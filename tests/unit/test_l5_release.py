@@ -85,6 +85,21 @@ def test_vendored_wheel_satisfies_the_dependency_and_carries_what_we_use():
         assert f"pyverify/{module}" in names, module
 
 
+def test_vendored_openocd_configs_match_the_readme():
+    readme = (VENDOR / "README.md").read_text(encoding="utf-8")
+    rows = dict(re.findall(r"\| `openocd/([^`]+)` \| `([0-9a-f]{64})` \|", readme))
+    files = {p.name: p for p in (VENDOR / "openocd").iterdir() if p.is_file()}
+    assert set(rows) == set(files), "vendor/openocd and vendor/README.md list different files"
+    for name, digest in rows.items():
+        # git may give a text file CRLF endings on Windows: hash it with LF endings
+        data = files[name].read_bytes().replace(b"\r\n", b"\n")
+        assert hashlib.sha256(data).hexdigest() == digest, f"openocd/{name} changed"
+    # the configs the MPS3 pack maps a design with a debug port to
+    from harness_manager_mps3.constants import DAP_DESIGN_CONFIGS
+    for configs in DAP_DESIGN_CONFIGS.values():
+        assert set(configs) <= set(files), configs
+
+
 @pytest.mark.skipif(os.name == "nt", reason="executable bits are POSIX")
 @pytest.mark.parametrize("name", SCRIPTS)
 def test_scripts_are_executable(name):
