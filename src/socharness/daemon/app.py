@@ -580,7 +580,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
     @api.get("/packs")
     def packs() -> JSONResponse:
-        return _JSON(ok(packs={n: p.title for n, p in sorted(d.engine.packs().items())}))
+        packs = sorted(d.engine.packs().items())
+        # T14-1: the pack's own capability titles, so a front-end never mirrors them.
+        caps = {n: [{"name": c.name, "title": c.title, "needs_hint": c.needs_hint}
+                    for c in p.capability_specs()] for n, p in packs}
+        return _JSON(ok(packs={n: p.title for n, p in packs}, capabilities=caps))
 
     @api.post("/probe")
     def probe(body: JsonBody = None) -> JSONResponse:
@@ -596,9 +600,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         running = d.jobs.running()
         if running:
             job = running[0]
-            raise HeldError(f"{job.describe()} is running on {job.board_id}; a probe now could "
+            err = HeldError(f"{job.describe()} is running on {job.board_id}; a probe now could "
                             "take that board's control port", holder=f"socharnessd {job.describe()}",
                             hint="probe again when the job finishes")
+            err.data = {"job": job.id, "kind": job.kind, "board_id": job.board_id}  # type: ignore[attr-defined]
+            raise err
         found = d.engine.probe(hints)
         d.remember(found)
         return _JSON(ok(candidates=found))
@@ -616,6 +622,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             job = d.gates.busy(board_id)
             if job is not None:
                 row["job"] = job.id
+                row["job_kind"] = job.kind        # T14-5
             rows.append(row)
         return _JSON(ok(boards=rows))
 
@@ -677,8 +684,12 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         running = d.jobs.running()
         if running and not force:
             names = ", ".join(f"{j.describe()} on {j.board_id}" for j in running)
-            raise HeldError(f"socharnessd is running {names}", holder="socharnessd",
+            err = HeldError(f"socharnessd is running {names}", holder="socharnessd",
                             hint="wait for it, or stop with --force (the operation is abandoned)")
+            err.data = {"job": running[0].id, "kind": running[0].kind,  # type: ignore[attr-defined]
+                        "jobs": [{"job": j.id, "kind": j.kind, "board_id": j.board_id}
+                                 for j in running]}
+            raise err
         if d.shutdown is None:
             raise UnavailableError("daemon_shutdown",
                                    "this server was not started by `socharness daemon`")
@@ -853,9 +864,13 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         adapters["shell"] = shell is not None and callable(getattr(shell, "call", None))
         resets = getattr(s, "resets", None)
         job = d.gates.busy(bid)
+        # T14-4: whether each engine service works at all (None) or why not (its stub reason).
+        services = {n: getattr(getattr(d.engine, n, None), "reason", None)
+                    for n in ("deploy", "consoles", "debug", "telemetry")}
         return _JSON(ok(board_id=bid, candidate=s.candidate, adapters=adapters,
                         reset_targets=list(resets.reset_targets()) if resets else [],
-                        job=job.id if job else None))
+                        job=job.id if job else None, job_kind=job.kind if job else None,
+                        services=services))
 
     @api.get("/boards/{bid:path}/telemetry")
     def telemetry(bid: str) -> JSONResponse:
@@ -1071,7 +1086,13 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     # -- the web UI -----------------------------------------------------------------------------
 
     if static is not None:
-        app.mount("/", StaticFiles(directory=str(static), html=True), name="ui")
+        from socharness import web
+
+        if static.resolve() == Path(web.STATIC_DIR).resolve():
+            # T14's mount: CSP (script-src 'self'), nosniff, no-cache, fixed media types.
+            web.mount_static(app, "/", name="ui")
+        else:                                   # a test's or a developer's own directory
+            app.mount("/", StaticFiles(directory=str(static), html=True), name="ui")
     else:
         @app.get("/", response_class=HTMLResponse)
         def placeholder() -> HTMLResponse:

@@ -85,10 +85,12 @@ class Job:
 
 
 def busy_error(board_id: str, job: Job) -> HeldError:
-    return HeldError(f"{board_id} is busy: {job.describe()} is running",
-                     holder=f"socharnessd {job.describe()}",
-                     hint=f"wait for it to finish (GET /api/v1/jobs/{job.id}; "
-                          "progress arrives on the events WebSocket)")
+    err = HeldError(f"{board_id} is busy: {job.describe()} is running",
+                    holder=f"socharnessd {job.describe()}",
+                    hint=f"wait for it to finish (GET /api/v1/jobs/{job.id}; "
+                         "progress arrives on the events WebSocket)")
+    err.data = {"job": job.id, "kind": job.kind, "board_id": board_id}  # type: ignore[attr-defined]
+    return err
 
 
 class BoardGates:

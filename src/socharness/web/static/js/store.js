@@ -7,7 +7,7 @@
 import {
   call, EventSocket, heldByJob, jobEvent, onConnection, toApiError, unwrapDebug, unwrapInfo,
 } from "./api.js";
-import { clock, secs } from "./format.js";
+import { clock, secs, setCapabilityTitles } from "./format.js";
 
 export const UI_NOTE = "socharness-ui";
 const LOG_MAX = 2000;
@@ -586,7 +586,10 @@ export async function start() {
     S.daemon = h.data.data;             // {ok, version, pid, service}
   }
   const p = await timed("packs", () => call("packs"));
-  if (!p.error) S.packs = p.data.data.packs || {};
+  if (!p.error) {
+    S.packs = p.data.data.packs || {};
+    setCapabilityTitles(p.data.data.capabilities);
+  }
   const r = await loadBoards();
   if (saved && S.boards[saved]) select(saved);
   else if (S.order.length) select(S.order[0]);

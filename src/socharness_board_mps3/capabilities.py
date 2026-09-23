@@ -55,7 +55,7 @@ SPECS: tuple[CapabilitySpec, ...] = (
     # Only an outlet can cycle; a meter-only INA260 also gives SMART_POWER, so
     # Engine.info() narrows this by the adapter's cycle_reason.
     CapabilitySpec(C.POWER_CYCLE, "Power-cycle the board (cold)", (via(L.SMART_POWER),),
-                   needs_hint="a networked power plug in boards.toml (Shelly, Tasmota, NETIO)"),
+                   needs_hint="needs a networked power plug in boards.toml (Shelly, Tasmota or NETIO)"),
     # v0.11 `reboot`: a warm restart of the shell CPU (bare-metal: the watchdog,
     # ~3 s; Linux: sync + WDOG + a full OS boot, see constants.reboot_wait_s).
     CapabilitySpec(C.RESET_SHELL, "Restart the shell", (via(L.ETHERNET, features=("reboot",)),

@@ -45,7 +45,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | Method and path | Engine call | Returns |
 |---|---|---|
 | `GET /health` (no auth) | — | `{ok, version}` |
-| `GET /packs` | `engine.packs()` | `{packs: {name: title}}` |
+| `GET /packs` | `engine.packs()` | `{packs: {name: title}, capabilities: {pack: [{name, title, needs_hint}]}}` |
 | `POST /probe` `{hosts?, serial_ports?, volumes?, scan_usb?, scan_network?, timeout_s?}` | `engine.probe(ProbeHints)` | `{candidates: [Candidate]}` (includes `identity` when probed) |
 | `GET /boards` | open boards + lock owners | `{boards: [{board_id, open: bool, holder?: LockOwner, candidate}]}` |
 | `POST /boards` `{target?, candidate?, note?}` | `engine.open(...)` | `{board_id, info: BoardInfo}` |
@@ -61,7 +61,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `GET /boards/{bid}/clocks` · `POST .../clocks` `{name, mhz}` | `session.clocks` | `{readings}` / `{reading}` |
 | `GET /boards/{bid}/consoles` | `consoles.names` | `{names}` |
 | `WS /boards/{bid}/consoles/{name}` | `consoles.subscribe` | binary frames both ways (bytes from and to the board); text frame `{"state":...}` on a state change |
-| `POST /boards/{bid}/consoles/{name}/export` `{port?}` | `consoles.export_tcp` | `{port}` |
+| `POST /boards/{bid}/consoles/{name}/export` `{port?}` | `consoles.export_tcp` | `{host, port}` |
 | `GET /boards/{bid}/debug` · `POST .../debug/detect` · `POST .../debug/up` · `POST .../debug/down` | `debug.status`/`detect`/`up`/`down` | `DebugStatus` / `{idcode}` / 202 job / `DebugStatus` |
 | `GET /boards/{bid}/controller/temps` · `/osc` | `session.controller.temperatures`/`oscillators` | `{readings}` |
 | `POST /boards/{bid}/controller/reboot` `{wait_s?}` | `session.controller.reboot` | 202 job; the result is the evidence |
@@ -74,7 +74,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `GET /help/tabs` | the CLI's `help --tabs` | `{tabs: [{name, text}]}` |
 | `GET /jobs/{id}` | — | job state |
 | `GET /jobs` | — | recent jobs; each record has `job, kind, board_id, state, phases, started_at, ended_at` |
-| `GET /boards/{bid}/session` | session adapters | `{candidate, adapters: {deploy, consoles, debug, resets, clocks, telemetry, controller, storage, shell}: bool, reset_targets, job}` |
+| `GET /boards/{bid}/session` | session adapters | `{candidate, adapters: {deploy, consoles, debug, resets, clocks, telemetry, controller, storage, shell}: bool, reset_targets, job, job_kind, services: {deploy, consoles, debug, telemetry}: null or reason}` |
 | `POST /daemon/shutdown` `{force?}` | — | `{ok}`; 409 while a job runs unless `force` |
 
 ## Behaviour clarified by the implementation (T13)
@@ -102,3 +102,11 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 
 ## The Python client (T13)
 `socharness.client.RemoteEngine` implements the `core.services.Engine` protocol over this API. `socharness.cli.engine.get_engine()` prefers a running daemon and falls back to the in-process engine, so the CLI and the web UI share one board session.
+
+## Additions at the T14 merge (lead)
+- **T14-1:** `GET /packs` also returns each pack's capability `title` and `needs_hint`. The web UI uses them in place of its mirrored titles.
+- **T14-3:** while `health.control_channel` is `rescue`, `offline` or `wedged`, `BoardInfo` lists the capabilities that need the harness's Ethernet services as unavailable, with the reason `the harness is <state>: <note>`. Routes over other links (USB, SSH, a power plug) are unaffected.
+- **T14-4:** `/session` `services` gives `null` when an engine service works, else its stub `reason` (docs/CONTRACTS.md convention).
+- **T14-5:** a HELD caused by a daemon job carries `error.data.{job, kind, board_id}`; `/boards` rows and `/session` add `job_kind`. Front-ends read these, not the holder text.
+- **Declined, T14-2:** a wedged harness still makes `GET /boards/{bid}` fail with its own error code. That code is the honest answer, and the CLI's exit codes depend on it. The UI keeps the last good read and labels it stale.
+- **Static files:** socharnessd serves the UI with `socharness.web.mount_static`: CSP `script-src 'self'`, `nosniff`, `no-cache`, and fixed media types.

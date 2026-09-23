@@ -41,7 +41,7 @@ from typing import Any
 from socharness.core.capabilities import POWER_CYCLE, negotiate
 from socharness.core.errors import AbsentError, AlreadyError, HeldError, UsageError
 from socharness.core.events import Event, EventBus
-from socharness.core.model import BoardIdentity, BoardInfo, Candidate, Link
+from socharness.core.model import BoardIdentity, BoardInfo, Candidate, Link, LinkKind
 from socharness.core.pack import BoardPack, BoardSession, ProbeHints
 from socharness.core.registry import load_packs
 from socharness.core.services import EngineConfig
@@ -62,6 +62,9 @@ LAZY_SERVICES: dict[str, tuple[str, str, str]] = {
     "debug": ("socharness.services.debug", "DebugService", "debug"),
     "update": ("socharness.services.update", "UpdateService", "update"),
 }
+
+#: Health.control_channel states in which the harness serves nothing over Ethernet.
+HARNESS_DOWN = frozenset({"wedged", "rescue", "offline"})
 
 # Lock files held by any Engine in this process: resolved path -> the holding engine.
 # A weak reference, so an engine dropped without close_all() does not hold a board forever.
@@ -295,6 +298,18 @@ class Engine:
         links = [lk.kind for lk in entry.candidate.links]
         available, unavailable = negotiate(entry.pack.capability_specs(), links,
                                            identity.features)
+        if health.control_channel in HARNESS_DOWN and LinkKind.ETHERNET in links:
+            # T14-3: the harness is not serving, so routes that need its Ethernet
+            # services are dead now; routes over other links (USB, SSH, a plug) still work.
+            still, _ = negotiate(entry.pack.capability_specs(),
+                                 [k for k in links if k != LinkKind.ETHERNET], identity.features)
+            lost = available - still
+            if lost:
+                why = f"the harness is {health.control_channel}"
+                if health.notes:
+                    why += f": {health.notes[0]}"
+                available = available & still
+                unavailable = {**unavailable, **dict.fromkeys(lost, why)}
         if POWER_CYCLE in available:   # the link is there; can the device actually cycle?
             power = getattr(entry.session, "power", None)
             reason = "no power adapter" if power is None else power.cycle_reason

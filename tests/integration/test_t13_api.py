@@ -91,8 +91,13 @@ def test_negative_twin_the_api_refuses_a_missing_or_wrong_token(client, auth):
 
 def test_the_right_token_is_accepted(client):
     r = client.get("/api/v1/packs", headers=H)
-    assert r.status_code == 200 and r.json() == {"ok": True,
-                                                 "packs": {"mps3": "Arm MPS3 (V2M-MPS3, HBI0309C)"}}
+    body = r.json()
+    assert r.status_code == 200 and body["ok"] is True
+    assert body["packs"] == {"mps3": "Arm MPS3 (V2M-MPS3, HBI0309C)"}
+    # T14-1: the pack's capability titles and hints, so front-ends never mirror them.
+    caps = {c["name"]: c for c in body["capabilities"]["mps3"]}
+    assert caps["power_cycle"]["title"] == "Power-cycle the board (cold)"
+    assert caps["power_cycle"]["needs_hint"].startswith("needs ")
     assert r.headers["cache-control"] == "no-store"
 
 

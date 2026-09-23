@@ -280,7 +280,7 @@ class _Controller:
             raise RefusedError(f"MCC command {line.split()[0]!r} is hard-denied")
         return "Cmd>"
 
-    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> None:
+    def reboot(self, progress: Progress | None = None, wait_s: float | None = None) -> dict:
         e = self._e
         e._enter("controller.reboot", self._bid)
         for i, phase in enumerate(("sent", "down", "up"), start=1):
@@ -293,6 +293,12 @@ class _Controller:
                 raise e.failures["controller.reboot.confirm"]
         # A reboot reloads the SD image: the greybox comes back.
         e._set_identity(self._bid, rm_id="0x00000000", rm_name="greybox")
+        # The same evidence shape as the MPS3 ControllerAdapter (CONTRACTS.md).
+        return {"summary": "REBOOT witnessed (demo): down after 0.3s, up after 0.9s",
+                "down_after_s": 0.3, "up_after_s": 0.9,
+                "down_evidence": ["the MCC printed its boot banner"],
+                "up_evidence": "the MCC boot banner completed with 'FPGA configuration complete.'",
+                "shell_id_before": None, "shell_id_after": None, "fpga_configured": True}
 
     def temperatures(self) -> Sequence[Reading]:
         return [r for r in self._e._board(self._bid).readings if r.unit == "degC"]

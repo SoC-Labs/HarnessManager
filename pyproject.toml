@@ -36,6 +36,8 @@ dev = [
     "pyserial>=3.5",
 ]
 guitest = ["pytest-qt>=4.4", "PySide6-Essentials>=6.6"]
+# browser tests for the web UI (T14): drives the system Chrome, no browser download
+webtest = ["playwright>=1.40"]
 
 [project.scripts]
 socharness = "socharness.cli.main:main"

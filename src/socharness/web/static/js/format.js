@@ -31,6 +31,18 @@ export const CAPABILITY_ORDER = Object.keys(CAPABILITY_TITLES);
 
 export function capTitle(name) { return CAPABILITY_TITLES[name] || name; }
 
+// The daemon serves each pack's titles (GET /packs `capabilities`, T14-1); they replace
+// the mirror above, and a capability the mirror lacks joins the end of the order.
+export function setCapabilityTitles(byPack) {
+  for (const caps of Object.values(byPack || {})) {
+    for (const c of caps || []) {
+      if (!c || !c.name || !c.title) continue;
+      if (!(c.name in CAPABILITY_TITLES)) CAPABILITY_ORDER.push(c.name);
+      CAPABILITY_TITLES[c.name] = c.title;
+    }
+  }
+}
+
 export function capState(info, name) {
   if (!info) return null;
   const caps = info.capabilities || [];

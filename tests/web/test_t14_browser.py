@@ -177,7 +177,9 @@ def test_with_the_usb_link_reboot_is_gated_only_by_the_arm_box(page_factory, eng
     page.wait_for_function(
         "() => document.querySelector('[data-testid=\"reboot-result\"]')?.innerText.includes('rc 0')",
         timeout=T)
-    assert "went down and came back" in result_text(page, "reboot-result")
+    # The demo reboot returns the same evidence dict as the MPS3 controller (lead fix).
+    text = result_text(page, "reboot-result")
+    assert "REBOOT witnessed" in text and "down after 0.3 s, back after 0.9 s" in text, text
     assert len(engine.called("controller.reboot")) == 1
     expect(page.locator('[data-testid="arm-reboot"] input')).not_to_be_checked()   # disarmed after
 

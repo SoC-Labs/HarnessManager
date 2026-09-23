@@ -8,7 +8,7 @@ VENV      ?= .venv
 PYVERIFY  ?= ../mps3-nanosoc-platform/host/pyverify
 BIN        = $(VENV)/bin
 
-.PHONY: venv check lint test hil gui-deps gui-syslibs clean
+.PHONY: venv check lint test hil gui-deps web-deps gui-syslibs clean
 
 venv: $(BIN)/socharness
 
@@ -21,6 +21,11 @@ $(BIN)/socharness: pyproject.toml
 
 gui-deps: venv
 	$(BIN)/pip install -q -e '.[guitest]'
+
+# Web UI browser tests (tests/web): Playwright driving the system Chrome/Chromium.
+# Without it those tests skip with the reason.
+web-deps: venv
+	$(BIN)/pip install -q -e '.[webtest]'
 
 # Qt >= 6.5 needs libxcb-cursor.so.0 for X11. RHEL 8 hosts often lack it. This
 # fetches the distro package WITHOUT root and unpacks the library into the
