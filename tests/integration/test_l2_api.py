@@ -25,10 +25,12 @@ from harness_manager.daemon.jobs import Job
 from harness_manager.services import pty as ptymod
 from tests.fakes.l2_rig import (
     PtyClient,
+    PtyHolder,
     apply_pack_ccr,
     fast_pty_options,
     install_uart_baud_codec,
     l2_virtual_board,
+    queued,
     wait_for,
 )
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
@@ -108,6 +110,28 @@ def test_pty_post_get_delete(api, board):
     assert not os.path.lexists(body["path"])
     # Negative twin: a second DELETE has nothing to close.
     assert client.delete(f"{B}/consoles/uart0/pty", headers=H).json()["closed"] is False
+
+
+def test_a_program_that_opens_the_pty_and_leaves_does_not_eat_the_banner(api, board):
+    # The 2026-09-24 flake, on purpose: on this host something outside the process opens
+    # and closes a new PTY within ~1 ms of its link appearing under /tmpdir. The daemon
+    # then reset the line with TCSAFLUSH and the banner queued for screen was gone.
+    client, eng = api
+    bid = open_board(client, board)
+    B = bid_path(bid)
+    body = client.post(f"{B}/consoles/uart0/pty", headers=H).json()
+    port = eng.consoles._ptys.get(bid, "uart0")
+    wait_for(lambda: queued(port.slave) >= len(BANNER), what="the banner queued in the PTY")
+
+    def clients() -> int:
+        return client.get(f"{B}/consoles/uart0/pty", headers=H).json()["pty"]["clients"]
+
+    probe = PtyHolder(body["path"])                  # opens, never reads
+    wait_for(lambda: clients() == 1, what="the probe counted")
+    probe.release()
+    wait_for(lambda: clients() == 0, what="the probe gone")
+    with PtyClient(body["path"]) as term:
+        term.read_until(BANNER, timeout=5)
 
 
 def test_negative_twin_no_pty_for_an_unknown_console_or_a_closed_board(api, board):

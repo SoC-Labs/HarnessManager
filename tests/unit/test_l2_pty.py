@@ -30,9 +30,11 @@ from harness_manager.services.console import ConsoleBroker
 from tests.fakes.l2_rig import (
     LOOP,
     PtyClient,
+    PtyHolder,
     fast_pty_options,
     is_link_to,
     open_fails_busy,
+    queued,
     wait_for,
 )
 from tests.fakes.t4_console_rig import BareSession, EventLog, read_until, recv_until
@@ -381,3 +383,68 @@ def test_every_broker_shares_one_inotify_instance(bus, root):
     finally:
         for b in brokers:
             b.shutdown()
+
+
+# -- output queued for the next client survives a client that comes and goes -----------------------
+#
+# The flake behind "screen shows nothing" (lead, 2026-09-24): test_pty_post_get_delete lost
+# the boot banner about 1 run in 3. Something opened and closed the new PTY within ~1 ms of
+# its creation, before the test's client; the count went 0 -> 1 -> 0, and the "last client
+# left" reset put the line back to raw with tty.setraw()'s default TCSAFLUSH, which DISCARDS
+# the tty's input queue: the banner, queued there for the next reader. Any program that
+# opens the PTY and leaves without reading (stty -F, a terminal probing it, a screen quit at
+# once) did the same. These tests make that sequence happen on purpose.
+
+
+GREETING = b"serial up at 115200"
+
+
+def _queued_greeting(broker, session) -> tuple[dict, object]:
+    info = broker.pty(session, "fpga_uart0")
+    port = broker._ptys.get(BOARD, "fpga_uart0")
+    wait_for(lambda: queued(port.slave) >= len(GREETING), what="the greeting queued in the PTY")
+    return info, port
+
+
+def _come_and_go(broker, path: str, *, exclusive: bool = False) -> None:
+    """A client that opens the PTY, is counted, and leaves without reading a byte."""
+    holder = PtyHolder(path, exclusive=exclusive)
+    wait_for(lambda: broker.pty_info(BOARD, "fpga_uart0")["clients"] == 1, what="counted")
+    holder.release()
+    wait_for(lambda: broker.pty_info(BOARD, "fpga_uart0")["clients"] == 0, what="gone")
+
+
+def test_a_client_that_comes_and_goes_leaves_the_queued_output_for_the_next(broker, session):
+    info, port = _queued_greeting(broker, session)
+    _come_and_go(broker, info["path"])
+    assert queued(port.slave) >= len(GREETING)
+    with PtyClient(info["path"]) as client:
+        client.read_until(GREETING, timeout=5)
+
+
+def test_after_screen_quits_the_line_is_reset_and_the_queued_output_is_still_there(
+        broker, session):
+    info, port = _queued_greeting(broker, session)
+    _come_and_go(broker, info["path"], exclusive=True)            # TIOCEXCL left behind
+    assert not open_fails_busy(info["path"])                      # the reset DID run
+    with PtyClient(info["path"], exclusive=True) as client:
+        client.read_until(GREETING, timeout=5)
+
+
+def test_a_reset_itself_never_discards_queued_output(broker, session, monkeypatch):
+    monkeypatch.setattr(ptymod.ConsolePty, "needs_reset", lambda self: True)
+    info, port = _queued_greeting(broker, session)
+    _come_and_go(broker, info["path"])
+    with PtyClient(info["path"]) as client:
+        client.read_until(GREETING, timeout=5)
+
+
+def test_negative_twin_a_flushing_reset_loses_the_queued_output(broker, session, monkeypatch):
+    # The bug, put back: reset on every 0 -> 1 -> 0, with the TCSAFLUSH tty.setraw() default.
+    monkeypatch.setattr(ptymod.ConsolePty, "needs_reset", lambda self: True)
+    monkeypatch.setattr(ptymod, "RESET_WHEN", termios.TCSAFLUSH)
+    info, port = _queued_greeting(broker, session)
+    _come_and_go(broker, info["path"])
+    assert queued(port.slave) == 0                                # flushed
+    with PtyClient(info["path"]) as client, pytest.raises(AssertionError):
+        client.read_until(GREETING, timeout=1)

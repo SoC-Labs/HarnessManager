@@ -26,9 +26,16 @@ Behaviour
   export are separate broker subscribers and always see everything.
 - **Re-attach.** ``screen`` leaves TIOCEXCL set and its own line modes behind
   when it exits (seen with screen 4.06.02, because the daemon still holds the
-  slave). When the attached-client count drops to 0, the daemon clears
-  TIOCEXCL and puts the line back to raw at its preset speed, so the next
-  ``screen <path>`` opens it.
+  slave). When the attached-client count drops to 0 and the client left
+  something behind (``needs_reset``), the daemon clears TIOCEXCL and puts the
+  line back to raw at its preset speed, so the next ``screen <path>`` opens it.
+- **Queued output survives clients that come and go.** Board output nobody has
+  read yet waits in the tty's input queue for the next client. The reset
+  applies the modes with TCSANOW (``RESET_WHEN``), never TCSAFLUSH (the
+  ``tty.setraw`` default), which would discard that queue: with it, any program
+  that opened the PTY and left without reading (a probe, ``stty -F``, a screen
+  quit at once) made the next ``screen`` start blank. That was the "no banner"
+  flake of 2026-09-24 (tests/unit/test_l2_pty.py has it on purpose).
 - **No reader.** Board output keeps flowing into the PTY. When nobody reads it
   and the line's buffer stays full for ``stall_s``, the stale output is flushed
   (``flushed`` counts it), so a new client sees recent output, not a backlog.
@@ -90,6 +97,14 @@ WINDOWS_HINT = ("use the TCP export instead: `harness-manager console TARGET NAM
                 "then a raw-TCP terminal (PuTTY 'Raw') on 127.0.0.1 and the port it prints")
 _READ_SLICE_S = 0.2
 _NOTICE_EVERY_S = 2.0
+#: How the line modes are (re)applied: TCSANOW keeps the input queue, the board output
+#: waiting for the next client. NEVER TCSAFLUSH (``tty.setraw``'s default): it discards it.
+try:
+    import termios as _termios
+
+    RESET_WHEN: int = _termios.TCSANOW
+except ImportError:                     # Windows: no PTYs at all
+    RESET_WHEN = 0
 #: TIOCGEXCL (Linux >= 3.8, asm-generic/ioctls.h: _IOR('T', 0x40, int)); Python's termios lacks it.
 _TIOCGEXCL = 0x80045440 if sys.platform.startswith("linux") else None
 
@@ -474,7 +489,7 @@ class ConsolePty:
         self.master, self.slave = os.openpty()
         try:
             self.device = os.ttyname(self.slave)
-            tty.setraw(self.slave)
+            tty.setraw(self.slave, RESET_WHEN)
             self.preset = baud_constant(baud) if baud else None
             if self.preset is not None:
                 self._set_speed(self.preset)
@@ -585,7 +600,7 @@ class ConsolePty:
         try:
             if hasattr(termios, "TIOCNXCL"):
                 fcntl.ioctl(self.slave, termios.TIOCNXCL)
-            tty.setraw(self.slave)
+            tty.setraw(self.slave, RESET_WHEN)       # keeps the queued board output
             if self.preset is not None:
                 self._set_speed(self.preset)
             self._raw = termios.tcgetattr(self.slave)[:4]
@@ -878,7 +893,7 @@ class PtyManager:
             self._wake.clear()
 
     def _set_clients(self, pty: ConsolePty, now: int | None) -> None:
-        if now == 0 and pty.clients != 0:
+        if now == 0 and pty.clients != 0 and pty.needs_reset():
             pty.reset_line()                   # the last client left: ready for the next one
         if now == pty.clients:
             return

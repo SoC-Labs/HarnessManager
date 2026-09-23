@@ -15,6 +15,8 @@
   port echoes what it is sent and greets each open with ``serial up at <baud>``.
 - ``PtyClient``: a SEPARATE process holding the PTY open (the daemon's own pid is never
   counted as a client), optionally exclusive (TIOCEXCL) the way ``screen`` opens it.
+- ``PtyHolder``: a separate process that opens the PTY and never reads it (a probe);
+  ``queued(fd)`` is the tty input queue, the bytes waiting for the next reader.
 
 VirtualMps3 itself is lead-owned and untouched: ``l2_virtual_board`` swaps its shell.
 """
@@ -329,6 +331,57 @@ class PtyClient:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+_HOLDER = r"""
+import fcntl, os, sys, termios
+path, excl = sys.argv[1], sys.argv[2] == "1"
+fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+if excl:
+    fcntl.ioctl(fd, termios.TIOCEXCL)
+sys.stdout.write("open\n"); sys.stdout.flush()
+sys.stdin.readline()
+os.close(fd)
+sys.stdout.write("closed\n"); sys.stdout.flush()
+"""
+
+
+class PtyHolder:
+    """A separate process that opens the PTY and NEVER reads it, until ``release()``.
+
+    It is what a program that probes a terminal and leaves looks like (``stty -F``, a
+    terminal emulator checking the device, a screen started and quit at once): an
+    open and a close, with the board output still queued for the next client.
+    ``exclusive`` sets TIOCEXCL as ``screen`` does (and leaves it set on close).
+    """
+
+    def __init__(self, path: str, *, exclusive: bool = False) -> None:
+        self.proc = subprocess.Popen([sys.executable, "-c", _HOLDER, path,
+                                      "1" if exclusive else "0"],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        line = self.proc.stdout.readline().strip()
+        if line != "open":
+            self.proc.kill()
+            raise OSError(f"the PTY holder did not open {path}: {line!r}")
+
+    def release(self) -> None:
+        """Close the device (the process then exits)."""
+        if self.proc.poll() is None:
+            self.proc.stdin.write("\n")
+            self.proc.stdin.flush()
+            self.proc.stdout.readline()
+            self.proc.wait(timeout=10)
+        for f in (self.proc.stdin, self.proc.stdout):
+            f.close()
+
+
+def queued(fd: int) -> int:
+    """Bytes waiting in a tty's input queue (TIOCINQ), i.e. queued for the next reader."""
+    import fcntl
+    import struct
+    import termios
+
+    return struct.unpack("i", fcntl.ioctl(fd, termios.TIOCINQ, struct.pack("i", 0)))[0]
 
 
 def open_fails_busy(path: str) -> bool:
