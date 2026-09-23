@@ -13,12 +13,19 @@ license = { text = "Proprietary (SoC Labs), pending decision" }
 # It is the ONLY implementation of net-protocol.md on the host. Never re-implement it here.
 dependencies = [
     "mps3-pyverify>=0.1.0",
+    # socharnessd + the web UI (Wave 2): all pure pip wheels on Linux/Windows/macOS.
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "websockets>=12",
+    # signed update channel (minisign / Ed25519)
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
 serial = ["pyserial>=3.5"]
 gui = ["PySide6-Essentials>=6.6"]
 dev = [
+    "httpx>=0.27",
     "pytest>=8",
     "pytest-timeout>=2.3",
     "ruff>=0.6",
@@ -37,6 +44,9 @@ mps3 = "socharness_board_mps3.pack:Mps3Pack"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"socharness.web" = ["static/**/*", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

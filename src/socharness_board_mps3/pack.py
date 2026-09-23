@@ -13,6 +13,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.openocd:make_debug_adapter(session)``       | T4   | ``DebugAdapter`` (replaces the scaffold one) |
 | ``.telemetry:make_telemetry_adapter(session)`` | T9   | ``TelemetryAdapter``               |
 | ``.clock:make_clock_adapter(session)``         | lead | ``ClockAdapter`` (DUT MMCM presets) |
+| ``.identify:probe_identify(hints, found)``     | T12  | ``list[Candidate]`` found by UDP 6899 identify |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -199,6 +200,10 @@ class Mps3Pack(BoardPack):
                     label=f"MPS3 {ident.rm_name or ident.rm_id} on shell {ident.shell_id}",
                     evidence="answered ping", identity=ident,
                 ))
+        identify = _hook("identify", "probe_identify")   # T12: UDP 6899 identify
+        if identify is not None and hints.scan_network:
+            seen = {c.board_id for c in found}
+            found.extend(c for c in identify(hints, list(found)) if c.board_id not in seen)
         usb = _hook("usb", "probe_usb")
         if usb is not None and (hints.scan_usb or hints.serial_ports or hints.volumes):
             usb_found = usb(hints, list(found))
