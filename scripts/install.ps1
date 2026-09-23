@@ -136,10 +136,10 @@ function Test-Python([string]$Exe, [string[]]$Pre = @()) {
     return $lines[1]
 }
 
-function Find-Python {
-    if ($Python) {
-        $exe = Test-Python $Python
-        if (-not $exe) { Fail "$Python is not Python $MinPy or newer" }
+function Find-Python([string]$Wanted) {
+    if ($Wanted) {
+        $exe = Test-Python $Wanted
+        if (-not $exe) { Fail "$Wanted is not Python $MinPy or newer" }
         return $exe
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
@@ -284,14 +284,15 @@ try {
     } else {
         if (Test-Path $Venv) { Remove-Item -Recurse -Force $Venv }
         New-Item -ItemType Directory -Force -Path $Root | Out-Null
+        # The newest local Python >= 3.10 (or -Python).
+        $base = Find-Python $Python
         if ($uv) {
-            $want = ">=$MinPy"
-            if ($Python) { $want = $Python }
-            # uv finds a Python >= 3.10, or downloads one.
+            # With no local Python >= 3.10, uv downloads one.
+            $want = '3.12'
+            if ($base) { $want = $base }
             $r = Invoke-Native $uv @('venv', '--quiet', '--python', $want, $Venv)
             if ($r.Code -ne 0) { Fail "uv could not make a venv with Python >= $MinPy" }
         } else {
-            $base = Find-Python
             if (-not $base) {
                 Fail ("Harness Manager needs Python $MinPy or newer, and none was found. " +
                       "Install one from python.org (tick 'Add python.exe to PATH') or with " +

@@ -180,20 +180,21 @@ if [[ -x "$venv/bin/python" ]] && py_ok "$venv/bin/python"; then
 else
     rm -rf "$venv"
     mkdir -p "$home_dir"
+    # The newest local Python >= 3.10 (or --python).
+    base=""
+    if [[ -n "$python" ]]; then
+        py_ok "$python" || die "$python is not Python $MIN_PY or newer"
+        base="$python"
+    else
+        for cand in python3.13 python3.12 python3.11 python3.10 python3 python; do
+            if command -v "$cand" >/dev/null 2>&1 && py_ok "$cand"; then base="$cand"; break; fi
+        done
+    fi
     if [[ $use_uv -eq 1 ]]; then
-        # uv finds a Python >= 3.10, or downloads one.
-        uv venv --quiet --python "${python:->=$MIN_PY}" "$venv" \
+        # With no local Python >= 3.10, uv downloads one.
+        uv venv --quiet --python "${base:-3.12}" "$venv" \
             || die "uv could not make a venv with Python >= $MIN_PY"
     else
-        base=""
-        if [[ -n "$python" ]]; then
-            py_ok "$python" || die "$python is not Python $MIN_PY or newer"
-            base="$python"
-        else
-            for cand in python3.13 python3.12 python3.11 python3.10 python3 python; do
-                if command -v "$cand" >/dev/null 2>&1 && py_ok "$cand"; then base="$cand"; break; fi
-            done
-        fi
         [[ -n "$base" ]] || die "Harness Manager needs Python $MIN_PY or newer, and none was \
 found. Install one (python.org, your package manager, or uv: https://docs.astral.sh/uv/), \
 or name it with --python."

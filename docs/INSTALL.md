@@ -5,8 +5,9 @@ do, how to install from other sources, and how the release is packaged and teste
 
 ## What you need
 
-- Python 3.10 or newer, or [uv](https://docs.astral.sh/uv/). With uv, the installer
-  lets uv find a Python 3.10+ or download one.
+- Python 3.10 or newer, or [uv](https://docs.astral.sh/uv/). The installer takes the
+  newest Python 3.10+ it finds (`--python` names one). With uv and no such Python, uv
+  downloads one.
 - git, to clone the repository (it is private: ask SoC Labs for access).
 - A network connection to PyPI for the dependencies (FastAPI, uvicorn, websockets,
   cryptography). pyverify comes from `vendor/` in the repository.
@@ -91,14 +92,14 @@ python3 -m venv ~/hm && ~/hm/bin/pip install vendor/mps3_pyverify-*.whl
 ~/hm/bin/pip install --find-links vendor '.[serial]'
 ```
 
-From a release directory made by `make dist`, which holds both wheels:
+From a release directory made by `make dist`, which holds both wheels, name the files:
 
 ```bash
-pip install dist/mps3_pyverify-*.whl && pip install --find-links dist harness-manager
+pip install dist/mps3_pyverify-*.whl && pip install dist/harness_manager-*.whl
 ```
 
-Do not `pip install harness-manager` or `mps3-pyverify` from PyPI. Neither name is
-ours there.
+Never install `harness-manager` or `mps3-pyverify` by name alone: neither name is ours
+on PyPI, and pip prefers the highest version it can see there.
 
 ## Packaging (maintainers)
 

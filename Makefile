@@ -53,7 +53,8 @@ hil: venv
 	HARNESS_MANAGER_HIL=1 $(BIN)/pytest -q -m hil tests/hil
 
 # The sdist, then the wheel built from it (python -m build), plus the pyverify wheel the
-# install needs: `pip install --find-links dist harness-manager` works from dist/ alone.
+# install needs, so dist/ alone installs: pip install dist/mps3_pyverify-*.whl, then
+# pip install dist/harness_manager-*.whl (by file name, never by name from PyPI).
 dist: venv
 	rm -rf dist
 	$(BIN)/python -m build --outdir dist .
