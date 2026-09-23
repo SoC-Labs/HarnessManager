@@ -547,7 +547,11 @@ class RebootWitness:
                 f"({self.up_evidence})")
 
 
-ShellProbe = Callable[[], "str | None"]   # shell_id if the shell answers ping, else None
+# A shell probe returns the shell_id when ping is answered, ``SHELL_BUSY`` when the
+# control port is alive but did not answer (held by another client, reset, protocol
+# error), and None when the shell is unreachable.
+ShellProbe = Callable[[], "str | None"]
+SHELL_BUSY = "(busy)"
 
 
 # --- the adapter ----------------------------------------------------------------------
@@ -803,12 +807,12 @@ class Mps3Controller:
 
             # 2. the shell, if there is one.
             shell_now: str | None = None
-            pinged = False
+            answered = False
             if eth and now >= next_ping:
                 next_ping = now + t.ping_interval_s
                 shell_now = self._probe_shell()
-                pinged = True
                 failed_in_row = failed_in_row + 1 if shell_now is None else 0
+                answered = shell_now not in (None, SHELL_BUSY)
                 if failed_in_row >= t.down_pings:   # one lost ping is a glitch, not a reboot
                     ping_failed = True
 
@@ -834,7 +838,8 @@ class Mps3Controller:
             if down_at is not None:
                 rec = watch.record
                 if eth:
-                    if pinged and shell_now is not None and (ping_failed or not eth_baseline):
+                    # Up needs a real ping reply: a busy/reset port may be a shell mid-restart.
+                    if answered and (ping_failed or not eth_baseline):
                         emit("up", 3, 3)
                         return RebootWitness(
                             sent_at=sent_at, down_after_s=down_at - sent_at, up_after_s=now - sent_at,
@@ -915,8 +920,10 @@ def _shell_probe_for(shell: Any, timeout: float) -> ShellProbe:
         except UnreachableError:
             return None
         except HarnessError:
-            return "(answered)"      # someone else holds 6900, or a protocol hiccup: it is up
-        return getattr(ping, "shell_id", "") or "(answered)"
+            # Held by another client, reset ("or the board is restarting", shell.py), or a
+            # protocol error: something is there, but it is not a confirmed answer.
+            return SHELL_BUSY
+        return getattr(ping, "shell_id", "") or SHELL_BUSY
 
     return probe
 

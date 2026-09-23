@@ -398,6 +398,25 @@ def test_a_one_ping_threshold_would_be_fooled(shell):
     assert ctl.last_reboot.down_evidence[0] == "the shell stopped answering ping"
 
 
+def test_a_busy_control_port_is_not_proof_of_up(shell):
+    # After the shell goes down, a held/reset port is not "came back": only a ping reply is.
+    clock = FakeClock()
+    mcc = slow_boot_mcc(clock, on_reboot=shell.stop, on_boot=shell.start)
+    ctl, *_ = eth_controller(shell, mcc, clock)
+    real, state = ctl._shell_probe, {"down_seen": False}
+
+    def busy_after_down():
+        got = real()
+        if got is None:
+            state["down_seen"] = True
+            return None
+        return mccmod.SHELL_BUSY if state["down_seen"] else got
+
+    ctl._shell_probe = busy_after_down
+    with pytest.raises(ActionFailedError, match="never answered ping again"):
+        ctl.reboot(wait_s=60)
+
+
 def test_shell_that_never_comes_back_fails(shell):
     clock = FakeClock()
     mcc = slow_boot_mcc(clock, on_reboot=shell.stop)

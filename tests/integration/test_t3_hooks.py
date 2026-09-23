@@ -131,3 +131,18 @@ def test_probe_with_two_shells_does_not_pair(vb, tmp_path):
     assert len(cands) == 3
     usb = [c for c in cands if not any(lk.kind == LinkKind.ETHERNET for lk in c.links)]
     assert len(usb) == 1 and "firmware A0" in usb[0].evidence
+
+
+def test_engine_telemetry_reads_the_mcc_through_t3(vb, fake_time, tmp_path):
+    from socharness.core.services import EngineConfig
+    from socharness.engine import Engine
+
+    eng = Engine(EngineConfig(state_dir=tmp_path / "state"),
+                 packs={"mps3": Mps3Pack(console_ports=vb.console_ports)})
+    try:
+        session = eng.open(vb.candidate(usb=True))
+        by_name = {r.name: r for r in eng.telemetry.readings(session)}
+        assert by_name["mcc_temp"].value == 35.5 and by_name["mcc_temp"].source == "mcc-console"
+        assert by_name["osc0"].value == 25.0 and by_name["osc5"].value == 23.75
+    finally:
+        eng.close_all()
