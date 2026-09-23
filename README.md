@@ -147,10 +147,8 @@ terminal after the first install.
 **A feature is greyed out.** The app, and `harness-manager info`, say what it needs,
 for example "needs the Debug USB cable". See the user guide.
 
-**Debug says the MPS3 OpenOCD configs are missing.** An installed 0.1.0 does not carry
-them yet. Point it at the copy in your clone, then restart the service:
-`export HARNESS_MANAGER_MPS3_OPENOCD_DIR=~/HarnessManager/vendor/openocd` and
-`harness-manager daemon stop`. Debugging also needs OpenOCD itself on your PATH.
+**Debug says OpenOCD is missing.** Debugging needs OpenOCD (0.12 or later) on your PATH.
+The MPS3 target configs ship with Harness Manager.
 
 **Anything else.** `harness-manager daemon status` shows the background service, and
 its log is `~/.config/harness-manager/daemon.log`. `harness-manager daemon stop` stops

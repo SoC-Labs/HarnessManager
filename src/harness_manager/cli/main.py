@@ -87,6 +87,8 @@ def make_parser() -> argparse.ArgumentParser:
     p = _Parser(prog="harness-manager", description="SoC Labs Harness Manager",
                 epilog="`harness-manager help --tabs` prints the full help, section by section.")
     p.add_argument("--pack", default=None, help="board pack (default: mps3)")
+    from harness_manager import __version__
+    p.add_argument("--version", action="version", version=f"Harness Manager {__version__}")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--json", action="store_true", default=False,
                    help="one JSON object on stdout")

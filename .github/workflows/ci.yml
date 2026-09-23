@@ -22,9 +22,6 @@ concurrency:
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONUTF8: "1"
-  # The MPS3 OpenOCD target configs live in the platform repo, which is not checked out
-  # here; vendor/openocd is the copy from the vendored platform commit (vendor/README.md).
-  HARNESS_MANAGER_MPS3_OPENOCD_DIR: ${{ github.workspace }}/vendor/openocd
 
 jobs:
   lint:

@@ -24,10 +24,10 @@ Check it: `sha256sum vendor/mps3_pyverify-0.1.0-py3-none-any.whl` must print the
 
 ## The MPS3 OpenOCD configs (openocd/)
 
-`openocd/` is `host/openocd` from the same platform commit (last changed at
+`openocd/` (shipped in the wheel as `src/harness_manager_mps3/openocd_cfg/`) is `host/openocd` from the same platform commit (last changed at
 `cb45c189c6424451dd24779f7656fbdfc3b03f90`). The MPS3 pack's debug service needs these target configs. From a
-checkout next to the platform repo it finds them there. Anywhere else, set
-`HARNESS_MANAGER_MPS3_OPENOCD_DIR` to this directory (CI does).
+checkout next to the platform repo it finds them there; anywhere else it uses the packaged copy.
+`HARNESS_MANAGER_MPS3_OPENOCD_DIR` still overrides both.
 
 | File | sha256 |
 |---|---|

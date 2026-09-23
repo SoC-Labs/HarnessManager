@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the pyverify wheel (distribution mps3-pyverify) from one commit of the
 # platform repo, and put it in vendor/ with its provenance. The same commit's
-# MPS3 OpenOCD configs (host/openocd) go to vendor/openocd/.
+# MPS3 OpenOCD configs (host/openocd) go to src/harness_manager_mps3/openocd_cfg/ (in the wheel).
 #
 #   scripts/vendor_pyverify.sh [PLATFORM_REPO [COMMIT]]
 #
@@ -53,10 +53,11 @@ mkdir -p "$here/vendor"
 rm -f "$here"/vendor/mps3_pyverify-*.whl
 cp "$whl" "$here/vendor/$name"
 sha="$(sha256 "$here/vendor/$name")"
-rm -rf "$here/vendor/openocd"
-cp -R "$work/host/openocd" "$here/vendor/openocd"
+cfg="$here/src/harness_manager_mps3/openocd_cfg"   # shipped in the wheel
+rm -rf "$cfg"
+cp -R "$work/host/openocd" "$cfg"
 openocd_rows=""
-for f in "$here"/vendor/openocd/*; do
+for f in "$cfg"/*; do
     openocd_rows+="| \`openocd/$(basename "$f")\` | \`$(sha256 "$f")\` |"$'\n'
 done
 pyver="$("$py" -c 'import platform; print(platform.python_version())')"
@@ -92,7 +93,7 @@ Check it: \`sha256sum vendor/$name\` must print the sha256 above.
 \`openocd/\` is \`host/openocd\` from the same platform commit (last changed at
 \`$openocd_commit\`). The MPS3 pack's debug service needs these target configs. From a
 checkout next to the platform repo it finds them there. Anywhere else, set
-\`HARNESS_MANAGER_MPS3_OPENOCD_DIR\` to this directory (CI does).
+Harness Manager ships them in the wheel (\`harness_manager_mps3/openocd_cfg/\`).
 
 | File | sha256 |
 |---|---|
@@ -102,4 +103,4 @@ printf '%s' "$openocd_rows" >> "$here/vendor/README.md"
 echo "vendored $name"
 echo "  sha256 $sha"
 echo "  from   $commit ($subject)"
-echo "  and    vendor/openocd/"
+echo "  and    src/harness_manager_mps3/openocd_cfg/"

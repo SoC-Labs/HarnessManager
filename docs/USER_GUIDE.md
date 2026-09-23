@@ -137,10 +137,8 @@ the same console at the same time. The DUT's UART0 runs at the rate the loaded d
 was built with (76800 for nanosoc), so `screen` needs no baud argument.
 
 Debug: connect gdb with `target extended-remote 127.0.0.1:<gdb port>`. Arm DS uses the
-same port through its "Generic GDB" connection. In 0.1.0 the debug service also needs
-the MPS3 OpenOCD configs from your clone: set
-`HARNESS_MANAGER_MPS3_OPENOCD_DIR=<clone>/vendor/openocd`, then
-`harness-manager daemon stop` so the service restarts with it.
+same port through its "Generic GDB" connection. OpenOCD itself must be on your PATH;
+the MPS3 target configs ship with Harness Manager.
 
 The command and the app share one board session through a background service, so you
 can use both at once. `harness-manager daemon status` shows the service.

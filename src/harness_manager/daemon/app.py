@@ -321,7 +321,9 @@ async def _serve(websocket: WebSocket, outbox: Outbox, *,
         current = asyncio.current_task()
         # Never await while this task is itself being cancelled (the server is closing
         # the connection): a second await here would swallow part of the cancellation.
-        if current is None or not current.cancelling():
+        # Task.cancelling() is Python 3.11+; 3.10 cannot tell, and awaits.
+        cancelling = getattr(current, "cancelling", None)
+        if current is None or cancelling is None or not cancelling():
             await asyncio.wait(tasks)
 
 

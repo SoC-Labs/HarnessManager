@@ -88,8 +88,9 @@ def test_vendored_wheel_satisfies_the_dependency_and_carries_what_we_use():
 def test_vendored_openocd_configs_match_the_readme():
     readme = (VENDOR / "README.md").read_text(encoding="utf-8")
     rows = dict(re.findall(r"\| `openocd/([^`]+)` \| `([0-9a-f]{64})` \|", readme))
-    files = {p.name: p for p in (VENDOR / "openocd").iterdir() if p.is_file()}
-    assert set(rows) == set(files), "vendor/openocd and vendor/README.md list different files"
+    cfg = VENDOR.parent / "src" / "harness_manager_mps3" / "openocd_cfg"   # shipped in the wheel
+    files = {p.name: p for p in cfg.iterdir() if p.is_file()}
+    assert set(rows) == set(files), "openocd_cfg and vendor/README.md list different files"
     for name, digest in rows.items():
         # git may give a text file CRLF endings on Windows: hash it with LF endings
         data = files[name].read_bytes().replace(b"\r\n", b"\n")

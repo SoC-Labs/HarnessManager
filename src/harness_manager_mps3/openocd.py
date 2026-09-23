@@ -97,7 +97,8 @@ def design_debug(design: int) -> DesignDebug:
 
 
 def config_dir() -> Path | None:
-    """``$HARNESS_MANAGER_MPS3_OPENOCD_DIR`` (read at call time), else the platform repo's."""
+    """``$HARNESS_MANAGER_MPS3_OPENOCD_DIR`` (read at call time), else ``OPENOCD_CFG_DIR``:
+    the platform repo's when it is checked out alongside, else the packaged copy."""
     env = os.environ.get(CFG_DIR_ENV)
     if env:
         return Path(env)
