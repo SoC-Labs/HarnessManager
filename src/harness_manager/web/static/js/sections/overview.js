@@ -5,13 +5,14 @@
 // here repeats them: the tiles carry what a user does next.
 
 import { panelState } from "../actions.js";
-import { capState, shortScreen, valueText } from "../format.js";
+import { capState, valueText } from "../format.js";
 import { existingSession } from "../consoles.js";
 import { html, useEffect } from "../lib.js";
 import {
   boardState, changed, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection,
 } from "../store.js";
-import { durationText, leaseLeft, openPty, week } from "../week.js";
+import { consoleRows, durationText, leaseLeft, openPty, week } from "../week.js";
+import { ScreenCommand } from "./consoles.js";
 import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./details.js";
 import { debugLive, debugSpecs } from "./debug.js";
 import { ARM_TEXT, REBOOT_GATE, RESET_DUT_GATE, rebootSpec, resetDutSpec } from "./power.js";
@@ -162,19 +163,17 @@ function ConsolesTile({ bid }) {
     ${none ? html`<${Reason} icon="circle-slash" text=${`Cannot: ${caps[0].reason}`} />` : null}
     ${b.consolesError ? html`<${Reason} level="err" text=${`${b.consolesError.errName}: ${b.consolesError.message}`} />` : null}
     ${!none && !b.consoles && !b.consolesError ? html`<p class="muted"><${Spinner} /> Reading...</p>` : null}
-    <ul class="tile-consoles">${(b.consoles || []).map((name) => {
+    <ul class="tile-consoles">${consoleRows(bid, b.consoles).map(({ name, aka }) => {
       const s = existingSession(bid, name);
-      const state = (s && s.state) || w.consoleState[name] || "";
+      const state = (s && s.state) || w.consoleState[name] || (meta[name] && meta[name].state) || "";
       const pty = w.pty[name];
       const baud = (w.baud[name] && w.baud[name].baud) ?? (meta[name] && meta[name].baud);
       return html`<li key=${name} data-console=${name}>
         <span class=${`dot ${DOT[state] || "unk"}`} title=${state || "not open in this page"}></span>
-        <span class="mono cname">${name}</span>
+        <span class="mono cname" title=${aka.length ? `also called ${aka.join(", ")}` : undefined}>${name}</span>
         <span class="muted small num baud">${baud ? `${baud}` : ""}</span>
         <span class="screen">${pty && pty.path
-          ? html`<span class="copy-row"><code title=${pty.command || `screen ${pty.path}`}>${shortScreen(pty.command || `screen ${pty.path}`)}</code>
-              <${CopyButton} text=${pty.command || `screen ${pty.path}`} /></span>
-              ${pty.clients ? html`<span class="muted small nowrap">${pty.clients} attached</span>` : null}`
+          ? html`<${ScreenCommand} pty=${pty} compact=${true} />`
           : w.ptyUnsupported ? null
           : w.ptyError[name] ? html`<span class="muted small" title=${w.ptyError[name].message}>no screen here</span>`
           : html`<button type="button" class="btn ghost sm" data-action=${`attach-${name}`}

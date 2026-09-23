@@ -117,12 +117,26 @@ export const VIA_NAMES = { ssh: "via SSH tunnel", hub: "via hub tunnel" };
 // "screen /tmp/harness-manager-me/mps3_192.168.10.102_6900/uart0" shown as
 // "screen …/mps3_192.168.10.102_6900/uart0": the part that tells consoles apart stays.
 // The copy button and the title always carry the whole command.
+// "screen /tmp/harness-manager-me/mps3_x/uart0 115200" -> "screen …/mps3_x/uart0 115200":
+// the path shortened for display, the rate (screen sets 9600 without it) kept.
 export function shortScreen(command, keep = 2) {
   const parts = String(command || "").split(" ");
   if (parts.length < 2) return command;
-  const segs = parts.slice(1).join(" ").split("/");
+  const segs = parts[1].split("/");
   if (segs.length <= keep + 2) return command;
-  return `${parts[0]} \u2026/${segs.slice(-keep).join("/")}`;
+  return [parts[0], `\u2026/${segs.slice(-keep).join("/")}`, ...parts.slice(2)].join(" ");
+}
+
+// A console's rate, said briefly: "fixed by the nanosoc design (needs harness 'uart_baud')".
+// The daemon's full reason (with the file that fixes it) stays for the tooltip.
+export function baudWhy(v) {
+  if (!v) return "";
+  if (v.share) return "set by the hub share";
+  if (v.source === "design" && v.design && v.baud) {
+    return `fixed by the ${v.design} design${/uart_baud/.test(v.reason || "") ? " (needs harness 'uart_baud')" : ""}`;
+  }
+  if (v.source === "harness" && !v.settable) return "fixed by the harness firmware";
+  return v.reason || "";
 }
 
 export function hostOf(boardId) {

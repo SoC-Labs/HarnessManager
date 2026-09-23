@@ -138,7 +138,7 @@ def test_the_board_tile_resets_the_dut_once_armed(page_factory, engine):
 # --- consoles: baud and screen ------------------------------------------------------------------
 
 
-@pytest.mark.week_plan("consoles_api")
+@pytest.mark.week_plan("consoles_api", sim=True)
 def test_a_design_fixed_baud_shows_its_rate_and_reason_and_no_selector(page_factory):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
@@ -147,7 +147,23 @@ def test_a_design_fixed_baud_shows_its_rate_and_reason_and_no_selector(page_fact
     expect(baud).to_have_attribute("data-settable", "no")
     expect(baud).to_contain_text("76800")
     expect(baud).to_contain_text("fixed by the nanosoc design (needs harness 'uart_baud')")
+    assert "rp_nanosoc_wrapper.sv:54" in baud.get_attribute("title")        # the cite, on hover
     assert baud.locator("select").count() == 0
+
+
+@pytest.mark.week_plan("consoles_api", sim=True)
+def test_swo_is_fixed_by_the_harness_and_uart1_has_no_rate(page_factory):
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "consoles")
+    page.locator('[data-console-tab="swo"]').click()
+    swo = page.locator('[data-testid="console-swo"] [data-testid="baud"]')
+    expect(swo).to_contain_text("2000000")
+    expect(swo).to_contain_text("fixed by the harness firmware")
+    page.locator('[data-console-tab="uart1"]').click()
+    uart1 = page.locator('[data-testid="console-uart1"] [data-testid="baud"]')
+    expect(uart1).to_contain_text("no rate")                                  # never a 0
+    expect(uart1).to_contain_text("nothing drives uart1")
 
 
 @pytest.mark.week_plan("consoles_api", sim=True)
@@ -190,6 +206,41 @@ def test_attach_with_screen_shows_the_command_and_the_client_count(page_factory,
     sim_of(daemon).attach_screen(BOARD_USB, "uart0", 2)
     expect(pane.locator('[data-testid="screen-clients"]')).to_have_text("2 attached")
     assert page.locator('[data-testid="terminal-command"]').count() == 0     # no CLI line
+
+
+@pytest.mark.week_plan("consoles_api", sim=True)
+def test_a_serial_consoles_screen_command_carries_its_rate_verbatim(page_factory, daemon):
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "consoles")
+    page.locator('[data-console-tab="mcc"]').click()
+    pane = page.locator('[data-testid="console-mcc"]')
+    pane.locator('[data-action="attach-screen"]').click()
+    code = pane.locator('[data-testid="screen-command"] code')
+    expect(code).to_contain_text("/mcc 115200")                   # screen would set 9600 without it
+    assert code.get_attribute("title").endswith("/mcc 115200")
+    expect(pane.locator('[data-testid="screen-exclusive"]')).to_contain_text("one terminal at a time")
+    # screen leaves, then the PTY closes: the command goes, the attach button is back.
+    sim_of(daemon).attach_screen(BOARD_USB, "mcc", 0)
+    expect(pane.locator('[data-testid="screen-clients"]')).to_have_text("0 attached")
+    assert sim_of(daemon).close_pty(BOARD_USB, "mcc")
+    expect(pane.locator('[data-action="attach-screen"]')).to_be_visible(timeout=T)
+
+
+@pytest.mark.week_plan("consoles_api")
+def test_attach_with_screen_makes_a_pty_on_the_daemon(page_factory, daemon, tmp_path, monkeypatch):
+    # Real-daemon capable: L2's fallback gives the demo boards real PTYs (under tmp_path here).
+    monkeypatch.setenv("HARNESS_MANAGER_PTY_DIR", str(tmp_path / "ptys"))
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "consoles")
+    pane = page.locator('[data-testid="console-uart0"]')
+    pane.locator('[data-action="attach-screen"]').click()
+    code = pane.locator('[data-testid="screen-command"] code')
+    expect(code).to_contain_text("/uart0", timeout=T)
+    assert code.get_attribute("title").startswith("screen /")
+    expect(pane.locator('[data-testid="screen-exclusive"]')).to_be_visible()
+    expect(pane.locator('[data-testid="console-result"]')).to_contain_text("$ console uart0 pty  (rc 0")
 
 
 @pytest.mark.week_plan("consoles_api", sim=True)

@@ -14,7 +14,7 @@ export function week(bid) {
   const b = boardState(bid);
   if (!b.week) {
     b.week = {
-      consoles: null,          // [{name, kind, baud, settable, pty}] from GET /consoles
+      consoles: null,          // [{name, kind, baud, settable, source, reason, state, alias_of, pty}]
       pty: {},                 // name -> {path, device, command, clients} | null
       ptyError: {},            // name -> ApiError (422 on Windows, say)
       ptyUnsupported: false,
@@ -48,7 +48,8 @@ export async function loadConsoleMeta(bid) {
   if (!r.error && Array.isArray(r.data.data.consoles)) {
     w.consoles = r.data.data.consoles;
     for (const c of w.consoles) {
-      if (c.pty && !w.pty[c.name]) w.pty[c.name] = { path: c.pty, command: `screen ${c.pty}` };
+      // The row has the path only: read the PTY for its verbatim command (it may carry a rate).
+      if (c.pty && !w.pty[c.alias_of || c.name]) loadPty(bid, c.alias_of || c.name);
     }
     changed();
   }
@@ -67,7 +68,18 @@ export async function loadPty(bid, name) {
   changed();
 }
 
-// POST .../pty: create (or find) the console's PTY; the result is `screen <path>`.
+// An alias row (shell for fpga_uart2) is the same console: show it once, under its target.
+export function consoleRows(bid, names) {
+  const w = week(bid);
+  const meta = Object.fromEntries((w.consoles || []).map((c) => [c.name, c]));
+  const aka = {};
+  for (const c of w.consoles || []) if (c.alias_of) (aka[c.alias_of] = aka[c.alias_of] || []).push(c.name);
+  return (names || []).filter((n) => !(meta[n] && meta[n].alias_of))
+    .map((n) => ({ name: n, meta: meta[n] || null, aka: aka[n] || [] }));
+}
+
+// POST .../pty: create (or find) the console's PTY. `command` is used verbatim: it is
+// `screen <path>`, or `screen <path> <baud>` for a serial console (screen sets 9600 otherwise).
 export async function openPty(bid, name) {
   const w = week(bid);
   const { data } = await call("ptyOpen", { bid, name });
@@ -181,9 +193,17 @@ onBoardEvent((ev) => {
   const d = ev.data || {};
   const w = week(bid);
   if (ev.topic === "console.pty" && d.name) {
+    // {name, path, device, clients, open}: opened, closed, or a client came or left.
     w.ptyAt[d.name] = performance.now();
-    w.pty[d.name] = d.closed ? null : { ...(w.pty[d.name] || {}), path: d.path,
-      command: (w.pty[d.name] || {}).command || `screen ${d.path}`, clients: d.clients };
+    const had = w.pty[d.name];
+    if (d.open === false || d.closed) {
+      w.pty[d.name] = null;
+    } else {
+      const same = had && had.path === d.path && had.command;
+      w.pty[d.name] = { ...(had || {}), path: d.path, device: d.device, clients: d.clients,
+        command: same ? had.command : null };
+      if (!same) setTimeout(() => loadPty(bid, d.name), 0);     // the event has no command
+    }
   }
   if (ev.topic === "console.state" && d.name) {
     if (d.state) w.consoleState[d.name] = d.state;

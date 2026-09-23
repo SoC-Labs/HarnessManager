@@ -70,8 +70,23 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles
 SERIAL_CHOICES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
-UART_BAUD_CHOICES = [9600, 19200, 38400, 57600, 76800, 115200, 230400]
+#: harness_manager_mps3.uart as built by L2 (the rates on today's fielded shell), copied so
+#: the mock does not need pyverify.
+HARNESS_CHOICES = [9600, 19200, 38400, 57600, 76800, 115200, 230400, 460800, 921600]
 DESIGN_BAUD = 76800                          # rp_nanosoc_wrapper.sv UART_BAUD
+DESIGN_CITE = {
+    "nanosoc": "fpga/rp/nanosoc/rp_nanosoc_wrapper.sv:54 (UART_BAUD -> uart_axis_shim .BAUD, "
+               "382-384)",
+    "nanosoc_upy": "fpga/rp/nanosoc_upy/rp_nanosoc_upy_wrapper.sv:62 (passed to "
+                   "rp_nanosoc_wrapper, 164)",
+}
+GREYBOX_WHY = "no design is loaded (greybox): nothing drives uart0"
+UART1_WHY = ("nothing drives uart1: the shell ties its DUT side off until a design widens the "
+             "partition contract (fpga/shell/ip/uart_bridge/README.md:72-75)")
+SWO_BAUD = 2_000_000
+SWO_SOURCE = "firmware/uart_over_eth/uart_over_eth.c:30-35 (UART_OVER_ETH_SWO_DIVISOR 24)"
+HUB_SHARE = "a hub share: the share sets the rate (change it on the hub, not here)"
+STANDARD_SPEEDS = {9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600}
 DUT_CLOCK_PRESETS = (25.0, 50.0, 100.0)
 RELEASE_STATIC_ID = "0x72bb0a36"            # the ILA mint's shell (FIELDED_ILA_V011)
 RELEASE_VERSION = "1.1.0"
@@ -178,19 +193,40 @@ class WeekPlanSim:
         if self.update_reason:
             raise UnavailableError("update", self.update_reason)
 
-    def attach_screen(self, bid: str, name: str, clients: int = 1) -> None:
-        """``screen <path>`` attached to a console's PTY (``console.pty`` fires)."""
+    def attach_screen(self, bid: str, name: str, clients: int | None = 1) -> None:
+        """A terminal attached to (or left) a console's PTY: ``console.pty`` fires."""
         with self._lock:
             pty = self.ptys.get((bid, name))
             if pty is None:
                 raise AbsentError(f"{name} has no PTY yet")
             pty["clients"] = clients
-        self.publish("console.pty", bid, {"name": name, "path": pty["path"], "clients": clients})
+        self.publish("console.pty", bid, {"name": name, "path": pty["path"],
+                                          "device": pty["device"], "clients": clients,
+                                          "open": True})
 
-    # -- consoles: PTY and baud ---------------------------------------------------------
+    def close_pty(self, bid: str, name: str) -> bool:
+        """The PTY goes away (DELETE .../pty; the daemon closing the board)."""
+        with self._lock:
+            pty = self.ptys.pop((bid, name), None)
+        if pty is not None:
+            self.publish("console.pty", bid, {"name": name, "path": pty["path"],
+                                              "device": pty["device"], "clients": 0,
+                                              "open": False})
+        return pty is not None
+
+    # -- consoles: PTY and baud (L2 as built: services/console.py, harness_manager_mps3.uart) --
 
     def console_kind(self, bid: str, name: str) -> str:
         return "serial" if name in SERIAL_CONSOLES else "ethernet"
+
+    @staticmethod
+    def _row(kind: str, baud: int | None, source: str, *, settable: bool = False,
+             reason: str = "", choices: list[int] | None = None, **extra: Any) -> dict[str, Any]:
+        out = {"kind": kind, "baud": baud, "source": source, "settable": settable,
+               "reason": "" if settable else reason,
+               "choices": list(choices) if choices else ([baud] if baud else [])}
+        out.update(extra)
+        return out
 
     def baud_view(self, bid: str, name: str) -> dict[str, Any]:
         kind = self.console_kind(bid, name)
@@ -198,49 +234,74 @@ class WeekPlanSim:
         if kind == "serial":
             baud = self.bauds.get(key, 115200)
             if bid in self.hubs:
-                return {"baud": baud, "settable": False, "choices": [], "source": "serial",
-                        "reason": "set by the hub share (fpgahub owns the serial port)"}
-            return {"baud": baud, "settable": True, "choices": list(SERIAL_CHOICES),
-                    "source": "serial"}
+                return self._row("serial", baud, "serial", reason=HUB_SHARE, share=True)
+            return self._row("serial", baud, "serial", settable=True, choices=SERIAL_CHOICES)
         if name == "swo":
-            return {"baud": None, "settable": False, "choices": [], "source": "unknown",
-                    "reason": "SWO is trace output, not a UART: it has no baud rate"}
+            return self._row("ethernet", SWO_BAUD, "harness", cite=SWO_SOURCE,
+                             reason=f"the harness firmware fixes the SWO deserialiser at "
+                                    f"{SWO_BAUD} baud (divisor 24 at the 50 MHz dut_clk; "
+                                    f"{SWO_SOURCE})")
+        if name == "uart1":
+            return self._row("ethernet", None, "design", reason=UART1_WHY)
         ident = self.identity(bid)
-        design = ident.rm_name or ident.rm_id or "loaded"
+        design = ident.rm_name or "unknown"
+        if design == "greybox":
+            return self._row("ethernet", None, "design", reason=GREYBOX_WHY, design=design,
+                             cite="fpga/dfx/rms/rm_greybox/rm_greybox.sv")
+        cite = DESIGN_CITE.get(design, "")
         if "uart_baud" in (ident.features or ()):
-            return {"baud": self.bauds.get(key, DESIGN_BAUD), "settable": True,
-                    "choices": list(UART_BAUD_CHOICES), "source": "harness"}
-        return {"baud": self.bauds.get(key, DESIGN_BAUD), "settable": False, "choices": [],
-                "source": "design",
-                "reason": f"fixed by the {design} design (needs harness 'uart_baud')"}
+            mode = "set" if key in self.bauds else "fixed"
+            return self._row("ethernet", self.bauds.get(key, DESIGN_BAUD), "harness",
+                             settable=True, choices=HARNESS_CHOICES, mode=mode, design=design)
+        return self._row("ethernet", DESIGN_BAUD, "design", design=design, cite=cite,
+                         reason=f"{design} fixes {name} at {DESIGN_BAUD} baud when it is built "
+                                f"({cite}); changing it at run time needs harness firmware "
+                                "with 'uart_baud'")
 
     def consoles_view(self, bid: str) -> list[dict[str, Any]]:
         out = []
         for name in self.console_names(bid):
             view = self.baud_view(bid, name)
             pty = self.ptys.get((bid, name))
-            out.append({"name": name, "kind": self.console_kind(bid, name),
-                        "baud": view["baud"], "settable": view["settable"],
-                        "pty": pty["path"] if pty else None})
+            out.append({"name": name, "kind": view["kind"], "baud": view["baud"],
+                        "settable": view["settable"], "source": view["source"],
+                        "reason": view["reason"], "pty": pty["path"] if pty else None,
+                        "state": "up" if pty else "closed"})
         return out
+
+    def pty_view(self, bid: str, name: str) -> dict[str, Any] | None:
+        pty = self.ptys.get((bid, name))
+        if pty is None:
+            return None
+        view = self.baud_view(bid, name)
+        rate = view["baud"] if view["kind"] == "serial" and view["baud"] in STANDARD_SPEEDS \
+            else None
+        command = f"screen {pty['path']}" + (f" {rate}" if rate else "")
+        return {"name": name, "path": pty["path"], "device": pty["device"],
+                "clients": pty["clients"], "command": command}
 
     def open_pty(self, bid: str, name: str) -> dict[str, Any]:
         self.require_console(bid, name)
         if self.pty_unavailable:
-            raise UnavailableError(f"console {name} pty", self.pty_unavailable)
+            err = UnavailableError("console_pty", self.pty_unavailable)
+            err.hint = ("use the TCP export instead: `harness-manager console TARGET NAME "
+                        "--export 0`, then a raw-TCP terminal (PuTTY 'Raw') on 127.0.0.1 and "
+                        "the port it prints")
+            raise err
         created = False
         with self._lock:
             pty = self.ptys.get((bid, name))
             if pty is None:
                 self._pts += 1
                 path = f"/tmp/harness-manager-{getpass.getuser()}/{_slug(bid)}/{name}"
-                pty = {"path": path, "device": f"/dev/pts/{self._pts}",
-                       "command": f"screen {path}", "clients": 0}
+                pty = {"path": path, "device": f"/dev/pts/{self._pts}", "clients": 0}
                 self.ptys[(bid, name)] = pty
                 created = True
         if created:
-            self.publish("console.pty", bid, {"name": name, "path": pty["path"], "clients": 0})
-        return {k: pty[k] for k in ("path", "device", "command")}
+            self.publish("console.pty", bid, {"name": name, "path": pty["path"],
+                                              "device": pty["device"], "clients": 0,
+                                              "open": True})
+        return self.pty_view(bid, name) or {}
 
     # -- update ----------------------------------------------------------------------------
 
@@ -351,50 +412,49 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
     @app.post(f"{API}/boards/{{bid}}/consoles/{{name}}/pty")
     def pty_open(bid: str, name: str) -> dict[str, Any]:
         state.session(bid)
-        return ok(**sim.open_pty(bid, name))
+        return ok(board_id=bid, **sim.open_pty(bid, name))
 
     @app.get(f"{API}/boards/{{bid}}/consoles/{{name}}/pty")
     def pty_get(bid: str, name: str) -> dict[str, Any]:
         state.session(bid)
         sim.require_console(bid, name)
-        pty = sim.ptys.get((bid, name))
-        return ok(pty=dict(pty) if pty else None)
+        return ok(board_id=bid, pty=sim.pty_view(bid, name))
 
     @app.delete(f"{API}/boards/{{bid}}/consoles/{{name}}/pty")
     def pty_close(bid: str, name: str) -> dict[str, Any]:
         state.session(bid)
-        with sim._lock:
-            pty = sim.ptys.pop((bid, name), None)
-        if pty is not None:
-            sim.publish("console.pty", bid, {"name": name, "path": pty["path"], "clients": 0,
-                                             "closed": True})
-        return ok()
+        return ok(board_id=bid, name=name, closed=sim.close_pty(bid, name))
 
     @app.get(f"{API}/boards/{{bid}}/consoles/{{name}}/baud")
     def baud_get(bid: str, name: str) -> dict[str, Any]:
         state.session(bid)
         sim.require_console(bid, name)
-        view = sim.baud_view(bid, name)
-        return ok(**{k: v for k, v in view.items() if v is not None or k == "baud"})
+        return ok(board_id=bid, name=name, **sim.baud_view(bid, name))
 
     @app.post(f"{API}/boards/{{bid}}/consoles/{{name}}/baud")
     def baud_set(bid: str, name: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
-        jobs.gate(bid)
         state.session(bid)
+        if "baud" not in body:
+            raise UsageError("the request needs 'baud'",
+                             hint='e.g. {"baud": 115200}; 0 goes back to the console\'s default '
+                                  "rate")
+        baud = body["baud"]
+        if isinstance(baud, bool) or not isinstance(baud, int):
+            raise UsageError(f"baud must be a whole number, not {baud!r}")
+        jobs.gate(bid)
         sim.require_console(bid, name)
         view = sim.baud_view(bid, name)
         if not view["settable"]:
-            raise UnavailableError(f"console {name} baud", view.get("reason") or "not settable")
-        try:
-            baud = int(body.get("baud"))
-        except (TypeError, ValueError):
-            raise UsageError("baud must be an integer", hint="e.g. {\"baud\": 115200}") from None
-        if baud not in view["choices"]:
-            raise UsageError(f"{baud} is not a rate this console offers",
-                             hint="choices: " + ", ".join(str(c) for c in view["choices"]))
-        sim.bauds[(bid, name)] = baud
-        sim.publish("console.state", bid, {"name": name, "state": "up", "baud": baud})
-        return ok(baud=baud, source=view["source"])
+            raise UnavailableError("console_baud", view["reason"] or "the rate is unknown")
+        if baud:
+            sim.bauds[(bid, name)] = baud
+        else:
+            sim.bauds.pop((bid, name), None)
+        view = sim.baud_view(bid, name)
+        sim.publish("console.state", bid, {"name": name, "state": "up", "baud": view["baud"],
+                                           "detail": f"{name} set to {view['baud']} baud"})
+        return ok(board_id=bid, name=name, baud=view["baud"], source=view["source"],
+                  mode=view.get("mode", ""))
 
     # -- hub_api ---------------------------------------------------------------------------
 

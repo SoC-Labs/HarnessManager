@@ -3,11 +3,11 @@
 // shared with this page), Export to TCP, Save.
 
 import { call } from "../api.js";
-import { capState, shortScreen } from "../format.js";
+import { baudWhy, capState, shortScreen } from "../format.js";
 import { consoleSession } from "../consoles.js";
 import { html, useEffect, useRef, useState } from "../lib.js";
 import { boardState, changed, loadConsoles, log, timed } from "../store.js";
-import { loadBaud, loadPty, openPty, setBaud, week } from "../week.js";
+import { consoleRows, loadBaud, loadPty, openPty, setBaud, week } from "../week.js";
 import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
 
 const CONSOLE_CAPS = ["console_dut", "console_shell", "console_controller"];
@@ -60,9 +60,26 @@ function BaudControl({ bid, name, onResult }) {
         ${(v.choices || []).map((c) => html`<option key=${c} value=${String(c)}>${c}</option>`)}
       </select></span>`;
   }
-  return html`<span class="baud-ctl" data-testid="baud" data-settable="no" title=${`source: ${SOURCE_TEXT[v.source] || v.source}`}>
+  const why = baudWhy(v);
+  const tip = [v.reason, v.cite ? `(${v.cite})` : "", `source: ${SOURCE_TEXT[v.source] || v.source}`].filter(Boolean).join(" ");
+  return html`<span class="baud-ctl" data-testid="baud" data-settable="no" title=${tip}>
     <span class="muted small">Baud</span>
-    <span class="num">${v.baud ?? "none"}</span>${v.reason ? html`<span class="muted small">· ${v.reason}</span>` : null}</span>`;
+    <span class="num">${v.baud ?? "no rate"}</span>${why ? html`<span class="muted small why">· ${why}</span>` : null}</span>`;
+}
+
+const EXCLUSIVE = "one terminal at a time: screen holds the PTY exclusively";
+
+// The daemon's screen line, verbatim (copy it whole; the display shortens the path only).
+export function ScreenCommand({ pty, compact = false }) {
+  const cmd = pty.command;
+  if (!cmd) return html`<span class="muted small"><${Spinner} /> reading the screen command...</span>`;
+  const clients = pty.clients !== undefined && pty.clients !== null
+    ? html`<span class="muted small nowrap" data-testid="screen-clients">${pty.clients} attached</span>` : null;
+  return html`<span class="copy-row screen-row" data-testid="screen-command"
+      title=${`Run this in any terminal; ${EXCLUSIVE}. screen shares the console with this page (Ctrl-A K ends it).`}>
+    <code title=${cmd}>${shortScreen(cmd)}</code><${CopyButton} text=${cmd} />
+    ${compact ? (pty.clients ? clients : null) : clients}
+    ${compact ? null : html`<span class="muted small" data-testid="screen-exclusive">${EXCLUSIVE}</span>`}</span>`;
 }
 
 // "Attach with screen": the daemon's PTY for this console (the page and screen share it).
@@ -71,13 +88,7 @@ function ScreenControl({ bid, name, onResult, onExport }) {
   const pty = w.pty[name];
   const err = w.ptyError[name];
   if (w.ptyUnsupported) return null;
-  if (pty && pty.path) {
-    const cmd = pty.command || `screen ${pty.path}`;
-    return html`<span class="copy-row screen-row" data-testid="screen-command"
-        title="Run this in any terminal: screen shares the console with this page (Ctrl-A K ends it)">
-      <code title=${cmd}>${shortScreen(cmd)}</code><${CopyButton} text=${cmd} />
-      ${pty.clients !== undefined && pty.clients !== null ? html`<span class="muted small" data-testid="screen-clients">${pty.clients} attached</span>` : null}</span>`;
-  }
+  if (pty && pty.path) return html`<${ScreenCommand} pty=${pty} />`;
   if (err) {
     return html`<span class="screen-row" data-testid="screen-unavailable">
       <${Reason} icon="circle-slash" text=${`No screen here: ${err.reason || err.message}`} />
@@ -206,15 +217,18 @@ export function ConsolesSection({ bid }) {
   }
   if (!b.consoles) return html`<p class="muted"><${Spinner} /> Asking the daemon for this board's consoles...</p>`;
   if (!b.consoles.length) return html`<${Reason} text="The daemon reports no consoles for this board." />`;
-  const current = b.consoleSelected || b.consoles[0];
+  const rows = consoleRows(bid, b.consoles);
+  const shown = rows.map((r) => r.name);
+  const alias = ((week(bid).consoles || []).find((c) => c.name === b.consoleSelected) || {}).alias_of;
+  const current = alias || (shown.includes(b.consoleSelected) ? b.consoleSelected : shown[0]);
   return html`
     <div class="console-tabs" role="tablist" aria-label="Consoles">
-      ${b.consoles.map((n) => {
+      ${rows.map(({ name: n, aka }) => {
         const s = consoleSession(bid, n);
         return html`<button type="button" role="tab" key=${n} class="console-tab" data-console-tab=${n}
-          aria-selected=${n === current ? "true" : "false"}
+          aria-selected=${n === current ? "true" : "false"} title=${aka.length ? `also called ${aka.join(", ")}` : undefined}
           onClick=${() => { b.consoleSelected = n; changed(); }}>
-          <span class=${`dot ${s.state === "up" ? "ok" : s.state === "down" ? "warn" : "unk"}`}></span>${n}</button>`;
+          <span class=${`dot ${s.state === "up" ? "ok" : s.state === "down" ? "warn" : "unk"}`}></span>${n}${aka.length ? html`<span class="muted small"> (${aka.join(", ")})</span>` : null}</button>`;
       })}
     </div>
     <${ConsolePane} key=${current} bid=${bid} name=${current} />`;

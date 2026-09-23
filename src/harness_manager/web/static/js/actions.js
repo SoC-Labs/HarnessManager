@@ -111,8 +111,12 @@ export async function runAction(bid, panel, spec) {
   changed();
   // One line per phase: a repeat of the last phase updates its line in place.
   const phases = [];
+  let finished = false;
   const ctx = {
     progress(text, phase = text) {
+      // A job.progress event can arrive after the job's answer (the poll won the race): the
+      // result lines are final by then, and a late phase must not overwrite them.
+      if (finished) return;
       const last = phases[phases.length - 1];
       if (last === phase) progress[progress.length - 1] = text;
       else { phases.push(phase); progress.push(text); }
@@ -129,6 +133,7 @@ export async function runAction(bid, panel, spec) {
     ok = false;
     value = toApiError(e);
   }
+  finished = true;
   const took = (performance.now() - t0) / 1000;
   const head = { kind: "rc", command: spec.command, rc: ok ? 0 : rcOf(value), secs: took,
     level: ok ? "ok" : "err" };
