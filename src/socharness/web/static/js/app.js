@@ -117,7 +117,7 @@ function Rail() {
           onClick=${() => setAdding(!adding)}><${Icon} name="plus" /></button>
         <button type="button" class="btn ghost sm icon-only" title="Scan for boards"
           aria-label="Scan for boards" data-action="rescan"
-          aria-busy=${S.scan.running ? "true" : undefined} onClick=${() => probe()}>
+          aria-busy=${S.scan.running ? "true" : undefined} onClick=${() => { if (!S.scan.running) probe(); }}>
           ${S.scan.running ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}</button>
       </span>
     </div>

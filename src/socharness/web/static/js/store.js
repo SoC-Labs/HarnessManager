@@ -216,8 +216,16 @@ export async function loadBoards() {
   return r;
 }
 
-export async function probe(hosts = null) {
-  if (S.scan.running) return;
+// Probes run one after another: an address added while a scan runs waits its turn
+// instead of being dropped.
+let probeChain = Promise.resolve();
+
+export function probe(hosts = null) {
+  probeChain = probeChain.then(() => probeNow(hosts), () => probeNow(hosts));
+  return probeChain;
+}
+
+async function probeNow(hosts) {
   S.scan = { running: true, line: hosts ? `adding ${hosts.join(", ")}...` : "scanning...", level: "" };
   changed();
   // With explicit hosts the pack pings only those and unicasts identify to them, so a board
