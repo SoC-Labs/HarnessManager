@@ -355,6 +355,18 @@ estimates = {{ vivado_reports = "{reports}" }}
     assert [lk.kind for lk in cand.links] == [LinkKind.ETHERNET, LinkKind.SMART_POWER, LinkKind.JTAG]
 
 
+def test_a_session_state_dir_wins_over_the_env_rule(boards_toml: Path, tmp_path: Path):
+    other = tmp_path / "engine_state"
+    other.mkdir()
+    (other / "boards.toml").write_text(
+        f'[boards."{BOARD}".power]\nkind = "netio"\nurl = "http://pdu.other"\n')
+    session = FakeSession(shell=None)
+    assert make_power_adapter(session) is None               # env-rule dir has no boards.toml
+    session.state_dir = other                                 # what the pack would set (CCR 5)
+    assert make_power_adapter(session).label == "netio http://pdu.other outlet 1"
+    assert [lk.address for lk in config_links(session.candidate, other)] == ["http://pdu.other"]
+
+
 def test_hook_with_a_broken_file_puts_the_error_on_the_rows(boards_toml: Path):
     boards_toml.write_text("[boards\n")
     rows = make_telemetry_adapter(FakeSession(shell=None, links=())).readings()

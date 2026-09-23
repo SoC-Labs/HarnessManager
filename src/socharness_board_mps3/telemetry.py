@@ -53,7 +53,14 @@ from socharness.core.model import BoardIdentity, Candidate, Link, Reading
 from socharness.power import vivado
 from socharness.power.adapter import PowerAdapter
 from socharness.power.adapter import make_power_adapter as _make_power_adapter
-from socharness.power.config import BoardConfig, ConfigError, load_boards, power_link, with_links
+from socharness.power.config import (
+    BOARDS_FILE,
+    BoardConfig,
+    ConfigError,
+    load_boards,
+    power_link,
+    with_links,
+)
 
 from .sysmon import (
     CHANNELS,
@@ -361,13 +368,22 @@ class Mps3Telemetry:
 # --- configuration -> adapters and links ------------------------------------------------------------
 
 
-def board_config(candidate: Candidate) -> tuple[BoardConfig | None, str]:
-    """This board's ``boards.toml`` table, or (None, the reason the file is unusable)."""
+def board_config(candidate: Candidate,
+                 state_dir: Path | None = None) -> tuple[BoardConfig | None, str]:
+    """This board's ``boards.toml`` table, or (None, the reason the file is unusable).
+
+    ``state_dir`` is the engine's, when the pack knows it (T9 CCR 5); otherwise the
+    state-dir rule (``$SOCHARNESS_STATE_DIR``, else ``~/.config/socharness``) applies.
+    """
     try:
-        boards = load_boards()
+        boards = load_boards(Path(state_dir) / BOARDS_FILE if state_dir is not None else None)
     except ConfigError as exc:
         return None, str(exc)
     return boards.for_board(candidate.board_id, candidate.links), ""
+
+
+def _state_dir(session: Any) -> Path | None:
+    return getattr(session, "state_dir", None)
 
 
 def _sysmon_from(board: BoardConfig | None) -> tuple[XsdbSysmon | OpenOcdSysmon | None, str, float]:
@@ -399,8 +415,7 @@ def _estimates_from(board: BoardConfig | None) -> tuple[Path | None, str]:
 
 def make_telemetry_adapter(session: Any) -> Mps3Telemetry:
     """The hook. Always returns an adapter: the rows it cannot fill say why."""
-    candidate = session.candidate
-    board, config_error = board_config(candidate)
+    board, config_error = board_config(session.candidate, _state_dir(session))
     reader, sysmon_error, interval = _sysmon_from(board)
     est_dir, est_error = _estimates_from(board)
     return Mps3Telemetry(session, board=board, config_error=config_error, sysmon=reader,
@@ -411,18 +426,18 @@ def make_telemetry_adapter(session: Any) -> Mps3Telemetry:
 
 def make_power_adapter(session: Any) -> PowerAdapter | None:
     """Proposed hook (T9 CCR 1): ``BoardSession.power`` from ``[boards.<id>.power]``."""
-    board, _err = board_config(session.candidate)
+    board, _err = board_config(session.candidate, _state_dir(session))
     return _make_power_adapter(board)
 
 
-def config_links(candidate: Candidate) -> tuple[Link, ...]:
+def config_links(candidate: Candidate, state_dir: Path | None = None) -> tuple[Link, ...]:
     """Links ``boards.toml`` gives this board: ``SMART_POWER`` for a meter, ``JTAG`` for SYSMON.
 
     Proposed use (T9 CCR 2): the pack adds these to every candidate it returns, so
     capability negotiation sees ``telemetry_power`` and the JTAG route of
     ``telemetry_temp``. Secret-free: no address here carries a credential.
     """
-    board, _err = board_config(candidate)
+    board, _err = board_config(candidate, state_dir)
     links: list[Link] = []
     link = power_link(board)
     if link is not None:
@@ -433,9 +448,9 @@ def config_links(candidate: Candidate) -> tuple[Link, ...]:
     return tuple(links)
 
 
-def with_config_links(candidate: Candidate) -> Candidate:
+def with_config_links(candidate: Candidate, state_dir: Path | None = None) -> Candidate:
     """``candidate`` plus its ``boards.toml`` links (the one-line pack integration)."""
-    return with_links(candidate, config_links(candidate))
+    return with_links(candidate, config_links(candidate, state_dir))
 
 
 __all__ = [
