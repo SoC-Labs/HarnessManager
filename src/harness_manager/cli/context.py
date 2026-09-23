@@ -134,7 +134,9 @@ class Ctx:
             return Candidate(pack=self.pack, board_id=f"{self.pack}@usb:{first}", links=extra,
                              label=f"{self.pack} over USB ({first})", evidence="given explicitly")
         try:
-            cand = self.engine.candidate_for(target, self.pack)
+            via = getattr(self.args, "via", "") or ""
+            cand = (self.engine.candidate_for(target, self.pack, via=via) if via
+                    else self.engine.candidate_for(target, self.pack))
         except ValueError as exc:
             raise UsageError(f"target {target!r} is not host[:port] ({exc})",
                              hint="e.g. 192.168.10.101 or 192.168.10.101:6900, or '-' for USB") \

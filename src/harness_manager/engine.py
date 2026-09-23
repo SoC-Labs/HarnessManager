@@ -226,8 +226,9 @@ class Engine:
                 "links": [_link_data(lk) for lk in cand.links]}))
         return result
 
-    def candidate_for(self, target: str, pack: str = "mps3") -> Candidate:
-        return self._pack(pack).candidate_for_host(target)
+    def candidate_for(self, target: str, pack: str = "mps3", via: str = "") -> Candidate:
+        found = self._pack(pack)
+        return found.candidate_for_host(target, via) if via else found.candidate_for_host(target)
 
     # -- sessions ------------------------------------------------------------------
 

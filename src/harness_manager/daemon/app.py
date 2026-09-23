@@ -634,7 +634,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                            serial_ports=tuple(_serial_url(s) for s in _strings(b, "serial_ports")),
                            volumes=_strings(b, "volumes"),
                            scan_usb=_bool(b, "scan_usb", True),
-                           scan_network=_bool(b, "scan_network", True), timeout_s=timeout)
+                           scan_network=_bool(b, "scan_network", True), timeout_s=timeout,
+                           via=_str(b, "via") if b.get("via") else "")
         # Engine-wide jobs (an update check, an app switch) hold no board's control port.
         running = [j for j in d.jobs.running() if j.board_id]
         if running:
@@ -669,12 +670,19 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def open_board(body: JsonBody = None) -> JSONResponse:
         b = _obj(body)
         note = _sanitise_note(b.get("note", ""))
+        via = _str(b, "via") if b.get("via") else ""
         if b.get("candidate") is not None:
+            if via:
+                raise UsageError("via goes with target, not with a candidate",
+                                 hint="a candidate from POST /probe already carries its route")
             cand = from_json(Candidate, b["candidate"])
         elif b.get("target"):
             target = _str(b, "target")
+            pack = _str(b, "pack", "mps3")
             try:
-                cand = d.engine.candidate_for(target, _str(b, "pack", "mps3"))
+                # via only when given: engines that predate it (the demo) take two arguments.
+                cand = (d.engine.candidate_for(target, pack, via=via) if via
+                        else d.engine.candidate_for(target, pack))
             except ValueError as exc:
                 raise UsageError(f"target {target!r} is not host[:port] ({exc})",
                                  hint="e.g. 192.168.10.101 or 192.168.10.101:6900") from exc

@@ -190,10 +190,10 @@ class RemotePack:
     def capability_specs(self) -> Sequence[Any]:
         return tuple(self._local.capability_specs()) if self._local is not None else ()
 
-    def candidate_for_host(self, spec: str) -> Candidate:
+    def candidate_for_host(self, spec: str, via: str = "") -> Candidate:
         if self._local is None:
             raise UsageError(f"pack {self.name!r} is not installed here, only in the daemon")
-        return self._local.candidate_for_host(spec)
+        return self._local.candidate_for_host(spec, via) if via else self._local.candidate_for_host(spec)
 
     def probe(self, hints: ProbeHints) -> list[Candidate]:
         raise UsageError("the daemon probes: use engine.probe()")
@@ -376,15 +376,17 @@ class RemoteEngine:
         body = {"hosts": list(hints.hosts), "serial_ports": list(hints.serial_ports),
                 "volumes": list(hints.volumes), "scan_usb": hints.scan_usb,
                 "scan_network": hints.scan_network, "timeout_s": hints.timeout_s}
+        if getattr(hints, "via", ""):
+            body["via"] = hints.via
         found = self._http.post("/probe", body).get("candidates", [])
         return [from_json(Candidate, c) for c in found]
 
-    def candidate_for(self, target: str, pack: str = "mps3") -> Candidate:
+    def candidate_for(self, target: str, pack: str = "mps3", via: str = "") -> Candidate:
         local = self._local_packs().get(pack)
         if local is None:
             known = ", ".join(sorted(self._local_packs())) or "none installed"
             raise AbsentError(f"no board pack named {pack!r}", hint=f"installed packs: {known}")
-        return local.candidate_for_host(target)
+        return local.candidate_for_host(target, via) if via else local.candidate_for_host(target)
 
     # -- sessions ------------------------------------------------------------------------------
 

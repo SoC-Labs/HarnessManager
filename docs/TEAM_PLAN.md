@@ -20,6 +20,9 @@
 - **T7-5:** a public overlay-import hook on the pack (today `PackOverlayHandler` imports `harness_manager_<pack>.overlays` by name).
 - **Trust keys:** `update/trust.py` `PINNED_KEYS` is empty, so every channel is refused. david creates the minisign keys (harness-release, root, optional app-ci).
 - **Web UI gaps** (Qt had none of these either): SD install page, Clocks, Board & XDC, lab verbs, an update page, a power-cycle button.
+- **L1-5:** a pack hook to narrow capabilities when a board is reached only through an MCC share: `USB_SERIAL` over-claims `console_shell`. The `HUB` link kind is not the fix, because it would also claim the SD.
+- **L1-6:** `RouteContext.on_close(fn)`, so extension routers stop wrapping `d.close`.
+- **L1-2:** move the lease and share TSV layouts into `output.TSV_COLUMNS`, with golden cases.
 - **T14-2 (declined):** a wedged harness keeps failing `GET /boards/{bid}` with its code; revisit only if the stale view proves confusing on a real board.
 
 T8 (hub mode) and T10 (XDC export) follow.

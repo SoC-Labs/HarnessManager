@@ -51,6 +51,7 @@ def cmd_probe(ctx: Ctx) -> int:
         scan_usb=scan,
         scan_network=scan,
         timeout_s=a.timeout,
+        via=getattr(a, "via", "") or "",
     )
     found = ctx.engine.probe(hints)
     if getattr(a, "pack", None):

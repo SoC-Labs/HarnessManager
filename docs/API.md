@@ -180,3 +180,10 @@ Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
   - `swo` is 2000000 (firmware divisor);
   - FPGA UART lanes are settable;
   - hub shares are fixed by the share.
+
+**As built by L1 (hub):**
+- **Additive keys:** the tunnel object adds `forwards`, `restarts`, `pid` and `shares`; the lease object adds `user`.
+- **`DELETE /lease`** returns `{released}`, or `{cancelled: true}` for a queued acquire, and 404 when this client holds no lease.
+- **Limits:** `ttl_s` must be 60–86400, and `GET /lease` is cached for 10 s.
+- **Holds:** a queued lease job holds the board (409 with `error.data.kind == "lease"`). Cancel it with `DELETE /lease`.
+- **Over a hub share:** MCC reads are slow (about 2 s for temperatures, about 6 s for oscillators), and SD storage is unavailable because there is no `USB_MSD` link.

@@ -64,6 +64,9 @@ def _usb_parent() -> argparse.ArgumentParser:
                         "COM7, /dev/ttyUSB0)")
     p.add_argument("--volume", action="append", metavar="PATH", default=argparse.SUPPRESS,
                    help="add the configuration SD volume (the mounted V2M-MPS3 drive)")
+    p.add_argument("--via", metavar="ssh:HOST", default=argparse.SUPPRESS,
+                   help="reach the shell through an SSH tunnel on HOST (the lab hub); "
+                        "boards.toml via does the same")
     return p
 
 
@@ -116,6 +119,8 @@ def make_parser() -> argparse.ArgumentParser:
     vp.add_argument("--volume", action="append", default=[], metavar="PATH",
                     help="mounted volume to try (repeatable)")
     vp.add_argument("--timeout", type=float, default=2.0, metavar="S")
+    vp.add_argument("--via", default="", metavar="ssh:HOST",
+                    help="reach the hosts through an SSH tunnel on HOST (the lab hub)")
     vp.add_argument("--no-scan", action="store_true",
                     help="look only at the addresses given; no default address, no USB scan")
     vp.set_defaults(fn=cmd_system.cmd_probe)
@@ -289,6 +294,13 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_daemon
     cmd_daemon.register(sub)
     for name in ("daemon", "ui", "app"):   # so `harness-manager help <verb>` knows them
+        if name in sub.choices:
+            verbs[name] = sub.choices[name]
+
+    # -- lease / share (L1: the lab hub) ------------------------------------------------
+    from . import cmd_hub
+    cmd_hub.register(sub)
+    for name in ("lease", "share"):
         if name in sub.choices:
             verbs[name] = sub.choices[name]
 

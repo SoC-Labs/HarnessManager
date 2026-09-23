@@ -37,6 +37,7 @@ class ProbeHints:
     scan_usb: bool = True
     scan_network: bool = True
     timeout_s: float = 2.0
+    via: str = ""                        # "ssh:HOST": reach the hosts through an SSH tunnel (L1)
 
 
 # --- shared value types used by adapters --------------------------------------------
@@ -266,8 +267,12 @@ class BoardPack(ABC):
     @abstractmethod
     def open(self, candidate: Candidate) -> BoardSession: ...
 
-    def candidate_for_host(self, spec: str) -> Candidate:
-        """Build a candidate from an explicit address. Packs that can, override this."""
+    def candidate_for_host(self, spec: str, via: str = "") -> Candidate:
+        """Build a candidate from an explicit address. Packs that can, override this.
+
+        ``via`` ("ssh:HOST") asks for the board to be reached through an SSH tunnel
+        on HOST; a pack that cannot do that raises ``UsageError`` for a non-empty one.
+        """
         from .errors import UsageError
 
         raise UsageError(f"pack {self.name!r} cannot open a board by address")

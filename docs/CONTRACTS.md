@@ -33,6 +33,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `power.cycle` `{phase: off\|on, off_s, device}` | a cold power cycle through a metered outlet (T9, L4) |
 | `console.pty` `{name, path, device, clients, open}` | a console's PTY for `screen` opened, closed, or a client attached or left (L2) |
 | `lease.state` `{target, state, holder, expires_at}` | a hub lease was held, queued, released, expired or lost (L1) |
+| `tunnel.state` `{via, host, state: up\|down\|starting, ports, forwards, restarts, pid, detail}` | the SSH tunnel to a board behind a hub changed state (L1) |
 | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | harness-manager-daemon jobs and back-pressure (docs/API.md) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
@@ -59,6 +60,10 @@ These are the interfaces every team codes against. They are owned by the lead an
   - `ConsoleAdapter.console_baud_info() -> {name: {kind, baud, source, settable, reason, choices, mode?, share?}}` and `console_set_baud(name, baud)` are optional. Host `serial://` ports may be left out: the broker owns their rate.
   - `ConsoleBroker` gains the optional `pty`, `pty_info`, `close_pty`, `baud`, `set_baud` and `consoles`. A broker without them gets the daemon's fallback PTYs.
   - `console.state` carries `baud` when the rate changes.
+- **Reaching a board through a hub (L1).**
+  - `ProbeHints.via` and `candidate_for_host(spec, via="")` take `"ssh:HOST"`. A pack that cannot tunnel raises `UsageError` for a non-empty `via`.
+  - Sessions behind a hub may carry `session.hub` (`host`, `target`, `client`) and `session.reach` (`status()`, `close()`). A pack may offer `hub_for(candidate)`.
+  - Engines that predate `via` still work: callers pass it only when it is set.
 - **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
 
 ## Changing a contract
