@@ -553,17 +553,19 @@ class SshTunnel:
 
     def _supervise(self) -> None:
         attempt = 0
+        last_failure = ""                   # why the last restart failed (its process is gone)
         while not self._closing.is_set():
             with self._mu:
                 proc = self._proc
-            rc = proc.poll() if proc is not None else -1
-            if rc is None:
+            rc = proc.poll() if proc is not None else None
+            if proc is not None and rc is None:
                 self._closing.wait(_POLL_S)
                 continue
-            why = _explain(_stderr_of(proc)) if proc is not None else ""
             wait = self._backoff[min(attempt, len(self._backoff) - 1)]
-            self._set("down", f"ssh exited with status {rc}"
-                              f"{f' ({why})' if why else ''}; restarting in {wait:.0f}s")
+            if proc is not None:
+                why = _explain(_stderr_of(proc))
+                last_failure = f"ssh exited with status {rc}{f' ({why})' if why else ''}"
+            self._set("down", f"{last_failure or 'ssh is not running'}; restarting in {wait:.0f}s")
             if self._closing.wait(wait):
                 break
             attempt += 1
@@ -578,7 +580,7 @@ class SshTunnel:
                                 f"(restarted {self.restarts}x)")
             elif not self._closing.is_set():
                 self._stop_proc()
-                self._set("down", why)
+                last_failure = why
 
     def open_failures_since(self, t0: float) -> list[str]:
         """ssh's "channel N: open failed: …" lines logged at or after ``t0`` (monotonic).

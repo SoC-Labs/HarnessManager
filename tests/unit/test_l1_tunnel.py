@@ -171,6 +171,25 @@ def test_a_dropped_tunnel_restarts_on_the_same_local_port(board):
     assert states[-1] == "down" and t.detail == "closed with the board"
 
 
+def test_a_restart_that_fails_keeps_trying_and_says_why(board):
+    fake = FakeSsh()
+    t = make_tunnel(fake, board)
+    details: list[str] = []
+    t.watch(lambda st: details.append(st["detail"]))
+    with t:
+        fake.fail = "auth"                                      # the key stopped working
+        fake.current.drop()
+        deadline = time.monotonic() + 10
+        while len(fake.launches) < 3 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(fake.launches) >= 3 and t.state != "up"
+        assert any("Permission denied" in d for d in details)
+        fake.fail = ""                                          # the twin: it comes back
+        while t.state != "up" and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert t.state == "up" and roundtrip(t.local_port("control")) == b"echo:ping"
+
+
 def test_negative_twin_a_closed_tunnel_does_not_restart(board):
     fake = FakeSsh()
     t = make_tunnel(fake, board).start()
