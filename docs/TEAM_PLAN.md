@@ -24,6 +24,41 @@
 
 T8 (hub mode) and T10 (XDC export) follow.
 
+## Wave 3 plan (drawn up 2026-09-23, late; awaiting david's go)
+
+Nothing has touched real hardware yet, and the next hard dates are fixed by the board: **B0 on Fri 09-25** (slots 1 and 3 belong to Harness Manager, docs/planning/B0_RUNBOOK_LINUX.md in the platform repo), **B1 go/no-go 10-02**, **mint 3 around 10-08**, **cutover 10-12**.
+
+**Phase A: reach the lab board from srv03335 (Thu 09-24, about 1 day, lead).** srv03335 cannot route to 192.168.10.101; only the hub can. The MCC is reachable only through a hub share.
+
+| # | Work | Estimate |
+|---|---|---|
+| A1 | Built-in SSH tunnel: `--via ssh:mapstone-dev` (and `via` in boards.toml) forwards 6900/6910/6921/6930–6932 to free local ports, maps them into the pack, and marks the links `via="ssh"`. `-o ControlPath=none`. | 4 h |
+| A2 | `tcp://` serial scheme, so the MCC adapter runs over an fpgahub share (`fpgahub share start mps3_01_pl /dev/mps3_01_pl/tty_00`) through the tunnel. The MCC pacing is unchanged. | 2–3 h |
+| A3 | A July Linux v0.7 FakeShell profile (no `version` verb) and a slot-3 rehearsal test against it. | 1–2 h |
+| A4 | `docs/HIL_B0.md`: the exact slot 1 and slot 3 commands, the expected answers, and the evidence files. `make hil` updated for the tunnel. | 1 h |
+
+**Phase B: B0 window (Fri 09-25, 40 min on the board, read-only).** Slot 1 (bare-metal `0x3F1A560F`): `info`, the DUT consoles, MCC `HELP`/`CFG R TEMP`, debug `detect`, the web UI on real data. Slot 3 (July Linux): graceful behaviour with no `version` verb, ping, diag, 6910 push. david takes the lease (the runbook's first command). Harness Manager stays off `tty_02` and never runs `share stop`. Output: evidence files and a bug list.
+
+**Phase C: Wave 3 teams (Mon 09-28 → Fri 10-02), in parallel.**
+
+| Team | Scope | Estimate |
+|---|---|---|
+| T15 | Close the UI gaps: daemon endpoints for power (read, cycle) and update (check, harness, app, rollback as jobs); UI pages for update, power-cycle, SD install, Clocks (the DUT MMCM presets already work in the engine). | 3 days |
+| T8 | Hub mode against fpgahub 0.3.0: credentials, leases inside the app (acquire, heartbeat, release, queue), shares for the MCC and the FPGA UARTs, and the board list from the hub. It replaces the Phase A tunnel for lab users. | 4–5 days |
+| T10 | XDC export from the pin DB (a fixture until harness Lane C lands) plus the Board & XDC page. | 2 days |
+| T11 | Release engineering: a GitHub repo with CI, the pywebview native window as the `app` extra, one-file builds (Linux, Windows, macOS), and a user guide for external MPS3 owners. | 3 days |
+
+**B1 gate (10-02):** the same read-only tier against `mps3-harnessd`: `impl:"linux"` detected, the SSH link, the identify reply (UDP 6899: hub mode or on the hub's LAN, because UDP does not tunnel).
+
+**Phase D: mint 3 and cutover (10-08 → 10-12).** T7-2 `os_slots` once FLOW_CONTRACT.md lands, then a first signed channel (needs the keys). Rehearse the harness update on the virtual board; run it on the real board only with david.
+
+**Decisions for david:**
+1. **Tunnel now, hub mode next week** (recommended): the tunnel unblocks Friday, and hub mode is the lasting answer.
+2. **Create `SoC-Labs/harness-manager` (private) and allow a push:** that gives CI and a place for T11's builds.
+3. **Create the three minisign keys** (harness-release, root, app-ci). Until then every update channel is refused by design.
+4. **Board actions:** david takes leases himself (auto mode blocks an agent's `lease acquire`), or adds a permission rule for `fpgahub lease show|acquire|release` on `mps3_01_pl`.
+5. **Licence:** pyproject still says "Proprietary (SoC Labs), pending decision".
+
 **Status (2026-09-23): Wave 1 is complete and merged.** `make check` gives 900 passed and 4 skipped (the real-OpenOCD tests; they pass with `SOCHARNESS_TEST_REAL_OPENOCD` set). The GUI tests run offscreen.
 
 | Team | Merged as | What landed |
