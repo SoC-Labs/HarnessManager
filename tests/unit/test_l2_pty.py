@@ -32,6 +32,7 @@ from tests.fakes.l2_rig import (
     PtyClient,
     PtyHolder,
     fast_pty_options,
+    in_ring,
     is_link_to,
     open_fails_busy,
     queued,
@@ -215,17 +216,35 @@ def test_negative_twin_without_the_reset_an_exclusive_client_locks_the_pty(broke
     assert open_fails_busy(info["path"])                           # what screen leaves behind
 
 
-def test_output_nobody_reads_is_flushed_not_queued_forever(broker, session):
+def test_output_nobody_reads_is_kept_as_recent_output_not_queued(broker, session):
     info = broker.pty(session, "fpga_uart0")
     gui = broker.subscribe(session, "fpga_uart0")
     read_until(gui, b"serial up")
-    gui.write(b"x" * 60000 + b"END-MARK\r")                       # echoed into the PTY
+    gui.write(b"x" * 60000 + b"END-MARK\r")                       # echoed; no PTY client
     read_until(gui, b"END-MARK", timeout=10)
     port = broker._ptys.get(BOARD, "fpga_uart0")
-    wait_for(lambda: port.flushed > 0, what="a flush")
+    wait_for(lambda: in_ring(port, b"END-MARK"), what="the ring")
+    assert queued(port.slave) == 0 and port.flushed == 0           # nothing written for nobody
     with PtyClient(info["path"]) as client:
         got = client.read_until(b"END-MARK")
-    assert len(got) < 60000                                        # not the whole backlog
+    assert len(got) <= 4096                                         # the recent output only
+
+
+def test_negative_twin_always_live_output_nobody_reads_is_flushed(bus, root, session):
+    b = ConsoleBroker(bus, pty_options=fast_pty_options(replay_on_attach=False))
+    try:
+        info = b.pty(session, "fpga_uart0")
+        gui = b.subscribe(session, "fpga_uart0")
+        read_until(gui, b"serial up")
+        gui.write(b"x" * 60000 + b"END-MARK\r")
+        read_until(gui, b"END-MARK", timeout=10)
+        port = b._ptys.get(BOARD, "fpga_uart0")
+        wait_for(lambda: port.flushed > 0, what="a flush")
+        with PtyClient(info["path"]) as client:
+            got = client.read_until(b"END-MARK")
+        assert len(got) < 60000                                     # not the whole backlog
+    finally:
+        b.shutdown()
 
 
 # -- serial baud ------------------------------------------------------------------------------------
@@ -385,24 +404,25 @@ def test_every_broker_shares_one_inotify_instance(bus, root):
             b.shutdown()
 
 
-# -- output queued for the next client survives a client that comes and goes -----------------------
+# -- what a new client sees: recent output, after it has set the line up ----------------------------
 #
 # The flake behind "screen shows nothing" (lead, 2026-09-24): test_pty_post_get_delete lost
-# the boot banner about 1 run in 3. Something opened and closed the new PTY within ~1 ms of
-# its creation, before the test's client; the count went 0 -> 1 -> 0, and the "last client
-# left" reset put the line back to raw with tty.setraw()'s default TCSAFLUSH, which DISCARDS
-# the tty's input queue: the banner, queued there for the next reader. Any program that
-# opens the PTY and leaves without reading (stty -F, a terminal probing it, a screen quit at
-# once) did the same. These tests make that sequence happen on purpose.
+# the boot banner about 1 run in 3. Something outside the process opened and closed the new
+# PTY within ~1 ms of its link appearing; the count went 0 -> 1 -> 0 before the test's
+# client, and the "last client left" reset (tty.setraw's default TCSAFLUSH) discarded the
+# banner, queued on the line for the next reader. And GNU screen itself applies its modes
+# with TCSAFLUSH ~200 ms after opening, so output queued before it attached never showed.
+# Now nothing is written while no client is attached; a client gets the recent output once
+# it has set the line up. These tests make both sequences happen on purpose.
 
 
 GREETING = b"serial up at 115200"
 
 
-def _queued_greeting(broker, session) -> tuple[dict, object]:
+def _greeting_held(broker, session) -> tuple[dict, object]:
     info = broker.pty(session, "fpga_uart0")
     port = broker._ptys.get(BOARD, "fpga_uart0")
-    wait_for(lambda: queued(port.slave) >= len(GREETING), what="the greeting queued in the PTY")
+    wait_for(lambda: in_ring(port, GREETING), what="the greeting in the PTY's recent output")
     return info, port
 
 
@@ -414,37 +434,90 @@ def _come_and_go(broker, path: str, *, exclusive: bool = False) -> None:
     wait_for(lambda: broker.pty_info(BOARD, "fpga_uart0")["clients"] == 0, what="gone")
 
 
-def test_a_client_that_comes_and_goes_leaves_the_queued_output_for_the_next(broker, session):
-    info, port = _queued_greeting(broker, session)
+def test_a_client_that_comes_and_goes_leaves_the_recent_output_for_the_next(broker, session):
+    info, port = _greeting_held(broker, session)
     _come_and_go(broker, info["path"])
-    assert queued(port.slave) >= len(GREETING)
     with PtyClient(info["path"]) as client:
         client.read_until(GREETING, timeout=5)
 
 
-def test_after_screen_quits_the_line_is_reset_and_the_queued_output_is_still_there(
+def test_after_screen_quits_the_line_is_reset_and_the_next_client_sees_the_output(
         broker, session):
-    info, port = _queued_greeting(broker, session)
+    info, port = _greeting_held(broker, session)
     _come_and_go(broker, info["path"], exclusive=True)            # TIOCEXCL left behind
     assert not open_fails_busy(info["path"])                      # the reset DID run
     with PtyClient(info["path"], exclusive=True) as client:
         client.read_until(GREETING, timeout=5)
 
 
-def test_a_reset_itself_never_discards_queued_output(broker, session, monkeypatch):
+def test_a_screen_like_client_that_flushes_its_line_still_sees_the_earlier_output(
+        broker, session):
+    info, port = _greeting_held(broker, session)
+    with PtyClient(info["path"], setup_s=0.1) as client:          # TCSAFLUSH at 100 ms
+        client.read_until(GREETING, timeout=5)
+    assert port.replays == 1
+
+
+def test_negative_twin_always_live_the_screen_like_flush_loses_the_earlier_output(
+        bus, root, session):
+    b = ConsoleBroker(bus, pty_options=fast_pty_options(replay_on_attach=False))
+    try:
+        info = b.pty(session, "fpga_uart0")
+        port = b._ptys.get(BOARD, "fpga_uart0")
+        wait_for(lambda: queued(port.slave) >= len(GREETING), what="the greeting queued")
+        with PtyClient(info["path"], setup_s=0.1) as client, pytest.raises(AssertionError):
+            client.read_until(GREETING, timeout=1)
+    finally:
+        b.shutdown()
+
+
+# Always live (no inotify count, or replay_on_attach=False), output IS queued on the line:
+# a reset must never discard it.
+
+
+@pytest.fixture
+def live_broker(bus, root) -> Iterator[ConsoleBroker]:
+    b = ConsoleBroker(bus, backoff=(0.05, 0.2),
+                      pty_options=fast_pty_options(replay_on_attach=False))
+    yield b
+    b.shutdown()
+
+
+def _greeting_queued(broker, session) -> tuple[dict, object]:
+    info = broker.pty(session, "fpga_uart0")
+    port = broker._ptys.get(BOARD, "fpga_uart0")
+    wait_for(lambda: queued(port.slave) >= len(GREETING), what="the greeting queued in the PTY")
+    return info, port
+
+
+def test_a_reset_itself_never_discards_queued_output(live_broker, session, monkeypatch):
     monkeypatch.setattr(ptymod.ConsolePty, "needs_reset", lambda self: True)
-    info, port = _queued_greeting(broker, session)
-    _come_and_go(broker, info["path"])
+    info, port = _greeting_queued(live_broker, session)
+    _come_and_go(live_broker, info["path"])
+    assert queued(port.slave) >= len(GREETING)
     with PtyClient(info["path"]) as client:
         client.read_until(GREETING, timeout=5)
 
 
-def test_negative_twin_a_flushing_reset_loses_the_queued_output(broker, session, monkeypatch):
-    # The bug, put back: reset on every 0 -> 1 -> 0, with the TCSAFLUSH tty.setraw() default.
+def test_negative_twin_a_flushing_reset_loses_the_queued_output(live_broker, session,
+                                                                monkeypatch):
+    # The bug, put back: reset on every 1 -> 0, with the TCSAFLUSH tty.setraw() default.
     monkeypatch.setattr(ptymod.ConsolePty, "needs_reset", lambda self: True)
     monkeypatch.setattr(ptymod, "RESET_WHEN", termios.TCSAFLUSH)
-    info, port = _queued_greeting(broker, session)
-    _come_and_go(broker, info["path"])
+    info, port = _greeting_queued(live_broker, session)
+    _come_and_go(live_broker, info["path"])
     assert queued(port.slave) == 0                                # flushed
     with PtyClient(info["path"]) as client, pytest.raises(AssertionError):
         client.read_until(GREETING, timeout=1)
+
+
+def test_a_come_and_go_with_nothing_left_behind_does_not_reset_the_line(live_broker, session,
+                                                                        monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(ptymod.ConsolePty, "reset_line", lambda self: calls.append(self.name))
+    info, port = _greeting_queued(live_broker, session)
+    _come_and_go(live_broker, info["path"])
+    assert calls == []
+    # Negative twin: a client that leaves TIOCEXCL behind does get a reset.
+    _come_and_go(live_broker, info["path"], exclusive=True)
+    assert calls == ["fpga_uart0"]

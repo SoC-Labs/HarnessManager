@@ -28,9 +28,9 @@ from tests.fakes.l2_rig import (
     PtyHolder,
     apply_pack_ccr,
     fast_pty_options,
+    in_ring,
     install_uart_baud_codec,
     l2_virtual_board,
-    queued,
     wait_for,
 )
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
@@ -121,7 +121,7 @@ def test_a_program_that_opens_the_pty_and_leaves_does_not_eat_the_banner(api, bo
     B = bid_path(bid)
     body = client.post(f"{B}/consoles/uart0/pty", headers=H).json()
     port = eng.consoles._ptys.get(bid, "uart0")
-    wait_for(lambda: queued(port.slave) >= len(BANNER), what="the banner queued in the PTY")
+    wait_for(lambda: in_ring(port, BANNER), what="the banner in the PTY's recent output")
 
     def clients() -> int:
         return client.get(f"{B}/consoles/uart0/pty", headers=H).json()["pty"]["clients"]
@@ -132,6 +132,20 @@ def test_a_program_that_opens_the_pty_and_leaves_does_not_eat_the_banner(api, bo
     wait_for(lambda: clients() == 0, what="the probe gone")
     with PtyClient(body["path"]) as term:
         term.read_until(BANNER, timeout=5)
+
+
+def test_screen_attaching_after_the_banner_still_shows_it(api, board):
+    # GNU screen sets its line up with TCSAFLUSH ~200 ms after opening: output queued
+    # before that was never shown. The PTY now replays the recent output after the setup.
+    client, eng = api
+    bid = open_board(client, board)
+    body = client.post(f"{bid_path(bid)}/consoles/uart0/pty", headers=H).json()
+    port = eng.consoles._ptys.get(bid, "uart0")
+    wait_for(lambda: in_ring(port, BANNER), what="the banner printed before screen came")
+    with PtyClient(body["path"], exclusive=True, setup_s=0.2) as term:
+        term.read_until(BANNER, timeout=5)
+        term.type("print(1)")                                      # then it is live
+        term.read_until(b"print(1)\r", timeout=5)
 
 
 def test_negative_twin_no_pty_for_an_unknown_console_or_a_closed_board(api, board):

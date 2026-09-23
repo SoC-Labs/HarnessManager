@@ -16,7 +16,8 @@
 - ``PtyClient``: a SEPARATE process holding the PTY open (the daemon's own pid is never
   counted as a client), optionally exclusive (TIOCEXCL) the way ``screen`` opens it.
 - ``PtyHolder``: a separate process that opens the PTY and never reads it (a probe);
-  ``queued(fd)`` is the tty input queue, the bytes waiting for the next reader.
+  ``queued(fd)`` is the tty input queue, the bytes waiting for the next reader;
+  ``PtyClient(setup_s=...)`` sets its line up with TCSAFLUSH after opening, as screen does.
 
 VirtualMps3 itself is lead-owned and untouched: ``l2_virtual_board`` swaps its shell.
 """
@@ -240,7 +241,7 @@ register_serial_scheme(LOOP.scheme, LOOP.open)
 
 _CLIENT = r"""
 import fcntl, os, select, sys, termios, time
-path, excl, speed = sys.argv[1], sys.argv[2] == "1", int(sys.argv[3])
+path, excl, speed, setup = sys.argv[1], sys.argv[2] == "1", int(sys.argv[3]), float(sys.argv[4])
 fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
 if excl:
     fcntl.ioctl(fd, termios.TIOCEXCL)
@@ -249,6 +250,13 @@ if speed:
     a[4] = a[5] = speed
     termios.tcsetattr(fd, termios.TCSANOW, a)
 sys.stdout.write("open\n"); sys.stdout.flush()
+if setup:
+    # What GNU screen does ~200 ms after it opens a tty: its own modes, with TCSAFLUSH,
+    # which throws away whatever was queued on the line before.
+    time.sleep(setup)
+    a = termios.tcgetattr(fd)
+    a[0] |= termios.IGNBRK
+    termios.tcsetattr(fd, termios.TCSAFLUSH, a)
 while True:
     r, _, _ = select.select([fd, sys.stdin], [], [], 0.1)
     if sys.stdin in r:
@@ -266,12 +274,15 @@ class PtyClient:
     """A separate process with the PTY open: reads (hex lines on stdout) and types (stdin).
 
     ``exclusive`` sets TIOCEXCL as ``screen`` does; ``speed`` (a termios constant) sets the
-    line speed as ``screen <path> <rate>`` does.
+    line speed as ``screen <path> <rate>`` does; ``setup_s`` > 0 sets its own line modes
+    with TCSAFLUSH that long after opening, before reading anything, as screen does.
     """
 
-    def __init__(self, path: str, *, exclusive: bool = False, speed: int = 0) -> None:
+    def __init__(self, path: str, *, exclusive: bool = False, speed: int = 0,
+                 setup_s: float = 0.0) -> None:
         self.proc = subprocess.Popen(
-            [sys.executable, "-c", _CLIENT, path, "1" if exclusive else "0", str(speed)],
+            [sys.executable, "-c", _CLIENT, path, "1" if exclusive else "0", str(speed),
+             str(setup_s)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.got = bytearray()
         self._lines: queue.Queue[str] = queue.Queue()
@@ -391,9 +402,15 @@ def open_fails_busy(path: str) -> bool:
     return subprocess.run([sys.executable, "-c", code, path], timeout=10).returncode == 16
 
 
-def fast_pty_options() -> dict[str, float]:
-    """PtyManager timings for tests: poll 50 ms, scan 100 ms, stall 0.3 s."""
-    return {"poll_s": 0.05, "scan_s": 0.1, "stall_s": 0.3, "scan_budget_s": 5.0}
+def fast_pty_options(**extra: Any) -> dict[str, Any]:
+    """PtyManager timings for tests: poll 50 ms, scan 100 ms, stall 0.3 s, settle 0.3 s."""
+    return {"poll_s": 0.05, "scan_s": 0.1, "stall_s": 0.3, "scan_budget_s": 5.0,
+            "settle_s": 0.3, **extra}
+
+
+def in_ring(port: Any, data: bytes) -> bool:
+    """``data`` is in the PTY's replay ring (the recent output a new client is shown)."""
+    return data in bytes(port._ring)
 
 
 def wait_for(predicate: Any, timeout: float = 10.0, what: str = "condition") -> Any:

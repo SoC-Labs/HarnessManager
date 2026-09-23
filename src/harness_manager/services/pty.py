@@ -29,13 +29,23 @@ Behaviour
   slave). When the attached-client count drops to 0 and the client left
   something behind (``needs_reset``), the daemon clears TIOCEXCL and puts the
   line back to raw at its preset speed, so the next ``screen <path>`` opens it.
-- **Queued output survives clients that come and go.** Board output nobody has
-  read yet waits in the tty's input queue for the next client. The reset
-  applies the modes with TCSANOW (``RESET_WHEN``), never TCSAFLUSH (the
-  ``tty.setraw`` default), which would discard that queue: with it, any program
-  that opened the PTY and left without reading (a probe, ``stty -F``, a screen
-  quit at once) made the next ``screen`` start blank. That was the "no banner"
-  flake of 2026-09-24 (tests/unit/test_l2_pty.py has it on purpose).
+- **What a new client sees: the recent output, replayed once it is ready.**
+  GNU screen (4.06.02, measured) applies its line modes about 200 ms after it
+  opens the PTY, with TCSAFLUSH: anything queued on the line before that is
+  thrown away, so output printed before ``screen`` attached (the boot banner, a
+  prompt) never showed. So while no client is attached (counted by inotify),
+  board output is NOT written to the line; the PTY keeps the last
+  ``replay_bytes`` of it. When a client attaches, the PTY waits until the
+  client has configured the line (its modes change, plus ``settle_grace_s``)
+  or ``settle_s`` has passed (a client that configures nothing, such as
+  ``cat``), writes that recent output, and then goes live. When the last client
+  leaves, whatever it left unread is discarded from the line (the replay covers
+  it next time). Without inotify (no reliable count) the PTY is always live.
+- **A reset never discards queued output.** The modes are applied with
+  TCSANOW (``RESET_WHEN``), never TCSAFLUSH (the ``tty.setraw`` default). With
+  TCSAFLUSH, a program that opened the PTY and left without reading (a probe,
+  ``stty -F``, a screen quit at once) made the next client start blank: the
+  "no banner" flake of 2026-09-24 (tests/unit/test_l2_pty.py has it on purpose).
 - **No reader.** Board output keeps flowing into the PTY. When nobody reads it
   and the line's buffer stays full for ``stall_s``, the stale output is flushed
   (``flushed`` counts it), so a new client sees recent output, not a backlog.
@@ -96,7 +106,11 @@ PTY_CAPABILITY = "console_pty"
 WINDOWS_HINT = ("use the TCP export instead: `harness-manager console TARGET NAME --export 0`, "
                 "then a raw-TCP terminal (PuTTY 'Raw') on 127.0.0.1 and the port it prints")
 _READ_SLICE_S = 0.2
+_SETTLE_SLICE_S = 0.01                   # how often a settling PTY looks at the line modes
 _NOTICE_EVERY_S = 2.0
+#: Output modes of a PTY: IDLE (no client: keep, do not write), SETTLING (a client is
+#: setting the line up: keep), LIVE (write as it comes).
+IDLE, SETTLING, LIVE = "idle", "settling", "live"
 #: How the line modes are (re)applied: TCSANOW keeps the input queue, the board output
 #: waiting for the next client. NEVER TCSAFLUSH (``tty.setraw``'s default): it discards it.
 try:
@@ -483,9 +497,16 @@ class ConsolePty:
         self.link = link
         self.clients: int | None = 0
         self.flushed = 0                   # times stale output was flushed (nobody reading)
+        self.replays = 0                   # times the recent output was written for a new client
         self.created_at = time.time()
         self._stop = threading.Event()
         self._last_notice = 0.0
+        self._ring = bytearray()           # the last manager.replay_bytes of board output
+        self._wlock = threading.Lock()     # output mode changes vs writes to the line
+        self.mode = LIVE
+        self._settle_until = 0.0
+        self._attach_attrs: list | None = None
+        self._configured_at: float | None = None
         self.master, self.slave = os.openpty()
         try:
             self.device = os.ttyname(self.slave)
@@ -499,6 +520,8 @@ class ConsolePty:
             self.opens = 0                           # other openers' file descriptions (inotify)
             self.count_lock = threading.Lock()
             self.wd = manager._track(self)           # before the path exists: no open is missed
+            if self.wd >= 0 and manager.replay_on_attach:
+                self.mode = IDLE                     # a reliable count: hold output for a client
             self._link()
         except BaseException:
             manager._untrack(getattr(self, "wd", -1))
@@ -623,16 +646,85 @@ class ConsolePty:
             t.start()
 
     def _to_pty(self) -> None:
-        """Board bytes (the broker subscription) into the PTY."""
+        """Board bytes (the broker subscription) into the PTY, or into the replay ring."""
         while not self._stop.is_set():
+            slice_s = _SETTLE_SLICE_S if self.mode == SETTLING else _READ_SLICE_S
             try:
-                data = self.sub.read(_READ_SLICE_S)
+                data = self.sub.read(slice_s)
             except HarnessError:
                 break                                   # a stream that ends by raising
             if data:
-                self._write_master(data)
-            elif getattr(self.sub, "closed", False):
+                self._remember(data)
+            with self._wlock:
+                if self.mode == LIVE:
+                    if data:
+                        self._write_master(data)
+                elif self.mode == SETTLING and self._settled():
+                    self.mode = LIVE
+                    replay = bytes(self._ring)
+                    if replay:
+                        self.replays += 1
+                        self._write_master(replay)
+            if not data and getattr(self.sub, "closed", False):
                 break
+
+    def _remember(self, data: bytes) -> None:
+        self._ring += data
+        excess = len(self._ring) - self.manager.replay_bytes
+        if excess > 0:
+            del self._ring[:excess]
+
+    def _settled(self) -> bool:
+        """The client has set the line up (its modes changed, plus a grace), or time is up."""
+        import termios
+
+        now = time.monotonic()
+        if now >= self._settle_until:
+            return True
+        if self._configured_at is None:
+            try:
+                attrs = termios.tcgetattr(self.slave)[:6]
+            except OSError:
+                return True
+            if attrs != self._attach_attrs:
+                self._configured_at = now
+        return (self._configured_at is not None
+                and now - self._configured_at >= self.manager.settle_grace_s)
+
+    # -- clients come and go (the manager's counter calls these) -------------------------
+
+    def attached(self) -> None:
+        """The first client opened the line: replay the recent output once it is set up."""
+        import termios
+
+        with self._wlock:
+            if self.mode != IDLE:
+                return
+            try:
+                self._attach_attrs = termios.tcgetattr(self.slave)[:6]
+            except OSError:
+                self._attach_attrs = None
+            self._configured_at = None
+            self._settle_until = time.monotonic() + self.manager.settle_s
+            self.mode = SETTLING
+
+    def detached(self) -> None:
+        """The last client left: stop writing, and drop what it left unread (the ring has it)."""
+        import termios
+
+        with self._wlock:
+            if self.mode == IDLE or self.wd < 0 or not self.manager.replay_on_attach:
+                return
+            self.mode = IDLE
+            try:
+                termios.tcflush(self.slave, termios.TCIFLUSH)
+            except OSError:
+                pass
+
+    def go_live(self) -> None:
+        """Counts are unknown (inotify overflow): write everything, as without a count."""
+        with self._wlock:
+            self.mode = LIVE
 
     def _write_master(self, data: bytes) -> None:
         import termios
@@ -739,10 +831,16 @@ class PtyManager:
     def __init__(self, publish: Callable[[str, str, dict[str, Any]], None],
                  on_speed: Callable[[ConsolePty, int], None], *,
                  root: Path | None = None, poll_s: float = 0.5, scan_s: float = 2.0,
-                 scan_budget_s: float = 0.25, stall_s: float = 1.0) -> None:
+                 scan_budget_s: float = 0.25, stall_s: float = 1.0,
+                 replay_on_attach: bool = True, replay_bytes: int = 4096,
+                 settle_s: float = 1.0, settle_grace_s: float = 0.05) -> None:
         self._publish = publish
         self._on_speed = on_speed
         self._root = root
+        self.replay_on_attach = replay_on_attach   # False: always live (the pre-2026-09-24 way)
+        self.replay_bytes = replay_bytes           # recent output a new client is shown
+        self.settle_s = settle_s                   # the longest a new client waits for it
+        self.settle_grace_s = settle_grace_s       # after the client set the line up
         self.poll_s = poll_s
         self.scan_s = scan_s
         self.scan_budget_s = scan_budget_s
@@ -893,8 +991,14 @@ class PtyManager:
             self._wake.clear()
 
     def _set_clients(self, pty: ConsolePty, now: int | None) -> None:
-        if now == 0 and pty.clients != 0 and pty.needs_reset():
-            pty.reset_line()                   # the last client left: ready for the next one
+        if now is None:
+            pty.go_live()
+        elif now > 0 and not pty.clients:
+            pty.attached()
+        elif now == 0 and pty.clients != 0:
+            pty.detached()
+            if pty.needs_reset():
+                pty.reset_line()               # the last client left: ready for the next one
         if now == pty.clients:
             return
         pty.clients = now

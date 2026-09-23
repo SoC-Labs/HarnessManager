@@ -244,6 +244,38 @@ def test_negative_twin_a_speed_set_on_an_ethernet_pty_changes_nothing(tmp_path, 
 
 
 @pytest.mark.skipif(shutil.which("screen") is None, reason="GNU screen is not installed")
+def test_real_screen_shows_the_banner_printed_before_it_attached(tmp_path, broker):
+    # What david sees on Thursday: the board booted, THEN he runs `screen <path>`.
+    screendir = tmp_path / "screens"
+    screendir.mkdir(mode=0o700)
+    env = {k: v for k, v in os.environ.items() if k != "STY"}
+    env["SCREENDIR"] = str(screendir)
+    name = f"l2-banner-{os.getpid()}"
+    shot = tmp_path / "hardcopy.txt"
+
+    def screen(*args: str) -> None:
+        subprocess.run(["screen", *args], env=env, check=False, timeout=10,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def shown() -> str:
+        shot.unlink(missing_ok=True)
+        screen("-S", name, "-X", "hardcopy", str(shot))
+        return wait_for(lambda: shot.exists() and shot.read_text(), timeout=5,
+                        what="a hardcopy") or ""
+
+    with l2_virtual_board(tmp_path, features=()) as vb:
+        s = open_session(vb)
+        info = broker.pty(s, "uart0")
+        port = broker._ptys.get(s.candidate.board_id, "uart0")
+        wait_for(lambda: BANNER in bytes(port._ring), what="the banner, before screen")
+        screen("-dmS", name, info["path"])
+        try:
+            wait_for(lambda: "nanosoc boot" in shown(), timeout=10, what="the banner in screen")
+        finally:
+            screen("-S", name, "-X", "quit")
+
+
+@pytest.mark.skipif(shutil.which("screen") is None, reason="GNU screen is not installed")
 def test_real_screen_attaches_detaches_and_reattaches(tmp_path, broker):
     screendir = tmp_path / "screens"
     screendir.mkdir(mode=0o700)
