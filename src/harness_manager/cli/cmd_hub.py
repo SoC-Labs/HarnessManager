@@ -25,19 +25,21 @@ The lead wires ``register(sub)`` into ``cli/main.py`` (CCR L1-2).
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any
 
 from harness_manager.core.errors import AbsentError, ExitCode, UsageError
 from harness_manager.services.lease import DEFAULT_TTL_S, LeaseService, default_holder
 
 from .context import Ctx
-from .output import TSV_COLUMNS, Result
+from .output import TSV_COLUMNS, Result, tsv_field
 
 LEASE_COLUMNS = ("TARGET", "HUB", "STATE", "HOLDER", "EXPIRES", "MINE")
 SHARE_COLUMNS = ("TARGET", "HUB", "TTY", "TCP", "WRITER", "READERS", "RUNNING")
 
-#: Append-only TSV layouts. They belong in ``output.TSV_COLUMNS`` (CCR L1-2); until the
-#: lead moves them there, registering adds them.
+#: Append-only TSV layouts. They belong in ``output.TSV_COLUMNS`` (CCR L1-2; T5 owns that
+#: table and its golden test). Until they are there, ``_emit`` prints the rows itself
+#: with the same field rules, as ``cmd_daemon`` does.
 LAYOUTS = {"lease": LEASE_COLUMNS, "share": SHARE_COLUMNS}
 
 
@@ -53,8 +55,6 @@ def _fmt_parent() -> argparse.ArgumentParser:
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     """Add ``lease`` and ``share`` to the CLI's verbs."""
-    for name, cols in LAYOUTS.items():
-        TSV_COLUMNS.setdefault(name, cols)
     fmt = _fmt_parent()
     target_help = "the board (192.168.10.101); its boards.toml hub table names the hub"
 
@@ -97,6 +97,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     vp.set_defaults(fn=cmd_share)
 
 
+def _emit(ctx: Ctx, result: Result) -> None:
+    if ctx.fmt != "tsv" or result.layout in TSV_COLUMNS:
+        ctx.emit(result)
+        return
+    cols = LAYOUTS[result.layout]
+    for row in result.rows:
+        if len(row) != len(cols):     # a bug in the verb, never the user's fault
+            raise AssertionError(f"tsv layout {result.layout!r} has {len(cols)} columns")
+        sys.stdout.write("\t".join(tsv_field(v) for v in row) + "\n")
+    sys.stdout.flush()
+
+
 def _hub(ctx: Ctx) -> tuple[Any, Any]:
     """(candidate, the board's hub adapter) from TARGET and boards.toml, without opening it."""
     from harness_manager.core.registry import load_packs
@@ -107,7 +119,7 @@ def _hub(ctx: Ctx) -> tuple[Any, Any]:
     hub = hub_for(cand) if callable(hub_for) else None
     if hub is None:
         raise AbsentError(f"{cand.board_id} is not behind a hub",
-                          hint="add a hub table for it to boards.toml (docs/HIL_B0.md step 1)")
+                          hint="add a hub table for it to boards.toml (docs/HIL_B0.md step 0.2)")
     return cand, hub
 
 
@@ -134,7 +146,7 @@ def cmd_lease(ctx: Ctx) -> int:
         human = [f"{hub.target} on {hub.host}: not leased"] if lease is None else [
             f"{hub.target} on {hub.host}: held by {lease['holder']} (user {lease.get('user') or '?'}, "
             f"expires {lease.get('expires_at') or '?'})" + (" — yours" if lease["mine"] else "")]
-        ctx.emit(Result("lease", {"board_id": cand.board_id, **view},
+        _emit(ctx, Result("lease", {"board_id": cand.board_id, **view},
                         rows=[_row(hub.target, hub.host, view)], human=human))
         return ExitCode.OK
     if a.lease_cmd == "acquire":
@@ -160,13 +172,13 @@ def cmd_lease(ctx: Ctx) -> int:
                  f" until {lease.get('expires_at') or '?'}" + (" (already yours)" if out.get("already")
                                                                 else ""),
                  "the Harness Manager service extends it while the board is open there"]
-        ctx.emit(Result("lease", {"board_id": cand.board_id, **view},
+        _emit(ctx, Result("lease", {"board_id": cand.board_id, **view},
                         rows=[_row(hub.target, hub.host, view)], human=human))
         return ExitCode.OK
     if a.lease_cmd == "release":
         out = svc.release(hub, board_id=cand.board_id)
         view = {"lease": None, "hub": hub.host}
-        ctx.emit(Result("lease", {"board_id": cand.board_id, **view, "released": out.get("released")},
+        _emit(ctx, Result("lease", {"board_id": cand.board_id, **view, "released": out.get("released")},
                         rows=[_row(hub.target, hub.host, view)],
                         human=[f"{hub.target} on {hub.host}: released"]))
         return ExitCode.OK
@@ -194,5 +206,5 @@ def cmd_share(ctx: Ctx) -> int:
     data = {"board_id": cand.board_id, "hub": hub.host, "target": hub.target,
             "shares": [{"tty": s.tty, "host": s.host, "port": s.port, "writer": s.writer,
                         "readers": s.readers, "running": s.running} for s in shares]}
-    ctx.emit(Result("share", data, rows=rows, human=human))
+    _emit(ctx, Result("share", data, rows=rows, human=human))
     return ExitCode.OK

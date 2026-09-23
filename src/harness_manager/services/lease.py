@@ -63,6 +63,9 @@ MAX_HEARTBEAT_S = 600.0
 TICK_S = 5.0
 POLL_S = 20.0
 ACQUIRE_TIMEOUT_S = 3600.0
+#: How long a ``lease show`` answer is reused. Each one is an ssh round trip to the hub,
+#: and a UI chip may poll; our own acquire/release/heartbeat results replace it at once.
+VIEW_TTL_S = 10.0
 
 _QUEUED = re.compile(r"queued(?: at position (\d+))?")
 
@@ -183,6 +186,7 @@ class LeaseService:
         self._acquiring: dict[str, threading.Event] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._views: dict[tuple[str, str], tuple[float, Any]] = {}
 
     # -- views ----------------------------------------------------------------------------------
 
@@ -190,14 +194,14 @@ class LeaseService:
     def require_hub(hub: Any, board_id: str = "") -> Any:
         if hub is None:
             raise UnavailableError(CAPABILITY, f"{board_id or 'this board'} is not behind a hub; "
-                                               "add a hub table to boards.toml (docs/HIL_B0.md)")
+                                               "add a hub table to boards.toml (docs/HIL_B0.md step 0.2)")
         return hub
 
     def view(self, hub: Any) -> dict[str, Any]:
         """``{lease: {target, holder, expires_at, mine, user} or None, hub: HOST or None}``."""
         if hub is None:
             return {"lease": None, "hub": None}
-        shown = hub.client.lease_show()
+        shown = self._show(hub)
         if not shown.held:
             return {"lease": None, "hub": hub.host}
         stored = self.store.get(hub.host, hub.target)
@@ -207,7 +211,24 @@ class LeaseService:
                           "mine": mine, "user": shown.user},
                 "hub": hub.host}
 
+    def _show(self, hub: Any, *, fresh: bool = False) -> Any:
+        key = (hub.host, hub.target)
+        now = self._clock()
+        with self._mu:
+            cached = self._views.get(key)
+        if not fresh and cached is not None and now - cached[0] < VIEW_TTL_S:
+            return cached[1]
+        shown = hub.client.lease_show()
+        with self._mu:
+            self._views[key] = (now, shown)
+        return shown
+
+    def _forget(self, hub: Any) -> None:
+        with self._mu:
+            self._views.pop((hub.host, hub.target), None)
+
     def _emit(self, board_id: str, hub: Any, state: str, holder: str = "", expires_at: str = "") -> None:
+        self._forget(hub)
         if self.bus is None:
             return
         self.bus.publish(Event(TOPIC, board_id, {"target": hub.target, "state": state,
@@ -228,7 +249,7 @@ class LeaseService:
         holder = holder or default_holder()
         stored = self.store.get(hub.host, hub.target)
         if stored is not None and stored.holder == holder:
-            shown = hub.client.lease_show()
+            shown = self._show(hub, fresh=True)
             if shown.held and shown.holder == holder:
                 # Already ours: say so rather than queue behind ourselves.
                 if heartbeat:
@@ -292,7 +313,7 @@ class LeaseService:
             return {"ok": True, "cancelled": True}
         stored = self.store.get(hub.host, hub.target)
         if stored is None:
-            shown = hub.client.lease_show()
+            shown = self._show(hub, fresh=True)
             who = f"held by {shown.holder}" if shown.held else "not leased"
             raise AbsentError(f"this Harness Manager holds no lease on {hub.target} ({who})",
                               hint="a lease taken outside Harness Manager is released where it was "
