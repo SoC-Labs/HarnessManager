@@ -8,7 +8,7 @@
 - the feasibility report: <https://claude.ai/artifact/T12zMEjmH8ybHBBvZmi4N5>;
 - the harness-side handover: `mps3-nanosoc-platform/docs/planning/BOARD_MANAGER_HARNESS_HANDOVER.md`.
 
-**Next action:** david approves Wave 1. The lead then launches teams T1–T6 in separate git worktrees (§4).
+**Next action:** the lead reviews each Wave 1 hand-back and merges in order T1 → T3 → T2 → T4 → T5 → T6, running the scenario suite after each merge (§5).
 
 ---
 
