@@ -18,14 +18,25 @@ Item names come from ``socharness.services.deploy``.
 - (b) crc and length: ``pyverify.overlay.Overlay.validate`` over both files.
 - (c) clearing pairs partial: two distinct files named ``<rm>_clear.bin`` /
   ``<rm>.bin``, both framed with one rm_id.
-- (d) clearing fits: the clearing is at most 262144 B, the firmware's clearing
-  arena. Source: ``firmware/platform/Makefile`` SWAP_CLEARING_ARENA_BYTES and
-  CLEARING_RAM_BYTES; gate ``scripts/harness_gates/check_clearing_fits.py``.
-  A bigger clearing would be staged to QSPI, which has never worked on silicon,
-  and the next swap-away would fail closed at SWAP_STREAM_CLEARING.
-- (e) transport: chosen from ``version.features``. "windowed" means
-  tcp + windowed on 6910, otherwise tftp. A windowed shell deadlocks against a
-  plain push (docs/internal/OVER_THE_WIRE_DEPLOY_STATUS.md (2)).
+- (d) clearing fits: the clearing is at most the harness's ``clr_max`` (an
+  additive key in ``version``, else in ``stats``), default 262144 B, the
+  bare-metal firmware's clearing arena. Source: ``firmware/platform/Makefile``
+  SWAP_CLEARING_ARENA_BYTES and CLEARING_RAM_BYTES; gate
+  ``scripts/harness_gates/check_clearing_fits.py``. A bigger clearing would be
+  staged to QSPI, which has never worked on silicon, and the next swap-away
+  would fail closed at SWAP_STREAM_CLEARING.
+- (e) transport, first rule that applies:
+
+  1. ``version.features`` has "windowed": tcp + windowed on 6910. A windowed
+     shell deadlocks against a plain push (OVER_THE_WIRE_DEPLOY_STATUS.md (2)).
+  2. ``version.impl == "linux"``: plain tcp on 6910. ``mps3-harnessd`` builds
+     config_agent plain (the kernel paces TCP), so "windowed" is absent by
+     design (Linux plan §10a S2).
+  3. the link is a TCP tunnel (``is_tunnelled``): plain tcp. TFTP is UDP and
+     cannot cross an SSH port forward or a hub WSS tunnel.
+  4. otherwise tftp.
+
+  A shell with no ``version`` verb gets tftp (tcp through a tunnel), UNCHECKED.
 - (f) static_usercode matches: UNCHECKED ("needs JTAG") unless the running
   static's USERCODE is provided. The shell cannot report it; see
   ``gen_manifest.py`` on why ``static_id`` alone cannot catch a wrong static.
@@ -33,6 +44,13 @@ Item names come from ``socharness.services.deploy``.
 ``deploy()`` runs the same preflight again before any push, so the adapter is
 safe even when called without the service: a ``static_id`` mismatch raises
 ``IncompatibleError`` before a single byte leaves the host.
+
+The shell's own refusals. When the card's image and the running fabric disagree
+the shell refuses ``swap`` with a distinct error line (Linux plan §10a S1; the
+string is TBD, see ``constants.FABRIC_MISMATCH_ERRS``): that is
+``IncompatibleError``. A refusal arrives before the push is expected, so the
+push is RESET; the pending reply is then read (1 s) to say why. EBUSY is
+``HeldError``.
 
 Push ports. The host is always the session's shell host. The ports resolve in
 this order, first hit wins:
@@ -54,7 +72,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pyverify import rm_id as rmid
-from pyverify.client import ShellClient, ShellProtocolError
+from pyverify.client import ShellClient, ShellProtocolError, SocketTransport
 from pyverify.overlay import OverlayValidationError
 from pyverify.pusher import (
     DEFAULT_ACK_WINDOW,
@@ -69,12 +87,13 @@ from pyverify.swap import SwapError, SwapOrchestrator
 from socharness.core.errors import (
     ActionFailedError,
     HarnessError,
+    HeldError,
     IncompatibleError,
     RefusedError,
     UnreachableError,
     UsageError,
 )
-from socharness.core.model import Check
+from socharness.core.model import Check, LinkKind
 from socharness.core.pack import DeployResult, OverlayRef, PreflightItem, Progress
 from socharness.services.deploy import (
     ITEM_CLEARING_FITS,
@@ -87,23 +106,29 @@ from socharness.services.deploy import (
     refusal,
 )
 
-from .constants import PUSH_PORT
+from . import constants
+from .constants import FABRIC_MISMATCH_ERRS, IMPL_LINUX, PUSH_PORT
 from .overlays import CatalogueEntry, OverlayCatalogue
-from .shell import Mps3Shell
+from .shell import Mps3Shell, ShellLive, _ShellBusy, _TapTransport
 
 log = logging.getLogger(__name__)
 
 PUSH_PORT_ENV = "SOCHARNESS_MPS3_PUSH_PORT"
 TFTP_PORT_ENV = "SOCHARNESS_MPS3_TFTP_PORT"
+#: Set to 1 when 6900/6910 are reached through a TCP-only tunnel that the link
+#: detail does not mark (a hand-made ``ssh -L``): TFTP cannot cross it.
+TUNNEL_ENV = "SOCHARNESS_MPS3_TUNNELLED"
 
 #: firmware/platform/Makefile:187,193 (SWAP_CLEARING_ARENA_BYTES, CLEARING_RAM_BYTES).
-CLEARING_ARENA_BYTES = 262144
+#: The default when the harness reports no ``clr_max``.
+CLEARING_ARENA_BYTES = constants.CLEARING_ARENA_BYTES
 
 #: The shell parks 6900 for the whole reconfiguration. The silicon-proven recipe
 #: uses 300 s (OVER_THE_WIRE_DEPLOY_STATUS.md (3)); a real swap takes 3–7 s.
 SWAP_TIMEOUT_S = 300.0
 
 TRANSPORT_WINDOWED = "tcp+windowed"
+TRANSPORT_TCP = "tcp"
 TRANSPORT_TFTP = "tftp"
 WINDOWED_FEATURE = "windowed"
 
@@ -121,7 +146,33 @@ def make_deploy_adapter(session: Any) -> Mps3Deploy | None:
         return None
     return Mps3Deploy(shell,
                       push_port=getattr(session, "push_port", None),
-                      tftp_port=getattr(session, "tftp_port", None))
+                      tftp_port=getattr(session, "tftp_port", None),
+                      tunnelled=is_tunnelled(session))
+
+
+def is_tunnelled(session: Any) -> bool:
+    """True when the shell is reached through a TCP-only tunnel, so TFTP cannot be used.
+
+    A loopback address alone does NOT mean a tunnel (every test fake is on
+    127.0.0.1). The signals, any of which is enough:
+
+    - ``$SOCHARNESS_MPS3_TUNNELLED`` is 1/true/yes/on (0/false/no/off forces False);
+    - the candidate has a ``HUB`` link (fpgahub reaches boards over WSS TCP tunnels);
+    - the Ethernet link's ``detail`` says "tunnel" (the convention for SSH port
+      forwards and hub tunnels until ``Link`` can say so itself; CCR T12-4).
+    """
+    env = os.environ.get(TUNNEL_ENV, "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    candidate = getattr(session, "candidate", None)
+    for link in getattr(candidate, "links", ()) or ():
+        if link.kind == LinkKind.HUB:
+            return True
+        if link.kind == LinkKind.ETHERNET and "tunnel" in (link.detail or "").lower():
+            return True
+    return False
 
 
 def _env_port(name: str) -> int | None:
@@ -145,6 +196,8 @@ class _Live:
     rm_id: str
     version_ok: bool
     features: tuple[str, ...]
+    impl: str = ""                 # "linux" | "bare-metal" | "" (no `version` verb)
+    clr_max: int | None = None     # the harness's own clearing limit, when it reports one
 
 
 @dataclass(frozen=True)
@@ -198,8 +251,11 @@ class Mps3Deploy:
     def __init__(self, shell: Mps3Shell, *, catalogue: OverlayCatalogue | None = None,
                  push_port: int | None = None, tftp_port: int | None = None,
                  swap_timeout_s: float = SWAP_TIMEOUT_S,
-                 running_usercode: str | int | None = None) -> None:
+                 running_usercode: str | int | None = None,
+                 tunnelled: bool = False) -> None:
         self._shell = shell
+        #: 6900/6910 are reached through a TCP-only tunnel: never choose TFTP.
+        self.tunnelled = tunnelled
         self.catalogue = catalogue if catalogue is not None else OverlayCatalogue()
         self._push_port = push_port
         self._tftp_port = tftp_port
@@ -263,12 +319,15 @@ class Mps3Deploy:
             sent[kind] = payload_bytes
             report(PHASE_PUSH, sum(sent.values()), total)
 
-        windowed = assessment.transport == TRANSPORT_WINDOWED
         host = self._shell.host
-        if windowed:
+        if assessment.transport == TRANSPORT_WINDOWED:
             pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
                                       tcp_port=self.push_port, windowed=True,
                                       window=DEFAULT_ACK_WINDOW)
+            src = "tcp"
+        elif assessment.transport == TRANSPORT_TCP:
+            pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
+                                      tcp_port=self.push_port, windowed=False)
             src = "tcp"
         else:
             pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tftp",
@@ -276,13 +335,36 @@ class Mps3Deploy:
             src = "tftp"
         self.last_pusher = pusher
 
-        client = ShellClient(host, port=self._shell.port, timeout=self.swap_timeout_s)
+        tap: _TapTransport | None = None
         try:
+            tap = _TapTransport(_TimedSocketTransport(host, self._shell.port, self.swap_timeout_s))
+            client = ShellClient(host, port=self._shell.port, timeout=self.swap_timeout_s,
+                                 transport=tap)
             with client:
                 orchestrator = SwapOrchestrator(_ReportingClient(client, report, total), pusher)
-                res = orchestrator.deploy(ov, src=src)
+                try:
+                    res = orchestrator.deploy(ov, src=src)
+                except PushError as exc:
+                    # A shell that REFUSED the swap replied at once and never armed the
+                    # push, so the push was reset: read that reply to say why. Only the
+                    # DISTINCT refusals (fabric mismatch, EBUSY) replace the push error; a
+                    # swap that failed because the push failed is reported as the push.
+                    early = _pending_reply(tap)
+                    err = str((early or {}).get("err", ""))
+                    if early is not None and (_is_fabric_mismatch(err)
+                                              or err.strip().upper() == "EBUSY"):
+                        raise _refusal_error(early, overlay) from exc
+                    said = f"; the shell then said: {err}" if err else ""
+                    raise ActionFailedError(
+                        f"bitstream push of {overlay.name} failed: {exc}{said}",
+                        hint="the swap was parked and will time out with the partition "
+                             "decoupled; restore the baseline") from exc
+        except _ShellBusy as exc:
+            raise HeldError(f"the shell is busy (EBUSY): {overlay.name} was not deployed",
+                            hint="another client holds the control port, or a swap is running",
+                            holder=str(exc.reply.get("holder") or "")) from exc
         except SwapError as exc:
-            raise _swap_error(exc, overlay) from exc
+            raise _swap_error(exc, overlay, tap.last if tap is not None else {}) from exc
         except PushError as exc:
             raise ActionFailedError(
                 f"bitstream push of {overlay.name} failed: {exc}",
@@ -309,16 +391,30 @@ class Mps3Deploy:
     # -- checks -----------------------------------------------------------------------
 
     def _live(self) -> _Live:
-        ping, ver = self._shell.call(lambda c: (c.ping(), c.version()))
-        if not ping.ok:
-            raise ActionFailedError("shell answered ping with ok:false")
-        return _Live(shell_id=ping.shell_id, rm_id=ping.rm_id, version_ok=ver.ok,
-                     features=tuple(ver.features) if ver.ok else ())
+        live: ShellLive = self._shell.live()
+        clr_max = live.clr_max
+        if clr_max is None and "stats" in live.features:
+            clr_max = self._stats_clr_max()
+        return _Live(shell_id=live.shell_id, rm_id=live.rm_id, version_ok=live.version_ok,
+                     features=live.features, impl=live.impl, clr_max=clr_max)
+
+    def _stats_clr_max(self) -> int | None:
+        """``stats.clr_max`` when pyverify can send ``stats`` (v0.11 codec) and the
+        harness reports the key. Never a hand-rolled request (one codec)."""
+        if not callable(getattr(ShellClient, "stats", None)):
+            return None
+        try:
+            raw = self._shell.call_raw(lambda c, tap: (c.stats(), dict(tap.last))[1])
+        except HarnessError:
+            return None
+        value = raw.get("clr_max")
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 \
+            else None
 
     def _assess(self, overlay: OverlayRef) -> _Assessment:
         entry = self.catalogue.entry_for(overlay)
         live = self._live()
-        transport_item, transport = _check_transport(live)
+        transport_item, transport = _check_transport(live, self.tunnelled)
         items = (
             PreflightItem(ITEM_CONTROL, Check.OK,
                           f"{self._shell.host}:{self._shell.port} answered "
@@ -326,7 +422,7 @@ class Mps3Deploy:
             _check_shell_id(entry, live),
             _check_files(entry),
             PreflightItem(ITEM_PAIR, entry.pair_check, entry.pair_detail),
-            _check_clearing_fits(entry),
+            _check_clearing_fits(entry, live.clr_max),
             transport_item,
             _check_usercode(entry, self.running_usercode),
         )
@@ -363,24 +459,34 @@ def _check_files(entry: CatalogueEntry) -> PreflightItem:
         f"partial {m.partial.len} B crc 0x{m.partial.crc32:08x}")
 
 
-def _check_clearing_fits(entry: CatalogueEntry) -> PreflightItem:
+def _check_clearing_fits(entry: CatalogueEntry, clr_max: int | None = None) -> PreflightItem:
     declared = entry.overlay.manifest.clearing.len
     path = entry.overlay.clearing_path()
     actual = path.stat().st_size if path.is_file() else 0
     size = max(declared, actual)
-    if size > CLEARING_ARENA_BYTES:
+    if clr_max is not None:
+        limit, source = clr_max, "the harness's clr_max"
+    else:
+        limit, source = CLEARING_ARENA_BYTES, "clearing arena"
+    if size > limit:
+        why = ("the harness reports it cannot hold a bigger clearing" if clr_max is not None
+               else "firmware/platform/Makefile SWAP_CLEARING_ARENA_BYTES, CLEARING_RAM_BYTES; "
+                    "scripts/harness_gates/check_clearing_fits.py")
         return PreflightItem(
             ITEM_CLEARING_FITS, Check.MISMATCH,
-            f"clearing is {size} B, over the {CLEARING_ARENA_BYTES} B clearing arena "
-            "(firmware/platform/Makefile SWAP_CLEARING_ARENA_BYTES, CLEARING_RAM_BYTES; "
-            "scripts/harness_gates/check_clearing_fits.py): it would be staged to QSPI and "
-            "the next swap-away would fail closed")
-    return PreflightItem(ITEM_CLEARING_FITS, Check.OK,
-                         f"{size} B of the {CLEARING_ARENA_BYTES} B clearing arena")
+            f"clearing is {size} B, over the {limit} B {source} ({why}): it would be staged "
+            "to QSPI and the next swap-away would fail closed")
+    return PreflightItem(ITEM_CLEARING_FITS, Check.OK, f"{size} B of the {limit} B {source}")
 
 
-def _check_transport(live: _Live) -> tuple[PreflightItem, str]:
+def _check_transport(live: _Live, tunnelled: bool = False) -> tuple[PreflightItem, str]:
     if not live.version_ok:
+        if tunnelled:
+            return (PreflightItem(
+                ITEM_TRANSPORT, Check.UNCHECKED,
+                "tcp: the link is a TCP tunnel (TFTP cannot cross it) and the shell did not "
+                "answer 'version', so its push mode is unknown; a shell built WINDOWED=1 "
+                "would stall a plain push"), TRANSPORT_TCP)
         return (PreflightItem(
             ITEM_TRANSPORT, Check.UNCHECKED,
             "tftp: the shell did not answer 'version', so its push mode is unknown; "
@@ -390,6 +496,16 @@ def _check_transport(live: _Live) -> tuple[PreflightItem, str]:
             ITEM_TRANSPORT, Check.OK,
             "tcp+windowed: the firmware reports 'windowed' (a plain push deadlocks it)"),
             TRANSPORT_WINDOWED)
+    if live.impl == IMPL_LINUX:
+        return (PreflightItem(
+            ITEM_TRANSPORT, Check.OK,
+            "tcp: mps3-harnessd takes a plain push on 6910 (the kernel paces TCP; "
+            "'windowed' is absent by design)"), TRANSPORT_TCP)
+    if tunnelled:
+        return (PreflightItem(
+            ITEM_TRANSPORT, Check.OK,
+            "tcp: the link is a TCP tunnel and TFTP (UDP) cannot cross it; the firmware "
+            "does not report 'windowed', so a plain push is safe"), TRANSPORT_TCP)
     return (PreflightItem(ITEM_TRANSPORT, Check.OK,
                           "tftp: the firmware does not report 'windowed'"), TRANSPORT_TFTP)
 
@@ -418,10 +534,61 @@ def _check_usercode(entry: CatalogueEntry, running: str | int | None) -> Preflig
     return PreflightItem(ITEM_USERCODE, Check.OK, f"0x{have:08x}")
 
 
-def _swap_error(exc: SwapError, overlay: OverlayRef) -> HarnessError:
-    """Map pyverify's one SwapError onto the exit-code taxonomy."""
+class _TimedSocketTransport(SocketTransport):
+    """pyverify's socket transport, plus a way to shorten the read timeout (to read a
+    pending refusal without waiting out the swap timeout)."""
+
+    def settimeout(self, seconds: float) -> None:
+        self._sock.settimeout(seconds)
+
+
+def _pending_reply(tap: _TapTransport, wait_s: float = 1.0) -> dict | None:
+    """The control reply already sent (a refused swap), or None if none arrives soon."""
+    try:
+        tap._inner.settimeout(wait_s)
+        tap.recv_line()
+    except _ShellBusy as busy:
+        return busy.reply
+    except (OSError, AttributeError):
+        return None
+    return tap.last or None
+
+
+def _is_fabric_mismatch(err: str) -> bool:
+    low = err.lower()
+    return any(marker in low for marker in FABRIC_MISMATCH_ERRS)
+
+
+def _refusal_error(reply: dict, overlay: OverlayRef) -> HarnessError:
+    """Map the shell's own refusal of a swap (a reply line) onto the taxonomy."""
+    err = str(reply.get("err", ""))
+    if err.strip().upper() == "EBUSY":
+        return HeldError(f"the shell is busy (EBUSY): {overlay.name} was not deployed",
+                         hint="another client holds the control port, or a swap is running")
+    if _is_fabric_mismatch(err):
+        return IncompatibleError(
+            f"the shell refused {overlay.name}: the running fabric does not match the "
+            f"harness image ({err})",
+            hint="nothing was loaded; `info` shows the skew. Re-provision the image for "
+                 "this fabric, or restore the base bitstream it was built for")
+    if reply.get("ok") is True:
+        return ActionFailedError(f"the push of {overlay.name} was reset although the shell "
+                                 "accepted the swap", hint="restore the baseline")
+    return ActionFailedError(f"the shell refused the swap to {overlay.name}: {err or reply}",
+                             hint="nothing was loaded; the shell refused before the push")
+
+
+def _swap_error(exc: SwapError, overlay: OverlayRef, raw: dict | None = None) -> HarnessError:
+    """Map pyverify's one SwapError onto the exit-code taxonomy.
+
+    ``raw`` is the last reply line (the swap reply, when there was one): pyverify's
+    ``SwapResponse`` drops its ``err``, which is where the shell says why.
+    """
     text = str(exc)
     cause = exc.__cause__
+    err = str((raw or {}).get("err", "")) if (raw or {}).get("ok") is False else ""
+    if err and _is_fabric_mismatch(err):
+        return _refusal_error(raw or {}, overlay)
     if "static_id mismatch" in text or "unparseable shell_id" in text:
         return IncompatibleError(f"{overlay.name} does not match the running shell: {text}")
     if isinstance(cause, OverlayValidationError):
@@ -432,5 +599,6 @@ def _swap_error(exc: SwapError, overlay: OverlayRef) -> HarnessError:
             f"the swap to {overlay.name} did not complete: {text}",
             hint="the control connection timed out or dropped mid-swap; "
                  "read `info`, then restore the baseline if needed")
-    return ActionFailedError(f"the shell refused the swap to {overlay.name}: {text}",
+    detail = f"{err} ({text})" if err else text
+    return ActionFailedError(f"the shell refused the swap to {overlay.name}: {detail}",
                              hint="the partition is left decoupled; restore the baseline")
