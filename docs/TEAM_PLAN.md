@@ -241,6 +241,18 @@ Delivered:
 - Optional `DebugAdapter` extras (`openocd_post_config`, `describe`, `expected_idcode`) and the ConsoleBroker/DebugService extras T4 already implements (T4-2, T4-3).
 - Links changing on an open board, i.e. hotplug (T6 CCR-3).
 
+**Linux harness alignment (agreed with the MicroBlaze agent, 2026-09-23).** Linux becomes the product at mint 3, around 10-08 → 10-12.
+- **The wire is unchanged:** the same firmware service modules run under `mps3-harnessd`.
+- **New team T12 · Linux harness support**, Wave 2:
+  - `BoardIdentity` carries `impl` (`version.impl`);
+  - health states `wedged` (accepts, never replies) and `rescue` (pingable, TFTP only, no 6900);
+  - a UDP identify (6899) probe;
+  - an SSH link kind with the **claim** flow (TFTP `authorized_keys` while unclaimed, then pin the host key);
+  - reboot-witness timeout 180 s on Linux;
+  - a `linux` VirtualMps3 profile, once FakeShell grows it.
+- **T7's harness bundle** follows the two-target manifest in the platform repo's `docs/planning/linux_lanes/FLOW_CONTRACT.md`. Base = MCC SD (bitstream + stage0). Ethernet-updatable = µSD slot image + overlays, written to the inactive slot, with rollback by stage0's boot counter.
+- **Don't build:** bare-metal-only platform features, or a TCP shell console.
+
 **New Wave 2 work these revealed:**
 - **A local engine service (`socharnessd`, per user).** A board lock belongs to one process, so today:
   - `socharness attach` must stay in the foreground;
