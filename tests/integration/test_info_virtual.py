@@ -135,3 +135,16 @@ def test_busy_control_port_is_held_not_unreachable():
     finally:
         t.join(timeout=2)
         srv.close()
+
+
+def test_clock_presets_and_refusals(vboard: VirtualMps3, mps3_pack):
+    from socharness.core.errors import UsageError as UE
+
+    session = mps3_pack.open(mps3_pack.candidate_for_host(vboard.shell_endpoint))
+    assert not session.clocks.clocks()[0].available          # cannot read back before a set
+    reading = session.clocks.set_clock("dut", 50)
+    assert reading.value == 50.0 and session.clocks.clocks()[0].value == 50.0
+    with pytest.raises(UE):
+        session.clocks.set_clock("dut", 33)                  # not a preset (needs firmware A8)
+    with pytest.raises(UE):
+        session.clocks.set_clock("osc1", 50)                 # board oscillators are not the shell's

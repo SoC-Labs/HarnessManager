@@ -48,4 +48,11 @@ SPECS: tuple[CapabilitySpec, ...] = (
                                                          via(L.HUB, features=("reboot",)))),
     CapabilitySpec(C.DISCOVER_NETWORK, "Find boards on the network",
                    (via(L.ETHERNET, features=("identify",)),)),
+    # Pack-specific "lab" capabilities (the CLI's `lab` verbs).
+    CapabilitySpec("mps3.display_flip", "Hand the CLCD panel to the DUT",
+                   (via(L.ETHERNET, features=("clcd_kvm",)), via(L.HUB, features=("clcd_kvm",)))),
+    # DUT egress (dutrx) is fielded on 0x3F1A560F but not yet reported in
+    # version.features (harness handover A2), so it is gated on the link only.
+    CapabilitySpec("mps3.dut_egress", "Read frames the DUT transmitted",
+                   (via(L.ETHERNET), via(L.HUB))),
 )

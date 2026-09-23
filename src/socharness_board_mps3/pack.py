@@ -12,6 +12,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.usb:serial_console_endpoints(candidate)``   | T3   | extra console endpoints (FPGA UARTs) |
 | ``.openocd:make_debug_adapter(session)``       | T4   | ``DebugAdapter`` (replaces the scaffold one) |
 | ``.telemetry:make_telemetry_adapter(session)`` | T9   | ``TelemetryAdapter``               |
+| ``.clock:make_clock_adapter(session)``         | lead | ``ClockAdapter`` (DUT MMCM presets) |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -129,6 +130,7 @@ class Mps3Session(BoardSession):
             ("storage", "sd", "make_storage_adapter"),
             ("debug", "openocd", "make_debug_adapter"),
             ("telemetry", "telemetry", "make_telemetry_adapter"),
+            ("clocks", "clock", "make_clock_adapter"),
         ):
             make = _hook(module, factory)
             if make is not None:

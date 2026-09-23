@@ -162,6 +162,9 @@ class StorageAdapter(Protocol):
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord,
                 progress: Progress | None = None) -> None: ...
     def restore(self, backup: BackupRecord, progress: Progress | None = None) -> None: ...
+    def load_backup(self, path: Path) -> BackupRecord:
+        """Rebuild a ``BackupRecord`` from a backup archive on disk (and verify it)."""
+        ...
 
 
 # --- session and pack ----------------------------------------------------------------
