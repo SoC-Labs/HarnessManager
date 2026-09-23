@@ -273,11 +273,16 @@ def test_every_endpoint_the_ui_calls_is_in_api_md():
 def test_the_ui_additive_endpoints_are_ones_socharnessd_serves_and_api_md_lacks():
     # The only way past API.md: a route the real daemon (T13) serves, named in ADDITIVE.
     additive = {n: ep for n, ep in ui_endpoints().items() if n in ui_additive()}
-    assert set(additive) == ui_additive() == {"session"}
+    assert set(additive) == ui_additive()
     served = daemon_routes()
     for name, ep in additive.items():
         assert ep in served, name
         assert ep not in api_md_endpoints(), f"{name} is in API.md now: drop it from ADDITIVE"
+
+
+def test_the_ui_calls_the_session_route_api_md_now_lists():
+    assert ui_endpoints()["session"] == ("GET", "/boards/{}/session")
+    assert ("GET", "/boards/{}/session") in api_md_endpoints()
 
 
 def test_the_endpoint_check_catches_an_endpoint_api_md_lacks():

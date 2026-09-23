@@ -144,6 +144,9 @@ def test_a_capability_the_board_lacks_is_disabled_with_its_reason(page_factory, 
     expect(page.locator('[data-testid="reboot-result"]')).to_contain_text("Nothing was run.")
     assert "not run" in result_text(page, "reboot-result")
     assert engine.called("controller.reboot") == []
+    # No metered outlet in boards.toml: the cold power cycle says why, and offers no button.
+    expect(page.locator('[data-testid="power-cycle-reason"]')).to_contain_text("networked power plug")
+    assert page.locator('[data-testid="power-cycle"] button').count() == 0
 
 
 def test_with_the_usb_link_reboot_is_gated_only_by_the_arm_box(page_factory, engine):

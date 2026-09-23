@@ -1,7 +1,7 @@
 // Overview: identity, health, telemetry (a source per value), capabilities (with reasons).
 
 import { ageText, CAPABILITY_ORDER, capTitle, clock, healthOf, valueText } from "../format.js";
-import { html, useState } from "../lib.js";
+import { html, useEffect, useState } from "../lib.js";
 import { boardState, loadTelemetry, refreshInfo } from "../store.js";
 import { Card, CheckChip, Chip, Icon, LinkLine, Reason, Spinner } from "../ui.js";
 
@@ -90,7 +90,7 @@ function TelemetryCard({ bid }) {
       sub="Every value names its source. A value the board cannot give is shown as unavailable, never as zero."
       testid="telemetry-card">
     ${b.telemetryError ? html`<div class="pad-x"><${Reason} level="err"
-        text=${`${b.telemetryError.errName}: ${b.telemetryError.message}`} /></div>` : null}
+        text=${`${b.telemetryError.errName}: ${b.telemetryError.message}${b.telemetry ? " (showing the last good read)" : ""}`} /></div>` : null}
     ${readings && readings.length ? html`<table class="table" data-testid="telemetry-table">
       <colgroup><col style="width:38%" /><col style="width:20%" /><col style="width:24%" /><col style="width:18%" /></colgroup>
       <thead><tr><th>Reading</th><th class="r">Value</th><th>Source</th><th>Age</th></tr></thead>
@@ -127,8 +127,21 @@ function CapabilitiesCard({ info }) {
   <//>`;
 }
 
+// SYSMON over JTAG takes ~3 s a read (docs/CONTRACTS.md), so telemetry is polled in the
+// background, never awaited by anything else, and the last good values stay on screen.
+const TELEMETRY_POLL_MS = 15000;
+
 export function OverviewSection({ bid }) {
   const b = boardState(bid);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = boardState(bid);
+      if (document.visibilityState === "visible" && now.info && !now.job && !now.telemetryLoading) {
+        loadTelemetry(bid);
+      }
+    }, TELEMETRY_POLL_MS);
+    return () => clearInterval(timer);
+  }, [bid]);
   if (!b.info) {
     return html`<div class="card" data-testid="info-error"><div class="card-body">
       ${b.infoError ? html`<${Reason} level="err" text=${`${b.infoLine}: ${b.infoError.errName}: ${b.infoError.message}`} />

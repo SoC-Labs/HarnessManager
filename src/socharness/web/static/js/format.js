@@ -22,6 +22,7 @@ export const CAPABILITY_TITLES = {
   storage_backup: "Back up the configuration SD",
   storage_install: "Install a harness onto the SD",
   discover_network: "Find boards on the network",
+  power_cycle: "Power-cycle the board (cold)",
   "mps3.display_flip": "Hand the CLCD panel to the DUT",
   "mps3.dut_egress": "Read frames the DUT transmitted",
 };

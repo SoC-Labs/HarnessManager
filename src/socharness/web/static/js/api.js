@@ -2,9 +2,9 @@
 //
 // Every endpoint the UI calls is listed in ENDPOINTS. A test checks each entry
 // against the endpoint table in docs/API.md, so the UI cannot drift from the
-// contract without failing `make check`. The one exception is ADDITIVE: routes
-// socharnessd (T13) serves beyond API.md v1, which the test checks against the
-// daemon's own route table instead (contract change request T14-2 asks to document them).
+// contract without failing `make check`. ADDITIVE may name routes socharnessd serves
+// beyond API.md; the test checks those against the daemon's own route table instead,
+// and fails once API.md lists them (then they leave ADDITIVE). It is empty today.
 
 export const ENDPOINTS = Object.freeze({
   health: ["GET", "/health"],
@@ -37,13 +37,13 @@ export const ENDPOINTS = Object.freeze({
   events: ["WS", "/events"],
 });
 
-export const ADDITIVE = Object.freeze(["session"]);
+export const ADDITIVE = Object.freeze([]);
 
 // Topics the UI follows (docs/CONTRACTS.md). console.line is left out on purpose:
 // console bytes arrive on each console's own socket, so a line is never shown twice.
 export const EVENT_TOPICS = [
   "board.*", "session.*", "deploy.*", "console.state", "debug.*", "controller.*",
-  "storage.*", "update.*", "job.*", "events.*",
+  "storage.*", "update.*", "power.*", "job.*", "events.*",
 ];
 
 const TOKEN_KEY = "socharness.token";

@@ -511,6 +511,7 @@ export function handleEvent(ev) {
     if (phase && !b.reboot.phases.includes(phase)) b.reboot.phases.push(phase);
     if (phase === "up") scheduleRefresh(bid, 100);
   }
+  if (ev.topic === "power.cycle" && (ev.data || {}).phase === "up") scheduleRefresh(bid, 100);
   if (ev.topic === "board.found" || ev.topic === "board.lost" || ev.topic.startsWith("session.")) {
     scheduleBoards();
   }

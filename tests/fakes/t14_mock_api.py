@@ -90,11 +90,9 @@ OPEN_POINTS: dict[str, str] = {
     "refused WS": "an HTTP denial with the envelope, or close 4000 + exit code",
 }
 
-#: Routes socharnessd serves beyond API.md v1 (T13, additive). The UI uses the first.
-ADDITIVE_ROUTES: tuple[tuple[str, str], ...] = (
-    ("GET", "/boards/{bid}/session"),
-    ("GET", "/jobs"),
-)
+#: Routes socharnessd serves beyond API.md. Empty since the lead documented T13's
+#: additions (session, jobs, daemon/shutdown); kept so a new one has a place to go.
+ADDITIVE_ROUTES: tuple[tuple[str, str], ...] = ()
 
 #: The route table: (method, path template). Kept literal so a test can diff it with API.md.
 ROUTES: tuple[tuple[str, str], ...] = (
@@ -132,6 +130,9 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("POST", "/boards/{bid}/lab/{verb}"),
     ("GET", "/help/tabs"),
     ("GET", "/jobs/{id}"),
+    ("GET", "/jobs"),
+    ("GET", "/boards/{bid}/session"),
+    ("POST", "/daemon/shutdown"),
     ("WS", "/events"),
 ) + ADDITIVE_ROUTES
 
@@ -403,6 +404,14 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         from socharness.cli.helptext import tabs
 
         return _ok(tabs=[{"name": n, "text": t} for n, t in tabs()])
+
+    @app.post(f"{API}/daemon/shutdown")
+    def shutdown(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:  # noqa: B008
+        running = state.jobs.running()
+        if running and not body.get("force"):
+            raise HeldError(f"socharnessd is running {running[0].describe()}", holder="socharnessd",
+                            hint="wait for it, or stop with --force")
+        raise UnavailableError("daemon_shutdown", "the T14 mock is not started by `socharness daemon`")
 
     @app.get(f"{API}/jobs")
     def jobs() -> dict[str, Any]:

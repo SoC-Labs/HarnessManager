@@ -3,7 +3,7 @@
 
 import { panelState, runJob } from "../actions.js";
 import { call } from "../api.js";
-import { journalText } from "../format.js";
+import { capState, journalText } from "../format.js";
 import { html } from "../lib.js";
 import { boardState, changed, loadPending, scheduleRefresh } from "../store.js";
 import { ActionRow, ArmBox, Card, Reason, ResultBlock } from "../ui.js";
@@ -107,13 +107,7 @@ function RebootCard({ bid }) {
     command: "mcc reboot",
     run: (ctx) => runJob("reboot", { bid }, {},
       (d) => ctx.progress(`reboot: ${d.phase} (${d.done}/${d.total})`, d.phase), "reboot"),
-    render: (evidence) => {
-      const out = [{ kind: "ok", text: "the board went down and came back" }];
-      if (evidence && typeof evidence === "object") {
-        for (const [k, v] of Object.entries(evidence)) out.push({ kind: "out", text: `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}` });
-      }
-      return out;
-    },
+    render: rebootLines,
     onDone: () => scheduleRefresh(bid, 200),
   };
   const phases = ["sent", "down", "up"];
@@ -128,6 +122,41 @@ function RebootCard({ bid }) {
         class=${`step ${b.reboot.phases.includes(ph) ? "done" : ""}`}><div class="bar"></div><span>${ph}</span></div>`)}</div>` : null}
       <${ResultBlock} lines=${p.lines} panel=${p} testid="reboot-result" />
     </div>
+  <//>`;
+}
+
+// The reboot job's result is the controller's evidence: {summary, down_after_s, up_after_s,
+// down_evidence[], up_evidence, shell_id_before, shell_id_after, fpga_configured}.
+export function rebootLines(ev) {
+  if (!ev || typeof ev !== "object") return [{ kind: "ok", text: "the board went down and came back" }];
+  const out = [{ kind: "ok", text: ev.summary || "the board went down and came back" }];
+  const t = (s) => (Number.isFinite(Number(s)) ? `${Number(s).toFixed(1)} s` : "?");
+  if (ev.down_after_s !== undefined || ev.up_after_s !== undefined) {
+    out.push({ kind: "out", text: `down after ${t(ev.down_after_s)}, back after ${t(ev.up_after_s)}` });
+  }
+  if (ev.shell_id_before || ev.shell_id_after) {
+    const same = ev.shell_id_before === ev.shell_id_after;
+    out.push({ kind: same ? "out" : "warnline",
+      text: `shell ${ev.shell_id_before || "?"} -> ${ev.shell_id_after || "?"}${same ? " (unchanged)" : " (CHANGED)"}` });
+  }
+  if (ev.fpga_configured !== undefined) {
+    out.push({ kind: ev.fpga_configured ? "out" : "warnline",
+      text: `FPGA configured: ${ev.fpga_configured ? "yes" : "NO"}` });
+  }
+  for (const line of [].concat(ev.down_evidence || [])) out.push({ kind: "hint", text: `down: ${line}` });
+  if (ev.up_evidence) out.push({ kind: "hint", text: `up: ${typeof ev.up_evidence === "object" ? JSON.stringify(ev.up_evidence) : ev.up_evidence}` });
+  return out;
+}
+
+// A cold power cycle through a networked outlet (T9). socharnessd has no endpoint for it
+// yet, so this says what the board can do and why not, and offers no button.
+function PowerCycleCard({ bid }) {
+  const st = capState(boardState(bid).info, "power_cycle");
+  return html`<${Card} title="Cold power cycle" icon="plug-zap" testid="power-cycle"
+      sub="Switches the board's supply off and on through a networked outlet listed in boards.toml.">
+    ${!st ? html`<${Reason} text="waiting for the board's capability view" />`
+      : !st.available ? html`<${Reason} icon="circle-slash" text=${`Cannot: ${st.reason}`} testid="power-cycle-reason" />`
+      : html`<${Reason} text="This board's outlet can cycle it. socharnessd has no power-cycle endpoint yet, so it is not offered here: use the command line." testid="power-cycle-reason" />`}
   <//>`;
 }
 
@@ -168,6 +197,9 @@ export function PowerSection({ bid }) {
     <div class="grid two">
       <${RebootCard} bid=${bid} />
       <${SdBackupCard} bid=${bid} />
+    </div>
+    <div class="grid two">
+      <${PowerCycleCard} bid=${bid} />
     </div>
   </div>`;
 }

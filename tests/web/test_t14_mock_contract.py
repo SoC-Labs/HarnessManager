@@ -71,7 +71,7 @@ def wait_job(client, job_id, timeout=10.0):
 # --- the route table -------------------------------------------------------------------------
 
 
-def test_the_mock_route_table_is_api_md_plus_the_daemons_additive_routes():
+def test_the_mock_route_table_is_api_md_plus_any_additive_routes():
     mock = {(m, normalise(p)) for m, p in ROUTES}
     additive = {(m, normalise(p)) for m, p in ADDITIVE_ROUTES}
     assert mock - additive == api_md_endpoints()
@@ -400,3 +400,15 @@ def test_storage_pending_is_null_without_a_storage_link(client):
 def test_help_tabs_come_from_the_cli(client):
     tabs = client.get("/api/v1/help/tabs", headers=AUTH).json()["tabs"]
     assert tabs and all(set(t) == {"name", "text"} for t in tabs)
+
+
+def test_daemon_shutdown_is_refused_while_a_job_runs(client, engine):
+    engine.delays["deploy.deploy"] = 1.0
+    probe_and_open(client, BOARD_USB)
+    job = client.post(f"/api/v1/boards/{enc(BOARD_USB)}/deploy", json={"overlay": "led"},
+                      headers=AUTH).json()["job"]
+    r = client.post("/api/v1/daemon/shutdown", json={}, headers=AUTH)
+    assert r.status_code == 409 and r.json()["error"]["name"] == "HELD"
+    wait_job(client, job)
+    # With no job, the mock says it cannot stop itself (it was not started by `socharness daemon`).
+    assert client.post("/api/v1/daemon/shutdown", json={}, headers=AUTH).status_code == 422

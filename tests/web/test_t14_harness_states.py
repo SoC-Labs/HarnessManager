@@ -168,6 +168,21 @@ def test_a_hung_harness_shows_the_failed_read_and_keeps_the_last_good_one(stage,
         expect(health_chip(page)).to_have_attribute("data-level", "ok")
 
 
+def test_a_board_reboot_shows_the_controllers_evidence(stage, tmp_path, screenshots):
+    with VirtualMps3(tmp_path, FIELDED_3F1A560F, usb=True) as vb:
+        page, _, _ = stage(vb, vb.candidate(usb=True))
+        page.locator('[data-section="power"]').click()
+        page.locator('[data-testid="arm-reboot"] input').check()
+        page.locator('[data-action="reboot"]').click()
+        expect(page.locator('[data-testid="job-chip"]')).to_contain_text("board reboot", timeout=T)
+        result = page.locator('[data-testid="reboot-result"]')
+        expect(result).to_contain_text("rc 0", timeout=45_000)
+        expect(result).to_contain_text("down after")
+        expect(result).to_contain_text("shell 0x3f1a560f -> 0x3f1a560f (unchanged)")
+        assert vb.reboots == 1
+        shoot(page, screenshots, "reboot-evidence")
+
+
 def test_a_rescue_board_is_found_opened_and_explained(stage, tmp_path, screenshots, monkeypatch):
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
         endpoint = vb.shell_endpoint

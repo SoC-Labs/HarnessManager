@@ -121,13 +121,13 @@ def app_routes(app) -> set[tuple[str, str]]:
 
 
 def daemon_routes() -> set[tuple[str, str]]:
-    """The real socharnessd's route table (Team T13), minus its catch-all and admin routes."""
+    """The real socharnessd's route table (Team T13), minus its catch-all 404 route."""
     from socharness.daemon.app import create_app
     from socharness.gui.demo_engine import DemoEngine
 
     engine = DemoEngine(speed=0)
     try:
         app = create_app(engine, token="route-table-only", static_dir=None)
-        return {(m, p) for m, p in app_routes(app) if p not in ("/{}", "/daemon/shutdown")}
+        return {(m, p) for m, p in app_routes(app) if p != "/{}"}
     finally:
         engine.close_all()
