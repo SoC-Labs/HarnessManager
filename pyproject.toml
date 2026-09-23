@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "socharness"
+version = "0.0.1"
+description = "SoC Labs Harness Manager: board manager for SoC prototyping harnesses (MPS3 pilot)."
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "Proprietary (SoC Labs), pending decision" }
+# The shell control-channel codec is pyverify (mps3-nanosoc-platform/host/pyverify).
+# It is the ONLY implementation of net-protocol.md on the host. Never re-implement it here.
+dependencies = [
+    "mps3-pyverify>=0.1.0",
+]
+
+[project.optional-dependencies]
+serial = ["pyserial>=3.5"]
+gui = ["PySide6-Essentials>=6.6"]
+dev = [
+    "pytest>=8",
+    "pytest-timeout>=2.3",
+    "ruff>=0.6",
+    "pyserial>=3.5",
+]
+guitest = ["pytest-qt>=4.4", "PySide6-Essentials>=6.6"]
+
+[project.scripts]
+socharness = "socharness.cli.main:main"
+socharness-gui = "socharness.gui:main"
+
+# Board packs register here. The MPS3 pack is in-tree for now and will split
+# out as socharness-board-mps3 once its interface has settled.
+[project.entry-points."socharness.boards"]
+mps3 = "socharness_board_mps3.pack:Mps3Pack"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 60
+markers = [
+    "hil: hardware-in-the-loop; needs SOCHARNESS_HIL=1, a board address, and david's board window",
+    "gui: needs PySide6 + pytest-qt (offscreen)",
+    "slow: long-running integration scenario",
+]
+addopts = "-m 'not hil'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
