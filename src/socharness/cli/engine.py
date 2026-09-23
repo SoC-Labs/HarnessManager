@@ -5,16 +5,29 @@ Order of precedence:
 1. a factory installed with ``set_engine_factory`` (the test hook);
 2. ``$SOCHARNESS_CLI_ENGINE=package.module:callable``: a factory that takes the
    parsed args (or ``None``) and returns an engine;
-3. ``socharness.engine.Engine`` (Team T1), the real one.
+3. a running ``socharnessd`` for this state dir (``socharness.client.RemoteEngine``),
+   so the CLI shares the daemon's engine and board sessions with the web UI;
+4. ``socharness.engine.Engine`` (Team T1), the in-process one.
 
-The CLI only ever uses the frozen ``socharness.core.services.Engine`` protocol,
-so every verb behaves the same over any of them.
+Step 3 is skipped, and the verb runs on the in-process engine, when:
+
+- ``$SOCHARNESS_NO_DAEMON`` is set (to anything but ``0``);
+- the verb is one of ``IN_PROCESS_VERBS``: ``attach``/``detach`` are about THIS
+  process holding the board's lock; ``daemon``/``ui`` manage the daemon itself;
+- the verb was given ``--overlay-dir``: that sets the overlay search path in
+  this process's environment, which the daemon cannot see.
+
+A daemon that is recorded but does not answer ``/api/v1/health`` within a
+second is not used. The CLI only ever uses the frozen
+``socharness.core.services.Engine`` protocol, so every verb behaves the same
+over any of them.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib
+import logging
 import os
 from collections.abc import Callable
 from typing import Any
@@ -22,7 +35,18 @@ from typing import Any
 from socharness.core.errors import UsageError
 from socharness.core.services import EngineConfig
 
+log = logging.getLogger(__name__)
+
 ENV_ENGINE = "SOCHARNESS_CLI_ENGINE"
+ENV_NO_DAEMON = "SOCHARNESS_NO_DAEMON"
+
+#: Verbs that always run on the in-process engine, and why.
+IN_PROCESS_VERBS: dict[str, str] = {
+    "attach": "holds the board's lock in this process",
+    "detach": "signals the process that holds the lock",
+    "daemon": "manages socharnessd itself",
+    "ui": "manages socharnessd itself",
+}
 
 EngineFactory = Callable[[argparse.Namespace | None], Any]
 
@@ -48,22 +72,63 @@ def _load_factory(spec: str) -> EngineFactory:
                          hint=f"unset {ENV_ENGINE} to use the installed engine") from exc
 
 
+def daemon_disabled() -> bool:
+    return os.environ.get(ENV_NO_DAEMON, "").strip() not in ("", "0")
+
+
+def wants_daemon(args: argparse.Namespace | None) -> bool:
+    """Whether this invocation may use a running daemon (see the module docstring)."""
+    if daemon_disabled():
+        return False
+    if args is not None:
+        if getattr(args, "cmd", None) in IN_PROCESS_VERBS:
+            return False
+        if getattr(args, "overlay_dir", None):
+            return False
+    return True
+
+
+def daemon_engine(args: argparse.Namespace | None = None) -> Any | None:
+    """A ``RemoteEngine`` for the running daemon, or ``None``."""
+    if not wants_daemon(args):
+        return None
+    try:
+        from socharness.client import RemoteEngine
+
+        return RemoteEngine.discover()
+    except Exception:  # noqa: BLE001 - no daemon, or a broken one: use the in-process engine
+        log.debug("socharnessd discovery failed", exc_info=True)
+        return None
+
+
 def get_engine(args: argparse.Namespace | None = None) -> Any:
     if _factory is not None:
         return _factory(args)
     spec = os.environ.get(ENV_ENGINE, "").strip()
     if spec:
         return _load_factory(spec)(args)
+    remote = daemon_engine(args)
+    if remote is not None:
+        return remote
     from socharness.engine import Engine
 
     return Engine(EngineConfig())
 
 
 def describe_engine() -> str:
-    """Which engine ``get_engine`` would build, without building it."""
+    """Which engine ``get_engine`` would build, without building it (no network)."""
     if _factory is not None:
         return "test factory"
     spec = os.environ.get(ENV_ENGINE, "").strip()
     if spec:
         return f"{spec} (from ${ENV_ENGINE})"
+    if not daemon_disabled():
+        try:
+            from socharness.daemon.state import discover
+
+            info = discover()
+        except Exception:  # noqa: BLE001
+            info = None
+        if info is not None:
+            return f"socharnessd at {info.base_url} (pid {info.pid})"
     return "socharness.engine.Engine"
