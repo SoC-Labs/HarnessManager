@@ -30,6 +30,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `controller.reboot` `{phase: sent\|down\|up}` | board reboot |
 | `storage.progress` `{op, bytes, total}` | SD backup/install/restore |
 | `update.available`, `update.progress`, `update.done` | updates |
+| `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | socharnessd jobs and back-pressure (docs/API.md) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
 

@@ -191,7 +191,8 @@ def _with_daemon_verbs(original):
     def make_parser() -> argparse.ArgumentParser:
         parser = original()
         sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
-        register(sub)
+        if "daemon" not in sub.choices:        # main.py wires it since the T13 merge
+            register(sub)
         return parser
 
     return make_parser

@@ -281,6 +281,13 @@ def make_parser() -> argparse.ArgumentParser:
                     help="print the help sections as '## <tab>' blocks (the GUI renders these)")
     vp.add_argument("--list", action="store_true", help="list the help tab names")
     vp.set_defaults(fn=functools.partial(cmd_help, parser=p, verbs=verbs))
+
+    # -- daemon / ui (T13: socharnessd, the local engine service) ---------------------
+    from . import cmd_daemon
+    cmd_daemon.register(sub)
+    for name in ("daemon", "ui"):          # so `socharness help <verb>` knows them
+        if name in sub.choices:
+            verbs[name] = sub.choices[name]
     return p
 
 

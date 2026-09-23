@@ -73,11 +73,32 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `POST /boards/{bid}/lab/{verb}` `{...}` | the CLI's lab verbs (`link`/`display`/`macgen`/`dutrx`) | verb result |
 | `GET /help/tabs` | the CLI's `help --tabs` | `{tabs: [{name, text}]}` |
 | `GET /jobs/{id}` | — | job state |
+| `GET /jobs` | — | recent jobs; each record has `job, kind, board_id, state, phases, started_at, ended_at` |
+| `GET /boards/{bid}/session` | session adapters | `{candidate, adapters: {deploy, consoles, debug, resets, clocks, telemetry, controller, storage, shell}: bool, reset_targets, job}` |
+| `POST /daemon/shutdown` `{force?}` | — | `{ok}`; 409 while a job runs unless `force` |
+
+## Behaviour clarified by the implementation (T13)
+- `/health` is also at `/api/v1/health` and returns `{ok, version, pid, service}`.
+- A 401 carries code 15 (REFUSED). The UI should tell the user to run `socharness ui` again.
+- `POST /boards` returns `{board_id, info}`. If `info` is null, `info_error` explains why, but the session IS open. A 409 with name ALREADY means the board is already open in the daemon, so the UI should just use it.
+- While a job runs on a board, every request that touches the board returns 409 HELD naming the job.
+- `POST /deploy` runs the preflight synchronously. A mismatch returns 409 (code 14 or 15) with `error.data.{overlay, preflight}`, and no job is created. `POST /preflight` returns 200 and includes `refusal` only when it refuses.
+- `overlay` in a request body may be a name, an `rm_id`, or the OverlayRef object itself.
+- `GET /boards/{bid}/overlays` also returns `overlays` (all of them, including blocked ones).
+- Board ids are percent-encoded, including `/`.
+- **Console WebSocket frames:**
+  - The first frame is text: `{"state","name","detail"}`.
+  - Later text frames are `{"state":...}`, `{"dropped","dropped_frames"}` or `{"error"}`.
+  - The client sends keystrokes as BINARY frames.
+  - When the console ends, the server sends `{"state":"closed"}` and closes with code 1000.
+- A refused WebSocket gets an HTTP denial carrying the error envelope, or a close with code 4000+exit code.
+- The daemon's lock note is `socharnessd: <note>`.
 
 ## Events
 - **Endpoint:** `WS /api/v1/events?token=…&topics=board.*,deploy.*`.
 - **Each text frame:** `{"topic", "board_id", "data", "at"}`, one per `core.events.Event`, with the topics listed in docs/CONTRACTS.md.
 - **Job events:** `job.started`, `job.progress {job, phase, done, total}`, `job.done {job, result}` and `job.failed {job, error}`.
+- **Drops:** `events.dropped {dropped}` is sent when a slow client's bounded queue drops its oldest events.
 
 ## The Python client (T13)
 `socharness.client.RemoteEngine` implements the `core.services.Engine` protocol over this API. `socharness.cli.engine.get_engine()` prefers a running daemon and falls back to the in-process engine, so the CLI and the web UI share one board session.

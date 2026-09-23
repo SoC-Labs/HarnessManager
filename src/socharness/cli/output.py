@@ -34,6 +34,8 @@ READING_COLUMNS = ("BOARD_ID", "NAME", "VALUE", "UNIT", "SOURCE", "AGE_S", "REAS
 DEBUG_COLUMNS = ("BOARD_ID", "STATE", "GDB", "TELNET", "TCL", "PID", "CONFIG", "DETAIL")
 
 TSV_COLUMNS: dict[str, tuple[str, ...]] = {
+    "daemon": ("STATE", "PID", "PORT", "URL", "STATE_DIR"),
+    "ui": ("URL", "PORT", "PID", "STARTED"),
     "version": ("VERSION", "ENGINE"),
     "packs": ("PACK", "TITLE"),
     "probe": ("BOARD_ID", "PACK", "LABEL", "EVIDENCE", "LINKS"),

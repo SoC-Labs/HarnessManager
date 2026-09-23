@@ -315,7 +315,8 @@ def test_every_verb_has_a_success_and_a_failure_case():
     assert expected <= verbs_ok
     assert expected <= verbs_fail
     # every TSV layout is exercised by some success case
-    assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS)
+    # daemon/ui run a real socharnessd process; their TSV is pinned in test_t13_process.py.
+    assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS) - {"daemon", "ui"}
 
 
 @pytest.mark.parametrize("fmt", ["json", "tsv", "human"])
