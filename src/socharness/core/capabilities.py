@@ -36,6 +36,7 @@ TELEMETRY_POWER = "telemetry_power"
 STORAGE_BACKUP = "storage_backup"
 STORAGE_INSTALL = "storage_install"
 DISCOVER_NETWORK = "discover_network"
+POWER_CYCLE = "power_cycle"
 
 
 @dataclass(frozen=True)

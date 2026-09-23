@@ -52,6 +52,10 @@ SPECS: tuple[CapabilitySpec, ...] = (
                    needs_hint=NEEDS_USB + ", a JTAG cable on J17, or newer harness firmware"),
     CapabilitySpec(C.TELEMETRY_POWER, "Board power", (via(L.SMART_POWER),),
                    needs_hint="the MPS3 has no power sensor; add a metered plug or an INA260"),
+    # Only an outlet can cycle; a meter-only INA260 also gives SMART_POWER, so
+    # Engine.info() narrows this by the adapter's cycle_reason.
+    CapabilitySpec(C.POWER_CYCLE, "Power-cycle the board (cold)", (via(L.SMART_POWER),),
+                   needs_hint="a networked power plug in boards.toml (Shelly, Tasmota, NETIO)"),
     # v0.11 `reboot`: a warm restart of the shell CPU (bare-metal: the watchdog,
     # ~3 s; Linux: sync + WDOG + a full OS boot, see constants.reboot_wait_s).
     CapabilitySpec(C.RESET_SHELL, "Restart the shell", (via(L.ETHERNET, features=("reboot",)),

@@ -197,6 +197,27 @@ class StorageAdapter(Protocol):
         ...
 
 
+@runtime_checkable
+class PowerAdapter(Protocol):
+    """A metered outlet or meter on the board's supply (T9). Board-agnostic."""
+
+    label: str
+
+    def read(self) -> list[Reading]:
+        """``board_power`` (W), ``supply_voltage`` (V), ``supply_current`` (A). Never raises."""
+        ...
+
+    @property
+    def cycle_reason(self) -> str:
+        """Why ``power_cycle`` cannot work ("" when it can; a meter-only INA260 cannot)."""
+        ...
+
+    def power_cycle(self, off_s: float = 5.0, *, wait: bool = True,
+                    progress: Progress | None = None) -> dict:
+        """A COLD power cycle through the outlet, timed by the device. Returns the evidence."""
+        ...
+
+
 # --- session and pack ----------------------------------------------------------------
 
 
@@ -220,6 +241,7 @@ class BoardSession(ABC):
     telemetry: TelemetryAdapter | None = None
     controller: ControllerAdapter | None = None
     storage: StorageAdapter | None = None
+    power: PowerAdapter | None = None
 
     def close(self) -> None:  # noqa: B027 - optional hook
         """Release anything the session holds. Idempotent."""

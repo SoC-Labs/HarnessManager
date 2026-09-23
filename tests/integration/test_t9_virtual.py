@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from socharness.core.model import LinkKind
 from socharness.core.services import EngineConfig
 from socharness.engine import Engine
 from socharness_board_mps3 import mcc as mccmod
@@ -111,17 +112,39 @@ def test_config_links_light_up_the_power_capability(vboard: VirtualMps3, state: 
                             f'power = {{ kind = "shelly_gen2", url = "{plug.url}" }}\n')
         eng = engine_for(vboard, state)
         try:
+            # The pack adds the boards.toml links itself (T9 CCR 2, applied by the lead).
             cand = eng.candidate_for(vboard.shell_endpoint)
-            eng.open(with_config_links(cand))
+            assert any(lk.kind == LinkKind.SMART_POWER for lk in cand.links)
+            assert with_config_links(cand) == cand
+            eng.open(cand)
             info = eng.info(cand.board_id)
-            assert "telemetry_power" in info.capabilities and "reboot_board" in info.capabilities
+            assert {"telemetry_power", "reboot_board", "power_cycle"} <= info.capabilities
             eng.close(cand.board_id)
-            # Negative twin: the same board without the boards.toml links.
+            # Negative twin: the same board once boards.toml has no power table.
+            write_boards(state, '[boards.lab]\nmatch = ["127.0.0.1"]\n')
+            cand = eng.candidate_for(vboard.shell_endpoint)
+            assert not any(lk.kind == LinkKind.SMART_POWER for lk in cand.links)
             eng.open(cand)
             info = eng.info(cand.board_id)
             assert "no power sensor" in info.unavailable["telemetry_power"]
+            assert "power_cycle" in info.unavailable
         finally:
             eng.close_all()
+
+
+def test_a_meter_only_ina260_measures_but_cannot_power_cycle(vboard: VirtualMps3, state: Path):
+    write_boards(state, '[boards.lab]\nmatch = ["127.0.0.1"]\n'
+                        'power = { kind = "ina260_mcp2221", i2c_address = 0x41, device = 1 }\n')
+    eng = engine_for(vboard, state)
+    try:
+        cand = eng.candidate_for(vboard.shell_endpoint)
+        eng.open(cand)
+        info = eng.info(cand.board_id)
+        assert "telemetry_power" in info.capabilities
+        assert "power_cycle" not in info.capabilities
+        assert "only measures" in info.unavailable["power_cycle"]
+    finally:
+        eng.close_all()
 
 
 def test_power_cycle_through_the_session_adapter(vboard: VirtualMps3, state: Path):

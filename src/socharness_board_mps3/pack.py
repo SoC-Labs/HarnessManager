@@ -12,6 +12,8 @@ factory in its own module, and this file wires it in if it exists:
 | ``.usb:serial_console_endpoints(candidate)``   | T3   | extra console endpoints (FPGA UARTs) |
 | ``.openocd:make_debug_adapter(session)``       | T4   | ``DebugAdapter`` (replaces the scaffold one) |
 | ``.telemetry:make_telemetry_adapter(session)`` | T9   | ``TelemetryAdapter``               |
+| ``.telemetry:make_power_adapter(session)``     | T9   | ``PowerAdapter`` (boards.toml power table) |
+| ``.telemetry:with_config_links(candidate)``    | T9   | the candidate plus its boards.toml links |
 | ``.clock:make_clock_adapter(session)``         | lead | ``ClockAdapter`` (DUT MMCM presets) |
 | ``.identify:probe_identify(hints, found)``     | T12  | ``list[Candidate]`` found by UDP 6899 identify |
 
@@ -54,6 +56,12 @@ def _hook(module: str, attr: str) -> Callable[..., Any] | None:
             return None
         raise
     return getattr(mod, attr, None)
+
+
+def _with_config_links(candidate: Candidate) -> Candidate:
+    """Add the links boards.toml gives this board (a power meter, a SYSMON JTAG cable)."""
+    add = _hook("telemetry", "with_config_links")   # T9
+    return add(candidate) if add is not None else candidate
 
 
 class Mps3Consoles:
@@ -134,6 +142,7 @@ class Mps3Session(BoardSession):
             ("storage", "sd", "make_storage_adapter"),
             ("debug", "openocd", "make_debug_adapter"),
             ("telemetry", "telemetry", "make_telemetry_adapter"),
+            ("power", "telemetry", "make_power_adapter"),
             ("clocks", "clock", "make_clock_adapter"),
         ):
             make = _hook(module, factory)
@@ -181,13 +190,13 @@ class Mps3Pack(BoardPack):
     def candidate_for_host(self, spec: str) -> Candidate:
         host, port = parse_endpoint(spec, CONTROL_PORT)
         addr = f"{host}:{port}"
-        return Candidate(
+        return _with_config_links(Candidate(
             pack=self.name,
             board_id=f"mps3@{addr}",
             links=(Link(LinkKind.ETHERNET, addr, "shell control channel"),),
             label=f"MPS3 at {addr}",
             evidence="given explicitly",
-        )
+        ))
 
     def probe(self, hints: ProbeHints) -> list[Candidate]:
         found: list[Candidate] = []
@@ -215,7 +224,7 @@ class Mps3Pack(BoardPack):
             # A USB board paired with an Ethernet shell replaces that shell's candidate.
             ids = {c.board_id for c in usb_found}
             found = [c for c in found if c.board_id not in ids] + list(usb_found)
-        return found
+        return [_with_config_links(c) for c in found]
 
     def open(self, candidate: Candidate) -> Mps3Session:
         eth = next((lk for lk in candidate.links if lk.kind == LinkKind.ETHERNET), None)

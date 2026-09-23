@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from socharness.core.capabilities import negotiate
+from socharness.core.capabilities import POWER_CYCLE, negotiate
 from socharness.core.errors import AbsentError, AlreadyError, HeldError, UsageError
 from socharness.core.events import Event, EventBus
 from socharness.core.model import BoardIdentity, BoardInfo, Candidate, Link
@@ -289,6 +289,12 @@ class Engine:
         links = [lk.kind for lk in entry.candidate.links]
         available, unavailable = negotiate(entry.pack.capability_specs(), links,
                                            identity.features)
+        if POWER_CYCLE in available:   # the link is there; can the device actually cycle?
+            power = getattr(entry.session, "power", None)
+            reason = "no power adapter" if power is None else power.cycle_reason
+            if reason:
+                available = available - {POWER_CYCLE}
+                unavailable = {**unavailable, POWER_CYCLE: reason}
         with self._lock:
             changed = self._identities.get(board_id) != identity
             self._identities[board_id] = identity
