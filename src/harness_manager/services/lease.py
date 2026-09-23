@@ -217,7 +217,7 @@ class LeaseService:
 
     def acquire(self, hub: Any, *, board_id: str = "", ttl_s: int = DEFAULT_TTL_S,
                 holder: str | None = None, progress: Progress | None = None,
-                cancel: threading.Event | None = None, poll_s: float = POLL_S,
+                cancel: threading.Event | None = None, poll_s: float | None = None,
                 timeout_s: float = ACQUIRE_TIMEOUT_S, heartbeat: bool = True) -> dict[str, Any]:
         """Block until the lease is held (it may queue); store it; heartbeat it while tracked."""
         hub = self.require_hub(hub, board_id)
@@ -253,7 +253,8 @@ class LeaseService:
 
         report("acquire", 0, 1)
         try:
-            lease, expires_at = hub.client.lease_acquire(holder, ttl=ttl_s, poll_s=poll_s,
+            lease, expires_at = hub.client.lease_acquire(holder, ttl=ttl_s,
+                                                          poll_s=poll_s or POLL_S,
                                                           timeout_s=timeout_s, sleep=sleep,
                                                           log_fn=on_log)
         except _Cancelled:
