@@ -1,0 +1,2 @@
+# Wheels are binary: no line-ending or diff treatment.
+*.whl binary

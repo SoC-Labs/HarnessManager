@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harness-manager"
-version = "0.0.1"
-description = "SoC Labs Harness Manager: board manager for SoC prototyping harnesses (MPS3 pilot)."
+version = "0.1.0"
+description = "SoC Labs Harness Manager: a board manager for nanoSoC DUT harnesses on Arm MPS3 FPGA boards."
 requires-python = ">=3.10"
 readme = "README.md"
-license = { text = "Proprietary (SoC Labs), pending decision" }
+# Licence: private, to be decided (david). No licence metadata until then.
 # The shell control-channel codec is pyverify (mps3-nanosoc-platform/host/pyverify).
 # It is the ONLY implementation of net-protocol.md on the host. Never re-implement it here.
+# pyverify is not on PyPI: its wheel is in vendor/ (see vendor/README.md), so every
+# install passes `--find-links vendor` (scripts/install.sh, CI, `make venv`).
 dependencies = [
     "mps3-pyverify>=0.1.0",
     # harness-manager-daemon + the web UI (Wave 2): all pure pip wheels on Linux/Windows/macOS.
@@ -33,6 +35,8 @@ dev = [
     "pytest-timeout>=2.3",
     "ruff>=0.6",
     "pyserial>=3.5",
+    # `make dist` and tests/integration/test_l5_packaging.py
+    "build>=1.2",
 ]
 # `harness-manager app` in a native window (WebView2 / WKWebView / GTK-Qt WebKit); without it,
 # the app opens a Chrome/Edge/Chromium app window
@@ -61,6 +65,7 @@ timeout = 60
 markers = [
     "hil: hardware-in-the-loop; needs HARNESS_MANAGER_HIL=1, a board address, and david's board window",
     "slow: long-running integration scenario",
+    "packaging: builds the sdist and wheel and installs them into a clean venv (needs the package index)",
 ]
 addopts = "-m 'not hil'"
 

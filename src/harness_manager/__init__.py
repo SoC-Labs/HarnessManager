@@ -18,4 +18,4 @@ Layers (see docs/ARCHITECTURE.md):
 - ``harness_manager_mps3``: the MPS3 board pack.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
