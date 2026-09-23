@@ -43,6 +43,12 @@ owners.
   load. Restore the baseline design.
 - DUT consoles (UART0, UART1, SWO) over Ethernet; the MCC and the FPGA UARTs over the
   Debug USB.
+- Each console can also be a terminal device for `screen`
+  (`/tmp/harness-manager-$USER/<board>/<console>`, `harness-manager pty`), shown in the
+  app and in `screen` at the same time (Linux and macOS).
+- Console rates: `harness-manager baud` and the app show each console's rate. Serial
+  consoles change rate; Ethernet consoles report the loaded design's fixed rate (76800
+  on nanosoc) and say why they cannot change it.
 - A debug server for the DUT CPU (OpenOCD), for gdb and Arm DS.
 - Reset the DUT, set the DUT clock, read temperatures and oscillators.
 - The board controller (MCC) over the Debug USB: temperatures, oscillators, a reboot
@@ -51,7 +57,7 @@ owners.
 - The configuration SD: backup, install and restore. A backup comes first, `.ebf` files
   are never written, and an interrupted install can be recovered.
 - Board power from a networked plug (Shelly, Tasmota, NETIO) or an INA260, set in
-  `boards.toml`.
+  `boards.toml`: `harness-manager power show`, and a cold `power cycle`.
 - Signed updates of the harness and the app (`harness-manager update`). The channel is
   not live yet: it refuses every release until the release keys are made.
 

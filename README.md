@@ -96,15 +96,17 @@ app shows it:
 screen /tmp/harness-manager-$USER/<board>/uart0
 ```
 
-The app shows the exact path, with a button to copy it. `harness-manager pty TARGET uart0`
-prints it too.
+The app shows the exact `screen` command, with a button to copy it. From a terminal,
+`harness-manager pty TARGET uart0` makes the same device, prints the command, and keeps
+the device until Ctrl-C. One `screen` at a time per console; the app can show it too.
 
 The baud rate:
-- **Ethernet consoles** (uart0 and uart1 on the DUT) run at the rate the loaded design
-  was built with: 76800 for nanosoc. The app shows it. `screen` needs no baud argument
-  for them.
-- **Serial consoles** on the Debug USB (the MCC, the FPGA UARTs) can change rate. Set it
-  in the app.
+- **Ethernet consoles** run at the rate the loaded design was built with: uart0 is
+  76800 on nanosoc, and swo is 2000000. The app shows it. `screen` needs no baud
+  argument for them.
+- **Serial consoles** on the Debug USB (the MCC, the FPGA UARTs) can change rate: in the
+  app, or with `harness-manager baud TARGET NAME RATE`. Their `screen` command carries
+  the rate, because `screen` alone sets 9600.
 
 On Windows there is no `screen`. Use the console in the app, or
 `harness-manager console TARGET uart0 --export 0` and a raw TCP terminal such as PuTTY.
@@ -120,6 +122,8 @@ On Windows there is no `screen`. Use the console in the app, or
 | `harness-manager debug up TARGET` | OpenOCD for the loaded design; connect gdb to the port it prints |
 | `harness-manager reset TARGET` | reset the DUT |
 | `harness-manager restore TARGET` | back to the baseline design |
+| `harness-manager pty TARGET uart0` | a console as a terminal device, for `screen` |
+| `harness-manager power cycle TARGET` | switch the board off and on (needs a networked plug in `boards.toml`) |
 
 `TARGET` is the board's address, for example `192.168.10.101`. Add `--json` to any verb
 for one JSON object on stdout. `harness-manager help --tabs` prints the full help,

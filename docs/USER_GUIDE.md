@@ -128,11 +128,11 @@ harness-manager restore 192.168.10.101            # back to the baseline design
 `program` checks that the design was built for the harness on your board before it
 writes anything, asks you, then confirms the board loaded it.
 
-Consoles: open them in the app, or attach `screen` to the path the app shows
-(`screen /tmp/harness-manager-$USER/<board>/uart0`, Linux and macOS). The app and
-`screen` can show the same console at the same time. The DUT's UARTs run at the rate
-the loaded design was built with (76800 for nanosoc), so `screen` needs no baud
-argument.
+Consoles: open them in the app, or run the `screen` command the app shows
+(`screen /tmp/harness-manager-$USER/<board>/uart0`, Linux and macOS;
+`harness-manager pty 192.168.10.101 uart0` prints it too). The app and `screen` can show
+the same console at the same time. The DUT's UART0 runs at the rate the loaded design
+was built with (76800 for nanosoc), so `screen` needs no baud argument.
 
 Debug: connect gdb with `target extended-remote 127.0.0.1:<gdb port>`. Arm DS uses the
 same port through its "Generic GDB" connection.
@@ -192,8 +192,8 @@ Start at the top. Go down one step only when the step above did not help.
 3. **Reset the DUT.** `harness-manager reset TARGET`.
 4. **Reboot the board from its SD.** `harness-manager mcc - --serial PORT reboot`, with
    the Debug USB cable plugged in. This reloads the FPGA from the SD card, as at power-on.
-   With a networked power plug set up, the app's power-cycle button does the same.
-5. **Power-cycle.** Switch the board off, wait ten seconds, switch it on.
+5. **Power-cycle.** Switch the board off, wait ten seconds, switch it on. With a
+   networked power plug in `boards.toml`: `harness-manager power cycle TARGET`.
 6. **Put the SD back.** Plug in the Debug USB cable, then
    `harness-manager sd - --volume DRIVE restore ~/mps3-backups/<zip>` and reboot (step 4).
    Restoring the backup from your first install returns the SD to how it was before
