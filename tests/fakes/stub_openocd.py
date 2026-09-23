@@ -61,7 +61,7 @@ LOOPBACK = ("127.0.0.1", "localhost")
 def make_wrapper(directory: Path, python: str | None = None) -> Path:
     """Write an ``openocd`` launcher for this stub into ``directory``; return its path.
 
-    Point ``$SOCHARNESS_OPENOCD`` at it. POSIX: a ``sh`` script that ``exec``s
+    Point ``$HARNESS_MANAGER_OPENOCD`` at it. POSIX: a ``sh`` script that ``exec``s
     Python (so the pid is the stub's). Windows: a ``.cmd``.
     """
     directory.mkdir(parents=True, exist_ok=True)

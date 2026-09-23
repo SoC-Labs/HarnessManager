@@ -18,20 +18,20 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import RefusedError
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness.services.update import (
+from harness_manager.core.errors import RefusedError
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager.services.update import (
     RESULT_INSTALLED,
     RESULT_RESTORED,
     RESULT_STORED,
     RESULT_WRITTEN,
     UpdateService,
 )
-from socharness_board_mps3 import mcc as mccmod
-from socharness_board_mps3 import sd as sdmod
-from socharness_board_mps3.overlays import OverlayCatalogue
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager_mps3 import mcc as mccmod
+from harness_manager_mps3 import sd as sdmod
+from harness_manager_mps3.overlays import OverlayCatalogue
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.fake_channel import ChannelBuilder, FakeChannelServer, TestKeys
 from tests.fakes.t3_clock import FakeClock
 from tests.fakes.t7_board import bind_identity_to_sd
@@ -294,7 +294,7 @@ def test_app_update_when_none_is_published(world):
 
 
 def _journal(w):
-    from socharness.services.update.state import Journal
+    from harness_manager.services.update.state import Journal
 
     return Journal(w["svc"].state, w["session"].candidate.board_id)
 
@@ -322,7 +322,7 @@ def test_a_journal_after_the_sd_write_is_recovered_when_the_board_runs_the_relea
     p2, verified = plan(w)
     out = w["svc"].install_harness(w["session"], p2, p2.approve(), verified)
     assert out.result == "up-to-date" and _journal(w).read() is None
-    from socharness.services.update.state import InstallRecords
+    from harness_manager.services.update.state import InstallRecords
 
     rec = InstallRecords(w["svc"].state).get(w["session"].candidate.board_id)
     assert rec["result"] == RESULT_INSTALLED and rec["detail"].startswith("recovered")

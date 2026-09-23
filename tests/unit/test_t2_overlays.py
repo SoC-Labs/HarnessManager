@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import AbsentError, RefusedError
-from socharness.core.model import Check
-from socharness.core.pack import OverlayRef
-from socharness_board_mps3 import overlays as ov_mod
-from socharness_board_mps3.overlays import (
+from harness_manager.core.errors import AbsentError, RefusedError
+from harness_manager.core.model import Check
+from harness_manager.core.pack import OverlayRef
+from harness_manager_mps3 import overlays as ov_mod
+from harness_manager_mps3.overlays import (
     OVERLAY_DIRS_ENV,
     OverlayCatalogue,
     import_overlay,

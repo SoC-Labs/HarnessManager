@@ -12,16 +12,16 @@ import dataclasses
 
 import pytest
 
-from socharness.core.errors import RefusedError
-from socharness.core.events import EventBus
-from socharness.core.model import BoardIdentity
-from socharness.services.update import RESULT_INSTALLED, RESULT_WRITTEN
-from socharness.services.update.channel import ChannelClient
-from socharness.services.update.download import Downloader, sha256_file
-from socharness.services.update.executor import HarnessInstaller
-from socharness.services.update.os_slots import SlotInfo
-from socharness.services.update.planner import BoardView, make_plan
-from socharness.services.update.state import UpdateState
+from harness_manager.core.errors import RefusedError
+from harness_manager.core.events import EventBus
+from harness_manager.core.model import BoardIdentity
+from harness_manager.services.update import RESULT_INSTALLED, RESULT_WRITTEN
+from harness_manager.services.update.channel import ChannelClient
+from harness_manager.services.update.download import Downloader, sha256_file
+from harness_manager.services.update.executor import HarnessInstaller
+from harness_manager.services.update.os_slots import SlotInfo
+from harness_manager.services.update.planner import BoardView, make_plan
+from harness_manager.services.update.state import UpdateState
 from tests.fakes.fake_channel import AssetFile, ChannelBuilder, TestKeys
 from tests.fakes.t7_board import FakeOsSlots, StubSession
 from tests.fakes.t7_bundles import FIELDED_STATIC, Release
@@ -159,7 +159,7 @@ class StubStorage:
         return None
 
     def backup(self, dest_dir, progress=None):
-        from socharness.core.pack import BackupRecord
+        from harness_manager.core.pack import BackupRecord
 
         self.log.append("sd:backup")
         return BackupRecord(path=str(dest_dir / "b.zip"), sha256="0" * 64, created_at=0.0,
@@ -218,7 +218,7 @@ def test_a_two_target_release_writes_the_os_slot_then_the_sd_then_reboots_once(t
 
 
 def test_an_os_only_journal_is_recovered_without_the_debug_usb(world):
-    from socharness.services.update.state import InstallRecords, Journal
+    from harness_manager.services.update.state import InstallRecords, Journal
 
     w = world
     journal = Journal(w["state"], w["session"].candidate.board_id)
@@ -236,7 +236,7 @@ def test_an_os_only_journal_is_recovered_without_the_debug_usb(world):
 
 
 def test_an_os_only_journal_that_did_not_take_is_dropped_and_the_update_runs(world):
-    from socharness.services.update.state import Journal
+    from harness_manager.services.update.state import Journal
 
     w = world
     Journal(w["state"], w["session"].candidate.board_id).write(

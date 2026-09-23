@@ -1,6 +1,6 @@
-"""The web UI end to end: a headless system Chrome on socharnessd (T13's app) over DemoEngine.
+"""The web UI end to end: a headless system Chrome on harness-manager-daemon (T13's app) over DemoEngine.
 
-Each test opens the page the way ``socharness ui`` will (``/#token=...``) and drives it
+Each test opens the page the way ``harness-manager ui`` will (``/#token=...``) and drives it
 with clicks and keys only. What each proves is in its name; each has a negative twin
 (the board, design or state where the opposite must show).
 
@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from socharness.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
+from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -84,15 +84,15 @@ def test_the_token_moves_from_the_url_into_session_storage(page_factory, daemon)
     page = page_factory()
     page.wait_for_selector(".board-item", timeout=T)
     assert "token" not in page.url
-    assert page.evaluate("sessionStorage.getItem('socharness.token')") == daemon.token
-    assert page.locator('[data-testid="daemon-line"]').inner_text().startswith("socharnessd")
+    assert page.evaluate("sessionStorage.getItem('harness_manager.token')") == daemon.token
+    assert page.locator('[data-testid="daemon-line"]').inner_text().startswith("harness-manager-daemon")
     assert page.errors == []
 
 
 def test_a_wrong_token_says_the_session_expired(page_factory, daemon):
     page = page_factory(url=f"{daemon.url}/#token=not-the-token")
     page.wait_for_selector(".banner.err", timeout=T)
-    assert "Session expired: run socharness ui again." in page.locator(".banner.err").inner_text()
+    assert "Session expired: run harness-manager ui again." in page.locator(".banner.err").inner_text()
     assert "session expired" in page.locator('[data-testid="daemon-line"]').inner_text()
 
 
@@ -258,7 +258,7 @@ def test_program_needs_the_arm_box(page_factory, engine):
 
 
 def console_text(page, name):
-    return page.evaluate(f"window.__socharnessConsoles.text({BOARD_USB!r}, {name!r})") or ""
+    return page.evaluate(f"window.__harness_managerConsoles.text({BOARD_USB!r}, {name!r})") or ""
 
 
 @pytest.mark.mock_too
@@ -277,7 +277,7 @@ def test_console_output_appears_and_send_works(page_factory, engine, screenshots
     assert wait_until(lambda: "print(1+1)" in console_text(page, "uart0"))   # the demo DUT echoes
     # The same console in any terminal (lead): the CLI command, ready to copy.
     cmd = page.locator('[data-testid="terminal-command"] code').inner_text()
-    assert cmd.startswith("socharness console ") and cmd.endswith(" uart0"), cmd
+    assert cmd.startswith("harness-manager console ") and cmd.endswith(" uart0"), cmd
     page.screenshot(path=str(screenshots / "light-consoles-live.png"))
 
 
@@ -469,7 +469,7 @@ def test_a_slow_engine_call_leaves_the_page_usable(page_factory, engine):
 
 
 def test_help_shows_the_cli_help_tabs_and_escape_closes_it(page_factory, screenshots):
-    from socharness.cli.helptext import tabs
+    from harness_manager.cli.helptext import tabs
 
     page = page_factory()
     page.wait_for_selector(".board-item", timeout=T)

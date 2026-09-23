@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from socharness.core.errors import RefusedError, UsageError
-from socharness.core.model import Candidate, Link, LinkKind
-from socharness.core.pack import ProbeHints
-from socharness_board_mps3 import usb as usbmod
-from socharness_board_mps3.sd import VolumeInfo
-from socharness_board_mps3.usb import UsbEnv, group_ft4232, probe_usb, serial_console_endpoints
+from harness_manager.core.errors import RefusedError, UsageError
+from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.pack import ProbeHints
+from harness_manager_mps3 import usb as usbmod
+from harness_manager_mps3.sd import VolumeInfo
+from harness_manager_mps3.usb import UsbEnv, group_ft4232, probe_usb, serial_console_endpoints
 from tests.fakes.fake_sd import FakeDapLinkVolume, FakeSdVolume
 from tests.fakes.t3_usb import linux_ft4232, unrelated_ports, windows_ftdi_vcp
 
@@ -94,7 +94,7 @@ def test_scan_builds_one_board_with_mcc_first_and_the_sd(tmp_path):
 
 
 def test_usb_board_id_is_the_clis_rule(tmp_path):
-    # mps3@usb:<first link address>, as socharness.cli.context builds for TARGET '-',
+    # mps3@usb:<first link address>, as harness_manager.cli.context builds for TARGET '-',
     # so one board gets one session lock whether it was probed or given explicitly.
     (scanned,) = probe_usb(SCAN, [], env=usb_env(linux_ft4232()))
     assert scanned.board_id == "mps3@usb:serial:///dev/ttyUSB10"

@@ -6,16 +6,16 @@ import copy
 
 import pytest
 
-from socharness.core.errors import IncompatibleError
-from socharness.services.update.schema import ChannelFormatError, parse_channel
-from socharness.services.update.version import at_least, compare, parse_version
+from harness_manager.core.errors import IncompatibleError
+from harness_manager.services.update.schema import ChannelFormatError, parse_channel
+from harness_manager.services.update.version import at_least, compare, parse_version
 
 SHA = "ab" * 32
 
 
 def good() -> dict:
     return {
-        "schema": "socharness-channel", "schema_version": 1, "channel": "stable", "serial": 3,
+        "schema": "harness-manager-channel", "schema_version": 1, "channel": "stable", "serial": 3,
         "issued_at": "2026-09-23T12:00:00Z", "expires_at": "2027-01-01T00:00:00Z",
         "signing_key_id": "A1A1A1A1A1A1A1A1",
         "board": {"pack": "mps3", "part": "xcku115", "revisions": ["HBI0309C"]},
@@ -35,8 +35,8 @@ def good() -> dict:
             ]}]},
         "app": {"current": "0.2.0", "releases": [{
             "version": "0.2.0", "status": "current", "requires_python": ">=3.10",
-            "artifacts": [{"kind": "wheel", "name": "socharness-0.2.0-py3-none-any.whl",
-                           "url": "https://x/socharness-0.2.0-py3-none-any.whl", "sha256": SHA,
+            "artifacts": [{"kind": "wheel", "name": "harness_manager-0.2.0-py3-none-any.whl",
+                           "url": "https://x/harness_manager-0.2.0-py3-none-any.whl", "sha256": SHA,
                            "size": 5}]}]},
     }
 
@@ -172,7 +172,7 @@ def test_at_least():
 
 H = "0" * 63
 SAMPLE_CHANNEL = {
-    "schema": "socharness-channel", "schema_version": 1,
+    "schema": "harness-manager-channel", "schema_version": 1,
     "channel": "stable", "serial": 12,
     "issued_at": "2026-10-12T10:00:00Z", "expires_at": "2027-04-12T00:00:00Z",
     "signing_key_id": "E7620F1842B4E81F",
@@ -229,13 +229,13 @@ SAMPLE_CHANNEL = {
     "app": {"current": "0.2.0", "releases": [
         {"version": "0.2.0", "status": "current", "requires_python": ">=3.10",
          "min_harness": "1.0.0",
-         "artifacts": [{"kind": "wheel", "name": "socharness-0.2.0-py3-none-any.whl",
+         "artifacts": [{"kind": "wheel", "name": "harness_manager-0.2.0-py3-none-any.whl",
                         "url": "https://github.com/SoC-Labs/mps3-platform-dist/releases/"
-                               "download/app-v0.2.0/socharness-0.2.0-py3-none-any.whl",
+                               "download/app-v0.2.0/harness_manager-0.2.0-py3-none-any.whl",
                         "sha256": H + "b", "size": 412000}],
-         "lock": {"name": "socharness-0.2.0-requirements.lock",
+         "lock": {"name": "harness_manager-0.2.0-requirements.lock",
                   "url": "https://github.com/SoC-Labs/mps3-platform-dist/releases/download/"
-                         "app-v0.2.0/socharness-0.2.0-requirements.lock",
+                         "app-v0.2.0/harness_manager-0.2.0-requirements.lock",
                   "sha256": H + "c", "size": 9000}}]},
 }
 

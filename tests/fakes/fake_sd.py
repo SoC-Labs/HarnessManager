@@ -47,7 +47,7 @@ class FakeSdVolume:
         """relative POSIX path -> sha256 of every file (the journal excluded)."""
         out = {}
         for p in sorted(self.root.rglob("*")):
-            if p.is_file() and p.name != ".socharness-journal.json":
+            if p.is_file() and p.name != ".harness-manager-journal.json":
                 out[p.relative_to(self.root).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
         return out
 

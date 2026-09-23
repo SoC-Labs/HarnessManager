@@ -1,9 +1,9 @@
-"""Team T13: socharnessd under a REAL uvicorn on 127.0.0.1, with the CLI going through it.
+"""Team T13: harness-manager-daemon under a REAL uvicorn on 127.0.0.1, with the CLI going through it.
 
 ``LiveDaemon`` runs the app in a thread and writes ``daemon.json``, so
 ``cli.engine.get_engine()`` finds it and every CLI verb runs on a
 ``RemoteEngine``. The negative twins run the same verb on the in-process engine
-(``SOCHARNESS_NO_DAEMON=1``). Only 127.0.0.1 is reached.
+(``HARNESS_MANAGER_NO_DAEMON=1``). Only 127.0.0.1 is reached.
 """
 
 from __future__ import annotations
@@ -17,11 +17,16 @@ from pathlib import Path
 
 import pytest
 
-from socharness.cli.engine import ENV_NO_DAEMON, describe_engine, get_engine, set_engine_factory
-from socharness.client import RemoteEngine
-from socharness.core.errors import ExitCode
-from socharness.core.events import Event
-from socharness.core.services import Engine as EngineProtocol
+from harness_manager.cli.engine import (
+    ENV_NO_DAEMON,
+    describe_engine,
+    get_engine,
+    set_engine_factory,
+)
+from harness_manager.client import RemoteEngine
+from harness_manager.core.errors import ExitCode
+from harness_manager.core.events import Event
+from harness_manager.core.services import Engine as EngineProtocol
 from tests.fakes.t2_overlays import OTHER_STATIC_ID, SYNTH2_RM_ID, make_overlay, use_overlay_dirs
 from tests.fakes.t4_console_rig import SingleClientProxy
 from tests.fakes.t13_daemon import (
@@ -38,7 +43,7 @@ from tests.fakes.virtual_board import VirtualMps3
 
 @pytest.fixture(autouse=True)
 def _real_engine_selection(monkeypatch):
-    from socharness.cli import engine as cli_engine
+    from harness_manager.cli import engine as cli_engine
 
     monkeypatch.delenv(cli_engine.ENV_ENGINE, raising=False)
     monkeypatch.delenv(ENV_NO_DAEMON, raising=False)
@@ -82,7 +87,7 @@ def test_a_running_daemon_is_the_clis_engine(daemon):
         assert eng.base_url == daemon.base_url
     finally:
         eng.close_all()
-    assert describe_engine().startswith(f"socharnessd at {daemon.base_url}")
+    assert describe_engine().startswith(f"harness-manager-daemon at {daemon.base_url}")
 
 
 def test_negative_twin_no_daemon_env_keeps_the_cli_in_process(daemon, monkeypatch):
@@ -92,7 +97,7 @@ def test_negative_twin_no_daemon_env_keeps_the_cli_in_process(daemon, monkeypatc
         assert not isinstance(eng, RemoteEngine)
     finally:
         eng.close_all()
-    assert describe_engine() == "socharness.engine.Engine"
+    assert describe_engine() == "harness_manager.engine.Engine"
 
 
 # -- CLI verbs through the daemon print what they print in-process -------------------------------------
@@ -208,7 +213,7 @@ def test_the_cli_and_a_websocket_client_share_one_board_session(vboard, capsys, 
                 locks = list((state_dir() / "locks").glob("*.lock"))
                 assert len(locks) == 1
                 owner = json.loads(locks[0].read_text())
-                assert owner["pid"] == os.getpid() and owner["note"] == "socharnessd: web ui"
+                assert owner["pid"] == os.getpid() and owner["note"] == "harness-manager-daemon: web ui"
                 assert (proxy.accepted, proxy.refused) == (1, 0)
                 # the CLI's clients left; the UI's session is still open and live
                 boards = web.get("/api/v1/boards").json()["boards"]
@@ -218,7 +223,7 @@ def test_the_cli_and_a_websocket_client_share_one_board_session(vboard, capsys, 
                 # negative twin: the in-process engine cannot take the board the daemon holds
                 rc, out, err = in_process(monkeypatch, capsys, "--json", "info",
                                           vboard.shell_endpoint)
-                assert rc == ExitCode.HELD and "socharnessd: web ui" in json.loads(out)[
+                assert rc == ExitCode.HELD and "harness-manager-daemon: web ui" in json.loads(out)[
                     "error"]["holder"]
             finally:
                 ui.close()
@@ -344,7 +349,7 @@ def test_the_daemon_will_not_stop_under_a_running_job_unless_forced(vboard):
 
 
 def test_debug_up_is_a_job_and_openocd_outlives_the_client(tmp_path, monkeypatch, capsys):
-    from socharness.services.debug import pid_alive, port_in_use
+    from harness_manager.services.debug import pid_alive, port_in_use
     from tests.fakes.t4_debug_rig import use_stub
     from tests.fakes.t4_rbb_jtag import FakeJtagServer
 

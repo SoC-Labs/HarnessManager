@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from socharness.core.errors import RefusedError
-from socharness.core.model import BoardIdentity
-from socharness.services.update.planner import (
+from harness_manager.core.errors import RefusedError
+from harness_manager.core.model import BoardIdentity
+from harness_manager.services.update.planner import (
     MODE_FULL,
     MODE_NONE,
     MODE_OVERLAYS,
     BoardView,
     make_plan,
 )
-from socharness.services.update.schema import parse_channel
+from harness_manager.services.update.schema import parse_channel
 from tests.fakes.fake_channel import AssetFile, ChannelBuilder, TestKeys
 from tests.fakes.t7_bundles import (
     FIELDED_HARNESS,

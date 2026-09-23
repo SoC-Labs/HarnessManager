@@ -7,10 +7,10 @@ import threading
 
 import pytest
 
-from socharness.core.errors import ExitCode, HeldError, IncompatibleError
-from socharness.core.events import EventBus
-from socharness.daemon.jobs import BoardGates, Job, JobManager
-from socharness.daemon.outbox import Outbox
+from harness_manager.core.errors import ExitCode, HeldError, IncompatibleError
+from harness_manager.core.events import EventBus
+from harness_manager.daemon.jobs import BoardGates, Job, JobManager
+from harness_manager.daemon.outbox import Outbox
 
 
 @pytest.fixture

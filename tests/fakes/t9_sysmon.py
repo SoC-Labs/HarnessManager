@@ -22,7 +22,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from socharness_board_mps3.sysmon import IR_SYSMON_DRP
+from harness_manager_mps3.sysmon import IR_SYSMON_DRP
 
 IR_IDCODE = 0x249          # BSDL: IDCODE (001001001001)
 IR_BYPASS = 0xFFF
@@ -194,7 +194,7 @@ class FakeRbbServer:
 # --- a Tcl model of xsdb, run by a real tclsh --------------------------------------------------
 
 _PRELUDE = r"""
-# Fake xsdb for socharness T9 tests. Models only what the generated script uses.
+# Fake xsdb for harness-manager T9 tests. Models only what the generated script uses.
 set ::mode {%(mode)s}
 set ::regs [dict create %(regs)s]
 set ::log [open {%(log)s} w]
@@ -217,7 +217,7 @@ proc jtag {sub args} {
             return {}
         }
         sequence {
-            set name ::socharness_seq[incr ::seqn]
+            set name ::harness_manager_seq[incr ::seqn]
             set ::ops($name) {}
             proc $name {cmd args} "return \[seqcmd $name \$cmd \$args\]"
             return $name
@@ -312,5 +312,5 @@ class ScriptedRunner:
 
 def marker_output(regs: Mapping[int, int], *, extra: str = "") -> str:
     """What a successful xsdb/openocd run prints, for the given codes."""
-    lines = [f"SOCHARNESS_SYSMON {a:02x} {((a << 16) | v):08x}" for a, v in regs.items()]
+    lines = [f"HARNESS_MANAGER_SYSMON {a:02x} {((a << 16) | v):08x}" for a, v in regs.items()]
     return "\n".join(lines) + ("\n" + extra if extra else "") + "\n"

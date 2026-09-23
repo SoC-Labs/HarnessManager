@@ -1,4 +1,4 @@
-"""Team T13: the socharnessd API on the virtual MPS3, through FastAPI's TestClient.
+"""Team T13: the harness-manager-daemon API on the virtual MPS3, through FastAPI's TestClient.
 
 The app wraps T1's real Engine with the MPS3 pack pointed at ``VirtualMps3``
 (FakeShell pinned to the fielded firmware) by ``EngineConfig.pack_overrides``.
@@ -22,11 +22,11 @@ with warnings.catch_warnings():
     from fastapi.testclient import TestClient
     from starlette.testclient import WebSocketDenialResponse
 
-from socharness.cli.output import jsonable
-from socharness.core.errors import ExitCode
-from socharness.core.model import Candidate, Link, LinkKind
-from socharness.daemon.app import create_app
-from socharness_board_mps3 import mcc as mccmod
+from harness_manager.cli.output import jsonable
+from harness_manager.core.errors import ExitCode
+from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.daemon.app import create_app
+from harness_manager_mps3 import mcc as mccmod
 from tests.fakes.t2_overlays import OTHER_STATIC_ID, SYNTH2_RM_ID, make_overlay, use_overlay_dirs
 from tests.fakes.t3_clock import FakeClock
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
@@ -130,13 +130,13 @@ def test_probe_open_info_overlays_preflight_deploy_reset_close(client, vboard, o
     bid = body["board_id"]
     assert r.status_code == 200 and body["info"]["identity"]["shell_id"] == "0x3f1a560f"
     B = bid_path(bid)
-    # info is BoardInfo, as `socharness --json info` prints it
+    # info is BoardInfo, as `harness-manager --json info` prints it
     info = client.get(B, headers=H).json()
     assert set(info) == {"ok", "candidate", "identity", "health", "capabilities", "unavailable"}
     assert "reboot_board" in info["unavailable"]
     # the lock is held by this process, once, and the note is the daemon's
     holder = client.get(f"{B}/lock", headers=H).json()["holder"]
-    assert holder["note"] == "socharnessd: flow"
+    assert holder["note"] == "harness-manager-daemon: flow"
     listed = client.get("/api/v1/boards", headers=H).json()["boards"]
     assert [(b["board_id"], b["open"]) for b in listed] == [(bid, True)]
     # overlays: one loads, one is blocked with its reason
@@ -223,8 +223,8 @@ def test_error_statuses_follow_the_table(client, vboard, engine):
     assert (r.status_code, r.json()["error"]["name"]) == (404, "ABSENT")
     # the board held by ANOTHER engine (another process, in real life): HELD, holder named
     engine.close(bid)
-    from socharness.core.services import EngineConfig
-    from socharness.engine import Engine
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
 
     other = Engine(EngineConfig(state_dir=engine.state_dir))
     other.open(other.candidate_for(vboard.shell_endpoint), note="someone else")
@@ -239,7 +239,7 @@ def test_error_statuses_follow_the_table(client, vboard, engine):
 def test_the_cli_hold_tag_never_reaches_the_daemons_lock(client, vboard):
     bid = open_board(client, vboard, note="[cli-hold] console uart0")
     note = client.get(f"{bid_path(bid)}/lock", headers=H).json()["holder"]["note"]
-    assert note == "socharnessd: console uart0"          # `detach` must never signal the daemon
+    assert note == "harness-manager-daemon: console uart0"          # `detach` must never signal the daemon
 
 
 # -- the board gate ---------------------------------------------------------------------------------------

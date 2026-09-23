@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
     AlreadyError,
@@ -15,8 +15,8 @@ from socharness.core.errors import (
     IncompatibleError,
     NothingOnTargetError,
 )
-from socharness.core.model import Check, LinkKind
-from socharness.core.services import (
+from harness_manager.core.model import Check, LinkKind
+from harness_manager.core.services import (
     ConsoleBroker,
     ContentStore,
     DebugService,
@@ -24,7 +24,7 @@ from socharness.core.services import (
     Engine,
     TelemetryService,
 )
-from socharness.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
+from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
 
 
 @pytest.fixture

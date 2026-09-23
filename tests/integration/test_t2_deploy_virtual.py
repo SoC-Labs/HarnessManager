@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
     HeldError,
@@ -23,10 +23,10 @@ from socharness.core.errors import (
     RefusedError,
     UnreachableError,
 )
-from socharness.core.events import EventBus
-from socharness.core.model import Check
-from socharness.core.pack import DeployAdapter
-from socharness.services.deploy import (
+from harness_manager.core.events import EventBus
+from harness_manager.core.model import Check
+from harness_manager.core.pack import DeployAdapter
+from harness_manager.services.deploy import (
     ITEM_CLEARING_FITS,
     ITEM_FILES,
     ITEM_PAIR,
@@ -35,9 +35,9 @@ from socharness.services.deploy import (
     ITEM_USERCODE,
     DeployService,
 )
-from socharness_board_mps3.deploy import CLEARING_ARENA_BYTES, Mps3Deploy
-from socharness_board_mps3.overlays import OVERLAY_DIRS_ENV
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager_mps3.deploy import CLEARING_ARENA_BYTES, Mps3Deploy
+from harness_manager_mps3.overlays import OVERLAY_DIRS_ENV
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.t2_overlays import (
     FIELDED_USERCODE,
     GREYBOX_RM_ID,
@@ -357,7 +357,7 @@ def test_push_port_not_listening_is_action_failed(vboard, monkeypatch, overlay_r
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         dead_port = s.getsockname()[1]
-    monkeypatch.setenv("SOCHARNESS_MPS3_PUSH_PORT", str(dead_port))
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_PUSH_PORT", str(dead_port))
 
     with pytest.raises(ActionFailedError, match="bitstream push"):
         DeployService().deploy(session, synth)
@@ -365,12 +365,12 @@ def test_push_port_not_listening_is_action_failed(vboard, monkeypatch, overlay_r
 
 
 def test_explicit_port_arguments_win_over_the_env(vboard, monkeypatch, overlay_root):
-    monkeypatch.setenv("SOCHARNESS_MPS3_PUSH_PORT", "1")
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_PUSH_PORT", "1")
     adapter = Mps3Deploy(Mps3Pack().open(vboard.candidate()).shell,
                          push_port=vboard.shell.raw_tcp_port)
     assert adapter.push_port == vboard.shell.raw_tcp_port
-    monkeypatch.delenv("SOCHARNESS_MPS3_PUSH_PORT")
-    monkeypatch.delenv("SOCHARNESS_MPS3_TFTP_PORT", raising=False)
+    monkeypatch.delenv("HARNESS_MANAGER_MPS3_PUSH_PORT")
+    monkeypatch.delenv("HARNESS_MANAGER_MPS3_TFTP_PORT", raising=False)
     assert Mps3Deploy(adapter._shell).push_port == 6910 and Mps3Deploy(adapter._shell).tftp_port == 69
 
 
@@ -424,7 +424,7 @@ def test_held_control_port_stops_the_preflight(monkeypatch, overlay_root):
 # -- the real fielded overlays (skipped where the .bin payloads are absent) ---------
 
 _REAL = Path(os.environ.get(
-    "SOCHARNESS_T2_REAL_OVERLAYS",
+    "HARNESS_MANAGER_T2_REAL_OVERLAYS",
     Path(__file__).resolve().parents[3] / "mps3-nanosoc-platform" / "fpga" / "dfx" / "overlay"))
 
 

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.model import Candidate, Link, LinkKind
-from socharness.power.config import (
+from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.power.config import (
     BOARDS_FILE,
     ConfigError,
     Secret,
@@ -38,7 +38,7 @@ def test_missing_file_is_empty(tmp_path: Path):
 
 
 def test_default_path_follows_the_state_dir(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("SOCHARNESS_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.setenv("HARNESS_MANAGER_STATE_DIR", str(tmp_path / "st"))
     assert default_path() == tmp_path / "st" / BOARDS_FILE
 
 
@@ -141,12 +141,12 @@ def test_invalid_toml_is_a_config_error(tmp_path: Path):
 @pytest.mark.skipif(os.name != "posix", reason="file modes are POSIX")
 def test_world_readable_inline_password_warns_without_the_password(tmp_path: Path, caplog):
     text = f'[boards.a]\npower = {{ kind = "netio", url = "http://p", auth = {{ password = "{PW}" }} }}\n'
-    with caplog.at_level(logging.WARNING, logger="socharness.power.config"):
+    with caplog.at_level(logging.WARNING, logger="harness_manager.power.config"):
         load_boards(write(tmp_path, text, mode=0o644))
     assert "chmod 600" in caplog.text and PW not in caplog.text
     caplog.clear()
     # Negative twin: a private file does not warn.
-    with caplog.at_level(logging.WARNING, logger="socharness.power.config"):
+    with caplog.at_level(logging.WARNING, logger="harness_manager.power.config"):
         load_boards(write(tmp_path, text, mode=0o600))
     assert caplog.text == ""
 

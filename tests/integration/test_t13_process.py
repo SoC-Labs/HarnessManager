@@ -1,7 +1,7 @@
-"""Team T13: real ``socharnessd`` processes. Single instance, stale takeover, and the CLI verbs.
+"""Team T13: real ``harness-manager-daemon`` processes. Single instance, stale takeover, and the CLI verbs.
 
-These spawn ``python -m socharness.daemon`` (directly, or detached through
-``socharness daemon start`` / ``socharness ui``), always on 127.0.0.1 and an
+These spawn ``python -m harness_manager.daemon`` (directly, or detached through
+``harness-manager daemon start`` / ``harness-manager ui``), always on 127.0.0.1 and an
 ephemeral port, and always stop them. ``webbrowser.open`` is replaced, so no
 browser ever starts. Every check has a negative twin.
 """
@@ -20,9 +20,9 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 
-from socharness.cli.engine import ENV_NO_DAEMON, set_engine_factory
-from socharness.core.errors import ExitCode
-from socharness.daemon.state import daemon_json_path, read_info
+from harness_manager.cli.engine import ENV_NO_DAEMON, set_engine_factory
+from harness_manager.core.errors import ExitCode
+from harness_manager.daemon.state import daemon_json_path, read_info
 from tests.fakes.t13_daemon import (
     kill,
     pack_overrides,
@@ -39,7 +39,7 @@ pytestmark = pytest.mark.timeout(180)
 
 @pytest.fixture(autouse=True)
 def _cleanup(monkeypatch):
-    from socharness.cli import engine as cli_engine
+    from harness_manager.cli import engine as cli_engine
 
     monkeypatch.delenv(cli_engine.ENV_ENGINE, raising=False)
     monkeypatch.delenv(ENV_NO_DAEMON, raising=False)
@@ -73,7 +73,7 @@ def get(url: str, path: str, token: str | None) -> httpx.Response:
         return c.get(url.split("#")[0].rstrip("/") + path, headers=headers)
 
 
-# -- `socharness ui` ------------------------------------------------------------------------------------
+# -- `harness-manager ui` ------------------------------------------------------------------------------------
 
 
 def test_ui_no_browser_prints_a_url_whose_token_works(capsys, no_browser):
@@ -101,7 +101,7 @@ def test_ui_no_browser_prints_a_url_whose_token_works(capsys, no_browser):
     ws_connect(f"ws://127.0.0.1:{info.port}/api/v1/events?token={token}").close()
     time.sleep(0.2)
     log = (state_dir() / "daemon.log").read_text()
-    assert "socharness daemon start" in log and token not in log
+    assert "harness-manager daemon start" in log and token not in log
     # a second `ui` reuses the running daemon and opens the browser this time
     rc, out, _ = run_cli(capsys, "--json", "ui")
     again = json.loads(out)
@@ -131,7 +131,7 @@ def test_ui_on_a_different_port_than_the_running_daemon_is_refused(capsys, no_br
     assert rc == ExitCode.USAGE and str(port) in err["message"]
 
 
-# -- `socharness daemon start|stop|status` --------------------------------------------------------------
+# -- `harness-manager daemon start|stop|status` --------------------------------------------------------------
 
 
 def test_daemon_start_status_stop(capsys):
@@ -193,7 +193,7 @@ def test_a_second_daemon_on_the_same_state_dir_refuses_to_start(tmp_path):
         kill(first)
     # a clean stop removes daemon.json and releases the lock
     assert not daemon_json_path(state_dir()).exists()
-    assert not (state_dir() / "socharnessd.lock").exists()
+    assert not (state_dir() / "harness-manager-daemon.lock").exists()
 
 
 def test_a_taken_port_is_port_bound(tmp_path):
@@ -201,7 +201,7 @@ def test_a_taken_port_is_port_bound(tmp_path):
         s.bind(("127.0.0.1", 0))
         s.listen()
         port = s.getsockname()[1]
-        proc = subprocess.run([sys.executable, "-m", "socharness.daemon", "--state-dir",
+        proc = subprocess.run([sys.executable, "-m", "harness_manager.daemon", "--state-dir",
                                str(state_dir()), "--port", str(port)],
                               capture_output=True, timeout=60)
     assert proc.returncode == ExitCode.PORT_BOUND and b"already in use" in proc.stdout + proc.stderr
@@ -233,8 +233,8 @@ def test_the_cli_reaches_a_board_through_a_daemon_process(tmp_path, capsys):
 
 
 def test_bad_pack_overrides_stop_the_daemon_at_start(tmp_path):
-    proc = subprocess.run([sys.executable, "-m", "socharness.daemon", "--state-dir",
+    proc = subprocess.run([sys.executable, "-m", "harness_manager.daemon", "--state-dir",
                            str(state_dir()), "--pack-overrides", '{"mps3": {"nope": 1}}'],
                           capture_output=True, timeout=60)
     assert proc.returncode == ExitCode.USAGE and not daemon_json_path(state_dir()).exists()
-    assert not Path(state_dir() / "socharnessd.lock").exists()
+    assert not Path(state_dir() / "harness-manager-daemon.lock").exists()

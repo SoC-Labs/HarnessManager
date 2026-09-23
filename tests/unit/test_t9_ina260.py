@@ -6,10 +6,10 @@ import sys
 
 import pytest
 
-from socharness.core.errors import UnavailableError
-from socharness.power.adapter import make_driver
-from socharness.power.config import PowerConfig
-from socharness.power.ina260 import NEEDS_PACKAGE, Ina260Mcp2221
+from harness_manager.core.errors import UnavailableError
+from harness_manager.power.adapter import make_driver
+from harness_manager.power.config import PowerConfig
+from harness_manager.power.ina260 import NEEDS_PACKAGE, Ina260Mcp2221
 
 CFG = PowerConfig(kind="ina260_mcp2221", i2c_address=0x40, device=0, cycle=False)
 

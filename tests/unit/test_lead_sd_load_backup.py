@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from socharness.core.errors import RefusedError
+from harness_manager.core.errors import RefusedError
 from tests.unit.test_t3_sd import sd, storage  # noqa: F401 - reuse T3's fixtures
 
 
@@ -33,7 +33,7 @@ def test_load_backup_without_sidecar_is_verified_but_flagged(tmp_path, sd, stora
 
 
 def test_load_backup_missing_file_is_absent(tmp_path, storage):  # noqa: F811
-    from socharness.core.errors import AbsentError
+    from harness_manager.core.errors import AbsentError
 
     with pytest.raises(AbsentError):
         storage.load_backup(tmp_path / "nope.zip")

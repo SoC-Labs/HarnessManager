@@ -1,4 +1,4 @@
-"""``socharness app``'s window launcher (web/window.py): which window it opens, and the fallbacks.
+"""``harness-manager app``'s window launcher (web/window.py): which window it opens, and the fallbacks.
 
 No real browser or window starts here: ``popen``, ``which`` and ``browser_open``
 are injected, and pywebview is replaced in ``sys.modules``.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from socharness.web import window
+from harness_manager.web import window
 
 URL = "http://127.0.0.1:41411/#token=abc"
 

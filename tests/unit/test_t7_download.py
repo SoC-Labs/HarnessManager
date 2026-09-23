@@ -7,9 +7,9 @@ import logging
 
 import pytest
 
-from socharness.core.errors import RefusedError, UnavailableError, UnreachableError
-from socharness.services.update.download import Downloader
-from socharness.services.update.schema import Asset
+from harness_manager.core.errors import RefusedError, UnavailableError, UnreachableError
+from harness_manager.services.update.download import Downloader
+from harness_manager.services.update.schema import Asset
 from tests.fakes.fake_channel import FakeChannelServer
 
 DATA = bytes(range(256)) * 1024          # 256 KiB, several chunks

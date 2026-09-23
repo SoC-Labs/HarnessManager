@@ -13,7 +13,7 @@ output; and each board-side failure maps to the right exit code.
 What it cannot prove: a gdb attach (the fake has no MEM-AP/Cortex-M0), or
 anything about the real board's jtag_server timing.
 
-Set ``SOCHARNESS_TEST_REAL_OPENOCD`` to a binary to run this where ``openocd``
+Set ``HARNESS_MANAGER_TEST_REAL_OPENOCD`` to a binary to run this where ``openocd``
 is not on PATH (e.g. ~/tools/oss-cad-suite/bin/openocd).
 """
 
@@ -28,17 +28,17 @@ from pathlib import Path
 
 import pytest
 
-import socharness.services.debug as dbg
-from socharness.core.errors import HeldError, NothingOnTargetError, PortBoundError
-from socharness.core.events import EventBus
-from socharness.services.debug import DebugService, pid_alive, port_in_use, tcl_rpc
-from socharness_board_mps3.constants import OPENOCD_CFG_DIR
-from socharness_board_mps3.pack import Mps3Pack
+import harness_manager.services.debug as dbg
+from harness_manager.core.errors import HeldError, NothingOnTargetError, PortBoundError
+from harness_manager.core.events import EventBus
+from harness_manager.services.debug import DebugService, pid_alive, port_in_use, tcl_rpc
+from harness_manager_mps3.constants import OPENOCD_CFG_DIR
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.t4_rbb_jtag import FakeJtagServer
 from tests.fakes.virtual_board import VirtualMps3
 
-REAL = os.environ.get("SOCHARNESS_TEST_REAL_OPENOCD") or shutil.which("openocd")
-CFG_DIR = Path(os.environ.get("SOCHARNESS_MPS3_OPENOCD_DIR") or OPENOCD_CFG_DIR or "/nonexistent")
+REAL = os.environ.get("HARNESS_MANAGER_TEST_REAL_OPENOCD") or shutil.which("openocd")
+CFG_DIR = Path(os.environ.get("HARNESS_MANAGER_MPS3_OPENOCD_DIR") or OPENOCD_CFG_DIR or "/nonexistent")
 
 
 def _has_remote_bitbang(binary: str | None) -> bool:
@@ -54,7 +54,7 @@ def _has_remote_bitbang(binary: str | None) -> bool:
 
 pytestmark = [
     pytest.mark.slow,
-    pytest.mark.skipif(not REAL, reason="no real openocd (set SOCHARNESS_TEST_REAL_OPENOCD)"),
+    pytest.mark.skipif(not REAL, reason="no real openocd (set HARNESS_MANAGER_TEST_REAL_OPENOCD)"),
     pytest.mark.skipif(bool(REAL) and not _has_remote_bitbang(REAL),
                        reason=f"{REAL} was built without the remote_bitbang adapter"),
     pytest.mark.skipif(not (CFG_DIR / "nanosoc_mps3_jtag.cfg").is_file(),
@@ -64,9 +64,9 @@ pytestmark = [
 
 @pytest.fixture
 def real(monkeypatch) -> str:
-    monkeypatch.setenv("SOCHARNESS_OPENOCD", str(REAL))
-    monkeypatch.setenv("SOCHARNESS_MPS3_OPENOCD_DIR", str(CFG_DIR))
-    monkeypatch.delenv("SOCHARNESS_DEBUG_PORT_BASE", raising=False)
+    monkeypatch.setenv("HARNESS_MANAGER_OPENOCD", str(REAL))
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_OPENOCD_DIR", str(CFG_DIR))
+    monkeypatch.delenv("HARNESS_MANAGER_DEBUG_PORT_BASE", raising=False)
     return str(REAL)
 
 

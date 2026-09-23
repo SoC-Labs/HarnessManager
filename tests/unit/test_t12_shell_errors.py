@@ -11,11 +11,11 @@ import socket
 
 import pytest
 
-from socharness.core.errors import ExitCode, HeldError, UnreachableError
-from socharness.core.model import Check
-from socharness_board_mps3 import shell as shellmod
-from socharness_board_mps3.identify import IdentifyReply
-from socharness_board_mps3.shell import (
+from harness_manager.core.errors import ExitCode, HeldError, UnreachableError
+from harness_manager.core.model import Check
+from harness_manager_mps3 import shell as shellmod
+from harness_manager_mps3.identify import IdentifyReply
+from harness_manager_mps3.shell import (
     Mps3Shell,
     ShellProbes,
     ShellRefusedError,
@@ -218,7 +218,7 @@ def test_held_identity_falls_back_to_identify(monkeypatch):
     """identity() does not fail on EBUSY: identify (UDP) is independent of 6900."""
     with RawShell("ebusy") as srv, FakeIdentifyResponder(
             lambda n: canonical_reply(n, unit="dna-0123456789abcdef")) as ident:
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(ident.port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(ident.port))
         got = Mps3Shell("127.0.0.1", srv.port, timeout=1).identity()
     assert got.shell_id == "0x3f1a560f" and got.harness_impl == "linux"
     assert got.unit_id == "dna-0123456789abcdef" and got.build_check == Check.UNCHECKED
@@ -226,7 +226,7 @@ def test_held_identity_falls_back_to_identify(monkeypatch):
 
 def test_negative_twin_held_without_identify_still_raises_held(monkeypatch):
     with RawShell("ebusy") as srv:
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(dead_port()))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(dead_port()))
         with pytest.raises(HeldError):
             Mps3Shell("127.0.0.1", srv.port, timeout=1).identity()
 

@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import HeldError, UnavailableError
-from socharness.core.model import BoardIdentity, Candidate, Link, LinkKind, Reading
-from socharness.power.adapter import PowerAdapter
-from socharness_board_mps3 import telemetry as tm
-from socharness_board_mps3.sysmon import SysmonSample
-from socharness_board_mps3.telemetry import (
+from harness_manager.core.errors import HeldError, UnavailableError
+from harness_manager.core.model import BoardIdentity, Candidate, Link, LinkKind, Reading
+from harness_manager.power.adapter import PowerAdapter
+from harness_manager_mps3 import telemetry as tm
+from harness_manager_mps3.sysmon import SysmonSample
+from harness_manager_mps3.telemetry import (
     NO_ESTIMATES,
     NO_POWER_SENSOR,
     Mps3Telemetry,
@@ -320,7 +320,7 @@ def test_estimate_for_the_loaded_design(tmp_path: Path):
 def boards_toml(tmp_path: Path, monkeypatch) -> Path:
     state = tmp_path / "state"
     state.mkdir()
-    monkeypatch.setenv("SOCHARNESS_STATE_DIR", str(state))
+    monkeypatch.setenv("HARNESS_MANAGER_STATE_DIR", str(state))
     return state / "boards.toml"
 
 

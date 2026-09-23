@@ -14,12 +14,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from socharness.core import capabilities as C
-from socharness.core.pack import ProbeHints
-from socharness.core.services import EngineConfig
-from socharness.daemon.jobs import busy_error
-from socharness.engine import Engine
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.core import capabilities as C
+from harness_manager.core.pack import ProbeHints
+from harness_manager.core.services import EngineConfig
+from harness_manager.daemon.jobs import busy_error
+from harness_manager.engine import Engine
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
 from tests.fakes.virtual_board import LINUX_HARNESSD, VirtualMps3
 
@@ -27,7 +27,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")   # starlette: httpx with its TestClient is deprecated
     from fastapi.testclient import TestClient
 
-from socharness.daemon.app import create_app  # noqa: E402
+from harness_manager.daemon.app import create_app  # noqa: E402
 
 
 def _rescue_engine(vb: VirtualMps3, tmp_path: Path) -> Engine:
@@ -37,7 +37,7 @@ def _rescue_engine(vb: VirtualMps3, tmp_path: Path) -> Engine:
 
 def test_a_rescue_board_loses_the_capabilities_that_need_the_harness(tmp_path, monkeypatch):
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         vb.enter_rescue("slot A and B failed CRC")
         eng = _rescue_engine(vb, tmp_path)
         try:
@@ -55,7 +55,7 @@ def test_a_rescue_board_loses_the_capabilities_that_need_the_harness(tmp_path, m
 
 def test_negative_twin_a_running_board_keeps_them(tmp_path, monkeypatch):
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         eng = _rescue_engine(vb, tmp_path)
         try:
             cand = eng.candidate_for(vb.shell_endpoint)
@@ -71,7 +71,7 @@ def test_a_busy_board_names_its_job_in_error_data():
     job = SimpleNamespace(id="j7", kind="deploy", describe=lambda: "deploy job j7")
     err = busy_error("mps3@x", job)
     assert err.data == {"job": "j7", "kind": "deploy", "board_id": "mps3@x"}
-    assert err.holder == "socharnessd deploy job j7"
+    assert err.holder == "harness-manager-daemon deploy job j7"
 
 
 @pytest.fixture
@@ -95,7 +95,7 @@ def test_session_view_reports_service_availability(vboard):
     assert body["job"] is None and body["job_kind"] is None
 
 
-# -- `socharness ui --demo` (lead, at the Qt retirement) -------------------------------------
+# -- `harness-manager ui --demo` (lead, at the Qt retirement) -------------------------------------
 
 
 def test_ui_demo_serves_scripted_boards_from_its_own_state_dir(capsys, monkeypatch):
@@ -103,8 +103,8 @@ def test_ui_demo_serves_scripted_boards_from_its_own_state_dir(capsys, monkeypat
 
     import httpx
 
-    from socharness.cli.engine import ENV_NO_DAEMON, set_engine_factory
-    from socharness.daemon.state import read_info
+    from harness_manager.cli.engine import ENV_NO_DAEMON, set_engine_factory
+    from harness_manager.daemon.state import read_info
     from tests.fakes.t13_daemon import run_cli, state_dir, stop_state_dir
 
     monkeypatch.delenv(ENV_NO_DAEMON, raising=False)
@@ -133,11 +133,11 @@ def test_ui_demo_serves_scripted_boards_from_its_own_state_dir(capsys, monkeypat
         set_engine_factory(previous)
 
 
-# -- `socharness app` (lead) ------------------------------------------------------------------
+# -- `harness-manager app` (lead) ------------------------------------------------------------------
 
 
 def _app_cli(capsys, monkeypatch, *argv: str):
-    from socharness.cli.engine import ENV_NO_DAEMON, set_engine_factory
+    from harness_manager.cli.engine import ENV_NO_DAEMON, set_engine_factory
     from tests.fakes.t13_daemon import run_cli
 
     monkeypatch.delenv(ENV_NO_DAEMON, raising=False)
@@ -151,7 +151,7 @@ def _app_cli(capsys, monkeypatch, *argv: str):
 def test_app_opens_the_ui_in_an_application_window(capsys, monkeypatch):
     import json
 
-    from socharness.web import window
+    from harness_manager.web import window
     from tests.fakes.t13_daemon import state_dir, stop_state_dir
 
     opened: list[tuple[str, Path, bool]] = []
@@ -175,7 +175,7 @@ def test_app_opens_the_ui_in_an_application_window(capsys, monkeypatch):
 def test_negative_twin_app_with_no_display_prints_the_url_and_opens_nothing(capsys, monkeypatch):
     import json
 
-    from socharness.web import window
+    from harness_manager.web import window
     from tests.fakes.t13_daemon import state_dir, stop_state_dir
 
     monkeypatch.delenv("DISPLAY", raising=False)

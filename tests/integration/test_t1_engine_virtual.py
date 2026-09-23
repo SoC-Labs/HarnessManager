@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import ExitCode, HeldError, UnreachableError
-from socharness.core.events import EventBus
-from socharness.core.model import LinkKind
-from socharness.core.pack import ProbeHints
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness.services.telemetry import NO_SOURCE_REASON
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.core.errors import ExitCode, HeldError, UnreachableError
+from harness_manager.core.events import EventBus
+from harness_manager.core.model import LinkKind
+from harness_manager.core.pack import ProbeHints
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager.services.telemetry import NO_SOURCE_REASON
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.virtual_board import VirtualMps3
 
 REPO = Path(__file__).resolve().parents[2]
@@ -127,8 +127,8 @@ def test_telemetry_on_the_ethernet_only_board_is_explicitly_unavailable(vboard, 
 CHILD = textwrap.dedent("""
     import sys
     from pathlib import Path
-    from socharness.core.services import EngineConfig
-    from socharness.engine import Engine
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
     eng = Engine(EngineConfig(state_dir=Path(sys.argv[1])))
     eng.open(eng.candidate_for(sys.argv[2]), note="child process holding the board")
     print("HELD", flush=True)

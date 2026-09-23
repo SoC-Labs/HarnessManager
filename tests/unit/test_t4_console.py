@@ -6,10 +6,10 @@ from collections.abc import Iterator
 
 import pytest
 
-from socharness.core.errors import AbsentError, ExitCode, UnavailableError
-from socharness.core.events import EventBus
-from socharness.core.transport import register_fake_serial, unregister_fake_serial
-from socharness.services.console import ConsoleBroker
+from harness_manager.core.errors import AbsentError, ExitCode, UnavailableError
+from harness_manager.core.events import EventBus
+from harness_manager.core.transport import register_fake_serial, unregister_fake_serial
+from harness_manager.services.console import ConsoleBroker
 from tests.fakes.t4_console_rig import BareSession, EventLog, FakeUart, read_until
 
 

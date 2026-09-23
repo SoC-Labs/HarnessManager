@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.model import LinkKind
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness_board_mps3 import mcc as mccmod
-from socharness_board_mps3.pack import Mps3Pack
-from socharness_board_mps3.telemetry import (
+from harness_manager.core.model import LinkKind
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager_mps3 import mcc as mccmod
+from harness_manager_mps3.pack import Mps3Pack
+from harness_manager_mps3.telemetry import (
     NO_POWER_SENSOR,
     NO_STATS_CODEC,
     Mps3Telemetry,
@@ -32,7 +32,7 @@ TCLSH = shutil.which("tclsh")
 
 @pytest.fixture
 def state(tmp_path: Path) -> Path:
-    # conftest's autouse fixture already points SOCHARNESS_STATE_DIR here, so the engine and
+    # conftest's autouse fixture already points HARNESS_MANAGER_STATE_DIR here, so the engine and
     # the pack (which reads boards.toml by the state-dir rule) agree.
     return tmp_path / "state"
 

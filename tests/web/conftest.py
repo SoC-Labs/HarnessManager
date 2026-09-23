@@ -1,11 +1,11 @@
 """Web UI test fixtures (Team T14): the daemon under the page, and a headless system Chrome.
 
-- ``daemon``: the REAL socharnessd app (Team T13, ``socharness.daemon.app``) over
+- ``daemon``: the REAL harness-manager-daemon app (Team T13, ``harness_manager.daemon.app``) over
   ``DemoEngine``. A test marked ``@pytest.mark.mock_too`` also runs over the T14 mock
   (``tests/fakes/t14_mock_api.py``), which keeps the mock honest in the browser too.
 - ``browser``: the SYSTEM Chrome through Playwright. Skipped, with the reason, when
   Playwright is not installed or no Chrome/Chromium binary is found; nothing is ever
-  downloaded. ``SOCHARNESS_TEST_CHROME`` picks a binary.
+  downloaded. ``HARNESS_MANAGER_TEST_CHROME`` picks a binary.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from socharness.demo import DemoEngine
+from harness_manager.demo import DemoEngine
 from tests.fakes.t14_mock_api import MockDaemon, real_daemon
 
 SCREENSHOTS = Path(__file__).resolve().parent / "screenshots"
@@ -29,12 +29,12 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "browser: drives a headless system Chrome through Playwright (T14 web UI)")
     config.addinivalue_line(
-        "markers", "mock_too: also run this browser test over the T14 mock socharnessd")
+        "markers", "mock_too: also run this browser test over the T14 mock harness-manager-daemon")
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "daemon" in metafunc.fixturenames:
-        servers = ["socharnessd"]
+        servers = ["harness-manager-daemon"]
         if metafunc.definition.get_closest_marker("mock_too"):
             servers.append("mock")
         metafunc.parametrize("daemon", servers, indirect=True)
@@ -61,14 +61,14 @@ def dump_failed_pages(request, pages) -> None:
     for i, page in enumerate(pages):
         try:
             page.screenshot(path=str(out / f"{stem}-{i}.png"))
-            state = page.evaluate("window.__socharnessState ? window.__socharnessState() : null")
+            state = page.evaluate("window.__harness_managerState ? window.__harness_managerState() : null")
             (out / f"{stem}-{i}.json").write_text(json.dumps(state, indent=1, default=str))
         except Exception:  # noqa: BLE001, S112 - a report must never mask the failure
             continue
 
 
 def chrome_binary() -> str | None:
-    given = os.environ.get("SOCHARNESS_TEST_CHROME")
+    given = os.environ.get("HARNESS_MANAGER_TEST_CHROME")
     if given:
         return given if Path(given).exists() else None
     for path in CHROME_CANDIDATES:
@@ -82,7 +82,7 @@ def browser():
     sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
     binary = chrome_binary()
     if binary is None:
-        pytest.skip("no system Chrome/Chromium found (set SOCHARNESS_TEST_CHROME)")
+        pytest.skip("no system Chrome/Chromium found (set HARNESS_MANAGER_TEST_CHROME)")
     with sync_api.sync_playwright() as p:
         try:
             b = p.chromium.launch(executable_path=binary, headless=True,
@@ -102,11 +102,11 @@ def engine() -> Iterator[DemoEngine]:
 
 @pytest.fixture
 def daemon(request, engine, tmp_path):
-    kind = getattr(request, "param", "socharnessd")
+    kind = getattr(request, "param", "harness-manager-daemon")
     if kind == "mock":
         server = MockDaemon(engine, token="t14-browser")
     else:
-        server = real_daemon(engine, token="t14-browser", state_dir=tmp_path / "socharnessd")
+        server = real_daemon(engine, token="t14-browser", state_dir=tmp_path / "harness-manager-daemon")
     with server as d:
         yield d
 

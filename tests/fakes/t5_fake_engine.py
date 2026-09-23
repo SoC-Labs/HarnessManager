@@ -1,6 +1,6 @@
 """Team T5: a scripted fake of the frozen ``Engine`` protocol and its services.
 
-It implements ``socharness.core.services`` (``Engine``, ``DeployService``,
+It implements ``harness_manager.core.services`` (``Engine``, ``DeployService``,
 ``ConsoleBroker``, ``DebugService``, ``TelemetryService``) and a board session
 with every adapter the CLI touches (``resets``, ``clocks``, ``controller``,
 ``storage``) plus an MPS3-style ``shell`` handle for the lab verbs. Nothing here
@@ -35,15 +35,15 @@ from pyverify.client import (
     MacGenResponse,
 )
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     AlreadyError,
     HarnessError,
     NothingOnTargetError,
     RefusedError,
     UsageError,
 )
-from socharness.core.events import Event, EventBus
-from socharness.core.model import (
+from harness_manager.core.events import Event, EventBus
+from harness_manager.core.model import (
     BoardIdentity,
     BoardInfo,
     Candidate,
@@ -53,7 +53,7 @@ from socharness.core.model import (
     LinkKind,
     Reading,
 )
-from socharness.core.pack import (
+from harness_manager.core.pack import (
     BackupRecord,
     BoardSession,
     DeployResult,
@@ -62,8 +62,8 @@ from socharness.core.pack import (
     ProbeHints,
     Progress,
 )
-from socharness.core.services import DebugStatus
-from socharness.core.session import LockOwner
+from harness_manager.core.services import DebugStatus
+from harness_manager.core.session import LockOwner
 
 SHELL_ID = "0x3f1a560f"
 DANGEROUS = {"FORMAT", "DEL", "EEPROM", "USB_OFF", "SHUTDOWN", "REN", "COPY", "CAP", "FILL"}
@@ -441,7 +441,7 @@ class FakeStore:
 
 
 class FakeEngine:
-    """Implements ``socharness.core.services.Engine`` with scripted behaviour."""
+    """Implements ``harness_manager.core.services.Engine`` with scripted behaviour."""
 
     def __init__(self, state: FakeState | None = None) -> None:
         self.st = state or FakeState()
@@ -516,5 +516,5 @@ class FakeEngine:
 
 
 def make_engine(_args: Any = None) -> FakeEngine:
-    """A factory for ``$SOCHARNESS_CLI_ENGINE=tests.fakes.t5_fake_engine:make_engine``."""
+    """A factory for ``$HARNESS_MANAGER_CLI_ENGINE=tests.fakes.t5_fake_engine:make_engine``."""
     return FakeEngine()

@@ -1,4 +1,4 @@
-"""The web UI over the REAL stack: socharnessd (T13) -> Engine -> MPS3 pack -> pyverify ->
+"""The web UI over the REAL stack: harness-manager-daemon (T13) -> Engine -> MPS3 pack -> pyverify ->
 VirtualMps3, in every harness state Team T12 modelled (FIELDED_ILA_V011, LINUX_HARNESSD,
 busy, wedged, rescue, a tunnelled link). No DemoEngine and no mock here: what the page
 shows is what the product daemon and engine report.
@@ -12,11 +12,11 @@ from dataclasses import replace
 
 import pytest
 
-from socharness.core.model import Link, LinkKind
-from socharness.core.pack import ProbeHints
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.core.model import Link, LinkKind
+from harness_manager.core.pack import ProbeHints
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.t14_mock_api import real_daemon
 from tests.fakes.virtual_board import (
     FIELDED_3F1A560F,
@@ -38,10 +38,10 @@ def stage(browser, tmp_path, monkeypatch, screenshots):
     daemons, contexts = [], []
 
     def make(vb: VirtualMps3, candidate=None, scheme: str = "light"):
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         engine = Engine(EngineConfig(state_dir=tmp_path / "state"),
                         packs={"mps3": Mps3Pack(console_ports=vb.console_ports)})
-        daemon = real_daemon(engine, token="t14-states", state_dir=tmp_path / "socharnessd").start()
+        daemon = real_daemon(engine, token="t14-states", state_dir=tmp_path / "harness-manager-daemon").start()
         daemons.append(daemon)
         cand = candidate or vb.candidate()
         daemon.seed(cand)                  # known to the daemon, so the page never scans
@@ -188,7 +188,7 @@ def test_a_rescue_board_is_found_opened_and_explained(stage, tmp_path, screensho
         endpoint = vb.shell_endpoint
         vb.enter_rescue("slot A and B failed CRC")
         pack = Mps3Pack(console_ports=vb.console_ports)
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         # scan_network stays on: with explicit hosts it only unicasts identify to them, and a
         # board in rescue answers identify, not 6900.
         (cand,) = pack.probe(ProbeHints(hosts=(endpoint,), scan_usb=False, timeout_s=0.5))

@@ -22,7 +22,7 @@ UPSTREAM FIRST. pyverify's HOST lane is adding ``FakeShell(profile="linux",
 hung=, mode=, identify_port=, ...)``. When the installed FakeShell accepts those
 keywords, this class passes them through and does NOT install its own
 version/diag/hung/identify/rescue behaviour (``self.upstream`` is True).
-``SOCHARNESS_T12_FAKES=local`` forces the local models, ``=upstream`` requires
+``HARNESS_MANAGER_T12_FAKES=local`` forces the local models, ``=upstream`` requires
 the upstream ones. EBUSY, the reboot outage and ``version_extra`` stay local:
 upstream does not model them.
 """
@@ -47,9 +47,9 @@ UPSTREAM_AVAILABLE = _UPSTREAM_KEYS <= set(inspect.signature(FakeShell.__init__)
 
 
 def use_upstream() -> bool:
-    want = os.environ.get("SOCHARNESS_T12_FAKES", "auto").strip().lower()
+    want = os.environ.get("HARNESS_MANAGER_T12_FAKES", "auto").strip().lower()
     if want == "upstream" and not UPSTREAM_AVAILABLE:
-        raise RuntimeError("SOCHARNESS_T12_FAKES=upstream but the installed pyverify FakeShell "
+        raise RuntimeError("HARNESS_MANAGER_T12_FAKES=upstream but the installed pyverify FakeShell "
                            "has no linux profile")
     return UPSTREAM_AVAILABLE and want != "local"
 

@@ -1,8 +1,8 @@
-"""The web UI against the real daemon PROCESS: ``python -m socharness.daemon`` (Team T13),
+"""The web UI against the real daemon PROCESS: ``python -m harness_manager.daemon`` (Team T13),
 the real Engine and MPS3 pack, and a VirtualMps3 on loopback.
 
 This is the install path david's users take: the daemon finds the UI in the
-``socharness.web`` package data by itself, writes ``daemon.json`` with a fresh token,
+``harness_manager.web`` package data by itself, writes ``daemon.json`` with a fresh token,
 and the page, opened at ``/#token=...``, adds the board by address and opens it.
 
 Loopback only. The page's automatic first scan (``POST /probe`` with no hosts would
@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from socharness.daemon.state import read_info
+from harness_manager.daemon.state import read_info
 from tests.fakes.virtual_board import FIELDED_3F1A560F, VirtualMps3
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
@@ -36,12 +36,12 @@ def daemon_process(tmp_path):
     procs = []
 
     def start(vb: VirtualMps3):
-        sdir = tmp_path / "socharnessd"
+        sdir = tmp_path / "harness-manager-daemon"
         overrides = {"mps3": {"console_ports": vb.console_ports,
                               "push_port": vb.shell.raw_tcp_port, "tftp_port": vb.shell.tftp_port}}
-        env = dict(os.environ, SOCHARNESS_STATE_DIR=str(sdir))
+        env = dict(os.environ, HARNESS_MANAGER_STATE_DIR=str(sdir))
         proc = subprocess.Popen(
-            [sys.executable, "-m", "socharness.daemon", "--state-dir", str(sdir), "--port", "0",
+            [sys.executable, "-m", "harness_manager.daemon", "--state-dir", str(sdir), "--port", "0",
              "--log-level", "warning", "--pack-overrides", json.dumps(overrides)],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         procs.append(proc)
@@ -51,9 +51,9 @@ def daemon_process(tmp_path):
             if info is not None and info.pid == proc.pid:
                 return info
             if proc.poll() is not None:
-                raise AssertionError(f"socharnessd exited: {proc.stdout.read().decode()[-2000:]}")
+                raise AssertionError(f"harness-manager-daemon exited: {proc.stdout.read().decode()[-2000:]}")
             time.sleep(0.05)
-        raise AssertionError("socharnessd did not write daemon.json")
+        raise AssertionError("harness-manager-daemon did not write daemon.json")
 
     yield start
     for proc in procs:
@@ -87,7 +87,7 @@ def test_the_daemon_process_serves_the_ui_and_opens_a_board_added_by_address(
             page.route("**/api/v1/probe", only_explicit_probes)
             page.goto(f"{info.base_url}/#token={info.token}")
             expect(page.locator('[data-testid="daemon-line"]')).to_contain_text(
-                f"socharnessd {info.version}", timeout=T)
+                f"harness-manager-daemon {info.version}", timeout=T)
             assert "token" not in page.url
             page.locator('button[aria-label="Add a board by address"]').click()
             page.locator('input[aria-label="Board address"]').fill(vb.shell_endpoint)

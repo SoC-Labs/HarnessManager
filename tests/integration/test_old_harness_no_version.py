@@ -1,7 +1,7 @@
 """A harness older than net-protocol v0.8 has no `version` (and maybe no `diag`) verb.
 
 The July Linux image (v0.7 daemons), which boots at the B0 window, is exactly
-this. Its reply is {"ok":false,"err":"unknown op"}. `socharness info` must
+this. Its reply is {"ok":false,"err":"unknown op"}. `harness-manager info` must
 treat that as a legitimate older harness, never as an error
 (from the MicroBlaze agent, 2026-09-23).
 """
@@ -13,8 +13,8 @@ import socket
 import socketserver
 import threading
 
-from socharness.cli.main import main
-from socharness.core.errors import ExitCode
+from harness_manager.cli.main import main
+from harness_manager.core.errors import ExitCode
 
 
 class _V07Handler(socketserver.StreamRequestHandler):

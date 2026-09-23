@@ -17,16 +17,16 @@ from pathlib import Path
 import pytest
 from pyverify.client import ShellClient
 
-from socharness.core import capabilities as C
-from socharness.core.errors import ExitCode, IncompatibleError, UnreachableError
-from socharness.core.model import Check
-from socharness.core.pack import ProbeHints
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness.services.deploy import ITEM_CLEARING_FITS, ITEM_TRANSPORT
-from socharness_board_mps3.constants import reboot_wait_s
-from socharness_board_mps3.pack import Mps3Pack
-from socharness_board_mps3.shell import ShellRescueError, ShellWedgedError
+from harness_manager.core import capabilities as C
+from harness_manager.core.errors import ExitCode, IncompatibleError, UnreachableError
+from harness_manager.core.model import Check
+from harness_manager.core.pack import ProbeHints
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager.services.deploy import ITEM_CLEARING_FITS, ITEM_TRANSPORT
+from harness_manager_mps3.constants import reboot_wait_s
+from harness_manager_mps3.pack import Mps3Pack
+from harness_manager_mps3.shell import ShellRescueError, ShellWedgedError
 from tests.fakes.t2_overlays import (
     FIELDED_USERCODE,
     NON_WINDOWED,
@@ -93,7 +93,7 @@ def test_ila_mint_bake_is_the_old_feature_set_with_a_readable_usracc(tmp_path):
 
 def test_placeholder_static_ids_are_flagged_and_overridable(monkeypatch):
     assert not FIELDED_ILA_V011.static_id_final and not LINUX_HARNESSD.static_id_final
-    monkeypatch.setenv("SOCHARNESS_T12_LINUX_STATIC_ID", "0x2B082E1B")
+    monkeypatch.setenv("HARNESS_MANAGER_T12_LINUX_STATIC_ID", "0x2B082E1B")
     p = linux_harnessd_profile()
     assert (p.static_id, p.static_id_final) == (0x2B082E1B, True)
 
@@ -145,7 +145,7 @@ def test_hung_harnessd_is_wedged_not_offline(tmp_path):
 
 def test_dead_harnessd_is_offline_and_identify_says_why(tmp_path, monkeypatch):
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         session = pack_for(vb).open(vb.candidate())
         vb.kill_harness(keep_identify=True)
         told = session.health()
@@ -160,7 +160,7 @@ def test_dead_harnessd_is_offline_and_identify_says_why(tmp_path, monkeypatch):
 def test_ebusy_does_not_break_info(tmp_path, monkeypatch):
     """A3's busy line: info still shows the board (identify), and health says busy."""
     with VirtualMps3(tmp_path, LINUX_HARNESSD, unit="dna-0a0b0c0d") as vb:
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         eng = engine_for(vb, tmp_path)
         cand = vb.candidate()
         eng.open(cand)
@@ -178,7 +178,7 @@ def test_rescue_board_is_found_by_probe_and_explained(tmp_path, monkeypatch):
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
         endpoint = vb.shell_endpoint
         vb.enter_rescue("slot A and B failed CRC")
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         (cand,) = pack_for(vb).probe(ProbeHints(hosts=(endpoint,), scan_usb=False,
                                                 timeout_s=0.5))
         session = pack_for(vb).open(cand)
@@ -198,7 +198,7 @@ def test_rescue_board_is_found_by_probe_and_explained(tmp_path, monkeypatch):
 
 def test_negative_twin_a_running_board_is_found_by_ping_not_identify(tmp_path, monkeypatch):
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         (cand,) = pack_for(vb).probe(ProbeHints(hosts=(vb.shell_endpoint,), scan_usb=False))
         asked = len(vb.shell.identify_requests)
     assert cand.evidence == "answered ping" and cand.identity.harness_impl == "linux"
@@ -208,7 +208,7 @@ def test_negative_twin_a_running_board_is_found_by_ping_not_identify(tmp_path, m
 def test_probe_keys_a_board_by_its_unit(tmp_path, monkeypatch):
     with VirtualMps3(tmp_path, LINUX_HARNESSD, unit="dna-feedface") as vb:
         endpoint = vb.shell_endpoint
-        monkeypatch.setenv("SOCHARNESS_MPS3_IDENTIFY_PORT", str(vb.identify_port))
+        monkeypatch.setenv("HARNESS_MANAGER_MPS3_IDENTIFY_PORT", str(vb.identify_port))
         vb.kill_harness(keep_identify=True)
         (cand,) = pack_for(vb).probe(ProbeHints(hosts=(endpoint,), scan_usb=False,
                                                 timeout_s=0.5))

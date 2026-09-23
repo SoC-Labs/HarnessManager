@@ -11,10 +11,10 @@ import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from socharness.core import capabilities as C
-from socharness.core.capabilities import CapabilitySpec, via
-from socharness.core.model import BoardIdentity, Candidate, Health, Link, LinkKind, Reading
-from socharness.core.pack import BoardPack, BoardSession, ProbeHints
+from harness_manager.core import capabilities as C
+from harness_manager.core.capabilities import CapabilitySpec, via
+from harness_manager.core.model import BoardIdentity, Candidate, Health, Link, LinkKind, Reading
+from harness_manager.core.pack import BoardPack, BoardSession, ProbeHints
 
 SPECS = (
     CapabilitySpec(C.IDENTIFY, "Identify", (via(LinkKind.ETHERNET),)),

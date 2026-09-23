@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-import socharness.services.debug as dbg
-from socharness.core.errors import (
+import harness_manager.services.debug as dbg
+from harness_manager.core.errors import (
     ExitCode,
     HeldError,
     NothingOnTargetError,
@@ -28,8 +28,8 @@ from socharness.core.errors import (
     UnavailableError,
     UnreachableError,
 )
-from socharness.core.events import Event, EventBus
-from socharness.services.debug import (
+from harness_manager.core.events import Event, EventBus
+from harness_manager.services.debug import (
     DEFAULT_PORT_BASE,
     PORT_BLOCK,
     PORT_SLOTS,
@@ -39,7 +39,7 @@ from socharness.services.debug import (
     port_in_use,
     tcl_rpc,
 )
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.stub_openocd import read_log
 from tests.fakes.t4_console_rig import EventLog, free_port
 from tests.fakes.t4_debug_rig import StubRig, argv_positions, run_stub, use_stub
@@ -193,8 +193,8 @@ def test_iice_uses_the_two_tap_chain_config(rig, jtag, tmp_path, debug):
 
 
 def test_missing_configs_are_unavailable(rig, jtag, nanosoc, debug, monkeypatch, tmp_path):
-    monkeypatch.setenv("SOCHARNESS_MPS3_OPENOCD_DIR", str(tmp_path / "empty"))
-    with pytest.raises(UnavailableError, match="SOCHARNESS_MPS3_OPENOCD_DIR") as exc:
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_OPENOCD_DIR", str(tmp_path / "empty"))
+    with pytest.raises(UnavailableError, match="HARNESS_MANAGER_MPS3_OPENOCD_DIR") as exc:
         debug.up(open_session(nanosoc, jtag.port))
     assert exc.value.code == ExitCode.UNAVAILABLE and rig.runs() == []
 
@@ -205,15 +205,15 @@ def test_missing_configs_are_unavailable(rig, jtag, nanosoc, debug, monkeypatch,
 def test_no_openocd_binary_is_unavailable(rig, jtag, nanosoc, debug, monkeypatch, tmp_path):
     assert find_openocd() == str(rig.binary)                    # positive twin
     session = open_session(nanosoc, jtag.port)
-    monkeypatch.setenv("SOCHARNESS_OPENOCD", str(tmp_path / "no-such-openocd"))
+    monkeypatch.setenv("HARNESS_MANAGER_OPENOCD", str(tmp_path / "no-such-openocd"))
     with pytest.raises(UnavailableError) as exc:
         debug.up(session)
     assert exc.value.code == ExitCode.UNAVAILABLE == 12
-    monkeypatch.delenv("SOCHARNESS_OPENOCD")
+    monkeypatch.delenv("HARNESS_MANAGER_OPENOCD")
     monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
     with pytest.raises(UnavailableError) as exc:
         debug.detect(session)
-    assert exc.value.reason == "OpenOCD not found — install it or set SOCHARNESS_OPENOCD"
+    assert exc.value.reason == "OpenOCD not found — install it or set HARNESS_MANAGER_OPENOCD"
 
 
 # -- ports ---------------------------------------------------------------------------------------

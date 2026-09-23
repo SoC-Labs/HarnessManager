@@ -7,17 +7,17 @@
 | Team | Scope | State |
 |---|---|---|
 | T12 | Harness evolution: ILA v0.11 + Linux, identify, wedged/rescue | merged (9fc2004, CCRs 64ae3be) |
-| T13 | `socharnessd` local service + RemoteEngine, per docs/API.md | merged (752d047, CCRs fdebfef) |
-| T14 | Clean web UI replacing Qt: no-build ES modules, served by socharnessd | merged (8f1a7ee, CCRs 1daa928); Qt retired |
+| T13 | `harness-manager-daemon` local service + RemoteEngine, per docs/API.md | merged (752d047, CCRs fdebfef) |
+| T14 | Clean web UI replacing Qt: no-build ES modules, served by harness-manager-daemon | merged (8f1a7ee, CCRs 1daa928); Qt retired |
 | T7 | Signed GitHub update channel, two-target bundles, app self-update | merged (7750171, CCRs e60d7f0) |
 | T9 | Telemetry sources and power | merged (764c472, CCRs 5ae5937) |
 
-`make check` on main: 1539 passed, 7 skipped (the Qt tests left with Qt). Try the UI with no board: `socharness ui --demo`.
+`make check` on main: 1539 passed, 7 skipped (the Qt tests left with Qt). Try the UI with no board: `harness-manager ui --demo`.
 
 **Wave 2 follow-ups (not yet assigned):**
-- **socharnessd endpoints** for `session.power` (read, cycle) and `engine.update` (check, harness, app, rollback as jobs). The web UI greys both out until then.
+- **harness-manager-daemon endpoints** for `session.power` (read, cycle) and `engine.update` (check, harness, app, rollback as jobs). The web UI greys both out until then.
 - **T7-2:** move `OsSlotAdapter` into `core.pack` as `BoardSession.os_slots`, with a T12 pack hook. This waits on the Linux lead's FLOW_CONTRACT.md.
-- **T7-5:** a public overlay-import hook on the pack (today `PackOverlayHandler` imports `socharness_board_<pack>.overlays` by name).
+- **T7-5:** a public overlay-import hook on the pack (today `PackOverlayHandler` imports `harness_manager_<pack>.overlays` by name).
 - **Trust keys:** `update/trust.py` `PINNED_KEYS` is empty, so every channel is refused. david creates the minisign keys (harness-release, root, optional app-ci).
 - **Web UI gaps** (Qt had none of these either): SD install page, Clocks, Board & XDC, lab verbs, an update page, a power-cycle button.
 - **T14-2 (declined):** a wedged harness keeps failing `GET /boards/{bid}` with its code; revisit only if the stale view proves confusing on a real board.
@@ -42,7 +42,7 @@ It installs from `git@github.com:SoC-Labs/HarnessManager.git` (private) with one
 
 ### Step 0 (lead, first, about 1 h): rename, then freeze the new contracts
 
-**Rename `socharness` to Harness Manager everywhere:**
+**Rename `harness-manager` to Harness Manager everywhere:**
 
 | What | New name |
 |---|---|
@@ -106,7 +106,7 @@ The lead wires each new router and hook into `app.py` and `pack.py` (lead-owned)
 3. **Push to SoC-Labs/HarnessManager** after the rename: the repo is private and empty.
 4. **Licence:** can wait for the tag.
 
-**Status (2026-09-23): Wave 1 is complete and merged.** `make check` gives 900 passed and 4 skipped (the real-OpenOCD tests; they pass with `SOCHARNESS_TEST_REAL_OPENOCD` set). The GUI tests run offscreen.
+**Status (2026-09-23): Wave 1 is complete and merged.** `make check` gives 900 passed and 4 skipped (the real-OpenOCD tests; they pass with `HARNESS_MANAGER_TEST_REAL_OPENOCD` set). The GUI tests run offscreen.
 
 | Team | Merged as | What landed |
 |---|---|---|
@@ -124,7 +124,7 @@ The lead's contract fixes after each merge are the `Apply T<n> contract change r
 - the harness-side handover: `mps3-nanosoc-platform/docs/planning/BOARD_MANAGER_HARNESS_HANDOVER.md`.
 
 **Next action:**
-1. david opens a board window for **HIL R0/R1** (read-only: `socharness info`, the consoles, the MCC `HELP`/`CFG R`, and debug `detect`).
+1. david opens a board window for **HIL R0/R1** (read-only: `harness-manager info`, the consoles, the MCC `HELP`/`CFG R`, and debug `detect`).
 2. The lead opens the Wave 2 contract window (§4a).
 
 ---
@@ -161,7 +161,7 @@ The fielded shell is `0x3F1A560F` (harness 1.0.0). Every row marked "today" can 
 ## 2. Principles every team follows
 
 1. **Contract first.**
-   - Teams code against `socharness.core` (models, errors and exit codes, capabilities, events, the pack interface, the session lock).
+   - Teams code against `harness_manager.core` (models, errors and exit codes, capabilities, events, the pack interface, the session lock).
    - Contracts change only through `docs/CONTRACTS.md` (§5).
 2. **One codec.**
    - The MPS3 shell protocol is spoken only through `pyverify` (platform repo). If it lacks something, the fix goes to the harness agent, not into this repo.
@@ -195,18 +195,18 @@ The fielded shell is `0x3F1A560F` (harness 1.0.0). Every row marked "today" can 
 
 | Path | Owner | Contents |
 |---|---|---|
-| `src/socharness/core/**` | **lead** | contracts (frozen per wave) |
+| `src/harness_manager/core/**` | **lead** | contracts (frozen per wave) |
 | `tests/fakes/virtual_board.py`, `tests/conftest.py`, `pyproject.toml`, `Makefile`, `docs/CONTRACTS.md` | **lead** | shared fixtures and build |
-| `src/socharness/engine.py`, `src/socharness/services/telemetry.py`, `src/socharness/services/store.py` | T1 | engine facade, telemetry aggregator, local content store |
-| `src/socharness/services/deploy.py`, `src/socharness_board_mps3/deploy.py`, `src/socharness_board_mps3/overlays.py` | T2 | guarded deploy |
-| `src/socharness/transports/direct.py`, `src/socharness_board_mps3/{mcc,sd,usb}.py`, `tests/fakes/fake_mcc.py`, `tests/fakes/fake_sd.py` | T3 | controller, storage, USB discovery |
-| `src/socharness/services/{console,debug}.py`, `src/socharness_board_mps3/openocd.py`, `tests/fakes/stub_openocd.py` | T4 | consoles, debug sessions |
-| `src/socharness/cli/**` | T5 | all verbs, output formats |
-| ~~`src/socharness/gui/**`, `tests/gui/**`~~ | T6 | PySide6 app, retired at the T14 merge (`DemoEngine` is now `socharness/demo.py`) |
-| `src/socharness/services/update/**`, `tests/fakes/fake_channel.py` | T7 | channel, verify, install, self-update |
-| `src/socharness/transports/hub.py`, `src/socharness_fpgahub/**`, `tests/fakes/fake_hub.py` | T8 | hub mode |
-| `src/socharness_board_mps3/telemetry.py`, `src/socharness/power/**` | T9 | telemetry sources, smart plugs |
-| `src/socharness/services/xdc/**`, `src/socharness_board_mps3/pins/**` | T10 | XDC export |
+| `src/harness_manager/engine.py`, `src/harness_manager/services/telemetry.py`, `src/harness_manager/services/store.py` | T1 | engine facade, telemetry aggregator, local content store |
+| `src/harness_manager/services/deploy.py`, `src/harness_manager_mps3/deploy.py`, `src/harness_manager_mps3/overlays.py` | T2 | guarded deploy |
+| `src/harness_manager/transports/direct.py`, `src/harness_manager_mps3/{mcc,sd,usb}.py`, `tests/fakes/fake_mcc.py`, `tests/fakes/fake_sd.py` | T3 | controller, storage, USB discovery |
+| `src/harness_manager/services/{console,debug}.py`, `src/harness_manager_mps3/openocd.py`, `tests/fakes/stub_openocd.py` | T4 | consoles, debug sessions |
+| `src/harness_manager/cli/**` | T5 | all verbs, output formats |
+| ~~`src/harness-manager/gui/**`, `tests/gui/**`~~ | T6 | PySide6 app, retired at the T14 merge (`DemoEngine` is now `harness_manager/demo.py`) |
+| `src/harness_manager/services/update/**`, `tests/fakes/fake_channel.py` | T7 | channel, verify, install, self-update |
+| `src/harness_manager/transports/hub.py`, `src/harness_manager_fpgahub/**`, `tests/fakes/fake_hub.py` | T8 | hub mode |
+| `src/harness_manager_mps3/telemetry.py`, `src/harness_manager/power/**` | T9 | telemetry sources, smart plugs |
+| `src/harness_manager/services/xdc/**`, `src/harness_manager_mps3/pins/**` | T10 | XDC export |
 | `packaging/**`, `.github/**`, `docs/user/**` | T11 | release, CI, user docs |
 
 Each team's tests go in `tests/unit/test_<team>_*.py` and `tests/integration/test_<team>_*.py`, so pytest's default collection finds them. Every team may **read** everything; it **writes** only its own rows.
@@ -228,14 +228,14 @@ Delivered:
 ### Wave 1: the engine, CLI and GUI MVP (6 teams in parallel, ~8–10 working days)
 
 **T1 · Engine core services (4–6 d)**
-- `socharness.engine.Engine`:
+- `harness_manager.engine.Engine`:
   - probe every pack;
   - open sessions under the `SessionLock`;
   - compute the capability view;
   - publish events.
 - `services/store.py`: a content-addressed local store (sha256), with indexes keyed by `static_id`/`static_usercode` for overlays and by harness version for bundles.
 - `services/telemetry.py`: aggregates readings with provenance and max age.
-- Settings and config (`~/.config/socharness/`, `SOCHARNESS_*` env).
+- Settings and config (`~/.config/harness-manager/`, `HARNESS_MANAGER_*` env).
 - **Tests:**
   - lock contention between two engines;
   - store integrity (a corrupted blob is detected);
@@ -358,8 +358,8 @@ Delivered:
 - **Don't build:** bare-metal-only platform features, or a TCP shell console.
 
 **New Wave 2 work these revealed:**
-- **A local engine service (`socharnessd`, per user).** A board lock belongs to one process, so today:
-  - `socharness attach` must stay in the foreground;
+- **A local engine service (`harness-manager-daemon`, per user).** A board lock belongs to one process, so today:
+  - `harness-manager attach` must stay in the foreground;
   - `debug up` cannot leave OpenOCD running after the command exits;
   - the GUI and the CLI cannot share one board.
 
@@ -389,7 +389,7 @@ Delivered:
 
 **T8 · Hub mode (6–8 d)**
 - `transports/hub.py`: the fpgahub 0.3.0 REST client, SSE events, leases, and WSS TCP tunnels for local gdb/Vivado ports.
-- `socharness_fpgahub`: the engine running hub-side as an fpgahub plugin.
+- `harness_manager_fpgahub`: the engine running hub-side as an fpgahub plugin.
 - Contract tests against fpgahub's OpenAPI. Read the 0.3.0 tree, not the stale local checkout.
 - A fake hub fixture.
 
@@ -441,7 +441,7 @@ The harness agent works through handover lanes B, A, G, C and D in its own repo.
 - The lead checks every hand-back with `git diff --stat main...team/<id>`. A change outside the owned paths is rejected, not merged.
 
 **Contracts.**
-- `socharness.core` and the shared fakes are frozen for a wave.
+- `harness_manager.core` and the shared fakes are frozen for a wave.
 - A team that needs a change writes a **contract change request** in its hand-back: what, why, and the smallest diff.
 - The lead applies agreed requests to `main` at the next merge window. Blocking requests are applied mid-wave and all teams are told.
 
@@ -490,12 +490,12 @@ The harness agent works through handover lanes B, A, G, C and D in its own repo.
 | GUI | `tests/gui` | `make check` when PySide6 is present | offscreen; fake engine; fits-window check |
 | HIL R0 | `tests/hil` | board window only | read-only: `info`, consoles read, MCC `HELP`/`CFG R` |
 | HIL R1 | `tests/hil` | board window only | OpenOCD detect, IDCODE |
-| HIL M1–M5 | `tests/hil` | board window + `SOCHARNESS_HIL_MUTATE=1` | M1 deploy greybox↔led; M2 reset and clock; M3 MCC REBOOT; M4 SD backup; M5 install + rollback (david present) |
+| HIL M1–M5 | `tests/hil` | board window + `HARNESS_MANAGER_HIL_MUTATE=1` | M1 deploy greybox↔led; M2 reset and clock; M3 MCC REBOOT; M4 SD backup; M5 install + rollback (david present) |
 
 **Cross-cutting rules:**
 - Tests pass on Linux and Windows. Use `pathlib` everywhere.
 - Coverage target: 85% for `core` and `services`.
-- No test touches `~/.config`; the `SOCHARNESS_STATE_DIR` fixture handles that.
+- No test touches `~/.config`; the `HARNESS_MANAGER_STATE_DIR` fixture handles that.
 - No test reaches any host except `127.0.0.1`.
 
 ## 7. Milestones (indicative; board windows set the real pace)
@@ -519,7 +519,7 @@ on branch team/t<n>-<slug>. Commit only there. Never push. Never touch hardware,
 the hub, or the platform repo.
 
 Read first: docs/TEAM_PLAN.md (§2 principles, §3 ownership, §6 testing),
-docs/CONTRACTS.md, and src/socharness/core/**.
+docs/CONTRACTS.md, and src/harness_manager/core/**.
 
 You own (write only these): <paths>
 Implement: <deliverables from §4>

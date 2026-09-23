@@ -1,13 +1,13 @@
-"""Team T13 test rig: socharnessd in-process (TestClient or real uvicorn), and the CLI harness.
+"""Team T13 test rig: harness-manager-daemon in-process (TestClient or real uvicorn), and the CLI harness.
 
 - ``engine_for(vb)``: an ``Engine`` in the test's state dir, pointed at a
   ``VirtualMps3`` with ``EngineConfig.pack_overrides`` (console, push and TFTP ports).
 - ``LiveDaemon``: the app under a REAL uvicorn on an ephemeral 127.0.0.1 port,
   in a thread, optionally with ``daemon.json`` written so ``get_engine()`` finds it.
 - ``api(url)``: an httpx client with the bearer token and no proxy.
-- ``cli``: ``socharness`` ``main()`` with ``cmd_daemon.register`` wired in the way
+- ``cli``: ``harness-manager`` ``main()`` with ``cmd_daemon.register`` wired in the way
   the lead will wire it into ``cli/main.py``.
-- ``spawn``/``stop_all``: real ``python -m socharness.daemon`` processes, always
+- ``spawn``/``stop_all``: real ``python -m harness_manager.daemon`` processes, always
   stopped at the end of a test.
 
 Loopback only.
@@ -31,11 +31,11 @@ from urllib.parse import quote
 
 import httpx
 
-from socharness.core.services import EngineConfig
-from socharness.daemon.app import create_app
-from socharness.daemon.server import bind_socket
-from socharness.daemon.state import DaemonInfo, daemon_json_path, read_info, write_info
-from socharness.engine import Engine
+from harness_manager.core.services import EngineConfig
+from harness_manager.daemon.app import create_app
+from harness_manager.daemon.server import bind_socket
+from harness_manager.daemon.state import DaemonInfo, daemon_json_path, read_info, write_info
+from harness_manager.engine import Engine
 from tests.fakes.virtual_board import VirtualMps3
 
 TOKEN = "t13-test-token-0123456789"
@@ -43,7 +43,7 @@ TOKEN = "t13-test-token-0123456789"
 
 def state_dir() -> Path:
     """The per-test state dir the autouse fixture set."""
-    return Path(os.environ["SOCHARNESS_STATE_DIR"])
+    return Path(os.environ["HARNESS_MANAGER_STATE_DIR"])
 
 
 def pack_overrides(vb: VirtualMps3, **extra: Any) -> dict[str, dict]:
@@ -186,7 +186,7 @@ def recv_json_until(ws: Any, predicate, timeout: float = 10.0) -> list[dict]:
 
 
 def _with_daemon_verbs(original):
-    from socharness.cli.cmd_daemon import register
+    from harness_manager.cli.cmd_daemon import register
 
     def make_parser() -> argparse.ArgumentParser:
         parser = original()
@@ -201,7 +201,7 @@ def _with_daemon_verbs(original):
 @contextmanager
 def daemon_verbs() -> Iterator[None]:
     """``cli.main.main`` with ``daemon``/``ui`` registered (as the lead will wire them)."""
-    from socharness.cli import main as cli_main
+    from harness_manager.cli import main as cli_main
 
     original = cli_main.make_parser
     cli_main.make_parser = _with_daemon_verbs(original)
@@ -212,7 +212,7 @@ def daemon_verbs() -> Iterator[None]:
 
 
 def run_cli(capsys, *argv: str) -> tuple[int, str, str]:
-    from socharness.cli.main import main
+    from harness_manager.cli.main import main
 
     with daemon_verbs():
         rc = main(list(argv))
@@ -224,15 +224,15 @@ def run_cli(capsys, *argv: str) -> tuple[int, str, str]:
 
 
 def spawn(sdir: Path, *extra: str) -> subprocess.Popen:
-    """``python -m socharness.daemon`` in the foreground of a child process (the test owns it)."""
-    return subprocess.Popen([sys.executable, "-m", "socharness.daemon", "--state-dir", str(sdir),
+    """``python -m harness_manager.daemon`` in the foreground of a child process (the test owns it)."""
+    return subprocess.Popen([sys.executable, "-m", "harness_manager.daemon", "--state-dir", str(sdir),
                              "--port", "0", "--log-level", "warning", *extra],
                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, env=dict(os.environ))
 
 
 def wait_info(sdir: Path, pid: int, timeout: float = 30.0) -> DaemonInfo:
-    from socharness.daemon.control import health
+    from harness_manager.daemon.control import health
 
     def ready() -> DaemonInfo | None:
         info = read_info(sdir)
@@ -255,8 +255,8 @@ def kill(proc: subprocess.Popen) -> None:
 
 def stop_state_dir(sdir: Path) -> None:
     """Stop whatever daemon ``daemon.json`` in ``sdir`` names (test cleanup)."""
-    from socharness.core.session import pid_alive
-    from socharness.daemon import control
+    from harness_manager.core.session import pid_alive
+    from harness_manager.daemon import control
 
     info = read_info(sdir)
     if info is None:

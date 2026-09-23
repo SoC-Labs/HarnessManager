@@ -18,7 +18,7 @@ The two generations that follow it (Team T12):
 
 Their ``static_id``s are NOT FINAL (the ILA mint's is in the mint's own
 ``prod/static_id.txt``, not yet fielded; mint 3 has not been built). Each is a
-placeholder that ``SOCHARNESS_T12_ILA_STATIC_ID`` / ``SOCHARNESS_T12_LINUX_STATIC_ID``
+placeholder that ``HARNESS_MANAGER_T12_ILA_STATIC_ID`` / ``HARNESS_MANAGER_T12_LINUX_STATIC_ID``
 override; tests only rely on it differing from ``0x3F1A560F``.
 """
 
@@ -30,8 +30,8 @@ from pathlib import Path
 
 from pyverify.testing.fakeshell import FakeShell
 
-from socharness.core.model import Candidate, Link, LinkKind
-from socharness.core.transport import register_fake_serial, unregister_fake_serial
+from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.transport import register_fake_serial, unregister_fake_serial
 
 from .fake_identify import FakeIdentifyResponder
 from .fake_mcc import FakeMcc
@@ -100,7 +100,7 @@ def ila_mint_bake_profile(static_id: int | None = None) -> FirmwareProfile:
     the five v0.8 features, but with USRACC fixed, so ``usr_access`` is readable
     and the skew check runs (W1 runbook §0.2, proof 3)."""
     sid, final = ((static_id, True) if static_id is not None else
-                  _static_id_from_env("SOCHARNESS_T12_ILA_STATIC_ID",
+                  _static_id_from_env("HARNESS_MANAGER_T12_ILA_STATIC_ID",
                                       ILA_MINT_STATIC_ID_PLACEHOLDER))
     return FirmwareProfile(
         name=f"ila-mint-bake-0x{sid:08X}", static_id=sid, harness_version="1.0.0",
@@ -125,7 +125,7 @@ def linux_harnessd_profile(static_id: int | None = None) -> FirmwareProfile:
     no source for OMITTED, ``up_ms`` = process uptime + additive ``os_up_ms``, a
     reboot ~30-40 s longer than bare-metal (the pack's witness budget: 180 s)."""
     sid, final = ((static_id, True) if static_id is not None else
-                  _static_id_from_env("SOCHARNESS_T12_LINUX_STATIC_ID",
+                  _static_id_from_env("HARNESS_MANAGER_T12_LINUX_STATIC_ID",
                                       LINUX_MINT3_STATIC_ID_PLACEHOLDER))
     return FirmwareProfile(
         name=f"linux-harnessd-0x{sid:08X}", static_id=sid, harness_version="1.0.0",
@@ -184,7 +184,7 @@ class VirtualMps3:
         self.sd = FakeSdVolume(tmp_path / "sd")
         self.reboots = 0
         # usb=True registers the MCC as fake://<name> so the pack's USB adapters
-        # (Team T3) can open it through socharness.core.transport.open_serial.
+        # (Team T3) can open it through harness_manager.core.transport.open_serial.
         self.usb = usb
         self.mcc_url = ""
         self._fake_name = f"mcc-{id(self):x}"
@@ -218,7 +218,7 @@ class VirtualMps3:
 
     def identify_env(self) -> dict[str, str]:
         """The environment that points the pack's identify client at this board."""
-        return {"SOCHARNESS_MPS3_IDENTIFY_PORT": str(self.identify_port)}
+        return {"HARNESS_MANAGER_MPS3_IDENTIFY_PORT": str(self.identify_port)}
 
     def hang(self) -> None:
         """mps3-harnessd hangs: 6900 still accepts, nothing replies, identify is silent."""

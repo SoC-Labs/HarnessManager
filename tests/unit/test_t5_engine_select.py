@@ -6,11 +6,11 @@ import json
 
 import pytest
 
-from socharness.cli import engine as cli_engine
-from socharness.cli.engine import ENV_ENGINE, describe_engine, get_engine, set_engine_factory
-from socharness.cli.main import main
-from socharness.core.errors import ExitCode, UsageError
-from socharness.core.services import Engine as EngineProtocol
+from harness_manager.cli import engine as cli_engine
+from harness_manager.cli.engine import ENV_ENGINE, describe_engine, get_engine, set_engine_factory
+from harness_manager.cli.main import main
+from harness_manager.core.errors import ExitCode, UsageError
+from harness_manager.core.services import Engine as EngineProtocol
 from tests.fakes.t5_fake_engine import FakeEngine
 
 
@@ -23,14 +23,14 @@ def _no_factory(monkeypatch):
 
 
 def test_default_is_the_installed_engine_and_it_satisfies_the_protocol():
-    from socharness.engine import Engine
+    from harness_manager.engine import Engine
 
     eng = get_engine()
     try:
         assert isinstance(eng, Engine) and isinstance(eng, EngineProtocol)
     finally:
         eng.close_all()
-    assert describe_engine() == "socharness.engine.Engine"
+    assert describe_engine() == "harness_manager.engine.Engine"
 
 
 def test_the_fake_engine_satisfies_the_same_protocol():

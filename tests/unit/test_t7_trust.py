@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from socharness.core.errors import RefusedError
-from socharness.services.update import minisign
-from socharness.services.update.state import UpdateState
-from socharness.services.update.trust import (
+from harness_manager.core.errors import RefusedError
+from harness_manager.services.update import minisign
+from harness_manager.services.update.state import UpdateState
+from harness_manager.services.update.trust import (
     PINNED_KEYS,
     TrustStore,
     accept_keys_json,
@@ -21,7 +21,7 @@ KEYS = TestKeys()
 
 
 def keys_doc(serial: int, keys: list[dict], revoked: list[str] | None = None) -> bytes:
-    return json.dumps({"schema": "socharness-keys", "schema_version": 1, "serial": serial,
+    return json.dumps({"schema": "harness-manager-keys", "schema_version": 1, "serial": serial,
                        "keys": keys, "revoked": revoked or []}).encode()
 
 

@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import pytest
 from pyverify.swap import SwapError
 
-from socharness.core.errors import ActionFailedError, HeldError, IncompatibleError
-from socharness.core.model import Candidate, Check, Link, LinkKind
-from socharness.core.pack import OverlayRef
-from socharness_board_mps3 import deploy as dep
-from socharness_board_mps3.deploy import (
+from harness_manager.core.errors import ActionFailedError, HeldError, IncompatibleError
+from harness_manager.core.model import Candidate, Check, Link, LinkKind
+from harness_manager.core.pack import OverlayRef
+from harness_manager_mps3 import deploy as dep
+from harness_manager_mps3.deploy import (
     TRANSPORT_TCP,
     TRANSPORT_TFTP,
     TRANSPORT_WINDOWED,

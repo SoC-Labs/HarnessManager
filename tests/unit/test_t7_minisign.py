@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from socharness.services.update import minisign as m
+from harness_manager.services.update import minisign as m
 
 VECTOR_PK = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3"
 VECTOR_SIG = (

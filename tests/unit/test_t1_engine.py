@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from socharness import engine as engine_mod
-from socharness.core.errors import (
+from harness_manager import engine as engine_mod
+from harness_manager.core.errors import (
     AbsentError,
     AlreadyError,
     ExitCode,
@@ -23,16 +23,16 @@ from socharness.core.errors import (
     UnreachableError,
     UsageError,
 )
-from socharness.core.events import EventBus
-from socharness.core.model import BoardIdentity, LinkKind
-from socharness.core.pack import ProbeHints
-from socharness.core.services import Engine as EngineProtocol
-from socharness.core.services import EngineConfig
-from socharness.core.session import SessionLock
-from socharness.engine import Engine, resolve_state_dir
-from socharness.services._unavailable import UnavailableService, is_unavailable
-from socharness.services.store import ContentStore
-from socharness.services.telemetry import TelemetryService
+from harness_manager.core.events import EventBus
+from harness_manager.core.model import BoardIdentity, LinkKind
+from harness_manager.core.pack import ProbeHints
+from harness_manager.core.services import Engine as EngineProtocol
+from harness_manager.core.services import EngineConfig
+from harness_manager.core.session import SessionLock
+from harness_manager.engine import Engine, resolve_state_dir
+from harness_manager.services._unavailable import UnavailableService, is_unavailable
+from harness_manager.services.store import ContentStore
+from harness_manager.services.telemetry import TelemetryService
 from tests.fakes.t1_fakes import FakePack, candidate
 
 DEAD_PID = 2**22 + 12345          # above Linux pid_max: never a live process
@@ -65,17 +65,17 @@ def write_lock(state: Path, board_id: str, pid: int, note: str = "") -> Path:
 # -- state dir ----------------------------------------------------------------------------
 
 def test_state_dir_config_beats_env(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("SOCHARNESS_STATE_DIR", str(tmp_path / "env"))
+    monkeypatch.setenv("HARNESS_MANAGER_STATE_DIR", str(tmp_path / "env"))
     assert resolve_state_dir(EngineConfig(state_dir=tmp_path / "cfg")) == tmp_path / "cfg"
     assert resolve_state_dir(EngineConfig()) == tmp_path / "env"
     assert Engine().state_dir == tmp_path / "env"
 
 
 def test_state_dir_falls_back_to_home(tmp_path: Path, monkeypatch):
-    monkeypatch.delenv("SOCHARNESS_STATE_DIR", raising=False)
+    monkeypatch.delenv("HARNESS_MANAGER_STATE_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
-    assert resolve_state_dir() == tmp_path / "home" / ".config" / "socharness"
+    assert resolve_state_dir() == tmp_path / "home" / ".config" / "harness-manager"
 
 
 def test_engine_satisfies_the_frozen_protocol(state: Path):
@@ -322,7 +322,7 @@ def lazy(monkeypatch):
 
 @pytest.mark.parametrize("attr", ["deploy", "consoles", "debug"])
 def test_missing_service_module_is_an_unavailable_stub(state: Path, lazy, attr: str):
-    lazy(attr, "socharness.services.t1_not_installed", "Nope")
+    lazy(attr, "harness_manager.services.t1_not_installed", "Nope")
     svc = getattr(make(state), attr)
     assert is_unavailable(svc)
     with pytest.raises(UnavailableError) as exc:
@@ -344,7 +344,7 @@ def test_service_whose_dependency_is_missing_is_unavailable_with_the_reason(
     # A broken install: the service module exists, but its own dependency does not.
     # Written at test time, so pytest never tries to collect it.
     (tmp_path / "t1_broken_service_mod.py").write_text(
-        "import socharness_t1_dependency_that_is_not_installed\n"
+        "import harness_manager_t1_dependency_that_is_not_installed\n"
         "class DeployService:\n"
         "    def __init__(self, engine): pass\n")
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -353,7 +353,7 @@ def test_service_whose_dependency_is_missing_is_unavailable_with_the_reason(
     with pytest.raises(UnavailableError) as exc:
         svc.deploy(None, None)
     assert "failed to load" in exc.value.reason
-    assert "socharness_t1_dependency_that_is_not_installed" in exc.value.reason
+    assert "harness_manager_t1_dependency_that_is_not_installed" in exc.value.reason
 
 
 def test_service_module_without_the_class_is_unavailable(state: Path, lazy):

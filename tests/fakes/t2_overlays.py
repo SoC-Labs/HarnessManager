@@ -15,7 +15,7 @@ import zlib
 from dataclasses import replace
 from pathlib import Path
 
-from socharness.core.pack import OverlayRef
+from harness_manager.core.pack import OverlayRef
 from tests.fakes.virtual_board import FIELDED_3F1A560F, FirmwareProfile, VirtualMps3
 
 FIELDED_STATIC_ID = FIELDED_3F1A560F.static_id            # 0x3F1A560F
@@ -95,12 +95,12 @@ def ref_named(refs: list[OverlayRef], name: str) -> OverlayRef:
 
 def point_pushes_at(monkeypatch, vb: VirtualMps3) -> None:
     """Aim the adapter's push ports at the virtual board's ephemeral FakeShell ports."""
-    monkeypatch.setenv("SOCHARNESS_MPS3_PUSH_PORT", str(vb.shell.raw_tcp_port))
-    monkeypatch.setenv("SOCHARNESS_MPS3_TFTP_PORT", str(vb.shell.tftp_port))
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_PUSH_PORT", str(vb.shell.raw_tcp_port))
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_TFTP_PORT", str(vb.shell.tftp_port))
 
 
 def use_overlay_dirs(monkeypatch, *dirs: Path) -> None:
-    monkeypatch.setenv("SOCHARNESS_MPS3_OVERLAY_DIRS", os.pathsep.join(str(d) for d in dirs))
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_OVERLAY_DIRS", os.pathsep.join(str(d) for d in dirs))
 
 
 def profile(name: str, **changes) -> FirmwareProfile:

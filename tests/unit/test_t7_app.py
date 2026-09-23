@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     ActionFailedError,
     AlreadyError,
     HeldError,
@@ -20,15 +20,15 @@ from socharness.core.errors import (
     RefusedError,
     UnavailableError,
 )
-from socharness.core.session import SessionLock
-from socharness.services.update.app import (
+from harness_manager.core.session import SessionLock
+from harness_manager.services.update.app import (
     AppLayout,
     AppUpdater,
     LocalBusyProbe,
     python_satisfies,
 )
-from socharness.services.update.schema import AppRelease, Asset
-from socharness.services.update.service import UpdateService
+from harness_manager.services.update.schema import AppRelease, Asset
+from harness_manager.services.update.service import UpdateService
 from tests.fakes.fake_channel import AssetFile, ChannelBuilder, FakeChannelServer, TestKeys
 from tests.fakes.t7_board import FakeUv
 
@@ -37,8 +37,8 @@ SHA = "cd" * 32
 
 
 def release(version: str, *, name: str | None = None, requires_python: str = "") -> AppRelease:
-    wheel = Asset(name=name or f"socharness-{version}-py3-none-any.whl",
-                  url=f"https://x/socharness-{version}-py3-none-any.whl", sha256=SHA, size=10)
+    wheel = Asset(name=name or f"harness_manager-{version}-py3-none-any.whl",
+                  url=f"https://x/harness_manager-{version}-py3-none-any.whl", sha256=SHA, size=10)
     return AppRelease(version=version, status="current", wheel=wheel,
                       requires_python=requires_python)
 
@@ -51,7 +51,7 @@ def env(tmp_path):
     busy = LocalBusyProbe(state_dir, extra=(lambda: list(extra),))
     up = AppUpdater(AppLayout(state_dir / "update" / "app"), busy, uv="/opt/uv", runner=uv,
                     python_version="3.11", running_version="0.1.0", windows=False)
-    wheel = tmp_path / "socharness-0.2.0-py3-none-any.whl"
+    wheel = tmp_path / "harness_manager-0.2.0-py3-none-any.whl"
     wheel.write_bytes(b"wheel")
     return {"up": up, "uv": uv, "state_dir": state_dir, "extra": extra, "wheel": wheel,
             "tmp": tmp_path}
@@ -71,9 +71,9 @@ def test_stage_builds_a_side_by_side_venv_with_hash_pinned_requirements(env):
     assert uv.calls[1][:5] == ["/opt/uv", "pip", "install", "--python", py]
     assert "--require-hashes" in uv.calls[1]
     assert uv.calls[2][0] == py and uv.calls[2][1] == "-c"
-    assert f"--hash=sha256:{SHA}" in uv.reqs_seen[0] and "socharness @ file://" in uv.reqs_seen[0]
+    assert f"--hash=sha256:{SHA}" in uv.reqs_seen[0] and "harness-manager @ file://" in uv.reqs_seen[0]
     # pip needs the PEP 427 name, not the cache's hash name
-    assert "/wheels/socharness-0.2.0-py3-none-any.whl --hash" in uv.reqs_seen[0]
+    assert "/wheels/harness_manager-0.2.0-py3-none-any.whl --hash" in uv.reqs_seen[0]
     assert up.state()["current"] == ""                                # staging never switches
 
 
@@ -87,7 +87,7 @@ def test_a_lock_file_is_carried_into_the_requirements(env):
 def test_switch_then_rollback(env):
     up = env["up"]
     stage(env, "0.2.0")
-    env["wheel"] = env["wheel"].with_name("socharness-0.3.0-py3-none-any.whl")
+    env["wheel"] = env["wheel"].with_name("harness_manager-0.3.0-py3-none-any.whl")
     env["wheel"].write_bytes(b"wheel3")
     stage(env, "0.3.0")
     up.switch("0.2.0")
@@ -137,11 +137,11 @@ def test_switch_is_refused_while_a_harness_update_is_unfinished(env):
 def test_switch_and_rollback_are_refused_while_a_job_or_lease_is_active(env):
     up = env["up"]
     stage(env, "0.2.0")
-    env["wheel"] = env["wheel"].with_name("socharness-0.3.0-py3-none-any.whl")
+    env["wheel"] = env["wheel"].with_name("harness_manager-0.3.0-py3-none-any.whl")
     env["wheel"].write_bytes(b"wheel3")
     stage(env, "0.3.0")
     up.switch("0.2.0")
-    env["extra"].append("socharnessd job 7 (deploy nanosoc) is running")
+    env["extra"].append("harness-manager-daemon job 7 (deploy nanosoc) is running")
     with pytest.raises(HeldError, match="job 7"):
         up.switch("0.3.0")
     up.__dict__["busy"] = LocalBusyProbe(env["state_dir"])       # job done
@@ -171,12 +171,12 @@ def test_a_venv_reporting_another_version_is_refused(env):
 
 def test_a_wheel_with_another_version_is_refused_before_uv_runs(env):
     with pytest.raises(IncompatibleError, match="version 0.9.9"):
-        stage(env, name="socharness-0.9.9-py3-none-any.whl")
+        stage(env, name="harness_manager-0.9.9-py3-none-any.whl")
     assert env["uv"].calls == []
 
 
 def test_a_wheel_of_another_package_is_refused(env):
-    with pytest.raises(IncompatibleError, match="not socharness"):
+    with pytest.raises(IncompatibleError, match="not harness-manager"):
         stage(env, name="evil-0.2.0-py3-none-any.whl")
 
 
@@ -187,7 +187,7 @@ def test_requires_python(env):
 
 
 def test_no_uv_is_unavailable(env, monkeypatch):
-    monkeypatch.delenv("SOCHARNESS_UV", raising=False)
+    monkeypatch.delenv("HARNESS_MANAGER_UV", raising=False)
     monkeypatch.setenv("PATH", str(env["tmp"]))
     up = AppUpdater(env["up"].layout, env["up"].busy, runner=env["uv"])
     with pytest.raises(UnavailableError, match="uv"):
@@ -213,7 +213,7 @@ def test_windows_venv_python_path(env):
 def test_prune_keeps_current_and_previous(env):
     up = env["up"]
     for v in ("0.2.0", "0.3.0", "0.4.0", "0.5.0"):
-        wheel = env["tmp"] / f"socharness-{v}-py3-none-any.whl"
+        wheel = env["tmp"] / f"harness_manager-{v}-py3-none-any.whl"
         wheel.write_bytes(v.encode())
         up.stage(release(v), wheel)
     up.switch("0.4.0")
@@ -230,8 +230,8 @@ def test_prune_keeps_current_and_previous(env):
 def channel_app(tmp_path):
     with FakeChannelServer(tmp_path / "www") as srv:
         b = ChannelBuilder(srv.root, KEYS)
-        b.add_app("0.2.0", AssetFile("socharness-0.2.0-py3-none-any.whl", b"PK-fake-wheel"),
-                  lock=AssetFile("socharness-0.2.0-requirements.lock",
+        b.add_app("0.2.0", AssetFile("harness_manager-0.2.0-py3-none-any.whl", b"PK-fake-wheel"),
+                  lock=AssetFile("harness_manager-0.2.0-requirements.lock",
                                  b"fastapi==0.110 --hash=sha256:" + b"ab" * 32 + b"\n"),
                   requires_python=">=3.10")
         yield srv, b
@@ -259,7 +259,7 @@ def test_update_app_downloads_verifies_stages_and_switches(channel_app, tmp_path
 def test_update_app_refuses_a_tampered_wheel_before_building_anything(channel_app, tmp_path):
     srv, b = channel_app
     b.publish(serial=1)
-    (srv.root / "assets" / "socharness-0.2.0-py3-none-any.whl").write_bytes(b"PK-evil-wheel")
+    (srv.root / "assets" / "harness_manager-0.2.0-py3-none-any.whl").write_bytes(b"PK-evil-wheel")
     uv = FakeUv()
     with pytest.raises(RefusedError, match="sha256"):
         service(tmp_path, uv).update_app(source=srv.source())

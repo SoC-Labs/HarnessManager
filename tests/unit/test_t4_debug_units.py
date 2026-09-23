@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     ActionFailedError,
     ExitCode,
     HeldError,
@@ -19,7 +19,7 @@ from socharness.core.errors import (
     UnavailableError,
     UnreachableError,
 )
-from socharness.services.debug import (
+from harness_manager.services.debug import (
     DebugPorts,
     classify_failure,
     detect_argv,
@@ -27,7 +27,7 @@ from socharness.services.debug import (
     port_in_use,
     up_argv,
 )
-from socharness_board_mps3 import openocd as mps3ocd
+from harness_manager_mps3 import openocd as mps3ocd
 from tests.fakes.t4_debug_rig import StaticDebugAdapter
 
 FOUND = """Info : Connecting to 127.0.0.1:62427

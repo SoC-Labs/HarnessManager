@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from socharness.cli.helptext import parse_tabs, render_tabs, tab_names, tabs
-from socharness.cli.main import main, make_parser
-from socharness.cli.output import TSV_COLUMNS
-from socharness.core.errors import ExitCode
+from harness_manager.cli.helptext import parse_tabs, render_tabs, tab_names, tabs
+from harness_manager.cli.main import main, make_parser
+from harness_manager.cli.output import TSV_COLUMNS
+from harness_manager.core.errors import ExitCode
 
 
 def run(capsys, *argv: str) -> tuple[int, str, str]:
@@ -77,7 +77,7 @@ def _verbs() -> list[str]:
 @pytest.mark.parametrize("verb", _verbs())
 def test_every_verb_has_help(capsys, verb):
     rc, out, _ = run(capsys, "help", verb)
-    assert rc == 0 and f"socharness {verb}" in out
+    assert rc == 0 and f"harness-manager {verb}" in out
 
 
 def test_help_for_an_unknown_verb_lists_the_verbs(capsys):

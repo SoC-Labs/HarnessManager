@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from socharness.cli.main import main
-from socharness.core.errors import ExitCode, NothingOnTargetError, UsageError
+from harness_manager.cli.main import main
+from harness_manager.core.errors import ExitCode, NothingOnTargetError, UsageError
 from tests.fakes.virtual_board import VirtualMps3
 
 
@@ -91,7 +91,7 @@ def test_console_endpoints_point_at_the_board(vboard: VirtualMps3, mps3_pack):
 
 
 def test_usb_only_session_opens_without_shell(tmp_path, mps3_pack):
-    from socharness.core.transport import open_serial
+    from harness_manager.core.transport import open_serial
 
     with VirtualMps3(tmp_path / "u", usb=True) as vb:
         cand = vb.candidate(ethernet=False)
@@ -103,7 +103,7 @@ def test_usb_only_session_opens_without_shell(tmp_path, mps3_pack):
 
 
 def test_open_serial_unknown_scheme_is_usage_error():
-    from socharness.core.transport import open_serial
+    from harness_manager.core.transport import open_serial
 
     with pytest.raises(UsageError):
         open_serial("bogus://x")
@@ -114,8 +114,8 @@ def test_busy_control_port_is_held_not_unreachable():
     import socket
     import threading
 
-    from socharness.core.errors import HeldError
-    from socharness_board_mps3.shell import Mps3Shell
+    from harness_manager.core.errors import HeldError
+    from harness_manager_mps3.shell import Mps3Shell
 
     srv = socket.socket()
     srv.bind(("127.0.0.1", 0))
@@ -138,7 +138,7 @@ def test_busy_control_port_is_held_not_unreachable():
 
 
 def test_clock_presets_and_refusals(vboard: VirtualMps3, mps3_pack):
-    from socharness.core.errors import UsageError as UE
+    from harness_manager.core.errors import UsageError as UE
 
     session = mps3_pack.open(mps3_pack.candidate_for_host(vboard.shell_endpoint))
     assert not session.clocks.clocks()[0].available          # cannot read back before a set
@@ -151,7 +151,7 @@ def test_clock_presets_and_refusals(vboard: VirtualMps3, mps3_pack):
 
 
 def test_probed_candidate_carries_identity(vboard: VirtualMps3, mps3_pack):
-    from socharness.core.pack import ProbeHints
+    from harness_manager.core.pack import ProbeHints
 
     (cand,) = mps3_pack.probe(ProbeHints(hosts=(vboard.shell_endpoint,), scan_usb=False))
     assert cand.identity is not None and cand.identity.shell_id.lower() == "0x3f1a560f"

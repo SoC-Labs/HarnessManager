@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from pyverify.testing.fakeshell import FakeShell
 
-from socharness.core.errors import ActionFailedError, UsageError
-from socharness_board_mps3.shell import Mps3Shell, ShellResets, make_reset_adapter
+from harness_manager.core.errors import ActionFailedError, UsageError
+from harness_manager_mps3.shell import Mps3Shell, ShellResets, make_reset_adapter
 from tests.fakes.t12_harness_shell import HarnessFakeShell
 from tests.fakes.t12_raw_servers import PING, VERSION_BARE, RawShell
 

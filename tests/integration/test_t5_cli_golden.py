@@ -7,7 +7,7 @@ Each case runs three times, once per output format, and checks:
 - ``--tsv``: every row has exactly ``len(TSV_COLUMNS[layout])`` columns; a failure
   prints nothing on stdout;
 - human: a success prints something; a failure prints
-  ``socharness: <message> — <next action>`` on stderr;
+  ``harness-manager: <message> — <next action>`` on stderr;
 - the exit code is the expected ``ExitCode`` in all three.
 
 Every success case has a failure twin with the same verb. No network: the fake
@@ -28,10 +28,10 @@ from pathlib import Path
 
 import pytest
 
-from socharness.cli.engine import set_engine_factory
-from socharness.cli.main import main
-from socharness.cli.output import TSV_COLUMNS
-from socharness.core.errors import (
+from harness_manager.cli.engine import set_engine_factory
+from harness_manager.cli.main import main
+from harness_manager.cli.output import TSV_COLUMNS
+from harness_manager.core.errors import (
     AbsentError,
     ExitCode,
     HeldError,
@@ -40,14 +40,14 @@ from socharness.core.errors import (
     UnreachableError,
     UsageError,
 )
-from socharness.core.model import Candidate, Check, Link, LinkKind
-from socharness.core.pack import PreflightItem
-from socharness.core.session import LockOwner, SessionLock
+from harness_manager.core.model import Candidate, Check, Link, LinkKind
+from harness_manager.core.pack import PreflightItem
+from harness_manager.core.session import LockOwner, SessionLock
 from tests.fakes.t5_fake_engine import FakeEngine
 
 T = "127.0.0.1"
 BID = f"mps3@{T}"
-ERROR_LINE = re.compile(r"^socharness: .+ — .+$")
+ERROR_LINE = re.compile(r"^harness-manager: .+ — .+$")
 
 
 @pytest.fixture
@@ -315,7 +315,7 @@ def test_every_verb_has_a_success_and_a_failure_case():
     assert expected <= verbs_ok
     assert expected <= verbs_fail
     # every TSV layout is exercised by some success case
-    # daemon/ui run a real socharnessd process; their TSV is pinned in test_t13_process.py.
+    # daemon/ui run a real harness-manager-daemon process; their TSV is pinned in test_t13_process.py.
     # The update layouts need a signed channel; they are pinned in test_t7_cli.py.
     pinned_elsewhere = {"daemon", "ui", "app"} | {
         k for k in TSV_COLUMNS if k.startswith("update ")}
@@ -414,7 +414,7 @@ def test_unavailable_prints_the_reason_and_exit_12(fake: FakeEngine, capsys):
     fake.st.adapters["controller"] = None
     rc, out, err = run(capsys, "--json", "mcc", T, "reboot", "--yes")
     assert rc == ExitCode.UNAVAILABLE == 12
-    assert err.strip() == "socharness: reboot_board is unavailable — needs the Debug USB cable"
+    assert err.strip() == "harness-manager: reboot_board is unavailable — needs the Debug USB cable"
     assert json.loads(out)["error"]["reason"] == "needs the Debug USB cable"
 
 
@@ -433,7 +433,7 @@ def test_held_by_my_own_attach_says_how_to_detach(fake: FakeEngine, capsys):
     user = os.environ.get("USER") or os.environ.get("USERNAME") or "user"
     fake.st.lock_owners[BID] = LockOwner(user, socket.gethostname(), 1, 0.0, "[cli-hold] attach")
     rc, _, err = run(capsys, "info", T)
-    assert rc == ExitCode.HELD and "socharness detach 127.0.0.1" in err
+    assert rc == ExitCode.HELD and "harness-manager detach 127.0.0.1" in err
     rc, _, err = run(capsys, "attach", T, "--for", "0")
     assert rc == ExitCode.ALREADY and "already attached by you" in err
 

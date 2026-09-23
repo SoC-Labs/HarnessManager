@@ -10,9 +10,9 @@ import logging
 
 import pytest
 
-from socharness.cli.output import error_json, jsonable, reading_json
-from socharness.client.codec import error_from_json, from_json
-from socharness.core.errors import (
+from harness_manager.cli.output import error_json, jsonable, reading_json
+from harness_manager.client.codec import error_from_json, from_json
+from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
     AlreadyError,
@@ -27,7 +27,7 @@ from socharness.core.errors import (
     UnreachableError,
     UsageError,
 )
-from socharness.core.model import (
+from harness_manager.core.model import (
     BoardIdentity,
     BoardInfo,
     Candidate,
@@ -37,11 +37,11 @@ from socharness.core.model import (
     LinkKind,
     Reading,
 )
-from socharness.core.pack import BackupRecord, DeployResult, OverlayRef, PreflightItem
-from socharness.core.services import DebugStatus
-from socharness.core.session import LockOwner
-from socharness.daemon.server import RedactToken
-from socharness.daemon.wire import (
+from harness_manager.core.pack import BackupRecord, DeployResult, OverlayRef, PreflightItem
+from harness_manager.core.services import DebugStatus
+from harness_manager.core.session import LockOwner
+from harness_manager.daemon.server import RedactToken
+from harness_manager.daemon.wire import (
     HTTP_STATUS,
     encode_event,
     http_status,
@@ -85,7 +85,7 @@ OBJECTS = [
                  volume_label="V2M-MPS3"),
     DebugStatus(state="up", gdb_port=3333, telnet_port=4444, tcl_port=6666,
                 config=("target/a.cfg", "b.cfg"), pid=42, detail="ok"),
-    LockOwner(user="u", host="h", pid=7, since=1.5, note="socharnessd: web"),
+    LockOwner(user="u", host="h", pid=7, since=1.5, note="harness-manager-daemon: web"),
 ]
 
 
@@ -177,7 +177,7 @@ def test_negative_twin_topic_filters_do_not_overmatch():
 
 
 def test_an_event_frame_has_the_api_shape():
-    from socharness.core.events import Event
+    from harness_manager.core.events import Event
 
     frame = json.loads(encode_event(Event("deploy.done", "b", {"result": DeployResult(
         rm_id="0x1", verified=True, seconds=1.0)}, at=5.0)))

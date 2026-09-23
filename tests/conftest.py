@@ -6,20 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.virtual_board import VirtualMps3
 
 
 @pytest.fixture(autouse=True)
 def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never let a test touch the user's real ~/.config/socharness."""
-    monkeypatch.setenv("SOCHARNESS_STATE_DIR", str(tmp_path / "state"))
+    """Never let a test touch the user's real ~/.config/harness-manager."""
+    monkeypatch.setenv("HARNESS_MANAGER_STATE_DIR", str(tmp_path / "state"))
 
 
 @pytest.fixture(autouse=True)
 def _no_real_usb(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never let a test enumerate the test machine's real serial ports or volumes."""
-    from socharness_board_mps3 import usb
+    from harness_manager_mps3 import usb
 
     monkeypatch.setattr(usb, "DEFAULT_ENV", usb.UsbEnv(lambda: [], lambda: []))
 
@@ -38,4 +38,4 @@ def mps3_pack(vboard: VirtualMps3) -> Mps3Pack:
 
 
 def hil_enabled() -> bool:
-    return os.environ.get("SOCHARNESS_HIL") == "1"
+    return os.environ.get("HARNESS_MANAGER_HIL") == "1"

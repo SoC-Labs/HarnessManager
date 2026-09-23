@@ -5,10 +5,10 @@ A board manager for SoC prototyping harnesses: find a board, attach to it, progr
 It runs **standalone** (one PC with the board on Ethernet, plus optionally its Debug USB) or **through fpgahub** in the lab.
 
 ```bash
-make venv            # Python 3.11 venv; installs socharness + pyverify (editable)
+make venv            # Python 3.11 venv; installs harness-manager + pyverify (editable)
 make check           # lint + unit + integration tests against a virtual MPS3
-.venv/bin/socharness info 192.168.10.101          # a real board (board window only)
-.venv/bin/socharness --json info 192.168.10.101
+.venv/bin/harness-manager info 192.168.10.101          # a real board (board window only)
+.venv/bin/harness-manager --json info 192.168.10.101
 ```
 
 - Design and rationale: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

@@ -1,6 +1,6 @@
 """Team T9 test doubles: fake metered plugs/PDUs on 127.0.0.1, and a shared fake clock.
 
-Each fake models the device's documented HTTP API (see socharness/power/plugs.py for
+Each fake models the device's documented HTTP API (see harness_manager/power/plugs.py for
 the sources) closely enough to exercise the real drivers over real sockets:
 
 - ``FakeShelly``: Gen2 RPC ``Switch.GetStatus``/``Switch.Set`` (``toggle_after``),

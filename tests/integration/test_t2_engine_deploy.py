@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.events import EventBus
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness.services.deploy import DeployService
-from socharness_board_mps3.overlays import OVERLAY_DIRS_ENV, import_overlay
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.core.events import EventBus
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager.services.deploy import DeployService
+from harness_manager_mps3.overlays import OVERLAY_DIRS_ENV, import_overlay
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.t2_overlays import (
     FIELDED_USERCODE,
     PARTIAL,

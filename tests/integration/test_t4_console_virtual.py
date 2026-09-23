@@ -15,10 +15,10 @@ from collections.abc import Iterator
 import pytest
 from pyverify.console import ConsoleReader
 
-from socharness.core.errors import AbsentError, ExitCode, PortBoundError, UnreachableError
-from socharness.core.events import Event, EventBus
-from socharness.services.console import ConsoleBroker
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.core.errors import AbsentError, ExitCode, PortBoundError, UnreachableError
+from harness_manager.core.events import Event, EventBus
+from harness_manager.services.console import ConsoleBroker
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.t4_console_rig import (
     EventLog,
     SingleClientProxy,
@@ -304,8 +304,8 @@ def test_negative_twin_a_preflight_refusal_touches_nothing(broker, session, prox
 
 
 def test_shell_alias_opens_lane_2_over_usb_and_never_the_mcc(tmp_path, broker):
-    from socharness.core.model import Candidate, Link, LinkKind
-    from socharness.core.transport import register_fake_serial, unregister_fake_serial
+    from harness_manager.core.model import Candidate, Link, LinkKind
+    from harness_manager.core.transport import register_fake_serial, unregister_fake_serial
     from tests.fakes.t4_console_rig import FakeUart
 
     lane2 = FakeUart()
@@ -336,7 +336,7 @@ def test_shell_alias_opens_lane_2_over_usb_and_never_the_mcc(tmp_path, broker):
 def test_dut_uart_input_is_paced_and_write_does_not_block(broker, paced_session):
     import time
 
-    from socharness_board_mps3.constants import DUT_CONSOLE_PACE_S
+    from harness_manager_mps3.constants import DUT_CONSOLE_PACE_S
 
     assert paced_session.consoles.console_write_pace_s() == {
         "uart0": DUT_CONSOLE_PACE_S, "uart1": DUT_CONSOLE_PACE_S}

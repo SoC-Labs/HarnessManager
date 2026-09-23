@@ -13,20 +13,20 @@ import sys
 
 import pytest
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     AbsentError,
     ExitCode,
     HeldError,
     UnreachableError,
     UsageError,
 )
-from socharness.core.transport import open_serial
-from socharness.transports import direct
+from harness_manager.core.transport import open_serial
+from harness_manager.transports import direct
 
 
 def test_importing_mcc_registers_the_serial_scheme():
-    import socharness_board_mps3.mcc  # noqa: F401 - the import is the registration
-    from socharness.core import transport
+    import harness_manager_mps3.mcc  # noqa: F401 - the import is the registration
+    from harness_manager.core import transport
 
     assert transport._OPENERS["serial"] is direct.open_pyserial
 
@@ -90,7 +90,7 @@ def test_missing_pyserial_is_a_usage_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "serial", None)      # import serial -> ImportError
     with pytest.raises(UsageError, match="pyserial is not installed") as info:
         direct.open_pyserial("/dev/ttyUSB10")
-    assert "socharness[serial]" in info.value.hint
+    assert "harness-manager[serial]" in info.value.hint
     with pytest.raises(UsageError):
         direct.comports()
 

@@ -12,10 +12,10 @@ import time
 
 import pytest
 
-from socharness.core.errors import UnreachableError, UsageError
-from socharness.core.model import Candidate, Link, LinkKind
-from socharness.core.pack import ProbeHints
-from socharness_board_mps3 import identify as ident
+from harness_manager.core.errors import UnreachableError, UsageError
+from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.pack import ProbeHints
+from harness_manager_mps3 import identify as ident
 from tests.fakes.fake_identify import FakeIdentifyResponder, canonical_reply
 
 

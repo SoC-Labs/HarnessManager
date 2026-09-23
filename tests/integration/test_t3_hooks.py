@@ -15,12 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.model import LinkKind
-from socharness.core.pack import ProbeHints
-from socharness_board_mps3 import mcc as mccmod
-from socharness_board_mps3.mcc import Mps3Controller
-from socharness_board_mps3.pack import Mps3Pack
-from socharness_board_mps3.sd import Mps3Storage
+from harness_manager.core.model import LinkKind
+from harness_manager.core.pack import ProbeHints
+from harness_manager_mps3 import mcc as mccmod
+from harness_manager_mps3.mcc import Mps3Controller
+from harness_manager_mps3.pack import Mps3Pack
+from harness_manager_mps3.sd import Mps3Storage
 from tests.fakes.t3_clock import FakeClock
 from tests.fakes.virtual_board import VirtualMps3
 
@@ -102,7 +102,7 @@ def test_mcc_answers_straight_after_an_ethernet_witnessed_reboot(vb, fake_time):
 
 def test_s6_no_op_reboot_is_not_reported_as_done(vb, fake_time):
     # Negative twin: an MCC that accepts REBOOT and does nothing (the old tty_01 trap).
-    from socharness.core.errors import ActionFailedError
+    from harness_manager.core.errors import ActionFailedError
 
     vb.mcc.ignore_reboot = True
     with pytest.raises(ActionFailedError):
@@ -155,8 +155,8 @@ def test_probe_with_two_shells_does_not_pair(vb, tmp_path):
 
 
 def test_engine_telemetry_reads_the_mcc_through_t3(vb, fake_time, tmp_path):
-    from socharness.core.services import EngineConfig
-    from socharness.engine import Engine
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
 
     eng = Engine(EngineConfig(state_dir=tmp_path / "state"),
                  packs={"mps3": Mps3Pack(console_ports=vb.console_ports)})

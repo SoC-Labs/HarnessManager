@@ -11,17 +11,17 @@ from types import SimpleNamespace
 import pytest
 from pyverify.testing.fakeshell import FakeShell
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     ActionFailedError,
     ExitCode,
     NothingOnTargetError,
     RefusedError,
     UnreachableError,
 )
-from socharness.core.model import Candidate, Link, LinkKind
-from socharness.core.pack import ControllerAdapter
-from socharness_board_mps3 import mcc as mccmod
-from socharness_board_mps3.mcc import DENIED, MccTiming, Mps3Controller, classify
+from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.pack import ControllerAdapter
+from harness_manager_mps3 import mcc as mccmod
+from harness_manager_mps3.mcc import DENIED, MccTiming, Mps3Controller, classify
 from tests.fakes.fake_mcc import BOOT_BANNER, FakeMcc, SilentPort
 from tests.fakes.t3_clock import FakeClock, RecordingPort
 

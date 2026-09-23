@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
     ExitCode,
@@ -21,11 +21,11 @@ from socharness.core.errors import (
     UnavailableError,
     UnreachableError,
 )
-from socharness.core.events import EventBus
-from socharness.core.model import BoardIdentity, Candidate, Check
-from socharness.core.pack import DeployAdapter, DeployResult, OverlayRef, PreflightItem
-from socharness.core.services import DeployService as DeployServiceProtocol
-from socharness.services.deploy import (
+from harness_manager.core.events import EventBus
+from harness_manager.core.model import BoardIdentity, Candidate, Check
+from harness_manager.core.pack import DeployAdapter, DeployResult, OverlayRef, PreflightItem
+from harness_manager.core.services import DeployService as DeployServiceProtocol
+from harness_manager.services.deploy import (
     ITEM_CLEARING_FITS,
     ITEM_FILES,
     ITEM_SHELL_ID,

@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from socharness.core.errors import RefusedError, UnreachableError
-from socharness.services.update.channel import ChannelClient, channel_url
-from socharness.services.update.download import Downloader
-from socharness.services.update.state import UpdateState
+from harness_manager.core.errors import RefusedError, UnreachableError
+from harness_manager.services.update.channel import ChannelClient, channel_url
+from harness_manager.services.update.download import Downloader
+from harness_manager.services.update.state import UpdateState
 from tests.fakes.fake_channel import ChannelBuilder, FakeChannelServer, TestKeys
 from tests.fakes.t7_bundles import Release
 
@@ -120,7 +120,7 @@ def test_an_expired_channel_warns_but_does_not_block(server, builder, tmp_path):
 
 
 def test_signed_but_malformed_is_refused(server, builder, tmp_path):
-    builder.publish(raw=json.dumps({"schema": "socharness-channel", "schema_version": 1}).encode())
+    builder.publish(raw=json.dumps({"schema": "harness-manager-channel", "schema_version": 1}).encode())
     with pytest.raises(RefusedError, match="channel.json"):
         client(tmp_path).fetch("stable", server.source())
 

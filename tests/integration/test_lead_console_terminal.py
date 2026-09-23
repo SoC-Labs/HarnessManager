@@ -1,4 +1,4 @@
-"""``socharness console`` as an interactive terminal (lead): keys to the board, Ctrl-] exits.
+"""``harness-manager console`` as an interactive terminal (lead): keys to the board, Ctrl-] exits.
 
 - unit: ``_terminal`` with fake keys and a fake stream (escape, write errors);
 - end to end: the real CLI ``main()`` on a pseudo-terminal, against the virtual
@@ -15,12 +15,12 @@ import types
 
 import pytest
 
-from socharness.cli import cmd_io
-from socharness.cli.engine import ENV_NO_DAEMON, set_engine_factory
-from socharness.core.errors import UnreachableError
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.cli import cmd_io
+from harness_manager.cli.engine import ENV_NO_DAEMON, set_engine_factory
+from harness_manager.core.errors import UnreachableError
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager_mps3.pack import Mps3Pack
 
 
 class FakeKeys:
@@ -81,7 +81,7 @@ def test_negative_twin_a_write_error_is_shown_and_the_terminal_stays(capsys):
     ctx, _ = ctx_for()
     stream = FakeStream(fail=True)
     cmd_io._terminal(ctx, stream, "mps3@b", FakeKeys(b"a", b"\x1d"))
-    assert "[socharness: console 'uart0' is not connected" in capsys.readouterr().out
+    assert "[harness-manager: console 'uart0' is not connected" in capsys.readouterr().out
 
 
 def test_json_tsv_for_and_read_only_are_never_interactive(monkeypatch):
@@ -99,7 +99,7 @@ def test_json_tsv_for_and_read_only_are_never_interactive(monkeypatch):
 def test_end_to_end_on_a_pty_against_the_virtual_uart0(vboard, monkeypatch):
     import pty
 
-    from socharness.cli.main import main
+    from harness_manager.cli.main import main
 
     monkeypatch.setenv(ENV_NO_DAEMON, "1")
     eng = Engine(EngineConfig(), packs={"mps3": Mps3Pack(console_ports=vboard.console_ports)})

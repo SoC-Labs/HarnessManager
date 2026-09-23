@@ -1,17 +1,17 @@
-# socharnessd: the local engine service API (v1)
+# harness-manager-daemon: the local engine service API (v1)
 
 This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server and a Python client. Team T14 builds the web UI against it. fpgahub (T8) will later serve the same API shape in hub mode.
 
 ## Why it exists
 - A board's lock belongs to one process, and each board port accepts one client.
 - So the CLI, the web UI and long-lived sessions (debug, consoles) must all go through **one engine process per user**.
-- `socharnessd` is that process. It wraps `socharness.engine.Engine` unchanged.
+- `harness-manager-daemon` is that process. It wraps `harness_manager.engine.Engine` unchanged.
 
 ## Process and security
 - **Starting it:**
-  - `socharness daemon start|stop|status`;
-  - `socharness ui` starts the daemon if needed, then opens the browser;
-  - `socharness ui --no-browser --port N` for use over `ssh -L`.
+  - `harness-manager daemon start|stop|status`;
+  - `harness-manager ui` starts the daemon if needed, then opens the browser;
+  - `harness-manager ui --no-browser --port N` for use over `ssh -L`.
 - **Binding:** `127.0.0.1` only, by default. A non-loopback bind needs `--listen ADDR` and prints a warning.
 - **State:** `<state_dir>/daemon.json` (mode 0600) holds `{pid, port, token, started_at, version}`. Only one daemon runs per state dir.
 - **Auth:** every request carries `Authorization: Bearer <token>`.
@@ -38,7 +38,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 - **Board ids** are URL-encoded (`mps3%40192.168.10.101%3A6900`).
 - **Long operations** return `202 {"ok": true, "job": "<id>"}`. Progress and completion arrive as events. `GET /jobs/{id}` returns `{state: running|done|failed, result?, error?, progress: {phase, done, total}}`.
   - Long operations: deploy, restore, reboot, sd backup/install/restore, and debug up.
-- **Serialisation:** dataclasses are serialised with `socharness.cli.output`'s rules (enums become values, frozensets become sorted lists), so the CLI and API emit the same JSON for the same object.
+- **Serialisation:** dataclasses are serialised with `harness_manager.cli.output`'s rules (enums become values, frozensets become sorted lists), so the CLI and API emit the same JSON for the same object.
 
 ## Endpoints
 
@@ -79,7 +79,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 
 ## Behaviour clarified by the implementation (T13)
 - `/health` is also at `/api/v1/health` and returns `{ok, version, pid, service}`.
-- A 401 carries code 15 (REFUSED). The UI should tell the user to run `socharness ui` again.
+- A 401 carries code 15 (REFUSED). The UI should tell the user to run `harness-manager ui` again.
 - `POST /boards` returns `{board_id, info}`. If `info` is null, `info_error` explains why, but the session IS open. A 409 with name ALREADY means the board is already open in the daemon, so the UI should just use it.
 - While a job runs on a board, every request that touches the board returns 409 HELD naming the job.
 - `POST /deploy` runs the preflight synchronously. A mismatch returns 409 (code 14 or 15) with `error.data.{overlay, preflight}`, and no job is created. `POST /preflight` returns 200 and includes `refusal` only when it refuses.
@@ -92,7 +92,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
   - The client sends keystrokes as BINARY frames.
   - When the console ends, the server sends `{"state":"closed"}` and closes with code 1000.
 - A refused WebSocket gets an HTTP denial carrying the error envelope, or a close with code 4000+exit code.
-- The daemon's lock note is `socharnessd: <note>`.
+- The daemon's lock note is `harness-manager-daemon: <note>`.
 
 ## Events
 - **Endpoint:** `WS /api/v1/events?token=…&topics=board.*,deploy.*`.
@@ -101,7 +101,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 - **Drops:** `events.dropped {dropped}` is sent when a slow client's bounded queue drops its oldest events.
 
 ## The Python client (T13)
-`socharness.client.RemoteEngine` implements the `core.services.Engine` protocol over this API. `socharness.cli.engine.get_engine()` prefers a running daemon and falls back to the in-process engine, so the CLI and the web UI share one board session.
+`harness_manager.client.RemoteEngine` implements the `core.services.Engine` protocol over this API. `harness_manager.cli.engine.get_engine()` prefers a running daemon and falls back to the in-process engine, so the CLI and the web UI share one board session.
 
 ## Additions at the T14 merge (lead)
 - **T14-1:** `GET /packs` also returns each pack's capability `title` and `needs_hint`. The web UI uses them in place of its mirrored titles.
@@ -109,4 +109,46 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 - **T14-4:** `/session` `services` gives `null` when an engine service works, else its stub `reason` (docs/CONTRACTS.md convention).
 - **T14-5:** a HELD caused by a daemon job carries `error.data.{job, kind, board_id}`; `/boards` rows and `/session` add `job_kind`. Front-ends read these, not the holder text.
 - **Declined, T14-2:** a wedged harness still makes `GET /boards/{bid}` fail with its own error code. That code is the honest answer, and the CLI's exit codes depend on it. The UI keeps the last good read and labels it stale.
-- **Static files:** socharnessd serves the UI with `socharness.web.mount_static`: CSP `script-src 'self'`, `nosniff`, `no-cache`, and fixed media types.
+- **Static files:** harness-manager-daemon serves the UI with `harness_manager.web.mount_static`: CSP `script-src 'self'`, `nosniff`, `no-cache`, and fixed media types.
+
+## Week-plan additions (frozen 2026-09-23, night; lanes L1, L2, L4)
+
+The routes come from extension modules: `harness_manager.daemon.<consoles_api|hub_api|power_api|update_api>`, each with `register(ctx: RouteContext)`. `create_app` loads them before the core `/boards/{bid:path}` routes, because that path converter is greedy. Every rule above applies: bearer auth, the error envelope, 409 HELD while a job runs, 202 plus `job.*` events for long work.
+
+### Consoles: PTYs for `screen`, and baud (L2, `consoles_api.py`)
+
+| Method and path | Returns |
+|---|---|
+| `POST /boards/{bid}/consoles/{name}/pty` | `{path, device, command}`. Idempotent: it creates the console's PTY if needed. `path` is stable while the board is open: `/tmp/harness-manager-$USER/<board-slug>/<name>`, a symlink to `device` (`/dev/pts/N`). `command` is `screen <path>`. On Windows: 422 UNAVAILABLE, with the TCP export as the hint. |
+| `GET /boards/{bid}/consoles/{name}/pty` | `{pty: {path, device, command, clients} or null}` |
+| `DELETE /boards/{bid}/consoles/{name}/pty` | `{ok}`. Also closed when the board closes. |
+| `GET /boards/{bid}/consoles/{name}/baud` | `{baud, settable, reason?, choices: [int], source}`. `source` is `serial` (the rate the host port is set to), `design` (the loaded design's fixed rate, e.g. 76800 for nanosoc), `harness` (the harness reports it) or `unknown`. `settable: false` carries `reason`. |
+| `POST /boards/{bid}/consoles/{name}/baud` `{baud}` | `{baud, source}`. A serial console reopens at the new rate. An Ethernet console needs the harness feature `uart_baud`; without it, 422 UNAVAILABLE with the reason. |
+| `GET /boards/{bid}/consoles` | Also returns `consoles: [{name, kind: "ethernet"|"serial", baud, settable, pty: path or null}]` next to `names`. |
+
+Events: `console.state` gains `{baud}` when the rate changes, and `console.pty {name, path, clients}` fires when screen attaches or detaches.
+
+### The hub: tunnel and leases (L1, `hub_api.py`)
+
+| Method and path | Returns |
+|---|---|
+| `POST /probe` `{..., via?}` and `POST /boards` `{target?, via?}` | `via: "ssh:HOST"` reaches a board through an SSH tunnel (the lab hub). The candidate's Ethernet link is then `via="ssh"`. A `via` in boards.toml does the same without the field. |
+| `GET /boards/{bid}/tunnel` | `{tunnel: {via, host, state: up|down|starting, ports: {remote: local}, detail} or null}` |
+| `GET /boards/{bid}/lease` | `{lease: {target, holder, expires_at, mine} or null, hub: HOST or null}`. null when the board is not behind a hub. |
+| `POST /boards/{bid}/lease` `{ttl_s?}` | 202 job `lease`. It completes when the lease is HELD (it may queue); the result is `{lease}`. The daemon heartbeats it while the board is open. |
+| `DELETE /boards/{bid}/lease` | `{ok}` releases this client's lease. |
+
+Events: `lease.state {target, state: held|queued|released|expired|lost, holder, expires_at}`.
+
+### Power and update (L4, `power_api.py`, `update_api.py`)
+
+| Method and path | Returns |
+|---|---|
+| `GET /boards/{bid}/power` | `{readings: [Reading], cycle_reason, device}`. `cycle_reason` is `""` when the board can be cycled. |
+| `POST /boards/{bid}/power/cycle` `{off_s?}` | 202 job `power_cycle`; the result is the device's evidence. |
+| `POST /update/check` `{board_id?, source?, channel?}` | 202 job `update_check`. The result is the check: the channel, the releases, the app update, and the board's plan with `fingerprint`, `mode`, `rekey`, `blockers`, `warnings`, `steps`. Read-only. |
+| `POST /boards/{bid}/update/harness` `{fingerprint, rekey_phrase?}` | 202 job `update_harness`. The plan is recomputed and must match `fingerprint`. A re-key needs `rekey_phrase == "REKEY <static_id>"`. The result is the outcome. |
+| `POST /boards/{bid}/update/rollback` | 202 job `update_rollback` |
+| `POST /update/app` `{version?}` · `POST /update/app/rollback` | 202 jobs `update_app` / `update_app_rollback`. Refused (409) while any board job runs. |
+
+Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.

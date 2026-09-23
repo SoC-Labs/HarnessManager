@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from socharness_board_mps3.mcc import BootWatch, parse_boot_log
+from harness_manager_mps3.mcc import BootWatch, parse_boot_log
 from tests.fakes.fake_mcc import BOOT_BANNER
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "t3" / "pB_mcc_log_20260923.txt"

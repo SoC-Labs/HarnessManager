@@ -14,7 +14,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 API_MD = REPO / "docs" / "API.md"
-STATIC = REPO / "src" / "socharness" / "web" / "static"
+STATIC = REPO / "src" / "harness_manager" / "web" / "static"
 API_JS = STATIC / "js" / "api.js"
 
 METHODS = ("GET", "POST", "DELETE", "PUT", "PATCH", "WS")
@@ -92,7 +92,7 @@ def ui_endpoints() -> dict[str, tuple[str, str]]:
 
 
 def ui_additive() -> set[str]:
-    """Names in ENDPOINTS the UI marks ADDITIVE: served by socharnessd beyond API.md v1."""
+    """Names in ENDPOINTS the UI marks ADDITIVE: served by harness-manager-daemon beyond API.md v1."""
     js = API_JS.read_text(encoding="utf-8")
     block = js.split("export const ADDITIVE", 1)[1].split(";", 1)[0]
     return set(re.findall(r'"(\w+)"', block))
@@ -121,9 +121,9 @@ def app_routes(app) -> set[tuple[str, str]]:
 
 
 def daemon_routes() -> set[tuple[str, str]]:
-    """The real socharnessd's route table (Team T13), minus its catch-all 404 route."""
-    from socharness.daemon.app import create_app
-    from socharness.demo import DemoEngine
+    """The real harness-manager-daemon's route table (Team T13), minus its catch-all 404 route."""
+    from harness_manager.daemon.app import create_app
+    from harness_manager.demo import DemoEngine
 
     engine = DemoEngine(speed=0)
     try:

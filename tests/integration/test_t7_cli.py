@@ -1,4 +1,4 @@
-"""T7: ``socharness update …`` end to end: the real CLI main, the real Engine and MPS3 pack,
+"""T7: ``harness-manager update …`` end to end: the real CLI main, the real Engine and MPS3 pack,
 the virtual board over Ethernet + USB, and the fake channel on 127.0.0.1.
 
 ``cli/main.py`` registers ``update`` (lead, after the T7 merge). The engine factory
@@ -12,17 +12,17 @@ import json
 
 import pytest
 
-from socharness.cli import cmd_update
-from socharness.cli import main as climain
-from socharness.cli.engine import set_engine_factory
-from socharness.cli.output import TSV_COLUMNS
-from socharness.core.errors import ExitCode
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness.services.update import UpdateService
-from socharness.services.update.app import AppLayout, AppUpdater, LocalBusyProbe
-from socharness_board_mps3 import mcc as mccmod
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.cli import cmd_update
+from harness_manager.cli import main as climain
+from harness_manager.cli.engine import set_engine_factory
+from harness_manager.cli.output import TSV_COLUMNS
+from harness_manager.core.errors import ExitCode
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager.services.update import UpdateService
+from harness_manager.services.update.app import AppLayout, AppUpdater, LocalBusyProbe
+from harness_manager_mps3 import mcc as mccmod
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.fake_channel import AssetFile, ChannelBuilder, FakeChannelServer, TestKeys
 from tests.fakes.t3_clock import FakeClock
 from tests.fakes.t7_board import FakeUv, bind_identity_to_sd
@@ -121,7 +121,7 @@ def test_update_harness_and_app_tsv_have_the_documented_columns(cli, capsys, mon
     rc, out, err = run(capsys, monkeypatch, "--tsv", "update", "harness", *board_args(cli), "--yes")
     assert rc == ExitCode.OK, err
     _tsv_cols(out, "update harness")
-    cli["builder"].add_app("0.2.0", AssetFile("socharness-0.2.0-py3-none-any.whl", b"PK-wheel"))
+    cli["builder"].add_app("0.2.0", AssetFile("harness_manager-0.2.0-py3-none-any.whl", b"PK-wheel"))
     cli["builder"].publish(serial=2)
     rc, out, err = run(capsys, monkeypatch, "--tsv", "update", "app", "--yes", "--source",
                        cli["srv"].source())
@@ -205,7 +205,7 @@ def test_written_not_running_exits_6_with_the_restore_command(cli, capsys, monke
     obj = json.loads(out)
     assert rc == ExitCode.ACTION_FAILED and "written, not running" in err
     endpoint = cli["vb"].shell_endpoint
-    assert f"socharness update rollback {endpoint}" in obj["error"]["hint"]
+    assert f"harness-manager update rollback {endpoint}" in obj["error"]["hint"]
     assert obj["error"]["data"]["outcome"]["result"] == "written-not-running"
     rc, out, err = run(capsys, monkeypatch, "--json", "update", "rollback", endpoint, "--serial",
                        cli["vb"].mcc_url, "--volume", str(cli["vb"].sd.root), "--yes")
@@ -214,7 +214,7 @@ def test_written_not_running_exits_6_with_the_restore_command(cli, capsys, monke
 
 
 def test_update_app_stages_and_switches(cli, capsys, monkeypatch):
-    cli["builder"].add_app("0.2.0", AssetFile("socharness-0.2.0-py3-none-any.whl", b"PK-wheel"))
+    cli["builder"].add_app("0.2.0", AssetFile("harness_manager-0.2.0-py3-none-any.whl", b"PK-wheel"))
     cli["builder"].publish(serial=1)
     rc, out, err = run(capsys, monkeypatch, "--json", "update", "app", "--yes", "--source",
                        cli["srv"].source())

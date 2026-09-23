@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import UnavailableError, UsageError
-from socharness.core.model import LinkKind
-from socharness_board_mps3.sysmon import (
+from harness_manager.core.errors import UnavailableError, UsageError
+from harness_manager.core.model import LinkKind
+from harness_manager_mps3.sysmon import (
     FLAG_JTGD,
     FLAG_OT,
     FLAG_REF,
@@ -137,13 +137,13 @@ def test_missing_register_is_unavailable_with_why():
 
 
 def test_parse_output_values_errors_and_fatal():
-    text = ("noise\nSOCHARNESS_SYSMON 00 0000a235\nSOCHARNESS_SYSMON 3f 003f0200\n"
-            "SOCHARNESS_SYSMON_ERR read 06 JTAG busy\n"
-            'in procedure: echo "SOCHARNESS_SYSMON 01 [format %08x 0x$v]"\n')   # echoed template
+    text = ("noise\nHARNESS_MANAGER_SYSMON 00 0000a235\nHARNESS_MANAGER_SYSMON 3f 003f0200\n"
+            "HARNESS_MANAGER_SYSMON_ERR read 06 JTAG busy\n"
+            'in procedure: echo "HARNESS_MANAGER_SYSMON 01 [format %08x 0x$v]"\n')   # echoed template
     out = parse_output(text)
     assert out.codes == {0x00: 0xA235, 0x3F: 0x0200}
     assert out.errors == {0x06: "read failed: JTAG busy"} and out.fatal is None
-    assert parse_output("SOCHARNESS_SYSMON_ERR connect Connection refused").fatal == (
+    assert parse_output("HARNESS_MANAGER_SYSMON_ERR connect Connection refused").fatal == (
         "connect", "Connection refused")
 
 
@@ -175,9 +175,9 @@ def test_xsdb_script_is_read_only_and_parsed(fake_tool):
 
 
 @pytest.mark.parametrize("stdout,expect", [
-    ("SOCHARNESS_SYSMON_ERR connect Connection refused",
+    ("HARNESS_MANAGER_SYSMON_ERR connect Connection refused",
      "cannot reach hw_server at tcp:127.0.0.1:3121: Connection refused"),
-    ("SOCHARNESS_SYSMON_ERR target no targets found",
+    ("HARNESS_MANAGER_SYSMON_ERR target no targets found",
      "no xcku115* on the JTAG chain behind tcp:127.0.0.1:3121: no targets found (is the JTAG cable on J17"),
     ("xsdb% something odd", "xsdb printed no SYSMON values: xsdb% something odd"),
 ])
@@ -260,7 +260,7 @@ def test_openocd_argv_order_and_read_only(fake_tool):
     joined = " ".join(cmds)
     assert "irscan ku115.tap 0xde4" in joined and "irscan ku115.tap 0x249" in joined
     for a in READ_REGS:
-        assert f"socharness_rd {read_command(a)}" in joined
+        assert f"harness_manager_rd {read_command(a)}" in joined
     assert "drscan ku115.tap 32 0]" in joined
 
 
@@ -272,7 +272,7 @@ def test_openocd_success_and_failures(fake_tool):
         ("Warn : JTAG tap: ku115.tap UNEXPECTED: 0x6ba00477 (mfg...)", "not a KU115 (IDCODE 0x6ba00477)"),
         ("Error: JTAG scan chain interrogation failed: all ones", "scan chain all ones"),
         ("Error: unable to open ftdi device with vid 0403", "no FTDI JTAG adapter found"),
-        ("SOCHARNESS_SYSMON_ERR target IDCODE 0x13631093 is not a KU115", "openocd: IDCODE 0x13631093"),
+        ("HARNESS_MANAGER_SYSMON_ERR target IDCODE 0x13631093 is not a KU115", "openocd: IDCODE 0x13631093"),
         ("Error: something else broke\n", "Error: something else broke"),
     ]
     for stderr, expect in cases:

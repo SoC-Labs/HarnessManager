@@ -8,11 +8,16 @@ import socket
 
 import pytest
 
-from socharness.core.errors import ActionFailedError, UnavailableError, UnreachableError, UsageError
-from socharness.power.adapter import PowerAdapter, make_driver, make_power_adapter
-from socharness.power.base import ON_GRACE_S
-from socharness.power.config import Auth, BoardConfig, PowerConfig, Secret
-from socharness.power.http import digest_authorization, parse_challenge
+from harness_manager.core.errors import (
+    ActionFailedError,
+    UnavailableError,
+    UnreachableError,
+    UsageError,
+)
+from harness_manager.power.adapter import PowerAdapter, make_driver, make_power_adapter
+from harness_manager.power.base import ON_GRACE_S
+from harness_manager.power.config import Auth, BoardConfig, PowerConfig, Secret
+from harness_manager.power.http import digest_authorization, parse_challenge
 from tests.fakes.t9_plugs import FakeClock, FakeNetio, FakeShelly, FakeTasmota
 
 PW = "pl4g-Secret"

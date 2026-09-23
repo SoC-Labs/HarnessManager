@@ -2,9 +2,9 @@
 
 ``use_stub(monkeypatch, tmp_path)`` sets:
 
-- ``$SOCHARNESS_OPENOCD`` -> a launcher for tests/fakes/stub_openocd.py;
+- ``$HARNESS_MANAGER_OPENOCD`` -> a launcher for tests/fakes/stub_openocd.py;
 - ``$STUB_OPENOCD_LOG`` -> a JSON-lines log of every stub run and event;
-- ``$SOCHARNESS_MPS3_OPENOCD_DIR`` -> a directory holding empty files with the
+- ``$HARNESS_MANAGER_MPS3_OPENOCD_DIR`` -> a directory holding empty files with the
   real config names, so the tests never depend on the platform repo checkout.
 """
 
@@ -46,10 +46,10 @@ def make_cfg_dir(path: Path) -> Path:
 def use_stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StubRig:
     rig = StubRig(binary=make_wrapper(tmp_path / "bin"), log=tmp_path / "stub_openocd.jsonl",
                   cfg_dir=make_cfg_dir(tmp_path / "cfg"))
-    monkeypatch.setenv("SOCHARNESS_OPENOCD", str(rig.binary))
+    monkeypatch.setenv("HARNESS_MANAGER_OPENOCD", str(rig.binary))
     monkeypatch.setenv("STUB_OPENOCD_LOG", str(rig.log))
-    monkeypatch.setenv("SOCHARNESS_MPS3_OPENOCD_DIR", str(rig.cfg_dir))
-    monkeypatch.delenv("SOCHARNESS_DEBUG_PORT_BASE", raising=False)
+    monkeypatch.setenv("HARNESS_MANAGER_MPS3_OPENOCD_DIR", str(rig.cfg_dir))
+    monkeypatch.delenv("HARNESS_MANAGER_DEBUG_PORT_BASE", raising=False)
     for var in ("STUB_OPENOCD_IDCODE", "STUB_OPENOCD_INIT_DELAY", "STUB_OPENOCD_NO_ADAPTER"):
         monkeypatch.delenv(var, raising=False)
     return rig
@@ -94,7 +94,7 @@ class StaticDebugAdapter:
 ORPHAN_MAKER = '''
 import json, sys, time
 from pathlib import Path
-from socharness.services.debug import DebugService
+from harness_manager.services.debug import DebugService
 from tests.fakes.t4_console_rig import BareSession
 from tests.fakes.t4_debug_rig import StaticDebugAdapter
 cfg_dir, rbb_port, board = Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3]

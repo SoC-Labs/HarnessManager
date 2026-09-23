@@ -28,8 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from socharness.core.model import BoardIdentity, Candidate, Link, LinkKind
-from socharness.services.update.os_slots import (
+from harness_manager.core.model import BoardIdentity, Candidate, Link, LinkKind
+from harness_manager.services.update.os_slots import (
     SLOT_CONFIRMED,
     SLOT_EMPTY,
     SLOT_TRY_ONCE,
@@ -139,7 +139,7 @@ class FakeOsSlots:
     def reboot(self, progress=None, wait_s: float = 180.0) -> dict:
         self.calls.append("reboot")
         if self.reboot_fails:
-            from socharness.core.errors import ActionFailedError
+            from harness_manager.core.errors import ActionFailedError
 
             raise ActionFailedError("reboot sent but no restart observed")
         booted = self.active
@@ -165,7 +165,7 @@ class FakeOsSlots:
         self.calls.append(f"confirm:{slot}")
         info = self.slots[slot]
         if slot != self.active:
-            from socharness.core.errors import ActionFailedError
+            from harness_manager.core.errors import ActionFailedError
 
             raise ActionFailedError(f"slot {slot} is not running")
         self.slots[slot] = SlotInfo(slot, info.image_sha256, info.version, SLOT_CONFIRMED)
@@ -219,16 +219,16 @@ class FakeUv:
         if len(argv) > 2 and argv[1:3] == ["pip", "install"]:
             if self.fail_install:
                 return subprocess.CompletedProcess(argv, 1, "",
-                                                   "error: hash mismatch for socharness")
+                                                   "error: hash mismatch for harness-manager")
             py = argv[argv.index("--python") + 1]
             reqs = Path(argv[argv.index("-r") + 1]).read_text()
             self.reqs_seen.append(reqs)
-            m = re.search(r"socharness-([^-]+)-py3", reqs)
+            m = re.search(r"harness_manager-([^-]+)-py3", reqs)
             self.installed[py] = m.group(1) if m else "?"
             return subprocess.CompletedProcess(argv, 0, "Installed 1 package", "")
         if len(argv) > 1 and argv[1] == "-c":
             ver = self.report_version or self.installed.get(argv[0], "")
             if not ver:
-                return subprocess.CompletedProcess(argv, 1, "", "ModuleNotFoundError: socharness")
+                return subprocess.CompletedProcess(argv, 1, "", "ModuleNotFoundError: harness-manager")
             return subprocess.CompletedProcess(argv, 0, ver, "")
         return subprocess.CompletedProcess(argv, 127, "", f"fake uv: unknown command {argv}")

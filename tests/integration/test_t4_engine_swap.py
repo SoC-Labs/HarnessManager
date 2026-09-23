@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import IncompatibleError
-from socharness.core.events import EventBus
-from socharness.core.services import EngineConfig
-from socharness.engine import Engine
-from socharness.services.console import ConsoleBroker
-from socharness.services.debug import DebugService, pid_alive
-from socharness_board_mps3.pack import Mps3Pack
+from harness_manager.core.errors import IncompatibleError
+from harness_manager.core.events import EventBus
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
+from harness_manager.services.console import ConsoleBroker
+from harness_manager.services.debug import DebugService, pid_alive
+from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.t2_overlays import (
     OTHER_STATIC_ID,
     make_overlay,

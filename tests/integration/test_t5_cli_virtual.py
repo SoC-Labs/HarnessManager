@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from socharness.cli.engine import get_engine
-from socharness.cli.main import main
-from socharness.core.errors import ExitCode
+from harness_manager.cli.engine import get_engine
+from harness_manager.cli.main import main
+from harness_manager.core.errors import ExitCode
 from tests.fakes.t2_overlays import OTHER_STATIC_ID, make_overlay, point_pushes_at
 from tests.fakes.virtual_board import VirtualMps3
 
@@ -123,7 +123,7 @@ def _first_line(proc: subprocess.Popen, timeout: float) -> str:
 def test_attach_holds_across_processes_until_detach(vboard: VirtualMps3, capsys):
     ep = vboard.shell_endpoint
     proc = subprocess.Popen(
-        [sys.executable, "-m", "socharness.cli.main", "--json", "attach", ep, "--note", "t5-e2e"],
+        [sys.executable, "-m", "harness_manager.cli.main", "--json", "attach", ep, "--note", "t5-e2e"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=dict(os.environ))
     try:
         attached = json.loads(_first_line(proc, 30))
@@ -131,7 +131,7 @@ def test_attach_holds_across_processes_until_detach(vboard: VirtualMps3, capsys)
 
         # While it holds the board, this process is held off, and told how to detach.
         rc, _, err = run(capsys, "info", ep)
-        assert rc == ExitCode.HELD and "t5-e2e" in err and f"socharness detach {ep}" in err
+        assert rc == ExitCode.HELD and "t5-e2e" in err and f"harness-manager detach {ep}" in err
 
         rc, out, _ = run(capsys, "--json", "detach", ep)
         assert rc == 0 and json.loads(out)["state"] == "released"
@@ -224,7 +224,7 @@ def test_lab_dutrx_reads_what_the_dut_sent(vboard: VirtualMps3, capsys):
 def test_mcc_over_ethernet_only_needs_the_usb_cable(vboard: VirtualMps3, capsys):
     rc, _, err = run(capsys, "mcc", vboard.shell_endpoint, "temp")
     assert rc == ExitCode.UNAVAILABLE
-    assert err.strip() == "socharness: console_controller is unavailable — needs the Debug USB cable"
+    assert err.strip() == "harness-manager: console_controller is unavailable — needs the Debug USB cable"
 
 
 def test_telemetry_never_reports_a_missing_value_as_zero(vboard: VirtualMps3, capsys):
@@ -254,7 +254,7 @@ def test_program_an_overlay_end_to_end(pushes: VirtualMps3, tmp_path: Path, caps
     assert rc == 0, err
     assert obj["result"]["verified"] is True and obj["result"]["rm_id"] == "0x01007a57"
     assert "deploy: push" in err                                    # progress on stderr
-    assert "SOCHARNESS_MPS3_OVERLAY_DIRS" not in os.environ         # the flag was scoped
+    assert "HARNESS_MANAGER_MPS3_OVERLAY_DIRS" not in os.environ         # the flag was scoped
     rc, out, _ = run(capsys, "--json", "info", pushes.shell_endpoint)
     assert json.loads(out)["identity"]["rm_id"] == "0x01007a57"
 

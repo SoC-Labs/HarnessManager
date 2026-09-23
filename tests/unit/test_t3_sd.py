@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
     ExitCode,
@@ -25,10 +25,10 @@ from socharness.core.errors import (
     UnavailableError,
     UsageError,
 )
-from socharness.core.model import Candidate, Link, LinkKind
-from socharness.core.pack import StorageAdapter
-from socharness_board_mps3 import sd as sdmod
-from socharness_board_mps3.sd import (
+from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.pack import StorageAdapter
+from harness_manager_mps3 import sd as sdmod
+from harness_manager_mps3.sd import (
     JOURNAL_NAME,
     Mps3Storage,
     SdEnv,
@@ -208,7 +208,7 @@ def test_load_backup_refuses_a_foreign_zip_and_a_missing_file(tmp_path, storage)
         zf.writestr("cat.jpg", b"meow")
     with pytest.raises(RefusedError, match="unreadable or incomplete"):
         storage.load_backup(foreign)
-    from socharness.core.errors import AbsentError
+    from harness_manager.core.errors import AbsentError
 
     with pytest.raises(AbsentError, match="does not exist"):   # exit 3: the file is not there
         storage.load_backup(tmp_path / "nope.zip")
@@ -355,7 +355,7 @@ def _plant_killed_journal(sd: FakeSdVolume, rec, *, host="testhost", pid=999_999
                "started_at": started_at, "planned": [BIT], "done": [], "created": [],
                "current": BIT, "backup": {"path": rec.path, "sha256": rec.sha256}}
     (sd.root / JOURNAL_NAME).write_text(json.dumps(journal))
-    (sd.root / (BIT + ".socharness-tmp")).write_bytes(b"\x07" * 10)   # the half-written temp
+    (sd.root / (BIT + ".harness-manager-tmp")).write_bytes(b"\x07" * 10)   # the half-written temp
 
 
 def test_install_killed_mid_write_is_detected_and_restored(tmp_path, sd):

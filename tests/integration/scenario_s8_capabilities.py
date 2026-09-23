@@ -8,8 +8,8 @@ The same board viewed three ways:
 
 from __future__ import annotations
 
-from socharness.core import capabilities as C
-from socharness.core.capabilities import negotiate
+from harness_manager.core import capabilities as C
+from harness_manager.core.capabilities import negotiate
 from tests.fakes.virtual_board import VirtualMps3
 
 

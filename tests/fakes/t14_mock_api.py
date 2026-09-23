@@ -1,18 +1,18 @@
-"""A mock ``socharnessd`` for the web UI (Team T14): docs/API.md v1 over an in-process engine.
+"""A mock ``harness-manager-daemon`` for the web UI (Team T14): docs/API.md v1 over an in-process engine.
 
 It implements the frozen API contract (docs/API.md) with FastAPI over any
-object that follows ``socharness.core.services.Engine``: by default the GUI's
+object that follows ``harness_manager.core.services.Engine``: by default the GUI's
 ``DemoEngine`` (three scripted boards), or the real ``Engine`` over
-``VirtualMps3``. It serves the UI from ``socharness.web`` exactly as the daemon
-will (``socharness.web.mount_static``), so the page runs here unchanged.
+``VirtualMps3``. It serves the UI from ``harness_manager.web`` exactly as the daemon
+will (``harness_manager.web.mount_static``), so the page runs here unchanged.
 
 It is a test double, not the daemon: the real server is Team T13's
-``socharness.daemon``, and the browser tests run against that. The mock follows
+``harness_manager.daemon``, and the browser tests run against that. The mock follows
 the behaviour T13 settled where API.md leaves it open (``OPEN_POINTS``), and
 ``tests/web/test_t14_mock_contract.py`` checks its route table against both
 API.md and the real daemon's.
 
-Run the UI by hand over the demo boards (the real socharnessd app by default,
+Run the UI by hand over the demo boards (the real harness-manager-daemon app by default,
 this mock with ``--mock``)::
 
     .venv/bin/python -m tests.fakes.t14_mock_api --port 8765
@@ -39,9 +39,9 @@ from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from socharness.cli.output import error_json, jsonable, reading_json
-from socharness.core import capabilities as C
-from socharness.core.errors import (
+from harness_manager.cli.output import error_json, jsonable, reading_json
+from harness_manager.core import capabilities as C
+from harness_manager.core.errors import (
     AbsentError,
     ExitCode,
     HarnessError,
@@ -50,14 +50,14 @@ from socharness.core.errors import (
     UnavailableError,
     UsageError,
 )
-from socharness.core.events import Event, EventBus, _matches
-from socharness.core.model import BoardIdentity, Candidate, Link, LinkKind
-from socharness.core.pack import ProbeHints
-from socharness.core.session import LockOwner
+from harness_manager.core.events import Event, EventBus, _matches
+from harness_manager.core.model import BoardIdentity, Candidate, Link, LinkKind
+from harness_manager.core.pack import ProbeHints
+from harness_manager.core.session import LockOwner
 
 API = "/api/v1"
 VERSION = "0.0.1-t14-mock"
-UI_NOTE = "socharness-ui"
+UI_NOTE = "harness-manager-ui"
 
 #: HTTP status per ExitCode, from the table in docs/API.md.
 HTTP_STATUS: dict[ExitCode, int] = {
@@ -72,7 +72,7 @@ HTTP_STATUS: dict[ExitCode, int] = {
     ExitCode.REFUSED: 409,
 }
 
-#: Where docs/API.md is open, and what socharnessd (T13) does there; the mock does the same.
+#: Where docs/API.md is open, and what harness-manager-daemon (T13) does there; the mock does the same.
 OPEN_POINTS: dict[str, str] = {
     "GET /boards/{bid}": "BoardInfo fields flattened next to ok (the CLI's `info --json`)",
     "GET /boards/{bid}/debug": "DebugStatus fields flattened next to ok",
@@ -80,7 +80,7 @@ OPEN_POINTS: dict[str, str] = {
     "POST /boards": "candidate = a Candidate object; {board_id, info} with info null + info_error "
                     "when the first read fails (the session is open); 409 ALREADY when open",
     "GET /boards": "every board the daemon has probed or opened, open or not, plus `job`",
-    "401": "error REFUSED (15): 'session expired: run socharness ui again'",
+    "401": "error REFUSED (15): 'session expired: run harness-manager ui again'",
     "jobs": "while a job runs on a board, the board's other requests are 409 HELD naming it",
     "POST /deploy": "preflight first; a refusal is 409 (14/15) with error.data.{overlay, "
                     "preflight} and no job",
@@ -90,7 +90,7 @@ OPEN_POINTS: dict[str, str] = {
     "refused WS": "an HTTP denial with the envelope, or close 4000 + exit code",
 }
 
-#: Routes socharnessd serves beyond API.md. Empty since the lead documented T13's
+#: Routes harness-manager-daemon serves beyond API.md. Empty since the lead documented T13's
 #: additions (session, jobs, daemon/shutdown); kept so a new one has a place to go.
 ADDITIVE_ROUTES: tuple[tuple[str, str], ...] = ()
 
@@ -195,10 +195,10 @@ class Jobs:
             return list(self._jobs.values())
 
     def gate(self, board_id: str) -> None:
-        """socharnessd's rule: while a job runs on a board, its other requests are refused."""
+        """harness-manager-daemon's rule: while a job runs on a board, its other requests are refused."""
         for job in self.running(board_id):
             raise HeldError(f"{board_id} is busy: {job.describe()} is running",
-                            holder=f"socharnessd {job.describe()}",
+                            holder=f"harness-manager-daemon {job.describe()}",
                             hint=f"wait for it to finish (GET /api/v1/jobs/{job.id})")
 
     def start(self, board_id: str, kind: str,
@@ -208,7 +208,7 @@ class Jobs:
             for other in self._jobs.values():
                 if other.board_id == board_id and other.state == "running":
                     raise HeldError(f"{board_id} is busy: {other.describe()} is running",
-                                    holder=f"socharnessd {other.describe()}")
+                                    holder=f"harness-manager-daemon {other.describe()}")
             self._jobs[job.id] = job
         self.bus.publish(Event("job.started", board_id, {"job": job.id, "kind": kind}))
 
@@ -228,7 +228,7 @@ class Jobs:
             except Exception as exc:  # noqa: BLE001 - reported as the job's error
                 job.error = {"code": 1, "name": "FAILED", "message": str(exc),
                              "hint": "this is a bug in the mock daemon"}
-            # Free the board BEFORE saying so (as socharnessd does): a client reacting to
+            # Free the board BEFORE saying so (as harness-manager-daemon does): a client reacting to
             # job.done is never refused by this job's own claim.
             job.ended_at = time.time()
             if job.error is not None:
@@ -250,7 +250,7 @@ class Jobs:
 
 def auth_error() -> HarnessError:
     return RefusedError("missing or wrong token",
-                        hint="`socharness ui` opens the UI with the current token")
+                        hint="`harness-manager ui` opens the UI with the current token")
 
 
 def _err(exc: HarnessError) -> JSONResponse:
@@ -326,11 +326,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                serve_ui: bool = True) -> FastAPI:
     """The mock daemon as an ASGI app. ``engine`` defaults to a ``DemoEngine``."""
     if engine is None:
-        from socharness.demo import DemoEngine
+        from harness_manager.demo import DemoEngine
 
         engine = DemoEngine(speed=1.0)
     state = MockDaemonApp(engine, token)
-    app = FastAPI(title="socharnessd (T14 mock)", version=VERSION, docs_url=None,
+    app = FastAPI(title="harness-manager-daemon (T14 mock)", version=VERSION, docs_url=None,
                   redoc_url=None, openapi_url=None)
     app.state.daemon = state
 
@@ -359,7 +359,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     eng = engine
 
     async def ws_deny(ws: WebSocket, exc: HarnessError) -> None:
-        """socharnessd's refusal: an HTTP denial with the envelope, else close 4000 + code."""
+        """harness-manager-daemon's refusal: an HTTP denial with the envelope, else close 4000 + code."""
         try:
             await ws.send_denial_response(JSONResponse(
                 error_json(exc), status_code=401 if exc.code == ExitCode.REFUSED
@@ -373,7 +373,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     def health() -> dict[str, Any]:
         import os
 
-        return _ok(version=VERSION, service="socharnessd (T14 mock)", pid=os.getpid())
+        return _ok(version=VERSION, service="harness-manager-daemon (T14 mock)", pid=os.getpid())
 
     @app.get(f"{API}/packs")
     def packs() -> dict[str, Any]:
@@ -389,7 +389,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                            timeout_s=float(body.get("timeout_s", 2.0)))
         for job in state.jobs.running():
             raise HeldError(f"{job.describe()} is running on {job.board_id}; a probe now could "
-                            "take that board's control port", holder=f"socharnessd {job.describe()}")
+                            "take that board's control port", holder=f"harness-manager-daemon {job.describe()}")
         found = list(eng.probe(hints))
         for host in hints.hosts:
             # An explicit address the scan did not answer still becomes a candidate.
@@ -401,7 +401,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     @app.get(f"{API}/help/tabs")
     def help_tabs() -> dict[str, Any]:
-        from socharness.cli.helptext import tabs
+        from harness_manager.cli.helptext import tabs
 
         return _ok(tabs=[{"name": n, "text": t} for n, t in tabs()])
 
@@ -409,9 +409,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     def shutdown(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:  # noqa: B008
         running = state.jobs.running()
         if running and not body.get("force"):
-            raise HeldError(f"socharnessd is running {running[0].describe()}", holder="socharnessd",
+            raise HeldError(f"harness-manager-daemon is running {running[0].describe()}", holder="harness-manager-daemon",
                             hint="wait for it, or stop with --force")
-        raise UnavailableError("daemon_shutdown", "the T14 mock is not started by `socharness daemon`")
+        raise UnavailableError("daemon_shutdown", "the T14 mock is not started by `harness-manager daemon`")
 
     @app.get(f"{API}/jobs")
     def jobs() -> dict[str, Any]:
@@ -499,7 +499,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # -- deploy ---------------------------------------------------------------------------
 
     def find_overlay(session: Any, spec: Any) -> Any:
-        """By name, by rm_id, or by the OverlayRef object the API returned (as socharnessd)."""
+        """By name, by rm_id, or by the OverlayRef object the API returned (as harness-manager-daemon)."""
         every = list(eng.deploy.overlays(session))
         if isinstance(spec, dict):
             keys = [k for k in ("name", "rm_id", "static_id", "source") if spec.get(k)]
@@ -529,7 +529,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     @app.post(f"{API}/boards/{{bid}}/preflight")
     def preflight(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
-        from socharness.core.pack import preflight_refusal
+        from harness_manager.core.pack import preflight_refusal
 
         state.jobs.gate(bid)
         session = state.session(bid)
@@ -543,7 +543,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     @app.post(f"{API}/boards/{{bid}}/deploy", status_code=202)
     def deploy(bid: str, body: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        from socharness.core.pack import preflight_refusal
+        from harness_manager.core.pack import preflight_refusal
 
         state.jobs.gate(bid)
         session = state.session(bid)
@@ -705,11 +705,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # -- controller and storage -----------------------------------------------------------
 
     def existing_backup(raw: Any) -> Path:
-        # socharnessd (cli.cmd_board.backup_record) refuses an archive that is not there.
+        # harness-manager-daemon (cli.cmd_board.backup_record) refuses an archive that is not there.
         path = Path(str(raw or ""))
         if not raw or not path.is_file():
             raise AbsentError(f"no backup archive at {path}",
-                              hint="make one with `socharness sd TARGET backup DIR`")
+                              hint="make one with `harness-manager sd TARGET backup DIR`")
         return path
 
     def controller(bid: str) -> Any:
@@ -832,7 +832,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                 t.cancel()
 
     if serve_ui:
-        from socharness.web import mount_static
+        from harness_manager.web import mount_static
 
         mount_static(app, "/")
     return app
@@ -845,7 +845,7 @@ class ServedApp:
     """Any ASGI app on 127.0.0.1 in a background uvicorn thread (tests and demos).
 
     ``ServedApp(app, token)`` serves the given app: the mock below, or the real
-    ``socharness.daemon.app.create_app(engine, token=...)``. ``app.state.daemon``
+    ``harness_manager.daemon.app.create_app(engine, token=...)``. ``app.state.daemon``
     must have ``engine`` and ``remember(candidates)`` (both servers do)::
 
         with ServedApp(app, token) as d:
@@ -916,9 +916,9 @@ class MockDaemon(ServedApp):
 
 
 def real_daemon(engine: Any, *, token: str, state_dir: Path | None = None) -> ServedApp:
-    """Team T13's socharnessd app over ``engine``, served the same way (lifespan on, so it
+    """Team T13's harness-manager-daemon app over ``engine``, served the same way (lifespan on, so it
     closes its boards and jobs when it stops)."""
-    from socharness.daemon.app import create_app as daemon_app
+    from harness_manager.daemon.app import create_app as daemon_app
 
     return ServedApp(daemon_app(engine, token=token, state_dir=state_dir), token,
                      lifespan="on")
@@ -931,16 +931,16 @@ def running(engine: Any | None = None, **kw: Any) -> Iterator[MockDaemon]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="the T14 mock socharnessd over DemoEngine")
+    parser = argparse.ArgumentParser(description="the T14 mock harness-manager-daemon over DemoEngine")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--token", default="t14-demo")
     parser.add_argument("--speed", type=float, default=1.0, help="DemoEngine pacing factor")
     parser.add_argument("--sd-journal", action="store_true",
                         help="leave an interrupted SD install on the USB board")
     parser.add_argument("--mock", action="store_true",
-                        help="serve this mock instead of the real socharnessd app (T13)")
+                        help="serve this mock instead of the real harness-manager-daemon app (T13)")
     args = parser.parse_args(argv)
-    from socharness.demo import BOARD_USB, DemoEngine
+    from harness_manager.demo import BOARD_USB, DemoEngine
 
     engine = DemoEngine(speed=args.speed, console_chatter=True)
     if args.sd_journal:
@@ -948,10 +948,10 @@ def main(argv: list[str] | None = None) -> int:
                                           "current": "MB/HBI0309C/AN536/images.txt",
                                           "backup": {"path": "/tmp/backup.zip"}})
     server = (MockDaemon(engine, token=args.token, port=args.port) if args.mock else ServedApp(
-        __import__("socharness.daemon.app", fromlist=["create_app"]).create_app(
+        __import__("harness_manager.daemon.app", fromlist=["create_app"]).create_app(
             engine, token=args.token), args.token, port=args.port, lifespan="on"))
     with server as d:
-        print(f"{'T14 mock' if args.mock else 'socharnessd'} over DemoEngine: {d.ui_url}",
+        print(f"{'T14 mock' if args.mock else 'harness-manager-daemon'} over DemoEngine: {d.ui_url}",
               flush=True)
         try:
             while True:

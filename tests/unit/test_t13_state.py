@@ -18,16 +18,16 @@ from pathlib import Path
 
 import pytest
 
-from socharness.cli import engine as cli_engine
-from socharness.cli.engine import (
+from harness_manager.cli import engine as cli_engine
+from harness_manager.cli.engine import (
     ENV_NO_DAEMON,
     describe_engine,
     get_engine,
     set_engine_factory,
     wants_daemon,
 )
-from socharness.core.errors import HeldError
-from socharness.daemon.state import (
+from harness_manager.core.errors import HeldError
+from harness_manager.daemon.state import (
     DaemonInfo,
     DaemonInstance,
     daemon_json_path,
@@ -36,7 +36,7 @@ from socharness.daemon.state import (
     remove_info,
     write_info,
 )
-from socharness.engine import Engine
+from harness_manager.engine import Engine
 from tests.fakes.t13_daemon import state_dir
 
 
@@ -115,9 +115,9 @@ def test_remove_info_only_removes_its_own_file(tmp_path):
 
 def _foreign_lock(sdir: Path, pid: int) -> None:
     sdir.mkdir(parents=True, exist_ok=True)
-    (sdir / "socharnessd.lock").write_text(json.dumps(
+    (sdir / "harness-manager-daemon.lock").write_text(json.dumps(
         {"user": "someone", "host": socket.gethostname(), "pid": pid, "since": time.time(),
-         "note": "socharnessd"}))
+         "note": "harness-manager-daemon"}))
 
 
 def test_a_live_daemon_keeps_the_state_dir(tmp_path, live_child):
@@ -132,11 +132,11 @@ def test_negative_twin_a_dead_daemons_lock_is_taken_over(tmp_path):
     inst = DaemonInstance(tmp_path)
     inst.acquire()
     try:
-        owner = json.loads((tmp_path / "socharnessd.lock").read_text())
+        owner = json.loads((tmp_path / "harness-manager-daemon.lock").read_text())
         assert owner["pid"] == os.getpid()
     finally:
         inst.release()
-    assert not (tmp_path / "socharnessd.lock").exists()
+    assert not (tmp_path / "harness-manager-daemon.lock").exists()
 
 
 # -- the CLI's engine choice (no daemon running) -----------------------------------------------
@@ -149,7 +149,7 @@ def test_with_no_daemon_the_cli_uses_the_in_process_engine():
         assert isinstance(eng, Engine)
     finally:
         eng.close_all()
-    assert describe_engine() == "socharness.engine.Engine"
+    assert describe_engine() == "harness_manager.engine.Engine"
 
 
 def test_negative_twin_a_stale_daemon_json_is_not_used(tmp_path):
@@ -159,7 +159,7 @@ def test_negative_twin_a_stale_daemon_json_is_not_used(tmp_path):
         assert isinstance(eng, Engine)
     finally:
         eng.close_all()
-    assert describe_engine() == "socharness.engine.Engine"
+    assert describe_engine() == "harness_manager.engine.Engine"
 
 
 def test_a_recorded_daemon_that_does_not_answer_is_not_used():

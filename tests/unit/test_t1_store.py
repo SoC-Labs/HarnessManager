@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core.errors import AbsentError, ExitCode, UsageError
-from socharness.core.services import ContentStore as ContentStoreProtocol
-from socharness.services import store as store_mod
-from socharness.services.store import ContentStore
+from harness_manager.core.errors import AbsentError, ExitCode, UsageError
+from harness_manager.core.services import ContentStore as ContentStoreProtocol
+from harness_manager.services import store as store_mod
+from harness_manager.services.store import ContentStore
 
 OVL = {"name": "nanosoc", "rm_id": "0x01000001", "static_id": "0x3f1a560f"}
 
@@ -250,7 +250,7 @@ def test_concurrent_puts_from_two_processes_are_safe(store: ContentStore):
     script = textwrap.dedent("""
         import sys
         from pathlib import Path
-        from socharness.services.store import ContentStore
+        from harness_manager.services.store import ContentStore
         s = ContentStore(Path(sys.argv[1]))
         for i in range(60):
             s.put_bytes((b"shared-%d" % (i % 6)) * 2000, kind="overlay",

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from socharness.core.errors import ActionFailedError
-from socharness.core.services import TelemetryService as TelemetryServiceProtocol
-from socharness.services.telemetry import (
+from harness_manager.core.errors import ActionFailedError
+from harness_manager.core.services import TelemetryService as TelemetryServiceProtocol
+from harness_manager.services.telemetry import (
     EMPTY_SOURCES_REASON,
     NO_SOURCE_REASON,
     TelemetryService,

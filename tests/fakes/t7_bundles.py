@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from socharness.services.update.bitheader import build_bit
+from harness_manager.services.update.bitheader import build_bit
 from tests.fakes.fake_channel import AssetFile, ChannelBuilder
 from tests.fakes.t2_overlays import FIELDED_USERCODE, SYNTH2_RM_ID, SYNTH_RM_ID, make_overlay
 from tests.fakes.virtual_board import FIELDED_3F1A560F, FIELDED_ILA_V011
@@ -54,7 +54,7 @@ def fake_bit(*, static_id: str, harness: str, sha: str = "c0ffee00", usercode: s
 
 def read_fake_identity(bit: bytes) -> dict[str, Any] | None:
     """The identity a fake .bit carries, or None for any other file."""
-    from socharness.services.update.bitheader import BitHeaderError, parse_bit_header
+    from harness_manager.services.update.bitheader import BitHeaderError, parse_bit_header
 
     try:
         hdr = parse_bit_header(bit)

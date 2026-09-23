@@ -8,7 +8,7 @@
   TAP on 127.0.0.1. This proves the argv order, the IR/DR scan sequence, the
   read-on-the-next-shift pipelining, the IDCODE guard, and that no write is ever sent.
 
-``SOCHARNESS_TEST_REAL_XSDB`` / ``SOCHARNESS_TEST_REAL_OPENOCD`` point at a binary that is
+``HARNESS_MANAGER_TEST_REAL_XSDB`` / ``HARNESS_MANAGER_TEST_REAL_OPENOCD`` point at a binary that is
 not on PATH (e.g. ~/tools/oss-cad-suite/bin/openocd).
 """
 
@@ -21,12 +21,12 @@ import subprocess
 
 import pytest
 
-from socharness.core.errors import UnavailableError
-from socharness_board_mps3.sysmon import READ_REGS, OpenOcdSysmon, XsdbSysmon, sysmon_readings
+from harness_manager.core.errors import UnavailableError
+from harness_manager_mps3.sysmon import READ_REGS, OpenOcdSysmon, XsdbSysmon, sysmon_readings
 from tests.fakes.t9_sysmon import GOOD_REGS, FakeRbbServer
 
-XSDB = os.environ.get("SOCHARNESS_TEST_REAL_XSDB") or shutil.which("xsdb")
-OPENOCD = os.environ.get("SOCHARNESS_TEST_REAL_OPENOCD") or shutil.which("openocd")
+XSDB = os.environ.get("HARNESS_MANAGER_TEST_REAL_XSDB") or shutil.which("xsdb")
+OPENOCD = os.environ.get("HARNESS_MANAGER_TEST_REAL_OPENOCD") or shutil.which("openocd")
 
 
 def _has_remote_bitbang(binary: str | None) -> bool:
@@ -53,7 +53,7 @@ def _rbb(port: int) -> list[str]:
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not XSDB, reason="no xsdb (set SOCHARNESS_TEST_REAL_XSDB)")
+@pytest.mark.skipif(not XSDB, reason="no xsdb (set HARNESS_MANAGER_TEST_REAL_XSDB)")
 def test_real_xsdb_without_a_hw_server_is_unavailable():
     reader = XsdbSysmon(xsdb=XSDB, hw_server=f"tcp:127.0.0.1:{_closed_port()}", timeout_s=120)
     with pytest.raises(UnavailableError) as err:
@@ -66,7 +66,7 @@ def needs_openocd(fn):
     """slow, and skipped without an openocd that has the remote_bitbang adapter."""
     fn = pytest.mark.skipif(bool(OPENOCD) and not _has_remote_bitbang(OPENOCD),
                             reason=f"{OPENOCD} was built without remote_bitbang")(fn)
-    fn = pytest.mark.skipif(not OPENOCD, reason="no openocd (set SOCHARNESS_TEST_REAL_OPENOCD)")(fn)
+    fn = pytest.mark.skipif(not OPENOCD, reason="no openocd (set HARNESS_MANAGER_TEST_REAL_OPENOCD)")(fn)
     return pytest.mark.slow(fn)
 
 

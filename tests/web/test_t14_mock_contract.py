@@ -1,4 +1,4 @@
-"""The T14 mock socharnessd against docs/API.md, and the calls the UI makes through it.
+"""The T14 mock harness-manager-daemon against docs/API.md, and the calls the UI makes through it.
 
 The mock is what the browser tests run against, so it must be the contract, not an
 approximation: its route table equals API.md's, errors carry the CLI's JSON shape and
@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import pytest
 
-from socharness.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
+from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
 from tests.fakes.t14_api_contract import (
     api_md_endpoints,
     app_routes,
@@ -78,7 +78,7 @@ def test_the_mock_route_table_is_api_md_plus_any_additive_routes():
     assert not additive & api_md_endpoints()
 
 
-def test_the_mock_route_table_equals_the_real_socharnessd():
+def test_the_mock_route_table_equals_the_real_harness_manager_daemon():
     # T13's daemon is the product; the mock must not drift from it.
     assert {(m, normalise(p)) for m, p in ROUTES} == daemon_routes()
 
@@ -94,7 +94,7 @@ def test_every_ui_endpoint_is_served_by_the_mock():
 
 
 def test_http_statuses_follow_the_api_md_table():
-    from socharness.core.errors import ExitCode
+    from harness_manager.core.errors import ExitCode
 
     assert HTTP_STATUS[ExitCode.USAGE] == 400
     assert HTTP_STATUS[ExitCode.ABSENT] == 404
@@ -281,7 +281,7 @@ def test_opening_an_open_board_is_409_already(client):
 
 
 def test_open_keeps_the_session_when_the_first_read_fails(client, engine):
-    from socharness.core.errors import UnreachableError
+    from harness_manager.core.errors import UnreachableError
 
     engine.failures["info"] = UnreachableError("shell did not reply", hint="check the board")
     r = probe_and_open(client, BOARD_USB)
@@ -410,5 +410,5 @@ def test_daemon_shutdown_is_refused_while_a_job_runs(client, engine):
     r = client.post("/api/v1/daemon/shutdown", json={}, headers=AUTH)
     assert r.status_code == 409 and r.json()["error"]["name"] == "HELD"
     wait_job(client, job)
-    # With no job, the mock says it cannot stop itself (it was not started by `socharness daemon`).
+    # With no job, the mock says it cannot stop itself (it was not started by `harness-manager daemon`).
     assert client.post("/api/v1/daemon/shutdown", json={}, headers=AUTH).status_code == 422

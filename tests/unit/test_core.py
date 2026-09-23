@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from socharness.core import capabilities as C
-from socharness.core.capabilities import CapabilitySpec, negotiate, via
-from socharness.core.errors import ExitCode, HeldError, UnavailableError
-from socharness.core.events import Event, EventBus
-from socharness.core.model import LinkKind, Reading
-from socharness.core.registry import load_packs
-from socharness.core.session import SessionLock
+from harness_manager.core import capabilities as C
+from harness_manager.core.capabilities import CapabilitySpec, negotiate, via
+from harness_manager.core.errors import ExitCode, HeldError, UnavailableError
+from harness_manager.core.events import Event, EventBus
+from harness_manager.core.model import LinkKind, Reading
+from harness_manager.core.registry import load_packs
+from harness_manager.core.session import SessionLock
 
 # -- exit codes -------------------------------------------------------------------------
 

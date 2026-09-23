@@ -32,8 +32,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from socharness.services.update import minisign
-from socharness.services.update.trust import (
+from harness_manager.services.update import minisign
+from harness_manager.services.update.trust import (
     ROLE_APP_CI,
     ROLE_RELEASE,
     ROLE_ROOT,
@@ -255,7 +255,7 @@ class ChannelBuilder:
     def document(self, *, channel: str, serial: int, key: minisign.SecretKey,
                  expires_at: str = "2099-01-01T00:00:00Z") -> dict[str, Any]:
         doc: dict[str, Any] = {
-            "schema": "socharness-channel", "schema_version": 1, "channel": channel,
+            "schema": "harness-manager-channel", "schema_version": 1, "channel": channel,
             "serial": serial, "issued_at": "2026-09-23T12:00:00Z", "expires_at": expires_at,
             "signing_key_id": key.public.id_hex, "board": dict(self.board), **self.extra,
         }
@@ -284,7 +284,7 @@ class ChannelBuilder:
     def publish_keys(self, keys: list[dict[str, Any]], *, serial: int = 1,
                      revoked: list[str] | None = None, key: minisign.SecretKey | None = None,
                      channel: str = "stable") -> Path:
-        data = json.dumps({"schema": "socharness-keys", "schema_version": 1, "serial": serial,
+        data = json.dumps({"schema": "harness-manager-keys", "schema_version": 1, "serial": serial,
                            "keys": keys, "revoked": revoked or []}, indent=1).encode()
         path = self.root / "channel" / channel / "keys.json"
         path.parent.mkdir(parents=True, exist_ok=True)

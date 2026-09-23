@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import pytest
 
-from socharness.core.errors import IncompatibleError, RefusedError
-from socharness.core.model import Check
-from socharness.services.update.bitheader import BitHeaderError, build_bit, parse_bit_header
-from socharness.services.update.bundle import PackOverlayHandler, prepare_release, safe_extract
-from socharness.services.update.channel import ChannelClient
-from socharness.services.update.download import Downloader
-from socharness.services.update.state import UpdateState
+from harness_manager.core.errors import IncompatibleError, RefusedError
+from harness_manager.core.model import Check
+from harness_manager.services.update.bitheader import BitHeaderError, build_bit, parse_bit_header
+from harness_manager.services.update.bundle import PackOverlayHandler, prepare_release, safe_extract
+from harness_manager.services.update.channel import ChannelClient
+from harness_manager.services.update.download import Downloader
+from harness_manager.services.update.state import UpdateState
 from tests.fakes.fake_channel import ChannelBuilder, TestKeys
 from tests.fakes.t7_bundles import USERCODE, Release, zip_bytes
 

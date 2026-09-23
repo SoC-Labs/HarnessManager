@@ -21,9 +21,9 @@ import threading
 import time
 from collections.abc import Callable
 
-from socharness.core.events import Event, EventBus
-from socharness.core.model import BoardIdentity, Candidate, Health, Link, LinkKind
-from socharness.core.pack import BoardSession
+from harness_manager.core.events import Event, EventBus
+from harness_manager.core.model import BoardIdentity, Candidate, Health, Link, LinkKind
+from harness_manager.core.pack import BoardSession
 
 
 class SingleClientProxy:

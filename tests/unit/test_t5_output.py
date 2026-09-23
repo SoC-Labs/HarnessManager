@@ -11,9 +11,9 @@ from enum import Enum
 
 import pytest
 
-from socharness.cli.cmd_board import bundle_files, preset_mhz
-from socharness.cli.context import hold, serial_url
-from socharness.cli.output import (
+from harness_manager.cli.cmd_board import bundle_files, preset_mhz
+from harness_manager.cli.context import hold, serial_url
+from harness_manager.cli.output import (
     TSV_COLUMNS,
     StderrProgress,
     error_json,
@@ -23,7 +23,7 @@ from socharness.cli.output import (
     tsv_line,
     with_data,
 )
-from socharness.core.errors import (
+from harness_manager.core.errors import (
     ActionFailedError,
     ExitCode,
     HarnessError,
@@ -32,7 +32,7 @@ from socharness.core.errors import (
     UnavailableError,
     UsageError,
 )
-from socharness.core.model import Check, Reading
+from harness_manager.core.model import Check, Reading
 
 # The TSV columns as first shipped. Columns may be APPENDED; these prefixes never change.
 PINNED = {
@@ -88,10 +88,10 @@ def test_jsonable_handles_every_shape_the_verbs_emit():
 
 def test_error_line_always_names_a_next_action():
     assert error_line(UsageError("bad")) == (
-        "socharness: bad — run `socharness help` for the verbs and the TARGET forms")
-    assert error_line(ActionFailedError("x", hint="do y")) == "socharness: x — do y"
+        "harness-manager: bad — run `harness-manager help` for the verbs and the TARGET forms")
+    assert error_line(ActionFailedError("x", hint="do y")) == "harness-manager: x — do y"
     assert error_line(UnavailableError("reboot_board", "needs the Debug USB cable")) == (
-        "socharness: reboot_board is unavailable — needs the Debug USB cable")
+        "harness-manager: reboot_board is unavailable — needs the Debug USB cable")
     assert "bug" in error_line(HarnessError("internal error: KeyError"))
 
 

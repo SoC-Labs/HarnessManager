@@ -104,7 +104,7 @@ def test_index_html_references_resolve_to_served_files():
 
 
 def test_index_html_has_no_inline_script():
-    # The UI runs under script-src 'self' (socharness.web.CONTENT_SECURITY_POLICY).
+    # The UI runs under script-src 'self' (harness_manager.web.CONTENT_SECURITY_POLICY).
     text = (STATIC / "index.html").read_text()
     for m in re.finditer(r"<script\b([^>]*)>(.*?)</script>", text, re.S):
         assert "src=" in m.group(1), "inline <script> would be blocked by the CSP"
@@ -245,15 +245,15 @@ def test_every_literal_icon_name_exists_in_the_vendored_set():
 
 
 def test_static_files_ship_as_package_data():
-    root = importlib.resources.files("socharness.web") / "static"
+    root = importlib.resources.files("harness_manager.web") / "static"
     assert (root / "index.html").is_file()
     assert (root / "vendor" / "VENDOR.md").is_file()
     text = (REPO / "pyproject.toml").read_text()
-    assert '"socharness.web" = ["static/**/*", "static/*"]' in text
+    assert '"harness_manager.web" = ["static/**/*", "static/*"]' in text
 
 
 def test_web_package_exposes_the_static_dir():
-    import socharness.web as web
+    import harness_manager.web as web
 
     assert web.static_dir() == STATIC.resolve()
     assert "script-src 'self'" in web.CONTENT_SECURITY_POLICY
@@ -270,7 +270,7 @@ def test_every_endpoint_the_ui_calls_is_in_api_md():
     assert {name: ep for name, ep in called.items() if ep not in defined} == {}
 
 
-def test_the_ui_additive_endpoints_are_ones_socharnessd_serves_and_api_md_lacks():
+def test_the_ui_additive_endpoints_are_ones_harness_manager_daemon_serves_and_api_md_lacks():
     # The only way past API.md: a route the real daemon (T13) serves, named in ADDITIVE.
     additive = {n: ep for n, ep in ui_endpoints().items() if n in ui_additive()}
     assert set(additive) == ui_additive()

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from socharness.core import capabilities as C
-from socharness.core.capabilities import negotiate
-from socharness.core.model import BoardIdentity, LinkKind
-from socharness_board_mps3.capabilities import HARNESS_STATES, SPECS
-from socharness_board_mps3.constants import (
+from harness_manager.core import capabilities as C
+from harness_manager.core.capabilities import negotiate
+from harness_manager.core.model import BoardIdentity, LinkKind
+from harness_manager_mps3.capabilities import HARNESS_STATES, SPECS
+from harness_manager_mps3.constants import (
     REBOOT_WAIT_S_BARE_METAL,
     REBOOT_WAIT_S_LINUX,
     reboot_wait_s,

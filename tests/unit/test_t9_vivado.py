@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from socharness.power.vivado import (
+from harness_manager.power.vivado import (
     NotAPowerReport,
     find_reports,
     load_estimates,
