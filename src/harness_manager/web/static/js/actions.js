@@ -95,7 +95,8 @@ export async function runJob(name, params, body, onProgress, kind = name) {
 }
 
 // Run one action. spec: {key, command, busyLabel, budgetS, run(ctx), render(result)->lines,
-// arm, onDone(ok, value)}. ctx.progress(text) appends a line while it runs.
+// renderError(ApiError)->more lines (from error.data), arm, onDone(ok, value)}.
+// ctx.progress(text) appends a line while it runs.
 export async function runAction(bid, panel, spec) {
   const p = panelState(bid, panel);
   if (p.running) return;
@@ -132,7 +133,7 @@ export async function runAction(bid, panel, spec) {
   const head = { kind: "rc", command: spec.command, rc: ok ? 0 : rcOf(value), secs: took,
     level: ok ? "ok" : "err" };
   const body = ok ? (spec.render ? spec.render(value) : [{ kind: "out", text: "done" }])
-    : errorLines(value);
+    : [...errorLines(value), ...(spec.renderError ? spec.renderError(value) || [] : [])];
   p.lines = [head, ...progress.map((t) => ({ kind: "progress", text: t })), ...body];
   p.running = null;
   p.overdue = false;

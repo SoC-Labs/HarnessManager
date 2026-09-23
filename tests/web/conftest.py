@@ -31,9 +31,11 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "mock_too: also run this browser test over the T14 mock harness-manager-daemon")
     config.addinivalue_line(
-        "markers", "week_plan(*modules): needs the week-plan routes of those daemon extension "
-                   "modules; runs over the mock, and over the real daemon too when they have "
-                   "landed and HARNESS_MANAGER_WEB_WEEK_REAL=1")
+        "markers", "week_plan(*modules, sim=False): needs the week-plan routes of those daemon "
+                   "extension modules; runs over the mock, and over the real daemon too when "
+                   "they have landed and HARNESS_MANAGER_WEB_WEEK_REAL=1. sim=True: the test "
+                   "scripts its scenario through the mock's WeekPlanSim (a meter, a hub, an "
+                   "update channel), so it runs over the mock only")
 
 
 def landed(module: str) -> bool:
@@ -50,7 +52,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
             # daemon joins once every module the test needs is in the tree (opt-in).
             servers = ["mock"]
             if (os.environ.get("HARNESS_MANAGER_WEB_WEEK_REAL") == "1"
-                    and all(landed(m) for m in week.args)):
+                    and not week.kwargs.get("sim") and all(landed(m) for m in week.args)):
                 servers.append("harness-manager-daemon")
         else:
             servers = ["harness-manager-daemon"]

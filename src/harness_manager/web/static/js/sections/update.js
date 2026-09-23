@@ -5,13 +5,13 @@
 import { panelState, runJob } from "../actions.js";
 import { clock } from "../format.js";
 import { html, useState } from "../lib.js";
-import { changed } from "../store.js";
+import { changed, S } from "../store.js";
 import { week } from "../week.js";
 import { ActionRow, ArmBox, Card, Chip, Reason, ResultBlock } from "../ui.js";
 
 function checkLines(rep) {
   if (!rep || typeof rep !== "object") return [{ kind: "out", text: "checked" }];
-  const out = [{ kind: "ok", text: `channel ${rep.channel} #${rep.serial}: harness ${rep.harness_current || "?"}, app ${rep.app_current || "?"}` }];
+  const out = [{ kind: "ok", text: `channel ${rep.channel} #${rep.serial}: harness ${rep.harness_current || "?"}, app ${rep.app_current || "none published"}` }];
   if (rep.plan) {
     const p = rep.plan;
     out.push({ kind: p.blockers && p.blockers.length ? "warnline" : "out",
@@ -20,19 +20,53 @@ function checkLines(rep) {
   return out;
 }
 
+// An outcome (update.done): the result, what the board said, and the checks that are not
+// plainly ok. UNCHECKED stays UNCHECKED: it never reads as a pass.
 function outcomeLines(o) {
   if (!o || typeof o !== "object") return [{ kind: "out", text: "done" }];
-  const out = [{ kind: o.result === "installed" || o.result === "restored" ? "ok" : "warnline",
-    text: `${o.result}: ${o.detail || ""}` }];
+  const good = o.result === "installed" || o.result === "restored";
+  const out = [{ kind: good ? "ok" : "warnline", text: `${o.result}: ${o.detail || ""}` }];
+  const checks = o.checks || [];
+  if (checks.length) {
+    const count = (c) => checks.filter((x) => x.check === c).length;
+    const parts = [`${count("ok")} ok`];
+    for (const c of ["unchecked", "failed", "mismatch"]) if (count(c)) parts.push(`${count(c)} ${c}`);
+    const other = checks.length - checks.filter((x) => ["ok", "unchecked", "failed", "mismatch"].includes(x.check)).length;
+    if (other) parts.push(`${other} other`);
+    out.push({ kind: "out", text: `checks: ${parts.join(", ")}` });
+    for (const c of checks.filter((x) => x.check !== "ok")) {
+      out.push({ kind: c.check === "unchecked" ? "hint" : "warnline", text: `${c.name}: ${c.check.toUpperCase()} (${c.detail})` });
+    }
+  }
+  if (o.evidence && o.evidence.summary) out.push({ kind: "out", text: o.evidence.summary });
   if (o.restore_hint) out.push({ kind: "hint", text: o.restore_hint });
   return out;
 }
 
+// update.progress phases ("download:base-sd", "backup:backup", "sd:install", "reboot:down")
+// -> the plan step they belong to.
+const PHASE_STEP = { download: "download", verify: "verify", "store-overlays": "store-overlays",
+  backup: "backup-sd", "backup-sd": "backup-sd", sd: "install-sd", "install-sd": "install-sd",
+  restore: "install-sd", reboot: "reboot", confirm: "confirm-identity", "confirm-identity": "confirm-identity" };
+
+export function stepOf(phase) {
+  const head = String(phase || "").split(":")[0];
+  return PHASE_STEP[phase] || PHASE_STEP[head] || head;
+}
+
 function PlanSteps({ plan, phase }) {
-  const idx = plan.steps.findIndex((s) => s.action === phase);
+  const idx = plan.steps.findIndex((s) => s.action === stepOf(phase));
   return html`<ol class="plan-steps" data-testid="update-steps">${plan.steps.map((s, i) => html`
     <li key=${i} class=${idx < 0 ? "" : i < idx ? "done" : i === idx ? "active" : ""}>
       <span class="mono">${s.action}</span><span class="secondary">${s.detail}</span></li>`)}</ol>`;
+}
+
+// What to do if the installed harness misbehaves: the daemon's hint, else the backup it took.
+function rollbackHint(o) {
+  if (!o) return "";
+  if (o.restore_hint) return o.restore_hint;
+  const path = o.backup && o.backup.path;
+  return path ? `Roll back (below) restores the backup ${path} and reboots the board.` : "";
 }
 
 function PlanCard({ bid, rep }) {
@@ -47,23 +81,39 @@ function PlanCard({ bid, rep }) {
     budgetS: 900, command: `update harness ${plan.version}${plan.rekey ? " --rekey" : ""}`,
     run: (ctx) => runJob("updateHarness", { bid }, { fingerprint: plan.fingerprint,
       ...(plan.rekey ? { rekey_phrase: typed.trim() } : {}) },
-    (d) => ctx.progress(`${d.phase}${d.total > 1 ? `: ${Math.floor((d.done * 100) / d.total)}%` : ""}`, d.phase),
+    (d) => ctx.progress(`${d.phase}${d.total > 1 ? `: ${Math.floor((d.done * 100) / d.total)}%` : ""}`, stepOf(d.phase)),
     "update_harness"),
     render: outcomeLines,
-    onDone: (ok, o) => {
-      if (ok && o) {
-        w.outcome = o;
-        if (o.result === "installed") plan.applied = true;     // the plan is spent: check again for the next
-        changed();
+    renderError: (e) => {
+      const d = e.data || {};
+      if (d.outcome) return outcomeLines(d.outcome);
+      if (d.plan && d.plan.fingerprint !== plan.fingerprint) {
+        return [{ kind: "hint", text: "the card above now shows the new plan: read it, then approve again" }];
+      }
+      return [];
+    },
+    onDone: (ok, v) => {
+      const d = (!ok && v && v.data) || {};
+      if (ok && v) {
+        w.outcome = v;
+        if (v.result === "installed") plan.applied = true;     // the plan is spent: check again for the next
+      } else if (d.outcome) {
+        w.outcome = d.outcome;
+      } else if (d.plan && w.update && d.plan.fingerprint !== plan.fingerprint) {
+        // The board or the channel changed since the check: this is the plan that would run.
+        w.update = { ...w.update, plan: d.plan };
+        w.planChanged = true;
       }
       setTyped("");
+      changed();
     },
   };
   const rollback = {
     key: "update_rollback", label: "Roll back", busyLabel: "Rolling back...", budgetS: 900,
     command: "update rollback",
-    run: (ctx) => runJob("updateRollback", { bid }, undefined, (d) => ctx.progress(d.phase, d.phase), "update_rollback"),
+    run: (ctx) => runJob("updateRollback", { bid }, {}, (d) => ctx.progress(d.phase, stepOf(d.phase)), "update_rollback"),
     render: outcomeLines,
+    renderError: (e) => (e.data && e.data.outcome ? outcomeLines(e.data.outcome) : []),
   };
   const guard = () => {
     if (plan.up_to_date) return "the board already runs this release";
@@ -83,6 +133,8 @@ function PlanCard({ bid, rep }) {
       ${(plan.blockers || []).map((t) => html`<${Reason} level="err" text=${t} key=${t} testid="update-blocker" />`)}
       ${(plan.warnings || []).map((t) => html`<${Reason} level="warn" text=${t} key=${t} />`)}
       ${(plan.unusable || []).length ? html`<${Reason} level="warn" icon="circle-slash" text=${`Becomes unusable: ${plan.unusable.join("; ")}`} />` : null}
+      ${w.planChanged ? html`<${Reason} level="warn" testid="plan-changed"
+        text="The plan changed since you checked (the board or the channel moved). This is the new plan: read it, then approve again. Nothing was installed." />` : null}
       ${plan.steps && plan.steps.length ? html`<${PlanSteps} plan=${plan} phase=${phase} />` : null}
       ${plan.applied ? html`<${Reason} level="ok" testid="plan-applied"
         text=${`Installed. This plan is spent; check again to see what the channel offers this board now.`} />` : null}
@@ -95,35 +147,59 @@ function PlanCard({ bid, rep }) {
         <${ActionRow} bid=${bid} panel="update" spec=${install} variant="primary" icon="upload"
           gate=${{ arm: "update", guard }} />`}
       <${ResultBlock} lines=${p.lines} panel=${p} testid="update-result" />
-      ${w.outcome && w.outcome.restore_hint ? html`<${Reason} text=${`If it misbehaves: ${w.outcome.restore_hint}`} testid="rollback-hint" />` : null}
+      ${rollbackHint(w.outcome) ? html`<${Reason} text=${`If it misbehaves: ${rollbackHint(w.outcome)}`} testid="rollback-hint" />` : null}
       <div class="mt-8">
-        <${ArmBox} bid=${bid} armKey="update_rollback" compact=${true}
-          text="Arm: I understand this restores the backup the last install took, and reboots the board." />
-        <${ActionRow} bid=${bid} panel="update" spec=${rollback} icon="undo-2" quietArm=${true}
-          gate=${{ arm: "update_rollback" }} />
+        <${ActionRow} bid=${bid} panel="update" spec=${rollback} icon="undo-2" compact=${true}
+            gate=${{ arm: "update_rollback" }}>
+          <${ArmBox} bid=${bid} armKey="update_rollback" compact=${true} testid="arm-rollback"
+            text="Arm: I understand this restores the backup the last install took, and reboots the board." />
+        <//>
       </div>
     </div>
   <//>`;
 }
 
 // The app's own update is not about this board, but it runs from this page: its panel lives
-// with the board's, and it waits for the board's jobs like every other action.
+// with the board's, and it waits for the board's jobs like every other action. The switch
+// happens only while the daemon holds no board (T7's rail), so the page says so first.
+export function heldBoards() {
+  return Object.entries(S.boards).filter(([, row]) => row && row.open).map(([id, row]) => row.name || id);
+}
+
 function AppCard({ bid, rep }) {
   const p = panelState(bid, "update_app");
+  const held = heldBoards();
   const spec = {
     key: "update_app", label: `Update the app to ${rep.app_update}`, busyLabel: "Updating...", budgetS: 600,
     command: `update app ${rep.app_update}`,
     run: (ctx) => runJob("updateApp", {}, { version: rep.app_update }, (d) => ctx.progress(d.phase, d.phase), "update_app"),
-    render: (r) => [{ kind: "ok", text: `harness-manager ${r && r.version} staged${r && r.switched ? " and switched" : ""}` },
-      ...(r && r.restart ? [{ kind: "hint", text: r.restart }] : [])],
+    render: (r) => [{ kind: "ok", text: `harness-manager ${(r && r.version) || rep.app_update} ${r && r.result ? r.result : "switched"}` },
+      { kind: "hint", text: "restart harness-manager to run it" }],
   };
+  const guard = () => (held.length
+    ? `close your boards first: the app switches only while this daemon holds no board (it holds ${held.join(", ")})`
+    : "");
+  const current = rep.app_current
+    ? `the channel's current release is ${rep.app_current}` : "the channel publishes no app release";
   return html`<${Card} title="The app" icon="download" testid="update-app"
-      sub=${`You run harness-manager ${rep.app_running || "?"}; the channel's current release is ${rep.app_current || "?"}.`}>
+      sub=${`You run harness-manager ${rep.app_running || "?"}; ${current}.`}>
     ${rep.app_update ? html`<div class="actions">
-      <${ActionRow} bid=${bid} panel="update_app" spec=${spec} icon="download" gate=${{}} />
+      <${ActionRow} bid=${bid} panel="update_app" spec=${spec} icon="download" gate=${{ guard }} />
       <${ResultBlock} lines=${p.lines} panel=${p} />
-    </div>` : html`<${Reason} level="ok" text="The app is current." />`}
+    </div>` : rep.app_current ? html`<${Reason} level="ok" text="The app is current." />`
+      : html`<${Reason} icon="circle-slash" text="Nothing to install: the channel has no app release." />`}
   <//>`;
+}
+
+function ReleasesTable({ rep }) {
+  const rows = (rep.releases && rep.releases.harness) || [];
+  if (!rows.length) return null;
+  return html`<table class="table" data-testid="releases"><thead><tr>
+      <th>Harness</th><th>Status</th><th>Static id</th><th>Impl</th><th></th></tr></thead>
+    <tbody>${rows.map((r) => html`<tr key=${r.version} data-release=${r.version}>
+      <td class="mono">${r.version}</td><td>${r.current ? html`<b>${r.status}</b>` : r.status}</td>
+      <td class="mono">${r.static_id}</td><td>${r.impl}</td>
+      <td>${r.rekey ? html`<${Chip} level="warn">re-key<//>` : null}</td></tr>`)}</tbody></table>`;
 }
 
 export function UpdateSection({ bid }) {
@@ -134,17 +210,28 @@ export function UpdateSection({ bid }) {
     command: "update check",
     run: (ctx) => runJob("updateCheck", {}, { board_id: bid }, (d) => ctx.progress(d.phase, d.phase), "update_check"),
     render: checkLines,
-    onDone: (ok, rep) => { if (ok) { w.update = rep; w.checkedAt = Date.now() / 1000; changed(); } },
+    onDone: (ok, rep) => {
+      if (ok) {
+        w.update = rep; w.checkedAt = Date.now() / 1000; w.planChanged = false; w.unavailable = "";
+      } else if (rep && rep.errName === "UNAVAILABLE") {
+        w.unavailable = rep.reason || rep.message;      // DemoEngine: "this engine has no update service"
+      }
+      changed();
+    },
   };
   const rep = w.update;
+  const signer = rep ? String(rep.signed_by || "?") : "";
   return html`<div class="stack">
     <${Card} title="Updates" icon="refresh-cw" testid="update-card"
         sub="Releases come from a signed channel (minisign, pinned keys). Checking reads only: nothing is installed until you approve a plan.">
       <div class="actions">
         <${ActionRow} bid=${bid} panel="update_check" spec=${check} variant="primary" icon="scan-search" gate=${{}} />
         <${ResultBlock} lines=${p.lines} panel=${p} testid="update-check-result" />
-        ${rep ? html`<p class="muted small">checked ${clock(w.checkedAt)} · signed by <span class="mono">${String(rep.signed_by || "?").slice(0, 16)}...</span> (${rep.key_role || "?"})
+        ${w.unavailable ? html`<${Reason} icon="circle-slash" testid="update-unavailable"
+          text=${`Updates are unavailable here: ${w.unavailable}.`} />` : null}
+        ${rep ? html`<p class="muted small">checked ${clock(w.checkedAt)} · signed by <span class="mono">${signer.length > 16 ? `${signer.slice(0, 16)}...` : signer}</span> (${rep.key_role || "?"})
           ${(rep.warnings || []).length ? html` · ${rep.warnings.join("; ")}` : null}</p>` : null}
+        ${rep ? html`<${ReleasesTable} rep=${rep} />` : null}
       </div>
     <//>
     ${rep && rep.plan ? html`<${PlanCard} bid=${bid} rep=${rep} />` : null}

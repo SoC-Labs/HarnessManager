@@ -76,16 +76,49 @@ export function rebootLines(ev) {
 
 // --- the supply ---------------------------------------------------------------------------
 
+// POST .../power/cycle takes off_s in 2..300 s (400 USAGE otherwise); the daemon's default is 5.
+export const OFF_S = { min: 2, max: 300, fallback: 5 };
+
+export function offSeconds(b) {
+  const raw = b.powerOffS;
+  if (raw === undefined || raw === null || raw === "") return OFF_S.fallback;
+  return Number(raw);
+}
+
+function offGuard(b) {
+  const s = offSeconds(b);
+  return Number.isFinite(s) && s >= OFF_S.min && s <= OFF_S.max
+    ? "" : `the off time must be ${OFF_S.min} to ${OFF_S.max} seconds`;
+}
+
+// The job's result: {meter, off_s, was_on, confirmed_off, confirmed_on, seconds}. The outlet
+// only proves the supply is back; nothing here claims the board is up.
+export function cycleLines(r) {
+  if (!r || typeof r !== "object") return [{ kind: "ok", text: "the outlet cycled" }];
+  const out = [{ kind: r.confirmed_off && r.confirmed_on ? "ok" : "warnline",
+    text: `${r.meter || "the outlet"}: off ${r.off_s} s, ${r.confirmed_off ? "OFF confirmed" : "OFF NOT confirmed"}, ${r.confirmed_on ? "ON confirmed" : "ON NOT confirmed"} (${r.seconds} s)` }];
+  if (r.was_on === false) out.push({ kind: "warnline", text: "the outlet was already off before the cycle" });
+  out.push({ kind: "hint", text: "The supply is back; the board boots by itself. The header re-reads the board; give the shell about 15 s." });
+  return out;
+}
+
 function powerCycleSpec(bid, device) {
+  const b = boardState(bid);
+  const off = offSeconds(b);
   return {
-    key: "power_cycle", label: "Power-cycle", busyLabel: "Cycling...", budgetS: 240,
-    command: `power cycle${device ? ` (${device})` : ""}`,
-    run: (ctx) => runJob("powerCycle", { bid }, {}, (d) => ctx.progress(`power: ${d.phase}`, d.phase), "power_cycle"),
-    render: (ev) => (ev && typeof ev === "object"
-      ? [{ kind: "ok", text: ev.summary || "the board was power-cycled" }]
-      : [{ kind: "ok", text: "the board was power-cycled" }]),
+    key: "power_cycle", label: "Power-cycle", busyLabel: "Cycling...", budgetS: off + 60,
+    command: `power cycle --off ${off}${device ? ` (${device})` : ""}`,
+    run: (ctx) => runJob("powerCycle", { bid }, { off_s: off }, (d) => ctx.progress(`outlet ${d.phase}`, d.phase), "power_cycle"),
+    render: cycleLines,
     onDone: () => { loadPower(bid); scheduleRefresh(bid, 200); },
   };
+}
+
+// Three rows that are all unavailable for one reason (no meter) say it once, not three times.
+function sharedReason(readings) {
+  if (!readings.length || readings.some((r) => r.value !== null && r.value !== undefined)) return "";
+  const reasons = new Set(readings.map((r) => r.reason || ""));
+  return reasons.size === 1 ? [...reasons][0] : "";
 }
 
 function PowerSupplyCard({ bid }) {
@@ -105,27 +138,36 @@ function PowerSupplyCard({ bid }) {
     <//>`;
   }
   const reason = pw ? pw.cycle_reason : "";
-  const phases = ["off", "on", "up"];
+  const readings = (pw && pw.readings) || [];
+  const shared = sharedReason(readings);
+  const phases = ["off", "on"];
   return html`<${Card} title="Power supply" icon="plug-zap" actions=${refresh} testid="power-card"
       sub=${pw && pw.device ? `Through ${pw.device}.` : "A networked outlet or meter on the board's supply (boards.toml)."}>
     <div class="actions">
       ${w.powerError ? html`<${Reason} level="err" text=${`${w.powerError.errName}: ${w.powerError.message}`} />` : null}
       ${!pw && !w.powerError ? html`<p class="muted"><${Spinner} /> Reading the supply...</p>` : null}
       ${pw ? html`<table class="table readings" data-testid="power-readings">
-        <tbody>${(pw.readings || []).map((r) => {
+        <tbody>${readings.map((r) => {
           const ok = r.value !== null && r.value !== undefined;
           return html`<tr key=${r.name} data-reading=${r.name}>
-            <td><span class="mono">${r.name}</span>${!ok && r.reason ? html`<${Reason} text=${r.reason} icon="circle-slash" />` : null}</td>
+            <td><span class="mono">${r.name}</span>${!ok && r.reason && !shared ? html`<${Reason} text=${r.reason} icon="circle-slash" />` : null}</td>
             <td class="r num nowrap">${ok ? valueText(r) : html`<span class="muted">unavailable</span>`}</td>
             <td class="muted nowrap small">${ok && r.observed_at ? ageText(r.observed_at) : ""}</td></tr>`;
         })}</tbody></table>` : null}
+      ${shared ? html`<${Reason} icon="circle-slash" testid="power-readings-reason" text=${`Readings: ${shared}`} />` : null}
+      ${pw && !shared && readings[0] && readings[0].reason && readings[0].value !== null
+        ? html`<p class="muted small">${readings[0].reason}</p>` : null}
       ${pw && reason ? html`<${Reason} icon="circle-slash" testid="power-cycle-reason" text=${`Power cycle: cannot, ${reason}`} />` : null}
       ${pw && !reason ? html`
+        <div class="field"><label for=${`off-${bid}`}>Off for</label>
+          <input class="input num sm" id=${`off-${bid}`} type="number" min=${OFF_S.min} max=${OFF_S.max} step="1"
+            value=${b.powerOffS ?? OFF_S.fallback} data-testid="power-off-s"
+            onInput=${(e) => { b.powerOffS = e.target.value; changed(); }} /><span class="muted small">seconds (${OFF_S.min} to ${OFF_S.max})</span></div>
         <${ArmBox} bid=${bid} armKey="power_cycle" testid="arm-power" text=${ARM_TEXT.power_cycle} />
         <${ActionRow} bid=${bid} panel="power_cycle" spec=${powerCycleSpec(bid, pw.device)} variant="danger" icon="power"
-          gate=${{ arm: "power_cycle" }} />
+          gate=${{ arm: "power_cycle", guard: () => offGuard(b) }} />
         ${w.powerPhases.length ? html`<div class="steps">${phases.map((ph) => html`<div key=${ph}
-          class=${`step ${w.powerPhases.includes(ph) ? "done" : ""}`}><div class="bar"></div><span>${ph}</span></div>`)}</div>` : null}
+          class=${`step ${w.powerPhases.includes(ph) ? "done" : ""}`}><div class="bar"></div><span>outlet ${ph}</span></div>`)}</div>` : null}
         <${ResultBlock} lines=${p.lines} panel=${p} testid="power-result" />` : null}
     </div>
   <//>`;

@@ -7,9 +7,9 @@ this: the same routes, bodies, jobs and events, over ``DemoEngine`` boards. Noth
 touches a real PTY, hub, plug or update channel.
 
 ``WeekPlanSim`` holds the simulated state; its knobs (``behind_hub``, ``set_power``,
-``attach_screen``, ``pty_unavailable``, ``update_outcome`` ...) set up a scenario for a
-test or a screenshot. ``register(app, state, sim)`` adds the routes to the mock app.
-"""
+``attach_screen``, ``pty_unavailable``, ``update_reason``, ``bump_channel`` ...) set up a
+scenario for a test or a screenshot. ``register(app, state, sim)`` adds the routes to the
+mock app. The power and update routes follow docs/API.md "As built by L4"."""
 
 from __future__ import annotations
 
@@ -25,9 +25,10 @@ from typing import Any
 from fastapi import Body, FastAPI
 from fastapi.responses import JSONResponse
 
-from harness_manager.cli.output import reading_json
+from harness_manager.cli.output import reading_json, with_data
 from harness_manager.core.errors import (
     AbsentError,
+    ActionFailedError,
     HeldError,
     RefusedError,
     UnavailableError,
@@ -35,6 +36,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event
 from harness_manager.core.model import Reading
+from harness_manager.power.base import DEFAULT_OFF_S, check_off_s
 
 API = "/api/v1"
 
@@ -73,6 +75,12 @@ DESIGN_BAUD = 76800                          # rp_nanosoc_wrapper.sv UART_BAUD
 DUT_CLOCK_PRESETS = (25.0, 50.0, 100.0)
 RELEASE_STATIC_ID = "0x72bb0a36"            # the ILA mint's shell (FIELDED_ILA_V011)
 RELEASE_VERSION = "1.1.0"
+#: Every meter answers these three rows, in this order (daemon/power_api.py POWER_ROWS).
+POWER_ROWS = (("board_power", "W"), ("supply_voltage", "V"), ("supply_current", "A"))
+#: The update service's key id and channel source, as the real check reports them.
+SIGNED_BY = "4E3C9A1F0B7D2E68"
+CHANNEL_SOURCE = ("https://raw.githubusercontent.com/SoC-Labs/mps3-platform-dist/channel/"
+                  "stable/channel.json")
 
 
 def _slug(board_id: str) -> str:
@@ -94,7 +102,10 @@ class WeekPlanSim:
         self._lease_freed: dict[str, threading.Event] = {}
         self.power: dict[str, dict[str, Any]] = {}
         self.clocks: dict[str, float] = {}
-        self.update_outcome = "installed"    # or "written-not-running"
+        self.update_reason = ""              # non-empty: every update route is 422 (DemoEngine)
+        self.update_outcome = "installed"    # or "written-not-running" (the job then fails)
+        self.rollback_outcome = "restored"   # or "restored-not-confirmed" (fails the job)
+        self.channel_serial = 14             # bump it between check and install: plan changed
         self.plans: dict[str, dict[str, Any]] = {}
         self.previous: dict[str, dict[str, Any]] = {}
         self.app_version = "0.0.1"
@@ -147,12 +158,25 @@ class WeekPlanSim:
         if ev is not None:
             ev.set()
 
-    def set_power(self, bid: str, *, device: str = "Shelly Plus Plug S (192.168.10.50)",
-                  cycle_reason: str = "", watts: float | None = 23.4,
-                  volts: float | None = 12.1) -> None:
+    def set_power(self, bid: str, *, device: str = "shelly_gen2 http://192.168.10.50 outlet 0",
+                  cycle_reason: str = "", watts: float | None = 11.4,
+                  volts: float | None = 239.1, amps: float | None = 0.071,
+                  note: str = "AC at the wall outlet: includes the board power supply's own "
+                              "losses") -> None:
+        """A meter on the board's supply (boards.toml ``[power]``). ``cycle_reason`` non-empty:
+        a meter that cannot switch (an INA260), so the page offers no cycle."""
         with self._lock:
             self.power[bid] = {"device": device, "cycle_reason": cycle_reason, "watts": watts,
-                               "volts": volts}
+                               "volts": volts, "amps": amps, "note": note}
+
+    def bump_channel(self) -> None:
+        """A new release on the channel: every plan checked before this one is stale."""
+        with self._lock:
+            self.channel_serial += 1
+
+    def require_update(self) -> None:
+        if self.update_reason:
+            raise UnavailableError("update", self.update_reason)
 
     def attach_screen(self, bid: str, name: str, clients: int = 1) -> None:
         """``screen <path>`` attached to a console's PTY (``console.pty`` fires)."""
@@ -243,8 +267,8 @@ class WeekPlanSim:
                             f"keyed to {ident.shell_id} stops loading; the release brings "
                             "overlays keyed to the new shell")
         steps = [] if up_to_date else [
-            {"action": "download", "detail": "3 component(s), sha256-checked: base-sd, "
-                                             "overlays, firmware", "component": ""},
+            {"action": "download", "detail": "2 component(s), sha256-checked: base-sd, "
+                                             "overlays", "component": ""},
             {"action": "verify", "detail": "domain checks: part, static_id, usercode, CRC, "
                                            "SD rules", "component": ""},
             {"action": "store-overlays", "detail": f"overlays keyed to {RELEASE_STATIC_ID} "
@@ -263,7 +287,8 @@ class WeekPlanSim:
                                                      f"{RELEASE_VERSION}", "component": ""},
         ]
         plan = {
-            "board_id": bid, "channel": "stable", "serial": 14, "version": RELEASE_VERSION,
+            "board_id": bid, "channel": "stable", "serial": self.channel_serial,
+            "version": RELEASE_VERSION,
             "running": running, "running_release": ident.harness_version or "",
             "mode": "none" if up_to_date else "full", "up_to_date": up_to_date,
             "rekey": rekey and not up_to_date,
@@ -271,7 +296,7 @@ class WeekPlanSim:
             "unusable": unusable if not up_to_date else [], "steps": steps,
             "warnings": warnings if not up_to_date else [],
             "blockers": blockers if not up_to_date else [],
-            "components": [] if up_to_date else ["base-sd", "overlays", "firmware"],
+            "components": [] if up_to_date else ["base-sd", "overlays"],
             "skipped": {}, "base": not up_to_date, "os_slot": False,
         }
         plan["fingerprint"] = hashlib.sha256(json.dumps(
@@ -279,11 +304,25 @@ class WeekPlanSim:
             sort_keys=True).encode()).hexdigest()
         return plan
 
+    def releases(self) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "harness": [
+                {"version": RELEASE_VERSION, "status": "current", "static_id": RELEASE_STATIC_ID,
+                 "harness": RELEASE_VERSION, "impl": "bare-metal", "rekey": True,
+                 "released_at": "2026-09-23", "notes_url": "", "current": True},
+                {"version": "1.0.0", "status": "superseded", "static_id": "0x3f1a560f",
+                 "harness": "1.0.0", "impl": "bare-metal", "rekey": False,
+                 "released_at": "2026-09-16", "notes_url": "", "current": False},
+            ],
+            "app": [{"version": self.app_current, "status": "current", "released_at": "2026-09-23",
+                     "notes_url": "", "current": True}] if self.app_current else [],
+        }
+
     def check(self, bid: str | None) -> dict[str, Any]:
         report: dict[str, Any] = {
-            "channel": "stable", "serial": 14, "issued_at": time.time() - 3 * 86400,
-            "expires_at": time.time() + 27 * 86400, "signed_by": "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3",
-            "key_role": "release", "source": "github:SoC-Labs/HarnessManager-releases",
+            "channel": "stable", "serial": self.channel_serial,
+            "issued_at": "2026-09-23T12:00:00Z", "expires_at": "2026-10-23T12:00:00Z",
+            "signed_by": SIGNED_BY, "key_role": "harness-release", "source": CHANNEL_SOURCE,
             "warnings": [], "harness_current": RELEASE_VERSION, "app_current": self.app_current,
             "app_running": self.app_version,
             "app_update": self.app_current if self.app_current != self.app_version else "",
@@ -295,9 +334,10 @@ class WeekPlanSim:
         report["available"] = bool(report["app_update"]) or bool(
             report.get("plan") and not report["plan"]["up_to_date"]
             and not report["plan"]["blockers"])
+        report["releases"] = self.releases()
         if report["available"]:
             self.publish("update.available", bid or "", {
-                "channel": "stable", "serial": 14, "harness": RELEASE_VERSION,
+                "channel": "stable", "serial": self.channel_serial, "harness": RELEASE_VERSION,
                 "app": report["app_update"]})
         return report
 
@@ -418,174 +458,234 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
                                          "expires_at": None})
         return ok()
 
-    # -- power_api -------------------------------------------------------------------------
+    # -- power_api (as built by L4: daemon/power_api.py) ----------------------------------
 
     @app.get(f"{API}/boards/{{bid}}/power")
     def power(bid: str) -> dict[str, Any]:
+        state.session(bid)
         jobs.gate(bid)
         info = sim.info(bid)
         p = sim.power.get(bid)
-        if p is None:
-            reason = info.unavailable.get("power_cycle") or "needs a networked power plug"
-            return ok(readings=[reading_json(Reading.unavailable(
-                "board_power", "W", "no power device in boards.toml for this board"))],
-                cycle_reason=reason, device=None)
         now = time.time()
+        if p is None:
+            why = info.unavailable.get("telemetry_power") or "this board has no power meter"
+            readings = [Reading.unavailable(n, u, why, source="power-meter") for n, u in POWER_ROWS]
+            return ok(board_id=bid, readings=[reading_json(r, now) for r in readings],
+                      cycle_reason=info.unavailable.get("power_cycle") or "no power adapter",
+                      device=None)
         src = p["device"]
-        readings = [
-            Reading("board_power", p["watts"], "W", source=src, observed_at=now)
-            if p["watts"] is not None else
-            Reading.unavailable("board_power", "W", "the device reported no power", source=src),
-            Reading("supply_voltage", p["volts"], "V", source=src, observed_at=now)
-            if p["volts"] is not None else
-            Reading.unavailable("supply_voltage", "V", "the device reports no voltage", source=src),
-        ]
-        return ok(readings=[reading_json(r, now) for r in readings],
+        values = {"board_power": p["watts"], "supply_voltage": p["volts"],
+                  "supply_current": p["amps"]}
+        readings = [Reading(n, values[n], u, source=src, observed_at=now, reason=p["note"])
+                    if values[n] is not None else
+                    Reading.unavailable(n, u, "the device does not report it", source=src)
+                    for n, u in POWER_ROWS]
+        return ok(board_id=bid, readings=[reading_json(r, now) for r in readings],
                   cycle_reason=p["cycle_reason"], device=src)
 
     @app.post(f"{API}/boards/{{bid}}/power/cycle", status_code=202)
     def power_cycle(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
+        state.session(bid)
+        off_s = check_off_s(body.get("off_s", DEFAULT_OFF_S))     # 400 before any job
         jobs.gate(bid)
         p = sim.power.get(bid)
-        reason = (p or {}).get("cycle_reason", "") if p else (
-            sim.info(bid).unavailable.get("power_cycle") or "needs a networked power plug")
+        reason = p["cycle_reason"] if p else (
+            sim.info(bid).unavailable.get("power_cycle") or "no power adapter")
         if reason:
             raise UnavailableError("power_cycle", reason)
-        off_s = float(body.get("off_s") or 5.0)
 
         def work(progress: Any) -> dict[str, Any]:
             t0 = time.monotonic()
-            for i, phase in enumerate(("off", "on", "up"), start=1):
+            for i, phase in enumerate(("off", "on"), start=1):    # never "up": no witness
                 time.sleep(0.25)
-                progress(phase, i, 3)
+                progress(phase, i, 2)
                 sim.publish("power.cycle", bid, {"phase": phase, "off_s": off_s,
                                                  "device": p["device"]})
-            return {"device": p["device"], "off_s": off_s,
-                    "summary": f"power-cycled through {p['device']}: off {off_s:.0f} s, "
-                               f"the shell answered {time.monotonic() - t0:.1f} s after power on",
-                    "up_after_s": round(time.monotonic() - t0, 1)}
+            return {"board_id": bid, "meter": p["device"], "off_s": off_s, "was_on": True,
+                    "confirmed_off": True, "confirmed_on": True,
+                    "seconds": round(off_s + time.monotonic() - t0, 1)}
 
         return accepted(jobs.start(bid, "power_cycle", work))
 
-    # -- update_api ------------------------------------------------------------------------
+    # -- update_api (as built by L4: daemon/update_api.py) ----------------------------------
 
     @app.post(f"{API}/update/check", status_code=202)
     def update_check(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         bid = body.get("board_id") or ""
+        sim.require_update()
         if bid:
             state.session(bid)
 
         def work(progress: Any) -> dict[str, Any]:
-            progress("fetch", 1, 2)
+            progress("check", 0, 0)
             time.sleep(0.2)
-            progress("verify", 2, 2)
+            progress("plan", 0, 0)
             return sim.check(bid or None)
 
         return accepted(jobs.start(bid, "update_check", work))
 
     @app.post(f"{API}/boards/{{bid}}/update/harness", status_code=202)
     def update_harness(bid: str, body: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        jobs.gate(bid)
         state.session(bid)
+        fingerprint = body.get("fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint:
+            raise UsageError("fingerprint must be a non-empty string")
+        sim.require_update()
+        jobs.gate(bid)
         plan = sim.plan_for(bid)
-        if body.get("fingerprint") != plan["fingerprint"]:
-            raise RefusedError("the plan changed since it was approved (or was never checked)",
-                               hint="check again, then approve the new plan")
+        if fingerprint != plan["fingerprint"]:
+            raise with_data(RefusedError(
+                f"the update plan for {bid} changed since it was checked; nothing was installed",
+                hint="check again (POST /api/v1/update/check) and confirm the new plan"), plan=plan)
         if plan["blockers"]:
-            raise RefusedError(f"this update cannot run: {'; '.join(plan['blockers'])}",
-                               hint="fix the blockers first")
+            raise with_data(RefusedError(f"cannot update {bid}: {'; '.join(plan['blockers'])}",
+                                         hint="fix the blockers, then check again"), plan=plan)
         if plan["up_to_date"]:
-            raise RefusedError(f"harness {RELEASE_VERSION} is already running",
-                               hint="nothing to install")
-        if plan["rekey"] and str(body.get("rekey_phrase") or "").strip() != plan["consent_phrase"]:
-            raise RefusedError(f"this update RE-KEYS the board (shell {plan['running']['shell_id']}"
-                               f" -> {RELEASE_STATIC_ID})",
-                               hint=f"to consent, type exactly: {plan['consent_phrase']}")
+            raise with_data(RefusedError(f"harness {RELEASE_VERSION} is already running",
+                                         hint="nothing to install"), plan=plan)
+        if plan["rekey"] and str(body.get("rekey_phrase") or "") != plan["consent_phrase"]:
+            raise with_data(RefusedError(
+                f"this update RE-KEYS the board (shell {plan['running']['shell_id']} -> "
+                f"{RELEASE_STATIC_ID}); {len(plan['unusable'])} item(s) become unusable",
+                hint=f"to consent, type exactly: {plan['consent_phrase']}"), plan=plan)
         ident = sim.identity(bid)
 
         def work(progress: Any) -> dict[str, Any]:
             sim.publish("update.started", bid, {"version": RELEASE_VERSION, "mode": plan["mode"],
                                                 "rekey": plan["rekey"]})
-            total = 12 * 1024 * 1024
-            for phase, done in (("download", total // 3), ("download", total), ("verify", total),
-                                ("backup-sd", total), ("install-sd", total), ("reboot", total),
-                                ("confirm-identity", total)):
-                time.sleep(0.2)
+            mib = 1024 * 1024
+            for phase, done, total in (("download:base-sd", 4 * mib, 12 * mib),
+                                       ("download:base-sd", 12 * mib, 12 * mib),
+                                       ("download:overlays", 3 * mib, 3 * mib),
+                                       ("store-overlays", 0, 0), ("backup:backup", 0, 0),
+                                       ("sd:install", 12 * mib, 12 * mib), ("sd:verify", 0, 0),
+                                       ("reboot:sent", 1, 3), ("reboot:down", 2, 3),
+                                       ("reboot:up", 3, 3)):
+                time.sleep(0.15)
                 progress(phase, done, total)
                 sim.publish("update.progress", bid, {"phase": phase, "bytes": done,
                                                      "total": total})
-            backup = f"/home/{getpass.getuser()}/.config/harness-manager/backups/sd-{int(time.time())}.zip"
-            sim.previous[bid] = {"shell_id": ident.shell_id, "harness_version": ident.harness_version}
-            hint = f"`harness-manager update rollback TARGET` restores the backup {backup}"
-            if sim.update_outcome == "installed":
+            backup = (f"/home/{getpass.getuser()}/.local/state/harness-manager/update/backups/"
+                      f"{_slug(bid)}/V2M-MPS3-20260924T060000Z.zip")
+            sim.previous[bid] = {"shell_id": ident.shell_id,
+                                 "harness_version": ident.harness_version}
+            installed = sim.update_outcome == "installed"
+            if installed:
                 sim.engine._set_identity(bid, shell_id=RELEASE_STATIC_ID,
                                          harness_version=RELEASE_VERSION)
-                result, detail = "installed", (f"the board reports shell {RELEASE_STATIC_ID}, "
-                                               f"harness {RELEASE_VERSION}")
+                result = "installed"
+                detail = (f"harness {RELEASE_VERSION} is running: the board reports shell "
+                          f"{RELEASE_STATIC_ID}, harness {RELEASE_VERSION}")
             else:
-                result, detail = "written-not-running", (
-                    "the SD holds the new base, but after the reboot the board still reports "
-                    f"shell {ident.shell_id}: it is not running it")
+                result = "written-not-running"
+                detail = ("the SD holds the new base, but after the reboot the board still "
+                          f"reports shell {ident.shell_id}, harness {ident.harness_version}")
+            after = sim.identity(bid)
+            outcome = {
+                "board_id": bid, "version": RELEASE_VERSION, "result": result, "detail": detail,
+                "ok": installed,
+                "checks": [
+                    {"name": "shell_id", "check": "ok" if installed else "failed",
+                     "detail": f"board reports {after.shell_id}, release is {RELEASE_STATIC_ID}"},
+                    {"name": "harness version", "check": "ok" if installed else "failed",
+                     "detail": f"board reports {after.harness_version}, release is "
+                               f"{RELEASE_VERSION}"},
+                    {"name": "usercode", "check": "unchecked",
+                     "detail": "board reports nothing (not on the wire yet), release is "
+                               "0xd46fcdcb"},
+                ],
+                "identity_after": {"shell_id": after.shell_id, "harness": after.harness_version,
+                                   "impl": after.harness_impl or ""},
+                "evidence": {"summary": "REBOOT witnessed: down after 1.0s (the shell stopped "
+                                        "answering ping), up after 14.3s (the shell answers "
+                                        f"ping again (shell_id {after.shell_id}))"},
+                "backup": {"path": backup, "sha256": hashlib.sha256(backup.encode()).hexdigest()},
+                "restore_hint": "", "stored": [f"overlays keyed to {RELEASE_STATIC_ID}"],
+                "skipped": {}, "os_slot": None,
+            }
             sim.publish("update.done", bid, {"version": RELEASE_VERSION, "result": result,
                                              "detail": detail})
-            return {"board_id": bid, "version": RELEASE_VERSION, "result": result,
-                    "detail": detail, "ok": result == "installed", "checks": [],
-                    "identity_after": {"shell_id": RELEASE_STATIC_ID if result == "installed"
-                                       else ident.shell_id,
-                                       "harness_version": RELEASE_VERSION if result == "installed"
-                                       else ident.harness_version},
-                    "evidence": {"summary": "REBOOT witnessed: down after 1.0 s, up after 6.2 s"},
-                    "backup": {"path": backup}, "restore_hint": hint,
-                    "stored": ["overlays keyed to " + RELEASE_STATIC_ID]}
+            if not installed:
+                raise with_data(ActionFailedError(
+                    detail, hint=f"roll {bid} back (POST .../boards/ID/update/rollback) to "
+                                 f"restore the backup {backup}"), outcome=outcome)
+            return outcome
 
         return accepted(jobs.start(bid, "update_harness", work))
 
     @app.post(f"{API}/boards/{{bid}}/update/rollback", status_code=202)
-    def update_rollback(bid: str) -> JSONResponse:
-        jobs.gate(bid)
+    def update_rollback(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         state.session(bid)
+        sim.require_update()
+        jobs.gate(bid)
+        info = sim.info(bid)
+        for cap in ("storage_install", "reboot_board"):
+            if cap in info.unavailable:
+                raise UnavailableError(cap, info.unavailable[cap])
         prev = sim.previous.get(bid)
 
         def work(progress: Any) -> dict[str, Any]:
             sim.publish("update.started", bid, {"version": "rollback", "mode": "restore",
                                                 "rekey": False})
-            for i, phase in enumerate(("restore-sd", "reboot", "confirm-identity"), start=1):
-                time.sleep(0.2)
-                progress(phase, i, 3)
-            if prev:
+            for phase, done, total in (("restore:restore", 0, 0), ("reboot:sent", 1, 3),
+                                       ("reboot:down", 2, 3), ("reboot:up", 3, 3)):
+                time.sleep(0.15)
+                progress(phase, done, total)
+                sim.publish("update.progress", bid, {"phase": phase, "bytes": done,
+                                                     "total": total})
+            if prev and sim.rollback_outcome == "restored":
                 sim.engine._set_identity(bid, **prev)
-            detail = ("restored the backup; the board reports shell "
-                      f"{sim.identity(bid).shell_id}")
-            sim.publish("update.done", bid, {"version": "rollback", "result": "restored",
+            after = sim.identity(bid)
+            result = sim.rollback_outcome
+            detail = (f"restored the backup; the board reports shell {after.shell_id}, harness "
+                      f"{after.harness_version}")
+            outcome = {"board_id": bid, "version": "rollback", "result": result,
+                       "detail": detail, "ok": result == "restored", "checks": [],
+                       "identity_after": {"shell_id": after.shell_id,
+                                          "harness": after.harness_version},
+                       "restore_hint": "", "stored": [], "skipped": {}, "os_slot": None}
+            sim.publish("update.done", bid, {"version": "rollback", "result": result,
                                              "detail": detail})
-            return {"board_id": bid, "version": "rollback", "result": "restored",
-                    "detail": detail, "ok": True}
+            if result != "restored":
+                raise with_data(ActionFailedError(
+                    detail, hint="the SD is restored; check the board (GET .../boards/ID), and "
+                                 "power-cycle it if it is dark"), outcome=outcome)
+            return outcome
 
         return accepted(jobs.start(bid, "update_rollback", work))
 
-    def app_job(kind: str, version: str) -> JSONResponse:
+    def app_job(kind: str, version: str, what: str) -> JSONResponse:
+        sim.require_update()
         for job in jobs.running():
-            raise HeldError(f"{job.describe()} is running on {job.board_id}",
+            where = f"on {job.board_id}" if job.board_id else "in the service"
+            raise HeldError(f"cannot {what} while {job.describe()} runs {where}",
                             holder=f"harness-manager-daemon {job.describe()}",
-                            hint="update the app when no board job runs")
+                            hint=f"wait for it to finish (GET /api/v1/jobs/{job.id}), then try "
+                                 "again")
 
         def work(progress: Any) -> dict[str, Any]:
-            time.sleep(0.3)
-            progress("switch", 1, 1)
+            progress("stage" if kind == "update_app" else "switch", 0, 0)
+            time.sleep(0.2)
+            held = [f"this process holds {b}" for b in sim.engine.open_boards()]
+            if held:        # T7's switch rail: staged, but no switch while a session is held
+                raise HeldError(f"cannot switch to {version} now: {'; '.join(held)}",
+                                hint="finish or close those sessions first; the new version "
+                                     "stays staged")
             before = sim.app_version
             sim.app_version = version
-            return {"version": version, "previous": before, "switched": True, "locked": True,
-                    "restart": "restart harness-manager to run it"}
+            return {"target": "app", "result": "switched", "version": version,
+                    "previous": before}
 
         return accepted(jobs.start("", kind, work))
 
     @app.post(f"{API}/update/app", status_code=202)
     def update_app(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
-        return app_job("update_app", str(body.get("version") or sim.app_current))
+        return app_job("update_app", str(body.get("version") or sim.app_current),
+                       "update the app")
 
     @app.post(f"{API}/update/app/rollback", status_code=202)
     def update_app_rollback() -> JSONResponse:
-        return app_job("update_app_rollback", "0.0.1")
+        return app_job("update_app_rollback", "0.0.1", "roll the app back")
 
 
 # -- the clocks adapter the demo boards lack (GET/POST /clocks are core routes) ------------

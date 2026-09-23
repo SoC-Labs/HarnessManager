@@ -9,6 +9,7 @@ have landed. Each behaviour has its negative twin.
 
 from __future__ import annotations
 
+import re
 import time
 import zipfile
 
@@ -92,7 +93,7 @@ def test_needs_attention_shows_only_what_is_wrong_with_its_fix(page_factory, eng
     page.wait_for_selector('[data-testid="section-update"]', timeout=T)
 
 
-@pytest.mark.week_plan("consoles_api")
+@pytest.mark.week_plan("consoles_api", sim=True)
 def test_the_consoles_tile_attaches_screen_and_opens_a_console(page_factory, daemon):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
@@ -149,7 +150,7 @@ def test_a_design_fixed_baud_shows_its_rate_and_reason_and_no_selector(page_fact
     assert baud.locator("select").count() == 0
 
 
-@pytest.mark.week_plan("consoles_api")
+@pytest.mark.week_plan("consoles_api", sim=True)
 def test_a_serial_console_baud_is_set_from_the_gui_and_confirmed(page_factory, daemon):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
@@ -165,7 +166,7 @@ def test_a_serial_console_baud_is_set_from_the_gui_and_confirmed(page_factory, d
     expect(baud.locator("select")).to_have_value("9600")
 
 
-@pytest.mark.week_plan("consoles_api", "hub_api")
+@pytest.mark.week_plan("consoles_api", "hub_api", sim=True)
 def test_a_hub_share_fixes_the_serial_baud_and_says_so(page_factory, daemon):
     sim_of(daemon).behind_hub(BOARD_USB)
     page = page_factory(**APP)
@@ -177,7 +178,7 @@ def test_a_hub_share_fixes_the_serial_baud_and_says_so(page_factory, daemon):
     expect(baud).to_contain_text("set by the hub share")
 
 
-@pytest.mark.week_plan("consoles_api")
+@pytest.mark.week_plan("consoles_api", sim=True)
 def test_attach_with_screen_shows_the_command_and_the_client_count(page_factory, daemon):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
@@ -191,7 +192,7 @@ def test_attach_with_screen_shows_the_command_and_the_client_count(page_factory,
     assert page.locator('[data-testid="terminal-command"]').count() == 0     # no CLI line
 
 
-@pytest.mark.week_plan("consoles_api")
+@pytest.mark.week_plan("consoles_api", sim=True)
 def test_without_ptys_screen_says_why_and_offers_the_tcp_export(page_factory, daemon):
     sim_of(daemon).pty_unavailable = "PTYs need a POSIX host (this is Windows): export the console over TCP"
     page = page_factory(**APP)
@@ -208,22 +209,26 @@ def test_without_ptys_screen_says_why_and_offers_the_tcp_export(page_factory, da
 # --- power --------------------------------------------------------------------------------------
 
 
-@pytest.mark.week_plan("power_api")
+@pytest.mark.week_plan("power_api", sim=True)
 def test_power_page_reads_the_supply_and_cycles_it_once_armed(page_factory, daemon):
     sim_of(daemon).set_power(BOARD_USB)
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
     section(page, "power")
     card = page.locator('[data-testid="power-card"]')
-    expect(card.locator('[data-reading="board_power"]')).to_contain_text("23.4 W")
+    expect(card.locator('[data-reading="board_power"]')).to_contain_text("11.4 W")
+    expect(card.locator('[data-reading="supply_current"]')).to_contain_text("0.071 A")
     expect(card.locator('[data-testid="reason-power_cycle"]')).to_contain_text("not armed")
     card.locator('[data-testid="arm-power"] input').check()
     card.locator('[data-action="power_cycle"]').click()
     expect(card.locator('[data-testid="power-result"]')).to_contain_text("rc 0", timeout=T)
-    expect(card.locator('[data-testid="power-result"]')).to_contain_text("power-cycled through Shelly")
+    result = card.locator('[data-testid="power-result"]')
+    expect(result).to_contain_text("off 5 s, OFF confirmed, ON confirmed")
+    expect(result).to_contain_text("outlet on")                 # the phases: off, on; never "up"
+    expect(result).not_to_contain_text("outlet up")
 
 
-@pytest.mark.week_plan("power_api")
+@pytest.mark.week_plan("power_api", sim=True)
 def test_a_meter_that_cannot_cycle_shows_the_reason_and_no_button(page_factory, daemon):
     sim_of(daemon).set_power(BOARD_USB, device="INA260 on the 12 V input",
                              cycle_reason="the INA260 only measures: it cannot switch the supply")
@@ -235,10 +240,43 @@ def test_a_meter_that_cannot_cycle_shows_the_reason_and_no_button(page_factory, 
     assert card.locator('[data-action="power_cycle"]').count() == 0
 
 
+@pytest.mark.week_plan("power_api")
+def test_a_board_with_no_meter_says_why_once_and_offers_no_cycle(page_factory, daemon):
+    # Real-daemon capable: a DemoEngine board has no power adapter, as on the lab MPS3 today.
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "power")
+    card = page.locator('[data-testid="power-card"]')
+    rows = card.locator('[data-testid="power-readings"] tr')
+    expect(rows).to_have_count(3, timeout=T)
+    for name in ("board_power", "supply_voltage", "supply_current"):
+        expect(card.locator(f'[data-reading="{name}"]')).to_contain_text("unavailable")   # no 0
+    expect(card.locator('[data-testid="power-readings-reason"]')).to_be_visible()
+    expect(card.locator('[data-testid="power-cycle-reason"]')).to_contain_text("Power cycle: cannot")
+    assert card.locator('[data-action="power_cycle"]').count() == 0
+
+
+@pytest.mark.week_plan("power_api", sim=True)
+def test_an_off_time_out_of_range_is_interlocked_and_nothing_runs(page_factory, daemon):
+    sim_of(daemon).set_power(BOARD_USB)
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "power")
+    card = page.locator('[data-testid="power-card"]')
+    card.locator('[data-testid="power-off-s"]').fill("1")
+    card.locator('[data-testid="arm-power"] input').check()
+    expect(card.locator('[data-testid="reason-power_cycle"]')).to_contain_text("2 to 300 seconds")
+    card.locator('[data-action="power_cycle"]').click(force=True)
+    expect(card.locator('[data-testid="power-result"]')).to_contain_text("Nothing was run.")
+    card.locator('[data-testid="power-off-s"]').fill("3")
+    card.locator('[data-action="power_cycle"]').click()
+    expect(card.locator('[data-testid="power-result"]')).to_contain_text("off 3 s, OFF confirmed", timeout=T)
+
+
 # --- update --------------------------------------------------------------------------------------
 
 
-@pytest.mark.week_plan("update_api")
+@pytest.mark.week_plan("update_api", sim=True)
 def test_update_check_plan_rekey_consent_install_and_rollback_hint(page_factory, engine):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
@@ -257,12 +295,13 @@ def test_update_check_plan_rekey_consent_install_and_rollback_hint(page_factory,
     plan.locator('[data-testid="rekey-phrase"]').fill("REKEY 0x72bb0a36")
     plan.locator('[data-action="update_harness"]').click()
     result = plan.locator('[data-testid="update-result"]')
-    expect(result).to_contain_text("installed: the board reports shell 0x72bb0a36", timeout=T)
-    expect(plan.locator('[data-testid="rollback-hint"]')).to_contain_text("update rollback")
+    expect(result).to_contain_text("installed: harness 1.1.0 is running", timeout=T)
+    expect(result).to_contain_text("usercode: UNCHECKED")           # never shown as ok
+    expect(plan.locator('[data-testid="rollback-hint"]')).to_contain_text("restores the backup")
     expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x72bb0a36", timeout=T)
 
 
-@pytest.mark.week_plan("update_api")
+@pytest.mark.week_plan("update_api", sim=True)
 def test_an_update_the_board_cannot_take_lists_its_blockers_and_is_refused(page_factory, engine):
     page = page_factory(**APP)
     open_board(page, BOARD_FIELDED)                      # no Debug USB: no SD, no reboot
@@ -276,10 +315,86 @@ def test_an_update_the_board_cannot_take_lists_its_blockers_and_is_refused(page_
     assert engine.info(BOARD_FIELDED).identity.shell_id == "0x3f1a560f"
 
 
+@pytest.mark.week_plan("update_api")
+def test_an_engine_without_an_update_service_says_so_cleanly(page_factory, daemon):
+    # Real-daemon capable: DemoEngine has no update service (422 UNAVAILABLE).
+    sim = getattr(daemon.app.state, "sim", None)
+    if sim is not None:
+        sim.update_reason = "this engine has no update service"
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "update")
+    page.locator('[data-action="update_check"]').click()
+    expect(page.locator('[data-testid="update-unavailable"]')).to_contain_text(
+        "Updates are unavailable here: this engine has no update service", timeout=T)
+    assert page.locator('[data-testid="update-plan"]').count() == 0
+
+
+@pytest.mark.week_plan("update_api", sim=True)
+def test_a_plan_that_changed_since_the_check_is_shown_again_to_approve(page_factory, daemon, engine):
+    sim = sim_of(daemon)
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "update")
+    page.locator('[data-action="update_check"]').click()
+    plan = page.locator('[data-testid="update-plan"]')
+    expect(plan).to_contain_text("release #14", timeout=T)
+    sim.bump_channel()                                   # a new release lands after the check
+    plan.locator('[data-testid="rekey-phrase"]').fill("REKEY 0x72bb0a36")
+    plan.locator('[data-testid="arm-update"] input').check()
+    plan.locator('[data-action="update_harness"]').click()
+    result = plan.locator('[data-testid="update-result"]')
+    expect(result).to_contain_text("changed since it was checked; nothing was installed", timeout=T)
+    expect(plan.locator('[data-testid="plan-changed"]')).to_be_visible()
+    expect(plan).to_contain_text("release #15")
+    assert engine.info(BOARD_USB).identity.shell_id == "0x3f1a560f"
+    expect(plan.locator('[data-testid="rekey-phrase"]')).to_have_value("")    # consent again
+    plan.locator('[data-testid="rekey-phrase"]').fill("REKEY 0x72bb0a36")
+    plan.locator('[data-testid="arm-update"] input').check()
+    plan.locator('[data-action="update_harness"]').click()
+    expect(result).to_contain_text("installed: harness 1.1.0 is running", timeout=T)
+
+
+@pytest.mark.week_plan("update_api", sim=True)
+def test_an_install_the_board_does_not_run_fails_with_its_outcome_and_the_rollback(page_factory, daemon, engine):
+    sim = sim_of(daemon)
+    sim.update_outcome = "written-not-running"
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "update")
+    page.locator('[data-action="update_check"]').click()
+    plan = page.locator('[data-testid="update-plan"]')
+    plan.locator('[data-testid="rekey-phrase"]').fill("REKEY 0x72bb0a36", timeout=T)
+    plan.locator('[data-testid="arm-update"] input').check()
+    plan.locator('[data-action="update_harness"]').click()
+    result = plan.locator('[data-testid="update-result"]')
+    expect(result).to_contain_text("ACTION_FAILED", timeout=T)
+    expect(result).to_contain_text("written-not-running: the SD holds the new base")
+    expect(plan.locator('[data-testid="rollback-hint"]')).to_contain_text("restores the backup")
+    assert plan.locator('[data-testid="plan-applied"]').count() == 0
+    plan.locator('[data-testid="arm-rollback"] input').check()
+    plan.locator('[data-action="update_rollback"]').click()
+    expect(result).to_contain_text("restored: restored the backup", timeout=T)
+
+
+@pytest.mark.week_plan("update_api", sim=True)
+def test_the_app_update_asks_to_close_the_boards_first(page_factory, daemon):
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    section(page, "update")
+    page.locator('[data-action="update_check"]').click()
+    card = page.locator('[data-testid="update-app"]')
+    expect(card).to_contain_text("You run harness-manager 0.0.1", timeout=T)
+    expect(card.locator('[data-testid="reason-update_app"]')).to_contain_text("close your boards first")
+    card.locator('[data-action="update_app"]').click(force=True)
+    expect(card).to_contain_text("Nothing was run.")
+    assert sim_of(daemon).app_version == "0.0.1"
+
+
 # --- clocks ----------------------------------------------------------------------------------------
 
 
-@pytest.mark.week_plan()
+@pytest.mark.week_plan(sim=True)
 def test_clocks_set_a_dut_preset_and_read_the_oscillators(page_factory):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
@@ -313,7 +428,8 @@ def test_sd_flow_backup_then_install_needs_files_and_a_backup(page_factory, engi
     flow = page.locator('[data-testid="sd-flow"]')
     flow.locator('[data-action="sd_backup"]').click()
     expect(flow.locator('[data-testid="sd-backup-result"]')).to_contain_text("rc 0", timeout=T)
-    expect(flow.locator('[data-testid="sd-backup-path"]')).to_have_value("demo-backup.zip")
+    # The backup's path (the mock's "demo-backup.zip", the daemon's state dir) fills the field.
+    expect(flow.locator('[data-testid="sd-backup-path"]')).to_have_value(re.compile(r"demo-backup\.zip$"))
     flow.locator('[data-testid="arm-sd-install"] input').check()
     expect(flow.locator('[data-testid="reason-sd_install"]')).to_contain_text("add at least one file")
     flow.locator('[data-testid="sd-dest-0"]').fill("MB/HBI0309C/HARNESS.ebf")
@@ -339,7 +455,7 @@ def test_sd_flow_backup_then_install_needs_files_and_a_backup(page_factory, engi
 # --- a board behind a hub -------------------------------------------------------------------------------
 
 
-@pytest.mark.week_plan("hub_api")
+@pytest.mark.week_plan("hub_api", sim=True)
 def test_a_board_behind_a_hub_shows_its_tunnel_and_lease_and_releases_it(page_factory, daemon):
     sim_of(daemon).behind_hub(BOARD_USB, lease="mine", expires_in_s=1620)
     page = page_factory(**APP)
@@ -355,7 +471,7 @@ def test_a_board_behind_a_hub_shows_its_tunnel_and_lease_and_releases_it(page_fa
     expect(page.locator('[data-attention="lease"]')).to_have_count(0)
 
 
-@pytest.mark.week_plan("hub_api")
+@pytest.mark.week_plan("hub_api", sim=True)
 def test_someone_elses_lease_and_a_dead_tunnel_need_attention(page_factory, daemon):
     sim_of(daemon).behind_hub(BOARD_USB, lease="other", tunnel="down",
                               detail="the ssh process exited (255): Connection refused")

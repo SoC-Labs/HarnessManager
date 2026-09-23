@@ -135,6 +135,16 @@ export function boardTitle(cand, boardId) {
   return `${pack.toUpperCase()} ${hostOf(boardId || (cand && cand.board_id))}`;
 }
 
+// The probe's label ("MPS3 nanosoc on shell 0x3f1a560f") is a snapshot: after a program or
+// an update the live identity wins, so the title never names a shell the board left.
+export function liveTitle(cand, ident, boardId) {
+  const label = (cand && cand.label) || "";
+  if (!label) return boardTitle(cand, boardId);
+  const m = /^(\S+) (\S+) on shell (0x[0-9a-fA-F]+)$/.exec(label);
+  if (!m || !ident) return label;
+  return `${m[1]} ${designText(ident) || m[2]} on shell ${ident.shell_id || m[3]}`;
+}
+
 export function designText(ident) {
   if (!ident) return "";
   return ident.rm_name || ident.rm_id || "";

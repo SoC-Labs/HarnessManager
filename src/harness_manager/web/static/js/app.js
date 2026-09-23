@@ -3,7 +3,7 @@
 import { ApiError, call, hasToken, initToken } from "./api.js";
 import { closeBoardConsoles } from "./consoles.js";
 import {
-  boardTitle, clock, designText, healthOf, holderAge, holderText, hostOf, LINK_ICONS, linkName,
+  boardTitle, clock, designText, liveTitle, healthOf, holderAge, holderText, hostOf, LINK_ICONS, linkName,
 } from "./format.js";
 import { html, render, useEffect, useState } from "./lib.js";
 import { ActivitySection } from "./sections/activity.js";
@@ -178,7 +178,7 @@ function BoardHeader({ bid }) {
   return html`<header class="board-header" data-testid="board-header">
     <div class="header-row1">
       <div class="header-titles">
-        <h1 class="header-title">${cand.label || boardTitle(cand, bid)}</h1>
+        <h1 class="header-title">${liveTitle(cand, ident, bid)}</h1>
         <div class="header-id">${bid}</div>
       </div>
       <div class="header-actions">
