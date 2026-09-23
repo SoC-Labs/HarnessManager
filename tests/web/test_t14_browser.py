@@ -275,6 +275,9 @@ def test_console_output_appears_and_send_works(page_factory, engine, screenshots
     assert wait_until(lambda: (BOARD_USB, "uart0", b"print(1+1)\r\n") in engine.consoles.writes)
     expect(page.locator('[data-testid="console-result"]')).to_contain_text("rc 0")
     assert wait_until(lambda: "print(1+1)" in console_text(page, "uart0"))   # the demo DUT echoes
+    # The same console in any terminal (lead): the CLI command, ready to copy.
+    cmd = page.locator('[data-testid="terminal-command"] code').inner_text()
+    assert cmd.startswith("socharness console ") and cmd.endswith(" uart0"), cmd
     page.screenshot(path=str(screenshots / "light-consoles-live.png"))
 
 

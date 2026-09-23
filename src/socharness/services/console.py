@@ -23,6 +23,11 @@ Behaviour
   banner still shows it.
 - **Writes are serialised** onto the one upstream connection, whole chunk by
   whole chunk, so two writers never interleave inside a chunk.
+- **Paced writes.** A console the board pack declares slow
+  (``ConsoleAdapter.console_write_pace_s() -> {name: seconds}``, optional) gets
+  one byte per ``seconds``, sent from a writer thread so ``write`` never blocks
+  the caller. The MPS3 DUT UARTs need it: the nanoSoC UART has no receive FIFO,
+  and unpaced input is dropped (board window 2026-09-23).
 - **Reconnect with backoff.** UART1 (6931) and SWO (6932) drop on every
   partition swap (harness handover; the RP is decoupled), and a connection can
   drop for other reasons. The broker re-dials with exponential backoff
@@ -57,6 +62,7 @@ for one URL share one connection.
 from __future__ import annotations
 
 import logging
+import queue
 import select
 import socket
 import threading
@@ -103,6 +109,17 @@ def _bus_of(engine: Any) -> EventBus | None:
     if isinstance(engine, EventBus):
         return engine
     return getattr(engine, "bus", None)
+
+
+def _pace(session: BoardSession, name: str) -> float:
+    """Seconds per byte the board pack asks for on console ``name`` (0: unpaced)."""
+    fn = getattr(getattr(session, "consoles", None), "console_write_pace_s", None)
+    if fn is None:
+        return 0.0
+    try:
+        return max(0.0, float(fn().get(name, 0.0)))
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
 
 
 # --- upstream links ----------------------------------------------------------------
@@ -254,8 +271,13 @@ class ConsoleSubscription:
 class _Upstream:
     """The single connection to one board console, and its reader thread."""
 
-    def __init__(self, broker: ConsoleBroker, board_id: str, name: str, endpoint: str) -> None:
+    def __init__(self, broker: ConsoleBroker, board_id: str, name: str, endpoint: str,
+                 pace_s: float = 0.0) -> None:
         self.broker = broker
+        self.pace_s = pace_s          # > 0: one byte per pace_s, from the writer thread
+        self.write_dropped = 0        # paced bytes discarded because the link went down
+        self._wq: queue.Queue[bytes] = queue.Queue()
+        self._writer: threading.Thread | None = None
         self.board_id = board_id
         self.name = name
         self.endpoint = endpoint
@@ -360,18 +382,67 @@ class _Upstream:
             self._thread.join(timeout=2.0)
 
     def write(self, data: bytes) -> None:
+        if self.pace_s > 0:
+            self._write_paced(data)
+            return
         with self._wlock:
             link = self._link
             if link is None or self.state != "up":
-                raise UnreachableError(
-                    f"console {self.name!r} on {self.board_id} is not connected (state {self.state})",
-                    hint="it reconnects by itself; retry when console.state is 'up'",
-                )
+                raise self._not_up()
             try:
                 link.send(data)
             except OSError as exc:
                 link.close()                # the reader sees end of stream and re-dials
                 raise UnreachableError(f"console {self.name!r} write failed: {exc}") from exc
+
+    def _not_up(self) -> UnreachableError:
+        return UnreachableError(
+            f"console {self.name!r} on {self.board_id} is not connected (state {self.state})",
+            hint="it reconnects by itself; retry when console.state is 'up'",
+        )
+
+    def _write_paced(self, data: bytes) -> None:
+        if self._link is None or self.state != "up":
+            raise self._not_up()
+        self._wq.put(bytes(data))
+        with self._lock:
+            if self._writer is None or not self._writer.is_alive():
+                self._writer = threading.Thread(target=self._write_loop, daemon=True,
+                                                name=f"console-{self.board_id}-{self.name}-tx")
+                self._writer.start()
+
+    def _write_loop(self) -> None:
+        """One byte per ``pace_s``. A link that drops discards the rest of the queue."""
+        while not self._stop.is_set():
+            try:
+                chunk = self._wq.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            for i in range(len(chunk)):
+                with self._wlock:
+                    link = self._link
+                    ok = link is not None and self.state == "up"
+                    if ok:
+                        try:
+                            link.send(chunk[i:i + 1])
+                        except OSError:
+                            link.close()        # the reader sees end of stream and re-dials
+                            ok = False
+                if not ok:
+                    self._drop_queued(len(chunk) - i)
+                    break
+                time.sleep(self.pace_s)
+
+    def _drop_queued(self, first: int) -> None:
+        dropped = first
+        while True:
+            try:
+                dropped += len(self._wq.get_nowait())
+            except queue.Empty:
+                break
+        self.write_dropped += dropped
+        log.warning("console %s on %s: link down, %d unsent byte(s) dropped",
+                    self.name, self.board_id, dropped)
 
     # -- reader thread ---------------------------------------------------------------
 
@@ -657,7 +728,8 @@ class ConsoleBroker:
         """A new reader of console ``name``. ``replay`` first delivers the scrollback."""
         key, endpoint = self.resolve(session, name)
         with self._lock:
-            return self._upstream(session.candidate.board_id, key, endpoint).attach(replay)
+            return self._upstream(session.candidate.board_id, key, endpoint,
+                                  _pace(session, key)).attach(replay)
 
     def export_tcp(self, session: BoardSession, name: str, port: int = 0) -> int:
         """Serve console ``name`` on 127.0.0.1:``port`` (0 = any free port); returns the port.
@@ -667,7 +739,7 @@ class ConsoleBroker:
         """
         key, endpoint = self.resolve(session, name)
         with self._lock:
-            up = self._upstream(session.candidate.board_id, key, endpoint)
+            up = self._upstream(session.candidate.board_id, key, endpoint, _pace(session, key))
             try:
                 exp = _Export(up, port)
             except PortBoundError:
@@ -713,15 +785,17 @@ class ConsoleBroker:
 
     # -- internals ------------------------------------------------------------------------
 
-    def _upstream(self, board_id: str, name: str, endpoint: str) -> _Upstream:
+    def _upstream(self, board_id: str, name: str, endpoint: str,
+                  pace_s: float = 0.0) -> _Upstream:
         """Get or start the one upstream. Call with ``self._lock`` held."""
         up = self._ups.get((board_id, name))
         if up is not None and up.endpoint == endpoint and not up._stop.is_set():
+            up.pace_s = pace_s
             return up
         if up is not None:              # the board's endpoint moved: start over
             del self._ups[(board_id, name)]
             up.stop()
-        new = _Upstream(self, board_id, name, endpoint)
+        new = _Upstream(self, board_id, name, endpoint, pace_s)
         self._ups[(board_id, name)] = new
         new.start()
         return new

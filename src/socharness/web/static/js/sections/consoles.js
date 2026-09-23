@@ -4,7 +4,7 @@ import { call } from "../api.js";
 import { capState } from "../format.js";
 import { consoleSession } from "../consoles.js";
 import { html, useEffect, useRef, useState } from "../lib.js";
-import { boardState, changed, loadConsoles, log, timed } from "../store.js";
+import { boardState, changed, loadConsoles, log, S, timed } from "../store.js";
 import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
 
 const CONSOLE_CAPS = ["console_dut", "console_shell", "console_controller"];
@@ -24,6 +24,14 @@ function Terminal({ session }) {
     };
   }, [session]);
   return html`<div class="term-wrap" ref=${ref} data-testid="terminal"></div>`;
+}
+
+// The CLI command that opens this console in any terminal (VS Code's, say): it shares
+// the daemon's session, so this page and that terminal show the same console.
+export function terminalCommand(bid, name) {
+  const cand = S.boards[bid]?.candidate;
+  const eth = (cand?.links || []).find((l) => l.kind === "ethernet");
+  return eth ? `socharness console ${eth.address} ${name}` : null;
 }
 
 function ConsolePane({ bid, name }) {
@@ -78,6 +86,9 @@ function ConsolePane({ bid, name }) {
         icon=${st === "up" ? "radio" : st === "connecting" ? "loader-circle" : "unplug"}>${st}<//>
       <span class="grow secondary small" data-testid="console-detail">${session.detail || (st === "up" ? "Type into the terminal, or send a line below." : "")}
         ${session.dropped ? html`${" "}<span class="i-warn" data-testid="console-dropped">${session.dropped} bytes dropped: the page fell behind</span>` : null}</span>
+      ${terminalCommand(bid, name) ? html`<span class="copy-row" data-testid="terminal-command"
+        title="Run this in a terminal (VS Code, say): typing goes to the board, Ctrl-] exits">
+        <code>${terminalCommand(bid, name)}</code><${CopyButton} text=${terminalCommand(bid, name)} /></span>` : null}
       ${exported ? html`<span class="copy-row"><code>telnet 127.0.0.1 ${exported}</code>
         <${CopyButton} text=${`telnet 127.0.0.1 ${exported}`} /></span>` : null}
       <button type="button" class="btn sm" onClick=${doExport} aria-busy=${exporting ? "true" : undefined}

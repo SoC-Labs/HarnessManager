@@ -51,8 +51,16 @@ def broker(bus: EventBus) -> Iterator[ConsoleBroker]:
 
 @pytest.fixture
 def session(vboard: VirtualMps3, proxy: SingleClientProxy):
+    # Unpaced: these tests push kilobytes through uart0. Pacing has its own tests below.
     ports = dict(vboard.console_ports, uart0=proxy.port)
-    pack = Mps3Pack(console_ports=ports)
+    pack = Mps3Pack(console_ports=ports, console_pace_s=0.0)
+    return pack.open(pack.candidate_for_host(vboard.shell_endpoint))
+
+
+@pytest.fixture
+def paced_session(vboard: VirtualMps3, proxy: SingleClientProxy):
+    ports = dict(vboard.console_ports, uart0=proxy.port)
+    pack = Mps3Pack(console_ports=ports)            # the real default: DUT UARTs paced
     return pack.open(pack.candidate_for_host(vboard.shell_endpoint))
 
 
@@ -320,3 +328,38 @@ def test_shell_alias_opens_lane_2_over_usb_and_never_the_mcc(tmp_path, broker):
             assert broker.resolve(session, "shell") == ("fpga_uart2", lane_url)
     finally:
         unregister_fake_serial("t4-lane2")
+
+
+# -- paced input (lead): the DUT UART has no receive FIFO -----------------------------------
+
+
+def test_dut_uart_input_is_paced_and_write_does_not_block(broker, paced_session):
+    import time
+
+    from socharness_board_mps3.constants import DUT_CONSOLE_PACE_S
+
+    assert paced_session.consoles.console_write_pace_s() == {
+        "uart0": DUT_CONSOLE_PACE_S, "uart1": DUT_CONSOLE_PACE_S}
+    s = broker.subscribe(paced_session, "uart0")
+    read_until(s, BANNER)
+    text = b"print(1+1)\r"
+    t0 = time.monotonic()
+    s.write(text)
+    assert time.monotonic() - t0 < 0.1                     # queued, not sent inline
+    echoed = read_until(s, text)
+    took = time.monotonic() - t0
+    assert text in echoed
+    assert took >= (len(text) - 1) * DUT_CONSOLE_PACE_S     # one byte per pace, at least
+
+
+def test_negative_twin_swo_and_an_unpaced_pack_are_not_paced(broker, session, paced_session):
+    assert "swo" not in paced_session.consoles.console_write_pace_s()
+    assert session.consoles.console_write_pace_s() == {"uart0": 0.0, "uart1": 0.0}
+    import time
+
+    s = broker.subscribe(session, "uart0")
+    read_until(s, BANNER)
+    t0 = time.monotonic()
+    s.write(b"x" * 200 + b"\n")
+    read_until(s, b"x" * 200)
+    assert time.monotonic() - t0 < 200 * 0.02 / 2                # far faster than paced

@@ -131,3 +131,61 @@ def test_ui_demo_serves_scripted_boards_from_its_own_state_dir(capsys, monkeypat
     finally:
         stop_state_dir(demo_dir)
         set_engine_factory(previous)
+
+
+# -- `socharness app` (lead) ------------------------------------------------------------------
+
+
+def _app_cli(capsys, monkeypatch, *argv: str):
+    from socharness.cli.engine import ENV_NO_DAEMON, set_engine_factory
+    from tests.fakes.t13_daemon import run_cli
+
+    monkeypatch.delenv(ENV_NO_DAEMON, raising=False)
+    previous = set_engine_factory(None)
+    try:
+        return run_cli(capsys, *argv)
+    finally:
+        set_engine_factory(previous)
+
+
+def test_app_opens_the_ui_in_an_application_window(capsys, monkeypatch):
+    import json
+
+    from socharness.web import window
+    from tests.fakes.t13_daemon import state_dir, stop_state_dir
+
+    opened: list[tuple[str, Path, bool]] = []
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setattr(window, "open_window", lambda url, prof, native=True: opened.append(
+        (url, prof, native)) or window.Launched("app-mode", "/usr/bin/google-chrome", 1))
+    demo_dir = state_dir() / "demo"
+    try:
+        rc, out, err = _app_cli(capsys, monkeypatch, "--json", "app", "--demo", "--no-native")
+        assert rc == 0, err
+        shown = json.loads(out)
+        assert shown["window"] == "app-mode" and shown["started"] is True
+        ((url, prof, native),) = opened
+        assert url == shown["url"] and "#token=" in url
+        assert prof == demo_dir / "app-window" and native is False
+        assert "opened an app window (google-chrome)" in err
+    finally:
+        stop_state_dir(demo_dir)
+
+
+def test_negative_twin_app_with_no_display_prints_the_url_and_opens_nothing(capsys, monkeypatch):
+    import json
+
+    from socharness.web import window
+    from tests.fakes.t13_daemon import state_dir, stop_state_dir
+
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.setattr(window, "open_window", lambda *a, **k: pytest.fail("opened a window"))
+    demo_dir = state_dir() / "demo"
+    try:
+        rc, out, err = _app_cli(capsys, monkeypatch, "--json", "app", "--demo")
+        assert rc == 0, err
+        assert json.loads(out)["window"] == "none" and "ssh -L" in err
+    finally:
+        stop_state_dir(demo_dir)

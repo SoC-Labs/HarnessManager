@@ -25,6 +25,12 @@ CLEARING_ARENA_BYTES = 262144
 
 CONSOLE_PORTS = {"uart0": UART0_PORT, "uart1": UART1_PORT, "swo": SWO_PORT}
 
+#: Seconds per byte for input to the DUT UARTs. The nanoSoC UART has no receive FIFO:
+#: an unpaced `print(1+1)` arrived as `p(1+1)` and a NameError (board window 2026-09-23,
+#: platform docs/evidence/2026-09-w2/rf_flash_boot_20260923.txt). SWO is output only.
+DUT_CONSOLE_PACE_S = 0.02
+PACED_CONSOLES = ("uart0", "uart1")
+
 # --- the two harness generations (T12) ----------------------------------------------
 #
 # Sources: the Linux harness plan §10/§10a (mps3-nanosoc-platform

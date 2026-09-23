@@ -52,6 +52,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 - **Telemetry reads can block.** A SYSMON read over JTAG takes about 3 s (xsdb). socharnessd and the web UI poll telemetry off the request thread, never on it.
 - **`engine.update` is optional.** The in-process `Engine` has it (T7's `UpdateService`); a `RemoteEngine` does not. Read it with `getattr(engine, "update", None)`. The CLI's `update` verb always runs in-process, so a daemon that holds the board refuses it by name (HELD).
 - **`ControllerAdapter.reboot` returns a dict**: `summary`, `down_after_s`, `up_after_s`, `down_evidence`, `up_evidence`, `shell_id_before`, `shell_id_after`, `fpga_configured`. It returns only once the controller console is back at its prompt.
+- **`ConsoleAdapter.console_write_pace_s()` is optional** and returns `{console name: seconds per byte}`. The console broker then sends that console's input one byte at a time from a writer thread, so `write` never blocks. The MPS3 pack paces `uart0`/`uart1` at 20 ms (the nanoSoC UART has no receive FIFO); `Mps3Pack(console_pace_s=0)` turns it off.
 - **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
 
 ## Changing a contract

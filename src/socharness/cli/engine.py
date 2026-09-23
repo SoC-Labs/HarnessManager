@@ -47,6 +47,7 @@ IN_PROCESS_VERBS: dict[str, str] = {
     "daemon": "manages socharnessd itself",
     "update": "writes the SD and reboots in this process; a daemon holding the board refuses it by name",
     "ui": "manages socharnessd itself",
+    "app": "manages socharnessd itself",
 }
 
 EngineFactory = Callable[[argparse.Namespace | None], Any]

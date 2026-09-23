@@ -30,11 +30,12 @@ from .output import TSV_COLUMNS, Result, tsv_field
 
 DAEMON_COLUMNS = ("STATE", "PID", "PORT", "URL", "STATE_DIR")
 UI_COLUMNS = ("URL", "PORT", "PID", "STARTED")
+APP_COLUMNS = ("URL", "PORT", "PID", "STARTED", "WINDOW")
 
 #: Append-only TSV layouts of these verbs. They belong in ``output.TSV_COLUMNS``
 #: (a contract change request; T5 owns that table). Until they are there,
 #: ``_emit`` prints the TSV rows itself with the same field rules.
-LAYOUTS = {"daemon": DAEMON_COLUMNS, "ui": UI_COLUMNS}
+LAYOUTS = {"daemon": DAEMON_COLUMNS, "ui": UI_COLUMNS, "app": APP_COLUMNS}
 
 NON_LOOPBACK_WARNING = ("socharnessd listens on {addr}, which is not loopback: anyone who can "
                         "reach it AND has the token controls your boards")
@@ -95,6 +96,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                     help="only print the URL (e.g. to open it through `ssh -L N:127.0.0.1:N`)")
     _listen_args(up)
     up.set_defaults(fn=cmd_ui)
+
+    ap = subparsers.add_parser(
+        "app", help="open Harness Manager in its own window (starts socharnessd if needed)",
+        description="The web UI as a desktop application: a native window (pywebview, the "
+                    "'app' extra) or a Chrome/Edge/Chromium app window with no tabs or "
+                    "address bar. Falls back to a browser tab.",
+        parents=[fmt, demo], epilog=f"--tsv columns: {' '.join(APP_COLUMNS)}")
+    ap.add_argument("--port", type=int, default=0, metavar="N",
+                    help="TCP port for the daemon (default: any free port)")
+    ap.add_argument("--no-native", action="store_true",
+                    help="skip pywebview; use a browser app window")
+    ap.set_defaults(fn=cmd_app)
 
 
 def state_dir(demo: bool = False) -> Path:
@@ -216,4 +229,33 @@ def cmd_ui(ctx: Ctx) -> int:
                  f"`ssh -L {info.port}:127.0.0.1:{info.port} HOST`, then open it locally)")
     elif not a.no_browser and not opened:
         ctx.note("no browser could be opened here; open the URL above")
+    return ExitCode.OK
+
+
+def cmd_app(ctx: Ctx) -> int:
+    """``socharness app``: the daemon, then the UI in an application window (web/window.py)."""
+    from socharness.daemon import control
+    from socharness.web import window
+
+    a = ctx.args
+    sdir = state_dir(a.demo)
+    _check_listen(ctx, "127.0.0.1", a.port)
+    info, started = control.ensure_running(sdir, port=a.port, demo=a.demo)
+    url = info.ui_url
+    stop = "`socharness daemon stop --demo`" if a.demo else "`socharness daemon stop`"
+    if not can_open_browser():
+        launched = window.Launched("none", "no display here")
+    else:
+        launched = window.open_window(url, sdir / "app-window", native=not a.no_native)
+    data = {"url": url, "port": info.port, "pid": info.pid, "started": started,
+            "window": launched.how, "detail": launched.detail}
+    _emit(ctx, Result("app", data, rows=[[url, info.port, info.pid, started, launched.how]],
+                      human=[url]))
+    how = "started" if started else "running"
+    ctx.note(f"socharnessd {'(demo) ' if a.demo else ''}{how} (pid {info.pid}); {stop} stops it")
+    if launched.how == "none":
+        ctx.note(f"{launched.detail}: open the URL above in a browser (over ssh: "
+                 f"`ssh -L {info.port}:127.0.0.1:{info.port} HOST`, then open it locally)")
+    else:
+        ctx.note(window.describe(launched))
     return ExitCode.OK

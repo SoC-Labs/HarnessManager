@@ -168,12 +168,15 @@ def make_parser() -> argparse.ArgumentParser:
     vp.set_defaults(fn=cmd_program.cmd_restore)
 
     # -- consoles and debug --------------------------------------------------------
-    vp = verb("console", "stream a console to stdout, or re-export it on a local port",
+    vp = verb("console", "a console in this terminal (interactive; Ctrl-] exits), or re-export it",
               layout="console", parents=(fmt, usb))
     target(vp)
     vp.add_argument("name", metavar="NAME", help="console name: uart0, uart1, swo, ...")
     vp.add_argument("--export", type=int, default=None, metavar="PORT",
                     help="re-export on 127.0.0.1:PORT (0 = any free port); prints the port")
+    vp.add_argument("--read-only", action="store_true",
+                    help="only show the output; do not send keystrokes (the default in a "
+                         "terminal is interactive: Ctrl-] exits)")
     _for_arg(vp, "stream or export")
     vp.set_defaults(fn=cmd_io.cmd_console)
 
@@ -285,7 +288,7 @@ def make_parser() -> argparse.ArgumentParser:
     # -- daemon / ui (T13: socharnessd, the local engine service) ---------------------
     from . import cmd_daemon
     cmd_daemon.register(sub)
-    for name in ("daemon", "ui"):          # so `socharness help <verb>` knows them
+    for name in ("daemon", "ui", "app"):   # so `socharness help <verb>` knows them
         if name in sub.choices:
             verbs[name] = sub.choices[name]
 

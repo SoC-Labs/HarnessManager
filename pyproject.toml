@@ -34,6 +34,9 @@ dev = [
     "ruff>=0.6",
     "pyserial>=3.5",
 ]
+# `socharness app` in a native window (WebView2 / WKWebView / GTK-Qt WebKit); without it,
+# the app opens a Chrome/Edge/Chromium app window
+app = ["pywebview>=5"]
 # browser tests for the web UI (T14): drives the system Chrome, no browser download
 webtest = ["playwright>=1.40"]
 

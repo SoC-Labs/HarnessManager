@@ -287,7 +287,8 @@ def test_negative_twin_a_reading_events_client_loses_nothing(vboard):
 
 
 def test_a_stalled_console_client_is_told_what_it_lost(vboard):
-    eng = engine_for(vboard)
+    # 4 MiB through uart0: unpaced (at the DUT's 20 ms/byte it would take a day).
+    eng = engine_for(vboard, console_pace_s=0.0)
     try:
         with LiveDaemon(eng, write_json=False, console_limits=(8, 4096)) as d, \
                 d.client() as web:

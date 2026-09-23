@@ -41,8 +41,10 @@ from .constants import (
     CONTROL_PORT,
     DAP_DESIGN_CONFIGS,
     DEFAULT_SHELL_HOST,
+    DUT_CONSOLE_PACE_S,
     JTAG_RBB_PORT,
     OPENOCD_CFG_DIR,
+    PACED_CONSOLES,
 )
 from .shell import Mps3Shell, parse_endpoint
 
@@ -65,11 +67,16 @@ def _with_config_links(candidate: Candidate) -> Candidate:
 
 
 class Mps3Consoles:
-    def __init__(self, endpoints: dict[str, str]) -> None:
+    def __init__(self, endpoints: dict[str, str], pace_s: float = DUT_CONSOLE_PACE_S) -> None:
         self._endpoints = endpoints
+        self._pace_s = pace_s
 
     def console_endpoints(self) -> dict[str, str]:
         return dict(self._endpoints)
+
+    def console_write_pace_s(self) -> dict[str, float]:
+        """The DUT UARTs drop unpaced input (see constants.DUT_CONSOLE_PACE_S)."""
+        return {n: self._pace_s for n in PACED_CONSOLES if n in self._endpoints}
 
 
 class Mps3Resets:
@@ -117,7 +124,8 @@ class Mps3Debug:
 class Mps3Session(BoardSession):
     def __init__(self, candidate: Candidate, shell: Mps3Shell | None,
                  console_ports: dict[str, int], rbb_port: int, *,
-                 push_port: int | None = None, tftp_port: int | None = None) -> None:
+                 push_port: int | None = None, tftp_port: int | None = None,
+                 console_pace_s: float = DUT_CONSOLE_PACE_S) -> None:
         self.candidate = candidate
         self.shell = shell
         # Read by the deploy adapter (T2). None means "use the default or env override".
@@ -134,7 +142,7 @@ class Mps3Session(BoardSession):
         extra = _hook("usb", "serial_console_endpoints")
         if extra is not None:
             endpoints.update(extra(candidate))
-        self.consoles = Mps3Consoles(endpoints) if endpoints else None
+        self.consoles = Mps3Consoles(endpoints, console_pace_s) if endpoints else None
 
         for attr, module, factory in (
             ("deploy", "deploy", "make_deploy_adapter"),
@@ -176,13 +184,16 @@ class Mps3Pack(BoardPack):
 
     def __init__(self, *, console_ports: dict[str, int] | None = None,
                  rbb_port: int = JTAG_RBB_PORT, push_port: int | None = None,
-                 tftp_port: int | None = None) -> None:
+                 tftp_port: int | None = None,
+                 console_pace_s: float = DUT_CONSOLE_PACE_S) -> None:
         # Port overrides exist so tests can point the pack at a FakeShell on
-        # ephemeral ports. Real boards use the defaults.
+        # ephemeral ports. Real boards use the defaults. ``console_pace_s`` is the
+        # DUT UART input pace (0 for a DUT whose UART has a receive FIFO).
         self._console_ports = dict(console_ports or CONSOLE_PORTS)
         self._rbb_port = rbb_port
         self._push_port = push_port
         self._tftp_port = tftp_port
+        self._console_pace_s = console_pace_s
 
     def capability_specs(self) -> Iterable[CapabilitySpec]:
         return SPECS
@@ -235,4 +246,5 @@ class Mps3Pack(BoardPack):
         elif not any(lk.kind in (LinkKind.USB_SERIAL, LinkKind.USB_MSD) for lk in candidate.links):
             raise UsageError("this candidate has no link the MPS3 pack can use")
         return Mps3Session(candidate, shell, self._console_ports, self._rbb_port,
-                           push_port=self._push_port, tftp_port=self._tftp_port)
+                           push_port=self._push_port, tftp_port=self._tftp_port,
+                           console_pace_s=self._console_pace_s)
