@@ -88,6 +88,16 @@ def test_pty_human_output_is_the_path_then_the_screen_command(tmp_path, in_proce
     assert "screen" not in err or "Ctrl-C" not in err                  # --for: no Ctrl-C note
 
 
+def test_pty_tsv_is_one_row_of_seven_columns(tmp_path, in_process, capsys):
+    with l2_virtual_board(tmp_path, features=()) as vb:
+        in_process.append(vb)
+        rc, out, _ = run_cli(capsys, "--tsv", "pty", vb.shell_endpoint, "uart0", "--for", "0")
+    cols = out.rstrip("\n").split("\t")
+    assert rc == 0 and len(out.splitlines()) == 1 and len(cols) == 7
+    assert cols[1] == "uart0" and cols[2].endswith("/uart0") and cols[4] == f"screen {cols[2]}"
+    assert cols[6] == "this command"
+
+
 def test_negative_twin_pty_for_an_unknown_console_exits_absent(tmp_path, in_process, capsys):
     with l2_virtual_board(tmp_path, features=()) as vb:
         in_process.append(vb)
