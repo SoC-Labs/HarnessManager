@@ -168,7 +168,7 @@ def is_tunnelled(session: Any) -> bool:
         return False
     candidate = getattr(session, "candidate", None)
     for link in getattr(candidate, "links", ()) or ():
-        if link.kind == LinkKind.HUB:
+        if link.kind == LinkKind.HUB or getattr(link, "via", "") in ("ssh", "hub"):
             return True
         if link.kind == LinkKind.ETHERNET and "tunnel" in (link.detail or "").lower():
             return True

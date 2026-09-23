@@ -171,7 +171,7 @@ class ControllerAdapter(Protocol):
         """
         ...
 
-    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> dict | None:
+    def reboot(self, progress: Progress | None = None, wait_s: float | None = None) -> dict | None:
         """Reboot and prove it: the board went down, then came back. Returns the evidence."""
         ...
 

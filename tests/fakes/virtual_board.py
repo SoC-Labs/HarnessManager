@@ -41,7 +41,7 @@ from .t12_harness_shell import LINUX_OMITTED_DIAG_KEYS, HarnessFakeShell
 SHELL_0x3F1A560F = 0x3F1A560F
 
 #: PLACEHOLDERS until the mints are fielded (see the module docstring).
-ILA_MINT_STATIC_ID_PLACEHOLDER = 0x1A102610
+ILA_MINT_STATIC_ID_PLACEHOLDER = 0x72BB0A36   # real: build_mint_2026_10/prod/static_id.txt (2026-09-23 14:56), not yet fielded
 LINUX_MINT3_STATIC_ID_PLACEHOLDER = 0x11C30003
 
 

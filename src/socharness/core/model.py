@@ -34,6 +34,7 @@ class Link:
     kind: LinkKind
     address: str               # "192.168.10.101", "/dev/ttyUSB10", "E:\\", "hub://mapstone-dev/mps3_01"
     detail: str = ""           # human-readable: "FT4232H if00 (MCC)", "V2M-MPS3 volume"
+    via: str = ""              # "" direct | "ssh" (SSH port-forward) | "hub" (fpgahub tunnel): TCP-only
 
 
 class Check(str, Enum):
@@ -88,7 +89,7 @@ class BoardIdentity:
 @dataclass(frozen=True)
 class Health:
     reachable: bool
-    control_channel: str = "unknown"   # "idle" | "busy" | "wedged" | "offline" | "unknown"
+    control_channel: str = "unknown"   # "idle" | "busy" | "wedged" | "offline" | "rescue" | "unknown"
     counters: dict[str, int] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
 

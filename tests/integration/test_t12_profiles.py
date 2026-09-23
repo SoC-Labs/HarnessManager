@@ -183,13 +183,17 @@ def test_rescue_board_is_found_by_probe_and_explained(tmp_path, monkeypatch):
                                                 timeout_s=0.5))
         session = pack_for(vb).open(cand)
         health = session.health()
+        # The shell itself still raises (no 6900 in rescue)...
         with pytest.raises(ShellRescueError) as exc:
-            session.identity()
+            session.shell.identity()
+        # ...but the session reports what stage0 said (lead CCR T12-2), so info never fails.
+        session_ident = session.identity()
     assert "RESCUE" in cand.evidence and "slot A and B failed CRC" in cand.evidence
     assert cand.identity.shell_id == f"0x{LINUX_HARNESSD.static_id:08x}"
     assert cand.identity.harness_impl == "" and "rescue" in cand.links[0].detail
     assert (health.control_channel, health.reachable) == ("rescue", True)
     assert exc.value.identity == cand.identity
+    assert session_ident == cand.identity
 
 
 def test_negative_twin_a_running_board_is_found_by_ping_not_identify(tmp_path, monkeypatch):

@@ -120,7 +120,8 @@ class Mps3Session(BoardSession):
         endpoints: dict[str, str] = {}
         if shell is not None:
             endpoints.update({n: f"tcp://{shell.host}:{p}" for n, p in console_ports.items()})
-            self.resets = Mps3Resets(shell)
+            from .shell import make_reset_adapter  # T12: targets come from the harness
+            self.resets = make_reset_adapter(self) or Mps3Resets(shell)
             self.debug = Mps3Debug(self, rbb_port)
         extra = _hook("usb", "serial_console_endpoints")
         if extra is not None:
@@ -147,7 +148,11 @@ class Mps3Session(BoardSession):
     def identity(self) -> BoardIdentity:
         if self.shell is None:
             return BoardIdentity(board_type="mps3")
-        return self.shell.identity()
+        from .shell import ShellRescueError
+        try:
+            return self.shell.identity()
+        except ShellRescueError as exc:      # stage0 rescue: report what stage0 said (T12-2)
+            return exc.identity
 
     def health(self) -> Health:
         if self.shell is None:

@@ -733,10 +733,18 @@ class Mps3Controller:
 
     # -- reboot with a witness --
 
-    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> dict:
+    def reboot(self, progress: Progress | None = None, wait_s: float | None = None) -> dict:
         """Send a paced REBOOT and prove the board went down and came back.
 
         Returns the witness summary (also kept on ``last_reboot``)."""
+        if wait_s is None:
+            # 120 s bare-metal, 180 s Linux (stage0 + µSD + kernel), per constants (T12-6).
+            from .constants import reboot_wait_s
+            ident_fn = getattr(self, "identity_fn", None)
+            try:
+                wait_s = reboot_wait_s(ident_fn()) if ident_fn else reboot_wait_s(None)
+            except Exception:  # noqa: BLE001 - an unreadable identity must not block a reboot
+                wait_s = reboot_wait_s(None)
         emit: Progress = progress or (lambda phase, done, total: None)
         shell_before = self._probe_shell()
         with self._session() as con:
@@ -947,5 +955,8 @@ def make_controller_adapter(session: Any) -> Mps3Controller | None:
     timing = DEFAULT_TIMING
     shell = getattr(session, "shell", None)
     probe = _shell_probe_for(shell, timing.ping_timeout_s) if shell is not None else None
-    return Mps3Controller(serial_url(link.address), timing=timing, clock=DEFAULT_CLOCK,
-                          sleep=DEFAULT_SLEEP, shell_probe=probe)
+    ctl = Mps3Controller(serial_url(link.address), timing=timing, clock=DEFAULT_CLOCK,
+                         sleep=DEFAULT_SLEEP, shell_probe=probe)
+    if shell is not None:
+        ctl.identity_fn = session.identity   # reboot's default wait follows the harness impl
+    return ctl
