@@ -50,7 +50,7 @@ def test_a_rescue_board_loses_the_capabilities_that_need_the_harness(tmp_path, m
     assert info.health.control_channel == "rescue"
     for cap in (C.DEPLOY_PARTIAL, C.CONSOLE_DUT, C.DEBUG_DUT, C.RESET_DUT):
         assert cap not in info.capabilities
-        assert info.unavailable[cap].startswith("the harness is rescue"), info.unavailable[cap]
+        assert info.unavailable[cap] == "the harness is rescue (see Health)"
 
 
 def test_negative_twin_a_running_board_keeps_them(tmp_path, monkeypatch):

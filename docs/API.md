@@ -105,7 +105,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 
 ## Additions at the T14 merge (lead)
 - **T14-1:** `GET /packs` also returns each pack's capability `title` and `needs_hint`. The web UI uses them in place of its mirrored titles.
-- **T14-3:** while `health.control_channel` is `rescue`, `offline` or `wedged`, `BoardInfo` lists the capabilities that need the harness's Ethernet services as unavailable, with the reason `the harness is <state>: <note>`. Routes over other links (USB, SSH, a power plug) are unaffected.
+- **T14-3:** while `health.control_channel` is `rescue`, `offline` or `wedged`, `BoardInfo` lists the capabilities that need the harness's Ethernet services as unavailable, with the short reason `the harness is <state> (see Health)`; `health.notes` carries the full explanation. Routes over other links (USB, SSH, a power plug) are unaffected.
 - **T14-4:** `/session` `services` gives `null` when an engine service works, else its stub `reason` (docs/CONTRACTS.md convention).
 - **T14-5:** a HELD caused by a daemon job carries `error.data.{job, kind, board_id}`; `/boards` rows and `/session` add `job_kind`. Front-ends read these, not the holder text.
 - **Declined, T14-2:** a wedged harness still makes `GET /boards/{bid}` fail with its own error code. That code is the honest answer, and the CLI's exit codes depend on it. The UI keeps the last good read and labels it stale.

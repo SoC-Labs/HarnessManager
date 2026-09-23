@@ -305,9 +305,8 @@ class Engine:
                                  [k for k in links if k != LinkKind.ETHERNET], identity.features)
             lost = available - still
             if lost:
-                why = f"the harness is {health.control_channel}"
-                if health.notes:
-                    why += f": {health.notes[0]}"
+                # Short: it repeats on every lost capability; Health carries the full notes.
+                why = f"the harness is {health.control_channel} (see Health)"
                 available = available & still
                 unavailable = {**unavailable, **dict.fromkeys(lost, why)}
         if POWER_CYCLE in available:   # the link is there; can the device actually cycle?
