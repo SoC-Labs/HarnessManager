@@ -90,7 +90,7 @@ function renderLine(l, panel) {
 
 // One button of a panel, plus the reason it cannot run (visible text, never a silent grey).
 export function ActionRow({ bid, panel, spec, gate = {}, variant = "", icon = "",
-  showReason = true, quietArm = false }) {
+  showReason = true, quietArm = false, compact = false, children = null }) {
   const p = panelState(bid, panel);
   const why = gateReason(bid, panel, spec.key, gate);
   const running = p.running === spec.key;
@@ -109,18 +109,26 @@ export function ActionRow({ bid, panel, spec, gate = {}, variant = "", icon = ""
   let reason = running ? (p.overdue ? "past its time budget; the page stays usable" : "")
     : why === "running" ? "" : why;
   if (quietArm && reason.startsWith("not armed")) reason = "";   // a sibling already says it
-  return html`<div class="action-row">
-    <button type="button" class=${`btn ${variant}`} data-action=${spec.key}
+  return html`<div class=${`action-row ${compact ? "compact" : ""}`}>
+    <div class="action-main">${children}
+    <button type="button" class=${`btn ${variant} ${compact ? "sm" : ""}`} data-action=${spec.key}
       aria-disabled=${blocked ? "true" : undefined} aria-busy=${running ? "true" : undefined}
-      title=${blocked ? why : undefined} onClick=${onClick}>${label}</button>
+      title=${blocked ? why : undefined} onClick=${onClick}>${label}</button></div>
     ${showReason && reason ? html`<${Reason} text=${reason}
       icon=${reason.startsWith("Cannot:") ? "circle-slash" : reason.startsWith("not armed") ? "lock" : "info"}
       testid=${`reason-${spec.key}`} />` : null}
   </div>`;
 }
 
-export function ArmBox({ bid, armKey, text, testid = "" }) {
+export function ArmBox({ bid, armKey, text, testid = "", compact = false }) {
   const on = isArmed(bid, armKey);
+  if (compact) {
+    // The tiles' arm: the same state as the section's arm box, the full text as its title.
+    return html`<label class=${`arm-inline ${on ? "armed" : ""}`} title=${text} data-testid=${testid || undefined}>
+      <input type="checkbox" checked=${on} aria-label=${text}
+        onChange=${(e) => setArmed(bid, armKey, e.target.checked)} />
+      <${Icon} name=${on ? "lock-open" : "lock"} cls="sm" /><span>Arm</span></label>`;
+  }
   return html`<label class=${`arm ${on ? "armed" : ""}`} data-testid=${testid || undefined}>
     <input type="checkbox" checked=${on} onChange=${(e) => setArmed(bid, armKey, e.target.checked)} />
     <${Icon} name=${on ? "lock-open" : "lock"} />

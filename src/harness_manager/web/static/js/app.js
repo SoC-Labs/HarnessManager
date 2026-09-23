@@ -10,9 +10,13 @@ import { ActivitySection } from "./sections/activity.js";
 import { ConsolesSection } from "./sections/consoles.js";
 import { DebugSection } from "./sections/debug.js";
 import { OverviewSection } from "./sections/overview.js";
-import { BoardXdcSection, ClocksSection } from "./sections/placeholders.js";
+import { ClocksSection } from "./sections/clocks.js";
+import { BoardXdcSection } from "./sections/placeholders.js";
 import { PowerSection } from "./sections/power.js";
 import { ProgramSection } from "./sections/program.js";
+import { SdSection } from "./sections/sd.js";
+import { UpdateSection } from "./sections/update.js";
+import { HubFact } from "./hub.js";
 import {
   boardState, changed, jobLabel, log, openedBoard, probe, refreshInfo, S, sectionOf, select,
   setSection, start, subscribe, timed, UI_NOTE,
@@ -25,9 +29,11 @@ export const SECTIONS = [
   { key: "program", label: "Program", icon: "upload", render: ProgramSection },
   { key: "consoles", label: "Consoles", icon: "terminal", render: ConsolesSection, fill: true },
   { key: "debug", label: "Debug", icon: "bug", render: DebugSection },
-  { key: "power", label: "Reset & Power", icon: "power", render: PowerSection },
+  { key: "power", label: "Power", icon: "power", render: PowerSection },
   { key: "clocks", label: "Clocks", icon: "clock", render: ClocksSection },
-  { key: "xdc", label: "Board & XDC", icon: "file-code", render: BoardXdcSection },
+  { key: "sd", label: "SD card", icon: "hard-drive", render: SdSection },
+  { key: "update", label: "Update", icon: "rocket", render: UpdateSection },
+  { key: "xdc", label: "XDC", icon: "file-code", render: BoardXdcSection },
   { key: "activity", label: "Activity", icon: "history", render: ActivitySection },
 ];
 
@@ -59,7 +65,7 @@ function BoardItem({ bid }) {
       <div class="board-row1">
         <span class=${`dot ${dot}`} title=${dotTitle}></span>
         <span class="board-name" title=${bid}>${hostOf(bid)}</span>
-        ${(b && b.job) || row.job ? html`<span class="i-muted" title="a job is running on this board"><${Spinner} /></span>` : null}
+        ${(b && b.job) || (row.job && !(b && b.readOnOpen)) ? html`<span class="i-muted" title="a job is running on this board"><${Spinner} /></span>` : null}
         ${mine ? html`<${Chip} level="accent" icon="user" cls="lock-chip">Yours<//>`
           : held ? html`<${Chip} level="warn" icon="lock" cls="lock-chip" title=${`held by ${holderText(row.holder)}`}>
               ${row.holder.user || "held"}<//>` : null}
@@ -178,6 +184,9 @@ function BoardHeader({ bid }) {
       <div class="header-actions">
         ${b.job ? html`<${Chip} level="accent" testid="job-chip" title=${`harness-manager-daemon job ${b.job.id}: the board's other actions wait for it`}>
           <${Spinner} />${jobLabel(b.job.kind)} running · ${Math.floor((Date.now() - b.job.at) / 1000)} s<//>` : null}
+        ${row.open ? html`<button type="button" class="btn ghost sm icon-only" data-action="refresh-board"
+            aria-label="Read the board again" title="Read the board again" onClick=${() => refreshInfo(bid)}
+            aria-busy=${b.infoLoading ? "true" : undefined}>${b.infoLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}</button>` : null}
         ${row.open ? html`<${Chip} level="accent" icon="user" testid="lock-chip"
             title=${row.holder ? `locked to ${holderText(row.holder)}` : "locked to this daemon"}>Yours<//>
           <button type="button" class="btn sm" onClick=${close}
@@ -196,10 +205,11 @@ function BoardHeader({ bid }) {
       <${Fact} label="Health"><${Chip} level=${health.level} testid="health-chip" title=${health.detail}
         icon=${health.level === "ok" ? "activity" : health.level === "err" ? "circle-x" : "circle-help"}>
         ${health.text}<//><//>
+      <${HubFact} bid=${bid} />
     </div>
     <nav class="sections" role="tablist" aria-label="Board sections">
       ${SECTIONS.map((s) => {
-        const badge = s.key === "power" && b.pending ? html`<span class="badge" aria-label="needs attention">!</span>` : null;
+        const badge = s.key === "sd" && b.pending ? html`<span class="badge" aria-label="needs attention">!</span>` : null;
         return html`<button type="button" role="tab" key=${s.key} class="section-tab"
           data-section=${s.key} aria-selected=${sectionOf(bid) === s.key ? "true" : "false"}
           onClick=${() => setSection(bid, s.key)}><${Icon} name=${s.icon} cls="sm" />${s.label}${badge}</button>`;
@@ -307,7 +317,7 @@ function Banners({ bid }) {
     out.push(html`<div class="banner err" role="alert" key="sd" data-testid="sd-banner">
       <${Icon} name="hard-drive" /><div class="grow"><strong>Interrupted SD install.</strong>${" "}
       Restore the configuration SD before anything else on this board.</div>
-      <button type="button" class="btn sm danger" onClick=${() => setSection(bid, "power")}>Go to recovery</button>
+      <button type="button" class="btn sm danger" onClick=${() => setSection(bid, "sd")}>Go to recovery</button>
     </div>`);
   }
   return out;

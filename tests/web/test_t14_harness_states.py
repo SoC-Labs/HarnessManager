@@ -53,6 +53,7 @@ def stage(browser, tmp_path, monkeypatch, screenshots):
         page.locator(f'.board-item[data-board="{cand.board_id}"]').click()
         page.locator('[data-action="open"]').click()
         page.wait_for_selector('[data-testid="board-header"]', timeout=T)
+        page.locator('[data-action="details"]').click()        # the Details start collapsed
         page.wait_for_selector('[data-testid="health-card"]', timeout=T)
         return page, engine, cand.board_id
 
@@ -76,7 +77,7 @@ def health_chip(page):
 
 
 def refresh(page):
-    page.locator('[data-testid="identity-card"] button:has-text("Refresh")').click()
+    page.locator('[data-action="refresh-board"]').click()
 
 
 # --- identity by harness generation ------------------------------------------------------

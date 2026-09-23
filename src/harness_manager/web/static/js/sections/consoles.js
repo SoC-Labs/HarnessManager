@@ -1,10 +1,13 @@
-// Consoles: one tab per console, a live terminal, a send line, Export to TCP, Save.
+// Consoles: one tab per console, a live terminal, a send line, the baud (set here, like
+// ConfPro-SX does for HAPS UARTs), "Attach with screen" (the daemon's PTY for the console,
+// shared with this page), Export to TCP, Save.
 
 import { call } from "../api.js";
-import { capState } from "../format.js";
+import { capState, shortScreen } from "../format.js";
 import { consoleSession } from "../consoles.js";
 import { html, useEffect, useRef, useState } from "../lib.js";
-import { boardState, changed, loadConsoles, log, S, timed } from "../store.js";
+import { boardState, changed, loadConsoles, log, timed } from "../store.js";
+import { loadBaud, loadPty, openPty, setBaud, week } from "../week.js";
 import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
 
 const CONSOLE_CAPS = ["console_dut", "console_shell", "console_controller"];
@@ -26,12 +29,79 @@ function Terminal({ session }) {
   return html`<div class="term-wrap" ref=${ref} data-testid="terminal"></div>`;
 }
 
-// The CLI command that opens this console in any terminal (VS Code's, say): it shares
-// the daemon's session, so this page and that terminal show the same console.
-export function terminalCommand(bid, name) {
-  const cand = S.boards[bid]?.candidate;
-  const eth = (cand?.links || []).find((l) => l.kind === "ethernet");
-  return eth ? `harness-manager console ${eth.address} ${name}` : null;
+const SOURCE_TEXT = { serial: "the host serial port", design: "the loaded design", harness: "the harness", unknown: "unknown" };
+
+// The console's rate: a selector when it can change, else the rate and why not.
+function BaudControl({ bid, name, onResult }) {
+  const w = week(bid);
+  const v = w.baud[name];
+  if (w.baudUnsupported || !v) return null;
+  const change = async (e) => {
+    const baud = Number(e.target.value);
+    const t0 = performance.now();
+    const command = `console ${name} baud ${baud}`;
+    try {
+      const r = await setBaud(bid, name, baud);
+      const took = ((performance.now() - t0) / 1000).toFixed(1);
+      onResult({ level: "ok", text: `$ ${command}  (rc 0, ${took} s)\nnow ${r.baud} baud (set by ${SOURCE_TEXT[r.source] || r.source || "?"})` });
+      log("info", "console", `${command}: now ${r.baud}`, bid);
+    } catch (err) {
+      const took = ((performance.now() - t0) / 1000).toFixed(1);
+      onResult({ level: "err", text: `$ ${command}  (rc ${err.code ?? "?"}, ${took} s)\n${err.errName}  ${err.message}${err.hint ? `\nhint: ${err.hint}` : ""}` });
+      log("error", "console", `${command}: ${err.message}`, bid);
+      loadBaud(bid, name);
+    }
+  };
+  if (v.settable) {
+    return html`<span class="baud-ctl" data-testid="baud" data-settable="yes">
+      <label class="muted small" for=${`baud-${name}`}>Baud</label>
+      <select class="select sm" id=${`baud-${name}`} value=${String(v.baud)} onChange=${change}
+        aria-label=${`Baud rate of ${name}`} title=${`set on ${SOURCE_TEXT[v.source] || v.source}`}>
+        ${(v.choices || []).map((c) => html`<option key=${c} value=${String(c)}>${c}</option>`)}
+      </select></span>`;
+  }
+  return html`<span class="baud-ctl" data-testid="baud" data-settable="no" title=${`source: ${SOURCE_TEXT[v.source] || v.source}`}>
+    <span class="muted small">Baud</span>
+    <span class="num">${v.baud ?? "none"}</span>${v.reason ? html`<span class="muted small">· ${v.reason}</span>` : null}</span>`;
+}
+
+// "Attach with screen": the daemon's PTY for this console (the page and screen share it).
+function ScreenControl({ bid, name, onResult, onExport }) {
+  const w = week(bid);
+  const pty = w.pty[name];
+  const err = w.ptyError[name];
+  if (w.ptyUnsupported) return null;
+  if (pty && pty.path) {
+    const cmd = pty.command || `screen ${pty.path}`;
+    return html`<span class="copy-row screen-row" data-testid="screen-command"
+        title="Run this in any terminal: screen shares the console with this page (Ctrl-A K ends it)">
+      <code title=${cmd}>${shortScreen(cmd)}</code><${CopyButton} text=${cmd} />
+      ${pty.clients !== undefined && pty.clients !== null ? html`<span class="muted small" data-testid="screen-clients">${pty.clients} attached</span>` : null}</span>`;
+  }
+  if (err) {
+    return html`<span class="screen-row" data-testid="screen-unavailable">
+      <${Reason} icon="circle-slash" text=${`No screen here: ${err.reason || err.message}`} />
+      <button type="button" class="btn sm primary" onClick=${onExport}><${Icon} name="external-link" /> Export to TCP instead</button></span>`;
+  }
+  const attach = async () => {
+    const t0 = performance.now();
+    const command = `console ${name} pty`;
+    try {
+      const r = await openPty(bid, name);
+      const took = ((performance.now() - t0) / 1000).toFixed(1);
+      onResult({ level: "ok", text: `$ ${command}  (rc 0, ${took} s)\n${r.command}` });
+      log("info", "console", `${command}: ${r.path} -> ${r.device}`, bid);
+    } catch (e) {
+      w.ptyError[name] = e;
+      changed();
+      const took = ((performance.now() - t0) / 1000).toFixed(1);
+      onResult({ level: "err", text: `$ ${command}  (rc ${e.code ?? "?"}, ${took} s)\n${e.errName}  ${e.message}${e.hint ? `\nhint: ${e.hint}` : ""}` });
+      log("warning", "console", `${command}: ${e.message}`, bid);
+    }
+  };
+  return html`<button type="button" class="btn sm" data-action="attach-screen" onClick=${attach}
+    title="Create this console's PTY, then attach any terminal with screen">
+    <${Icon} name="terminal" /> Attach with screen</button>`;
 }
 
 function ConsolePane({ bid, name }) {
@@ -80,26 +150,29 @@ function ConsolePane({ bid, name }) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
   const st = session.state;
+  useEffect(() => { loadBaud(bid, name); loadPty(bid, name); }, [bid, name]);
   return html`<section class="card console-card" aria-label=${`Console ${name}`} data-testid=${`console-${name}`}>
     <div class="console-bar">
       <${Chip} level=${STATE_LEVEL[st] ?? "unk"} testid="console-state"
         icon=${st === "up" ? "radio" : st === "connecting" ? "loader-circle" : "unplug"}>${st}<//>
       <span class="grow secondary small" data-testid="console-detail">${session.detail || (st === "up" ? "Type into the terminal, or send a line below." : "")}
         ${session.dropped ? html`${" "}<span class="i-warn" data-testid="console-dropped">${session.dropped} bytes dropped: the page fell behind</span>` : null}</span>
-      ${terminalCommand(bid, name) ? html`<span class="copy-row" data-testid="terminal-command"
-        title="Run this in a terminal (VS Code, say): typing goes to the board, Ctrl-] exits">
-        <code>${terminalCommand(bid, name)}</code><${CopyButton} text=${terminalCommand(bid, name)} /></span>` : null}
-      ${exported ? html`<span class="copy-row"><code>telnet 127.0.0.1 ${exported}</code>
-        <${CopyButton} text=${`telnet 127.0.0.1 ${exported}`} /></span>` : null}
-      <button type="button" class="btn sm" onClick=${doExport} aria-busy=${exporting ? "true" : undefined}
-        title="Re-export this console on a local TCP port for an external terminal">
-        ${exporting ? html`<${Spinner} />` : html`<${Icon} name="external-link" />`} Export to TCP</button>
       <button type="button" class="btn sm ghost" onClick=${save} title="Save the scrollback as a text file">
         <${Icon} name="download" /> Save</button>
       <button type="button" class="btn sm ghost" onClick=${() => { session.clear(); changed(); }}
         title="Clear the terminal (the board is not touched)"><${Icon} name="trash-2" /> Clear</button>
       ${st === "down" || st === "closed" ? html`<button type="button" class="btn sm"
         onClick=${() => session.connect()}><${Icon} name="refresh-cw" /> Reconnect</button>` : null}
+    </div>
+    <div class="console-meta">
+      <${BaudControl} bid=${bid} name=${name} onResult=${setResult} />
+      <span class="grow"></span>
+      <${ScreenControl} bid=${bid} name=${name} onResult=${setResult} onExport=${doExport} />
+      ${exported ? html`<span class="copy-row"><code>telnet 127.0.0.1 ${exported}</code>
+        <${CopyButton} text=${`telnet 127.0.0.1 ${exported}`} /></span>` : null}
+      <button type="button" class="btn sm ghost" data-action="export" onClick=${doExport} aria-busy=${exporting ? "true" : undefined}
+        title="Re-export this console on a local TCP port for an external terminal">
+        ${exporting ? html`<${Spinner} />` : html`<${Icon} name="external-link" />`} Export to TCP</button>
     </div>
     <${Terminal} session=${session} />
     <form class="console-send" onSubmit=${send}>

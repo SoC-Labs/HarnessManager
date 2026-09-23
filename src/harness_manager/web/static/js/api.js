@@ -31,7 +31,26 @@ export const ENDPOINTS = Object.freeze({
   sdPending: ["GET", "/boards/{bid}/storage/pending"],
   sdBackup: ["POST", "/boards/{bid}/storage/backup"],
   sdRestore: ["POST", "/boards/{bid}/storage/restore"],
+  sdInstall: ["POST", "/boards/{bid}/storage/install"],
   session: ["GET", "/boards/{bid}/session"],
+  clocks: ["GET", "/boards/{bid}/clocks"],
+  clockSet: ["POST", "/boards/{bid}/clocks"],
+  osc: ["GET", "/boards/{bid}/controller/osc"],
+  // Week-plan additions (docs/API.md, frozen): lanes L2 consoles, L1 hub, L4 power and update.
+  ptyOpen: ["POST", "/boards/{bid}/consoles/{name}/pty"],
+  ptyGet: ["GET", "/boards/{bid}/consoles/{name}/pty"],
+  baudGet: ["GET", "/boards/{bid}/consoles/{name}/baud"],
+  baudSet: ["POST", "/boards/{bid}/consoles/{name}/baud"],
+  tunnel: ["GET", "/boards/{bid}/tunnel"],
+  lease: ["GET", "/boards/{bid}/lease"],
+  leaseTake: ["POST", "/boards/{bid}/lease"],
+  leaseRelease: ["DELETE", "/boards/{bid}/lease"],
+  power: ["GET", "/boards/{bid}/power"],
+  powerCycle: ["POST", "/boards/{bid}/power/cycle"],
+  updateCheck: ["POST", "/update/check"],
+  updateHarness: ["POST", "/boards/{bid}/update/harness"],
+  updateRollback: ["POST", "/boards/{bid}/update/rollback"],
+  updateApp: ["POST", "/update/app"],
   helpTabs: ["GET", "/help/tabs"],
   job: ["GET", "/jobs/{id}"],
   events: ["WS", "/events"],
@@ -42,8 +61,8 @@ export const ADDITIVE = Object.freeze([]);
 // Topics the UI follows (docs/CONTRACTS.md). console.line is left out on purpose:
 // console bytes arrive on each console's own socket, so a line is never shown twice.
 export const EVENT_TOPICS = [
-  "board.*", "session.*", "deploy.*", "console.state", "debug.*", "controller.*",
-  "storage.*", "update.*", "power.*", "job.*", "events.*",
+  "board.*", "session.*", "deploy.*", "console.state", "console.pty", "debug.*",
+  "controller.*", "storage.*", "update.*", "power.*", "lease.*", "job.*", "events.*",
 ];
 
 const TOKEN_KEY = "harness_manager.token";
@@ -184,6 +203,14 @@ export async function call(name, params = {}, body = undefined) {
 }
 
 // A request harness-manager-daemon refused because a job holds the board (409 HELD, "... job <id>").
+// A week-plan route this daemon does not serve yet (its lane has not landed): the catch-all
+// answers 404 "no such endpoint", and a GET under /boards/{bid:path} answers 404 for the
+// board id with the suffix glued on. The page then hides that feature instead of erroring.
+export function routeMissing(err) {
+  return !!err && err.status === 404 && (/no such endpoint/.test(err.message)
+    || /\/(lease|tunnel|power|pty|baud)\b/.test(err.message));
+}
+
 export function heldByJob(err) {
   return !!err && err.errName === "HELD" && / job /.test(`${err.holder} ${err.message}`);
 }

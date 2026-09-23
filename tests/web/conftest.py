@@ -30,13 +30,32 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers", "browser: drives a headless system Chrome through Playwright (T14 web UI)")
     config.addinivalue_line(
         "markers", "mock_too: also run this browser test over the T14 mock harness-manager-daemon")
+    config.addinivalue_line(
+        "markers", "week_plan(*modules): needs the week-plan routes of those daemon extension "
+                   "modules; runs over the mock, and over the real daemon too when they have "
+                   "landed and HARNESS_MANAGER_WEB_WEEK_REAL=1")
+
+
+def landed(module: str) -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec(f"harness_manager.daemon.{module}") is not None
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "daemon" in metafunc.fixturenames:
-        servers = ["harness-manager-daemon"]
-        if metafunc.definition.get_closest_marker("mock_too"):
-            servers.append("mock")
+        week = metafunc.definition.get_closest_marker("week_plan")
+        if week is not None:
+            # L1/L2/L4 land these routes separately: the mock always has them; the real
+            # daemon joins once every module the test needs is in the tree (opt-in).
+            servers = ["mock"]
+            if (os.environ.get("HARNESS_MANAGER_WEB_WEEK_REAL") == "1"
+                    and all(landed(m) for m in week.args)):
+                servers.append("harness-manager-daemon")
+        else:
+            servers = ["harness-manager-daemon"]
+            if metafunc.definition.get_closest_marker("mock_too"):
+                servers.append("mock")
         metafunc.parametrize("daemon", servers, indirect=True)
 
 

@@ -1,130 +1,282 @@
-// Overview: identity, health, telemetry (a source per value), capabilities (with reasons).
+// Overview: what needs attention (only when something is wrong), four action tiles
+// (Design, Consoles, Debug, Board), and the Details, collapsed.
+//
+// The header above already shows the board, shell, design, harness and health, so nothing
+// here repeats them: the tiles carry what a user does next.
 
-import { ageText, CAPABILITY_ORDER, capTitle, clock, healthOf, valueText } from "../format.js";
-import { html, useEffect, useState } from "../lib.js";
-import { boardState, loadTelemetry, refreshInfo } from "../store.js";
-import { Card, CheckChip, Chip, Icon, LinkLine, Reason, Spinner } from "../ui.js";
+import { panelState } from "../actions.js";
+import { capState, shortScreen, valueText } from "../format.js";
+import { existingSession } from "../consoles.js";
+import { html, useEffect } from "../lib.js";
+import {
+  boardState, changed, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection,
+} from "../store.js";
+import { durationText, leaseLeft, openPty, week } from "../week.js";
+import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./details.js";
+import { debugLive, debugSpecs } from "./debug.js";
+import { ARM_TEXT, REBOOT_GATE, RESET_DUT_GATE, rebootSpec, resetDutSpec } from "./power.js";
+import {
+  ActionRow, ArmBox, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner,
+} from "../ui.js";
+import { leaseSpecs } from "../hub.js";
 
-function IdentityCard({ bid, info }) {
+// --- needs attention ----------------------------------------------------------------------
+
+const HARNESS_TITLES = {
+  busy: "The harness is busy", wedged: "The harness is wedged", offline: "The harness is offline",
+  rescue: "The board is in stage0 rescue", unknown: "The harness state is unknown",
+};
+
+// One line per problem, each with its fix. Nothing when all is well.
+export function attentionItems(bid) {
   const b = boardState(bid);
-  const cand = info.candidate || {};
-  const id = info.identity || {};
-  const build = id.build_check || "unchecked";
-  const buildNote = {
-    ok: "The harness firmware matches the fabric it runs on.",
-    mismatch: "The harness firmware was built for different fabric. Treat results with care.",
-    unchecked: "The harness could not compare its firmware with the fabric. Unchecked is not a pass.",
-  }[build] || "";
-  const refresh = html`<button type="button" class="btn ghost sm" onClick=${() => refreshInfo(bid)}
-    aria-busy=${b.infoLoading ? "true" : undefined} title="Read the board again">
-    ${b.infoLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`} Refresh</button>`;
-  return html`<${Card} title="Identity" icon="cpu" actions=${refresh} testid="identity-card">
-    <dl class="kv">
-      <dt>Board</dt>
-      <dd>${cand.label || "unnamed board"}
-        <div class="sub mono">${cand.board_id}</div>
-        ${cand.evidence ? html`<div class="sub">found: ${cand.evidence}</div>` : null}</dd>
-      <dt>Links</dt>
-      <dd>${(cand.links || []).length ? (cand.links || []).map((l) => html`<${LinkLine} key=${l.kind + l.address} link=${l} />`)
-        : html`<span class="muted">none</span>`}</dd>
-      <dt>Shell</dt><dd class="mono" data-testid="id-shell">${id.shell_id || "unknown"}</dd>
-      <dt>Design</dt>
-      <dd>${id.rm_name || "unknown design"} <span class="mono sub">${id.rm_id ? `rm_id ${id.rm_id}` : ""}</span></dd>
-      <dt>Harness</dt>
-      <dd><div class="line" data-testid="id-harness">${id.harness_version || "unknown"}
-        ${id.harness_impl ? html`<span class="tag">${id.harness_impl}</span>`
-          : html`<span class="sub" title="the harness predates the version verb, so it cannot say">implementation unknown</span>`}
-        ${id.proto ? html`<span class="sub">protocol ${id.proto}</span>` : null}</div>
-        <div class="sub">firmware <span class="mono">${id.firmware_sha || "?"}</span>
-          ${id.firmware_dirty ? html` <${Chip} level="warn" icon="triangle-alert">dirty build<//>` : null}</div></dd>
-      <dt>Build check</dt>
-      <dd><div class="line"><${CheckChip} check=${build} testid="id-build" /></div>
-        <${Reason} text=${buildNote} level=${build === "ok" ? "" : build === "mismatch" ? "err" : "unk"} testid="id-build-note" /></dd>
-      <dt>Features</dt>
-      <dd>${(id.features || []).length ? html`<div class="tags">${id.features.map((f) => html`<span class="tag" key=${f}>${f}</span>`)}</div>`
-        : html`<span class="muted">none reported</span>`}</dd>
-      <dt>Unit id</dt><dd>${id.unit_id ? html`<span class="mono">${id.unit_id}</span>` : html`<span class="muted">not reported by this harness</span>`}</dd>
-      ${id.usercode ? html`<dt>Usercode</dt><dd class="mono">${id.usercode}</dd>` : null}
-    </dl>
+  const w = week(bid);
+  const out = [];
+  const info = b.info;
+  const ident = (info && info.identity) || {};
+  const go = (section, label) => ({ label, run: () => setSection(bid, section) });
+  if (b.pending) {
+    out.push({ key: "sd", level: "err", title: "An SD install was interrupted.",
+      text: "The configuration SD is half-written; nothing else on this board should be trusted.",
+      fix: go("sd", "Restore it first") });
+  }
+  if (b.infoError && b.infoError.errName !== "ABSENT") {
+    out.push({ key: "read", level: "err", title: "The last read of the board failed.",
+      text: `${b.infoError.message}${b.infoError.hint ? ` Fix: ${b.infoError.hint}` : ""}`,
+      fix: { label: "Read again", run: () => refreshInfo(bid) } });
+  }
+  const h = info && info.health;
+  if (h && !(b.infoError && b.infoError.errName !== "ABSENT")) {
+    const cc = h.control_channel || "unknown";
+    if (!h.reachable) {
+      out.push({ key: "harness", level: "err", title: "The harness does not answer.",
+        text: (h.notes || [])[0] || "Check the board's power, the Ethernet cable and its address.",
+        fix: go("power", "Power") });
+    } else if (cc !== "idle") {
+      out.push({ key: "harness", level: cc === "busy" || cc === "rescue" ? "warn" : "err",
+        title: `${HARNESS_TITLES[cc] || `The harness is ${cc}`}.`,
+        text: (h.notes || []).join(" ") || "It does not report idle.",
+        fix: cc === "busy" ? null : go("power", "Power") });
+    }
+  }
+  if (info && ident.build_check === "unchecked") {
+    out.push({ key: "build", level: "unk", title: "Build check unchecked.",
+      text: "The harness cannot compare its firmware with the fabric (this mint's USR_ACCESS is unreadable), so a mismatch would not show. Fix: a harness that can, from the Update page.",
+      fix: go("update", "Update") });
+  } else if (info && ident.build_check === "mismatch") {
+    out.push({ key: "build", level: "err", title: "Build check MISMATCH.",
+      text: "The harness firmware was built for other fabric. Fix: reinstall the harness that matches this shell.",
+      fix: go("update", "Update") });
+  }
+  const hub = w.hub;
+  if (hub) {
+    const t = hub.tunnel;
+    if (t && t.state !== "up") {
+      out.push({ key: "tunnel", level: t.state === "starting" ? "warn" : "err",
+        title: `The SSH tunnel to ${t.host || hub.host} is ${t.state}.`,
+        text: `${t.detail || ""} Fix: check that \`ssh ${t.host || hub.host}\` works from this machine (key, VPN).`.trim() });
+    }
+    const lease = hub.lease;
+    const left = leaseLeft(lease);
+    const specs = leaseSpecs(bid);
+    if (!lease) {
+      out.push({ key: "lease", level: "warn", title: `Not leased on ${hub.host}.`,
+        text: "Another hub user can take this board at any time. Fix: acquire the lease.",
+        action: specs.acquire });
+    } else if (!lease.mine) {
+      out.push({ key: "lease", level: "err", title: `Leased to ${lease.holder || "someone else"} on ${hub.host}.`,
+        text: `This client must not drive the board until the lease is yours${left !== null ? ` (theirs ends in ${durationText(left)})` : ""}. Fix: queue for it.`,
+        action: specs.acquire });
+    } else if (left !== null && left < 300) {
+      out.push({ key: "lease", level: "warn", title: `Your lease ends in ${durationText(left)}.`,
+        text: "The daemon renews it while the board is open; if this stays, the hub is not answering. Fix: renew it.",
+        action: specs.acquire });
+    }
+  }
+  return out;
+}
+
+const ATTENTION_ICONS = { err: "circle-x", unk: "circle-help", warn: "triangle-alert" };
+
+function AttentionStrip({ bid }) {
+  const items = attentionItems(bid);
+  if (!items.length) return null;
+  const pl = panelState(bid, "lease");
+  return html`<section class="attention" aria-label="Needs attention" data-testid="attention">
+    <h2 class="attention-title"><${Icon} name="triangle-alert" />Needs attention</h2>
+    <ul>${items.map((it) => html`<li key=${it.key} class=${`att ${it.level}`} data-attention=${it.key}>
+      <${Icon} name=${ATTENTION_ICONS[it.level] || "triangle-alert"} />
+      <span class="att-text"><strong>${it.title}</strong>${" "}${it.text}</span>
+      ${it.fix ? html`<button type="button" class="btn sm" onClick=${it.fix.run}>${it.fix.label}</button>` : null}
+      ${it.action ? html`<${ActionRow} bid=${bid} panel="lease" spec=${it.action} compact=${true} gate=${{}} />` : null}
+    </li>`)}</ul>
+    ${pl.lines && pl.lines.length ? html`<${ResultBlock} lines=${pl.lines} panel=${pl} testid="lease-result" />` : null}
+  </section>`;
+}
+
+// --- the tiles -----------------------------------------------------------------------------
+
+function Tile({ title, icon, action = null, children, testid }) {
+  return html`<section class="tile" aria-label=${title} data-testid=${testid}>
+    <div class="tile-head"><h2 class="tile-title"><${Icon} name=${icon} />${title}</h2>
+      <span class="spacer"></span>${action}</div>
+    <div class="tile-body">${children}</div>
+  </section>`;
+}
+
+function DesignTile({ bid }) {
+  const b = boardState(bid);
+  useEffect(() => { if (!b.overlays && !b.overlaysLoading) loadOverlays(bid); }, [bid]);
+  const ident = (b.info && b.info.identity) || {};
+  const d = b.deploy;
+  const o = b.overlays;
+  const loadable = o ? o.loadable.length : null;
+  const program = html`<button type="button" class="btn primary sm" data-action="go-program"
+    onClick=${() => setSection(bid, "program")}><${Icon} name="upload" /> Program...</button>`;
+  return html`<${Tile} title="Design" icon="layers" action=${program} testid="tile-design">
+    <div class="big-value" data-testid="tile-design-name">${ident.rm_name || "unknown design"}</div>
+    <div class="mono secondary">${ident.rm_id ? `rm_id ${ident.rm_id}` : "rm_id not reported"}</div>
+    ${loadable !== null ? html`<p class="secondary small mt-8">${loadable} design${loadable === 1 ? "" : "s"} load on this shell.</p>` : null}
+    ${d.state === "running" ? html`<p class="small mt-8"><${Spinner} /> Programming ${d.overlay}: ${d.phase}</p>`
+      : d.state === "done" ? html`<${Reason} level=${d.verified ? "ok" : "warn"} text=${`Last program: ${d.overlay || d.rm_id}, ${d.verified ? "verified by the board" : "written, not verified"}.`} />`
+      : d.state === "failed" ? html`<${Reason} level="err" text=${`Last program failed: ${d.reason}`} />` : null}
   <//>`;
 }
 
-const COUNTERS_SHOWN = 9;
+const DOT = { up: "ok", connecting: "unk", down: "warn", closed: "unk" };
 
-function HealthCard({ bid, info }) {
+function ConsolesTile({ bid }) {
   const b = boardState(bid);
-  const [all, setAll] = useState(false);
-  const h = info.health || {};
-  const failed = b.infoError && b.infoError.errName !== "ABSENT";
-  const health = healthOf(info);
-  // Non-zero counters first (they are the ones that say something), then by name.
-  const counters = Object.entries(h.counters || {}).sort(([a, x], [c, y]) =>
-    (Number(y) !== 0) - (Number(x) !== 0) || a.localeCompare(c));
-  const shown = all ? counters : counters.slice(0, COUNTERS_SHOWN);
-  return html`<${Card} title="Health" icon="activity" testid="health-card">
-    ${failed ? html`<div class="mb-12"><${Reason} level="err" testid="health-failed"
-      text=${`The latest read failed (${b.infoError.errName}); below is the last good one${b.infoOkAt ? `, from ${clock(b.infoOkAt)}` : ""}.`} /></div>` : null}
-    <div class=${`row ${failed ? "stale" : ""}`}>
-      <${Chip} level=${health.level} icon=${health.level === "ok" ? "circle-check" : "circle-alert"}>${health.text}<//>
-      <span class="secondary">control channel <span class="mono">${h.control_channel || "unknown"}</span>${" · "}${h.reachable ? "reachable" : "not reachable"}</span>
-    </div>
-    ${(h.notes || []).map((n) => html`<div class="mt-8" key=${n} data-testid="health-note"><${Reason} text=${n}
-      level=${health.level === "ok" ? "" : health.level} /></div>`)}
-    ${counters.length ? html`<div class=${`counters mt-14 ${failed ? "stale" : ""}`} data-testid="counters">
-      ${shown.map(([k, v]) => html`<div class="counter" key=${k}>
-        <div class="counter-name" title=${k}>${k}</div><div class="counter-value">${Number(v).toLocaleString("en-GB")}</div></div>`)}
-    </div>
-    ${counters.length > COUNTERS_SHOWN ? html`<button type="button" class="btn ghost sm mt-8" onClick=${() => setAll(!all)}>
-      ${all ? "Show fewer counters" : `Show all ${counters.length} counters`}</button>` : null}`
-      : html`<p class="muted mt-12">The harness reports no counters.</p>`}
+  const w = week(bid);
+  useEffect(() => { if (!b.consoles && !b.consolesError) loadConsoles(bid); }, [bid]);
+  const caps = ["console_dut", "console_shell", "console_controller"].map((c) => capState(b.info, c));
+  const none = caps.every((s) => s && !s.available);
+  const open = (name) => { b.consoleSelected = name; setSection(bid, "consoles"); };
+  const meta = Object.fromEntries((w.consoles || []).map((c) => [c.name, c]));
+  const attach = async (name) => {
+    try { await openPty(bid, name); } catch (e) { w.ptyError[name] = e; changed(); }
+  };
+  const openAll = html`<button type="button" class="btn sm" onClick=${() => setSection(bid, "consoles")}>
+    <${Icon} name="terminal" /> Consoles</button>`;
+  return html`<${Tile} title="Consoles" icon="terminal" action=${openAll} testid="tile-consoles">
+    ${none ? html`<${Reason} icon="circle-slash" text=${`Cannot: ${caps[0].reason}`} />` : null}
+    ${b.consolesError ? html`<${Reason} level="err" text=${`${b.consolesError.errName}: ${b.consolesError.message}`} />` : null}
+    ${!none && !b.consoles && !b.consolesError ? html`<p class="muted"><${Spinner} /> Reading...</p>` : null}
+    <ul class="tile-consoles">${(b.consoles || []).map((name) => {
+      const s = existingSession(bid, name);
+      const state = (s && s.state) || w.consoleState[name] || "";
+      const pty = w.pty[name];
+      const baud = (w.baud[name] && w.baud[name].baud) ?? (meta[name] && meta[name].baud);
+      return html`<li key=${name} data-console=${name}>
+        <span class=${`dot ${DOT[state] || "unk"}`} title=${state || "not open in this page"}></span>
+        <span class="mono cname">${name}</span>
+        <span class="muted small num baud">${baud ? `${baud}` : ""}</span>
+        <span class="screen">${pty && pty.path
+          ? html`<span class="copy-row"><code title=${pty.command || `screen ${pty.path}`}>${shortScreen(pty.command || `screen ${pty.path}`)}</code>
+              <${CopyButton} text=${pty.command || `screen ${pty.path}`} /></span>
+              ${pty.clients ? html`<span class="muted small nowrap">${pty.clients} attached</span>` : null}`
+          : w.ptyUnsupported ? null
+          : w.ptyError[name] ? html`<span class="muted small" title=${w.ptyError[name].message}>no screen here</span>`
+          : html`<button type="button" class="btn ghost sm" data-action=${`attach-${name}`}
+              onClick=${() => attach(name)} title="Create this console's PTY, then attach any terminal with screen">
+              <${Icon} name="terminal" cls="sm" /> Attach with screen</button>`}</span>
+        <button type="button" class="btn sm" data-action=${`open-${name}`} onClick=${() => open(name)}>Open</button>
+      </li>`;
+    })}</ul>
   <//>`;
 }
 
-function TelemetryCard({ bid }) {
+function DebugTile({ bid }) {
+  const b = boardState(bid);
+  const p = panelState(bid, "debug");
+  const st = b.debug || { state: "unknown" };
+  const live = debugLive(bid);
+  const { up, down } = debugSpecs(bid);
+  const start = { ...up, label: "Start", busyLabel: "Starting..." };
+  const stop = { ...down, label: "Stop", busyLabel: "Stopping..." };
+  const level = { up: "ok", starting: "", down: "", failed: "err" }[st.state] ?? "unk";
+  return html`<${Tile} title="Debug" icon="bug" testid="tile-debug">
+    <div class="row"><${Chip} level=${level} testid="tile-debug-state">${st.state}<//>
+      ${b.idcode ? html`<span class="secondary small">IDCODE <span class="mono">${b.idcode}</span></span>` : null}</div>
+    <div class="tile-kv mt-8">
+      <span class="k">gdb</span>
+      <span class="v">${live && st.gdb_port ? html`<span class="copy-row"><code>127.0.0.1:${st.gdb_port}</code>
+        <${CopyButton} text=${`127.0.0.1:${st.gdb_port}`} /></span>` : html`<span class="muted">start a session to get a port</span>`}</span>
+    </div>
+    <div class="mt-8">${live
+      ? html`<${ActionRow} bid=${bid} panel="debug" spec=${stop} icon="square" compact=${true} gate=${{}} />`
+      : html`<${ActionRow} bid=${bid} panel="debug" spec=${start} variant="primary" icon="play" compact=${true}
+          gate=${{ capability: "debug_dut" }} />`}</div>
+    ${p.lines && p.lines.length && p.running ? html`<p class="muted small mt-8">${p.lines[p.lines.length - 1].text || ""}</p>` : null}
+  <//>`;
+}
+
+function pickTemperature(readings) {
+  const temps = (readings || []).filter((r) => r.unit === "degC");
+  return temps.find((r) => r.value !== null && r.value !== undefined) || temps[0] || null;
+}
+
+function ReadingValue({ r, empty }) {
+  if (!r) return html`<span class="muted">${empty}</span>`;
+  const ok = r.value !== null && r.value !== undefined;
+  return ok
+    ? html`<span class="num">${valueText(r)}</span> <span class="muted small mono">${r.source || ""}</span>`
+    : html`<span class="muted" title=${r.reason}>unavailable</span> <span class="muted small">${r.reason}</span>`;
+}
+
+function BoardTile({ bid }) {
   const b = boardState(bid);
   const readings = b.telemetry;
-  const action = html`<button type="button" class="btn ghost sm" onClick=${() => loadTelemetry(bid)}
-    aria-busy=${b.telemetryLoading ? "true" : undefined}>
-    ${b.telemetryLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`} Read again</button>`;
-  return html`<${Card} title="Telemetry" icon="thermometer" actions=${action} bodyCls="flush"
-      sub="Every value names its source. A value the board cannot give is shown as unavailable, never as zero."
-      testid="telemetry-card">
-    ${b.telemetryError ? html`<div class="pad-x"><${Reason} level="err"
-        text=${`${b.telemetryError.errName}: ${b.telemetryError.message}${b.telemetry ? " (showing the last good read)" : ""}`} /></div>` : null}
-    ${readings && readings.length ? html`<table class="table" data-testid="telemetry-table">
-      <colgroup><col style="width:38%" /><col style="width:20%" /><col style="width:24%" /><col style="width:18%" /></colgroup>
-      <thead><tr><th>Reading</th><th class="r">Value</th><th>Source</th><th>Age</th></tr></thead>
-      <tbody>${readings.map((r) => {
-        const ok = r.value !== null && r.value !== undefined;
-        return html`<tr key=${r.name} data-reading=${r.name} data-available=${ok ? "yes" : "no"}>
-          <td><span class="mono">${r.name}</span>
-            ${r.reason ? html`<${Reason} text=${r.reason} level=${ok ? "" : "unk"} icon=${ok ? "info" : "circle-slash"} />` : null}</td>
-          <td class="r num nowrap">${ok ? valueText(r) : html`<span class="muted">unavailable</span>`}</td>
-          <td><span class="mono secondary">${r.source || "none given"}</span></td>
-          <td class="muted nowrap">${ok && r.observed_at ? ageText(r.observed_at) : "-"}</td>
-        </tr>`;
-      })}</tbody></table>`
-      : html`<p class="muted pad-x">${b.telemetryLoading ? "Reading..." : readings ? "No readings." : "Not read yet."}</p>`}
-    ${b.telemetryLine ? html`<p class="muted mono pad-x pad-y small">${b.telemetryLine}</p>` : null}
+  const temp = pickTemperature(readings);
+  const clk = (readings || []).find((r) => r.name === "dut_clk");
+  const pr = panelState(bid, "reset_dut");
+  const pb = panelState(bid, "reboot");
+  const last = [pr, pb].filter((p) => p.lines && p.lines.length).sort((x, y) => y.startedAt - x.startedAt)[0];
+  return html`<${Tile} title="Board" icon="circuit-board" testid="tile-board">
+    <div class="tile-kv">
+      <span class="k">Temperature</span><span class="v" data-testid="tile-temp"><${ReadingValue} r=${temp} empty=${readings ? "no sensor" : "reading..."} /></span>
+      <span class="k">DUT clock</span><span class="v" data-testid="tile-clock"><${ReadingValue} r=${clk} empty=${readings ? "not reported" : "reading..."} /></span>
+    </div>
+    <div class="tile-actions">
+      <${ActionRow} bid=${bid} panel="reset_dut" spec=${resetDutSpec(bid)} icon="rotate-ccw" compact=${true}
+        gate=${RESET_DUT_GATE}><${ArmBox} bid=${bid} armKey="reset_dut" compact=${true} text=${ARM_TEXT.reset_dut} /><//>
+      <${ActionRow} bid=${bid} panel="reboot" spec=${{ ...rebootSpec(bid), label: "Reboot" }} variant="danger" icon="power"
+        compact=${true} gate=${REBOOT_GATE}><${ArmBox} bid=${bid} armKey="reboot" compact=${true} testid="tile-arm-reboot" text=${ARM_TEXT.reboot} /><//>
+    </div>
+    ${last ? html`<div class="mt-8"><${ResultBlock} lines=${last.lines} panel=${last} testid="tile-board-result" /></div>` : null}
   <//>`;
 }
 
-function CapabilitiesCard({ info }) {
-  const names = new Set([...(info.capabilities || []), ...Object.keys(info.unavailable || {})]);
-  const order = [...CAPABILITY_ORDER.filter((n) => names.has(n)), ...[...names].filter((n) => !CAPABILITY_ORDER.includes(n)).sort()];
-  const available = order.filter((n) => (info.capabilities || []).includes(n));
-  const missing = order.filter((n) => !(info.capabilities || []).includes(n));
-  return html`<${Card} title="Capabilities" icon="list-checks" testid="capabilities-card"
-      sub="What this board can do over the links it has now. A missing one says what it needs.">
-    <p class="sub-head">Available (${available.length})</p>
-    <div class="caps-available">${available.map((n) => html`<span class="cap" key=${n} title=${n}
-      data-capability=${n}><${Icon} name="check" cls="sm i-ok" />${capTitle(n)}</span>`)}</div>
-    ${missing.length ? html`<p class="sub-head mt-18">Not available (${missing.length})</p>
-    <ul class="caps-missing">${missing.map((n) => html`<li key=${n} data-capability=${n}>
-      <div class="cap-title"><${Icon} name="circle-slash" cls="sm i-muted" />${capTitle(n)}</div>
-      <${Reason} text=${(info.unavailable || {})[n] || "not offered by this board pack"} />
-    </li>`)}</ul>` : null}
-  <//>`;
+// --- details --------------------------------------------------------------------------------
+
+function detailsOpen() {
+  try { return window.sessionStorage.getItem("harness-manager.details") === "open"; } catch (e) { return false; }
+}
+
+function Details({ bid }) {
+  const b = boardState(bid);
+  if (S.detailsOpen === undefined) S.detailsOpen = detailsOpen();
+  const toggle = () => {
+    S.detailsOpen = !S.detailsOpen;
+    try { window.sessionStorage.setItem("harness-manager.details", S.detailsOpen ? "open" : "closed"); } catch (e) { /* ok */ }
+    changed();
+  };
+  return html`<section class="details" data-testid="details">
+    <button type="button" class="details-toggle" aria-expanded=${S.detailsOpen ? "true" : "false"}
+      data-action="details" onClick=${toggle}>
+      <${Icon} name="chevron-right" cls=${`sm chev ${S.detailsOpen ? "open" : ""}`} />Details
+      <span class="muted small">identity, health counters, telemetry, capabilities</span></button>
+    ${S.detailsOpen ? html`<div class="grid split mt-14">
+      <div class="stack">
+        <${IdentityCard} info=${b.info} />
+        <${TelemetryCard} bid=${bid} />
+      </div>
+      <div class="stack">
+        <${HealthCard} bid=${bid} info=${b.info} />
+        <${CapabilitiesCard} info=${b.info} />
+      </div>
+    </div>` : null}
+  </section>`;
 }
 
 // SYSMON over JTAG takes ~3 s a read (docs/CONTRACTS.md), so telemetry is polled in the
@@ -150,14 +302,15 @@ export function OverviewSection({ bid }) {
             <${Icon} name="refresh-cw" /> Read again</button></p>`
         : html`<p class="muted"><${Spinner} /> Reading the board...</p>`}</div></div>`;
   }
-  return html`<div class="grid split">
-    <div class="stack">
-      <${IdentityCard} bid=${bid} info=${b.info} />
-      <${TelemetryCard} bid=${bid} />
+  return html`<div class="stack overview">
+    <${AttentionStrip} bid=${bid} />
+    <div class="tiles" data-testid="tiles">
+      <${DesignTile} bid=${bid} />
+      <${ConsolesTile} bid=${bid} />
+      <${DebugTile} bid=${bid} />
+      <${BoardTile} bid=${bid} />
     </div>
-    <div class="stack">
-      <${HealthCard} bid=${bid} info=${b.info} />
-      <${CapabilitiesCard} info=${b.info} />
-    </div>
+    <${Details} bid=${bid} />
   </div>`;
 }
+

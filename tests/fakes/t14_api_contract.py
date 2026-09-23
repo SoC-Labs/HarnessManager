@@ -43,35 +43,66 @@ def _resolve(prev: str, path: str) -> str:
     return path
 
 
-def parse_api_md(text: str) -> set[tuple[str, str]]:
-    """Every (method, normalised path) in API.md's endpoint table and its Events section."""
-    out: set[tuple[str, str]] = set()
-    in_table = False
+TABLE_SECTIONS = ("## Endpoints", "## Week-plan additions")
+_MODULE = re.compile(r"`(\w+_api)\.py`")
+
+
+def _row_routes(line: str) -> list[tuple[str, str]]:
+    first_cell = line.split("|")[1]
+    method, prev, out = "", "", []
+    for seg in _SEG.findall(first_cell):
+        m = _CALL.match(seg)
+        if m:
+            method = m.group(1)
+            path = _resolve(prev, m.group(2))
+        elif seg.startswith("/") and method:
+            # "`GET /x/temps` · `/osc`": same method, sibling path.
+            path = prev.rsplit("/", 1)[0] + seg
+        else:
+            continue            # a body sketch such as `{overlay}`
+        out.append((method, normalise(path)))
+        prev = path
+    return out
+
+
+def parse_api_md_sections(text: str) -> dict[str, set[tuple[str, str]]]:
+    """Routes by where API.md defines them: ``core`` (the Endpoints table and the Events
+    section) or the daemon extension module named in a week-plan heading (``hub_api`` ...)."""
+    out: dict[str, set[tuple[str, str]]] = {"core": set()}
+    section, modules = "", ["core"]
     for line in text.splitlines():
         if line.startswith("## "):
-            in_table = line.strip() == "## Endpoints"
+            section = next((s for s in TABLE_SECTIONS if line.startswith(s)), line.strip())
+        elif line.startswith("### ") and section == "## Week-plan additions":
+            modules = _MODULE.findall(line) or ["core"]
+        if line.startswith("## "):
+            modules = ["core"]
         if line.startswith("- **Endpoint:**"):
             for seg in _SEG.findall(line):
                 m = _CALL.match(seg)
                 if m:
-                    out.add((m.group(1), normalise(m.group(2))))
-        if not in_table or not line.startswith("| `"):
-            continue
-        first_cell = line.split("|")[1]
-        method, prev = "", ""
-        for seg in _SEG.findall(first_cell):
-            m = _CALL.match(seg)
-            if m:
-                method = m.group(1)
-                path = _resolve(prev, m.group(2))
-            elif seg.startswith("/") and method:
-                # "`GET /x/temps` · `/osc`": same method, sibling path.
-                path = prev.rsplit("/", 1)[0] + seg
-            else:
-                continue            # a body sketch such as `{overlay}`
-            out.add((method, normalise(path)))
-            prev = path
+                    out["core"].add((m.group(1), normalise(m.group(2))))
+        if section in TABLE_SECTIONS and line.startswith("| `"):
+            for route in _row_routes(line):
+                # A heading may name two modules ("power_api.py, update_api.py"): a route
+                # goes to the one whose name its path carries, else the first.
+                owner = next((m for m in modules if f"/{m[:-4]}" in route[1]), modules[0])
+                out.setdefault(owner, set()).add(route)
+    # A week-plan row may repeat a core route with a new field (`POST /probe {via?}`).
+    for mod, routes in out.items():
+        if mod != "core":
+            routes -= out["core"]
     return out
+
+
+def parse_api_md(text: str) -> set[tuple[str, str]]:
+    """Every (method, normalised path) API.md defines: the core table, the Events section and
+    the week-plan additions."""
+    return set().union(*parse_api_md_sections(text).values())
+
+
+def api_md_sections() -> dict[str, set[tuple[str, str]]]:
+    return parse_api_md_sections(API_MD.read_text(encoding="utf-8"))
 
 
 def api_md_endpoints() -> set[tuple[str, str]]:

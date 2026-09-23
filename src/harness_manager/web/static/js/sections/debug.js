@@ -22,12 +22,9 @@ function statusLines(st) {
   return out;
 }
 
-export function DebugSection({ bid }) {
+// The debug actions, shared by this section and the Overview's Debug tile (one panel).
+export function debugSpecs(bid) {
   const b = boardState(bid);
-  const p = panelState(bid, "debug");
-  useEffect(() => { loadDebug(bid); }, [bid]);
-  const st = b.debug || { state: "unknown" };
-  const live = st.state === "up" || st.state === "starting";
   const keep = (ok, value) => {
     if (ok && value && typeof value === "object" && value.state) {
       b.debug = unwrapDebug(value);
@@ -58,6 +55,21 @@ export function DebugSection({ bid }) {
     run: async () => unwrapDebug((await call("debugDown", { bid })).data),
     render: statusLines, onDone: keep,
   };
+  return { detect, up, down };
+}
+
+export function debugLive(bid) {
+  const st = boardState(bid).debug || { state: "unknown" };
+  return st.state === "up" || st.state === "starting";
+}
+
+export function DebugSection({ bid }) {
+  const b = boardState(bid);
+  const p = panelState(bid, "debug");
+  useEffect(() => { loadDebug(bid); }, [bid]);
+  const st = b.debug || { state: "unknown" };
+  const live = debugLive(bid);
+  const { detect, up, down } = debugSpecs(bid);
   const gdbCmd = st.gdb_port ? `arm-none-eabi-gdb -ex 'target extended-remote :${st.gdb_port}'` : "";
   return html`<div class="grid split">
     <${Card} title="DUT debug (OpenOCD)" icon="bug" testid="debug-card"

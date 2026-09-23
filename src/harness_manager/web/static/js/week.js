@@ -1,0 +1,235 @@
+// The week-plan features (docs/API.md "Week-plan additions"): a console's PTY for `screen`
+// and its baud; the hub's tunnel and lease; the board's power; clocks; update checks.
+//
+// Each lane (L1 hub, L2 consoles, L4 power and update) lands its routes separately. A route
+// this daemon does not serve yet makes its feature `unsupported` here, and the page then
+// hides it or says so calmly: nothing errors because a lane has not landed.
+
+import { call, routeMissing, toApiError } from "./api.js";
+import {
+  boardState, changed, log, onBoardEvent, onBoardOpened, onJobEnded, S, scheduleRefresh, timed,
+} from "./store.js";
+
+export function week(bid) {
+  const b = boardState(bid);
+  if (!b.week) {
+    b.week = {
+      consoles: null,          // [{name, kind, baud, settable, pty}] from GET /consoles
+      pty: {},                 // name -> {path, device, command, clients} | null
+      ptyError: {},            // name -> ApiError (422 on Windows, say)
+      ptyUnsupported: false,
+      ptyAt: {},               // name -> when the last console.pty event arrived
+      baud: {},                // name -> {baud, settable, reason, choices, source}
+      baudUnsupported: false,
+      consoleState: {},        // name -> state from console.state events
+      hub: null,               // {host, lease, tunnel} | null (not behind a hub)
+      hubUnsupported: false,
+      hubLoaded: false,
+      leaseQueued: false,
+      power: null,             // {readings, cycle_reason, device}
+      powerError: null,
+      powerUnsupported: false,
+      powerPhases: [],
+      clocks: null, clocksError: null,
+      osc: null, oscError: null,
+      update: null,            // the last check's result
+      updateEvents: [],
+      lastBackup: null,        // the BackupRecord of this page's last SD backup
+    };
+  }
+  return b.week;
+}
+
+// --- consoles: metadata, PTYs and baud ------------------------------------------------------
+
+export async function loadConsoleMeta(bid) {
+  const w = week(bid);
+  const r = await timed("consoles", () => call("consoles", { bid }));
+  if (!r.error && Array.isArray(r.data.data.consoles)) {
+    w.consoles = r.data.data.consoles;
+    for (const c of w.consoles) {
+      if (c.pty && !w.pty[c.name]) w.pty[c.name] = { path: c.pty, command: `screen ${c.pty}` };
+    }
+    changed();
+  }
+}
+
+export async function loadPty(bid, name) {
+  const w = week(bid);
+  const asked = performance.now();
+  const r = await timed(`pty ${name}`, () => call("ptyGet", { bid, name }));
+  if ((w.ptyAt[name] || 0) > asked) return;     // a console.pty event is newer than this read
+  if (r.error) {
+    if (routeMissing(r.error)) w.ptyUnsupported = true;
+  } else {
+    w.pty[name] = r.data.data.pty || null;
+  }
+  changed();
+}
+
+// POST .../pty: create (or find) the console's PTY; the result is `screen <path>`.
+export async function openPty(bid, name) {
+  const w = week(bid);
+  const { data } = await call("ptyOpen", { bid, name });
+  w.pty[name] = { ...(w.pty[name] || {}), ...data };
+  delete w.ptyError[name];
+  changed();
+  loadPty(bid, name);
+  return data;
+}
+
+export async function loadBaud(bid, name) {
+  const w = week(bid);
+  const r = await timed(`baud ${name}`, () => call("baudGet", { bid, name }));
+  if (r.error) {
+    if (routeMissing(r.error)) w.baudUnsupported = true;
+  } else {
+    w.baud[name] = r.data.data;
+  }
+  changed();
+}
+
+export async function setBaud(bid, name, baud) {
+  const { data } = await call("baudSet", { bid, name }, { baud });
+  const w = week(bid);
+  w.baud[name] = { ...(w.baud[name] || {}), baud: data.baud, source: data.source || (w.baud[name] || {}).source };
+  changed();
+  loadBaud(bid, name);           // read it back: the confirmation is what the daemon now says
+  return data;
+}
+
+// --- the hub: tunnel and lease -------------------------------------------------------------
+
+export async function loadHub(bid) {
+  const w = week(bid);
+  const [lr, tr] = await Promise.all([
+    timed("lease", () => call("lease", { bid })),
+    timed("tunnel", () => call("tunnel", { bid })),
+  ]);
+  w.hubLoaded = true;
+  if (lr.error && routeMissing(lr.error)) {
+    w.hubUnsupported = true;
+    w.hub = null;
+    changed();
+    return;
+  }
+  const lease = lr.error ? null : lr.data.data;
+  const tunnel = tr.error ? null : tr.data.data.tunnel;
+  if ((!lease || !lease.hub) && !tunnel) {
+    w.hub = null;                // not behind a hub
+  } else {
+    w.hub = { host: (lease && lease.hub) || (tunnel && tunnel.host) || "",
+      lease: lease ? lease.lease : null, tunnel };
+  }
+  changed();
+}
+
+export function leaseLeft(lease, now = Date.now() / 1000) {
+  if (!lease || !lease.expires_at) return null;
+  return Math.max(0, lease.expires_at - now);
+}
+
+export function durationText(s) {
+  if (s === null || s === undefined) return "";
+  if (s < 90) return `${Math.round(s)} s`;
+  if (s < 5400) return `${Math.round(s / 60)} min`;
+  return `${(s / 3600).toFixed(1)} h`;
+}
+
+// --- power, clocks ---------------------------------------------------------------------------
+
+export async function loadPower(bid) {
+  const w = week(bid);
+  const r = await timed("power", () => call("power", { bid }));
+  if (r.error) {
+    if (routeMissing(r.error)) w.powerUnsupported = true;
+    else w.powerError = r.error;
+  } else {
+    w.power = r.data.data;
+    w.powerError = null;
+  }
+  changed();
+}
+
+export async function loadClocks(bid) {
+  const w = week(bid);
+  const r = await timed("clocks", () => call("clocks", { bid }));
+  w.clocksError = r.error;
+  if (!r.error) w.clocks = r.data.data.readings || [];
+  changed();
+}
+
+export async function loadOsc(bid) {
+  const w = week(bid);
+  const r = await timed("osc", () => call("osc", { bid }));
+  w.oscError = r.error;
+  if (!r.error) w.osc = r.data.data.readings || [];
+  changed();
+}
+
+// --- events and hooks ------------------------------------------------------------------------
+
+const hubTimers = {};
+function scheduleHub(bid, ms = 200) {
+  clearTimeout(hubTimers[bid]);
+  hubTimers[bid] = setTimeout(() => loadHub(bid), ms);
+}
+
+onBoardEvent((ev) => {
+  const bid = ev.board_id;
+  if (!bid) return;
+  const d = ev.data || {};
+  const w = week(bid);
+  if (ev.topic === "console.pty" && d.name) {
+    w.ptyAt[d.name] = performance.now();
+    w.pty[d.name] = d.closed ? null : { ...(w.pty[d.name] || {}), path: d.path,
+      command: (w.pty[d.name] || {}).command || `screen ${d.path}`, clients: d.clients };
+  }
+  if (ev.topic === "console.state" && d.name) {
+    if (d.state) w.consoleState[d.name] = d.state;
+    if (d.baud !== undefined && d.baud !== null) {
+      w.baud[d.name] = { ...(w.baud[d.name] || {}), baud: d.baud };
+    }
+  }
+  if (ev.topic === "lease.state") {
+    w.leaseQueued = d.state === "queued";
+    if (d.state === "lost" || d.state === "expired") {
+      log("warning", "lease", `the lease on ${d.target || bid} was ${d.state}`, bid);
+    }
+    scheduleHub(bid);
+  }
+  if (ev.topic === "power.cycle") {
+    if (d.phase === "off") w.powerPhases = [];
+    if (d.phase && !w.powerPhases.includes(d.phase)) w.powerPhases.push(d.phase);
+  }
+  if (ev.topic.startsWith("update.")) {
+    w.updateEvents.push({ topic: ev.topic, data: d, at: ev.at });
+    if (w.updateEvents.length > 100) w.updateEvents.splice(0, w.updateEvents.length - 100);
+  }
+});
+
+onBoardOpened((bid) => {
+  loadHub(bid);
+  loadConsoleMeta(bid);
+});
+
+onJobEnded((bid, kind) => {
+  if (kind === "power_cycle") { loadPower(bid); scheduleRefresh(bid, 100); }
+  if (kind === "lease") loadHub(bid);
+  if (kind === "update_harness" || kind === "update_rollback") scheduleRefresh(bid, 100);
+});
+
+// The lease and the tunnel change under us (expiry, the hub, a dropped ssh): re-read them
+// now and then for every open board that is behind a hub.
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  for (const [bid, row] of Object.entries(S.boards)) {
+    const b = S.board[bid];
+    if (row.open && b && b.week && b.week.hub) loadHub(bid);
+  }
+}, 30000);
+
+export function errorText(err) {
+  const e = toApiError(err);
+  return `${e.errName}: ${e.message}`;
+}

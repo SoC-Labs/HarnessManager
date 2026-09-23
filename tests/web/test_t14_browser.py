@@ -37,6 +37,15 @@ def open_board(page, board_id):
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
 
 
+def open_details(page):
+    """The Overview's Details (identity, counters, telemetry, capabilities) start collapsed."""
+    toggle = page.locator('[data-action="details"]')
+    toggle.wait_for(timeout=T)
+    if toggle.get_attribute("aria-expanded") != "true":
+        toggle.click()
+    page.wait_for_selector('[data-testid="identity-card"]', timeout=T)
+
+
 def section(page, key):
     page.locator(f'[data-section="{key}"]').click()
     page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
@@ -115,6 +124,7 @@ def test_selecting_a_board_renders_identity_with_unchecked_as_a_warning(page_fac
     preview = page.locator('[data-testid="preview-build"]')
     assert preview.get_attribute("data-level") == "unk" and "Unchecked" in preview.inner_text()
     open_board(page, BOARD_FIELDED)
+    open_details(page)
     assert page.locator('[data-testid="id-shell"]').inner_text() == "0x3f1a560f"
     for testid in ("build-chip", "id-build"):
         chip = page.locator(f'[data-testid="{testid}"]')
@@ -136,12 +146,13 @@ def test_a_board_whose_build_check_passed_shows_ok_not_unchecked(page_factory):
 def test_telemetry_shows_unavailable_with_its_reason_never_zero(page_factory):
     page = page_factory()
     open_board(page, BOARD_FIELDED)
-    row = page.locator('[data-reading="mcc_temp"]')
+    open_details(page)
+    row = page.locator('[data-telemetry] [data-reading="mcc_temp"]')
     row.wait_for(timeout=T)
     assert row.get_attribute("data-available") == "no"
     text = row.inner_text()
     assert "unavailable" in text and "needs the Debug USB cable" in text and " 0 " not in text
-    assert "50 MHz" in page.locator('[data-reading="dut_clk"]').inner_text()
+    assert "50 MHz" in page.locator('[data-telemetry] [data-reading="dut_clk"]').inner_text()
 
 
 # --- capabilities ----------------------------------------------------------------------------------
@@ -150,6 +161,7 @@ def test_telemetry_shows_unavailable_with_its_reason_never_zero(page_factory):
 def test_a_capability_the_board_lacks_is_disabled_with_its_reason(page_factory, engine):
     page = page_factory()
     open_board(page, BOARD_FIELDED)
+    open_details(page)
     missing = page.locator('[data-testid="capabilities-card"] li[data-capability="reboot_board"]')
     assert "needs the Debug USB cable" in missing.inner_text()
     section(page, "power")
@@ -163,7 +175,7 @@ def test_a_capability_the_board_lacks_is_disabled_with_its_reason(page_factory, 
     assert engine.called("controller.reboot") == []
     # No metered outlet in boards.toml: the cold power cycle says why, and offers no button.
     expect(page.locator('[data-testid="power-cycle-reason"]')).to_contain_text("networked power plug")
-    assert page.locator('[data-testid="power-cycle"] button').count() == 0
+    assert page.locator('[data-testid="power-card"] [data-action="power_cycle"]').count() == 0
 
 
 def test_with_the_usb_link_reboot_is_gated_only_by_the_arm_box(page_factory, engine):
@@ -275,9 +287,8 @@ def test_console_output_appears_and_send_works(page_factory, engine, screenshots
     assert wait_until(lambda: (BOARD_USB, "uart0", b"print(1+1)\r\n") in engine.consoles.writes)
     expect(page.locator('[data-testid="console-result"]')).to_contain_text("rc 0")
     assert wait_until(lambda: "print(1+1)" in console_text(page, "uart0"))   # the demo DUT echoes
-    # The same console in any terminal (lead): the CLI command, ready to copy.
-    cmd = page.locator('[data-testid="terminal-command"] code').inner_text()
-    assert cmd.startswith("harness-manager console ") and cmd.endswith(" uart0"), cmd
+    # david (L3): attach with screen, never the CLI line; that row is gone.
+    assert page.locator('[data-testid="terminal-command"]').count() == 0
     page.screenshot(path=str(screenshots / "light-consoles-live.png"))
 
 
@@ -363,8 +374,8 @@ def test_the_sd_recovery_panel_shows_first_when_an_install_was_interrupted(page_
     page = page_factory()
     open_board(page, BOARD_USB)
     page.wait_for_selector('[data-testid="sd-recovery"]', timeout=T)
-    assert page.locator('[data-section="power"]').get_attribute("aria-selected") == "true"
-    first = page.locator('[data-testid="section-power"] .card').first
+    assert page.locator('[data-section="sd"]').get_attribute("aria-selected") == "true"
+    first = page.locator('[data-testid="section-sd"] .card').first
     assert first.get_attribute("data-testid") == "sd-recovery"
     assert "images.txt" in page.locator('[data-testid="sd-journal"]').inner_text()
     assert page.locator('[data-testid="sd-banner"]').is_visible()
@@ -395,7 +406,8 @@ def test_no_recovery_panel_when_nothing_is_pending(page_factory):
     open_board(page, BOARD_USB)
     assert page.locator('[data-section="overview"]').get_attribute("aria-selected") == "true"
     assert page.locator('[data-testid="sd-banner"]').count() == 0
-    section(page, "power")
+    assert page.locator('[data-testid="attention"] [data-attention="sd"]').count() == 0
+    section(page, "sd")
     assert page.locator('[data-testid="sd-recovery"]').count() == 0
 
 

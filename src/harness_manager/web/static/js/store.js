@@ -112,7 +112,10 @@ export function restoreSelection() {
 
 const JOB_LABELS = {
   deploy: "deploy", restore: "restore", debug_up: "debug session start", reboot: "board reboot",
-  sd_backup: "SD backup", sd_install: "SD install", sd_restore: "SD restore",
+  sd_backup: "SD backup", sd_install: "SD install", sd_restore: "SD restore", lease: "lease",
+  power_cycle: "power cycle", update_check: "update check", update_harness: "harness update",
+  update_rollback: "harness rollback", update_app: "app update",
+  update_app_rollback: "app rollback",
 };
 
 export function jobLabel(kind) {
@@ -153,6 +156,8 @@ function jobEnded(bid, id) {
     endedJobs.add(id);
     if (endedJobs.size > 500) endedJobs.delete(endedJobs.values().next().value);
   }
+  // The rail's marker comes from GET /boards rows: it ends with the job, not at the next poll.
+  if (S.boards[bid] && S.boards[bid].job === id) S.boards[bid] = { ...S.boards[bid], job: null };
   const b = boardState(bid);
   if (!b.job || b.job.id !== id) return;
   const kind = b.job.kind;
@@ -165,6 +170,9 @@ function jobEnded(bid, id) {
   }
   if (kind === "debug_up") loadDebug(bid);
   if (kind === "reboot" || kind.startsWith("sd_")) loadPending(bid);
+  for (const fn of jobEndHooks) {
+    try { fn(bid, kind); } catch (e) { /* a hook never breaks the end of a job */ }
+  }
   changed();
 }
 
@@ -289,6 +297,9 @@ export function openedBoard(bid, { quiet = false } = {}) {
   loadSession(bid);
   loadPending(bid);
   loadDebug(bid);
+  for (const fn of openHooks) {
+    try { fn(bid); } catch (e) { /* a hook never breaks the open */ }
+  }
   if (!quiet) changed();
 }
 
@@ -418,7 +429,7 @@ export async function loadPending(bid) {
   b.pending = pending;
   if (first) {
     b.pendingSeen = true;
-    S.sections[bid] = "power";          // recovery before anything else
+    S.sections[bid] = "sd";             // recovery before anything else
     log("error", "storage", "Interrupted SD install: restore it first (Reset & Power)", bid);
   }
   changed();
@@ -502,9 +513,20 @@ function onDeployEvent(ev) {
   if (dep.events.length > 200) dep.events.splice(0, dep.events.length - 200);
 }
 
+// Other modules (week.js) follow events and board opens without store.js importing them.
+const eventHooks = [];
+const openHooks = [];
+const jobEndHooks = [];
+export function onBoardEvent(fn) { eventHooks.push(fn); }
+export function onBoardOpened(fn) { openHooks.push(fn); }
+export function onJobEnded(fn) { jobEndHooks.push(fn); }
+
 export function handleEvent(ev) {
   const bid = ev.board_id || "";
   if (ev.topic.startsWith("job.")) jobEvent(ev);
+  for (const fn of eventHooks) {
+    try { fn(ev); } catch (e) { /* a hook never breaks the router */ }
+  }
   if (ev.topic === "events.dropped") {
     // The page fell behind and the daemon dropped events: read the state again.
     log("warning", "events", `the daemon dropped ${(ev.data || {}).dropped} events for this page; reading again`);

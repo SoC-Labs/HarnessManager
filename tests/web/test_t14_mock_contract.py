@@ -17,8 +17,10 @@ from urllib.parse import quote
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
+from tests.fakes.l3_week_plan import EXTENSION_ROUTES
 from tests.fakes.t14_api_contract import (
     api_md_endpoints,
+    api_md_sections,
     app_routes,
     daemon_routes,
     normalise,
@@ -78,9 +80,34 @@ def test_the_mock_route_table_is_api_md_plus_any_additive_routes():
     assert not additive & api_md_endpoints()
 
 
-def test_the_mock_route_table_equals_the_real_harness_manager_daemon():
-    # T13's daemon is the product; the mock must not drift from it.
-    assert {(m, normalise(p)) for m, p in ROUTES} == daemon_routes()
+def landed_extensions() -> set[str]:
+    """The week-plan extension modules present in this tree (lanes L1, L2, L4 land them)."""
+    import importlib.util
+
+    return {m for m in EXTENSION_ROUTES
+            if importlib.util.find_spec(f"harness_manager.daemon.{m}") is not None}
+
+
+def test_the_mock_serves_each_extension_modules_routes_as_api_md_assigns_them():
+    sections = api_md_sections()
+    assert set(sections) == {"core", *EXTENSION_ROUTES}
+    for module, routes in EXTENSION_ROUTES.items():
+        assert {(m, normalise(p)) for m, p in routes} == sections[module], module
+
+
+def test_the_real_daemon_serves_the_core_plus_exactly_the_extensions_that_landed():
+    # T13's daemon is the product. The week-plan modules land separately (the lead wires
+    # them at merge), so assert what exists and never fake what does not.
+    sections = api_md_sections()
+    landed = landed_extensions()
+    expected = set(sections["core"]).union(*(sections[m] for m in landed))
+    assert daemon_routes() == expected, f"landed extensions: {sorted(landed) or 'none'}"
+
+
+def test_the_route_check_notices_a_route_the_daemon_lacks():
+    sections = api_md_sections()
+    pretend = set(sections["core"]) | sections["power_api"]      # as if power_api had landed
+    assert daemon_routes() != pretend or "power_api" in landed_extensions()
 
 
 def test_the_mock_app_serves_every_route_it_declares(engine):

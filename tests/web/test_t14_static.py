@@ -236,7 +236,11 @@ def test_every_literal_icon_name_exists_in_the_vendored_set():
         text = p.read_text()
         used |= set(re.findall(r'(?<!\[)\b(?:name|icon)=\\?"([a-z0-9-]+)"', text))
         used |= set(re.findall(r'\bicon:\s*"([a-z0-9-]+)"', text))
-        used |= set(re.findall(r'\bname=\$\{[^}]*?"([a-z0-9-]+)"', text))
+        # name=${cond ? "a" : MAP[k] || "b"}: every literal an icon can be, not the strings
+        # a condition compares with (x === "err")
+        for expr in re.findall(r'\bname=\$\{([^}]*)\}', text):
+            expr = re.sub(r'[=!]==?\s*"[^"]*"', "", expr)
+            used |= set(re.findall(r'"([a-z0-9-]+)"', expr))
     assert used, "no icon names found: the pattern is broken"
     assert used - icons == set()
 

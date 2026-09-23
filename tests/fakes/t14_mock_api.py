@@ -55,6 +55,9 @@ from harness_manager.core.model import BoardIdentity, Candidate, Link, LinkKind
 from harness_manager.core.pack import ProbeHints
 from harness_manager.core.session import LockOwner
 
+from .l3_week_plan import EXTENSION_ROUTES, SimClocks, WeekPlanSim
+from .l3_week_plan import register as register_week_plan
+
 API = "/api/v1"
 VERSION = "0.0.1-t14-mock"
 UI_NOTE = "harness-manager-ui"
@@ -95,6 +98,7 @@ OPEN_POINTS: dict[str, str] = {
 ADDITIVE_ROUTES: tuple[tuple[str, str], ...] = ()
 
 #: The route table: (method, path template). Kept literal so a test can diff it with API.md.
+#: The week-plan additions (tests/fakes/l3_week_plan.py) join it below.
 ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/health"),
     ("GET", "/packs"),
@@ -134,7 +138,7 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/boards/{bid}/session"),
     ("POST", "/daemon/shutdown"),
     ("WS", "/events"),
-) + ADDITIVE_ROUTES
+) + tuple(r for routes in EXTENSION_ROUTES.values() for r in routes) + ADDITIVE_ROUTES
 
 
 # --- jobs --------------------------------------------------------------------------------
@@ -357,6 +361,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
             "hint": "this is a bug in the mock daemon"}}, status_code=500)
 
     eng = engine
+    # The frozen week-plan additions (lanes L1, L2, L4), simulated: tests/fakes/l3_week_plan.py.
+    sim = WeekPlanSim(state)
+    app.state.sim = sim
+    register_week_plan(app, state, sim, _ok, _accepted)
 
     async def ws_deny(ws: WebSocket, exc: HarnessError) -> None:
         """harness-manager-daemon's refusal: an HTTP denial with the envelope, else close 4000 + code."""
@@ -377,7 +385,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     @app.get(f"{API}/packs")
     def packs() -> dict[str, Any]:
-        return _ok(packs={name: pack.title for name, pack in eng.packs().items()})
+        packs = sorted(eng.packs().items())
+        caps = {n: [{"name": c.name, "title": c.title, "needs_hint": c.needs_hint}
+                    for c in p.capability_specs()] for n, p in packs}
+        return _ok(packs={name: pack.title for name, pack in packs}, capabilities=caps)
 
     @app.post(f"{API}/probe")
     def probe(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:  # noqa: B008
@@ -397,6 +408,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                 with contextlib.suppress(HarnessError):
                     found.append(eng.candidate_for(host))
         state.remember(found)
+        via = str(body.get("via") or "")
+        if via.startswith("ssh:"):           # week plan (L1): reached through the hub's tunnel
+            for c in found:
+                sim.behind_hub(c.board_id, host=via[4:], lease="none")
         return _ok(candidates=found)
 
     @app.get(f"{API}/help/tabs")
@@ -454,6 +469,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
             cand = state.lookup(str(cdata.get("board_id", ""))) or _candidate_from_json(cdata)
         eng.open(cand, note=str(body.get("note") or UI_NOTE))
         state.remember([cand])
+        via = str(body.get("via") or "")
+        if via.startswith("ssh:"):
+            sim.behind_hub(cand.board_id, host=via[4:], lease="none")
         try:
             return _ok(board_id=cand.board_id, info=eng.info(cand.board_id))
         except HarnessError as exc:
@@ -474,9 +492,12 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         adapters["shell"] = getattr(s, "shell", None) is not None
         resets = getattr(s, "resets", None)
         running = state.jobs.running(bid)
+        services = {n: getattr(getattr(eng, n, None), "reason", None)
+                    for n in ("deploy", "consoles", "debug", "telemetry")}
         return _ok(board_id=bid, candidate=s.candidate, adapters=adapters,
                    reset_targets=list(resets.reset_targets()) if resets else [],
-                   job=running[0].id if running else None)
+                   job=running[0].id if running else None,
+                   job_kind=running[0].kind if running else None, services=services)
 
     @app.get(f"{API}/boards/{{bid}}")
     def info(bid: str) -> dict[str, Any]:
@@ -574,26 +595,33 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         resets.reset(target)
         return _ok(target=target)
 
+    def clock_adapter(bid: str) -> Any:
+        adapter = state.session(bid).clocks
+        if adapter is not None:
+            return adapter
+        # DemoEngine sessions have none: the mock plays the MPS3 `clock` verb (presets).
+        if C.CLOCK_DUT in eng.info(bid).capabilities:
+            return SimClocks(sim, bid)
+        raise UnavailableError(C.CLOCK_DUT, eng.info(bid).unavailable.get(
+            C.CLOCK_DUT, "this board has no clock adapter in this build"))
+
     @app.get(f"{API}/boards/{{bid}}/clocks")
     def clocks(bid: str) -> dict[str, Any]:
-        adapter = state.session(bid).clocks
-        if adapter is None:
-            raise UnavailableError(C.CLOCK_DUT, "this board has no clock adapter in this build")
-        return _ok(readings=[reading_json(r) for r in adapter.clocks()])
+        state.jobs.gate(bid)
+        return _ok(readings=[reading_json(r) for r in clock_adapter(bid).clocks()])
 
     @app.post(f"{API}/boards/{{bid}}/clocks")
     def set_clock(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
-        adapter = state.session(bid).clocks
-        if adapter is None:
-            raise UnavailableError(C.CLOCK_DUT, "this board has no clock adapter in this build")
-        return _ok(reading=reading_json(adapter.set_clock(str(body["name"]),
-                                                          float(body["mhz"]))))
+        state.jobs.gate(bid)
+        return _ok(reading=reading_json(clock_adapter(bid).set_clock(
+            str(body.get("name") or "dut"), float(body["mhz"]))))
 
     # -- consoles -------------------------------------------------------------------------
 
     @app.get(f"{API}/boards/{{bid}}/consoles")
     def consoles(bid: str) -> dict[str, Any]:
-        return _ok(names=list(eng.consoles.names(state.session(bid))))
+        return _ok(names=list(eng.consoles.names(state.session(bid))),
+                   consoles=sim.consoles_view(bid))
 
     @app.post(f"{API}/boards/{{bid}}/consoles/{{name}}/export")
     def export(bid: str, name: str,

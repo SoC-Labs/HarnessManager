@@ -114,6 +114,17 @@ export function linkName(kind) { return LINK_NAMES[kind] || kind; }
 export const VIA_NAMES = { ssh: "via SSH tunnel", hub: "via hub tunnel" };
 
 
+// "screen /tmp/harness-manager-me/mps3_192.168.10.102_6900/uart0" shown as
+// "screen …/mps3_192.168.10.102_6900/uart0": the part that tells consoles apart stays.
+// The copy button and the title always carry the whole command.
+export function shortScreen(command, keep = 2) {
+  const parts = String(command || "").split(" ");
+  if (parts.length < 2) return command;
+  const segs = parts.slice(1).join(" ").split("/");
+  if (segs.length <= keep + 2) return command;
+  return `${parts[0]} \u2026/${segs.slice(-keep).join("/")}`;
+}
+
 export function hostOf(boardId) {
   const at = String(boardId || "").indexOf("@");
   return at >= 0 ? boardId.slice(at + 1) : String(boardId || "");
