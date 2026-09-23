@@ -24,7 +24,12 @@
 
 T8 (hub mode) and T10 (XDC export) follow.
 
-## Week plan: a working Harness Manager by Fri 09-25 (drawn up 2026-09-23 23:00; awaiting david's go)
+## Week plan: a working Harness Manager by Fri 09-25 (drawn up 2026-09-23 23:00; GO given, all six lanes running)
+
+**Status 2026-09-23 ~23:45:**
+- Step 0 is done: the rename is at `d8fad9e` (1559 passed) and pushed to `SoC-Labs/HarnessManager`.
+- Lanes L1–L6 are running in `../hm-l*` and the `../mps3-nanosoc-platform-baud` worktree.
+- david's decisions: L6 yes; the board is available Thu 09-24 for testing; push approved; the licence waits.
 
 **Friday acceptance ("working"):** on srv03335, `harness-manager app` shows the lab MPS3 through the hub, with:
 1. the simplified Overview;
