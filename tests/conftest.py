@@ -16,6 +16,14 @@ def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SOCHARNESS_STATE_DIR", str(tmp_path / "state"))
 
 
+@pytest.fixture(autouse=True)
+def _no_real_usb(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let a test enumerate the test machine's real serial ports or volumes."""
+    from socharness_board_mps3 import usb
+
+    monkeypatch.setattr(usb, "DEFAULT_ENV", usb.UsbEnv(lambda: [], lambda: []))
+
+
 @pytest.fixture
 def vboard(tmp_path: Path) -> Iterator[VirtualMps3]:
     with VirtualMps3(tmp_path) as vb:

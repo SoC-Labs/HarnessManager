@@ -62,7 +62,11 @@ class VirtualMps3:
             harness_usr_access=profile.usr_access,
             features=profile.features,
         )
-        self.mcc = FakeMcc(on_reboot=self._on_reboot)
+        # boot_s=3 so a reboot is observable over Ethernet (the witness needs
+        # two failed 1 s pings) when a test runs on the real clock.
+        self.mcc = FakeMcc(on_reboot=self._on_reboot, on_boot=self._on_boot, boot_s=3.0)
+        self.boot_rm_id = boot_rm_id
+        self.boots = 0
         self.sd = FakeSdVolume(tmp_path / "sd")
         self.reboots = 0
         # usb=True registers the MCC as fake://<name> so the pack's USB adapters
@@ -72,9 +76,16 @@ class VirtualMps3:
         self._fake_name = f"mcc-{id(self):x}"
 
     def _on_reboot(self) -> None:
-        # A real REBOOT power-cycles the board and reloads the SD bitstream
-        # (proven 2026-08-04). The fake counts it; T3 will model the reload.
+        # A real REBOOT power-cycles the board (proven 2026-08-04): the shell goes away.
         self.reboots += 1
+        self.shell.stop()
+
+    def _on_boot(self) -> None:
+        # ...and the MCC reloads the base bitstream from the SD, so the shell comes back
+        # on the same address with the boot design (greybox) loaded, not the last swap.
+        self.boots += 1
+        self.shell.current_rm_id = 0
+        self.shell.start()
 
     @property
     def shell_endpoint(self) -> str:

@@ -646,6 +646,42 @@ class Mps3Storage:
                                hint="take a fresh backup") from exc
         return manifest
 
+    def load_backup(self, path: Path) -> BackupRecord:
+        """Rebuild a ``BackupRecord`` from an archive on disk, then verify it fully.
+
+        The ``<zip>.sha256`` sidecar written by ``backup()`` is the tamper
+        witness. If it is present, the archive must match it; if it is missing,
+        the archive is verified against its own manifest only, which is weaker,
+        and that is noted in the record's label.
+        (Contract addition CCR-2 from T5; added by the lead after the T3 merge.)
+        """
+        path = Path(path)
+        if not path.is_file():
+            raise RefusedError(f"backup {path} does not exist", hint="check the path")
+        actual = file_sha256(path)
+        sidecar = path.with_name(path.name + ".sha256")
+        recorded = actual
+        if sidecar.is_file():
+            recorded = sidecar.read_text(encoding="utf-8").split()[0].strip()
+            if recorded != actual:
+                raise RefusedError(
+                    f"backup {path} does not match its .sha256 sidecar: it was changed after the backup",
+                    hint="take a fresh backup")
+        try:
+            with zipfile.ZipFile(path) as zf:
+                manifest = json.loads(zf.read(MANIFEST_NAME))
+        except (zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
+            raise RefusedError(f"backup {path} is unreadable or incomplete: {exc}",
+                               hint="take a fresh backup") from exc
+        label = str(manifest.get("label", ""))
+        record = BackupRecord(
+            path=str(path), sha256=recorded, created_at=float(manifest.get("created_at", 0.0)),
+            files=len(manifest.get("files", [])),
+            volume_label=label if sidecar.is_file() else f"{label} (no .sha256 sidecar)",
+        )
+        self.verify_backup(record)
+        return record
+
     # -- install --
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord | None,

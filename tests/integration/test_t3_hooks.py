@@ -80,13 +80,24 @@ def test_reboot_through_the_session_is_witnessed_by_the_shell(vb, fake_time):
     assert session.identity().shell_id.lower() == "0x3f1a560f"      # the shell is back
 
 
-def test_reboot_the_virtual_board_ignores_is_not_reported_as_done(vb, fake_time):
-    # Negative twin: VirtualMps3 as the lead ships it never takes the shell down,
-    # so with an Ethernet shell the witness cannot prove a reboot and fails.
+def test_s6_reboot_over_ethernet_and_usb_is_witnessed(vb, fake_time):
+    # S6 (lead, after the T3 merge): VirtualMps3 now models REBOOT. The shell goes away,
+    # the MCC boots, and the shell comes back with the SD's boot design (greybox).
+    vb.shell.current_rm_id = 0x01000001          # pretend nanosoc was swapped in
+    session = open_session(vb)
+    session.controller.reboot(wait_s=120)
+    assert vb.reboots == 1 and vb.boots == 1
+    assert session.identity().rm_id.lower() == "0x00000000"   # a reload from SD reverts to greybox
+
+
+def test_s6_no_op_reboot_is_not_reported_as_done(vb, fake_time):
+    # Negative twin: an MCC that accepts REBOOT and does nothing (the old tty_01 trap).
     from socharness.core.errors import ActionFailedError
 
-    with pytest.raises(ActionFailedError, match="never stopped answering ping"):
+    vb.mcc.ignore_reboot = True
+    with pytest.raises(ActionFailedError):
         open_session(vb).controller.reboot(wait_s=40)
+    assert vb.reboots == 0
 
 
 def test_usb_only_reboot_is_witnessed_on_the_console(vb, fake_time):

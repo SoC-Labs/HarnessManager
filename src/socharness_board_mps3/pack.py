@@ -199,7 +199,10 @@ class Mps3Pack(BoardPack):
                 ))
         usb = _hook("usb", "probe_usb")
         if usb is not None and (hints.scan_usb or hints.serial_ports or hints.volumes):
-            found.extend(usb(hints, found))
+            usb_found = usb(hints, list(found))
+            # A USB board paired with an Ethernet shell replaces that shell's candidate.
+            ids = {c.board_id for c in usb_found}
+            found = [c for c in found if c.board_id not in ids] + list(usb_found)
         return found
 
     def open(self, candidate: Candidate) -> Mps3Session:

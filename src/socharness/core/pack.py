@@ -141,8 +141,12 @@ class TelemetryAdapter(Protocol):
 class ControllerAdapter(Protocol):
     """The board controller (the MCC on the MPS3)."""
 
-    def command(self, line: str) -> str:
-        """Run one ALLOWLISTED command and return its reply text; else ``RefusedError``."""
+    def command(self, line: str, *, arm: bool = False) -> str:
+        """Run one ALLOWLISTED command and return its reply text; else ``RefusedError``.
+
+        ``arm=True`` is required for allowlisted commands that change state
+        (e.g. ``CFG W OSC``).
+        """
         ...
 
     def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> None:
@@ -164,6 +168,10 @@ class StorageAdapter(Protocol):
     def restore(self, backup: BackupRecord, progress: Progress | None = None) -> None: ...
     def load_backup(self, path: Path) -> BackupRecord:
         """Rebuild a ``BackupRecord`` from a backup archive on disk (and verify it)."""
+        ...
+
+    def pending(self) -> dict | None:
+        """An interrupted install's journal, if one exists (show "restore" first); else None."""
         ...
 
 
