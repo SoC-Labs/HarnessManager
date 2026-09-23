@@ -1,0 +1,248 @@
+# MCC console (port 0, /dev/mps3_01_pl/tty_00) across the 2026-09-23 power cycles; Cmd> prompts stripped, one block per power-on
+ARM V2M-MPS3 Boot loader v1.0.0
+HBI0309 build 567
+ARM V2M-MPS3 Firmware v1.3.2
+Build Date: Apr 20 2018
+Press Enter to stop auto boot...
+Enabling usb remote...
+USB Serial Number = 0000000000000
+Powering up system...
+ERROR: File not found \MB\HBI0309C\mbb_v141.ebf
+Switching on main power...
+Configuring motherboard (rev C, var A)...
+Reading Board File \MB\HBI0309C\Nanosoc\nanosoc.txt
+Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoc.bit
+Address: 0x00000000Address: 0x00020000Address: 0x00040000Address: 0x00060000Address: 0x00080000Address: 0x000A0000Address: 0x000C0000Address: 0x000E0000Address: 0x00100000Address: 0x00120000Address: 0x00140000Address: 0x00160000Address: 0x00180000Address: 0x001A0000Address: 0x001C0000Address: 0x001E0000Address: 0x00200000Address: 0x00220000Address: 0x00240000Address: 0x00260000Address: 0x00280000Address: 0x002A0000Address: 0x002C0000Address: 0x002E0000Address: 0x00300000Address: 0x00320000Address: 0x00340000Address: 0x00360000Address: 0x00380000Address: 0x003A0000Address: 0x003C0000Address: 0x003E0000Address: 0x00400000Address: 0x00420000Address: 0x00440000Address: 0x00460000Address: 0x00480000Address: 0x004A0000Address: 0x004C0000Address: 0x004E0000Address: 0x00500000Address: 0x00520000Address: 0x00540000Address: 0x00560000Address: 0x00580000Address: 0x005A0000Address: 0x005C0000Address: 0x005E0000Address: 0x00600000Address: 0x00620000Address: 0x00640000Address: 0x00660000Address: 0x00680000Address: 0x006A0000Address: 0x006C0000Address: 0x006E0000Address: 0x00700000Address: 0x00720000Address: 0x00740000Address: 0x00760000Address: 0x00780000Address: 0x007A0000Address: 0x007C0000Address: 0x007E0000Address: 0x00800000Address: 0x00820000Address: 0x00840000Address: 0x00860000Address: 0x00880000Address: 0x008A0000Address: 0x008C0000Address: 0x008E0000Address: 0x00900000Address: 0x00920000Address: 0x00940000Address: 0x00960000Address: 0x00980000Address: 0x009A0000Address: 0x009C0000Address: 0x009E0000Address: 0x00A00000Address: 0x00A20000Address: 0x00A40000Address: 0x00A60000Address: 0x00A80000Address: 0x00AA0000Address: 0x00AC0000Address: 0x00AE0000Address: 0x00B00000Address: 0x00B20000Address: 0x00B40000Address: 0x00B60000
+FPGA configuration complete.
+OSCCLK0 : 25.000000MHz
+OSCCLK1 : 50.000000MHz
+OSCCLK2 : 50.000000MHz
+OSCCLK3 : 50.000000MHz
+OSCCLK4 : 24.576000MHz
+OSCCLK5 : 23.750000MHz
+OSCCLK setup: PASSED
+GTXCLK (100): PASSED
+FPGA does not support MCC<>SCC interface
+WARNING: Image file not found
+Reading images file \MB\HBI0309C\Nanosoc\images.txt
+ERROR: File not found \MB\HBI0309C\Nanosoc\images.txt
+ERROR: The SMSC9220 bus is in 16-bit mode. 32-bit mode was expected.
+Reading the Ethernet ID register failed.
+Check that the SMSC9220 device is present on the system.
+SMSC9220 initialisation failed.
+UART0: MCC, UART1: FPGA0
+Releasing CB_nRST
+Enabling debug USB.
+USB Serial Number = 0000000000000
+ARM V2M-MPS3 Boot loader v1.0.0
+HBI0309 build 567
+ARM V2M-MPS3 Firmware v1.3.2
+Build Date: Apr 20 2018
+Press Enter to stop auto boot...
+Enabling usb remote...
+USB Serial Number = 0000000000000
+Powering up system...
+ERROR: File not found \MB\HBI0309C\mbb_v141.ebf
+Switching on main power...
+Configuring motherboard (rev C, var A)...
+Reading Board File \MB\HBI0309C\Nanosoc\nanosoc.txt
+Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoc.bit
+Address: 0x00000000Address: 0x00020000Address: 0x00040000Address: 0x00060000Address: 0x00080000Address: 0x000A0000Address: 0x000C0000Address: 0x000E0000Address: 0x00100000Address: 0x00120000Address: 0x00140000Address: 0x00160000Address: 0x00180000Address: 0x001A0000Address: 0x001C0000Address: 0x001E0000Address: 0x00200000Address: 0x00220000Address: 0x00240000Address: 0x00260000Address: 0x00280000Address: 0x002A0000Address: 0x002C0000Address: 0x002E0000Address: 0x00300000Address: 0x00320000Address: 0x00340000Address: 0x00360000Address: 0x00380000Address: 0x003A0000Address: 0x003C0000Address: 0x003E0000Address: 0x00400000Address: 0x00420000Address: 0x00440000Address: 0x00460000Address: 0x00480000Address: 0x004A0000Address: 0x004C0000Address: 0x004E0000Address: 0x00500000Address: 0x00520000Address: 0x00540000Address: 0x00560000Address: 0x00580000Address: 0x005A0000Address: 0x005C0000Address: 0x005E0000Address: 0x00600000Address: 0x00620000Address: 0x00640000Address: 0x00660000Address: 0x00680000Address: 0x006A0000Address: 0x006C0000Address: 0x006E0000Address: 0x00700000Address: 0x00720000Address: 0x00740000Address: 0x00760000Address: 0x00780000Address: 0x007A0000Address: 0x007C0000Address: 0x007E0000Address: 0x00800000Address: 0x00820000Address: 0x00840000Address: 0x00860000Address: 0x00880000Address: 0x008A0000Address: 0x008C0000Address: 0x008E0000Address: 0x00900000Address: 0x00920000Address: 0x00940000Address: 0x00960000Address: 0x00980000Address: 0x009A0000Address: 0x009C0000Address: 0x009E0000Address: 0x00A00000Address: 0x00A20000Address: 0x00A40000Address: 0x00A60000Address: 0x00A80000Address: 0x00AA0000Address: 0x00AC0000Address: 0x00AE0000Address: 0x00B00000Address: 0x00B20000Address: 0x00B40000Address: 0x00B60000
+FPGA configuration complete.
+OSCCLK0 : 25.000000MHz
+OSCCLK1 : 50.000000MHz
+OSCCLK2 : 50.000000MHz
+OSCCLK3 : 50.000000MHz
+OSCCLK4 : 24.576000MHz
+OSCCLK5 : 23.750000MHz
+OSCCLK setup: PASSED
+GTXCLK (100): PASSED
+FPGA does not support MCC<>SCC interface
+WARNING: Image file not found
+Reading images file \MB\HBI0309C\Nanosoc\images.txt
+ERROR: File not found \MB\HBI0309C\Nanosoc\images.txt
+ERROR: The SMSC9220 bus is in 16-bit mode. 32-bit mode was expected.
+Reading the Ethernet ID register failed.
+Check that the SMSC9220 device is present on the system.
+SMSC9220 initialisation failed.
+UART0: MCC, UART1: FPGA0
+Releasing CB_nRST
+Enabling debug USB.
+USB Serial Number = 0000000000000
+ARM V2M-MPS3 Boot loader v1.0.0
+HBI0309 build 567
+ARM V2M-MPS3 Firmware v1.3.2
+Build Date: Apr 20 2018
+Press Enter to stop auto boot...
+Enabling usb remote...
+USB Serial Number = 0000000000000
+Powering up system...
+ERROR: File not found \MB\HBI0309C\mbb_v141.ebf
+Switching on main power...
+Configuring motherboard (rev C, var A)...
+Reading Board File \MB\HBI0309C\Nanosoc\nanosoc.txt
+Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoc.bit
+Address: 0x00000000Address: 0x00020000Address: 0x00040000Address: 0x00060000Address: 0x00080000Address: 0x000A0000Address: 0x000C0000Address: 0x000E0000Address: 0x00100000Address: 0x00120000Address: 0x00140000Address: 0x00160000Address: 0x00180000Address: 0x001A0000Address: 0x001C0000Address: 0x001E0000Address: 0x00200000Address: 0x00220000Address: 0x00240000Address: 0x00260000Address: 0x00280000Address: 0x002A0000Address: 0x002C0000Address: 0x002E0000Address: 0x00300000Address: 0x00320000Address: 0x00340000Address: 0x00360000Address: 0x00380000Address: 0x003A0000Address: 0x003C0000Address: 0x003E0000Address: 0x00400000Address: 0x00420000Address: 0x00440000Address: 0x00460000Address: 0x00480000Address: 0x004A0000Address: 0x004C0000Address: 0x004E0000Address: 0x00500000Address: 0x00520000Address: 0x00540000Address: 0x00560000Address: 0x00580000Address: 0x005A0000Address: 0x005C0000Address: 0x005E0000Address: 0x00600000Address: 0x00620000Address: 0x00640000Address: 0x00660000Address: 0x00680000Address: 0x006A0000Address: 0x006C0000Address: 0x006E0000Address: 0x00700000Address: 0x00720000Address: 0x00740000Address: 0x00760000Address: 0x00780000Address: 0x007A0000Address: 0x007C0000Address: 0x007E0000Address: 0x00800000Address: 0x00820000Address: 0x00840000Address: 0x00860000Address: 0x00880000Address: 0x008A0000Address: 0x008C0000Address: 0x008E0000Address: 0x00900000Address: 0x00920000Address: 0x00940000Address: 0x00960000Address: 0x00980000Address: 0x009A0000Address: 0x009C0000Address: 0x009E0000Address: 0x00A00000Address: 0x00A20000Address: 0x00A40000Address: 0x00A60000Address: 0x00A80000Address: 0x00AA0000Address: 0x00AC0000Address: 0x00AE0000Address: 0x00B00000Address: 0x00B20000Address: 0x00B40000Address: 0x00B60000
+FPGA configuration complete.
+OSCCLK0 : 25.000000MHz
+OSCCLK1 : 50.000000MHz
+OSCCLK2 : 50.000000MHz
+OSCCLK3 : 50.000000MHz
+OSCCLK4 : 24.576000MHz
+OSCCLK5 : 23.750000MHz
+OSCCLK setup: PASSED
+GTXCLK (100): PASSED
+FPGA does not support MCC<>SCC interface
+WARNING: Image file not found
+Reading images file \MB\HBI0309C\Nanosoc\images.txt
+ERROR: File not found \MB\HBI0309C\Nanosoc\images.txt
+ERROR: The SMSC9220 bus is in 16-bit mode. 32-bit mode was expected.
+Reading the Ethernet ID register failed.
+Check that the SMSC9220 device is present on the system.
+SMSC9220 initialisation failed.
+UART0: MCC, UART1: FPGA0
+Releasing CB_nRST
+Enabling debug USB.
+USB Serial Number = 0000000000000
+ARM V2M-MPS3 Boot loader v1.0.0
+HBI0309 build 567
+ARM V2M-MPS3 Firmware v1.3.2
+Build Date: Apr 20 2018
+Press Enter to stop auto boot...
+Enabling usb remote...
+USB Serial Number = 0000000000000
+Powering up system...
+ERROR: File not found \MB\HBI0309C\mbb_v141.ebf
+Switching on main power...
+Configuring motherboard (rev C, var A)...
+Reading Board File \MB\HBI0309C\Nanosoc\nanosoc.txt
+Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoc.bit
+Address: 0x00000000Address: 0x00020000Address: 0x00040000Address: 0x00060000Address: 0x00080000Address: 0x000A0000Address: 0x000C0000Address: 0x000E0000Address: 0x00100000Address: 0x00120000Address: 0x00140000Address: 0x00160000Address: 0x00180000Address: 0x001A0000Address: 0x001C0000Address: 0x001E0000Address: 0x00200000Address: 0x00220000Address: 0x00240000Address: 0x00260000Address: 0x00280000Address: 0x002A0000Address: 0x002C0000Address: 0x002E0000Address: 0x00300000Address: 0x00320000Address: 0x00340000Address: 0x00360000Address: 0x00380000Address: 0x003A0000Address: 0x003C0000Address: 0x003E0000Address: 0x00400000Address: 0x00420000Address: 0x00440000Address: 0x00460000Address: 0x00480000Address: 0x004A0000Address: 0x004C0000Address: 0x004E0000Address: 0x00500000Address: 0x00520000Address: 0x00540000Address: 0x00560000Address: 0x00580000Address: 0x005A0000Address: 0x005C0000Address: 0x005E0000Address: 0x00600000Address: 0x00620000Address: 0x00640000Address: 0x00660000Address: 0x00680000Address: 0x006A0000Address: 0x006C0000Address: 0x006E0000Address: 0x00700000Address: 0x00720000Address: 0x00740000Address: 0x00760000Address: 0x00780000Address: 0x007A0000Address: 0x007C0000Address: 0x007E0000Address: 0x00800000Address: 0x00820000Address: 0x00840000Address: 0x00860000Address: 0x00880000Address: 0x008A0000Address: 0x008C0000Address: 0x008E0000Address: 0x00900000Address: 0x00920000Address: 0x00940000Address: 0x00960000Address: 0x00980000Address: 0x009A0000Address: 0x009C0000Address: 0x009E0000Address: 0x00A00000Address: 0x00A20000Address: 0x00A40000Address: 0x00A60000Address: 0x00A80000Address: 0x00AA0000Address: 0x00AC0000Address: 0x00AE0000Address: 0x00B00000Address: 0x00B20000Address: 0x00B40000Address: 0x00B60000
+FPGA configuration complete.
+OSCCLK0 : 25.000000MHz
+OSCCLK1 : 50.000000MHz
+OSCCLK2 : 50.000000MHz
+OSCCLK3 : 50.000000MHz
+OSCCLK4 : 24.576000MHz
+OSCCLK5 : 23.750000MHz
+OSCCLK setup: PASSED
+GTXCLK (100): PASSED
+FPGA does not support MCC<>SCC interface
+WARNING: Image file not found
+Reading images file \MB\HBI0309C\Nanosoc\images.txt
+ERROR: File not found \MB\HBI0309C\Nanosoc\images.txt
+ERROR: The SMSC9220 bus is in 16-bit mode. 32-bit mode was expected.
+Reading the Ethernet ID register failed.
+Check that the SMSC9220 device is present on the system.
+SMSC9220 initialisation failed.
+UART0: MCC, UART1: FPGA0
+Releasing CB_nRST
+Enabling debug USB.
+USB Serial Number = 0000000000000
+ARM V2M-MPS3 Boot loader v1.0.0
+HBI0309 build 567
+ARM V2M-MPS3 Firmware v1.3.2
+Build Date: Apr 20 2018
+Press Enter to stop auto boot...
+Enabling usb remote...
+USB Serial Number = 0000000000000
+Powering up system...
+ERROR: File not found \MB\HBI0309C\mbb_v141.ebf
+Switching on main power...
+Configuring motherboard (rev C, var A)...
+Reading Board File \MB\HBI0309C\Nanosoc\nanosoc.txt
+Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoc.bit
+Address: 0x00000000Address: 0x00020000Address: 0x00040000Address: 0x00060000Address: 0x00080000Address: 0x000A0000Address: 0x000C0000Address: 0x000E0000Address: 0x00100000Address: 0x00120000Address: 0x00140000Address: 0x00160000Address: 0x00180000Address: 0x001A0000Address: 0x001C0000Address: 0x001E0000Address: 0x00200000Address: 0x00220000Address: 0x00240000Address: 0x00260000Address: 0x00280000Address: 0x002A0000Address: 0x002C0000Address: 0x002E0000Address: 0x00300000Address: 0x00320000Address: 0x00340000Address: 0x00360000Address: 0x00380000Address: 0x003A0000Address: 0x003C0000Address: 0x003E0000Address: 0x00400000Address: 0x00420000Address: 0x00440000Address: 0x00460000Address: 0x00480000Address: 0x004A0000Address: 0x004C0000Address: 0x004E0000Address: 0x00500000Address: 0x00520000Address: 0x00540000Address: 0x00560000Address: 0x00580000Address: 0x005A0000Address: 0x005C0000Address: 0x005E0000Address: 0x00600000Address: 0x00620000Address: 0x00640000Address: 0x00660000Address: 0x00680000Address: 0x006A0000Address: 0x006C0000Address: 0x006E0000Address: 0x00700000Address: 0x00720000Address: 0x00740000Address: 0x00760000Address: 0x00780000Address: 0x007A0000Address: 0x007C0000Address: 0x007E0000Address: 0x00800000Address: 0x00820000Address: 0x00840000Address: 0x00860000Address: 0x00880000Address: 0x008A0000Address: 0x008C0000Address: 0x008E0000Address: 0x00900000Address: 0x00920000Address: 0x00940000Address: 0x00960000Address: 0x00980000Address: 0x009A0000Address: 0x009C0000Address: 0x009E0000Address: 0x00A00000Address: 0x00A20000Address: 0x00A40000Address: 0x00A60000Address: 0x00A80000Address: 0x00AA0000Address: 0x00AC0000Address: 0x00AE0000Address: 0x00B00000Address: 0x00B20000Address: 0x00B40000Address: 0x00B60000
+FPGA configuration complete.
+OSCCLK0 : 25.000000MHz
+OSCCLK1 : 50.000000MHz
+OSCCLK2 : 50.000000MHz
+OSCCLK3 : 50.000000MHz
+OSCCLK4 : 24.576000MHz
+OSCCLK5 : 23.750000MHz
+OSCCLK setup: PASSED
+GTXCLK (100): PASSED
+FPGA does not support MCC<>SCC interface
+WARNING: Image file not found
+Reading images file \MB\HBI0309C\Nanosoc\images.txt
+ERROR: File not found \MB\HBI0309C\Nanosoc\images.txt
+ERROR: The SMSC9220 bus is in 16-bit mode. 32-bit mode was expected.
+Reading the Ethernet ID register failed.
+Check that the SMSC9220 device is present on the system.
+SMSC9220 initialisation failed.
+UART0: MCC, UART1: FPGA0
+Releasing CB_nRST
+Enabling debug USB.
+USB Serial Number = 0000000000000
+ARM V2M-MPS3 Boot loader v1.0.0
+HBI0309 build 567
+ARM V2M-MPS3 Firmware v1.3.2
+Build Date: Apr 20 2018
+Press Enter to stop auto boot...
+Enabling usb remote...
+USB Serial Number = 0000000000000
+Powering up system...
+ERROR: File not found \MB\HBI0309C\mbb_v141.ebf
+Switching on main power...
+Configuring motherboard (rev C, var A)...
+Reading Board File \MB\HBI0309C\Nanosoc\nanosoc.txt
+Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoc.bit
+Address: 0x00000000Address: 0x00020000Address: 0x00040000Address: 0x00060000Address: 0x00080000Address: 0x000A0000Address: 0x000C0000Address: 0x000E0000Address: 0x00100000Address: 0x00120000Address: 0x00140000Address: 0x00160000Address: 0x00180000Address: 0x001A0000Address: 0x001C0000Address: 0x001E0000Address: 0x00200000Address: 0x00220000Address: 0x00240000Address: 0x00260000Address: 0x00280000Address: 0x002A0000Address: 0x002C0000Address: 0x002E0000Address: 0x00300000Address: 0x00320000Address: 0x00340000Address: 0x00360000Address: 0x00380000Address: 0x003A0000Address: 0x003C0000Address: 0x003E0000Address: 0x00400000Address: 0x00420000Address: 0x00440000Address: 0x00460000Address: 0x00480000Address: 0x004A0000Address: 0x004C0000Address: 0x004E0000Address: 0x00500000Address: 0x00520000Address: 0x00540000Address: 0x00560000Address: 0x00580000Address: 0x005A0000Address: 0x005C0000Address: 0x005E0000Address: 0x00600000Address: 0x00620000Address: 0x00640000Address: 0x00660000Address: 0x00680000Address: 0x006A0000Address: 0x006C0000Address: 0x006E0000Address: 0x00700000Address: 0x00720000Address: 0x00740000Address: 0x00760000Address: 0x00780000Address: 0x007A0000Address: 0x007C0000Address: 0x007E0000Address: 0x00800000Address: 0x00820000Address: 0x00840000Address: 0x00860000Address: 0x00880000Address: 0x008A0000Address: 0x008C0000Address: 0x008E0000Address: 0x00900000Address: 0x00920000Address: 0x00940000Address: 0x00960000Address: 0x00980000Address: 0x009A0000Address: 0x009C0000Address: 0x009E0000Address: 0x00A00000Address: 0x00A20000Address: 0x00A40000Address: 0x00A60000Address: 0x00A80000Address: 0x00AA0000Address: 0x00AC0000Address: 0x00AE0000Address: 0x00B00000Address: 0x00B20000Address: 0x00B40000Address: 0x00B60000
+FPGA configuration complete.
+OSCCLK0 : 25.000000MHz
+OSCCLK1 : 50.000000MHz
+OSCCLK2 : 50.000000MHz
+OSCCLK3 : 50.000000MHz
+OSCCLK4 : 24.576000MHz
+OSCCLK5 : 23.750000MHz
+OSCCLK setup: PASSED
+GTXCLK (100): PASSED
+FPGA does not support MCC<>SCC interface
+WARNING: Image file not found
+Reading images file \MB\HBI0309C\Nanosoc\images.txt
+ERROR: File not found \MB\HBI0309C\Nanosoc\images.txt
+ERROR: The SMSC9220 bus is in 16-bit mode. 32-bit mode was expected.
+Reading the Ethernet ID register failed.
+Check that the SMSC9220 device is present on the system.
+SMSC9220 initialisation failed.
+UART0: MCC, UART1: FPGA0
+Releasing CB_nRST
+Enabling debug USB.
+USB Serial Number = 0000000000000
+External reset request...
+Resets released...                    
+ARM V2M-MPS3 Boot loader v1.0.0
+HBI0309 build 567
+ARM V2M-MPS3 Firmware v1.3.2
+Build Date: Apr 20 2018
+Press Enter to stop auto boot...
+Enabling usb remote...
+USB Serial Number = 0000000000000
+Powering up system...
+ERROR: File not found \MB\HBI0309C\mbb_v141.ebf
+Switching on main power...
+Configuring motherboard (rev C, var A)...
+Reading Board File \MB\HBI0309C\Nanosoc\nanosoc.txt
+Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoc.bit
+Address: 0x00000000Address: 0x00020000Address: 0x00040000Address: 0x00060000Address: 0x00080000Address: 0x000A0000Address: 0x000C0000Address: 0x000E0000Address: 0x00100000Address: 0x00120000Address: 0x00140000Address: 0x00160000Address: 0x00180000Address: 0x001A0000Address: 0x001C0000Address: 0x001E0000Address: 0x00200000Address: 0x00220000Address: 0x00240000Address: 0x00260000Address: 0x00280000Address: 0x002A0000Address: 0x002C0000Address: 0x002E0000Address: 0x00300000Address: 0x00320000Address: 0x00340000Address: 0x00360000Address: 0x00380000Address: 0x003A0000Address: 0x003C0000Address: 0x003E0000Address: 0x00400000Address: 0x00420000Address: 0x00440000Address: 0x00460000Address: 0x00480000Address: 0x004A0000Address: 0x004C0000Address: 0x004E0000Address: 0x00500000Address: 0x00520000Address: 0x00540000Address: 0x00560000Address: 0x00580000Address: 0x005A0000Address: 0x005C0000Address: 0x005E0000Address: 0x00600000Address: 0x00620000Address: 0x00640000Address: 0x00660000Address: 0x00680000Address: 0x006A0000Address: 0x006C0000Address: 0x006E0000Address: 0x00700000Address: 0x00720000Address: 0x00740000Address: 0x00760000Address: 0x00780000Address: 0x007A0000Address: 0x007C0000Address: 0x007E0000Address: 0x00800000Address: 0x00820000Address: 0x00840000Address: 0x00860000Address: 0x00880000Address: 0x008A0000Address: 0x008C0000Address: 0x008E0000Address: 0x00900000Address: 0x00920000Address: 0x00940000Address: 0x00960000Address: 0x00980000Address: 0x009A0000Address: 0x009C0000Address: 0x009E0000Address: 0x00A00000Address: 0x00A20000Address: 0x00A40000Address: 0x00A60000Address: 0x00A80000Address: 0x00AA0000Address: 0x00AC0000Address: 0x00AE0000Address: 0x00B00000Address: 0x00B20000Address: 0x00B40000Address: 0x00B60000
+FPGA configuration complete.
+OSCCLK0 : 25.000000MHz
+OSCCLK1 : 50.000000MHz
+OSCCLK2 : 50.000000MHz
+OSCCLK3 : 50.000000MHz
+OSCCLK4 : 24.576000MHz
+OSCCLK5 : 23.750000MHz
+OSCCLK setup: PASSED
+GTXCLK (100): PASSED
+FPGA does not support MCC<>SCC interface
+WARNING: Image file not found
+Reading images file \MB\HBI0309C\Nanosoc\images.txt
+ERROR: File not found \MB\HBI0309C\Nanosoc\images.txt
+ERROR: The SMSC9220 bus is in 16-bit mode. 32-bit mode was expected.
+Reading the Ethernet ID register failed.
+Check that the SMSC9220 device is present on the system.
+SMSC9220 initialisation failed.
+UART0: MCC, UART1: FPGA0
+Releasing CB_nRST
+Enabling debug USB.
+USB Serial Number = 0000000000000
