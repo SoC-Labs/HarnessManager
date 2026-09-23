@@ -73,7 +73,7 @@ log = logging.getLogger(__name__)
 
 API = "/api/v1"
 ADAPTERS = ("deploy", "consoles", "debug", "resets", "clocks", "telemetry", "controller",
-            "storage")
+            "storage", "power")
 #: WebSocket frames: consoles send board bytes in frames of at most this size.
 MAX_WS_FRAME = 64 * 1024
 
@@ -635,7 +635,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                            volumes=_strings(b, "volumes"),
                            scan_usb=_bool(b, "scan_usb", True),
                            scan_network=_bool(b, "scan_network", True), timeout_s=timeout)
-        running = d.jobs.running()
+        # Engine-wide jobs (an update check, an app switch) hold no board's control port.
+        running = [j for j in d.jobs.running() if j.board_id]
         if running:
             job = running[0]
             err = HeldError(f"{job.describe()} is running on {job.board_id}; a probe now could "

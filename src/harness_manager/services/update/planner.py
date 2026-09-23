@@ -120,6 +120,7 @@ class Plan:
             "warnings": list(self.warnings), "blockers": list(self.blockers),
             "components": list(self.components), "skipped": dict(self.skipped),
             "base": self.base, "os_slot": self.os_slot,
+            "fingerprint": self.fingerprint(),
         }
 
 

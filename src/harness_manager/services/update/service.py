@@ -49,6 +49,19 @@ def _state_dir(engine: Any, state_dir: Path | None) -> Path:
     return resolve_state_dir(getattr(engine, "config", None))
 
 
+def releases_summary(ch: Any) -> dict[str, list[dict[str, Any]]]:
+    """The channel's releases as listed, the one it calls current marked (daemon + UI)."""
+    return {
+        "harness": [{"version": r.version, "status": r.status, "static_id": r.identity.static_id,
+                     "harness": r.identity.harness, "impl": r.identity.impl, "rekey": r.rekey,
+                     "released_at": r.released_at, "notes_url": r.notes_url,
+                     "current": r.version == ch.harness_current} for r in ch.harness],
+        "app": [{"version": r.version, "status": r.status, "released_at": r.released_at,
+                 "notes_url": r.notes_url, "current": r.version == ch.app_current}
+                for r in ch.app],
+    }
+
+
 class UpdateService:
     def __init__(self, engine: Any = None, *, state_dir: Path | None = None,
                  trust: TrustStore | None = None, token: str | None = None,
@@ -172,6 +185,7 @@ class UpdateService:
             "warnings": list(verified.warnings),
             "harness_current": ch.harness_current, "app_current": ch.app_current,
             "app_running": self.app_version, "app_update": "",
+            "releases": releases_summary(ch),
         }
         offer = self.app().offer(ch.app, ch.app_current) if ch.app_current else None
         if offer is not None:

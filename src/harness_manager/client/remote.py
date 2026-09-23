@@ -595,6 +595,30 @@ class _Storage(_Proxy):
         return self._engine._http.get(self._path("storage/pending")).get("pending")
 
 
+class _Power(_Proxy):
+    """``session.power`` over ``GET/POST /boards/{bid}/power[/cycle]`` (lane L4). The daemon
+    always waits for the outlet to report ON again, so ``wait`` is not sent."""
+
+    def _state(self) -> dict[str, Any]:
+        return self._engine._http.get(self._path("power"))
+
+    @property
+    def label(self) -> str:
+        return str(self._state().get("device") or "")
+
+    def read(self) -> list[Reading]:
+        return list(_readings(self._state()))
+
+    @property
+    def cycle_reason(self) -> str:
+        return str(self._state().get("cycle_reason", ""))
+
+    def power_cycle(self, off_s: float = 5.0, *, wait: bool = True,
+                    progress: Progress | None = None) -> dict:
+        return self._engine.run_job(self._path("power/cycle"), {"off_s": off_s},
+                                    progress=progress)
+
+
 class _LabClient(_Proxy):
     """The pyverify ``ShellClient`` verbs ``cli/cmd_lab.py`` uses, as daemon lab calls.
 
@@ -665,6 +689,7 @@ class RemoteSession(BoardSession):
         self.telemetry = _Telemetry(engine, bid) if has("telemetry") else None
         self.controller = _Controller(engine, bid) if has("controller") else None
         self.storage = _Storage(engine, bid) if has("storage") else None
+        self.power = _Power(engine, bid) if has("power") else None
         self.shell = RemoteLabShell(engine, bid) if has("shell") else None
 
     def identity(self) -> Any:

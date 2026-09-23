@@ -318,7 +318,7 @@ def test_every_verb_has_a_success_and_a_failure_case():
     # daemon/ui run a real harness-manager-daemon process; their TSV is pinned in test_t13_process.py.
     # The update layouts need a signed channel; they are pinned in test_t7_cli.py.
     pinned_elsewhere = {"daemon", "ui", "app"} | {
-        k for k in TSV_COLUMNS if k.startswith("update ")}
+        k for k in TSV_COLUMNS if k.startswith(("update ", "power "))}
     assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS) - pinned_elsewhere
 
 

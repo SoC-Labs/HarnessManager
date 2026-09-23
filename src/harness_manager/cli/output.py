@@ -70,6 +70,8 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "sd install": ("BOARD_ID", "FILES", "BACKUP_SHA256"),
     "sd restore": ("BOARD_ID", "BACKUP", "SHA256"),
     "telemetry": READING_COLUMNS,
+    "power show": READING_COLUMNS,
+    "power cycle": ("BOARD_ID", "DEVICE", "OFF_S", "CONFIRMED_OFF", "CONFIRMED_ON", "SECONDS"),
     "help": ("TAB", "LINE", "TEXT"),
 }
 

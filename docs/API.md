@@ -152,3 +152,14 @@ Events: `lease.state {target, state: held|queued|released|expired|lost, holder, 
 | `POST /update/app` `{version?}` · `POST /update/app/rollback` | 202 jobs `update_app` / `update_app_rollback`. Refused (409) while any board job runs. |
 
 Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
+
+**As built by L4 (additive):**
+- `GET /power` also returns `board_id`.
+- The `power_cycle` job result is `{board_id, meter, off_s, was_on, confirmed_off, confirmed_on, seconds}`. `power.cycle` phases are `off` and `on` only: there is no board-agnostic witness that the board came back, so refresh on `job.done`.
+- `off_s` must be 2–300 s.
+- Engine-wide jobs have `board_id: ""`, and `/probe` is not refused for them.
+- `update/harness` takes optional `channel` and `source`. Without them, the plan comes from the check that issued the fingerprint, else the board's last check.
+- `update/rollback` takes optional `{backup_path, wait_s}`. `/update/app` takes optional `{channel, source}`.
+- Refusals carry `error.data.plan` (with the new `fingerprint`). Failed outcomes carry `error.data.outcome`.
+- The update check result has `releases: {harness: [...], app: [...]}`, and `plan.fingerprint`.
+- An app switch fails with HELD while this process holds any board: close the boards first.

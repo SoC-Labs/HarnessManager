@@ -297,6 +297,11 @@ def make_parser() -> argparse.ArgumentParser:
     cmd_update.register(sub)
     if "update" in sub.choices:
         verbs["update"] = sub.choices["update"]
+
+    # -- power (L4: the meter in boards.toml, and a cold power cycle) ------------------
+    from . import cmd_power
+    cmd_power.register(sub)
+    verbs["power"] = sub.choices["power"]
     return p
 
 
