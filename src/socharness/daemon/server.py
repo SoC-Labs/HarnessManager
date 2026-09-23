@@ -112,7 +112,8 @@ def _server_class() -> type:
 
 
 def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
-               pack_overrides: dict[str, dict] | None = None, log_level: str = "info") -> int:
+               pack_overrides: dict[str, dict] | None = None, log_level: str = "info",
+               demo: bool = False) -> int:
     """Serve until stopped. Returns 0; raises ``HarnessError`` if it cannot start."""
     import uvicorn
 
@@ -133,7 +134,13 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
             log.warning("socharnessd listens on %s, which is not loopback: anyone who can "
                         "reach it AND has the token controls your boards", listen)
         token = new_token()
-        engine = Engine(EngineConfig(state_dir=state_dir, pack_overrides=pack_overrides or {}))
+        if demo:        # scripted boards, no hardware: `socharness ui --demo`
+            from socharness.demo import DemoEngine
+
+            engine = DemoEngine(console_chatter=True)
+        else:
+            engine = Engine(EngineConfig(state_dir=state_dir,
+                                         pack_overrides=pack_overrides or {}))
         engine.packs()               # bad pack settings fail here, before anyone connects
         holder: dict[str, uvicorn.Server] = {}
 
@@ -178,6 +185,8 @@ def _parser() -> argparse.ArgumentParser:
                    help="address to bind (default 127.0.0.1; anything else prints a warning)")
     p.add_argument("--log-level", default="info",
                    choices=("critical", "error", "warning", "info", "debug"))
+    p.add_argument("--demo", action="store_true",
+                   help="serve scripted demo boards (no hardware); use its own --state-dir")
     # Development and test seam: per-pack constructor kwargs, as EngineConfig.pack_overrides.
     p.add_argument("--pack-overrides", default=None, help=argparse.SUPPRESS)
     return p
@@ -200,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise UsageError("--pack-overrides must be a JSON object")
         state_dir = Path(args.state_dir) if args.state_dir else default_state_dir()
         return run_daemon(state_dir, port=args.port, listen=args.listen,
-                          pack_overrides=overrides, log_level=args.log_level)
+                          pack_overrides=overrides, log_level=args.log_level, demo=args.demo)
     except HarnessError as exc:
         sys.stderr.write(error_line(exc).replace("socharness:", "socharnessd:", 1) + "\n")
         return int(exc.code)

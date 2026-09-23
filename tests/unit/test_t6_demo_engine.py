@@ -24,7 +24,14 @@ from socharness.core.services import (
     Engine,
     TelemetryService,
 )
-from socharness.gui.demo_engine import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
+from socharness.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
+
+
+@pytest.fixture
+def engine():
+    eng = DemoEngine(speed=0.02)      # 2 % of the demo's pacing
+    yield eng
+    eng.close_all()
 
 
 def topics(engine: DemoEngine) -> list:

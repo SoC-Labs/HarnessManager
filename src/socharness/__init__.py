@@ -12,8 +12,9 @@ Layers (see docs/ARCHITECTURE.md):
   ``hub`` (the fpgahub API).
 - ``socharness.services``: board-agnostic managers (console, debug, deploy,
   telemetry, update) built on board-pack adapters.
-- ``socharness.cli`` / ``socharness.gui``: front-ends. They render what the
-  engine reports and never talk to a board directly.
+- ``socharness.cli`` / ``socharness.web`` (served by ``socharness.daemon``):
+  front-ends. They render what the engine reports and never talk to a board
+  directly. ``socharness.demo`` is a scripted engine for demos and UI tests.
 - ``socharness_board_mps3``: the MPS3 board pack.
 """
 

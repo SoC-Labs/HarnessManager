@@ -1,10 +1,12 @@
 # Architecture
 
-The full rationale is in the feasibility report (<https://claude.ai/artifact/T12zMEjmH8ybHBBvZmi4N5>). This page is the short version for people working in the code.
+The full rationale is in the 2026-09-23 feasibility report. This page is the short version for people working in the code.
 
 ```
-            socharness CLI            socharness-gui (PySide6)
-                    \                   /
+     socharness CLI          web UI (browser: socharness.web, no build step)
+            \                      /  HTTP + WebSockets, token auth, 127.0.0.1
+             \          socharnessd (daemon: one engine per user, jobs, API v1)
+              \                  /
                      Engine (T1): probe, sessions, capability view, EventBus
                                   |
      services: deploy · console · debug · telemetry · update · xdc     (board-agnostic)
@@ -21,3 +23,5 @@ The full rationale is in the feasibility report (<https://claude.ai/artifact/T12
 - **Ethernet-only after the first install.** The capability view says exactly which features need the USB cable, and which need newer harness firmware.
 - **pyverify is the only MPS3 shell codec.** It lives in the platform repo, together with `FakeShell`, the executable spec of the firmware.
 - **Board packs keep the core board-agnostic.** A pack supplies discovery, the controller driver, the harness protocol, program methods, debug routes, telemetry sources, pin data and the bundle format.
+
+- **One engine per user, behind socharnessd.** A board's lock belongs to one process, so the CLI and the web UI share the daemon's session (docs/API.md). `socharness ui` starts it and opens the browser; `socharness ui --demo` serves scripted boards with no hardware.

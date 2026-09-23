@@ -123,7 +123,7 @@ def app_routes(app) -> set[tuple[str, str]]:
 def daemon_routes() -> set[tuple[str, str]]:
     """The real socharnessd's route table (Team T13), minus its catch-all 404 route."""
     from socharness.daemon.app import create_app
-    from socharness.gui.demo_engine import DemoEngine
+    from socharness.demo import DemoEngine
 
     engine = DemoEngine(speed=0)
     try:

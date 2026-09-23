@@ -93,3 +93,41 @@ def test_session_view_reports_service_availability(vboard):
     assert body["services"] == {"deploy": None, "consoles": None, "debug": None,
                                 "telemetry": None}
     assert body["job"] is None and body["job_kind"] is None
+
+
+# -- `socharness ui --demo` (lead, at the Qt retirement) -------------------------------------
+
+
+def test_ui_demo_serves_scripted_boards_from_its_own_state_dir(capsys, monkeypatch):
+    import json
+
+    import httpx
+
+    from socharness.cli.engine import ENV_NO_DAEMON, set_engine_factory
+    from socharness.daemon.state import read_info
+    from tests.fakes.t13_daemon import run_cli, state_dir, stop_state_dir
+
+    monkeypatch.delenv(ENV_NO_DAEMON, raising=False)
+    previous = set_engine_factory(None)
+    demo_dir = state_dir() / "demo"
+    try:
+        rc, out, err = run_cli(capsys, "--json", "ui", "--demo", "--no-browser")
+        assert rc == 0, err
+        url = json.loads(out)["url"]
+        token = url.split("#token=", 1)[1]
+        with httpx.Client(trust_env=False, timeout=10,
+                          headers={"Authorization": f"Bearer {token}"}) as c:
+            base = url.split("#")[0].rstrip("/")
+            found = c.post(base + "/api/v1/probe", json={}).json()["candidates"]
+            index = c.get(base + "/")
+        assert len(found) == 3 and all(cand["pack"] == "mps3" for cand in found)
+        assert index.status_code == 200 and "script-src 'self'" in index.headers[
+            "content-security-policy"]
+        # Negative twin: the real daemon's state dir holds no daemon; the demo never shares it.
+        assert read_info(demo_dir) is not None and read_info(state_dir()) is None
+        rc, _, err = run_cli(capsys, "daemon", "stop", "--demo")
+        assert rc == 0, err
+        assert read_info(demo_dir) is None
+    finally:
+        stop_state_dir(demo_dir)
+        set_engine_factory(previous)

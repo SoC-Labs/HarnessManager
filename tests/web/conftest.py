@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from socharness.gui.demo_engine import DemoEngine
+from socharness.demo import DemoEngine
 from tests.fakes.t14_mock_api import MockDaemon, real_daemon
 
 SCREENSHOTS = Path(__file__).resolve().parent / "screenshots"

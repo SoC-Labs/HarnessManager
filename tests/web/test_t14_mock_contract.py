@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import pytest
 
-from socharness.gui.demo_engine import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
+from socharness.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
 from tests.fakes.t14_api_contract import (
     api_md_endpoints,
     app_routes,

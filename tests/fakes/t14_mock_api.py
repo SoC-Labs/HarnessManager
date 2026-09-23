@@ -326,7 +326,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                serve_ui: bool = True) -> FastAPI:
     """The mock daemon as an ASGI app. ``engine`` defaults to a ``DemoEngine``."""
     if engine is None:
-        from socharness.gui.demo_engine import DemoEngine
+        from socharness.demo import DemoEngine
 
         engine = DemoEngine(speed=1.0)
     state = MockDaemonApp(engine, token)
@@ -940,7 +940,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mock", action="store_true",
                         help="serve this mock instead of the real socharnessd app (T13)")
     args = parser.parse_args(argv)
-    from socharness.gui.demo_engine import BOARD_USB, DemoEngine
+    from socharness.demo import BOARD_USB, DemoEngine
 
     engine = DemoEngine(speed=args.speed, console_chatter=True)
     if args.sd_journal:

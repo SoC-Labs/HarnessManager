@@ -42,7 +42,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | MPS3 `ControllerAdapter`, `StorageAdapter`, USB probe, `serial://` opener | T3 | `socharness_board_mps3/{mcc,sd,usb}.py`, `socharness/transports/direct.py` |
 | `ConsoleBroker`, `DebugService` + the MPS3 `DebugAdapter` | T4 | `socharness/services/{console,debug}.py`, `socharness_board_mps3/openocd.py` |
 | CLI over `Engine` | T5 | `socharness/cli/**` |
-| GUI over `Engine` | T6 | `socharness/gui/**` |
+| GUI over `Engine` | T6 | `socharness/gui/**` (retired at the T14 merge; the web UI replaced it, `DemoEngine` moved to `socharness/demo.py`) |
 
 ## Conventions the front-ends rely on
 

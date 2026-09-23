@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from socharness.gui.demo_engine import BOARD_FIELDED, BOARD_HELD, BOARD_USB
+from socharness.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect

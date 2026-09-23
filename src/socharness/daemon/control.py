@@ -127,12 +127,12 @@ def running(state_dir: Path) -> DaemonInfo | None:
     return info
 
 
-def _spawn(state_dir: Path, port: int, listen: str) -> subprocess.Popen:
+def _spawn(state_dir: Path, port: int, listen: str, demo: bool = False) -> subprocess.Popen:
     state_dir.mkdir(parents=True, exist_ok=True)
     log_path = daemon_log_path(state_dir)
     fd = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
     cmd = [sys.executable, "-m", "socharness.daemon", "--state-dir", str(state_dir),
-           "--port", str(port), "--listen", listen]
+           "--port", str(port), "--listen", listen] + (["--demo"] if demo else [])
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": fd,
                               "stderr": subprocess.STDOUT, "cwd": str(state_dir),
                               "close_fds": True}
@@ -170,7 +170,7 @@ def _log_tail(state_dir: Path, lines: int = 5) -> str:
 
 
 def start(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
-          wait_s: float = START_WAIT_S) -> DaemonInfo:
+          wait_s: float = START_WAIT_S, demo: bool = False) -> DaemonInfo:
     """Launch a detached daemon and wait until it answers. ``AlreadyError`` if one runs."""
     state_dir = Path(state_dir)
     current = running(state_dir)
@@ -178,7 +178,7 @@ def start(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
         raise AlreadyError(f"socharnessd is already running (pid {current.pid}, "
                            f"{current.base_url})",
                            hint="`socharness daemon stop` stops it")
-    child = _spawn(state_dir, port, listen)
+    child = _spawn(state_dir, port, listen, demo)
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         code = child.poll()
@@ -194,13 +194,13 @@ def start(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
                             hint=f"see {daemon_log_path(state_dir)}")
 
 
-def ensure_running(state_dir: Path, *, port: int = 0,
-                   listen: str = LOOPBACK) -> tuple[DaemonInfo, bool]:
+def ensure_running(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
+                   demo: bool = False) -> tuple[DaemonInfo, bool]:
     """(the running daemon, whether this call started it)."""
     current = running(Path(state_dir))
     if current is not None:
         return current, False
-    return start(Path(state_dir), port=port, listen=listen), True
+    return start(Path(state_dir), port=port, listen=listen, demo=demo), True
 
 
 def _wait_gone(pid: int, timeout: float) -> bool:

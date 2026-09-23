@@ -27,7 +27,6 @@ dependencies = [
 serial = ["pyserial>=3.5"]
 # a USB INA260 on the 12 V input (T9): board power where there is no metered plug
 ina260 = ["EasyMCP2221>=1.7"]
-gui = ["PySide6-Essentials>=6.6"]
 dev = [
     "httpx>=0.27",
     "pytest>=8",
@@ -35,13 +34,11 @@ dev = [
     "ruff>=0.6",
     "pyserial>=3.5",
 ]
-guitest = ["pytest-qt>=4.4", "PySide6-Essentials>=6.6"]
 # browser tests for the web UI (T14): drives the system Chrome, no browser download
 webtest = ["playwright>=1.40"]
 
 [project.scripts]
 socharness = "socharness.cli.main:main"
-socharness-gui = "socharness.gui:main"
 
 # Board packs register here. The MPS3 pack is in-tree for now and will split
 # out as socharness-board-mps3 once its interface has settled.
@@ -60,7 +57,6 @@ python_files = ["test_*.py", "scenario_*.py"]
 timeout = 60
 markers = [
     "hil: hardware-in-the-loop; needs SOCHARNESS_HIL=1, a board address, and david's board window",
-    "gui: needs PySide6 + pytest-qt (offscreen)",
     "slow: long-running integration scenario",
 ]
 addopts = "-m 'not hil'"

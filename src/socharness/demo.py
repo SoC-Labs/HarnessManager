@@ -1,9 +1,10 @@
-"""A scripted, in-process engine for demos and GUI tests (``socharness-gui --fake``).
+"""A scripted, in-process engine for demos and UI tests (``socharness ui --demo``).
 
 ``DemoEngine`` implements the frozen ``socharness.core.services.Engine``
 protocol with no hardware and no sockets except one optional 127.0.0.1
 listener per console export. It stands in for Team T1's ``Engine`` until that
-merges, and keeps working afterwards as the GUI's demo mode.
+merged, and keeps working as the web UI's demo mode (moved out of the retired
+Qt GUI package at the T14 merge).
 
 Three scripted boards, each modelled on a real lab situation:
 

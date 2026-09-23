@@ -2,24 +2,25 @@
 
 **Owner:** the lead agent (Claude), accountable to david.
 
-**Status (2026-09-23, evening): Wave 2 is running** (approved by david). Worktrees `../harness-manager-t12|t13|t14|t7|t9`:
+**Status (2026-09-23, late): Wave 2 is merged** (approved by david). Worktrees `../harness-manager-t12|t13|t14|t7|t9`:
 
 | Team | Scope | State |
 |---|---|---|
 | T12 | Harness evolution: ILA v0.11 + Linux, identify, wedged/rescue | merged (9fc2004, CCRs 64ae3be) |
 | T13 | `socharnessd` local service + RemoteEngine, per docs/API.md | merged (752d047, CCRs fdebfef) |
-| T14 | Clean web UI replacing Qt: no-build ES modules, served by socharnessd | running |
+| T14 | Clean web UI replacing Qt: no-build ES modules, served by socharnessd | merged (8f1a7ee, CCRs 1daa928); Qt retired |
 | T7 | Signed GitHub update channel, two-target bundles, app self-update | merged (7750171, CCRs e60d7f0) |
 | T9 | Telemetry sources and power | merged (764c472, CCRs 5ae5937) |
 
-Main at e60d7f0: 1484 passed, 7 skipped.
+`make check` on main: 1539 passed, 7 skipped (the Qt tests left with Qt). Try the UI with no board: `socharness ui --demo`.
 
 **Wave 2 follow-ups (not yet assigned):**
 - **socharnessd endpoints** for `session.power` (read, cycle) and `engine.update` (check, harness, app, rollback as jobs). The web UI greys both out until then.
 - **T7-2:** move `OsSlotAdapter` into `core.pack` as `BoardSession.os_slots`, with a T12 pack hook. This waits on the Linux lead's FLOW_CONTRACT.md.
 - **T7-5:** a public overlay-import hook on the pack (today `PackOverlayHandler` imports `socharness_board_<pack>.overlays` by name).
 - **Trust keys:** `update/trust.py` `PINNED_KEYS` is empty, so every channel is refused. david creates the minisign keys (harness-release, root, optional app-ci).
-- **Retire Qt** once T14 reaches parity.
+- **Web UI gaps** (Qt had none of these either): SD install page, Clocks, Board & XDC, lab verbs, an update page, a power-cycle button.
+- **T14-2 (declined):** a wedged harness keeps failing `GET /boards/{bid}` with its code; revisit only if the stale view proves confusing on a real board.
 
 T8 (hub mode) and T10 (XDC export) follow.
 
@@ -37,7 +38,7 @@ T8 (hub mode) and T10 (XDC export) follow.
 The lead's contract fixes after each merge are the `Apply T<n> contract change requests` commits.
 
 **Background reading:**
-- the feasibility report: <https://claude.ai/artifact/T12zMEjmH8ybHBBvZmi4N5>;
+- the 2026-09-23 feasibility report (its artifact was withdrawn; ask the lead for the local copy);
 - the harness-side handover: `mps3-nanosoc-platform/docs/planning/BOARD_MANAGER_HARNESS_HANDOVER.md`.
 
 **Next action:**
@@ -119,7 +120,7 @@ The fielded shell is `0x3F1A560F` (harness 1.0.0). Every row marked "today" can 
 | `src/socharness/transports/direct.py`, `src/socharness_board_mps3/{mcc,sd,usb}.py`, `tests/fakes/fake_mcc.py`, `tests/fakes/fake_sd.py` | T3 | controller, storage, USB discovery |
 | `src/socharness/services/{console,debug}.py`, `src/socharness_board_mps3/openocd.py`, `tests/fakes/stub_openocd.py` | T4 | consoles, debug sessions |
 | `src/socharness/cli/**` | T5 | all verbs, output formats |
-| `src/socharness/gui/**`, `tests/gui/**` | T6 | PySide6 app |
+| ~~`src/socharness/gui/**`, `tests/gui/**`~~ | T6 | PySide6 app, retired at the T14 merge (`DemoEngine` is now `socharness/demo.py`) |
 | `src/socharness/services/update/**`, `tests/fakes/fake_channel.py` | T7 | channel, verify, install, self-update |
 | `src/socharness/transports/hub.py`, `src/socharness_fpgahub/**`, `tests/fakes/fake_hub.py` | T8 | hub mode |
 | `src/socharness_board_mps3/telemetry.py`, `src/socharness/power/**` | T9 | telemetry sources, smart plugs |

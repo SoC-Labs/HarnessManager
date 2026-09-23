@@ -50,6 +50,13 @@ def _fmt_parent() -> argparse.ArgumentParser:
     return p
 
 
+def _demo_parent() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--demo", action="store_true",
+                   help="the demo daemon: scripted boards, no hardware (its own state dir)")
+    return p
+
+
 def _listen_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--port", type=int, default=0, metavar="N",
                    help="TCP port for the daemon (default: any free port)")
@@ -60,39 +67,41 @@ def _listen_args(p: argparse.ArgumentParser) -> None:
 def register(subparsers: argparse._SubParsersAction) -> None:
     """Add ``daemon`` and ``ui`` to the CLI's verbs."""
     fmt = _fmt_parent()
+    demo = _demo_parent()
     vp = subparsers.add_parser(
         "daemon", help="the local engine service (socharnessd): start, stop, status",
         description="socharnessd owns the engine so the CLI, the web UI and long-lived "
                     "sessions share one board session.",
         parents=[fmt], epilog=f"--tsv columns: {' '.join(DAEMON_COLUMNS)}")
     dsub = vp.add_subparsers(dest="daemon_cmd", required=True, metavar="ACTION")
-    sp = dsub.add_parser("start", help="start socharnessd (detached)", parents=[fmt])
+    sp = dsub.add_parser("start", help="start socharnessd (detached)", parents=[fmt, demo])
     _listen_args(sp)
     sp.add_argument("--foreground", action="store_true",
                     help="run in this process until Ctrl-C (for service managers)")
-    sp = dsub.add_parser("stop", help="stop socharnessd", parents=[fmt])
+    sp = dsub.add_parser("stop", help="stop socharnessd", parents=[fmt, demo])
     sp.add_argument("--force", action="store_true",
                     help="stop even while a job runs (the job is abandoned)")
     sp.add_argument("--timeout", type=float, default=10.0, metavar="S",
                     help="how long to wait for it to exit")
-    dsub.add_parser("status", help="is socharnessd running, and where", parents=[fmt])
+    dsub.add_parser("status", help="is socharnessd running, and where", parents=[fmt, demo])
     vp.set_defaults(fn=cmd_daemon)
 
     up = subparsers.add_parser(
         "ui", help="open the web UI (starts socharnessd if needed)",
         description="Start socharnessd if it is not running, print the UI's URL and open "
                     "a browser at it.",
-        parents=[fmt], epilog=f"--tsv columns: {' '.join(UI_COLUMNS)}")
+        parents=[fmt, demo], epilog=f"--tsv columns: {' '.join(UI_COLUMNS)}")
     up.add_argument("--no-browser", action="store_true",
                     help="only print the URL (e.g. to open it through `ssh -L N:127.0.0.1:N`)")
     _listen_args(up)
     up.set_defaults(fn=cmd_ui)
 
 
-def state_dir() -> Path:
+def state_dir(demo: bool = False) -> Path:
+    """The daemon's state dir. The demo daemon has its own, so it never holds real boards."""
     from socharness.daemon.state import default_state_dir
 
-    return default_state_dir()
+    return default_state_dir() / "demo" if demo else default_state_dir()
 
 
 def _check_listen(ctx: Ctx, listen: str, port: int) -> None:
@@ -108,7 +117,7 @@ def cmd_daemon(ctx: Ctx) -> int:
     from socharness.daemon import control
 
     a = ctx.args
-    sdir = state_dir()
+    sdir = state_dir(getattr(a, "demo", False))
     action = a.daemon_cmd
     if action == "start":
         _check_listen(ctx, a.listen, a.port)
@@ -116,8 +125,8 @@ def cmd_daemon(ctx: Ctx) -> int:
             from socharness.daemon.server import run_daemon
 
             ctx.note(f"socharnessd running in the foreground for {sdir}; Ctrl-C stops it")
-            return run_daemon(sdir, port=a.port, listen=a.listen)
-        info = control.start(sdir, port=a.port, listen=a.listen)
+            return run_daemon(sdir, port=a.port, listen=a.listen, demo=a.demo)
+        info = control.start(sdir, port=a.port, listen=a.listen, demo=a.demo)
         data = {"state": "running", "pid": info.pid, "port": info.port, "url": info.base_url,
                 "state_dir": str(sdir), "started": True}
         _emit(ctx, Result("daemon", data, rows=[_row(data)],
@@ -180,9 +189,9 @@ def cmd_ui(ctx: Ctx) -> int:
     from socharness.daemon import control
 
     a = ctx.args
-    sdir = state_dir()
+    sdir = state_dir(getattr(a, "demo", False))
     _check_listen(ctx, a.listen, a.port)
-    info, started = control.ensure_running(sdir, port=a.port, listen=a.listen)
+    info, started = control.ensure_running(sdir, port=a.port, listen=a.listen, demo=a.demo)
     if a.port and info.port != a.port:
         raise UsageError(f"socharnessd already runs on port {info.port}, not {a.port}",
                          hint="use that port (e.g. `ssh -L "
@@ -200,7 +209,8 @@ def cmd_ui(ctx: Ctx) -> int:
             "browser": opened}
     _emit(ctx, Result("ui", data, rows=[[url, info.port, info.pid, started]], human=[url]))
     how = "started" if started else "running"
-    ctx.note(f"socharnessd {how} (pid {info.pid}); `socharness daemon stop` stops it")
+    stop = "`socharness daemon stop --demo`" if a.demo else "`socharness daemon stop`"
+    ctx.note(f"socharnessd {'(demo) ' if a.demo else ''}{how} (pid {info.pid}); {stop} stops it")
     if headless:
         ctx.note("no display here: open the URL above in a browser (over ssh: "
                  f"`ssh -L {info.port}:127.0.0.1:{info.port} HOST`, then open it locally)")
