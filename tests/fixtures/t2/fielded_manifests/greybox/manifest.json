@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "static_id": "0x3F1A560F",
+  "rm_id": "0x00000000",
+  "rm_name": "greybox",
+  "clearing": {
+    "file": "greybox_clear.bin",
+    "len": 64992,
+    "crc32": "0x940bc0a0"
+  },
+  "partial": {
+    "file": "greybox.bin",
+    "len": 1283848,
+    "crc32": "0x9386cdbd"
+  },
+  "built": "2026-09-15",
+  "vivado": "2024.1",
+  "static_usercode": "0xD46FCDCB"
+}

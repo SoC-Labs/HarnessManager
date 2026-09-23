@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "static_id": "0x3F1A560F",
+  "rm_id": "0x00010007",
+  "rm_name": "clcd_demo",
+  "clearing": {
+    "file": "clcd_demo_clear.bin",
+    "len": 73672,
+    "crc32": "0xdda97f18"
+  },
+  "partial": {
+    "file": "clcd_demo.bin",
+    "len": 1319012,
+    "crc32": "0x3ca173df"
+  },
+  "built": "2026-09-15",
+  "vivado": "2024.1",
+  "static_usercode": "0xD46FCDCB"
+}

@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "static_id": "0x3F1A560F",
+  "rm_id": "0x01000001",
+  "rm_name": "nanosoc",
+  "clearing": {
+    "file": "nanosoc_clear.bin",
+    "len": 171600,
+    "crc32": "0x5ac2cf7a"
+  },
+  "partial": {
+    "file": "nanosoc.bin",
+    "len": 2356496,
+    "crc32": "0x11f714d4"
+  },
+  "built": "2026-09-15",
+  "vivado": "2024.1",
+  "static_usercode": "0xD46FCDCB"
+}
