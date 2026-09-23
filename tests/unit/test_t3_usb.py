@@ -93,6 +93,19 @@ def test_scan_builds_one_board_with_mcc_first_and_the_sd(tmp_path):
     assert "none was found" in cand.evidence
 
 
+def test_usb_board_id_is_the_clis_rule(tmp_path):
+    # mps3@usb:<first link address>, as socharness.cli.context builds for TARGET '-',
+    # so one board gets one session lock whether it was probed or given explicitly.
+    (scanned,) = probe_usb(SCAN, [], env=usb_env(linux_ft4232()))
+    assert scanned.board_id == "mps3@usb:serial:///dev/ttyUSB10"
+    (given,) = probe_usb(ProbeHints(serial_ports=("/dev/ttyUSB10",)), [],
+                         env=UsbEnv(list_ports=_no_scan, list_volumes=lambda: []))
+    assert given.board_id == scanned.board_id
+    sd = FakeSdVolume(tmp_path / "sd")
+    (vol_only,) = probe_usb(SCAN, [], env=usb_env((), [VolumeInfo("V2M-MPS3", str(sd.root))]))
+    assert vol_only.board_id == f"mps3@usb:{sd.root}"
+
+
 def test_unmounted_sd_is_noted_not_linked():
     vols = [VolumeInfo("V2M-MPS3", None, "/dev/sdb1")]
     (cand,) = probe_usb(SCAN, [], env=usb_env(linux_ft4232(), vols))

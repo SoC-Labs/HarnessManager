@@ -144,6 +144,98 @@ def test_backup_of_an_older_sd_state_is_refused(tmp_path, sd, storage):
     assert sd.bit.read_bytes() == b"x"
 
 
+# --- load_backup: a record from a path (the CLI's `sd install --backup ZIP`) --------------
+
+
+def test_load_backup_rebuilds_the_record_and_it_installs(tmp_path, sd, storage):
+    rec = storage.backup(tmp_path / "b")
+    loaded = storage.load_backup(Path(rec.path))
+    assert loaded == rec
+    storage.install({BIT: src(tmp_path, "n.bit", b"via path")}, backup=loaded)
+    assert sd.bit.read_bytes() == b"via path"
+
+
+def test_load_backup_refuses_a_truncated_archive(tmp_path, storage):
+    rec = storage.backup(tmp_path / "b")
+    data = Path(rec.path).read_bytes()
+    cut = tmp_path / "cut.zip"
+    cut.write_bytes(data[: len(data) // 2])
+    with pytest.raises(RefusedError, match="unreadable or incomplete") as info:
+        storage.load_backup(cut)
+    assert info.value.code == ExitCode.REFUSED
+
+
+def _flip_member_byte(path: Path, member: str) -> None:
+    with zipfile.ZipFile(path) as zf:
+        info = zf.getinfo(member)
+    data = bytearray(path.read_bytes())
+    name_len = int.from_bytes(data[info.header_offset + 26: info.header_offset + 28], "little")
+    extra_len = int.from_bytes(data[info.header_offset + 28: info.header_offset + 30], "little")
+    data[info.header_offset + 30 + name_len + extra_len] ^= 0xFF      # first byte of its data
+    path.write_bytes(bytes(data))
+
+
+def test_load_backup_refuses_a_tampered_archive(tmp_path, storage):
+    rec = storage.backup(tmp_path / "b")
+    path = Path(rec.path)
+    _flip_member_byte(path, "volume/config.txt")
+    with pytest.raises(RefusedError, match="sha256"):         # the sidecar catches it
+        storage.load_backup(path)
+    Path(rec.path + ".sha256").unlink()
+    with pytest.raises(RefusedError):                          # without it, CRC/manifest do
+        storage.load_backup(path)
+
+
+def test_only_the_sidecar_sees_a_change_outside_the_members(tmp_path, storage):
+    # Twin: bytes no member read covers (a directory entry's local header) pass the
+    # manifest check, so the sidecar is what proves "the archive that was taken".
+    rec = storage.backup(tmp_path / "b")
+    path = Path(rec.path)
+    with zipfile.ZipFile(path) as zf:
+        offset = zf.getinfo("volume/MB/").header_offset + 30        # its local file name
+    data = bytearray(path.read_bytes())
+    data[offset] ^= 0x20
+    path.write_bytes(bytes(data))
+    with pytest.raises(RefusedError, match="sha256"):
+        storage.load_backup(path)
+    Path(rec.path + ".sha256").unlink()
+    assert storage.load_backup(path).files == rec.files
+
+
+def test_load_backup_refuses_a_foreign_zip_and_a_missing_file(tmp_path, storage):
+    foreign = tmp_path / "photos.zip"
+    with zipfile.ZipFile(foreign, "w") as zf:
+        zf.writestr("cat.jpg", b"meow")
+    with pytest.raises(RefusedError, match="unreadable or incomplete"):
+        storage.load_backup(foreign)
+    with pytest.raises(RefusedError, match="does not exist"):
+        storage.load_backup(tmp_path / "nope.zip")
+
+
+def test_sidecarless_backup_still_installs_on_a_labelled_sd(tmp_path, sd):
+    # load_backup marks a sidecar-less record's label "(no .sha256 sidecar)". On a real
+    # volume the label IS known, so the label check must use the verified manifest's
+    # label, or a board could never install from such a backup.
+    labelled = Mps3Storage(str(sd.root), env=env([VolumeInfo("V2M-MPS3", str(sd.root))]))
+    rec = labelled.backup(tmp_path / "b")
+    Path(rec.path + ".sha256").unlink()
+    loaded = labelled.load_backup(Path(rec.path))
+    assert loaded.volume_label.endswith("(no .sha256 sidecar)")
+    labelled.install({BIT: src(tmp_path, "n.bit", b"ok")}, backup=loaded)
+    assert sd.bit.read_bytes() == b"ok"
+
+
+def test_backup_of_another_volume_is_refused(tmp_path, sd):
+    # Twin: a backup whose manifest names another volume is refused.
+    st = Mps3Storage(str(sd.root), env=env([VolumeInfo("V2M-MPS3", str(sd.root))]))
+    rec = st.backup(tmp_path / "b")
+    manifest = st.verify_backup(rec)
+    st._check_label(sd.root, manifest, rec)                       # same volume: accepted
+    other = Mps3Storage(str(sd.root), env=env([VolumeInfo("V2M-OTHER", str(sd.root))]))
+    with pytest.raises(RefusedError, match="is of volume 'V2M-MPS3', this SD is 'V2M-OTHER'"):
+        other._check_label(sd.root, manifest, rec)
+
+
 # --- rails: .ebf, MCC command files, path escapes, space ---------------------------------
 
 

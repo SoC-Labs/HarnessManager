@@ -63,6 +63,7 @@ import sys
 import threading
 import time
 import zipfile
+import zlib
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +94,10 @@ DAPLINK_LABEL_PREFIXES = ("MBED", "DAPLINK", "MAINTENANCE")
 DAPLINK_MARKERS = frozenset({"details.txt", "mbed.htm"})   # DAPLink virtual-filesystem files
 # Host OS metadata, not board configuration: never backed up, compared or removed.
 IGNORED_DIRS = frozenset({"system volume information", ".trashes", ".spotlight-v100", ".fseventsd"})
+# What a damaged archive can raise on read: a bad zip, a corrupt deflate stream
+# (zlib.error), a truncated member (EOFError), a missing member (KeyError), bad JSON.
+_ARCHIVE_ERRORS = (zipfile.BadZipFile, zlib.error, EOFError, KeyError, ValueError, OSError)
+NO_SIDECAR_FLAG = " (no .sha256 sidecar)"   # load_backup's weaker-provenance mark
 STALE_AFTER_S = 1800.0      # a foreign-host journal younger than this is assumed live (pyverify/sd.py)
 CHUNK = 1 << 20
 
@@ -641,7 +646,7 @@ class Mps3Storage:
                             h.update(chunk)
                     if h.hexdigest() != entry["sha256"]:
                         raise RefusedError(f"backup {path}: {entry['path']} does not match its manifest")
-        except (zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
+        except _ARCHIVE_ERRORS as exc:
             raise RefusedError(f"backup {path} is unreadable or incomplete: {exc}",
                                hint="take a fresh backup") from exc
         return manifest
@@ -662,7 +667,8 @@ class Mps3Storage:
         sidecar = path.with_name(path.name + ".sha256")
         recorded = actual
         if sidecar.is_file():
-            recorded = sidecar.read_text(encoding="utf-8").split()[0].strip()
+            words = sidecar.read_text(encoding="utf-8", errors="replace").split()
+            recorded = words[0].strip().lower() if words else ""      # T3: an empty sidecar
             if recorded != actual:
                 raise RefusedError(
                     f"backup {path} does not match its .sha256 sidecar: it was changed after the backup",
@@ -670,14 +676,20 @@ class Mps3Storage:
         try:
             with zipfile.ZipFile(path) as zf:
                 manifest = json.loads(zf.read(MANIFEST_NAME))
-        except (zipfile.BadZipFile, KeyError, ValueError, OSError) as exc:
+        except _ARCHIVE_ERRORS as exc:                 # T3: + zlib.error / EOFError
             raise RefusedError(f"backup {path} is unreadable or incomplete: {exc}",
                                hint="take a fresh backup") from exc
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("files"), list):
+            raise RefusedError(f"backup {path} has no valid {MANIFEST_NAME}")
         label = str(manifest.get("label", ""))
+        try:
+            created = float(manifest.get("created_at", 0.0))
+        except (TypeError, ValueError):
+            created = 0.0
         record = BackupRecord(
-            path=str(path), sha256=recorded, created_at=float(manifest.get("created_at", 0.0)),
-            files=len(manifest.get("files", [])),
-            volume_label=label if sidecar.is_file() else f"{label} (no .sha256 sidecar)",
+            path=str(path), sha256=recorded, created_at=created,
+            files=len(manifest["files"]),
+            volume_label=label if sidecar.is_file() else f"{label}{NO_SIDECAR_FLAG}",
         )
         self.verify_backup(record)
         return record
@@ -699,10 +711,7 @@ class Mps3Storage:
         self._refuse_if_pending(root, "install")
         plan = self._plan(root, files)
         manifest = self.verify_backup(backup)
-        current_label = self._label_of(root)
-        if current_label and backup.volume_label and current_label.upper() != backup.volume_label.upper():
-            raise RefusedError(f"backup {backup.path} is of volume {backup.volume_label!r}, "
-                               f"this SD is {current_label!r}")
+        self._check_label(root, manifest, backup)
         self._check_backup_is_current(root, manifest, plan, backup)
         total = sum(size for _, _, size in plan)
         overwritten = sum(dest.stat().st_size for dest, _, _ in plan if dest.is_file())
@@ -805,6 +814,13 @@ class Mps3Storage:
             plan.append((dest, src, src.stat().st_size))
         return plan
 
+    def _check_label(self, root: Path, manifest: dict[str, Any], backup: BackupRecord) -> None:
+        """The backup must be of this volume: compare the verified manifest's label."""
+        current = self._label_of(root)
+        taken = str(manifest.get("label", ""))
+        if current and taken and current.upper() != taken.upper():
+            raise RefusedError(f"backup {backup.path} is of volume {taken!r}, this SD is {current!r}")
+
     def _check_backup_is_current(self, root: Path, manifest: dict[str, Any],
                                  plan: list[tuple[Path, Path, int]], backup: BackupRecord) -> None:
         files, _ = _walk(root)
@@ -837,10 +853,7 @@ class Mps3Storage:
         emit: Progress = progress or (lambda phase, done, total: None)
         manifest = self.verify_backup(backup)
         root = Path(self.locate())
-        current_label = self._label_of(root)
-        if current_label and backup.volume_label and current_label.upper() != backup.volume_label.upper():
-            raise RefusedError(f"backup {backup.path} is of volume {backup.volume_label!r}, "
-                               f"this SD is {current_label!r}")
+        self._check_label(root, manifest, backup)
         journal = self._read_journal(root)
         if journal is not None and self._owner_alive(root, journal):
             raise HeldError(

@@ -219,7 +219,6 @@ def _board_links(board: Ft4232Board) -> list[Link]:
 class _UsbBoard:
     serial_links: list[Link] = field(default_factory=list)
     volume: Link | None = None
-    ident: str = ""
     evidence: list[str] = field(default_factory=list)
 
 
@@ -227,14 +226,14 @@ def _explicit(hints: ProbeHints, env: UsbEnv) -> list[_UsbBoard]:
     boards: list[_UsbBoard] = []
     serials = [_UsbBoard(serial_links=[Link(LinkKind.USB_SERIAL, _serial_url(url),
                                             "MCC console (given explicitly)")],
-                         ident=url, evidence=[f"MCC console {url} given explicitly"])
+                         evidence=[f"MCC console {url} given explicitly"])
                for url in hints.serial_ports]
     vols = []
     for spec in hints.volumes:
         # Explicit input gets an explicit refusal (the DAPLink drive, a non-SD folder).
         root = sdmod.Mps3Storage(spec, env=sdmod.SdEnv(list_volumes=env.list_volumes)).locate()
         vols.append(_UsbBoard(volume=Link(LinkKind.USB_MSD, root, f"{MSD_VOLUME_LABEL} volume (given explicitly)"),
-                              ident=root, evidence=[f"config SD {root} given explicitly"]))
+                              evidence=[f"config SD {root} given explicitly"]))
     if len(serials) == 1 and len(vols) == 1:
         s, v = serials[0], vols[0]
         s.volume = v.volume
@@ -261,7 +260,7 @@ def _scanned(env: UsbEnv) -> list[_UsbBoard]:
     sds = [v for v in volumes if v.label.upper() == MSD_VOLUME_LABEL.upper()]
     boards: list[_UsbBoard] = []
     for ft in fts:
-        b = _UsbBoard(serial_links=_board_links(ft), ident=ft.serial or ft.usb_path or ft.key)
+        b = _UsbBoard(serial_links=_board_links(ft))
         vid, pid = FT4232H_VID_PID
         where = f" at USB {ft.usb_path}" if ft.usb_path else ""
         b.evidence.append(f"FT4232H {vid:04x}:{pid:04x} serial {ft.serial or '?'}{where} ({ft.how})")
@@ -290,7 +289,7 @@ def _scanned(env: UsbEnv) -> list[_UsbBoard]:
                 b.volume = _volume_link(vol)
                 b.evidence.append(f"config SD {vol.root}: on the same USB hub {hub}")
         for vol in unmatched_sd:
-            boards.append(_UsbBoard(volume=_volume_link(vol), ident=vol.device or str(vol.root),
+            boards.append(_UsbBoard(volume=_volume_link(vol),
                                     evidence=[f"{MSD_VOLUME_LABEL} volume at {vol.root}; its FT4232H "
                                               "could not be told apart"]))
     for b in boards:
@@ -311,7 +310,9 @@ def _candidate(b: _UsbBoard) -> Candidate:
                      else "FPGA UARTs")
     if b.volume:
         parts.append("config SD")
-    return Candidate(pack="mps3", board_id=f"mps3@usb:{b.ident}", links=links,
+    # board_id = "mps3@usb:<first link address>", the same rule the CLI uses for a
+    # USB-only target, so one board has one session lock however it was found.
+    return Candidate(pack="mps3", board_id=f"mps3@usb:{links[0].address}", links=links,
                      label=f"MPS3 on Debug USB ({', '.join(parts)})",
                      evidence="; ".join(b.evidence))
 
