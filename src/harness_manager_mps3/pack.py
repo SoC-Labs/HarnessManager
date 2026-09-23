@@ -18,6 +18,10 @@ factory in its own module, and this file wires it in if it exists:
 | ``.identify:probe_identify(hints, found)``     | T12  | ``list[Candidate]`` found by UDP 6899 identify |
 | ``.uart:console_baud_info(endpoints, shell)``  | L2   | each console's rate (``ConsoleAdapter.console_baud_info``) |
 | ``.uart:console_set_baud(endpoints, shell, name, baud)`` | L2 | the ``uart_baud`` verb (``ConsoleAdapter.console_set_baud``) |
+| ``.hub:route_candidate(candidate, via)``       | L1   | the candidate routed ``via`` (boards.toml ``via``/``hub``) |
+| ``.tunnel:open_reach(candidate, ports)``       | L1   | ``Reach``: the SSH tunnel's local ports, or None (direct) |
+| ``.tunnel:probe_reach(spec, via, ...)``        | L1   | a short tunnel for a probe (control port only) |
+| ``.hub:make_hub_adapter(session)``             | L1   | ``Mps3Hub`` (leases, shares) when the board has a hub |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -47,6 +51,8 @@ from .constants import (
     JTAG_RBB_PORT,
     OPENOCD_CFG_DIR,
     PACED_CONSOLES,
+    PUSH_PORT,
+    XVC_PORT,
 )
 from .shell import Mps3Shell, parse_endpoint
 
@@ -66,6 +72,12 @@ def _with_config_links(candidate: Candidate) -> Candidate:
     """Add the links boards.toml gives this board (a power meter, a SYSMON JTAG cable)."""
     add = _hook("telemetry", "with_config_links")   # T9
     return add(candidate) if add is not None else candidate
+
+
+def _route(candidate: Candidate, via: str = "") -> Candidate:
+    """Route the candidate ``via`` an SSH hub and add its hub shares (L1; boards.toml)."""
+    route = _hook("hub", "route_candidate")   # L1
+    return route(candidate, via) if route is not None else candidate
 
 
 class Mps3Consoles:
@@ -141,9 +153,11 @@ class Mps3Session(BoardSession):
     def __init__(self, candidate: Candidate, shell: Mps3Shell | None,
                  console_ports: dict[str, int], rbb_port: int, *,
                  push_port: int | None = None, tftp_port: int | None = None,
-                 console_pace_s: float = DUT_CONSOLE_PACE_S) -> None:
+                 console_pace_s: float = DUT_CONSOLE_PACE_S, reach: Any = None) -> None:
         self.candidate = candidate
         self.shell = shell
+        # L1: how this session reaches the board (an SSH tunnel's local ports), or None.
+        self.reach = reach
         # Read by the deploy adapter (T2). None means "use the default or env override".
         self.push_port = push_port
         self.tftp_port = tftp_port
@@ -168,6 +182,7 @@ class Mps3Session(BoardSession):
             ("telemetry", "telemetry", "make_telemetry_adapter"),
             ("power", "telemetry", "make_power_adapter"),
             ("clocks", "clock", "make_clock_adapter"),
+            ("hub", "hub", "make_hub_adapter"),              # L1: leases and shares
         ):
             make = _hook(module, factory)
             if make is not None:
@@ -191,7 +206,22 @@ class Mps3Session(BoardSession):
         if self.shell is None:
             return Health(reachable=False, control_channel="offline",
                           notes=("no Ethernet link to the shell",))
-        return self.shell.health()
+        health = self.shell.health()
+        tunnel = getattr(self.reach, "tunnel", None)
+        if tunnel is not None and tunnel.state != "up":
+            # Through a tunnel, "no answer" may be the tunnel, not the board: say which.
+            note = f"the SSH tunnel to {tunnel.host} is {tunnel.state}: {tunnel.detail}"
+            health = Health(reachable=health.reachable, control_channel=health.control_channel,
+                            counters=health.counters, notes=(note, *health.notes))
+        return health
+
+    def close(self) -> None:
+        """Close the hub's share forwards, then the board's SSH tunnel (L1). Idempotent."""
+        hub = getattr(self, "hub", None)
+        if hub is not None:
+            hub.close()
+        if self.reach is not None:
+            self.reach.close()
 
 
 class Mps3Pack(BoardPack):
@@ -214,26 +244,50 @@ class Mps3Pack(BoardPack):
     def capability_specs(self) -> Iterable[CapabilitySpec]:
         return SPECS
 
-    def candidate_for_host(self, spec: str) -> Candidate:
+    def candidate_for_host(self, spec: str, via: str = "") -> Candidate:
+        """``via`` ("ssh:HOST") reaches the shell through an SSH tunnel (L1); boards.toml
+        ``via`` does the same when it is not given."""
         host, port = parse_endpoint(spec, CONTROL_PORT)
         addr = f"{host}:{port}"
-        return _with_config_links(Candidate(
+        return _route(_with_config_links(Candidate(
             pack=self.name,
             board_id=f"mps3@{addr}",
             links=(Link(LinkKind.ETHERNET, addr, "shell control channel"),),
             label=f"MPS3 at {addr}",
             evidence="given explicitly",
-        ))
+        )), via)
+
+    def hub_for(self, candidate: Candidate) -> Any:
+        """The board's hub adapter (leases, shares) without opening it; None without a hub (L1)."""
+        adapter_for = _hook("hub", "adapter_for")
+        return adapter_for(candidate) if adapter_for is not None else None
+
+    def _remote_ports(self) -> dict[str, int]:
+        """The board ports a session uses, by name (what an SSH tunnel forwards; L1)."""
+        return {"push": self._push_port or PUSH_PORT, "rbb": self._rbb_port,
+                **self._console_ports, "xvc": XVC_PORT}
+
+    def _identity(self, host: str, port: int, via: str, timeout_s: float) -> BoardIdentity:
+        if not via:
+            return Mps3Shell(host, port, timeout=timeout_s).identity()
+        probe_reach = _hook("tunnel", "probe_reach")   # L1
+        if probe_reach is None:
+            raise UsageError("this build cannot reach a board through an SSH tunnel")
+        with probe_reach(f"{host}:{port}", via, timeout_s=timeout_s) as (lhost, lport):
+            return Mps3Shell(lhost, lport, timeout=timeout_s).identity()
 
     def probe(self, hints: ProbeHints) -> list[Candidate]:
         found: list[Candidate] = []
         if hints.scan_network or hints.hosts:
             hosts = hints.hosts or (DEFAULT_SHELL_HOST,)
+            via = getattr(hints, "via", "")          # L1 (ProbeHints.via, CCR L1-1)
             for spec in hosts:
-                cand = self.candidate_for_host(spec)
+                cand = self.candidate_for_host(spec, via)
                 host, port = parse_endpoint(spec, CONTROL_PORT)
+                cand_via = _hook("tunnel", "candidate_via")
                 try:
-                    ident = Mps3Shell(host, port, timeout=hints.timeout_s).identity()
+                    ident = self._identity(host, port, cand_via(cand) if cand_via else "",
+                                           hints.timeout_s)
                 except HarnessError:
                     continue
                 found.append(Candidate(
@@ -255,12 +309,28 @@ class Mps3Pack(BoardPack):
 
     def open(self, candidate: Candidate) -> Mps3Session:
         eth = next((lk for lk in candidate.links if lk.kind == LinkKind.ETHERNET), None)
+        if eth is None and not any(lk.kind in (LinkKind.USB_SERIAL, LinkKind.USB_MSD)
+                                   for lk in candidate.links):
+            raise UsageError("this candidate has no link the MPS3 pack can use")
+        # L1: a via="ssh" candidate is reached through an SSH tunnel; the session then
+        # talks to the tunnel's local ports, and closing the session closes the tunnel.
+        open_reach = _hook("tunnel", "open_reach")
+        reach = open_reach(candidate, self._remote_ports()) if open_reach and eth else None
+        console_ports, rbb_port = self._console_ports, self._rbb_port
+        push_port, tftp_port = self._push_port, self._tftp_port
         shell = None
-        if eth is not None:
+        if reach is not None:
+            shell = Mps3Shell(reach.host, reach.ports["control"])
+            console_ports = {n: reach.ports[n] for n in self._console_ports}
+            rbb_port, push_port, tftp_port = reach.ports["rbb"], reach.ports["push"], None
+        elif eth is not None:
             host, port = parse_endpoint(eth.address, CONTROL_PORT)
             shell = Mps3Shell(host, port)
-        elif not any(lk.kind in (LinkKind.USB_SERIAL, LinkKind.USB_MSD) for lk in candidate.links):
-            raise UsageError("this candidate has no link the MPS3 pack can use")
-        return Mps3Session(candidate, shell, self._console_ports, self._rbb_port,
-                           push_port=self._push_port, tftp_port=self._tftp_port,
-                           console_pace_s=self._console_pace_s)
+        try:
+            return Mps3Session(candidate, shell, console_ports, rbb_port,
+                               push_port=push_port, tftp_port=tftp_port,
+                               console_pace_s=self._console_pace_s, reach=reach)
+        except BaseException:
+            if reach is not None:
+                reach.close()
+            raise
