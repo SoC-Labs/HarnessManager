@@ -122,6 +122,11 @@ class Mps3Shell:
             return Health(reachable=False, control_channel="offline")
         except HeldError:
             return Health(reachable=True, control_channel="busy")
+        if not diag.ok:
+            # A harness without `diag` (e.g. the July Linux v0.7 daemons) is a legitimate
+            # older harness, not a fault: reachable, idle, just no counters.
+            return Health(reachable=True, control_channel="idle",
+                          notes=("this harness does not report diagnostic counters (no `diag` verb)",))
         counters = {
             k: v
             for k, v in dataclasses.asdict(diag).items()

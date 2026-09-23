@@ -733,8 +733,10 @@ class Mps3Controller:
 
     # -- reboot with a witness --
 
-    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> None:
-        """Send a paced REBOOT and prove the board went down and came back."""
+    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> dict:
+        """Send a paced REBOOT and prove the board went down and came back.
+
+        Returns the witness summary (also kept on ``last_reboot``)."""
         emit: Progress = progress or (lambda phase, done, total: None)
         shell_before = self._probe_shell()
         with self._session() as con:
@@ -744,6 +746,7 @@ class Mps3Controller:
             sent_at = self._clock()
             emit("sent", 1, 3)
             self.last_reboot = self._witness(con, sent_at, wait_s, shell_before, emit)
+        return self.last_reboot.summary()
 
     def _probe_shell(self) -> str | None:
         if self._shell_probe is None:

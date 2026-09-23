@@ -12,7 +12,6 @@ from socharness.core.errors import (
     ActionFailedError,
     ExitCode,
     HarnessError,
-    IncompatibleError,
 )
 from socharness.core.model import Check
 from socharness.core.pack import DeployResult, OverlayRef, PreflightItem
@@ -100,26 +99,18 @@ def preflight_lines(items: Sequence[PreflightItem]) -> list[str]:
 
 
 def preflight_refusal(items: Sequence[PreflightItem], overlay_name: str) -> HarnessError | None:
-    """The error for a preflight with a MISMATCH, or None.
+    """The core rule (``socharness.core.pack.preflight_refusal``), shared with the GUI and service.
 
-    The deploy service owns which mismatches are identity mismatches (exit 14)
-    and which are other refusals (exit 15); its ``refusal()`` is used when it is
-    installed, so the CLI's exit code always equals the service's. Without it,
-    any MISMATCH is INCOMPATIBLE.
+    Identity items are marked by the deploy service. When items arrive
+    unmarked, the service's ``mark_identity`` is applied if it is installed.
     """
+    from socharness.core.pack import preflight_refusal as core_rule
+
     try:
-        from socharness.services.deploy import refusal
+        from socharness.services.deploy import mark_identity
     except ImportError:
-        refusal = None
-    if refusal is not None:
-        return refusal(items, overlay_name)
-    bad = [i for i in items if i.check == Check.MISMATCH]
-    if not bad:
-        return None
-    return IncompatibleError(
-        f"{overlay_name} does not match this board "
-        f"({'; '.join(f'{i.name}: {i.detail}' for i in bad)})",
-        hint="nothing was pushed; use an overlay built for the running shell")
+        return core_rule(items, overlay_name)
+    return core_rule(mark_identity(items), overlay_name)
 
 
 def _result_rows(board_id: str, overlay: str, r: DeployResult) -> list:

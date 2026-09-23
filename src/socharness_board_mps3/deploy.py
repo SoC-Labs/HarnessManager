@@ -239,7 +239,9 @@ class Mps3Deploy:
         return entry.ref if entry is not None else None
 
     def preflight(self, overlay: OverlayRef) -> Sequence[PreflightItem]:
-        return self._assess(overlay).items
+        from socharness.services.deploy import mark_identity
+
+        return mark_identity(self._assess(overlay).items)
 
     def deploy(self, overlay: OverlayRef, progress: Progress | None = None) -> DeployResult:
         report: Progress = progress or (lambda phase, done, total: None)

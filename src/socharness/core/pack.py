@@ -60,6 +60,28 @@ class PreflightItem:
     name: str                 # "shell_id matches", "crc", "clearing fits", "transport"
     check: Check              # OK / MISMATCH / UNCHECKED (UNCHECKED is not a pass)
     detail: str = ""
+    identity: bool = False    # a MISMATCH here means "built for a different board"
+
+
+def preflight_refusal(items: Sequence[PreflightItem], overlay_name: str):
+    """The error a front-end or service raises for a failed preflight, or None.
+
+    Any MISMATCH refuses. An identity MISMATCH is ``IncompatibleError`` (14);
+    any other is ``RefusedError`` (15). UNCHECKED never blocks. The rule lives
+    here so the CLI, GUI and deploy service always agree.
+    """
+    from .errors import IncompatibleError, RefusedError
+
+    bad = [i for i in items if i.check == Check.MISMATCH]
+    if not bad:
+        return None
+    text = "; ".join(f"{i.name}: {i.detail}" for i in bad)
+    if any(i.identity for i in bad):
+        return IncompatibleError(
+            f"{overlay_name} does not match this board ({text})",
+            hint="use an overlay built for the running shell, or restore the shell it was built for")
+    return RefusedError(f"refusing to deploy {overlay_name} ({text})",
+                        hint="nothing was pushed; rebuild or re-import the overlay")
 
 
 @dataclass(frozen=True)
@@ -149,8 +171,8 @@ class ControllerAdapter(Protocol):
         """
         ...
 
-    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> None:
-        """Reboot and prove it: the board went down, then came back."""
+    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> dict | None:
+        """Reboot and prove it: the board went down, then came back. Returns the evidence."""
         ...
 
     def temperatures(self) -> Sequence[Reading]: ...

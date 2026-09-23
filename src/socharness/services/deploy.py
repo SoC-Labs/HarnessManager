@@ -41,8 +41,6 @@ from socharness.core.errors import (
     AbsentError,
     ActionFailedError,
     HarnessError,
-    IncompatibleError,
-    RefusedError,
     UnavailableError,
 )
 from socharness.core.events import Event
@@ -77,22 +75,19 @@ def mismatches(items: Sequence[PreflightItem]) -> list[PreflightItem]:
     return [i for i in items if i.check == Check.MISMATCH]
 
 
+def mark_identity(items: Sequence[PreflightItem]) -> list[PreflightItem]:
+    """Set ``identity=True`` on the identity items (shell_id, static_usercode)."""
+    import dataclasses
+
+    return [dataclasses.replace(i, identity=True) if i.name in IDENTITY_ITEMS and not i.identity
+            else i for i in items]
+
+
 def refusal(items: Sequence[PreflightItem], overlay_name: str) -> HarnessError | None:
-    """The error to raise for a failed preflight, or None when nothing mismatched."""
-    bad = mismatches(items)
-    if not bad:
-        return None
-    text = "; ".join(f"{i.name}: {i.detail}" for i in bad)
-    if any(i.name in IDENTITY_ITEMS for i in bad):
-        return IncompatibleError(
-            f"{overlay_name} does not match this board ({text})",
-            hint="use an overlay built for the running shell (see `overlays`), "
-                 "or restore the shell it was built for",
-        )
-    return RefusedError(
-        f"refusing to deploy {overlay_name} ({text})",
-        hint="nothing was pushed; rebuild or re-import the overlay",
-    )
+    """The error to raise for a failed preflight, or None (delegates to the core rule)."""
+    from socharness.core.pack import preflight_refusal
+
+    return preflight_refusal(mark_identity(items), overlay_name)
 
 
 def _same_id(a: str, b: str) -> bool:
