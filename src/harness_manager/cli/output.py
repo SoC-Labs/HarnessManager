@@ -54,6 +54,8 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "restore": ("BOARD_ID", "RM_ID", "VERIFIED", "SECONDS", "TRANSPORT"),
     "console": ("NAME", "TEXT"),
     "console --export": ("BOARD_ID", "NAME", "HOST", "PORT"),
+    "pty": ("BOARD_ID", "NAME", "PATH", "DEVICE", "COMMAND", "CLIENTS", "HELD_BY"),
+    "baud": ("BOARD_ID", "NAME", "KIND", "BAUD", "SETTABLE", "SOURCE", "REASON"),
     "debug up|down|status": DEBUG_COLUMNS,
     "debug detect": ("BOARD_ID", "IDCODE"),
     "reset": ("BOARD_ID", "TARGET", "RESULT"),

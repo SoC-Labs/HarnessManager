@@ -163,3 +163,20 @@ Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
 - Refusals carry `error.data.plan` (with the new `fingerprint`). Failed outcomes carry `error.data.outcome`.
 - The update check result has `releases: {harness: [...], app: [...]}`, and `plan.fingerprint`.
 - An app switch fails with HELD while this process holds any board: close the boards first.
+
+**As built by L2 (consoles):**
+- **The screen command.** `command` is `screen <path> <baud>` for a serial console whose rate is a standard termios speed, because screen with no rate sets 9600 on the line. Otherwise it is `screen <path>`.
+- **Additive fields:**
+  - the pty and baud replies carry `name`;
+  - `DELETE .../pty` returns `closed`;
+  - `GET baud` adds `kind`, `mode`, `design` and `cite`;
+  - console rows add `source`, `reason`, `state` and `alias_of`;
+  - `GET /consoles?rates=0` skips the rate lookup.
+- **Holds and gates:** `POST baud` is 409 HELD while a job runs. `GET baud` and `GET /consoles` are never HELD: they return the last report, or `baud: null` with the reason. The PTY routes take no gate, like the console WebSocket.
+- **`clients`** counts open file descriptions, found through inotify on the PTY device. One terminal per PTY: screen opens it exclusively, and the daemon clears the exclusive flag when screen leaves, so a re-attach works.
+- **The rates on today's fielded shell:**
+  - `uart0` is 76800, fixed by the nanosoc design;
+  - `uart1` has no DUT side;
+  - `swo` is 2000000 (firmware divisor);
+  - FPGA UART lanes are settable;
+  - hub shares are fixed by the share.

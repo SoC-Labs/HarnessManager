@@ -16,6 +16,8 @@ factory in its own module, and this file wires it in if it exists:
 | ``.telemetry:with_config_links(candidate)``    | T9   | the candidate plus its boards.toml links |
 | ``.clock:make_clock_adapter(session)``         | lead | ``ClockAdapter`` (DUT MMCM presets) |
 | ``.identify:probe_identify(hints, found)``     | T12  | ``list[Candidate]`` found by UDP 6899 identify |
+| ``.uart:console_baud_info(endpoints, shell)``  | L2   | each console's rate (``ConsoleAdapter.console_baud_info``) |
+| ``.uart:console_set_baud(endpoints, shell, name, baud)`` | L2 | the ``uart_baud`` verb (``ConsoleAdapter.console_set_baud``) |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -67,9 +69,11 @@ def _with_config_links(candidate: Candidate) -> Candidate:
 
 
 class Mps3Consoles:
-    def __init__(self, endpoints: dict[str, str], pace_s: float = DUT_CONSOLE_PACE_S) -> None:
+    def __init__(self, endpoints: dict[str, str], pace_s: float = DUT_CONSOLE_PACE_S,
+                 shell: Mps3Shell | None = None) -> None:
         self._endpoints = endpoints
         self._pace_s = pace_s
+        self._shell = shell
 
     def console_endpoints(self) -> dict[str, str]:
         return dict(self._endpoints)
@@ -77,6 +81,18 @@ class Mps3Consoles:
     def console_write_pace_s(self) -> dict[str, float]:
         """The DUT UARTs drop unpaced input (see constants.DUT_CONSOLE_PACE_S)."""
         return {n: self._pace_s for n in PACED_CONSOLES if n in self._endpoints}
+
+    def console_baud_info(self) -> dict[str, dict]:
+        """Each console's rate and whether it can change (L2: ``.uart``)."""
+        from .uart import console_baud_info
+
+        return console_baud_info(self._endpoints, self._shell)
+
+    def console_set_baud(self, name: str, baud: int) -> dict:
+        """The harness verb ``uart_baud`` (L2: ``.uart``); UnavailableError with the reason."""
+        from .uart import console_set_baud
+
+        return console_set_baud(self._endpoints, self._shell, name, baud)
 
 
 class Mps3Resets:
@@ -142,7 +158,7 @@ class Mps3Session(BoardSession):
         extra = _hook("usb", "serial_console_endpoints")
         if extra is not None:
             endpoints.update(extra(candidate))
-        self.consoles = Mps3Consoles(endpoints, console_pace_s) if endpoints else None
+        self.consoles = Mps3Consoles(endpoints, console_pace_s, shell) if endpoints else None
 
         for attr, module, factory in (
             ("deploy", "deploy", "make_deploy_adapter"),

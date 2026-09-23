@@ -113,6 +113,19 @@ separator), then the local content store. DIR may be one overlay or a root of
 several (<root>/<rm>/manifest.json, the platform's fpga/dfx/overlay/)."""
 
 CONSOLES = """\
+pty TARGET NAME [--baud RATE] [--for SECONDS]
+    The console's PTY for `screen`: prints its path, then the command to attach
+    with (`screen <path>`), for any terminal, while the web UI shows the same
+    console. When harness-manager-daemon has the board open (the web UI), the
+    PTY is the daemon's and this returns at once; otherwise this command holds
+    it until Ctrl-C, `detach`, or --for. One terminal per PTY. Not on Windows
+    (use --export). --baud sets a serial console's rate first.
+baud TARGET NAME [RATE]
+    The console's rate, where it comes from (serial, design, harness) and
+    whether it can change. RATE changes it (0 = the default): a serial console
+    reopens its port; uart0/uart1 need harness firmware with 'uart_baud' (the
+    loaded design fixes 76800 otherwise). Exit 12 with the reason when it
+    cannot change.
 console TARGET NAME [--for SECONDS]
     Stream a console (uart0, uart1, swo, ...) to stdout until Ctrl-C or --for.
     --tsv prints one NAME<TAB>TEXT row per line. --json needs --for and prints

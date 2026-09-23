@@ -30,7 +30,9 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `controller.reboot` `{phase: sent\|down\|up}` | board reboot |
 | `storage.progress` `{op, bytes, total}` | SD backup/install/restore |
 | `update.available`, `update.started` `{version, mode, rekey}`, `update.progress` `{phase, bytes, total}`, `update.done` `{version, result, detail}`, `update.failed` `{version, reason, phase}` | updates (T7). `result`: installed \| written-not-running \| stored \| up-to-date \| restored \| restored-not-confirmed |
-| `power.cycle` `{phase: off\|on\|up, off_s, device}` | a cold power cycle through a metered outlet (T9) |
+| `power.cycle` `{phase: off\|on, off_s, device}` | a cold power cycle through a metered outlet (T9, L4) |
+| `console.pty` `{name, path, device, clients, open}` | a console's PTY for `screen` opened, closed, or a client attached or left (L2) |
+| `lease.state` `{target, state, holder, expires_at}` | a hub lease was held, queued, released, expired or lost (L1) |
 | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | harness-manager-daemon jobs and back-pressure (docs/API.md) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
@@ -53,6 +55,10 @@ These are the interfaces every team codes against. They are owned by the lead an
 - **`engine.update` is optional.** The in-process `Engine` has it (T7's `UpdateService`); a `RemoteEngine` does not. Read it with `getattr(engine, "update", None)`. The CLI's `update` verb always runs in-process, so a daemon that holds the board refuses it by name (HELD).
 - **`ControllerAdapter.reboot` returns a dict**: `summary`, `down_after_s`, `up_after_s`, `down_evidence`, `up_evidence`, `shell_id_before`, `shell_id_after`, `fpga_configured`. It returns only once the controller console is back at its prompt.
 - **`ConsoleAdapter.console_write_pace_s()` is optional** and returns `{console name: seconds per byte}`. The console broker then sends that console's input one byte at a time from a writer thread, so `write` never blocks. The MPS3 pack paces `uart0`/`uart1` at 20 ms (the nanoSoC UART has no receive FIFO); `Mps3Pack(console_pace_s=0)` turns it off.
+- **Console rates (L2).**
+  - `ConsoleAdapter.console_baud_info() -> {name: {kind, baud, source, settable, reason, choices, mode?, share?}}` and `console_set_baud(name, baud)` are optional. Host `serial://` ports may be left out: the broker owns their rate.
+  - `ConsoleBroker` gains the optional `pty`, `pty_info`, `close_pty`, `baud`, `set_baud` and `consoles`. A broker without them gets the daemon's fallback PTYs.
+  - `console.state` carries `baud` when the rate changes.
 - **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
 
 ## Changing a contract

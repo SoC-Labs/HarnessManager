@@ -302,6 +302,9 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_power
     cmd_power.register(sub)
     verbs["power"] = sub.choices["power"]
+
+    # -- pty and baud (L2: a console's PTY for `screen`, and its rate) -------------------
+    verbs.update(cmd_io.register(sub))
     return p
 
 
