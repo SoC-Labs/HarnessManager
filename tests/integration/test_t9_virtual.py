@@ -15,13 +15,14 @@ from socharness_board_mps3 import mcc as mccmod
 from socharness_board_mps3.pack import Mps3Pack
 from socharness_board_mps3.telemetry import (
     NO_POWER_SENSOR,
+    NO_STATS_CODEC,
     Mps3Telemetry,
     make_power_adapter,
     with_config_links,
 )
 from tests.fakes.t9_fixtures import power_report
 from tests.fakes.t9_plugs import FakeClock, FakeShelly
-from tests.fakes.t9_shell import MISSING, t9_virtual_board
+from tests.fakes.t9_shell import MISSING, install_v011_stats, t9_virtual_board
 from tests.fakes.t9_sysmon import make_fake_xsdb
 from tests.fakes.virtual_board import VirtualMps3
 
@@ -140,7 +141,13 @@ def test_power_cycle_through_the_session_adapter(vboard: VirtualMps3, state: Pat
 # --- a harness that reports sysmon / touch_temp (future profile) ---------------------------------
 
 
-def test_harness_sysmon_and_touch_temp_through_the_engine(tmp_path: Path, state: Path):
+@pytest.fixture
+def v011_codec(monkeypatch) -> None:
+    """pyverify with the v0.11 ``stats()`` codec (a stand-in when the installed one predates it)."""
+    install_v011_stats(monkeypatch)
+
+
+def test_harness_sysmon_and_touch_temp_through_the_engine(tmp_path: Path, state: Path, v011_codec):
     with t9_virtual_board(tmp_path) as vb:
         eng = engine_for(vb, state)
         try:
@@ -166,7 +173,8 @@ def test_harness_sysmon_and_touch_temp_through_the_engine(tmp_path: Path, state:
     ({"touch_temp_c": None}, "lcd_ambient_temp", "touch_temp_c is null"),
     ({"touch_temp_c": MISSING}, "lcd_ambient_temp", "has no touch_temp_c"),
 ])
-def test_harness_that_claims_a_feature_but_does_not_deliver(tmp_path: Path, state: Path, change, row, why):
+def test_harness_that_claims_a_feature_but_does_not_deliver(tmp_path: Path, state: Path, v011_codec,
+                                                           change, row, why):
     with t9_virtual_board(tmp_path) as vb:
         for k, v in change.items():
             setattr(vb.shell, k, v)
@@ -177,6 +185,24 @@ def test_harness_that_claims_a_feature_but_does_not_deliver(tmp_path: Path, stat
         finally:
             session.close()
     assert rows[row].value is None and why in rows[row].reason
+
+
+def test_a_pyverify_without_stats_is_a_reason_not_a_hand_rolled_request(tmp_path: Path, state: Path,
+                                                                        monkeypatch):
+    from pyverify.client import ShellClient
+
+    monkeypatch.delattr(ShellClient, "stats", raising=False)     # the pre-v0.11 codec
+    with t9_virtual_board(tmp_path) as vb:
+        session = Mps3Pack(console_ports=vb.console_ports).open(
+            Mps3Pack().candidate_for_host(vb.shell_endpoint))
+        try:
+            rows = by_name(session.telemetry.readings())
+        finally:
+            session.close()
+        ops = list(vb.shell.ops)
+    assert rows["fpga_die_temp"].value is None and rows["fpga_die_temp"].reason == NO_STATS_CODEC
+    assert "stats" not in ops and "telemetry" in ops
+    assert rows["lcd_ambient_temp"].value == 23.9                # touch_temp still works
 
 
 # --- USB only: the T3 MCC rows and the T9 rows side by side ---------------------------------------

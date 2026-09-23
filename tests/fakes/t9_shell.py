@@ -9,13 +9,18 @@ refuse them) and has no ``stats`` verb. Until the harness agent adds them (T9 CC
 
 ``VirtualMps3`` itself is lead-owned and untouched: ``t9_virtual_board`` swaps its
 shell for a ``T9Shell`` before starting it.
+
+The installed pyverify may predate the v0.11 ``stats()`` codec; ``install_v011_stats``
+gives it a stand-in with the same request and ``raw`` carrier, for tests only.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pyverify.client import ShellClient
 from pyverify.testing.fakeshell import FakeShell
 
 from tests.fakes.t9_sysmon import GOOD_REGS
@@ -59,6 +64,28 @@ class T9Shell(FakeShell):
 
 
 MISSING = _MISSING
+
+
+@dataclass(frozen=True)
+class _StatsResponse:
+    ok: bool
+    err: str = ""
+    raw: dict = field(default_factory=dict)
+
+
+def _v011_stats(self: ShellClient) -> _StatsResponse:
+    """Stand-in for pyverify's v0.11 ``ShellClient.stats()`` (platform d68dd0e): same
+    request, same ``raw`` carrier for keys the codec does not model."""
+    resp = self._request({"op": "stats"})
+    return _StatsResponse(ok=bool(resp["ok"]), err=str(resp.get("err", "")), raw=dict(resp))
+
+
+def install_v011_stats(monkeypatch: Any) -> bool:
+    """Give the installed pyverify a ``stats()`` if it lacks one; True if it was added."""
+    if callable(getattr(ShellClient, "stats", None)):
+        return False                     # the real v0.11 codec is installed: use it
+    monkeypatch.setattr(ShellClient, "stats", _v011_stats, raising=False)
+    return True
 
 
 def t9_virtual_board(tmp_path: Path, *, features: tuple[str, ...] = ("sysmon", "touch_temp"),

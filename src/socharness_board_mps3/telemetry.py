@@ -30,6 +30,12 @@ The wire shape of the harness keys is T9's proposal to the harness agent (CCR):
 ``"sysmon": {"temp", "vccint", "vccaux", "vccbram", "temp_max", ..., "vccbram_min",
 "flag"}`` holding the raw 16-bit DRP codes, so one conversion (and the REF-bit
 check) serves both the JTAG and the Ethernet path.
+
+One codec: the requests are pyverify's own (``telemetry()``, and ``stats()`` from
+the v0.11 codec). The additive keys are read from the reply line pyverify parsed,
+through ``Mps3Shell.call_raw``'s tap, never from a hand-rolled request (the rule in
+``shell.py``). An installed pyverify without ``stats()`` makes the harness SYSMON
+rows unavailable with exactly that reason.
 """
 
 from __future__ import annotations
@@ -87,14 +93,32 @@ for _name, _reg, *_ in CHANNELS:
     STATS_SYSMON_KEYS[f"{_key}_min"] = REG_MIN[_reg]
 
 
-def shell_request(client: Any, op: str) -> dict[str, Any]:
-    """One verb's whole reply, through pyverify's codec (framing, JSON, the ``ok`` check).
+NO_STATS_CODEC = ("the harness reports 'sysmon' but the installed pyverify has no stats() "
+                  "(net-protocol v0.11 codec); update pyverify")
 
-    pyverify has no ``stats()`` yet, and ``TelemetryResponse`` keeps only ok/err/lockup,
-    so the additive keys are read from the raw reply. This is the ONE place to switch
-    to typed pyverify calls once they exist (T9 CCR 4).
+
+def harness_replies(client: Any, tap: Any, *, telemetry: bool,
+                    stats: bool) -> tuple[dict[str, Any] | None, dict[str, Any] | str | None]:
+    """The whole ``telemetry`` and ``stats`` replies, via pyverify on ONE connection.
+
+    ``tap.last`` is the reply line pyverify just parsed (``Mps3Shell.call_raw``), so keys
+    pyverify does not model (``touch_temp_c``, ``sysmon``) come from that same line.
+    ``stats`` is a reason string when the installed pyverify cannot ask for it.
     """
-    return client._request({"op": op})
+    tel: dict[str, Any] | None = None
+    st: dict[str, Any] | str | None = None
+    if telemetry:
+        client.telemetry()
+        tel = dict(tap.last)
+    if stats:
+        ask = getattr(client, "stats", None)
+        if not callable(ask):
+            st = NO_STATS_CODEC
+        else:
+            resp = ask()
+            raw = getattr(resp, "raw", None)
+            st = dict(raw) if isinstance(raw, dict) and raw else dict(tap.last)
+    return tel, st
 
 
 # --- pure parsers (unit-tested directly) -------------------------------------------------
@@ -119,9 +143,11 @@ def touch_readings(reply: dict[str, Any] | None, error: str = "",
     return [Reading(name, float(value), unit, TOUCH_SOURCE, reason=TOUCH_CAVEAT, **stamp)]
 
 
-def stats_sysmon_sample(reply: dict[str, Any] | None,
+def stats_sysmon_sample(reply: dict[str, Any] | str | None,
                         observed_at: float | None = None) -> SysmonSample | str:
     """The raw SYSMON codes in a ``stats`` reply, or the reason there are none."""
+    if isinstance(reply, str):
+        return reply
     if reply is None:
         return "no stats reply"
     if reply.get("ok") is False:
@@ -174,7 +200,7 @@ class Mps3Telemetry:
         cand_ident = getattr(getattr(session, "candidate", None), "identity", None)
         if cand_ident is not None:
             self._ident = (clock(), cand_ident, "")
-        self._shell_cache: tuple[float, dict | None, dict | None, str] | None = None
+        self._shell_cache: tuple[float, dict | None, dict | str | None, str] | None = None
         self._sysmon_cache: tuple[float, list[Reading]] | None = None
         self._est_cache: tuple[float, dict[str, vivado.PowerEstimate]] | None = None
 
@@ -216,19 +242,15 @@ class Mps3Telemetry:
 
     # -- the harness (6900) ------------------------------------------------------------------------
 
-    def _harness(self, want_telemetry: bool, want_stats: bool) -> tuple[dict | None, dict | None, str, float]:
+    def _harness(self, want_telemetry: bool,
+                 want_stats: bool) -> tuple[dict | None, dict | str | None, str, float]:
         now = self._clock()
         cache = self._shell_cache
         if cache is not None and now - cache[0] < SHELL_MIN_INTERVAL_S:
             return cache[1], cache[2], cache[3], cache[0]
-
-        def ask(client: Any) -> tuple[dict | None, dict | None]:
-            tel = shell_request(client, "telemetry") if want_telemetry else None
-            st = shell_request(client, "stats") if want_stats else None
-            return tel, st
-
         try:
-            tel, st = self._shell.call(ask)
+            tel, st = self._shell.call_raw(lambda client, tap: harness_replies(
+                client, tap, telemetry=want_telemetry, stats=want_stats))
             err = ""
         except HarnessError as exc:
             tel, st, err = None, None, f"cannot ask the harness: {exc}"
@@ -421,7 +443,7 @@ __all__ = [
     "config_links",
     "make_power_adapter",
     "make_telemetry_adapter",
-    "shell_request",
+    "harness_replies",
     "stats_sysmon_sample",
     "touch_readings",
     "with_config_links",

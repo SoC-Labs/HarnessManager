@@ -32,27 +32,53 @@ BOARD = "mps3@192.168.10.101:6900"
 ETH = Link(LinkKind.ETHERNET, "192.168.10.101:6900")
 
 
-class FakeClient:
-    def __init__(self, replies: dict[str, dict]) -> None:
-        self.replies = replies
-        self.ops: list[str] = []
+class FakeTap:
+    """``Mps3Shell.call_raw``'s tap: the reply line pyverify parsed last."""
 
-    def _request(self, op: dict) -> dict:
-        self.ops.append(op["op"])
-        return self.replies[op["op"]]
+    last: dict = {}
+
+
+class FakeResponse:
+    def __init__(self, raw: dict) -> None:
+        self.ok = bool(raw.get("ok"))
+        self.raw = raw
+
+
+class FakeClient:
+    """pyverify's ShellClient verbs T9 uses. ``stats`` only when the codec has it (v0.11)."""
+
+    def __init__(self, replies: dict[str, dict], tap: FakeTap, *, has_stats: bool = True) -> None:
+        self.replies = replies
+        self.tap = tap
+        self.ops: list[str] = []
+        if not has_stats:
+            self.stats = None
+
+    def _reply(self, op: str) -> dict:
+        self.ops.append(op)
+        self.tap.last = dict(self.replies[op])
+        return self.tap.last
+
+    def telemetry(self):
+        return FakeResponse(self._reply("telemetry"))
+
+    def stats(self):
+        return FakeResponse(self._reply("stats"))
 
 
 class FakeShell:
-    def __init__(self, replies: dict[str, dict] | None = None, *, error: Exception | None = None):
-        self.client = FakeClient(replies or {})
+    def __init__(self, replies: dict[str, dict] | None = None, *, error: Exception | None = None,
+                 has_stats: bool = True):
+        self.tap = FakeTap()
+        self.client = FakeClient(replies or {}, self.tap, has_stats=has_stats)
         self.error = error
         self.calls = 0
 
-    def call(self, fn):
+    def call_raw(self, fn):
         self.calls += 1
         if self.error is not None:
             raise self.error
-        return fn(self.client)
+        return fn(self.client, self.tap)
 
 
 class FakeSession:
@@ -106,6 +132,7 @@ def test_stats_sysmon_sample_shapes():
     assert "unknown op" in stats_sysmon_sample({"ok": False, "err": "unknown op 'stats'"})
     assert "no sysmon object" in stats_sysmon_sample({"ok": True})
     assert "none of the expected raw-code keys" in stats_sysmon_sample({"ok": True, "sysmon": {"t": 1}})
+    assert stats_sysmon_sample(tm.NO_STATS_CODEC) == tm.NO_STATS_CODEC     # a reason passes through
 
 
 # --- the adapter ---------------------------------------------------------------------------
@@ -183,6 +210,16 @@ def test_harness_features_read_in_one_rate_limited_connection():
     clock.sleep(tm.SHELL_MIN_INTERVAL_S)
     adapter.readings()
     assert shell.calls == 2
+
+
+def test_a_pyverify_without_stats_says_so_and_sends_nothing_hand_rolled():
+    shell = FakeShell({"telemetry": {"ok": False, "touch_temp_c": 22.5}}, has_stats=False)
+    session = FakeSession(shell=shell, features=("sysmon", "touch_temp"), probe_identity=True)
+    rows = Mps3Telemetry(session).readings()
+    sysmon = [r for r in rows if r.source == "sysmon (harness stats)"]
+    assert sysmon and all(r.value is None and r.reason == tm.NO_STATS_CODEC for r in sysmon)
+    assert shell.client.ops == ["telemetry"]                   # stats was never sent
+    assert next(r for r in rows if r.name == "lcd_ambient_temp").value == 22.5
 
 
 def test_only_the_reported_feature_is_asked_for():
