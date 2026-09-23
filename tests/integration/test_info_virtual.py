@@ -148,3 +148,12 @@ def test_clock_presets_and_refusals(vboard: VirtualMps3, mps3_pack):
         session.clocks.set_clock("dut", 33)                  # not a preset (needs firmware A8)
     with pytest.raises(UE):
         session.clocks.set_clock("osc1", 50)                 # board oscillators are not the shell's
+
+
+def test_probed_candidate_carries_identity(vboard: VirtualMps3, mps3_pack):
+    from socharness.core.pack import ProbeHints
+
+    (cand,) = mps3_pack.probe(ProbeHints(hosts=(vboard.shell_endpoint,), scan_usb=False))
+    assert cand.identity is not None and cand.identity.shell_id.lower() == "0x3f1a560f"
+    # Negative twin: an explicit candidate has not talked to the board, so it knows nothing.
+    assert mps3_pack.candidate_for_host(vboard.shell_endpoint).identity is None

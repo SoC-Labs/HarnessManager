@@ -42,6 +42,12 @@ These are the interfaces every team codes against. They are owned by the lead an
 | CLI over `Engine` | T5 | `socharness/cli/**` |
 | GUI over `Engine` | T6 | `socharness/gui/**` |
 
+## Conventions the front-ends rely on
+
+- **Service stubs carry `reason`.** When the engine cannot provide a service (the module is not installed, or failed to load), the service attribute is a stub whose every call raises `UnavailableError`, and it has a `reason: str` attribute. **A real service never defines `reason`.** Front-ends read `getattr(engine.<service>, "reason", None)` to grey a panel with its reason without calling the stub.
+- **`Candidate.identity`** is what the board said while it was being probed, or `None`. It lets the selection list show shell, design and harness before a board is opened. `Engine.info()` still needs an open board.
+- **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
+
 ## Changing a contract
 
 1. Write a **contract change request** in your hand-back:

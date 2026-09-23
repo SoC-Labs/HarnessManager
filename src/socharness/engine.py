@@ -208,7 +208,8 @@ class Engine:
                     found[cand.board_id] = Candidate(
                         pack=prev.pack, board_id=prev.board_id,
                         links=_merge_links(prev.links, cand.links),
-                        label=prev.label, evidence=prev.evidence)
+                        label=prev.label, evidence=prev.evidence,
+                        identity=prev.identity or cand.identity)
         result = list(found.values())
         for cand in result:
             self.bus.publish(Event("board.found", cand.board_id, {

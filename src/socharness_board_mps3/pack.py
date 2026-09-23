@@ -195,7 +195,7 @@ class Mps3Pack(BoardPack):
                 found.append(Candidate(
                     pack=cand.pack, board_id=cand.board_id, links=cand.links,
                     label=f"MPS3 {ident.rm_name or ident.rm_id} on shell {ident.shell_id}",
-                    evidence="answered ping",
+                    evidence="answered ping", identity=ident,
                 ))
         usb = _hook("usb", "probe_usb")
         if usb is not None and (hints.scan_usb or hints.serial_ports or hints.volumes):

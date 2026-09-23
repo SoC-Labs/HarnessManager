@@ -345,7 +345,8 @@ def _pair_with_ethernet(usb: list[Candidate],
             pack="mps3", board_id=e.board_id, links=e.links + u.links,
             label=f"{e.label} + Debug USB",
             evidence=f"{e.evidence}; {u.evidence}; paired: the only MPS3 shell on Ethernet "
-                     "and the only MPS3 on USB")
+                     "and the only MPS3 on USB",
+            identity=e.identity)
         if isinstance(already_found, MutableSequence):
             already_found.remove(e)          # superseded by the merged candidate
         return [merged]

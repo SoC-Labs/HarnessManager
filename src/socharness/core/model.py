@@ -98,6 +98,7 @@ class Candidate:
     links: tuple[Link, ...]
     label: str = ""            # what the selection dialog shows
     evidence: str = ""         # how it was found ("answered ping", "FT4232H 0403:6011")
+    identity: BoardIdentity | None = None   # what the board said while being probed, if anything
 
 
 @dataclass(frozen=True)
