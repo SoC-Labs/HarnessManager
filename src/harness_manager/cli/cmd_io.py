@@ -1,4 +1,11 @@
-"""Consoles (``engine.consoles``) and debug sessions (``engine.debug``)."""
+"""Consoles (``engine.consoles``) and debug sessions (``engine.debug``).
+
+Lane L2 adds the promoted console path, ``harness-manager pty TARGET NAME``: the
+console's PTY path and the ``screen`` command to attach with, from any terminal,
+while the GUI shows the same console. And ``harness-manager baud TARGET NAME
+[RATE]``: each console's rate, and a change where the console allows one. The
+``console`` verb stays (a console in this terminal, or ``--export``).
+"""
 
 from __future__ import annotations
 
@@ -14,12 +21,13 @@ from harness_manager.core.errors import (
     ActionFailedError,
     ExitCode,
     HarnessError,
+    UnavailableError,
     UsageError,
 )
 from harness_manager.core.services import DebugStatus
 
 from .context import Ctx, Stopper, hold, hold_note
-from .output import Result, tsv_line, with_data
+from .output import TSV_COLUMNS, Result, tsv_field, tsv_line, with_data
 
 EXPORT_HOST = "127.0.0.1"
 READ_SLICE_S = 0.2
@@ -288,3 +296,144 @@ def cmd_debug(ctx: Ctx) -> int:
             hold(a.for_s)
             svc.down(session)
     return ExitCode.OK
+
+
+# --- pty and baud (lane L2) -------------------------------------------------------------------
+
+PTY_COLUMNS = ("BOARD_ID", "NAME", "PATH", "DEVICE", "COMMAND", "CLIENTS", "HELD_BY")
+BAUD_COLUMNS = ("BOARD_ID", "NAME", "KIND", "BAUD", "SETTABLE", "SOURCE", "REASON")
+
+#: Append-only TSV layouts of these verbs. They belong in ``output.TSV_COLUMNS``
+#: (a contract change request; the table is not this lane's). Until they are
+#: there, ``_emit`` prints the TSV rows itself with the same field rules.
+LAYOUTS = {"pty": PTY_COLUMNS, "baud": BAUD_COLUMNS}
+
+
+def _emit(ctx: Ctx, result: Result) -> None:
+    if ctx.fmt != "tsv" or result.layout in TSV_COLUMNS:
+        ctx.emit(result)
+        return
+    cols = LAYOUTS[result.layout]
+    for row in result.rows:
+        if len(row) != len(cols):     # a bug in the verb, never the user's fault
+            raise AssertionError(f"tsv layout {result.layout!r} has {len(cols)} columns")
+        sys.stdout.write("\t".join(tsv_field(v) for v in row) + "\n")
+    sys.stdout.flush()
+
+
+def _need(broker: Any, name: str) -> Any:
+    fn = getattr(broker, name, None)
+    if not callable(fn):
+        reason = getattr(broker, "reason", "") or f"this build's console service has no {name}()"
+        raise UnavailableError("console_dut", reason)
+    return fn
+
+
+def _check_name(broker: Any, session: Any, board_id: str, name: str) -> None:
+    names = list(broker.names(session))
+    if name not in names:
+        raise AbsentError(f"{board_id} has no console named {name!r}",
+                          hint=f"consoles: {', '.join(names) or 'none'}")
+
+
+def cmd_pty(ctx: Ctx) -> int:
+    """The console's PTY for ``screen``. In-process, this command holds it (Ctrl-C closes it);
+    when harness-manager-daemon already has the board open, the PTY is the daemon's and
+    this command prints it and returns."""
+    a = ctx.args
+    with ctx.board(note=hold_note(f"pty {a.name}")) as (cand, session):
+        broker = ctx.engine.consoles
+        _check_name(broker, session, cand.board_id, a.name)
+        if a.baud is not None:
+            _need(broker, "set_baud")(session, a.name, a.baud)
+        info = _need(broker, "pty")(session, a.name)
+        daemon_holds = getattr(session, "owned", None) is False
+        held_by = "harness-manager-daemon" if getattr(session, "owned", None) is not None \
+            else "this command"
+        _emit(ctx, Result("pty", {"board_id": cand.board_id, **info, "held_by": held_by,
+                                  "held_here": not daemon_holds},
+                          rows=[[cand.board_id, info.get("name", a.name), info["path"],
+                                 info.get("device", ""), info["command"], info.get("clients"),
+                                 held_by]],
+                          human=[info["path"], info["command"]]))
+        if daemon_holds:
+            ctx.note("the PTY is harness-manager-daemon's: it stays while the board is open "
+                     "there (the web UI, or `harness-manager ui`)")
+            return ExitCode.OK
+        if a.for_s is None:
+            ctx.note(f"console {info.get('name', a.name)} of {cand.board_id}: run "
+                     f"`{info['command']}` in any terminal; Ctrl-C here closes the PTY")
+        hold(a.for_s)
+    return ExitCode.OK
+
+
+def _baud_human(row: dict[str, Any]) -> list[str]:
+    baud = row.get("baud")
+    head = f"{row.get('name', '')}  {baud if baud else '-'} baud  ({row.get('kind', '?')}, " \
+           f"{row.get('source', 'unknown')})  {'settable' if row.get('settable') else 'fixed'}"
+    lines = [head]
+    if row.get("settable") and row.get("choices"):
+        lines.append("choices  " + " ".join(str(c) for c in row["choices"]))
+    if row.get("reason"):
+        lines.append(f"why      {row['reason']}")
+    return lines
+
+
+def cmd_baud(ctx: Ctx) -> int:
+    """A console's rate; with RATE, change it (0 goes back to the console's default)."""
+    a = ctx.args
+    with ctx.board(note=f"cli baud {a.name}") as (cand, session):
+        broker = ctx.engine.consoles
+        _check_name(broker, session, cand.board_id, a.name)
+        changed: dict[str, Any] | None = None
+        if a.rate is not None:
+            changed = _need(broker, "set_baud")(session, a.name, a.rate)
+        row = _need(broker, "baud")(session, a.name)
+        remote = getattr(session, "owned", None) is not None
+        if changed is not None and row.get("kind") == "serial" and not remote:
+            ctx.note("a serial console's rate lives in the process that holds its port, and this "
+                     "one exits now: set it through harness-manager-daemon (`harness-manager "
+                     "daemon start`), or with `harness-manager pty TARGET NAME --baud RATE`")
+        data = {"board_id": cand.board_id, **row}
+        if changed is not None:
+            data["changed"] = changed
+        _emit(ctx, Result("baud", data,
+                          rows=[[cand.board_id, row.get("name", a.name), row.get("kind"),
+                                 row.get("baud"), row.get("settable"), row.get("source"),
+                                 row.get("reason")]],
+                          human=_baud_human(row)))
+    return ExitCode.OK
+
+
+def register(subparsers: Any) -> dict[str, Any]:
+    """Add ``pty`` and ``baud`` to the CLI's verbs; returns ``{verb: parser}`` for ``help``."""
+    from .main import TARGET_HELP, _fmt_parent, _usb_parent
+
+    def _epilog_for(cols: tuple[str, ...]) -> str:
+        return f"--tsv columns: {' '.join(cols)}"
+
+    fmt, usb = _fmt_parent(), _usb_parent()
+    out: dict[str, Any] = {}
+    help_ = ("a console's PTY for `screen`: prints the path and the screen command "
+             "(the GUI shows the same console)")
+    vp = subparsers.add_parser("pty", help=help_, description=help_, parents=[fmt, usb],
+                               epilog=_epilog_for(PTY_COLUMNS))
+    vp.add_argument("target", metavar="TARGET", help=TARGET_HELP)
+    vp.add_argument("name", metavar="NAME", help="console name: uart0, uart1, swo, fpga_uart0, ...")
+    vp.add_argument("--baud", type=int, default=None, metavar="RATE",
+                    help="set a serial console's rate first (0 = its default)")
+    vp.add_argument("--for", dest="for_s", type=float, default=None, metavar="SECONDS",
+                    help="hold the PTY this long, then close it (default: until Ctrl-C)")
+    vp.set_defaults(fn=cmd_pty)
+    out["pty"] = vp
+
+    help_ = "a console's baud rate; with RATE, change it where the console allows (0 = default)"
+    vp = subparsers.add_parser("baud", help=help_, description=help_, parents=[fmt, usb],
+                               epilog=_epilog_for(BAUD_COLUMNS))
+    vp.add_argument("target", metavar="TARGET", help=TARGET_HELP)
+    vp.add_argument("name", metavar="NAME", help="console name: uart0, uart1, swo, fpga_uart0, ...")
+    vp.add_argument("rate", nargs="?", type=int, default=None, metavar="RATE",
+                    help="the new rate in baud (0 goes back to the console's default)")
+    vp.set_defaults(fn=cmd_baud)
+    out["baud"] = vp
+    return out

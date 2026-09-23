@@ -508,7 +508,8 @@ class _DeployAdapter(_Proxy):
 
 class _ConsoleAdapter(_Proxy):
     def console_endpoints(self) -> dict[str, str]:
-        names = self._engine._http.get(self._path("consoles")).get("names", [])
+        # ?rates=0: names only, so listing consoles never opens the board's control port.
+        names = self._engine._http.get(self._path("consoles") + "?rates=0").get("names", [])
         return {n: f"harness-manager-daemon:{n}" for n in names}
 
 
@@ -851,7 +852,7 @@ class RemoteConsoles:
         self._streams: dict[str, list[RemoteConsoleStream]] = {}
 
     def names(self, session: BoardSession) -> list[str]:
-        return list(self._engine._http.get(f"/boards/{q(_bid(session))}/consoles")
+        return list(self._engine._http.get(f"/boards/{q(_bid(session))}/consoles?rates=0")
                     .get("names", []))
 
     def subscribe(self, session: BoardSession, name: str) -> RemoteConsoleStream:
@@ -865,6 +866,42 @@ class RemoteConsoles:
             f"/boards/{q(_bid(session))}/consoles/{q(name)}/export", {"port": port})
         return int(payload["port"])
 
+    # -- lane L2: PTYs for screen, and baud (docs/API.md "Week-plan additions") ----------------
+
+    @staticmethod
+    def _console_path(board_id: str, name: str, leaf: str) -> str:
+        return f"/boards/{q(board_id)}/consoles/{q(name)}/{leaf}"
+
+    def pty(self, session: BoardSession, name: str) -> dict[str, Any]:
+        """The daemon's PTY for console ``name`` (created if needed): ``{name, path, device,
+        command, clients}``. It lives in the daemon while the board is open there."""
+        payload = self._engine._http.post(self._console_path(_bid(session), name, "pty"))
+        return _pick(payload, ("name", "path", "device", "command", "clients"))
+
+    def pty_info(self, board_id: str, name: str) -> dict[str, Any] | None:
+        pty = self._engine._http.get(self._console_path(board_id, name, "pty")).get("pty")
+        return dict(pty) if isinstance(pty, dict) else None
+
+    def close_pty(self, board_id: str, name: str) -> bool:
+        payload = self._engine._http.delete(self._console_path(board_id, name, "pty"))
+        return bool(payload.get("closed", True))
+
+    def baud(self, session: BoardSession, name: str) -> dict[str, Any]:
+        """``{name, kind, baud, settable, reason, choices, source, ...}``."""
+        payload = self._engine._http.get(self._console_path(_bid(session), name, "baud"))
+        return {k: v for k, v in payload.items() if k not in ("ok", "board_id")}
+
+    def set_baud(self, session: BoardSession, name: str, baud: int) -> dict[str, Any]:
+        """``{name, baud, source, ...}``; UNAVAILABLE (with the reason) when it cannot change."""
+        payload = self._engine._http.post(self._console_path(_bid(session), name, "baud"),
+                                          {"baud": baud})
+        return {k: v for k, v in payload.items() if k not in ("ok", "board_id")}
+
+    def consoles(self, session: BoardSession) -> list[dict[str, Any]]:
+        """``GET /boards/{bid}/consoles`` rows: ``{name, kind, baud, settable, pty, ...}``."""
+        rows = self._engine._http.get(f"/boards/{q(_bid(session))}/consoles").get("consoles")
+        return [dict(r) for r in rows] if isinstance(rows, list) else []
+
     def close_all(self, board_id: str) -> None:
         with self._mu:
             streams = self._streams.pop(board_id, [])
@@ -876,6 +913,10 @@ class RemoteConsoles:
             boards = list(self._streams)
         for board_id in boards:
             self.close_all(board_id)
+
+
+def _pick(payload: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Any]:
+    return {k: payload[k] for k in keys if k in payload}
 
 
 class RemoteDebug:
