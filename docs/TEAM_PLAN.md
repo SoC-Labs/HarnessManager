@@ -2,7 +2,7 @@
 
 **Owner:** the lead agent (Claude), accountable to david.
 
-**Status (2026-09-23):** Wave 0 is done. The scaffold is on `main` and `make check` passes: 28 tests, including end-to-end `socharness info` against a virtual MPS3.
+**Status (2026-09-23):** Wave 0 is done (`72f9cd4`) and the Wave 1 contracts are frozen (`4c4053a`). **Wave 1 is running**: T1–T6 in worktrees `../harness-manager-t1` … `-t6`, on branches `team/t*`.
 
 **Background reading:**
 - the feasibility report: <https://claude.ai/artifact/T12zMEjmH8ybHBBvZmi4N5>;
@@ -92,7 +92,7 @@ The fielded shell is `0x3F1A560F` (harness 1.0.0). Every row marked "today" can 
 | `src/socharness/services/xdc/**`, `src/socharness_board_mps3/pins/**` | T10 | XDC export |
 | `packaging/**`, `.github/**`, `docs/user/**` | T11 | release, CI, user docs |
 
-Each team's tests go in `tests/unit/<team>_*.py` and `tests/integration/<team>_*.py`. Every team may **read** everything; it **writes** only its own rows.
+Each team's tests go in `tests/unit/test_<team>_*.py` and `tests/integration/test_<team>_*.py`, so pytest's default collection finds them. Every team may **read** everything; it **writes** only its own rows.
 
 ## 4. Waves and teams
 

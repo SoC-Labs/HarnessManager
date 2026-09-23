@@ -40,6 +40,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+python_files = ["test_*.py", "t[0-9]_*.py", "scenario_*.py"]
 timeout = 60
 markers = [
     "hil: hardware-in-the-loop; needs SOCHARNESS_HIL=1, a board address, and david's board window",
