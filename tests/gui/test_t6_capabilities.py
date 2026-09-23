@@ -12,7 +12,7 @@ pytest.importorskip("PySide6.QtWidgets")
 pytest.importorskip("pytestqt")
 
 from socharness.gui.demo_engine import BOARD_FIELDED, BOARD_USB  # noqa: E402
-from socharness.gui.panels import NOTHING_RUN  # noqa: E402
+from socharness.gui.panels import ARM_REASON, NOTHING_RUN  # noqa: E402
 
 pytestmark = pytest.mark.gui
 
@@ -58,7 +58,7 @@ def test_unarmed_intrusive_action_says_so_and_runs_nothing(qtbot, open_window, e
     win = open_window(BOARD_USB)
     panel = reboot_panel(win)
     assert not panel.buttons["reboot"].isEnabled()
-    assert panel.reasons["reboot"].text().startswith("tick 'arm:")
+    assert panel.reasons["reboot"].text() == ARM_REASON
     assert not panel.trigger("reboot")          # the click path, forced
     assert NOTHING_RUN in panel.answer_text()
     assert engine.called("controller.reboot") == []

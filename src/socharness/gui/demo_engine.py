@@ -31,7 +31,9 @@ Test and demo knobs (not part of the Engine protocol):
 - ``set_links``/``set_features``/``set_build_check``/``set_owner``: change a
   board and publish ``board.identity``, the way a real engine reports a
   changed capability view;
-- ``inject_console(board_id, name, text)``: bytes arrive on a console.
+- ``inject_console(board_id, name, text)``: bytes arrive on a console;
+- ``set_sd_journal(board_id, journal)``: an interrupted SD install (T3's journal);
+- ``failures["controller.reboot.confirm"]``: REBOOT sent, no restart observed.
 """
 
 from __future__ import annotations
@@ -70,6 +72,7 @@ from socharness.core.model import (
     Reading,
 )
 from socharness.core.pack import (
+    BackupRecord,
     BoardPack,
     BoardSession,
     DeployResult,
@@ -132,6 +135,7 @@ class _Board:
     readings: list[Reading] = field(default_factory=list)
     debug: DebugStatus = field(default_factory=lambda: DebugStatus(state="down"))
     port_base: int = 3333
+    sd_journal: dict | None = None
 
 
 def _eth(host: str) -> Link:
@@ -270,7 +274,7 @@ class _Controller:
     def __init__(self, engine: DemoEngine, board_id: str) -> None:
         self._e, self._bid = engine, board_id
 
-    def command(self, line: str) -> str:
+    def command(self, line: str, *, arm: bool = False) -> str:
         self._e._enter("controller.command", self._bid, line)
         if line.split()[:1] and line.split()[0].upper() in self.DENIED:
             raise RefusedError(f"MCC command {line.split()[0]!r} is hard-denied")
@@ -284,6 +288,9 @@ class _Controller:
             if progress is not None:
                 progress(phase, i, 3)
             e.bus.publish(Event("controller.reboot", self._bid, {"phase": phase}))
+            if phase == "sent" and e.failures.get("controller.reboot.confirm") is not None:
+                # T3's no-op witness: REBOOT sent, the board never went down.
+                raise e.failures["controller.reboot.confirm"]
         # A reboot reloads the SD image: the greybox comes back.
         e._set_identity(self._bid, rm_id="0x00000000", rm_name="greybox")
 
@@ -292,6 +299,45 @@ class _Controller:
 
     def oscillators(self) -> Sequence[Reading]:
         return [r for r in self._e._board(self._bid).readings if r.name.startswith("osc")]
+
+
+class _Storage:
+    """The config SD, as far as the GUI needs it (T3's StorageAdapter, in memory)."""
+
+    def __init__(self, engine: DemoEngine, board_id: str) -> None:
+        self._e, self._bid = engine, board_id
+
+    def locate(self) -> str:
+        return USB_MSD_LINK.address
+
+    def pending(self) -> dict | None:
+        self._e._enter("storage.pending", self._bid)
+        return self._e._board(self._bid).sd_journal
+
+    def load_backup(self, path: Path) -> BackupRecord:
+        self._e._enter("storage.load_backup", self._bid, str(path))
+        return BackupRecord(path=str(path), sha256="0" * 64, created_at=time.time() - 3600,
+                            files=12, volume_label="V2M-MPS3")
+
+    def backup(self, dest_dir: Path, progress: Progress | None = None) -> BackupRecord:
+        self._e._enter("storage.backup", self._bid, str(dest_dir))
+        return self.load_backup(Path(dest_dir) / "demo-backup.zip")
+
+    def install(self, files, *, backup: BackupRecord, progress: Progress | None = None) -> None:
+        self._e._enter("storage.install", self._bid)
+        raise RefusedError("the demo engine does not write SD cards")
+
+    def restore(self, backup: BackupRecord, progress: Progress | None = None) -> None:
+        e = self._e
+        e._enter("storage.restore", self._bid, backup.path)
+        total = 12 * 65536
+        for step in range(1, 5):
+            e._sleep(0.2)
+            if progress is not None:
+                progress("restore", total * step // 4, total)
+        e._board(self._bid).sd_journal = None
+        e.bus.publish(Event("storage.progress", self._bid, {"op": "restore", "bytes": total,
+                                                            "total": total}))
 
 
 class DemoSession(BoardSession):
@@ -306,6 +352,12 @@ class DemoSession(BoardSession):
         board = self._e._board(self.candidate.board_id)
         kinds = {lk.kind for lk in board.candidate.links}
         return _Controller(self._e, board.candidate.board_id) if LinkKind.USB_SERIAL in kinds else None
+
+    @property  # type: ignore[override]
+    def storage(self):  # noqa: D401 - follows the board's live links
+        board = self._e._board(self.candidate.board_id)
+        kinds = {lk.kind for lk in board.candidate.links}
+        return _Storage(self._e, board.candidate.board_id) if LinkKind.USB_MSD in kinds else None
 
     def identity(self) -> BoardIdentity:
         return self._e._board(self.candidate.board_id).identity
@@ -786,6 +838,10 @@ class DemoEngine:
     def set_owner(self, board_id: str, owner: LockOwner | None) -> None:
         """Somebody else takes (or releases) the board's lock."""
         self._board(board_id).owner = owner
+
+    def set_sd_journal(self, board_id: str, journal: dict | None) -> None:
+        """Leave (or clear) an interrupted SD install on a board's config SD."""
+        self._board(board_id).sd_journal = journal
 
     def inject_console(self, board_id: str, name: str, text: str | bytes) -> int:
         data = text.encode() if isinstance(text, str) else text

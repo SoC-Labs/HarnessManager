@@ -83,6 +83,8 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
 
+        self.sd_journal: dict | None = None
+        self.reset.sd_pending.connect(self._on_sd_pending)
         self.ctx.logged.connect(self._log_line)
         self.ctx.info_changed.connect(self._render_header)
         self.ctx.board_event.connect(self._status_event)
@@ -99,10 +101,24 @@ class MainWindow(QMainWindow):
         if ev.topic != "console.line":
             self.statusBar().showMessage(event_text(ev), 8000)
 
+    def _on_sd_pending(self, journal: dict | None) -> None:
+        first = journal is not None and self.sd_journal is None
+        self.sd_journal = journal
+        if first:
+            self.tabs.setCurrentWidget(self.reset)     # before anything else
+            self.ctx.log("error", "storage", "Interrupted SD install: restore it first "
+                                             "(Reset tab)")
+        self._render_header(self.ctx.info)
+
     def _render_header(self, info: BoardInfo | None) -> None:
+        if self.sd_journal is not None:
+            self.header.setText(f"{self.candidate.board_id}   |   Interrupted SD install "
+                                "\u2014 Restore it first (Reset tab)")
+            set_level(self.header, "error")
+            return
         if info is None:
             self.header.setText(f"{self.candidate.board_id}   cannot read the board: "
-                                f"{self.ctx.info_error.splitlines()[0]}")
+                                f"{(self.ctx.info_error.splitlines() or ['no answer'])[0]}")
             set_level(self.header, "error")
             return
         ident = info.identity

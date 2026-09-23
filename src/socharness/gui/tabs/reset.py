@@ -1,18 +1,28 @@
-"""Reset tab: DUT reset, shell restart, board reboot. Every one is armed by a tick box.
+"""Reset tab: SD recovery first, then DUT reset, shell restart, board reboot. All armed.
 
 Engine calls (on workers), through the session's adapters as
 ``socharness.core.services`` prescribes: ``session.resets.reset_targets()``,
-``session.resets.reset(target)``, ``session.controller.reboot(progress, wait_s)``.
+``session.resets.reset(target)``, ``session.controller.reboot(progress, wait_s)``,
+``session.storage.pending()``, ``session.storage.load_backup(path)``,
+``session.storage.restore(record, progress)``.
 Events consumed: none directly (``controller.reboot`` reaches the Log tab, and
 the context re-reads the board after ``phase: up``).
+
+An interrupted SD install (``storage.pending()`` returns its journal) is shown
+before anything else: a panel at the top of this tab, the main window's header,
+and this tab brought to the front.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from socharness.core import capabilities as C
-from socharness.core.errors import UnavailableError
+from socharness.core.errors import RefusedError, UnavailableError
 from socharness.core.model import BoardInfo
 
 from ..context import BoardContext
@@ -52,12 +62,76 @@ def call_reboot(env: ActionEnv) -> str:
     return "the board went down and came back"
 
 
+SD_TITLE = "Interrupted SD install \u2014 Restore"
+
+
+def journal_text(journal: dict[str, Any]) -> str:
+    who = f" by pid {journal['pid']} on {journal['host']}" if journal.get("pid") else ""
+    text = f"{journal.get('op', '?')} {journal.get('state', '?')}{who}"
+    if journal.get("current"):
+        text += f"; was writing {journal['current']}"
+    if journal.get("error"):
+        text += f"; {journal['error']}"
+    return text
+
+
+def call_sd_restore(env: ActionEnv) -> str:
+    storage = env.session().storage
+    if storage is None:
+        raise UnavailableError(C.STORAGE_INSTALL, "this session has no configuration-SD adapter")
+    journal = storage.pending()
+    if journal is None:
+        return "nothing to restore: the SD has no interrupted install"
+    path = (journal.get("backup") or {}).get("path")
+    if not path:
+        raise RefusedError("the interrupted install's journal names no backup",
+                           hint="restore by hand: socharness sd restore <backup.zip>")
+    record = storage.load_backup(Path(path))
+    shown = [-1]
+
+    def progress(phase: str, done: int, total: int) -> None:
+        pct = done * 100 // total if total else 0
+        if pct // 25 != shown[0]:           # a line per quarter, not per chunk
+            shown[0] = pct // 25
+            env.progress(f"{phase}: {pct}%")
+
+    storage.restore(record, progress)
+    left = storage.pending()
+    if left is not None:
+        return f"restored from {path}, but the SD still has a journal: {journal_text(left)}"
+    return f"restored the SD from {path}; no install is pending now"
+
+
+def read_pending(engine: Any, board_id: str) -> dict[str, Any] | None:
+    storage = engine.session(board_id).storage
+    return storage.pending() if storage is not None else None
+
+
 class ResetTab(QWidget):
+    sd_pending = Signal(object)            # the journal of an interrupted install, or None
+
     def __init__(self, ctx: BoardContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.ctx = ctx
         self._targets_read = False
+        self.journal: dict[str, Any] | None = None
         v = QVBoxLayout(self)
+        self.sd = PanelWidget(PanelDesc(
+            key="sd_restore", title=SD_TITLE,
+            fields=(PanelField("journal", "Journal", default="-"),
+                    PanelField("backup", "Backup", default="-"),
+                    PanelField("arm", "arm: I understand this rewrites the configuration SD "
+                               "from the backup taken before the install", kind="check")),
+            actions=(PanelAction("restore", "Restore the SD", call=call_sd_restore,
+                                 command=lambda v, _: f"sd restore {v.get('backup') or '?'}",
+                                 busy_label="Restoring...", budget_s=900.0, armed_by="arm",
+                                 enabled_when_capability=C.STORAGE_INSTALL, render=str,
+                                 on_result=lambda panel, res: self.check_sd()),),
+            answer_hint="An SD install was interrupted. Restore puts back the backup taken "
+                        "before it. Nothing else on this board should be trusted until then.",
+            answer_lines=3), ctx)
+        self.sd.setVisible(False)
+        v.addWidget(self.sd)
         row = QHBoxLayout()
         self.dut = PanelWidget(PanelDesc(
             key="reset_dut", title="DUT reset",
@@ -100,10 +174,28 @@ class ResetTab(QWidget):
         v.addStretch(1)
         ctx.info_changed.connect(self._on_info)
 
+    def check_sd(self) -> None:
+        """Ask the config SD for an interrupted install's journal (on a worker)."""
+        if not self.ctx.session_open:
+            return
+        engine, board_id = self.ctx.engine, self.ctx.board_id
+        self.ctx.runner.submit(lambda: read_pending(engine, board_id), self._sd_checked,
+                               label="sd pending", budget_s=30.0)
+
+    def _sd_checked(self, result: TaskResult) -> None:
+        journal = result.value if result.ok else None
+        self.journal = journal
+        if journal is not None:
+            self.sd.set_value("journal", journal_text(journal), "error")
+            self.sd.set_value("backup", str((journal.get("backup") or {}).get("path", "none")))
+        self.sd.setVisible(journal is not None)
+        self.sd_pending.emit(journal)
+
     def _on_info(self, info: BoardInfo | None) -> None:
         if info is None or self._targets_read or not self.ctx.session_open:
             return
         self._targets_read = True
+        self.check_sd()
         engine, board_id = self.ctx.engine, self.ctx.board_id
 
         def work() -> list[str]:

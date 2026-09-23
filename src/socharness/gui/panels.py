@@ -46,6 +46,7 @@ from .style import fixed_font, level_label, role_label, set_level
 from .worker import TaskHandle, TaskResult, describe_error, rc_line, seconds_text
 
 NOTHING_RUN = "Nothing was run."
+ARM_REASON = "not armed: tick the arm box above first"
 
 
 @dataclass(frozen=True)
@@ -263,9 +264,7 @@ class PanelWidget(QGroupBox):
             if why:
                 return why
         if action.armed_by and not self.value(action.armed_by):
-            box = self.values_widgets[action.armed_by]
-            text = box.text() if isinstance(box, QCheckBox) else action.armed_by
-            return f"tick '{text}' to arm it"
+            return ARM_REASON
         return ""
 
     @Slot()

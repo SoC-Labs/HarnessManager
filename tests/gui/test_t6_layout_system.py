@@ -63,8 +63,12 @@ def every_page(qtbot, win):
                 yield f"{win.tabs.tabText(i)}/{sub.tabText(j)}"
 
 
-def test_main_window_fits_1280x800_in_every_tab(qtbot, open_window):
-    win = open_window(BOARD_USB)            # the busiest board: five consoles, USB links
+def test_main_window_fits_1280x800_in_every_tab(qtbot, open_window, engine):
+    # The busiest board: five consoles, USB links, and an interrupted SD install to show.
+    engine.set_sd_journal(BOARD_USB, {"op": "install", "state": "interrupted",
+                                      "backup": {"path": "/tmp/backup.zip"}})
+    win = open_window(BOARD_USB)
+    qtbot.waitUntil(lambda: win.reset.sd.isVisible(), timeout=5000)
     win.tabs.setCurrentWidget(win.consoles)
     qtbot.waitUntil(lambda: len(win.consoles.views) == 5, timeout=5000)
     win.tabs.setCurrentWidget(win.program)
