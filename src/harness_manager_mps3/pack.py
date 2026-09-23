@@ -22,6 +22,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.tunnel:open_reach(candidate, ports)``       | L1   | ``Reach``: the SSH tunnel's local ports, or None (direct) |
 | ``.tunnel:probe_reach(spec, via, ...)``        | L1   | a short tunnel for a probe (control port only) |
 | ``.hub:make_hub_adapter(session)``             | L1   | ``Mps3Hub`` (leases, shares) when the board has a hub |
+| ``.hub:relay_share_consoles(endpoints, cand)`` | L1   | the endpoints, each ``hub://`` share as a ``tcp://`` relay |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -179,6 +180,9 @@ class Mps3Session(BoardSession):
         extra = _hook("usb", "serial_console_endpoints")
         if extra is not None:
             endpoints.update(extra(candidate))
+        relay = _hook("hub", "relay_share_consoles")    # L1: hub shares as tcp:// consoles
+        if relay is not None:
+            endpoints = relay(endpoints, candidate)
         self.consoles = Mps3Consoles(endpoints, console_pace_s, shell) if endpoints else None
 
         for attr, module, factory in (

@@ -234,3 +234,52 @@ def test_the_boards_toml_in_the_hil_doc_routes_the_lab_board(tmp_path, monkeypat
     assert mcc.address == f"hub://{HUB}/mps3_01_pl{MCC_TTY}"
     cfg = hubmod.hub_config_for(cand)
     assert (cfg.host, cfg.target, cfg.start_shares) == (HUB, "mps3_01_pl", False)
+
+
+LANE_TOML = (f'[boards.lab]\nmatch = ["{BOARD_IP}"]\nvia = "ssh:{HUB}"\n'
+             f'hub = {{ host = "{HUB}", target = "mps3_01_pl", shares = {{ mcc = "{MCC_TTY}", '
+             'fpga_uart2 = "/dev/mps3_01_pl/tty_02" } }\n')
+
+
+def test_a_shared_fpga_lane_is_a_tcp_console_the_broker_and_l2_read_as_a_share(tmp_path, monkeypatch,
+                                                                                 engine):
+    from harness_manager_mps3 import uart
+    from tests.fakes.l1_fake_hub import FakeLane
+
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir(),
+                                          toml=LANE_TOML) as rig:
+        lane_tty = FakeLane()
+        rig.hub.add_tty("/dev/mps3_01_pl/tty_02", lane_tty, share=True)
+        session = engine.open(engine.candidate_for(BOARD_IP))
+        eps = session.consoles.console_endpoints()
+        lane = eps["fpga_uart2"]
+        assert lane.startswith("tcp://127.0.0.1:") and lane.endswith("?baud=115200")
+        assert "mcc" not in eps                                # the MCC is never a console
+        row = uart.console_baud_info(eps, session.shell)["fpga_uart2"]
+        assert row["share"] and row["baud"] == 115200 and not row["settable"]
+        port = int(lane.split(":")[2].split("?")[0])
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+            s.settimeout(5)
+            s.sendall(b"root\n")                            # a share only relays what is new
+            got = b""
+            while b"root" not in got:
+                got += s.recv(100)
+        assert lane_tty.received == b"root\n"                # typed through relay, tunnel, share
+        engine.close(session.candidate.board_id)
+        with pytest.raises(OSError):
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()   # closed with the board
+
+
+def test_negative_twin_a_lane_whose_share_is_not_running_closes_and_says_why(tmp_path, monkeypatch,
+                                                                               engine):
+    from harness_manager_mps3 import hub as hubmod
+
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir(), toml=LANE_TOML):
+        session = engine.open(engine.candidate_for(BOARD_IP))
+        lane = session.consoles.console_endpoints()["fpga_uart2"]
+        port = int(lane.split(":")[2].split("?")[0])
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+            s.settimeout(5)
+            assert s.recv(10) == b""
+        ref = hubmod.ShareRef(HUB, "mps3_01_pl", "/dev/mps3_01_pl/tty_02")
+        assert "fpgahub share start" in hubmod.SHARES.relay(ref).last_error

@@ -35,6 +35,38 @@ from pyverify.lease import RunResult
 EXPIRES = "2026-09-25T12:00:00+00:00"
 
 
+class FakeLane:
+    """An FPGA UART lane (e.g. the shell console on tty_02) as a serial fake: it prints
+    ``banner`` once, then echoes what it is sent."""
+
+    def __init__(self, banner: bytes = b"mps3-harness login: ") -> None:
+        self._out = bytearray(banner)
+        self.received = bytearray()
+
+    @property
+    def in_waiting(self) -> int:
+        return len(self._out)
+
+    def read(self, size: int = 1) -> bytes:
+        data = bytes(self._out[:size])
+        del self._out[:size]
+        return data
+
+    def write(self, data: bytes) -> int:
+        self.received += data
+        self._out += data
+        return len(data)
+
+    def read_until(self, expected: bytes = b"\n", size: int | None = None) -> bytes:
+        return self.read(len(self._out))
+
+    def reset_input_buffer(self) -> None:
+        self._out.clear()
+
+    def close(self) -> None:
+        pass
+
+
 class FakeShareServer:
     def __init__(self, port_like: Any, tty: str) -> None:
         self.tty = tty
@@ -122,10 +154,11 @@ class FakeShareServer:
 
     def close(self) -> None:
         self._stop.set()
-        try:
-            self._srv.close()
-        except OSError:
-            pass
+        for step in (lambda: self._srv.shutdown(socket.SHUT_RDWR), self._srv.close):
+            try:
+                step()
+            except OSError:
+                pass
         with self._cmu:
             clients, self._clients = self._clients, []
         for c in clients:

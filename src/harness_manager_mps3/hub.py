@@ -41,8 +41,10 @@ dropped without a trace.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
+import socket
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -460,33 +462,51 @@ class _ShareRoutes:
 
     def __init__(self) -> None:
         self._mu = threading.Lock()
+        self._build = threading.Lock()      # one forward per share, even with two openers at once
         self._routes: dict[ShareRef, _ShareRoute] = {}
+        self._relays: dict[ShareRef, ShareRelay] = {}
         self._starts: dict[tuple[str, str], bool] = {}     # (host, target) -> start_shares
         self._bauds: dict[tuple[str, str], int] = {}
+        self._groups: dict[tuple[str, str], str | None] = {}
 
     def configure(self, cfg: HubConfig) -> None:
         with self._mu:
             self._starts[(cfg.host, cfg.target)] = cfg.start_shares
             self._bauds[(cfg.host, cfg.target)] = cfg.baud
+            self._groups[(cfg.host, cfg.target)] = cfg.group
+
+    def client(self, ref: ShareRef) -> HubClient:
+        with self._mu:
+            group = self._groups.get((ref.host, ref.target), DEFAULT_GROUP)
+        return HubClient(ref.host, ref.target, group=group)
 
     def route(self, ref: ShareRef, info: ShareInfo) -> _ShareRoute:
-        with self._mu:
-            old = self._routes.get(ref)
+        with self._build:
+            with self._mu:
+                old = self._routes.get(ref)
             if old is not None and old.port == info.port and (
                     old.tunnel is None or old.tunnel.alive() or old.tunnel.state == "starting"):
                 return old
-        if old is not None and old.tunnel is not None:
-            old.tunnel.close()
-        if ref.host in LOCAL_HOSTS:
-            new = _ShareRoute(info.port, info.port)
-        else:
-            t = _tunnel.SshTunnel(ref.host, [_tunnel.Forward("share", info.remote_host, info.port)],
-                                  label=f"hub share {ref.tty} on {ref.host}")
-            t.start()
-            new = _ShareRoute(info.port, t.local_port("share"), t)
+            if old is not None and old.tunnel is not None:
+                old.tunnel.close()
+            if ref.host in LOCAL_HOSTS:
+                new = _ShareRoute(info.port, info.port)
+            else:
+                t = _tunnel.SshTunnel(ref.host,
+                                      [_tunnel.Forward("share", info.remote_host, info.port)],
+                                      label=f"hub share {ref.tty} on {ref.host}")
+                t.start()
+                new = _ShareRoute(info.port, t.local_port("share"), t)
+            with self._mu:
+                self._routes[ref] = new
+            return new
+
+    def relay(self, ref: ShareRef) -> ShareRelay:
         with self._mu:
-            self._routes[ref] = new
-        return new
+            relay = self._relays.get(ref)
+            if relay is None:
+                relay = self._relays[ref] = ShareRelay(ref)
+            return relay
 
     def status(self, host: str, target: str) -> dict[str, Any]:
         with self._mu:
@@ -500,13 +520,19 @@ class _ShareRoutes:
                     if (ref.host, ref.target) == (host, target)]
             for ref, _ in gone:
                 del self._routes[ref]
+            relays = [(ref, r) for ref, r in self._relays.items()
+                      if (ref.host, ref.target) == (host, target)]
+            for ref, _ in relays:
+                del self._relays[ref]
+        for _, relay in relays:
+            relay.close()
         for _, r in gone:
             if r.tunnel is not None:
                 r.tunnel.close()
 
     def close_all(self) -> None:
         with self._mu:
-            keys = {(ref.host, ref.target) for ref in self._routes}
+            keys = {(ref.host, ref.target) for ref in [*self._routes, *self._relays]}
         for host, target in keys:
             self.close_for(host, target)
 
@@ -522,20 +548,26 @@ class _ShareRoutes:
 SHARES = _ShareRoutes()
 
 
+def resolve_share(ref: ShareRef) -> tuple[ShareInfo, _ShareRoute]:
+    """Find the share (``share list``; ``share start`` only when allowed) and forward to it."""
+    client = SHARES.client(ref)
+    info = client.share_for(ref.tty)
+    if info is None:
+        if not SHARES.start_allowed(ref):
+            raise AbsentError(f"no fpgahub share for {ref.tty} on {ref.host} (target {ref.target})",
+                              hint=start_share_hint(ref.host, ref.target, ref.tty,
+                                                    SHARES.baud_for(ref)))
+        info = client.share_start(ref.tty, SHARES.baud_for(ref))
+    return info, SHARES.route(ref, info)
+
+
 def open_hub_share(address: str, baud: int = DEFAULT_SHARE_BAUD) -> SerialPort:
     """The ``hub://`` opener: find the share, forward to it, connect (module docstring)."""
     ref = ShareRef.parse(address)
     share_baud = SHARES.baud_for(ref)
     if baud and baud != share_baud:
         raise UnavailableError(tcp_serial.BAUD_CAPABILITY, tcp_serial.share_baud_reason(share_baud))
-    client = HubClient(ref.host, ref.target)
-    info = client.share_for(ref.tty)
-    if info is None:
-        if not SHARES.start_allowed(ref):
-            raise AbsentError(f"no fpgahub share for {ref.tty} on {ref.host} (target {ref.target})",
-                              hint=start_share_hint(ref.host, ref.target, ref.tty, share_baud))
-        info = client.share_start(ref.tty, share_baud)
-    route = SHARES.route(ref, info)
+    info, route = resolve_share(ref)
     read_only = info.readers > 0
     why = (f"another client ({info.writer or 'unknown'}) holds the hub share's write slot; "
            "fpgahub drops every other client's writes") if read_only else ""
@@ -547,6 +579,117 @@ def open_hub_share(address: str, baud: int = DEFAULT_SHARE_BAUD) -> SerialPort:
 
 
 register_serial_scheme(HUB_SCHEME, open_hub_share)
+
+
+# --- hub shares as consoles --------------------------------------------------------------------
+
+
+def _pipe(src: socket.socket, dst: socket.socket) -> None:
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+    except OSError:
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            dst.shutdown(socket.SHUT_WR)
+
+
+class ShareRelay:
+    """A local ``tcp://`` endpoint for a hub share, resolved each time a client connects.
+
+    The console broker dials ``tcp://`` console endpoints itself (raw TCP), and
+    lane L2 reads a ``tcp://`` console that is not a shell console (uart0, uart1,
+    swo) as a hub share whose rate is the URL's ``?baud=`` (``uart.serial_row``).
+    So a shared FPGA lane is offered as ``tcp://127.0.0.1:<relay>?baud=<rate>``;
+    on each connection the relay finds the share and its forward (``resolve_share``)
+    and pipes the bytes. A share started after the board was opened still works; a
+    missing one closes the connection, with the reason in ``last_error`` and the log.
+    """
+
+    def __init__(self, ref: ShareRef) -> None:
+        self.ref = ref
+        self.last_error = ""
+        self._stop = threading.Event()
+        self._mu = threading.Lock()
+        self._conns: list[socket.socket] = []
+        self._srv = socket.socket()
+        self._srv.bind(("127.0.0.1", _tunnel.free_local_port()))
+        self._srv.listen(4)
+        self.port = self._srv.getsockname()[1]
+        threading.Thread(target=self._accept, name=f"share-relay-{ref.tty}", daemon=True).start()
+
+    def url(self, baud: int) -> str:
+        return f"{tcp_serial.TCP_SCHEME}://127.0.0.1:{self.port}?baud={baud}"
+
+    def _accept(self) -> None:
+        while not self._stop.is_set():
+            try:
+                client, _ = self._srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(client,), daemon=True).start()
+
+    def _serve(self, client: socket.socket) -> None:
+        try:
+            _info, route = resolve_share(self.ref)
+            upstream = socket.create_connection(("127.0.0.1", route.local_port), timeout=10)
+            upstream.settimeout(None)
+        except (HarnessError, OSError) as exc:
+            self.last_error = str(exc)                 # the message and the next step
+            log.warning("hub share %s on %s: %s", self.ref.tty, self.ref.host, self.last_error)
+            client.close()
+            return
+        self.last_error = ""
+        with self._mu:
+            if self._stop.is_set():
+                client.close()
+                upstream.close()
+                return
+            self._conns += [client, upstream]
+        threading.Thread(target=_pipe, args=(client, upstream), daemon=True).start()
+        _pipe(upstream, client)
+
+    def close(self) -> None:
+        self._stop.set()
+        # shutdown first: close() alone leaves a socket that another thread is blocked in
+        # accept() on still listening (Linux keeps it alive for the syscall).
+        with contextlib.suppress(OSError):
+            self._srv.shutdown(socket.SHUT_RDWR)
+        with contextlib.suppress(OSError):
+            self._srv.close()
+        with self._mu:
+            conns, self._conns = self._conns, []
+        for c in conns:
+            with contextlib.suppress(OSError):
+                c.shutdown(socket.SHUT_RDWR)
+            c.close()
+
+
+def relay_share_consoles(endpoints: dict[str, str],
+                         candidate: Candidate | None = None) -> dict[str, str]:
+    """The pack hook: console endpoints with each ``hub://`` share as a ``tcp://`` relay.
+
+    ``candidate`` gives the hub table (the share's rate, start_shares, group) before the
+    session's hub adapter exists.
+    """
+    if candidate is not None and any(u.startswith(f"{HUB_SCHEME}://") for u in endpoints.values()):
+        with contextlib.suppress(UsageError):
+            cfg = hub_config_for(candidate)
+            if cfg is not None:
+                SHARES.configure(cfg)
+    out: dict[str, str] = {}
+    for name, url in endpoints.items():
+        if url.startswith(f"{HUB_SCHEME}://"):
+            ref = ShareRef.parse(url.split("://", 1)[1])
+            baud = SHARES.baud_for(ref)
+            url = SHARES.relay(ref).url(baud)
+            tcp_serial.mark_share(url, baud)
+        out[name] = url
+    return out
 
 
 # --- the session adapter -------------------------------------------------------------------------
