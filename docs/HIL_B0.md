@@ -101,6 +101,15 @@ before the MCC checks. If one is still attached, Harness Manager says
 `another client (…) holds the hub share's write slot` instead of sending
 commands that would be dropped.
 
+**Optional, Thursday only (never during B0 slot 1): the shell console.** Add
+lane 2 to the `shares` in boards.toml:
+```
+shares = { mcc = "/dev/mps3_01_pl/tty_00", fpga_uart2 = "/dev/mps3_01_pl/tty_02" }
+```
+then run `harness-manager share start 192.168.10.101 fpga_uart2`.
+- It appears as console `fpga_uart2` (alias `shell`), at a rate the share sets.
+- Whoever connects to `tty_02` first owns its write slot.
+
 ---
 
 ## 3. Start the app
@@ -230,5 +239,6 @@ windowed, so it pushes plain TCP.
 | R1: `busy`, "another client holds the control channel" | a real second client on 6900 (a pyverify run, the hub's poller) | wait, or close the other client |
 | `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh mapstone-dev… 'id -nG'` must list `fpga` |
 | a probe finds nothing | boards.toml missing or `match` wrong; UDP discovery never crosses the tunnel | check `~/.config/harness-manager/boards.toml`; open by address |
+| `ssh … -N -T` processes left after the app was killed (not closed) | a hard kill skips the tunnel's close | `pkill -f -- '-N -T .*mapstone-dev'` (only Harness Manager's tunnels run with `-N -T`) |
 
 **Send back:** the whole `$EV` folder, plus any screenshots.
