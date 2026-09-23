@@ -13,6 +13,10 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `socharness.core.pack` | `BoardPack` (`capability_specs`, `probe`, `open`); `BoardSession` (`identity`, `health`, optional adapters); the adapter protocols (`Deploy`, `Console`, `Debug`, `Reset`, `Clock`, `Telemetry`); `ProbeHints`. |
 | `socharness.core.registry` | Packs are loaded from the `socharness.boards` entry-point group. |
 | `socharness.core.session` | `SessionLock`: one process owns a board; the holder is named; stale locks are taken over; only your own lock is released. |
+| `socharness.core.pack` (adapters) | `DeployAdapter`, `ConsoleAdapter`, `DebugAdapter`, `ResetAdapter`, `ClockAdapter`, `TelemetryAdapter`, `ControllerAdapter`, `StorageAdapter`; value types `OverlayRef`, `PreflightItem`, `DeployResult`, `BackupRecord`, `Progress`. |
+| `socharness.core.services` | The service protocols the front-ends consume: `Engine`, `ContentStore`, `DeployService`, `ConsoleBroker`/`ConsoleStream`, `DebugService`/`DebugStatus`, `TelemetryService`, `EngineConfig`. |
+| `socharness.core.transport` | `SerialPort` (the subset of `serial.Serial` used); `open_serial(url)` with the `serial://` (T3 registers it) and `fake://` (tests) schemes. |
+| `socharness_board_mps3.pack` (lead-owned) | Adapter **hooks**: teams implement factories in their own modules (`deploy.make_deploy_adapter`, `mcc.make_controller_adapter`, `sd.make_storage_adapter`, `usb.probe_usb`, `usb.serial_console_endpoints`, `openocd.make_debug_adapter`, `telemetry.make_telemetry_adapter`), and `pack.py` wires them in when they exist. |
 
 ### Event topics (append-only)
 
@@ -27,17 +31,16 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `storage.progress` `{op, bytes, total}` | SD backup/install/restore |
 | `update.available`, `update.progress`, `update.done` | updates |
 
-## To be fixed at the start of Wave 1 (each owner proposes it in its first hand-back)
+## Wave 1 implementations (who implements which frozen protocol)
 
-| Interface | Owner | Shape |
+| Protocol | Owner | Module |
 |---|---|---|
-| `Engine` (T1) | T1 | `probe()`, `open(board_id)`, `info(board_id)`, `close()`, `bus`. Holds a `SessionLock` per open board. |
-| `ContentStore` (T1) | T1 | `put(bytes\|path) -> sha256`, `get(sha)`, `index(kind, key)` |
-| `DeployService` (T2) | T2 | `compatible(session)`, `preflight(session, overlay) -> list[Check]`, `deploy(session, overlay)` (emits `deploy.*`), `restore_greybox(session)` |
-| `McCDriver` (T3) | T3 | `command(line, allow=...)`, `reboot(witness=...)`, `temps()`, `oscillators()` |
-| `SdVolume` (T3) | T3 | `find()`, `backup()`, `install(bundle)`, `restore(backup)` |
-| `ConsoleBroker` (T4) | T4 | `subscribe(board, name) -> stream`, `export_tcp(board, name) -> port` |
-| `DebugService` (T4) | T4 | `up(session)`, `down(session)`, `status(session)`, `detect(session)` |
+| `Engine`, `ContentStore`, `TelemetryService` | T1 | `socharness/engine.py`, `socharness/services/{store,telemetry}.py` |
+| `DeployService` + the MPS3 `DeployAdapter` | T2 | `socharness/services/deploy.py`, `socharness_board_mps3/{deploy,overlays}.py` |
+| MPS3 `ControllerAdapter`, `StorageAdapter`, USB probe, `serial://` opener | T3 | `socharness_board_mps3/{mcc,sd,usb}.py`, `socharness/transports/direct.py` |
+| `ConsoleBroker`, `DebugService` + the MPS3 `DebugAdapter` | T4 | `socharness/services/{console,debug}.py`, `socharness_board_mps3/openocd.py` |
+| CLI over `Engine` | T5 | `socharness/cli/**` |
+| GUI over `Engine` | T6 | `socharness/gui/**` |
 
 ## Changing a contract
 

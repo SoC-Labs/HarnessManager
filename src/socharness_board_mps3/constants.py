@@ -6,6 +6,9 @@ lives in the platform repo, prefer importing it from pyverify over copying it.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from pyverify.client import CONTROL_PORT  # noqa: F401 - re-exported; 6900
 from pyverify.console import SWO_PORT, UART0_PORT, UART1_PORT  # 6930 / 6931 / 6932
 
@@ -42,3 +45,11 @@ DAP_DESIGN_CONFIGS = {
     0x0005: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),
     0x0008: ("nanosoc_iice_chain.cfg", "nanosoc_ops.tcl"),
 }
+
+# Where the OpenOCD target-half configs live (mps3-nanosoc-platform/host/openocd).
+# Harness bundles will ship them (harness Lane G1); until then, point at the platform repo.
+_default_cfg = Path(__file__).resolve().parents[3] / "mps3-nanosoc-platform" / "host" / "openocd"
+OPENOCD_CFG_DIR: Path | None = (
+    Path(os.environ["SOCHARNESS_MPS3_OPENOCD_DIR"]) if os.environ.get("SOCHARNESS_MPS3_OPENOCD_DIR")
+    else (_default_cfg if _default_cfg.is_dir() else None)
+)

@@ -88,3 +88,22 @@ def test_console_endpoints_point_at_the_board(vboard: VirtualMps3, mps3_pack):
     session = mps3_pack.open(mps3_pack.candidate_for_host(vboard.shell_endpoint))
     eps = session.consoles.console_endpoints()
     assert eps["uart0"] == f"tcp://{vboard.shell.host}:{vboard.console_ports['uart0']}"
+
+
+def test_usb_only_session_opens_without_shell(tmp_path, mps3_pack):
+    from socharness.core.transport import open_serial
+
+    with VirtualMps3(tmp_path / "u", usb=True) as vb:
+        cand = vb.candidate(ethernet=False)
+        session = mps3_pack.open(cand)
+        assert session.shell is None and not session.health().reachable
+        # The fake MCC is reachable through the transport seam T3 builds on.
+        port = open_serial(vb.mcc_url)
+        assert port is vb.mcc
+
+
+def test_open_serial_unknown_scheme_is_usage_error():
+    from socharness.core.transport import open_serial
+
+    with pytest.raises(UsageError):
+        open_serial("bogus://x")

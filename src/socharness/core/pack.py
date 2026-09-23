@@ -7,22 +7,24 @@ A board pack knows one board family. It supplies:
 - ``open()``: opens a ``BoardSession`` for one candidate.
 
 A ``BoardSession`` exposes optional *adapters*, one per service area. The
-board-agnostic services in ``socharness.services`` drive boards only through
-these adapters. An adapter a board cannot provide is ``None``, and the
-matching capability is then unavailable with a reason.
+board-agnostic services (``socharness.core.services`` protocols, implemented
+in ``socharness.services``) drive boards only through these adapters. An
+adapter a board cannot provide is ``None``, and the matching capability is
+then unavailable with a reason.
 
-CONTRACT: changes to anything in this file go through docs/CONTRACTS.md.
+CONTRACT (frozen for Wave 1): changes go through docs/CONTRACTS.md.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from .capabilities import CapabilitySpec
-from .model import BoardIdentity, Candidate, Health, Reading
+from .model import BoardIdentity, Candidate, Check, Health, Reading
 
 
 @dataclass(frozen=True)
@@ -30,40 +32,91 @@ class ProbeHints:
     """Where to look. Empty means "use the pack's defaults"."""
 
     hosts: tuple[str, ...] = ()          # explicit shell addresses, "192.168.10.101[:6900]"
-    serial_ports: tuple[str, ...] = ()   # explicit serial devices
-    volumes: tuple[str, ...] = ()        # explicit mounted volumes
+    serial_ports: tuple[str, ...] = ()   # explicit serial URLs ("serial:///dev/ttyUSB10", "fake://mcc")
+    volumes: tuple[str, ...] = ()        # explicit mounted volumes (config SD)
     scan_usb: bool = True
     scan_network: bool = True
     timeout_s: float = 2.0
 
 
-# --- service adapters (each optional on a session) --------------------------------
+# --- shared value types used by adapters --------------------------------------------
+
+
+@dataclass(frozen=True)
+class OverlayRef:
+    """One loadable partition design (an overlay), as the deploy adapter knows it."""
+
+    name: str                 # "nanosoc"
+    rm_id: str                # "0x01000001"
+    static_id: str            # the shell it is keyed to, "0x3f1a560f"
+    static_usercode: str = ""  # the implementation run it is keyed to
+    source: str = ""          # manifest path or content-store key
+    size_bytes: int = 0
+    ip_class: str = "unknown"  # "open" | "arm-aaa" | "unknown"
+
+
+@dataclass(frozen=True)
+class PreflightItem:
+    name: str                 # "shell_id matches", "crc", "clearing fits", "transport"
+    check: Check              # OK / MISMATCH / UNCHECKED (UNCHECKED is not a pass)
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class DeployResult:
+    rm_id: str
+    verified: bool
+    seconds: float
+    transport: str = ""       # "tcp+windowed", "tftp"
+
+
+Progress = Callable[[str, int, int], None]   # (phase, done, total)
+
+
+@dataclass(frozen=True)
+class BackupRecord:
+    path: str                 # the backup archive
+    sha256: str
+    created_at: float
+    files: int
+    volume_label: str
+
+
+# --- service adapters (each optional on a session) ------------------------------------
 
 
 @runtime_checkable
 class DeployAdapter(Protocol):
-    def list_compatible(self) -> Sequence[str]: ...
-    def deploy(self, rm_name: str) -> BoardIdentity: ...
+    def overlays(self) -> Sequence[OverlayRef]: ...
+    def preflight(self, overlay: OverlayRef) -> Sequence[PreflightItem]: ...
+    def deploy(self, overlay: OverlayRef, progress: Progress | None = None) -> DeployResult: ...
+    def baseline(self) -> OverlayRef | None:
+        """The safe design to restore to (greybox on the MPS3), if known."""
+        ...
 
 
 @runtime_checkable
 class ConsoleAdapter(Protocol):
     def console_endpoints(self) -> dict[str, str]:
-        """Console name -> endpoint URL ("tcp://host:6930", "serial:///dev/ttyUSB12")."""
+        """Console name -> endpoint URL ("tcp://host:6930", "serial:///dev/ttyUSB12", "fake://x")."""
         ...
 
 
 @runtime_checkable
 class DebugAdapter(Protocol):
     def openocd_config(self) -> tuple[str, ...]:
-        """OpenOCD target-half config files for the currently loaded design.
+        """OpenOCD target-half config files for the loaded design.
 
         Raises ``NothingOnTargetError`` when the loaded design has no debug port.
         """
         ...
 
     def openocd_probe_args(self) -> tuple[str, ...]:
-        """Probe-half ``-c`` commands (adapter, host, port), set before any ``-f``."""
+        """Probe-half ``-c`` commands (adapter, host, port). They go before any ``-f``."""
+        ...
+
+    def openocd_search_paths(self) -> tuple[Path, ...]:
+        """Directories OpenOCD should search (``-s``) for the target-half configs."""
         ...
 
 
@@ -84,7 +137,34 @@ class TelemetryAdapter(Protocol):
     def readings(self) -> Sequence[Reading]: ...
 
 
-# --- session and pack ----------------------------------------------------------
+@runtime_checkable
+class ControllerAdapter(Protocol):
+    """The board controller (the MCC on the MPS3)."""
+
+    def command(self, line: str) -> str:
+        """Run one ALLOWLISTED command and return its reply text; else ``RefusedError``."""
+        ...
+
+    def reboot(self, progress: Progress | None = None, wait_s: float = 120.0) -> None:
+        """Reboot and prove it: the board went down, then came back."""
+        ...
+
+    def temperatures(self) -> Sequence[Reading]: ...
+    def oscillators(self) -> Sequence[Reading]: ...
+
+
+@runtime_checkable
+class StorageAdapter(Protocol):
+    """The board's configuration storage (the MPS3 config microSD over USB MSD)."""
+
+    def locate(self) -> str: ...
+    def backup(self, dest_dir: Path, progress: Progress | None = None) -> BackupRecord: ...
+    def install(self, files: Mapping[str, Path], *, backup: BackupRecord,
+                progress: Progress | None = None) -> None: ...
+    def restore(self, backup: BackupRecord, progress: Progress | None = None) -> None: ...
+
+
+# --- session and pack ----------------------------------------------------------------
 
 
 class BoardSession(ABC):
@@ -105,6 +185,8 @@ class BoardSession(ABC):
     resets: ResetAdapter | None = None
     clocks: ClockAdapter | None = None
     telemetry: TelemetryAdapter | None = None
+    controller: ControllerAdapter | None = None
+    storage: StorageAdapter | None = None
 
     def close(self) -> None:  # noqa: B027 - optional hook
         """Release anything the session holds. Idempotent."""
@@ -128,3 +210,9 @@ class BoardPack(ABC):
 
     @abstractmethod
     def open(self, candidate: Candidate) -> BoardSession: ...
+
+    def candidate_for_host(self, spec: str) -> Candidate:
+        """Build a candidate from an explicit address. Packs that can, override this."""
+        from .errors import UsageError
+
+        raise UsageError(f"pack {self.name!r} cannot open a board by address")

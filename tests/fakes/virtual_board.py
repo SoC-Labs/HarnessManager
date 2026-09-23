@@ -15,7 +15,11 @@ from pathlib import Path
 
 from pyverify.testing.fakeshell import FakeShell
 
+from socharness.core.model import Candidate, Link, LinkKind
+from socharness.core.transport import register_fake_serial, unregister_fake_serial
+
 from .fake_mcc import FakeMcc
+from .fake_sd import FakeSdVolume
 
 SHELL_0x3F1A560F = 0x3F1A560F
 
@@ -43,29 +47,11 @@ FIELDED_3F1A560F = FirmwareProfile(
 )
 
 
-class FakeSdVolume:
-    """The configuration microSD as it appears over USB mass storage."""
-
-    LABEL = "V2M-MPS3"
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        (root / "MB" / "HBI0309C" / "Nanosoc").mkdir(parents=True, exist_ok=True)
-        (root / "config.txt").write_text("TITLE: V2M-MPS3 config\nUSB_REMOTE: TRUE\nUARTMODE: 0\n")
-        (root / "MB" / "HBI0309C" / "board.txt").write_text("APPFILE: Nanosoc\\nanosoc.txt\n")
-        (root / "MB" / "HBI0309C" / "Nanosoc" / "nanosoc.txt").write_text(
-            "F0FILE: nanosoc.bit\n[OSCCLKS]\nOSC0: 25.0\nOSC1: 50.0\n"
-        )
-        (root / "MB" / "HBI0309C" / "Nanosoc" / "nanosoc.bit").write_bytes(b"\x00" * 64)
-        # Stock MCC firmware image. The installer must never write or delete .ebf files.
-        (root / "MB" / "HBI0309C" / "mbb_v132.ebf").write_bytes(b"MCCBIOS")
-
-
 class VirtualMps3:
     """Start with ``with VirtualMps3(tmp_path) as vb:``; the parts are attributes."""
 
     def __init__(self, tmp_path: Path, profile: FirmwareProfile = FIELDED_3F1A560F,
-                 *, boot_rm_id: int = 0) -> None:
+                 *, boot_rm_id: int = 0, usb: bool = False) -> None:
         self.profile = profile
         self.shell = FakeShell.ephemeral(
             static_id=profile.static_id,
@@ -79,6 +65,11 @@ class VirtualMps3:
         self.mcc = FakeMcc(on_reboot=self._on_reboot)
         self.sd = FakeSdVolume(tmp_path / "sd")
         self.reboots = 0
+        # usb=True registers the MCC as fake://<name> so the pack's USB adapters
+        # (Team T3) can open it through socharness.core.transport.open_serial.
+        self.usb = usb
+        self.mcc_url = ""
+        self._fake_name = f"mcc-{id(self):x}"
 
     def _on_reboot(self) -> None:
         # A real REBOOT power-cycles the board and reloads the SD bitstream
@@ -93,9 +84,23 @@ class VirtualMps3:
     def console_ports(self) -> dict[str, int]:
         return dict(self.shell.console_ports)
 
+    def candidate(self, *, ethernet: bool = True, usb: bool | None = None) -> Candidate:
+        """A candidate with the links this virtual board exposes."""
+        links: list[Link] = []
+        if ethernet:
+            links.append(Link(LinkKind.ETHERNET, self.shell_endpoint, "shell control channel"))
+        if self.usb if usb is None else usb:
+            links.append(Link(LinkKind.USB_SERIAL, self.mcc_url, "MCC console (fake)"))
+            links.append(Link(LinkKind.USB_MSD, str(self.sd.root), "V2M-MPS3 (fake)"))
+        return Candidate(pack="mps3", board_id=f"mps3@{self.shell_endpoint}", links=tuple(links),
+                         label="virtual MPS3", evidence="test fixture")
+
     def __enter__(self) -> VirtualMps3:
         self.shell.start()
+        if self.usb:
+            self.mcc_url = register_fake_serial(self._fake_name, self.mcc)
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.shell.stop()
+        unregister_fake_serial(self._fake_name)

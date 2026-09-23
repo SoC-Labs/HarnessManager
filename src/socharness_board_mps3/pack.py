@@ -1,15 +1,28 @@
-"""The MPS3 board pack: probe, open, and adapters.
+"""The MPS3 board pack: probe, open, and adapter wiring.
 
-Scaffold status (Wave 0):
-- probe: explicit hosts plus the default shell address; USB scan is Team T3.
-- session: identity, health, DUT reset, console endpoints, and the debug
-  config choice by rm_id.
-- deploy, clocks and telemetry adapters are Teams T2/T3/T4.
+This file is LEAD-OWNED. Teams do not edit it. Instead each team implements a
+factory in its own module, and this file wires it in if it exists:
+
+| Hook (module:function)                         | Team | Returns                            |
+|------------------------------------------------|------|------------------------------------|
+| ``.deploy:make_deploy_adapter(session)``       | T2   | ``DeployAdapter``                  |
+| ``.mcc:make_controller_adapter(session)``      | T3   | ``ControllerAdapter`` (needs a USB serial link) |
+| ``.sd:make_storage_adapter(session)``          | T3   | ``StorageAdapter`` (needs a USB MSD link) |
+| ``.usb:probe_usb(hints)``                      | T3   | ``list[Candidate]`` with USB links  |
+| ``.usb:serial_console_endpoints(candidate)``   | T3   | extra console endpoints (FPGA UARTs) |
+| ``.openocd:make_debug_adapter(session)``       | T4   | ``DebugAdapter`` (replaces the scaffold one) |
+| ``.telemetry:make_telemetry_adapter(session)`` | T9   | ``TelemetryAdapter``               |
+
+A factory may return ``None`` when the session lacks the links it needs. The
+capability view then explains why.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import importlib
+from collections.abc import Callable, Iterable, Sequence
+from pathlib import Path
+from typing import Any
 
 from pyverify import rm_id as rmid
 
@@ -25,17 +38,28 @@ from .constants import (
     DAP_DESIGN_CONFIGS,
     DEFAULT_SHELL_HOST,
     JTAG_RBB_PORT,
+    OPENOCD_CFG_DIR,
 )
 from .shell import Mps3Shell, parse_endpoint
 
 
+def _hook(module: str, attr: str) -> Callable[..., Any] | None:
+    """Load a team's factory if its module exists yet; ``None`` otherwise."""
+    try:
+        mod = importlib.import_module(f"{__package__}.{module}")
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.endswith(module):
+            return None
+        raise
+    return getattr(mod, attr, None)
+
+
 class Mps3Consoles:
-    def __init__(self, host: str, ports: dict[str, int]) -> None:
-        self._host = host
-        self._ports = ports
+    def __init__(self, endpoints: dict[str, str]) -> None:
+        self._endpoints = endpoints
 
     def console_endpoints(self) -> dict[str, str]:
-        return {name: f"tcp://{self._host}:{port}" for name, port in self._ports.items()}
+        return dict(self._endpoints)
 
 
 class Mps3Resets:
@@ -52,6 +76,8 @@ class Mps3Resets:
 
 
 class Mps3Debug:
+    """Scaffold debug adapter. Team T4 replaces it via ``.openocd:make_debug_adapter``."""
+
     def __init__(self, session: Mps3Session, rbb_port: int) -> None:
         self._session = session
         self._rbb_port = rbb_port
@@ -62,6 +88,9 @@ class Mps3Debug:
             f"set RBB_HOST {self._session.shell.host}",
             f"set RBB_PORT {self._rbb_port}",
         )
+
+    def openocd_search_paths(self) -> tuple[Path, ...]:
+        return (OPENOCD_CFG_DIR,) if OPENOCD_CFG_DIR else ()
 
     def openocd_config(self) -> tuple[str, ...]:
         ident = self._session.identity()
@@ -76,18 +105,45 @@ class Mps3Debug:
 
 
 class Mps3Session(BoardSession):
-    def __init__(self, candidate: Candidate, shell: Mps3Shell, console_ports: dict[str, int],
-                 rbb_port: int) -> None:
+    def __init__(self, candidate: Candidate, shell: Mps3Shell | None,
+                 console_ports: dict[str, int], rbb_port: int) -> None:
         self.candidate = candidate
         self.shell = shell
-        self.consoles = Mps3Consoles(shell.host, console_ports)
-        self.resets = Mps3Resets(shell)
-        self.debug = Mps3Debug(self, rbb_port)
+        endpoints: dict[str, str] = {}
+        if shell is not None:
+            endpoints.update({n: f"tcp://{shell.host}:{p}" for n, p in console_ports.items()})
+            self.resets = Mps3Resets(shell)
+            self.debug = Mps3Debug(self, rbb_port)
+        extra = _hook("usb", "serial_console_endpoints")
+        if extra is not None:
+            endpoints.update(extra(candidate))
+        self.consoles = Mps3Consoles(endpoints) if endpoints else None
+
+        for attr, module, factory in (
+            ("deploy", "deploy", "make_deploy_adapter"),
+            ("controller", "mcc", "make_controller_adapter"),
+            ("storage", "sd", "make_storage_adapter"),
+            ("debug", "openocd", "make_debug_adapter"),
+            ("telemetry", "telemetry", "make_telemetry_adapter"),
+        ):
+            make = _hook(module, factory)
+            if make is not None:
+                adapter = make(self)
+                if adapter is not None or attr != "debug":
+                    setattr(self, attr, adapter)
+
+    def link(self, kind: LinkKind) -> Link | None:
+        return next((lk for lk in self.candidate.links if lk.kind == kind), None)
 
     def identity(self) -> BoardIdentity:
+        if self.shell is None:
+            return BoardIdentity(board_type="mps3")
         return self.shell.identity()
 
     def health(self) -> Health:
+        if self.shell is None:
+            return Health(reachable=False, control_channel="offline",
+                          notes=("no Ethernet link to the shell",))
         return self.shell.health()
 
 
@@ -117,30 +173,32 @@ class Mps3Pack(BoardPack):
         )
 
     def probe(self, hints: ProbeHints) -> list[Candidate]:
-        hosts = hints.hosts or ((DEFAULT_SHELL_HOST,) if hints.scan_network else ())
         found: list[Candidate] = []
-        for spec in hosts:
-            cand = self.candidate_for_host(spec)
-            host, port = parse_endpoint(spec, CONTROL_PORT)
-            try:
-                ident = Mps3Shell(host, port, timeout=hints.timeout_s).identity()
-            except HarnessError:
-                continue
-            found.append(
-                Candidate(
-                    pack=cand.pack,
-                    board_id=cand.board_id,
-                    links=cand.links,
+        if hints.scan_network or hints.hosts:
+            hosts = hints.hosts or (DEFAULT_SHELL_HOST,)
+            for spec in hosts:
+                cand = self.candidate_for_host(spec)
+                host, port = parse_endpoint(spec, CONTROL_PORT)
+                try:
+                    ident = Mps3Shell(host, port, timeout=hints.timeout_s).identity()
+                except HarnessError:
+                    continue
+                found.append(Candidate(
+                    pack=cand.pack, board_id=cand.board_id, links=cand.links,
                     label=f"MPS3 {ident.rm_name or ident.rm_id} on shell {ident.shell_id}",
                     evidence="answered ping",
-                )
-            )
+                ))
+        usb = _hook("usb", "probe_usb")
+        if usb is not None and (hints.scan_usb or hints.serial_ports or hints.volumes):
+            found.extend(usb(hints, found))
         return found
 
     def open(self, candidate: Candidate) -> Mps3Session:
         eth = next((lk for lk in candidate.links if lk.kind == LinkKind.ETHERNET), None)
-        if eth is None:
-            raise UsageError("this scaffold can only open MPS3 boards over Ethernet",
-                             hint="USB-only sessions arrive with Team T3")
-        host, port = parse_endpoint(eth.address, CONTROL_PORT)
-        return Mps3Session(candidate, Mps3Shell(host, port), self._console_ports, self._rbb_port)
+        shell = None
+        if eth is not None:
+            host, port = parse_endpoint(eth.address, CONTROL_PORT)
+            shell = Mps3Shell(host, port)
+        elif not any(lk.kind in (LinkKind.USB_SERIAL, LinkKind.USB_MSD) for lk in candidate.links):
+            raise UsageError("this candidate has no link the MPS3 pack can use")
+        return Mps3Session(candidate, shell, self._console_ports, self._rbb_port)
