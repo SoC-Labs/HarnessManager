@@ -90,6 +90,16 @@ def test_s6_reboot_over_ethernet_and_usb_is_witnessed(vb, fake_time):
     assert session.identity().rm_id.lower() == "0x00000000"   # a reload from SD reverts to greybox
 
 
+def test_mcc_answers_straight_after_an_ethernet_witnessed_reboot(vb, fake_time):
+    # T7-6: the shell answers ping before the MCC has finished its banner. The reboot must
+    # read the console to its prompt before returning, so the very next command works.
+    session = open_session(vb)
+    evidence = session.controller.reboot(wait_s=120)
+    assert isinstance(evidence, dict) and evidence["shell_id_after"]
+    assert "REBOOT witnessed" in evidence["summary"] and evidence["down_evidence"]
+    assert session.controller.oscillators()          # no clock advance in between
+
+
 def test_s6_no_op_reboot_is_not_reported_as_done(vb, fake_time):
     # Negative twin: an MCC that accepts REBOOT and does nothing (the old tty_01 trap).
     from socharness.core.errors import ActionFailedError

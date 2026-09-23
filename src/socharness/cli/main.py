@@ -288,6 +288,12 @@ def make_parser() -> argparse.ArgumentParser:
     for name in ("daemon", "ui"):          # so `socharness help <verb>` knows them
         if name in sub.choices:
             verbs[name] = sub.choices[name]
+
+    # -- update (T7: the signed GitHub update channel) ----------------------------------
+    from . import cmd_update
+    cmd_update.register(sub)
+    if "update" in sub.choices:
+        verbs["update"] = sub.choices["update"]
     return p
 
 

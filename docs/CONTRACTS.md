@@ -29,7 +29,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `debug.state` `{state: down\|starting\|up\|failed, ports, pid, detail, config}` | debug sessions |
 | `controller.reboot` `{phase: sent\|down\|up}` | board reboot |
 | `storage.progress` `{op, bytes, total}` | SD backup/install/restore |
-| `update.available`, `update.progress`, `update.done` | updates |
+| `update.available`, `update.started` `{version, mode, rekey}`, `update.progress` `{phase, bytes, total}`, `update.done` `{version, result, detail}`, `update.failed` `{version, reason, phase}` | updates (T7). `result`: installed \| written-not-running \| stored \| up-to-date \| restored \| restored-not-confirmed |
 | `power.cycle` `{phase: off\|on\|up, off_s, device}` | a cold power cycle through a metered outlet (T9) |
 | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | socharnessd jobs and back-pressure (docs/API.md) |
 
@@ -50,6 +50,8 @@ These are the interfaces every team codes against. They are owned by the lead an
 - **`Candidate.identity`** is what the board said while it was being probed, or `None`. It lets the selection list show shell, design and harness before a board is opened. `Engine.info()` still needs an open board.
 - **`power_cycle` is narrowed by the adapter.** The capability needs a `SMART_POWER` link, and `Engine.info()` also moves it to `unavailable` with `session.power.cycle_reason` when the device cannot cycle (a meter-only INA260).
 - **Telemetry reads can block.** A SYSMON read over JTAG takes about 3 s (xsdb). socharnessd and the web UI poll telemetry off the request thread, never on it.
+- **`engine.update` is optional.** The in-process `Engine` has it (T7's `UpdateService`); a `RemoteEngine` does not. Read it with `getattr(engine, "update", None)`. The CLI's `update` verb always runs in-process, so a daemon that holds the board refuses it by name (HELD).
+- **`ControllerAdapter.reboot` returns a dict**: `summary`, `down_after_s`, `up_after_s`, `down_evidence`, `up_evidence`, `shell_id_before`, `shell_id_after`, `fpga_configured`. It returns only once the controller console is back at its prompt.
 - **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
 
 ## Changing a contract

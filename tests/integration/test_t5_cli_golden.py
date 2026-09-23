@@ -316,7 +316,9 @@ def test_every_verb_has_a_success_and_a_failure_case():
     assert expected <= verbs_fail
     # every TSV layout is exercised by some success case
     # daemon/ui run a real socharnessd process; their TSV is pinned in test_t13_process.py.
-    assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS) - {"daemon", "ui"}
+    # The update layouts need a signed channel; they are pinned in test_t7_cli.py.
+    pinned_elsewhere = {"daemon", "ui"} | {k for k in TSV_COLUMNS if k.startswith("update ")}
+    assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS) - pinned_elsewhere
 
 
 @pytest.mark.parametrize("fmt", ["json", "tsv", "human"])

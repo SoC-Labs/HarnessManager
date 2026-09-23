@@ -129,6 +129,7 @@ class MccTiming:
     down_pings: int = 2                     # consecutive failed pings that count as "down"
     reopen_interval_s: float = 0.5          # reboot witness: retry a port that dropped off USB
     quiet_s: float = 2.0                    # reboot witness: no prompt after REBOOT for this long
+    banner_tail_s: float = 30.0             # reboot witness: read the banner to its prompt after the shell is up
 
 
 DEFAULT_TIMING = MccTiming()
@@ -546,6 +547,19 @@ class RebootWitness:
                 f"({'; '.join(self.down_evidence)}), up after {self.up_after_s:.1f}s "
                 f"({self.up_evidence})")
 
+    def as_dict(self) -> dict:
+        """The evidence as plain JSON (the ``ControllerAdapter.reboot`` return, T7-6)."""
+        return {
+            "summary": self.summary(),
+            "down_after_s": round(self.down_after_s, 3),
+            "up_after_s": round(self.up_after_s, 3),
+            "down_evidence": list(self.down_evidence),
+            "up_evidence": self.up_evidence,
+            "shell_id_before": self.shell_id_before,
+            "shell_id_after": self.shell_id_after,
+            "fpga_configured": self.boot.fpga_configured if self.boot is not None else None,
+        }
+
 
 # A shell probe returns the shell_id when ping is answered, ``SHELL_BUSY`` when the
 # control port is alive but did not answer (held by another client, reset, protocol
@@ -617,6 +631,30 @@ class Mps3Controller:
                 )
             watch.feed(con.listen(self.timing.poll_s * 10))
         self._settle(con, watch)
+
+    def _drain_to_prompt(self, con: _Console, watch: BootWatch, after: bytearray) -> None:
+        """Read (never type) until the console ends in a prompt.
+
+        Stops at ``banner_tail_s``, or after ``2 * quiet_s`` of silence (a prompt missed
+        while the port was off USB); the next command's CR then finds the prompt itself.
+        """
+        if con.port is None:
+            return
+        t = self.timing
+        end = self._clock() + t.banner_tail_s
+        last_rx = self._clock()
+        while not PROMPT_RE.search(after.decode("ascii", "replace")):
+            now = self._clock()
+            if now >= end or now - last_rx >= 2 * t.quiet_s:
+                return
+            try:
+                data = con.listen(t.poll_s * 5)
+            except UnreachableError:
+                return
+            if data:
+                after += data
+                watch.feed(data)
+                last_rx = self._clock()
 
     def _settle(self, con: _Console, watch: BootWatch) -> None:
         """After a banner completes, give the MCC a moment to print its prompt before typing."""
@@ -736,7 +774,7 @@ class Mps3Controller:
     def reboot(self, progress: Progress | None = None, wait_s: float | None = None) -> dict:
         """Send a paced REBOOT and prove the board went down and came back.
 
-        Returns the witness summary (also kept on ``last_reboot``)."""
+        Returns the witness as a dict (the full record is kept on ``last_reboot``)."""
         if wait_s is None:
             # 120 s bare-metal, 180 s Linux (stage0 + µSD + kernel), per constants (T12-6).
             from .constants import reboot_wait_s
@@ -754,7 +792,7 @@ class Mps3Controller:
             sent_at = self._clock()
             emit("sent", 1, 3)
             self.last_reboot = self._witness(con, sent_at, wait_s, shell_before, emit)
-        return self.last_reboot.summary()
+        return self.last_reboot.as_dict()
 
     def _probe_shell(self) -> str | None:
         if self._shell_probe is None:
@@ -851,12 +889,16 @@ class Mps3Controller:
                 if eth:
                     # Up needs a real ping reply: a busy/reset port may be a shell mid-restart.
                     if answered and (ping_failed or not eth_baseline):
+                        # The shell can answer before the MCC has finished its banner: let
+                        # it reach its prompt, or the next MCC command finds none (T7-6).
+                        self._drain_to_prompt(con, watch, after)
                         emit("up", 3, 3)
                         return RebootWitness(
                             sent_at=sent_at, down_after_s=down_at - sent_at, up_after_s=now - sent_at,
                             down_evidence=tuple(down_evidence),
                             up_evidence=f"the shell answers ping again (shell_id {shell_now})",
-                            shell_id_before=shell_before, shell_id_after=shell_now, boot=rec)
+                            shell_id_before=shell_before, shell_id_after=shell_now,
+                            boot=watch.record or rec)
                 elif rec is not None and rec.complete:
                     if con.port is not None:
                         try:

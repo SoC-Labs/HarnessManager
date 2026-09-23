@@ -36,6 +36,11 @@ DEBUG_COLUMNS = ("BOARD_ID", "STATE", "GDB", "TELNET", "TCL", "PID", "CONFIG", "
 TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "daemon": ("STATE", "PID", "PORT", "URL", "STATE_DIR"),
     "ui": ("URL", "PORT", "PID", "STARTED"),
+    "update check": ("CHANNEL", "SERIAL", "HARNESS_CURRENT", "APP_CURRENT", "APP_UPDATE",
+                     "BOARD_ID", "RUNNING", "MODE", "REKEY", "BLOCKERS"),
+    "update harness": ("BOARD_ID", "VERSION", "RESULT", "BACKUP", "DETAIL"),
+    "update app": ("VERSION", "STAGED", "SWITCHED", "CURRENT", "PREVIOUS"),
+    "update rollback": ("TARGET", "RESULT", "VERSION", "DETAIL"),
     "version": ("VERSION", "ENGINE"),
     "packs": ("PACK", "TITLE"),
     "probe": ("BOARD_ID", "PACK", "LABEL", "EVIDENCE", "LINKS"),

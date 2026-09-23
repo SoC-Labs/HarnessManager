@@ -60,6 +60,7 @@ LAZY_SERVICES: dict[str, tuple[str, str, str]] = {
     "deploy": ("socharness.services.deploy", "DeployService", "deploy"),
     "consoles": ("socharness.services.console", "ConsoleBroker", "consoles"),
     "debug": ("socharness.services.debug", "DebugService", "debug"),
+    "update": ("socharness.services.update", "UpdateService", "update"),
 }
 
 # Lock files held by any Engine in this process: resolved path -> the holding engine.
@@ -133,6 +134,11 @@ class Engine:
     @property
     def debug(self) -> Any:
         return self._service("debug")
+
+    @property
+    def update(self) -> Any:
+        """The signed update channel (T7). Optional on an Engine: read it with getattr."""
+        return self._service("update")
 
     def _service(self, attr: str) -> Any:
         with self._lock:

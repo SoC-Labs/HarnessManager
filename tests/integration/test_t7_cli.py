@@ -1,14 +1,12 @@
 """T7: ``socharness update …`` end to end: the real CLI main, the real Engine and MPS3 pack,
 the virtual board over Ethernet + USB, and the fake channel on 127.0.0.1.
 
-``cmd_update.register`` is attached to the CLI's own parser here the way the lead
-will wire it into ``cli/main.py``. The engine factory gives the engine an
-``update`` service that trusts the test keys (the build pins none yet).
+``cli/main.py`` registers ``update`` (lead, after the T7 merge). The engine factory
+gives the engine an ``update`` service that trusts the test keys (the build pins none yet).
 """
 
 from __future__ import annotations
 
-import argparse
 import io
 import json
 
@@ -17,6 +15,7 @@ import pytest
 from socharness.cli import cmd_update
 from socharness.cli import main as climain
 from socharness.cli.engine import set_engine_factory
+from socharness.cli.output import TSV_COLUMNS
 from socharness.core.errors import ExitCode
 from socharness.core.services import EngineConfig
 from socharness.engine import Engine
@@ -46,15 +45,6 @@ def cli(vb, tmp_path, monkeypatch):
     monkeypatch.setattr(mccmod, "DEFAULT_SLEEP", clock.sleep)
     vb.mcc.clock = clock
     vb.mcc.down_s, vb.mcc.boot_s, vb.mcc.autoboot_window_s = 1.0, 25.0, 3.0
-    real_make = climain.make_parser
-
-    def make_parser():
-        p = real_make()
-        sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
-        cmd_update.register(sub)
-        return p
-
-    monkeypatch.setattr(climain, "make_parser", make_parser)
     state = tmp_path / "state"
     uv = FakeUv()
 
@@ -63,8 +53,9 @@ def cli(vb, tmp_path, monkeypatch):
                      packs={"mps3": Mps3Pack(console_ports=vb.console_ports)})
         app = AppUpdater(AppLayout(state / "update" / "app"), LocalBusyProbe(state), uv="/opt/uv",
                          runner=uv, python_version="3.11", running_version="0.1.0")
-        eng.update = UpdateService(eng, trust=KEYS.trust(), token="", app_version="0.1.0",
-                                   app_updater=app)
+        # engine.update is a lazy service; seed it with one that trusts the test keys.
+        eng._services["update"] = UpdateService(eng, trust=KEYS.trust(), token="",
+                                                app_version="0.1.0", app_updater=app)
         return eng
 
     previous = set_engine_factory(factory)
@@ -116,6 +107,38 @@ def test_update_check_tsv_has_the_documented_columns(cli, capsys, monkeypatch):
     rc, out, _ = run(capsys, monkeypatch, "--tsv", "update", "check", "--source",
                      cli["srv"].source())
     assert rc == 0 and len(out.rstrip("\n").split("\t")) == len(cmd_update.UPDATE_TSV["update check"])
+
+
+def _tsv_cols(out: str, layout: str) -> None:
+    rows = out.rstrip("\n").split("\n")
+    assert rows and all(len(r.split("\t")) == len(TSV_COLUMNS[layout]) for r in rows), out
+
+
+# The T5 golden test exempts the update layouts; these pin them (lead, after the T7 merge).
+def test_update_harness_and_app_tsv_have_the_documented_columns(cli, capsys, monkeypatch):
+    bind_identity_to_sd(cli["vb"])
+    publish(cli, Release.fielded(), Release("1.1.0"))
+    rc, out, err = run(capsys, monkeypatch, "--tsv", "update", "harness", *board_args(cli), "--yes")
+    assert rc == ExitCode.OK, err
+    _tsv_cols(out, "update harness")
+    cli["builder"].add_app("0.2.0", AssetFile("socharness-0.2.0-py3-none-any.whl", b"PK-wheel"))
+    cli["builder"].publish(serial=2)
+    rc, out, err = run(capsys, monkeypatch, "--tsv", "update", "app", "--yes", "--source",
+                       cli["srv"].source())
+    assert rc == ExitCode.OK, err
+    _tsv_cols(out, "update app")
+
+
+def test_update_rollback_tsv_has_the_documented_columns(cli, capsys, monkeypatch):
+    bind_identity_to_sd(cli["vb"], stale=True)          # written, not running: then roll back
+    publish(cli, Release.fielded(), Release("1.1.0"))
+    vb = cli["vb"]
+    rc, _, _ = run(capsys, monkeypatch, "update", "harness", *board_args(cli), "--yes")
+    assert rc == ExitCode.ACTION_FAILED
+    rc, out, err = run(capsys, monkeypatch, "--tsv", "update", "rollback", vb.shell_endpoint,
+                       "--serial", vb.mcc_url, "--volume", str(vb.sd.root), "--yes")
+    assert rc == ExitCode.OK, err
+    _tsv_cols(out, "update rollback")
 
 
 def test_a_tampered_channel_exits_15(cli, capsys, monkeypatch):
@@ -184,7 +207,6 @@ def test_written_not_running_exits_6_with_the_restore_command(cli, capsys, monke
     endpoint = cli["vb"].shell_endpoint
     assert f"socharness update rollback {endpoint}" in obj["error"]["hint"]
     assert obj["error"]["data"]["outcome"]["result"] == "written-not-running"
-    cli["clock"].advance(60)
     rc, out, err = run(capsys, monkeypatch, "--json", "update", "rollback", endpoint, "--serial",
                        cli["vb"].mcc_url, "--volume", str(cli["vb"].sd.root), "--yes")
     assert rc == ExitCode.OK, err

@@ -45,6 +45,7 @@ IN_PROCESS_VERBS: dict[str, str] = {
     "attach": "holds the board's lock in this process",
     "detach": "signals the process that holds the lock",
     "daemon": "manages socharnessd itself",
+    "update": "writes the SD and reboots in this process; a daemon holding the board refuses it by name",
     "ui": "manages socharnessd itself",
 }
 

@@ -162,9 +162,6 @@ def test_written_but_not_running_offers_the_restore_and_the_restore_works(world)
     assert out.backup["path"] in out.restore_hint and vb.reboots == 1
     assert w["events"][-1].data["result"] == RESULT_WRITTEN
 
-    # The user reads the report first. (The Ethernet witness returns while the MCC is still
-    # printing the tail of its banner; see the T3 note in the hand-back.)
-    w["clock"].advance(60)
     back = w["svc"].rollback_harness(w["session"])
     assert back.result == RESULT_RESTORED, back.detail
     assert vb.sd.snapshot() == before and vb.reboots == 2
@@ -258,7 +255,6 @@ def test_an_interrupted_sd_write_is_refused_until_it_is_restored(world, monkeypa
     assert back.result == RESULT_RESTORED, back.detail
     assert vb.sd.snapshot() == before and w["session"].storage.pending() is None
 
-    w["clock"].advance(60)
     p3, verified = plan(w)                                   # and now the update goes through
     out = w["svc"].install_harness(w["session"], p3, p3.approve(), verified)
     assert out.result == RESULT_INSTALLED, out.detail
