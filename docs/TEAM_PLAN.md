@@ -4,13 +4,22 @@
 
 **Status (2026-09-23, evening): Wave 2 is running** (approved by david). Worktrees `../harness-manager-t12|t13|t14|t7|t9`:
 
-| Team | Scope |
-|---|---|
-| T12 | Harness evolution: ILA v0.11 + Linux, identify, wedged/rescue |
-| T13 | `socharnessd` local service + RemoteEngine, per docs/API.md |
-| T14 | Clean web UI replacing Qt: no-build ES modules, served by socharnessd |
-| T7 | Signed GitHub update channel, two-target bundles, app self-update |
-| T9 | Telemetry sources and power |
+| Team | Scope | State |
+|---|---|---|
+| T12 | Harness evolution: ILA v0.11 + Linux, identify, wedged/rescue | merged (9fc2004, CCRs 64ae3be) |
+| T13 | `socharnessd` local service + RemoteEngine, per docs/API.md | merged (752d047, CCRs fdebfef) |
+| T14 | Clean web UI replacing Qt: no-build ES modules, served by socharnessd | running |
+| T7 | Signed GitHub update channel, two-target bundles, app self-update | merged (7750171, CCRs e60d7f0) |
+| T9 | Telemetry sources and power | merged (764c472, CCRs 5ae5937) |
+
+Main at e60d7f0: 1484 passed, 7 skipped.
+
+**Wave 2 follow-ups (not yet assigned):**
+- **socharnessd endpoints** for `session.power` (read, cycle) and `engine.update` (check, harness, app, rollback as jobs). The web UI greys both out until then.
+- **T7-2:** move `OsSlotAdapter` into `core.pack` as `BoardSession.os_slots`, with a T12 pack hook. This waits on the Linux lead's FLOW_CONTRACT.md.
+- **T7-5:** a public overlay-import hook on the pack (today `PackOverlayHandler` imports `socharness_board_<pack>.overlays` by name).
+- **Trust keys:** `update/trust.py` `PINNED_KEYS` is empty, so every channel is refused. david creates the minisign keys (harness-release, root, optional app-ci).
+- **Retire Qt** once T14 reaches parity.
 
 T8 (hub mode) and T10 (XDC export) follow.
 
