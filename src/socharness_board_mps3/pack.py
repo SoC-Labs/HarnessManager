@@ -114,6 +114,8 @@ class Mps3Session(BoardSession):
         # Read by the deploy adapter (T2). None means "use the default or env override".
         self.push_port = push_port
         self.tftp_port = tftp_port
+        # Read by the debug adapter (T4): the board's remote_bitbang JTAG port.
+        self.rbb_port = rbb_port
         endpoints: dict[str, str] = {}
         if shell is not None:
             endpoints.update({n: f"tcp://{shell.host}:{p}" for n, p in console_ports.items()})

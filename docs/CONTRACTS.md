@@ -25,8 +25,8 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `board.found`, `board.lost`, `board.identity` | discovery and identity changes |
 | `session.opened`, `session.closed` | session lifecycle |
 | `deploy.started`, `deploy.progress` `{phase, bytes, total}`, `deploy.done` `{rm_id, verified}`, `deploy.failed` `{reason}` | partition programming |
-| `console.line` `{name, text}`, `console.state` `{name, state}` | consoles |
-| `debug.state` `{state, ports}` | debug sessions |
+| `console.line` `{name, text, partial?}`, `console.state` `{name, state: connecting\|up\|down\|closed, detail, endpoint}` | consoles |
+| `debug.state` `{state: down\|starting\|up\|failed, ports, pid, detail, config}` | debug sessions |
 | `controller.reboot` `{phase: sent\|down\|up}` | board reboot |
 | `storage.progress` `{op, bytes, total}` | SD backup/install/restore |
 | `update.available`, `update.progress`, `update.done` | updates |

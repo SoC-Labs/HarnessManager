@@ -65,6 +65,10 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+#: Public name (T4-6): other modules need the same Windows-safe liveness check.
+pid_alive = _pid_alive
+
+
 #: A lock file with no readable owner may simply be mid-write by its creator.
 #: Only treat it as stale once it is older than this.
 TORN_LOCK_GRACE_S = 5.0

@@ -2,13 +2,26 @@
 
 **Owner:** the lead agent (Claude), accountable to david.
 
-**Status (2026-09-23):** Wave 0 is done (`72f9cd4`) and the Wave 1 contracts are frozen (`4c4053a`). **Wave 1 is running**: T1–T6 in worktrees `../harness-manager-t1` … `-t6`, on branches `team/t*`.
+**Status (2026-09-23): Wave 1 is complete and merged.** `make check` gives 900 passed and 4 skipped (the real-OpenOCD tests; they pass with `SOCHARNESS_TEST_REAL_OPENOCD` set). The GUI tests run offscreen.
+
+| Team | Merged as | What landed |
+|---|---|---|
+| T1 | `1ebba72` | Engine, ContentStore, TelemetryService |
+| T2 | `702dfb4` | Guarded deploy, MPS3 deploy adapter, overlay catalogue |
+| T3 | `52b8528`, `693cc87` | MCC controller, config-SD storage, USB discovery, `serial://` |
+| T4 | `c29aea6` | Console broker, OpenOCD session manager, MPS3 debug adapter |
+| T5 | `7bd4163` | The full CLI |
+| T6 | `2162eb2`, `c2bb67d` | GUI MVP (selection dialog + tabs) |
+
+The lead's contract fixes after each merge are the `Apply T<n> contract change requests` commits.
 
 **Background reading:**
 - the feasibility report: <https://claude.ai/artifact/T12zMEjmH8ybHBBvZmi4N5>;
 - the harness-side handover: `mps3-nanosoc-platform/docs/planning/BOARD_MANAGER_HARNESS_HANDOVER.md`.
 
-**Next action:** the lead reviews each Wave 1 hand-back and merges in order T1 → T3 → T2 → T4 → T5 → T6, running the scenario suite after each merge (§5).
+**Next action:**
+1. david opens a board window for **HIL R0/R1** (read-only: `socharness info`, the consoles, the MCC `HELP`/`CFG R`, and debug `detect`).
+2. The lead opens the Wave 2 contract window (§4a).
 
 ---
 
@@ -204,6 +217,48 @@ Delivered:
   - disabled states follow capabilities;
   - fits a 1280×800 window.
 - Uses only T1's `Engine` interface. Until T1 lands, it codes against a fake engine built from the `core` contracts.
+
+
+### 4a. Wave 1 → Wave 2 carry-over (the contract window at the start of Wave 2)
+
+**Scenario coverage after Wave 1:**
+
+| Scenario | Where it is covered |
+|---|---|
+| S1 | `tests/integration/test_info_virtual.py` |
+| S2, S3 | `test_t2_deploy_virtual.py`, `test_t2_engine_deploy.py` |
+| S4, S5 | `test_t4_console_virtual.py`, `test_t4_engine_swap.py` |
+| S6 | `test_t3_hooks.py::test_s6_*` |
+| S7 | `test_t3_sd.py` round trip |
+| S8 | `scenario_s8_capabilities.py` |
+| S9, S10 | Wave 2 (T7, T8) |
+
+**Contract changes deferred from Wave 1, all agreed in principle:**
+- `PreflightItem.identity` + a core `refusal()` rule, so front-ends stop importing the deploy service (T2 CCR 4, T5 CCR 3).
+- `Mps3Pack(overlay_dirs=)` as a pack setting instead of an env var (T5 CCR 4).
+- A `LabAdapter` protocol for `link`/`display`/`macgen`/`dutrx` (T5 CCR 5).
+- Reboot evidence returned from `ControllerAdapter.reboot()` (T3 CCR 3; T7 needs it).
+- Optional `DebugAdapter` extras (`openocd_post_config`, `describe`, `expected_idcode`) and the ConsoleBroker/DebugService extras T4 already implements (T4-2, T4-3).
+- Links changing on an open board, i.e. hotplug (T6 CCR-3).
+
+**New Wave 2 work these revealed:**
+- **A local engine service (`socharnessd`, per user).** A board lock belongs to one process, so today:
+  - `socharness attach` must stay in the foreground;
+  - `debug up` cannot leave OpenOCD running after the command exits;
+  - the GUI and the CLI cannot share one board.
+
+  A small per-user daemon owning the engine fixes all three (T5 design question, T4-7). Its client API is the same shape as hub mode, so T8 builds it alongside.
+- **A more realistic virtual board** (T4-5):
+  - promote `SingleClientProxy` and `FakeJtagServer` into `VirtualMps3`;
+  - model 6931/6932 dropping on a swap;
+  - ask the harness agent to add one-client-per-port to FakeShell itself.
+- **The demo engine** (`--fake`) shows a USB board with build check "OK". Real fielded boards report "unchecked", so make the demo match.
+- **Unproven until real hardware or a real OS:**
+  - Linux/Windows drive and port discovery;
+  - the MCC's real REBOOT echo;
+  - SD writes over the MCC's USB storage;
+  - a real gdb attach through the board's 6921;
+  - Windows as a whole.
 
 ### Wave 2: updates, hub, telemetry, XDC (~8–10 working days, after the Wave 1 merge)
 
