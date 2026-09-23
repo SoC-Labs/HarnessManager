@@ -26,6 +26,7 @@ class LinkKind(str, Enum):
     JTAG = "jtag"              # FPGA JTAG cable (hw_server / openocd)
     HUB = "hub"                # everything above, reached through fpgahub
     SMART_POWER = "smart_power"  # networked metered plug / PDU on the board's supply
+    SSH = "ssh"                # SSH into a Linux harness (console, logs, forwards, file copy)
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,9 @@ class BoardIdentity:
     features: tuple[str, ...] = ()
     build_check: Check = Check.UNCHECKED   # firmware vs fabric skew verdict
     unit_id: str = ""          # per-board serial/DNA when the harness can report it
+    harness_impl: str = ""     # "bare-metal" | "linux" | "" (unknown: harness predates `version`)
+    proto: str = ""            # net-protocol version the harness speaks, when it says
+    usercode: str = ""         # implementation-run identity (static_usercode), when it says
 
 
 @dataclass(frozen=True)
