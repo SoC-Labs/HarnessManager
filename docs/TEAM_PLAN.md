@@ -2,6 +2,18 @@
 
 **Owner:** the lead agent (Claude), accountable to david.
 
+**Status (2026-09-23, evening): Wave 2 is running** (approved by david). Worktrees `../harness-manager-t12|t13|t14|t7|t9`:
+
+| Team | Scope |
+|---|---|
+| T12 | Harness evolution: ILA v0.11 + Linux, identify, wedged/rescue |
+| T13 | `socharnessd` local service + RemoteEngine, per docs/API.md |
+| T14 | Clean web UI replacing Qt: no-build ES modules, served by socharnessd |
+| T7 | Signed GitHub update channel, two-target bundles, app self-update |
+| T9 | Telemetry sources and power |
+
+T8 (hub mode) and T10 (XDC export) follow.
+
 **Status (2026-09-23): Wave 1 is complete and merged.** `make check` gives 900 passed and 4 skipped (the real-OpenOCD tests; they pass with `SOCHARNESS_TEST_REAL_OPENOCD` set). The GUI tests run offscreen.
 
 | Team | Merged as | What landed |
