@@ -40,6 +40,33 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("daemon", servers, indirect=True)
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    setattr(item, f"rep_{report.when}", report)
+
+
+def dump_failed_pages(request, pages) -> None:
+    """A failed browser test leaves each page's screenshot and state under screenshots/failures."""
+    import json
+    import re
+
+    rep = getattr(request.node, "rep_call", None)
+    if rep is None or not rep.failed:
+        return
+    out = SCREENSHOTS / "failures"
+    out.mkdir(parents=True, exist_ok=True)
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", request.node.nodeid)[-120:]
+    for i, page in enumerate(pages):
+        try:
+            page.screenshot(path=str(out / f"{stem}-{i}.png"))
+            state = page.evaluate("window.__socharnessState ? window.__socharnessState() : null")
+            (out / f"{stem}-{i}.json").write_text(json.dumps(state, indent=1, default=str))
+        except Exception:  # noqa: BLE001, S112 - a report must never mask the failure
+            continue
+
+
 def chrome_binary() -> str | None:
     given = os.environ.get("SOCHARNESS_TEST_CHROME")
     if given:
@@ -85,9 +112,9 @@ def daemon(request, engine, tmp_path):
 
 
 @pytest.fixture
-def page_factory(browser, daemon):
+def page_factory(browser, daemon, request):
     """``page_factory(scheme="light")`` -> a 1280x800 page on the UI, with errors collected."""
-    contexts = []
+    contexts, pages = [], []
 
     def make(scheme: str = "light", *, url: str | None = None, width: int = 1280,
              height: int = 800):
@@ -100,9 +127,11 @@ def page_factory(browser, daemon):
         page.on("console", lambda m: page.errors.append(m.text) if m.type == "error"
                 and "status of 4" not in m.text and "status of 5" not in m.text else None)
         page.goto(url or daemon.ui_url)
+        pages.append(page)
         return page
 
     yield make
+    dump_failed_pages(request, pages)
     for ctx in contexts:
         ctx.close()
 

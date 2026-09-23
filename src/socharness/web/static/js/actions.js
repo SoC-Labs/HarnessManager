@@ -11,7 +11,7 @@
 // - An intrusive action is armed by a tick box, which clears after each run.
 // - An interlock that stops a click says so and ends with "Nothing was run."
 
-import { call, toApiError, waitJob } from "./api.js";
+import { call, jobFinished, toApiError, waitJob } from "./api.js";
 import { capState, secs } from "./format.js";
 import { boardState, changed, jobLabel, log, S, setJob } from "./store.js";
 
@@ -89,7 +89,8 @@ function rcOf(err) {
 export async function runJob(name, params, body, onProgress, kind = name) {
   const { data } = await call(name, params, body);
   if (!data.job) return data;
-  if (params && params.bid) setJob(params.bid, data.job, kind);
+  // Not when its job.done already arrived: that would mark the board busy for good.
+  if (params && params.bid && !jobFinished(data.job)) setJob(params.bid, data.job, kind);
   return waitJob(data.job, { onProgress });
 }
 

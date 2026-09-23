@@ -120,17 +120,39 @@ export function jobLabel(kind) {
 }
 
 export function setJob(bid, id, kind) {
+  if (endedJobs.has(id)) return;          // its end already arrived: never resurrect it
   const b = boardState(bid);
   if (b.job && b.job.id === id) {
     if (kind && b.job.kind === "job") b.job.kind = kind;
     return;
   }
   b.job = { id, kind: kind || "job", at: Date.now() };
+  if (!kind && id && id !== "?") learnJob(bid, id);
   changed();
 }
 
+// A job learned of without its kind (GET /boards, a missed job.started): ask the daemon.
+async function learnJob(bid, id) {
+  try {
+    const { data } = await call("job", { id });
+    const b = boardState(bid);
+    if (b.job && b.job.id === id && data.kind) {
+      b.job.kind = data.kind;
+      if (data.started_at) b.job.at = data.started_at * 1000;
+      changed();
+    }
+    if (data.state && data.state !== "running") jobEnded(bid, id);
+  } catch (e) { /* the chip still says a job runs; job.done or GET /boards ends it */ }
+}
+
+const endedJobs = new Set();
+
 // The job ended: the board is free again, so read what it changed.
 function jobEnded(bid, id) {
+  if (id) {
+    endedJobs.add(id);
+    if (endedJobs.size > 500) endedJobs.delete(endedJobs.values().next().value);
+  }
   const b = boardState(bid);
   if (!b.job || b.job.id !== id) return;
   const kind = b.job.kind;
@@ -147,11 +169,14 @@ function jobEnded(bid, id) {
 }
 
 // A read refused because a job holds the board is not an error: wait for the job.
+// socharnessd names it in the holder: "socharnessd <kind> job <id>".
 function deferIfHeld(bid, err) {
   if (!heldByJob(err)) return false;
   const b = boardState(bid);
   b.deferred = true;
-  if (!b.job) b.job = { id: "?", kind: "job", at: Date.now() };
+  const named = /(\S+) job (\S+)/.exec(err.holder || "");
+  if (named) setJob(bid, named[2], named[1]);
+  else if (!b.job) b.job = { id: "?", kind: "job", at: Date.now() };
   changed();
   return true;
 }
@@ -269,9 +294,12 @@ export function openedBoard(bid, { quiet = false } = {}) {
 
 export async function refreshInfo(bid) {
   const b = boardState(bid);
+  b.infoGen = (b.infoGen || 0) + 1;
+  const gen = b.infoGen;
   b.infoLoading = true;
   changed();
   const r = await timed("info", () => call("info", { bid }));
+  if (gen !== b.infoGen) return;          // a newer read is on its way: it wins
   b.infoLoading = false;
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.infoLine = r.line;
@@ -359,7 +387,9 @@ export async function runPreflight(bid, name) {
 
 export async function loadDebug(bid) {
   const b = boardState(bid);
+  const asked = performance.now();
   const r = await timed("debug status", () => call("debugStatus", { bid }));
+  if ((b.debugAt || 0) > asked) return;   // the state changed while this read was out
   if (!r.error) b.debug = unwrapDebug(r.data.data);
   else if (!b.debug) b.debug = { state: "unknown", detail: r.error.message };
   changed();
@@ -491,6 +521,7 @@ export function handleEvent(ev) {
   if (ev.topic.startsWith("deploy.")) onDeployEvent(ev);
   if (ev.topic === "debug.state") {
     const b = boardState(bid);
+    b.debugAt = performance.now();
     const d = ev.data || {};
     const ports = d.ports || {};
     b.debug = { ...(b.debug || {}), state: d.state || "unknown",
@@ -562,5 +593,16 @@ export async function start() {
   if (!r.error && !S.order.length) probe();
   // Holders change under us (other users, the CLI): re-read the list now and then.
   setInterval(() => { if (document.visibilityState === "visible") loadBoards(); }, 15000);
+  // A job known to hold a board is also asked after directly: its end frees the board even
+  // when the event socket missed job.done (reconnecting, or events dropped).
+  setInterval(() => {
+    let unknown = false;
+    for (const [bid, b] of Object.entries(S.board)) {
+      if (!b.job) continue;
+      if (b.job.id === "?") unknown = true;
+      else learnJob(bid, b.job.id);
+    }
+    if (unknown) loadBoards();
+  }, 2000);
   changed();
 }

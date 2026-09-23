@@ -405,6 +405,13 @@ function App() {
   return html`<div class="app"><${Rail} /><${Workspace} /><${HelpModal} /></div>`;
 }
 
+// A read-only snapshot for the browser tests' failure reports and for the devtools console.
+window.__socharnessState = () => JSON.parse(JSON.stringify({
+  connection: S.connection, eventsUp: S.eventsUp, selected: S.selected, boards: S.boards,
+  jobs: Object.fromEntries(Object.entries(S.board).map(([bid, b]) => [bid, b.job])),
+  log: S.log.slice(-80),
+}));
+
 initTheme();
 initToken();
 render(html`<${App} />`, document.getElementById("app"));

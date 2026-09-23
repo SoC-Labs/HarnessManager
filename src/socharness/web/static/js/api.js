@@ -212,10 +212,23 @@ export function unwrapDebug(data) { return data && data.state ? data : (data && 
 // --- jobs ------------------------------------------------------------------------------------
 
 const jobWaiters = new Map();     // job id -> {resolve, reject, onProgress, settled}
+// A fast job can end, and its events arrive, before the 202 that named it: its outcome
+// waits here for the waiter instead of being lost (and the poll would be the only way).
+const jobOutcomes = new Map();    // job id -> {ok, value}
+const OUTCOMES_KEPT = 200;
+
+export function jobFinished(id) { return jobOutcomes.has(id); }
 
 export function jobEvent(ev) {
   const id = ev.data && ev.data.job;
-  const w = id && jobWaiters.get(id);
+  if (!id) return;
+  if (ev.topic === "job.done" || ev.topic === "job.failed") {
+    const outcome = ev.topic === "job.done" ? { ok: true, value: ev.data.result }
+      : { ok: false, value: new ApiError(ev.data.error || {}, 0) };
+    jobOutcomes.set(id, outcome);
+    if (jobOutcomes.size > OUTCOMES_KEPT) jobOutcomes.delete(jobOutcomes.keys().next().value);
+  }
+  const w = jobWaiters.get(id);
   if (!w) return;
   if (ev.topic === "job.progress" && w.onProgress) w.onProgress(ev.data);
   if (ev.topic === "job.done") settle(id, true, ev.data.result);
@@ -234,6 +247,8 @@ function settle(id, ok, value) {
 // Resolves with the job's result, rejects with its error. Events drive it; a slow poll of
 // GET /jobs/{id} is the backstop for a dropped event socket.
 export function waitJob(id, { onProgress, pollMs = 1500 } = {}) {
+  const known = jobOutcomes.get(id);
+  if (known) return known.ok ? Promise.resolve(known.value) : Promise.reject(known.value);
   return new Promise((resolve, reject) => {
     const w = { resolve, reject, onProgress, settled: false, timer: 0 };
     jobWaiters.set(id, w);

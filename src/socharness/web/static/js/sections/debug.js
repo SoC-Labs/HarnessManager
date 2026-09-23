@@ -31,6 +31,7 @@ export function DebugSection({ bid }) {
   const keep = (ok, value) => {
     if (ok && value && typeof value === "object" && value.state) {
       b.debug = unwrapDebug(value);
+      b.debugAt = performance.now();
       changed();
     } else {
       loadDebug(bid);
