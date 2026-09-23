@@ -662,7 +662,7 @@ class Mps3Storage:
         """
         path = Path(path)
         if not path.is_file():
-            raise RefusedError(f"backup {path} does not exist", hint="check the path")
+            raise AbsentError(f"backup {path} does not exist", hint="check the path")
         actual = file_sha256(path)
         sidecar = path.with_name(path.name + ".sha256")
         recorded = actual

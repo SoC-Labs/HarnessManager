@@ -32,6 +32,8 @@ def test_load_backup_without_sidecar_is_verified_but_flagged(tmp_path, sd, stora
     assert "no .sha256 sidecar" in loaded.volume_label
 
 
-def test_load_backup_missing_file(tmp_path, storage):  # noqa: F811
-    with pytest.raises(RefusedError):
+def test_load_backup_missing_file_is_absent(tmp_path, storage):  # noqa: F811
+    from socharness.core.errors import AbsentError
+
+    with pytest.raises(AbsentError):
         storage.load_backup(tmp_path / "nope.zip")

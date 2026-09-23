@@ -208,7 +208,9 @@ def test_load_backup_refuses_a_foreign_zip_and_a_missing_file(tmp_path, storage)
         zf.writestr("cat.jpg", b"meow")
     with pytest.raises(RefusedError, match="unreadable or incomplete"):
         storage.load_backup(foreign)
-    with pytest.raises(RefusedError, match="does not exist"):
+    from socharness.core.errors import AbsentError
+
+    with pytest.raises(AbsentError, match="does not exist"):   # exit 3: the file is not there
         storage.load_backup(tmp_path / "nope.zip")
 
 
