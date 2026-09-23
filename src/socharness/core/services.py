@@ -29,6 +29,7 @@ from typing import Protocol, runtime_checkable
 from .events import EventBus
 from .model import BoardInfo, Candidate, Reading
 from .pack import BoardPack, BoardSession, DeployResult, OverlayRef, PreflightItem, ProbeHints
+from .session import LockOwner
 
 # --- content store -----------------------------------------------------------------
 
@@ -163,3 +164,8 @@ class Engine(Protocol):
     def info(self, board_id: str) -> BoardInfo: ...
     def close(self, board_id: str) -> None: ...
     def close_all(self) -> None: ...
+    def lock_owner(self, board_id: str) -> LockOwner | None:
+        """Who holds the board right now (any process), without opening it."""
+        ...
+
+    def open_boards(self) -> list[str]: ...

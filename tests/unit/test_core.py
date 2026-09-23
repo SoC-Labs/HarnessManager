@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import time
 from pathlib import Path
 
 import pytest
@@ -117,7 +119,7 @@ def test_session_lock_takes_over_stale_lock(tmp_path: Path):
     lock = SessionLock("mps3@y", lock_dir=tmp_path)
     lock.lock_dir.mkdir(parents=True, exist_ok=True)
     lock.path.write_text(json.dumps(
-        {"user": "ghost", "host": os.uname().nodename, "pid": 2**22 + 12345, "since": 0.0}))
+        {"user": "ghost", "host": socket.gethostname(), "pid": 2**22 + 12345, "since": 0.0}))
     lock.acquire()  # dead pid on this host -> stale -> taken over
     assert lock.owner() is not None and lock.owner().pid == os.getpid()
     lock.release()
@@ -139,3 +141,22 @@ def test_session_lock_never_releases_someone_elses(tmp_path: Path):
 def test_mps3_pack_is_registered():
     packs = load_packs()
     assert "mps3" in packs and packs["mps3"].title.startswith("Arm MPS3")
+
+
+def test_session_lock_does_not_steal_a_fresh_empty_lock(tmp_path: Path):
+    # CCR-2: a lock file its creator has not written yet must not be taken over.
+    lock = SessionLock("mps3@e", lock_dir=tmp_path)
+    tmp_path.mkdir(exist_ok=True)
+    lock.path.write_text("")
+    with pytest.raises(HeldError):
+        lock.acquire()
+
+
+def test_session_lock_takes_over_an_old_empty_lock(tmp_path: Path):
+    lock = SessionLock("mps3@f", lock_dir=tmp_path)
+    lock.path.write_text("")
+    old = time.time() - 60
+    os.utime(lock.path, (old, old))
+    lock.acquire()
+    assert lock.owner().pid == os.getpid()
+    lock.release()

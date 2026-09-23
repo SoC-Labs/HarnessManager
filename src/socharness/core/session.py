@@ -38,6 +38,22 @@ def _safe_name(board_id: str) -> str:
 def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        # os.kill(pid, 0) on Windows sends CTRL_C_EVENT (== 0): never use it there.
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5      # ACCESS_DENIED: it exists
+        try:
+            code = wintypes.DWORD()
+            if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259                 # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -47,6 +63,11 @@ def _pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+#: A lock file with no readable owner may simply be mid-write by its creator.
+#: Only treat it as stale once it is older than this.
+TORN_LOCK_GRACE_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -83,6 +104,12 @@ class SessionLock:
             return LockOwner(user="?", host=socket.gethostname(), pid=-1, since=0.0)
 
     def _is_stale(self, owner: LockOwner) -> bool:
+        if owner.pid == -1:
+            # Torn or empty: its creator may still be writing it (O_EXCL, then write).
+            try:
+                return time.time() - self.path.stat().st_mtime > TORN_LOCK_GRACE_S
+            except FileNotFoundError:
+                return True
         return owner.host == socket.gethostname() and not _pid_alive(owner.pid)
 
     def acquire(self) -> None:
