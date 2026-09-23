@@ -1,0 +1,157 @@
+# Harness Manager CI: lint, the full test suite on Linux (including the web UI in the
+# runner's Chrome and the packaging and installer tests), and the unit tests plus an
+# installer smoke run on Windows and macOS.
+#
+# pyverify is not on PyPI. Every job installs the vendored wheel (vendor/, see
+# vendor/README.md) by path FIRST, so the package index never picks which pyverify runs.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+
+jobs:
+  lint:
+    name: lint (ruff, shellcheck, PSScriptAnalyzer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: |
+          python -m pip install vendor/mps3_pyverify-*.whl
+          python -m pip install --find-links vendor -e ".[dev]"
+      - name: ruff
+        run: ruff check src tests
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+      - name: PSScriptAnalyzer (install.ps1, and its syntax against Windows PowerShell 5.1)
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          }
+          $found = @(Invoke-ScriptAnalyzer -Path scripts/install.ps1 -Severity Warning,Error `
+                       -ExcludeRule PSAvoidUsingWriteHost,PSUseShouldProcessForStateChangingFunctions)
+          $compat = @{ Rules = @{ PSUseCompatibleSyntax = @{ Enable = $true; TargetVersions = @('5.1', '7.0') } } }
+          $found += @(Invoke-ScriptAnalyzer -Path scripts/install.ps1 -Settings $compat `
+                        -IncludeRule PSUseCompatibleSyntax)
+          $found | Format-Table -AutoSize RuleName, Line, Message | Out-String -Width 200
+          if ($found.Count -gt 0) { exit 1 }
+
+  test:
+    name: tests (ubuntu, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install (dev + webtest; uv for the installer's uv path)
+        run: |
+          python -m pip install vendor/mps3_pyverify-*.whl
+          python -m pip install --find-links vendor -e ".[dev,webtest]" uv
+      - name: Use the runner's Chrome for the web UI tests (Playwright downloads nothing)
+        run: |
+          chrome="$(command -v google-chrome || command -v google-chrome-stable)"
+          "$chrome" --version
+          echo "HARNESS_MANAGER_TEST_CHROME=$chrome" >> "$GITHUB_ENV"
+      - name: Tests (unit, integration, web UI, packaging, installer)
+        run: |
+          set -o pipefail
+          python -m pytest -q -rs | tee pytest.log
+      - name: The browser, packaging and installer tests ran (no skips)
+        run: |
+          if grep -E "^SKIPPED .*(playwright|Chrome|chrome|package index|uv is not|curl)" pytest.log; then
+            echo "::error::browser, packaging or installer tests were skipped"
+            exit 1
+          fi
+
+  other-os:
+    name: unit tests + installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install (pyverify from vendor/)
+        shell: bash
+        run: |
+          python -m pip install vendor/mps3_pyverify-*.whl
+          python -m pip install --find-links vendor -e ".[dev]"
+      - name: Unit tests
+        run: python -m pytest -q -rs tests/unit
+      - name: Installer smoke (scripts/install.sh)
+        if: runner.os != 'Windows'
+        run: scripts/smoke_install.sh --no-uv
+      - name: Installer smoke (scripts/install.ps1 in Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        # GitHub prepends $ErrorActionPreference = 'stop', which makes any native stderr line
+        # fatal in Windows PowerShell 5.1: go back to Continue and check exit codes instead.
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $want = (Select-String -Path pyproject.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          $root = Join-Path $env:LOCALAPPDATA 'harness-manager'
+          $hm = Join-Path $root 'bin\harness-manager.exe'
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -NoUv -WithSerial
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
+          $got = (& $hm version 2>$null | Out-String).Trim()
+          if ($got -ne $want) { throw "harness-manager version is '$got', pyproject says '$want'" }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (-not ($userPath -split ';' -contains (Join-Path $root 'bin'))) { throw "bin dir not on the user PATH: $userPath" }
+
+          $ui = & $hm --json ui --demo --no-browser 2>$null | Out-String | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "harness-manager ui exited $LASTEXITCODE" }
+          $base = $ui.url.Split('#')[0]
+          $page = Invoke-WebRequest -UseBasicParsing $base
+          $csp = $page.Headers['Content-Security-Policy']
+          if ($page.StatusCode -ne 200 -or "$csp" -notlike "*script-src 'self'*") { throw "page: $($page.StatusCode) CSP: $csp" }
+          $health = Invoke-RestMethod ($base.TrimEnd('/') + '/api/v1/health')
+          if ($health.version -ne $want) { throw "health: $($health | ConvertTo-Json -Compress)" }
+          Write-Host "UI $base answers, CSP: $csp"
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -NoUv
+          if ($LASTEXITCODE -ne 0) { throw "the second install.ps1 exited $LASTEXITCODE" }
+          $status = & $hm --json daemon status --demo 2>$null | Out-String | ConvertFrom-Json
+          if ($status.state -eq 'running') { throw "the demo service survived the upgrade" }
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -Uninstall
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 -Uninstall exited $LASTEXITCODE" }
+          if (Test-Path $hm) { throw "$hm is still there" }
+          if (Test-Path (Join-Path $root 'venv')) { throw "the venv is still there" }
+          Write-Host "SMOKE PASS"
