@@ -6,6 +6,7 @@ are injected, and pywebview is replaced in ``sys.modules``.
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 from pathlib import Path
@@ -30,9 +31,11 @@ def which_of(*present: str):
 class Recorder:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
+        self.envs: list[dict] = []
 
     def __call__(self, args, **kwargs):
         self.calls.append(list(args))
+        self.envs.append(kwargs.get("env") or {})
         return types.SimpleNamespace(pid=4242)
 
 
@@ -112,3 +115,21 @@ def test_no_native_skips_pywebview(tmp_path: Path, monkeypatch):
     got = window.open_window(URL, tmp_path / "prof", native=False, popen=Recorder(),
                              which=which_of("google-chrome"))
     assert got.how == "app-mode" and seen == []
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the D-Bus isolation is Linux-only")
+def test_the_app_window_runs_without_the_desktop_session_bus(tmp_path: Path, monkeypatch):
+    # A ThinLinc desktop's session bus left Chrome's app window blank (2026-09-23).
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:abstract=/tmp/dbus-x")
+    monkeypatch.delenv(window.ENV_KEEP_DBUS, raising=False)
+    rec = Recorder()
+    window.open_window(URL, tmp_path / "prof", popen=rec, which=which_of("google-chrome"))
+    assert rec.envs[0]["DBUS_SESSION_BUS_ADDRESS"] == "disabled:"
+    assert "--password-store=basic" in rec.calls[0]
+    assert os.environ["DBUS_SESSION_BUS_ADDRESS"] == "unix:abstract=/tmp/dbus-x"   # ours untouched
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the D-Bus isolation is Linux-only")
+def test_negative_twin_keep_dbus_keeps_the_bus(monkeypatch):
+    env = window.app_mode_env({"DBUS_SESSION_BUS_ADDRESS": "unix:x", window.ENV_KEEP_DBUS: "1"})
+    assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:x"

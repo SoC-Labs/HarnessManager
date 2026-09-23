@@ -15,6 +15,13 @@ window differs. The launcher tries, in order:
 
 Closing the window leaves socharnessd running, because the CLI shares it.
 ``socharness daemon stop`` stops it.
+
+On Linux the app window starts WITHOUT the desktop's D-Bus session bus, and with
+``--password-store=basic``. On a ThinLinc (Xvnc) desktop, Chrome attached to the
+session bus mapped a window but never loaded the page: no request reached the
+daemon, and the window stayed blank. With the bus disabled, the same command
+rendered the page (reproduced on a private Xvnc, 2026-09-23). The app window uses
+nothing on that bus. ``SOCHARNESS_APP_KEEP_DBUS=1`` keeps the bus.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ENV_APP_BROWSER = "SOCHARNESS_APP_BROWSER"
+ENV_KEEP_DBUS = "SOCHARNESS_APP_KEEP_DBUS"
 TITLE = "Harness Manager"
 WINDOW_SIZE = (1440, 900)
 
@@ -75,7 +83,16 @@ def app_mode_args(exe: str, url: str, profile_dir: Path) -> list[str]:
     """The command line for a Chromium-family browser in app mode, with its own profile."""
     w, h = WINDOW_SIZE
     return [exe, f"--app={url}", f"--user-data-dir={profile_dir}", f"--window-size={w},{h}",
-            "--no-first-run", "--no-default-browser-check", "--class=socharness"]
+            "--no-first-run", "--no-default-browser-check", "--class=socharness",
+            "--password-store=basic"]
+
+
+def app_mode_env(environ: dict[str, str] | None = None) -> dict[str, str]:
+    """The app window's environment: on Linux, no desktop session bus (see the docstring)."""
+    env = dict(os.environ if environ is None else environ)
+    if sys.platform.startswith("linux") and env.get(ENV_KEEP_DBUS, "") in ("", "0"):
+        env["DBUS_SESSION_BUS_ADDRESS"] = "disabled:"
+    return env
 
 
 def _try_pywebview(url: str) -> Launched | None:
@@ -107,9 +124,9 @@ def open_window(url: str, profile_dir: Path, *, native: bool = True,
     exe = find_app_browser(which)
     if exe is not None:
         profile_dir.mkdir(parents=True, exist_ok=True)
-        child = popen(app_mode_args(exe, url, profile_dir), stdin=subprocess.DEVNULL,
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                      start_new_session=(os.name != "nt"))
+        child = popen(app_mode_args(exe, url, profile_dir), env=app_mode_env(),
+                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL, start_new_session=(os.name != "nt"))
         return Launched("app-mode", exe, getattr(child, "pid", None))
     if named:
         notes.append(f"${ENV_APP_BROWSER}={named} is not an executable")
@@ -130,5 +147,6 @@ def describe(launched: Launched) -> str:
             "none": launched.detail}[launched.how]
 
 
-__all__: Sequence[str] = ("ENV_APP_BROWSER", "Launched", "app_mode_args", "describe",
+__all__: Sequence[str] = ("ENV_APP_BROWSER", "ENV_KEEP_DBUS", "Launched", "app_mode_args",
+                          "app_mode_env", "describe",
                           "find_app_browser", "open_window")
