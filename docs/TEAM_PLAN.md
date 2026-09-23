@@ -24,40 +24,87 @@
 
 T8 (hub mode) and T10 (XDC export) follow.
 
-## Wave 3 plan (drawn up 2026-09-23, late; awaiting david's go)
+## Week plan: a working Harness Manager by Fri 09-25 (drawn up 2026-09-23 23:00; awaiting david's go)
 
-Nothing has touched real hardware yet, and the next hard dates are fixed by the board: **B0 on Fri 09-25** (slots 1 and 3 belong to Harness Manager, docs/planning/B0_RUNBOOK_LINUX.md in the platform repo), **B1 go/no-go 10-02**, **mint 3 around 10-08**, **cutover 10-12**.
+**Friday acceptance ("working"):** on srv03335, `harness-manager app` shows the lab MPS3 through the hub, with:
+1. the simplified Overview;
+2. every console in the GUI AND attachable with `screen <path>` at the same time, with the baud set from the GUI;
+3. MCC temperature and board-controller access over a hub share;
+4. debug `detect`;
+5. and, if david grants a write slot, programming a partition plus a debug session.
 
-**Phase A: reach the lab board from srv03335 (Thu 09-24, about 1 day, lead).** srv03335 cannot route to 192.168.10.101; only the hub can. The MCC is reachable only through a hub share.
+It installs from `git@github.com:SoC-Labs/HarnessManager.git` (private) with one command.
 
-| # | Work | Estimate |
-|---|---|---|
-| A1 | Built-in SSH tunnel: `--via ssh:mapstone-dev` (and `via` in boards.toml) forwards 6900/6910/6921/6930–6932 to free local ports, maps them into the pack, and marks the links `via="ssh"`. `-o ControlPath=none`. | 4 h |
-| A2 | `tcp://` serial scheme, so the MCC adapter runs over an fpgahub share (`fpgahub share start mps3_01_pl /dev/mps3_01_pl/tty_00`) through the tunnel. The MCC pacing is unchanged. | 2–3 h |
-| A3 | A July Linux v0.7 FakeShell profile (no `version` verb) and a slot-3 rehearsal test against it. | 1–2 h |
-| A4 | `docs/HIL_B0.md`: the exact slot 1 and slot 3 commands, the expected answers, and the evidence files. `make hil` updated for the tunnel. | 1 h |
+**Facts that shape it:**
+- **Baud on UART0/1 over Ethernet is fixed in the loaded design.** `rp_nanosoc_wrapper.sv`: `UART_BAUD = 76800` sets the `uart_axis_shim` divider at build time. No register or verb changes it at run time, so a GUI setting needs a hardware change.
+- **Consoles on real serial ports can change baud from the app today:** the FPGA UART lanes on the Debug USB, the MCC, and hub shares.
+- **76800 is not a Linux termios speed,** so `screen`'s baud argument cannot carry it. For Ethernet consoles the GUI is the baud control, and the PTY just carries bytes.
 
-**Phase B: B0 window (Fri 09-25, 40 min on the board, read-only).** Slot 1 (bare-metal `0x3F1A560F`): `info`, the DUT consoles, MCC `HELP`/`CFG R TEMP`, debug `detect`, the web UI on real data. Slot 3 (July Linux): graceful behaviour with no `version` verb, ping, diag, 6910 push. david takes the lease (the runbook's first command). Harness Manager stays off `tty_02` and never runs `share stop`. Output: evidence files and a bug list.
+### Step 0 (lead, first, about 1 h): rename, then freeze the new contracts
 
-**Phase C: Wave 3 teams (Mon 09-28 → Fri 10-02), in parallel.**
+**Rename `socharness` to Harness Manager everywhere:**
 
-| Team | Scope | Estimate |
-|---|---|---|
-| T15 | Close the UI gaps: daemon endpoints for power (read, cycle) and update (check, harness, app, rollback as jobs); UI pages for update, power-cycle, SD install, Clocks (the DUT MMCM presets already work in the engine). | 3 days |
-| T8 | Hub mode against fpgahub 0.3.0: credentials, leases inside the app (acquire, heartbeat, release, queue), shares for the MCC and the FPGA UARTs, and the board list from the hub. It replaces the Phase A tunnel for lab users. | 4–5 days |
-| T10 | XDC export from the pin DB (a fixture until harness Lane C lands) plus the Board & XDC page. | 2 days |
-| T11 | Release engineering: a GitHub repo with CI, the pywebview native window as the `app` extra, one-file builds (Linux, Windows, macOS), and a user guide for external MPS3 owners. | 3 days |
+| What | New name |
+|---|---|
+| Command | `harness-manager` |
+| Distribution | `harness-manager` |
+| Imports | `harness_manager`, `harness_manager_mps3` |
+| Board-pack entry point | `harness_manager.boards` |
+| Environment variables | `HARNESS_MANAGER_*` |
+| State directory | `~/.config/harness-manager` |
+| Daemon (in prose) | "the Harness Manager service" |
+| API `service` field | `harness-manager` |
+| Update-channel schema | `harness-manager-channel` |
+| Pack distribution | `harness-manager-board-*` |
 
-**B1 gate (10-02):** the same read-only tier against `mps3-harnessd`: `impl:"linux"` detected, the SSH link, the identify reply (UDP 6899: hub mode or on the hub's LAN, because UDP does not tunnel).
+Nothing was published under the old name, so there are no compatibility shims.
 
-**Phase D: mint 3 and cutover (10-08 → 10-12).** T7-2 `os_slots` once FLOW_CONTRACT.md lands, then a first signed channel (needs the keys). Rehearse the harness update on the virtual board; run it on the real board only with david.
+**Then:**
+- set `origin` to SoC-Labs/HarnessManager;
+- freeze the API additions below in docs/API.md, so the UI lane can build against them while the backend lanes build them.
 
-**Decisions for david:**
-1. **Tunnel now, hub mode next week** (recommended): the tunnel unblocks Friday, and hub mode is the lasting answer.
-2. **Create `SoC-Labs/harness-manager` (private) and allow a push:** that gives CI and a place for T11's builds.
-3. **Create the three minisign keys** (harness-release, root, app-ci). Until then every update channel is refused by design.
-4. **Board actions:** david takes leases himself (auto mode blocks an agent's `lease acquire`), or adds a permission rule for `fpgahub lease show|acquire|release` on `mps3_01_pl`.
-5. **Licence:** pyproject still says "Proprietary (SoC Labs), pending decision".
+### Tonight: six lanes in parallel (worktrees from post-rename main)
+
+| Lane | Scope | Owns | Est. |
+|---|---|---|---|
+| **L1 Reach** | SSH tunnel (`--via ssh:HOST`, boards.toml `via`); a `tcp://` serial scheme for fpgahub shares (the MCC on `tty_00`, FPGA UART lanes); leases through pyverify.lease (show, acquire, heartbeat, release) as a service; the July v0.7 FakeShell profile; docs/HIL_B0.md (slot commands, expected answers, evidence files). | `harness_manager_mps3/tunnel.py`, `transports/tcp_serial.py`, `services/lease.py`, `daemon/hub_api.py`, the fakes, the docs | 6 h |
+| **L2 Consoles** | A PTY per console in the daemon, with a stable path `/tmp/harness-manager-$USER/<board>/<console>` for `screen <path>` (the GUI and screen share the broker); `ConsoleBroker.baud()/set_baud()`: serial backends reopen at the new rate, Ethernet consoles report the design's fixed rate and refuse changes with the reason unless the harness has the `uart_baud` feature; a standard baud set by screen is forwarded; `harness-manager pty TARGET NAME`. | `services/console.py`, `services/pty.py`, `daemon/consoles_api.py`, `client/` console parts, `cli/cmd_io.py` | 6 h |
+| **L3 UI** (the T14 agent, resumed) | The simplified Overview (spec below); the console bar gets a baud selector and the screen command (the `console` CLI line goes); pages for update, power-cycle, SD install and Clocks; a lease chip. Builds against the mock and the frozen API; screenshots for david in the morning. | `web/**`, `tests/web/**`, `tests/fakes/t14_*` | 8 h |
+| **L4 Service endpoints** | power (read, cycle as a job), update (check, harness, app, rollback as jobs), clocks (list, set), all behind the existing job/HELD rules. | `daemon/power_api.py`, `daemon/update_api.py`, `daemon/clocks_api.py` | 4 h |
+| **L5 Release** | `pyproject` 0.1.0; an install script (uv/pipx plus the vendored pyverify wheel); GitHub Actions CI (lint, tests, headless browser tests); README quickstart for external MPS3 owners; the pywebview `app` extra; CHANGELOG. | `README.md`, `scripts/`, `.github/`, packaging | 4 h |
+| **L6 HW baud** (optional, platform repo worktree, simulation only) | A runtime divisor in `uart_axis_shim`, set in-band from the shell over the existing host→DUT stream (no boundary change, so no re-mint; an overlay rebuild only), plus a `uart_baud` verb and feature, the pyverify codec, FakeShell, and a cocotb/VCS proof. Handover for the Linux lead's service modules. | platform `fpga/rp/nanosoc/uart_axis_shim.sv`, `firmware/uart_over_eth`, pyverify | overnight |
+
+The lead wires each new router and hook into `app.py` and `pack.py` (lead-owned) at merge, so no two lanes edit the same file.
+
+**Simplified Overview (L3 spec):**
+1. **No duplication.** The page header already shows the board, shell, design, harness and health, so the Identity card goes.
+2. **Four action tiles:**
+   - **Design:** the name and rm_id, with "Program…";
+   - **Consoles:** each with a state dot, "Open", and the screen path to copy;
+   - **Debug:** state and gdb port, with "Start";
+   - **Board:** temperature and DUT clock, with "Reset DUT" and "Reboot".
+3. **A "Needs attention" strip,** shown only when something is wrong: build unchecked, harness not idle, the lease expiring. One line each.
+4. **"Details", collapsed:** identity, counters, capabilities with their reasons, telemetry.
+
+### Thursday 09-24
+- **Morning:** david reviews the Overview screenshots and tries `screen` on the demo boards. The lead merges L1–L5 and runs the full suite.
+- **Afternoon:**
+  - a tunnel rehearsal against the virtual board;
+  - install on srv03335 from the private repo;
+  - fix-forward.
+- **Board:** W1 (ILA mint fielding) runs that day, and Harness Manager stays off the board.
+
+### Friday 09-25 (B0)
+- **Slot 1:** read-only, 30 min, on whatever shell W1 leaves.
+- **Slot 3:** July Linux, 10 min.
+- **Optional slot 4:** the write proof, 15 min, if david grants it: program nanosoc, open uart0 via screen, debug detect, restore greybox.
+- **Close:** fix-forward, tag v0.1.0, push.
+
+### Decisions for david
+1. **L6 hardware-baud lane tonight** (recommended). Simulation only; silicon needs an overlay rebuild and a board window next week.
+2. **Slot 4 on Friday**, for the write proof.
+3. **Push to SoC-Labs/HarnessManager** after the rename: the repo is private and empty.
+4. **Licence:** can wait for the tag.
 
 **Status (2026-09-23): Wave 1 is complete and merged.** `make check` gives 900 passed and 4 skipped (the real-OpenOCD tests; they pass with `SOCHARNESS_TEST_REAL_OPENOCD` set). The GUI tests run offscreen.
 
