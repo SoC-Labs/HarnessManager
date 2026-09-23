@@ -175,3 +175,17 @@ def test_negative_twin_a_direct_board_has_no_tunnel_and_no_hub(tmp_path):
             r = c.post(f"{bid_path(bid)}/lease", json={}, headers=H)
             assert r.status_code == 422 and r.json()["error"]["code"] == ExitCode.UNAVAILABLE
         eng.close_all()
+
+
+def test_a_probed_candidate_keeps_its_route_through_json(client, rig):
+    """The UI probes, then opens the candidate it got back: via and the hub link must survive."""
+    r = client.post("/api/v1/probe", json={"hosts": [BOARD_IP], "scan_usb": False,
+                                           "scan_network": False}, headers=H)
+    (cand,) = r.json()["candidates"]
+    eth = next(lk for lk in cand["links"] if lk["kind"] == "ethernet")
+    assert eth["via"] == "ssh" and f"ssh:{HUB}" in eth["detail"]
+    assert any(lk["address"].startswith("hub://") and lk["via"] == "hub" for lk in cand["links"])
+    opened = client.post("/api/v1/boards", json={"candidate": cand, "note": "ui"}, headers=H)
+    assert opened.status_code == 200 and opened.json()["info"]["identity"]["shell_id"] == "0x3f1a560f"
+    bid = opened.json()["board_id"]
+    assert client.get(f"{bid_path(bid)}/tunnel", headers=H).json()["tunnel"]["state"] == "up"
