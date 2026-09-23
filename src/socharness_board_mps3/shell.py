@@ -23,6 +23,15 @@ from .constants import KNOWN_DESIGNS
 T = TypeVar("T")
 
 
+def _resolve_rm_name(rm_id: str) -> str:
+    """Design name from the overlay manifests (T2), falling back to KNOWN_DESIGNS."""
+    try:
+        from .overlays import resolve_rm_name
+    except ImportError:
+        return KNOWN_DESIGNS.get(rmid.design_id(rm_id), "")
+    return resolve_rm_name(rm_id)
+
+
 def parse_endpoint(spec: str, default_port: int) -> tuple[str, int]:
     """'host' | 'host:port' -> (host, port). IPv6 literals need brackets."""
     if spec.startswith("["):
@@ -58,6 +67,21 @@ class Mps3Shell:
                 f"shell at {self.host}:{self.port} did not answer within {self.timeout}s",
                 hint="check the Ethernet link and the board's IP",
             ) from exc
+        except ConnectionError as exc:
+            # pyverify raises ConnectionError("... closed by peer") on EOF. Accept-then-EOF
+            # is how the fielded shell turns away a second client (one client at a time);
+            # lwIP may instead reset the connection (RST) when it aborts the extra client.
+            if isinstance(exc, ConnectionResetError):
+                raise HeldError(
+                    f"shell at {self.host}:{self.port} reset the connection",
+                    hint="another client probably holds the control port, or the board is restarting",
+                ) from exc
+            if "closed by peer" in str(exc):
+                raise HeldError(
+                    f"shell at {self.host}:{self.port} closed the connection",
+                    hint="another client probably holds the control port (one client at a time)",
+                ) from exc
+            raise UnreachableError(f"cannot reach {self.host}:{self.port}: {exc}") from exc
         except OSError as exc:
             raise UnreachableError(f"cannot reach {self.host}:{self.port}: {exc}") from exc
         except ShellProtocolError as exc:
@@ -78,13 +102,12 @@ class Mps3Shell:
         ping, ver = self.call(ask)
         if not ping.ok:
             raise ActionFailedError("shell answered ping with ok:false")
-        design = rmid.design_id(ping.rm_id) if ping.rm_id else None
         verdict = ver.skew_verdict if ver.ok else "unchecked"
         return BoardIdentity(
             board_type="mps3",
             shell_id=ping.shell_id,
             rm_id=ping.rm_id,
-            rm_name=KNOWN_DESIGNS.get(design, "") if design is not None else "",
+            rm_name=_resolve_rm_name(ping.rm_id) if ping.rm_id else "",
             harness_version=ver.harness if ver.ok else "",
             firmware_sha=ver.sha if ver.ok else "",
             firmware_dirty=bool(ver.dirty) if ver.ok else False,

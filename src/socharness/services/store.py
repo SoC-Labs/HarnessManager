@@ -22,11 +22,12 @@ Rules:
   Adding content whose blob exists but fails verification replaces the bad
   blob with the good one.
 
-Typical use (Team T2, overlays)::
+Typical use (overlays): do not store bare partials as ``kind="overlay"``.
+Use ``socharness_board_mps3.overlays.import_overlay(store, overlay_dir)``,
+which stores the manifest as ``kind="overlay"`` (meta includes
+``clearing_sha256``/``partial_sha256``) and each payload as
+``kind="overlay_payload"``. Then::
 
-    sha = store.put_file(partial, kind="overlay",
-                         meta={"name": "nanosoc", "rm_id": "0x01000001",
-                               "static_id": "0x3f1a560f"})
     store.find("overlay", static_id="0x3f1a560f")   # -> [(sha, meta), ...]
 """
 

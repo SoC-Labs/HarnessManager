@@ -107,3 +107,31 @@ def test_open_serial_unknown_scheme_is_usage_error():
 
     with pytest.raises(UsageError):
         open_serial("bogus://x")
+
+
+def test_busy_control_port_is_held_not_unreachable():
+    """Accept-then-EOF (how the fielded shell refuses a 2nd client) must be HELD (4)."""
+    import socket
+    import threading
+
+    from socharness.core.errors import HeldError
+    from socharness_board_mps3.shell import Mps3Shell
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def accept_and_close() -> None:
+        conn, _ = srv.accept()
+        conn.close()
+
+    t = threading.Thread(target=accept_and_close, daemon=True)
+    t.start()
+    try:
+        with pytest.raises(HeldError) as exc:
+            Mps3Shell("127.0.0.1", port, timeout=2).identity()
+        assert exc.value.code == ExitCode.HELD
+    finally:
+        t.join(timeout=2)
+        srv.close()

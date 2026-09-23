@@ -25,7 +25,8 @@ def vboard(tmp_path: Path) -> Iterator[VirtualMps3]:
 @pytest.fixture
 def mps3_pack(vboard: VirtualMps3) -> Mps3Pack:
     """An MPS3 pack pointed at the virtual board's ephemeral ports."""
-    return Mps3Pack(console_ports=vboard.console_ports)
+    return Mps3Pack(console_ports=vboard.console_ports,
+                    push_port=vboard.shell.raw_tcp_port, tftp_port=vboard.shell.tftp_port)
 
 
 def hil_enabled() -> bool:

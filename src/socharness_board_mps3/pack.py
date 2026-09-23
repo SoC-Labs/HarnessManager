@@ -106,9 +106,13 @@ class Mps3Debug:
 
 class Mps3Session(BoardSession):
     def __init__(self, candidate: Candidate, shell: Mps3Shell | None,
-                 console_ports: dict[str, int], rbb_port: int) -> None:
+                 console_ports: dict[str, int], rbb_port: int, *,
+                 push_port: int | None = None, tftp_port: int | None = None) -> None:
         self.candidate = candidate
         self.shell = shell
+        # Read by the deploy adapter (T2). None means "use the default or env override".
+        self.push_port = push_port
+        self.tftp_port = tftp_port
         endpoints: dict[str, str] = {}
         if shell is not None:
             endpoints.update({n: f"tcp://{shell.host}:{p}" for n, p in console_ports.items()})
@@ -152,11 +156,14 @@ class Mps3Pack(BoardPack):
     title = "Arm MPS3 (V2M-MPS3, HBI0309C)"
 
     def __init__(self, *, console_ports: dict[str, int] | None = None,
-                 rbb_port: int = JTAG_RBB_PORT) -> None:
+                 rbb_port: int = JTAG_RBB_PORT, push_port: int | None = None,
+                 tftp_port: int | None = None) -> None:
         # Port overrides exist so tests can point the pack at a FakeShell on
         # ephemeral ports. Real boards use the defaults.
         self._console_ports = dict(console_ports or CONSOLE_PORTS)
         self._rbb_port = rbb_port
+        self._push_port = push_port
+        self._tftp_port = tftp_port
 
     def capability_specs(self) -> Iterable[CapabilitySpec]:
         return SPECS
@@ -201,4 +208,5 @@ class Mps3Pack(BoardPack):
             shell = Mps3Shell(host, port)
         elif not any(lk.kind in (LinkKind.USB_SERIAL, LinkKind.USB_MSD) for lk in candidate.links):
             raise UsageError("this candidate has no link the MPS3 pack can use")
-        return Mps3Session(candidate, shell, self._console_ports, self._rbb_port)
+        return Mps3Session(candidate, shell, self._console_ports, self._rbb_port,
+                           push_port=self._push_port, tftp_port=self._tftp_port)
