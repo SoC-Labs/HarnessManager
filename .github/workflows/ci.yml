@@ -87,7 +87,7 @@ jobs:
           python -m pytest -q -rs | tee pytest.log
       - name: The browser, packaging and installer tests ran (no skips)
         run: |
-          if grep -E "^SKIPPED .*(playwright|Chrome|chrome|package index|uv is not|curl)" pytest.log; then
+          if grep -E "^SKIPPED .*(playwright|Chrome|chrome|package index|'build' package|uv is not|curl)" pytest.log; then
             echo "::error::browser, packaging or installer tests were skipped"
             exit 1
           fi

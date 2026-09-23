@@ -207,7 +207,9 @@ sudo apt install python3-venv (or python3.X-venv for your version)."
 fi
 
 # -- install ---------------------------------------------------------------------------
-say "install  $what${extras[*]:+ [${extras[*]}]}"
+shown="$what"
+if [[ ${#extras[@]} -gt 0 ]]; then shown="$what [${extras[*]}]"; fi
+say "install  $shown"
 if [[ $use_uv -eq 1 ]]; then
     uvpip() { uv pip install --quiet --python "$venv/bin/python" "$@"; }
     # pyverify keeps its version number across commits: always reinstall the vendored one.
@@ -241,14 +243,13 @@ if [[ -e "$launcher" || -L "$launcher" ]] && ! ours "$launcher"; then
 with --force. Until then, run $venv/bin/harness-manager"
     fi
 fi
-q() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 cat >"$launcher.tmp" <<EOF
 #!/bin/sh
 # $MARKER.
 # Re-run the installer to upgrade; \`install.sh --uninstall\` removes it.
 # Runs the version the app's self-update selected (<state dir>/update/app/current.json)
 # when there is one, else the installed venv.
-venv=$(q "$venv")
+venv=$(printf '%q' "$venv")
 state="\${HARNESS_MANAGER_STATE_DIR:-\$HOME/.config/harness-manager}"
 pointer="\$state/update/app/current.json"
 if [ -f "\$pointer" ]; then
