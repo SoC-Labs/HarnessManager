@@ -293,3 +293,35 @@ def test_real_ssh_parses_the_filtered_copy_and_sees_no_forwards(tmp_path):
                            text=True, timeout=10)
     assert shown.returncode == 0 and "controlmaster auto" in shown.stdout
     assert not T.config_forwards(shown.stdout)
+
+
+@pytest.mark.skipif(shutil.which("ssh") is None, reason="no OpenSSH client")
+def test_real_ssh_accepts_the_tunnel_command_line(tmp_path):
+    """The exact argv the tunnel runs, checked by OpenSSH with -G (evaluate, never connect):
+    every option parses, the forwards are ours on 127.0.0.1, and the config's are gone."""
+    cfg = tmp_path / "config"
+    cfg.write_text(DAVIDS_BLOCK)
+
+    def real_g(argv):
+        argv = list(argv)
+        if "-F" not in argv:
+            argv[1:1] = ["-F", str(cfg)]
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+        assert out.returncode == 0, out.stderr
+        return out.stdout
+
+    t = T.SshTunnel("mapstone-dev", [T.Forward("control", "192.168.10.101", 6900),
+                                     T.Forward("share", "127.0.0.1", 12000)], ssh_g=real_g,
+                    user_config=cfg, system_config=None)
+    argv = t.build_argv()
+    assert argv[:2] == ["ssh", "-F"]                     # the config gives the host forwards
+    shown = subprocess.run(["ssh", "-G", *[a for a in argv[1:] if a not in ("-N", "-T")]],
+                           capture_output=True, text=True, timeout=10)
+    assert shown.returncode == 0, shown.stderr
+    forwards = [ln for ln in shown.stdout.splitlines() if ln.startswith("localforward")]
+    assert forwards == [
+        f"localforward [127.0.0.1]:{t.local_port('control')} [192.168.10.101]:6900",
+        f"localforward [127.0.0.1]:{t.local_port('share')} [127.0.0.1]:12000"]
+    for want in ("exitonforwardfailure yes", "batchmode yes", "serveraliveinterval 15",
+                 "controlmaster false"):
+        assert want in shown.stdout

@@ -30,6 +30,7 @@ import itertools
 import re
 import socket
 import threading
+import time
 from collections.abc import Sequence
 
 _L_SPEC = re.compile(r"^(?P<bind>[^:]+):(?P<lport>\d+):(?P<rhost>\[[^\]]+\]|[^:]+):(?P<rport>\d+)$")
@@ -67,6 +68,8 @@ class FakeSshProcess:
         self._stopped = threading.Event()
         self.channel_failures = 0
         self.accepted = 0
+        #: (monotonic time, line) per channel open failure, as the tunnel's Popen wrapper keeps
+        self.open_failures: list[tuple[float, str]] = []
         args = self.argv
         for i, a in enumerate(args):
             if a == "-L" and i + 1 < len(args):
@@ -159,7 +162,9 @@ class FakeSshProcess:
             except OSError:
                 # What ssh -L does when the far end refuses: accept, log, close.
                 self.channel_failures += 1
-                self.stderr_tail += f"channel {n + 1}: open failed: connect failed: Connection refused\n"
+                line = f"channel {n + 1}: open failed: connect failed: Connection refused"
+                self.stderr_tail += line + "\n"
+                self.open_failures.append((time.monotonic(), line))
                 client.close()
                 continue
             with self._mu:

@@ -226,3 +226,31 @@ def test_write_boards_toml_helper_matches_the_doc(tmp_path):
     doc = (Path(__file__).resolve().parents[2] / "docs" / "HIL_B0.md")
     if doc.is_file():                                     # the doc's table is the one tested here
         assert f'via = "ssh:{HUB}"' in doc.read_text() and f'via = "ssh:{HUB}"' in text
+
+
+def test_a_dead_shell_through_the_tunnel_reads_offline_not_busy(tmp_path, monkeypatch, engine):
+    """ssh -L accepts locally and closes when the hub is refused; ssh's log says which it was."""
+    from harness_manager.core.errors import UnreachableError
+
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir()):
+        cand = engine.candidate_for(BOARD_IP)
+        session = engine.open(cand)
+        vb.shell.stop()                                        # the harness stops listening
+        health = session.health()
+        assert health.control_channel == "offline" and not health.reachable
+        assert "could not reach the shell" in health.notes[0]
+        assert not any("another client" in n for n in health.notes)
+        with pytest.raises(UnreachableError) as exc:
+            session.identity()
+        assert "open failed" in exc.value.message
+
+
+def test_negative_twin_a_busy_shell_through_the_tunnel_stays_busy(tmp_path, monkeypatch, engine):
+    from tests.fakes.virtual_board import LINUX_HARNESSD
+
+    with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb, lab(vb, monkeypatch, state_dir=state_dir()):
+        session = engine.open(engine.candidate_for(BOARD_IP))
+        vb.set_busy()                                          # EBUSY: the board itself says so
+        health = session.health()
+        assert health.control_channel == "busy"
+        assert not any("could not reach" in n for n in health.notes)

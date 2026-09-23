@@ -30,6 +30,7 @@ capability view then explains why.
 from __future__ import annotations
 
 import importlib
+import time
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
@@ -37,11 +38,17 @@ from typing import Any
 from pyverify import rm_id as rmid
 
 from harness_manager.core.capabilities import CapabilitySpec
-from harness_manager.core.errors import HarnessError, NothingOnTargetError, UsageError
+from harness_manager.core.errors import (
+    HarnessError,
+    HeldError,
+    NothingOnTargetError,
+    UnreachableError,
+    UsageError,
+)
 from harness_manager.core.model import BoardIdentity, Candidate, Health, Link, LinkKind
 from harness_manager.core.pack import BoardPack, BoardSession, ProbeHints
 
-from .capabilities import SPECS
+from .capabilities import HARNESS_STATES, SPECS
 from .constants import (
     CONSOLE_PORTS,
     CONTROL_PORT,
@@ -197,17 +204,42 @@ class Mps3Session(BoardSession):
         if self.shell is None:
             return BoardIdentity(board_type="mps3")
         from .shell import ShellRescueError
+        started = time.monotonic()
         try:
             return self.shell.identity()
         except ShellRescueError as exc:      # stage0 rescue: report what stage0 said (T12-2)
             return exc.identity
+        except HeldError as exc:
+            raise self._refused_through_tunnel(started) or exc from None
+
+    def _refused_through_tunnel(self, started: float) -> HarnessError | None:
+        """L1: through ssh -L a port that refuses the HUB is accepted locally, then closed,
+        which the codec reads as "held by another client". ssh logs the refusal; use it."""
+        tunnel = getattr(self.reach, "tunnel", None)
+        refused = tunnel.open_failures_since(started) if tunnel is not None else []
+        if not refused:
+            return None
+        return UnreachableError(
+            f"the hub {tunnel.host} could not reach the shell ({refused[-1]})",
+            hint="the board is off, rebooting, or its harness is not listening; "
+                 "check it from the hub, or power-cycle it")
 
     def health(self) -> Health:
         if self.shell is None:
             return Health(reachable=False, control_channel="offline",
                           notes=("no Ethernet link to the shell",))
+        started = time.monotonic()
         health = self.shell.health()
         tunnel = getattr(self.reach, "tunnel", None)
+        refused = tunnel.open_failures_since(started) if tunnel is not None else []
+        if refused and health.control_channel == "busy":
+            # Through ssh -L, "accepted then closed" is what the hub being refused looks
+            # like too; ssh said so, so this is not another client holding the port.
+            busy = HARNESS_STATES["harness.busy"]
+            health = Health(reachable=False, control_channel="offline", counters=health.counters,
+                            notes=(f"the hub {tunnel.host} could not reach the shell "
+                                   f"({refused[-1]}); nothing answers on the control channel",
+                                   *(n for n in health.notes if n != busy)))
         if tunnel is not None and tunnel.state != "up":
             # Through a tunnel, "no answer" may be the tunnel, not the board: say which.
             note = f"the SSH tunnel to {tunnel.host} is {tunnel.state}: {tunnel.detail}"

@@ -64,6 +64,7 @@ import socket
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -326,6 +327,8 @@ class _PopenProcess:
                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.pid = self._proc.pid
         self.stderr_tail = ""
+        #: ``(monotonic time, line)`` for each "channel N: open failed: ..." ssh logged.
+        self.open_failures: deque[tuple[float, str]] = deque(maxlen=32)
         self._t = threading.Thread(target=self._drain, name=f"ssh-stderr-{self.pid}", daemon=True)
         self._t.start()
 
@@ -336,6 +339,8 @@ class _PopenProcess:
         for raw in iter(stream.readline, b""):
             line = raw.decode("utf-8", "replace")
             self.stderr_tail = (self.stderr_tail + line)[-_STDERR_KEEP:]
+            if "open failed" in line:
+                self.open_failures.append((time.monotonic(), line.strip()))
 
     def poll(self) -> int | None:
         return self._proc.poll()
@@ -404,7 +409,8 @@ class SshTunnel:
                  ready_timeout_s: float = READY_TIMEOUT_S, restart: bool = True,
                  backoff_s: Sequence[float] = BACKOFF_S,
                  on_state: Callable[[dict[str, Any]], None] | None = None,
-                 label: str = "") -> None:
+                 label: str = "", user_config: Path | None = None,
+                 system_config: Path | None = Path("/etc/ssh/ssh_config")) -> None:
         if not host:
             raise UsageError("an SSH tunnel needs a host")
         if not forwards:
@@ -414,6 +420,8 @@ class SshTunnel:
         self._launcher = launcher or DEFAULT_LAUNCHER
         self._ssh = ssh
         self._ssh_g = ssh_g or DEFAULT_SSH_G
+        self._user_config = user_config            # None: ~/.ssh/config
+        self._system_config = system_config
         self.ready_timeout_s = ready_timeout_s
         self._restart = restart
         self._backoff = tuple(backoff_s) or (1.0,)
@@ -476,14 +484,19 @@ class SshTunnel:
 
     # -- lifecycle --------------------------------------------------------------------------
 
-    def start(self) -> SshTunnel:
-        """Start ssh and wait until every local forward listens. Raises ``UnreachableError``."""
-        base = ssh_base_argv(self.host, ssh=self._ssh, ssh_g=self._ssh_g)
+    def build_argv(self) -> list[str]:
+        """The ssh command line (it reads the user's config with ``ssh -G``; never connects)."""
+        base = ssh_base_argv(self.host, ssh=self._ssh, ssh_g=self._ssh_g,
+                             user_config=self._user_config, system_config=self._system_config)
         argv = [*base, *SSH_OPTIONS, "-N", "-T"]
         for fw in self.forwards:
             argv += ["-L", fw.spec()]
         argv.append(self.host)
-        self.argv = argv
+        return argv
+
+    def start(self) -> SshTunnel:
+        """Start ssh and wait until every local forward listens. Raises ``UnreachableError``."""
+        self.argv = self.build_argv()
         self._set("starting", f"connecting to {self.host}")
         ok, why = self._launch_and_wait()
         if not ok:
@@ -566,6 +579,18 @@ class SshTunnel:
             elif not self._closing.is_set():
                 self._stop_proc()
                 self._set("down", why)
+
+    def open_failures_since(self, t0: float) -> list[str]:
+        """ssh's "channel N: open failed: …" lines logged at or after ``t0`` (monotonic).
+
+        Through ``ssh -L`` a board port that refuses the HUB is still accepted
+        locally, then closed: a client sees "accepted, then EOF", which the shell
+        codec reads as another client holding the port. These lines tell the two apart.
+        """
+        with self._mu:
+            proc = self._proc
+        fails = getattr(proc, "open_failures", ()) or ()
+        return [line for at, line in list(fails) if at >= t0]
 
     def alive(self) -> bool:
         with self._mu:
