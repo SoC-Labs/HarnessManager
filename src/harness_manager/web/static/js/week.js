@@ -136,9 +136,17 @@ export async function loadHub(bid) {
   changed();
 }
 
+// expires_at: fpgahub's ISO 8601 ("2026-09-25T12:00:00+00:00"), or epoch seconds.
+export function epochOf(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const ms = Date.parse(String(v));
+  return Number.isFinite(ms) ? ms / 1000 : null;
+}
+
 export function leaseLeft(lease, now = Date.now() / 1000) {
-  if (!lease || !lease.expires_at) return null;
-  return Math.max(0, lease.expires_at - now);
+  const at = lease ? epochOf(lease.expires_at) : null;
+  return at === null ? null : Math.max(0, at - now);
 }
 
 export function durationText(s) {
@@ -210,6 +218,11 @@ onBoardEvent((ev) => {
     if (d.baud !== undefined && d.baud !== null) {
       w.baud[d.name] = { ...(w.baud[d.name] || {}), baud: d.baud };
     }
+  }
+  if (ev.topic === "tunnel.state") {
+    // {via, host, state, ports, forwards, restarts, pid, detail}: the tunnel moved.
+    if (w.hub) w.hub = { ...w.hub, tunnel: { ...(w.hub.tunnel || {}), ...d } };
+    else scheduleHub(bid);
   }
   if (ev.topic === "lease.state") {
     w.leaseQueued = d.state === "queued";

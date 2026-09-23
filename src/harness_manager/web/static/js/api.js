@@ -62,7 +62,7 @@ export const ADDITIVE = Object.freeze([]);
 // console bytes arrive on each console's own socket, so a line is never shown twice.
 export const EVENT_TOPICS = [
   "board.*", "session.*", "deploy.*", "console.state", "console.pty", "debug.*",
-  "controller.*", "storage.*", "update.*", "power.*", "lease.*", "job.*", "events.*",
+  "controller.*", "storage.*", "update.*", "power.*", "lease.*", "tunnel.*", "job.*", "events.*",
 ];
 
 const TOKEN_KEY = "harness_manager.token";

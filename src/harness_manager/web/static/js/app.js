@@ -83,13 +83,17 @@ function BoardItem({ bid }) {
   </li>`;
 }
 
+// A board by address, optionally through a hub's SSH tunnel (L1: POST /probe {via:
+// "ssh:HOST"}). The candidate it finds carries that route, so opening it needs no via.
 function AddByAddress({ onDone }) {
   const [value, setValue] = useState("");
+  const [hub, setHub] = useState("");
   const submit = (e) => {
     e.preventDefault();
     const host = value.trim();
     if (!host) return;
-    probe([host]);
+    const h = hub.trim();
+    probe([host], h ? (h.startsWith("ssh:") ? h : `ssh:${h}`) : "");
     setValue("");
     onDone();
   };
@@ -97,6 +101,8 @@ function AddByAddress({ onDone }) {
     <input class="input mono" placeholder="192.168.10.101[:6900]" aria-label="Board address"
       value=${value} onInput=${(e) => setValue(e.target.value)} autofocus />
     <button type="submit" class="btn sm">Add</button>
+    <input class="input mono via" placeholder="through a hub: ssh host (optional)" aria-label="Through a hub (ssh host)"
+      data-testid="add-via" value=${hub} onInput=${(e) => setHub(e.target.value)} />
   </form>`;
 }
 

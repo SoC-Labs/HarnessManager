@@ -201,9 +201,12 @@ class Jobs:
     def gate(self, board_id: str) -> None:
         """harness-manager-daemon's rule: while a job runs on a board, its other requests are refused."""
         for job in self.running(board_id):
-            raise HeldError(f"{board_id} is busy: {job.describe()} is running",
+            err = HeldError(f"{board_id} is busy: {job.describe()} is running",
                             holder=f"harness-manager-daemon {job.describe()}",
                             hint=f"wait for it to finish (GET /api/v1/jobs/{job.id})")
+            # As harness-manager-daemon: the job that holds it (a queued lease is kind "lease").
+            err.data = {"job": job.id, "kind": job.kind, "board_id": board_id}  # type: ignore[attr-defined]
+            raise err
 
     def start(self, board_id: str, kind: str,
               work: Callable[[Callable[[str, int, int], None]], Any]) -> Job:
@@ -463,6 +466,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         if bool(target) == bool(cdata):
             raise UsageError("give exactly one of target or candidate",
                              hint="target: an address; candidate: a /probe result")
+        if cdata and body.get("via"):       # L1 as built: a probed candidate carries its route
+            raise UsageError("via goes with target, not with a candidate",
+                             hint="a candidate from POST /probe already carries its route")
         if target:
             cand = eng.candidate_for(str(target))
         else:

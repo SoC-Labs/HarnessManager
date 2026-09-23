@@ -51,7 +51,11 @@ export function gateReason(bid, panel, key, opts = {}) {
   }
   const p = panelState(bid, panel);
   if (p.running) return p.running === key ? "running" : `waiting for ${p.busyLabel}`;
-  if (b.job) return `waiting for the ${jobLabel(b.job.kind)} job to finish (harness-manager-daemon holds the board)`;
+  // opts.whileJob: the action acts on the running job itself (Cancel a queued lease).
+  if (b.job && !opts.whileJob) {
+    if (b.job.kind === "lease") return "waiting for the hub lease (it may be queued): Cancel it in the header to stop waiting";
+    return `waiting for the ${jobLabel(b.job.kind)} job to finish (harness-manager-daemon holds the board)`;
+  }
   if (opts.guard) {
     const why = opts.guard();
     if (why) return why;

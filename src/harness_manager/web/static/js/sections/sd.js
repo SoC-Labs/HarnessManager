@@ -3,7 +3,7 @@
 // The storage routes are the existing ones; every write is armed and needs a backup first.
 
 import { panelState, runJob } from "../actions.js";
-import { journalText } from "../format.js";
+import { capState, journalText } from "../format.js";
 import { html, useState } from "../lib.js";
 import { boardState, changed, loadPending } from "../store.js";
 import { week } from "../week.js";
@@ -90,6 +90,10 @@ function InstallFlow({ bid }) {
     render: () => [{ kind: "ok", text: `restored the SD from ${backup}` }],
     onDone: () => loadPending(bid),
   };
+  // Over a hub there is no USB_MSD link: both storage capabilities say why, once, here.
+  const bk = capState(boardState(bid).info, "storage_backup");
+  const inst = capState(boardState(bid).info, "storage_install");
+  const sdOut = bk && inst && !bk.available && !inst.available ? bk.reason : "";
   const installGuard = () => {
     if (!given.length) return "add at least one file: its path on the SD and the local file to write";
     if (given.some((f) => f.dest.trim().toLowerCase().endsWith(".ebf"))) {
@@ -101,6 +105,8 @@ function InstallFlow({ bid }) {
   const setRow = (i, key, value) => { const next = files.slice(); next[i] = { ...next[i], [key]: value }; setFiles(next); };
   return html`<${Card} title="Install onto the configuration SD" icon="hard-drive" testid="sd-flow"
       sub="The board loads its base (bitstream, firmware, config) from this SD at power-on. Paths are on the machine running harness-manager-daemon.">
+    ${sdOut ? html`<${Reason} icon="circle-slash" testid="sd-unavailable"
+      text=${`The configuration SD is out of reach from here: ${sdOut}`} />` : null}
     <ol class="flow">
       <${Step} n="1" title="Back up the SD" done=${!!w.lastBackup} testid="sd-step-backup">
         <p class="secondary small">A zip with a sha256 manifest of the whole card. An install needs one.</p>

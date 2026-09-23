@@ -512,7 +512,8 @@ def test_a_board_behind_a_hub_shows_its_tunnel_and_lease_and_releases_it(page_fa
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
     expect(page.locator('[data-testid="tunnel-chip"]')).to_have_text("tunnel up")
-    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours")
+    # fpgahub's ISO expiry: 1620 s from now reads as 27 min, never NaN.
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text(re.compile(r"lease yours · 2[67] min"))
     assert page.locator('[data-testid="attention"]').count() == 0
     page.locator('[data-testid="fact-hub"] [data-action="lease_release"]').click()
     expect(page.locator('[data-testid="lease-chip"]')).to_have_text("no lease", timeout=T)
@@ -532,6 +533,62 @@ def test_someone_elses_lease_and_a_dead_tunnel_need_attention(page_factory, daem
     expect(page.locator('[data-testid="tunnel-chip"]')).to_have_attribute("data-level", "err")
     expect(page.locator('[data-attention="tunnel"]')).to_contain_text("ssh mapstone-dev")
     expect(page.locator('[data-attention="lease"]')).to_contain_text("Leased to alice@lab-pc-07")
+
+
+@pytest.mark.week_plan("hub_api", sim=True)
+def test_a_queued_lease_holds_the_board_and_can_be_cancelled(page_factory, daemon, engine):
+    sim_of(daemon).behind_hub(BOARD_USB, lease="other")
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
+    expect(page.locator('[data-testid="lease-queued"]')).to_be_visible(timeout=T)
+    # While it queues the board is held: a DUT reset waits and says why.
+    tile = page.locator('[data-testid="tile-board"]')
+    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("waiting for the hub lease")
+    page.locator('[data-testid="fact-hub"] [data-action="lease_cancel"]').click()
+    expect(page.locator('[data-testid="fact-hub"] [data-action="lease_cancel"]')).to_have_count(0, timeout=T)
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to alice@lab-pc-07")
+    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("not armed")
+    assert not engine.called("resets.reset")
+
+
+@pytest.mark.week_plan("hub_api", sim=True)
+def test_a_tunnel_that_drops_and_comes_back_is_followed_live(page_factory, daemon):
+    sim = sim_of(daemon)
+    sim.behind_hub(BOARD_USB, lease="mine")
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    expect(page.locator('[data-testid="tunnel-chip"]')).to_have_text("tunnel up")
+    sim.set_tunnel(BOARD_USB, "starting", "ssh exited (255); restarting in 2 s")
+    expect(page.locator('[data-testid="tunnel-chip"]')).to_have_text("tunnel starting", timeout=T)
+    expect(page.locator('[data-attention="tunnel"]')).to_contain_text("restarting in 2 s")
+    assert "restarted 1 time(s)" in page.locator('[data-testid="tunnel-chip"]').get_attribute("title")
+    sim.set_tunnel(BOARD_USB, "up")
+    expect(page.locator('[data-attention="tunnel"]')).to_have_count(0, timeout=T)
+
+
+@pytest.mark.week_plan("hub_api", sim=True)
+def test_the_sd_page_over_a_hub_says_why_the_sd_is_out_of_reach(page_factory, daemon):
+    sim_of(daemon).behind_hub(BOARD_FIELDED, lease="mine")         # Ethernet only: no USB_MSD
+    page = page_factory(**APP)
+    open_board(page, BOARD_FIELDED)
+    section(page, "sd")
+    expect(page.locator('[data-testid="sd-unavailable"]')).to_contain_text("out of reach")
+    expect(page.locator('[data-testid="sd-flow"] [data-testid="reason-sd_backup"]')).to_contain_text("Cannot:")
+
+
+@pytest.mark.week_plan("hub_api", sim=True)
+def test_a_board_added_through_a_hub_opens_with_its_tunnel_and_lease(page_factory, daemon):
+    page = page_factory(**APP)
+    page.locator('[aria-label="Add a board by address"]').click()
+    page.locator('[aria-label="Board address"]').fill("192.168.10.102")
+    page.locator('[data-testid="add-via"]').fill("mapstone-dev")
+    page.locator('.rail-add button[type="submit"]').click()
+    expect(page.locator(".rail-status")).to_contain_text("--via ssh:mapstone-dev", timeout=T)
+    page.locator('[data-action="open"]').click()               # the candidate carries its route
+    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    expect(page.locator('[data-testid="tunnel-chip"]')).to_have_text("tunnel up", timeout=T)
+    expect(page.locator('[data-testid="lease-chip"]')).to_have_text("no lease")
 
 
 @pytest.mark.week_plan()

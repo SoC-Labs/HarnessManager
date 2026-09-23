@@ -112,7 +112,7 @@ export function restoreSelection() {
 
 const JOB_LABELS = {
   deploy: "deploy", restore: "restore", debug_up: "debug session start", reboot: "board reboot",
-  sd_backup: "SD backup", sd_install: "SD install", sd_restore: "SD restore", lease: "lease",
+  sd_backup: "SD backup", sd_install: "SD install", sd_restore: "SD restore", lease: "hub lease",
   power_cycle: "power cycle", update_check: "update check", update_harness: "harness update",
   update_rollback: "harness rollback", update_app: "app update",
   update_app_rollback: "app rollback",
@@ -253,18 +253,19 @@ export async function loadBoards() {
 // instead of being dropped.
 let probeChain = Promise.resolve();
 
-export function probe(hosts = null) {
-  probeChain = probeChain.then(() => probeNow(hosts), () => probeNow(hosts));
+export function probe(hosts = null, via = "") {
+  probeChain = probeChain.then(() => probeNow(hosts, via), () => probeNow(hosts, via));
   return probeChain;
 }
 
-async function probeNow(hosts) {
-  S.scan = { running: true, line: hosts ? `adding ${hosts.join(", ")}...` : "scanning...", level: "" };
+async function probeNow(hosts, via = "") {
+  S.scan = { running: true, line: hosts ? `adding ${hosts.join(", ")}${via ? ` ${via}` : ""}...` : "scanning...", level: "" };
   changed();
   // With explicit hosts the pack pings only those and unicasts identify to them, so a board
-  // in stage0 rescue (identify, no 6900) is still found: keep scan_network on.
-  const body = hosts ? { hosts, scan_usb: false } : {};
-  const what = hosts ? `probe ${hosts.join(" ")}` : "probe";
+  // in stage0 rescue (identify, no 6900) is still found: keep scan_network on. `via`
+  // ("ssh:HOST") reaches them through that hub's tunnel.
+  const body = hosts ? { hosts, scan_usb: false, ...(via ? { via } : {}) } : {};
+  const what = hosts ? `probe ${hosts.join(" ")}${via ? ` --via ${via}` : ""}` : "probe";
   const r = await timed(what, () => call("probe", {}, body));
   if (r.error) {
     S.scan = { running: false, line: `${r.line}\n${r.error.errName}: ${r.error.message}`, level: "err" };
@@ -347,6 +348,7 @@ export async function loadTelemetry(bid) {
   changed();
   const r = await timed("telemetry", () => call("telemetry", { bid }));
   b.telemetryLoading = false;
+  b.telemetryAt = Date.now();
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.telemetryLine = r.line;
   b.telemetryError = r.error;

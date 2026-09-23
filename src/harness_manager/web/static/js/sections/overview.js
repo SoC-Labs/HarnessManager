@@ -75,7 +75,7 @@ export function attentionItems(bid) {
     if (t && t.state !== "up") {
       out.push({ key: "tunnel", level: t.state === "starting" ? "warn" : "err",
         title: `The SSH tunnel to ${t.host || hub.host} is ${t.state}.`,
-        text: `${t.detail || ""} Fix: check that \`ssh ${t.host || hub.host}\` works from this machine (key, VPN).`.trim() });
+        text: `${sentence(t.detail)} Fix: check that \`ssh ${t.host || hub.host}\` works from this machine (key, VPN).`.trim() });
     }
     const lease = hub.lease;
     const left = leaseLeft(lease);
@@ -95,6 +95,12 @@ export function attentionItems(bid) {
     }
   }
   return out;
+}
+
+// A daemon detail as a sentence: "…Connection refused" -> "…Connection refused."
+function sentence(text) {
+  const s = String(text || "").trim();
+  return !s || /[.!?)]$/.test(s) ? s : `${s}.`;
 }
 
 const ATTENTION_ICONS = { err: "circle-x", unk: "circle-help", warn: "triangle-alert" };
@@ -281,13 +287,17 @@ function Details({ bid }) {
 // SYSMON over JTAG takes ~3 s a read (docs/CONTRACTS.md), so telemetry is polled in the
 // background, never awaited by anything else, and the last good values stay on screen.
 const TELEMETRY_POLL_MS = 15000;
+// Over a hub share an MCC read takes about 2 s (oscillators about 6 s): ask half as often.
+const HUB_TELEMETRY_POLL_MS = 30000;
 
 export function OverviewSection({ bid }) {
   const b = boardState(bid);
   useEffect(() => {
     const timer = setInterval(() => {
       const now = boardState(bid);
-      if (document.visibilityState === "visible" && now.info && !now.job && !now.telemetryLoading) {
+      const every = week(bid).hub ? HUB_TELEMETRY_POLL_MS : TELEMETRY_POLL_MS;
+      if (document.visibilityState === "visible" && now.info && !now.job && !now.telemetryLoading
+          && Date.now() - (now.telemetryAt || 0) >= every - 1000) {
         loadTelemetry(bid);
       }
     }, TELEMETRY_POLL_MS);
