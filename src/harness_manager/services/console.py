@@ -48,6 +48,18 @@ Behaviour
   works on Windows too. Any raw-TCP terminal attaches: ``nc 127.0.0.1 <port>``,
   ``socat -,raw,echo=0 tcp:127.0.0.1:<port>``, PuTTY "Raw". Each connected
   terminal is one more subscriber; the board still sees one connection.
+- **PTYs for screen** (``pty``, lane L2): one pseudo-terminal per console with
+  a stable path, ``/tmp/harness-manager-$USER/<board-slug>/<console>``, for
+  ``screen <path>`` in any terminal; one more subscriber (``services/pty.py``).
+- **Baud** (``baud``/``set_baud``, lane L2). A serial console's rate is the
+  host port's: ``set_baud`` reopens the port at the new rate (``0`` goes back
+  to the URL's ``?baud=``). An Ethernet console's rate is set inside the board:
+  the pack reports it (optional ``ConsoleAdapter.console_baud_info()``, cached
+  for ``baud_ttl_s`` and dropped on a swap) and changes it only when it can
+  (optional ``console_set_baud(name, baud)``, the MPS3 harness verb
+  ``uart_baud``); otherwise ``UnavailableError`` with the pack's reason. A
+  ``tcp://`` console the pack says nothing about reports ``source: unknown``.
+  A change publishes ``console.state`` with ``baud``.
 
 Endpoints come from the board session's ``ConsoleAdapter``, and the broker
 opens nothing else: ``tcp://host:port`` (the shell's consoles),
@@ -82,6 +94,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession
 from harness_manager.core.transport import SerialPort, open_serial
+from harness_manager.services import pty as _pty
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +114,16 @@ _REFUSAL_WINDOW_S = 1.0
 _READ_SLICE_S = 0.2          # how often the reader thread checks for stop/idle flush
 _WRITE_TIMEOUT_S = 10.0      # a write to the board gives up after this long (whole chunk)
 _LINE_FORCE_FLUSH = 4096     # never hold more than this much of an unterminated line
+
+#: A serial URL's rate when it has no ``?baud=`` (the ``serial://`` opener's default).
+DEFAULT_SERIAL_BAUD = 115200
+#: Rates offered for a serial console (a host port takes any of them; the FT4232H up to 12 Mbaud).
+SERIAL_CHOICES = (9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600)
+MAX_BAUD = 12_000_000
+#: The capability label on a refused rate change (an error label, not a negotiated capability).
+BAUD_CAPABILITY = "console_baud"
+UNKNOWN_RATE = ("the board pack does not report this console's rate (a TCP console the "
+                "board sets up itself)")
 
 
 def _bus_of(engine: Any) -> EventBus | None:
@@ -179,17 +202,27 @@ class _SerialLink:
             pass
 
 
-def _link_opener(endpoint: str, connect_timeout: float) -> Callable[[], _TcpLink | _SerialLink]:
+def url_baud(endpoint: str) -> int:
+    """A serial URL's ``?baud=`` (``DEFAULT_SERIAL_BAUD`` when it has none)."""
+    query = parse_qs(urlparse(endpoint).query)
+    try:
+        return int(query.get("baud", [str(DEFAULT_SERIAL_BAUD)])[0])
+    except ValueError:
+        raise UsageError(f"console endpoint {endpoint!r} has a bad ?baud=") from None
+
+
+def _link_opener(endpoint: str, connect_timeout: float,
+                 baud: int | None = None) -> Callable[[], _TcpLink | _SerialLink]:
+    """How to dial ``endpoint``. ``baud`` overrides a serial URL's ``?baud=``."""
     parsed = urlparse(endpoint)
     if parsed.scheme == "tcp":
         if not parsed.hostname or not parsed.port:
             raise UsageError(f"console endpoint {endpoint!r} needs a host and a port")
         host, port = parsed.hostname, parsed.port
         return lambda: _TcpLink(host, port, connect_timeout)
-    query = parse_qs(parsed.query)
-    baud = int(query.get("baud", ["115200"])[0])
+    rate = baud or url_baud(endpoint)
     bare = endpoint.split("?", 1)[0]
-    return lambda: _SerialLink(bare, baud)
+    return lambda: _SerialLink(bare, rate)
 
 
 # --- subscriber streams ------------------------------------------------------------
@@ -284,7 +317,9 @@ class _Upstream:
         self.state = "connecting"
         self.connects = 0             # successful upstream connections (tests, diagnostics)
         self.history = bytearray()
-        self._opener = _link_opener(endpoint, broker.connect_timeout)
+        self._opener = _link_opener(endpoint, broker.connect_timeout,
+                                    broker._rates.get((board_id, name)))
+        self._reopen_detail = ""
         self._subs: set[ConsoleSubscription] = set()
         self._exports: set[_Export] = set()
         self._lock = threading.RLock()
@@ -305,11 +340,12 @@ class _Upstream:
     def start(self) -> None:
         self._thread.start()
 
-    def attach(self, replay: bool) -> ConsoleSubscription:
+    def attach(self, replay: bool, limit: int | None = None) -> ConsoleSubscription:
+        """A new subscriber; ``replay`` feeds it the scrollback (its last ``limit`` bytes)."""
         sub = ConsoleSubscription(self, self.broker.buffer_bytes)
         with self._lock:
             if replay and self.history:
-                sub._feed(bytes(self.history))
+                sub._feed(bytes(self.history if limit is None else self.history[-limit:]))
             self._subs.add(sub)
         return sub
 
@@ -358,6 +394,16 @@ class _Upstream:
     def resume(self) -> None:
         self._paused.clear()
         self.kick()
+
+    def reopen(self, baud: int | None, detail: str) -> None:
+        """Dial again now with a new serial rate (``None``: the URL's own)."""
+        self._opener = _link_opener(self.endpoint, self.broker.connect_timeout, baud)
+        with self._lock:
+            link = self._link
+        if link is not None:
+            self._reopen_detail = detail
+            link.close()                        # the reader sees end of stream and re-dials
+        self.kick()                             # not connected: the next dial uses the new rate
 
     @property
     def paused(self) -> bool:
@@ -491,6 +537,10 @@ class _Upstream:
                 break
             if self._paused.is_set():
                 self._set_state("down", self._pause_detail)
+                continue
+            if self._reopen_detail:                # set_baud: re-dial at once, no backoff
+                self._reopen_detail = ""
+                self._backoff = first
                 continue
             lived = time.monotonic() - connected_at
             if received == 0 and lived < _REFUSAL_WINDOW_S:
@@ -670,7 +720,10 @@ class ConsoleBroker:
                  connect_timeout: float = 3.0,
                  history_bytes: int = 64 * 1024,
                  buffer_bytes: int = 4 * 1024 * 1024,
-                 line_idle_s: float = 0.3) -> None:
+                 line_idle_s: float = 0.3,
+                 baud_ttl_s: float = 3.0,
+                 pty_replay_bytes: int = 4096,
+                 pty_options: dict[str, Any] | None = None) -> None:
         self.bus = _bus_of(engine)
         self.aliases = dict(ALIASES)
         self.backoff = backoff
@@ -678,13 +731,20 @@ class ConsoleBroker:
         self.history_bytes = history_bytes
         self.buffer_bytes = buffer_bytes
         self.line_idle_s = line_idle_s
+        self.baud_ttl_s = baud_ttl_s             # how long the pack's rate report is reused
+        self.pty_replay_bytes = pty_replay_bytes  # scrollback a new PTY starts with
+        self._pty_options = dict(pty_options or {})   # PtyManager keywords (tests: fast polls)
         self._lock = threading.RLock()
         self._ups: dict[tuple[str, str], _Upstream] = {}
+        self._rates: dict[tuple[str, str], int] = {}          # serial rate overrides (set_baud)
+        self._baud_cache: dict[str, tuple[float, dict[str, dict[str, Any]]]] = {}
+        self._ptys: _pty.PtyManager | None = None
         self._unsubs: list[Callable[[], None]] = []
         if self.bus is not None:
             for topic, handler in (("deploy.started", self._on_swap_start),
                                    ("deploy.done", self._on_swap_done),
-                                   ("deploy.failed", self._on_swap_failed)):
+                                   ("deploy.failed", self._on_swap_failed),
+                                   ("board.identity", self._on_identity)):
                 self._unsubs.append(self.bus.subscribe(topic, handler))
 
     # -- protocol -------------------------------------------------------------------
@@ -724,12 +784,13 @@ class ConsoleBroker:
         return dict(consoles.console_endpoints())
 
     def subscribe(self, session: BoardSession, name: str, *,
-                  replay: bool = True) -> ConsoleSubscription:
-        """A new reader of console ``name``. ``replay`` first delivers the scrollback."""
+                  replay: bool = True, replay_bytes: int | None = None) -> ConsoleSubscription:
+        """A new reader of console ``name``. ``replay`` first delivers the scrollback
+        (only its last ``replay_bytes`` when given)."""
         key, endpoint = self.resolve(session, name)
         with self._lock:
             return self._upstream(session.candidate.board_id, key, endpoint,
-                                  _pace(session, key)).attach(replay)
+                                  _pace(session, key)).attach(replay, replay_bytes)
 
     def export_tcp(self, session: BoardSession, name: str, port: int = 0) -> int:
         """Serve console ``name`` on 127.0.0.1:``port`` (0 = any free port); returns the port.
@@ -766,10 +827,19 @@ class ConsoleBroker:
         return up.state if up is not None else "closed"
 
     def close_all(self, board_id: str) -> None:
-        """Close every console, subscriber and export of one board. Safe when none is open."""
+        """Close every console, PTY, subscriber and export of one board. Safe when none is open.
+
+        The board's serial rate overrides go too: the next session starts at each
+        URL's own rate."""
+        ptys = self._ptys
+        if ptys is not None:
+            ptys.close_board(board_id)
         with self._lock:
             keys = [k for k in self._ups if k[0] == board_id]
             ups = [self._ups.pop(k) for k in keys]
+            for k in [k for k in self._rates if k[0] == board_id]:
+                del self._rates[k]
+            self._baud_cache.pop(board_id, None)
         for up in ups:
             up.stop()
 
@@ -777,11 +847,218 @@ class ConsoleBroker:
         """Close everything and stop listening for events (engine shutdown)."""
         with self._lock:
             boards = {b for b, _ in self._ups}
+            ptys = self._ptys
+        if ptys is not None:
+            boards |= {p.board_id for p in ptys.ptys()}
         for board_id in boards:
             self.close_all(board_id)
+        if ptys is not None:
+            ptys.shutdown()
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
+
+    # -- PTYs for screen (lane L2) ------------------------------------------------------
+
+    def _pty_manager(self) -> _pty.PtyManager:
+        with self._lock:
+            if self._ptys is None:
+                self._ptys = _pty.PtyManager(self._publish, self._on_pty_speed,
+                                             **self._pty_options)
+            return self._ptys
+
+    def pty(self, session: BoardSession, name: str) -> dict[str, Any]:
+        """Console ``name``'s PTY, created if needed: ``{name, path, device, command, clients}``.
+
+        ``path`` is ``/tmp/harness-manager-$USER/<board-slug>/<console>``, a symlink to
+        ``device``; ``command`` is the ``screen`` line to attach with. Idempotent.
+        ``UnavailableError`` on a system without PTYs (Windows), hinting at the TCP export.
+        """
+        if not _pty.supported():
+            raise _pty.unavailable()
+        key, endpoint = self.resolve(session, name)
+        row = self._rate_row(session, key, endpoint, live=False)
+        serial = _broker_owned(row)
+        port = self._pty_manager().open(
+            session, key,
+            lambda: self.subscribe(session, key, replay_bytes=self.pty_replay_bytes),
+            kind="serial" if serial else "ethernet", baud=row["baud"] if serial else None)
+        return self._pty_view(port)
+
+    def pty_info(self, board_id: str, name: str) -> dict[str, Any] | None:
+        """The PTY of console ``name`` (an alias resolves to its target), or None."""
+        ptys = self._ptys
+        if ptys is None:
+            return None
+        port = ptys.get(board_id, name) or ptys.get(board_id, self.aliases.get(name, ""))
+        return self._pty_view(port) if port is not None else None
+
+    def close_pty(self, board_id: str, name: str) -> bool:
+        """Close one PTY (its terminal sees the line go away). False when there was none."""
+        ptys = self._ptys
+        if ptys is None:
+            return False
+        return ptys.close(board_id, name) or ptys.close(board_id, self.aliases.get(name, ""))
+
+    def _pty_view(self, port: _pty.ConsolePty) -> dict[str, Any]:
+        rate = None
+        if port.kind == "serial":
+            try:
+                key, endpoint = self.resolve(port.session, port.name)
+                rate = self._serial_row(port.board_id, key, endpoint)["baud"]
+            except HarnessError:
+                rate = None
+        return {**port.info(), "command": _pty.screen_command(port.link, rate)}
+
+    def _on_pty_speed(self, port: _pty.ConsolePty, baud: int) -> None:
+        """A client set a standard speed on the PTY (``screen <path> 57600``)."""
+        try:
+            key, endpoint = self.resolve(port.session, port.name)
+        except HarnessError:
+            return
+        row = self._rate_row(port.session, key, endpoint, live=False)
+        if not _broker_owned(row):
+            log.debug("console %s of %s: the PTY is now at %d baud; ignored (%s)", key,
+                      port.board_id, baud, row.get("reason") or "not a host serial port")
+            return
+        if not _pty.is_standard(row["baud"]):
+            log.debug("console %s of %s: the PTY is now at %d baud; ignored (the console runs at "
+                      "%s baud, set from the GUI)", key, port.board_id, baud, row["baud"])
+            return
+        if baud == row["baud"]:
+            return
+        log.info("console %s of %s: the PTY client set %d baud; reopening the port at it",
+                 key, port.board_id, baud)
+        self.set_baud(port.session, key, baud)
+
+    # -- baud (lane L2) ---------------------------------------------------------------------
+
+    def baud(self, session: BoardSession, name: str, *, live: bool = True,
+             offline_reason: str = "") -> dict[str, Any]:
+        """``{name, kind, baud, settable, reason, choices, source, ...}`` for console ``name``.
+
+        ``source``: ``serial`` (the host port's rate), ``design`` (the loaded design
+        fixes it), ``harness`` (the harness reports it) or ``unknown``. ``live=False``
+        never asks the board: the pack's last report is used, or ``offline_reason``.
+        """
+        key, endpoint = self.resolve(session, name)
+        return {"name": key, **self._rate_row(session, key, endpoint, live=live,
+                                              offline_reason=offline_reason)}
+
+    def consoles(self, session: BoardSession, *, live: bool = True,
+                 offline_reason: str = "") -> list[dict[str, Any]]:
+        """One row per name in ``names``: ``{name, kind, baud, settable, source, reason,
+        pty, state}`` (``alias_of`` on an alias)."""
+        board_id = session.candidate.board_id
+        rows = []
+        for name in self.names(session):
+            key, endpoint = self.resolve(session, name)
+            rate = self._rate_row(session, key, endpoint, live=live, offline_reason=offline_reason)
+            port = self.pty_info(board_id, key)
+            row: dict[str, Any] = {
+                "name": name, "kind": rate["kind"], "baud": rate["baud"],
+                "settable": rate["settable"], "source": rate["source"], "reason": rate["reason"],
+                "pty": port["path"] if port else None, "state": self.state(board_id, key)}
+            if key != name:
+                row["alias_of"] = key
+            rows.append(row)
+        return rows
+
+    def set_baud(self, session: BoardSession, name: str, baud: int) -> dict[str, Any]:
+        """Change console ``name``'s rate; ``0`` goes back to its default. ``{name, baud, source}``.
+
+        A serial console reopens its host port at the new rate. An Ethernet console
+        asks the pack (``console_set_baud``); a console whose rate cannot be changed
+        raises ``UnavailableError`` with the reason.
+        """
+        if isinstance(baud, bool) or not isinstance(baud, int) or not 0 <= baud <= MAX_BAUD:
+            raise UsageError(f"baud must be a whole number from 0 to {MAX_BAUD}, not {baud!r}",
+                             hint="0 goes back to the console's default rate")
+        key, endpoint = self.resolve(session, name)
+        board_id = session.candidate.board_id
+        row = self._rate_row(session, key, endpoint, live=True)
+        if _broker_owned(row):
+            return self._set_serial(board_id, key, endpoint, baud)
+        if not row["settable"]:
+            raise UnavailableError(BAUD_CAPABILITY, row["reason"] or UNKNOWN_RATE)
+        setter = getattr(getattr(session, "consoles", None), "console_set_baud", None)
+        if not callable(setter):
+            raise UnavailableError(BAUD_CAPABILITY,
+                                   "the board pack cannot change this console's rate")
+        new = _normal(setter(key, baud))
+        with self._lock:
+            self._baud_cache.pop(board_id, None)
+        what = f"set to {new['baud']} baud" if baud else f"back to {new['baud']} baud"
+        self._announce(board_id, key, endpoint, new["baud"], f"{key} {what}")
+        return {"name": key, "baud": new["baud"], "source": new["source"],
+                "mode": new.get("mode", "")}
+
+    def _set_serial(self, board_id: str, key: str, endpoint: str, baud: int) -> dict[str, Any]:
+        with self._lock:
+            if baud:
+                self._rates[(board_id, key)] = baud
+            else:
+                self._rates.pop((board_id, key), None)
+            up = self._ups.get((board_id, key))
+        rate = baud or url_baud(endpoint)
+        detail = f"reopened at {rate} baud"
+        if up is not None:
+            up.reopen(baud or None, detail)
+        ptys = self._ptys
+        port = ptys.get(board_id, key) if ptys is not None else None
+        if port is not None:
+            port.set_preset(rate)
+        self._announce(board_id, key, endpoint, rate, detail)
+        return {"name": key, "baud": rate, "source": "serial"}
+
+    def _announce(self, board_id: str, key: str, endpoint: str, baud: int | None,
+                  detail: str) -> None:
+        self._publish("console.state", board_id, {
+            "name": key, "state": self.state(board_id, key), "detail": detail,
+            "endpoint": endpoint, "baud": baud})
+
+    def _serial_row(self, board_id: str, key: str, endpoint: str) -> dict[str, Any]:
+        with self._lock:
+            rate = self._rates.get((board_id, key)) or url_baud(endpoint)
+        return {"kind": "serial", "baud": rate, "source": "serial", "settable": True,
+                "reason": "", "choices": sorted({*SERIAL_CHOICES, rate}), "share": False}
+
+    def _rate_row(self, session: BoardSession, key: str, endpoint: str, *, live: bool,
+                  offline_reason: str = "") -> dict[str, Any]:
+        info, why = self._pack_info(session, live=live, offline_reason=offline_reason)
+        entry = info.get(key) if info else None
+        if entry is not None and not (entry.get("kind") == "serial" and not entry.get("share")):
+            return _normal(entry)
+        if urlparse(endpoint).scheme == "tcp":
+            return {"kind": "ethernet", "baud": None, "source": "unknown", "settable": False,
+                    "reason": why or UNKNOWN_RATE, "choices": []}
+        return self._serial_row(session.candidate.board_id, key, endpoint)
+
+    def _pack_info(self, session: BoardSession, *, live: bool,
+                   offline_reason: str = "") -> tuple[dict[str, dict[str, Any]] | None, str]:
+        """(the pack's ``console_baud_info()``, why it is missing). Cached per board."""
+        fn = getattr(getattr(session, "consoles", None), "console_baud_info", None)
+        if not callable(fn):
+            return {}, ""
+        board_id = session.candidate.board_id
+        with self._lock:
+            cached = self._baud_cache.get(board_id)
+        now = time.monotonic()
+        if cached is not None and (not live or now - cached[0] < self.baud_ttl_s):
+            return cached[1], ""
+        if not live:
+            return None, offline_reason or "the rate is read from the board when it is free"
+        try:
+            info = {str(k): dict(v) for k, v in (fn() or {}).items()}
+        except HarnessError as exc:
+            return {}, f"cannot read the rate: {exc}"
+        with self._lock:
+            self._baud_cache[board_id] = (now, info)
+        return info, ""
+
+    def _on_identity(self, event: Event) -> None:
+        with self._lock:
+            self._baud_cache.pop(event.board_id, None)
 
     # -- internals ------------------------------------------------------------------------
 
@@ -818,11 +1095,13 @@ class ConsoleBroker:
     def _on_swap_start(self, event: Event) -> None:
         # The swap decouples the partition: close before it starts (lead rule, and
         # 6931/6932 would drop anyway). Subscribers stay attached and wait.
+        self._on_identity(event)                # the design, so its fixed rate, changes
         overlay = event.data.get("overlay", "")
         for up in self._board_ups(event.board_id):
             up.pause(f"closed for a partition swap{f' to {overlay}' if overlay else ''}")
 
     def _on_swap_done(self, event: Event) -> None:
+        self._on_identity(event)
         for up in self._board_ups(event.board_id):
             if event.data.get("verified"):
                 up.resume()
@@ -835,6 +1114,8 @@ class ConsoleBroker:
         # consoles were never closed, so there is nothing to report. Otherwise stay down.
         stage = event.data.get("stage", "")
         reason = event.data.get("reason", "")
+        if stage not in ("", "preflight"):
+            self._on_identity(event)
         for up in self._board_ups(event.board_id):
             up.hold(f"not reconnected: the swap failed at {stage or 'an unknown stage'}"
                     f"{f' ({reason})' if reason else ''}; check what is loaded, then reconnect")
@@ -847,6 +1128,24 @@ class ConsoleBroker:
     def _publish(self, topic: str, board_id: str, data: dict[str, Any]) -> None:
         if self.bus is not None:
             self.bus.publish(Event(topic, board_id, data))
+
+
+def _broker_owned(row: dict[str, Any]) -> bool:
+    """A host serial port: the broker sets its rate by reopening it."""
+    return row.get("kind") == "serial" and row.get("source") == "serial" and not row.get("share")
+
+
+def _normal(entry: dict[str, Any]) -> dict[str, Any]:
+    """A pack's rate row with every key the API promises."""
+    baud = entry.get("baud")
+    baud = baud if isinstance(baud, int) and not isinstance(baud, bool) and baud > 0 else None
+    settable = entry.get("settable") is True
+    choices = [c for c in entry.get("choices") or () if isinstance(c, int) and c > 0]
+    out = {**entry, "kind": str(entry.get("kind") or "ethernet"), "baud": baud,
+           "source": str(entry.get("source") or "unknown"), "settable": settable,
+           "reason": "" if settable else str(entry.get("reason") or UNKNOWN_RATE),
+           "choices": choices or ([baud] if baud else [])}
+    return out
 
 
 # How to attach a terminal to an export; one home for the phrase (CLI/GUI help).
