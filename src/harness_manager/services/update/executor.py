@@ -61,7 +61,14 @@ from .planner import (
     running_summary,
     ver32_match,
 )
-from .schema import KIND_OVERLAYS, TARGET_HOST_STORE, HarnessIdentity, HarnessRelease
+from .schema import (
+    KIND_OVERLAYS,
+    TARGET_ETHERNET,
+    TARGET_HOST_STORE,
+    TARGET_MCC_SD,
+    HarnessIdentity,
+    HarnessRelease,
+)
 from .state import InstallRecords, Journal, StoredComponents, UpdateState
 from .version import same_version
 
@@ -220,16 +227,45 @@ def _evidence(result: Any, controller: Any) -> dict[str, Any]:
     return out
 
 
+def _record_fields(plan: Plan) -> dict[str, Any]:
+    """What the install history keeps of a plan (HARNESS-CAT): the release that ran before
+    it (``from_version``, by the wire identity; "" when unrecorded), the wire identity it
+    installs, the doors, and the channel it came from."""
+    rel = plan.release
+    return {"kind": "install" if plan.base or plan.os_slot else "overlays",
+            "from_version": plan.running_release, "channel": plan.channel,
+            "serial": plan.serial, "mode": plan.mode, "rekey": plan.rekey,
+            "fw_sha": rel.identity.fw_sha if rel else "",
+            "static_id": rel.identity.static_id if rel else "", "doors": doors_of(plan)}
+
+
 def default_os_slots(session: Any) -> OsSlotAdapter | None:
     """``session.os_slots`` when the pack provides it (see the contract change request)."""
     return getattr(session, "os_slots", None)
 
 
+def doors_of(plan: Plan) -> list[str]:
+    """The doors an install goes through (HARNESS-DIST §3.1; the history records them)."""
+    doors = [TARGET_MCC_SD] if plan.base else []
+    if plan.os_slot:
+        doors.append(TARGET_ETHERNET)
+    if plan.release is not None and any(
+            c.target == TARGET_HOST_STORE and c.name in plan.components
+            for c in plan.release.components):
+        doors.append(TARGET_HOST_STORE)
+    return doors
+
+
 class HarnessInstaller:
+    """``lease_check(session, what)`` (HARNESS-CAT): raises ``HeldError`` unless this client
+    holds the board's hub lease (a board with no hub has no lease: it passes). It runs before
+    anything that writes to or reboots the board; None skips it (the unit tests' default)."""
+
     def __init__(self, *, state: UpdateState, downloader: Downloader, store: Any,
                  bus: EventBus | None = None, overlay_handler: OverlayHandler | None = None,
                  os_slots_for: Callable[[Any], OsSlotAdapter | None] = default_os_slots,
-                 now: Callable[[], float] = time.time) -> None:
+                 now: Callable[[], float] = time.time,
+                 lease_check: Callable[[Any, str], Any] | None = None) -> None:
         self.state = state
         self.downloader = downloader
         self.store = store
@@ -237,6 +273,7 @@ class HarnessInstaller:
         self.overlay_handler = overlay_handler
         self.os_slots_for = os_slots_for
         self.now = now
+        self.lease_check = lease_check
         self.records = InstallRecords(state)
 
     # -- events --
@@ -302,7 +339,8 @@ class HarnessInstaller:
             ident = self._identity(session)
             if journaled_release_runs(j, ident):
                 self.records.put(board_id, {
-                    "version": version, "result": RESULT_INSTALLED,
+                    "version": version, "result": RESULT_INSTALLED, "kind": "recovered",
+                    "from_version": j.get("from_version", ""),
                     "static_id": j.get("static_id", ""), "backup": j.get("backup"),
                     "previous": j.get("previous"), "identity_after": running_summary(ident),
                     "detail": f"recovered: the board reports harness {version} after an update "
@@ -331,7 +369,9 @@ class HarnessInstaller:
         if version and journaled_release_runs(j, ident):
             self.records.put(board_id, {
                 "version": version, "result": RESULT_INSTALLED, "static_id": j.get("static_id", ""),
-                "previous": j.get("previous"), "identity_after": running_summary(ident),
+                "kind": "recovered", "from_version": j.get("from_version", ""),
+                "previous": j.get("previous"),
+                "identity_after": running_summary(ident),
                 "detail": f"recovered: the board reports harness {version} after an OS-slot "
                           f"update that stopped at {j.get('phase')}"})
             self._emit("update.done", board_id, version=version, result=RESULT_INSTALLED,
@@ -368,6 +408,10 @@ class HarnessInstaller:
                                hint=f"type exactly: {plan.consent_phrase}")
         rel = plan.release
         assert rel is not None
+        if (plan.base or plan.os_slot) and self.lease_check is not None:
+            # HARNESS-DIST §2: a board behind a hub is written and rebooted only by the
+            # lease holder (HeldError names who holds it). Before anything touches it.
+            self.lease_check(session, f"install harness {rel.version}")
         journal = self._check_journal(session, board_id)
         if plan.mode == MODE_NONE:
             return UpdateOutcome(board_id, rel.version, RESULT_UP_TO_DATE,
@@ -412,13 +456,14 @@ class HarnessInstaller:
                                 "in the local store; the board was not touched",
                                 checks=prepared.checks, stored=stored, skipped=skipped)
             self.records.put(board_id, {"version": rel.version, "result": out.result,
-                                        "overlays": stored})
+                                        "overlays": stored, **_record_fields(plan)})
             self._emit("update.done", board_id, version=rel.version, result=out.result)
             return out
 
         journal.write(phase="verified", version=rel.version, static_id=rel.identity.static_id,
                       identity=_wire(rel.identity), host=socket.gethostname(), pid=os.getpid(),
-                      previous=plan.running, base=plan.base, os_slot=plan.os_slot)
+                      previous=plan.running, base=plan.base, os_slot=plan.os_slot,
+                      from_version=plan.running_release)
         try:
             return self._install(session, plan, prepared, journal, storage, controller, slots,
                                  stored, skipped)
@@ -509,7 +554,8 @@ class HarnessInstaller:
             return self._finish(board_id, rel, RESULT_WRITTEN, journal,
                                 f"written, not running: the reboot was not witnessed ({exc.message})",
                                 backup_d, restore_hint, stored=stored, skipped=skipped,
-                                os_info=os_info, evidence={"reboot_error": str(exc)})
+                                os_info=os_info, evidence={"reboot_error": str(exc)},
+                                plan=plan)
         journal.write(phase="rebooted", evidence=evidence)
 
         # -- confirm what the board reports --
@@ -528,14 +574,14 @@ class HarnessInstaller:
                                 f"{ident.harness_version if ident else '?'}",
                                 backup_d, "", checks=checks, identity_after=identity_after,
                                 evidence=evidence, stored=stored, skipped=skipped,
-                                os_info=os_info, previous=plan.running)
+                                os_info=os_info, previous=plan.running, plan=plan)
         bad = "; ".join(f"{c.name}: {c.detail}" for c in checks if c.check != Check.OK)
         return self._finish(board_id, rel, RESULT_WRITTEN, journal,
                             f"written, not running: after the reboot the board does not report "
                             f"harness {rel.version} ({bad})",
                             backup_d, restore_hint, checks=checks, identity_after=identity_after,
                             evidence=evidence, stored=stored, skipped=skipped, os_info=os_info,
-                            previous=plan.running)
+                            previous=plan.running, plan=plan)
 
     def _write_os(self, slots: OsSlotAdapter, prepared: PreparedRelease,
                   board_id: str) -> dict[str, Any]:
@@ -585,7 +631,7 @@ class HarnessInstaller:
                 checks: list[PreflightItem] | None = None, identity_after: dict | None = None,
                 evidence: dict | None = None, stored: list[str] | None = None,
                 skipped: dict[str, str] | None = None, os_info: dict | None = None,
-                previous: dict | None = None) -> UpdateOutcome:
+                previous: dict | None = None, plan: Plan | None = None) -> UpdateOutcome:
         out = UpdateOutcome(board_id, rel.version, result, detail, checks=checks or [],
                             identity_after=identity_after or {}, evidence=evidence or {},
                             backup=backup, restore_hint=restore_hint, stored=stored or [],
@@ -595,6 +641,7 @@ class HarnessInstaller:
             "version": rel.version, "result": result, "static_id": rel.identity.static_id,
             "backup": backup, "previous": previous if previous is not None else prior.get("previous"),
             "identity_after": out.identity_after, "detail": detail,
+            **(_record_fields(plan) if plan is not None else {}),
         })
         journal.clear()
         topic = "update.done"
@@ -610,6 +657,8 @@ class HarnessInstaller:
         storage, controller = session.storage, session.controller
         if storage is None or controller is None:
             raise UnavailableError("harness rollback", "needs the Debug USB (config SD + MCC)")
+        if self.lease_check is not None:
+            self.lease_check(session, "roll the harness back")
         record = self.records.get(board_id) or {}
         journal = Journal(self.state, board_id)
         chosen = str(backup_path) if backup_path else ""
@@ -655,8 +704,17 @@ class HarnessInstaller:
                        f"{previous.get('harness')}, firmware {previous.get('firmware_sha') or '?'})")
         out = UpdateOutcome(board_id, "rollback", result, detail, identity_after=now,
                             evidence=evidence, backup={"path": backup.path, "sha256": backup.sha256})
-        self.records.put(board_id, {"version": previous.get("harness", ""), "result": result,
+        # The history names releases (HARNESS-CAT): the backup holds what ran before the
+        # last install (its ``from_version``); a second restore restores the same backup.
+        undone = record.get("version", "")
+        back_to = (undone if record.get("kind") == "restore"
+                   else record.get("from_version", "")) or previous.get("harness", "")
+        self.records.put(board_id, {"version": back_to, "result": result,
                                     "backup": out.backup, "previous": previous,
-                                    "identity_after": now, "detail": detail})
+                                    "identity_after": now, "detail": detail,
+                                    "kind": "restore", "from_version": undone,
+                                    "static_id": previous.get("shell_id", ""),
+                                    "fw_sha": previous.get("firmware_sha", ""),
+                                    "doors": [TARGET_MCC_SD]})
         self._emit("update.done", board_id, version="rollback", result=result, detail=detail)
         return out

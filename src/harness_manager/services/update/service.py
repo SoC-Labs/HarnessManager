@@ -31,10 +31,12 @@ from .bundle import OverlayHandler, PackOverlayHandler
 from .channel import ChannelClient, VerifiedChannel
 from .download import Downloader, token_from_env
 from .executor import HarnessInstaller, UpdateOutcome, default_os_slots
+from .lease_gate import lease_state, require_lease
 from .os_slots import OsSlotAdapter
 from .planner import Approval, BoardView, Plan, make_plan
 from .policy import Policy, load_policy
-from .state import StoredComponents, UpdateState
+from .schema import harness_catalog
+from .state import Pins, StoredComponents, UpdateState
 from .trust import TrustStore, load_trust
 from .version import compare
 
@@ -72,7 +74,8 @@ class UpdateService:
                  overlay_handler: OverlayHandler | None = None,
                  os_slots_for: Callable[[Any], OsSlotAdapter | None] = default_os_slots,
                  downloader: Downloader | None = None, app_updater: AppUpdater | None = None,
-                 policy: Policy | None = None, now: Callable[[], float] = time.time) -> None:
+                 policy: Policy | None = None, now: Callable[[], float] = time.time,
+                 leases: Any = None) -> None:
         self.engine = engine
         self.state_dir = _state_dir(engine, state_dir)
         self.state = UpdateState.under(self.state_dir)
@@ -92,6 +95,10 @@ class UpdateService:
         # the administrator's policy file (U6), read-only; a user's settings cannot loosen it
         self.policy = policy if policy is not None else load_policy()
         self.now = now
+        # HARNESS-CAT: the hub lease gates every install (``lease_gate``). The daemon shares
+        # its ``LeaseService`` here; otherwise one is made on first need (no bus: the
+        # daemon's own service is the one that announces lease changes).
+        self.leases = leases
 
     # -- parts --
 
@@ -114,7 +121,32 @@ class UpdateService:
     def installer(self, pack: str) -> HarnessInstaller:
         return HarnessInstaller(state=self.state, downloader=self.downloader, store=self.store,
                                 bus=self.bus, overlay_handler=self.overlay_handler(pack),
-                                os_slots_for=self.os_slots_for, now=self.now)
+                                os_slots_for=self.os_slots_for, now=self.now,
+                                lease_check=self.check_lease)
+
+    # -- the hub lease (HARNESS-CAT) --
+
+    def lease_service(self) -> Any:
+        if self.leases is None:
+            from harness_manager.services.lease import LeaseService
+
+            self.leases = LeaseService(self.state_dir)
+        return self.leases
+
+    def lease_state(self, session: Any) -> dict[str, Any]:
+        """The board's hub lease as it bears on an install (``lease_gate.lease_state``)."""
+        if getattr(session, "hub", None) is None:
+            return lease_state(session, None)
+        return lease_state(session, self.lease_service())
+
+    def check_lease(self, session: Any, what: str = "install a harness") -> dict[str, Any]:
+        """``HeldError`` unless an install may go ahead on this board (``lease_gate``)."""
+        if getattr(session, "hub", None) is None:
+            return lease_state(session, None)
+        return require_lease(session, self.lease_service(), what)
+
+    def pins(self) -> Pins:
+        return Pins(self.state)
 
     # -- channel --
 
@@ -161,8 +193,15 @@ class UpdateService:
     def plan_harness(self, session: Any, *, verified: VerifiedChannel | None = None,
                      channel: str | None = None, source: str | None = None,
                      version: str | None = None, overlays_only: bool = False,
-                     catalog: str | None = None) -> tuple[Plan, VerifiedChannel]:
+                     catalog: str | None = None,
+                     pinned: str | None = None) -> tuple[Plan, VerifiedChannel]:
+        """``pinned`` (HARNESS-CAT): None reads the board's pin (``Pins``) for this channel's
+        catalogue; "" plans as if it had none."""
         verified = verified or self.fetch_channel(channel, source, catalog=catalog)
+        if pinned is None:
+            pin = self.pins().get(session.candidate.board_id,
+                                  verified.catalog or harness_catalog(session.candidate.pack))
+            pinned = str(pin["version"]) if pin else ""
         stored = []
         if self.store is not None:
             try:
@@ -173,7 +212,8 @@ class UpdateService:
                          version=version, overlays_only=overlays_only, stored_overlays=stored,
                          have_token=self.downloader.has_token(),
                          channel_warnings=verified.warnings,
-                         stored_components=StoredComponents(self.state).all())
+                         stored_components=StoredComponents(self.state).all(),
+                         pinned=pinned)
         return plan, verified
 
     def install_harness(self, session: Any, plan: Plan, approval: Approval | None,

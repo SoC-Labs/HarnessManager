@@ -275,26 +275,54 @@ def base_differs(rel: HarnessRelease, ident: BoardIdentity) -> bool:
                                 not same_version(i.harness, ident.harness_version))
 
 
+def pinned_release(channel: Channel, pinned: str) -> tuple[HarnessRelease | None, str]:
+    """What a board pinned to ``pinned`` is OFFERED on ``channel`` (HARNESS-CAT, §4.2):
+    ``(release, why)``. The channel's current release when it is not past the pin; else
+    the pinned release; None (with the reason) when the channel lists only releases past
+    the pin, so nothing is offered."""
+    current = channel.harness_release(None)
+    if current is not None and (compare_safe(current.version, pinned) or 0) <= 0:
+        return current, ""
+    pin = channel.harness_release(pinned)
+    if pin is not None:
+        return pin, (f"the board is pinned to harness {pin.version}: the channel's current "
+                     f"{current.version if current else '?'} is past the pin, so it is not offered")
+    return None, (f"the board is pinned to harness {pinned}, which the {channel.channel!r} channel "
+                  "does not list, and its releases are past the pin: nothing is offered "
+                  "(unpin it, or name a version)")
+
+
 def make_plan(channel: Channel, board: BoardView, *, app_version: str,
               version: str | None = None, overlays_only: bool = False,
               stored_overlays: Iterable[dict[str, str]] = (),
               have_token: bool = False, channel_warnings: Iterable[str] = (),
-              stored_components: Iterable[str] = ()) -> Plan:
-    """The plan for one board (see the module docstring). Never raises for a board state."""
+              stored_components: Iterable[str] = (), pinned: str = "") -> Plan:
+    """The plan for one board (see the module docstring). Never raises for a board state.
+
+    ``pinned`` (HARNESS-CAT): the board's pin. With no ``version``, the plan offers the
+    pinned release instead of a newer current one, and a board already past its pin has
+    nothing to do (a pin never proposes a rollback; naming the version does).
+    """
     ident = board.identity or BoardIdentity(board_type=board.pack)
-    rel = channel.harness_release(version)
+    pin_note = ""
+    if version is None and pinned:
+        rel, pin_note = pinned_release(channel, pinned)
+    else:
+        rel = channel.harness_release(version)
     plan = Plan(board_id=board.board_id, channel=channel.channel, serial=channel.serial,
                 release=rel, running=running_summary(board.identity),
                 running_release="", mode=MODE_NONE)
     plan.warnings.extend(channel_warnings)
+    if pin_note and rel is not None:
+        plan.warnings.append(pin_note)
     running = match_release(channel, ident) if board.identity_known else None
     plan.running_release = running.version if running else ""
     if running is not None and running.status == STATUS_WITHDRAWN:
         plan.warnings.append(f"the board runs harness {running.version}, which the publisher "
                              "has WITHDRAWN: update it")
     if rel is None:
-        plan.blockers.append(f"the {channel.channel!r} channel has no harness release "
-                             f"{version or '(no current release)'}")
+        plan.blockers.append(pin_note or f"the {channel.channel!r} channel has no harness "
+                                          f"release {version or '(no current release)'}")
         return plan
     if rel.status == STATUS_WITHDRAWN:
         plan.blockers.append(f"harness {rel.version} is withdrawn by its publisher")
@@ -331,8 +359,9 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
             downgrade = (compare_safe(rel.identity.harness, ident.harness_version) or 0) < 0
     if downgrade and version is None and not (running is not None and
                                               running.status == STATUS_WITHDRAWN):
+        offered = "pinned release" if pin_note else "channel's current"
         plan.warnings.append(f"the board runs harness {newer}, newer than the "
-                             f"channel's current {rel.version}; nothing to do")
+                             f"{offered} {rel.version}; nothing to do")
         base_needed = False
     elif downgrade:
         plan.warnings.append(f"this is a ROLLBACK from harness {newer} to "

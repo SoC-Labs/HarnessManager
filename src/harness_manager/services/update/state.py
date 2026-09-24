@@ -12,6 +12,10 @@ Layout under ``<state_dir>/update/``::
     backups/<board>/          config-SD backups taken before a harness install
     journal/<board>.json      the phase of a harness install in progress (resume / recover)
     installed.json            board -> the last install outcome ("installed" or "written")
+    history/<board>.jsonl     the last ``HISTORY_KEEP`` installs of a board, oldest first
+                              (HARNESS-CAT; "roll back to previous" reads it)
+    pins.json                 board -> the harness release it is pinned to (HARNESS-CAT; a
+                              per-board pin, never a channel)
     app/                      the app self-updater's venvs and switch pointer (``app.py``)
 
 Every JSON write is write-then-rename, so a crash leaves the old or the new
@@ -99,6 +103,13 @@ class UpdateState:
     @property
     def installed(self) -> Path:
         return self.root / "installed.json"
+
+    def history(self, board_id: str) -> Path:
+        return self.root / "history" / f"{safe_name(board_id)}.jsonl"
+
+    @property
+    def pins(self) -> Path:
+        return self.root / "pins.json"
 
     @property
     def app(self) -> Path:
@@ -245,9 +256,25 @@ class BadVersions:
 # --- install records and the in-progress journal ------------------------------------
 
 
+#: How many installs a board's history keeps (HARNESS-CAT). The oldest go first.
+HISTORY_KEEP = 20
+
+
 class InstallRecords:
-    def __init__(self, state: UpdateState) -> None:
+    """What was installed on each board.
+
+    ``installed.json`` keeps each board's LAST record (T7's shape, which the rollback reads);
+    ``history/<board>.jsonl`` keeps the last ``keep`` records, one JSON object per line,
+    oldest first (HARNESS-CAT: the catalogue's history and its rollback candidates). Every
+    ``put`` goes to both. A record names at least ``version`` and ``result``; the executor
+    adds ``kind`` (install | overlays | restore | recovered), ``from_version`` (the release
+    the board ran before), ``static_id``, ``fw_sha``, ``doors``, ``backup`` and ``detail``.
+    """
+
+    def __init__(self, state: UpdateState, *, keep: int = HISTORY_KEEP) -> None:
+        self.state = state
         self.path = state.installed
+        self.keep = max(1, int(keep))
 
     def get(self, board_id: str) -> dict[str, Any] | None:
         data = read_json(self.path, {}) or {}
@@ -256,8 +283,82 @@ class InstallRecords:
 
     def put(self, board_id: str, record: dict[str, Any]) -> None:
         data = read_json(self.path, {}) or {}
-        data[board_id] = {**record, "recorded_at": time.time()}
+        entry = {**record, "recorded_at": time.time()}
+        data[board_id] = entry
         atomic_write_json(self.path, data)
+        self._append(board_id, entry)
+
+    def history(self, board_id: str, limit: int | None = None) -> list[dict[str, Any]]:
+        """The board's installs, NEWEST first (at most ``keep``; ``limit`` cuts it shorter)."""
+        rows = self._read(board_id)
+        if not rows:
+            last = self.get(board_id)          # a T7 record from before the history existed
+            rows = [last] if last else []
+        rows.reverse()
+        return rows[:limit] if limit is not None else rows
+
+    def _read(self, board_id: str) -> list[dict[str, Any]]:
+        try:
+            text = self.state.history(board_id).read_text(encoding="utf-8")
+        except (FileNotFoundError, OSError):
+            return []
+        out: list[dict[str, Any]] = []
+        for line in text.splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue                        # a torn line (a crash mid-write): skip it
+            if isinstance(row, dict):
+                out.append(row)
+        return out
+
+    def _append(self, board_id: str, entry: dict[str, Any]) -> None:
+        rows = [*self._read(board_id), entry][-self.keep:]
+        body = "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows)
+        atomic_write_bytes(self.state.history(board_id), body.encode("utf-8"))
+
+
+class Pins:
+    """Per-board pins (HARNESS-CAT; HARNESS-DIST §4.2): the harness release a board stays on.
+
+    A pin is HM state, never a channel: ``pins.json`` maps a board id to ``{version,
+    catalog, by, at}``. The planner never OFFERS a release past a board's pin (an explicit
+    ``--version`` is the user's own choice and still plans).
+    """
+
+    def __init__(self, state: UpdateState) -> None:
+        self.path = state.pins
+
+    def all(self) -> dict[str, dict[str, Any]]:
+        data = read_json(self.path, {}) or {}
+        return {b: p for b, p in data.items() if isinstance(p, dict) and p.get("version")} \
+            if isinstance(data, dict) else {}
+
+    def get(self, board_id: str, catalog: str | None = None) -> dict[str, Any] | None:
+        pin = self.all().get(board_id)
+        if pin is None or (catalog and pin.get("catalog") and pin["catalog"] != catalog):
+            return None
+        return pin
+
+    def set(self, board_id: str, version: str, *, catalog: str = "",
+            by: str = "user") -> dict[str, Any] | None:
+        """Pin ``board_id`` to ``version``. Returns the pin it replaced, if any."""
+        data = read_json(self.path, {}) or {}
+        if not isinstance(data, dict):
+            data = {}
+        before = data.get(board_id) if isinstance(data.get(board_id), dict) else None
+        data[board_id] = {"version": version, "catalog": catalog, "by": by, "at": time.time()}
+        atomic_write_json(self.path, data)
+        return before
+
+    def clear(self, board_id: str) -> dict[str, Any] | None:
+        """Unpin. Returns the pin it removed, or None when there was none."""
+        data = read_json(self.path, {}) or {}
+        if not isinstance(data, dict) or board_id not in data:
+            return None
+        before = data.pop(board_id)
+        atomic_write_json(self.path, data)
+        return before if isinstance(before, dict) else None
 
 
 class StoredComponents:
