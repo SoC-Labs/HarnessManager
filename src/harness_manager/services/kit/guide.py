@@ -299,7 +299,7 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
     s = steps["check"]
     if receipt is None or receipt.state != "passed":
         raw["check"] = "todo"
-        s.detail = "waits for a passed build"
+        s.detail = "no passed build yet"
     else:
         rel = receipt.path
         checks = build.receipt_checks(receipt)

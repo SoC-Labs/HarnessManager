@@ -331,8 +331,10 @@ def _guide(ctx: Ctx) -> int:
     g = guide.guide(kits, pack=ctx.pack, static_id=a.static_id, identity=ident, board_id=bid,
                     design=a.design, build_dir=Path(a.build_dir) if a.build_dir else None,
                     store=ContentStore(_state_dir() / "store"))
+    facts = [f"static {g.static_id}"] if bid and g.static_id else []
+    facts += [f"kit {g.kit_id}"] if g.kit_id else []
     head = (f"Build a DUT for {bid or 'static ' + (g.static_id or '?')}"
-            + (f" (static {g.static_id}, kit {g.kit_id})" if g.kit_id else ""))
+            + (f" ({', '.join(facts)})" if facts else ""))
     human = [head]
     rows = []
     for s in g.steps:
