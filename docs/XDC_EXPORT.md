@@ -138,7 +138,7 @@ For the nanoSoC designs, the OOC XDC matches the platform's own `nanosoc_ooc.xdc
 - `<name>_io.xdc`: IO standards and pad properties, grouped by bank with its VCCO, plus the configuration voltage;
 - `<name>_timing.xdc`: `create_clock` for every clock port. The model has no board trace delays, so IO delays are yours to add.
 
-Both kits also write `manifest.json`: the design, every check, the facts, and the model's provenance.
+Both kits also write `manifest.json`: the design, `passed`, every check, the facts, and the model's provenance.
 
 ## Checks
 
@@ -169,7 +169,7 @@ Every check is an **error** with a reason and, usually, a hint. **Any error refu
 Rules for the export routes:
 
 - `design` is a built-in name or an inline design object. File paths are refused, because the daemon's filesystem is not the caller's.
-- `preview: true` answers 200 with `{kind, design, ok, files, checks, facts}`, even when a check fails.
+- `preview: true` answers 200 with `{ok: true, kind, design, passed, files, checks, facts}`, even when a check fails (`passed: false`; `ok` is the envelope).
 - Otherwise a failed check is 409 REFUSED with `error.data.checks`.
 - `format: "zip"` returns `application/zip`: the files plus `manifest.json`.
 

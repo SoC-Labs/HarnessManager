@@ -13,8 +13,8 @@ Routes (bearer auth and the error envelope as everywhere; docs/XDC_EXPORT.md):
 design object (docs/XDC_EXPORT.md); a file path is not accepted over the API (the
 daemon's filesystem is not the caller's).
 
-- ``preview: true`` answers 200 with ``{kit, design, ok, files: {name: text}, checks,
-  facts}`` even when checks fail, so a front end can show the files next to the failures.
+- ``preview: true`` answers 200 with ``{ok: true, kind, design, passed, files: {name:
+  text}, checks, facts}`` even when checks fail (``passed: false``), so a front end can show the files next to the failures.
 - Otherwise a failed check is 409 REFUSED with ``error.data.checks`` (every finding).
 - ``format: "zip"`` answers ``application/zip`` (the files plus ``manifest.json``).
 

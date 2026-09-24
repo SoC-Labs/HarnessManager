@@ -82,7 +82,7 @@ class Kit:
         return not self.errors
 
     def manifest(self) -> dict[str, Any]:
-        return {"kind": self.kind, "design": self.design, "ok": self.ok,
+        return {"kind": self.kind, "design": self.design, "passed": self.ok,
                 "files": sorted(self.files), "checks": [asdict(f) for f in self.findings],
                 "facts": self.facts, "generator": GENERATOR}
 

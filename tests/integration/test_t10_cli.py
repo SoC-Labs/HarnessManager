@@ -61,7 +61,7 @@ def test_rm_kit_writes_the_files_and_the_manifest(tmp_path: Path, capsys):
     assert names == ["manifest.json", "nanosoc_connectivity.csv", "nanosoc_connectivity.md",
                      "nanosoc_ooc.xdc", "nanosoc_pblock.md", "nanosoc_wrapper_skeleton.sv"]
     man = json.loads((tmp_path / "manifest.json").read_text())
-    assert man["ok"] and man["facts"]["static_id"] == "0x72BB0A36"
+    assert man["passed"] and man["facts"]["static_id"] == "0x72BB0A36"
     assert man["facts"]["model"]["derived"] is True
 
 
@@ -72,7 +72,7 @@ def test_without_out_it_previews_and_writes_nothing(tmp_path: Path, capsys, monk
     assert list(tmp_path.iterdir()) == []
     code, out, _ = run(["xdc", "board", "--json"], capsys)       # the default design
     body = json.loads(out)
-    assert body["ok"] and "set_property PACKAGE_PIN AK16" in body["files"]["blinky_pins.xdc"]
+    assert body["ok"] and body["passed"] and "set_property PACKAGE_PIN AK16" in body["files"]["blinky_pins.xdc"]
 
 
 def test_a_failed_check_exits_15_and_lists_every_check(tmp_path: Path, capsys):

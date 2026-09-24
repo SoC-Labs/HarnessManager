@@ -146,7 +146,9 @@ export function BoardXdcSection({ bid }) {
     x.busy = "preview"; x.error = null; x.downloaded = ""; redraw();
     try {
       x.result = await xdcCall("boardXdcExport", { bid }, { kit: x.kit, design: designArg(), preview: true });
-      x.tab = Object.keys(x.result.files || {}).sort()[0] || "";
+      const names = Object.keys(x.result.files || {}).sort();
+      // open on the constraint file itself: the OOC XDC, or the pins file
+      x.tab = names.find((n) => /_(ooc|pins)\.xdc$/.test(n)) || names[0] || "";
     } catch (e) { x.error = toApiError(e); x.result = null; }
     x.busy = ""; redraw();
   }
@@ -165,7 +167,7 @@ export function BoardXdcSection({ bid }) {
     } catch (e) {
       x.error = toApiError(e);
       const checks = x.error.data && x.error.data.checks;
-      if (checks) x.result = Object.assign({}, x.result || {}, { checks, ok: false });
+      if (checks) x.result = Object.assign({}, x.result || {}, { checks, passed: false });
     }
     x.busy = ""; redraw();
   }
@@ -209,9 +211,13 @@ export function BoardXdcSection({ bid }) {
     <${Card} title="Files" icon="file-code" testid="xdc-files"
         sub=${r ? (errors ? "Preview only: the export is refused until the failed checks are fixed." : "These are the files the zip holds, with manifest.json.") : "Preview a kit to see its files."}>
       ${files.length ? html`<div class="actions">
-          <${Seg} label="File" value=${x.tab} options=${files.map((f) => ({ value: f, label: f }))}
-            onChange=${(v) => { x.tab = v; redraw(); }} />
-          <pre class="result" style="max-height: 520px" data-testid="xdc-file-body" data-file=${x.tab}>${(r.files || {})[x.tab] || ""}</pre>
+          <div role="group" aria-label="File" data-testid="xdc-file-tabs" style="display: flex; flex-wrap: wrap; gap: 4px">
+            ${files.map((f) => html`<button type="button" key=${f} class="btn ghost sm mono" data-file=${f}
+              aria-pressed=${x.tab === f ? "true" : "false"} style=${x.tab === f ? "background: var(--hover); color: var(--text)" : ""}
+              onClick=${() => { x.tab = f; redraw(); }}>${f}</button>`)}
+          </div>
+          <pre class="result" style="max-height: 520px; white-space: pre; overflow: auto" data-testid="xdc-file-body"
+            data-file=${x.tab}>${(r.files || {})[x.tab] || ""}</pre>
         </div>`
         : html`<p class="muted">${r ? "No files." : "Nothing previewed yet."}</p>`}
     <//>

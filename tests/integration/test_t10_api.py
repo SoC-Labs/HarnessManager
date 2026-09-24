@@ -79,7 +79,7 @@ def test_preview_returns_the_files_and_the_checks(fielded_board):
                                                     "preview": True}, headers=H)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["ok"] is True and "nanosoc_ooc.xdc" in body["files"]
+    assert body["ok"] is True and body["passed"] is True and "nanosoc_ooc.xdc" in body["files"]
     assert "create_clock -name dut_clk" in body["files"]["nanosoc_ooc.xdc"]
     assert body["design"]["static_id"] == "0x72BB0A36"
 
@@ -93,7 +93,7 @@ def test_an_rm_kit_for_a_board_on_another_static_is_refused_with_the_reason(old_
     assert [x["code"] for x in err["data"]["checks"] if x["severity"] == "error"] == ["static_id"]
     # twin: the board-free export for the model's static is fine
     ok = c.post("/api/v1/xdc/export", json={"kit": "rm-kit", "design": "nanosoc"}, headers=H)
-    assert ok.status_code == 200 and ok.json()["ok"] is True
+    assert ok.status_code == 200 and ok.json()["passed"] is True
 
 
 def test_a_failed_check_is_409_with_every_check_and_preview_still_shows_them(fielded_board):
@@ -107,7 +107,8 @@ def test_a_failed_check_is_409_with_every_check_and_preview_still_shows_them(fie
     assert codes == ["direction", "clock_capable"]
     p = c.post(bid_path(bid) + "/xdc/export", json={"kit": "board", "design": design,
                                                     "preview": True}, headers=H)
-    assert p.status_code == 200 and p.json()["ok"] is False
+    assert p.status_code == 200 and p.json()["ok"] is True   # the envelope: the request worked
+    assert p.json()["passed"] is False                     # the kit: its checks did not
     assert "bad_pins.xdc" in p.json()["files"]
 
 
