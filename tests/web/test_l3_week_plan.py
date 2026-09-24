@@ -1,10 +1,10 @@
 """Lane L3 (UI) in the browser: the simplified Overview, screen and baud on the consoles,
 the Power, Update, Clocks and SD pages, and a board behind a hub.
 
-These run over the T14 mock, which simulates the frozen week-plan routes (lanes L1, L2
-and L4 build the real ones in parallel): tests/fakes/l3_week_plan.py. With
-HARNESS_MANAGER_WEB_WEEK_REAL=1 they also run over the real daemon once those modules
-have landed. Each behaviour has its negative twin.
+These run over the T14 mock, which simulates the week-plan routes of lanes L1, L2 and L4:
+tests/fakes/l3_week_plan.py. The ones without sim=True also run over the real daemon, now
+that those modules are on main (HARNESS_MANAGER_WEB_WEEK_REAL=0 turns that off). Each
+behaviour has its negative twin.
 """
 
 from __future__ import annotations

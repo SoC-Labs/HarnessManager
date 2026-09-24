@@ -33,7 +33,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "week_plan(*modules, sim=False): needs the week-plan routes of those daemon "
                    "extension modules; runs over the mock, and over the real daemon too when "
-                   "they have landed and HARNESS_MANAGER_WEB_WEEK_REAL=1. sim=True: the test "
+                   "they have landed (HARNESS_MANAGER_WEB_WEEK_REAL=0: mock only). sim=True: the test "
                    "scripts its scenario through the mock's WeekPlanSim (a meter, a hub, an "
                    "update channel), so it runs over the mock only")
 
@@ -48,10 +48,12 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "daemon" in metafunc.fixturenames:
         week = metafunc.definition.get_closest_marker("week_plan")
         if week is not None:
-            # L1/L2/L4 land these routes separately: the mock always has them; the real
-            # daemon joins once every module the test needs is in the tree (opt-in).
+            # L1/L2/L4 landed these routes separately: the mock always has them; the real
+            # daemon joins once every module the test needs is in the tree. That was opt-in
+            # (=1) while the lanes ran, so CI never ran these over the real daemon; all four
+            # modules are on main now (Q1 2026-09-24), so it is on unless =0.
             servers = ["mock"]
-            if (os.environ.get("HARNESS_MANAGER_WEB_WEEK_REAL") == "1"
+            if (os.environ.get("HARNESS_MANAGER_WEB_WEEK_REAL", "1") != "0"
                     and not week.kwargs.get("sim") and all(landed(m) for m in week.args)):
                 servers.append("harness-manager-daemon")
         else:
