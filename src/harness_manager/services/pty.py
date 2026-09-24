@@ -382,6 +382,19 @@ class Inotify:
                     deltas[wd] = deltas.get(wd, 0) - 1
         return deltas, overflow
 
+    def pending(self) -> bool:
+        """Events are queued that nobody has read yet (FIONREAD)."""
+        import fcntl
+        import termios
+
+        if self.fd < 0:
+            return False
+        try:
+            raw = fcntl.ioctl(self.fd, termios.FIONREAD, struct.pack("i", 0))
+        except OSError:
+            return False
+        return struct.unpack("i", raw)[0] > 0
+
     def close(self) -> None:
         if self.fd >= 0:
             try:
@@ -406,6 +419,7 @@ class ClientCounter:
         self._lock = threading.Lock()
         self._cbs: dict[int, Callable[[int | None], None]] = {}
         self._orphans: dict[int, int] = {}      # deltas read before their watch was registered
+        self._recheck: set[int] = set()         # watches to call again with the next read
         self._thread = threading.Thread(target=self._run, daemon=True, name="console-pty-inotify")
         self._thread.start()
 
@@ -427,7 +441,17 @@ class ClientCounter:
         with self._lock:
             self._cbs.pop(wd, None)
             self._orphans.pop(wd, None)
+            self._recheck.discard(wd)
             self._ino.remove(wd)
+
+    def pending(self) -> bool:
+        """Events are queued that this thread has not read yet."""
+        return self._ino.pending()
+
+    def recheck(self, wd: int) -> None:
+        """Call ``wd``'s callback again (delta 0) after the next read, whatever it holds."""
+        with self._lock:
+            self._recheck.add(wd)
 
     def _run(self) -> None:
         while self._ino.fd >= 0:
@@ -440,6 +464,9 @@ class ClientCounter:
             deltas, overflow = self._ino.read()
             calls: list[tuple[Callable[[int | None], None], int | None]] = []
             with self._lock:
+                for wd in self._recheck:
+                    deltas.setdefault(wd, 0)
+                self._recheck.clear()
                 for wd, delta in deltas.items():
                     cb = self._cbs.get(wd)
                     if cb is None:
@@ -885,9 +912,32 @@ class PtyManager:
             else:
                 pty.opens = max(0, pty.opens + delta)
                 now = pty.opens
+                if now == 0:
+                    now = self._visible_clients(pty)
+                if now == 0 and self._counter is not None and self._counter.pending():
+                    # Events came in while this was decided: a client that opened meanwhile
+                    # was reset under it (its TIOCEXCL cleared; seen under load). They
+                    # decide instead, with this PTY looked at again after the next read.
+                    self._counter.recheck(pty.wd)
+                    return
             if pty.master < 0:
                 return                                   # closed meanwhile
             self._set_clients(pty, now)
+
+    def _visible_clients(self, pty: ConsolePty) -> int:
+        """This user's processes that hold ``pty`` (0 when /proc cannot say).
+
+        inotify coalesces identical back-to-back events: two opens before the counter
+        thread read the first are ONE IN_OPEN. A second opener that comes and goes (a
+        probe, another terminal; on srv03335 something opens each new PTY as its link
+        appears) then takes opens minus closes to 0 with a client still attached, and
+        the PTY stopped writing to it and reset its line under it: under load, when this
+        thread reads late, 2 runs in 30 of test_l2_pty (FLAKE 2026-09-24). So a count of
+        0 is checked against /proc first. /proc cannot see a setgid screen.
+        """
+        counts = scan_clients({pty.device}, exclude_pid=os.getpid(),
+                              budget_s=self.scan_budget_s)
+        return (counts or {}).get(pty.device, 0)
 
     # -- open / close ---------------------------------------------------------------------
 

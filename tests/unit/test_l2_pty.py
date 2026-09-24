@@ -20,6 +20,7 @@ import os
 import socket
 import stat
 import termios
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -461,6 +462,58 @@ def _come_and_go(broker, path: str, *, exclusive: bool = False) -> None:
     wait_for(lambda: broker.pty_info(BOARD, "fpga_uart0")["clients"] == 1, what="counted")
     holder.release()
     wait_for(lambda: broker.pty_info(BOARD, "fpga_uart0")["clients"] == 0, what="gone")
+
+
+def _read_late(monkeypatch) -> threading.Event:
+    """The counter thread reads its inotify queue only once the returned event is set (a
+    loaded machine): what happens meanwhile stays queued, and the kernel coalesces it."""
+    go = threading.Event()
+    original = ptymod.Inotify.read
+
+    def late(self):
+        go.wait(10)
+        return original(self)
+
+    monkeypatch.setattr(ptymod.Inotify, "read", late)
+    return go
+
+
+def test_a_client_whose_open_the_kernel_coalesced_is_still_counted(broker, session, monkeypatch):
+    # FLAKE 2026-09-24 ("timed out waiting for counted", 2 runs in 30 under load): another
+    # opener came and went while the counter thread was behind. Its IN_OPEN and the
+    # client's were ONE event, so opens minus closes read 0 with the client attached.
+    info, port = _greeting_held(broker, session)
+    go = _read_late(monkeypatch)
+    holder = PtyHolder(info["path"])                                  # stays
+    try:
+        assert not open_fails_busy(info["path"])                      # comes and goes
+        go.set()
+        wait_for(lambda: broker.pty_info(BOARD, "fpga_uart0")["clients"] == 1,
+                 what="the client that stayed")
+        assert port.mode != ptymod.IDLE                               # it is written to
+    finally:
+        holder.release()
+    wait_for(lambda: broker.pty_info(BOARD, "fpga_uart0")["clients"] == 0, what="gone")
+
+
+def test_negative_twin_the_kernel_reads_two_back_to_back_opens_as_one():
+    # Why a count of 0 is checked against /proc: opens minus closes alone says nobody
+    # holds this PTY while a client does.
+    ino = ptymod.Inotify.create()
+    master, slave = os.openpty()
+    try:
+        device = os.ttyname(slave)
+        wd = ino.add(device)
+        stays = os.open(device, os.O_RDWR | os.O_NOCTTY)
+        comes_and_goes = os.open(device, os.O_RDWR | os.O_NOCTTY)   # before anything is read
+        os.close(comes_and_goes)
+        deltas, _ = ino.read()
+        assert deltas.get(wd, 0) < 1                                  # one IN_OPEN for two
+        os.close(stays)
+    finally:
+        ino.close()
+        os.close(master)
+        os.close(slave)
 
 
 def test_a_client_that_comes_and_goes_leaves_the_recent_output_for_the_next(broker, session):
