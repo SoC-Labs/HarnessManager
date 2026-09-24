@@ -530,10 +530,12 @@ def test_a_reset_itself_never_discards_queued_output(live_broker, session, monke
 
 def test_negative_twin_a_flushing_reset_loses_the_queued_output(live_broker, session,
                                                                 monkeypatch):
-    # The bug, put back: reset on every 1 -> 0, with the TCSAFLUSH tty.setraw() default.
+    info, port = _greeting_queued(live_broker, session)
+    # The bug, put back AFTER the greeting is queued: reset on every 1 -> 0, with the
+    # TCSAFLUSH tty.setraw() default. (Patched earlier, the PTY's own set-up flushed the
+    # greeting before it was counted: the twin raced itself, ~1 run in 3.)
     monkeypatch.setattr(ptymod.ConsolePty, "needs_reset", lambda self: True)
     monkeypatch.setattr(ptymod, "RESET_WHEN", termios.TCSAFLUSH)
-    info, port = _greeting_queued(live_broker, session)
     _come_and_go(live_broker, info["path"])
     assert queued(port.slave) == 0                                # flushed
     with PtyClient(info["path"]) as client, pytest.raises(AssertionError):
