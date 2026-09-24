@@ -105,6 +105,8 @@ START_ATTEMPTS = 3
 BACKOFF_S = (1.0, 2.0, 5.0, 10.0, 30.0)
 _POLL_S = 0.25
 _STDERR_KEEP = 4096
+#: How long an exited ssh's stderr reader gets to reach the end of the pipe (see poll()).
+_DRAIN_WAIT_S = 2.0
 
 #: The ports a session needs through the tunnel, by name (constants.py for the numbers).
 DEFAULT_REMOTE_PORTS: dict[str, int] = {
@@ -345,6 +347,7 @@ class _PopenProcess:
         self.stderr_tail = ""
         #: ``(monotonic time, line)`` for each "channel N: open failed: ..." ssh logged.
         self.open_failures: deque[tuple[float, str]] = deque(maxlen=32)
+        self._drain_waited = False
         self._t = threading.Thread(target=self._drain, name=f"ssh-stderr-{self.pid}", daemon=True)
         self._t.start()
 
@@ -359,7 +362,15 @@ class _PopenProcess:
                 self.open_failures.append((time.monotonic(), line.strip()))
 
     def poll(self) -> int | None:
-        return self._proc.poll()
+        rc = self._proc.poll()
+        if rc is not None and not self._drain_waited:
+            # ssh wrote why just before it exited, but the reader thread may not have read
+            # it yet: a loaded machine reported "exited with status 255 (no message)" for a
+            # refused login. The pipe ends with the process, so this wait is short; bounded,
+            # and only once, for a child that inherited the pipe (a ProxyCommand) and keeps it.
+            self._t.join(timeout=_DRAIN_WAIT_S)
+            self._drain_waited = True
+        return rc
 
     def terminate(self) -> None:
         self._proc.terminate()

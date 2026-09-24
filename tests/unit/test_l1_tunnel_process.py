@@ -106,3 +106,45 @@ def test_a_missing_ssh_binary_is_unreachable_not_a_crash(monkeypatch, tmp_path):
     with pytest.raises(UnreachableError) as exc:
         T.popen_launcher(["ssh", "-N", HUB])
     assert "OpenSSH" in exc.value.hint
+
+
+# FLAKE 2026-09-24: under load the refused-login test above read "ssh exited with status 255
+# (no message)". poll() saw the exit before the stderr reader thread had read ssh's last
+# words; now an exited process's poll() lets the reader reach the end of the pipe first.
+
+_SAYS_NO = [sys.executable, "-c",
+            "import sys; sys.stderr.write('u@hub: Permission denied (publickey).\\n')"]
+
+
+def _lagging_reader(monkeypatch) -> threading.Event:
+    """The stderr reader starts only when the returned event is set (a starved thread)."""
+    go = threading.Event()
+    original = T._PopenProcess._drain
+
+    def drain(self) -> None:
+        go.wait(10)
+        original(self)
+
+    monkeypatch.setattr(T._PopenProcess, "_drain", drain)
+    return go
+
+
+def test_an_exited_ssh_is_reported_with_what_it_wrote_even_when_its_reader_lags(monkeypatch):
+    go = _lagging_reader(monkeypatch)
+    proc = T._PopenProcess(_SAYS_NO)
+    proc._proc.wait(timeout=20)                       # exited; its reader has read nothing
+    threading.Timer(0.1, go.set).start()
+    assert proc.poll() == 0
+    assert "Permission denied (publickey)" in T._stderr_of(proc)
+
+
+def test_negative_twin_without_the_wait_the_exit_is_reported_before_the_words(monkeypatch):
+    go = _lagging_reader(monkeypatch)
+    monkeypatch.setattr(T, "_DRAIN_WAIT_S", 0.0)
+    proc = T._PopenProcess(_SAYS_NO)
+    try:
+        proc._proc.wait(timeout=20)
+        assert proc.poll() == 0
+        assert T._stderr_of(proc) == ""               # "no message": the flake
+    finally:
+        go.set()
