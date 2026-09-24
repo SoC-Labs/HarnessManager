@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -228,6 +229,7 @@ def test_the_local_port_is_never_2542(monkeypatch):
         T.SshTunnel(HUB, [T.Forward("xvc", "192.168.10.101", 2542, local_port=2542)])
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc/net/tcp (Linux)")
 def test_listening_reads_the_kernel_table_without_connecting():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))

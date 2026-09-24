@@ -497,3 +497,15 @@ def test_reap_orphans_sweeps_every_board(rig, jtag, debug):
     owner.wait(5)
     assert debug.reap_orphans() == ["mps3@sweep"]
     assert debug.reap_orphans() == []                            # negative twin: nothing left
+
+
+def test_an_empty_cmdline_is_unknown_not_another_program(debug, monkeypatch):
+    # Lead, after the first GitHub CI run: Linux shows an EMPTY /proc/<pid>/cmdline for a
+    # process mid-exec or exited-but-unreaped, and that read as "pid reused".
+    rec = {"pid": os.getpid(), "state": "up", "ports": {}, "ports_command": "gdb_port 1",
+           "owner": {"host": socket.gethostname(), "pid": 999_999_999}}
+    monkeypatch.setattr(dbg, "_cmdline", lambda pid: [])
+    assert debug._classify("mps3@x", rec) != "reused"
+    # Negative twin: a readable command line of another program still is reuse.
+    monkeypatch.setattr(dbg, "_cmdline", lambda pid: ["/usr/bin/vim", "notes.txt"])
+    assert debug._classify("mps3@x", rec) == "reused"

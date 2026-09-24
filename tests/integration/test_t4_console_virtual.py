@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
 from collections.abc import Iterator
 
 import pytest
@@ -264,7 +265,12 @@ def test_swap_closes_the_console_and_a_verified_swap_reopens_it(broker, session,
     bus.publish(Event("deploy.started", board, {"overlay": "nanosoc", "rm_id": "0x01000001"}))
     ev = log.wait_for(lambda e: e.data["state"] == "down", after=mark)
     assert "partition swap" in ev.data["detail"]
-    assert not proxy.busy and proxy.accepted == 1        # really closed, and not re-dialled
+    # really closed, and not re-dialled: the proxy's relay thread notices the close a
+    # moment after the broker publishes "down" (a race on slow CI runners)
+    deadline = time.monotonic() + 5
+    while proxy.busy and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert not proxy.busy and proxy.accepted == 1
     mark = log.mark()
     bus.publish(Event("deploy.done", board, {"rm_id": "0x01000001", "verified": True}))
     up_after(log, mark)

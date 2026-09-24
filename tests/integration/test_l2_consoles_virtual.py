@@ -8,6 +8,14 @@ client's typing comes back to every reader. Every check has a negative twin.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
+if not sys.platform.startswith("linux"):
+    # Client counting (inotify) and TIOCINQ are Linux-only; the PTYs are untested elsewhere.
+    pytest.skip("the PTY tests need Linux", allow_module_level=True)
+
 import os
 import shutil
 import subprocess

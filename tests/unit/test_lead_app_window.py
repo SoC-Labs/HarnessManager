@@ -21,6 +21,7 @@ URL = "http://127.0.0.1:41411/#token=abc"
 @pytest.fixture(autouse=True)
 def _no_env_and_no_pywebview(monkeypatch):
     monkeypatch.delenv(window.ENV_APP_BROWSER, raising=False)
+    monkeypatch.setattr(window, "_platform_paths", lambda: [])   # a Mac runner has real Chrome
     monkeypatch.setitem(sys.modules, "webview", None)       # import webview -> ImportError
 
 

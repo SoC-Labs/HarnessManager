@@ -531,7 +531,9 @@ class DebugService:
             return "stale"
         cmd = _cmdline(pid)
         ports_cmd = rec.get("ports_command", "")
-        if cmd is not None and ports_cmd and ports_cmd not in cmd:
+        # An EMPTY cmdline is unknown, not a different program: Linux shows none for a
+        # process mid-exec or exited-but-unreaped (a zombie). Seen on CI runners.
+        if cmd and ports_cmd and ports_cmd not in cmd:
             return "reused"
         owner_pid = int(owner.get("pid") or 0)
         if owner_pid == os.getpid() or not pid_alive(owner_pid):

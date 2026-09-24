@@ -34,7 +34,7 @@ fail() {
     exit 1
 }
 cleanup() {
-    [[ -x "$hm" ]] && "$hm" daemon stop --demo >/dev/null 2>&1 || true
+    if [[ -x "$hm" ]]; then "$hm" daemon stop --demo >/dev/null 2>&1 || true; fi
     rm -rf "$fake_home"
 }
 trap cleanup EXIT
