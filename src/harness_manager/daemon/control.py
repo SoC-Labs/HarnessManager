@@ -144,31 +144,10 @@ def daemon_python(*, windows: bool = os.name == "nt", executable: str = "",
     return executable, None
 
 
-#: daemon.log is appended to by every start; past this size the old log becomes
-#: daemon.log.1 (one generation kept), so a machine that runs for months keeps a bound.
-LOG_ROTATE_BYTES = 8 * 1024 * 1024
-
-
-def _rotate_log(log_path: Path, limit: int = LOG_ROTATE_BYTES) -> None:
-    try:
-        if log_path.stat().st_size > limit:
-            os.replace(log_path, log_path.with_name(log_path.name + ".1"))
-    except OSError:
-        pass
-
-
 def _spawn(state_dir: Path, port: int, listen: str, demo: bool = False) -> subprocess.Popen:
+    state_dir.mkdir(parents=True, exist_ok=True)
     log_path = daemon_log_path(state_dir)
-    try:
-        state_dir.mkdir(parents=True, exist_ok=True)
-        _rotate_log(log_path)
-        fd = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
-    except OSError as exc:
-        raise ActionFailedError(
-            f"cannot start harness-manager-daemon: cannot write {log_path}: "
-            f"{exc.strerror or exc}",
-            hint="use a state directory you can write on a disk with free space "
-                 "(HARNESS_MANAGER_STATE_DIR)") from exc
+    fd = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
     python, env = daemon_python()
     cmd = [python, "-m", "harness_manager.daemon", "--state-dir", str(state_dir),
            "--port", str(port), "--listen", listen] + (["--demo"] if demo else [])

@@ -7,7 +7,7 @@
   the LR lanes'; the fix is in the report);
 - an SSH tunnel whose owner was killed is stopped by the next process (records + reaper);
 - a tunnel whose local port was taken while starting picks new ports;
-- job failures are in daemon.log; daemon.log rotates at start.
+- job failures are in daemon.log.
 """
 
 from __future__ import annotations
@@ -477,18 +477,6 @@ def test_a_failed_job_is_in_the_log_with_its_error(caplog):
     assert f"reset job {ok.id} done" in text          # twin: success says so too
 
 
-def test_daemon_log_rotates_at_start_once_it_is_big(tmp_path):
-    from harness_manager.daemon.control import _rotate_log
-
-    log_path = tmp_path / "daemon.log"
-    log_path.write_bytes(b"x" * 100)
-    _rotate_log(log_path, limit=1000)
-    assert log_path.exists() and not (tmp_path / "daemon.log.1").exists()   # small: kept
-    log_path.write_bytes(b"x" * 2000)
-    _rotate_log(log_path, limit=1000)
-    assert not log_path.exists() and (tmp_path / "daemon.log.1").stat().st_size == 2000
-
-
 # --- a board that is off, through the tunnel, is not "held by another client" -----------------
 
 
@@ -809,3 +797,72 @@ def test_negative_twin_a_link_that_drops_under_queued_input_still_warns(caplog):
         sub.close()
         broker.shutdown()
         unregister_fake_serial("q2-drop")
+
+
+# --- Reboot is claimed at once, not after the UI's MCC reads (Q1's finding) -------------------
+
+
+@pytest.mark.parametrize("busy", [True, False])
+def test_reboot_is_accepted_at_once_while_an_mcc_read_is_in_flight(tmp_path, monkeypatch, busy):
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    from harness_manager.cli.output import jsonable
+    from harness_manager.core.model import Candidate
+    from harness_manager.daemon.app import create_app
+    from harness_manager.daemon.jobs import WAITING
+    from harness_manager_mps3 import mcc as mccmod
+    from tests.fakes.t3_clock import FakeClock
+    from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
+    from tests.fakes.virtual_board import VirtualMps3
+
+    clock = FakeClock()
+    monkeypatch.setattr(mccmod, "DEFAULT_CLOCK", clock)
+    monkeypatch.setattr(mccmod, "DEFAULT_SLEEP", clock.sleep)
+    with VirtualMps3(tmp_path / "usb", usb=True) as vb:
+        vb.mcc.clock = clock
+        vb.mcc.down_s, vb.mcc.boot_s, vb.mcc.autoboot_window_s = 1.0, 25.0, 3.0
+        counted = vb.mcc.on_reboot
+        vb.mcc.on_reboot = lambda: (counted(), vb.shell.stop())
+        vb.mcc.on_boot = vb.shell.start
+        base = vb.candidate(ethernet=True, usb=True)
+        cand = Candidate(pack="mps3", board_id=f"mps3@usb:{vb.mcc_url}/x", links=base.links,
+                         label="virtual MPS3 over USB", evidence="test")
+        eng = engine_for(vb)
+        try:
+            with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as c:
+                H = headers()
+                assert c.post("/api/v1/boards", json={"candidate": jsonable(cand)},
+                              headers=H).status_code == 200
+                B = bid_path(cand.board_id)
+                ctl = eng.session(cand.board_id).controller
+                real = ctl.temperatures
+
+                def slow_temps():                    # the MCC at 60-100 ms a character
+                    time.sleep(2.0)
+                    return real()
+
+                ctl.temperatures = slow_temps
+                reader = threading.Thread(
+                    target=lambda: c.get(f"{B}/controller/temps", headers=H))
+                if busy:
+                    reader.start()
+                    time.sleep(0.3)                  # the Details panel's read is in flight
+                t0 = time.monotonic()
+                r = c.post(f"{B}/controller/reboot", json={}, headers=H)
+                accepted_s = time.monotonic() - t0
+                assert r.status_code == 202, r.text
+                assert accepted_s < 1.0              # was ~1.7 s here, ~6.5 s on the UI
+                job = r.json()["job"]
+                _wait(lambda: c.get(f"/api/v1/jobs/{job}", headers=H).json()["state"]
+                      != "running", timeout=60, what="the reboot job")
+                j = c.get(f"/api/v1/jobs/{job}", headers=H).json()
+                assert j["state"] == "done", j
+                if busy:
+                    reader.join(10)
+                    assert j["phases"] == [WAITING, "sent", "down", "up"]   # said so
+                else:                                                        # twin
+                    assert j["phases"] == ["sent", "down", "up"]
+        finally:
+            eng.close_all()

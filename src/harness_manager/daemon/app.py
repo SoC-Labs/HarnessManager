@@ -631,6 +631,19 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def board(bid: str) -> BoardSession:
         return d.engine.session(bid)
 
+    def adapter_for_job(bid: str, s: BoardSession, attr: str, capability: str) -> Any:
+        """The adapter a job route needs, WITHOUT waiting for the board's op gate.
+
+        Having it is a local fact; only its absence talks to the board (to say why). The
+        gate is taken for that case alone, so a job is claimed (202) at once instead of
+        after a telemetry read on the MCC (seconds): Reboot looked dead (Q1/Q2).
+        """
+        adapter = getattr(s, attr, None)
+        if adapter is not None:
+            return adapter
+        with d.gates.op(bid):
+            return require(s, attr, capability)
+
     def require(session: BoardSession, attr: str, capability: str) -> Any:
         """The session adapter, or ``UnavailableError`` with the CLI's reason (``Ctx.require``)."""
         import argparse
@@ -847,8 +860,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         wait_s = _number(b, "wait_s") if b.get("wait_s") is not None else None
         if wait_s is not None and wait_s <= 0:
             raise UsageError("wait_s must be positive")
-        with d.gates.op(bid):
-            ctl = require(s, "controller", C.REBOOT_BOARD)
+        ctl = adapter_for_job(bid, s, "controller", C.REBOOT_BOARD)
         return accepted(d.jobs.submit(
             "reboot", bid, lambda progress: ctl.reboot(progress=progress, wait_s=wait_s)))
 
@@ -878,8 +890,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         if dest.exists() and not dest.is_dir():
             raise UsageError(f"{dest} exists and is not a directory",
                              hint="give a directory for the backup archive")
-        with d.gates.op(bid):
-            storage = require(s, "storage", C.STORAGE_BACKUP)
+        storage = adapter_for_job(bid, s, "storage", C.STORAGE_BACKUP)
         dest.mkdir(parents=True, exist_ok=True)
         return accepted(d.jobs.submit(
             "sd_backup", bid, lambda progress: storage.backup(dest, progress=progress)))

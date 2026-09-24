@@ -48,6 +48,9 @@ OP_WAIT_S = 60.0
 PROGRESS_INTERVAL_S = 0.1
 
 ProgressFn = Callable[[str, int, int], None]
+#: The first ``job.progress`` phase of a job that waits for the request in flight on its
+#: board (additive to docs/API.md's job phases).
+WAITING = "waiting for the request in flight"
 
 
 class Job:
@@ -125,10 +128,17 @@ class BoardGates:
                 del self._jobs[board_id]
 
     @contextmanager
-    def hold(self, board_id: str) -> Iterator[None]:
-        """A job's hold: waits for in-flight short requests, then keeps the board."""
+    def hold(self, board_id: str, on_wait: Callable[[], None] | None = None) -> Iterator[None]:
+        """A job's hold: waits for in-flight short requests, then keeps the board.
+
+        ``on_wait`` is called once if it has to wait (a telemetry read on the MCC takes
+        seconds), so the job can say so instead of looking stuck (Q2).
+        """
         lock = self._lock(board_id)
-        lock.acquire()
+        if not lock.acquire(blocking=False):
+            if on_wait is not None:
+                on_wait()
+            lock.acquire()
         try:
             yield
         finally:
@@ -230,9 +240,12 @@ class JobManager:
              serialise: Callable[[Any], Any]) -> None:
         error: HarnessError | None = None
         result: Any = None
+        progress = self._progress_fn(job)
         try:
-            with self.gates.hold(job.board_id):
-                result = serialise(fn(self._progress_fn(job)))
+            # The phase says what it waits for: the request in flight, never a queue of
+            # them (a claimed board refuses new requests; see BoardGates.op).
+            with self.gates.hold(job.board_id, lambda: progress(WAITING, 0, 0)):
+                result = serialise(fn(progress))
         except HarnessError as exc:
             error = exc
         except Exception as exc:  # noqa: BLE001 - a bug in a job must still end the job
@@ -249,8 +262,8 @@ class JobManager:
                 job.result = result
                 job.state = "done"
                 job.ended_at = time.time()
-            job.finished.set()
             log.info("%s done in %.1f s", job.describe(), job.ended_at - job.started_at)
+            job.finished.set()
             self._publish("job.done", job, {"job": job.id, "result": result})
 
     def _fail(self, job: Job, exc: HarnessError) -> None:
@@ -259,11 +272,11 @@ class JobManager:
             job.error = err
             job.state = "failed"
             job.ended_at = time.time()
-        job.finished.set()
         # The field record: a failed deploy or reboot said nothing in daemon.log before.
         log.warning("%s on %s failed after %.1f s: %s: %s", job.describe(),
                     job.board_id or "the engine", job.ended_at - job.started_at,
                     err.get("name"), err.get("message"))
+        job.finished.set()
         self._publish("job.failed", job, {"job": job.id, "error": err})
 
     def _publish(self, topic: str, job: Job, data: dict[str, Any]) -> None:
