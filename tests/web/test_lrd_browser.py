@@ -1,0 +1,370 @@
+"""Lane LR-D in the browser: lease requests, force release and leaving the queue
+(docs/LEASE_REQUESTS.md "UI"), over the T14 mock (tests/fakes/t14_lease_requests.py).
+
+Three people use it: the requester (Request board, the waiting bar, Leave queue, Force),
+the holder (the prompt, from any section) and the victim (the banner). The mock's fake
+clock (``advance``) stands in for the two minutes; no test sleeps them. Each behaviour has
+its negative twin. Nothing here reaches a hub.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+
+import pytest
+
+from harness_manager.demo import BOARD_USB
+
+sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
+expect = sync_api.expect
+
+pytestmark = [pytest.mark.browser, pytest.mark.week_plan("hub_api", sim=True)]
+T = 10_000
+APP = {"width": 1440, "height": 900}
+HOLDER = "alice@lab-pc-07"
+TARGET = "mps3_01_pl"
+
+
+# --- helpers (test_lrd_screenshots.py uses them too) --------------------------------------------
+
+
+def open_board(page, board_id=BOARD_USB):
+    page.locator(f'.board-item[data-board="{board_id}"]').click()
+    page.locator('[data-action="open"]').click()
+    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+
+
+def section(page, key):
+    page.locator(f'[data-section="{key}"]').click()
+    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+
+
+def reqs(daemon):
+    return daemon.app.state.sim.requests
+
+
+def wait_until(fn, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if fn():
+            return True
+        time.sleep(0.05)
+    return fn()
+
+
+def send_request(page, message="need it for the 15:00 demo"):
+    page.locator('[data-testid="fact-hub"] [data-action="lease_request_open"]').click()
+    form = page.locator('[data-testid="lease-request-form"]')
+    expect(form).to_be_visible()
+    if message:
+        form.locator("textarea").fill(message)
+    form.locator('[data-action="lease_request"]').click()
+    expect(form).to_have_count(0)
+    bar = page.locator('[data-testid="lease-request"]')
+    expect(bar.locator('[data-testid="req-asked"]')).to_be_visible(timeout=T)
+    return bar
+
+
+def requester(page_factory, daemon, scheme="light", **kw):
+    """A board leased to alice; this page asks for it."""
+    daemon.app.state.sim.behind_hub(BOARD_USB, lease="other")
+    page = page_factory(scheme, **APP)
+    open_board(page)
+    return page, send_request(page, **kw)
+
+
+def force_button(page):
+    return page.locator('[data-testid="lease-request"] [data-action="lease_force_open"]')
+
+
+# --- the requester -------------------------------------------------------------------------------
+
+
+def test_request_board_replaces_queue_for_it_and_its_form_can_be_cancelled(page_factory, daemon):
+    daemon.app.state.sim.behind_hub(BOARD_USB, lease="other")
+    page = page_factory(**APP)
+    open_board(page)
+    hub = page.locator('[data-testid="fact-hub"]')
+    expect(hub.locator('[data-action="lease_request_open"]')).to_have_text("Request board")
+    assert hub.locator('[data-action="lease_acquire"]').count() == 0     # no "Queue for it"
+    expect(page.locator('[data-attention="lease"]')).to_contain_text("Fix: request it")
+    # the twin: Cancel (and Escape) send nothing, and focus goes back to the button
+    hub.locator('[data-action="lease_request_open"]').click()
+    expect(page.locator("#lease-message")).to_be_focused()
+    page.locator('[data-action="lease_request_cancel"]').click()
+    expect(page.locator('[data-testid="lease-request-form"]')).to_have_count(0)
+    expect(hub.locator('[data-action="lease_request_open"]')).to_be_focused()
+    hub.locator('[data-action="lease_request_open"]').click()
+    page.keyboard.press("Escape")
+    expect(page.locator('[data-testid="lease-request-form"]')).to_have_count(0)
+    assert reqs(daemon).outgoing == {}
+    assert page.locator('[data-testid="lease-request"]').count() == 0
+
+
+def test_a_request_shows_position_asked_countdown_and_its_command(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    expect(bar.locator('[data-testid="req-position"]')).to_have_text("position 1 in the queue")
+    expect(bar.locator('[data-testid="req-asked"]')).to_contain_text("the holder has been asked")
+    clock = bar.locator('[data-testid="req-countdown"]')
+    expect(clock).to_contain_text(re.compile(r"[12]:[0-5]\d"))
+    first = int(clock.get_attribute("data-left"))
+    assert 110 <= first <= 120
+    expect(clock).not_to_have_attribute("data-left", str(first), timeout=3000)   # it runs
+    expect(bar).to_contain_text("“need it for the 15:00 demo”")
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text(
+        f"$ lease request {TARGET} --message 'need it for the 15:00 demo'  (running")
+    expect(page.locator('[data-testid="lease-requested"]')).to_contain_text("requested · position 1")
+    note = reqs(daemon).outgoing[BOARD_USB]
+    assert note["message"] == "need it for the 15:00 demo"
+    # the twin: before the deadline Force is offered but disarmed, with the live reason
+    expect(force_button(page)).to_have_attribute("aria-disabled", "true")
+    expect(bar.locator('[data-testid="reason-lease_force"]')).to_contain_text(f"if {HOLDER} has not answered")
+
+
+def test_the_countdown_reaching_zero_enables_force_without_the_event(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    r = reqs(daemon)
+    r.announce_force = False               # only the page's own read at 0:00 can find it
+    expect(force_button(page)).to_have_attribute("aria-disabled", "true")
+    r.advance(BOARD_USB, 117)              # the fake clock: 0:03 left
+    clock = bar.locator('[data-testid="req-countdown"]')
+    expect(clock).to_have_attribute("data-left", re.compile(r"^[0-3]$"), timeout=T)
+    expect(clock).to_have_attribute("data-left", "0", timeout=T)
+    expect(clock).to_contain_text("0:00")
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=T)
+    expect(bar.locator('[data-testid="reason-lease_force"]')).to_have_count(0)
+    expect(bar).to_have_class(re.compile(r"\bdue\b"))
+
+
+def test_a_disarmed_force_says_why_and_runs_nothing(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    force_button(page).click(force=True)                                  # aria-disabled
+    expect(page.locator('[data-testid="force-confirm"]')).to_have_count(0)      # no confirm
+    expect(bar.locator('[data-testid="result-lease_force"]')).to_contain_text("Nothing was run.")
+    expect(bar.locator('[data-testid="result-lease_force"]')).to_contain_text("(not run)")
+    assert reqs(daemon).revokes == []
+
+
+def test_force_confirm_is_red_names_the_holder_and_cancel_runs_nothing(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    reqs(daemon).advance(BOARD_USB, 121)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=T)
+    expect(force_button(page)).to_have_text("Force release…")
+    force_button(page).click()
+    modal = page.locator('[data-testid="force-confirm"]')
+    expect(modal).to_be_visible()
+    assert modal.get_attribute("role") == "alertdialog"
+    expect(modal).to_have_class(re.compile(r"\bdanger\b"))
+    expect(modal.locator('[data-testid="force-what"]')).to_have_text(
+        f"This kicks {HOLDER} off {TARGET} now; anything they are running is interrupted.")
+    expect(modal.locator('[data-action="force_cancel"]')).to_be_focused()   # the safe default
+    modal.locator('[data-action="force_cancel"]').click()
+    expect(modal).to_have_count(0)
+    expect(force_button(page)).to_be_focused()
+    force_button(page).click()
+    page.keyboard.press("Escape")
+    expect(modal).to_have_count(0)
+    assert reqs(daemon).revokes == []
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text(f"leased to {HOLDER}")
+
+
+def test_force_revokes_and_the_board_is_ours(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    reqs(daemon).advance(BOARD_USB, 121)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=T)
+    force_button(page).click()
+    page.locator('[data-testid="force-confirm"] [data-action="force_confirm"]').click()
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours", timeout=T)
+    result = bar.locator('[data-testid="result-lease_force"]')
+    expect(result).to_contain_text(f"$ lease force {TARGET} --yes  (rc 0")
+    expect(result).to_contain_text(f"{HOLDER} was force-released")
+    expect(bar.locator('[data-testid="req-title"]')).to_have_text(f"{TARGET} is yours.")
+    (revoke,) = reqs(daemon).revokes
+    assert revoke["prior_holder"] == HOLDER and "no answer to a request made at" in revoke["reason"]
+    bar.locator('[data-action="lease_request_dismiss"]').click()
+    expect(page.locator('[data-testid="lease-request"]')).to_have_count(0)
+
+
+def test_force_refused_by_the_daemon_shows_its_reason(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    r = reqs(daemon)
+    r.advance(BOARD_USB, 121)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=T)
+    r.refuse_force = "force is not available: carol@lab-pc-09 is ahead of you in the queue"
+    force_button(page).click()
+    page.locator('[data-testid="force-confirm"] [data-action="force_confirm"]').click()
+    result = bar.locator('[data-testid="result-lease_force"]')
+    expect(result).to_contain_text("(rc 15", timeout=T)
+    expect(result).to_contain_text("REFUSED")
+    expect(result).to_contain_text("carol@lab-pc-09 is ahead of you in the queue")
+    assert r.revokes == []
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text(f"leased to {HOLDER}")
+
+
+def test_not_at_the_head_force_stays_disarmed_with_the_daemons_reason(page_factory, daemon):
+    daemon.app.state.sim.behind_hub(BOARD_USB, lease="other")
+    reqs(daemon).queue_ahead(BOARD_USB, "carol@lab-pc-09")
+    page = page_factory(**APP)
+    open_board(page)
+    bar = send_request(page)
+    expect(bar.locator('[data-testid="req-position"]')).to_have_text("position 2 in the queue")
+    reqs(daemon).advance(BOARD_USB, 121)
+    expect(bar.locator('[data-testid="req-countdown"]')).to_contain_text("0:00", timeout=T)
+    expect(bar.locator('[data-testid="reason-lease_force"]')).to_contain_text(
+        "carol@lab-pc-09 would get the board", timeout=T)
+    expect(force_button(page)).to_have_attribute("aria-disabled", "true")
+
+
+def test_a_keep_answer_shows_its_message_and_the_minutes_left(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    assert bar.locator('[data-testid="req-answer"]').count() == 0              # the twin
+    reqs(daemon).answer(BOARD_USB, "keep", minutes=15, message="finishing a run")
+    answer = bar.locator('[data-testid="req-answer"]')
+    expect(answer).to_contain_text(f"{HOLDER} is keeping it for 15 min", timeout=T)
+    expect(answer).to_contain_text("“finishing a run”")
+    expect(answer.locator('[data-testid="req-keep-left"]')).to_contain_text(re.compile(r"1[45] min left \(until \d\d:\d\d:\d\d\)"))
+    assert bar.locator('[data-testid="req-countdown"]').count() == 0          # answered: no 2:00
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text("the holder answered: keep for 15 min")
+    # kept: even past the 2:00, Force is not offered until the 15 min run out
+    reqs(daemon).advance(BOARD_USB, 125)
+    page.locator('[data-action="refresh-board"]').click()
+    expect(bar.locator('[data-testid="reason-lease_force"]')).to_contain_text("keep for 15 min", timeout=T)
+    expect(force_button(page)).to_have_attribute("aria-disabled", "true")
+    reqs(daemon).advance(BOARD_USB, 15 * 60)
+    expect(answer.locator('[data-testid="req-keep-left"]')).to_contain_text("their 15 min ran out", timeout=T)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=T)
+
+
+def test_a_release_answer_gives_us_the_board(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    reqs(daemon).answer(BOARD_USB, "release")
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours", timeout=T)
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text(f"lease held on {TARGET}")
+    assert reqs(daemon).revokes == []                                           # nothing forced
+
+
+def test_leave_queue_withdraws_the_request_and_frees_the_board(page_factory, daemon, engine):
+    page, bar = requester(page_factory, daemon)
+    tile = page.locator('[data-testid="tile-board"]')
+    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("your request is queued")
+    bar.locator('[data-action="lease_leave"]').click()
+    expect(bar.locator('[data-testid="result-lease_leave"]')).to_contain_text(
+        f"$ lease leave {TARGET}  (rc 0", timeout=T)
+    expect(bar.locator('[data-testid="result-lease_leave"]')).to_contain_text("you left the queue")
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text("the request is withdrawn", timeout=T)
+    expect(bar.locator('[data-testid="result-lease_req"]')).not_to_contain_text("ACTION_FAILED")
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text(f"leased to {HOLDER}")
+    expect(page.locator('[data-testid="fact-hub"] [data-action="lease_request_open"]')).to_be_visible(timeout=T)
+    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("not armed", timeout=T)
+    assert reqs(daemon).outgoing == {}
+    assert not engine.called("resets.reset")
+
+
+# --- the holder --------------------------------------------------------------------------------
+
+
+def holder_page(page_factory, daemon, scheme="light", where="consoles"):
+    daemon.app.state.sim.behind_hub(BOARD_USB, lease="mine")
+    page = page_factory(scheme, **APP)
+    open_board(page)
+    section(page, where)
+    return page
+
+
+def test_the_holder_prompt_appears_from_a_non_overview_section(page_factory, daemon):
+    page = holder_page(page_factory, daemon, where="power")
+    assert page.locator('[data-testid="lease-wanted"]').count() == 0          # the twin
+    rid = reqs(daemon).incoming(BOARD_USB, by="bob@lab-pc-02", message="demo at 3")
+    prompt = page.locator(f'[data-testid="lease-wanted"][data-request="{rid}"]')
+    expect(prompt).to_be_visible(timeout=T)
+    expect(page.locator('[data-testid="section-power"]')).to_be_visible()     # still on Power
+    expect(prompt.locator('[data-testid="wanted-title"]')).to_have_text(f"bob@lab-pc-02 wants {TARGET}: “demo at 3”")
+    expect(prompt.locator('[data-testid="wanted-countdown"]')).to_contain_text(re.compile(r"[12]:[0-5]\d"))
+    for m in (5, 15, 30, 60):
+        expect(prompt.locator(f'[data-action="respond_keep_{m}"]')).to_have_text(f"{m} min")
+    # and from the Activity section too
+    section(page, "activity")
+    expect(prompt).to_be_visible()
+
+
+def test_the_holder_keeps_it_with_a_message_and_sees_what_they_answered(page_factory, daemon):
+    page = holder_page(page_factory, daemon)
+    rid = reqs(daemon).incoming(BOARD_USB, by="bob@lab-pc-02", message="demo at 3")
+    prompt = page.locator('[data-testid="lease-wanted"]')
+    expect(prompt).to_be_visible(timeout=T)
+    prompt.locator('[data-testid="wanted-message"]').fill("ten more minutes")
+    prompt.locator('[data-action="respond_keep_15"]').click()
+    answered = page.locator(f'[data-testid="lease-answered"][data-request="{rid}"]')
+    expect(answered).to_contain_text("You answered bob@lab-pc-02: keep mps3_01_pl for 15 min", timeout=T)
+    expect(answered).to_contain_text("“ten more minutes”")
+    expect(answered).to_contain_text(re.compile(r"They may force-release it after \d\d:\d\d:\d\d"))
+    expect(answered).to_contain_text(f"$ lease respond {TARGET} {rid} --keep 15 --message 'ten more minutes'  (rc 0")
+    expect(prompt).to_have_count(0)
+    assert reqs(daemon).answers[BOARD_USB][rid] == {
+        "answer": "keep", "minutes": 15, "message": "ten more minutes",
+        "at": reqs(daemon).answers[BOARD_USB][rid]["at"]}
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours")   # kept
+    # a reload still knows it was answered: no second prompt for the same request
+    page.reload()
+    page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    expect(page.locator('[data-testid="lease-answered"]')).to_be_visible(timeout=T)
+    assert page.locator('[data-testid="lease-wanted"]').count() == 0
+
+
+def test_the_holder_releases_now_and_the_board_goes_to_the_requester(page_factory, daemon):
+    page = holder_page(page_factory, daemon)
+    rid = reqs(daemon).incoming(BOARD_USB, by="bob@lab-pc-02", message="")
+    prompt = page.locator('[data-testid="lease-wanted"]')
+    expect(prompt.locator('[data-testid="wanted-title"]')).to_contain_text("(no message)", timeout=T)
+    prompt.locator('[data-action="respond_release"]').click()
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to bob@lab-pc-02", timeout=T)
+    answered = page.locator(f'[data-testid="lease-answered"][data-request="{rid}"]')
+    expect(answered).to_contain_text(f"You released {TARGET} to bob@lab-pc-02")
+    expect(prompt).to_have_count(0)
+    answered.locator('[data-action="lease_answer_dismiss"]').click()
+    expect(answered).to_have_count(0)
+    assert reqs(daemon).answers[BOARD_USB][rid]["answer"] == "release"
+
+
+def test_a_malformed_answer_is_never_sent_keep_needs_one_of_the_four_durations(page_factory, daemon):
+    # The page offers exactly 5 / 15 / 30 / 60: nothing else can be clicked.
+    page = holder_page(page_factory, daemon)
+    reqs(daemon).incoming(BOARD_USB)
+    prompt = page.locator('[data-testid="lease-wanted"]')
+    expect(prompt).to_be_visible(timeout=T)
+    keeps = prompt.locator('[data-action^="respond_keep_"]')
+    assert [keeps.nth(i).get_attribute("data-action") for i in range(keeps.count())] == [
+        "respond_keep_5", "respond_keep_15", "respond_keep_30", "respond_keep_60"]
+
+
+# --- the victim ------------------------------------------------------------------------------------
+
+
+def test_the_victim_banner_persists_across_a_reload_until_dismissed(page_factory, daemon):
+    page = holder_page(page_factory, daemon, where="program")
+    assert page.locator('[data-testid="lease-taken"]').count() == 0            # the twin
+    t = reqs(daemon).taken(BOARD_USB, by="bob@lab-pc-02")
+    banner = page.locator('[data-testid="lease-taken"]')
+    expect(banner).to_contain_text(re.compile(
+        rf"{TARGET} was force-released by bob@lab-pc-02 at \d\d:\d\d:\d\d: force-released by bob@lab-pc-02 via Harness Manager"), timeout=T)
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to bob@lab-pc-02", timeout=T)
+    section(page, "activity")
+    row = page.locator('[data-testid="activity-table"] tr[data-level="error"]', has_text="was force-released by bob@lab-pc-02")
+    expect(row).to_have_count(1)
+    page.reload()
+    page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    expect(banner).to_be_visible(timeout=T)                                    # still there
+    expect(banner).to_contain_text(t["reason"])
+    banner.locator('[data-action="lease_taken_dismiss"]').click()
+    expect(banner).to_have_count(0)
+    page.reload()
+    page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    page.wait_for_timeout(600)
+    expect(banner).to_have_count(0)                                            # dismissed stays
+    # a new force release is a new banner
+    daemon.app.state.sim.behind_hub(BOARD_USB, lease="mine")
+    time.sleep(1.1)                                                            # a new `at`
+    reqs(daemon).taken(BOARD_USB, by="carol@lab-pc-09")
+    expect(banner).to_contain_text("force-released by carol@lab-pc-09", timeout=T)

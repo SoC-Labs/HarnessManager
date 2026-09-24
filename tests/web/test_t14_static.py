@@ -17,6 +17,7 @@ from tests.fakes.t14_api_contract import (
     STATIC,
     api_md_endpoints,
     daemon_routes,
+    frozen_endpoints,
     normalise,
     parse_api_md,
     parse_ui_endpoints,
@@ -268,7 +269,8 @@ def test_web_package_exposes_the_static_dir():
 
 
 def test_every_endpoint_the_ui_calls_is_in_api_md():
-    defined = api_md_endpoints()
+    # API.md, plus the four routes docs/LEASE_REQUESTS.md (frozen) adds for lane LR-D.
+    defined = frozen_endpoints()
     called = {n: ep for n, ep in ui_endpoints().items() if n not in ui_additive()}
     assert len(called) >= 20
     assert {name: ep for name, ep in called.items() if ep not in defined} == {}

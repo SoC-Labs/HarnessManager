@@ -20,6 +20,7 @@ import {
   ActionRow, ArmBox, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner,
 } from "../ui.js";
 import { leaseSpecs } from "../hub.js";
+import { openRequestForm, requestActive } from "../lease.js";
 
 // --- needs attention ----------------------------------------------------------------------
 
@@ -85,9 +86,12 @@ export function attentionItems(bid) {
         text: "Another hub user can take this board at any time. Fix: acquire the lease.",
         action: specs.acquire });
     } else if (!lease.mine) {
+      const asked = requestActive(bid);
       out.push({ key: "lease", level: "err", title: `Leased to ${lease.holder || "someone else"} on ${hub.host}.`,
-        text: `This client must not drive the board until the lease is yours${left !== null ? ` (theirs ends in ${durationText(left)})` : ""}. Fix: queue for it.`,
-        action: specs.acquire });
+        text: `This client must not drive the board until the lease is yours${left !== null ? ` (theirs ends in ${durationText(left)})` : ""}. ${asked
+          ? "You have asked for it: the request is above."
+          : "Fix: request it. The holder is asked; with no answer in 2 minutes you may force-release it."}`,
+        fix: asked ? null : { label: "Request board", action: "lease_request_open", run: (e) => openRequestForm(bid, e && e.currentTarget) } });
     } else if (left !== null && left < 300) {
       out.push({ key: "lease", level: "warn", title: `Your lease ends in ${durationText(left)}.`,
         text: "The daemon renews it while the board is open; if this stays, the hub is not answering. Fix: renew it.",
@@ -114,7 +118,7 @@ function AttentionStrip({ bid }) {
     <ul>${items.map((it) => html`<li key=${it.key} class=${`att ${it.level}`} data-attention=${it.key}>
       <${Icon} name=${ATTENTION_ICONS[it.level] || "triangle-alert"} />
       <span class="att-text"><strong>${it.title}</strong>${" "}${it.text}</span>
-      ${it.fix ? html`<button type="button" class="btn sm" onClick=${it.fix.run}>${it.fix.label}</button>` : null}
+      ${it.fix ? html`<button type="button" class="btn sm" data-action=${it.fix.action || undefined} onClick=${it.fix.run}>${it.fix.label}</button>` : null}
       ${it.action ? html`<${ActionRow} bid=${bid} panel="lease" spec=${it.action} compact=${true} gate=${{}} />` : null}
     </li>`)}</ul>
     ${pl.lines && pl.lines.length ? html`<${ResultBlock} lines=${pl.lines} panel=${pl} testid="lease-result" />` : null}

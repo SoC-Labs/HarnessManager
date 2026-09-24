@@ -144,6 +144,7 @@ class WeekPlanSim:
         self.previous: dict[str, dict[str, Any]] = {}
         self.app_version = "0.0.1"
         self.app_current = "0.1.0"
+        self.requests: Any = None            # t14_lease_requests.LeaseRequestSim (the mock sets it)
 
     # -- helpers -------------------------------------------------------------------------
 
@@ -510,9 +511,11 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
     def lease_get(bid: str) -> dict[str, Any]:
         state.session(bid)
         hub = sim.hubs.get(bid)
+        # docs/LEASE_REQUESTS.md adds queue, request, incoming and taken.
+        more = sim.requests.view(bid) if sim.requests is not None else {}
         if hub is None:
-            return ok(lease=None, hub=None)
-        return ok(lease=dict(hub["lease"]) if hub["lease"] else None, hub=hub["host"])
+            return ok(lease=None, hub=None, **more)
+        return ok(lease=dict(hub["lease"]) if hub["lease"] else None, hub=hub["host"], **more)
 
     @app.post(f"{API}/boards/{{bid}}/lease", status_code=202)
     def lease_take(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008

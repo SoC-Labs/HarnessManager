@@ -1,7 +1,10 @@
 // A board behind a hub (lane L1): the SSH tunnel's state and the lease, as chips in the
 // header, with acquire and release. Nothing shows for a board that is not behind a hub.
+// Someone else's lease offers "Request board" (lane LR-D, lease.js): the holder is asked,
+// and the request's own bar (queue position, countdown, Leave queue, Force) sits above.
 
 import { runJob } from "./actions.js";
+import { openRequestForm, requestActive } from "./lease.js";
 import { call } from "./api.js";
 import { clock } from "./format.js";
 import { html } from "./lib.js";
@@ -15,10 +18,10 @@ import { ActionRow, Chip, Icon } from "./ui.js";
 export function leaseSpecs(bid) {
   const hub = week(bid).hub;
   const lease = hub && hub.lease;
-  const label = !lease ? "Acquire lease" : lease.mine ? "Renew" : "Queue for it";
+  const label = !lease ? "Acquire lease" : "Renew";
   return {
     acquire: {
-      key: "lease_acquire", label, busyLabel: lease && !lease.mine ? "Queued..." : "Leasing...",
+      key: "lease_acquire", label, busyLabel: "Leasing...",
       budgetS: 600, command: `lease acquire${hub ? ` ${hub.host}` : ""}`,
       run: (ctx) => runJob("leaseTake", { bid }, {}, (d) => ctx.progress(
         d.phase === "queued" ? `queued${d.done ? ` (position ${d.done})` : ""}` : d.phase || "waiting", d.phase), "lease"),
@@ -70,6 +73,8 @@ export function HubFact({ bid }) {
   const specs = leaseSpecs(bid);
   const job = boardState(bid).job;
   const acquiring = !!(job && job.kind === "lease");        // it may be queued: offer Cancel
+  const requesting = requestActive(bid);
+  const req = hub.request;
   let leaseChip;
   if (!lease) {
     leaseChip = html`<${Chip} level="warn" icon="lock-open" testid="lease-chip" title=${`${hub.host}: nobody holds this board's lease`}>no lease<//>`;
@@ -88,12 +93,21 @@ export function HubFact({ bid }) {
       ${t ? html`<${Chip} level=${TUNNEL_LEVEL[t.state] || "unk"} icon=${t.state === "up" ? "cable" : "unplug"} testid="tunnel-chip"
         title=${tunnelTitle(t, hub)}>tunnel ${t.state}<//>` : null}
       ${leaseChip}
-      ${w.leaseQueued ? html`<span class="muted small" data-testid="lease-queued"><${Icon} name="clock" cls="sm" /> queued</span>` : null}
+      ${requesting ? html`<span class="muted small" data-testid="lease-requested"><${Icon} name="send" cls="sm" /> requested${req && req.position ? ` · position ${req.position}` : ""}</span>`
+        : w.leaseQueued ? html`<span class="muted small" data-testid="lease-queued"><${Icon} name="clock" cls="sm" /> queued</span>` : null}
       ${lease && lease.mine && !acquiring
         ? html`<${ActionRow} bid=${bid} panel="lease" spec=${specs.release} variant="ghost" compact=${true} showReason=${false} gate=${{}} />`
+        : lease && !lease.mine ? (requesting ? null : html`<${RequestButton} bid=${bid} />`)
         : html`<${ActionRow} bid=${bid} panel="lease" spec=${specs.acquire} compact=${true} showReason=${false} gate=${{}} />`}
       ${acquiring ? html`<${ActionRow} bid=${bid} panel="lease_cancel" spec=${specs.cancel} variant="ghost" compact=${true}
         showReason=${false} gate=${{ whileJob: true }} />` : null}
     </span>
   </div>`;
+}
+
+// "Request board": opens the small form (lease.js) that asks the holder to give it up.
+export function RequestButton({ bid, compact = true }) {
+  return html`<button type="button" class=${`btn ${compact ? "sm" : ""}`} data-action="lease_request_open"
+    aria-haspopup="dialog" title="Join the queue and ask the holder to give the board up"
+    onClick=${(e) => openRequestForm(bid, e.currentTarget)}><${Icon} name="send" /> Request board</button>`;
 }

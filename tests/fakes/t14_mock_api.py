@@ -57,6 +57,8 @@ from harness_manager.core.session import LockOwner
 
 from .l3_week_plan import EXTENSION_ROUTES, SimClocks, WeekPlanSim
 from .l3_week_plan import register as register_week_plan
+from .t14_lease_requests import LEASE_REQUEST_ROUTES, LeaseRequestSim
+from .t14_lease_requests import register as register_lease_requests
 
 API = "/api/v1"
 VERSION = "0.0.1-t14-mock"
@@ -98,7 +100,8 @@ OPEN_POINTS: dict[str, str] = {
 ADDITIVE_ROUTES: tuple[tuple[str, str], ...] = ()
 
 #: The route table: (method, path template). Kept literal so a test can diff it with API.md.
-#: The week-plan additions (tests/fakes/l3_week_plan.py) join it below.
+#: The week-plan additions (tests/fakes/l3_week_plan.py) and the lease requests
+#: (docs/LEASE_REQUESTS.md; tests/fakes/t14_lease_requests.py) join it below.
 ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/health"),
     ("GET", "/packs"),
@@ -138,7 +141,8 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/boards/{bid}/session"),
     ("POST", "/daemon/shutdown"),
     ("WS", "/events"),
-) + tuple(r for routes in EXTENSION_ROUTES.values() for r in routes) + ADDITIVE_ROUTES
+) + tuple(r for routes in EXTENSION_ROUTES.values() for r in routes) + LEASE_REQUEST_ROUTES \
+    + ADDITIVE_ROUTES
 
 
 # --- jobs --------------------------------------------------------------------------------
@@ -209,11 +213,15 @@ class Jobs:
             raise err
 
     def start(self, board_id: str, kind: str,
-              work: Callable[[Callable[[str, int, int], None]], Any]) -> Job:
+              work: Callable[[Callable[[str, int, int], None]], Any],
+              beside: tuple[str, ...] = ()) -> Job:
+        """``beside``: job kinds this one may run next to on the same board (a force release
+        runs beside its own queued lease request, which the revoke promotes)."""
         job = Job(id=f"j{next(self._ids)}-{uuid.uuid4().hex[:6]}", board_id=board_id, kind=kind)
         with self._lock:
             for other in self._jobs.values():
-                if other.board_id == board_id and other.state == "running":
+                if other.board_id == board_id and other.state == "running" \
+                        and other.kind not in beside:
                     raise HeldError(f"{board_id} is busy: {other.describe()} is running",
                                     holder=f"harness-manager-daemon {other.describe()}")
             self._jobs[job.id] = job
@@ -371,6 +379,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # T10's XDC routes (docs/API.md "XDC export"): the real xdc service, the mock's boards.
     from .t10_mock_xdc import register as register_xdc
     register_xdc(app, state, _ok)
+    # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
+    sim.requests = LeaseRequestSim(sim)
+    register_lease_requests(app, state, sim.requests, _ok, _accepted)
 
     async def ws_deny(ws: WebSocket, exc: HarnessError) -> None:
         """harness-manager-daemon's refusal: an HTTP denial with the envelope, else close 4000 + code."""

@@ -45,6 +45,11 @@ export const ENDPOINTS = Object.freeze({
   lease: ["GET", "/boards/{bid}/lease"],
   leaseTake: ["POST", "/boards/{bid}/lease"],
   leaseRelease: ["DELETE", "/boards/{bid}/lease"],
+  // Lease requests, force release, leaving the queue (docs/LEASE_REQUESTS.md, frozen; LR-C).
+  leaseRequest: ["POST", "/boards/{bid}/lease/request"],
+  leaseRespond: ["POST", "/boards/{bid}/lease/respond"],
+  leaseForce: ["POST", "/boards/{bid}/lease/force"],
+  leaseLeave: ["DELETE", "/boards/{bid}/lease/queue"],
   power: ["GET", "/boards/{bid}/power"],
   powerCycle: ["POST", "/boards/{bid}/power/cycle"],
   updateCheck: ["POST", "/update/check"],

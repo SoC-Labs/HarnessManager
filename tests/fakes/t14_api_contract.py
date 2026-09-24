@@ -14,6 +14,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 API_MD = REPO / "docs" / "API.md"
+#: The frozen lease-requests design (lanes LR-A..D): its "API" table adds routes to hub_api.
+LEASE_REQUESTS_MD = REPO / "docs" / "LEASE_REQUESTS.md"
 STATIC = REPO / "src" / "harness_manager" / "web" / "static"
 API_JS = STATIC / "js" / "api.js"
 
@@ -107,6 +109,28 @@ def api_md_sections() -> dict[str, set[tuple[str, str]]]:
 
 def api_md_endpoints() -> set[tuple[str, str]]:
     return parse_api_md(API_MD.read_text(encoding="utf-8"))
+
+
+def parse_lease_requests_md(text: str) -> set[tuple[str, str]]:
+    """The routes of the "## API" table of docs/LEASE_REQUESTS.md (the four it adds)."""
+    out: set[tuple[str, str]] = set()
+    in_api = False
+    for line in text.splitlines():
+        if line.startswith("## "):
+            in_api = line.startswith("## API")
+        elif in_api and line.startswith("| `"):
+            out.update(_row_routes(line))
+    return out
+
+
+def lease_requests_md_endpoints() -> set[tuple[str, str]]:
+    return parse_lease_requests_md(LEASE_REQUESTS_MD.read_text(encoding="utf-8"))
+
+
+def frozen_endpoints() -> set[tuple[str, str]]:
+    """Every route the frozen docs define: API.md plus LEASE_REQUESTS.md (until the lead folds
+    the latter into API.md; the union holds either way)."""
+    return api_md_endpoints() | lease_requests_md_endpoints()
 
 
 _ENTRY = re.compile(r'^\s*(\w+):\s*\[\s*"([A-Z]+)"\s*,\s*"([^"]+)"\s*\]', re.M)

@@ -113,6 +113,7 @@ export function restoreSelection() {
 const JOB_LABELS = {
   deploy: "deploy", restore: "restore", debug_up: "debug session start", reboot: "board reboot",
   sd_backup: "SD backup", sd_install: "SD install", sd_restore: "SD restore", lease: "hub lease",
+  lease_request: "lease request", lease_force: "force release",
   power_cycle: "power cycle", update_check: "update check", update_harness: "harness update",
   update_rollback: "harness rollback", update_app: "app update",
   update_app_rollback: "app rollback",

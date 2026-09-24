@@ -18,6 +18,7 @@ import { ProgramSection } from "./sections/program.js";
 import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
 import { HubFact } from "./hub.js";
+import { LeaseBanners } from "./lease.js";
 import {
   boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, S,
   sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
@@ -405,12 +406,14 @@ function Workspace() {
   }
   const row = S.boards[bid];
   if (!row.open) {
-    return html`<main class="workspace"><${Banners} bid=${null} /><${BoardPreview} key=${bid} bid=${bid} /></main>`;
+    return html`<main class="workspace"><${Banners} bid=${null} /><${LeaseBanners} bid=${null} />
+      <${BoardPreview} key=${bid} bid=${bid} /></main>`;
   }
   const section = SECTIONS.find((s) => s.key === sectionOf(bid)) || SECTIONS[0];
   const Section = section.render;
   return html`<main class="workspace" data-board=${bid}>
     <${Banners} bid=${bid} />
+    <${LeaseBanners} bid=${bid} />
     <${BoardHeader} bid=${bid} />
     <div class=${`section-body ${section.fill ? "fill" : ""}`} role="tabpanel"
       data-testid=${`section-${section.key}`} aria-label=${section.label}>

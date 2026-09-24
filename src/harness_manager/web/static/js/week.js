@@ -130,11 +130,24 @@ export async function loadHub(bid) {
   if ((!lease || !lease.hub) && !tunnel) {
     w.hub = null;                // not behind a hub
   } else {
-    w.hub = { host: (lease && lease.hub) || (tunnel && tunnel.host) || "",
-      lease: lease ? lease.lease : null, tunnel };
+    // docs/LEASE_REQUESTS.md adds queue, request (mine, outgoing), incoming (for my lease)
+    // and taken (the last force release of my lease); an older daemon has none of them.
+    const d = lease || {};
+    w.hub = { host: d.hub || (tunnel && tunnel.host) || "", lease: lease ? d.lease : null, tunnel,
+      queue: Array.isArray(d.queue) ? d.queue : [], request: d.request || null,
+      incoming: Array.isArray(d.incoming) ? d.incoming : [], taken: d.taken || null,
+      board: d.board || "" };
+  }
+  w.hubAt = Date.now();
+  for (const fn of hubHooks) {
+    try { fn(bid, w.hub); } catch (e) { /* a hook never breaks the read */ }
   }
   changed();
 }
+
+// lease.js follows every read of the lease (the victim banner, the countdowns).
+const hubHooks = [];
+export function onHubLoaded(fn) { hubHooks.push(fn); }
 
 // expires_at: fpgahub's ISO 8601 ("2026-09-25T12:00:00+00:00"), or epoch seconds.
 export function epochOf(v) {
@@ -190,7 +203,7 @@ export async function loadOsc(bid) {
 // --- events and hooks ------------------------------------------------------------------------
 
 const hubTimers = {};
-function scheduleHub(bid, ms = 200) {
+export function scheduleHub(bid, ms = 200) {
   clearTimeout(hubTimers[bid]);
   hubTimers[bid] = setTimeout(() => loadHub(bid), ms);
 }
@@ -248,7 +261,7 @@ onBoardOpened((bid) => {
 
 onJobEnded((bid, kind) => {
   if (kind === "power_cycle") { loadPower(bid); scheduleRefresh(bid, 100); }
-  if (kind === "lease") loadHub(bid);
+  if (kind === "lease" || kind.startsWith("lease_")) loadHub(bid);
   if (kind === "update_harness" || kind === "update_rollback") scheduleRefresh(bid, 100);
 });
 

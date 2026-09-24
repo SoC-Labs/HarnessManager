@@ -23,9 +23,13 @@ from tests.fakes.t14_api_contract import (
     api_md_sections,
     app_routes,
     daemon_routes,
+    frozen_endpoints,
+    lease_requests_md_endpoints,
     normalise,
+    parse_lease_requests_md,
     ui_endpoints,
 )
+from tests.fakes.t14_lease_requests import LEASE_REQUEST_ROUTES
 from tests.fakes.t14_mock_api import ADDITIVE_ROUTES, HTTP_STATUS, ROUTES, create_app
 
 with warnings.catch_warnings():
@@ -73,11 +77,23 @@ def wait_job(client, job_id, timeout=10.0):
 # --- the route table -------------------------------------------------------------------------
 
 
-def test_the_mock_route_table_is_api_md_plus_any_additive_routes():
+def test_the_mock_route_table_is_api_md_plus_lease_requests_md_plus_any_additive_routes():
     mock = {(m, normalise(p)) for m, p in ROUTES}
     additive = {(m, normalise(p)) for m, p in ADDITIVE_ROUTES}
-    assert mock - additive == api_md_endpoints()
-    assert not additive & api_md_endpoints()
+    assert mock - additive == frozen_endpoints()
+    assert not additive & frozen_endpoints()
+
+
+def test_the_mock_serves_exactly_the_four_routes_lease_requests_md_adds():
+    four = {(m, normalise(p)) for m, p in LEASE_REQUEST_ROUTES}
+    assert four == lease_requests_md_endpoints()
+    assert len(four) == 4
+    # the twin: a fifth route in the doc's API table would not match
+    extra = "## API\n| `POST /boards/{bid}/lease/steal` | `{}` | 202 |\n"
+    assert parse_lease_requests_md(extra) - four == {("POST", "/boards/{}/lease/steal")}
+    # and a CLI row or an event row is not a route
+    assert parse_lease_requests_md("## API\n| `lease.wanted` | `{id}` | holder |\n"
+                                   "## CLI\n| `POST /x` | y |\n") == set()
 
 
 def landed_extensions() -> set[str]:
@@ -91,8 +107,16 @@ def landed_extensions() -> set[str]:
 def test_the_mock_serves_each_extension_modules_routes_as_api_md_assigns_them():
     sections = api_md_sections()
     assert set(sections) == {"core", *EXTENSION_ROUTES}
+    # LEASE_REQUESTS.md's routes belong to hub_api; they count on both sides, so this holds
+    # before and after the lead folds them into API.md.
+    four = lease_requests_md_endpoints()
     for module, routes in EXTENSION_ROUTES.items():
-        assert {(m, normalise(p)) for m, p in routes} == sections[module], module
+        mock = {(m, normalise(p)) for m, p in routes}
+        doc = set(sections[module])
+        if module == "hub_api":
+            mock |= {(m, normalise(p)) for m, p in LEASE_REQUEST_ROUTES}
+            doc |= four
+        assert mock == doc, module
 
 
 def test_the_real_daemon_serves_the_core_plus_exactly_the_extensions_that_landed():
