@@ -139,3 +139,18 @@ taken:  {by, reason, at} | null        # the last time my lease was force-releas
 - **At the deadline, with no answer and at the head:** **"Force release…"** opens a confirm modal (red, names the holder, and says what happens). A "keep" answer shows its message and the new time.
 - **Holder side:** a prominent prompt when `lease.wanted` arrives: "`<by>` wants mps3-01: *message*. Release now / Keep for 5 / 15 / 30 / 60 min (+ message)", with the countdown. It must be visible from any section.
 - **Victim side:** a persistent banner: "mps3-01 was force-released by `<by>` at `<time>`: `<reason>`". It stays until dismissed and is also written to Activity.
+
+## Decisions after the lanes built it (lead, 2026-09-24 afternoon)
+
+These amend the frozen spec. Lanes align to them before merging.
+
+| # | Question (raised by) | Decision |
+|---|---|---|
+| D1 | A keep answer ended the request job, but we are still queued: who holds the queue entry, and who takes the lease when we are promoted? (LR-D, LR-C) | **The request job keeps running after a `keep` answer.** Its phase becomes `answered`, and `lease.answered` is emitted, but `request()` keeps polling the acquire. It ends only when the lease is **held**, we **leave**, or a **force** succeeds. `lease request` on the CLI prints the answer and keeps waiting (Ctrl-C leaves). After the keep minutes run out, `force_available` can become true again. |
+| D2 | Force while our own request job is running (LR-D, LR-C) | **`lease_force` runs beside the requester's own `lease_request` job** (LR-C's second JobManager). The revoke promotes us, so the request job ends with `{lease}`, and so does the force job. Any OTHER job on the board still makes force answer 409 HELD. |
+| D3 | Status codes (LR-D) | **API.md's table wins.** `confirm` missing is **400 USAGE**; "time left" is **422 UNAVAILABLE** with `error.data.time_left_s` and `deadline_at`; not the head, already answered, or not ours is **409 REFUSED** with the reason. |
+| D4 | The confirm dialog needs the board that is revoked (LR-D) | `GET /lease` adds **`board`**, the physical board from `hub.board_id()` (`mps3_01`). The UI shows the N1 name and says which board is revoked when it differs from the target. |
+| D5 | The holder could not see its earlier answers after a reload (LR-D) | **`incoming[].answer: {answer, minutes, message, at} \| null`**, read from the answer notes. |
+| D6 | The 10 s `GET /lease` cache could hide `force_available` (LR-D) | The service **drops its cached view on every lease state change** and **at a request's `deadline_at`** (and at keep expiry). |
+| D7 | Outcome of a cancelled request job (LR-D) | **The job succeeds with `{left: true}`**, so leaving is not a failure. |
+| D8 | Timestamp formats (LR-D) | Every lease-request time is **ISO 8601 UTC with `+00:00`**: `created_at`, `deadline_at`, `answer.at`, `taken.at`. fpgahub's `…Z` forms are parsed on Python 3.10 too (3.10's `fromisoformat` rejects `Z`). |
