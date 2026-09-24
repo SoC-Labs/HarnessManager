@@ -29,6 +29,16 @@ T8 (hub mode) and T10 (XDC export) follow.
 
 ## Week plan: a working Harness Manager by Fri 09-25 (drawn up 2026-09-23 23:00; GO given, all six lanes running)
 
+**Status 2026-09-24 ~03:00: CI is green on every platform at `7e2a0db`.**
+- **Platforms:** Linux (Python 3.10, 3.11, 3.12), macOS, and Windows, including `install.ps1` under Windows PowerShell 5.1. Lint passes.
+- **The first GitHub runs found real bugs**, all fixed:
+  - a pid-reuse race in the debug service;
+  - `file:///C:/…` update sources on Windows;
+  - the daemon launched through a Windows venv redirector (`ui` timed out);
+  - content-store concurrent puts on Windows;
+  - WinError 10053, which read as "unreachable" instead of "busy".
+- **Follow-up:** the SSH-tunnel process tests still skip on Windows. They need a `.cmd` ssh shim.
+
 **Status 2026-09-24 ~01:20: all six lanes merged; `main` is pushed at `c65df06` (1857 passed).**
 - **Merges into `main`:** L4 at 5ddbdf7, L2 at 720e364, L1 at 4d02142, L5 at 984fb48, the L2 fix at eac1890, L3 at 8e7e4de.
 - **L6:** `feat/uart-runtime-baud` at `fe87b6c` in the platform repo. It is local and simulation-proven, and its rebuild steps are in `HANDOVER_UART_RUNTIME_BAUD.md`.
