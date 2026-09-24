@@ -291,6 +291,16 @@ def test_negative_twin_a_reading_events_client_loses_nothing(vboard):
     assert all(f["topic"] == "t13.flood" and f["board_id"] == "b" for f in frames)
 
 
+def _read_to_mark(stream, mark: bytes, timeout: float) -> None:
+    """Read a ConsoleStream until ``mark`` (keeping only a tail: megabytes go by)."""
+    tail = b""
+    deadline = time.monotonic() + timeout
+    while mark not in tail:
+        left = deadline - time.monotonic()
+        assert left > 0, f"{mark!r} did not come back within {timeout}s"
+        tail = (tail + stream.read(timeout=left))[-len(mark) * 2:]
+
+
 def test_a_stalled_console_client_is_told_what_it_lost(vboard):
     # 4 MiB through uart0: unpaced (at the DUT's 20 ms/byte it would take a day).
     eng = engine_for(vboard, console_pace_s=0.0)
@@ -301,11 +311,19 @@ def test_a_stalled_console_client_is_told_what_it_lost(vboard):
                 "board_id"]
             ws = ws_connect(d.ws_url(f"/boards/{bid.replace('@', '%40')}/consoles/uart0"),
                             sock=_stalled_socket(d.port), max_queue=1)
+            # Another reader of uart0, in this process: it says when the whole echo is back.
+            tap = eng.consoles.subscribe(eng.session(bid), "uart0", replay=False)
             try:
                 blob = b"0123456789abcdef" * 4096               # 64 KiB per write
                 for _ in range(64):                             # 4 MiB echoed back
                     ws.send(blob)
                 ws.send(b"\nEND-MARK\n")
+                # The client stays stalled until the board has echoed everything. It used
+                # to read at once: on a loaded machine the echo then trickled in behind a
+                # client that kept up, nothing had to be dropped, and lost was 0 (FLAKE
+                # 2026-09-24). The daemon's reader may still be behind here and hand its
+                # whole backlog over in one chunk: the outbox bounds that chunk too.
+                _read_to_mark(tap, b"END-MARK", timeout=60)
                 got, notes = bytearray(), []
                 deadline = time.monotonic() + 60
                 while b"END-MARK" not in got and time.monotonic() < deadline:
@@ -315,6 +333,7 @@ def test_a_stalled_console_client_is_told_what_it_lost(vboard):
                     else:
                         got += msg
             finally:
+                tap.close()
                 ws.close()
     finally:
         eng.close_all()

@@ -53,10 +53,22 @@ class Outbox:
         return self._closed
 
     def put(self, item: str | bytes) -> None:
-        """Queue one frame from any thread. Never blocks; may drop the oldest frames."""
+        """Queue one frame from any thread. Never blocks; may drop the oldest frames.
+
+        A byte chunk bigger than the whole byte budget keeps only its newest ``max_bytes``;
+        its older bytes count as dropped. A console reader that fell behind (a loaded
+        machine) hands over everything it buffered in one chunk, and a whole-frame rule
+        kept that chunk, so a stalled client was sent megabytes past its budget and told
+        of no loss. A text frame is kept whole: JSON cannot be cut.
+        """
         with self._lock:
             if self._closed:
                 return
+            if isinstance(item, (bytes, bytearray)) and len(item) > self.max_bytes:
+                cut = len(item) - self.max_bytes
+                item = bytes(item[cut:])
+                self._dropped_bytes += cut
+                self.total_dropped_bytes += cut
             self._items.append(item)
             self._bytes += len(item)
             while len(self._items) > 1 and (len(self._items) > self.max_items

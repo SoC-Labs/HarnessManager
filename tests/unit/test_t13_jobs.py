@@ -240,6 +240,33 @@ def test_the_byte_budget_drops_old_chunks_too():
     assert batch.items == [b"cccc", b"dddd"] and batch.dropped_bytes == 8
 
 
+def test_a_chunk_bigger_than_the_byte_budget_keeps_its_newest_bytes_and_counts_the_rest():
+    # FLAKE 2026-09-24: a console reader that fell behind put its whole backlog as ONE
+    # chunk, which the whole-frame rule kept: a stalled client was told of no loss.
+    async def main():
+        box = Outbox(asyncio.get_running_loop(), max_items=100, max_bytes=10)
+        box.put(b"0123456789abcdef")
+        return await box.take(), box.total_dropped_bytes
+
+    batch, total = run(main())
+    assert batch.items == [b"6789abcdef"] and batch.dropped_bytes == 6 and total == 6
+    assert batch.dropped_items == 0                     # a partial chunk is not a lost frame
+
+
+def test_negative_twin_a_text_frame_or_a_chunk_within_the_budget_is_kept_whole():
+    async def main():
+        box = Outbox(asyncio.get_running_loop(), max_items=100, max_bytes=10)
+        box.put('{"state": "up", "detail": "a JSON frame cannot be cut"}')
+        first = await box.take()
+        box.put(b"0123456789")
+        return first, await box.take()
+
+    text, chunk = run(main())
+    assert text.items == ['{"state": "up", "detail": "a JSON frame cannot be cut"}']
+    assert chunk.items == [b"0123456789"]
+    assert (text.dropped_bytes, chunk.dropped_bytes) == (0, 0)
+
+
 def test_a_put_from_another_thread_wakes_the_taker_and_close_ends_it():
     async def main():
         box = Outbox(asyncio.get_running_loop())
