@@ -484,3 +484,91 @@ def test_soft_busy_lists_gdb_and_xvc_sessions_and_confirm_goes_ahead(world):
     assert "OpenOCD for GDB" in err["message"]
     assert apply(w, version=NEW, confirm=True).status_code == 202          # the twin
     wait_restarted(w)
+
+
+# --- the helper's own edge paths (no real daemon: a stand-in answers /health) -------------------
+
+
+class _Health:
+    """127.0.0.1: answers /api/v1/health as ``version`` and /api/v1/jobs for ``token``."""
+
+    def __init__(self, version: str, token: str) -> None:
+        import http.server
+
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:               # noqa: N802 - the stdlib's name
+                if self.path == "/api/v1/health":
+                    body, code = {"ok": True, "version": outer.version, "pid": 4242}, 200
+                elif self.headers.get("Authorization") == f"Bearer {outer.token}":
+                    body, code = {"ok": True, "jobs": []}, 200
+                else:
+                    body, code = {"ok": False}, 401
+                data = json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a: Any) -> None:
+                pass
+
+        self.version, self.token = version, token
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+def _helper_args(sd: Path, root: Path, **kw: Any):
+    argv = ["--state-dir", str(sd), "--root", str(root), "--id", "h1", "--from", __version__,
+            "--from-pointer", "", "--to", kw.pop("to", NEW), "--old-pid",
+            str(kw.pop("old_pid", 2 ** 22 + 12345)), "--health-s", "2", "--stable-s", "0.5"]
+    return ua._parser().parse_args(argv)
+
+
+class _Child:
+    pid = 4242
+
+    def poll(self):
+        return None
+
+
+def test_a_helper_that_cannot_switch_restarts_the_old_version_and_says_so(tmp_path):
+    sd, root = tmp_path / "state", install_root(tmp_path)
+    ptr = json.loads((root / "current.json").read_text())
+    ptr["versions"][NEW]["state"] = "failed"              # not staged: the switch is refused
+    (root / "current.json").write_text(json.dumps(ptr))
+    old = _Health(__version__, "tok")
+    spawned: list = []
+    try:
+        su.write_json(su.resume_path(sd), {"schema": 1, "token": "tok", "port": old.port,
+                                           "listen": "127.0.0.1", "boards": []}, private=True)
+        rc = ua.run_helper(_helper_args(sd, root),
+                           spawn=lambda argv, env, log, cwd: spawned.append(argv) or _Child())
+    finally:
+        old.close()
+    rec = json.loads(su.last_apply_path(sd).read_text())
+    assert (rc, rec["result"], rec["phase"]) == (15, "not-switched", "switch"), rec
+    assert "not staged" in rec["reason"]
+    assert len(spawned) == 1 and spawned[0][0] == sys.executable          # the OLD version
+    assert json.loads((root / "current.json").read_text())["current"] == ""
+    assert not su.apply_record_path(sd).exists()                          # its record went
+
+
+def test_negative_twin_a_helper_whose_old_daemon_never_exits_changes_nothing(tmp_path,
+                                                                           monkeypatch):
+    sd, root = tmp_path / "state", install_root(tmp_path)
+    su.write_json(su.resume_path(sd), {"schema": 1, "token": "tok", "port": 1,
+                                       "listen": "127.0.0.1", "boards": []}, private=True)
+    monkeypatch.setattr(ua, "OLD_PID_WAIT_S", 0.3)
+    spawned: list = []
+    rc = ua.run_helper(_helper_args(sd, root, old_pid=os.getpid()),      # alive: this process
+                       spawn=lambda *a: spawned.append(a) or _Child())
+    rec = json.loads(su.last_apply_path(sd).read_text())
+    assert (rc, rec["result"], rec["phase"]) == (4, "not-started", "stop")
+    assert spawned == [] and json.loads((root / "current.json").read_text())["current"] == ""

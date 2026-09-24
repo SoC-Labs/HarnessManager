@@ -767,6 +767,15 @@ def python_for(app: Any, pointer: str) -> Path:
 
 def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detached,
                sleep: Callable[[float], None] = time.sleep) -> int:
+    """The helper, start to verdict. Its record ``apply.json`` goes when it ends."""
+    try:
+        return _run_helper(a, spawn=spawn, sleep=sleep)
+    finally:
+        su.apply_record_path(Path(a.state_dir)).unlink(missing_ok=True)
+
+
+def _run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any],
+                sleep: Callable[[float], None]) -> int:
     from harness_manager.core.session import pid_alive
     from harness_manager.services.update.app import AppLayout, AppUpdater, LocalBusyProbe
 
@@ -807,8 +816,9 @@ def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detac
         lines = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("--- ")]
         return " | ".join(lines[-2:])[-300:]
 
+    resume_file = Path(a.resume) if a.resume else su.resume_path(sd)
     try:
-        resume = read_resume(Path(a.resume))
+        resume = read_resume(resume_file)
     except HarnessError as exc:
         verdict("not-started", "resume", exc.message)
         return 2
@@ -873,13 +883,12 @@ def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detac
             "python_version": a.from_version, "started_at": time.time(), "phase": "starting"})
         log_mark()
         child = spawn([str(py), "-m", "harness_manager.daemon", "--state-dir", str(sd),
-                       "--resume", a.resume], env, daemon_log_path(sd), sd)
+                       "--resume", str(resume_file)], env, daemon_log_path(sd), sd)
         ok, why, phase = wait_healthy(host, port, token, a.to, child, health_s=a.health_s,
                                       stable_s=a.stable_s, sleep=sleep, log_tail=tail)
         if ok:
             say(why)
             verdict("applied", pid=child.pid)
-            su.apply_record_path(sd).unlink(missing_ok=True)
             return 0
     else:
         phase = "start"
@@ -896,7 +905,6 @@ def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detac
     say(f"marked {a.to} bad; pointer back to {before['current'] or '(installed)'}")
     ok = restart(a.from_pointer, a.from_version, "rollback")
     verdict("rolled-back" if ok else "down", phase or "health", why)
-    su.apply_record_path(sd).unlink(missing_ok=True)
     return 6
 
 

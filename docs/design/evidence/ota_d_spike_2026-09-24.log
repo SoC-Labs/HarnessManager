@@ -1,0 +1,94 @@
+# OTA-D spike re-run: scripts/spikes/ota_apply_spike.sh /tmp/ota-dspike2 (HEAD 8c99bf8, 2026-09-24)
+# ports 29425-29427; throwaway key; real installer, uv, wheels and hashed lock; the daemon's apply step
+
+
+=== tools: uv + cryptography in a throwaway venv
+uv 0.8.0
+
+=== release: a throwaway key, three pinned copies of HEAD, three wheels, one hashed lock
+key 18D4232AF28FC82C -> /tmp/ota-dspike2/keys
+lock /tmp/ota-dspike2/lock.txt (22 packages)
+
+=== serve the channel on 127.0.0.1:29425 (serial 1: 0.1.1 WITHOUT a lock)
+published stable serial 1: app ['0.1.1', '0.1.0'] -> /tmp/ota-dspike2/www/channel/stable/channel.json
+
+=== install 0.1.0 with the real installer; start its daemon on port 29427
+venv     /tmp/ota-dspike2/home/.local/share/harness-manager/venv (3.12.14)
+install  /tmp/ota-dspike2/dist-v1/harness_manager-0.1.0-py3-none-any.whl [serial]
+command  /tmp/ota-dspike2/home/.local/bin/harness-manager
+Harness Manager 0.1.0 is installed.
+pointer   current (installer venv)  previous (installer venv)
+started    harness-manager-daemon (pid 3084030) at http://127.0.0.1:29427
+{"ok":true,"version":"0.1.0","service":"harness-manager-daemon","pid":3084030}
+
+=== BREAK 1: a release without a hashed lock cannot be staged
+harness-manager: building harness-manager 0.1.1 failed at `/tmp/ota-dspike2/home/.local/share/harness-manager/venv/bin/uv pip install …`:          And because only harness-manager==0.1.1 is available and you require harness-manager, we can 
+rc=6
+
+=== serial 2 adds the hashed lock
+
+=== BREAK 2 + 5: update app --apply restarts the running daemon, same port, same token
+update: checking
+update: restarting
+update: restarted: the helper checks the new version stays up
+applied    harness-manager 0.1.1 runs now (restarted in 11.6 s, same port and token)
+rc=0
+pointer   current 0.1.1  previous (installer venv)
+health: {"ok":true,"version":"0.1.1","service":"harness-manager-daemon","pid":3084461}
+the OLD token on /api/v1/boards: HTTP 200
+last_apply {'at': 1790290648.9642625, 'from': '0.1.0', 'id': '5493b9ad9441', 'phase': '', 'pid': 3084461, 'reason': '', 'result': 'applied', 'seconds': 11.6, 'to': '0.1.1'}
+
+=== BREAK 3: rollback right after the first switch reaches the installer's 0.1.0
+switched   harness-manager 0.1.0 (installed) is current again (from the next start)
+pointer   current (installer venv)  previous 0.1.1
+switched   harness-manager 0.1.1 is current again (from the next start)
+pointer   current 0.1.1  previous (installer venv)
+
+=== BREAK 4: serial 3 offers 0.1.2 (its daemon cannot start); apply; the helper rolls back
+update: restarting
+update: restarted: the helper checks the new version stays up
+harness-manager: 0.1.2 did not come up, so the service rolled back to 0.1.1 and marked it bad: the daemon exited with code 1 while starting: OTA SPIKE: v0.1.2 daemon is deliberately broken — `harness-manager update status`; the helper's log is /tmp/ota-dspike2/home/.config/harness-manager/update/app
+rc=6 (6: rolled back)
+pointer   current 0.1.1  previous (installer venv)
+health: {"ok":true,"version":"0.1.1","service":"harness-manager-daemon","pid":3085811}
+the OLD token after the rollback: HTTP 200
+last_apply {'at': 1790290659.7163353, 'from': '0.1.1', 'id': '53b2010c7a6c', 'phase': 'start', 'reason': 'the daemon exited with code 1 while starting: OTA SPIKE: v0.1.2 daemon is deliberately broken', 'result': 'rolled-back', 'seconds': 5.4, 'to': '0.1.2'}
+bad {'hm-app': {'0.1.2': {'at': 1790290655.5492752, 'phase': 'start', 'reason': 'the daemon exited with code 1 while starting: OTA SPIKE: v0.1.2 daemon is deliberately broken'}}}
+app        current 0.1.2, running 0.1.1
+check: app_update / app_skipped = - 0.1.2
+status    running    0.1.1 (this command); daemon 0.1.1 (pid 3085811)
+status    pointer    current 0.1.1, previous 0.1.0 (installed)
+status    staged     -
+status    bad        0.1.2: the daemon exited with code 1 while starting: OTA SPIKE: v0.1.2 daemon is deliberately broken
+status    available  - (never checked)
+status    mode       stage
+status    last apply 0.1.1 -> 0.1.2: rolled-back (the daemon exited with code 1 while starting: OTA SPIKE: v0.1.2 daemon is deliberately broken) at 2026-09-24 23:57
+
+=== summary: the five breaks
+break 1: REMAINS (rc=6: a release still needs a hashed lock; OTA-R's make release ships one)
+break 2: fixed (the daemon restarted onto 0.1.1 by itself, port 29427)
+break 3: fixed (rc=0; OTA-L M2)
+break 4: fixed (0.1.2 rolled back, marked bad, not offered: app_skipped)
+break 5: fixed (the old token still answers 200 after the restart)
+
+=== done: stopping the spike's daemon and server
+
+real	1m8.174s
+user	0m32.970s
+sys	0m5.679s
+EXIT 0
+
+=== the helper's log (<state>/update/apply.log)
+--- 2026-09-24 23:57:17 /tmp/ota-dspike2/home/.local/share/harness-manager/venv/bin/python -m harness_manager.daemon.update_apply …
+2026-09-24 23:57:17 apply: 0.1.0 -> 0.1.1 on port 29427; waiting for pid 3084030 to exit
+2026-09-24 23:57:17 apply: pointer: current 0.1.1
+2026-09-24 23:57:28 apply: /health reports 0.1.1 (pid 3084461) and stayed up 10 s
+2026-09-24 23:57:28 apply: result applied
+--- 2026-09-24 23:57:34 /tmp/ota-dspike2/home/.local/share/harness-manager/versions/0.1.1/bin/python -m harness_manager.daemon.update_apply …
+2026-09-24 23:57:34 apply: 0.1.1 -> 0.1.2 on port 29427; waiting for pid 3084461 to exit
+2026-09-24 23:57:34 apply: pointer: current 0.1.2
+2026-09-24 23:57:35 apply: 0.1.2 is not healthy (start): the daemon exited with code 1 while starting: OTA SPIKE: v0.1.2 daemon is deliberately broken; rolling back
+2026-09-24 23:57:35 apply: marked 0.1.2 bad; pointer back to 0.1.1
+2026-09-24 23:57:35 apply: starting 0.1.1 again (/tmp/ota-dspike2/home/.local/share/harness-manager/versions/0.1.1/bin/python)
+2026-09-24 23:57:39 apply: 0.1.1: up: /health reports 0.1.1 (pid 3085811) and stayed up 3 s
+2026-09-24 23:57:39 apply: result rolled-back (start: the daemon exited with code 1 while starting: OTA SPIKE: v0.1.2 daemon is deliberately broken)
