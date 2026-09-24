@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -114,19 +115,33 @@ def test_negative_twin_a_keep_answer_exits_held_with_the_answer(capsys, world):
     assert e["data"]["answered"]["minutes"] == 15 and "B1 running" in err
 
 
+def after_the_countdown_read_the_deadline(world: LeaseWorld, action):
+    """``action(rid)`` once the countdown thread has made its one ``view`` call, and drawn."""
+
+    def go(rid: str) -> None:
+        deadline = time.monotonic() + 10
+        while ("view",) not in world.calls[1:] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.3)
+        action(rid)
+
+    return go
+
+
 def test_request_shows_a_countdown_on_a_terminal(capsys, world, monkeypatch):
     monkeypatch.setattr(cmd_hub, "_stderr_is_tty", lambda: True)
-    t = meanwhile(world, lambda rid: world.answer(rid, "release"), delay=0.3)
+    t = meanwhile(world, after_the_countdown_read_the_deadline(
+        world, lambda rid: world.answer(rid, "release")))
     rc, _, err = run(capsys, "lease", "request", TARGET_ARG)
     t.join(5)
     assert rc == ExitCode.OK
-    assert f"\rwaiting for {ALICE} to answer: 2:00 left" in err or \
-        f"\rwaiting for {ALICE} to answer: 1:59 left" in err
+    assert re.search(rf"\rwaiting for {ALICE} to answer: (2:00|1:5\d) left", err), err
     assert "(Ctrl-C leaves the queue)" in err
 
 
 def test_negative_twin_no_terminal_no_redrawn_line(capsys, world):
-    t = meanwhile(world, lambda rid: world.answer(rid, "release"), delay=0.3)
+    t = meanwhile(world, after_the_countdown_read_the_deadline(
+        world, lambda rid: world.answer(rid, "release")))
     rc, _, err = run(capsys, "lease", "request", TARGET_ARG)
     t.join(5)
     assert rc == ExitCode.OK and "\r" not in err and "answer is due by" in err

@@ -406,7 +406,7 @@ def sentinel(client: TestClient, bid: str) -> None:
 def test_the_requester_gets_force_available_answered_and_left(client, bid, world):
     url = f"/api/v1/events?token={TOKEN}&topics=lease.*"
     with client.websocket_connect(url) as ws:
-        start_request(client, bid, world)
+        first = start_request(client, bid, world)
         rid = world.my_request()["id"]
         world.expire_deadline()
         f = frames_until(ws, "lease.force_available")
@@ -414,6 +414,8 @@ def test_the_requester_gets_force_available_answered_and_left(client, bid, world
         client.delete(lease(bid, "/queue"), headers=H)
         f = frames_until(ws, "lease.left")
         assert f["board_id"] == bid and f["data"] == {}
+        # lease.left comes from leave(); the job frees the board on its next poll tick.
+        assert wait_job(client, first)["state"] == "failed"
         start_request(client, bid, world)
         rid = world.my_request()["id"]
         world.answer(rid, "keep", 5, "two more runs")
