@@ -1,0 +1,38 @@
+[   0.0s] load average (69.96, 68.32, 67.25); fake XVC on 127.0.0.1:40651
+[   4.5s] hw_server up on 127.0.0.1:43033 in 4.5s: -q -p0 -s TCP:127.0.0.1:43033 -e set auto-open-servers xilinx-xvc:127.0.0.1:40651 -L- -lxvc
+[   9.5s] Q2 hw_server idle 5 s, no client: slot=free connections=0 shifts=0 stalled_polls=0 dropped=0
+[  20.5s] SWAP begins (gate on: shifts stall; the chain changes): slot=held by 127.0.0.1:48016 connections=1 shifts=704 stalled_polls=0 dropped=0
+[  32.6s] SWAP ends after 12s (gate off): slot=held by 127.0.0.1:48016 connections=1 shifts=704 stalled_polls=1173 dropped=0
+[  52.8s] xsdb A_open_across_swap: rc=0 in 43.2s
+[  52.8s]     TARGETS A_open_across_swap (a)
+[  52.8s]       1  Xilinx Virtual Cable 127.0.0.1:40651
+[  52.8s]          2  xc7a100t (idcode 13631093 irlen 6 fpga)
+[  52.8s]     TARGETS A_open_across_swap (b, same session, after the swap)
+[  52.8s]       1  Xilinx Virtual Cable 127.0.0.1:40651
+[  52.8s]          2  xc7a100t (idcode 13631093 irlen 6 fpga)
+[  52.8s] after client A left: slot=held by 127.0.0.1:48016 connections=1 shifts=5759 stalled_polls=1173 dropped=0
+[  58.8s] Q2 6 s after the last client left: slot=free connections=1 shifts=5954 stalled_polls=1173 dropped=0
+[  72.0s] xsdb B_same_hw_server_after_swap: rc=0 in 13.2s
+[  72.0s]     TARGETS B_same_hw_server_after_swap (a)
+[  72.0s]       1  Xilinx Virtual Cable 127.0.0.1:40651
+[  72.0s]          2  xc7a100t (idcode 13631093 irlen 6 fpga)
+[  72.0s] hw_server stopped; slot free 0.05s after SIGTERM
+[  75.6s] hw_server up on 127.0.0.1:46565 in 3.6s: -q -p0 -s TCP:127.0.0.1:46565 -e set auto-open-servers xilinx-xvc:127.0.0.1:40651 -L- -lxvc
+[  88.0s] xsdb C_fresh_hw_server: rc=0 in 12.4s
+[  88.0s]     TARGETS C_fresh_hw_server (a)
+[  88.0s]       1  Xilinx Virtual Cable 127.0.0.1:40651
+[  88.0s]          2  xc7a100t (idcode 13631093 irlen 6 fpga)
+[  88.0s] hw_server stopped; slot free 0.02s after SIGTERM
+[  88.0s] hw_server_43033.log: TCF 15:45:05.123: xvc: disposed JTAG-jsn-XVC-127.0.0.1:40651-0a003093-0
+[  88.0s] hw_server_43033.log: TCF 15:45:26.141: xvc: disposed JTAG-jsn-XVC-127.0.0.1:40651-13631093-0
+[  88.0s] hw_server_43033.log: TCF 15:45:44.533: signal 15 received, shutdown initiated
+[  88.0s] fake   16.31s connect 127.0.0.1:48016
+[  88.0s] fake   17.32s settck 100
+[  88.0s] fake   53.65s disconnect 127.0.0.1:48016 (client closed)
+[  88.0s] fake   66.68s connect 127.0.0.1:54240
+[  88.0s] fake   67.78s settck 100
+[  88.0s] fake   72.00s disconnect 127.0.0.1:54240 (client closed)
+[  88.0s] fake   82.81s connect 127.0.0.1:43310
+[  88.0s] fake   83.84s settck 100
+[  88.0s] fake   88.00s disconnect 127.0.0.1:43310 (client closed)
+rc=0

@@ -1,0 +1,289 @@
+{
+  "when": "2026-09-24 16:24:26 BST",
+  "host": "srv03335",
+  "loadavg": [
+    76.4,
+    72.6,
+    61.16
+  ],
+  "ssh": "OpenSSH_8.0p1, OpenSSL 1.1.1k  FIPS 25 Mar 2021",
+  "tap_idcode_direct": "0x0A003093",
+  "tunnel_argv_board_shape": [
+    "/tmp/xvc-spike-83072/ssh/bin/ssh",
+    "-o",
+    "ControlPath=none",
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-o",
+    "ConnectTimeout=15",
+    "-o",
+    "PermitLocalCommand=no",
+    "-o",
+    "RequestTTY=no",
+    "-N",
+    "-T",
+    "-L",
+    "127.0.0.1:63769:127.0.0.1:37301",
+    "xvc-board"
+  ],
+  "latency": {
+    "direct": {
+      "getinfo": {
+        "n": 320,
+        "median_us": 29.4,
+        "p90_us": 40.0,
+        "p99_us": 131.0,
+        "min_us": 28.0
+      },
+      "shift_64": {
+        "n": 320,
+        "median_us": 31.6,
+        "p90_us": 38.9,
+        "p99_us": 82.4,
+        "min_us": 30.2
+      },
+      "shift_2048": {
+        "n": 320,
+        "median_us": 32.5,
+        "p90_us": 43.2,
+        "p99_us": 781.5,
+        "min_us": 30.8,
+        "kbit_per_s_at_median": 63015.4
+      }
+    },
+    "hub_shape_1hop": {
+      "getinfo": {
+        "n": 320,
+        "median_us": 7746.3,
+        "p90_us": 33001.9,
+        "p99_us": 55001.5,
+        "min_us": 130.1
+      },
+      "shift_64": {
+        "n": 320,
+        "median_us": 283.2,
+        "p90_us": 23408.7,
+        "p99_us": 72275.5,
+        "min_us": 132.3
+      },
+      "shift_2048": {
+        "n": 320,
+        "median_us": 170.5,
+        "p90_us": 10344.2,
+        "p99_us": 44035.7,
+        "min_us": 138.3,
+        "kbit_per_s_at_median": 12011.7
+      }
+    },
+    "board_shape_2hop_proxyjump": {
+      "getinfo": {
+        "n": 320,
+        "median_us": 303.4,
+        "p90_us": 19555.2,
+        "p99_us": 76601.3,
+        "min_us": 208.7
+      },
+      "shift_64": {
+        "n": 320,
+        "median_us": 230.7,
+        "p90_us": 6822.5,
+        "p99_us": 29770.4,
+        "min_us": 211.5
+      },
+      "shift_2048": {
+        "n": 320,
+        "median_us": 252.1,
+        "p90_us": 12129.7,
+        "p99_us": 47863.7,
+        "min_us": 226.4,
+        "kbit_per_s_at_median": 8123.8
+      }
+    },
+    "relay_plus_2hop": {
+      "getinfo": {
+        "n": 320,
+        "median_us": 667.7,
+        "p90_us": 18999.3,
+        "p99_us": 55746.8,
+        "min_us": 229.7
+      },
+      "shift_64": {
+        "n": 320,
+        "median_us": 257.7,
+        "p90_us": 12352.0,
+        "p99_us": 52468.3,
+        "min_us": 232.5
+      },
+      "shift_2048": {
+        "n": 320,
+        "median_us": 275.4,
+        "p90_us": 9096.6,
+        "p99_us": 56598.7,
+        "min_us": 250.1,
+        "kbit_per_s_at_median": 7436.5
+      }
+    }
+  },
+  "reconnect_race": {
+    "direct": {
+      "tries": 20,
+      "refused_immediate_reconnect": 17
+    },
+    "hub_shape_1hop": {
+      "tries": 20,
+      "refused_immediate_reconnect": 15
+    },
+    "board_shape_2hop_proxyjump": {
+      "tries": 20,
+      "refused_immediate_reconnect": 16
+    },
+    "relay_plus_2hop": {
+      "tries": 20,
+      "refused_immediate_reconnect": 15
+    }
+  },
+  "connect_plus_first_getinfo": {
+    "direct": {
+      "n": 20,
+      "median_us": 34864.4,
+      "p90_us": 115715.2,
+      "p99_us": 142711.7,
+      "min_us": 5052.0
+    },
+    "hub_shape_1hop": {
+      "n": 20,
+      "median_us": 45141.2,
+      "p90_us": 183566.9,
+      "p99_us": 276867.4,
+      "min_us": 1004.2
+    },
+    "board_shape_2hop_proxyjump": {
+      "n": 20,
+      "median_us": 24798.9,
+      "p90_us": 120853.8,
+      "p99_us": 420763.7,
+      "min_us": 3633.0
+    },
+    "relay_plus_2hop": {
+      "n": 20,
+      "median_us": 199594.3,
+      "p90_us": 309250.3,
+      "p99_us": 458721.1,
+      "min_us": 32495.1
+    }
+  },
+  "overhead_median_us": {
+    "hub_shape_1hop": {
+      "getinfo": 7716.9,
+      "shift_64": 251.6,
+      "shift_2048": 138.0
+    },
+    "board_shape_2hop_proxyjump": {
+      "getinfo": 274.0,
+      "shift_64": 199.1,
+      "shift_2048": 219.6
+    },
+    "relay_plus_2hop": {
+      "getinfo": 638.3,
+      "shift_64": 226.1,
+      "shift_2048": 242.9
+    }
+  },
+  "single_client_via_2hop": {
+    "probe_while_held": {
+      "state": "held",
+      "info": "",
+      "rtt_ms": 0.819
+    },
+    "first_client_undisturbed": true,
+    "board_refusals_logged": 1,
+    "probe_after_release": {
+      "state": "free",
+      "info": "xvcServer_v1.0:2048",
+      "rtt_ms": 45.269
+    }
+  },
+  "swap_gate_via_2hop": {
+    "getinfo_answered_while_gated": true,
+    "shift_stalled_while_gated": true,
+    "reply_after_ungate_ms": 1.0,
+    "reply_len": 4
+  },
+  "relay": {
+    "who_is_attached": {
+      "pid": 83072,
+      "is_this_process": true,
+      "command": "../hm-flake/.venv/bin/python -m tests.spikes.xvc_tunnel_spike --rounds 8 --per-r"
+    },
+    "second_client_via_relay": "held",
+    "kick_to_board_slot_free_ms": 1.9,
+    "client_after_kick": "closed (XvcClosed)",
+    "attach_while_held": "held",
+    "attach_after_release": "free"
+  },
+  "tunnel_drop_2hop": {
+    "client_on_drop": "closed (ConnectionResetError)",
+    "board_slot_freed_after_s": 0.032,
+    "tunnel_back_up_after_s": 1.82,
+    "same_local_port": true,
+    "probe_after_restart": "free"
+  },
+  "hw_server": {
+    "argv": [
+      "/apps/Xilinx/Vivado/2024.1/bin/hw_server",
+      "-q",
+      "-p0",
+      "-s",
+      "TCP:127.0.0.1:39177",
+      "-e",
+      "set auto-open-servers xilinx-xvc:127.0.0.1:40447",
+      "-L-",
+      "-lxvc"
+    ],
+    "listening_after_s": 6.0,
+    "xvc_opened_with_no_client_after_s": null,
+    "fake_saw": {
+      "getinfo": 0,
+      "settck": 0,
+      "shifts": 0,
+      "shift_bits": 0
+    },
+    "slot_held_while_idle": false,
+    "probe_while_hw_server_up": "free",
+    "reconnects_after_drop_s": null,
+    "exit_after_sigterm_s": 0.01,
+    "board_slot_freed_after_stop_s": 0.01,
+    "log_tail": "TCF 15:26:11.581: signal 15 received, shutdown initiated\n",
+    "fake_events": [
+      [
+        734816.262,
+        "connect",
+        "127.0.0.1:63774"
+      ],
+      [
+        734816.373,
+        "disconnect",
+        "127.0.0.1:63774 (client closed)"
+      ]
+    ]
+  },
+  "fake_totals": {
+    "connections": 216,
+    "refused_second": 56,
+    "getinfo": 1497,
+    "settck": 0,
+    "shifts": 2561,
+    "shift_bits": 2703392,
+    "stalled_shifts": 98,
+    "dropped": 0
+  },
+  "leftover_ssh_pids": []
+}
