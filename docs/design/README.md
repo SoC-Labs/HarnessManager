@@ -8,7 +8,7 @@ and `make check` does not run it (only `tests/unit/test_clcd_mock.py`, which is 
 |---|---|---|---|
 | XVC fabric debug | XVC | Brokered, lease-gated session: HM relays XVC over SSH and owns hw_server. | [XVC_DEBUG.md](XVC_DEBUG.md) |
 | DUT build kit storage | KIT-STORE | Per-static signed kit on the release channel, cached by HM; not on SD. | [DUT_BUILD_KIT_STORAGE.md](DUT_BUILD_KIT_STORAGE.md) |
-| DUT build guide | KIT-GUIDE | A "Build" section driving a generated `build_rm.tcl`; receipt binds partial to static. | [DUT_BUILD_GUIDE.md](DUT_BUILD_GUIDE.md) ([template](build_rm.tcl.template)) |
+| DUT build guide | KIT-GUIDE | A "Build" section driving a generated `build_rm.tcl`; receipt binds partial to static. | [DUT_BUILD_GUIDE.md](DUT_BUILD_GUIDE.md) ([template](../../src/harness_manager/services/kit/templates/build_rm.tcl.template), built by KIT-CORE) |
 | Front panel (CLCD) | CLCD-HM | Panel as a read-mostly second face of HM, Linux harness only; shared tokens. | [CLCD_ALIGNMENT.md](CLCD_ALIGNMENT.md) ([mock-ups](clcd/)) |
 | Harness versions from the web | HARNESS-DIST | Publish with OTA's release tool; add a Harness versions catalogue; A/B config SD. | [HARNESS_DISTRIBUTION.md](HARNESS_DISTRIBUTION.md) |
 | HM self-update | OTA | Finish T7: lead-run `make release`, daemon restart, rollback to the installed version. | [HM_SELF_UPDATE.md](HM_SELF_UPDATE.md) |

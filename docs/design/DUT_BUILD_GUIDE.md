@@ -106,7 +106,7 @@ board  deploy preflight: shell_id == static_id ; crc/len ; pair ; clearing fits 
 
 The partial bitstream cannot carry this binding itself: every `-cell` write says `UserID=0XFFFFFFFF`, and the partition's frame box is identical on all three statics measured (§4). That is why the receipt exists. A hand-made manifest can claim any static_id. A receipt's static_id is a CRC that the build computed from the bytes it opened.
 
-## 3. The generated Tcl (`docs/design/build_rm.tcl.template`)
+## 3. The generated Tcl (`src/harness_manager/services/kit/templates/build_rm.tcl.template`)
 
 ### 3.1 Shape
 
@@ -403,4 +403,4 @@ Everything ran on srv03335: Vivado 2024.1, `nice -n 10`, `general.maxThreads 2`,
 - A wrong static is refused: `HDPRVerify-08`, then `12-3515 … not compatible`.
 - 2024.1 refuses a 2026.1 DCP (`Runs 36-378`).
 
-**Artefacts** are in `tools/spike_kit_guide/`: `render_build_rm.py`, `spike_rm.sv`, `partial_check.py`, `test_partial_check.py` and `pack_receipt.py`. The `/tmp/guide-*` copies have been deleted.
+**Artefacts** were in `tools/spike_kit_guide/`: `render_build_rm.py`, `spike_rm.sv`, `partial_check.py`, `test_partial_check.py` and `pack_receipt.py`. The `/tmp/guide-*` copies have been deleted. **Lane KIT-CORE moved them into the product:** the template is package data (`src/harness_manager/services/kit/templates/`), `partial_check.py` is `src/harness_manager_mps3/bitcheck.py`, its tests are `tests/unit/test_kit_bitcheck.py`, `render_build_rm.py` and `pack_receipt.py` became `services/kit/render.py`, `services/kit/build.py` and `harness_manager_mps3/kit.py` (`pack_receipt`), and `spike_rm.sv` is `tests/fakes/kit_fixture/spike_rm.sv`.

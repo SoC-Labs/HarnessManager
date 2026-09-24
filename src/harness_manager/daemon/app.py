@@ -95,7 +95,8 @@ JsonBody = Annotated[Any, Body()]
 
 
 #: Extension router modules, loaded in this order if present (docs/API.md).
-EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "panel_api")
+EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "panel_api",
+              "kit_api")
 
 
 @dataclass

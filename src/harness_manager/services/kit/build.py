@@ -21,6 +21,7 @@ MPS3 pack writes ``pyverify``'s overlay triple).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from harness_manager.core.pack import KitCheck
 
@@ -110,3 +111,55 @@ def load(path: Path) -> BuildReceipt:
                                    "run the build first")
         p = found[0]
     return load_receipt(p)
+
+
+def _pack_of(r: BuildReceipt, default: str) -> str:
+    return r.kit_id.split("/", 1)[0] if "/" in r.kit_id else default
+
+
+def check_any(kits: Any, path: Path, *, clearing: Path | None = None, static_id: str = "",
+              identity: Any = None, pack: str = "mps3"
+              ) -> tuple[list[KitCheck], dict[str, Any], str, BuildReceipt | None]:
+    """``kit check`` for the CLI and the API: a receipt (or a build dir: its newest receipt)
+    with its files and pair, else a bare partial (``clearing`` beside it). With the kit of
+    the static cached, the pair is held to its ``rp.frames``; with a board identity, the
+    build's static to the board's (identity). Returns (checks, facts, static_id, receipt)."""
+    p = Path(path)
+    if p.is_dir() or p.suffix.lower() == ".json":
+        r = load(p)
+        checks = receipt_checks(r)
+        facts: dict[str, Any] = {"receipt": r.to_json()}
+        sid = r.get("static_id")
+        files = receipt_files(r)
+        if r.state == "passed" and files.get("partial") and files["partial"].is_file():
+            kit = kits.get(sid) if sid else None
+            adapter = kits.adapter_for(_pack_of(r, pack))
+            bit = files["partial"].with_suffix(".bit")
+            pair, facts["pair"] = adapter.check_pair(
+                bit if bit.is_file() else files["partial"], files.get("clearing"),
+                kit=kit.manifest if kit else None,
+                bin_path=files["partial"] if bit.is_file() else None)
+            checks += pair
+            if kit is None:
+                checks.append(KitCheck("kit", "unchecked", f"no kit for {sid} in the cache: "
+                                                           "the frame box was not compared"))
+        if identity is not None and getattr(identity, "shell_id", "") and sid:
+            same = same_id(identity.shell_id, sid)
+            checks.append(KitCheck("board_static", "ok" if same else "mismatch",
+                                   f"built for {sid}; the board runs {identity.shell_id}",
+                                   identity=True))
+        return checks, facts, sid, r
+    if not p.is_file():
+        from harness_manager.core.errors import AbsentError
+
+        raise AbsentError(f"no such file: {p}", hint="a receipt (.json), a build directory, "
+                                                   "or a partial (.bin/.bit)")
+    sid = hex32(parse_u32(static_id)) if static_id else ""
+    kit = kits.get(sid) if sid else None
+    checks, facts = kits.adapter_for(pack).check_pair(p, clearing,
+                                                      kit=kit.manifest if kit else None)
+    checks = list(checks)
+    if sid and kit is None:
+        checks.append(KitCheck("kit", "unchecked", f"no kit for {sid} in the cache: the "
+                                                   "frame box was not compared"))
+    return checks, facts, sid, None

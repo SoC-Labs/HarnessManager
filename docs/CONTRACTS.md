@@ -47,6 +47,8 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `panel.state` `{page, owner, pending, banner, card, count, seq, source, touch, sessions}` | what the board's front panel shows changed (P1; `source`: panel \| rebuilt) |
 | `panel.tap` `{seq, kind, on, ms_ago, at, notify, request?}` | someone touched the panel; once per `seq`. `on: "request"` in the lease holder's Harness Manager carries `notify: "holder"` and the open request: a notice, never a release (P1, decision P2) |
 | `panel.locate` `{state: on\|off, until, seconds, who}` | Identify started or stopped on a board (P1) |
+| `kit.progress` `{static_id, phase, bytes, total}` | a DUT build kit is being fetched (KIT-CORE; `POST /kits/fetch`) |
+| `kit.stored` `{static_id, source, kit_id}` | a build kit entered the kit cache: fetched or imported (KIT-CORE) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
 
@@ -81,6 +83,11 @@ These are the interfaces every team codes against. They are owned by the lead an
   - `session.hub.client.transport` is `"ssh"` or `"rest"`. A REST client has `notes_supported = False` (+ `notes_reason`), `can_revoke() -> (bool, reason)` (force-release needs an admin token), `observe(event)` and `relevant(event)`.
   - `session.reach` may be a `DirectReach` (`status()['mode'] == 'direct'`, with the plan).
 - **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
+- **DUT build kits (KIT-CORE, additive to `core.pack`).**
+  - `BuildProfile` (the KIT-GUIDE pack hook, CCR KG-1): part, partition (`rp_inst`, `rp_pblock`, `boundary_ports`, `boundary_bits`), `clr_max`, the Vivado release, `static_usercode`, `kit_id`, the user design-id range; `source` is `kit` or `pack`.
+  - `KitCheck(name, state, detail, identity)` with `state` `ok | mismatch | warning | unchecked`, and `kit_refusal(items, what)`: any `mismatch` refuses (identity: `IncompatibleError` 14, else `RefusedError` 15); `warning` and `unchecked` never do. A Vivado release mismatch is a `warning` in HM; the generated `build_rm.tcl` refuses another major.minor (david K4).
+  - `KitAdapter` (`build_profile`, `check_kit`, `kit_from_dir`) is found by module convention, like the pin model: `<pack package>.kit:make_kit_adapter()` (`harness_manager.services.kit.kit_adapter(pack)`), so a pack opts in without an edit to its `pack.py`. The MPS3 one also offers `taken_designs`, `propose_rm_id`, `rm_id_checks`, `check_pair`, `pack_receipt` and `import_overlay`. A pack without the module: `UnavailableError("build_kit", ...)`.
+  - Kits live in the engine's `ContentStore`: files as kind `rm_kit_file` (meta `static_id, path, role`), then `kit.json` as kind `rm_kit` (meta `static_id, board_type, vivado, usercode, impl, source, imported_at`).
 
 ## Changing a contract
 

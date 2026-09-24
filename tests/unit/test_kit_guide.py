@@ -336,3 +336,13 @@ def test_why_names_a_fix_for_every_gate_the_template_has():
     assert gates <= set(guide.GATE_HELP), gates - set(guide.GATE_HELP)
     with pytest.raises(UsageError):
         guide.why("nonesuch")
+
+
+def test_fetching_the_kit_does_not_wait_for_vivado(tmp_path):
+    empty = KitService(ContentStore(tmp_path / "s"), tmp_path / "w", hub=HubSource(None))
+    g = guide.guide(empty, static_id="0x72BB0A36",
+                    vivado=vivado.VivadoFound(None, reason="not on PATH"))
+    s = states(g)
+    assert s["tools"] == "next" and s["kit"] == "next" and s["build"] == "blocked"
+    assert g.next.id == "tools"                          # the first of them
+    assert "waits for 2 tools, 3 kit" in g.steps[4].reason

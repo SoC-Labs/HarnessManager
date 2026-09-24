@@ -10,8 +10,8 @@ Harness Manager works out from what it can detect (KIT-GUIDE KG-A; docs/design/D
 | 5 | build   | a receipt with ``state: passed`` is in the build directory |
 | 6 | check   | the receipt, its files and the pair pass every check, and the overlay is in the store |
 
-States: ``done`` · ``next`` (the one thing to do now) · ``blocked`` (waits for an earlier
-step, or for something only the user can do) · ``failed`` (a check said no: the detail
+States: ``done`` · ``next`` (can be done now; ``Guide.next`` is the first such step) ·
+``blocked`` (waits for an earlier step) · ``failed`` (a check said no: the detail
 says which) · ``unchecked`` (HM cannot tell from here; never a pass). The licence is always
 unchecked: only a synth run can tell.
 
@@ -339,18 +339,17 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
 
 
 def _resolve(steps: dict[str, Step], raw: dict[str, str]) -> None:
-    """raw done/failed/unchecked/todo/blocked -> the five states; the first actionable todo
-    is ``next``."""
-    nxt = None
+    """raw done/failed/unchecked/todo/blocked -> the five states. Every todo whose
+    prerequisites are done is ``next`` (fetching the kit does not wait for Vivado);
+    ``Guide.next`` is the first of them."""
     for sid, s in steps.items():
         r = raw.get(sid, "blocked")
         if r in ("done", "failed", "unchecked"):
             s.state = r
             continue
         waits = [steps[n] for n in NEEDS[sid] if raw.get(n) not in ("done", "unchecked")]
-        if r == "todo" and not waits and nxt is None:
+        if r == "todo" and not waits:
             s.state = "next"
-            nxt = s
         else:
             s.state = "blocked"
             if waits and not s.reason:

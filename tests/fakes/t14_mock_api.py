@@ -386,6 +386,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     from .p1_mock_panel import register as register_panel
     app.state.panel = PanelSim(eng)
     register_panel(app, state, app.state.panel, _ok)
+    # KIT-CORE's kit routes (docs/API.md "DUT build kits"): the real kit_api over the mock.
+    from .kit_mock import register as register_kit
+    register_kit(app, state, _accepted)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)

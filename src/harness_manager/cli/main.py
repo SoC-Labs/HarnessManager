@@ -35,7 +35,7 @@ from .output import TSV_COLUMNS, Result, report_error
 
 log = logging.getLogger(__name__)
 
-NO_ENGINE = {"help", "version", "xdc"}
+NO_ENGINE = {"help", "version", "xdc", "kit"}
 
 
 class _Parser(argparse.ArgumentParser):
@@ -328,6 +328,11 @@ def make_parser() -> argparse.ArgumentParser:
     # -- panel / identify (P1: the board's front panel) ------------------------------------
     from . import cmd_panel
     verbs.update(cmd_panel.register(sub))
+
+    # -- kit (KIT-CORE: DUT build kits and the build guide; opens a board only for TARGET) --
+    from . import cmd_kit
+    cmd_kit.register(sub)
+    verbs["kit"] = sub.choices["kit"]
     return p
 
 

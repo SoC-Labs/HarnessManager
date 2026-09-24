@@ -61,6 +61,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "harness_manager.web" = ["static/**/*", "static/*"]
 "harness_manager_mps3" = ["openocd_cfg/*", "pins/*.json", "pins/designs/*.json"]
+"harness_manager.services.kit" = ["templates/*.template"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

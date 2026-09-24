@@ -266,6 +266,32 @@ Events (docs/CONTRACTS.md):
 - `panel.tap` once per tap on the glass (de-duplicated by `seq`). A tap `on: "request"` (the lease-request banner) carries `notify: "holder"` and `request: {id, by}` in the lease holder's own Harness Manager: it notifies the holder and never releases;
 - `panel.locate` when Identify starts or stops.
 
+### DUT build kits and the build guide (KIT-CORE, `kit_api.py`)
+
+docs/design/DUT_BUILD_KIT_STORAGE.md and docs/design/DUT_BUILD_GUIDE.md are the designs; david's decisions K1-K9 (2026-09-24) apply. A **kit** is one static's build inputs (the locked static DCP, whose CRC-32 is the static_id, plus `kit.json`), cached in the engine's content store.
+
+| Method and path | Returns |
+|---|---|
+| `GET /kits` | `{kits: [summary], sources: [{name, available, reason}]}`. A summary is `{static_id, kit_id, board_type, part, vivado: {release, build, checkpoint_version}, static_usercode, harness_impl, access, ip_class, licence_note, size, files, sha256, source, imported_at}`. |
+| `GET /kits/{static_id}` | `{kit: summary, manifest: kit.json, checks}`: the blobs re-hashed and the DCP's CRC-32 recomputed. 404 when not cached. |
+| `POST /kits/fetch` `{static_id?, board_id?, source?}` | 202 job `kit_fetch` (engine-wide). `source`: `cache`, `channel`, `hub` or an absolute path; default, in that order. The result is `{kit, source, checks}`; a kit for another static than the board fails the job 14. |
+| `POST /kits/import` `{path}` | `{kit, already, checks}`: a kit directory, a kit zip, or loose mint files (`fielded/<sid>/`). |
+| `POST /kits/{static_id}/export` `{out_dir}` | `{out_dir, written}`: a plain directory Vivado opens. |
+| `GET /kits/{static_id}/zip` | `application/zip`: `<static_id>/kit.json` and every kit file, for a browser that is not on the daemon's host. |
+| `GET /boards/{bid}/kit` | `{board_id, static_id, cached, kit, profile, checks, sources, vivado}` for the static the board runs: its kit, the partition facts (`BuildProfile`), the kit against the live `shell_id` and `usercode`, and the Vivado found against the kit's release. |
+| `GET /guide?pack=&static_id=&design=&build_dir=` | the guide: `{pack, static_id, board_id, kit_id, profile, vivado, design, build_dir, rm_id, steps, next}`. Each step is `{id, n, title, state, detail, reason, actions: [{kind: "copy", text}], checks}`; `state` is `done`, `next`, `blocked`, `failed` or `unchecked`; ids are `target`, `tools`, `kit`, `wrapper`, `build`, `check`. |
+| `GET /boards/{bid}/guide?design=&build_dir=` | the same guide for the board's live static and identity. |
+| `POST /guide/script` `{static_id, design, pack?, out_dir?, kit_dir?, jobs?, stop_after?, format?}` | `{design, rm_id, rm_id_proposed, static_id, kit_id, files: {name: text}, params, checks, command, receipt, out_dir, written}`. With `out_dir` it writes the build directory. `format: "zip"` answers `application/zip` (the files plus the kit). 409 REFUSED with `error.data.checks` when the design fails an XDC check. |
+| `POST /kits/check` `{path, clearing?, static_id?, board_id?}` | `{passed, static_id, checks, facts}`, 200 whether or not it passed: a receipt (or a build directory) with its files and pair, or a bare partial. |
+| `POST /kits/pack` `{path, out_dir?, import?}` | `{overlay_dir, manifest, imported, checks}`: the overlay triple written from a passed receipt (`build_receipt` names it), and with `import: true` put in the content store, so it shows in Program. 409 REFUSED with `error.data.checks` for a build that did not pass. |
+
+- **Paths** (`path`, `out_dir`, `kit_dir`, `build_dir`, `source`, a `design` file) are absolute paths on the daemon's host (400 USAGE otherwise). The build runs on that host (david K6), and the daemon listens on loopback. `design` may also be a built-in design's name or an inline design object (docs/XDC_EXPORT.md), plus the optional `rm_id` and `build: {top, sources, include_dirs, defines, synth_hook, synth_dcp, rm_xdc}`.
+- **Checks** are `{name, state, detail, identity}` with `state` `ok`, `mismatch`, `warning` or `unchecked`. Any `mismatch` refuses: 409 with name INCOMPATIBLE (14) when it is an identity check (the board's static or usercode), else REFUSED (15). `warning` and `unchecked` never refuse. A Vivado release that differs from the kit's is a `warning` here; the generated `build_rm.tcl` refuses another major.minor itself (david K4).
+- **User rm_ids** (david K8): a design with no `rm_id` gets a proposal (design id `0x8000`-`0xFFFF`, stable per name, `rm_id_proposed: true`); a clash with the overlay catalogue is a `warning`.
+- **Events:** `kit.progress {static_id, phase, bytes, total}` during a fetch; `kit.stored {static_id, source, kit_id}` when a kit enters the cache (docs/CONTRACTS.md).
+- **Not yet:** the `channel` source reports itself unavailable until lane OTA-C adds the `rm-kit` channel kind; HM does not run Vivado (`kit build` prints the command).
+- **Errors:** 400 USAGE for a bad id, path, `format`, `jobs` or `stop_after`; 404 ABSENT for a kit not in the cache, a missing receipt or file, or a board that is not open; 422 UNAVAILABLE for a pack with no build kit.
+
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)
 - **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.
 - **A name is display only.** It never keys a board: `board_id` does, and so do boards.toml tables, session locks and leases. A hub id is shown with `_` as `-` (`mps3_01` becomes `mps3-01`).

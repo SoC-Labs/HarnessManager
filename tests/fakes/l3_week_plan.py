@@ -85,6 +85,21 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/boards/{bid}/panel/frame"),
         ("POST", "/boards/{bid}/identify"),
     ),
+    # KIT-CORE: served in the mock by tests/fakes/kit_mock.py over the real kit service.
+    "kit_api": (
+        ("GET", "/kits"),
+        ("GET", "/kits/{static_id}"),
+        ("POST", "/kits/fetch"),
+        ("POST", "/kits/import"),
+        ("POST", "/kits/{static_id}/export"),
+        ("GET", "/kits/{static_id}/zip"),
+        ("GET", "/boards/{bid}/kit"),
+        ("GET", "/guide"),
+        ("GET", "/boards/{bid}/guide"),
+        ("POST", "/guide/script"),
+        ("POST", "/kits/check"),
+        ("POST", "/kits/pack"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles
