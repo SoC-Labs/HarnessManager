@@ -32,6 +32,8 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import socket
+import sys
 import threading
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
@@ -157,9 +159,13 @@ class HubEventStream:
         sock = getattr(conn, "sock", None)
         if sock is not None:
             with contextlib.suppress(OSError):
-                import socket
-
                 sock.shutdown(socket.SHUT_RDWR)
+            if sys.platform == "win32":
+                # Windows: shutdown does not wake a recv blocked in the reader thread, and
+                # closing the response would then wait on its buffer lock for ever. Closing
+                # the handle itself does wake it.
+                with contextlib.suppress(OSError):
+                    socket.close(sock.detach())
         with contextlib.suppress(Exception):
             conn.close()
 
