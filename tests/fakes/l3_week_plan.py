@@ -114,6 +114,19 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/boards/{bid}/xvc/tcl"),
         ("GET", "/boards/{bid}/xvc/ltx"),
     ),
+    # HARNESS-CAT: served in the mock by tests/fakes/hcat_mock_harness.py (the real routes
+    # and catalogue over a simulated update service).
+    "harness_api": (
+        ("GET", "/harness/catalog"),
+        ("POST", "/harness/catalog/refresh"),
+        ("GET", "/harness/releases/{version}"),
+        ("POST", "/harness/releases/{version}/fetch"),
+        ("POST", "/boards/{bid}/harness/install"),
+        ("PUT", "/boards/{bid}/harness/pin"),
+        ("DELETE", "/boards/{bid}/harness/pin"),
+        ("GET", "/boards/{bid}/harness/history"),
+        ("POST", "/boards/{bid}/harness/rollback"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles

@@ -4,8 +4,8 @@ docs/API.md "Week-plan additions -> Power and update" (frozen):
 
 | Route | Job |
 |---|---|
-| ``POST /update/check`` ``{board_id?, source?, channel?}`` | ``update_check`` (read-only) |
-| ``POST /boards/{bid}/update/harness`` ``{fingerprint, rekey_phrase?}`` | ``update_harness`` |
+| ``POST /update/check`` ``{board_id?, source?, channel?, version?}`` | ``update_check`` (read-only) |
+| ``POST /boards/{bid}/update/harness`` ``{fingerprint, rekey_phrase?, version?}`` | ``update_harness`` |
 | ``POST /boards/{bid}/update/rollback`` | ``update_rollback`` |
 | ``POST /update/app`` ``{version?}`` | ``update_app`` |
 | ``POST /update/app/rollback`` | ``update_app_rollback`` |
@@ -19,8 +19,11 @@ Consent is code, the same rules as the CLI (``cli/cmd_update.py``):
 
 - **The plan the user saw is the plan that runs.** ``update_check`` returns the
   board's plan with its ``fingerprint``. ``update/harness`` recomputes the plan (from
-  the channel and source that check used) and refuses with 409 REFUSED, before any
-  job, when the fingerprint differs: the board or the channel changed since.
+  the channel, source and ``version`` that check used) and refuses with 409 REFUSED,
+  before any job, when the fingerprint differs: the board or the channel changed since.
+  A check with a ``version`` plans that release, and the install recomputes the plan
+  for it (HARNESS-CAT: it used to drop the version, so only the current release could
+  be installed).
 - **A re-key needs the typed phrase.** ``rekey_phrase`` must equal the plan's
   ``consent_phrase`` (``REKEY <static_id>``). Nothing implies it: there is no "yes"
   that re-keys a board.
@@ -78,7 +81,8 @@ ENGINE = ""
 #: Outcome results (docs/CONTRACTS.md ``update.done``) that fail the job.
 RESULT_WRITTEN = "written-not-running"
 RESULT_RESTORED = "restored"
-#: How many checked plans the daemon remembers: (board, fingerprint) -> (channel, source).
+#: How many checked plans the daemon remembers: (board, fingerprint) -> (channel, source,
+#: version).
 REMEMBER = 64
 
 
@@ -117,8 +121,9 @@ def register(ctx: RouteContext) -> None:
     # Where each checked plan came from, so update/harness recomputes it from the SAME
     # channel and source: by (board, fingerprint), and each board's last check (for a
     # fingerprint the daemon never issued: it is then compared with that board's channel).
-    checked: OrderedDict[tuple[str, str], tuple[str | None, str | None]] = OrderedDict()
-    last_check: dict[str, tuple[str | None, str | None]] = {}
+    Where = tuple[str | None, str | None, str | None]      # channel, source, version
+    checked: OrderedDict[tuple[str, str], Where] = OrderedDict()
+    last_check: dict[str, Where] = {}
 
     # -- plumbing ------------------------------------------------------------------------------
 
@@ -133,19 +138,21 @@ def register(ctx: RouteContext) -> None:
         return svc
 
     def remember(board_id: str, fingerprint: str, channel: str | None,
-                 source: str | None) -> None:
+                 source: str | None, version: str | None = None) -> None:
         with mu:
-            checked[(board_id, fingerprint)] = (channel, source)
+            checked[(board_id, fingerprint)] = (channel, source, version)
             checked.move_to_end((board_id, fingerprint))
             while len(checked) > REMEMBER:
                 checked.popitem(last=False)
-            last_check[board_id] = (channel, source)
+            last_check[board_id] = (channel, source, version)
 
-    def recall(board_id: str, fingerprint: str) -> tuple[str | None, str | None]:
-        """The channel and source to plan from: that check's, else the board's last check's,
-        else the defaults (``$HARNESS_MANAGER_UPDATE_CHANNEL``/``_SOURCE``, then GitHub)."""
+    def recall(board_id: str, fingerprint: str) -> Where:
+        """The channel, source and version to plan from: that check's, else the board's last
+        check's, else the defaults (``$HARNESS_MANAGER_UPDATE_CHANNEL``/``_SOURCE``, then
+        GitHub; the channel's current release)."""
         with mu:
-            return checked.get((board_id, fingerprint)) or last_check.get(board_id) or (None, None)
+            return (checked.get((board_id, fingerprint)) or last_check.get(board_id)
+                    or (None, None, None))
 
     def refuse_while_jobs(what: str) -> None:
         running = d.jobs.running()
@@ -187,6 +194,7 @@ def register(ctx: RouteContext) -> None:
         b = _obj(body)
         board_id = _opt_str(b, "board_id")
         channel, source = _opt_str(b, "channel"), _opt_str(b, "source")
+        version = _opt_str(b, "version")
         svc = service()
         session = ctx.board(board_id) if board_id else None
 
@@ -194,6 +202,10 @@ def register(ctx: RouteContext) -> None:
             progress("check", 0, 0)
             report = svc.check(channel=channel, source=source, session=session)
             plan = report.get("plan")
+            if session is not None and version is not None:
+                # HARNESS-CAT: plan the release asked for, not the channel's current one
+                p, _ = svc.plan_harness(session, channel=channel, source=source, version=version)
+                report["plan"] = plan = plan_json(p)
             need_fingerprint = session is not None and not (plan and "fingerprint" in plan)
             if need_fingerprint or "releases" not in report:
                 # CCR L4-1: until check() returns them, plan once more for the fingerprint
@@ -206,7 +218,7 @@ def register(ctx: RouteContext) -> None:
                     verified = svc.fetch_channel(channel, source)
                 report.setdefault("releases", releases_json(verified.channel))
             if session is not None and plan is not None:
-                remember(board_id or "", plan["fingerprint"], channel, source)
+                remember(board_id or "", plan["fingerprint"], channel, source, version)
             return report
 
         if session is not None:
@@ -229,8 +241,9 @@ def register(ctx: RouteContext) -> None:
         remembered = recall(bid, fingerprint)
         channel = _opt_str(b, "channel") or remembered[0]
         source = _opt_str(b, "source") or remembered[1]
+        version = _opt_str(b, "version") or remembered[2]
         with d.gates.op(bid):
-            plan, verified = svc.plan_harness(s, channel=channel, source=source)
+            plan, verified = svc.plan_harness(s, channel=channel, source=source, version=version)
         summary = plan_json(plan)
         if summary["fingerprint"] != fingerprint:
             raise with_data(RefusedError(

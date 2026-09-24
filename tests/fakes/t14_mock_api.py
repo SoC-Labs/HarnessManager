@@ -392,6 +392,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # XVC-CORE's fabric-debug routes (docs/API.md "Fabric debug over XVC"), simulated.
     from .x3_mock_xvc import register as register_xvc
     app.state.xvc = register_xvc(app, state, sim, _ok, _accepted)
+    # HARNESS-CAT's harness versions routes (docs/API.md "Harness versions"): the real
+    # routes and catalogue over a simulated update service.
+    from .hcat_mock_harness import register as register_harness
+    app.state.harness = register_harness(app, state, sim, _accepted)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)
