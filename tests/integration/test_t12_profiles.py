@@ -228,11 +228,17 @@ def test_linux_reboot_is_an_outage_then_up_ms_restarts(tmp_path):
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
         session = pack_for(vb).open(vb.candidate())
         port = vb.shell.control_port
-        time.sleep(0.2)
+        time.sleep(0.2)                                         # some uptime to lose
         before = raw(port, {"op": "stats"})["up_ms"]
         assert raw(port, {"op": "reboot"})["ok"]
-        time.sleep(0.3)
-        assert session.health().control_channel == "offline"   # the OS is booting
+        # The outage is a window (0.1 s after the reply, for 1 s): poll into it rather than
+        # sleep 0.3 s and hope a loaded host has not run past it (Q1).
+        states = []
+        deadline = time.monotonic() + 5
+        while "offline" not in states and time.monotonic() < deadline:
+            states.append(session.health().control_channel)
+            time.sleep(0.02)
+        assert "offline" in states, states[-5:]                # the OS is booting
         deadline = time.monotonic() + 5
         while session.health().control_channel != "idle" and time.monotonic() < deadline:
             time.sleep(0.1)
