@@ -6,14 +6,17 @@
 - **Offline tolerance:** an unreachable or missing source is logged once per outage and
   recorded in ``last_check.json`` (``error_kind: offline``); nothing is published. A bad
   signature or a serial rollback is logged as a warning every time (``error_kind: refused``).
+- **What it reads:** the ``hm-app`` catalogue (OTA-C), never the harness catalogues (lane H6).
+  The offer is OTA-C's ``appstage.offer_app``: a version marked bad is never offered.
 - **What it publishes:** ``update.available {channel, serial, app, notes, staged, harness,
   source: "checker"}``, only when the offer CHANGES (a new version, or it became staged),
-  never on every check. A version marked bad is never offered (``AppUpdater.offer``).
+  never on every check. OTA-C's ``stage_app`` adds ``update.app.staged`` when it stages.
 - **Policy (U3, U6):** the effective mode is the stricter of the admin policy and the user's
   ``auto`` setting (``selfupdate.effective``). ``stage`` (the default): the offer is staged
-  in the background as an ``update_stage`` job (engine-wide, so the gates and a drain apply;
-  a busy service defers it to a retry in 10 minutes). ``notify``: published only. ``off``,
-  and every developer install: the checker does nothing at all (no fetch, no event).
+  in the background by OTA-C's ``appstage.stage_app`` inside an ``update_stage`` job
+  (engine-wide, so the gates and a drain apply; a busy service defers it to a retry in 10
+  minutes). ``notify``: published only. ``off``, and every developer install: the checker
+  does nothing at all (no fetch, no event).
 - **It never applies anything.** Applying is ``POST /update/app/apply``, on a click.
 
 ``HARNESS_MANAGER_UPDATE_FIRST_CHECK_S`` moves the first check (tests, the spike).
@@ -94,7 +97,7 @@ class UpdateChecker:
         self._offline_logged = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._mu = threading.Lock()
+        self._mu = threading.RLock()        # a job may run its stage on this thread
 
     # -- the timer --
 
@@ -155,8 +158,11 @@ class UpdateChecker:
         rec: dict[str, Any] = {"at": self.now(), "mode": eff["auto"],
                                "interval_s": eff["check_interval_s"], "error": "",
                                "announced": last.get("announced")}
+        from harness_manager.services.update.appstage import offer_app
+        from harness_manager.services.update.schema import CATALOG_APP
+
         try:
-            verified = svc.fetch_channel(eff["channel"] or None, None)
+            verified = svc.fetch_channel(eff["channel"] or None, None, catalog=CATALOG_APP)
         except HarnessError as exc:
             kind = error_kind(exc)
             rec.update(error=exc.message, error_kind=kind)
@@ -171,9 +177,12 @@ class UpdateChecker:
             return rec
         self._offline_logged = False
         ch = verified.channel
-        offer = app.offer(ch.app, ch.app_current) if ch.app_current else None
+        verdict = offer_app(ch, svc.app_version, svc.state, app=app)
+        offer = verdict.release
         rec.update(channel=ch.channel, serial=ch.serial, source=verified.url,
-                   available=offer.version if offer else "")
+                   catalog=CATALOG_APP, available=offer.version if offer else "")
+        if verdict.skipped_bad:
+            rec["skipped_bad"] = {"version": verdict.skipped_bad, "why": verdict.why}
         if offer is None:
             su.write_json(su.last_check_path(self.state_dir), rec)
             return rec
@@ -206,23 +215,31 @@ class UpdateChecker:
         rec["announced"] = key
 
     def _stage(self, svc: Any, verified: Any, offer: Any, ch: Any, rec: dict[str, Any]) -> bool:
-        """Stage ``offer`` (never switch). True when it is staged by the time this returns."""
+        """Stage ``offer`` with OTA-C's ``stage_app`` (never switches). True when it is staged
+        by the time this returns (inline); a job reports it later."""
+        from harness_manager.services.update.appstage import stage_app
+
+        def stage(progress: Any = None) -> dict[str, Any]:
+            # progress: (what, bytes, total), the job's own shape
+            return stage_app(svc, verified=verified, version=offer.version, auto=True,
+                             progress=progress)
+
         def run(progress: Any) -> Any:
             if callable(progress):
                 progress("stage", 0, 0)
-            out = svc.update_app(verified=verified, version=offer.version, switch=False)
-            # announced from the job thread: the tick has already returned
-            with self._mu:
-                last = su.read_json(su.last_check_path(self.state_dir)) or {}
-                after = {**last, "staged": True}
-                self._announce(ch, offer, True, after)
-                su.write_json(su.last_check_path(self.state_dir), after)
+            out = stage(progress)
+            if out.get("staged"):
+                # announced from the job thread: the tick has already returned
+                with self._mu:
+                    last = su.read_json(su.last_check_path(self.state_dir)) or {}
+                    after = {**last, "staged": True}
+                    self._announce(ch, offer, True, after)
+                    su.write_json(su.last_check_path(self.state_dir), after)
             return out
 
         if self.submit is None:
             try:
-                svc.update_app(verified=verified, version=offer.version, switch=False)
-                return True
+                return bool(stage().get("staged"))
             except HarnessError as exc:
                 rec["stage_error"] = exc.message
                 log.warning("staging harness-manager %s failed: %s", offer.version, exc.message)

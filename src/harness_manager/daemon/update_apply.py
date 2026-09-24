@@ -27,8 +27,9 @@ handover). Two halves live here.
 3. starts the NEW daemon with ``--resume`` (same port, same token);
 4. requires ``/health`` to report the new version within ``health_s`` (30) and to stay up,
    same pid, for ``stable_s`` (10), and the old token to still be accepted;
-5. otherwise: stops it, puts the pointer back, marks the version bad (``AppUpdater.mark_bad``:
-   never offered again), and starts the OLD daemon with the same resume;
+5. otherwise: stops it, puts the pointer back, marks the version bad (OTA-C's catalogue
+   store and the pointer, ``AppUpdater.mark_bad``: never offered again), and starts the OLD
+   daemon with the same resume;
 6. writes ``last_apply.json`` ``{id, from, to, result: applied|rolled-back|down|not-switched,
    phase, reason, seconds}``.
 
@@ -397,7 +398,9 @@ class Applier:
                                hint="stage one first: POST /api/v1/update/app "
                                     '{"stage_only": true}, or `harness-manager update app '
                                     "--apply`")
-        mark = app.bad(target)
+        from harness_manager.services.update.appstage import bad_reason
+
+        mark = bad_reason(svc.state, target, app=app) if hasattr(svc, "state") else app.bad(target)
         if mark is not None:
             raise RefusedError(f"harness-manager {target} is marked bad: "
                                f"{mark.get('reason') or 'its apply failed'}",
@@ -509,7 +512,11 @@ class Applier:
         reason = f"harness-manager {plan['to']}: {why}"
         log.warning("not applying: %s", reason)
         with contextlib.suppress(Exception):
-            self._service().app().mark_bad(plan["to"], why, phase="self-test")
+            from harness_manager.services.update.appstage import mark_bad
+
+            svc = self._service()
+            mark_bad(svc.state, plan["to"], why, phase="self-test")        # OTA-C's store
+            svc.app().mark_bad(plan["to"], why, phase="self-test")         # and the pointer
         su.write_json(su.last_apply_path(self.d.state_dir), {
             "id": plan["id"], "from": plan["from"], "to": plan["to"], "result": "refused",
             "phase": "self-test", "reason": why, "at": time.time(), "seconds": 0.0})
@@ -801,8 +808,8 @@ def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detac
         verdict("not-started", "stop", f"the old daemon (pid {a.old_pid}) did not exit within "
                                        f"{OLD_PID_WAIT_S:g} s")
         return 4
-    up = AppUpdater(AppLayout(Path(a.root)), LocalBusyProbe(sd),
-                    windows=os.name == "nt", running_version=a.from_version)
+    up = AppUpdater(AppLayout(Path(a.root)), LocalBusyProbe(sd), windows=os.name == "nt",
+                    running_version=a.from_version, state_dir=sd)
     before = up.state()
 
     def restart(pointer: str, want: str, why: str) -> bool:

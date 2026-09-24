@@ -46,7 +46,7 @@ App self-update, apply and restart (lane OTA-D, additive; ``update_apply.py``,
 | Route | |
 |---|---|
 | ``GET /update/app`` | the pointer, versions, bad marks, staged, last check, last apply, the policy, settings, the pending apply |
-| ``POST /update/app`` ``{version?, stage_only?}`` | ``stage_only: true`` stages and never switches (the job ``update_app``) |
+| ``POST /update/app`` ``{version?, stage_only?, catalog?}`` | ``stage_only: true``: OTA-C's ``stage_app`` (the ``hm-app`` catalogue by default); never switches (the job ``update_app``) |
 | ``POST /update/app/apply`` ``{version?, confirm?, drain_timeout_s?, health_s?, stable_s?}`` | 202 ``{apply}``: drain, restart on the same port and token, health-check, roll back. 409 SOFT_BUSY/APPLYING/HELD |
 | ``POST /update/app/cancel`` | ``{apply}``: ends a drain; 409 once the restart began |
 | ``GET /update/settings`` · ``PUT /update/settings`` ``{channel?, auto?}`` | ``{settings, effective, policy}`` |
@@ -305,10 +305,20 @@ def register(ctx: RouteContext) -> None:
         if not stage_only:
             refuse_while_jobs("update the app")
 
+        catalog = _opt_str(b, "catalog")
+
         def run(progress: Callable[[str, int, int], None]) -> Any:
             progress("stage", 0, 0)
+            if stage_only:
+                # the click path (OTA-C ``stage_app``, auto=False): the hm-app catalogue by
+                # default; it never switches (the apply does, with a restart)
+                from harness_manager.services.update.appstage import stage_app
+                from harness_manager.services.update.schema import CATALOG_APP
+
+                return stage_app(svc, channel=channel, source=source, version=version,
+                                 catalog=catalog or CATALOG_APP, auto=False, progress=progress)
             return svc.update_app(channel=channel, source=source, version=version,
-                                  switch=not stage_only)
+                                  catalog=catalog)
 
         return submit_engine_wide("update_app", run)
 

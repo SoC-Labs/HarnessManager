@@ -294,7 +294,8 @@ def test_a_version_that_does_not_stay_up_is_rolled_back_and_never_offered_again(
     # the pointer is back, and the version is marked bad in both places
     ptr = w.inst.pointer()
     assert ptr["current"] == "" and ptr["versions"][version]["state"] == "bad"
-    assert version in w.inst.bad() and w.inst.bad()[version]["phase"] == phase
+    bad = w.inst.bad(w.state)
+    assert version in bad and bad[version]["phase"] == phase
     deadline = time.monotonic() + 30
     log = ""
     while "update.rolled_back" not in log and time.monotonic() < deadline:

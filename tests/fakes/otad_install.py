@@ -132,8 +132,8 @@ class FakeInstall:
 
     def reset(self) -> None:
         """The pointer as installed (current = the installer's venv), every other version
-        staged, no bad marks."""
-        (self.root / "bad_versions.json").unlink(missing_ok=True)
+        staged, no bad marks in the pointer (each test has its own state dir, so its own
+        OTA-C catalogue store)."""
         (self.root / "current.json").unlink(missing_ok=True)
         _launch.register(self.root, self.root / "venv", self.installed, extras=[], windows=False)
         ptr = json.loads((self.root / "current.json").read_text())
@@ -145,9 +145,11 @@ class FakeInstall:
     def pointer(self) -> dict:
         return json.loads((self.root / "current.json").read_text())
 
-    def bad(self) -> dict:
-        path = self.root / "bad_versions.json"
-        return json.loads(path.read_text()) if path.exists() else {}
+    @staticmethod
+    def bad(state_dir: Path) -> dict:
+        """OTA-C's catalogue store of bad versions (``hm-app``) in a state dir."""
+        path = Path(state_dir) / "update" / "bad_versions.json"
+        return json.loads(path.read_text()).get("hm-app", {}) if path.exists() else {}
 
 
 def env(work: Path, *, extra: dict[str, str] | None = None) -> dict[str, str]:

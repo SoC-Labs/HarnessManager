@@ -68,9 +68,16 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.session import SessionLock, pid_alive
 
-from .schema import AppRelease
-from .selfupdate import BadVersions, venv_in_use
-from .state import UpdateState, atomic_write_bytes, atomic_write_json, read_json, safe_name
+from .schema import CATALOG_APP, AppRelease
+from .selfupdate import venv_in_use
+from .state import (
+    BadVersions,
+    UpdateState,
+    atomic_write_bytes,
+    atomic_write_json,
+    read_json,
+    safe_name,
+)
 from .version import at_least, is_version, parse_version
 
 UV_ENV = "HARNESS_MANAGER_UV"
@@ -80,7 +87,8 @@ STATE_STAGING = "staging"
 STATE_STAGED = "staged"
 STATE_FAILED = "failed"
 #: A version whose apply failed its health check (lane OTA-D): never offered, staged or
-#: switched to again. The mark also lives in ``<root>/bad_versions.json`` (it outlives prune).
+#: switched to again. The mark also lives in OTA-C's catalogue store (``state.BadVersions``,
+#: ``<state_dir>/update/bad_versions.json``), which outlives prune.
 STATE_BAD = "bad"
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
@@ -232,6 +240,8 @@ class AppUpdater:
     dev_install: str = ""
     # why the administrator's policy file turned self-update off ("": it did not)
     policy_off: str = ""
+    # the state dir whose update/bad_versions.json (OTA-C) records bad versions (lane OTA-D)
+    state_dir: Path | None = None
 
     @classmethod
     def for_install(cls, state_dir: Path, *, prefix: str | None = None, policy_off: str = "",
@@ -242,14 +252,15 @@ class AppUpdater:
         root = None if dev else _launch.install_root(prefix)
         if root is None:
             return cls(AppLayout(UpdateState.under(state_dir).app), LocalBusyProbe(state_dir),
-                       dev_install=dev or "not an installed copy", policy_off=policy_off, **kw)
+                       dev_install=dev or "not an installed copy", policy_off=policy_off,
+                       state_dir=Path(state_dir), **kw)
         info = _launch.read_json(root / _launch.INSTALL_JSON) or {}
         uv = str(info.get("uv") or "")
         if os.environ.get(UV_ENV, "").strip() or not uv or not Path(uv).exists():
             uv = ""
         extras = tuple(e for e in info.get("extras") or () if isinstance(e, str))
         return cls(AppLayout(root), LocalBusyProbe(state_dir), uv=uv or None, extras=extras,
-                   policy_off=policy_off, **kw)
+                   policy_off=policy_off, state_dir=Path(state_dir), **kw)
 
     # -- state --
 
@@ -474,9 +485,10 @@ class AppUpdater:
         """Why ``version`` is marked bad (``{reason, phase, at}``), or None."""
         if not version:
             return None
-        mark = BadVersions(self.layout.root).reason(version)
-        if mark is not None:
-            return mark
+        if self.state_dir is not None:
+            mark = BadVersions(UpdateState.under(self.state_dir)).get(CATALOG_APP, version)
+            if mark is not None:
+                return mark
         info = self.state()["versions"].get(version) or {}
         if info.get("state") == STATE_BAD:
             return {"reason": info.get("reason") or info.get("error") or "marked bad",
@@ -484,8 +496,11 @@ class AppUpdater:
         return None
 
     def mark_bad(self, version: str, reason: str, *, phase: str = "health") -> None:
-        """Never offer, stage or switch to ``version`` again (its apply failed)."""
-        BadVersions(self.layout.root).mark(version, reason, phase=phase)
+        """Never offer, stage or switch to ``version`` again (its apply failed): the pointer's
+        record, and OTA-C's catalogue store when the state dir is known."""
+        if self.state_dir is not None:
+            BadVersions(UpdateState.under(self.state_dir)).mark(CATALOG_APP, version, reason,
+                                                               phase=phase)
         if version in self.state()["versions"]:
             self._mark(version, STATE_BAD, reason=reason, phase=phase)
 
@@ -502,6 +517,4 @@ class AppUpdater:
         if rel is None or not at_least(rel.version, self.running_version) or \
                 parse_version(rel.version) == parse_version(self.running_version):
             return None
-        if self.bad(rel.version) is not None:
-            return None             # its apply failed here: never offered again (OTA-D)
         return rel

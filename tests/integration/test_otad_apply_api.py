@@ -103,7 +103,7 @@ def world(tmp_path: Path):
         eng.consoles._pty_options.update(fast_pty_options())
         app_up = AppUpdater(AppLayout(root), LocalBusyProbe(state_dir()), uv="/opt/uv",
                             runner=FakeUv(), python_version="3.11", running_version=__version__,
-                            windows=False)
+                            windows=False, state_dir=state_dir())
         svc = UpdateService(eng, trust=KEYS.trust(), token="", app_version=__version__,
                             app_updater=app_up, policy=Policy())
         eng._services["update"] = svc
@@ -310,6 +310,9 @@ def test_a_version_that_fails_its_self_test_is_marked_bad_and_nothing_restarts(w
     assert st["last"]["result"] == "failed" and "self-test" in st["last"]["reason"]
     assert w["rec"].spawned == [] and w["rec"].shutdowns == 0
     assert w["svc"].app().bad(NEW)["phase"] == "self-test"
+    from harness_manager.services.update.appstage import bad_reason
+
+    assert bad_reason(w["svc"].state, NEW)["phase"] == "self-test"      # OTA-C's store too
     last = json.loads(su.last_apply_path(state_dir()).read_text())
     assert (last["result"], last["to"]) == ("refused", NEW)
     # jobs are accepted again, and the bad version is never applied again (the twin)
@@ -368,7 +371,7 @@ def test_stage_only_stages_and_never_switches_even_with_a_board_open(world):
                              json={"source": srv.source(), "stage_only": True})
         state = wait_job(w["client"], r.json()["job"])
     assert state["state"] == "done", state
-    assert (state["result"]["version"], state["result"]["switched"]) == ("0.3.0", False)
+    assert (state["result"]["version"], state["result"]["staged"]) == ("0.3.0", True)
     ptr = w["svc"].app().state()
     assert ptr["current"] == "" and ptr["versions"]["0.3.0"]["state"] == "staged"
 
@@ -443,3 +446,41 @@ def test_read_resume_refuses_a_file_that_is_not_one(tmp_path):
     good.write_text(json.dumps({"schema": 1, "token": "t", "port": 5}))
     assert ua.read_resume(good)["port"] == 5
     assert ExitCode.USAGE == 2
+
+
+def test_soft_busy_lists_gdb_and_xvc_sessions_and_confirm_goes_ahead(world):
+    from harness_manager.core.services import DebugStatus
+
+    w = world
+    bid = open_board(w)
+
+    class Debug:
+        reason = None
+
+        def status(self, session):
+            return DebugStatus(state="up", gdb_port=3333, pid=99)
+
+        def down(self, session):
+            return DebugStatus(state="down")
+
+    class Xvc:
+        reason = None
+
+        def status(self, session):
+            return type("St", (), {"open": True,
+                                   "attached": {"command": "vivado", "pid": 7}})()
+
+        def close(self, session, reason=""):
+            return None
+
+    w["eng"]._services["debug"] = Debug()
+    w["eng"]._services["xvc"] = Xvc()
+    r = apply(w, version=NEW)
+    err = r.json()["error"]
+    assert (r.status_code, err["data"]["reason"]) == (409, "SOFT_BUSY"), r.text
+    rows = {b["kind"]: b for b in err["data"]["soft_busy"]}
+    assert set(rows) == {"gdb", "xvc"} and rows["gdb"]["board_id"] == bid
+    assert "port 3333" in rows["gdb"]["detail"] and "vivado attached" in rows["xvc"]["detail"]
+    assert "OpenOCD for GDB" in err["message"]
+    assert apply(w, version=NEW, confirm=True).status_code == 202          # the twin
+    wait_restarted(w)

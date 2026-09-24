@@ -54,7 +54,13 @@ def root_with(tmp_path: Path, *staged: str) -> Path:
 def updater(root: Path, tmp_path: Path, running: str = "0.1.0") -> AppUpdater:
     return AppUpdater(AppLayout(root), LocalBusyProbe(tmp_path / "state"), uv="/opt/uv",
                       runner=FakeUv(), python_version="3.11", running_version=running,
-                      windows=False)
+                      windows=False, state_dir=tmp_path / "state")
+
+
+def store_marks(tmp_path: Path) -> dict:
+    """OTA-C's catalogue store: <state>/update/bad_versions.json, catalogue hm-app."""
+    path = tmp_path / "state" / "update" / "bad_versions.json"
+    return json.loads(path.read_text()).get("hm-app", {}) if path.exists() else {}
 
 
 # --- settings and the effective mode ------------------------------------------------------------
@@ -97,21 +103,38 @@ def test_settings_refuse_a_bad_mode_and_a_channel_the_policy_does_not_pin(tmp_pa
 # --- bad versions ----------------------------------------------------------------------------------
 
 
+def offered(up: AppUpdater, tmp_path: Path, *releases: AppRelease):
+    """OTA-C's offer (``appstage.offer_app``) over this updater."""
+    from harness_manager.services.update.appstage import offer_app
+    from harness_manager.services.update.schema import BoardSpec, Channel
+    from harness_manager.services.update.state import UpdateState
+
+    ch = Channel(channel="stable", serial=1, issued_at="", signing_key_id="", board=BoardSpec(),
+                 harness_current="", harness=(), app_current=releases[0].version,
+                 app=tuple(releases))
+    return offer_app(ch, "0.1.0", UpdateState.under(tmp_path / "state"), app=up)
+
+
 def test_a_bad_version_is_never_offered_staged_or_switched_to_again(tmp_path):
     root = root_with(tmp_path, "0.2.0")
     up = updater(root, tmp_path)
-    assert up.offer([release("0.2.0")], "0.2.0").version == "0.2.0"
+    assert offered(up, tmp_path, release("0.2.0")).release.version == "0.2.0"
     up.mark_bad("0.2.0", "the daemon exited with code 1 while starting", phase="start")
-    assert up.offer([release("0.2.0")], "0.2.0") is None
+    verdict = offered(up, tmp_path, release("0.2.0"))
+    assert verdict.release is None and verdict.skipped_bad == "0.2.0"
     for call in (lambda: up.stage(release("0.2.0"), tmp_path / "w.whl"),
                  lambda: up.switch("0.2.0")):
         with pytest.raises(RefusedError, match="marked bad"):
             call()
-    marks = json.loads((root / "bad_versions.json").read_text())
-    assert marks["0.2.0"]["phase"] == "start"
-    assert up.state()["versions"]["0.2.0"]["state"] == "bad"
+    assert store_marks(tmp_path)["0.2.0"]["phase"] == "start"         # OTA-C's store
+    assert up.state()["versions"]["0.2.0"]["state"] == "bad"          # and the pointer
+    # OTA-C's own offer honours it too
+    from harness_manager.services.update.appstage import bad_reason
+    from harness_manager.services.update.state import UpdateState
+
+    assert bad_reason(UpdateState.under(tmp_path / "state"), "0.2.0")["phase"] == "start"
     # negative twin: a NEWER release is offered as usual
-    assert up.offer([release("0.3.0"), release("0.2.0")], "0.3.0").version == "0.3.0"
+    assert offered(up, tmp_path, release("0.3.0"), release("0.2.0")).release.version == "0.3.0"
 
 
 def test_the_bad_mark_outlives_prune_of_its_venv(tmp_path):
@@ -123,8 +146,9 @@ def test_the_bad_mark_outlives_prune_of_its_venv(tmp_path):
     up.mark_bad("0.2.0", "failed its health check")
     removed = up.prune(keep=3)
     assert "0.2.0" in removed and not (root / "versions" / "0.2.0").exists()
+    assert "0.2.0" not in up.state()["versions"]
     assert up.bad("0.2.0")["reason"] == "failed its health check"          # still bad
-    assert up.offer([release("0.2.0")], "0.2.0") is None
+    assert offered(up, tmp_path, release("0.2.0")).skipped_bad == "0.2.0"
 
 
 def test_rollback_to_a_bad_previous_version_is_refused_with_its_reason(tmp_path):
@@ -135,8 +159,10 @@ def test_rollback_to_a_bad_previous_version_is_refused_with_its_reason(tmp_path)
     up.mark_bad("0.2.0", "exited 2 s after it answered")
     with pytest.raises(RefusedError, match="exited 2 s after it answered"):
         up.rollback()
-    up.bad("0.2.0")
-    su.BadVersions(root).clear("0.2.0")
+    from harness_manager.services.update.appstage import clear_bad
+    from harness_manager.services.update.state import UpdateState
+
+    assert clear_bad(UpdateState.under(tmp_path / "state"), "0.2.0")
     st = up.state()
     st["versions"]["0.2.0"]["state"] = "staged"
     up._save(st)

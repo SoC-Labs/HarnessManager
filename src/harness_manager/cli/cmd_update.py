@@ -377,7 +377,11 @@ def _apply(ctx: Ctx, svc: Any, info: Any) -> int:
     job = _wait_job(info, payload["job"])
     if job["state"] != "done":
         _raise({"error": job.get("error")}, 500)
-    version = job["result"]["version"]
+    staged = job.get("result") or {}
+    version = staged.get("version") or ""
+    if not staged.get("staged") or not version:
+        raise AlreadyError(staged.get("why") or "there is no newer version to apply",
+                           hint="`harness-manager update status` shows what is staged")
     ctx.confirm(f"restart harness-manager-daemon (pid {info.pid}) to run harness-manager "
                 f"{version}? Running jobs finish first")
     confirm = bool(a.yes)

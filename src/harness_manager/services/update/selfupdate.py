@@ -15,13 +15,10 @@ Under ``<state_dir>/update/``::
     apply.log           the apply helper's log
     last_apply.json     how the last apply ended: {id, from, to, result, phase, reason, seconds}
 
-Under the install root (``AppLayout.root``)::
-
-    bad_versions.json   version -> {reason, phase, at}: a version whose apply failed its health
-                        check. It is never offered, staged or switched to again (a NEWER release
-                        is offered as usual). Kept apart from ``current.json`` so ``prune`` can
-                        delete the venv and the mark stays. (OTA-C's ``update/bad_versions.json``
-                        is keyed by catalogue: CCR OTA-D-1 folds this file into it.)
+A version whose apply failed its self-test or health check is marked bad in OTA-C's
+catalogue-keyed store (``state.BadVersions``, ``<state_dir>/update/bad_versions.json``,
+catalogue ``hm-app``) AND in the pointer (``current.json`` ``versions[V].state = "bad"``):
+``appstage.offer_app``/``refuse_if_bad`` honour either, and the store outlives ``prune``.
 
 The effective self-update mode is the stricter of the admin policy (``policy.py``) and the
 user's ``auto`` setting, in the order ``off < notify < stage``.
@@ -34,7 +31,6 @@ import json
 import os
 import re
 import sys
-import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -45,7 +41,6 @@ from harness_manager.core.errors import RefusedError, UsageError
 MODES = ("off", "notify", "stage")
 DEFAULT_MODE = "stage"
 _CHANNEL_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
-BAD_VERSIONS = "bad_versions.json"
 
 
 # --- small file helpers (stdlib only: the apply helper imports this) ---------------------------
@@ -179,38 +174,6 @@ def effective(policy: Any, settings: Settings, *, blocked: str = "") -> dict[str
             "check_interval_s": int(getattr(policy, "interval_s", 6 * 3600)), "why": why}
 
 
-# --- bad versions (the install root) ----------------------------------------------------------
-
-
-class BadVersions:
-    """``<root>/bad_versions.json``: the versions whose apply failed its health check."""
-
-    def __init__(self, root: Path) -> None:
-        self.path = Path(root) / BAD_VERSIONS
-
-    def all(self) -> dict[str, dict[str, Any]]:
-        data = read_json(self.path) or {}
-        return {v: info for v, info in data.items() if isinstance(info, dict)}
-
-    def reason(self, version: str) -> dict[str, Any] | None:
-        if not version:
-            return None
-        return self.all().get(version)
-
-    def mark(self, version: str, reason: str, *, phase: str = "health") -> dict[str, Any]:
-        data = self.all()
-        data[version] = {"reason": reason, "phase": phase, "at": time.time()}
-        write_json(self.path, data)
-        return data[version]
-
-    def clear(self, version: str) -> bool:
-        data = self.all()
-        if data.pop(version, None) is None:
-            return False
-        write_json(self.path, data)
-        return True
-
-
 # --- is a venv in use by a running process? ---------------------------------------------------
 
 
@@ -299,11 +262,14 @@ def status_view(svc: Any, state_dir: Path) -> dict[str, Any]:
     settings, effective, dev_install}`` from the files alone (no network, no daemon needed)."""
     from harness_manager import __version__
 
+    from .schema import CATALOG_APP
+    from .state import BadVersions, UpdateState
     from .version import is_version, parse_version
 
     app = svc.app()
     st = app.state()
-    bad = BadVersions(app.layout.root).all()
+    store = getattr(svc, "state", None) or UpdateState.under(state_dir)
+    bad = dict(BadVersions(store).all(CATALOG_APP))
     for v, info in st["versions"].items():
         if info.get("state") == "bad" and v not in bad:
             bad[v] = {"reason": info.get("reason", ""), "phase": info.get("phase", ""),
