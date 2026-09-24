@@ -49,6 +49,12 @@ victim         a heartbeat that says ``lost``, or a status naming another holder
                ``lease.taken {by, reason, at}`` and keep it for ``view()`` until dismissed.
 =============  ==========================================================================
 
+Hub mode (T8): ``on_hub_event`` hears fpgahub's event stream (``hub.event``), drops the
+cached view, and settles a revoke of our lease at once, with ``lease.taken`` from the event
+(over REST the only source of who and why). A REST client has no note store
+(``notes_supported`` False: no keep, no answer notes) and may lack the right to revoke
+(``can_revoke()``): force is then unavailable, and the view says why.
+
 Every countdown is computed from the notes' UTC timestamps against the wall clock
 (``wall_clock``), never from local elapsed time, so a second process (the CLI) or a
 restarted daemon sees the same deadline. Clock, sleep and poll interval are injectable.
@@ -138,6 +144,11 @@ PRINCIPAL_RETRY_S = 60.0
 HISTORY_SLACK_S = 600.0
 FORCE_REASON = "force-released by {principal} via Harness Manager: no answer to a request made at {created_at}"
 _FORCER = re.compile(r"force-released by (\S+) via Harness Manager")
+#: fpgahub appends `` (by <actor>)`` to a revoke reason (``unix:alice``, ``token:ci``).
+_BY_SUFFIX = re.compile(r"\(by ([^()]+)\)\s*$")
+#: fpgahub events that end a lease by force; ``lease.revoked`` names ``holder``, the
+#: ``admin_revoked`` audit event ``prior_holder`` (T8: both arrive over the REST event stream).
+REVOKE_EVENTS = ("lease.revoked", "lease.admin_revoked")
 _NOTE_ID = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
 
 _QUEUED = re.compile(r"queued(?: at position (\d+))?")
@@ -521,6 +532,7 @@ class LeaseService:
         self._chassis: dict[tuple[str, str], str] = {}    # hub key -> hub.board_id() (D4)
         self._chassis_failed: dict[tuple[str, str], float] = {}
         self._viewed: dict[tuple[str, str], float] = {}   # hub key -> wall time of the last view
+        self._hubs: dict[str, Any] = {}                   # board id -> its hub (hub events)
 
     # -- hub reads (cached) -----------------------------------------------------------------------
 
@@ -609,6 +621,69 @@ class LeaseService:
                 self._chassis_failed[key] = self._clock()
         return board or None
 
+    def forget(self, hub: Any) -> None:
+        """Drop the cached view for ``hub`` (the hub said something changed; T8)."""
+        self._forget(hub)
+
+    def on_hub_event(self, ev: Event) -> None:
+        """``hub.event`` (T8, fpgahub's event stream): a lease change seconds before a poll.
+
+        Drops the board's cached view. A revoke of the lease this service holds for the
+        board (``lease.revoked``/``lease.admin_revoked``) settles at once: ``lease.state``
+        lost, the token dropped, and ``lease.taken {by, reason, at}`` from the event itself
+        (over REST it is the only place that says who and why). An expiry of it heartbeats
+        now, which settles it the way a scheduled heartbeat would. Never raises.
+        """
+        try:
+            self._on_hub_event(ev)
+        except Exception:  # noqa: BLE001 - an event handler must not break the bus
+            log.exception("hub event %s for %s", (ev.data or {}).get("type"), ev.board_id)
+
+    def _on_hub_event(self, ev: Event) -> None:
+        with self._mu:
+            tr = self._tracked.get(ev.board_id)
+            hub = tr.hub if tr is not None else self._hubs.get(ev.board_id)
+        if hub is None:
+            return
+        self._forget(hub)
+        etype = str((ev.data or {}).get("type", ""))
+        data = dict((ev.data or {}).get("data") or {})
+        if etype not in (*REVOKE_EVENTS, "lease.expired"):
+            return
+        gone = str(data.get("prior_holder") or data.get("holder") or "")
+        stored = self.store.get(hub.host, hub.target)
+        mine = {self._principal(hub)} | ({stored.principal, stored.holder} if stored else set())
+        if not gone or gone not in mine - {""}:
+            return
+        if etype == "lease.expired":
+            if stored is not None and tr is not None:
+                tr.last_beat = self._clock() - 10 * MAX_HEARTBEAT_S
+                self.beat_due()
+            return
+        taken = self._taken_from_event(data, (ev.data or {}).get("ts"))
+        if stored is not None:
+            self.store.drop(hub.host, hub.target)
+            self.untrack(ev.board_id)
+            log.warning("the lease on %s was revoked: %s", hub.target, taken["reason"])
+            self._emit(ev.board_id, hub, "lost", stored.principal or stored.holder)
+        else:
+            # Already settled (the other revoke event, or a heartbeat that read the history):
+            # only fill in what that could not say (fpgahub 0.3.0's history has no reason).
+            before = self.store.get_taken(hub.host, hub.target)
+            if before is None or before.get("reason") not in ("", taken["reason"]) or \
+                    (before.get("by") and before.get("reason")):
+                return                             # not this revoke, or nothing to add
+            taken = {k: before.get(k) or taken[k] for k in ("by", "reason", "at")}
+        self.store.put_taken(hub.host, hub.target, taken)
+        self._publish(TOPIC_TAKEN, ev.board_id, dict(taken))
+
+    def _taken_from_event(self, data: dict[str, Any], ts: Any) -> dict[str, str]:
+        reason = str(data.get("reason") or "")
+        m = _FORCER.search(reason)
+        suffix = _BY_SUFFIX.search(reason)
+        by = m.group(1) if m else str(data.get("by") or (suffix.group(1) if suffix else ""))
+        return {"by": by, "reason": reason, "at": iso_norm(ts) or iso_utc(self._wall())}
+
     def _forget(self, hub: Any) -> None:
         with self._mu:
             for k in [k for k in self._cache if k[:2] == _hk(hub)]:
@@ -651,6 +726,27 @@ class LeaseService:
             raise UnavailableError(REQUEST_CAPABILITY,
                                    f"this hub client has no {', '.join(missing)}; lease requests "
                                    "need the fpgahub 0.3.0 client (harness_manager_mps3.hub)")
+
+    @staticmethod
+    def _notes_supported(hub: Any) -> tuple[bool, str]:
+        """T8: over fpgahub's REST API there is no note store (no messages, no keep)."""
+        client = hub.client
+        if getattr(client, "notes_supported", True):
+            return True, ""
+        return False, str(getattr(client, "notes_reason", "")
+                          or "this hub client cannot carry request notes")
+
+    @staticmethod
+    def _can_revoke(hub: Any) -> tuple[bool, str]:
+        """T8: force-release needs a credential the hub lets revoke (REST: an admin token)."""
+        fn = getattr(hub.client, "can_revoke", None)
+        if not callable(fn):
+            return True, ""
+        try:
+            ok, why = fn()
+        except HarnessError as exc:
+            return False, exc.message
+        return bool(ok), str(why or "")
 
     def _my_ids(self, hub: Any, stored: StoredLease | None, principal: str) -> set[str]:
         ids = {principal}
@@ -778,6 +874,10 @@ class LeaseService:
             answer = None
         position = self._position(queue, principal)
         check = force_check(note, answer, position, self._wall())
+        if check.available:
+            can, why = self._can_revoke(hub)
+            if not can:
+                check = ForceCheck(False, why, "refused")
         return {"id": note.id, "message": getattr(note, "message", ""),
                 "created_at": iso_norm(note.created_at), "deadline_at": iso_norm(note.deadline_at),
                 "position": position, "answer": _answer_public(answer),
@@ -1102,7 +1202,8 @@ class LeaseService:
             if report is not None:
                 report("answered", 0, 0)
         check = force_check(out.note, out.answer, out.position, self._wall())
-        if check.available and out.force_announced != ("sig", out.answer_sig):
+        if check.available and out.force_announced != ("sig", out.answer_sig) and \
+                self._can_revoke(hub)[0]:
             out.force_announced = ("sig", out.answer_sig)
             self._publish(TOPIC_FORCE_AVAILABLE, out.board_id, {"id": out.note.id})
             if report is not None:
@@ -1184,6 +1285,9 @@ class LeaseService:
             minutes = 0
         message = self._check_message(message)
         self._need(hub, "lease_status", "list_requests", "put_answer")
+        notes_ok, notes_why = self._notes_supported(hub)
+        if answer == "keep" and not notes_ok:
+            raise UnavailableError("keep", notes_why)          # T8: REST has no answer notes
         principal = self._principal(hub, required=True)
         stored = self.store.get(hub.host, hub.target)
         shown = self._show(hub, fresh=True)
@@ -1203,7 +1307,8 @@ class LeaseService:
         if answer == "release":
             released = self._release_stored(board_id, hub, stored)   # the hub promotes the head
             try:
-                hub.client.put_answer(reply)
+                if notes_ok:
+                    hub.client.put_answer(reply)
             except HarnessError as exc:
                 log.warning("released %s, but the answer note was not written: %s", hub.target,
                             exc.message)
@@ -1263,6 +1368,11 @@ class LeaseService:
                                          hint="wait for the answer or the deadline")
             raise ForceRefusedError(f"force-release of {hub.target} is refused: {check.reason}",
                                     time_left_s=check.time_left_s, request_id=rid)
+        can, why = self._can_revoke(hub)
+        if not can:
+            raise ForceRefusedError(f"force-release of {hub.target} is refused: {why}",
+                                    request_id=note.id,
+                                    hint="an admin credential can force-release; or wait")
         victim = status.holder
         reason = force_reason(principal, note.created_at)
         revoked = hub.client.lease_revoke(reason)
@@ -1354,6 +1464,7 @@ class LeaseService:
             return
         self._board_for(hub, board_id)
         with self._mu:
+            self._hubs[board_id] = hub
             prev = self._tracked.get(board_id)
             self._tracked[board_id] = _Tracked(hub, self._clock(), announced=announced,
                                                last_watch=prev.last_watch if prev else float("-inf"))
