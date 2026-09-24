@@ -69,6 +69,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.session import SessionLock, pid_alive
 
 from .schema import AppRelease
+from .selfupdate import BadVersions, venv_in_use
 from .state import UpdateState, atomic_write_bytes, atomic_write_json, read_json, safe_name
 from .version import at_least, is_version, parse_version
 
@@ -78,6 +79,9 @@ WHEEL_DIST = DIST_NAME.replace("-", "_")   # how PEP 427 wheel file names spell 
 STATE_STAGING = "staging"
 STATE_STAGED = "staged"
 STATE_FAILED = "failed"
+#: A version whose apply failed its health check (lane OTA-D): never offered, staged or
+#: switched to again. The mark also lives in ``<root>/bad_versions.json`` (it outlives prune).
+STATE_BAD = "bad"
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
 
@@ -330,6 +334,7 @@ class AppUpdater:
     def stage(self, release: AppRelease, wheel: Path, lock: Path | None = None) -> dict[str, Any]:
         """Build ``versions/<v>`` from the verified wheel. Never touches the running venv."""
         self.guard(f"stage harness-manager {release.version}")
+        self._refuse_if_bad(release.version, "stage")
         check_wheel_name(release.wheel.name, release)
         if release.requires_python:
             major, minor = (int(x) for x in self.python_version.split(".")[:2])
@@ -381,6 +386,7 @@ class AppUpdater:
     def switch(self, version: str) -> dict[str, Any]:
         """Point the launcher at a staged version. Refused while anything is busy."""
         self.guard(f"switch to harness-manager {version}")
+        self._refuse_if_bad(version, "switch to")
         st = self.state()
         if st["versions"].get(version, {}).get("state") != STATE_STAGED or \
                 not self.layout.python(version, windows=self.windows).exists():
@@ -411,6 +417,10 @@ class AppUpdater:
                 raise RefusedError(f"the installed version's venv {py.parent.parent} is gone",
                                    hint="re-run the installer")
             prev_name = f"{(st.get('installer') or {}).get('version') or '?'} (installed)"
+        elif self.bad(prev) is not None:
+            raise RefusedError(f"the previous version {prev} is marked bad: "
+                               f"{self.bad(prev).get('reason') or 'it failed its health check'}",
+                               hint="update to a newer release instead")
         elif st["versions"].get(prev, {}).get("state") != STATE_STAGED or \
                 not self.layout.python(prev, windows=self.windows).exists():
             raise RefusedError(f"the previous version {prev} is no longer on disk")
@@ -428,15 +438,24 @@ class AppUpdater:
             raise HeldError(f"cannot {what} now: {'; '.join(reasons)}",
                             hint="finish or close those sessions first; the new version stays staged")
 
-    def prune(self, keep: int = 3) -> list[str]:
-        """Remove old staged versions, never the current or the previous one."""
+    def prune(self, keep: int = 3, *, state_dir: Path | None = None) -> list[str]:
+        """Remove old staged versions, never the current or the previous one, and never a
+        version whose venv a running process uses (a daemon, the apply helper, a CLI: lane
+        OTA-D; ``selfupdate.venv_in_use``). A bad version's venv goes; its mark stays."""
         st = self.state()
         protected = {st["current"], st["previous"]}
         staged = [v for v, info in st["versions"].items()
-                  if v not in protected and info.get("state") in (STATE_STAGED, STATE_FAILED)]
+                  if v not in protected and info.get("state") in (STATE_STAGED, STATE_FAILED,
+                                                                   STATE_BAD)]
         staged.sort(key=parse_version, reverse=True)
         removed = []
+        self.pruned_skipped: dict[str, str] = {}
         for v in staged[max(0, keep - len(protected - {''})):]:
+            busy = venv_in_use(self.layout.venv(v), v, state_dir=state_dir,
+                               running_version=self.running_version)
+            if busy:
+                self.pruned_skipped[v] = busy
+                continue
             shutil.rmtree(self.layout.venv(v), ignore_errors=True)
             wheel_name = st["versions"][v].get("wheel", "")
             if wheel_name:
@@ -449,10 +468,40 @@ class AppUpdater:
         self._save(st)
         return removed
 
+    # -- bad versions (lane OTA-D) --
+
+    def bad(self, version: str) -> dict[str, Any] | None:
+        """Why ``version`` is marked bad (``{reason, phase, at}``), or None."""
+        if not version:
+            return None
+        mark = BadVersions(self.layout.root).reason(version)
+        if mark is not None:
+            return mark
+        info = self.state()["versions"].get(version) or {}
+        if info.get("state") == STATE_BAD:
+            return {"reason": info.get("reason") or info.get("error") or "marked bad",
+                    "phase": info.get("phase", ""), "at": info.get("at")}
+        return None
+
+    def mark_bad(self, version: str, reason: str, *, phase: str = "health") -> None:
+        """Never offer, stage or switch to ``version`` again (its apply failed)."""
+        BadVersions(self.layout.root).mark(version, reason, phase=phase)
+        if version in self.state()["versions"]:
+            self._mark(version, STATE_BAD, reason=reason, phase=phase)
+
+    def _refuse_if_bad(self, version: str, what: str) -> None:
+        mark = self.bad(version)
+        if mark is not None:
+            raise RefusedError(f"cannot {what} harness-manager {version}: it is marked bad "
+                               f"({mark.get('reason') or 'it failed its health check'})",
+                               hint="a newer release will be offered when there is one")
+
     def offer(self, releases: Iterable[AppRelease], current: str) -> AppRelease | None:
         """The release to offer: the channel's current one, when it is newer than we run."""
         rel = next((r for r in releases if r.version == current), None)
         if rel is None or not at_least(rel.version, self.running_version) or \
                 parse_version(rel.version) == parse_version(self.running_version):
             return None
+        if self.bad(rel.version) is not None:
+            return None             # its apply failed here: never offered again (OTA-D)
         return rel

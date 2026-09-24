@@ -67,6 +67,10 @@ Behaviour
   takes longer than ``scan_budget_s``. Each change publishes
   ``console.pty {name, path, device, clients}``.
 - **Windows** has no PTYs: ``UnavailableError`` whose hint is the TCP export.
+- **A restart for an app update** (lane OTA-D, decision U4) keeps the PATH, not the
+  device: before the daemon exits it writes one line into each PTY (``announce``: "re-attach
+  with ``screen <path>`` in a few seconds"), and the new daemon opens the same consoles'
+  PTYs again at the same paths (a new ``/dev/pts/N``). There is no fd handover.
 
 Security: the directory is created 0700 and must be a real directory owned by
 this user (a directory another user planted in /tmp is refused, never used).
@@ -812,6 +816,20 @@ class ConsolePty:
             os.write(self.master, f"\r\n[harness-manager: {text}]\r\n".encode())
         except OSError:
             pass
+
+    def announce(self, text: str) -> bool:
+        """Write ``text`` into the line NOW, whatever the output mode (a restart notice).
+
+        A client that is attached reads it before the line goes away; with none attached it
+        waits on the line and is dropped with it. Never blocks: False when it did not fit.
+        """
+        if self.master < 0:
+            return False
+        with self._wlock:
+            try:
+                return os.write(self.master, text.encode("utf-8", "replace")) > 0
+            except OSError:
+                return False
 
     # -- lifecycle ------------------------------------------------------------------------
 

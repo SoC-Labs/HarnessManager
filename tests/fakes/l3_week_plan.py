@@ -71,6 +71,12 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/boards/{bid}/update/rollback"),
         ("POST", "/update/app"),
         ("POST", "/update/app/rollback"),
+        # lane OTA-D: the app's apply with a restart, its status, and the settings
+        ("GET", "/update/app"),
+        ("POST", "/update/app/apply"),
+        ("POST", "/update/app/cancel"),
+        ("GET", "/update/settings"),
+        ("PUT", "/update/settings"),
     ),
     # T10: served in the mock by tests/fakes/t10_mock_xdc.py over the real xdc service.
     "xdc_api": (
@@ -173,6 +179,15 @@ class WeekPlanSim:
         self.previous: dict[str, dict[str, Any]] = {}
         self.app_version = "0.0.1"
         self.app_current = "0.1.0"
+        # lane OTA-D: the apply (drain -> restart -> health), the settings, the bad marks
+        self.apply_state = "idle"            # idle | draining | restarting
+        self.apply_plan: dict[str, Any] | None = None
+        self.apply_outcome = "applied"       # or "rolled-back" (the new version fails health)
+        self.apply_hold = threading.Event()  # set: the restart may go on (tests hold it)
+        self.apply_hold.set()
+        self.update_settings = {"channel": "", "auto": ""}
+        self.bad_versions: dict[str, dict[str, Any]] = {}
+        self.staged: list[str] = []
         self.requests: Any = None            # t14_lease_requests.LeaseRequestSim (the mock sets it)
 
     # -- helpers -------------------------------------------------------------------------
@@ -844,6 +859,120 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
     @app.post(f"{API}/update/app/rollback", status_code=202)
     def update_app_rollback() -> JSONResponse:
         return app_job("update_app_rollback", "0.0.1", "roll the app back")
+
+    # -- lane OTA-D: apply with a restart, status, settings (daemon/update_api.py) ------------
+
+    def effective() -> dict[str, Any]:
+        auto = sim.update_settings["auto"] or "stage"
+        return {"auto": auto, "channel": sim.update_settings["channel"],
+                "check_interval_s": 21600, "why": "your settings turn self-update off"
+                if auto == "off" else ""}
+
+    def apply_view() -> dict[str, Any]:
+        plan = sim.apply_plan or {}
+        return {"state": sim.apply_state, **plan,
+                "waiting_on": [{"job": j.id, "kind": j.kind, "board_id": j.board_id}
+                               for j in jobs.running()]} if plan else {"state": sim.apply_state}
+
+    @app.get(f"{API}/update/app")
+    def app_status() -> JSONResponse:
+        sim.require_update()
+        return ok(running=sim.app_version,
+                  pointer={"current": sim.app_version, "previous": "", "installer": {
+                      "version": "0.0.1", "venv": "/home/u/.local/share/harness-manager/venv"},
+                      "root": "/home/u/.local/share/harness-manager"},
+                  versions={v: {"state": "staged"} for v in sim.staged},
+                  bad=sim.bad_versions, staged=list(sim.staged),
+                  available=sim.app_current if sim.app_current != sim.app_version else "",
+                  last_check=None, last_apply=None, policy={"path": "", "self_update": "stage",
+                                                            "channel": "",
+                                                            "check_interval_s": 21600,
+                                                            "problems": []},
+                  settings=dict(sim.update_settings), effective=effective(), dev_install="",
+                  apply=apply_view())
+
+    @app.post(f"{API}/update/app/apply", status_code=202)
+    def app_apply(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
+        sim.require_update()
+        version = str(body.get("version") or sim.app_current)
+        if sim.apply_state != "idle":
+            err = HeldError(f"an update to {version} is already being applied",
+                            holder="harness-manager-daemon")
+            raise with_data(err, reason="APPLYING")
+        if version in sim.bad_versions:
+            raise RefusedError(f"harness-manager {version} is marked bad")
+        busy = [{"kind": "screen", "board_id": b, "name": n, "path": p["path"],
+                 "clients": p["clients"], "detail": f"{p['clients']} terminal(s) on {p['path']}"}
+                for (b, n), p in sim.ptys.items() if p.get("clients")]
+        if busy and body.get("confirm") is not True:
+            raise with_data(RefusedError(f"applying harness-manager {version} restarts the "
+                                         "service", hint='confirm with {"confirm": true}'),
+                            reason="SOFT_BUSY", soft_busy=busy, version=version)
+        sim.apply_plan = {"id": f"apply{int(time.time() * 1000) % 100000}",
+                          "from": sim.app_version, "to": version, "started_at": time.time()}
+        sim.apply_state = "draining"
+        plan = dict(sim.apply_plan)
+
+        def restart() -> None:
+            while jobs.running():
+                time.sleep(0.05)
+            sim.apply_hold.wait(30)
+            if sim.apply_state != "draining":
+                return                                   # cancelled
+            sim.apply_state = "restarting"
+            sim.publish("update.applying", "", {**plan, "phase": "restarting", "eta_s": 30})
+            time.sleep(0.2)
+            if sim.apply_outcome == "applied":
+                sim.app_version = version
+                sim.publish("update.applied", "", {**plan, "seconds": 0.2})
+            else:
+                sim.bad_versions[version] = {"reason": "the daemon exited while starting",
+                                             "phase": "start", "at": time.time()}
+                sim.publish("update.rolled_back", "", {**plan, "phase": "start",
+                                                       "reason": "the daemon exited while "
+                                                                 "starting"})
+            sim.apply_state, sim.apply_plan = "idle", None
+
+        sim.publish("update.applying", "", {**plan, "phase": "draining",
+                                            "waiting_on": apply_view()["waiting_on"]})
+        threading.Thread(target=restart, daemon=True, name="mock-apply").start()
+        return JSONResponse(ok(apply=apply_view()), status_code=202)
+
+    @app.post(f"{API}/update/app/cancel")
+    def app_cancel() -> JSONResponse:
+        sim.require_update()
+        if sim.apply_state == "idle":
+            from harness_manager.core.errors import AlreadyError
+
+            raise AlreadyError("no update is being applied")
+        if sim.apply_state == "restarting":
+            raise with_data(HeldError("too late to cancel: harness-manager-daemon is restarting",
+                                      holder="harness-manager-daemon"), reason="RESTARTING")
+        plan = dict(sim.apply_plan or {})
+        sim.apply_state, sim.apply_plan = "idle", None
+        sim.publish("update.applying", "", {**plan, "phase": "cancelled",
+                                            "reason": "cancelled by a user"})
+        return ok(apply={"state": "idle"})
+
+    @app.get(f"{API}/update/settings")
+    def get_settings() -> JSONResponse:
+        sim.require_update()
+        return ok(settings=dict(sim.update_settings), effective=effective(),
+                  policy={"path": "", "self_update": "stage", "channel": "",
+                          "check_interval_s": 21600, "problems": []})
+
+    @app.put(f"{API}/update/settings")
+    def put_settings(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
+        sim.require_update()
+        unknown = sorted(set(body) - {"channel", "auto"})
+        if unknown:
+            raise UsageError(f"unknown settings: {', '.join(unknown)}")
+        if "auto" in body and body["auto"] not in ("", "off", "notify", "stage"):
+            raise UsageError(f"auto must be one of off, notify, stage, not {body['auto']!r}")
+        for key in ("channel", "auto"):
+            if key in body:
+                sim.update_settings[key] = str(body[key] or "")
+        return get_settings()
 
 
 # -- the clocks adapter the demo boards lack (GET/POST /clocks are core routes) ------------

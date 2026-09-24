@@ -39,6 +39,17 @@ staged version stays for the next try.
 Events: the service publishes ``update.*`` on the engine bus and the events socket
 forwards them as they are. For board jobs, ``update.progress`` also drives
 ``job.progress`` ``{phase, done, total}``.
+
+App self-update, apply and restart (lane OTA-D, additive; ``update_apply.py``,
+``update_checker.py``):
+
+| Route | |
+|---|---|
+| ``GET /update/app`` | the pointer, versions, bad marks, staged, last check, last apply, the policy, settings, the pending apply |
+| ``POST /update/app`` ``{version?, stage_only?}`` | ``stage_only: true`` stages and never switches (the job ``update_app``) |
+| ``POST /update/app/apply`` ``{version?, confirm?, drain_timeout_s?, health_s?, stable_s?}`` | 202 ``{apply}``: drain, restart on the same port and token, health-check, roll back. 409 SOFT_BUSY/APPLYING/HELD |
+| ``POST /update/app/cancel`` | ``{apply}``: ends a drain; 409 once the restart began |
+| ``GET /update/settings`` · ``PUT /update/settings`` ``{channel?, auto?}`` | ``{settings, effective, policy}`` |
 """
 
 from __future__ import annotations
@@ -60,7 +71,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event
 
-from .app import JsonBody, RouteContext, _abs_path, _number, _obj, _str
+from .app import _JSON, JsonBody, RouteContext, _abs_path, _bool, _number, _obj, _str, ok
 
 #: The board id of an engine-wide job (a check with no board, the app updates).
 ENGINE = ""
@@ -289,14 +300,77 @@ def register(ctx: RouteContext) -> None:
         b = _obj(body)
         version = _opt_str(b, "version")
         channel, source = _opt_str(b, "channel"), _opt_str(b, "source")
+        stage_only = _bool(b, "stage_only", False)
         svc = service()
-        refuse_while_jobs("update the app")
+        if not stage_only:
+            refuse_while_jobs("update the app")
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             progress("stage", 0, 0)
-            return svc.update_app(channel=channel, source=source, version=version)
+            return svc.update_app(channel=channel, source=source, version=version,
+                                  switch=not stage_only)
 
         return submit_engine_wide("update_app", run)
+
+    # -- the app: apply with a restart, status, settings (lane OTA-D) --------------------------
+
+    from harness_manager.services.update import selfupdate as su
+
+    from .update_apply import Applier
+    from .update_checker import UpdateChecker
+
+    applier = Applier(d, service)
+    d.update_applier = applier
+    d.update_checker = UpdateChecker(      # started by server.py once the server answers
+        lambda: getattr(d.engine, "update", None), d.bus, d.state_dir,
+        submit=lambda kind, fn: d.jobs.submit(kind, ENGINE, fn))
+
+    def _opt_num(b: dict[str, Any], key: str, default: float | None) -> float | None:
+        return _number(b, key) if b.get(key) is not None else default
+
+    @api.get("/update/app")
+    def app_status() -> Any:
+        svc = service()
+        view = su.status_view(svc, d.state_dir)
+        view["apply"] = applier.status()
+        return _JSON(ok(**view))
+
+    @api.post("/update/app/apply")
+    def app_apply(body: JsonBody = None) -> Any:
+        from .update_apply import HEALTH_S, STABLE_S
+
+        b = _obj(body)
+        status = applier.start(_opt_str(b, "version"), confirm=_bool(b, "confirm", False),
+                               drain_timeout_s=_opt_num(b, "drain_timeout_s", None),
+                               health_s=_opt_num(b, "health_s", HEALTH_S),
+                               stable_s=_opt_num(b, "stable_s", STABLE_S))
+        return _JSON(ok(apply=status), status_code=202)
+
+    @api.post("/update/app/cancel")
+    def app_cancel(body: JsonBody = None) -> Any:
+        _obj(body)
+        return _JSON(ok(apply=applier.cancel()))
+
+    def settings_view(svc: Any) -> dict[str, Any]:
+        settings = su.load_settings(d.state_dir)
+        return {"settings": settings.as_dict(), "policy": svc.policy.as_dict(),
+                "effective": su.effective(svc.policy, settings, blocked=svc.app().dev_install)}
+
+    @api.get("/update/settings")
+    def get_settings() -> Any:
+        return _JSON(ok(**settings_view(service())))
+
+    @api.put("/update/settings")
+    def put_settings(body: JsonBody = None) -> Any:
+        b = _obj(body)
+        unknown = sorted(set(b) - {"channel", "auto"})
+        if unknown:
+            raise UsageError(f"unknown settings: {', '.join(unknown)}",
+                             hint="settable: channel, auto (off, notify, stage)")
+        svc = service()
+        su.save_settings(d.state_dir, channel=b.get("channel"), auto=b.get("auto"),
+                         policy=svc.policy)
+        return _JSON(ok(**settings_view(svc)))
 
     @api.post("/update/app/rollback")
     def update_app_rollback(body: JsonBody = None) -> Any:

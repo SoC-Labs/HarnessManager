@@ -90,6 +90,21 @@ class _FallbackPtys:
         if mgr is not None:
             mgr.close_board(board_id)
 
+    def open_ptys(self) -> list[dict[str, Any]]:
+        """As ``ConsoleBroker.open_ptys`` (lane OTA-D: the restart records them)."""
+        mgr = self._mgr
+        return [{"board_id": p.board_id, **p.info(), "command": _pty.screen_command(p.link)}
+                for p in (mgr.ptys() if mgr is not None else [])]
+
+    def announce_ptys(self, text_for: Any) -> list[str]:
+        mgr = self._mgr
+        done = []
+        for p in (mgr.ptys() if mgr is not None else []):
+            view = {"board_id": p.board_id, **p.info(), "command": _pty.screen_command(p.link)}
+            if p.announce(text_for(view)):
+                done.append(str(p.link))
+        return done
+
     def baud(self, session: Any, name: str, **_kw: Any) -> dict[str, Any]:
         names = list(self._d.engine.consoles.names(session))
         if name not in names:
@@ -133,6 +148,7 @@ def register(ctx: RouteContext) -> None:
     api = ctx.api
 
     fallback = _FallbackPtys(d)
+    d.fallback_ptys = fallback            # lane OTA-D: the restart records and reopens PTYs
 
     def broker_call(name: str) -> Any:
         """The console service's own call, or the fallback's (a service stub is refused)."""

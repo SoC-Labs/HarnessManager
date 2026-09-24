@@ -912,6 +912,26 @@ class ConsoleBroker:
             return False
         return ptys.close(board_id, name) or ptys.close(board_id, self.aliases.get(name, ""))
 
+    def open_ptys(self) -> list[dict[str, Any]]:
+        """Every open PTY: ``{board_id, name, path, device, clients, command}`` (lane OTA-D:
+        a restarting daemon records them, and its successor opens the same paths)."""
+        ptys = self._ptys
+        if ptys is None:
+            return []
+        return [{"board_id": p.board_id, **self._pty_view(p)} for p in ptys.ptys()]
+
+    def announce_ptys(self, text_for: Callable[[dict[str, Any]], str]) -> list[str]:
+        """Write ``text_for(view)`` into every open PTY now (a restart notice). The paths
+        written to."""
+        ptys = self._ptys
+        if ptys is None:
+            return []
+        done = []
+        for port in ptys.ptys():
+            if port.announce(text_for({"board_id": port.board_id, **self._pty_view(port)})):
+                done.append(str(port.link))
+        return done
+
     def _pty_view(self, port: _pty.ConsolePty) -> dict[str, Any]:
         rate = None
         if port.kind == "serial":

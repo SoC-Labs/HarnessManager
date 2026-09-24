@@ -395,6 +395,9 @@ _LOGGED = {
     "controller.reboot": ("phase",), "power.cycle": ("phase", "device"),
     "lease.state": ("target", "state", "holder", "expires_at"),
     "update.done": ("version", "result"), "update.failed": ("version", "phase", "reason"),
+    # lane OTA-D: the app's own apply, restart and rollback
+    "update.applying": ("phase", "from", "to", "reason"), "update.applied": ("from", "to"),
+    "update.rolled_back": ("from", "to", "phase", "reason"),
 }
 
 

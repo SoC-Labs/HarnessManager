@@ -14,6 +14,18 @@ and the consoles), removes ``daemon.json`` and releases the instance lock.
 The log goes to stderr, which ``harness-manager daemon start`` points at
 ``<state_dir>/daemon.log``. WebSocket URLs carry ``?token=``, so every log
 line passes a filter that masks it.
+
+Lane OTA-D (app self-update, additive):
+
+- ``--resume FILE`` starts the daemon that follows an app update (or its rollback): the
+  port, listen address and TOKEN come from the resume file, so an open app window and every
+  client keep working, and once the server answers it opens the same boards and their
+  consoles' PTYs at the same paths (``update_apply.resume_after_start``). The file (0600)
+  is deleted once read; the token never travels in argv.
+- ``--self-test`` imports the app, the engine and the board packs and builds the routes
+  without binding anything or writing the state dir; exit 0 and one JSON line when they all
+  load. The apply step runs it on the new version before it drains.
+- The periodic update checker (``update_checker.py``) starts once the server answers.
 """
 
 from __future__ import annotations
@@ -246,10 +258,57 @@ def _state_error(what: str, path: Path, exc: OSError) -> HarnessError:
     return ActionFailedError(f"harness-manager-daemon cannot {what} {path}: {why}", hint=hint)
 
 
+def _after_start(server: Any, d: Any, resume: dict[str, Any] | None) -> None:
+    """Once the server answers: the resumed boards and PTYs, then the update checker."""
+    deadline = time.monotonic() + 60.0
+    while not getattr(server, "started", False):
+        if getattr(server, "should_exit", False) or time.monotonic() > deadline:
+            return
+        time.sleep(0.05)
+    checker = getattr(d, "update_checker", None)
+    if checker is not None:
+        try:
+            checker.start()
+        except Exception:  # noqa: BLE001 - the checker is never worth a daemon
+            log.exception("the update checker did not start")
+    if resume is not None:
+        from .update_apply import resume_after_start
+
+        resume_after_start(d, resume)
+
+
+def self_test() -> int:
+    """``--self-test``: everything a start needs loads (app, engine, packs, routes, server)."""
+    import tempfile
+
+    import uvicorn  # noqa: F401 - the server must import too
+
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
+
+    from .app import create_app
+
+    with tempfile.TemporaryDirectory(prefix="hm-self-test-") as tmp:
+        engine = Engine(EngineConfig(state_dir=Path(tmp)))
+        try:
+            packs = sorted(engine.packs())
+            app = create_app(engine, token=new_token(), state_dir=Path(tmp))
+            routes = len(app.routes)
+            app.state.daemon.close()
+        finally:
+            engine.close_all()
+    sys.stdout.write(json.dumps({"ok": True, "version": __version__, "packs": packs,
+                                 "routes": routes}) + "\n")
+    return 0
+
+
 def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
                pack_overrides: dict[str, dict] | None = None, log_level: str = "info",
-               demo: bool = False) -> int:
-    """Serve until stopped. Returns 0; raises ``HarnessError`` if it cannot start."""
+               demo: bool = False, resume: dict[str, Any] | None = None) -> int:
+    """Serve until stopped. Returns 0; raises ``HarnessError`` if it cannot start.
+
+    ``resume`` (lane OTA-D): a resume file's content. Its port, listen address, token, pack
+    overrides and demo flag win over the arguments."""
     import uvicorn
 
     from harness_manager.core.services import EngineConfig
@@ -258,6 +317,10 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
     from .app import create_app
 
     state_dir = Path(state_dir)
+    if resume is not None:
+        port, listen = int(resume["port"]), str(resume.get("listen") or listen)
+        pack_overrides = resume.get("pack_overrides") or pack_overrides
+        demo = bool(resume.get("demo", demo))
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -274,7 +337,7 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
         if not is_loopback(listen):
             log.warning("harness-manager-daemon listens on %s, which is not loopback: anyone who can "
                         "reach it AND has the token controls your boards", listen)
-        token = new_token()
+        token = str(resume["token"]) if resume is not None else new_token()
         if demo:        # scripted boards, no hardware: `harness-manager ui --demo`
             from harness_manager.demo import DemoEngine
 
@@ -293,6 +356,12 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
                 server.should_exit = True
 
         app = create_app(engine, token=token, state_dir=state_dir, shutdown=request_shutdown)
+        daemon = app.state.daemon
+        # What a restart for an app update hands the next daemon (lane OTA-D).
+        daemon.runtime = {"port": sock.getsockname()[1], "listen": listen,
+                          "log_level": log_level, "pack_overrides": pack_overrides or {},
+                          "demo": demo}
+        daemon.resumed = resume
         # log_config=None: uvicorn's own lines go through the root handler, so they carry
         # the same timestamps as ours (its default formatter has none) and the token filter.
         config = uvicorn.Config(app, log_level=log_level, access_log=False, lifespan="on",
@@ -307,15 +376,22 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
         except OSError as exc:
             raise _state_error("write daemon.json in", state_dir, exc) from None
         wrote = True
-        log.info("harness-manager-daemon %s (pid %d) serving %s for %s", __version__, info.pid,
-                 info.base_url, state_dir)
+        log.info("harness-manager-daemon %s (pid %d) serving %s for %s%s", __version__, info.pid,
+                 info.base_url, state_dir,
+                 f" (resumed after {resume.get('reason', 'a restart')}: "
+                 f"{len(resume.get('boards') or [])} board(s))" if resume is not None else "")
         _stop_on_hangup(server)
+        threading.Thread(target=_after_start, args=(server, daemon, resume), daemon=True,
+                         name="harness-manager-daemon-after-start").start()
         # Install lane Q3 (from Q2's soak): a size cap on daemon.log while it runs.
         rotator = logfile.LogRotator(daemon_log_path(state_dir)).start()
         try:
             server.run(sockets=[sock])
         finally:
             rotator.stop()
+            checker = getattr(daemon, "update_checker", None)
+            if checker is not None:
+                checker.stop()
         log.info("harness-manager-daemon stopped")
         return 0
     finally:
@@ -344,6 +420,11 @@ def _parser() -> argparse.ArgumentParser:
                    choices=("critical", "error", "warning", "info", "debug"))
     p.add_argument("--demo", action="store_true",
                    help="serve scripted demo boards (no hardware); use its own --state-dir")
+    p.add_argument("--resume", default=None, metavar="FILE",
+                   help="restart from a resume file (after an app update): the same port and "
+                        "token, the same boards and PTY paths")
+    p.add_argument("--self-test", action="store_true",
+                   help="check that everything a start needs loads, then exit (binds nothing)")
     # Development and test seam: per-pack constructor kwargs, as EngineConfig.pack_overrides.
     p.add_argument("--pack-overrides", default=None, help=argparse.SUPPRESS)
     return p
@@ -355,6 +436,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level.upper()),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.self_test:
+        try:
+            return self_test()
+        except HarnessError as exc:
+            sys.stderr.write(error_line(exc) + "\n")
+            return int(exc.code)
     try:
         overrides = None
         if args.pack_overrides:
@@ -365,8 +452,15 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(overrides, dict):
                 raise UsageError("--pack-overrides must be a JSON object")
         state_dir = Path(args.state_dir) if args.state_dir else default_state_dir()
+        resume = None
+        if args.resume:
+            from .update_apply import read_resume
+
+            resume = read_resume(Path(args.resume))
+            Path(args.resume).unlink(missing_ok=True)       # it holds the token: read once
         return run_daemon(state_dir, port=args.port, listen=args.listen,
-                          pack_overrides=overrides, log_level=args.log_level, demo=args.demo)
+                          pack_overrides=overrides, log_level=args.log_level, demo=args.demo,
+                          resume=resume)
     except HarnessError as exc:
         sys.stderr.write(error_line(exc).replace("harness-manager:", "harness-manager-daemon:", 1) + "\n")
         return int(exc.code)

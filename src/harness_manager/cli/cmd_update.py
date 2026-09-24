@@ -5,6 +5,10 @@ Verbs::
     harness-manager update check   [TARGET]           read-only: the channel, and the plan for a board
     harness-manager update harness TARGET             install the channel's harness (asks first)
     harness-manager update app                        download, stage and switch to the new app
+    harness-manager update app --apply                stage, then restart the running service onto
+                                                      it (same port and token; rolls back by itself)
+    harness-manager update status                     the app's versions, bad marks, last check and
+                                                      apply, the policy (no network)
     harness-manager update rollback TARGET            restore the config SD backup, reboot, confirm
     harness-manager update rollback --app             switch back to the previous app version
 
@@ -48,9 +52,13 @@ UPDATE_TSV: dict[str, tuple[str, ...]] = {
     "update check": ("CHANNEL", "SERIAL", "HARNESS_CURRENT", "APP_CURRENT", "APP_UPDATE",
                      "BOARD_ID", "RUNNING", "MODE", "REKEY", "BLOCKERS"),
     "update harness": ("BOARD_ID", "VERSION", "RESULT", "BACKUP", "DETAIL"),
-    "update app": ("VERSION", "STAGED", "SWITCHED", "CURRENT", "PREVIOUS"),
+    "update app": ("VERSION", "STAGED", "SWITCHED", "CURRENT", "PREVIOUS", "RESULT"),
     "update rollback": ("TARGET", "RESULT", "VERSION", "DETAIL"),
+    "update status": ("RUNNING", "CURRENT", "PREVIOUS", "STAGED", "BAD", "AVAILABLE", "MODE",
+                      "LAST_CHECK", "LAST_APPLY", "DEV_INSTALL"),
 }
+#: How long ``update app --apply`` waits for the restart's verdict (drain + health + rollback).
+APPLY_WAIT_S = 1800.0
 
 TARGET_HELP = "shell address host[:port], or - for a USB-only board (with --serial/--volume)"
 
@@ -112,7 +120,18 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                     help="stage this version instead of the channel's current one")
     ap.add_argument("--stage-only", action="store_true",
                     help="build the new version but do not switch to it")
-    ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    ap.add_argument("--apply", action="store_true",
+                    help="with a running harness-manager-daemon: stage, then restart it onto "
+                         "the new version (jobs finish first; same port and token; it rolls "
+                         "back by itself if the new version does not come up)")
+    ap.add_argument("--no-wait", action="store_true",
+                    help="with --apply: return once the restart is under way")
+    ap.add_argument("--yes", action="store_true",
+                    help="do not ask for confirmation (with --apply: also end GDB, XVC and "
+                         "screen sessions)")
+
+    sub.add_parser("status", help="the app's versions, bad marks, last check and last apply",
+                   parents=[fmt], epilog=epilog("update status"))
 
     ap = sub.add_parser("rollback", help="undo: restore a board's SD backup, or the previous app",
                         parents=[fmt, usb], epilog=epilog("update rollback"))
@@ -209,7 +228,8 @@ def _plan_lines(s: dict[str, Any]) -> list[str]:
 
 def cmd_update(ctx: Ctx) -> int:
     action = ctx.args.update_cmd
-    return {"check": _check, "harness": _harness, "app": _app, "rollback": _rollback}[action](ctx)
+    return {"check": _check, "harness": _harness, "app": _app, "rollback": _rollback,
+            "status": _status}[action](ctx)
 
 
 def _check(ctx: Ctx) -> int:
@@ -291,6 +311,16 @@ def _harness(ctx: Ctx) -> int:
 def _app(ctx: Ctx) -> int:
     a = ctx.args
     svc = service(ctx)
+    if a.apply:
+        if a.stage_only:
+            raise UsageError("give --apply or --stage-only, not both")
+        from harness_manager.daemon import control
+
+        info = control.running(Path(svc.state_dir))
+        if info is not None:
+            return _apply(ctx, svc, info)
+        ctx.note("update: no harness-manager-daemon runs here, so there is nothing to restart: "
+                 "staging and switching")
     verified = svc.fetch_channel(a.channel, a.source)
     rel = verified.channel.app_release(a.want_version)
     if rel is None:
@@ -306,7 +336,177 @@ def _app(ctx: Ctx) -> int:
         human.append(f"warning    {out['warning']}")
     ctx.emit(Result("update app", out,
                     rows=[[out["version"], True, out["switched"], pointer.get("current", ""),
-                           pointer.get("previous", "")]], human=human))
+                           pointer.get("previous", ""),
+                           "switched" if out["switched"] else "staged"]], human=human))
+    return ExitCode.OK
+
+
+# --- update app --apply, and update status (lane OTA-D) ----------------------------------------
+
+
+def _call(info: Any, method: str, path: str, body: Any = None,
+          timeout: float = 30.0) -> tuple[int, dict[str, Any]]:
+    from harness_manager.daemon import control
+
+    return control._request(info, method, f"/api/v1{path}", body=body, timeout=timeout)
+
+
+def _raise(payload: dict[str, Any], status: int) -> None:
+    from harness_manager.client.codec import error_from_json
+
+    err = payload.get("error") if isinstance(payload, dict) else None
+    if err:
+        raise error_from_json(err)
+    raise ActionFailedError(f"harness-manager-daemon answered HTTP {status}")
+
+
+def _apply(ctx: Ctx, svc: Any, info: Any) -> int:
+    """Stage through the daemon, then ``POST /update/app/apply``, then wait for the verdict."""
+    import time
+
+    from harness_manager.services.update import selfupdate as su
+
+    a = ctx.args
+    body: dict[str, Any] = {"stage_only": True}
+    for key, value in (("version", a.want_version), ("channel", a.channel), ("source", a.source)):
+        if value:
+            body[key] = value
+    status, payload = _call(info, "POST", "/update/app", body)
+    if status != 202:
+        _raise(payload, status)
+    job = _wait_job(info, payload["job"])
+    if job["state"] != "done":
+        _raise({"error": job.get("error")}, 500)
+    version = job["result"]["version"]
+    ctx.confirm(f"restart harness-manager-daemon (pid {info.pid}) to run harness-manager "
+                f"{version}? Running jobs finish first")
+    confirm = bool(a.yes)
+    while True:
+        status, payload = _call(info, "POST", "/update/app/apply",
+                                {"version": version, "confirm": confirm})
+        err = payload.get("error") or {}
+        if status == 409 and (err.get("data") or {}).get("reason") == "SOFT_BUSY" and not confirm:
+            for row in err["data"].get("soft_busy") or []:
+                ctx.note(f"update: the restart ends {row.get('detail')}")
+            ctx.confirm("end those sessions and apply?")
+            confirm = True
+            continue
+        if status != 202:
+            _raise(payload, status)
+        break
+    plan = payload["apply"]
+    ctx.note(f"update: applying {version} (id {plan['id']}): running jobs finish, then the "
+             "service restarts on the same port")
+    if a.no_wait:
+        ctx.emit(Result("update app", {"version": version, "apply": plan, "result": "applying"},
+                        rows=[[version, True, False, "", "", "applying"]],
+                        human=[f"applying   harness-manager {version} (id {plan['id']})"]))
+        return ExitCode.OK
+    sdir = Path(svc.state_dir)
+    deadline = time.monotonic() + APPLY_WAIT_S
+    said = ""
+    rec: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        last = su.read_json(su.last_apply_path(sdir))
+        if last is not None and last.get("id") == plan["id"] and last.get("result") in (
+                "applied", "rolled-back", "down", "not-switched", "not-started", "refused"):
+            rec = last
+            break
+        try:
+            code, view = _call(info, "GET", "/update/app", timeout=3.0)
+        except OSError:
+            code, view = 0, {}
+        ap = view.get("apply") or {}
+        done = ap.get("last") or {}
+        if code == 200 and ap.get("state") == "idle" and done.get("id") == plan["id"]:
+            rec = {"result": done.get("result"), "reason": done.get("reason"), "to": version}
+            break
+        now = ap.get("state", "restarting") if code == 200 else "restarting"
+        waiting = ", ".join(f"{w['kind']} on {w['board_id'] or 'the service'}"
+                            for w in ap.get("waiting_on") or [])
+        line = f"{now}" + (f": waiting for {waiting}" if waiting and now == "draining" else "")
+        if line != said:
+            ctx.note(f"update: {line}")
+            said = line
+        time.sleep(0.5)
+    if rec is None:
+        raise ActionFailedError(f"no verdict on applying {version} within {APPLY_WAIT_S:g} s",
+                                hint=f"see {su.apply_log_path(sdir)}")
+    pointer = svc.app().state()
+    row = [version, True, rec["result"] == "applied", pointer.get("current", ""),
+           pointer.get("previous", ""), rec["result"]]
+    if rec["result"] == "applied":
+        ctx.emit(Result("update app", {"version": version, "apply": rec, "result": "applied"},
+                        rows=[row], human=[f"applied    harness-manager {version} runs now "
+                                           f"(restarted in {rec.get('seconds', '?')} s, same "
+                                           "port and token)"]))
+        return ExitCode.OK
+    what = {"rolled-back": f"{version} did not come up, so the service rolled back to "
+                           f"{rec.get('from', 'the previous version')} and marked it bad",
+            "refused": f"{version} failed its self-test and is marked bad; nothing restarted",
+            "cancelled": "the apply was cancelled; nothing restarted"}.get(
+        rec["result"], f"applying {version} ended {rec['result']}")
+    raise with_data(ActionFailedError(f"{what}: {rec.get('reason') or ''}".rstrip(": "),
+                                      hint=f"`harness-manager update status`; the helper's log is "
+                                           f"{su.apply_log_path(sdir)}"),
+                    apply=rec)
+
+
+def _wait_job(info: Any, job_id: str, timeout: float = 1800.0) -> dict[str, Any]:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        status, body = _call(info, "GET", f"/jobs/{job_id}", timeout=10.0)
+        if status == 200 and body.get("state") != "running":
+            return body
+        time.sleep(0.25)
+    raise ActionFailedError(f"the staging job {job_id} did not finish within {timeout:g} s")
+
+
+def _status(ctx: Ctx) -> int:
+    import time
+
+    from harness_manager.daemon import control
+    from harness_manager.services.update import selfupdate as su
+
+    svc = service(ctx)
+    view = su.status_view(svc, Path(svc.state_dir))
+    daemon = control.status(Path(svc.state_dir))
+    view["daemon"] = {k: daemon.get(k) for k in ("state", "pid", "version", "url")}
+    ptr = view["pointer"]
+    installed = f"{(ptr.get('installer') or {}).get('version') or '?'} (installed)"
+
+    def when(t: Any) -> str:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(t)) if t else "-"
+
+    lc, la = view["last_check"] or {}, view["last_apply"] or {}
+    bad = view["bad"]
+    human = [f"running    {view['running']} (this command)" + (
+                 f"; daemon {daemon.get('version')} (pid {daemon.get('pid')})"
+                 if daemon.get("state") == "running" else "; no daemon runs"),
+             f"pointer    current {ptr['current'] or installed}, previous "
+             f"{ptr['previous'] or installed}",
+             f"staged     {', '.join(view['staged']) or '-'}"]
+    human += [f"bad        {v}: {info.get('reason') or 'failed its health check'}"
+              for v, info in sorted(bad.items())]
+    human.append(f"available  {view['available'] or '-'}"
+                 + (f" (checked {when(lc.get('at'))}"
+                    + (f", error: {lc['error']}" if lc.get("error") else "") + ")" if lc else
+                    " (never checked)"))
+    eff = view["effective"]
+    human.append(f"mode       {eff['auto']}" + (f" ({eff['why']})" if eff["why"] else "")
+                 + (f"; channel {eff['channel']}" if eff["channel"] else ""))
+    if la:
+        human.append(f"last apply {la.get('from')} -> {la.get('to')}: {la.get('result')}"
+                     + (f" ({la.get('reason')})" if la.get("reason") else "")
+                     + f" at {when(la.get('at'))}")
+    if view["dev_install"]:
+        human.append(f"developer  {view['dev_install']}")
+    row = [view["running"], ptr["current"], ptr["previous"], view["staged"], sorted(bad),
+           view["available"], eff["auto"], lc.get("at", ""), la.get("result", ""),
+           bool(view["dev_install"])]
+    ctx.emit(Result("update status", view, rows=[row], human=human))
     return ExitCode.OK
 
 

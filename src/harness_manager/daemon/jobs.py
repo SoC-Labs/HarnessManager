@@ -20,6 +20,11 @@ request that talks to a board goes through ``BoardGates``:
 
 Requests that do not touch the board (lock owner, debug status, console names,
 job state) never take the gate.
+
+Drain (lane OTA-D). Before the daemon restarts for an app update it DRAINS: the jobs
+already running finish, and every new job is refused at once with 409 HELD whose
+``error.data.reason`` is ``DRAINING`` (``JobManager.drain``). ``undrain`` (a cancelled
+apply) accepts jobs again. ``wait_idle`` blocks until nothing runs.
 """
 
 from __future__ import annotations
@@ -180,6 +185,35 @@ class JobManager:
         self._jobs: OrderedDict[str, Job] = OrderedDict()
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="harness-manager-daemon-job")
         self._closed = False
+        self._draining: Callable[[], HarnessError] | None = None
+        self._idle = threading.Condition()
+
+    # -- drain (lane OTA-D) --
+
+    def drain(self, refusal: Callable[[], HarnessError]) -> None:
+        """Refuse every new job with ``refusal()`` (a 409 DRAINING); running jobs go on."""
+        self._draining = refusal
+
+    def undrain(self) -> None:
+        self._draining = None
+
+    @property
+    def draining(self) -> bool:
+        return self._draining is not None
+
+    def wait_idle(self, timeout: float | None = None,
+                  stop: threading.Event | None = None) -> bool:
+        """Wait until no job runs (True), or ``timeout``/``stop`` came first (False)."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._idle:
+            while self.running():
+                if stop is not None and stop.is_set():
+                    return False
+                left = 0.25 if deadline is None else min(0.25, deadline - time.monotonic())
+                if left <= 0:
+                    return False
+                self._idle.wait(left)
+        return True
 
     def get(self, job_id: str) -> Job | None:
         with self._mu:
@@ -198,6 +232,9 @@ class JobManager:
         """Claim the board, record the job, start it. ``HeldError`` if the board has a job."""
         if self._closed:
             raise ActionFailedError("harness-manager-daemon is shutting down", hint="start it again")
+        refusal = self._draining
+        if refusal is not None:
+            raise refusal()
         job = Job(kind, board_id)
         self.gates.claim(board_id, job)
         with self._mu:
@@ -255,6 +292,8 @@ class JobManager:
             # Free the board BEFORE saying so, so a client that reacts to job.done
             # is never refused by this job's own claim.
             self.gates.release(job.board_id, job)
+            with self._idle:
+                self._idle.notify_all()
         if error is not None:
             self._fail(job, error)
         else:
