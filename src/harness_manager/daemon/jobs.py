@@ -147,6 +147,13 @@ class BoardGates:
                 raise busy_error(board_id, job)
             raise HeldError(f"{board_id} is busy with another request",
                             holder="harness-manager-daemon", hint="retry in a moment")
+        # Again, now that it is ours: a job may have claimed the board while this request
+        # waited for the one before it (a deploy's preflight). Going on would run this
+        # request (a close!) ahead of the job's hold, under it (Q2, 2026-09-24).
+        job = self.busy(board_id)
+        if job is not None:
+            lock.release()
+            raise busy_error(board_id, job)
         try:
             yield
         finally:

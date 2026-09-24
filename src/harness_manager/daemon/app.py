@@ -613,6 +613,21 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def accepted(job: Job) -> JSONResponse:
         return _JSON(ok(job=job.id), status_code=202)
 
+    def still_open(bid: str, s: BoardSession, what: str) -> None:
+        """A board job's first step: the session it was given is still the open one.
+
+        A close may land between the request and the job (the job claims the board just
+        after its preflight); running on a closed session failed mid-way, UNREACHABLE,
+        with the swap parked. Now it stops before touching the board (Q2).
+        """
+        try:
+            current = d.engine.session(bid)
+        except HarnessError:
+            current = None
+        if current is not s:
+            raise AbsentError(f"{bid} was closed before the {what} started; nothing was sent",
+                              hint="open the board again, then retry")
+
     def board(bid: str) -> BoardSession:
         return d.engine.session(bid)
 
@@ -793,6 +808,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         s = board(bid)
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
+            still_open(bid, s, "debug session")
             progress("starting", 0, 0)
             status = d.engine.debug.up(s)
             progress(getattr(status, "state", "up"), 0, 0)
@@ -985,6 +1001,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             raise refusal
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
+            still_open(bid, s, "deploy")
+
             def on_progress(ev: Event) -> None:
                 if ev.board_id == bid:
                     progress(str(ev.data.get("phase", "")), int(ev.data.get("bytes", 0) or 0),
@@ -1003,6 +1021,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         s = board(bid)
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
+            still_open(bid, s, "restore")
+
             def on_progress(ev: Event) -> None:
                 if ev.board_id == bid:
                     progress(str(ev.data.get("phase", "")), int(ev.data.get("bytes", 0) or 0),
