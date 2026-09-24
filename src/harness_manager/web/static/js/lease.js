@@ -4,7 +4,10 @@
 // - the REQUESTER: "Request board" (a small form, an optional message), then a bar with
 //   the queue position, "the holder has been asked", the holder's 2:00 countdown, Leave
 //   queue, and "Force release..." once the daemon says force is available. Force opens a
-//   red confirm naming the holder; it is the only way to force.
+//   red confirm naming the holder; it is the only way to force. When no Harness Manager
+//   session is known to hold the board (lease.holder_kind is not "hm": it never answered,
+//   so it may be a script, a soak or runner; D12), the confirm asks for the board's name
+//   typed, and Force stays disabled until it matches.
 // - the HOLDER: a prompt per incoming request: who wants the board and why, the
 //   countdown to their force, Release now, or Keep for 5 / 15 / 30 / 60 min (+ message).
 // - the VICTIM: a banner "<board> was force-released by <by> at <time>: <reason>" that
@@ -56,6 +59,27 @@ export function leaseBoardName(bid) {
 
 // TARGET in the `$ lease ...` lines: the board's address, as every CLI verb takes it.
 function cliTarget(bid) { return hostOf(bid); }
+
+// D12: the holder may be a script (no Harness Manager session answered for it). The daemon's
+// lease.holder_kind says; a daemon without it counts as "maybe a script".
+export function holderMayBeScript(bid) {
+  const hub = hubOf(bid);
+  return !!(hub && hub.lease && !hub.lease.mine && hub.lease.holder_kind !== "hm");
+}
+
+// What the force confirm asks to be typed: the board's name (N1), else the hub's board as
+// people write it (mps3_01 -> mps3-01), else its address. The daemon accepts it (D12).
+export function forceName(bid) {
+  const b = S.board[bid];
+  const row = S.boards[bid] || {};
+  const cand = (b && b.info && b.info.candidate) || row.candidate || null;
+  const hub = hubOf(bid);
+  return (cand && cand.name) || (hub && hub.board ? String(hub.board).replace(/_/g, "-") : "") || hostOf(bid);
+}
+
+export function nameMatches(typed, name) {
+  return String(typed || "").trim().toLowerCase() === String(name || "").trim().toLowerCase();
+}
 
 export function secondsTo(at, now = Date.now() / 1000) {
   const e = epochOf(at);
@@ -223,14 +247,15 @@ function leaveSpec(bid) {
   };
 }
 
-function forceSpec(bid) {
+function forceSpec(bid, confirmBoard = "") {
   const name = leaseBoardName(bid);
   const hub = hubOf(bid);
   const holder = (hub && hub.lease && hub.lease.holder) || "the holder";
+  const typed = String(confirmBoard || "").trim();
   return {
     key: "lease_force", label: "Force release", busyLabel: "Force releasing...", budgetS: 120,
-    command: `lease force ${cliTarget(bid)} --yes`,
-    run: (ctx) => runJob("leaseForce", { bid }, { confirm: true },
+    command: typed ? `lease force ${cliTarget(bid)} --confirm-board ${/^[A-Za-z0-9_.:@-]+$/.test(typed) ? typed : shellQuote(typed)}` : `lease force ${cliTarget(bid)} --yes`,
+    run: (ctx) => runJob("leaseForce", { bid }, typed ? { confirm: true, confirm_board: typed } : { confirm: true },
       (d) => ctx.progress(d.phase || "revoking", d.phase), "lease_force"),
     render: (r) => {
       const at = r && r.lease && epochOf(r.lease.expires_at);
@@ -271,7 +296,7 @@ function openConfirm(bid, trigger) {
     interlock(bid, "lease_force", forceSpec(bid).command, `Cannot force: ${why}`);
     return;
   }
-  L.confirm = { bid, trigger };
+  L.confirm = { bid, trigger, typed: "" };
   changed();
 }
 
@@ -286,7 +311,9 @@ function confirmForce() {
   const c = L.confirm;
   if (!c) return;
   const bid = c.bid;
-  const spec = forceSpec(bid);
+  const script = holderMayBeScript(bid);
+  if (script && !nameMatches(c.typed, forceName(bid))) return;     // D12: Force stays disabled
+  const spec = forceSpec(bid, script ? c.typed : "");
   const why = forceWhy(bid) || gateReason(bid, "lease_force", spec.key, { whileJob: true });
   closeConfirm();
   if (why) {
@@ -622,6 +649,11 @@ function ForceConfirm() {
   // D4: the revoke acts on the physical board; say so when it is not the target's name.
   const target = hub && hub.lease && hub.lease.target;
   const board = hub && hub.board && hub.board !== target ? hub.board : "";
+  // D12: nobody can say a Harness Manager session holds it: the board's name, typed.
+  const script = holderMayBeScript(bid);
+  const typeName = forceName(bid);
+  const matched = !script || nameMatches(L.confirm.typed, typeName);
+  const disarmed = !!why || !matched;
   return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) closeConfirm(); }}>
     <div class="modal small danger" role="alertdialog" aria-modal="true" aria-labelledby="force-title"
       aria-describedby="force-what" ref=${ref} data-testid="force-confirm">
@@ -633,12 +665,24 @@ function ForceConfirm() {
           ? html` (the hub target <code>${target}</code> is part of it)` : null}.</p>` : null}
         <p class="secondary small">The hub records who did it and why${made ? ` (no answer to your request made at ${clock(made)})` : ""},
           and ${holder}'s session is told who took the board.</p>
+        ${script ? html`<div data-testid="force-script">
+          <${Reason} level="warn" icon="triangle-alert" testid="force-script-why"
+            text=${`No Harness Manager session is known to hold ${typeName}; it may be a script (a soak or runner). Type ${typeName} to force-release.`} />
+          ${hub.lease.holder_kind_reason ? html`<p class="secondary small" data-testid="force-script-reason">${hub.lease.holder_kind_reason}.</p>` : null}
+          <label class="field-label" for="force-board-name">Board name</label>
+          <input id="force-board-name" class="input mono force-name" type="text" autocomplete="off" spellcheck="false"
+            data-testid="force-board-name" value=${L.confirm.typed} data-autofocus
+            onInput=${(e) => { L.confirm.typed = e.target.value; changed(); }}
+            onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); if (matched) confirmForce(); } }} />
+        </div>` : null}
         ${why ? html`<${Reason} level="err" text=${`Not available now: ${why}`} testid="force-confirm-why" />` : null}
       </div>
       <div class="modal-foot">
-        <button type="button" class="btn" data-action="force_cancel" onClick=${closeConfirm} data-autofocus>Cancel</button>
+        <button type="button" class="btn" data-action="force_cancel" onClick=${closeConfirm} data-autofocus=${script ? undefined : true}>Cancel</button>
         <button type="button" class="btn danger-solid" data-action="force_confirm"
-          aria-disabled=${why ? "true" : undefined} onClick=${confirmForce}><${Icon} name="zap" /> Force</button>
+          aria-disabled=${disarmed ? "true" : undefined}
+          title=${!why && !matched ? `Type ${typeName} first` : undefined}
+          onClick=${confirmForce}><${Icon} name="zap" /> Force</button>
       </div>
     </div>
   </div>`;

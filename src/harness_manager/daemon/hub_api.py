@@ -15,7 +15,7 @@ docs/LEASE_REQUESTS.md, "API" (frozen 2026-09-24, lane LR-C):
 |---|---|---|
 | ``POST /boards/{bid}/lease/request`` | ``{message?, ttl_s?}`` | 202 job ``lease_request``; phases ``queued``, ``notified``, ``answered``, ``force-available``, ``held``. A "keep" answer does not end it (D1); it ends with ``{lease}`` when held, or ``{left: true}`` when we leave (D7). 409 ALREADY when the lease is already this principal's (this or another session, CCR-A2) |
 | ``POST /boards/{bid}/lease/respond`` | ``{id, answer, minutes?, message?}`` | 200 ``{ok}`` |
-| ``POST /boards/{bid}/lease/force`` | ``{confirm: true}`` | 202 job ``lease_force``; result ``{lease}``. Before any revoke: 400 USAGE without ``confirm: true``; 422 UNAVAILABLE with the time left; 409 REFUSED (or ALREADY) with the reason (D3) |
+| ``POST /boards/{bid}/lease/force`` | ``{confirm: true, confirm_board?}`` | 202 job ``lease_force``; result ``{lease}``. Before any revoke: 400 USAGE without ``confirm: true``; 422 UNAVAILABLE with the time left; 409 REFUSED (or ALREADY) with the reason (D3). D12: when ``GET /lease`` says ``lease.holder_kind`` is not ``"hm"`` (maybe a script), ``confirm_board`` must be the board's name: 400 USAGE without it, 409 REFUSED with another name |
 | ``DELETE /boards/{bid}/lease/queue`` | none | 200 ``{left: bool}`` |
 | ``DELETE /boards/{bid}/lease/taken`` | none | 200 ``{dismissed: bool}``; ``GET /lease`` then has ``taken: null`` until the next forced release (D11) |
 
@@ -60,6 +60,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from harness_manager import naming
 from harness_manager.cli.cmd_hub import (
     clean_message,
     force_refusal,
@@ -70,7 +71,12 @@ from harness_manager.cli.cmd_hub import (
 )
 from harness_manager.core.errors import HarnessError, UsageError
 from harness_manager.core.events import Event
-from harness_manager.services.lease import DEFAULT_TTL_S, LeaseService
+from harness_manager.services.lease import (
+    DEFAULT_TTL_S,
+    LeaseService,
+    typed_names,
+    view_confirm_error,
+)
 
 from .app import _JSON, JsonBody, RouteContext, _obj, ok
 from .jobs import BoardGates, Job, JobManager, busy_error
@@ -237,6 +243,13 @@ def register(ctx: RouteContext) -> None:
         session = ctx.board(bid)
         return leases.require_hub(getattr(session, "hub", None), bid)
 
+    def names_of(bid: str) -> tuple[str, ...]:
+        """What the UI calls the board (N1 name first), then its address (D12's typed name)."""
+        cand = getattr(ctx.board(bid), "candidate", None)
+        if cand is None:
+            return ()
+        return (getattr(cand, "name", "") or "", naming.address_of(cand))
+
     # -- routes -----------------------------------------------------------------------------
 
     @ctx.api.get("/boards/{bid:path}/tunnel")
@@ -310,14 +323,26 @@ def register(ctx: RouteContext) -> None:
             raise UsageError("force-release needs \"confirm\": true",
                              hint="it kicks the holder off the board now; the UI asks "
                                   "\"Are you sure?\" first")
+        confirm_board = b.get("confirm_board")
         hub = hub_of(bid)
-        refusal = force_refusal(full_view(leases.view(hub)), _now(), hub.target)
+        view = full_view(leases.view(hub))
+        refusal = force_refusal(view, _now(), hub.target)
+        if refusal is not None:
+            raise refusal
+        # D12: a holder no Harness Manager session answered for may be a script: the board's
+        # name typed, or 400 USAGE (missing) / 409 REFUSED (another name), before the job.
+        names = names_of(bid)
+        refusal = view_confirm_error(
+            view, confirm_board,
+            typed_names(names[0] if names else "", view.get("board"), hub.target, *names[1:]),
+            hub.target)
         if refusal is not None:
             raise refusal
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             progress("revoke", 0, 1)
-            out = leases.force(bid, hub, confirm=True)
+            out = leases.force(bid, hub, confirm=True, confirm_board=confirm_board,
+                               board_names=names)
             progress("held", 1, 1)
             return out
 

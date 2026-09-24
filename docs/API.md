@@ -198,7 +198,7 @@ docs/LEASE_REQUESTS.md is the design, with the lead decisions D1–D8.
 |---|---|
 | `POST /boards/{bid}/lease/request` `{message?, ttl_s?}` | 202 job `lease_request`. Phases: `queued`, `notified`, `answered`, `force-available`, `held`. It ends with `{lease}` when the lease is ours, or `{left: true}` when we leave the queue. |
 | `POST /boards/{bid}/lease/respond` `{id, answer: "release"\|"keep", minutes?, message?}` | `{ok}` |
-| `POST /boards/{bid}/lease/force` `{confirm: true}` | 202 job `lease_force`; the result is `{lease}`. Refused before any revoke (below). |
+| `POST /boards/{bid}/lease/force` `{confirm: true, confirm_board?}` | 202 job `lease_force`; the result is `{lease}`. Refused before any revoke (below). `confirm_board` is the board's name, needed when `lease.holder_kind` is not `"hm"` (D12). |
 | `DELETE /boards/{bid}/lease/queue` | `{left: bool}`: leaves the queue and withdraws the request. |
 | `DELETE /boards/{bid}/lease/taken` | `{dismissed: bool}`: forgets the last forced release of our lease (D11). `GET /lease` then returns `taken: null` until the next one. |
 
@@ -212,6 +212,7 @@ Events: `lease.wanted`, `lease.answered`, `lease.force_available`, `lease.taken`
 - **`request` refusal:** 409 ALREADY, with no job, when the lease is already this principal's, in this session or another.
 - **`force` refusals** come before any revoke (D3):
   - 400 USAGE without `confirm: true`.
+  - D12: when no Harness Manager session is known to hold the lease (`GET /lease` has `lease.holder_kind: "unknown"` and `lease.holder_kind_reason`; it may be a script), 400 USAGE without `confirm_board` (`error.data.{holder_kind, holder_kind_reason, confirm_board}` names the board to type), and 409 REFUSED when it is not the board's name (the N1 name, the hub's board id, the address or the target; any case).
   - 422 UNAVAILABLE while the holder still has time to answer, with `error.data.{request_id, deadline_at, time_left_s}`.
   - 409 REFUSED with the reason: no request, not at the head of the queue (`error.data.position`), or answered (`release`, or a `keep` whose minutes have not run out, with `error.data.time_left_s`).
   - 409 ALREADY when the lease is already yours.

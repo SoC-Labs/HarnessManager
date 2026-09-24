@@ -42,7 +42,9 @@ holder         while it holds a lease on a tracked board: list the request notes
                promotes the head of the queue) and writes the answer; ``respond(keep)``
                writes the answer only.
 force          re-reads the hub (status, notes, answer), checks every rule, revokes with
-               the frozen reason, then takes the lease the hub promoted us to.
+               the frozen reason, then takes the lease the hub promoted us to. A holder that
+               has not answered may be a script (D12, ``holder_kind``): then the board's name
+               must be typed (``confirm_board``).
 leave          cancel the queue entry, delete our note, ``lease.left``.
 victim         a heartbeat that says ``lost``, or a status naming another holder while we
                hold a stored lease: read ``lease_history``, find ``admin_revoked``, emit
@@ -93,6 +95,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from harness_manager import naming
 from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
@@ -337,6 +340,109 @@ class ForceRefusedError(RefusedError):
         super().__init__(message, hint=hint)
         self.time_left_s = time_left_s
         self.data = {"time_left_s": time_left_s, "request_id": request_id}
+
+
+# --- who holds it: a Harness Manager session, or maybe a script (D12) ----------------------------
+
+HOLDER_HM = "hm"
+HOLDER_UNKNOWN = "unknown"
+HOLDER_KINDS = (HOLDER_HM, HOLDER_UNKNOWN)
+
+
+def _field(obj: Any, name: str, default: Any = "") -> Any:
+    """``name`` of an answer note, or of its public dict (``view()['request']['answer']``)."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
+def holder_kind(answer: Any = None, *, asked: bool = True, here: bool = False, mine: bool = False,
+                notes_ok: bool = True) -> tuple[str, str]:
+    """D12: is the lease held by a Harness Manager session (``"hm"``), or can nobody say
+    (``"unknown"``: likely a script, such as a soak or a runner)? Returns ``(kind, reason)``.
+
+    The one evidence that cannot come from a script: **an answer to our current request**.
+    ``respond()`` writes one only from the session that holds the lease's token, and D9
+    re-sends the request (a new note, no answer) when the holder changes. Evidence about the
+    PRINCIPAL is not enough: scripts run under the same ``name@host`` as their owner's
+    Harness Manager (pyverify leases for the B1 runner and the soaks), and fpgahub records
+    no ``--holder`` or client kind. So a holder that has not answered is ``unknown``: a
+    script, or a person away from Harness Manager; forcing it then needs the board's name.
+    """
+    if here:
+        return HOLDER_HM, "this Harness Manager session holds it"
+    if mine:
+        return HOLDER_UNKNOWN, ("it is held under your hub name, but not by this Harness Manager "
+                                "session: another session of yours, or a script you run")
+    kind = str(_field(answer, "answer", "") or "") if answer is not None else ""
+    if kind in ANSWERS:
+        minutes = int(_field(answer, "minutes", 0) or 0)
+        what = f"keep {minutes} min" if kind == "keep" else "release"
+        return HOLDER_HM, (f"the holder answered your request from Harness Manager ({what}, "
+                           f"at {iso_norm(_field(answer, 'at', ''))})")
+    if not notes_ok:
+        return HOLDER_UNKNOWN, ("this hub connection carries no request notes, so Harness Manager "
+                                "cannot tell a session from a script (a soak or runner)")
+    if not asked:
+        return HOLDER_UNKNOWN, ("you have not asked for it, and only an answer to your request "
+                                "shows that a Harness Manager session holds it")
+    return HOLDER_UNKNOWN, ("no Harness Manager session has answered your request for it; the "
+                            "holder may be a script (a soak or runner), or someone away from "
+                            "Harness Manager")
+
+
+def typed_names(name: str, board: str | None, target: str, *also: str) -> list[str]:
+    """D12: what may be typed to confirm force-releasing a board no Harness Manager session is
+    known to hold. The first is the one to ask for: the board's name (N1: ``mps3-01``), else
+    the hub's board as people write it, else the hub target. The rest are accepted too: the
+    hub's board id (``mps3_01``), ``also`` (the address) and the target."""
+    board = board or ""
+    out: list[str] = []
+    for n in (name, naming.hub_display(board) if board else "", board, *also, target):
+        n = (n or "").strip()
+        if n and n.casefold() not in {o.casefold() for o in out}:
+            out.append(n)
+    return out
+
+
+def confirm_board_error(kind: str, reason: str, confirm_board: Any, names: list[str],
+                        target: str) -> HarnessError | None:
+    """D12: a force-release of a board whose holder is not known to be a Harness Manager
+    session needs the board's name typed. None when it may go ahead; else USAGE (400) when
+    ``confirm_board`` is missing, REFUSED (409) when it is not one of ``names``. A name given
+    for a Harness Manager holder must be right too (a wrong one means the wrong board)."""
+    if kind == HOLDER_HM and confirm_board is None:
+        return None
+    ask = names[0] if names else target
+    data = {"holder_kind": kind, "holder_kind_reason": reason, "confirm_board": ask}
+    err: HarnessError
+    if kind == HOLDER_HM and isinstance(confirm_board, str) and not confirm_board.strip():
+        return None
+    if confirm_board is None or (isinstance(confirm_board, str) and not confirm_board.strip()):
+        err = UsageError(f"force-release of {ask} needs the board's name typed: {reason}",
+                         hint=f"type {ask} to confirm it (API: \"confirm_board\": \"{ask}\"; "
+                              f"CLI: --confirm-board {ask})")
+    elif not isinstance(confirm_board, str):
+        err = UsageError(f"confirm_board must be the board's name as text, not "
+                         f"{type(confirm_board).__name__}")
+    elif confirm_board.strip().casefold() not in {n.casefold() for n in names}:
+        err = RefusedError(f"force-release of {ask} is refused: {confirm_board.strip()!r} is not "
+                           "this board's name", hint=f"type {ask} to confirm it")
+    else:
+        return None
+    err.data = data  # type: ignore[attr-defined]
+    return err
+
+
+def view_confirm_error(view: dict[str, Any], confirm_board: Any, names: list[str],
+                       target: str) -> HarnessError | None:
+    """``confirm_board_error`` from a lease view (the daemon's route and the CLI check it
+    before the job or the revoke; ``force()`` checks again against the hub). A view without
+    ``holder_kind`` (an older service) counts as ``unknown``."""
+    lease = view.get("lease") or {}
+    kind = lease.get("holder_kind") if lease.get("holder_kind") in HOLDER_KINDS else HOLDER_UNKNOWN
+    reason = lease.get("holder_kind_reason") or holder_kind(None)[1]
+    return confirm_board_error(kind, reason, confirm_board, names, target)
 
 
 def _answer_public(answer: Any) -> dict[str, Any] | None:
@@ -788,7 +894,8 @@ class LeaseService:
     def view(self, hub: Any) -> dict[str, Any]:
         """``GET /boards/{bid}/lease`` (docs/LEASE_REQUESTS.md, API)::
 
-            lease:    {target, holder, user, expires_at, mine} | null
+            lease:    {target, holder, user, expires_at, mine,
+                       holder_kind: "hm" | "unknown", holder_kind_reason} | null   # D12
             hub:      HOST | null
             board:    the physical board, hub.board_id() (D4) | null
             queue:    [{position, holder, user, mine}]
@@ -804,6 +911,10 @@ class LeaseService:
 
         ``reasked`` is known to the process that is waiting (D9's limit): another process
         (the CLI's ``lease show``) says False.
+
+        ``holder_kind`` (D12, ``holder_kind()``): ``"hm"`` when a Harness Manager session is
+        known to hold the lease (this one, or one that answered our request), else
+        ``"unknown"`` (maybe a script): force-release then needs the board's name typed.
         """
         empty: dict[str, Any] = {"lease": None, "hub": None, "board": None, "queue": [],
                                  "request": None, "incoming": [], "taken": None,
@@ -855,6 +966,11 @@ class LeaseService:
             if here:
                 out["incoming"] = self._incoming_list(hub, notes, principal, queue,
                                                       has_queue=hasattr(shown, "queue"))
+        if out["lease"] is not None:
+            req = out["request"]
+            kind, why = holder_kind(req.get("answer") if req else None, asked=req is not None,
+                                    here=here, mine=mine, notes_ok=notes_ok)
+            out["lease"].update(holder_kind=kind, holder_kind_reason=why)
         taken = self.store.get_taken(hub.host, hub.target)
         out["taken"] = {**taken, "at": iso_norm(taken.get("at"))} if taken else None
         return out
@@ -1338,9 +1454,16 @@ class LeaseService:
 
     # -- requests: force -----------------------------------------------------------------------------
 
-    def force(self, board_id: str, hub: Any, *, confirm: bool, heartbeat: bool = True) -> dict[str, Any]:
+    def force(self, board_id: str, hub: Any, *, confirm: bool, confirm_board: str | None = None,
+              board_names: tuple[str, ...] | list[str] = (), heartbeat: bool = True) -> dict[str, Any]:
         """Force-release the board to us: every rule re-checked against the hub NOW, then
-        revoke (the hub promotes the head of the queue, which is us) and take the lease."""
+        revoke (the hub promotes the head of the queue, which is us) and take the lease.
+
+        D12: unless the holder answered our request (a Harness Manager session), it may be a
+        script, and ``confirm_board`` must be the board's name: one of ``typed_names()`` of
+        ``board_names`` (the names the caller showed, the one it asked for first: the N1
+        name, then e.g. the address), the hub's board and the target. Missing: USAGE;
+        another name: REFUSED; both before any revoke."""
         hub = self.require_hub(hub, board_id)
         self._board_for(hub, board_id)
         if confirm is not True:
@@ -1392,6 +1515,12 @@ class LeaseService:
             raise ForceRefusedError(f"force-release of {hub.target} is refused: {why}",
                                     request_id=note.id,
                                     hint="an admin credential can force-release; or wait")
+        kind, kind_why = holder_kind(answer, notes_ok=self._notes_supported(hub)[0])
+        names = list(board_names or ())
+        typed = typed_names(names[0] if names else "", self._board_id(hub), hub.target, *names[1:])
+        refusal = confirm_board_error(kind, kind_why, confirm_board, typed, hub.target)
+        if refusal is not None:
+            raise refusal
         victim = status.holder
         reason = force_reason(principal, note.created_at)
         revoked = hub.client.lease_revoke(reason)

@@ -336,8 +336,16 @@ def test_negative_twin_respond_refuses_bad_answers(capsys, world, args, code):
 # --- lease force ----------------------------------------------------------------------------------
 
 
+def answered_expired(world: LeaseWorld) -> str:
+    """As ``queued_expired``, but the holder answered from Harness Manager (keep 5 min, 6 min
+    ago): a Harness Manager session holds it (D12), so the plain confirm is enough."""
+    rid = queued_expired(world)
+    world.answer(rid, "keep", 5, "one more run", age_s=6 * 60)
+    return rid
+
+
 def test_force_without_a_terminal_is_refused_unless_yes(capsys, world):
-    queued_expired(world)
+    answered_expired(world)
     rc, _, err = run(capsys, "lease", "force", TARGET_ARG)
     assert rc == ExitCode.REFUSED and "no terminal" in err and "--yes" in err
     assert world.revoked == [] and world.holder == ALICE
@@ -349,7 +357,7 @@ def test_force_without_a_terminal_is_refused_unless_yes(capsys, world):
 
 
 def test_force_asks_first_and_n_aborts(capsys, world, monkeypatch):
-    queued_expired(world)
+    answered_expired(world)
     monkeypatch.setattr(cmd_hub, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr("sys.stdin", io.StringIO("n\n"))
     rc, _, err = run(capsys, "lease", "force", TARGET_ARG)
@@ -360,7 +368,7 @@ def test_force_asks_first_and_n_aborts(capsys, world, monkeypatch):
 
 
 def test_negative_twin_force_answered_y_goes_ahead(capsys, world, monkeypatch):
-    queued_expired(world)
+    answered_expired(world)
     monkeypatch.setattr(cmd_hub, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr("sys.stdin", io.StringIO("y\n"))
     # D4: the view's board is the one revoked; a config name that differs comes first.
@@ -373,12 +381,62 @@ def test_negative_twin_force_answered_y_goes_ahead(capsys, world, monkeypatch):
 
 def test_force_prompt_without_a_board_in_the_view_asks_the_hub_client(capsys, world,
                                                                      monkeypatch):
-    queued_expired(world)
+    answered_expired(world)
     world.board = ""                                   # a service without D4
     monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(name=""), _Hub()))
     rc, _, err = run(capsys, "lease", "force", TARGET_ARG)
     assert rc == ExitCode.REFUSED and f"kicks {ALICE} off mps3-07 now" in err
     assert world.revoked == []
+
+
+# --- D12: a holder that never answered may be a script: the board's name, typed -------------------
+
+
+def test_force_of_a_holder_that_never_answered_asks_for_the_board_name(capsys, world,
+                                                                      monkeypatch):
+    queued_expired(world)
+    monkeypatch.setattr(cmd_hub, "_stdin_is_tty", lambda: True)
+    monkeypatch.setattr("sys.stdin", io.StringIO("mps3-02\n"))                  # a wrong name
+    rc, _, err = run(capsys, "lease", "force", TARGET_ARG)
+    assert ("No Harness Manager session is known to hold mps3-01; it may be a script (a soak "
+            "or runner).") in err and "Type mps3-01 to force-release: " in err
+    assert "[y/N]" not in err                          # the typed name is the confirmation
+    assert rc == ExitCode.REFUSED and "'mps3-02' is not this board's name" in err
+    assert world.revoked == [] and not any(c[0] == "force" for c in world.calls)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))                        # nothing typed
+    rc, _, err = run(capsys, "lease", "force", TARGET_ARG)
+    assert rc == ExitCode.REFUSED and "not confirmed" in err and world.revoked == []
+    # twin: the right name forces it
+    monkeypatch.setattr("sys.stdin", io.StringIO("mps3-01\n"))
+    rc, out, err = run(capsys, "lease", "force", TARGET_ARG)
+    assert rc == ExitCode.OK, err
+    assert f"mps3-01 ({TARGET} on {HUB}): force-released" in out and world.holder == ME
+    assert world.forced_with[-1]["confirm_board"] == "mps3-01"
+    assert world.forced_with[-1]["board_names"] == ("mps3-01", "192.168.10.101:6900")
+
+
+def test_force_of_a_holder_that_never_answered_needs_confirm_board_without_a_terminal(
+        capsys, world):
+    queued_expired(world)
+    for extra in ((), ("--yes",)):                     # --yes is not enough
+        rc, out, err = run(capsys, "--json", "lease", "force", TARGET_ARG, *extra)
+        e = json.loads(out)["error"]
+        assert rc == ExitCode.USAGE and "no terminal to type it on" in e["message"]
+        assert "--confirm-board mps3-01" in e["hint"] and world.revoked == []
+    rc, out, err = run(capsys, "--json", "lease", "force", TARGET_ARG, "--confirm-board", "mps3_07")
+    assert rc == ExitCode.REFUSED and "is not this board's name" in json.loads(out)["error"]["message"]
+    assert world.revoked == [] and not any(c[0] == "force" for c in world.calls)
+    # twin: the board's name (or the hub's id for it) is the confirmation a script gives
+    rc, out, err = run(capsys, "--json", "lease", "force", TARGET_ARG, "--confirm-board", "mps3_01")
+    assert rc == ExitCode.OK, err
+    assert json.loads(out)["lease"]["mine"] and len(world.revoked) == 1
+
+
+def test_negative_twin_a_holder_that_answered_is_forced_with_yes_alone(capsys, world):
+    answered_expired(world)
+    rc, out, err = run(capsys, "--json", "lease", "force", TARGET_ARG, "--yes")
+    assert rc == ExitCode.OK, err
+    assert world.forced_with[-1]["confirm_board"] is None and len(world.revoked) == 1
 
 
 @pytest.mark.parametrize("setup, code, words", [

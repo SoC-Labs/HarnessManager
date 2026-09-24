@@ -8,7 +8,7 @@
     harness-manager lease request TARGET [--message M] [--ttl S]
     harness-manager lease requests TARGET
     harness-manager lease respond TARGET ID --release | --keep MINUTES [--message M]
-    harness-manager lease force TARGET [--yes]
+    harness-manager lease force TARGET [--yes] [--confirm-board NAME]
     harness-manager lease leave TARGET
     harness-manager lease dismiss TARGET          # forget the last forced release (D11)
     harness-manager share list TARGET
@@ -31,8 +31,11 @@ the 2:00 countdown and the answer. A "keep" answer does not end the wait (D1): i
 prints the answer and counts down to when force-release can reopen. With no
 answer by the deadline (or a keep that ran out), and at the head of the queue,
 ``lease force`` revokes the holder's lease (it asks first; without a terminal it
-needs ``--yes``). ``lease leave`` leaves the queue and withdraws the request;
-Ctrl-C during ``lease request`` does the same.
+needs ``--yes``). When no Harness Manager session answered the request, the holder may
+be a script (a soak or runner; docs/LEASE_REQUESTS.md D12): then it asks for the
+board's name to be typed instead, and a script passes ``--confirm-board NAME`` (``--yes``
+is not enough). ``lease leave`` leaves the queue and withdraws the request; Ctrl-C during
+``lease request`` does the same.
 
 Exit codes: 0 when the verb did what it says (``request``/``force``: the board is
 yours); 6 ACTION_FAILED when a waiting ``request`` ends without the board (it left
@@ -65,7 +68,15 @@ from harness_manager.core.errors import (
     UnavailableError,
     UsageError,
 )
-from harness_manager.services.lease import DEFAULT_TTL_S, LeaseService, default_holder
+from harness_manager.services.lease import (
+    DEFAULT_TTL_S,
+    HOLDER_HM,
+    LeaseService,
+    confirm_board_error,
+    default_holder,
+    typed_names,
+    view_confirm_error,
+)
 
 from .context import Ctx
 from .output import TSV_COLUMNS, Result
@@ -317,10 +328,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         description="Revoke the holder's lease. Only after your request's 2:00 deadline, with "
                     "no answer (or a 'keep' that ran out), and you at the head of the queue. "
                     "It kicks the holder off the board now. Asks first; without a terminal "
-                    "it needs --yes.",
+                    "it needs --yes. When no Harness Manager session answered, the holder may "
+                    "be a script (a soak or runner): it asks you to type the board's name, and "
+                    "without a terminal it needs --confirm-board NAME (--yes is not enough).",
         parents=[fmt], epilog=_cols("lease"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
     sp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    sp.add_argument("--confirm-board", metavar="NAME", default=None,
+                    help="the board's name (mps3-01), for scripts: confirms a force-release "
+                         "whose holder may be a script; replaces the prompt")
 
     sp = lsub.add_parser("leave", help="leave the queue and withdraw your request",
                          parents=[fmt], epilog=_cols("lease leave"))
@@ -679,16 +695,33 @@ def _force(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     refusal = force_refusal(view, _now(), hub.target)
     if refusal is not None:
         raise refusal
-    holder = (view["lease"] or {}).get("holder") or "the holder"
+    lease = view["lease"] or {}
+    holder = lease.get("holder") or "the holder"
     board = _revoked_board(cand, hub, view)
-    warning = (f"Are you sure? This kicks {holder} off {board} now; anything they are running "
-               "on the board is interrupted.")
-    if not a.yes and not _stdin_is_tty():
-        raise RefusedError(f"force-release asks first, and there is no terminal to ask on "
-                           f"(it kicks {holder} off {board} now)",
-                           hint="re-run with --yes if you mean it")
-    ctx.confirm(warning)
-    out = svc.force(cand.board_id, hub, confirm=True)
+    # D12: the names that confirm it, the one to ask for first (what the prompt calls it).
+    names = (_board_name(cand, hub), naming.address_of(cand))
+    typed = typed_names(names[0], view.get("board"), hub.target, *names[1:])
+    confirm_board = getattr(a, "confirm_board", None)
+    if confirm_board is not None:
+        # A typed name confirms it whoever holds it (a script needs no --yes as well).
+        err = confirm_board_error("unknown", _holder_why(lease), confirm_board, typed, hub.target)
+        if err is not None:
+            raise err
+    elif lease.get("holder_kind") != HOLDER_HM:
+        confirm_board = _ask_board_name(ctx, holder, typed[0], lease)
+        err = view_confirm_error(view, confirm_board, typed, hub.target)
+        if err is not None:
+            raise err
+    else:
+        warning = (f"Are you sure? This kicks {holder} off {board} now; anything they are "
+                   "running on the board is interrupted.")
+        if not a.yes and not _stdin_is_tty():
+            raise RefusedError(f"force-release asks first, and there is no terminal to ask on "
+                               f"(it kicks {holder} off {board} now)",
+                               hint="re-run with --yes if you mean it")
+        ctx.confirm(warning)
+    out = svc.force(cand.board_id, hub, confirm=True, confirm_board=confirm_board,
+                    board_names=names)
     lease = out.get("lease") or {}
     human = [f"{_where(cand, hub)}: force-released; yours, held by "
              f"{lease.get('holder', '?')} until {lease.get('expires_at') or '?'}",
@@ -696,6 +729,38 @@ def _force(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     _emit(ctx, _lease_result(cand, hub, lease, human,
                              **{k: v for k, v in out.items() if k not in ("lease", "ok")}))
     return ExitCode.OK
+
+
+def _holder_why(lease: dict[str, Any]) -> str:
+    """Why the view could not say a Harness Manager session holds it (D12)."""
+    return lease.get("holder_kind_reason") or "the holder may be a script (a soak or runner)"
+
+
+def _ask_board_name(ctx: Ctx, holder: str, name: str, lease: dict[str, Any]) -> str:
+    """D12: the holder may be a script. Ask for the board's name on the terminal; without
+    one, the caller must pass ``--confirm-board`` (USAGE, as the API's missing name)."""
+    if not _stdin_is_tty():
+        raise UsageError(f"no Harness Manager session is known to hold {name} "
+                         f"({_holder_why(lease)}); force-release needs the board's name typed, "
+                         "and there is no terminal to type it on",
+                         hint=f"re-run with --confirm-board {name} if you mean it "
+                              "(--yes is not enough)")
+    stream = ctx.err or sys.stderr
+    stream.write(f"No Harness Manager session is known to hold {name}; it may be a script (a soak or "
+                 f"runner). Force-releasing kicks {holder} off it now, and anything running on "
+                 f"the board is interrupted.\nType {name} to force-release: ")
+    stream.flush()
+    try:
+        answer = sys.stdin.readline()
+    except (OSError, ValueError, EOFError):
+        answer = ""
+    if not answer.endswith("\n"):
+        stream.write("\n")
+        stream.flush()
+    if not answer.strip():
+        raise RefusedError("not confirmed: no board name was typed",
+                           hint=f"type {name} to force-release it")
+    return answer.strip()
 
 
 def _board_name(cand: Any, hub: Any) -> str:

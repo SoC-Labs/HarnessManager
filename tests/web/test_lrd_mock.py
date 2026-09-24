@@ -157,6 +157,7 @@ def test_a_keep_answer_is_a_phase_and_the_job_waits_on(client, sim, events):
     assert view(client)["request"]["force_available"] is True
     assert wait_for(lambda: job(client, jid)["phases"][-1] == "force-available")
     assert any(e.topic == "lease.answered" for e in events)
+    assert view(client)["lease"]["holder_kind"] == "hm"          # D12: she answered, from HM
     r = client.post(f"{LEASE}/force", json={"confirm": True}, headers=AUTH)
     assert r.status_code == 202
     assert done(client, jid)["result"]["lease"]["target"] == "mps3_01_pl"    # D2: ends held
@@ -180,7 +181,14 @@ def test_force_after_the_deadline_revokes_and_promotes(client, sim, events):
     sim.requests.advance(BOARD_USB, 121)
     assert wait_for(lambda: any(e.topic == "lease.force_available" for e in events))
     assert view(client)["request"]["force_available"] is True
+    # D12: alice never answered, so she may be a script: the board's name, typed
+    assert view(client)["lease"]["holder_kind"] == "unknown"
     r = client.post(f"{LEASE}/force", json={"confirm": True}, headers=AUTH)
+    assert r.status_code == 400 and r.json()["error"]["data"]["confirm_board"] == "mps3-01"
+    r = client.post(f"{LEASE}/force", json={"confirm": True, "confirm_board": "mps3-02"}, headers=AUTH)
+    assert r.status_code == 409 and r.json()["error"]["name"] == "REFUSED"
+    assert sim.requests.revokes == []
+    r = client.post(f"{LEASE}/force", json={"confirm": True, "confirm_board": "mps3-01"}, headers=AUTH)
     assert r.status_code == 202, r.text
     fjob = done(client, r.json()["job"])
     assert fjob["kind"] == "lease_force" and fjob["result"]["lease"]["holder"].endswith("@harness-manager")

@@ -521,7 +521,10 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         more = sim.requests.view(bid) if sim.requests is not None else {}
         if hub is None:
             return ok(lease=None, hub=None, **more)
-        return ok(lease=dict(hub["lease"]) if hub["lease"] else None, hub=hub["host"], **more)
+        lease = dict(hub["lease"]) if hub["lease"] else None
+        if lease is not None and sim.requests is not None:
+            lease.update(sim.requests.lease_keys(bid))          # D12: holder_kind
+        return ok(lease=lease, hub=hub["host"], **more)
 
     @app.post(f"{API}/boards/{{bid}}/lease", status_code=202)
     def lease_take(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008

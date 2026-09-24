@@ -30,7 +30,7 @@ Two Harness Manager sessions never talk directly; they may be on different machi
 | **Timer** | A request has `created_at` and `deadline_at = created_at + 120 s`, both UTC ISO 8601 and written in the note. Both sides count down from the note, not from their own clocks. |
 | **Holder's answers** | `release` releases now. `keep` takes `minutes` (5, 15, 30 or 60) and an optional `message`. |
 | **Force available** | Only when all of these hold: the deadline has passed; there is **no answer**, or a `keep` whose minutes have run out; and the requester is **at the head of the queue** (a revoke promotes the head, and anyone else would get the board). Otherwise force is refused with the reason: 409 REFUSED, or 422 with the time left. |
-| **Force needs `confirm: true`** | The UI shows "Are you sure? This kicks `<holder>` off mps3-01 now; anything they are running on the board is interrupted." |
+| **Force needs `confirm: true`** | The UI shows "Are you sure? This kicks `<holder>` off mps3-01 now; anything they are running on the board is interrupted." When no Harness Manager session is known to hold the lease (it may be a script), the board's name must be typed too: `confirm_board` (D12). |
 | **Revoke reason** | `"force-released by <principal> via Harness Manager: no answer to a request made at <created_at>"`. |
 | **Leaving** | Leaving the queue withdraws the request. Closing the board in the app while queued also leaves the queue (L1 already cancels an acquire on close). |
 | **Same person, two sessions** (CCR-A2) | fpgahub keys leases on `user@hubhost`, so a second session of the same person would be handed the lease back instead of queueing. `request()` refuses when `lease_status().holder == principal()`: "you already hold this board (another session)". |
@@ -96,7 +96,8 @@ class LeaseService:    # additions; the existing acquire/release/view/track stay
 
 `GET /boards/{bid}/lease` adds these keys; the old ones are unchanged:
 ```
-lease:  {target, holder, user, expires_at, mine} | null
+lease:  {target, holder, user, expires_at, mine,
+         holder_kind: "hm" | "unknown", holder_kind_reason} | null      # D12
 queue:  [{position, holder, user, mine}]
 request: {id, message, created_at, deadline_at, position,
           answer: {answer, minutes, message, at} | null,
@@ -122,7 +123,7 @@ revoke_reason: str                     # why not; "" when it may
 |---|---|---|
 | `POST /boards/{bid}/lease/request` | `{message?, ttl_s?}` | 202 job `lease_request`. Phases: `queued`, `notified`, `answered`, `force-available`, `held`. The result is `{lease}`, or `{answered: {...}}` when kept. |
 | `POST /boards/{bid}/lease/respond` | `{id, answer: "release"\|"keep", minutes?, message?}` | 200 `{ok}` |
-| `POST /boards/{bid}/lease/force` | `{confirm: true}` | 202 job `lease_force`, whose result is `{lease}`. Before any revoke: 409 REFUSED (not available: not at the head, answered, not yours) or 422 USAGE (`confirm` missing). |
+| `POST /boards/{bid}/lease/force` | `{confirm: true, confirm_board?}` | 202 job `lease_force`, whose result is `{lease}`. Before any revoke: 409 REFUSED (not available: not at the head, answered, not yours) or 422 USAGE (`confirm` missing). D12: when `lease.holder_kind` is not `"hm"`, `confirm_board` must be the board's name: 400 USAGE without it, 409 REFUSED with another name. |
 | `DELETE /boards/{bid}/lease/queue` | none | 200 `{left: bool}` (leave the queue and withdraw the request) |
 
 **Events** (append to CONTRACTS):
@@ -142,7 +143,7 @@ revoke_reason: str                     # why not; "" when it may
 | `harness-manager lease request TARGET [--message M] [--ttl S]` | Waits; shows the answer and the countdown. |
 | `harness-manager lease requests TARGET` | Lists incoming requests. |
 | `harness-manager lease respond TARGET ID --release \| --keep MINUTES [--message M]` | Answers a request. |
-| `harness-manager lease force TARGET [--yes]` | Prompts "Are you sure…" unless `--yes`; refuses if not available. |
+| `harness-manager lease force TARGET [--yes] [--confirm-board NAME]` | Prompts "Are you sure…" unless `--yes`; refuses if not available. D12: when the holder may be a script, it asks for the board's name to be typed instead, and without a terminal needs `--confirm-board NAME` (`--yes` is not enough). |
 | `harness-manager lease leave TARGET` | Leaves the queue. |
 | `lease show` | Also prints the queue and the requests. |
 
@@ -170,3 +171,4 @@ These amend the frozen spec. Lanes align to them before merging.
 | D9 | The holder changes while we wait: the new holder was never asked (LR-B-4) | **The note is re-sent to the new holder with a fresh 120 s deadline**, and `force()` refuses ("was not asked") until that deadline passes. Otherwise a stale deadline would let us kick someone who just got the board. Limit: a separate process with no memory of the wait cannot see the change. |
 | D10 | A requester's poll costs two ssh calls, not one (LR-B) | **Accepted.** One acquire plus one answer-note read per 10 s. The holder's poll stays at one call. |
 | D11 | The victim's "taken" banner has no way to be closed (LR-B) | **`DELETE /boards/{bid}/lease/taken`** → 200 `{dismissed: bool}`, calling `LeaseService.dismiss_taken(hub)`. `GET /lease` then returns `taken: null` until the next forced release. |
+| D12 | Scripts (the B1 runner, soaks, proof scripts) hold leases through pyverify and never answer a request, so force-release would kick them after 2 minutes (lead decision W5, 2026-09-24) | **When no Harness Manager session is known to hold the lease, warn and require the board's name typed.** `GET /lease` adds `lease.holder_kind`: `"hm"` or `"unknown"`, and `lease.holder_kind_reason`. The one signal a script cannot give is **an answer to our current request**: `respond()` writes it only from the session holding the lease's token, and D9 re-sends the request (no answer yet) to a new holder. So `"hm"` means this session holds it, or the holder answered our request (a keep that ran out). Everything else is `"unknown"`, including our own principal held elsewhere. Principal-level evidence (the holder once wrote a request note) is not enough: scripts lease under their owner's `name@host`, and fpgahub keeps neither `--holder` nor a client kind. There is no hub-side presence note. `force` with `"unknown"` needs `confirm_board`: the board's N1 name (`mps3-01`), the hub's board id (`mps3_01`), the address or the target, any case. Missing: 400 USAGE with `error.data.{holder_kind, holder_kind_reason, confirm_board}`; another name: 409 REFUSED; a name given for an `"hm"` holder must be right too. The route checks the view before the job and `force()` checks the hub again. **CLI:** a terminal asks "Type mps3-01 to force-release"; without a terminal, `--confirm-board NAME` (`--yes` is not enough). **UI:** the confirm says "No Harness Manager session is known to hold mps3-01; it may be a script (a soak or runner). Type mps3-01 to force-release." with a text field; Force stays disabled until the name matches. **Limits:** an HM user away from the app also gets the typed confirm; a separate process that missed a holder change (D9's limit) may count a previous holder's answer. A cheap follow-up that would let silent HM holders count as `"hm"`: the holder's 10 s poll writes a `seen-<id>` receipt (a frozen-interface change). |

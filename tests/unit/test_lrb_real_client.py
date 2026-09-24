@@ -154,7 +154,8 @@ def test_real_client_no_answer_then_force_and_the_victim_is_told_via_the_revoke_
     alice, bob = lab.holding("alice"), lab.session("bob")
     t0 = lab.clock.t
     forced: dict = {}
-    lab.clock.after(125, lambda: forced.update(bob.svc.force(BID, bob.hub, confirm=True)))
+    lab.clock.after(125, lambda: forced.update(bob.svc.force(BID, bob.hub, confirm=True,
+                                                             confirm_board="mps3-01")))
     out = bob.svc.request(BID, bob.hub)
     reason = force_reason(BOB, iso(t0))
     assert out["lease"]["holder"] == BOB and forced["forced"]["holder"] == ALICE

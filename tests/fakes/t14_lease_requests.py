@@ -28,6 +28,10 @@ The scripted scenarios are knobs on ``LeaseRequestSim`` (``sim.requests`` on the
   ``DELETE .../lease/taken`` forgets it (D11);
 - D9: ``new_holder(bid, principal)``: the lease passes to someone who was never asked, so
   our note is re-sent to them with a fresh 120 s deadline.
+- D12: ``lease.holder_kind`` is ``"hm"`` once the holder answered our request (``answer``),
+  else ``"unknown"`` (it may be a script): force then needs ``confirm_board``, the board's
+  name (400 USAGE without it, 409 REFUSED with another), by the real service's rules
+  (``harness_manager.services.lease.holder_kind`` / ``confirm_board_error``).
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from typing import Any
 from fastapi import Body, FastAPI
 from fastapi.responses import JSONResponse
 
+from harness_manager import naming
 from harness_manager.cli.output import with_data
 from harness_manager.core.errors import (
     AbsentError,
@@ -50,6 +55,7 @@ from harness_manager.core.errors import (
     UnavailableError,
     UsageError,
 )
+from harness_manager.services.lease import confirm_board_error, holder_kind, typed_names
 
 API = "/api/v1"
 
@@ -309,6 +315,23 @@ class LeaseRequestSim:
                 }
             return out
 
+    def lease_keys(self, bid: str) -> dict[str, Any]:
+        """D12: what ``GET /lease`` adds to ``lease``: is a Harness Manager session known to
+        hold it (it answered our request), or may it be a script?"""
+        with self._lock:
+            hub = self.week.hubs.get(bid) or {}
+            lease = hub.get("lease")
+            if not lease:
+                return {}
+            req = self.outgoing.get(bid)
+            kind, why = holder_kind(req.get("answer") if req else None, asked=req is not None,
+                                    here=bool(lease.get("mine")), notes_ok=not self.notes_reason)
+            return {"holder_kind": kind, "holder_kind_reason": why}
+
+    def board_of(self, bid: str) -> str:
+        hub = self.hub(bid)
+        return hub.get("board") or hub["target"].rsplit("_", 1)[0]
+
     # -- the service ---------------------------------------------------------------------------------
 
     def _promote(self, bid: str) -> None:
@@ -444,8 +467,9 @@ class LeaseRequestSim:
             self.publish("lease.state", bid, {"target": hub["target"], "state": "released",
                                               "holder": released["holder"], "expires_at": ""})
 
-    def check_force(self, bid: str, body: dict[str, Any]) -> None:
-        """Before any revoke: USAGE without confirm, then the frozen availability rule."""
+    def check_force(self, bid: str, body: dict[str, Any], names: tuple[str, ...] = ()) -> None:
+        """Before any revoke: USAGE without confirm, then the frozen availability rule, then
+        D12's typed board name (``names``: what the page calls the board, then its address)."""
         if body.get("confirm") is not True:
             raise UsageError("force needs confirm: true",
                              hint="it kicks the holder off the board now; the UI asks first")
@@ -468,6 +492,15 @@ class LeaseRequestSim:
                 raise with_data(err, time_left_s=max(1, int(deadline - time.time() + 0.999)),
                                 deadline_at=iso(deadline))           # D3
             raise RefusedError(f"force is not available: {why}")
+        keys = self.lease_keys(bid)
+        hub = self.hub(bid)
+        err = confirm_board_error(
+            keys.get("holder_kind", "unknown"), keys.get("holder_kind_reason", ""),
+            body.get("confirm_board"),
+            typed_names(names[0] if names else "", self.board_of(bid), hub["target"], *names[1:]),
+            hub["target"])
+        if err is not None:
+            raise err
 
     def force(self, bid: str, progress: Any) -> dict[str, Any]:
         hub = self.hub(bid)
@@ -516,9 +549,9 @@ def register(app: FastAPI, state: Any, sim: LeaseRequestSim, ok: Any, accepted: 
 
     @app.post(f"{API}/boards/{{bid}}/lease/force", status_code=202)
     def lease_force(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
-        state.session(bid)
+        cand = state.session(bid).candidate
         sim.hub(bid)
-        sim.check_force(bid, body)
+        sim.check_force(bid, body, (cand.name or "", naming.address_of(cand)))
         # Our own queued request job still runs (it is promoted by the revoke): force runs
         # beside it, never beside anything else.
         return accepted(jobs.start(bid, "lease_force", lambda progress: sim.force(bid, progress),

@@ -164,7 +164,8 @@ def test_rest_force_needs_an_admin_token(world):
     _rest(b, admin=True)                                       # twin: an admin token may
     world.clock.advance(11)
     assert b.svc.view(b.hub)["request"]["force_available"]
-    assert b.svc.force(BID, b.hub, confirm=True)["lease"]["holder"] == BOB
+    assert b.svc.view(b.hub)["lease"]["holder_kind"] == "unknown"    # D12: REST has no answers
+    assert b.svc.force(BID, b.hub, confirm=True, confirm_board="mps3-01")["lease"]["holder"] == BOB
 
 
 def test_rest_without_admin_the_wait_never_offers_force(world):

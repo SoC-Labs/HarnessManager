@@ -84,6 +84,15 @@ def force_button(page):
     return page.locator('[data-testid="lease-request"] [data-action="lease_force_open"]')
 
 
+def answered_then_ran_out(daemon, minutes=5):
+    """The holder answered from Harness Manager (keep), and the keep ran out: a Harness
+    Manager session holds it (D12), so the plain confirm is enough."""
+    r = reqs(daemon)
+    r.advance(BOARD, 121)
+    r.answer(BOARD, "keep", minutes=minutes, message="one more run")
+    r.advance(BOARD, 60 * minutes + 1)
+
+
 # --- the requester -------------------------------------------------------------------------------
 
 
@@ -156,7 +165,7 @@ def test_a_disarmed_force_says_why_and_runs_nothing(page_factory, daemon):
 
 def test_force_confirm_is_red_names_the_holder_and_cancel_runs_nothing(page_factory, daemon):
     page, bar = requester(page_factory, daemon)
-    reqs(daemon).advance(BOARD, 121)
+    answered_then_ran_out(daemon)                  # an HM holder: no name to type (D12)
     expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
     expect(force_button(page)).to_have_text("Force release…")
     force_button(page).click()
@@ -167,6 +176,7 @@ def test_force_confirm_is_red_names_the_holder_and_cancel_runs_nothing(page_fact
     expect(modal.locator('[data-testid="force-what"]')).to_have_text(
         f"This kicks {HOLDER} off {NAME} now; anything they are running is interrupted.")
     expect(modal.locator('[data-action="force_cancel"]')).to_be_focused()   # the safe default
+    expect(modal.locator('[data-testid="force-board-name"]')).to_have_count(0)
     modal.locator('[data-action="force_cancel"]').click()
     expect(modal).to_have_count(0)
     expect(force_button(page)).to_be_focused()
@@ -178,15 +188,22 @@ def test_force_confirm_is_red_names_the_holder_and_cancel_runs_nothing(page_fact
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text(f"leased to {HOLDER}")
 
 
+def type_board_name(page, name=NAME):
+    modal = page.locator('[data-testid="force-confirm"]')
+    modal.locator('[data-testid="force-board-name"]').fill(name)
+    return modal
+
+
 def test_force_revokes_and_the_board_is_ours(page_factory, daemon):
     page, bar = requester(page_factory, daemon)
     reqs(daemon).advance(BOARD, 121)
     expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
     force_button(page).click()
+    type_board_name(page)                          # alice never answered: maybe a script (D12)
     page.locator('[data-testid="force-confirm"] [data-action="force_confirm"]').click()
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours", timeout=T)
     result = bar.locator('[data-testid="result-lease_force"]')
-    expect(result).to_contain_text(f"$ lease force {ADDR} --yes  (rc 0")
+    expect(result).to_contain_text(f"$ lease force {ADDR} --confirm-board {NAME}  (rc 0")
     expect(result).to_contain_text(f"{HOLDER} was force-released")
     expect(bar.locator('[data-testid="req-title"]')).to_have_text(f"{NAME} is yours.")
     (revoke,) = reqs(daemon).revokes
@@ -202,6 +219,7 @@ def test_force_refused_by_the_daemon_shows_its_reason(page_factory, daemon):
     expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
     r.refuse_force = "force is not available: carol@lab-pc-09 is ahead of you in the queue"
     force_button(page).click()
+    type_board_name(page)
     page.locator('[data-testid="force-confirm"] [data-action="force_confirm"]').click()
     result = bar.locator('[data-testid="result-lease_force"]')
     expect(result).to_contain_text("(rc 15", timeout=T)
@@ -209,6 +227,55 @@ def test_force_refused_by_the_daemon_shows_its_reason(page_factory, daemon):
     expect(result).to_contain_text("carol@lab-pc-09 is ahead of you in the queue")
     assert r.revokes == []
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text(f"leased to {HOLDER}")
+
+
+# --- D12: a holder that never answered may be a script: the board's name, typed ---------------------
+
+
+def test_a_holder_that_never_answered_needs_the_board_name_typed(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    r = reqs(daemon)
+    r.advance(BOARD, 121)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
+    force_button(page).click()
+    modal = page.locator('[data-testid="force-confirm"]')
+    expect(modal.locator('[data-testid="force-script-why"]')).to_have_text(
+        f"No Harness Manager session is known to hold {NAME}; it may be a script (a soak or "
+        f"runner). Type {NAME} to force-release.")
+    expect(modal.locator('[data-testid="force-script-reason"]')).to_contain_text("has answered")
+    field = modal.locator('[data-testid="force-board-name"]')
+    expect(field).to_be_focused()                  # typing is the confirmation
+    go = modal.locator('[data-action="force_confirm"]')
+    expect(go).to_have_attribute("aria-disabled", "true")          # nothing typed yet
+    field.fill("mps3-0")
+    expect(go).to_have_attribute("aria-disabled", "true")          # not the name yet
+    go.click(force=True)
+    field.press("Enter")
+    expect(modal).to_be_visible()                  # neither the click nor Enter ran anything
+    assert r.revokes == []
+    field.fill("MPS3-01")                          # the name, in any case
+    expect(go).not_to_have_attribute("aria-disabled", "true")
+    field.press("Enter")
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours", timeout=T)
+    expect(bar.locator('[data-testid="result-lease_force"]')).to_contain_text(
+        f"$ lease force {ADDR} --confirm-board MPS3-01  (rc 0")
+    (revoke,) = r.revokes
+    assert revoke["prior_holder"] == HOLDER
+
+
+def test_negative_twin_a_holder_that_answered_is_forced_without_typing(page_factory, daemon):
+    page, bar = requester(page_factory, daemon)
+    answered_then_ran_out(daemon)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
+    force_button(page).click()
+    modal = page.locator('[data-testid="force-confirm"]')
+    expect(modal).to_be_visible()
+    expect(modal.locator('[data-testid="force-script"]')).to_have_count(0)
+    modal.locator('[data-action="force_confirm"]').click()
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours", timeout=T)
+    expect(bar.locator('[data-testid="result-lease_force"]')).to_contain_text(
+        f"$ lease force {ADDR} --yes  (rc 0")
+    assert len(reqs(daemon).revokes) == 1
 
 
 def test_not_at_the_head_force_stays_disarmed_with_the_daemons_reason(page_factory, daemon):
@@ -466,6 +533,7 @@ def test_a_time_left_refusal_says_when_force_opens(page_factory, daemon):
                                "hint": "force-release opens at the deadline",
                                "data": {"time_left_s": 95, "deadline_at": "2026-09-24T12:01:35+00:00"}}}))
     force_button(page).click()
+    type_board_name(page)
     page.locator('[data-testid="force-confirm"] [data-action="force_confirm"]').click()
     result = bar.locator('[data-testid="result-lease_force"]')
     expect(result).to_contain_text("(rc 12", timeout=T)

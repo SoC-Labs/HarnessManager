@@ -33,6 +33,8 @@ from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
 from tests.fakes.virtual_board import VirtualMps3
 
 H = headers()
+#: D12: the board's name, as the UI asks for it typed (N1: the hub's mps3_01 as people write it).
+NAME = "mps3-01"
 
 
 def state_dir() -> Path:
@@ -271,7 +273,7 @@ def test_force_after_the_deadline_runs_beside_the_request_job(client, bid, world
     wait_for(lambda: "force-available" in job_state(client, req_job)["phases"])
     created = world.my_request()["created_at"]
     assert client.get(lease(bid), headers=H).json()["request"]["force_available"] is True
-    r = client.post(lease(bid, "/force"), json={"confirm": True}, headers=H)
+    r = client.post(lease(bid, "/force"), json={"confirm": True, "confirm_board": NAME}, headers=H)
     assert r.status_code == 202, r.text
     force_job = r.json()["job"]
     done = wait_job(client, force_job)
@@ -342,6 +344,8 @@ def test_negative_twin_a_keep_that_ran_out_opens_force_again(client, bid, world)
     world.answer(rid, "keep", 15, age_s=16 * 60)                    # 15 min kept, 16 gone
     wait_for(lambda: "force-available" in job_state(client, job)["phases"])
     assert job_state(client, job)["state"] == "running"             # D1: still waiting
+    # D12: the holder answered from Harness Manager, so the plain confirm is enough
+    assert client.get(lease(bid), headers=H).json()["lease"]["holder_kind"] == "hm"
     r = client.post(lease(bid, "/force"), json={"confirm": True}, headers=H)
     assert r.status_code == 202, r.text
     assert wait_job(client, r.json()["job"])["result"]["lease"]["mine"] and len(world.revoked) == 1
@@ -359,7 +363,7 @@ def _queued_by_the_cli(world: LeaseWorld) -> None:
 
 def test_force_with_no_request_job_is_an_ordinary_board_job(client, bid, world):
     _queued_by_the_cli(world)
-    r = client.post(lease(bid, "/force"), json={"confirm": True}, headers=H)
+    r = client.post(lease(bid, "/force"), json={"confirm": True, "confirm_board": NAME}, headers=H)
     assert r.status_code == 202
     done = wait_job(client, r.json()["job"])
     assert done["state"] == "done" and done["board_id"] == bid and world.holder == ME
@@ -368,9 +372,57 @@ def test_force_with_no_request_job_is_an_ordinary_board_job(client, bid, world):
 def test_negative_twin_force_is_held_while_another_job_runs(client, bid, world, blocker):
     _queued_by_the_cli(world)
     blocker(bid)
-    r = client.post(lease(bid, "/force"), json={"confirm": True}, headers=H)
+    r = client.post(lease(bid, "/force"), json={"confirm": True, "confirm_board": NAME}, headers=H)
     assert r.status_code == 409 and r.json()["error"]["data"]["kind"] == "deploy"
     assert world.revoked == [] and world.holder == ALICE
+
+
+# --- D12: a holder that never answered may be a script: the board's name, typed ------------------
+
+
+def test_force_of_a_holder_that_never_answered_needs_the_board_name(client, bid, world):
+    job = start_request(client, bid, world)
+    world.expire_deadline()
+    wait_for(lambda: "force-available" in job_state(client, job)["phases"])
+    held = client.get(lease(bid), headers=H).json()["lease"]
+    assert held["holder_kind"] == "unknown" and "script" in held["holder_kind_reason"]
+    r = client.post(lease(bid, "/force"), json={"confirm": True}, headers=H)       # no name
+    assert r.status_code == 400, r.text
+    err = r.json()["error"]
+    assert err["code"] == ExitCode.USAGE and "needs the board's name typed" in err["message"]
+    assert err["data"]["confirm_board"] == NAME and err["data"]["holder_kind"] == "unknown"
+    for wrong in ("mps3-02", "yes"):                                                # another name
+        r = client.post(lease(bid, "/force"), json={"confirm": True, "confirm_board": wrong},
+                        headers=H)
+        assert r.status_code == 409 and r.json()["error"]["code"] == ExitCode.REFUSED, r.text
+        assert "is not this board's name" in r.json()["error"]["message"]
+    r = client.post(lease(bid, "/force"), json={"confirm": True, "confirm_board": 7}, headers=H)
+    assert r.status_code == 400
+    assert world.revoked == [] and not any(c[0] == "force" for c in world.calls)
+    # twin: the right name (any case, the hub's board id too) forces it
+    r = client.post(lease(bid, "/force"), json={"confirm": True, "confirm_board": " MPS3-01 "},
+                    headers=H)
+    assert r.status_code == 202, r.text
+    assert wait_job(client, r.json()["job"])["state"] == "done" and world.holder == ME
+    assert world.forced_with[-1]["confirm_board"] == " MPS3-01 "
+    (rev,) = world.revoked
+    assert rev["prior_holder"] == ALICE
+
+
+def test_negative_twin_a_holder_that_answered_forces_with_the_plain_confirm(client, bid, world):
+    job = start_request(client, bid, world)
+    rid = world.my_request()["id"]
+    world.expire_deadline()
+    world.answer(rid, "keep", 5, "one more run", age_s=6 * 60)       # a keep that ran out
+    wait_for(lambda: "force-available" in job_state(client, job)["phases"])
+    held = client.get(lease(bid), headers=H).json()["lease"]
+    assert held["holder_kind"] == "hm" and "keep 5 min" in held["holder_kind_reason"]
+    r = client.post(lease(bid, "/force"), json={"confirm": True, "confirm_board": "mps3-02"},
+                    headers=H)
+    assert r.status_code == 409, r.text          # a name, if given, must still be this board's
+    r = client.post(lease(bid, "/force"), json={"confirm": True}, headers=H)
+    assert r.status_code == 202, r.text
+    assert wait_job(client, r.json()["job"])["state"] == "done" and len(world.revoked) == 1
 
 
 # --- DELETE /lease/queue ------------------------------------------------------------------------

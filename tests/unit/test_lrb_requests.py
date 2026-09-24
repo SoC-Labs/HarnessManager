@@ -26,6 +26,10 @@ from harness_manager.services.lease import (
 from tests.fakes.lrb_fake_hub import HOST, TARGET, iso
 from tests.fakes.lrb_rig import BID, BOB, CAROL, DAVID, World
 
+#: D12: a holder that did not answer may be a script, so forcing it needs the board's name
+#: typed (the hub's board mps3_01, as people write it).
+NAME = "mps3-01"
+
 
 @pytest.fixture(autouse=True)
 def _no_real_hub(monkeypatch):
@@ -157,7 +161,8 @@ def test_no_answer_then_force_and_the_holder_is_told_who_took_it(world):
     t0 = world.clock.t
     phases: list[str] = []
     forced: dict = {}
-    world.clock.after(125, lambda: forced.update(b.svc.force(BID, b.hub, confirm=True)))
+    world.clock.after(125, lambda: forced.update(b.svc.force(BID, b.hub, confirm=True,
+                                                             confirm_board=NAME)))
     out = b.svc.request(BID, b.hub, progress=phases_into(phases))
 
     reason = force_reason(BOB, iso(t0))
@@ -207,7 +212,7 @@ def test_force_is_refused_before_the_deadline_and_allowed_after(world):
     assert "90 s left" in exc.value.message and exc.value.data["time_left_s"] == 90
     assert world.hub.revokes == [] and world.hub.current["holder"] == DAVID
     world.clock.advance(90)
-    out = b.svc.force(BID, b.hub, confirm=True)
+    out = b.svc.force(BID, b.hub, confirm=True, confirm_board=NAME)
     assert out["lease"]["holder"] == BOB and len(world.hub.revokes) == 1
 
 
@@ -245,7 +250,7 @@ def test_force_is_refused_when_not_at_the_head_of_the_queue(world):
     assert "position 2" in exc.value.message and world.hub.revokes == []
     req = b.svc.view(b.hub)["request"]
     assert req["position"] == 2 and not req["force_available"] and "position 2" in req["force_reason"]
-    out = c.svc.force(BID, c.hub, confirm=True)               # twin: the head may
+    out = c.svc.force(BID, c.hub, confirm=True, confirm_board=NAME)   # twin: the head may
     assert out["lease"]["holder"] == CAROL and world.hub.revokes[0]["by"] == CAROL
 
 
@@ -261,7 +266,7 @@ def test_force_needs_confirm_and_a_request_of_ours(world):
     with pytest.raises(ForceRefusedError) as exc:
         c.svc.force(BID, c.hub, confirm=True)                 # carol never asked
     assert "no request" in exc.value.message and world.hub.revokes == []
-    assert b.svc.force(BID, b.hub, confirm=True)["lease"]["holder"] == BOB   # twin
+    assert b.svc.force(BID, b.hub, confirm=True, confirm_board=NAME)["lease"]["holder"] == BOB  # twin
 
 
 def test_force_rechecks_the_hub_not_a_cached_view(world):
@@ -423,7 +428,7 @@ def test_a_new_holder_is_asked_before_it_can_be_forced(world):
         assert exc.value.time_left_s == 110
 
     def bob_forces():                                         # t0+260
-        got["forced"] = b.svc.force(BID, b.hub, confirm=True)
+        got["forced"] = b.svc.force(BID, b.hub, confirm=True, confirm_board=NAME)
 
     world.clock.after(125, carol_gets_it)
     world.clock.after(135, carol_is_asked)
@@ -485,7 +490,7 @@ def test_the_holder_session_absent_no_answer_so_force_works(world):
     a = world.holding()
     a.svc.close()                                             # david's Harness Manager is not running
     b = world.session(BOB)
-    world.clock.after(125, lambda: b.svc.force(BID, b.hub, confirm=True))
+    world.clock.after(125, lambda: b.svc.force(BID, b.hub, confirm=True, confirm_board=NAME))
     out = b.svc.request(BID, b.hub)
     assert out["lease"]["holder"] == BOB and world.hub.answers == {}
     assert world.calls(DAVID, "list_requests") == []
@@ -524,7 +529,7 @@ def test_clock_skew_the_requests_deadline_is_the_notes(world):
         assert exc.value.time_left_s == 20
 
     def cli_forces():                                         # t0+130: past the note's deadline
-        cli["forced"] = cli["b2"].svc.force(BID, cli["b2"].hub, confirm=True)
+        cli["forced"] = cli["b2"].svc.force(BID, cli["b2"].hub, confirm=True, confirm_board=NAME)
 
     world.clock.after(100, at_100)
     world.clock.after(125, cli_forces)
@@ -685,7 +690,7 @@ def test_threaded_force_while_the_request_job_waits(world):
         b.svc.force(BID, b.hub, confirm=True)
     world.clock.t += 121                                      # the note's deadline passes
     assert _until(lambda: b.of("lease.force_available"))
-    out = b.svc.force(BID, b.hub, confirm=True)
+    out = b.svc.force(BID, b.hub, confirm=True, confirm_board=NAME)
     t.join(timeout=5)
     assert not t.is_alive() and result["lease"]["holder"] == BOB == out["lease"]["holder"]
     assert world.hub.queue == [] and world.hub.notes == {}

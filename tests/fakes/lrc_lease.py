@@ -13,8 +13,10 @@ The additions follow docs/LEASE_REQUESTS.md "Interfaces" exactly:
   until held (``{lease}``) or we leave (``{left: true}``, D7; ``cancel_raises`` makes a
   cancel raise instead, as an older service did). A "keep" answer does not end it (D1);
 - ``respond(board_id, hub, request_id, answer, *, minutes, message)``;
-- ``force(board_id, hub, *, confirm)``: refused (REFUSED/UNAVAILABLE) unless
-  available, then the revoke, and the head of the queue (us) is promoted;
+- ``force(board_id, hub, *, confirm, confirm_board, board_names)``: refused
+  (REFUSED/UNAVAILABLE) unless available; D12: a holder that did not answer our request
+  may be a script, so the board's name is required (the real ``confirm_board_error``);
+  then the revoke, and the head of the queue (us) is promoted;
 - ``leave(board_id, hub)``: ``{left}``;
 - ``view(hub)``: the extended view.
 
@@ -43,7 +45,12 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event
-from harness_manager.services.lease import LeaseService
+from harness_manager.services.lease import (
+    LeaseService,
+    confirm_board_error,
+    holder_kind,
+    typed_names,
+)
 
 ME = "david@mapstone-dev"
 ALICE = "alice@lab-pc"
@@ -75,6 +82,7 @@ class LeaseWorld:
     cancel_raises: bool = False
     tick_s: float = 0.01
     calls: list[tuple[Any, ...]] = field(default_factory=list)
+    forced_with: list[dict[str, Any]] = field(default_factory=list)    # force()'s D12 arguments
     mu: threading.RLock = field(default_factory=threading.RLock)
     _ids: Any = field(default_factory=lambda: itertools.count(1))
 
@@ -206,6 +214,10 @@ class FakeLeaseService(LeaseService):
                                                                   "at")}}
                          for n in w.notes.values() if n["by"] != w.me]
                         if w.holder == w.me else [])
+            if lease is not None:                    # D12, by the real service's rule
+                kind, why = holder_kind(request["answer"] if request else None,
+                                        asked=request is not None, here=lease["mine"])
+                lease.update(holder_kind=kind, holder_kind_reason=why)
             out = {"lease": lease, "hub": hub.host, "queue": queue, "request": request,
                    "incoming": incoming, "taken": w.taken}
             if w.board:
@@ -281,9 +293,11 @@ class FakeLeaseService(LeaseService):
             w.answer(request_id, answer, minutes, message)
         return {"ok": True}
 
-    def force(self, board_id: str, hub: Any, *, confirm: bool) -> dict[str, Any]:
+    def force(self, board_id: str, hub: Any, *, confirm: bool, confirm_board: str | None = None,
+              board_names: tuple[str, ...] | list[str] = ()) -> dict[str, Any]:
         w = self.world
         w.calls.append(("force", board_id, confirm))
+        w.forced_with.append({"confirm_board": confirm_board, "board_names": tuple(board_names)})
         if confirm is not True:
             raise UsageError("force needs confirm")
         with w.mu:
@@ -295,6 +309,13 @@ class FakeLeaseService(LeaseService):
                 if "until" in reason:
                     raise UnavailableError("lease_force", reason)
                 raise RefusedError(f"force-release is not available: {reason}")
+            kind, why = holder_kind(w.answers.get(mine["id"]))
+            names = list(board_names)
+            err = confirm_board_error(kind, why, confirm_board,
+                                      typed_names(names[0] if names else "", w.board, hub.target,
+                                                  *names[1:]), hub.target)
+            if err is not None:
+                raise err
             victim = w.holder
             w.revoked.append({"target": hub.target, "prior_holder": victim, "by": w.me,
                               "reason": f"force-released by {w.me} via Harness Manager: no answer "
