@@ -21,6 +21,13 @@ What it does:
 
 Each probe prints PASS (T7 does it), GAP (T7 does not, and the design needs
 it) or NOTE, with the evidence. The design doc quotes this output.
+
+OTA-C (2026-09-24) re-ran it after closing P7-P10: P9 now plays GitHub's API host on
+127.0.0.1 (``token_hosts``, as the unit tests do; the twin shows a non-GitHub host never
+gets the token), and P10 builds its mirror with ``mirror.write_mirror`` (the designed
+``harness mirror`` flow) instead of a plain copy (kept as P10b, which still fails). The
+bare-metal fake mints now record ``ver32 = 0x01000000``, what the v0.11 firmware (VERSION
+1.0.0) reports, since HM matches and confirms ``ver32`` when both sides have one (H1).
 """
 
 from __future__ import annotations
@@ -115,7 +122,7 @@ def bare_metal_mint(tmp: Path, static_id: str, usercode: str, fw_sha: str,
                    features=features)
     return MintRecord(
         static_id=static_id, usercode=usercode, impl="bare-metal", fw_sha=fw_sha,
-        wire_harness="1.0.0", ver32="0x01000001", proto=proto, features=features,
+        wire_harness="1.0.0", ver32="0x01000000", proto=proto, features=features,
         vivado="2024.1", sd_files=sd_files(bit),
         overlays_open=overlays(tmp, static_id, usercode, ("synth",)),
         overlays_aaa=overlays(tmp, static_id, usercode, ("synth2",), ip_class="arm-aaa"),
@@ -318,11 +325,30 @@ def p6(w: World, ws: Path) -> None:
 
 @probe("P7 DUT kit as a channel component (KIT-STORE rm-kit)")
 def p7(w: World, ws: Path) -> None:
+    from harness_manager.services.update.kits import ChannelKits
+    from harness_manager.services.update.planner import BoardView, make_plan
+
     store = ReleaseStore(ws / "www-kit")
     rel = build_release(store, "1.1.1", w.mints["1.1.1"], with_kit=True)
     try:
         publish_channel(store, channel_document("stable", 1, w.key, [rel], "1.1.1"), w.key)
-        record("P7 DUT kit as a channel component (KIT-STORE rm-kit)", "PASS", "accepted")
+        state = UpdateState.under(ws / "state-kit")
+        client = ChannelClient(state, Downloader(state.cache), w.trust)
+        kits = ChannelKits(client, client.downloader,
+                           source=str(store.root) + "/channel/{channel}/channel.json")
+        found = kits.list(S_ILA)
+        blob = kits.fetch(S_ILA)
+        ch = kits.verified()[0].channel
+        ident = BoardIdentity(board_type="mps3", shell_id=S_OLD.lower(), harness_version="1.0.0")
+        plan = make_plan(ch, BoardView(board_id="b", pack="mps3", identity=ident,
+                                       has_storage=True, has_controller=True),
+                         app_version="0.1.0")
+        ok = len(found) == 1 and blob.read_bytes() == w.mints["1.1.1"].kit_zip and \
+            "kit" not in plan.components
+        record("P7 DUT kit as a channel component (KIT-STORE rm-kit)", "PASS" if ok else "GAP",
+               f"accepted; kits.list({S_ILA}) -> {[(k.release, k.vivado) for k in found]}; "
+               f"fetched {blob.stat().st_size} B sha-checked; the harness plan fetches "
+               f"{plan.components} (never the kit)")
     except HarnessError as exc:
         record("P7 DUT kit as a channel component (KIT-STORE rm-kit)", "GAP",
                f"schema refuses it: {exc.message[:110]} (schema.py:53-65). The publisher's "
@@ -369,11 +395,24 @@ def p9(w: World, ws: Path) -> None:
         rel = build_release(store, "1.0.0", w.mints["1.0.0"])
         publish_channel(store, channel_document("stable", 1, w.key, [rel], "1.0.0"), w.key)
         state = UpdateState.under(ws / "state-private")
-        dl = Downloader(state.cache, token=srv.token)
+        # The fake plays GitHub's API host: 127.0.0.1 is a token host here, as in the tests.
+        twin = ChannelClient(UpdateState.under(ws / "state-private-twin"),
+                             Downloader(ws / "c-twin", token=srv.token), w.trust)
+        try:
+            twin.fetch("stable", srv.base + "private/channel/{channel}/channel.json")
+            twin_note = "a NON-token host got it (bad)"
+        except HarnessError:
+            twin_note = ("twin: with GitHub-only token hosts, 127.0.0.1 got no token "
+                         f"(Authorization sent: {[r['auth'] for r in srv.requests]})")
+        srv.requests.clear()
+        dl = Downloader(state.cache, token=srv.token, token_hosts=frozenset({"127.0.0.1"}))
         client = ChannelClient(state, dl, w.trust)
         try:
-            client.fetch("stable", srv.base + "private/channel/{channel}/channel.json")
-            record("P9 private channel index (token)", "PASS", "fetched with the token")
+            v = client.fetch("stable", srv.base + "private/channel/{channel}/channel.json")
+            sent = [r["auth_value_ok"] for r in srv.requests]
+            record("P9 private channel index (token)", "PASS" if all(sent) else "GAP",
+                   f"serial {v.channel.serial} fetched with the token on both index requests "
+                   f"({sent}); {twin_note}")
         except HarnessError as exc:
             sent = [r.get("auth") for r in srv.requests]
             record("P9 private channel index (token)", "GAP",
@@ -384,25 +423,46 @@ def p9(w: World, ws: Path) -> None:
 
 @probe("P10 offline mirror of absolute GitHub URLs")
 def p10(w: World, ws: Path) -> None:
+    from harness_manager.services.update.mirror import write_mirror
+
     web = ws / "www-origin"
+    mirror = ws / "mirror"
     with FakeChannelServer(web) as origin:
         store = ReleaseStore(web, url_base=origin.base)    # absolute URLs, like GitHub Releases
         rel = build_release(store, "1.1.1", w.mints["1.1.1"])
         publish_channel(store, channel_document("stable", 1, w.key, [rel], "1.1.1"), w.key)
-    mirror = ws / "mirror"
-    shutil.copytree(web, mirror)                           # the bytes are all here now
-    b = Board(ws, w.trust, "mirror")
+        # `harness mirror --to DIR` (H5): the exact signed channel + blobs/<sha256>
+        state = UpdateState.under(ws / "state-mirror-writer")
+        writer = ChannelClient(state, Downloader(state.cache), w.trust)
+        report = write_mirror(writer.fetch("stable", origin.source()), writer.downloader, mirror)
+    shutil.copytree(web, ws / "plain-copy")                # P10b: the old plain copy
+    b = Board(ws, w.trust, "mirror")                        # the origin is gone now
     try:
-        plan, verified = b.svc.plan_harness(b.session, channel="stable",
-                                            source=str(mirror) + "/channel/{channel}/channel.json")
+        plan, verified = b.svc.plan_harness(b.session, channel="stable", source=str(mirror))
         try:
-            b.svc.install_harness(b.session, plan, plan.approve(), verified)
-            record("P10 offline mirror of absolute GitHub URLs", "PASS", "installed from the mirror")
+            out = b.svc.install_harness(b.session, plan, plan.approve(), verified)
+            record("P10 offline mirror of absolute GitHub URLs",
+                   "PASS" if out.result == "installed" else "GAP",
+                   f"write_mirror -> {len(report.blobs)} blobs, skipped {list(report.skipped)}; "
+                   f"origin down; --source {mirror.name}/ -> {out.result} from blobs/<sha256> "
+                   "(no URL rewritten)")
         except HarnessError as exc:
             record("P10 offline mirror of absolute GitHub URLs", "GAP",
-                   f"channel.json verified from the mirror, but assets still go to the dead "
-                   f"origin: {exc.message[:80]}. Fix: look assets up by sha256 in mirror dirs "
-                   "before the URL (the cache is already content-addressed)")
+                   f"channel.json verified from the mirror, but: {exc.message[:120]}")
+    finally:
+        b.close()
+    b = Board(ws, w.trust, "plain-copy")
+    try:
+        plan, verified = b.svc.plan_harness(
+            b.session, channel="stable",
+            source=str(ws / "plain-copy") + "/channel/{channel}/channel.json")
+        try:
+            b.svc.install_harness(b.session, plan, plan.approve(), verified)
+            record("P10b a plain copy (no blobs/)", "NOTE", "installed (unexpected)")
+        except HarnessError as exc:
+            record("P10b a plain copy (no blobs/)", "NOTE",
+                   f"still goes to the dead origin, as it should: {exc.message[:70]}. A mirror "
+                   "is written by write_mirror / the release tool's --mirror")
     finally:
         b.close()
 
