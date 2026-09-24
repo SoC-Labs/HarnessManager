@@ -29,6 +29,17 @@ T8 (hub mode) and T10 (XDC export) follow.
 
 ## Week plan: a working Harness Manager by Fri 09-25 (drawn up 2026-09-23 23:00; GO given, all six lanes running)
 
+**Status 2026-09-24 ~01:20: all six lanes merged; `main` is pushed at `c65df06` (1857 passed).**
+- **Merges into `main`:** L4 at 5ddbdf7, L2 at 720e364, L1 at 4d02142, L5 at 984fb48, the L2 fix at eac1890, L3 at 8e7e4de.
+- **L6:** `feat/uart-runtime-baud` at `fe87b6c` in the platform repo. It is local and simulation-proven, and its rebuild steps are in `HANDOVER_UART_RUNTIME_BAUD.md`.
+- **Next:** david's real-board test (docs/HIL_B0.md), then B0 on Friday.
+- **Follow-ups:**
+  - L1-5 (capability narrowing over a share) and L1-6 (`on_close`);
+  - the L3 CCRs: `command` in `console.pty` events, and a place for the app switch outside a board;
+  - a DemoEngine with a meter, an update channel and rates;
+  - re-vendor pyverify after L6 lands in platform master;
+  - Windows and macOS on a real board.
+
 **Status 2026-09-23 ~23:45:**
 - Step 0 is done: the rename is at `d8fad9e` (1559 passed) and pushed to `SoC-Labs/HarnessManager`.
 - Lanes L1–L6 are running in `../hm-l*` and the `../mps3-nanosoc-platform-baud` worktree.
