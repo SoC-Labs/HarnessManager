@@ -272,13 +272,21 @@ export async function loadBoards() {
 // Probes run one after another: an address added while a scan runs waits its turn
 // instead of being dropped.
 let probeChain = Promise.resolve();
+let userProbes = 0;          // probes the user asked for (Scan, Add by address)
 
-export function probe(hosts = null, via = "") {
-  probeChain = probeChain.then(() => probeNow(hosts, via), () => probeNow(hosts, via));
+export function probe(hosts = null, via = "", { auto = false } = {}) {
+  if (!auto) userProbes += 1;
+  const run = () => probeNow(hosts, via, auto);
+  probeChain = probeChain.then(run, run);
   return probeChain;
 }
 
-async function probeNow(hosts, via = "") {
+async function probeNow(hosts, via = "", auto = false) {
+  // The page's own first scan (no boards listed) gives way to a probe the user asked for
+  // meanwhile: an address added while the first list loaded ran first, and the scan
+  // chained after it replaced the add's answer on the status line (FLAKE 2026-09-24,
+  // CI run 35996099505).
+  if (auto && (userProbes || S.order.length)) return;
   S.scan = { running: true, line: hosts ? `adding ${hosts.join(", ")}${via ? ` ${via}` : ""}...` : "scanning...", level: "" };
   changed();
   // With explicit hosts the pack pings only those and unicasts identify to them, so a board
@@ -641,7 +649,7 @@ export async function start() {
     if (saved && S.boards[saved]) select(saved);
     else if (S.order.length) select(S.order[0]);
   }
-  if (!r.error && !S.order.length) probe();
+  if (!r.error && !S.order.length) probe(null, "", { auto: true });
   // Holders change under us (other users, the CLI): re-read the list now and then.
   setInterval(() => { if (document.visibilityState === "visible") loadBoards(); }, 15000);
   // A job known to hold a board is also asked after directly: its end frees the board even

@@ -793,6 +793,69 @@ def test_a_board_added_through_a_hub_opens_with_its_tunnel_and_lease(page_factor
     expect(page.locator('[data-testid="lease-chip"]')).to_have_text("no lease")
 
 
+PROBE = re.compile(r"/api/v1/probe$")
+
+
+def add_by_address(page, address, via=""):
+    page.locator('[aria-label="Add a board by address"]').click()
+    page.locator('[aria-label="Board address"]').fill(address)
+    page.locator('[data-testid="add-via"]').fill(via)
+    page.locator('.rail-add button[type="submit"]').click()
+
+
+@pytest.mark.week_plan("hub_api", sim=True)
+def test_an_address_added_while_the_page_loads_is_not_followed_by_a_scan(page_factory, daemon):
+    # FLAKE 2026-09-24 (CI run 35996099505): the test above added an address before the
+    # page's first list was in. That list was empty, so the page chained its own first
+    # scan behind the add, and the scan's "3 boards" replaced the add's answer.
+    page = page_factory(url="about:blank", **APP)
+    bodies, health, adds = [], [], []
+
+    def hold_health(route):
+        if not bodies:
+            health.append(route)                  # start() waits: the add goes first
+        else:
+            route.continue_()
+
+    def record(route):
+        bodies.append(route.request.post_data_json)
+        if len(bodies) == 1:
+            adds.append(route)                    # held until start() has read its list
+        else:
+            route.continue_()
+
+    page.route(re.compile(r"/api/v1/health$"), hold_health)
+    page.route(PROBE, record)
+    page.goto(daemon.ui_url)
+    add_by_address(page, "192.168.10.102", "mapstone-dev")
+    deadline = time.monotonic() + 10
+    while not (adds and health) and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    assert adds and health, "the add or the page's start-up read did not happen"
+    with page.expect_response(lambda r: BOARDS_LIST.search(r.url) and r.request.method == "GET",
+                              timeout=T):
+        for route in health:
+            route.continue_()                     # start(): health, packs, the list
+    page.evaluate("() => new Promise((done) => setTimeout(done, 100))")
+    adds[0].continue_()
+    status = page.locator(".rail-status")
+    expect(status).to_contain_text("--via ssh:mapstone-dev", timeout=T)
+    add_by_address(page, "192.168.10.101")        # anything chained runs before this one
+    expect(status).to_contain_text("probe 192.168.10.101", timeout=T)
+    assert [b.get("hosts") for b in bodies] == [["192.168.10.102"], ["192.168.10.101"]]
+
+
+@pytest.mark.week_plan()
+def test_negative_twin_a_page_that_opens_with_no_boards_scans_by_itself(page_factory, daemon):
+    bodies = []
+    page = page_factory(url="about:blank", **APP)
+    page.route(PROBE, lambda route: (bodies.append(route.request.post_data_json),
+                                     route.continue_()))
+    page.goto(daemon.ui_url)
+    expect(page.locator(".rail-status")).to_contain_text("board", timeout=T)
+    assert bodies == [{}]
+
+
 @pytest.mark.week_plan()
 def test_a_board_not_behind_a_hub_shows_no_hub(page_factory):
     page = page_factory(**APP)
