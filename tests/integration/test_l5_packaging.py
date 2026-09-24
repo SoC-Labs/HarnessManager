@@ -118,6 +118,8 @@ def test_the_wheel_carries_the_web_ui_and_the_entry_points(dist):
     missing = [f for f in static_files() if f"harness_manager/web/static/{f}" not in names]
     assert not missing, f"static files missing from the wheel: {missing}"
     assert "harness-manager = harness_manager.cli.main:main" in entry_points
+    # what the installers put on PATH (lane OTA-L): it follows the self-update pointer
+    assert "harness-manager-launch = harness_manager._launch:main" in entry_points
     assert "[harness_manager.boards]" in entry_points
     assert "mps3 = harness_manager_mps3.pack:Mps3Pack" in entry_points
     assert "Requires-Dist: mps3-pyverify" in metadata

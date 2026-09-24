@@ -317,12 +317,15 @@ def _rollback(ctx: Ctx) -> int:
         if a.target is not None:
             raise UsageError("give either TARGET or --app, not both")
         st = svc.app().state()
-        ctx.confirm(f"switch back from harness-manager {st['current'] or '?'} to {st['previous'] or '?'}?")
+        # "" is the installer's venv (lane OTA-L, M2): name it by its version
+        installed = f"{(st.get('installer') or {}).get('version') or '?'} (installed)"
+        ctx.confirm(f"switch back from harness-manager {st['current'] or installed} to "
+                    f"{st['previous'] or installed}?")
         st = svc.app().rollback()
         ctx.emit(Result("update rollback", {"target": "app", "result": "switched", "state": st},
                         rows=[["app", "switched", st["current"], f"previous {st['previous']}"]],
-                        human=[f"switched   harness-manager {st['current']} is current again "
-                               "(from the next start)"]))
+                        human=[f"switched   harness-manager {st['current'] or installed} is "
+                               "current again (from the next start)"]))
         return ExitCode.OK
     if a.target is None:
         raise UsageError("update rollback needs a TARGET (a board) or --app")

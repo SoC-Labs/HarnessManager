@@ -51,8 +51,9 @@ out="$(cd "$out" && pwd)"
 "$work/venv/bin/python" -m pip install --quiet --disable-pip-version-check --upgrade pip
 spec="$work/src"
 if [[ -n "$extras" ]]; then spec="$work/src[${extras#,}]"; fi
+# uv too: install.sh puts it in the venv, and the app's self-update builds new versions with it.
 "$work/venv/bin/python" -m pip wheel --quiet --disable-pip-version-check \
-    --find-links "$here/vendor" --constraint "$here/constraints.txt" -w "$out" "$spec"
+    --find-links "$here/vendor" --constraint "$here/constraints.txt" -w "$out" "$spec" "uv>=0.4"
 cp "$here"/vendor/mps3_pyverify-*.whl "$here/constraints.txt" "$out/"
 (cd "$out" && "$work/venv/bin/python" -c "import hashlib, pathlib; print(''.join(
     f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n'

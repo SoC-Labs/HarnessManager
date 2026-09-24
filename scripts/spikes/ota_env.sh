@@ -14,8 +14,11 @@ export HARNESS_MANAGER_STATE_DIR="$HOME/.config/harness-manager"
 export HARNESS_MANAGER_PTY_DIR="$OTA/pty"
 export HARNESS_MANAGER_UPDATE_SOURCE="http://127.0.0.1:$OTA_CHANNEL_PORT/channel/{channel}/channel.json"
 export HARNESS_MANAGER_UPDATE_CHANNEL=stable
-# The self-updater needs uv; this machine has none on PATH (the installer fell back to pip).
-export HARNESS_MANAGER_UV="$OTA/tools/bin/uv"
+# The self-updater needs uv, and this machine has none on PATH. Since lane OTA-L the installer
+# puts uv in its venv (M5) and the updater finds it there: HARNESS_MANAGER_UV stays unset.
+# OTA_UV is the spike's own uv (the tools venv), for building wheels and listing packages.
+export OTA_UV="$OTA/tools/bin/uv"
+unset HARNESS_MANAGER_UV
 export UV_CACHE_DIR="$OTA/uv-cache"
 export PATH="$HARNESS_MANAGER_BIN_DIR:/usr/bin:/bin"
 unset HARNESS_MANAGER_GITHUB_TOKEN

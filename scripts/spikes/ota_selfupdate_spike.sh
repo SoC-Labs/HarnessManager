@@ -16,6 +16,10 @@
 #      (ota_restart.py) rolls the pointer back and restarts 0.1.1 on the same port;
 #   8. `update rollback --app` and a cleared pointer both return to 0.1.0.
 #
+# Lane OTA-L re-ran it on its layout: the pointer, the versions and install.json live in the
+# install root ($HARNESS_MANAGER_HOME), the installer puts uv in its venv, and rollback right
+# after the first switch returns to the installer's 0.1.0 (it was exit 15).
+#
 # Needs: python3.11 (for the tools venv), network to PyPI (uv, the dependencies).
 # Isolation: HOME, XDG dirs, the state dir, the PTY dir and every port are the spike's own
 # (scripts/spikes/ota_env.sh). It stops what it started; `rm -rf $OTA` removes the rest.
@@ -35,7 +39,7 @@ cleanup() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
 }
 trap cleanup EXIT
-ptr() { "$OTA/tools/bin/python" -c "import json;d=json.load(open('$HARNESS_MANAGER_STATE_DIR/update/app/current.json'));print('pointer   current', d['current'] or '(installer venv)', ' previous', d['previous'] or '-')"; }
+ptr() { "$OTA/tools/bin/python" -c "import json;d=json.load(open('$HARNESS_MANAGER_HOME/current.json'));print('pointer   current', d['current'] or '(installer venv)', ' previous', d['previous'] or '(installer venv)')"; }
 hl() { curl -s "http://127.0.0.1:$OTA_DAEMON_PORT/health"; echo; }
 
 step "tools: uv + cryptography in a throwaway venv"
@@ -76,8 +80,11 @@ $N "$OTA/tools/bin/python" "$here/ota_slow_http.py" "$OTA_SLOW_PORT" 25 \
 sleep 2
 
 step "install 0.1.0 with the real installer (no uv on PATH here: it uses venv + pip)"
-$N bash "$W/scripts/install.sh" --from "$wh1" --with-serial 2>&1 | grep -E "^(venv|install|command|menu|Harness)"
+$N bash "$W/scripts/install.sh" --from "$wh1" --with-serial 2>&1 | grep -E "^(venv|install|command|menu|Harness|install.sh: no uv)"
 cd "$OTA"
+echo "uv in the venv (M5): $(ls "$HARNESS_MANAGER_HOME/venv/bin/uv" 2>&1)"
+"$OTA/tools/bin/python" -c "import json;d=json.load(open('$HARNESS_MANAGER_HOME/install.json'));print('install.json', {k: d[k] for k in ('version', 'extras', 'uv')})"
+ptr
 $N harness-manager daemon start --port "$OTA_DAEMON_PORT" | head -1
 hl
 $N harness-manager update check | grep -E "^(channel|app)"
@@ -95,7 +102,7 @@ $REL publish "$OTA/www" stable 2 "$OTA/keys" --asset "$pyv" --app 0.1.1 "$wh2" "
     --app 0.1.0 "$wh1" "$OTA/lock.txt" >/dev/null
 set +e; $N harness-manager update app --yes 2>&1 | tail -1; echo "rc=${PIPESTATUS[0]}"; set -e
 ptr
-"$HARNESS_MANAGER_UV" pip list --python "$HARNESS_MANAGER_STATE_DIR/update/app/versions/0.1.1/bin/python" \
+"$OTA_UV" pip list --python "$HARNESS_MANAGER_HOME/versions/0.1.1/bin/python" \
     2>/dev/null | grep -E "^(harness-manager|mps3-pyverify|pyserial|pywebview) " || true
 kill "$hold"; sleep 1
 
@@ -121,6 +128,9 @@ $N harness-manager daemon stop | head -1
 $N harness-manager daemon start --port "$OTA_DAEMON_PORT" | head -1
 hl
 set +e; $N harness-manager update rollback --app --yes 2>&1 | tail -1; echo "rollback right after the first switch: rc=${PIPESTATUS[0]}"; set -e
+ptr; echo "the command now runs: $(harness-manager version)"
+set +e; $N harness-manager update rollback --app --yes 2>&1 | tail -1; echo "and forward again: rc=${PIPESTATUS[0]}"; set -e
+ptr; echo "the command now runs: $(harness-manager version)"
 
 step "serial 3: 0.1.2 (its daemon cannot start); switch; the restart prototype rolls back"
 $REL publish "$OTA/www" stable 3 "$OTA/keys" --app 0.1.2 "$wh3" "$OTA/lock.txt" \
@@ -138,7 +148,7 @@ $RESTART | tail -1; hl
 $N harness-manager update rollback --app --yes | tail -1
 $RESTART | tail -1; hl
 "$OTA/tools/bin/python" - <<EOF
-import json; p = "$HARNESS_MANAGER_STATE_DIR/update/app/current.json"
+import json; p = "$HARNESS_MANAGER_HOME/current.json"
 d = json.load(open(p)); d["previous"], d["current"] = d["current"], ""; json.dump(d, open(p, "w"))
 EOF
 ptr; $RESTART | tail -1; hl

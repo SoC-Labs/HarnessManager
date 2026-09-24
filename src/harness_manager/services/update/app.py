@@ -1,21 +1,29 @@
 """App self-update: side-by-side versioned venvs, built by ``uv``, switched by a pointer.
 
-Layout under ``<state_dir>/update/app/``::
+Layout under the install root (``harness_manager._launch``; lane OTA-L moved it out of
+``<state_dir>/update/app/``, and the installer migrates an older one)::
 
+    install.json                 what the installer installed: its venv, version, extras, uv
+    venv/                        the installer's venv: the version ``current: ""`` runs
     versions/<version>/          one venv per version (never modified once staged)
     wheels/<wheel file name>     the verified wheel under its PEP 427 name (pip needs it)
     reqs/<version>.txt           the hashed requirements the venv was built from
-    current.json                 {"current": "0.2.0", "previous": "0.1.0", "versions": {...}}
+    current.json                 {"current": "0.2.0", "previous": "", "versions": {...},
+                                  "installer": {"version": "0.1.0", "venv": "…/venv"}}
 
-The launcher shims (T11's installer writes them) read ``current.json`` and run
-``versions/<current>/bin/harness-manager``. So:
+The installer's command (``harness_manager._launch``) reads ``current.json`` and runs
+``versions/<current>``, or its own venv when ``current`` is ``""``. So:
 
 - **staging** a new version builds a NEW venv next to the running one; the
   running process and its venv are never touched;
 - **switching** rewrites ``current.json`` atomically, and only when nothing is
   busy (no board session lock held by a live process, no harness update
   journal open, no job/lease reported by an extra probe such as harness-manager-daemon's
-  job table or a hub lease). The previous version stays for **rollback**;
+  job table or a hub lease). The previous version stays for **rollback**, and that may be
+  the installer's venv (``""``, M2);
+- a developer install (``pip install -e``, a venv no installer made) never stages, switches
+  or rolls back (``_launch.dev_install``); neither does an install whose administrator's
+  policy turned self-update off (rollback stays allowed there);
 - ``pip install git+…@branch`` remains the developer path; it bypasses all of this.
 
 Commands (``uv`` 0.4+)::
@@ -43,12 +51,13 @@ import socket
 import subprocess
 import sys
 import time
+import zipfile
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from harness_manager import __version__
+from harness_manager import __version__, _launch
 from harness_manager.core.errors import (
     ActionFailedError,
     AlreadyError,
@@ -60,7 +69,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.session import SessionLock, pid_alive
 
 from .schema import AppRelease
-from .state import atomic_write_bytes, atomic_write_json, read_json, safe_name
+from .state import UpdateState, atomic_write_bytes, atomic_write_json, read_json, safe_name
 from .version import at_least, is_version, parse_version
 
 UV_ENV = "HARNESS_MANAGER_UV"
@@ -172,6 +181,37 @@ def python_satisfies(spec: str, version: tuple[int, int]) -> bool:
     return True
 
 
+def _norm_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def wheel_extras(wheel: Path) -> dict[str, set[str]]:
+    """extra -> the distributions it adds, from the wheel's METADATA (``Requires-Dist``)."""
+    out: dict[str, set[str]] = {}
+    try:
+        with zipfile.ZipFile(wheel) as zf:
+            meta = next((n for n in zf.namelist() if n.endswith(".dist-info/METADATA")), "")
+            text = zf.read(meta).decode("utf-8", "replace") if meta else ""
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return out
+    for line in text.splitlines():
+        m = re.match(r"^Requires-Dist:\s*([A-Za-z0-9][A-Za-z0-9._-]*)", line)
+        extra = re.search(r"""extra\s*==\s*["']([^"']+)["']""", line)
+        if m and extra:
+            out.setdefault(_norm_name(extra.group(1)), set()).add(_norm_name(m.group(1)))
+    return out
+
+
+def lock_names(lock_text: str) -> set[str]:
+    """The distributions a hashed lock pins (``name==1.0 \\`` lines; hashes and options skipped)."""
+    names = set()
+    for line in lock_text.splitlines():
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^]]*\])?\s*(==|@)", line)
+        if m:
+            names.add(_norm_name(m.group(1)))
+    return names
+
+
 @dataclass
 class AppUpdater:
     layout: AppLayout
@@ -182,13 +222,55 @@ class AppUpdater:
     running_version: str = __version__
     windows: bool = field(default_factory=lambda: os.name == "nt")
     now: Callable[[], float] = time.time
+    # M6: the extras the installer installed (install.json), kept by every update
+    extras: tuple[str, ...] = ()
+    # why this copy never changes the pointer: a developer install ("": it may)
+    dev_install: str = ""
+    # why the administrator's policy file turned self-update off ("": it did not)
+    policy_off: str = ""
+
+    @classmethod
+    def for_install(cls, state_dir: Path, *, prefix: str | None = None, policy_off: str = "",
+                    **kw: Any) -> AppUpdater:
+        """The updater of the copy that runs: its install root (M4, M7), the installer's uv
+        (M5) and extras (M6). A developer install gets the old state-dir layout, read-only."""
+        dev = _launch.dev_install(prefix)
+        root = None if dev else _launch.install_root(prefix)
+        if root is None:
+            return cls(AppLayout(UpdateState.under(state_dir).app), LocalBusyProbe(state_dir),
+                       dev_install=dev or "not an installed copy", policy_off=policy_off, **kw)
+        info = _launch.read_json(root / _launch.INSTALL_JSON) or {}
+        uv = str(info.get("uv") or "")
+        if os.environ.get(UV_ENV, "").strip() or not uv or not Path(uv).exists():
+            uv = ""
+        extras = tuple(e for e in info.get("extras") or () if isinstance(e, str))
+        return cls(AppLayout(root), LocalBusyProbe(state_dir), uv=uv or None, extras=extras,
+                   policy_off=policy_off, **kw)
 
     # -- state --
 
     def state(self) -> dict[str, Any]:
         data = read_json(self.layout.pointer, {}) or {}
-        return {"current": data.get("current", ""), "previous": data.get("previous", ""),
+        # every other key (the installer's registration, switched_at, …) survives a save
+        return {**data, "current": data.get("current", ""), "previous": data.get("previous", ""),
                 "versions": dict(data.get("versions", {}))}
+
+    def blocked(self) -> str:
+        """Why this copy may not stage or switch a new version ("": it may)."""
+        return self.dev_install or self.policy_off
+
+    def guard(self, what: str, *, rollback: bool = False) -> None:
+        if self.dev_install:
+            raise RefusedError(f"cannot {what}: {self.dev_install}",
+                               hint="developer installs never self-update")
+        if self.policy_off and not rollback:
+            raise RefusedError(f"cannot {what}: {self.policy_off}",
+                               hint="ask this machine's administrator")
+
+    def installer_python(self, st: dict[str, Any]) -> Path | None:
+        """The installer's venv Python (M2), when the installer registered one."""
+        venv = str((st.get("installer") or {}).get("venv") or "")
+        return _launch.python_in(Path(venv), windows=self.windows) if venv else None
 
     def _save(self, st: dict[str, Any]) -> None:
         atomic_write_json(self.layout.pointer, st)
@@ -208,14 +290,30 @@ class AppUpdater:
 
     # -- commands --
 
-    def requirements(self, release: AppRelease, wheel: Path, lock: Path | None) -> str:
+    def requirements(self, release: AppRelease, wheel: Path, lock: Path | None,
+                     extras: Sequence[str] = ()) -> str:
         lines = []
         if lock is not None:
             lines += [ln for ln in lock.read_text(encoding="utf-8").splitlines()
                       if ln.strip() and not ln.lstrip().startswith(DIST_NAME)]
-        lines.append(f"{DIST_NAME} @ {Path(wheel).resolve().as_uri()} "
+        spec = f"{DIST_NAME}[{','.join(extras)}]" if extras else DIST_NAME
+        lines.append(f"{spec} @ {Path(wheel).resolve().as_uri()} "
                      f"--hash=sha256:{release.wheel.sha256}")
         return "\n".join(lines) + "\n"
+
+    def kept_extras(self, wheel: Path, lock: Path | None) -> tuple[list[str], list[str]]:
+        """M6: (the recorded extras the release's lock covers, the ones it does not).
+
+        Under ``--require-hashes`` every package an extra adds must be in the lock. An extra
+        the lock lacks would fail the whole stage, so it is left out and reported.
+        """
+        if not self.extras:
+            return [], []
+        wanted = sorted({_norm_name(e) for e in self.extras})
+        per_extra = wheel_extras(wheel)
+        pinned = lock_names(lock.read_text(encoding="utf-8")) if lock is not None else set()
+        kept = [e for e in wanted if e in per_extra and per_extra[e] <= pinned]
+        return kept, [e for e in wanted if e not in kept]
 
     def commands(self, release: AppRelease, reqs: Path) -> list[list[str]]:
         uv = self.find_uv()
@@ -231,6 +329,7 @@ class AppUpdater:
 
     def stage(self, release: AppRelease, wheel: Path, lock: Path | None = None) -> dict[str, Any]:
         """Build ``versions/<v>`` from the verified wheel. Never touches the running venv."""
+        self.guard(f"stage harness-manager {release.version}")
         check_wheel_name(release.wheel.name, release)
         if release.requires_python:
             major, minor = (int(x) for x in self.python_version.split(".")[:2])
@@ -251,7 +350,8 @@ class AppUpdater:
         named.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(wheel, named)
         reqs = self.layout.reqs(release.version)
-        atomic_write_bytes(reqs, self.requirements(release, named, lock).encode("utf-8"))
+        extras, missing = self.kept_extras(named, lock)
+        atomic_write_bytes(reqs, self.requirements(release, named, lock, extras).encode("utf-8"))
         self._mark(release.version, STATE_STAGING)
         cmds = self.commands(release, reqs)
         for argv in cmds[:-1]:
@@ -265,7 +365,8 @@ class AppUpdater:
             self._fail(release.version, cmds[-1], res,
                        why=f"the new venv reports version {got or '?'}, expected {release.version}")
         self._mark(release.version, STATE_STAGED, wheel_sha256=release.wheel.sha256,
-                   wheel=release.wheel.name, locked=lock is not None)
+                   wheel=release.wheel.name, locked=lock is not None, extras=extras,
+                   extras_missing=missing)
         return self.state()["versions"][release.version]
 
     def _fail(self, version: str, argv: Sequence[str], res: subprocess.CompletedProcess,
@@ -279,6 +380,7 @@ class AppUpdater:
 
     def switch(self, version: str) -> dict[str, Any]:
         """Point the launcher at a staged version. Refused while anything is busy."""
+        self.guard(f"switch to harness-manager {version}")
         st = self.state()
         if st["versions"].get(version, {}).get("state") != STATE_STAGED or \
                 not self.layout.python(version, windows=self.windows).exists():
@@ -293,15 +395,28 @@ class AppUpdater:
         return st
 
     def rollback(self) -> dict[str, Any]:
-        """Switch back to the previous version (kept on disk for exactly this)."""
+        """Switch back to the previous version (kept on disk for exactly this).
+
+        The previous version may be the installer's venv (``""``, M2): after the first
+        self-update, rollback returns to what the installer installed.
+        """
+        self.guard("roll the app back", rollback=True)
         st = self.state()
         prev = st["previous"]
         if not prev:
-            raise RefusedError("there is no previous version to roll back to")
-        if st["versions"].get(prev, {}).get("state") != STATE_STAGED or \
+            py = self.installer_python(st)
+            if not st["current"] or py is None:
+                raise RefusedError("there is no previous version to roll back to")
+            if not py.exists():
+                raise RefusedError(f"the installed version's venv {py.parent.parent} is gone",
+                                   hint="re-run the installer")
+            prev_name = f"{(st.get('installer') or {}).get('version') or '?'} (installed)"
+        elif st["versions"].get(prev, {}).get("state") != STATE_STAGED or \
                 not self.layout.python(prev, windows=self.windows).exists():
             raise RefusedError(f"the previous version {prev} is no longer on disk")
-        self._refuse_if_busy(f"roll back to {prev}")
+        else:
+            prev_name = prev
+        self._refuse_if_busy(f"roll back to {prev_name}")
         st["previous"], st["current"] = st["current"], prev
         st["switched_at"] = self.now()
         self._save(st)

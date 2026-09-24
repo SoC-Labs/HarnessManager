@@ -6,6 +6,10 @@ pyverify wheel, and two versions of a stand-in dependency. So these tests need n
 network and take a few seconds each, and they exercise the real installer end to end:
 the venv, pip, the lock, the pins, the launcher, the desktop menu entry, the messages.
 
+The stand-in is a ``harness_manager`` package with the REAL ``harness_manager/_launch.py``
+(lane OTA-L), so the launcher, the self-update pointer, the install record and the
+migration of an older layout run for real, against real venvs.
+
 ``test_l5_install.py`` (and CI's distribution matrix) run the real package from PyPI.
 """
 
@@ -13,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import shutil
 import signal
@@ -40,10 +45,15 @@ import sys
 VERSION = "{version}"
 
 
-def main():
-    args = sys.argv[1:]
+def main(argv=None):
+    args = sys.argv[1:] if argv is None else list(argv)
     if args == ["version"]:
         print(VERSION)
+        return 0
+    if args[:1] == ["exit"]:
+        return int(args[1])
+    if args == ["whoami"]:
+        print(VERSION, sys.prefix)
         return 0
     if args == ["--version"]:
         print("Harness Manager " + VERSION)
@@ -89,11 +99,26 @@ def make_wheel(dest: Path, name: str, version: str, files: dict[str, str], *,
     return whl
 
 
-def harness_wheel(dest: Path, version: str, *, requires=("fakedep>=1",)) -> Path:
-    return make_wheel(dest, "harness-manager", version,
-                      {"hm_q3_standin.py": FAKE_CLI.format(version=version)},
-                      requires=requires, extras={"serial": ("fakeserial",)},
-                      scripts={"harness-manager": "hm_q3_standin:main"})
+LAUNCH_PY = (ROOT / "src" / "harness_manager" / "_launch.py").read_text()
+
+
+def standin_package(version: str, *, launcher: bool = True) -> dict[str, str]:
+    """A stand-in harness_manager: its CLI, and the real launcher (a wheel before OTA-L: none)."""
+    files = {"harness_manager/__init__.py": f'__version__ = "{version}"\n',
+             "harness_manager/cli/__init__.py": "",
+             "harness_manager/cli/main.py": FAKE_CLI.format(version=version)}
+    if launcher:
+        files["harness_manager/_launch.py"] = LAUNCH_PY
+    return files
+
+
+def harness_wheel(dest: Path, version: str, *, requires=("fakedep>=1",),
+                  launcher: bool = True) -> Path:
+    scripts = {"harness-manager": "harness_manager.cli.main:main"}
+    if launcher:
+        scripts["harness-manager-launch"] = "harness_manager._launch:main"
+    return make_wheel(dest, "harness-manager", version, standin_package(version, launcher=launcher),
+                      requires=requires, extras={"serial": ("fakeserial",)}, scripts=scripts)
 
 
 @pytest.fixture
@@ -121,6 +146,8 @@ class Box:
         self.hm = self.bin / "harness-manager"
         self.root = self.home / ".local" / "share" / "harness-manager"
         self.venv = self.root / "venv"
+        self.pointer = self.root / "current.json"
+        self.install_json = self.root / "install.json"
         self.state = self.home / ".config" / "harness-manager"
         self.menu = self.home / ".local" / "share" / "applications" / "harness-manager.desktop"
         self.icon = (self.home / ".local" / "share" / "icons" / "hicolor" / "scalable" / "apps"
@@ -154,9 +181,12 @@ class Box:
                                  f"--- stdout\n{res.stdout}\n--- stderr\n{res.stderr}")
         return res
 
-    def hm_run(self, *args: str) -> str:
-        return subprocess.run([str(self.hm), *args], env=self.env(), capture_output=True,
-                              text=True, check=True, timeout=60).stdout.strip()
+    def hm_run(self, *args: str, **env: str) -> str:
+        return self.hm_proc(*args, check=True, **env).stdout.strip()
+
+    def hm_proc(self, *args: str, check: bool = False, **env: str) -> subprocess.CompletedProcess:
+        return subprocess.run([str(self.hm), *args], env=self.env(**env), capture_output=True,
+                              text=True, check=check, timeout=60)
 
     def py(self, code: str) -> str:
         return subprocess.run([str(self.venv / "bin" / "python"), "-c", code], env=self.env(),
@@ -498,3 +528,179 @@ def test_rhel8_old_expat_is_named_as_the_cause(box: Box, wheelhouse: Path, tmp_p
     assert f"install.sh: the cause: {err}" in res.stderr, res.stderr
     assert "Update expat: sudo dnf upgrade expat, then run this again." in res.stderr
     assert "CalledProcessError" not in res.stderr.split("the cause:")[1]
+
+
+# -- OTA-L: the launcher, the install record and the self-update layout ------------------------
+
+def make_version(venv: Path, version: str) -> Path:
+    """A real venv holding a stand-in harness_manager ``version``: a self-updated version."""
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True,
+                   timeout=180)
+    site = subprocess.run([str(venv / "bin" / "python"), "-c",
+                           "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                          capture_output=True, text=True, check=True, timeout=60).stdout.strip()
+    for rel, text in standin_package(version).items():
+        f = Path(site) / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+    return venv
+
+
+def point(box: Box, current: str, **more) -> dict:
+    ptr = json.loads(box.pointer.read_text())
+    ptr.update(current=current, **more)
+    box.pointer.write_text(json.dumps(ptr))
+    return ptr
+
+
+def test_the_launcher_follows_the_pointer_and_passes_the_exit_code(box: Box, wheelhouse: Path):
+    box.run(*offline(wheelhouse))
+    ptr = json.loads(box.pointer.read_text())
+    assert ptr["current"] == "" and ptr["installer"] == {"version": "0.1.0", "venv": str(box.venv)}
+    v2 = make_version(box.root / "versions" / "0.2.0", "0.2.0")
+    point(box, "0.2.0")
+    assert box.hm_run("version") == "0.2.0"
+    assert box.hm_run("whoami") == f"0.2.0 {v2}"         # the new venv's own Python runs it
+    assert box.hm_proc("exit", "7").returncode == 7
+    assert box.hm_proc("exit", "0").returncode == 0
+    # the way back when a self-updated version cannot start
+    assert box.hm_run("version", HARNESS_MANAGER_USE_INSTALLED="1") == "0.1.0"
+
+
+def test_negative_twin_the_launcher_falls_back_to_the_installed_version(box: Box, wheelhouse: Path):
+    box.run(*offline(wheelhouse))
+    assert box.hm_run("whoami") == f"0.1.0 {box.venv}"
+    point(box, "0.2.0")                                  # its venv is not there
+    res = box.hm_proc("version")
+    assert res.stdout.strip() == "0.1.0" and "0.2.0 is missing" in res.stderr
+    assert box.hm_proc("exit", "3").returncode == 3      # in this process, the code passes too
+    make_version(box.root / "versions" / "0.2.0", "0.2.0")
+    assert box.hm_run("version") == "0.2.0"
+    # the dev guard: never follow the pointer
+    assert box.hm_run("version", HARNESS_MANAGER_NO_SELF_UPDATE="1") == "0.1.0"
+
+
+@pytest.mark.parametrize("selfupdated, runs", [("0.0.9", "0.1.0"), ("0.2.0", "0.2.0")])
+def test_a_rerun_of_the_installer_and_a_self_updated_version(box: Box, wheelhouse: Path,
+                                                             selfupdated: str, runs: str):
+    box.run(*offline(wheelhouse))
+    make_version(box.root / "versions" / selfupdated, selfupdated)
+    point(box, selfupdated, previous="")
+    assert box.hm_run("version") == selfupdated
+    res = box.run(*offline(wheelhouse))
+    assert box.hm_run("version") == runs
+    ptr = json.loads(box.pointer.read_text())
+    if runs == "0.1.0":
+        # M3: the installer installs a version at least as new: it wins, and the
+        # self-updated one stays as the rollback target
+        assert (ptr["current"], ptr["previous"]) == ("", "0.0.9")
+        assert "the command runs 0.1.0 now" in res.stdout
+    else:
+        # negative twin: a newer self-updated version keeps running; one rollback reaches 0.1.0
+        assert (ptr["current"], ptr["previous"]) == ("0.2.0", "")
+        assert "is newer than 0.1.0" in res.stdout
+
+
+def test_the_install_record_extras_and_uv(box: Box, wheelhouse: Path):
+    # M5 twin first: a wheelhouse without uv installs, and says the app cannot update itself
+    res = box.run(*offline(wheelhouse, "--with-serial"))
+    assert "no uv in the venv (the wheelhouse has no uv wheel)" in res.stderr
+    info = json.loads(box.install_json.read_text())
+    assert (info["venv"], info["version"], info["extras"], info["uv"], info["installer"]) == \
+        (str(box.venv), "0.1.0", ["serial"], "", "install.sh")
+    # M5: with uv in the wheelhouse, it goes into the venv, and the record names it
+    make_wheel(wheelhouse, "uv", "0.8.0", {"uv_q3_standin.py": "def main():\n    print('uv')\n"},
+               scripts={"uv": "uv_q3_standin:main"})
+    res = box.run(*offline(wheelhouse))
+    assert "no uv" not in res.stderr
+    info = json.loads(box.install_json.read_text())
+    assert info["uv"] == str(box.venv / "bin" / "uv") and (box.venv / "bin" / "uv").exists()
+    assert info["extras"] == ["serial"]                 # M6: kept by a re-run without the flag
+
+
+def test_an_older_install_s_self_updated_versions_move_into_the_install_root(box: Box,
+                                                                            wheelhouse: Path):
+    # M4: an older updater built its venvs in the state dir
+    legacy = box.state / "update" / "app"
+    make_version(legacy / "versions" / "0.2.0", "0.2.0")
+    (legacy / "current.json").write_text(json.dumps(
+        {"current": "0.2.0", "previous": "", "versions": {"0.2.0": {"state": "staged"}}}))
+    res = box.run(*offline(wheelhouse))
+    moved = box.root / "versions" / "0.2.0"
+    assert f"moved    self-updated version 0.2.0 to {moved}" in res.stdout
+    assert not legacy.exists() and moved.is_dir()
+    # The moved venv runs (its python, not its scripts' #! lines); it is newer, so it stays.
+    assert box.hm_run("whoami") == f"0.2.0 {moved}"
+    assert json.loads(box.pointer.read_text())["versions"] == {"0.2.0": {"state": "staged"}}
+    # --uninstall removes the self-updated versions too; the state dir stays
+    res = box.run("--uninstall")
+    assert f"removed  {box.root / 'versions'}" in res.stdout
+    assert not box.root.exists() and box.state.is_dir()
+
+
+def test_the_state_dir_does_not_move_the_pointer(box: Box, wheelhouse: Path, tmp_path: Path):
+    # M7: installed with one state dir, run with others: the pointer is the install root's
+    box.run(*offline(wheelhouse), env=box.env(HARNESS_MANAGER_STATE_DIR=str(tmp_path / "s1")))
+    make_version(box.root / "versions" / "0.2.0", "0.2.0")
+    point(box, "0.2.0")
+    assert box.hm_run("version") == "0.2.0"
+    assert box.hm_run("version", HARNESS_MANAGER_STATE_DIR=str(tmp_path / "s2")) == "0.2.0"
+    # negative twin: the old place is never read at run time
+    point(box, "")
+    legacy = box.state / "update" / "app"
+    make_version(legacy / "versions" / "0.3.0", "0.3.0")
+    (legacy / "current.json").write_text(json.dumps({"current": "0.3.0"}))
+    assert box.hm_run("version") == "0.1.0"
+
+
+def test_a_wheel_from_before_the_launcher_runs_directly(box: Box, wheelhouse: Path, tmp_path: Path):
+    box.run(*offline(wheelhouse))
+    assert box.install_json.exists()
+    old = tmp_path / "old"
+    old.mkdir()
+    whl = harness_wheel(old, "0.0.5", launcher=False)
+    res = box.run(*offline(wheelhouse, "--from", str(whl)))
+    assert "harness-manager 0.0.5 has no self-update launcher" in res.stderr
+    assert box.hm_run("version") == "0.0.5" and not box.install_json.exists()
+
+
+PWSH = shutil.which("pwsh")
+
+
+@pytest.mark.skipif(not PWSH, reason="pwsh is not on PATH (CI's ubuntu runners have it)")
+def test_install_ps1_launcher_record_extras_and_uninstall(box: Box, wheelhouse: Path):
+    # install.ps1 under PowerShell 7 on this OS: the same code paths as on Windows, with
+    # bin/ for Scripts\. PIP_NO_INDEX keeps pip off the network, as --offline does.
+    env = box.env(PIP_NO_INDEX="1", PIP_FIND_LINKS=str(wheelhouse),
+                  HARNESS_MANAGER_HOME=str(box.root), HARNESS_MANAGER_BIN_DIR=str(box.bin),
+                  DOTNET_SYSTEM_GLOBALIZATION_INVARIANT="1", POWERSHELL_TELEMETRY_OPTOUT="1")
+    ps1 = ROOT / "scripts" / "install.ps1"
+    whl = wheelhouse / "harness_manager-0.1.0-py3-none-any.whl"
+
+    def ps(*args: str) -> subprocess.CompletedProcess:
+        res = subprocess.run([PWSH, "-NoProfile", "-File", str(ps1), *args], env=env,
+                             cwd=box.home, capture_output=True, text=True, timeout=300)
+        assert res.returncode == 0, f"{res.stdout}\n{res.stderr}"
+        return res
+
+    res = ps("-From", str(whl), "-Python", sys.executable, "-NoUv", "-WithSerial")
+    assert "no uv in the venv" in res.stdout + res.stderr
+    info = json.loads(box.install_json.read_text())
+    assert (info["extras"], info["installer"], info["uv"]) == (["serial"], "install.ps1", "")
+    assert box.hm.read_bytes() == (box.venv / "bin" / "harness-manager-launch").read_bytes()
+    assert box.hm_run("version") == "0.1.0"
+    make_version(box.root / "versions" / "0.2.0", "0.2.0")
+    point(box, "0.2.0")
+    assert box.hm_run("version") == "0.2.0"
+    assert box.hm_proc("exit", "9").returncode == 9
+    # A re-run without -WithSerial keeps the extra (install.json). 0.2.0 is newer than the
+    # 0.1.0 it installs, so 0.2.0 keeps running, and one rollback reaches 0.1.0.
+    res = ps("-From", str(whl), "-Python", sys.executable, "-NoUv")
+    assert "[serial]" in res.stdout
+    assert json.loads(box.install_json.read_text())["extras"] == ["serial"]
+    assert (json.loads(box.pointer.read_text())["current"], box.hm_run("version")) == ("0.2.0",
+                                                                                       "0.2.0")
+    assert json.loads(box.pointer.read_text())["previous"] == ""
+    res = ps("-Uninstall", "-Force")
+    assert f"removed  {box.root / 'versions'}" in res.stdout
+    assert not box.hm.exists() and not box.root.exists()

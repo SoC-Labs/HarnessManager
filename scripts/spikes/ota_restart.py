@@ -26,7 +26,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from harness_manager.services.update.app import AppLayout, AppUpdater, LocalBusyProbe
+from harness_manager.services.update.app import AppUpdater
 
 
 def health(port: int) -> dict | None:
@@ -62,7 +62,8 @@ def main() -> int:
     health_s = float(sys.argv[3]) if len(sys.argv) > 3 else 20.0
     info = json.loads((state_dir / "daemon.json").read_text())
     port = int(info["port"])
-    up = AppUpdater(AppLayout(state_dir / "update" / "app"), LocalBusyProbe(state_dir))
+    # lane OTA-L: the pointer lives in the install root of this (the installer's) venv
+    up = AppUpdater.for_install(state_dir)
     want = up.state()["current"]
     t0 = time.monotonic()
     rc, out = run([launcher, "daemon", "stop"])

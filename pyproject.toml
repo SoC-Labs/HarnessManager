@@ -46,6 +46,9 @@ webtest = ["playwright>=1.40"]
 
 [project.scripts]
 harness-manager = "harness_manager.cli.main:main"
+# What the installers put on PATH as `harness-manager`: it runs the version the app's
+# self-update selected (<install root>/current.json), else this one (src/harness_manager/_launch.py).
+harness-manager-launch = "harness_manager._launch:main"
 
 # Board packs register here. The MPS3 pack is in-tree for now and will split
 # out as harness-manager-board-mps3 once its interface has settled.

@@ -24,13 +24,14 @@ from harness_manager import __version__
 from harness_manager.core.errors import AlreadyError, HarnessError, RefusedError
 from harness_manager.core.events import Event, EventBus
 
-from .app import AppLayout, AppUpdater, LocalBusyProbe
+from .app import AppUpdater
 from .bundle import OverlayHandler, PackOverlayHandler
 from .channel import ChannelClient, VerifiedChannel
 from .download import Downloader, token_from_env
 from .executor import HarnessInstaller, UpdateOutcome, default_os_slots
 from .os_slots import OsSlotAdapter
 from .planner import Approval, BoardView, Plan, make_plan
+from .policy import Policy, load_policy
 from .state import StoredComponents, UpdateState
 from .trust import TrustStore, load_trust
 from .version import compare
@@ -69,7 +70,7 @@ class UpdateService:
                  overlay_handler: OverlayHandler | None = None,
                  os_slots_for: Callable[[Any], OsSlotAdapter | None] = default_os_slots,
                  downloader: Downloader | None = None, app_updater: AppUpdater | None = None,
-                 now: Callable[[], float] = time.time) -> None:
+                 policy: Policy | None = None, now: Callable[[], float] = time.time) -> None:
         self.engine = engine
         self.state_dir = _state_dir(engine, state_dir)
         self.state = UpdateState.under(self.state_dir)
@@ -83,6 +84,8 @@ class UpdateService:
         self._overlay_handler = overlay_handler
         self.os_slots_for = os_slots_for
         self._app = app_updater
+        # the administrator's policy file (U6), read-only; a user's settings cannot loosen it
+        self.policy = policy if policy is not None else load_policy()
         self.now = now
 
     # -- parts --
@@ -98,8 +101,9 @@ class UpdateService:
 
     def app(self) -> AppUpdater:
         if self._app is None:
-            self._app = AppUpdater(AppLayout(self.state.app), LocalBusyProbe(self.state_dir),
-                                   running_version=self.app_version, now=self.now)
+            # lane OTA-L: the install root of the running copy (M4), its uv and extras
+            self._app = AppUpdater.for_install(self.state_dir, policy_off=self.policy.off_reason(),
+                                               running_version=self.app_version, now=self.now)
         return self._app
 
     def installer(self, pack: str) -> HarnessInstaller:
@@ -110,7 +114,7 @@ class UpdateService:
     # -- channel --
 
     def fetch_channel(self, channel: str | None = None, source: str | None = None) -> VerifiedChannel:
-        return self.channels.fetch(channel, source)
+        return self.channels.fetch(self.policy.channel_for(channel), source)
 
     # -- board --
 
@@ -188,8 +192,15 @@ class UpdateService:
             "releases": releases_summary(ch),
         }
         offer = self.app().offer(ch.app, ch.app_current) if ch.app_current else None
-        if offer is not None:
+        blocked = self.app().blocked()
+        if offer is not None and blocked:
+            report["warnings"].append(f"harness-manager {offer.version} is available, but "
+                                      f"self-update is off here: {blocked}")
+        elif offer is not None:
             report["app_update"] = offer.version
+        if self.policy.path:
+            report["policy"] = self.policy.as_dict()
+            report["warnings"] += [f"policy {self.policy.path}: {p}" for p in self.policy.problems]
         board_id = ""
         if session is not None:
             plan, _ = self.plan_harness(session, verified=verified)
@@ -222,6 +233,7 @@ class UpdateService:
         if version is None and compare(rel.version, self.app_version) <= 0:
             raise AlreadyError(f"harness-manager {self.app_version} is current on the "
                                f"{ch.channel!r} channel")
+        self.app().guard(f"update the app to {rel.version}")     # before any download
         wheel = self.downloader.fetch(rel.wheel, base_url=verified.url)
         lock = self.downloader.fetch(rel.lock, base_url=verified.url) if rel.lock else None
         staged = self.app().stage(rel, wheel, lock)
@@ -230,6 +242,11 @@ class UpdateService:
         if not lock:
             out["warning"] = ("the release has no hashed lock file: dependencies came from the "
                               "package index unpinned")
+        if staged.get("extras_missing"):
+            out["warning"] = "; ".join(w for w in (out.get("warning"), (
+                f"the release's lock does not cover the extras "
+                f"{', '.join(staged['extras_missing'])} you installed, so {rel.version} is "
+                "without them")) if w)
         if switch:
             out["pointer"] = self.app().switch(rel.version)
             out["switched"] = True

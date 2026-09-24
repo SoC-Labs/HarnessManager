@@ -68,6 +68,10 @@ steps:
 6. Write the `harness-manager` command, and check that it runs.
 7. On Linux, add Harness Manager to the desktop's application menu.
 8. Remember the extras and the menu choice in `install.conf`, so a re-run keeps them.
+9. Put uv in the venv, because the app's self-update builds each new version with it.
+   Without network (a wheelhouse with no uv wheel) it says so and carries on.
+10. Record the install in `install.json`, and register the venv in the self-update
+    pointer (see [Self-update and the install root](#self-update-and-the-install-root)).
 
 It builds from a temporary copy of the checkout, so your checkout gets no `build/` or
 `*.egg-info` directories.
@@ -78,17 +82,19 @@ It builds from a temporary copy of the checkout, so your checkout gets no `build
 | Command | `~/.local/bin/harness-manager` | `%LOCALAPPDATA%\harness-manager\bin\harness-manager.exe` |
 | PATH | prints the line to add, for your shell, if the directory is not on it | adds the directory to your user PATH |
 | Menu entry (Linux) | `~/.local/share/applications/harness-manager.desktop`, icon in `~/.local/share/icons/hicolor/scalable/apps/` | none yet |
-| Choices a re-run keeps | `~/.local/share/harness-manager/install.conf` | none yet |
+| Choices a re-run keeps | `~/.local/share/harness-manager/install.conf` | the extras, in `install.json` |
+| Install record, self-update pointer | `~/.local/share/harness-manager/install.json`, `current.json` | `%LOCALAPPDATA%\harness-manager\install.json`, `current.json` |
+| Self-updated versions (removed by `--uninstall`) | `~/.local/share/harness-manager/versions/` | `%LOCALAPPDATA%\harness-manager\versions\` |
 | State (kept by `--uninstall`) | `~/.config/harness-manager` | `%USERPROFILE%\.config\harness-manager` |
 
 Environment variables move these: `HARNESS_MANAGER_HOME` (the venv's parent),
 `HARNESS_MANAGER_BIN_DIR` (the command), `HARNESS_MANAGER_STATE_DIR` (the state).
 
-On Linux and macOS the command is a small launcher script. It runs the venv's
-`harness-manager`, unless the app's self-update has selected another version in
-`<state>/update/app/current.json`; then it runs that one. On Windows the command is a
-copy of the venv's `harness-manager.exe`, which holds the venv's absolute path (pipx
-does the same).
+The command is the venv's `harness-manager-launch`: on Linux and macOS through a small
+shell script, on Windows as a copy of `harness-manager-launch.exe`, which holds the venv's
+absolute path (pipx does the same). It runs the version the app's self-update selected,
+else the installed one. [Self-update and the install root](#self-update-and-the-install-root)
+says how.
 
 ## Options
 
@@ -104,7 +110,7 @@ does the same).
 | `--latest` | | the newest dependency versions instead of the pins (rebuilds the venv) |
 | `--no-desktop` / `--desktop` | | skip the Linux menu entry (remembered), or bring it back |
 | `--force` | `-Force` | replace a `harness-manager` command the installer did not write |
-| `--uninstall` | `-Uninstall` | stop the service, remove the venv, the command and the menu entry |
+| `--uninstall` | `-Uninstall` | stop the service, remove the venv, the self-updated versions, the command and the menu entry |
 
 Examples:
 
@@ -199,9 +205,92 @@ clone over HTTPS with a GitHub token.
   never touches the state directory. A pyverify rebuilt from a newer platform commit
   keeps its version number, so the installer always reinstalls it.
 - **Uninstall:** `scripts/install.sh --uninstall` (or `-Uninstall`). It stops the
-  service, removes the venv, the command and the menu entry, and leaves the state
-  directory: your `boards.toml`, SD backups, content store and logs. Delete that
-  yourself if you want it gone.
+  service, removes the venv, the self-updated versions, the command and the menu entry,
+  and leaves the state directory: your `boards.toml`, SD backups, content store and logs.
+  Delete that yourself if you want it gone.
+
+## Self-update and the install root
+
+Harness Manager can update itself (`harness-manager update app`). Each new version is a
+new venv beside the installed one, and a pointer says which one runs. Everything lives
+in the install root (`HARNESS_MANAGER_HOME`), never in the state directory:
+
+```
+~/.local/share/harness-manager/          %LOCALAPPDATA%\harness-manager\ on Windows
+    install.json     what the installer installed: the venv, the version, the extras, uv
+    venv/            the installer's venv; self-update never changes it
+    current.json     the pointer: {"current": "0.2.0", "previous": "", "installer": {...}}
+    versions/0.2.0/  a self-updated version's venv
+    wheels/, reqs/   what the self-updater built those venvs from
+```
+
+- **The command follows the pointer.** It runs `versions/<current>`, with the same
+  arguments and the same exit code. When `current` is `""`, it runs the installer's venv.
+  The same holds on every OS: `os.execv` on Linux and macOS, and a child process on
+  Windows.
+- **Rollback reaches the installed version.** The installer registers its venv in the
+  pointer, so `harness-manager update rollback --app` right after the first update
+  returns to it.
+- **Running the installer again wins.** If it installs a version at least as new as the
+  self-updated one, the command runs the installed version, and the self-updated one
+  stays as the rollback target. If the self-updated version is newer, it keeps running,
+  and one `update rollback --app` switches to the installed version. The installer says
+  which of the two happened.
+- **Extras stay.** Every new version gets the extras the installer installed
+  (`install.json`), as far as the release's hashed lock covers them. An extra the lock
+  does not cover is left out, and the update says so.
+- **uv:** the self-updater uses the uv in the installer's venv. `HARNESS_MANAGER_UV`
+  names another.
+- **An older install** kept its self-updated versions in `<state>/update/app/`. The first
+  run of this installer moves them into the install root.
+- **The way back:** `HARNESS_MANAGER_USE_INSTALLED=1 harness-manager …` runs the
+  installer's venv whatever the pointer says. Use it when a self-updated version cannot
+  start: `HARNESS_MANAGER_USE_INSTALLED=1 harness-manager update rollback --app`.
+
+**Developer installs never self-update.** They never follow the pointer, and they never
+change it. That covers:
+
+- a `pip install -e` (`make venv`);
+- code run from a checkout through `PYTHONPATH`;
+- a venv that no installer made;
+- any copy run with `HARNESS_MANAGER_NO_SELF_UPDATE=1`.
+
+`update app` and `update rollback --app` refuse ("this is a developer install … update it
+with git"). `update check` says why it offers no app update.
+
+## Shared lab machines: the administrator's policy
+
+Installs are per user. On a managed machine, an administrator can limit self-update for
+every user with one file. Harness Manager only reads it, and a user's own settings
+cannot loosen it:
+
+| OS | File |
+|---|---|
+| Linux | `/etc/harness-manager/policy.toml` |
+| macOS | `/Library/Application Support/harness-manager/policy.toml` |
+| Windows | `%ProgramData%\harness-manager\policy.toml` |
+
+```toml
+self_update = "off"        # off | notify | stage (default stage); true = stage, false = off
+channel = "stable"         # the only update channel users may use
+check_interval = "12h"     # how often the service checks: s, m, h, d, or seconds; 0 = never
+```
+
+| Key | Effect |
+|---|---|
+| `self_update = "off"` | No app update is offered, staged or switched. `update app` refuses and names the file. Rolling back to a version already on disk still works. |
+| `self_update = "notify"` | The service says an update exists, and stages it only when a user asks. |
+| `self_update = "stage"` | The default: notify, stage in the background, apply on a click. |
+| `channel` | Pins the channel for app and harness updates. `--channel` with another one is refused. |
+| `check_interval` | The time between the service's background checks. The default is 6 h, and the minimum is 5 minutes. |
+
+It fails closed. A file that cannot be read or parsed, or a `self_update` or `channel`
+value that is not understood, turns self-update off. `update check` then shows why. An
+unknown key or a bad `check_interval` is only a warning. No environment variable moves
+or disables the file.
+
+`notify`, `stage` and `check_interval` steer the service's background checks. The service
+does not check in the background yet, so today only `off` and `channel` change anything.
 
 ## Without the installer
 
@@ -235,7 +324,7 @@ on PyPI, and pip prefers the highest version it can see there.
   --help`, `harness-manager version` and `pip check`.
 - **The installer:** `scripts/smoke_install.sh` (also `make smoke-install`) installs
   into a throwaway HOME, runs the command from PATH (`--version` too), checks the
-  self-update launcher and the Linux menu entry, starts
+  install record, uv in the venv, the self-update launcher and the Linux menu entry, starts
   `harness-manager ui --demo --no-browser`, fetches the page and its CSP header,
   upgrades in place, and uninstalls. `tests/integration/test_l5_install.py` runs it with
   pip, and with uv when uv is on PATH.
@@ -243,7 +332,11 @@ on PyPI, and pip prefers the highest version it can see there.
   `install.sh` from a hand-made wheelhouse, with no network, in seconds: the lock (a
   second install at once, a stale lock), Ctrl-C and resume, no write access, a system
   whose only Python is 3.6, no package index, the pins and `--latest`, remembered
-  extras, the menu entry, and a clean uninstall.
+  extras, the menu entry, and a clean uninstall. It also covers the self-update
+  layout: the launcher following the pointer (exit codes too) and falling back, a re-run
+  against an older and a newer self-updated version, `install.json` and uv, the move of
+  an older install's versions, the state-dir override, and a wheel from before the
+  launcher. With `pwsh` on PATH it runs `install.ps1` the same way.
 
 Both integration tests are marked `slow` and `packaging`, take about a minute each, and
 skip with the reason when PyPI is unreachable.

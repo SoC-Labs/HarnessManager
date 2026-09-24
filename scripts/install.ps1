@@ -6,7 +6,12 @@ Install Harness Manager for this user (Windows).
 Makes a private venv in %LOCALAPPDATA%\harness-manager\venv, installs Harness
 Manager and pyverify into it, and puts one command, harness-manager, in
 %LOCALAPPDATA%\harness-manager\bin, which it adds to your user PATH. Re-running
-it upgrades in place. Nothing needs Administrator.
+it upgrades in place and keeps the extras. Nothing needs Administrator.
+
+The command runs the version the app's self-update selected
+(%LOCALAPPDATA%\harness-manager\current.json), else the one installed here.
+Re-running the installer makes the version it installs the one that runs, unless
+a self-updated version is newer.
 
 It runs in Windows PowerShell 5.1 and in PowerShell 7. It uses uv when uv is on
 PATH, else a Python 3.10 or newer (the py launcher, python or python3).
@@ -38,8 +43,8 @@ Use venv and pip even when uv is on PATH.
 Replace an existing harness-manager command in a custom HARNESS_MANAGER_BIN_DIR.
 
 .PARAMETER Uninstall
-Stop the service, remove the venv and the command. Your settings and backups in
-%USERPROFILE%\.config\harness-manager stay.
+Stop the service, remove the venv, the self-updated versions and the command.
+Your settings and backups in %USERPROFILE%\.config\harness-manager stay.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -WithSerial
@@ -80,15 +85,25 @@ if ($env:HARNESS_MANAGER_STATE_DIR) {
 } else {
     $StateDir = Join-Path (Join-Path $HOME '.config') 'harness-manager'
 }
+# The app's self-update keeps its versions and its pointer in the install root
+# (harness_manager._launch). An older install kept them in <state dir>\update\app.
+$InstallJson = Join-Path $Root 'install.json'
+$LegacyApp = Join-Path (Join-Path $StateDir 'update') 'app'
 if ($OnWindows) {
-    $VenvPy = Join-Path (Join-Path $Venv 'Scripts') 'python.exe'
-    $VenvHm = Join-Path (Join-Path $Venv 'Scripts') 'harness-manager.exe'
+    $VenvScripts = Join-Path $Venv 'Scripts'
+    $Exe = '.exe'
+    $VenvPy = Join-Path $VenvScripts 'python.exe'
     $Command = Join-Path $BinDir 'harness-manager.exe'
 } else {
-    $VenvPy = Join-Path (Join-Path $Venv 'bin') 'python'
-    $VenvHm = Join-Path (Join-Path $Venv 'bin') 'harness-manager'
+    $VenvScripts = Join-Path $Venv 'bin'
+    $Exe = ''
+    $VenvPy = Join-Path $VenvScripts 'python'
     $Command = Join-Path $BinDir 'harness-manager'
 }
+$VenvHm = Join-Path $VenvScripts "harness-manager$Exe"
+# The launcher: it runs the version the self-update selected, else this venv's.
+$VenvLaunch = Join-Path $VenvScripts "harness-manager-launch$Exe"
+$VenvUv = Join-Path $VenvScripts "uv$Exe"
 
 function Say([string]$Text) { Write-Host $Text }
 function Note([string]$Text) { Write-Host "install.ps1: $Text" -ForegroundColor Yellow }
@@ -198,6 +213,22 @@ if ($Uninstall) {
         }
     }
     if (Test-Path $Venv) { Remove-Item -Recurse -Force $Venv; Say "removed  $Venv" }
+    # The self-updated versions are venvs, not settings: they go too, from the install
+    # root and from where an older install kept them.
+    foreach ($dir in @($Root, $LegacyApp)) {
+        foreach ($item in @('versions', 'wheels', 'reqs', 'current.json')) {
+            $p = Join-Path $dir $item
+            if (-not (Test-Path $p)) { continue }
+            try {
+                Remove-Item -Recurse -Force $p
+                if ($item -eq 'versions') { Say "removed  $p" }
+            } catch {
+                Note "could not remove $p ($($_.Exception.Message)). Close every Harness Manager window, then run -Uninstall again."
+            }
+        }
+    }
+    if ((Test-Path $LegacyApp) -and -not (Get-ChildItem -Force $LegacyApp)) { Remove-Item -Force $LegacyApp }
+    if (Test-Path $InstallJson) { Remove-Item -Force $InstallJson }
     if ($OnWindows -and $BinDir -eq $DefaultBin) {
         $userPath = Get-UserPath
         if (Test-OnPath $userPath $BinDir) {
@@ -267,6 +298,19 @@ try {
     $extras = @()
     if ($WithApp) { $extras += 'app' }
     if ($WithSerial) { $extras += 'serial' }
+    # The extras an earlier run installed stay: the installer never removes them, and the
+    # app's self-update installs them into every new version.
+    if (Test-Path $InstallJson) {
+        try {
+            $recorded = Get-Content -Raw $InstallJson | ConvertFrom-Json
+            if ($recorded.PSObject.Properties['extras']) {
+                foreach ($e in @($recorded.extras)) { if ($e) { $extras += [string]$e } }
+            }
+        } catch {
+            Note "could not read $InstallJson; installing only the extras named now"
+        }
+    }
+    $extras = @($extras | Sort-Object -Unique)
     $spec = $pkg
     if ($extras.Count -gt 0) { $spec = "$pkg[" + ($extras -join ',') + "]" }
     $findLinks = @()
@@ -338,18 +382,54 @@ try {
     if ($r.Code -ne 0) { Write-Host $r.Error; Fail "the installed harness-manager does not run" }
     $version = $r.Output.Trim()
 
+    # -- uv in the venv: the app's self-update builds each new version with it ----------
+    if (-not (Test-Path $VenvUv)) {
+        if ($uv) {
+            $r = Invoke-Native $uv ($pipBase + $findLinks + @('uv>=0.4')) -Capture
+        } else {
+            $r = Invoke-Native $VenvPy ($pipBase + $findLinks + @('uv>=0.4')) -Capture
+        }
+    }
+    $recordUv = ''
+    if (Test-Path $VenvUv) {
+        $recordUv = $VenvUv
+    } else {
+        Note "no uv in the venv, so the app cannot update itself until you run this again with network. Everything else works."
+    }
+
+    # -- the install record and the self-update pointer ----------------------------------
+    # install.json says what was installed, and where. The pointer learns this venv, so
+    # that rollback can return to it. A re-run wins over an older self-updated version. An
+    # older install's self-updated versions move into the install root. Each value is
+    # passed as --name=value: Windows PowerShell 5.1 drops an empty argument.
+    $Source = $VenvHm
+    $r = Invoke-Native $VenvPy @('-c', 'import harness_manager._launch') -Capture
+    if ($r.Code -eq 0 -and (Test-Path $VenvLaunch)) {
+        $Source = $VenvLaunch
+        $hook = @('-m', 'harness_manager._launch', '--installer-hook', "--root=$Root",
+                  "--venv=$Venv", "--version=$version", "--extras=$($extras -join ' ')",
+                  "--uv=$recordUv", "--legacy=$LegacyApp", '--installer=install.ps1')
+        $r = Invoke-Native $VenvPy $hook
+        if ($r.Code -ne 0) { Note "could not record the install in $InstallJson; the command runs $version" }
+    } else {
+        if (Test-Path $InstallJson) { Remove-Item -Force $InstallJson }
+        Note "harness-manager $version has no self-update launcher: the command runs it directly"
+    }
+
     # -- the command on PATH ------------------------------------------------------------
     # A copy of the venv's launcher: it holds the venv's absolute Python path, so it
-    # runs from anywhere (pipx does the same on Windows).
+    # runs from anywhere (pipx does the same on Windows). It is harness-manager-launch,
+    # which runs the self-updated version when there is one: Windows has no shell shim.
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     if ((Test-Path $Command) -and $BinDir -ne $DefaultBin -and -not $Force) {
-        $same = (Get-FileHash $Command).Hash -eq (Get-FileHash $VenvHm).Hash
-        if (-not $same) {
+        $ours = @((Get-FileHash $VenvHm).Hash)
+        if (Test-Path $VenvLaunch) { $ours += (Get-FileHash $VenvLaunch).Hash }
+        if ($ours -notcontains (Get-FileHash $Command).Hash) {
             Fail "$Command exists and this script did not write it. Move it away, or re-run with -Force."
         }
     }
     try {
-        Copy-Item -Force $VenvHm $Command
+        Copy-Item -Force $Source $Command
     } catch {
         Fail "could not write $Command ($($_.Exception.Message)). Close any running harness-manager, then run this again."
     }

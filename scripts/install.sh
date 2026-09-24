@@ -8,6 +8,10 @@
 # Manager to your desktop's application menu. Re-running it upgrades in place
 # and keeps your choices. Nothing needs root.
 #
+# The command runs the version the app's self-update selected, else the one
+# installed here. Re-running the installer makes the version it installs the one
+# that runs, unless a self-updated version is newer.
+#
 # Options:
 #   --from SRC      what to install. A checkout (default: the one holding this
 #                   script), a wheel file, or a git URL (cloned, depth 1).
@@ -26,13 +30,16 @@
 #   --desktop       add it again after an earlier --no-desktop.
 #   --force         replace an existing harness-manager command that this
 #                   script did not write.
-#   --uninstall     stop the service, remove the venv, the command and the menu
-#                   entry. Your settings and backups in ~/.config/harness-manager stay.
+#   --uninstall     stop the service, remove the venv, the self-updated versions,
+#                   the command and the menu entry. Your settings and backups in
+#                   ~/.config/harness-manager stay.
 #   -h, --help      print this help.
 #
 # Environment:
 #   HARNESS_MANAGER_HOME     install root (default ~/.local/share/harness-manager)
 #   HARNESS_MANAGER_BIN_DIR  where the command goes (default ~/.local/bin)
+#   HARNESS_MANAGER_STATE_DIR  the state dir (default ~/.config/harness-manager). An
+#                            older install kept its self-updated versions in it.
 #   HTTPS_PROXY              a proxy for the package index (pip and uv use it)
 set -euo pipefail
 
@@ -53,10 +60,14 @@ data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 home_dir="${HARNESS_MANAGER_HOME:-$data_home/harness-manager}"
 venv="$home_dir/venv"
 record="$home_dir/install.conf"
+# The app's self-update keeps its versions and its pointer in the install root
+# (harness_manager._launch). An older install kept them in <state dir>/update/app.
+install_json="$home_dir/install.json"
 lock_dir="$home_dir/.install.lock"
 bin_dir="${HARNESS_MANAGER_BIN_DIR:-$HOME/.local/bin}"
 launcher="$bin_dir/harness-manager"
 state_dir="${HARNESS_MANAGER_STATE_DIR:-$HOME/.config/harness-manager}"
+legacy_app="$state_dir/update/app"
 apps_dir="$data_home/applications"
 desktop_file="$apps_dir/harness-manager.desktop"
 icon_file="$data_home/icons/hicolor/scalable/apps/harness-manager.svg"
@@ -215,7 +226,15 @@ if [[ $uninstall -eq 1 ]]; then
     fi
     remove_desktop_entry
     if [[ -d "$venv" ]]; then rm -rf "$venv"; say "removed  $venv"; fi
-    rm -f "$record"
+    # The self-updated versions are venvs, not settings: they go too, from the install
+    # root and from where an older install kept them.
+    for dir in "$home_dir" "$legacy_app"; do
+        if [[ -d "$dir/versions" ]]; then rm -rf "$dir/versions"; say "removed  $dir/versions"; fi
+        rm -rf "$dir/wheels" "$dir/reqs"
+        rm -f "$dir/current.json"
+    done
+    rmdir "$legacy_app" 2>/dev/null || true
+    rm -f "$record" "$install_json"
     rm -rf "$lock_dir"; locked=0
     rmdir "$home_dir" 2>/dev/null || true
     say "kept     $state_dir (settings, SD backups, the content store)."
@@ -509,6 +528,38 @@ version="$("$venv/bin/harness-manager" version)" || die "the installed harness-m
 printf '# Written by scripts/install.sh: the choices a re-run keeps.\nextras=%s\ndesktop=%s\n' \
     "$extras" "$desktop" >"$record"
 
+# -- uv in the venv: the app's self-update builds each new version with it ------------------
+if [[ ! -x "$venv/bin/uv" ]]; then
+    if [[ $use_uv -eq 1 ]]; then
+        uvpip ${index_args[@]+"${index_args[@]}"} ${find_links[@]+"${find_links[@]}"} "uv>=0.4" \
+            >/dev/null 2>&1 || true
+    else
+        pip install --quiet ${index_args[@]+"${index_args[@]}"} ${find_links[@]+"${find_links[@]}"} \
+            "uv>=0.4" >/dev/null 2>&1 || true
+    fi
+fi
+venv_uv=""
+if [[ -x "$venv/bin/uv" ]]; then
+    venv_uv="$venv/bin/uv"
+else
+    note "no uv in the venv${offline:+ (the wheelhouse has no uv wheel)}, so the app cannot"
+    note "update itself until you run this again with network. Everything else works."
+fi
+
+# -- the install record and the self-update pointer ---------------------------------------
+# install.json says what was installed, and where. The pointer learns this venv, so that
+# rollback can return to it. A re-run wins over an older self-updated version. An older
+# install's self-updated versions move into the install root.
+if "$venv/bin/python" -c 'import harness_manager._launch' >/dev/null 2>&1; then
+    "$venv/bin/python" -m harness_manager._launch --installer-hook --root "$home_dir" \
+        --venv "$venv" --version "$version" --extras "$extras" --uv "$venv_uv" \
+        --legacy "$legacy_app" --installer install.sh \
+        || note "could not record the install in $install_json; the command runs $version"
+else
+    rm -f "$install_json"
+    note "harness-manager $version has no self-update launcher: the command runs it directly"
+fi
+
 # -- the command on PATH ---------------------------------------------------------------
 if [[ -e "$launcher" || -L "$launcher" ]] && ! ours "$launcher"; then
     if [[ $force -eq 1 ]]; then
@@ -522,27 +573,17 @@ cat >"$launcher.tmp" <<EOF
 #!/bin/sh
 # $MARKER.
 # Re-run the installer to upgrade; \`install.sh --uninstall\` removes it.
-# Runs the version the app's self-update selected (<state dir>/update/app/current.json)
-# when there is one, else the installed venv.
+# harness-manager-launch runs the version the app's self-update selected
+# (<install root>/current.json), else the installed venv. HARNESS_MANAGER_USE_INSTALLED=1
+# runs the installed venv whatever the pointer says.
 venv=$(printf '%q' "$venv")
-state="\${HARNESS_MANAGER_STATE_DIR:-\$HOME/.config/harness-manager}"
-pointer="\$state/update/app/current.json"
-if [ -f "\$pointer" ]; then
-    v=\$(sed -n 's/.*"current"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "\$pointer" | head -n 1)
-    if [ -n "\$v" ] && [ -x "\$state/update/app/versions/\$v/bin/harness-manager" ]; then
-        exec "\$state/update/app/versions/\$v/bin/harness-manager" "\$@"
-    fi
+if [ -x "\$venv/bin/harness-manager-launch" ]; then
+    exec "\$venv/bin/harness-manager-launch" "\$@"
 fi
 exec "\$venv/bin/harness-manager" "\$@"
 EOF
 chmod 755 "$launcher.tmp"
 mv -f "$launcher.tmp" "$launcher"
-
-pointer="$state_dir/update/app/current.json"
-if [[ -f "$pointer" ]] && grep -q '"current"[[:space:]]*:[[:space:]]*"[^"]' "$pointer"; then
-    note "the app's self-update selected a version in $pointer; the command runs that one"
-    note "until you roll it back. The version just installed is $version."
-fi
 say "command  $launcher"
 
 # -- the application menu (Linux desktops) ----------------------------------------------
