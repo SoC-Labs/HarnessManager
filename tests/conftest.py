@@ -12,8 +12,12 @@ from tests.fakes.virtual_board import VirtualMps3
 
 @pytest.fixture(autouse=True)
 def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never let a test touch the user's real ~/.config/harness-manager."""
+    """Never let a test touch the user's real ~/.config/harness-manager, nor the PTY links
+    of a daemon the user runs on the same machine (/tmp/harness-manager-$USER): a PTY is
+    only made on request, and the L2 tests pick their own directory (l2_rig.pty_dir), but
+    a test that forgets must land here, not beside a live daemon's links."""
     monkeypatch.setenv("HARNESS_MANAGER_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("HARNESS_MANAGER_PTY_DIR", str(tmp_path / "ptys"))
 
 
 @pytest.fixture(autouse=True)

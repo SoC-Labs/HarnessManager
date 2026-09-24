@@ -137,6 +137,23 @@ def test_board_slug_is_a_safe_readable_name():
         assert "/" not in slug and slug not in (".", "..")
 
 
+def test_the_default_directory_is_tmp_harness_manager_user(monkeypatch):
+    # docs/API.md; tests/conftest.py sets HARNESS_MANAGER_PTY_DIR for every test, so the
+    # default is only ever read here, and nothing is created.
+    monkeypatch.delenv(ptymod.PTY_DIR_ENV, raising=False)
+    monkeypatch.setenv("USER", "ada.l")
+    assert ptymod.runtime_dir() == Path("/tmp") / "harness-manager-ada.l"
+    monkeypatch.setenv("USER", "a/../b")                       # a user name never climbs out
+    assert ptymod.runtime_dir().parent == Path("/tmp")
+
+
+def test_negative_twin_the_directory_follows_the_override(monkeypatch, tmp_path):
+    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(tmp_path / "mine"))
+    assert ptymod.runtime_dir() == tmp_path / "mine"
+    monkeypatch.setenv(ptymod.PTY_DIR_ENV, "  ")                # blank: the default again
+    assert ptymod.runtime_dir().parent == Path("/tmp")
+
+
 def test_a_planted_symlink_in_place_of_the_directory_is_refused(tmp_path, monkeypatch, bus,
                                                                session):
     target = tmp_path / "elsewhere"
