@@ -151,8 +151,12 @@ def test_a_local_mirror_directory_works_offline(builder, tmp_path):
     assert v.url.startswith("file://") and v.channel.serial == 7
 
 
-def test_channel_url_forms(tmp_path):
+def test_channel_url_forms(tmp_path, monkeypatch):
+    monkeypatch.delenv("HARNESS_MANAGER_UPDATE_SOURCE")           # conftest points it at tmp
     assert channel_url("https://h/x/{channel}/channel.json", "beta") == "https://h/x/beta/channel.json"
     assert channel_url("https://h/mirror/", "beta") == "https://h/mirror/channel.json"
     assert channel_url(str(tmp_path), "beta") == (tmp_path / "channel.json").as_uri()
-    assert "raw.githubusercontent.com" in channel_url(None, "stable")
+    # david U1 (OTA-C): the default is the private HarnessManager repo's GitHub Releases
+    assert channel_url(None, "stable") == ("https://github.com/SoC-Labs/HarnessManager/releases/"
+                                           "download/channel-stable/channel.json")
+    assert channel_url(None, "stable", "hm-app").endswith("/channel-hm-app-stable/channel.json")

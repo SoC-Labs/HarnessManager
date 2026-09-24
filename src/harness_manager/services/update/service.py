@@ -5,7 +5,7 @@ the contract change request), or with explicit parts in tests. It owns:
 
 - the trust store (pinned keys + accepted rotation) and the channel client;
 - the downloader (cache in ``state_dir/update/cache``; the GitHub token from
-  ``$HARNESS_MANAGER_GITHUB_TOKEN``, never logged);
+  ``$HARNESS_MANAGER_GITHUB_TOKEN``, else ``gh auth token`` on first need, never logged);
 - the planner, the harness installer/rollback, and the app self-updater.
 
 ``check`` only reads (and publishes ``update.available``). Every install needs
@@ -24,7 +24,9 @@ from harness_manager import __version__
 from harness_manager.core.errors import AlreadyError, HarnessError, RefusedError
 from harness_manager.core.events import Event, EventBus
 
+from . import github
 from .app import AppUpdater
+from .appstage import app_dirs, offer_app, prepare_app_release, refuse_if_bad
 from .bundle import OverlayHandler, PackOverlayHandler
 from .channel import ChannelClient, VerifiedChannel
 from .download import Downloader, token_from_env
@@ -75,8 +77,11 @@ class UpdateService:
         self.state_dir = _state_dir(engine, state_dir)
         self.state = UpdateState.under(self.state_dir)
         self.trust = trust if trust is not None else load_trust(self.state)
+        # An explicit token (even "") is final; otherwise the env var, else `gh auth token`,
+        # resolved only when a GitHub host is about to be asked (OTA-C, U1).
         self.downloader = downloader or Downloader(
-            self.state.cache, token=token if token is not None else token_from_env())
+            self.state.cache, token=token if token is not None else token_from_env(),
+            token_provider=None if token is not None else github.resolve_token)
         self.channels = ChannelClient(self.state, self.downloader, self.trust, now=now)
         self.bus = bus if bus is not None else getattr(engine, "bus", None)
         self._store = store
@@ -113,8 +118,11 @@ class UpdateService:
 
     # -- channel --
 
-    def fetch_channel(self, channel: str | None = None, source: str | None = None) -> VerifiedChannel:
-        return self.channels.fetch(self.policy.channel_for(channel), source)
+    def fetch_channel(self, channel: str | None = None, source: str | None = None, *,
+                      catalog: str | None = None) -> VerifiedChannel:
+        """``catalog`` (OTA-C): ``hm-app`` or a harness catalogue; picks a ``github:``
+        source's rolling release, and the signed document must belong to it."""
+        return self.channels.fetch(self.policy.channel_for(channel), source, catalog=catalog)
 
     # -- board --
 
@@ -152,8 +160,9 @@ class UpdateService:
 
     def plan_harness(self, session: Any, *, verified: VerifiedChannel | None = None,
                      channel: str | None = None, source: str | None = None,
-                     version: str | None = None, overlays_only: bool = False) -> tuple[Plan, VerifiedChannel]:
-        verified = verified or self.fetch_channel(channel, source)
+                     version: str | None = None, overlays_only: bool = False,
+                     catalog: str | None = None) -> tuple[Plan, VerifiedChannel]:
+        verified = verified or self.fetch_channel(channel, source, catalog=catalog)
         stored = []
         if self.store is not None:
             try:
@@ -162,7 +171,7 @@ class UpdateService:
                 stored = []
         plan = make_plan(verified.channel, self.board_view(session), app_version=self.app_version,
                          version=version, overlays_only=overlays_only, stored_overlays=stored,
-                         have_token=bool(self.downloader.token),
+                         have_token=self.downloader.has_token(),
                          channel_warnings=verified.warnings,
                          stored_components=StoredComponents(self.state).all())
         return plan, verified
@@ -179,8 +188,8 @@ class UpdateService:
     # -- check (read-only) --
 
     def check(self, *, channel: str | None = None, source: str | None = None,
-              session: Any = None) -> dict[str, Any]:
-        verified = self.fetch_channel(channel, source)
+              session: Any = None, catalog: str | None = None) -> dict[str, Any]:
+        verified = self.fetch_channel(channel, source, catalog=catalog)
         ch = verified.channel
         report: dict[str, Any] = {
             "channel": ch.channel, "serial": ch.serial, "issued_at": ch.issued_at,
@@ -191,7 +200,11 @@ class UpdateService:
             "app_running": self.app_version, "app_update": "",
             "releases": releases_summary(ch),
         }
-        offer = self.app().offer(ch.app, ch.app_current) if ch.app_current else None
+        # OTA-C: a version marked bad (it failed its health check here) is never offered
+        verdict = offer_app(ch, self.app_version, self.state, app=self.app())
+        offer = verdict.release
+        if verdict.skipped_bad:
+            report["app_skipped"] = {"version": verdict.skipped_bad, "why": verdict.why}
         policy_off = self.policy.off_reason() or self.app().policy_off
         if offer is not None and policy_off:
             # the administrator's "off": no app update is offered at all
@@ -225,9 +238,9 @@ class UpdateService:
 
     def update_app(self, *, verified: VerifiedChannel | None = None, channel: str | None = None,
                    source: str | None = None, version: str | None = None,
-                   switch: bool = True) -> dict[str, Any]:
+                   switch: bool = True, catalog: str | None = None) -> dict[str, Any]:
         """Download + verify + stage the app release, then switch (unless busy)."""
-        verified = verified or self.fetch_channel(channel, source)
+        verified = verified or self.fetch_channel(channel, source, catalog=catalog)
         ch = verified.channel
         rel = ch.app_release(version)
         if rel is None:
@@ -239,12 +252,16 @@ class UpdateService:
             raise AlreadyError(f"harness-manager {self.app_version} is current on the "
                                f"{ch.channel!r} channel")
         self.app().guard(f"update the app to {rel.version}")     # before any download
-        wheel = self.downloader.fetch(rel.wheel, base_url=verified.url)
-        lock = self.downloader.fetch(rel.lock, base_url=verified.url) if rel.lock else None
-        staged = self.app().stage(rel, wheel, lock)
+        refuse_if_bad(self.state, rel.version, app=self.app())
+        # wheel, lock and deps, each sha256-checked; deps pinned to the verified local files
+        wheels_dir, locks_dir = app_dirs(self.app(), self.state)
+        prepared = prepare_app_release(self.downloader, verified, rel, wheels_dir=wheels_dir,
+                                       locks_dir=locks_dir,
+                                       extras=getattr(self.app(), "extras", ()) or ())
+        staged = self.app().stage(rel, prepared.wheel, prepared.lock)
         out: dict[str, Any] = {"version": rel.version, "staged": staged, "switched": False,
-                               "locked": lock is not None}
-        if not lock:
+                               "locked": rel.lock is not None, "lock": prepared.lock_name}
+        if rel.lock is None:
             out["warning"] = ("the release has no hashed lock file: dependencies came from the "
                               "package index unpinned")
         if staged.get("extras_missing"):

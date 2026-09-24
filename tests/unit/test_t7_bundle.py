@@ -16,19 +16,20 @@ from harness_manager.services.update.bundle import PackOverlayHandler, prepare_r
 from harness_manager.services.update.channel import ChannelClient
 from harness_manager.services.update.download import Downloader
 from harness_manager.services.update.state import UpdateState
-from tests.fakes.fake_channel import ChannelBuilder, TestKeys
+from tests.fakes.fake_channel import ChannelBuilder, FakeChannelServer, TestKeys
 from tests.fakes.t7_bundles import USERCODE, Release, zip_bytes
 
 KEYS = TestKeys()
 
 
-def prepare(tmp_path, release: Release, *, names=None, token=None):
-    b = ChannelBuilder(tmp_path / "mirror", KEYS)
+def prepare(tmp_path, release: Release, *, names=None, token=None, server=None):
+    b = ChannelBuilder(server.root if server else tmp_path / "mirror", KEYS)
     release.add_to(b, tmp_path / "art")
     b.publish(serial=1)
     state = UpdateState(tmp_path / "state" / "update")
-    dl = Downloader(state.cache, token=token)
-    v = ChannelClient(state, dl, KEYS.trust()).fetch("stable", str(b.root / "channel" / "stable"))
+    dl = Downloader(state.cache, token=token, mirrors=())
+    src = server.source() if server else str(b.root / "channel" / "stable")
+    v = ChannelClient(state, dl, KEYS.trust()).fetch("stable", src)
     rel = v.channel.harness_release()
     names = names or [c.name for c in rel.components]
     return prepare_release(rel, names, downloader=dl, base_url=v.url, work=state.work(rel.version),
@@ -92,9 +93,17 @@ def test_a_corrupt_overlay_payload_fails_its_crc(tmp_path):
 
 
 def test_a_private_component_without_a_token_is_skipped_not_fatal(tmp_path):
-    p = prepare(tmp_path, Release("1.1.0", private_overlays=True))
+    # From a host, a private component needs the token (OTA-C: a LOCAL copy, file://, is
+    # read as it is: nothing leaves the machine; the planner still skips Arm IP without one).
+    with FakeChannelServer(tmp_path / "www") as srv:
+        p = prepare(tmp_path, Release("1.1.0", private_overlays=True), server=srv)
     assert "overlays-aaa" in p.skipped and "GitHub token" in p.skipped["overlays-aaa"]
     assert "overlays-open" in p.parts
+
+
+def test_twin_a_private_component_in_a_local_copy_needs_no_token(tmp_path):
+    p = prepare(tmp_path, Release("1.1.0", private_overlays=True))
+    assert not p.skipped and "overlays-aaa" in p.parts
 
 
 def test_the_signed_per_file_list_is_enforced(tmp_path):

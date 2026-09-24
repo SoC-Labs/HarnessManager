@@ -224,6 +224,13 @@ class ShellLive:
         return _hex_id(self.raw_version.get("usercode")) if self.version_ok else ""
 
     @property
+    def ver32(self) -> str:
+        """``version.ver32`` (the packed HARNESS_VER32) as ``0x`` + 8 hex; "" when absent or 0
+        (0 is "not stamped": no firmware with a ``version`` verb packs 0.0.0)."""
+        v = _hex_id(self.raw_version.get("ver32")) if self.version_ok else ""
+        return "" if not v.startswith("0x") or int(v, 16) == 0 else v
+
+    @property
     def name(self) -> str:
         """The board's own name, when the harness sends the (proposed, N1) ``name`` key."""
         from harness_manager.naming import clean_name
@@ -257,6 +264,7 @@ class ShellLive:
             proto=self.proto,
             usercode=self.usercode,
             name=self.name,
+            ver32=self.ver32,
         )
 
 

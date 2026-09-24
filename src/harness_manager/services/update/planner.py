@@ -160,7 +160,8 @@ def running_summary(ident: BoardIdentity | None) -> dict[str, Any]:
         return {}
     return {"shell_id": ident.shell_id.lower(), "harness": ident.harness_version,
             "firmware_sha": ident.firmware_sha, "usercode": ident.usercode.lower(),
-            "impl": ident.harness_impl, "features": sorted(ident.features)}
+            "impl": ident.harness_impl, "features": sorted(ident.features),
+            "ver32": ident.ver32.lower()}
 
 
 #: The shortest sha prefix that names a build (git's own short-sha floor).
@@ -181,11 +182,27 @@ def fw_sha_match(want: str, have: str) -> bool | None:
     return w == h if n < FW_SHA_MIN_HEX else w[:n] == h[:n]
 
 
+def ver32_match(want: str, have: str) -> bool | None:
+    """Do a release's ``ver32`` and the board's name the same HARNESS_VER32?
+
+    None when either side has none (0 counts as none: "not stamped"). Compared as u32.
+    """
+    try:
+        w = int(want, 16) if want else 0
+        h = int(have, 16) if have else 0
+    except ValueError:
+        return None
+    if not w or not h:
+        return None
+    return w == h
+
+
 def identity_rank(want: HarnessIdentity, ident: BoardIdentity) -> int | None:
     """How well what the board reports fits a release's wire identity (HARNESS-DIST §3.2).
 
     None: it does not fit. Otherwise a rank, higher = more specific:
-    2 for a matching ``fw_sha``, plus 1 for a matching ``harness`` string.
+    2 for a matching ``fw_sha``, plus 1 for a matching ``ver32``, plus 1 for a matching
+    ``harness`` string.
 
     - ``static_id`` must match; ``usercode`` and ``impl`` must match when both sides
       have them;
@@ -193,8 +210,12 @@ def identity_rank(want: HarnessIdentity, ident: BoardIdentity) -> int | None:
       ``harness=1.0.0``, and a release may carry its tag there, so a differing
       version string never overrules a matching sha, and a matching one never
       rescues a differing sha;
-    - without a sha to compare (an older record, or a board that does not say), the
-      ``harness`` string must match when both sides have one.
+    - ``ver32`` (H1) is decisive the same way when both sides have one: it is what the
+      firmware packs from its VERSION, so once VERSION is stamped with the release tag
+      (HARNESS-DIST R4) two bakes of one firmware sha differ only there. A differing
+      ver32 never fits, even with a matching sha;
+    - with neither a sha nor a ver32 to compare (an older record, or a board that does
+      not say), the ``harness`` string must match when both sides have one.
     """
     if not ident.shell_id or not _same_u32(want.static_id, ident.shell_id):
         return None
@@ -205,11 +226,14 @@ def identity_rank(want: HarnessIdentity, ident: BoardIdentity) -> int | None:
     sha = fw_sha_match(want.fw_sha, ident.firmware_sha)
     if sha is False:
         return None
+    v32 = ver32_match(want.ver32, ident.ver32)
+    if v32 is False:
+        return None
     harness = same_version(want.harness, ident.harness_version) \
         if want.harness and ident.harness_version else None
-    if sha is None and harness is False:
+    if sha is None and v32 is None and harness is False:
         return None
-    return (2 if sha else 0) + (1 if harness else 0)
+    return (2 if sha else 0) + (1 if v32 else 0) + (1 if harness else 0)
 
 
 def match_release(channel: Channel, ident: BoardIdentity) -> HarnessRelease | None:
@@ -229,8 +253,9 @@ def match_release(channel: Channel, ident: BoardIdentity) -> HarnessRelease | No
 
 
 def base_differs(rel: HarnessRelease, ident: BoardIdentity) -> bool:
-    """Would installing ``rel`` change the base the board runs? The firmware sha decides
-    when both sides have one; otherwise the ``harness`` string (``identity_rank``)."""
+    """Would installing ``rel`` change the base the board runs? A differing ver32 does;
+    then the firmware sha decides when both sides have one; then a matching ver32 says
+    no; otherwise the ``harness`` string (``identity_rank``)."""
     i = rel.identity
     if not ident.shell_id or not _same_u32(i.static_id, ident.shell_id):
         return True
@@ -238,9 +263,14 @@ def base_differs(rel: HarnessRelease, ident: BoardIdentity) -> bool:
         return True
     if i.impl and ident.harness_impl and i.impl != ident.harness_impl:
         return True
+    v32 = ver32_match(i.ver32, ident.ver32)
+    if v32 is False:
+        return True
     sha = fw_sha_match(i.fw_sha, ident.firmware_sha)
     if sha is not None:
         return not sha
+    if v32:
+        return False
     return bool(i.harness) and (not ident.harness_version or
                                 not same_version(i.harness, ident.harness_version))
 

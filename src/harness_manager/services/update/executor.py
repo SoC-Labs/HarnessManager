@@ -52,7 +52,15 @@ from .bundle import OverlayHandler, PreparedRelease, prepare_release
 from .channel import VerifiedChannel
 from .download import Downloader
 from .os_slots import OsSlotAdapter
-from .planner import MODE_NONE, MODE_OVERLAYS, Approval, Plan, fw_sha_match, running_summary
+from .planner import (
+    MODE_NONE,
+    MODE_OVERLAYS,
+    Approval,
+    Plan,
+    fw_sha_match,
+    running_summary,
+    ver32_match,
+)
 from .schema import KIND_OVERLAYS, TARGET_HOST_STORE, HarnessIdentity, HarnessRelease
 from .state import InstallRecords, Journal, StoredComponents, UpdateState
 from .version import same_version
@@ -118,10 +126,11 @@ def confirm_wire_identity(want: HarnessIdentity,
                           ident: BoardIdentity | None) -> tuple[bool, list[PreflightItem]]:
     """``confirm_identity`` on a bare wire identity (the journal keeps one, not a release).
 
-    Essential: ``shell_id`` plus the ``harness`` string OR the firmware sha
-    (HARNESS-DIST §3.2 rule 3). A matching sha is decisive: the firmware reports
-    ``harness=1.0.0`` whatever the release is tagged, so a differing version string
-    is then shown UNCHECKED, never a mismatch. Any other MISMATCH fails the confirm.
+    Essential: ``shell_id`` plus the ``harness`` string OR the firmware sha OR the
+    ``ver32`` (HARNESS-DIST §3.2 rule 3; ver32 is H1). A matching sha or ver32 is
+    decisive: the firmware reports ``harness=1.0.0`` whatever the release is tagged, so
+    a differing version string is then shown UNCHECKED, never a mismatch. Any other
+    MISMATCH (a differing ver32 included) fails the confirm.
     """
     items: list[PreflightItem] = []
     if ident is None or not ident.shell_id:
@@ -130,18 +139,22 @@ def confirm_wire_identity(want: HarnessIdentity,
     items.append(_item("shell_id", _same_u32(ident.shell_id, want.static_id),
                        f"board reports {ident.shell_id}, release is {want.static_id}"))
     sha_ok = fw_sha_match(want.fw_sha, ident.firmware_sha)
+    v32_ok = ver32_match(want.ver32, ident.ver32)
     if want.harness:
         have = ident.harness_version
         ok = None if not have else same_version(have, want.harness)
         detail = f"board reports {have or 'nothing (no version verb)'}, release is {want.harness}"
-        if ok is False and sha_ok:
+        if ok is False and (sha_ok or v32_ok):
             ok = None
-            detail += " (not decisive: the firmware sha matches, and the firmware does not " \
-                      "report the release's version)"
+            detail += (" (not decisive: the firmware " + ("sha" if sha_ok else "ver32") +
+                       " matches, and the firmware does not report the release's version)")
         items.append(_item("harness version", ok, detail))
     if want.fw_sha:
         items.append(_item("firmware sha", sha_ok,
                            f"board reports {ident.firmware_sha or '?'}, release is {want.fw_sha}"))
+    if want.ver32:
+        items.append(_item("ver32", v32_ok,
+                           f"board reports {ident.ver32 or 'nothing'}, release is {want.ver32}"))
     if want.features:
         missing = sorted(set(want.features) - set(ident.features))
         items.append(_item("features", not missing,
@@ -159,7 +172,7 @@ def confirm_wire_identity(want: HarnessIdentity,
         items.append(_item("build check", False, "the firmware and fabric disagree (skew)"))
     checks = {i.name: i.check for i in items}
     version_ok = not (want.harness or want.fw_sha) or Check.OK in (
-        checks.get("harness version"), checks.get("firmware sha"))
+        checks.get("harness version"), checks.get("firmware sha"), checks.get("ver32"))
     confirmed = checks["shell_id"] == Check.OK and version_ok and \
         not any(i.check == Check.MISMATCH for i in items)
     return confirmed, items
@@ -168,7 +181,7 @@ def confirm_wire_identity(want: HarnessIdentity,
 def _wire(want: HarnessIdentity) -> dict[str, str]:
     """What the journal keeps of a release's wire identity, to recognise it after a crash."""
     return {"harness": want.harness, "fw_sha": want.fw_sha, "usercode": want.usercode,
-            "impl": want.impl}
+            "impl": want.impl, "ver32": want.ver32}
 
 
 def journaled_release_runs(j: dict[str, Any], ident: BoardIdentity | None) -> bool:
@@ -185,8 +198,8 @@ def journaled_release_runs(j: dict[str, Any], ident: BoardIdentity | None) -> bo
         static_id=str(j.get("static_id") or ident.shell_id),
         harness=str(wire.get("harness") or j.get("version") or ""),
         fw_sha=str(wire.get("fw_sha") or ""), usercode=str(wire.get("usercode") or ""),
-        impl=str(wire.get("impl") or ""))
-    if not (want.harness or want.fw_sha):
+        impl=str(wire.get("impl") or ""), ver32=str(wire.get("ver32") or ""))
+    if not (want.harness or want.fw_sha or want.ver32):
         return False
     return confirm_wire_identity(want, ident)[0]
 
@@ -373,7 +386,9 @@ class HarnessInstaller:
             if now_running.get("shell_id") != plan.running.get("shell_id") or \
                     now_running.get("harness") != plan.running.get("harness") or \
                     fw_sha_match(plan.running.get("firmware_sha", ""),
-                                 now_running.get("firmware_sha", "")) is False:
+                                 now_running.get("firmware_sha", "")) is False or \
+                    ver32_match(plan.running.get("ver32", ""),
+                                now_running.get("ver32", "")) is False:
                 raise RefusedError("the board changed since this update was planned "
                                    f"(planned against {plan.running}, now {now_running})",
                                    hint="check again, then confirm the new plan")
@@ -629,7 +644,9 @@ class HarnessInstaller:
             not previous or (_same_u32(now.get("shell_id", ""), previous.get("shell_id", "")) and
                              now.get("harness") == previous.get("harness") and
                              fw_sha_match(previous.get("firmware_sha", ""),
-                                          now.get("firmware_sha", "")) is not False))
+                                          now.get("firmware_sha", "")) is not False and
+                             ver32_match(previous.get("ver32", ""),
+                                         now.get("ver32", "")) is not False))
         result = RESULT_RESTORED if confirmed else RESULT_RESTORED_UNCONFIRMED
         detail = (f"restored {backup.path}; the board reports shell {now.get('shell_id') or '?'}, "
                   f"harness {now.get('harness') or '?'}")

@@ -85,6 +85,9 @@ class BoardIdentity:
     proto: str = ""            # net-protocol version the harness speaks, when it says
     usercode: str = ""         # implementation-run identity (static_usercode), when it says
     name: str = ""             # the board's own name, when the harness reports one (CCR N1-1)
+    # OTA-C (H1): the packed HARNESS_VER32 the firmware reports ("0x01000000"), when it says.
+    # Names the release once VERSION is stamped with its tag (HARNESS-DIST §3.2 rule 4).
+    ver32: str = ""
 
 
 @dataclass(frozen=True)

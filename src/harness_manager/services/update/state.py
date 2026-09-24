@@ -2,7 +2,9 @@
 
 Layout under ``<state_dir>/update/``::
 
-    serials.json              channel -> {serial, sha256} last accepted (anti-rollback)
+    serials.json              (catalog, channel) -> {serial, sha256} last accepted
+                              (anti-rollback; format 2, migrated from channel-only keys)
+    bad_versions.json         catalog -> version -> why it is never offered again
     keys.json(.minisig)       the accepted key rotation (re-verified on every load)
     cache/blobs/<sha256>      downloaded assets, named by their verified hash
     cache/partial/<sha256>.part  an interrupted download (resumed with a Range request)
@@ -29,6 +31,8 @@ from pathlib import Path
 from typing import Any
 
 from harness_manager.core.errors import RefusedError
+
+from .version import same_version
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -101,41 +105,141 @@ class UpdateState:
         return self.root / "app"
 
 
-# --- anti-rollback: the last serial seen per channel -----------------------------------
+# --- anti-rollback: the last serial seen per (catalog, channel) ------------------------
+
+#: ``serials.json`` format 2: ``{"format": 2, "catalogs": {catalog: {channel: entry}}}``.
+#: Format 1 (T7) was ``{channel: entry}`` at the top level.
+SERIALS_FORMAT = 2
+#: Where T7's channel-only serials go: before catalogues the one channel a client read was
+#: the MPS3 platform channel (``schema.LEGACY_CATALOG``; imported lazily, no cycle).
+_LEGACY_CATALOG = "mps3-harness"
+
+
+def _is_serial_entry(v: Any) -> bool:
+    return isinstance(v, dict) and "serial" in v
 
 
 class SerialStore:
-    """Channel serials never go down; a serial is never reused for different content."""
+    """Channel serials never go down; a serial is never reused for different content.
 
-    def __init__(self, state: UpdateState) -> None:
+    Keyed by (catalogue, channel) (HM_SELF_UPDATE §4.6), so the app catalogue and a
+    board pack's harness catalogue can both have a ``stable`` channel without one's
+    serial refusing the other's. A T7 file (channel-only keys) is read as the MPS3
+    harness catalogue's history and rewritten in format 2 on the next accept.
+    """
+
+    def __init__(self, state: UpdateState, *, legacy_catalog: str = _LEGACY_CATALOG) -> None:
         self.path = state.serials
+        self.legacy_catalog = legacy_catalog
 
-    def last(self, channel: str) -> tuple[int, str]:
+    def load(self) -> dict[str, dict[str, dict[str, Any]]]:
+        """catalog -> channel -> entry, whatever format is on disk (format 1 migrated)."""
         data = read_json(self.path, {}) or {}
-        entry = data.get(channel) or {}
+        if not isinstance(data, dict):
+            return {}
+        if data.get("format") == SERIALS_FORMAT:
+            cats = data.get("catalogs") or {}
+            return {c: {n: e for n, e in chans.items() if _is_serial_entry(e)}
+                    for c, chans in cats.items() if isinstance(chans, dict)} \
+                if isinstance(cats, dict) else {}
+        legacy = {n: e for n, e in data.items() if _is_serial_entry(e)}
+        return {self.legacy_catalog: legacy} if legacy else {}
+
+    def _save(self, cats: dict[str, dict[str, dict[str, Any]]]) -> None:
+        old = read_json(self.path, {}) or {}
+        doc: dict[str, Any] = {"format": SERIALS_FORMAT, "catalogs": cats}
+        if isinstance(old, dict) and old.get("format") == SERIALS_FORMAT:
+            if "migrated" in old:
+                doc["migrated"] = old["migrated"]
+        elif isinstance(old, dict) and any(_is_serial_entry(v) for v in old.values()):
+            doc["migrated"] = {"from_format": 1, "to_catalog": self.legacy_catalog,
+                               "at": time.time()}
+        atomic_write_json(self.path, doc)
+
+    def migrate(self) -> bool:
+        """Rewrite a format-1 file as format 2 now (``accept`` does it anyway). True if it did."""
+        data = read_json(self.path, {}) or {}
+        if not isinstance(data, dict) or data.get("format") == SERIALS_FORMAT or not data:
+            return False
+        self._save(self.load())
+        return True
+
+    def last(self, channel: str, catalog: str | None = None) -> tuple[int, str]:
+        entry = self.load().get(catalog or self.legacy_catalog, {}).get(channel) or {}
         try:
             return int(entry.get("serial", 0)), str(entry.get("sha256", ""))
         except (TypeError, ValueError):
             return 0, ""
 
-    def check(self, channel: str, serial: int, sha256: str) -> None:
-        last, last_sha = self.last(channel)
+    def check(self, channel: str, serial: int, sha256: str, catalog: str | None = None) -> None:
+        last, last_sha = self.last(channel, catalog)
+        what = f"the {channel!r} channel" + (f" of the {catalog!r} catalogue" if catalog else "")
         if serial < last:
             raise RefusedError(
-                f"the {channel!r} channel offers serial {serial}, older than serial {last} "
+                f"{what} offers serial {serial}, older than serial {last} "
                 "already accepted: a rollback or a stale mirror",
                 hint="refusing it; wait for the mirror to catch up, or check the channel source")
         if serial == last and last_sha and sha256 != last_sha:
             raise RefusedError(
-                f"the {channel!r} channel reuses serial {serial} for different content",
+                f"{what} reuses serial {serial} for different content",
                 hint="a published channel never changes without a new serial; refusing it")
 
-    def accept(self, channel: str, serial: int, sha256: str) -> None:
-        data = read_json(self.path, {}) or {}
-        last, _ = self.last(channel)
+    def accept(self, channel: str, serial: int, sha256: str, catalog: str | None = None) -> None:
+        cats = self.load()
+        last, _ = self.last(channel, catalog)
         if serial >= last:
-            data[channel] = {"serial": serial, "sha256": sha256, "accepted_at": time.time()}
+            cats.setdefault(catalog or self.legacy_catalog, {})[channel] = {
+                "serial": serial, "sha256": sha256, "accepted_at": time.time()}
+            self._save(cats)
+
+
+# --- versions never offered again (a failed health check) -------------------------------
+
+
+class BadVersions:
+    """Versions marked bad: never offered, auto-staged or installed by default again.
+
+    OTA §5.4: when a new app version fails its health check after an apply, the apply
+    helper (lane OTA-D) marks it here and rolls back; ``offer`` then skips it until the
+    channel's current version is a newer one. Keyed by catalogue (``hm-app``, or a
+    harness catalogue), so a harness version and an app version never collide.
+    """
+
+    def __init__(self, state: UpdateState) -> None:
+        self.path = state.root / "bad_versions.json"
+
+    def all(self, catalog: str) -> dict[str, dict[str, Any]]:
+        data = read_json(self.path, {}) or {}
+        cat = data.get(catalog) if isinstance(data, dict) else None
+        return {v: e for v, e in cat.items() if isinstance(e, dict)} \
+            if isinstance(cat, dict) else {}
+
+    def get(self, catalog: str, version: str) -> dict[str, Any] | None:
+        return next((e for v, e in self.all(catalog).items() if same_version(v, version)), None)
+
+    def is_bad(self, catalog: str, version: str) -> bool:
+        return self.get(catalog, version) is not None
+
+    def mark(self, catalog: str, version: str, reason: str, *, phase: str = "health") -> None:
+        data = read_json(self.path, {}) or {}
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault(catalog, {})[version] = {"reason": reason, "phase": phase,
+                                                 "at": time.time()}
+        atomic_write_json(self.path, data)
+
+    def clear(self, catalog: str, version: str) -> bool:
+        """Offer ``version`` again (an operator decided the failure was not the release's)."""
+        data = read_json(self.path, {}) or {}
+        cat = data.get(catalog) if isinstance(data, dict) else None
+        if not isinstance(cat, dict):
+            return False
+        hit = [v for v in cat if same_version(v, version)]
+        for v in hit:
+            del cat[v]
+        if hit:
             atomic_write_json(self.path, data)
+        return bool(hit)
 
 
 # --- install records and the in-progress journal ------------------------------------

@@ -244,7 +244,8 @@ def test_the_sample_channel_in_the_hand_back_is_valid():
     ch = parse_channel(SAMPLE_CHANNEL)
     rel = ch.harness_release()
     assert rel.rekey and rel.identity.impl == "linux"
-    assert {c.target for c in rel.components} == {"mcc-sd", "user-usd", "host-store"}
+    # OTA-C: HM's old door names are read as the platform's (FLOW_CONTRACT v1.6 linux bundle)
+    assert {c.target for c in rel.components} == {"mcc_sd", "ethernet", "host-store"}
     assert rel.component("os-2.0.0").fmt == "raw" and rel.component("overlays-aaa").needs_token
     assert rel.extra["provenance"]["commit"] == "c855108"
     assert ch.harness_release("1.0.0").status == "superseded"
