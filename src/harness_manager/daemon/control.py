@@ -127,15 +127,33 @@ def running(state_dir: Path) -> DaemonInfo | None:
     return info
 
 
+def daemon_python(*, windows: bool = os.name == "nt", executable: str = "",
+                  base: str = "") -> tuple[str, dict[str, str] | None]:
+    """The Python to run the daemon with, and its environment (``None``: inherit ours).
+
+    Windows: a venv's ``python.exe`` (every install.ps1 install) is a redirector that
+    runs the base interpreter as a CHILD process, so ``Popen.pid`` would be the
+    redirector's and never the pid the daemon writes to daemon.json, which ``start``
+    waits for. Start the base interpreter itself, as multiprocessing does (bpo-35797):
+    ``__PYVENV_LAUNCHER__`` makes it the venv's Python.
+    """
+    executable = executable or sys.executable
+    base = base or getattr(sys, "_base_executable", "") or executable
+    if windows and os.path.normcase(base) != os.path.normcase(executable):
+        return base, dict(os.environ, __PYVENV_LAUNCHER__=executable)
+    return executable, None
+
+
 def _spawn(state_dir: Path, port: int, listen: str, demo: bool = False) -> subprocess.Popen:
     state_dir.mkdir(parents=True, exist_ok=True)
     log_path = daemon_log_path(state_dir)
     fd = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
-    cmd = [sys.executable, "-m", "harness_manager.daemon", "--state-dir", str(state_dir),
+    python, env = daemon_python()
+    cmd = [python, "-m", "harness_manager.daemon", "--state-dir", str(state_dir),
            "--port", str(port), "--listen", listen] + (["--demo"] if demo else [])
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": fd,
                               "stderr": subprocess.STDOUT, "cwd": str(state_dir),
-                              "close_fds": True}
+                              "close_fds": True, "env": env}
     if os.name == "nt":
         kwargs["creationflags"] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     else:
@@ -148,7 +166,7 @@ def _spawn(state_dir: Path, port: int, listen: str, demo: bool = False) -> subpr
             child = subprocess.Popen(cmd, **kwargs)
     except OSError as exc:
         raise ActionFailedError(f"cannot start harness-manager-daemon: {exc}",
-                                hint=f"check that {sys.executable} can run") from exc
+                                hint=f"check that {python} can run") from exc
     _CHILDREN[child.pid] = child
     return child
 

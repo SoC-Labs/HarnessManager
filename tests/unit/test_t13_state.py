@@ -191,3 +191,24 @@ def test_which_verbs_may_use_the_daemon(monkeypatch, args, env, wanted):
     if env is not None:
         monkeypatch.setenv(ENV_NO_DAEMON, env)
     assert wants_daemon(args) is wanted
+
+
+# -- which Python runs the daemon -------------------------------------------------------------
+
+VENV_PY = r"C:\Users\u\AppData\Local\harness-manager\venv\Scripts\python.exe"
+BASE_PY = r"C:\Python312\python.exe"
+
+
+def test_a_windows_venv_starts_the_base_interpreter_as_the_venv():
+    # The venv's python.exe is a redirector with a child process: its pid is not the daemon's.
+    from harness_manager.daemon.control import daemon_python
+
+    exe, env = daemon_python(windows=True, executable=VENV_PY, base=BASE_PY)
+    assert exe == BASE_PY and env is not None and env["__PYVENV_LAUNCHER__"] == VENV_PY
+
+
+@pytest.mark.parametrize("windows, base", [(False, BASE_PY), (True, VENV_PY)])
+def test_negative_twin_posix_or_no_venv_runs_our_own_interpreter(windows, base):
+    from harness_manager.daemon.control import daemon_python
+
+    assert daemon_python(windows=windows, executable=VENV_PY, base=base) == (VENV_PY, None)
