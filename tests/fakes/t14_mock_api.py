@@ -395,6 +395,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)
+    # P3: a tap on the panel's request banner tells the lease side (CCR PANEL-1), as presence
+    # tells the daemon's lease service.
+    app.state.panel.leases = sim.requests
 
     async def ws_deny(ws: WebSocket, exc: HarnessError) -> None:
         """harness-manager-daemon's refusal: an HTTP denial with the envelope, else close 4000 + code."""

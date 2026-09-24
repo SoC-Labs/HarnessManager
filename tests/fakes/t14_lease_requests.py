@@ -32,6 +32,9 @@ The scripted scenarios are knobs on ``LeaseRequestSim`` (``sim.requests`` on the
   else ``"unknown"`` (it may be a script): force then needs ``confirm_board``, the board's
   name (400 USAGE without it, 409 REFUSED with another), by the real service's rules
   (``harness_manager.services.lease.holder_kind`` / ``confirm_board_error``).
+- CCR PANEL-1: ``notify_holder(bid, seq=, at=)`` is a tap on the front panel's request
+  banner (the mock's ``PanelSim.tap(bid, "request")`` calls it, as presence calls the lease
+  service's): ``tapped_at`` on the open request and ``lease.tapped``; never a release.
 """
 
 from __future__ import annotations
@@ -100,6 +103,8 @@ class LeaseRequestSim:
         self.inbox: dict[str, list[dict[str, Any]]] = {}   # bid -> requests for our lease
         self.answers: dict[str, dict[str, dict[str, Any]]] = {}   # bid -> id -> our answer
         self.last_taken: dict[str, dict[str, Any]] = {}    # bid -> {by, reason, at}
+        #: CCR PANEL-1: taps on the front panel's request banner, bid -> id -> (seq, tapped_at)
+        self.taps: dict[str, dict[str, tuple[int, str]]] = {}
         self.revokes: list[dict[str, Any]] = []            # what `lease revoke` would have run
         self.refuse_force = ""
         #: False: no lease.force_available event (the page must find out by reading at zero)
@@ -271,6 +276,41 @@ class LeaseRequestSim:
         self.publish("lease.taken", bid, dict(record))
         return record
 
+    # -- the front panel (CCR PANEL-1, as LeaseService.notify_holder plays it) ------------------------
+
+    def notify_holder(self, bid: str, *, seq: int, at: float) -> dict[str, Any]:
+        """Someone at the board tapped the panel's lease-request banner (decision P2): the
+        open request (the oldest unanswered one: ours, or one for our lease) gets
+        ``tapped_at`` and ``lease.tapped {id, by, at}`` is published once per ``seq``.
+        ``notified`` is True where our lease is held. It never releases, answers, forces or
+        leaves: nothing here touches the lease, the queue or an answer."""
+        with self._lock:
+            hub = self.week.hubs.get(bid)
+            if hub is None:
+                return {"notified": False, "request": None}
+            answers = self.answers.get(bid, {})
+            open_ = [(n["created_at"], n["id"], n["by"]) for n in self.inbox.get(bid, [])
+                     if n["id"] not in answers]
+            req = self.outgoing.get(bid)
+            if req is not None and not req.get("answer"):
+                open_.append((iso(req["created"]), req["id"], me()))
+            if not open_:
+                return {"notified": False, "request": None}      # the banner was stale
+            _, rid, by = min(open_)
+            when = iso(at) if at else iso(time.time())
+            taps = self.taps.setdefault(bid, {})
+            fresh = taps.get(rid, (None, ""))[0] != seq
+            if fresh:
+                taps[rid] = (seq, when)
+            notified = bool((hub.get("lease") or {}).get("mine"))
+        request = {"id": rid, "by": by}
+        if fresh:
+            self.publish("lease.tapped", bid, {**request, "at": when})
+        return {"notified": notified, "request": request}
+
+    def _tapped_at(self, bid: str, rid: str) -> str | None:
+        return self.taps.get(bid, {}).get(rid, (0, None))[1]
+
     # -- the view ----------------------------------------------------------------------------------
 
     def view(self, bid: str) -> dict[str, Any]:
@@ -297,7 +337,8 @@ class LeaseRequestSim:
                 queue = [(n["by"], False) for n in self.inbox.get(bid, [])]
                 answers = self.answers.get(bid, {})
                 out["incoming"] = [{**n, "answer": dict(answers[n["id"]])      # D5
-                                    if n["id"] in answers else None}
+                                    if n["id"] in answers else None,
+                                    "tapped_at": self._tapped_at(bid, n["id"])}  # PANEL-1
                                    for n in self.inbox.get(bid, [])]
             out["queue"] = [{"position": i, "holder": p, "user": _user_host(p)[0], "mine": mine}
                             for i, (p, mine) in enumerate(queue, start=1)]
@@ -312,6 +353,7 @@ class LeaseRequestSim:
                     "answer": {k: a[k] for k in ("answer", "minutes", "message", "at")}
                     if a else None,
                     "force_available": available, "force_reason": why,
+                    "tapped_at": self._tapped_at(bid, req["id"]),              # PANEL-1
                 }
             return out
 
