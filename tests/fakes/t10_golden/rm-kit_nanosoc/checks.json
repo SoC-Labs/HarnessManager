@@ -1,0 +1,18 @@
+[
+ {
+  "code": "timed_group",
+  "hint": "",
+  "reason": "kept out of the false paths: the RM times this group's data against its clock; the shell side owns the pad timing",
+  "severity": "note",
+  "src": "",
+  "subject": "qspi"
+ },
+ {
+  "code": "tied_off",
+  "hint": "",
+  "reason": "not used by this design: tie the outputs to their safe-idle value (the skeleton does)",
+  "severity": "note",
+  "src": "",
+  "subject": "dbgbscan, eth"
+ }
+]

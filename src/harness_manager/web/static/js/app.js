@@ -12,7 +12,7 @@ import { ConsolesSection } from "./sections/consoles.js";
 import { DebugSection } from "./sections/debug.js";
 import { OverviewSection } from "./sections/overview.js";
 import { ClocksSection } from "./sections/clocks.js";
-import { BoardXdcSection } from "./sections/placeholders.js";
+import { BoardXdcSection } from "./sections/xdc.js";
 import { PowerSection } from "./sections/power.js";
 import { ProgramSection } from "./sections/program.js";
 import { SdSection } from "./sections/sd.js";

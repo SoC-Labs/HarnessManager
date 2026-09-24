@@ -70,18 +70,20 @@ class HdlPort:
 
 
 _DIRS = {"input": "in", "output": "out", "inout": "inout"}
-_PORT_DECL = re.compile(
-    r"^\s*(?P<dir>input|output|inout)\b"
-    r"(?:\s+(?:wire|logic|reg|var|signed|unsigned|tri|wand|wor))*"
+_ITEM = re.compile(
+    r"^(?:(?P<dir>input|output|inout)\b)?"
+    r"(?:\s*\b(?:wire|logic|reg|var|signed|unsigned|tri|wand|wor)\b)*"
     r"\s*(?:\[\s*(?P<msb>[^:\]]+?)\s*:\s*(?P<lsb>[^\]]+?)\s*\])?"
-    r"\s*(?P<names>[A-Za-z_][A-Za-z0-9_$]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_$]*)*)"
-    r"\s*,?\s*(?://.*)?$"
-)
+    r"\s*(?P<name>[A-Za-z_][A-Za-z0-9_$]*)\s*$", re.S)
 
 
-def _strip_block_comments(text: str) -> str:
-    # Keep line numbers: replace each comment with the same number of newlines.
-    return re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+def _blank_comments(text: str) -> str:
+    """Comments and preprocessor lines become spaces: offsets (and so line numbers) stay put."""
+    def blank(m: re.Match[str]) -> str:
+        return re.sub(r"[^\n]", " ", m.group(0))
+    text = re.sub(r"/\*.*?\*/", blank, text, flags=re.S)
+    text = re.sub(r"//[^\n]*", blank, text)
+    return re.sub(r"^[ \t]*`[^\n]*", blank, text, flags=re.M)
 
 
 def _eval_bound(expr: str, params: dict[str, int]) -> int:
@@ -95,52 +97,83 @@ def _eval_bound(expr: str, params: dict[str, int]) -> int:
     raise ValueError(f"cannot evaluate the range bound {expr!r}")
 
 
+def _matching(text: str, i: int) -> int:
+    """Index of the ``)`` closing the ``(`` at ``i``."""
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] == "(":
+            depth += 1
+        elif text[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    raise ValueError("unbalanced parentheses in the module header")
+
+
+def _split_top(text: str, base: int) -> list[tuple[int, str]]:
+    """Split at top-level commas: ``[(offset in the whole text, item)]``."""
+    items, depth, cur = [], 0, 0
+    for j, ch in enumerate(text):
+        if ch in "[(":
+            depth += 1
+        elif ch in "])":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            items.append((base + cur, text[cur:j]))
+            cur = j + 1
+    items.append((base + cur, text[cur:]))
+    return items
+
+
 def parse_ansi_ports(text: str, module: str | None = None,
                      params: dict[str, int] | None = None) -> list[HdlPort]:
     """The ports of an ANSI-style (System)Verilog module header.
 
     ``module`` picks one module when the text has several; ``params`` resolves
-    symbolic ranges such as ``[NGPIO-1:0]``. Raises ``ValueError`` when there is no
-    such module or a declaration cannot be read. `ifdef'd ports are all read (the
-    caller decides which build defines apply).
+    symbolic ranges such as ``[NGPIO-1:0]`` (a ``#(parameter N = 16)`` block adds its
+    own). Raises ``ValueError`` when there is no such module or a declaration cannot
+    be read. `ifdef'd ports are all read (the caller decides which defines apply).
     """
     params = dict(params or {})
-    text = _strip_block_comments(text)
-    lines = text.splitlines()
-    start = None
-    for i, line in enumerate(lines):
-        m = re.match(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_$]*)", line)
-        if m and (module is None or m.group(1) == module):
-            start = i
-            break
-    if start is None:
+    clean = _blank_comments(text)
+    rx = rf"\bmodule\s+({re.escape(module) if module else '[A-Za-z_][A-Za-z0-9_$]*'})\b"
+    m = re.search(rx, clean)
+    if not m:
         raise ValueError(f"no module {module!r} in the text" if module else "no module in the text")
-    # parameters declared in a #( ... ) block feed symbolic ranges
+    i = m.end()
+    while i < len(clean) and clean[i].isspace():
+        i += 1
+    if clean.startswith("#", i):
+        po = clean.index("(", i)
+        pc = _matching(clean, po)
+        for pm in re.finditer(r"\bparameter\s+(?:int\s+|integer\s+)?([A-Za-z_][A-Za-z0-9_]*)"
+                              r"\s*=\s*(\d+)", clean[po:pc]):
+            params.setdefault(pm.group(1), int(pm.group(2)))
+        i = pc + 1
+    while i < len(clean) and clean[i].isspace():
+        i += 1
+    if not clean.startswith("(", i):
+        raise ValueError(f"module {m.group(1)}: no port list")
+    close = _matching(clean, i)
     ports: list[HdlPort] = []
-    for i in range(start, len(lines)):
-        raw = lines[i]
-        pm = re.match(r"^\s*(?:parameter|localparam)\s+(?:int\s+|integer\s+)?"
-                      r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+)", raw)
-        if pm and pm.group(1) not in params:
-            params[pm.group(1)] = int(pm.group(2))
-        code = raw.split("//", 1)[0]
-        if i > start and re.search(r"\)\s*;", code) and not re.match(r"^\s*(input|output|inout)\b",
-                                                                     code):
-            break
-        code = re.sub(r"^\s*[,(]\s*", "", code)          # leading-comma style
-        if not re.match(r"^\s*(input|output|inout)\b", code):
+    direction = None
+    for pos, item in _split_top(clean[i + 1:close], i + 1):
+        body = item.strip()
+        if not body:
             continue
-        m = _PORT_DECL.match(code.rstrip().rstrip(")").rstrip(";").rstrip(")"))
-        if not m:
-            raise ValueError(f"line {i + 1}: cannot read the port declaration {raw.strip()!r}")
+        line = clean.count("\n", 0, pos + (len(item) - len(item.lstrip()))) + 1
+        im = _ITEM.match(re.sub(r"\s+", " ", body))
+        if not im:
+            raise ValueError(f"line {line}: cannot read the port declaration {body!r}")
+        if im.group("dir"):
+            direction = _DIRS[im.group("dir")]
+        if direction is None:
+            raise ValueError(f"line {line}: {body!r} has no direction (not an ANSI header)")
         msb = lsb = None
-        if m.group("msb") is not None:
-            msb = _eval_bound(m.group("msb"), params)
-            lsb = _eval_bound(m.group("lsb"), params)
-        for name in re.split(r"\s*,\s*", m.group("names").strip()):
-            ports.append(HdlPort(name, _DIRS[m.group("dir")], msb, lsb, i + 1))
-        if re.search(r"\)\s*;", code):
-            break
+        if im.group("msb") is not None:
+            msb = _eval_bound(im.group("msb"), params)
+            lsb = _eval_bound(im.group("lsb"), params)
+        ports.append(HdlPort(im.group("name"), direction, msb, lsb, line))
     return ports
 
 
@@ -185,6 +218,8 @@ def parse_xdc_pins(text: str) -> tuple[dict[str, XdcPort], list[XdcClock]]:
     prev_rule = False
     for n, line in enumerate(text.splitlines(), 1):
         s = line.strip()
+        if ";#" in s and not s.startswith("#"):
+            s = s.split(";#", 1)[0].rstrip()
         if re.match(r"^#\s*[#=\-]{8,}", s) or re.match(r"^#{8,}", s):
             prev_rule = True
             continue
