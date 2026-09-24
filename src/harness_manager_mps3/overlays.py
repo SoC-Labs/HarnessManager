@@ -28,11 +28,21 @@ Content-store convention (``import_overlay`` writes it; the loader reads it):
   (``clearing``/``partial``), ``rm_id`` and ``static_id``;
 - the manifest is a blob of kind ``"overlay"``, with meta ``static_id``,
   ``rm_name``, ``rm_id``, ``clearing_sha256``, ``partial_sha256`` and, when the
-  manifest has one, ``static_usercode``.
+  manifest has one, ``static_usercode``;
+- two optional files travel with the pair when the overlay has them, each an
+  ``"overlay_payload"`` blob with its own ``role``, listed in the manifest's meta
+  by sha256: the ILA probes file the manifest names in ``ltx`` (role ``ltx``,
+  meta ``ltx_sha256``; checked against ``ltx_crc32`` when the manifest has one)
+  and the build receipt (role ``receipt``, meta ``receipt_sha256``): the file the
+  manifest names in ``build_receipt`` (KIT-GUIDE's pack step), else a
+  ``<rm>_build.json`` or ``receipt.json`` beside the manifest. A store overlay's
+  ``validate()`` re-hashes both, so a damaged copy is caught where the payload
+  CRCs are. An overlay without them is stored and listed exactly as before.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -47,9 +57,10 @@ from pyverify.overlay import (
     OverlayManifest,
     OverlayManifestError,
     OverlayValidationError,
+    compute_crc32,
 )
 
-from harness_manager.core.errors import AbsentError, RefusedError
+from harness_manager.core.errors import AbsentError, HarnessError, RefusedError
 from harness_manager.core.model import Check
 from harness_manager.core.pack import OverlayRef
 
@@ -62,6 +73,11 @@ STORE_KIND = "overlay"
 STORE_PAYLOAD_KIND = "overlay_payload"
 STORE_SOURCE_PREFIX = "store:"
 DEFAULT_IP_CLASS = "unknown"
+ROLE_LTX = "ltx"
+ROLE_RECEIPT = "receipt"
+OPTIONAL_ROLES = (ROLE_LTX, ROLE_RECEIPT)
+#: Where a build receipt is looked for when the manifest names none (DUT_BUILD_GUIDE §3.4).
+RECEIPT_NAMES = ("{rm}_build.json", "receipt.json")
 
 
 def _hex32(value: int) -> str:
@@ -89,10 +105,13 @@ class _StoredOverlay(Overlay):
     """
 
     def __init__(self, directory: Path, manifest: OverlayManifest,
-                 clearing: Path, partial: Path) -> None:
+                 clearing: Path, partial: Path, *, store: Any = None,
+                 optional: Mapping[str, str] | None = None) -> None:
         super().__init__(directory=directory, manifest=manifest)
         self._clearing = clearing
         self._partial = partial
+        self._store = store
+        self.optional_sha256: dict[str, str] = dict(optional or {})   # role -> sha256
 
     def clearing_path(self) -> Path:
         return self._clearing
@@ -100,13 +119,38 @@ class _StoredOverlay(Overlay):
     def partial_path(self) -> Path:
         return self._partial
 
-    # The store does not carry the optional .ltx/_app.bin; do not let validate()
-    # fail on them. The re-attach plan then has no probes file, which is honest.
+    def optional_path(self, role: str) -> Path | None:
+        """Where the store keeps an optional file (``ltx``, ``receipt``); None: not stored."""
+        sha = self.optional_sha256.get(role)
+        if not sha or self._store is None:
+            return None
+        try:
+            return self._store.path(sha)
+        except HarnessError:
+            return None
+
+    # The .ltx is served from the store when it was imported with the pair; an overlay
+    # imported without one (or before the store kept it) has no probes file, which is
+    # honest. The store never carries the _app.bin.
     def ltx_path(self) -> Path | None:
-        return None
+        return self.optional_path(ROLE_LTX)
 
     def fw_path(self) -> Path | None:
         return None
+
+    def validate(self, *, expected_static_id: int | None = None) -> None:
+        """pyverify's checks, plus: each optional file still hashes to the sha it is stored under."""
+        errors: list[str] = []
+        try:
+            super().validate(expected_static_id=expected_static_id)
+        except OverlayValidationError as exc:
+            errors.append(str(exc))
+        for role, sha in sorted(self.optional_sha256.items()):
+            if not _store_verify(self._store, sha):
+                errors.append(f"stored {role} {sha[:12]} is missing or fails its sha256 "
+                              "(re-import the overlay to repair the store copy)")
+        if errors:
+            raise OverlayValidationError("; ".join(errors))
 
 
 # --- loading --------------------------------------------------------------------------
@@ -129,9 +173,12 @@ def load_overlay_dir(directory: Path) -> tuple[Overlay, dict[str, Any]]:
     return Overlay(directory=directory, manifest=manifest), raw
 
 
-def _ref(overlay: Overlay, raw: Mapping[str, Any], source: str) -> OverlayRef:
+def _ref(overlay: Overlay, raw: Mapping[str, Any], source: str,
+         optional: Mapping[str, str] | None = None) -> OverlayRef:
+    """``optional``: role -> sha256 of the optional files (``ltx``, ``receipt``) it carries."""
     m = overlay.manifest
     ip_class = raw.get("ip_class")
+    optional = optional or {}
     return OverlayRef(
         name=m.rm_name,
         rm_id=_hex32(m.rm_id),
@@ -140,7 +187,95 @@ def _ref(overlay: Overlay, raw: Mapping[str, Any], source: str) -> OverlayRef:
         source=source,
         size_bytes=m.clearing.len + m.partial.len,   # bytes pushed, without the 24-byte headers
         ip_class=ip_class if isinstance(ip_class, str) and ip_class else DEFAULT_IP_CLASS,
+        ltx_sha256=optional.get(ROLE_LTX, ""),
+        receipt_sha256=optional.get(ROLE_RECEIPT, ""),
     )
+
+
+# --- the optional files beside the pair (.ltx, build receipt) ---------------------------
+
+
+def _plain_name(name: object) -> bool:
+    """A file name beside the manifest: no directory part, no '.'/'..'."""
+    return isinstance(name, str) and name not in ("", ".", "..") and \
+        Path(name).name == name and "\\" not in name
+
+
+def _named_receipt(raw: Mapping[str, Any]) -> str | None:
+    named = raw.get("build_receipt")
+    return named if isinstance(named, str) and named else None
+
+
+def optional_files(overlay: Overlay, raw: Mapping[str, Any]) -> dict[str, Path]:
+    """The optional files of an overlay DIRECTORY that exist, by role: the ``.ltx`` its
+    manifest names, and its build receipt (``build_receipt``, else ``RECEIPT_NAMES``)."""
+    out: dict[str, Path] = {}
+    directory = Path(overlay.directory)
+    ltx = overlay.manifest.ltx
+    if _plain_name(ltx) and (directory / ltx).is_file():
+        out[ROLE_LTX] = directory / ltx
+    named = _named_receipt(raw)
+    names = [named] if named is not None else [n.format(rm=overlay.manifest.rm_name)
+                                                for n in RECEIPT_NAMES]
+    for name in names:
+        if _plain_name(name) and (directory / name).is_file():
+            out[ROLE_RECEIPT] = directory / name
+            break
+    return out
+
+
+def _optional_problems(overlay: Overlay, raw: Mapping[str, Any]) -> list[str]:
+    """Why the optional files cannot be stored with the pair (pyverify has already
+    refused an ``ltx`` the manifest names but the directory lacks)."""
+    problems: list[str] = []
+    ltx = overlay.manifest.ltx
+    if ltx is not None and not _plain_name(ltx):
+        problems.append(f"ltx {ltx!r} is not a file name beside the manifest")
+    elif ltx is not None and raw.get("ltx_crc32") is not None:
+        path = Path(overlay.directory) / ltx
+        want = _crc_value(raw["ltx_crc32"])
+        have = compute_crc32(path) if path.is_file() else None
+        if want is None:
+            problems.append(f"ltx_crc32 {raw['ltx_crc32']!r} is not a CRC-32")
+        elif have is not None and have != want:
+            problems.append(f"ltx crc32 mismatch: manifest=0x{want:08x} "
+                            f"actual=0x{have:08x} ({path}): a stale probes file")
+    named = _named_receipt(raw)
+    if named is not None and not _plain_name(named):
+        problems.append(f"build_receipt {named!r} is not a file name beside the manifest")
+    elif named is not None and not (Path(overlay.directory) / named).is_file():
+        problems.append(f"build_receipt referenced but missing: {Path(overlay.directory) / named}")
+    return problems
+
+
+def _crc_value(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value & 0xFFFFFFFF
+    try:
+        return int(str(value).strip(), 16) & 0xFFFFFFFF
+    except ValueError:
+        return None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        while chunk := fh.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _store_verify(store: Any, sha: str) -> bool:
+    """The store's own re-hash when it has one (``ContentStore.verify``); else hash the blob."""
+    if store is None:
+        return False
+    verify = getattr(store, "verify", None)
+    try:
+        if callable(verify):
+            return bool(verify(sha))
+        return _sha256_file(store.path(sha)) == sha
+    except (OSError, HarnessError, ValueError):
+        return False
 
 
 def _pair_by_name(manifest: OverlayManifest) -> tuple[Check, str]:
@@ -289,8 +424,10 @@ class OverlayCatalogue:
                     log.warning("skipping overlay %s: %s", manifest_path, exc)
                     continue
                 check, detail = _pair_by_name(overlay.manifest)
-                add(CatalogueEntry(_ref(overlay, raw, str(manifest_path)), overlay, origin,
-                                   check, detail))
+                optional = {role: _sha256_file(p)
+                            for role, p in optional_files(overlay, raw).items()}
+                add(CatalogueEntry(_ref(overlay, raw, str(manifest_path), optional), overlay,
+                                   origin, check, detail))
 
         for entry in self._load_store():
             add(entry)
@@ -316,10 +453,14 @@ class OverlayCatalogue:
             except (OSError, ValueError, OverlayManifestError) as exc:
                 self._rejects[source] = f"store manifest unreadable: {exc}"
                 continue
+            optional = {role: meta[f"{role}_sha256"] for role in OPTIONAL_ROLES
+                        if meta.get(f"{role}_sha256")}
             overlay = _StoredOverlay(store.path(sha).parent, manifest,
-                                     store.path(clearing_sha), store.path(partial_sha))
+                                     store.path(clearing_sha), store.path(partial_sha),
+                                     store=store, optional=optional)
             check, detail = _pair_in_store(store, manifest, clearing_sha, partial_sha)
-            yield CatalogueEntry(_ref(overlay, raw, source), overlay, "store", check, detail)
+            yield CatalogueEntry(_ref(overlay, raw, source, optional), overlay, "store", check,
+                                 detail)
 
 
 def _pair_in_store(store: Any, manifest: OverlayManifest,
@@ -356,7 +497,9 @@ def import_overlay(store: Any, directory: Path) -> str:
     """Validate an overlay directory, then copy it into ``store``. Returns the manifest's sha256.
 
     A corrupt overlay is refused (``RefusedError``). The store never holds a
-    triple that failed its own manifest's length and CRC check.
+    triple that failed its own manifest's length and CRC check, nor an ``.ltx``
+    that fails the manifest's ``ltx_crc32``. The optional ``.ltx`` and build
+    receipt are stored beside the pair (module docstring).
     """
     overlay, raw = load_overlay_dir(Path(directory))
     try:
@@ -364,6 +507,10 @@ def import_overlay(store: Any, directory: Path) -> str:
     except OverlayValidationError as exc:
         raise RefusedError(f"refusing to import {directory}: {exc}",
                            hint="rebuild the overlay or fix its manifest.json") from exc
+    problems = _optional_problems(overlay, raw)
+    if problems:
+        raise RefusedError(f"refusing to import {directory}: {'; '.join(problems)}",
+                           hint="rebuild the overlay or fix its manifest.json")
     m = overlay.manifest
     ids = {"rm_id": _hex32(m.rm_id), "static_id": _hex32(m.static_id)}
     clearing = store.put_file(overlay.clearing_path(), kind=STORE_PAYLOAD_KIND,
@@ -371,6 +518,9 @@ def import_overlay(store: Any, directory: Path) -> str:
     partial = store.put_file(overlay.partial_path(), kind=STORE_PAYLOAD_KIND,
                              meta={"role": "partial", **ids})
     meta = {"rm_name": m.rm_name, "clearing_sha256": clearing, "partial_sha256": partial, **ids}
+    for role, path in sorted(optional_files(overlay, raw).items()):
+        meta[f"{role}_sha256"] = store.put_file(path, kind=STORE_PAYLOAD_KIND,
+                                                meta={"role": role, **ids})
     if m.static_usercode is not None:
         meta["static_usercode"] = _hex32(m.static_usercode)
     data = json.dumps(raw, indent=2, sort_keys=True).encode("utf-8")

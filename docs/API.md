@@ -85,6 +85,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 - `POST /deploy` runs the preflight synchronously. A mismatch returns 409 (code 14 or 15) with `error.data.{overlay, preflight}`, and no job is created. `POST /preflight` returns 200 and includes `refusal` only when it refuses.
 - `overlay` in a request body may be a name, an `rm_id`, or the OverlayRef object itself.
 - `GET /boards/{bid}/overlays` also returns `overlays` (all of them, including blocked ones).
+- An OverlayRef also carries `ltx_sha256` and `receipt_sha256`: the sha256 of the ILA probes file and of the build receipt that travel with the pair, or `""` when the overlay has none (additive; the content store keeps both, `harness_manager_mps3/overlays.py`).
 - Board ids are percent-encoded, including `/`.
 - **Console WebSocket frames:**
   - The first frame is text: `{"state","name","detail"}`.

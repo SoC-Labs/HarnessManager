@@ -284,6 +284,29 @@ def test_overlays_lists_both_kinds(pushes: VirtualMps3, tmp_path: Path, capsys):
     assert [o["name"] for o in obj["incompatible"]] == ["alien"]
 
 
+def test_overlays_shows_the_ltx_and_the_receipt_an_overlay_carries(pushes, tmp_path, capsys):
+    import hashlib
+
+    d = make_overlay(tmp_path / "ov", "synth")
+    (d / "synth.ltx").write_bytes(b'{"probes": []}')
+    (d / "synth_build.json").write_bytes(b'{"state": "passed"}')
+    m = json.loads((d / "manifest.json").read_text())
+    (d / "manifest.json").write_text(json.dumps({**m, "ltx": "synth.ltx"}))
+    make_overlay(tmp_path / "ov", "plain", rm_id=0x0100_7A58)
+    rc, out, _ = run(capsys, "--json", "overlays", pushes.shell_endpoint,
+                     "--overlay-dir", str(tmp_path / "ov"))
+    by_name = {o["name"]: o for o in json.loads(out)["compatible"]}
+    assert rc == 0
+    assert by_name["synth"]["ltx_sha256"] == hashlib.sha256(b'{"probes": []}').hexdigest()
+    assert by_name["synth"]["receipt_sha256"] == hashlib.sha256(b'{"state": "passed"}').hexdigest()
+    assert by_name["plain"]["ltx_sha256"] == "" == by_name["plain"]["receipt_sha256"]   # twin
+    rc, out, _ = run(capsys, "overlays", pushes.shell_endpoint, "--overlay-dir",
+                     str(tmp_path / "ov"))
+    lines = {ln.split()[1]: ln for ln in out.splitlines() if ln.startswith("ok")}
+    assert lines["synth"].endswith("(unknown, ltx, receipt)")
+    assert lines["plain"].endswith("(unknown)")                                        # twin
+
+
 def test_overlay_dir_that_does_not_exist_is_absent(pushes: VirtualMps3, tmp_path, capsys):
     rc, _, _ = run(capsys, "overlays", pushes.shell_endpoint, "--overlay-dir",
                    str(tmp_path / "nope"))

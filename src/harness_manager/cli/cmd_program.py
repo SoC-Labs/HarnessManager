@@ -56,7 +56,9 @@ def cmd_overlays(ctx: Ctx) -> int:
     for o in loadable:
         rows.append([cand.board_id, o.name, "compatible", o.rm_id, o.static_id, o.size_bytes,
                      o.ip_class, ""])
-        human.append(f"ok         {o.name:<20} {o.rm_id}  ({o.ip_class})")
+        carries = [role for role, sha in (("ltx", o.ltx_sha256), ("receipt", o.receipt_sha256))
+                   if sha]
+        human.append(f"ok         {o.name:<20} {o.rm_id}  ({', '.join([o.ip_class, *carries])})")
     for name, why in sorted(refused.items()):
         rows.append([cand.board_id, name, "incompatible", "", "", "", "", why])
         human.append(f"cannot     {name:<20} {why}")

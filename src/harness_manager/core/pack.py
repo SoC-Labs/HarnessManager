@@ -54,6 +54,9 @@ class OverlayRef:
     source: str = ""          # manifest path or content-store key
     size_bytes: int = 0
     ip_class: str = "unknown"  # "open" | "arm-aaa" | "unknown"
+    # Optional files that travel with the pair (additive; "" = the overlay has none):
+    ltx_sha256: str = ""      # the ILA probes file (<rm>.ltx), by its sha256
+    receipt_sha256: str = ""  # the build receipt (<rm>_build.json), by its sha256
 
 
 @dataclass(frozen=True)
