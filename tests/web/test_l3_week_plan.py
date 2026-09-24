@@ -9,6 +9,7 @@ have landed. Each behaviour has its negative twin.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 import zipfile
@@ -552,6 +553,108 @@ def test_a_queued_lease_holds_the_board_and_can_be_cancelled(page_factory, daemo
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to alice@lab-pc-07")
     expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("not armed")
     assert not engine.called("resets.reset")
+
+
+BOARDS_LIST = re.compile(r"/api/v1/boards(\?[^/]*)?$")
+
+
+def page_state(page):
+    return page.evaluate("window.__harness_managerState()")
+
+
+@pytest.mark.week_plan("hub_api", sim=True)
+def test_a_boards_list_asked_before_a_job_started_does_not_end_it(page_factory, daemon):
+    # Q1 2026-09-24: the queued-lease test above failed 2 runs in 30 with the lease queued
+    # and the reset saying "not armed". The GET /boards that follows session.opened was
+    # asked before the lease job started and answered after it; the page read its "no job"
+    # as a job.done it had missed, ended the live job, and never let it back.
+    sim_of(daemon).behind_hub(BOARD_USB, lease="other")
+    page = page_factory(**APP)
+    rail(page, BOARD_USB).wait_for(timeout=T)            # the first list is in
+    stale = []
+
+    def hold(route):
+        if route.request.method != "GET" or stale:
+            route.continue_()
+            return
+        response = route.fetch()                          # answered now, before the job
+        row = next((r for r in response.json()["boards"] if r["board_id"] == BOARD_USB), {})
+        if row.get("open") and not row.get("job"):
+            stale.append((route, response))               # held: it lands after the job
+        else:
+            route.fulfill(response=response)              # a list from before the open
+
+    page.route(BOARDS_LIST, hold)
+    open_board(page, BOARD_USB)                           # session.opened: the list again
+    deadline = time.monotonic() + 10
+    while not stale and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    assert stale, "the page did not ask for the boards list after the board opened"
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
+    expect(page.locator('[data-testid="lease-queued"]')).to_be_visible(timeout=T)
+    tile = page.locator('[data-testid="tile-board"]')
+    reason = tile.locator('[data-testid="reason-reset_dut"]')
+    expect(reason).to_contain_text("waiting for the hub lease", timeout=T)
+    route, response = stale[0]
+    body = response.json()
+    rows = [r for r in body["boards"] if r["board_id"] == BOARD_USB]
+    assert rows and rows[0].get("open") and not rows[0].get("job")   # really the stale list
+    rows[0]["q1_stale"] = True                            # a marker: this list has landed
+    route.fulfill(response=response, json=body)
+    page.unroute(BOARDS_LIST)
+    page.wait_for_function(
+        f"() => (window.__harness_managerState().boards[{BOARD_USB!r}] || {{}}).q1_stale",
+        timeout=T)
+    assert page_state(page)["jobs"][BOARD_USB] is not None
+    expect(reason).to_contain_text("waiting for the hub lease")
+
+
+@pytest.mark.week_plan("hub_api", sim=True)
+def test_negative_twin_a_newer_list_ends_a_job_whose_end_the_page_missed(page_factory, daemon):
+    # The recovery the guard above must keep: the job ends while the page hears nothing
+    # (job.done dropped, GET /jobs/{id} unanswered); the next list ends it.
+    sim_of(daemon).behind_hub(BOARD_USB, lease="other")
+    page = page_factory(**APP)
+    missed = {"on": False, "dropped": []}
+    sockets = []
+
+    def relay(ws):
+        server = ws.connect_to_server()
+
+        def from_server(message):
+            try:
+                topic = json.loads(message).get("topic", "")
+            except (TypeError, ValueError):
+                topic = ""
+            if missed["on"] and topic in ("job.done", "job.failed"):
+                missed["dropped"].append(topic)
+                return
+            ws.send(message)
+
+        server.on_message(from_server)
+        sockets.append(ws)
+
+    page.route_web_socket(re.compile(r"/api/v1/events"), relay)
+    page.route(re.compile(r"/api/v1/jobs/"),
+               lambda route: route.abort() if missed["on"] else route.continue_())
+    page.reload()
+    open_board(page, BOARD_USB)
+    assert sockets, "the events socket did not go through the relay"
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
+    expect(page.locator('[data-testid="lease-queued"]')).to_be_visible(timeout=T)
+    reason = page.locator('[data-testid="tile-board"] [data-testid="reason-reset_dut"]')
+    expect(reason).to_contain_text("waiting for the hub lease", timeout=T)
+    missed["on"] = True
+    page.locator('[data-testid="fact-hub"] [data-action="lease_cancel"]').click()
+    deadline = time.monotonic() + 10
+    while not missed["dropped"] and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    assert missed["dropped"], "the job's end never came, so there was nothing to miss"
+    expect(reason).to_contain_text("waiting for the hub lease")    # the page missed it
+    sockets[-1].send(json.dumps({"topic": "events.dropped", "board_id": "",
+                                 "data": {"dropped": 1}, "at": time.time()}))
+    expect(reason).to_contain_text("not armed", timeout=T)         # the list ended it
+    assert page_state(page)["jobs"][BOARD_USB] is None
 
 
 @pytest.mark.week_plan("hub_api", sim=True)

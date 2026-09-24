@@ -228,6 +228,7 @@ function mergeBoards(rows) {
 }
 
 export async function loadBoards() {
+  const asked = Date.now();
   const r = await timed("boards", () => call("boards"));
   if (r.error) return r;
   const rows = r.data.data.boards || [];
@@ -239,8 +240,12 @@ export async function loadBoards() {
   mergeBoards(rows);
   for (const row of rows) {
     if (row.job) setJob(row.board_id, row.job, null);
-    else if (S.board[row.board_id] && S.board[row.board_id].job && row.open) {
+    else if (S.board[row.board_id] && S.board[row.board_id].job && row.open
+             && S.board[row.board_id].job.at < asked) {
       // The list says no job: one we missed the end of (the event socket was down).
+      // Only for a job known before this list was asked for: one that started while the
+      // request was in flight is newer than the list, and ending it here would free a
+      // board its job still holds, for good (endedJobs never lets it back).
       jobEnded(row.board_id, S.board[row.board_id].job.id);
     }
     if (row.open) openedBoard(row.board_id, { quiet: true });
@@ -615,8 +620,12 @@ export async function start() {
     setCapabilityTitles(p.data.data.capabilities);
   }
   const r = await loadBoards();
-  if (saved && S.boards[saved]) select(saved);
-  else if (S.order.length) select(S.order[0]);
+  // A board clicked while this list loaded stays selected: the event socket's own read
+  // can draw the rail first, and selecting here would switch the user's pick back.
+  if (!S.selected) {
+    if (saved && S.boards[saved]) select(saved);
+    else if (S.order.length) select(S.order[0]);
+  }
   if (!r.error && !S.order.length) probe();
   // Holders change under us (other users, the CLI): re-read the list now and then.
   setInterval(() => { if (document.visibilityState === "visible") loadBoards(); }, 15000);
