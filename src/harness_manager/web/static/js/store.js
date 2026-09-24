@@ -219,10 +219,25 @@ export async function timed(what, fn) {
 
 // --- boards --------------------------------------------------------------------------------
 
-function mergeBoards(rows) {
+// This page opened or closed the board after a list was asked for: that list is older
+// than what the page knows, and its "open" must not undo the click. A list asked before
+// Open and answered after it put a just-opened board back to its preview (the Shell fact
+// never came: FLAKE 2026-09-24); only the next list, if any, brought it back.
+export function openedOrClosedHere(bid, open) {
+  S.boards[bid] = { ...S.boards[bid], open, openChangedAt: Date.now() };
+}
+
+function newerHere(bid, asked) {
+  const at = S.boards[bid] && S.boards[bid].openChangedAt;
+  return asked !== null && !!at && at >= asked;
+}
+
+function mergeBoards(rows, asked = null) {
   for (const row of rows) {
     const prev = S.boards[row.board_id] || {};
-    S.boards[row.board_id] = { ...prev, ...row };
+    const next = { ...prev, ...row };
+    if (newerHere(row.board_id, asked)) next.open = prev.open;
+    S.boards[row.board_id] = next;
     if (!S.order.includes(row.board_id)) S.order.push(row.board_id);
   }
 }
@@ -235,9 +250,9 @@ export async function loadBoards() {
   const seen = new Set(rows.map((b) => b.board_id));
   for (const bid of Object.keys(S.boards)) {
     // A board this page knows but the daemon no longer lists stays, marked not open.
-    if (!seen.has(bid)) S.boards[bid] = { ...S.boards[bid], open: false };
+    if (!seen.has(bid) && !newerHere(bid, asked)) S.boards[bid] = { ...S.boards[bid], open: false };
   }
-  mergeBoards(rows);
+  mergeBoards(rows, asked);
   for (const row of rows) {
     if (row.job) setJob(row.board_id, row.job, null);
     else if (S.board[row.board_id] && S.board[row.board_id].job && row.open
@@ -248,7 +263,7 @@ export async function loadBoards() {
       // board its job still holds, for good (endedJobs never lets it back).
       jobEnded(row.board_id, S.board[row.board_id].job.id);
     }
-    if (row.open) openedBoard(row.board_id, { quiet: true });
+    if (S.boards[row.board_id].open) openedBoard(row.board_id, { quiet: true });
   }
   changed();
   return r;

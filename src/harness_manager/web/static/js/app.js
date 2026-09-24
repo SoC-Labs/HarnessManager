@@ -19,8 +19,8 @@ import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
 import { HubFact } from "./hub.js";
 import {
-  boardState, changed, jobLabel, log, openedBoard, probe, refreshInfo, S, sectionOf, select,
-  setSection, start, subscribe, timed, UI_NOTE,
+  boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, S,
+  sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
 import { CheckChip, Chip, Icon, LinkLine, Reason, Seg, Spinner } from "./ui.js";
@@ -178,7 +178,8 @@ function BoardHeader({ bid }) {
     const r = await timed(`close ${bid}`, () => call("closeBoard", { bid }));
     log(r.error ? "error" : "info", "session", r.error ? `${r.line}  ${r.error.message}` : r.line, bid);
     if (!r.error) {
-      S.boards[bid] = { ...S.boards[bid], open: false, holder: null };
+      openedOrClosedHere(bid, false);
+      S.boards[bid].holder = null;
       closeBoardConsoles(bid);
       delete S.board[bid];
     }
@@ -248,7 +249,7 @@ function BoardPreview({ bid }) {
       changed();
       return;
     }
-    S.boards[bid] = { ...S.boards[bid], open: true };
+    openedOrClosedHere(bid, true);
     const b = boardState(bid);
     const d = r.data ? r.data.data : {};
     if (d.info) {

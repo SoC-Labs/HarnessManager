@@ -617,7 +617,7 @@ def test_negative_twin_a_newer_list_ends_a_job_whose_end_the_page_missed(page_fa
     # (job.done dropped, GET /jobs/{id} unanswered); the next list ends it.
     sim_of(daemon).behind_hub(BOARD_USB, lease="other")
     page = page_factory(**APP)
-    missed = {"on": False, "dropped": []}
+    missed = {"on": False, "quiet": True, "dropped": []}
     sockets = []
 
     def relay(ws):
@@ -639,6 +639,11 @@ def test_negative_twin_a_newer_list_ends_a_job_whose_end_the_page_missed(page_fa
     page.route_web_socket(re.compile(r"/api/v1/events"), relay)
     page.route(re.compile(r"/api/v1/jobs/"),
                lambda route: route.abort() if missed["on"] else route.continue_())
+    # Nor a list until the test sends events.dropped: the page re-reads the list every 15 s
+    # (and on a socket reconnect), and on a loaded machine that list landed between the
+    # cancel and the check below and ended the job first (FLAKE 2026-09-24).
+    page.route(BOARDS_LIST, lambda route: route.abort() if missed["on"] and missed["quiet"]
+               and route.request.method == "GET" else route.continue_())
     page.reload()
     open_board(page, BOARD_USB)
     assert sockets, "the events socket did not go through the relay"
@@ -653,10 +658,100 @@ def test_negative_twin_a_newer_list_ends_a_job_whose_end_the_page_missed(page_fa
         page.wait_for_timeout(50)
     assert missed["dropped"], "the job's end never came, so there was nothing to miss"
     expect(reason).to_contain_text("waiting for the hub lease")    # the page missed it
+    missed["quiet"] = False
     sockets[-1].send(json.dumps({"topic": "events.dropped", "board_id": "",
                                  "data": {"dropped": 1}, "at": time.time()}))
     expect(reason).to_contain_text("not armed", timeout=T)         # the list ended it
     assert page_state(page)["jobs"][BOARD_USB] is None
+
+
+DROPPED = json.dumps({"topic": "events.dropped", "board_id": "", "data": {"dropped": 1}})
+
+
+def relay_events(page, drop=lambda topic: False):
+    """The page's event socket through a relay: ``drop(topic)`` hides an event from it.
+    Returns the relayed sockets (the last one is the page's live socket)."""
+    sockets = []
+
+    def relay(ws):
+        server = ws.connect_to_server()
+
+        def from_server(message):
+            try:
+                topic = json.loads(message).get("topic", "")
+            except (TypeError, ValueError):
+                topic = ""
+            if not drop(topic):
+                ws.send(message)
+
+        server.on_message(from_server)
+        sockets.append(ws)
+
+    page.route_web_socket(re.compile(r"/api/v1/events"), relay)
+    return sockets
+
+
+@pytest.mark.week_plan()
+def test_a_boards_list_asked_before_the_open_does_not_close_the_board(page_factory, daemon):
+    # FLAKE 2026-09-24: the list-before-a-job test above timed out on CI waiting for the
+    # Shell fact. A list in flight when Open was clicked (the start-up read, say) was
+    # answered after the open: its "open: false" put the board back to its preview, and
+    # the list session.opened asks for (the one that test holds) was all that would have
+    # brought it back.
+    page = page_factory(**APP)
+    sockets = relay_events(page)
+    page.reload()
+    rail(page, BOARD_USB).wait_for(timeout=T)
+    held, released = [], []
+
+    def hold(route):
+        if route.request.method != "GET" or released:
+            route.continue_()
+        elif not held:
+            held.append((route, route.fetch()))         # answered now, before the open
+        else:
+            held.append((route, None))                  # newer lists wait until it landed
+
+    page.route(BOARDS_LIST, hold)
+    sockets[-1].send(DROPPED)                           # the page asks for the list now
+    deadline = time.monotonic() + 10
+    while not held and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    assert held, "the page did not ask for the boards list"
+    route, response = held[0]
+    body = response.json()
+    rows = [r for r in body["boards"] if r["board_id"] == BOARD_USB]
+    assert rows and not rows[0].get("open")             # really a list from before the open
+    open_board(page, BOARD_USB)
+    rows[0]["flake_stale"] = True                       # a marker: this list has landed
+    route.fulfill(response=response, json=body)
+    page.wait_for_function(
+        f"() => (window.__harness_managerState().boards[{BOARD_USB!r}] || {{}}).flake_stale",
+        timeout=T)
+    assert page_state(page)["boards"][BOARD_USB]["open"]
+    expect(page.locator('[data-testid="fact-shell"]')).to_contain_text(re.compile(r"0x[0-9a-f]{8}"))
+    released.append(True)
+    for later, _ in held[1:]:
+        later.continue_()
+    page.unroute(BOARDS_LIST)
+
+
+@pytest.mark.week_plan()
+def test_negative_twin_a_list_asked_after_the_board_closed_elsewhere_closes_it(
+        page_factory, daemon, engine):
+    # The guard above keeps only what this page did after the list was asked: a board the
+    # CLI closed (the page heard nothing of it) is closed by the next list.
+    page = page_factory(**APP)
+    sockets = relay_events(page, drop=lambda topic: topic.startswith("session."))
+    page.reload()
+    open_board(page, BOARD_USB)
+    info = re.compile(r"/api/v1/boards/[^/?]+$")        # only the list may tell the page
+    page.route(info, lambda route: route.abort() if route.request.method == "GET"
+               else route.continue_())
+    engine.close(BOARD_USB)
+    sockets[-1].send(DROPPED)
+    expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
+    assert not page_state(page)["boards"][BOARD_USB]["open"]
 
 
 @pytest.mark.week_plan("hub_api", sim=True)
