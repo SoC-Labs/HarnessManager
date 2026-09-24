@@ -2,14 +2,17 @@
 
 **Lane:** KIT-GUIDE (design only; nothing here is wired into Harness Manager yet).
 **Sister lanes:** KIT-STORE owns where the static DCP lives and how it is fetched ("kit fetch"). XVC owns live debug and serving the `.ltx`. T10 owns the XDC kit.
-**Status:** 2026-09-24. Spike (b) (the board-free partial validator) is done and tested. The Tcl template has been smoke-run in Vivado 2024.1 (see §9).
+**Status:** 2026-09-24, against HM main 595d359.
+- Spike (b), the board-free partial validator, is done and tested.
+- The generated Tcl ran **end to end** in Vivado 2024.1 against the fielded static: 24 gates passed, `pr_verify` was compatible, and the receipt was packed into HM's catalogue (§9).
+- KIT-STORE's companion design is `../hm-kit-store/docs/design/DUT_BUILD_KIT_STORAGE.md` (commit 008e0b1).
 
 david asked: "how we should provide xdc's and the dcp used for building the DUT bitstream from harness manager? … Can we include instructions from within harness manager to help with this?"
 
 ## 0. Recommendation
 
 - **Put a "Build" section before "Program" on every board.** It walks a lab user from "I have RTL" to "it runs on mps3-01 and I can debug it". It has six step cards, and Harness Manager (HM) works out each card's state.
-- **Make the instructions runnable.** HM generates one Vivado Tcl script, `build_rm.tcl`, per (board pack, static, Vivado version, design). Every step in the guide is a stage in that script, and every check is a gate that prints `HM_GATE <name> PASS|FAIL`. The script writes a **build receipt** (`<rm>_build.json`) that HM reads back.
+- **Make the instructions runnable, per static and per Vivado release.** HM generates one Vivado Tcl script, `build_rm.tcl`, per (board pack, static, Vivado version, design). Nothing is "always 2024.1": the fielded bare-metal static 0x72BB0A36 needs 2024.1, and mint 3 (the Linux harness) needs 2026.1. The release is a fact of the kit. Every step in the guide is a stage in that script, and every check is a gate that prints `HM_GATE <name> PASS|FAIL`. The script writes a **build receipt** (`<rm>_build.json`) that HM reads back.
 - **Bind the partial to the static with the receipt, not the bitstream.** A static is identified by the CRC-32 of its locked DCP (that CRC *is* the static_id). The script re-computes that CRC from the file it actually opens, runs `pr_verify` against it, and records both in the receipt.
 - **What the partial can prove with no Vivado and no board.** HM validates the partial pair itself: right device, right SLR, right partition frames, partial and clearing not swapped, and no device-global writes. The spike showed this works, and that it cannot tell one static from another.
 - **The DCP question.** The static DCP never needs to reach an SD card or be "served into" Vivado. Vivado opens only local files. So HM fetches the kit to the machine that runs Vivado (KIT-STORE's `kit fetch`), and proves the file is the board's static before any Vivado time is spent.
@@ -24,17 +27,26 @@ david asked: "how we should provide xdc's and the dcp used for building the DUT 
 
 ## 1. The journey
 
-### 1.1 Prerequisites (for the fielded static 0x72BB0A36)
+### 1.1 Prerequisites
+
+Every row is a fact of **the kit for one static** (KIT-STORE's `kit.json`: `vivado.release`, `part`, `rp.*`). The guide and the script read them from there and never hard-code them. Today there are two:
+
+| Static | Harness | Vivado | Partition | Kit |
+|---|---|---|---|---|
+| `0x72BB0A36` (fielded 2026-09-24) | bare-metal MicroBlaze | **2024.1** | `u_rp_dut` / `pblock_rp_dut`, 47 ports / 148 bits | ≈ 10.2 MB |
+| mint 3 (RC2, not yet minted) | MicroBlaze V Linux | **2026.1** (INTEG) | the same boundary, unchanged for RC2 (47 / 148) | ≈ 38 MB (KIT-STORE §2.1) |
+
+The rest of this table is for 0x72BB0A36:
 
 | What | Value | Source / how HM knows |
 |---|---|---|
-| Vivado | **exactly 2024.1**. The Linux harness (mint 3) will need 2026.1. | A routed DCP opens only in the release that wrote it (2026.1 DCPs do not open in 2024.1). The kit records it; `static_stamp.json` and the `.bit` header say `Version=2024.1`. |
+| Vivado | **exactly the kit's release**: 2024.1 for this static | A routed DCP opens only in the release that wrote it. 2024.1 refuses a 2026.1 DCP with `[Runs 36-378]` (KIT-STORE spike). The kit records the release; the `.bit` header says `Version=2024.1`. |
 | Part | `xcku115-flvb1760-1-c` | `build_dfx.tcl:78`; the partial's `.bit` header |
 | Licence | A licence that covers the KU115, which is probably Vivado ML **Enterprise** (the lab's floating server). DFX itself needs no separate licence in 2024.1. | Not detectable without running synth: the failure is `[Common 17-345] A valid license was not found`. The guide shows this as *unchecked*, and the script's `part_installed` gate only proves the device files exist. **Verify** that KU115 is outside the free ML Standard list. |
 | OS | Linux or Windows (the script uses no `exec`, no python and no shell) | template design |
-| RAM | ~3 GB to open the static and link it (KIT-STORE's measurement: `open_checkpoint` peak 2.78 GB, 57 s). Plan for 8 GB for a nanoSoC-sized RM. | KIT-STORE spike log; mint timings |
+| RAM | **Measured: 4.0 GB peak** for a small RM, end to end (the spike: 3.0 GB at synth, 3.6 at opt, 4.4 GB reported by Vivado at route). Plan for 8 GB for a nanoSoC-sized RM. | §9; KIT-STORE (open_checkpoint 2.8 GB, 57 s) |
 | Disk | The kit is ~10 MB (`static_routed_locked.dcp` 10,152,801 B). It needs no second, reference DCP (§3.3). One build writes 20–40 MB. The Vivado install with UltraScale is tens of GB. | `fielded/0x72BB0A36/mint.json` |
-| Time | 10–20 min per small RM, and ~20 min for nanoSoC, at the mint's thread count on this box | `mint.json` routed-DCP timestamps (greybox 13:55, regdemo_a 14:10, regdemo_b 14:23, led 14:35) |
+| Time | **Measured: 17 min 41 s** for a small RM with 2 threads on a box at load 70 (place 4 min, route 8 min). The mint took ~10–20 min per RM (and ~20 min for nanoSoC) at its own thread count. | §9; `mint.json` routed-DCP timestamps |
 
 ### 1.2 The steps
 
@@ -66,6 +78,7 @@ Each trap below cites where the platform documents it. The last column says whic
 | **A clearing bigger than the 256 KiB arena** is staged to QSPI, and the next swap-away fails closed | HM `harness_manager_mps3/deploy.py` (d); `firmware/platform/Makefile` | `clearing_fits`, in the script and again in `kit check` |
 | **Loading a partial onto a different static implementation destroys the FPGA configuration** (twice on 2026-07-24), and `static_id` alone cannot see it | `fpga/dfx/gen_manifest.py:188-199` | receipt `static_id` (CRC of the opened DCP) + `pr_verify`; deploy preflight (f) USERCODE when JTAG is present |
 | **Vivado exits 0 after a Tcl error** | `tools/debug_probes.tcl:17`; the Makefile greps markers | markers: `HM_RM_BUILD_COMPLETE` / `HM_RM_BUILD_FAILED gate=…`. The receipt's `state` is the verdict. |
+| **The Vivado log echoes the sourced script**, so an unanchored grep for a marker matches the script's own `puts` line (the spike's first wait loop ended at once, on log line 68: `#   puts "HM_RM_BUILD_FAILED gate=$name"`) | spike, this lane | HM parses `^HM_…` at line start only, and prefers the receipt over the log |
 | **Vivado's python breaks `exec python3`** | `build_dfx.tcl:442-457` | the script has no `exec` |
 | **Generated SoC RTL drifts, or regeneration wipes edits** (nanoSoC's `nanosoc.sv`, patched at build time) | `fpga/rp/nanosoc/ooc_synth.tcl:38-47` | not gateable. The receipt should carry the sha256 of each source (CCR KG-6), and the guide's troubleshooting says "edit the generator's template, not its output". |
 | **The docs lag the boundary** (the guide says 35 ports; it is 47) | `adding-an-rm.md:22,146` vs `boundary.yaml` | HM's boundary comes from the pin model, which T10's generator derives from `boundary.yaml` and holds to the fielded hashes |
@@ -101,6 +114,7 @@ The partial bitstream cannot carry this binding itself: every `-cell` write says
 - **Overrides.** Any parameter can be overridden with `-tclargs NAME=VALUE`, so `kit build` does not need to re-render.
 - **Six stages:** preflight → synth → link → impl → verify → bitstream. `STOP_AFTER` ends the run early; this is how the guide's "Check my wrapper in Vivado" button runs synth only.
 - **Every gate prints `HM_GATE`, and a failure writes the receipt before it errors.** A failed build still tells HM which gate failed.
+- **Any other Tcl error becomes the gate `tcl_error`.** The stages run inside one `catch`, so a Vivado command that refuses its arguments still ends the build with `HM_RM_BUILD_FAILED gate=tcl_error` and a `failed` receipt. The spike's first full run needed this: `report_utilization -pblocks [get_pblocks -of_objects u_rp_dut]` returned no pblock in the locked static, and the run died after routing with no verdict. The pblock now comes from the kit (`RP_PBLOCK`), and the routed checkpoint is written before any report.
 - **It needs nothing but Vivado.** There is no `rm_list.tcl`, no Makefile, no python and no platform checkout.
 
 ### 3.2 Stages, gates and where each comes from
@@ -112,7 +126,8 @@ The partial bitstream cannot carry this binding itself: every `-cell` write says
 | link | `rp_cell`, **`rp_pins_link`**, `clocks_after_link`, **`drc_hdpr_link`** | `build_dfx.tcl:224-244` (open the static, black-box a stub, `read_checkpoint -cell`); `:250-256`; `:279-283`; `:341-349` (`read_xdc -cell` for RM-internal timing); `:386` (`PERSIST NO`); `:390-395` + `check_hdpr_reports.py` |
 | impl | `rp_pins_opt`, `drc_routed`, **`rm_timing`** (worst setup/hold over paths that start or end in the RP) | `build_dfx.tcl:397-408`; `debug_probes.tcl:147-165` |
 | verify | **`pr_verify`** (parses "are compatible") | `build_dfx.tcl:551` (incremental add), `:739`; the report format in `prod_results_2026-07-06-realshell/pr_verify_rm_led.rpt` |
-| bitstream | `ltx_written`, `artefact` ×4, **`clearing_fits`** | `build_dfx.tcl:555` (`write_bitstream -force -bin_file -cell`), `:559-566`; `debug_probes.tcl:63-120` (`write_debug_probes -cell`, delete `_clear.ltx`) |
+| bitstream | `ltx_written`, `artefact` ×4, **`clearing_fits`** |
+| any | `tcl_error`: any Tcl error that is not a gate (all stages run inside one `catch`) | `build_dfx.tcl:555` (`write_bitstream -force -bin_file -cell`), `:559-566`; `debug_probes.tcl:63-120` (`write_debug_probes -cell`, delete `_clear.ltx`) |
 
 **What a DUT build is.** It is the platform's *incremental add* (`build_dfx.tcl:518-603`, `make add-rm-%` at `Makefile:524-560`): link one RM into the already-locked static, route only the RM, `pr_verify` it, and write the pair. static_id is read, never re-minted. The template is that path, taken out of the mint machinery.
 
@@ -189,9 +204,9 @@ States are `done` · `next` · `blocked` · `failed` · `unchecked`, driven only
 
 | Card | done when | blocked / failed shows |
 |---|---|---|
-| 1 Target | the board reported `shell_id` and a kit exists for it | "no kit for 0x… (Vivado …)": ask the lab, or pick a static that has one |
+| 1 Target | the board reported `shell_id` and a kit exists for it (KIT-STORE `kit info`) | "no kit for 0x… (Vivado …)": ask the lab, or pick a static that has one |
 | 2 Tools | `vivado -version` = the kit's version (CLI/local daemon only) | the version found and the one needed. The licence is always shown *unchecked*, with the error text to watch for. |
-| 3 Kit | the kit is fetched and its CRC == static_id | "the file is not this static": re-fetch (KIT-STORE) |
+| 3 Kit | the kit is fetched and its CRC == static_id (KIT-STORE's "Build kit" card: Fetch, Download zip, Copy Vivado command) | "the file is not this static": re-fetch (KIT-STORE) |
 | 4 Wrapper & XDC | the design passes every XDC-kit check with its `wrapper` | the first failing check, with its hint (T10's findings) |
 | 5 Build | a receipt with `state: passed` exists in the chosen out dir | `failed`: the gate, its detail and the troubleshooting card below. `stopped`: "finish the build" |
 | 6 Check & add | `kit check` passes and the overlay is in the store (it shows in Program) | the failing check. `unchecked` rows stay listed. |
@@ -303,7 +318,7 @@ A board pack opts in with one hook, `pack.dut_build_profile(static_id) -> BuildP
 | KG-1 | lead (`core.pack`) | `BuildProfile` and the optional `dut_build_profile` hook |
 | KG-2 | T10 (`cmd_xdc` wiring, in flight) | `xdc rm-kit` gains `--wrapper FILE`, so the check can run on a user's own wrapper from the CLI. The service already supports `wrapper` (verified on the spike RM and on a negative case). |
 | KG-3 | T2 (`overlays.py`) | `import_overlay` stores the `.ltx` and the receipt next to the pair. Today the store drops the `.ltx` (`_StoredOverlay.ltx_path` returns None), so a user's ILA build loses its probes on import (XVC lane). |
-| KG-4 | KIT-STORE | the kit contract the guide needs: `static_routed_locked.dcp` (+ optional reference routed DCP), `static_id`, `static_usercode`, Vivado version, part, `rp_inst`, the greybox partial + clearing `.bin` (1.3 MB, for §4), a `kit.json` with sha256s |
+| KG-4 | KIT-STORE (`kit.json` v1, its §8) | Every template parameter maps onto a field that already exists: `part`, `static_id`, `static_usercode`, `vivado.release`, `rp.inst`, `rp.pblock`, `rp.bits`, `pr_verify_ref`, and `files[role=locked_static]`. **Add** `rp.clr_max`, and `rp.frames`: the §4 facts (`idcode`, the frame box per block type, and the partial and clearing command vocabularies). `partial_check` computes these from the mint's greybox pair when the kit is packed, so HM does not have to ship a 1.3 MB reference partial. |
 | KG-5 | lead (`web/app.js` SECTIONS) | the Build section between XDC and Program |
 | KG-6 | this lane (template v2) | the receipt records the sha256 of each RM source and the synth-time warning counts (e.g. `[Synth 8-3848]` net has no driver, which is how the nanoSoC exp_* bug showed: `fpga/rp/nanosoc/ooc_synth.tcl:28-35`) |
 
@@ -324,6 +339,11 @@ A board pack opts in with one hook, `pack.dut_build_profile(static_id) -> BuildP
 2. Users register in the platform's `rm_list.tcl` (a PR per user design).
 3. No allocation, first come first served. A clash confuses names only, because the shell verifies the full rm_id after the swap.
 
+**D5. Who writes the manifest, and who ships `build_rm.tcl`** (reconciles this design with KIT-STORE §6.2 and F2).
+1. *(recommended)* HM owns one board-agnostic template (this one). The kit's `tcl/build_rm.tcl` (F2) is that template rendered with the kit's facts, and the design's values arrive as `-tclargs`. The script writes only the **receipt**, and HM writes the manifest from it (`kit pack`; the spike's `pack_receipt.py`). There is no `exec python` inside Vivado, which the platform documents as fragile (`build_dfx.tcl:442-457`) and which Windows users may not have at all.
+2. The platform ships its own `build_rm.tcl`, which ends by `exec`-ing the kit's `gen_manifest.py` (KIT-STORE §6.2 as written). That keeps two copies of the flow: the platform's Tcl and HM's gates, and they will drift. It also needs python on Vivado's path.
+3. Both: the kit's Tcl writes the receipt *and* calls `gen_manifest.py` when python is present.
+
 **D4. Where the guide lives.**
 1. *(recommended)* A new "Build" board section, plus `kit guide` on the CLI.
 2. A tab inside XDC.
@@ -343,4 +363,44 @@ Total: ~22 h of agent time, runnable as four parallel lanes (A first, then B–D
 
 ## 9. Spike results
 
-See the hand-back and `tools/spike_kit_guide/`. (Filled in below when the Vivado smoke-run completes.)
+Everything ran on srv03335: Vivado 2024.1, `nice -n 10`, `general.maxThreads 2`, with a load average of about 70 on 16 cores. The only static used was a `/tmp` copy of the fielded `static_routed_locked.dcp` (md5 `7f81e8f5…`, CRC-32 0x72BB0A36), taken from `mps3-nanosoc-platform-ila/fielded/0x72BB0A36/`.
+
+**(b) The board-free partial validator: the chosen spike.** `tools/spike_kit_guide/partial_check.py` plus 8 synthetic tests (`test_partial_check.py`, all passing).
+- Real bitstreams: 7 RMs across 3 statics, plus the fielded full image.
+- Every positive passed.
+- Negatives N1–N6 were refused: a full image as a partial, swapped roles, a truncated file, a `.bin`/`.bit` mismatch, a clearing over the arena, the wrong part.
+- **N7 is the honest limit.** A partial of another static passes, because the bitstream carries no static identity (§4).
+
+**(a) The Tcl template, end to end.** It ran after KIT-STORE's Vivado runs had finished, so the DCP was never loaded twice.
+- The user RTL was `tools/spike_kit_guide/spike_rm.sv`: a 32-bit counter on the shield GPIO, rm_id 0x010080F0. Its OOC XDC came from HM's own `xdc` service; the wrapper also passed HM's boundary check, and a copy with a port removed was refused (`missing_pin: qspi_io_i`).
+
+| Stage | Result |
+|---|---|
+| preflight | 6/6 PASS, including `static_id`: the Tcl CRC-32 of the DCP is 0x72BB0A36 |
+| synth | `no_black_boxes`, `boundary_bits` 148/148, `rm_id_match` (the netlist drives 0x010080F0), `ooc_clocks` (dut_clk, dbg_bscan_tck, dbg_bscan_drck). 2 min 29 s, peak 3.0 GB |
+| link | 148 partition pins, 7 clocks propagated, no HDPR blockers |
+| impl | `rp_pins_opt` 148; `drc_routed` clean; `rm_timing` over the RM's 34 registers: setup WNS +18.057 ns, hold WHS +0.079 ns. place 4 min 2 s, route 7 min 47 s |
+| verify | `pr_verify` **against the locked static**: `[Vivado 12-3253] … are compatible` |
+| bitstream | partial 1,313,624 B (crc 0x12001BB5), clearing 65,896 B (crc 0xC771E06B, under the 262,144 B arena); `.bit`/`.bin` pairs written; no debug core, so no `.ltx` (a NOTE) |
+| total | **17 min 41 s wall, peak RSS 4.0 GB**; `HM_RM_BUILD_COMPLETE`; the receipt's `state` is `passed` with 24 gates |
+
+**Negative:** `-tclargs RM_ID=0x010080F1` failed at `rm_id_match` ("the netlist drives rm_id 0x010080F0, RM_ID is 0x010080F1"). The failed receipt was written, and `pack_receipt.py` refuses it.
+
+**After the build:**
+- `partial_check.py` passed on the generated pair against the fielded dbg_demo pair as the reference: SLR0 only, the same frame box, role partial/clearing, `.bit` = `.bin`.
+- `pack_receipt.py` wrote the overlay triple. `pyverify.Overlay.validate(expected_static_id=0x72BB0A36)` returned ok.
+- `import_overlay` put the triple into a scratch HM content store, where the catalogue lists `spike_rm rm_id 0x010080f0 static 0x72bb0a36 usercode 0xc8551081`, pair ok.
+- **The only step left is a board:** Program on mps3-01 and the rm_id read back (lane KG-E).
+
+**The first full run found two template bugs, both fixed:**
+- `report_utilization -pblocks [get_pblocks -of_objects u_rp_dut]` finds no pblock in the locked static. The run died *after routing*, with no verdict.
+- As a result, the pblock now comes from the kit (`RP_PBLOCK`), the routed checkpoint is written before any report, and every stage runs inside one `catch`, so an unexpected Tcl error becomes the gate `tcl_error` and a `failed` receipt.
+- Also found: the Vivado log echoes the sourced script, so marker greps must be line-anchored (§1.3).
+
+**Measured by KIT-STORE, and used here:**
+- `open_checkpoint` of the locked static: 57 s, 2.8 GB.
+- `pr_verify` against the locked static is compatible, with the same counts as against the routed greybox.
+- A wrong static is refused: `HDPRVerify-08`, then `12-3515 … not compatible`.
+- 2024.1 refuses a 2026.1 DCP (`Runs 36-378`).
+
+**Artefacts** are in `tools/spike_kit_guide/`: `render_build_rm.py`, `spike_rm.sv`, `partial_check.py`, `test_partial_check.py` and `pack_receipt.py`. The `/tmp/guide-*` copies have been deleted.

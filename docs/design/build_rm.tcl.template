@@ -47,6 +47,7 @@ array set P {
     VIVADO_VERSION    {{{VIVADO_VERSION}}}
     PART              {{{PART}}}
     RP_INST           {{{RP_INST}}}
+    RP_PBLOCK         {{{RP_PBLOCK}}}
     BOUNDARY_BITS     {{{BOUNDARY_BITS}}}
     STATIC_ID         {{{STATIC_ID}}}
     STATIC_USERCODE   {{{STATIC_USERCODE}}}
@@ -74,6 +75,7 @@ array set P {
 # STATIC_DCP        the kit's static_routed_locked.dcp ("harness-manager kit fetch")
 # PR_VERIFY_REF     a routed reference config of the SAME static; empty = the
 #                   locked static itself (see the guide: "what pr_verify compares")
+# RP_PBLOCK         the partition's pblock (utilization is reported against it)
 # CLEARING_MAX      bytes; the harness stages a bigger clearing to QSPI, and the
 #                   next swap-away then fails closed (HM deploy preflight (d))
 # RM_SOURCES        .sv/.v/.vhd files, in order. Or leave empty and read them in
@@ -105,6 +107,7 @@ proc gate { name ok detail } {
     puts "HM_GATE $name $verdict $detail"
     lappend ::gates [list $name $verdict $detail]
     if { !$ok } {
+        set ::gate_failed 1
         puts "HM_RM_BUILD_FAILED gate=$name"
         write_receipt failed
         error "build_rm.tcl: gate '$name' failed: $detail"
@@ -225,244 +228,268 @@ proc write_receipt { state } {
 }
 
 set ::stage init
+set ::gate_failed 0
 set rp $P(RP_INST)
 set out $P(OUT_DIR)
 set name $P(RM_NAME)
 
-# ===========================================================================
-# STAGE 1 -- preflight: the cheap refusals, before any Vivado time is spent
-# ===========================================================================
-stage preflight
-file mkdir $out
-rset rm_name $name
-rset rm_top $P(RM_TOP)
-rset part $P(PART)
-rset rp_inst $rp
+# Every stage runs inside one catch: a gate that fails has already said so and
+# written the receipt; ANY other Tcl error (a Vivado command refusing its
+# arguments, a missing file) becomes the gate `tcl_error`, so a build can never
+# end without a verdict. `return` (STOP_AFTER) is code 2 and is a clean stop.
+set rc [catch {
+    # ===========================================================================
+    # STAGE 1 -- preflight: the cheap refusals, before any Vivado time is spent
+    # ===========================================================================
+    stage preflight
+    file mkdir $out
+    rset rm_name $name
+    rset rm_top $P(RM_TOP)
+    rset part $P(PART)
+    rset rp_inst $rp
 
-set_param general.maxThreads $P(JOBS)
-set vv [version -short]
-rset vivado $vv
-# A routed DCP opens only in the Vivado release that wrote it (a 2026.1 DCP
-# does not open in 2024.1, and the reverse is refused as a downgrade risk).
-gate vivado_version [string equal $vv $P(VIVADO_VERSION)] \
-    "running $vv; the kit's static was written by $P(VIVADO_VERSION)"
+    set_param general.maxThreads $P(JOBS)
+    set vv [version -short]
+    rset vivado $vv
+    # A routed DCP opens only in the Vivado release that wrote it (a 2026.1 DCP
+    # does not open in 2024.1, and the reverse is refused as a downgrade risk).
+    gate vivado_version [string equal $vv $P(VIVADO_VERSION)] \
+        "running $vv; the kit's static was written by $P(VIVADO_VERSION)"
 
-gate part_installed [expr { [llength [get_parts -quiet $P(PART)]] == 1 }] \
-    "$P(PART) (install the device family with Vivado; licensing is checked at synth)"
+    gate part_installed [expr { [llength [get_parts -quiet $P(PART)]] == 1 }] \
+        "$P(PART) (install the device family with Vivado; licensing is checked at synth)"
 
-gate static_dcp_present [file isfile $P(STATIC_DCP)] $P(STATIC_DCP)
-# static_id IS the CRC-32 of static_routed_locked.dcp (build_dfx.tcl:725), so the
-# kit's DCP can be proven to be the board's static without opening it.
-set sid [hex32 [file_crc32 $P(STATIC_DCP)]]
-rset static_id $sid
-rset static_usercode $P(STATIC_USERCODE)
-gate static_id [string equal -nocase $sid $P(STATIC_ID)] \
-    "CRC-32 of [file tail $P(STATIC_DCP)] is $sid, the kit is for $P(STATIC_ID)"
+    gate static_dcp_present [file isfile $P(STATIC_DCP)] $P(STATIC_DCP)
+    # static_id IS the CRC-32 of static_routed_locked.dcp (build_dfx.tcl:725), so the
+    # kit's DCP can be proven to be the board's static without opening it.
+    set sid [hex32 [file_crc32 $P(STATIC_DCP)]]
+    rset static_id $sid
+    rset static_usercode $P(STATIC_USERCODE)
+    gate static_id [string equal -nocase $sid $P(STATIC_ID)] \
+        "CRC-32 of [file tail $P(STATIC_DCP)] is $sid, the kit is for $P(STATIC_ID)"
 
-if { $P(PR_VERIFY_REF) ne "" } {
-    gate pr_verify_ref_present [file isfile $P(PR_VERIFY_REF)] $P(PR_VERIFY_REF)
-}
-if { ![regexp {^0[xX][0-9A-Fa-f_]{1,9}$} $P(RM_ID)] } {
-    gate rm_id_format 0 "RM_ID '$P(RM_ID)' is not a 32-bit hex literal"
-}
-set want_rm_id [expr { [string map {_ ""} $P(RM_ID)] & 0xFFFFFFFF }]
-rset rm_id [hex32 $want_rm_id]
-if { $want_rm_id == 0 } {
-    gate rm_id_nonzero 0 "rm_id 0x00000000 is the greybox's; give your RM its own id"
-}
-if { $P(RM_SYNTH_DCP) eq "" } {
-    foreach f [concat $P(RM_SOURCES) $P(RM_SYNTH_HOOK)] {
-        gate source_present [file isfile $f] $f
+    if { $P(PR_VERIFY_REF) ne "" } {
+        gate pr_verify_ref_present [file isfile $P(PR_VERIFY_REF)] $P(PR_VERIFY_REF)
     }
-    if { [llength $P(RM_SOURCES)] == 0 && $P(RM_SYNTH_HOOK) eq "" } {
-        gate sources_given 0 "set RM_SOURCES or RM_SYNTH_HOOK (or RM_SYNTH_DCP)"
+    if { ![regexp {^0[xX][0-9A-Fa-f_]{1,9}$} $P(RM_ID)] } {
+        gate rm_id_format 0 "RM_ID '$P(RM_ID)' is not a 32-bit hex literal"
     }
-    gate ooc_xdc_present [file isfile $P(RM_OOC_XDC)] \
-        "$P(RM_OOC_XDC) (harness-manager xdc rm-kit writes it)"
-} else {
-    gate synth_dcp_present [file isfile $P(RM_SYNTH_DCP)] $P(RM_SYNTH_DCP)
-}
-if { $P(RM_XDC) ne "" } { gate rm_xdc_present [file isfile $P(RM_XDC)] $P(RM_XDC) }
-if { [done_after preflight] } { return }
-
-# ===========================================================================
-# STAGE 2 -- out-of-context synthesis (or your own synth checkpoint)
-# ===========================================================================
-stage synth
-set synth_dcp [file join $out "${name}_synth.dcp"]
-if { $P(RM_SYNTH_DCP) eq "" } {
-    create_project -in_memory -part $P(PART)
-    foreach f $P(RM_SOURCES) {
-        switch -glob -- [string tolower $f] {
-            *.vhd - *.vhdl { read_vhdl $f }
-            *.v            { read_verilog $f }
-            default        { read_verilog -sv $f }
+    set want_rm_id [expr { [string map {_ ""} $P(RM_ID)] & 0xFFFFFFFF }]
+    rset rm_id [hex32 $want_rm_id]
+    if { $want_rm_id == 0 } {
+        gate rm_id_nonzero 0 "rm_id 0x00000000 is the greybox's; give your RM its own id"
+    }
+    if { $P(RM_SYNTH_DCP) eq "" } {
+        foreach f [concat $P(RM_SOURCES) $P(RM_SYNTH_HOOK)] {
+            gate source_present [file isfile $f] $f
         }
+        if { [llength $P(RM_SOURCES)] == 0 && $P(RM_SYNTH_HOOK) eq "" } {
+            gate sources_given 0 "set RM_SOURCES or RM_SYNTH_HOOK (or RM_SYNTH_DCP)"
+        }
+        gate ooc_xdc_present [file isfile $P(RM_OOC_XDC)] \
+            "$P(RM_OOC_XDC) (harness-manager xdc rm-kit writes it)"
+    } else {
+        gate synth_dcp_present [file isfile $P(RM_SYNTH_DCP)] $P(RM_SYNTH_DCP)
     }
-    if { $P(RM_SYNTH_HOOK) ne "" } { source $P(RM_SYNTH_HOOK) }
-    set sargs [list -mode out_of_context -top $P(RM_TOP) -part $P(PART)]
-    if { $P(RM_INCLUDE_DIRS) ne "" } { lappend sargs -include_dirs $P(RM_INCLUDE_DIRS) }
-    foreach d $P(RM_DEFINES) { lappend sargs -verilog_define $d }
-    synth_design {*}$sargs
-    # read AFTER synth_design: it names ports and synthesised pins
-    # (_template/ooc_synth.tcl:69-80)
-    read_xdc $P(RM_OOC_XDC)
-    report_utilization    -file [file join $out "${name}_synth_util.rpt"]
-    report_timing_summary -file [file join $out "${name}_synth_timing.rpt"]
-    write_checkpoint -force $synth_dcp
-} else {
-    open_checkpoint $P(RM_SYNTH_DCP)
-    file copy -force $P(RM_SYNTH_DCP) $synth_dcp
+    if { $P(RM_XDC) ne "" } { gate rm_xdc_present [file isfile $P(RM_XDC)] $P(RM_XDC) }
+    if { [done_after preflight] } { return }
+
+    # ===========================================================================
+    # STAGE 2 -- out-of-context synthesis (or your own synth checkpoint)
+    # ===========================================================================
+    stage synth
+    set synth_dcp [file join $out "${name}_synth.dcp"]
+    if { $P(RM_SYNTH_DCP) eq "" } {
+        create_project -in_memory -part $P(PART)
+        foreach f $P(RM_SOURCES) {
+            switch -glob -- [string tolower $f] {
+                *.vhd - *.vhdl { read_vhdl $f }
+                *.v            { read_verilog $f }
+                default        { read_verilog -sv $f }
+            }
+        }
+        if { $P(RM_SYNTH_HOOK) ne "" } { source $P(RM_SYNTH_HOOK) }
+        set sargs [list -mode out_of_context -top $P(RM_TOP) -part $P(PART)]
+        if { $P(RM_INCLUDE_DIRS) ne "" } { lappend sargs -include_dirs $P(RM_INCLUDE_DIRS) }
+        foreach d $P(RM_DEFINES) { lappend sargs -verilog_define $d }
+        synth_design {*}$sargs
+        # read AFTER synth_design: it names ports and synthesised pins
+        # (_template/ooc_synth.tcl:69-80)
+        read_xdc $P(RM_OOC_XDC)
+        report_utilization    -file [file join $out "${name}_synth_util.rpt"]
+        report_timing_summary -file [file join $out "${name}_synth_timing.rpt"]
+        write_checkpoint -force $synth_dcp
+    } else {
+        open_checkpoint $P(RM_SYNTH_DCP)
+        file copy -force $P(RM_SYNTH_DCP) $synth_dcp
+    }
+
+    # A missing source does not fail synthesis: it synthesises as a black box and the
+    # RM links EMPTY (the platform's "synth_mode inline" trap, adding-an-rm.md).
+    set bb [get_cells -quiet -hierarchical -filter {IS_BLACKBOX}]
+    gate no_black_boxes [expr { [llength $bb] == 0 }] \
+        [expr { [llength $bb] ? "black boxes: [lrange $bb 0 4] (a source file is missing)" : "none" }]
+
+    # The OOC netlist's bit-level port count is the boundary (boundary.yaml totals.bits).
+    set nports [llength [get_ports -quiet]]
+    gate boundary_bits [expr { $nports == $P(BOUNDARY_BITS) }] \
+        "$nports port bits, the partition has $P(BOUNDARY_BITS) (compare your wrapper with the kit's skeleton)"
+
+    set got [netlist_rm_id [lsort -dictionary [get_ports -quiet {rm_id[*]}]]]
+    if { $got eq "" } {
+        gate rm_id_constant 0 "rm_id\[31:0\] is not driven by constants in the netlist"
+    }
+    rset rm_id_netlist [hex32 $got]
+    gate rm_id_match [expr { $got == $want_rm_id }] \
+        "the netlist drives rm_id [hex32 $got], RM_ID is [hex32 $want_rm_id] (the shell compares them after every swap)"
+
+    set ooc_clocks [get_clocks -quiet]
+    gate ooc_clocks [expr { [llength $ooc_clocks] > 0 }] \
+        "OOC clocks: $ooc_clocks (none = nothing was timed; read the kit's OOC XDC)"
+    close_project
+    if { [done_after synth] } { return }
+
+    # ===========================================================================
+    # STAGE 3 -- link into the locked static
+    # ===========================================================================
+    stage link
+    open_checkpoint $P(STATIC_DCP)
+    set rp_cell [get_cells -quiet $rp]
+    gate rp_cell [expr { $rp_cell ne "" }] "$rp in [file tail $P(STATIC_DCP)]"
+    if { ![get_property IS_BLACKBOX $rp_cell] } {
+        # a static shipped with an inert stub in the partition (build_dfx.tcl:235-242)
+        update_design -cells $rp_cell -black_box
+    }
+    read_checkpoint -cell $rp_cell $synth_dcp
+
+    set npins [llength [get_pins -quiet ${rp}/*]]
+    gate rp_pins_link [expr { $npins == $P(BOUNDARY_BITS) }] \
+        "$npins partition pins after link, the boundary has $P(BOUNDARY_BITS)"
+
+    set clks [get_clocks -quiet]
+    gate clocks_after_link [expr { [llength $clks] > 0 }] \
+        "[llength $clks] clocks propagated from the static"
+
+    if { $P(RM_XDC) ne "" } { read_xdc -cell $rp_cell $P(RM_XDC) }
+    set_property BITSTREAM.CONFIG.PERSIST NO [current_design]
+
+    report_drc -checks [get_drc_checks HDPR*] -file [file join $out "${name}_drc_hdpr_link.rpt"]
+    set bad [drc_blockers]
+    gate drc_hdpr_link [expr { [llength $bad] == 0 }] \
+        [expr { [llength $bad] ? "$bad (HDPR-16: an ILA with no RM-side hub; HDPR-18/50: a clock/BSCAN/IO site pulled into the partition)" : "no HDPR-16/18/50, no Error" }]
+    if { [done_after link] } { return }
+
+    # ===========================================================================
+    # STAGE 4 -- implement your RM inside the partition (the static is locked)
+    # ===========================================================================
+    stage impl
+    opt_design
+    set npins2 [llength [get_pins -quiet ${rp}/*]]
+    gate rp_pins_opt [expr { $npins2 == $npins }] \
+        "$npins2 partition pins after opt_design (a static-side debug core punches hub ports into the RP)"
+    place_design
+    phys_opt_design
+    route_design
+
+    # the routed design first: a report that fails must not cost the routing
+    set routed_dcp [file join $out "${name}_routed.dcp"]
+    write_checkpoint -force $routed_dcp
+    set pb [get_pblocks -quiet $P(RP_PBLOCK)]
+    if { $pb eq "" } { set pb [get_pblocks -quiet -of_objects [get_cells $rp]] }
+    if { $pb ne "" } {
+        report_utilization -pblocks $pb -file [file join $out "${name}_util.rpt"]
+    } else {
+        report_utilization -cells [get_cells $rp] -file [file join $out "${name}_util.rpt"]
+    }
+    report_timing_summary -file [file join $out "${name}_timing.rpt"]
+    report_drc -file [file join $out "${name}_drc.rpt"]
+    set bad [drc_blockers]
+    gate drc_routed [expr { [llength $bad] == 0 }] \
+        [expr { [llength $bad] ? $bad : "no HDPR-16/18/50, no Error" }]
+
+    lassign [rp_slack $rp] wns whs nregs
+    rset rm_wns $wns
+    rset rm_whs $whs
+    set tok [expr { ($wns eq "" || $wns >= 0) && ($whs eq "" || $whs >= 0) }]
+    if { $tok || $P(ALLOW_TIMING_FAIL) ne "1" } {
+        gate rm_timing $tok "your RM's paths ($nregs registers): setup WNS $wns ns, hold WHS $whs ns"
+    } else {
+        note rm_timing "NEGATIVE SLACK ALLOWED: setup WNS $wns ns, hold WHS $whs ns"
+    }
+    close_project
+    if { [done_after impl] } { return }
+
+    # ===========================================================================
+    # STAGE 5 -- pr_verify: is the static in your build the static on the board?
+    # ===========================================================================
+    stage verify
+    set ref [expr { $P(PR_VERIFY_REF) ne "" ? $P(PR_VERIFY_REF) : $P(STATIC_DCP) }]
+    set prv [file join $out "${name}_pr_verify.rpt"]
+    set prv_rc [catch { pr_verify $ref $routed_dcp -file $prv } msg]
+    set compat 0
+    if { [file isfile $prv] } {
+        set fh [open $prv r]; set txt [read $fh]; close $fh
+        set compat [expr { [string first " are compatible" $txt] >= 0 && [string first "not compatible" $txt] < 0 }]
+    }
+    rset pr_verify_ref [file tail $ref]
+    gate pr_verify [expr { $compat && !$prv_rc }] \
+        [expr { $compat ? "compatible with [file tail $ref]" : "NOT compatible with [file tail $ref]: $msg (see $prv)" }]
+    if { [done_after verify] } { return }
+
+    # ===========================================================================
+    # STAGE 6 -- the partial + clearing pair, the probes file, the receipt
+    # ===========================================================================
+    stage bitstream
+    open_checkpoint $routed_dcp
+    set root [file join $out "${name}_partial"]
+    write_bitstream -force -bin_file -cell [get_cells $rp] $root
+
+    # The .ltx: from the SAME routed config as the partial, -cell only
+    # (debug_probes.tcl:63-120; a full-design write scatters auto-named files).
+    set cores {}
+    foreach c [get_debug_cores -quiet] {
+        if { [string match "${rp}/*" $c] } { lappend cores $c }
+    }
+    set ltx ""
+    if { [llength $cores] > 0 } {
+        set ltx [file join $out "${name}.ltx"]
+        write_debug_probes -force -cell $rp $ltx
+        file delete -force [file join $out "${name}_clear.ltx"]
+        gate ltx_written [file isfile $ltx] "$ltx ([llength $cores] debug cores: $cores)"
+    } else {
+        note ltx "no debug core in the partition: no .ltx"
+    }
+    close_project
+
+    foreach f [list ${root}.bin ${root}_clear.bin ${root}.bit ${root}_clear.bit] {
+        gate artefact [file isfile $f] $f
+    }
+    set clr [file size ${root}_clear.bin]
+    gate clearing_fits [expr { $clr <= $P(CLEARING_MAX) }] \
+        "clearing $clr B, the harness holds $P(CLEARING_MAX) B"
+
+    rset partial_bin  [file tail ${root}.bin]
+    rset partial_len  [file size ${root}.bin]
+    rset partial_crc32 [hex32 [file_crc32 ${root}.bin]]
+    rset clearing_bin [file tail ${root}_clear.bin]
+    rset clearing_len $clr
+    rset clearing_crc32 [hex32 [file_crc32 ${root}_clear.bin]]
+    if { $ltx ne "" } {
+        rset ltx [file tail $ltx]
+        rset ltx_crc32 [hex32 [file_crc32 $ltx]]
+    }
+    rset built [clock format [clock seconds] -format "%Y-%m-%dT%H:%M:%SZ" -gmt 1]
+    write_receipt passed
+    puts "HM_RM_BUILD_COMPLETE rm=$name rm_id=[hex32 $want_rm_id] static_id=$sid partial=${root}.bin"
+    puts "next: harness-manager kit check [file join $out ${name}_build.json]"
+} err]
+if { $rc == 1 } {
+    if { !$::gate_failed } {
+        set msg [string map {"\n" " "} $err]
+        puts "HM_GATE tcl_error FAIL stage=$::stage: $msg"
+        lappend ::gates [list tcl_error FAIL "stage $::stage: $msg"]
+        puts "HM_RM_BUILD_FAILED gate=tcl_error"
+        write_receipt failed
+    }
+    error $err
 }
-
-# A missing source does not fail synthesis: it synthesises as a black box and the
-# RM links EMPTY (the platform's "synth_mode inline" trap, adding-an-rm.md).
-set bb [get_cells -quiet -hierarchical -filter {IS_BLACKBOX}]
-gate no_black_boxes [expr { [llength $bb] == 0 }] \
-    [expr { [llength $bb] ? "black boxes: [lrange $bb 0 4] (a source file is missing)" : "none" }]
-
-# The OOC netlist's bit-level port count is the boundary (boundary.yaml totals.bits).
-set nports [llength [get_ports -quiet]]
-gate boundary_bits [expr { $nports == $P(BOUNDARY_BITS) }] \
-    "$nports port bits, the partition has $P(BOUNDARY_BITS) (compare your wrapper with the kit's skeleton)"
-
-set got [netlist_rm_id [lsort -dictionary [get_ports -quiet {rm_id[*]}]]]
-if { $got eq "" } {
-    gate rm_id_constant 0 "rm_id\[31:0\] is not driven by constants in the netlist"
-}
-rset rm_id_netlist [hex32 $got]
-gate rm_id_match [expr { $got == $want_rm_id }] \
-    "the netlist drives rm_id [hex32 $got], RM_ID is [hex32 $want_rm_id] (the shell compares them after every swap)"
-
-set ooc_clocks [get_clocks -quiet]
-gate ooc_clocks [expr { [llength $ooc_clocks] > 0 }] \
-    "OOC clocks: $ooc_clocks (none = nothing was timed; read the kit's OOC XDC)"
-close_project
-if { [done_after synth] } { return }
-
-# ===========================================================================
-# STAGE 3 -- link into the locked static
-# ===========================================================================
-stage link
-open_checkpoint $P(STATIC_DCP)
-set rp_cell [get_cells -quiet $rp]
-gate rp_cell [expr { $rp_cell ne "" }] "$rp in [file tail $P(STATIC_DCP)]"
-if { ![get_property IS_BLACKBOX $rp_cell] } {
-    # a static shipped with an inert stub in the partition (build_dfx.tcl:235-242)
-    update_design -cells $rp_cell -black_box
-}
-read_checkpoint -cell $rp_cell $synth_dcp
-
-set npins [llength [get_pins -quiet ${rp}/*]]
-gate rp_pins_link [expr { $npins == $P(BOUNDARY_BITS) }] \
-    "$npins partition pins after link, the boundary has $P(BOUNDARY_BITS)"
-
-set clks [get_clocks -quiet]
-gate clocks_after_link [expr { [llength $clks] > 0 }] \
-    "[llength $clks] clocks propagated from the static"
-
-if { $P(RM_XDC) ne "" } { read_xdc -cell $rp_cell $P(RM_XDC) }
-set_property BITSTREAM.CONFIG.PERSIST NO [current_design]
-
-report_drc -checks [get_drc_checks HDPR*] -file [file join $out "${name}_drc_hdpr_link.rpt"]
-set bad [drc_blockers]
-gate drc_hdpr_link [expr { [llength $bad] == 0 }] \
-    [expr { [llength $bad] ? "$bad (HDPR-16: an ILA with no RM-side hub; HDPR-18/50: a clock/BSCAN/IO site pulled into the partition)" : "no HDPR-16/18/50, no Error" }]
-if { [done_after link] } { return }
-
-# ===========================================================================
-# STAGE 4 -- implement your RM inside the partition (the static is locked)
-# ===========================================================================
-stage impl
-opt_design
-set npins2 [llength [get_pins -quiet ${rp}/*]]
-gate rp_pins_opt [expr { $npins2 == $npins }] \
-    "$npins2 partition pins after opt_design (a static-side debug core punches hub ports into the RP)"
-place_design
-phys_opt_design
-route_design
-
-report_utilization -pblocks [get_pblocks -of_objects $rp_cell] -file [file join $out "${name}_util.rpt"]
-report_timing_summary -file [file join $out "${name}_timing.rpt"]
-report_drc -file [file join $out "${name}_drc.rpt"]
-set bad [drc_blockers]
-gate drc_routed [expr { [llength $bad] == 0 }] \
-    [expr { [llength $bad] ? $bad : "no HDPR-16/18/50, no Error" }]
-
-lassign [rp_slack $rp] wns whs nregs
-rset rm_wns $wns
-rset rm_whs $whs
-set tok [expr { ($wns eq "" || $wns >= 0) && ($whs eq "" || $whs >= 0) }]
-if { $tok || $P(ALLOW_TIMING_FAIL) ne "1" } {
-    gate rm_timing $tok "your RM's paths ($nregs registers): setup WNS $wns ns, hold WHS $whs ns"
-} else {
-    note rm_timing "NEGATIVE SLACK ALLOWED: setup WNS $wns ns, hold WHS $whs ns"
-}
-set routed_dcp [file join $out "${name}_routed.dcp"]
-write_checkpoint -force $routed_dcp
-close_project
-if { [done_after impl] } { return }
-
-# ===========================================================================
-# STAGE 5 -- pr_verify: is the static in your build the static on the board?
-# ===========================================================================
-stage verify
-set ref [expr { $P(PR_VERIFY_REF) ne "" ? $P(PR_VERIFY_REF) : $P(STATIC_DCP) }]
-set prv [file join $out "${name}_pr_verify.rpt"]
-set rc [catch { pr_verify $ref $routed_dcp -file $prv } msg]
-set compat 0
-if { [file isfile $prv] } {
-    set fh [open $prv r]; set txt [read $fh]; close $fh
-    set compat [expr { [string first " are compatible" $txt] >= 0 && [string first "not compatible" $txt] < 0 }]
-}
-rset pr_verify_ref [file tail $ref]
-gate pr_verify [expr { $compat && !$rc }] \
-    [expr { $compat ? "compatible with [file tail $ref]" : "NOT compatible with [file tail $ref]: $msg (see $prv)" }]
-if { [done_after verify] } { return }
-
-# ===========================================================================
-# STAGE 6 -- the partial + clearing pair, the probes file, the receipt
-# ===========================================================================
-stage bitstream
-open_checkpoint $routed_dcp
-set root [file join $out "${name}_partial"]
-write_bitstream -force -bin_file -cell [get_cells $rp] $root
-
-# The .ltx: from the SAME routed config as the partial, -cell only
-# (debug_probes.tcl:63-120; a full-design write scatters auto-named files).
-set cores {}
-foreach c [get_debug_cores -quiet] {
-    if { [string match "${rp}/*" $c] } { lappend cores $c }
-}
-set ltx ""
-if { [llength $cores] > 0 } {
-    set ltx [file join $out "${name}.ltx"]
-    write_debug_probes -force -cell $rp $ltx
-    file delete -force [file join $out "${name}_clear.ltx"]
-    gate ltx_written [file isfile $ltx] "$ltx ([llength $cores] debug cores: $cores)"
-} else {
-    note ltx "no debug core in the partition: no .ltx"
-}
-close_project
-
-foreach f [list ${root}.bin ${root}_clear.bin ${root}.bit ${root}_clear.bit] {
-    gate artefact [file isfile $f] $f
-}
-set clr [file size ${root}_clear.bin]
-gate clearing_fits [expr { $clr <= $P(CLEARING_MAX) }] \
-    "clearing $clr B, the harness holds $P(CLEARING_MAX) B"
-
-rset partial_bin  [file tail ${root}.bin]
-rset partial_len  [file size ${root}.bin]
-rset partial_crc32 [hex32 [file_crc32 ${root}.bin]]
-rset clearing_bin [file tail ${root}_clear.bin]
-rset clearing_len $clr
-rset clearing_crc32 [hex32 [file_crc32 ${root}_clear.bin]]
-if { $ltx ne "" } {
-    rset ltx [file tail $ltx]
-    rset ltx_crc32 [hex32 [file_crc32 $ltx]]
-}
-rset built [clock format [clock seconds] -format "%Y-%m-%dT%H:%M:%SZ" -gmt 1]
-write_receipt passed
-puts "HM_RM_BUILD_COMPLETE rm=$name rm_id=[hex32 $want_rm_id] static_id=$sid partial=${root}.bin"
-puts "next: harness-manager kit check [file join $out ${name}_build.json]"
