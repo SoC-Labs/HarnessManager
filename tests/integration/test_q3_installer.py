@@ -34,6 +34,7 @@ INSTALL = ROOT / "scripts" / "install.sh"
 LINUX = sys.platform.startswith("linux")
 
 FAKE_CLI = '''\
+import os
 import sys
 
 VERSION = "{version}"
@@ -48,7 +49,8 @@ def main():
         print("Harness Manager " + VERSION)
         return 0
     if args[:2] == ["daemon", "stop"]:
-        return 8                       # ALREADY: no service was running
+        # 8 = ALREADY: no service was running; the tests set 6 to play a stop that failed
+        return int(os.environ.get("HM_Q3_STOP_EXIT", "8"))
     print("stand-in harness-manager", *args)
     return 0
 '''
@@ -393,3 +395,75 @@ def test_a_menu_entry_we_did_not_write_is_left_alone(box: Box, wheelhouse: Path)
     assert "left " + str(box.menu) + " alone" in res.stderr
     box.run("--uninstall")
     assert box.menu.read_text().startswith("[Desktop Entry]\nName=Someone")
+
+
+def _zombie() -> subprocess.Popen:
+    """A child that has exited and that nobody reaps: what a container's PID 1 leaves."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    deadline = time.monotonic() + 10
+    while Path(f"/proc/{child.pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z":
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    return child
+
+
+def _daemon_json(state: Path, pid: int) -> None:
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "daemon.json").write_text(
+        f'{{\n  "hostname": "x",\n  "pid": {pid},\n  "port": 1,\n  "token": "t"\n}}\n')
+
+
+@pytest.mark.skipif(not LINUX, reason="zombies are visible through /proc on Linux")
+def test_upgrade_carries_on_when_the_service_already_exited(box: Box, wheelhouse: Path):
+    # CI run 35993990472: in a container, the stopped demo service stayed a zombie, and an
+    # installed harness-manager from before the fix said "did not stop" (exit 6).
+    box.run(*offline(wheelhouse))
+    zombie = _zombie()
+    try:
+        _daemon_json(box.state / "demo", zombie.pid)
+        res = box.run(*offline(wheelhouse), env=box.env(HM_Q3_STOP_EXIT="6"))
+        assert "the Harness Manager service (demo) had already exited" in res.stderr
+        assert "the Harness Manager service had already exited" in res.stderr  # no daemon.json
+    finally:
+        zombie.wait()
+
+
+def test_negative_twin_upgrade_stops_when_the_service_really_runs(box: Box, wheelhouse: Path):
+    box.run(*offline(wheelhouse))
+    live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        _daemon_json(box.state / "demo", live.pid)
+        res = box.run(*offline(wheelhouse), env=box.env(HM_Q3_STOP_EXIT="6"), check=False)
+        assert res.returncode == 1
+        assert "did not stop (`harness-manager daemon stop --demo` exited 6)" in res.stderr
+    finally:
+        live.kill()
+        live.wait()
+
+
+@pytest.mark.parametrize("distro, want", [
+    ('ID="rocky"\nID_LIKE="rhel centos fedora"\n', "sudo dnf install python3.12-pip"),
+    ('ID=fedora\n', "sudo dnf install python3-pip"),
+    ('ID=ubuntu\nID_LIKE=debian\n', "sudo apt install python3.12-venv"),
+])
+def test_a_python_that_cannot_make_a_venv_names_the_package(box: Box, wheelhouse: Path,
+                                                             tmp_path: Path, distro, want):
+    # CI run 35993990472: Rocky 8's python3.12 without python3.12-pip, told to apt install.
+    path = _tool_dir(tmp_path / "tools", python3_version=None)
+    fake = Path(path) / "python3.12"
+    fake.write_text('#!/bin/sh\ncase "$*" in\n'
+                    '  *print*sys.version_info*) echo 3.12 ;;\n'
+                    '  *sys.version_info*) exit 0 ;;\n'
+                    '  *python_version*) echo 3.12.1 ;;\n'
+                    '  *"-m venv"*) echo "Error: ensurepip returned non-zero exit status 1." >&2;'
+                    ' exit 1 ;;\nesac\n')
+    fake.chmod(0o755)
+    osr = tmp_path / "os-release"
+    osr.write_text(distro)
+    res = box.run("--offline", str(wheelhouse), "--no-uv",
+                  env=box.env(path=path, HARNESS_MANAGER_OS_RELEASE=str(osr)), check=False)
+    assert res.returncode == 1
+    assert "python3.12 could not make a venv with pip in it" in res.stderr
+    assert want in res.stderr, res.stderr
+    assert "ensurepip returned non-zero" in res.stderr       # the tool's own error, too
+    assert not box.venv.exists()

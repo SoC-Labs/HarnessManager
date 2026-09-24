@@ -19,7 +19,7 @@ which fetches a Python for you. On a fresh system:
 | Linux | Install first |
 |---|---|
 | Ubuntu 22.04+, Debian 12 | `sudo apt install python3-venv git` |
-| Rocky, RHEL, Alma 8 or 9 | `sudo dnf install python3.12 git` (their `python3` is too old) |
+| Rocky, RHEL, Alma 8 or 9 | `sudo dnf install python3.12 python3.12-pip git` (their `python3` is too old) |
 | Fedora | `sudo dnf install python3 git` |
 
 [docs/INSTALL.md](docs/INSTALL.md#linux-prerequisites-by-distribution) has the exact

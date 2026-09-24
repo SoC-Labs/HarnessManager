@@ -23,7 +23,7 @@ upgrade and uninstall. Each needs only these packages and nothing else.
 
 | Distribution | Its Python | Install first |
 |---|---|---|
-| Rocky, RHEL, Alma 8 | `python3` is 3.6: too old | `sudo dnf install -y python3 python3.12 git tar` (the installer picks python3.12; `python3` is only there to prove it) |
+| Rocky, RHEL, Alma 8 | `python3` is 3.6: too old | `sudo dnf install -y python3 python3.12 python3.12-pip git tar` (the installer picks python3.12; `python3` is only there to prove it). Without `python3.12-pip`, python3.12 cannot make a venv here |
 | Rocky, RHEL, Alma 9 | `python3` is 3.9: too old | `sudo dnf install -y python3.12 git-core tar` |
 | Rocky 9 with no Python 3.10+ and no root | 3.9 | `sudo dnf install -y git-core tar` once, then uv: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Ubuntu 22.04 | 3.10 | `sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 python3-venv git curl ca-certificates` |
@@ -31,8 +31,9 @@ upgrade and uninstall. Each needs only these packages and nothing else.
 | Debian 12 | 3.11 | the same as Ubuntu 22.04 |
 | Fedora (current) | 3.13 or newer | `sudo dnf install -y python3 git-core tar` |
 
-On Debian and Ubuntu, `python3-venv` is the one people miss: without it the venv has no
-pip, and the installer says so. Older releases (Ubuntu 20.04, Debian 11) have no Python
+On Debian and Ubuntu, `python3-venv` is the one people miss; on RHEL 8 it is
+`python3.12-pip`. Without it the venv has no pip, and the installer names the package for
+your distribution. Older releases (Ubuntu 20.04, Debian 11) have no Python
 3.10 package: use uv. On a system whose `python3` is too old, the installer lists what it
 found and prints the line for your distribution.
 
@@ -183,7 +184,8 @@ clone over HTTPS with a GitHub token.
 | What you see | What to do |
 |---|---|
 | `needs Python 3.10 or newer. Found only python3 (3.6.8)` | install the package it names for your distribution, or uv, and run it again |
-| `could not make a venv` | Debian/Ubuntu: `sudo apt install python3-venv` |
+| `could not make a venv with pip in it` | install the package it names: Debian/Ubuntu `python3.X-venv`, RHEL/Rocky/Alma `python3.X-pip`, Fedora `python3-pip` |
+| `the Harness Manager service did not stop` | a job is running: wait for it, or `harness-manager daemon stop --force`. A service that already exited (a zombie in a container) no longer stops the install |
 | `cannot write to DIR` | fix the directory's owner, or move the install: `HARNESS_MANAGER_HOME`, `HARNESS_MANAGER_BIN_DIR` |
 | `another Harness Manager install (pid N) is running` | wait for it. If none runs (a reboot), remove the `.install.lock` it names |
 | `the install did not finish` | the message above it is pip's. No network: check the proxy, or use `--offline`. A pin with no wheel for a new Python: `--latest` |

@@ -51,7 +51,7 @@ jobs:
           # python3 is 3.6 on EL8: the installer must pick python3.12 on its own.
           - name: Rocky Linux 8 (python3 is 3.6; python3.12 alongside)
             image: rockylinux/rockylinux:8
-            prereq: dnf install -y python3 python3.12 git tar
+            prereq: dnf install -y python3 python3.12 python3.12-pip git tar
           # python3 is 3.9 on EL9: too old; python3.12 is an AppStream package.
           - name: Rocky Linux 9 (python3.12)
             image: rockylinux/rockylinux:9
@@ -93,15 +93,18 @@ jobs:
       - name: uv (the user's one-liner; no root)
         if: matrix.uv
         shell: bash
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        # Not through $GITHUB_PATH: in a container job it replaces the image's PATH for
+        # later action steps (run 35993990472: actions/checkout then found no git or tar).
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - uses: actions/checkout@v4
       - name: Install, run the demo UI, upgrade, uninstall (scripts/smoke_install.sh)
         shell: bash
         run: |
           set -o pipefail
-          # uv on PATH is used by default; the other entries have none, so venv + pip.
+          # uv on PATH is used by default; only the uv entry has it there (the installer
+          # puts it in ~/.local/bin), the others use venv + pip.
+          export PATH="$HOME/.local/bin:$PATH"
+          if [ "${{ matrix.uv }}" = true ]; then uv --version; fi
           time scripts/smoke_install.sh --with-serial
 
   offline:

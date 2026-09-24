@@ -159,18 +159,39 @@ ours() {
     [[ -f "$1" ]] && grep -q "$MARKER" "$1" 2>/dev/null
 }
 
+# True when the service for state dir $1 is gone: no daemon.json, no such process, or
+# a zombie. An installed version before 0.1.0's fix waited on a zombie (in a container
+# whose PID 1 never reaps, a stopped service stays one) and reported "did not stop".
+service_gone() {
+    local json="$1/daemon.json" pid st
+    [[ -f "$json" ]] || return 0
+    pid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$json" | head -n 1)"
+    [[ -n "$pid" ]] || return 0
+    kill -0 "$pid" 2>/dev/null || return 0
+    if [[ -r "/proc/$pid/stat" ]]; then
+        st="$(sed 's/.*) //' "/proc/$pid/stat" | cut -d ' ' -f 1)"
+        [[ "$st" == Z || "$st" == X ]] && return 0
+    fi
+    return 1
+}
+
 # Stop the Harness Manager service (and the demo one) before the venv changes under it.
 # A running job refuses the stop, and then this script stops too.
 stop_daemons() {
-    local hm="$venv/bin/harness-manager" rc err flag
+    local hm="$venv/bin/harness-manager" rc err flag sdir
     [[ -x "$hm" ]] || return 0
     for flag in "" "--demo"; do
         rc=0
+        sdir="$state_dir${flag:+/demo}"
         # shellcheck disable=SC2086 # $flag is empty or one word
         err="$("$hm" daemon stop $flag 2>&1 >/dev/null)" || rc=$?
         case "$rc" in
             0|8) ;;   # stopped, or it was not running (8 = ALREADY)
-            *) printf '%s\n' "$err" >&2
+            *) if service_gone "$sdir"; then
+                   note "the Harness Manager service${flag:+ (demo)} had already exited; carrying on"
+                   continue
+               fi
+               printf '%s\n' "$err" >&2
                die "the Harness Manager service did not stop (\`harness-manager daemon stop \
 $flag\` exited $rc). If a job is running, wait for it; or stop it with --force. Then run \
 this again." ;;
@@ -308,8 +329,8 @@ python_hint() {
         case " $id $like " in
             *" fedora "*)
                 if [[ "$id" == fedora ]]; then say "  Fedora: sudo dnf install python3"
-                else say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12"; fi ;;
-            *" rhel "*|*" centos "*) say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12" ;;
+                else say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12 python3.12-pip"; fi ;;
+            *" rhel "*|*" centos "*) say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12 python3.12-pip" ;;
             *" debian "*|*" ubuntu "*)
                 say "  Debian 12, Ubuntu 22.04 or newer: sudo apt install python3 python3-venv"
                 say "  (older releases have no Python $MIN_PY package: use uv, below)" ;;
@@ -319,6 +340,29 @@ python_hint() {
     fi
     say "  or, with no root: curl -LsSf https://astral.sh/uv/install.sh | sh"
     say "  then open a new terminal and run this installer again (uv downloads a Python)."
+}
+
+# What gives this Python its venv and pip on this system, from /etc/os-release.
+venv_hint() {
+    local osr="${HARNESS_MANAGER_OS_RELEASE:-/etc/os-release}" id="" like="" xy
+    xy="$("$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+    [[ -n "$xy" ]] || xy=3
+    if [[ -r "$osr" ]]; then
+        id="$(sed -n 's/^ID=//p' "$osr" | tr -d '"' | head -n 1)"
+        like="$(sed -n 's/^ID_LIKE=//p' "$osr" | tr -d '"' | head -n 1)"
+    fi
+    case " $id $like " in
+        *" debian "*|*" ubuntu "*) printf 'Install it: sudo apt install python%s-venv' "$xy" ;;
+        *" fedora "*|*" rhel "*|*" centos "*)
+            # Fedora's own Python, and a RHEL python3, are python3-pip; RHEL's
+            # side-by-side ones are python3.X-pip.
+            if [[ "$id" == fedora || "$xy" == 3 || "$(basename "$1")" == python3 ]]; then
+                printf 'Install it: sudo dnf install python3-pip'
+            else printf 'Install it: sudo dnf install python%s-pip' "$xy"; fi ;;
+        *" suse "*|*" opensuse "*) printf 'Install it: sudo zypper install python%s-pip' "${xy/./}" ;;
+        *) printf 'On Debian or Ubuntu: sudo apt install python%s-venv. On RHEL, Rocky, Alma or Fedora: sudo dnf install python%s-pip' "$xy" "$xy" ;;
+    esac
+    printf ', then run this again.'
 }
 
 if [[ $use_uv -eq 1 ]] && ! command -v uv >/dev/null 2>&1; then use_uv=0; fi
@@ -371,8 +415,7 @@ needs $MIN_PY or newer"
         "$base" -m venv "$venv" 2>"$work/venv.err" || {
             cat "$work/venv.err" >&2
             rm -rf "$venv"
-            die "$base could not make a venv. On Debian or Ubuntu: \
-sudo apt install python3-venv (or python3.X-venv for your version)."
+            die "$base could not make a venv with pip in it. $(venv_hint "$base")"
         }
     fi
     say "venv     $venv ($(py_version "$venv/bin/python"))"
