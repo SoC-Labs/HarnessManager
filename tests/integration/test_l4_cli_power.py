@@ -111,7 +111,8 @@ def test_negative_twin_power_show_without_a_meter_is_unavailable_never_zero(
     rc, out, _ = run(capsys, monkeypatch, "--json", "power", "show", vboard.shell_endpoint)
     obj = json.loads(out)
     assert rc == ExitCode.OK
-    assert all(r["value"] is None and "no power sensor" in r["reason"] for r in obj["readings"])
+    assert obj["readings"] and all(r["value"] is None and "no power sensor" in r["reason"]
+                                   for r in obj["readings"])      # all([]) is True: not empty
     assert obj["device"] is None and "networked power plug" in obj["cycle_reason"]
 
 

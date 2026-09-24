@@ -61,7 +61,8 @@ def test_lease_acquire_show_release(capsys, rig):
                        "--holder", "david-b0")
     assert rc == ExitCode.OK, err
     lease = json.loads(out)["lease"]
-    assert lease["holder"] == "david-b0" and lease["mine"] and "token" not in out
+    # The secret itself never leaves (the fake hub's tokens are "tok-NNNN-..."), under any key.
+    assert lease["holder"] == "david-b0" and lease["mine"] and "tok-" not in out + err
     assert rig.hub.current["ttl"] == 900
     rc, out, _ = run(capsys, "lease", "show", BOARD_IP)
     assert rc == ExitCode.OK and "held by david-b0" in out and "yours" in out

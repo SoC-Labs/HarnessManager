@@ -99,8 +99,14 @@ def test_ui_no_browser_prints_a_url_whose_token_works(capsys, no_browser):
     from tests.fakes.t13_daemon import ws_connect
 
     ws_connect(f"ws://127.0.0.1:{info.port}/api/v1/events?token={token}").close()
-    time.sleep(0.2)
-    log = (state_dir() / "daemon.log").read_text()
+    # Wait for the line that carried it (masked), rather than a fixed 0.2 s: before Q1 a
+    # slow log write made "token not in log" pass with no such line written at all.
+    deadline = time.monotonic() + 10
+    log = ""
+    while "token=***" not in log and time.monotonic() < deadline:
+        time.sleep(0.05)
+        log = (state_dir() / "daemon.log").read_text()
+    assert "token=***" in log, log[-2000:]
     assert "harness-manager daemon start" in log and token not in log
     # a second `ui` reuses the running daemon and opens the browser this time
     rc, out, _ = run_cli(capsys, "--json", "ui")

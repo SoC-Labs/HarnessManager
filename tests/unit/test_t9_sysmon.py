@@ -91,13 +91,13 @@ def test_external_reference_flags_every_reading():
     assert by_name(rows)["fpga_die_temp"].value == round(temp_c(GOOD_REGS[0], external_ref=True), 2)
     # Negative twin: REF=1 (internal) carries no reference caveat.
     internal = sysmon_readings(SysmonSample({**GOOD_REGS, 0x3F: FLAG_REF}))
-    assert not any("reference" in r.reason for r in internal)
+    assert len(internal) == len(rows) and not any("reference" in r.reason for r in internal)
 
 
 def test_unknown_reference_when_the_flag_was_not_read():
     regs = {k: v for k, v in GOOD_REGS.items() if k != 0x3F}
     rows = sysmon_readings(SysmonSample(regs, errors={0x3F: "read failed: chain broken"}))
-    assert all("reference unknown: flag register 3Fh read failed: chain broken" in r.reason
+    assert rows and all("reference unknown: flag register 3Fh read failed: chain broken" in r.reason
                for r in rows)
 
 

@@ -65,7 +65,7 @@ def test_help_json_carries_the_same_text(capsys):
 def test_help_tsv_rows_number_each_tab_from_one(capsys):
     rc, out, _ = run(capsys, "--tsv", "help", "--tabs", "Reset")
     rows = [line.split("\t") for line in out.splitlines()]
-    assert rc == 0 and all(len(r) == 3 and r[0] == "Reset" for r in rows)
+    assert rc == 0 and rows and all(len(r) == 3 and r[0] == "Reset" for r in rows)
     assert [int(r[1]) for r in rows] == list(range(1, len(rows) + 1))
 
 

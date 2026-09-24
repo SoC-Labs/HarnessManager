@@ -84,7 +84,7 @@ def test_lease_acquire_is_a_job_then_the_lease_is_mine_until_released(client, ri
     assert r.status_code == 202
     done = wait_job(client, r.json()["job"])
     assert done["state"] == "done" and done["kind"] == "lease"
-    assert done["result"]["lease"]["mine"] and "token" not in str(done["result"])
+    assert done["result"]["lease"]["mine"] and "tok-" not in str(done["result"])  # the secret
     view = client.get(f"{bid_path(bid)}/lease", headers=H).json()
     assert view["lease"]["mine"] and view["lease"]["target"] == "mps3_01_pl"
     assert seen[-1]["state"] == "held"

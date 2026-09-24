@@ -116,9 +116,26 @@ def test_telemetry_on_the_ethernet_only_board_is_explicitly_unavailable(vboard, 
     session = eng.open(cand)
     readings = eng.telemetry.readings(session)
     assert readings and all(r.available or r.reason for r in readings)   # never a silent 0
-    if session.telemetry is None and session.controller is None:
-        assert [(r.name, r.value, r.reason) for r in readings] == [
-            ("temperature", None, NO_SOURCE_REASON)]
+    # Q1: this was an `if session.telemetry is None` branch that never ran (the pack always
+    # wires an adapter). With no sensor at all, every reading is None and says what it needs.
+    assert {r.name: (r.value, r.available) for r in readings} == {
+        "fpga_die_temp": (None, False), "lcd_ambient_temp": (None, False),
+        "board_power": (None, False), "onchip_power_estimate": (None, False)}
+    by_name = {r.name: r.reason for r in readings}
+    assert "JTAG cable" in by_name["fpga_die_temp"] and "touch_temp" in by_name["lcd_ambient_temp"]
+    assert "no power sensor" in by_name["board_power"]
+    eng.close_all()
+
+
+def test_negative_twin_a_pack_with_no_telemetry_adapter_says_no_source(vboard, state: Path,
+                                                                       monkeypatch):
+    eng = engine_for(vboard, state)
+    session = eng.open(eng.candidate_for(vboard.shell_endpoint))
+    monkeypatch.setattr(session, "telemetry", None, raising=False)
+    monkeypatch.setattr(session, "controller", None, raising=False)
+    readings = eng.telemetry.readings(session)
+    assert [(r.name, r.value, r.reason) for r in readings] == [
+        ("temperature", None, NO_SOURCE_REASON)]
     eng.close_all()
 
 

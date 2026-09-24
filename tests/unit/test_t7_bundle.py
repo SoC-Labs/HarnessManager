@@ -118,7 +118,10 @@ def test_archive_escapes_are_refused(tmp_path, name):
     z.write_bytes(zip_bytes({name: b"x"}))
     with pytest.raises(RefusedError):
         safe_extract(z, tmp_path / "out")
-    assert not (tmp_path / "out").exists()
+    # Nothing next to the archive either: no "out", no ".out.*.tmp" left behind, and no
+    # "evil.txt" written beside "out" (Q1: "out" alone can never exist here, since
+    # safe_extract renames its temp directory to it only after a clean extract).
+    assert [p.name for p in tmp_path.iterdir()] == ["bad.zip"]
 
 
 def test_case_duplicates_are_refused_for_a_fat_target(tmp_path):

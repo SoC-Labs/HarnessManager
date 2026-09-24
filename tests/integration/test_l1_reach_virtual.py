@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from harness_manager.core import capabilities as C
+from harness_manager.core.errors import UsageError
 from harness_manager.core.model import LinkKind
 from harness_manager.core.pack import ProbeHints
 from harness_manager.core.services import EngineConfig
@@ -203,9 +204,9 @@ def test_hub_links_carry_lane_numbers_for_the_console_names():
 def test_boards_toml_hub_table_errors_name_the_key(tmp_path):
     for bad, word in (({"target": "x"}, "host"), ({"host": "h", "shares": {"mcc": "tty_00"}}, "shares"),
                       ({"host": "h", "stop": True}, "unknown"), ({"host": "h", "baud": "fast"}, "baud")):
-        with pytest.raises(Exception) as exc:
+        with pytest.raises(UsageError) as exc:        # not Exception: KeyError('host') matched too
             hubmod.parse_hub_table(bad)
-        assert word in str(exc.value)
+        assert word in exc.value.message
     assert hubmod.parse_hub_table({"host": "h"}).target == "mps3_01_pl"
 
 

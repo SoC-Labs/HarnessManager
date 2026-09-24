@@ -206,7 +206,9 @@ def test_attach_with_screen_shows_the_command_and_the_client_count(page_factory,
     expect(pane.locator('[data-testid="console-result"]')).to_contain_text("$ console uart0 pty  (rc 0")
     sim_of(daemon).attach_screen(BOARD_USB, "uart0", 2)
     expect(pane.locator('[data-testid="screen-clients"]')).to_have_text("2 attached")
-    assert page.locator('[data-testid="terminal-command"]').count() == 0     # no CLI line
+    # No CLI line (Q1: the old check looked for a data-testid the page no longer has, so
+    # it could not fail; the removed row read "harness-manager console <address> <name>").
+    assert "harness-manager console" not in pane.inner_text()
 
 
 @pytest.mark.week_plan("consoles_api", sim=True)

@@ -66,10 +66,12 @@ def hold(engine, service, method):
     import threading
 
     release = threading.Event()
+    release.entered = []                   # calls that reached the service and wait here
     target = getattr(engine, service)
     original = getattr(target, method)
 
     def held(*args, **kwargs):
+        release.entered.append(args)
         release.wait(30)
         return original(*args, **kwargs)
 
@@ -288,7 +290,10 @@ def test_console_output_appears_and_send_works(page_factory, engine, screenshots
     expect(page.locator('[data-testid="console-result"]')).to_contain_text("rc 0")
     assert wait_until(lambda: "print(1+1)" in console_text(page, "uart0"))   # the demo DUT echoes
     # david (L3): attach with screen, never the CLI line; that row is gone.
-    assert page.locator('[data-testid="terminal-command"]').count() == 0
+    # (Q1: this checked a data-testid the page no longer has anywhere, so it could not
+    # fail. The removed row read "harness-manager console <address> <name>".)
+    section_text = page.locator('[data-testid="section-consoles"]').inner_text()
+    assert "rc 0" in section_text and "harness-manager console" not in section_text
     page.screenshot(path=str(screenshots / "light-consoles-live.png"))
 
 
@@ -472,7 +477,9 @@ def test_a_slow_engine_call_leaves_the_page_usable(page_factory, engine):
     section(page, "activity")
     section(page, "debug")
     expect(busy).to_contain_text("Detecting...")
-    assert engine.called("debug.detect") == []            # still held at the service
+    # In flight: it reached the service and has not finished. (Q1: `called == []` alone
+    # was true by construction, since the demo engine records a call only once it runs.)
+    assert len(release.entered) == 1 and engine.called("debug.detect") == []
     release.set()
     page.wait_for_selector('[data-testid="idcode"]:has-text("0x6ba00477")', timeout=T)
 
