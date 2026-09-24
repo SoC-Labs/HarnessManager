@@ -1,112 +1,112 @@
-#!/usr/bin/env python3
-"""Spike (lane KIT-GUIDE): receipt -> overlay triple -> Harness Manager's catalogue.
+"""The build receipt, read back: is this build fit to become an overlay?
 
-    pack_receipt.py RECEIPT.json OUT_ROOT [--store DIR]
+``build_rm.tcl`` writes ``<rm>_build.json`` in its ``OUT_DIR`` after a pass, a failed gate
+or a ``STOP_AFTER`` (schema ``harness-manager-rm-build`` v1, ``schema.parse_receipt``).
+The receipt is the binding between the pair and the static: its ``static_id`` is the
+CRC-32 the build computed from the DCP it opened, and its ``rm_id_netlist`` is the id the
+netlist drives. So nobody writes an overlay manifest by hand (david K5): ``kit pack``
+derives it from a receipt that passes ``receipt_checks``.
 
-Reads the build receipt that build_rm.tcl writes, refuses it unless every gate
-passed and the files still match the CRCs it recorded, then writes
-``OUT_ROOT/<rm_name>/{manifest.json, <rm_name>.bin, <rm_name>_clear.bin[, .ltx]}``
-in the schema of ``overlay-manifest.md`` (the fields ``fpga/dfx/gen_manifest.py
-build`` writes). ``static_id`` and ``rm_id`` come from the receipt: the CRC of
-the DCP the build opened and the id read out of the netlist, never typed.
+``receipt_checks`` refuses:
 
-With ``--store`` it imports the triple through ``overlays.import_overlay``
-(which re-validates length and CRC) into a content store there, and lists the
-catalogue the Program page would show.
+- a build that did not pass (``state`` failed or stopped), or any ``FAIL`` gate;
+- ``rm_id`` != ``rm_id_netlist`` (the shell compares them after every swap);
+- a partial, clearing or ``.ltx`` whose length or CRC-32 is not the one the build recorded
+  (a file copied from another build, or half-copied).
+
+Board-agnostic: the overlay manifest itself is the pack's format (``KitAdapter`` of the
+MPS3 pack writes ``pyverify``'s overlay triple).
 """
+
 from __future__ import annotations
 
-import argparse
-import json
-import shutil
-import sys
-import zlib
 from pathlib import Path
 
+from harness_manager.core.pack import KitCheck
 
-def crc32(path: Path) -> str:
-    return f"0x{zlib.crc32(path.read_bytes()) & 0xFFFFFFFF:08x}"
+from .schema import BuildReceipt, crc32_file, hex32, load_receipt, parse_u32, same_id
+
+RECEIPT_GLOB = "*_build.json"
 
 
-def pack(receipt_path: Path, out_root: Path) -> Path:
-    r = json.loads(receipt_path.read_text(encoding="utf-8"))
-    problems = []
-    if r.get("schema") != "harness-manager-rm-build":
-        problems.append(f"not a build receipt (schema {r.get('schema')!r})")
-    if r.get("state") != "passed":
-        problems.append(f"the build did not pass (state {r.get('state')!r}, stage {r.get('stage')!r})")
-    failed = [g["gate"] for g in r.get("gates", []) if g.get("verdict") == "FAIL"]
-    if failed:
-        problems.append(f"failed gates: {failed}")
-    if r.get("rm_id") != r.get("rm_id_netlist"):
-        problems.append(f"rm_id {r.get('rm_id')} != netlist {r.get('rm_id_netlist')}")
-    base = receipt_path.parent
-    files = {}
-    for role in ("partial", "clearing"):
-        f = base / str(r.get(f"{role}_bin", ""))
-        if not r.get(f"{role}_bin") or not f.is_file():
-            problems.append(f"{role} missing: {f}")
+def find_receipts(build_dir: Path) -> list[Path]:
+    """Receipts in a build directory (``kit script`` layout: ``<dir>/out/<rm>_build.json``)
+    or in the directory itself. Newest first."""
+    d = Path(build_dir)
+    found = [*d.glob(RECEIPT_GLOB), *(d / "out").glob(RECEIPT_GLOB)] if d.is_dir() else []
+    return sorted(set(found), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def receipt_files(r: BuildReceipt) -> dict[str, Path]:
+    """The files the receipt names, resolved beside it: ``partial``, ``clearing``, ``ltx``."""
+    base = r.path.parent
+    out = {}
+    for role, key in (("partial", "partial_bin"), ("clearing", "clearing_bin"), ("ltx", "ltx")):
+        if r.get(key):
+            out[role] = base / r.get(key)
+    return out
+
+
+def receipt_checks(r: BuildReceipt) -> list[KitCheck]:
+    """Every check a receipt must pass before it becomes an overlay (module docstring)."""
+    checks: list[KitCheck] = []
+    ok = r.state == "passed"
+    detail = {"passed": f"the build passed {len(r.gates)} gates",
+              "stopped": f"the build stopped after {r.stage} (STOP_AFTER): finish it",
+              "failed": f"the build failed at {r.stage}"}[r.state]
+    g = r.failed_gate
+    if g is not None:
+        detail += f": gate {g.gate}: {g.detail}"
+    checks.append(KitCheck("build", "ok" if ok and g is None else "mismatch", detail))
+    if not ok:
+        return checks
+
+    want, got = r.get("rm_id"), r.get("rm_id_netlist")
+    try:
+        same = same_id(want, got) and parse_u32(want) != 0
+    except (TypeError, ValueError):
+        same = False
+    checks.append(KitCheck("rm_id", "ok" if same else "mismatch",
+                           f"the netlist drives {got}" + ("" if same else f", RM_ID is {want}")))
+    sid = r.get("static_id")
+    checks.append(KitCheck("static_id", "ok" if sid else "mismatch",
+                           f"built against static {sid} (the CRC-32 of the DCP the build opened)"
+                           if sid else "the receipt names no static_id"))
+    files = receipt_files(r)
+    for role in ("partial", "clearing", "ltx"):
+        p = files.get(role)
+        if p is None:
+            if role != "ltx":
+                checks.append(KitCheck(role, "mismatch", f"the receipt names no {role}"))
             continue
-        if crc32(f).lower() != str(r.get(f"{role}_crc32", "")).lower():
-            problems.append(f"{role} {f.name} crc {crc32(f)} != receipt {r.get(f'{role}_crc32')}")
-        if f.stat().st_size != int(r.get(f"{role}_len", -1)):
-            problems.append(f"{role} {f.name} is {f.stat().st_size} B, receipt says {r.get(f'{role}_len')}")
-        files[role] = f
-    if problems:
-        raise SystemExit("REFUSED: " + "; ".join(problems))
-
-    name = r["rm_name"]
-    d = out_root / name
-    d.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(files["partial"], d / f"{name}.bin")
-    shutil.copyfile(files["clearing"], d / f"{name}_clear.bin")
-    manifest = {
-        "schema": 1,
-        "static_id": r["static_id"],
-        "rm_id": r["rm_id"],
-        "rm_name": name,
-        "clearing": {"file": f"{name}_clear.bin", "len": int(r["clearing_len"]),
-                     "crc32": r["clearing_crc32"].lower()},
-        "partial": {"file": f"{name}.bin", "len": int(r["partial_len"]),
-                    "crc32": r["partial_crc32"].lower()},
-        "built": r.get("built", "")[:10],
-        "vivado": r.get("vivado"),
-        "static_usercode": r.get("static_usercode"),
-        "build_receipt": receipt_path.name,
-    }
-    if r.get("ltx"):
-        shutil.copyfile(base / r["ltx"], d / f"{name}.ltx")
-        manifest["ltx"] = f"{name}.ltx"
-        manifest["ltx_crc32"] = r["ltx_crc32"].lower()
-    shutil.copyfile(receipt_path, d / receipt_path.name)
-    (d / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    return d
+        if not p.is_file():
+            checks.append(KitCheck(role, "mismatch", f"{p} is missing"))
+            continue
+        want_crc = r.get(f"{role}_crc32")
+        crc = hex32(crc32_file(p))
+        bad = []
+        if want_crc and not same_id(crc, want_crc):
+            bad.append(f"CRC-32 {crc}, the receipt says {want_crc}")
+        want_len = r.get(f"{role}_len")
+        if want_len and str(p.stat().st_size) != want_len:
+            bad.append(f"{p.stat().st_size} B, the receipt says {want_len}")
+        checks.append(KitCheck(role, "mismatch" if bad else "ok",
+                               f"{p.name}: " + ("; ".join(bad) + " (a file from another build, "
+                                                "or half-copied)" if bad else
+                                                f"{p.stat().st_size} B, CRC-32 {crc} as built")))
+    return checks
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("receipt", type=Path)
-    ap.add_argument("out_root", type=Path)
-    ap.add_argument("--store", type=Path)
-    a = ap.parse_args(argv)
-    d = pack(a.receipt, a.out_root)
-    print(f"overlay: {d}")
-    from pyverify.overlay import Overlay
-    sid = int(json.loads((d / "manifest.json").read_text())["static_id"], 16)
-    Overlay.load(d).validate(expected_static_id=sid)
-    print(f"pyverify Overlay.validate(expected_static_id=0x{sid:08X}): ok")
-    if a.store:
-        from harness_manager.services.store import ContentStore
-        from harness_manager_mps3.overlays import OverlayCatalogue, import_overlay
-        store = ContentStore(a.store)
-        sha = import_overlay(store, d)
-        cat = OverlayCatalogue(use_env=False, store=store)
-        for e in cat.entries():
-            print(f"catalogue: {e.ref.name} rm_id {e.ref.rm_id} static {e.ref.static_id} "
-                  f"usercode {e.ref.static_usercode} {e.ref.size_bytes} B, pair "
-                  f"{e.pair_check.value}: {e.pair_detail} (manifest blob {sha[:12]})")
-    return 0
+def load(path: Path) -> BuildReceipt:
+    """A receipt from its path, or the newest receipt in a build directory."""
+    p = Path(path)
+    if p.is_dir():
+        found = find_receipts(p)
+        if not found:
+            from harness_manager.core.errors import AbsentError
 
-
-if __name__ == "__main__":
-    sys.exit(main())
+            raise AbsentError(f"no build receipt in {p}",
+                              hint="build_rm.tcl writes <rm>_build.json in its OUT_DIR; "
+                                   "run the build first")
+        p = found[0]
+    return load_receipt(p)

@@ -1,39 +1,39 @@
 #!/usr/bin/env python3
-"""Spike (lane KIT-GUIDE): what Harness Manager can prove about a partial bitstream
-with no Vivado and no board.
+"""What Harness Manager can prove about a partial bitstream with no Vivado and no board.
 
-    partial_check.py PARTIAL [--clearing C] [--bin B] [--ref REF_PARTIAL]
-                     [--part xcku115-flvb1760-1-c] [--clearing-max 262144] [--json]
+Moved from the KIT-GUIDE spike (``tools/spike_kit_guide/partial_check.py``) into the
+MPS3 pack: the facts it checks were measured on this platform (7 RMs on 3 statics, and
+the fielded full image; docs/design/DUT_BUILD_GUIDE.md §4).
 
-PARTIAL and C may be a Vivado ``.bit`` (the ASCII header is read too) or the ICAP
-``.bin`` that ``write_bitstream -bin_file`` writes beside it (the same bytes with
-no header). ``--bin`` pairs a ``.bit`` with its ``.bin`` and proves they carry
-one payload. ``--ref`` is a partial of the SAME static and partition, e.g. the
-kit's greybox partial: every frame address the candidate writes must be inside
-the reference's frame box.
+``check(partial, clearing=..., bin_path=..., ref=...)`` reads a Vivado ``.bit`` (the
+ASCII header is read too) or the ICAP ``.bin`` that ``write_bitstream -bin_file``
+writes beside it (the same bytes with no header). ``bin_path`` pairs a ``.bit`` with
+its ``.bin`` and proves they carry one payload. ``ref`` is the partition's reference
+facts: a kit's ``rp.frames`` (``frames_of_pair`` computes them from a greybox pair when
+the kit is packed), so HM ships no 1.3 MB reference partial.
 
-How the packet stream is read. A configuration stream is a sync word
-(0xAA995566) then packets: a Type-1 header names a register and a word count, a
-Type-2 header carries a long word count for the register the Type-1 before it
-named. The walker always skips a packet's payload by its count, so frame data
-(megabytes of arbitrary words) is never read as headers: the failure mode that
-``fpga/dfx/tools/bit_identity.py`` warns about is a walker that does not skip.
-A stream it cannot walk to its end is reported as unparsed, never as clean.
+How the packet stream is read. A configuration stream is a sync word (0xAA995566) then
+packets: a Type-1 header names a register and a word count, a Type-2 header carries a
+long word count for the register the Type-1 before it named. The walker always skips a
+packet's payload by its count, so frame data (megabytes of arbitrary words) is never
+read as headers: the failure mode that the platform's ``fpga/dfx/tools/bit_identity.py``
+warns about is a walker that does not skip. A stream it cannot walk to its end is
+reported as unparsed (a mismatch), never as clean.
 
-Not wired into Harness Manager; the design doc (docs/design/DUT_BUILD_GUIDE.md,
-"Validation before deploy") says where it would live.
+The honest limit: a partial carries no static identity (every ``-cell`` write says
+``UserID=0XFFFFFFFF`` and the frame box is the same on every static of this partition).
+``static_binding`` is always UNCHECKED here; the build receipt and ``pr_verify`` bind it.
 """
 from __future__ import annotations
 
-import argparse
 import hashlib
-import json
 import struct
-import sys
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from harness_manager.core.pack import KitCheck
 
 SYNC = 0xAA995566
 DUMMY = 0xFFFFFFFF
@@ -192,8 +192,11 @@ def walk(data: bytes, start: int = 0, depth: int = 0) -> list[Section]:
 
 
 def summarise(path: Path) -> dict[str, Any]:
-    data = path.read_bytes()
-    header, off = read_header(data)
+    data = Path(path).read_bytes()
+    try:
+        header, off = read_header(data)
+    except (ValueError, struct.error):
+        header, off = {"e_len": "-1"}, len(data)      # a cut .bit header: nothing to walk
     payload = data[off:]
     tokens = {}
     if header.get("a"):
@@ -249,14 +252,17 @@ def summarise(path: Path) -> dict[str, Any]:
 
 @dataclass
 class Verdict:
-    items: list[dict[str, str]] = field(default_factory=list)
+    items: list[KitCheck] = field(default_factory=list)
 
     def add(self, check: str, state: str, detail: str) -> None:
-        self.items.append({"check": check, "state": state, "detail": detail})
+        self.items.append(KitCheck(check, state, detail))
 
     @property
     def refused(self) -> bool:
-        return any(i["state"] == "mismatch" for i in self.items)
+        return any(i.state == "mismatch" for i in self.items)
+
+    def states(self) -> dict[str, str]:
+        return {i.name: i.state for i in self.items}
 
 
 def _inside(box: dict[str, Any], ref: dict[str, Any]) -> bool:
@@ -270,8 +276,33 @@ def _inside(box: dict[str, Any], ref: dict[str, Any]) -> bool:
     return True
 
 
+def role_ref(ref: dict[str, Any] | None, role: str) -> dict[str, Any] | None:
+    """The reference facts for one role, from a kit's ``rp.frames`` (or a ``summarise``)."""
+    if not ref:
+        return None
+    if "frames" in ref and "cmds" in ref:              # a summarise() of a reference file
+        return {"by_block": ref["frames"]["by_block"], "cmds": ref["cmds"], "regs": ref["regs"]}
+    r = ref.get(role)
+    if not isinstance(r, dict) or "by_block" not in r:
+        return None
+    return {"by_block": r["by_block"], "cmds": list(r.get("cmds", [])),
+            "regs": list(r.get("regs", []))}
+
+
+def frames_of_pair(partial: Path, clearing: Path) -> dict[str, Any]:
+    """A kit's ``rp.frames`` from a reference pair of the partition (the mint's greybox,
+    or any overlay of the static): the frame box and vocabulary of each role."""
+    p, c = summarise(partial), summarise(clearing)
+    ids = sorted({x for sec in p["sections"] for x in sec["idcodes"]})
+    return {"idcode": ids[0] if len(ids) == 1 else "",
+            "partial": {"by_block": p["frames"]["by_block"], "cmds": p["cmds"], "regs": p["regs"]},
+            "clearing": {"by_block": c["frames"]["by_block"], "cmds": c["cmds"],
+                         "regs": c["regs"]},
+            "from": [Path(partial).name, Path(clearing).name]}
+
+
 def _stream_checks(v: Verdict, s: dict[str, Any], role: str, part: str,
-                   ref: dict[str, Any] | None) -> None:
+                   ref: dict[str, Any] | None, idcode: str = "") -> None:
     label = f"{role}: "
     h = s["header"]
     if s["kind"] == "bit":
@@ -289,6 +320,9 @@ def _stream_checks(v: Verdict, s: dict[str, Any], role: str, part: str,
         v.add(label + "stream", "mismatch", "no sync word: not a configuration stream")
     elif unparsed:
         v.add(label + "stream", "mismatch", f"packet walk failed: {unparsed[0]}")
+    elif any(x["end"] != "desync" for x in secs):
+        v.add(label + "stream", "mismatch", "the stream ends before DESYNC: a truncated or "
+                                            "half-copied file")
     else:
         v.add(label + "stream", "ok", f"{len(secs)} sections, every packet walked to DESYNC, "
               f"{sum(x['fdri_words'] for x in secs)} FDRI words, {s['frames']['far_distinct']} frames")
@@ -301,53 +335,62 @@ def _stream_checks(v: Verdict, s: dict[str, Any], role: str, part: str,
         names = [next((n for n, c in slrs.items() if (c & IDCODE_MASK) == (i & IDCODE_MASK)), None)
                  for i in ids]
         ok = bool(ids) and None not in names and len(set(names)) == 1
+        want = int(idcode, 16) & IDCODE_MASK if idcode else None
+        if ok and want is not None and any((i & IDCODE_MASK) != want for i in ids):
+            ok = False
+            names = [f"{n}, the partition is in 0x{want:08X}" for n in names]
         v.add(label + "idcode", "ok" if ok else "mismatch",
               ", ".join(f"0x{i:08X}={n or 'not ' + dev}" for i, n in zip(ids, names, strict=True))
-              + ("" if ok else " (a partial here writes exactly one SLR)"))
+              + ("" if ok else " (a partial here writes exactly the partition's one SLR)"))
     bad = sorted((set(s["cmds"]) & FORBIDDEN_CMDS) | (set(s["regs"]) & FORBIDDEN_REGS))
     v.add(label + "device_global_writes", "mismatch" if bad else "ok",
           f"writes {bad}" if bad else "no IPROG, AXSS, WBSTAR or SLR pass-through")
     v.add(label + "role", "ok" if s["role"] == role else "mismatch",
           f"the commands say {s['role']!r}" + ("" if s["role"] == role else f", expected {role!r}"
                                                 " (are the two files swapped?)"))
-    if ref is not None:
-        inside = _inside(s["frames"]["by_block"], ref["frames"]["by_block"])
-        v.add(label + "frame_box", "ok" if inside else "mismatch",
-              f"{s['frames']['by_block']} inside the reference's {ref['frames']['by_block']}"
-              if inside else f"{s['frames']['by_block']} is OUTSIDE the reference's "
-              f"{ref['frames']['by_block']}: another partition or another device")
-        extra = sorted((set(s["cmds"]) - set(ref["cmds"])) | (set(s["regs"]) - set(ref["regs"])))
-        v.add(label + "vocabulary", "mismatch" if extra else "ok",
-              f"writes {extra}, which the reference {role} never does" if extra
-              else f"commands and registers are a subset of the reference {role}'s")
+    if ref is None:
+        v.add(label + "frame_box", "unchecked", "no reference frames for this partition (the "
+              "kit carries none): the frame box and vocabulary were not compared")
+        return
+    box = s["frames"]["by_block"]
+    inside = _inside(box, ref["by_block"])
+    v.add(label + "frame_box", "ok" if inside else "mismatch",
+          f"{box} inside the partition's {ref['by_block']}" if inside else
+          f"{box} is OUTSIDE the partition's {ref['by_block']}: another partition or another device")
+    extra = sorted((set(s["cmds"]) - set(ref["cmds"])) | (set(s["regs"]) - set(ref["regs"])))
+    v.add(label + "vocabulary", "mismatch" if extra else "ok",
+          f"writes {extra}, which the reference {role} never does" if extra
+          else f"commands and registers are a subset of the reference {role}'s")
 
 
 def check(partial: Path, *, clearing: Path | None = None, bin_path: Path | None = None,
-          ref: Path | None = None, ref_clearing: Path | None = None,
-          part: str = "xcku115-flvb1760-1-c",
+          ref: dict[str, Any] | None = None, part: str = "xcku115-flvb1760-1-c",
           clearing_max: int = 262144) -> tuple[Verdict, dict[str, Any]]:
+    """Every stream check of a partial (and its clearing). ``ref`` is the kit's
+    ``rp.frames`` (or ``frames_of_pair``); without it the frame box is UNCHECKED."""
     v = Verdict()
+    partial = Path(partial)
     s = summarise(partial)
-    r = summarise(ref) if ref is not None else None
-    facts: dict[str, Any] = {"partial": s}
-    if r is not None:
-        facts["ref"] = {k: r[k] for k in ("file", "frames", "header", "role")}
-    _stream_checks(v, s, "partial", part, r)
+    idcode = str((ref or {}).get("idcode") or "")
+    facts: dict[str, Any] = {"partial": _public(s)}
+    _stream_checks(v, s, "partial", part, role_ref(ref, "partial"), idcode)
 
     if bin_path is not None:
-        b = summarise(bin_path)
+        b = summarise(Path(bin_path))
         same = b["payload_sha256"] == s["payload_sha256"]
         v.add("bit_bin_pair", "ok" if same else "mismatch",
-              f"{bin_path.name} {'carries' if same else 'does NOT carry'} the payload of {partial.name}")
+              f"{Path(bin_path).name} {'carries' if same else 'does NOT carry'} the payload of "
+              f"{partial.name}")
 
     if clearing is not None:
-        c = summarise(clearing)
-        rc = summarise(ref_clearing) if ref_clearing is not None else None
-        facts["clearing"] = {k: c[k] for k in ("file", "bytes", "frames", "crc32", "role")}
-        _stream_checks(v, c, "clearing", part, rc)
+        c = summarise(Path(clearing))
+        facts["clearing"] = _public(c)
+        _stream_checks(v, c, "clearing", part, role_ref(ref, "clearing"), idcode)
         pay = c["payload_bytes"]
         v.add("clearing_fits", "ok" if pay <= clearing_max else "mismatch",
-              f"clearing payload {pay} B of the {clearing_max} B the harness holds")
+              f"clearing payload {pay} B of the {clearing_max} B the harness holds"
+              + ("" if pay <= clearing_max else ": the harness would stage it to QSPI and the "
+                                                 "next swap-away fails closed"))
         inside = _inside(c["frames"]["by_block"], s["frames"]["by_block"])
         v.add("clearing_pairs_partial", "ok" if inside else "mismatch",
               f"the clearing's frames {c['frames']['by_block']} lie "
@@ -359,31 +402,5 @@ def check(partial: Path, *, clearing: Path | None = None, bin_path: Path | None 
     return v, facts
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("partial", type=Path)
-    ap.add_argument("--clearing", type=Path)
-    ap.add_argument("--bin", dest="bin_path", type=Path)
-    ap.add_argument("--ref", type=Path, help="a partial of the same partition (the kit's greybox)")
-    ap.add_argument("--ref-clearing", type=Path, help="that partial's clearing")
-    ap.add_argument("--part", default="xcku115-flvb1760-1-c")
-    ap.add_argument("--clearing-max", type=int, default=262144)
-    ap.add_argument("--json", action="store_true")
-    a = ap.parse_args(argv)
-    v, facts = check(a.partial, clearing=a.clearing, bin_path=a.bin_path, ref=a.ref,
-                     ref_clearing=a.ref_clearing,
-                     part=a.part, clearing_max=a.clearing_max)
-    for f in (facts.get("partial"), facts.get("ref")):
-        if isinstance(f, dict):
-            f.pop("_fars", None)
-    if a.json:
-        print(json.dumps({"refused": v.refused, "checks": v.items, "facts": facts}, indent=1))
-    else:
-        for i in v.items:
-            print(f"{i['state']:>9}  {i['check']:<32} {i['detail']}")
-        print("REFUSED" if v.refused else "PASSED (unchecked is not a pass: see the list)")
-    return 15 if v.refused else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+def _public(s: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in s.items() if not k.startswith("_")}

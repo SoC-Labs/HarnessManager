@@ -89,6 +89,85 @@ def preflight_refusal(items: Sequence[PreflightItem], overlay_name: str):
 
 
 @dataclass(frozen=True)
+class BuildProfile:
+    """What building a DUT for one static needs: the KIT-GUIDE pack hook (CCR KG-1).
+
+    A pack's ``KitAdapter.build_profile(static_id, kit)`` returns one. The facts come
+    from the static's build kit when there is one (``source == "kit"``), else from what
+    the pack itself knows (``"pack"``: its pin model), with ``vivado`` then unknown.
+    """
+
+    pack: str                 # "mps3"
+    static_id: str            # "0x72BB0A36"
+    part: str                 # "xcku115-flvb1760-1-c"
+    rp_inst: str              # "u_rp_dut"
+    rp_pblock: str            # "pblock_rp_dut"
+    boundary_ports: int       # 47
+    boundary_bits: int        # 148
+    clr_max: int              # the harness's clearing arena, bytes
+    vivado: str = ""          # the release the static was written by ("2024.1"); "" = unknown
+    vivado_build: int = 0
+    static_usercode: str = ""
+    harness_impl: str = ""    # "bare-metal" | "linux" | ""
+    kit_id: str = ""          # "mps3/0x72BB0A36/vivado-2024.1" when a kit backs the profile
+    user_design_ids: tuple[int, int] = (0x8000, 0xFFFF)   # rm_id[15:0] range for user RMs (K8)
+    source: str = "pack"      # "kit" | "pack"
+
+
+@dataclass(frozen=True)
+class KitCheck:
+    """One check of a build kit, a receipt or a partial pair (four states, unlike
+    ``PreflightItem``: a Vivado release mismatch is a warning, never a refusal, david K4)."""
+
+    name: str
+    state: str                # "ok" | "mismatch" | "warning" | "unchecked"
+    detail: str = ""
+    identity: bool = False    # a mismatch here means "built for a different static"
+
+
+def kit_refusal(items: Sequence[KitCheck], what: str):
+    """The error for failed kit checks, or None. Any ``mismatch`` refuses: an identity one
+    is ``IncompatibleError`` (14), any other ``RefusedError`` (15). ``warning`` and
+    ``unchecked`` never block (the ``preflight_refusal`` rule, with one more state)."""
+    from .errors import IncompatibleError, RefusedError
+
+    bad = [i for i in items if i.state == "mismatch"]
+    if not bad:
+        return None
+    text = "; ".join(f"{i.name}: {i.detail}" for i in bad[:4]) + (" ..." if len(bad) > 4 else "")
+    if any(i.identity for i in bad):
+        return IncompatibleError(f"{what} does not match ({text})",
+                                 hint="use the kit, build or board of the same static")
+    return RefusedError(f"{what} failed {len(bad)} check{'s' if len(bad) != 1 else ''} ({text})",
+                        hint="every check is listed with --json")
+
+
+@runtime_checkable
+class KitAdapter(Protocol):
+    """A board pack's DUT-build support (KIT-CORE; docs/design/DUT_BUILD_*.md).
+
+    Found by module convention, like the pin model: ``<pack package>.kit`` with
+    ``make_kit_adapter() -> KitAdapter``. A pack without that module has no build kit
+    (capability ``build_kit`` unavailable, with the reason). ``kit`` arguments are
+    ``harness_manager.services.kit.KitManifest`` objects.
+    """
+
+    def build_profile(self, static_id: str, kit: object | None = None) -> BuildProfile | None:
+        """The facts for building against ``static_id``; None if the pack knows nothing of it."""
+        ...
+
+    def check_kit(self, kit: object, identity: BoardIdentity | None) -> Sequence[KitCheck]:
+        """The kit against the board's live static: shell_id (identity), usercode (identity;
+        unchecked when the board does not report it), part. ``identity`` None = no board."""
+        ...
+
+    def kit_from_dir(self, directory: Path) -> tuple[dict, dict[str, Path]] | None:
+        """A kit.json document and its files ``{kit path: source file}`` for a directory of
+        loose mint files (a ``fielded/<sid>/`` or a mint ``prod/`` dir); None if it is not one."""
+        ...
+
+
+@dataclass(frozen=True)
 class DeployResult:
     rm_id: str
     verified: bool

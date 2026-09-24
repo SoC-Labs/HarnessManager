@@ -1,0 +1,2 @@
+# Byte-exact fixtures: kit.json records each file's sha256, so no line-ending conversion.
+* -text

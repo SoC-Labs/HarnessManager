@@ -1,0 +1,9 @@
+{
+  "schema": "mps3-static-stamp",
+  "schema_version": "1",
+  "generated_by": "tests/fakes/kit_fakes.py",
+  "static_id": "0x72BB0A36",
+  "stamped": true,
+  "harness_version": "1.0.0",
+  "usercode": "0xC8551081"
+}

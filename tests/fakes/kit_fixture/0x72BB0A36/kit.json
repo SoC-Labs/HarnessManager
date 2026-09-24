@@ -1,0 +1,133 @@
+{
+ "access": "public",
+ "board_type": "mps3",
+ "files": [
+  {
+   "crc32": "0x72BB0A36",
+   "path": "static/static_routed_locked.dcp",
+   "role": "locked_static",
+   "sha256": "09c78fafb5b765ad703710e6b2b4bc0166c37dad184ef8b69dfccd5b0c2a0b3c",
+   "size": 537
+  },
+  {
+   "path": "static/static_stamp.json",
+   "role": "stamp",
+   "sha256": "69ebe7581a4cfac43266430813e550497abb9769a955d5b40b6cb346aab3ccdc",
+   "size": 213
+  }
+ ],
+ "generated_by": "tests/fakes/kit_fakes.py (a FAKE DCP: not a Vivado checkpoint)",
+ "harness_impl": "bare-metal",
+ "ip_class": "open",
+ "licence_note": "the locked static DCP holds AMD IP netlists (MicroBlaze, AXI peripherals, debug_bridge, ...), encrypted where AMD secures them, and the SoC Labs shell netlist; it holds no Arm IP",
+ "part": "xcku115-flvb1760-1-c",
+ "pr_verify_ref": "static/static_routed_locked.dcp",
+ "rp": {
+  "bits": 148,
+  "clr_max": 262144,
+  "frames": {
+   "clearing": {
+    "by_block": {
+     "0": {
+      "columns": [
+       101,
+       193
+      ],
+      "rows": [
+       0,
+       1
+      ]
+     }
+    },
+    "cmds": [
+     "AGHIGH",
+     "DESYNC",
+     "MFW",
+     "NULL",
+     "RCRC",
+     "SHUTDOWN",
+     "WCFG"
+    ],
+    "regs": [
+     "CMD",
+     "COR0",
+     "CRC",
+     "CTL0",
+     "CTL1",
+     "FAR",
+     "FDRI",
+     "IDCODE",
+     "MASK",
+     "MFWR"
+    ]
+   },
+   "from": [
+    "config_rm_dbg_demo_pblock_rp_dut_partial.bin",
+    "config_rm_dbg_demo_pblock_rp_dut_partial_clear.bin"
+   ],
+   "idcode": "0x0390D093",
+   "partial": {
+    "by_block": {
+     "0": {
+      "columns": [
+       94,
+       200
+      ],
+      "rows": [
+       0,
+       1
+      ]
+     },
+     "1": {
+      "columns": [
+       6,
+       11
+      ],
+      "rows": [
+       0,
+       1
+      ]
+     }
+    },
+    "cmds": [
+     "DESYNC",
+     "GRESTORE",
+     "LFRM",
+     "MFW",
+     "NULL",
+     "RCRC",
+     "SHUTDOWN",
+     "START",
+     "WCFG"
+    ],
+    "regs": [
+     "CMD",
+     "COR0",
+     "CRC",
+     "CTL0",
+     "CTL1",
+     "FAR",
+     "FDRI",
+     "IDCODE",
+     "MASK",
+     "MFWR"
+    ]
+   }
+  },
+  "inst": "u_rp_dut",
+  "pblock": "pblock_rp_dut",
+  "ports": 47
+ },
+ "schema": "hm-rm-kit",
+ "schema_version": 1,
+ "source": {
+  "fixture": true
+ },
+ "static_id": "0x72BB0A36",
+ "static_usercode": "0xC8551081",
+ "vivado": {
+  "build": 5076996,
+  "checkpoint_version": 22,
+  "release": "2024.1"
+ }
+}
