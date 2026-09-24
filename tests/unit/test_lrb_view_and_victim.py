@@ -20,6 +20,17 @@ from tests.fakes.lrb_rig import BID, BOB, CAROL, DAVID, World
 VIEW_KEYS = {"lease", "hub", "queue", "request", "incoming", "taken"}
 
 
+@pytest.fixture(autouse=True)
+def _no_real_hub(monkeypatch):
+    """Nothing here may reach the real hub: a revoke kicks a real person."""
+    from harness_manager_mps3 import hub as hubmod
+
+    def refuse(host, group):
+        raise AssertionError(f"a test tried to reach the real hub {host}")
+
+    monkeypatch.setattr(hubmod, "DEFAULT_RUNNER_FACTORY", refuse)
+
+
 @pytest.fixture
 def world(tmp_path):
     w = World(tmp_path)
@@ -142,21 +153,10 @@ def test_negative_twin_a_session_that_does_not_hold_it_does_not_poll_requests(wo
     assert world.calls(BOB, "list_requests") == [] and b.of("lease.wanted") == []
 
 
-# --- the victim, when fpgahub's history has no admin_revoked entry -----------------------------------
+# --- the victim, for a client whose module has no taken_from_history -----------------------------
 
 
-def test_victim_without_admin_revoked_in_history_names_the_requester_it_was_sent(world):
-    world.hub.history_has_revoke = False                       # fpgahub 0.3.0's target history
-    a, b = world.holding(), world.session(BOB)
-    note = world.queued_by_hand(BOB, age_s=200)
-    a.svc.watch_due(force=True)                                # david's session saw the request
-    b.svc.force(BID, b.hub, confirm=True)
-    a.svc.beat_due(force=True)
-    (taken,) = a.of("lease.taken")
-    assert taken["by"] == BOB and taken["reason"] == force_reason(BOB, note.created_at)
-
-
-def test_negative_twin_no_revoke_entry_and_no_request_is_lost_not_taken(world):
+def test_no_revoke_entry_in_the_history_is_lost_not_taken(world):
     world.hub.history_has_revoke = False
     a = world.holding()
     world.hub.expire()

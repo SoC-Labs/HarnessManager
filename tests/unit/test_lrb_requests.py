@@ -28,6 +28,17 @@ from tests.fakes.lrb_fake_hub import HOST, TARGET, iso
 from tests.fakes.lrb_rig import BID, BOB, CAROL, DAVID, World
 
 
+@pytest.fixture(autouse=True)
+def _no_real_hub(monkeypatch):
+    """Nothing here may reach the real hub: a revoke kicks a real person."""
+    from harness_manager_mps3 import hub as hubmod
+
+    def refuse(host, group):
+        raise AssertionError(f"a test tried to reach the real hub {host}")
+
+    monkeypatch.setattr(hubmod, "DEFAULT_RUNNER_FACTORY", refuse)
+
+
 @pytest.fixture
 def world(tmp_path):
     w = World(tmp_path)
@@ -195,8 +206,8 @@ def test_force_is_refused_before_the_deadline_and_allowed_after(world):
     world.queued_by_hand(BOB, age_s=30)                      # bob's note, from another process
     with pytest.raises(ForceTooEarlyError) as exc:
         b.svc.force(BID, b.hub, confirm=True)
-    assert exc.value.code == ExitCode.USAGE and exc.value.time_left_s == 90
-    assert "90 s left" in exc.value.message
+    assert exc.value.code == ExitCode.UNAVAILABLE and exc.value.time_left_s == 90   # 422
+    assert "90 s left" in exc.value.message and exc.value.data["time_left_s"] == 90
     assert world.hub.revokes == [] and world.hub.current["holder"] == DAVID
     world.clock.advance(90)
     out = b.svc.force(BID, b.hub, confirm=True)
@@ -535,21 +546,69 @@ def test_a_second_request_while_one_waits_is_refused(world):
 
 
 def test_requests_need_a_hub_client_that_can_carry_them(tmp_path):
+    from harness_manager.core.errors import HarnessError
     from tests.fakes.l1_fake_hub import FakeHub
     from tests.unit.test_l1_lease import Hub
 
-    fake = FakeHub()
+    class L1OnlyClient:                                       # show/acquire/heartbeat/release only
+        def __init__(self):
+            self.calls = []
+
+        def __getattr__(self, name):
+            if name.startswith("lease_") and name not in ("lease_status", "lease_revoke",
+                                                          "lease_history"):
+                return lambda *a, **k: self.calls.append(name)
+            raise AttributeError(name)
+
+    class Ref:
+        host, target = HOST, TARGET
+        client = L1OnlyClient()
+
     svc = LeaseService(tmp_path / "s", tick_s=3600.0)
+    fake = FakeHub()                                          # an fpgahub without whoami
     try:
         with pytest.raises(UnavailableError) as exc:
-            svc.request(BID, Hub(fake))
-        assert "list_requests" in exc.value.message or "lease_status" in exc.value.message
-        assert fake.calls == []
+            svc.request(BID, Ref())
+        assert "lease_status" in exc.value.message and Ref.client.calls == []
         with pytest.raises(UnavailableError):
             svc.request(BID, None)                             # not behind a hub at all
+        with pytest.raises(HarnessError):                      # the hub cannot say who we are
+            svc.request(BID, Hub(fake))
+        assert [c[1] for c in fake.calls] == ["whoami"]        # nothing queued, no note
     finally:
         svc.close()
         fake.close()
+
+
+# --- the same person in two sessions (CCR-A2) ---------------------------------------------------
+
+
+def test_a_request_is_refused_when_our_principal_already_holds_it(world):
+    world.holding(BOB, name="bob-desk")                       # bob's other session holds it
+    b = world.session(BOB, name="bob-laptop")
+    n = len(world.hub.calls)
+    with pytest.raises(AlreadyError) as exc:
+        b.svc.request(BID, b.hub)
+    assert "another session" in exc.value.message
+    assert [v for _p, v in world.hub.calls[n:]] == ["principal", "lease_status"]   # no queue, no note
+    assert world.hub.queue == [] and world.hub.notes == {}
+    same = world.sessions[0]                                  # this session holds it
+    with pytest.raises(AlreadyError) as exc:
+        same.svc.request(BID, same.hub)
+    assert "another session" not in exc.value.message
+    c = world.session(CAROL)                                  # twin: another principal queues
+    world.clock.after(5, lambda: c.svc.leave(BID, c.hub))
+    with pytest.raises(ActionFailedError):
+        c.svc.request(BID, c.hub)
+    assert c.of("lease.left") == [{}]
+
+
+def test_force_is_refused_when_our_principal_already_holds_it(world):
+    world.holding(BOB, name="bob-desk")
+    b = world.session(BOB, name="bob-laptop")
+    with pytest.raises(AlreadyError):
+        b.svc.force(BID, b.hub, confirm=True)
+    assert world.hub.revokes == []
 
 
 # --- as the daemon runs it: the request in a job thread, force or leave from another ----------

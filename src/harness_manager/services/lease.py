@@ -77,6 +77,7 @@ import os
 import re
 import secrets
 import socket
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -291,20 +292,26 @@ def force_check(note: Any, answer: Any, position: int, now: float) -> ForceCheck
     return ForceCheck(True)
 
 
-class ForceTooEarlyError(UsageError):
-    """Force refused because the holder still has time to answer (the spec's 422 case)."""
+class ForceTooEarlyError(UnavailableError):
+    """Force refused because the holder still has time to answer: UNAVAILABLE, the spec's 422
+    "with the time left". ``data`` carries ``time_left_s`` (and the request id) for the API."""
 
-    def __init__(self, message: str, *, time_left_s: int, hint: str = "") -> None:
-        super().__init__(message, hint=hint)
+    def __init__(self, reason: str, *, time_left_s: int, request_id: str = "", hint: str = "") -> None:
+        super().__init__("force-release", reason)
+        self.hint = hint
         self.time_left_s = time_left_s
+        self.data = {"time_left_s": time_left_s, "request_id": request_id}
 
 
 class ForceRefusedError(RefusedError):
-    """Force refused: answered, not at the head of the queue, or no request (409)."""
+    """Force refused: answered, not at the head of the queue, or no request (409 REFUSED).
+    ``data`` carries ``time_left_s`` (a keep's) and the request id."""
 
-    def __init__(self, message: str, *, time_left_s: int = 0, hint: str = "") -> None:
+    def __init__(self, message: str, *, time_left_s: int = 0, request_id: str = "",
+                 hint: str = "") -> None:
         super().__init__(message, hint=hint)
         self.time_left_s = time_left_s
+        self.data = {"time_left_s": time_left_s, "request_id": request_id}
 
 
 def _answer_public(answer: Any) -> dict[str, Any] | None:
@@ -450,13 +457,20 @@ class _Outgoing:
 class _Incoming:
     """Requests for a lease we hold, as the holder's poll last saw them."""
 
-    notes: dict[str, Any] = field(default_factory=dict)   # id -> note (kept after it goes)
-    announced: set[str] = field(default_factory=set)
+    announced: dict[str, float] = field(default_factory=dict)   # id -> its created_at (wall)
     answered: dict[str, float] = field(default_factory=dict)  # id -> hidden until (wall)
 
 
 def _hk(hub: Any) -> tuple[str, str]:
     return (hub.host, hub.target)
+
+
+def _pack_attr(client: Any, name: str, default: Any = None) -> Any:
+    """``name`` from the module that defines the hub client (the MPS3 pack's ``hub``), so the
+    notes the service writes are the client's own classes (it checks them) and the victim is
+    told by the pack's reading of its hub's history; ``default`` for any other client."""
+    mod = sys.modules.get(type(client).__module__)
+    return getattr(mod, name, default) if mod is not None else default
 
 
 class LeaseService:
@@ -764,7 +778,9 @@ class LeaseService:
         except _Cancelled:
             removed = False
             with contextlib.suppress(HarnessError):
-                removed = hub.client.lease_cancel(holder)
+                # By PRINCIPAL (CCR-A3): over the hub's unix socket we are an admin, whose
+                # --holder is taken literally, so the name we asked for cancels nothing.
+                removed = hub.client.lease_cancel(self._principal(hub) or holder)
             raise ActionFailedError(
                 f"the lease request for {hub.target} was cancelled"
                 + ("; its queue entry was removed" if removed else ""),
@@ -850,6 +866,15 @@ class LeaseService:
         self._need(hub, "lease_status", "put_request", "list_requests", "get_answer",
                    "delete_request")
         principal = self._principal(hub, required=True)
+        status = self._show(hub, fresh=True)
+        if status.held and status.holder == principal:
+            # CCR-A2: fpgahub keys leases on the principal, so an acquire would hand this
+            # session the lease another session of ours holds, token and all. Refuse.
+            ours = self.store.get(hub.host, hub.target)
+            raise AlreadyError(f"you already hold {hub.target}"
+                               + ("" if ours is not None else " (another session)"),
+                               hint="use it there, or release it there first")
+        asked = status.holder if status.held else ""
         key = _hk(hub)
         cancel = cancel or threading.Event()
         gate = board_id or f"{hub.host}/{hub.target}"
@@ -877,7 +902,7 @@ class LeaseService:
                     report("queued", position, 0)
                     self._emit(board_id, hub, "queued", principal)
                     out = self._open_request(board_id, hub, holder, ttl_s, message, principal,
-                                             cancel, heartbeat)
+                                             cancel, heartbeat, asked)
                     report("notified", 0, 0)
                 self._moved(out, position, principal, report)
                 answered = self._poll_answer(out, report)
@@ -943,13 +968,13 @@ class LeaseService:
         return lease, expires_at, 0
 
     def _open_request(self, board_id: str, hub: Any, holder: str, ttl_s: int, message: str,
-                      principal: str, cancel: threading.Event, heartbeat: bool) -> _Outgoing:
-        """Our note on the hub: the one already there (its countdown stands), else a new one."""
-        status = self._show(hub, fresh=True)
-        asked = (getattr(status, "holder", "") or "") if getattr(status, "held", False) else ""
+                      principal: str, cancel: threading.Event, heartbeat: bool,
+                      asked: str) -> _Outgoing:
+        """Our note on the hub: the one already there (its countdown stands), else a new one.
+        ``asked`` is who held the board when we queued."""
         ours = self._latest_of(list(hub.client.list_requests() or []), principal)
         if ours is None:
-            ours = self._new_note(principal, message)
+            ours = self._new_note(hub, principal, message)
             hub.client.put_request(ours)
         out = _Outgoing(board_id, hub, holder, ttl_s, ours, heartbeat=heartbeat, cancel=cancel,
                         asked_holder=asked)
@@ -958,9 +983,10 @@ class LeaseService:
         self._forget(hub)
         return out
 
-    def _new_note(self, principal: str, message: str) -> RequestNote:
+    def _new_note(self, hub: Any, principal: str, message: str) -> Any:
         now = self._wall()
-        return RequestNote(id=f"{int(now)}-{secrets.token_hex(4)}", by=principal,
+        cls = _pack_attr(hub.client, "RequestNote", RequestNote)
+        return cls(id=f"{int(now)}-{secrets.token_hex(4)}", by=principal,
                            user=_local_user(), host=socket.gethostname().split(".")[0],
                            message=message, created_at=iso_utc(now),
                            deadline_at=iso_utc(now + REQUEST_WINDOW_S))
@@ -984,7 +1010,7 @@ class LeaseService:
         hub = out.hub
         with contextlib.suppress(HarnessError):
             hub.client.delete_request(out.note.id)
-        note = self._new_note(principal, getattr(out.note, "message", ""))
+        note = self._new_note(hub, principal, getattr(out.note, "message", ""))
         hub.client.put_request(note)
         log.info("%s now holds %s; the request was sent to them (deadline %s)", holder, hub.target,
                  note.deadline_at)
@@ -1108,8 +1134,8 @@ class LeaseService:
             raise AbsentError(f"no request {request_id} for {hub.target} (withdrawn, or it expired)",
                               hint="list the requests again")
         now = self._wall()
-        reply = AnswerNote(id=request_id, answer=answer, minutes=minutes, message=message,
-                           at=iso_utc(now))
+        reply = _pack_attr(hub.client, "AnswerNote", AnswerNote)(
+            id=request_id, answer=answer, minutes=minutes, message=message, at=iso_utc(now))
         if answer == "release":
             released = self._release_stored(board_id, hub, stored)   # the hub promotes the head
             try:
@@ -1141,16 +1167,15 @@ class LeaseService:
         principal = self._principal(hub, required=True)
         status = self._show(hub, fresh=True)
         holder = default_holder()
+        if status.held and status.holder == principal:
+            ours = self.store.get(hub.host, hub.target)
+            raise AlreadyError(f"{hub.target} is already yours"
+                               + ("" if ours is not None else " (another session holds it)")
+                               + "; there is nothing to force",
+                               hint="release it there first if this session should have it")
         with self._mu:
             out = self._outgoing.get(_hk(hub))
         ttl_s = out.ttl_s if out is not None else DEFAULT_REQUEST_TTL_S
-        if status.held and status.holder == principal:
-            # Already ours (a force that revoked but did not finish, or a release): the
-            # re-acquire hands back the token the hub holds for us.
-            lease, expires_at, _pos = self._acquire_once(hub, holder, ttl_s)
-            if lease is not None:
-                return self._granted(board_id, hub, holder, lease, expires_at, ttl_s,
-                                     heartbeat=heartbeat, already=True)
         if out is not None and out.asked_holder and status.held and \
                 status.holder not in (out.asked_holder, principal):
             # Someone ahead of us got the board since we asked: its holder was never asked.
@@ -1158,7 +1183,7 @@ class LeaseService:
             raise ForceRefusedError(
                 f"force-release of {hub.target} is refused: {status.holder} holds it now and was "
                 f"not asked; the request was sent to them (deadline {out.note.deadline_at})",
-                time_left_s=REQUEST_WINDOW_S)
+                time_left_s=REQUEST_WINDOW_S, request_id=out.note.id)
         notes = self._notes(hub, fresh=True)
         note = self._latest_of(notes, principal)
         answer = self._answer(hub, note.id, fresh=True) if note is not None else None
@@ -1169,12 +1194,13 @@ class LeaseService:
             check = ForceCheck(False, f"nobody holds {hub.target} now: there is nothing to force; "
                                       "your queued request is granted at its next poll", "refused")
         if not check.available:
+            rid = getattr(note, "id", "") if note is not None else ""
             if check.kind == "early":
-                raise ForceTooEarlyError(f"force-release of {hub.target} is not available yet: "
-                                         f"{check.reason}", time_left_s=check.time_left_s,
+                raise ForceTooEarlyError(f"{hub.target}: {check.reason}",
+                                         time_left_s=check.time_left_s, request_id=rid,
                                          hint="wait for the answer or the deadline")
             raise ForceRefusedError(f"force-release of {hub.target} is refused: {check.reason}",
-                                    time_left_s=check.time_left_s)
+                                    time_left_s=check.time_left_s, request_id=rid)
         victim = status.holder
         reason = force_reason(principal, note.created_at)
         revoked = hub.client.lease_revoke(reason)
@@ -1213,8 +1239,10 @@ class LeaseService:
         self._publish(TOPIC_TAKEN, board_id, dict(taken))
 
     def _find_taken(self, hub: Any, stored: StoredLease, new_holder: str) -> dict[str, str] | None:
-        mine = {stored.principal, stored.holder, self._principal(hub)} - {""}
-        since = stored.acquired_at or 0.0
+        """``{by, reason, at}`` for a forced release of ``stored``, or None (it expired, or it
+        went some other way). The pack reads its own hub's history (``taken_from_history``:
+        fpgahub 0.3.0 keeps ``admin_revoked`` out of a target's history, so LR-A's client
+        merges its revoke notes in); any other client's history is read here."""
         history: list[Any] = []
         fn = getattr(hub.client, "lease_history", None)
         if callable(fn):
@@ -1222,6 +1250,16 @@ class LeaseService:
                 history = list(fn() or [])
             except HarnessError as exc:
                 log.warning("lease history for %s: %s", hub.target, exc.message)
+                return None
+        holder = stored.principal or self._principal(hub) or stored.holder
+        reader = _pack_attr(hub.client, "taken_from_history")
+        if callable(reader):
+            got = reader(history, holder)
+            if not got:
+                return None
+            return {k: str(got.get(k, "") or "") for k in ("by", "reason", "at")}
+        mine = {stored.principal, stored.holder, holder} - {""}
+        since = stored.acquired_at or 0.0
         best: dict[str, Any] | None = None
         for entry in history:
             if not isinstance(entry, dict):
@@ -1235,32 +1273,13 @@ class LeaseService:
             if at is not None and since and at < since - HISTORY_SLACK_S:
                 continue                           # an older revoke, before this lease
             best = entry                           # history is oldest first: keep the last
-        if best is not None:
-            reason = str(best.get("reason", "") or "")
-            m = _FORCER.search(reason)
-            by = m.group(1) if m else str(best.get("by") or new_holder or "")
-            return {"by": by, "reason": reason,
-                    "at": str(best.get("ts") or best.get("at") or iso_utc(self._wall()))}
-        # No admin_revoked entry to read (fpgahub 0.3.0 keeps it out of a target's history):
-        # a request from the new holder that we were asked is the evidence of a force.
-        note = self._request_from(hub, new_holder)
-        if note is None:
+        if best is None:
             return None
-        return {"by": new_holder, "reason": force_reason(new_holder, note.created_at),
-                "at": iso_utc(self._wall())}
-
-    def _request_from(self, hub: Any, who: str) -> Any:
-        if not who:
-            return None
-        with self._mu:
-            inc = self._incoming.get(_hk(hub))
-            seen = [n for n in (inc.notes.values() if inc else ()) if getattr(n, "by", "") == who]
-        if seen:
-            return seen[-1]
-        try:
-            return self._latest_of(self._notes(hub, fresh=True), who)
-        except HarnessError:
-            return None
+        reason = str(best.get("reason", "") or "")
+        m = _FORCER.search(reason)
+        by = m.group(1) if m else str(best.get("by") or new_holder or "")
+        return {"by": by, "reason": reason,
+                "at": str(best.get("ts") or best.get("at") or iso_utc(self._wall()))}
 
     # -- heartbeat --------------------------------------------------------------------------------
 
@@ -1388,14 +1407,11 @@ class LeaseService:
             for note in notes:
                 if getattr(note, "by", "") in ("", principal):
                     continue
-                inc.notes[note.id] = note
                 if note.id not in inc.announced:
-                    inc.announced.add(note.id)
+                    inc.announced[note.id] = parse_utc(getattr(note, "created_at", "")) or wall
                     new.append(note)
-            for nid in [k for k, n in inc.notes.items()
-                        if wall - (parse_utc(getattr(n, "created_at", "")) or wall) > NOTE_MAX_AGE_S]:
-                inc.notes.pop(nid, None)
-                inc.announced.discard(nid)
+            for nid in [k for k, t in inc.announced.items() if wall - t > NOTE_MAX_AGE_S]:
+                inc.announced.pop(nid, None)
                 inc.answered.pop(nid, None)
         for note in new:
             self._publish(TOPIC_WANTED, board_id,
