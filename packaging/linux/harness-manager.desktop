@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Harness Manager
+GenericName=MPS3 Board Manager
+Comment=Program, debug and watch nanoSoC DUTs on Arm MPS3 FPGA boards
+Exec="@LAUNCHER@" app
+TryExec=@LAUNCHER@
+Icon=@ICON@
+Terminal=false
+Categories=Development;Electronics;
+Keywords=MPS3;FPGA;nanoSoC;SoC Labs;board;harness;
+StartupNotify=false
+StartupWMClass=harness-manager
+Actions=demo;
+X-HarnessManager-Installer=scripts/install.sh
+
+[Desktop Action demo]
+Name=Open with Demo Boards
+Exec="@LAUNCHER@" app --demo

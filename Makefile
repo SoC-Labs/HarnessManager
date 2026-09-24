@@ -5,9 +5,12 @@
 #   make hil     hardware-in-the-loop read-only tier (board window + lease only)
 #
 # Release (lane L5):
-#   make dist            sdist + wheel in dist/, with the vendored pyverify wheel and SHA256SUMS
+#   make dist            sdist + wheel in dist/, with the vendored pyverify wheel, constraints.txt
+#                        and SHA256SUMS
 #   make install-local   install this checkout for your user (scripts/install.sh; INSTALL_ARGS=...)
 #   make smoke-install   install, run and uninstall in a throwaway HOME (scripts/smoke_install.sh)
+#   make wheelhouse      every wheel for an offline install, in dist/wheelhouse (WHEELHOUSE_ARGS=...)
+#   make lock            re-pin constraints.txt (needs uv; LOCK_ARGS=--upgrade moves every pin)
 #   make vendor-pyverify rebuild vendor/mps3_pyverify-*.whl from $(PLATFORM) at PLATFORM_REF
 
 PY        ?= python3.11
@@ -20,9 +23,12 @@ PLATFORM_REF ?= HEAD
 PYVERIFY  ?= $(if $(wildcard $(PLATFORM)/host/pyverify/pyproject.toml),$(PLATFORM)/host/pyverify,)
 PYVERIFY_WHEEL = $(firstword $(wildcard vendor/mps3_pyverify-*.whl))
 INSTALL_ARGS ?=
+WHEELHOUSE_ARGS ?=
+LOCK_ARGS ?=
 BIN        = $(VENV)/bin
 
-.PHONY: venv check lint test hil web-deps clean dist install-local smoke-install vendor-pyverify
+.PHONY: venv check lint test hil web-deps clean dist install-local smoke-install vendor-pyverify \
+	wheelhouse lock
 
 venv: $(BIN)/harness-manager
 
@@ -58,7 +64,7 @@ hil: venv
 dist: venv
 	rm -rf dist
 	$(BIN)/python -m build --outdir dist .
-	cp $(PYVERIFY_WHEEL) dist/
+	cp $(PYVERIFY_WHEEL) constraints.txt dist/
 	cd dist && $(CURDIR)/$(BIN)/python -c "import hashlib, pathlib; \
 	print(''.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n' \
 	for p in sorted(pathlib.Path('.').iterdir()) if p.name != 'SHA256SUMS'), end='')" > SHA256SUMS
@@ -69,6 +75,13 @@ install-local:
 
 smoke-install:
 	scripts/smoke_install.sh $(INSTALL_ARGS)
+
+# Build it with the Python version of the machine you will install on (--python PY).
+wheelhouse:
+	scripts/make_wheelhouse.sh $(WHEELHOUSE_ARGS) dist/wheelhouse
+
+lock:
+	scripts/lock_deps.sh $(LOCK_ARGS)
 
 vendor-pyverify:
 	PYTHON=$(if $(wildcard $(BIN)/python),$(BIN)/python,python3) scripts/vendor_pyverify.sh $(PLATFORM) $(PLATFORM_REF)

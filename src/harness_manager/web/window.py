@@ -95,11 +95,31 @@ def app_mode_env(environ: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def pywebview_backend_missing() -> str | None:
+    """Why pywebview cannot open a window here, or None.
+
+    Install lane Q3 (product code, for the install): on Linux pywebview needs GTK
+    (``gi``, PyGObject) or Qt (``qtpy``) bindings, which the installer's venv does not
+    have. pywebview then printed two tracebacks before failing, on every ``app``.
+    Skip it quietly; the Chrome/Chromium app window is the Linux path.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
+    import importlib.util
+
+    if importlib.util.find_spec("gi") or importlib.util.find_spec("qtpy"):
+        return None
+    return "pywebview has no GTK or Qt bindings here"
+
+
 def _try_pywebview(url: str) -> Launched | None:
     try:
         import webview  # type: ignore[import-not-found]
     except ImportError:
         return None
+    missing = pywebview_backend_missing()
+    if missing:
+        return Launched("none", missing)
     try:
         webview.create_window(TITLE, url, width=WINDOW_SIZE[0], height=WINDOW_SIZE[1])
         webview.start()                      # blocks until the window closes

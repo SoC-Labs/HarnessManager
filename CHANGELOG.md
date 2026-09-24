@@ -18,6 +18,25 @@ owners.
   through pywebview), `--from` a checkout, a wheel or a git URL.
 - pyverify, the MPS3 shell codec, ships as a wheel in `vendor/`, with the platform commit
   it came from and its sha256 (`vendor/README.md`). It is not on PyPI.
+- Tested dependency versions: `constraints.txt` pins every dependency for Python 3.10 and
+  newer, and the installer uses it, so every install of a release gets the same
+  packages. `--latest` takes the newest instead; `make lock` re-pins.
+- Linux: **Harness Manager** in the desktop's application menu, with an
+  **Open with Demo Boards** action (`--no-desktop` skips it). It is written on a server
+  with no display too, for a later remote desktop such as ThinLinc.
+- No network: `scripts/make_wheelhouse.sh` (or `make wheelhouse`) collects every wheel,
+  and `install.sh --offline DIR` installs from it without the package index.
+- The installer finds a Python 3.10+ beside an older `python3` (RHEL 8's 3.6, Rocky 9's
+  3.9), and when there is none it lists what it found and prints the package to install
+  for your distribution, or the uv one-liner.
+- The installer is safe to run twice at once (the second stops and names the first),
+  safe to interrupt (a re-run resumes), checks it can write before it starts, refuses
+  `sudo`, keeps your extras and menu choice across upgrades, explains a missing network
+  or proxy, and prints the full path of the command when `~/.local/bin` is not on PATH.
+- `harness-manager app` with `--with-app` on Linux no longer prints two pywebview
+  tracebacks: without GTK or Qt bindings it goes straight to the Chrome app window.
+- CI installs from a checkout on Rocky Linux 8 and 9, Ubuntu 22.04 and 24.04, Debian 12
+  and Fedora, with only each distribution's prerequisites, and once with no network.
 
 ### The app and the command
 - `harness-manager app`: the web UI in its own window (pywebview, or a Chrome, Edge or
@@ -79,4 +98,5 @@ owners.
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
 - Windows and macOS run the unit tests and the installer in CI; they have not been used
-  with a real board.
+  with a real board. `install.ps1` does not yet use `constraints.txt`, the wheelhouse or
+  a Start-menu entry.

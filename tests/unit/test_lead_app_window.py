@@ -93,6 +93,9 @@ def _fake_webview(monkeypatch, *, fail: bool) -> list:
 
     mod.start = start
     monkeypatch.setitem(sys.modules, "webview", mod)
+    # A pywebview with its GUI bindings (on Linux, GTK or Qt): tests/unit/test_q3_window.py
+    # covers the Linux venv that has neither.
+    monkeypatch.setattr(window, "pywebview_backend_missing", lambda: None)
     return seen
 
 

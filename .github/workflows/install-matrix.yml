@@ -1,0 +1,127 @@
+# Harness Manager install matrix: scripts/install.sh from a checkout, on the Linux
+# distributions people use, each with only the prerequisites a user would install.
+#
+# Each job runs scripts/smoke_install.sh inside the distribution's container. That
+# installs into a throwaway HOME, checks `harness-manager --version`, the desktop menu
+# entry, `harness-manager ui --demo --no-browser` and the page it serves (with its CSP
+# header and /api/v1/health), re-runs the installer (an upgrade in place), and
+# uninstalls. The `prereq` line of each entry is exactly what docs/INSTALL.md tells a
+# user of that distribution to install.
+#
+# One more job installs from a wheelhouse in a container with NO network.
+name: Install matrix
+
+on:
+  push:
+    branches: [main, "ci/**"]
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "packaging/**"
+      - "vendor/**"
+      - "pyproject.toml"
+      - "constraints.txt"
+      - ".github/workflows/install-matrix.yml"
+  schedule:
+    - cron: "23 5 * * 1"     # Mondays: new distribution images, new Pythons
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  distro:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # python3 is 3.6 on EL8: the installer must pick python3.12 on its own.
+          - name: Rocky Linux 8 (python3 is 3.6; python3.12 alongside)
+            image: rockylinux/rockylinux:8
+            prereq: dnf install -y python3 python3.12 git tar
+          # python3 is 3.9 on EL9: too old; python3.12 is an AppStream package.
+          - name: Rocky Linux 9 (python3.12)
+            image: rockylinux/rockylinux:9
+            prereq: dnf install -y python3.12 git-core tar
+          # No Python >= 3.10 at all, and no root needed for one: uv downloads it.
+          - name: Rocky Linux 9 (uv, no Python 3.10+)
+            image: rockylinux/rockylinux:9
+            prereq: dnf install -y git-core tar
+            uv: true
+          - name: Ubuntu 22.04 (Python 3.10)
+            image: ubuntu:22.04
+            prereq: apt-get update && apt-get install -y --no-install-recommends python3 python3-venv git curl ca-certificates
+          - name: Ubuntu 24.04 (Python 3.12)
+            image: ubuntu:24.04
+            prereq: apt-get update && apt-get install -y --no-install-recommends python3 python3-venv git curl ca-certificates
+          - name: Debian 12 (Python 3.11)
+            image: debian:12
+            prereq: apt-get update && apt-get install -y --no-install-recommends python3 python3-venv git curl ca-certificates
+          - name: Fedora latest
+            image: fedora:latest
+            prereq: dnf install -y python3 git-core tar
+    steps:
+      - name: Prerequisites (what a user installs)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ${{ matrix.prereq }}
+          # curl ships in every image here except Debian/Ubuntu (installed above);
+          # on Rocky 9 and Fedora it is curl-minimal, which is enough.
+          command -v curl
+          cat /etc/os-release | head -n 4
+          for py in python3 python3.10 python3.11 python3.12 python3.13 python3.14; do
+            if command -v "$py" >/dev/null; then echo "$py: $("$py" --version 2>&1)"; fi
+          done
+      - name: uv (the user's one-liner; no root)
+        if: matrix.uv
+        shell: bash
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - name: Install, run the demo UI, upgrade, uninstall (scripts/smoke_install.sh)
+        shell: bash
+        run: |
+          set -o pipefail
+          # uv on PATH is used by default; the other entries have none, so venv + pip.
+          time scripts/smoke_install.sh --with-serial
+
+  offline:
+    name: Ubuntu 24.04, no network (wheelhouse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: An image with only the prerequisites
+        run: |
+          docker build -t hm-offline - <<'EOF'
+          FROM ubuntu:24.04
+          RUN apt-get update \
+           && apt-get install -y --no-install-recommends python3 python3-venv curl ca-certificates \
+           && rm -rf /var/lib/apt/lists/*
+          EOF
+      - name: Make the wheelhouse (with network, same Python as the target)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src hm-offline \
+            scripts/make_wheelhouse.sh --with-serial /src/wheelhouse
+          ls -l wheelhouse
+      - name: Install and run with no network at all
+        run: |
+          docker run --rm --network none -v "$PWD:/src:ro" -w /src hm-offline bash -c '
+            set -euo pipefail
+            if curl -sS -m 5 -o /dev/null https://pypi.org/simple/; then
+              echo "::error::the container reached PyPI"; exit 1
+            fi
+            scripts/smoke_install.sh --offline /src/wheelhouse --with-serial'

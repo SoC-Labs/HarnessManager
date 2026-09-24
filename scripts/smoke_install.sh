@@ -3,10 +3,11 @@
 #
 #   scripts/smoke_install.sh [install.sh options...]
 #
-# Install, run the command from PATH, start the demo UI and fetch its page (it
-# must carry the Content-Security-Policy header), re-run the installer (an
-# upgrade in place), then uninstall. Your real HOME is not touched, except
-# that the pip and uv download caches are shared with it to save time.
+# Install, run the command from PATH, check the desktop menu entry (Linux),
+# start the demo UI and fetch its page (it must carry the
+# Content-Security-Policy header), re-run the installer (an upgrade in place),
+# then uninstall. Your real HOME is not touched, except that the pip and uv
+# download caches are shared with it to save time.
 #
 # Used by tests/integration/test_l5_install.py and by CI. Exits non-zero on the
 # first failed check.
@@ -22,10 +23,17 @@ export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$cache_home/pip}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$cache_home/uv}"
 unset HARNESS_MANAGER_STATE_DIR HARNESS_MANAGER_HOME HARNESS_MANAGER_BIN_DIR XDG_DATA_HOME \
       XDG_CONFIG_HOME VIRTUAL_ENV
+# Consoles as terminal devices would live in /tmp/harness-manager-$USER: keep them here.
+export HARNESS_MANAGER_PTY_DIR="$fake_home/pty"
 export PATH="$fake_home/.local/bin:$PATH"
+started=$SECONDS
 
 hm="$fake_home/.local/bin/harness-manager"
 log="$fake_home/.config/harness-manager/demo/daemon.log"
+menu="$fake_home/.local/share/applications/harness-manager.desktop"
+icon="$fake_home/.local/share/icons/hicolor/scalable/apps/harness-manager.svg"
+# curl straight to the loopback UI, even behind a proxy (http_proxy set, no no_proxy)
+fetch() { curl --noproxy '*' -sS "$@"; }
 
 step() { printf '== %s\n' "$*"; }
 fail() {
@@ -45,6 +53,12 @@ want="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$here/pyproject.toml" | head -n 1)
 step "install ($*)"
 "$here/scripts/install.sh" "$@" || fail "install.sh exited $?"
 [[ -x "$hm" ]] || fail "$hm is missing"
+echo "installed in $((SECONDS - started)) s"
+
+step "harness-manager --version"
+got="$(harness-manager --version)" || fail "harness-manager --version exited $?"
+[[ "$got" == "Harness Manager $want" ]] || fail "--version says '$got', pyproject says '$want'"
+echo "$got"
 
 step "harness-manager version"
 [[ "$(command -v harness-manager)" == "$hm" ]] || fail "harness-manager on PATH is $(command -v harness-manager)"
@@ -67,6 +81,18 @@ printf '{"current": "", "previous": ""}\n' >"$upd/current.json"
 rm -rf "$upd"
 echo "ok"
 
+if [[ "$(uname -s)" == Linux ]]; then
+    step "the desktop menu entry"
+    [[ -f "$menu" ]] || fail "$menu is missing"
+    grep -qxF "Exec=\"$hm\" app" "$menu" || fail "$menu does not run $hm app: $(cat "$menu")"
+    grep -qxF "Icon=$icon" "$menu" || fail "$menu has the wrong icon"
+    [[ -f "$icon" ]] || fail "$icon is missing"
+    if command -v desktop-file-validate >/dev/null 2>&1; then
+        desktop-file-validate "$menu" || fail "desktop-file-validate $menu"
+    fi
+    echo "ok"
+fi
+
 step "harness-manager ui --demo --no-browser"
 out="$(harness-manager --json ui --demo --no-browser)" || fail "ui exited $?"
 url="$(printf '%s' "$out" | sed -n 's/.*"url": *"\([^"]*\)".*/\1/p')"
@@ -75,13 +101,13 @@ base="${url%%#*}"
 echo "$base"
 
 step "the page and its headers"
-headers="$(curl -sS -D - -o "$fake_home/index.html" "$base")" || fail "GET $base failed"
+headers="$(fetch -D - -o "$fake_home/index.html" "$base")" || fail "GET $base failed"
 printf '%s\n' "$headers" | grep -qi '^HTTP/[0-9.]* 200' || fail "GET $base: $headers"
 csp="$(printf '%s\n' "$headers" | grep -i '^content-security-policy:' || true)"
 [[ "$csp" == *"script-src 'self'"* ]] || fail "no CSP with script-src 'self': $headers"
 echo "${csp%$'\r'}"
 grep -qi '<html' "$fake_home/index.html" || fail "the page is not HTML"
-health="$(curl -sS "${base%/}/api/v1/health")" || fail "GET /api/v1/health failed"
+health="$(fetch "${base%/}/api/v1/health")" || fail "GET /api/v1/health failed"
 [[ "$health" == *"\"version\":\"$want\""* || "$health" == *"\"version\": \"$want\""* ]] \
     || fail "health says: $health"
 echo "$health"
@@ -98,5 +124,7 @@ step "uninstall"
 [[ ! -e "$hm" ]] || fail "$hm is still there"
 [[ ! -d "$fake_home/.local/share/harness-manager/venv" ]] || fail "the venv is still there"
 [[ -d "$fake_home/.config/harness-manager" ]] || fail "the state dir was removed (it must stay)"
+[[ ! -e "$menu" && ! -e "$icon" ]] || fail "the menu entry or its icon is still there"
+[[ ! -e "$fake_home/.local/share/harness-manager" ]] || fail "the install root is still there"
 
-echo "SMOKE PASS"
+echo "SMOKE PASS ($((SECONDS - started)) s)"

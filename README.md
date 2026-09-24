@@ -13,9 +13,18 @@ private, and its licence is still to be decided.
 
 ## Install
 
-You need Python 3.10 or newer, or [uv](https://docs.astral.sh/uv/) (uv fetches a
-Python for you), and git. The repository is private: ask SoC Labs for access, and add
-an SSH key to your GitHub account. Then clone it and run the installer.
+You need git and Python 3.10 or newer (with `venv`), or [uv](https://docs.astral.sh/uv/),
+which fetches a Python for you. On a fresh system:
+
+| Linux | Install first |
+|---|---|
+| Ubuntu 22.04+, Debian 12 | `sudo apt install python3-venv git` |
+| Rocky, RHEL, Alma 8 or 9 | `sudo dnf install python3.12 git` (their `python3` is too old) |
+| Fedora | `sudo dnf install python3 git` |
+
+[docs/INSTALL.md](docs/INSTALL.md#linux-prerequisites-by-distribution) has the exact
+lines CI tests on each. The repository is private: ask SoC Labs for access, and add an
+SSH key to your GitHub account. Then clone it and run the installer.
 
 Linux and macOS:
 
@@ -29,19 +38,24 @@ Windows (PowerShell):
 git clone git@github.com:SoC-Labs/HarnessManager.git; powershell -ExecutionPolicy Bypass -File HarnessManager\scripts\install.ps1
 ```
 
-The installer makes a private venv, installs Harness Manager into it, and puts the
-`harness-manager` command on your PATH. Nothing needs root or Administrator.
+The installer makes a private venv, installs Harness Manager into it at tested
+dependency versions, puts the `harness-manager` command on your PATH, and on Linux adds
+**Harness Manager** to your desktop's application menu. It takes about 20 seconds.
+Nothing needs root or Administrator.
 
 | Option (`install.sh` / `install.ps1`) | What it adds |
 |---|---|
 | `--with-serial` / `-WithSerial` | pyserial, for the board's Debug USB serial ports. Take it if you own an MPS3. |
-| `--with-app` / `-WithApp` | pywebview, for a native app window. Without it the app opens a Chrome, Edge or Chromium window. |
+| `--with-app` / `-WithApp` | pywebview, for a native app window on Windows and macOS. Linux uses a Chrome or Chromium app window. |
 | `--from PATH-or-URL` / `-From` | install from another checkout, a wheel, or a git URL |
+| `--offline DIR` | install with no network, from a wheelhouse ([docs/INSTALL.md](docs/INSTALL.md#no-network-a-wheelhouse)) |
+| `--no-desktop` | no application menu entry (Linux) |
 
-To upgrade, `git pull`, then run the installer again. To remove Harness Manager, run it
-with `--uninstall` (`-Uninstall`). Your settings and SD backups stay.
+To upgrade, `git pull`, then run the installer again: it keeps your options and
+settings. To remove Harness Manager, run it with `--uninstall` (`-Uninstall`). Your
+settings and SD backups stay.
 
-More detail, including where everything goes: [docs/INSTALL.md](docs/INSTALL.md).
+More detail, including proxies and where everything goes: [docs/INSTALL.md](docs/INSTALL.md).
 
 ## First run
 
@@ -51,7 +65,8 @@ harness-manager app --demo
 
 This opens the app with scripted demo boards. It needs no hardware, so you can look
 around safely. Close the window when you are done. `harness-manager daemon stop --demo`
-stops the demo service.
+stops the demo service. On Linux you can also start it from the application menu:
+**Harness Manager**, or its **Open with Demo Boards** action.
 
 ## Connect to a board
 
@@ -141,8 +156,13 @@ the URL and the `ssh -L` command that forwards it. Run that on your own machine,
 open the URL there.
 
 **`harness-manager: command not found`.** `~/.local/bin` is not on your PATH. The
-installer printed the line to add to your shell's startup file. On Windows, open a new
-terminal after the first install.
+installer printed the line to add to your shell's startup file, and the full path to use
+until then (`~/.local/bin/harness-manager`). On Windows, open a new terminal after the
+first install.
+
+**The installer stopped.** It says why, and what to install or change: a Python that is
+too old, no `python3-venv`, no network or a proxy, no write access. Running it again is
+always safe. [docs/INSTALL.md](docs/INSTALL.md#when-the-install-stops) lists each case.
 
 **A feature is greyed out.** The app, and `harness-manager info`, say what it needs,
 for example "needs the Debug USB cable". See the user guide.
