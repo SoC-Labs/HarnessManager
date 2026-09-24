@@ -61,6 +61,66 @@ def test_negative_twin_a_short_request_is_refused_while_a_job_holds_the_board():
         pass
 
 
+def _hold_op(gates: BoardGates, board: str) -> tuple[threading.Event, threading.Thread]:
+    """A short request that stays in flight on ``board`` until the returned event is set."""
+    inside, leave = threading.Event(), threading.Event()
+
+    def op() -> None:
+        with gates.op(board):
+            inside.set()
+            leave.wait(10)
+
+    t = threading.Thread(target=op, daemon=True)
+    t.start()
+    assert inside.wait(5), "the first request never got the board"
+    return leave, t
+
+
+def test_a_short_request_waits_its_turn_then_is_refused_as_busy():
+    # Q1: the HELD gate between two short requests (jobs.py BoardGates.op) had no test.
+    gates = BoardGates(op_wait_s=0.2)
+    leave, t = _hold_op(gates, "b")
+    try:
+        with pytest.raises(HeldError) as err, gates.op("b"):
+            pass
+        assert "busy with another request" in err.value.message
+        assert err.value.holder == "harness-manager-daemon" and err.value.code == ExitCode.HELD
+        with gates.op("other"):              # another board is not affected
+            pass
+    finally:
+        leave.set()
+        t.join(5)
+    with gates.op("b"):                      # and the board is free once it leaves
+        pass
+
+
+def test_negative_twin_a_short_request_that_frees_the_board_in_time_lets_the_next_run():
+    gates = BoardGates(op_wait_s=5.0)
+    leave, t = _hold_op(gates, "b")
+    threading.Timer(0.1, leave.set).start()
+    with gates.op("b"):                      # waits for it, not refused
+        ran = True
+    t.join(5)
+    assert ran
+
+
+def test_a_request_waiting_for_the_board_when_a_job_claims_it_names_the_job():
+    gates = BoardGates(op_wait_s=1.0)
+    leave, t = _hold_op(gates, "b")
+    job = Job("deploy", "b")
+    claim = threading.Timer(0.05, gates.claim, ("b", job))  # while the request waits
+    claim.start()
+    try:
+        with pytest.raises(HeldError) as err, gates.op("b"):
+            pass
+        assert claim.finished.is_set() and job.id in err.value.message   # names the job
+    finally:
+        claim.join(5)
+        gates.release("b", job)
+        leave.set()
+        t.join(5)
+
+
 def test_one_job_per_board():
     gates = BoardGates()
     gates.claim("b", Job("deploy", "b"))
