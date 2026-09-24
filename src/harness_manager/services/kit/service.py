@@ -250,8 +250,11 @@ class KitService:
     @classmethod
     def for_state_dir(cls, state_dir: Path, store: Any = None, **kw: Any) -> KitService:
         from harness_manager.services.store import ContentStore
+        from harness_manager.services.update.kits import kit_channel_source
 
         state_dir = Path(state_dir)
+        # OTA-C: the signed channel's rm-kit, through the update service (token, mirrors)
+        kw.setdefault("channel", kit_channel_source(state_dir))
         return cls(store if store is not None else ContentStore(state_dir / "store"),
                    state_dir / "kits", **kw)
 
@@ -431,7 +434,8 @@ class KitService:
                     continue
                 got = self.channel.fetch(sid, self.work_dir, progress)
                 if got is None:
-                    tried.append(f"channel: no rm-kit component for {sid}")
+                    why = getattr(self.channel, "last_error", "")    # OTA-C's source says why
+                    tried.append(f"channel: {why or f'no rm-kit component for {sid}'}")
                     continue
                 res = self.import_(got, source=SOURCE_CHANNEL)
                 _check_is(res.kit, sid)

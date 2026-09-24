@@ -114,7 +114,10 @@ def test_no_static_is_a_usage_error(capsys):
 
 def test_fetch_with_no_source_is_absent_and_names_what_it_tried(capsys):
     rc, _, err = run(capsys, "kit", "fetch", "--static-id", "0x72BB0A36")
-    assert rc == ExitCode.ABSENT and "OTA-C" in err
+    # OTA-C wired the signed channel: it is tried, and says why it had no kit (the test
+    # suite's update source is an absent local dir, never GitHub)
+    assert rc == ExitCode.ABSENT and "channel: channel.json not found" in err
+    assert "cache: not cached" in err and "hub:" in err
 
 
 def test_fetch_from_the_hub_archive_path(tmp_path, capsys, monkeypatch):
