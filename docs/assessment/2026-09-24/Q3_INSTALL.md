@@ -132,6 +132,25 @@ previous commit failed exactly as in CI. The fixed tree passes (SMOKE PASS in 32
 old install upgraded by the new `install.sh` also passes; the installer notes that the
 service "had already exited".
 
+### CI round 3 (commit 43635b1)
+
+- **`CI` run 36017946738: all 6 jobs green.** Linux on Python 3.10, 3.11 and 3.12, macOS,
+  Windows and lint.
+- **`Install matrix` run 36017946791: 7 of 8 green.** Rocky Linux 8, both Rocky Linux 9
+  jobs (the uv one included), Ubuntu 24.04, Debian 12, Fedora and the offline job.
+- **Ubuntu 22.04 failed without installing anything.** `apt-get update` hit a mirror
+  that was mid-sync (`File has unexpected size … Mirror sync in progress`) and exited
+  100. The prerequisites step still passed, because in `a && b` the shell's `set -e`
+  ignores a failing `a` (F20). The installer then said, correctly, that there was no
+  Python 3.10.
+- **Local gate for Ubuntu 22.04:** I pulled the real `ubuntu:22.04` rootfs from Docker
+  Hub and ran it GitHub-style: PID 1 is `tail -f /dev/null`, the checkout is mounted
+  read-only, and the workflow's own prerequisites line runs as root. Result: Python
+  3.10.12, SMOKE PASS in 59 s.
+- **Still unproven on CI:** GitHub Actions stopped starting jobs at 15:14 UTC (billing).
+  The F20 workflow fix is committed but not yet run there. I checked the step's logic
+  locally: a failing `apt-get update && …` now fails the step, and a good one passes.
+
 ## Findings and fixes
 
 | # | Finding | Fix | Test |
@@ -152,6 +171,7 @@ service "had already exited".
 | F15 | **Found by CI.** On Rocky 8, `python3.12 -m venv` failed inside ensurepip, and the installer said `apt install python3-venv`. The first guess, `python3.12-pip`, was wrong (CI run 36006058809). I reproduced it in the real `rockylinux/rockylinux:8` rootfs (Docker Hub layer, chroot in a user namespace). The image's `expat` 2.2.5 is older than python3.12's `pyexpat` needs: `undefined symbol: XML_SetBillionLaughsAttackProtectionMaximumAmplification`. The python3.12 package does not ask for a newer one. `dnf upgrade expat` (2.5.0) fixes it; `python3.12-pip` is not needed | The prerequisite is `dnf install -y python3 python3.12 expat git tar` in the workflow, INSTALL.md and README. `install.sh` makes a venv without pip, runs ensurepip itself and prints "the cause: ImportError: … pyexpat … XML_…", because venv hides it. It then names the fix: `sudo dnf upgrade expat` (RHEL family) or `libexpat1` (Debian). Otherwise it names the package: `python3.X-venv`, `python3.X-pip` or `python3-pip`. In the Rocky 8 rootfs: old expat gives that exact message; after `dnf upgrade expat`, the smoke passes (SMOKE PASS, 48 s) | `test_rhel8_old_expat_is_named_as_the_cause`, `test_a_python_that_cannot_make_a_venv_names_the_package` (Rocky, Fedora, Ubuntu) |
 | F16 | **Found by CI (twice).** In a container job, anything added to `$GITHUB_PATH` REPLACES the image's PATH for the action steps after it, because the Rocky images set no PATH. The first run used it directly. In run 36006058809, uv's own installer added itself to `$GITHUB_PATH` when it saw one, and `actions/checkout` again found no git or tar (both were installed) | uv is installed after the checkout, with `env -u GITHUB_PATH UV_NO_MODIFY_PATH=1`. The smoke step exports `~/.local/bin` itself | the next CI run |
 | F17b | **Found by CI (macOS).** The pid-reuse twin SIGTERMed our own hung stand-in daemon, but on macOS the test process never reaped it. `pid_alive` could not see a zombie without /proc, so `stop` reported "did not stop". A pywebview app window that started the daemon and stays open leaves the same zombie for a `daemon stop` run from a terminal | Product code, marked: `core.session._zombie` asks `ps -o stat=` on macOS and the BSDs. Windows cannot tell | `test_the_ps_fallback_sees_a_zombie` (+ twin); `test_q3_daemon_zombie.py` now runs on every POSIX system |
+| F20 | **Found by CI.** The prerequisites step ran `apt-get update && apt-get install …` under `set -e`. A failing `apt-get update`, such as a mirror mid-sync, skipped the install and still passed the step | The line now runs in its own `bash -euo pipefail -c` from the job's env, with 3 tries 20 s apart. It fails the step with an error if all 3 tries fail | step logic checked locally: a failing line gives rc 1, a good one rc 0. Not yet run on CI |
 | F17 | **From lane Q1.** `daemon stop` sent SIGTERM to whatever process held the pid in `daemon.json`. If the pid had been reused, an upgrade could kill an unrelated process | Product code, marked: `control.is_our_daemon`. The pid counts as ours only if `/health` answers with it, or if its command line is `-m harness_manager.daemon --state-dir <this dir>` (or `daemon start --foreground`). This is checked before the shutdown request and again right before any signal. A foreign pid means the daemon is gone: `daemon.json` is removed ("stale-removed") and nothing is signalled. Where the command line cannot be read (Windows), a hung daemon is not signalled, and the message says to stop it by hand | `test_q3_daemon_pid_reuse.py`: a reused pid and another state dir's daemon are never signalled; the twin checks that our own hung daemon still gets SIGTERM |
 | F18 | **From lane Q2's soak.** daemon.log grew 0.5 to 0.6 MB an hour, and nothing trimmed it | Product code, marked: `daemon/logfile.py`. `daemon start` rotates daemon.log over 8 MiB to `.1` to `.3`, and the oldest drops. The running daemon checks once a minute: it renames its own log and points its stdout and stderr at a fresh one (`dup2`), so every writer follows. A `--foreground` daemon, whose stdout is not the file, is left alone. On Windows an open file cannot be renamed, so the next start rotates instead | `test_q3_daemon_log.py`: shift and drop, twin under the cap, the start rotates, the running daemon rotates both fds, twin foreground |
 | F19 | **From lane Q2.** `daemon start` on a read-only state dir printed "internal error: PermissionError" (exit 1) | `control._spawn`: an OSError on the state dir or the log is now "cannot start harness-manager-daemon: cannot write …: it is not writable (or the disk is full)", with the next step, exit 6. It uses Q2's `storage_error` | `test_daemon_start_on_a_read_only_state_dir_is_a_message`; the CLI returns 6, not "internal error". Both fail on the old code |

@@ -78,9 +78,18 @@ jobs:
     steps:
       - name: Prerequisites (what a user installs)
         shell: bash
+        env:
+          PREREQ: ${{ matrix.prereq }}
+        # In `a && b`, set -e ignores a failing `a`: run 36017946791's `apt-get update` hit
+        # a mirror mid-sync (exit 100), nothing was installed, and the step still passed.
+        # So run the line in its own shell, and retry: mirrors sync all the time.
         run: |
           set -euxo pipefail
-          ${{ matrix.prereq }}
+          for try in 1 2 3; do
+            if bash -euxo pipefail -c "$PREREQ"; then break; fi
+            if [ "$try" = 3 ]; then echo "::error::the prerequisites did not install"; exit 1; fi
+            sleep 20
+          done
           head -n 4 /etc/os-release
           for py in python3 python3.10 python3.11 python3.12 python3.13 python3.14; do
             if command -v "$py" >/dev/null; then echo "$py: $("$py" --version 2>&1)"; fi
