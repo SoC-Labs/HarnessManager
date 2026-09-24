@@ -83,9 +83,9 @@ def _cand(addr: str = "192.168.10.101:6900", via: str = "") -> Candidate:
 def test_url_builds_the_rest_client_host_the_ssh_one_and_both_prefer_rest(hub):
     tf = _token_file(hub)
     for table, want in [
-        (f'{{ url = "{hub.url}", token_file = "{tf}" }}', "rest"),
+        (f'{{ url = "{hub.url}", token_file = "{tf.as_posix()}" }}', "rest"),
         ('{ host = "mapstone-dev" }', "ssh"),
-        (f'{{ url = "{hub.url}", host = "mapstone-dev", token_file = "{tf}" }}', "rest"),
+        (f'{{ url = "{hub.url}", host = "mapstone-dev", token_file = "{tf.as_posix()}" }}', "rest"),
     ]:
         _boards_toml(f'[boards.lab]\nmatch = ["192.168.10.101"]\nhub = {table}\n')
         adapter = hubmod.adapter_for(_cand())
@@ -107,7 +107,7 @@ def test_a_hub_table_with_neither_url_nor_host_or_a_bad_key_is_refused(hub):
 def test_a_rest_only_share_is_reached_directly_on_the_hub(hub):
     tf = _token_file(hub)
     _boards_toml(f'[boards.lab]\nmatch = ["192.168.10.101"]\n'
-                 f'hub = {{ url = "{hub.url}", token_file = "{tf}", start_shares = true, '
+                 f'hub = {{ url = "{hub.url}", token_file = "{tf.as_posix()}", start_shares = true, '
                  f'shares = {{ mcc = "/dev/mps3_01_pl/tty_00" }} }}\n')
     adapter = hubmod.adapter_for(_cand())
     port = hubmod.open_hub_share(hubmod.share_url_for(adapter.config, "mcc").split("://", 1)[1])
@@ -124,7 +124,7 @@ def test_a_rest_only_share_is_reached_directly_on_the_hub(hub):
 def test_a_share_with_an_ssh_host_still_goes_through_the_tunnel(hub, monkeypatch):
     tf = _token_file(hub)
     _boards_toml(f'[boards.lab]\nmatch = ["192.168.10.101"]\n'
-                 f'hub = {{ url = "{hub.url}", host = "mapstone-dev", token_file = "{tf}", '
+                 f'hub = {{ url = "{hub.url}", host = "mapstone-dev", token_file = "{tf.as_posix()}", '
                  f'start_shares = true, shares = {{ mcc = "/dev/mps3_01_pl/tty_00" }} }}\n')
     adapter = hubmod.adapter_for(_cand())
     started = []
@@ -154,7 +154,7 @@ def test_via_hub_with_direct_always_talks_to_the_board_address():
     with FakeFpgahub(boards=_gate(True)) as hub:
         tf = _token_file(hub)
         _boards_toml(f'[boards.lab]\nmatch = ["192.168.10.101"]\nvia = "hub"\n'
-                     f'hub = {{ url = "{hub.url}", token_file = "{tf}", direct = "always" }}\n')
+                     f'hub = {{ url = "{hub.url}", token_file = "{tf.as_posix()}", direct = "always" }}\n')
         cand = tunmod.with_via(_cand(), "hub")
         assert tunmod.candidate_via(cand) == "hub"
         reach = tunmod.open_reach(cand, {"push": 6910, "rbb": 6921})
@@ -167,7 +167,7 @@ def test_via_hub_with_no_direct_path_and_no_ssh_host_says_why():
     with FakeFpgahub(boards=_gate(False)) as hub:
         tf = _token_file(hub)
         _boards_toml(f'[boards.lab]\nmatch = ["192.168.10.101"]\nvia = "hub"\n'
-                     f'hub = {{ url = "{hub.url}", token_file = "{tf}" }}\n')
+                     f'hub = {{ url = "{hub.url}", token_file = "{tf.as_posix()}" }}\n')
         with pytest.raises(UnreachableError) as ei:
             tunmod.open_reach(tunmod.with_via(_cand(), "hub"), {"push": 6910})
         assert "route" in ei.value.message or "gate" in ei.value.message
@@ -191,7 +191,7 @@ def test_an_open_rest_board_streams_and_a_revoke_is_lost_without_waiting_for_a_h
         addr = f"127.0.0.1:{vb.shell.control_port}"
         tf = _token_file(hub, "bob")
         _boards_toml(f'[boards.lab]\nmatch = ["{addr}"]\n'
-                     f'hub = {{ url = "{hub.url}", token_file = "{tf}" }}\n')
+                     f'hub = {{ url = "{hub.url}", token_file = "{tf.as_posix()}" }}\n')
         eng = engine_for(vb)
         with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as api:
             d = api.app.state.daemon
