@@ -66,6 +66,10 @@ from .constants import (
 )
 from .shell import Mps3Shell, parse_endpoint
 
+#: How long a "held" answer through an SSH tunnel waits for ssh's "open failed" line,
+#: which tells a board that refused the hub from one another client holds (Q2).
+OPEN_FAILURE_GRACE_S = 0.5
+
 
 def _hook(module: str, attr: str) -> Callable[..., Any] | None:
     """Load a team's factory if its module exists yet; ``None`` otherwise."""
@@ -233,7 +237,10 @@ class Mps3Session(BoardSession):
         """L1: through ssh -L a port that refuses the HUB is accepted locally, then closed,
         which the codec reads as "held by another client". ssh logs the refusal; use it."""
         tunnel = getattr(self.reach, "tunnel", None)
-        refused = tunnel.open_failures_since(started) if tunnel is not None else []
+        # ssh's line may trail the close we saw: wait for it briefly (Q2). Only this
+        # failure path waits, and only through a tunnel.
+        refused = tunnel.open_failures_since(started, wait_s=OPEN_FAILURE_GRACE_S) \
+            if tunnel is not None else []
         if not refused:
             return None
         return UnreachableError(
@@ -248,7 +255,9 @@ class Mps3Session(BoardSession):
         started = time.monotonic()
         health = self.shell.health()
         tunnel = getattr(self.reach, "tunnel", None)
-        refused = tunnel.open_failures_since(started) if tunnel is not None else []
+        refused = tunnel.open_failures_since(
+            started, wait_s=OPEN_FAILURE_GRACE_S if health.control_channel == "busy" else 0.0) \
+            if tunnel is not None else []
         if refused and health.control_channel == "busy":
             # Through ssh -L, "accepted then closed" is what the hub being refused looks
             # like too; ssh said so, so this is not another client holding the port.

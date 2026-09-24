@@ -249,7 +249,12 @@ def test_the_share_relay_closes_both_sockets_of_each_connection(tmp_path, monkey
         rig.hub.add_tty(tty, FakeLane(), share=True)
         relay = hubmod.SHARES.relay(hubmod.ShareRef(LAB_HUB, "mps3_01_pl", tty))
 
+        share = rig.hub.shares[tty]
+
         def once(text: bytes) -> None:
+            # The share gives its write slot to its FIRST client: wait for the last one
+            # to have left the share (fpgahub does the same), or our keys are dropped.
+            _wait(lambda: share.readers == 0, what="the previous client to leave the share")
             with socket.create_connection(("127.0.0.1", relay.port), timeout=5) as s:
                 s.settimeout(5)
                 s.sendall(text)
@@ -477,3 +482,72 @@ def test_daemon_log_rotates_at_start_once_it_is_big(tmp_path):
     log_path.write_bytes(b"x" * 2000)
     _rotate_log(log_path, limit=1000)
     assert not log_path.exists() and (tmp_path / "daemon.log.1").stat().st_size == 2000
+
+
+# --- a board that is off, through the tunnel, is not "held by another client" -----------------
+
+
+class _LateLines(list):
+    """``open_failures`` whose lines arrive late, as they do through ssh's stderr pipe."""
+
+    def append(self, item) -> None:
+        import threading
+
+        threading.Timer(0.15, super().append, args=(item,)).start()
+
+
+def test_a_board_that_is_off_through_the_tunnel_is_unreachable_even_when_ssh_says_so_late(
+        tmp_path, monkeypatch):
+    from harness_manager.core.errors import HeldError
+    from harness_manager.core.services import EngineConfig
+    from tests.fakes import l1_fake_ssh
+    from tests.fakes.l1_rig import BOARD_IP, lab
+    from tests.fakes.virtual_board import VirtualMps3
+
+    real_init = l1_fake_ssh.FakeSshProcess.__init__
+
+    def late_init(self, *a, **k) -> None:
+        real_init(self, *a, **k)
+        self.open_failures = _LateLines(self.open_failures)
+
+    monkeypatch.setattr(l1_fake_ssh.FakeSshProcess, "__init__", late_init)
+    state = tmp_path / "state"
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state):
+        eng = Engine(EngineConfig(state_dir=state))
+        try:
+            cand = eng.candidate_for(BOARD_IP)
+            eng.open(cand)
+            from harness_manager_mps3.shell import Mps3Shell
+
+            def held(_self):
+                raise HeldError("another client holds the control port")
+
+            with monkeypatch.context() as m:         # twin first: a real second client,
+                m.setattr(Mps3Shell, "identity", held)   # and ssh says nothing: still HELD
+                t0 = time.monotonic()
+                with pytest.raises(HeldError):
+                    eng.info(cand.board_id)
+                assert time.monotonic() - t0 < 2
+            vb.shell.stop()                          # the board is off: the hub is refused
+            with pytest.raises(UnreachableError) as exc:
+                eng.info(cand.board_id)
+            assert "could not reach the shell" in exc.value.message
+        finally:
+            eng.close_all()
+
+
+def test_open_failures_since_waits_only_as_long_as_asked():
+    ssh = FakeSsh()
+    t = T.SshTunnel(HUB, [T.Forward("control", "192.168.10.101", 6900)], launcher=ssh,
+                    ssh_g=ssh.ssh_g, restart=False)
+    t.start()
+    try:
+        t0 = time.monotonic()
+        late = _LateLines()
+        ssh.current.open_failures = late
+        late.append((t0 + 0.01, "channel 3: open failed: connect failed: Connection refused"))
+        assert t.open_failures_since(t0) == []                   # at once: the race
+        assert t.open_failures_since(t0, wait_s=1.0)[0].startswith("channel 3")
+    finally:
+        t.close()
+        ssh.close()

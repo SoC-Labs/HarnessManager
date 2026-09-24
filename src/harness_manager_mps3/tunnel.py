@@ -753,17 +753,27 @@ class SshTunnel:
                 self._stop_proc()
                 last_failure = why
 
-    def open_failures_since(self, t0: float) -> list[str]:
+    def open_failures_since(self, t0: float, wait_s: float = 0.0) -> list[str]:
         """ssh's "channel N: open failed: …" lines logged at or after ``t0`` (monotonic).
 
         Through ``ssh -L`` a board port that refuses the HUB is still accepted
         locally, then closed: a client sees "accepted, then EOF", which the shell
         codec reads as another client holding the port. These lines tell the two apart.
+
+        ``wait_s``: how long to wait for a line that may still be on its way. ssh logs
+        the refusal as it closes the socket, but the line reaches us through a pipe and
+        a reader thread, often AFTER the client has seen the close; asking at once then
+        found nothing and called a board that is off "held by another client" (Q2).
         """
-        with self._mu:
-            proc = self._proc
-        fails = getattr(proc, "open_failures", ()) or ()
-        return [line for at, line in list(fails) if at >= t0]
+        deadline = time.monotonic() + wait_s
+        while True:
+            with self._mu:
+                proc = self._proc
+            fails = getattr(proc, "open_failures", ()) or ()
+            found = [line for at, line in list(fails) if at >= t0]
+            if found or time.monotonic() >= deadline:
+                return found
+            time.sleep(0.02)
 
     def alive(self) -> bool:
         with self._mu:
