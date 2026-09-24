@@ -144,6 +144,22 @@ export function hostOf(boardId) {
   return at >= 0 ? boardId.slice(at + 1) : String(boardId || "");
 }
 
+// N1: a board's display name ("mps3-01"). The daemon resolves it (harness_manager.naming:
+// boards.toml, then the harness, then the hub); a board with no name is called by its address.
+export const NAME_SOURCES = {
+  config: "boards.toml", harness: "the harness", hub: "the hub", "hub-target": "the hub target's name",
+};
+
+export function boardName(cand, boardId) {
+  return (cand && cand.name) || hostOf(boardId || (cand && cand.board_id));
+}
+
+// "name from the hub": where the name came from, for a tooltip; "" when the board has none.
+export function nameSourceText(cand) {
+  if (!cand || !cand.name) return "";
+  return `name from ${NAME_SOURCES[cand.name_source] || cand.name_source || "unknown"}`;
+}
+
 export function boardTitle(cand, boardId) {
   const pack = (cand && cand.pack) || String(boardId || "").split("@")[0] || "board";
   return `${pack.toUpperCase()} ${hostOf(boardId || (cand && cand.board_id))}`;

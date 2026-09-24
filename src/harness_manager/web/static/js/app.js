@@ -3,7 +3,8 @@
 import { ApiError, call, hasToken, initToken } from "./api.js";
 import { closeBoardConsoles } from "./consoles.js";
 import {
-  boardTitle, clock, designText, liveTitle, healthOf, holderAge, holderText, hostOf, LINK_ICONS, linkName,
+  boardName, boardTitle, clock, designText, liveTitle, healthOf, holderAge, holderText, LINK_ICONS,
+  linkName, nameSourceText,
 } from "./format.js";
 import { html, render, useEffect, useState } from "./lib.js";
 import { ActivitySection } from "./sections/activity.js";
@@ -44,6 +45,7 @@ function BoardItem({ bid }) {
   const cand = row.candidate || {};
   const b = S.board[bid];
   const ident = (b && b.info && b.info.identity) || cand.identity || null;
+  const named = (b && b.info && b.info.candidate) || cand;     // N1: the latest name
   const design = designText(ident);
   const shell = ident && ident.shell_id;
   const mine = !!row.open;
@@ -64,7 +66,8 @@ function BoardItem({ bid }) {
       data-board=${bid} onClick=${() => select(bid)}>
       <div class="board-row1">
         <span class=${`dot ${dot}`} title=${dotTitle}></span>
-        <span class="board-name" title=${bid}>${hostOf(bid)}</span>
+        <span class="board-name" data-testid="rail-name"
+          title=${named.name ? `${bid} · ${nameSourceText(named)}` : bid}>${boardName(named, bid)}</span>
         ${(b && b.job) || (row.job && !(b && b.readOnOpen)) ? html`<span class="i-muted" title="a job is running on this board"><${Spinner} /></span>` : null}
         ${mine ? html`<${Chip} level="accent" icon="user" cls="lock-chip">Yours<//>`
           : held ? html`<${Chip} level="warn" icon="lock" cls="lock-chip" title=${`held by ${holderText(row.holder)}`}>
@@ -184,7 +187,9 @@ function BoardHeader({ bid }) {
   return html`<header class="board-header" data-testid="board-header">
     <div class="header-row1">
       <div class="header-titles">
-        <h1 class="header-title">${liveTitle(cand, ident, bid)}</h1>
+        <h1 class="header-title" data-testid="header-name"
+          title=${nameSourceText(cand) || undefined}>${cand.name || liveTitle(cand, ident, bid)}</h1>
+        ${cand.name ? html`<div class="header-sub" data-testid="header-sub">${liveTitle(cand, ident, bid)}</div>` : null}
         <div class="header-id">${bid}</div>
       </div>
       <div class="header-actions">
@@ -260,7 +265,8 @@ function BoardPreview({ bid }) {
   const held = row.holder;
   return html`<div class="section-body"><div class="preview stack">
     <section class="card" aria-label="Board">
-      <div class="card-head"><h2 class="card-title"><${Icon} name="server" />${cand.label || boardTitle(cand, bid)}</h2></div>
+      <div class="card-head"><h2 class="card-title" data-testid="preview-name"><${Icon} name="server" />${cand.name
+        ? `${cand.name} · ${cand.label || boardTitle(cand, bid)}` : cand.label || boardTitle(cand, bid)}</h2></div>
       <p class="card-sub">${packTitle}${cand.evidence ? ` · found: ${cand.evidence}` : ""}</p>
       <div class="card-body">
         <dl class="kv">
@@ -279,7 +285,7 @@ function BoardPreview({ bid }) {
             ${state.busy ? html`<${Spinner} /> Opening...` : html`<${Icon} name="lock" /> Open board`}</button>
           <${Reason} text=${held
             ? "Open asks the daemon anyway: it refuses a live lock and takes over a stale one."
-            : `Opening takes the board's lock for this daemon, so the CLI and this page share one session. ${hostOf(bid)} stays yours until you close it.`} />
+            : `Opening takes the board's lock for this daemon, so the CLI and this page share one session. ${boardName(cand, bid)} stays yours until you close it.`} />
         </div>
         ${state.line ? html`<div class="result mt-14" data-testid="open-result">
           <div><span class=${`rc ${state.error ? "err" : "ok"}`}>${state.line}</span></div>
@@ -416,7 +422,9 @@ function App() {
   const [, setN] = useState(0);
   useEffect(() => subscribe(() => setN((n) => n + 1)), []);
   const row = S.selected && S.boards[S.selected];
-  const title = row ? `${hostOf(S.selected)} · Harness Manager` : "Harness Manager";
+  const sel = row && S.board[S.selected];
+  const named = (sel && sel.info && sel.info.candidate) || (row && row.candidate) || null;
+  const title = row ? `${boardName(named, S.selected)} · Harness Manager` : "Harness Manager";
   if (document.title !== title) document.title = title;
   return html`<div class="app"><${Rail} /><${Workspace} /><${HelpModal} /></div>`;
 }

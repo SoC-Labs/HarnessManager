@@ -155,7 +155,8 @@ def _counters(swaps: int) -> dict[str, int]:
 def _script() -> dict[str, _Board]:
     fielded = _Board(
         candidate=Candidate("mps3", BOARD_FIELDED, (_eth("192.168.10.101"),),
-                            label="MPS3 greybox on shell 0x3f1a560f", evidence="answered ping"),
+                            label="MPS3 greybox on shell 0x3f1a560f", evidence="answered ping",
+                            name="mps3-01", name_source="hub"),     # the lab board (N1)
         identity=BoardIdentity(board_type="mps3", shell_id=SHELL_FIELDED, rm_id="0x00000000",
                                rm_name="greybox", harness_version="1.0.0",
                                firmware_sha="cb31b0f2", features=FIELDED_FEATURES,
@@ -213,7 +214,8 @@ def _script() -> dict[str, _Board]:
     boards = (fielded, usb, held)
     for b in boards:
         b.candidate = DemoCandidate(**{f: getattr(b.candidate, f) for f in (
-            "pack", "board_id", "links", "label", "evidence")}, identity=b.identity)
+            "pack", "board_id", "links", "label", "evidence", "name", "name_source")},
+            identity=b.identity)
     return {b.candidate.board_id: b for b in boards}
 
 
