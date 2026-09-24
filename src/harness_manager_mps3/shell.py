@@ -372,9 +372,10 @@ class Mps3Shell:
             raise ShellWedgedError(
                 f"shell at {where} accepted the connection but did not reply within "
                 f"{self.timeout}s", hint=HARNESS_STATES["harness.wedged"]) from exc
-        except ConnectionResetError as exc:
+        except (ConnectionResetError, ConnectionAbortedError) as exc:
             # lwIP (bare-metal) or the kernel (Linux) may RST the extra client instead
-            # of closing it; a board restarting mid-request looks the same.
+            # of closing it; a board restarting mid-request looks the same. Windows
+            # reports the same accept-then-close as WSAECONNABORTED (WinError 10053).
             raise HeldError(
                 f"shell at {where} reset the connection",
                 hint="another client probably holds the control port, or the board is restarting",

@@ -217,6 +217,40 @@ def test_negative_twin_an_ordinary_failure_is_not_ebusy():
         assert not isinstance(exc.value, HeldError) and "bad args" in str(exc.value)
 
 
+class _FailingTransport:
+    """A transport whose read fails the way a given OS reports a dropped connection."""
+
+    def __init__(self, exc: OSError) -> None:
+        self.exc = exc
+
+    def send_line(self, payload: bytes) -> None:
+        pass
+
+    def recv_line(self) -> bytes:
+        raise self.exc
+
+    def close(self) -> None:
+        pass
+
+
+def test_an_aborted_connection_is_held_like_a_reset(monkeypatch):
+    # Windows reports the shell turning a second client away as WSAECONNABORTED
+    # (WinError 10053), where Linux gives EOF or RST (first seen on the Windows runner).
+    exc = ConnectionAbortedError(10053, "An established connection was aborted")
+    monkeypatch.setattr(shellmod, "SocketTransport", lambda *a, **k: _FailingTransport(exc))
+    sh = Mps3Shell("10.0.0.5", 6900, timeout=0.1, probes=Probes().as_probes())
+    with pytest.raises(HeldError):
+        sh.live()
+
+
+def test_negative_twin_an_unreachable_host_is_not_held(monkeypatch):
+    exc = OSError(113, "No route to host")
+    monkeypatch.setattr(shellmod, "SocketTransport", lambda *a, **k: _FailingTransport(exc))
+    sh = Mps3Shell("10.0.0.5", 6900, timeout=0.1, probes=Probes().as_probes())
+    with pytest.raises(UnreachableError):
+        sh.live()
+
+
 def test_held_identity_falls_back_to_identify(monkeypatch):
     """identity() does not fail on EBUSY: identify (UDP) is independent of 6900."""
     with RawShell("ebusy") as srv, FakeIdentifyResponder(
