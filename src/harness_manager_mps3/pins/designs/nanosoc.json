@@ -1,0 +1,15 @@
+{
+ "kind": "rm",
+ "name": "nanosoc",
+ "title": "single-core nanoSoC (Cortex-M0) RM, as fpga/rp/nanosoc constrains it",
+ "rm_id": "0x01000001",
+ "use": {
+  "clkrst": {},
+  "jtag": {},
+  "uart": {},
+  "status": {},
+  "gpio": {},
+  "qspi": {"timed": true}
+ },
+ "clocks": ["jtag_tck"]
+}

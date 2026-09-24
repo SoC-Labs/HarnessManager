@@ -1,0 +1,11 @@
+{
+ "kind": "board",
+ "name": "blinky",
+ "title": "a whole-FPGA blinky: the 50 MHz board clock, a reset button, 8 LEDs, 8 switches",
+ "ports": [
+  {"port": "clk", "net": "OSCCLK[1]", "dir": "in", "clock_mhz": 50},
+  {"port": "rst_n", "net": "USER_nPB[0]", "dir": "in"},
+  {"port": "led_n[7:0]", "net": "USER_nLED[7:0]", "dir": "out"},
+  {"port": "sw[7:0]", "net": "USER_SW[7:0]", "dir": "in"}
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "kind": "board",
+ "name": "shield_gpio",
+ "title": "a whole-FPGA design on the Arduino shield headers: 16 GPIO on SH0, a clock input on SH1",
+ "ports": [
+  {"port": "clk", "net": "OSCCLK[1]", "dir": "in", "clock_mhz": 50},
+  {"port": "gpio[15:0]", "net": "SH0_IO[15:0]", "dir": "inout"},
+  {"port": "ext_clk", "net": "SH1_IO[13]", "dir": "in", "clock_mhz": 25}
+ ]
+}

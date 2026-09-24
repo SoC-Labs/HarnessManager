@@ -1,0 +1,416 @@
+{
+ "kind": "board",
+ "name": "harness_shell",
+ "title": "the fielded static 0x72BB0A36's own pads (mps3_harness.xdc + the touch XDC), rebuilt from the model",
+ "ports": [
+  {
+   "port": "CFG_DATAOUT",
+   "net": "CFG_DATAOUT",
+   "dir": "out"
+  },
+  {
+   "port": "CLCD_BL",
+   "net": "CLCD_BL",
+   "dir": "out"
+  },
+  {
+   "port": "CLCD_CS",
+   "net": "CLCD_CS",
+   "dir": "out"
+  },
+  {
+   "port": "CLCD_PD[10]",
+   "net": "CLCD_PD[10]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_PD[11]",
+   "net": "CLCD_PD[11]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_PD[12]",
+   "net": "CLCD_PD[12]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_PD[13]",
+   "net": "CLCD_PD[13]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_PD[14]",
+   "net": "CLCD_PD[14]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_PD[15]",
+   "net": "CLCD_PD[15]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_PD[16]",
+   "net": "CLCD_PD[16]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_PD[17]",
+   "net": "CLCD_PD[17]",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_RD",
+   "net": "CLCD_RD",
+   "dir": "out"
+  },
+  {
+   "port": "CLCD_RS",
+   "net": "CLCD_RS",
+   "dir": "out"
+  },
+  {
+   "port": "CLCD_RST",
+   "net": "CLCD_RST",
+   "dir": "out"
+  },
+  {
+   "port": "CLCD_TINT",
+   "net": "CLCD_TINT",
+   "dir": "in"
+  },
+  {
+   "port": "CLCD_TSCL",
+   "net": "CLCD_TSCL",
+   "dir": "inout"
+  },
+  {
+   "port": "CLCD_TSDA",
+   "net": "CLCD_TSDA",
+   "dir": "inout",
+   "props": {
+    "PULLUP": "true"
+   }
+  },
+  {
+   "port": "CLCD_WR_SCL",
+   "net": "CLCD_WR_SCL",
+   "dir": "out"
+  },
+  {
+   "port": "ETH_INT",
+   "net": "ETH_INT",
+   "dir": "in",
+   "props": {
+    "PULLTYPE": "PULLUP"
+   }
+  },
+  {
+   "port": "ETH_nCS",
+   "net": "ETH_nCS",
+   "dir": "out"
+  },
+  {
+   "port": "ETH_nOE",
+   "net": "ETH_nOE",
+   "dir": "out"
+  },
+  {
+   "port": "IOFPGA_SYSWDT",
+   "net": "IOFPGA_SYSWDT",
+   "dir": "out"
+  },
+  {
+   "port": "MB_UART_RXD",
+   "net": "UART_RX_F[2]",
+   "dir": "in"
+  },
+  {
+   "port": "MB_UART_TXD",
+   "net": "UART_TX_F[2]",
+   "dir": "out"
+  },
+  {
+   "port": "OSCCLK1",
+   "net": "OSCCLK[1]",
+   "dir": "in",
+   "clock_mhz": 50
+  },
+  {
+   "port": "QSPI_D0",
+   "net": "QSPI_D0",
+   "dir": "inout",
+   "props": {
+    "PULLUP": "true"
+   }
+  },
+  {
+   "port": "QSPI_D1",
+   "net": "QSPI_D1",
+   "dir": "inout",
+   "props": {
+    "PULLUP": "true"
+   }
+  },
+  {
+   "port": "QSPI_D2",
+   "net": "QSPI_D2",
+   "dir": "inout",
+   "props": {
+    "PULLUP": "true"
+   }
+  },
+  {
+   "port": "QSPI_D3",
+   "net": "QSPI_D3",
+   "dir": "inout",
+   "props": {
+    "PULLUP": "true"
+   }
+  },
+  {
+   "port": "QSPI_SCLK",
+   "net": "QSPI_SCLK",
+   "dir": "inout"
+  },
+  {
+   "port": "QSPI_nCS",
+   "net": "QSPI_nCS",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_ADDR[0]",
+   "net": "SMBF_ADDR[0]",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_ADDR[1]",
+   "net": "SMBF_ADDR[1]",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_ADDR[2]",
+   "net": "SMBF_ADDR[2]",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_ADDR[3]",
+   "net": "SMBF_ADDR[3]",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_ADDR[4]",
+   "net": "SMBF_ADDR[4]",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_ADDR[5]",
+   "net": "SMBF_ADDR[5]",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_ADDR[6]",
+   "net": "SMBF_ADDR[6]",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_DATA[0]",
+   "net": "SMBF_DATA[0]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[1]",
+   "net": "SMBF_DATA[1]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[2]",
+   "net": "SMBF_DATA[2]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[3]",
+   "net": "SMBF_DATA[3]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[4]",
+   "net": "SMBF_DATA[4]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[5]",
+   "net": "SMBF_DATA[5]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[6]",
+   "net": "SMBF_DATA[6]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[7]",
+   "net": "SMBF_DATA[7]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[8]",
+   "net": "SMBF_DATA[8]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[9]",
+   "net": "SMBF_DATA[9]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[10]",
+   "net": "SMBF_DATA[10]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[11]",
+   "net": "SMBF_DATA[11]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[12]",
+   "net": "SMBF_DATA[12]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[13]",
+   "net": "SMBF_DATA[13]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[14]",
+   "net": "SMBF_DATA[14]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_DATA[15]",
+   "net": "SMBF_DATA[15]",
+   "dir": "inout"
+  },
+  {
+   "port": "SMBF_FIFOSEL",
+   "net": "SMBF_FIFOSEL",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_nOE",
+   "net": "SMBF_nOE",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_nRST",
+   "net": "SMBF_nRST",
+   "dir": "out"
+  },
+  {
+   "port": "SMBF_nWE",
+   "net": "SMBF_nWE",
+   "dir": "out"
+  },
+  {
+   "port": "SMBM_nWAIT",
+   "net": "SMBM_nWAIT",
+   "dir": "out"
+  },
+  {
+   "port": "USER_SW[0]",
+   "net": "USER_SW[0]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_SW[1]",
+   "net": "USER_SW[1]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_SW[2]",
+   "net": "USER_SW[2]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_SW[3]",
+   "net": "USER_SW[3]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_SW[4]",
+   "net": "USER_SW[4]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_SW[5]",
+   "net": "USER_SW[5]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_SW[6]",
+   "net": "USER_SW[6]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_SW[7]",
+   "net": "USER_SW[7]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_nLED[0]",
+   "net": "USER_nLED[0]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nLED[1]",
+   "net": "USER_nLED[1]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nLED[2]",
+   "net": "USER_nLED[2]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nLED[3]",
+   "net": "USER_nLED[3]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nLED[4]",
+   "net": "USER_nLED[4]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nLED[5]",
+   "net": "USER_nLED[5]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nLED[6]",
+   "net": "USER_nLED[6]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nLED[7]",
+   "net": "USER_nLED[7]",
+   "dir": "out"
+  },
+  {
+   "port": "USER_nPB0",
+   "net": "USER_nPB[0]",
+   "dir": "in"
+  },
+  {
+   "port": "USER_nPB1",
+   "net": "USER_nPB[1]",
+   "dir": "in"
+  },
+  {
+   "port": "WDOG_RREQ",
+   "net": "WDOG_RREQ",
+   "dir": "out"
+  }
+ ]
+}

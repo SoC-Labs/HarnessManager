@@ -1,0 +1,6 @@
+{
+ "kind": "rm",
+ "name": "minimal",
+ "title": "the smallest RM: clock, resets and rm_id; every other group tied off (fpga/rp/_template)",
+ "use": {"clkrst": {}, "status": {}}
+}

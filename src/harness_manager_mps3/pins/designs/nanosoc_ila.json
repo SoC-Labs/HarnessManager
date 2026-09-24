@@ -1,0 +1,16 @@
+{
+ "kind": "rm",
+ "name": "nanosoc_ila",
+ "title": "nanoSoC with an RM debug hub and ILAs over XVC, as fpga/rp/nanosoc_ila constrains it",
+ "rm_id": "0x0100000A",
+ "use": {
+  "clkrst": {},
+  "jtag": {},
+  "dbgbscan": {},
+  "uart": {},
+  "status": {},
+  "gpio": {},
+  "qspi": {"timed": true}
+ },
+ "clocks": ["jtag_tck", "phy_rmii_ref_clk"]
+}
