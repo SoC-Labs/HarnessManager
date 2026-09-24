@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from .capabilities import CapabilitySpec
 from .model import BoardIdentity, Candidate, Check, Health, Reading
@@ -301,6 +301,41 @@ class PowerAdapter(Protocol):
         ...
 
 
+@runtime_checkable
+class XvcAdapter(Protocol):
+    """Xilinx Virtual Cable to the harness's OWN XVC server (CCR X-3, docs/design/XVC_DEBUG.md).
+
+    Scope: the reconfigurable partition's debug chain only (the harness's Debug Bridge
+    and the debug hub and ILAs of the design loaded in the partition). It is never
+    whole-device JTAG, and an adapter must never return an endpoint that is.
+
+    Optional members the service uses when present: ``xvc_release()`` (close anything
+    ``xvc_endpoint`` opened, e.g. a board-SSH forward), ``xvc_open_failures_since(t0)``
+    (ssh's "open failed" lines: a far end that refused, not a held slot) and
+    ``use_store(store)`` (the engine's content store, for probes files).
+    """
+
+    def xvc_endpoint(self) -> tuple[str, int]:
+        """Where the harness's XVC server is reachable from this host, already tunnelled.
+
+        May open a forward the first time (a board-SSH tunnel); raises
+        ``UnreachableError`` when it cannot.
+        """
+        ...
+
+    def xvc_reason(self) -> str:
+        """``""`` when XVC can be used on this board now; else why not, in words."""
+        ...
+
+    def xvc_probes(self, rm_id: str) -> dict[str, Any]:
+        """``{rm, static, full: {path, name, crc_ok, vivado, source} or None, vivado, rm_name}``."""
+        ...
+
+    def xvc_facts(self) -> dict[str, Any]:
+        """``{scope, reach, impl, authenticated, warnings: [..], target, notes: [..]}`` for the UI."""
+        ...
+
+
 # --- session and pack ----------------------------------------------------------------
 
 
@@ -325,6 +360,7 @@ class BoardSession(ABC):
     controller: ControllerAdapter | None = None
     storage: StorageAdapter | None = None
     power: PowerAdapter | None = None
+    xvc: XvcAdapter | None = None          # CCR X-3: fabric debug over the harness's XVC
 
     def close(self) -> None:  # noqa: B027 - optional hook
         """Release anything the session holds. Idempotent."""

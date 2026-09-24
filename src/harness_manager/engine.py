@@ -63,6 +63,8 @@ LAZY_SERVICES: dict[str, tuple[str, str, str]] = {
     "consoles": ("harness_manager.services.console", "ConsoleBroker", "consoles"),
     "debug": ("harness_manager.services.debug", "DebugService", "debug"),
     "update": ("harness_manager.services.update", "UpdateService", "update"),
+    # CCR X-6: fabric debug over the harness's XVC (lane XVC-CORE).
+    "xvc": ("harness_manager.services.xvc", "XvcService", "xvc"),
 }
 
 #: Health.control_channel states in which the harness serves nothing over Ethernet.
@@ -139,6 +141,11 @@ class Engine:
     @property
     def debug(self) -> Any:
         return self._service("debug")
+
+    @property
+    def xvc(self) -> Any:
+        """Fabric debug over the harness's XVC (CCR X-6). Optional: read it with getattr."""
+        return self._service("xvc")
 
     @property
     def update(self) -> Any:
@@ -369,10 +376,11 @@ class Engine:
     def _release_services(self, board_id: str, session: BoardSession) -> None:
         """Tell services that hold board ports to let go. Only services already in use."""
         with self._lock:
-            in_use = {name: self._services.get(name) for name in ("consoles", "debug")}
+            in_use = {name: self._services.get(name) for name in ("consoles", "debug", "xvc")}
         actions = {
             "consoles": lambda svc: svc.close_all(board_id),
             "debug": lambda svc: svc.down(session),
+            "xvc": lambda svc: svc.close(session, reason="the board was closed"),
         }
         for name, svc in in_use.items():
             if svc is None or is_unavailable(svc):

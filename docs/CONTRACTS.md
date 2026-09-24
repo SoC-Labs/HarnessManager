@@ -49,6 +49,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `panel.locate` `{state: on\|off, until, seconds, who}` | Identify started or stopped on a board (P1) |
 | `kit.progress` `{static_id, phase, bytes, total}` | a DUT build kit is being fetched (KIT-CORE; `POST /kits/fetch`) |
 | `kit.stored` `{static_id, source, kit_id}` | a build kit entered the kit cache: fetched or imported (KIT-CORE) |
+| `xvc.state` `{state: down\|starting\|ready\|attached\|held\|swapping\|failed, open, mode, relay_port, hw_server_port, hw_server_pid, url, attached, board_slot, reach, ltx, warnings, scope, rm_id, rm_name, detail}` | a board's fabric-debug (XVC) session changed: opened, attached, dropped for a swap and re-attached, reconnected, or closed (XVC-CORE; `scope`: the reconfigurable partition's debug chain, never whole-device JTAG) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
 

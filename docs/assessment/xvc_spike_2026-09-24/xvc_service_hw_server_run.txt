@@ -1,0 +1,19 @@
+# XVC-CORE: the shipped XvcService (relay + HM-owned hw_server) with a REAL Vivado 2024.1 hw_server
+# against tests/fakes/xvc_server.py, 127.0.0.1 only. tests/spikes/xvc_service_hw_server_spike.py, 2026-09-24.
+
+[   0.0s] load average (33.68, 31.24, 25.02)
+[   0.7s] open: ready relay 127.0.0.1:51417 hw_server localhost:51418 pid 2316871 slot ours
+[   7.7s] xsdb A_before_swap: rc=0 in 7.0s
+[   7.7s]     TARGETS
+[   7.7s]       1  Xilinx Virtual Cable 127.0.0.1:51417
+[   7.7s]          2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+[   7.7s] after A: state attached, fake shifts 710, dropped 0, board connections 1
+[   7.7s] deploy.started: state swapping, slot held by nobody
+[   8.6s] deploy.done: ready, hw_server pid 2317963 (was 2316871), same port True
+[  16.5s] xsdb B_after_swap: rc=0 in 7.9s
+[  16.5s]     TARGETS
+[  16.5s]       1  Xilinx Virtual Cable 127.0.0.1:51417
+[  16.5s]          2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+[  16.5s] after B: fake shifts 1504, dropped 0, board connections 2
+[  16.5s] closed; slot free; events ['starting', 'ready', 'attached', 'swapping', 'swapping', 'swapping', 'ready', 'attached', 'down']
+[  16.5s] RESULT PASS
