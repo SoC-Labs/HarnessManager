@@ -196,8 +196,10 @@ class LeaseRequestSim:
         with self._lock:
             self.inbox[bid] = [n for n in self.inbox.get(bid, []) if n["id"] != request_id]
 
-    def taken(self, bid: str, *, by: str = "bob@lab-pc-02", reason: str = "") -> dict[str, Any]:
-        """Another session force-released our lease (fpgahub audit: lease.admin_revoked)."""
+    def taken(self, bid: str, *, by: str = "bob@lab-pc-02",
+              reason: str | None = None) -> dict[str, Any]:
+        """Another session force-released our lease (fpgahub audit: lease.admin_revoked).
+        ``reason=""``: no revoke note was found (LR-A: ``by`` is then the next holder)."""
         now = time.time()
         with self._lock:
             hub = self.hub(bid)
@@ -206,7 +208,7 @@ class LeaseRequestSim:
             hub["lease"] = {"target": hub["target"], "holder": by, "user": user,
                             "expires_at": iso(now + 3600), "mine": False}
             made = iso(now - self.window_s - 5)
-            record = {"by": by, "at": iso(now), "reason": reason or (
+            record = {"by": by, "at": iso(now), "reason": reason if reason is not None else (
                 f"force-released by {by} via Harness Manager: no answer to a request made at "
                 f"{made}")}
             self.last_taken[bid] = record

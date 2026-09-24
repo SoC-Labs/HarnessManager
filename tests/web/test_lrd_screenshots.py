@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from harness_manager.demo import BOARD_USB
 from tests.web.test_lrd_browser import (
     APP,
+    BOARD,
     HOLDER,
+    NAME,
     POLL,
-    TARGET,
     T,
     force_button,
     open_board,
@@ -43,7 +43,7 @@ def settle(page, ms=400):
 
 
 def requesting(page_factory, daemon, scheme):
-    daemon.app.state.sim.behind_hub(BOARD_USB, lease="other")
+    daemon.app.state.sim.behind_hub(BOARD, lease="other")
     page = page_factory(scheme, **APP)
     open_board(page)
     return page, send_request(page)
@@ -63,11 +63,11 @@ def test_review_lease_request_waiting(page_factory, daemon, review, scheme):
 @SCHEMES
 def test_review_lease_force_confirm(page_factory, daemon, review, scheme):
     page, bar = requesting(page_factory, daemon, scheme)
-    reqs(daemon).advance(BOARD_USB, 121)
+    reqs(daemon).advance(BOARD, 121)
     expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
     force_button(page).click()
     modal = page.locator('[data-testid="force-confirm"]')
-    expect(modal.locator('[data-testid="force-what"]')).to_contain_text(f"This kicks {HOLDER} off {TARGET} now")
+    expect(modal.locator('[data-testid="force-what"]')).to_contain_text(f"This kicks {HOLDER} off {NAME} now")
     settle(page)
     assert not page.errors, page.errors
     page.screenshot(path=str(review / f"lease-force-confirm-{scheme}.png"))
@@ -76,11 +76,11 @@ def test_review_lease_force_confirm(page_factory, daemon, review, scheme):
 
 @SCHEMES
 def test_review_lease_holder_prompt(page_factory, daemon, review, scheme):
-    daemon.app.state.sim.behind_hub(BOARD_USB, lease="mine")
+    daemon.app.state.sim.behind_hub(BOARD, lease="mine")
     page = page_factory(scheme, **APP)
     open_board(page)
     section(page, "consoles")                            # any section, not only Overview
-    reqs(daemon).incoming(BOARD_USB, by="bob@lab-pc-02",
+    reqs(daemon).incoming(BOARD, by="bob@lab-pc-02",
                           message="need it for the 15:00 demo, about an hour", age_s=41)
     prompt = page.locator('[data-testid="lease-wanted"]')
     expect(prompt.locator('[data-testid="wanted-countdown"]')).to_contain_text("1:1", timeout=T)
@@ -92,13 +92,13 @@ def test_review_lease_holder_prompt(page_factory, daemon, review, scheme):
 
 @SCHEMES
 def test_review_lease_victim_banner(page_factory, daemon, review, scheme):
-    daemon.app.state.sim.behind_hub(BOARD_USB, lease="mine")
+    daemon.app.state.sim.behind_hub(BOARD, lease="mine")
     page = page_factory(scheme, **APP)
     open_board(page)
     section(page, "program")
-    reqs(daemon).taken(BOARD_USB, by="bob@lab-pc-02")
+    reqs(daemon).taken(BOARD, by="bob@lab-pc-02")
     expect(page.locator('[data-testid="lease-taken"]')).to_contain_text(
-        f"{TARGET} was force-released by bob@lab-pc-02", timeout=T)
+        f"{NAME} was force-released by bob@lab-pc-02", timeout=T)
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to bob@lab-pc-02", timeout=T)
     settle(page)
     assert not page.errors, page.errors

@@ -135,8 +135,7 @@ export async function loadHub(bid) {
     const d = lease || {};
     w.hub = { host: d.hub || (tunnel && tunnel.host) || "", lease: lease ? d.lease : null, tunnel,
       queue: Array.isArray(d.queue) ? d.queue : [], request: d.request || null,
-      incoming: Array.isArray(d.incoming) ? d.incoming : [], taken: d.taken || null,
-      board: d.board || "" };
+      incoming: Array.isArray(d.incoming) ? d.incoming : [], taken: d.taken || null };
   }
   w.hubAt = Date.now();
   for (const fn of hubHooks) {

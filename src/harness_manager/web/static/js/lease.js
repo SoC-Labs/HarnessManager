@@ -15,7 +15,7 @@
 
 import { gateReason, interlock, panelState, runAction, runJob } from "./actions.js";
 import { call, routeMissing } from "./api.js";
-import { clock, hostOf } from "./format.js";
+import { boardName, clock, hostOf } from "./format.js";
 import { html, useLayoutEffect, useRef, useState } from "./lib.js";
 import { changed, log, onBoardEvent, S } from "./store.js";
 import { epochOf, loadHub, onHubLoaded, scheduleHub, week } from "./week.js";
@@ -31,12 +31,16 @@ function hubOf(bid) {
   return (b && b.week && b.week.hub) || null;
 }
 
-// The name the confirm and the banners use: the physical board when the daemon gives it
-// (CCR: GET /lease has no field for it yet), else the hub target, else the address.
+// What every lease text calls the board: its name (N1: "mps3-01", from boards.toml, the
+// harness or the hub), else its address.
 export function leaseBoardName(bid) {
-  const hub = hubOf(bid);
-  return (hub && (hub.board || (hub.lease && hub.lease.target))) || hostOf(bid);
+  const b = S.board[bid];
+  const row = S.boards[bid] || {};
+  return boardName((b && b.info && b.info.candidate) || row.candidate || null, bid);
 }
+
+// TARGET in the `$ lease ...` lines: the board's address, as every CLI verb takes it.
+function cliTarget(bid) { return hostOf(bid); }
 
 export function secondsTo(at, now = Date.now() / 1000) {
   const e = epochOf(at);
@@ -120,12 +124,11 @@ const PHASE_TEXT = {
 };
 
 function requestSpec(bid, message) {
-  const hub = hubOf(bid);
-  const target = (hub && hub.lease && hub.lease.target) || leaseBoardName(bid);
+  const name = leaseBoardName(bid);
   return {
     key: "lease_request", label: "Send request", busyLabel: "Waiting for the board...",
     budgetS: 7200,           // a queue may wait for hours: past this the panel only notes it
-    command: `lease request ${target}${message ? ` --message ${shellQuote(message)}` : ""}`,
+    command: `lease request ${cliTarget(bid)}${message ? ` --message ${shellQuote(message)}` : ""}`,
     run: async (ctx) => {
       const onProgress = (d) => ctx.progress(
         (PHASE_TEXT[d.phase] || (() => d.phase || "waiting"))(d), d.phase);
@@ -151,7 +154,7 @@ function requestSpec(bid, message) {
         return [{ kind: "warnline", text: `the holder answered: keep for ${a.minutes} min${a.message ? `: ${quoted(a.message)}` : ""}` }];
       }
       const at = r && r.lease && epochOf(r.lease.expires_at);
-      return [{ kind: "ok", text: `lease held on ${(r && r.lease && r.lease.target) || target}${at ? ` until ${clock(at)}` : ""}: the board is yours` }];
+      return [{ kind: "ok", text: `${name} is yours: lease held${r && r.lease && r.lease.target ? ` on ${r.lease.target}` : ""}${at ? ` until ${clock(at)}` : ""}` }];
     },
     onDone: () => loadHub(bid),
   };
@@ -179,10 +182,9 @@ function sendRequest() {
 }
 
 function leaveSpec(bid) {
-  const target = leaseBoardName(bid);
   return {
     key: "lease_leave", label: "Leave queue", busyLabel: "Leaving...", budgetS: 30,
-    command: `lease leave ${target}`,
+    command: `lease leave ${cliTarget(bid)}`,
     run: async () => {
       L.leaving.add(bid);
       try {
@@ -205,17 +207,17 @@ function leaveSpec(bid) {
 }
 
 function forceSpec(bid) {
-  const target = leaseBoardName(bid);
+  const name = leaseBoardName(bid);
   const hub = hubOf(bid);
   const holder = (hub && hub.lease && hub.lease.holder) || "the holder";
   return {
     key: "lease_force", label: "Force release", busyLabel: "Force releasing...", budgetS: 120,
-    command: `lease force ${target} --yes`,
+    command: `lease force ${cliTarget(bid)} --yes`,
     run: (ctx) => runJob("leaseForce", { bid }, { confirm: true },
       (d) => ctx.progress(d.phase || "revoking", d.phase), "lease_force"),
     render: (r) => {
       const at = r && r.lease && epochOf(r.lease.expires_at);
-      return [{ kind: "ok", text: `${holder} was force-released; the lease on ${(r && r.lease && r.lease.target) || target} is yours${at ? ` until ${clock(at)}` : ""}. Their session is told who took it.` }];
+      return [{ kind: "ok", text: `${holder} was force-released; ${name} is yours${at ? ` until ${clock(at)}` : ""}. Their session is told who took it.` }];
     },
     onDone: () => loadHub(bid),
   };
@@ -367,7 +369,7 @@ function respond(bid, note, answer, minutes, message) {
   const spec = {
     key: `respond_${answer}`, label: answer === "release" ? "Release now" : `Keep ${minutes} min`,
     busyLabel: "Answering...", budgetS: 30,
-    command: `lease respond ${target} ${note.id} ${flags}${message ? ` --message ${shellQuote(message)}` : ""}`,
+    command: `lease respond ${cliTarget(bid)} ${note.id} ${flags}${message ? ` --message ${shellQuote(message)}` : ""}`,
     run: async () => (await call("leaseRespond", { bid }, {
       id: note.id, answer, ...(answer === "keep" ? { minutes } : {}), ...(message ? { message } : {}),
     })).data,
