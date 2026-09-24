@@ -292,9 +292,18 @@ class LrFakeHub(FakeHub):
     # -- the audit log -------------------------------------------------------------------------
 
     def _now(self) -> datetime:
+        """The audit log's next time: never equal to the last one, and never ahead of the
+        clock. A coarse clock (Windows: ~16 ms) is waited out, so a note a client stamps
+        with the same clock can never land before an event that happened before it. A
+        clock that does not move (a test's) gets 1 µs steps instead."""
         now = self.clock()
         if self._last_ts is not None and now <= self._last_ts:
-            now = self._last_ts + timedelta(microseconds=1000)
+            deadline = time.monotonic() + 0.1
+            while now <= self._last_ts and time.monotonic() < deadline:
+                time.sleep(0.001)
+                now = self.clock()
+            if now <= self._last_ts:
+                now = self._last_ts + timedelta(microseconds=1)
         self._last_ts = now
         return now
 

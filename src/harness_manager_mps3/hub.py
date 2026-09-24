@@ -38,7 +38,12 @@ First writer wins on a share (``tty_share.TtyShareBroker``): only the first
 connected client's bytes reach the TTY. Before connecting, the opener reads the
 share's client count; if another client is already attached, the port it
 returns is read-only and a write raises, instead of a paced MCC command being
-dropped without a trace.
+dropped without a trace. The count lags our own closes: the hub drops a client
+only when it reads the EOF, a few ms (a round trip through the forward) after
+we close. So while every counted client could be one of our own connections
+closed in the last few seconds, the opener re-lists (``SLOT_POLL_S``, for up to
+``SLOT_WAIT_S``) until the hub has let go, rather than refuse itself the slot.
+Anyone else attached still makes the port read-only at once.
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ import re
 import secrets
 import socket
 import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -79,6 +85,14 @@ DEFAULT_TARGET = "mps3_01_pl"
 DEFAULT_SHARE_BAUD = tcp_serial.DEFAULT_SHARE_BAUD
 DEFAULT_GROUP = "fpga"
 HUB_TIMEOUT_S = 60.0
+#: How long one of our own share connections may still be counted after we closed it
+#: (the hub reads the EOF through the ssh forward), how long the opener waits for the
+#: hub to let go of the write slot, and how often it re-lists while it waits.
+OWN_LINGER_S = 3.0
+SLOT_WAIT_S = 2.0
+SLOT_POLL_S = 0.1
+#: How long a relayed console may keep sending after the share ended its side.
+RELAY_DRAIN_S = 5.0
 
 #: tty_0N is FT4232H interface 0N (fpgahub's udev naming): 00 = MCC, 01..03 = lanes.
 _TTY_IF_RE = re.compile(r"tty_0([0-3])$")
@@ -440,13 +454,36 @@ def _snippet(text: str) -> str:
     return repr(text[:200] + ("…" if len(text) > 200 else "")) if text else "(nothing)"
 
 
-def parse_ts(value: Any) -> datetime | None:
-    """An ISO 8601 time (``Z`` or an offset; none = UTC), or None."""
-    if not isinstance(value, str) or not value.strip():
+_ISO_TS = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})[T ](?P<time>\d{2}:\d{2}(?::\d{2})?)"
+                     r"(?:[.,](?P<frac>\d+))?(?P<tz>[Zz]|[+-]\d{2}(?::?\d{2})?)?")
+
+
+def iso_for_fromisoformat(value: str) -> str | None:
+    """``value`` in the one shape every ``datetime.fromisoformat`` (3.10 included) reads:
+    ``YYYY-MM-DDTHH:MM:SS[.ffffff][+HH:MM]``. Python 3.10 refuses a ``Z``, a fraction
+    that is not 3 or 6 digits (``12:03:59.9``) and an offset without a colon; 3.11+ takes
+    all three, so without this a time read fine on one Python and was None on another."""
+    m = _ISO_TS.fullmatch(value.strip())
+    if m is None:
         return None
-    text = value.strip()
-    if text[-1:] in ("Z", "z"):
-        text = text[:-1] + "+00:00"
+    clock = m["time"] if m["time"].count(":") == 2 else m["time"] + ":00"
+    frac = f".{(m['frac'] + '000000')[:6]}" if m["frac"] else ""
+    tz = m["tz"] or ""
+    if tz in ("Z", "z"):
+        tz = "+00:00"
+    elif tz:
+        digits = tz[1:].replace(":", "")
+        tz = f"{tz[0]}{digits[:2]}:{(digits[2:] or '00')}"
+    return f"{m['date']}T{clock}{frac}{tz}"
+
+
+def parse_ts(value: Any) -> datetime | None:
+    """An ISO 8601 time (``Z`` or an offset; none = UTC), or None. The same on 3.10+."""
+    if not isinstance(value, str):
+        return None
+    text = iso_for_fromisoformat(value)
+    if text is None:
+        return None
     try:
         dt = datetime.fromisoformat(text)
     except ValueError:
@@ -641,6 +678,28 @@ def parse_lease_history(text: str) -> list[dict[str, Any]]:
                                f"{_snippet(text)}")
     return [dict(e) for e in events
             if isinstance(e, dict) and isinstance(e.get("ts"), str) and isinstance(e.get("event"), str)]
+
+
+def merge_history(history: Sequence[dict[str, Any]],
+                  notes: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """fpgahub's lease-history with our revoke notes placed among it by time.
+
+    fpgahub's events keep fpgahub's order, whatever their timestamps (a coarse clock gives
+    ties). Each note goes after every event not later than it: a tie puts the history
+    first, and notes among themselves are ordered by time, then id. Deterministic, so the
+    same inputs give the same list on every platform.
+    """
+    queue = sorted(notes, key=lambda n: (_ts_key(n.get("ts")), str(n.get("id") or "")))
+    out: list[dict[str, Any]] = []
+    i = 0
+    for event in history:
+        at = parse_ts(event.get("ts"))
+        while at is not None and i < len(queue) and _ts_key(queue[i].get("ts")) < at:
+            out.append(queue[i])
+            i += 1
+        out.append(event)
+    out.extend(queue[i:])
+    return out
 
 
 def taken_from_history(events: Sequence[dict[str, Any]], holder: str) -> dict[str, str] | None:
@@ -1143,13 +1202,13 @@ class HubClient:
         events = parse_lease_history(self._hub_out(
             ["fpgahub", "target", "lease-history", self.target, "--limit", str(limit), "--json"],
             "target lease-history"))
+        notes: list[dict[str, Any]] = []
         try:
             out = self._notes("list", "rev-", what="list revoke notes")
-            events += [e for n, d in note_lines(out, "rev-") if (e := decode_revoke(d, n))]
+            notes = [e for n, d in note_lines(out, "rev-") if (e := decode_revoke(d, n))]
         except HarnessError as exc:
             log.warning("lease history for %s without revoke notes: %s", self.target, exc)
-        events.sort(key=lambda e: _ts_key(e.get("ts")))
-        return events[-limit:]
+        return merge_history(events, notes)[-limit:]
 
     # -- the note files: /tmp/harness-manager-lease/<target>/ on the hub -----------------------
 
@@ -1242,6 +1301,25 @@ class _ShareRoutes:
         self._starts: dict[tuple[str, str], bool] = {}     # (host, target) -> start_shares
         self._bauds: dict[tuple[str, str], int] = {}
         self._groups: dict[tuple[str, str], str | None] = {}
+        self._closed_at: dict[ShareRef, list[float]] = {}   # our connections' close times
+
+    def note_closed(self, ref: ShareRef) -> None:
+        """One of our connections to this share has just closed (``_SharePort.close``)."""
+        now = time.monotonic()
+        with self._mu:
+            recent = [t for t in self._closed_at.get(ref, []) if now - t < OWN_LINGER_S]
+            self._closed_at[ref] = [*recent, now]
+
+    def lingering(self, ref: ShareRef) -> int:
+        """How many of the share's clients could still be our own closed connections."""
+        now = time.monotonic()
+        with self._mu:
+            recent = [t for t in self._closed_at.get(ref, []) if now - t < OWN_LINGER_S]
+            if recent:
+                self._closed_at[ref] = recent
+            else:
+                self._closed_at.pop(ref, None)
+            return len(recent)
 
     def configure(self, cfg: HubConfig) -> None:
         with self._mu:
@@ -1341,15 +1419,46 @@ def open_hub_share(address: str, baud: int = DEFAULT_SHARE_BAUD) -> SerialPort:
     share_baud = SHARES.baud_for(ref)
     if baud and baud != share_baud:
         raise UnavailableError(tcp_serial.BAUD_CAPABILITY, tcp_serial.share_baud_reason(share_baud))
-    info, route = resolve_share(ref)
+    info, route = settle_write_slot(ref, *resolve_share(ref))
     read_only = info.readers > 0
     why = (f"another client ({info.writer or 'unknown'}) holds the hub share's write slot; "
            "fpgahub drops every other client's writes") if read_only else ""
-    port = tcp_serial.TcpSerialPort("127.0.0.1", route.local_port, baud=share_baud,
-                                    read_only=read_only, read_only_reason=why,
-                                    label=f"hub share {ref.tty} on {ref.host}")
+    port = _SharePort(ref, "127.0.0.1", route.local_port, baud=share_baud,
+                      read_only=read_only, read_only_reason=why,
+                      label=f"hub share {ref.tty} on {ref.host}")
     tcp_serial.mark_share(ref.url, share_baud)
     return port
+
+
+def settle_write_slot(ref: ShareRef, info: ShareInfo, route: _ShareRoute,
+                      *, sleep: Callable[[float], None] = time.sleep,
+                      clock: Callable[[], float] = time.monotonic) -> tuple[ShareInfo, _ShareRoute]:
+    """Wait for our own just-closed connections to leave the share (module docstring).
+
+    Re-lists only while EVERY client the hub counts could be one of ours, closed in the
+    last ``OWN_LINGER_S``; a client that cannot be ours ends the wait at once, and so does
+    ``SLOT_WAIT_S``. Returns the last listing (and route: the share may have moved).
+    """
+    deadline = clock() + SLOT_WAIT_S
+    while 0 < info.readers <= SHARES.lingering(ref) and clock() < deadline:
+        sleep(SLOT_POLL_S)
+        info, route = resolve_share(ref)
+    return info, route
+
+
+class _SharePort(tcp_serial.TcpSerialPort):
+    """A hub share's port that tells ``SHARES`` when it closes, so the next opener knows
+    the hub may still be counting it for a moment (``settle_write_slot``)."""
+
+    def __init__(self, ref: ShareRef, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.ref = ref
+
+    def close(self) -> None:
+        was_open = self.is_open
+        super().close()
+        if was_open:
+            SHARES.note_closed(self.ref)
 
 
 register_serial_scheme(HUB_SCHEME, open_hub_share)
@@ -1424,8 +1533,27 @@ class ShareRelay:
                 upstream.close()
                 return
             self._conns += [client, upstream]
-        threading.Thread(target=_pipe, args=(client, upstream), daemon=True).start()
-        _pipe(upstream, client)
+
+        def from_client() -> None:
+            _pipe(client, upstream)
+            with contextlib.suppress(OSError):
+                upstream.shutdown(socket.SHUT_RDWR)       # the console left: end both ways
+
+        back = threading.Thread(target=from_client, name=f"share-relay-in-{self.ref.tty}",
+                                daemon=True)
+        back.start()
+        try:
+            _pipe(upstream, client)
+            back.join(timeout=RELAY_DRAIN_S)
+        finally:
+            # Both sockets of this connection, now: they used to stay open until the
+            # board closed, two fds per console (re)connection (Q2 finding).
+            with self._mu:
+                self._conns = [c for c in self._conns if c is not client and c is not upstream]
+            for c in (client, upstream):
+                with contextlib.suppress(OSError):
+                    c.shutdown(socket.SHUT_RDWR)
+                c.close()
 
     def close(self) -> None:
         self._stop.set()

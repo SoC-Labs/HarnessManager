@@ -238,10 +238,6 @@ def _relay_sockets(relay_port: int, share_port: int) -> int:
 
 
 @pytest.mark.skipif(not LINUX, reason="counts fds in /proc")
-@pytest.mark.xfail(strict=True, reason="Q2 finding: hub.ShareRelay keeps both sockets of every "
-                   "relayed connection open until the board closes. hub.py belongs to the LR "
-                   "lanes (lead notice 2026-09-24); the fix is in Q2_ROBUSTNESS.md. Remove this "
-                   "mark with it.")
 def test_the_share_relay_closes_both_sockets_of_each_connection(tmp_path, monkeypatch):
     from harness_manager_mps3 import hub as hubmod
     from tests.fakes.l1_fake_hub import FakeLane
@@ -681,11 +677,6 @@ def test_negative_twin_a_console_that_connects_returns_what_it_read(capsys, tmp_
 # --- MCC reads over a hub share, back to back (finding for the LR lanes: hub.py) --------------
 
 
-@pytest.mark.xfail(strict=False, reason="Q2 finding (a race, so not strict): open_hub_share "
-                   "decides read-only from "
-                   "`share list` readers, which still counts OUR previous connection for a few "
-                   "ms after it closed; the next MCC read is refused as 'another client holds "
-                   "the write slot'. hub.py is the LR lanes'; the fix is in Q2_ROBUSTNESS.md.")
 def test_back_to_back_mcc_reads_over_a_hub_share_both_work(tmp_path, monkeypatch):
     from harness_manager.core.services import EngineConfig
     from tests.fakes.l1_rig import BOARD_IP, lab

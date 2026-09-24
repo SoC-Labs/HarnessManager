@@ -7,6 +7,7 @@ module refuses the default runner factory (which would ssh to the real hub).
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -241,11 +242,53 @@ def test_history_is_oldest_first_with_the_revoke_notes_merged(s):
     s.requester.lease_revoke(REASON)
     hist = s.holder.lease_history()
     kinds = [e["event"] for e in hist]
-    assert kinds[:2] == ["lease.acquired", "lease.queued"]
-    assert kinds.index(hubmod.ADMIN_REVOKED) < kinds.index("lease.revoked") < kinds.index("lease.promoted")
+    fpgahubs = [r["event"] for r in s.hub.audit if r.get("board") == TARGET]
+    assert [k for k in kinds if k != hubmod.ADMIN_REVOKED] == fpgahubs     # its order, untouched
+    assert fpgahubs[:2] == ["lease.acquired", "lease.queued"]
+    assert kinds.count(hubmod.ADMIN_REVOKED) == 1
+    assert kinds.index(hubmod.ADMIN_REVOKED) > kinds.index("lease.queued")  # stamped after it
     assert all("reason" not in e for e in hist if e["event"] == "lease.revoked")   # 0.3.0 drops it
+    assert hist == s.holder.lease_history()                                 # the same each time
     assert hubmod.ADMIN_REVOKED not in [r["event"] for r in s.hub.audit if r.get("board")]
     assert len(s.holder.lease_history(limit=2)) == 2
+
+
+class _CoarseDatetime(datetime):
+    """``datetime`` with Windows' clock: it moves in 15.625 ms steps."""
+
+    @classmethod
+    def now(cls, tz=None):
+        t = time.time()
+        return datetime.fromtimestamp(t - t % 0.015625, tz)
+
+
+def test_the_merge_is_the_same_on_a_coarse_clock(monkeypatch):
+    """CI on Windows: the note sorted before 'lease.queued' (the fake ran its clock ahead)."""
+    monkeypatch.setattr(hubmod, "datetime", _CoarseDatetime)
+    for _ in range(5):
+        hub = LrFakeHub(clock=lambda: _CoarseDatetime.now(timezone.utc))
+        alice = hubmod.HubClient(HOST, TARGET, runner=hub.as_user("alice"))
+        bob = hubmod.HubClient(HOST, TARGET, runner=hub.as_user("bob"))
+        hub.grant("alice")
+        hub.as_user("bob")(["fpgahub", "lease", "acquire", TARGET])
+        bob.lease_revoke(REASON)
+        kinds = [e["event"] for e in alice.lease_history()]
+        assert [k for k in kinds if k != hubmod.ADMIN_REVOKED] == [
+            r["event"] for r in hub.audit if r.get("board") == TARGET]
+        assert kinds.index(hubmod.ADMIN_REVOKED) > kinds.index("lease.queued")
+        stamps = [r["ts"] for r in hub.audit]
+        assert len(set(stamps)) == len(stamps)                  # the fake never repeats a time
+        assert max(hubmod.parse_ts(t) for t in stamps) <= datetime.now(timezone.utc)  # nor runs ahead
+
+
+def test_negative_twin_a_clock_that_never_moves_still_gets_distinct_times():
+    frozen = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+    hub = LrFakeHub(clock=lambda: frozen)
+    hub.grant("alice")
+    for name in ("bob", "carol"):
+        hub.as_user(name)(["fpgahub", "lease", "acquire", TARGET])
+    stamps = [hubmod.parse_ts(r["ts"]) for r in hub.audit]
+    assert stamps == sorted(set(stamps)) and stamps[0] == frozen
 
 
 def test_negative_twin_history_without_readable_notes_is_fpgahubs_alone(s):

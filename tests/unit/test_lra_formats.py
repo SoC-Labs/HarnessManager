@@ -7,6 +7,7 @@ The texts here are what fpgahub v0.3.0's cli.py prints (see the format table in
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -243,9 +244,67 @@ def test_times_parse_with_z_offset_or_none():
     assert hubmod.parse_ts(hubmod.utc_now()) is not None
 
 
-@pytest.mark.parametrize("value", ["", "yesterday", "2026-13-01T00:00:00", None, 1727179200])
+#: The only shape Python 3.10's datetime.fromisoformat reads (3.11+ reads more).
+PY310_ISO = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{6})?([+-]\d{2}:\d{2})?")
+
+
+@pytest.mark.parametrize("value,want", [
+    ("2026-09-24T12:03:59.9+00:00", "2026-09-24T12:03:59.900000+00:00"),     # CI: 3.10 said None
+    ("2026-09-24T12:04:00.123Z", "2026-09-24T12:04:00.123000+00:00"),
+    ("2026-09-24T12:04:00.1234567z", "2026-09-24T12:04:00.123456+00:00"),
+    ("2026-09-24 13:04:00+0100", "2026-09-24T13:04:00+01:00"),
+    ("2026-09-24T12:04+01", "2026-09-24T12:04:00+01:00"),
+    ("2026-09-24T12:04:00,5", "2026-09-24T12:04:00.500000"),
+    (" 2026-09-24T12:04:00.123456+00:00 ", "2026-09-24T12:04:00.123456+00:00"),
+])
+def test_times_are_normalised_to_what_python_3_10_reads(value, want):
+    got = hubmod.iso_for_fromisoformat(value)
+    assert got == want and PY310_ISO.fullmatch(got)
+    assert hubmod.parse_ts(value) == hubmod.parse_ts(want) is not None
+
+
+@pytest.mark.parametrize("value", ["", "yesterday", "2026-13-01T00:00:00", None, 1727179200,
+                                   "2026-09-24", "2026-09-24T12:00:00+00:00 junk", "12:00:00"])
 def test_negative_twin_times_that_do_not_parse(value):
     assert hubmod.parse_ts(value) is None
+
+
+# -- merging our revoke notes into fpgahub's history ---------------------------------------------
+
+
+def ev(ts: str, event: str, **kw) -> dict:
+    return {"ts": ts, "event": event, **kw}
+
+
+def note(ts: str, nid: str = "n") -> dict:
+    return {"ts": ts, "event": hubmod.ADMIN_REVOKED, "id": nid}
+
+
+T0, T1, T2 = "2026-09-24T12:00:00+00:00", "2026-09-24T12:00:00.015625+00:00", "2026-09-24T12:00:01Z"
+
+
+def test_a_note_lands_between_the_events_either_side_of_it():
+    hist = [ev(T0, "lease.acquired"), ev(T2, "lease.revoked")]
+    assert [e["event"] for e in hubmod.merge_history(hist, [note(T1)])] == [
+        "lease.acquired", hubmod.ADMIN_REVOKED, "lease.revoked"]
+
+
+def test_negative_twin_a_tie_puts_fpgahubs_event_first_every_time():
+    """Windows' ~16 ms clock gives equal times: the result must not depend on it."""
+    hist = [ev(T0, "lease.acquired"), ev(T1, "lease.queued"), ev(T1, "lease.revoked"),
+            ev(T1, "lease.promoted")]
+    notes = [note(T1, "b"), note(T1, "a")]
+    got = hubmod.merge_history(hist, notes)
+    assert [e["event"] for e in got] == [e["event"] for e in hist] + [hubmod.ADMIN_REVOKED] * 2
+    assert [e["id"] for e in got[-2:]] == ["a", "b"]                        # then by id
+    assert hubmod.merge_history(hist, list(reversed(notes))) == got
+
+
+def test_fpgahubs_own_order_is_never_changed():
+    hist = [ev(T2, "lease.acquired"), ev(T0, "lease.queued"), ev("garbled", "lease.revoked")]
+    got = hubmod.merge_history(hist, [note(T1)])
+    assert [e for e in got if e["event"] != hubmod.ADMIN_REVOKED] == hist
+    assert hubmod.merge_history(hist, []) == hist and hubmod.merge_history([], [note(T1)]) == [note(T1)]
 
 
 def test_revoke_reasons_are_one_line_and_bounded():
