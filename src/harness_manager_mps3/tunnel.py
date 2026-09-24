@@ -545,12 +545,20 @@ class SshTunnel:
                  backoff_s: Sequence[float] = BACKOFF_S,
                  on_state: Callable[[dict[str, Any]], None] | None = None,
                  label: str = "", user_config: Path | None = None,
-                 system_config: Path | None = Path("/etc/ssh/ssh_config")) -> None:
+                 system_config: Path | None = Path("/etc/ssh/ssh_config"),
+                 jump: str = "", user: str = "") -> None:
         if not host:
             raise UsageError("an SSH tunnel needs a host")
         if not forwards:
             raise UsageError("an SSH tunnel needs at least one forward")
+        for what, value in (("jump host", jump), ("user", user)):
+            if value and (value.startswith("-") or any(c.isspace() for c in value)):
+                raise UsageError(f"bad SSH {what} {value!r}")
         self.host = host
+        #: CCR X-1: ``ssh -J JUMP -l USER HOST`` (the Linux harness's board SSH, reached
+        #: through the hub). Both empty: today's one-hop tunnel, argv unchanged.
+        self.jump = jump
+        self.user = user
         self.label = label or f"ssh:{host}"
         self._launcher = launcher or DEFAULT_LAUNCHER
         self._ssh = ssh
@@ -596,12 +604,15 @@ class SshTunnel:
 
     def status(self) -> dict[str, Any]:
         with self._mu:
-            return {"via": f"{VIA_SSH}:{self.host}", "host": self.host, "state": self.state,
-                    "ports": {str(k): v for k, v in self.ports().items()},
-                    "forwards": {fw.name: {"remote": f"{fw.remote_host}:{fw.remote_port}",
-                                           "local": fw.local_port} for fw in self.forwards},
-                    "detail": self.detail, "restarts": self.restarts,
-                    "pid": getattr(self._proc, "pid", None)}
+            out = {"via": f"{VIA_SSH}:{self.host}", "host": self.host, "state": self.state,
+                   "ports": {str(k): v for k, v in self.ports().items()},
+                   "forwards": {fw.name: {"remote": f"{fw.remote_host}:{fw.remote_port}",
+                                          "local": fw.local_port} for fw in self.forwards},
+                   "detail": self.detail, "restarts": self.restarts,
+                   "pid": getattr(self._proc, "pid", None)}
+            if self.jump or self.user:          # CCR X-1: additive, only for a -J tunnel
+                out.update(jump=self.jump, user=self.user)
+            return out
 
     def watch(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Call ``callback(status())`` on every state change (the daemon publishes events)."""
@@ -627,6 +638,10 @@ class SshTunnel:
         base = ssh_base_argv(self.host, ssh=self._ssh, ssh_g=self._ssh_g,
                              user_config=self._user_config, system_config=self._system_config)
         argv = [*base, *SSH_OPTIONS, "-N", "-T"]
+        if self.jump:
+            argv += ["-J", self.jump]
+        if self.user:
+            argv += ["-l", self.user]
         for fw in self.forwards:
             argv += ["-L", fw.spec()]
         argv.append(self.host)

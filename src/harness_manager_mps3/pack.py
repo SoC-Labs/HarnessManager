@@ -26,6 +26,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.naming:name_candidate(candidate)``          | N1   | the candidate with its display name (boards.toml, harness, hub table) |
 | ``.naming:session_board_name(session, ident)`` | N1   | ``(name, source)``: the hub's confirmed name for an open board |
 | ``.panel:make_panel_adapter(session)``         | P2   | ``session.panel``: the front panel (``core.panel.PanelAdapter``) |
+| ``.xvc:make_xvc_adapter(session)``             | XVC  | ``XvcAdapter``: the harness's XVC, partition-scoped (CCR X-8) |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -208,6 +209,7 @@ class Mps3Session(BoardSession):
             ("clocks", "clock", "make_clock_adapter"),
             ("hub", "hub", "make_hub_adapter"),              # L1: leases and shares
             ("panel", "panel", "make_panel_adapter"),        # P2: the front panel (CLCD)
+            ("xvc", "xvc", "make_xvc_adapter"),              # CCR X-8: fabric debug (XVC)
         ):
             make = _hook(module, factory)
             if make is not None:

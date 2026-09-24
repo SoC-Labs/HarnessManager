@@ -31,6 +31,12 @@ SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.DEPLOY_PARTIAL, "Program a partition", (via(L.ETHERNET), via(L.HUB))),
     CapabilitySpec(C.CONSOLE_DUT, "DUT consoles (UART0/UART1/SWO)", (via(L.ETHERNET), via(L.HUB))),
     CapabilitySpec(C.DEBUG_DUT, "Debug the DUT CPU (OpenOCD)", (via(L.ETHERNET), via(L.HUB))),
+    # CCR X-7 (lane XVC-CORE): the harness's OWN XVC server, scoped to the reconfigurable
+    # partition's debug chain (the Debug Bridge and the loaded design's ILAs); never
+    # whole-device JTAG. The Linux harness is also reached by board SSH (D-X1).
+    CapabilitySpec(C.DEBUG_FABRIC, "Debug the partition's ILAs (XVC, partition-scoped)",
+                   (via(L.ETHERNET, features=("xvc_dbgbr",)), via(L.HUB, features=("xvc_dbgbr",)),
+                    via(L.SSH, features=("xvc_dbgbr",)))),
     CapabilitySpec(C.RESET_DUT, "Reset the DUT", (via(L.ETHERNET), via(L.HUB))),
     CapabilitySpec(C.CLOCK_DUT, "Set the DUT clock", (via(L.ETHERNET), via(L.HUB))),
     # FPGA UART lane 2 over the Debug USB, the hub, or (Linux harness) an SSH login.
