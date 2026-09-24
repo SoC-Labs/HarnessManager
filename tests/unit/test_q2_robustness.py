@@ -3,7 +3,8 @@
 - a zombie is not alive (``daemon stop`` from beside an open app window);
 - ``Engine.close_all`` closes every board even when one fails;
 - a full or read-only state dir is a message, never a traceback or an empty lock;
-- the hub-share relay closes each connection's sockets when it ends;
+- the hub-share relay closes each connection's sockets when it ends (xfail: hub.py is
+  the LR lanes'; the fix is in the report);
 - an SSH tunnel whose owner was killed is stopped by the next process (records + reaper);
 - a tunnel whose local port was taken while starting picks new ports;
 - job failures are in daemon.log; daemon.log rotates at start.
@@ -237,6 +238,10 @@ def _relay_sockets(relay_port: int, share_port: int) -> int:
 
 
 @pytest.mark.skipif(not LINUX, reason="counts fds in /proc")
+@pytest.mark.xfail(strict=True, reason="Q2 finding: hub.ShareRelay keeps both sockets of every "
+                   "relayed connection open until the board closes. hub.py belongs to the LR "
+                   "lanes (lead notice 2026-09-24); the fix is in Q2_ROBUSTNESS.md. Remove this "
+                   "mark with it.")
 def test_the_share_relay_closes_both_sockets_of_each_connection(tmp_path, monkeypatch):
     from harness_manager_mps3 import hub as hubmod
     from tests.fakes.l1_fake_hub import FakeLane
@@ -551,3 +556,101 @@ def test_open_failures_since_waits_only_as_long_as_asked():
     finally:
         t.close()
         ssh.close()
+
+
+# --- a short request that waited must not run under a job that claimed the board meanwhile ----
+
+
+def _race(claim: bool) -> str:
+    """A deploy's preflight holds the board's op lock; a close waits for it; the deploy's
+    job claims the board; the preflight lets go. Which runs: the close or the job?"""
+    import threading
+
+    from harness_manager.core.errors import HeldError
+    from harness_manager.daemon.jobs import BoardGates, Job
+
+    gates = BoardGates(op_wait_s=10)
+    holding, release = threading.Event(), threading.Event()
+    outcome: list[str] = []
+
+    def preflight() -> None:
+        with gates.op("b"):
+            holding.set()
+            release.wait(5)
+
+    def close() -> None:
+        try:
+            with gates.op("b"):
+                outcome.append("the close ran")
+        except HeldError as exc:
+            outcome.append(f"held: {exc.message}")
+
+    t1 = threading.Thread(target=preflight)
+    t1.start()
+    assert holding.wait(5)
+    t2 = threading.Thread(target=close)
+    t2.start()
+    time.sleep(0.2)                              # the close now waits for the op lock
+    if claim:
+        gates.claim("b", Job("deploy", "b"))     # what jobs.submit does after the preflight
+    release.set()
+    t1.join(5)
+    t2.join(5)
+    return outcome[0]
+
+
+def test_a_close_that_waited_behind_a_preflight_is_refused_once_the_job_has_claimed():
+    # In the concurrency run the close won the lock and closed the board under the
+    # deploy job, which then failed UNREACHABLE mid-way.
+    assert _race(claim=True).startswith("held: b is busy: deploy job")
+
+
+def test_negative_twin_with_no_job_the_waiting_close_runs():
+    assert _race(claim=False) == "the close ran"
+
+
+# --- a job whose board was closed before it started sends nothing -----------------------------
+
+
+@pytest.mark.parametrize("close_first", [True, False])
+def test_a_deploy_whose_board_closed_before_the_job_ran_sends_nothing(tmp_path, monkeypatch,
+                                                                       close_first):
+    from fastapi.testclient import TestClient
+
+    from harness_manager.daemon import jobs as jobsmod
+    from harness_manager.daemon.app import create_app
+    from tests.fakes.t2_overlays import make_overlay, use_overlay_dirs
+    from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
+    from tests.fakes.virtual_board import VirtualMps3
+
+    make_overlay(tmp_path / "ov", "synth")
+    use_overlay_dirs(monkeypatch, tmp_path / "ov")
+    with VirtualMps3(tmp_path) as vb:
+        eng = engine_for(vb)
+        real_submit = jobsmod.JobManager.submit
+
+        def submit(self, kind, board_id, fn, **kw):
+            if close_first and kind == "deploy":
+                eng.close(board_id)              # the close that won the race (interleaving a)
+            return real_submit(self, kind, board_id, fn, **kw)
+
+        monkeypatch.setattr(jobsmod.JobManager, "submit", submit)
+        try:
+            with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as c:
+                bid = c.post("/api/v1/boards", json={"target": vb.shell_endpoint},
+                             headers=headers()).json()["board_id"]
+                r = c.post(f"{bid_path(bid)}/deploy", json={"overlay": "synth"},
+                           headers=headers())
+                assert r.status_code == 202
+                job = r.json()["job"]
+                _wait(lambda: c.get(f"/api/v1/jobs/{job}", headers=headers())
+                      .json()["state"] != "running", what="the job")
+                j = c.get(f"/api/v1/jobs/{job}", headers=headers()).json()
+                if close_first:
+                    assert j["state"] == "failed" and j["error"]["name"] == "ABSENT"
+                    assert "closed before the deploy started" in j["error"]["message"]
+                    assert vb.shell.accepted_pushes == []          # nothing reached the board
+                else:                                               # twin: it deploys
+                    assert j["state"] == "done", j
+        finally:
+            eng.close_all()

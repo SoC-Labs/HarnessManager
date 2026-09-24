@@ -1424,27 +1424,8 @@ class ShareRelay:
                 upstream.close()
                 return
             self._conns += [client, upstream]
-        def from_client() -> None:
-            _pipe(client, upstream)
-            # The console left: nothing more to relay either way. Without this, a share
-            # that stays silent kept the other direction (and both fds) waiting forever.
-            with contextlib.suppress(OSError):
-                upstream.shutdown(socket.SHUT_RDWR)
-
-        back = threading.Thread(target=from_client, daemon=True)
-        back.start()
-        try:
-            _pipe(upstream, client)
-            back.join(timeout=5.0)        # the client's EOF follows the share's at once
-        finally:
-            # Both ends are done: close them and forget them. They used to stay open in
-            # _conns until the board closed, two fds per console connection (Q2).
-            with self._mu:
-                self._conns = [c for c in self._conns if c is not client and c is not upstream]
-            for c in (client, upstream):
-                with contextlib.suppress(OSError):
-                    c.shutdown(socket.SHUT_RDWR)
-                c.close()
+        threading.Thread(target=_pipe, args=(client, upstream), daemon=True).start()
+        _pipe(upstream, client)
 
     def close(self) -> None:
         self._stop.set()
