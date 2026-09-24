@@ -60,6 +60,21 @@ owners.
   `boards.toml`: `harness-manager power show`, and a cold `power cycle`.
 - Signed updates of the harness and the app (`harness-manager update`). The channel is
   not live yet: it refuses every release until the release keys are made.
+- Boards behind a lab hub: `via = "ssh:HOST"` in `boards.toml`, or `--via ssh:HOST`,
+  reaches the board through one supervised SSH tunnel (consoles, programming, debug).
+  The MCC and FPGA UART lanes work over the hub's serial shares. `harness-manager lease`
+  and `share` manage the hub lease and shares (there is no `share stop`: it would stop
+  every share on the board). The lease is heartbeated while the board is open.
+- DUT console input is paced (20 ms a byte on UART0/UART1), because the nanoSoC UART has
+  no receive FIFO: a paste no longer arrives garbled.
+
+### The app's pages
+- A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"
+  line only when something is wrong, and the details folded away.
+- Consoles: "Attach with screen" gives the command to copy, the rate and why it is
+  fixed, a rate selector where it can change, and Export to TCP.
+- Power, Update, Clocks and SD card pages; a lease and tunnel chip for boards behind a
+  hub.
 
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
