@@ -234,7 +234,10 @@ def test_a_keep_answer_shows_its_message_and_the_minutes_left(page_factory, daem
     expect(answer).to_contain_text("“finishing a run”")
     expect(answer.locator('[data-testid="req-keep-left"]')).to_contain_text(re.compile(r"1[45] min left \(until \d\d:\d\d:\d\d\)"))
     assert bar.locator('[data-testid="req-countdown"]').count() == 0          # answered: no 2:00
-    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text("the holder answered: keep for 15 min")
+    # D1: the answer is a phase; the request job waits on (we stay in the queue)
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text("the holder answered: you stay in the queue")
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text("(running")
+    expect(page.locator('[data-testid="job-chip"]')).to_contain_text("lease request running")
     # kept: even past the 2:00, Force is not offered until the 15 min run out
     reqs(daemon).advance(BOARD, 125)
     expect(bar.locator('[data-testid="reason-lease_force"]')).to_contain_text("keep for 15 min", timeout=POLL)
@@ -315,7 +318,7 @@ def test_the_holder_keeps_it_with_a_message_and_sees_what_they_answered(page_fac
         "answer": "keep", "minutes": 15, "message": "ten more minutes",
         "at": reqs(daemon).answers[BOARD][rid]["at"]}
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours")   # kept
-    # a reload still knows it was answered: no second prompt for the same request
+    # a reload (this page's memory gone) still knows: D5, the answer rides on the request
     page.reload()
     page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
     expect(page.locator('[data-testid="lease-answered"]')).to_be_visible(timeout=T)
@@ -425,3 +428,124 @@ def test_an_unnamed_board_is_called_by_its_address_and_a_bare_revoke_has_no_reas
         r"^192\.168\.10\.102:6900 was force-released by bob@lab-pc-02 at \d\d:\d\d:\d\d$"), timeout=T)
     # the twin: the named board says its name, never the address
     assert "mps3-01" not in title.inner_text()
+
+
+# --- decisions D1-D8 (docs/LEASE_REQUESTS.md) ------------------------------------------------------
+
+
+def test_the_confirm_names_the_physical_board_the_revoke_acts_on(page_factory, daemon):
+    # D4: GET /lease.board ("mps3_01") differs from the target ("mps3_01_pl"): say so.
+    page, bar = requester(page_factory, daemon)
+    reqs(daemon).advance(BOARD, 121)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
+    force_button(page).click()
+    modal = page.locator('[data-testid="force-confirm"]')
+    expect(modal.locator('[data-testid="force-board"]')).to_have_text(
+        "It revokes board mps3_01 (the hub target mps3_01_pl is part of it).")
+    modal.locator('[data-action="force_cancel"]').click()
+    # the twin: a board named like its target needs no extra line
+    reqs(daemon).set_board(BOARD, "mps3_01_pl")
+    force_button(page).click()
+    expect(modal).to_be_visible()
+    expect(modal.locator('[data-testid="force-board"]')).to_have_count(0, timeout=POLL)   # next read
+    modal.locator('[data-action="force_cancel"]').click()
+    assert reqs(daemon).revokes == []
+
+
+def test_a_time_left_refusal_says_when_force_opens(page_factory, daemon):
+    # D3: 422 UNAVAILABLE carries error.data {time_left_s, deadline_at}. The page never sends
+    # force early itself, so the refusal is played at the route (a page behind the hub).
+    page, bar = requester(page_factory, daemon)
+    reqs(daemon).advance(BOARD, 121)
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
+    page.route(re.compile(r"/lease/force$"), lambda route: route.fulfill(status=422, json={
+        "ok": False, "error": {"code": 12, "name": "UNAVAILABLE",
+                               "message": "lease_force is unavailable: alice@lab-pc-07 has 95 s left to answer",
+                               "hint": "force-release opens at the deadline",
+                               "data": {"time_left_s": 95, "deadline_at": "2026-09-24T12:01:35+00:00"}}}))
+    force_button(page).click()
+    page.locator('[data-testid="force-confirm"] [data-action="force_confirm"]').click()
+    result = bar.locator('[data-testid="result-lease_force"]')
+    expect(result).to_contain_text("(rc 12", timeout=T)
+    expect(result).to_contain_text("force-release opens in 1:35 (at ")
+    assert reqs(daemon).revokes == []
+
+
+def test_an_answer_given_elsewhere_shows_as_answered_not_as_a_prompt(page_factory, daemon):
+    # D5: the holder answered from the CLI (or another page): incoming[].answer carries it.
+    page = holder_page(page_factory, daemon)
+    rid = reqs(daemon).incoming(BOARD, by="bob@lab-pc-02", message="demo at 3")
+    expect(page.locator(f'[data-testid="lease-wanted"][data-request="{rid}"]')).to_be_visible(timeout=T)
+    reqs(daemon).answer_incoming(BOARD, rid, "keep", minutes=30, message="from the CLI")
+    answered = page.locator(f'[data-testid="lease-answered"][data-request="{rid}"]')
+    expect(answered).to_contain_text(f"You answered bob@lab-pc-02: keep {NAME} for 30 min", timeout=POLL)
+    expect(answered).to_contain_text("“from the CLI”")
+    expect(page.locator('[data-testid="lease-wanted"]')).to_have_count(0)
+
+
+# --- hub mode over fpgahub REST (T8, docs/HUB_MODE.md) ------------------------------------------------
+
+NOTES_OFF = "the hub is reached over its REST API, which has no request notes"
+ROLE_OFF = "force-release needs an admin token; this hub token's role is write"
+
+
+def test_over_rest_the_holder_prompt_has_no_message_box_and_no_keep_and_says_why(page_factory, daemon):
+    reqs(daemon).notes_reason = NOTES_OFF
+    page = holder_page(page_factory, daemon)
+    reqs(daemon).incoming(BOARD, by="bob@lab-pc-02", message="never arrives")
+    prompt = page.locator('[data-testid="lease-wanted"]')
+    expect(prompt.locator('[data-testid="wanted-title"]')).to_have_text(f"bob@lab-pc-02 wants {NAME}.", timeout=T)
+    assert prompt.locator('[data-testid="wanted-message"]').count() == 0
+    assert prompt.locator('[data-action^="respond_keep_"]').count() == 0
+    expect(prompt.locator('[data-testid="wanted-notes-off"]')).to_contain_text(NOTES_OFF)
+    expect(prompt.locator('[data-testid="wanted-notes-off"]')).to_contain_text("Release now still works")
+    prompt.locator('[data-action="respond_release"]').click()
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to bob@lab-pc-02", timeout=T)
+
+
+def test_with_notes_the_holder_prompt_keeps_its_message_box_and_keep_buttons(page_factory, daemon):
+    page = holder_page(page_factory, daemon)                   # the twin of the one above
+    reqs(daemon).incoming(BOARD)
+    prompt = page.locator('[data-testid="lease-wanted"]')
+    expect(prompt.locator('[data-testid="wanted-message"]')).to_be_visible(timeout=T)
+    expect(prompt.locator('[data-action^="respond_keep_"]')).to_have_count(4)
+    assert prompt.locator('[data-testid="wanted-notes-off"]').count() == 0
+
+
+def test_over_rest_the_request_form_has_no_message_and_says_why(page_factory, daemon):
+    daemon.app.state.sim.behind_hub(BOARD, lease="other")
+    reqs(daemon).notes_reason = NOTES_OFF
+    page = page_factory(**APP)
+    open_board(page)
+    page.locator('[data-testid="fact-hub"] [data-action="lease_request_open"]').click()
+    form = page.locator('[data-testid="lease-request-form"]')
+    expect(form.locator('[data-testid="request-notes-off"]')).to_contain_text(NOTES_OFF)
+    assert form.locator("textarea").count() == 0
+    expect(form.locator('[data-action="lease_request"]')).to_be_focused()
+    form.locator('[data-action="lease_request"]').click()
+    bar = page.locator('[data-testid="lease-request"]')
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text(f"$ lease request {ADDR}  (running", timeout=T)
+    assert wait_until(lambda: BOARD in reqs(daemon).outgoing)
+    assert reqs(daemon).outgoing[BOARD]["message"] == ""
+
+
+def test_over_rest_a_write_token_cannot_force_and_the_page_says_why(page_factory, daemon):
+    daemon.app.state.sim.behind_hub(BOARD, lease="other")
+    reqs(daemon).revoke_reason = ROLE_OFF
+    page = page_factory(**APP)
+    open_board(page)
+    bar = send_request(page)
+    # the role, not the countdown, is the reason: even while the 2:00 run
+    expect(bar.locator('[data-testid="reason-lease_force"]')).to_contain_text(ROLE_OFF, timeout=T)
+    reqs(daemon).advance(BOARD, 121)
+    expect(bar.locator('[data-testid="req-countdown"]')).to_contain_text("0:00", timeout=POLL)
+    page.wait_for_timeout(2500)                                # the reads at 0:00 are in
+    expect(force_button(page)).to_have_attribute("aria-disabled", "true")
+    expect(bar.locator('[data-testid="reason-lease_force"]')).to_contain_text(ROLE_OFF)
+    force_button(page).click(force=True)
+    expect(page.locator('[data-testid="force-confirm"]')).to_have_count(0)
+    expect(bar.locator('[data-testid="result-lease_force"]')).to_contain_text("Nothing was run.")
+    assert reqs(daemon).revokes == []
+    # the twin: an admin token, and Force opens
+    reqs(daemon).revoke_reason = ""
+    expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)

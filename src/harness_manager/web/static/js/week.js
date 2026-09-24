@@ -135,7 +135,12 @@ export async function loadHub(bid) {
     const d = lease || {};
     w.hub = { host: d.hub || (tunnel && tunnel.host) || "", lease: lease ? d.lease : null, tunnel,
       queue: Array.isArray(d.queue) ? d.queue : [], request: d.request || null,
-      incoming: Array.isArray(d.incoming) ? d.incoming : [], taken: d.taken || null };
+      incoming: Array.isArray(d.incoming) ? d.incoming : [], taken: d.taken || null,
+      board: d.board || "",                          // D4: the physical board (mps3_01)
+      // T8 hub mode over REST: no request messages or Keep; force only with an admin token.
+      // Absent keys (a daemon or hub mode without them) mean both work.
+      notesOk: d.notes_supported !== false, notesReason: d.notes_reason || "",
+      revokeOk: d.can_revoke !== false, revokeReason: d.revoke_reason || "" };
   }
   w.hubAt = Date.now();
   for (const fn of hubHooks) {

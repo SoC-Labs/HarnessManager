@@ -141,8 +141,10 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/boards/{bid}/session"),
     ("POST", "/daemon/shutdown"),
     ("WS", "/events"),
-) + tuple(r for routes in EXTENSION_ROUTES.values() for r in routes) + LEASE_REQUEST_ROUTES \
-    + ADDITIVE_ROUTES
+) + tuple(r for routes in EXTENSION_ROUTES.values() for r in routes) + tuple(
+    # LR-C may list the four in EXTENSION_ROUTES["hub_api"] too: each route once.
+    r for r in LEASE_REQUEST_ROUTES if r not in EXTENSION_ROUTES.get("hub_api", ())
+) + ADDITIVE_ROUTES
 
 
 # --- jobs --------------------------------------------------------------------------------

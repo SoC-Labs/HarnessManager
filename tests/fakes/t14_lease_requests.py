@@ -16,6 +16,14 @@ The scripted scenarios are knobs on ``LeaseRequestSim`` (``sim.requests`` on the
   (the daemon caches ``GET /lease`` for 10 s, so the page can be behind the hub);
   ``announce_force = False`` drops the ``lease.force_available`` event;
 - holder: ``incoming(bid, by=..., message=...)`` is another session asking for our lease;
+  ``answer_incoming(bid, id, "keep", minutes=15)`` is our answer given elsewhere (the CLI,
+  another page): D5 shows it as ``incoming[].answer``;
+- ``set_board(bid, "mps3_01")``: the physical board ``GET /lease`` names (D4); by default
+  the target without its ``_pl``;
+- hub mode over fpgahub REST (T8, docs/HUB_MODE.md): ``notes_reason = "why"`` turns request
+  notes off (no message reaches the holder, no Keep answer: ``notes_supported`` false), and
+  ``revoke_reason = "why"`` is a token that cannot revoke (``can_revoke`` false: force is
+  REFUSED whatever the clock says);
 - victim: ``taken(bid, by=..., reason=...)`` is another session force-releasing it.
 """
 
@@ -31,10 +39,10 @@ from typing import Any
 from fastapi import Body, FastAPI
 from fastapi.responses import JSONResponse
 
+from harness_manager.cli.output import with_data
 from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
-    HeldError,
     RefusedError,
     UnavailableError,
     UsageError,
@@ -85,6 +93,9 @@ class LeaseRequestSim:
         self.refuse_force = ""
         #: False: no lease.force_available event (the page must find out by reading at zero)
         self.announce_force = True
+        #: hub mode over REST (T8): non-empty = no request notes / no revoke, with the reason
+        self.notes_reason = ""
+        self.revoke_reason = ""
         self._watch: threading.Thread | None = None
 
     # -- helpers -----------------------------------------------------------------------------
@@ -119,6 +130,8 @@ class LeaseRequestSim:
         req = self.outgoing.get(bid)
         if req is None:
             return False, "there is no request of yours to force"
+        if self.revoke_reason:                   # T8: the token's role, whatever the clock says
+            return False, self.revoke_reason
         hub = self.week.hubs.get(bid) or {}
         lease = hub.get("lease")
         if not lease or lease.get("mine"):
@@ -172,6 +185,10 @@ class LeaseRequestSim:
         with self._lock:
             self.ahead.setdefault(bid, []).append(principal)
 
+    def set_board(self, bid: str, board: str) -> None:
+        with self._lock:
+            self.hub(bid)["board"] = board
+
     def clear_ahead(self, bid: str) -> None:
         with self._lock:
             self.ahead.pop(bid, None)
@@ -183,6 +200,8 @@ class LeaseRequestSim:
         """Another session asks for our lease: it queues and writes req-<id>.json."""
         now = time.time() - age_s
         user, host = _user_host(by)
+        if self.notes_reason:                    # T8: every waiter, never its message
+            message = ""
         note = {"id": f"r{uuid.uuid4().hex[:8]}", "by": by, "user": user, "host": host,
                 "message": message, "created_at": iso(now), "deadline_at": iso(now + self.window_s)}
         with self._lock:
@@ -228,8 +247,14 @@ class LeaseRequestSim:
             out: dict[str, Any] = {"queue": [], "request": None, "incoming": [],
                                    "taken": dict(self.last_taken[bid])
                                    if bid in self.last_taken else None}
+            out["board"] = None
+            # T8 hub mode over REST: what this client's hub connection can do. The names follow
+            # the REST client (notes_supported, notes_reason, can_revoke()); LR-B may rename.
+            out.update(notes_supported=not self.notes_reason, notes_reason=self.notes_reason,
+                       can_revoke=not self.revoke_reason, revoke_reason=self.revoke_reason)
             if hub is None:
                 return out
+            out["board"] = hub.get("board") or hub["target"].rsplit("_", 1)[0]     # D4
             queue: list[tuple[str, bool]] = []
             req = self.outgoing.get(bid)
             if req is not None:
@@ -237,7 +262,10 @@ class LeaseRequestSim:
             lease = hub.get("lease")
             if lease and lease.get("mine"):
                 queue = [(n["by"], False) for n in self.inbox.get(bid, [])]
-                out["incoming"] = [dict(n) for n in self.inbox.get(bid, [])]
+                answers = self.answers.get(bid, {})
+                out["incoming"] = [{**n, "answer": dict(answers[n["id"]])      # D5
+                                    if n["id"] in answers else None}
+                                   for n in self.inbox.get(bid, [])]
             out["queue"] = [{"position": i, "holder": p, "user": _user_host(p)[0], "mine": mine}
                             for i, (p, mine) in enumerate(queue, start=1)]
             if req is not None:
@@ -311,7 +339,8 @@ class LeaseRequestSim:
             progress("notified", 0, 0)
         self.start_watch()
         stop = time.monotonic() + 600
-        answered = force = False
+        seen_answer: Any = None
+        force_seen = False
         while time.monotonic() < stop:
             with self._lock:
                 free = hub["lease"] is None and not self.ahead.get(bid) and bid in self.outgoing
@@ -322,18 +351,18 @@ class LeaseRequestSim:
                 lease = hub["lease"]
                 return {"lease": {k: lease[k] for k in ("target", "holder", "expires_at")}}
             if cancel.is_set():
-                raise ActionFailedError(f"the request for {hub['target']} was withdrawn: this "
-                                        "client left the queue", hint="request it again when "
-                                                                      "you want the board")
+                return {"left": True}            # D7: leaving is not a failure
+            # D1: a keep answer is a phase, not the end: we stay queued, and force can open
+            # again once its minutes run out.
             a = req["answer"]
-            if a and a["answer"] == "keep" and not answered:
-                answered = True
+            if a and a is not seen_answer:
+                seen_answer = a
                 progress("answered", 0, 0)
-                return {"answered": {k: a[k] for k in ("answer", "minutes", "message", "at")}}
-            if not force and req.get("force_published"):
-                force = True
+            now_force = bool(req.get("force_published"))
+            if now_force and not force_seen:
                 progress("force-available", 0, 0)
-        raise HeldError(f"{hub['target']} is leased to {hub['lease']['holder']}",
+            force_seen = now_force
+        raise ActionFailedError(f"{hub['target']} is leased to {hub['lease']['holder']}",
                         holder=hub["lease"]["holder"], hint="the mock's queue timed out")
 
     def leave(self, bid: str) -> bool:
@@ -359,6 +388,13 @@ class LeaseRequestSim:
         message = body.get("message") or ""
         if not isinstance(message, str) or len(message.encode()) > NOTE_MAX // 2:
             raise UsageError("message must be text of at most 2 KiB (a note is at most 4 KiB)")
+        if self.notes_reason and answer == "keep":
+            raise UnavailableError("lease_keep", self.notes_reason)
+        self.answer_incoming(bid, rid, answer, minutes=minutes, message=message)
+
+    def answer_incoming(self, bid: str, rid: str, answer: str, *, minutes: int = 0,
+                        message: str = "") -> None:
+        """Our answer to an incoming request (POST .../respond, or the CLI elsewhere)."""
         hub = self.hub(bid)
         with self._lock:
             note = next((n for n in self.inbox.get(bid, []) if n["id"] == rid), None)
@@ -392,10 +428,18 @@ class LeaseRequestSim:
         if self.refuse_force:
             why, self.refuse_force = self.refuse_force, ""
             raise RefusedError(why, hint="GET .../lease shows the hub's view now")
+        if self.revoke_reason:
+            raise RefusedError(f"force is not available: {self.revoke_reason}",
+                               hint="ask the hub admin, or wait for the holder")
         available, why = self.force_state(bid)
         if not available:
-            if time.time() < self._deadline(req):
-                raise UnavailableError("lease_force", why)
+            deadline = self._deadline(req)
+            if time.time() < deadline and not req.get("answer"):
+                err = UnavailableError("lease_force", why)
+                err.hint = ("force-release opens at the deadline if there is still no answer "
+                            "and you are at the head of the queue")
+                raise with_data(err, time_left_s=max(1, int(deadline - time.time() + 0.999)),
+                                deadline_at=iso(deadline))           # D3
             raise RefusedError(f"force is not available: {why}")
 
     def force(self, bid: str, progress: Any) -> dict[str, Any]:

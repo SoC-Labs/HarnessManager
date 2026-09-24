@@ -11,7 +11,11 @@
 //   stays until dismissed (across reloads) and is written to Activity.
 //
 // Every countdown runs to a time the daemon read from the hub's note (deadline_at, an
-// answer's at + minutes), never to a timer this page started.
+// answer's at + minutes), never to a timer this page started. docs/LEASE_REQUESTS.md D1-D8
+// amend the frozen API: a keep answer is a phase of the request job (D1), leaving ends it
+// with {left: true} (D7), GET /lease names the physical board (D4) and each incoming
+// request's answer (D5). Over fpgahub's REST API (T8, docs/HUB_MODE.md) there are no
+// messages and no Keep (notes_supported false), and a non-admin token cannot force.
 
 import { gateReason, interlock, panelState, runAction, runJob } from "./actions.js";
 import { call, routeMissing } from "./api.js";
@@ -29,6 +33,17 @@ const NOTE_MAX = 500;                   // characters; a note on the hub is at m
 function hubOf(bid) {
   const b = S.board[bid];
   return (b && b.week && b.week.hub) || null;
+}
+
+// T8 hub mode over REST: request notes (the message, Keep) and the right to force.
+export function notesOff(bid) {
+  const hub = hubOf(bid);
+  return hub && hub.notesOk === false ? (hub.notesReason || "this hub connection carries no request messages") : "";
+}
+
+function revokeOff(bid) {
+  const hub = hubOf(bid);
+  return hub && hub.revokeOk === false ? (hub.revokeReason || "force-release needs an admin token on this hub") : "";
 }
 
 // What every lease text calls the board: its name (N1: "mps3-01", from boards.toml, the
@@ -74,19 +89,19 @@ function recall(store, key) {
   try { return JSON.parse(store.getItem(key) || "{}") || {}; } catch (e) { return {}; }
 }
 
-function sessionStore() { try { return window.sessionStorage; } catch (e) { return null; } }
 function localStore() { try { return window.localStorage; } catch (e) { return null; } }
 
 // --- page state --------------------------------------------------------------------------------
 
 const DISMISSED_KEY = "harness_manager.lease_taken_dismissed";   // {bid: at}, survives reloads
-const ANSWERS_KEY = "harness_manager.lease_answers";             // {bid: {id: answer}}, per tab
 
 const L = {
   form: null,                // {bid, message, trigger}: the "Request board" form
   confirm: null,             // {bid, trigger}: the force confirm
   leaving: new Set(),        // boards whose request this page withdrew
-  answers: recall(sessionStore(), ANSWERS_KEY),
+  // What this page answered, until GET /lease carries it (D5: incoming[].answer) or the
+  // request is gone (a release): the fallback for a daemon without D5, this page only.
+  answers: {},
   dismissedTaken: recall(localStore(), DISMISSED_KEY),
   takenLogged: new Set(),
   resultDismissed: {},       // bid -> the startedAt of the request result the user closed
@@ -118,7 +133,7 @@ function closeForm() {
 const PHASE_TEXT = {
   queued: (d) => `queued${d.done ? ` (position ${d.done})` : ""}`,
   notified: () => "the holder has been asked",
-  answered: () => "the holder answered",
+  answered: () => "the holder answered: you stay in the queue",
   "force-available": () => "no answer in time: force release is available",
   held: () => "held",
 };
@@ -164,7 +179,7 @@ function sendRequest() {
   const f = L.form;
   if (!f) return;
   const bid = f.bid;
-  const message = f.message.trim();
+  const message = notesOff(bid) ? "" : f.message.trim();
   const spec = requestSpec(bid, message);
   const why = gateReason(bid, "lease_req", spec.key, {});
   closeForm();
@@ -219,6 +234,13 @@ function forceSpec(bid) {
       const at = r && r.lease && epochOf(r.lease.expires_at);
       return [{ kind: "ok", text: `${holder} was force-released; ${name} is yours${at ? ` until ${clock(at)}` : ""}. Their session is told who took it.` }];
     },
+    // D3: 422 "time left" carries when force opens.
+    renderError: (e) => {
+      const d = (e && e.data) || {};
+      if (d.time_left_s === undefined || d.time_left_s === null) return [];
+      const at = epochOf(d.deadline_at);
+      return [{ kind: "hint", text: `force-release opens in ${mmss(Number(d.time_left_s))}${at ? ` (at ${clock(at)})` : ""}, if there is still no answer` }];
+    },
     onDone: () => loadHub(bid),
   };
 }
@@ -229,6 +251,8 @@ export function forceWhy(bid) {
   const req = hub && hub.request;
   if (!req) return "there is no request of yours to force";
   if (req.force_available) return "";
+  const role = revokeOff(bid);               // T8: the token's role, whatever the clock says
+  if (role) return role;
   // While the holder's 2:00 run, say it live (the daemon's reason is as old as the read).
   const left = secondsTo(req.deadline_at);
   if (!req.answer && left !== null && left > 0) {
@@ -359,7 +383,6 @@ function answerOf(bid, id) {
 
 function saveAnswer(bid, id, a) {
   L.answers[bid] = { ...(L.answers[bid] || {}), [id]: a };
-  remember(sessionStore(), ANSWERS_KEY, L.answers);
 }
 
 function respond(bid, note, answer, minutes, message) {
@@ -378,7 +401,7 @@ function respond(bid, note, answer, minutes, message) {
       : `${note.by} is told you keep it for ${minutes} min` }],
     onDone: (ok) => {
       if (ok) saveAnswer(bid, note.id, { answer, minutes: answer === "keep" ? minutes : 0, message,
-        at: Date.now() / 1000, by: note.by, board: target });
+        at: new Date().toISOString(), by: note.by });
       loadHub(bid);
     },
   };
@@ -396,29 +419,32 @@ function HolderPrompt({ bid, note }) {
   const name = leaseBoardName(bid);
   const left = secondsTo(note.deadline_at);
   const busy = !!p.running;
+  const off = notesOff(bid);
   return html`<div class="banner lease-prompt" role="alert" data-testid="lease-wanted" data-request=${note.id} data-board=${bid}>
     <${Icon} name="triangle-alert" />
     <div class="grow">
       <div class="lease-prompt-title" data-testid="wanted-title"><strong>${note.by}</strong> wants <strong>${name}</strong>${note.message
-        ? html`: ${quoted(note.message)}` : html`. <span class="muted">(no message)</span>`}</div>
+        ? html`: ${quoted(note.message)}` : off ? "." : html`. <span class="muted">(no message)</span>`}</div>
       <div class="secondary small">
         ${left === null ? "Answer now, or they may force-release it."
           : left > 0 ? html`Answer within <span class="lease-clock" data-testid="wanted-countdown" data-left=${Math.ceil(left)}><${Icon} name="timer" cls="sm" />${mmss(left)}</span>, or they may force-release it: anything you run on the board is interrupted then.`
           : html`<span class="lease-clock due" data-testid="wanted-countdown" data-left="0"><${Icon} name="timer" cls="sm" />0:00</span> Their 2 minutes are up: they may force-release it now.`}
       </div>
       <div class="lease-actions">
-        <input class="input lease-msg" type="text" maxlength=${NOTE_MAX} placeholder="Message (optional)"
+        ${off ? null : html`<input class="input lease-msg" type="text" maxlength=${NOTE_MAX} placeholder="Message (optional)"
           aria-label=${`Message to ${note.by} (optional)`} data-testid="wanted-message" value=${message}
-          onInput=${(e) => setMessage(e.target.value)} disabled=${busy} />
+          onInput=${(e) => setMessage(e.target.value)} disabled=${busy} />`}
         <button type="button" class="btn sm primary" data-action="respond_release" disabled=${busy}
-          onClick=${() => respond(bid, note, "release", 0, message.trim())}><${Icon} name="lock-open" /> Release now</button>
-        <span class="keep-group" role="group" aria-label="Keep it for">
+          onClick=${() => respond(bid, note, "release", 0, off ? "" : message.trim())}><${Icon} name="lock-open" /> Release now</button>
+        ${off ? null : html`<span class="keep-group" role="group" aria-label="Keep it for">
           <span class="keep-label">Keep for</span>
           ${KEEP_MINUTES.map((m) => html`<button type="button" key=${m} class="btn sm" data-action=${`respond_keep_${m}`}
             disabled=${busy} onClick=${() => respond(bid, note, "keep", m, message.trim())}>${m} min</button>`)}
-        </span>
+        </span>`}
         ${busy ? html`<span class="muted small"><${Spinner} /> answering</span>` : null}
       </div>
+      ${off ? html`<${Reason} icon="circle-slash" testid="wanted-notes-off"
+        text=${`No message and no "keep for N min" here: ${off}. Release now still works; to keep the board, tell ${note.by} another way.`} />` : null}
       ${p.lines.length ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="result-lease_respond" />` : null}
     </div>
   </div>`;
@@ -426,14 +452,16 @@ function HolderPrompt({ bid, note }) {
 
 function AnsweredLine({ bid, id, a }) {
   const p = panelState(bid, `lease_respond:${id}`);
-  const until = a.answer === "keep" ? a.at + 60 * a.minutes : null;
+  const at = epochOf(a.at);
+  const until = keepUntil(a);
+  const board = leaseBoardName(bid);
   const close = () => { L.answerDismissed.add(`${bid}|${id}`); changed(); };
   return html`<div class="banner lease-bar ok" role="status" data-testid="lease-answered" data-request=${id}>
     <${Icon} name="circle-check" />
     <div class="grow">
       <strong>${a.answer === "release"
-        ? `You released ${a.board} to ${a.by} at ${clock(a.at)}.`
-        : `You answered ${a.by}: keep ${a.board} for ${a.minutes} min${a.message ? "" : "."}`}</strong>${a.answer === "keep" && a.message
+        ? `You released ${board} to ${a.by}${at ? ` at ${clock(at)}` : ""}.`
+        : `You answered ${a.by}: keep ${board} for ${a.minutes} min${a.message ? "" : "."}`}</strong>${a.answer === "keep" && a.message
         ? html` ${quoted(a.message)}` : null}
       ${until ? html` <span class="secondary">They may force-release it after ${clock(until)}.</span>` : null}
       ${p.lines.length ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="result-lease_respond" />` : null}
@@ -448,15 +476,24 @@ function HolderPrompts({ bid }) {
   const incoming = (hub && hub.incoming) || [];
   const out = [];
   const ids = new Set();
+  const shown = new Set();
   for (const note of incoming) {
     ids.add(note.id);
-    const a = note.answer || answerOf(bid, note.id);      // `answer` if the daemon adds it
-    if (!a) out.push(html`<${HolderPrompt} key=${`w-${bid}-${note.id}`} bid=${bid} note=${note} />`);
+    // D5: the daemon reads our answer from the hub's answer note, whoever gave it (this page,
+    // another page, the CLI); this page's own answer covers a daemon without D5.
+    const a = note.answer ? { ...note.answer, by: note.by } : answerOf(bid, note.id);
+    if (!a) {
+      out.push(html`<${HolderPrompt} key=${`w-${bid}-${note.id}`} bid=${bid} note=${note} />`);
+    } else if (!L.answerDismissed.has(`${bid}|${note.id}`)) {
+      shown.add(note.id);
+      out.push(html`<${AnsweredLine} key=${`a-${bid}-${note.id}`} bid=${bid} id=${note.id} a=${a} />`);
+    }
   }
-  // What this page answered stays in view until closed, even once the request has gone.
+  // A request answered here that has gone since (a release: the requester has the board)
+  // stays in view until closed, for an hour at most.
   for (const [id, a] of Object.entries(L.answers[bid] || {})) {
-    if (L.answerDismissed.has(`${bid}|${id}`)) continue;
-    if (!ids.has(id) && Date.now() / 1000 - a.at > 3600) continue;
+    if (shown.has(id) || ids.has(id) || L.answerDismissed.has(`${bid}|${id}`)) continue;
+    if (Date.now() / 1000 - (epochOf(a.at) || 0) > 3600) continue;
     out.push(html`<${AnsweredLine} key=${`a-${bid}-${id}`} bid=${bid} id=${id} a=${a} />`);
   }
   return out;
@@ -532,6 +569,7 @@ function RequestForm() {
   const hub = hubOf(f.bid);
   const holder = hub && hub.lease && !hub.lease.mine ? hub.lease.holder : "";
   const name = leaseBoardName(f.bid);
+  const off = notesOff(f.bid);
   return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) closeForm(); }}>
     <form class="modal small" role="dialog" aria-modal="true" aria-labelledby="lease-form-title" ref=${ref}
       data-testid="lease-request-form" onSubmit=${(e) => { e.preventDefault(); sendRequest(); }}>
@@ -539,14 +577,16 @@ function RequestForm() {
       <div class="modal-pad">
         <p class="secondary">${holder ? html`<strong>${holder}</strong> holds it.` : "Someone else holds it."} You join the
           queue and they are asked to give it up. With no answer in 2 minutes you may force-release it.</p>
-        <label class="field-label" for="lease-message">Message (optional)</label>
+        ${off ? html`<${Reason} icon="circle-slash" testid="request-notes-off"
+          text=${`No message: ${off}. ${holder || "The holder"} sees that you are waiting, not why.`} />`
+        : html`<label class="field-label" for="lease-message">Message (optional)</label>
         <textarea id="lease-message" class="input lease-textarea" rows="3" maxlength=${NOTE_MAX}
           placeholder="Why you need it, and for how long" value=${f.message} data-autofocus
-          onInput=${(e) => { f.message = e.target.value; }}></textarea>
+          onInput=${(e) => { f.message = e.target.value; }}></textarea>`}
       </div>
       <div class="modal-foot">
         <button type="button" class="btn" data-action="lease_request_cancel" onClick=${closeForm}>Cancel</button>
-        <button type="submit" class="btn primary" data-action="lease_request"><${Icon} name="send" /> Send request</button>
+        <button type="submit" class="btn primary" data-action="lease_request" data-autofocus=${off ? true : undefined}><${Icon} name="send" /> Send request</button>
       </div>
     </form>
   </div>`;
@@ -562,6 +602,9 @@ function ForceConfirm() {
   const req = hub && hub.request;
   const why = forceWhy(bid);
   const made = req && epochOf(req.created_at);
+  // D4: the revoke acts on the physical board; say so when it is not the target's name.
+  const target = hub && hub.lease && hub.lease.target;
+  const board = hub && hub.board && hub.board !== target ? hub.board : "";
   return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) closeConfirm(); }}>
     <div class="modal small danger" role="alertdialog" aria-modal="true" aria-labelledby="force-title"
       aria-describedby="force-what" ref=${ref} data-testid="force-confirm">
@@ -569,6 +612,8 @@ function ForceConfirm() {
       <div class="modal-pad">
         <p id="force-what" class="force-what" data-testid="force-what">This kicks <strong>${holder}</strong> off <strong>${name}</strong> now;
           anything they are running is interrupted.</p>
+        ${board ? html`<p class="secondary small" data-testid="force-board">It revokes board <code>${board}</code>${target
+          ? html` (the hub target <code>${target}</code> is part of it)` : null}.</p>` : null}
         <p class="secondary small">The hub records who did it and why${made ? ` (no answer to your request made at ${clock(made)})` : ""},
           and ${holder}'s session is told who took the board.</p>
         ${why ? html`<${Reason} level="err" text=${`Not available now: ${why}`} testid="force-confirm-why" />` : null}
