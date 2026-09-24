@@ -20,6 +20,9 @@ at `64eb716`.
 **After this lane:**
 
 - Every edge case gives a clear message, and a second run fixes it.
+- Upgrades work inside containers: CI's first run found that `daemon stop` waited on a
+  zombie.
+- A reused pid is never signalled (lane Q1's finding).
 - The desktop menu has a launcher.
 - The installer uses pinned dependency versions (the tested ones).
 - An offline install works.
@@ -89,7 +92,7 @@ workflow identical. Each job then checks:
 
 | Job | Prerequisites | Expected |
 |---|---|---|
-| Rocky Linux 8 | `dnf install -y python3 python3.12 git tar` | PASS: the installer skips the 3.6 `python3` and picks python3.12 |
+| Rocky Linux 8 | `dnf install -y python3 python3.12 python3.12-pip git tar` | PASS: the installer skips the 3.6 `python3` and picks python3.12 |
 | Rocky Linux 9 | `dnf install -y python3.12 git-core tar` | PASS on 3.12, beside a 3.9 `python3` |
 | Rocky Linux 9, uv | `dnf install -y git-core tar`, then the uv one-liner | PASS: uv downloads CPython 3.12 |
 | Ubuntu 22.04 | `apt-get install … python3 python3-venv git curl ca-certificates` | PASS on 3.10 (tomli, exceptiongroup, websockets 16 pins) |
@@ -109,6 +112,25 @@ Risks, and what to do if one of them fails:
 
 Each job takes about 2 to 3 minutes, and they run in parallel.
 
+### CI round 1 (run 35993990472): what it caught
+
+The first run of the matrix failed 7 of its 8 jobs. Only the offline job passed. There
+were three causes, all fixed on this branch (F14 to F16), and lane Q1 found a fourth
+problem in the same code (F17):
+
+- **Ubuntu 22.04 and 24.04, Debian 12, Fedora, Rocky 9:** the upgrade failed. Its
+  `daemon stop --demo` exited 6 with "did not stop".
+- **Rocky 8:** python3.12 could not make a venv, and the installer told the user to
+  `apt install`.
+- **Rocky 9 with uv:** the job never got past `actions/checkout`, which found no `git`
+  or `tar`.
+
+I reproduced the first cause on srv03335 in a user+PID namespace whose PID 1 is
+`tail -f /dev/null`, which is how GitHub runs a container job. There, the smoke from the
+previous commit failed exactly as in CI. The fixed tree passes (SMOKE PASS in 32 s). An
+old install upgraded by the new `install.sh` also passes; the installer notes that the
+service "had already exited".
+
 ## Findings and fixes
 
 | # | Finding | Fix | Test |
@@ -125,6 +147,10 @@ Each job takes about 2 to 3 minutes, and they run in parallel.
 | F10 | Extras were kept only because pip never removes packages; a rebuilt venv lost them | `install.conf` records the extras and the menu choice; re-runs merge them | `test_lifecycle_…` |
 | F11 | When `~/.local/bin` was not on PATH, the printed **Next** commands failed | The installer prints the line for your shell (bash, zsh, fish or sh) and gives the full path in **Next** until the PATH is fixed | `test_lifecycle_…` |
 | F12 | `smoke_install.sh` could create consoles in the live `/tmp/harness-manager-$USER`, and its curl would use `http_proxy` for 127.0.0.1 | It sets its own `HARNESS_MANAGER_PTY_DIR`. It uses `curl --noproxy '*'`. It also checks `--version`, the menu entry and a complete uninstall, and prints timings | CI and `test_l5_install` |
+| F14 | **Found by CI (product bug).** In a container whose PID 1 never reaps orphans (`docker run` with no init, and GitHub's container jobs), a stopped daemon stays a zombie. `os.kill(pid, 0)` still succeeds on a zombie. So `daemon stop` waited 15 s and failed with exit 6, and so did every upgrade | Product code, marked: `core/session.py` `pid_alive` treats /proc state Z or X as dead. This covers `daemon stop`, `daemon status` and stale board locks. `install.sh` also carries on when an older installed CLI says the stop failed but the service is gone (no `daemon.json`, no process, or a zombie). A service that really runs still stops the install | `test_q3_daemon_zombie.py`: 3 of its 4 tests fail without the fix. `test_upgrade_carries_on_when_the_service_already_exited` and its twin |
+| F15 | **Found by CI.** On Rocky and RHEL 8, python3.12 cannot make a venv without `python3.12-pip`. The installer's hint said `apt install python3-venv` | The prerequisites (workflow, INSTALL.md, README) include `python3.12-pip`. The venv hint names the package for the distribution: `python3.X-venv` (Debian, Ubuntu), `python3.X-pip` (RHEL family), `python3-pip` (Fedora) or zypper (SUSE). It still prints the tool's own error | `test_a_python_that_cannot_make_a_venv_names_the_package` (Rocky, Fedora, Ubuntu) |
+| F16 | **Found by CI.** In a container job, `$GITHUB_PATH` replaced the image's PATH for the steps after it, so `actions/checkout` found no `git` and no `tar` | uv's bin directory is exported in the smoke step instead of through `$GITHUB_PATH` | the next CI run |
+| F17 | **From lane Q1.** `daemon stop` sent SIGTERM to whatever process held the pid in `daemon.json`. If the pid had been reused, an upgrade could kill an unrelated process | Product code, marked: `control.is_our_daemon`. The pid counts as ours only if `/health` answers with it, or if its command line is `-m harness_manager.daemon --state-dir <this dir>` (or `daemon start --foreground`). This is checked before the shutdown request and again right before any signal. A foreign pid means the daemon is gone: `daemon.json` is removed ("stale-removed") and nothing is signalled. Where the command line cannot be read (Windows), a hung daemon is not signalled, and the message says to stop it by hand | `test_q3_daemon_pid_reuse.py`: a reused pid and another state dir's daemon are never signalled; the twin checks that our own hung daemon still gets SIGTERM |
 | F13 | Only Ubuntu was tested; the documented prerequisites were untested | The distribution matrix, above. INSTALL.md lists the exact tested line for each distribution, and README gives a short table | `test_install_doc_gives_what_ci_proves` |
 
 ### Checked and found correct
@@ -160,12 +186,7 @@ Each job takes about 2 to 3 minutes, and they run in parallel.
 5. **Not in CI:**
    - aarch64 Linux: an `ubuntu-24.04-arm` runner job;
    - openSUSE and Arch: the installer prints their hints, but CI does not test them.
-6. **Test hygiene (Q1's area):**
-   - `tests/conftest.py` isolates `HARNESS_MANAGER_STATE_DIR` for every test, but not
-     `HARNESS_MANAGER_PTY_DIR`.
-   - A future test that opens a console PTY without setting it would use the live
-     `/tmp/harness-manager-$USER`.
-7. **USER_GUIDE (outside this lane's files):**
+6. **USER_GUIDE (outside this lane's files):**
    - The `dialout` note says "Ubuntu and Debian", but RHEL and Fedora use the same group.
    - A headless server has no automount for the MCC's USB drive: the user needs
      `udisksctl mount -b /dev/sdX1` or sudo.

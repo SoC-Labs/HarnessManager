@@ -30,9 +30,16 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="zombies are visible through /proc on Linux")
 
 FAKE_DAEMON = textwrap.dedent("""
-    import http.server, threading
+    import http.server, json, os, threading
 
     class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):                       # /api/v1/health, as the daemon answers it
+            body = json.dumps({"ok": True, "pid": os.getpid()}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_POST(self):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

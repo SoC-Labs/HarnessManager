@@ -221,6 +221,60 @@ def ensure_running(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
     return start(Path(state_dir), port=port, listen=listen, demo=demo), True
 
 
+DAEMON_MODULE = "harness_manager.daemon"
+
+
+def _cmdline(pid: int) -> list[str] | None:
+    """The argv of ``pid``: /proc on Linux, ``ps`` on other POSIX systems; ``None`` where
+    neither can tell (Windows, a vanished process, no ``ps``)."""
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        raw = None
+    if raw is not None:
+        return [a.decode(errors="replace") for a in raw.split(b"\0") if a] or None
+    if os.name == "nt" or sys.platform.startswith("linux"):
+        return None
+    try:
+        res = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+                             text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return res.stdout.split() if res.returncode == 0 and res.stdout.strip() else None
+
+
+def _same_dir(arg: str, state_dir: Path) -> bool:
+    mine = os.path.realpath(state_dir)
+    if os.path.isabs(arg):
+        return os.path.realpath(arg) == mine
+    return mine.endswith(os.sep + os.path.normpath(arg))   # started with a relative dir
+
+
+def is_our_daemon(info: DaemonInfo, state_dir: Path) -> bool | None:
+    """Is ``info.pid`` really this state dir's harness-manager-daemon? ``None``: cannot tell.
+
+    Install lane Q3 (from lane Q1's finding): a pid in a leftover daemon.json may since
+    belong to another process. ``daemon stop`` (and so every upgrade, which stops the
+    service first) must never signal that one. The daemon answering /health with this
+    pid settles it; else its command line: ``-m harness_manager.daemon --state-dir DIR``,
+    or ``harness-manager daemon start --foreground``.
+    """
+    payload = health(info)
+    if payload is not None and payload.get("pid") == info.pid:
+        return True
+    argv = _cmdline(info.pid)
+    if argv is None:
+        return None
+    if DAEMON_MODULE in argv:
+        if "--state-dir" not in argv[:-1]:
+            return False
+        return _same_dir(argv[argv.index("--state-dir") + 1], state_dir)
+    if all(w in argv for w in ("daemon", "start", "--foreground")) and \
+            any(Path(a).name.startswith("harness-manager") for a in argv[:2]):
+        return True                      # the foreground daemon: its state dir is its env's
+    return False
+
+
 def _wait_gone(pid: int, timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -242,6 +296,10 @@ def stop(state_dir: Path, *, force: bool = False, timeout: float = STOP_WAIT_S) 
             return "stale-removed"
         raise AlreadyError(f"harness-manager-daemon for {state_dir} runs on {info.hostname}, not here",
                            hint=f"stop it on {info.hostname}")
+    if is_our_daemon(info, state_dir) is False:
+        # The pid was reused by another process: our daemon is gone. Never signal it.
+        daemon_json_path(state_dir).unlink(missing_ok=True)
+        return "stale-removed"
     try:
         code, payload = _request(info, "POST", "/api/v1/daemon/shutdown",
                                  body={"force": force}, timeout=5.0)
@@ -257,7 +315,17 @@ def stop(state_dir: Path, *, force: bool = False, timeout: float = STOP_WAIT_S) 
     if _wait_gone(info.pid, timeout):
         return "stopped"
     # It did not go (or never answered): terminate it. Board locks it held go stale
-    # and are taken over by the next owner; daemon.json is removed here.
+    # and are taken over by the next owner; daemon.json is removed here. Only when the
+    # pid is still, provably, this daemon: never a process that reused the pid.
+    ours = is_our_daemon(info, state_dir)
+    if ours is False:
+        daemon_json_path(state_dir).unlink(missing_ok=True)
+        return "stopped"
+    if ours is None:
+        raise ActionFailedError(
+            f"harness-manager-daemon (pid {info.pid}) did not stop, and pid {info.pid} "
+            "cannot be checked to be it on this system",
+            hint=f"if pid {info.pid} is harness-manager-daemon, stop it by hand")
     try:
         os.kill(info.pid, signal.SIGTERM)     # TerminateProcess on Windows
     except OSError:

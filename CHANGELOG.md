@@ -28,11 +28,16 @@ owners.
   and `install.sh --offline DIR` installs from it without the package index.
 - The installer finds a Python 3.10+ beside an older `python3` (RHEL 8's 3.6, Rocky 9's
   3.9), and when there is none it lists what it found and prints the package to install
-  for your distribution, or the uv one-liner.
+  for your distribution, or the uv one-liner. When a Python cannot make a venv, it
+  names that distribution's package (`python3.X-venv`, `python3.X-pip`).
 - The installer is safe to run twice at once (the second stops and names the first),
   safe to interrupt (a re-run resumes), checks it can write before it starts, refuses
   `sudo`, keeps your extras and menu choice across upgrades, explains a missing network
   or proxy, and prints the full path of the command when `~/.local/bin` is not on PATH.
+- `harness-manager daemon stop`, and so every upgrade, no longer fails inside a
+  container. There, a stopped service stays a zombie, which still looked alive. It also
+  never signals a process that has reused the service's old pid: it checks the pid is
+  this state dir's harness-manager-daemon first.
 - `harness-manager app` with `--with-app` on Linux no longer prints two pywebview
   tracebacks: without GTK or Qt bindings it goes straight to the Chrome app window.
 - CI installs from a checkout on Rocky Linux 8 and 9, Ubuntu 22.04 and 24.04, Debian 12
