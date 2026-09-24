@@ -220,7 +220,7 @@ def parse_xdc_pins(text: str) -> tuple[dict[str, XdcPort], list[XdcClock]]:
         s = line.strip()
         if ";#" in s and not s.startswith("#"):
             s = s.split(";#", 1)[0].rstrip()
-        if re.match(r"^#\s*[#=\-]{8,}", s) or re.match(r"^#{8,}", s):
+        if re.match(r"^#\s*[#=\-]{8,}\s*$", s):          # a rule line, text-free
             prev_rule = True
             continue
         if prev_rule and s.startswith("#"):

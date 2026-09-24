@@ -7964,7 +7964,7 @@
      ],
      "iostandard": "LVCMOS18",
      "props": {},
-     "function": "NOT yet added to any Vivado constraint set, so it does NOT affect the shipped",
+     "function": "Phase-2 CLCD resistive-touch I2C pads",
      "shell_dir": "in"
     },
     "CLCD_TSCL": {
@@ -7974,8 +7974,10 @@
       "shell_top:118"
      ],
      "iostandard": "LVCMOS18",
-     "props": {},
-     "function": "NOT yet added to any Vivado constraint set, so it does NOT affect the shipped",
+     "props": {
+      "PULLUP": "true"
+     },
+     "function": "Phase-2 CLCD resistive-touch I2C pads",
      "shell_dir": "inout"
     },
     "CLCD_TSDA": {
@@ -7988,7 +7990,7 @@
      "props": {
       "PULLUP": "true"
      },
-     "function": "NOT yet added to any Vivado constraint set, so it does NOT affect the shipped",
+     "function": "Phase-2 CLCD resistive-touch I2C pads",
      "shell_dir": "inout"
     },
     "CLCD_WR_SCL": {

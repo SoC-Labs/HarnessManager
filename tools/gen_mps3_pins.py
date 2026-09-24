@@ -345,6 +345,8 @@ def build(plat: Platform, pkg_path: Path, static_id: str) -> dict[str, Any]:
     shell_clocks = []
     for path in SHELL_PIN_FILES:
         key = src.add(_key(path), path, "a fielded-shell pin constraint file")
+        first = plat.text(path).splitlines()[0].lstrip("#").strip()
+        file_title = first.split(" -- ", 1)[1].rstrip(".") if " -- " in first else path
         sp, sclk = parse_xdc_pins(plat.text(path))
         for pname, p in sp.items():
             if not p.pin:
@@ -358,7 +360,7 @@ def build(plat: Platform, pkg_path: Path, static_id: str) -> dict[str, Any]:
                                f"pinmap says {board} is {bnet['iostandard']}")
             shell_nets[board] = {"shell_port": pname, "src": f"{key}:{p.pin_line}",
                                  "iostandard": p.iostandard, "props": dict(sorted((p.props or {}).items())),
-                                 "function": p.group}
+                                 "function": p.group or file_title}
             bnet["verified"] = "hw-proven"
             bnet["src"].append(f"{key}:{p.pin_line}")
         for c in sclk:

@@ -81,7 +81,10 @@
   {
    "port": "CLCD_TSCL",
    "net": "CLCD_TSCL",
-   "dir": "inout"
+   "dir": "inout",
+   "props": {
+    "PULLUP": "true"
+   }
   },
   {
    "port": "CLCD_TSDA",

@@ -18,6 +18,16 @@ from harness_manager.cli.output import report_error
 from harness_manager.core.errors import ExitCode, HarnessError
 
 
+@pytest.fixture(autouse=True)
+def keep_tsv_columns(monkeypatch):
+    """register() adds the xdc layouts to the shared table; undo it after each test so the
+    T5 golden's layout census is not order-dependent (until CCR T10-1 folds them in)."""
+    from harness_manager.cli import output
+
+    monkeypatch.setattr(output, "TSV_COLUMNS", dict(output.TSV_COLUMNS))
+    monkeypatch.setattr(cmd_xdc, "TSV_COLUMNS", output.TSV_COLUMNS)
+
+
 def run(argv: list[str], capsys) -> tuple[int, str, str]:
     p = argparse.ArgumentParser(prog="harness-manager")
     p.add_argument("--pack", default=None)

@@ -1,7 +1,7 @@
 """T10, opt-in: Vivado reads a generated OOC XDC against the kit's own wrapper skeleton.
 
-Skipped unless ``HM_T10_VIVADO=1`` and ``vivado`` is on PATH. It synthesises the (empty)
-skeleton out of context, then ``read_xdc``s the kit's OOC XDC and fails on any XDC
+Skipped unless ``HM_T10_VIVADO=1`` and ``vivado`` is on PATH. It synthesises the kit's
+skeleton (plus one flop on dut_clk) out of context, then ``read_xdc``s the kit's OOC XDC and fails on any XDC
 CRITICAL WARNING or ERROR. A few minutes of Vivado: never part of ``make check``.
 """
 
@@ -33,6 +33,13 @@ puts "T10_CLOCKS [llength [get_clocks]]"
 def test_vivado_reads_the_generated_ooc_xdc(design: str, tmp_path: Path):
     kit = xdc.export("mps3", "rm-kit", design)
     xdc.write_kit(kit, tmp_path)
+    # One flop on dut_clk, so the port has a load: HD.CLK_SRC on an unloaded port is a
+    # CRITICAL WARNING about the empty skeleton, not about the XDC.
+    sv = tmp_path / f"{design}_wrapper_skeleton.sv"
+    text = sv.read_text()
+    assert "  // assign irq_out = ...;" in text
+    sv.write_text(text.replace("  // assign irq_out = ...;",
+                               "  always_ff @(posedge dut_clk) irq_out <= dut_resetn;"))
     tcl = tmp_path / "read.tcl"
     tcl.write_text(TCL.format(sv=tmp_path / f"{design}_wrapper_skeleton.sv", name=design,
                               xdc=tmp_path / f"{design}_ooc.xdc"))
