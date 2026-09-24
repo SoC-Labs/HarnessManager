@@ -197,6 +197,10 @@ def test_xsdb_missing_tool_and_timeout(fake_tool):
             raises=subprocess.TimeoutExpired("xsdb", 5))).read()
     with pytest.raises(UnavailableError, match="xsdb not found"):
         XsdbSysmon(xsdb=fake_tool, runner=ScriptedRunner(raises=FileNotFoundError())).read()
+    # Found but not runnable (Windows: an extension-less script) is a reason, not a crash.
+    with pytest.raises(UnavailableError, match=r"cannot run xsdb .*xsdb\.bat"):
+        XsdbSysmon(xsdb=fake_tool, runner=ScriptedRunner(
+            raises=OSError(8, "Exec format error"))).read()
 
 
 @pytest.mark.parametrize("kw", [

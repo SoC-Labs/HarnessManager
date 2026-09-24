@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import stat
 import subprocess
@@ -273,6 +274,11 @@ def make_fake_xsdb(directory: Path, *, regs: Mapping[int, int] | None = None,
     prelude.write_text(_PRELUDE % {
         "mode": mode, "log": str(log),
         "regs": " ".join(f"{a} {v}" for a, v in regs.items())}, encoding="utf-8")
+    if os.name == "nt":
+        # Windows runs no #! script ([WinError 193]); a .cmd is what xsdb.bat is on Windows.
+        exe = directory / "xsdb.cmd"
+        exe.write_text(f'@"{tclsh}" "{prelude}" %*\r\n', encoding="utf-8")
+        return exe, log
     exe = directory / "xsdb"
     exe.write_text(f'#!/bin/sh\nexec {tclsh} "{prelude}" "$@"\n', encoding="utf-8")
     exe.chmod(exe.stat().st_mode | stat.S_IXUSR)

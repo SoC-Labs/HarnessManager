@@ -225,6 +225,12 @@ def _run(runner: Runner, argv: list[str], timeout_s: float, what: str, key: str)
                                          f"sysmon.{key} in boards.toml to its full path") from exc
     except subprocess.TimeoutExpired as exc:
         raise UnavailableError("sysmon", f"{what} did not finish within {timeout_s:g} s") from exc
+    except OSError as exc:
+        # Found but not runnable: on Windows, Vivado's bin/ holds an extension-less sh script
+        # beside xsdb.bat ([WinError 193]); on POSIX, a file without its x bit.
+        raise UnavailableError("sysmon", f"cannot run {what} ({argv[0]!r}): {exc}; set "
+                                         f"sysmon.{key} in boards.toml to the program itself "
+                                         f"(on Windows, {what}.bat or {what}.exe)") from exc
     return f"{proc.stdout or ''}\n{proc.stderr or ''}"
 
 
