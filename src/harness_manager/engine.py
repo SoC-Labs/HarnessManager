@@ -383,10 +383,22 @@ class Engine:
                 log.exception("%s service failed while closing %s", name, board_id)
 
     def close_all(self) -> None:
+        """Close every board, even when closing one fails; then raise the first failure.
+
+        Stopping at the first failure left the other boards' SSH tunnels, OpenOCDs and
+        locks running after the daemon exited (Q2, 2026-09-24).
+        """
         with self._lock:
             ids = list(self._open)
+        first: BaseException | None = None
         for board_id in ids:
-            self.close(board_id)
+            try:
+                self.close(board_id)
+            except Exception as exc:  # noqa: BLE001 - every board must still be closed
+                log.exception("closing %s failed", board_id)
+                first = first or exc
+        if first is not None:
+            raise first
 
     def open_boards(self) -> list[str]:
         with self._lock:

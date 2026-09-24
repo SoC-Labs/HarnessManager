@@ -267,10 +267,12 @@ class Mps3Session(BoardSession):
     def close(self) -> None:
         """Close the hub's share forwards, then the board's SSH tunnel (L1). Idempotent."""
         hub = getattr(self, "hub", None)
-        if hub is not None:
-            hub.close()
-        if self.reach is not None:
-            self.reach.close()
+        try:
+            if hub is not None:
+                hub.close()
+        finally:                          # a failing share close must not leave the ssh up
+            if self.reach is not None:
+                self.reach.close()
 
 
 class Mps3Pack(BoardPack):
@@ -305,6 +307,12 @@ class Mps3Pack(BoardPack):
             label=f"MPS3 at {addr}",
             evidence="given explicitly",
         )), via))
+
+    def reap_orphans(self) -> list[str]:
+        """Stop what a killed owner left running: its SSH tunnels (Q2). Optional pack hook;
+        harness-manager-daemon calls it when it starts. Returns what it stopped."""
+        reap = _hook("tunnel", "reap_orphans")
+        return [f"ssh tunnel pid {pid}" for pid in reap()] if reap is not None else []
 
     def hub_for(self, candidate: Candidate) -> Any:
         """The board's hub adapter (leases, shares) without opening it; None without a hub (L1)."""

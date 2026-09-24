@@ -232,13 +232,11 @@ def owner_file(link: Path) -> Path:
 
 
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    """Alive and not a zombie (``core.session.pid_alive``): a killed daemon whose parent
+    has not reaped it yet holds no PTY."""
+    from harness_manager.core.session import pid_alive
+
+    return pid_alive(pid)
 
 
 def sweep_stale(root: Path) -> list[Path]:

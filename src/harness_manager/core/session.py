@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import HeldError
+from .errors import ActionFailedError, HeldError
 
 
 def default_lock_dir() -> Path:
@@ -62,11 +62,50 @@ def _pid_alive(pid: int) -> bool:
         return True
     except OSError:
         return False
-    return True
+    return not _zombie(pid)
+
+
+def _zombie(pid: int) -> bool:
+    """True for a process that has exited but whose parent has not reaped it yet.
+
+    ``kill(pid, 0)`` succeeds on a zombie, yet it runs nothing and holds nothing (no
+    fds, no ports, no locks). A daemon started by a front-end that stays open (the
+    app window) is such a zombie from the moment it exits until that front-end polls
+    it, and counting it as alive made ``daemon stop`` wait, signal it, then report
+    it "did not stop"; a new daemon then refused to start (Q2, 2026-09-24).
+    Linux reads ``/proc/<pid>/stat``; elsewhere this cannot tell, and says no.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    try:
+        return stat.rsplit(")", 1)[1].split()[0] == "Z"
+    except IndexError:
+        return False
 
 
 #: Public name (T4-6): other modules need the same Windows-safe liveness check.
 pid_alive = _pid_alive
+
+
+def storage_error(path: Path, exc: OSError) -> ActionFailedError:
+    """A lock or state file that cannot be written, as a message with the next step.
+
+    It is the machine, not a bug: the CLI used to print "internal error: PermissionError"
+    and the daemon a traceback (Q2, 2026-09-24).
+    """
+    import errno
+
+    if exc.errno == errno.ENOSPC:
+        why, hint = "the disk is full", f"free space on the disk holding {path}"
+    elif exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+        why, hint = "it is not writable", ("point HARNESS_MANAGER_STATE_DIR at a directory "
+                                           "you can write")
+    else:
+        why = exc.strerror or str(exc)
+        hint = "check the state directory (HARNESS_MANAGER_STATE_DIR)"
+    return ActionFailedError(f"cannot write {path}: {why}", hint=hint)
 
 
 #: A lock file with no readable owner may simply be mid-write by its creator.
@@ -117,7 +156,10 @@ class SessionLock:
         return owner.host == socket.gethostname() and not _pid_alive(owner.pid)
 
     def acquire(self) -> None:
-        self.lock_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.lock_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise storage_error(self.lock_dir, exc) from None
         me = LockOwner(
             user=os.environ.get("USER") or os.environ.get("USERNAME") or "user",
             host=socket.gethostname(),
@@ -143,8 +185,14 @@ class SessionLock:
                     holder=owner.describe(),
                     hint=f"held by {owner.describe()}",
                 ) from None
-            with os.fdopen(fd, "w") as fh:
-                json.dump(me.__dict__, fh)
+            except OSError as exc:
+                raise storage_error(self.path, exc) from None
+            try:
+                with os.fdopen(fd, "w") as fh:
+                    json.dump(me.__dict__, fh)
+            except OSError as exc:        # a full disk: never leave an empty lock behind
+                self.path.unlink(missing_ok=True)
+                raise storage_error(self.path, exc) from None
             self._held = True
             return
         raise HeldError(f"{self.board_id} lock could not be taken", hint="retry")
