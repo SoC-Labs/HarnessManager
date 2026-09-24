@@ -17,7 +17,8 @@ Rules:
 - **Every write is write-then-rename.** A blob or record is first written in
   full to ``tmp/``, then moved into place with ``os.replace``. A reader never
   sees a partial file, and two processes adding at once need no lock: both
-  renames put the same content under the same name.
+  renames put the same content under the same name. (Windows: the second
+  rename does not replace the first writer's file; see ``_replace``.)
 - **Corruption is detected, never trusted.** ``verify`` re-hashes the blob.
   Adding content whose blob exists but fails verification replaces the bad
   blob with the good one.
@@ -40,18 +41,23 @@ import os
 import re
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, TypeVar
 
 from harness_manager.core.errors import AbsentError, UsageError
 
 log = logging.getLogger(__name__)
+T = TypeVar("T")
 
 CHUNK = 1 << 20                      # streamed hashing: 1 MiB at a time
 TMP_MAX_AGE_S = 24 * 3600            # partial writes older than this are debris
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+_WINDOWS = os.name == "nt"
+# Windows only: how long to retry a PermissionError while another writer's rename of the
+# same name is in flight (or a virus scanner holds the file). About 1 s in all.
+_WIN_RETRY_S = (0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.3)
 
 
 def _check_sha(sha256: str) -> str:
@@ -179,10 +185,11 @@ class ContentStore:
     def _commit_blob(self, tmp: Path, sha: str) -> None:
         dest = self._blob_path(sha)
         try:
-            if dest.is_file() and self.verify(sha):
+            present = dest.is_file()
+            if present and self.verify(sha):
                 return                                  # deduplicated
             dest.parent.mkdir(parents=True, exist_ok=True)
-            _replace(tmp, dest)
+            _replace(tmp, dest, repair=present)         # present but bad: replace it
         finally:
             tmp.unlink(missing_ok=True)
         if not self.verify(sha):
@@ -227,24 +234,47 @@ class ContentStore:
                 pass
 
 
+def _windows_retry(op: Callable[[], T]) -> T:
+    """Run ``op``. On Windows, retry a ``PermissionError`` for about a second.
+
+    Windows refuses to open a file while another writer's rename onto it is in flight,
+    and refuses the rename while a reader has the file open (the concurrent-put tests hit
+    both on the Windows CI runner). Both clear in milliseconds. Elsewhere a
+    PermissionError is a real permission problem and is raised at once.
+    """
+    for delay in _WIN_RETRY_S if _WINDOWS else ():
+        try:
+            return op()
+        except PermissionError:
+            time.sleep(delay)
+    return op()
+
+
 def _hash_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as fh:
+    with _windows_retry(lambda: path.open("rb")) as fh:
         while chunk := fh.read(CHUNK):
             digest.update(chunk)
     return digest.hexdigest()
 
 
-def _replace(src: Path, dest: Path) -> None:
-    """``os.replace`` that tolerates losing a race to an identical writer.
+def _replace(src: Path, dest: Path, *, repair: bool = False) -> None:
+    """Move a finished temp file to ``dest``, tolerating a race to an identical writer.
 
-    On Windows, replacing a file another process has open fails with
-    ``PermissionError``. Every writer of ``dest`` writes the same bytes (the name
-    is the content hash, or the hash of the record), so if ``dest`` exists the
-    other writer has already done the job.
+    Every writer of ``dest`` writes the same bytes (the name is the content hash, or
+    the hash of the record), so an existing ``dest`` is another writer's finished copy.
+
+    POSIX: ``os.replace``; a reader keeps the file it opened. Windows: replacing a file
+    breaks the readers of that name (see ``_windows_retry``), so an existing ``dest`` is
+    left alone: ``os.rename`` there refuses to overwrite (``FileExistsError``), which
+    means the other writer got there first. Only ``repair`` (``dest`` is known bad)
+    replaces it.
     """
+    move = os.rename if _WINDOWS and not repair else os.replace
     try:
-        os.replace(src, dest)
+        _windows_retry(lambda: move(src, dest))
+    except FileExistsError:
+        pass                            # Windows: another writer's identical copy is in place
     except PermissionError:
         if not dest.is_file():
             raise

@@ -266,3 +266,69 @@ def test_concurrent_puts_from_two_processes_are_safe(store: ContentStore):
     assert len(found) == 6 and len(blobs(store)) == 6
     assert all(store.verify(sha) for sha, _ in found)
     assert list((store.root / "tmp").iterdir()) == []
+
+
+# -- Windows file semantics, modelled here so Linux runs cover the Windows branch -------------
+
+
+@pytest.fixture
+def windows(monkeypatch):
+    """Windows rules: os.rename refuses an existing target; retries do not sleep."""
+    real_rename = os.rename
+
+    def rename(src, dest):
+        if Path(dest).exists():
+            raise FileExistsError(17, "Cannot create a file when that file already exists")
+        real_rename(src, dest)
+
+    monkeypatch.setattr(store_mod, "_WINDOWS", True)
+    monkeypatch.setattr(store_mod, "_WIN_RETRY_S", (0.0, 0.0, 0.0))
+    monkeypatch.setattr(store_mod.os, "rename", rename)
+
+
+def test_windows_a_second_writer_leaves_the_first_copy_in_place(tmp_path, windows, monkeypatch):
+    dest, src = tmp_path / "blob", tmp_path / "blob.part"
+    dest.write_bytes(b"same")
+    src.write_bytes(b"same")
+    before = dest.stat().st_ino
+    monkeypatch.setattr(store_mod.os, "replace", lambda *a: pytest.fail("replaced a good copy"))
+    store_mod._replace(src, dest)                       # the race lost: not an error
+    assert dest.stat().st_ino == before and src.exists()   # the caller removes its temp file
+
+
+def test_negative_twin_windows_repair_does_replace_a_bad_copy(tmp_path, windows):
+    dest, src = tmp_path / "blob", tmp_path / "blob.part"
+    dest.write_bytes(b"damaged")
+    src.write_bytes(b"good")
+    store_mod._replace(src, dest, repair=True)
+    assert dest.read_bytes() == b"good" and not src.exists()
+
+
+def test_windows_a_transient_permission_error_is_retried(windows):
+    calls = []
+
+    def op():
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError(13, "Permission denied")  # another writer's rename in flight
+        return "read"
+
+    assert store_mod._windows_retry(op) == "read" and len(calls) == 3
+
+
+def test_negative_twin_a_lasting_permission_error_is_raised(windows, monkeypatch):
+    def op():
+        raise PermissionError(13, "Permission denied")
+
+    with pytest.raises(PermissionError):                # Windows: after the retries
+        store_mod._windows_retry(op)
+    monkeypatch.setattr(store_mod, "_WINDOWS", False)
+    calls = []
+
+    def once():
+        calls.append(1)
+        raise PermissionError(13, "Permission denied")
+
+    with pytest.raises(PermissionError):                # POSIX: at once, a real permission fault
+        store_mod._windows_retry(once)
+    assert calls == [1]
