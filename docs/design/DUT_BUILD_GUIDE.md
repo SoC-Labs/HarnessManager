@@ -5,7 +5,7 @@
 **Status:** 2026-09-24, against HM main 595d359.
 - Spike (b), the board-free partial validator, is done and tested.
 - The generated Tcl ran **end to end** in Vivado 2024.1 against the fielded static: 24 gates passed, `pr_verify` was compatible, and the receipt was packed into HM's catalogue (§9).
-- KIT-STORE's companion design is `../hm-kit-store/docs/design/DUT_BUILD_KIT_STORAGE.md` (commit 008e0b1).
+- KIT-STORE's companion design is `DUT_BUILD_KIT_STORAGE.md` in this directory (lane commit 008e0b1).
 
 david asked: "how we should provide xdc's and the dcp used for building the DUT bitstream from harness manager? … Can we include instructions from within harness manager to help with this?"
 

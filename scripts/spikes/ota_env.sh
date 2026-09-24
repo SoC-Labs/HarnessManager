@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Spike (lane OTA): the isolated environment. Source it: `. scripts/spikes/ota_env.sh`.
 # Everything lives under $OTA (default /tmp/ota-spike): HOME, XDG dirs, the state dir, the
 # PTY dir, the install root and the command. Nothing touches the real user's install.
