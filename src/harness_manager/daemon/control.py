@@ -29,8 +29,9 @@ from harness_manager.core.errors import (
     HarnessError,
     UnreachableError,
 )
-from harness_manager.core.session import pid_alive
+from harness_manager.core.session import pid_alive, storage_error
 
+from . import logfile
 from .state import (
     LOOPBACK,
     DaemonInfo,
@@ -145,9 +146,17 @@ def daemon_python(*, windows: bool = os.name == "nt", executable: str = "",
 
 
 def _spawn(state_dir: Path, port: int, listen: str, demo: bool = False) -> subprocess.Popen:
-    state_dir.mkdir(parents=True, exist_ok=True)
     log_path = daemon_log_path(state_dir)
-    fd = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+    # Install lane Q3 (from Q2): rotate daemon.log (size cap, backups), and a state dir
+    # that cannot be written is a message (exit 6), not "internal error: PermissionError".
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        logfile.rotate(log_path)
+        fd = os.open(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+    except OSError as exc:
+        err = storage_error(Path(exc.filename) if exc.filename else log_path, exc)
+        raise ActionFailedError(f"cannot start harness-manager-daemon: {err.message}",
+                                hint=err.hint) from None
     python, env = daemon_python()
     cmd = [python, "-m", "harness_manager.daemon", "--state-dir", str(state_dir),
            "--port", str(port), "--listen", listen] + (["--demo"] if demo else [])

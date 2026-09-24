@@ -38,6 +38,10 @@ owners.
   container. There, a stopped service stays a zombie, which still looked alive. It also
   never signals a process that has reused the service's old pid: it checks the pid is
   this state dir's harness-manager-daemon first.
+- daemon.log is capped: over 8 MiB it moves to `daemon.log.1` (three kept), at
+  `daemon start` and once a minute while the service runs.
+- `daemon start` on a state directory it cannot write says so, with the next step
+  (exit 6), instead of "internal error: PermissionError".
 - `harness-manager app` with `--with-app` on Linux no longer prints two pywebview
   tracebacks: without GTK or Qt bindings it goes straight to the Chrome app window.
 - CI installs from a checkout on Rocky Linux 8 and 9, Ubuntu 22.04 and 24.04, Debian 12

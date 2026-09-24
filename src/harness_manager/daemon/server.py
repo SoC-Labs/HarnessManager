@@ -42,7 +42,16 @@ from harness_manager.core.errors import (
     UsageError,
 )
 
-from .state import DaemonInstance, default_state_dir, is_loopback, new_info, remove_info, write_info
+from . import logfile
+from .state import (
+    DaemonInstance,
+    daemon_log_path,
+    default_state_dir,
+    is_loopback,
+    new_info,
+    remove_info,
+    write_info,
+)
 
 log = logging.getLogger("harness_manager.daemon")
 
@@ -301,7 +310,12 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
         log.info("harness-manager-daemon %s (pid %d) serving %s for %s", __version__, info.pid,
                  info.base_url, state_dir)
         _stop_on_hangup(server)
-        server.run(sockets=[sock])
+        # Install lane Q3 (from Q2's soak): a size cap on daemon.log while it runs.
+        rotator = logfile.LogRotator(daemon_log_path(state_dir)).start()
+        try:
+            server.run(sockets=[sock])
+        finally:
+            rotator.stop()
         log.info("harness-manager-daemon stopped")
         return 0
     finally:
