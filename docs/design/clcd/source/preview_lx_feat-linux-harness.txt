@@ -1,0 +1,419 @@
+# clcd_preview, mps3-nanosoc-platform-lx feat/linux-harness@17c7ea1 (adds D13 'USD :' on row 4; row 12 engine row is a weak seam, blank here).
+
+== greybox-boot   fresh boot, greybox, no swap yet
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : greybox              v0.0         |
+   03 |SWAP: IDLE (boot)         #000          |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:00:03                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 0 B  rxdrop 0 txerr 0             |
+   09 |CFG : greybox: empty tie-off            |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== usd-skipped    user uSD: PB1 held at power-up -> greybox
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : greybox              v0.0         |
+   03 |SWAP: IDLE (boot)         #000          |
+   04 |SID : 0x14E1A2D8  USD : skipped         |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:00:03                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 0 B  rxdrop 0 txerr 0             |
+   09 |CFG : greybox: empty tie-off            |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== jtag-swapped   RP JTAG-loaded behind the fw -> LIVE id wins
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc_multicore    v1.0         |
+   03 |SWAP: IDLE (boot)         #000          |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 0 B  rxdrop 0 txerr 0             |
+   09 |CFG : 2x CPU  ETH MAC+PTP  2x UART      |
+   10 |DIP : --                                |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== healthy        nanoSoC loaded + verified, link up, no banner
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== multicore      LONGEST name (17ch) + version -- the overflow
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc_multicore    v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 2100480 B  rxdrop 0 txerr 0       |
+   09 |CFG : 2x CPU  ETH MAC+PTP  2x UART      |
+   10 |DIP : --                                |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== rp-decoupled   RP isolated -> clamped 0x0 is NOT 'greybox'
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : RP DECOUPLED                      |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : unknown -- no valid rm_id from RP |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== rm-id-unstable rm_id_valid clear -> say so, never a name
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : RM ID NOT VALID                   |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : unknown -- no valid rm_id from RP |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== eth_ss         ethernet-MAC DUT loaded (no CPU, no UART)
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : eth_ss               v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : no CPU  ETH MAC+PTP  no UART      |
+   10 |DIP : --                                |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== unknown-rm     unrecognised rm_id -> raw hex, never a lie
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : rm?0100DEAD          v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : design unknown                    |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== usd-default    user uSD: default loaded from slot A (row 4)
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : nanosoc [A]     |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== usd-widest     user uSD: 12-char name + [B] = 16, to col 39
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc_multicore    v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : nanosoc_mult [B]|
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 2x CPU  ETH MAC+PTP  2x UART      |
+   10 |DIP : --                                |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== usd-foreign    user uSD: PC card, never written, no banner
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : foreign         |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== usd-no-hw      shell without usd_spi (weak fallback text)
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : no hw           |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== swap-failed    last swap FAILED -> banner
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: FAILED UNVERIF      #001  last ERR|
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+INV10 |                                        |  <<
+INV11 |    LAST SWAP FAILED - RM NOT LOADED    |  <<
+INV12 |                                        |  <<
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== link-down      network link down -> banner (highest rank)
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  DOWN              |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+INV10 |                                        |  <<
+INV11 |           NETWORK LINK DOWN            |  <<
+INV12 |                                        |  <<
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== clock-dead     DUT clock not running -> banner
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x14E1A2D8  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-DEAD    MMCM-UNL     |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+INV10 |                                        |  <<
+INV11 |         DUT CLOCK NOT RUNNING          |  <<
+INV12 |                                        |  <<
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb \  |
+    +----------------------------------------+
+
+== unprovisioned  static_id 0 -> banner
+    +----------------------------------------+
+   00 |MPS3-01             nanoSoC harness     |
+   01 |----------------------------------------|
+   02 |DUT : nanosoc              v1.0         |
+   03 |SWAP: LOADED VERIFIED     #001  last OK |
+   04 |SID : 0x00000000  USD : none            |
+   05 |NET : 192.168.10.101  UP 100/FD         |
+   06 |UP  : 000:00:01:48                      |
+   07 |DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    |
+   08 |ICAP: 1835072 B  rxdrop 0 txerr 0       |
+   09 |CFG : 1x Cortex-M0  no ETH  1x UART     |
+INV10 |                                        |  <<
+INV11 |       STATIC_ID NOT PROVISIONED        |  <<
+INV12 |                                        |  <<
+   13 |----------------------------------------|
+   14 |MAC 02:00:00:4D:50:53             hb /  |
+    +----------------------------------------+
+
+== dut-banner     KVM handover OSD: DUT is taking the panel
+    +----------------------------------------+
+   00 |----------- nanoSoC harness ------------|
+   01 |                                        |
+   02 |                                        |
+   03 |                                        |
+   04 |                                        |
+   05 |                                        |
+INV06 |          DUT HAS THE DISPLAY           |  <<
+INV07 |                                        |  <<
+INV08 |         PRESS  PB1  TO RETURN          |  <<
+   09 |                                        |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |                                        |
+   14 |----------------------------------------|
+    +----------------------------------------+
+
+== apps-nanosoc   Apps page: nanosoc (M0) services + commands
+    +----------------------------------------+
+   00 |APPS & PORTS nanosoc                    |
+   01 |----------------------------------------|
+   02 |CTRL  nc 192.168.10.101 6900            |
+   03 |TFTP  tftp 192.168.10.101 69            |
+   04 |PUSH  nc 192.168.10.101 6910            |
+   05 |XVC   xvc 192.168.10.101:2542           |
+   06 |SWD   ocd rbb 192.168.10.101:6920       |
+   07 |JTAG  ocd rbb 192.168.10.101:6921       |
+   08 |UART0 nc 192.168.10.101 6930            |
+   09 |SWO   nc 192.168.10.101 6932            |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+INV14 |PB1 tap:next page   hold:give DUT       |  <<
+    +----------------------------------------+
+
+== apps-multicore Apps page: multicore (all 9 services)
+    +----------------------------------------+
+   00 |APPS & PORTS nanosoc_multicore          |
+   01 |----------------------------------------|
+   02 |CTRL  nc 192.168.10.101 6900            |
+   03 |TFTP  tftp 192.168.10.101 69            |
+   04 |PUSH  nc 192.168.10.101 6910            |
+   05 |XVC   xvc 192.168.10.101:2542           |
+   06 |SWD   ocd rbb 192.168.10.101:6920       |
+   07 |JTAG  ocd rbb 192.168.10.101:6921       |
+   08 |UART0 nc 192.168.10.101 6930            |
+   09 |UART1 nc 192.168.10.101 6931            |
+   10 |SWO   nc 192.168.10.101 6932            |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+INV14 |PB1 tap:next page   hold:give DUT       |  <<
+    +----------------------------------------+
+
+== apps-eth_ss    Apps page: eth_ss (shell services only)
+    +----------------------------------------+
+   00 |APPS & PORTS eth_ss                     |
+   01 |----------------------------------------|
+   02 |CTRL  nc 192.168.10.101 6900            |
+   03 |TFTP  tftp 192.168.10.101 69            |
+   04 |PUSH  nc 192.168.10.101 6910            |
+   05 |XVC   xvc 192.168.10.101:2542           |
+   06 |                                        |
+   07 |                                        |
+   08 |                                        |
+   09 |                                        |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+INV14 |PB1 tap:next page   hold:give DUT       |  <<
+    +----------------------------------------+
+
+== apps-greybox   Apps page: greybox (shell services only)
+    +----------------------------------------+
+   00 |APPS & PORTS greybox                    |
+   01 |----------------------------------------|
+   02 |CTRL  nc 192.168.10.101 6900            |
+   03 |TFTP  tftp 192.168.10.101 69            |
+   04 |PUSH  nc 192.168.10.101 6910            |
+   05 |XVC   xvc 192.168.10.101:2542           |
+   06 |                                        |
+   07 |                                        |
+   08 |                                        |
+   09 |                                        |
+   10 |                                        |
+   11 |                                        |
+   12 |                                        |
+   13 |----------------------------------------|
+INV14 |PB1 tap:next page   hold:give DUT       |  <<
+    +----------------------------------------+
