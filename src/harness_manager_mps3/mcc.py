@@ -68,7 +68,7 @@ import re
 import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import harness_manager.transports.direct as _direct  # noqa: F401 - registers the serial:// scheme
@@ -133,6 +133,18 @@ class MccTiming:
 
 
 DEFAULT_TIMING = MccTiming()
+#: The MCC reached over an fpgahub TTY share (``tcp://``/``hub://``): 100 ms a character,
+#: the rate the remote REBOOT was proven at across the share's jitter (ILA mint findings
+#: 2026-09-24 #2). Over the Debug USB the 60 ms default stands (fpgahub 30ae4f3).
+SHARE_PACE_S = 0.1
+
+
+def timing_for(url: str, base: MccTiming | None = None) -> MccTiming:
+    """The pacing for an MCC console URL: slower across a hub share."""
+    base = base or DEFAULT_TIMING
+    if url.startswith(("tcp://", "hub://")):
+        return replace(base, pace_s=max(base.pace_s, SHARE_PACE_S))
+    return base
 # Module-level so tests can swap in a fake clock; read at adapter creation time.
 DEFAULT_CLOCK: Callable[[], float] = time.monotonic
 DEFAULT_SLEEP: Callable[[float], None] = time.sleep
@@ -994,7 +1006,7 @@ def make_controller_adapter(session: Any) -> Mps3Controller | None:
                  if lk.kind == LinkKind.USB_SERIAL and not is_lane_link(lk)), None)
     if link is None or not link.address:
         return None
-    timing = DEFAULT_TIMING
+    timing = timing_for(serial_url(link.address))
     shell = getattr(session, "shell", None)
     probe = _shell_probe_for(shell, timing.ping_timeout_s) if shell is not None else None
     ctl = Mps3Controller(serial_url(link.address), timing=timing, clock=DEFAULT_CLOCK,

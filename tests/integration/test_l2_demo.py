@@ -21,7 +21,7 @@ from harness_manager.core.errors import ExitCode
 from harness_manager.daemon.app import create_app
 from harness_manager.demo import DemoEngine
 from harness_manager.services import pty as ptymod
-from tests.fakes.l2_rig import PtyClient, wait_for
+from tests.fakes.l2_rig import PtyClient, pty_dir, wait_for
 from tests.fakes.t13_daemon import TOKEN, bid_path, headers
 
 pytestmark = pytest.mark.skipif(not ptymod.supported(), reason="PTYs need a POSIX system")
@@ -31,7 +31,7 @@ H = headers()
 
 @pytest.fixture
 def demo(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(tmp_path / "ptys"))
+    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(pty_dir(tmp_path)))
     eng = DemoEngine(speed=0)
     try:
         with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as c:

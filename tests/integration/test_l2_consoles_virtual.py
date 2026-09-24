@@ -40,6 +40,7 @@ from tests.fakes.l2_rig import (
     fast_pty_options,
     install_uart_baud_codec,
     l2_virtual_board,
+    pty_dir,
     wait_for,
 )
 from tests.fakes.t4_console_rig import EventLog, read_until
@@ -53,7 +54,7 @@ BANNER = b"nanosoc boot\n"
 def _wiring(tmp_path: Path, monkeypatch) -> None:
     apply_pack_ccr(monkeypatch)
     install_uart_baud_codec(monkeypatch)
-    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(tmp_path / "ptys"))
+    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(pty_dir(tmp_path)))
 
 
 @pytest.fixture

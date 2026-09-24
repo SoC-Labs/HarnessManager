@@ -369,3 +369,32 @@ def test_negative_twin_swo_and_an_unpaced_pack_are_not_paced(broker, session, pa
     s.write(b"x" * 200 + b"\n")
     read_until(s, b"x" * 200)
     assert time.monotonic() - t0 < 200 * 0.02 / 2                # far faster than paced
+
+
+def test_after_a_verified_swap_a_new_subscriber_is_not_replayed_the_old_design(broker, session,
+                                                                               bus):
+    # ILA mint findings 2026-09-24 #4: output from before a swap belongs to the old design.
+    board = session.candidate.board_id
+    log = EventLog(bus, "console.state")
+    s = broker.subscribe(session, "uart0")
+    read_until(s, BANNER)
+    s.write(b"OLD-DESIGN\n")
+    read_until(s, b"OLD-DESIGN")                          # FakeShell echoes: now in scrollback
+    mark = log.mark()
+    bus.publish(Event("deploy.started", board, {"overlay": "nanosoc", "rm_id": "0x01000001"}))
+    log.wait_for(lambda e: e.data["state"] == "down", after=mark)
+    mark = log.mark()
+    bus.publish(Event("deploy.done", board, {"rm_id": "0x01000001", "verified": True}))
+    up_after(log, mark)
+    late = broker.subscribe(session, "uart0")             # replay=True by default
+    got = read_until(late, BANNER)
+    assert b"OLD-DESIGN" not in got
+
+
+def test_negative_twin_without_a_swap_the_scrollback_is_replayed(broker, session):
+    s = broker.subscribe(session, "uart0")
+    read_until(s, BANNER)
+    s.write(b"SAME-DESIGN\n")
+    read_until(s, b"SAME-DESIGN")
+    late = broker.subscribe(session, "uart0")
+    assert b"SAME-DESIGN" in read_until(late, b"SAME-DESIGN")

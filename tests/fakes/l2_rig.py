@@ -423,10 +423,35 @@ def wait_for(predicate: Any, timeout: float = 10.0, what: str = "condition") -> 
     raise AssertionError(f"timed out waiting for {what}")
 
 
+_PTY_DIRS: list[Path] = []
+
+
+def _remove_pty_dirs() -> None:
+    import shutil
+
+    for d in _PTY_DIRS:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def pty_dir(tmp_path: Path) -> Path:
-    """A private PTY directory for one test (``HARNESS_MANAGER_PTY_DIR``)."""
-    root = tmp_path / "ptys"
-    return root
+    """A private PTY directory for one test (``HARNESS_MANAGER_PTY_DIR``).
+
+    Under /tmp where there is one, like the product's own default. On srv03335 something
+    outside our processes opens new tty devices whose links appear under $TMPDIR
+    (/tmpdir), which upsets the exact client counts these tests check. It never touches
+    /tmp (lane L2's measurements).
+    """
+    import atexit
+    import tempfile
+
+    base = Path("/tmp")
+    if os.name == "posix" and base.is_dir():
+        d = Path(tempfile.mkdtemp(prefix="hm-pty-", dir=base))
+        if not _PTY_DIRS:
+            atexit.register(_remove_pty_dirs)
+        _PTY_DIRS.append(d)
+        return d / "ptys"
+    return tmp_path / "ptys"
 
 
 def is_link_to(path: str | Path, device: str) -> bool:

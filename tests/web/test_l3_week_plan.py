@@ -230,7 +230,9 @@ def test_a_serial_consoles_screen_command_carries_its_rate_verbatim(page_factory
 @pytest.mark.week_plan("consoles_api")
 def test_attach_with_screen_makes_a_pty_on_the_daemon(page_factory, daemon, tmp_path, monkeypatch):
     # Real-daemon capable: L2's fallback gives the demo boards real PTYs (under tmp_path here).
-    monkeypatch.setenv("HARNESS_MANAGER_PTY_DIR", str(tmp_path / "ptys"))
+    from tests.fakes.l2_rig import pty_dir  # termios: never import it on Windows
+
+    monkeypatch.setenv("HARNESS_MANAGER_PTY_DIR", str(pty_dir(tmp_path)))
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
     section(page, "consoles")

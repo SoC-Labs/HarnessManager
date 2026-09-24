@@ -31,6 +31,7 @@ from tests.fakes.l2_rig import (
     in_ring,
     install_uart_baud_codec,
     l2_virtual_board,
+    pty_dir,
     wait_for,
 )
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
@@ -45,7 +46,7 @@ BANNER = b"nanosoc boot\n"
 def _wiring(tmp_path: Path, monkeypatch) -> None:
     apply_pack_ccr(monkeypatch)
     install_uart_baud_codec(monkeypatch)
-    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(tmp_path / "ptys"))
+    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(pty_dir(tmp_path)))
 
 
 def make_client(vb) -> Iterator[tuple[TestClient, object]]:

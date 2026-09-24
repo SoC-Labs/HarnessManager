@@ -43,6 +43,7 @@ from tests.fakes.l2_rig import (
     in_ring,
     is_link_to,
     open_fails_busy,
+    pty_dir,
     queued,
     wait_for,
 )
@@ -56,7 +57,7 @@ BOARD = "test@lab:6900"
 
 @pytest.fixture
 def root(tmp_path: Path, monkeypatch) -> Path:
-    r = tmp_path / "ptys"
+    r = pty_dir(tmp_path)
     monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(r))
     return r
 
@@ -210,7 +211,10 @@ def test_reattach_after_an_exclusive_client_exits(broker, session, log):
         second.type("again")
         second.read_until(b"again\r")
     counts = [e["clients"] for e in pty_events(log)]
-    assert counts[:3] == [0, 1, 0] and all(e["path"] == info["path"] for e in pty_events(log))
+    # The "created" event (clients 0) can be published after a fast client has already
+    # attached, so do not pin the first value: an attach, then a detach after it.
+    assert 1 in counts and 0 in counts[counts.index(1) + 1:], counts
+    assert all(e["path"] == info["path"] for e in pty_events(log))
 
 
 def test_negative_twin_without_the_reset_an_exclusive_client_locks_the_pty(broker, session,

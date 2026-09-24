@@ -15,6 +15,21 @@ the command, the expected answer and the evidence file to save.
 4. UDP does not cross the SSH tunnel, so identify (6899) and TFTP (69) do not
    work from srv03335. Deploys push over 6910 TCP.
 
+**The board as of 09-24** (from the ILA mint session's findings,
+`FINDINGS_FOR_LINUX_HARNESS_2026-09-24.md` on the platform's `feat/rm-ila-mint`):
+
+- **The fielded shell is `0x72BB0A36`** (boundary 47/148/20), running firmware
+  v0.11 (`987cf264`) from the SD card. Expect `shell_id` `0x72bb0a36` in R1.
+  `0x3f1a560f` is the previous board state, and its overlays do not load on this shell.
+- **A new console client may first see stale output from the previous design.** The shell
+  holds UART output while nobody reads 6930. Harness Manager drops its own scrollback
+  on a verified swap, but it cannot drop what the shell still holds.
+- **MCC commands over the hub share are paced at 100 ms a character**, the rate the remote REBOOT was
+  proven at. Exactly one program may read `tty_00`, so close any other console on it.
+- **After a MicroBlaze warm restart** (watchdog, `reboot`), the partition stays in reset
+  until the first swap, and `stats` may show `rm_ok: false`. That is a real state,
+  not a Harness Manager fault.
+
 How it works: `via = "ssh:mapstone-dev…"` in boards.toml makes the app run one
 `ssh -N` to the hub, forwarding the shell's ports (6900, 6910, 6921,
 6930–6932, 2542) to free local ports. It never binds local port 2542. The MCC

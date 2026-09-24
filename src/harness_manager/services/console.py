@@ -391,6 +391,12 @@ class _Upstream:
             self._pause_detail = detail
             self._set_state("down", detail)
 
+    def forget(self) -> None:
+        """Drop the scrollback: it is the previous design's output (a verified swap)."""
+        with self._lock:
+            self.history.clear()
+            self._line.clear()
+
     def resume(self) -> None:
         self._paused.clear()
         self.kick()
@@ -1104,6 +1110,9 @@ class ConsoleBroker:
         self._on_identity(event)
         for up in self._board_ups(event.board_id):
             if event.data.get("verified"):
+                # A new subscriber must not be replayed the old design's output
+                # (ILA mint findings 2026-09-24 #4).
+                up.forget()
                 up.resume()
             else:
                 up.hold("not reconnected: the board did not verify the swap; "

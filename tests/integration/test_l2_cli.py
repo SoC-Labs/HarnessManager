@@ -24,6 +24,7 @@ from tests.fakes.l2_rig import (
     apply_pack_ccr,
     install_uart_baud_codec,
     l2_virtual_board,
+    pty_dir,
     run_cli,
     wait_for,
 )
@@ -38,7 +39,7 @@ BANNER = b"nanosoc boot\n"
 def _wiring(tmp_path: Path, monkeypatch) -> None:
     apply_pack_ccr(monkeypatch)
     install_uart_baud_codec(monkeypatch)
-    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(tmp_path / "ptys"))
+    monkeypatch.setenv(ptymod.PTY_DIR_ENV, str(pty_dir(tmp_path)))
 
 
 @pytest.fixture
@@ -64,7 +65,7 @@ def test_pty_in_process_holds_the_pty_until_it_ends(tmp_path, in_process, capsys
 
         t = threading.Thread(target=cli)
         t.start()
-        root = tmp_path / "ptys"
+        root = Path(os.environ["HARNESS_MANAGER_PTY_DIR"])   # the fixture's pty_dir
         link = wait_for(lambda: next(iter(root.glob("*/uart0")), None), what="the PTY link")
         with PtyClient(str(link)) as term:
             term.read_until(BANNER)                               # the console, through the CLI's PTY
@@ -103,7 +104,7 @@ def test_negative_twin_pty_for_an_unknown_console_exits_absent(tmp_path, in_proc
         in_process.append(vb)
         rc, out, err = run_cli(capsys, "--json", "pty", vb.shell_endpoint, "uart9", "--for", "0")
     assert rc == ExitCode.ABSENT and "uart0" in json.loads(out)["error"]["hint"]
-    assert not list((tmp_path / "ptys").glob("*/*"))
+    assert not list(Path(os.environ["HARNESS_MANAGER_PTY_DIR"]).glob("*/*"))   # the fixture's pty_dir
 
 
 def test_pty_through_the_daemon_prints_its_pty_and_returns(tmp_path, capsys):
