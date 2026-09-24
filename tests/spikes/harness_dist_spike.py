@@ -28,6 +28,11 @@ gets the token), and P10 builds its mirror with ``mirror.write_mirror`` (the des
 ``harness mirror`` flow) instead of a plain copy (kept as P10b, which still fails). The
 bare-metal fake mints now record ``ver32 = 0x01000000``, what the v0.11 firmware (VERSION
 1.0.0) reports, since HM matches and confirms ``ver32`` when both sides have one (H1).
+
+HARNESS-CAT (2026-09-25) re-ran it with P3 on the catalogue service
+(``services/harness_catalog.HarnessCatalog.list``): verdicts, marks and rollback candidates
+per release, where it used to be a hand-rolled loop over ``make_plan`` (``catalog_view``,
+kept for reference).
 """
 
 from __future__ import annotations
@@ -254,17 +259,25 @@ def p2(w: World, srv: FakeChannelServer, store: ReleaseStore, b: Board) -> None:
 
 @probe("P3 catalogue view (per-version plans)")
 def p3(w: World, srv: FakeChannelServer, store: ReleaseStore, b: Board) -> None:
-    rows = catalog_view(b.svc, b.session, srv.source(), "beta")
+    # HARNESS-CAT (H6): the catalogue service, one plan per release, with verdicts
+    from harness_manager.services.harness_catalog import HarnessCatalog
+
+    listing = HarnessCatalog(b.svc).list(b.session, channels=["stable", "beta"],
+                                         source=srv.source())
+    rows = listing.as_dict()["releases"]
     for r in rows:
-        print(f"       {r['version']:6} {r['status']:10} {r['static']} {r['impl']:10} "
-              f"mode={r['mode']:8} rekey={str(r['rekey']):5} running={str(r['running']):5} "
-              f"blockers={r['blockers']} {r['why']}")
+        print(f"       {r['version']:6} {r['status']:10} {r['static_id']} {r['impl']:10} "
+              f"mode={r['mode']:8} verdict={r['verdict']:12} marks={','.join(r['marks']) or '-':16} "
+              f"{r['why'][:60]}")
+    got = {r["version"]: (r["verdict"], "running" in r["marks"]) for r in rows}
+    want = {"2.0.0": ("needs-door", False), "1.1.1": ("fits", False), "1.1.0": ("fits", True),
+            "1.0.0": ("re-key", False)}
     lnx = next(r for r in rows if r["version"] == "2.0.0")
-    record("P3 catalogue view (per-version plans)", "NOTE",
-           f"{len(rows)} rows from one plan per version: works as a thin layer over make_plan, "
-           f"but it is not in T7 (service/API/UI plan only the current or one --version). "
-           f"Linux 2.0.0 on this board: rekey={lnx['rekey']}, blockers={lnx['blockers']} "
-           f"({lnx['why']!r})")
+    record("P3 catalogue view (per-version plans)", "PASS" if got == want else "GAP",
+           f"HarnessCatalog.list: {len(rows)} rows over stable+beta, verdicts "
+           f"{ {v: g[0] for v, g in got.items()} }, running={listing.board['running_release']}, "
+           f"offer={listing.offer}, rollback={[c['version'] for c in listing.rollback]}; "
+           f"Linux 2.0.0: {lnx['why'][:70]!r}")
 
 
 @probe("P4 install fw-only 1.1.1 (same static, local Debug USB)")
