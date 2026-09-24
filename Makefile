@@ -12,6 +12,13 @@
 #   make wheelhouse      every wheel for an offline install, in dist/wheelhouse (WHEELHOUSE_ARGS=...)
 #   make lock            re-pin constraints.txt (needs uv; LOCK_ARGS=--upgrade moves every pin)
 #   make vendor-pyverify rebuild vendor/mps3_pyverify-*.whl from $(PLATFORM) at PLATFORM_REF
+#
+# Signed releases (lane OTA-R; docs/RELEASING.md, keys: docs/KEYS.md). Each is a DRY RUN into
+# dist/release/ (written, signed, verified; the gh steps only written) unless PUBLISH=1.
+# The key source: HM_RELEASE_SECRET_KEY + HM_RELEASE_PUBLIC_KEY (minisign CLI), or RELEASE_ARGS.
+#   make release [VERSION=] [CHANNEL=beta] [MIRROR=DIR] [PUBLISH=1]     the app (wheel, lock, dep)
+#   make release-harness BUNDLE=DIR VERSION=1.2.0 [CHANNEL=beta]       a harness bundle (H13)
+#   make release-promote VERSION=0.2.0 [CATALOG=hm-app]                beta -> stable, re-signed
 
 PY        ?= python3.11
 VENV      ?= .venv
@@ -25,10 +32,15 @@ PYVERIFY_WHEEL = $(firstword $(wildcard vendor/mps3_pyverify-*.whl))
 INSTALL_ARGS ?=
 WHEELHOUSE_ARGS ?=
 LOCK_ARGS ?=
+RELEASE_ARGS ?=
+CHANNEL   ?= beta
+CATALOG   ?= hm-app
 BIN        = $(VENV)/bin
+RELEASE    = $(BIN)/python -m tools.release
+RELEASE_COMMON = $(if $(MIRROR),--mirror $(MIRROR)) $(if $(PUBLISH),--publish) $(RELEASE_ARGS)
 
 .PHONY: venv check lint test hil web-deps clean dist install-local smoke-install vendor-pyverify \
-	wheelhouse lock
+	wheelhouse lock release release-harness release-promote
 
 venv: $(BIN)/harness-manager
 
@@ -45,7 +57,7 @@ web-deps: venv
 	$(BIN)/pip install -q --find-links vendor -e '.[webtest]'
 
 lint: venv
-	$(BIN)/ruff check src tests
+	$(BIN)/ruff check src tests tools/release
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck scripts/*.sh; \
 	else echo "lint: shellcheck not found, scripts/*.sh not checked"; fi
 
@@ -85,6 +97,16 @@ lock:
 
 vendor-pyverify:
 	PYTHON=$(if $(wildcard $(BIN)/python),$(BIN)/python,python3) scripts/vendor_pyverify.sh $(PLATFORM) $(PLATFORM_REF)
+
+release: venv
+	$(RELEASE) app $(if $(VERSION),--version $(VERSION)) --channel $(CHANNEL) $(RELEASE_COMMON)
+
+release-harness: venv
+	$(RELEASE) harness --bundle $(BUNDLE) --version $(VERSION) --channel $(CHANNEL) \
+		$(RELEASE_COMMON)
+
+release-promote: venv
+	$(RELEASE) promote --catalog $(CATALOG) --version $(VERSION) $(RELEASE_COMMON)
 
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache build dist src/*.egg-info
