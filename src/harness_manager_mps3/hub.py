@@ -15,7 +15,9 @@ the hub), ``target`` (the fpgahub board name leases and shares use:
 AUTHORITY"), ``shares`` (name -> TTY path; ``mcc`` is the board controller,
 ``fpga_uart0..3`` the FPGA UART lanes), ``baud`` (the rate the shares run at,
 default 115200), ``start_shares`` (default false: use a share that is already
-running, never start one), ``group`` (the hub socket's group, default ``fpga``).
+running, never start one), ``group`` (the hub socket's group, default ``fpga``),
+``board`` (the physical board that owns the target, for ``fpgahub board lease
+revoke``; unset, fpgahub's ``board list --json`` says: ``mps3_01`` for ``mps3_01_pl``).
 
 Every hub command runs through pyverify's lease dialect: ``LeaseClient`` for the
 lease verbs and its ``SshHubRunner`` (``ssh HUB 'sg fpga -c "fpgahub …"'``) for
@@ -42,12 +44,15 @@ dropped without a trace.
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import re
+import secrets
 import socket
 import threading
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from harness_manager.core.errors import (
@@ -91,6 +96,7 @@ class HubConfig:
     baud: int = DEFAULT_SHARE_BAUD
     start_shares: bool = False
     group: str | None = DEFAULT_GROUP
+    board: str = ""                    # the physical board (fpgahub chassis); "" = ask the hub
 
     @property
     def local(self) -> bool:
@@ -101,7 +107,7 @@ def parse_hub_table(table: Any, *, where: str = "hub") -> HubConfig:
     """Validate one boards.toml ``hub`` table. ``UsageError`` names the bad key."""
     if not isinstance(table, dict):
         raise UsageError(f"{where} must be a table: {{ host = ..., target = ... }}")
-    unknown = set(table) - {"host", "target", "shares", "baud", "start_shares", "group"}
+    unknown = set(table) - {"host", "target", "shares", "baud", "start_shares", "group", "board"}
     if unknown:
         raise UsageError(f"{where} has unknown keys: {', '.join(sorted(unknown))}")
     host = table.get("host")
@@ -124,8 +130,11 @@ def parse_hub_table(table: Any, *, where: str = "hub") -> HubConfig:
     group = table.get("group", DEFAULT_GROUP)
     if group is not None and not isinstance(group, str):
         raise UsageError(f"{where}.group must be a string (empty: no sg wrapper)")
+    board = table.get("board", "")
+    if not isinstance(board, str) or (board and not valid_name(board)):
+        raise UsageError(f"{where}.board must be an fpgahub board id, e.g. mps3_01")
     return HubConfig(host=host, target=target, shares=dict(shares), baud=baud,
-                     start_shares=start, group=group or None)
+                     start_shares=start, group=group or None, board=board)
 
 
 def board_tables(candidate: Candidate) -> dict[str, Any]:
@@ -327,6 +336,10 @@ def classify_hub_error(what: str, host: str, target: str, text: str) -> HarnessE
     if "does not match" in low:
         return LeaseLostError(f"{what}: the lease on {target} is no longer ours ({text})",
                               state="lost", hint="see who holds it: harness-manager lease show")
+    if "admin required" in low:
+        return RefusedError(f"{what} on {host}: the hub needs an admin for this ({text})",
+                            hint="the hub's unix socket makes you admin: check `fpgahub whoami` on "
+                                 "the hub says role admin (a stored API token can lower it)")
     if "permission denied (publickey" in low or "host key verification" in low:
         return UnreachableError(f"{what}: ssh to {host} was refused ({text})",
                                 hint=f"check `ssh {host} true` works without a prompt (BatchMode)")
@@ -345,16 +358,585 @@ def classify_hub_error(what: str, host: str, target: str, text: str) -> HarnessE
     return UnreachableError(f"{what} on {host} failed: {text}")
 
 
+# --- lease requests: formats, notes (lane LR-A; docs/LEASE_REQUESTS.md "Hub client") ------------
+#
+# Every fpgahub format below is 0.3.0's (tag v0.3.0, 22aa362: what the lab hub runs), read from
+# its source and never guessed. The hub runs each command with pyverify's render settings
+# (COLUMNS=400 NO_COLOR=1 TERM=dumb), so rich neither wraps nor colours; ANSI escapes are
+# stripped anyway, and a reply that does not have the expected shape raises instead of being
+# read as "free" or "nobody waiting".
+#
+#   fpgahub whoami --json                  cli.py whoami: json.dumps(GET /whoami) (api/v1.py
+#                                          whoami; ``holder`` = Principal.holder, "name@host")
+#   fpgahub lease show TARGET              cli.py lease_show, NO --json: "held by H (user U,
+#                                          expires E)" or "not leased", then a rich Table titled
+#                                          "Queue" (Pos, Holder, User) when anyone waits
+#   fpgahub board list --json              cli.py chassis_list: json.dumps(GET /groups):
+#                                          {"groups": [{"board", "size", "is_paired",
+#                                          "members": [{"name", "role"}]}]}
+#   fpgahub board lease show BOARD --json  cli.py chassis_lease_show: json.dumps(GET
+#                                          /boards/{board}/lease): {"board", "state", "members":
+#                                          [{"board", "current": {holder, user, expires_at,
+#                                          tier} | null}], "queue", ...}
+#   fpgahub board lease revoke BOARD --reason R --yes
+#                                          cli.py chassis_lease_revoke: "revoked A, B (by
+#                                          unix:alice)" or "no lease to revoke" (api/v1.py
+#                                          _do_revoke; admin only: 403 "admin required")
+#   fpgahub target lease-history TARGET --limit N --json
+#                                          cli.py board_lease_history: console.print_json of
+#                                          {"board", "events": [LeaseEventRecord]}; a record
+#                                          keeps ONLY ts, event, board, holder, user, position,
+#                                          ttl_s, expires_at, source, error (api/schemas.py)
+#
+# What lease-history can NOT say (0.3.0): who revoked a lease, and why. ``lease.admin_revoked``
+# is emitted with ``chassis=`` and no ``board=`` (api/v1.py _do_revoke), and the tail buffer is
+# filtered on ``board`` (lease_journal.LeaseEventSink.recent), so it never appears; the
+# ``lease.revoked`` that does appear (daemon.py _on_revoke) has its ``reason`` stripped by
+# LeaseEventRecord. So ``lease_revoke`` also leaves a revoke note (``rev-<id>.json``) in the note
+# directory, written BEFORE the revoke so the victim finds it the moment it notices, and
+# ``lease_history`` merges those notes in as ``lease.admin_revoked`` entries.
+
+NOTE_ROOT = "/tmp/harness-manager-lease"
+NOTE_MAX_BYTES = 4096
+NOTE_MAX_AGE_S = 3600
+HISTORY_MAX = 500                    # fpgahub's tail buffer (lease_journal.DEFAULT_TAIL_SIZE)
+REASON_MAX = 512
+ANSWERS = ("release", "keep")
+MAX_KEEP_MINUTES = 24 * 60
+ADMIN_REVOKED = "lease.admin_revoked"
+#: How far apart fpgahub's ``lease.revoked`` and our revoke note may be and still be one revoke.
+REVOKE_MATCH_S = 300.0
+
+_NAME_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]")
+#: C0 and C1 controls, DEL; a message may still carry newlines and tabs.
+_BAD_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+_ANY_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_TABLE_BAR = "│┃|"
+_TABLE_SPLIT = re.compile(r"[│┃|]")
+_BOX_ONLY = re.compile(r"^[\s\-+=━─┳╇┩┡┏┓└┘┴┬├┤┼╋╈╂╀╁╃╄╅╆╉╊┗┛┣┫┠┨┯┷┿]*$")
+_HELD_LINE = re.compile(r"^held by (?P<holder>.+?) \(user (?P<user>.*?), expires (?P<expires>[^)]*)\)$")
+_REVOKED_LINE = re.compile(r"^revoked (?P<boards>.+?) \(by (?P<by>[^()]*)\)$")
+
+
+def valid_name(value: Any) -> bool:
+    """An id, target or board safe as a file name and as one argv word: ``[A-Za-z0-9_.-]``,
+    1 to 64 characters, and not ``.`` or ``..`` (a target is a directory on the hub)."""
+    return isinstance(value, str) and bool(_NAME_RE.fullmatch(value)) and value.strip(".") != ""
+
+
+def _check_name(value: Any, what: str) -> str:
+    if not valid_name(value):
+        raise UsageError(f"{what} must be 1 to 64 of [A-Za-z0-9_.-] (not . or ..), not {value!r}")
+    return value
+
+
+def _clean(text: str) -> str:
+    return _ANSI.sub("", text or "").replace("\r", "")
+
+
+def _snippet(text: str) -> str:
+    text = _clean(text).strip()
+    return repr(text[:200] + ("…" if len(text) > 200 else "")) if text else "(nothing)"
+
+
+def parse_ts(value: Any) -> datetime | None:
+    """An ISO 8601 time (``Z`` or an offset; none = UTC), or None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text[-1:] in ("Z", "z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _ts_key(value: Any) -> datetime:
+    return parse_ts(value) or _EPOCH
+
+
+def _json_from(text: str, what: str) -> Any:
+    """The JSON document a ``--json`` verb printed (rich's ``print_json`` included)."""
+    clean = _clean(text)
+    starts = [i for i in (clean.find("{"), clean.find("[")) if i >= 0]
+    if not starts:
+        raise UnreachableError(f"{what} printed no JSON: {_snippet(text)}")
+    try:
+        data, _end = json.JSONDecoder().raw_decode(clean, min(starts))
+    except ValueError as exc:
+        raise UnreachableError(f"{what} printed JSON that does not parse ({exc}): {_snippet(text)}") from exc
+    return data
+
+
+# -- the dataclasses of the frozen interface ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class QueueEntry:
+    position: int
+    holder: str        # principal, "david@mapstone-dev"
+    user: str
+
+
+@dataclass(frozen=True)
+class LeaseStatus:
+    """``fpgahub lease show``: the holder (if any) and the interactive queue, head first."""
+
+    held: bool
+    holder: str = ""
+    user: str = ""
+    expires_at: str = ""
+    queue: tuple[QueueEntry, ...] = ()
+
+    @property
+    def head(self) -> QueueEntry | None:
+        return self.queue[0] if self.queue else None
+
+    def position_of(self, holder: str) -> int | None:
+        return next((q.position for q in self.queue if q.holder == holder), None)
+
+
+@dataclass(frozen=True)
+class RequestNote:
+    id: str
+    by: str
+    user: str
+    host: str
+    message: str
+    created_at: str
+    deadline_at: str
+
+
+@dataclass(frozen=True)
+class AnswerNote:
+    id: str
+    answer: str        # "release" | "keep"
+    minutes: int
+    message: str
+    at: str
+
+
+# -- fpgahub's outputs ---------------------------------------------------------------------------
+
+
+def parse_whoami(text: str) -> dict[str, Any]:
+    """``fpgahub whoami --json``: the principal; ``holder`` is what a lease is recorded under."""
+    data = _json_from(text, "fpgahub whoami --json")
+    holder = data.get("holder") if isinstance(data, dict) else None
+    if not isinstance(holder, str) or not holder or len(holder) > 256 or any(
+            c.isspace() for c in holder) or _ANY_CONTROL.search(holder):
+        raise UnreachableError(f"fpgahub whoami printed no usable holder: {_snippet(text)}")
+    return {k: v for k, v in data.items() if isinstance(k, str)}
+
+
+def parse_lease_show(text: str) -> LeaseStatus:
+    """``fpgahub lease show TARGET`` (0.3.0 cli.py ``lease_show``, which has no ``--json``).
+
+    Line one is ``held by H (user U, expires E)`` or ``not leased``; a rich table titled
+    ``Queue`` (``Pos``, ``Holder``, ``User``) follows when anyone waits, drawn with box
+    characters, or ``|``/``+``/``-`` when rich falls back to ASCII. A reply without either
+    first line, or with a queue row it cannot read (or that rich truncated with ``…``),
+    raises: it is never read as "free" or "nobody waiting".
+    """
+    held: bool | None = None
+    holder = user = expires = ""
+    queue: list[QueueEntry] = []
+    for raw in _clean(text).splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if held is None:
+            m = _HELD_LINE.match(line)
+            if m:
+                held, holder, user, expires = True, m["holder"], m["user"], m["expires"].strip()
+                continue
+            if line == "not leased":
+                held = False
+                continue
+        if line[0] not in _TABLE_BAR or _BOX_ONLY.match(line):
+            continue                                    # the title, a border, a warning
+        cells = [c.strip() for c in _TABLE_SPLIT.split(line)]
+        cells = [c for c in cells if c]
+        if not cells or _BOX_ONLY.match("".join(cells)) or cells[0] == "Pos":
+            continue
+        if len(cells) != 3 or not cells[0].isdigit():
+            raise UnreachableError(f"fpgahub lease show printed a queue row this client cannot "
+                                   f"read: {line!r}")
+        if any("…" in c for c in cells):
+            raise UnreachableError(f"fpgahub lease show truncated a queue row: {line!r}",
+                                   hint="the hub's terminal is too narrow; COLUMNS is set by pyverify")
+        queue.append(QueueEntry(int(cells[0]), cells[1], cells[2]))
+    if held is None:
+        raise UnreachableError(f"fpgahub lease show printed neither 'held by …' nor 'not leased': "
+                               f"{_snippet(text)}")
+    return LeaseStatus(held, holder, user, expires, tuple(sorted(queue, key=lambda q: q.position)))
+
+
+def parse_groups(text: str) -> list[tuple[str, list[str]]]:
+    """``fpgahub board list --json``: ``[(board, [member target, ...]), ...]``."""
+    data = _json_from(text, "fpgahub board list --json")
+    groups = data.get("groups") if isinstance(data, dict) else None
+    if not isinstance(groups, list):
+        raise UnreachableError(f"fpgahub board list --json has no 'groups' list: {_snippet(text)}")
+    out: list[tuple[str, list[str]]] = []
+    for g in groups:
+        if not isinstance(g, dict) or not isinstance(g.get("board"), str):
+            continue
+        members = [m["name"] for m in g.get("members") or []
+                   if isinstance(m, dict) and isinstance(m.get("name"), str)]
+        out.append((g["board"], members))
+    return out
+
+
+def parse_board_lease(text: str) -> dict[str, dict[str, Any] | None]:
+    """``fpgahub board lease show BOARD --json``: ``{member: current lease or None}``."""
+    data = _json_from(text, "fpgahub board lease show --json")
+    members = data.get("members") if isinstance(data, dict) else None
+    if not isinstance(members, list):
+        raise UnreachableError(f"fpgahub board lease show --json has no 'members' list: "
+                               f"{_snippet(text)}")
+    out: dict[str, dict[str, Any] | None] = {}
+    for m in members:
+        if not isinstance(m, dict) or not isinstance(m.get("board"), str):
+            raise UnreachableError(f"fpgahub board lease show --json has a member without a "
+                                   f"board: {m!r}")
+        cur = m.get("current")
+        if cur is not None and not (isinstance(cur, dict) and isinstance(cur.get("holder"), str)):
+            raise UnreachableError(f"fpgahub board lease show --json: member {m['board']} has a "
+                                   f"lease without a holder: {cur!r}")
+        out[m["board"]] = cur
+    return out
+
+
+def parse_revoke(text: str) -> dict[str, Any]:
+    """``fpgahub board lease revoke``: ``{"revoked": [target, ...], "by": "unix:alice"}``."""
+    for raw in _clean(text).splitlines():
+        line = raw.strip()
+        m = _REVOKED_LINE.match(line)
+        if m:
+            return {"revoked": [b.strip() for b in m["boards"].split(",") if b.strip()],
+                    "by": m["by"].strip()}
+        if line == "no lease to revoke":
+            return {"revoked": [], "by": ""}
+    raise UnreachableError(f"fpgahub board lease revoke printed neither 'revoked …' nor "
+                           f"'no lease to revoke': {_snippet(text)}")
+
+
+def parse_lease_history(text: str) -> list[dict[str, Any]]:
+    """``fpgahub target lease-history TARGET --json``: the events, oldest first."""
+    data = _json_from(text, "fpgahub target lease-history --json")
+    events = data.get("events") if isinstance(data, dict) else None
+    if not isinstance(events, list):
+        raise UnreachableError(f"fpgahub target lease-history --json has no 'events' list: "
+                               f"{_snippet(text)}")
+    return [dict(e) for e in events
+            if isinstance(e, dict) and isinstance(e.get("ts"), str) and isinstance(e.get("event"), str)]
+
+
+def taken_from_history(events: Sequence[dict[str, Any]], holder: str) -> dict[str, str] | None:
+    """Who took ``holder``'s lease: ``{by, reason, at}``, or None (it expired, or it is still ours).
+
+    ``events`` is :meth:`HubClient.lease_history` (oldest first). Newest first, the first event
+    that ends ``holder``'s tenure decides:
+
+    - a Harness Manager revoke note (``lease.admin_revoked`` whose ``prior_holder`` is
+      ``holder``): ``by`` is the principal that forced it, ``reason`` what it gave;
+    - fpgahub's own ``lease.revoked`` for ``holder`` (0.3.0 keeps no reason or actor in
+      lease-history): a revoke note within 5 minutes supplies ``by`` and ``reason``; without
+      one, ``by`` is whoever was promoted next and ``reason`` is ``""``;
+    - ``lease.expired``, or ``holder``'s own ``lease.acquired``/``lease.promoted``: None.
+    """
+    evs = [e for e in events if isinstance(e, dict)]
+    notes = [e for e in evs if e.get("event") == ADMIN_REVOKED and e.get("prior_holder") == holder]
+    for i in range(len(evs) - 1, -1, -1):
+        e = evs[i]
+        kind = e.get("event")
+        if kind == ADMIN_REVOKED and e.get("prior_holder") == holder:
+            return {"by": str(e.get("by") or ""), "reason": str(e.get("reason") or ""),
+                    "at": str(e.get("ts") or "")}
+        if e.get("holder") != holder:
+            continue
+        if kind == "lease.revoked":
+            at = parse_ts(e.get("ts"))
+            note = next((n for n in reversed(notes)
+                         if at is not None and (t := parse_ts(n.get("ts"))) is not None
+                         and abs((t - at).total_seconds()) <= REVOKE_MATCH_S), None)
+            if note is not None:
+                return {"by": str(note.get("by") or ""), "reason": str(note.get("reason") or ""),
+                        "at": str(e.get("ts") or "")}
+            nxt = next((str(x.get("holder") or "") for x in evs[i + 1:]
+                        if x.get("event") in ("lease.promoted", "lease.acquired")
+                        and x.get("holder") != holder), "")
+            return {"by": nxt, "reason": "", "at": str(e.get("ts") or "")}
+        if kind in ("lease.expired", "lease.acquired", "lease.promoted"):
+            return None
+    return None
+
+
+# -- the note files --------------------------------------------------------------------------------
+
+
+def check_reason(reason: Any) -> str:
+    """A revoke reason: 1 to 512 characters, no control characters (it lands in fpgahub's audit
+    log and a query string)."""
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > REASON_MAX \
+            or _ANY_CONTROL.search(reason):
+        raise UsageError(f"a revoke reason is 1 to {REASON_MAX} characters on one line, "
+                         f"without control characters (got {reason!r:.80})")
+    return reason
+
+
+def _note_text(value: Any, what: str, *, multiline: bool = False) -> str:
+    if not isinstance(value, str) or (_BAD_CONTROL if multiline else _ANY_CONTROL).search(value):
+        raise UsageError(f"{what} must be text without control characters, not {value!r:.80}")
+    return value
+
+
+def _note_time(value: Any, what: str) -> str:
+    if parse_ts(value) is None:
+        raise UsageError(f"{what} must be an ISO 8601 time, e.g. 2026-09-24T12:00:00+00:00, "
+                         f"not {value!r:.80}")
+    return value
+
+
+def _encode_note(obj: dict[str, Any]) -> str:
+    """Compact ASCII JSON (so bytes == characters, and a message cannot carry raw control
+    characters or non-ASCII to the hub), at most :data:`NOTE_MAX_BYTES`."""
+    body = json.dumps(obj, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    if len(body) > NOTE_MAX_BYTES:
+        raise UsageError(f"a lease note is at most {NOTE_MAX_BYTES} bytes; this one is {len(body)}",
+                         hint="shorten the message")
+    return body
+
+
+def encode_request(note: RequestNote) -> str:
+    if not isinstance(note, RequestNote):
+        raise UsageError(f"put_request takes a RequestNote, not {type(note).__name__}")
+    _check_name(note.id, "a request id")
+    for key in ("by", "user", "host"):
+        _note_text(getattr(note, key), f"the request's {key}")
+    _note_text(note.message, "the request's message", multiline=True)
+    _note_time(note.created_at, "created_at")
+    _note_time(note.deadline_at, "deadline_at")
+    return _encode_note(asdict(note))
+
+
+def _check_answer(answer: Any, minutes: Any) -> None:
+    if answer not in ANSWERS:
+        raise UsageError(f"an answer is 'release' or 'keep', not {answer!r:.40}")
+    if not isinstance(minutes, int) or isinstance(minutes, bool) or not 0 <= minutes <= MAX_KEEP_MINUTES:
+        raise UsageError(f"minutes must be a whole number 0..{MAX_KEEP_MINUTES}, not {minutes!r:.40}")
+
+
+def encode_answer(note: AnswerNote) -> str:
+    if not isinstance(note, AnswerNote):
+        raise UsageError(f"put_answer takes an AnswerNote, not {type(note).__name__}")
+    _check_name(note.id, "a request id")
+    _check_answer(note.answer, note.minutes)
+    _note_text(note.message, "the answer's message", multiline=True)
+    _note_time(note.at, "the answer's time")
+    return _encode_note(asdict(note))
+
+
+def decode_request(data: Any, name: str) -> RequestNote | None:
+    """A request note read back from the hub; None (and a warning) when it is not one."""
+    try:
+        if not isinstance(data, dict):
+            raise UsageError("not a JSON object")
+        note = RequestNote(**{k: data[k] for k in RequestNote.__dataclass_fields__})
+        if name != f"req-{note.id}.json":
+            raise UsageError(f"its id {note.id!r} does not match the file name")
+        encode_request(note)
+    except (KeyError, TypeError, UsageError) as exc:
+        log.warning("lease note %s ignored: %s", name, exc)
+        return None
+    return note
+
+
+def decode_answer(data: Any, name: str) -> AnswerNote | None:
+    try:
+        if not isinstance(data, dict):
+            raise UsageError("not a JSON object")
+        note = AnswerNote(**{k: data[k] for k in AnswerNote.__dataclass_fields__})
+        if name != f"ans-{note.id}.json":
+            raise UsageError(f"its id {note.id!r} does not match the file name")
+        encode_answer(note)
+    except (KeyError, TypeError, UsageError) as exc:
+        log.warning("lease note %s ignored: %s", name, exc)
+        return None
+    return note
+
+
+def decode_revoke(data: Any, name: str) -> dict[str, Any] | None:
+    """A revoke note as a lease-history entry (``event`` ``lease.admin_revoked``)."""
+    keys = ("ts", "by", "reason", "prior_holder", "board")
+    if not isinstance(data, dict) or data.get("event") != ADMIN_REVOKED or not all(
+            isinstance(data.get(k), str) for k in keys) or parse_ts(data["ts"]) is None \
+            or name != f"rev-{data.get('id')}.json":
+        log.warning("lease note %s ignored: not a revoke note", name)
+        return None
+    return {k: v for k, v in data.items() if isinstance(v, (str, int, list)) and not isinstance(v, bool)}
+
+
+def note_lines(text: str, prefix: str) -> list[tuple[str, Any]]:
+    """The ``list`` op's output: one ``NAME<TAB>JSON`` line per note; oversized, unnamed or
+    unparsable lines are dropped (and logged)."""
+    out: list[tuple[str, Any]] = []
+    for line in (text or "").splitlines():
+        name, sep, body = line.partition("\t")
+        if not sep:
+            continue
+        if not (name.startswith(prefix) and name.endswith(".json")
+                and valid_name(name[len(prefix):-len(".json")])):
+            log.warning("lease note %r ignored: not a %s note name", name[:80], prefix)
+            continue
+        if len(body) > NOTE_MAX_BYTES:
+            log.warning("lease note %s ignored: over %d bytes", name, NOTE_MAX_BYTES)
+            continue
+        try:
+            out.append((name, json.loads(body)))
+        except ValueError:
+            log.warning("lease note %s ignored: not JSON", name)
+    return out
+
+
+#: The note store's one shell script, run on the hub as ``sh -c SCRIPT hm-lease OP ROOT TARGET
+#: GROUP ARG...`` through the same runner (and so the same ``sg fpga``) as every fpgahub verb.
+#: Values only ever arrive as positional parameters, each quoted by the runner (shlex.quote,
+#: once per shell), and are only ever expanded inside double quotes: a message cannot reach a
+#: shell as code. Ops: ``put NAME BODY`` (atomic: mktemp in the directory, then mv), ``list
+#: PREFIX`` (``NAME<TAB>BODY`` lines), ``get NAME``, ``del NAME``. ``put`` and ``list`` prune
+#: notes older than an hour. Exit codes: 64 usage, 65 too big, 66 not writable, 67 not
+#: readable, 68 not a plain directory (a symlink, say); messages start with ``hm-lease:``.
+NOTE_SCRIPT = r"""set -u
+op=$1 root=$2 target=$3 grp=$4
+shift 4
+dir=$root/$target
+umask 007
+fail() { printf 'hm-lease: %s\n' "$2" >&2; exit "$1"; }
+checkname() {
+  case $1 in req-?*.json|ans-?*.json|rev-?*.json) ;; *) fail 64 "not a note name: $1" ;; esac
+  case $1 in *[!A-Za-z0-9_.-]*) fail 64 "not a note name: $1" ;; esac
+}
+plain() {
+  for d in "$root" "$dir"; do
+    if [ -L "$d" ]; then fail 68 "$d is a symbolic link; refusing to use it"; fi
+    if [ -e "$d" ] && [ ! -d "$d" ]; then fail 68 "$d is not a directory"; fi
+  done
+}
+prune() {
+  [ -d "$dir" ] || return 0
+  find "$dir" -maxdepth 1 -type f \( -name 'req-*.json' -o -name 'ans-*.json' \
+    -o -name 'rev-*.json' -o -name '.tmp.*' \) -mmin +60 -exec rm -f {} + 2>/dev/null
+  return 0
+}
+ensure() {
+  plain
+  for d in "$root" "$dir"; do
+    if [ ! -d "$d" ]; then
+      mkdir "$d" 2>/dev/null || [ -d "$d" ] || fail 66 "cannot create $d"
+      if [ -n "$grp" ]; then chgrp "$grp" "$d" 2>/dev/null; fi
+      chmod 2770 "$d" 2>/dev/null
+    fi
+  done
+  if [ ! -w "$dir" ] || [ ! -x "$dir" ]; then fail 66 "$dir is not writable"; fi
+}
+readable() {
+  plain
+  [ -d "$dir" ] || exit 0
+  if [ ! -r "$dir" ] || [ ! -x "$dir" ]; then fail 67 "$dir is not readable"; fi
+}
+emit() {
+  [ -L "$1" ] && return 0
+  head -c 4097 "$1" 2>/dev/null | LC_ALL=C tr -cd '\040-\176'
+}
+case $op in
+put)
+  checkname "$1"
+  n=$(printf '%s' "$2" | wc -c | tr -d ' ')
+  [ "$n" -le 4096 ] || fail 65 "a note is at most 4096 bytes; this one is $n"
+  ensure
+  prune
+  tmp=$(mktemp "$dir/.tmp.XXXXXX" 2>/dev/null) || fail 66 "cannot create a file in $dir"
+  if printf '%s' "$2" > "$tmp" && chmod 660 "$tmp" && mv -f "$tmp" "$dir/$1"; then exit 0; fi
+  rm -f "$tmp"
+  fail 66 "cannot write $dir/$1"
+  ;;
+list)
+  case $1 in req-|ans-|rev-) ;; *) fail 64 "not a note kind: $1" ;; esac
+  readable
+  prune
+  for f in "$dir/$1"*.json; do
+    [ -f "$f" ] || continue
+    b=${f##*/}
+    case $b in *[!A-Za-z0-9_.-]*) continue ;; esac
+    printf '%s\t' "$b"
+    emit "$f"
+    printf '\n'
+  done
+  ;;
+get)
+  checkname "$1"
+  readable
+  [ -f "$dir/$1" ] || exit 0
+  emit "$dir/$1"
+  ;;
+del)
+  checkname "$1"
+  plain
+  if [ ! -e "$dir/$1" ] && [ ! -L "$dir/$1" ]; then exit 0; fi
+  rm -f "$dir/$1" 2>/dev/null || fail 66 "cannot delete $dir/$1"
+  ;;
+*) fail 64 "unknown op: $op" ;;
+esac
+"""
+
+NOTE_OPS = ("put", "list", "get", "del")
+_NOTE_EXIT = {64: "usage", 65: "usage", 66: "unwritable", 67: "unreadable", 68: "unsafe"}
+
+
+def note_error(res: Any, what: str, host: str, target: str, note_dir: str) -> HarnessError:
+    """A failed note op as a ``HarnessError``: ours (``hm-lease:``) or the transport's."""
+    text = _clean((getattr(res, "stderr", "") or "") + (getattr(res, "stdout", "") or "")).strip()
+    m = re.search(r"hm-lease: (.*)", text)
+    kind = _NOTE_EXIT.get(getattr(res, "returncode", 1)) if m else None
+    if kind == "usage":
+        return UsageError(f"{what}: {m.group(1)}")          # type: ignore[union-attr]
+    if kind is not None:
+        exc = UnavailableError("lease requests", f"{what}: {m.group(1)} on {host}")  # type: ignore[union-attr]
+        exc.hint = (f"remove {note_dir} on {host}: it is not Harness Manager's" if kind == "unsafe"
+                    else f"on {host}, its owner runs: chgrp fpga {note_dir} && chmod 2770 {note_dir} "
+                         f"(or removes it; the next note recreates it)")
+        return exc
+    return classify_hub_error(what, host, target, text or f"exit status {getattr(res, 'returncode', '?')}")
+
+
 class HubClient:
     """fpgahub on one hub for one target: lease verbs (pyverify ``LeaseClient``) and shares."""
 
     def __init__(self, host: str, target: str = DEFAULT_TARGET, *, group: str | None = DEFAULT_GROUP,
-                 runner: Callable[..., Any] | None = None, timeout_s: float = HUB_TIMEOUT_S) -> None:
+                 runner: Callable[..., Any] | None = None, timeout_s: float = HUB_TIMEOUT_S,
+                 board: str = "") -> None:
         from pyverify.lease import LeaseClient
 
         self.host = host
         self.target = target
+        self.group = group
+        self.board = board                   # hub.board in boards.toml; "" = ask fpgahub
         self.timeout_s = timeout_s
+        self.note_root = NOTE_ROOT           # tests point it at a temporary directory
+        self._whoami: dict[str, Any] | None = None
+        self._board_id: str | None = None
         self._run = _Recorder(runner or DEFAULT_RUNNER_FACTORY(host, group))
         self.leases = LeaseClient(self._run, target=target, timeout=timeout_s)
 
@@ -439,6 +1021,198 @@ class HubClient:
             raise UnreachableError(f"share start on {self.host} printed no share for {tty}: "
                                    f"{text.strip()[:200]}")
         return found[0]
+
+
+    # -- lease requests (lane LR-A; docs/LEASE_REQUESTS.md "Hub client") -----------------------
+
+    def _hub_out(self, argv: list[str], what: str) -> str:
+        """One fpgahub verb's stdout, or its failure as a ``HarnessError``."""
+        from pyverify.lease import LeaseError
+
+        def run() -> str:
+            res = self._run(argv, timeout=self.timeout_s)
+            if res.returncode != 0:
+                raise LeaseError(f"{what} failed: {res.text.strip() or '(no output)'}")
+            return res.stdout or ""
+
+        return self._call(what, run)
+
+    def whoami(self) -> dict[str, Any]:
+        """``fpgahub whoami --json`` (asked once per client): ``holder``, ``audit_id``, ``role``…"""
+        if self._whoami is None:
+            self._whoami = parse_whoami(self._hub_out(["fpgahub", "whoami", "--json"], "whoami"))
+        return dict(self._whoami)
+
+    def principal(self) -> str:
+        """What fpgahub records this client's leases and queue entries under (``name@host``).
+
+        fpgahub 0.3.0 ignores ``--holder``: over the hub's unix socket it is the unix user at
+        the hub's hostname, e.g. ``david@mapstone-dev``, whatever the caller asked for.
+        """
+        return str(self.whoami()["holder"])
+
+    def lease_status(self) -> LeaseStatus:
+        """``fpgahub lease show TARGET``: the holder and the interactive queue (one ssh call)."""
+        return parse_lease_show(self._hub_out(["fpgahub", "lease", "show", self.target],
+                                              "lease show"))
+
+    def board_id(self) -> str:
+        """The physical board that owns the target: ``hub.board`` in boards.toml, else the
+        group ``fpgahub board list --json`` puts the target in (asked once per client)."""
+        if self.board:
+            return self.board
+        if self._board_id is None:
+            groups = parse_groups(self._hub_out(["fpgahub", "board", "list", "--json"], "board list"))
+            owners = [board for board, members in groups if self.target in members]
+            if not owners:
+                raise AbsentError(f"no board on the hub {self.host} has the target {self.target}",
+                                  hint="set hub.board in boards.toml (mps3_01 for mps3_01_pl)")
+            if not valid_name(owners[0]):
+                raise UnreachableError(f"fpgahub board list named the board {owners[0]!r}, "
+                                       "which is not a board id this client will pass on")
+            self._board_id = owners[0]
+        return self._board_id
+
+    def lease_revoke(self, reason: str) -> dict[str, Any]:
+        """Force-release the target: ``fpgahub board lease revoke BOARD --reason R --yes``.
+
+        This KICKS whoever holds the board; fpgahub then promotes the head of the queue. The
+        board's members are read first (``board lease show --json``), and the revoke is
+        refused when it would also kick a lease on another member held by someone else, or
+        when the lease is this client's own. Before revoking, a revoke note is left for the
+        victim (:func:`taken_from_history`); it is withdrawn if nothing was revoked.
+
+        Returns ``{"revoked": [target, ...], "by": fpgahub's actor ("unix:alice"), "board",
+        "prior_holder", "reason", "principal"}``; ``revoked`` is empty when nobody held it.
+        """
+        reason = check_reason(reason)
+        board = self.board_id()
+        me = self.principal()
+        members = parse_board_lease(self._hub_out(
+            ["fpgahub", "board", "lease", "show", board, "--json"], "board lease show"))
+        if self.target not in members:
+            raise AbsentError(f"fpgahub's board {board} has no member {self.target}",
+                              hint="set hub.board in boards.toml to the board that owns it")
+        current = members[self.target]
+        base = {"board": board, "reason": reason, "principal": me}
+        if current is None:
+            return {"revoked": [], "by": "", "prior_holder": "", **base}
+        prior = str(current["holder"])
+        if prior == me:
+            raise RefusedError(f"{self.target} is held by this client's own principal ({me})",
+                               hint="release it instead: harness-manager lease release")
+        others = sorted(f"{m} (held by {c['holder']})" for m, c in members.items()
+                        if m != self.target and c is not None and c.get("holder") != prior)
+        if others:
+            raise RefusedError(f"force-releasing board {board} would also kick {', '.join(others)}",
+                               hint="ask them to release first; fpgahub revokes whole boards")
+        note_id = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}"
+        name = f"rev-{note_id}.json"
+        note = {"id": note_id, "ts": datetime.now(timezone.utc).isoformat(), "event": ADMIN_REVOKED,
+                "board": self.target,
+                "chassis": board, "by": me, "actor": str(self.whoami().get("audit_id") or ""),
+                "reason": reason, "prior_holder": prior, "prior_user": str(current.get("user") or ""),
+                "source": "harness-manager"}
+        noted = False
+        try:
+            self._notes("put", name, _encode_note(note), what="leave the revoke note")
+            noted = True
+        except HarnessError as exc:
+            log.warning("revoking %s without a revoke note (the victim will not see the reason): %s",
+                        self.target, exc)
+        try:
+            text = self._hub_out(["fpgahub", "board", "lease", "revoke", board, "--reason", reason,
+                                  "--yes"], "board lease revoke")
+        except HarnessError:
+            if noted:
+                with contextlib.suppress(HarnessError):
+                    self._notes("del", name, what="withdraw the revoke note")
+            raise
+        out = parse_revoke(text)          # a reply we cannot read keeps the note: it may have run
+        if not out["revoked"] and noted:
+            with contextlib.suppress(HarnessError):
+                self._notes("del", name, what="withdraw the revoke note")
+        return {**out, "prior_holder": prior, **base}
+
+    def lease_history(self, limit: int = 50) -> list[dict[str, Any]]:
+        """The target's recent lease events, oldest first: fpgahub's ``target lease-history
+        --json`` plus this hub's revoke notes (as ``lease.admin_revoked`` entries), the last
+        ``limit`` (1..500) of them. Unreadable notes only cost the notes."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= HISTORY_MAX:
+            raise UsageError(f"limit must be a whole number 1..{HISTORY_MAX}, not {limit!r}")
+        events = parse_lease_history(self._hub_out(
+            ["fpgahub", "target", "lease-history", self.target, "--limit", str(limit), "--json"],
+            "target lease-history"))
+        try:
+            out = self._notes("list", "rev-", what="list revoke notes")
+            events += [e for n, d in note_lines(out, "rev-") if (e := decode_revoke(d, n))]
+        except HarnessError as exc:
+            log.warning("lease history for %s without revoke notes: %s", self.target, exc)
+        events.sort(key=lambda e: _ts_key(e.get("ts")))
+        return events[-limit:]
+
+    # -- the note files: /tmp/harness-manager-lease/<target>/ on the hub -----------------------
+
+    @property
+    def note_dir(self) -> str:
+        return f"{self.note_root}/{self.target}"
+
+    def _notes(self, op: str, *args: str, what: str) -> str:
+        """Run one note op (:data:`NOTE_SCRIPT`) on the hub; its stdout."""
+        if op not in NOTE_OPS:
+            raise UsageError(f"unknown note op {op!r}")
+        _check_name(self.target, "the hub target")
+        if not self.note_root.startswith("/") or any(c.isspace() for c in self.note_root):
+            raise UsageError(f"the note root must be an absolute path, not {self.note_root!r}")
+        argv = ["sh", "-c", NOTE_SCRIPT, "hm-lease", op, self.note_root, self.target,
+                self.group or "", *args]
+
+        def run() -> str:
+            res = self._run(argv, timeout=self.timeout_s)
+            if res.returncode != 0:
+                raise note_error(res, what, self.host, self.target, self.note_dir)
+            return res.stdout or ""
+
+        return self._call(what, run)
+
+    def put_request(self, note: RequestNote) -> None:
+        """Leave ``req-<id>.json`` for the holder's session (atomic, at most 4 KiB)."""
+        body = encode_request(note)
+        self._notes("put", f"req-{note.id}.json", body, what="leave the request note")
+
+    def list_requests(self) -> list[RequestNote]:
+        """Every request note for the target, oldest first; prunes notes older than an hour.
+        A missing directory is no requests; an unreadable one raises."""
+        out = self._notes("list", "req-", what="list request notes")
+        notes = [n for name, data in note_lines(out, "req-") if (n := decode_request(data, name))]
+        return sorted(notes, key=lambda n: (_ts_key(n.created_at), n.id))
+
+    def delete_request(self, request_id: str) -> None:
+        """Withdraw ``req-<id>.json`` (a missing one is fine; its answer is left to pruning)."""
+        _check_name(request_id, "a request id")
+        self._notes("del", f"req-{request_id}.json", what="withdraw the request note")
+
+    def put_answer(self, note: AnswerNote) -> None:
+        """Leave ``ans-<id>.json`` (``id`` is the request's) for the requester's session."""
+        body = encode_answer(note)
+        self._notes("put", f"ans-{note.id}.json", body, what="leave the answer note")
+
+    def get_answer(self, request_id: str) -> AnswerNote | None:
+        """The answer to a request, or None (none yet, or one that is not a valid answer)."""
+        _check_name(request_id, "a request id")
+        name = f"ans-{request_id}.json"
+        out = self._notes("get", name, what="read the answer note").strip()
+        if not out:
+            return None
+        if len(out) > NOTE_MAX_BYTES:
+            log.warning("lease note %s ignored: over %d bytes", name, NOTE_MAX_BYTES)
+            return None
+        try:
+            data = json.loads(out)
+        except ValueError:
+            log.warning("lease note %s ignored: not JSON", name)
+            return None
+        return decode_answer(data, name)
 
 
 def start_share_hint(host: str, target: str, tty: str, baud: int = DEFAULT_SHARE_BAUD) -> str:
@@ -702,7 +1476,7 @@ class Mps3Hub:
         self.config = cfg
         self.host = cfg.host
         self.target = cfg.target
-        self.client = client or HubClient(cfg.host, cfg.target, group=cfg.group)
+        self.client = client or HubClient(cfg.host, cfg.target, group=cfg.group, board=cfg.board)
         SHARES.configure(cfg)
 
     def share_status(self) -> dict[str, Any]:
