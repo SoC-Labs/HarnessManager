@@ -224,6 +224,13 @@ class ShellLive:
         return _hex_id(self.raw_version.get("usercode")) if self.version_ok else ""
 
     @property
+    def name(self) -> str:
+        """The board's own name, when the harness sends the (proposed, N1) ``name`` key."""
+        from harness_manager.naming import clean_name
+
+        return clean_name(self.raw_version.get("name")) if self.version_ok else ""
+
+    @property
     def lmb_kb(self) -> int:
         return int(self.version.lmb_kb) if self.version_ok else 0
 
@@ -249,6 +256,7 @@ class ShellLive:
             harness_impl=self.impl,
             proto=self.proto,
             usercode=self.usercode,
+            name=self.name,
         )
 
 

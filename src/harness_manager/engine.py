@@ -29,6 +29,7 @@ which the lock file alone cannot (it trusts its own pid).
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 import logging
 import os
@@ -47,6 +48,7 @@ from harness_manager.core.registry import load_packs
 from harness_manager.core.services import EngineConfig
 from harness_manager.core.session import LockOwner, SessionLock
 
+from . import naming
 from .services._unavailable import UnavailableService, is_unavailable
 from .services.store import ContentStore
 from .services.telemetry import TelemetryService
@@ -214,15 +216,16 @@ class Engine:
                 if prev is None:
                     found[cand.board_id] = cand
                 else:
-                    found[cand.board_id] = Candidate(
-                        pack=prev.pack, board_id=prev.board_id,
-                        links=_merge_links(prev.links, cand.links),
-                        label=prev.label, evidence=prev.evidence,
-                        identity=prev.identity or cand.identity)
+                    name, source = naming.stronger(prev, cand)
+                    found[cand.board_id] = dataclasses.replace(
+                        prev, links=_merge_links(prev.links, cand.links),
+                        identity=prev.identity or cand.identity,
+                        name=name, name_source=source)
         result = list(found.values())
         for cand in result:
             self.bus.publish(Event("board.found", cand.board_id, {
                 "pack": cand.pack, "label": cand.label, "evidence": cand.evidence,
+                "name": cand.name, "name_source": cand.name_source,
                 "links": [_link_data(lk) for lk in cand.links]}))
         return result
 
@@ -316,6 +319,7 @@ class Engine:
             if reason:
                 available = available - {POWER_CYCLE}
                 unavailable = {**unavailable, POWER_CYCLE: reason}
+        candidate = self._named(entry, identity)
         with self._lock:
             changed = self._identities.get(board_id) != identity
             self._identities[board_id] = identity
@@ -323,8 +327,29 @@ class Engine:
             self.bus.publish(Event("board.identity", board_id, {
                 "shell_id": identity.shell_id, "rm_id": identity.rm_id,
                 "rm_name": identity.rm_name, "harness_version": identity.harness_version,
-                "features": list(identity.features)}))
-        return BoardInfo(entry.candidate, identity, health, available, unavailable)
+                "features": list(identity.features),
+                "name": candidate.name, "name_source": candidate.name_source}))
+        return BoardInfo(candidate, identity, health, available, unavailable)
+
+    def _named(self, entry: _Open, identity: BoardIdentity) -> Candidate:
+        """N1: the open board's candidate, renamed when its harness or the session (the
+        hub) gives a better name than it had (``harness_manager.naming``). Only the name
+        fields change, never board_id or links; the session sees the same candidate."""
+        cand = naming.with_identity(entry.candidate, identity)
+        board_name = getattr(entry.session, "board_name", None)
+        if callable(board_name):
+            try:
+                name, source = board_name(identity)
+            except Exception:  # noqa: BLE001 - a name is never worth failing info
+                log.exception("naming %s failed", entry.candidate.board_id)
+            else:
+                cand = naming.offer(cand, name, source)
+        if cand is not entry.candidate:
+            with self._lock:
+                entry.candidate = cand
+            if getattr(entry.session, "candidate", None) is not None:
+                entry.session.candidate = cand
+        return cand
 
     def close(self, board_id: str) -> None:
         """Close the session and release the lock. Closing a board that is not open is a no-op."""

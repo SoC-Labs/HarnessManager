@@ -15,7 +15,11 @@ fpgahub 0.3.0 CLI prints (fpgahub ``cli.py`` ``lease_*``/``share_*``):
 - ``share list``: the rich table (TTY path, TCP, Writer, Readers, Running);
 - ``share start``: ``share <tty> → 0.0.0.0:<port>``; an existing share is
   returned as it is (``TtyShareManager.start_share``);
-- ``share stop``: recorded in ``share_stops`` (tests assert it stays empty).
+- ``share stop``: recorded in ``share_stops`` (tests assert it stays empty);
+- ``board list --json`` (N1): the physical boards and their targets, the JSON
+  fpgahub 0.3.0 prints (``cli.py`` ``chassis_list`` over ``GET /groups``,
+  ``api/schemas.py`` ``GroupsResponse``): by default the target's board is the
+  target minus ``_pl`` (``grouping.chassis_of``), as on the lab hub.
 
 ``FakeShareServer`` is ``tty_share.TtyShareBroker`` in miniature: one serial
 fake (e.g. ``FakeMcc``) served on a TCP port; every byte read is broadcast to
@@ -199,6 +203,10 @@ class FakeHub:
         self.heartbeats = 0
         self.fail_with = ""                  # the next call fails with this stderr text
         self._tokens = 0
+        # N1: board -> [(target, role)], what `fpgahub board list --json` reports
+        stem, _, role = target.rpartition("_")
+        self.boards: dict[str, list[tuple[str, str | None]]] = (
+            {stem: [(target, role)]} if stem and role in ("pl", "ps", "mcc") else {target: [(target, None)]})
 
     # -- helpers for tests -----------------------------------------------------------------
 
@@ -233,6 +241,8 @@ class FakeHub:
         if argv[:1] != ["fpgahub"] or len(argv) < 3:
             return RunResult(2, "", f"Usage: fpgahub [OPTIONS] COMMAND (got {argv})")
         group, verb, rest = argv[1], argv[2], argv[3:]
+        if (group, verb) == ("board", "list"):
+            return self._board_list(rest)
         name = rest[0] if rest else ""
         if name != self.target:
             return RunResult(1, "", f"HTTP 404: no such board: {name!r}; configured: {self.target}")
@@ -297,6 +307,17 @@ class FakeHub:
             self.queue.remove(holder)
             return RunResult(0, f"cancelled board={self.target}\n", "")
         return RunResult(0, f"no matching wait to cancel board={self.target}\n", "")
+
+    def _board_list(self, rest: list[str]) -> RunResult:
+        """``fpgahub board list --json``: ``click.echo(json.dumps(GET /groups, indent=2))``."""
+        import json
+
+        groups = [{"board": board, "size": len(members), "is_paired": len(members) > 1,
+                   "members": [{"name": n, "role": r} for n, r in members]}
+                  for board, members in self.boards.items()]
+        if "--json" in rest:
+            return RunResult(0, json.dumps({"groups": groups}, indent=2) + "\n", "")
+        return RunResult(0, "".join(f"{g['board']}\n" for g in groups), "")
 
     def _share_list(self, _argv: list[str], _rest: list[str], _o: dict[str, str]) -> RunResult:
         if not self.shares:

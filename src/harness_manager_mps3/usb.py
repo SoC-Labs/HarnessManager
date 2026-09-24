@@ -45,6 +45,7 @@ Every OS call is injectable (``UsbEnv``).
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from collections.abc import Callable, MutableSequence, Sequence
@@ -341,12 +342,11 @@ def _pair_with_ethernet(usb: list[Candidate],
         return []
     if len(eth) == 1 and len(usb) == 1:
         e, u = eth[0], usb[0]
-        merged = Candidate(
-            pack="mps3", board_id=e.board_id, links=e.links + u.links,
+        merged = dataclasses.replace(
+            e, pack="mps3", links=e.links + u.links,
             label=f"{e.label} + Debug USB",
             evidence=f"{e.evidence}; {u.evidence}; paired: the only MPS3 shell on Ethernet "
-                     "and the only MPS3 on USB",
-            identity=e.identity)
+                     "and the only MPS3 on USB")
         if isinstance(already_found, MutableSequence):
             already_found.remove(e)          # superseded by the merged candidate
         return [merged]
@@ -356,8 +356,8 @@ def _pair_with_ethernet(usb: list[Candidate],
         why = (f"not paired with an Ethernet shell: {len(eth)} MPS3 shell(s) on Ethernet and "
                f"{len(usb)} on USB; which is which cannot be told until the harness reports a "
                "board serial (firmware A0)")
-    return [Candidate(pack=c.pack, board_id=c.board_id, links=c.links, label=c.label,
-                      evidence=f"{c.evidence}; {why}" if c.evidence else why) for c in usb]
+    return [dataclasses.replace(c, evidence=f"{c.evidence}; {why}" if c.evidence else why)
+            for c in usb]
 
 
 # --- console endpoints ----------------------------------------------------------------

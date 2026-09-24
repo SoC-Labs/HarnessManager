@@ -192,6 +192,13 @@ class IdentifyReply:
         return unit if isinstance(unit, str) else ""
 
     @property
+    def name(self) -> str:
+        """The board's own name (the proposed ``name`` key, N1); ``""`` in rescue or absent."""
+        from harness_manager.naming import clean_name
+
+        return "" if self.is_rescue else clean_name(self.raw.get("name"))
+
+    @property
     def shell_id(self) -> str:
         return _hex_id(self.raw.get("shell_id"))
 
@@ -270,6 +277,7 @@ class IdentifyReply:
             unit_id=self.unit,
             harness_impl=self.impl,
             proto=self.proto,
+            name=self.name,
         )
 
     def describe(self) -> str:

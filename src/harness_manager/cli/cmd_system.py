@@ -7,7 +7,7 @@ import signal
 import socket
 import time
 
-from harness_manager import __version__
+from harness_manager import __version__, naming
 from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
@@ -65,8 +65,9 @@ def cmd_probe(ctx: Ctx) -> int:
     rows, human = [], []
     for c in found:
         links = [f"{lk.kind.value}={lk.address}" for lk in c.links]
-        rows.append([c.board_id, c.pack, c.label, c.evidence, links])
-        human.append(f"{c.board_id}\t{c.label}\t{c.evidence}")
+        rows.append([c.board_id, c.pack, c.label, c.evidence, links, c.name])
+        named = f"{c.name}\t" if c.name else ""
+        human.append(f"{named}{c.board_id}\t{c.label}\t{c.evidence}")
     ctx.emit(Result("probe", {"candidates": found}, rows=rows, human=human))
     return ExitCode.OK
 
@@ -78,11 +79,13 @@ def cmd_info(ctx: Ctx) -> int:
     with ctx.board() as (cand, _session):
         info = ctx.engine.info(cand.board_id)
     ident = info.identity
-    row = [info.candidate.board_id, ident.board_type, ident.shell_id, ident.rm_id,
+    cand = info.candidate
+    row = [cand.board_id, ident.board_type, ident.shell_id, ident.rm_id,
            ident.rm_name, ident.harness_version, ident.build_check.value,
-           info.health.control_channel]
-    human = [
-        f"board      {info.candidate.label}",
+           info.health.control_channel, cand.name]
+    human = [f"name       {cand.name} ({naming.describe_source(cand)})"] if cand.name else []
+    human += [
+        f"board      {cand.label}",
         f"shell      {ident.shell_id}   harness {ident.harness_version or '?'}"
         f" ({ident.firmware_sha or '?'}{' dirty' if ident.firmware_dirty else ''})",
         f"design     {ident.rm_name or '?'} ({ident.rm_id})",

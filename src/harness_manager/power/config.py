@@ -9,6 +9,7 @@ Schema (every table is optional)::
     # The table key is the board_id, as `harness-manager probe` prints it.
     [boards."mps3@192.168.10.101:6900"]
     match = ["192.168.10.101"]        # optional: other board ids or link addresses for this board
+    name = "mps3-01"                  # optional: the board's display name (harness_manager.naming)
 
     [boards."mps3@192.168.10.101:6900".power]
     kind = "shelly_gen2"              # shelly_gen2 | tasmota | netio | ina260_mcp2221
@@ -31,6 +32,7 @@ one. Credentials in the URL itself are refused, because a URL is shown to users.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import stat
@@ -119,6 +121,7 @@ class BoardConfig:
     power_error: str = ""                      # why the power table cannot be used
     tables: Mapping[str, Any] = field(default_factory=dict)   # sysmon, estimates, ... (for packs)
     path: Path | None = None
+    name: str = ""                             # display name (N1); never used to match a board
 
     @property
     def has_power(self) -> bool:
@@ -195,9 +198,28 @@ def _board(path: Path, key: str, table: dict[str, Any]) -> BoardConfig:
             power = parse_power(table["power"], where=f"boards.{key!r}.power")
         except ConfigError as exc:
             power_error = f"{path.name}: {exc.message}"
-    others = {k: v for k, v in table.items() if k not in ("match", "power")}
+    name = _name(path, key, table.get("name", ""))
+    others = {k: v for k, v in table.items() if k not in ("match", "power", "name")}
     return BoardConfig(key=key, match=tuple(match), power=power, power_error=power_error,
-                       tables=MappingProxyType(others), path=path)
+                       tables=MappingProxyType(others), path=path, name=name)
+
+
+def _name(path: Path, key: str, raw: Any) -> str:
+    """boards.toml ``name``: a string of 1-64 printable characters (``""`` when absent).
+
+    A bad name is only a label gone wrong, so it is logged and ignored (the board shows
+    its next name, or its address) instead of failing the file: the same file routes the
+    board through its hub, and a typo in a label must not cut the board off.
+    """
+    from harness_manager.naming import MAX_NAME_LEN, clean_name
+
+    if raw == "":
+        return ""
+    name = clean_name(raw)
+    if not name:
+        log.warning("%s: boards.%r.name must be 1-%d printable characters (got %r); ignored",
+                    path, key, MAX_NAME_LEN, raw)
+    return name
 
 
 def parse_power(table: Any, *, where: str = "power") -> PowerConfig:
@@ -351,6 +373,5 @@ def with_links(candidate: Candidate, extra: Iterable[Link]) -> Candidate:
     add = tuple(lk for lk in extra if (lk.kind, lk.address) not in seen)
     if not add:
         return candidate
-    return Candidate(pack=candidate.pack, board_id=candidate.board_id,
-                     links=candidate.links + add, label=candidate.label,
-                     evidence=candidate.evidence, identity=candidate.identity)
+    # replace(), not a field-by-field copy: a copy drops every field added later (N1's name).
+    return dataclasses.replace(candidate, links=candidate.links + add)

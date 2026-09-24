@@ -7,6 +7,7 @@ import json
 import pytest
 
 from harness_manager.cli.main import main
+from harness_manager.cli.output import TSV_COLUMNS
 from harness_manager.core.errors import ExitCode, NothingOnTargetError, UsageError
 from tests.fakes.virtual_board import VirtualMps3
 
@@ -38,7 +39,8 @@ def test_info_json_reports_fielded_identity(vboard: VirtualMps3, capsys):
 def test_info_tsv_columns_are_stable(vboard: VirtualMps3, capsys):
     rc, out, _ = run_cli(capsys, "--tsv", "info", vboard.shell_endpoint)
     cols = out.rstrip("\n").split("\t")
-    assert rc == ExitCode.OK and len(cols) == 8
+    # The first 8 columns are pinned; later ones are appended (N1 added NAME).
+    assert rc == ExitCode.OK and len(cols) == len(TSV_COLUMNS["info"]) >= 8
     assert cols[1] == "mps3" and cols[6] == "unchecked" and cols[7] == "idle"
 
 

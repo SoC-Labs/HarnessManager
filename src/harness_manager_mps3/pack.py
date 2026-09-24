@@ -23,6 +23,8 @@ factory in its own module, and this file wires it in if it exists:
 | ``.tunnel:probe_reach(spec, via, ...)``        | L1   | a short tunnel for a probe (control port only) |
 | ``.hub:make_hub_adapter(session)``             | L1   | ``Mps3Hub`` (leases, shares) when the board has a hub |
 | ``.hub:relay_share_consoles(endpoints, cand)`` | L1   | the endpoints, each ``hub://`` share as a ``tcp://`` relay |
+| ``.naming:name_candidate(candidate)``          | N1   | the candidate with its display name (boards.toml, harness, hub table) |
+| ``.naming:session_board_name(session, ident)`` | N1   | ``(name, source)``: the hub's confirmed name for an open board |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -80,6 +82,12 @@ def _with_config_links(candidate: Candidate) -> Candidate:
     """Add the links boards.toml gives this board (a power meter, a SYSMON JTAG cable)."""
     add = _hook("telemetry", "with_config_links")   # T9
     return add(candidate) if add is not None else candidate
+
+
+def _named(candidate: Candidate) -> Candidate:
+    """Give the candidate its display name (N1: boards.toml, its harness, its hub table)."""
+    name = _hook("naming", "name_candidate")   # N1
+    return name(candidate) if name is not None else candidate
 
 
 def _route(candidate: Candidate, via: str = "") -> Candidate:
@@ -204,6 +212,11 @@ class Mps3Session(BoardSession):
     def link(self, kind: LinkKind) -> Link | None:
         return next((lk for lk in self.candidate.links if lk.kind == kind), None)
 
+    def board_name(self, identity: BoardIdentity | None = None) -> tuple[str, str]:
+        """``(name, source)`` for the open board beyond its candidate: the hub's name (N1)."""
+        name = _hook("naming", "session_board_name")
+        return name(self, identity) if name is not None else ("", "")
+
     def identity(self) -> BoardIdentity:
         if self.shell is None:
             return BoardIdentity(board_type="mps3")
@@ -285,13 +298,13 @@ class Mps3Pack(BoardPack):
         ``via`` does the same when it is not given."""
         host, port = parse_endpoint(spec, CONTROL_PORT)
         addr = f"{host}:{port}"
-        return _route(_with_config_links(Candidate(
+        return _named(_route(_with_config_links(Candidate(
             pack=self.name,
             board_id=f"mps3@{addr}",
             links=(Link(LinkKind.ETHERNET, addr, "shell control channel"),),
             label=f"MPS3 at {addr}",
             evidence="given explicitly",
-        )), via)
+        )), via))
 
     def hub_for(self, candidate: Candidate) -> Any:
         """The board's hub adapter (leases, shares) without opening it; None without a hub (L1)."""
@@ -341,7 +354,7 @@ class Mps3Pack(BoardPack):
             # A USB board paired with an Ethernet shell replaces that shell's candidate.
             ids = {c.board_id for c in usb_found}
             found = [c for c in found if c.board_id not in ids] + list(usb_found)
-        return [_with_config_links(c) for c in found]
+        return [_named(_with_config_links(c)) for c in found]
 
     def open(self, candidate: Candidate) -> Mps3Session:
         eth = next((lk for lk in candidate.links if lk.kind == LinkKind.ETHERNET), None)

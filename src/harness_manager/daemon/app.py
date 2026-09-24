@@ -18,6 +18,7 @@ first; the bare ``/boards/{bid}`` routes come last.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hmac
 import importlib
 import importlib.util
@@ -692,8 +693,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                           for s in _strings(b, "serial")) + tuple(
                 Link(LinkKind.USB_MSD, v, "given with volume") for v in _strings(b, "volume"))
             if extra:
-                cand = Candidate(pack=cand.pack, board_id=cand.board_id, links=cand.links + extra,
-                                 label=cand.label, evidence=cand.evidence, identity=cand.identity)
+                cand = dataclasses.replace(cand, links=cand.links + extra)   # keeps the name (N1)
         else:
             raise UsageError("opening a board needs a target or a candidate",
                              hint='{"target": "192.168.10.101"}, or a candidate from POST /probe')

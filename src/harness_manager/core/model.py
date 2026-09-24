@@ -84,6 +84,7 @@ class BoardIdentity:
     harness_impl: str = ""     # "bare-metal" | "linux" | "" (unknown: harness predates `version`)
     proto: str = ""            # net-protocol version the harness speaks, when it says
     usercode: str = ""         # implementation-run identity (static_usercode), when it says
+    name: str = ""             # the board's own name, when the harness reports one (CCR N1-1)
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,12 @@ class Candidate:
     label: str = ""            # what the selection dialog shows
     evidence: str = ""         # how it was found ("answered ping", "FT4232H 0403:6011")
     identity: BoardIdentity | None = None   # what the board said while being probed, if anything
+    # CCR N1-1: the board's display name ("mps3-01") and where it came from:
+    # "config" (boards.toml name) | "harness" | "hub" | "hub-target" | "" (no name: show
+    # the address). Display only: a name never keys anything (board_id does).
+    # harness_manager.naming holds the resolution order.
+    name: str = ""
+    name_source: str = ""
 
 
 @dataclass(frozen=True)
