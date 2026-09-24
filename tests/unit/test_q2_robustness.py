@@ -866,3 +866,20 @@ def test_reboot_is_accepted_at_once_while_an_mcc_read_is_in_flight(tmp_path, mon
                     assert j["phases"] == ["sent", "down", "up"]
         finally:
             eng.close_all()
+
+
+def test_uvicorn_websocket_chatter_is_dropped_but_its_warnings_are_not():
+    from harness_manager.daemon.server import QuietWebSocketChatter
+
+    flt = QuietWebSocketChatter()
+
+    def rec(name: str, level: int, msg: str) -> logging.LogRecord:
+        return logging.LogRecord(name, level, __file__, 1, msg, (), None)
+
+    assert not flt.filter(rec("uvicorn.error", logging.INFO, "connection open"))
+    assert not flt.filter(rec("uvicorn.error", logging.INFO, "connection closed"))
+    # twins: the accepted line (it has the path), a warning, and our own loggers pass
+    assert flt.filter(rec("uvicorn.error", logging.INFO,
+                          '127.0.0.1:1 - "WebSocket /api/v1/events?token=***" [accepted]'))
+    assert flt.filter(rec("uvicorn.error", logging.WARNING, "connection closed"))
+    assert flt.filter(rec("harness_manager.daemon", logging.INFO, "connection open"))

@@ -63,13 +63,34 @@ class RedactToken(logging.Filter):
         return True
 
 
+class QuietWebSocketChatter(logging.Filter):
+    """Drop uvicorn's bare "connection open"/"connection closed" INFO lines.
+
+    They were 40 % of daemon.log in the Q2 soak (one pair per WebSocket, and the UI
+    reconnects), and say nothing the "WebSocket <path> [accepted]" line before them
+    does not. Warnings and errors from the same logger still pass.
+    """
+
+    _CHATTER = frozenset({"connection open", "connection closed"})
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno > logging.INFO or record.name != "uvicorn.error":
+            return True
+        try:
+            return record.getMessage() not in self._CHATTER
+        except Exception:  # noqa: BLE001 - a malformed record is not ours to fix
+            return True
+
+
 def install_redaction() -> None:
     flt = RedactToken()
+    quiet = QuietWebSocketChatter()
     for name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "harness_manager"):
         logger = logging.getLogger(name)
         logger.addFilter(flt)
         for handler in logger.handlers:
             handler.addFilter(flt)
+            handler.addFilter(quiet)
 
 
 def new_token() -> str:
