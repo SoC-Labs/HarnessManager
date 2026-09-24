@@ -19,7 +19,6 @@ import pytest
 from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB, DemoEngine
 from tests.fakes.l3_week_plan import EXTENSION_ROUTES
 from tests.fakes.t14_api_contract import (
-    api_md_endpoints,
     api_md_sections,
     app_routes,
     daemon_routes,

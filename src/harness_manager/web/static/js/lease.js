@@ -14,9 +14,9 @@
 // answer's at + minutes), never to a timer this page started.
 
 import { gateReason, interlock, panelState, runAction, runJob } from "./actions.js";
-import { call } from "./api.js";
+import { call, routeMissing } from "./api.js";
 import { clock, hostOf } from "./format.js";
-import { html, useEffect, useRef, useState } from "./lib.js";
+import { html, useLayoutEffect, useRef, useState } from "./lib.js";
 import { changed, log, onBoardEvent, S } from "./store.js";
 import { epochOf, loadHub, onHubLoaded, scheduleHub, week } from "./week.js";
 import { Icon, Reason, ResultBlock, Spinner } from "./ui.js";
@@ -127,14 +127,21 @@ function requestSpec(bid, message) {
     budgetS: 7200,           // a queue may wait for hours: past this the panel only notes it
     command: `lease request ${target}${message ? ` --message ${shellQuote(message)}` : ""}`,
     run: async (ctx) => {
+      const onProgress = (d) => ctx.progress(
+        (PHASE_TEXT[d.phase] || (() => d.phase || "waiting"))(d), d.phase);
       try {
-        return await runJob("leaseRequest", { bid }, message ? { message } : {}, (d) => ctx.progress(
-          (PHASE_TEXT[d.phase] || (() => d.phase || "waiting"))(d), d.phase), "lease_request");
+        return await runJob("leaseRequest", { bid }, message ? { message } : {}, onProgress,
+          "lease_request");
       } catch (e) {
         if (L.leaving.has(bid)) return { left: true };        // we withdrew it: not a failure
-        throw e;
+        if (!routeMissing(e)) throw e;
+        // A daemon from before lease requests (LR-C): queue plainly, as "Queue for it" did.
+        ctx.progress("this harness-manager-daemon has no lease requests: queued without asking the holder", "fallback");
+        return await runJob("leaseTake", { bid }, {}, onProgress, "lease");
       } finally {
         L.leaving.delete(bid);
+        const w = week(bid);
+        w.leaseQueued = false;
       }
     },
     render: (r) => {
@@ -164,6 +171,11 @@ function sendRequest() {
     return;
   }
   runAction(bid, "lease_req", spec);
+  // The Request board button is gone now: keyboard focus goes to the bar's first action.
+  setTimeout(() => {
+    const next = document.querySelector('[data-testid="lease-request"] [data-action="lease_leave"]');
+    if (next) next.focus();
+  }, 80);
 }
 
 function leaveSpec(bid) {
@@ -176,6 +188,11 @@ function leaveSpec(bid) {
       try {
         return (await call("leaseLeave", { bid })).data;
       } catch (e) {
+        if (routeMissing(e)) {
+          // A daemon from before lease requests: DELETE /lease cancels a queued acquire.
+          const r = (await call("leaseRelease", { bid })).data;
+          return { left: !!(r && r.cancelled) };
+        }
         L.leaving.delete(bid);
         throw e;
       }
@@ -482,12 +499,14 @@ function TakenBanner({ bid }) {
 
 // Escape closes; Tab stays inside the dialog; the [data-autofocus] element takes focus on
 // open (the autofocus attribute works once per document, not for a dialog added later).
+// Layout effects: both are in place as soon as the dialog is in the DOM, so a key pressed
+// right after the click that opened it is never lost.
 function useDialogKeys(ref, onEscape) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const first = ref.current && ref.current.querySelector("[data-autofocus]");
     if (first) first.focus();
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") { e.preventDefault(); onEscape(); return; }
       if (e.key !== "Tab" || !ref.current) return;
@@ -593,6 +612,7 @@ onBoardEvent((ev) => {
     const have = (w.hub.incoming || []).some((n) => n.id === d.id);
     if (!have) w.hub = { ...w.hub, incoming: [...(w.hub.incoming || []), { ...d }] };
   }
+  if (ev.topic === "lease.left") w.leaseQueued = false;
   if (ev.topic === "lease.taken") {
     if (w.hub) w.hub = { ...w.hub, taken: { ...d } };
     noteTaken(bid, d);

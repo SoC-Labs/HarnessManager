@@ -540,18 +540,28 @@ def test_someone_elses_lease_and_a_dead_tunnel_need_attention(page_factory, daem
     expect(page.locator('[data-attention="lease"]')).to_contain_text("Leased to alice@lab-pc-07")
 
 
+def queue_for_it(page):
+    """Someone else holds the lease: "Request board" (lane LR-D, docs/LEASE_REQUESTS.md; it
+    replaced "Queue for it") queues this client behind them as a lease_request job."""
+    page.locator('[data-testid="fact-hub"] [data-action="lease_request_open"]').click()
+    page.locator('[data-testid="lease-request-form"] [data-action="lease_request"]').click()
+    expect(page.locator('[data-testid="lease-requested"]')).to_be_visible(timeout=T)
+
+
+LEAVE_QUEUE = '[data-testid="lease-request"] [data-action="lease_leave"]'
+
+
 @pytest.mark.week_plan("hub_api", sim=True)
 def test_a_queued_lease_holds_the_board_and_can_be_cancelled(page_factory, daemon, engine):
     sim_of(daemon).behind_hub(BOARD_USB, lease="other")
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
-    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
-    expect(page.locator('[data-testid="lease-queued"]')).to_be_visible(timeout=T)
+    queue_for_it(page)
     # While it queues the board is held: a DUT reset waits and says why.
     tile = page.locator('[data-testid="tile-board"]')
     expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("waiting for the hub lease")
-    page.locator('[data-testid="fact-hub"] [data-action="lease_cancel"]').click()
-    expect(page.locator('[data-testid="fact-hub"] [data-action="lease_cancel"]')).to_have_count(0, timeout=T)
+    page.locator(LEAVE_QUEUE).click()
+    expect(page.locator('[data-testid="lease-requested"]')).to_have_count(0, timeout=T)
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to alice@lab-pc-07")
     expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("not armed")
     assert not engine.called("resets.reset")
@@ -592,8 +602,7 @@ def test_a_boards_list_asked_before_a_job_started_does_not_end_it(page_factory, 
     while not stale and time.monotonic() < deadline:
         page.wait_for_timeout(50)
     assert stale, "the page did not ask for the boards list after the board opened"
-    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
-    expect(page.locator('[data-testid="lease-queued"]')).to_be_visible(timeout=T)
+    queue_for_it(page)
     tile = page.locator('[data-testid="tile-board"]')
     reason = tile.locator('[data-testid="reason-reset_dut"]')
     expect(reason).to_contain_text("waiting for the hub lease", timeout=T)
@@ -647,12 +656,11 @@ def test_negative_twin_a_newer_list_ends_a_job_whose_end_the_page_missed(page_fa
     page.reload()
     open_board(page, BOARD_USB)
     assert sockets, "the events socket did not go through the relay"
-    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
-    expect(page.locator('[data-testid="lease-queued"]')).to_be_visible(timeout=T)
+    queue_for_it(page)
     reason = page.locator('[data-testid="tile-board"] [data-testid="reason-reset_dut"]')
     expect(reason).to_contain_text("waiting for the hub lease", timeout=T)
     missed["on"] = True
-    page.locator('[data-testid="fact-hub"] [data-action="lease_cancel"]').click()
+    page.locator(LEAVE_QUEUE).click()
     deadline = time.monotonic() + 10
     while not missed["dropped"] and time.monotonic() < deadline:
         page.wait_for_timeout(50)
