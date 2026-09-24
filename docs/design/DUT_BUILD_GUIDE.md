@@ -33,7 +33,7 @@ david asked: "how we should provide xdc's and the dcp used for building the DUT 
 | Licence | A licence that covers the KU115, which is probably Vivado ML **Enterprise** (the lab's floating server). DFX itself needs no separate licence in 2024.1. | Not detectable without running synth: the failure is `[Common 17-345] A valid license was not found`. The guide shows this as *unchecked*, and the script's `part_installed` gate only proves the device files exist. **Verify** that KU115 is outside the free ML Standard list. |
 | OS | Linux or Windows (the script uses no `exec`, no python and no shell) | template design |
 | RAM | ~3 GB to open the static and link it (KIT-STORE's measurement: `open_checkpoint` peak 2.78 GB, 57 s). Plan for 8 GB for a nanoSoC-sized RM. | KIT-STORE spike log; mint timings |
-| Disk | The kit is ~10 MB (`static_routed_locked.dcp` 10,152,801 B), plus ~11 MB if a pr_verify reference is shipped (§3.3). One build writes 20–40 MB. The Vivado install with UltraScale is tens of GB. | `fielded/0x72BB0A36/mint.json` |
+| Disk | The kit is ~10 MB (`static_routed_locked.dcp` 10,152,801 B). It needs no second, reference DCP (§3.3). One build writes 20–40 MB. The Vivado install with UltraScale is tens of GB. | `fielded/0x72BB0A36/mint.json` |
 | Time | 10–20 min per small RM, and ~20 min for nanoSoC, at the mint's thread count on this box | `mint.json` routed-DCP timestamps (greybox 13:55, regdemo_a 14:10, regdemo_b 14:23, led 14:35) |
 
 ### 1.2 The steps
@@ -127,7 +127,11 @@ The platform compares against `config_rm_greybox_routed.dcp` (`Makefile:546`). T
 
 **KIT-STORE's spike (b2) answered the positive case.** `pr_verify static_routed_locked.dcp config_rm_led_routed.dcp` reports `[Vivado 12-3253] … are compatible`, just as the flow's own greybox-vs-led pair does; that pair took 99 s. So the kit can be a single DCP.
 
-This lane ran the negative: the locked 0x72BB0A36 static against a routed config of **another** static (0x3F1A560F's led). The result is in §9. It decides whether the locked-static reference also *refuses* the wrong static, and that is what D2 turns on.
+**KIT-STORE's negative settled the rest.** It compared the locked 0x3F1A560F static with a routed config of 0xA8C1C535:
+- Vivado reports `[Constraints 18-891] HDPRVerify-08: … places instance u_shell/…/BUFG_DRCK … at site BUFGCE_X1Y118, yet … does not`, then `[Vivado 12-3515] … are not compatible`;
+- `pr_verify` itself raises `[Common 17-39] 'pr_verify' failed due to earlier errors`.
+
+So the locked static both accepts the right static and refuses a wrong one. **The kit needs one DCP** (D2). The template's `pr_verify` gate treats a Tcl error or "not compatible" as FAIL, and needs "are compatible" to pass. (This lane had queued the same negative on 0x72BB0A36 and cancelled it, so as not to load the DCP twice.)
 
 ### 3.4 The receipt (`<rm>_build.json`, schema `harness-manager-rm-build` v1)
 
@@ -311,7 +315,7 @@ A board pack opts in with one hook, `pack.dut_build_profile(static_id) -> BuildP
 3. CI (GitHub runners). There is no Vivado or licence there. Not viable.
 
 **D2. The `pr_verify` reference.**
-1. *(recommended if the spike shows it works)* The locked static itself: the kit is one DCP.
+1. *(recommended; KIT-STORE's spikes show it accepts the right static and refuses the wrong one)* The locked static itself: the kit is one DCP.
 2. Ship `config_rm_greybox_routed.dcp` as well (+11 MB), as the platform does.
 3. Skip `pr_verify` for users and trust the link. Not recommended: it is the only Vivado-side proof that the static in the build is the fielded one.
 
