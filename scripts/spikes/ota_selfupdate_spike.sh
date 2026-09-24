@@ -18,7 +18,9 @@
 #
 # Lane OTA-L re-ran it on its layout: the pointer, the versions and install.json live in the
 # install root ($HARNESS_MANAGER_HOME), the installer puts uv in its venv, and rollback right
-# after the first switch returns to the installer's 0.1.0 (it was exit 15).
+# after the first switch returns to the installer's 0.1.0 (it was exit 15). Its run:
+# docs/design/evidence/ota_l_spike_2026-09-24.log (ports 29415-29417, outside the ephemeral
+# range, so a parallel test suite cannot take them).
 #
 # Needs: python3.11 (for the tools venv), network to PyPI (uv, the dependencies).
 # Isolation: HOME, XDG dirs, the state dir, the PTY dir and every port are the spike's own
@@ -27,7 +29,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 W="$(cd "$here/../.." && pwd)"
 export OTA="${1:-/tmp/ota-spike}"
-[[ "$OTA" == /tmp/ota-* ]] || { echo "OTA_DIR must be /tmp/ota-*" >&2; exit 2; }
+[[ "$OTA" == /tmp/ota-* || "$OTA" == /tmp/otal-* ]] || { echo "OTA_DIR must be /tmp/ota-* or /tmp/otal-*" >&2; exit 2; }
 # shellcheck source=ota_env.sh
 . "$here/ota_env.sh"
 mkdir -p "$OTA/logs" "$OTA/www"
@@ -48,7 +50,8 @@ if [[ ! -x "$OTA/tools/bin/uv" ]]; then
     $N "$OTA/tools/bin/pip" install -q --disable-pip-version-check "uv==0.8.0" cryptography
 fi
 "$OTA/tools/bin/uv" --version
-REL="$N env PYTHONPATH=$W/src $OTA/tools/bin/python $here/ota_release.py"
+# the release tool uses the spike's own uv; the installed Harness Manager uses its venv's (M5)
+REL="$N env PYTHONPATH=$W/src HARNESS_MANAGER_UV=$OTA_UV $OTA/tools/bin/python $here/ota_release.py"
 
 step "release: a throwaway key, three pinned source copies, three wheels, one hashed lock"
 [[ -f "$OTA/keys/release.seed" ]] || $REL keygen "$OTA/keys"

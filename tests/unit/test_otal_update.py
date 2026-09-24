@@ -217,8 +217,9 @@ def test_negative_twin_no_extras_no_lock_no_brackets(tmp_path):
 # --- the policy file (U6) -----------------------------------------------------------------------
 
 def test_policy_paths_per_os():
-    assert str(policy_path("linux", {})) == "/etc/harness-manager/policy.toml"
-    assert str(policy_path("darwin", {})).startswith("/Library/Application Support/harness-manager")
+    assert policy_path("linux", {}).as_posix() == "/etc/harness-manager/policy.toml"
+    assert policy_path("darwin", {}).as_posix() == \
+        "/Library/Application Support/harness-manager/policy.toml"
     win = policy_path("win32", {"ProgramData": r"D:\PD"})
     assert win.parts[-2:] == ("harness-manager", "policy.toml") and str(win).startswith("D:")
 

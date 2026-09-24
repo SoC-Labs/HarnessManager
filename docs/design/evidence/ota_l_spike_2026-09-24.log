@@ -1,0 +1,87 @@
+
+=== tools: uv + cryptography in a throwaway venv
+uv 0.8.0
+
+=== release: a throwaway key, three pinned source copies, three wheels, one hashed lock
+key B3BFFC78CE83B7B6 -> /tmp/otal-spike2/keys
+lock /tmp/otal-spike2/lock.txt (22 packages)
+
+=== serve the channel on 127.0.0.1:29415 (serial 1: 0.1.1 WITHOUT a lock)
+published stable serial 1: app ['0.1.1', '0.1.0'] -> /tmp/otal-spike2/www/channel/stable/channel.json
+
+=== install 0.1.0 with the real installer (no uv on PATH here: it uses venv + pip)
+venv     /tmp/otal-spike2/home/.local/share/harness-manager/venv (3.12.14)
+install  /tmp/otal-spike2/dist-v1/harness_manager-0.1.0-py3-none-any.whl [serial]
+command  /tmp/otal-spike2/home/.local/bin/harness-manager
+menu     /tmp/otal-spike2/home/.local/share/applications/harness-manager.desktop
+Harness Manager 0.1.0 is installed.
+uv in the venv (M5): /tmp/otal-spike2/home/.local/share/harness-manager/venv/bin/uv
+install.json {'version': '0.1.0', 'extras': ['serial'], 'uv': '/tmp/otal-spike2/home/.local/share/harness-manager/venv/bin/uv'}
+pointer   current (installer venv)  previous (installer venv)
+started    harness-manager-daemon (pid 2208896) at http://127.0.0.1:29417
+{"ok":true,"version":"0.1.0","service":"harness-manager-daemon","pid":2208896}
+channel    stable serial 1, signed by B3BFFC78CE83B7B6 (harness-release)
+app        current 0.1.1, running 0.1.0: UPDATE to 0.1.1 (`harness-manager update app`)
+
+=== hold a board lock from a live process (a stand-in for a running CLI deploy)
+holding /tmp/otal-spike2/home/.config/harness-manager/locks/ota-board-1.lock
+
+=== update app, serial 1 (no lock file): expect a failed stage
+harness-manager: building harness-manager 0.1.1 failed at `/tmp/otal-spike2/home/.local/share/harness-manager/venv/bin/uv pip install …`:          And because only harness-manager==0.1.1 is available and you require harness-manager, we can conclude that your requirements are unsatisfiable. — the running version is untouched; retry, or report the release
+rc=6
+
+=== serial 2 adds the hashed lock: stage works, the held lock refuses the switch
+harness-manager: cannot switch to 0.1.1 now: ota-board-1 is in use by dam1n19 on srv03335 (pid 2208999, 5s): ota spike: a long deploy — finish or close those sessions first; the new version stays staged
+rc=4
+pointer   current (installer venv)  previous (installer venv)
+harness-manager   0.1.1
+mps3-pyverify     0.1.0
+pyserial          3.5
+scripts/spikes/ota_selfupdate_spike.sh: line 108: 2208999 Terminated              "$HARNESS_MANAGER_HOME/venv/bin/python" "$here/ota_hold_lock.py" ota-board-1 600 > "$OTA/logs/holdlock.log" 2>&1
+
+=== the daemon path: a 25 s job runs; POST /update/app is refused; after it, it switches
+{"ok":true,"job":"073abee63b8e"}
+{"ok":false,"error":{"code":4,"name":"HELD","message":"cannot update the app while update_check job 073abee63b8e runs in the service","hint":"wait for it to fin
+job done switched True
+pointer   current 0.1.1  previous (installer venv)
+daemon still runs: {"ok":true,"version":"0.1.0","service":"harness-manager-daemon","pid":2208896}
+the command now runs: 0.1.1
+
+=== restart by hand through the launcher
+stopped    harness-manager-daemon (/tmp/otal-spike2/home/.config/harness-manager)
+started    harness-manager-daemon (pid 2215464) at http://127.0.0.1:29417
+{"ok":true,"version":"0.1.1","service":"harness-manager-daemon","pid":2215464}
+switched   harness-manager 0.1.0 (installed) is current again (from the next start)
+rollback right after the first switch: rc=0
+pointer   current (installer venv)  previous 0.1.1
+the command now runs: 0.1.0
+switched   harness-manager 0.1.1 is current again (from the next start)
+and forward again: rc=0
+pointer   current 0.1.1  previous (installer venv)
+the command now runs: 0.1.1
+
+=== serial 3: 0.1.2 (its daemon cannot start); switch; the restart prototype rolls back
+switched   yes: it runs from the next start
+pointer   current 0.1.2  previous 0.1.1
+stop      rc=0 stopped    harness-manager-daemon (/tmp/otal-spike2/home/.config/harness-manager)
+start     0.1.2: FAILED: start exited 6: harness-manager: harness-manager-daemon exited while starting (exit code 1) — /tmp/otal-spike2/home/.config/harness-manager/daemon.log: 2026-09-24 22:18:41,113
+rollback  pointer back to 0.1.1 (previous 0.1.2)
+start     0.1.1: OK: /health ok, version 0.1.1, pid 2217118
+result    rolled-back in 3.6s
+pointer   current 0.1.1  previous 0.1.2
+{"ok":true,"version":"0.1.1","service":"harness-manager-daemon","pid":2217118}
+app        current 0.1.2, running 0.1.1: UPDATE to 0.1.2 (`harness-manager update app`)
+
+=== back to 0.1.0: from signed history, then rollback, then a cleared pointer
+switched   yes: it runs from the next start
+result    restarted on 0.1.0 in 6.6s, same port 29417
+{"ok":true,"version":"0.1.0","service":"harness-manager-daemon","pid":2218668}
+switched   harness-manager 0.1.1 is current again (from the next start)
+result    restarted on 0.1.1 in 2.4s, same port 29417
+{"ok":true,"version":"0.1.1","service":"harness-manager-daemon","pid":2219497}
+pointer   current (installer venv)  previous 0.1.1
+result    restarted on  in 1.9s, same port 29417
+{"ok":true,"version":"0.1.0","service":"harness-manager-daemon","pid":2219904}
+
+=== done: stopping the spike's daemon and servers
+EXIT 0

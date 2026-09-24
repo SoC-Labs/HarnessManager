@@ -152,11 +152,12 @@ def test_negative_twin_the_installer_version_runs(tmp_path, case):
 
 def test_posix_execs_the_target_python_with_the_same_arguments(tmp_path):
     seen = []
-    L.run_there(Path("/v/bin/python"), ["update", "check", "--json"], windows=False,
+    py = Path("/v/bin/python")
+    L.run_there(py, ["update", "check", "--json"], windows=False,
                 execv=lambda path, argv: seen.append((path, argv)))
     path, argv = seen[0]
-    assert path == "/v/bin/python"
-    assert argv == ["/v/bin/python", "-c", L.BOOT, "update", "check", "--json"]
+    assert path == str(py)
+    assert argv == [str(py), "-c", L.BOOT, "update", "check", "--json"]
 
 
 def test_windows_runs_a_child_and_passes_its_exit_code(tmp_path):
@@ -181,9 +182,10 @@ def test_negative_twin_an_unrunnable_target_falls_back_to_the_installed_version(
         monkeypatch, capsys):
     ran = []
     monkeypatch.setattr(L, "run_here", lambda args: ran.append(args) or 3)
-    assert L.run_there(Path("/gone/bin/python"), ["version"], windows=False, execv=_raise) == 3
+    gone = Path("/gone/bin/python")
+    assert L.run_there(gone, ["version"], windows=False, execv=_raise) == 3
     assert ran == [["version"]]
-    assert "cannot run /gone/bin/python" in capsys.readouterr().err
+    assert f"cannot run {gone}" in capsys.readouterr().err
 
     def call_raises(argv):
         raise OSError(2, "No such file")
