@@ -688,3 +688,29 @@ def test_negative_twin_a_console_that_connects_returns_what_it_read(capsys, tmp_
     out, _ = capsys.readouterr()
     assert rc == 0, out
     assert "nanosoc boot" in json.loads(out)["text"]
+
+
+# --- MCC reads over a hub share, back to back (finding for the LR lanes: hub.py) --------------
+
+
+@pytest.mark.xfail(strict=False, reason="Q2 finding (a race, so not strict): open_hub_share "
+                   "decides read-only from "
+                   "`share list` readers, which still counts OUR previous connection for a few "
+                   "ms after it closed; the next MCC read is refused as 'another client holds "
+                   "the write slot'. hub.py is the LR lanes'; the fix is in Q2_ROBUSTNESS.md.")
+def test_back_to_back_mcc_reads_over_a_hub_share_both_work(tmp_path, monkeypatch):
+    from harness_manager.core.services import EngineConfig
+    from tests.fakes.l1_rig import BOARD_IP, lab
+    from tests.fakes.virtual_board import VirtualMps3
+
+    state = tmp_path / "state"
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state):
+        eng = Engine(EngineConfig(state_dir=state))
+        try:
+            s = eng.open(eng.candidate_for(BOARD_IP))
+            first = s.controller.temperatures()[0]
+            second = s.controller.oscillators()[0]           # at once, as telemetry does
+            assert first.value is not None, first.reason
+            assert second.value is not None, second.reason   # was: "... holds the write slot"
+        finally:
+            eng.close_all()
