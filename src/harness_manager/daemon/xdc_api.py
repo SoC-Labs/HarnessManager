@@ -18,9 +18,9 @@ daemon's filesystem is not the caller's).
 - Otherwise a failed check is 409 REFUSED with ``error.data.checks`` (every finding).
 - ``format: "zip"`` answers ``application/zip`` (the files plus ``manifest.json``).
 
-None of these routes touches the board: the board routes read only the static id the
-board reported when it was probed (``candidate.identity``), so they take no board gate
-and are never 409 HELD.
+The kits come from the pin model, never from the board. The board routes need one fact
+from it, the static it runs: the identity it reported when probed, else one identity
+read under the board gate (409 HELD while a job runs on the board).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from typing import Any
 
 from fastapi.responses import Response
 
-from harness_manager.core.errors import UsageError
+from harness_manager.core.errors import HarnessError, UsageError
 from harness_manager.services import xdc
 from harness_manager.services.xdc.kits import Finding, same_static
 
@@ -71,15 +71,25 @@ def _answer(kit: xdc.Kit, preview: bool, fmt: str) -> Any:
     return _JSON(ok(**kit.to_json()))
 
 
-def board_static(session: Any, model: xdc.PinModel) -> dict[str, Any]:
-    """What static the board runs, as it said when probed, against the model's shell."""
+def running_static(session: Any, read: Any = None) -> tuple[str, str]:
+    """The static the board runs: what it said when probed, else one identity read."""
     cand = getattr(session, "candidate", None)
     ident = getattr(cand, "identity", None)
     running = str(getattr(ident, "shell_id", "") or "")
+    if running or read is None:
+        return running, "" if running else "the board did not report its static when probed"
+    try:
+        running = str(getattr(read(), "shell_id", "") or "")
+    except HarnessError as exc:
+        return "", f"the board's identity could not be read: {exc.message}"
+    return running, "" if running else "the board does not report its static"
+
+
+def board_static(running: str, why: str, model: xdc.PinModel) -> dict[str, Any]:
+    """The board's static against the model's shell."""
     target = model.default_shell
     if not running:
-        return {"static_id": None, "model_static_id": target, "matches": None,
-                "reason": "the board did not report its static when it was probed"}
+        return {"static_id": None, "model_static_id": target, "matches": None, "reason": why}
     match = same_static(running, target)
     return {"static_id": running, "model_static_id": target, "matches": match,
             "reason": "" if match else
@@ -108,12 +118,18 @@ def register(ctx: RouteContext) -> None:
         cand = getattr(session, "candidate", None)
         return str(getattr(cand, "pack", "") or "mps3")
 
+    def static_of(bid: str, s: Any, model: xdc.PinModel) -> dict[str, Any]:
+        def read() -> Any:
+            with ctx.daemon.gates.op(bid):       # 409 HELD while a job runs on the board
+                return s.identity()
+        return board_static(*running_static(s, read), model)
+
     @api.get("/boards/{bid:path}/xdc")
     def board_xdc(bid: str) -> Any:
         s = ctx.board(bid)
         pins = xdc.load_pack_pins(pack_of(s))
         cat = xdc.catalogue(pins.pack, pins=pins)
-        return _JSON(ok(**cat, board=board_static(s, pins.model), board_id=bid))
+        return _JSON(ok(**cat, board=static_of(bid, s, pins.model), board_id=bid))
 
     @api.post("/boards/{bid:path}/xdc/export")
     def board_xdc_export(bid: str, body: JsonBody = None) -> Any:
@@ -122,7 +138,7 @@ def register(ctx: RouteContext) -> None:
         kit_name, design, preview, fmt, sid = _request(body)
         pins = xdc.load_pack_pins(pack_of(s))
         kit = xdc.export(pins.pack, kit_name, design, static_id=sid, pins=pins)
-        st = board_static(s, pins.model)
+        st = static_of(bid, s, pins.model)
         if kit_name == "rm-kit" and st["matches"] is False and \
                 same_static(kit.design.get("static_id", ""), pins.model.default_shell):
             kit.findings.append(Finding(
