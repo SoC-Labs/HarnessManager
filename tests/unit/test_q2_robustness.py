@@ -714,3 +714,45 @@ def test_back_to_back_mcc_reads_over_a_hub_share_both_work(tmp_path, monkeypatch
             assert second.value is not None, second.reason   # was: "... holds the write slot"
         finally:
             eng.close_all()
+
+
+# --- the lease heartbeat thread (finding for the LR lanes: services/lease.py) ------------------
+
+
+@pytest.mark.xfail(strict=False, reason="Q2 finding: LeaseService.beat_due says it never raises "
+                   "but catches only HarnessError; one OSError (a full disk on store.put) ends "
+                   "the heartbeat thread for good and the lease lapses with no lease.state "
+                   "event. services/lease.py is the LR lanes'; not strict so their fix does not "
+                   "break the merge; remove the mark with it.")
+def test_the_lease_heartbeat_survives_one_failed_round(tmp_path):
+    from harness_manager.services.lease import LeaseService, StoredLease
+
+    class Client:
+        beats = 0
+
+        def lease_heartbeat(self, token: str, holder: str) -> str:
+            Client.beats += 1
+            return "2026-09-25T12:00:00+00:00"
+
+    class Hub:
+        host, target, client = "hub.invalid", "mps3_01_pl", Client()
+
+    svc = LeaseService(tmp_path, tick_s=0.02, heartbeat_s=0.05)
+    svc.store.put(StoredLease(hub=Hub.host, target=Hub.target, holder="me", token="t",
+                              ttl_s=600, expires_at="x", acquired_at=time.time()))
+    real_put = svc.store.put
+
+    def full(_lease) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    svc.store.put = full                           # type: ignore[method-assign]
+    try:
+        svc.track("b", Hub())
+        _wait(lambda: Client.beats >= 1, what="the first beat")
+        time.sleep(0.2)
+        svc.store.put = real_put                   # type: ignore[method-assign]
+        before = Client.beats
+        time.sleep(0.4)
+        assert Client.beats > before, "the heartbeat thread died on the OSError"
+    finally:
+        svc.close()
