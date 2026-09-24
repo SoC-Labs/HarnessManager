@@ -12,7 +12,6 @@ import time
 import pytest
 
 from harness_manager.core.errors import (
-    ActionFailedError,
     AlreadyError,
     ExitCode,
     UnavailableError,
@@ -92,8 +91,7 @@ def test_a_request_for_a_free_board_is_granted_at_once_without_a_note(world):
     # twin: a board someone holds queues and writes a note
     c = world.session(CAROL)
     world.clock.after(5, lambda: c.svc.leave(BID, c.hub))
-    with pytest.raises(ActionFailedError):
-        c.svc.request(BID, c.hub)
+    assert c.svc.request(BID, c.hub) == {"left": True}          # D7: leaving is not a failure
     assert c.of("lease.left") == [{}] and [p for p, v in world.hub.calls if v == "put_request"] == [CAROL]
 
 
@@ -101,54 +99,53 @@ def test_a_request_for_a_free_board_is_granted_at_once_without_a_note(world):
 
 
 def test_request_keep_then_the_keep_runs_out_then_force_is_available(world):
+    """D1: a keep answer does not end the wait; force becomes available again when it runs out."""
     a, b = world.holding(), world.session(BOB)
     t0 = world.clock.t
     phases: list[str] = []
+    seen: dict = {}
 
     def holder_keeps():                             # t0+30
         a.svc.watch_due(force=True)
         (wanted,) = a.of("lease.wanted")
         a.svc.respond(BID, a.hub, wanted["id"], "keep", minutes=5, message="finishing a run")
 
+    def while_kept():                               # t0+40: answered, still queued, still waiting
+        rid = next(iter(world.hub.notes))
+        seen["rid"] = rid
+        assert b.of("lease.answered") == [{"id": rid, "answer": "keep", "minutes": 5,
+                                           "message": "finishing a run"}]
+        assert world.hub.position(BOB) == 1 and list(world.hub.notes) == [rid]
+        req = b.svc.view(b.hub)["request"]
+        assert req["answer"] == {"answer": "keep", "minutes": 5, "message": "finishing a run",
+                                 "at": iso(t0 + 30)}
+        assert not req["force_available"] and "keep" in req["force_reason"]
+        (inc,) = a.svc.view(a.hub)["incoming"]                  # D5: the holder sees its answer
+        assert inc["answer"]["answer"] == "keep"
+        n = len(world.calls(BOB))
+        seen["poll"] = n
+
+    def ten_seconds_early():                        # t0+320: the keep ends at t0+330
+        with pytest.raises(ForceRefusedError) as exc:
+            b.svc.force(BID, b.hub, confirm=True)
+        assert exc.value.code == ExitCode.REFUSED and exc.value.time_left_s == 10
+        assert b.of("lease.force_available") == [] and world.hub.revokes == []
+
+    def after_the_keep():                           # t0+340
+        assert b.of("lease.force_available") == [{"id": seen["rid"]}]   # announced once
+        req = b.svc.view(b.hub)["request"]          # D6: no stale cache across the keep's end
+        assert req["force_available"] and req["force_reason"] == ""
+        seen["forced"] = b.svc.force(BID, b.hub, confirm=True)
+
     world.clock.after(25, holder_keeps)
+    world.clock.after(35, while_kept)
+    world.clock.after(315, ten_seconds_early)
+    world.clock.after(335, after_the_keep)
     out = b.svc.request(BID, b.hub, progress=phases_into(phases))
-
-    rid = next(iter(world.hub.notes))
-    assert out == {"answered": {"answer": "keep", "minutes": 5, "message": "finishing a run",
-                                "at": iso(t0 + 30)}}
-    assert b.of("lease.answered") == [{"id": rid, "answer": "keep", "minutes": 5,
-                                       "message": "finishing a run"}]
-    assert phases == ["queued", "notified", "answered"]
-    assert world.hub.position(BOB) == 1 and list(world.hub.notes) == [rid]   # place and note kept
-    assert world.hub.current["holder"] == DAVID
-    req = b.svc.view(b.hub)["request"]
-    assert req["answer"]["answer"] == "keep" and not req["force_available"]
-    assert "keep" in req["force_reason"]
-    assert a.svc.view(a.hub)["incoming"] == []              # answered: no prompt while it runs
-
-    # One requester poll is two hub calls: the acquire (grant or place) and the answer note.
-    n = len(world.calls(BOB))
-    b.svc.watch_due(force=True)
-    assert world.calls(BOB)[n:] == ["lease_acquire", "get_answer"]
-
-    world.clock.advance(t0 + 330 - world.clock.t - 1)       # one second before the keep ends
-    b.svc.watch_due(force=True)
-    assert b.of("lease.force_available") == []
-    with pytest.raises(ForceRefusedError) as exc:
-        b.svc.force(BID, b.hub, confirm=True)
-    assert exc.value.code == ExitCode.REFUSED and exc.value.time_left_s == 1
-    assert world.hub.revokes == []
-
-    world.clock.advance(2)                                    # the keep has run out
-    b.svc.watch_due(force=True)
-    b.svc.watch_due(force=True)
-    assert b.of("lease.force_available") == [{"id": rid}]   # announced once
-    world.clock.advance(11)                                   # past the view cache
-    req = b.svc.view(b.hub)["request"]
-    assert req["force_available"] and req["force_reason"] == ""
-    assert [i["id"] for i in a.svc.view(a.hub)["incoming"]] == [rid]   # the prompt is back
-    out = b.svc.force(BID, b.hub, confirm=True)
-    assert out["lease"]["holder"] == BOB and world.hub.current["holder"] == BOB
+    assert out["lease"]["holder"] == BOB and seen["forced"]["lease"]["holder"] == BOB
+    assert phases == ["queued", "notified", "answered", "force-available", "held"]
+    # one requester poll is two hub calls: the acquire (grant or place) and the answer note
+    assert world.calls(BOB)[seen["poll"]:seen["poll"] + 2] == ["lease_acquire", "get_answer"]
     assert world.hub.revokes[0]["reason"] == force_reason(BOB, iso(t0))
 
 
@@ -284,9 +281,7 @@ def test_leave_while_queued_withdraws_the_request(world):
     a, b = world.holding(), world.session(BOB)
     left: dict = {}
     world.clock.after(15, lambda: left.update(b.svc.leave(BID, b.hub)))
-    with pytest.raises(ActionFailedError) as exc:
-        b.svc.request(BID, b.hub, message="x")
-    assert "left the queue" in exc.value.message
+    assert b.svc.request(BID, b.hub, message="x") == {"left": True}   # D7
     assert left == {"left": True}
     assert world.hub.queue == [] and world.hub.notes == {}
     assert b.of("lease.left") == [{}]
@@ -304,69 +299,60 @@ def test_leave_after_an_answer(world):
         a.svc.watch_due(force=True)
         a.svc.respond(BID, a.hub, a.of("lease.wanted")[0]["id"], "keep", minutes=30)
 
+    def still_waiting():                            # twin: answered, and still queued
+        assert world.hub.position(BOB) == 1 and b.of("lease.answered")
+        assert b.svc.leave(BID, b.hub) == {"left": True}
+
     world.clock.after(5, holder_keeps)
-    assert "answered" in b.svc.request(BID, b.hub)
-    n = len(world.calls(BOB))
-    b.svc.watch_due(force=True)
-    assert len(world.calls(BOB)) > n                          # twin: still watched until it leaves
-    assert b.svc.leave(BID, b.hub) == {"left": True}
+    world.clock.after(25, still_waiting)
+    assert b.svc.request(BID, b.hub) == {"left": True}
     assert world.hub.queue == [] and world.hub.notes == {} and b.of("lease.left") == [{}]
-    n = len(world.calls(BOB))
-    b.svc.watch_due(force=True)
-    assert len(world.calls(BOB)) == n                         # nothing watched any more
     assert b.svc.view(b.hub)["request"] is None
 
 
 def test_closing_the_board_while_queued_leaves_the_queue(world):
     a, b = world.holding(), world.session(BOB)
     world.clock.after(15, lambda: b.svc.cancel_acquire(BID))   # the daemon's session.closed
-    with pytest.raises(ActionFailedError):
-        b.svc.request(BID, b.hub)
+    assert b.svc.request(BID, b.hub) == {"left": True}
     assert world.hub.queue == [] and world.hub.notes == {} and b.of("lease.left") == [{}]
-    # twin: an answered request the service is watching leaves too
+    assert not b.svc.cancel_acquire(BID)                      # twin: nothing waits any more
+    # after a keep answer the wait goes on, and closing still leaves
     world.clock.after(5, lambda: a.svc.respond(BID, a.hub, next(iter(world.hub.notes)), "keep",
                                                minutes=5))
-    assert "answered" in b.svc.request(BID, b.hub)
-    assert world.hub.position(BOB) == 1
-    assert b.svc.cancel_acquire(BID)
-    deadline = time.monotonic() + 5
-    while world.hub.queue and time.monotonic() < deadline:
-        time.sleep(0.01)
+    world.clock.after(25, lambda: b.svc.cancel_acquire(BID))
+    assert b.svc.request(BID, b.hub) == {"left": True}
     assert world.hub.queue == [] and world.hub.notes == {}
 
 
-def test_closing_the_service_leaves_a_watched_queue_place(world):
+def test_closing_the_service_leaves_the_queue(world):
     a, b = world.holding(), world.session(BOB)
     world.clock.after(5, lambda: a.svc.respond(BID, a.hub, next(iter(world.hub.notes)), "keep",
                                                minutes=5))
-    assert "answered" in b.svc.request(BID, b.hub)
-    a.svc.close()                                             # twin: a holder's close leaves nothing
-    assert world.hub.position(BOB) == 1 and len(world.hub.notes) == 1
-    b.svc.close()                                             # the daemon shuts down
+
+    def shutdown():
+        a.svc.close()                                         # twin: a holder's close leaves nothing
+        assert world.hub.position(BOB) == 1 and len(world.hub.notes) == 1
+        b.svc.close()                                         # the daemon shuts down
+
+    world.clock.after(25, shutdown)
+    assert b.svc.request(BID, b.hub) == {"left": True}
     assert world.hub.queue == [] and world.hub.notes == {} and b.of("lease.left") == [{}]
 
 
 def test_a_missed_poll_is_retried_but_three_in_a_row_end_the_request(world):
     from harness_manager.core.errors import UnreachableError
 
-    a, b = world.holding(), world.session(BOB)
+    world.holding()
+    b = world.session(BOB)
     hiccup = UnreachableError("ssh: connect to host mapstone-dev port 22: Connection timed out")
     world.clock.after(5, lambda: world.hub.fail_next.update(get_answer=hiccup))   # one miss
-
-    def keep():
-        a.svc.watch_due(force=True)
-        a.svc.respond(BID, a.hub, a.of("lease.wanted")[0]["id"], "keep", minutes=5)
-
-    world.clock.after(25, keep)
-    assert "answered" in b.svc.request(BID, b.hub)             # survived the miss
-    b.svc.leave(BID, b.hub)
+    world.clock.after(35, lambda: b.svc.leave(BID, b.hub))
+    assert b.svc.request(BID, b.hub) == {"left": True}           # survived the miss
+    assert world.calls(BOB, "get_answer").count("get_answer") >= 3
     world.hub.fail_always["get_answer"] = hiccup                # twin: the hub stays away
     with pytest.raises(UnreachableError):
         b.svc.request(BID, b.hub)
     assert world.hub.queue == [] and world.hub.notes == {}     # it left, best effort
-    n = len(world.calls(BOB))
-    b.svc.watch_due(force=True)
-    assert len(world.calls(BOB)) == n                          # and nothing is watched
 
 
 def test_ctrl_c_leaves_the_queue_to_the_caller(world):
@@ -380,10 +366,9 @@ def test_ctrl_c_leaves_the_queue_to_the_caller(world):
     with pytest.raises(KeyboardInterrupt):
         b.svc.request(BID, b.hub)
     assert world.hub.position(BOB) == 1                         # the CLI decides (it leaves)
-    n = len(world.calls(BOB))
-    b.svc.watch_due(force=True)
-    assert len(world.calls(BOB)) == n                          # not watched: it was not a keep
-    assert b.svc.leave(BID, b.hub) == {"left": True} and world.hub.queue == []
+    world.clock.after(5, lambda: b.svc.leave(BID, b.hub))       # twin: a new request may start
+    b.svc._sleep = world.clock.advance
+    assert b.svc.request(BID, b.hub) == {"left": True} and world.hub.queue == []
 
 
 # --- two requesters ------------------------------------------------------------------------------
@@ -473,8 +458,7 @@ def test_the_wait_re_asks_a_new_holder_itself(world):
 
     world.clock.after(125, carol_gets_it)
     world.clock.after(135, check)
-    with pytest.raises(ActionFailedError):
-        b.svc.request(BID, b.hub, progress=phases_into(phases))
+    assert b.svc.request(BID, b.hub, progress=phases_into(phases)) == {"left": True}
     assert phases == ["queued", "notified", "notified"]       # asked david, then carol
     assert world.hub.current["holder"] == CAROL and world.hub.revokes == []
 
@@ -563,8 +547,7 @@ def test_request_checks_its_arguments(world):
             b.svc.request(BID, b.hub, ttl_s=bad)
     assert world.calls(BOB) == []
     world.clock.after(5, lambda: b.svc.leave(BID, b.hub))    # twin: a 1000-character message is fine
-    with pytest.raises(ActionFailedError):
-        b.svc.request(BID, b.hub, message="x" * 1000, ttl_s=600)
+    assert b.svc.request(BID, b.hub, message="x" * 1000, ttl_s=600) == {"left": True}
     assert world.calls(BOB, "put_request") == ["put_request"]
 
 
@@ -580,8 +563,7 @@ def test_a_second_request_while_one_waits_is_refused(world):
         b.svc.leave(BID, b.hub)
 
     world.clock.after(5, again)
-    with pytest.raises(ActionFailedError):
-        b.svc.request(BID, b.hub)
+    assert b.svc.request(BID, b.hub) == {"left": True}
     assert seen["refused"] and world.calls(BOB, "put_request") == ["put_request"]
 
 
@@ -638,8 +620,7 @@ def test_a_request_is_refused_when_our_principal_already_holds_it(world):
     assert "another session" not in exc.value.message
     c = world.session(CAROL)                                  # twin: another principal queues
     world.clock.after(5, lambda: c.svc.leave(BID, c.hub))
-    with pytest.raises(ActionFailedError):
-        c.svc.request(BID, c.hub)
+    assert c.svc.request(BID, c.hub) == {"left": True}
     assert c.of("lease.left") == [{}]
 
 
@@ -700,18 +681,15 @@ def test_threaded_leave_while_the_request_job_waits(world):
 
     world.holding()
     b = _threaded(world, BOB)
-    errors: list = []
+    results: list = []
 
     def job():
-        try:
-            b.svc.request(BID, b.hub)
-        except ActionFailedError as exc:
-            errors.append(exc)
+        results.append(b.svc.request(BID, b.hub))
 
     t = threading.Thread(target=job, daemon=True)
     t.start()
     assert _until(lambda: world.hub.notes)
     assert b.svc.leave(BID, b.hub) == {"left": True}
     t.join(timeout=5)
-    assert not t.is_alive() and "left the queue" in errors[0].message
+    assert not t.is_alive() and results == [{"left": True}]
     assert world.hub.queue == [] and world.hub.notes == {} and b.of("lease.left") == [{}]

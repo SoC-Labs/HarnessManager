@@ -122,20 +122,32 @@ def test_real_client_request_then_release_then_granted(lab):
 
 def test_real_client_keep_answer_round_trips(lab):
     alice, bob = lab.holding("alice"), lab.session("bob")
+    got: dict = {}
 
     def keep():
         alice.svc.watch_due(force=True)
         alice.svc.respond(BID, alice.hub, alice.of("lease.wanted")[0]["id"], "keep", minutes=15,
                           message="demo at 3, then it's yours")
 
+    def still_waiting():
+        got["answered"] = list(bob.of("lease.answered"))
+        got["queue"], got["notes"] = lab.waiting(), lab.requests()
+        with pytest.raises(RefusedError) as exc:
+            bob.svc.force(BID, bob.hub, confirm=True)
+        got["err"] = exc.value
+        (inc,) = alice.svc.view(alice.hub)["incoming"]
+        got["incoming"] = inc
+        bob.svc.leave(BID, bob.hub)
+
     lab.clock.after(15, keep)
-    out = bob.svc.request(BID, bob.hub)
-    assert out["answered"]["minutes"] == 15
-    assert out["answered"]["message"] == "demo at 3, then it's yours"
-    assert lab.waiting() == [BOB] and len(lab.requests()) == 1    # the place and note stay
-    with pytest.raises(RefusedError) as exc:
-        bob.svc.force(BID, bob.hub, confirm=True)
-    assert exc.value.code == ExitCode.REFUSED and lab.revoke_calls() == []
+    lab.clock.after(35, still_waiting)
+    assert bob.svc.request(BID, bob.hub) == {"left": True}
+    (ans,) = got["answered"]
+    assert ans["minutes"] == 15 and ans["message"] == "demo at 3, then it's yours"
+    assert got["queue"] == [BOB] and len(got["notes"]) == 1         # the place and note stayed
+    assert got["err"].code == ExitCode.REFUSED and lab.revoke_calls() == []
+    assert got["incoming"]["answer"]["minutes"] == 15              # D5, read from the hub
+    assert lab.waiting() == [] and lab.requests() == []
 
 
 def test_real_client_no_answer_then_force_and_the_victim_is_told_via_the_revoke_note(lab):
@@ -179,9 +191,9 @@ def test_real_client_force_refused_before_the_deadline_revokes_nothing(lab):
         bob.svc.leave(BID, bob.hub)
 
     lab.clock.after(35, too_early)                            # runs at t0+40
-    with pytest.raises(ActionFailedError):
-        bob.svc.request(BID, bob.hub)
+    assert bob.svc.request(BID, bob.hub) == {"left": True}
     assert got["err"].code == ExitCode.UNAVAILABLE and got["err"].time_left_s == 80
+    assert got["err"].data["deadline_at"].endswith("+00:00")    # D3/D8
     assert lab.revoke_calls() == [] and lab.hub.current["holder"] == ALICE
 
 
@@ -190,8 +202,7 @@ def test_real_client_leave_cancels_by_principal_and_withdraws_the_note(lab):
     bob = lab.session("bob")
     left: dict = {}
     lab.clock.after(15, lambda: left.update(bob.svc.leave(BID, bob.hub)))
-    with pytest.raises(ActionFailedError):
-        bob.svc.request(BID, bob.hub)
+    assert bob.svc.request(BID, bob.hub) == {"left": True}
     assert left == {"left": True} and lab.waiting() == [] and lab.requests() == []
     assert ["fpgahub", "lease", "cancel", TARGET, "--holder", BOB] in lab.hub.calls
     assert bob.of("lease.left") == [{}]
@@ -207,8 +218,7 @@ def test_real_client_same_principal_in_two_sessions_is_refused(lab):
     assert lab.waiting() == [] and lab.requests() == []
     carol = lab.session("carol")                              # twin: another person queues
     lab.clock.after(15, lambda: carol.svc.leave(BID, carol.hub))
-    with pytest.raises(ActionFailedError):
-        carol.svc.request(BID, carol.hub)
+    assert carol.svc.request(BID, carol.hub) == {"left": True}
     cancels = [c for c in lab.hub.calls if c[:3] == ["fpgahub", "lease", "cancel"]]
     assert cancels[-1][-1] == CAROL
 

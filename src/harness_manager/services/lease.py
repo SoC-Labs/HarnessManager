@@ -34,8 +34,9 @@ requester      ``request``: join the queue (an acquire that queues), write a req
                (``created_at``, ``deadline_at`` = +120 s), then poll every 10 s: the answer
                note (``lease.answered``), the deadline (``lease.force_available``, only at
                the head of the queue with no answer or a keep that has run out), the grant
-               (held). A keep answer ends the call with ``{answered}``; the queue place and
-               the note stay, and the service keeps watching them.
+               (held). A keep answer does not end it (D1): it keeps waiting, and force can
+               become available again when the keep runs out. It ends held (``{lease}``),
+               left (``{left: true}``, D7), or when a force promotes us.
 holder         while it holds a lease on a tracked board: list the request notes every 10 s,
                ``lease.wanted`` once per request. ``respond(release)`` releases (the hub
                promotes the head of the queue) and writes the answer; ``respond(keep)``
@@ -225,6 +226,12 @@ def parse_utc(text: Any) -> float | None:
     return dt.timestamp()
 
 
+def iso_norm(text: Any) -> str:
+    """A note's time as ISO 8601 UTC with ``+00:00`` (D8); unreadable text is passed on."""
+    t = parse_utc(text)
+    return iso_utc(t) if t is not None else (text if isinstance(text, str) else "")
+
+
 def force_reason(principal: str, created_at: str) -> str:
     """The revoke reason (frozen): the audit log and the victim's banner show it."""
     return FORCE_REASON.format(principal=principal, created_at=created_at)
@@ -299,11 +306,13 @@ class ForceTooEarlyError(UnavailableError):
     """Force refused because the holder still has time to answer: UNAVAILABLE, the spec's 422
     "with the time left". ``data`` carries ``time_left_s`` (and the request id) for the API."""
 
-    def __init__(self, reason: str, *, time_left_s: int, request_id: str = "", hint: str = "") -> None:
+    def __init__(self, reason: str, *, time_left_s: int, request_id: str = "",
+                 deadline_at: str = "", hint: str = "") -> None:
         super().__init__("force-release", reason)
         self.hint = hint
         self.time_left_s = time_left_s
-        self.data = {"time_left_s": time_left_s, "request_id": request_id}
+        self.data = {"time_left_s": time_left_s, "request_id": request_id,
+                     "deadline_at": iso_norm(deadline_at)}
 
 
 class ForceRefusedError(RefusedError):
@@ -321,7 +330,7 @@ def _answer_public(answer: Any) -> dict[str, Any] | None:
     if answer is None:
         return None
     return {"answer": getattr(answer, "answer", ""), "minutes": int(getattr(answer, "minutes", 0) or 0),
-            "message": getattr(answer, "message", ""), "at": getattr(answer, "at", "")}
+            "message": getattr(answer, "message", ""), "at": iso_norm(getattr(answer, "at", ""))}
 
 
 def _answer_sig(answer: Any) -> tuple[str, int, str, str] | None:
@@ -331,9 +340,12 @@ def _answer_sig(answer: Any) -> tuple[str, int, str, str] | None:
             getattr(answer, "at", ""), getattr(answer, "message", ""))
 
 
-def _incoming_public(note: Any) -> dict[str, Any]:
-    return {k: getattr(note, k, "") for k in ("id", "by", "user", "host", "message", "created_at",
-                                              "deadline_at")}
+def _incoming_public(note: Any, answer: Any = None) -> dict[str, Any]:
+    out = {k: getattr(note, k, "") for k in ("id", "by", "user", "host", "message")}
+    out["created_at"] = iso_norm(getattr(note, "created_at", ""))
+    out["deadline_at"] = iso_norm(getattr(note, "deadline_at", ""))
+    out["answer"] = _answer_public(answer)                    # D5
+    return out
 
 
 # --- the token store -------------------------------------------------------------------------
@@ -449,11 +461,9 @@ class _Outgoing:
     answer_sig: Any = None
     position: int = 0
     force_announced: Any = False       # the answer_sig it was announced for, or False
-    blocking: bool = True              # a request() call is polling it; else the service does
     asked_holder: str = ""             # who held the board when the note was written
     cancel: threading.Event | None = None
     left: bool = False
-    last_watch: float = float("-inf")
 
 
 @dataclass
@@ -461,7 +471,6 @@ class _Incoming:
     """Requests for a lease we hold, as the holder's poll last saw them."""
 
     announced: dict[str, float] = field(default_factory=dict)   # id -> its created_at (wall)
-    answered: dict[str, float] = field(default_factory=dict)  # id -> hidden until (wall)
 
 
 def _hk(hub: Any) -> tuple[str, str]:
@@ -509,6 +518,9 @@ class LeaseService:
         self._outgoing: dict[tuple[str, str], _Outgoing] = {}
         self._incoming: dict[tuple[str, str], _Incoming] = {}
         self._boards: dict[tuple[str, str], str] = {}     # hub key -> the board id last seen
+        self._chassis: dict[tuple[str, str], str] = {}    # hub key -> hub.board_id() (D4)
+        self._chassis_failed: dict[tuple[str, str], float] = {}
+        self._viewed: dict[tuple[str, str], float] = {}   # hub key -> wall time of the last view
 
     # -- hub reads (cached) -----------------------------------------------------------------------
 
@@ -553,6 +565,49 @@ class LeaseService:
         if not callable(fn):
             return None
         return self._cached(hub, f"answer:{request_id}", lambda: fn(request_id), fresh=fresh)
+
+    def _drop_at_edges(self, hub: Any) -> None:
+        """D6: a cached view is dropped when a request's ``deadline_at`` or a keep's end has
+        passed since the last view (``force_available`` may have flipped)."""
+        key, now = _hk(hub), self._wall()
+        with self._mu:
+            last = self._viewed.get(key)
+            self._viewed[key] = now
+            cached = [(k[2], v[1]) for k, v in self._cache.items() if k[:2] == key]
+        if last is None:
+            return
+        edges: list[float | None] = []
+        for what, value in cached:
+            if what == "notes":
+                edges += [parse_utc(getattr(n, "deadline_at", "")) for n in value or []]
+            elif what.startswith("answer:"):
+                edges.append(keep_until(value))
+        if any(e is not None and last < e <= now for e in edges):
+            self._forget(hub)
+
+    def _board_id(self, hub: Any) -> str | None:
+        """D4: the physical board that owns the target (``hub.board_id()``: ``mps3_01``)."""
+        key = _hk(hub)
+        with self._mu:
+            known = self._chassis.get(key)
+            failed = self._chassis_failed.get(key)
+        if known:
+            return known
+        fn = getattr(hub.client, "board_id", None)
+        if not callable(fn) or (failed is not None and self._clock() - failed < PRINCIPAL_RETRY_S):
+            return None
+        try:
+            board = str(fn() or "")
+        except HarnessError as exc:
+            log.warning("the hub %s did not say which board owns %s: %s", hub.host, hub.target,
+                        exc.message)
+            board = ""
+        with self._mu:
+            if board:
+                self._chassis[key] = board
+            else:
+                self._chassis_failed[key] = self._clock()
+        return board or None
 
     def _forget(self, hub: Any) -> None:
         with self._mu:
@@ -636,18 +691,21 @@ class LeaseService:
 
             lease:    {target, holder, user, expires_at, mine} | null
             hub:      HOST | null
+            board:    the physical board, hub.board_id() (D4) | null
             queue:    [{position, holder, user, mine}]
             request:  {id, message, created_at, deadline_at, position,
                        answer: {answer, minutes, message, at} | null,
                        force_available, force_reason} | null     # my outgoing request
-            incoming: [{id, by, user, host, message, created_at, deadline_at}]
+            incoming: [{id, by, user, host, message, created_at, deadline_at,
+                        answer: {answer, minutes, message, at} | null}]      # D5
             taken:    {by, reason, at} | null
         """
-        empty: dict[str, Any] = {"lease": None, "hub": None, "queue": [], "request": None,
-                                 "incoming": [], "taken": None}
+        empty: dict[str, Any] = {"lease": None, "hub": None, "board": None, "queue": [],
+                                 "request": None, "incoming": [], "taken": None}
         if hub is None:
             return empty
-        out = {**empty, "hub": hub.host}
+        out = {**empty, "hub": hub.host, "board": self._board_id(hub)}
+        self._drop_at_edges(hub)
         shown = self._show(hub)
         stored = self.store.get(hub.host, hub.target)
         principal = self._principal(hub)
@@ -686,7 +744,8 @@ class LeaseService:
             if here:
                 out["incoming"] = self._incoming_list(hub, notes, principal, queue,
                                                       has_queue=hasattr(shown, "queue"))
-        out["taken"] = self.store.get_taken(hub.host, hub.target)
+        taken = self.store.get_taken(hub.host, hub.target)
+        out["taken"] = {**taken, "at": iso_norm(taken.get("at"))} if taken else None
         return out
 
     def _safe_notes(self, hub: Any) -> list[Any]:
@@ -720,20 +779,24 @@ class LeaseService:
         position = self._position(queue, principal)
         check = force_check(note, answer, position, self._wall())
         return {"id": note.id, "message": getattr(note, "message", ""),
-                "created_at": note.created_at, "deadline_at": note.deadline_at,
+                "created_at": iso_norm(note.created_at), "deadline_at": iso_norm(note.deadline_at),
                 "position": position, "answer": _answer_public(answer),
                 "force_available": check.available, "force_reason": check.reason}
 
     def _incoming_list(self, hub: Any, notes: list[Any], principal: str, queue: list[Any], *,
                        has_queue: bool) -> list[dict[str, Any]]:
         waiting = {getattr(e, "holder", "") for e in queue}
-        now = self._wall()
-        with self._mu:
-            inc = self._incoming.get(_hk(hub))
-            hidden = {k for k, until in (inc.answered.items() if inc else ()) if now < until}
-        return [_incoming_public(n) for n in notes
-                if getattr(n, "by", "") != principal and n.id not in hidden
-                and (not has_queue or getattr(n, "by", "") in waiting)]
+        out = []
+        for n in notes:
+            if getattr(n, "by", "") == principal or (has_queue and getattr(n, "by", "") not in waiting):
+                continue
+            try:
+                answer = self._answer(hub, n.id)
+            except HarnessError as exc:
+                log.warning("reading the answer to %s on %s: %s", n.id, hub.host, exc.message)
+                answer = None
+            out.append(_incoming_public(n, answer))
+        return out
 
     def dismiss_taken(self, hub: Any) -> bool:
         """Forget the last forced release of our lease (the victim's banner was dismissed)."""
@@ -815,25 +878,13 @@ class LeaseService:
 
     def cancel_acquire(self, board_id: str) -> bool:
         """Stop a queued acquire or request for this board (its job then removes the queue
-        entry); an answered request the service is still watching leaves the queue too."""
+        entry and withdraws the request note)."""
         with self._mu:
             ev = self._acquiring.get(board_id)
-            watched = next((o for o in self._outgoing.values()
-                            if o.board_id == board_id and not o.blocking), None)
-        if ev is not None:
-            ev.set()
-            return True
-        if watched is not None:
-            threading.Thread(target=self._leave_quietly, args=(board_id, watched.hub),
-                             name="lease-leave", daemon=True).start()
-            return True
-        return False
-
-    def _leave_quietly(self, board_id: str, hub: Any) -> None:
-        try:
-            self.leave(board_id, hub)
-        except HarnessError as exc:
-            log.warning("leaving the queue for %s: %s", board_id, exc.message)
+        if ev is None:
+            return False
+        ev.set()
+        return True
 
     def release(self, hub: Any, *, board_id: str = "") -> dict[str, Any]:
         hub = self.require_hub(hub, board_id)
@@ -862,11 +913,12 @@ class LeaseService:
                 heartbeat: bool = True) -> dict[str, Any]:
         """Ask the holder for the board: queue, write a request note, and wait.
 
-        Returns ``{lease}`` when the hub grants it (the holder released, or a force), or
-        ``{answered: {...}}`` when the holder answers keep (our queue place and note stay;
-        the service keeps watching them). Cancelling leaves the queue and withdraws the
-        note. Phases: ``queued``, ``notified``, ``answered``, ``force-available``, ``held``.
-        ``heartbeat=False`` (the CLI) does not heartbeat the lease it gets.
+        Returns ``{lease}`` when the hub grants it (the holder released, a force promoted
+        us, or the lease lapsed to us), or ``{left: true}`` when we leave (``leave()``, the
+        cancel event, the board closing: D7). A keep answer does NOT end it (D1): it emits
+        ``lease.answered`` and keeps waiting; force can become available again when the keep
+        runs out. Phases: ``queued``, ``notified``, ``answered``, ``force-available``,
+        ``held``. ``heartbeat=False`` (the CLI) does not heartbeat the lease it gets.
         """
         hub = self.require_hub(hub, board_id)
         self._board_for(hub, board_id)
@@ -890,7 +942,7 @@ class LeaseService:
         gate = board_id or f"{hub.host}/{hub.target}"
         with self._mu:
             prior = self._outgoing.get(key)
-            if prior is not None and prior.blocking:
+            if prior is not None:
                 raise AlreadyError(f"a request for {hub.target} is already waiting",
                                    hint="watch it, or leave the queue to withdraw it")
             if gate in self._acquiring:
@@ -900,7 +952,6 @@ class LeaseService:
         report = progress or (lambda *_: None)
         holder = default_holder()
         out: _Outgoing | None = None
-        kept = False
         misses = 0
         try:
             while True:
@@ -918,7 +969,7 @@ class LeaseService:
                                                  cancel, heartbeat, asked)
                         report("notified", 0, 0)
                     self._moved(out, position, principal, report)
-                    answered = self._poll_answer(out, report)
+                    self._poll_answer(out, report)
                     misses = 0
                 except UnreachableError as exc:
                     misses += 1                  # an ssh hiccup: the queue place is still ours
@@ -926,17 +977,11 @@ class LeaseService:
                         raise
                     log.warning("request for %s: poll %d missed (will retry): %s", hub.target,
                                 misses, exc.message)
-                    answered = None
-                if answered is not None:
-                    kept = True
-                    return {"answered": answered}
                 self._nap(cancel)
         except _Cancelled:
             if out is None or not out.left:        # leave() has already done it otherwise
-                with contextlib.suppress(HarnessError):
-                    self._leave_hub(board_id, hub, principal)
-            raise ActionFailedError(f"the request for {hub.target} was withdrawn: you left the queue",
-                                    hint="request it again when you want the board") from None
+                self._leave_hub(board_id, hub, principal)
+            return {"left": True}                  # D7: leaving is not a failure
         except HarnessError:
             # The wait failed: do not leave a queue place behind that nobody watches (it can
             # later hand the board to nobody). Best effort: the hub may be the thing that failed.
@@ -947,17 +992,8 @@ class LeaseService:
             with self._mu:
                 if self._acquiring.get(gate) is cancel:
                     del self._acquiring[gate]
-                o = self._outgoing.get(key)
-                watch = False
-                if o is not None and o is out and o.blocking:
-                    if kept:
-                        o.blocking = False       # answered keep: the service watches it now
-                        o.cancel = None
-                        watch = True
-                    else:
-                        del self._outgoing[key]  # e.g. Ctrl-C: the caller leaves or keeps it
-            if watch:
-                self._ensure_thread()
+                if out is not None and self._outgoing.get(key) is out:
+                    del self._outgoing[key]      # e.g. Ctrl-C: the caller leaves or keeps it
 
     @staticmethod
     def _check_message(message: Any) -> str:
@@ -1051,9 +1087,9 @@ class LeaseService:
         out.force_announced = False
         self._forget(hub)
 
-    def _poll_answer(self, out: _Outgoing, report: Progress | None = None) -> dict[str, Any] | None:
-        """Read the answer; announce a new one and a force that became available. Returns the
-        answer when it is a keep that is still running (a blocking request then ends)."""
+    def _poll_answer(self, out: _Outgoing, report: Progress | None = None) -> None:
+        """Read the answer; announce a new one, and a force that became available (again,
+        after a keep runs out)."""
         hub = out.hub
         answer = hub.client.get_answer(out.note.id)
         self._remember(hub, f"answer:{out.note.id}", answer)
@@ -1071,10 +1107,6 @@ class LeaseService:
             self._publish(TOPIC_FORCE_AVAILABLE, out.board_id, {"id": out.note.id})
             if report is not None:
                 report("force-available", 0, 0)
-        until = keep_until(out.answer)
-        if until is not None and self._wall() < until:
-            return _answer_public(out.answer)
-        return None
 
     def _granted(self, board_id: str, hub: Any, holder: str, lease: Any, expires_at: str, ttl_s: int,
                  report: Progress | None = None, *, heartbeat: bool = True,
@@ -1177,9 +1209,6 @@ class LeaseService:
                             exc.message)
             return {"ok": True, "answer": _answer_public(reply), "released": released["released"]}
         hub.client.put_answer(reply)
-        with self._mu:
-            inc = self._incoming.setdefault(_hk(hub), _Incoming())
-            inc.answered[request_id] = now + 60 * minutes
         self._forget(hub)
         return {"ok": True, "answer": _answer_public(reply)}
 
@@ -1230,6 +1259,7 @@ class LeaseService:
             if check.kind == "early":
                 raise ForceTooEarlyError(f"{hub.target}: {check.reason}",
                                          time_left_s=check.time_left_s, request_id=rid,
+                                         deadline_at=getattr(note, "deadline_at", ""),
                                          hint="wait for the answer or the deadline")
             raise ForceRefusedError(f"force-release of {hub.target} is refused: {check.reason}",
                                     time_left_s=check.time_left_s, request_id=rid)
@@ -1289,7 +1319,9 @@ class LeaseService:
             got = reader(history, holder)
             if not got:
                 return None
-            return {k: str(got.get(k, "") or "") for k in ("by", "reason", "at")}
+            out = {k: str(got.get(k, "") or "") for k in ("by", "reason", "at")}
+            out["at"] = iso_norm(out["at"]) or iso_utc(self._wall())
+            return out
         mine = {stored.principal, stored.holder, holder} - {""}
         since = stored.acquired_at or 0.0
         best: dict[str, Any] | None = None
@@ -1311,7 +1343,7 @@ class LeaseService:
         m = _FORCER.search(reason)
         by = m.group(1) if m else str(best.get("by") or new_holder or "")
         return {"by": by, "reason": reason,
-                "at": str(best.get("ts") or best.get("at") or iso_utc(self._wall()))}
+                "at": iso_norm(best.get("ts") or best.get("at")) or iso_utc(self._wall())}
 
     # -- heartbeat --------------------------------------------------------------------------------
 
@@ -1420,18 +1452,12 @@ class LeaseService:
         return (getattr(shown, "holder", "") or "") if getattr(shown, "held", False) else ""
 
     def watch_due(self, *, force: bool = False) -> None:
-        """One request-watch round (every ``request_poll_s``). Never raises.
-
-        - holder: every tracked board whose lease we hold: list the requests, ``lease.wanted``
-          once per new one;
-        - requester: an answered request no ``request()`` call is polling any more: acquire
-          once (the grant, the queue position), read the answer, announce a force that has
-          become available.
-        """
+        """One holder's-watch round: every tracked board whose lease we hold, every
+        ``request_poll_s``: list the requests (one call), ``lease.wanted`` once per new one.
+        Never raises. (A requester's ``request()`` polls its own request.)"""
         now = self._clock()
         with self._mu:
             tracked = list(self._tracked.items())
-            outgoing = [o for o in self._outgoing.values() if not o.blocking]
         for board_id, tr in tracked:
             if not force and now - tr.last_watch < self._poll_s:
                 continue
@@ -1440,16 +1466,6 @@ class LeaseService:
                 self._watch_incoming(board_id, tr.hub)
             except Exception:  # noqa: BLE001 - the heartbeat thread must survive
                 log.exception("watching lease requests for %s", board_id)
-        for out in outgoing:
-            if not force and now - out.last_watch < self._poll_s:
-                continue
-            out.last_watch = now
-            try:
-                self._watch_outgoing(out)
-            except HarnessError as exc:
-                log.warning("watching our request for %s: %s", out.hub.target, exc.message)
-            except Exception:  # noqa: BLE001
-                log.exception("watching our request for %s", out.hub.target)
 
     def _watch_incoming(self, board_id: str, hub: Any) -> None:
         stored = self.store.get(hub.host, hub.target)
@@ -1471,41 +1487,20 @@ class LeaseService:
                     new.append(note)
             for nid in [k for k, t in inc.announced.items() if wall - t > NOTE_MAX_AGE_S]:
                 inc.announced.pop(nid, None)
-                inc.answered.pop(nid, None)
         for note in new:
-            self._publish(TOPIC_WANTED, board_id,
-                          {k: getattr(note, k, "") for k in ("id", "by", "user", "host", "message",
-                                                             "deadline_at")})
-
-    def _watch_outgoing(self, out: _Outgoing) -> None:
-        hub = out.hub
-        lease, expires_at, position = self._acquire_once(hub, out.holder, out.ttl_s)
-        if lease is not None:
-            self._granted(out.board_id, hub, out.holder, lease, expires_at, out.ttl_s,
-                          heartbeat=out.heartbeat)
-            return
-        self._moved(out, position, self._principal(hub))
-        self._poll_answer(out)
+            data = {k: getattr(note, k, "") for k in ("id", "by", "user", "host", "message")}
+            data["deadline_at"] = iso_norm(getattr(note, "deadline_at", ""))
+            self._publish(TOPIC_WANTED, board_id, data)
 
     def close(self) -> None:
-        """Stop: waiting acquires and requests leave the queue (their threads do it), and so
-        does an answered request the service was watching: an abandoned queue entry can later
-        grant the board to nobody."""
+        """Stop: waiting acquires and requests leave the queue (their threads do it: an
+        abandoned queue entry can later grant the board to nobody)."""
         self._stop.set()
         with self._mu:
             waits = list(self._acquiring.values())
-            watched = [o for o in self._outgoing.values() if not o.blocking and not o.left]
             self._tracked.clear()
         for ev in waits:
             ev.set()
-        for out in watched:
-            out.left = True
-            try:
-                self._leave_hub(out.board_id, out.hub, self._principal(out.hub))
-            except HarnessError as exc:
-                log.warning("leaving the queue for %s on close: %s", out.hub.target, exc.message)
-        with self._mu:
-            self._outgoing = {k: o for k, o in self._outgoing.items() if o.blocking}
         t = self._thread
         if t is not None and t is not threading.current_thread():
             t.join(timeout=2.0)

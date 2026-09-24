@@ -16,7 +16,7 @@ from harness_manager.services.lease import (
 from tests.fakes.lrb_fake_hub import HOST, TARGET, iso
 from tests.fakes.lrb_rig import BID, BOB, CAROL, DAVID, World
 
-VIEW_KEYS = {"lease", "hub", "queue", "request", "incoming", "taken"}
+VIEW_KEYS = {"lease", "hub", "board", "queue", "request", "incoming", "taken"}
 
 
 @pytest.fixture(autouse=True)
@@ -104,9 +104,10 @@ def test_the_view_has_exactly_the_api_shape(world):
     assert set(va["lease"]) == {"target", "holder", "user", "expires_at", "mine"}
     assert set(va["queue"][0]) == {"position", "holder", "user", "mine"}
     assert va["request"] is None and va["taken"] is None and va["hub"] == HOST
+    assert va["board"] == vb["board"] == "mps3_01"                  # D4
     assert va["incoming"] == [{"id": note.id, "by": BOB, "user": "bob", "host": "lab-pc",
                                "message": "hi", "created_at": note.created_at,
-                               "deadline_at": note.deadline_at}]
+                               "deadline_at": note.deadline_at, "answer": None}]
     req = vb["request"]
     assert set(req) == {"id", "message", "created_at", "deadline_at", "position", "answer",
                         "force_available", "force_reason"}
@@ -117,8 +118,9 @@ def test_the_view_has_exactly_the_api_shape(world):
     world.clock.advance(11)
     answer = b.svc.view(b.hub)["request"]["answer"]
     assert answer == {"answer": "keep", "minutes": 5, "message": "soon", "at": iso(world.clock.t - 11)}
-    assert a.svc.view(None) == {"lease": None, "hub": None, "queue": [], "request": None,
-                                "incoming": [], "taken": None}
+    assert a.svc.view(a.hub)["incoming"][0]["answer"] == answer    # D5: the holder sees it too
+    assert a.svc.view(None) == {"lease": None, "hub": None, "board": None, "queue": [],
+                                "request": None, "incoming": [], "taken": None}
 
 
 def test_incoming_leaves_out_stale_notes_whose_requester_is_not_queued(world):
@@ -325,3 +327,52 @@ def test_a_heartbeat_client_bug_does_not_end_the_heartbeat(world):
     assert [d["warning"] for d in a.of("lease.state") if d.get("warning")][0].startswith(
         "the lease heartbeat failed (RuntimeError")
     assert a.svc.tracked() == [BID]
+
+
+# --- D6: the cached view does not hide a deadline or a keep's end --------------------------------
+
+
+def test_the_cached_view_is_dropped_at_the_deadline(world):
+    world.holding()
+    b = world.session(BOB)
+    world.queued_by_hand(BOB, age_s=115)                       # 5 s before the deadline
+    assert not b.svc.view(b.hub)["request"]["force_available"]
+    n = len(world.calls(BOB, "lease_status"))
+    world.clock.advance(3)                                     # twin: nothing crossed, cache used
+    b.svc.view(b.hub)
+    assert len(world.calls(BOB, "lease_status")) == n
+    world.clock.advance(3)                                     # the deadline passed: re-read
+    assert b.svc.view(b.hub)["request"]["force_available"]
+    assert len(world.calls(BOB, "lease_status")) == n + 1
+
+
+def test_the_cached_view_is_dropped_when_a_keep_runs_out(world):
+    a, b = world.holding(), world.session(BOB)
+    note = world.queued_by_hand(BOB, age_s=200)
+    a.svc.respond(BID, a.hub, note.id, "keep", minutes=5)
+    world.clock.advance(295)
+    assert not b.svc.view(b.hub)["request"]["force_available"]
+    n = len(world.calls(BOB, "get_answer"))
+    world.clock.advance(6)
+    assert b.svc.view(b.hub)["request"]["force_available"]
+    assert len(world.calls(BOB, "get_answer")) == n + 1
+
+
+# --- D8: one time format -------------------------------------------------------------------------------
+
+
+def test_times_are_iso_utc_with_offset_even_from_z_forms(world):
+    from harness_manager.services.lease import iso_norm
+
+    assert iso_norm("2026-09-24T10:00:00Z") == "2026-09-24T10:00:00+00:00"
+    assert iso_norm("2026-09-24T10:00:00.123456Z") == "2026-09-24T10:00:00+00:00"
+    assert iso_norm("2026-09-24T11:00:00+01:00") == "2026-09-24T10:00:00+00:00"
+    assert iso_norm("soon") == "soon" and iso_norm(None) == ""  # twin: unreadable is passed on
+    a = world.holding()
+    note = RequestNote("zform", BOB, "bob", "lab-pc", "", "2026-09-24T10:00:00Z",
+                       "2026-09-24T10:02:00Z")
+    world.hub.queue.append((BOB, "bob"))
+    world.hub.notes[note.id] = note
+    (inc,) = a.svc.view(a.hub)["incoming"]
+    assert (inc["created_at"], inc["deadline_at"]) == ("2026-09-24T10:00:00+00:00",
+                                                       "2026-09-24T10:02:00+00:00")
