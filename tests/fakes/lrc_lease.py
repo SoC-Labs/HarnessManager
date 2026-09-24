@@ -7,7 +7,8 @@ in-memory hub (``LeaseWorld``). Nothing here reaches a hub, ssh or fpgahub: a
 
 The additions follow docs/LEASE_REQUESTS.md "Interfaces" exactly:
 
-- ``request(board_id, hub, *, message, ttl_s, progress, cancel)``: queue + note;
+- ``request(board_id, hub, *, message, ttl_s, progress, cancel)``: refused (ALREADY)
+  when our principal already holds it (CCR-A2); else queue + note;
   phases ``queued``, ``notified``, ``answered``, ``force-available``, ``held``; blocks
   until held (``{lease}``), answered keep (``{answered}``) or cancelled
   (``ActionFailedError``, the queue entry and the note removed);
@@ -36,6 +37,7 @@ from typing import Any
 from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
+    AlreadyError,
     RefusedError,
     UnavailableError,
     UsageError,
@@ -209,7 +211,9 @@ class FakeLeaseService(LeaseService):
         report = progress or (lambda *_: None)
         cancel = cancel or threading.Event()
         with w.mu:
-            if w.holder in (None, w.me):
+            if w.holder == w.me:            # CCR-A2: same principal, maybe another session
+                raise AlreadyError(f"you already hold {hub.target} (another session)")
+            if w.holder is None:
                 w.holder = w.me
                 return {"lease": self._lease(hub)}
             if w.me not in w.queue:

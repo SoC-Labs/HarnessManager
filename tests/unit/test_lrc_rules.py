@@ -119,3 +119,14 @@ def test_negative_twin_an_old_view_still_fills_every_column():
     assert row[6:] == [0, None, "", "", "", 0, ""]
     assert h.full_view({"lease": None, "hub": None, "queue": None}) == {
         "lease": None, "hub": None, "queue": [], "request": None, "incoming": [], "taken": None}
+
+
+def test_a_request_is_refused_when_the_lease_is_already_this_principals():
+    err = h.request_refusal(view(mine=True, holder="david@mapstone-dev"), T)
+    assert err is not None and err.code == ExitCode.ALREADY and "another" in err.message
+
+
+def test_negative_twin_a_request_goes_ahead_when_someone_else_or_nobody_holds_it():
+    assert h.request_refusal(view(), T) is None
+    assert h.request_refusal(view(holder=None), T) is None
+    assert h.request_refusal({"lease": None, "hub": None}, T) is None

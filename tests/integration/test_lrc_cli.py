@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 from harness_manager.cli import cmd_hub
-from harness_manager.core.errors import ExitCode
-from tests.fakes.lrc_lease import ALICE, BOB, ME, LeaseWorld, factory
+from harness_manager.core.errors import ExitCode, UnreachableError
+from tests.fakes.lrc_lease import ALICE, BOB, ME, FakeLeaseService, LeaseWorld, factory
 
 TARGET_ARG = "192.168.10.101"
 HUB = "mapstone-dev.ecs.soton.ac.uk"
@@ -30,11 +30,22 @@ TARGET = "mps3_01_pl"
 @dataclass
 class _Cand:
     board_id: str = "mps3@192.168.10.101:6900"
+    name: str = "mps3-01"                     # N1: named offline from the hub table
 
 
 class _Client:
+    def __init__(self) -> None:
+        self.cancelled: list[str] = []
+
     def board_id(self) -> str:
-        return "mps3_01"
+        return "mps3_07"
+
+    def principal(self) -> str:
+        return ME
+
+    def lease_cancel(self, holder: str) -> bool:
+        self.cancelled.append(holder)
+        return True
 
 
 @dataclass
@@ -182,6 +193,52 @@ def test_ctrl_c_during_a_request_leaves_the_queue(capsys, world, monkeypatch):
     assert "left the queue" in err and ME not in world.queue and world.my_request() is None
 
 
+def test_request_for_a_board_this_principal_holds_is_already(capsys, world):
+    world.holder = ME
+    rc, out, err = run(capsys, "--json", "lease", "request", TARGET_ARG)
+    assert rc == ExitCode.ALREADY and "you already hold mps3-01" in err
+    assert json.loads(out)["error"]["name"] == "ALREADY"
+    assert not any(c[0] == "request" for c in world.calls) and world.queue == []
+
+
+def test_messages_name_the_board(capsys, world):
+    t = meanwhile(world, lambda rid: world.answer(rid, "release"))
+    rc, out, err = run(capsys, "lease", "request", TARGET_ARG)
+    t.join(5)
+    assert rc == ExitCode.OK and f"queued at position 1 for mps3-01 ({TARGET} on {HUB})" in err
+    assert out.startswith(f"mps3-01 ({TARGET} on {HUB}): yours")
+    rc, out, _ = run(capsys, "--json", "lease", "show", TARGET_ARG)
+    assert json.loads(out)["name"] == "mps3-01"
+
+
+def test_ctrl_c_in_acquire_cancels_with_the_principal(capsys, world, monkeypatch):
+    hub = _Hub()
+    monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(), hub))
+
+    def interrupted(self, *a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(FakeLeaseService, "acquire", interrupted)
+    rc, _, err = run(capsys, "lease", "acquire", TARGET_ARG, "--holder", "david-hm")
+    assert rc == ExitCode.ACTION_FAILED and "left the queue" in err
+    assert hub.client.cancelled == [ME]           # not "david-hm": fpgahub queued the principal
+
+
+def test_negative_twin_without_a_principal_acquire_cancels_with_the_holder(capsys, world,
+                                                                           monkeypatch):
+    hub = _Hub()
+
+    def no_principal() -> str:
+        raise UnreachableError("whoami failed")
+
+    hub.client.principal = no_principal                    # type: ignore[method-assign]
+    monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(), hub))
+    monkeypatch.setattr(FakeLeaseService, "acquire",
+                        lambda self, *a, **k: (_ for _ in ()).throw(KeyboardInterrupt))
+    rc, _, _ = run(capsys, "lease", "acquire", TARGET_ARG, "--holder", "david-hm")
+    assert rc == ExitCode.ACTION_FAILED and hub.client.cancelled == ["david-hm"]
+
+
 def test_negative_twin_request_refuses_a_long_message_before_queueing(capsys, world):
     rc, _, err = run(capsys, "lease", "request", TARGET_ARG, "--message", "x" * 501)
     assert rc == ExitCode.USAGE and "500" in err
@@ -262,7 +319,7 @@ def test_force_asks_first_and_n_aborts(capsys, world, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("n\n"))
     rc, _, err = run(capsys, "lease", "force", TARGET_ARG)
     assert rc == ExitCode.REFUSED and "not confirmed" in err
-    assert (f"Are you sure? This kicks {ALICE} off mps3_01 now; anything they are running on "
+    assert (f"Are you sure? This kicks {ALICE} off mps3-01 now; anything they are running on "
             "the board is interrupted. [y/N]") in err
     assert world.revoked == [] and world.holder == ALICE
 
@@ -271,8 +328,11 @@ def test_negative_twin_force_answered_y_goes_ahead(capsys, world, monkeypatch):
     queued_expired(world)
     monkeypatch.setattr(cmd_hub, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr("sys.stdin", io.StringIO("y\n"))
+    # A board with no name: the prompt names the hub's board (mps3_07 shown as mps3-07).
+    monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(name=""), _Hub()))
     rc, out, err = run(capsys, "lease", "force", TARGET_ARG)
-    assert rc == ExitCode.OK and "Are you sure?" in err and "force-released" in out
+    assert rc == ExitCode.OK and f"kicks {ALICE} off mps3-07 now" in err
+    assert f"{TARGET} on {HUB}: force-released" in out
     assert len(world.revoked) == 1 and world.holder == ME
 
 
@@ -353,6 +413,6 @@ def test_the_real_hub_adapter_path_reaches_the_new_verbs(capsys, tmp_path, monke
     with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=sd) as rig:
         rc, out, _ = run(capsys, "--json", "lease", "leave", TARGET_ARG)
         assert rc == ExitCode.OK and json.loads(out) == {
-            "ok": True, "board_id": json.loads(out)["board_id"], "hub": HUB, "target": TARGET,
-            "left": False}
+            "ok": True, "board_id": json.loads(out)["board_id"], "name": "mps3-01", "hub": HUB,
+            "target": TARGET, "left": False}
         assert rig.hub.current is None                          # the fake hub was not asked

@@ -13,7 +13,7 @@ docs/LEASE_REQUESTS.md, "API" (frozen 2026-09-24, lane LR-C):
 
 | Method and path | Body | Returns |
 |---|---|---|
-| ``POST /boards/{bid}/lease/request`` | ``{message?, ttl_s?}`` | 202 job ``lease_request``; phases ``queued``, ``notified``, ``answered``, ``force-available``, ``held``; result ``{lease}`` or ``{answered: {...}}`` |
+| ``POST /boards/{bid}/lease/request`` | ``{message?, ttl_s?}`` | 202 job ``lease_request``; phases ``queued``, ``notified``, ``answered``, ``force-available``, ``held``; result ``{lease}`` or ``{answered: {...}}``. 409 ALREADY when the lease is already this principal's (this or another session, CCR-A2) |
 | ``POST /boards/{bid}/lease/respond`` | ``{id, answer, minutes?, message?}`` | 200 ``{ok}`` |
 | ``POST /boards/{bid}/lease/force`` | ``{confirm: true}`` | 202 job ``lease_force``; result ``{lease}``. Before any revoke: 409 REFUSED (or ALREADY) with the reason, 422 UNAVAILABLE with the time left, 422 USAGE without ``confirm: true`` |
 | ``DELETE /boards/{bid}/lease/queue`` | none | 200 ``{left: bool}`` |
@@ -61,6 +61,7 @@ from harness_manager.cli.cmd_hub import (
     full_view,
     keep_minutes,
     request_id,
+    request_refusal,
 )
 from harness_manager.core.errors import HarnessError, UsageError
 from harness_manager.core.events import Event
@@ -216,6 +217,9 @@ def register(ctx: RouteContext) -> None:
         ttl = _ttl(b)
         message = clean_message(b.get("message"))
         hub = hub_of(bid)
+        refusal = request_refusal(full_view(leases.view(hub)), hub.target)
+        if refusal is not None:
+            raise refusal
         cancel = threading.Event()
 
         def run(progress: Callable[[str, int, int], None]) -> Any:

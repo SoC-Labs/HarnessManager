@@ -163,6 +163,15 @@ def test_negative_twin_a_free_board_is_granted_at_once(client, bid, world):
     assert world.my_request() is None and world.queue == []          # no note, no queue entry
 
 
+def test_a_request_for_a_lease_this_principal_holds_is_409_already_with_no_job(client, bid, world):
+    world.holder = ME                       # this session, or another of the same person's
+    r = client.post(lease(bid, "/request"), json={}, headers=H)
+    assert r.status_code == 409 and r.json()["error"]["code"] == ExitCode.ALREADY
+    assert "already hold" in r.json()["error"]["message"]
+    assert not any(c[0] == "request" for c in world.calls) and world.queue == []
+    assert client.get("/api/v1/jobs", headers=H).json()["jobs"] == []
+
+
 def test_the_request_route_refuses_bad_input(client, bid, world):
     for bad in ({"ttl_s": 5}, {"ttl_s": "long"}, {"message": 7}, {"message": "x" * 501}, [1]):
         r = client.post(lease(bid, "/request"), json=bad, headers=H)
