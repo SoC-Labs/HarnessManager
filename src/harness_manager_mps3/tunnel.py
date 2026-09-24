@@ -79,6 +79,8 @@ from .constants import CONSOLE_PORTS, CONTROL_PORT, JTAG_RBB_PORT, PUSH_PORT, XV
 log = logging.getLogger(__name__)
 
 VIA_SSH = "ssh"
+#: T8: through the hub by routing when it can (lease gate + route), else its SSH tunnel.
+VIA_HUB = "hub"
 #: The marker in a link's ``detail`` that names the hub (``via ssh:HOST``).
 _VIA_RE = re.compile(r"\bvia (ssh:[A-Za-z0-9._@\-\[\]:]+)")
 
@@ -115,9 +117,9 @@ DEFAULT_REMOTE_PORTS: dict[str, int] = {
 
 
 def parse_via(via: str) -> str:
-    """``"ssh:HOST"`` -> ``HOST``; ``""`` -> ``""``. Anything else is a ``UsageError``."""
+    """``"ssh:HOST"`` -> ``HOST``; ``""`` and ``"hub"`` -> ``""``. Else a ``UsageError``."""
     via = (via or "").strip()
-    if not via:
+    if not via or via == VIA_HUB:
         return ""
     kind, sep, host = via.partition(":")
     if kind != VIA_SSH or not sep or not host or any(c.isspace() for c in host):
@@ -135,8 +137,10 @@ def via_host(link: Link) -> str:
 
 
 def candidate_via(candidate: Candidate) -> str:
-    """``"ssh:HOST"`` when the candidate's Ethernet link goes through a hub, else ``""``."""
+    """``"ssh:HOST"`` (or ``"hub"``) when the candidate's Ethernet link goes through a hub."""
     for lk in candidate.links:
+        if lk.kind == LinkKind.ETHERNET and lk.via == VIA_HUB:
+            return VIA_HUB
         if lk.kind == LinkKind.ETHERNET:
             host = via_host(lk)
             if host:
@@ -148,7 +152,17 @@ def with_via(candidate: Candidate, via: str) -> Candidate:
     """The candidate with every Ethernet link routed ``via`` (``"ssh:HOST"``); ``""`` is a no-op.
 
     Board-agnostic: it only rewrites links. The pack's ``open`` does the tunnelling.
+    ``"hub"`` marks the links ``via="hub"`` (T8: ``open_reach`` plans the route).
     """
+    if (via or "").strip() == VIA_HUB:
+        def mark(lk: Link) -> Link:
+            if lk.kind != LinkKind.ETHERNET:
+                return lk
+            base = _VIA_RE.sub("", lk.detail or "").rstrip(" ,") or "shell control channel"
+            return Link(lk.kind, lk.address, f"{base}, via hub", via=VIA_HUB)
+
+        return replace(candidate, links=tuple(mark(lk) for lk in candidate.links),
+                       evidence=f"{candidate.evidence} (through the hub)".strip())
     host = parse_via(via)
     if not host:
         return candidate
@@ -844,6 +858,8 @@ def open_reach(candidate: Candidate, remote_ports: Mapping[str, int], *,
     eth = _eth(candidate)
     if eth is None:
         return None
+    if eth.via == VIA_HUB:
+        return _open_hub_reach(candidate, eth, remote_ports, launcher=launcher, ssh_g=ssh_g)
     hub = via_host(eth)
     if not hub:
         # Direct, or ``via="ssh"`` with no host: a forward someone made by hand (``ssh -L``),
@@ -860,6 +876,31 @@ def open_reach(candidate: Candidate, remote_ports: Mapping[str, int], *,
     tunnel.start()
     return Reach(via=f"{VIA_SSH}:{hub}", ports={fw.name: fw.local_port for fw in tunnel.forwards},
                  tunnel=tunnel, remote_host=rhost)
+
+
+def _open_hub_reach(candidate: Candidate, eth: Link, remote_ports: Mapping[str, int], *,
+                    launcher: Launcher | None, ssh_g: Callable[[Sequence[str]], str] | None) -> Any:
+    """``via = "hub"`` (T8): route through the hub when the plan allows, else its SSH tunnel."""
+    from harness_manager.transports.hub_reach import open_hub_reach
+
+    from . import hub as _hub
+
+    cfg = _hub.hub_config_for(candidate)
+    if cfg is None:
+        raise UsageError(f"via = \"hub\" needs a hub table for {candidate.board_id} in boards.toml")
+    rest = cfg.rest
+    ssh_host = (rest.ssh_host if rest is not None else cfg.host) or ""
+    client = _hub.adapter_for(candidate).client if rest is not None else None
+
+    def fallback(plan: Any) -> Reach | None:
+        return open_reach(with_via(replace(candidate, links=tuple(
+            Link(lk.kind, lk.address, lk.detail, via="") if lk is eth else lk
+            for lk in candidate.links)), f"{VIA_SSH}:{ssh_host}"), remote_ports,
+            launcher=launcher, ssh_g=ssh_g)
+
+    return open_hub_reach(eth.address, remote_ports, client=client,
+                          direct=rest.direct if rest is not None else "never",
+                          ssh_host=ssh_host, ssh_fallback=fallback, control_port=CONTROL_PORT)
 
 
 @contextlib.contextmanager

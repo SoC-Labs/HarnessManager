@@ -10,7 +10,9 @@ raw for packs)::
             shares = { mcc = "/dev/mps3_01_pl/tty_00" } }
 
 ``hub`` keys: ``host`` (the hub to ssh into; ``"local"`` when the app runs ON
-the hub), ``target`` (the fpgahub board name leases and shares use:
+the hub), ``url`` (fpgahub's REST API instead of ssh, with ``token_file``,
+``ca_file``, ... : ``harness_manager.transports.hub_rest``; with both, REST wins
+and ``host`` is only the SSH fallback of the data plane), ``target`` (the fpgahub board name leases and shares use:
 ``mps3_01_pl``, never the chassis ``mps3_01``; pyverify.lease "THE NAME
 AUTHORITY"), ``shares`` (name -> TTY path; ``mcc`` is the board controller,
 ``fpga_uart0..3`` the FPGA UART lanes), ``baud`` (the rate the shares run at,
@@ -104,29 +106,40 @@ _SHARE_LINE = re.compile(r"share\s+(?P<tty>/\S+)\s+\S+\s+(?P<host>\[[^\]]+\]|[^\
 
 @dataclass(frozen=True)
 class HubConfig:
-    host: str
+    host: str = ""                     # the SSH hub; with ``rest`` alone, the URL's host name
     target: str = DEFAULT_TARGET
     shares: dict[str, str] = field(default_factory=dict)     # name -> tty path
     baud: int = DEFAULT_SHARE_BAUD
     start_shares: bool = False
     group: str | None = DEFAULT_GROUP
     board: str = ""                    # the physical board (fpgahub chassis); "" = ask the hub
+    rest: Any = None                   # hub_rest.RestHubConfig when the table has ``url`` (T8)
 
     @property
     def local(self) -> bool:
-        return self.host in LOCAL_HOSTS
+        return self.host in LOCAL_HOSTS and self.rest is None
+
+    @property
+    def transport(self) -> str:
+        """``"rest"`` (fpgahub's API with a token) or ``"ssh"`` (``sg fpga -c fpgahub``)."""
+        return "rest" if self.rest is not None else "ssh"
 
 
 def parse_hub_table(table: Any, *, where: str = "hub") -> HubConfig:
     """Validate one boards.toml ``hub`` table. ``UsageError`` names the bad key."""
+    from harness_manager.transports import hub_rest
+
     if not isinstance(table, dict):
         raise UsageError(f"{where} must be a table: {{ host = ..., target = ... }}")
-    unknown = set(table) - {"host", "target", "shares", "baud", "start_shares", "group", "board"}
+    unknown = set(table) - {"host", "target", "shares", "baud", "start_shares", "group", "board"} \
+        - hub_rest.REST_KEYS
     if unknown:
         raise UsageError(f"{where} has unknown keys: {', '.join(sorted(unknown))}")
-    host = table.get("host")
+    rest = hub_rest.parse_rest_table(table, where=where)
+    host = table.get("host") or (rest.host if rest is not None else None)
     if not isinstance(host, str) or not host or any(c.isspace() for c in host):
-        raise UsageError(f"{where}.host must be the hub's host name (or \"local\")")
+        raise UsageError(f"{where}.host must be the hub's host name (or \"local\"), "
+                         f"or {where}.url its REST API (https://HUB:7246)")
     target = table.get("target", DEFAULT_TARGET)
     if not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_.\-]+", target):
         raise UsageError(f"{where}.target must be an fpgahub board name, e.g. mps3_01_pl")
@@ -148,7 +161,8 @@ def parse_hub_table(table: Any, *, where: str = "hub") -> HubConfig:
     if not isinstance(board, str) or (board and not valid_name(board)):
         raise UsageError(f"{where}.board must be an fpgahub board id, e.g. mps3_01")
     return HubConfig(host=host, target=target, shares=dict(shares), baud=baud,
-                     start_shares=start, group=group or None, board=board)
+                     start_shares=start, group=group or None, board=board,
+                     rest=hub_rest.with_target(rest, target) if rest is not None else None)
 
 
 def board_tables(candidate: Candidate) -> dict[str, Any]:
@@ -1287,6 +1301,7 @@ class _ShareRoute:
     port: int                             # the share's port on the hub
     local_port: int
     tunnel: Any = None                    # SshTunnel, or None on the hub itself
+    host: str = "127.0.0.1"               # where to connect: the hub itself when REST-only
 
 
 class _ShareRoutes:
@@ -1302,6 +1317,7 @@ class _ShareRoutes:
         self._bauds: dict[tuple[str, str], int] = {}
         self._groups: dict[tuple[str, str], str | None] = {}
         self._closed_at: dict[ShareRef, list[float]] = {}   # our connections' close times
+        self._configs: dict[tuple[str, str], HubConfig] = {}
 
     def note_closed(self, ref: ShareRef) -> None:
         """One of our connections to this share has just closed (``_SharePort.close``)."""
@@ -1326,10 +1342,16 @@ class _ShareRoutes:
             self._starts[(cfg.host, cfg.target)] = cfg.start_shares
             self._bauds[(cfg.host, cfg.target)] = cfg.baud
             self._groups[(cfg.host, cfg.target)] = cfg.group
+            self._configs[(cfg.host, cfg.target)] = cfg
 
-    def client(self, ref: ShareRef) -> HubClient:
+    def client(self, ref: ShareRef) -> Any:
         with self._mu:
             group = self._groups.get((ref.host, ref.target), DEFAULT_GROUP)
+            cfg = self._configs.get((ref.host, ref.target))
+        if cfg is not None and cfg.rest is not None:
+            from harness_manager.transports import hub_rest
+
+            return hub_rest.client_for(cfg)
         return HubClient(ref.host, ref.target, group=group)
 
     def route(self, ref: ShareRef, info: ShareInfo) -> _ShareRoute:
@@ -1341,8 +1363,14 @@ class _ShareRoutes:
                 return old
             if old is not None and old.tunnel is not None:
                 old.tunnel.close()
-            if ref.host in LOCAL_HOSTS:
+            with self._mu:
+                cfg = self._configs.get((ref.host, ref.target))
+            rest = cfg.rest if cfg is not None else None
+            if ref.host in LOCAL_HOSTS and rest is None:
                 new = _ShareRoute(info.port, info.port)
+            elif rest is not None and not rest.ssh_host:
+                # REST only (no SSH account): the share listens on the hub's 0.0.0.0 (T8).
+                new = _ShareRoute(info.port, info.port, host=rest.host)
             else:
                 t = _tunnel.SshTunnel(ref.host,
                                       [_tunnel.Forward("share", info.remote_host, info.port)],
@@ -1423,7 +1451,7 @@ def open_hub_share(address: str, baud: int = DEFAULT_SHARE_BAUD) -> SerialPort:
     read_only = info.readers > 0
     why = (f"another client ({info.writer or 'unknown'}) holds the hub share's write slot; "
            "fpgahub drops every other client's writes") if read_only else ""
-    port = _SharePort(ref, "127.0.0.1", route.local_port, baud=share_baud,
+    port = _SharePort(ref, route.host, route.local_port, baud=share_baud,
                       read_only=read_only, read_only_reason=why,
                       label=f"hub share {ref.tty} on {ref.host}")
     tcp_serial.mark_share(ref.url, share_baud)
@@ -1519,7 +1547,7 @@ class ShareRelay:
     def _serve(self, client: socket.socket) -> None:
         try:
             _info, route = resolve_share(self.ref)
-            upstream = socket.create_connection(("127.0.0.1", route.local_port), timeout=10)
+            upstream = socket.create_connection((route.host, route.local_port), timeout=10)
             upstream.settimeout(None)
         except (HarnessError, OSError) as exc:
             self.last_error = str(exc)                 # the message and the next step
@@ -1601,10 +1629,16 @@ class Mps3Hub:
     """``session.hub``: the board's hub, its target, and a client for both (lane L1)."""
 
     def __init__(self, cfg: HubConfig, client: HubClient | None = None) -> None:
+        from harness_manager.transports import hub_rest
+
         self.config = cfg
         self.host = cfg.host
         self.target = cfg.target
-        self.client = client or HubClient(cfg.host, cfg.target, group=cfg.group, board=cfg.board)
+        # T8: url -> fpgahub's REST API (hub_rest.RestHubClient), else ssh (HubClient).
+        self.client = client or hub_rest.client_for(
+            cfg, ssh_factory=lambda: HubClient(cfg.host, cfg.target, group=cfg.group,
+                                               board=cfg.board))
+        self.transport = getattr(self.client, "transport", "ssh")
         SHARES.configure(cfg)
 
     def share_status(self) -> dict[str, Any]:
