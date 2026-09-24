@@ -19,6 +19,7 @@ import pytest
 from harness_manager_mps3 import hub as hubmod
 from tests.fakes.l1_fake_hub import FakeLane
 from tests.fakes.l1_rig import HUB, MCC_TTY, TARGET, lab
+from tests.fakes.lr_hub import LaggingShareServer
 from tests.fakes.virtual_board import VirtualMps3
 
 LANE_TTY = "/dev/mps3_01_pl/tty_02"
@@ -230,3 +231,83 @@ def test_our_closes_count_for_own_linger_s_and_once_each(rig):
     assert hubmod.SHARES.lingering(ref) == 0                 # twin: an old close is forgotten
     assert ref not in hubmod.SHARES._closed_at
     assert hubmod.SHARES.lingering(hubmod.ShareRef(HUB, TARGET, LANE_TTY)) == 0
+
+
+# -- 3. a shared console after a quick reconnect ------------------------------------------------------
+
+
+LAG_S = 0.5          # how late the fake hub notices our EOF (the real one: through ssh)
+
+
+def lagging_lane(rig) -> tuple[hubmod.ShareRelay, LaggingShareServer, FakeLane]:
+    lane = FakeLane(banner=b"")
+    rig.hub.ttys[LANE_TTY] = lane
+    rig.hub.shares[LANE_TTY] = LaggingShareServer(lane, LANE_TTY, leave_after_s=LAG_S)
+    return hubmod.SHARES.relay(hubmod.ShareRef(HUB, TARGET, LANE_TTY)), rig.hub.shares[LANE_TTY], lane
+
+
+def type_then_reconnect_and_type(relay: hubmod.ShareRelay) -> tuple[bytes, float]:
+    """Type, leave, come straight back and type again (the UI reopening a console)."""
+    with socket.create_connection(("127.0.0.1", relay.port), timeout=5) as c:
+        c.sendall(b"first\n")
+        recv_until(c, b"first")
+    _wait(lambda: not relay._conns, what="the relay to close its side")
+    t0 = time.monotonic()
+    with socket.create_connection(("127.0.0.1", relay.port), timeout=5) as c:
+        c.sendall(b"second\n")                              # at once, as a person would
+        try:
+            got = recv_until(c, b"second", timeout=hubmod.SLOT_WAIT_S + 2 * LAG_S)
+        except TimeoutError:
+            got = b""
+    return got, time.monotonic() - t0
+
+
+def test_the_first_keys_after_a_quick_reconnect_reach_the_tty(rig):
+    relay, share, lane = lagging_lane(rig)
+    got, took = type_then_reconnect_and_type(relay)
+    assert b"second" in got and b"second" in lane.received
+    assert share.dropped_writes == 0
+    assert took < hubmod.SLOT_WAIT_S + 1.0                  # the wait is bounded
+
+
+def test_negative_twin_without_the_settle_the_hub_drops_them(rig, monkeypatch):
+    """The code before this fix: the relay connected at once, while the hub still gave
+    the write slot to our previous connection, and the keys vanished without a trace."""
+    monkeypatch.setattr(hubmod, "settle_write_slot", lambda ref, info, route, **_kw: (info, route))
+    relay, share, lane = lagging_lane(rig)
+    got, _took = type_then_reconnect_and_type(relay)
+    assert b"second" not in got and b"second" not in lane.received
+    assert share.dropped_writes >= len(b"second\n")
+
+
+def test_a_stranger_on_the_lane_share_does_not_delay_the_console(rig):
+    relay, share, _lane = lagging_lane(rig)
+    stranger = socket.create_connection(("127.0.0.1", share.port), timeout=5)
+    try:
+        _wait(lambda: share.readers == 1, what="the stranger to attach")
+        before, t0 = share_lists(rig), time.monotonic()
+        with socket.create_connection(("127.0.0.1", relay.port), timeout=5):
+            _wait(lambda: len(relay._conns) == 2, what="the console to be relayed")
+            took = time.monotonic() - t0
+        assert share_lists(rig) - before == 1 and took < hubmod.SLOT_WAIT_S   # no settle
+    finally:
+        stranger.close()
+
+
+def test_the_relay_records_a_close_only_when_the_console_left_first(rig):
+    ref = hubmod.ShareRef(HUB, TARGET, LANE_TTY)
+    relay, share, _lane = lagging_lane(rig)
+    with socket.create_connection(("127.0.0.1", relay.port), timeout=5) as c:
+        c.sendall(b"x\n")
+        recv_until(c, b"x")
+    _wait(lambda: not relay._conns, what="the relay to close its side")
+    assert hubmod.SHARES.lingering(ref) == 1                 # the console left: recorded
+    _wait(lambda: share.readers == 0, what="the hub to let go")
+    hubmod.SHARES._closed_at.clear()
+    with socket.create_connection(("127.0.0.1", relay.port), timeout=5) as c:
+        c.sendall(b"y\n")
+        recv_until(c, b"y")
+        rig.hub.shares.pop(LANE_TTY).close()                 # twin: the share ended it
+        assert recv_until(c, b"never", timeout=5) == b""
+    _wait(lambda: not relay._conns, what="the relay to close its side")
+    assert hubmod.SHARES.lingering(ref) == 0                 # the hub let go: nothing to wait for

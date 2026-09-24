@@ -52,7 +52,7 @@ from typing import Any
 from pyverify.lease import RunResult
 
 from harness_manager_mps3 import hub as hubmod
-from tests.fakes.l1_fake_hub import FakeHub
+from tests.fakes.l1_fake_hub import FakeHub, FakeShareServer
 
 HUB_HOSTNAME = "mapstone-dev"
 BOARD = "mps3_01"
@@ -587,3 +587,37 @@ def two_sessions(hub: LrFakeHub | None = None, *, host: str = "mapstone-dev.ecs.
     alice = hubmod.HubClient(host, hub.target, runner=hub.as_user("alice"))
     bob = hubmod.HubClient(host, hub.target, runner=hub.as_user("bob"))
     return TwoSessions(hub, alice, bob, {"alice": hub.grant("alice")})
+
+
+class LaggingShareServer(FakeShareServer):
+    """``FakeShareServer`` whose hub notices a client's EOF ``leave_after_s`` late, as the
+    real hub does through the ssh forward: until then the gone client is still counted
+    (``share list`` readers) and still holds the write slot (first writer wins), so a
+    client that connects meanwhile has its writes dropped (``dropped_writes``)."""
+
+    def __init__(self, port_like: Any, tty: str, *, leave_after_s: float = 0.5) -> None:
+        self.leave_after_s = leave_after_s
+        super().__init__(port_like, tty)
+
+    def _client(self, c: Any) -> None:                     # FakeShareServer._client, lagged
+        try:
+            while not self._stop.is_set():
+                data = c.recv(4096)
+                if not data:
+                    self._stop.wait(self.leave_after_s)   # the EOF crosses the forward
+                    break
+                with self._cmu:
+                    is_writer = bool(self._clients) and self._clients[0] is c
+                if not is_writer:
+                    self.dropped_writes += len(data)
+                    continue
+                with self._lock:
+                    self.written += data
+                    self._port.write(data)
+        except OSError:
+            pass
+        finally:
+            with self._cmu:
+                if c in self._clients:
+                    self._clients.remove(c)
+            c.close()
