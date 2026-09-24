@@ -16,7 +16,8 @@ from harness_manager.services.lease import (
 from tests.fakes.lrb_fake_hub import HOST, TARGET, iso
 from tests.fakes.lrb_rig import BID, BOB, CAROL, DAVID, World
 
-VIEW_KEYS = {"lease", "hub", "board", "queue", "request", "incoming", "taken"}
+VIEW_KEYS = {"lease", "hub", "board", "queue", "request", "incoming", "taken",
+             "notes_supported", "notes_reason", "can_revoke", "revoke_reason"}
 
 
 @pytest.fixture(autouse=True)
@@ -110,7 +111,10 @@ def test_the_view_has_exactly_the_api_shape(world):
                                "deadline_at": note.deadline_at, "answer": None}]
     req = vb["request"]
     assert set(req) == {"id", "message", "created_at", "deadline_at", "position", "answer",
-                        "force_available", "force_reason"}
+                        "force_available", "force_reason", "reasked", "reasked_at"}
+    assert (req["reasked"], req["reasked_at"]) == (False, None)
+    assert (va["notes_supported"], va["notes_reason"], va["can_revoke"], va["revoke_reason"]) == (
+        True, "", True, "")                                        # SSH: all of it works
     assert (req["id"], req["message"], req["position"], req["answer"]) == (note.id, "hi", 1, None)
     assert not req["force_available"] and "90 s left" in req["force_reason"]
     assert vb["incoming"] == []                                # twin: not the holder, nothing incoming
@@ -120,7 +124,11 @@ def test_the_view_has_exactly_the_api_shape(world):
     assert answer == {"answer": "keep", "minutes": 5, "message": "soon", "at": iso(world.clock.t - 11)}
     assert a.svc.view(a.hub)["incoming"][0]["answer"] == answer    # D5: the holder sees it too
     assert a.svc.view(None) == {"lease": None, "hub": None, "board": None, "queue": [],
-                                "request": None, "incoming": [], "taken": None}
+                                "request": None, "incoming": [], "taken": None,
+                                "notes_supported": False,
+                                "notes_reason": "this board is not behind a hub",
+                                "can_revoke": False,
+                                "revoke_reason": "this board is not behind a hub"}
 
 
 def test_incoming_leaves_out_stale_notes_whose_requester_is_not_queued(world):

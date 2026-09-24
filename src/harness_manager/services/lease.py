@@ -128,6 +128,8 @@ ACQUIRE_TIMEOUT_S = 3600.0
 VIEW_TTL_S = 10.0
 #: The holder has this long to answer a request before the requester may force it.
 REQUEST_WINDOW_S = 120
+#: What a board without a hub cannot do (view()'s notes_reason and revoke_reason).
+NO_HUB_REASON = "this board is not behind a hub"
 #: Requester and holder both look at the hub this often.
 REQUEST_POLL_S = 10.0
 #: A waiting request survives this many unanswered polls in a row (ssh hiccups) minus one.
@@ -473,6 +475,7 @@ class _Outgoing:
     position: int = 0
     force_announced: Any = False       # the answer_sig it was announced for, or False
     asked_holder: str = ""             # who held the board when the note was written
+    reasked_at: str = ""               # D9: when the note was re-sent to a new holder
     cancel: threading.Event | None = None
     left: bool = False
 
@@ -791,16 +794,28 @@ class LeaseService:
             queue:    [{position, holder, user, mine}]
             request:  {id, message, created_at, deadline_at, position,
                        answer: {answer, minutes, message, at} | null,
-                       force_available, force_reason} | null     # my outgoing request
+                       force_available, force_reason,
+                       reasked, reasked_at} | null     # my outgoing request; reasked: D9
             incoming: [{id, by, user, host, message, created_at, deadline_at,
                         answer: {answer, minutes, message, at} | null}]      # D5
             taken:    {by, reason, at} | null
+            notes_supported, notes_reason    # messages and keep answers (False over REST)
+            can_revoke, revoke_reason        # force-release (REST: an admin token only)
+
+        ``reasked`` is known to the process that is waiting (D9's limit): another process
+        (the CLI's ``lease show``) says False.
         """
         empty: dict[str, Any] = {"lease": None, "hub": None, "board": None, "queue": [],
-                                 "request": None, "incoming": [], "taken": None}
+                                 "request": None, "incoming": [], "taken": None,
+                                 "notes_supported": False, "notes_reason": NO_HUB_REASON,
+                                 "can_revoke": False, "revoke_reason": NO_HUB_REASON}
         if hub is None:
             return empty
-        out = {**empty, "hub": hub.host, "board": self._board_id(hub)}
+        notes_ok, notes_why = self._notes_supported(hub)
+        can, why = self._can_revoke(hub)
+        out = {**empty, "hub": hub.host, "board": self._board_id(hub),
+               "notes_supported": notes_ok, "notes_reason": "" if notes_ok else notes_why,
+               "can_revoke": can, "revoke_reason": "" if can else why}
         self._drop_at_edges(hub)
         shown = self._show(hub)
         stored = self.store.get(hub.host, hub.target)
@@ -836,7 +851,7 @@ class LeaseService:
         if principal:
             ours = self._latest_of(notes, principal)
             if ours is not None:
-                out["request"] = self._request_public(hub, ours, queue, principal)
+                out["request"] = self._request_public(hub, ours, queue, principal, (can, why))
             if here:
                 out["incoming"] = self._incoming_list(hub, notes, principal, queue,
                                                       has_queue=hasattr(shown, "queue"))
@@ -866,7 +881,8 @@ class LeaseService:
                 return int(getattr(e, "position", 0) or 0)
         return 0
 
-    def _request_public(self, hub: Any, note: Any, queue: list[Any], principal: str) -> dict[str, Any]:
+    def _request_public(self, hub: Any, note: Any, queue: list[Any], principal: str,
+                        revoke: tuple[bool, str]) -> dict[str, Any]:
         try:
             answer = self._answer(hub, note.id)
         except HarnessError as exc:
@@ -874,14 +890,16 @@ class LeaseService:
             answer = None
         position = self._position(queue, principal)
         check = force_check(note, answer, position, self._wall())
-        if check.available:
-            can, why = self._can_revoke(hub)
-            if not can:
-                check = ForceCheck(False, why, "refused")
+        if check.available and not revoke[0]:
+            check = ForceCheck(False, revoke[1], "refused")
+        with self._mu:
+            out = self._outgoing.get(_hk(hub))
+        reasked_at = out.reasked_at if out is not None and out.note.id == note.id else ""
         return {"id": note.id, "message": getattr(note, "message", ""),
                 "created_at": iso_norm(note.created_at), "deadline_at": iso_norm(note.deadline_at),
                 "position": position, "answer": _answer_public(answer),
-                "force_available": check.available, "force_reason": check.reason}
+                "force_available": check.available, "force_reason": check.reason,
+                "reasked": bool(reasked_at), "reasked_at": reasked_at or None}
 
     def _incoming_list(self, hub: Any, notes: list[Any], principal: str, queue: list[Any], *,
                        has_queue: bool) -> list[dict[str, Any]]:
@@ -1183,6 +1201,7 @@ class LeaseService:
         log.info("%s now holds %s; the request was sent to them (deadline %s)", holder, hub.target,
                  note.deadline_at)
         out.note, out.asked_holder = note, holder
+        out.reasked_at = iso_norm(note.created_at)
         out.answer = out.answer_sig = None
         out.force_announced = False
         self._forget(hub)

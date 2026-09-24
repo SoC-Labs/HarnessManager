@@ -100,10 +100,23 @@ lease:  {target, holder, user, expires_at, mine} | null
 queue:  [{position, holder, user, mine}]
 request: {id, message, created_at, deadline_at, position,
           answer: {answer, minutes, message, at} | null,
-          force_available: bool, force_reason: str} | null   # my outgoing request
+          force_available: bool, force_reason: str,
+          reasked: bool, reasked_at: str | null} | null   # my outgoing request
 incoming: [{id, by, user, host, message, created_at, deadline_at}]  # requests for my lease
 taken:  {by, reason, at} | null        # the last time my lease was force-released
+notes_supported: bool                  # messages and keep answers work (False over REST)
+notes_reason: str                      # why not; "" when supported
+can_revoke: bool                       # this client may force-release (REST: admin token only)
+revoke_reason: str                     # why not; "" when it may
 ```
+
+- `reasked` is true, and `reasked_at` is when, once the request was re-sent to a new holder
+  (D9); `deadline_at` is then the new deadline. Only the waiting process knows this: another
+  process (the CLI's `lease show`) reports false.
+- The four capability keys come from the hub client: `notes_supported`/`notes_reason` and
+  `can_revoke()` on T8's REST client; an SSH client has both, so they are true and `""`.
+  Without a hub they are false with the reason `this board is not behind a hub`. They are
+  known before any request, so the UI can hide Keep and say why force will not be offered.
 
 | Method and path | Body | Returns |
 |---|---|---|

@@ -174,3 +174,67 @@ def test_rest_without_admin_the_wait_never_offers_force(world):
     world.clock.after(145, lambda: b.svc.leave(BID, b.hub))
     assert b.svc.request(BID, b.hub) == {"left": True}
     assert b.of("lease.force_available") == []
+
+
+# --- CCR-1: what the hub connection can do, in the view -------------------------------------------
+
+
+def test_the_view_says_what_the_hub_connection_can_do(world):
+    a = world.holding()
+    v = a.svc.view(a.hub)                                      # twin: SSH, everything works
+    assert (v["notes_supported"], v["notes_reason"], v["can_revoke"], v["revoke_reason"]) == (
+        True, "", True, "")
+    _rest(a, admin=False)
+    world.clock.advance(11)
+    v = a.svc.view(a.hub)
+    assert v["notes_supported"] is False and "no note store" in v["notes_reason"]
+    assert v["can_revoke"] is False and "admin credential" in v["revoke_reason"]
+    assert v["request"] is None                                # said before any request or deadline
+    _rest(a, admin=True)
+    v = a.svc.view(a.hub)
+    assert v["can_revoke"] is True and v["revoke_reason"] == "" and v["notes_supported"] is False
+
+
+def test_a_hub_that_cannot_say_its_role_cannot_revoke(world):
+    from harness_manager.core.errors import UnreachableError
+
+    a = world.holding()
+
+    def fails():
+        raise UnreachableError("GET /whoami: connection refused")
+
+    a.hub.client.can_revoke = fails
+    v = a.svc.view(a.hub)
+    assert v["can_revoke"] is False and "connection refused" in v["revoke_reason"]
+
+
+# --- CCR-1 over T8's REST fake (the real RestHubClient; 127.0.0.1 only) -------------------------
+
+
+def test_rest_client_capabilities_reach_the_view(tmp_path):
+    from harness_manager.services.lease import LeaseService
+    from tests.fakes.t8_hub_rest import FakeFpgahub, client_for
+
+    class Ref:
+        def __init__(self, client):
+            self.host, self.target, self.client = "hub.test", "mps3_01_pl", client
+
+    hub = FakeFpgahub().start()
+    svc = LeaseService(tmp_path / "s", tick_s=3600.0)
+    try:
+        writer = Ref(client_for(hub, hub.add_token("alice", "write")))
+        v = svc.view(writer)
+        assert v["notes_supported"] is False and v["notes_reason"]
+        assert v["can_revoke"] is False and "admin" in v["revoke_reason"]
+        assert v["board"] == "mps3_01"
+        admin = Ref(client_for(hub, hub.add_token("david", "admin")))     # twin: an admin token
+        svc2 = LeaseService(tmp_path / "s2", tick_s=3600.0)
+        try:
+            v = svc2.view(admin)
+            assert v["can_revoke"] is True and v["revoke_reason"] == ""
+            assert v["notes_supported"] is False                         # REST all the same
+        finally:
+            svc2.close()
+    finally:
+        svc.close()
+        hub.close()

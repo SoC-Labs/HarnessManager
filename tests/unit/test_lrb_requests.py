@@ -444,6 +444,10 @@ def test_the_wait_re_asks_a_new_holder_itself(world):
     carol = world.queued_by_hand(CAROL, age_s=0)
     phases: list[str] = []
 
+    def before():                                             # t0+10: asked david, not re-asked
+        req = b.svc.view(b.hub)["request"]
+        assert (req["reasked"], req["reasked_at"]) == (False, None)
+
     def carol_gets_it():                                      # t0+130: the first deadline is past
         a.svc.respond(BID, a.hub, carol.id, "release")
         c.svc.acquire(c.hub, board_id=BID, heartbeat=False)
@@ -453,9 +457,20 @@ def test_the_wait_re_asks_a_new_holder_itself(world):
         c.svc.watch_due(force=True)
         assert [w["deadline_at"] for w in c.of("lease.wanted")] == [iso(t0 + 250)]
         assert b.of("lease.force_available") == []            # not against carol, not yet
-        assert not b.svc.view(b.hub)["request"]["force_available"]
+        req = b.svc.view(b.hub)["request"]
+        assert not req["force_available"]
+        assert (req["reasked"], req["reasked_at"]) == (True, iso(t0 + 130))   # CCR-2, explicit
+        assert req["deadline_at"] == iso(t0 + 250)
+        b2 = world.session(BOB, name="bob-cli")               # D9's limit: another process
+        assert b2.svc.view(b2.hub)["request"]["reasked"] is False
+        other = world.queued_by_hand(BOB, age_s=-1)           # twin: a newer note of bob's,
+        b.svc.forget(b.hub)                                   # not the one that was re-sent
+        req = b.svc.view(b.hub)["request"]
+        assert req["id"] == other.id and req["reasked"] is False
+        world.hub.notes.pop(other.id)
         b.svc.leave(BID, b.hub)
 
+    world.clock.after(5, before)
     world.clock.after(125, carol_gets_it)
     world.clock.after(135, check)
     assert b.svc.request(BID, b.hub, progress=phases_into(phases)) == {"left": True}

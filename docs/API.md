@@ -201,7 +201,7 @@ docs/LEASE_REQUESTS.md is the design, with the lead decisions D1–D8.
 | `DELETE /boards/{bid}/lease/queue` | `{left: bool}`: leaves the queue and withdraws the request. |
 | `DELETE /boards/{bid}/lease/taken` | `{dismissed: bool}`: forgets the last forced release of our lease (D11). `GET /lease` then returns `taken: null` until the next one. |
 
-`GET /boards/{bid}/lease` adds `queue`, `request`, `incoming` (each with its `answer` or `null`), `taken` and `board` (the physical board a force revokes, `mps3_01`). The fields are in docs/LEASE_REQUESTS.md "API". Times are ISO 8601 UTC with `+00:00`.
+`GET /boards/{bid}/lease` adds `queue`, `request`, `incoming` (each with its `answer` or `null`), `taken` and `board` (the physical board a force revokes, `mps3_01`). It also says what this hub connection can do, before any request: `notes_supported` and `notes_reason` (messages and Keep; false over fpgahub's REST API), and `can_revoke` and `revoke_reason` (force-release; over REST only with an admin token). `request.reasked` and `request.reasked_at` say that the request was re-sent to a new holder (D9). The fields are in docs/LEASE_REQUESTS.md "API". Times are ISO 8601 UTC with `+00:00`.
 
 Events: `lease.wanted`, `lease.answered`, `lease.force_available`, `lease.taken` and `lease.left` (docs/CONTRACTS.md). The lease service publishes them; the events WebSocket forwards them unchanged.
 
