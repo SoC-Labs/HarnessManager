@@ -346,3 +346,58 @@ def test_fetching_the_kit_does_not_wait_for_vivado(tmp_path):
     assert s["tools"] == "next" and s["kit"] == "next" and s["build"] == "blocked"
     assert g.next.id == "tools"                          # the first of them
     assert "waits for 2 tools, 3 kit" in g.steps[4].reason
+
+
+# --- KIT-UI: the receipt and the troubleshooting cards in the guide's JSON ------------------------
+
+
+def test_the_guide_json_carries_the_newest_receipt_and_its_twin_has_none(kits, tmp_path):
+    bdir = tmp_path / "build"
+    kf.passed_build(bdir, state="failed", gates=[
+        {"gate": "static_id", "verdict": "PASS", "detail": "CRC-32 is 0x72BB0A36"},
+        {"gate": "rm_timing", "verdict": "FAIL", "detail": "setup WNS -0.412 ns"}])
+    j = guide.guide(kits, static_id="0x72BB0A36", build_dir=bdir, vivado=found()).to_json()
+    r = j["receipt"]
+    assert r["state"] == "failed" and r["path"].endswith("out/spike_rm_build.json")
+    assert [(g["gate"], g["verdict"]) for g in r["gates"]] == [("static_id", "PASS"),
+                                                               ("rm_timing", "FAIL")]
+    assert guide.guide(kits, static_id="0x72BB0A36", vivado=found()).to_json()["receipt"] is None
+    assert guide.guide(kits, static_id="0x72BB0A36", build_dir=tmp_path / "empty",
+                       vivado=found()).to_json()["receipt"] is None
+
+
+def test_the_troubleshooting_cards_are_every_gate_in_order_and_the_checks(kits):
+    t = guide.guide(kits, static_id="0x72BB0A36", vivado=found()).to_json()["troubleshooting"]
+    assert [g["gate"] for g in t["gates"]] == list(guide.GATE_HELP)
+    assert all(g["fix"] for g in t["gates"])
+    assert t["checks"]["board_static"] and t["checks"]["xdc"]
+    assert t["checks"]["vivado"] == guide.GATE_HELP["vivado_version"]
+
+
+def card_for(name: str) -> str:
+    """The card a check uses (docs/API.md: ``partial: <name>`` -> ``<name>``; ``xdc:*`` -> xdc)."""
+    key = re.sub(r"^(partial|clearing):\s*", "", name)
+    if key in guide.CHECK_HELP:
+        return key
+    return "xdc" if key.startswith("xdc:") else ""
+
+
+def test_every_check_that_refuses_a_bad_pair_or_receipt_has_a_card(tmp_path):
+    a = mkit.make_kit_adapter()
+    gold = kf.golden_bitstreams()
+    names: set[str] = set()
+    for bad in ("full_image.bit", "truncated_partial.bin", "wrong_part.bit",
+                "other_device_partial.bin", "other_partition_partial.bin"):
+        p = tmp_path / bad
+        p.write_bytes(gold[bad])
+        checks, _ = a.check_pair(p, None, kit=None)
+        names |= {c.name for c in checks if c.state == "mismatch"}
+    swapped = tmp_path / "swapped.bin"
+    swapped.write_bytes(gold["good_partial_clear.bin"])
+    names |= {c.name for c in a.check_pair(swapped, None, kit=None)[0] if c.state == "mismatch"}
+    r = build.load(kf.passed_build(tmp_path / "b", netlist_rm_id="0x010080F1"))
+    names |= {c.name for c in build.receipt_checks(r) if c.state == "mismatch"}
+    assert {"rm_id", "partial: role"} <= names
+    assert {n: card_for(n) for n in names if not card_for(n)} == {}
+    # the twin: a name with no card is caught
+    assert card_for("partial: no_such_check") == "" and card_for("xdc:direction") == "xdc"

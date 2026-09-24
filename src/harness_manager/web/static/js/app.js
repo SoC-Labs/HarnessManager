@@ -13,6 +13,7 @@ import { DebugSection } from "./sections/debug.js";
 import { OverviewSection } from "./sections/overview.js";
 import { ClocksSection } from "./sections/clocks.js";
 import { BoardXdcSection } from "./sections/xdc.js";
+import { BuildSection } from "./sections/build.js";          // KIT-UI
 import { PowerSection } from "./sections/power.js";
 import { ProgramSection } from "./sections/program.js";
 import { SdSection } from "./sections/sd.js";
@@ -28,6 +29,10 @@ import { CheckChip, Chip, Icon, LinkLine, Reason, Seg, Spinner } from "./ui.js";
 
 export const SECTIONS = [
   { key: "overview", label: "Overview", icon: "gauge", render: OverviewSection },
+  // KIT-UI (david K9): the journey reads XDC -> Build -> Program, so XDC moved up from
+  // before Activity and Build sits between the two.
+  { key: "xdc", label: "XDC", icon: "file-code", render: BoardXdcSection },
+  { key: "build", label: "Build", icon: "file-cog", render: BuildSection },
   { key: "program", label: "Program", icon: "upload", render: ProgramSection },
   { key: "consoles", label: "Consoles", icon: "terminal", render: ConsolesSection, fill: true },
   { key: "debug", label: "Debug", icon: "bug", render: DebugSection },
@@ -35,7 +40,6 @@ export const SECTIONS = [
   { key: "clocks", label: "Clocks", icon: "clock", render: ClocksSection },
   { key: "sd", label: "SD card", icon: "hard-drive", render: SdSection },
   { key: "update", label: "Update", icon: "rocket", render: UpdateSection },
-  { key: "xdc", label: "XDC", icon: "file-code", render: BoardXdcSection },
   { key: "activity", label: "Activity", icon: "history", render: ActivitySection },
 ];
 

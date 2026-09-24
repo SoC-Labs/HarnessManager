@@ -94,6 +94,68 @@ GATE_HELP: dict[str, str] = {
                  "before HM_RM_BUILD_FAILED.",
 }
 
+#: One card per check that can refuse after (or before) the build: ``kit check``, ``kit
+#: pack``, ``kit script`` and the kit's own checks. The check's detail says what differed;
+#: this says what to do. A pair check is named ``partial: <name>`` or ``clearing: <name>``
+#: (the card is ``<name>``); ``xdc`` covers every ``xdc:<code>`` without its own card.
+CHECK_HELP: dict[str, str] = {
+    "build": "the build did not pass: fix the gate its receipt names, then run the build again.",
+    "rm_id": "the netlist drives another rm_id than RM_ID (or 0, the greybox's): make the "
+             "wrapper's localparam and the design's rm_id one value, then rebuild.",
+    "static_id": "the receipt names no static: it was not written by build_rm.tcl, or was "
+                 "edited; rebuild.",
+    "partial": "the partial is not the file the build wrote (another build's, or half-copied): "
+               "copy out/ from the build again, or rebuild.",
+    "clearing": "the clearing is not the file the build wrote (another build's, or half-copied): "
+                "copy out/ from the build again, or rebuild.",
+    "ltx": "the .ltx is not the one the build wrote: copy out/ again; a stale .ltx names probes "
+           "the partial does not have.",
+    "board_static": "the build is for another static than the board runs: fetch the board's kit, "
+                    "generate the script again and rebuild. A partial for another static can "
+                    "destroy the FPGA's configuration, and the static_id alone cannot see it.",
+    "kit": "the kit of the build's static is not cached, so the partition's frames were not "
+           "compared: fetch the kit, then check again.",
+    "bit_header_length": "not a Xilinx .bit: use the .bit or .bin the build wrote in out/.",
+    "part": "a bitstream for another device: use this build's pair.",
+    "partial_flag": "a full image, not a partial: use the <name>_partial.bit the build wrote.",
+    "stream": "the file is truncated or not a configuration stream: copy it again.",
+    "idcode": "another device's bitstream, or a multi-SLR image: use this build's pair.",
+    "device_global_writes": "the stream writes IPROG, AXSS or WBSTAR, or passes to another SLR: "
+                            "a partial never does. It is a full image: use this build's partial.",
+    "role": "the partial and the clearing are swapped (a partial issues START, a clearing "
+            "AGHIGH): swap the two files.",
+    "frame_box": "frames outside the partition: a partial for another partition or another "
+                 "floorplan.",
+    "vocabulary": "commands or registers the kit's own partials never use: not a partial of this "
+                  "partition.",
+    "bit_bin_pair": "the .bin is not the .bit's payload: a .bin from another build; copy out/ "
+                    "again.",
+    "clearing_fits": GATE_HELP["clearing_fits"],
+    "clearing_pairs_partial": "the clearing's frames are not inside the partial's: a clearing "
+                              "from another RM.",
+    "xdc:static_id": "HM's pin model describes another static, so it cannot write this kit's XDCs "
+                     "or check the wrapper: build for the static the model has (the XDC section "
+                     "names it).",
+    "xdc": "the design fails an XDC check: fix the port or group it names (the XDC section "
+           "previews the same checks).",
+    "rm_id_clash": "the design id is another design's: Program and the CLCD would show that "
+                   "name. Take the rm_id HM proposes (add it to the design to keep it).",
+    "rm_id_range": "the design id is in the platform's range: user designs take 0x8000-0xFFFF. "
+                   "Take the rm_id HM proposes.",
+    "files": "a kit file does not match its sha256 (corrupt or edited): fetch the kit again.",
+    "shell_id": "the kit is for another static than the board runs: fetch the board's own kit.",
+    "usercode": "the kit is for another implementation run of this static: fetch the kit again "
+                "from the release that fielded the board.",
+    "vivado": GATE_HELP["vivado_version"],
+}
+
+
+def troubleshooting() -> dict[str, Any]:
+    """The cards the Build section lists: every gate of build_rm.tcl (in order) and every
+    check that can refuse (``GATE_HELP``, ``CHECK_HELP``)."""
+    return {"gates": [{"gate": g, "fix": text} for g, text in GATE_HELP.items()],
+            "checks": dict(CHECK_HELP)}
+
 
 @dataclass
 class Step:
@@ -124,6 +186,9 @@ class Guide:
     build_dir: str
     steps: list[Step]
     rm_id: dict[str, Any] = field(default_factory=dict)
+    #: The newest receipt in ``build_dir`` as ``BuildReceipt.to_json`` (its gates and where
+    #: it stopped), or None.
+    receipt: dict[str, Any] | None = None
 
     @property
     def next(self) -> Step | None:
@@ -135,7 +200,8 @@ class Guide:
                 "kit_id": self.kit_id, "profile": self.profile, "vivado": self.vivado,
                 "design": self.design, "build_dir": self.build_dir, "rm_id": self.rm_id,
                 "steps": [s.to_json() for s in self.steps],
-                "next": ({"step": nxt.id, "actions": nxt.actions} if nxt else None)}
+                "next": ({"step": nxt.id, "actions": nxt.actions} if nxt else None),
+                "receipt": self.receipt, "troubleshooting": troubleshooting()}
 
 
 def _cmd(text: str) -> dict[str, str]:
@@ -335,7 +401,8 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
     return Guide(pack, sid, board_id, kit.manifest.kit_id if kit else "",
                  profile.__dict__ if profile else None, found.to_json(),
                  design if isinstance(design, str) else (str(design.get("name")) if design else ""),
-                 str(build_dir) if build_dir else "", list(steps.values()), rm_info)
+                 str(build_dir) if build_dir else "", list(steps.values()), rm_info,
+                 receipt.to_json() if receipt is not None else None)
 
 
 def _resolve(steps: dict[str, Step], raw: dict[str, str]) -> None:

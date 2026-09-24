@@ -68,6 +68,16 @@ export const ENDPOINTS = Object.freeze({
   helpTabs: ["GET", "/help/tabs"],
   job: ["GET", "/jobs/{id}"],
   events: ["WS", "/events"],
+  // --- KIT-UI: the Build section (docs/API.md "DUT build kits and the build guide") ---
+  boardKit: ["GET", "/boards/{bid}/kit"],
+  boardGuide: ["GET", "/boards/{bid}/guide"],          // ?design=&build_dir= (call's query)
+  kitGet: ["GET", "/kits/{static_id}"],
+  kitFetch: ["POST", "/kits/fetch"],
+  kitZip: ["GET", "/kits/{static_id}/zip"],
+  guideScript: ["POST", "/guide/script"],
+  kitCheck: ["POST", "/kits/check"],
+  kitPack: ["POST", "/kits/pack"],
+  // --- end KIT-UI ---
 });
 
 export const ADDITIVE = Object.freeze([]);
@@ -177,9 +187,13 @@ function setConnection(state) {
 
 // --- calls ---------------------------------------------------------------------------------
 
-async function send(name, params, body, accept) {
+async function send(name, params, body, accept, query = null) {
   const [method] = ENDPOINTS[name];
   const url = endpointUrl(name, params);
+  // KIT-UI: a query string (GET /boards/{bid}/guide?design=&build_dir=); empty values are left out.
+  for (const [k, v] of Object.entries(query || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
   const headers = { Accept: accept };
   if (token) headers.Authorization = `Bearer ${token}`;
   const init = { method, headers, cache: "no-store" };
@@ -216,8 +230,8 @@ function failure(res, data) {
   }, res.status);
 }
 
-export async function call(name, params = {}, body = undefined) {
-  const res = await send(name, params, body, "application/json");
+export async function call(name, params = {}, body = undefined, query = null) {
+  const res = await send(name, params, body, "application/json", query);
   let data = null;
   try { data = await res.json(); } catch (e) { data = null; }
   if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
