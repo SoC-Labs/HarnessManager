@@ -283,6 +283,10 @@ def test_a_version_that_does_not_stay_up_is_rolled_back_and_never_offered_again(
     rec = w.last_apply(apply_id)
     assert rec["result"] == "rolled-back", w.tail()
     assert rec["phase"] == phase and rec["to"] == version, rec
+    if version == DIES_AT_START:        # the reason is the new daemon's own last words
+        assert "this version cannot start" in rec["reason"], rec
+    log = (w.state / "update" / "apply.log").read_text()
+    assert log.count("result rolled-back") == 1, log            # one line per event
     # the OLD version answers on the same port, with the same token, the board open again
     h = w.health(want=OLD, timeout=60, other_than=first["pid"])
     info = json.loads((w.state / "daemon.json").read_text())

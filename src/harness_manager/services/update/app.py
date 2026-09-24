@@ -462,7 +462,7 @@ class AppUpdater:
         removed = []
         self.pruned_skipped: dict[str, str] = {}
         for v in staged[max(0, keep - len(protected - {''})):]:
-            busy = venv_in_use(self.layout.venv(v), v, state_dir=state_dir,
+            busy = venv_in_use(self.layout.venv(v), v, state_dir=state_dir or self.state_dir,
                                running_version=self.running_version)
             if busy:
                 self.pruned_skipped[v] = busy

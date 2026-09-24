@@ -426,6 +426,8 @@ def _apply(ctx: Ctx, svc: Any, info: Any) -> int:
             rec = {"result": done.get("result"), "reason": done.get("reason"), "to": version}
             break
         now = ap.get("state", "restarting") if code == 200 else "restarting"
+        if now == "idle":                  # the new daemon answers; the helper watches it
+            now = "restarted: the helper checks the new version stays up"
         waiting = ", ".join(f"{w['kind']} on {w['board_id'] or 'the service'}"
                             for w in ap.get("waiting_on") or [])
         line = f"{now}" + (f": waiting for {waiting}" if waiting and now == "draining" else "")

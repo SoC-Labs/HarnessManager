@@ -201,8 +201,9 @@ def snapshot(d: Any, plan: dict[str, Any]) -> dict[str, Any]:
             session = d.engine.session(bid)
         except HarnessError:
             continue
-        owner = d.engine.lock_owner(bid)
-        note = (owner.note if owner is not None else "") or ""
+        lock_owner = getattr(d.engine, "lock_owner", None)
+        owner = lock_owner(bid) if callable(lock_owner) else None
+        note = (getattr(owner, "note", "") if owner is not None else "") or ""
         if note.startswith(DAEMON_NOTE_PREFIX):
             note = note[len(DAEMON_NOTE_PREFIX):].strip()
         row: dict[str, Any] = {
@@ -679,14 +680,15 @@ class _Log:
         self.path = path
 
     def __call__(self, text: str) -> None:
+        """One line into apply.log (the helper's own stdout and stderr go there too, so the
+        line is written once, by this)."""
         line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} apply: {text}"
         try:
             with open(self.path, "a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
         except OSError:
-            pass
-        sys.stderr.write(line + "\n")
-        sys.stderr.flush()
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
 
 
 def _health(host: str, port: int, *, token: str = "", path: str = "/api/v1/health",
@@ -784,12 +786,26 @@ def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detac
             **extra})
         say(f"result {result}" + (f" ({phase}: {reason})" if reason else ""))
 
-    def tail() -> str:
+    mark = {"offset": 0}
+
+    def log_mark() -> None:
+        """What a daemon started from now on writes to daemon.log begins here."""
         try:
-            lines = daemon_log_path(sd).read_text(errors="replace").splitlines()
+            mark["offset"] = daemon_log_path(sd).stat().st_size
+        except OSError:
+            mark["offset"] = 0
+
+    def tail() -> str:
+        """The last lines the daemon the helper started wrote (its own error, not the old
+        daemon's shutdown)."""
+        try:
+            with open(daemon_log_path(sd), "rb") as fh:
+                fh.seek(mark["offset"])
+                lines = fh.read().decode(errors="replace").splitlines()
         except OSError:
             return ""
-        return " | ".join(ln.strip() for ln in lines[-3:] if ln.strip())[-400:]
+        lines = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("--- ")]
+        return " | ".join(lines[-2:])[-300:]
 
     try:
         resume = read_resume(Path(a.resume))
@@ -817,6 +833,7 @@ def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detac
         su.write_json(su.resume_path(sd), {**resume, "reason": why}, private=True)
         py = Path(sys.executable) if pointer == a.from_pointer else python_for(up, pointer)
         say(f"starting {want} again ({py})")
+        log_mark()
         child = spawn([str(py), "-m", "harness_manager.daemon", "--state-dir", str(sd),
                        "--resume", str(su.resume_path(sd))], env, daemon_log_path(sd), sd)
         ok, how, _ = wait_healthy(host, port, token, want, child, health_s=a.health_s,
@@ -854,6 +871,7 @@ def run_helper(a: argparse.Namespace, *, spawn: Callable[..., Any] = spawn_detac
         su.write_json(su.apply_record_path(sd), {
             "pid": os.getpid(), "id": a.id, "from": a.from_version, "to": a.to,
             "python_version": a.from_version, "started_at": time.time(), "phase": "starting"})
+        log_mark()
         child = spawn([str(py), "-m", "harness_manager.daemon", "--state-dir", str(sd),
                        "--resume", a.resume], env, daemon_log_path(sd), sd)
         ok, why, phase = wait_healthy(host, port, token, a.to, child, health_s=a.health_s,
