@@ -111,10 +111,12 @@ def test_the_view_has_exactly_the_api_shape(world):
     assert va["board"] == vb["board"] == "mps3_01"                  # D4
     assert va["incoming"] == [{"id": note.id, "by": BOB, "user": "bob", "host": "lab-pc",
                                "message": "hi", "created_at": note.created_at,
-                               "deadline_at": note.deadline_at, "answer": None}]
+                               "deadline_at": note.deadline_at, "answer": None,
+                               "tapped_at": None}]                            # PANEL-1
     req = vb["request"]
     assert set(req) == {"id", "message", "created_at", "deadline_at", "position", "answer",
-                        "force_available", "force_reason", "reasked", "reasked_at"}
+                        "force_available", "force_reason", "reasked", "reasked_at",
+                        "tapped_at"}                                       # PANEL-1
     assert (req["reasked"], req["reasked_at"]) == (False, None)
     assert (va["notes_supported"], va["notes_reason"], va["can_revoke"], va["revoke_reason"]) == (
         True, "", True, "")                                        # SSH: all of it works

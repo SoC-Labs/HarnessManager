@@ -72,12 +72,15 @@ works for show/acquire/heartbeat/release; the request verbs then say what is mis
 
 Events: ``lease.state {target, state: held|queued|released|expired|lost, holder,
 expires_at}``, and ``lease.wanted``, ``lease.answered``, ``lease.force_available``,
-``lease.taken``, ``lease.left`` (docs/LEASE_REQUESTS.md).
+``lease.taken``, ``lease.left`` (docs/LEASE_REQUESTS.md), and ``lease.tapped {id, by, at}``
+when someone at the board tapped the front panel's request banner (``notify_holder``, CCR
+PANEL-1: a notice, never a release).
 """
 
 from __future__ import annotations
 
 import contextlib
+import copy
 import getpass
 import json
 import logging
@@ -117,6 +120,7 @@ TOPIC_ANSWERED = "lease.answered"
 TOPIC_FORCE_AVAILABLE = "lease.force_available"
 TOPIC_TAKEN = "lease.taken"
 TOPIC_LEFT = "lease.left"
+TOPIC_TAPPED = "lease.tapped"
 CAPABILITY = "lease"
 REQUEST_CAPABILITY = "lease requests"
 DEFAULT_TTL_S = 3600
@@ -642,6 +646,10 @@ class LeaseService:
         self._chassis_failed: dict[tuple[str, str], float] = {}
         self._viewed: dict[tuple[str, str], float] = {}   # hub key -> wall time of the last view
         self._hubs: dict[str, Any] = {}                   # board id -> its hub (hub events)
+        # PANEL-2: the last view built per hub, (monotonic time, view), for view(cached_only)
+        self._views: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+        # PANEL-1: taps on the front panel's request banner, request id -> (seq, tapped_at)
+        self._taps: dict[tuple[str, str], dict[str, tuple[int, str]]] = {}
 
     # -- hub reads (cached) -----------------------------------------------------------------------
 
@@ -797,6 +805,7 @@ class LeaseService:
         with self._mu:
             for k in [k for k in self._cache if k[:2] == _hk(hub)]:
                 del self._cache[k]
+            self._views.pop(_hk(hub), None)           # PANEL-2: never hand out a stale view
 
     def _principal(self, hub: Any, *, required: bool = False) -> str:
         """This client's principal on the hub (``name@host``), learnt once per hub."""
@@ -891,7 +900,8 @@ class LeaseService:
 
     # -- the view -------------------------------------------------------------------------------
 
-    def view(self, hub: Any) -> dict[str, Any]:
+    def view(self, hub: Any, *, cached_only: bool = False,
+             max_age_s: float | None = None) -> dict[str, Any] | None:
         """``GET /boards/{bid}/lease`` (docs/LEASE_REQUESTS.md, API)::
 
             lease:    {target, holder, user, expires_at, mine,
@@ -902,9 +912,11 @@ class LeaseService:
             request:  {id, message, created_at, deadline_at, position,
                        answer: {answer, minutes, message, at} | null,
                        force_available, force_reason,
-                       reasked, reasked_at} | null     # my outgoing request; reasked: D9
+                       reasked, reasked_at,             # my outgoing request; reasked: D9
+                       tapped_at} | null                # PANEL-1
             incoming: [{id, by, user, host, message, created_at, deadline_at,
-                        answer: {answer, minutes, message, at} | null}]      # D5
+                        answer: {answer, minutes, message, at} | null,       # D5
+                        tapped_at}]                                         # PANEL-1
             taken:    {by, reason, at} | null
             notes_supported, notes_reason    # messages and keep answers (False over REST)
             can_revoke, revoke_reason        # force-release (REST: an admin token only)
@@ -915,6 +927,14 @@ class LeaseService:
         ``holder_kind`` (D12, ``holder_kind()``): ``"hm"`` when a Harness Manager session is
         known to hold the lease (this one, or one that answered our request), else
         ``"unknown"`` (maybe a script): force-release then needs the board's name typed.
+
+        ``tapped_at`` (CCR PANEL-1, ``notify_holder``): when someone at the board last tapped
+        the front panel's banner for that request, as this process saw it, else null.
+
+        ``cached_only=True`` (CCR PANEL-2, the presence beat): the last view this service
+        built for the hub, copied, with no hub call at all; None when there is none, when it
+        is older than ``max_age_s``, or since a lease change dropped it (every ``lease.state``,
+        a hub event, a request's deadline). Without a hub: the empty view, as always.
         """
         empty: dict[str, Any] = {"lease": None, "hub": None, "board": None, "queue": [],
                                  "request": None, "incoming": [], "taken": None,
@@ -922,6 +942,12 @@ class LeaseService:
                                  "can_revoke": False, "revoke_reason": NO_HUB_REASON}
         if hub is None:
             return empty
+        if cached_only:
+            with self._mu:
+                hit = self._views.get(_hk(hub))
+            if hit is None or (max_age_s is not None and self._clock() - hit[0] > max_age_s):
+                return None
+            return copy.deepcopy(hit[1])
         notes_ok, notes_why = self._notes_supported(hub)
         can, why = self._can_revoke(hub)
         out = {**empty, "hub": hub.host, "board": self._board_id(hub),
@@ -971,9 +997,82 @@ class LeaseService:
             kind, why = holder_kind(req.get("answer") if req else None, asked=req is not None,
                                     here=here, mine=mine, notes_ok=notes_ok)
             out["lease"].update(holder_kind=kind, holder_kind_reason=why)
+        taps = self._taps_for(hub, {getattr(n, "id", "") for n in notes})
+        if out["request"] is not None:
+            out["request"]["tapped_at"] = taps.get(out["request"]["id"])
+        for inc in out["incoming"]:
+            inc["tapped_at"] = taps.get(inc["id"])
         taken = self.store.get_taken(hub.host, hub.target)
         out["taken"] = {**taken, "at": iso_norm(taken.get("at"))} if taken else None
+        with self._mu:
+            self._views[_hk(hub)] = (self._clock(), copy.deepcopy(out))
         return out
+
+    def _taps_for(self, hub: Any, live: set[str]) -> dict[str, str]:
+        """PANEL-1: request id -> tapped_at, for the notes still on the hub (the rest go)."""
+        with self._mu:
+            taps = self._taps.get(_hk(hub), {})
+            for rid in [r for r in taps if r not in live]:
+                del taps[rid]
+            return {rid: at for rid, (_seq, at) in taps.items()}
+
+    # -- the front panel (CCR PANEL-1) ------------------------------------------------------------
+
+    def notify_holder(self, board_id: str, hub: Any, *, seq: int, at: float) -> dict[str, Any]:
+        """Someone at the board tapped the lease-request banner on its front panel (decision
+        P2: a tap notifies the holder; it never releases).
+
+        The banner shows the open request: the oldest request note for the board with no
+        answer yet. Its ``tapped_at`` is recorded here (``view()``: ``incoming[].tapped_at``
+        in the holder's Harness Manager, ``request.tapped_at`` in the requester's) and
+        ``lease.tapped {id, by, at}`` is published, once per tap (``seq``; presence calls this
+        in every Harness Manager that watches the board, since the tap ring is never
+        acknowledged). ``notified`` is True where the lease is held (this process has its
+        token): there the holder is told. Elsewhere the tap is still recorded.
+
+        Reads the request notes and their answers (cached for 10 s); writes nothing to the
+        hub, and never releases, answers, forces or leaves. Returns
+        ``{"notified": bool, "request": {"id", "by"} | None}``.
+        """
+        nothing: dict[str, Any] = {"notified": False, "request": None}
+        if hub is None:
+            return nothing
+        self._board_for(hub, board_id)
+        notes = sorted(self._safe_notes(hub),
+                       key=lambda n: (parse_utc(getattr(n, "created_at", "")) or 0.0,
+                                      getattr(n, "id", "")))
+        note = None
+        for n in notes:
+            try:
+                answered = self._answer(hub, n.id) is not None
+            except HarnessError as exc:
+                log.warning("reading the answer to %s on %s: %s", n.id, hub.host, exc.message)
+                answered = False
+            if not answered:
+                note = n
+                break
+        if note is None:
+            return nothing                          # no open request: the banner was stale
+        when = iso_utc(at) if isinstance(at, (int, float)) and not isinstance(at, bool) \
+            and at > 0 else iso_utc(self._wall())
+        request = {"id": note.id, "by": getattr(note, "by", "")}
+        key = _hk(hub)
+        with self._mu:
+            taps = self._taps.setdefault(key, {})
+            seen = taps.get(note.id)
+            fresh = seen is None or seen[0] != seq
+            if fresh:
+                taps[note.id] = (seq, when)
+                hit = self._views.get(key)
+                if hit is not None:                 # the cached view says so too (PANEL-2)
+                    view = hit[1]
+                    for entry in [view.get("request") or {}, *(view.get("incoming") or [])]:
+                        if entry.get("id") == note.id:
+                            entry["tapped_at"] = when
+        if fresh:
+            self._publish(TOPIC_TAPPED, board_id, {**request, "at": when})
+        here = self.store.get(hub.host, hub.target) is not None
+        return {"notified": here, "request": request}
 
     def _safe_notes(self, hub: Any) -> list[Any]:
         try:

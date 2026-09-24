@@ -185,8 +185,11 @@ class FakeLeaseService(LeaseService):
 
     # -- the frozen additions -------------------------------------------------------------------
 
-    def view(self, hub: Any) -> dict[str, Any]:
+    def view(self, hub: Any, *, cached_only: bool = False,
+             max_age_s: float | None = None) -> dict[str, Any] | None:
         w = self.world
+        if cached_only:                      # PANEL-2: this fake keeps no view; read it again
+            return None
         w.calls.append(("view",))
         if hub is None:
             return {"lease": None, "hub": None}

@@ -46,17 +46,25 @@ JOB_WORDS = {"deploy": "program", "restore": "restore", "reboot": "reboot",
              "power_cycle": "power", "debug_up": "debug", "sd_backup": "backup",
              "sd_install": "install", "sd_restore": "restore", "update_check": "update",
              "update_harness": "update", "update_rollback": "rollback"}
+#: CCR PANEL-2: a beat takes the lease service's last view (no hub call) while it is at most
+#: this old; an older one, or none (a lease change drops it), is read again.
+LEASE_VIEW_MAX_AGE_S = 60.0
+
+
+def beat_lease_view(leases: Any, hub: Any) -> dict[str, Any] | None:
+    """The lease view a presence beat relays (CCR PANEL-2): the lease service's cached view
+    when it has a recent one (no ssh to the hub), else an ordinary read."""
+    if hub is None or leases is None:
+        return None
+    cached = leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
+    return cached if cached is not None else leases.view(hub)
 
 
 def register(ctx: RouteContext) -> None:
     d = ctx.daemon
 
     def lease_view(session: Any) -> dict[str, Any] | None:
-        hub = getattr(session, "hub", None)
-        leases = getattr(d, "leases", None)
-        if hub is None or leases is None:
-            return None
-        return leases.view(hub)
+        return beat_lease_view(getattr(d, "leases", None), getattr(session, "hub", None))
 
     def job_of(board_id: str) -> HelloJob | None:
         job = d.gates.busy(board_id)

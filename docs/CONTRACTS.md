@@ -40,6 +40,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `lease.force_available` `{id}` | this session's request is unanswered past its deadline (or its keep ran out), at the head of the queue (LR-B, LR-C) |
 | `lease.taken` `{by, reason, at}` | this session's lease was force-released by someone else (LR-B, LR-C) |
 | `lease.left` `{}` | this session left the queue and withdrew its request (LR-B, LR-C) |
+| `lease.tapped` `{id, by, at}` | someone at the board tapped the front panel's banner for the open lease request (the oldest unanswered one); `GET /lease` then has `tapped_at` on it (`incoming[]` for the holder, `request` for the requester). A notice: nothing is released, answered, forced or left (CCR PANEL-1, `LeaseService.notify_holder`) |
 | `hub.event` `{type, ts, target, board, data}` | fpgahub pushed a lease or share event about the board's target or its physical board (T8; `data` is fpgahub's own payload, never a token) |
 | `hub.stream` `{state: connecting\|up\|down\|refused\|closed, detail, url, reconnects}` | the board's fpgahub event stream changed state (T8) |
 | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | harness-manager-daemon jobs and back-pressure (docs/API.md) |

@@ -90,7 +90,7 @@ FORCE_KIND = "lease_force"
 LEASE_KINDS = frozenset({LEASE_KIND, REQUEST_KIND, FORCE_KIND})
 #: The events the lease service publishes for requests (docs/LEASE_REQUESTS.md, "Events").
 REQUEST_TOPICS = ("lease.wanted", "lease.answered", "lease.force_available", "lease.taken",
-                  "lease.left")
+                  "lease.left", "lease.tapped")
 
 
 def _ttl(body: dict[str, Any]) -> int:

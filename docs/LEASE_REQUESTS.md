@@ -102,8 +102,10 @@ queue:  [{position, holder, user, mine}]
 request: {id, message, created_at, deadline_at, position,
           answer: {answer, minutes, message, at} | null,
           force_available: bool, force_reason: str,
-          reasked: bool, reasked_at: str | null} | null   # my outgoing request
-incoming: [{id, by, user, host, message, created_at, deadline_at}]  # requests for my lease
+          reasked: bool, reasked_at: str | null,
+          tapped_at: str | null} | null   # my outgoing request; tapped_at: PANEL-1
+incoming: [{id, by, user, host, message, created_at, deadline_at,
+            answer, tapped_at}]           # requests for my lease; answer: D5
 taken:  {by, reason, at} | null        # the last time my lease was force-released
 notes_supported: bool                  # messages and keep answers work (False over REST)
 notes_reason: str                      # why not; "" when supported
@@ -135,6 +137,7 @@ revoke_reason: str                     # why not; "" when it may
 | `lease.force_available` | `{id}` | the requester's session, at the deadline |
 | `lease.taken` | `{by, reason, at}` | the holder's session, after a forced release |
 | `lease.left` | `{}` | whoever left the queue |
+| `lease.tapped` | `{id, by, at}` | every session watching the board, when someone at the board taps the front panel's banner for the open request (CCR PANEL-1, `LeaseService.notify_holder`). A notice only: nothing is released, answered, forced or left; `tapped_at` in `GET /lease` records it |
 
 ## CLI: `cli/cmd_hub.py`, lane LR-C
 
