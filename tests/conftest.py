@@ -18,6 +18,9 @@ def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     a test that forgets must land here, not beside a live daemon's links."""
     monkeypatch.setenv("HARNESS_MANAGER_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("HARNESS_MANAGER_PTY_DIR", str(tmp_path / "ptys"))
+    # Never run the machine's real Vivado (`vivado -version` from kit discovery): a test that
+    # wants one points HARNESS_MANAGER_VIVADO at a fake (tests/fakes/kit_fakes.py).
+    monkeypatch.setenv("HARNESS_MANAGER_VIVADO", "off")
 
 
 @pytest.fixture(autouse=True)
