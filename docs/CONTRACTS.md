@@ -34,6 +34,11 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `console.pty` `{name, path, device, clients, open}` | a console's PTY for `screen` opened, closed, or a client attached or left (L2) |
 | `lease.state` `{target, state, holder, expires_at}` | a hub lease was held, queued, released, expired or lost (L1) |
 | `tunnel.state` `{via, host, state: up\|down\|starting, ports, forwards, restarts, pid, detail}` | the SSH tunnel to a board behind a hub changed state (L1) |
+| `lease.wanted` `{id, by, user, host, message, deadline_at}` | someone asked for the lease this session holds (LR-B, LR-C) |
+| `lease.answered` `{id, answer, minutes, message}` | the holder answered this session's request, `release` or `keep`; a keep does not end the request (LR-B, LR-C) |
+| `lease.force_available` `{id}` | this session's request is unanswered past its deadline (or its keep ran out), at the head of the queue (LR-B, LR-C) |
+| `lease.taken` `{by, reason, at}` | this session's lease was force-released by someone else (LR-B, LR-C) |
+| `lease.left` `{}` | this session left the queue and withdrew its request (LR-B, LR-C) |
 | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | harness-manager-daemon jobs and back-pressure (docs/API.md) |
 
 ## Wave 1 implementations (who implements which frozen protocol)

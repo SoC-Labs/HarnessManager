@@ -10,8 +10,8 @@ The additions follow docs/LEASE_REQUESTS.md "Interfaces" exactly:
 - ``request(board_id, hub, *, message, ttl_s, progress, cancel)``: refused (ALREADY)
   when our principal already holds it (CCR-A2); else queue + note;
   phases ``queued``, ``notified``, ``answered``, ``force-available``, ``held``; blocks
-  until held (``{lease}``), answered keep (``{answered}``) or cancelled
-  (``ActionFailedError``, the queue entry and the note removed);
+  until held (``{lease}``) or we leave (``{left: true}``, D7; ``cancel_raises`` makes a
+  cancel raise instead, as an older service did). A "keep" answer does not end it (D1);
 - ``respond(board_id, hub, request_id, answer, *, minutes, message)``;
 - ``force(board_id, hub, *, confirm)``: refused (REFUSED/UNAVAILABLE) unless
   available, then the revoke, and the head of the queue (us) is promoted;
@@ -71,6 +71,8 @@ class LeaseWorld:
     answers: dict[str, dict[str, Any]] = field(default_factory=dict)   # ans-<id>.json
     revoked: list[dict[str, Any]] = field(default_factory=list)        # never a real revoke
     taken: dict[str, Any] | None = None
+    board: str = "mps3_01"               # the physical board a revoke names (D4); "" = unknown
+    cancel_raises: bool = False
     tick_s: float = 0.01
     calls: list[tuple[Any, ...]] = field(default_factory=list)
     mu: threading.RLock = field(default_factory=threading.RLock)
@@ -197,12 +199,18 @@ class FakeLeaseService(LeaseService):
                            "answer": None if ans is None else {k: ans[k] for k in (
                                "answer", "minutes", "message", "at")},
                            "force_available": ok, "force_reason": reason}
-            incoming = ([{k: n[k] for k in ("id", "by", "user", "host", "message", "created_at",
-                                             "deadline_at")}
-                         for n in w.notes.values() if n["by"] != w.me and n["id"] not in w.answers]
+            incoming = ([{**{k: n[k] for k in ("id", "by", "user", "host", "message",
+                                               "created_at", "deadline_at")},
+                          "answer": None if n["id"] not in w.answers else {   # D5
+                              k: w.answers[n["id"]][k] for k in ("answer", "minutes", "message",
+                                                                  "at")}}
+                         for n in w.notes.values() if n["by"] != w.me]
                         if w.holder == w.me else [])
-            return {"lease": lease, "hub": hub.host, "queue": queue, "request": request,
-                    "incoming": incoming, "taken": w.taken}
+            out = {"lease": lease, "hub": hub.host, "queue": queue, "request": request,
+                   "incoming": incoming, "taken": w.taken}
+            if w.board:
+                out["board"] = w.board
+            return out
 
     def request(self, board_id: str, hub: Any, *, message: str = "", ttl_s: int = 7200,
                 progress: Any = None, cancel: threading.Event | None = None) -> dict[str, Any]:
@@ -233,20 +241,23 @@ class FakeLeaseService(LeaseService):
                     if w.me in w.queue:
                         w.queue.remove(w.me)
                     w.notes.pop(rid, None)
-                raise ActionFailedError(f"the lease request for {hub.target} was cancelled; "
-                                        "its queue entry was removed",
-                                        hint="request again when you want the board")
+                if w.cancel_raises:
+                    raise ActionFailedError(f"the lease request for {hub.target} was cancelled; "
+                                            "its queue entry was removed")
+                return {"left": True}                                  # D7
             with w.mu:
                 held = w.holder == w.me
+                gone = not held and rid not in w.notes and w.me not in w.queue
                 ans = w.answers.get(rid)
                 force_ok, _ = w.force_state(rid) if rid in w.notes else (False, "")
+            if gone:                                  # left from elsewhere (lease leave)
+                return {"left": True}
             if ans is not None and not told_answer:
                 told_answer = True
                 report("answered", 0, 0)
                 self._publish("lease.answered", board_id, {k: ans[k] for k in (
                     "id", "answer", "minutes", "message")})
-                if ans["answer"] == "keep":
-                    return {"answered": dict(ans)}
+                # D1: a keep does not end the request; we stay queued and keep polling.
             if held:
                 report("held", 1, 1)
                 return {"lease": self._lease(hub)}

@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from harness_manager.cli import cmd_hub
+from harness_manager.cli.output import TSV_COLUMNS
 from harness_manager.core.errors import ExitCode, UnreachableError
 from tests.fakes.lrc_lease import ALICE, BOB, ME, FakeLeaseService, LeaseWorld, factory
 
@@ -116,14 +117,35 @@ def test_request_waits_until_the_holder_releases(capsys, world):
     assert ("request", "mps3@192.168.10.101:6900", "B1 at 3", 900) in world.calls
 
 
-def test_negative_twin_a_keep_answer_exits_held_with_the_answer(capsys, world):
-    t = meanwhile(world, lambda rid: world.answer(rid, "keep", 15, "B1 running"))
+def test_a_keep_answer_is_shown_and_the_wait_goes_on(capsys, world):
+    """D1: keep prints the answer and keeps waiting; the board comes later."""
+    def keep_then_release(rid: str) -> None:
+        views = sum(1 for c in world.calls if c == ("view",))
+        world.answer(rid, "keep", 15, "B1 running")
+        deadline = time.monotonic() + 5            # the countdown reads the answer ...
+        while sum(1 for c in world.calls if c == ("view",)) <= views and \
+                time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.3)
+        world.release()                            # ... then the holder lets go
+
+    t = meanwhile(world, keep_then_release)
     rc, out, err = run(capsys, "--json", "lease", "request", TARGET_ARG)
     t.join(5)
-    assert rc == ExitCode.HELD
-    e = json.loads(out)["error"]
-    assert e["name"] == "HELD" and e["holder"] == ALICE and "15 more min" in e["message"]
-    assert e["data"]["answered"]["minutes"] == 15 and "B1 running" in err
+    assert rc == ExitCode.OK, err
+    assert json.loads(out)["lease"]["mine"]
+    assert f"{ALICE} keeps mps3-01 for 15 more min: 'B1 running'" in err
+    assert "force-release can reopen at" in err and "You stay in the queue (position 1)" in err
+
+
+def test_negative_twin_leaving_from_elsewhere_ends_the_wait_without_the_board(capsys, world,
+                                                                               tmp_path):
+    other = factory(world)(tmp_path)               # `lease leave` in another terminal
+    t = meanwhile(world, lambda rid: other.leave("b", _Hub()), delay=0.2)
+    rc, out, err = run(capsys, "--json", "lease", "request", TARGET_ARG)
+    t.join(5)
+    assert rc == ExitCode.ACTION_FAILED and "you left the queue" in err
+    assert json.loads(out)["ok"] is False and "keeps" not in err
 
 
 def after_the_countdown_read_the_deadline(world: LeaseWorld, action):
@@ -260,7 +282,20 @@ def test_requests_lists_what_waits_for_an_answer(capsys, world):
     assert f"request {rid} from {ALICE}: 'B1 at 3?'" in out
     assert f"lease respond {TARGET} {rid} --release | --keep MINUTES" in out
     rc, out, _ = run(capsys, "--tsv", "lease", "requests", TARGET_ARG)
-    assert out.rstrip("\n").split("\t")[:5] == [TARGET, rid, ALICE, "alice", "lab-pc"]
+    row = out.rstrip("\n").split("\t")
+    assert row[:5] == [TARGET, rid, ALICE, "alice", "lab-pc"] and row[-1] == "-"
+    assert len(row) == len(TSV_COLUMNS["lease requests"])
+
+
+def test_requests_shows_my_earlier_answer(capsys, world):
+    world.holder = ME
+    rid = world.add_request(ALICE, "B1?")
+    world.answer(rid, "keep", 15)
+    rc, out, _ = run(capsys, "lease", "requests", TARGET_ARG)
+    assert rc == ExitCode.OK and f"request {rid} from {ALICE}: 'B1?'; you answered keep for 15 min" in out
+    assert "lease respond" not in out
+    rc, out, _ = run(capsys, "--tsv", "lease", "requests", TARGET_ARG)
+    assert out.rstrip("\n").split("\t")[-1] == "keep:15"
 
 
 def test_negative_twin_no_requests_says_so(capsys, world):
@@ -328,12 +363,22 @@ def test_negative_twin_force_answered_y_goes_ahead(capsys, world, monkeypatch):
     queued_expired(world)
     monkeypatch.setattr(cmd_hub, "_stdin_is_tty", lambda: True)
     monkeypatch.setattr("sys.stdin", io.StringIO("y\n"))
-    # A board with no name: the prompt names the hub's board (mps3_07 shown as mps3-07).
-    monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(name=""), _Hub()))
+    # D4: the view's board is the one revoked; a config name that differs comes first.
+    monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(name="lab-left"), _Hub()))
     rc, out, err = run(capsys, "lease", "force", TARGET_ARG)
-    assert rc == ExitCode.OK and f"kicks {ALICE} off mps3-07 now" in err
-    assert f"{TARGET} on {HUB}: force-released" in out
+    assert rc == ExitCode.OK and f"kicks {ALICE} off lab-left (hub board mps3_01) now" in err
+    assert f"lab-left ({TARGET} on {HUB}): force-released" in out
     assert len(world.revoked) == 1 and world.holder == ME
+
+
+def test_force_prompt_without_a_board_in_the_view_asks_the_hub_client(capsys, world,
+                                                                     monkeypatch):
+    queued_expired(world)
+    world.board = ""                                   # a service without D4
+    monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(name=""), _Hub()))
+    rc, _, err = run(capsys, "lease", "force", TARGET_ARG)
+    assert rc == ExitCode.REFUSED and f"kicks {ALICE} off mps3-07 now" in err
+    assert world.revoked == []
 
 
 @pytest.mark.parametrize("setup, code, words", [

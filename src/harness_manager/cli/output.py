@@ -74,6 +74,13 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "telemetry": READING_COLUMNS,
     "power show": READING_COLUMNS,
     "power cycle": ("BOARD_ID", "DEVICE", "OFF_S", "CONFIRMED_OFF", "CONFIRMED_ON", "SECONDS"),
+    "lease": ("TARGET", "HUB", "STATE", "HOLDER", "EXPIRES", "MINE", "QUEUED", "POSITION",
+              "REQUEST", "ANSWER", "FORCE", "INCOMING", "TAKEN_BY"),
+    "lease requests": ("TARGET", "ID", "BY", "USER", "HOST", "MESSAGE", "CREATED", "DEADLINE",
+                       "ANSWER"),
+    "lease respond": ("TARGET", "ID", "ANSWER", "MINUTES", "MESSAGE"),
+    "lease leave": ("TARGET", "HUB", "LEFT"),
+    "share": ("TARGET", "HUB", "TTY", "TCP", "WRITER", "READERS", "RUNNING"),
     "help": ("TAB", "LINE", "TEXT"),
 }
 

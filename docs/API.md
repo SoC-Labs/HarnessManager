@@ -189,6 +189,35 @@ Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
 - **Over a hub share:** MCC reads are slow (about 2 s for temperatures, about 6 s for oscillators), and SD storage is unavailable because there is no `USB_MSD` link.
 - **Timestamps:** `lease.expires_at` is an ISO 8601 string as fpgahub reports it. Every other timestamp is epoch seconds.
 
+### Lease requests, force release and leaving the queue (LR-C, `hub_api.py`)
+
+docs/LEASE_REQUESTS.md is the design, with the lead decisions D1–D8.
+
+| Method and path | Returns |
+|---|---|
+| `POST /boards/{bid}/lease/request` `{message?, ttl_s?}` | 202 job `lease_request`. Phases: `queued`, `notified`, `answered`, `force-available`, `held`. It ends with `{lease}` when the lease is ours, or `{left: true}` when we leave the queue. |
+| `POST /boards/{bid}/lease/respond` `{id, answer: "release"\|"keep", minutes?, message?}` | `{ok}` |
+| `POST /boards/{bid}/lease/force` `{confirm: true}` | 202 job `lease_force`; the result is `{lease}`. Refused before any revoke (below). |
+| `DELETE /boards/{bid}/lease/queue` | `{left: bool}`: leaves the queue and withdraws the request. |
+
+`GET /boards/{bid}/lease` adds `queue`, `request`, `incoming` (each with its `answer` or `null`), `taken` and `board` (the physical board a force revokes, `mps3_01`). The fields are in docs/LEASE_REQUESTS.md "API". Times are ISO 8601 UTC with `+00:00`.
+
+Events: `lease.wanted`, `lease.answered`, `lease.force_available`, `lease.taken` and `lease.left` (docs/CONTRACTS.md). The lease service publishes them; the events WebSocket forwards them unchanged.
+
+**As built by LR-C:**
+- **A "keep" answer does not end the request job** (D1): the phase becomes `answered` and `lease.answered` is emitted. The job ends when the lease is held, when we leave (`{left: true}`, a success, D7), or after a successful force.
+- **Holds:** a running `lease_request` job holds the board (409 HELD with `error.data.kind == "lease_request"`), like L1's queued `lease` job. `GET /lease`, `respond`, `force` and `DELETE /lease/queue` still work while it runs.
+- **`request` refusal:** 409 ALREADY, with no job, when the lease is already this principal's, in this session or another.
+- **`force` refusals** come before any revoke (D3):
+  - 400 USAGE without `confirm: true`.
+  - 422 UNAVAILABLE while the holder still has time to answer, with `error.data.{request_id, deadline_at, time_left_s}`.
+  - 409 REFUSED with the reason: no request, not at the head of the queue (`error.data.position`), or answered (`release`, or a `keep` whose minutes have not run out, with `error.data.time_left_s`).
+  - 409 ALREADY when the lease is already yours.
+- **`lease_force` runs beside the board's own `lease_request` job** (D2): the revoke is what ends that job, so force does not wait for its gate. With no request job running, force is an ordinary board job. Any other running job refuses it with 409 HELD. Its phases are `revoke` and `held`. `GET /jobs` and `GET /jobs/{id}` include it.
+- **Validation (400 USAGE):** `id` is `[A-Za-z0-9_.-]{1,64}`; `minutes` is 5, 15, 30 or 60, and only with `keep`; `message` is at most 500 characters (control characters become one space); `ttl_s` is 60–86400.
+- **`respond`:** a `release` is 409 HELD while a non-lease job (a deploy) runs on the board. A `keep` never is.
+- **Leaving:** `DELETE /lease/queue` stops the request job, which ends with `{left: true}`. `left` is true when a queue entry was removed or a request job was running. `DELETE /lease` does the same for a queued request and returns `{cancelled: true, left: true}`. Closing the board, or stopping the daemon, also leaves the queue.
+
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)
 - **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.
 - **A name is display only.** It never keys a board: `board_id` does, and so do boards.toml tables, session locks and leases. A hub id is shown with `_` as `-` (`mps3_01` becomes `mps3-01`).

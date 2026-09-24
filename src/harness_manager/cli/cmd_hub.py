@@ -26,15 +26,19 @@ queue place is kept). Ctrl-C while queued removes the queue entry. There is no
 
 Lease requests (docs/LEASE_REQUESTS.md, lane LR-C): ``lease request`` joins the
 queue AND asks the holder's session to give the board up, then waits, showing
-the 2:00 countdown and the answer. With no answer by the deadline, and at the
-head of the queue, ``lease force`` revokes the holder's lease (it asks first;
-without a terminal it needs ``--yes``). ``lease leave`` leaves the queue and
-withdraws the request; Ctrl-C during ``lease request`` does the same.
+the 2:00 countdown and the answer. A "keep" answer does not end the wait (D1): it
+prints the answer and counts down to when force-release can reopen. With no
+answer by the deadline (or a keep that ran out), and at the head of the queue,
+``lease force`` revokes the holder's lease (it asks first; without a terminal it
+needs ``--yes``). ``lease leave`` leaves the queue and withdraws the request;
+Ctrl-C during ``lease request`` does the same.
 
 Exit codes: 0 when the verb did what it says (``request``/``force``: the board is
-yours); 4 HELD when the holder answered "keep"; 12 UNAVAILABLE when force-release
-is not open yet (the holder still has time to answer); 15 REFUSED when it is not
-available at all, or the prompt was not confirmed.
+yours); 6 ACTION_FAILED when a waiting ``request`` ends without the board (it left
+the queue from elsewhere); 8 ALREADY when the lease is already yours; 12
+UNAVAILABLE when force-release is not open yet (the holder still has time to
+answer); 15 REFUSED when it is not available at all, or the prompt was not
+confirmed.
 
 The lead wires ``register(sub)`` into ``cli/main.py`` (CCR L1-2).
 """
@@ -56,7 +60,6 @@ from harness_manager.core.errors import (
     AlreadyError,
     ExitCode,
     HarnessError,
-    HeldError,
     RefusedError,
     UnavailableError,
     UsageError,
@@ -64,24 +67,13 @@ from harness_manager.core.errors import (
 from harness_manager.services.lease import DEFAULT_TTL_S, LeaseService, default_holder
 
 from .context import Ctx
-from .output import TSV_COLUMNS, Result, tsv_field
+from .output import TSV_COLUMNS, Result
 
-#: Append-only. L1's six columns, then LR-C's: the queue length, my place in it, my request,
-#: its answer (``keep:15`` / ``release``), whether force-release is open, the incoming
-#: requests (for my lease), and who force-released my lease last.
-LEASE_COLUMNS = ("TARGET", "HUB", "STATE", "HOLDER", "EXPIRES", "MINE",
-                 "QUEUED", "POSITION", "REQUEST", "ANSWER", "FORCE", "INCOMING", "TAKEN_BY")
-LEASE_REQUESTS_COLUMNS = ("TARGET", "ID", "BY", "USER", "HOST", "MESSAGE", "CREATED", "DEADLINE")
-LEASE_RESPOND_COLUMNS = ("TARGET", "ID", "ANSWER", "MINUTES", "MESSAGE")
-LEASE_LEAVE_COLUMNS = ("TARGET", "HUB", "LEFT")
-SHARE_COLUMNS = ("TARGET", "HUB", "TTY", "TCP", "WRITER", "READERS", "RUNNING")
-
-#: Append-only TSV layouts. They belong in ``output.TSV_COLUMNS`` (CCR L1-2 and LR-C-1; T5
-#: owns that table and its golden test). Until they are there, ``_emit`` prints the rows
-#: itself with the same field rules, as ``cmd_daemon`` does.
-LAYOUTS = {"lease": LEASE_COLUMNS, "lease requests": LEASE_REQUESTS_COLUMNS,
-           "lease respond": LEASE_RESPOND_COLUMNS, "lease leave": LEASE_LEAVE_COLUMNS,
-           "share": SHARE_COLUMNS}
+#: The TSV layouts are in ``output.TSV_COLUMNS`` (append-only). ``lease``: L1's six
+#: columns, then the queue length, my place in it, my request, its answer (``keep:15`` /
+#: ``release``), whether force-release is open, the incoming requests (for my lease), and
+#: who force-released my lease last.
+LEASE_COLUMNS = TSV_COLUMNS["lease"]
 
 # --- lease-request rules shared with the daemon (daemon/hub_api.py imports these) ----------
 
@@ -138,6 +130,11 @@ def parse_iso(value: Any) -> float | None:
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)     # the notes are UTC
     return stamp.timestamp()
+
+
+def iso_utc(epoch: float) -> str:
+    """Epoch seconds as ISO 8601 UTC with ``+00:00`` (D8)."""
+    return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="seconds")
 
 
 def fmt_left(seconds: float) -> str:
@@ -255,7 +252,7 @@ def _fmt_parent() -> argparse.ArgumentParser:
 
 
 def _cols(layout: str) -> str:
-    return f"--tsv columns: {' '.join(LAYOUTS[layout])}"
+    return f"--tsv columns: {' '.join(TSV_COLUMNS[layout])}"
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -346,15 +343,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _emit(ctx: Ctx, result: Result) -> None:
-    if ctx.fmt != "tsv" or result.layout in TSV_COLUMNS:
-        ctx.emit(result)
-        return
-    cols = LAYOUTS[result.layout]
-    for row in result.rows:
-        if len(row) != len(cols):     # a bug in the verb, never the user's fault
-            raise AssertionError(f"tsv layout {result.layout!r} has {len(cols)} columns")
-        sys.stdout.write("\t".join(tsv_field(v) for v in row) + "\n")
-    sys.stdout.flush()
+    ctx.emit(result)
 
 
 def _hub(ctx: Ctx) -> tuple[Any, Any]:
@@ -415,9 +404,7 @@ def _row(target: str, hub: str, view: dict[str, Any]) -> list[Any]:
     queue = view["queue"]
     mine = next((q.get("position") for q in queue if q.get("mine")), None)
     req = view["request"]
-    ans = (req or {}).get("answer") or None
-    answer = "" if not ans else (f"keep:{ans.get('minutes')}" if ans.get("answer") == "keep"
-                                 else ans.get("answer", ""))
+    answer = _answer_field((req or {}).get("answer"))
     taken = view["taken"]
     return head + [len(queue), mine if mine is not None else (req or {}).get("position"),
                    (req or {}).get("id", ""), answer,
@@ -469,10 +456,24 @@ def _human_view(where: str, target: str, view: dict[str, Any], now: float) -> li
     return lines
 
 
+def _answer_field(ans: Any) -> str:
+    """``keep:15`` / ``release`` / ``""``: an answer in one TSV field."""
+    if not isinstance(ans, dict) or not ans.get("answer"):
+        return ""
+    return f"keep:{ans.get('minutes')}" if ans["answer"] == "keep" else str(ans["answer"])
+
+
 def _incoming_lines(target: str, incoming: list[dict[str, Any]], now: float) -> list[str]:
     lines = []
     for inc in incoming:
         said = f": {inc['message']!r}" if inc.get("message") else ""
+        ans = inc.get("answer") or None
+        if ans:                                   # D5: what I answered (it survives a reload)
+            what = (f"keep for {ans.get('minutes')} min" if ans.get("answer") == "keep"
+                    else str(ans.get("answer")))
+            lines.append(f"request {inc.get('id', '?')} from {inc.get('by', '?')}{said}; "
+                         f"you answered {what} at {_clock(ans.get('at'))}")
+            continue
         deadline = parse_iso(inc.get("deadline_at"))
         left = "" if deadline is None or now >= deadline else f" ({fmt_left(deadline - now)} left)"
         lines.append(f"request {inc.get('id', '?')} from {inc.get('by', '?')}{said}; answer by "
@@ -482,20 +483,34 @@ def _incoming_lines(target: str, incoming: list[dict[str, Any]], now: float) -> 
 
 
 class _Countdown:
-    """The request's countdown on stderr, from the note's ``deadline_at`` (not our clock).
+    """What ``lease request`` shows on stderr while it waits, on its own thread.
 
-    On a terminal it redraws one line each second; otherwise it prints the deadline
-    once. It reads the deadline with one ``view`` call on its own thread, so the
-    service's ``request`` (which is running the callback) is never re-entered."""
+    ``arm(mode)`` is called from the service's progress callback; the thread then
+    reads the lease view (one ``view`` call, so the service's ``request`` is never
+    re-entered) and shows:
 
-    def __init__(self, ctx: Ctx, svc: Any, hub: Any) -> None:
-        self.ctx, self.svc, self.hub = ctx, svc, hub
+    - ``notified``: the holder's 2:00, from the note's ``deadline_at`` (not our clock);
+    - ``answered``: the answer; for a "keep", the time until force-release can reopen
+      (``answer.at`` + minutes). The wait goes on (D1);
+    - ``force``: that force-release is open, and the command for it.
+
+    On a terminal the time left is one line redrawn each second; otherwise each state
+    is printed once.
+    """
+
+    def __init__(self, ctx: Ctx, svc: Any, cand: Any, hub: Any) -> None:
+        self.ctx, self.svc, self.cand, self.hub = ctx, svc, cand, hub
         self.stop = threading.Event()
+        self.wake = threading.Event()
+        self._pending: list[str] = []          # modes to show, in order (none is dropped)
         self._mu = threading.Lock()
         self._drawn = False
         self._thread: threading.Thread | None = None
 
-    def start(self) -> None:
+    def arm(self, mode: str) -> None:
+        with self._mu:
+            self._pending.append(mode)
+        self.wake.set()
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="lease-countdown", daemon=True)
             self._thread.start()
@@ -503,43 +518,76 @@ class _Countdown:
     def _stream(self) -> Any:
         return self.ctx.err or sys.stderr
 
-    def _deadline(self) -> tuple[float, str, str]:
-        holder = "the holder"
+    def _view(self) -> dict[str, Any] | None:
         try:
-            view = full_view(self.svc.view(self.hub))
-            lease = view["lease"] or {}
-            holder = lease.get("holder") or holder
-            deadline = parse_iso((view["request"] or {}).get("deadline_at"))
-            if deadline is not None:
-                return deadline, holder, ""
+            return full_view(self.svc.view(self.hub))
         except HarnessError:
-            pass
-        return _now() + REQUEST_WINDOW_S, holder, " (about)"
+            return None
+
+    def _plan(self, mode: str) -> tuple[float | None, str]:
+        """(until when to count down, or None; the redrawn line's text with ``{left}``)."""
+        view = self._view() or full_view({})
+        holder = (view["lease"] or {}).get("holder") or "the holder"
+        req = view["request"] or {}
+        board = _board_name(self.cand, self.hub)
+        target = getattr(self.ctx.args, "target", "TARGET")
+        if mode == "notified":
+            deadline = parse_iso(req.get("deadline_at"))
+            about = ""
+            if deadline is None:
+                deadline, about = _now() + REQUEST_WINDOW_S, " (about)"
+            self.note(f"asked {holder} to release {board}; the answer is due by "
+                      f"{_clock(iso_utc(deadline))}{about} ({fmt_left(deadline - _now())})")
+            return deadline, f"waiting for {holder} to answer: {{left}}{about} left " \
+                             "(Ctrl-C leaves the queue)"
+        if mode == "answered":
+            ans = req.get("answer") or {}
+            said = f": {ans['message']!r}" if ans.get("message") else ""
+            if ans.get("answer") == "keep":
+                minutes = ans.get("minutes") or 0
+                at = parse_iso(ans.get("at"))
+                until = None if at is None else at + 60 * minutes
+                when = "" if until is None else f"; force-release can reopen at {_clock(iso_utc(until))}"
+                self.note(f"{holder} keeps {board} for {minutes} more min{said}{when}. You stay "
+                          f"in the queue (position {req.get('position') or '?'}); still "
+                          "waiting (Ctrl-C leaves the queue)")
+                return until, f"{holder} keeps it: {{left}} until force-release can reopen " \
+                              "(Ctrl-C leaves the queue)"
+            if ans.get("answer") == "release":
+                self.note(f"{holder} released {board}{said}; it is on its way to you")
+                return None, ""
+            self.note("the holder answered; still waiting (Ctrl-C leaves the queue)")
+            return None, ""
+        if mode == "force":
+            self.note(f"force-release is open: you are at the head of the queue and "
+                      f"{holder} has not given {board} up. `harness-manager lease force "
+                      f"{target}` takes it now (it kicks {holder} off; it asks first)")
+        return None, ""
 
     def _run(self) -> None:
-        deadline, holder, about = self._deadline()
-        if self.stop.is_set():
-            return
-        if not _stderr_is_tty():
-            self.note(f"asked {holder} to release {self.hub.target}; the answer is due by "
-                      f"{datetime.fromtimestamp(deadline, timezone.utc):%H:%M:%S} UTC{about} "
-                      f"({fmt_left(deadline - _now())})")
-            return
+        until: float | None = None
+        text = ""
         while not self.stop.is_set():
-            left = deadline - _now()
-            text = (f"waiting for {holder} to answer: {fmt_left(left)}{about} left "
-                    "(Ctrl-C leaves the queue)" if left > 0 else
-                    f"no answer from {holder} by the deadline")
             with self._mu:
+                modes, self._pending = self._pending, []
+            for mode in modes:
                 if self.stop.is_set():
                     return
-                self._stream().write("\r" + text + "\x1b[K")
-                self._stream().flush()
-                self._drawn = True
-            if left <= 0:
+                until, text = self._plan(mode)
+            if until is not None and _stderr_is_tty() and until > _now():
+                with self._mu:
+                    if self.stop.is_set():
+                        return
+                    self._stream().write("\r" + text.format(left=fmt_left(until - _now()))
+                                         + "\x1b[K")
+                    self._stream().flush()
+                    self._drawn = True
+                self.wake.wait(1.0)
+            else:
                 self.clear()
-                return
-            self.stop.wait(1.0)
+                until = None
+                self.wake.wait()
+            self.wake.clear()
 
     def clear(self) -> None:
         with self._mu:
@@ -556,6 +604,10 @@ class _Countdown:
 
     def close(self) -> None:
         self.stop.set()
+        self.wake.set()
+        t = self._thread
+        if t is not None and t is not threading.current_thread():
+            t.join(timeout=2.0)
         self.clear()
 
 
@@ -574,21 +626,16 @@ def _request(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     refusal = request_refusal(full_view(svc.view(hub)), _board_name(cand, hub))
     if refusal is not None:
         raise refusal
-    countdown = _Countdown(ctx, svc, hub)
+    countdown = _Countdown(ctx, svc, cand, hub)
 
     def progress(phase: str, done: int, _total: int) -> None:
         if phase == "queued":
             where = f" at position {done}" if done else ""
             countdown.note(f"queued{where} for {_where(cand, hub)} (Ctrl-C leaves the queue)")
-        elif phase == "notified":
-            countdown.start()
-        elif phase == "answered":
-            countdown.close()
+        elif phase in ("notified", "answered"):
+            countdown.arm(phase)
         elif phase == "force-available":
-            countdown.close()
-            countdown.note(f"no answer by the deadline, and you are at the head of the queue: "
-                           f"`harness-manager lease force {a.target}` takes the board now "
-                           "(it kicks the holder off; it asks first)")
+            countdown.arm("force")
         elif phase == "held":
             countdown.close()
 
@@ -610,28 +657,12 @@ def _request(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
         _emit(ctx, _lease_result(cand, hub, lease, human,
                                  **{k: v for k, v in out.items() if k not in ("lease", "ok")}))
         return ExitCode.OK
-    ans = out.get("answered")
-    if ans:
-        minutes = ans.get("minutes") or 0
-        said = f": {ans['message']!r}" if ans.get("message") else ""
-        holder = _holder_now(svc, hub)
-        err = HeldError(f"{holder or 'the holder'} keeps {_board_name(cand, hub)} for {minutes} "
-                        f"more min{said}",
-                        holder=holder,
-                        hint=f"force-release opens when those {minutes} min run out if you are "
-                             f"still at the head of the queue (`harness-manager lease show "
-                             f"{a.target}`); `harness-manager lease leave {a.target}` leaves it")
-        err.data = {"board_id": cand.board_id, "answered": ans}  # type: ignore[attr-defined]
-        raise err
+    if out.get("left"):
+        # D7: the request was withdrawn (lease leave, the UI's Leave queue): no board.
+        raise ActionFailedError(f"the request for {_where(cand, hub)} ended: you left the queue",
+                                hint=f"`harness-manager lease request {a.target}` asks again")
     raise ActionFailedError(f"the request for {hub.target} ended without the board ({out})",
                             hint=f"`harness-manager lease show {a.target}`")
-
-
-def _holder_now(svc: Any, hub: Any) -> str:
-    try:
-        return (full_view(svc.view(hub))["lease"] or {}).get("holder") or ""
-    except HarnessError:
-        return ""
 
 
 def _force(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
@@ -641,7 +672,7 @@ def _force(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     if refusal is not None:
         raise refusal
     holder = (view["lease"] or {}).get("holder") or "the holder"
-    board = _board_name(cand, hub)
+    board = _revoked_board(cand, hub, view)
     warning = (f"Are you sure? This kicks {holder} off {board} now; anything they are running "
                "on the board is interrupted.")
     if not a.yes and not _stdin_is_tty():
@@ -674,6 +705,17 @@ def _board_name(cand: Any, hub: Any) -> str:
         except HarnessError:
             pass
     return hub.target
+
+
+def _revoked_board(cand: Any, hub: Any, view: dict[str, Any]) -> str:
+    """The board a force revokes, for the prompt (D4): the view's ``board`` (``mps3_01``)
+    as people write it, with the N1 name first when that differs."""
+    board = view.get("board")
+    if not isinstance(board, str) or not board:
+        return _board_name(cand, hub)
+    shown = naming.hub_display(board)
+    name = _name(cand)
+    return f"{name} (hub board {board})" if name and name != shown else shown
 
 
 def _name(cand: Any) -> str:
@@ -748,7 +790,8 @@ def cmd_lease(ctx: Ctx) -> int:
         view = full_view(svc.view(hub))
         incoming = view["incoming"]
         rows = [[hub.target, r.get("id"), r.get("by"), r.get("user"), r.get("host"),
-                 r.get("message"), r.get("created_at"), r.get("deadline_at")] for r in incoming]
+                 r.get("message"), r.get("created_at"), r.get("deadline_at"),
+                 _answer_field(r.get("answer"))] for r in incoming]
         lines = _incoming_lines(hub.target, incoming, _now())
         if not incoming:
             mine = (view["lease"] or {}).get("mine")

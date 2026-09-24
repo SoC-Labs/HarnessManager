@@ -21,7 +21,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from fastapi.testclient import TestClient
 
-from harness_manager.core.errors import ExitCode
+from harness_manager.core.errors import ExitCode, UnreachableError
 from harness_manager.core.events import Event
 from harness_manager.core.services import EngineConfig
 from harness_manager.daemon import hub_api
@@ -145,15 +145,22 @@ def test_negative_twin_a_second_request_or_an_acquire_while_one_waits_is_held(cl
     assert sum(1 for c in world.calls if c[0] == "request") == 1
 
 
-def test_a_keep_answer_ends_the_request_job_with_the_answer(client, bid, world):
+def test_a_keep_answer_does_not_end_the_request_job(client, bid, world):
+    """D1: the job goes on after a keep, still queued and holding the board."""
     job = start_request(client, bid, world)
-    world.answer(world.my_request()["id"], "keep", 15, "running B1, 15 min")
+    rid = world.my_request()["id"]
+    world.answer(rid, "keep", 15, "running B1, 15 min")
+    wait_for(lambda: "answered" in job_state(client, job)["phases"])
+    time.sleep(0.1)
+    assert job_state(client, job)["state"] == "running"
+    assert client.get(bid_path(bid), headers=H).json()["error"]["data"]["kind"] == "lease_request"
+    req = client.get(lease(bid), headers=H).json()["request"]
+    assert req["answer"]["answer"] == "keep" and req["answer"]["minutes"] == 15
+    assert req["force_available"] is False and ME in world.queue
+    world.release()                                                   # later, they let go
     done = wait_job(client, job)
-    assert done["state"] == "done" and "lease" not in done["result"]
-    ans = done["result"]["answered"]
-    assert ans["answer"] == "keep" and ans["minutes"] == 15 and ans["message"] == "running B1, 15 min"
-    assert "answered" in done["phases"]
-    assert client.get(bid_path(bid), headers=H).status_code == 200    # the job let go
+    assert done["state"] == "done" and done["result"]["lease"]["mine"]
+    assert done["phases"][-2:] == ["answered", "held"]
 
 
 def test_negative_twin_a_free_board_is_granted_at_once(client, bid, world):
@@ -289,12 +296,12 @@ def test_negative_twin_force_before_the_deadline_is_422_with_the_time_left(clien
     assert world.revoked == [] and not any(c[0] == "force" for c in world.calls)
 
 
-def test_force_without_confirm_true_is_422_usage(client, bid, world):
+def test_force_without_confirm_true_is_400_usage(client, bid, world):
     start_request(client, bid, world)
     world.expire_deadline()
     for body in ({}, {"confirm": False}, {"confirm": "yes"}, {"confirm": 1}):
-        r = client.post(lease(bid, "/force"), json=body, headers=H)
-        assert r.status_code == 422 and r.json()["error"]["code"] == ExitCode.USAGE, body
+        r = client.post(lease(bid, "/force"), json=body, headers=H)            # D3: 400
+        assert r.status_code == 400 and r.json()["error"]["code"] == ExitCode.USAGE, body
         assert "confirm" in r.json()["error"]["message"]
     assert world.revoked == [] and not any(c[0] == "force" for c in world.calls)
 
@@ -333,10 +340,12 @@ def test_negative_twin_a_keep_that_ran_out_opens_force_again(client, bid, world)
     rid = world.my_request()["id"]
     world.expire_deadline()
     world.answer(rid, "keep", 15, age_s=16 * 60)                    # 15 min kept, 16 gone
-    assert wait_job(client, job)["result"]["answered"]["minutes"] == 15
+    wait_for(lambda: "force-available" in job_state(client, job)["phases"])
+    assert job_state(client, job)["state"] == "running"             # D1: still waiting
     r = client.post(lease(bid, "/force"), json={"confirm": True}, headers=H)
     assert r.status_code == 202, r.text
     assert wait_job(client, r.json()["job"])["result"]["lease"]["mine"] and len(world.revoked) == 1
+    assert wait_job(client, job)["result"]["lease"]["mine"]
 
 
 def _queued_by_the_cli(world: LeaseWorld) -> None:
@@ -372,9 +381,32 @@ def test_leave_withdraws_the_request_and_ends_the_job(client, bid, world):
     r = client.delete(lease(bid, "/queue"), headers=H)
     assert r.status_code == 200 and r.json() == {"ok": True, "left": True}
     state = wait_job(client, job)
-    assert state["state"] == "failed" and "cancelled" in state["error"]["message"]
+    assert state["state"] == "done" and state["result"] == {"left": True}      # D7
     assert ME not in world.queue and world.my_request() is None
     assert client.get(bid_path(bid), headers=H).status_code == 200
+
+
+def test_negative_twin_a_service_that_raises_on_cancel_still_ends_with_left(client, bid, world):
+    world.cancel_raises = True
+    job = start_request(client, bid, world)
+    client.delete(lease(bid, "/queue"), headers=H)
+    state = wait_job(client, job)
+    assert state["state"] == "done" and state["result"] == {"left": True}
+    # ... but a failure we did not cause is still a failure
+    world.cancel_raises = False
+    job = start_request(client, bid, world)
+    boom = client.app.state.daemon.leases
+
+    def broken(*_a, **_k):
+        raise UnreachableError("the hub stopped answering")
+
+    boom.request = broken
+    job2 = client.post(lease(bid, "/request"), json={}, headers=H)
+    assert job2.status_code == 409                                    # the first still holds
+    client.delete(lease(bid, "/queue"), headers=H)
+    wait_job(client, job)
+    state = wait_job(client, client.post(lease(bid, "/request"), json={}, headers=H).json()["job"])
+    assert state["state"] == "failed" and state["error"]["code"] == ExitCode.UNREACHABLE
 
 
 def test_negative_twin_leave_with_nothing_queued_says_so(client, bid, world):
@@ -387,13 +419,13 @@ def test_delete_lease_cancels_a_queued_request_like_a_queued_acquire(client, bid
     job = start_request(client, bid, world)
     r = client.delete(lease(bid), headers=H)
     assert r.status_code == 200 and r.json()["cancelled"] is True
-    assert wait_job(client, job)["state"] == "failed" and ME not in world.queue
+    assert wait_job(client, job)["result"] == {"left": True} and ME not in world.queue
 
 
 def test_closing_the_board_leaves_the_queue(client, bid, world):
     job = start_request(client, bid, world)
     client.app.state.daemon.engine.close(bid)                       # session.closed
-    assert wait_job(client, job)["state"] == "failed"
+    assert wait_job(client, job)["result"] == {"left": True}
     wait_for(lambda: ME not in world.queue)
 
 
@@ -424,7 +456,7 @@ def test_the_requester_gets_force_available_answered_and_left(client, bid, world
         f = frames_until(ws, "lease.left")
         assert f["board_id"] == bid and f["data"] == {}
         # lease.left comes from leave(); the job frees the board on its next poll tick.
-        assert wait_job(client, first)["state"] == "failed"
+        assert wait_job(client, first)["result"] == {"left": True}
         start_request(client, bid, world)
         rid = world.my_request()["id"]
         world.answer(rid, "keep", 5, "two more runs")
@@ -467,6 +499,12 @@ def test_negative_twin_a_topic_filter_and_an_empty_leave_send_nothing(client, bi
 
 def test_get_lease_passes_the_extended_view_through(client, bid, world):
     v = client.get(lease(bid), headers=H).json()
-    assert set(v) >= {"ok", "lease", "hub", "queue", "request", "incoming", "taken"}
-    assert v["hub"] == HUB and v["lease"]["target"] == TARGET
+    assert set(v) >= {"ok", "lease", "hub", "queue", "request", "incoming", "taken", "board"}
+    assert v["hub"] == HUB and v["lease"]["target"] == TARGET and v["board"] == "mps3_01"
     assert v["queue"] == [] and v["request"] is None and v["incoming"] == [] and v["taken"] is None
+    world.holder = ME                                                 # D5: my answers survive
+    rid = world.add_request(ALICE)
+    world.answer(rid, "keep", 30, "long run")
+    (inc,) = client.get(lease(bid), headers=H).json()["incoming"]
+    assert inc["answer"]["answer"] == "keep" and inc["answer"]["minutes"] == 30
+    assert inc["answer"]["at"].endswith("+00:00")                     # D8

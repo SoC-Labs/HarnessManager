@@ -13,13 +13,14 @@ docs/LEASE_REQUESTS.md, "API" (frozen 2026-09-24, lane LR-C):
 
 | Method and path | Body | Returns |
 |---|---|---|
-| ``POST /boards/{bid}/lease/request`` | ``{message?, ttl_s?}`` | 202 job ``lease_request``; phases ``queued``, ``notified``, ``answered``, ``force-available``, ``held``; result ``{lease}`` or ``{answered: {...}}``. 409 ALREADY when the lease is already this principal's (this or another session, CCR-A2) |
+| ``POST /boards/{bid}/lease/request`` | ``{message?, ttl_s?}`` | 202 job ``lease_request``; phases ``queued``, ``notified``, ``answered``, ``force-available``, ``held``. A "keep" answer does not end it (D1); it ends with ``{lease}`` when held, or ``{left: true}`` when we leave (D7). 409 ALREADY when the lease is already this principal's (this or another session, CCR-A2) |
 | ``POST /boards/{bid}/lease/respond`` | ``{id, answer, minutes?, message?}`` | 200 ``{ok}`` |
-| ``POST /boards/{bid}/lease/force`` | ``{confirm: true}`` | 202 job ``lease_force``; result ``{lease}``. Before any revoke: 409 REFUSED (or ALREADY) with the reason, 422 UNAVAILABLE with the time left, 422 USAGE without ``confirm: true`` |
+| ``POST /boards/{bid}/lease/force`` | ``{confirm: true}`` | 202 job ``lease_force``; result ``{lease}``. Before any revoke: 400 USAGE without ``confirm: true``; 422 UNAVAILABLE with the time left; 409 REFUSED (or ALREADY) with the reason (D3) |
 | ``DELETE /boards/{bid}/lease/queue`` | none | 200 ``{left: bool}`` |
 
-``GET /lease`` adds ``queue``, ``request``, ``incoming`` and ``taken``: the lease
-service's ``view`` builds them (lane LR-B) and the route passes the view through.
+``GET /lease`` adds ``queue``, ``request``, ``incoming`` (each with its ``answer``, D5),
+``taken`` and ``board`` (D4): the lease service's ``view`` builds them (lane LR-B) and
+the route passes the view through.
 
 Events: ``lease.state {target, state, holder, expires_at}``; ``tunnel.state``
 (the tunnel's status) whenever an open board's tunnel changes state (CCR L1-4
@@ -69,7 +70,6 @@ from harness_manager.services.lease import DEFAULT_TTL_S, LeaseService
 
 from .app import _JSON, JsonBody, RouteContext, _obj, ok
 from .jobs import BoardGates, Job, JobManager, busy_error
-from .wire import error_body
 
 log = logging.getLogger(__name__)
 
@@ -81,9 +81,6 @@ LEASE_KINDS = frozenset({LEASE_KIND, REQUEST_KIND, FORCE_KIND})
 #: The events the lease service publishes for requests (docs/LEASE_REQUESTS.md, "Events").
 REQUEST_TOPICS = ("lease.wanted", "lease.answered", "lease.force_available", "lease.taken",
                   "lease.left")
-#: 422, not the usual 400 for USAGE: docs/LEASE_REQUESTS.md fixes it for a force without
-#: ``confirm: true`` (the UI's confirm modal was skipped, not a malformed request).
-FORCE_UNCONFIRMED_STATUS = 422
 
 
 def _ttl(body: dict[str, Any]) -> int:
@@ -226,6 +223,12 @@ def register(ctx: RouteContext) -> None:
             try:
                 return leases.request(bid, hub, message=message, ttl_s=ttl, progress=progress,
                                       cancel=cancel)
+            except HarnessError:
+                if cancel.is_set():
+                    # We stopped it (leave, DELETE /lease, close): leaving is not a failure
+                    # (D7), whether the service returns {left} or raises its "cancelled".
+                    return {"left": True}
+                raise
             finally:
                 with mu:
                     if requesting.get(bid) is cancel:
@@ -260,11 +263,10 @@ def register(ctx: RouteContext) -> None:
     @ctx.api.post("/boards/{bid:path}/lease/force")
     def lease_force(bid: str, body: JsonBody = None) -> _JSON:
         b = _obj(body)
-        if b.get("confirm") is not True:
-            err = UsageError("force-release needs \"confirm\": true",
+        if b.get("confirm") is not True:            # 400 USAGE (D3: API.md's table)
+            raise UsageError("force-release needs \"confirm\": true",
                              hint="it kicks the holder off the board now; the UI asks "
                                   "\"Are you sure?\" first")
-            return _JSON(error_body(err), status_code=FORCE_UNCONFIRMED_STATUS)
         hub = hub_of(bid)
         refusal = force_refusal(full_view(leases.view(hub)), _now(), hub.target)
         if refusal is not None:
