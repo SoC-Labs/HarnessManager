@@ -187,3 +187,4 @@ Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
 - **Limits:** `ttl_s` must be 60–86400, and `GET /lease` is cached for 10 s.
 - **Holds:** a queued lease job holds the board (409 with `error.data.kind == "lease"`). Cancel it with `DELETE /lease`.
 - **Over a hub share:** MCC reads are slow (about 2 s for temperatures, about 6 s for oscillators), and SD storage is unavailable because there is no `USB_MSD` link.
+- **Timestamps:** `lease.expires_at` is an ISO 8601 string as fpgahub reports it. Every other timestamp is epoch seconds.

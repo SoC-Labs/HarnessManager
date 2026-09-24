@@ -17,8 +17,10 @@ from harness_manager.demo import BOARD_FIELDED, BOARD_USB
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
 
+# sim=True: these are scripted scenes (a meter, a hub, an update channel) only the mock's
+# WeekPlanSim can play; the real-daemon behaviour is covered by the other l3 tests.
 pytestmark = [pytest.mark.browser, pytest.mark.week_plan("consoles_api", "hub_api", "power_api",
-                                                          "update_api")]
+                                                          "update_api", sim=True)]
 T = 10_000
 APP = {"width": 1440, "height": 900}
 
