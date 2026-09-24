@@ -346,6 +346,46 @@ def test_closing_the_service_leaves_a_watched_queue_place(world):
     assert world.hub.queue == [] and world.hub.notes == {} and b.of("lease.left") == [{}]
 
 
+def test_a_missed_poll_is_retried_but_three_in_a_row_end_the_request(world):
+    from harness_manager.core.errors import UnreachableError
+
+    a, b = world.holding(), world.session(BOB)
+    hiccup = UnreachableError("ssh: connect to host mapstone-dev port 22: Connection timed out")
+    world.clock.after(5, lambda: world.hub.fail_next.update(get_answer=hiccup))   # one miss
+
+    def keep():
+        a.svc.watch_due(force=True)
+        a.svc.respond(BID, a.hub, a.of("lease.wanted")[0]["id"], "keep", minutes=5)
+
+    world.clock.after(25, keep)
+    assert "answered" in b.svc.request(BID, b.hub)             # survived the miss
+    b.svc.leave(BID, b.hub)
+    world.hub.fail_always["get_answer"] = hiccup                # twin: the hub stays away
+    with pytest.raises(UnreachableError):
+        b.svc.request(BID, b.hub)
+    assert world.hub.queue == [] and world.hub.notes == {}     # it left, best effort
+    n = len(world.calls(BOB))
+    b.svc.watch_due(force=True)
+    assert len(world.calls(BOB)) == n                          # and nothing is watched
+
+
+def test_ctrl_c_leaves_the_queue_to_the_caller(world):
+    world.holding()
+    b = world.session(BOB)
+
+    def ctrl_c(_s):
+        raise KeyboardInterrupt
+
+    b.svc._sleep = ctrl_c
+    with pytest.raises(KeyboardInterrupt):
+        b.svc.request(BID, b.hub)
+    assert world.hub.position(BOB) == 1                         # the CLI decides (it leaves)
+    n = len(world.calls(BOB))
+    b.svc.watch_due(force=True)
+    assert len(world.calls(BOB)) == n                          # not watched: it was not a keep
+    assert b.svc.leave(BID, b.hub) == {"left": True} and world.hub.queue == []
+
+
 # --- two requesters ------------------------------------------------------------------------------
 
 

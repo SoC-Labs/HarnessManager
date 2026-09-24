@@ -94,6 +94,7 @@ from harness_manager.core.errors import (
     HeldError,
     RefusedError,
     UnavailableError,
+    UnreachableError,
     UsageError,
 )
 from harness_manager.core.events import Event, EventBus
@@ -122,6 +123,8 @@ VIEW_TTL_S = 10.0
 REQUEST_WINDOW_S = 120
 #: Requester and holder both look at the hub this often.
 REQUEST_POLL_S = 10.0
+#: A waiting request survives this many unanswered polls in a row (ssh hiccups) minus one.
+REQUEST_MAX_MISSES = 3
 KEEP_MINUTES = (5, 15, 30, 60)
 ANSWERS = ("release", "keep")
 #: A note is at most 4 KiB on the hub; the message is the only free text in it.
@@ -660,11 +663,15 @@ class LeaseService:
             if held and stored is not None and holder not in ids:
                 self._lost(self._board_for(hub), hub, stored, holder)
                 stored = None
-        mine = held and stored is not None and holder in ids
+        # "mine" is by principal (docs/LEASE_REQUESTS.md "Who am I"): also true when another
+        # session of ours holds it. Answering requests needs the token, so "incoming" is only
+        # for the session that holds it here.
+        here = held and stored is not None and holder in ids
+        mine = held and (here or (bool(principal) and holder == principal))
         if held:
             out["lease"] = {"target": hub.target, "holder": holder,
                             "expires_at": getattr(shown, "expires_at", "")
-                            or (stored.expires_at if mine and stored else ""),
+                            or (stored.expires_at if here and stored else ""),
                             "mine": mine, "user": getattr(shown, "user", "") or ""}
         queue = list(getattr(shown, "queue", ()) or ())
         out["queue"] = [{"position": int(getattr(e, "position", 0) or 0),
@@ -676,7 +683,7 @@ class LeaseService:
             ours = self._latest_of(notes, principal)
             if ours is not None:
                 out["request"] = self._request_public(hub, ours, queue, principal)
-            if mine:
+            if here:
                 out["incoming"] = self._incoming_list(hub, notes, principal, queue,
                                                       has_queue=hasattr(shown, "queue"))
         out["taken"] = self.store.get_taken(hub.host, hub.target)
@@ -893,23 +900,35 @@ class LeaseService:
         report = progress or (lambda *_: None)
         holder = default_holder()
         out: _Outgoing | None = None
+        kept = False
+        misses = 0
         try:
             while True:
                 if cancel.is_set():
                     raise _Cancelled()
-                lease, expires_at, position = self._acquire_once(hub, holder, ttl_s)
-                if lease is not None:
-                    return self._granted(board_id, hub, holder, lease, expires_at, ttl_s, report,
-                                         heartbeat=heartbeat)
-                if out is None:
-                    report("queued", position, 0)
-                    self._emit(board_id, hub, "queued", principal)
-                    out = self._open_request(board_id, hub, holder, ttl_s, message, principal,
-                                             cancel, heartbeat, asked)
-                    report("notified", 0, 0)
-                self._moved(out, position, principal, report)
-                answered = self._poll_answer(out, report)
+                try:
+                    lease, expires_at, position = self._acquire_once(hub, holder, ttl_s)
+                    if lease is not None:
+                        return self._granted(board_id, hub, holder, lease, expires_at, ttl_s,
+                                             report, heartbeat=heartbeat)
+                    if out is None:
+                        report("queued", position, 0)
+                        self._emit(board_id, hub, "queued", principal)
+                        out = self._open_request(board_id, hub, holder, ttl_s, message, principal,
+                                                 cancel, heartbeat, asked)
+                        report("notified", 0, 0)
+                    self._moved(out, position, principal, report)
+                    answered = self._poll_answer(out, report)
+                    misses = 0
+                except UnreachableError as exc:
+                    misses += 1                  # an ssh hiccup: the queue place is still ours
+                    if misses >= REQUEST_MAX_MISSES:
+                        raise
+                    log.warning("request for %s: poll %d missed (will retry): %s", hub.target,
+                                misses, exc.message)
+                    answered = None
                 if answered is not None:
+                    kept = True
                     return {"answered": answered}
                 self._nap(cancel)
         except _Cancelled:
@@ -918,15 +937,25 @@ class LeaseService:
                     self._leave_hub(board_id, hub, principal)
             raise ActionFailedError(f"the request for {hub.target} was withdrawn: you left the queue",
                                     hint="request it again when you want the board") from None
+        except HarnessError:
+            # The wait failed: do not leave a queue place behind that nobody watches (it can
+            # later hand the board to nobody). Best effort: the hub may be the thing that failed.
+            with contextlib.suppress(HarnessError):
+                self._leave_hub(board_id, hub, principal)
+            raise
         finally:
             with self._mu:
                 if self._acquiring.get(gate) is cancel:
                     del self._acquiring[gate]
                 o = self._outgoing.get(key)
-                watch = o is not None and o is out and o.blocking
-                if watch:
-                    o.blocking = False           # answered keep: the service watches it now
-                    o.cancel = None
+                watch = False
+                if o is not None and o is out and o.blocking:
+                    if kept:
+                        o.blocking = False       # answered keep: the service watches it now
+                        o.cancel = None
+                        watch = True
+                    else:
+                        del self._outgoing[key]  # e.g. Ctrl-C: the caller leaves or keeps it
             if watch:
                 self._ensure_thread()
 

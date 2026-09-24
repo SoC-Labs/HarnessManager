@@ -73,6 +73,7 @@ class LrbHub:
         self.calls: list[tuple[str, str]] = []
         self.history_has_revoke = True
         self.fail_next: dict[str, Exception] = {}  # verb -> raised once
+        self.fail_always: dict[str, Exception] = {}  # verb -> raised every time
         self._tokens = 0
 
     def client(self, principal: str, user: str = "") -> LrbClient:
@@ -132,7 +133,7 @@ class LrbClient:
 
     def _call(self, verb: str) -> None:
         self.hub.calls.append((self._principal, verb))
-        err = self.hub.fail_next.pop(verb, None)
+        err = self.hub.fail_next.pop(verb, None) or self.hub.fail_always.get(verb)
         if err is not None:
             raise err
 

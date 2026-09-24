@@ -82,6 +82,17 @@ def test_is_this_queue_entry_me(world):
     assert [e["mine"] for e in q] == [True, False]
 
 
+def test_mine_is_by_principal_even_from_another_session_but_incoming_needs_the_token(world):
+    world.holding(BOB, name="bob-desk")                        # bob's other session holds it
+    world.queued_by_hand(CAROL, age_s=0)
+    laptop = world.session(BOB, name="bob-laptop")
+    v = laptop.svc.view(laptop.hub)
+    assert v["lease"]["holder"] == BOB and v["lease"]["mine"]   # the spec: mine by principal
+    assert v["incoming"] == []                                  # it cannot answer: no token here
+    desk = world.sessions[0]                                    # twin: the session with the token
+    assert [i["by"] for i in desk.svc.view(desk.hub)["incoming"]] == [CAROL]
+
+
 # --- the view --------------------------------------------------------------------------------------
 
 
