@@ -92,7 +92,9 @@ def test_negative_twin_a_cancelled_wait_removes_its_queue_entry(tmp_path, fake):
 def test_the_view_says_whose_lease_it_is(tmp_path, fake):
     clock = [0.0]
     s = svc(tmp_path, clock=lambda: clock[0])
-    assert s.view(Hub(fake)) == {"lease": None, "hub": HUB}
+    # LR-B extends the view (queue, request, incoming, taken); L1's two keys are unchanged.
+    assert {k: v for k, v in s.view(Hub(fake)).items() if k in ("lease", "hub")} == {
+        "lease": None, "hub": HUB}
     s.acquire(Hub(fake), ttl_s=600, holder="hm-test", heartbeat=False)
     mine = s.view(Hub(fake))["lease"]
     assert mine["mine"] and mine["holder"] == "hm-test" and mine["expires_at"] == EXPIRES
@@ -101,7 +103,7 @@ def test_the_view_says_whose_lease_it_is(tmp_path, fake):
     clock[0] += 11.0                                            # ... for 10 s
     theirs = s.view(Hub(fake))["lease"]
     assert not theirs["mine"] and theirs["holder"] == "b0-linux"
-    assert s.view(None) == {"lease": None, "hub": None}         # not behind a hub
+    assert s.view(None)["lease"] is None and s.view(None)["hub"] is None   # not behind a hub
 
 
 def test_heartbeat_extends_and_reports_expired_or_lost(tmp_path, fake, events):
