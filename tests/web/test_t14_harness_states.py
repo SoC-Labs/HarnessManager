@@ -169,8 +169,20 @@ def test_a_hung_harness_shows_the_failed_read_and_keeps_the_last_good_one(stage,
         expect(health_chip(page)).to_have_attribute("data-level", "ok")
 
 
-def test_a_board_reboot_shows_the_controllers_evidence(stage, tmp_path, screenshots):
+def test_a_board_reboot_shows_the_controllers_evidence(stage, tmp_path, screenshots, monkeypatch):
+    # The page is under test here, not the MCC's timing (tests/unit/test_t3_mcc.py and
+    # test_t3_hooks.py hold that). At the real 60 ms a character, the Details' MCC reads
+    # hold the board and the reboot POST waits ~6.5 s for them (Q1 finding); a 5 ms pace,
+    # a faster witness and a 1 s boot keep every phase the evidence reports (sent, down,
+    # up, shell id) and cut the test from ~14 s.
+    from harness_manager_mps3 import mcc
+
+    monkeypatch.setattr(mcc, "DEFAULT_TIMING", replace(
+        mcc.DEFAULT_TIMING, pace_s=0.005, ping_interval_s=0.25, ping_timeout_s=0.25,
+        quiet_s=0.5, reopen_interval_s=0.1))
     with VirtualMps3(tmp_path, FIELDED_3F1A560F, usb=True) as vb:
+        vb.mcc._pace = 0.002                  # the fake drops characters closer than this
+        vb.mcc.boot_s = 1.0
         page, _, _ = stage(vb, vb.candidate(usb=True))
         page.locator('[data-section="power"]').click()
         page.locator('[data-testid="arm-reboot"] input').check()
