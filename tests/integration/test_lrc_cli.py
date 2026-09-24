@@ -461,3 +461,26 @@ def test_the_real_hub_adapter_path_reaches_the_new_verbs(capsys, tmp_path, monke
             "ok": True, "board_id": json.loads(out)["board_id"], "name": "mps3-01", "hub": HUB,
             "target": TARGET, "left": False}
         assert rig.hub.current is None                          # the fake hub was not asked
+
+
+# --- D11: lease dismiss --------------------------------------------------------------------------
+
+
+def test_dismiss_forgets_a_forced_release(capsys, world):
+    world.holder = ME
+    world.force_me_off(BOB)
+    rc, out, _ = run(capsys, "lease", "show", TARGET_ARG)
+    assert f"your lease was force-released by {BOB}" in out
+    rc, out, _ = run(capsys, "--json", "lease", "dismiss", TARGET_ARG)
+    d = json.loads(out)
+    assert rc == ExitCode.OK and d["dismissed"] is True and d["target"] == TARGET
+    rc, out, _ = run(capsys, "lease", "show", TARGET_ARG)
+    assert "force-released" not in out and world.taken is None
+
+
+def test_negative_twin_dismiss_with_nothing_to_dismiss(capsys, world):
+    rc, out, _ = run(capsys, "lease", "dismiss", TARGET_ARG)
+    assert rc == ExitCode.OK and f"no forced release of mps3-01 ({TARGET} on {HUB}) to dismiss" in out
+    rc, out, _ = run(capsys, "--tsv", "lease", "dismiss", TARGET_ARG)
+    assert out == f"{TARGET}\t{HUB}\tfalse\n"
+    assert len(TSV_COLUMNS["lease dismiss"]) == 3 and world.holder == ALICE

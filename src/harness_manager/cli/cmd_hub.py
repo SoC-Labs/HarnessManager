@@ -10,6 +10,7 @@
     harness-manager lease respond TARGET ID --release | --keep MINUTES [--message M]
     harness-manager lease force TARGET [--yes]
     harness-manager lease leave TARGET
+    harness-manager lease dismiss TARGET          # forget the last forced release (D11)
     harness-manager share list TARGET
     harness-manager share start TARGET NAME      # a share name from boards.toml (mcc, ...) or a /dev path
 
@@ -323,6 +324,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     sp = lsub.add_parser("leave", help="leave the queue and withdraw your request",
                          parents=[fmt], epilog=_cols("lease leave"))
+    sp.add_argument("target", metavar="TARGET", help=target_help)
+
+    sp = lsub.add_parser("dismiss", help="forget the last forced release of your lease (D11)",
+                         description="`lease show` reports the last time someone force-released "
+                                     "your lease until you dismiss it. Local only: the hub is "
+                                     "not asked, and the next forced release is reported again.",
+                         parents=[fmt], epilog=_cols("lease dismiss"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
     vp.set_defaults(fn=cmd_lease)
 
@@ -828,6 +836,17 @@ def cmd_lease(ctx: Ctx) -> int:
                           human=[f"left the queue for {_where(cand, hub)}; the request is "
                                  "withdrawn" if left else
                                  f"not in the queue for {_where(cand, hub)}"]))
+        return ExitCode.OK
+    if a.lease_cmd == "dismiss":
+        # D11: local (the service's own record); like `leave`, running it twice is fine.
+        dismissed = bool(svc.dismiss_taken(hub))
+        _emit(ctx, Result("lease dismiss", {"board_id": cand.board_id, "name": _name(cand),
+                                            "hub": hub.host, "target": hub.target,
+                                            "dismissed": dismissed},
+                          rows=[[hub.target, hub.host, dismissed]],
+                          human=[f"dismissed the forced release of {_where(cand, hub)}"
+                                 if dismissed else
+                                 f"no forced release of {_where(cand, hub)} to dismiss"]))
         return ExitCode.OK
     raise UsageError(f"unknown lease action {a.lease_cmd!r}")
 

@@ -59,6 +59,7 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/boards/{bid}/lease/respond"),
         ("POST", "/boards/{bid}/lease/force"),
         ("DELETE", "/boards/{bid}/lease/queue"),
+        ("DELETE", "/boards/{bid}/lease/taken"),
     ),
     "power_api": (
         ("GET", "/boards/{bid}/power"),

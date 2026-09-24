@@ -579,3 +579,47 @@ def test_stopping_the_daemon_closes_the_streams(rig, world, streams, monkeypatch
         assert len(c.app.state.daemon.hub_streams) == 1
     eng.close_all()
     assert [s.closed for s in streams] == [1]
+
+
+# --- D11: DELETE /lease/taken (the victim dismisses the "force-released" banner) --------------
+
+
+def test_dismissing_a_forced_release_clears_taken_even_while_a_job_runs(client, bid, world,
+                                                                        blocker):
+    world.holder = ME
+    world.force_me_off(ALICE)
+    assert client.get(lease(bid), headers=H).json()["taken"]["by"] == ALICE
+    blocker(bid)                                                      # no gate: still answers
+    r = client.delete(lease(bid, "/taken"), headers=H)
+    assert r.status_code == 200 and r.json() == {"ok": True, "dismissed": True}
+    assert client.get(lease(bid), headers=H).json()["taken"] is None
+    assert ("dismiss_taken",) in world.calls and world.holder == ALICE   # the lease untouched
+
+
+def test_negative_twin_nothing_to_dismiss_a_closed_board_or_no_hub(client, bid, world, tmp_path):
+    r = client.delete(lease(bid, "/taken"), headers=H)
+    assert r.status_code == 200 and r.json() == {"ok": True, "dismissed": False}
+    r = client.delete(lease("mps3@10.9.9.9:6900", "/taken"), headers=H)
+    assert r.status_code == 404 and r.json()["error"]["code"] == ExitCode.ABSENT
+    assert client.get(bid_path(bid), headers=H).status_code == 200    # the board is not closed
+    with VirtualMps3(tmp_path / "direct") as vb:
+        eng = engine_for(vb)
+        with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as c:
+            b = c.post("/api/v1/boards", json={"target": vb.shell_endpoint}, headers=H).json()
+            r = c.delete(lease(b["board_id"], "/taken"), headers=H)
+            assert r.status_code == 422 and r.json()["error"]["code"] == ExitCode.UNAVAILABLE
+        eng.close_all()
+
+
+def test_the_route_calls_the_real_services_dismiss_taken(rig):
+    """The real LeaseService (LR-B), not the fake: its record goes, and only once."""
+    eng = Engine(EngineConfig(state_dir=state_dir()))
+    with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as c:
+        bid = c.post("/api/v1/boards", json={"target": BOARD_IP}, headers=H).json()["board_id"]
+        store = c.app.state.daemon.leases.store
+        store.put_taken(HUB, TARGET, {"by": ALICE, "reason": "force-released by alice", "at":
+                                      "2026-09-24T12:00:00+00:00"})
+        r = c.delete(lease(bid, "/taken"), headers=H)
+        assert r.json() == {"ok": True, "dismissed": True} and store.get_taken(HUB, TARGET) is None
+        assert c.delete(lease(bid, "/taken"), headers=H).json()["dismissed"] is False
+    eng.close_all()

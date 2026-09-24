@@ -80,6 +80,7 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
                        "ANSWER"),
     "lease respond": ("TARGET", "ID", "ANSWER", "MINUTES", "MESSAGE"),
     "lease leave": ("TARGET", "HUB", "LEFT"),
+    "lease dismiss": ("TARGET", "HUB", "DISMISSED"),
     "share": ("TARGET", "HUB", "TTY", "TCP", "WRITER", "READERS", "RUNNING"),
     "help": ("TAB", "LINE", "TEXT"),
 }

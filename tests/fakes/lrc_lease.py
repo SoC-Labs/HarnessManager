@@ -304,6 +304,16 @@ class FakeLeaseService(LeaseService):
             assert w.holder == w.me
         return {"lease": self._lease(hub)}
 
+    def dismiss_taken(self, hub: Any) -> bool:
+        """D11: forget the last forced release (the victim closed the banner)."""
+        w = self.world
+        w.calls.append(("dismiss_taken",))
+        if hub is None:
+            return False
+        with w.mu:
+            had, w.taken = w.taken is not None, None
+        return had
+
     def leave(self, board_id: str, hub: Any) -> dict[str, Any]:
         w = self.world
         w.calls.append(("leave", board_id))

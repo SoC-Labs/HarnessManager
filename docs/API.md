@@ -199,6 +199,7 @@ docs/LEASE_REQUESTS.md is the design, with the lead decisions D1–D8.
 | `POST /boards/{bid}/lease/respond` `{id, answer: "release"\|"keep", minutes?, message?}` | `{ok}` |
 | `POST /boards/{bid}/lease/force` `{confirm: true}` | 202 job `lease_force`; the result is `{lease}`. Refused before any revoke (below). |
 | `DELETE /boards/{bid}/lease/queue` | `{left: bool}`: leaves the queue and withdraws the request. |
+| `DELETE /boards/{bid}/lease/taken` | `{dismissed: bool}`: forgets the last forced release of our lease (D11). `GET /lease` then returns `taken: null` until the next one. |
 
 `GET /boards/{bid}/lease` adds `queue`, `request`, `incoming` (each with its `answer` or `null`), `taken` and `board` (the physical board a force revokes, `mps3_01`). The fields are in docs/LEASE_REQUESTS.md "API". Times are ISO 8601 UTC with `+00:00`.
 
@@ -216,6 +217,7 @@ Events: `lease.wanted`, `lease.answered`, `lease.force_available`, `lease.taken`
 - **`lease_force` runs beside the board's own `lease_request` job** (D2): the revoke is what ends that job, so force does not wait for its gate. With no request job running, force is an ordinary board job. Any other running job refuses it with 409 HELD. Its phases are `revoke` and `held`. `GET /jobs` and `GET /jobs/{id}` include it.
 - **Validation (400 USAGE):** `id` is `[A-Za-z0-9_.-]{1,64}`; `minutes` is 5, 15, 30 or 60, and only with `keep`; `message` is at most 500 characters (control characters become one space); `ttl_s` is 60–86400.
 - **`respond`:** a `release` is 409 HELD while a non-lease job (a deploy) runs on the board. A `keep` never is.
+- **Dismissing (D11):** `DELETE /lease/taken` is local (the service's own record, no hub call) and takes no gate, so it works while a job runs. `dismissed` is false when there was nothing to dismiss; running it twice is fine. No event is sent: a front-end that dismisses clears its own banner, and others see `taken: null` on their next `GET /lease`.
 - **Leaving:** `DELETE /lease/queue` stops the request job, which ends with `{left: true}`. `left` is true when a queue entry was removed or a request job was running. `DELETE /lease` does the same for a queued request and returns `{cancelled: true, left: true}`. Closing the board, or stopping the daemon, also leaves the queue.
 
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)

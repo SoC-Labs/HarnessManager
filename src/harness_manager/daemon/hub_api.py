@@ -17,6 +17,7 @@ docs/LEASE_REQUESTS.md, "API" (frozen 2026-09-24, lane LR-C):
 | ``POST /boards/{bid}/lease/respond`` | ``{id, answer, minutes?, message?}`` | 200 ``{ok}`` |
 | ``POST /boards/{bid}/lease/force`` | ``{confirm: true}`` | 202 job ``lease_force``; result ``{lease}``. Before any revoke: 400 USAGE without ``confirm: true``; 422 UNAVAILABLE with the time left; 409 REFUSED (or ALREADY) with the reason (D3) |
 | ``DELETE /boards/{bid}/lease/queue`` | none | 200 ``{left: bool}`` |
+| ``DELETE /boards/{bid}/lease/taken`` | none | 200 ``{dismissed: bool}``; ``GET /lease`` then has ``taken: null`` until the next forced release (D11) |
 
 ``GET /lease`` adds ``queue``, ``request``, ``incoming`` (each with its ``answer``, D5),
 ``taken`` and ``board`` (D4): the lease service's ``view`` builds them (lane LR-B) and
@@ -331,6 +332,11 @@ def register(ctx: RouteContext) -> None:
         stopped = stop_request(bid)
         rest = {k: v for k, v in out.items() if k not in ("ok", "left")}
         return _JSON(ok(left=bool(out.get("left")) or stopped, **rest))
+
+    @ctx.api.delete("/boards/{bid:path}/lease/taken")
+    def lease_dismiss_taken(bid: str) -> _JSON:
+        """D11: the victim closed the "force-released by ..." banner. Local; no gate."""
+        return _JSON(ok(dismissed=bool(leases.dismiss_taken(hub_of(bid)))))
 
     @ctx.api.get("/boards/{bid:path}/lease")
     def lease_view(bid: str) -> _JSON:
