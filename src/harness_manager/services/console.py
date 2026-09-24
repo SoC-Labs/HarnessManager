@@ -493,6 +493,12 @@ class _Upstream:
             except queue.Empty:
                 break
         self.write_dropped += dropped
+        if self._stop.is_set():
+            # The last reader left (or the board closed) while paced input was queued: an
+            # ordinary close, not a fault. "link down" here sent field reports astray (Q2).
+            log.info("console %s on %s: closed with %d unsent byte(s)",
+                     self.name, self.board_id, dropped)
+            return
         log.warning("console %s on %s: link down, %d unsent byte(s) dropped",
                     self.name, self.board_id, dropped)
 

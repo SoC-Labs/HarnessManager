@@ -756,3 +756,56 @@ def test_the_lease_heartbeat_survives_one_failed_round(tmp_path):
         assert Client.beats > before, "the heartbeat thread died on the OSError"
     finally:
         svc.close()
+
+
+# --- a console's queued input dropped at close is a close, not "link down" --------------------
+
+
+def _paced_console(name: str):
+    from harness_manager.core.events import EventBus
+    from harness_manager.core.transport import register_fake_serial
+    from harness_manager.services.console import ConsoleBroker
+    from tests.fakes.t4_console_rig import BareSession, FakeUart, _Consoles
+
+    class Paced(_Consoles):
+        def console_write_pace_s(self) -> dict[str, float]:
+            return {"u": 0.05}
+
+    uart = FakeUart()
+    session = BareSession(f"q2@{name}")
+    session.consoles = Paced({"u": register_fake_serial(name, uart)})
+    broker = ConsoleBroker(EventBus())
+    sub = broker.subscribe(session, "u")
+    _wait(lambda: sub.state == "up", what="the console to connect")
+    sub.write(b"x" * 40)                           # 2 s of paced input
+    _wait(lambda: len(uart.written) >= 1, what="the first paced byte")
+    return broker, sub, uart
+
+
+def test_paced_input_left_when_the_last_reader_leaves_is_logged_as_a_close(caplog):
+    from harness_manager.core.transport import unregister_fake_serial
+
+    broker, sub, _uart = _paced_console("q2-close")
+    try:
+        with caplog.at_level(logging.INFO, logger="harness_manager.services.console"):
+            sub.close()                            # the last reader leaves
+            _wait(lambda: "unsent byte" in caplog.text, what="the drop to be logged")
+        assert "closed with" in caplog.text and "link down" not in caplog.text
+    finally:
+        broker.shutdown()
+        unregister_fake_serial("q2-close")
+
+
+def test_negative_twin_a_link_that_drops_under_queued_input_still_warns(caplog):
+    from harness_manager.core.transport import unregister_fake_serial
+
+    broker, sub, uart = _paced_console("q2-drop")
+    try:
+        with caplog.at_level(logging.INFO, logger="harness_manager.services.console"):
+            uart.unplug()                          # the link dies while input is queued
+            _wait(lambda: "unsent byte" in caplog.text, what="the drop to be logged")
+        assert "link down" in caplog.text
+    finally:
+        sub.close()
+        broker.shutdown()
+        unregister_fake_serial("q2-drop")
