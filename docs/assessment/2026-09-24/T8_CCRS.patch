@@ -1,0 +1,368 @@
+--- a/src/harness_manager_mps3/hub.py
++++ b/src/harness_manager_mps3/hub.py
+@@ -10,7 +10,9 @@
+             shares = { mcc = "/dev/mps3_01_pl/tty_00" } }
+ 
+ ``hub`` keys: ``host`` (the hub to ssh into; ``"local"`` when the app runs ON
+-the hub), ``target`` (the fpgahub board name leases and shares use:
++the hub), ``url`` (fpgahub's REST API instead of ssh, with ``token_file``,
++``ca_file``, ... : ``harness_manager.transports.hub_rest``; with both, REST wins
++and ``host`` is only the SSH fallback of the data plane), ``target`` (the fpgahub board name leases and shares use:
+ ``mps3_01_pl``, never the chassis ``mps3_01``; pyverify.lease "THE NAME
+ AUTHORITY"), ``shares`` (name -> TTY path; ``mcc`` is the board controller,
+ ``fpga_uart0..3`` the FPGA UART lanes), ``baud`` (the rate the shares run at,
+@@ -85,28 +87,39 @@
+ 
+ @dataclass(frozen=True)
+ class HubConfig:
+-    host: str
++    host: str = ""                  # the SSH hub; with ``rest`` alone, the URL's host name
+     target: str = DEFAULT_TARGET
+     shares: dict[str, str] = field(default_factory=dict)     # name -> tty path
+     baud: int = DEFAULT_SHARE_BAUD
+     start_shares: bool = False
+     group: str | None = DEFAULT_GROUP
++    rest: Any = None                # hub_rest.RestHubConfig when the table has ``url`` (T8)
+ 
+     @property
+     def local(self) -> bool:
+-        return self.host in LOCAL_HOSTS
++        return self.host in LOCAL_HOSTS and self.rest is None
++
++    @property
++    def transport(self) -> str:
++        """``"rest"`` (fpgahub's API with a token) or ``"ssh"`` (``sg fpga -c fpgahub``)."""
++        return "rest" if self.rest is not None else "ssh"
+ 
+ 
+ def parse_hub_table(table: Any, *, where: str = "hub") -> HubConfig:
+     """Validate one boards.toml ``hub`` table. ``UsageError`` names the bad key."""
++    from harness_manager.transports import hub_rest
++
+     if not isinstance(table, dict):
+         raise UsageError(f"{where} must be a table: {{ host = ..., target = ... }}")
+-    unknown = set(table) - {"host", "target", "shares", "baud", "start_shares", "group"}
++    unknown = set(table) - {"host", "target", "shares", "baud", "start_shares", "group"} \
++        - hub_rest.REST_KEYS
+     if unknown:
+         raise UsageError(f"{where} has unknown keys: {', '.join(sorted(unknown))}")
+-    host = table.get("host")
++    rest = hub_rest.parse_rest_table(table, where=where)
++    host = table.get("host") or (rest.host if rest is not None else None)
+     if not isinstance(host, str) or not host or any(c.isspace() for c in host):
+-        raise UsageError(f"{where}.host must be the hub's host name (or \"local\")")
++        raise UsageError(f"{where}.host must be the hub's host name (or \"local\"), "
++                         f"or {where}.url its REST API (https://HUB:7246)")
+     target = table.get("target", DEFAULT_TARGET)
+     if not isinstance(target, str) or not re.fullmatch(r"[A-Za-z0-9_.\-]+", target):
+         raise UsageError(f"{where}.target must be an fpgahub board name, e.g. mps3_01_pl")
+@@ -125,7 +138,8 @@
+     if group is not None and not isinstance(group, str):
+         raise UsageError(f"{where}.group must be a string (empty: no sg wrapper)")
+     return HubConfig(host=host, target=target, shares=dict(shares), baud=baud,
+-                     start_shares=start, group=group or None)
++                     start_shares=start, group=group or None,
++                     rest=hub_rest.with_target(rest, target) if rest is not None else None)
+ 
+ 
+ def board_tables(candidate: Candidate) -> dict[str, Any]:
+@@ -454,6 +468,7 @@
+     port: int                             # the share's port on the hub
+     local_port: int
+     tunnel: Any = None                    # SshTunnel, or None on the hub itself
++    host: str = "127.0.0.1"               # where to connect: the hub itself when REST-only
+ 
+ 
+ class _ShareRoutes:
+@@ -468,16 +483,23 @@
+         self._starts: dict[tuple[str, str], bool] = {}     # (host, target) -> start_shares
+         self._bauds: dict[tuple[str, str], int] = {}
+         self._groups: dict[tuple[str, str], str | None] = {}
++        self._configs: dict[tuple[str, str], HubConfig] = {}
+ 
+     def configure(self, cfg: HubConfig) -> None:
+         with self._mu:
+             self._starts[(cfg.host, cfg.target)] = cfg.start_shares
+             self._bauds[(cfg.host, cfg.target)] = cfg.baud
+             self._groups[(cfg.host, cfg.target)] = cfg.group
++            self._configs[(cfg.host, cfg.target)] = cfg
+ 
+-    def client(self, ref: ShareRef) -> HubClient:
++    def client(self, ref: ShareRef) -> Any:
+         with self._mu:
+             group = self._groups.get((ref.host, ref.target), DEFAULT_GROUP)
++            cfg = self._configs.get((ref.host, ref.target))
++        if cfg is not None and cfg.rest is not None:
++            from harness_manager.transports import hub_rest
++
++            return hub_rest.client_for(cfg)
+         return HubClient(ref.host, ref.target, group=group)
+ 
+     def route(self, ref: ShareRef, info: ShareInfo) -> _ShareRoute:
+@@ -489,8 +511,14 @@
+                 return old
+             if old is not None and old.tunnel is not None:
+                 old.tunnel.close()
+-            if ref.host in LOCAL_HOSTS:
++            with self._mu:
++                cfg = self._configs.get((ref.host, ref.target))
++            rest = cfg.rest if cfg is not None else None
++            if ref.host in LOCAL_HOSTS and rest is None:
+                 new = _ShareRoute(info.port, info.port)
++            elif rest is not None and not rest.ssh_host:
++                # REST only (no SSH account): the share listens on the hub's 0.0.0.0 (T8).
++                new = _ShareRoute(info.port, info.port, host=rest.host)
+             else:
+                 t = _tunnel.SshTunnel(ref.host,
+                                       [_tunnel.Forward("share", info.remote_host, info.port)],
+@@ -571,7 +599,7 @@
+     read_only = info.readers > 0
+     why = (f"another client ({info.writer or 'unknown'}) holds the hub share's write slot; "
+            "fpgahub drops every other client's writes") if read_only else ""
+-    port = tcp_serial.TcpSerialPort("127.0.0.1", route.local_port, baud=share_baud,
++    port = tcp_serial.TcpSerialPort(route.host, route.local_port, baud=share_baud,
+                                     read_only=read_only, read_only_reason=why,
+                                     label=f"hub share {ref.tty} on {ref.host}")
+     tcp_serial.mark_share(ref.url, share_baud)
+@@ -636,7 +664,7 @@
+     def _serve(self, client: socket.socket) -> None:
+         try:
+             _info, route = resolve_share(self.ref)
+-            upstream = socket.create_connection(("127.0.0.1", route.local_port), timeout=10)
++            upstream = socket.create_connection((route.host, route.local_port), timeout=10)
+             upstream.settimeout(None)
+         except (HarnessError, OSError) as exc:
+             self.last_error = str(exc)                 # the message and the next step
+@@ -699,10 +727,15 @@
+     """``session.hub``: the board's hub, its target, and a client for both (lane L1)."""
+ 
+     def __init__(self, cfg: HubConfig, client: HubClient | None = None) -> None:
++        from harness_manager.transports import hub_rest
++
+         self.config = cfg
+         self.host = cfg.host
+         self.target = cfg.target
+-        self.client = client or HubClient(cfg.host, cfg.target, group=cfg.group)
++        # T8: url -> fpgahub's REST API (hub_rest.RestHubClient), else ssh (HubClient).
++        self.client = client or hub_rest.client_for(
++            cfg, ssh_factory=lambda: HubClient(cfg.host, cfg.target, group=cfg.group))
++        self.transport = getattr(self.client, "transport", "ssh")
+         SHARES.configure(cfg)
+ 
+     def share_status(self) -> dict[str, Any]:
+--- a/src/harness_manager/daemon/hub_api.py
++++ b/src/harness_manager/daemon/hub_api.py
+@@ -11,7 +11,10 @@
+ 
+ Events: ``lease.state {target, state, holder, expires_at}``; and ``tunnel.state``
+ (the tunnel's status) whenever an open board's tunnel changes state (CCR L1-4
+-appends the topic).
++appends the topic). A board whose hub is reached over fpgahub's REST API (T8)
++also streams the hub's own events while it is open: ``hub.event`` and
++``hub.stream`` (``harness_manager.transports.hub_events``); each one drops the
++lease service's cached view and settles a revoked or expired lease at once.
+ 
+ None of these take the board's operation gate: they talk to the hub, not to
+ the board, so a queued lease request (a job, which does hold the board) can
+@@ -52,6 +55,9 @@
+     d = ctx.daemon
+     leases = LeaseService(d.state_dir, d.bus)
+     d.leases = leases                     # other lanes and tests read it here
++    streams: dict[str, Any] = {}          # board id -> hub_events.HubEventStream (T8)
++    d.hub_streams = streams
++    d.bus.subscribe("hub.event", leases.on_hub_event)
+ 
+     # -- follow boards opening and closing ------------------------------------------------
+ 
+@@ -63,6 +69,14 @@
+         hub = getattr(session, "hub", None)
+         if hub is not None:
+             leases.track(ev.board_id, hub)
++            client = getattr(hub, "client", None)
++            if getattr(client, "transport", "") == "rest" and \
++                    getattr(getattr(client, "config", None), "events", False) and \
++                    ev.board_id not in streams:
++                from harness_manager.transports import hub_events
++
++                streams[ev.board_id] = hub_events.attach_bus(
++                    d.bus, ev.board_id, client, on_resync=lambda h=hub: leases.forget(h))
+         tunnel = getattr(getattr(session, "reach", None), "tunnel", None)
+         if tunnel is not None and hasattr(tunnel, "watch"):
+             bid = ev.board_id
+@@ -71,6 +85,9 @@
+     def closed(ev: Event) -> None:
+         leases.untrack(ev.board_id)
+         leases.cancel_acquire(ev.board_id)
++        stream = streams.pop(ev.board_id, None)
++        if stream is not None:
++            stream.close()
+ 
+     d.bus.subscribe("session.opened", opened)
+     d.bus.subscribe("session.closed", closed)
+@@ -80,6 +97,9 @@
+     original_close = d.close
+ 
+     def close() -> None:
++        for stream in list(streams.values()):
++            stream.close()
++        streams.clear()
+         leases.close()
+         original_close()
+ 
+--- a/docs/CONTRACTS.md
++++ b/docs/CONTRACTS.md
+@@ -34,6 +34,8 @@
+ | `console.pty` `{name, path, device, clients, open}` | a console's PTY for `screen` opened, closed, or a client attached or left (L2) |
+ | `lease.state` `{target, state, holder, expires_at}` | a hub lease was held, queued, released, expired or lost (L1) |
+ | `tunnel.state` `{via, host, state: up\|down\|starting, ports, forwards, restarts, pid, detail}` | the SSH tunnel to a board behind a hub changed state (L1) |
++| `hub.event` `{type, ts, target, board, data}` | fpgahub pushed a lease or share event about the board's target or its physical board (T8; `data` is fpgahub's own payload, never a token) |
++| `hub.stream` `{state: connecting\|up\|down\|refused\|closed, detail, url, reconnects}` | the board's fpgahub event stream changed state (T8) |
+ | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | harness-manager-daemon jobs and back-pressure (docs/API.md) |
+ 
+ ## Wave 1 implementations (who implements which frozen protocol)
+@@ -64,6 +66,10 @@
+   - `ProbeHints.via` and `candidate_for_host(spec, via="")` take `"ssh:HOST"`. A pack that cannot tunnel raises `UsageError` for a non-empty `via`.
+   - Sessions behind a hub may carry `session.hub` (`host`, `target`, `client`) and `session.reach` (`status()`, `close()`). A pack may offer `hub_for(candidate)`.
+   - Engines that predate `via` still work: callers pass it only when it is set.
++- **Hub mode (T8).**
++  - boards.toml `hub.url` (with `token_file`, `ca_file`, ...) reaches fpgahub's REST API instead of ssh; with `host` too, REST wins and `host` is the data plane's SSH fallback. `via = "hub"` routes through the hub when the lease gate allows, else tunnels.
++  - `session.hub.client.transport` is `"ssh"` or `"rest"`. A REST client has `notes_supported = False` (+ `notes_reason`), `can_revoke() -> (bool, reason)` (force-release needs an admin token), `observe(event)` and `relevant(event)`.
++  - `session.reach` may be a `DirectReach` (`status()['mode'] == 'direct'`, with the plan).
+ - **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
+ 
+ ## Changing a contract
+--- a/src/harness_manager/services/lease.py
++++ b/src/harness_manager/services/lease.py
+@@ -227,6 +227,38 @@
+         with self._mu:
+             self._views.pop((hub.host, hub.target), None)
+ 
++    def forget(self, hub: Any) -> None:
++        """Drop the cached ``lease show`` for ``hub`` (the hub said it changed; T8)."""
++        self._forget(hub)
++
++    def on_hub_event(self, ev: Event) -> None:
++        """``hub.event`` (T8, fpgahub's SSE): a lease change seconds before a poll would see it.
++
++        Drops the board's cached view. When the change took away the lease this service
++        holds for that board (revoked, expired), it heartbeats now, which settles it the
++        way a scheduled heartbeat would: ``lease.state`` lost/expired, token dropped.
++        """
++        with self._mu:
++            tr = self._tracked.get(ev.board_id)
++        if tr is None:
++            return
++        self._forget(tr.hub)
++        data = ev.data.get("data") or {}
++        if ev.data.get("type") not in ("lease.revoked", "lease.admin_revoked", "lease.expired"):
++            return
++        stored = self.store.get(tr.hub.host, tr.hub.target)
++        if stored is None:
++            return
++        gone = data.get("prior_holder") or data.get("holder")
++        principal = getattr(tr.hub.client, "principal", None)
++        mine = {stored.holder}
++        if callable(principal):
++            with contextlib.suppress(HarnessError):
++                mine.add(principal())
++        if gone in mine:
++            tr.last_beat = self._clock() - 10 * MAX_HEARTBEAT_S
++            self.beat_due()
++
+     def _emit(self, board_id: str, hub: Any, state: str, holder: str = "", expires_at: str = "") -> None:
+         self._forget(hub)
+         if self.bus is None:
+--- a/src/harness_manager_mps3/tunnel.py
++++ b/src/harness_manager_mps3/tunnel.py
+@@ -79,6 +79,8 @@
+ log = logging.getLogger(__name__)
+ 
+ VIA_SSH = "ssh"
++#: T8: through the hub by routing when it can (lease gate + route), else its SSH tunnel.
++VIA_HUB = "hub"
+ #: The marker in a link's ``detail`` that names the hub (``via ssh:HOST``).
+ _VIA_RE = re.compile(r"\bvia (ssh:[A-Za-z0-9._@\-\[\]:]+)")
+ 
+@@ -113,9 +115,9 @@
+ 
+ 
+ def parse_via(via: str) -> str:
+-    """``"ssh:HOST"`` -> ``HOST``; ``""`` -> ``""``. Anything else is a ``UsageError``."""
++    """``"ssh:HOST"`` -> ``HOST``; ``""`` and ``"hub"`` -> ``""``. Else a ``UsageError``."""
+     via = (via or "").strip()
+-    if not via:
++    if not via or via == VIA_HUB:
+         return ""
+     kind, sep, host = via.partition(":")
+     if kind != VIA_SSH or not sep or not host or any(c.isspace() for c in host):
+@@ -133,8 +135,10 @@
+ 
+ 
+ def candidate_via(candidate: Candidate) -> str:
+-    """``"ssh:HOST"`` when the candidate's Ethernet link goes through a hub, else ``""``."""
++    """``"ssh:HOST"`` (or ``"hub"``) when the candidate's Ethernet link goes through a hub."""
+     for lk in candidate.links:
++        if lk.kind == LinkKind.ETHERNET and lk.via == VIA_HUB:
++            return VIA_HUB
+         if lk.kind == LinkKind.ETHERNET:
+             host = via_host(lk)
+             if host:
+@@ -146,7 +150,17 @@
+     """The candidate with every Ethernet link routed ``via`` (``"ssh:HOST"``); ``""`` is a no-op.
+ 
+     Board-agnostic: it only rewrites links. The pack's ``open`` does the tunnelling.
++    ``"hub"`` marks the links ``via="hub"`` (T8: ``open_reach`` plans the route).
+     """
++    if (via or "").strip() == VIA_HUB:
++        def mark(lk: Link) -> Link:
++            if lk.kind != LinkKind.ETHERNET:
++                return lk
++            base = _VIA_RE.sub("", lk.detail or "").rstrip(" ,") or "shell control channel"
++            return Link(lk.kind, lk.address, f"{base}, via hub", via=VIA_HUB)
++
++        return replace(candidate, links=tuple(mark(lk) for lk in candidate.links),
++                       evidence=f"{candidate.evidence} (through the hub)".strip())
+     host = parse_via(via)
+     if not host:
+         return candidate
+@@ -663,6 +677,8 @@
+     eth = _eth(candidate)
+     if eth is None:
+         return None
++    if eth.via == VIA_HUB:
++        return _open_hub_reach(candidate, eth, remote_ports, launcher=launcher, ssh_g=ssh_g)
+     hub = via_host(eth)
+     if not hub:
+         # Direct, or ``via="ssh"`` with no host: a forward someone made by hand (``ssh -L``),
+@@ -681,6 +697,31 @@
+                  tunnel=tunnel, remote_host=rhost)
+ 
+ 
++def _open_hub_reach(candidate: Candidate, eth: Link, remote_ports: Mapping[str, int], *,
++                    launcher: Launcher | None, ssh_g: Callable[[Sequence[str]], str] | None) -> Any:
++    """``via = "hub"`` (T8): route through the hub when the plan allows, else its SSH tunnel."""
++    from harness_manager.transports.hub_reach import open_hub_reach
++
++    from . import hub as _hub
++
++    cfg = _hub.hub_config_for(candidate)
++    if cfg is None:
++        raise UsageError(f"via = \"hub\" needs a hub table for {candidate.board_id} in boards.toml")
++    rest = cfg.rest
++    ssh_host = (rest.ssh_host if rest is not None else cfg.host) or ""
++    client = _hub.adapter_for(candidate).client if rest is not None else None
++
++    def fallback(plan: Any) -> Reach | None:
++        return open_reach(with_via(replace(candidate, links=tuple(
++            Link(lk.kind, lk.address, lk.detail, via="") if lk is eth else lk
++            for lk in candidate.links)), f"{VIA_SSH}:{ssh_host}"), remote_ports,
++            launcher=launcher, ssh_g=ssh_g)
++
++    return open_hub_reach(eth.address, remote_ports, client=client,
++                          direct=rest.direct if rest is not None else "never",
++                          ssh_host=ssh_host, ssh_fallback=fallback, control_port=CONTROL_PORT)
++
++
+ @contextlib.contextmanager
+ def probe_reach(host_spec: str, via: str, *, timeout_s: float = 2.0,
+                 launcher: Launcher | None = None,

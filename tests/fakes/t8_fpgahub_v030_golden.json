@@ -1,0 +1,3303 @@
+{
+ "events": [
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "counts": {
+     "hub_missing": 1
+    },
+    "overall": "hub_missing"
+   },
+   "ts": "2026-09-24T11:45:53.100236+00:00",
+   "type": "topology.board_diagnosed"
+  },
+  {
+   "data": {
+    "board": "kr260_01_ps",
+    "counts": {
+     "hub_missing": 1
+    },
+    "overall": "hub_missing"
+   },
+   "ts": "2026-09-24T11:45:53.100383+00:00",
+   "type": "topology.board_diagnosed"
+  },
+  {
+   "data": {
+    "board": "kr260_01_pl",
+    "counts": {
+     "hub_missing": 1
+    },
+    "overall": "hub_missing"
+   },
+   "ts": "2026-09-24T11:45:53.100431+00:00",
+   "type": "topology.board_diagnosed"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "alice@mapstone-dev",
+    "tier": "interactive",
+    "user": "alice"
+   },
+   "ts": "2026-09-24T11:45:53.422280+00:00",
+   "type": "lease.acquired"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "alice@mapstone-dev",
+    "tier": "interactive",
+    "user": "alice"
+   },
+   "ts": "2026-09-24T11:45:53.438339+00:00",
+   "type": "lease.acquired"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "position": 1,
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "ts": "2026-09-24T11:45:53.447108+00:00",
+   "type": "lease.queued"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "position": 1,
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "ts": "2026-09-24T11:45:53.455535+00:00",
+   "type": "lease.queued"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "expires_at": "2026-09-24T11:55:53.467964+00:00",
+    "holder": "alice@mapstone-dev",
+    "ttl_s": null,
+    "user": "alice"
+   },
+   "ts": "2026-09-24T11:45:53.477460+00:00",
+   "type": "lease.heartbeat"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "alice@mapstone-dev",
+    "reason": "force-released by david@mapstone-dev via Harness Manager (by token:david)",
+    "tier": "interactive",
+    "user": "alice"
+   },
+   "ts": "2026-09-24T11:45:53.708615+00:00",
+   "type": "lease.revoked"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "expires_at": "2026-09-24T11:55:53.708802+00:00",
+    "holder": "bob@mapstone-dev",
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "ts": "2026-09-24T11:45:53.708836+00:00",
+   "type": "lease.promoted"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "chassis": "mps3_01",
+    "holder": "alice@mapstone-dev"
+   },
+   "ts": "2026-09-24T11:45:53.715715+00:00",
+   "type": "lease.released"
+  },
+  {
+   "data": {
+    "by": "token:david",
+    "chassis": "mps3_01",
+    "members": [
+     "mps3_01_pl"
+    ],
+    "prior_holder": "alice@mapstone-dev",
+    "prior_user": "alice",
+    "reason": "force-released by david@mapstone-dev via Harness Manager (by token:david)"
+   },
+   "ts": "2026-09-24T11:45:53.715842+00:00",
+   "type": "lease.admin_revoked"
+  },
+  {
+   "data": {
+    "actor": "token:bob",
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev"
+   },
+   "ts": "2026-09-24T11:45:53.756394+00:00",
+   "type": "lease.released"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "alice@mapstone-dev",
+    "tier": "interactive",
+    "user": "alice"
+   },
+   "ts": "2026-09-24T11:45:53.787019+00:00",
+   "type": "lease.acquired"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "position": 1,
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "ts": "2026-09-24T11:45:53.821839+00:00",
+   "type": "lease.queued"
+  },
+  {
+   "data": {
+    "actor": "token:bob",
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev"
+   },
+   "ts": "2026-09-24T11:45:53.834460+00:00",
+   "type": "lease.queue.cancelled"
+  }
+ ],
+ "fpgahub_version": "0.3.0",
+ "hub_hostname": "mapstone-dev",
+ "openapi": {
+  "components": {
+   "schemas": {
+    "BoardAccess": {
+     "additionalProperties": false,
+     "properties": {
+      "default_client": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Default Client"
+      },
+      "gate_ethernet": {
+       "default": false,
+       "title": "Gate Ethernet",
+       "type": "boolean"
+      },
+      "gate_tty": {
+       "default": false,
+       "title": "Gate Tty",
+       "type": "boolean"
+      },
+      "lease_timeout_s": {
+       "default": 3600,
+       "title": "Lease Timeout S",
+       "type": "integer"
+      },
+      "share_port_base": {
+       "default": 12000,
+       "title": "Share Port Base",
+       "type": "integer"
+      },
+      "share_tty": {
+       "default": false,
+       "title": "Share Tty",
+       "type": "boolean"
+      }
+     },
+     "title": "BoardAccess",
+     "type": "object"
+    },
+    "BoardGroupInfo": {
+     "description": "A physical board and the targets living inside it.",
+     "properties": {
+      "board": {
+       "title": "Board",
+       "type": "string"
+      },
+      "is_paired": {
+       "title": "Is Paired",
+       "type": "boolean"
+      },
+      "members": {
+       "items": {
+        "$ref": "#/components/schemas/GroupMemberInfo"
+       },
+       "title": "Members",
+       "type": "array"
+      },
+      "size": {
+       "title": "Size",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "board",
+      "size",
+      "is_paired",
+      "members"
+     ],
+     "title": "BoardGroupInfo",
+     "type": "object"
+    },
+    "BoardNaming": {
+     "additionalProperties": false,
+     "properties": {
+      "net_name": {
+       "title": "Net Name",
+       "type": "string"
+      },
+      "tty_symlink_dir": {
+       "title": "Tty Symlink Dir",
+       "type": "string"
+      }
+     },
+     "required": [
+      "tty_symlink_dir",
+      "net_name"
+     ],
+     "title": "BoardNaming",
+     "type": "object"
+    },
+    "BoardNetwork": {
+     "additionalProperties": false,
+     "properties": {
+      "board_ip": {
+       "format": "ipv4",
+       "title": "Board Ip",
+       "type": "string"
+      },
+      "board_mac": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Board Mac"
+      },
+      "dns_search": {
+       "default": "fpga",
+       "title": "Dns Search",
+       "type": "string"
+      },
+      "host_ip": {
+       "anyOf": [
+        {
+         "format": "ipv4interface",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Host Ip"
+      },
+      "hostname": {
+       "title": "Hostname",
+       "type": "string"
+      },
+      "pl_mac": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Pl Mac"
+      }
+     },
+     "required": [
+      "board_ip",
+      "hostname"
+     ],
+     "title": "BoardNetwork",
+     "type": "object"
+    },
+    "BoardPatchAccess": {
+     "additionalProperties": false,
+     "properties": {
+      "default_client": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Default Client"
+      },
+      "lease_timeout_s": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lease Timeout S"
+      }
+     },
+     "title": "BoardPatchAccess",
+     "type": "object"
+    },
+    "BoardPatchNaming": {
+     "additionalProperties": false,
+     "properties": {
+      "net_name": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Net Name"
+      },
+      "tty_symlink_dir": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tty Symlink Dir"
+      }
+     },
+     "title": "BoardPatchNaming",
+     "type": "object"
+    },
+    "BoardPatchNetwork": {
+     "additionalProperties": false,
+     "properties": {
+      "board_ip": {
+       "anyOf": [
+        {
+         "format": "ipv4",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Board Ip"
+      },
+      "board_mac": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Board Mac"
+      },
+      "dns_search": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Dns Search"
+      },
+      "host_ip": {
+       "anyOf": [
+        {
+         "format": "ipv4interface",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Host Ip"
+      },
+      "hostname": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Hostname"
+      }
+     },
+     "title": "BoardPatchNetwork",
+     "type": "object"
+    },
+    "BoardPatchRequest": {
+     "additionalProperties": false,
+     "properties": {
+      "access": {
+       "anyOf": [
+        {
+         "$ref": "#/components/schemas/BoardPatchAccess"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "description": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Description"
+      },
+      "hub_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Hub Path"
+      },
+      "naming": {
+       "anyOf": [
+        {
+         "$ref": "#/components/schemas/BoardPatchNaming"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "network": {
+       "anyOf": [
+        {
+         "$ref": "#/components/schemas/BoardPatchNetwork"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "server": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Server"
+      }
+     },
+     "title": "BoardPatchRequest",
+     "type": "object"
+    },
+    "BoardResponse": {
+     "properties": {
+      "access": {
+       "$ref": "#/components/schemas/BoardAccess"
+      },
+      "attach": {
+       "default": "usbip",
+       "enum": [
+        "usbip",
+        "network"
+       ],
+       "title": "Attach",
+       "type": "string"
+      },
+      "board_type": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Board Type"
+      },
+      "capabilities": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Capabilities",
+       "type": "array"
+      },
+      "description": {
+       "title": "Description",
+       "type": "string"
+      },
+      "discovered_mac": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Discovered Mac"
+      },
+      "effective_hub_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Effective Hub Path"
+      },
+      "hub_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Hub Path"
+      },
+      "lease_holder": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lease Holder"
+      },
+      "lease_queue_length": {
+       "default": 0,
+       "title": "Lease Queue Length",
+       "type": "integer"
+      },
+      "lease_state": {
+       "default": "none",
+       "enum": [
+        "held",
+        "queued",
+        "none"
+       ],
+       "title": "Lease State",
+       "type": "string"
+      },
+      "name": {
+       "title": "Name",
+       "type": "string"
+      },
+      "naming": {
+       "anyOf": [
+        {
+         "$ref": "#/components/schemas/BoardNaming"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "network": {
+       "$ref": "#/components/schemas/BoardNetwork"
+      },
+      "pinout_url": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Pinout Url"
+      },
+      "server": {
+       "title": "Server",
+       "type": "string"
+      }
+     },
+     "required": [
+      "name",
+      "server",
+      "description",
+      "network",
+      "access"
+     ],
+     "title": "BoardResponse",
+     "type": "object"
+    },
+    "ChassisLeaseCancelRequest": {
+     "description": "Body for ``DELETE /boards/{name}/queue`` and\n``DELETE /targets/{name}/queue``.\n\nA4: this used to identify the waiter *by holder string*, and every\nweb user's holder was the hub's hostname \u2014 so any write-role user\ncould cancel any other's wait. A caller cancels their own wait and\nneeds to name nobody; an admin may name a ``holder`` to cancel\nsomebody else's, and only an admin's is honoured.",
+     "properties": {
+      "holder": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Holder"
+      }
+     },
+     "title": "ChassisLeaseCancelRequest",
+     "type": "object"
+    },
+    "ChassisLeaseHistoryResponse": {
+     "description": "Lease audit-log events merged across every member of a chassis,\nsorted by timestamp. Each event keeps its ``board`` field so consumers\ncan attribute rows back to a specific member.",
+     "properties": {
+      "board": {
+       "title": "Board",
+       "type": "string"
+      },
+      "events": {
+       "items": {
+        "$ref": "#/components/schemas/LeaseEventRecord"
+       },
+       "title": "Events",
+       "type": "array"
+      }
+     },
+     "required": [
+      "board",
+      "events"
+     ],
+     "title": "ChassisLeaseHistoryResponse",
+     "type": "object"
+    },
+    "GroupMemberInfo": {
+     "properties": {
+      "name": {
+       "title": "Name",
+       "type": "string"
+      },
+      "role": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Role"
+      }
+     },
+     "required": [
+      "name"
+     ],
+     "title": "GroupMemberInfo",
+     "type": "object"
+    },
+    "GroupsResponse": {
+     "properties": {
+      "groups": {
+       "items": {
+        "$ref": "#/components/schemas/BoardGroupInfo"
+       },
+       "title": "Groups",
+       "type": "array"
+      }
+     },
+     "required": [
+      "groups"
+     ],
+     "title": "GroupsResponse",
+     "type": "object"
+    },
+    "HTTPValidationError": {
+     "properties": {
+      "detail": {
+       "items": {
+        "$ref": "#/components/schemas/ValidationError"
+       },
+       "title": "Detail",
+       "type": "array"
+      }
+     },
+     "title": "HTTPValidationError",
+     "type": "object"
+    },
+    "HealthResponse": {
+     "properties": {
+      "schema_version": {
+       "default": 0,
+       "title": "Schema Version",
+       "type": "integer"
+      },
+      "status": {
+       "const": "ok",
+       "default": "ok",
+       "title": "Status",
+       "type": "string"
+      },
+      "version": {
+       "title": "Version",
+       "type": "string"
+      }
+     },
+     "required": [
+      "version"
+     ],
+     "title": "HealthResponse",
+     "type": "object"
+    },
+    "LeaseAcquireRequest": {
+     "description": "Body for every lease acquire.\n\nCarries *what* is being asked for, never *who* is asking. A3: the\ncaller is resolved once, from the transport, into a\n:class:`~fpgahub.api.principal.Principal`, and the lease records\n``principal.holder`` / ``principal.name``.\n\n``holder``, ``user`` and ``unix_user`` are no longer fields.\nPydantic ignores unknown keys, so an older CLI that still sends them\nkeeps working for one release; a validator logs a deprecation the\nfirst time each is seen, rather than failing a caller mid-phase.\n``source_ip`` stays, but the handler fills it from the request \u2014\nthe ethernet gate opens a firewall pinhole to that address, which is\nprecisely the thing a caller must not be able to choose.",
+     "properties": {
+      "client_pid": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Client Pid"
+      },
+      "requeue_on_revoke": {
+       "default": false,
+       "title": "Requeue On Revoke",
+       "type": "boolean"
+      },
+      "source_ip": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Source Ip"
+      },
+      "tier": {
+       "$ref": "#/components/schemas/LeaseTier",
+       "default": "interactive"
+      },
+      "ttl_seconds": {
+       "default": 3600,
+       "exclusiveMinimum": 0.0,
+       "title": "Ttl Seconds",
+       "type": "integer"
+      }
+     },
+     "title": "LeaseAcquireRequest",
+     "type": "object"
+    },
+    "LeaseEventRecord": {
+     "description": "One entry from the lease-event audit log's tail buffer.",
+     "properties": {
+      "board": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Board"
+      },
+      "error": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Error"
+      },
+      "event": {
+       "title": "Event",
+       "type": "string"
+      },
+      "expires_at": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Expires At"
+      },
+      "holder": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Holder"
+      },
+      "position": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Position"
+      },
+      "source": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Source"
+      },
+      "ts": {
+       "title": "Ts",
+       "type": "string"
+      },
+      "ttl_s": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Ttl S"
+      },
+      "user": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "User"
+      }
+     },
+     "required": [
+      "ts",
+      "event"
+     ],
+     "title": "LeaseEventRecord",
+     "type": "object"
+    },
+    "LeaseHeartbeatRequest": {
+     "description": "The token proves the lease; the principal proves the caller.\n\n``holder`` is gone for the same reason as on\n:class:`LeaseAcquireRequest` \u2014 it is matched against\n``principal.holder``, so sending it could only ever disagree.",
+     "properties": {
+      "token": {
+       "title": "Token",
+       "type": "string"
+      },
+      "ttl_seconds": {
+       "anyOf": [
+        {
+         "exclusiveMinimum": 0.0,
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Ttl Seconds"
+      }
+     },
+     "required": [
+      "token"
+     ],
+     "title": "LeaseHeartbeatRequest",
+     "type": "object"
+    },
+    "LeaseHistoryResponse": {
+     "properties": {
+      "board": {
+       "title": "Board",
+       "type": "string"
+      },
+      "events": {
+       "items": {
+        "$ref": "#/components/schemas/LeaseEventRecord"
+       },
+       "title": "Events",
+       "type": "array"
+      }
+     },
+     "required": [
+      "board",
+      "events"
+     ],
+     "title": "LeaseHistoryResponse",
+     "type": "object"
+    },
+    "LeaseInfo": {
+     "properties": {
+      "board": {
+       "title": "Board",
+       "type": "string"
+      },
+      "expires_at": {
+       "format": "date-time",
+       "title": "Expires At",
+       "type": "string"
+      },
+      "holder": {
+       "title": "Holder",
+       "type": "string"
+      },
+      "tier": {
+       "$ref": "#/components/schemas/LeaseTier",
+       "default": "interactive"
+      },
+      "user": {
+       "title": "User",
+       "type": "string"
+      }
+     },
+     "required": [
+      "board",
+      "holder",
+      "user",
+      "expires_at"
+     ],
+     "title": "LeaseInfo",
+     "type": "object"
+    },
+    "LeaseReleaseRequest": {
+     "description": "See :class:`LeaseHeartbeatRequest`. A4: release used to take a\nholder string, which is how a web user could release somebody\nelse's board.",
+     "properties": {
+      "token": {
+       "title": "Token",
+       "type": "string"
+      }
+     },
+     "required": [
+      "token"
+     ],
+     "title": "LeaseReleaseRequest",
+     "type": "object"
+    },
+    "LeaseTier": {
+     "description": "Two-tier lease priority.\n\n``INTERACTIVE`` (default \u2014 every pre-tier caller) preempts ``BACKGROUND``.\nA background holder is revoked when an interactive caller arrives;\nbackground callers always queue behind interactive ones. See\n``docs/PROPOSAL_BACKGROUND_TIER.md`` for the full rationale.",
+     "enum": [
+      "interactive",
+      "background"
+     ],
+     "title": "LeaseTier",
+     "type": "string"
+    },
+    "LeaseWaitGrantedResponse": {
+     "description": "Successful response from ``GET /boards|targets/{id}/lease/wait``.\n\nReturned when the caller's token holds the chassis (or every\nmember of it) at the moment of return. Carries the per-member\nlease snapshots so callers don't need a follow-up GET.",
+     "properties": {
+      "kind": {
+       "const": "granted",
+       "default": "granted",
+       "title": "Kind",
+       "type": "string"
+      },
+      "leases": {
+       "items": {
+        "$ref": "#/components/schemas/LeaseInfo"
+       },
+       "title": "Leases",
+       "type": "array"
+      },
+      "tier": {
+       "$ref": "#/components/schemas/LeaseTier",
+       "default": "interactive"
+      },
+      "token": {
+       "title": "Token",
+       "type": "string"
+      }
+     },
+     "required": [
+      "token"
+     ],
+     "title": "LeaseWaitGrantedResponse",
+     "type": "object"
+    },
+    "PrincipalLimits": {
+     "description": "What ``[policy]`` allows this caller, beyond a role.",
+     "properties": {
+      "max_boards": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Max Boards"
+      },
+      "max_ttl_s": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Max Ttl S"
+      },
+      "rule": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Rule"
+      },
+      "tier": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Tier"
+      }
+     },
+     "title": "PrincipalLimits",
+     "type": "object"
+    },
+    "ShareInfoResponse": {
+     "properties": {
+      "board": {
+       "title": "Board",
+       "type": "string"
+      },
+      "host": {
+       "title": "Host",
+       "type": "string"
+      },
+      "port": {
+       "title": "Port",
+       "type": "integer"
+      },
+      "reader_count": {
+       "title": "Reader Count",
+       "type": "integer"
+      },
+      "running": {
+       "title": "Running",
+       "type": "boolean"
+      },
+      "tty_path": {
+       "title": "Tty Path",
+       "type": "string"
+      },
+      "writer": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Writer"
+      }
+     },
+     "required": [
+      "board",
+      "tty_path",
+      "host",
+      "port",
+      "writer",
+      "reader_count",
+      "running"
+     ],
+     "title": "ShareInfoResponse",
+     "type": "object"
+    },
+    "ShareStartRequest": {
+     "additionalProperties": false,
+     "properties": {
+      "baud": {
+       "default": 115200,
+       "title": "Baud",
+       "type": "integer"
+      },
+      "bytesize": {
+       "default": 8,
+       "title": "Bytesize",
+       "type": "integer"
+      },
+      "parity": {
+       "default": "N",
+       "enum": [
+        "N",
+        "E",
+        "O",
+        "M",
+        "S"
+       ],
+       "title": "Parity",
+       "type": "string"
+      },
+      "stopbits": {
+       "default": 1,
+       "title": "Stopbits",
+       "type": "number"
+      },
+      "tty_paths": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Tty Paths",
+       "type": "array"
+      }
+     },
+     "title": "ShareStartRequest",
+     "type": "object"
+    },
+    "ValidationError": {
+     "properties": {
+      "ctx": {
+       "title": "Context",
+       "type": "object"
+      },
+      "input": {
+       "title": "Input"
+      },
+      "loc": {
+       "items": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "integer"
+         }
+        ]
+       },
+       "title": "Location",
+       "type": "array"
+      },
+      "msg": {
+       "title": "Message",
+       "type": "string"
+      },
+      "type": {
+       "title": "Error Type",
+       "type": "string"
+      }
+     },
+     "required": [
+      "loc",
+      "msg",
+      "type"
+     ],
+     "title": "ValidationError",
+     "type": "object"
+    },
+    "WhoAmIResponse": {
+     "description": "``GET /whoami`` \u2014 the principal this request resolved to.\n\nThe point of the route is that \"what am I allowed to do, and as whom\nis it recorded\" is answerable *before* trying an action and being\nrefused. ``holder`` is the string a lease will be recorded under, so a\nuser can tell whether the hub sees them as themselves or as their\nworkstation.",
+     "properties": {
+      "audit_id": {
+       "title": "Audit Id",
+       "type": "string"
+      },
+      "groups": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Groups",
+       "type": "array"
+      },
+      "holder": {
+       "title": "Holder",
+       "type": "string"
+      },
+      "host": {
+       "title": "Host",
+       "type": "string"
+      },
+      "kind": {
+       "title": "Kind",
+       "type": "string"
+      },
+      "limits": {
+       "$ref": "#/components/schemas/PrincipalLimits"
+      },
+      "name": {
+       "title": "Name",
+       "type": "string"
+      },
+      "role": {
+       "title": "Role",
+       "type": "string"
+      },
+      "token_name": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Token Name"
+      }
+     },
+     "required": [
+      "kind",
+      "name",
+      "role",
+      "host",
+      "holder",
+      "audit_id"
+     ],
+     "title": "WhoAmIResponse",
+     "type": "object"
+    }
+   }
+  },
+  "paths": {
+   "/api/v1/boards/{name}/lease": {
+    "delete": {
+     "description": "Release every chassis member this principal holds under ``token``.\n\nA4: the holder came off the payload, so \"release\" was really \"force\nrelease, unaudited\". It is now the caller's own lease or nothing;\ntaking somebody else's is the admin revoke below.",
+     "operationId": "release_chassis_lease_api_v1_boards__name__lease_delete",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LeaseReleaseRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Release Chassis Lease"
+    },
+    "get": {
+     "description": "Return the chassis-level lease summary.\n\nThe chassis is considered 'held' when every member has a lease\nfrom the same (holder, token). A partially held chassis (some\nmembers free, some held) is reported as held by whoever holds the\nmajority \u2014 operators see a truthful picture but the chassis\nacquire endpoint will still refuse cleanly when they try to take it.\n\nIncludes ``queue`` (FCFS, 1-indexed) so dashboards can render\n\"Queue: N waiting\" / \"You are #M in queue\" without a second\nround-trip. ``queue_length`` is a convenience scalar.",
+     "operationId": "get_chassis_lease_api_v1_boards__name__lease_get",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Get Chassis Lease"
+    },
+    "post": {
+     "description": "Atomically acquire (or queue) a lease across every member of the chassis.\n\nMay return:\n\n- 200 ``granted`` \u2014 every member ended up holding a single shared\n  token. Release / heartbeat at chassis level uses that token.\n- 200 ``queued`` \u2014 every held member is held by the *same* other\n  holder, so the request was queued FCFS. ``position`` is 1-indexed.\n- 409 \u2014 heterogeneous third-party holders across members.",
+     "operationId": "acquire_chassis_lease_api_v1_boards__name__lease_post",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LeaseAcquireRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Acquire Chassis Lease"
+    }
+   },
+   "/api/v1/boards/{name}/lease/history": {
+    "get": {
+     "description": "Lease audit-log events merged across every member of a chassis.\n\n``limit`` applies *per member* \u2014 the merged response can therefore\ncontain up to ``limit * len(members)`` entries. Events are sorted\nby timestamp so consumers don't need to interleave themselves.",
+     "operationId": "chassis_lease_history_api_v1_boards__name__lease_history_get",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      {
+       "in": "query",
+       "name": "limit",
+       "required": false,
+       "schema": {
+        "default": 50,
+        "title": "Limit",
+        "type": "integer"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/ChassisLeaseHistoryResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Chassis Lease History"
+    }
+   },
+   "/api/v1/boards/{name}/lease/revoke": {
+    "post": {
+     "description": "Admin force-release: kick every member's lease on the chassis\nregardless of holder/token. Promotes the next FCFS waiter exactly\nlike a normal release. Admin-only.\n\nThe audit trail records ``principal.audit_id`` \u2014 ``unix:alice``,\n``token:ci-1``, ``session:bob`` \u2014 rather than the flat\n``\"unix-socket-admin\"`` every local revoke used to be attributed to.",
+     "operationId": "revoke_chassis_lease_api_v1_boards__name__lease_revoke_post",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      {
+       "in": "query",
+       "name": "reason",
+       "required": false,
+       "schema": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Reason"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Revoke Chassis Lease"
+    }
+   },
+   "/api/v1/boards/{name}/queue": {
+    "delete": {
+     "description": "Remove a queued waiter from a chassis-level FCFS queue.\n\nIdempotent: returns ``{removed: false}`` if no matching waiter is\nfound. Returns 404 if the chassis itself is unknown so callers can\ndistinguish \"wrong URL\" from \"your wait already cleared\".",
+     "operationId": "cancel_chassis_queue_api_v1_boards__name__queue_delete",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ChassisLeaseCancelRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Cancel Chassis Queue"
+    }
+   },
+   "/api/v1/events": {
+    "get": {
+     "description": "Server-Sent Events stream of daemon state changes.\n\nFilters (ANDed \u2014 all set filters must match):\n\n* ``types``:    comma-separated ``Event.type`` values (e.g.\n                ``action.start,action.log,action.end``)\n* ``board``:    only events whose ``data.board`` equals the given name\n* ``action_id``: only events whose ``data.action_id`` matches\n* ``run_id``:   only events whose ``data.run_id`` matches\n\n``board`` + ``action_id`` let a client start streaming before it knows\nthe ``run_id`` (the dispatch handler is what assigns run_ids). Once\nthe first ``action.start`` arrives carrying the run_id, the client\ncan reconnect with a ``run_id`` filter if it wants a tighter view;\nin practice the board+action_id pair is unique mid-dispatch thanks to\nthe per-board mutex.",
+     "operationId": "events_stream_api_v1_events_get",
+     "parameters": [
+      {
+       "in": "query",
+       "name": "types",
+       "required": false,
+       "schema": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Types"
+       }
+      },
+      {
+       "in": "query",
+       "name": "board",
+       "required": false,
+       "schema": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Board"
+       }
+      },
+      {
+       "in": "query",
+       "name": "action_id",
+       "required": false,
+       "schema": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Action Id"
+       }
+      },
+      {
+       "in": "query",
+       "name": "run_id",
+       "required": false,
+       "schema": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Run Id"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Events Stream"
+    }
+   },
+   "/api/v1/groups": {
+    "get": {
+     "description": "Return the configured boards organised by physical chassis.\n\nPairs boards that share a ``chassis`` id (or an auto-derived one\nfrom the ``_ps`` / ``_pl`` suffix convention) so UI / CLI consumers\ncan render one entry per physical enclosure.",
+     "operationId": "list_groups_api_v1_groups_get",
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/GroupsResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      }
+     },
+     "summary": "List Groups"
+    }
+   },
+   "/api/v1/health": {
+    "get": {
+     "operationId": "health_api_v1_health_get",
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HealthResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      }
+     },
+     "summary": "Health"
+    }
+   },
+   "/api/v1/targets/{name}": {
+    "delete": {
+     "operationId": "delete_board_api_v1_targets__name__delete",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "responses": {
+      "204": {
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Delete Board"
+    },
+    "get": {
+     "operationId": "get_board_api_v1_targets__name__get",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/BoardResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Get Board"
+    },
+    "patch": {
+     "operationId": "patch_board_api_v1_targets__name__patch",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BoardPatchRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/BoardResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Patch Board"
+    }
+   },
+   "/api/v1/targets/{name}/lease": {
+    "delete": {
+     "operationId": "release_lease_api_v1_targets__name__lease_delete",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LeaseReleaseRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Release Lease"
+    },
+    "get": {
+     "operationId": "get_lease_api_v1_targets__name__lease_get",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Get Lease"
+    },
+    "post": {
+     "operationId": "acquire_lease_api_v1_targets__name__lease_post",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LeaseAcquireRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Acquire Lease"
+    }
+   },
+   "/api/v1/targets/{name}/lease/heartbeat": {
+    "post": {
+     "operationId": "heartbeat_lease_api_v1_targets__name__lease_heartbeat_post",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LeaseHeartbeatRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Heartbeat Lease"
+    }
+   },
+   "/api/v1/targets/{name}/lease/history": {
+    "get": {
+     "operationId": "board_lease_history_api_v1_targets__name__lease_history_get",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      {
+       "in": "query",
+       "name": "limit",
+       "required": false,
+       "schema": {
+        "default": 50,
+        "title": "Limit",
+        "type": "integer"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/LeaseHistoryResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Board Lease History"
+    }
+   },
+   "/api/v1/targets/{name}/lease/wait": {
+    "get": {
+     "description": "Block until ``token`` holds the board, or ``timeout`` elapses.\n\nIdempotent and safe to call while ``token`` already holds the\nboard \u2014 returns immediately in that case. Designed for the\nrevoke-with-requeue flow: after a revoke, the original token is\npreserved and re-installed on regrant, so a CI script polling\nthis endpoint sees the same shape on either side of the revoke.",
+     "operationId": "wait_board_lease_api_v1_targets__name__lease_wait_get",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      },
+      {
+       "deprecated": true,
+       "description": "DEPRECATED \u2014 send the token in the X-Fpgahub-Lease-Token header instead: a query parameter is written to the access log. Optional either way: a queued caller has none, and is matched on its principal.",
+       "in": "query",
+       "name": "token",
+       "required": false,
+       "schema": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "deprecated": true,
+        "description": "DEPRECATED \u2014 send the token in the X-Fpgahub-Lease-Token header instead: a query parameter is written to the access log. Optional either way: a queued caller has none, and is matched on its principal.",
+        "title": "Token"
+       }
+      },
+      {
+       "in": "query",
+       "name": "timeout",
+       "required": false,
+       "schema": {
+        "default": 60.0,
+        "exclusiveMinimum": 0,
+        "maximum": 600.0,
+        "title": "Timeout",
+        "type": "number"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/LeaseWaitGrantedResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Wait Board Lease"
+    }
+   },
+   "/api/v1/targets/{name}/queue": {
+    "delete": {
+     "description": "Remove a queued waiter from a target-level FCFS queue.\n\nFor a target in a multi-target board the queue lives at the board\nlevel \u2014 return 409 ``board_required`` pointing the caller at the\nboard endpoint so the dashboard / CLI can route the cancel\ncorrectly. A single-target board (board id == target name) hits the\nexisting per-target ``cancel_wait``.",
+     "operationId": "cancel_board_queue_api_v1_targets__name__queue_delete",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ChassisLeaseCancelRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {}
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Cancel Board Queue"
+    }
+   },
+   "/api/v1/targets/{name}/shares": {
+    "delete": {
+     "description": "Stop **every** share on this board.\n\nWhich is why it needs more than ``write``: S1 left it gated on the\nrole alone, so any ``write`` caller could cut the console out from\nunder the person holding the board (F2). There is no per-share\nownership signal to gate on \u2014 the lease is the ownership signal, and\nit is the one the dispatchers use, so `fpgahub share stop` still\nworks for the person who started it.",
+     "operationId": "stop_shares_api_v1_targets__name__shares_delete",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "responses": {
+      "204": {
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Stop Shares"
+    },
+    "get": {
+     "operationId": "list_shares_api_v1_targets__name__shares_get",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "items": {
+           "$ref": "#/components/schemas/ShareInfoResponse"
+          },
+          "title": "Response List Shares Api V1 Targets  Name  Shares Get",
+          "type": "array"
+         }
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "List Shares"
+    },
+    "post": {
+     "operationId": "start_shares_api_v1_targets__name__shares_post",
+     "parameters": [
+      {
+       "in": "path",
+       "name": "name",
+       "required": true,
+       "schema": {
+        "title": "Name",
+        "type": "string"
+       }
+      }
+     ],
+     "requestBody": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ShareStartRequest"
+        }
+       }
+      },
+      "required": true
+     },
+     "responses": {
+      "201": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "items": {
+           "$ref": "#/components/schemas/ShareInfoResponse"
+          },
+          "title": "Response Start Shares Api V1 Targets  Name  Shares Post",
+          "type": "array"
+         }
+        }
+       },
+       "description": "Successful Response"
+      },
+      "422": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/HTTPValidationError"
+         }
+        }
+       },
+       "description": "Validation Error"
+      }
+     },
+     "summary": "Start Shares"
+    }
+   },
+   "/api/v1/whoami": {
+    "get": {
+     "description": "Who the hub thinks you are, and what that lets you do.\n\nAnswers for every transport \u2014 unix socket, Bearer token, mTLS peer,\nweb session \u2014 because it reports the resolved principal rather than\nre-deriving identity per credential. ``read`` is enough to call it:\nthe reply is about the caller and tells them nothing about anyone\nelse. ``fpgahub whoami`` is this route.",
+     "operationId": "whoami_api_v1_whoami_get",
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/WhoAmIResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      }
+     },
+     "summary": "Whoami"
+    }
+   }
+  }
+ },
+ "source": "~/SoCLabs/fpgahub-v030-readonly (22aa362 build: version 0.3.0)",
+ "sse_framing": {
+  "connected": ":connected\n\n",
+  "event": "event: {type}\ndata: {json of {type, ts, data}}\n\n"
+ },
+ "steps": [
+  {
+   "body": null,
+   "method": "GET",
+   "name": "health_anon",
+   "params": null,
+   "path": "/health",
+   "response": {
+    "schema_version": 1,
+    "status": "ok",
+    "version": "0.3.0"
+   },
+   "status": 200,
+   "who": null
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "whoami_anon",
+   "params": null,
+   "path": "/whoami",
+   "response": {
+    "detail": "read access: present a Bearer token (fpgahub login) or sign in to the web UI"
+   },
+   "status": 401,
+   "who": null
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "whoami_bad_token",
+   "params": null,
+   "path": "/whoami",
+   "response": {
+    "detail": "read access: present a Bearer token (fpgahub login) or sign in to the web UI"
+   },
+   "status": 401,
+   "who": "bogus"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "whoami_write",
+   "params": null,
+   "path": "/whoami",
+   "response": {
+    "audit_id": "token:alice",
+    "groups": [],
+    "holder": "alice@mapstone-dev",
+    "host": "mapstone-dev",
+    "kind": "token",
+    "limits": {
+     "max_boards": null,
+     "max_ttl_s": null,
+     "rule": null,
+     "tier": null
+    },
+    "name": "alice",
+    "role": "write",
+    "token_name": "alice-dev"
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "whoami_admin",
+   "params": null,
+   "path": "/whoami",
+   "response": {
+    "audit_id": "token:david",
+    "groups": [],
+    "holder": "david@mapstone-dev",
+    "host": "mapstone-dev",
+    "kind": "token",
+    "limits": {
+     "max_boards": null,
+     "max_ttl_s": null,
+     "rule": null,
+     "tier": null
+    },
+    "name": "david",
+    "role": "admin",
+    "token_name": "david-admin"
+   },
+   "status": 200,
+   "who": "david"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "groups",
+   "params": null,
+   "path": "/groups",
+   "response": {
+    "groups": [
+     {
+      "board": "mps3_01",
+      "is_paired": false,
+      "members": [
+       {
+        "name": "mps3_01_pl",
+        "role": "pl"
+       }
+      ],
+      "size": 1
+     },
+     {
+      "board": "kr260_01",
+      "is_paired": true,
+      "members": [
+       {
+        "name": "kr260_01_ps",
+        "role": "ps"
+       },
+       {
+        "name": "kr260_01_pl",
+        "role": "pl"
+       }
+      ],
+      "size": 2
+     }
+    ]
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "target",
+   "params": null,
+   "path": "/targets/mps3_01_pl",
+   "response": {
+    "access": {
+     "default_client": null,
+     "gate_ethernet": false,
+     "gate_tty": false,
+     "lease_timeout_s": 3600,
+     "share_port_base": 12000,
+     "share_tty": false
+    },
+    "attach": "usbip",
+    "board_type": "mps3",
+    "capabilities": [],
+    "description": "HBI0309C MPS3 #01 (lab)",
+    "discovered_mac": null,
+    "effective_hub_path": null,
+    "hub_path": "1-2.3.4.3",
+    "lease_holder": null,
+    "lease_queue_length": 0,
+    "lease_state": "none",
+    "name": "mps3_01_pl",
+    "naming": {
+     "net_name": "mps3_01_pl",
+     "tty_symlink_dir": "mps3_01_pl"
+    },
+    "network": {
+     "board_ip": "192.168.10.101",
+     "board_mac": "02:00:5e:00:03:03",
+     "dns_search": "fpga",
+     "host_ip": "192.168.10.1/24",
+     "hostname": "mps3-01-pl",
+     "pl_mac": null
+    },
+    "pinout_url": null,
+    "server": "mapstone-dev"
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "target_404",
+   "params": null,
+   "path": "/targets/nope/lease",
+   "response": {
+    "detail": "no such board: 'nope'; configured: kr260_01_pl, kr260_01_ps, mps3_01_pl"
+   },
+   "status": 404,
+   "who": "alice"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "lease_free",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "background_queue": [],
+    "current": null,
+    "queue": []
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "acquire_read_403",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "detail": "role='read'; write required"
+   },
+   "status": 403,
+   "who": "carol"
+  },
+  {
+   "body": {
+    "ttl_seconds": 0
+   },
+   "method": "POST",
+   "name": "acquire_bad_ttl_422",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "detail": [
+     {
+      "ctx": {
+       "gt": 0
+      },
+      "input": 0,
+      "loc": [
+       "body",
+       "ttl_seconds"
+      ],
+      "msg": "Input should be greater than 0",
+      "type": "greater_than"
+     }
+    ]
+   },
+   "status": 422,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "acquire_granted",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "kind": "granted",
+    "lease": {
+     "board": "mps3_01_pl",
+     "expires_at": "2026-09-24T11:55:53.413832Z",
+     "holder": "alice@mapstone-dev",
+     "tier": "interactive",
+     "user": "alice"
+    },
+    "requeue_on_revoke": false,
+    "tier": "interactive",
+    "token": "FlRWbXMtwft0paels9C-vw"
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "acquire_again_refreshes",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "kind": "granted",
+    "lease": {
+     "board": "mps3_01_pl",
+     "expires_at": "2026-09-24T11:55:53.433256Z",
+     "holder": "alice@mapstone-dev",
+     "tier": "interactive",
+     "user": "alice"
+    },
+    "requeue_on_revoke": false,
+    "tier": "interactive",
+    "token": "FlRWbXMtwft0paels9C-vw"
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "acquire_queued",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "kind": "queued",
+    "position": 1,
+    "queue": "interactive",
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "acquire_queued_again",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "kind": "queued",
+    "position": 1,
+    "queue": "interactive",
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "lease_held_queue",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "background_queue": [],
+    "current": {
+     "board": "mps3_01_pl",
+     "expires_at": "2026-09-24T11:55:53.433256Z",
+     "holder": "alice@mapstone-dev",
+     "tier": "interactive",
+     "user": "alice"
+    },
+    "queue": [
+     {
+      "board": "mps3_01_pl",
+      "holder": "bob@mapstone-dev",
+      "position": 1,
+      "tier": "interactive",
+      "user": "bob"
+     }
+    ]
+   },
+   "status": 200,
+   "who": "carol"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "board_lease",
+   "params": null,
+   "path": "/boards/mps3_01/lease",
+   "response": {
+    "background_queue": [],
+    "background_queue_length": 0,
+    "board": "mps3_01",
+    "capabilities": [],
+    "current_tier": "interactive",
+    "description": null,
+    "members": [
+     {
+      "board": "mps3_01_pl",
+      "current": {
+       "board": "mps3_01_pl",
+       "expires_at": "2026-09-24T11:55:53.433256Z",
+       "holder": "alice@mapstone-dev",
+       "tier": "interactive",
+       "user": "alice"
+      }
+     }
+    ],
+    "queue": [
+     {
+      "board": "mps3_01",
+      "holder": "bob@mapstone-dev",
+      "position": 1,
+      "tier": "interactive",
+      "user": "bob"
+     }
+    ],
+    "queue_length": 1,
+    "state": "held",
+    "tags": []
+   },
+   "status": 200,
+   "who": "carol"
+  },
+  {
+   "body": {
+    "token": "FlRWbXMtwft0paels9C-vw"
+   },
+   "method": "POST",
+   "name": "heartbeat",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease/heartbeat",
+   "response": {
+    "board": "mps3_01_pl",
+    "expires_at": "2026-09-24T11:55:53.467964Z",
+    "holder": "alice@mapstone-dev",
+    "tier": "interactive",
+    "user": "alice"
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "token": "FlRWbXMtwft0paels9C-vw"
+   },
+   "method": "POST",
+   "name": "heartbeat_not_holder_403",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease/heartbeat",
+   "response": {
+    "detail": "holder or token does not match current lease"
+   },
+   "status": 403,
+   "who": "bob"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "wait_timeout_408",
+   "params": {
+    "timeout": "0.2"
+   },
+   "path": "/targets/mps3_01_pl/lease/wait",
+   "response": {
+    "detail": "lease wait timed out after 0.2s for board 'mps3_01_pl'"
+   },
+   "status": 408,
+   "who": "bob"
+  },
+  {
+   "body": null,
+   "method": "POST",
+   "name": "revoke_write_403",
+   "params": {
+    "reason": "force-released by bob via Harness Manager"
+   },
+   "path": "/boards/mps3_01/lease/revoke",
+   "response": {
+    "detail": "role='write'; admin required"
+   },
+   "status": 403,
+   "who": "bob"
+  },
+  {
+   "body": null,
+   "method": "POST",
+   "name": "revoke_admin",
+   "params": {
+    "reason": "force-released by david@mapstone-dev via Harness Manager"
+   },
+   "path": "/boards/mps3_01/lease/revoke",
+   "response": {
+    "board": "mps3_01",
+    "by": "token:david",
+    "revoked": [
+     "mps3_01_pl"
+    ]
+   },
+   "status": 200,
+   "who": "david"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "lease_after_revoke",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "background_queue": [],
+    "current": {
+     "board": "mps3_01_pl",
+     "expires_at": "2026-09-24T11:55:53.708802Z",
+     "holder": "bob@mapstone-dev",
+     "tier": "interactive",
+     "user": "bob"
+    },
+    "queue": []
+   },
+   "status": 200,
+   "who": "carol"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "wait_granted",
+   "params": {
+    "timeout": "1"
+   },
+   "path": "/targets/mps3_01_pl/lease/wait",
+   "response": {
+    "kind": "granted",
+    "leases": [
+     {
+      "board": "mps3_01_pl",
+      "expires_at": "2026-09-24T11:55:53.708802Z",
+      "holder": "bob@mapstone-dev",
+      "tier": "interactive",
+      "user": "bob"
+     }
+    ],
+    "tier": "interactive",
+    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": {
+    "token": "FlRWbXMtwft0paels9C-vw"
+   },
+   "method": "POST",
+   "name": "heartbeat_after_revoke_403",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease/heartbeat",
+   "response": {
+    "detail": "holder or token does not match current lease"
+   },
+   "status": 403,
+   "who": "alice"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "history",
+   "params": {
+    "limit": 50
+   },
+   "path": "/targets/mps3_01_pl/lease/history",
+   "response": {
+    "board": "mps3_01_pl",
+    "events": [
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.acquired",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.422381+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.acquired",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.438415+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.queued",
+      "expires_at": null,
+      "holder": "bob@mapstone-dev",
+      "position": 1,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.447179+00:00",
+      "ttl_s": null,
+      "user": "bob"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.queued",
+      "expires_at": null,
+      "holder": "bob@mapstone-dev",
+      "position": 1,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.455622+00:00",
+      "ttl_s": null,
+      "user": "bob"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.heartbeat",
+      "expires_at": "2026-09-24T11:55:53.467964+00:00",
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.477545+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.revoked",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.708682+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.promoted",
+      "expires_at": "2026-09-24T11:55:53.708802+00:00",
+      "holder": "bob@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.708876+00:00",
+      "ttl_s": null,
+      "user": "bob"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.released",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.715787+00:00",
+      "ttl_s": null,
+      "user": null
+     }
+    ]
+   },
+   "status": 200,
+   "who": "carol"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "board_history",
+   "params": {
+    "limit": 50
+   },
+   "path": "/boards/mps3_01/lease/history",
+   "response": {
+    "board": "mps3_01",
+    "events": [
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.acquired",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.422381+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.acquired",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.438415+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.queued",
+      "expires_at": null,
+      "holder": "bob@mapstone-dev",
+      "position": 1,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.447179+00:00",
+      "ttl_s": null,
+      "user": "bob"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.queued",
+      "expires_at": null,
+      "holder": "bob@mapstone-dev",
+      "position": 1,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.455622+00:00",
+      "ttl_s": null,
+      "user": "bob"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.heartbeat",
+      "expires_at": "2026-09-24T11:55:53.467964+00:00",
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.477545+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.revoked",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.708682+00:00",
+      "ttl_s": null,
+      "user": "alice"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.promoted",
+      "expires_at": "2026-09-24T11:55:53.708802+00:00",
+      "holder": "bob@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.708876+00:00",
+      "ttl_s": null,
+      "user": "bob"
+     },
+     {
+      "board": "mps3_01_pl",
+      "error": null,
+      "event": "lease.released",
+      "expires_at": null,
+      "holder": "alice@mapstone-dev",
+      "position": null,
+      "source": null,
+      "ts": "2026-09-24T11:45:53.715787+00:00",
+      "ttl_s": null,
+      "user": null
+     }
+    ]
+   },
+   "status": 200,
+   "who": "carol"
+  },
+  {
+   "body": {
+    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+   },
+   "method": "DELETE",
+   "name": "release",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "released": true
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": {
+    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+   },
+   "method": "DELETE",
+   "name": "release_nothing",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "released": false
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": {
+    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+   },
+   "method": "POST",
+   "name": "heartbeat_no_lease_403",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease/heartbeat",
+   "response": {
+    "detail": "no current lease for board"
+   },
+   "status": 403,
+   "who": "bob"
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "acquire_again",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "kind": "granted",
+    "lease": {
+     "board": "mps3_01_pl",
+     "expires_at": "2026-09-24T11:55:53.775343Z",
+     "holder": "alice@mapstone-dev",
+     "tier": "interactive",
+     "user": "alice"
+    },
+    "requeue_on_revoke": false,
+    "tier": "interactive",
+    "token": "O_4rn5R1gqFrUX6tXQK5_A"
+   },
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "queue_again",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "kind": "queued",
+    "position": 1,
+    "queue": "interactive",
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": {},
+   "method": "DELETE",
+   "name": "cancel_queue",
+   "params": null,
+   "path": "/targets/mps3_01_pl/queue",
+   "response": {
+    "board": "mps3_01_pl",
+    "removed": true
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": {},
+   "method": "DELETE",
+   "name": "cancel_queue_nothing",
+   "params": null,
+   "path": "/targets/mps3_01_pl/queue",
+   "response": {
+    "board": "mps3_01_pl",
+    "removed": false
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": {},
+   "method": "DELETE",
+   "name": "cancel_multi_target_409",
+   "params": null,
+   "path": "/targets/kr260_01_pl/queue",
+   "response": {
+    "detail": {
+     "board": "kr260_01",
+     "hint": "target 'kr260_01_pl' is part of board 'kr260_01'; cancel via DELETE /boards/kr260_01/queue.",
+     "kind": "board_required",
+     "members": [
+      "kr260_01_ps",
+      "kr260_01_pl"
+     ]
+    }
+   },
+   "status": 409,
+   "who": "bob"
+  },
+  {
+   "body": {},
+   "method": "DELETE",
+   "name": "cancel_board_queue",
+   "params": null,
+   "path": "/boards/kr260_01/queue",
+   "response": {
+    "board": "kr260_01",
+    "removed": false
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "shares_empty",
+   "params": null,
+   "path": "/targets/mps3_01_pl/shares",
+   "response": [],
+   "status": 200,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "baud": 115200,
+    "holder": "x",
+    "tty_paths": [
+     "/dev/mps3_01_pl/tty_00"
+    ]
+   },
+   "method": "POST",
+   "name": "share_start_extra_key_422",
+   "params": null,
+   "path": "/targets/mps3_01_pl/shares",
+   "response": {
+    "detail": [
+     {
+      "input": "x",
+      "loc": [
+       "body",
+       "holder"
+      ],
+      "msg": "Extra inputs are not permitted",
+      "type": "extra_forbidden"
+     }
+    ]
+   },
+   "status": 422,
+   "who": "alice"
+  },
+  {
+   "body": {
+    "baud": 115200,
+    "tty_paths": [
+     "/dev/mps3_01_pl/tty_00"
+    ]
+   },
+   "method": "POST",
+   "name": "share_start_not_holder_409",
+   "params": null,
+   "path": "/targets/mps3_01_pl/shares",
+   "response": {
+    "detail": {
+     "board": "mps3_01_pl",
+     "holder": "alice@mapstone-dev",
+     "kind": "lease_conflict",
+     "message": "share start refused: board 'mps3_01_pl' is leased by alice@mapstone-dev (alice). Wait for the lease to be released, or ask an admin to force-release it.",
+     "op": "share start",
+     "user": "alice"
+    }
+   },
+   "status": 409,
+   "who": "bob"
+  }
+ ]
+}
