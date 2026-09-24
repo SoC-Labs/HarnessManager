@@ -334,12 +334,13 @@ def test_hook_with_no_file_still_explains(boards_toml: Path):
 def test_hook_reads_the_board_table(boards_toml: Path, tmp_path: Path):
     reports = tmp_path / "reports"
     reports.mkdir()
+    # as_posix(): inside a TOML "basic string", the backslashes of C:\Users\... are escapes.
     boards_toml.write_text(f"""
 [boards.lab]
 match = ["192.168.10.101"]
 power = {{ kind = "netio", url = "http://pdu.lab", outlet = 2, auth = {{ password = "pw-t9-x" }} }}
 sysmon = {{ backend = "xsdb", hw_server = "tcp:hub.lab:3121", min_interval_s = 30 }}
-estimates = {{ vivado_reports = "{reports}" }}
+estimates = {{ vivado_reports = "{reports.as_posix()}" }}
 """)
     boards_toml.chmod(0o600)
     session = FakeSession(shell=None)
@@ -381,7 +382,7 @@ def test_hook_with_bad_sysmon_and_estimates_tables(boards_toml: Path, tmp_path: 
     boards_toml.write_text(f"""
 [boards."{BOARD}"]
 sysmon = {{ backend = "jlink" }}
-estimates = {{ vivado_reports = "{tmp_path / 'missing'}" }}
+estimates = {{ vivado_reports = "{(tmp_path / 'missing').as_posix()}" }}
 """)
     rows = make_telemetry_adapter(FakeSession(shell=None, links=())).readings()
     by = {r.name: r for r in rows}

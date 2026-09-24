@@ -111,7 +111,9 @@ def test_refused_connection_is_unavailable():
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
     s.close()
-    rows = driver("shelly_gen2", f"http://127.0.0.1:{port}", timeout_s=1.0).read()
+    # The default 3 s timeout: Windows reports a refused connect only after about 2 s (it
+    # resends the SYN twice after the RST), so 1 s would read "did not answer" there.
+    rows = driver("shelly_gen2", f"http://127.0.0.1:{port}").read()
     assert_all_unavailable(rows, "refused the connection")
 
 

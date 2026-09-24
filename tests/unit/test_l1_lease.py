@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import stat
 import threading
 import time
@@ -56,7 +57,8 @@ def test_acquire_stores_the_token_privately_and_says_held(tmp_path, fake, events
     stored = s.store.get(HUB, "mps3_01_pl")
     assert stored is not None and stored.token.startswith("tok-") and stored.ttl_s == 600
     path = next((tmp_path / "state" / "leases").glob("*.json"))
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":                                         # Windows has no POSIX modes
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert seen[-1]["state"] == "held" and seen[-1]["board"] == "b1"
     assert ["fpgahub", "lease", "acquire", "mps3_01_pl", "--holder", "hm-test", "--tier",
             "interactive", "--ttl", "600"] in fake.calls

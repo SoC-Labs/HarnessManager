@@ -28,6 +28,9 @@ from tests.fakes.t12_raw_servers import PING, VERSION_BARE, VERSION_LINUX, RawSh
 
 
 def dead_port() -> int:
+    """A closed port. Linux refuses a connect to it at once; Windows only after about 2 s
+    (it resends the SYN twice after the RST), so a test that must see "refused" rather than
+    "silent" keeps the shell's default 3 s timeout instead of a 1 s one."""
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -64,7 +67,7 @@ def reply(**over) -> IdentifyReply:
 
 
 def test_refused_is_unreachable_and_offline():
-    sh = Mps3Shell("127.0.0.1", dead_port(), timeout=1, probes=Probes().as_probes())
+    sh = Mps3Shell("127.0.0.1", dead_port(), probes=Probes().as_probes())   # default timeout
     with pytest.raises(ShellRefusedError) as exc:
         sh.identity()
     assert exc.value.code == ExitCode.UNREACHABLE and "refused" in exc.value.message
@@ -151,7 +154,7 @@ def test_rescue_board_health_and_identity():
 
 def test_negative_twin_run_mode_identify_does_not_hide_a_refused_port():
     probes = Probes(reply=reply())
-    sh = Mps3Shell("127.0.0.1", dead_port(), timeout=1, probes=probes.as_probes())
+    sh = Mps3Shell("127.0.0.1", dead_port(), probes=probes.as_probes())      # default timeout
     with pytest.raises(ShellRefusedError) as exc:
         sh.identity()
     assert "harness service" in exc.value.hint and not isinstance(exc.value, ShellRescueError)

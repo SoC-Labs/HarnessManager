@@ -178,6 +178,11 @@ What the reasons mean:
   url = "http://192.168.10.50"
   ```
 
+  On Windows, write a path in `boards.toml` with forward slashes
+  (`"C:/Xilinx/Vivado/2023.2/bin/xsdb.bat"`) or in single quotes
+  (`'C:\Xilinx\Vivado\2023.2\bin\xsdb.bat'`). Inside double quotes, TOML reads each
+  backslash as an escape and refuses the file.
+
 ## 6. When something goes wrong: the recovery ladder
 
 Start at the top. Go down one step only when the step above did not help.

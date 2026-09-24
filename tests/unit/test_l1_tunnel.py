@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import socket
 import subprocess
@@ -272,7 +273,8 @@ def test_config_forwards_for_the_host_are_left_out_with_a_filtered_copy(tmp_path
     assert "# [harness-manager: forward removed]     LocalForward 18081" in text
     assert "\n    LocalForward" not in text                         # none left live
     assert "ControlMaster auto" in text                               # everything else kept
-    assert oct(copy.stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":                                               # Windows: no POSIX modes
+        assert oct(copy.stat().st_mode & 0o777) == "0o600"
     assert fake.g_calls[-1][:3] == ["ssh", "-F", str(copy)]          # checked before use
 
 

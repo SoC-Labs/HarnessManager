@@ -28,7 +28,10 @@ class Echo:
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self) -> None:
-        self.conn, _ = self.srv.accept()
+        try:
+            self.conn, _ = self.srv.accept()
+        except OSError:        # closed before a client came (Windows: WinError 10022)
+            return
         if self._greeting:
             self.conn.sendall(self._greeting)
         while True:
