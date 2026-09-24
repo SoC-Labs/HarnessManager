@@ -100,6 +100,14 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/kits/check"),
         ("POST", "/kits/pack"),
     ),
+    # XVC-CORE: served in the mock by tests/fakes/x3_mock_xvc.py (a simulated session).
+    "xvc_api": (
+        ("GET", "/boards/{bid}/xvc"),
+        ("POST", "/boards/{bid}/xvc/open"),
+        ("POST", "/boards/{bid}/xvc/close"),
+        ("GET", "/boards/{bid}/xvc/tcl"),
+        ("GET", "/boards/{bid}/xvc/ltx"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles

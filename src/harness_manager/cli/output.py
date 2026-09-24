@@ -88,6 +88,11 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "panel mirror": ("BOARD_ID", "ROW", "TEXT", "ROLES", "SOURCE"),
     "identify": ("BOARD_ID", "SECONDS", "UNTIL"),
     "help": ("TAB", "LINE", "TEXT"),
+    # lane XVC-CORE (cli/cmd_xvc.py): fabric debug over the harness's XVC
+    "xvc": ("BOARD_ID", "STATE", "MODE", "URL", "RELAY_PORT", "HW_SERVER_PORT",
+            "HW_SERVER_PID", "BOARD_SLOT", "REACH", "ATTACHED", "LTX", "WARNINGS", "DETAIL"),
+    "xvc tcl": ("BOARD_ID", "LINE", "TEXT"),
+    "xvc ltx": ("BOARD_ID", "WHICH", "NAME", "PATH", "CRC_OK", "WRITTEN"),
 }
 
 

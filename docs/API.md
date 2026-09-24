@@ -292,6 +292,29 @@ docs/design/DUT_BUILD_KIT_STORAGE.md and docs/design/DUT_BUILD_GUIDE.md are the 
 - **Not yet:** the `channel` source reports itself unavailable until lane OTA-C adds the `rm-kit` channel kind; HM does not run Vivado (`kit build` prints the command).
 - **Errors:** 400 USAGE for a bad id, path, `format`, `jobs` or `stop_after`; 404 ABSENT for a kit not in the cache, a missing receipt or file, or a board that is not open; 422 UNAVAILABLE for a pack with no build kit.
 
+### Fabric debug over XVC (XVC-CORE, `xvc_api.py`)
+
+docs/design/XVC_DEBUG.md is the design. **Scope:** XVC here is the harness's own XVC server, scoped to the reconfigurable partition's debug chain: the Debug Bridge and the debug hub and ILAs of the design loaded in the partition (on the Linux harness also the static MIG calibration hub behind the same bridge). It is never whole-device JTAG. Every status carries this as `scope`.
+
+| Method and path | Returns |
+|---|---|
+| `GET /boards/{bid}/xvc` | `XvcStatus`: `{state, open, mode, relay_port, hw_server_port, hw_server_pid, hw_server, url, attached, board_slot, reach, ltx, warnings, scope, rm_id, rm_name, reason, detail}` |
+| `POST /boards/{bid}/xvc/open` `{byo?}` | 202 job `xvc_open`; the result is the `XvcStatus`. Refused before any job (below). |
+| `POST /boards/{bid}/xvc/close` | the `XvcStatus` (`down`): the client kicked, HM's hw_server stopped, the board's slot freed |
+| `GET /boards/{bid}/xvc/tcl?byo=` | `{tcl, url, ltx, which, mode, scope, open}`: the Vivado Tcl for what is loaded |
+| `GET /boards/{bid}/xvc/ltx?which=&format=` | the probes file as a download (`application/octet-stream`, `Content-Disposition`, `X-Ltx-Which`); with `format=json`, `{which, name, path, crc_ok, source, vivado}` |
+
+- **States:** `down`, `starting`, `ready` (nothing attached), `attached` (`attached` names the local peer: `{peer, pid, command, since, bytes_up, bytes_down, shifts}`), `held` (another client holds the board's one XVC slot), `swapping`, `failed`. `open` says whether a session exists (it may be reconnecting or swapping). `board_slot` is `ours`, `held`, `refused`, `down`, `released` or `unknown`.
+- **The relay holds the board's slot while a session is open** (D-X4): one upstream connection, whole XVC commands only, local clients in turn; a second local client is accepted and closed at once.
+- **`mode`:** `m1` (HM's own hw_server: `-p0`, no `-d`/`-I`, one fixed port per board; Vivado connects to `url`, `localhost:H`) or `byo` (your own hw_server: `open_hw_target -xvc_url 127.0.0.1:R`, R being `relay_port`).
+- **`reach`:** `hub-tunnel` (bare-metal behind a hub: the hub tunnel's 2542 forward), `board-ssh` (the Linux harness: `ssh -J HUB root@BOARD -L 127.0.0.1:p:127.0.0.1:2542`) or `direct`. boards.toml `xvc = { reach = "auto" }` chooses (`auto`, `hub`, `board-ssh`, `direct`).
+- **`warnings`:** the bare-metal harness's XVC is open on every interface, so its status carries "XVC on this harness is unauthenticated: ..." until the Linux cutover (X6). A Linux harness carries the same warning until it reports the XVC lock (`xvc_lock`). Also: a swap closes the session and reopens it; `byo` reminds that your hw_server lingers 20 s.
+- **`ltx`:** `{rm, static, full, preferred, note}`, each `{path, name, crc_ok, source, vivado}` or null. `preferred` is `full` when the mint staged a full-design file for the loaded RM (X5), else `rm`. `static` (the MIG view) is Linux only. `which` is `auto` (the preferred one), `rm`, `static` or `full`.
+- **Refusals before any job:** 409 HELD while another job runs on the board; 409 HELD naming the holder when the board is behind a hub and the lease is not this client's (the lease holder only, and a hub that cannot be asked also refuses); 409 ALREADY when a session is open; 422 UNAVAILABLE when the image's XVC does not drive the Debug Bridge (`xvc_jtagbb`), the harness lacks `xvc_dbgbr`, or no hw_server is installed (use `byo`).
+- **Gates:** `close` takes the board gate. `GET` routes never touch the board while a session is open; with none open, the first `GET /xvc` (and `tcl`, `ltx`) reads the board's identity once under the gate.
+- **Swaps and leases:** `deploy.started` drops the board's slot and stops HM's hw_server before the swap; `deploy.done` (verified) re-attaches with a fresh hw_server on the same port and the new design's probes file; an unverified or failed swap closes the session with the reason. `lease.state` released, expired or lost closes it. Closing the board closes it.
+- **Errors:** 400 USAGE for a bad `which`, `format` or `byo`; 404 ABSENT for no such probes file, or a board that is not open.
+
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)
 - **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.
 - **A name is display only.** It never keys a board: `board_id` does, and so do boards.toml tables, session locks and leases. A hub id is shown with `_` as `-` (`mps3_01` becomes `mps3-01`).

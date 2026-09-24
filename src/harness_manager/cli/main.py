@@ -333,6 +333,11 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_kit
     cmd_kit.register(sub)
     verbs["kit"] = sub.choices["kit"]
+
+    # -- xvc (lane XVC-CORE: the partition's ILAs over the harness's XVC) -----------------
+    from . import cmd_xvc
+    cmd_xvc.register(sub)
+    verbs["xvc"] = sub.choices["xvc"]
     return p
 
 

@@ -220,6 +220,7 @@ class RemoteEngine:
         self.deploy = RemoteDeploy(self)
         self.consoles = RemoteConsoles(self)
         self.debug = RemoteDebug(self)
+        self.xvc = RemoteXvc(self)             # lane XVC-CORE: fabric debug over XVC
         self.telemetry = RemoteTelemetry(self)
         self._mu = threading.RLock()
         self._sessions: dict[str, RemoteSession] = {}
@@ -939,6 +940,45 @@ class RemoteDebug:
 
     def status(self, session: BoardSession) -> DebugStatus:
         return from_json(DebugStatus, self._engine._http.get(f"/boards/{q(_bid(session))}/debug"))
+
+
+class RemoteXvc:
+    """The XVC service (``services.xvc``) over the API. The relay and hw_server run in, and
+    belong to, the daemon; ``ltx`` returns the file's metadata (the daemon is local, so its
+    ``path`` is readable here)."""
+
+    def __init__(self, engine: RemoteEngine) -> None:
+        self._engine = engine
+
+    def _path(self, session: BoardSession, leaf: str = "") -> str:
+        return f"/boards/{q(_bid(session))}/xvc{leaf}"
+
+    @staticmethod
+    def _status(payload: dict[str, Any]) -> Any:
+        from harness_manager.services.xvc import XvcStatus
+
+        return from_json(XvcStatus, {k: v for k, v in payload.items()
+                                     if k not in ("ok", "board_id")})
+
+    def status(self, session: BoardSession, *, refresh: bool = False) -> Any:
+        return self._status(self._engine._http.get(self._path(session)))
+
+    def open(self, session: BoardSession, *, byo: bool = False) -> Any:
+        return self._status(self._engine.run_job(self._path(session, "/open"), {"byo": byo}))
+
+    def close(self, session: BoardSession, *, reason: str = "") -> Any:
+        return self._status(self._engine._http.post(self._path(session, "/close")))
+
+    def tcl(self, session: BoardSession, *, byo: bool | None = None,
+            refresh: bool = False) -> dict[str, Any]:
+        leaf = "/tcl" if byo is None else f"/tcl?byo={'true' if byo else 'false'}"
+        payload = self._engine._http.get(self._path(session, leaf))
+        return {k: v for k, v in payload.items() if k not in ("ok", "board_id")}
+
+    def ltx(self, session: BoardSession, which: str = "auto", *,
+            refresh: bool = False) -> dict[str, Any]:
+        payload = self._engine._http.get(self._path(session, f"/ltx?which={q(which)}&format=json"))
+        return {k: v for k, v in payload.items() if k not in ("ok", "board_id")}
 
 
 class RemoteTelemetry:

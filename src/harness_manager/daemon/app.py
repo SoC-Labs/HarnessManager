@@ -96,7 +96,7 @@ JsonBody = Annotated[Any, Body()]
 
 #: Extension router modules, loaded in this order if present (docs/API.md).
 EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "panel_api",
-              "kit_api")
+              "kit_api", "xvc_api")
 
 
 @dataclass
@@ -391,6 +391,7 @@ _LOGGED = {
     "board.identity": ("shell_id", "rm_id", "rm_name", "harness_version"),
     "deploy.done": ("rm_id", "verified"), "deploy.failed": ("stage", "reason"),
     "debug.state": ("state", "pid", "detail"),
+    "xvc.state": ("state", "board_slot", "detail"),
     "controller.reboot": ("phase",), "power.cycle": ("phase", "device"),
     "lease.state": ("target", "state", "holder", "expires_at"),
     "update.done": ("version", "result"), "update.failed": ("version", "phase", "reason"),

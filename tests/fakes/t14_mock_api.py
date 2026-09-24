@@ -389,6 +389,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # KIT-CORE's kit routes (docs/API.md "DUT build kits"): the real kit_api over the mock.
     from .kit_mock import register as register_kit
     register_kit(app, state, _accepted)
+    # XVC-CORE's fabric-debug routes (docs/API.md "Fabric debug over XVC"), simulated.
+    from .x3_mock_xvc import register as register_xvc
+    app.state.xvc = register_xvc(app, state, sim, _ok, _accepted)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)
