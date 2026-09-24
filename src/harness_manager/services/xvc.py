@@ -1478,6 +1478,12 @@ class XvcService:
         with self._board_lock(board_id):
             with self._guard:
                 live = self._live.pop(board_id, None)
+                if live is not None:        # the reason is visible the moment it is closed
+                    st = XvcStatus(state="failed" if failed else "down",
+                                   reach=str(live.facts.get("reach") or ""),
+                                   warnings=tuple(live.facts.get("warnings") or ()),
+                                   rm_id=live.rm_id, rm_name=live.rm_name, detail=reason)
+                    self._last[board_id] = st
             if live is None:
                 return XvcStatus(state="down", detail="no XVC session was open")
             live.relay.close()
@@ -1486,11 +1492,6 @@ class XvcService:
             self._adapter_release(live.adapter)
             self._release_ports(live.ports)
             self._drop_record(board_id)
-            st = XvcStatus(state="failed" if failed else "down",
-                           reach=str(live.facts.get("reach") or ""),
-                           warnings=tuple(live.facts.get("warnings") or ()),
-                           rm_id=live.rm_id, rm_name=live.rm_name, detail=reason)
-            self._last[board_id] = st
             self._publish(board_id, st)
             return st
 
