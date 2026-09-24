@@ -45,7 +45,8 @@ too. ``lease.state`` released/expired/lost closes the session. A board with no h
 no lease; the session lock (one Harness Manager per board) is the gate.
 
 **hw_server (D-X2).** HM runs its own: ``-q -p0 -s TCP:127.0.0.1:H -e "set
-auto-open-servers xilinx-xvc:127.0.0.1:R"``, never ``-d`` or ``-I`` (a daemonised or
+auto-open-servers xilinx-xvc:127.0.0.1:R" -e "set jtag-port-filter Xilinx/XVC/127.0.0.1:R"``
+(the XVC cable only, never a local USB one: ``hw_server_argv``), never ``-d`` or ``-I`` (a daemonised or
 idle-lingering hw_server outlives the swap: ILA-mint finding #19), in its own process
 group, restarted around every swap. Only processes this service started are ever
 signalled; one a killed owner left behind is stopped only while its command line is
@@ -97,7 +98,8 @@ from harness_manager.core.pack import BoardSession
 log = logging.getLogger(__name__)
 
 __all__ = ["XvcService", "XvcStatus", "XvcRelay", "XvcPorts", "XvcClient", "probe",
-           "hw_server_argv", "find_hw_server", "vivado_tcl", "PARTITION_SCOPE", "TOPIC"]
+           "hw_server_argv", "xvc_port_filter", "find_hw_server", "vivado_tcl", "PARTITION_SCOPE",
+           "TOPIC"]
 
 CAPABILITY = DEBUG_FABRIC
 TOPIC = "xvc.state"
@@ -693,6 +695,19 @@ class XvcRelay:
 
 _VIVADO_VERSION = re.compile(r"(?:^|[/\\])(20\d\d\.\d)(?:[/\\]|$)")
 _FORBIDDEN_HW_ARGS = ("-d", "-I")
+#: hw_server settings ``extra`` may not touch: they would open cables beyond the XVC one.
+_CABLE_SETTINGS = ("auto-open-servers", "jtag-port-filter", "always-open-jtag", "--init")
+
+
+def xvc_port_filter(xvc: str) -> str:
+    """hw_server's ``jtag-port-filter`` that admits the XVC cable ``xvc`` (host:port) only.
+
+    hw_server names a port ``<manufacturer>/<product>/<serial>``; an XVC one is
+    ``Xilinx/XVC/<host>:<port>``. The filter is a substring match (probed on 2024.1,
+    2025.2 and 2026.1: ``XVC`` admits every XVC cable, ``*`` admits none), so the full
+    name admits this one cable and nothing else.
+    """
+    return f"Xilinx/XVC/{xvc}"
 
 
 def hw_server_argv(binary: str, listen_port: int, xvc: str, *, log_xvc: bool = False,
@@ -702,13 +717,28 @@ def hw_server_argv(binary: str, listen_port: int, xvc: str, *, log_xvc: bool = F
     ``-p0``: no GDB ports (the default opens 3000-3005 on every interface). No ``-d``
     and no ``-I``: HM starts and stops it, so it never lingers the 20 s that the
     auto-launched one does (ILA-mint finding #19). ``extra`` may not add them back.
+
+    **Only the XVC cable (david's scope rule: never whole-device JTAG).** By default
+    hw_server opens every local cable type (``auto-open-servers`` is ``*``: digilent-ftdi,
+    xilinx-ftdi, xilinx-pcusb, bscan-jtag), so a USB JTAG cable on this host would be
+    offered as a whole-device target. ``set auto-open-servers xilinx-xvc:<xvc>`` replaces
+    that list with the one XVC server, and ``set jtag-port-filter Xilinx/XVC/<xvc>``
+    also hides any cable a client opens on this hw_server later (``jtag servers -open``).
+    Evidence: docs/assessment/xvc_ui_2026-09-25/hw_server_cable_filter.txt. Proven on
+    this host against a second (fake) XVC cable; UNVERIFIED against a physical USB cable
+    until the board window. ``extra`` may not change these settings.
     """
     for arg in extra:
         if arg in _FORBIDDEN_HW_ARGS or arg.startswith("-I"):
             raise UsageError(f"hw_server option {arg} is not allowed here",
                              hint="Harness Manager owns this hw_server's lifetime (no -d, no -I)")
+        if any(name in arg for name in _CABLE_SETTINGS):
+            raise UsageError(f"hw_server option {arg!r} is not allowed here",
+                             hint="this hw_server opens the board's XVC cable only; with "
+                                  "--byo you run your own")
     argv = [binary, "-q", "-p0", "-s", f"TCP:127.0.0.1:{listen_port}",
-            "-e", f"set auto-open-servers xilinx-xvc:{xvc}"]
+            "-e", f"set auto-open-servers xilinx-xvc:{xvc}",
+            "-e", f"set jtag-port-filter {xvc_port_filter(xvc)}"]
     if log_xvc:
         argv += ["-L-", "-lxvc"]
     return [*argv, *extra]

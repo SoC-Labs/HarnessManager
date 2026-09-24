@@ -1,0 +1,206 @@
+# XVC-UI: hw_server opens the XVC cable only (david's scope rule: never whole-device JTAG)
+# 2026-09-24/25, host srv03335, 127.0.0.1 only; no board, no cable, no hub.
+#
+# The flag: hw_server has no "disable USB" switch. Its cable settings (xsdb `configparams`
+# on a running 2024.1 hw_server) are:
+#   auto-open-servers  "set to select types of JTAG cables to detect"   default "*"
+#   jtag-port-filter   "JTAG port filter list"                           default ""
+#   always-open-jtag   "set to open JTAG cables even without clients"    default 0
+#   auto-open-ports    "set to automatically open any detected JTAG ports" default 1
+# The default "*" opens digilent-ftdi, xilinx-ftdi, xilinx-pcusb, bscan-jtag
+# (2026.1 adds amd-uniflashpod): a USB JTAG cable on the HM host would be offered.
+#
+# HM's argv (services/xvc.py hw_server_argv) now sets both:
+#   -e "set auto-open-servers xilinx-xvc:127.0.0.1:<R>"      replaces "*" with the one XVC server
+#   -e "set jtag-port-filter Xilinx/XVC/127.0.0.1:<R>"      hides any other cable, even one a
+#                                                           client opens later (jtag servers -open)
+# jtag-port-filter is a substring match on the port name "<maker>/<product>/<serial>"
+# (probed: "Xilinx", "XVC", "127.0.0.1:<R>" and "Xilinx/XVC/127.0.0.1:<R>" admit the XVC
+# cable; "*", "Xilinx/127.0.0.1:<R>", "xilinx-xvc:..." and "Xilinx/nomatch" admit none).
+# The full name admits the relay's port only.
+#
+# Result (below): with HM's argv, 2024.1, 2025.2 and 2026.1 all find debug_bridge
+# (idcode 0a003093 irlen 6) on the XVC cable; a second XVC cable a client opens shows
+# "cables 0" (filtered); `nomatch` shows the parameter is live. The "old" argv (before
+# this lane) already replaced "*", but let a client open more cables.
+#
+# UNVERIFIED against a physical USB cable until the board window: this host has no USB
+# devices (lsusb: two USB/IP root hubs only), so digilent-ftdi reports "cables 0" in
+# every run, filter or not. Check at the window: on a host with a Digilent/Xilinx USB
+# cable plugged in, `xvc open`, then xsdb `jtag servers` / Vivado `get_hw_targets` on
+# HM's hw_server must list the XVC cable only.
+#
+# Reproduce: PYTHONPATH=src:. python -m tests.spikes.xvc_hw_server_filter_spike --vivado-bin <bin>
+
+# hw_server /apps/Xilinx/Vivado/2024.1/bin/hw_server; 127.0.0.1 only; scratch /tmp/xvcui-filter-3028114-vd3tf48d
+# fake XVC 'board' 127.0.0.1:33989, second fake XVC 127.0.0.1:34343
+
+=== baseline
+argv: -q -p0 -s TCP:127.0.0.1:64223
+auto-open-servers = <*>
+jtag-port-filter = <>
+always-open-jtag = <0>
+auto-open-ports = <1>
+SERVERS
+  digilent-ftdi cables 0
+  xilinx-ftdi cables 0
+  xilinx-pcusb cables 0
+  bscan-jtag cables 0
+OPEN-ERR no target(s) with id: 1
+TARGETS
+
+SERVERS after a client opens a 2nd XVC and digilent-ftdi
+  digilent-ftdi cables 0
+  xilinx-ftdi cables 0
+  xilinx-pcusb cables 0
+  bscan-jtag cables 0
+  xilinx-xvc:127.0.0.1:34343 cables 1
+TARGETS after
+  1  Xilinx Virtual Cable 127.0.0.1:34343
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+
+=== old
+argv: -q -p0 -s TCP:127.0.0.1:63029 -e set auto-open-servers xilinx-xvc:127.0.0.1:33989
+auto-open-servers = <xilinx-xvc:127.0.0.1:33989>
+jtag-port-filter = <>
+always-open-jtag = <0>
+auto-open-ports = <1>
+SERVERS
+  xilinx-xvc:127.0.0.1:33989 cables 1
+TARGETS
+  1  Xilinx Virtual Cable 127.0.0.1:33989
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+SERVERS after a client opens a 2nd XVC and digilent-ftdi
+  xilinx-xvc:127.0.0.1:33989 cables 1
+  xilinx-xvc:127.0.0.1:34343 cables 1
+  digilent-ftdi cables 0
+TARGETS after
+  1  Xilinx Virtual Cable 127.0.0.1:33989
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+  3  Xilinx Virtual Cable 127.0.0.1:34343
+     4  debug_bridge (idcode 0a003093 irlen 6 fpga)
+
+=== hm
+argv: -q -p0 -s TCP:127.0.0.1:59491 -e set auto-open-servers xilinx-xvc:127.0.0.1:33989 -e set jtag-port-filter Xilinx/XVC/127.0.0.1:33989
+auto-open-servers = <xilinx-xvc:127.0.0.1:33989>
+jtag-port-filter = <Xilinx/XVC/127.0.0.1:33989>
+always-open-jtag = <0>
+auto-open-ports = <1>
+SERVERS
+  xilinx-xvc:127.0.0.1:33989 cables 1
+TARGETS
+  1  Xilinx Virtual Cable 127.0.0.1:33989
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+SERVERS after a client opens a 2nd XVC and digilent-ftdi
+  xilinx-xvc:127.0.0.1:33989 cables 1
+  xilinx-xvc:127.0.0.1:34343 cables 0
+  digilent-ftdi cables 0
+TARGETS after
+  1  Xilinx Virtual Cable 127.0.0.1:33989
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+
+=== nomatch
+argv: -q -p0 -s TCP:127.0.0.1:44709 -e set auto-open-servers xilinx-xvc:127.0.0.1:33989 -e set jtag-port-filter Xilinx/nomatch
+auto-open-servers = <xilinx-xvc:127.0.0.1:33989>
+jtag-port-filter = <Xilinx/nomatch>
+always-open-jtag = <0>
+auto-open-ports = <1>
+SERVERS
+  xilinx-xvc:127.0.0.1:33989 cables 0
+TARGETS
+
+SERVERS after a client opens a 2nd XVC and digilent-ftdi
+  xilinx-xvc:127.0.0.1:33989 cables 0
+  xilinx-xvc:127.0.0.1:34343 cables 0
+  digilent-ftdi cables 0
+TARGETS after
+
+# hw_server /research/CAD/Xilinx/Vivado/2025.2/Vivado/bin/hw_server; 127.0.0.1 only; scratch /tmp/xvcui-filter-3030504-77gropro
+# fake XVC 'board' 127.0.0.1:43673, second fake XVC 127.0.0.1:35029
+
+=== hm
+argv: -q -p0 -s TCP:127.0.0.1:50009 -e set auto-open-servers xilinx-xvc:127.0.0.1:43673 -e set jtag-port-filter Xilinx/XVC/127.0.0.1:43673
+auto-open-servers = <xilinx-xvc:127.0.0.1:43673>
+jtag-port-filter = <Xilinx/XVC/127.0.0.1:43673>
+always-open-jtag = <0>
+auto-open-ports = <1>
+SERVERS
+  xilinx-xvc:127.0.0.1:43673 cables 1
+TARGETS
+  1  Xilinx Virtual Cable 127.0.0.1:43673
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+SERVERS after a client opens a 2nd XVC and digilent-ftdi
+  xilinx-xvc:127.0.0.1:43673 cables 1
+  xilinx-xvc:127.0.0.1:35029 cables 0
+  digilent-ftdi cables 0
+TARGETS after
+  1  Xilinx Virtual Cable 127.0.0.1:43673
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+
+# hw_server /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/hw_server; 127.0.0.1 only; scratch /tmp/xvcui-filter-3031630-prrqj60t
+# fake XVC 'board' 127.0.0.1:34001, second fake XVC 127.0.0.1:35221
+
+=== baseline
+argv: -q -p0 -s TCP:127.0.0.1:35453
+auto-open-servers = <*>
+jtag-port-filter = <>
+always-open-jtag = <0>
+auto-open-ports = <1>
+SERVERS
+  digilent-ftdi cables 0
+  xilinx-ftdi cables 0
+  amd-uniflashpod cables 0
+  xilinx-pcusb cables 0
+  bscan-jtag cables 0
+OPEN-ERR no target(s) with id: 1
+TARGETS
+
+SERVERS after a client opens a 2nd XVC and digilent-ftdi
+  digilent-ftdi cables 0
+  xilinx-ftdi cables 0
+  amd-uniflashpod cables 0
+  xilinx-pcusb cables 0
+  bscan-jtag cables 0
+  xilinx-xvc:127.0.0.1:35221 cables 1
+TARGETS after
+  1  Xilinx Virtual Cable 127.0.0.1:35221
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+
+=== hm
+argv: -q -p0 -s TCP:127.0.0.1:43123 -e set auto-open-servers xilinx-xvc:127.0.0.1:34001 -e set jtag-port-filter Xilinx/XVC/127.0.0.1:34001
+auto-open-servers = <xilinx-xvc:127.0.0.1:34001>
+jtag-port-filter = <Xilinx/XVC/127.0.0.1:34001>
+always-open-jtag = <0>
+auto-open-ports = <1>
+SERVERS
+  xilinx-xvc:127.0.0.1:34001 cables 1
+TARGETS
+  1  Xilinx Virtual Cable 127.0.0.1:34001
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+SERVERS after a client opens a 2nd XVC and digilent-ftdi
+  xilinx-xvc:127.0.0.1:34001 cables 1
+  xilinx-xvc:127.0.0.1:35221 cables 0
+  digilent-ftdi cables 0
+TARGETS after
+  1  Xilinx Virtual Cable 127.0.0.1:34001
+     2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+
+
+# The shipped XvcService (relay + HM-owned hw_server, new argv) with the real 2024.1 hw_server,
+# before and after a swap: tests/spikes/xvc_service_hw_server_spike.py
+[   0.0s] load average (5.0, 5.72, 7.66)
+[   0.4s] open: ready relay 127.0.0.1:51027 hw_server localhost:51028 pid 3021052 slot ours
+[   7.1s] xsdb A_before_swap: rc=0 in 6.6s
+[   7.1s]     TARGETS
+[   7.1s]       1  Xilinx Virtual Cable 127.0.0.1:51027
+[   7.1s]          2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+[   7.1s] after A: state attached, fake shifts 794, dropped 0, board connections 1
+[   7.1s] deploy.started: state swapping, slot held by nobody
+[   7.5s] deploy.done: ready, hw_server pid 3021654 (was 3021052), same port True
+[  14.1s] xsdb B_after_swap: rc=0 in 6.7s
+[  14.1s]     TARGETS
+[  14.1s]       1  Xilinx Virtual Cable 127.0.0.1:51027
+[  14.1s]          2  debug_bridge (idcode 0a003093 irlen 6 fpga)
+[  14.1s] after B: fake shifts 1618, dropped 0, board connections 2
+[  14.1s] closed; slot free; events ['starting', 'ready', 'attached', 'swapping', 'swapping', 'swapping', 'ready', 'attached', 'down']
+[  14.1s] RESULT PASS

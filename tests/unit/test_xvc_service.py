@@ -391,7 +391,8 @@ def test_negative_twin_a_board_that_stays_gone_keeps_the_relay_down_and_refusing
 def test_hw_server_argv_is_private_with_no_gdb_ports_and_no_daemon_or_idle_linger():
     argv = X.hw_server_argv("/v/2024.1/bin/hw_server", 23601, "127.0.0.1:23600")
     assert argv == ["/v/2024.1/bin/hw_server", "-q", "-p0", "-s", "TCP:127.0.0.1:23601",
-                    "-e", "set auto-open-servers xilinx-xvc:127.0.0.1:23600"]
+                    "-e", "set auto-open-servers xilinx-xvc:127.0.0.1:23600",
+                    "-e", "set jtag-port-filter Xilinx/XVC/127.0.0.1:23600"]
     assert "-d" not in argv and not any(a.startswith("-I") for a in argv)
     assert X.vivado_version_of(argv[0]) == "2024.1"
 
@@ -400,6 +401,75 @@ def test_hw_server_argv_is_private_with_no_gdb_ports_and_no_daemon_or_idle_linge
 def test_negative_twin_the_argv_refuses_daemon_and_idle_options(bad):
     with pytest.raises(UsageError):
         X.hw_server_argv("hw_server", 23601, "127.0.0.1:23600", extra=[bad])
+
+
+def test_hw_server_opens_the_xvc_cable_only_never_a_local_usb_one():
+    """XVC-UI hardening (david's scope rule): hw_server's default ``auto-open-servers *``
+    would offer a local USB cable as whole-device JTAG. The argv names the one XVC server
+    and filters ports to its name (docs/assessment/xvc_ui_2026-09-25/)."""
+    argv = X.hw_server_argv("hw_server", 23601, "127.0.0.1:23600")
+    settings = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
+    assert settings == ["set auto-open-servers xilinx-xvc:127.0.0.1:23600",
+                        "set jtag-port-filter Xilinx/XVC/127.0.0.1:23600"]
+    assert not any("*" in s for s in settings)                  # never "every cable type"
+    assert X.xvc_port_filter("127.0.0.1:23600") == "Xilinx/XVC/127.0.0.1:23600"
+    # A filter is a substring match on "<maker>/<product>/<serial>": this one admits the
+    # relay's own XVC port and no other XVC port, nor a Digilent/Xilinx USB cable.
+    flt = X.xvc_port_filter("127.0.0.1:23600")
+    assert flt in "Xilinx/XVC/127.0.0.1:23600"
+    for other in ("Xilinx/XVC/127.0.0.1:23602", "Digilent/JTAG-SMT2NC/210251A08870",
+                  "Xilinx/Platform Cable USB II/000013e8b58201"):
+        assert flt not in other
+
+
+@pytest.mark.parametrize("bad", [["-e", "set auto-open-servers *"],
+                                 ["-e", "set jtag-port-filter Digilent"],
+                                 ["-e", "set always-open-jtag 1"], ["--init=/tmp/x.tcl"]])
+def test_negative_twin_extra_options_cannot_reopen_local_cables(bad):
+    with pytest.raises(UsageError):
+        X.hw_server_argv("hw_server", 23601, "127.0.0.1:23600", extra=bad)
+
+
+def test_negative_twin_byo_builds_no_hw_server_argv_and_so_no_filter(fake, svc, monkeypatch,
+                                                                     tmp_path):
+    """--byo: your own hw_server, your own cables. HM builds no argv, so adds no filter."""
+    calls: list[tuple] = []
+    real = X.hw_server_argv
+    monkeypatch.setattr(X, "hw_server_argv", lambda *a, **k: calls.append(a) or real(*a, **k))
+    monkeypatch.setenv(X.HW_SERVER_ENV, str(tmp_path / "no-such-hw_server"))
+    s = FakeSession(FakeAdapter(fake))
+    st = svc.open(s, byo=True)
+    try:
+        assert st.mode == "byo" and st.hw_server_pid == 0
+        assert calls == []
+        assert "jtag-port-filter" not in svc.tcl(s)["tcl"]      # the snippet sets nothing either
+    finally:
+        svc.close(s)
+
+
+@posix_only
+def test_negative_twin_a_port_filter_that_does_not_admit_the_cable_never_opens_it(
+        fake, bus, tmp_path, monkeypatch, hw_shim):
+    """The fake hw_server obeys jtag-port-filter as the real one does: a filter that is not
+    the relay's own port name hides the cable, and the board's slot sees no shift."""
+    real = X.hw_server_argv
+
+    def wrong_filter(binary, port, xvc, **kw):
+        argv = real(binary, port, xvc, **kw)
+        return [*argv[:-1], "set jtag-port-filter Xilinx/XVC/127.0.0.1:1"]
+
+    monkeypatch.setattr(X, "hw_server_argv", wrong_filter)
+    svc = service(bus, tmp_path)
+    s = FakeSession(FakeAdapter(fake))
+    try:
+        st = svc.open(s)
+        shifts = fake.stats.shifts
+        with socket.create_connection(("127.0.0.1", st.hw_server_port), timeout=5):
+            time.sleep(1.0)
+            assert svc.status(s).state == "ready"             # nothing came through the relay
+        assert fake.stats.shifts == shifts
+    finally:
+        svc.shutdown()
 
 
 def test_find_hw_server_prefers_the_env_then_the_one_beside_vivado(tmp_path, monkeypatch):
@@ -445,7 +515,8 @@ def test_open_runs_hms_own_hw_server_behind_the_relay_and_close_stops_it(fake, s
     argv = json.loads((tmp_path / "hw_argv.jsonl").read_text().splitlines()[-1])["argv"]
     assert argv[:4] == ["-q", "-p0", "-s", f"TCP:127.0.0.1:{st.hw_server_port}"]
     assert "-d" not in argv and not any(a.startswith("-I") for a in argv)
-    assert argv[-1] == f"set auto-open-servers xilinx-xvc:127.0.0.1:{st.relay_port}"
+    assert argv[-3:] == [f"set auto-open-servers xilinx-xvc:127.0.0.1:{st.relay_port}", "-e",
+                         f"set jtag-port-filter Xilinx/XVC/127.0.0.1:{st.relay_port}"]
     assert st.scope == X.PARTITION_SCOPE and X.UNAUTHENTICATED_WARNING in st.warnings
     # Vivado connects to hw_server; hw_server opens the XVC target through the relay.
     # The relay reads "attached" at the connect, before hw_server's first command; a shift

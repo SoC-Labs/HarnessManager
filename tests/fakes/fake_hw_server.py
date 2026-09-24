@@ -9,7 +9,10 @@ the design spike measured the real one (docs/assessment/xvc_spike_2026-09-24/):
   IDCODE-sized ``shift:``, as a scan would);
 - it lets go of the XVC target about ``FAKE_HW_SERVER_LINGER_S`` after its last client
   leaves;
-- SIGTERM ends it at once.
+- SIGTERM ends it at once;
+- like the real one, ``-e "set jtag-port-filter F"`` hides every cable whose port name
+  (``Xilinx/XVC/HOST:PORT``) does not contain ``F``: the XVC target is then never opened
+  (lane XVC-UI, docs/assessment/xvc_ui_2026-09-25/hw_server_cable_filter.txt).
 
 It refuses what Harness Manager must never pass: ``-d`` (daemon) and ``-I`` (idle exit)
 exit with status 2. ``FAKE_HW_SERVER_ARGV_LOG``: append the argv as one JSON line.
@@ -30,8 +33,8 @@ import threading
 import time
 
 
-def _parse(argv: list[str]) -> tuple[int, str]:
-    port, xvc = 0, ""
+def _parse(argv: list[str]) -> tuple[int, str, str | None]:
+    port, xvc, port_filter = 0, "", None
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -46,10 +49,12 @@ def _parse(argv: list[str]) -> tuple[int, str]:
             words = argv[i + 1].split()
             if words[:2] == ["set", "auto-open-servers"] and len(words) == 3:
                 xvc = words[2].split("xilinx-xvc:", 1)[1]
+            if words[:2] == ["set", "jtag-port-filter"]:
+                port_filter = " ".join(words[2:])
             i += 2
             continue
         i += 1
-    return port, xvc
+    return port, xvc, port_filter
 
 
 class _Target:
@@ -63,12 +68,13 @@ class _Target:
         self.sock: socket.socket | None = None
         self.clients = 0
         self.gen = 0
+        self.hidden = False             # a jtag-port-filter that does not admit this cable
 
     def attach(self) -> None:
         with self.mu:
             self.clients += 1
             self.gen += 1
-            if self.sock is not None:
+            if self.sock is not None or self.hidden:
                 return
             try:
                 s = socket.create_connection(self.addr, timeout=5)
@@ -112,7 +118,7 @@ def main(argv: list[str]) -> int:
     if log:
         with open(log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"pid": os.getpid(), "argv": argv}) + "\n")
-    port, xvc = _parse(argv)
+    port, xvc, port_filter = _parse(argv)
     if os.environ.get("FAKE_HW_SERVER_FAIL") == "exit":
         print("fake hw_server: ERROR: cannot start (FAKE_HW_SERVER_FAIL)", flush=True)
         return 1
@@ -123,6 +129,10 @@ def main(argv: list[str]) -> int:
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
     time.sleep(float(os.environ.get("FAKE_HW_SERVER_START_S", "0.2")))
     target = _Target(xvc, float(os.environ.get("FAKE_HW_SERVER_LINGER_S", "0.3")))
+    if port_filter is not None and port_filter not in f"Xilinx/XVC/{xvc}":
+        print(f"fake hw_server: jtag-port-filter {port_filter!r} hides Xilinx/XVC/{xvc}",
+              flush=True)
+        target.hidden = True
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
