@@ -2,7 +2,7 @@
 
 The exact diffs are in `T8_CCRS.patch`, next to this file. It is made against `8085488`: from the repo root, run `git apply --check docs/assessment/2026-09-24/T8_CCRS.patch`, then `git apply` it.
 
-Proof: with every CCR applied (in a copy of the tree), the new tests `tests/integration/test_t8_ccr_wiring.py` pass, 8 of 8. They skip until the CCRs land, and each skip names the missing hook. The full suite also passes on that copy; the one failure, the t13 events-flood test, is load-sensitive and passes when run alone.
+Proof: with every CCR applied (in a copy of the tree), the new tests `tests/integration/test_t8_ccr_wiring.py` pass, 8 of 8. They skip until the CCRs land, and each skip names the missing hook. The full suite passes on that copy too: 1987 passed, 11 skipped. One earlier run hit the t13 events-flood test under host load; it passes when run alone, with or without the CCRs.
 
 | CCR | File (owner) | Change | Why |
 |---|---|---|---|
