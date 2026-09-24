@@ -52,8 +52,8 @@ from .bundle import OverlayHandler, PreparedRelease, prepare_release
 from .channel import VerifiedChannel
 from .download import Downloader
 from .os_slots import OsSlotAdapter
-from .planner import MODE_NONE, MODE_OVERLAYS, Approval, Plan, running_summary
-from .schema import KIND_OVERLAYS, TARGET_HOST_STORE, HarnessRelease
+from .planner import MODE_NONE, MODE_OVERLAYS, Approval, Plan, fw_sha_match, running_summary
+from .schema import KIND_OVERLAYS, TARGET_HOST_STORE, HarnessIdentity, HarnessRelease
 from .state import InstallRecords, Journal, StoredComponents, UpdateState
 from .version import same_version
 
@@ -111,23 +111,37 @@ def _item(name: str, ok: bool | None, detail: str, identity: bool = True) -> Pre
 
 def confirm_identity(rel: HarnessRelease, ident: BoardIdentity | None) -> tuple[bool, list[PreflightItem]]:
     """Does the identity the board reports match the release? (confirmed, items)."""
-    want = rel.identity
+    return confirm_wire_identity(rel.identity, ident)
+
+
+def confirm_wire_identity(want: HarnessIdentity,
+                          ident: BoardIdentity | None) -> tuple[bool, list[PreflightItem]]:
+    """``confirm_identity`` on a bare wire identity (the journal keeps one, not a release).
+
+    Essential: ``shell_id`` plus the ``harness`` string OR the firmware sha
+    (HARNESS-DIST §3.2 rule 3). A matching sha is decisive: the firmware reports
+    ``harness=1.0.0`` whatever the release is tagged, so a differing version string
+    is then shown UNCHECKED, never a mismatch. Any other MISMATCH fails the confirm.
+    """
     items: list[PreflightItem] = []
     if ident is None or not ident.shell_id:
         items.append(_item("shell_id", None, "the shell did not answer: nothing to confirm with"))
         return False, items
     items.append(_item("shell_id", _same_u32(ident.shell_id, want.static_id),
                        f"board reports {ident.shell_id}, release is {want.static_id}"))
+    sha_ok = fw_sha_match(want.fw_sha, ident.firmware_sha)
     if want.harness:
         have = ident.harness_version
-        items.append(_item("harness version", None if not have else same_version(have, want.harness),
-                           f"board reports {have or 'nothing (no version verb)'}, "
-                           f"release is {want.harness}"))
+        ok = None if not have else same_version(have, want.harness)
+        detail = f"board reports {have or 'nothing (no version verb)'}, release is {want.harness}"
+        if ok is False and sha_ok:
+            ok = None
+            detail += " (not decisive: the firmware sha matches, and the firmware does not " \
+                      "report the release's version)"
+        items.append(_item("harness version", ok, detail))
     if want.fw_sha:
-        have = ident.firmware_sha
-        items.append(_item("firmware sha", None if not have else
-                           have.lower().startswith(want.fw_sha.lower()[:8]),
-                           f"board reports {have or '?'}, release is {want.fw_sha}"))
+        items.append(_item("firmware sha", sha_ok,
+                           f"board reports {ident.firmware_sha or '?'}, release is {want.fw_sha}"))
     if want.features:
         missing = sorted(set(want.features) - set(ident.features))
         items.append(_item("features", not missing,
@@ -143,10 +157,38 @@ def confirm_identity(rel: HarnessRelease, ident: BoardIdentity | None) -> tuple[
                            f"board reports {have or '?'}, release is {want.impl}"))
     if ident.build_check == Check.MISMATCH:
         items.append(_item("build check", False, "the firmware and fabric disagree (skew)"))
-    essential = [i for i in items if i.name in ("shell_id", "harness version")]
-    confirmed = all(i.check == Check.OK for i in essential) and \
+    checks = {i.name: i.check for i in items}
+    version_ok = not (want.harness or want.fw_sha) or Check.OK in (
+        checks.get("harness version"), checks.get("firmware sha"))
+    confirmed = checks["shell_id"] == Check.OK and version_ok and \
         not any(i.check == Check.MISMATCH for i in items)
     return confirmed, items
+
+
+def _wire(want: HarnessIdentity) -> dict[str, str]:
+    """What the journal keeps of a release's wire identity, to recognise it after a crash."""
+    return {"harness": want.harness, "fw_sha": want.fw_sha, "usercode": want.usercode,
+            "impl": want.impl}
+
+
+def journaled_release_runs(j: dict[str, Any], ident: BoardIdentity | None) -> bool:
+    """Does the board run the release an interrupted update's journal names?
+
+    By the wire identity the journal recorded (``confirm_wire_identity``: the firmware
+    sha is decisive). A journal written before it recorded one has only the release
+    version, which is then compared as the harness string, as it always was.
+    """
+    if ident is None or not ident.shell_id:
+        return False
+    wire = j.get("identity") if isinstance(j.get("identity"), dict) else {}
+    want = HarnessIdentity(
+        static_id=str(j.get("static_id") or ident.shell_id),
+        harness=str(wire.get("harness") or j.get("version") or ""),
+        fw_sha=str(wire.get("fw_sha") or ""), usercode=str(wire.get("usercode") or ""),
+        impl=str(wire.get("impl") or ""))
+    if not (want.harness or want.fw_sha):
+        return False
+    return confirm_wire_identity(want, ident)[0]
 
 
 def _evidence(result: Any, controller: Any) -> dict[str, Any]:
@@ -245,9 +287,7 @@ class HarnessInstaller:
             return journal
         if phase in ("written", "rebooting", "rebooted") and pending is None:
             ident = self._identity(session)
-            if ident is not None and ident.harness_version and version and \
-                    same_version(ident.harness_version, version) and \
-                    _same_u32(ident.shell_id or "", j.get("static_id", "") or ident.shell_id or ""):
+            if journaled_release_runs(j, ident):
                 self.records.put(board_id, {
                     "version": version, "result": RESULT_INSTALLED,
                     "static_id": j.get("static_id", ""), "backup": j.get("backup"),
@@ -275,7 +315,7 @@ class HarnessInstaller:
         either the board runs the new image (record it) or it kept/returned to the old slot."""
         version = j.get("version", "")
         ident = self._identity(session)
-        if ident is not None and version and same_version(ident.harness_version or "", version):
+        if version and journaled_release_runs(j, ident):
             self.records.put(board_id, {
                 "version": version, "result": RESULT_INSTALLED, "static_id": j.get("static_id", ""),
                 "previous": j.get("previous"), "identity_after": running_summary(ident),
@@ -331,7 +371,9 @@ class HarnessInstaller:
         if plan.running:
             now_running = running_summary(self._identity(session))
             if now_running.get("shell_id") != plan.running.get("shell_id") or \
-                    now_running.get("harness") != plan.running.get("harness"):
+                    now_running.get("harness") != plan.running.get("harness") or \
+                    fw_sha_match(plan.running.get("firmware_sha", ""),
+                                 now_running.get("firmware_sha", "")) is False:
                 raise RefusedError("the board changed since this update was planned "
                                    f"(planned against {plan.running}, now {now_running})",
                                    hint="check again, then confirm the new plan")
@@ -360,8 +402,8 @@ class HarnessInstaller:
             return out
 
         journal.write(phase="verified", version=rel.version, static_id=rel.identity.static_id,
-                      host=socket.gethostname(), pid=os.getpid(), previous=plan.running,
-                      base=plan.base, os_slot=plan.os_slot)
+                      identity=_wire(rel.identity), host=socket.gethostname(), pid=os.getpid(),
+                      previous=plan.running, base=plan.base, os_slot=plan.os_slot)
         try:
             return self._install(session, plan, prepared, journal, storage, controller, slots,
                                  stored, skipped)
@@ -585,12 +627,15 @@ class HarnessInstaller:
         previous = record.get("previous") or {}
         confirmed = bool(ident and ident.shell_id) and (
             not previous or (_same_u32(now.get("shell_id", ""), previous.get("shell_id", "")) and
-                             now.get("harness") == previous.get("harness")))
+                             now.get("harness") == previous.get("harness") and
+                             fw_sha_match(previous.get("firmware_sha", ""),
+                                          now.get("firmware_sha", "")) is not False))
         result = RESULT_RESTORED if confirmed else RESULT_RESTORED_UNCONFIRMED
         detail = (f"restored {backup.path}; the board reports shell {now.get('shell_id') or '?'}, "
                   f"harness {now.get('harness') or '?'}")
         if not confirmed and previous:
-            detail += f" (expected shell {previous.get('shell_id')}, harness {previous.get('harness')})"
+            detail += (f" (expected shell {previous.get('shell_id')}, harness "
+                       f"{previous.get('harness')}, firmware {previous.get('firmware_sha') or '?'})")
         out = UpdateOutcome(board_id, "rollback", result, detail, identity_after=now,
                             evidence=evidence, backup={"path": backup.path, "sha256": backup.sha256})
         self.records.put(board_id, {"version": previous.get("harness", ""), "result": result,

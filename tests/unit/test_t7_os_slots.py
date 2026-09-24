@@ -195,14 +195,15 @@ def test_a_two_target_release_writes_the_os_slot_then_the_sd_then_reboots_once(t
     log = _Log()
     slots = FakeOsSlots(slots={"A": SlotInfo("A", "a" * 64, "1.1.0", "confirmed"),
                                "B": SlotInfo("B")})
+    # The board runs 1.1.0's firmware (another sha): H2 decides the base by the sha.
     ident = BoardIdentity(board_type="mps3", shell_id=FIELDED_STATIC, harness_version="1.1.0",
                           harness_impl="linux", features=tuple(rel.features),
-                          firmware_sha=rel.sha)
+                          firmware_sha="0110b0a7")
     session = StubSession(ident, storage=StubStorage(log, tmp_path),
                           controller=None, os_slots=slots)
     session.controller = StubController(log, slots)
     slots.on_boot = lambda info: setattr(session, "ident", dataclasses.replace(
-        session.ident, harness_version=info.version))
+        session.ident, harness_version=info.version, firmware_sha=rel.sha))
     view = BoardView(board_id=session.candidate.board_id, pack="mps3", identity=ident,
                      has_storage=True, has_controller=True, has_os_slots=True,
                      os_active_sha="a" * 64, sd_revisions=("HBI0309C",))

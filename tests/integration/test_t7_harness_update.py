@@ -246,6 +246,7 @@ def test_an_interrupted_sd_write_is_refused_until_it_is_restored(world, monkeypa
     monkeypatch.setattr(sdmod, "_copy_stream", real)
     assert w["session"].storage.pending() is not None
     assert vb.reboots == 0                                   # never reboot a half-written SD
+    assert _journal(w).read()["identity"]["fw_sha"] == "c0ffee00"   # H2: kept for recovery
 
     p2, verified = plan(w)
     with pytest.raises(RefusedError, match="rollback"):
@@ -412,3 +413,62 @@ def test_a_wrong_usercode_on_the_wire_is_written_not_running(ila_world):
     p, verified = plan(w)
     out = w["svc"].install_harness(w["session"], p, p.approve(), verified)
     assert out.result == RESULT_WRITTEN and "usercode" in out.detail
+
+
+# --- H2: the fielded lineage says harness=1.0.0 on every firmware (HARNESS-DIST §3.2) ------
+
+
+def _lineage(version: str, sha: str, *, tag: bool) -> Release:
+    """A release whose firmware reports "1.0.0"; ``tag``: the channel's identity.harness
+    carries the release tag (spike P6), else the wire string (rule 1)."""
+    return Release(version, sha=sha, wire_harness="1.0.0",
+                   identity_harness=None if tag else "1.0.0")
+
+
+@pytest.mark.parametrize("tag", [True, False], ids=["tag-in-identity", "wire-in-identity"])
+def test_a_1_1_x_release_whose_firmware_says_1_0_0_is_confirmed_by_its_sha(world, tag):
+    w, vb = world, world["vb"]
+    bind_identity_to_sd(vb)
+    publish(w, Release.fielded(), _lineage("1.1.1", "0e12a0b0", tag=tag))
+    p, verified = plan(w)
+    assert p.running_release == "1.0.0" and p.base
+    out = w["svc"].install_harness(w["session"], p, p.approve(), verified)
+    assert out.result == RESULT_INSTALLED, out.detail
+    ident = w["session"].identity()
+    assert ident.harness_version == "1.0.0" and ident.firmware_sha == "0e12a0b0"
+    assert {c.name: c.check.value for c in out.checks}["firmware sha"] == "ok"
+    again, _ = plan(w)                                   # and it is known as running now
+    assert again.running_release == "1.1.1" and not again.base
+
+
+@pytest.mark.parametrize("tag", [True, False], ids=["tag-in-identity", "wire-in-identity"])
+def test_twin_the_old_firmware_coming_back_is_written_not_running(world, tag):
+    w, vb = world, world["vb"]
+    bind_identity_to_sd(vb, stale=True)                  # the board keeps the old image
+    publish(w, Release.fielded(), _lineage("1.1.1", "0e12a0b0", tag=tag))
+    p, verified = plan(w)
+    out = w["svc"].install_harness(w["session"], p, p.approve(), verified)
+    assert out.result == RESULT_WRITTEN and "firmware sha" in out.detail
+
+
+def test_an_interrupted_1_1_x_install_is_recovered_by_its_journaled_sha(world):
+    from harness_manager.services.update.executor import journaled_release_runs
+
+    w, vb = world, world["vb"]
+    bind_identity_to_sd(vb)
+    publish(w, Release.fielded(), _lineage("1.1.1", "0e12a0b0", tag=True))
+    p, verified = plan(w)
+    w["svc"].install_harness(w["session"], p, p.approve(), verified)
+    # as if that process had died right after the reboot; the journal kept the wire identity
+    _journal(w).write(phase="rebooted", version="1.1.1", static_id=FIELDED_STATIC,
+                      identity={"harness": "1.1.1", "fw_sha": "0e12a0b0"})
+    assert journaled_release_runs(_journal(w).read(), w["session"].identity())
+    p2, verified = plan(w)
+    out = w["svc"].install_harness(w["session"], p2, p2.approve(), verified)
+    assert out.result == "up-to-date" and _journal(w).read() is None
+    # twin: a journal for another firmware is refused, never recorded as installed
+    _journal(w).write(phase="rebooted", version="1.1.2", static_id=FIELDED_STATIC,
+                      identity={"harness": "1.1.2", "fw_sha": "5eed5eed"})
+    p3, verified = plan(w)
+    with pytest.raises(RefusedError, match="does not report it"):
+        w["svc"].install_harness(w["session"], p3, p3.approve(), verified)

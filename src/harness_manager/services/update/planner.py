@@ -36,6 +36,7 @@ from .schema import (
     TARGET_MCC_SD,
     Channel,
     Component,
+    HarnessIdentity,
     HarnessRelease,
 )
 from .version import at_least, compare_safe, same_version
@@ -162,32 +163,86 @@ def running_summary(ident: BoardIdentity | None) -> dict[str, Any]:
             "impl": ident.harness_impl, "features": sorted(ident.features)}
 
 
+#: The shortest sha prefix that names a build (git's own short-sha floor).
+FW_SHA_MIN_HEX = 7
+
+
+def fw_sha_match(want: str, have: str) -> bool | None:
+    """Do a release's ``fw_sha`` and the board's firmware sha name the same build?
+
+    None when either side has none (nothing to decide with). Compared on their
+    common prefix, because the board reports 8 hex digits and a release may record
+    the full sha; a pair shorter than ``FW_SHA_MIN_HEX`` must be equal.
+    """
+    w, h = (want or "").strip().lower(), (have or "").strip().lower()
+    if not w or not h:
+        return None
+    n = min(len(w), len(h))
+    return w == h if n < FW_SHA_MIN_HEX else w[:n] == h[:n]
+
+
+def identity_rank(want: HarnessIdentity, ident: BoardIdentity) -> int | None:
+    """How well what the board reports fits a release's wire identity (HARNESS-DIST §3.2).
+
+    None: it does not fit. Otherwise a rank, higher = more specific:
+    2 for a matching ``fw_sha``, plus 1 for a matching ``harness`` string.
+
+    - ``static_id`` must match; ``usercode`` and ``impl`` must match when both sides
+      have them;
+    - ``fw_sha`` is DECISIVE when both sides have one: every firmware since v0.8 says
+      ``harness=1.0.0``, and a release may carry its tag there, so a differing
+      version string never overrules a matching sha, and a matching one never
+      rescues a differing sha;
+    - without a sha to compare (an older record, or a board that does not say), the
+      ``harness`` string must match when both sides have one.
+    """
+    if not ident.shell_id or not _same_u32(want.static_id, ident.shell_id):
+        return None
+    if want.usercode and ident.usercode and not _same_u32(want.usercode, ident.usercode):
+        return None
+    if want.impl and ident.harness_impl and want.impl != ident.harness_impl:
+        return None
+    sha = fw_sha_match(want.fw_sha, ident.firmware_sha)
+    if sha is False:
+        return None
+    harness = same_version(want.harness, ident.harness_version) \
+        if want.harness and ident.harness_version else None
+    if sha is None and harness is False:
+        return None
+    return (2 if sha else 0) + (1 if harness else 0)
+
+
 def match_release(channel: Channel, ident: BoardIdentity) -> HarnessRelease | None:
-    """The channel release this board runs, by (static_id, harness version[, usercode])."""
-    for rel in channel.harness:
-        if not ident.shell_id or not _same_u32(rel.identity.static_id, ident.shell_id):
-            continue
-        if rel.identity.harness and ident.harness_version and \
-                not same_version(rel.identity.harness, ident.harness_version):
-            continue
-        if rel.identity.usercode and ident.usercode and \
-                not _same_u32(rel.identity.usercode, ident.usercode):
-            continue
-        return rel
-    return None
+    """The channel release this board runs, by its wire identity (``identity_rank``).
+
+    The most specific fit wins. When two releases fit equally well (the same firmware
+    in two releases, or a board that reports too little to tell them apart) the answer
+    is None, "unrecorded": naming one of them would be a guess.
+    """
+    ranked = [(rank, rel) for rel in channel.harness
+              if (rank := identity_rank(rel.identity, ident)) is not None]
+    if not ranked:
+        return None
+    best = max(rank for rank, _ in ranked)
+    top = [rel for rank, rel in ranked if rank == best]
+    return top[0] if len(top) == 1 else None
 
 
 def base_differs(rel: HarnessRelease, ident: BoardIdentity) -> bool:
+    """Would installing ``rel`` change the base the board runs? The firmware sha decides
+    when both sides have one; otherwise the ``harness`` string (``identity_rank``)."""
     i = rel.identity
     if not ident.shell_id or not _same_u32(i.static_id, ident.shell_id):
         return True
-    if i.harness and (not ident.harness_version or
-                      not same_version(i.harness, ident.harness_version)):
-        return True
     if i.usercode and ident.usercode and not _same_u32(i.usercode, ident.usercode):
         return True
-    return bool(i.fw_sha and ident.firmware_sha and not
-                ident.firmware_sha.lower().startswith(i.fw_sha.lower()[:8]))
+    if i.impl and ident.harness_impl and i.impl != ident.harness_impl:
+        return True
+    sha = fw_sha_match(i.fw_sha, ident.firmware_sha)
+    if sha is not None:
+        return not sha
+    return bool(i.harness) and (not ident.harness_version or
+                                not same_version(i.harness, ident.harness_version))
 
 
 def make_plan(channel: Channel, board: BoardView, *, app_version: str,
@@ -237,16 +292,20 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
         plan.warnings.append(f"the channel does not mark harness {rel.version} as a re-key, but "
                              "its static_id differs from the board's: treating it as one")
     base_needed = base_differs(rel, ident) if board.identity_known else True
-    downgrade = False
-    if board.identity_known and ident.harness_version and rel.identity.harness and \
-            _same_u32(rel.identity.static_id, ident.shell_id or "0x0"):
-        downgrade = (compare_safe(rel.identity.harness, ident.harness_version) or 0) < 0
-    if downgrade and version is None:
-        plan.warnings.append(f"the board runs harness {ident.harness_version}, newer than the "
+    downgrade, newer = False, ident.harness_version
+    if board.identity_known and _same_u32(rel.identity.static_id, ident.shell_id or "0x0"):
+        if running is not None:
+            # The release versions order the catalogue: the wire string may say 1.0.0 for all.
+            downgrade, newer = (compare_safe(rel.version, running.version) or 0) < 0, running.version
+        elif ident.harness_version and rel.identity.harness:
+            downgrade = (compare_safe(rel.identity.harness, ident.harness_version) or 0) < 0
+    if downgrade and version is None and not (running is not None and
+                                              running.status == STATUS_WITHDRAWN):
+        plan.warnings.append(f"the board runs harness {newer}, newer than the "
                              f"channel's current {rel.version}; nothing to do")
         base_needed = False
     elif downgrade:
-        plan.warnings.append(f"this is a ROLLBACK from harness {ident.harness_version} to "
+        plan.warnings.append(f"this is a ROLLBACK from harness {newer} to "
                              f"{rel.version} (from the signed release history)")
     os_comp = next((c for c in rel.components if c.kind == KIND_OS_SLOT), None)
     os_needed = os_comp is not None and (
@@ -361,8 +420,11 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
                   else "the pack's budget for this harness")
         s.append(PlanStep("reboot", "reboot the board and witness it go down and come back "
                                     f"({budget})"))
+        want = rel.identity
+        what = f"harness {want.harness or rel.version}"
+        if want.fw_sha:
+            what = f"firmware {want.fw_sha[:8]} ({what})"
         s.append(PlanStep("confirm-identity", f"the board must report shell "
-                                              f"{rel.identity.static_id}, harness "
-                                              f"{rel.identity.harness or rel.version}"))
+                                              f"{want.static_id}, {what}"))
     if plan.os_slot:
         s.append(PlanStep("confirm-os-slot", "confirm the new slot so stage0 keeps it"))

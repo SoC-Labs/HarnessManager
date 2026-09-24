@@ -123,14 +123,19 @@ class Release:
     private_overlays: bool = False
     impl: str = "bare-metal"
     wire_usercode: str | None = None      # the usercode the firmware reports (v0.12); None: silent
+    # The fielded lineage (HARNESS-DIST §3.2): the firmware says "1.0.0" whatever the tag.
+    identity_harness: str | None = None   # the channel's identity.harness; None: the version
+    wire_harness: str | None = None       # what the firmware reports; None: the version
 
     def identity(self) -> dict[str, Any]:
-        return {"static_id": self.static_id, "usercode": self.usercode, "harness": self.version,
+        harness = self.version if self.identity_harness is None else self.identity_harness
+        return {"static_id": self.static_id, "usercode": self.usercode, "harness": harness,
                 "impl": self.impl, "proto": "0.10", "features": list(self.features),
                 "fw_sha": self.sha}
 
     def bit(self) -> bytes:
-        return fake_bit(static_id=self.static_id, harness=self.version, sha=self.sha,
+        harness = self.version if self.wire_harness is None else self.wire_harness
+        return fake_bit(static_id=self.static_id, harness=harness, sha=self.sha,
                         usercode=self.bit_usercode or self.usercode, features=self.features,
                         part=self.bit_part, wire_usercode=self.wire_usercode)
 
