@@ -1,10 +1,15 @@
-"""``harness-manager lease`` and ``harness-manager share``: the lab hub from a terminal (lane L1).
+"""``harness-manager lease`` and ``harness-manager share``: the lab hub from a terminal (lanes L1, LR-C).
 
 ::
 
     harness-manager lease show TARGET
     harness-manager lease acquire TARGET [--ttl S] [--holder NAME] [--timeout S]
     harness-manager lease release TARGET
+    harness-manager lease request TARGET [--message M] [--ttl S]
+    harness-manager lease requests TARGET
+    harness-manager lease respond TARGET ID --release | --keep MINUTES [--message M]
+    harness-manager lease force TARGET [--yes]
+    harness-manager lease leave TARGET
     harness-manager share list TARGET
     harness-manager share start TARGET NAME      # a share name from boards.toml (mcc, ...) or a /dev path
 
@@ -19,28 +24,204 @@ CLI took as soon as the board is open there.
 queue place is kept). Ctrl-C while queued removes the queue entry. There is no
 ``share stop``: fpgahub stops EVERY share on the board with it.
 
+Lease requests (docs/LEASE_REQUESTS.md, lane LR-C): ``lease request`` joins the
+queue AND asks the holder's session to give the board up, then waits, showing
+the 2:00 countdown and the answer. With no answer by the deadline, and at the
+head of the queue, ``lease force`` revokes the holder's lease (it asks first;
+without a terminal it needs ``--yes``). ``lease leave`` leaves the queue and
+withdraws the request; Ctrl-C during ``lease request`` does the same.
+
+Exit codes: 0 when the verb did what it says (``request``/``force``: the board is
+yours); 4 HELD when the holder answered "keep"; 12 UNAVAILABLE when force-release
+is not open yet (the holder still has time to answer); 15 REFUSED when it is not
+available at all, or the prompt was not confirmed.
+
 The lead wires ``register(sub)`` into ``cli/main.py`` (CCR L1-2).
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
+import threading
+import time
+from datetime import datetime, timezone
 from typing import Any
 
-from harness_manager.core.errors import AbsentError, ExitCode, UsageError
+from harness_manager.core.errors import (
+    AbsentError,
+    ActionFailedError,
+    AlreadyError,
+    ExitCode,
+    HarnessError,
+    HeldError,
+    RefusedError,
+    UnavailableError,
+    UsageError,
+)
 from harness_manager.services.lease import DEFAULT_TTL_S, LeaseService, default_holder
 
 from .context import Ctx
 from .output import TSV_COLUMNS, Result, tsv_field
 
-LEASE_COLUMNS = ("TARGET", "HUB", "STATE", "HOLDER", "EXPIRES", "MINE")
+#: Append-only. L1's six columns, then LR-C's: the queue length, my place in it, my request,
+#: its answer (``keep:15`` / ``release``), whether force-release is open, the incoming
+#: requests (for my lease), and who force-released my lease last.
+LEASE_COLUMNS = ("TARGET", "HUB", "STATE", "HOLDER", "EXPIRES", "MINE",
+                 "QUEUED", "POSITION", "REQUEST", "ANSWER", "FORCE", "INCOMING", "TAKEN_BY")
+LEASE_REQUESTS_COLUMNS = ("TARGET", "ID", "BY", "USER", "HOST", "MESSAGE", "CREATED", "DEADLINE")
+LEASE_RESPOND_COLUMNS = ("TARGET", "ID", "ANSWER", "MINUTES", "MESSAGE")
+LEASE_LEAVE_COLUMNS = ("TARGET", "HUB", "LEFT")
 SHARE_COLUMNS = ("TARGET", "HUB", "TTY", "TCP", "WRITER", "READERS", "RUNNING")
 
-#: Append-only TSV layouts. They belong in ``output.TSV_COLUMNS`` (CCR L1-2; T5 owns that
-#: table and its golden test). Until they are there, ``_emit`` prints the rows itself
-#: with the same field rules, as ``cmd_daemon`` does.
-LAYOUTS = {"lease": LEASE_COLUMNS, "share": SHARE_COLUMNS}
+#: Append-only TSV layouts. They belong in ``output.TSV_COLUMNS`` (CCR L1-2 and LR-C-1; T5
+#: owns that table and its golden test). Until they are there, ``_emit`` prints the rows
+#: itself with the same field rules, as ``cmd_daemon`` does.
+LAYOUTS = {"lease": LEASE_COLUMNS, "lease requests": LEASE_REQUESTS_COLUMNS,
+           "lease respond": LEASE_RESPOND_COLUMNS, "lease leave": LEASE_LEAVE_COLUMNS,
+           "share": SHARE_COLUMNS}
+
+# --- lease-request rules shared with the daemon (daemon/hub_api.py imports these) ----------
+
+#: docs/LEASE_REQUESTS.md: the holder has this long to answer.
+REQUEST_WINDOW_S = 120
+#: The "keep it" answers, in minutes.
+KEEP_MINUTES = (5, 15, 30, 60)
+#: A request or answer message. The note it rides in is at most 4 KiB on the hub.
+MAX_MESSAGE = 500
+#: Request ids go into hub file names (``req-<id>.json``): this alphabet only.
+REQUEST_ID = re.compile(r"[A-Za-z0-9_.\-]{1,64}")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
+
+
+def clean_message(value: Any, field: str = "message") -> str:
+    """A request or answer message: a string of at most ``MAX_MESSAGE`` characters.
+    Control characters (a pasted newline) become one space. None is ``""``."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise UsageError(f"{field} must be a string, not {value!r}")
+    text = _CONTROL.sub(" ", value).strip()
+    if len(text) > MAX_MESSAGE:
+        raise UsageError(f"{field} is {len(text)} characters; the most is {MAX_MESSAGE}",
+                         hint="it is shown to the other person in one line: keep it short")
+    return text
+
+
+def request_id(value: Any) -> str:
+    if not isinstance(value, str) or not REQUEST_ID.fullmatch(value):
+        raise UsageError(f"id must be a request id ({REQUEST_ID.pattern}), not {value!r}",
+                         hint="`harness-manager lease requests TARGET` lists them")
+    return value
+
+
+def keep_minutes(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value not in KEEP_MINUTES:
+        raise UsageError(f"minutes must be one of {', '.join(map(str, KEEP_MINUTES))}, "
+                         f"not {value!r}", hint="\"keep\" says how long you still need the board")
+    return value
+
+
+def parse_iso(value: Any) -> float | None:
+    """An ISO 8601 time from a hub note (``...Z`` or ``+00:00``) as epoch seconds, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        stamp = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)     # the notes are UTC
+    return stamp.timestamp()
+
+
+def fmt_left(seconds: float) -> str:
+    """``95`` -> ``1:35``; never negative."""
+    s = max(0, int(seconds + 0.999))
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def force_refusal(view: dict[str, Any], now: float, target: str) -> HarnessError | None:
+    """Why force-release is not available from this lease view, or None.
+
+    The view's ``request.force_available`` is the lease service's answer. A view may be
+    up to 10 s old (``lease show`` is cached), and availability changes by time alone at
+    the deadline, so the time-based rules are checked here against ``now``: once they
+    all pass, the service's ``force`` decides (it checks again before any revoke).
+
+    - nothing to force: the lease is already mine (ALREADY), nobody holds it, or I have
+      no request (REFUSED);
+    - an answer: "release" (the board is on its way) or a "keep" whose minutes have not
+      run out (REFUSED, with the time);
+    - not at the head of the queue: a revoke hands the board to the head (REFUSED);
+    - the deadline has not passed: 422 UNAVAILABLE with the time left.
+    """
+    lease = view.get("lease") or None
+    req = view.get("request") or None
+    if lease and lease.get("mine"):
+        return AlreadyError(f"{target} is already yours; there is nothing to force",
+                            hint="`harness-manager lease release TARGET` gives it back")
+    if not req:
+        return RefusedError(f"you have no request for {target}, so there is nothing to force",
+                            hint="`harness-manager lease request TARGET` asks the holder first; "
+                                 "force-release follows a request nobody answered")
+    rid = req.get("id", "")
+    if lease is None:
+        return RefusedError(f"nobody holds {target}; your request gets it without a force",
+                            hint="wait for `lease request` to finish")
+    if req.get("force_available"):
+        return None
+    holder = lease.get("holder") or "the holder"
+    service_reason = req.get("force_reason") or ""
+    ans = req.get("answer") or None
+    if ans:
+        if ans.get("answer") == "release":
+            return RefusedError(f"{holder} released {target}; it is on its way to you",
+                                hint="wait for `lease request` to finish")
+        minutes = ans.get("minutes") or 0
+        at = parse_iso(ans.get("at"))
+        until = None if at is None else at + 60 * minutes
+        if until is None or now < until:
+            said = f": {ans['message']!r}" if ans.get("message") else ""
+            when = (f"; force-release opens in {fmt_left(until - now)}" if until is not None
+                    else "")
+            err = RefusedError(f"{holder} answered: keep {target} for {minutes} min{said}{when}",
+                               hint="ask again later, or `harness-manager lease leave TARGET`")
+            err.data = {"request_id": rid, "answer": ans,  # type: ignore[attr-defined]
+                        "force_reason": service_reason,
+                        "time_left_s": None if until is None else round(until - now)}
+            return err
+    pos = req.get("position")
+    if isinstance(pos, bool) or not isinstance(pos, int) or pos < 1:
+        return RefusedError(f"you are not in the queue for {target}",
+                            hint="`harness-manager lease request TARGET` joins it again")
+    if pos > 1:
+        err = RefusedError(f"you are at position {pos} in the queue for {target}; only the head "
+                           "can force-release it (a revoke hands the board to the head)",
+                           hint="wait for the people ahead of you, or ask them")
+        err.data = {"request_id": rid, "position": pos,  # type: ignore[attr-defined]
+                    "force_reason": service_reason}
+        return err
+    deadline = parse_iso(req.get("deadline_at"))
+    if deadline is None:
+        err = RefusedError(f"force-release of {target} is not available: "
+                           f"{service_reason or 'the request has no deadline'}")
+        err.data = {"request_id": rid, "force_reason": service_reason}  # type: ignore[attr-defined]
+        return err
+    if now < deadline:
+        err = UnavailableError("lease_force", f"{holder} has {fmt_left(deadline - now)} left to "
+                                              f"answer the request (until {req['deadline_at']})")
+        err.data = {"request_id": rid, "deadline_at": req["deadline_at"],  # type: ignore[attr-defined]
+                    "time_left_s": round(deadline - now)}
+        return err
+    return None        # a view from before the deadline: the service decides
+
+
+# --- the verbs ----------------------------------------------------------------------------
 
 
 def _fmt_parent() -> argparse.ArgumentParser:
@@ -53,21 +234,27 @@ def _fmt_parent() -> argparse.ArgumentParser:
     return p
 
 
+def _cols(layout: str) -> str:
+    return f"--tsv columns: {' '.join(LAYOUTS[layout])}"
+
+
 def register(subparsers: argparse._SubParsersAction) -> None:
     """Add ``lease`` and ``share`` to the CLI's verbs."""
     fmt = _fmt_parent()
     target_help = "the board (192.168.10.101); its boards.toml hub table names the hub"
 
     vp = subparsers.add_parser(
-        "lease", help="the board's hub lease: show, acquire (may queue), release",
+        "lease", help="the board's hub lease: show, acquire, request, force, leave, release",
         description="The hub lease that keeps two people off one shared board. The Harness "
-                    "Manager service heartbeats it while the board is open there.",
-        parents=[fmt], epilog=f"--tsv columns: {' '.join(LEASE_COLUMNS)}")
+                    "Manager service heartbeats it while the board is open there. `request` "
+                    "asks the holder to give it up; with no answer in 2:00, `force` takes it.",
+        parents=[fmt], epilog=_cols("lease"))
     lsub = vp.add_subparsers(dest="lease_cmd", required=True, metavar="ACTION")
-    sp = lsub.add_parser("show", help="who holds it, until when", parents=[fmt])
+    sp = lsub.add_parser("show", help="who holds it, until when; the queue and the requests",
+                         parents=[fmt], epilog=_cols("lease"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
     sp = lsub.add_parser("acquire", help="take it; waits in the queue if someone holds it",
-                         parents=[fmt])
+                         parents=[fmt], epilog=_cols("lease"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
     sp.add_argument("--ttl", type=int, default=DEFAULT_TTL_S, metavar="S",
                     help=f"lease length in seconds (default {DEFAULT_TTL_S}); the service "
@@ -77,7 +264,48 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     sp.add_argument("--timeout", type=float, default=3600.0, metavar="S",
                     help="give up waiting in the queue after this long (the entry is removed)")
     sp = lsub.add_parser("release", help="give it back (only a lease this Harness Manager took)",
-                         parents=[fmt])
+                         parents=[fmt], epilog=_cols("lease"))
+    sp.add_argument("target", metavar="TARGET", help=target_help)
+
+    sp = lsub.add_parser(
+        "request", help="ask the holder to give it up; waits, with the 2:00 countdown",
+        description="Join the queue and ask the holder's Harness Manager to release the board. "
+                    "Waits until it is yours (exit 0) or the holder answers 'keep' (exit 4). "
+                    "With no answer in 2:00 and you at the head of the queue, "
+                    "`harness-manager lease force TARGET` takes it. Ctrl-C leaves the queue.",
+        parents=[fmt], epilog=_cols("lease"))
+    sp.add_argument("target", metavar="TARGET", help=target_help)
+    sp.add_argument("--message", default="", metavar="M",
+                    help=f"why you need it, shown to the holder (at most {MAX_MESSAGE} characters)")
+    sp.add_argument("--ttl", type=int, default=DEFAULT_TTL_S, metavar="S",
+                    help=f"lease length in seconds once it is yours (default {DEFAULT_TTL_S})")
+
+    sp = lsub.add_parser("requests", help="the requests waiting for your answer",
+                         parents=[fmt], epilog=_cols("lease requests"))
+    sp.add_argument("target", metavar="TARGET", help=target_help)
+
+    sp = lsub.add_parser("respond", help="answer a request: release now, or keep it N minutes",
+                         parents=[fmt], epilog=_cols("lease respond"))
+    sp.add_argument("target", metavar="TARGET", help=target_help)
+    sp.add_argument("id", metavar="ID", help="the request id (`lease requests TARGET`)")
+    g = sp.add_mutually_exclusive_group(required=True)
+    g.add_argument("--release", action="store_true", help="release the board to them now")
+    g.add_argument("--keep", type=int, choices=KEEP_MINUTES, metavar="MINUTES",
+                   help=f"keep it this long ({', '.join(map(str, KEEP_MINUTES))} minutes)")
+    sp.add_argument("--message", default="", metavar="M", help="a note for the requester")
+
+    sp = lsub.add_parser(
+        "force", help="force-release it: no answer to your request in 2:00 (asks first)",
+        description="Revoke the holder's lease. Only after your request's 2:00 deadline, with "
+                    "no answer (or a 'keep' that ran out), and you at the head of the queue. "
+                    "It kicks the holder off the board now. Asks first; without a terminal "
+                    "it needs --yes.",
+        parents=[fmt], epilog=_cols("lease"))
+    sp.add_argument("target", metavar="TARGET", help=target_help)
+    sp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+
+    sp = lsub.add_parser("leave", help="leave the queue and withdraw your request",
+                         parents=[fmt], epilog=_cols("lease leave"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
     vp.set_defaults(fn=cmd_lease)
 
@@ -85,7 +313,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "share", help="the hub's TTY shares for the board: list, start (never stop)",
         description="fpgahub serves a board's USB serial ports (the MCC on tty_00, the FPGA "
                     "UART lanes) as TCP streams. There is no stop: it stops every share.",
-        parents=[fmt], epilog=f"--tsv columns: {' '.join(SHARE_COLUMNS)}")
+        parents=[fmt], epilog=_cols("share"))
     ssub = vp.add_subparsers(dest="share_cmd", required=True, metavar="ACTION")
     sp = ssub.add_parser("list", help="running shares", parents=[fmt])
     sp.add_argument("target", metavar="TARGET", help=target_help)
@@ -129,11 +357,293 @@ def _service() -> LeaseService:
     return LeaseService(resolve_state_dir())
 
 
+def _now() -> float:
+    return time.time()
+
+
+def _stderr_is_tty() -> bool:
+    try:
+        return sys.stderr.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _stdin_is_tty() -> bool:
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def full_view(view: dict[str, Any]) -> dict[str, Any]:
+    """A lease view with every key docs/LEASE_REQUESTS.md lists, whatever the service gave."""
+    out = dict(view)
+    out.setdefault("lease", None)
+    out.setdefault("hub", None)
+    for key, empty in (("queue", list), ("request", lambda: None), ("incoming", list),
+                       ("taken", lambda: None)):
+        if out.get(key) is None:
+            out[key] = empty()
+    return out
+
+
 def _row(target: str, hub: str, view: dict[str, Any]) -> list[Any]:
-    lease = view.get("lease")
-    if lease is None:
-        return [target, hub, "free", "", "", False]
-    return [target, hub, "held", lease["holder"], lease.get("expires_at", ""), lease["mine"]]
+    view = full_view(view)
+    lease = view["lease"]
+    head = ([target, hub, "free", "", "", False] if lease is None else
+            [target, hub, "held", lease["holder"], lease.get("expires_at", ""), lease["mine"]])
+    queue = view["queue"]
+    mine = next((q.get("position") for q in queue if q.get("mine")), None)
+    req = view["request"]
+    ans = (req or {}).get("answer") or None
+    answer = "" if not ans else (f"keep:{ans.get('minutes')}" if ans.get("answer") == "keep"
+                                 else ans.get("answer", ""))
+    taken = view["taken"]
+    return head + [len(queue), mine if mine is not None else (req or {}).get("position"),
+                   (req or {}).get("id", ""), answer,
+                   "" if req is None else bool(req.get("force_available")),
+                   len(view["incoming"]), (taken or {}).get("by", "")]
+
+
+def _clock(iso: Any) -> str:
+    """``2026-09-24T12:02:00+00:00`` -> ``12:02:00`` (the UTC time a person reads)."""
+    stamp = parse_iso(iso)
+    if stamp is None:
+        return str(iso or "?")
+    return datetime.fromtimestamp(stamp, timezone.utc).strftime("%H:%M:%S UTC")
+
+
+def _human_view(target: str, host: str, view: dict[str, Any], now: float) -> list[str]:
+    view = full_view(view)
+    lease = view["lease"]
+    lines = [f"{target} on {host}: not leased"] if lease is None else [
+        f"{target} on {host}: held by {lease['holder']} (user {lease.get('user') or '?'}, "
+        f"expires {lease.get('expires_at') or '?'})" + (" — yours" if lease["mine"] else "")]
+    if view["queue"]:
+        lines.append("queue: " + "  ".join(
+            f"{q.get('position', '?')}. {q.get('holder', '?')}" + (" (you)" if q.get("mine") else "")
+            for q in view["queue"]))
+    req = view["request"]
+    if req:
+        ans = req.get("answer") or None
+        line = f"your request {req.get('id', '?')}: asked at {_clock(req.get('created_at'))}"
+        if ans:
+            said = f": {ans['message']!r}" if ans.get("message") else ""
+            line += (f"; answered keep for {ans.get('minutes')} min{said}"
+                     if ans.get("answer") == "keep" else f"; answered {ans.get('answer')}{said}")
+        else:
+            deadline = parse_iso(req.get("deadline_at"))
+            left = "" if deadline is None else (f" ({fmt_left(deadline - now)} left)"
+                                                if now < deadline else " (passed)")
+            line += f"; answer due {_clock(req.get('deadline_at'))}{left}"
+        lines.append(line)
+        if req.get("force_available"):
+            lines.append(f"  force-release is available: `harness-manager lease force {target}`")
+        elif req.get("force_reason"):
+            lines.append(f"  force-release: {req['force_reason']}")
+    lines += _incoming_lines(target, view["incoming"], now)
+    taken = view["taken"]
+    if taken:
+        lines.append(f"your lease was force-released by {taken.get('by', '?')} at "
+                     f"{_clock(taken.get('at'))}: {taken.get('reason', '')}")
+    return lines
+
+
+def _incoming_lines(target: str, incoming: list[dict[str, Any]], now: float) -> list[str]:
+    lines = []
+    for inc in incoming:
+        said = f": {inc['message']!r}" if inc.get("message") else ""
+        deadline = parse_iso(inc.get("deadline_at"))
+        left = "" if deadline is None or now >= deadline else f" ({fmt_left(deadline - now)} left)"
+        lines.append(f"request {inc.get('id', '?')} from {inc.get('by', '?')}{said}; answer by "
+                     f"{_clock(inc.get('deadline_at'))}{left}: `harness-manager lease respond "
+                     f"{target} {inc.get('id', 'ID')} --release | --keep MINUTES`")
+    return lines
+
+
+class _Countdown:
+    """The request's countdown on stderr, from the note's ``deadline_at`` (not our clock).
+
+    On a terminal it redraws one line each second; otherwise it prints the deadline
+    once. It reads the deadline with one ``view`` call on its own thread, so the
+    service's ``request`` (which is running the callback) is never re-entered."""
+
+    def __init__(self, ctx: Ctx, svc: Any, hub: Any) -> None:
+        self.ctx, self.svc, self.hub = ctx, svc, hub
+        self.stop = threading.Event()
+        self._mu = threading.Lock()
+        self._drawn = False
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, name="lease-countdown", daemon=True)
+            self._thread.start()
+
+    def _stream(self) -> Any:
+        return self.ctx.err or sys.stderr
+
+    def _deadline(self) -> tuple[float, str, str]:
+        holder = "the holder"
+        try:
+            view = full_view(self.svc.view(self.hub))
+            lease = view["lease"] or {}
+            holder = lease.get("holder") or holder
+            deadline = parse_iso((view["request"] or {}).get("deadline_at"))
+            if deadline is not None:
+                return deadline, holder, ""
+        except HarnessError:
+            pass
+        return _now() + REQUEST_WINDOW_S, holder, " (about)"
+
+    def _run(self) -> None:
+        deadline, holder, about = self._deadline()
+        if self.stop.is_set():
+            return
+        if not _stderr_is_tty():
+            self.note(f"asked {holder} to release {self.hub.target}; the answer is due by "
+                      f"{datetime.fromtimestamp(deadline, timezone.utc):%H:%M:%S} UTC{about} "
+                      f"({fmt_left(deadline - _now())})")
+            return
+        while not self.stop.is_set():
+            left = deadline - _now()
+            text = (f"waiting for {holder} to answer: {fmt_left(left)}{about} left "
+                    "(Ctrl-C leaves the queue)" if left > 0 else
+                    f"no answer from {holder} by the deadline")
+            with self._mu:
+                if self.stop.is_set():
+                    return
+                self._stream().write("\r" + text + "\x1b[K")
+                self._stream().flush()
+                self._drawn = True
+            if left <= 0:
+                self.clear()
+                return
+            self.stop.wait(1.0)
+
+    def clear(self) -> None:
+        with self._mu:
+            if self._drawn:
+                self._stream().write("\r\x1b[K")
+                self._stream().flush()
+                self._drawn = False
+
+    def note(self, text: str) -> None:
+        """A line on stderr that does not tangle with the countdown line."""
+        self.clear()
+        with self._mu:
+            self.ctx.note(text)
+
+    def close(self) -> None:
+        self.stop.set()
+        self.clear()
+
+
+def _lease_result(cand: Any, hub: Any, lease: dict[str, Any], human: list[str],
+                  **extra: Any) -> Result:
+    view = {"lease": lease, "hub": hub.host}
+    return Result("lease", {"board_id": cand.board_id, **view, **extra},
+                  rows=[_row(hub.target, hub.host, view)], human=human)
+
+
+def _request(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
+    a = ctx.args
+    message = clean_message(a.message)
+    countdown = _Countdown(ctx, svc, hub)
+
+    def progress(phase: str, done: int, _total: int) -> None:
+        if phase == "queued":
+            where = f" at position {done}" if done else ""
+            countdown.note(f"queued{where} for {hub.target} (Ctrl-C leaves the queue)")
+        elif phase == "notified":
+            countdown.start()
+        elif phase == "answered":
+            countdown.close()
+        elif phase == "force-available":
+            countdown.close()
+            countdown.note(f"no answer by the deadline, and you are at the head of the queue: "
+                           f"`harness-manager lease force {a.target}` takes the board now "
+                           "(it kicks the holder off; it asks first)")
+        elif phase == "held":
+            countdown.close()
+
+    try:
+        out = svc.request(cand.board_id, hub, message=message, ttl_s=a.ttl, progress=progress)
+    except KeyboardInterrupt:
+        countdown.close()
+        left = svc.leave(cand.board_id, hub).get("left")
+        ctx.note("left the queue; the request is withdrawn" if left else "not in the queue")
+        raise
+    finally:
+        countdown.close()
+    if out.get("lease"):
+        lease = out["lease"]
+        human = [f"{hub.target} on {hub.host}: yours, held by {lease['holder']} until "
+                 f"{lease.get('expires_at') or '?'}"
+                 + (" (already yours)" if out.get("already") else ""),
+                 "the Harness Manager service extends it while the board is open there"]
+        _emit(ctx, _lease_result(cand, hub, lease, human,
+                                 **{k: v for k, v in out.items() if k not in ("lease", "ok")}))
+        return ExitCode.OK
+    ans = out.get("answered")
+    if ans:
+        minutes = ans.get("minutes") or 0
+        said = f": {ans['message']!r}" if ans.get("message") else ""
+        holder = _holder_now(svc, hub)
+        err = HeldError(f"{holder or 'the holder'} keeps {hub.target} for {minutes} more min{said}",
+                        holder=holder,
+                        hint=f"force-release opens when those {minutes} min run out if you are "
+                             f"still at the head of the queue (`harness-manager lease show "
+                             f"{a.target}`); `harness-manager lease leave {a.target}` leaves it")
+        err.data = {"board_id": cand.board_id, "answered": ans}  # type: ignore[attr-defined]
+        raise err
+    raise ActionFailedError(f"the request for {hub.target} ended without the board ({out})",
+                            hint=f"`harness-manager lease show {a.target}`")
+
+
+def _holder_now(svc: Any, hub: Any) -> str:
+    try:
+        return (full_view(svc.view(hub))["lease"] or {}).get("holder") or ""
+    except HarnessError:
+        return ""
+
+
+def _force(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
+    a = ctx.args
+    view = full_view(svc.view(hub))
+    refusal = force_refusal(view, _now(), hub.target)
+    if refusal is not None:
+        raise refusal
+    holder = (view["lease"] or {}).get("holder") or "the holder"
+    board = _board_name(hub)
+    warning = (f"Are you sure? This kicks {holder} off {board} now; anything they are running "
+               "on the board is interrupted.")
+    if not a.yes and not _stdin_is_tty():
+        raise RefusedError(f"force-release asks first, and there is no terminal to ask on "
+                           f"(it kicks {holder} off {board} now)",
+                           hint="re-run with --yes if you mean it")
+    ctx.confirm(warning)
+    out = svc.force(cand.board_id, hub, confirm=True)
+    lease = out.get("lease") or {}
+    human = [f"{hub.target} on {hub.host}: force-released; yours, held by "
+             f"{lease.get('holder', '?')} until {lease.get('expires_at') or '?'}",
+             f"{holder} is told who took it and why"]
+    _emit(ctx, _lease_result(cand, hub, lease, human,
+                             **{k: v for k, v in out.items() if k not in ("lease", "ok")}))
+    return ExitCode.OK
+
+
+def _board_name(hub: Any) -> str:
+    """The physical board for the prompt (``mps3_01``); the target when the hub cannot say."""
+    getter = getattr(getattr(hub, "client", None), "board_id", None)
+    if callable(getter):
+        try:
+            name = getter()
+            if isinstance(name, str) and name:
+                return name
+        except HarnessError:
+            pass
+    return hub.target
 
 
 def cmd_lease(ctx: Ctx) -> int:
@@ -141,13 +651,10 @@ def cmd_lease(ctx: Ctx) -> int:
     cand, hub = _hub(ctx)
     svc = _service()
     if a.lease_cmd == "show":
-        view = svc.view(hub)
-        lease = view["lease"]
-        human = [f"{hub.target} on {hub.host}: not leased"] if lease is None else [
-            f"{hub.target} on {hub.host}: held by {lease['holder']} (user {lease.get('user') or '?'}, "
-            f"expires {lease.get('expires_at') or '?'})" + (" — yours" if lease["mine"] else "")]
+        view = full_view(svc.view(hub))
         _emit(ctx, Result("lease", {"board_id": cand.board_id, **view},
-                        rows=[_row(hub.target, hub.host, view)], human=human))
+                          rows=[_row(hub.target, hub.host, view)],
+                          human=_human_view(hub.target, hub.host, view, _now())))
         return ExitCode.OK
     if a.lease_cmd == "acquire":
         holder = a.holder or default_holder()
@@ -167,20 +674,58 @@ def cmd_lease(ctx: Ctx) -> int:
             ctx.note("left the queue" if removed else "not queued")
             raise
         lease = out["lease"]
-        view = {"lease": lease, "hub": hub.host}
         human = [f"{hub.target} on {hub.host}: held by {lease['holder']}"
                  f" until {lease.get('expires_at') or '?'}" + (" (already yours)" if out.get("already")
                                                                 else ""),
                  "the Harness Manager service extends it while the board is open there"]
-        _emit(ctx, Result("lease", {"board_id": cand.board_id, **view},
-                        rows=[_row(hub.target, hub.host, view)], human=human))
+        _emit(ctx, _lease_result(cand, hub, lease, human))
         return ExitCode.OK
     if a.lease_cmd == "release":
         out = svc.release(hub, board_id=cand.board_id)
         view = {"lease": None, "hub": hub.host}
         _emit(ctx, Result("lease", {"board_id": cand.board_id, **view, "released": out.get("released")},
-                        rows=[_row(hub.target, hub.host, view)],
-                        human=[f"{hub.target} on {hub.host}: released"]))
+                          rows=[_row(hub.target, hub.host, view)],
+                          human=[f"{hub.target} on {hub.host}: released"]))
+        return ExitCode.OK
+    if a.lease_cmd == "request":
+        return _request(ctx, cand, hub, svc)
+    if a.lease_cmd == "requests":
+        view = full_view(svc.view(hub))
+        incoming = view["incoming"]
+        rows = [[hub.target, r.get("id"), r.get("by"), r.get("user"), r.get("host"),
+                 r.get("message"), r.get("created_at"), r.get("deadline_at")] for r in incoming]
+        lines = _incoming_lines(hub.target, incoming, _now())
+        if not incoming:
+            mine = (view["lease"] or {}).get("mine")
+            lines = [f"no requests for {hub.target}" + ("" if mine else " (you do not hold it; "
+                                                        "requests go to the holder)")]
+        _emit(ctx, Result("lease requests", {"board_id": cand.board_id, "hub": hub.host,
+                                             "target": hub.target, "incoming": incoming},
+                          rows=rows, human=lines))
+        return ExitCode.OK
+    if a.lease_cmd == "respond":
+        rid = request_id(a.id)
+        message = clean_message(a.message)
+        answer, minutes = ("release", 0) if a.release else ("keep", keep_minutes(a.keep))
+        out = svc.respond(cand.board_id, hub, rid, answer, minutes=minutes, message=message)
+        human = ([f"released {hub.target}: the requester gets it next"] if answer == "release"
+                 else [f"told the requester you keep {hub.target} for {minutes} more min"])
+        data = {"board_id": cand.board_id, "target": hub.target, "id": rid, "answer": answer,
+                "minutes": minutes, "message": message,
+                **{k: v for k, v in out.items() if k != "ok"}}
+        _emit(ctx, Result("lease respond", data,
+                          rows=[[hub.target, rid, answer, minutes, message]], human=human))
+        return ExitCode.OK
+    if a.lease_cmd == "force":
+        return _force(ctx, cand, hub, svc)
+    if a.lease_cmd == "leave":
+        out = svc.leave(cand.board_id, hub)
+        left = bool(out.get("left"))
+        _emit(ctx, Result("lease leave", {"board_id": cand.board_id, "hub": hub.host,
+                                          "target": hub.target, "left": left},
+                          rows=[[hub.target, hub.host, left]],
+                          human=[f"left the queue for {hub.target}; the request is withdrawn"
+                                 if left else f"not in the queue for {hub.target}"]))
         return ExitCode.OK
     raise UsageError(f"unknown lease action {a.lease_cmd!r}")
 
