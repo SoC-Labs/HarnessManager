@@ -95,6 +95,18 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
             "HW_SERVER_PID", "BOARD_SLOT", "REACH", "ATTACHED", "LTX", "WARNINGS", "DETAIL"),
     "xvc tcl": ("BOARD_ID", "LINE", "TEXT"),
     "xvc ltx": ("BOARD_ID", "WHICH", "NAME", "PATH", "CRC_OK", "WRITTEN"),
+    # lane HARNESS-CAT (cli/cmd_harness.py): the harness versions catalogue
+    "harness list": ("VERSION", "CHANNELS", "STATUS", "STATIC_ID", "IMPL", "FW_SHA", "VERDICT",
+                     "MARKS", "MODE", "SIZE", "CACHED", "WHY"),
+    "harness show": ("VERSION", "SECTION", "NAME", "VALUE"),
+    "harness fetch": ("VERSION", "COMPONENT", "SIZE", "SHA256", "RESULT", "PATH"),
+    "harness install": ("BOARD_ID", "VERSION", "RESULT", "FROM", "BACKUP", "DETAIL"),
+    "harness pin": ("BOARD_ID", "PINNED", "PREVIOUS"),
+    "harness unpin": ("BOARD_ID", "PINNED", "PREVIOUS"),
+    "harness history": ("BOARD_ID", "AT", "KIND", "VERSION", "RESULT", "FROM", "STATIC_ID",
+                        "FW_SHA", "DOORS", "BACKUP"),
+    "harness rollback": ("BOARD_ID", "VERSION", "RESULT", "HOW", "DETAIL"),
+    "harness mirror": ("CHANNEL", "ROOT", "CHANNEL_DIR", "BLOBS", "SKIPPED"),
 }
 
 

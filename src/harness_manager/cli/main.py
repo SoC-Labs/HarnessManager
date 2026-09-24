@@ -312,6 +312,11 @@ def make_parser() -> argparse.ArgumentParser:
     if "update" in sub.choices:
         verbs["update"] = sub.choices["update"]
 
+    # -- harness (HARNESS-CAT: the harness versions catalogue; `update` stays T7's alias) --
+    from . import cmd_harness
+    cmd_harness.register(sub)
+    verbs["harness"] = sub.choices["harness"]
+
     # -- power (L4: the meter in boards.toml, and a cold power cycle) ------------------
     from . import cmd_power
     cmd_power.register(sub)

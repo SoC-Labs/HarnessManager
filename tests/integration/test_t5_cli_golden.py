@@ -323,11 +323,12 @@ def test_every_verb_has_a_success_and_a_failure_case():
     # panel and identify (P1) need a panel adapter: pinned in test_p1_cli.py.
     # kit (KIT-CORE) needs the fixture kit and a state dir: pinned in test_kit_cli.py.
     # xvc (XVC-CORE) needs a fake XVC server: pinned in test_xvc_cli.py.
+    # harness (HARNESS-CAT) needs a signed channel: pinned in test_hcat_cli.py.
     pinned_elsewhere = {"daemon", "ui", "app", "pty", "baud", "lease", "lease requests",
                         "lease respond", "lease leave", "lease dismiss", "share", "xdc",
                         "xdc info", "panel show", "panel mirror", "identify", "kit",
                         "kit list", "kit guide", "xvc", "xvc tcl", "xvc ltx"} | {
-        k for k in TSV_COLUMNS if k.startswith(("update ", "power "))}
+        k for k in TSV_COLUMNS if k.startswith(("update ", "power ", "harness "))}
     assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS) - pinned_elsewhere
 
 

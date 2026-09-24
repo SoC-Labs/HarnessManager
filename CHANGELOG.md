@@ -90,6 +90,13 @@ owners.
   `boards.toml`: `harness-manager power show`, and a cold `power cycle`.
 - Signed updates of the harness and the app (`harness-manager update`). The channel is
   not live yet: it refuses every release until the release keys are made.
+- Harness versions: `harness-manager harness list|show|fetch|install|pin|unpin|history|
+  rollback|mirror` (and the `/harness` API) lists every release of the board's harness
+  catalogue with a verdict for the board (fits, re-key, needs Debug USB or hub,
+  incompatible) and what it would change, installs a chosen version, pins a board to a
+  release, keeps each board's last 20 installs, and rolls back to the release the last
+  install replaced. A board behind a hub is installed on only by the lease holder.
+  `update` still works as before.
 - Boards behind a lab hub: `via = "ssh:HOST"` in `boards.toml`, or `--via ssh:HOST`,
   reaches the board through one supervised SSH tunnel (consoles, programming, debug).
   The MCC and FPGA UART lanes work over the hub's serial shares. `harness-manager lease`
