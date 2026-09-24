@@ -37,6 +37,11 @@ STORAGE_BACKUP = "storage_backup"
 STORAGE_INSTALL = "storage_install"
 DISCOVER_NETWORK = "discover_network"
 POWER_CYCLE = "power_cycle"
+# The front panel (lane P1, docs/design/CLCD_ALIGNMENT.md §5). NOT "identify": that is
+# "Identify the harness" above. The UI word for LOCATE is "Identify".
+FRONT_PANEL = "front_panel"   # read the panel's state and its mirror
+LOCATE = "locate"             # show which board this is (blink the panel)
+PRESENCE = "presence"         # tell the board who is connected (hello)
 
 
 @dataclass(frozen=True)
