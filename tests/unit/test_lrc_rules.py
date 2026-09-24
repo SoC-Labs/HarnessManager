@@ -52,6 +52,7 @@ def test_negative_twin_force_refusals_carry_the_reason_and_the_code():
         assert err is not None and err.code == code and words in err.message, (words, err)
     early = h.force_refusal(view(deadline_in=+95), NOW, T)
     assert early.data["time_left_s"] == 95 and early.data["request_id"] == "r1"
+    assert "opens at the deadline" in early.hint
     kept = h.force_refusal(view(answer={"answer": "keep", "minutes": 15, "message": "",
                                         "at": iso(NOW - 60)}), NOW, T)
     assert kept.data["time_left_s"] == 14 * 60 and "14:00" in kept.message

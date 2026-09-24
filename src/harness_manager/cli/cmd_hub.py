@@ -233,6 +233,8 @@ def force_refusal(view: dict[str, Any], now: float, target: str) -> HarnessError
     if now < deadline:
         err = UnavailableError("lease_force", f"{holder} has {fmt_left(deadline - now)} left to "
                                               f"answer the request (until {req['deadline_at']})")
+        err.hint = ("force-release opens at the deadline if there is still no answer and "
+                    "you are at the head of the queue")
         err.data = {"request_id": rid, "deadline_at": req["deadline_at"],  # type: ignore[attr-defined]
                     "time_left_s": round(deadline - now)}
         return err
