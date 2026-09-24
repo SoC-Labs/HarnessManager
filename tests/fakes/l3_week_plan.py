@@ -79,6 +79,12 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/boards/{bid}/xdc"),
         ("POST", "/boards/{bid}/xdc/export"),
     ),
+    # P1: served in the mock by tests/fakes/p1_mock_panel.py (a simulated panel per board).
+    "panel_api": (
+        ("GET", "/boards/{bid}/panel"),
+        ("GET", "/boards/{bid}/panel/frame"),
+        ("POST", "/boards/{bid}/identify"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles

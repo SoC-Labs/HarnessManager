@@ -381,6 +381,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # T10's XDC routes (docs/API.md "XDC export"): the real xdc service, the mock's boards.
     from .t10_mock_xdc import register as register_xdc
     register_xdc(app, state, _ok)
+    # P1's front-panel routes (docs/API.md "Front panel"): a simulated panel per demo board.
+    from .p1_mock_panel import PanelSim
+    from .p1_mock_panel import register as register_panel
+    app.state.panel = PanelSim(eng)
+    register_panel(app, state, app.state.panel, _ok)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)

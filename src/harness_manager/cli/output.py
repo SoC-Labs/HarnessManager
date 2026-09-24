@@ -82,6 +82,11 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "lease leave": ("TARGET", "HUB", "LEFT"),
     "lease dismiss": ("TARGET", "HUB", "DISMISSED"),
     "share": ("TARGET", "HUB", "TTY", "TCP", "WRITER", "READERS", "RUNNING"),
+    # P1: the front panel (cli/cmd_panel.py)
+    "panel show": ("BOARD_ID", "SOURCE", "PAGE", "OWNER", "BANNER", "CARD", "SESSIONS", "SEQ",
+                   "TOUCH", "IDENTIFY", "REASON"),
+    "panel mirror": ("BOARD_ID", "ROW", "TEXT", "ROLES", "SOURCE"),
+    "identify": ("BOARD_ID", "SECONDS", "UNTIL"),
     "help": ("TAB", "LINE", "TEXT"),
 }
 

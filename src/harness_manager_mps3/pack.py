@@ -25,6 +25,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.hub:relay_share_consoles(endpoints, cand)`` | L1   | the endpoints, each ``hub://`` share as a ``tcp://`` relay |
 | ``.naming:name_candidate(candidate)``          | N1   | the candidate with its display name (boards.toml, harness, hub table) |
 | ``.naming:session_board_name(session, ident)`` | N1   | ``(name, source)``: the hub's confirmed name for an open board |
+| ``.panel:make_panel_adapter(session)``         | P2   | ``session.panel``: the front panel (``core.panel.PanelAdapter``) |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -206,6 +207,7 @@ class Mps3Session(BoardSession):
             ("power", "telemetry", "make_power_adapter"),
             ("clocks", "clock", "make_clock_adapter"),
             ("hub", "hub", "make_hub_adapter"),              # L1: leases and shares
+            ("panel", "panel", "make_panel_adapter"),        # P2: the front panel (CLCD)
         ):
             make = _hook(module, factory)
             if make is not None:

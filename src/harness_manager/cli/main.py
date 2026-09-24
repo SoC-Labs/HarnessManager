@@ -324,6 +324,10 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_xdc
     cmd_xdc.register(sub)
     verbs["xdc"] = sub.choices["xdc"]
+
+    # -- panel / identify (P1: the board's front panel) ------------------------------------
+    from . import cmd_panel
+    verbs.update(cmd_panel.register(sub))
     return p
 
 

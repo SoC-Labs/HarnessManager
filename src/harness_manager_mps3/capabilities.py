@@ -19,6 +19,11 @@ from harness_manager.core.capabilities import CapabilitySpec, via
 from harness_manager.core.model import LinkKind as L
 
 NEEDS_USB = "needs the Debug USB cable"
+#: The front panel's reasons (P2). Bare metal keeps its panel as it is (decision P3).
+NEEDS_PANEL = ("needs the Ethernet link and harness firmware with 'panel' (Linux harness) "
+               "or 'clcd_kvm'")
+NEEDS_LOCATE = "needs harness feature 'locate' (Linux harness)"
+NEEDS_PRESENCE = "needs harness feature 'presence' (Linux harness)"
 
 SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.IDENTIFY, "Identify the harness", (via(L.ETHERNET), via(L.HUB))),
@@ -71,6 +76,19 @@ SPECS: tuple[CapabilitySpec, ...] = (
     # "dut_egress not present", which the lab verb reports as such).
     CapabilitySpec("mps3.dut_egress", "Read frames the DUT transmitted",
                    (via(L.ETHERNET), via(L.HUB))),
+    # The front panel (lane P1/P2, docs/design/CLCD_ALIGNMENT.md §5.2). The Linux harness
+    # reports 'panel'/'presence'/'locate'; bare metal (v0.11) falls back to the KVM owner
+    # ('clcd_kvm') with a mirror rebuilt from what Harness Manager read.
+    CapabilitySpec(C.FRONT_PANEL, "Front panel (LCD) state",
+                   (via(L.ETHERNET, features=("panel",)), via(L.HUB, features=("panel",)),
+                    via(L.ETHERNET, features=("clcd_kvm",)), via(L.HUB, features=("clcd_kvm",))),
+                   needs_hint=NEEDS_PANEL),
+    CapabilitySpec(C.LOCATE, "Identify: blink this board's panel",
+                   (via(L.ETHERNET, features=("locate",)), via(L.HUB, features=("locate",))),
+                   needs_hint=NEEDS_LOCATE),
+    CapabilitySpec(C.PRESENCE, "Show who is connected on the panel",
+                   (via(L.ETHERNET, features=("presence",)), via(L.HUB, features=("presence",))),
+                   needs_hint=NEEDS_PRESENCE),
 )
 
 #: What each harness state means, and what to do about it. ``shell.py`` puts these

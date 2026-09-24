@@ -320,9 +320,10 @@ def test_every_verb_has_a_success_and_a_failure_case():
     # pty and baud (L2) need a real PTY and a virtual board: pinned in test_l2_cli.py.
     # lease and share (L1, LR-C) talk to a hub: pinned in test_l1_cli.py and test_lrc_cli.py.
     # xdc (T10) needs the board pack's pin model: pinned in test_t10_cli.py.
+    # panel and identify (P1) need a panel adapter: pinned in test_p1_cli.py.
     pinned_elsewhere = {"daemon", "ui", "app", "pty", "baud", "lease", "lease requests",
                         "lease respond", "lease leave", "lease dismiss", "share", "xdc",
-                        "xdc info"} | {
+                        "xdc info", "panel show", "panel mirror", "identify"} | {
         k for k in TSV_COLUMNS if k.startswith(("update ", "power "))}
     assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS) - pinned_elsewhere
 

@@ -1,0 +1,462 @@
+"""The MPS3 front panel (CLCD) as ``session.panel`` (lane P2). ``make_panel_adapter(session)``
+is the hook ``pack.py`` calls.
+
+docs/design/CLCD_ALIGNMENT.md §2, §5.2, §5.3 is the wire; ``harness_manager.core.panel`` is
+the model. Two harness generations, told apart by feature bit (``version.features``):
+
+| Features | ``state()`` | ``frame()`` | ``hello()`` | ``locate()`` |
+|---|---|---|---|---|
+| ``panel`` (Linux harness, R2) | the ``panel`` verb | ``panel`` ``frame:"a"`` + ``"b"`` | ``presence`` (R1): the ``hello`` verb | ``locate`` (R3) |
+| ``clcd_kvm`` only (bare metal, v0.11) | ``display`` query: the owner only | REBUILT from what HM read | UNAVAILABLE, with the reason | UNAVAILABLE, with the reason |
+| neither | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
+
+Bare metal keeps its panel exactly as it is (decision P3): nothing here sends it a new verb.
+A board without ``locate`` never gets a ``display`` toggle as a stand-in: that would disturb
+a DUT that owns the panel.
+
+**Touch health** comes from the additive ``stats`` keys ``touch_ok``, ``touch_bus_lost`` and
+``touch_recoveries`` (both engines, Linux lead 2026-09-24), read on the same connection as
+the state when the harness reports ``stats``. An absent key is unknown, never "ok".
+
+**Riding.** A hello goes on connections Harness Manager makes anyway (decision P1):
+``offer(hello, on_reply)`` arms it, and the next ``Mps3Shell.call_raw`` on this session, for
+whatever reason, sends it first on the same connection. When nothing else talks to the board
+the presence service sends it itself (``hello``). Arming is the only way a ride happens, and
+only a board that reports ``presence`` is ever armed, so every other board's connections are
+untouched. The ride is installed by wrapping this session's ``shell.call_raw`` (CCR PANEL-3
+asks for an explicit ``Mps3Shell`` preamble hook instead).
+
+**One codec, until R1-R3 land in pyverify.** ``hello``, ``panel`` and ``locate`` have no
+``ShellClient`` method yet, so they go through pyverify's own request framing
+(``ShellClient._request``: its transport, its reply validation) with the op this module
+builds. The FakeShell profile in ``tests/fakes/clcd_panel_shell.py`` answers them exactly as
+the design's wire says. ``stats`` uses ``ShellClient.stats()`` when the installed pyverify has
+it. CCR PANEL-4 (to the Linux lead): ``ShellClient.hello/panel/locate`` + FakeShell ``_op_*``.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
+
+from harness_manager.core import capabilities as C
+from harness_manager.core.errors import UnavailableError
+from harness_manager.core.model import BoardIdentity
+from harness_manager.core.panel import (
+    COLS,
+    LINE_MAX,
+    REBUILT_NOTE,
+    ROLE_INVERTED,
+    ROLE_TEXT,
+    ROWS,
+    SOURCE_PANEL,
+    SOURCE_REBUILT,
+    WHO_MAX,
+    Hello,
+    OnReply,
+    PanelEvent,
+    PanelFrame,
+    PanelSession,
+    PanelState,
+    PanelSupport,
+    ascii_field,
+    encode_hello,
+    hello_message,
+    order_sessions,
+    touch_health,
+)
+
+from .capabilities import NEEDS_LOCATE, NEEDS_PANEL, NEEDS_PRESENCE
+from .shell import _ShellBusy
+
+log = logging.getLogger(__name__)
+
+#: How long the harness's feature list is trusted before it is read again.
+FEATURES_TTL_S = 300.0
+#: A frame comes in two halves (rows 0-7, then 8-14): a whole frame with its roles is about
+#: 1.25 KB, at the harness's 1280 B reply limit (docs/design §2.5).
+FRAME_HALVES = (("a", 0, 8), ("b", 8, ROWS))
+LOCATE_MAX_S = 30
+
+
+def _request(client: Any, msg: dict[str, Any]) -> dict[str, Any]:
+    """One request through pyverify's framing (see the module docstring)."""
+    return client._request(msg)
+
+
+def _stats(client: Any, tap: Any) -> dict[str, Any] | None:
+    """The ``stats`` reply as a dict (the additive touch keys are read from it)."""
+    ask = getattr(client, "stats", None)
+    try:
+        if callable(ask):
+            resp = ask()
+            raw = getattr(resp, "raw", None)
+            reply = dict(raw) if isinstance(raw, dict) and raw else dict(getattr(tap, "last", {}))
+        else:
+            reply = _request(client, {"op": "stats"})
+    except (TimeoutError, OSError):
+        raise
+    except Exception as exc:  # noqa: BLE001 - touch health is optional; never fail the state
+        log.debug("stats for touch health failed: %s", exc)
+        return None
+    return reply if reply.get("ok") else None
+
+
+def _declined(reply: dict[str, Any], capability: str, what: str) -> UnavailableError | None:
+    """The harness said no. "unknown op" means it lacks the verb despite the feature bit."""
+    if reply.get("ok"):
+        return None
+    err = str(reply.get("err") or "no reason given")
+    return UnavailableError(capability, f"the harness declined {what}: {err}")
+
+
+def _events(raw: Any, wall: float) -> tuple[PanelEvent, ...]:
+    out = []
+    for e in raw if isinstance(raw, list) else ():
+        if not isinstance(e, dict):
+            continue
+        seq, ms = e.get("seq"), e.get("ms_ago", 0)
+        if not isinstance(seq, int) or isinstance(seq, bool):
+            continue
+        ms = ms if isinstance(ms, int) and not isinstance(ms, bool) and ms >= 0 else 0
+        out.append(PanelEvent(seq=seq, kind=str(e.get("k") or "tap"), on=str(e.get("on") or ""),
+                              ms_ago=ms, at=wall - ms / 1000.0))
+    return tuple(sorted(out, key=lambda ev: ev.seq))
+
+
+def _sessions(raw: Any, mine: str = "") -> tuple[PanelSession, ...]:
+    out = []
+    for s in raw if isinstance(raw, list) else ():
+        if not isinstance(s, dict) or not s.get("sid"):
+            continue
+        age = s.get("age_s", 0)
+        age = float(age) if isinstance(age, (int, float)) and not isinstance(age, bool) else 0.0
+        sid = str(s["sid"])
+        out.append(PanelSession(sid=sid, who=str(s.get("who") or ""),
+                                role=str(s.get("role") or "watch"), age_s=age,
+                                mine=bool(mine) and sid == mine))
+    return order_sessions(out)
+
+
+def parse_state(reply: dict[str, Any], *, wall: float, stats: dict[str, Any] | None = None,
+                mine: str = "") -> PanelState:
+    """A ``panel`` reply (or a ``hello`` reply's ``panel`` object merged with its events)."""
+    sessions = _sessions(reply.get("sessions"), mine)
+    count = reply.get("count")
+    if not isinstance(count, int) or isinstance(count, bool):
+        count = len(sessions)
+    seq = reply.get("seq", 0)
+    return PanelState(
+        page=str(reply.get("page") or ""), owner=str(reply.get("owner") or ""),
+        pending=bool(reply.get("pending", False)), banner=str(reply.get("banner") or ""),
+        card=str(reply.get("card") or ""), touch=touch_health(stats, reply.get("touch")),
+        sessions=sessions, count=count,
+        seq=seq if isinstance(seq, int) and not isinstance(seq, bool) else 0,
+        events=_events(reply.get("events"), wall), source=SOURCE_PANEL, observed_at=wall)
+
+
+def parse_hello_reply(reply: dict[str, Any], *, wall: float) -> PanelState:
+    """``{ok, sessions: N, panel: {...}, events: [...]}``: the count, the panel, the ring."""
+    panel = reply.get("panel") if isinstance(reply.get("panel"), dict) else {}
+    count = reply.get("sessions")
+    merged = {**panel, "events": reply.get("events"),
+              "count": count if isinstance(count, int) and not isinstance(count, bool) else 0}
+    merged.pop("sessions", None)
+    return parse_state(merged, wall=wall)
+
+
+# --- the rebuilt mirror (bare metal) ------------------------------------------------------
+
+
+def _row(text: str) -> str:
+    return text[:COLS].ljust(COLS)
+
+
+def _centred(text: str) -> str:
+    return _row(" " * ((COLS - len(text)) // 2) + text)
+
+
+def rebuilt_frame(*, name: str, identity: BoardIdentity | None, host: str, owner: str,
+                  wall: float) -> PanelFrame:
+    """Today's (v0.11) panel layout with only the facts Harness Manager read; ``?`` where it
+    does not know. It is labelled as rebuilt: it was not read from the glass."""
+    roles = [ROLE_TEXT * COLS for _ in range(ROWS)]
+    if owner == "dut":
+        # The KVM notice the harness leaves on the glass (clcd.c:543-553), rows 6-8 inverted.
+        rows = [" " * COLS] * ROWS
+        rows[0] = "-" * 11 + " nanoSoC harness " + "-" * 12
+        rows[6], rows[8] = _centred("DUT HAS THE DISPLAY"), _centred("PRESS  PB1  TO RETURN")
+        rows[14] = "-" * COLS
+        for r in (6, 7, 8):
+            roles[r] = ROLE_INVERTED * COLS
+    else:
+        ident = identity or BoardIdentity(board_type="mps3")
+        design = ident.rm_name or ident.rm_id or "?"
+        shell = ident.shell_id.upper().replace("0X", "0x") if ident.shell_id else "?"
+        rows = [
+            _row(f"{(name or 'MPS3').upper():<20}nanoSoC harness"),
+            "-" * COLS,
+            _row(f"DUT : {design}"),
+            _row("SWAP: ?"),
+            _row(f"SID : {shell}"),
+            _row(f"NET : {host or '?'}"),
+            _row("UP  : ?"),
+            _row("DUT : ?"),
+            _row("ICAP: ?"),
+            _row("CFG : ?"),
+            " " * COLS, " " * COLS, " " * COLS,
+            "-" * COLS,
+            _row("MAC ?"),
+        ]
+    return PanelFrame(rows=tuple(rows), roles="".join(roles), source=SOURCE_REBUILT,
+                      observed_at=wall, note=REBUILT_NOTE)
+
+
+# --- the adapter ---------------------------------------------------------------------------
+
+
+class Mps3Panel:
+    """``session.panel`` for an MPS3 with an Ethernet link to its shell."""
+
+    def __init__(self, session: Any, *, clock: Callable[[], float] = time.monotonic,
+                 wall: Callable[[], float] = time.time,
+                 features_ttl_s: float = FEATURES_TTL_S) -> None:
+        self._session = session
+        self._clock = clock
+        self._wall = wall
+        self._ttl = features_ttl_s
+        self._mu = threading.Lock()
+        self._ident: tuple[float, BoardIdentity] | None = None
+        self._forgot = False                 # the next identity is read live, not seeded
+        self._armed: tuple[Hello, OnReply] | None = None
+        self.rides = 0                       # hellos that rode another connection
+
+    # -- what this board can do -------------------------------------------------------------
+
+    @property
+    def _shell(self) -> Any:
+        return self._session.shell
+
+    def identity(self, *, fresh: bool = False) -> BoardIdentity:
+        """The harness's identity, cached ``features_ttl_s`` (features change only with the
+        firmware). The probe's identity seeds it, so opening a board costs no extra read."""
+        now = self._clock()
+        with self._mu:
+            cached = self._ident
+        if not fresh and cached is not None and now - cached[0] < self._ttl:
+            return cached[1]
+        if cached is None and not fresh and not self._forgot:
+            seed = getattr(self._session.candidate, "identity", None)
+            if seed is not None and seed.features:
+                with self._mu:
+                    self._ident = (now, seed)
+                return seed
+        ident = self._session.identity()
+        with self._mu:
+            self._ident = (now, ident)
+            self._forgot = False
+        return ident
+
+    def forget(self) -> None:
+        """Read the features again next time (the harness declined a verb it announced)."""
+        with self._mu:
+            self._ident = None
+            self._forgot = True
+
+    def _features(self) -> frozenset[str]:
+        return frozenset(self.identity().features)
+
+    def support(self) -> PanelSupport:
+        f = self._features()
+        panel = "panel" in f
+        return PanelSupport(
+            front_panel="" if panel or "clcd_kvm" in f else NEEDS_PANEL,
+            presence="" if "presence" in f else NEEDS_PRESENCE,
+            locate="" if "locate" in f else NEEDS_LOCATE,
+            source=SOURCE_PANEL if panel else SOURCE_REBUILT)
+
+    # -- reads ------------------------------------------------------------------------------
+
+    def state(self) -> PanelState:
+        f = self._features()
+        stats_too = "stats" in f
+        if "panel" in f:
+            def ask(c: Any, tap: Any) -> tuple[dict[str, Any], dict[str, Any] | None]:
+                reply = _request(c, {"op": "panel"})
+                return reply, (_stats(c, tap) if stats_too else None)
+
+            reply, stats = self._shell.call_raw(ask)
+            refusal = _declined(reply, C.FRONT_PANEL, "the panel read")
+            if refusal is not None:
+                self.forget()
+                raise refusal
+            return parse_state(reply, wall=self._wall(), stats=stats)
+        if "clcd_kvm" in f:
+            def ask_owner(c: Any, tap: Any) -> tuple[Any, dict[str, Any] | None]:
+                resp = c.display_owner()
+                return resp, (_stats(c, tap) if stats_too else None)
+
+            resp, stats = self._shell.call_raw(ask_owner)
+            if not resp.ok:
+                raise UnavailableError(C.FRONT_PANEL, f"the shell has no CLCD KVM ({resp.err})")
+            return PanelState(owner=str(resp.owner or ""), touch=touch_health(stats),
+                              source=SOURCE_REBUILT, observed_at=self._wall(), note=REBUILT_NOTE)
+        raise UnavailableError(C.FRONT_PANEL, NEEDS_PANEL)
+
+    def frame(self) -> PanelFrame:
+        f = self._features()
+        if "panel" in f:
+            return self._read_frame()
+        if "clcd_kvm" not in f:
+            raise UnavailableError(C.FRONT_PANEL, NEEDS_PANEL)
+        owner = self.state().owner
+        cand = self._session.candidate
+        return rebuilt_frame(name=getattr(cand, "name", ""), identity=self.identity(),
+                             host=self._shell.host, owner=owner, wall=self._wall())
+
+    def _read_frame(self) -> PanelFrame:
+        def ask(c: Any, _tap: Any) -> list[dict[str, Any]]:
+            out = []
+            for part, _r0, _r1 in FRAME_HALVES:
+                reply = _request(c, {"op": "panel", "frame": part})
+                out.append(reply)
+                if not reply.get("ok") or len(reply.get("rows") or ()) >= ROWS:
+                    break          # refused, or the harness sent the whole frame at once
+            return out
+
+        replies = self._shell.call_raw(ask)
+        for reply in replies:
+            refusal = _declined(reply, C.FRONT_PANEL, "the frame read")
+            if refusal is not None:
+                raise refusal
+        rows: list[str] = []
+        roles = ""
+        for reply in replies:
+            rows += [_row(str(r)) for r in reply.get("rows") or ()]
+            roles += str(reply.get("roles") or "")
+        if len(rows) != ROWS:
+            raise UnavailableError(C.FRONT_PANEL, f"the harness sent {len(rows)} rows, "
+                                                  f"not {ROWS}")
+        return PanelFrame(rows=tuple(rows), roles=roles if len(roles) == ROWS * COLS else "",
+                          source=SOURCE_PANEL, observed_at=self._wall())
+
+    # -- presence ---------------------------------------------------------------------------
+
+    def _presence(self) -> None:
+        if "presence" not in self._features():
+            raise UnavailableError(C.PRESENCE, NEEDS_PRESENCE)
+
+    def _send_hello(self, c: Any, hello: Hello) -> PanelState:
+        encode_hello(hello)                     # ValueError over LINE_MAX: never on the wire
+        reply = _request(c, hello_message(hello))
+        refusal = _declined(reply, C.PRESENCE, "the hello")
+        if refusal is not None:
+            self.forget()
+            raise refusal
+        return parse_hello_reply(reply, wall=self._wall())
+
+    def hello(self, hello: Hello) -> PanelState:
+        self._presence()
+        self.withdraw()                          # sent now: nothing left to ride
+        return self._shell.call_raw(lambda c, _tap: self._send_hello(c, hello))
+
+    def offer(self, hello: Hello, on_reply: OnReply) -> None:
+        """Arm ``hello`` for the next connection this session opens (see the docstring)."""
+        self._presence()
+        with self._mu:
+            self._armed = (hello, on_reply)
+
+    def withdraw(self) -> bool:
+        with self._mu:
+            armed, self._armed = self._armed, None
+        return armed is not None
+
+    def _take(self) -> tuple[Hello, OnReply] | None:
+        with self._mu:
+            armed, self._armed = self._armed, None
+        return armed
+
+    def ride(self, client: Any, _tap: Any) -> None:
+        """Send the armed hello, if any, on ``client``'s connection before its own requests.
+
+        Connection-level failures (busy, timeout, reset) are re-armed and re-raised: the
+        caller's own request would meet them too. Anything else is logged and the caller
+        goes on; the presence service sends the hello itself later.
+        """
+        armed = self._take()
+        if armed is None:
+            return
+        hello, on_reply = armed
+        try:
+            state = self._send_hello(client, hello)
+        except (TimeoutError, OSError, _ShellBusy):
+            self._rearm(armed)
+            raise
+        except Exception as exc:  # noqa: BLE001 - a hello never fails someone else's call
+            log.debug("a riding hello failed: %s", exc)
+            return
+        self.rides += 1
+        try:
+            on_reply(state)
+        except Exception:  # noqa: BLE001 - the listener's bug is not the caller's
+            log.exception("presence reply handler failed")
+
+    def _rearm(self, armed: tuple[Hello, OnReply]) -> None:
+        with self._mu:
+            if self._armed is None:
+                self._armed = armed
+
+    def install_ride(self, shell: Any) -> None:
+        """Wrap ``shell.call_raw`` so an armed hello rides the next connection (CCR PANEL-3)."""
+        original = shell.call_raw
+
+        def call_raw(fn: Callable[[Any, Any], Any]) -> Any:
+            with self._mu:
+                armed = self._armed is not None
+            if not armed:
+                return original(fn)
+
+            def first_hello(client: Any, tap: Any) -> Any:
+                self.ride(client, tap)
+                return fn(client, tap)
+
+            return original(first_hello)
+
+        shell.call_raw = call_raw
+
+    # -- Identify ---------------------------------------------------------------------------
+
+    def locate(self, seconds: int, who: str) -> float:
+        if "locate" not in self._features():
+            raise UnavailableError(C.LOCATE, NEEDS_LOCATE)
+        s = max(0, min(LOCATE_MAX_S, int(seconds)))
+        msg = {"op": "locate", "s": s}
+        if s and who:
+            msg["who"] = ascii_field(who, WHO_MAX)
+        reply = self._shell.call_raw(lambda c, _tap: _request(c, msg))
+        refusal = _declined(reply, C.LOCATE, "Identify")
+        if refusal is not None:
+            self.forget()
+            raise refusal
+        until_ms = reply.get("until_ms", s * 1000)
+        if not isinstance(until_ms, (int, float)) or isinstance(until_ms, bool):
+            until_ms = s * 1000
+        return self._wall() + max(0.0, float(until_ms)) / 1000.0
+
+
+def make_panel_adapter(session: Any) -> Mps3Panel | None:
+    """The pack hook: a panel adapter for a session with an Ethernet shell, else None."""
+    shell = getattr(session, "shell", None)
+    if shell is None:
+        return None
+    panel = Mps3Panel(session)
+    if callable(getattr(shell, "call_raw", None)):
+        panel.install_ride(shell)
+    return panel
+
+
+__all__ = ["LINE_MAX", "Mps3Panel", "make_panel_adapter", "parse_hello_reply", "parse_state",
+           "rebuilt_frame"]

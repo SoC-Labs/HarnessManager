@@ -16,6 +16,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `harness_manager.core.pack` (adapters) | `DeployAdapter`, `ConsoleAdapter`, `DebugAdapter`, `ResetAdapter`, `ClockAdapter`, `TelemetryAdapter`, `ControllerAdapter`, `StorageAdapter`, `PowerAdapter` (T9: `read`, `cycle_reason`, `power_cycle`); value types `OverlayRef`, `PreflightItem`, `DeployResult`, `BackupRecord`, `Progress`. |
 | `harness_manager.core.services` | The service protocols the front-ends consume: `Engine`, `ContentStore`, `DeployService`, `ConsoleBroker`/`ConsoleStream`, `DebugService`/`DebugStatus`, `TelemetryService`, `EngineConfig`. |
 | `harness_manager.core.transport` | `SerialPort` (the subset of `serial.Serial` used); `open_serial(url)` with the `serial://` (T3 registers it) and `fake://` (tests) schemes. |
+| `harness_manager.core.panel` (P1, additive) | The front panel: `Hello` (+ `HelloLease`, `HelloJob`) and `hello_message`/`encode_hello` with the field caps (printable ASCII, 256 B worst case, relative seconds); `PanelState`, `PanelSession`, `PanelEvent`, `TouchHealth`, `PanelFrame`, `PanelSupport`; the optional adapter `PanelAdapter` (`session.panel`, read with `getattr`: `support`, `state`, `frame`, `hello`, `locate`; optional `offer`/`withdraw` to ride a hello on the next connection). Capabilities `front_panel`, `locate`, `presence`. |
 | `harness_manager_mps3.pack` (lead-owned) | Adapter **hooks**: teams implement factories in their own modules (`deploy.make_deploy_adapter`, `mcc.make_controller_adapter`, `sd.make_storage_adapter`, `usb.probe_usb`, `usb.serial_console_endpoints`, `openocd.make_debug_adapter`, `telemetry.make_telemetry_adapter`, `telemetry.make_power_adapter`, `telemetry.with_config_links`), and `pack.py` wires them in when they exist. |
 
 ### Event topics (append-only)
@@ -42,6 +43,9 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `hub.event` `{type, ts, target, board, data}` | fpgahub pushed a lease or share event about the board's target or its physical board (T8; `data` is fpgahub's own payload, never a token) |
 | `hub.stream` `{state: connecting\|up\|down\|refused\|closed, detail, url, reconnects}` | the board's fpgahub event stream changed state (T8) |
 | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | harness-manager-daemon jobs and back-pressure (docs/API.md) |
+| `panel.state` `{page, owner, pending, banner, card, count, seq, source, touch, sessions}` | what the board's front panel shows changed (P1; `source`: panel \| rebuilt) |
+| `panel.tap` `{seq, kind, on, ms_ago, at, notify, request?}` | someone touched the panel; once per `seq`. `on: "request"` in the lease holder's Harness Manager carries `notify: "holder"` and the open request: a notice, never a release (P1, decision P2) |
+| `panel.locate` `{state: on\|off, until, seconds, who}` | Identify started or stopped on a board (P1) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
 

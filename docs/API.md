@@ -238,6 +238,33 @@ docs/XDC_EXPORT.md is the reference: the pin model, the design format, the kits 
 - **The board.** The kits come from the pin model, never from the board. The board routes need one fact from it, the static it runs: the identity it reported when probed, else one identity read under the board gate (409 HELD while a job runs). An RM kit for a board on another static fails the `static_id` check; with no static known it is a note.
 - **Errors:** 400 USAGE for a bad `kit`, `format`, `design` or `static_id` type, or a design of the other kind; 404 ABSENT for an unknown design, pack or shell, or a board that is not open; 422 UNAVAILABLE for a pack with no pin model.
 
+### Front panel: what it shows, presence and Identify (P1, `panel_api.py`)
+
+docs/design/CLCD_ALIGNMENT.md is the design (§2, §5). The Linux harness's verbs `hello`, `panel` and `locate` (lanes R1-R3) are not built yet; until they are, the MPS3 pack follows the design's wire and its FakeShell profile answers it.
+
+| Method and path | Returns |
+|---|---|
+| `GET /boards/{bid}/panel` | `{panel: PanelState or null, reason, identify: {available, reason, until}, support: {front_panel, presence, locate, source}, presence: {active, reason, sid, last_hello_at, sent, ridden, skipped, last_error, interval_s}}` |
+| `GET /boards/{bid}/panel/frame` | `{rows: [15 strings of 40], roles, source, observed_at, note}` |
+| `POST /boards/{bid}/identify` `{seconds?}` | `{until, seconds}`: the board blinks its panel until `until` (epoch seconds). `seconds` is 0-30 (default 10); 0 stops a blink. |
+
+- **`PanelState`:** `{page, owner, pending, banner, card, touch: {present, cal, ok, bus_lost, recoveries, reason}, sessions: [{sid, who, role, age_s, mine}], count, seq, events: [{seq, kind, on, ms_ago, at}], source, observed_at, note}`.
+  - `source` is `panel` (read from the panel: the Linux harness) or `rebuilt` (bare metal: the owner from `display`, everything else unknown; `note` says it was rebuilt from what Harness Manager read).
+  - `page` and `owner` are `""` when not known. `sessions` are ordered holder > owner > watch, most recent first; `mine` marks this Harness Manager's own.
+  - `touch.ok` is `false` with `reason` "touch unavailable (...)" when the harness's `stats` says `touch_ok: false`; every touch field is `null` when the harness did not say.
+- **`panel` is null** with `reason` when the board has no front panel Harness Manager can reach (a USB-only board, or a pack with no panel adapter).
+- **Identify on bare metal:** `identify.available` is false with the reason ("needs harness feature 'locate' (Linux harness)"); `POST /identify` is 422 UNAVAILABLE with the same reason, and nothing is sent to the board. A bad `seconds` is 400 USAGE, before the board.
+- **Gates:** all three go through the board gate: 409 HELD naming the job while one runs. `POST /identify` is short, not a job.
+- **Rate:** the board rate-limits reads, so `GET /panel` reuses an answer up to 1 s old and `GET /panel/frame` one up to 3 s old.
+- **The mirror:** `rows` are 15 strings of 40 characters; `roles` is 600 per-cell role codes (`t` text, `i` inverted in a rebuilt frame; the Linux renderer's codes otherwise), or `""` when not known.
+
+**Presence (no route).** For each board the daemon has open, it sends the board a `hello` every 30 s (every 10 s while a lease request or an Identify is open), first offered to the next control connection the daemon opens anyway. It is skipped while a job holds the board, except a lease job, which waits on the hub. The board lists a session for 90 s after its last hello, and keeps at most 4. A bare-metal board is never sent one; `presence.reason` says why. Closing the board stops the hellos.
+
+Events (docs/CONTRACTS.md):
+- `panel.state` when what the panel shows changes;
+- `panel.tap` once per tap on the glass (de-duplicated by `seq`). A tap `on: "request"` (the lease-request banner) carries `notify: "holder"` and `request: {id, by}` in the lease holder's own Harness Manager: it notifies the holder and never releases;
+- `panel.locate` when Identify starts or stops.
+
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)
 - **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.
 - **A name is display only.** It never keys a board: `board_id` does, and so do boards.toml tables, session locks and leases. A hub id is shown with `_` as `-` (`mps3_01` becomes `mps3-01`).
