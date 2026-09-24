@@ -253,7 +253,7 @@ A watcher's HM also knows the holder from `lease show`, so the badge survives wh
 
 ### 4.1 One source of truth
 
-`design/tokens.json`. The spike's draft is `docs/design/clcd/tokens.json`. It holds:
+`design/tokens.json` (built by lane P4 from the spike's draft, which it replaced; `tools/gen_tokens.py` generates from it). It holds:
 
 | Section | What it holds |
 |---|---|
@@ -449,7 +449,7 @@ Capability routes: `front_panel` via Ethernet/hub with feature `panel`, falling 
 | `today_apps.png`, `today_link_down.png`, `today_dut.png` | today's equivalents |
 | `aligned_status_if_bgr.png` | what an R/B swap would look like |
 | `glyph_*.png` | the proposed 8x16 status glyphs |
-| `tokens.json`, `source/` | the draft single source, and the fixtures with their provenance |
+| `source/` | the fixtures with their provenance (the draft `tokens.json` became `design/tokens.json`) |
 
 **Tests:** `tests/unit/test_clcd_mock.py`, 23 tests, all passing. They cover:
 - the tokens equal `app.css` in both themes, and the new family is exactly `held*`;

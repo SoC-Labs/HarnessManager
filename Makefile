@@ -1,6 +1,9 @@
 # SoC Labs Harness Manager: developer entry points.
 #   make venv    create .venv (Python 3.11) and install harness-manager + pyverify (editable)
-#   make check   lint + unit + integration (the gate every team runs before handing work back)
+#   make check   lint + tokens-check + unit + integration (the gate every team runs before
+#                handing work back)
+#   make tokens  regenerate tokens.css, design/generated/* from design/tokens.json
+#   make tokens-check  fail if they are stale, or app.css has colours of its own (in check)
 #   make web-deps  Playwright for the web UI browser tests (they skip without it)
 #   make hil     hardware-in-the-loop read-only tier (board window + lease only)
 #
@@ -40,7 +43,7 @@ RELEASE    = $(BIN)/python -m tools.release
 RELEASE_COMMON = $(if $(MIRROR),--mirror $(MIRROR)) $(if $(PUBLISH),--publish) $(RELEASE_ARGS)
 
 .PHONY: venv check lint test hil web-deps clean dist install-local smoke-install vendor-pyverify \
-	wheelhouse lock release release-harness release-promote
+	wheelhouse lock release release-harness release-promote tokens tokens-check
 
 venv: $(BIN)/harness-manager
 
@@ -57,14 +60,22 @@ web-deps: venv
 	$(BIN)/pip install -q --find-links vendor -e '.[webtest]'
 
 lint: venv
-	$(BIN)/ruff check src tests tools/release
+	$(BIN)/ruff check src tests tools/release tools/gen_tokens.py
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck scripts/*.sh; \
 	else echo "lint: shellcheck not found, scripts/*.sh not checked"; fi
 
 test: venv
 	$(BIN)/pytest -q
 
-check: lint test
+# Design tokens (decision P4): design/tokens.json is the one source; tools/gen_tokens.py
+# (stdlib only) writes the web UI's tokens.css and design/generated/{palette.json,clcd_palette.h}.
+tokens: venv
+	$(BIN)/python tools/gen_tokens.py
+
+tokens-check: venv
+	$(BIN)/python tools/gen_tokens.py --check
+
+check: lint tokens-check test
 	@echo "CHECK PASS"
 
 hil: venv

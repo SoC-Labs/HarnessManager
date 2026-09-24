@@ -2,10 +2,9 @@
 <html lang="en" data-theme="dark"><head><meta charset="utf-8">
 <title>CLCD alignment mock-up</title>
 <link rel="stylesheet" href="../../../src/harness_manager/web/static/css/fonts.css">
+<link rel="stylesheet" href="../../../src/harness_manager/web/static/css/tokens.css">
 <link rel="stylesheet" href="../../../src/harness_manager/web/static/css/app.css">
 <style>
-  :root[data-theme="dark"] { --held: #b69cf5; --held-soft: #1f1830;
-    --held-border: #45376a; }
   body { padding: 24px 28px; min-width: 1400px; }
   h1 { font-size: 20px; margin: 0 0 4px; } h2.sec { font-size: 15px; margin: 28px 0 10px; color: var(--text-2); }
   .cols { display: grid; grid-template-columns: 660px 660px 380px; gap: 22px; align-items: start; }
@@ -25,7 +24,7 @@
 <h1>MPS3 front panel and Harness Manager: one design language (spike)</h1>
 <p class="note">Lane CLCD-HM, 2026-09-24. Every panel image is 320x240 pixels drawn with the firmware's own 8x16 font and
 quantised to RGB565. "Today" is the real renderer's output (clcd.c via clcd_preview, feat/rm-ila-mint, v0.11).
-"Proposed" is built from docs/design/clcd/tokens.json. Proposed rows target the Linux harness only (DL4).</p>
+"Proposed" is built from design/tokens.json. Proposed rows target the Linux harness only (DL4).</p>
 
 <h2 class="sec">1. The status page, and the card that mirrors it</h2>
 <div class="cols">

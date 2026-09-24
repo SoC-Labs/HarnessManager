@@ -1,140 +1,16 @@
 /* SoC Labs Harness Manager: web UI styles.
 
    One accent colour. Neutral greys with a slight cool hue. Status colours are
-   reserved for state: ok, warn, err, and unk (UNCHECKED: a neutral warning that
-   is never drawn like OK). Light and dark follow prefers-color-scheme, and
-   <html data-theme="light|dark"> overrides it. */
+   reserved for state: ok, warn, err, unk (UNCHECKED: a neutral warning that
+   is never drawn like OK) and held (someone else has it). Light and dark follow
+   prefers-color-scheme, and <html data-theme="light|dark"> overrides it.
+
+   Every colour, font, radius and shadow is a token: css/tokens.css, generated from
+   design/tokens.json by tools/gen_tokens.py and loaded first by index.html. This file
+   only uses them (var(--name)); `make check` fails if it defines a colour of its own. */
 
 :root {
-  color-scheme: light;
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-
-  --bg: #f4f5f7;
-  --rail: #eceef2;
-  --surface: #ffffff;
-  --surface-2: #f7f8fa;
-  --hover: #f0f2f5;
-  --border: #e0e3e8;
-  --border-strong: #c9ced6;
-  --text: #191d23;
-  --text-2: #4b535f;
-  --text-3: #767e8a;
-
-  --accent: #2f5bd3;
-  --accent-hover: #2650c0;
-  --accent-soft: #e9eefb;
-  --accent-border: #bccbf2;
-  --accent-text: #2449b0;
-  --on-accent: #ffffff;
-  --on-err: #ffffff;
-
-  --ok: #1b7a48;
-  --ok-soft: #e7f4ec;
-  --ok-border: #b7dcc6;
-  --warn: #945800;
-  --warn-soft: #fcf1de;
-  --warn-border: #eed19e;
-  --err: #b1261d;
-  --err-soft: #fbeceb;
-  --err-border: #edbdb9;
-  --unk: #665d40;
-  --unk-soft: #f3f1e9;
-  --unk-border: #c7bd9b;
-
-  --term-bg: #fbfbfc;
-  --term-fg: #1f242b;
-  --term-cursor: #2f5bd3;
-  --term-selection: rgba(47, 91, 211, 0.22);
-
-  --ring: 0 0 0 3px rgba(47, 91, 211, 0.35);
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow-pop: 0 8px 28px rgba(16, 24, 40, 0.14);
-  --radius: 10px;
-  --radius-sm: 6px;
   --rail-w: 272px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #0f1216;
-    --rail: #0c0e12;
-    --surface: #161a20;
-    --surface-2: #1b2028;
-    --hover: #1f252e;
-    --border: #272d37;
-    --border-strong: #353d49;
-    --text: #e4e7ec;
-    --text-2: #a9b1bd;
-    --text-3: #7e8794;
-    --accent: #7d9cf4;
-    --accent-hover: #95aff7;
-    --accent-soft: #1b2440;
-    --accent-border: #2f3f6e;
-    --accent-text: #a8bcf8;
-    --on-accent: #0f1216;
-    --on-err: #0f1216;
-    --ok: #5cc68c;
-    --ok-soft: #122419;
-    --ok-border: #214a33;
-    --warn: #e8ad58;
-    --warn-soft: #291f11;
-    --warn-border: #574220;
-    --err: #f08b82;
-    --err-soft: #2b1616;
-    --err-border: #5a2a27;
-    --unk: #cbc19e;
-    --unk-soft: #22201a;
-    --unk-border: #4c4632;
-    --term-bg: #0c0f13;
-    --term-fg: #d9dde3;
-    --term-cursor: #7d9cf4;
-    --term-selection: rgba(125, 156, 244, 0.28);
-    --ring: 0 0 0 3px rgba(125, 156, 244, 0.45);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-pop: 0 10px 32px rgba(0, 0, 0, 0.5);
-  }
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #0f1216;
-  --rail: #0c0e12;
-  --surface: #161a20;
-  --surface-2: #1b2028;
-  --hover: #1f252e;
-  --border: #272d37;
-  --border-strong: #353d49;
-  --text: #e4e7ec;
-  --text-2: #a9b1bd;
-  --text-3: #7e8794;
-  --accent: #7d9cf4;
-  --accent-hover: #95aff7;
-  --accent-soft: #1b2440;
-  --accent-border: #2f3f6e;
-  --accent-text: #a8bcf8;
-  --on-accent: #0f1216;
-  --on-err: #0f1216;
-  --ok: #5cc68c;
-  --ok-soft: #122419;
-  --ok-border: #214a33;
-  --warn: #e8ad58;
-  --warn-soft: #291f11;
-  --warn-border: #574220;
-  --err: #f08b82;
-  --err-soft: #2b1616;
-  --err-border: #5a2a27;
-  --unk: #cbc19e;
-  --unk-soft: #22201a;
-  --unk-border: #4c4632;
-  --term-bg: #0c0f13;
-  --term-fg: #d9dde3;
-  --term-cursor: #7d9cf4;
-  --term-selection: rgba(125, 156, 244, 0.28);
-  --ring: 0 0 0 3px rgba(125, 156, 244, 0.45);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-pop: 0 10px 32px rgba(0, 0, 0, 0.5);
 }
 
 /* --- base ------------------------------------------------------------------------------ */
@@ -326,7 +202,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .section-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
 .section-tab .badge {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px;
-  display: inline-grid; place-items: center; background: var(--err); color: #fff;
+  display: inline-grid; place-items: center; background: var(--err); color: var(--on-badge);
 }
 
 .section-body {
@@ -663,7 +539,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .ports dd { margin: 0; min-width: 0; }
 
 .modal-back {
-  position: fixed; inset: 0; background: rgba(10, 12, 16, 0.45); display: grid; place-items: center;
+  position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center;
   z-index: 20; padding: 24px;
 }
 .modal {

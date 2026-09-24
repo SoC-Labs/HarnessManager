@@ -8,8 +8,10 @@ firmware's own 8x16 font, from two sources:
   ``docs/design/clcd/source/``. Colours are the firmware's only three: white text,
   black background, red on an inverted row (clcd.c:65-67, :911-913).
 - **proposed**: frames built here from a board state, with colour roles resolved
-  from ``docs/design/clcd/tokens.json`` (the proposed single source of truth) and
-  quantised to RGB565 exactly as the panel stores them.
+  from ``design/tokens.json`` (the single source of truth, decision P4) and quantised
+  to RGB565 exactly as the panel stores them. The token and RGB565 code is
+  ``tools/gen_tokens.py``'s, which also generates the web UI's ``tokens.css`` and the
+  panel's ``clcd_palette.h`` from the same file.
 
 It also holds the proposed presence model (``hello`` line, session table, the
 panel's ``hm`` row), so the mock-up's session row comes from code a test checks.
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import importlib.util
 import json
 import re
 import struct
@@ -37,9 +40,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DESIGN = ROOT / "docs" / "design" / "clcd"
-TOKENS_PATH = DESIGN / "tokens.json"
+TOKENS_PATH = ROOT / "design" / "tokens.json"
 FONT_PATH = DESIGN / "source" / "font8x16.json"
 APP_CSS = ROOT / "src" / "harness_manager" / "web" / "static" / "css" / "app.css"
+#: The web UI's token stylesheet, generated from TOKENS_PATH (tools/gen_tokens.py).
+TOKENS_CSS = ROOT / "src" / "harness_manager" / "web" / "static" / "css" / "tokens.css"
 ICONS_JS = ROOT / "src" / "harness_manager" / "web" / "static" / "vendor" / "lucide" / "icons.js"
 
 COLS, ROWS = 40, 15
@@ -97,69 +102,42 @@ def load_font(path: Path = FONT_PATH) -> dict[str, list[int]]:
     return font
 
 
-# --- tokens and RGB565 -------------------------------------------------------------------
+# --- tokens and RGB565 (tools/gen_tokens.py owns them) --------------------------------------
+
+
+def _gen_tokens():
+    """``tools/gen_tokens.py``, loaded by path (this is a script, not a package)."""
+    if "gen_tokens" not in sys.modules:
+        spec = importlib.util.spec_from_file_location("gen_tokens", Path(__file__).with_name("gen_tokens.py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["gen_tokens"] = mod
+        spec.loader.exec_module(mod)
+    return sys.modules["gen_tokens"]
+
+
+_GT = _gen_tokens()
+rgb565, rgb565_hex, resolve, panel_palette = _GT.rgb565, _GT.rgb565_hex, _GT.resolve, _GT.panel_palette
+css_block = _GT.css_block
 
 
 def load_tokens(path: Path = TOKENS_PATH) -> dict:
-    return json.loads(path.read_text())
-
-
-def _rgb(hexs: str) -> tuple[int, int, int]:
-    h = hexs.lstrip("#")
-    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-
-
-def rgb565(hexs: str) -> int:
-    """#rrggbb -> the panel's 16-bit word (rounded, not truncated)."""
-    r, g, b = _rgb(hexs)
-    return (round(r * 31 / 255) << 11) | (round(g * 63 / 255) << 5) | round(b * 31 / 255)
-
-
-def rgb565_hex(v: int, *, bgr: bool = False) -> str:
-    """The colour a 16-bit word shows (5/6-bit fields expanded by bit replication).
-    ``bgr=True`` shows what an R<->B channel swap would put on the glass."""
-    r5, g6, b5 = (v >> 11) & 31, (v >> 5) & 63, v & 31
-    if bgr:
-        r5, b5 = b5, r5
-    r, g, b = (r5 << 3) | (r5 >> 2), (g6 << 2) | (g6 >> 4), (b5 << 3) | (b5 >> 2)
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-def resolve(tokens: dict, ref: str, theme: str = "dark") -> str:
-    """A role colour reference -> #rrggbb. ``"#ffffff"`` literal; ``"err"`` the theme's
-    token; ``"err@light"`` a named theme; ``"bg"`` honours the panel's ``bg_override``."""
-    if ref.startswith("#"):
-        return ref
-    name, _, want = ref.partition("@")
-    if name == "bg" and not want and tokens["panel"].get("bg_override"):
-        return tokens["panel"]["bg_override"]
-    return tokens["color"][name][want or theme]
-
-
-def panel_palette(tokens: dict) -> dict[str, tuple[int, int]]:
-    """role -> (fg565, bg565), in the panel's theme."""
-    theme = tokens["panel"]["theme"]
-    return {role: (rgb565(resolve(tokens, spec["fg"], theme)), rgb565(resolve(tokens, spec["bg"], theme)))
-            for role, spec in tokens["panel"]["roles"].items()}
+    return _GT.load_tokens(path)
 
 
 #: Today's firmware palette: white on black, white on red for an inverted row.
 TODAY = {"text": (0xFFFF, 0x0000), "inv": (0xFFFF, 0xF800)}
 
 
-def css_block(tokens: dict, theme: str) -> dict[str, str]:
-    """The ``--name: value`` pairs the web UI's CSS would be generated from."""
-    return {f"--{name}": vals[theme] for name, vals in tokens["color"].items()}
-
-
 def app_css_values(css: str) -> dict[str, dict[str, str]]:
-    """The colour custom properties of app.css: light (``:root``) and dark
-    (``:root[data-theme="dark"]``)."""
+    """The custom properties the web UI's stylesheet sets (``tokens.css``, generated):
+    light (``:root``), dark by ``prefers-color-scheme`` (``media-dark``) and dark by
+    ``data-theme`` (``dark``)."""
     def block(selector: str) -> dict[str, str]:
         i = css.index(selector)
         body = css[css.index("{", i) + 1:css.index("}", i)]
-        return dict(re.findall(r"(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;", body))
-    return {"light": block(":root {"), "dark": block(':root[data-theme="dark"] {')}
+        return {k: v.strip() for k, v in re.findall(r"(--[a-z0-9-]+):\s*([^;]+);", body)}
+    return {"light": block(":root {"), "media-dark": block(':root:not([data-theme="light"]) {'),
+            "dark": block(':root[data-theme="dark"] {')}
 
 
 # --- frames and pixels -------------------------------------------------------------------
@@ -598,10 +576,9 @@ def build(out: Path = DESIGN, *, now: float = 1_000_000.0) -> dict[str, Path]:
 <html lang="en" data-theme="dark"><head><meta charset="utf-8">
 <title>CLCD alignment mock-up</title>
 <link rel="stylesheet" href="../../../src/harness_manager/web/static/css/fonts.css">
+<link rel="stylesheet" href="../../../src/harness_manager/web/static/css/tokens.css">
 <link rel="stylesheet" href="../../../src/harness_manager/web/static/css/app.css">
 <style>
-  :root[data-theme="dark"] {{ --held: {tokens['color']['held']['dark']}; --held-soft: {tokens['color']['held-soft']['dark']};
-    --held-border: {tokens['color']['held-border']['dark']}; }}
   body {{ padding: 24px 28px; min-width: 1400px; }}
   h1 {{ font-size: 20px; margin: 0 0 4px; }} h2.sec {{ font-size: 15px; margin: 28px 0 10px; color: var(--text-2); }}
   .cols {{ display: grid; grid-template-columns: 660px 660px 380px; gap: 22px; align-items: start; }}
@@ -621,7 +598,7 @@ def build(out: Path = DESIGN, *, now: float = 1_000_000.0) -> dict[str, Path]:
 <h1>MPS3 front panel and Harness Manager: one design language (spike)</h1>
 <p class="note">Lane CLCD-HM, 2026-09-24. Every panel image is 320x240 pixels drawn with the firmware's own 8x16 font and
 quantised to RGB565. "Today" is the real renderer's output (clcd.c via clcd_preview, feat/rm-ila-mint, v0.11).
-"Proposed" is built from docs/design/clcd/tokens.json. Proposed rows target the Linux harness only (DL4).</p>
+"Proposed" is built from design/tokens.json. Proposed rows target the Linux harness only (DL4).</p>
 
 <h2 class="sec">1. The status page, and the card that mirrors it</h2>
 <div class="cols">

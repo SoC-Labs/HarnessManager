@@ -32,25 +32,29 @@ NOW = 1_000_000.0
 
 
 def test_tokens_equal_the_web_ui_css_today():
-    """tokens.json's colours ARE app.css's: a generator fed from it would change nothing."""
+    """design/tokens.json's values ARE the web UI's: the stylesheet it generates (tokens.css,
+    which index.html loads before app.css) sets exactly them, in all three theme blocks.
+    tools/gen_tokens.py --check (make check, tests/unit/test_p4_tokens.py) keeps app.css
+    from defining colours of its own."""
     tokens = M.load_tokens()
-    css = M.app_css_values(M.APP_CSS.read_text())
-    for theme in ("light", "dark"):
-        want = {k: v.lower() for k, v in css[theme].items()}
-        got = {k: v.lower() for k, v in M.css_block(tokens, theme).items()}
-        new = {f"--{n}" for n, v in tokens["color"].items() if v.get("new")}
-        shared = set(got) - new
-        assert shared <= set(want), f"tokens not in app.css ({theme}): {sorted(shared - set(want))}"
-        assert {k: got[k] for k in shared} == {k: want[k] for k in shared}
+    css = M.app_css_values(M.TOKENS_CSS.read_text())
+    for block, theme in (("light", "light"), ("media-dark", "dark"), ("dark", "dark")):
+        want = M.css_block(tokens, theme)
+        if theme == "light":
+            want.update({f"--{n}": v for n, v in tokens["static"].items()})
+        assert css[block] == want, block
 
 
-def test_new_tokens_are_not_in_app_css_yet():
-    """'held' is the proposal's one new colour family (CCR CLCD-2 adds it to app.css)."""
+def test_the_held_family_is_in_the_web_ui_css():
+    """'held' (decision P6: someone else has it) is the one new colour family; app.css
+    itself defines no token (they are all in tokens.css)."""
     tokens = M.load_tokens()
-    css = M.app_css_values(M.APP_CSS.read_text())
-    new = {f"--{n}" for n, v in tokens["color"].items() if v.get("new")}
-    assert new == {"--held", "--held-soft", "--held-border"}
-    assert not new & set(css["dark"])
+    css = M.app_css_values(M.TOKENS_CSS.read_text())
+    held = ("held", "held-soft", "held-border")
+    for block, theme in (("light", "light"), ("media-dark", "dark"), ("dark", "dark")):
+        assert {f"--{n}": tokens["color"][n][theme] for n in held}.items() <= css[block].items()
+    assert tokens["color"]["held"] == {"light": "#6b3fc4", "dark": "#b69cf5"}
+    assert "--held" not in M.APP_CSS.read_text()
 
 
 def test_every_panel_role_resolves_and_every_grammar_state_has_a_colour():
