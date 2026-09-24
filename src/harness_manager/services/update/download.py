@@ -32,12 +32,18 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from harness_manager import __version__
 from harness_manager.core.errors import RefusedError, UnavailableError, UnreachableError
 
 from .schema import ACCESS_TOKEN, Asset
+
+
+def _file_path(url_path: str) -> Path:
+    """A ``file://`` URL's path as a local path. ``url2pathname`` unquotes it and, on
+    Windows, turns ``/C:/x`` into ``C:\\x`` (``Path("/C:/x")`` is not a valid path there)."""
+    return Path(urllib.request.url2pathname(url_path))
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +110,7 @@ class Downloader:
         parts = _split(url)
         what = what or url
         if parts.scheme == "file":
-            path = Path(unquote(parts.path))
+            path = _file_path(parts.path)
             try:
                 size = path.stat().st_size
                 if size > max_bytes:
@@ -171,7 +177,7 @@ class Downloader:
             token = self.token
         part = self.cache / "partial" / f"{asset.sha256}.part"
         if parts.scheme == "file":
-            self._copy_file(Path(unquote(parts.path)), part, asset, progress)
+            self._copy_file(_file_path(parts.path), part, asset, progress)
         else:
             self._http(url, parts.hostname or "", headers, token, part, asset, progress)
         return self._finish(part, asset)
