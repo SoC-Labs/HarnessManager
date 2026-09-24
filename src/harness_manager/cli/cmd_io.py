@@ -22,6 +22,7 @@ from harness_manager.core.errors import (
     ExitCode,
     HarnessError,
     UnavailableError,
+    UnreachableError,
     UsageError,
 )
 from harness_manager.core.services import DebugStatus
@@ -76,13 +77,31 @@ def cmd_console(ctx: Ctx) -> int:
     return ExitCode.OK
 
 
+#: A console that is not up this long after the start gets a note on stderr (Q2).
+NOT_UP_NOTE_S = 3.0
+
+
 def _pump(ctx: Ctx, stream) -> str:
-    """Stream the console until Ctrl-C/SIGTERM or ``--for`` elapses. Returns what was read."""
+    """Stream the console until Ctrl-C/SIGTERM or ``--for`` elapses. Returns what was read.
+
+    A console that never connected is an error, not an empty success: ``--json console
+    X uart0 --for 5`` against a board whose console port refused printed ``ok: true``
+    with ``text: ""``, which reads as "the DUT said nothing" (Q2, 2026-09-24).
+    """
     name = ctx.args.name
     collected = bytearray()
     pending = b""
+    state = getattr(stream, "state", "up")
+    ever_up = state == "up"
+    noted = False
+    started = time.monotonic()
     with Stopper(ctx.args.for_s) as stopper:
         while not stopper.done:
+            state = getattr(stream, "state", "up")
+            ever_up = ever_up or state == "up"
+            if not ever_up and not noted and time.monotonic() - started >= NOT_UP_NOTE_S:
+                ctx.note(f"console {name}: {state}; not connected yet (Ctrl-C stops)")
+                noted = True
             left = stopper.remaining()
             chunk = stream.read(timeout=READ_SLICE_S if left is None else min(READ_SLICE_S, left))
             if not chunk:
@@ -100,6 +119,11 @@ def _pump(ctx: Ctx, stream) -> str:
     if ctx.fmt == "tsv" and pending:
         sys.stdout.write(tsv_line("console", [name, pending.decode("utf-8", "replace")]) + "\n")
         sys.stdout.flush()
+    if not ever_up and not collected:
+        raise UnreachableError(
+            f"console {name} never connected (it stayed {state})",
+            hint="is the board up and its harness serving the console? "
+                 "`harness-manager info TARGET` says")
     return collected.decode("utf-8", "replace")
 
 

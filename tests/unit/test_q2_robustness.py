@@ -654,3 +654,37 @@ def test_a_deploy_whose_board_closed_before_the_job_ran_sends_nothing(tmp_path, 
                     assert j["state"] == "done", j
         finally:
             eng.close_all()
+
+
+# --- `console --for` that never connected is an error, not an empty success -----------------
+
+
+def test_a_console_that_never_connected_fails_instead_of_returning_empty_text(capsys,
+                                                                             monkeypatch):
+    from harness_manager.cli import cmd_io
+    from harness_manager.cli.main import main
+
+    monkeypatch.setattr(cmd_io, "NOT_UP_NOTE_S", 0.2)
+    rc = main(["--json", "console", "127.0.0.1:1", "uart0", "--for", "1"])   # refused
+    out, err = capsys.readouterr()
+    assert rc == 7, out
+    body = json.loads(out)
+    assert body["ok"] is False and "never connected" in body["error"]["message"]
+    assert "not connected yet" in err                   # said while it waited
+
+
+def test_negative_twin_a_console_that_connects_returns_what_it_read(capsys, tmp_path):
+    from harness_manager.cli.engine import set_engine_factory
+    from harness_manager.cli.main import main
+    from tests.fakes.t13_daemon import engine_for
+    from tests.fakes.virtual_board import VirtualMps3
+
+    with VirtualMps3(tmp_path) as vb:
+        previous = set_engine_factory(lambda _args: engine_for(vb))
+        try:
+            rc = main(["--json", "console", vb.shell_endpoint, "uart0", "--for", "1"])
+        finally:
+            set_engine_factory(previous)
+    out, _ = capsys.readouterr()
+    assert rc == 0, out
+    assert "nanosoc boot" in json.loads(out)["text"]
