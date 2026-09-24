@@ -48,10 +48,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # python3 is 3.6 on EL8: the installer must pick python3.12 on its own.
+          # python3 is 3.6 on EL8: the installer must pick python3.12 on its own. The
+          # image's expat is older than python3.12's pyexpat needs (ensurepip then fails:
+          # "undefined symbol: XML_SetBillionLaughs..."), and dnf install updates it.
           - name: Rocky Linux 8 (python3 is 3.6; python3.12 alongside)
             image: rockylinux/rockylinux:8
-            prereq: dnf install -y python3 python3.12 python3.12-pip git tar
+            prereq: dnf install -y python3 python3.12 expat git tar
           # python3 is 3.9 on EL9: too old; python3.12 is an AppStream package.
           - name: Rocky Linux 9 (python3.12)
             image: rockylinux/rockylinux:9
@@ -90,13 +92,15 @@ jobs:
             if command -v dnf >/dev/null; then dnf install -y curl; else apt-get install -y curl; fi
           fi
           curl --version | head -n 1
+      - uses: actions/checkout@v4
       - name: uv (the user's one-liner; no root)
         if: matrix.uv
         shell: bash
-        # Not through $GITHUB_PATH: in a container job it replaces the image's PATH for
-        # later action steps (run 35993990472: actions/checkout then found no git or tar).
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-      - uses: actions/checkout@v4
+        # uv's installer adds its bin dir to $GITHUB_PATH when it sees one. In a container
+        # job that REPLACES the image's PATH for later action steps (these images set no
+        # PATH): run 36006058809's checkout then found no git or tar. So: no $GITHUB_PATH,
+        # and uv after the checkout; the smoke step puts ~/.local/bin on PATH itself.
+        run: curl -LsSf https://astral.sh/uv/install.sh | env -u GITHUB_PATH UV_NO_MODIFY_PATH=1 sh
       - name: Install, run the demo UI, upgrade, uninstall (scripts/smoke_install.sh)
         shell: bash
         run: |

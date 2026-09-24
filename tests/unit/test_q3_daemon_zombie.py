@@ -8,6 +8,8 @@ stops, it stays a zombie, and ``os.kill(pid, 0)`` still succeeds on a zombie. So
 because install.sh stops the service first.
 
 Here the test process plays that PID 1: it starts a stand-in daemon and never reaps it.
+Linux sees the zombie in /proc; macOS and the BSDs through ``ps`` (CI's macOS run: a
+SIGTERMed daemon stayed a zombie of the test, and ``daemon stop`` said "did not stop").
 """
 
 from __future__ import annotations
@@ -26,8 +28,7 @@ from harness_manager.core.session import pid_alive
 from harness_manager.daemon import control
 from harness_manager.daemon.state import DaemonInfo, write_info
 
-pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                reason="zombies are visible through /proc on Linux")
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="Windows has no zombies to see")
 
 FAKE_DAEMON = textwrap.dedent("""
     import http.server, json, os, threading
@@ -57,7 +58,12 @@ FAKE_DAEMON = textwrap.dedent("""
 
 
 def _state(proc: subprocess.Popen) -> str:
-    return Path(f"/proc/{proc.pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    """The process state letter: /proc on Linux, ``ps`` on macOS and the BSDs."""
+    if sys.platform.startswith("linux"):
+        return Path(f"/proc/{proc.pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    out = subprocess.run(["ps", "-o", "stat=", "-p", str(proc.pid)], capture_output=True,
+                         text=True).stdout.strip()
+    return out[:1]
 
 
 def _wait_zombie(proc: subprocess.Popen, timeout: float = 10.0) -> None:
@@ -117,4 +123,22 @@ def test_a_leftover_daemon_json_naming_a_zombie_is_stale(tmp_path: Path):
         assert control.running(state) is None
         assert control.stop(state, timeout=1.0) == "stale-removed"
     finally:
+        child.wait()
+
+
+def test_the_ps_fallback_sees_a_zombie(monkeypatch):
+    # macOS and the BSDs have no /proc: _zombie asks `ps -o stat=`. Linux's ps answers
+    # the same question, so the fallback is checked here too.
+    from harness_manager.core import session
+
+    monkeypatch.setattr(session.sys, "platform", "darwin")
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    alive = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        _wait_zombie(child)
+        assert session._zombie_by_ps(child.pid) is True
+        assert session._zombie_by_ps(alive.pid) is False     # twin: a running process
+    finally:
+        alive.kill()
+        alive.wait()
         child.wait()

@@ -310,7 +310,7 @@ def _tool_dir(where: Path, *, python3_version: str | None) -> str:
     """A PATH with the basic tools and no Python >= 3.10 (and no uv)."""
     where.mkdir()
     tools = ("bash sh env uname id mkdir dirname basename cat sed grep mktemp tar rm sleep tr "
-             "head readlink mv chmod cp ln rmdir").split()
+             "head readlink mv chmod cp ln rmdir cut").split()
     for tool in tools:
         found = shutil.which(tool, path="/usr/bin:/bin")
         if found:
@@ -448,7 +448,7 @@ def test_negative_twin_upgrade_stops_when_the_service_really_runs(box: Box, whee
 ])
 def test_a_python_that_cannot_make_a_venv_names_the_package(box: Box, wheelhouse: Path,
                                                              tmp_path: Path, distro, want):
-    # CI run 35993990472: Rocky 8's python3.12 without python3.12-pip, told to apt install.
+    # CI run 35993990472: Rocky 8's python3.12 could not make a venv and was told to apt install.
     path = _tool_dir(tmp_path / "tools", python3_version=None)
     fake = Path(path) / "python3.12"
     fake.write_text('#!/bin/sh\ncase "$*" in\n'
@@ -467,3 +467,34 @@ def test_a_python_that_cannot_make_a_venv_names_the_package(box: Box, wheelhouse
     assert want in res.stderr, res.stderr
     assert "ensurepip returned non-zero" in res.stderr       # the tool's own error, too
     assert not box.venv.exists()
+
+
+def test_rhel8_old_expat_is_named_as_the_cause(box: Box, wheelhouse: Path, tmp_path: Path):
+    # CI run 36006058809, reproduced in a Rocky 8 rootfs: the image's expat 2.2.5 is older
+    # than python3.12's pyexpat needs, so ensurepip fails inside `python3.12 -m venv`, which
+    # hides why. The installer makes a venv without pip, runs ensurepip itself, and says so.
+    path = _tool_dir(tmp_path / "tools", python3_version=None)
+    err = ("ImportError: /usr/lib64/python3.12/lib-dynload/pyexpat.cpython-312-x86_64-linux-gnu"
+           ".so: undefined symbol: XML_SetBillionLaughsAttackProtectionMaximumAmplification")
+    probe_python = (f'#!/bin/sh\necho "Traceback (most recent call last):" >&2\n'
+                    f'echo "{err}" >&2\n'
+                    'echo "subprocess.CalledProcessError: Command returned 1." >&2\nexit 1\n')
+    fake = Path(path) / "python3.12"
+    fake.write_text('#!/bin/sh\ncase "$*" in\n'
+                    '  *print*sys.version_info*) echo 3.12 ;;\n'
+                    '  *sys.version_info*) exit 0 ;;\n'
+                    '  *python_version*) echo 3.12.14 ;;\n'
+                    '  *"--without-pip"*) d="$4"; mkdir -p "$d/bin";'
+                    f" printf '%s' '{probe_python}' > \"$d/bin/python\";"
+                    ' chmod 755 "$d/bin/python" ;;\n'
+                    '  *"-m venv"*) echo "Error: Command ensurepip returned non-zero exit status 1." >&2;'
+                    ' exit 1 ;;\nesac\n')
+    fake.chmod(0o755)
+    osr = tmp_path / "os-release"
+    osr.write_text('ID="rocky"\nID_LIKE="rhel centos fedora"\nVERSION_ID="8.10"\n')
+    res = box.run("--offline", str(wheelhouse), "--no-uv",
+                  env=box.env(path=path, HARNESS_MANAGER_OS_RELEASE=str(osr)), check=False)
+    assert res.returncode == 1
+    assert f"install.sh: the cause: {err}" in res.stderr, res.stderr
+    assert "Update expat: sudo dnf upgrade expat, then run this again." in res.stderr
+    assert "CalledProcessError" not in res.stderr.split("the cause:")[1]

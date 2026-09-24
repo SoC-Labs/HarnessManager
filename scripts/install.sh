@@ -329,8 +329,8 @@ python_hint() {
         case " $id $like " in
             *" fedora "*)
                 if [[ "$id" == fedora ]]; then say "  Fedora: sudo dnf install python3"
-                else say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12 python3.12-pip"; fi ;;
-            *" rhel "*|*" centos "*) say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12 python3.12-pip" ;;
+                else say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12 expat"; fi ;;
+            *" rhel "*|*" centos "*) say "  RHEL, Rocky, Alma 8 or 9: sudo dnf install python3.12 expat" ;;
             *" debian "*|*" ubuntu "*)
                 say "  Debian 12, Ubuntu 22.04 or newer: sudo apt install python3 python3-venv"
                 say "  (older releases have no Python $MIN_PY package: use uv, below)" ;;
@@ -342,8 +342,20 @@ python_hint() {
     say "  then open a new terminal and run this installer again (uv downloads a Python)."
 }
 
+# Why this Python's venv has no pip: venv hides ensurepip's own error, so make a venv
+# without pip and run ensurepip in it. Prints the first error line, or nothing.
+venv_cause() {
+    rm -rf "$work/probe"
+    "$1" -m venv --without-pip "$work/probe" >/dev/null 2>&1 || return 0
+    if "$work/probe/bin/python" -m ensurepip --default-pip >"$work/ensurepip.out" 2>&1; then
+        return 0
+    fi
+    { grep -E '^[A-Za-z.]*(Error|Exception): ' "$work/ensurepip.out" \
+        | grep -v 'CalledProcessError' | head -n 1 | cut -c 1-300; } || true
+}
+
 # What gives this Python its venv and pip on this system, from /etc/os-release.
-venv_hint() {
+venv_hint() {  # PYTHON [CAUSE]
     local osr="${HARNESS_MANAGER_OS_RELEASE:-/etc/os-release}" id="" like="" xy
     xy="$("$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
     [[ -n "$xy" ]] || xy=3
@@ -351,6 +363,19 @@ venv_hint() {
         id="$(sed -n 's/^ID=//p' "$osr" | tr -d '"' | head -n 1)"
         like="$(sed -n 's/^ID_LIKE=//p' "$osr" | tr -d '"' | head -n 1)"
     fi
+    # RHEL 8's python3.12 needs a newer libexpat than an un-updated system has (pip then
+    # fails to import pyexpat: "undefined symbol: XML_SetBillionLaughs..."), and its
+    # package does not ask for one.
+    case "${2:-}" in
+        *pyexpat*|*XML_*)
+            case " $id $like " in
+                *" debian "*|*" ubuntu "*) printf 'Update expat: sudo apt install --only-upgrade libexpat1' ;;
+                *" fedora "*|*" rhel "*|*" centos "*) printf 'Update expat: sudo dnf upgrade expat' ;;
+                *) printf "Update the system's expat library (libexpat)" ;;
+            esac
+            printf ', then run this again.'
+            return 0 ;;
+    esac
     case " $id $like " in
         *" debian "*|*" ubuntu "*) printf 'Install it: sudo apt install python%s-venv' "$xy" ;;
         *" fedora "*|*" rhel "*|*" centos "*)
@@ -415,7 +440,9 @@ needs $MIN_PY or newer"
         "$base" -m venv "$venv" 2>"$work/venv.err" || {
             cat "$work/venv.err" >&2
             rm -rf "$venv"
-            die "$base could not make a venv with pip in it. $(venv_hint "$base")"
+            cause="$(venv_cause "$base" || true)"
+            if [[ -n "$cause" ]]; then note "the cause: $cause"; fi
+            die "$base could not make a venv with pip in it. $(venv_hint "$base" "$cause")"
         }
     fi
     say "venv     $venv ($(py_version "$venv/bin/python"))"

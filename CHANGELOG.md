@@ -29,7 +29,9 @@ owners.
 - The installer finds a Python 3.10+ beside an older `python3` (RHEL 8's 3.6, Rocky 9's
   3.9), and when there is none it lists what it found and prints the package to install
   for your distribution, or the uv one-liner. When a Python cannot make a venv, it
-  names that distribution's package (`python3.X-venv`, `python3.X-pip`).
+  shows the real cause, which venv hides, and names the fix: `python3.X-venv`, or on
+  RHEL 8 `sudo dnf upgrade expat`, because python3.12 needs a newer expat than an
+  un-updated system has.
 - The installer is safe to run twice at once (the second stops and names the first),
   safe to interrupt (a re-run resumes), checks it can write before it starts, refuses
   `sudo`, keeps your extras and menu choice across upgrades, explains a missing network

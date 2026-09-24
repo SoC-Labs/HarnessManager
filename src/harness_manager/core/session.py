@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,16 +74,31 @@ def _zombie(pid: int) -> bool:
     app window) is such a zombie from the moment it exits until that front-end polls
     it, and counting it as alive made ``daemon stop`` wait, signal it, then report
     it "did not stop"; a new daemon then refused to start (Q2, 2026-09-24).
-    Linux reads ``/proc/<pid>/stat``; elsewhere this cannot tell, and says no.
+    Linux reads ``/proc/<pid>/stat``. macOS and the BSDs ask ``ps`` (install lane Q3:
+    CI's macOS run left a SIGTERMed daemon a zombie of the test that started it, and
+    ``daemon stop`` reported "did not stop"). Windows cannot tell, and says no.
     """
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
     except OSError:
-        return False
+        return _zombie_by_ps(pid)
     try:
         return stat.rsplit(")", 1)[1].split()[0] == "Z"
     except IndexError:
         return False
+
+
+def _zombie_by_ps(pid: int) -> bool:
+    if os.name == "nt" or sys.platform.startswith("linux"):
+        return False          # Linux without /proc for it: gone, or cannot tell
+    import subprocess
+
+    try:
+        res = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                             text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return res.returncode == 0 and res.stdout.strip().startswith("Z")
 
 
 #: Public name (T4-6): other modules need the same Windows-safe liveness check.
