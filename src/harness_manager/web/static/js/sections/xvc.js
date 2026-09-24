@@ -344,7 +344,7 @@ export function XvcCard({ bid }) {
           <dt>Design</dt><dd data-testid="xvc-design">${design.name || design.id
             ? html`${design.name || "unnamed"} ${design.id ? html`<span class="mono sub">${design.id}</span>` : null}`
             : html`<span class="muted">-</span>`}</dd>
-          ${st.detail && !held && !x.swap ? html`<dt>Status</dt><dd class="small" data-testid="xvc-detail">${st.detail}</dd>` : null}
+          ${st.detail && !held && !x.swap && !x.reattached ? html`<dt>Status</dt><dd class="small" data-testid="xvc-detail">${st.detail}</dd>` : null}
           <dt>Vivado</dt><dd data-testid="xvc-url">${st.open && st.url
             ? html`<span class="copy-row"><code>${st.url}</code><${CopyButton} text=${st.url} /></span>
               <div class="sub">${st.mode === "byo" ? "your hw_server: open_hw_target -xvc_url" : "Harness Manager's hw_server: connect_hw_server -url"}</div>`

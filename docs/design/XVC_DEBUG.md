@@ -22,7 +22,8 @@ Sources are cited as `repo:path:line`. The prefixes mean:
 - **hw_server.** HM runs its own hw_server by default:
   - on a fixed port per board;
   - with `-p0`;
-  - with no `-d` and no `-I`.
+  - with no `-d` and no `-I`;
+  - with the XVC cable only (lane XVC-UI): `auto-open-servers` names the one xilinx-xvc server (the default `*` opens every local USB cable type) and `jtag-port-filter Xilinx/XVC/127.0.0.1:<R>` hides any other cable a client opens later. Evidence: `docs/assessment/xvc_ui_2026-09-25/hw_server_cable_filter.txt`; unverified against a physical USB cable until the board window.
 
   After every swap HM restarts it. This replaces the 20 s linger wait (up to 40 s) with a restart that takes a few seconds.
 - **Probes files.** HM serves the matching `.ltx` for the RM that is loaded (and, on Linux, the static MIG file). It also serves a ready-made Vivado Tcl snippet.

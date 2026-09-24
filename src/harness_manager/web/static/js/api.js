@@ -95,10 +95,10 @@ export const ADDITIVE = Object.freeze([]);
 // Topics the UI follows (docs/CONTRACTS.md). console.line is left out on purpose:
 // console bytes arrive on each console's own socket, so a line is never shown twice.
 export const EVENT_TOPICS = [
-  "xvc.state",                         // XVC-UI: the Debug section's XVC card
   "board.*", "session.*", "deploy.*", "console.state", "console.pty", "debug.*",
   "controller.*", "storage.*", "update.*", "power.*", "lease.*", "tunnel.*", "job.*", "events.*",
   "panel.*",                           // P3 PANEL-UI: panel.state, panel.tap, panel.locate
+  "xvc.*",                             // XVC-UI: xvc.state, the Debug section's XVC card
 ];
 
 const TOKEN_KEY = "harness_manager.token";

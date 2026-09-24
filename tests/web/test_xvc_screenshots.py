@@ -54,7 +54,8 @@ def test_review_xvc_attached(page_factory, daemon, engine, review, scheme):
     button(page, "xvc_open").click()
     state_is(page, "ready")
     sim(daemon).attach(BOARD, command="hw_server -q -p0 -s TCP:127.0.0.1:23601 "
-                                      "-e set auto-open-servers xilinx-xvc:127.0.0.1:23600")
+                                      "-e set auto-open-servers xilinx-xvc:127.0.0.1:23600 "
+                                      "-e set jtag-port-filter Xilinx/XVC/127.0.0.1:23600")
     state_is(page, "attached")
     expect(by_id(page, "xvc-unauth")).to_be_visible()
     expect(by_id(page, "xvc-ltx")).to_contain_text("nanosoc_ila.ltx")
