@@ -9,6 +9,10 @@ no hw_server runs). The status objects are the real ``XvcStatus`` and the Tcl th
 Knobs (``XvcSim``): ``hold_slot(bid, who)`` makes the board's slot held by someone else,
 ``attach(bid)`` pretends Vivado attached, ``ltx_body`` is the probes file served.
 Behind a hub (``WeekPlanSim.behind_hub``), ``open`` is for the lease holder only.
+Lane XVC-UI adds ``slot_taken(bid, who)`` (an open session loses the board's slot to
+another client: ``held``), ``stage_full(bid)`` (the mint staged a full-design file, X5,
+which is then preferred) and the static (MIG) file: a Linux harness has one, a bare-metal
+one says why not (``static_note``, the MPS3 pack's words).
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ API = "/api/v1"
 WHICH = ("auto", "rm", "static", "full")
 JTAGBB_REASON = ("2542 on this image drives jtag_bb (the Identify path), not the Debug Bridge: "
                  "no ILAs to debug over XVC")          # harness_manager_mps3.xvc.JTAGBB_REASON
+NO_MIG_NOTE = "the bare-metal static has no MIG debug hub"  # harness_manager_mps3.xvc.NO_MIG_NOTE
 
 
 class XvcSim:
@@ -52,6 +57,7 @@ class XvcSim:
         self._lock = threading.Lock()
         self.sessions: dict[str, dict[str, Any]] = {}
         self.held_by: dict[str, str] = {}
+        self.full: set[str] = set()            # boards whose mint staged a full-design .ltx
         self.ltx_body = b'{"probes": [{"name": "ila_0", "type": "ila"}]}\n'
         self.engine.bus.subscribe("deploy.started", self._swap_started)
         self.engine.bus.subscribe("deploy.done", self._swap_done)
@@ -61,6 +67,16 @@ class XvcSim:
 
     def hold_slot(self, bid: str, who: str = "a hub user's Vivado") -> None:
         self.held_by[bid] = who
+
+    def slot_taken(self, bid: str, who: str = "a hub user's Vivado") -> None:
+        """An open session loses the board's slot, and another client has it now."""
+        if self._set(bid, state="held", slot="held", attached=None,
+                     detail=f"the board's slot is held: accepted, then closed ({who})"):
+            self._publish(bid)
+
+    def stage_full(self, bid: str) -> None:
+        """The mint staged a full-design probes file for the loaded design (X5)."""
+        self.full.add(bid)
 
     def attach(self, bid: str, command: str = "hw_server -q -p0") -> None:
         with self._lock:
@@ -95,12 +111,21 @@ class XvcSim:
     def ltx(self, bid: str) -> dict[str, Any]:
         ident = self._ident(bid)
         name = getattr(ident, "rm_name", "") or ""
+        linux = getattr(ident, "harness_impl", "") == "linux"
+        static = ({"path": "/tmp/harness-manager-mock/config_rm_greybox_static.ltx",
+                   "name": "config_rm_greybox_static.ltx", "crc_ok": None, "source": "mock",
+                   "vivado": "2026.1"} if linux else None)
+        static_note = "" if linux else NO_MIG_NOTE
         if not name or getattr(ident, "rm_id", "") in ("", "0x00000000"):
-            return {"rm": None, "static": None, "full": None, "preferred": None,
-                    "note": "the greybox has no ILAs"}
+            return {"rm": None, "static": static, "full": None, "preferred": None,
+                    "note": "the greybox has no ILAs", "static_note": static_note}
         rm = {"path": f"/tmp/harness-manager-mock/{name}.ltx", "name": f"{name}.ltx",
               "crc_ok": True, "source": "mock", "vivado": "2024.1"}
-        return {"rm": rm, "static": None, "full": None, "preferred": "rm", "note": ""}
+        full = ({"path": f"/tmp/harness-manager-mock/{name}_full.ltx",
+                 "name": f"{name}_full.ltx", "crc_ok": None, "source": "mock",
+                 "vivado": "2024.1"} if bid in self.full else None)
+        return {"rm": rm, "static": static, "full": full, "preferred": "full" if full else "rm",
+                "note": "", "static_note": static_note}
 
     # -- status ------------------------------------------------------------------------------
 

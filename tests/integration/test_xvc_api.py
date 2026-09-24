@@ -137,6 +137,28 @@ def test_open_is_refused_before_any_job_on_a_harness_without_xvc_dbgbr(tmp_path,
             assert fake.stats.connections == 0
 
 
+def test_an_engine_without_an_xvc_service_is_unavailable_not_an_internal_error():
+    """XVC-UI: the demo engine (the GUI's, and the web tests' real daemon) has no XVC
+    service. Every XVC route says so with 422 UNAVAILABLE, which the card shows as a reason,
+    instead of 500 "this is a bug". The twin: the real engine above answers 200."""
+    from harness_manager.demo import BOARD_FIELDED, DemoEngine
+
+    eng = DemoEngine(speed=0.02)
+    try:
+        with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as client:
+            cands = client.post("/api/v1/probe", json={}, headers=H).json()["candidates"]
+            cand = next(c for c in cands if c["board_id"] == BOARD_FIELDED)
+            assert client.post("/api/v1/boards", json={"candidate": cand}, headers=H).status_code == 200
+            for method, suffix in (("get", ""), ("get", "/tcl"), ("get", "/ltx"), ("post", "/open"),
+                                   ("post", "/close")):
+                r = getattr(client, method)(f"{bid_path(BOARD_FIELDED)}/xvc{suffix}", headers=H)
+                err = r.json()["error"]
+                assert r.status_code == 422 and err["code"] == ExitCode.UNAVAILABLE, (suffix, r.text)
+                assert "no XVC service" in err["message"]
+    finally:
+        eng.close_all()
+
+
 def test_negative_twin_open_is_held_while_a_job_runs_and_already_when_open(v011):
     client, eng, vb = v011
     bid = open_board(client, vb)

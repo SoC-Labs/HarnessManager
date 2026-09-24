@@ -37,7 +37,7 @@ from typing import Any
 from fastapi import Response
 
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import UsageError
+from harness_manager.core.errors import UnavailableError, UsageError
 
 from .app import _JSON, JsonBody, RouteContext, _bool, _obj, ok
 
@@ -61,7 +61,9 @@ def register(ctx: RouteContext) -> None:
     api = ctx.api
 
     def service() -> Any:
-        svc = d.engine.xvc
+        svc = getattr(d.engine, "xvc", None)
+        if svc is None:                                     # an engine without one (the demo)
+            raise UnavailableError(C.DEBUG_FABRIC, "this engine has no XVC service")
         # Share hub_api's lease service (one cache, one view of "mine"): X6.
         if getattr(svc, "leases", "absent") is None and getattr(d, "leases", None) is not None:
             svc.leases = d.leases

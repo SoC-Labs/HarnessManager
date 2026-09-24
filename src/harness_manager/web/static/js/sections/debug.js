@@ -1,10 +1,12 @@
-// Debug: Detect (IDCODE only), open and close the OpenOCD session, its ports and config.
+// Debug: Detect (IDCODE only), open and close the OpenOCD session, its ports and config;
+// below it the partition's fabric debug over XVC (sections/xvc.js, lane XVC-UI).
 
 import { panelState, runJob } from "../actions.js";
 import { call, unwrapDebug } from "../api.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, loadDebug } from "../store.js";
 import { ActionRow, Card, Chip, CopyButton, Reason, ResultBlock } from "../ui.js";
+import { XvcCard } from "./xvc.js";
 
 const LEVEL = { up: "ok", starting: "", down: "", failed: "err" };
 
@@ -71,7 +73,7 @@ export function DebugSection({ bid }) {
   const live = debugLive(bid);
   const { detect, up, down } = debugSpecs(bid);
   const gdbCmd = st.gdb_port ? `arm-none-eabi-gdb -ex 'target extended-remote :${st.gdb_port}'` : "";
-  return html`<div class="grid split">
+  return html`<div class="stack"><div class="grid split">
     <${Card} title="DUT debug (OpenOCD)" icon="bug" testid="debug-card"
         sub="Detect reads the TAP IDCODE only: no reset, no halt, no register written. Open starts OpenOCD with the config for the loaded design.">
       <div class="actions">
@@ -105,5 +107,6 @@ export function DebugSection({ bid }) {
       </dl>
       <div class="mt-14"><${Reason} text="The session closes by itself before a partition swap, and reopens only when you ask." /></div>
     <//>
-  </div>`;
+  </div>
+  <${XvcCard} bid=${bid} /></div>`;
 }
