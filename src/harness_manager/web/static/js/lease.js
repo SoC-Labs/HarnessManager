@@ -21,7 +21,7 @@ import { gateReason, interlock, panelState, runAction, runJob } from "./actions.
 import { call, routeMissing } from "./api.js";
 import { boardName, clock, hostOf } from "./format.js";
 import { html, useLayoutEffect, useRef, useState } from "./lib.js";
-import { changed, log, onBoardEvent, S } from "./store.js";
+import { changed, log, onBoardEvent, S, timed } from "./store.js";
 import { epochOf, loadHub, onHubLoaded, scheduleHub, week } from "./week.js";
 import { Icon, Reason, ResultBlock, Spinner } from "./ui.js";
 
@@ -107,6 +107,8 @@ const L = {
   resultDismissed: {},       // bid -> the startedAt of the request result the user closed
   answerDismissed: new Set(),
   zeroSeen: new Set(),       // request ids whose countdown this page saw reach zero
+  seenReq: {},               // bid -> {id, deadline_at}: the request as last read
+  reasked: {},               // bid -> {holder, deadline_at}: D9, a new holder was asked
 };
 
 // --- the requester -------------------------------------------------------------------------------
@@ -349,6 +351,9 @@ function RequestBar({ bid }) {
           : html`<span class="lease-fact muted"><${Spinner} /> joining the queue</span>`}
         ${clockText ? html`<span class="lease-fact">${clockText}</span>` : null}
       </div>
+      ${L.reasked[bid] && req ? html`<div class="lease-answer" data-testid="req-reasked">
+        <${Icon} name="refresh-cw" cls="sm" /><span><strong>${name} passed to ${L.reasked[bid].holder}</strong>, who had not
+        been asked: your request went to them, and a new 2:00 runs to ${clock(epochOf(req.deadline_at))}.</span></div>` : null}
       ${answer && answer.answer === "keep" ? html`<div class="lease-answer" data-testid="req-answer">
         <${Icon} name="clock" cls="sm" /><span><strong>${holder || "The holder"} is keeping it for ${answer.minutes} min</strong>${answer.message ? html`: ${quoted(answer.message)}` : null}
         ${keepLeft !== null ? (keepLeft > 0
@@ -516,10 +521,22 @@ function noteTaken(bid, t) {
   log("error", "lease", takenText(bid, t), bid);
 }
 
-function dismissTaken(bid, t) {
+// D11: DELETE .../lease/taken makes the daemon forget it (GET /lease then says taken: null).
+// The page also remembers the dismissal, so the banner goes at once, and stays gone over a
+// daemon without the route.
+async function dismissTaken(bid, t) {
   L.dismissedTaken[bid] = takenKey(t);
   remember(localStore(), DISMISSED_KEY, L.dismissedTaken);
   changed();
+  const r = await timed("lease taken dismiss", () => call("leaseTakenDismiss", { bid }));
+  if (r.error && routeMissing(r.error)) {
+    log("info", "lease", `${r.line}: this daemon keeps no dismissal; this browser remembers it`, bid);
+  } else if (r.error) {
+    log("warning", "lease", `${r.line}  ${r.error.errName}: ${r.error.message}`, bid);
+  } else {
+    log("info", "lease", `${r.line}  the force-release notice for ${leaseBoardName(bid)} is dismissed`, bid);
+    loadHub(bid);
+  }
 }
 
 function TakenBanner({ bid }) {
@@ -671,6 +688,22 @@ onBoardEvent((ev) => {
 
 onHubLoaded((bid, hub) => {
   if (hub && hub.taken) noteTaken(bid, hub.taken);
+  // D9: the same request with a later deadline means the board passed to someone who had
+  // not been asked; the daemon re-sent the request to them and the 2:00 start again.
+  const req = hub && hub.request;
+  const was = L.seenReq[bid];
+  if (!req) {
+    delete L.seenReq[bid];
+    delete L.reasked[bid];
+    return;
+  }
+  const later = was && was.id === req.id && (epochOf(req.deadline_at) || 0) > (epochOf(was.deadline_at) || 0) + 1;
+  if (later) {
+    const holder = (hub.lease && !hub.lease.mine && hub.lease.holder) || "the new holder";
+    L.reasked[bid] = { holder, deadline_at: req.deadline_at };
+    log("warning", "lease", `${leaseBoardName(bid)} passed to ${holder}, who had not been asked: your request went to them; force waits for the new deadline, ${clock(epochOf(req.deadline_at))}`, bid);
+  }
+  L.seenReq[bid] = { id: req.id, deadline_at: req.deadline_at };
 });
 
 // Once a second: re-render the countdowns; read the lease again the moment one reaches
@@ -690,7 +723,7 @@ setInterval(() => {
       const left = secondsTo(req.deadline_at);
       const keepEnd = keepUntil(req.answer);
       const due = (left !== null && left <= 0 && !req.answer) || (keepEnd !== null && keepEnd <= Date.now() / 1000);
-      const key = `${bid}|${req.id}|${req.answer ? "keep" : "wait"}`;
+      const key = `${bid}|${req.id}|${req.deadline_at}|${req.answer ? `keep ${req.answer.at}` : "wait"}`;
       if (due && !L.zeroSeen.has(key)) {
         L.zeroSeen.add(key);
         loadHub(bid);

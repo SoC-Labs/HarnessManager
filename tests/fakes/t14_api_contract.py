@@ -112,14 +112,22 @@ def api_md_endpoints() -> set[tuple[str, str]]:
 
 
 def parse_lease_requests_md(text: str) -> set[tuple[str, str]]:
-    """The routes of the "## API" table of docs/LEASE_REQUESTS.md (the four it adds)."""
+    """The routes docs/LEASE_REQUESTS.md adds: its "## API" table (the four), and any full
+    board route a row of its "## Decisions" table names (D11: ``DELETE
+    /boards/{bid}/lease/taken``). Shorthand in the prose (``GET /lease``) is not a route."""
     out: set[tuple[str, str]] = set()
-    in_api = False
+    section = ""
     for line in text.splitlines():
         if line.startswith("## "):
-            in_api = line.startswith("## API")
-        elif in_api and line.startswith("| `"):
+            section = "api" if line.startswith("## API") else (
+                "decisions" if line.startswith("## Decisions") else "")
+        elif section == "api" and line.startswith("| `"):
             out.update(_row_routes(line))
+        elif section == "decisions" and line.startswith("| D"):
+            for seg in _SEG.findall(line):
+                m = _CALL.match(seg)
+                if m and m.group(2).startswith("/boards/{"):
+                    out.add((m.group(1), normalise(m.group(2))))
     return out
 
 

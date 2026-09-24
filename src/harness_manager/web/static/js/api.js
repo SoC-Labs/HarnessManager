@@ -50,6 +50,7 @@ export const ENDPOINTS = Object.freeze({
   leaseRespond: ["POST", "/boards/{bid}/lease/respond"],
   leaseForce: ["POST", "/boards/{bid}/lease/force"],
   leaseLeave: ["DELETE", "/boards/{bid}/lease/queue"],
+  leaseTakenDismiss: ["DELETE", "/boards/{bid}/lease/taken"],      // D11
   power: ["GET", "/boards/{bid}/power"],
   powerCycle: ["POST", "/boards/{bid}/power/cycle"],
   updateCheck: ["POST", "/update/check"],

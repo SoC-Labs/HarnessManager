@@ -83,16 +83,21 @@ def test_the_mock_route_table_is_api_md_plus_lease_requests_md_plus_any_additive
     assert not additive & frozen_endpoints()
 
 
-def test_the_mock_serves_exactly_the_four_routes_lease_requests_md_adds():
-    four = {(m, normalise(p)) for m, p in LEASE_REQUEST_ROUTES}
-    assert four == lease_requests_md_endpoints()
-    assert len(four) == 4
-    # the twin: a fifth route in the doc's API table would not match
+def test_the_mock_serves_exactly_the_routes_lease_requests_md_adds():
+    added = {(m, normalise(p)) for m, p in LEASE_REQUEST_ROUTES}
+    assert added == lease_requests_md_endpoints()
+    assert ("DELETE", "/boards/{}/lease/taken") in added             # D11
+    assert len(added) == 5
+    # the twin: another route in the doc's API table, or named by a decision, would not match
     extra = "## API\n| `POST /boards/{bid}/lease/steal` | `{}` | 202 |\n"
-    assert parse_lease_requests_md(extra) - four == {("POST", "/boards/{}/lease/steal")}
-    # and a CLI row or an event row is not a route
+    assert parse_lease_requests_md(extra) - added == {("POST", "/boards/{}/lease/steal")}
+    decided = "## Decisions after\n| D12 | x | **`POST /boards/{bid}/lease/nudge`** → 200 |\n"
+    assert parse_lease_requests_md(decided) == {("POST", "/boards/{}/lease/nudge")}
+    # and a CLI row, an event row, a decision naming no route, or prose shorthand is not one
     assert parse_lease_requests_md("## API\n| `lease.wanted` | `{id}` | holder |\n"
-                                   "## CLI\n| `POST /x` | y |\n") == set()
+                                   "## CLI\n| `POST /x` | y |\n"
+                                   "## Decisions\n| D3 | x | `confirm` missing is 400 |\n"
+                                   "| D11 | x | `GET /lease` then says null |\n") == set()
 
 
 def landed_extensions() -> set[str]:
@@ -107,7 +112,7 @@ def test_the_mock_serves_each_extension_modules_routes_as_api_md_assigns_them():
     sections = api_md_sections()
     assert set(sections) == {"core", *EXTENSION_ROUTES}
     # LEASE_REQUESTS.md's routes belong to hub_api; they count on both sides, so this holds
-    # before and after the lead folds them into API.md.
+    # before and after the lead folds them into API.md (LR-C lists the four there; D11 next).
     four = lease_requests_md_endpoints()
     for module, routes in EXTENSION_ROUTES.items():
         mock = {(m, normalise(p)) for m, p in routes}

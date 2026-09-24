@@ -24,7 +24,10 @@ The scripted scenarios are knobs on ``LeaseRequestSim`` (``sim.requests`` on the
   notes off (no message reaches the holder, no Keep answer: ``notes_supported`` false), and
   ``revoke_reason = "why"`` is a token that cannot revoke (``can_revoke`` false: force is
   REFUSED whatever the clock says);
-- victim: ``taken(bid, by=..., reason=...)`` is another session force-releasing it.
+- victim: ``taken(bid, by=..., reason=...)`` is another session force-releasing it;
+  ``DELETE .../lease/taken`` forgets it (D11);
+- D9: ``new_holder(bid, principal)``: the lease passes to someone who was never asked, so
+  our note is re-sent to them with a fresh 120 s deadline.
 """
 
 from __future__ import annotations
@@ -50,12 +53,14 @@ from harness_manager.core.errors import (
 
 API = "/api/v1"
 
-#: The four routes docs/LEASE_REQUESTS.md adds (daemon module hub_api, lane LR-C).
+#: The routes docs/LEASE_REQUESTS.md adds (daemon module hub_api, lane LR-C): the four of
+#: its API table, and D11's dismiss of the victim's banner.
 LEASE_REQUEST_ROUTES: tuple[tuple[str, str], ...] = (
     ("POST", "/boards/{bid}/lease/request"),
     ("POST", "/boards/{bid}/lease/respond"),
     ("POST", "/boards/{bid}/lease/force"),
     ("DELETE", "/boards/{bid}/lease/queue"),
+    ("DELETE", "/boards/{bid}/lease/taken"),
 )
 
 WINDOW_S = 120                      # a request's deadline: created_at + 120 s
@@ -140,6 +145,9 @@ class LeaseRequestSim:
         deadline = self._deadline(req)
         if now < deadline:
             left = int(deadline - now + 0.999)
+            if req.get("reasked"):               # D9
+                return False, (f"{holder} was not asked until {iso(req['created'])[11:19]} UTC: "
+                               f"they have {left} s left to answer")
             return False, (f"{holder} has {left} s left to answer (until "
                            f"{iso(deadline)[11:19]} UTC)")
         until = self._keep_until(req)
@@ -188,6 +196,25 @@ class LeaseRequestSim:
     def set_board(self, bid: str, board: str) -> None:
         with self._lock:
             self.hub(bid)["board"] = board
+
+    def new_holder(self, bid: str, principal: str = "carol@lab-pc-09") -> None:
+        """D9: the lease passes to ``principal`` while we wait; they were never asked, so the
+        note goes to them with a fresh deadline (and force waits for it)."""
+        now = time.time()
+        with self._lock:
+            hub = self.hub(bid)
+            user, _ = _user_host(principal)
+            hub["lease"] = {"target": hub["target"], "holder": principal, "user": user,
+                            "expires_at": iso(now + 3600), "mine": False}
+            req = self.outgoing.get(bid)
+            if req is not None:
+                req.update(created=now, answer=None, force_published=False, reasked=True)
+        self.publish("lease.state", bid, {"target": hub["target"], "state": "queued",
+                                          "holder": me(), "expires_at": ""})
+
+    def dismiss_taken(self, bid: str) -> bool:
+        with self._lock:
+            return self.last_taken.pop(bid, None) is not None
 
     def clear_ahead(self, bid: str) -> None:
         with self._lock:
@@ -502,3 +529,8 @@ def register(app: FastAPI, state: Any, sim: LeaseRequestSim, ok: Any, accepted: 
         state.session(bid)
         sim.hub(bid)
         return ok(left=sim.leave(bid))
+
+    @app.delete(f"{API}/boards/{{bid}}/lease/taken")
+    def lease_taken_dismiss(bid: str) -> dict[str, Any]:
+        state.session(bid)                       # D11: GET /lease then says taken: null
+        return ok(dismissed=sim.dismiss_taken(bid))

@@ -371,6 +371,8 @@ def test_the_victim_banner_persists_across_a_reload_until_dismissed(page_factory
     expect(banner).to_contain_text(t["reason"])
     banner.locator('[data-action="lease_taken_dismiss"]').click()
     expect(banner).to_have_count(0)
+    # D11: the daemon forgot it too (GET /lease says taken: null)
+    assert wait_until(lambda: BOARD not in reqs(daemon).last_taken)
     page.reload()
     page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
     page.wait_for_timeout(600)
@@ -549,3 +551,48 @@ def test_over_rest_a_write_token_cannot_force_and_the_page_says_why(page_factory
     # the twin: an admin token, and Force opens
     reqs(daemon).revoke_reason = ""
     expect(force_button(page)).not_to_have_attribute("aria-disabled", "true", timeout=POLL)
+
+
+
+def test_dismiss_over_a_daemon_without_the_d11_route_is_remembered_by_this_browser(page_factory, daemon):
+    # A daemon from before D11 answers 404: the banner still goes, and stays gone on reload.
+    page = holder_page(page_factory, daemon)
+    page.route(re.compile(r"/lease/taken$"), lambda route: route.fulfill(status=404, json={
+        "ok": False, "error": {"code": 3, "name": "ABSENT", "message": "no such endpoint"}}))
+    reqs(daemon).taken(BOARD, by="bob@lab-pc-02")
+    banner = page.locator('[data-testid="lease-taken"]')
+    banner.locator('[data-action="lease_taken_dismiss"]').click()
+    expect(banner).to_have_count(0)
+    assert BOARD in reqs(daemon).last_taken                     # the daemon still has it
+    page.reload()
+    page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    page.wait_for_timeout(600)
+    expect(banner).to_have_count(0)                              # this browser remembers
+    # the twin: another browser (no memory) still sees it, since the daemon kept it
+    other = page_factory(**APP)                                  # the board is open already
+    other.locator(f'.board-item[data-board="{BOARD}"]').click()
+    expect(other.locator('[data-testid="lease-taken"]')).to_be_visible(timeout=T)
+
+
+def test_a_new_holder_is_asked_again_and_the_page_shows_the_new_deadline(page_factory, daemon):
+    # D9: the board passes to carol while we wait; she was never asked, so the request goes
+    # to her with a fresh 2:00, and force waits for that.
+    page, bar = requester(page_factory, daemon)
+    r = reqs(daemon)
+    r.advance(BOARD, 110)                                       # 0:10 left for alice
+    expect(bar.locator('[data-testid="req-countdown"]')).to_have_attribute(
+        "data-left", re.compile(r"^([0-9]|10)$"), timeout=POLL)
+    assert bar.locator('[data-testid="req-reasked"]').count() == 0          # the twin
+    r.new_holder(BOARD, "carol@lab-pc-09")
+    reasked = bar.locator('[data-testid="req-reasked"]')
+    expect(reasked).to_contain_text(f"{NAME} passed to carol@lab-pc-09", timeout=POLL)
+    expect(reasked).to_contain_text(re.compile(r"a new 2:00 runs to \d\d:\d\d:\d\d"))
+    clock = bar.locator('[data-testid="req-countdown"]')
+    expect(clock).to_contain_text(re.compile(r"^\s*1:[5]\d|^\s*2:00"))
+    expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to carol@lab-pc-09")
+    # past alice's old deadline, force stays shut: carol has her own 2:00
+    page.wait_for_timeout(1500)
+    expect(force_button(page)).to_have_attribute("aria-disabled", "true")
+    expect(bar.locator('[data-testid="reason-lease_force"]')).to_contain_text("carol@lab-pc-09 has not answered")
+    section(page, "activity")
+    expect(page.locator('[data-testid="activity-table"]')).to_contain_text("passed to carol@lab-pc-09, who had not been asked")
