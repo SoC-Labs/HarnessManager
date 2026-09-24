@@ -388,6 +388,8 @@ function RequestBar({ bid }) {
           : html`<span class="lease-fact" data-testid="req-keep-left">their ${answer.minutes} min ran out</span>`) : null}</span>
       </div>` : null}
       ${req && req.message ? html`<div class="secondary small">Your message: ${quoted(req.message)}</div>` : null}
+      <${TappedLine} at=${req && req.tapped_at} testid="req-tapped"
+        text=${`someone at ${name} tapped your request on its front panel; the holder is told. Nothing was released.`} />
       <div class="lease-actions">
         <button type="button" class="btn sm" data-action="lease_leave" aria-busy=${pl.running ? "true" : undefined}
           onClick=${() => {
@@ -445,6 +447,16 @@ function respond(bid, note, answer, minutes, message) {
   runAction(bid, panel, spec);
 }
 
+// CCR PANEL-1 (lane P3): a tap on the front panel's lease-request banner records tapped_at on
+// the open request (GET /lease: incoming[].tapped_at for the holder, request.tapped_at for the
+// requester). Decision P2: it notifies the holder; it never releases.
+function TappedLine({ at, text, testid }) {
+  const when = epochOf(at);
+  if (when === null) return null;
+  return html`<div class="lease-tapped small" data-testid=${testid} data-at=${at}>
+    <${Icon} name="user" cls="sm" /><span><strong>Tapped on the panel</strong> at ${clock(when)}: ${text}</span></div>`;
+}
+
 function HolderPrompt({ bid, note }) {
   const [message, setMessage] = useState("");
   const p = panelState(bid, `lease_respond:${note.id}`);
@@ -462,6 +474,8 @@ function HolderPrompt({ bid, note }) {
           : left > 0 ? html`Answer within <span class="lease-clock" data-testid="wanted-countdown" data-left=${Math.ceil(left)}><${Icon} name="timer" cls="sm" />${mmss(left)}</span>, or they may force-release it: anything you run on the board is interrupted then.`
           : html`<span class="lease-clock due" data-testid="wanted-countdown" data-left="0"><${Icon} name="timer" cls="sm" />0:00</span> Their 2 minutes are up: they may force-release it now.`}
       </div>
+      <${TappedLine} at=${note.tapped_at} testid="wanted-tapped"
+        text=${`someone at ${name} tapped this request on its front panel. Nothing was released: the answer is still yours.`} />
       <div class="lease-actions">
         ${off ? null : html`<input class="input lease-msg" type="text" maxlength=${NOTE_MAX} placeholder="Message (optional)"
           aria-label=${`Message to ${note.by} (optional)`} data-testid="wanted-message" value=${message}
@@ -721,11 +735,17 @@ onBoardEvent((ev) => {
     if (!have) w.hub = { ...w.hub, incoming: [...(w.hub.incoming || []), { ...d }] };
   }
   if (ev.topic === "lease.left") w.leaseQueued = false;
+  if (ev.topic === "lease.tapped" && w.hub && d.id) {
+    // P3: {id, by, at}: someone tapped the panel's request banner; the read that follows agrees.
+    const tap = (n) => (n && n.id === d.id ? { ...n, tapped_at: d.at } : n);
+    w.hub = { ...w.hub, incoming: (w.hub.incoming || []).map(tap), request: tap(w.hub.request) };
+  }
   if (ev.topic === "lease.taken") {
     if (w.hub) w.hub = { ...w.hub, taken: { ...d } };
     noteTaken(bid, d);
   }
-  if (["lease.wanted", "lease.answered", "lease.force_available", "lease.taken", "lease.left"].includes(ev.topic)) {
+  if (["lease.wanted", "lease.answered", "lease.force_available", "lease.taken", "lease.left",
+    "lease.tapped"].includes(ev.topic)) {
     scheduleHub(bid, 50);
   }
 });

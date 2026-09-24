@@ -21,6 +21,7 @@ import {
 } from "../ui.js";
 import { leaseSpecs } from "../hub.js";
 import { openRequestForm, requestActive } from "../lease.js";
+import { PanelCard, PanelTileRow } from "./panel.js";          // P3 PANEL-UI
 
 // --- needs attention ----------------------------------------------------------------------
 
@@ -245,6 +246,7 @@ function BoardTile({ bid }) {
     <div class="tile-kv">
       <span class="k">Temperature</span><span class="v" data-testid="tile-temp"><${ReadingValue} r=${temp} empty=${readings ? "no sensor" : "reading..."} /></span>
       <span class="k">DUT clock</span><span class="v" data-testid="tile-clock"><${ReadingValue} r=${clk} empty=${readings ? "not reported" : "reading..."} /></span>
+      <${PanelTileRow} bid=${bid} />
     </div>
     <div class="tile-actions">
       <${ActionRow} bid=${bid} panel="reset_dut" spec=${resetDutSpec(bid)} icon="rotate-ccw" compact=${true}
@@ -274,13 +276,14 @@ function Details({ bid }) {
     <button type="button" class="details-toggle" aria-expanded=${S.detailsOpen ? "true" : "false"}
       data-action="details" onClick=${toggle}>
       <${Icon} name="chevron-right" cls=${`sm chev ${S.detailsOpen ? "open" : ""}`} />Details
-      <span class="muted small">identity, health counters, telemetry, capabilities</span></button>
+      <span class="muted small">identity, health counters, telemetry, capabilities, front panel</span></button>
     ${S.detailsOpen ? html`<div class="grid split mt-14">
       <div class="stack">
         <${IdentityCard} info=${b.info} />
         <${TelemetryCard} bid=${bid} />
       </div>
       <div class="stack">
+        <${PanelCard} bid=${bid} />
         <${HealthCard} bid=${bid} info=${b.info} />
         <${CapabilitiesCard} info=${b.info} />
       </div>

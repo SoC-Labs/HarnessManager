@@ -36,6 +36,11 @@ export const ENDPOINTS = Object.freeze({
   clocks: ["GET", "/boards/{bid}/clocks"],
   clockSet: ["POST", "/boards/{bid}/clocks"],
   osc: ["GET", "/boards/{bid}/controller/osc"],
+  // --- P3 PANEL-UI: the front panel (docs/API.md "Front panel", panel_api.py) ---
+  panel: ["GET", "/boards/{bid}/panel"],
+  panelFrame: ["GET", "/boards/{bid}/panel/frame"],
+  identify: ["POST", "/boards/{bid}/identify"],
+  // --- end P3 PANEL-UI ---
   // Week-plan additions (docs/API.md, frozen): lanes L2 consoles, L1 hub, L4 power and update.
   ptyOpen: ["POST", "/boards/{bid}/consoles/{name}/pty"],
   ptyGet: ["GET", "/boards/{bid}/consoles/{name}/pty"],
@@ -72,6 +77,7 @@ export const ADDITIVE = Object.freeze([]);
 export const EVENT_TOPICS = [
   "board.*", "session.*", "deploy.*", "console.state", "console.pty", "debug.*",
   "controller.*", "storage.*", "update.*", "power.*", "lease.*", "tunnel.*", "job.*", "events.*",
+  "panel.*",                           // P3 PANEL-UI: panel.state, panel.tap, panel.locate
 ];
 
 const TOKEN_KEY = "harness_manager.token";

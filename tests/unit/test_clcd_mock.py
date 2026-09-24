@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -54,7 +55,9 @@ def test_the_held_family_is_in_the_web_ui_css():
     for block, theme in (("light", "light"), ("media-dark", "dark"), ("dark", "dark")):
         assert {f"--{n}": tokens["color"][n][theme] for n in held}.items() <= css[block].items()
     assert tokens["color"]["held"] == {"light": "#6b3fc4", "dark": "#b69cf5"}
-    assert "--held" not in M.APP_CSS.read_text()
+    # app.css uses the family (var(--held), lane P3) but defines none of it
+    assert not re.search(r"--held[\w-]*\s*:", M.APP_CSS.read_text())
+    assert "var(--held)" in M.APP_CSS.read_text()
 
 
 def test_every_panel_role_resolves_and_every_grammar_state_has_a_colour():

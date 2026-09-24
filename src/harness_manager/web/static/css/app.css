@@ -780,3 +780,37 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .force-name { display: block; width: 100%; margin-top: 6px; }
 .field-label { font-size: 12.5px; color: var(--text-2); font-weight: 500; }
 .lease-textarea { width: 100%; height: auto; min-height: 72px; padding: 8px 10px; resize: vertical; font-family: var(--font-sans); }
+
+/* --- the front panel (lane P3): the Board tile's line, Identify, the Details mirror ---------------
+   "held" (decision P6, violet) is someone else having it: here, the DUT owning the panel. */
+.chip.held { background: var(--held-soft); border-color: var(--held-border); color: var(--held); }
+.panel-line { line-height: 1.5; }
+.pl .icon { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+.pl.ok { color: var(--ok); }
+.pl.warn { color: var(--warn); }
+.pl.err { color: var(--err); }
+.pl.unk { color: var(--unk); }
+.pl.held { color: var(--held); font-weight: 500; }
+.pl.busy { color: var(--accent-text); }
+.pl-sep { color: var(--text-3); }
+.rebuilt-tag { color: var(--unk); border-style: dashed; border-color: var(--unk-border); background: var(--unk-soft); }
+.identify { margin-top: 6px; }
+.identify .action-main { display: flex; align-items: center; flex-wrap: wrap; }
+.identify .btn { min-width: 0; }
+.identify-seconds { height: 28px; font-size: 12.5px; padding: 0 4px 0 8px; color: var(--text); }
+.identify-until {
+  display: inline-flex; align-items: center; gap: 5px; color: var(--accent-text); font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.panel-mirror {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.4; background: var(--term-bg);
+  color: var(--term-fg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 8px 10px; overflow-x: auto;
+}
+.panel-mirror.rebuilt { border-style: dashed; border-color: var(--unk-border); }
+.pm-row { white-space: pre; min-height: 1.4em; }
+.pm-inv { background: var(--err); color: var(--on-err); }
+.pm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.pm-list li { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.lease-tapped { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; color: var(--held); }
+.lease-tapped .icon { margin-top: 2px; }
