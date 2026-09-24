@@ -45,7 +45,9 @@ only when it reads the EOF, a few ms (a round trip through the forward) after
 we close. So while every counted client could be one of our own connections
 closed in the last few seconds, the opener re-lists (``SLOT_POLL_S``, for up to
 ``SLOT_WAIT_S``) until the hub has let go, rather than refuse itself the slot.
-Anyone else attached still makes the port read-only at once.
+Anyone else attached still makes the port read-only at once. A shared console
+(``ShareRelay``) settles the same way before it connects, so the first keys typed
+after a quick reconnect reach the TTY instead of being dropped by the hub.
 """
 
 from __future__ import annotations
@@ -1495,11 +1497,20 @@ register_serial_scheme(HUB_SCHEME, open_hub_share)
 # --- hub shares as consoles --------------------------------------------------------------------
 
 
-def _pipe(src: socket.socket, dst: socket.socket) -> None:
+def _pipe(src: socket.socket, dst: socket.socket,
+          on_src_end: Callable[[], None] | None = None) -> None:
+    """Copy ``src`` to ``dst`` until ``src`` ends; then end ``dst``'s sending side.
+    ``on_src_end`` runs when ``src`` ended (EOF or an error), BEFORE ``dst`` is shut:
+    so of two pipes, the one whose source ended first always calls back first."""
     try:
         while True:
-            data = src.recv(65536)
+            try:
+                data = src.recv(65536)
+            except OSError:
+                data = b""
             if not data:
+                if on_src_end is not None:
+                    on_src_end()
                 break
             dst.sendall(data)
     except OSError:
@@ -1546,7 +1557,10 @@ class ShareRelay:
 
     def _serve(self, client: socket.socket) -> None:
         try:
-            _info, route = resolve_share(self.ref)
+            # Our last connection may still hold the share's write slot (module docstring):
+            # wait for the hub to let go, or the first keys typed are dropped. Keys typed
+            # meanwhile wait in the client socket; nothing is lost.
+            _info, route = settle_write_slot(self.ref, *resolve_share(self.ref))
             upstream = socket.create_connection((route.host, route.local_port), timeout=10)
             upstream.settimeout(None)
         except (HarnessError, OSError) as exc:
@@ -1562,8 +1576,22 @@ class ShareRelay:
                 return
             self._conns += [client, upstream]
 
+        first_end: list[str] = []
+        end_mu = threading.Lock()
+
+        def ended(side: str) -> None:
+            # The console left first: we close our side, and the hub counts it until it
+            # reads the EOF; record that, so a quick reconnect settles. The share ending
+            # first means the hub has already let go: nothing to record.
+            with end_mu:
+                if first_end:
+                    return
+                first_end.append(side)
+            if side == "console":
+                SHARES.note_closed(self.ref)
+
         def from_client() -> None:
-            _pipe(client, upstream)
+            _pipe(client, upstream, on_src_end=lambda: ended("console"))
             with contextlib.suppress(OSError):
                 upstream.shutdown(socket.SHUT_RDWR)       # the console left: end both ways
 
@@ -1571,7 +1599,7 @@ class ShareRelay:
                                 daemon=True)
         back.start()
         try:
-            _pipe(upstream, client)
+            _pipe(upstream, client, on_src_end=lambda: ended("share"))
             back.join(timeout=RELAY_DRAIN_S)
         finally:
             # Both sockets of this connection, now: they used to stay open until the
