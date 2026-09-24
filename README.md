@@ -51,9 +51,9 @@ Nothing needs root or Administrator.
 | `--offline DIR` | install with no network, from a wheelhouse ([docs/INSTALL.md](docs/INSTALL.md#no-network-a-wheelhouse)) |
 | `--no-desktop` | no application menu entry (Linux) |
 
-To upgrade, `git pull`, then run the installer again: it keeps your options and
-settings. To remove Harness Manager, run it with `--uninstall` (`-Uninstall`). Your
-settings and SD backups stay.
+To upgrade, `git pull`, then run the installer again. It keeps your settings, and
+`install.sh` also keeps the options you chose. To remove Harness Manager, run it with
+`--uninstall` (`-Uninstall`). Your settings and SD backups stay.
 
 More detail, including proxies and where everything goes: [docs/INSTALL.md](docs/INSTALL.md).
 
