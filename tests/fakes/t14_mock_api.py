@@ -368,6 +368,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     sim = WeekPlanSim(state)
     app.state.sim = sim
     register_week_plan(app, state, sim, _ok, _accepted)
+    # T10's XDC routes (docs/API.md "XDC export"): the real xdc service, the mock's boards.
+    from .t10_mock_xdc import register as register_xdc
+    register_xdc(app, state, _ok)
 
     async def ws_deny(ws: WebSocket, exc: HarnessError) -> None:
         """harness-manager-daemon's refusal: an HTTP denial with the envelope, else close 4000 + code."""

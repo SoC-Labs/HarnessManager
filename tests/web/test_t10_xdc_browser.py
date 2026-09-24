@@ -1,5 +1,5 @@
 """T10: the Board & XDC section in a headless system Chrome, on the real daemon with
-``xdc_api`` loaded (CCR T10-1 adds it to ``EXTENSIONS``; this test adds it itself).
+``xdc_api`` loaded (in ``EXTENSIONS`` since CCR T10-1).
 
 Drives it with clicks only: preview the RM kit (the demo board runs the previous static,
 so the one error is ``static_id``), switch to the full-board kit (no error: the twin),
@@ -10,18 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from harness_manager.daemon import app as daemon_app
 from harness_manager.demo import BOARD_USB
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 
 pytestmark = pytest.mark.browser
 T = 10_000
-
-
-@pytest.fixture(autouse=True)
-def xdc_routes(monkeypatch):
-    monkeypatch.setattr(daemon_app, "EXTENSIONS", (*daemon_app.EXTENSIONS, "xdc_api"))
 
 
 def open_xdc(page):
@@ -33,8 +27,9 @@ def open_xdc(page):
     page.wait_for_selector('[data-testid="xdc-model"]', timeout=T)
 
 
-def test_preview_the_rm_kit_then_the_board_kit_then_a_failing_design(xdc_routes, page_factory,
-                                                                    screenshots):
+@pytest.mark.mock_too
+def test_preview_the_rm_kit_then_the_board_kit_then_a_failing_design(page_factory, screenshots,
+                                                                    daemon):
     page = page_factory("light")
     open_xdc(page)
     assert "derived" in page.locator('[data-testid="xdc-derived"]').inner_text()
@@ -51,7 +46,7 @@ def test_preview_the_rm_kit_then_the_board_kit_then_a_failing_design(xdc_routes,
     errors = page.locator('[data-severity="error"]')
     assert errors.count() == 1 and errors.first.get_attribute("data-check") == "static_id"
     assert "Preview only" in page.locator('[data-testid="xdc-files"]').inner_text()
-    page.screenshot(path=str(screenshots / "light-xdc-rm-kit.png"))
+    page.screenshot(path=str(screenshots / f"light-xdc-rm-kit-{type(daemon).__name__}.png"))
 
     page.locator('button:has-text("Full board")').click()
     page.locator('[data-testid="xdc-design"]').select_option("blinky")
@@ -60,7 +55,11 @@ def test_preview_the_rm_kit_then_the_board_kit_then_a_failing_design(xdc_routes,
     assert page.locator('[data-severity="error"]').count() == 0
     page.locator('[data-testid="xdc-file-tabs"] [data-file="blinky_pins.xdc"]').click()
     assert "PACKAGE_PIN AK16" in page.locator('[data-testid="xdc-file-body"]').inner_text()
-    page.screenshot(path=str(screenshots / "light-xdc-board.png"))
+    page.screenshot(path=str(screenshots / f"light-xdc-board-{type(daemon).__name__}.png"))
+    with page.expect_download(timeout=T) as dl:                    # api.js callBlob
+        page.locator('[data-testid="xdc-download"]').click()
+    assert dl.value.suggested_filename == "blinky_board.zip"
+    page.wait_for_selector('[data-testid="xdc-downloaded"]', timeout=T)
 
     page.locator('[data-testid="xdc-use-custom"]').check()
     page.locator('[data-testid="xdc-custom"]').fill(

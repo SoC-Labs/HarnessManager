@@ -157,7 +157,7 @@ Every check is an **error** with a reason and, usually, a hint. **Any error refu
 | `syntax` | a generated XDC failed the built-in syntax check (a generator bug) |
 | notes | `timed_group`, `tied_off`, `caution` (for example, SH\*_IO16/17 connect through 4K7 to IO14/15) |
 
-## The daemon API (additions, CCR T10-2)
+## The daemon API (docs/API.md "XDC export")
 
 | Method and path | Returns |
 |---|---|

@@ -1,8 +1,9 @@
 """T10: the Board & XDC section, statically: wiring, imports, and its routes exist.
 
-``sections/xdc.js`` calls the XDC routes through its own small table (they are not in
-docs/API.md yet, CCR T10-2), so this test is that table's contract: every route it calls
-is one ``daemon/xdc_api.py`` serves, and every name it imports is one its module exports.
+``sections/xdc.js`` calls the XDC routes by their ``api.js`` ENDPOINTS names (CCR T10-2
+put them there and in docs/API.md, whose tests hold the table to the contract). This test
+holds the section to the table: every endpoint name it calls is an ENDPOINTS entry the real
+daemon serves, and every name it imports is one its module exports.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import re
 from pathlib import Path
 
 from harness_manager.daemon import app as daemon_app
-from tests.fakes.t14_api_contract import daemon_routes
+from tests.fakes.t14_api_contract import api_md_sections, daemon_routes, ui_endpoints
 
 JS = Path(daemon_app.__file__).resolve().parents[1] / "web" / "static" / "js"
 XDC_JS = JS / "sections" / "xdc.js"
@@ -46,16 +47,28 @@ def test_the_import_check_catches_a_missing_export():
     assert "socketUrl" in exports(JS / "api.js")
 
 
-def test_every_route_xdc_js_calls_is_one_xdc_api_serves(monkeypatch):
-    monkeypatch.setattr(daemon_app, "EXTENSIONS", (*daemon_app.EXTENSIONS, "xdc_api"))
-    served = daemon_routes()                     # T14's reader of the real route table
-    called = {(m, re.sub(r"\{\w+\}", "{}", p))
-              for m, p in re.findall(r'\["(GET|POST)",\s*"([^"]+)"\]', XDC_JS.read_text())}
-    assert called == {("GET", "/boards/{}/xdc"), ("POST", "/boards/{}/xdc/export")}
-    assert called <= served, called - served
+def called_names(js: str) -> set[str]:
+    """The ENDPOINTS names a section passes to call()/callBlob() (directly or through a wrapper
+    whose first argument is the name)."""
+    return set(re.findall(r'\b(?:call|callBlob|xdcCall)\(\s*"(\w+)"', js))
 
 
-def test_without_the_ccr_the_daemon_does_not_serve_them_and_the_section_says_so():
-    served = daemon_routes()
-    assert ("GET", "/boards/{}/xdc") not in served or "xdc_api" in daemon_app.EXTENSIONS
+def test_every_endpoint_xdc_js_calls_is_an_xdc_api_route_the_daemon_serves():
+    names = called_names(XDC_JS.read_text())
+    assert names == {"boardXdc", "boardXdcExport"}
+    table = ui_endpoints()
+    routes = {table[n] for n in names}                # KeyError = not in ENDPOINTS
+    assert routes == {("GET", "/boards/{}/xdc"), ("POST", "/boards/{}/xdc/export")}
+    assert routes <= daemon_routes()                  # T14's reader of the real route table
+    assert routes <= api_md_sections()["xdc_api"]
+
+
+def test_the_name_check_catches_a_name_the_table_lacks():
+    assert called_names('await call("noSuchRoute", { bid })') == {"noSuchRoute"}
+    assert "noSuchRoute" not in ui_endpoints()
+
+
+def test_the_daemon_loads_xdc_api_and_the_section_still_covers_an_older_daemon():
+    assert "xdc_api" in daemon_app.EXTENSIONS
+    assert ("GET", "/boards/{}/xdc") in daemon_routes()
     assert "has no XDC routes yet" in XDC_JS.read_text()

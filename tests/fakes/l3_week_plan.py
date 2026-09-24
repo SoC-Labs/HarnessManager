@@ -72,6 +72,13 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/update/app"),
         ("POST", "/update/app/rollback"),
     ),
+    # T10: served in the mock by tests/fakes/t10_mock_xdc.py over the real xdc service.
+    "xdc_api": (
+        ("GET", "/xdc"),
+        ("POST", "/xdc/export"),
+        ("GET", "/boards/{bid}/xdc"),
+        ("POST", "/boards/{bid}/xdc/export"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles

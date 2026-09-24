@@ -51,6 +51,9 @@ export const ENDPOINTS = Object.freeze({
   updateHarness: ["POST", "/boards/{bid}/update/harness"],
   updateRollback: ["POST", "/boards/{bid}/update/rollback"],
   updateApp: ["POST", "/update/app"],
+  // T10: XDC export (docs/API.md "XDC export", xdc_api.py).
+  boardXdc: ["GET", "/boards/{bid}/xdc"],
+  boardXdcExport: ["POST", "/boards/{bid}/xdc/export"],
   helpTabs: ["GET", "/help/tabs"],
   job: ["GET", "/jobs/{id}"],
   events: ["WS", "/events"],
@@ -162,19 +165,18 @@ function setConnection(state) {
 
 // --- calls ---------------------------------------------------------------------------------
 
-export async function call(name, params = {}, body = undefined) {
+async function send(name, params, body, accept) {
   const [method] = ENDPOINTS[name];
   const url = endpointUrl(name, params);
-  const headers = { Accept: "application/json" };
+  const headers = { Accept: accept };
   if (token) headers.Authorization = `Bearer ${token}`;
   const init = { method, headers, cache: "no-store" };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  let res;
   try {
-    res = await fetch(url, init);
+    return await fetch(url, init);
   } catch (e) {
     setConnection("down");
     throw new ApiError({
@@ -183,23 +185,46 @@ export async function call(name, params = {}, body = undefined) {
       hint: "check it is running: harness-manager daemon status",
     }, 0, true);
   }
-  let data = null;
-  try { data = await res.json(); } catch (e) { data = null; }
+}
+
+// A failed answer as an ApiError: 401 marks the session expired; anything else carries the
+// daemon's error envelope (or says there was none).
+function failure(res, data) {
   if (res.status === 401) {
     // harness-manager-daemon answers a missing or stale token with 401 and REFUSED (15).
     setConnection("auth");
-    throw new ApiError((data && data.error) || {
+    return new ApiError((data && data.error) || {
       name: "REFUSED", code: 15, message: "session expired",
       hint: "run harness-manager ui again",
     }, 401);
   }
   setConnection("ok");
-  if (!res.ok || !data || data.ok === false) {
-    throw new ApiError((data && data.error) || {
-      name: `HTTP_${res.status}`, message: `the daemon answered ${res.status} with no error body`,
-    }, res.status);
-  }
+  return new ApiError((data && data.error) || {
+    name: `HTTP_${res.status}`, message: `the daemon answered ${res.status} with no error body`,
+  }, res.status);
+}
+
+export async function call(name, params = {}, body = undefined) {
+  const res = await send(name, params, body, "application/json");
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
   return { data, status: res.status };
+}
+
+// A binary answer (the XDC export's zip): the body as a Blob. A failure still answers
+// JSON, so it throws the same ApiError as call() (with error.data, e.g. the failed checks).
+export async function callBlob(name, params = {}, body = undefined) {
+  const res = await send(name, params, body, "application/zip, application/json");
+  const type = res.headers.get("content-type") || "";
+  if (res.ok && !type.startsWith("application/json")) {
+    setConnection("ok");
+    return res.blob();
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  throw failure(res, data);
 }
 
 // A request harness-manager-daemon refused because a job holds the board (409 HELD, "... job <id>").

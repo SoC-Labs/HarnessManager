@@ -1,9 +1,8 @@
 """T10: the XDC routes on the real daemon (``daemon/xdc_api.py``), over ``VirtualMps3``.
 
-``xdc_api`` is not in ``app.EXTENSIONS`` until the lead applies CCR T10-1, so these tests
-add it for the app they build. The board routes read only the static the board reported
-when probed: the default virtual board runs the previous shell 0x3F1A560F, the ILA-mint
-profile runs the fielded 0x72BB0A36 the pin model describes.
+``xdc_api`` is loaded through ``app.EXTENSIONS`` (CCR T10-1). The board routes read only
+the static the board reported when probed: the default virtual board runs the previous
+shell 0x3F1A560F, the ILA-mint profile runs the fielded 0x72BB0A36 the pin model describes.
 """
 
 from __future__ import annotations
@@ -24,11 +23,6 @@ from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
 from tests.fakes.virtual_board import VirtualMps3, ila_mint_bake_profile
 
 H = headers()
-
-
-@pytest.fixture(autouse=True)
-def with_xdc_routes(monkeypatch):
-    monkeypatch.setattr(daemon_app, "EXTENSIONS", (*daemon_app.EXTENSIONS, "xdc_api"))
 
 
 def client_for(vb: VirtualMps3) -> Iterator[tuple[TestClient, str]]:

@@ -35,7 +35,7 @@ from .output import TSV_COLUMNS, Result, report_error
 
 log = logging.getLogger(__name__)
 
-NO_ENGINE = {"help", "version"}
+NO_ENGINE = {"help", "version", "xdc"}
 
 
 class _Parser(argparse.ArgumentParser):
@@ -319,6 +319,11 @@ def make_parser() -> argparse.ArgumentParser:
 
     # -- pty and baud (L2: a console's PTY for `screen`, and its rate) -------------------
     verbs.update(cmd_io.register(sub))
+
+    # -- xdc (T10: constraint kits from the board pack's pin model) -----------------------
+    from . import cmd_xdc
+    cmd_xdc.register(sub)
+    verbs["xdc"] = sub.choices["xdc"]
     return p
 
 

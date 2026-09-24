@@ -15,8 +15,8 @@ Exit codes: 0 every check passed; 2 a bad design file or kit; 3 no such design, 
 or shell; 12 the pack has no pin model; 15 a check failed (every failure is listed,
 and ``--json`` carries them all in ``error.data.checks``).
 
-The lead wires this module into ``cli/main.py`` with ``cmd_xdc.register(sub)`` and adds
-``"xdc"`` to ``NO_ENGINE`` (the verb never opens a board).
+``cli/main.py`` registers it with ``cmd_xdc.register(sub)``, and ``"xdc"`` is in
+``NO_ENGINE``: the verb never opens a board (CCR T10-1).
 """
 
 from __future__ import annotations

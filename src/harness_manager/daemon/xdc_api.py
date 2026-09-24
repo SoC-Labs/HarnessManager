@@ -1,6 +1,6 @@
-"""XDC export over the daemon API (T10). The lead adds ``"xdc_api"`` to ``app.EXTENSIONS``.
+"""XDC export over the daemon API (T10), loaded through ``app.EXTENSIONS`` (CCR T10-1).
 
-Routes (bearer auth and the error envelope as everywhere; docs/XDC_EXPORT.md):
+Routes (bearer auth and the error envelope as everywhere; docs/API.md "XDC export"):
 
 | Method and path | Returns |
 |---|---|
@@ -97,6 +97,20 @@ def board_static(running: str, why: str, model: xdc.PinModel) -> dict[str, Any]:
             "it is for a different static"}
 
 
+def check_board_static(kit: xdc.Kit, st: dict[str, Any], model: xdc.PinModel, bid: str) -> None:
+    """An RM kit for the model's static, on a board that runs another: the static_id check
+    fails. No static known: a note. (The daemon and the T14 mock share this rule.)"""
+    if kit.kind != "rm-kit":
+        return
+    if st["matches"] is False and same_static(kit.design.get("static_id", ""), model.default_shell):
+        kit.findings.append(Finding(
+            "static_id", st["static_id"], st["reason"],
+            hint="update the board to the fielded shell, or export without a board "
+                 "(`harness-manager xdc rm-kit`) if the RM is meant for the model's static"))
+    elif st["matches"] is None:
+        kit.findings.append(Finding("static_id", bid, st["reason"], severity="note"))
+
+
 def register(ctx: RouteContext) -> None:
     api = ctx.api
 
@@ -138,14 +152,6 @@ def register(ctx: RouteContext) -> None:
         kit_name, design, preview, fmt, sid = _request(body)
         pins = xdc.load_pack_pins(pack_of(s))
         kit = xdc.export(pins.pack, kit_name, design, static_id=sid, pins=pins)
-        st = static_of(bid, s, pins.model)
-        if kit_name == "rm-kit" and st["matches"] is False and \
-                same_static(kit.design.get("static_id", ""), pins.model.default_shell):
-            kit.findings.append(Finding(
-                "static_id", st["static_id"], st["reason"],
-                hint="update the board to the fielded shell, or export without a board "
-                     "(`harness-manager xdc rm-kit`) if the RM is meant for the model's static"))
-        elif kit_name == "rm-kit" and st["matches"] is None:
-            kit.findings.append(Finding("static_id", bid, st["reason"], severity="note"))
+        check_board_static(kit, static_of(bid, s, pins.model), pins.model, bid)
         return _answer(kit, preview, fmt)
 

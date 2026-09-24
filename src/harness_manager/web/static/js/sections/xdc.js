@@ -3,59 +3,27 @@
 // Pick a kit (the RM kit for the shell's partition, or the full-board export), pick a
 // built-in design or paste one, preview the files next to every check, download a zip.
 // Nothing here touches the board: the daemon builds the kit from the pin model and reads
-// only the static id the board reported when it was probed.
-//
-// The routes (daemon/xdc_api.py) are not in docs/API.md yet (CCR T10-2), so they are not in
-// api.js's ENDPOINTS: this module calls them through the same base URL and bearer token.
+// only the static the board runs (docs/API.md "XDC export").
 
-import { fillPath, socketUrl, toApiError, ApiError } from "../api.js";
+import { ApiError, call, callBlob, toApiError } from "../api.js";
 import { html, useEffect, useState } from "../lib.js";
 import { Card, Chip, Icon, Reason, Seg, Spinner } from "../ui.js";
 
-const XDC_ENDPOINTS = Object.freeze({
-  boardXdc: ["GET", "/boards/{bid}/xdc"],
-  boardXdcExport: ["POST", "/boards/{bid}/xdc/export"],
-});
-
-// The page's API base and token, read from api.js's own socket URL builder (it signs every
-// WebSocket URL with the token), so this module keeps no copy of either.
-function auth() {
-  const url = new URL(socketUrl("events"));
-  const token = url.searchParams.get("token") || "";
-  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  url.search = "";
-  const base = url.toString().replace(/events$/, "");
-  return { base, token };
+// A daemon from before the XDC routes answers GET /boards/{bid}/xdc from its greedy
+// /boards/{bid} route: "<board>/xdc is not open" (404 ABSENT). Say what that means.
+function explain(err) {
+  const e = toApiError(err);
+  if (e.status === 404 && /\/xdc\b/.test(e.message || "")) {
+    return new ApiError({ name: "UNAVAILABLE", message: "this harness-manager-daemon has no XDC routes yet",
+      hint: "update Harness Manager (the XDC export arrived with team T10)" }, 404);
+  }
+  return e;
 }
 
-async function xdcCall(name, params, body, { raw = false } = {}) {
-  const [method, template] = XDC_ENDPOINTS[name];
-  const { base, token } = auth();
-  const url = new URL(fillPath(template, params).replace(/^\//, ""), base);
-  const headers = { Accept: raw ? "application/zip" : "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const init = { method, headers, cache: "no-store" };
-  if (body !== undefined) {
-    headers["Content-Type"] = "application/json";
-    init.body = JSON.stringify(body);
-  }
-  let res;
+async function xdcCall(name, params, body) {
   try {
-    res = await fetch(url, init);
-  } catch (e) {
-    throw new ApiError({ name: "NO_ANSWER", message: "harness-manager-daemon did not answer" }, 0, true);
-  }
-  if (raw && res.ok) return res.blob();
-  let data = null;
-  try { data = await res.json(); } catch (e) { data = null; }
-  if (res.status === 404 && (!data || !data.error)) {
-    throw new ApiError({ name: "UNAVAILABLE", message: "this harness-manager-daemon has no XDC routes yet",
-      hint: "update Harness Manager (the XDC export arrives with team T10)" }, 404);
-  }
-  if (!res.ok || !data || data.ok === false) {
-    throw new ApiError((data && data.error) || { name: `HTTP_${res.status}`, message: `the daemon answered ${res.status}` }, res.status);
-  }
-  return data;
+    return (await call(name, params, body)).data;
+  } catch (e) { throw explain(e); }
 }
 
 // --- state kept per board across re-renders ------------------------------------------------
@@ -123,7 +91,7 @@ export function BoardXdcSection({ bid }) {
   useEffect(() => {
     if (x.cat || x.catError) return;
     xdcCall("boardXdc", { bid }).then((cat) => { x.cat = cat; redraw(); })
-      .catch((e) => { x.catError = toApiError(e); redraw(); });
+      .catch((e) => { x.catError = explain(e); redraw(); });
   }, [bid]);
 
   if (x.catError) {
@@ -156,7 +124,7 @@ export function BoardXdcSection({ bid }) {
   async function download() {
     x.busy = "zip"; x.error = null; redraw();
     try {
-      const blob = await xdcCall("boardXdcExport", { bid }, { kit: x.kit, design: designArg(), format: "zip" }, { raw: true });
+      const blob = await callBlob("boardXdcExport", { bid }, { kit: x.kit, design: designArg(), format: "zip" });
       const name = `${x.useCustom ? "design" : chosen}_${x.kit}.zip`;
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);

@@ -220,6 +220,23 @@ Events: `lease.wanted`, `lease.answered`, `lease.force_available`, `lease.taken`
 - **Dismissing (D11):** `DELETE /lease/taken` is local (the service's own record, no hub call) and takes no gate, so it works while a job runs. `dismissed` is false when there was nothing to dismiss; running it twice is fine. No event is sent: a front-end that dismisses clears its own banner, and others see `taken: null` on their next `GET /lease`.
 - **Leaving:** `DELETE /lease/queue` stops the request job, which ends with `{left: true}`. `left` is true when a queue entry was removed or a request job was running. `DELETE /lease` does the same for a queued request and returns `{cancelled: true, left: true}`. Closing the board, or stopping the daemon, also leaves the queue.
 
+### XDC export (T10, `xdc_api.py`)
+
+docs/XDC_EXPORT.md is the reference: the pin model, the design format, the kits and the checks.
+
+| Method and path | Returns |
+|---|---|
+| `GET /xdc?pack=mps3` | the catalogue: `model` (board, status, shells, sources), `kits`, `default_design`, `designs`, `checks` (the check codes). No board needed. |
+| `POST /xdc/export` `{pack?, kit, design?, static_id?, preview?, format?}` | the kit: `{kind, design, passed, files: {name: text}, checks, facts}`. |
+| `GET /boards/{bid}/xdc` | the catalogue for the board's pack, plus `board: {static_id, model_static_id, matches, reason}` and `board_id`. |
+| `POST /boards/{bid}/xdc/export` `{kit, design?, preview?, format?}` | the same kit, checked against the static the board runs. |
+
+- **`kit`** is `rm-kit` or `board`. **`design`** is a built-in design's name or an inline design object. A file path is 400 USAGE: the daemon's filesystem is not the caller's.
+- **`passed`** is the kit's verdict; `ok` stays the envelope's. A failed check is 409 REFUSED with `error.data.checks` (every check, errors and notes), unless `preview: true`: then 200 with `passed: false` and the files, so a front end shows them next to the failures.
+- **`format: "zip"`** answers `application/zip` (the files and `manifest.json` under `<design>/`), with `X-Xdc-Ok: 1|0`.
+- **The board.** The kits come from the pin model, never from the board. The board routes need one fact from it, the static it runs: the identity it reported when probed, else one identity read under the board gate (409 HELD while a job runs). An RM kit for a board on another static fails the `static_id` check; with no static known it is a note.
+- **Errors:** 400 USAGE for a bad `kit`, `format`, `design` or `static_id` type, or a design of the other kind; 404 ABSENT for an unknown design, pack or shell, or a board that is not open; 422 UNAVAILABLE for a pack with no pin model.
+
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)
 - **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.
 - **A name is display only.** It never keys a board: `board_id` does, and so do boards.toml tables, session locks and leases. A hub id is shown with `_` as `-` (`mps3_01` becomes `mps3-01`).
