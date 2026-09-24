@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import socket
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -34,6 +33,7 @@ from harness_manager.core.events import EventBus
 from harness_manager.services.debug import DebugService, pid_alive, port_in_use, tcl_rpc
 from harness_manager_mps3.constants import OPENOCD_CFG_DIR
 from harness_manager_mps3.pack import Mps3Pack
+from tests.fakes.t4_debug_rig import held_gdb_block
 from tests.fakes.t4_rbb_jtag import FakeJtagServer
 from tests.fakes.virtual_board import VirtualMps3
 
@@ -121,11 +121,8 @@ def test_negative_twin_real_openocd_board_failures(real, board, debug, mode, err
 
 def test_real_openocd_with_its_gdb_port_taken_is_killed(real, board, monkeypatch):
     # OpenOCD 0.12 logs "couldn't bind gdb" and KEEPS RUNNING (measured 2026-09-23).
+    blocker, base = held_gdb_block()          # only the gdb port taken, not its neighbours
     monkeypatch.setattr(dbg, "port_in_use", lambda port: False)
-    blocker = socket.socket()
-    blocker.bind(("127.0.0.1", 0))
-    blocker.listen(1)
-    base = blocker.getsockname()[1]
     svc = DebugService(EventBus(), port_base=base, start_timeout=30)
     try:
         with FakeJtagServer() as jtag:

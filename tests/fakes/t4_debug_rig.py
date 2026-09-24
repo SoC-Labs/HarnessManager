@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import random
+import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -53,6 +55,33 @@ def use_stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StubRig:
     for var in ("STUB_OPENOCD_IDCODE", "STUB_OPENOCD_INIT_DELAY", "STUB_OPENOCD_NO_ADAPTER"):
         monkeypatch.delenv(var, raising=False)
     return rig
+
+
+def held_gdb_block() -> tuple[socket.socket, int]:
+    """``(listener, base)``: a listener on a port block's gdb port, the rest of the block free.
+
+    The base is drawn below every OS's ephemeral range (Linux 32768+, Windows and macOS
+    49152+) and below the debug service's own 23300 range. A block next to a ``bind(0)``
+    port is in the ephemeral range, where this host's outgoing connections take the
+    telnet or tcl port between the check and the stub's bind: 2 runs in 30 failed with
+    "local tcl port <base+3> is already in use" instead of the gdb port (Q1, 2026-09-24).
+    """
+    from harness_manager.services.debug import DebugPorts, port_in_use
+
+    pick = random.SystemRandom()          # not `random`: pytest-randomly reseeds it per test
+    for _ in range(200):
+        base = pick.randrange(20000, 23000)
+        if any(port_in_use(p) for p in DebugPorts.block(base).reserved()):
+            continue
+        blocker = socket.socket()
+        try:
+            blocker.bind(("127.0.0.1", base))
+        except OSError:
+            blocker.close()
+            continue
+        blocker.listen(1)
+        return blocker, base
+    raise AssertionError("no free debug port block in 20000-23000 on this host")
 
 
 def run_stub(argv: list[str], env: dict[str, str] | None = None,

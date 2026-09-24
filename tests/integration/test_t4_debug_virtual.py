@@ -42,7 +42,7 @@ from harness_manager.services.debug import (
 from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.stub_openocd import read_log
 from tests.fakes.t4_console_rig import EventLog, free_port
-from tests.fakes.t4_debug_rig import StubRig, argv_positions, run_stub, use_stub
+from tests.fakes.t4_debug_rig import StubRig, argv_positions, held_gdb_block, run_stub, use_stub
 from tests.fakes.t4_rbb_jtag import FakeJtagServer
 from tests.fakes.virtual_board import VirtualMps3
 
@@ -264,11 +264,8 @@ def test_openocd_that_cannot_bind_gdb_is_killed_not_left_holding_the_board(rig, 
                                                                            bus, monkeypatch):
     # Real OpenOCD 0.12 keeps running when only the gdb port is taken (measured).
     # Blind the pre-check (the race it cannot close) and make the stub hit it.
+    blocker, base = held_gdb_block()          # only the gdb port taken, not its neighbours
     monkeypatch.setattr(dbg, "port_in_use", lambda port: False)
-    blocker = socket.socket()
-    blocker.bind(("127.0.0.1", 0))
-    blocker.listen(1)
-    base = blocker.getsockname()[1]
     svc = DebugService(bus, port_base=base, start_timeout=10)
     try:
         with pytest.raises(PortBoundError, match=f"gdb port {base}"):
