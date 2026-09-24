@@ -277,7 +277,7 @@ def make_fake_xsdb(directory: Path, *, regs: Mapping[int, int] | None = None,
     if os.name == "nt":
         # Windows runs no #! script ([WinError 193]); a .cmd is what xsdb.bat is on Windows.
         exe = directory / "xsdb.cmd"
-        exe.write_text(f'@"{tclsh}" "{prelude}" %*\r\n', encoding="utf-8")
+        exe.write_text(f'@"{tclsh}" "{prelude}" %*\n', encoding="utf-8")   # text mode: CRLF
         return exe, log
     exe = directory / "xsdb"
     exe.write_text(f'#!/bin/sh\nexec {tclsh} "{prelude}" "$@"\n', encoding="utf-8")
