@@ -98,6 +98,8 @@ SSH_OPTIONS: tuple[str, ...] = (
 )
 
 READY_TIMEOUT_S = 30.0
+#: A first start whose local port was taken meanwhile picks new ports, this many tries in all.
+START_ATTEMPTS = 3
 BACKOFF_S = (1.0, 2.0, 5.0, 10.0, 30.0)
 _POLL_S = 0.25
 _STDERR_KEEP = 4096
@@ -371,6 +373,114 @@ def _stderr_of(proc: Any) -> str:
     return (getattr(proc, "stderr_tail", "") or "").strip()
 
 
+# --- orphans: a tunnel whose owner was killed ----------------------------------------------
+#
+# ``ssh -N`` outlives a process that is killed (``kill -9``, an OOM kill, a crash): it is
+# not in the owner's process group's fate, and ServerAliveInterval keeps it up for good,
+# holding the hub connection and its forwards (HIL_B0.md listed ``pkill`` for it). So each
+# running ssh is recorded in ``<state_dir>/tunnel/procs/<owner pid>-<id>.json``; the record
+# goes when the tunnel stops it. ``reap_orphans`` (the daemon calls it when it starts, and
+# every new tunnel first) stops the ssh of a record whose OWNER is gone, and only when that
+# pid still runs the recorded ssh command line (a reused pid is never signalled).
+
+PROCS_DIR = "procs"
+
+
+def procs_dir() -> Path:
+    return tunnel_config_dir() / PROCS_DIR
+
+
+def _proc_argv(pid: int) -> list[str] | None:
+    """The process's argv: /proc on Linux, ``ps`` elsewhere on POSIX; None if unknown."""
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        return [a.decode(errors="replace") for a in raw.split(b"\0") if a]
+    except OSError:
+        pass
+    if os.name != "posix" or not Path("/bin/ps").exists():
+        return None
+    try:
+        out = subprocess.run(["/bin/ps", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out.stdout.split() if out.returncode == 0 and out.stdout.strip() else None
+
+
+def _runs_recorded_ssh(pid: int, argv: Sequence[str]) -> bool:
+    """Does ``pid`` still run the recorded tunnel: every ``-L`` spec and the host in its argv."""
+    now = _proc_argv(pid)
+    if not now or not argv:
+        return False
+    specs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-L"]
+    return bool(specs) and argv[-1] in now and all(s in now for s in specs)
+
+
+def _stop_pid(pid: int, timeout: float = 3.0) -> None:
+    import signal
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return
+    deadline = time.monotonic() + timeout
+    from harness_manager.core.session import pid_alive
+
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return
+        time.sleep(0.05)
+    with contextlib.suppress(OSError):
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+
+
+def reap_orphans(directory: Path | None = None) -> list[int]:
+    """Stop the ssh tunnels whose owner process is gone; return their pids.
+
+    A record whose owner is alive is never touched (a CLI verb or another daemon owns
+    it). A record whose ssh has gone, or whose pid now runs something else, is dropped
+    without signalling anything. Records written on another machine are left alone.
+    """
+    import json
+
+    from harness_manager.core.session import pid_alive
+
+    root = directory or procs_dir()
+    reaped: list[int] = []
+    try:
+        records = sorted(root.glob("*.json"))
+    except OSError:
+        return reaped
+    for path in records:
+        try:
+            rec = json.loads(path.read_text(encoding="utf-8"))
+            pid, owner = int(rec.get("pid") or 0), int(rec.get("owner_pid") or 0)
+            argv = [str(a) for a in rec.get("argv") or []]
+            host = str(rec.get("owner_host") or "")
+        except (OSError, ValueError, TypeError, AttributeError):
+            with contextlib.suppress(OSError):
+                path.unlink()
+            continue
+        if host and host != socket.gethostname():
+            continue
+        if owner == os.getpid() or pid_alive(owner):
+            continue
+        if pid > 0 and pid_alive(pid) and _runs_recorded_ssh(pid, argv):
+            log.warning("stopping an orphaned SSH tunnel to %s (pid %d): its owner (pid %d) "
+                        "is gone", argv[-1] if argv else "?", pid, owner)
+            _stop_pid(pid)
+            reaped.append(pid)
+        with contextlib.suppress(OSError):
+            path.unlink()
+    return reaped
+
+
+def _port_taken(why: str) -> bool:
+    """ssh could not bind a local forward (ExitOnForwardFailure's message)."""
+    low = why.lower()
+    return "address already in use" in low or "cannot listen to port" in low
+
+
 def _explain(stderr: str) -> str:
     """The one line of ssh's stderr worth showing (auth, DNS, a refused forward)."""
     lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
@@ -435,6 +545,8 @@ class SshTunnel:
             taken.add(port)
             fixed.append(replace(fw, local_port=port))
         self.forwards: tuple[Forward, ...] = tuple(fixed)
+        #: forwards whose local port was picked here (a start may pick again; module doc)
+        self._picked = {fw.name for fw in forwards if not fw.local_port}
         self.state = "down"
         self.detail = ""
         self.restarts = 0
@@ -443,6 +555,7 @@ class SshTunnel:
         self._mu = threading.RLock()
         self._closing = threading.Event()
         self._sup: threading.Thread | None = None
+        self._record_path: Path | None = None       # procs/<owner>-<id>.json (reap_orphans)
 
     # -- views ------------------------------------------------------------------------------
 
@@ -496,22 +609,52 @@ class SshTunnel:
 
     def start(self) -> SshTunnel:
         """Start ssh and wait until every local forward listens. Raises ``UnreachableError``."""
-        self.argv = self.build_argv()
-        self._set("starting", f"connecting to {self.host}")
-        ok, why = self._launch_and_wait()
-        if not ok:
+        try:
+            reap_orphans()                 # a killed owner's ssh would hold the hub for good
+        except Exception:  # noqa: BLE001 - clean-up must never stop a new tunnel
+            log.exception("reaping orphaned SSH tunnels failed")
+        for attempt in range(START_ATTEMPTS):
+            self.argv = self.build_argv()
+            self._set("starting", f"connecting to {self.host}")
+            ok, why = self._launch_and_wait()
+            if ok:
+                break
             self._stop_proc()
+            taken = _port_taken(why)
+            if taken and attempt + 1 < START_ATTEMPTS and self._pick_ports_again():
+                # Another program bound a port between our choosing it and ssh binding it
+                # (ExitOnForwardFailure): choose again. Restarts keep their ports.
+                log.info("tunnel %s: a local port was taken (%s); choosing new ones",
+                         self.label, why)
+                continue
             self._set("down", why)
-            raise UnreachableError(
-                f"the SSH tunnel to {self.host} did not come up: {why}",
-                hint=f"check `ssh {self.host} true` works without a prompt (BatchMode), "
-                     "and that you are on the campus network or VPN")
+            hint = (f"check `ssh {self.host} true` works without a prompt (BatchMode), "
+                    "and that you are on the campus network or VPN")
+            if taken:
+                hint = "another program holds a local port the tunnel needs; open the board again"
+            raise UnreachableError(f"the SSH tunnel to {self.host} did not come up: {why}",
+                                   hint=hint)
         self._set("up", f"{len(self.forwards)} ports forwarded through {self.host}")
         if self._restart:
             self._sup = threading.Thread(target=self._supervise, name=f"tunnel-{self.host}",
                                          daemon=True)
             self._sup.start()
         return self
+
+    def _pick_ports_again(self) -> bool:
+        """New local ports for the forwards this tunnel picked itself; False if none."""
+        if not self._picked:
+            return False
+        keep = {fw.local_port for fw in self.forwards if fw.name not in self._picked}
+        old = {fw.local_port for fw in self.forwards}
+        fresh: list[Forward] = []
+        for fw in self.forwards:
+            if fw.name in self._picked:
+                fw = replace(fw, local_port=free_local_port(keep | old))
+                keep.add(fw.local_port)
+            fresh.append(fw)
+        self.forwards = tuple(fresh)
+        return True
 
     def _launch_and_wait(self) -> tuple[bool, str]:
         try:
@@ -522,6 +665,7 @@ class SshTunnel:
             return False, f"cannot start {self.argv[0]}: {exc}"
         with self._mu:
             self._proc = proc
+        self._record(proc)
         deadline = time.monotonic() + self.ready_timeout_s
         while not self._closing.is_set():
             rc = proc.poll()
@@ -535,6 +679,32 @@ class SshTunnel:
                               f"({_explain(_stderr_of(proc)) or 'ssh is still connecting'})"
             self._closing.wait(0.05)
         return False, "closed"
+
+    def _record(self, proc: TunnelProcess) -> None:
+        """Note the running ssh, so a later process can stop it if this one is killed."""
+        import json
+
+        pid = getattr(proc, "pid", None)
+        if not isinstance(pid, int) or pid <= 0:
+            return
+        try:
+            if self._record_path is None:
+                self._record_path = procs_dir() / f"{os.getpid()}-{id(self):x}.json"
+            self._record_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._record_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({
+                "pid": pid, "owner_pid": os.getpid(), "owner_host": socket.gethostname(),
+                "host": self.host, "label": self.label, "argv": list(self.argv),
+                "started_at": time.time()}), encoding="utf-8")
+            os.replace(tmp, self._record_path)
+        except OSError as exc:            # a full disk must not stop the tunnel
+            log.warning("tunnel %s: cannot record ssh pid %d for orphan clean-up: %s",
+                        self.label, pid, exc)
+
+    def _unrecord(self) -> None:
+        if self._record_path is not None:
+            with contextlib.suppress(OSError):
+                self._record_path.unlink()
 
     def _stop_proc(self) -> None:
         with self._mu:
@@ -550,6 +720,7 @@ class SshTunnel:
                 proc.kill()
             with contextlib.suppress(Exception):
                 proc.wait(timeout=2.0)
+        self._unrecord()
 
     def _supervise(self) -> None:
         attempt = 0

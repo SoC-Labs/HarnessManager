@@ -356,6 +356,7 @@ class Daemon:
         self.console_limits = console_limits
         self._mu = threading.Lock()
         self._candidates: dict[str, Candidate] = {}
+        self._unlog = self.bus.subscribe("*", _log_event)
 
     def check_token(self, presented: str | None) -> bool:
         return bool(presented) and hmac.compare_digest(presented.encode("utf-8"),
@@ -377,8 +378,30 @@ class Daemon:
         return known
 
     def close(self) -> None:
+        self._unlog()
         self.hub.close()
         self.jobs.shutdown(wait=False)
+
+
+#: Engine events worth a line in daemon.log: the board's life story for a field report
+#: (Q2). Never console bytes or progress ticks; no event here carries a token.
+_LOGGED = {
+    "session.opened": ("note",), "session.closed": (),
+    "board.identity": ("shell_id", "rm_id", "rm_name", "harness_version"),
+    "deploy.done": ("rm_id", "verified"), "deploy.failed": ("stage", "reason"),
+    "debug.state": ("state", "pid", "detail"),
+    "controller.reboot": ("phase",), "power.cycle": ("phase", "device"),
+    "lease.state": ("target", "state", "holder", "expires_at"),
+    "update.done": ("version", "result"), "update.failed": ("version", "phase", "reason"),
+}
+
+
+def _log_event(ev: Event) -> None:
+    keys = _LOGGED.get(ev.topic)
+    if keys is None:
+        return
+    fields = " ".join(f"{k}={ev.data.get(k)!r}" for k in keys if k in ev.data)
+    log.info("%s %s %s", ev.topic, ev.board_id or "-", fields)
 
 
 def _obj(body: Any) -> dict[str, Any]:

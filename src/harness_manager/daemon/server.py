@@ -19,6 +19,7 @@ line passes a filter that masks it.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import errno
 import json
 import logging
@@ -28,11 +29,18 @@ import secrets
 import signal
 import socket
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 from harness_manager import __version__
-from harness_manager.core.errors import HarnessError, PortBoundError, UsageError
+from harness_manager.core.errors import (
+    ActionFailedError,
+    HarnessError,
+    PortBoundError,
+    UsageError,
+)
 
 from .state import DaemonInstance, default_state_dir, is_loopback, new_info, remove_info, write_info
 
@@ -111,6 +119,103 @@ def _server_class() -> type:
     return Server
 
 
+def reap_debris(engine: Any) -> list[str]:
+    """What a killed daemon (``kill -9``, a crash) left running or lying around. Q2.
+
+    Called once the single-instance lock is ours, so nothing of a LIVE daemon for this
+    state dir is touched; every step only takes what a dead process owned:
+
+    - each pack's ``reap_orphans()`` (optional hook): the MPS3 pack's SSH tunnels;
+    - the debug service's orphaned OpenOCDs (``DebugService.reap_orphans``);
+    - PTY links whose process is gone (``pty.sweep_stale``): their ``/dev/pts/N`` may
+      belong to another terminal by now, so ``screen <path>`` would attach to it.
+    """
+    done: list[str] = []
+    try:
+        packs = engine.packs()
+    except Exception:  # noqa: BLE001 - start-up clean-up must never stop the daemon
+        log.exception("clean-up: the packs did not load")
+        packs = {}
+    for name, pack in sorted(packs.items()):
+        hook = getattr(pack, "reap_orphans", None)
+        if callable(hook):
+            try:
+                done += [f"{name}: {what}" for what in hook() or ()]
+            except Exception:  # noqa: BLE001
+                log.exception("clean-up: pack %s failed to reap its orphans", name)
+    debug = getattr(engine, "debug", None)
+    if debug is not None and getattr(debug, "reason", None) is None \
+            and callable(getattr(debug, "reap_orphans", None)):
+        try:
+            done += [f"OpenOCD of {board}" for board in debug.reap_orphans()]
+        except Exception:  # noqa: BLE001
+            log.exception("clean-up: reaping orphaned OpenOCDs failed")
+    try:
+        from harness_manager.services import pty
+
+        if pty.supported():
+            done += [f"PTY link {p}" for p in pty.sweep_stale(pty.runtime_dir())]
+    except Exception:  # noqa: BLE001
+        log.exception("clean-up: sweeping stale PTY links failed")
+    for what in done:
+        log.warning("clean-up after a daemon that did not stop cleanly: %s", what)
+    return done
+
+
+def _hold_signals() -> None:
+    """While the boards close, a SIGINT/SIGTERM must not kill the process half way.
+
+    uvicorn restores the default handlers when ``run()`` returns, so a second Ctrl-C,
+    or ``daemon stop``'s SIGTERM fallback, landing during ``close_all`` used to end the
+    process there: its ssh tunnels and OpenOCDs orphaned, daemon.json and the lock
+    left behind. Now the signal is logged and the clean-up finishes (Q2, 2026-09-24).
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return
+
+    def still_closing(sig: int, _frame: Any) -> None:
+        log.warning("signal %d while closing the boards: finishing the clean-up first", sig)
+
+    for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            with contextlib.suppress(OSError, ValueError):
+                signal.signal(sig, still_closing)
+
+
+def _stop_on_hangup(server: Any) -> None:
+    """SIGHUP (the terminal of a foreground daemon closed) stops it cleanly, like SIGTERM.
+
+    uvicorn handles only SIGINT and SIGTERM; the default SIGHUP action killed the
+    process with no clean-up at all.
+    """
+    sig = getattr(signal, "SIGHUP", None)
+    if sig is None or threading.current_thread() is not threading.main_thread():
+        return
+
+    def hangup(_sig: int, _frame: Any) -> None:
+        log.info("SIGHUP: stopping")
+        server.should_exit = True
+
+    with contextlib.suppress(OSError, ValueError):
+        signal.signal(sig, hangup)
+
+
+def _state_error(what: str, path: Path, exc: OSError) -> HarnessError:
+    """An OSError on the state dir as a message with the next step (never a traceback)."""
+    if exc.errno == errno.ENOSPC:
+        why = "the disk is full"
+        hint = f"free space on the disk holding {path}"
+    elif exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+        why = "it is not writable"
+        hint = ("use a state directory you can write: --state-dir DIR or "
+                "HARNESS_MANAGER_STATE_DIR")
+    else:
+        why = exc.strerror or str(exc)
+        hint = "check the state directory (--state-dir, HARNESS_MANAGER_STATE_DIR)"
+    return ActionFailedError(f"harness-manager-daemon cannot {what} {path}: {why}", hint=hint)
+
+
 def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
                pack_overrides: dict[str, dict] | None = None, log_level: str = "info",
                demo: bool = False) -> int:
@@ -123,9 +228,15 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
     from .app import create_app
 
     state_dir = Path(state_dir)
-    state_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _state_error("create its state directory", state_dir, exc) from None
     instance = DaemonInstance(state_dir)
-    instance.acquire()
+    try:
+        instance.acquire()
+    except OSError as exc:
+        raise _state_error("write its lock file in", state_dir, exc) from None
     engine: Any = None
     wrote = False
     try:
@@ -142,6 +253,8 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
             engine = Engine(EngineConfig(state_dir=state_dir,
                                          pack_overrides=pack_overrides or {}))
         engine.packs()               # bad pack settings fail here, before anyone connects
+        if not demo:
+            reap_debris(engine)
         holder: dict[str, uvicorn.Server] = {}
 
         def request_shutdown() -> None:
@@ -150,26 +263,35 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
                 server.should_exit = True
 
         app = create_app(engine, token=token, state_dir=state_dir, shutdown=request_shutdown)
+        # log_config=None: uvicorn's own lines go through the root handler, so they carry
+        # the same timestamps as ours (its default formatter has none) and the token filter.
         config = uvicorn.Config(app, log_level=log_level, access_log=False, lifespan="on",
-                                timeout_graceful_shutdown=5)
+                                timeout_graceful_shutdown=5, log_config=None)
         server = _server_class()(config)
         holder["server"] = server
         install_redaction()
         info = new_info(port=sock.getsockname()[1], token=token, version=__version__,
                         listen=listen)
-        write_info(state_dir, info)
+        try:
+            write_info(state_dir, info)
+        except OSError as exc:
+            raise _state_error("write daemon.json in", state_dir, exc) from None
         wrote = True
         log.info("harness-manager-daemon %s (pid %d) serving %s for %s", __version__, info.pid,
                  info.base_url, state_dir)
+        _stop_on_hangup(server)
         server.run(sockets=[sock])
         log.info("harness-manager-daemon stopped")
         return 0
     finally:
+        _hold_signals()
         if engine is not None:
+            t0 = time.monotonic()
             try:
                 engine.close_all()
             except Exception:  # noqa: BLE001 - shutting down must finish
                 log.exception("closing the boards failed")
+            log.info("boards closed in %.1f s", time.monotonic() - t0)
         if wrote:
             remove_info(state_dir, os.getpid())
         instance.release()

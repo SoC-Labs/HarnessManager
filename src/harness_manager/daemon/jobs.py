@@ -191,6 +191,7 @@ class JobManager:
                     break
                 self._jobs.popitem(last=False)
         self._publish("job.started", job, {"job": job.id, "kind": kind})
+        log.info("%s started on %s", job.describe(), board_id or "the engine")
         try:
             self._pool.submit(self._run, job, fn, serialise)
         except RuntimeError as exc:        # the pool is shut down
@@ -242,6 +243,7 @@ class JobManager:
                 job.state = "done"
                 job.ended_at = time.time()
             job.finished.set()
+            log.info("%s done in %.1f s", job.describe(), job.ended_at - job.started_at)
             self._publish("job.done", job, {"job": job.id, "result": result})
 
     def _fail(self, job: Job, exc: HarnessError) -> None:
@@ -251,6 +253,10 @@ class JobManager:
             job.state = "failed"
             job.ended_at = time.time()
         job.finished.set()
+        # The field record: a failed deploy or reboot said nothing in daemon.log before.
+        log.warning("%s on %s failed after %.1f s: %s: %s", job.describe(),
+                    job.board_id or "the engine", job.ended_at - job.started_at,
+                    err.get("name"), err.get("message"))
         self._publish("job.failed", job, {"job": job.id, "error": err})
 
     def _publish(self, topic: str, job: Job, data: dict[str, Any]) -> None:
