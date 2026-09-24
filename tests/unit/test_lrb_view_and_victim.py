@@ -11,7 +11,6 @@ from harness_manager.services.lease import (
     RequestNote,
     StoredLease,
     force_check,
-    force_reason,
     parse_utc,
 )
 from tests.fakes.lrb_fake_hub import HOST, TARGET, iso
@@ -276,3 +275,42 @@ def test_parse_utc_reads_the_notes_timestamps():
     assert parse_utc("2026-09-24T10:00:00") == parse_utc("2026-09-24T10:00:00+00:00")   # naive = UTC
     for bad in ("", "soon", None, 12, "2026-13-01T00:00:00Z"):
         assert parse_utc(bad) is None
+
+
+# --- the heartbeat survives anything (Q2) -------------------------------------------------------
+
+
+def test_a_heartbeat_round_that_fails_oddly_is_said_and_retried(world):
+    import errno
+
+    a = world.holding()
+    real_put = a.svc.store.put
+
+    def full(_lease):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    a.svc.store.put = full
+    a.svc.beat_due(force=True)                                 # must not raise
+    warned = [d for d in a.of("lease.state") if d.get("warning")]
+    assert len(warned) == 1 and warned[0]["state"] == "held" and "OSError" in warned[0]["warning"]
+    assert a.svc.tracked() == [BID] and a.svc.store.get(HOST, TARGET) is not None
+    a.svc.store.put = real_put
+    world.clock.advance(61)                                    # retried within a minute
+    n = len(world.calls(DAVID, "lease_heartbeat"))
+    a.svc.beat_due()
+    assert len(world.calls(DAVID, "lease_heartbeat")) == n + 1
+    assert len([d for d in a.of("lease.state") if d.get("warning")]) == 1   # twin: a good round is quiet
+
+
+def test_a_heartbeat_client_bug_does_not_end_the_heartbeat(world):
+    a = world.holding()
+
+    def broken(token, holder):
+        raise RuntimeError("parser fell over")
+
+    a.hub.client.lease_heartbeat = broken
+    a.svc.beat_due(force=True)
+    a.svc.watch_due(force=True)
+    assert [d["warning"] for d in a.of("lease.state") if d.get("warning")][0].startswith(
+        "the lease heartbeat failed (RuntimeError")
+    assert a.svc.tracked() == [BID]

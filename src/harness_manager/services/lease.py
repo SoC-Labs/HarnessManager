@@ -610,10 +610,13 @@ class LeaseService:
         if self.bus is not None:
             self.bus.publish(Event(topic, board_id, data))
 
-    def _emit(self, board_id: str, hub: Any, state: str, holder: str = "", expires_at: str = "") -> None:
+    def _emit(self, board_id: str, hub: Any, state: str, holder: str = "", expires_at: str = "",
+              *, warning: str = "") -> None:
         self._forget(hub)
-        self._publish(TOPIC, board_id, {"target": hub.target, "state": state, "holder": holder,
-                                        "expires_at": expires_at})
+        data = {"target": hub.target, "state": state, "holder": holder, "expires_at": expires_at}
+        if warning:
+            data["warning"] = warning             # additive: the state stands, something failed
+        self._publish(TOPIC, board_id, data)
 
     def _board_for(self, hub: Any, board_id: str = "") -> str:
         key = _hk(hub)
@@ -1312,46 +1315,73 @@ class LeaseService:
             return list(self._tracked)
 
     def _run(self) -> None:
+        # Nothing may end this loop but close(): a dead heartbeat lets the lease lapse, and
+        # the hub then resets the board under whoever is using it (Q2).
         while not self._stop.wait(self._tick_s):
-            self.beat_due()
-            self.watch_due()
+            for step in (self.beat_due, self.watch_due):
+                try:
+                    step()
+                except Exception:  # noqa: BLE001 - both say they never raise; make it so
+                    log.exception("lease service round %s", step.__name__)
 
     def beat_due(self, *, force: bool = False) -> None:
-        """One heartbeat round: every tracked board whose stored lease is due. Never raises."""
+        """One heartbeat round: every tracked board whose stored lease is due. Never raises:
+        a round that fails in any way is logged, said (``lease.state`` with ``warning``) and
+        retried within a minute; the TTL still covers the lease meanwhile."""
         with self._mu:
             items = list(self._tracked.items())
         for board_id, tr in items:
-            stored = self.store.get(tr.hub.host, tr.hub.target)
-            if stored is None:
-                continue                           # nothing of ours to keep alive (yet)
-            every = self._heartbeat_s or heartbeat_interval(stored.ttl_s)
-            now = self._clock()
-            if not force and now - tr.last_beat < every:
-                continue
-            tr.last_beat = now
             try:
-                expires_at = tr.hub.client.lease_heartbeat(stored.token, stored.holder)
-            except HeldError as exc:
-                state = getattr(exc, "state", "lost")
-                self.store.drop(tr.hub.host, tr.hub.target)
-                self.untrack(board_id)
-                log.warning("lease heartbeat for %s: %s", board_id, exc.message)
-                self._emit(board_id, tr.hub, state if state in ("expired", "lost") else "lost",
-                           stored.principal or stored.holder)
-                if state != "expired":
-                    self._check_taken(board_id, tr.hub, stored, self._holder_now(tr.hub))
-                continue
-            except HarnessError as exc:
-                # The hub did not answer this time: the TTL still covers us; try next tick.
-                log.warning("lease heartbeat for %s failed (will retry): %s", board_id, exc.message)
-                tr.last_beat = now - every + min(every, 60.0)
-                continue
-            if expires_at:
-                self.store.put(StoredLease(**{**asdict(stored), "expires_at": expires_at}))
-            if not tr.announced or expires_at != stored.expires_at:
-                tr.announced = True
-                self._emit(board_id, tr.hub, "held", stored.principal or stored.holder,
-                           expires_at or stored.expires_at)
+                self._beat_one(board_id, tr, force)
+            except Exception as exc:  # noqa: BLE001 - e.g. OSError: a full disk on store.put
+                log.exception("lease heartbeat for %s failed (will retry)", board_id)
+                self._beat_failed(board_id, tr, exc)
+
+    def _beat_failed(self, board_id: str, tr: _Tracked, exc: BaseException) -> None:
+        stored = None
+        with contextlib.suppress(Exception):
+            stored = self.store.get(tr.hub.host, tr.hub.target)
+        every = self._heartbeat_s or heartbeat_interval(stored.ttl_s if stored else DEFAULT_TTL_S)
+        tr.last_beat = self._clock() - every + min(every, 60.0)
+        with contextlib.suppress(Exception):
+            self._emit(board_id, tr.hub, "held",
+                       (stored.principal or stored.holder) if stored else "",
+                       stored.expires_at if stored else "",
+                       warning=f"the lease heartbeat failed ({type(exc).__name__}: {exc}); "
+                               "retrying within a minute")
+
+    def _beat_one(self, board_id: str, tr: _Tracked, force: bool) -> None:
+        stored = self.store.get(tr.hub.host, tr.hub.target)
+        if stored is None:
+            return                             # nothing of ours to keep alive (yet)
+        every = self._heartbeat_s or heartbeat_interval(stored.ttl_s)
+        now = self._clock()
+        if not force and now - tr.last_beat < every:
+            return
+        tr.last_beat = now
+        try:
+            expires_at = tr.hub.client.lease_heartbeat(stored.token, stored.holder)
+        except HeldError as exc:
+            state = getattr(exc, "state", "lost")
+            self.store.drop(tr.hub.host, tr.hub.target)
+            self.untrack(board_id)
+            log.warning("lease heartbeat for %s: %s", board_id, exc.message)
+            self._emit(board_id, tr.hub, state if state in ("expired", "lost") else "lost",
+                       stored.principal or stored.holder)
+            if state != "expired":
+                self._check_taken(board_id, tr.hub, stored, self._holder_now(tr.hub))
+            return
+        except HarnessError as exc:
+            # The hub did not answer this time: the TTL still covers us; try next tick.
+            log.warning("lease heartbeat for %s failed (will retry): %s", board_id, exc.message)
+            tr.last_beat = now - every + min(every, 60.0)
+            return
+        if expires_at:
+            self.store.put(StoredLease(**{**asdict(stored), "expires_at": expires_at}))
+        if not tr.announced or expires_at != stored.expires_at:
+            tr.announced = True
+            self._emit(board_id, tr.hub, "held", stored.principal or stored.holder,
+                       expires_at or stored.expires_at)
 
     def _holder_now(self, hub: Any) -> str:
         try:

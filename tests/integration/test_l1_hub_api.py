@@ -78,8 +78,9 @@ def test_lease_acquire_is_a_job_then_the_lease_is_mine_until_released(client, ri
     bid = open_lab(client)
     seen: list[dict] = []
     client.app.state.daemon.bus.subscribe("lease.*", lambda ev: seen.append(ev.data))
-    assert client.get(f"{bid_path(bid)}/lease", headers=H).json() == {"ok": True, "lease": None,
-                                                                         "hub": HUB}
+    # LR-B adds queue/request/incoming/taken to the view; L1's keys are unchanged.
+    got = client.get(f"{bid_path(bid)}/lease", headers=H).json()
+    assert {k: got[k] for k in ("ok", "lease", "hub")} == {"ok": True, "lease": None, "hub": HUB}
     r = client.post(f"{bid_path(bid)}/lease", json={"ttl_s": 600}, headers=H)
     assert r.status_code == 202
     done = wait_job(client, r.json()["job"])
@@ -170,8 +171,9 @@ def test_negative_twin_a_direct_board_has_no_tunnel_and_no_hub(tmp_path):
             r = c.post("/api/v1/boards", json={"target": vb.shell_endpoint}, headers=H)
             bid = r.json()["board_id"]
             assert c.get(f"{bid_path(bid)}/tunnel", headers=H).json() == {"ok": True, "tunnel": None}
-            assert c.get(f"{bid_path(bid)}/lease", headers=H).json() == {"ok": True, "lease": None,
-                                                                         "hub": None}
+            got = c.get(f"{bid_path(bid)}/lease", headers=H).json()
+            assert {k: got[k] for k in ("ok", "lease", "hub")} == {"ok": True, "lease": None,
+                                                                   "hub": None}
             r = c.post(f"{bid_path(bid)}/lease", json={}, headers=H)
             assert r.status_code == 422 and r.json()["error"]["code"] == ExitCode.UNAVAILABLE
         eng.close_all()

@@ -698,12 +698,9 @@ def test_back_to_back_mcc_reads_over_a_hub_share_both_work(tmp_path, monkeypatch
 # --- the lease heartbeat thread (finding for the LR lanes: services/lease.py) ------------------
 
 
-@pytest.mark.xfail(strict=False, reason="Q2 finding: LeaseService.beat_due says it never raises "
-                   "but catches only HarnessError; one OSError (a full disk on store.put) ends "
-                   "the heartbeat thread for good and the lease lapses with no lease.state "
-                   "event. services/lease.py is the LR lanes'; not strict so their fix does not "
-                   "break the merge; remove the mark with it.")
 def test_the_lease_heartbeat_survives_one_failed_round(tmp_path):
+    # Q2 finding, fixed by LR-B: beat_due caught only HarnessError, so one OSError (a full
+    # disk on store.put) ended the heartbeat thread and the lease lapsed with no event.
     from harness_manager.services.lease import LeaseService, StoredLease
 
     class Client:
