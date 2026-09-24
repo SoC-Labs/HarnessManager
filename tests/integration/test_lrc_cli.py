@@ -170,6 +170,8 @@ def test_ctrl_c_during_a_request_leaves_the_queue(capsys, world, monkeypatch):
 def test_negative_twin_request_refuses_a_long_message_before_queueing(capsys, world):
     rc, _, err = run(capsys, "lease", "request", TARGET_ARG, "--message", "x" * 501)
     assert rc == ExitCode.USAGE and "500" in err
+    rc, _, err = run(capsys, "lease", "request", TARGET_ARG, "--ttl", "5")
+    assert rc == ExitCode.USAGE and "--ttl" in err
     assert not any(c[0] == "request" for c in world.calls) and world.queue == []
 
 

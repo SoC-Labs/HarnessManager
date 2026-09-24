@@ -549,6 +549,8 @@ def _lease_result(cand: Any, hub: Any, lease: dict[str, Any], human: list[str],
 def _request(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     a = ctx.args
     message = clean_message(a.message)
+    if not 60 <= a.ttl <= 86400:            # the daemon route's rule (hub_api._ttl)
+        raise UsageError(f"--ttl must be whole seconds from 60 to 86400, not {a.ttl}")
     countdown = _Countdown(ctx, svc, hub)
 
     def progress(phase: str, done: int, _total: int) -> None:
