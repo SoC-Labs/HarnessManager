@@ -3,7 +3,7 @@ against the fake XVC server, 127.0.0.1 only (no cable, no board, no hub).
 
 Questions it answers for docs/design/XVC_DEBUG.md:
 
-1. Does an HM-owned hw_server (``xvc_spike.hw_server_argv``: private port, ``-p0``, no
+1. Does an HM-owned hw_server (``xvc_spike_lib.hw_server_argv``: private port, ``-p0``, no
    ``-d``/``-I``, XVC target pre-opened with ``-e "set auto-open-servers ..."``) see the
    device the way Vivado saw it on silicon (``debug_bridge``, IDCODE 0x0A003093)?
 2. Does it hold the board's ONE XVC slot while no client is attached?
@@ -38,8 +38,8 @@ import threading
 import time
 from pathlib import Path
 
-from harness_manager.services import xvc_spike as X
 from harness_manager_mps3.tunnel import listening
+from tests.spikes import xvc_spike_lib as X
 from tests.spikes.xvc_fake_server import FakeXvcServer, Tap
 
 NEW_RM_IDCODE = 0x13631093

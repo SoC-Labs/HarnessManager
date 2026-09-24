@@ -2,7 +2,7 @@
 
 **Lane:** XVC (design + one board-free spike). **Date:** 2026-09-24. **Base:** HM `main` 80bb849.
 **For:** david, to decide §5. Nothing here is wired into the app.
-**Spike code:** `tests/spikes/`, `src/harness_manager/services/xvc_spike.py`. **Evidence:** `docs/assessment/xvc_spike_2026-09-24/`.
+**Spike code:** `tests/spikes/` (the host-side pieces are in `tests/spikes/xvc_spike_lib.py`, kept out of the shipped package). **Evidence:** `docs/assessment/xvc_spike_2026-09-24/`.
 
 Sources are cited as `repo:path:line`. The prefixes mean:
 - `plat` = mps3-nanosoc-platform;
@@ -149,7 +149,7 @@ Vivado / openocd ───────►│                                    
   - refuse re-attach during a swap (`hold`).
 
   It costs about 25 µs a round trip on loopback (§8).
-- **M1: an HM-owned hw_server** (`xvc_spike.hw_server_argv`). The spike showed:
+- **M1: an HM-owned hw_server** (`xvc_spike_lib.hw_server_argv`). The spike showed:
   - it opens XVC lazily, only when a client opens the cable;
   - it releases the slot about 1–5 s after its last client leaves, so it does not squat while idle;
   - it frees the slot within 50 ms of SIGTERM.
@@ -197,7 +197,7 @@ Vivado / openocd ───────►│                                    
   - MIG only: the static file;
   - both: a full-design `.ltx` of that config, which FLOW does not stage today (a request, §7). Until it does, the UI offers the two separately.
 - **Version.** HM warns when the manifest's `vivado` is newer than the user's hw_server (mint 3 is built with 2026.1).
-- **The Tcl** (`xvc_spike.vivado_tcl`, M1):
+- **The Tcl** (`xvc_spike_lib.vivado_tcl`, M1):
 
   ```tcl
   open_hw_manager
@@ -406,7 +406,7 @@ The machine was loaded (load average 67–84 on 16 cores), so p90s are scheduler
 | Reconnect race | an immediate reconnect after a close was refused 15–17 times in 20 on every path, direct included (8–18 across four runs). It is the server's accept-before-recv order (§1.1, §7.3) |
 | Leftover processes | none (checked by scratch path) |
 
-**Real hw_server** (`hw_server_run.txt`; argv from `xvc_spike.hw_server_argv`: `-q -p0 -s TCP:127.0.0.1:<H> -e "set auto-open-servers xilinx-xvc:127.0.0.1:<fake>"`):
+**Real hw_server** (`hw_server_run.txt`; argv from `xvc_spike_lib.hw_server_argv`: `-q -p0 -s TCP:127.0.0.1:<H> -e "set auto-open-servers xilinx-xvc:127.0.0.1:<fake>"`):
 
 | Check | Result |
 |---|---|

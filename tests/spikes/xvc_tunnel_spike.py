@@ -11,7 +11,7 @@ Board-free, hub-free. Everything runs on 127.0.0.1:
         |                                                   forward to the board's 127.0.0.1)
     harness_manager_mps3.tunnel.SshTunnel  (the real class, real ssh processes)
         ^  127.0.0.1:<local>
-    harness_manager.services.xvc_spike.XvcRelay (optional hop) and XvcClient / probe
+    tests.spikes.xvc_spike_lib.XvcRelay (optional hop) and XvcClient / probe
 
 It measures round-trip latency direct vs through each shape, then checks the
 behaviours the design depends on: one client, the swap gate, the relay's kick/hold,
@@ -46,8 +46,8 @@ from typing import Any
 SCRATCH = Path("/tmp") / f"xvc-spike-{os.getpid()}"   # the lane rule: /tmp, xvc- prefix
 os.environ["HARNESS_MANAGER_STATE_DIR"] = str(SCRATCH / "hm-state")   # never the user's
 
-from harness_manager.services import xvc_spike as X  # noqa: E402
 from harness_manager_mps3 import tunnel as T  # noqa: E402
+from tests.spikes import xvc_spike_lib as X  # noqa: E402
 from tests.spikes.xvc_fake_server import FakeXvcServer, Tap  # noqa: E402
 
 SSHD = "/usr/sbin/sshd"

@@ -1,8 +1,10 @@
 """SPIKE ONLY (lane XVC, 2026-09-24): the host-side pieces an XVC service would need.
 
-Not wired into the engine, the daemon or the CLI. ``docs/design/XVC_DEBUG.md`` is the
-design; ``tests/spikes/xvc_tunnel_spike.py`` drives this module against a fake XVC
-server through Harness Manager's real ``SshTunnel`` and a private loopback sshd.
+Not wired into the engine, the daemon or the CLI, and kept under ``tests/spikes/`` so it
+never ships in the wheel (it was ``src/harness_manager/services/xvc_spike.py`` on the
+lane branch). ``docs/design/XVC_DEBUG.md`` is the design;
+``tests/spikes/xvc_tunnel_spike.py`` drives this module against a fake XVC server
+through Harness Manager's real ``SshTunnel`` and a private loopback sshd.
 
 What is here, and why each piece exists:
 
