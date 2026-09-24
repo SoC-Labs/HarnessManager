@@ -24,7 +24,10 @@ the route passes the view through.
 
 Events: ``lease.state {target, state, holder, expires_at}``; ``tunnel.state``
 (the tunnel's status) whenever an open board's tunnel changes state (CCR L1-4
-appends the topic). The lease service publishes ``lease.wanted``,
+appends the topic). A board whose hub is reached over fpgahub's REST API (T8,
+CCR T8-2) also streams the hub's own events while it is open: ``hub.event`` and
+``hub.stream`` (``harness_manager.transports.hub_events``); each one drops the
+lease service's cached view and settles a revoked or expired lease at once. The lease service publishes ``lease.wanted``,
 ``lease.answered``, ``lease.force_available``, ``lease.taken`` and ``lease.left``
 on the engine bus; the events WebSocket forwards every bus topic as it is.
 
@@ -140,6 +143,14 @@ def register(ctx: RouteContext) -> None:
     leases = LeaseService(d.state_dir, d.bus)
     d.leases = leases                     # other lanes and tests read it here
     beside = _BesideJobs(d)
+    streams: dict[str, Any] = {}          # board id -> hub_events.HubEventStream (T8)
+    d.hub_streams = streams
+    # CCR T8-4 gives the service these; until it lands, the stream still runs and the
+    # 10 s view cache and the heartbeat settle a change instead.
+    on_hub_event = getattr(leases, "on_hub_event", None)
+    if callable(on_hub_event):
+        d.bus.subscribe("hub.event", on_hub_event)
+    forget = getattr(leases, "forget", None) or getattr(leases, "_forget", None)
     mu = threading.Lock()
     requesting: dict[str, threading.Event] = {}     # board id -> its request job's cancel
 
@@ -162,15 +173,43 @@ def register(ctx: RouteContext) -> None:
         hub = getattr(session, "hub", None)
         if hub is not None:
             leases.track(ev.board_id, hub)
+            start_stream(ev.board_id, hub)
         tunnel = getattr(getattr(session, "reach", None), "tunnel", None)
         if tunnel is not None and hasattr(tunnel, "watch"):
             bid = ev.board_id
             tunnel.watch(lambda st: d.bus.publish(Event(TUNNEL_TOPIC, bid, st)))
 
+    def start_stream(board_id: str, hub: Any) -> None:
+        """fpgahub's event stream for a REST-mode hub with events on (CCR T8-2)."""
+        client = getattr(hub, "client", None)
+        if getattr(client, "transport", "") != "rest" or \
+                not getattr(getattr(client, "config", None), "events", False):
+            return
+        with mu:
+            if board_id in streams:
+                return
+        from harness_manager.transports import hub_events
+
+        stream = hub_events.attach_bus(
+            d.bus, board_id, client,
+            on_resync=(lambda h=hub: forget(h)) if callable(forget) else None)
+        with mu:
+            if board_id not in streams:
+                streams[board_id] = stream
+                return
+        stream.close()                    # lost a race with another open: keep the first
+
+    def stop_stream(board_id: str) -> None:
+        with mu:
+            stream = streams.pop(board_id, None)
+        if stream is not None:
+            stream.close()
+
     def closed(ev: Event) -> None:
         leases.untrack(ev.board_id)
         leases.cancel_acquire(ev.board_id)
         stop_request(ev.board_id)         # docs/LEASE_REQUESTS.md: closing leaves the queue
+        stop_stream(ev.board_id)
 
     d.bus.subscribe("session.opened", opened)
     d.bus.subscribe("session.closed", closed)
@@ -182,8 +221,11 @@ def register(ctx: RouteContext) -> None:
     def close() -> None:
         with mu:
             cancels = list(requesting.values())
+            ids = list(streams)
         for cancel in cancels:
             cancel.set()
+        for board_id in ids:
+            stop_stream(board_id)
         leases.close()
         beside.close()
         original_close()

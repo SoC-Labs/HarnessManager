@@ -508,3 +508,74 @@ def test_get_lease_passes_the_extended_view_through(client, bid, world):
     (inc,) = client.get(lease(bid), headers=H).json()["incoming"]
     assert inc["answer"]["answer"] == "keep" and inc["answer"]["minutes"] == 30
     assert inc["answer"]["at"].endswith("+00:00")                     # D8
+
+
+# --- CCR T8-2: fpgahub's event stream follows a REST-mode board ---------------------------------
+
+
+class _Stream:
+    def __init__(self, board_id: str, client, on_resync) -> None:
+        self.board_id, self.client, self.on_resync = board_id, client, on_resync
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+@pytest.fixture
+def streams(monkeypatch):
+    """A recording ``hub_events.attach_bus``: never a socket (the T8 fake hub covers that)."""
+    from harness_manager.transports import hub_events
+
+    made: list[_Stream] = []
+
+    def attach_bus(bus, board_id, client, *, on_resync=None, **_kw):
+        made.append(_Stream(board_id, client, on_resync))
+        return made[-1]
+
+    monkeypatch.setattr(hub_events, "attach_bus", attach_bus)
+    return made
+
+
+def _as_rest(client: TestClient, bid: str, *, events: bool = True):
+    """Make the open board's hub a REST-mode one (T8-1 is not on main yet), then re-announce it."""
+    from types import SimpleNamespace
+
+    session = client.app.state.daemon.engine.session(bid)
+    real = session.hub
+    session.hub = SimpleNamespace(host=real.host, target=real.target, close=real.close,
+                                  client=SimpleNamespace(transport="rest", target=real.target,
+                                                         config=SimpleNamespace(events=events)))
+    client.app.state.daemon.bus.publish(Event("session.opened", bid, {}))
+    return session.hub
+
+
+def test_a_rest_board_streams_hub_events_until_it_closes(client, bid, world, streams):
+    d = client.app.state.daemon
+    hub = _as_rest(client, bid)
+    (s,) = streams
+    assert d.hub_streams == {bid: s} and s.board_id == bid and s.client is hub.client
+    assert callable(s.on_resync)
+    s.on_resync()                                                     # drops the cached view
+    d.bus.publish(Event("session.opened", bid, {}))                   # a second open: no second
+    assert len(streams) == 1
+    assert client.delete(bid_path(bid), headers=H).status_code == 200
+    assert d.hub_streams == {} and s.closed == 1
+
+
+def test_negative_twin_ssh_or_events_off_starts_no_stream(client, bid, world, streams):
+    d = client.app.state.daemon
+    assert d.hub_streams == {} and streams == []                     # the SSH lab rig (L1)
+    _as_rest(client, bid, events=False)
+    assert d.hub_streams == {} and streams == []
+
+
+def test_stopping_the_daemon_closes_the_streams(rig, world, streams, monkeypatch):
+    monkeypatch.setattr(hub_api, "LeaseService", factory(world))
+    eng = Engine(EngineConfig(state_dir=state_dir()))
+    with TestClient(create_app(eng, token=TOKEN, static_dir=None)) as c:
+        bid = c.post("/api/v1/boards", json={"target": BOARD_IP}, headers=H).json()["board_id"]
+        _as_rest(c, bid)
+        assert len(c.app.state.daemon.hub_streams) == 1
+    eng.close_all()
+    assert [s.closed for s in streams] == [1]

@@ -39,6 +39,8 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `lease.force_available` `{id}` | this session's request is unanswered past its deadline (or its keep ran out), at the head of the queue (LR-B, LR-C) |
 | `lease.taken` `{by, reason, at}` | this session's lease was force-released by someone else (LR-B, LR-C) |
 | `lease.left` `{}` | this session left the queue and withdrew its request (LR-B, LR-C) |
+| `hub.event` `{type, ts, target, board, data}` | fpgahub pushed a lease or share event about the board's target or its physical board (T8; `data` is fpgahub's own payload, never a token) |
+| `hub.stream` `{state: connecting\|up\|down\|refused\|closed, detail, url, reconnects}` | the board's fpgahub event stream changed state (T8) |
 | `job.started`, `job.progress`, `job.done`, `job.failed`, `events.dropped` | harness-manager-daemon jobs and back-pressure (docs/API.md) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
@@ -69,6 +71,10 @@ These are the interfaces every team codes against. They are owned by the lead an
   - `ProbeHints.via` and `candidate_for_host(spec, via="")` take `"ssh:HOST"`. A pack that cannot tunnel raises `UsageError` for a non-empty `via`.
   - Sessions behind a hub may carry `session.hub` (`host`, `target`, `client`) and `session.reach` (`status()`, `close()`). A pack may offer `hub_for(candidate)`.
   - Engines that predate `via` still work: callers pass it only when it is set.
+- **Hub mode (T8).**
+  - boards.toml `hub.url` (with `token_file`, `ca_file`, ...) reaches fpgahub's REST API instead of ssh; with `host` too, REST wins and `host` is the data plane's SSH fallback. `via = "hub"` routes through the hub when the lease gate allows, else tunnels.
+  - `session.hub.client.transport` is `"ssh"` or `"rest"`. A REST client has `notes_supported = False` (+ `notes_reason`), `can_revoke() -> (bool, reason)` (force-release needs an admin token), `observe(event)` and `relevant(event)`.
+  - `session.reach` may be a `DirectReach` (`status()['mode'] == 'direct'`, with the plan).
 - **Readings are never zero-filled.** A missing value is `Reading.unavailable(...)` with a reason and a source.
 
 ## Changing a contract
