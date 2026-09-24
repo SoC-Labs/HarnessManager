@@ -1413,13 +1413,24 @@ class LeaseService:
         self._poll_answer(out)
 
     def close(self) -> None:
+        """Stop: waiting acquires and requests leave the queue (their threads do it), and so
+        does an answered request the service was watching: an abandoned queue entry can later
+        grant the board to nobody."""
         self._stop.set()
         with self._mu:
             waits = list(self._acquiring.values())
+            watched = [o for o in self._outgoing.values() if not o.blocking and not o.left]
             self._tracked.clear()
-            self._outgoing.clear()
         for ev in waits:
             ev.set()
+        for out in watched:
+            out.left = True
+            try:
+                self._leave_hub(out.board_id, out.hub, self._principal(out.hub))
+            except HarnessError as exc:
+                log.warning("leaving the queue for %s on close: %s", out.hub.target, exc.message)
+        with self._mu:
+            self._outgoing = {k: o for k, o in self._outgoing.items() if o.blocking}
         t = self._thread
         if t is not None and t is not threading.current_thread():
             t.join(timeout=2.0)

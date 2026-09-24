@@ -324,6 +324,17 @@ def test_closing_the_board_while_queued_leaves_the_queue(world):
     assert world.hub.queue == [] and world.hub.notes == {}
 
 
+def test_closing_the_service_leaves_a_watched_queue_place(world):
+    a, b = world.holding(), world.session(BOB)
+    world.clock.after(5, lambda: a.svc.respond(BID, a.hub, next(iter(world.hub.notes)), "keep",
+                                               minutes=5))
+    assert "answered" in b.svc.request(BID, b.hub)
+    a.svc.close()                                             # twin: a holder's close leaves nothing
+    assert world.hub.position(BOB) == 1 and len(world.hub.notes) == 1
+    b.svc.close()                                             # the daemon shuts down
+    assert world.hub.queue == [] and world.hub.notes == {} and b.of("lease.left") == [{}]
+
+
 # --- two requesters ------------------------------------------------------------------------------
 
 
@@ -387,6 +398,34 @@ def test_a_new_holder_is_asked_before_it_can_be_forced(world):
     assert len(b.of("lease.force_available")) == 1            # for the new note only
     c.svc.beat_due(force=True)
     assert c.of("lease.taken")[0]["by"] == BOB
+
+
+def test_the_wait_re_asks_a_new_holder_itself(world):
+    """No force call at all: the waiting request notices the new holder on its own poll,
+    so the UI is never offered a force-release against someone who was not asked."""
+    a, b, c = world.holding(), world.session(BOB), world.session(CAROL)
+    t0 = world.clock.t
+    carol = world.queued_by_hand(CAROL, age_s=0)
+    phases: list[str] = []
+
+    def carol_gets_it():                                      # t0+130: the first deadline is past
+        a.svc.respond(BID, a.hub, carol.id, "release")
+        c.svc.acquire(c.hub, board_id=BID, heartbeat=False)
+        c.svc.track(BID, c.hub, announced=True)
+
+    def check():                                              # t0+140
+        c.svc.watch_due(force=True)
+        assert [w["deadline_at"] for w in c.of("lease.wanted")] == [iso(t0 + 250)]
+        assert b.of("lease.force_available") == []            # not against carol, not yet
+        assert not b.svc.view(b.hub)["request"]["force_available"]
+        b.svc.leave(BID, b.hub)
+
+    world.clock.after(125, carol_gets_it)
+    world.clock.after(135, check)
+    with pytest.raises(ActionFailedError):
+        b.svc.request(BID, b.hub, progress=phases_into(phases))
+    assert phases == ["queued", "notified", "notified"]       # asked david, then carol
+    assert world.hub.current["holder"] == CAROL and world.hub.revokes == []
 
 
 # --- the holder's session is absent ---------------------------------------------------------------
@@ -511,3 +550,69 @@ def test_requests_need_a_hub_client_that_can_carry_them(tmp_path):
     finally:
         svc.close()
         fake.close()
+
+
+# --- as the daemon runs it: the request in a job thread, force or leave from another ----------
+
+
+def _threaded(world, principal):
+    """A session whose request() really waits (cancel.wait), polling every 20 ms."""
+    from harness_manager.core.events import EventBus
+    from tests.fakes.lrb_fake_hub import LrbHubRef
+    from tests.fakes.lrb_rig import Sess
+
+    bus = EventBus()
+    svc = LeaseService(world.tmp / f"t-{principal}", bus, tick_s=3600.0,
+                       wall_clock=world.clock.wall(), request_poll_s=0.02)
+    s = Sess(principal, principal, svc, LrbHubRef(world.hub.client(principal)))
+    bus.subscribe("lease.*", lambda ev: s.events.append((ev.topic, ev.board_id, dict(ev.data))))
+    world.sessions.append(s)
+    return s
+
+
+def _until(cond, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while not cond() and time.monotonic() < deadline:
+        time.sleep(0.005)
+    return cond()
+
+
+def test_threaded_force_while_the_request_job_waits(world):
+    import threading
+
+    world.holding()
+    b = _threaded(world, BOB)
+    result: dict = {}
+    t = threading.Thread(target=lambda: result.update(b.svc.request(BID, b.hub)), daemon=True)
+    t.start()
+    assert _until(lambda: world.hub.notes)
+    with pytest.raises(ForceTooEarlyError):                  # twin: not before the deadline
+        b.svc.force(BID, b.hub, confirm=True)
+    world.clock.t += 121                                      # the note's deadline passes
+    assert _until(lambda: b.of("lease.force_available"))
+    out = b.svc.force(BID, b.hub, confirm=True)
+    t.join(timeout=5)
+    assert not t.is_alive() and result["lease"]["holder"] == BOB == out["lease"]["holder"]
+    assert world.hub.queue == [] and world.hub.notes == {}
+
+
+def test_threaded_leave_while_the_request_job_waits(world):
+    import threading
+
+    world.holding()
+    b = _threaded(world, BOB)
+    errors: list = []
+
+    def job():
+        try:
+            b.svc.request(BID, b.hub)
+        except ActionFailedError as exc:
+            errors.append(exc)
+
+    t = threading.Thread(target=job, daemon=True)
+    t.start()
+    assert _until(lambda: world.hub.notes)
+    assert b.svc.leave(BID, b.hub) == {"left": True}
+    t.join(timeout=5)
+    assert not t.is_alive() and "left the queue" in errors[0].message
+    assert world.hub.queue == [] and world.hub.notes == {} and b.of("lease.left") == [{}]
