@@ -188,3 +188,12 @@ Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
 - **Holds:** a queued lease job holds the board (409 with `error.data.kind == "lease"`). Cancel it with `DELETE /lease`.
 - **Over a hub share:** MCC reads are slow (about 2 s for temperatures, about 6 s for oscillators), and SD storage is unavailable because there is no `USB_MSD` link.
 - **Timestamps:** `lease.expires_at` is an ISO 8601 string as fpgahub reports it. Every other timestamp is epoch seconds.
+
+## Board names (lane N1, additive; CCR N1-1 to N1-4)
+- **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.
+- **A name is display only.** It never keys a board: `board_id` does, and so do boards.toml tables, session locks and leases. A hub id is shown with `_` as `-` (`mps3_01` becomes `mps3-01`).
+- **`BoardIdentity` adds `name`:** what the harness reports, `""` today (no fielded firmware sends it).
+- **An open board can be renamed by `GET /boards/{bid}`.** When the harness or the hub gives a better name than the probe had, `info.candidate` carries it, and `GET /boards` shows it from then on. The first `info` of a board behind a hub asks the hub once (`fpgahub board list --json`, read-only) and caches the answer for an hour in that process. Set boards.toml `hub.board` to skip that call.
+- **Events:** `board.found` and `board.identity` add `name` and `name_source`.
+- **TSV:** `probe` and `info` append a `NAME` column.
+- **The web UI** shows the name in the rail, in the header (with the design and shell under it), on the preview card and in the window title (`mps3-01 · Harness Manager`). A board with no name shows its address, as before.

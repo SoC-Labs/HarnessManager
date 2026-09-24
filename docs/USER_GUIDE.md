@@ -143,6 +143,18 @@ the MPS3 target configs ship with Harness Manager.
 The command and the app share one board session through a background service, so you
 can use both at once. `harness-manager daemon status` shows the service.
 
+Board names: the app and `harness-manager info` call a board by its name when it has
+one, and by its address when it does not. A lab board behind a hub takes its name from
+the hub (`mps3-01`). To name your own board, add a `name` to its table in
+`~/.config/harness-manager/boards.toml`; your name always wins:
+
+```toml
+[boards."mps3@192.168.10.101:6900"]
+name = "my-mps3"
+```
+
+The name is only a label. You still address the board by its address.
+
 ## 5. The capability view
 
 Harness Manager never guesses what your board can do. It asks the board, and it lists
