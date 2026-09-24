@@ -256,7 +256,8 @@ change it. That covers:
 - any copy run with `HARNESS_MANAGER_NO_SELF_UPDATE=1`.
 
 `update app` and `update rollback --app` refuse ("this is a developer install … update it
-with git"). `update check` says why it offers no app update.
+with git"). `update check` still shows what the channel has, and says this copy cannot
+take it.
 
 ## Shared lab machines: the administrator's policy
 

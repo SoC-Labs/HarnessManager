@@ -192,12 +192,17 @@ class UpdateService:
             "releases": releases_summary(ch),
         }
         offer = self.app().offer(ch.app, ch.app_current) if ch.app_current else None
-        blocked = self.app().blocked()
-        if offer is not None and blocked:
+        policy_off = self.policy.off_reason() or self.app().policy_off
+        if offer is not None and policy_off:
+            # the administrator's "off": no app update is offered at all
             report["warnings"].append(f"harness-manager {offer.version} is available, but "
-                                      f"self-update is off here: {blocked}")
+                                      f"self-update is off here: {policy_off}")
         elif offer is not None:
             report["app_update"] = offer.version
+            if self.app().dev_install:
+                # a check only reads: it still says what the channel has
+                report["warnings"].append(f"this copy cannot update itself to {offer.version}: "
+                                          f"{self.app().dev_install}")
         if self.policy.path:
             report["policy"] = self.policy.as_dict()
             report["warnings"] += [f"policy {self.policy.path}: {p}" for p in self.policy.problems]

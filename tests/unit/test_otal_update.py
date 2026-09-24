@@ -316,10 +316,14 @@ def test_the_pinned_channel_is_used_and_another_is_refused(channel_app, tmp_path
         svc.check(channel="beta", source=channel_app.source())
 
 
-def test_a_developer_install_is_told_why_there_is_no_update(channel_app, tmp_path):
+def test_a_developer_install_sees_the_update_but_cannot_take_it(channel_app, tmp_path):
+    # A check only reads, so it still reports what the channel has (the release tool's
+    # smoke checks the offer from a developer venv); taking it is refused.
     svc, uv = service(tmp_path, policy=Policy(), dev_install="this is a developer install")
     report = svc.check(source=channel_app.source())
-    assert report["app_update"] == "" and any("developer install" in w for w in report["warnings"])
+    assert report["app_update"] == "0.2.0"
+    assert any("cannot update itself to 0.2.0: this is a developer install" in w
+               for w in report["warnings"])
     with pytest.raises(RefusedError, match="developer install"):
         svc.update_app(source=channel_app.source())
     assert uv.calls == []
