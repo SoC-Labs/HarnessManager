@@ -1,5 +1,17 @@
 # HIL: the lab MPS3 through the hub (Thu 09-24 test, Fri 09-25 B0)
 
+> **Friday 25 Sep, 09:00–10:00 is Harness Manager's slot** (bare-metal `0x72BB0A36`; agreed with the
+> Linux lead at 03:05). B1 v4 starts at 10:00 on its own lease, so this slot must end with the board
+> restored to greybox and the lease released by **09:55**.
+>
+> | Time | What |
+> |---|---|
+> | 09:00 | §0 checks, §1 lease (via Harness Manager, which uses `sg fpga`), §2 share, §3 app |
+> | 09:10 | §4 read-only checks R1–R11 |
+> | 09:35 | §5 write checks W1–W5 with david present, if R1–R11 passed |
+> | 09:50 | §7 close-out: restore greybox, release the lease, send the evidence |
+> | ~10:50 | §6 at the end of B1 v4, on the Linux lead's lease: Harness Manager against Linux (10 min) |
+
 Copy-paste steps for running Harness Manager on srv03335 against the lab MPS3,
 which only the hub `mapstone-dev.ecs.soton.ac.uk` can reach. Every check lists
 the command, the expected answer and the evidence file to save.
@@ -86,12 +98,14 @@ harness-manager lease acquire 192.168.10.101 --ttl 7200 --holder david-hm | tee 
 - The token stays in `~/.config/harness-manager/leases/` (mode 0600). It is
   never printed.
 
-**Friday (B0):** use the runbook's single lease instead (`sudo fpgahub lease
-acquire mps3_01_pl --holder b0-linux --ttl 7200`, B0_RUNBOOK_LINUX.md). It
-covers all three slots.
-- Harness Manager then shows it as `held by b0-linux`, without "yours", and does
-  not heartbeat it. The 2 h TTL covers the window.
-- Do not take a second lease.
+**Friday 09:00:** the same command as Thursday, with `--ttl 3600`. Harness Manager
+runs fpgahub under `sg fpga`, so the lease belongs to you, not to root.
+- **Never take it with `sudo`.** A sudo lease belongs to `root@mapstone-dev`: agents
+  cannot renew it, and Harness Manager treats it as someone else's lease (force-release
+  would then ask for the board name, D12).
+- If the Linux lead still holds it at 09:00, use the lease panel's **Request** (or
+  `harness-manager lease request 192.168.10.101 --message "HM slot 09:00"`) rather than
+  forcing it.
 
 Check it either way:
 ```bash
@@ -163,18 +177,25 @@ Work down the list and save each file.
 
 | # | Check | Command (terminal B) | Expected | Evidence |
 |---|---|---|---|---|
-| R1 | Identity and health | `harness-manager --json info 192.168.10.101 \| tee $EV/r1_info.json` | `shell_id` `0x3f1a560f` (or `0x72bb0a36` if W1 fielded the ILA mint), `harness_version` `1.0.0`, `health.reachable` true; `capabilities` include `console_dut`, `console_controller`, `telemetry_temp` | `r1_info.json` |
+| R1 | Identity and health | `harness-manager --json info 192.168.10.101 \| tee $EV/r1_info.json` | `shell_id` `0x72bb0a36`, `harness_version` `1.0.0` (every firmware since v0.8 says 1.0.0; Harness Manager names the release by its firmware sha instead), `health.reachable` true; `capabilities` include `console_dut`, `console_controller`, `telemetry_temp` | `r1_info.json` |
 | R2 | A console in the GUI | Consoles → `uart0` → Open | state `up`. Silent on greybox (no DUT UART); nanosoc prints its banner after a DUT reset | screenshot `r2_console_gui.png` |
 | R3 | The same console in `screen` | `harness-manager pty 192.168.10.101 uart0` (lane L2's verb) prints the path, then `screen <path>` | the same bytes as the GUI, at the same time; leave `screen` with `Ctrl-a k` | `r3_screen.txt` (paste) |
 | R4 | MCC temperature over the share | `harness-manager --json mcc 192.168.10.101 temp \| tee $EV/r4_mcc_temp.json` | `mcc_temp` about 35 degC, `source` `mcc-console`; takes ~3 s (paced at 60 ms/char) | `r4_mcc_temp.json` |
 | R5 | Debug detect | `harness-manager --json debug detect 192.168.10.101 \| tee $EV/r5_debug_detect.json` | on greybox: exit 13, `the loaded design (greybox) has no debug port` (correct: there is nothing to detect); on nanosoc: `idcode` `0x6ba00477` over remote_bitbang through the tunnel | `r5_debug_detect.json` |
-| R6 | The lease | `harness-manager --json lease show 192.168.10.101 \| tee $EV/r6_lease.json` | Thursday: `holder` `david-hm`, `mine` true. B0: `holder` `b0-linux`, `mine` false | `r6_lease.json` |
+| R6 | The lease | `harness-manager --json lease show 192.168.10.101 \| tee $EV/r6_lease.json` | `holder` `david-hm`, `mine` true, `holder_kind` `hm`; `notes_supported` and `can_revoke` true (SSH hub) | `r6_lease.json` |
+| R7 | Front panel on bare metal | `harness-manager panel show 192.168.10.101 \| tee $EV/r7_panel.txt`, then `harness-manager identify 192.168.10.101; echo rc=$?` | `source rebuilt from what Harness Manager read`; the owner (harness or DUT). Identify: `unavailable — needs harness feature 'locate' (Linux harness)`, rc=12, and the backlight does **not** blink. In the app: the Board tile's Panel line and the Details mirror say "rebuilt" | `r7_panel.txt` |
+| R8 | XDC for the fielded static | Board & XDC section → "RM kit" → Preview; or `harness-manager xdc rm-kit --design nanosoc --out $EV/xdc` | the model card says the board **runs** the model's static `0x72BB0A36`; the preview has no failed check | `xdc/`, screenshot `r8_xdc.png` |
+| R9 | Build guide against the board | Build section (between XDC and Program) | the Target step is **done** for `0x72BB0A36`; Kit is **next** (no kit cached yet) or done; Tools shows the Vivado needed (2024.1) | screenshot `r9_build.png` |
+| R10 | XVC status (read-only) | `harness-manager xvc status 192.168.10.101 \| tee $EV/r10_xvc.txt` | `down`; the scope line (reconfigurable partition only, never whole-device JTAG); the bare-metal warning (unauthenticated until cutover) | `r10_xvc.txt` |
+| R11 | Harness versions (no releases yet; skip if `harness` is not yet a command) | `harness-manager harness list 192.168.10.101 2>&1 \| tee $EV/r11_harness.txt; echo rc=$?` | the board line (`runs … shell 0x72bb0a36, fw <sha>`) and a clear "no channel/release published" message, not a traceback. Nothing is installed | `r11_harness.txt` |
 
 **Exit condition:** nothing was written. R1 run again shows the same `rm_id`.
 
 ---
 
-## 5. Write checks (only with david present; B0 optional slot 4)
+## 5. Write checks (only with david present; 09:35–09:50)
+
+Stop at 09:50 whatever is left: W4 (restore greybox) must run before the close-out.
 
 1. **Find the board's overlays.** Their `static_id` must match R1's `shell_id`.
    - `0x3f1a560f`:
@@ -195,31 +216,22 @@ Work down the list and save each file.
 | W1 | Program nanosoc | `harness-manager program 192.168.10.101 nanosoc \| tee $EV/w1_program.txt` (it shows the preflight and asks to confirm) | every preflight item ok or unchecked; the result line ends `via tcp+windowed; verified` (6910 through the tunnel, never TFTP); `rm_id` `0x01000001`; about 5–15 s | `w1_program.txt` |
 | W2 | A console | `screen <path from R3>`, then Reset DUT in the GUI | the nanosoc boot banner; typed characters reach the DUT (paced 20 ms/char) | `w2_console.txt` (paste) |
 | W3 | Debug up + gdb | terminal B: `harness-manager debug up 192.168.10.101` (holds; Ctrl-C ends it). Terminal C, with the gdb port it printed (a block from 23300 up): `arm-none-eabi-gdb -batch -ex 'target extended-remote localhost:<gdb port>' -ex 'info registers pc' -ex detach \| tee $EV/w3_gdb.txt` | `debug up` shows state `up` and its ports; gdb prints a `pc` value and detaches | `w3_gdb.txt` |
-| W4 | Restore greybox | Ctrl-C the `debug up` first, then `harness-manager restore 192.168.10.101 \| tee $EV/w4_restore.txt` | `verified`, `rm_id` `0x00000000` | `w4_restore.txt` |
+| W5 | XVC session (optional, while nanosoc_ila is loaded) | `harness-manager program 192.168.10.101 nanosoc_ila`, then `harness-manager xvc open 192.168.10.101 --for 5 \| tee $EV/w5_xvc.txt`; in Vivado 2024.1 paste the Tcl it prints; then `harness-manager xvc close 192.168.10.101` | `ready`; Vivado's hardware manager shows `debug_bridge` (IDCODE `0x0a003093`) and the RM's ILA with the `.ltx` loaded. **Also check** hw_server lists no local USB cable (the partition-only rule) | `w5_xvc.txt`, screenshot `w5_vivado.png` |
+| W4 | Restore greybox (always, last) | Ctrl-C the `debug up` / `xvc close` first, then `harness-manager restore 192.168.10.101 \| tee $EV/w4_restore.txt` | `verified`, `rm_id` `0x00000000` | `w4_restore.txt` |
 
 ---
 
-## 6. B0 slot 3: the July Linux harness (~10 min, Fri)
+## 6. At the end of B1 v4: Harness Manager on the Linux harness (~10 min, ~10:50)
 
-The board still runs the July image from slot 2 (static `0x2B082E1B`, the
-v0.7 daemons).
-
-**Expected, and not an error:** the image has **no `version` verb**. It answers
-`{"ok":false,"err":"unknown op"}`, so there is no harness version, no features
-and no `impl`.
+Only if B1 v4 reached step (e) (SSH to the board). This runs on the **Linux lead's lease**: do
+not take or request a lease. The board runs the P-mint static `0x61BC6789` with harnessd.
 
 | # | Check | Command | Expected | Evidence |
 |---|---|---|---|---|
-| S3.1 | Graceful identity | `harness-manager --json info 192.168.10.101 \| tee $EV/s3_info.json` | exit 0; `shell_id` `0x2b082e1b`; `rm_id` `0x0100001e` if S2.9 swapped led, else `0x00000000`; `harness_version` `""`; `features` `[]`; `build_check` `unchecked`; `health.reachable` true | `s3_info.json` |
-| S3.2 | ping + diag | the same file: `health.counters` is non-empty (diag answered) | counters present | `s3_info.json` |
-| S3.3 | 6910 push (only if david says so) | `HARNESS_MANAGER_MPS3_OVERLAY_DIRS=$HOME/SoCLabs/mps3-nanosoc-platform/fpga/dfx/overlay_linux harness-manager program 192.168.10.101 led \| tee $EV/s3_push_led.txt` | preflight `transport: tcp`, then `verified`, `rm_id` `0x0100001e` | `s3_push_led.txt` |
-
-**S3.3 caveat:** the July `mps3-pushd` was driven with pyverify's `--windowed`
-in S2.9. Without `version`, Harness Manager cannot know that the harness is
-windowed, so it pushes plain TCP.
-- The Linux kernel's buffers should absorb that; it has never been run.
-- If the push stalls for more than 60 s, press Ctrl-C, record it, and **do not
-  retry blind**.
+| S3.1 | Identity | `harness-manager --json info 192.168.10.101 \| tee $EV/s3_info.json` | exit 0; `shell_id` `0x61bc6789`; `impl` `linux`; `features` listed; `health.reachable` true | `s3_info.json` |
+| S3.2 | Front panel | `harness-manager panel show 192.168.10.101 \| tee $EV/s3_panel.txt` | the harnessd build has no `hello`/`panel`/`locate` yet (requests R1–R3 come after cutover), so the rebuilt view with the reason; touch fields shown if `stats` carries `touch_ok` | `s3_panel.txt` |
+| S3.3 | XVC status | `harness-manager xvc status 192.168.10.101 \| tee $EV/s3_xvc.txt` | `down`; the scope line; the unauthenticated warning (no `xvc_lock` feature yet) | `s3_xvc.txt` |
+| S3.4 | CLCD finger test (CLCD-HM R6, with the Linux lead) | hold a finger on the panel for 10 s while `harness-manager info` runs twice | both `info` calls answer (a held touch must not starve the network); record `touch_ok`, `touch_bus_lost`, `touch_recoveries` from `stats` before and after | `s3_touch.txt` |
 
 ---
 
@@ -231,13 +243,12 @@ windowed, so it pushes plain TCP.
    pgrep -af -- '-N -T' | grep mapstone || echo NO-TUNNEL | tee $EV/c1_tunnel_closed.txt
    ```
    Expected: `NO-TUNNEL`.
-2. **Thursday:** release the lease.
+2. **Release the lease by 09:55** (B1 v4 takes the board at 10:00).
    ```bash
    harness-manager lease release 192.168.10.101 | tee $EV/c2_release.txt
    harness-manager lease show 192.168.10.101 | tee -a $EV/c2_release.txt
    ```
    Expected: `released`, then `not leased`.
-   **B0:** the runbook's close-out releases `b0-linux`.
 3. Leave the shares running. Never `share stop` (rule 2).
 
 ---
@@ -256,4 +267,6 @@ windowed, so it pushes plain TCP.
 | a probe finds nothing | boards.toml missing or `match` wrong; UDP discovery never crosses the tunnel | check `~/.config/harness-manager/boards.toml`; open by address |
 | `ssh … -N -T` processes left after the app was killed (not closed) | a hard kill skips the tunnel's close | start the app again: from Q2 (`team/q2-robust`) the service stops a killed owner's tunnels, OpenOCD and PTY links when it starts, and says so in `daemon.log`. On an older build: `pkill -f -- '-N -T .*mapstone-dev'` (only Harness Manager's tunnels run with `-N -T`) |
 
-**Send back:** the whole `$EV` folder, plus any screenshots.
+**Send back:** the whole `$EV` folder, plus any screenshots. The lead forwards the result to the
+platform-guide session, which switches Harness Manager's write paths from "virtual board only" to
+"proven on the board".
