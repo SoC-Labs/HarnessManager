@@ -434,16 +434,17 @@ def test_an_install_the_board_does_not_run_fails_with_its_outcome_and_the_rollba
 
 
 @pytest.mark.week_plan("update_api", sim=True)
-def test_the_app_update_asks_to_close_the_boards_first(page_factory, daemon):
+def test_the_app_update_is_not_switched_from_a_boards_page(page_factory, daemon):
+    # UPDATE-UI (OTA-U) moved the app's own update out of the board's page: it is staged in
+    # the background and applied with a restart from the banner and Settings, never switched
+    # in place here (test_updui_browser.py covers the banner and Settings).
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
     section(page, "update")
-    page.locator('[data-action="update_check"]').click()
     card = page.locator('[data-testid="update-app"]')
-    expect(card).to_contain_text("You run harness-manager 0.0.1", timeout=T)
-    expect(card.locator('[data-testid="reason-update_app"]')).to_contain_text("close your boards first")
-    card.locator('[data-action="update_app"]').click(force=True)
-    expect(card).to_contain_text("Nothing was run.")
+    expect(card).to_contain_text("You run Harness Manager 0.0.1", timeout=T)
+    assert card.locator('[data-action="update_app"]').count() == 0
+    expect(card.locator('[data-action="open-settings"]')).to_be_visible()
     assert sim_of(daemon).app_version == "0.0.1"
 
 
