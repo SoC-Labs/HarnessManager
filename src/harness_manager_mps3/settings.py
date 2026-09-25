@@ -163,14 +163,14 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              scope="pack", owner="dev", env="HARNESS_MANAGER_MPS3_IDENTIFY_BROADCAST"),
         # X6-X8
         _row("mps3.push_port", "int", push_port, "Advanced",
-             "The bitstream push port (raw or windowed TCP)", at="deploy.py:277",
+             "The bitstream push port (raw or windowed TCP)", at="deploy.py:296",
              scope="pack", owner="dev", env="HARNESS_MANAGER_MPS3_PUSH_PORT", check=_port),
         _row("mps3.tftp_port", "int", tftp_port, "Advanced", "The TFTP push port",
-             at="deploy.py:281", scope="pack", owner="dev",
+             at="deploy.py:300", scope="pack", owner="dev",
              env="HARNESS_MANAGER_MPS3_TFTP_PORT", check=_port),
         _row("mps3.tunnelled", "str", "", "Advanced",
              "Treat the shell as reached through a TCP-only tunnel (no TFTP): on, off, or "
-             "empty for auto", at="deploy.py:164", scope="pack", owner="dev",
+             "empty for auto", at="deploy.py:174", scope="pack", owner="dev",
              env="HARNESS_MANAGER_MPS3_TUNNELLED", apply="reopen", check=_tunnelled),
     )
 
