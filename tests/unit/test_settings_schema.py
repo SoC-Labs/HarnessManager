@@ -156,33 +156,45 @@ def test_negative_twin_a_pack_cannot_take_a_core_key_or_leave_its_prefix():
         schema.spec("tools.nothing")
 
 
+#: The MPS3 pack's variables: its own rows (SET-PACK, ``tests/unit/test_settings_pack.py``).
+PACK_ENV = "HARNESS_MANAGER_MPS3_"
+
+
 def _env_names(root: Path) -> set[str]:
-    """Variables named in the code, outside the settings package (which declares them)."""
+    """Variables named in the code, outside the modules that declare them (the settings
+    package, and a pack's ``settings.py``)."""
     names: set[str] = set()
     for p in root.rglob("*.py"):
-        if "settings" in p.relative_to(SRC).parts[:2]:
+        rel = p.relative_to(SRC)
+        if "settings" in rel.parts[:2] or rel.name == "settings.py":
             continue
         names |= set(re.findall(r"HARNESS_MANAGER_[A-Z0-9_]*[A-Z0-9]\b", p.read_text()))
     return names
 
 
+def _core_names() -> set[str]:
+    return {n for n in _env_names(SRC / "harness_manager")
+            if not n.startswith(PACK_ENV)} - NOT_SETTINGS_ENV
+
+
 def test_every_core_variable_is_a_row_and_every_row_variable_is_real():
     """The inventory cannot drift: each ``HARNESS_MANAGER_*`` read in ``src/harness_manager``
-    is declared (the pack's ``HARNESS_MANAGER_MPS3_*`` are SET-PACK's, except K7's overlay
-    dirs), and each variable a row names is read somewhere (or is the new keyring switch)."""
-    core = _env_names(SRC / "harness_manager") - NOT_SETTINGS_ENV
+    is declared, and each variable a row names is read somewhere (or is the new keyring
+    switch). The ``HARNESS_MANAGER_MPS3_*`` ones are the MPS3 pack's rows, never the core's
+    (``test_settings_pack`` checks every one is declared there)."""
+    core = _core_names()
     declared = {s.env for s in CORE_ROWS if s.env.startswith("HARNESS_MANAGER_")}
     missing = sorted(core - declared)
     assert not missing, f"not declared in settings/rows.py: {missing}"
     everywhere = _env_names(SRC)
     ghosts = sorted(declared - everywhere - {"HARNESS_MANAGER_KEYRING"})   # new: secrets.py
     assert not ghosts, f"rows name variables nothing reads: {ghosts}"
-    pack_only = sorted(n for n in everywhere - core if n.startswith("HARNESS_MANAGER_MPS3_"))
-    assert pack_only and set(pack_only) - declared, "the MPS3 variables are SET-PACK's rows"
+    pack_only = sorted(n for n in everywhere if n.startswith(PACK_ENV))
+    assert pack_only and not set(pack_only) & declared, "the MPS3 variables are the pack's rows"
 
 
 def test_negative_twin_the_coverage_check_bites():
-    core = _env_names(SRC / "harness_manager") - NOT_SETTINGS_ENV
+    core = _core_names()
     declared = {s.env for s in CORE_ROWS[1:] if s.env.startswith("HARNESS_MANAGER_")}
     declared.discard("HARNESS_MANAGER_OPENOCD")
     assert "HARNESS_MANAGER_OPENOCD" in core - declared
