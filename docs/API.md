@@ -74,7 +74,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `GET /help/tabs` | the CLI's `help --tabs` | `{tabs: [{name, text}]}` |
 | `GET /jobs/{id}` | — | job state |
 | `GET /jobs` | — | recent jobs; each record has `job, kind, board_id, state, phases, started_at, ended_at` |
-| `GET /boards/{bid}/session` | session adapters | `{candidate, adapters: {deploy, consoles, debug, resets, clocks, telemetry, controller, storage, shell}: bool, reset_targets, job, job_kind, services: {deploy, consoles, debug, telemetry}: null or reason}` |
+| `GET /boards/{bid}/session` | session adapters | `{candidate, adapters: {deploy, consoles, debug, resets, clocks, telemetry, controller, storage, power, panel, shell}: bool, reset_targets, job, job_kind, services: {deploy, consoles, debug, telemetry}: null or reason}` |
 | `POST /daemon/shutdown` `{force?}` | — | `{ok}`; 409 while a job runs unless `force` |
 
 ## Behaviour clarified by the implementation (T13)
@@ -245,7 +245,7 @@ docs/design/CLCD_ALIGNMENT.md is the design (§2, §5). The Linux harness's verb
 
 | Method and path | Returns |
 |---|---|
-| `GET /boards/{bid}/panel` | `{panel: PanelState or null, reason, identify: {available, reason, until}, support: {front_panel, presence, locate, source}, presence: {active, reason, sid, last_hello_at, sent, ridden, skipped, last_error, interval_s}}` |
+| `GET /boards/{bid}/panel` | `{panel: PanelState or null, reason, identify: {available, reason, until}, support: {front_panel, presence, locate, source}, presence: {active, reason, sid, last_hello_at, sent, ridden, skipped, last_error, interval_s}}`. `?state=0`: the same without reading the board's panel (`panel` null; `reason` only when it cannot be read at all) |
 | `GET /boards/{bid}/panel/frame` | `{rows: [15 strings of 40], roles, source, observed_at, note}` |
 | `POST /boards/{bid}/identify` `{seconds?}` | `{until, seconds}`: the board blinks its panel until `until` (epoch seconds). `seconds` is 0-30 (default 10); 0 stops a blink. |
 

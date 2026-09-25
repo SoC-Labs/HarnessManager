@@ -74,7 +74,7 @@ log = logging.getLogger(__name__)
 
 API = "/api/v1"
 ADAPTERS = ("deploy", "consoles", "debug", "resets", "clocks", "telemetry", "controller",
-            "storage", "power")
+            "storage", "power", "panel")
 #: WebSocket frames: consoles send board bytes in frames of at most this size.
 MAX_WS_FRAME = 64 * 1024
 

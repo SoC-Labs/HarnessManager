@@ -14,9 +14,11 @@ On a bare-metal harness (v0.11) ``panel show`` gives the KVM owner only and says
 is rebuilt; ``panel mirror`` is rebuilt from what Harness Manager read (``source: rebuilt``);
 ``identify`` fails with exit 12 and the reason (it needs the Linux harness's ``locate``).
 
-Over a running harness-manager-daemon the verbs ask its ``/panel`` routes (docs/API.md "Front
-panel"), so the answer carries the daemon's presence too; in-process they read the board
-once (a CLI run is not a session worth announcing: it sends no ``hello``).
+Both ways the verbs go through ``session.panel`` (CCR PANEL-5), like every other adapter.
+Over a running harness-manager-daemon that is the daemon's proxy (``client.remote``: its
+``/panel`` routes, docs/API.md "Front panel"), so the answer carries the daemon's presence
+too; in-process it is the board pack's adapter and the board is read once (a CLI run is not
+a session worth announcing: it sends no ``hello``).
 
 Exit codes: 0 done; 4 the board is busy (a job, or another client on its control port);
 7 the board did not answer; 12 this board cannot do it (the reason says why).
@@ -87,20 +89,7 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
     return {"panel": vp, "identify": ip}
 
 
-# --- reading through the daemon or in-process ------------------------------------------------
-
-
-def _remote(ctx: Ctx) -> Any:
-    """The daemon's HTTP client when the CLI runs over harness-manager-daemon, else None."""
-    from harness_manager.client.remote import RemoteEngine
-
-    return ctx.engine.http if isinstance(ctx.engine, RemoteEngine) else None
-
-
-def _path(board_id: str, suffix: str) -> str:
-    from harness_manager.client.http import q
-
-    return f"/boards/{q(board_id)}/{suffix}"
+# --- reading through session.panel (the pack's adapter, or the daemon's proxy) ---------------
 
 
 def _why(ctx: Ctx, session: Any) -> Any:
@@ -116,22 +105,16 @@ def _why(ctx: Ctx, session: Any) -> Any:
 
 
 def read_state(ctx: Ctx, session: Any) -> dict[str, Any]:
-    http = _remote(ctx)
-    if http is not None:
-        body = http.get(_path(session.candidate.board_id, "panel"))
-        return {k: v for k, v in body.items() if k not in ("ok", "board_id")}
     from harness_manager.services.presence import NOT_BEATING, read_panel
 
     body = jsonable(read_panel(session, reason_for=_why(ctx, session)))
-    body["presence"] = {"active": False, "reason": NOT_BEATING}
+    # A daemon session's adapter knows the daemon's presence; in-process nothing beats.
+    beat = getattr(getattr(session, "panel", None), "presence", None)
+    body["presence"] = beat() if callable(beat) else {"active": False, "reason": NOT_BEATING}
     return body
 
 
 def read_frame(ctx: Ctx, session: Any) -> dict[str, Any]:
-    http = _remote(ctx)
-    if http is not None:
-        body = http.get(_path(session.candidate.board_id, "panel/frame"))
-        return {k: v for k, v in body.items() if k not in ("ok", "board_id")}
     from harness_manager.services.presence import require_panel
 
     panel = require_panel(session, C.FRONT_PANEL, _why(ctx, session)(C.FRONT_PANEL))
@@ -139,10 +122,6 @@ def read_frame(ctx: Ctx, session: Any) -> dict[str, Any]:
 
 
 def do_identify(ctx: Ctx, session: Any, seconds: int) -> dict[str, Any]:
-    http = _remote(ctx)
-    if http is not None:
-        body = http.post(_path(session.candidate.board_id, "identify"), {"seconds": seconds})
-        return {k: v for k, v in body.items() if k not in ("ok", "board_id")}
     from harness_manager.services.presence import (
         check_seconds,
         default_who,

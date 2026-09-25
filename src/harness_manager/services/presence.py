@@ -484,8 +484,10 @@ class PresenceService:
         return value
 
     def read(self, board_id: str, session: Any, *,
-             reason_for: Callable[[str], str] | None = None) -> dict[str, Any]:
-        """``GET /boards/{bid}/panel``: the panel, what it can do, and presence."""
+             reason_for: Callable[[str], str] | None = None,
+             with_state: bool = True) -> dict[str, Any]:
+        """``GET /boards/{bid}/panel``: the panel, what it can do, and presence.
+        ``with_state=False`` (``?state=0``) leaves the board's panel unread."""
         with self._mu:
             rec = self._boards.get(board_id)
             sid = rec.sid if rec is not None else ""
@@ -498,7 +500,7 @@ class PresenceService:
             return replace(got, sessions=tuple(replace(s, mine=s.sid == sid)
                                                for s in got.sessions))
 
-        body = read_panel(session, reason_for=reason_for, state=state)
+        body = read_panel(session, reason_for=reason_for, state=state, with_state=with_state)
         body["presence"] = self.presence(board_id, session)
         if until > self._wall():
             body["identify"]["until"] = until
@@ -535,11 +537,15 @@ def require_panel(session: Any, capability: str, reason: str = "") -> Any:
 
 
 def read_panel(session: Any, *, reason_for: Callable[[str], str] | None = None,
-               state: Callable[[Any], PanelState] | None = None) -> dict[str, Any]:
-    """``{panel: PanelState | None, reason, identify: {available, reason}, support}``.
+               state: Callable[[Any], PanelState] | None = None,
+               with_state: bool = True) -> dict[str, Any]:
+    """``{panel: PanelState | None, reason, identify: {available, reason, until}, support}``.
 
     ``panel`` is None, with the reason, when this board has no front panel HM can read. A
     bare-metal board answers with ``source: "rebuilt"`` and Identify unavailable.
+    ``with_state=False``: what the board can do only; ``panel`` is None and the panel is not
+    read (``reason`` is set only when it could not be read at all). ``identify.until`` is
+    the adapter's ``identify_until()`` when it has one (a daemon session's proxy).
     """
     panel = getattr(session, "panel", None)
     if panel is None:
@@ -553,14 +559,15 @@ def read_panel(session: Any, *, reason_for: Callable[[str], str] | None = None,
     reason, got = "", None
     if support.front_panel:
         reason = support.front_panel
-    else:
+    elif with_state:
         try:
             got = state(panel) if state is not None else panel.state()
         except UnavailableError as exc:
             reason = exc.reason
+    until = getattr(panel, "identify_until", None)
     return {"panel": got, "reason": reason,
             "identify": {"available": not support.locate, "reason": support.locate,
-                         "until": None},
+                         "until": until() if callable(until) else None},
             "support": jsonable(support)}
 
 

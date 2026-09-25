@@ -12,9 +12,10 @@ docs/design/CLCD_ALIGNMENT.md §2, §5 is the design; david's decisions of 2026-
   it read, and Identify greyed out with the reason.
 
 This module is board-agnostic: the model, the ``hello`` message with its field caps, and
-the optional session adapter (``session.panel``, read with ``getattr``). A board pack
-provides the adapter (MPS3: ``harness_manager_mps3.panel``);
-``harness_manager.services.presence`` drives it.
+the session adapter ``PanelAdapter``: ``BoardSession.panel`` (CCR PANEL-5), None when the
+board has no front panel Harness Manager can reach. A board pack provides the adapter
+(MPS3: ``harness_manager_mps3.panel``), a daemon session proxies it
+(``harness_manager.client.remote``), and ``harness_manager.services.presence`` drives it.
 
 The field caps. The MPS3 harness reads a request line of at most ``LINE_MAX`` (256) bytes
 (``MPS3_NET_LINE_MAX``), and the panel draws printable ASCII only. So every text field is
@@ -262,7 +263,7 @@ def touch_health(stats: dict[str, Any] | None, panel_touch: Any = None) -> Touch
 
 @runtime_checkable
 class PanelAdapter(Protocol):
-    """``session.panel``: a board's front panel. Optional; read it with ``getattr``.
+    """``session.panel``: a board's front panel (``BoardSession.panel``; None: it has none).
 
     Every method may raise ``UnavailableError`` (with the capability and the reason) when
     this board cannot do it now, and the usual ``HarnessError``s when the board does not
@@ -292,4 +293,9 @@ class PanelAdapter(Protocol):
 #: Optional on an adapter: ``offer(hello, on_reply)`` arms a hello that the next control
 #: connection Harness Manager opens for any reason carries first (riding); ``on_reply``
 #: gets the reply's ``PanelState``. ``withdraw()`` disarms it; returns True if it was armed.
+#:
+#: Optional on an adapter that is a view of a Harness Manager service (a daemon session's
+#: proxy, CCR PANEL-5): ``presence()`` returns that service's presence for the board (the
+#: ``presence`` object of ``GET /boards/{bid}/panel``), and ``identify_until()`` the epoch
+#: time a running Identify stops, or None. An in-process adapter has neither: nothing beats.
 OnReply = Callable[[PanelState], None]

@@ -25,6 +25,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from .capabilities import CapabilitySpec
 from .model import BoardIdentity, Candidate, Check, Health, Reading
+from .panel import PanelAdapter
 
 
 @dataclass(frozen=True)
@@ -361,6 +362,7 @@ class BoardSession(ABC):
     storage: StorageAdapter | None = None
     power: PowerAdapter | None = None
     xvc: XvcAdapter | None = None          # CCR X-3: fabric debug over the harness's XVC
+    panel: PanelAdapter | None = None      # CCR PANEL-5: the front panel (core.panel)
 
     def close(self) -> None:  # noqa: B027 - optional hook
         """Release anything the session holds. Idempotent."""

@@ -29,6 +29,10 @@ How it behaves where the in-process engine would differ:
   with the five shell verbs ``cli/cmd_lab.py`` uses (``link``,
   ``display_owner``, ``display_settled``, ``macgen``, ``read_dut_frame``), each
   one ``POST /boards/{bid}/lab/{verb}``. Anything else raises UNAVAILABLE.
+- **The front panel** (``session.panel``, CCR PANEL-5) is a proxy of the daemon's
+  ``/panel`` routes: ``support``/``state``/``frame``/``locate`` as the adapter protocol
+  says, plus ``presence()`` and ``identify_until()`` from the daemon's presence service.
+  The daemon owns presence, so ``hello`` is UNAVAILABLE and nothing is ``offer``ed.
 - **Not proxied**: the debug adapter's OpenOCD command-line pieces (OpenOCD runs
   in the daemon) and the storage adapter's ``locate``.
 """
@@ -46,6 +50,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from harness_manager.core import capabilities as C
 from harness_manager.core.errors import (
     AbsentError,
     AlreadyError,
@@ -65,6 +70,7 @@ from harness_manager.core.pack import (
     ProbeHints,
     Progress,
 )
+from harness_manager.core.panel import PanelFrame, PanelState, PanelSupport
 from harness_manager.core.services import DebugStatus, EngineConfig
 from harness_manager.core.session import LockOwner
 
@@ -623,6 +629,75 @@ class _Power(_Proxy):
                                     progress=progress)
 
 
+class _Panel(_Proxy):
+    """``session.panel`` over ``GET /panel``, ``GET /panel/frame`` and ``POST /identify``
+    (docs/API.md "Front panel"; CCR PANEL-5). Mirrors ``RemoteXvc``: the daemon's reply
+    without ``ok``/``board_id``, rebuilt into the core model.
+
+    ``GET /panel`` answers support, state and presence at once. The last answer is reused
+    for ``VIEW_S`` (the daemon's own state cache is 1 s), so ``support`` then ``state`` is
+    one request. ``support`` alone asks ``?state=0``, which never reads the board's panel:
+    an Identify costs the board its ``locate`` only.
+
+    The daemon beats for its boards and rides its own connections, so ``hello`` is
+    UNAVAILABLE here and there is no ``offer``/``withdraw``. ``locate`` sends no ``who``:
+    the daemon names itself (it runs as this user, on this host).
+    """
+
+    VIEW_S = 1.0
+    HELLO_REASON = ("harness-manager-daemon sends this board's hellos itself (presence runs "
+                    "in the Harness Manager service)")
+
+    def __init__(self, engine: RemoteEngine, board_id: str, *,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        super().__init__(engine, board_id)
+        self._clock = clock
+        self._view: tuple[float, bool, dict[str, Any]] | None = None   # (at, with state, body)
+
+    def _read(self, *, state: bool) -> dict[str, Any]:
+        now = self._clock()
+        view = self._view
+        if view is not None and now - view[0] < self.VIEW_S and (view[1] or not state):
+            return view[2]
+        payload = self._engine._http.get(self._path("panel" if state else "panel?state=0"))
+        body = {k: v for k, v in payload.items() if k not in ("ok", "board_id")}
+        self._view = (now, state, body)
+        return body
+
+    def support(self) -> PanelSupport:
+        return from_json(PanelSupport, self._read(state=False).get("support") or {})
+
+    def state(self) -> PanelState:
+        body = self._read(state=True)
+        if body.get("panel") is None:
+            raise UnavailableError(C.FRONT_PANEL, str(body.get("reason") or
+                                                      "the daemon read no panel state"))
+        return from_json(PanelState, body["panel"])
+
+    def frame(self) -> PanelFrame:
+        payload = self._engine._http.get(self._path("panel/frame"))
+        return from_json(PanelFrame, {k: v for k, v in payload.items()
+                                      if k not in ("ok", "board_id")})
+
+    def hello(self, hello: Any) -> PanelState:
+        raise UnavailableError(C.PRESENCE, self.HELLO_REASON)
+
+    def locate(self, seconds: int, who: str) -> float:
+        self._view = None                      # a blink changes identify.until
+        payload = self._engine._http.post(self._path("identify"), {"seconds": int(seconds)})
+        return float(payload.get("until") or 0.0)
+
+    def presence(self) -> dict[str, Any]:
+        """The daemon's presence for this board (``GET /panel``'s ``presence``)."""
+        return dict(self._read(state=False).get("presence") or {})
+
+    def identify_until(self) -> float | None:
+        """When the daemon's running Identify stops (epoch seconds), or None."""
+        until = (self._read(state=False).get("identify") or {}).get("until")
+        return float(until) if isinstance(until, (int, float)) and not isinstance(until, bool) \
+            else None
+
+
 class _LabClient(_Proxy):
     """The pyverify ``ShellClient`` verbs ``cli/cmd_lab.py`` uses, as daemon lab calls.
 
@@ -694,6 +769,7 @@ class RemoteSession(BoardSession):
         self.controller = _Controller(engine, bid) if has("controller") else None
         self.storage = _Storage(engine, bid) if has("storage") else None
         self.power = _Power(engine, bid) if has("power") else None
+        self.panel = _Panel(engine, bid) if has("panel") else None
         self.shell = RemoteLabShell(engine, bid) if has("shell") else None
 
     def identity(self) -> Any:

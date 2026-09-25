@@ -4,7 +4,7 @@ docs/API.md "Front panel" (additive):
 
 | Method and path | Returns |
 |---|---|
-| ``GET /boards/{bid}/panel`` | ``{panel: PanelState or null, reason, identify: {available, reason, until}, support, presence}`` |
+| ``GET /boards/{bid}/panel`` | ``{panel: PanelState or null, reason, identify: {available, reason, until}, support, presence}``; ``?state=0`` leaves the panel unread (``panel`` null) |
 | ``GET /boards/{bid}/panel/frame`` | ``{rows, roles, source, observed_at, note}`` |
 | ``POST /boards/{bid}/identify`` ``{seconds?}`` | ``{until, seconds}``; 422 UNAVAILABLE with the reason on bare metal |
 
@@ -20,6 +20,10 @@ docs/API.md "Front panel" (additive):
 
 The reads go through the gate like every other board request (409 HELD naming the job while
 one runs). ``POST /identify`` is short, not a job.
+
+``?state=0`` (CCR PANEL-5) answers what the board can do and the presence without reading
+the board's panel: the client's ``session.panel.support()`` (``client.remote``) asks it, so
+an Identify from the CLI costs the board one ``locate`` and nothing else, as before.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ from typing import Any
 
 from harness_manager.cli.output import jsonable
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import HarnessError, UnavailableError
+from harness_manager.core.errors import HarnessError, UnavailableError, UsageError
 from harness_manager.core.events import Event
 from harness_manager.core.panel import HelloJob
 from harness_manager.services.presence import PresenceService, check_seconds, require_panel
@@ -49,6 +53,17 @@ JOB_WORDS = {"deploy": "program", "restore": "restore", "reboot": "reboot",
 #: CCR PANEL-2: a beat takes the lease service's last view (no hub call) while it is at most
 #: this old; an older one, or none (a lease change drops it), is read again.
 LEASE_VIEW_MAX_AGE_S = 60.0
+
+
+def _flag(value: str | None, name: str, default: bool) -> bool:
+    if value is None or value == "":
+        return default
+    low = value.strip().lower()
+    if low in ("1", "true", "yes", "on"):
+        return True
+    if low in ("0", "false", "no", "off"):
+        return False
+    raise UsageError(f"{name} must be true or false, not {value!r}")
 
 
 def beat_lease_view(leases: Any, hub: Any) -> dict[str, Any] | None:
@@ -132,10 +147,11 @@ def register(ctx: RouteContext) -> None:
         return _JSON(ok(board_id=bid, **jsonable(frame)))
 
     @ctx.api.get("/boards/{bid:path}/panel")
-    def panel_state(bid: str) -> _JSON:
+    def panel_state(bid: str, state: str | None = None) -> _JSON:
+        with_state = _flag(state, "state", True)              # 400 before the board
         s = ctx.board(bid)
         with d.gates.op(bid):
-            body = presence.read(bid, s, reason_for=reason_for(s))
+            body = presence.read(bid, s, reason_for=reason_for(s), with_state=with_state)
         return _JSON(ok(board_id=bid, **jsonable(body)))
 
     @ctx.api.post("/boards/{bid:path}/identify")
