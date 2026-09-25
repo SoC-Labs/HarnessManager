@@ -448,8 +448,12 @@ def test_open_runs_hms_own_hw_server_behind_the_relay_and_close_stops_it(fake, s
     assert argv[-1] == f"set auto-open-servers xilinx-xvc:127.0.0.1:{st.relay_port}"
     assert st.scope == X.PARTITION_SCOPE and X.UNAUTHENTICATED_WARNING in st.warnings
     # Vivado connects to hw_server; hw_server opens the XVC target through the relay.
+    # The relay reads "attached" at the connect, before hw_server's first command; a shift
+    # counts once the board has answered it. So wait for the scan itself, not the attach.
     with socket.create_connection(("127.0.0.1", st.hw_server_port), timeout=5):
         wait_for(lambda: svc.status(s).state == "attached", what="hw_server to attach")
+        wait_for(lambda: (svc.status(s).attached or {}).get("shifts", 0) >= 1,
+                 what="hw_server's IDCODE scan through the relay")
         att = svc.status(s).attached
         assert att["shifts"] >= 1
         if os.path.isdir("/proc"):
