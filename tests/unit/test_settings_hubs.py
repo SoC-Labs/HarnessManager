@@ -563,3 +563,49 @@ def test_a_board_whose_hub_is_in_a_broken_settings_file_says_so():
     with pytest.raises(UsageError) as ei:
         hubmod.hub_config_for(cand())
     assert "no hub named 'lab'" in ei.value.message and "not valid TOML" in ei.value.message
+
+
+# --- the declared rows: every key a board's hub table may hold (SET-PACK asked) ---------------
+
+
+def _hub_fields(schema) -> set[str]:
+    return {s.parts[3] for s in schema.rows if s.parts[:3] == ("boards", "*", "hub")
+            and len(s.parts) >= 4}
+
+
+def test_every_key_a_hub_table_takes_is_a_declared_row_core_or_pack():
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
+
+    r = H.load_resolver(engine=Engine(EngineConfig(state_dir=state())))
+    schema = r.schema
+    l1 = {"host", "target", "shares", "baud", "start_shares", "group", "board"}
+    assert _hub_fields(schema) == l1 | set(hub_rest.REST_KEYS) | {"use"}
+    sample = {"host": HOST, "url": "https://hub.invalid:7246", "group": "g",
+              "token_file": "~/t", "ca_file": "~/ca", "cert_file": "~/c", "key_file": "~/k",
+              "insecure": True, "events": False, "direct": "never", "timeout_s": 5,
+              "target": "t1", "board": "b1", "shares": {"mcc": "/dev/t1/tty_00"},
+              "baud": 9600, "start_shares": True}
+    assert set(sample) | {"use"} == _hub_fields(schema)
+    hubmod.parse_hub_table(sample)                          # the parser takes every one
+    for key, value in sample.items():                       # and each passes its own row
+        if key != "shares":
+            assert r.check_settable(f"boards.x.hub.{key}", value)[1] == value
+
+
+def test_negative_twin_an_undeclared_hub_key_is_refused_by_the_parser_and_is_no_row():
+    with pytest.raises(UsageError, match="unknown keys: tokenfile"):
+        hubmod.parse_hub_table({"host": HOST, "tokenfile": "~/t"})
+    assert H.load_resolver().schema.find("boards.x.hub.tokenfile") is None
+
+
+def test_with_the_engine_the_packs_rows_check_a_discovered_boards_keys():
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
+
+    settings(LAB)
+    r = H.load_resolver(engine=Engine(EngineConfig(state_dir=state())))
+    assert r.schema.find("boards.x.hub.target").pack == "mps3"
+    assert H.load_resolver().schema.find("boards.x.hub.target") is None   # twin: core only
+    out = H.add_board_for_target("lab", "mps3_01_pl", r, details=DETAILS)
+    assert out["board"] == "mps3_01_pl"

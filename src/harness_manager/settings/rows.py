@@ -194,6 +194,44 @@ BOARDS = (
             advanced=True, check=_between(0, 15)),
 )
 
+# SET-HUBS: an INLINE hub table's own keys (harness_manager_mps3/hub.py:136-165 for SSH,
+# transports/hub_rest.py REST_KEYS for REST), declared so a boards.toml key nobody reads can
+# be flagged. They keep working as before; `harness-manager hub adopt BOARD` ("Make this a
+# hub") moves them to [hubs.<name>], and a board table with `use` refuses them. The table's
+# per-board keys (target, board, shares, baud, start_shares) are the board pack's rows.
+_INLINE = "an inline hub table's; `hub adopt` moves it to [hubs.<name>]"
+INLINE_HUB = (
+    Setting("boards.*.hub.host", "str", "", "Boards", f"The hub's SSH host ({_INLINE})",
+            scope="board", apply="reopen", advanced=True, check=_host),
+    Setting("boards.*.hub.url", "url", "", "Boards", f"The hub's REST API ({_INLINE})",
+            scope="board", apply="reopen", advanced=True),
+    Setting("boards.*.hub.group", "str", "fpga", "Boards",
+            f"The fpgahub socket's group ({_INLINE})", scope="board", apply="reopen",
+            advanced=True),
+    Setting("boards.*.hub.token_file", "path", "", "Boards",
+            f"A file holding the hub token ({_INLINE}; read before $FPGAHUB_TOKEN)",
+            scope="board", apply="reopen", advanced=True),
+    Setting("boards.*.hub.ca_file", "path", "", "Boards", f"The hub's CA ({_INLINE})",
+            scope="board", apply="reopen", advanced=True),
+    Setting("boards.*.hub.cert_file", "path", "", "Boards",
+            f"The mTLS client certificate ({_INLINE})", scope="board", apply="reopen",
+            advanced=True),
+    Setting("boards.*.hub.key_file", "path", "", "Boards", f"The mTLS client key ({_INLINE})",
+            scope="board", apply="reopen", advanced=True),
+    Setting("boards.*.hub.insecure", "bool", False, "Boards",
+            f"Skip TLS hostname verification ({_INLINE})", scope="board", apply="reopen",
+            advanced=True),
+    Setting("boards.*.hub.events", "bool", True, "Boards",
+            f"Follow the hub's event stream ({_INLINE})", scope="board", apply="reopen",
+            advanced=True),
+    Setting("boards.*.hub.direct", "enum", "auto", "Boards",
+            f"The data plane's route ({_INLINE})", scope="board", apply="reopen",
+            advanced=True, choices=("auto", "never", "always")),
+    Setting("boards.*.hub.timeout_s", "float", 30.0, "Boards",
+            f"The REST call timeout, s ({_INLINE})", scope="board", advanced=True,
+            check=_positive),
+)
+
 TOOLS = (
     # T1 services/debug.py:116,131-143
     Setting("tools.openocd", "path", "", "Tools", "OpenOCD (empty: openocd on PATH)",
@@ -356,8 +394,8 @@ ADVANCED = (
             owner="dev", env="HARNESS_MANAGER_KEYRING", choices=("auto", "off")),
 )
 
-CORE_ROWS: tuple[Setting, ...] = (GENERAL + HUBS + BOARDS + TOOLS + UPDATES + KITS + DEBUG
-                                  + CONSOLES + PANEL + ADVANCED)
+CORE_ROWS: tuple[Setting, ...] = (GENERAL + HUBS + BOARDS + INLINE_HUB + TOOLS + UPDATES + KITS
+                                  + DEBUG + CONSOLES + PANEL + ADVANCED)
 
 #: Variables that name output markers or install paths, not settings.
 NOT_SETTINGS_ENV = frozenset({"HARNESS_MANAGER_SYSMON", "HARNESS_MANAGER_SYSMON_ERR"})

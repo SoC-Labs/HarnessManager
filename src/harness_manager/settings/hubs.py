@@ -79,10 +79,17 @@ def check_name(name: Any) -> str:
     return name
 
 
-def load_resolver(root: Path | str | None = None,
-                  env: Mapping[str, str] | None = None) -> Resolver:
+def load_resolver(root: Path | str | None = None, env: Mapping[str, str] | None = None, *,
+                  engine: Any = None) -> Resolver:
     """The settings the hubs are resolved from: ``settings.toml`` and ``boards.toml`` in
-    ``root`` (default: the config dir), the environment and the admin policy."""
+    ``root`` (default: the config dir), the environment and the admin policy.
+
+    ``engine``: its ``settings_resolver()`` instead (SET-PACK): the engine's own config dir
+    and every loaded pack's rows, so the pack's ``boards.*.hub.*`` rows check a board's
+    per-board keys. The pack itself, which has no engine to hand, reads the core rows only
+    (it needs just the ``hubs.*`` ones)."""
+    if engine is not None:
+        return engine.settings_resolver(env=env, policy_path=POLICY_PATH)
     return Resolver.load(root, env=env, policy_path=POLICY_PATH)
 
 
@@ -510,6 +517,12 @@ def add_board_for_target(hub_name: str, target: str, resolver: Resolver, *,
     checked = dict(resolver.check_settable(k, v) for k, v in changes.items())
     hub_table = {"use": hub.name, "target": target,
                  "shares": {"mcc": f"/dev/{target}/tty_00"}}
+    # The board pack's own rows check its per-board keys, when the resolver has them
+    # (``engine.settings_resolver()``: SET-PACK's boards.*.hub.target / shares.*).
+    for k, v in ((("hub", "target"), target), (("hub", "shares", "mcc"), hub_table["shares"]["mcc"])):
+        full = join_key(("boards", key, *k))
+        if resolver.schema.find(full) is not None:
+            resolver.check_settable(full, v)
     checked[join_key(("boards", key, "hub"))] = _inline(hub_table)
     if resolver.files is None:                   # pragma: no cover - tests use load()
         raise UsageError("no settings files to write")

@@ -157,9 +157,13 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
 
 def cmd_hub(ctx: Ctx) -> int:
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
     from harness_manager.settings import hubs
 
-    r = hubs.load_resolver()
+    # An in-process engine for its settings resolver (its config dir, every pack's rows):
+    # it opens no board and never talks to a running service ("hub" is in NO_ENGINE).
+    r = hubs.load_resolver(engine=ctx.engine or Engine(EngineConfig()))
     return {"list": _list, "add": _add, "token": _token, "test": _test, "targets": _targets,
             "adopt": _adopt, "remove": _remove}[ctx.args.hub_cmd](ctx, r)
 
