@@ -336,10 +336,12 @@ def _test(ctx: Ctx, r: Any) -> int:
             human.append("  offers: " + ", ".join(t["target"] for t in v["targets"]))
         ctx.emit(Result("hub test", v, rows=rows, human=human))
         return ExitCode.OK
-    if ctx.fmt != "json":
-        human = [f"hub {a.name} ({(v['transport'] or '?').upper()}): stopped at {v['failed']}"]
-        human += [_step_line(s) for s in v["steps"]]
-        ctx.emit(Result("hub test", v, rows=rows, human=human))
+    if ctx.fmt == "human":
+        # A failure has no result on stdout (the output contract): the steps are remarks on
+        # stderr, before the error line; --json carries them in error.data.report.
+        ctx.note(f"hub {a.name} ({(v['transport'] or '?').upper()}): stopped at {v['failed']}")
+        for s in v["steps"]:
+            ctx.note(_step_line(s))
     raise with_data(report.error(), report=v)
 
 

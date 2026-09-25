@@ -85,8 +85,8 @@ def test_negative_twin_a_failed_ssh_test_exits_7_naming_the_step(capsys, fake_pa
     cli(capsys, "hub", "add", "lab", "--ssh", HOST)
     fake_path.setenv(fakebin.SCENARIO_ENV, "auth")
     rc, out, err = cli(capsys, "hub", "test", "lab")
-    assert rc == ExitCode.UNREACHABLE and "stopped at auth" in out and "FAIL auth" in out
-    assert "ssh-add" in err
+    assert rc == ExitCode.UNREACHABLE and out == ""
+    assert "stopped at auth" in err and "FAIL auth" in err and "ssh-add" in err
     rc, out, _ = cli(capsys, "--json", "hub", "test", "lab")
     body = json.loads(out)
     assert rc == 7 and body["error"]["data"]["report"]["failed"] == "auth"
@@ -118,8 +118,8 @@ def test_negative_twin_rest_with_a_wrong_token_exits_7_at_auth(capsys, monkeypat
                          monkeypatch=monkeypatch)
         assert rc == 0
         rc, out, err = cli(capsys, "hub", "test", "remote")
-        assert rc == ExitCode.UNREACHABLE and "stopped at auth" in out and "401" in out
-        assert "hub token remote" in err
+        assert rc == ExitCode.UNREACHABLE and out == "" and "stopped at auth" in err
+        assert "401" in err and "hub token remote" in err
 
 
 def test_adopt_makes_an_inline_table_a_hub_and_is_idempotent(capsys):
@@ -166,3 +166,44 @@ def test_a_token_is_never_taken_from_argv(capsys):
     assert rc == ExitCode.USAGE
     rc, _, _ = cli(capsys, "hub", "add", "x", "--url", "https://h.invalid", "--token", "t")
     assert rc == ExitCode.USAGE
+
+
+# --- the output contract: --tsv rows are exactly the layout's width, --json one object ----------
+
+
+def _tsv_ok(out: str, layout: str) -> bool:
+    from harness_manager.cli.output import TSV_COLUMNS
+
+    rows = [line.split("\t") for line in out.splitlines()]
+    return bool(rows) and all(len(r) == len(TSV_COLUMNS[layout]) for r in rows)
+
+
+def test_every_hub_layout_prints_rows_of_its_width_and_one_json_object(capsys, fake_path,
+                                                                       monkeypatch):
+    with FakeFpgahub() as hub:
+        tok = hub.add_token("alice")
+        rc, out, _ = cli(capsys, "--tsv", "hub", "add", "remote", "--url", hub.url,
+                         "--token-stdin", stdin=tok + "\n", monkeypatch=monkeypatch)
+        assert rc == 0 and _tsv_ok(out, "hub")
+        cli(capsys, "hub", "add", "lab", "--ssh", HOST)
+        for argv, layout in ((["hub", "list"], "hub"),
+                             (["hub", "token", "remote", "--clear"], "hub"),
+                             (["hub", "test", "lab"], "hub test"),
+                             (["hub", "targets", "lab"], "hub targets"),
+                             (["hub", "targets", "lab", "--add", "mps3_01_pl"], "hub change"),
+                             (["hub", "adopt", "mps3_01_pl"], "hub change"),
+                             (["hub", "remove", "remote"], "hub change")):
+            rc, out, _ = cli(capsys, "--tsv", *argv)
+            assert rc == 0 and _tsv_ok(out, layout), (argv, out)
+        rc, out, _ = cli(capsys, "--json", "hub", "list")
+        body = json.loads(out)
+        assert rc == 0 and body["ok"] and {h["name"] for h in body["hubs"]} == {"lab"}
+
+
+def test_negative_twin_a_failing_hub_verb_prints_nothing_on_stdout_with_tsv(capsys, fake_path):
+    cli(capsys, "hub", "add", "lab", "--ssh", HOST)
+    fake_path.setenv(fakebin.SCENARIO_ENV, "dns")
+    rc, out, err = cli(capsys, "--tsv", "hub", "test", "lab")
+    assert rc == ExitCode.UNREACHABLE and out == "" and "reach" in err
+    rc, out, err = cli(capsys, "--tsv", "hub", "remove", "nosuch")
+    assert rc == ExitCode.ABSENT and out == "" and err.startswith("harness-manager: ")

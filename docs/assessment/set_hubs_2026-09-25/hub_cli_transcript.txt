@@ -1,7 +1,7 @@
 # SET-HUBS: harness-manager hub, against the fakes only (2026-09-25)
 # fake fpgahub 0.3.0 on 127.0.0.1 (tests/fakes/t8_hub_rest.py); fake ssh/sg/id/fpgahub first on PATH
 # (tests/fakes/settings_fake_bin.py); host names under .invalid; HARNESS_MANAGER_KEYRING=off;
-# a scratch HARNESS_MANAGER_STATE_DIR. Script: the lane's /tmp/sethubs-demo/run_transcript.py.
+# a scratch HARNESS_MANAGER_STATE_DIR. stdout and stderr are shown together.
 
 $ harness-manager hub list
 No hub. Harness Manager talks to boards on your desk or your network directly. Add a hub when your boards live in a lab: `harness-manager hub add NAME --ssh HOST` (or --url URL).
@@ -15,53 +15,53 @@ next: `harness-manager hub test lab`
 $ harness-manager hub test lab
 hub lab (SSH): every step passed
   ok   config   ssh hub.invalid via bastion.invalid
-  ok   reach    hub.invalid answered  [347 ms]
-  ok   auth     logged in with your SSH key  [347 ms]
-  ok   group    in 'fpga'  [347 ms]
-  ok   targets  3 targets on 2 boards  [347 ms]
+  ok   reach    hub.invalid answered  [349 ms]
+  ok   auth     logged in with your SSH key  [349 ms]
+  ok   group    in 'fpga'  [349 ms]
+  ok   targets  3 targets on 2 boards  [349 ms]
   offers: mps3_01_pl, kr260_01_ps, kr260_01_pl
 [exit 0]
 
 $ SETTINGS_FAKE_SCENARIO=auth harness-manager hub test lab
 hub lab (SSH): stopped at auth
   ok   config   ssh hub.invalid via bastion.invalid
-  ok   reach    hub.invalid answered  [70 ms]
-  FAIL auth     dam1n19@hub.invalid: Permission denied (publickey,gssapi-with-mic).  [70 ms]
+  ok   reach    hub.invalid answered  [62 ms]
+  FAIL auth     dam1n19@hub.invalid: Permission denied (publickey,gssapi-with-mic).  [62 ms]
 harness-manager: hub lab: auth: dam1n19@hub.invalid: Permission denied (publickey,gssapi-with-mic). — your SSH key is not accepted: load it into your agent (ssh-add), or ask the hub admin to add it
 [exit 7]
 
 $ SETTINGS_FAKE_SCENARIO=nogroup harness-manager hub test lab
 hub lab (SSH): stopped at group
   ok   config   ssh hub.invalid via bastion.invalid
-  ok   reach    hub.invalid answered  [192 ms]
-  ok   auth     logged in with your SSH key  [192 ms]
-  FAIL group    your account on hub.invalid is not in 'fpga'  [192 ms]
+  ok   reach    hub.invalid answered  [193 ms]
+  ok   auth     logged in with your SSH key  [193 ms]
+  FAIL group    your account on hub.invalid is not in 'fpga'  [193 ms]
 harness-manager: hub lab: group: your account on hub.invalid is not in 'fpga' — ask the hub admin: `usermod -aG fpga <you>`, then log in again (a new group needs a new login)
 [exit 7]
 
 $ harness-manager hub test lab --target mps3_09_pl
 hub lab (SSH): stopped at target
   ok   config   ssh hub.invalid via bastion.invalid
-  ok   reach    hub.invalid answered  [369 ms]
-  ok   auth     logged in with your SSH key  [369 ms]
-  ok   group    in 'fpga'  [369 ms]
-  ok   targets  3 targets on 2 boards  [369 ms]
+  ok   reach    hub.invalid answered  [328 ms]
+  ok   auth     logged in with your SSH key  [328 ms]
+  ok   group    in 'fpga'  [328 ms]
+  ok   targets  3 targets on 2 boards  [328 ms]
   FAIL target   this hub has no target 'mps3_09_pl'
 harness-manager: hub lab: target: this hub has no target 'mps3_09_pl' — it offers kr260_01_pl, kr260_01_ps, mps3_01_pl; set hub.target in boards.toml to one of them
 [exit 3]
 
-$ printf '%s\n' WRONG-TOKEN | harness-manager hub add remote --url http://127.0.0.1:39069 --token-stdin
-added hub remote: REST http://127.0.0.1:39069 in /tmp/sethubs-demo/state/settings.toml
+$ printf '%s\n' WRONG-TOKEN | harness-manager hub add remote --url http://127.0.0.1:39775 --token-stdin
+added hub remote: REST http://127.0.0.1:39775 in /tmp/sethubs-demo/state/settings.toml
 token: in a private file
 next: `harness-manager hub test remote`
 [exit 0]
 
 $ harness-manager hub test remote
 hub remote (REST): stopped at auth
-  ok   config   http://127.0.0.1:39069
-  ok   reach    fpgahub 0.3.0 at 127.0.0.1:39069  [4 ms]
-  FAIL auth     whoami: the hub remote (127.0.0.1:39069) did not accept a credential (HTTP 401: read access: present a Bearer token (fpgahub login) or sign in to the web UI)  [4 ms]
-harness-manager: hub remote: auth: whoami: the hub remote (127.0.0.1:39069) did not accept a credential (HTTP 401: read access: present a Bearer token (fpgahub login) or sign in to the web UI) — store the right token: `harness-manager hub token remote --stdin` (or `harness-manager config set-secret hubs.remote.token`); an admin mints tokens (`fpgahub token create`)
+  ok   config   http://127.0.0.1:39775
+  ok   reach    fpgahub 0.3.0 at 127.0.0.1:39775  [3 ms]
+  FAIL auth     whoami: the hub remote (127.0.0.1:39775) did not accept a credential (HTTP 401: read access: present a Bearer token (fpgahub login) or sign in to the web UI)  [2 ms]
+harness-manager: hub remote: auth: whoami: the hub remote (127.0.0.1:39775) did not accept a credential (HTTP 401: read access: present a Bearer token (fpgahub login) or sign in to the web UI) — store the right token: `harness-manager hub token remote --stdin` (or `harness-manager config set-secret hubs.remote.token`); an admin mints tokens (`fpgahub token create`)
 [exit 7]
 
 $ printf '%s\n' "$ALICE_TOKEN" | harness-manager hub token remote --stdin
@@ -70,9 +70,9 @@ hub remote: token in a private file
 
 $ harness-manager hub test remote --target mps3_01_pl
 hub remote (REST): every step passed
-  ok   config   http://127.0.0.1:39069
-  ok   reach    fpgahub 0.3.0 at 127.0.0.1:39069  [3 ms]
-  ok   auth     alice@mapstone-dev (role write), token from hubs.remote.token in a private file  [2 ms]
+  ok   config   http://127.0.0.1:39775
+  ok   reach    fpgahub 0.3.0 at 127.0.0.1:39775  [3 ms]
+  ok   auth     alice@mapstone-dev (role write), token from hubs.remote.token in a private file  [3 ms]
   ok   targets  3 targets on 2 boards  [1 ms]
   ok   target   mps3_01_pl
   offers: mps3_01_pl, kr260_01_ps, kr260_01_pl
@@ -92,7 +92,7 @@ added boards.lab01 in /tmp/sethubs-demo/state/boards.toml: mps3_01_pl on hub rem
 $ harness-manager hub list
 lab            SSH   hub.invalid via bastion.invalid
                group fpga; lease 30 min; boards -
-remote         REST  http://127.0.0.1:39069
+remote         REST  http://127.0.0.1:39775
                token in a private file; lease 60 min; boards lab01
 boards.old has an inline hub table: `harness-manager hub adopt old` makes it a named hub
 [exit 0]
@@ -116,7 +116,7 @@ harness-manager: the hub 'lab' is used by old in boards.toml — point those boa
 $ harness-manager hub list
 lab            SSH   hub.invalid via bastion.invalid
                group fpga; lease 30 min; boards old
-remote         REST  http://127.0.0.1:39069
+remote         REST  http://127.0.0.1:39775
                token in a private file; lease 60 min; boards lab01
 [exit 0]
 
@@ -134,7 +134,7 @@ lease_ttl = 1800
 
 [hubs.remote]
 transport = "rest"
-url = "http://127.0.0.1:39069"
+url = "http://127.0.0.1:39775"
 
 $ cat $HARNESS_MANAGER_STATE_DIR/boards.toml
 [boards.lab01]
