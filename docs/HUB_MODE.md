@@ -6,6 +6,71 @@ Today Harness Manager reaches the lab hub (fpgahub on mapstone-dev) over SSH: `s
 
 Code: `src/harness_manager/transports/hub_rest.py` (the client), `hub_events.py` (the SSE stream), `hub_reach.py` (the data plane).
 
+## Named hubs (lane SET-HUBS, 2026-09-25)
+
+A hub can be a named setting instead of a table repeated in every board. **No hub at all is still the default**: a board on your desk or your network needs none, and nothing below runs, reads or probes until a hub is configured.
+
+```toml
+# settings.toml (beside boards.toml; `harness-manager hub add` writes it)
+[hubs.lab]
+host = "mapstone-dev.ecs.soton.ac.uk"   # SSH: your lab account ("local" on the hub itself)
+group = "fpga"                           # the fpgahub socket's group ("" = no sg)
+jump = ""                                # an SSH jump host on the way to the hub (ssh -J)
+holder = ""                              # the lease holder ("" = harness-manager-<user>@<host>)
+lease_ttl = "1h"                         # also request_ttl (2h) and queue_timeout (1h)
+
+[hubs.remote]
+url = "https://mapstone-dev.ecs.soton.ac.uk:7246"   # REST: a token (7245 is mTLS)
+token = "store"                          # store (default) | file:PATH | env:VAR | fpgahub-login
+ca_file = "~/lab-hub-ca.pem"
+```
+
+```toml
+# boards.toml
+[boards.lab]
+match = ["192.168.10.101"]
+via = "hub"
+hub = { use = "lab", target = "mps3_01_pl", shares = { mcc = "/dev/mps3_01_pl/tty_00" } }
+```
+
+- **Which keys go where.** The board keeps `use`, `target`, `board`, `shares`, `baud` and `start_shares`. Every other key belongs to the hub. A board table that has `use` and a hub key (`host`, `url`, `token_file`, …) is refused, naming the key.
+- **Machine hubs.** The admin's `/etc/harness-manager/policy.toml` may define `[hubs.<name>]`. Every key the admin wrote is locked (`hub add --update` and `hub remove` exit 15), but each user sets their own token with `harness-manager hub token NAME --stdin`. A `token` in the policy file is dropped, because every user can read that file.
+- **A named REST hub's token, first match wins:** `$FPGAHUB_TOKEN` (only when `$FPGAHUB_ADDR` is unset or names this hub), then your `hubs.<name>.token` (the secret store by default: the OS keyring, else a 0600 file; `file:PATH` is read strictly, so a file others can read is **refused**, not warned about), then the fpgahub login store for this hub. A token stored in a keyring this process cannot reach is an error (exit 7), never quietly replaced by the login store. An inline table keeps T8's order above (`token_file` first).
+- **`jump`** reaches the lease and share commands (`ssh -J`), the share forwards and the board's tunnel.
+- **`holder`, `lease_ttl`, `request_ttl`, `queue_timeout`** are what `lease acquire`, `lease request` and `POST /boards/{bid}/lease` ask for when the caller names none.
+
+### The `hub` verb
+
+```
+harness-manager hub list
+harness-manager hub add lab --ssh mapstone-dev.ecs.soton.ac.uk [--jump HOST] [--lease-ttl 30m]
+harness-manager hub add remote --url https://HUB:7246 --ca-file ~/lab-hub-ca.pem --token-stdin
+harness-manager hub token NAME --stdin | --ref file:PATH | --clear
+harness-manager hub test NAME [--target mps3_01_pl]
+harness-manager hub targets NAME [--add TARGET [--board KEY]]
+harness-manager hub adopt BOARD [--as NAME]
+harness-manager hub remove NAME [--force]
+```
+
+**`hub test`** proves, in order, and stops at the first failure with the reason and the next step: **config → reach → auth → group → targets → target**. It never takes, joins or releases a lease, and never starts a share.
+- Over REST it makes three reads: `GET /health`, `/whoami`, `/groups`.
+- Over SSH it makes **one** round trip with pyverify's own quoting, plus `ConnectTimeout=10`: `echo HM-TEST:login; id -Gn; echo HM-TEST:ids; sg fpga -c 'fpgahub board list --json'`. The markers show how far it got:
+  - a dead host or DNS failure stops at **reach**;
+  - `Permission denied (publickey)` or a host-key failure stops at **auth**;
+  - a login without the `fpga` group stops at **group**, with the admin's `usermod -aG fpga` command;
+  - no fpgahub on the host stops at **targets**.
+- The **target** step checks that the targets of the boards using the hub (or `--target`) are on offer.
+
+**`hub targets NAME --add TARGET`** writes a board for a target the hub offers. The board gets `hub.use`, `via = "hub"`, `match` (the target's `board_ip`) and `name` (its description). These come from `GET /targets/{t}` over REST, or `fpgahub target show T` over SSH, which v0.3.0 prints as JSON.
+
+**`hub adopt BOARD`** is "Make this a hub": the board's inline `hub` table becomes `[hubs.<name>]` plus `hub.use`.
+- The default name is the host's first label.
+- A `token_file` becomes `token = "file:PATH"`.
+- `via = "ssh:<the same host>"` becomes `via = "hub"`, which reaches an SSH hub through the same tunnel.
+- Comments are kept, and `boards.toml` is copied to `boards.toml.bak-<date>` first.
+- A second board with the same inline table reuses the hub. A name taken by a different definition is refused.
+- Run again, it does nothing.
+
 ## Setup for a user with a token
 
 1. **Get a token with the `write` role.** Two ways:
