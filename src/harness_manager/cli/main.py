@@ -35,7 +35,7 @@ from .output import TSV_COLUMNS, Result, report_error
 
 log = logging.getLogger(__name__)
 
-NO_ENGINE = {"help", "version", "xdc", "kit"}
+NO_ENGINE = {"help", "version", "xdc", "kit", "hub"}
 
 
 class _Parser(argparse.ArgumentParser):
@@ -343,6 +343,11 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_xvc
     cmd_xvc.register(sub)
     verbs["xvc"] = sub.choices["xvc"]
+
+    # -- hub (lane SET-HUBS: fpgahub hubs as named settings; never opens a board) ----------
+    from . import cmd_hubcfg
+    cmd_hubcfg.register(sub)
+    verbs["hub"] = sub.choices["hub"]
     return p
 
 
