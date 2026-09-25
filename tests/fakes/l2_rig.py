@@ -127,7 +127,8 @@ def l2_virtual_board(tmp_path: Path, *, features: tuple[str, ...] = ("uart_baud"
     shell = L2BaudShell.ephemeral(
         static_id=p.static_id, boot_rm_id=rm_id, reset_targets=p.reset_targets,
         harness_version=p.harness_version, harness_sha=p.harness_sha,
-        harness_usr_access=p.usr_access, features=p.features)
+        harness_usr_access=p.usr_access, features=p.features,
+        **vb.board_ports.shell_ports)                        # held for the board's life (FLAKE-2)
     shell.features = tuple(p.features) + tuple(features)   # bypasses FakeShell's feature check
     shell.ops = []
     shell.uart = {"uart0": _stream_state(76800, settable), "uart1": _stream_state(76800, settable)}

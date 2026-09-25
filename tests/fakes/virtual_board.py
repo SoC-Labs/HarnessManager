@@ -151,7 +151,7 @@ LINUX_HARNESSD = linux_harnessd_profile()
 BOARD_PORT_RANGE = (10000, 20000)
 SHELL_PORT_KEYS = ("control_port", "tftp_port", "raw_tcp_port", "uart0_port", "uart1_port",
                    "swo_port")
-_UDP_SERVED = frozenset({"tftp_port"})
+_UDP_SERVED = frozenset({"tftp_port", "identify_port"})
 
 
 class BoardPorts:
@@ -163,16 +163,19 @@ class BoardPorts:
     the kernel's range, and each is held for the board's life with the protocol the shell
     does NOT serve on it (UDP beside a TCP port, TCP beside the TFTP port): the shell binds
     and rebinds freely, and no other ``BoardPorts``, in this process or another, can pick
-    one meanwhile. ``candidates``: the ports to pick from (tests of this class).
+    one meanwhile. ``keys``: what to claim (``identify_port``: the Linux harness's UDP
+    identify responder, which a REBOOT restarts too). ``candidates``: the ports to pick
+    from (tests of this class).
     """
 
-    def __init__(self, candidates: tuple[int, ...] | None = None) -> None:
+    def __init__(self, candidates: tuple[int, ...] | None = None,
+                 keys: tuple[str, ...] = SHELL_PORT_KEYS) -> None:
         self.ports: dict[str, int] = {}
         self._held: list[socket.socket] = []
         pool = candidates or range(*BOARD_PORT_RANGE)
         pick = random.SystemRandom()           # not `random`: pytest-randomly reseeds it
         try:
-            for key in SHELL_PORT_KEYS:
+            for key in keys:
                 self.ports[key] = self._claim(pool, pick, udp_served=key in _UDP_SERVED)
         except BaseException:
             self.release()
@@ -197,6 +200,15 @@ class BoardPorts:
             self._held.append(held)
             return port
         raise AssertionError(f"no free port for a virtual board among {len(pool)} candidates")
+
+    @property
+    def shell_ports(self) -> dict[str, int]:
+        """The FakeShell's port keyword arguments."""
+        return {k: v for k, v in self.ports.items() if k in SHELL_PORT_KEYS}
+
+    @property
+    def identify_port(self) -> int:
+        return self.ports.get("identify_port", 0)
 
     def release(self) -> None:
         while self._held:
@@ -225,17 +237,22 @@ class VirtualMps3:
             harness_usr_access=profile.usr_access,
             harness_ver32=profile.harness_ver32,
         )
+        harness = _needs_harness_fake(profile) or mode != "run" or unit
         # The shell's ports, kept for the board's life (BoardPorts: a REBOOT rebinds them).
-        self.board_ports = BoardPorts()
+        self.board_ports = BoardPorts(
+            keys=SHELL_PORT_KEYS + (("identify_port",) if harness else ()))
         self._release_ports = weakref.finalize(self, self.board_ports.release)
-        common.update(self.board_ports.ports)
-        if _needs_harness_fake(profile) or mode != "run" or unit:
+        common.update(self.board_ports.shell_ports)
+        if harness:
             # T12: the v0.11 / Linux behaviours pyverify's FakeShell does not model yet.
+            # The identify port stays 0 (no responder) unless the board runs one.
+            responder = profile.identify or mode == "rescue"
             self.shell = HarnessFakeShell(
                 "127.0.0.1", features=profile.features, impl=profile.impl, lmb_kb=profile.lmb_kb, v011_verbs=profile.v011_verbs,
                 identify=profile.identify, omit_diag_keys=profile.omit_diag_keys,
                 version_extra=profile.version_extra, reboot_outage_s=profile.reboot_outage_s,
-                mode=mode, unit=unit, **common)
+                mode=mode, unit=unit,
+                identify_port=self.board_ports.identify_port if responder else 0, **common)
         else:
             self.shell = FakeShell("127.0.0.1", features=profile.features, **common)
         self._keepalive: FakeIdentifyResponder | None = None
@@ -314,6 +331,8 @@ class VirtualMps3:
         self.shell.stop()
         self.shell.mode = "rescue"
         self.shell.rescue_reason = reason
+        if not getattr(self.shell, "identify_port", 0) and self.board_ports.identify_port:
+            self.shell.identify_port = self.board_ports.identify_port   # the responder's, held
         self.shell.start()
 
     def leave_rescue(self) -> None:

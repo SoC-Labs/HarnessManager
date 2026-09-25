@@ -96,7 +96,8 @@ def t9_virtual_board(tmp_path: Path, *, features: tuple[str, ...] = ("sysmon", "
     shell = T9Shell.ephemeral(
         static_id=p.static_id, boot_rm_id=0, reset_targets=p.reset_targets,
         harness_version=p.harness_version, harness_sha=p.harness_sha,
-        harness_usr_access=p.usr_access, features=p.features)
+        harness_usr_access=p.usr_access, features=p.features,
+        **vb.board_ports.shell_ports)                        # held for the board's life (FLAKE-2)
     shell.features = tuple(p.features) + tuple(features)   # bypasses FakeShell's known-feature check
     shell.ops = []
     vb.shell = shell

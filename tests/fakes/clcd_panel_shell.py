@@ -226,5 +226,4 @@ class PanelVirtualMps3(VirtualMps3):
             boot_rm_id=0, reset_targets=profile.reset_targets,
             harness_version=profile.harness_version, harness_sha=profile.harness_sha,
             harness_usr_access=profile.usr_access, harness_ver32=profile.harness_ver32,
-            control_port=0, tftp_port=0, raw_tcp_port=0, uart0_port=0, uart1_port=0,
-            swo_port=0, **shell_kwargs)
+            **self.board_ports.shell_ports, **shell_kwargs)   # held for the board's life (FLAKE-2)
