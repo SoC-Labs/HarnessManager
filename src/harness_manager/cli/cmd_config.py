@@ -39,7 +39,7 @@ import time
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from harness_manager.core.errors import ExitCode, UnavailableError, UsageError
+from harness_manager.core.errors import ActionFailedError, ExitCode, UnavailableError, UsageError
 from harness_manager.settings import ops
 
 from .context import Ctx
@@ -195,8 +195,9 @@ class _Remote:
 
                 raise error_from_json(state.get("error") or {})
             time.sleep(0.2)
-        raise UsageError(f"the test is still running in the service (job {job})",
-                         hint=f"GET /api/v1/jobs/{job} shows it")
+        raise ActionFailedError(f"the test did not finish in {TEST_WAIT_S:g} s; it is still "
+                                f"running in the service (job {job})",
+                                hint=f"GET /api/v1/jobs/{job} shows it")
 
 
 def _shell_context(ctx: Ctx) -> ops.SettingsContext:

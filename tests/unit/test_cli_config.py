@@ -181,19 +181,37 @@ def test_negative_twin_a_tester_that_fails_exits_6_and_one_that_passes_0(capsys)
         testers.unregister("tools")
 
 
-@pytest.mark.parametrize("argv, layout", [
+TSV_CASES = [
     (("config", "list", "tools"), "config list"),
     (("config", "get", "tools.openocd"), "config get"),
     (("config", "set", "general.theme", "dark"), "config set|unset"),
     (("config", "unset", "general.theme"), "config set|unset"),
     (("config", "unset-secret", "hubs.lab.token"), "config set-secret|unset-secret"),
     (("config", "path"), "config path"),
-])
+]
+
+
+@pytest.mark.parametrize("argv, layout", TSV_CASES)
 def test_tsv_rows_have_the_layouts_columns(capsys, argv, layout):
     rc, out, _ = run(capsys, "--tsv", *argv)
     rows = [line.split("\t") for line in out.splitlines()]
     assert rc == 0 and rows
     assert {len(r) for r in rows} == {len(TSV_COLUMNS[layout])}
+
+
+def test_every_config_layout_is_pinned_here(capsys):
+    """test_t5_cli_golden leaves the config layouts to this file: each one is exercised."""
+    pinned = {layout for _, layout in TSV_CASES} | {"config test"}
+    assert pinned == {k for k in TSV_COLUMNS if k.startswith("config ")}
+    testers.register("tools", lambda req: {"ok": True, "steps": [
+        {"step": "openocd", "ok": True, "detail": "0.12.0"}, {"step": "vivado", "ok": True}]})
+    try:
+        rc, out, _ = run(capsys, "--tsv", "config", "test", "tools")
+    finally:
+        testers.unregister("tools")
+    rows = [line.split("\t") for line in out.splitlines()]
+    assert rc == 0 and len(rows) == 2
+    assert {len(r) for r in rows} == {len(TSV_COLUMNS["config test"])}
 
 
 def test_config_is_in_the_help(capsys):
