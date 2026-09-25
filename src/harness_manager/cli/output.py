@@ -52,7 +52,7 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "attach": ("BOARD_ID", "STATE", "HOLDER", "LOCK"),
     "detach": ("BOARD_ID", "STATE", "HOLDER"),
     "overlays": ("BOARD_ID", "NAME", "STATE", "RM_ID", "STATIC_ID", "SIZE", "IP_CLASS", "REASON"),
-    "program": ("BOARD_ID", "OVERLAY", "RM_ID", "VERIFIED", "SECONDS", "TRANSPORT"),
+    "program": ("BOARD_ID", "OVERLAY", "RM_ID", "VERIFIED", "SECONDS", "TRANSPORT", "CARD"),
     "restore": ("BOARD_ID", "RM_ID", "VERIFIED", "SECONDS", "TRANSPORT"),
     "console": ("NAME", "TEXT"),
     "console --export": ("BOARD_ID", "NAME", "HOST", "PORT"),

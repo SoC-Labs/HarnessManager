@@ -14,7 +14,13 @@ from harness_manager.core.errors import (
     HarnessError,
 )
 from harness_manager.core.model import Check
-from harness_manager.core.pack import DeployResult, OverlayRef, PreflightItem
+from harness_manager.core.pack import (
+    DeployResult,
+    OverlayRef,
+    PreflightItem,
+    card_status_of,
+    keep_refusal,
+)
 
 from .context import Ctx
 from .output import Result, with_data
@@ -119,6 +125,25 @@ def _result_rows(board_id: str, overlay: str, r: DeployResult) -> list:
     return [board_id, overlay, r.rm_id, r.verified, round(r.seconds, 3), r.transport]
 
 
+def card_line(r: DeployResult, overlay: str) -> str:
+    """The deploy report's card line, for a deploy that was asked to keep its design."""
+    if r.card is None:
+        return "not kept on the card: the deploy reported nothing about the card"
+    if r.card.kept:
+        slot = f" (slot {r.card.slot})" if r.card.slot else ""
+        return f"kept on the card{slot}: the board boots into {overlay} next time"
+    return f"not kept on the card: {r.card.why or 'no reason given'}"
+
+
+def _card_cell(r: DeployResult, asked: bool) -> str:
+    """TSV CARD: "" (printed "-") when not asked, "kept:<slot>" or "not kept: <why>"."""
+    if not asked:
+        return ""
+    if r.card is not None and r.card.kept:
+        return f"kept:{r.card.slot}"
+    return f"not kept: {r.card.why if r.card else 'not reported'}"
+
+
 def _check_verified(board_id: str, r: DeployResult, **data: object) -> None:
     if not r.verified:
         raise with_data(ActionFailedError(
@@ -137,16 +162,30 @@ def cmd_program(ctx: Ctx) -> int:
         refused = preflight_refusal(items, overlay.name)
         if refused is not None:                 # refuse BEFORE deploy() is ever called
             raise with_data(refused, overlay=overlay, preflight=items)
-        ctx.confirm(f"program {overlay.name} ({overlay.rm_id}) into {cand.board_id}?")
+        keep = bool(getattr(ctx.args, "keep_on_card", False))
+        also = ""
+        if keep:                                # the card must take it, before anything
+            card = card_status_of(deploy, session)
+            refused = keep_refusal(card)
+            if refused is not None:
+                raise with_data(refused, overlay=overlay, card=card)
+            ctx.note(f"card: {card.text or card.state or 'present'}; the design will be "
+                     "kept on it")
+            also = " and keep it on the card"
+        ctx.confirm(f"program {overlay.name} ({overlay.rm_id}) into {cand.board_id}{also}?")
         with ctx.bus_progress(cand.board_id, "deploy"):
-            result = deploy.deploy(session, overlay)
+            # The keyword only when asked: the default never writes the card.
+            result = (deploy.deploy(session, overlay, keep_on_card=True) if keep
+                      else deploy.deploy(session, overlay))
     _check_verified(cand.board_id, result, overlay=overlay, preflight=items)
+    human = [f"programmed {overlay.name} ({result.rm_id}) into {cand.board_id} in "
+             f"{result.seconds:.1f}s via {result.transport or '?'}; verified"]
+    if keep:
+        human.append(card_line(result, overlay.name))
     ctx.emit(Result("program", {
         "board_id": cand.board_id, "overlay": overlay, "preflight": items, "result": result,
-    }, rows=[_result_rows(cand.board_id, overlay.name, result)], human=[
-        f"programmed {overlay.name} ({result.rm_id}) into {cand.board_id} in "
-        f"{result.seconds:.1f}s via {result.transport or '?'}; verified",
-    ]))
+    }, rows=[[*_result_rows(cand.board_id, overlay.name, result), _card_cell(result, keep)]],
+        human=human))
     return ExitCode.OK
 
 

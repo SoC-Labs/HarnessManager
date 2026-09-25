@@ -167,6 +167,9 @@ def make_parser() -> argparse.ArgumentParser:
     target(vp)
     vp.add_argument("rm", metavar="RM", help="overlay name (nanosoc) or rm_id (0x01000001)")
     vp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    vp.add_argument("--keep-on-card", action="store_true",
+                    help="also keep the design on the board's user microSD, so it boots into "
+                         "it next time (off by default)")
     vp.set_defaults(fn=cmd_program.cmd_program)
 
     vp = verb("restore", "load the baseline design and confirm it", layout="restore",

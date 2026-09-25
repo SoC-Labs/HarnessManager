@@ -54,8 +54,11 @@ from harness_manager.core.model import (
     Reading,
 )
 from harness_manager.core.pack import (
+    CARD_NO_STORE,
     BackupRecord,
     BoardSession,
+    CardOutcome,
+    CardStatus,
     DeployResult,
     OverlayRef,
     PreflightItem,
@@ -103,6 +106,12 @@ class FakeState:
     ])
     preflight: dict[str, list[PreflightItem]] = field(default_factory=dict)
     deploy_verified: bool = True
+    # Keep on the card (L1): what card_status answers, what a kept deploy did, and the
+    # keep_on_card each deploy was called with (False = the keyword was not passed).
+    card: CardStatus = field(default_factory=lambda: CardStatus(store=False,
+                                                                reason=CARD_NO_STORE))
+    card_outcome: CardOutcome = field(default_factory=lambda: CardOutcome(kept=True, slot="A"))
+    deploy_keeps: list[bool] = field(default_factory=list)
     # consoles
     console_names: list[str] = field(default_factory=lambda: ["uart0", "uart1", "swo"])
     console_chunks: list[bytes] = field(default_factory=lambda: [
@@ -327,8 +336,15 @@ class FakeDeploy:
                 PreflightItem("shell_id matches", match, f"{overlay.static_id}"),
                 PreflightItem("crc", Check.OK)]
 
-    def deploy(self, session: BoardSession, overlay: OverlayRef) -> DeployResult:
+    def card_status(self, session: BoardSession) -> CardStatus:
+        self.st.hit("deploy.card_status")
+        return self.st.card
+
+    def deploy(self, session: BoardSession, overlay: OverlayRef, **kw: Any) -> DeployResult:
         self.st.hit("deploy.deploy")
+        keep = bool(kw.pop("keep_on_card", False))
+        assert not kw, kw
+        self.st.deploy_keeps.append(keep)
         bid = session.candidate.board_id
         self.bus.publish(Event("deploy.started", bid, {"rm": overlay.name}))
         for done in (0, overlay.size_bytes // 2, overlay.size_bytes):
@@ -337,7 +353,8 @@ class FakeDeploy:
         self.bus.publish(Event("deploy.done", bid, {"rm_id": overlay.rm_id,
                                                     "verified": self.st.deploy_verified}))
         self.st.identity = replace(self.st.identity, rm_id=overlay.rm_id, rm_name=overlay.name)
-        return DeployResult(overlay.rm_id, self.st.deploy_verified, 3.25, "tcp+windowed")
+        return DeployResult(overlay.rm_id, self.st.deploy_verified, 3.25, "tcp+windowed",
+                            card=self.st.card_outcome if keep else None)
 
     def restore_baseline(self, session: BoardSession) -> DeployResult:
         self.st.hit("deploy.restore_baseline")

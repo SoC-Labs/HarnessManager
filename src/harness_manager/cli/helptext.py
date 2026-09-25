@@ -95,7 +95,7 @@ PROGRAM = """\
 overlays TARGET [--overlay-dir DIR]...
     Every overlay the board knows: the ones that load on its shell, and the ones
     that do not, each with its reason.
-program TARGET RM [--yes] [--overlay-dir DIR]...
+program TARGET RM [--yes] [--keep-on-card] [--overlay-dir DIR]...
     RM is an overlay name (nanosoc) or rm_id (0x01000001). Prints the preflight
     table on stderr. A MISMATCH refuses and writes nothing: exit 14 when the
     overlay was built for another shell, exit 15 for any other failed check
@@ -103,6 +103,12 @@ program TARGET RM [--yes] [--overlay-dir DIR]...
     shown, and the prompt decides. Asks before writing unless --yes. Progress
     goes to stderr; the result (rm_id, verified, seconds, transport) to stdout.
     A deploy the board did not confirm exits 6.
+    --keep-on-card also keeps the design on the board's user microSD, so the
+    board boots into it next time; without it the card is never written. It
+    exits 12 before anything is written when the harness has no microSD store
+    or no card is in the USER microSD slot. The result says whether it was kept
+    (and in which slot) or why not; a card write that fails does not fail the
+    program (the new design is running; the card keeps the one it had).
 restore TARGET [--overlay-dir DIR]...
     Load the baseline design (greybox on the MPS3), then confirm it.
 
