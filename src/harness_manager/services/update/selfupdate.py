@@ -7,7 +7,10 @@ the same files.
 
 Under ``<state_dir>/update/``::
 
-    settings.json       the user's settings {channel, auto}: the admin policy may only tighten them
+    settings.json       the user's settings {channel, auto} before SET-CORE. They now live in
+                        ``<state_dir>/settings.toml`` ``[updates]`` (``harness_manager.settings``);
+                        this file is folded in on the first write, read until then, and kept
+                        current for one release so a rollback to an older version sees them
     last_check.json     what the periodic checker last saw (and what it announced)
     resume.json         0600. What a restarting daemon hands its successor: port, listen, token,
                         open boards and their PTYs. It never travels in argv (``ps`` shows argv)
@@ -122,9 +125,16 @@ class Settings:
 
 
 def load_settings(state_dir: Path) -> Settings:
-    data = read_json(settings_path(state_dir)) or {}
-    channel = data.get("channel") if isinstance(data.get("channel"), str) else ""
-    auto = data.get("auto") if data.get("auto") in MODES else ""
+    """The user's own choices (the ``user`` layer: no env, no policy; ``effective`` applies
+    those). From ``settings.toml`` ``[updates]``, else, until the first settings write,
+    ``update/settings.json``. A bad value reads as unset, as it always has."""
+    from harness_manager.settings.files import SettingsFiles  # stdlib-only to read
+
+    values = SettingsFiles(state_dir).read(boards=False).values
+    channel = values.get("updates.channel")
+    auto = values.get("updates.auto")
+    channel = channel if isinstance(channel, str) else ""
+    auto = auto if auto in MODES else ""
     return Settings(channel=channel if not channel or _CHANNEL_RE.match(channel) else "",
                     auto=auto)
 
@@ -151,7 +161,17 @@ def save_settings(state_dir: Path, *, channel: str | None = None, auto: str | No
             raise UsageError(f"auto must be one of {', '.join(MODES)}, not {auto!r}")
         new_auto = auto
     out = Settings(channel=new_channel, auto=new_auto)
-    write_json(settings_path(state_dir), out.as_dict())
+    from harness_manager.settings.files import SettingsFiles
+
+    changes: dict[str, str | None] = {}
+    if channel is not None:
+        changes["updates.channel"] = new_channel or None     # "": back to the default
+    if auto is not None:
+        changes["updates.auto"] = new_auto or None
+    if changes:
+        # settings.toml [updates], folding settings.json in on the first write; settings.json
+        # is rewritten too, as an older version reads it (SettingsFiles.write).
+        SettingsFiles(state_dir).write(changes)
     return out
 
 

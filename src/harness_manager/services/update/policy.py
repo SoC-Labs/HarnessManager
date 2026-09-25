@@ -20,6 +20,13 @@ user in one file. Harness Manager only reads it, and a user's own settings canno
 - **``notify``:** the service says an update exists, but stages it only when a user asks.
 - **``stage``:** the default (U3): notify, stage in the background, apply on a click.
 
+The same file holds the settings tables (``[lock]``, ``[default]``, ``[hubs.<name>]``; david S3,
+2026-09-25), which ``harness_manager.settings.policy`` reads. For these three settings,
+``[lock]`` may name them by their settings keys too (``updates.auto``, ``updates.channel``,
+``updates.check_interval``) with the same meaning; a top-level key wins over a ``[lock]``
+entry that disagrees with it (a warning says so). ``updates.auto`` is a ceiling either way:
+the administrator only tightens self-update.
+
 There is no environment variable that moves or disables the file: a user could otherwise
 step around it. A file that cannot be read or parsed, or a ``self_update`` or ``channel``
 value that is not understood, turns self-update **off** (it fails closed) and says why. An
@@ -43,6 +50,11 @@ DEFAULT_CHECK_INTERVAL_S = 6 * 3600
 MIN_CHECK_INTERVAL_S = 300
 _CHANNEL_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+#: The settings tables (SET-CORE): not U6 keys, and not unknown either.
+SETTINGS_TABLES = ("lock", "default", "hubs")
+#: A U6 key -> the settings key a ``[lock]`` entry may use for it.
+LOCK_KEYS = {"self_update": "updates.auto", "channel": "updates.channel",
+             "check_interval": "updates.check_interval"}
 
 
 def policy_path(platform: str = sys.platform, env: dict[str, str] | None = None) -> Path:
@@ -125,6 +137,7 @@ def parse_policy(text: str, path: str = "") -> Policy:
     mode, channel, interval = DEFAULT_MODE, "", None
     closed: list[str] = []
     warned: list[str] = []
+    data = _with_locks(data, warned)
     raw = data.get("self_update", DEFAULT_MODE)
     if raw is True:
         mode = DEFAULT_MODE
@@ -149,13 +162,45 @@ def parse_policy(text: str, path: str = "") -> Policy:
         except ValueError as exc:
             warned.append(f"check_interval: {exc}; the default is used")
             interval = None
-    for key in sorted(set(data) - {"self_update", "channel", "check_interval"}):
+    for key in sorted(set(data) - {"self_update", "channel", "check_interval", *SETTINGS_TABLES}):
         warned.append(f"unknown key {key!r} is ignored")
     if closed:
         mode = "off"
     return Policy(path=path, self_update=mode, channel=channel if not closed else "",
                   check_interval_s=interval, problems=tuple(closed + warned),
                   why_off="; ".join(closed))
+
+
+def _lock_entries(data: dict[str, Any]) -> dict[str, Any]:
+    """``[lock]``'s entries for ``updates.*``, however they are spelled: ``[lock.updates]``,
+    ``updates.channel = …`` (a dotted key) or ``"updates.channel" = …`` (a quoted one)."""
+    lock = data.get("lock")
+    if not isinstance(lock, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in lock.items():
+        if key == "updates" and isinstance(value, dict):
+            out.update({f"updates.{k}": v for k, v in value.items()})
+        elif key.startswith("updates."):
+            out[key] = value
+    return out
+
+
+def _with_locks(data: dict[str, Any], warned: list[str]) -> dict[str, Any]:
+    """The U6 keys, with a ``[lock]`` entry standing in for one the file does not set."""
+    locks = _lock_entries(data)
+    if not locks:
+        return data
+    out = dict(data)
+    for name, key in LOCK_KEYS.items():
+        if key not in locks:
+            continue
+        if name not in data:
+            out[name] = locks[key]
+        elif data[name] != locks[key]:
+            warned.append(f"[lock] {key} = {locks[key]!r} disagrees with {name} = "
+                          f"{data[name]!r}; {name} is used")
+    return out
 
 
 def load_policy(path: Path | None = None) -> Policy:

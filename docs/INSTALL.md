@@ -293,6 +293,29 @@ or disables the file.
 `notify`, `stage` and `check_interval` steer the service's background checks. The service
 does not check in the background yet, so today only `off` and `channel` change anything.
 
+The same file also accepts the settings tables (`docs/design/SETTINGS.md` §4):
+
+```toml
+[lock]                         # fixed for every user; no environment variable moves it
+updates.channel = "stable"     # the same as channel = "stable" above
+tools.vivado = "/tools/Xilinx/Vivado/2024.1/bin/vivado"
+
+[default]                      # this machine's starting point; a user may change it
+updates.mirrors = ["/lab/mirror"]
+
+[hubs.lab]                     # a machine hub; each user still sets their own token
+transport = "ssh"
+host = "mapstone-dev.ecs.soton.ac.uk"
+```
+
+`[lock]` may name the three keys above by their settings names (`updates.channel`,
+`updates.check_interval`, `updates.auto`), with the same meaning. If a top-level key
+disagrees with its `[lock]` entry, the top-level key is used and a warning says so.
+`updates.auto` is a ceiling: a user may still choose a lower mode. Never put a token in
+this file, because every user can read it. A `token` in a `[hubs.*]` table is dropped with
+a warning. Only the update keys take effect today. The other locks, defaults and hubs take
+effect as the Settings lanes wire each setting to them.
+
 ## Without the installer
 
 Any venv works. Install pyverify first, by its path, so the package index never chooses
