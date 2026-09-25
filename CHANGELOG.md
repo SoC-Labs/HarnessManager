@@ -77,6 +77,14 @@ owners.
   and over TFTP it rejected the new design (found on the board, 25 Sep).
 - After a failed push, the harness turns new connections away for up to 30 s while it
   finishes that swap. The board now shows as busy, with that reason, instead of offline.
+- Keep on the card: `harness-manager program TARGET RM --keep-on-card`, or the
+  **Keep on the card** box in the app's Program page, also writes the design to the
+  board's user microSD, so the board boots into it next time. It is off by default: a
+  plain program never writes the card. The box shows only when the harness has a
+  microSD store (the Linux harness) and a card is in the slot. Without a store or a
+  card, the program is refused before anything is written, with the reason. The
+  report says "Kept on the card (slot B)" or why not; a card write that fails never
+  fails the program.
 - DUT consoles (UART0, UART1, SWO) over Ethernet; the MCC and the FPGA UARTs over the
   Debug USB.
 - Each console can also be a terminal device for `screen`

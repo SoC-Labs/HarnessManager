@@ -130,6 +130,12 @@ harness-manager restore 192.168.10.101            # back to the baseline design
 `program` checks that the design was built for the harness on your board before it
 writes anything, asks you, then confirms the board loaded it.
 
+To have the board boot into the design next time, add `--keep-on-card` (in the app:
+tick **Keep on the card** in Program). It writes the design to the board's user microSD
+after the load is confirmed, and says which slot it went to. It is off by default. It
+needs a harness with a microSD store (the Linux harness) and a card in the USER microSD
+slot; without either it refuses before writing anything, and says which.
+
 Consoles: open them in the app, or run the `screen` command the app shows
 (`screen /tmp/harness-manager-$USER/<board>/uart0`, Linux and macOS;
 `harness-manager pty 192.168.10.101 uart0` prints it too). The app and `screen` can show
