@@ -251,6 +251,11 @@ class RestHubConfig:
     board: str = ""                # the physical board (lease unit); "" = ask the hub
     timeout_s: float = DEFAULT_TIMEOUT_S
     ssh_host: str = ""             # hub.host, when both are set: the data plane's fallback
+    #: CCR SET-HUB-2: a named hub (``[hubs.<name>]``, boards.toml ``hub.use``) takes its
+    #: token from the settings (``settings.hubs.hub_credential``), never from ``token_file``;
+    #: ``settings_root`` is the config dir its secret store is in ("" = the default one).
+    hub_name: str = ""
+    settings_root: str = ""
 
     @property
     def scheme(self) -> str:
@@ -428,8 +433,20 @@ def _read_token_file(path_text: str) -> str:
 
 def resolve_credential(cfg: RestHubConfig, *, env: Mapping[str, str] | None = None,
                        store: Path | None = None) -> Credential:
-    """``token_file``, else ``$FPGAHUB_TOKEN``, else the fpgahub login store for THIS hub."""
+    """An inline hub table: ``token_file``, else ``$FPGAHUB_TOKEN``, else the fpgahub login
+    store for THIS hub (T8's order, kept exactly for the tables that exist today).
+
+    A named hub (``cfg.hub_name``, CCR SET-HUB-2) goes by the settings design instead
+    (``settings.hubs.hub_credential``): ``$FPGAHUB_TOKEN`` for this hub, then the user's
+    ``hubs.<name>.token`` (the secret store, or a ``file:`` read strictly: a file others can
+    read is refused), then the fpgahub login store for this hub.
+    """
     env = os.environ if env is None else env
+    if cfg.hub_name:
+        from harness_manager.settings.hubs import hub_credential
+
+        return hub_credential(cfg.hub_name, cfg.host, cfg.port,
+                              root=cfg.settings_root or None, env=env, login_store=store)
     if cfg.token_file:
         return Credential(_read_token_file(cfg.token_file), f"token_file {cfg.token_file}")
     token = env.get("FPGAHUB_TOKEN", "")
@@ -471,10 +488,18 @@ def hub_error(what: str, status: int, body: Any, cfg: RestHubConfig) -> HarnessE
     where = cfg.addr
     lost = shape("LeaseLostError")
     if status == 401:
+        if cfg.hub_name:                       # SET-HUB-2: a named hub's token is a setting
+            return UnreachableError(
+                f"{what}: the hub {cfg.hub_name} ({where}) did not accept a credential "
+                f"(HTTP 401: {text})",
+                hint=f"store the right token: `harness-manager hub token {cfg.hub_name} "
+                     f"--stdin` (or `harness-manager config set-secret hubs.{cfg.hub_name}"
+                     ".token`); an admin mints tokens (`fpgahub token create`)")
         return UnreachableError(
             f"{what}: the hub {where} did not accept a credential (HTTP 401: {text})",
             hint="set hub.token_file in boards.toml, or `fpgahub login --addr "
-                 f"{where} --token …`; an admin mints tokens (`fpgahub token create`)")
+                 f"{where} --token …`; an admin mints tokens (`fpgahub token create`); "
+                 "or name a hub: `harness-manager hub token NAME --stdin`")
     if status == 403:
         if "no current lease" in low:
             return lost(f"{what}: the lease on {cfg.target} has expired ({text})",
@@ -770,6 +795,13 @@ class RestHubClient:
     def target_info(self) -> dict[str, Any]:
         """``GET /targets/{t}`` (fpgahub ``BoardResponse``): network, access (the gates), ..."""
         return self._call("target", "GET", self._t()).body or {}
+
+    def groups(self) -> list[dict[str, Any]]:
+        """``GET /groups``: the physical boards and their targets (SET-HUBS: Test connection
+        and discovery; a read)."""
+        body = self._call("groups", "GET", "/groups").body or {}
+        groups = body.get("groups", []) if isinstance(body, dict) else []
+        return [g for g in groups if isinstance(g, dict)]
 
     # -- leases (the SSH client's verbs) ---------------------------------------------------------
 

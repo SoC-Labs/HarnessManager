@@ -70,7 +70,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from harness_manager.core.errors import UnreachableError, UsageError
+from harness_manager.core.errors import HarnessError, UnreachableError, UsageError
 from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.transports import tcp_serial as _tcp_serial  # noqa: F401 - registers tcp://
 
@@ -872,14 +872,28 @@ def _eth(candidate: Candidate) -> Link | None:
     return next((lk for lk in candidate.links if lk.kind == LinkKind.ETHERNET), None)
 
 
+def _hub_jump(candidate: Candidate, host: str) -> str:
+    """A named hub's ``jump`` (CCR SET-HUB-4), when the board's hub is ``host``; else ""."""
+    from . import hub as _hub
+
+    try:
+        cfg = _hub.hub_config_for(candidate)
+    except HarnessError:
+        return ""
+    return cfg.jump if cfg is not None and cfg.name and cfg.host == host else ""
+
+
 def open_reach(candidate: Candidate, remote_ports: Mapping[str, int], *,
                launcher: Launcher | None = None,
-               ssh_g: Callable[[Sequence[str]], str] | None = None) -> Reach | None:
+               ssh_g: Callable[[Sequence[str]], str] | None = None,
+               jump: str | None = None) -> Reach | None:
     """The pack hook: a started tunnel for a ``via="ssh"`` candidate; None for a direct one.
 
     ``remote_ports`` are the board ports the session needs, by name (``control``,
     ``push``, ``rbb``, the console names, ``xvc``); the pack passes its own
-    configuration, so a test pack's ports are forwarded as they are.
+    configuration, so a test pack's ports are forwarded as they are. ``jump``: an SSH jump
+    host on the way to the hub (None: the board's named hub's ``jump`` when its host is the
+    tunnel's, SET-HUB-4).
     """
     eth = _eth(candidate)
     if eth is None:
@@ -897,8 +911,10 @@ def open_reach(candidate: Candidate, remote_ports: Mapping[str, int], *,
     ports = dict(remote_ports)
     ports["control"] = rport
     forwards = [Forward(name, rhost, port) for name, port in ports.items() if port]
+    if jump is None:
+        jump = _hub_jump(candidate, hub)
     tunnel = SshTunnel(hub, forwards, launcher=launcher, ssh_g=ssh_g,
-                       label=f"{candidate.board_id} via ssh:{hub}")
+                       label=f"{candidate.board_id} via ssh:{hub}", jump=jump)
     tunnel.start()
     return Reach(via=f"{VIA_SSH}:{hub}", ports={fw.name: fw.local_port for fw in tunnel.forwards},
                  tunnel=tunnel, remote_host=rhost)
@@ -922,7 +938,7 @@ def _open_hub_reach(candidate: Candidate, eth: Link, remote_ports: Mapping[str, 
         return open_reach(with_via(replace(candidate, links=tuple(
             Link(lk.kind, lk.address, lk.detail, via="") if lk is eth else lk
             for lk in candidate.links)), f"{VIA_SSH}:{ssh_host}"), remote_ports,
-            launcher=launcher, ssh_g=ssh_g)
+            launcher=launcher, ssh_g=ssh_g, jump=cfg.jump if ssh_host == cfg.host else "")
 
     return open_hub_reach(eth.address, remote_ports, client=client,
                           direct=rest.direct if rest is not None else "never",

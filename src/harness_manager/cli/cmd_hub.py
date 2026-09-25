@@ -69,11 +69,13 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.services.lease import (
+    DEFAULT_REQUEST_TTL_S,
     DEFAULT_TTL_S,
     HOLDER_HM,
     LeaseService,
     confirm_board_error,
     default_holder,
+    hub_holder,
     typed_names,
     view_confirm_error,
 )
@@ -285,13 +287,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     sp = lsub.add_parser("acquire", help="take it; waits in the queue if someone holds it",
                          parents=[fmt], epilog=_cols("lease"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
-    sp.add_argument("--ttl", type=int, default=DEFAULT_TTL_S, metavar="S",
-                    help=f"lease length in seconds (default {DEFAULT_TTL_S}); the service "
-                         "extends it while the board is open")
+    sp.add_argument("--ttl", type=int, default=None, metavar="S",
+                    help=f"lease length in seconds (default: the hub's lease_ttl, else "
+                         f"{DEFAULT_TTL_S}); the service extends it while the board is open")
     sp.add_argument("--holder", default=None, metavar="NAME",
-                    help=f"holder name (default {default_holder()})")
-    sp.add_argument("--timeout", type=float, default=3600.0, metavar="S",
-                    help="give up waiting in the queue after this long (the entry is removed)")
+                    help=f"holder name (default: the hub's holder, else {default_holder()})")
+    sp.add_argument("--timeout", type=float, default=None, metavar="S",
+                    help="give up waiting in the queue after this long (the entry is removed; "
+                         "default: the hub's queue_timeout, else 3600)")
     sp = lsub.add_parser("release", help="give it back (only a lease this Harness Manager took)",
                          parents=[fmt], epilog=_cols("lease"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
@@ -306,8 +309,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     sp.add_argument("target", metavar="TARGET", help=target_help)
     sp.add_argument("--message", default="", metavar="M",
                     help=f"why you need it, shown to the holder (at most {MAX_MESSAGE} characters)")
-    sp.add_argument("--ttl", type=int, default=DEFAULT_TTL_S, metavar="S",
-                    help=f"lease length in seconds once it is yours (default {DEFAULT_TTL_S})")
+    sp.add_argument("--ttl", type=int, default=None, metavar="S",
+                    help="lease length in seconds once it is yours (default: the hub's "
+                         f"request_ttl, else {DEFAULT_REQUEST_TTL_S})")
 
     sp = lsub.add_parser("requests", help="the requests waiting for your answer",
                          parents=[fmt], epilog=_cols("lease requests"))
@@ -645,7 +649,7 @@ def _lease_result(cand: Any, hub: Any, lease: dict[str, Any], human: list[str],
 def _request(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     a = ctx.args
     message = clean_message(a.message)
-    if not 60 <= a.ttl <= 86400:            # the daemon route's rule (hub_api._ttl)
+    if a.ttl is not None and not 60 <= a.ttl <= 86400:     # the daemon route's rule (hub_api._ttl)
         raise UsageError(f"--ttl must be whole seconds from 60 to 86400, not {a.ttl}")
     refusal = request_refusal(full_view(svc.view(hub)), _board_name(cand, hub))
     if refusal is not None:
@@ -825,7 +829,7 @@ def cmd_lease(ctx: Ctx) -> int:
                           human=_human_view(_where(cand, hub), hub.target, view, _now())))
         return ExitCode.OK
     if a.lease_cmd == "acquire":
-        holder = a.holder or default_holder()
+        holder = a.holder or hub_holder(hub)             # SET-HUB-3: the hub's holder
 
         def progress(phase: str, done: int, _total: int) -> None:
             if phase == "queued":

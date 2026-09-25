@@ -193,6 +193,33 @@ def default_holder() -> str:
     return f"harness-manager-{user}@{socket.gethostname().split('.')[0]}"
 
 
+def _hub_setting(hub: Any, name: str, default: Any) -> Any:
+    """A named hub's lease setting (``hub.config``: CCR SET-HUB-3); ``default`` when the hub
+    has none (an inline table, a test stand-in)."""
+    value = getattr(getattr(hub, "config", None), name, None)
+    if name == "holder":
+        return value if isinstance(value, str) and value else default
+    ok = isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+    return type(default)(value) if ok else default
+
+
+def hub_holder(hub: Any) -> str:
+    """The holder to ask for: the hub's ``holder`` (``[hubs.<name>] holder``), else
+    ``default_holder()``."""
+    return _hub_setting(hub, "holder", "") or default_holder()
+
+
+def hub_lease_ttl(hub: Any) -> int:
+    """The lease time to ask for: the hub's ``lease_ttl``, else ``DEFAULT_TTL_S``."""
+    return _hub_setting(hub, "lease_ttl", DEFAULT_TTL_S)
+
+
+def hub_request_ttl(hub: Any) -> int:
+    """The lease time asked for with a request: the hub's ``request_ttl``, else
+    ``DEFAULT_REQUEST_TTL_S``."""
+    return _hub_setting(hub, "request_ttl", DEFAULT_REQUEST_TTL_S)
+
+
 def heartbeat_interval(ttl_s: int) -> float:
     return max(MIN_HEARTBEAT_S, min(MAX_HEARTBEAT_S, ttl_s / 3.0))
 
@@ -1139,16 +1166,24 @@ class LeaseService:
 
     # -- acquire / release ------------------------------------------------------------------------
 
-    def acquire(self, hub: Any, *, board_id: str = "", ttl_s: int = DEFAULT_TTL_S,
+    def acquire(self, hub: Any, *, board_id: str = "", ttl_s: int | None = None,
                 holder: str | None = None, progress: Progress | None = None,
                 cancel: threading.Event | None = None, poll_s: float | None = None,
-                timeout_s: float = ACQUIRE_TIMEOUT_S, heartbeat: bool = True) -> dict[str, Any]:
-        """Block until the lease is held (it may queue); store it; heartbeat it while tracked."""
+                timeout_s: float | None = None, heartbeat: bool = True) -> dict[str, Any]:
+        """Block until the lease is held (it may queue); store it; heartbeat it while tracked.
+
+        ``ttl_s``, ``holder`` and ``timeout_s`` not given: the hub's ``lease_ttl``, ``holder``
+        and ``queue_timeout`` (a named hub, SET-HUB-3), else 3600 s, ``default_holder()``
+        and 3600 s."""
         hub = self.require_hub(hub, board_id)
         self._board_for(hub, board_id)
+        if ttl_s is None:
+            ttl_s = hub_lease_ttl(hub)
+        if timeout_s is None:
+            timeout_s = _hub_setting(hub, "queue_timeout", ACQUIRE_TIMEOUT_S)
         if not isinstance(ttl_s, int) or ttl_s <= 0:
             raise UsageError(f"ttl_s must be a positive whole number of seconds, not {ttl_s!r}")
-        holder = holder or default_holder()
+        holder = holder or hub_holder(hub)
         stored = self.store.get(hub.host, hub.target)
         if stored is not None:
             shown = self._show(hub, fresh=True)
@@ -1241,7 +1276,7 @@ class LeaseService:
 
     # -- requests: the requester --------------------------------------------------------------------
 
-    def request(self, board_id: str, hub: Any, *, message: str = "", ttl_s: int = DEFAULT_REQUEST_TTL_S,
+    def request(self, board_id: str, hub: Any, *, message: str = "", ttl_s: int | None = None,
                 progress: Progress | None = None, cancel: threading.Event | None = None,
                 heartbeat: bool = True) -> dict[str, Any]:
         """Ask the holder for the board: queue, write a request note, and wait.
@@ -1255,6 +1290,8 @@ class LeaseService:
         """
         hub = self.require_hub(hub, board_id)
         self._board_for(hub, board_id)
+        if ttl_s is None:
+            ttl_s = hub_request_ttl(hub)                 # SET-HUB-3: the hub's request_ttl
         if isinstance(ttl_s, bool) or not isinstance(ttl_s, int) or ttl_s <= 0:
             raise UsageError(f"ttl_s must be a positive whole number of seconds, not {ttl_s!r}")
         message = self._check_message(message)
@@ -1283,7 +1320,7 @@ class LeaseService:
                                    hint="cancel it first (DELETE the lease)")
             self._acquiring[gate] = cancel
         report = progress or (lambda *_: None)
-        holder = default_holder()
+        holder = hub_holder(hub)
         out: _Outgoing | None = None
         misses = 0
         try:
@@ -1573,7 +1610,7 @@ class LeaseService:
                    "delete_request")
         principal = self._principal(hub, required=True)
         status = self._show(hub, fresh=True)
-        holder = default_holder()
+        holder = hub_holder(hub)
         if status.held and status.holder == principal:
             ours = self.store.get(hub.host, hub.target)
             raise AlreadyError(f"{hub.target} is already yours"
@@ -1582,7 +1619,7 @@ class LeaseService:
                                hint="release it there first if this session should have it")
         with self._mu:
             out = self._outgoing.get(_hk(hub))
-        ttl_s = out.ttl_s if out is not None else DEFAULT_REQUEST_TTL_S
+        ttl_s = out.ttl_s if out is not None else hub_request_ttl(hub)
         if out is not None and out.asked_holder and status.held and \
                 status.holder not in (out.asked_holder, principal):
             # Someone ahead of us got the board since we asked: its holder was never asked.

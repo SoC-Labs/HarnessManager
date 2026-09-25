@@ -21,6 +21,13 @@ running, never start one), ``group`` (the hub socket's group, default ``fpga``),
 ``board`` (the physical board that owns the target, for ``fpgahub board lease
 revoke``; unset, fpgahub's ``board list --json`` says: ``mps3_01`` for ``mps3_01_pl``).
 
+A **named hub** (CCR SET-HUB-1, lane SET-HUBS): ``hub = { use = "lab", target = …,
+shares = … }`` takes the hub's own keys from ``[hubs.lab]`` in ``settings.toml`` (or the
+admin policy's machine hub), plus ``jump`` (an SSH jump host on the way to the hub),
+``holder`` and the lease times (``harness_manager.settings.hubs``). Beside ``use`` the
+board keeps only ``target``, ``board``, ``shares``, ``baud``, ``start_shares``; a hub key
+there is refused, naming it. An inline table (above) keeps working exactly as before.
+
 Every hub command runs through pyverify's lease dialect: ``LeaseClient`` for the
 lease verbs and its ``SshHubRunner`` (``ssh HUB 'sg fpga -c "fpgahub …"'``) for
 the share verbs. There is deliberately no way to run ``fpgahub share stop``: it
@@ -116,6 +123,13 @@ class HubConfig:
     group: str | None = DEFAULT_GROUP
     board: str = ""                    # the physical board (fpgahub chassis); "" = ask the hub
     rest: Any = None                   # hub_rest.RestHubConfig when the table has ``url`` (T8)
+    # CCR SET-HUB-1: a named hub's (``hub.use``); an inline table leaves them unset.
+    name: str = ""                     # the hub's name ("" = an inline table)
+    jump: str = ""                     # ssh -J on the way to the hub
+    holder: str = ""                   # the lease holder asked for ("" = default_holder())
+    lease_ttl: int = 0                 # the lease times asked for (0 = the service's default)
+    request_ttl: int = 0
+    queue_timeout: int = 0
 
     @property
     def local(self) -> bool:
@@ -167,19 +181,47 @@ def parse_hub_table(table: Any, *, where: str = "hub") -> HubConfig:
                      rest=hub_rest.with_target(rest, target) if rest is not None else None)
 
 
-def board_tables(candidate: Candidate) -> dict[str, Any]:
-    """This board's raw boards.toml tables (``via``, ``hub``, ...); ``{}`` when none."""
+def parse_board_hub(table: Any, *, where: str = "hub", root: Any = None) -> HubConfig:
+    """A boards.toml ``hub`` table: inline (``parse_hub_table``, unchanged), or naming a hub
+    with ``use`` (CCR SET-HUB-1): the named hub's keys, the board's own, and the hub's jump,
+    holder and lease times. ``root``: the directory of that boards.toml (its settings.toml
+    and secret store are beside it). ``UsageError`` names the problem."""
+    if not (isinstance(table, dict) and "use" in table):
+        return parse_hub_table(table, where=where)
+    from dataclasses import replace
+
+    from harness_manager.settings import hubs as named
+
+    merged, hub = named.board_hub_table(table, where=where, root=root)
+    cfg = parse_hub_table(merged, where=where)
+    rest = cfg.rest
+    if rest is not None:
+        rest = replace(rest, hub_name=hub.name, settings_root=str(root) if root else "")
+    return replace(cfg, rest=rest, name=hub.name, jump=hub.jump if hub.transport == "ssh" else "",
+                   holder=hub.holder, lease_ttl=hub.lease_ttl, request_ttl=hub.request_ttl,
+                   queue_timeout=hub.queue_timeout)
+
+
+def _board_config(candidate: Candidate) -> Any:
     from harness_manager.power.config import load_boards
 
-    board = load_boards().for_board(candidate.board_id, candidate.links)
+    return load_boards().for_board(candidate.board_id, candidate.links)
+
+
+def board_tables(candidate: Candidate) -> dict[str, Any]:
+    """This board's raw boards.toml tables (``via``, ``hub``, ...); ``{}`` when none."""
+    board = _board_config(candidate)
     return dict(board.tables) if board is not None else {}
 
 
 def hub_config_for(candidate: Candidate) -> HubConfig | None:
     """The board's hub, from boards.toml; else from a ``hub://`` link it carries; else None."""
-    tables = board_tables(candidate)
+    board = _board_config(candidate)
+    tables = dict(board.tables) if board is not None else {}
     if "hub" in tables:
-        return parse_hub_table(tables["hub"], where=f"boards.toml hub for {candidate.board_id}")
+        root = board.path.parent if getattr(board, "path", None) is not None else None
+        return parse_board_hub(tables["hub"], where=f"boards.toml hub for {candidate.board_id}",
+                               root=root)
     for lk in candidate.links:
         if lk.address.startswith(f"{HUB_SCHEME}://"):
             ref = ShareRef.parse(lk.address.split("://", 1)[1])
@@ -323,10 +365,44 @@ class _Recorder:
         return self.last
 
 
-def default_runner_factory(host: str, group: str | None) -> Callable[..., Any]:
+def default_runner_factory(host: str, group: str | None, jump: str = "") -> Callable[..., Any]:
     from pyverify.lease import LocalHubRunner, SshHubRunner
 
-    return LocalHubRunner() if host in LOCAL_HOSTS else SshHubRunner(host, group=group)
+    if host in LOCAL_HOSTS:
+        return LocalHubRunner()
+    return JumpSshHubRunner(host, group=group, jump=jump) if jump else \
+        SshHubRunner(host, group=group)
+
+
+_JUMP_RUNNER: Any = None
+
+
+def _jump_runner_class() -> Any:
+    global _JUMP_RUNNER
+    if _JUMP_RUNNER is not None:
+        return _JUMP_RUNNER
+    from pyverify.lease import SshHubRunner
+
+    class _JumpSshHubRunner(SshHubRunner):
+        """pyverify's ``SshHubRunner`` with ``-J JUMP`` (a named hub's ``jump``, CCR
+        SET-HUB-4) and a connect timeout: the quoting stays pyverify's own."""
+
+        def __init__(self, hub: str, group: str | None = DEFAULT_GROUP, jump: str = "") -> None:
+            super().__init__(hub, group=group)
+            if jump.startswith("-") or any(c.isspace() for c in jump):
+                raise UsageError(f"bad SSH jump host {jump!r}")
+            self.jump = jump
+
+        def build(self, argv: Sequence[str]) -> list[str]:
+            cmd = super().build(argv)
+            return [*cmd[:-2], "-o", "ConnectTimeout=15", "-J", self.jump, *cmd[-2:]]
+
+    _JUMP_RUNNER = _JumpSshHubRunner
+    return _JUMP_RUNNER
+
+
+def JumpSshHubRunner(host: str, *, group: str | None, jump: str) -> Any:  # noqa: N802
+    return _jump_runner_class()(host, group=group, jump=jump)
 
 
 #: What the pack uses to reach a hub; tests replace it (tests/fakes/l1_fake_hub.py).
@@ -1001,18 +1077,23 @@ class HubClient:
 
     def __init__(self, host: str, target: str = DEFAULT_TARGET, *, group: str | None = DEFAULT_GROUP,
                  runner: Callable[..., Any] | None = None, timeout_s: float = HUB_TIMEOUT_S,
-                 board: str = "") -> None:
+                 board: str = "", jump: str = "") -> None:
         from pyverify.lease import LeaseClient
 
         self.host = host
         self.target = target
         self.group = group
         self.board = board                   # hub.board in boards.toml; "" = ask fpgahub
+        self.jump = jump                     # a named hub's ssh -J (SET-HUB-4); "" = none
         self.timeout_s = timeout_s
         self.note_root = NOTE_ROOT           # tests point it at a temporary directory
         self._whoami: dict[str, Any] | None = None
         self._board_id: str | None = None
-        self._run = _Recorder(runner or DEFAULT_RUNNER_FACTORY(host, group))
+        if runner is None:
+            # The factory is a test seam taking (host, group); a jump is passed only when set.
+            runner = DEFAULT_RUNNER_FACTORY(host, group, jump=jump) if jump else \
+                DEFAULT_RUNNER_FACTORY(host, group)
+        self._run = _Recorder(runner)
         self.leases = LeaseClient(self._run, target=target, timeout=timeout_s)
 
     # -- plumbing -------------------------------------------------------------------------------
@@ -1354,7 +1435,7 @@ class _ShareRoutes:
             from harness_manager.transports import hub_rest
 
             return hub_rest.client_for(cfg)
-        return HubClient(ref.host, ref.target, group=group)
+        return HubClient(ref.host, ref.target, group=group, jump=cfg.jump if cfg else "")
 
     def route(self, ref: ShareRef, info: ShareInfo) -> _ShareRoute:
         with self._build:
@@ -1376,7 +1457,8 @@ class _ShareRoutes:
             else:
                 t = _tunnel.SshTunnel(ref.host,
                                       [_tunnel.Forward("share", info.remote_host, info.port)],
-                                      label=f"hub share {ref.tty} on {ref.host}")
+                                      label=f"hub share {ref.tty} on {ref.host}",
+                                      jump=cfg.jump if cfg is not None else "")
                 t.start()
                 new = _ShareRoute(info.port, t.local_port("share"), t)
             with self._mu:
@@ -1665,7 +1747,7 @@ class Mps3Hub:
         # T8: url -> fpgahub's REST API (hub_rest.RestHubClient), else ssh (HubClient).
         self.client = client or hub_rest.client_for(
             cfg, ssh_factory=lambda: HubClient(cfg.host, cfg.target, group=cfg.group,
-                                               board=cfg.board))
+                                               board=cfg.board, jump=cfg.jump))
         self.transport = getattr(self.client, "transport", "ssh")
         SHARES.configure(cfg)
 

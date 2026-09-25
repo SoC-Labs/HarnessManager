@@ -93,7 +93,11 @@ REQUEST_TOPICS = ("lease.wanted", "lease.answered", "lease.force_available", "le
                   "lease.left", "lease.tapped")
 
 
-def _ttl(body: dict[str, Any]) -> int:
+def _ttl(body: dict[str, Any]) -> int | None:
+    """``ttl_s``, checked; None when not given: the hub's own (``[hubs.<name>] lease_ttl`` /
+    ``request_ttl``, CCR SET-HUB-3), else the service's default."""
+    if "ttl_s" not in body:
+        return None
     value = body.get("ttl_s", DEFAULT_TTL_S)
     if isinstance(value, bool) or not isinstance(value, int) or not 60 <= value <= 86400:
         raise UsageError(f"ttl_s must be whole seconds from 60 to 86400, not {value!r}",
