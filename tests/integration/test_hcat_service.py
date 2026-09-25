@@ -58,8 +58,10 @@ class Leases:
 
     def __init__(self, lease: dict | None) -> None:
         self.lease = lease
+        self.views = 0
 
     def view(self, hub) -> dict:
+        self.views += 1
         return {"lease": self.lease, "hub": hub.host}
 
 
@@ -339,12 +341,39 @@ def test_negative_twin_the_lease_holder_installs_and_an_overlay_only_plan_needs_
     assert cat.install(rig.session, plan, plan.approve(), verified).result == "installed"
 
 
-def test_a_board_with_no_hub_needs_no_lease(rig, world):
+def test_a_board_with_no_hub_needs_no_lease_and_nothing_asks_a_hub(rig, world, monkeypatch):
+    # No hub, no lease: the gate must not build a LeaseService, call a hub or wait, on any
+    # path (list, install with its reboot, the rollback's gate).
+    import harness_manager.services.lease as lease_mod
+
+    def no_lease_service(*_a, **_k):
+        raise AssertionError("a board with no hub made the lease gate build a LeaseService")
+
+    monkeypatch.setattr(lease_mod, "LeaseService", no_lease_service)
     assert rig.svc.lease_state(rig.session) == {"required": False, "mine": False, "holder": "",
                                                 "target": "", "reason": ""}
+    assert rig.svc.check_lease(rig.session)["required"] is False
     listing = listing_for(rig, world, ("stable",))
     assert listing.board["lease"]["required"] is False
     assert not any("hub-lease" in r["needs"] for r in listing.as_dict()["releases"])
+    cat = HarnessCatalog(rig.svc)
+    plan, verified = cat.plan(rig.session, "1.1.1", channel="stable", source=world.srv.source())
+    assert cat.install(rig.session, plan, plan.approve(), verified).result == "installed"
+    # the rollback's gate is the same call (executor.rollback's first step)
+    assert rig.svc.installer("mps3").lease_check(rig.session, "roll the harness back") == \
+        {"required": False, "mine": False, "holder": "", "target": "", "reason": ""}
+    assert rig.svc.leases is None                     # never built, never asked
+
+
+def test_negative_twin_a_hub_board_asks_the_lease_view_once_per_check(rig, world):
+    _behind_hub(rig, MINE)
+    leases = rig.svc.leases
+    assert rig.svc.check_lease(rig.session)["mine"] is True
+    assert leases.views == 1
+    cat = HarnessCatalog(rig.svc)
+    plan, verified = cat.plan(rig.session, "1.1.1", channel="stable", source=world.srv.source())
+    cat.install(rig.session, plan, plan.approve(), verified)
+    assert leases.views == 3                          # the catalogue's check + the executor's
 
 
 # --- events -------------------------------------------------------------------------------------
