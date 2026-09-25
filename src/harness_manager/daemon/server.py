@@ -277,6 +277,28 @@ def _after_start(server: Any, d: Any, resume: dict[str, Any] | None) -> None:
         resume_after_start(d, resume)
 
 
+def host_allow_list(state_dir: Path, listen: str) -> frozenset[str]:
+    """The ``Host`` names this service answers to (lane SET-API, ``hosts.py``): loopback, the
+    ``--listen`` address, and ``advanced.allowed_hosts`` from the settings. A setting that
+    cannot be read adds nothing (the loopback names still work), and says why in the log."""
+    from .hosts import allowed_hosts
+
+    extra: list[str] = []
+    try:
+        from harness_manager.settings import Resolver
+
+        got = Resolver.load(state_dir).resolve("advanced.allowed_hosts")
+        extra = [str(h) for h in got.value or []]
+        for problem in got.problems:
+            log.warning("advanced.allowed_hosts: %s", problem)
+    except Exception as exc:  # noqa: BLE001 - a bad settings file must never stop the service
+        log.warning("advanced.allowed_hosts could not be read (%s); only loopback and %s are "
+                    "answered", exc, listen)
+    names = allowed_hosts(listen, extra)
+    log.info("answering to the host names: %s", ", ".join(sorted(names)))
+    return names
+
+
 def self_test() -> int:
     """``--self-test``: everything a start needs loads (app, engine, packs, routes, server)."""
     import tempfile
@@ -355,7 +377,8 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
             if server is not None:
                 server.should_exit = True
 
-        app = create_app(engine, token=token, state_dir=state_dir, shutdown=request_shutdown)
+        app = create_app(engine, token=token, state_dir=state_dir, shutdown=request_shutdown,
+                         allowed_hosts=host_allow_list(state_dir, listen))
         daemon = app.state.daemon
         # What a restart for an app update hands the next daemon (lane OTA-D).
         daemon.runtime = {"port": sock.getsockname()[1], "listen": listen,

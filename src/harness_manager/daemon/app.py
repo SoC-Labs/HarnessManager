@@ -27,7 +27,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,7 +96,7 @@ JsonBody = Annotated[Any, Body()]
 
 #: Extension router modules, loaded in this order if present (docs/API.md).
 EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "panel_api",
-              "kit_api", "xvc_api", "harness_api")
+              "kit_api", "xvc_api", "harness_api", "settings_api")
 
 
 @dataclass
@@ -398,6 +398,8 @@ _LOGGED = {
     # lane OTA-D: the app's own apply, restart and rollback
     "update.applying": ("phase", "from", "to", "reason"), "update.applied": ("from", "to"),
     "update.rolled_back": ("from", "to", "phase", "reason"),
+    # lane SET-API: which settings changed and what they need (never a value)
+    "settings.changed": ("keys", "apply", "source"),
 }
 
 
@@ -523,8 +525,13 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                static_dir: Path | str | None = "auto",
                shutdown: Callable[[], None] | None = None,
                event_limits: tuple[int, int] = (2000, 4 * 1024 * 1024),
-               console_limits: tuple[int, int] = (4096, 1024 * 1024)) -> FastAPI:
-    """The app. ``event_limits``/``console_limits`` are (max frames, max bytes) per socket."""
+               console_limits: tuple[int, int] = (4096, 1024 * 1024),
+               allowed_hosts: Iterable[str] | None = None) -> FastAPI:
+    """The app. ``event_limits``/``console_limits`` are (max frames, max bytes) per socket.
+
+    ``allowed_hosts`` (lane SET-API, ``hosts.py``): the ``Host`` names the app answers to;
+    any other is refused with 403 before a route runs. ``None``: no check (an app a test
+    builds); ``server.run_daemon`` always passes the list."""
     if not token:
         raise UsageError("harness-manager-daemon needs a token")
     d = Daemon(engine, token=token, state_dir=state_dir, shutdown=shutdown,
@@ -540,6 +547,10 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     app = FastAPI(title="harness-manager-daemon", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.daemon = d
+    if allowed_hosts is not None:
+        from .hosts import HostGuard
+
+        app.add_middleware(HostGuard, allowed=frozenset(allowed_hosts))
 
     # -- errors and headers ----------------------------------------------------------------
 

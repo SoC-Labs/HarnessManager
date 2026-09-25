@@ -53,6 +53,9 @@ App self-update, apply and restart (lane OTA-D, additive; ``update_apply.py``,
 | ``POST /update/app/apply`` ``{version?, confirm?, drain_timeout_s?, health_s?, stable_s?}`` | 202 ``{apply}``: drain, restart on the same port and token, health-check, roll back. 409 SOFT_BUSY/APPLYING/HELD |
 | ``POST /update/app/cancel`` | ``{apply}``: ends a drain; 409 once the restart began |
 | ``GET /update/settings`` · ``PUT /update/settings`` ``{channel?, auto?}`` | ``{settings, effective, policy}`` |
+
+A ``PUT /update/settings`` also publishes ``settings.changed {keys: ["updates.channel"?,
+"updates.auto"?], apply, applies, source: "api"}`` (lane SET-API; the reply is unchanged).
 """
 
 from __future__ import annotations
@@ -393,6 +396,15 @@ def register(ctx: RouteContext) -> None:
         svc = service()
         su.save_settings(d.state_dir, channel=b.get("channel"), auto=b.get("auto"),
                          policy=svc.policy)
+        keys = [f"updates.{k}" for k in ("channel", "auto") if k in b]
+        if keys:            # lane SET-API: other tabs and the menu hear it (no value in it)
+            from harness_manager.settings import core_schema, ops
+
+            applies = {a: [k for k in keys if core_schema().spec(k).apply == a]
+                       for a in ops.APPLY_ORDER}
+            d.bus.publish(Event("settings.changed", ENGINE, ops.changed_event(
+                {"keys": keys, "apply": ops.strongest([a for a in applies if applies[a]]),
+                 "applies": applies})))
         return _JSON(ok(**settings_view(svc)))
 
     @api.post("/update/app/rollback")
