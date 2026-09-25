@@ -121,9 +121,22 @@ def test_the_index_names_where_never_what(tmp_path):
     idx = json.loads(text)
     assert set(idx["secrets"]) == {"updates.github_token", "hubs.lab.token"}
     assert {e["backend"] for e in idx["secrets"].values()} == {"file"}
-    for leak in (VALUE, VALUE[:8], VALUE[-8:], str(len(VALUE)),
+    for leak in (VALUE, VALUE[:8], VALUE[-8:],
                  hashlib.sha256(VALUE.encode()).hexdigest()[:12]):
         assert leak not in text, leak
+
+    # The length, as a value: a substring test tripped on a timestamp ("11:27:06Z").
+    def numbers(node):
+        if isinstance(node, dict):
+            for v in node.values():
+                yield from numbers(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from numbers(v)
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            yield node
+    assert len(VALUE) not in set(numbers(idx)) - {idx.get("version")}
+    assert not any(k in {"length", "len", "size"} for e in idx["secrets"].values() for k in e)
     for st in (store.status("updates.github_token"), store.status("hubs.lab.token")):
         assert VALUE not in json.dumps(st.view()) and VALUE not in repr(st)
 
