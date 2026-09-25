@@ -105,6 +105,17 @@ export const ENDPOINTS = Object.freeze({
   harnessHistory: ["GET", "/boards/{bid}/harness/history"],
   harnessRollback: ["POST", "/boards/{bid}/harness/rollback"],
   // --- end UPDATE-UI ---
+  // --- SET-API: the settings (docs/API.md "Settings", settings_api.py). No UI calls these
+  // yet (SET-UI, after the cutover). The query (?section=&key=&all=) is the call's query
+  // argument; {key} is a setting's key, URL-encoded. A secret is written, never read back.
+  settings: ["GET", "/settings"],
+  settingsSchema: ["GET", "/settings/schema"],
+  settingsSet: ["PUT", "/settings"],
+  settingsUnset: ["DELETE", "/settings/{key}"],
+  settingsSecretSet: ["PUT", "/settings/secrets/{key}"],
+  settingsSecretUnset: ["DELETE", "/settings/secrets/{key}"],
+  settingsTest: ["POST", "/settings/test"],
+  // --- end SET-API ---
 });
 
 export const ADDITIVE = Object.freeze([]);

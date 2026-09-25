@@ -396,6 +396,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # routes and catalogue over a simulated update service.
     from .hcat_mock_harness import register as register_harness
     app.state.harness = register_harness(app, state, sim, _accepted)
+    # SET-API's settings routes (docs/API.md "Settings"): the real routes over a real resolver
+    # in a temporary directory of the mock's own (never the user's settings or keyring).
+    from .settings_mock import register as register_settings
+    app.state.settings = register_settings(app, state, _accepted)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)

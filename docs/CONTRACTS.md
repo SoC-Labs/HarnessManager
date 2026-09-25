@@ -55,6 +55,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `harness.installing` `{version, from, mode, rekey, doors, channel, by}` | a harness install from the catalogue started on the board (`from`: the release it replaces, `""` when unrecorded); `update.*` follow (HARNESS-CAT) |
 | `harness.installed` `{version, result, from, ok, detail}` | that install ended with an outcome (`result` as `update.done`); a refusal or error before an outcome is `update.failed` (HARNESS-CAT) |
 | `harness.pinned` `{version, previous, by}` | the board was pinned to `version`, or unpinned (`version: ""`); a pin is HM state, never a channel (HARNESS-CAT) |
+| `settings.changed` `{keys, apply: live\|reopen\|restart, applies: {live, reopen, restart}, source: "api"}` | settings were written through the service (`PUT /settings`, `DELETE /settings/{key}`, `PUT`/`DELETE /settings/secrets/{key}`, `PUT /update/settings`); `apply` is what the strongest change needs (`reopen`: the next board open, `restart`: the service). Board id `""`. Keys only: never a value, a secret's least of all (SET-API) |
 
 ## Wave 1 implementations (who implements which frozen protocol)
 

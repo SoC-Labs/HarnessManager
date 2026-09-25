@@ -127,6 +127,17 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/boards/{bid}/harness/history"),
         ("POST", "/boards/{bid}/harness/rollback"),
     ),
+    # SET-API: served in the mock by tests/fakes/settings_mock.py (the real routes over a real
+    # resolver in a temporary directory).
+    "settings_api": (
+        ("GET", "/settings"),
+        ("GET", "/settings/schema"),
+        ("PUT", "/settings"),
+        ("DELETE", "/settings/{key}"),
+        ("PUT", "/settings/secrets/{key}"),
+        ("DELETE", "/settings/secrets/{key}"),
+        ("POST", "/settings/test"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles
@@ -1055,6 +1066,11 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         for key in ("channel", "auto"):
             if key in body:
                 sim.update_settings[key] = str(body[key] or "")
+        keys = [f"updates.{k}" for k in ("channel", "auto") if k in body]
+        if keys:            # SET-API: as the daemon's update_api, the other tabs hear it
+            sim.publish("settings.changed", "", {
+                "keys": keys, "apply": "live", "source": "api",
+                "applies": {"live": keys, "reopen": [], "restart": []}})
         return get_settings()
 
 
