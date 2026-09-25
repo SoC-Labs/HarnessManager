@@ -54,6 +54,11 @@ def _host(v: Any) -> str:
         else "must be a host name (no spaces, not starting with '-')"
 
 
+def _hosts(v: Any) -> str:
+    bad = [h for h in v if not h or _host(h)]
+    return f"has names that are not host names: {bad}" if bad else ""
+
+
 def _via(v: Any) -> str:
     if v in ("", "direct", "hub"):
         return ""
@@ -374,6 +379,11 @@ ADVANCED = (
     Setting("advanced.listen", "str", "127.0.0.1", "Advanced",
             "The service's bind address (off loopback, it warns)", scope="machine",
             owner="admin", apply="restart", check=_host),
+    # SET-API daemon/hosts.py, server.py host_allow_list (SETTINGS.md §12.8)
+    Setting("advanced.allowed_hosts", "list", [], "Advanced",
+            "Other host names the service answers to (loopback and its listen address "
+            "always work)", scope="machine", owner="admin", apply="restart",
+            advanced=True, check=_hosts),
     Setting("advanced.log_level", "enum", "info", "Advanced", "Log verbosity",
             scope="machine", apply="restart",
             choices=("critical", "error", "warning", "info", "debug")),
