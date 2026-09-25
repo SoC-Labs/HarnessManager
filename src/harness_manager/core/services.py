@@ -67,7 +67,10 @@ class DeployService(Protocol):
     def deploy(self, session: BoardSession, overlay: OverlayRef) -> DeployResult:
         """Run the preflight, refuse on any MISMATCH, deploy, re-read identity, confirm.
 
-        Emits ``deploy.started|progress|done|failed`` on the engine bus.
+        Emits ``deploy.started|progress|done|failed`` on the engine bus. The real service
+        also takes ``keep_on_card=True`` (keep the design on the board's card; off by
+        default) and answers ``card_status(session) -> CardStatus``; callers pass the
+        keyword only when asked, so a service without it is unchanged.
         """
         ...
 

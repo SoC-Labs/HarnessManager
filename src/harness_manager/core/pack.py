@@ -172,11 +172,72 @@ class KitAdapter(Protocol):
 
 
 @dataclass(frozen=True)
+class CardOutcome:
+    """What a deploy asked to keep on the board's user microSD did (L1 decision a).
+
+    ``kept``: the pair is on the card, and the board loads it at its next power-on.
+    ``slot``: the card slot it went to ("A" or "B"). ``why``: why it was not kept.
+    """
+
+    kept: bool
+    slot: str = ""
+    why: str = ""
+
+    def text(self) -> str:
+        """The deploy report's line: "Kept on the card (slot B)" / "Not kept: no card ..."."""
+        if self.kept:
+            return f"Kept on the card (slot {self.slot})" if self.slot else "Kept on the card"
+        return f"Not kept: {self.why or 'no reason given'}"
+
+
+@dataclass(frozen=True)
+class CardStatus:
+    """The board's user microSD, as "Keep on the card" needs it: one read, nothing written.
+
+    ``store``: the harness keeps designs on a card (the MPS3 harness reports ``usd``).
+    ``present``: a card is in the slot. ``state``/``text``: the store's own words
+    ("empty", "valid", "foreign"...; the front panel's card row). ``reason``: why a deploy
+    cannot keep its design on the card now; "" when it can.
+    """
+
+    store: bool
+    present: bool = False
+    state: str = ""
+    text: str = ""
+    reason: str = ""
+
+
+#: "Keep on the card": the capability its refusal names, and the two plain reasons.
+KEEP_ON_CARD = "keep_on_card"
+CARD_NO_STORE = "this harness has no microSD store"
+CARD_NO_CARD = "no card in the USER microSD slot"
+
+
+def card_status_of(deploy: Any, *args: Any) -> CardStatus:
+    """``deploy.card_status(*args)`` (a deploy service with the session, or an adapter);
+    a deploy without card support answers "no store". Nothing is written."""
+    read = getattr(deploy, "card_status", None)
+    if not callable(read):
+        return CardStatus(store=False, reason=CARD_NO_STORE)
+    return read(*args)
+
+
+def keep_refusal(card: CardStatus):
+    """The error that refuses "Keep on the card" (``UnavailableError``, exit 12), or None
+    when the card can take the design. The CLI, the API and the deploy service share it."""
+    from .errors import UnavailableError
+
+    return UnavailableError(KEEP_ON_CARD, card.reason) if card.reason else None
+
+
+@dataclass(frozen=True)
 class DeployResult:
     rm_id: str
     verified: bool
     seconds: float
     transport: str = ""       # "tcp+windowed", "tftp"
+    #: Set only when the deploy was asked to keep the design on the card (``keep_on_card``).
+    card: CardOutcome | None = None
 
 
 Progress = Callable[[str, int, int], None]   # (phase, done, total)
@@ -196,6 +257,14 @@ class BackupRecord:
 
 @runtime_checkable
 class DeployAdapter(Protocol):
+    """A board's partition deploy.
+
+    Optional, for a board that can keep a design on a card (the MPS3's user microSD):
+    ``card_status() -> CardStatus``, and ``deploy(overlay, progress, keep_on_card=True)``
+    filling ``DeployResult.card``. The deploy service calls ``deploy`` with the keyword
+    only when it is asked to keep, so an adapter without the card support is unchanged.
+    """
+
     def overlays(self) -> Sequence[OverlayRef]: ...
     def preflight(self, overlay: OverlayRef) -> Sequence[PreflightItem]: ...
     def deploy(self, overlay: OverlayRef, progress: Progress | None = None) -> DeployResult: ...

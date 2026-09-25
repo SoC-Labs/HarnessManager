@@ -53,6 +53,18 @@ Item names come from ``harness_manager.services.deploy``.
 safe even when called without the service: a ``static_id`` mismatch raises
 ``IncompatibleError`` before a single byte leaves the host.
 
+Keep on the card (L1 = option a, david 2026-09-25). pyverify's deploy commits the pair
+to the board's user microSD after a verified swap (net-protocol v0.13, D13: ``commit``,
+a re-push over 6910 into the card's inactive slot) when ``persist=True``. This adapter
+passes ``persist=keep_on_card``, which is False unless the caller asks, so a deploy never
+writes the card by default. Asked, the result's ``card`` says what pyverify did: kept
+(the slot), or why not (no card, a card without the store, a failed write; a card that
+fails never fails the deploy, the swap already stands). ``card_status()`` reads the
+card (``version`` for the ``usd`` feature, then ``usd``) without writing anything; the
+service refuses a keep from it before a byte is pushed. The commit's push is always TCP
+on 6910 (``commit`` takes no TFTP), windowed exactly when the swap's is, and reports
+progress as the ``card`` phase.
+
 The shell's own refusals. When the card's image and the running fabric disagree
 the shell refuses ``swap`` with a distinct error line (Linux plan §10a S1; the
 string is TBD, see ``constants.FABRIC_MISMATCH_ERRS``): that is
@@ -92,7 +104,14 @@ from pyverify.pusher import (
     BitstreamPusher,
     PushError,
 )
-from pyverify.swap import SwapError, SwapOrchestrator
+from pyverify.swap import (
+    PERSIST_COMMITTED,
+    PERSIST_FAILED,
+    PERSIST_SKIPPED,
+    PersistResult,
+    SwapError,
+    SwapOrchestrator,
+)
 
 from harness_manager.core.errors import (
     ActionFailedError,
@@ -104,7 +123,14 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.model import Check, LinkKind
-from harness_manager.core.pack import DeployResult, OverlayRef, PreflightItem, Progress
+from harness_manager.core.pack import (
+    CardOutcome,
+    CardStatus,
+    DeployResult,
+    OverlayRef,
+    PreflightItem,
+    Progress,
+)
 from harness_manager.services.deploy import (
     ITEM_CLEARING_FITS,
     ITEM_CONTROL,
@@ -113,6 +139,8 @@ from harness_manager.services.deploy import (
     ITEM_SHELL_ID,
     ITEM_TRANSPORT,
     ITEM_USERCODE,
+    NO_CARD,
+    NO_STORE,
     refusal,
 )
 
@@ -147,6 +175,12 @@ PHASE_GUARD = "guard"
 PHASE_SWAP = "swap"
 PHASE_PUSH = "push"
 PHASE_VERIFY = "verify"
+PHASE_CARD = "card"         # only when asked to keep the design on the card
+
+#: The ``version.features`` name of the user-microSD store (net-protocol v0.13).
+USD_FEATURE = "usd"
+#: ``usd`` errors that mean the harness has no store at all (net-protocol v0.13).
+USD_NO_STORE_ERRS = frozenset({"no hw", "unavailable"})
 
 
 def make_deploy_adapter(session: Any) -> Mps3Deploy | None:
@@ -217,6 +251,8 @@ class _Assessment:
     transport: str
     #: ``BitstreamPusher.timeout_s`` for this push (``push_timeout_s``)
     push_timeout_s: float = DEFAULT_PUSH_TIMEOUT_S
+    #: the harness's ``version.impl`` ("linux", "bare-metal" or "")
+    impl: str = ""
 
 
 class _ReportingPusher(BitstreamPusher):
@@ -247,6 +283,9 @@ class _ReportingClient:
         self.parked = False
         #: The swap's reply was read (or a refusal was): nothing is left parked.
         self.settled = False
+        #: ``commit`` (Keep on the card) was sent / its reply was read.
+        self.committing = False
+        self.committed_reply = False
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
@@ -261,6 +300,18 @@ class _ReportingClient:
         self._report(PHASE_VERIFY, 0, 1)
         resp = self._client.swap_await()
         self.settled = True
+        return resp
+
+    def commit_begin(self, *args: Any, **kwargs: Any) -> None:
+        # pyverify commits only after a VERIFIED swap: verify is done, the card is next.
+        self._report(PHASE_VERIFY, 1, 1)
+        self._client.commit_begin(*args, **kwargs)
+        self.committing = True
+        self._report(PHASE_CARD, 0, self._total)
+
+    def commit_await(self):
+        resp = self._client.commit_await()
+        self.committed_reply = True
         return resp
 
 
@@ -284,6 +335,8 @@ class Mps3Deploy:
         self.running_usercode = running_usercode
         #: The pusher the last deploy built. Tests read it to prove the transport choice.
         self.last_pusher: BitstreamPusher | None = None
+        #: The pusher a kept deploy built for the card's commit (None when not asked).
+        self.last_commit_pusher: BitstreamPusher | None = None
 
     # -- configuration ----------------------------------------------------------------
 
@@ -318,7 +371,24 @@ class Mps3Deploy:
 
         return mark_identity(self._assess(overlay).items)
 
-    def deploy(self, overlay: OverlayRef, progress: Progress | None = None) -> DeployResult:
+    def card_status(self) -> CardStatus:
+        """The user microSD, read on one 6900 connection (``version`` then ``usd``).
+        Writes nothing. ``reason`` is why a deploy cannot keep its design on it now."""
+        def ask(c: ShellClient, _tap: _TapTransport) -> CardStatus:
+            ver = c.version()
+            features = tuple(ver.features) if getattr(ver, "ok", False) else ()
+            if USD_FEATURE not in features:
+                return CardStatus(store=False, reason=NO_STORE)
+            read = getattr(c, "usd", None)
+            if not callable(read):
+                return CardStatus(store=True, reason="this Harness Manager's pyverify cannot "
+                                                      "read the card (no `usd` verb)")
+            return card_status_from(read())
+
+        return self._shell.call_raw(ask)
+
+    def deploy(self, overlay: OverlayRef, progress: Progress | None = None, *,
+               keep_on_card: bool = False) -> DeployResult:
         report: Progress = progress or (lambda phase, done, total: None)
         started = time.monotonic()
 
@@ -338,6 +408,12 @@ class Mps3Deploy:
             sent[kind] = payload_bytes
             report(PHASE_PUSH, sum(sent.values()), total)
 
+        kept = {BitstreamKind.CLEARING: 0, BitstreamKind.PARTIAL: 0}
+
+        def on_card_frame(kind: BitstreamKind, payload_bytes: int) -> None:
+            kept[kind] = payload_bytes
+            report(PHASE_CARD, sum(kept.values()), total)
+
         host = self._shell.host
         timeout_s = assessment.push_timeout_s
         if assessment.transport == TRANSPORT_WINDOWED:
@@ -355,6 +431,16 @@ class Mps3Deploy:
                                       tftp_port=self.tftp_port, timeout_s=timeout_s)
             src = "tftp"
         self.last_pusher = pusher
+        # Keep on the card: ``commit`` takes its pair over 6910 only, windowed exactly
+        # when the swap's push is (a WINDOWED shell deadlocks on a plain push).
+        commit_pusher = None
+        if keep_on_card:
+            commit_pusher = _ReportingPusher(
+                on_frame=on_card_frame, host=host, transport="tcp", tcp_port=self.push_port,
+                windowed=assessment.transport == TRANSPORT_WINDOWED,
+                window=DEFAULT_ACK_WINDOW,
+                timeout_s=push_timeout_s(assessment.impl, TRANSPORT_TCP))
+        self.last_commit_pusher = commit_pusher
 
         tap: _TapTransport | None = None
         swap: _ReportingClient | None = None
@@ -364,13 +450,12 @@ class Mps3Deploy:
                                  transport=tap)
             with client:
                 swap = _ReportingClient(client, report, total)
-                orchestrator = SwapOrchestrator(swap, pusher)
+                orchestrator = SwapOrchestrator(swap, pusher, commit_pusher=commit_pusher)
                 try:
-                    # persist=False: pyverify's deploy now also commits the pair to the
-                    # user microSD after a verified swap (net-protocol v0.13, D1). This
-                    # adapter's deploy is the swap only, as before; a card write is not
-                    # shown or asked for here.
-                    res = orchestrator.deploy(ov, src=src, persist=False)
+                    # persist: pyverify's deploy also commits the pair to the user microSD
+                    # after a verified swap when asked (net-protocol v0.13, D1). Only
+                    # "Keep on the card" asks; by default the deploy is the swap only.
+                    res = orchestrator.deploy(ov, src=src, persist=keep_on_card)
                 except PushError as exc:
                     # A shell that REFUSED the swap replied at once and never armed the
                     # push, so the push was reset: read that reply to say why. Only the
@@ -405,23 +490,26 @@ class Mps3Deploy:
             raise UnreachableError(f"cannot reach the shell at {host}:{self._shell.port}: {exc}",
                                    hint="check the Ethernet link and the board's IP") from exc
         finally:
-            if swap is not None and swap.parked and not swap.settled:
-                # The push (or the wait for the reply) failed with the swap still parked:
-                # the harness turns new 6900 clients away until its 30 s idle timeout
-                # fails that swap. The shell's error mapping reads this (B1 v4).
+            if swap is not None and ((swap.parked and not swap.settled)
+                                     or (swap.committing and not swap.committed_reply)):
+                # The push (or the wait for the reply) failed with the swap (or a commit)
+                # still parked: the harness turns new 6900 clients away until its 30 s
+                # idle timeout fails it. The shell's error mapping reads this (B1 v4).
                 self._shell.note_failed_push()
 
         if not res.verified:
             raise ActionFailedError(
                 f"the shell swapped to {overlay.name} but reported verified:false",
                 hint="the partition may be left decoupled; restore the baseline")
-        report(PHASE_VERIFY, 1, 1)
+        if not swap.committing:            # a commit reported verify done before it began
+            report(PHASE_VERIFY, 1, 1)
         try:
             rm = rmid.format_rm_id(res.rm_id)
         except (TypeError, ValueError):
             rm = res.rm_id
+        card = card_outcome(getattr(res, "persist", None)) if keep_on_card else None
         return DeployResult(rm_id=rm, verified=True, seconds=time.monotonic() - started,
-                            transport=assessment.transport)
+                            transport=assessment.transport, card=card)
 
     # -- checks -----------------------------------------------------------------------
 
@@ -469,7 +557,46 @@ class Mps3Deploy:
             _check_usercode(entry, self.running_usercode),
         )
         return _Assessment(entry=entry, items=items, transport=transport,
-                           push_timeout_s=timeout_s)
+                           push_timeout_s=timeout_s, impl=live.impl)
+
+
+def card_status_from(st: Any) -> CardStatus:
+    """A pyverify ``UsdResponse`` (net-protocol v0.13 ``usd``) as a ``CardStatus``."""
+    if not getattr(st, "ok", False):
+        err = str(getattr(st, "err", "") or "")
+        if err in USD_NO_STORE_ERRS:
+            return CardStatus(store=False, reason=f"{NO_STORE} (usd: {err})")
+        return CardStatus(store=True, reason=f"the card could not be read (usd: {err or 'no reason'})")
+    state, text = str(st.state or ""), str(st.text or "")
+    if state == "no_hw":
+        return CardStatus(store=False, state=state, text=text, reason=NO_STORE)
+    if not st.present:
+        return CardStatus(store=True, present=False, state=state, text=text, reason=NO_CARD)
+    if st.committable:
+        return CardStatus(store=True, present=True, state=state, text=text)
+    why = {
+        "foreign": "the card in the USER microSD slot holds no harness store (a foreign card); "
+                   "format it for the harness first",
+        "init": "the card in the USER microSD slot is still starting; try again in a few "
+                "seconds",
+        "unsupported": "the card in the USER microSD slot is not a kind the harness supports",
+        "error": f"the card in the USER microSD slot reports an error ({text or 'no code'})",
+    }.get(state, f"the card in the USER microSD slot cannot take a design (state {state!r})")
+    return CardStatus(store=True, present=True, state=state, text=text, reason=why)
+
+
+def card_outcome(persist: PersistResult | None) -> CardOutcome:
+    """What pyverify's persist step did, as the deploy result's ``card``."""
+    if persist is None:
+        return CardOutcome(kept=False, why="pyverify reported nothing about the card")
+    if persist.status == PERSIST_COMMITTED:
+        return CardOutcome(kept=True, slot=persist.slot)
+    if persist.status == PERSIST_FAILED:
+        return CardOutcome(kept=False, why=f"the card write failed ({persist.err}); the card "
+                                           "keeps the design it had")
+    if persist.status == PERSIST_SKIPPED:
+        return CardOutcome(kept=False, why=persist.reason or "skipped")
+    return CardOutcome(kept=False, why=persist.reason or persist.status)
 
 
 def _check_shell_id(entry: CatalogueEntry, live: _Live) -> PreflightItem:
