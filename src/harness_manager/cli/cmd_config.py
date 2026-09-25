@@ -391,13 +391,7 @@ def _set(ctx: Ctx) -> int:
         if k in changes:
             raise UsageError(f"{k} is given twice")
         changes[k] = v
-    try:
-        result = _backend(ctx).set(changes)
-    except UsageError as exc:
-        if not exc.hint:
-            exc.hint = "nothing was written; `harness-manager config get KEY` says what it takes"
-        raise
-    _changed_output(ctx, result, "set")
+    _changed_output(ctx, _backend(ctx).set(changes), "set")
     return ExitCode.OK
 
 

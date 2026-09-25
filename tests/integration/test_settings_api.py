@@ -176,6 +176,7 @@ def test_one_bad_key_is_400_naming_it_and_nothing_is_written(w):
     r = w.call("PUT", "/settings", json={"general.theme": "dark", "tools.openocd": "/x",
                                          "consoles.scrollback": "lots"})
     assert r.status_code == 400 and "consoles.scrollback" in r.json()["error"]["message"]
+    assert r.json()["error"]["hint"].startswith("nothing was written")
     assert (w.state / "settings.toml").read_text() == before and len(w.changed()) == 1
     for bad in ([], {}, "x", {"no.such.key": 1}):
         assert w.call("PUT", "/settings", json=bad).status_code == 400, bad

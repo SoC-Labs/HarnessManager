@@ -219,14 +219,20 @@ def set_values(ctx: SettingsContext, changes: Any) -> dict[str, Any]:
     if not isinstance(changes, Mapping) or not changes:
         raise UsageError('send the settings to change as a JSON object: {"KEY": value, ...}')
     r = ctx.resolver()
-    keys = [concrete(k) for k in changes]
-    if len(set(keys)) != len(keys):
-        raise UsageError("a setting is named twice (two spellings of one key)")
-    values = dict(zip(keys, changes.values(), strict=True))
-    checked = [r.check_settable(k, v, text=True)[0] for k, v in values.items()]
-    if r.files is not None:
-        for path in {r.files.file_for(k) for k in checked}:
-            SettingsFiles._parse_for_write(path)      # a file that does not parse: refused now
+    try:
+        keys = [concrete(k) for k in changes]
+        if len(set(keys)) != len(keys):
+            raise UsageError("a setting is named twice (two spellings of one key)")
+        values = dict(zip(keys, changes.values(), strict=True))
+        checked = [r.check_settable(k, v, text=True)[0] for k, v in values.items()]
+        if r.files is not None:
+            for path in {r.files.file_for(k) for k in checked}:
+                SettingsFiles._parse_for_write(path)  # a file that does not parse: refused now
+    except UsageError as exc:
+        if not exc.hint:
+            exc.hint = ("nothing was written; `harness-manager config get KEY` "
+                        "(GET /settings?key=KEY) says what a setting takes")
+        raise
     rows = r.set_many(values, text=True)
     return {"rows": [row(x) for x in rows], **apply_summary(rows)}
 
