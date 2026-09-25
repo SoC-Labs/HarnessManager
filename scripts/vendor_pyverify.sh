@@ -90,10 +90,10 @@ Check it: \`sha256sum vendor/$name\` must print the sha256 above.
 
 ## The MPS3 OpenOCD configs (openocd/)
 
-\`openocd/\` is \`host/openocd\` from the same platform commit (last changed at
+\`openocd/\` (shipped in the wheel as \`src/harness_manager_mps3/openocd_cfg/\`) is \`host/openocd\` from the same platform commit (last changed at
 \`$openocd_commit\`). The MPS3 pack's debug service needs these target configs. From a
-checkout next to the platform repo it finds them there. Anywhere else, set
-Harness Manager ships them in the wheel (\`harness_manager_mps3/openocd_cfg/\`).
+checkout next to the platform repo it finds them there; anywhere else it uses the packaged copy.
+\`HARNESS_MANAGER_MPS3_OPENOCD_DIR\` still overrides both.
 
 | File | sha256 |
 |---|---|

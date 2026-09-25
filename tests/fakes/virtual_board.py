@@ -24,6 +24,7 @@ override; tests only rely on it differing from ``0x3F1A560F``.
 
 from __future__ import annotations
 
+import inspect
 import os
 import random
 import socket
@@ -40,6 +41,9 @@ from .fake_identify import FakeIdentifyResponder
 from .fake_mcc import FakeMcc
 from .fake_sd import FakeSdVolume
 from .t12_harness_shell import LINUX_OMITTED_DIAG_KEYS, HarnessFakeShell
+
+#: The installed FakeShell takes ``identify_port`` (pyverify's Linux profile, 09-25 on).
+_FAKESHELL_HAS_IDENTIFY = "identify_port" in inspect.signature(FakeShell.__init__).parameters
 
 SHELL_0x3F1A560F = 0x3F1A560F
 
@@ -254,6 +258,10 @@ class VirtualMps3:
                 mode=mode, unit=unit,
                 identify_port=self.board_ports.identify_port if responder else 0, **common)
         else:
+            if _FAKESHELL_HAS_IDENTIFY:
+                # pyverify's FakeShell defaults identify_port to the real 6899; this board
+                # runs no responder, so it reports none (VirtualMps3.identify_port == 0).
+                common["identify_port"] = 0
             self.shell = FakeShell("127.0.0.1", features=profile.features, **common)
         self._keepalive: FakeIdentifyResponder | None = None
         # boot_s=3 so a reboot is observable over Ethernet (the witness needs

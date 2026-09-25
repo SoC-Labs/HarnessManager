@@ -47,10 +47,11 @@ class JulyV07Shell(HarnessFakeShell):
 
     KNOWN = ("ping", "reset", "set_clk", "swap", "commit", "diag", "link")
 
-    def handle_control(self, request: dict[str, Any]) -> dict[str, Any]:
+    def handle_control(self, request: dict[str, Any],
+                       peer: str | None = None) -> dict[str, Any]:
         if request.get("op") not in self.KNOWN:
             return dict(UNKNOWN_OP)
-        return super().handle_control(request)
+        return super().handle_control(request, peer)
 
     def _op_version(self, request: dict[str, Any]) -> dict[str, Any]:
         return dict(UNKNOWN_OP)

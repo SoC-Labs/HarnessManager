@@ -14,6 +14,12 @@ net-protocol.md v0.11 on ``feat/rm-ila-mint``):
 - ``hung``: 6900 still ACCEPTS (the kernel's backlog) but never replies, and
   identify is silent (the same service loop);
 - ``busy``: every request answers ``{"ok":false,"err":"EBUSY",...}`` (A3);
+- ``refuse_after_failed_push_s``: after a push the fake REFUSED while a swap was
+  parked, every new 6900 client is turned away (accepted, then closed) for that
+  long: the harness finishing a failed swap (B1 v4, 2026-09-25; coordinator_net.c
+  keeps the parked client until the swap's 30 s idle timeout, and closes extras).
+  ``refuse_clients_for(s)`` starts the same window by hand (a push that failed on
+  the host side, which the fake cannot see);
 - ``mode="rescue"``: stage0 rescue: identify answers ``mode:"rescue"`` + ``reason``,
   and NOTHING listens on 6900/6910/6930-6932;
 - the UDP identify responder (``tests.fakes.fake_identify``).
@@ -36,9 +42,13 @@ import threading
 import time
 from typing import Any
 
+from pyverify.testing import fakeshell as _upstream_fakeshell
 from pyverify.testing.fakeshell import FakeShell
 
 from .fake_identify import FakeIdentifyResponder
+
+#: The feature names the installed FakeShell accepts (it refuses any other).
+_UPSTREAM_FEATURES = frozenset(getattr(_upstream_fakeshell, "VERSION_FEATURES", ()))
 
 #: The FakeShell keywords the upstream Linux profile adds (pyverify HOST lane).
 _UPSTREAM_KEYS = frozenset({"profile", "hung", "mode", "identify", "identify_port", "unit",
@@ -83,16 +93,21 @@ class HarnessFakeShell(FakeShell):
                  version_extra: dict[str, Any] | None = None,
                  stats_extra: dict[str, Any] | None = None,
                  ssh_claimed: bool = False, ssh_host_key_sha256: str = "SHA256:fake-host-key",
-                 mac: str = "02004d505300", dhcp: bool = False, **kwargs: Any) -> None:
+                 mac: str = "02004d505300", dhcp: bool = False,
+                 refuse_after_failed_push_s: float = 0.0, **kwargs: Any) -> None:
         self.upstream = use_upstream()
         if self.upstream:
+            # Upstream validates `features` against the firmware's names. The names only
+            # this repo's fakes model (the panel's R1-R3, uart_baud, ...) go on after.
             super().__init__(
                 host, profile="linux" if impl == "linux" else "bare-metal", impl=impl,
-                features=features, lmb_kb=lmb_kb, v011_verbs=v011_verbs,
+                features=tuple(f for f in features if f in _UPSTREAM_FEATURES),
+                lmb_kb=lmb_kb, v011_verbs=v011_verbs,
                 omit_diag_keys=omit_diag_keys, identify=identify, identify_port=identify_port,
                 unit=unit, mode=mode, hung=hung, os_boot_ms=os_boot_ms,
                 ssh_claimed=ssh_claimed, ssh_host_key_sha256=ssh_host_key_sha256,
                 mac=mac, dhcp=dhcp, board_ip=host, reboot_in_ms=reboot_in_ms, **kwargs)
+            self.features = tuple(features)
         else:
             super().__init__(host, lmb_kb=lmb_kb, **kwargs)
             # The installed codec knows the five v0.8 names; the firmware's canonical
@@ -117,6 +132,12 @@ class HarnessFakeShell(FakeShell):
             #: every identify datagram seen: (sender, request or None, replied?), as upstream
             self.identify_requests: list = []
         self.busy = False
+        #: seconds to turn 6900 clients away after a refused push into a parked swap
+        self.refuse_after_failed_push_s = refuse_after_failed_push_s
+        #: monotonic() until which new 6900 clients are turned away (0: never)
+        self.refuse_until = 0.0
+        #: 6900 clients turned away, in order (monotonic times)
+        self.refused_clients: list[float] = []
         self.rescue_reason = rescue_reason
         self.reboot_outage_s = reboot_outage_s
         self.version_extra = dict(version_extra or {})
@@ -130,6 +151,7 @@ class HarnessFakeShell(FakeShell):
     def start(self) -> HarnessFakeShell:
         if self.upstream:
             super().start()
+            self._install_refusal()
             return self
         if self.mode == "rescue":
             # stage0 rescue: no TCP service at all. Keep the control port a port that
@@ -138,6 +160,7 @@ class HarnessFakeShell(FakeShell):
                 self.control_port = _free_tcp_port(self.host)
         else:
             super().start()
+            self._install_refusal()
         if self.identify_enabled or self.mode == "rescue":
             self._start_responder()
         return self
@@ -146,6 +169,30 @@ class HarnessFakeShell(FakeShell):
         if not self.upstream:
             self._stop_responder()
         super().stop()
+
+    # -- 6900 turned away after a failed push -------------------------------------------
+
+    def _install_refusal(self) -> None:
+        """Hook the control server's ``verify_request``: False = accept, then close."""
+        for server in getattr(self, "_servers", ()):
+            if server.server_address[1] == self.control_port:
+                server.verify_request = self._verify_control      # type: ignore[method-assign]
+
+    def _verify_control(self, request: Any, client_address: Any) -> bool:
+        if time.monotonic() < self.refuse_until:
+            self.refused_clients.append(time.monotonic())
+            return False
+        return True
+
+    def refuse_clients_for(self, seconds: float) -> None:
+        """Turn every new 6900 client away (accept, then close) for ``seconds``."""
+        self.refuse_until = time.monotonic() + seconds
+
+    def _record_event(self, transport: str, status: Any, header: Any, detail: str = "") -> None:
+        super()._record_event(transport, status, header, detail)
+        if (self.refuse_after_failed_push_s > 0 and self.push_events
+                and not self.push_events[-1].ok and self._swap_in_flight):
+            self.refuse_clients_for(self.refuse_after_failed_push_s)
 
     def _start_responder(self) -> None:
         if self._responder is None:
@@ -206,7 +253,8 @@ class HarnessFakeShell(FakeShell):
 
     # -- 6900 -----------------------------------------------------------------------
 
-    def handle_control(self, request: dict[str, Any]) -> dict[str, Any]:
+    def handle_control(self, request: dict[str, Any],
+                       peer: str | None = None) -> dict[str, Any]:
         if not self.upstream:
             # HUNG: the kernel accepted the connection; nothing reads it until the hang
             # clears (then the buffered request is served, like a resumed process).
@@ -219,7 +267,7 @@ class HarnessFakeShell(FakeShell):
             return self._op_reboot_outage(request)
         if not self.upstream and self.v011_verbs and op in ("stats", "log"):
             return getattr(self, f"_op_{op}")(request)
-        return super().handle_control(request)
+        return super().handle_control(request, peer)
 
     def _op_version(self, request: dict[str, Any]) -> dict[str, Any]:
         reply = super()._op_version(request)

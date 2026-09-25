@@ -44,11 +44,12 @@ class T9Shell(FakeShell):
     stats_supported = True
     ops: list[str]
 
-    def handle_control(self, request: dict[str, Any]) -> dict[str, Any]:
+    def handle_control(self, request: dict[str, Any],
+                       peer: str | None = None) -> dict[str, Any]:
         self.ops.append(str(request.get("op")))
         op = request.get("op")
         if op == "telemetry":
-            reply = super().handle_control(request)
+            reply = super().handle_control(request, peer)
             if self.touch_temp_c is not _MISSING:
                 reply["touch_temp_c"] = self.touch_temp_c
             return reply
@@ -60,7 +61,7 @@ class T9Shell(FakeShell):
             if self.sysmon is not _MISSING:
                 reply["sysmon"] = self.sysmon
             return reply
-        return super().handle_control(request)
+        return super().handle_control(request, peer)
 
 
 MISSING = _MISSING

@@ -59,11 +59,12 @@ class L2BaudShell(FakeShell):
     uart: dict[str, dict[str, Any]]
     ops: list[dict[str, Any]]
 
-    def handle_control(self, request: dict[str, Any]) -> dict[str, Any]:
+    def handle_control(self, request: dict[str, Any],
+                       peer: str | None = None) -> dict[str, Any]:
         self.ops.append(dict(request))
         if request.get("op") == "uart_baud":
             return self._op_uart_baud(request)
-        return super().handle_control(request)
+        return super().handle_control(request, peer)
 
     def _op_uart_baud(self, req: dict[str, Any]) -> dict[str, Any]:
         stream = req.get("stream", "uart0")

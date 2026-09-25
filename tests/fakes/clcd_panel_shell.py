@@ -146,7 +146,8 @@ class PanelFakeShell(HarnessFakeShell):
 
     # -- the verbs ----------------------------------------------------------------------------
 
-    def handle_control(self, request: dict[str, Any]) -> dict[str, Any]:
+    def handle_control(self, request: dict[str, Any],
+                       peer: str | None = None) -> dict[str, Any]:
         self.requests.append(dict(request))
         op = request.get("op")
         if op in ("hello", "panel", "locate") and not self.busy and not self.hung:
@@ -156,7 +157,7 @@ class PanelFakeShell(HarnessFakeShell):
             if line > LINE_MAX:
                 return {"ok": False, "err": f"line too long ({line} B > {LINE_MAX})"}
             return getattr(self, f"_op_{op}")(request)
-        return super().handle_control(request)
+        return super().handle_control(request, peer)
 
     def _events(self) -> list[dict[str, Any]]:
         now = self.board_clock()

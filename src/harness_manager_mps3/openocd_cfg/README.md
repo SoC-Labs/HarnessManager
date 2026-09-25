@@ -128,7 +128,7 @@ this is exactly `pyverify.debug.XvcTarget.refresh_ila_tcl(ltx)` (which
 assumes the hw_manager/hw_server from the snippet above are already open):
 
 ```tcl
-open_hw_target
+open_hw_target -xvc_url 192.168.10.101:2542   ;# never a bare open_hw_target: that opens the FIRST target
 set_property PROBES.FILE overlay/nanosoc/nanosoc.ltx [current_hw_device]
 refresh_hw_device [current_hw_device]
 ```
