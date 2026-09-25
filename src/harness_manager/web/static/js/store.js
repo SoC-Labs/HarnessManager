@@ -66,7 +66,10 @@ export function boardState(bid) {
       preflightLine: "", preflightLoading: false, preflightGen: 0,
       deploy: { state: "idle", overlay: "", phase: "", bytes: 0, total: 0, phases: [],
         events: [], verified: false, rm_id: "", seconds: 0, transport: "", reason: "",
-        stage: "" },
+        stage: "", keep: false, card: null },
+      // Keep on the card: GET /boards/{bid}/card (read only when the harness reports "usd"),
+      // and the Program section's tick box (unticked by default, cleared after each deploy).
+      card: null, cardError: null, cardLoading: false, keepOnCard: false,
       debug: null, idcode: "",
       pending: undefined, pendingSeen: false,
       consoles: null, consolesError: null, consolesLine: "", consoleSelected: null,
@@ -172,6 +175,7 @@ function jobEnded(bid, id) {
   if (kind === "deploy" || kind === "restore") {
     loadOverlays(bid);
     if (b.selectedOverlay) runPreflight(bid, b.selectedOverlay);
+    loadCard(bid);
   }
   if (kind === "debug_up") loadDebug(bid);
   if (kind === "reboot" || kind.startsWith("sd_")) loadPending(bid);
@@ -406,6 +410,34 @@ export async function loadOverlays(bid) {
   changed();
 }
 
+// The harness keeps designs on its user microSD only when it reports "usd" (net-protocol
+// v0.13). Without it the card is never read and the "Keep on the card" box never shows.
+export function hasCardStore(b) {
+  const feats = b && b.info && b.info.identity && b.info.identity.features;
+  return Array.isArray(feats) && feats.includes("usd");
+}
+
+export async function loadCard(bid) {
+  const b = boardState(bid);
+  if (!hasCardStore(b)) {
+    b.card = null;
+    b.cardError = null;
+    b.keepOnCard = false;
+    changed();
+    return;
+  }
+  if (b.cardLoading) return;
+  b.cardLoading = true;
+  changed();
+  const r = await timed("card", () => call("card", { bid }));
+  b.cardLoading = false;
+  if (r.error && deferIfHeld(bid, r.error)) return;
+  b.cardError = r.error;
+  b.card = r.error ? null : (r.data.data.card || null);
+  if (!b.card || !b.card.store || !b.card.present || b.card.reason) b.keepOnCard = false;
+  changed();
+}
+
 export async function runPreflight(bid, name) {
   const b = boardState(bid);
   b.preflightGen += 1;
@@ -525,7 +557,7 @@ function onDeployEvent(ev) {
   if (ev.topic === "deploy.started") {
     Object.assign(dep, { state: "running", overlay: d.overlay || d.rm_id || "", phase: "started",
       bytes: 0, total: 0, phases: [], events: [], verified: false, reason: "", stage: "",
-      rm_id: d.rm_id || "" });
+      rm_id: d.rm_id || "", keep: !!d.keep_on_card, card: null });
     dep.events.push(`${clock(ev.at)}  started ${dep.overlay}`);
   } else if (ev.topic === "deploy.progress") {
     if (dep.state !== "running") Object.assign(dep, { state: "running", phases: [], events: [] });
@@ -536,7 +568,8 @@ function onDeployEvent(ev) {
     dep.events.push(`${clock(ev.at)}  ${dep.phase} ${dep.bytes}/${dep.total}`);
   } else if (ev.topic === "deploy.done") {
     Object.assign(dep, { state: "done", phase: "done", verified: !!d.verified,
-      rm_id: d.rm_id || "", seconds: Number(d.seconds || 0), transport: d.transport || "" });
+      rm_id: d.rm_id || "", seconds: Number(d.seconds || 0), transport: d.transport || "",
+      card: d.card || null });
     if (dep.total) dep.bytes = dep.total;
     dep.events.push(`${clock(ev.at)}  done rm_id ${d.rm_id} verified=${d.verified ? "yes" : "no"}`);
   } else if (ev.topic === "deploy.failed") {

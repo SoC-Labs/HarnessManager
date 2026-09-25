@@ -16,6 +16,7 @@ export const ENDPOINTS = Object.freeze({
   info: ["GET", "/boards/{bid}"],
   telemetry: ["GET", "/boards/{bid}/telemetry"],
   overlays: ["GET", "/boards/{bid}/overlays"],
+  card: ["GET", "/boards/{bid}/card"],
   preflight: ["POST", "/boards/{bid}/preflight"],
   deploy: ["POST", "/boards/{bid}/deploy"],
   restore: ["POST", "/boards/{bid}/restore"],

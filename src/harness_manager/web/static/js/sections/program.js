@@ -2,15 +2,37 @@
 //
 // Program is refused while any preflight row is MISMATCH. That mirrors the deploy
 // service's own rule (core.pack.preflight_refusal); the service still enforces it.
+//
+// Keep on the card (L1, decided 2026-09-25: off by default). The tick box shows only when
+// the harness reports "usd" and GET /card says a card is in the slot. Ticked, Program sends
+// keep_on_card: true and the report says whether the design was kept (and in which slot).
 
 import { panelState, runJob } from "../actions.js";
 import { bytesText, capState, checkIcon, checkLevel, kib } from "../format.js";
 import { html, useEffect } from "../lib.js";
-import { boardState, changed, loadOverlays, runPreflight } from "../store.js";
+import { boardState, changed, hasCardStore, loadCard, loadOverlays, runPreflight } from "../store.js";
 import { ActionRow, ArmBox, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 
 const ARM = "program";
 const PHASES = ["guard", "swap", "push", "verify"];
+const CARD_PHASE = "card";           // the card write, only when the deploy keeps the design
+
+// The report line for a deploy's `card` ({kept, slot, why}); "" when it was not asked to keep.
+export function cardText(card) {
+  if (!card) return "";
+  if (card.kept) return card.slot ? `Kept on the card (slot ${card.slot})` : "Kept on the card";
+  return `Not kept: ${card.why || "no reason given"}`;
+}
+
+// The box shows only for a harness with a card store and a card in the slot.
+function cardShown(b) {
+  return hasCardStore(b) && !!b.card && !!b.card.store && !!b.card.present;
+}
+
+// Keep only when the box is shown, usable and ticked: a stale tick never keeps.
+function keeping(b) {
+  return cardShown(b) && !b.card.reason && !!b.keepOnCard;
+}
 
 function rows(b) {
   const o = b.overlays;
@@ -119,10 +141,31 @@ function programGuard(bid) {
 function renderDeploy(result) {
   if (!result || typeof result !== "object") return [{ kind: "out", text: String(result) }];
   const verdict = result.verified ? "verified by the board" : "WRITTEN, NOT VERIFIED";
-  return [
+  const lines = [
     { kind: result.verified ? "ok" : "warnline", text: `rm_id ${result.rm_id}: ${verdict}` },
     { kind: "out", text: `transport ${result.transport || "?"}, ${Number(result.seconds || 0).toFixed(1)} s` },
   ];
+  if (result.card) lines.push({ kind: result.card.kept ? "ok" : "warnline", text: cardText(result.card) });
+  return lines;
+}
+
+function KeepBox({ bid }) {
+  const b = boardState(bid);
+  if (!cardShown(b)) return null;
+  const reason = b.card.reason || "";
+  const on = !reason && !!b.keepOnCard;
+  const toggle = (e) => { b.keepOnCard = e.target.checked; changed(); };
+  return html`<div class="keep-wrap" data-testid="keep-card">
+    <label class=${`keep ${on ? "on" : ""} ${reason ? "off" : ""}`}>
+      <input type="checkbox" data-testid="keep-on-card" checked=${on} disabled=${!!reason}
+        onChange=${toggle} />
+      <${Icon} name="memory-stick" />
+      <span><strong>Keep on the card</strong>
+        <span class="sub">The board boots into this design next time.</span></span>
+    </label>
+    ${reason ? html`<${Reason} text=${`Cannot keep on this card: ${reason}`} icon="circle-slash"
+      testid="keep-reason" />` : null}
+  </div>`;
 }
 
 function ProgramCard({ bid }) {
@@ -134,8 +177,14 @@ function ProgramCard({ bid }) {
     d.phase || "?");
   const program = {
     key: "program", label: "Program", busyLabel: "Programming...", budgetS: 120,
-    command: `program ${name || "?"}`,
-    run: (ctx) => runJob("deploy", { bid }, { overlay: overlaySpec(b, name) }, progress(ctx), "deploy"),
+    command: `program ${name || "?"}${keeping(b) ? " --keep-on-card" : ""}`,
+    run: (ctx) => {
+      // keep_on_card only when asked: the default never writes the card.
+      const body = keeping(b) ? { overlay: overlaySpec(b, name), keep_on_card: true }
+        : { overlay: overlaySpec(b, name) };
+      b.keepOnCard = false;              // each keep is a fresh choice
+      return runJob("deploy", { bid }, body, progress(ctx), "deploy");
+    },
     render: renderDeploy,
     onDone: (ok, value) => {
       // harness-manager-daemon runs the preflight before it takes the job, and a refusal carries the
@@ -160,6 +209,7 @@ function ProgramCard({ bid }) {
     <div class="actions">
       <div class="field"><label>Selected</label>
         ${name ? html`<span class="mono" data-testid="selected-overlay">${name}</span>` : html`<span class="muted">none</span>`}</div>
+      <${KeepBox} bid=${bid} />
       <${ArmBox} bid=${bid} armKey=${ARM} testid="arm-program"
         text="Arm: I understand this reconfigures the partition and resets the DUT." />
       <${ActionRow} bid=${bid} panel="program" spec=${program} variant="primary" icon="upload"
@@ -177,10 +227,11 @@ function ProgressCard({ bid }) {
   const d = b.deploy;
   const seen = d.phases;
   const current = d.state === "running" ? d.phase : "";
+  const phases = d.keep ? [...PHASES, CARD_PHASE] : PHASES;
   const pct = d.state === "done" ? 100 : d.total ? Math.min(100, Math.round((d.bytes * 100) / d.total)) : 0;
   const stepState = (ph) => {
     if (d.state === "idle") return "";
-    if (d.state === "failed" && (ph === d.phase || (!seen.includes(ph) && ph === PHASES[seen.length]))) return "failed";
+    if (d.state === "failed" && (ph === d.phase || (!seen.includes(ph) && ph === phases[seen.length]))) return "failed";
     if (d.state === "done") return "done";
     if (ph === current) return "active";
     if (seen.includes(ph)) return "done";
@@ -197,18 +248,25 @@ function ProgressCard({ bid }) {
     outcome = html`<div class="outcome err" data-testid="deploy-outcome" data-state="failed"><${Icon} name="circle-x" />
       <div><strong>Failed${d.stage ? ` at ${d.stage}` : ""}.</strong> ${d.reason}</div></div>`;
   }
+  const card = d.state === "done" && d.card
+    ? html`<div class=${`outcome ${d.card.kept ? "ok" : "warn"}`} data-testid="deploy-card"
+        data-kept=${d.card.kept ? "true" : "false"}><${Icon} name=${d.card.kept ? "memory-stick" : "triangle-alert"} />
+        <div><strong>${cardText(d.card)}.</strong>${d.card.kept
+          ? " The board boots into this design next time." : " The board boots as before next time."}</div></div>`
+    : null;
   const phaseText = d.state === "idle" ? "Idle: nothing is being programmed."
     : d.state === "running" ? `${d.phase || "starting"}${d.total > 1 ? `: ${bytesText(d.bytes)} of ${bytesText(d.total)}` : ""}`
     : d.state === "done" ? "Complete" : "Stopped";
   return html`<${Card} title="Progress" icon="activity" testid="progress-card"
       sub=${d.overlay ? `Deploy events for ${d.overlay}, in the order the engine sent them.` : "Deploy events, in the order the engine sent them."}>
-    <div class="steps" aria-hidden="true">${PHASES.map((ph) => html`<div key=${ph} class=${`step ${stepState(ph)}`}>
+    <div class="steps" aria-hidden="true">${phases.map((ph) => html`<div key=${ph} class=${`step ${stepState(ph)}`}>
       <div class="bar"></div><span>${ph}</span></div>`)}</div>
     <div class=${`meter ${d.state === "done" ? "done" : d.state === "failed" ? "failed" : ""}`}
       role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${pct} aria-label="Deploy progress">
       <div style=${`width:${pct}%`}></div></div>
     <div class="meter-line"><span data-testid="deploy-phase">${phaseText}</span><span class="num">${d.state !== "idle" ? `${pct}%` : ""}</span></div>
     ${outcome}
+    ${card}
     ${d.events.length ? html`<ul class="event-list" data-testid="deploy-events">${d.events.slice(-40).map((e, i) => html`<li key=${i}>${e}</li>`)}</ul>` : null}
   <//>`;
 }
@@ -218,6 +276,10 @@ export function ProgramSection({ bid }) {
   useEffect(() => {
     if (!b.overlays && !b.overlaysLoading) loadOverlays(bid);
   }, [bid]);
+  const store = hasCardStore(b);
+  useEffect(() => {
+    if (store && !b.card && !b.cardLoading) loadCard(bid);
+  }, [bid, store]);
   const cap = capState(b.info, "deploy_partial");
   return html`<div class="stack">
     ${cap && !cap.available ? html`<${Reason} text=${`Programming is not available on this board: ${cap.reason}`} icon="circle-slash" />` : null}
