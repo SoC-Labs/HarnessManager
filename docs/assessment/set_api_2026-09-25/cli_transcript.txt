@@ -1,0 +1,99 @@
+# SET-API: harness-manager config against a real demo service (board-free; a scratch state dir under /tmp,
+# HARNESS_MANAGER_KEYRING=off, an ephemeral loopback port). Recorded 2026-09-25 on team/set-api.
+
+# a demo service (python -m harness_manager.daemon --demo --port 0) runs for this state dir, so every verb goes through /settings
+$ harness-manager config set tools.openocd /opt/openocd/bin/openocd hubs.lab.host mapstone-dev.ecs.soton.ac.uk advanced.port 0
+tools.openocd = /opt/openocd/bin/openocd  (yours, in settings.toml)
+hubs.lab.host = mapstone-dev.ecs.soton.ac.uk  (yours, in settings.toml)
+advanced.port = 0  (yours, in settings.toml)
+note: hubs.lab.host: takes effect the next time the board opens
+note: advanced.port: takes effect when the service restarts (`harness-manager daemon stop`, then start it again)
+[exit 0]
+$ harness-manager config get tools.openocd
+tools.openocd = /opt/openocd/bin/openocd
+  source: yours, in settings.toml
+  apply:  live
+  about:  OpenOCD (empty: openocd on PATH)
+  this shell sees the same
+[exit 0]
+$ HARNESS_MANAGER_OPENOCD=/shell/openocd harness-manager config get tools.openocd
+tools.openocd = /opt/openocd/bin/openocd
+  source: yours, in settings.toml
+  apply:  live
+  about:  OpenOCD (empty: openocd on PATH)
+  this shell would use: /shell/openocd, from $HARNESS_MANAGER_OPENOCD in this shell's environment; it hides your own value: unset $HARNESS_MANAGER_OPENOCD to use it
+[exit 0]
+$ harness-manager config list tools
+Tools
+  tools.openocd    /opt/openocd/bin/openocd  (yours, in settings.toml)
+  tools.vivado     ""  (default)
+  tools.hw_server  ""  (default)
+  tools.uv         ""  (default)
+  tools.gh         ""  (default)
+(the service's view; `harness-manager config get KEY` also shows this shell's)
+[exit 0]
+$ printf "tok-demo-secret\n" | harness-manager config set-secret hubs.lab.token
+hubs.lab.token: stored in a private file
+  note: no keyring on this system
+note: hubs.lab.token: takes effect the next time the board opens
+[exit 0]
+$ harness-manager config set-secret hubs.lab.token <a value on argv>
+harness-manager: config set-secret never takes the secret on the command line (ps and your shell history would keep it); it was not stored — pipe it: `... | harness-manager config set-secret hubs.lab.token`, or run it in a terminal to be asked
+[exit 2]
+$ harness-manager config get hubs.lab.token
+hubs.lab.token = set (a private file)
+  source: yours, in a private file
+  apply:  reopen (takes effect the next time the board opens)
+  about:  The fpgahub Bearer token
+  this shell sees the same
+[exit 0]
+$ harness-manager --tsv config list hubs
+hubs.lab.transport	ssh	default	-	false	-	reopen	hubs	enum
+hubs.lab.host	mapstone-dev.ecs.soton.ac.uk	user	settings.toml	false	-	reopen	hubs	str
+hubs.lab.group	fpga	default	-	false	-	reopen	hubs	str
+hubs.lab.jump	-	default	-	false	-	reopen	hubs	str
+hubs.lab.url	-	default	-	false	-	reopen	hubs	url
+hubs.lab.token	set	user	a private file	false	-	reopen	hubs	str
+hubs.lab.ca_file	-	default	-	false	-	reopen	hubs	path
+hubs.lab.cert_file	-	default	-	false	-	reopen	hubs	path
+hubs.lab.key_file	-	default	-	false	-	reopen	hubs	path
+hubs.lab.insecure	false	default	-	false	-	reopen	hubs	bool
+hubs.lab.events	true	default	-	false	-	reopen	hubs	bool
+hubs.lab.direct	auto	default	-	false	-	reopen	hubs	enum
+hubs.lab.timeout_s	30	default	-	false	-	live	hubs	duration
+hubs.lab.holder	-	default	-	false	-	live	hubs	str
+hubs.lab.lease_ttl	3600	default	-	false	-	live	hubs	duration
+hubs.lab.request_ttl	7200	default	-	false	-	live	hubs	duration
+hubs.lab.queue_timeout	3600	default	-	false	-	live	hubs	duration
+[exit 0]
+$ harness-manager config path
+config_dir      /tmp/setapi-demo/cli/state
+settings        /tmp/setapi-demo/cli/state/settings.toml
+boards          /tmp/setapi-demo/cli/state/boards.toml  (not there)
+policy          /etc/harness-manager/policy.toml  (not there)
+secrets         /tmp/setapi-demo/cli/state/secrets
+secrets_index   /tmp/setapi-demo/cli/state/secrets/index.json
+legacy_updates  /tmp/setapi-demo/cli/state/update/settings.json  (not there)
+new secrets go to a private file (no keyring on this system) from this shell
+new secrets go to a private file (no keyring on this system) from the service
+[exit 0]
+$ harness-manager config test hubs lab
+harness-manager: config test is unavailable — the hubs settings are not testable yet
+[exit 12]
+$ harness-manager config set consoles.scrollback lots general.theme dark
+harness-manager: consoles.scrollback: 'lots' is not a whole number — nothing was written; `harness-manager config get KEY` (GET /settings?key=KEY) says what a setting takes
+[exit 2]
+$ harness-manager config unset tools.openocd
+tools.openocd = ""  (default)
+[exit 0]
+$ curl -s -H 'Host: evil.example' http://127.0.0.1:PORT/health
+{"ok": false, "error": {"code": 15, "name": "REFUSED", "message": "this Harness Manager service does not answer to the host name 'evil.example'", "hint": "open it at the address `harness-manager ui` prints (http://127.0.0.1:PORT/); to use another name, add it with `harness-manager config set advanced.allowed_hosts NAME` and restart the service"}}
+$ curl -s http://127.0.0.1:PORT/health
+{"ok":true,"version":"0.1.0","service":"harness-manager-daemon","pid":N}
+[1]+  Done                    $V/python -m harness_manager.daemon --state-dir $HARNESS_MANAGER_STATE_DIR --port 0 --demo --log-level info > daemon.log 2>&1
+# daemon.log, the settings lines (the secret appears 0 times)
+INFO harness_manager.daemon: answering to the host names: 127.0.0.1, ::1, localhost
+INFO harness_manager.daemon.app: settings.changed - keys=['tools.openocd', 'hubs.lab.host', 'advanced.port'] apply='restart' source='api'
+INFO harness_manager.daemon.app: settings.changed - keys=['hubs.lab.token'] apply='reopen' source='api'
+INFO harness_manager.daemon.app: settings.changed - keys=['tools.openocd'] apply='live' source='api'
+WARNING harness_manager.daemon.hosts: refused a request for the host name 'evil.example' (not one this service answers to: advanced.allowed_hosts)

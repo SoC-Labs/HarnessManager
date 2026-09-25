@@ -1,0 +1,372 @@
+# SET-API: example /settings replies from the real daemon app (create_app over the demo engine, TestClient),
+# a scratch state dir and policy.toml under /tmp, the service's env with $HARNESS_MANAGER_OPENOCD set.
+# The script, then its output (the secret sent was tok-SECRET; it appears nowhere below).
+
+```python
+import json, warnings
+from pathlib import Path
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    from fastapi.testclient import TestClient
+from harness_manager.daemon.app import create_app
+from harness_manager.daemon.hosts import allowed_hosts
+from harness_manager.demo import DemoEngine
+
+root = Path("/tmp/setapi-demo/api"); root.mkdir(parents=True, exist_ok=True)
+pol = root / "policy.toml"
+pol.write_text('[lock]\ntools.vivado = "/tools/Xilinx/Vivado/2024.1/bin/vivado"\n')
+H = {"Authorization": "Bearer demo"}
+eng = DemoEngine(speed=0)
+app = create_app(eng, token="demo", state_dir=root / "state", static_dir=None,
+                 allowed_hosts=allowed_hosts("127.0.0.1"))
+d = app.state.daemon
+d.settings.policy_path = pol
+d.settings.env = {"HARNESS_MANAGER_KEYRING": "off", "HARNESS_MANAGER_OPENOCD": "/env/openocd"}
+events = []
+d.bus.subscribe("settings.changed", lambda e: events.append(e.data))
+def show(title, r, trim=None):
+    body = r.json()
+    if trim: body = trim(body)
+    print(f"### {title}\nHTTP {r.status_code}\n{json.dumps(body, indent=1)}\n")
+with TestClient(app, base_url="http://127.0.0.1:40123") as c:
+    show("PUT /settings (all or nothing; apply class)", c.put("/api/v1/settings", headers=H,
+         json={"tools.openocd": "/opt/openocd/bin/openocd", "hubs.lab.host": "mapstone-dev.ecs.soton.ac.uk", "advanced.port": 0}),
+         lambda b: {**b, "rows": [{k: r[k] for k in ("key","value","source","where","shadowed","apply")} for r in b["rows"]]})
+    show("GET /settings?key=tools.openocd (env shadowing, the service's env)", c.get("/api/v1/settings?key=tools.openocd", headers=H),
+         lambda b: {"files": b["files"], "policy": b["policy"], "rows": b["rows"]})
+    show("PUT /settings with a locked key -> 409 (nothing written)", c.put("/api/v1/settings", headers=H, json={"general.theme": "dark", "tools.vivado": "/mine"}))
+    show("PUT /settings with one bad value -> 400 (nothing written)", c.put("/api/v1/settings", headers=H, json={"general.theme": "dark", "consoles.scrollback": "lots"}))
+    show("PUT /settings/secrets/hubs.lab.token {value} (reply: status only)", c.put("/api/v1/settings/secrets/hubs.lab.token", headers=H, json={"value": "tok-SECRET"}),
+         lambda b: {k: b[k] for k in ("key","secret","keys","apply","changed")})
+    show("GET /settings?key=hubs.lab.token", c.get("/api/v1/settings?key=hubs.lab.token", headers=H), lambda b: {"rows": b["rows"]})
+    show("DELETE /settings/tools.openocd", c.delete("/api/v1/settings/tools.openocd", headers=H),
+         lambda b: {**b, "rows": [{k: r[k] for k in ("key","value","source","where","shadowed")} for r in b["rows"]]})
+    show("POST /settings/test {section: hubs, name: lab} (SET-HUBS not landed)", c.post("/api/v1/settings/test", headers=H, json={"section": "hubs", "name": "lab"}))
+    show("GET /settings/schema (2 of the rows)", c.get("/api/v1/settings/schema", headers=H),
+         lambda b: {"schema_version": b["schema_version"], "sections": b["sections"], "rows": [r for r in b["rows"] if r["key"] in ("hubs.*.token", "advanced.allowed_hosts")], "n_rows": len(b["rows"])})
+    show("GET /api/v1/settings with Host: evil.example -> 403", c.get("/api/v1/settings", headers={**H, "host": "evil.example"}))
+print("### settings.changed events on the bus")
+for e in events: print(json.dumps(e))
+eng.close_all()
+```
+
+```
+refused a request for the host name 'evil.example' (not one this service answers to: advanced.allowed_hosts)
+### PUT /settings (all or nothing; apply class)
+HTTP 200
+{
+ "ok": true,
+ "rows": [
+  {
+   "key": "tools.openocd",
+   "value": "/env/openocd",
+   "source": "env",
+   "where": "$HARNESS_MANAGER_OPENOCD",
+   "shadowed": "$HARNESS_MANAGER_OPENOCD",
+   "apply": "live"
+  },
+  {
+   "key": "hubs.lab.host",
+   "value": "mapstone-dev.ecs.soton.ac.uk",
+   "source": "user",
+   "where": "settings.toml",
+   "shadowed": "",
+   "apply": "reopen"
+  },
+  {
+   "key": "advanced.port",
+   "value": 0,
+   "source": "user",
+   "where": "settings.toml",
+   "shadowed": "",
+   "apply": "restart"
+  }
+ ],
+ "keys": [
+  "tools.openocd",
+  "hubs.lab.host",
+  "advanced.port"
+ ],
+ "apply": "restart",
+ "applies": {
+  "live": [
+   "tools.openocd"
+  ],
+  "reopen": [
+   "hubs.lab.host"
+  ],
+  "restart": [
+   "advanced.port"
+  ]
+ }
+}
+
+### GET /settings?key=tools.openocd (env shadowing, the service's env)
+HTTP 200
+{
+ "files": {
+  "config_dir": "/tmp/setapi-demo/api/state",
+  "settings": "/tmp/setapi-demo/api/state/settings.toml",
+  "boards": "/tmp/setapi-demo/api/state/boards.toml",
+  "policy": "/tmp/setapi-demo/api/policy.toml",
+  "secrets": "/tmp/setapi-demo/api/state/secrets",
+  "secrets_backend": {
+   "backend": "file",
+   "where": "a private file",
+   "why": "no keyring on this system"
+  }
+ },
+ "policy": {
+  "path": "/tmp/setapi-demo/api/policy.toml",
+  "exists": true,
+  "problems": []
+ },
+ "rows": [
+  {
+   "key": "tools.openocd",
+   "value": "/env/openocd",
+   "source": "env",
+   "where": "$HARNESS_MANAGER_OPENOCD",
+   "locked": false,
+   "shadowed": "$HARNESS_MANAGER_OPENOCD",
+   "capped": "",
+   "apply": "live",
+   "problems": [],
+   "type": "path",
+   "section": "Tools",
+   "scope": "machine",
+   "doc": "OpenOCD (empty: openocd on PATH)",
+   "default": "",
+   "choices": [],
+   "readonly": false,
+   "owner": "admin",
+   "advanced": false,
+   "section_id": "tools"
+  }
+ ]
+}
+
+### PUT /settings with a locked key -> 409 (nothing written)
+HTTP 409
+{
+ "ok": false,
+ "error": {
+  "code": 15,
+  "name": "REFUSED",
+  "message": "tools.vivado is set by the administrator's policy /tmp/setapi-demo/api/policy.toml",
+  "hint": "ask your administrator to change it"
+ }
+}
+
+### PUT /settings with one bad value -> 400 (nothing written)
+HTTP 400
+{
+ "ok": false,
+ "error": {
+  "code": 2,
+  "name": "USAGE",
+  "message": "consoles.scrollback: 'lots' is not a whole number",
+  "hint": "nothing was written; `harness-manager config get KEY` (GET /settings?key=KEY) says what a setting takes"
+ }
+}
+
+### PUT /settings/secrets/hubs.lab.token {value} (reply: status only)
+HTTP 200
+{
+ "key": "hubs.lab.token",
+ "secret": {
+  "set": true,
+  "backend": "file",
+  "where": "a private file",
+  "reachable": true,
+  "why": "no keyring on this system"
+ },
+ "keys": [
+  "hubs.lab.token"
+ ],
+ "apply": "reopen",
+ "changed": true
+}
+
+### GET /settings?key=hubs.lab.token
+HTTP 200
+{
+ "rows": [
+  {
+   "key": "hubs.lab.token",
+   "value": {
+    "set": true
+   },
+   "source": "user",
+   "where": "a private file",
+   "locked": false,
+   "shadowed": "",
+   "capped": "",
+   "apply": "reopen",
+   "problems": [],
+   "secret": {
+    "set": true,
+    "backend": "file",
+    "where": "a private file",
+    "reachable": true,
+    "why": ""
+   },
+   "type": "str",
+   "section": "Hubs",
+   "scope": "hub",
+   "doc": "The fpgahub Bearer token",
+   "default": null,
+   "choices": [],
+   "readonly": false,
+   "owner": "user",
+   "advanced": false,
+   "section_id": "hubs"
+  }
+ ]
+}
+
+### DELETE /settings/tools.openocd
+HTTP 200
+{
+ "ok": true,
+ "rows": [
+  {
+   "key": "tools.openocd",
+   "value": "/env/openocd",
+   "source": "env",
+   "where": "$HARNESS_MANAGER_OPENOCD",
+   "shadowed": ""
+  }
+ ],
+ "changed": true,
+ "keys": [
+  "tools.openocd"
+ ],
+ "apply": "live",
+ "applies": {
+  "live": [
+   "tools.openocd"
+  ],
+  "reopen": [],
+  "restart": []
+ }
+}
+
+### POST /settings/test {section: hubs, name: lab} (SET-HUBS not landed)
+HTTP 200
+{
+ "ok": true,
+ "section": "hubs",
+ "name": "lab",
+ "testable": false,
+ "passed": null,
+ "steps": [],
+ "why": "the hubs settings are not testable yet"
+}
+
+### GET /settings/schema (2 of the rows)
+HTTP 200
+{
+ "schema_version": 1,
+ "sections": [
+  {
+   "id": "general",
+   "name": "General"
+  },
+  {
+   "id": "hubs",
+   "name": "Hubs"
+  },
+  {
+   "id": "boards",
+   "name": "Boards"
+  },
+  {
+   "id": "tools",
+   "name": "Tools"
+  },
+  {
+   "id": "updates",
+   "name": "Updates"
+  },
+  {
+   "id": "harness-kits",
+   "name": "Harness + kits"
+  },
+  {
+   "id": "debug",
+   "name": "Debug"
+  },
+  {
+   "id": "consoles",
+   "name": "Consoles"
+  },
+  {
+   "id": "advanced",
+   "name": "Advanced"
+  }
+ ],
+ "rows": [
+  {
+   "key": "hubs.*.token",
+   "type": "str",
+   "default": null,
+   "section": "Hubs",
+   "doc": "The fpgahub Bearer token",
+   "scope": "hub",
+   "secret": true,
+   "apply": "reopen",
+   "owner": "user",
+   "env": "FPGAHUB_TOKEN",
+   "env_rank": "over-user",
+   "choices": [],
+   "readonly": false,
+   "lockable": false,
+   "ui": true,
+   "ceiling": false,
+   "advanced": false,
+   "pack": "",
+   "section_id": "hubs"
+  },
+  {
+   "key": "advanced.allowed_hosts",
+   "type": "list",
+   "default": [],
+   "section": "Advanced",
+   "doc": "Other host names the service answers to (loopback and its listen address always work)",
+   "scope": "machine",
+   "secret": false,
+   "apply": "restart",
+   "owner": "admin",
+   "env": "",
+   "env_rank": "over-user",
+   "choices": [],
+   "readonly": false,
+   "lockable": true,
+   "ui": true,
+   "ceiling": false,
+   "advanced": true,
+   "pack": "",
+   "section_id": "advanced"
+  }
+ ],
+ "n_rows": 77
+}
+
+### GET /api/v1/settings with Host: evil.example -> 403
+HTTP 403
+{
+ "ok": false,
+ "error": {
+  "code": 15,
+  "name": "REFUSED",
+  "message": "this Harness Manager service does not answer to the host name 'evil.example'",
+  "hint": "open it at the address `harness-manager ui` prints (http://127.0.0.1:PORT/); to use another name, add it with `harness-manager config set advanced.allowed_hosts NAME` and restart the service"
+ }
+}
+
+### settings.changed events on the bus
+{"keys": ["tools.openocd", "hubs.lab.host", "advanced.port"], "apply": "restart", "applies": {"live": ["tools.openocd"], "reopen": ["hubs.lab.host"], "restart": ["advanced.port"]}, "source": "api"}
+{"keys": ["hubs.lab.token"], "apply": "reopen", "applies": {"live": [], "reopen": ["hubs.lab.token"], "restart": []}, "source": "api"}
+{"keys": ["tools.openocd"], "apply": "live", "applies": {"live": ["tools.openocd"], "reopen": [], "restart": []}, "source": "api"}
+```
