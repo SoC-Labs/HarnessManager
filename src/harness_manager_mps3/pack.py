@@ -27,6 +27,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.naming:session_board_name(session, ident)`` | N1   | ``(name, source)``: the hub's confirmed name for an open board |
 | ``.panel:make_panel_adapter(session)``         | P2   | ``session.panel``: the front panel (``core.panel.PanelAdapter``) |
 | ``.xvc:make_xvc_adapter(session)``             | XVC  | ``XvcAdapter``: the harness's XVC, partition-scoped (CCR X-8) |
+| ``.settings:mps3_rows(**pack kwargs)``         | SET-PACK | ``Mps3Pack.settings()``: the ``mps3.*`` rows and boards.toml tables |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -312,6 +313,13 @@ class Mps3Pack(BoardPack):
 
     def capability_specs(self) -> Iterable[CapabilitySpec]:
         return SPECS
+
+    def settings(self) -> Iterable[Any]:
+        """The MPS3's settings rows (CCR SET-PACK-2: ``.settings``), with this instance's
+        values as the defaults (the resolver's pack layer). Nothing reads through them yet."""
+        rows = _hook("settings", "mps3_rows")
+        return rows(console_pace_s=self._console_pace_s, rbb_port=self._rbb_port,
+                    push_port=self._push_port, tftp_port=self._tftp_port) if rows else ()
 
     def candidate_for_host(self, spec: str, via: str = "") -> Candidate:
         """``via`` ("ssh:HOST") reaches the shell through an SSH tunnel (L1); boards.toml

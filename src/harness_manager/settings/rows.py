@@ -3,12 +3,15 @@
 Each row cites where the value is read today (``path:line``); SET-WIRE switches those readers
 to the resolver, keeping the variable as the env layer. Nothing reads these rows yet.
 
-**Declared by the board pack instead (SET-PACK, ``BoardPack.settings()``):** the MPS3 rows
-(``mps3.*``: T2 openocd_cfg_dir, C1/C2 pacing, D4 rbb_port, D5 and X4-X8 the ``MPS3_*``
-variables) and the pack-validated board tables ``boards.*.hub.{target,board,shares,baud,
-start_shares}``, ``boards.*.xvc.*``, ``boards.*.sysmon.*``, ``boards.*.estimates.*``.
-``test_settings_schema`` holds that split: every ``HARNESS_MANAGER_*`` variable in
-``src/harness_manager`` is a core row, and every ``HARNESS_MANAGER_MPS3_*`` one is the pack's.
+**Declared by the board pack instead (SET-PACK, ``BoardPack.settings()``,
+``harness_manager_mps3/settings.py``):** the MPS3 rows (``mps3.*``: T2 openocd_cfg_dir, K7
+overlay_dirs, C1/C2 pacing, D4 rbb_port, D5 and X4-X8 the ``MPS3_*`` variables) and the
+pack-validated board tables ``boards.*.hub.{target,board,shares.*,baud,start_shares}``,
+``boards.*.xvc.*``, ``boards.*.sysmon.*``, ``boards.*.estimates.*``. ``boards.*.power.*``
+stays here: its parser is the core's (``power/config.py``), for every pack.
+``test_settings_schema`` and ``test_settings_pack`` hold that split: every
+``HARNESS_MANAGER_*`` variable is a core row, except ``HARNESS_MANAGER_MPS3_*``, which are
+all the MPS3 pack's.
 
 **Not declared (nothing can set them today):** G5 (derived from ``BROWSER``/``DISPLAY``),
 U7 install record, U12 apply budgets, K8 trust keys, B22 console baud (runtime only),
@@ -275,9 +278,8 @@ KITS = (
             "Where a kit is looked for, in order", check=_kit_sources),
     Setting("kits.hub_dir", "path", "", "Harness + kits", "The hub's mint archive",
             scope="machine", owner="admin", env="HARNESS_MANAGER_KIT_HUB_DIR"),
-    # K7 harness_manager_mps3/overlays.py:71,312-314; cli/main.py:156
-    Setting("overlays.dirs", "list", [], "Harness + kits", "Extra overlay directories",
-            env="HARNESS_MANAGER_MPS3_OVERLAY_DIRS", env_split="pathsep"),
+    # K7 is the pack's (mps3.overlay_dirs): each pack has its own variable
+    # (cli/cmd_program.py:23-25, HARNESS_MANAGER_<PACK>_OVERLAY_DIRS).
     # K9 cli/cmd_kit.py:121
     Setting("kits.jobs", "int", 2, "Harness + kits", "Vivado threads for a kit build",
             advanced=True, check=_between(1, 64)),
