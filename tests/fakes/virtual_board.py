@@ -25,6 +25,9 @@ override; tests only rely on it differing from ``0x3F1A560F``.
 from __future__ import annotations
 
 import os
+import random
+import socket
+import weakref
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -141,6 +144,65 @@ FIELDED_ILA_V011 = ila_v011_profile()
 LINUX_HARNESSD = linux_harnessd_profile()
 
 
+#: Where a virtual board's ports come from: below every OS's ephemeral range (Linux 32768+,
+#: Windows and macOS 49152+), so the kernel never hands one to another socket; clear of
+#: ``held_gdb_block``'s 20000-23000, Harness Manager's own 23300-23727 and the HAPS tools'
+#: local blocks (3200-3999, 24000+).
+BOARD_PORT_RANGE = (10000, 20000)
+SHELL_PORT_KEYS = ("control_port", "tftp_port", "raw_tcp_port", "uart0_port", "uart1_port",
+                   "swo_port")
+_UDP_SERVED = frozenset({"tftp_port"})
+
+
+class BoardPorts:
+    """The shell's ports, fixed for the board's life, so a REBOOT brings it back on them.
+
+    A REBOOT closes every listener and the boot binds the same ports again. On ``bind(0)``
+    ports that raced on a busy host: the kernel gave a port to another socket while the
+    board was down, and the boot died with EADDRINUSE (FLAKE-2). These ports are outside
+    the kernel's range, and each is held for the board's life with the protocol the shell
+    does NOT serve on it (UDP beside a TCP port, TCP beside the TFTP port): the shell binds
+    and rebinds freely, and no other ``BoardPorts``, in this process or another, can pick
+    one meanwhile. ``candidates``: the ports to pick from (tests of this class).
+    """
+
+    def __init__(self, candidates: tuple[int, ...] | None = None) -> None:
+        self.ports: dict[str, int] = {}
+        self._held: list[socket.socket] = []
+        pool = candidates or range(*BOARD_PORT_RANGE)
+        pick = random.SystemRandom()           # not `random`: pytest-randomly reseeds it
+        try:
+            for key in SHELL_PORT_KEYS:
+                self.ports[key] = self._claim(pool, pick, udp_served=key in _UDP_SERVED)
+        except BaseException:
+            self.release()
+            raise
+
+    def _claim(self, pool, pick, *, udp_served: bool) -> int:
+        served_type, held_type = ((socket.SOCK_DGRAM, socket.SOCK_STREAM) if udp_served
+                                  else (socket.SOCK_STREAM, socket.SOCK_DGRAM))
+        for _ in range(500):
+            port = pick.choice(pool)
+            if port in self.ports.values():
+                continue
+            probe, held = socket.socket(type=served_type), socket.socket(type=held_type)
+            try:
+                probe.bind(("127.0.0.1", port))    # free for the shell (released below)
+                held.bind(("127.0.0.1", port))     # and kept from every other claim
+            except OSError:
+                held.close()
+                continue
+            finally:
+                probe.close()
+            self._held.append(held)
+            return port
+        raise AssertionError(f"no free port for a virtual board among {len(pool)} candidates")
+
+    def release(self) -> None:
+        while self._held:
+            self._held.pop().close()
+
+
 def _needs_harness_fake(profile: FirmwareProfile) -> bool:
     return (profile.impl is not None or profile.v011_verbs or profile.identify
             or bool(profile.omit_diag_keys) or bool(profile.version_extra)
@@ -163,18 +225,19 @@ class VirtualMps3:
             harness_usr_access=profile.usr_access,
             harness_ver32=profile.harness_ver32,
         )
+        # The shell's ports, kept for the board's life (BoardPorts: a REBOOT rebinds them).
+        self.board_ports = BoardPorts()
+        self._release_ports = weakref.finalize(self, self.board_ports.release)
+        common.update(self.board_ports.ports)
         if _needs_harness_fake(profile) or mode != "run" or unit:
             # T12: the v0.11 / Linux behaviours pyverify's FakeShell does not model yet.
-            for key in ("control_port", "tftp_port", "raw_tcp_port",
-                        "uart0_port", "uart1_port", "swo_port"):
-                common[key] = 0
             self.shell = HarnessFakeShell(
                 "127.0.0.1", features=profile.features, impl=profile.impl, lmb_kb=profile.lmb_kb, v011_verbs=profile.v011_verbs,
                 identify=profile.identify, omit_diag_keys=profile.omit_diag_keys,
                 version_extra=profile.version_extra, reboot_outage_s=profile.reboot_outage_s,
                 mode=mode, unit=unit, **common)
         else:
-            self.shell = FakeShell.ephemeral(features=profile.features, **common)
+            self.shell = FakeShell("127.0.0.1", features=profile.features, **common)
         self._keepalive: FakeIdentifyResponder | None = None
         # boot_s=3 so a reboot is observable over Ethernet (the witness needs
         # two failed 1 s pings) when a test runs on the real clock.
@@ -288,3 +351,4 @@ class VirtualMps3:
         self.shell.hung = False          # release any handler parked by hang()
         self.shell.stop()
         unregister_fake_serial(self._fake_name)
+        self._release_ports()
