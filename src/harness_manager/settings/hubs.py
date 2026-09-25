@@ -685,3 +685,27 @@ __all__ = [
     "default_hub_name", "hub_credential", "hub_names", "inline_hub_boards", "list_hubs",
     "load_resolver", "remove_hub", "resolve_hub", "set_hub_token",
 ]
+
+
+def test_connection(req: Any) -> dict[str, Any]:
+    """The "hubs" section tester for ``config test hubs NAME`` and ``POST /settings/test``
+    (``settings/testers.py`` finds it by CONVENTION). Test connection for the named hub, or
+    for an unsaved ``req.table`` (tested before it is saved); never takes a lease."""
+    from dataclasses import fields as _fields
+
+    from .hubtest import test_hub
+
+    resolver = req.resolver
+    if req.table is not None:
+        known = {f.name for f in _fields(Hub)} - {"rows", "token", "problems", "machine",
+                                                  "policy"}
+        values = {k: v for k, v in dict(req.table).items() if k in known}
+        if "transport" not in values and values.get("url"):
+            values["transport"] = "rest"                 # H1: a url means REST
+        hub: Hub | str = Hub(name=req.name or "unsaved", **values)
+    else:
+        if not req.name:
+            raise UsageError("which hub? `harness-manager config test hubs NAME`",
+                             hint="`harness-manager hub list` shows the hubs")
+        hub = req.name
+    return test_hub(hub, resolver=resolver).view()
