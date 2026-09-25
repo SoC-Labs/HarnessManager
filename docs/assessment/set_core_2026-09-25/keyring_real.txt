@@ -1,0 +1,21 @@
+# SET-CORE: the real Secret Service path (keyring 25.7.0), in a private D-Bus session
+# PYTHONPATH=src:. .venv/bin/python -m tests.spikes.settings_keyring_real   (2026-09-25T09:17:13Z, srv03335, no session bus in the parent)
+
+PASS  K1 this process has no session bus, so no keyring, and it says why
+      no session bus in this process (an ssh or service session?)
+PASS  K2 in a desktop-like session the keyring package reaches the Secret Service
+      {"available": true, "why": "", "status": {"set": true, "backend": "secret-service", "where": "the Secret Service (your login keyring)", "reachable": true, "why": ""}, "readback": true, "class": "keyring.backends.SecretService.Keyring"}
+PASS  K3 ...stores the secret there and reads it back; the reply has no value
+PASS  K4 the index names the backend, never the value
+      {  "secrets": {   "hubs.lab.token": {    "backend": "secret-service",    "updated": "2026-09-25T09:17:14Z"   }  },  "version": 1 } 
+PASS  K5 back here: 'stored, unreachable here', not 'not set'
+      {'set': True, 'backend': 'secret-service', 'where': 'the Secret Service (your login keyring)', 'reachable': False, 'why': 'no session bus in this process (an ssh or service session?)'}
+PASS  K6 reading it here fails with 7 and the way out
+      hubs.lab.token is stored in the Secret Service (your login keyring), which this process cannot reach: no session bus in this process (an ssh or service session?) | start the service from your desktop session, or set the secret again here (it then moves to a private file)
+PASS  K7 no file copy was written
+PASS  K8 setting it again here moves it to the private file
+      {'set': True, 'backend': 'file', 'where': 'a private file', 'reachable': True, 'why': 'no keyring: the Secret Service (your login keyring): no session bus in this process (an ssh or service session?)'}
+PASS  K9 nothing left running from the throwaway session
+      none
+
+9/9 PASS

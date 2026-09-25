@@ -24,6 +24,9 @@ def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Never run the machine's real Vivado (`vivado -version` from kit discovery): a test that
     # wants one points HARNESS_MANAGER_VIVADO at a fake (tests/fakes/kit_fakes.py).
     monkeypatch.setenv("HARNESS_MANAGER_VIVADO", "off")
+    # SET-CORE: never reach the user's real OS keyring (the secret store falls back to its
+    # 0600 file); a test that wants a keyring passes its own stub backend.
+    monkeypatch.setenv("HARNESS_MANAGER_KEYRING", "off")
 
 
 @pytest.fixture(autouse=True)

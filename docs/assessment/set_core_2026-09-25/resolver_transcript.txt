@@ -1,0 +1,79 @@
+# SET-CORE: a resolver transcript, board-free (a scratch state dir and policy.toml under /tmp).
+# The script, then its output. Run: PYTHONPATH=src .venv/bin/python demo.py
+
+```python
+import json, os
+from pathlib import Path
+from harness_manager.settings import Resolver, SecretStore
+from harness_manager.settings.secrets import KeyringBackend
+from harness_manager.core.errors import HarnessError
+
+root = Path("/tmp/setcore-demo/state"); root.mkdir(parents=True, exist_ok=True)
+(root / "update").mkdir(exist_ok=True)
+(root / "update" / "settings.json").write_text('{"channel": "beta", "auto": "stage"}')
+pol = Path("/tmp/setcore-demo/policy.toml")
+pol.write_text('self_update = "notify"\n[lock]\ntools.vivado = "/tools/Xilinx/Vivado/2024.1/bin/vivado"\n'
+               '"hubs.*.lease_ttl" = "2h"\n[default]\nupdates.mirrors = ["/lab/mirror"]\n'
+               '[hubs.lab]\ntransport = "ssh"\nhost = "mapstone-dev.ecs.soton.ac.uk"\ntoken = "tok-oops"\n')
+env = {"HARNESS_MANAGER_OPENOCD": "/env/openocd", "HARNESS_MANAGER_XVC_PORT_BASE": "twelve",
+       "HARNESS_MANAGER_KEYRING": "off"}
+store = SecretStore(root, keyrings=[KeyringBackend("secret-service", env={})])
+r = Resolver.load(root, env=env, policy_path=pol, secrets=store)
+def show(k):
+    v = r.resolve(k).view()
+    extra = {x: v[x] for x in ("shadowed", "capped", "problems", "secret") if v.get(x)}
+    print(f"{k:28s} = {json.dumps(v['value']):42s} [{v['source']}{' LOCKED' if v['locked'] else ''}] {v['where']} {extra if extra else ''}")
+print("-- policy problems:", r.problems)
+r.set("tools.openocd", "/opt/openocd/bin/openocd")
+r.set("updates.auto", "stage")
+store.set("hubs.lab.token", "tok-SECRET-NEVER-PRINTED")
+r = Resolver.load(root, env=env, policy_path=pol, secrets=store)
+for k in ("tools.openocd", "tools.vivado", "updates.channel", "updates.auto", "updates.mirrors",
+          "updates.check_interval", "debug.xvc_port_base", "hubs.lab.host", "hubs.lab.lease_ttl",
+          "hubs.lab.token", "general.theme"):
+    show(k)
+for k, v in (("tools.vivado", "/mine"), ("hubs.lab.token", "x"), ("debug.port_base", 80)):
+    try:
+        r.set(k, v)
+    except HarnessError as e:
+        print(f"set {k}: exit {int(e.code)} {e.message}")
+print("-- settings.toml:"); print((root / "settings.toml").read_text())
+print("-- update/settings.json:", (root / "update" / "settings.json").read_text().strip())
+print("-- secrets/index.json:", (root / "secrets" / "index.json").read_text().replace("\n", " "))
+```
+
+```
+-- policy problems: ["/tmp/setcore-demo/policy.toml: hubs.lab.token: a hub's credential never goes in the policy (every user can read it); each user sets their own (`harness-manager config set-secret hubs.lab.token`)"]
+tools.openocd                = "/env/openocd"                             [env] $HARNESS_MANAGER_OPENOCD {'shadowed': '$HARNESS_MANAGER_OPENOCD'}
+tools.vivado                 = "/tools/Xilinx/Vivado/2024.1/bin/vivado"   [lock LOCKED] /tmp/setcore-demo/policy.toml 
+updates.channel              = "beta"                                     [user] settings.toml 
+updates.auto                 = "notify"                                   [user] settings.toml {'capped': "the administrator's policy /tmp/setcore-demo/policy.toml allows at most 'notify'"}
+updates.mirrors              = ["/lab/mirror"]                            [machine] /tmp/setcore-demo/policy.toml 
+updates.check_interval       = 21600                                      [default]  
+debug.xvc_port_base          = 0                                          [default]  {'problems': ["$HARNESS_MANAGER_XVC_PORT_BASE: debug.xvc_port_base: 'twelve' is not a whole number; ignored"]}
+hubs.lab.host                = "mapstone-dev.ecs.soton.ac.uk"             [lock LOCKED] /tmp/setcore-demo/policy.toml 
+hubs.lab.lease_ttl           = 7200                                       [lock LOCKED] /tmp/setcore-demo/policy.toml 
+hubs.lab.token               = {"set": true}                              [user] a private file {'secret': {'set': True, 'backend': 'file', 'where': 'a private file', 'reachable': True, 'why': ''}}
+general.theme                = "auto"                                     [default]  
+set tools.vivado: exit 15 tools.vivado is set by the administrator's policy /tmp/setcore-demo/policy.toml
+set hubs.lab.token: exit 2 hubs.lab.token is a secret: `harness-manager config set-secret hubs.lab.token`
+set debug.port_base: exit 2 debug.port_base must be 0 (automatic) or a TCP port 1024..65535
+-- settings.toml:
+# Harness Manager settings. The Settings menu and `harness-manager config` edit this file;
+# so can you: comments are kept. Secrets are never here (see `harness-manager config path`).
+
+schema = 1
+
+[updates]
+channel = "beta"
+auto = "stage"
+
+[tools]
+openocd = "/opt/openocd/bin/openocd"
+
+-- update/settings.json: {
+ "auto": "stage",
+ "channel": "beta"
+}
+-- secrets/index.json: {  "secrets": {   "hubs.lab.token": {    "backend": "file",    "updated": "2026-09-25T09:16:34Z"   }  },  "version": 1 } 
+```
