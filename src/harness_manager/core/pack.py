@@ -21,11 +21,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .capabilities import CapabilitySpec
 from .model import BoardIdentity, Candidate, Check, Health, Reading
 from .panel import PanelAdapter
+
+if TYPE_CHECKING:
+    from harness_manager.settings.schema import Setting
 
 
 @dataclass(frozen=True)
@@ -386,6 +389,16 @@ class BoardPack(ABC):
 
     @abstractmethod
     def open(self, candidate: Candidate) -> BoardSession: ...
+
+    def settings(self) -> Iterable[Setting]:
+        """The pack's own settings rows (CCR SET-PACK-1, docs/design/SETTINGS.md §3.2).
+
+        Optional: a pack declares none by default. Each row says ``pack=<name>`` and is
+        keyed under ``<name>.`` or in a board table (``boards.*.<table>.<field>``); the
+        schema refuses any other key and one declared twice. A row's default is this
+        instance's value, so the defaults are the resolver's ``pack`` layer.
+        """
+        return ()
 
     def candidate_for_host(self, spec: str, via: str = "") -> Candidate:
         """Build a candidate from an explicit address. Packs that can, override this.

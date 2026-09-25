@@ -30,6 +30,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any
 
 from harness_manager.core.errors import UsageError
@@ -210,9 +211,9 @@ class Setting:
         if problems:
             raise ValueError(f"setting {self.key!r}: " + "; ".join(problems))
 
-    @property
+    @cached_property
     def parts(self) -> tuple[str, ...]:
-        return split_key(self.key)
+        return split_key(self.key)          # cached: every lookup and extend compares parts
 
     @property
     def lockable(self) -> bool:
@@ -332,14 +333,14 @@ class Schema:
         """Add rows. A pack's rows (SET-PACK: ``BoardPack.settings()``) must carry its name
         and sit under its prefix (``mps3.``) or in a board table (``boards.*.<table>``)."""
         new = list(rows)
-        for s in new:
+        for i, s in enumerate(new):
             if pack:
                 if s.pack != pack:
                     raise ValueError(f"{s.key}: declared by pack {pack!r} but says {s.pack!r}")
                 if not (s.key.startswith(f"{pack}.") or s.collection == "boards"):
                     raise ValueError(f"{s.key}: a {pack} row sits under '{pack}.' "
                                      "or 'boards.*.'")
-            for old in self._rows:
+            for old in (*self._rows, *new[:i]):      # SET-PACK: twice in one batch, too
                 if s.key == old.key or matches(old.parts, s.parts) or matches(s.parts, old.parts):
                     raise ValueError(f"setting {s.key!r} is declared twice "
                                      f"(also {old.key!r}{' by ' + old.pack if old.pack else ''})")

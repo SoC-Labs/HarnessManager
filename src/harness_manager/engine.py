@@ -120,6 +120,7 @@ class Engine:
         self._identities: dict[str, BoardIdentity] = {}
         self._services: dict[str, Any] = {}
         self._store: ContentStore | None = None
+        self._settings: tuple[Any, dict[str, Any]] | None = None   # SET-PACK: schema, layer
 
     # -- services ------------------------------------------------------------------
 
@@ -185,7 +186,32 @@ class Engine:
         with self._lock:
             if self._packs is None:
                 self._packs = self._load_packs()
+                self._settings = None          # the packs' settings rows join on next use
             return dict(self._packs)
+
+    def settings_schema(self) -> Any:
+        """The settings schema: the core's rows plus every loaded pack's
+        (``BoardPack.settings()``, lane SET-PACK). Built once, after the packs load; a pack
+        whose rows are refused is logged and left out."""
+        return self._settings_layers()[0]
+
+    def settings_resolver(self, **kw: Any) -> Any:
+        """A ``settings.Resolver`` over this engine's config dir (its own state dir), with
+        every pack's rows, and their defaults as the pack layer. ``kw`` go to
+        ``Resolver.load`` (``env``, ``policy_path``, ``secrets``, ...)."""
+        from harness_manager.settings import Resolver
+
+        schema, layer = self._settings_layers()
+        layer = {**layer, **(kw.pop("pack_defaults", None) or {})}
+        return Resolver.load(self.state_dir, schema=schema, pack_defaults=layer, **kw)
+
+    def _settings_layers(self) -> tuple[Any, dict[str, Any]]:
+        with self._lock:
+            if self._settings is None:
+                from harness_manager.settings.packs import for_engine
+
+                self._settings = for_engine(self)     # loads the packs first (packs())
+            return self._settings
 
     def _load_packs(self) -> dict[str, BoardPack]:
         packs = load_packs()

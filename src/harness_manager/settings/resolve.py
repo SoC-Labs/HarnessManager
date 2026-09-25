@@ -34,7 +34,7 @@ value never leaves ``secrets.SecretStore.get`` / ``resolve_secret``.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -42,9 +42,10 @@ from typing import Any
 from harness_manager.core.errors import RefusedError, UsageError
 
 from .files import BOARD_DEFAULTS, SettingsFiles, UserLayer
+from .packs import with_packs
 from .policy import MachinePolicy, load_machine_policy
 from .rows import CORE_ROWS
-from .schema import Schema, Setting, canonical_key, coerce, join_key, split_key
+from .schema import Schema, Setting, canonical_key, coerce, join_key, matches, split_key
 from .secrets import SecretStore, parse_ref
 
 SOURCES = ("lock", "env", "user", "machine", "pack", "default")
@@ -94,8 +95,15 @@ class Resolver:
                  user: Mapping[str, Any] | UserLayer | None = None,
                  pack_defaults: Mapping[str, Any] | None = None,
                  files: SettingsFiles | None = None,
-                 secrets: SecretStore | None = None) -> None:
+                 secrets: SecretStore | None = None,
+                 packs: Iterable[Any] = ()) -> None:
         self.schema = schema or core_schema()
+        packs = tuple(packs)
+        if packs:
+            # SET-PACK: each pack's rows join the schema, and their defaults form the pack
+            # layer (an explicit ``pack_defaults`` entry still wins). Refused rows raise.
+            self.schema, layer = with_packs(self.schema, packs)
+            pack_defaults = {**layer, **(pack_defaults or {})}
         self.policy = policy or MachinePolicy()
         self.env: Mapping[str, str] = os.environ if env is None else env
         if isinstance(user, UserLayer):
@@ -131,14 +139,16 @@ class Resolver:
     def load(cls, state_dir: Path | str | None = None, *, schema: Schema | None = None,
              env: Mapping[str, str] | None = None, policy_path: Path | None = None,
              pack_defaults: Mapping[str, Any] | None = None,
-             secrets: SecretStore | None = None) -> Resolver:
+             secrets: SecretStore | None = None, packs: Iterable[Any] = ()) -> Resolver:
         """The real layers: the policy file, the environment, the user's files in the config
-        dir (``files.config_dir``), and the secret store beside them."""
+        dir (``files.config_dir``), and the secret store beside them. ``packs``: the loaded
+        board packs, whose rows and defaults join (``Engine.settings_resolver`` passes them)."""
         files = SettingsFiles(state_dir if state_dir is not None else
                               _config_dir_from(env))
         return cls(schema, policy=load_machine_policy(policy_path), env=env,
                    user=files.read(), pack_defaults=pack_defaults, files=files,
-                   secrets=secrets if secrets is not None else SecretStore(files.root, env=env))
+                   secrets=secrets if secrets is not None else SecretStore(files.root, env=env),
+                   packs=packs)
 
     # --- resolving ---
 
@@ -344,10 +354,19 @@ class Resolver:
                 for name in inst.get(s.collection, []):
                     parts = list(s.parts)
                     parts[1] = name
-                    out.append(self.resolve(join_key(parts)))
+                    if "*" in parts[2:]:
+                        # A table of names inside the board (SET-PACK: hub.shares.<name>):
+                        # the names the files give, never the ``*`` template itself.
+                        out.extend(self.resolve(k) for k in self._named(parts))
+                    else:
+                        out.append(self.resolve(join_key(parts)))
             else:
                 out.append(self.resolve(s.key))
         return out
+
+    def _named(self, pattern: list[str]) -> list[str]:
+        """The user's keys that fill a pattern's ``*`` parts, sorted."""
+        return sorted(k for k in self.layer.values if matches(pattern, split_key(k)))
 
 
 def _lowest(spec: Setting, a: Any, b: Any, problems: list[str], path: str) -> Any:

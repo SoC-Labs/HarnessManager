@@ -349,12 +349,16 @@ def _has(doc: Any, parts: tuple[str, ...]) -> bool:
 
 def _set(doc: Any, parts: tuple[str, ...], value: Any) -> None:
     import tomlkit
+    from tomlkit.items import InlineTable
 
     node = doc
     for depth, p in enumerate(parts[:-1]):
         if p not in node:
             leaf_parent = depth == len(parts) - 2
-            node[p] = tomlkit.table(is_super_table=not leaf_parent)
+            # Inside an inline table (``hub = { ... }``) only an inline table may nest
+            # (SET-PACK: ``boards.<b>.hub.shares.<name>`` when the hub has no shares yet).
+            node[p] = tomlkit.inline_table() if isinstance(node, InlineTable) \
+                else tomlkit.table(is_super_table=not leaf_parent)
         nxt = node[p]
         if not _is_table(nxt):
             raise UsageError(f"{'.'.join(parts[:depth + 1])} is a value in the file, not a "
