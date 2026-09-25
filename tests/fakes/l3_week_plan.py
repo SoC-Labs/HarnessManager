@@ -201,6 +201,23 @@ class WeekPlanSim:
         self.update_settings = {"channel": "", "auto": ""}
         self.bad_versions: dict[str, dict[str, Any]] = {}
         self.staged: list[str] = []
+        # lane UPDATE-UI (OTA-U): what GET /update/app reports beyond the apply. ``app_available``
+        # is the checker's offer ("" keeps every other page quiet), ``app_policy`` the admin
+        # policy file (U6), ``app_dev_install`` a developer install's reason, ``app_last_check``
+        # / ``app_last_apply`` the records, ``health_version`` what /health says once an apply
+        # restarted onto another version (""; the mock's own), ``restart_hold`` holds the
+        # restart after "restarting" (tests clear it to see the overlay)
+        self.app_available = ""
+        self.app_policy: dict[str, Any] = {"path": "", "self_update": "stage", "channel": "",
+                                           "check_interval_s": 21600, "problems": []}
+        self.app_dev_install = ""
+        self.app_last_check: dict[str, Any] | None = None
+        self.app_last_apply: dict[str, Any] | None = None
+        self.health_version = ""
+        self.app_soft_busy: list[dict[str, Any]] = []    # more soft-busy rows (GDB, XVC), as
+        #                                                  the daemon's soft_busy_probes
+        self.restart_hold = threading.Event()
+        self.restart_hold.set()
         self.requests: Any = None            # t14_lease_requests.LeaseRequestSim (the mock sets it)
 
     # -- helpers -------------------------------------------------------------------------
@@ -866,8 +883,32 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
 
     @app.post(f"{API}/update/app", status_code=202)
     def update_app(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
+        if body.get("stage_only") is True:
+            return stage_job(str(body.get("version") or sim.app_available or sim.app_current))
         return app_job("update_app", str(body.get("version") or sim.app_current),
                        "update the app")
+
+    def stage_job(version: str) -> JSONResponse:
+        """OTA-D's click path (``stage_only``, OTA-C ``stage_app``): download and prepare it,
+        never switch; ``update.app.staged`` when it is ready (lane UPDATE-UI)."""
+        sim.require_update()
+        if sim.app_dev_install:
+            raise RefusedError(f"cannot stage an app update: {sim.app_dev_install}",
+                               hint="developer installs never self-update")
+
+        def work(progress: Any) -> dict[str, Any]:
+            for done in (0, 1, 2):
+                progress("download:wheel", done, 2)
+                time.sleep(0.05)
+            progress("venv", 0, 0)
+            if version not in sim.staged:
+                sim.staged.append(version)
+            notes = f"harness-manager {version} (mock notes)"
+            sim.publish("update.app.staged", "", {"version": version, "channel": "stable",
+                                                  "notes": notes})
+            return {"staged": True, "version": version, "channel": "stable", "notes": notes}
+
+        return accepted(jobs.start("", "update_app", work))
 
     @app.post(f"{API}/update/app/rollback", status_code=202)
     def update_app_rollback() -> JSONResponse:
@@ -876,10 +917,23 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
     # -- lane OTA-D: apply with a restart, status, settings (daemon/update_api.py) ------------
 
     def effective() -> dict[str, Any]:
-        auto = sim.update_settings["auto"] or "stage"
-        return {"auto": auto, "channel": sim.update_settings["channel"],
-                "check_interval_s": 21600, "why": "your settings turn self-update off"
-                if auto == "off" else ""}
+        # selfupdate.effective: the stricter of the admin policy and the user's setting
+        rank = {"off": 0, "notify": 1, "stage": 2}
+        pol = sim.app_policy
+        user = sim.update_settings["auto"] or "stage"
+        admin = pol.get("self_update") or "stage"
+        auto = admin if rank[admin] < rank[user] else user
+        why = ""
+        if sim.app_dev_install:
+            auto, why = "off", sim.app_dev_install
+        elif auto != user:
+            why = (f"the administrator's policy {pol['path']} turns self-update off "
+                   '(self_update = "off")' if admin == "off" else
+                   f"the administrator's policy {pol['path']} allows at most {admin!r}")
+        elif auto == "off":
+            why = "your settings turn self-update off"
+        return {"auto": auto, "channel": pol.get("channel") or sim.update_settings["channel"],
+                "check_interval_s": int(pol.get("check_interval_s") or 21600), "why": why}
 
     def apply_view() -> dict[str, Any]:
         plan = sim.apply_plan or {}
@@ -895,14 +949,12 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
                       "version": "0.0.1", "venv": "/home/u/.local/share/harness-manager/venv"},
                       "root": "/home/u/.local/share/harness-manager"},
                   versions={v: {"state": "staged"} for v in sim.staged},
-                  bad=sim.bad_versions, staged=list(sim.staged),
-                  available=sim.app_current if sim.app_current != sim.app_version else "",
-                  last_check=None, last_apply=None, policy={"path": "", "self_update": "stage",
-                                                            "channel": "",
-                                                            "check_interval_s": 21600,
-                                                            "problems": []},
-                  settings=dict(sim.update_settings), effective=effective(), dev_install="",
-                  apply=apply_view())
+                  bad=sim.bad_versions, staged=[v for v in sim.staged if v not in sim.bad_versions],
+                  available=sim.app_available,
+                  last_check=sim.app_last_check, last_apply=sim.app_last_apply,
+                  policy=dict(sim.app_policy),
+                  settings=dict(sim.update_settings), effective=effective(),
+                  dev_install=sim.app_dev_install, apply=apply_view())
 
     @app.post(f"{API}/update/app/apply", status_code=202)
     def app_apply(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
@@ -914,9 +966,15 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
             raise with_data(err, reason="APPLYING")
         if version in sim.bad_versions:
             raise RefusedError(f"harness-manager {version} is marked bad")
+        if sim.app_dev_install:
+            raise RefusedError(f"cannot apply an app update: {sim.app_dev_install}",
+                               hint="developer installs never self-update")
+        if sim.app_policy.get("self_update") == "off":
+            raise RefusedError("cannot apply an app update: the administrator's policy turns "
+                               "self-update off", hint="ask this machine's administrator")
         busy = [{"kind": "screen", "board_id": b, "name": n, "path": p["path"],
                  "clients": p["clients"], "detail": f"{p['clients']} terminal(s) on {p['path']}"}
-                for (b, n), p in sim.ptys.items() if p.get("clients")]
+                for (b, n), p in sim.ptys.items() if p.get("clients")] + list(sim.app_soft_busy)
         if busy and body.get("confirm") is not True:
             raise with_data(RefusedError(f"applying harness-manager {version} restarts the "
                                          "service", hint='confirm with {"confirm": true}'),
@@ -935,15 +993,23 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
             sim.apply_state = "restarting"
             sim.publish("update.applying", "", {**plan, "phase": "restarting", "eta_s": 30})
             time.sleep(0.2)
+            sim.restart_hold.wait(60)
+            done = {"id": plan["id"], "from": plan["from"], "to": version, "at": time.time(),
+                    "seconds": 0.2}
             if sim.apply_outcome == "applied":
                 sim.app_version = version
+                sim.health_version = version          # /health: the new daemon answers
+                sim.staged = [v for v in sim.staged if v != version]
+                sim.app_last_apply = {**done, "result": "applied", "phase": "", "reason": ""}
                 sim.publish("update.applied", "", {**plan, "seconds": 0.2})
             else:
-                sim.bad_versions[version] = {"reason": "the daemon exited while starting",
-                                             "phase": "start", "at": time.time()}
-                sim.publish("update.rolled_back", "", {**plan, "phase": "start",
-                                                       "reason": "the daemon exited while "
-                                                                 "starting"})
+                why = (f"/health did not report {version} within 30 s (the daemon exited while "
+                       "starting)")
+                sim.bad_versions[version] = {"reason": why, "phase": "health", "at": time.time()}
+                sim.app_last_apply = {**done, "result": "rolled-back", "phase": "health",
+                                      "reason": why}
+                sim.publish("update.rolled_back", "", {**plan, "phase": "health",
+                                                       "reason": why})
             sim.apply_state, sim.apply_plan = "idle", None
 
         sim.publish("update.applying", "", {**plan, "phase": "draining",
@@ -971,8 +1037,7 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
     def get_settings() -> JSONResponse:
         sim.require_update()
         return ok(settings=dict(sim.update_settings), effective=effective(),
-                  policy={"path": "", "self_update": "stage", "channel": "",
-                          "check_interval_s": 21600, "problems": []})
+                  policy=dict(sim.app_policy))
 
     @app.put(f"{API}/update/settings")
     def put_settings(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
@@ -980,6 +1045,11 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         unknown = sorted(set(body) - {"channel", "auto"})
         if unknown:
             raise UsageError(f"unknown settings: {', '.join(unknown)}")
+        pinned = sim.app_policy.get("channel") or ""
+        if body.get("channel") and pinned and body["channel"] != pinned:
+            raise RefusedError(f"the administrator's policy {sim.app_policy['path']} pins the "
+                               f"{pinned!r} channel; {body['channel']!r} is not allowed",
+                               hint=f"use {pinned}, or leave the channel empty")
         if "auto" in body and body["auto"] not in ("", "off", "notify", "stage"):
             raise UsageError(f"auto must be one of off, notify, stage, not {body['auto']!r}")
         for key in ("channel", "auto"):

@@ -25,6 +25,7 @@ import {
   sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
+import { AppUpdateBanners, AppUpdateLayer, SettingsButton, startSelfUpdate } from "./selfupdate.js";   // UPDATE-UI
 import { CheckChip, Chip, Icon, LinkLine, Reason, Seg, Spinner } from "./ui.js";
 
 export const SECTIONS = [
@@ -157,6 +158,7 @@ function Rail() {
       <div class="daemon-line" data-testid="daemon-line">
         <span class=${`dot ${daemon}`}></span><span class="grow"
           title=${S.daemon ? `${S.daemon.service || "harness-manager-daemon"} ${S.daemon.version || ""}, pid ${S.daemon.pid || "?"}` : ""}>${daemonText}</span>
+        <${SettingsButton} />
         <button type="button" class="btn ghost sm" data-action="help" onClick=${openHelp}
           title="The command-line help, tab by tab"><${Icon} name="book-open" /> Help</button>
       </div>
@@ -394,6 +396,7 @@ function Workspace() {
     }
     const noBoards = !S.order.length;
     return html`<main class="workspace">
+      <${AppUpdateBanners} />
       <${Banners} bid=${null} />
       <div class="section-body">
         <div class="empty-state"><div>
@@ -410,12 +413,13 @@ function Workspace() {
   }
   const row = S.boards[bid];
   if (!row.open) {
-    return html`<main class="workspace"><${Banners} bid=${null} /><${LeaseBanners} bid=${null} />
+    return html`<main class="workspace"><${AppUpdateBanners} /><${Banners} bid=${null} /><${LeaseBanners} bid=${null} />
       <${BoardPreview} key=${bid} bid=${bid} /></main>`;
   }
   const section = SECTIONS.find((s) => s.key === sectionOf(bid)) || SECTIONS[0];
   const Section = section.render;
   return html`<main class="workspace" data-board=${bid}>
+    <${AppUpdateBanners} />
     <${Banners} bid=${bid} />
     <${LeaseBanners} bid=${bid} />
     <${BoardHeader} bid=${bid} />
@@ -434,7 +438,7 @@ function App() {
   const named = (sel && sel.info && sel.info.candidate) || (row && row.candidate) || null;
   const title = row ? `${boardName(named, S.selected)} · Harness Manager` : "Harness Manager";
   if (document.title !== title) document.title = title;
-  return html`<div class="app"><${Rail} /><${Workspace} /><${HelpModal} /></div>`;
+  return html`<div class="app"><${Rail} /><${Workspace} /><${HelpModal} /><${AppUpdateLayer} /></div>`;
 }
 
 // A read-only snapshot for the browser tests' failure reports and for the devtools console.
@@ -449,3 +453,4 @@ initToken();
 render(html`<${App} />`, document.getElementById("app"));
 if (!hasToken()) S.connection = "auth";
 start();
+startSelfUpdate();

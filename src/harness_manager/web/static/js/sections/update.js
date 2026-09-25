@@ -1,13 +1,16 @@
-// Update: check the signed channel, read the plan, approve it (a re-key needs the typed
-// phrase), then follow the install job to its outcome, with the rollback at hand.
-// Routes: POST /update/check, /boards/{bid}/update/harness|rollback, /update/app (lane L4).
+// Update: the board's Harness versions (H9, sections/harness.js: every signed release with a
+// verdict), then T7's check of the channel's current release: read the plan, approve it (a
+// re-key needs the typed phrase), follow the install job to its outcome, with the rollback at
+// hand. Routes: POST /update/check, /boards/{bid}/update/harness|rollback (lane L4).
 
 import { panelState, runJob } from "../actions.js";
 import { clock } from "../format.js";
 import { html, useState } from "../lib.js";
-import { changed, S } from "../store.js";
+import { changed } from "../store.js";
 import { week } from "../week.js";
-import { ActionRow, ArmBox, Card, Chip, Reason, ResultBlock } from "../ui.js";
+import { ActionRow, ArmBox, Card, Chip, Icon, Reason, ResultBlock } from "../ui.js";
+import { offer, openSettings, U } from "../selfupdate.js";            // UPDATE-UI
+import { HarnessVersionsCard } from "./harness.js";                    // UPDATE-UI (H9)
 
 function checkLines(rep) {
   if (!rep || typeof rep !== "object") return [{ kind: "out", text: "checked" }];
@@ -159,35 +162,25 @@ function PlanCard({ bid, rep }) {
   <//>`;
 }
 
-// The app's own update is not about this board, but it runs from this page: its panel lives
-// with the board's, and it waits for the board's jobs like every other action. The switch
-// happens only while the daemon holds no board (T7's rail), so the page says so first.
-export function heldBoards() {
-  return Object.entries(S.boards).filter(([, row]) => row && row.open).map(([id, row]) => row.name || id);
-}
-
-function AppCard({ bid, rep }) {
-  const p = panelState(bid, "update_app");
-  const held = heldBoards();
-  const spec = {
-    key: "update_app", label: `Update the app to ${rep.app_update}`, busyLabel: "Updating...", budgetS: 600,
-    command: `update app ${rep.app_update}`,
-    run: (ctx) => runJob("updateApp", {}, { version: rep.app_update }, (d) => ctx.progress(d.phase, d.phase), "update_app"),
-    render: (r) => [{ kind: "ok", text: `harness-manager ${(r && r.version) || rep.app_update} ${r && r.result ? r.result : "switched"}` },
-      { kind: "hint", text: "restart harness-manager to run it" }],
-  };
-  const guard = () => (held.length
-    ? `close your boards first: the app switches only while this daemon holds no board (it holds ${held.join(", ")})`
-    : "");
-  const current = rep.app_current
-    ? `the channel's current release is ${rep.app_current}` : "the channel publishes no app release";
+// The app's own update is not about this board (docs/design/HM_SELF_UPDATE.md §9: "move it
+// out of the per-board Update page"). It lives in Settings and the banner at the top of every
+// page (UPDATE-UI, selfupdate.js); this card only points there.
+function AppCard() {
+  const st = U.status;
+  const o = offer();
+  const text = U.unavailable ? `App updates are unavailable here: ${U.unavailable}.`
+    : !st ? "Reading the app's update state..."
+    : st.dev_install ? `You run Harness Manager ${st.running}, a developer install: updates are off (${st.dev_install}).`
+    : o && o.kind === "staged" ? `You run Harness Manager ${st.running}; ${o.version} is ready: restart to update (the banner at the top).`
+    : o ? `You run Harness Manager ${st.running}; ${o.version} is available (the banner at the top).`
+    : `You run Harness Manager ${st.running}; no newer version is offered.`;
   return html`<${Card} title="The app" icon="download" testid="update-app"
-      sub=${`You run harness-manager ${rep.app_running || "?"}; ${current}.`}>
-    ${rep.app_update ? html`<div class="actions">
-      <${ActionRow} bid=${bid} panel="update_app" spec=${spec} icon="download" gate=${{ guard }} />
-      <${ResultBlock} lines=${p.lines} panel=${p} />
-    </div>` : rep.app_current ? html`<${Reason} level="ok" text="The app is current." />`
-      : html`<${Reason} icon="circle-slash" text="Nothing to install: the channel has no app release." />`}
+      sub="Harness Manager's own update is not about this board: it lives in Settings, and a banner at the top of every page offers it.">
+    <div class="row">
+      <span data-testid="update-app-text">${text}</span>
+      <button type="button" class="btn sm" data-action="open-settings" onClick=${openSettings}>
+        <${Icon} name="sliders-horizontal" /> Settings</button>
+    </div>
   <//>`;
 }
 
@@ -222,7 +215,8 @@ export function UpdateSection({ bid }) {
   const rep = w.update;
   const signer = rep ? String(rep.signed_by || "?") : "";
   return html`<div class="stack">
-    <${Card} title="Updates" icon="refresh-cw" testid="update-card"
+    <${HarnessVersionsCard} bid=${bid} />
+    <${Card} title="The channel's current release" icon="refresh-cw" testid="update-card"
         sub="Releases come from a signed channel (minisign, pinned keys). Checking reads only: nothing is installed until you approve a plan.">
       <div class="actions">
         <${ActionRow} bid=${bid} panel="update_check" spec=${check} variant="primary" icon="scan-search" gate=${{}} />
@@ -235,7 +229,7 @@ export function UpdateSection({ bid }) {
       </div>
     <//>
     ${rep && rep.plan ? html`<${PlanCard} bid=${bid} rep=${rep} />` : null}
-    ${rep ? html`<${AppCard} bid=${bid} rep=${rep} />` : null}
+    <${AppCard} />
   </div>`;
 }
 

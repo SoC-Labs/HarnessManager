@@ -22,6 +22,7 @@ import {
 import { leaseSpecs } from "../hub.js";
 import { openRequestForm, requestActive } from "../lease.js";
 import { PanelCard, PanelTileRow } from "./panel.js";          // P3 PANEL-UI
+import { loadXvc, viewState, xvc } from "./xvc.js";             // UPDATE-UI: the tile's XVC line
 
 // --- needs attention ----------------------------------------------------------------------
 
@@ -196,6 +197,34 @@ function ConsolesTile({ bid }) {
   <//>`;
 }
 
+// The fabric-debug (XVC) session in one line (docs/design/XVC_DEBUG.md §4.1: "The Overview's
+// Debug tile gains one line"): its state, and the Vivado URL once a session is open. The
+// Debug section's XVC card has the rest.
+const XVC_LEVEL = { ready: "ok", attached: "accent", held: "held", swapping: "warn", failed: "err",
+  starting: "unk", down: "" };
+
+function XvcLine({ bid }) {
+  const x = xvc(bid);
+  useEffect(() => { if (!x.st && !x.error) loadXvc(bid); }, [bid]);
+  const state = viewState(bid);
+  const st = x.st || {};
+  const att = st.attached;
+  const go = html`<button type="button" class="btn ghost sm link-btn" data-action="tile-xvc-open"
+    onClick=${() => setSection(bid, "debug")}>Debug section</button>`;
+  let body;
+  if (state === "reading") body = html`<span class="muted">reading...</span>`;
+  else if (x.error) body = html`<span class="muted" title=${x.error.message}>unknown: ${x.error.errName}</span>`;
+  else if (st.reason) body = html`<span class="muted small" data-testid="tile-xvc-reason">not on this board: ${st.reason}</span>`;
+  else if (state === "down") body = html`<span class="muted">closed</span> ${go}`;
+  else {
+    body = html`<${Chip} level=${XVC_LEVEL[state] ?? "unk"} testid="tile-xvc-state" title=${st.detail || ""}>${state}<//>
+      ${st.open && st.url ? html` <code class="small-code">${st.url}</code>` : null}
+      ${att ? html` <span class="secondary small">${att.pid ? `pid ${att.pid}` : att.peer || "a client"} attached</span>` : null}
+      ${state === "held" ? html` <span class="secondary small">another client holds the slot</span>` : null}`;
+  }
+  return html`<span class="k">XVC</span><span class="v" data-testid="tile-xvc" data-state=${st.reason ? "unsupported" : state}>${body}</span>`;
+}
+
 function DebugTile({ bid }) {
   const b = boardState(bid);
   const p = panelState(bid, "debug");
@@ -212,6 +241,7 @@ function DebugTile({ bid }) {
       <span class="k">gdb</span>
       <span class="v">${live && st.gdb_port ? html`<span class="copy-row"><code>127.0.0.1:${st.gdb_port}</code>
         <${CopyButton} text=${`127.0.0.1:${st.gdb_port}`} /></span>` : html`<span class="muted">start a session to get a port</span>`}</span>
+      <${XvcLine} bid=${bid} />
     </div>
     <div class="mt-8">${live
       ? html`<${ActionRow} bid=${bid} panel="debug" spec=${stop} icon="square" compact=${true} gate=${{}} />`

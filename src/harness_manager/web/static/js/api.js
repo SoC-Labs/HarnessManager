@@ -88,6 +88,23 @@ export const ENDPOINTS = Object.freeze({
   xvcTcl: ["GET", "/boards/{bid}/xvc/tcl?byo={byo}"],
   xvcLtx: ["GET", "/boards/{bid}/xvc/ltx?which={which}"],
   // --- end XVC-UI ---
+  // --- UPDATE-UI: the app's own update (OTA-U; docs/API.md "App self-update", update_api.py)
+  // and a board's harness versions (H9; docs/API.md "Harness versions", harness_api.py).
+  // The queries (?board_id=&channel=, ?limit=) are the call's query argument.
+  appUpdate: ["GET", "/update/app"],
+  appApply: ["POST", "/update/app/apply"],
+  appCancel: ["POST", "/update/app/cancel"],
+  updateSettings: ["GET", "/update/settings"],
+  updateSettingsSet: ["PUT", "/update/settings"],
+  harnessCatalog: ["GET", "/harness/catalog"],
+  harnessRefresh: ["POST", "/harness/catalog/refresh"],
+  harnessRelease: ["GET", "/harness/releases/{version}"],
+  harnessInstall: ["POST", "/boards/{bid}/harness/install"],
+  harnessPin: ["PUT", "/boards/{bid}/harness/pin"],
+  harnessUnpin: ["DELETE", "/boards/{bid}/harness/pin"],
+  harnessHistory: ["GET", "/boards/{bid}/harness/history"],
+  harnessRollback: ["POST", "/boards/{bid}/harness/rollback"],
+  // --- end UPDATE-UI ---
 });
 
 export const ADDITIVE = Object.freeze([]);
@@ -99,6 +116,7 @@ export const EVENT_TOPICS = [
   "controller.*", "storage.*", "update.*", "power.*", "lease.*", "tunnel.*", "job.*", "events.*",
   "panel.*",                           // P3 PANEL-UI: panel.state, panel.tap, panel.locate
   "xvc.*",                             // XVC-UI: xvc.state, the Debug section's XVC card
+  "harness.*",                         // UPDATE-UI: harness.catalog|installing|installed|pinned
 ];
 
 const TOKEN_KEY = "harness_manager.token";

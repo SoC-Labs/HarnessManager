@@ -117,6 +117,10 @@ const JOB_LABELS = {
   power_cycle: "power cycle", update_check: "update check", update_harness: "harness update",
   update_rollback: "harness rollback", update_app: "app update",
   update_app_rollback: "app rollback",
+  // UPDATE-UI: the app's background stage, and the harness versions card's jobs
+  update_stage: "app download", harness_refresh: "harness catalogue refresh",
+  harness_install: "harness install", harness_rollback: "harness rollback",
+  harness_fetch: "harness download",
 };
 
 export function jobLabel(kind) {
@@ -548,9 +552,12 @@ function onDeployEvent(ev) {
 const eventHooks = [];
 const openHooks = [];
 const jobEndHooks = [];
+const reconnectHooks = [];
 export function onBoardEvent(fn) { eventHooks.push(fn); }
 export function onBoardOpened(fn) { openHooks.push(fn); }
 export function onJobEnded(fn) { jobEndHooks.push(fn); }
+// UPDATE-UI: the event socket came back (the daemon may have restarted onto a new version).
+export function onEventsReconnected(fn) { reconnectHooks.push(fn); }
 
 export function handleEvent(ev) {
   const bid = ev.board_id || "";
@@ -629,6 +636,9 @@ export async function start() {
       // Events were missed while the socket was down: read the state again.
       loadBoards();
       for (const [bid, row] of Object.entries(S.boards)) if (row.open) scheduleRefresh(bid, 50);
+      for (const fn of reconnectHooks) {
+        try { fn(); } catch (e) { /* a hook never breaks the reconnect */ }
+      }
     }
     changed();
   });

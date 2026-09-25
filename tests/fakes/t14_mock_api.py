@@ -418,7 +418,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     def health() -> dict[str, Any]:
         import os
 
-        return _ok(version=VERSION, service="harness-manager-daemon (T14 mock)", pid=os.getpid())
+        # UPDATE-UI: once a simulated apply restarted onto another version, /health says so
+        return _ok(version=sim.health_version or VERSION,
+                   service="harness-manager-daemon (T14 mock)", pid=os.getpid())
 
     @app.get(f"{API}/packs")
     def packs() -> dict[str, Any]:

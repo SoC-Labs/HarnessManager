@@ -11,8 +11,9 @@ the demo board "runs". Nothing is downloaded, written to a board or signed.
 The catalogue: ``stable`` 1.0.0 @0x3f1a560f (fw cb31b0f2: what the demo boards run),
 1.1.0 and 1.1.1 @0x72bb0a36; ``beta`` adds 2.0.0 (Linux). Knobs: the week-plan sim's
 ``behind_hub(bid, lease=...)`` (an install needs the lease), ``SimUpdate.outcome``
-(``written-not-running`` fails the job). State (pins, history) lives in a private temporary
-directory, removed with the app.
+(``written-not-running`` fails the job), ``SimUpdate.withdrawn`` (releases the publisher
+withdrew: incompatible). State (pins, history) lives in a private temporary directory,
+removed with the app.
 """
 
 from __future__ import annotations
@@ -95,14 +96,14 @@ RELEASES = {
 }
 
 
-def _doc(channel: str, serial: int) -> dict[str, Any]:
+def _doc(channel: str, serial: int, withdrawn: frozenset[str] = frozenset()) -> dict[str, Any]:
     versions = ["1.1.1", "1.1.0", "1.0.0"] if channel == "stable" else \
         ["2.0.0", "1.1.1", "1.1.0", "1.0.0"]
     current = versions[0]
     rels = []
     for v in versions:
         r = dict(RELEASES[v])
-        r["status"] = "current" if v == current else "superseded"
+        r["status"] = "withdrawn" if v in withdrawn else "current" if v == current else "superseded"
         rels.append(r)
     for i, r in enumerate(rels[:-1]):
         r["rekey"] = r["identity"]["static_id"] != rels[i + 1]["identity"]["static_id"]
@@ -151,6 +152,7 @@ class SimUpdate:
         self.serial = 7
         self.outcome = "installed"
         self.running: dict[str, str] = {}   # board -> the release it runs after an install
+        self.withdrawn: set[str] = set()    # UPDATE-UI: releases the publisher withdrew
 
     # -- channel --
 
@@ -159,7 +161,8 @@ class SimUpdate:
         name = channel or "stable"
         if name not in ("stable", "beta"):
             raise AbsentError(f"no {name!r} channel in the mock catalogue")
-        return VerifiedChannel(channel=parse_channel(_doc(name, self.serial)),
+        return VerifiedChannel(channel=parse_channel(_doc(name, self.serial,
+                                                          frozenset(self.withdrawn))),
                                url=f"https://example.invalid/channel/{name}/channel.json",
                                sha256="0" * 64, key_id="4E3C9A1F0B7D2E68",
                                key_role="harness-release", trusted_comment="mock",
