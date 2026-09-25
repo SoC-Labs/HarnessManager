@@ -107,6 +107,14 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
                         "FW_SHA", "DOORS", "BACKUP"),
     "harness rollback": ("BOARD_ID", "VERSION", "RESULT", "HOW", "DETAIL"),
     "harness mirror": ("CHANNEL", "ROOT", "CHANNEL_DIR", "BLOBS", "SKIPPED"),
+    # lane SET-API (cli/cmd_config.py): the settings. A secret's VALUE is "set"/"not set".
+    "config list": ("KEY", "VALUE", "SOURCE", "WHERE", "LOCKED", "SHADOWED", "APPLY",
+                    "SECTION", "TYPE"),
+    "config get": ("KEY", "VALUE", "SOURCE", "WHERE", "LOCKED", "SHADOWED", "APPLY", "VIEW"),
+    "config set|unset": ("KEY", "VALUE", "SOURCE", "WHERE", "SHADOWED", "APPLY"),
+    "config set-secret|unset-secret": ("KEY", "SET", "BACKEND", "WHERE", "REACHABLE", "WHY"),
+    "config path": ("WHAT", "PATH", "EXISTS", "VIEW"),
+    "config test": ("SECTION", "NAME", "STEP", "OK", "DETAIL", "HINT"),
 }
 
 

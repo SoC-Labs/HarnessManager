@@ -348,6 +348,11 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_hubcfg
     cmd_hubcfg.register(sub)
     verbs["hub"] = sub.choices["hub"]
+
+    # -- config (lane SET-API: the settings; through the service when it runs) -------------
+    from . import cmd_config
+    cmd_config.register(sub)
+    verbs["config"] = sub.choices["config"]
     return p
 
 
