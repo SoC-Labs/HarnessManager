@@ -33,8 +33,7 @@ def register(app: FastAPI, state: Any, accepted: Any) -> SettingsContext:
     root = Path(tempfile.mkdtemp(prefix="hm-mock-settings-"))
     weakref.finalize(app, shutil.rmtree, str(root), True)
     sctx = SettingsContext(state_dir=root / "state", env={"HARNESS_MANAGER_KEYRING": "off"},
-                           policy_path=root / "policy.toml", keyrings=[],
-                           packs=getattr(state.engine, "packs", None))
+                           policy_path=root / "policy.toml", keyrings=[], engine=state.engine)
     daemon = SimpleNamespace(
         engine=state.engine, bus=state.jobs.bus, state_dir=root / "state", settings=sctx,
         jobs=SimpleNamespace(submit=lambda kind, board_id, fn: state.jobs.start(board_id, kind,

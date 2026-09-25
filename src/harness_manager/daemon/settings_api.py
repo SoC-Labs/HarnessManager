@@ -18,8 +18,9 @@ two give the same JSON.
 that wrote something (``PUT /update/settings`` sends it too). It never carries a value.
 
 The service keeps one ``SettingsContext`` (``d.settings``): its own state dir, its own
-environment (the one the GUI's values come from) and the OS's policy file. A test points
-``d.settings.policy_path`` (or ``env``) somewhere else.
+environment (the one the GUI's values come from), the OS's policy file, and its engine's
+packs (``Engine.settings_resolver``; ``settings.packs.for_engine`` for the demo engine). A
+test points ``d.settings.policy_path`` (or ``env``) somewhere else.
 """
 
 from __future__ import annotations
@@ -51,9 +52,7 @@ def settings_context(d: Any) -> ops.SettingsContext:
     existing = getattr(d, "settings", None)
     if isinstance(existing, ops.SettingsContext):
         return existing
-    engine = d.engine
-    packs = getattr(engine, "packs", None)
-    sctx = ops.SettingsContext(state_dir=d.state_dir, packs=packs if callable(packs) else None)
+    sctx = ops.SettingsContext(state_dir=d.state_dir, engine=d.engine)
     d.settings = sctx
     return sctx
 

@@ -304,6 +304,8 @@ def test_the_hub_tester_is_found_by_convention_when_set_hubs_lands(monkeypatch):
 
 
 class _Pack:
+    name = "fake"
+
     def __init__(self, rows):
         self._rows = rows
 
@@ -311,23 +313,52 @@ class _Pack:
         return self._rows
 
 
-def test_a_packs_rows_join_the_schema(tmp_path):
+class _Engine:
+    """An engine with packs() and no settings_resolver (as DemoEngine): for_engine's path."""
+
+    def __init__(self, *packs):
+        self._packs = {p.name: p for p in packs}
+
+    def packs(self):
+        return dict(self._packs)
+
+
+def test_a_packs_rows_and_defaults_join_the_schema(tmp_path):
     row = Setting("fake.pace_ms", "int", 20, "Consoles", "Console pacing", pack="fake")
     ctx = ops.SettingsContext(state_dir=tmp_path, env={}, policy_path=tmp_path / "p.toml",
-                              keyrings=[], packs=lambda: {"fake": _Pack([row])})
+                              keyrings=[], engine=_Engine(_Pack([row])))
     keys = {r["key"] for r in ops.schema(ctx)["rows"]}
     assert "fake.pace_ms" in keys
-    assert ops.listing(ctx, key="fake.pace_ms")["rows"][0]["value"] == 20
+    got = ops.listing(ctx, key="fake.pace_ms")["rows"][0]
+    assert (got["value"], got["source"], got["where"]) == (20, "pack", "the fake pack")
 
 
-def test_negative_twin_a_pack_row_off_its_prefix_is_a_problem_not_a_failure(tmp_path):
+def test_negative_twin_a_pack_row_off_its_prefix_is_left_out_and_logged(tmp_path, caplog):
     row = Setting("tools.sneaky", "int", 1, "Tools", "x", pack="fake")
     ctx = ops.SettingsContext(state_dir=tmp_path, env={}, policy_path=tmp_path / "p.toml",
-                              keyrings=[], packs=lambda: {"fake": _Pack([row])})
+                              keyrings=[], engine=_Engine(_Pack([row])))
     got = ops.schema(ctx)
     assert "tools.sneaky" not in {r["key"] for r in got["rows"]}
-    assert any("fake pack's settings are not used" in p for p in got["problems"])
-    assert any("fake pack" in p for p in ops.listing(ctx)["problems"])
+    assert "tools.openocd" in {r["key"] for r in got["rows"]}          # the core still works
+    assert "'fake' declares settings the schema refuses" in caplog.text
+
+
+def test_the_real_engine_brings_the_mps3_packs_rows(tmp_path):
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
+
+    eng = Engine(EngineConfig(state_dir=tmp_path))
+    ctx = ops.SettingsContext(state_dir=tmp_path, env={}, policy_path=tmp_path / "p.toml",
+                              keyrings=[], engine=eng)
+    assert ctx._own_engine()                           # its own resolver, over its own dir
+    row = ops.listing(ctx, key="mps3.console.pace_ms")["rows"][0]
+    assert row["source"] == "pack" and row["value"] == 20
+    ops.set_values(ctx, {"mps3.console.pace_ms": "30"})
+    assert ops.listing(ctx, key="mps3.console.pace_ms")["rows"][0]["source"] == "user"
+    other = ops.SettingsContext(state_dir=tmp_path / "elsewhere", env={},
+                                policy_path=tmp_path / "p.toml", keyrings=[], engine=eng)
+    assert not other._own_engine()                     # the twin: another dir, its own resolver
+    assert ops.listing(other, key="mps3.console.pace_ms")["rows"][0]["source"] == "pack"
 
 
 def test_an_error_is_a_harness_error_with_its_exit_code(world):

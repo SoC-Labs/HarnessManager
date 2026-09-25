@@ -201,16 +201,15 @@ class _Remote:
 
 def _shell_context(ctx: Ctx) -> ops.SettingsContext:
     """This process's view: its own environment, the state dir the engine uses, and the
-    installed board packs (for their rows)."""
+    installed board packs' rows (a service's engine is not this process's: a local one,
+    which loads the packs and nothing else, stands in for it)."""
     engine = ctx.engine
-    state_dir = getattr(engine, "state_dir", None)
+    if not callable(getattr(engine, "settings_resolver", None)):
+        from harness_manager.core.services import EngineConfig
+        from harness_manager.engine import Engine
 
-    def packs() -> dict[str, Any]:
-        from harness_manager.core.registry import load_packs
-
-        return load_packs()
-
-    return ops.SettingsContext(state_dir=state_dir, packs=packs)
+        engine = Engine(EngineConfig(state_dir=getattr(engine, "state_dir", None)))
+    return ops.SettingsContext(state_dir=getattr(engine, "state_dir", None), engine=engine)
 
 
 def _backend(ctx: Ctx) -> _Local | _Remote:
@@ -261,7 +260,7 @@ def source_text(r: dict[str, Any], env_owner: str = "") -> str:
             "pack": f"from {where}",
             "default": "default"}.get(src, src)
     if r.get("shadowed"):
-        text += f"; it hides your own value (unset {r['shadowed']} to use it)"
+        text += f"; it hides your own value: unset {r['shadowed']} to use it"
     if r.get("capped"):
         text += f"; lowered: {r['capped']}"
     return text
@@ -351,8 +350,8 @@ def _get(ctx: Ctx) -> int:
     if service is None:
         human.append("  (no service is running: this is this shell's view)")
     elif differs:
-        human.append(f"  this shell would use: {value_text(shell)} "
-                     f"({source_text(shell, 'this shell')})")
+        where = source_text(shell, "this shell's")
+        human.append(f"  this shell would use: {value_text(shell)}, {where}")
     else:
         human.append("  this shell sees the same")
     views = [("service", service)] if service is not None else []

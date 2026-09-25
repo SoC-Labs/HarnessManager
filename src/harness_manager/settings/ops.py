@@ -22,7 +22,7 @@ A secret's value reaches ``SecretStore.set`` and nothing else here.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from harness_manager.core.errors import UsageError
 
 from . import testers
 from .files import LEGACY_UPDATES, SCHEMA_VERSION, SettingsFiles, config_dir
+from .packs import for_engine, pack_defaults
 from .resolve import Resolved, Resolver, core_schema
 from .schema import Schema, canonical_key, split_key
 from .secrets import SecretStore
@@ -44,7 +45,12 @@ APPLY_ORDER = ("live", "reopen", "restart")
 class SettingsContext:
     """Where the settings are, for one process: the service keeps one (``d.settings``), and
     each CLI call makes one. Every read builds a fresh ``Resolver`` over the files, so a
-    hand edit is seen at once; the secret store (its keyring probe) and the schema are kept.
+    hand edit is seen at once; the secret store (its keyring probe) is kept.
+
+    ``engine`` brings the board packs' rows and their defaults (the ``pack`` layer, lane
+    SET-PACK): an ``Engine`` through ``settings_schema()``/``settings_resolver()``, any other
+    engine with ``packs()`` (``DemoEngine``) through ``settings.packs.for_engine``; none,
+    the core's rows only. A pack whose rows are refused is logged and left out.
 
     ``env``/``policy_path``/``keyrings`` default to the process's own: ``os.environ``, the
     OS's policy file, the OS keyrings (``$HARNESS_MANAGER_KEYRING=off``: none).
@@ -54,10 +60,9 @@ class SettingsContext:
     env: Mapping[str, str] | None = None
     policy_path: Path | None = None
     keyrings: Sequence[Any] | None = None
-    packs: Callable[[], Mapping[str, Any]] | None = None
+    engine: Any = None
     _store: SecretStore | None = field(default=None, init=False, repr=False)
-    _schema: Schema | None = field(default=None, init=False, repr=False)
-    _schema_problems: list[str] = field(default_factory=list, init=False, repr=False)
+    _layers: tuple[Schema, dict[str, Any]] | None = field(default=None, init=False, repr=False)
 
     def environ(self) -> Mapping[str, str]:
         return os.environ if self.env is None else self.env
@@ -79,35 +84,35 @@ class SettingsContext:
             self._store = SecretStore(root, keyrings=self.keyrings, env=self.environ())
         return self._store
 
+    def _own_engine(self) -> bool:
+        """The engine's own resolver serves: it has one, and its config dir is ours."""
+        engine = self.engine
+        return callable(getattr(engine, "settings_resolver", None)) and \
+            Path(getattr(engine, "state_dir", "")) == self.config_dir
+
+    def layers(self) -> tuple[Schema, dict[str, Any]]:
+        """``(schema, pack layer)``: the core's rows plus every loaded pack's."""
+        if self._layers is None:
+            engine = self.engine
+            if callable(getattr(engine, "settings_schema", None)):
+                schema = engine.settings_schema()
+                self._layers = (schema, pack_defaults(r for r in schema.rows if r.pack))
+            elif callable(getattr(engine, "packs", None)):
+                self._layers = for_engine(engine)
+            else:
+                self._layers = (core_schema(), {})
+        return self._layers
+
     def schema(self) -> Schema:
-        """The core's rows, plus each board pack's (``BoardPack.settings()``, lane SET-PACK,
-        when a pack has it). A pack whose rows are refused is a problem, not a failure."""
-        if self._schema is not None:
-            return self._schema
-        schema = core_schema()
-        problems: list[str] = []
-        try:
-            packs = dict(self.packs()) if self.packs is not None else {}
-        except Exception as exc:  # noqa: BLE001 - the core rows still work without the packs
-            packs = {}
-            problems.append(f"the board packs did not load ({type(exc).__name__}: {exc}); "
-                            "their settings are not shown")
-        for name, pack in sorted(packs.items()):
-            declare = getattr(pack, "settings", None)
-            if not callable(declare):
-                continue
-            try:
-                schema.extend(list(declare() or ()), pack=name)
-            except Exception as exc:  # noqa: BLE001 - one pack's bad row must not hide the rest
-                problems.append(f"the {name} pack's settings are not used: {exc}")
-        self._schema, self._schema_problems = schema, problems
-        return schema
+        return self.layers()[0]
 
     def resolver(self) -> Resolver:
-        r = Resolver.load(self.config_dir, schema=self.schema(), env=self.environ(),
-                          policy_path=self.policy_file(), secrets=self.store())
-        r.problems.extend(self._schema_problems)
-        return r
+        kw: dict[str, Any] = {"env": self.environ(), "policy_path": self.policy_file(),
+                              "secrets": self.store()}
+        if self._own_engine():
+            return self.engine.settings_resolver(**kw)
+        schema, layer = self.layers()
+        return Resolver.load(self.config_dir, schema=schema, pack_defaults=layer, **kw)
 
 
 # --- helpers ------------------------------------------------------------------------------------
@@ -202,11 +207,10 @@ def listing(ctx: SettingsContext, *, section: str | None = None, key: str | None
 
 def schema(ctx: SettingsContext) -> dict[str, Any]:
     """``GET /settings/schema``: every declared row, without a value (dev rows too: ``ui``
-    says which the menu shows)."""
+    says which the menu shows), each loaded pack's too."""
     s = ctx.schema()
     return {"schema_version": SCHEMA_VERSION, "sections": sections(s),
-            "rows": [{**x.view(), "section_id": section_id(x.section)} for x in s.rows],
-            "problems": list(ctx._schema_problems)}
+            "rows": [{**x.view(), "section_id": section_id(x.section)} for x in s.rows]}
 
 
 # --- changing -----------------------------------------------------------------------------------
