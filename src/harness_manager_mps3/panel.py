@@ -23,8 +23,9 @@ the state when the harness reports ``stats``. An absent key is unknown, never "o
 whatever reason, sends it first on the same connection. When nothing else talks to the board
 the presence service sends it itself (``hello``). Arming is the only way a ride happens, and
 only a board that reports ``presence`` is ever armed, so every other board's connections are
-untouched. The ride is installed by wrapping this session's ``shell.call_raw`` (CCR PANEL-3
-asks for an explicit ``Mps3Shell`` preamble hook instead).
+untouched. The ride is the shell's explicit hook (CCR PANEL-3): ``make_panel_adapter`` sets
+``Mps3Shell.preamble`` to ``ride``, which ``call_raw`` runs on each connection before its
+own requests; with nothing armed it sends nothing.
 
 **One codec, until R1-R3 land in pyverify.** ``hello``, ``panel`` and ``locate`` have no
 ``ShellClient`` method yet, so they go through pyverify's own request framing
@@ -409,24 +410,6 @@ class Mps3Panel:
             if self._armed is None:
                 self._armed = armed
 
-    def install_ride(self, shell: Any) -> None:
-        """Wrap ``shell.call_raw`` so an armed hello rides the next connection (CCR PANEL-3)."""
-        original = shell.call_raw
-
-        def call_raw(fn: Callable[[Any, Any], Any]) -> Any:
-            with self._mu:
-                armed = self._armed is not None
-            if not armed:
-                return original(fn)
-
-            def first_hello(client: Any, tap: Any) -> Any:
-                self.ride(client, tap)
-                return fn(client, tap)
-
-            return original(first_hello)
-
-        shell.call_raw = call_raw
-
     # -- Identify ---------------------------------------------------------------------------
 
     def locate(self, seconds: int, who: str) -> float:
@@ -448,13 +431,18 @@ class Mps3Panel:
 
 
 def make_panel_adapter(session: Any) -> Mps3Panel | None:
-    """The pack hook: a panel adapter for a session with an Ethernet shell, else None."""
+    """The pack hook: a panel adapter for a session with an Ethernet shell, else None.
+
+    It takes the shell's ``preamble`` hook (CCR PANEL-3) for the ride: an armed hello goes
+    first on the next connection. A shell without the hook gets no ride; the presence
+    service then sends every hello on its own connection.
+    """
     shell = getattr(session, "shell", None)
     if shell is None:
         return None
     panel = Mps3Panel(session)
-    if callable(getattr(shell, "call_raw", None)):
-        panel.install_ride(shell)
+    if hasattr(shell, "preamble"):
+        shell.preamble = panel.ride
     return panel
 
 

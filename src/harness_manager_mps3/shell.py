@@ -341,6 +341,10 @@ class Diagnosis:
 # --- the shell -----------------------------------------------------------------------
 
 
+#: ``Mps3Shell.preamble``: run on a connection before the caller's own requests.
+Preamble = Callable[[ShellClient, _TapTransport], None]
+
+
 class Mps3Shell:
     def __init__(self, host: str, port: int, *, timeout: float = 3.0,
                  probes: ShellProbes | None = None) -> None:
@@ -348,6 +352,11 @@ class Mps3Shell:
         self.port = port
         self.timeout = timeout
         self.probes = probes or DEFAULT_PROBES
+        #: CCR PANEL-3: when set, ``call_raw`` runs ``preamble(client, tap)`` on every
+        #: connection it opens, before ``fn``, inside the same error mapping. The panel
+        #: adapter sets it to send a pending ``hello`` first (``Mps3Panel.ride``); it sends
+        #: nothing unless a hello is waiting. None: connections carry only ``fn``'s requests.
+        self.preamble: Preamble | None = None
 
     # -- plumbing ---------------------------------------------------------------
 
@@ -373,11 +382,15 @@ class Mps3Shell:
 
         ``tap.last`` is the reply line pyverify parsed last, as a dict: read keys the
         installed pyverify does not model from it, never send a hand-rolled request.
+        ``self.preamble``, when set, runs first on the same connection (CCR PANEL-3).
         """
         where = f"{self.host}:{self.port}"
+        preamble = self.preamble
         tap = self._connect()
         try:
             with ShellClient(self.host, self.port, timeout=self.timeout, transport=tap) as client:
+                if preamble is not None:
+                    preamble(client, tap)
                 return fn(client, tap)
         except _ShellBusy as exc:
             holder = str(exc.reply.get("holder") or exc.reply.get("peer") or "")
