@@ -56,7 +56,8 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `GET /boards/{bid}/telemetry` | `engine.telemetry.readings(session)` | `{readings: [Reading]}` |
 | `GET /boards/{bid}/overlays` | `deploy.compatible(session)` | `{loadable: [OverlayRef], blocked: {name: reason}}` |
 | `POST /boards/{bid}/preflight` `{overlay}` | `deploy.preflight` + `core.pack.preflight_refusal` | `{items: [PreflightItem], refusal?: error}` |
-| `POST /boards/{bid}/deploy` `{overlay}` | `deploy.deploy` | 202 job |
+| `GET /boards/{bid}/card` | `deploy.card_status(session)` | `{card: CardStatus}` |
+| `POST /boards/{bid}/deploy` `{overlay, keep_on_card?}` | `deploy.deploy` | 202 job |
 | `POST /boards/{bid}/restore` | `deploy.restore_baseline` | 202 job |
 | `POST /boards/{bid}/reset` `{target}` | `session.resets.reset` | `{ok}` |
 | `GET /boards/{bid}/clocks` · `POST .../clocks` `{name, mhz}` | `session.clocks` | `{readings}` / `{reading}` |
@@ -85,6 +86,10 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 - While a job runs on a board, every request that touches the board returns 409 HELD naming the job.
 - `POST /deploy` runs the preflight synchronously. A mismatch returns 409 (code 14 or 15) with `error.data.{overlay, preflight}`, and no job is created. `POST /preflight` returns 200 and includes `refusal` only when it refuses.
 - `overlay` in a request body may be a name, an `rm_id`, or the OverlayRef object itself.
+- **Keep on the card** (L1, decided 2026-09-25: off by default). `POST /deploy` with `keep_on_card: true` also writes the design to the board's user microSD after the verified swap, so the board boots into it at its next power-on. Without it (or `false`) the card is never written. A non-boolean is 400.
+  - `GET /boards/{bid}/card` reads the card and writes nothing: `CardStatus` is `{store, present, state, text, reason}`. `store`: the harness keeps designs on a card (the MPS3 harness reports `usd`). `present`: a card is in the slot. `state`/`text`: the store's own words (`empty`, `valid`, `foreign`...; the front panel's card row). `reason`: why a deploy cannot keep its design on the card now, `""` when it can. The web UI shows its "Keep on the card" box only when `store` and `present`.
+  - `keep_on_card: true` checks the card after the preflight and before any job: a `reason` refuses with 422 UNAVAILABLE (code 12, capability `keep_on_card`), `error.data.{overlay, card}`, and no job. The two plain reasons: `this harness has no microSD store` and `no card in the USER microSD slot`.
+  - The job's result (a `DeployResult`) then carries `card: {kept, slot, why}`: `kept` true with the `slot` (`A`/`B`), or false with `why` (the card was pulled, a card write failed...). A failed card write never fails the deploy: the swap stands, and the card keeps the design it had. `card` is `null` when the deploy was not asked to keep. `deploy.done` carries the same `card`; `deploy.started` carries `keep_on_card`; the card write reports progress as phase `card`.
 - `GET /boards/{bid}/overlays` also returns `overlays` (all of them, including blocked ones).
 - An OverlayRef also carries `ltx_sha256` and `receipt_sha256`: the sha256 of the ILA probes file and of the build receipt that travel with the pair, or `""` when the overlay has none (additive; the content store keeps both, `harness_manager_mps3/overlays.py`).
 - Board ids are percent-encoded, including `/`.

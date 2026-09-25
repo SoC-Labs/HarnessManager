@@ -64,6 +64,7 @@ from harness_manager.core.model import BoardInfo, Candidate, Reading
 from harness_manager.core.pack import (
     BackupRecord,
     BoardSession,
+    CardStatus,
     DeployResult,
     OverlayRef,
     PreflightItem,
@@ -507,8 +508,13 @@ class _DeployAdapter(_Proxy):
     def preflight(self, overlay: OverlayRef) -> Sequence[PreflightItem]:
         return self._engine.deploy._preflight(self._board_id, overlay)
 
-    def deploy(self, overlay: OverlayRef, progress: Progress | None = None) -> DeployResult:
-        return self._engine.deploy._deploy(self._board_id, overlay, progress)
+    def deploy(self, overlay: OverlayRef, progress: Progress | None = None, *,
+               keep_on_card: bool = False) -> DeployResult:
+        return self._engine.deploy._deploy(self._board_id, overlay, progress,
+                                           keep_on_card=keep_on_card)
+
+    def card_status(self) -> CardStatus:
+        return self._engine.deploy._card_status(self._board_id)
 
     def baseline(self) -> OverlayRef | None:
         raise UnavailableError("deploy_partial", "harness-manager-daemon resolves the baseline itself; "
@@ -807,10 +813,16 @@ class RemoteDeploy:
         return [from_json(PreflightItem, i) for i in payload.get("items", [])]
 
     def _deploy(self, board_id: str, overlay: OverlayRef,
-                progress: Progress | None = None) -> DeployResult:
-        result = self._engine.run_job(f"/boards/{q(board_id)}/deploy",
-                                      {"overlay": _overlay_body(overlay)}, progress=progress)
+                progress: Progress | None = None, *, keep_on_card: bool = False) -> DeployResult:
+        body: dict[str, Any] = {"overlay": _overlay_body(overlay)}
+        if keep_on_card:                  # sent only when asked: the default writes no card
+            body["keep_on_card"] = True
+        result = self._engine.run_job(f"/boards/{q(board_id)}/deploy", body, progress=progress)
         return from_json(DeployResult, result)
+
+    def _card_status(self, board_id: str) -> CardStatus:
+        payload = self._engine._http.get(f"/boards/{q(board_id)}/card")
+        return from_json(CardStatus, payload.get("card") or {"store": False})
 
     def overlays(self, session: BoardSession) -> Sequence[OverlayRef]:
         return self._overlays(_bid(session))
@@ -823,8 +835,12 @@ class RemoteDeploy:
     def preflight(self, session: BoardSession, overlay: OverlayRef) -> Sequence[PreflightItem]:
         return self._preflight(_bid(session), overlay)
 
-    def deploy(self, session: BoardSession, overlay: OverlayRef) -> DeployResult:
-        return self._deploy(_bid(session), overlay)
+    def deploy(self, session: BoardSession, overlay: OverlayRef, *,
+               keep_on_card: bool = False) -> DeployResult:
+        return self._deploy(_bid(session), overlay, keep_on_card=keep_on_card)
+
+    def card_status(self, session: BoardSession) -> CardStatus:
+        return self._card_status(_bid(session))
 
     def restore_baseline(self, session: BoardSession) -> DeployResult:
         result = self._engine.run_job(f"/boards/{q(_bid(session))}/restore")

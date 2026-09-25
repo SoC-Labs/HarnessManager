@@ -34,7 +34,11 @@ Test and demo knobs (not part of the Engine protocol):
   changed capability view;
 - ``inject_console(board_id, name, text)``: bytes arrive on a console;
 - ``set_sd_journal(board_id, journal)``: an interrupted SD install (T3's journal);
-- ``failures["controller.reboot.confirm"]``: REBOOT sent, no restart observed.
+- ``failures["controller.reboot.confirm"]``: REBOOT sent, no restart observed;
+- ``set_card(board_id, state)``: a card in the board's user microSD slot, its store in
+  ``state`` ("empty", "valid", "foreign"...), or None to take it out. "Keep on the card"
+  also needs the harness to report ``usd`` (``set_features``). No demo board has either
+  until a test or the demo sets them.
 """
 
 from __future__ import annotations
@@ -73,14 +77,20 @@ from harness_manager.core.model import (
     Reading,
 )
 from harness_manager.core.pack import (
+    CARD_NO_CARD,
+    CARD_NO_STORE,
     BackupRecord,
     BoardPack,
     BoardSession,
+    CardOutcome,
+    CardStatus,
     DeployResult,
     OverlayRef,
     PreflightItem,
     ProbeHints,
     Progress,
+    card_status_of,
+    keep_refusal,
 )
 from harness_manager.core.services import DebugStatus
 from harness_manager.core.session import LockOwner
@@ -137,6 +147,8 @@ class _Board:
     debug: DebugStatus = field(default_factory=lambda: DebugStatus(state="down"))
     port_base: int = 3333
     sd_journal: dict | None = None
+    card: str | None = None          # the user microSD's store state; None = no card
+    card_slot: str = "B"             # the slot the last kept design went to
 
 
 def _eth(host: str) -> Link:
@@ -454,17 +466,40 @@ class DemoDeploy:
             PreflightItem("transport", Check.OK, "tcp+windowed (the board reports 'windowed')"),
         ]
 
-    def deploy(self, session: BoardSession, overlay: OverlayRef) -> DeployResult:
+    def card_status(self, session: BoardSession) -> CardStatus:
+        """The board's user microSD (``set_card``), as the MPS3 pack reads it."""
+        bid = session.candidate.board_id
+        self._e._enter("deploy.card_status", bid)
+        board = self._e._board(bid)
+        if "usd" not in board.identity.features:
+            return CardStatus(store=False, reason=CARD_NO_STORE)
+        if board.card is None:
+            return CardStatus(store=True, present=False, state="none", text="none",
+                              reason=CARD_NO_CARD)
+        if board.card in ("empty", "valid", "stale", "bad"):
+            text = f"{board.identity.rm_name} [{board.card_slot}]" if board.card == "valid" \
+                else board.card
+            return CardStatus(store=True, present=True, state=board.card, text=text)
+        return CardStatus(store=True, present=True, state=board.card, text=board.card,
+                          reason=f"the card in the USER microSD slot cannot take a design "
+                                 f"(state {board.card!r})")
+
+    def deploy(self, session: BoardSession, overlay: OverlayRef, *,
+               keep_on_card: bool = False) -> DeployResult:
         e = self._e
         bid = session.candidate.board_id
-        e._enter("deploy.deploy", bid, overlay.name)
+        e._enter("deploy.deploy", bid, overlay.name, keep_on_card)
         t0 = time.monotonic()
         items = self._items(session, overlay)
         bad = [i for i in items if i.check is Check.MISMATCH]
+        err: HarnessError | None = None
         if bad:
             text = "; ".join(f"{i.name}: {i.detail}" for i in bad)
             err = IncompatibleError(f"{overlay.name} does not match this board ({text})",
                                     hint="use an overlay built for the running shell")
+        elif keep_on_card:
+            err = keep_refusal(card_status_of(self, session))
+        if err is not None:
             e.bus.publish(Event("deploy.failed", bid, {"reason": str(err),
                                                        "overlay": overlay.name,
                                                        "stage": "preflight"}))
@@ -472,10 +507,13 @@ class DemoDeploy:
         e.bus.publish(Event("deploy.started", bid, {
             "overlay": overlay.name, "rm_id": overlay.rm_id,
             "preflight": [{"name": i.name, "check": i.check.value, "detail": i.detail}
-                          for i in items]}))
+                          for i in items], "keep_on_card": keep_on_card}))
         e.debug._auto_close(bid)
-        for phase, total, steps in (("guard", 1, 1), ("swap", 1, 1),
-                                    ("push", overlay.size_bytes, 6), ("verify", 1, 1)):
+        phases = [("guard", 1, 1), ("swap", 1, 1), ("push", overlay.size_bytes, 6),
+                  ("verify", 1, 1)]
+        if keep_on_card:
+            phases.append(("card", overlay.size_bytes, 3))
+        for phase, total, steps in phases:
             for step in range(1, steps + 1):
                 e._sleep(0.12)
                 failure = e.failures.get(f"deploy.{phase}")
@@ -486,11 +524,22 @@ class DemoDeploy:
                 e.bus.publish(Event("deploy.progress", bid, {
                     "phase": phase, "bytes": total * step // steps, "total": total}))
         e._set_identity(bid, rm_id=overlay.rm_id, rm_name=overlay.name)
+        card = None
+        if keep_on_card:
+            board = e._board(bid)
+            if board.card is None:          # pulled mid-deploy: the swap stands
+                card = CardOutcome(kept=False, why="no card in the user microSD slot")
+            else:
+                board.card_slot = "A" if board.card_slot == "B" else "B"
+                board.card = "valid"
+                card = CardOutcome(kept=True, slot=board.card_slot)
         seconds = time.monotonic() - t0
         e.bus.publish(Event("deploy.done", bid, {
             "rm_id": overlay.rm_id, "verified": True, "overlay": overlay.name,
-            "seconds": seconds, "transport": "tcp+windowed"}))
-        return DeployResult(overlay.rm_id, True, seconds, "tcp+windowed")
+            "seconds": seconds, "transport": "tcp+windowed",
+            "card": None if card is None else {"kept": card.kept, "slot": card.slot,
+                                                "why": card.why}}))
+        return DeployResult(overlay.rm_id, True, seconds, "tcp+windowed", card=card)
 
     def restore_baseline(self, session: BoardSession) -> DeployResult:
         self._e._enter("deploy.restore_baseline", session.candidate.board_id)
@@ -847,6 +896,10 @@ class DemoEngine:
     def set_owner(self, board_id: str, owner: LockOwner | None) -> None:
         """Somebody else takes (or releases) the board's lock."""
         self._board(board_id).owner = owner
+
+    def set_card(self, board_id: str, state: str | None) -> None:
+        """Put a card in the user microSD slot (its store in ``state``), or take it out."""
+        self._board(board_id).card = state
 
     def set_sd_journal(self, board_id: str, journal: dict | None) -> None:
         """Leave (or clear) an interrupted SD install on a board's config SD."""

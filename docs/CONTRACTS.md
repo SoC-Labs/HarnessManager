@@ -25,7 +25,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 |---|---|
 | `board.found`, `board.lost`, `board.identity` | discovery and identity changes |
 | `session.opened`, `session.closed` | session lifecycle |
-| `deploy.started`, `deploy.progress` `{phase, bytes, total}`, `deploy.done` `{rm_id, verified}`, `deploy.failed` `{reason}` | partition programming |
+| `deploy.started` `{..., keep_on_card}`, `deploy.progress` `{phase, bytes, total}`, `deploy.done` `{rm_id, verified, card}`, `deploy.failed` `{reason}` | partition programming (`card`: `{kept, slot, why}` when the deploy was asked to keep the design on the card, else null; its write is phase `card`) |
 | `console.line` `{name, text, partial?}`, `console.state` `{name, state: connecting\|up\|down\|closed, detail, endpoint}` | consoles |
 | `debug.state` `{state: down\|starting\|up\|failed, ports, pid, detail, config}` | debug sessions |
 | `controller.reboot` `{phase: sent\|down\|up}` | board reboot |

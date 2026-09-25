@@ -53,7 +53,14 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.model import Candidate, Link, LinkKind
-from harness_manager.core.pack import BoardSession, OverlayRef, ProbeHints, preflight_refusal
+from harness_manager.core.pack import (
+    BoardSession,
+    OverlayRef,
+    ProbeHints,
+    card_status_of,
+    keep_refusal,
+    preflight_refusal,
+)
 
 from .jobs import BoardGates, Job, JobManager, busy_error
 from .outbox import Batch, Outbox
@@ -1004,6 +1011,14 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         return _JSON(ok(board_id=bid, loadable=list(loadable), blocked=dict(blocked),
                         overlays=every))
 
+    @api.get("/boards/{bid:path}/card")
+    def card(bid: str) -> JSONResponse:
+        # Keep on the card: the board's card as a deploy would keep a design on it. Reads only.
+        s = board(bid)
+        with d.gates.op(bid):
+            status = card_status_of(d.engine.deploy, s)
+        return _JSON(ok(board_id=bid, card=status))
+
     def _preflight(bid: str, s: BoardSession, spec: Any) -> tuple[OverlayRef, list, Any]:
         with d.gates.op(bid):
             overlay = resolve_overlay(list(d.engine.deploy.overlays(s)), spec)
@@ -1022,10 +1037,18 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     @api.post("/boards/{bid:path}/deploy")
     def deploy(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
+        keep = _bool(_obj(body), "keep_on_card", False)
         overlay, items, refusal = _preflight(bid, s, _obj(body).get("overlay"))
         if refusal is not None:            # refuse BEFORE deploy() is ever called
             refusal.data = {"overlay": overlay, "preflight": items}   # type: ignore[attr-defined]
             raise refusal
+        if keep:                           # Keep on the card: the card must take it, first
+            with d.gates.op(bid):
+                status = card_status_of(d.engine.deploy, s)
+            refused = keep_refusal(status)
+            if refused is not None:
+                refused.data = {"overlay": overlay, "card": status}   # type: ignore[attr-defined]
+                raise refused
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "deploy")
@@ -1037,6 +1060,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
+                if keep:                   # the keyword only when asked (off by default)
+                    return d.engine.deploy.deploy(s, overlay, keep_on_card=True)
                 return d.engine.deploy.deploy(s, overlay)
             finally:
                 unsubscribe()

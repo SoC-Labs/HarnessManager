@@ -88,7 +88,8 @@ OPEN_POINTS: dict[str, str] = {
     "401": "error REFUSED (15): 'session expired: run harness-manager ui again'",
     "jobs": "while a job runs on a board, the board's other requests are 409 HELD naming it",
     "POST /deploy": "preflight first; a refusal is 409 (14/15) with error.data.{overlay, "
-                    "preflight} and no job",
+                    "preflight} and no job; keep_on_card true then reads the card, and a card "
+                    "that cannot take it is 422 (12) with error.data.{overlay, card}, no job",
     "overlay": "a name, an rm_id, or the OverlayRef object",
     "console WS": "text frames {state,name,detail} / {dropped,dropped_frames} / {error}; "
                   "binary frames carry bytes both ways; {state:closed} then close 1000",
@@ -113,6 +114,7 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/boards/{bid}/lock"),
     ("GET", "/boards/{bid}/telemetry"),
     ("GET", "/boards/{bid}/overlays"),
+    ("GET", "/boards/{bid}/card"),
     ("POST", "/boards/{bid}/preflight"),
     ("POST", "/boards/{bid}/deploy"),
     ("POST", "/boards/{bid}/restore"),
@@ -594,6 +596,13 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         return _ok(loadable=list(loadable), blocked=dict(blocked),
                    overlays=list(eng.deploy.overlays(session)))
 
+    @app.get(f"{API}/boards/{{bid}}/card")
+    def card(bid: str) -> dict[str, Any]:
+        from harness_manager.core.pack import card_status_of
+
+        state.jobs.gate(bid)
+        return _ok(card=card_status_of(eng.deploy, state.session(bid)))
+
     @app.post(f"{API}/boards/{{bid}}/preflight")
     def preflight(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
         from harness_manager.core.pack import preflight_refusal
@@ -610,16 +619,27 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     @app.post(f"{API}/boards/{{bid}}/deploy", status_code=202)
     def deploy(bid: str, body: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        from harness_manager.core.pack import preflight_refusal
+        from harness_manager.core.pack import card_status_of, keep_refusal, preflight_refusal
 
         state.jobs.gate(bid)
         session = state.session(bid)
+        keep = body.get("keep_on_card", False)
+        if not isinstance(keep, bool):
+            raise UsageError(f"keep_on_card must be true or false, not {keep!r}")
         ov = find_overlay(session, body.get("overlay"))
         items = list(eng.deploy.preflight(session, ov))
         refusal = preflight_refusal(items, ov.name)
         if refusal is not None:            # refused BEFORE any job: nothing is pushed
             refusal.data = {"overlay": ov, "preflight": items}  # type: ignore[attr-defined]
             raise refusal
+        if keep:                           # Keep on the card: the card must take it, first
+            card = card_status_of(eng.deploy, session)
+            refused = keep_refusal(card)
+            if refused is not None:
+                refused.data = {"overlay": ov, "card": card}  # type: ignore[attr-defined]
+                raise refused
+            return _accepted(state.jobs.start(
+                bid, "deploy", lambda progress: eng.deploy.deploy(session, ov, keep_on_card=True)))
         return _accepted(state.jobs.start(bid, "deploy",
                                           lambda progress: eng.deploy.deploy(session, ov)))
 
