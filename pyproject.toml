@@ -26,6 +26,11 @@ dependencies = [
     "cryptography>=42",
     # boards.toml (T9) on Python 3.10; 3.11+ has tomllib
     "tomli>=2; python_version < '3.11'",
+    # settings (SET-CORE, david S1/S2 2026-09-25): settings.toml / boards.toml are edited in
+    # place with comments kept (tomlkit); secrets go to the OS keyring (Secret Service over
+    # jeepney, macOS Keychain, Windows Credential Manager: pure wheels) where one is reachable
+    "tomlkit>=0.13",
+    "keyring>=25",
 ]
 
 [project.optional-dependencies]
