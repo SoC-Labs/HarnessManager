@@ -124,14 +124,14 @@ jobs:
         # fatal in Windows PowerShell 5.1: go back to Continue and check exit codes instead.
         run: |
           $ErrorActionPreference = 'Continue'
-          $want = (Select-String -Path pyproject.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          $want = (Select-String -Path src\harness_manager\__init__.py -Pattern '^__version__ = "(.*)"').Matches[0].Groups[1].Value
           $root = Join-Path $env:LOCALAPPDATA 'harness-manager'
           $hm = Join-Path $root 'bin\harness-manager.exe'
 
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -NoUv -WithSerial
           if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
           $got = (& $hm version 2>$null | Out-String).Trim()
-          if ($got -ne $want) { throw "harness-manager version is '$got', pyproject says '$want'" }
+          if ($got -ne $want) { throw "harness-manager version is '$got', __version__ says '$want'" }
           $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
           if (-not ($userPath -split ';' -contains (Join-Path $root 'bin'))) { throw "bin dir not on the user PATH: $userPath" }
 

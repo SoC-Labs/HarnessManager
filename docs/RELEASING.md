@@ -44,7 +44,7 @@ The design is `docs/design/HM_SELF_UPDATE.md` §4 (app) and
 | # | Step | Time |
 |---|---|---|
 | 1 | `nice -n 10 make check` must end `CHECK PASS` | 3 min |
-| 2 | Bump the version in `pyproject.toml` and `src/harness_manager/__init__.py`. Add `## 0.2.0 (2026-10-02)` at the top of `CHANGELOG.md`: its text becomes the signed release notes. Commit | 1 min |
+| 2 | Bump `__version__` in `src/harness_manager/__init__.py`: it is the one version source (`pyproject.toml` reads it). Add `## 0.2.0 (2026-10-02)` at the top of `CHANGELOG.md`: its text becomes the signed release notes. Commit | 1 min |
 | 3 | Dry run: `make release RELEASE_ARGS="--smoke install"`. Read every `WARNING:` line | 1 min |
 | 4 | Tag the commit: `git tag -a v0.2.0 -m v0.2.0` | 10 s |
 | 5 | Publish to beta: `make release PUBLISH=1 RELEASE_ARGS="--smoke install"`. minisign asks for the passphrase | 2 min |
@@ -59,10 +59,11 @@ After a soak on beta, promote it (step 7). A stable release is never published d
 
 **What step 3 does:**
 
-1. **Preconditions.** Refuses a dirty tree (any change or untracked file), a version that
-   differs between `pyproject.toml`, `__version__` and the newest `CHANGELOG.md` heading, a
-   tag `v0.2.0` that points at another commit, and a version that is not newer than every
-   release already on the channel.
+1. **Preconditions.** Refuses a dirty tree (any change or untracked file), a
+   `pyproject.toml` with a version of its own (it must read `harness_manager.__version__`:
+   `dynamic = ["version"]`), a newest `CHANGELOG.md` heading that differs from
+   `__version__`, a tag `v0.2.0` that points at another commit, and a version that is not
+   newer than every release already on the channel.
 2. **Wheel.** `python -m build --wheel` on `git archive HEAD` (committed files only), with
    `SOURCE_DATE_EPOCH` set to the commit time.
 3. **Lock.** `uv pip compile --universal --generate-hashes --python-version 3.10

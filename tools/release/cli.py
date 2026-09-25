@@ -385,7 +385,7 @@ def parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("app", help="an app release (wheel, lock, dep, signed channel)")
     _common(p)
-    p.add_argument("--version", help="default: the version in pyproject.toml")
+    p.add_argument("--version", help="default: harness_manager.__version__ (the one source)")
     p.add_argument("--channel", default="beta", help="beta (default) or dev")
     p.add_argument("--repo-root", default=str(REPO_ROOT), help="the HM checkout to release")
     p.add_argument("--access", default="github-token", choices=("github-token", "public"),

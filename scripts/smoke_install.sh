@@ -47,8 +47,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-want="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$here/pyproject.toml" | head -n 1)"
-[[ -n "$want" ]] || fail "no version in pyproject.toml"
+# The one version source (pyproject.toml reads it): harness_manager.__version__.
+want="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' "$here/src/harness_manager/__init__.py" | head -n 1)"
+[[ -n "$want" ]] || fail "no __version__ in src/harness_manager/__init__.py"
 
 step "install ($*)"
 "$here/scripts/install.sh" "$@" || fail "install.sh exited $?"
@@ -57,13 +58,13 @@ echo "installed in $((SECONDS - started)) s"
 
 step "harness-manager --version"
 got="$(harness-manager --version)" || fail "harness-manager --version exited $?"
-[[ "$got" == "Harness Manager $want" ]] || fail "--version says '$got', pyproject says '$want'"
+[[ "$got" == "Harness Manager $want" ]] || fail "--version says '$got', __version__ says '$want'"
 echo "$got"
 
 step "harness-manager version"
 [[ "$(command -v harness-manager)" == "$hm" ]] || fail "harness-manager on PATH is $(command -v harness-manager)"
 got="$(harness-manager version)" || fail "harness-manager version exited $?"
-[[ "$got" == "$want" ]] || fail "version is '$got', pyproject says '$want'"
+[[ "$got" == "$want" ]] || fail "version is '$got', __version__ says '$want'"
 echo "$got"
 
 step "harness-manager packs"

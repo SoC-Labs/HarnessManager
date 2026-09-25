@@ -44,13 +44,22 @@ def fake_wheel_bytes(version: str, name: str = "harness-manager") -> bytes:
 
 
 def make_repo(root: Path, version: str = "0.2.0", *, changelog_version: str | None = None,
-              init_version: str | None = None) -> Path:
-    """A committed checkout with the files the release tool reads."""
+              init_version: str | None = None, pyproject_version: str | None = None) -> Path:
+    """A committed checkout with the files the release tool reads.
+
+    ``__version__`` (``init_version or version``) is the one version source (CCR OTA-R): the
+    pyproject reads it with a dynamic version, unless ``pyproject_version`` gives the old
+    layout, a static version of its own (which the release tool refuses)."""
     root.mkdir(parents=True, exist_ok=True)
+    head = (f'version = "{pyproject_version}"\n' if pyproject_version else
+            'dynamic = ["version"]\n')
+    tail = ("" if pyproject_version else
+            '\n[tool.setuptools.dynamic]\nversion = { attr = "harness_manager.__version__" }\n')
     (root / "pyproject.toml").write_text(
         '[project]\nname = "harness-manager"\n'
-        f'version = "{version}"\nrequires-python = ">=3.10"\n'
-        'dependencies = ["mps3-pyverify>=0.1.0", "cryptography>=42"]\n', encoding="utf-8")
+        f'{head}requires-python = ">=3.10"\n'
+        'dependencies = ["mps3-pyverify>=0.1.0", "cryptography>=42"]\n' + tail,
+        encoding="utf-8")
     pkg = root / "src" / "harness_manager"
     pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "__init__.py").write_text(f'__version__ = "{init_version or version}"\n',
@@ -125,10 +134,15 @@ class FakeTools:
 
 
 def _read_version(src: Path) -> str:
+    """The version setuptools would build: pyproject's static one, else ``__version__``."""
     import re
 
     text = (src / "pyproject.toml").read_text(encoding="utf-8")
-    return re.search(r'^version = "([^"]+)"$', text, re.M).group(1)  # type: ignore[union-attr]
+    static = re.search(r'^version = "([^"]+)"$', text, re.M)
+    if static:
+        return static.group(1)
+    init = (src / "src" / "harness_manager" / "__init__.py").read_text(encoding="utf-8")
+    return re.search(r'^__version__ = "([^"]+)"$', init, re.M).group(1)  # type: ignore[union-attr]
 
 
 FAKE_MINISIGN = '''#!{python}

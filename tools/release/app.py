@@ -14,6 +14,11 @@ What an app release ``V`` puts in the tree (OTA §4.1), under the per-version re
 
 Every tool (build, uv, pip-compile, git) runs through an injectable runner, so the tests
 use fakes and never reach the network.
+
+**One version source** (CCR OTA-R): ``harness_manager.__version__``. ``pyproject.toml``
+declares ``dynamic = ["version"]`` and setuptools reads that attribute; ``CHANGELOG.md``'s
+newest heading is a checked mirror. The preconditions refuse a ``pyproject.toml`` that
+carries its own version again, and the built wheel's METADATA must say the same version.
 """
 
 from __future__ import annotations
@@ -56,6 +61,8 @@ else:  # pragma: no cover - Python 3.10
 
 DIST = "harness_manager"
 PYVERIFY = "mps3-pyverify"
+#: Where the version lives; pyproject.toml's [tool.setuptools.dynamic] must point here.
+VERSION_ATTR = "harness_manager.__version__"
 LOCK_EXTRAS = ("serial", "ina260")          # the always-on small extras (OTA M6)
 UV_ENV = "HARNESS_MANAGER_UV"
 
@@ -65,16 +72,32 @@ UV_ENV = "HARNESS_MANAGER_UV"
 
 @dataclass(frozen=True)
 class SourceFacts:
-    pyproject_version: str
-    init_version: str
+    init_version: str              # harness_manager.__version__: THE version
+    pyproject_version: str         # a static [project] version: must be "" (CCR OTA-R)
+    pyproject_dynamic: bool        # "version" in [project] dynamic
+    pyproject_attr: str            # [tool.setuptools.dynamic] version.attr
     requires_python: str
     changelog_version: str
     changelog_heading: str
     notes: str
 
 
+def version_source_problem(facts: SourceFacts) -> str:
+    """Why pyproject.toml does not take its version from ``VERSION_ATTR`` ("" when it does)."""
+    if facts.pyproject_version:
+        return (f"pyproject.toml has its own version ({facts.pyproject_version}); the one "
+                f"source is {VERSION_ATTR}")
+    if not facts.pyproject_dynamic or facts.pyproject_attr != VERSION_ATTR:
+        got = facts.pyproject_attr or "nothing"
+        return (f"pyproject.toml does not read its version from {VERSION_ATTR} "
+                f"(dynamic version: {'yes' if facts.pyproject_dynamic else 'no'}, attr: {got})")
+    return ""
+
+
 def read_facts(tree: Path) -> SourceFacts:
     pp = tomllib.loads((tree / "pyproject.toml").read_text(encoding="utf-8"))
+    project = pp.get("project", {})
+    dyn_version = pp.get("tool", {}).get("setuptools", {}).get("dynamic", {}).get("version")
     init = (tree / "src" / "harness_manager" / "__init__.py").read_text(encoding="utf-8")
     m = re.search(r'^__version__ = "([^"]+)"$', init, re.M)
     log = (tree / "CHANGELOG.md").read_text(encoding="utf-8") \
@@ -86,9 +109,11 @@ def read_facts(tree: Path) -> SourceFacts:
         nxt = re.search(r"^## ", rest, re.M)
         notes = (rest[:nxt.start()] if nxt else rest).strip()
     return SourceFacts(
-        pyproject_version=str(pp.get("project", {}).get("version", "")),
         init_version=m.group(1) if m else "",
-        requires_python=str(pp.get("project", {}).get("requires-python", "")),
+        pyproject_version=str(project.get("version", "")),
+        pyproject_dynamic="version" in (project.get("dynamic") or ()),
+        pyproject_attr=str(dyn_version.get("attr", "")) if isinstance(dyn_version, dict) else "",
+        requires_python=str(project.get("requires-python", "")),
         changelog_version=head.group(1) if head else "",
         changelog_heading=head.group(0).strip() if head else "",
         notes=notes)
@@ -122,19 +147,23 @@ def check_preconditions(repo: Path, version: str | None, *, allow_dirty: bool = 
     commit = git(repo, "rev-parse", "HEAD", runner=runner)
     commit_time = int(git(repo, "log", "-1", "--format=%ct", "HEAD", runner=runner))
     facts = read_facts(repo)
-    v = version or facts.pyproject_version
+    problem = version_source_problem(facts)
+    if problem:
+        raise ReleaseError(problem, hint='pyproject.toml: dynamic = ["version"] and '
+                                         '[tool.setuptools.dynamic] version = '
+                                         f'{{ attr = "{VERSION_ATTR}" }}, no version of its own')
+    v = version or facts.init_version
     if not is_version(v):
         raise ReleaseError(f"{v!r} is not a version", code=EXIT_USAGE)
-    where = {"pyproject.toml": facts.pyproject_version,
-             "harness_manager.__version__": facts.init_version,
+    where = {VERSION_ATTR: facts.init_version,
              "CHANGELOG.md (newest heading)": facts.changelog_version}
     wrong = {k: x for k, x in where.items() if not x or parse_version(x) != parse_version(v)}
     if wrong:
         raise ReleaseError(
             f"version {v} is not the version everywhere: "
             + "; ".join(f"{k} says {x or 'nothing'}" for k, x in wrong.items()),
-            hint="bump pyproject.toml, src/harness_manager/__init__.py and add a CHANGELOG.md "
-                 f"section '## {v}', then commit")
+            hint="bump __version__ in src/harness_manager/__init__.py (pyproject.toml reads "
+                 f"it) and add a CHANGELOG.md section '## {v}', then commit")
     warnings = []
     if "unreleased" in facts.changelog_heading.lower():
         msg = f"CHANGELOG.md still says '{facts.changelog_heading}'"

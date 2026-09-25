@@ -7,7 +7,7 @@ tool is lane OTA-R in docs/design/HM_SELF_UPDATE.md.
 
     ota_release.py keygen OUT_DIR                 a throwaway minisign key (seed + id + pub)
     ota_release.py pin SRC_DIR PUB_FILE           pin that public key in a source copy's trust.py
-    ota_release.py bump SRC_DIR VERSION           set the version in pyproject.toml + __init__.py
+    ota_release.py bump SRC_DIR VERSION           set __version__ (pyproject.toml reads it)
     ota_release.py lock SRC_DIR OUT BASE_URL      a universal, hashed lock (uv), with the vendored
                                                   pyverify wheel pinned by URL + hash
     ota_release.py publish WWW CHANNEL SERIAL KEY_DIR [--app VERSION WHEEL [LOCK]]...
@@ -76,9 +76,9 @@ def pin(src: Path, pub_file: Path) -> None:
 
 
 def bump(src: Path, version: str) -> None:
-    for rel, pat, rep in (("pyproject.toml", r'^version = "[^"]+"$', f'version = "{version}"'),
-                          ("src/harness_manager/__init__.py", r'^__version__ = "[^"]+"$',
-                           f'__version__ = "{version}"')):
+    # CCR OTA-R: __version__ is the one source; pyproject.toml has a dynamic version.
+    for rel, pat, rep in (("src/harness_manager/__init__.py", r'^__version__ = "[^"]+"$',
+                           f'__version__ = "{version}"'),):
         p = src / rel
         text, n = re.subn(pat, rep, p.read_text(), flags=re.M)
         if n != 1:

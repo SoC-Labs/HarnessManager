@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harness-manager"
-version = "0.1.0"
+# ONE version source (CCR OTA-R): harness_manager.__version__ in src/harness_manager/__init__.py.
+# setuptools reads it (statically) from there; CHANGELOG.md mirrors it, and the release tool
+# (tools/release) refuses a mismatch. Bump __version__ only.
+dynamic = ["version"]
 description = "SoC Labs Harness Manager: a board manager for nanoSoC DUT harnesses on Arm MPS3 FPGA boards."
 requires-python = ">=3.10"
 readme = "README.md"
@@ -54,6 +57,9 @@ harness-manager-launch = "harness_manager._launch:main"
 # out as harness-manager-board-mps3 once its interface has settled.
 [project.entry-points."harness_manager.boards"]
 mps3 = "harness_manager_mps3.pack:Mps3Pack"
+
+[tool.setuptools.dynamic]
+version = { attr = "harness_manager.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

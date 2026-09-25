@@ -314,7 +314,8 @@ on PyPI, and pip prefers the highest version it can see there.
 
 ## Packaging (maintainers)
 
-- **Version:** `pyproject.toml` `version`, `harness_manager.__version__` and the newest
+- **Version:** one source, `harness_manager.__version__` (`src/harness_manager/__init__.py`).
+  `pyproject.toml` declares `dynamic = ["version"]` and setuptools reads it; the newest
   `CHANGELOG.md` heading must agree. `tests/unit/test_l5_release.py` checks it.
 - **`make dist`:** builds the sdist, then the wheel from the sdist, into `dist/`; copies
   in the pyverify wheel and `constraints.txt`; writes `dist/SHA256SUMS`.

@@ -47,7 +47,8 @@ RELEASE_COMMON = $(if $(MIRROR),--mirror $(MIRROR)) $(if $(PUBLISH),--publish) $
 
 venv: $(BIN)/harness-manager
 
-$(BIN)/harness-manager: pyproject.toml
+# __init__.py holds the version (pyproject reads it): a bump refreshes the editable metadata.
+$(BIN)/harness-manager: pyproject.toml src/harness_manager/__init__.py
 	$(PY) -m venv $(VENV)
 	$(BIN)/pip install -q --upgrade pip
 	$(if $(PYVERIFY),$(BIN)/pip install -q -e $(PYVERIFY),$(BIN)/pip install -q $(PYVERIFY_WHEEL))

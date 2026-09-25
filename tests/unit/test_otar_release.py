@@ -164,7 +164,7 @@ def test_twin_allow_dirty_dry_runs_but_never_publishes(tmp_path, repo, keys):
 
 def test_the_version_must_be_bumped_everywhere(tmp_path, keys):
     repo = make_repo(tmp_path / "hm", "0.2.0", init_version="0.1.9")
-    rc, lines = run_main(app_args(tmp_path / "dist", repo, keys["sk"]))
+    rc, lines = run_main(app_args(tmp_path / "dist", repo, keys["sk"], "--version", "0.2.0"))
     assert rc == 15 and "__version__ says 0.1.9" in "\n".join(lines)
 
 

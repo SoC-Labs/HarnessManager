@@ -1,6 +1,7 @@
 """L5 release: the facts a release depends on agree with each other.
 
-- one version, in pyproject.toml, ``harness_manager.__version__`` and CHANGELOG.md;
+- one version: ``harness_manager.__version__``, which pyproject.toml reads (CCR OTA-R) and
+  CHANGELOG.md mirrors;
 - the vendored pyverify wheel is the one vendor/README.md describes (sha256), and it
   satisfies the dependency in pyproject.toml;
 - the install scripts are executable and pass shellcheck (when shellcheck is installed);
@@ -45,12 +46,16 @@ def _pyverify_wheels() -> list[Path]:
 
 
 def test_one_version_everywhere():
-    version = PYPROJECT["project"]["version"]
-    assert harness_manager.__version__ == version
+    version = harness_manager.__version__
+    project = PYPROJECT["project"]
+    assert "version" not in project, "pyproject.toml carries a version of its own (CCR OTA-R)"
+    assert "version" in project["dynamic"]
+    assert PYPROJECT["tool"]["setuptools"]["dynamic"]["version"] == \
+        {"attr": "harness_manager.__version__"}
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     first = re.search(r"^## \[?(\d+\.\d+\.\d+[^\]\s]*)", changelog, re.MULTILINE)
     assert first, "CHANGELOG.md has no '## <version>' heading"
-    assert first.group(1) == version, "the newest CHANGELOG entry is not the pyproject version"
+    assert first.group(1) == version, "the newest CHANGELOG entry is not __version__"
 
 
 def test_exactly_one_vendored_pyverify_wheel():
