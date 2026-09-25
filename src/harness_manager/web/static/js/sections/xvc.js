@@ -50,6 +50,7 @@ export function xvc(bid) {
       swap: "",                // non-empty while a partition swap holds the session
       reattached: "",          // the design it re-attached on after the last swap
       tcl: null, tclError: null, tclKey: "", tclGen: 0, copied: false,
+      actionAt: 0,             // when this page's last Open/Close started
       ltxBusy: "", ltxError: null, downloaded: "",
     };
   }
@@ -178,9 +179,12 @@ function statusLines(st) {
 export function xvcSpecs(bid) {
   const x = xvc(bid);
   const target = bid.includes("@") ? bid.slice(bid.indexOf("@") + 1) : bid;
+  // The action's answer, unless an xvc.state event came after the action started: events
+  // are newer (a swap or an attach can follow the open job's "ready" before its answer lands).
+  const began = () => { x.actionAt = performance.now(); };
   const keep = (ok, value) => {
     if (ok && value && typeof value === "object" && value.state) {
-      applyStatus(bid, value);
+      if (x.at <= (x.actionAt || 0)) applyStatus(bid, value);
       changed();
     } else {
       const e = toApiError(value);
@@ -195,14 +199,17 @@ export function xvcSpecs(bid) {
   const open = {
     key: "xvc_open", label: "Open", busyLabel: "Opening...", budgetS: 90,
     command: `xvc open ${target}${x.byo ? " --byo" : ""}`,
-    run: (ctx) => runJob("xvcOpen", { bid }, { byo: !!x.byo },
-      (d) => ctx.progress(d.phase || "starting", d.phase), "xvc_open"),
+    run: (ctx) => {
+      began();
+      return runJob("xvcOpen", { bid }, { byo: !!x.byo },
+        (d) => ctx.progress(d.phase || "starting", d.phase), "xvc_open");
+    },
     render: statusLines, onDone: keep,
   };
   const close = {
     key: "xvc_close", label: "Close", busyLabel: "Closing...", budgetS: 30,
     command: `xvc close ${target}`,
-    run: async () => (await call("xvcClose", { bid })).data,
+    run: async () => { began(); return (await call("xvcClose", { bid })).data; },
     render: statusLines,
     onDone: (ok, value) => {
       if (ok) { x.heldBy = ""; x.reattached = ""; }

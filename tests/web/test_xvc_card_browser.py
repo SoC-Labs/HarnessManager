@@ -335,6 +335,25 @@ def test_a_swap_shows_swapping_then_re_attached(page_factory, daemon, engine):
     expect(by_id(page, "xvc-tcl")).to_contain_text("nanosoc_ila_b.ltx")
 
 
+def test_a_late_open_answer_never_undoes_a_swap_that_came_after_it(page_factory, daemon, engine):
+    """The open job's answer ("ready") can land after the events that followed it (a swap
+    started at once, on a loaded host: FLAKE 2026-09-25). The newer event wins."""
+    xvc_board(engine)
+    sim(daemon).result_delay_s = 2.0
+    page = debug_page(page_factory)
+    button(page, "xvc_open").click()
+    state_is(page, "ready")                                # the event, before the answer
+    expect(button(page, "xvc_open")).to_have_attribute("aria-busy", "true")
+    engine.bus.publish(Event("deploy.started", BOARD, {"overlay": "nanosoc_ila_b"}))
+    state_is(page, "swapping")
+    expect(by_id(page, "xvc-result")).to_contain_text("rc 0", timeout=T)   # the answer landed
+    state_is(page, "swapping")
+    expect(by_id(page, "xvc-reattached")).to_have_count(0)
+    engine._set_identity(BOARD, rm_id="0x0100000B", rm_name="nanosoc_ila_b")
+    engine.bus.publish(Event("deploy.done", BOARD, {"verified": True, "rm_id": "0x0100000B"}))
+    expect(by_id(page, "xvc-reattached")).to_contain_text("Re-attached on nanosoc_ila_b")
+
+
 def test_negative_twin_an_unverified_swap_closes_and_does_not_re_attach(page_factory, daemon,
                                                                        engine):
     xvc_board(engine)

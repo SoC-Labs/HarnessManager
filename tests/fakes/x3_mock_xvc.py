@@ -11,7 +11,8 @@ Knobs (``XvcSim``): ``hold_slot(bid, who)`` makes the board's slot held by someo
 Behind a hub (``WeekPlanSim.behind_hub``), ``open`` is for the lease holder only.
 Lane XVC-UI adds ``slot_taken(bid, who)`` (an open session loses the board's slot to
 another client: ``held``), ``stage_full(bid)`` (the mint staged a full-design file, X5,
-which is then preferred) and the static (MIG) file: a Linux harness has one, a bare-metal
+which is then preferred), ``result_delay_s`` (the open job answers late) and the static
+(MIG) file: a Linux harness has one, a bare-metal
 one says why not (``static_note``, the MPS3 pack's words).
 """
 
@@ -58,6 +59,7 @@ class XvcSim:
         self.sessions: dict[str, dict[str, Any]] = {}
         self.held_by: dict[str, str] = {}
         self.full: set[str] = set()            # boards whose mint staged a full-design .ltx
+        self.result_delay_s = 0.0              # the open job answers this long after "ready"
         self.ltx_body = b'{"probes": [{"name": "ila_0", "type": "ila"}]}\n'
         self.engine.bus.subscribe("deploy.started", self._swap_started)
         self.engine.bus.subscribe("deploy.done", self._swap_done)
@@ -301,6 +303,8 @@ def register(app: FastAPI, state: Any, sim: Any, ok: Any, accepted: Any) -> XvcS
             progress("starting", 0, 0)
             st = xs.open(bid, byo)
             progress(st.state, 0, 0)
+            if xs.result_delay_s:              # the job's answer lands after later events
+                time.sleep(xs.result_delay_s)
             return body_of(bid, st)
 
         return accepted(state.jobs.start(bid, "xvc_open", work))
