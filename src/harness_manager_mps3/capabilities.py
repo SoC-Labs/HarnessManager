@@ -104,6 +104,9 @@ HARNESS_STATES: dict[str, str] = {
     "harness.idle": "the harness answers its control channel",
     "harness.busy": ("another client holds the control channel (it serves one client at a "
                      "time); close the other tool, or wait for its swap to finish"),
+    # A busy condition, not a state of its own: Health.control_channel is "busy".
+    "harness.swap_settling": ("the harness is finishing a failed swap; it takes new clients "
+                              "again within 30 s"),
     "harness.wedged": ("the harness accepted the connection and never replied: its service "
                        "loop is hung. Linux: restart mps3-harnessd or send `reboot` over "
                        "SSH; bare-metal: MCC REBOOT"),

@@ -31,12 +31,20 @@ Item names come from ``harness_manager.services.deploy``.
      shell deadlocks against a plain push (OVER_THE_WIRE_DEPLOY_STATUS.md (2)).
   2. ``version.impl == "linux"``: plain tcp on 6910. ``mps3-harnessd`` builds
      config_agent plain (the kernel paces TCP), so "windowed" is absent by
-     design (Linux plan §10a S2).
+     design (Linux plan §10a S2). Never TFTP: swapping away from a DAP RM streams
+     its clearing into the ICAP first, and a partial that arrives meanwhile is
+     PARKED on 6910 but REJECTED over TFTP (silicon B1 v4, 2026-09-25).
   3. the link is a TCP tunnel (``is_tunnelled``): plain tcp. TFTP is UDP and
      cannot cross an SSH port forward or a hub WSS tunnel.
   4. otherwise tftp.
 
   A shell with no ``version`` verb gets tftp (tcp through a tunnel), UNCHECKED.
+
+  The push inactivity limit (``BitstreamPusher.timeout_s``: per TFTP packet, per
+  TCP chunk) is pyverify's rule (``pyverify.pusher.choose_push``): a tcp push to
+  the Linux harness gets ``LINUX_PUSH_TIMEOUT_S`` (30 s, the harness's own
+  ``MPS3_SWAP_AWAIT_IDLE_MS``), because the send blocks while 6910 parks the
+  partial; every other push keeps ``DEFAULT_PUSH_TIMEOUT_S`` (2 s).
 - (f) static_usercode matches: UNCHECKED ("needs JTAG") unless the running
   static's USERCODE is provided. The shell cannot report it; see
   ``gen_manifest.py`` on why ``static_id`` alone cannot catch a wrong static.
@@ -68,7 +76,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pyverify import rm_id as rmid
@@ -76,7 +84,9 @@ from pyverify.client import ShellClient, ShellProtocolError, SocketTransport
 from pyverify.overlay import OverlayValidationError
 from pyverify.pusher import (
     DEFAULT_ACK_WINDOW,
+    DEFAULT_PUSH_TIMEOUT_S,
     HEADER_SIZE,
+    LINUX_PUSH_TIMEOUT_S,
     TFTP_PORT,
     BitstreamKind,
     BitstreamPusher,
@@ -205,6 +215,8 @@ class _Assessment:
     entry: CatalogueEntry
     items: tuple[PreflightItem, ...]
     transport: str
+    #: ``BitstreamPusher.timeout_s`` for this push (``push_timeout_s``)
+    push_timeout_s: float = DEFAULT_PUSH_TIMEOUT_S
 
 
 class _ReportingPusher(BitstreamPusher):
@@ -231,18 +243,25 @@ class _ReportingClient:
         self._client = client
         self._report = report
         self._total = total
+        #: ``swap`` was sent: the harness may now hold a parked swap.
+        self.parked = False
+        #: The swap's reply was read (or a refusal was): nothing is left parked.
+        self.settled = False
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
 
     def swap_begin(self, rm: str, src: str = "tftp") -> None:
         self._client.swap_begin(rm, src)
+        self.parked = True
         self._report(PHASE_SWAP, 1, 1)
         self._report(PHASE_PUSH, 0, self._total)
 
     def swap_await(self):
         self._report(PHASE_VERIFY, 0, 1)
-        return self._client.swap_await()
+        resp = self._client.swap_await()
+        self.settled = True
+        return resp
 
 
 class Mps3Deploy:
@@ -320,36 +339,46 @@ class Mps3Deploy:
             report(PHASE_PUSH, sum(sent.values()), total)
 
         host = self._shell.host
+        timeout_s = assessment.push_timeout_s
         if assessment.transport == TRANSPORT_WINDOWED:
             pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
                                       tcp_port=self.push_port, windowed=True,
-                                      window=DEFAULT_ACK_WINDOW)
+                                      window=DEFAULT_ACK_WINDOW, timeout_s=timeout_s)
             src = "tcp"
         elif assessment.transport == TRANSPORT_TCP:
             pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
-                                      tcp_port=self.push_port, windowed=False)
+                                      tcp_port=self.push_port, windowed=False,
+                                      timeout_s=timeout_s)
             src = "tcp"
         else:
             pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tftp",
-                                      tftp_port=self.tftp_port)
+                                      tftp_port=self.tftp_port, timeout_s=timeout_s)
             src = "tftp"
         self.last_pusher = pusher
 
         tap: _TapTransport | None = None
+        swap: _ReportingClient | None = None
         try:
             tap = _TapTransport(_TimedSocketTransport(host, self._shell.port, self.swap_timeout_s))
             client = ShellClient(host, port=self._shell.port, timeout=self.swap_timeout_s,
                                  transport=tap)
             with client:
-                orchestrator = SwapOrchestrator(_ReportingClient(client, report, total), pusher)
+                swap = _ReportingClient(client, report, total)
+                orchestrator = SwapOrchestrator(swap, pusher)
                 try:
-                    res = orchestrator.deploy(ov, src=src)
+                    # persist=False: pyverify's deploy now also commits the pair to the
+                    # user microSD after a verified swap (net-protocol v0.13, D1). This
+                    # adapter's deploy is the swap only, as before; a card write is not
+                    # shown or asked for here.
+                    res = orchestrator.deploy(ov, src=src, persist=False)
                 except PushError as exc:
                     # A shell that REFUSED the swap replied at once and never armed the
                     # push, so the push was reset: read that reply to say why. Only the
                     # DISTINCT refusals (fabric mismatch, EBUSY) replace the push error; a
                     # swap that failed because the push failed is reported as the push.
                     early = _pending_reply(tap)
+                    if early is not None:
+                        swap.settled = True       # the shell answered: nothing is parked
                     err = str((early or {}).get("err", ""))
                     if early is not None and (_is_fabric_mismatch(err)
                                               or err.strip().upper() == "EBUSY"):
@@ -375,6 +404,12 @@ class Mps3Deploy:
         except OSError as exc:
             raise UnreachableError(f"cannot reach the shell at {host}:{self._shell.port}: {exc}",
                                    hint="check the Ethernet link and the board's IP") from exc
+        finally:
+            if swap is not None and swap.parked and not swap.settled:
+                # The push (or the wait for the reply) failed with the swap still parked:
+                # the harness turns new 6900 clients away until its 30 s idle timeout
+                # fails that swap. The shell's error mapping reads this (B1 v4).
+                self._shell.note_failed_push()
 
         if not res.verified:
             raise ActionFailedError(
@@ -415,6 +450,13 @@ class Mps3Deploy:
         entry = self.catalogue.entry_for(overlay)
         live = self._live()
         transport_item, transport = _check_transport(live, self.tunnelled)
+        timeout_s = push_timeout_s(live.impl, transport)
+        if timeout_s != DEFAULT_PUSH_TIMEOUT_S:
+            transport_item = replace(
+                transport_item,
+                detail=f"{transport_item.detail}; push inactivity limit {timeout_s:.0f} s "
+                       "(the send blocks while 6910 parks a partial behind the outgoing "
+                       "clearing)")
         items = (
             PreflightItem(ITEM_CONTROL, Check.OK,
                           f"{self._shell.host}:{self._shell.port} answered "
@@ -426,7 +468,8 @@ class Mps3Deploy:
             transport_item,
             _check_usercode(entry, self.running_usercode),
         )
-        return _Assessment(entry=entry, items=items, transport=transport)
+        return _Assessment(entry=entry, items=items, transport=transport,
+                           push_timeout_s=timeout_s)
 
 
 def _check_shell_id(entry: CatalogueEntry, live: _Live) -> PreflightItem:
@@ -508,6 +551,20 @@ def _check_transport(live: _Live, tunnelled: bool = False) -> tuple[PreflightIte
             "does not report 'windowed', so a plain push is safe"), TRANSPORT_TCP)
     return (PreflightItem(ITEM_TRANSPORT, Check.OK,
                           "tftp: the firmware does not report 'windowed'"), TRANSPORT_TFTP)
+
+
+def push_timeout_s(impl: str, transport: str) -> float:
+    """``BitstreamPusher.timeout_s`` for one push: pyverify's rule (``choose_push``).
+
+    A tcp push (plain or windowed) to the Linux harness waits up to
+    ``LINUX_PUSH_TIMEOUT_S`` (30 s) for each chunk: config_agent parks a partial that
+    arrives while the outgoing clearing still streams into the ICAP, with the TCP
+    window closed, so the send blocks for that whole stream. 30 s is the harness's
+    own ``MPS3_SWAP_AWAIT_IDLE_MS``. Everything else keeps ``DEFAULT_PUSH_TIMEOUT_S``.
+    """
+    if impl == IMPL_LINUX and transport in (TRANSPORT_TCP, TRANSPORT_WINDOWED):
+        return LINUX_PUSH_TIMEOUT_S
+    return DEFAULT_PUSH_TIMEOUT_S
 
 
 def _check_usercode(entry: CatalogueEntry, running: str | int | None) -> PreflightItem:

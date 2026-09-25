@@ -16,6 +16,15 @@ host sees, and what it means:
 | connected, never a reply | the service loop is hung (a hung harnessd's kernel still accepts) | ``ShellWedgedError`` (7) | ``wedged`` |
 | accept then EOF, or RST after accept | another client holds 6900 (single client) | ``HeldError`` (4) | ``busy`` |
 | ``{"ok":false,"err":"EBUSY"}`` (A3) | the same, said explicitly | ``HeldError`` (4) | ``busy`` |
+| refused, or accept then EOF/RST, within 35 s of a push this process ran that failed; or EBUSY with a ``swap`` key | the harness is finishing a failed swap | ``SwapSettlingError`` (4) | ``busy`` |
+
+After a failed push the harness keeps the swap parked until its idle timeout
+(``MPS3_SWAP_AWAIT_IDLE_MS``, 30 s) fails it, and until then it turns every new
+6900 client away (B1 v4, 2026-09-25). ``Mps3Deploy`` records each push that
+failed with the swap still parked (``note_failed_push``); for
+``FAILED_PUSH_WINDOW_S`` after it, a turned-away connect to that endpoint is
+``SwapSettlingError``, never "offline" or "another client". Outside the window
+nothing changes.
 
 The diagnosis after a refused or silent connect asks, cheapest first, whether
 anything else on the board answers: UDP identify (6899; ``mode:"rescue"`` means
@@ -38,6 +47,8 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
@@ -139,12 +150,80 @@ class ShellRescueError(UnreachableError):
         self.reply = reply
 
 
+class SwapSettlingError(HeldError):
+    """6900 turned the connection away while the harness finishes a failed swap.
+
+    ``remaining_s`` is how long, at most, until it takes clients again (0.0 when the
+    harness said so itself and gave no bound).
+    """
+
+    def __init__(self, message: str, *, hint: str = "", holder: str = "",
+                 remaining_s: float = 0.0) -> None:
+        super().__init__(message, holder=holder, hint=hint)
+        self.remaining_s = remaining_s
+
+
 class _ShellBusy(Exception):
     """The shell answered ``{"ok":false,"err":"EBUSY",...}`` (harness handover A3)."""
 
     def __init__(self, reply: dict[str, Any]) -> None:
         super().__init__(f"EBUSY: {reply}")
         self.reply = reply
+
+
+# --- failed pushes ---------------------------------------------------------------------
+
+#: The harness's swap idle timeout (swap_fsm.h ``MPS3_SWAP_AWAIT_IDLE_MS``): a parked
+#: swap that sees no push for this long fails, and 6900 serves new clients again.
+SWAP_AWAIT_IDLE_S = 30.0
+#: How long after a failed push a turned-away 6900 connect means "settling": the idle
+#: timeout plus a margin for the harness's poll loop and the host's own close.
+FAILED_PUSH_WINDOW_S = 35.0
+
+#: ``(host, port)`` of a control channel -> ``clock()`` when a push to it failed with
+#: the swap still parked. Process-wide: the daemon opens more than one ``Mps3Shell``
+#: for one board (a session, a probe), and each must see the same failure.
+_failed_pushes: dict[tuple[str, int], float] = {}
+_failed_pushes_lock = threading.Lock()
+#: The clock the window runs on (tests replace it).
+clock: Callable[[], float] = time.monotonic
+
+
+def note_failed_push(host: str, port: int) -> None:
+    """Record that a push to ``host:port``'s harness failed with its swap still parked."""
+    with _failed_pushes_lock:
+        _failed_pushes[(host, port)] = clock()
+
+
+def clear_failed_push(host: str, port: int) -> None:
+    """Forget it (the harness answered again, or a later swap settled)."""
+    with _failed_pushes_lock:
+        _failed_pushes.pop((host, port), None)
+
+
+def settling_remaining_s(host: str, port: int) -> float:
+    """Seconds left in the window after a failed push to ``host:port``; 0.0 outside it."""
+    with _failed_pushes_lock:
+        at = _failed_pushes.get((host, port))
+        if at is None:
+            return 0.0
+        left = FAILED_PUSH_WINDOW_S - (clock() - at)
+        if left <= 0.0:
+            del _failed_pushes[(host, port)]
+            return 0.0
+        return left
+
+
+def _is_ebusy(exc: HeldError) -> bool:
+    """The harness said EBUSY itself (another client, named): never reclassified."""
+    return bool(getattr(exc, "ebusy", False))
+
+
+def _says_swap_settling(reply: dict[str, Any]) -> bool:
+    """An EBUSY line that names a swap in progress (an additive ``swap`` key, the name
+    ``stats`` uses, with any state but ``idle``). No harness sends it yet."""
+    swap = reply.get("swap")
+    return isinstance(swap, str) and swap.strip() not in ("", "idle")
 
 
 # --- the tap -------------------------------------------------------------------------
@@ -384,6 +463,22 @@ class Mps3Shell:
         installed pyverify does not model from it, never send a hand-rolled request.
         ``self.preamble``, when set, runs first on the same connection (CCR PANEL-3).
         """
+        try:
+            result = self._call_raw(fn)
+        except SwapSettlingError:
+            raise
+        except (ShellRefusedError, HeldError) as exc:
+            left = settling_remaining_s(self.host, self.port)
+            if left <= 0.0 or (isinstance(exc, HeldError) and _is_ebusy(exc)):
+                raise
+            raise SwapSettlingError(
+                f"shell at {self.host}:{self.port} turned the connection away: the harness "
+                "is finishing a failed swap", hint=HARNESS_STATES["harness.swap_settling"],
+                remaining_s=left) from exc
+        clear_failed_push(self.host, self.port)
+        return result
+
+    def _call_raw(self, fn: Callable[[ShellClient, _TapTransport], T]) -> T:
         where = f"{self.host}:{self.port}"
         preamble = self.preamble
         tap = self._connect()
@@ -394,9 +489,14 @@ class Mps3Shell:
                 return fn(client, tap)
         except _ShellBusy as exc:
             holder = str(exc.reply.get("holder") or exc.reply.get("peer") or "")
-            raise HeldError(f"shell at {where} is busy (EBUSY): another client holds the "
-                            "control port", holder=holder,
-                            hint=HARNESS_STATES["harness.busy"]) from exc
+            if _says_swap_settling(exc.reply):
+                raise SwapSettlingError(
+                    f"shell at {where} is busy (EBUSY): the harness is finishing a swap",
+                    holder=holder, hint=HARNESS_STATES["harness.swap_settling"]) from exc
+            err = HeldError(f"shell at {where} is busy (EBUSY): another client holds the "
+                            "control port", holder=holder, hint=HARNESS_STATES["harness.busy"])
+            err.ebusy = True                         # said explicitly: not a refusal
+            raise err from exc
         except TimeoutError as exc:
             raise ShellWedgedError(
                 f"shell at {where} accepted the connection but did not reply within "
@@ -433,6 +533,15 @@ class Mps3Shell:
     def call(self, fn: Callable[[ShellClient], T]) -> T:
         """Open 6900, run ``fn``, close. Maps failures to exit-coded errors."""
         return self.call_raw(lambda client, _tap: fn(client))
+
+    def note_failed_push(self) -> None:
+        """A push this process ran failed with the swap still parked: for
+        ``FAILED_PUSH_WINDOW_S`` a turned-away connect is ``SwapSettlingError``."""
+        note_failed_push(self.host, self.port)
+
+    def settling_remaining_s(self) -> float:
+        """Seconds left in that window; 0.0 when there is none."""
+        return settling_remaining_s(self.host, self.port)
 
     # -- identity -----------------------------------------------------------------
 
@@ -526,6 +635,11 @@ class Mps3Shell:
     def health(self) -> Health:
         try:
             diag, raw = self.call_raw(lambda c, tap: (c.diag(), dict(tap.last)))
+        except SwapSettlingError as exc:
+            notes = [exc.hint]
+            if exc.remaining_s > 0.0:
+                notes.append(f"at most {exc.remaining_s:.0f} s more (the swap's idle timeout)")
+            return Health(reachable=True, control_channel="busy", notes=tuple(notes))
         except HeldError as exc:
             notes = [HARNESS_STATES["harness.busy"]]
             if exc.holder:

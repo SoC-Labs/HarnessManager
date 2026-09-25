@@ -71,6 +71,12 @@ owners.
   needs ("needs the Debug USB cable", "needs harness firmware with 'stats'").
 - Program the DUT partition with a preflight check against the shell, then confirm the
   load. Restore the baseline design.
+- Programming a board that runs the Linux harness always uses TCP and waits up to 30 s
+  for each part of the push. When you swap away from a design with a debug port
+  (nanosoc), the harness takes the new design only after it has cleared the old one,
+  and over TFTP it rejected the new design (found on the board, 25 Sep).
+- After a failed push, the harness turns new connections away for up to 30 s while it
+  finishes that swap. The board now shows as busy, with that reason, instead of offline.
 - DUT consoles (UART0, UART1, SWO) over Ethernet; the MCC and the FPGA UARTs over the
   Debug USB.
 - Each console can also be a terminal device for `screen`

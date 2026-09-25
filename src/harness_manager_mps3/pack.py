@@ -228,12 +228,14 @@ class Mps3Session(BoardSession):
     def identity(self) -> BoardIdentity:
         if self.shell is None:
             return BoardIdentity(board_type="mps3")
-        from .shell import ShellRescueError
+        from .shell import ShellRescueError, SwapSettlingError
         started = time.monotonic()
         try:
             return self.shell.identity()
         except ShellRescueError as exc:      # stage0 rescue: report what stage0 said (T12-2)
             return exc.identity
+        except SwapSettlingError:            # our failed push: the hub's refusal is the swap
+            raise
         except HeldError as exc:
             raise self._refused_through_tunnel(started) or exc from None
 
@@ -262,7 +264,10 @@ class Mps3Session(BoardSession):
         refused = tunnel.open_failures_since(
             started, wait_s=OPEN_FAILURE_GRACE_S if health.control_channel == "busy" else 0.0) \
             if tunnel is not None else []
-        if refused and health.control_channel == "busy":
+        # Within the window after our own failed push, the hub being refused IS the
+        # harness finishing that swap: it stays busy, with the shell's hint.
+        settling = self.shell.settling_remaining_s() > 0.0
+        if refused and health.control_channel == "busy" and not settling:
             # Through ssh -L, "accepted then closed" is what the hub being refused looks
             # like too; ssh said so, so this is not another client holding the port.
             busy = HARNESS_STATES["harness.busy"]

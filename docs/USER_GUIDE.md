@@ -202,6 +202,8 @@ Start at the top. Go down one step only when the step above did not help.
 1. **Ask the board.** `harness-manager info TARGET` (or the app's header) shows the
    harness state and what to do:
    - `busy`: another program holds the board. Close it, or wait for its job to finish.
+     Right after a failed `deploy`, `busy` means the harness is finishing that swap:
+     wait 30 s, then try again.
    - `offline`: nothing answers. Check the power, the Ethernet cable, and your PC's
      address (step 3.5).
    - `wedged`: the harness took the connection and never replied. Reboot the board
