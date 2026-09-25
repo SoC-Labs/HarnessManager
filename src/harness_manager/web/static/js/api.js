@@ -27,16 +27,6 @@ export const ENDPOINTS = Object.freeze({
   debugDetect: ["POST", "/boards/{bid}/debug/detect"],
   debugUp: ["POST", "/boards/{bid}/debug/up"],
   debugDown: ["POST", "/boards/{bid}/debug/down"],
-  // --- XVC-UI: the Debug section's XVC card (docs/API.md "Fabric debug over XVC", xvc_api.py).
-  // The query is part of the template, so call() needs no query argument: pass byo "" (the
-  // open session's mode), "true" or "false"; which "auto" (the full-design file when the
-  // mint staged one, else the RM's), "rm", "static" or "full".
-  xvcStatus: ["GET", "/boards/{bid}/xvc"],
-  xvcOpen: ["POST", "/boards/{bid}/xvc/open"],
-  xvcClose: ["POST", "/boards/{bid}/xvc/close"],
-  xvcTcl: ["GET", "/boards/{bid}/xvc/tcl?byo={byo}"],
-  xvcLtx: ["GET", "/boards/{bid}/xvc/ltx?which={which}"],
-  // --- end XVC-UI ---
   reboot: ["POST", "/boards/{bid}/controller/reboot"],
   sdPending: ["GET", "/boards/{bid}/storage/pending"],
   sdBackup: ["POST", "/boards/{bid}/storage/backup"],
@@ -88,6 +78,16 @@ export const ENDPOINTS = Object.freeze({
   kitCheck: ["POST", "/kits/check"],
   kitPack: ["POST", "/kits/pack"],
   // --- end KIT-UI ---
+  // --- XVC-UI: the Debug section's XVC card (docs/API.md "Fabric debug over XVC", xvc_api.py).
+  // The query is part of the template (callBlob takes no query argument): pass byo "" (the
+  // open session's mode), "true" or "false"; which "auto" (the full-design file when the
+  // mint staged one, else the RM's), "rm", "static" or "full".
+  xvcStatus: ["GET", "/boards/{bid}/xvc"],
+  xvcOpen: ["POST", "/boards/{bid}/xvc/open"],
+  xvcClose: ["POST", "/boards/{bid}/xvc/close"],
+  xvcTcl: ["GET", "/boards/{bid}/xvc/tcl?byo={byo}"],
+  xvcLtx: ["GET", "/boards/{bid}/xvc/ltx?which={which}"],
+  // --- end XVC-UI ---
 });
 
 export const ADDITIVE = Object.freeze([]);
