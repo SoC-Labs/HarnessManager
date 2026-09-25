@@ -19,14 +19,22 @@ Traps modelled, each from the firmware:
   it at once (jtag_server.c:185-192). ``accepted``/``refused`` count both.
 - **No TAP.** ``tdo_stuck`` = 0 or 1 models a design with nothing on the RP
   ``jtag_*`` pins (greybox): the scan reads all zeroes or all ones.
+- **Accept before drain** (the Linux harness's jtag_server, B1 v4 step (g),
+  2026-09-25). ``drain_lag`` = seconds a finished client keeps the port (its
+  final ``Q`` still unread); ``refuse_next`` = the next N clients meet the same
+  refusal whatever the timing. Either way the new client is accepted and closed
+  at once with an RST, as Linux sends a close with unread data.
 
 Loopback only (127.0.0.1). Stdlib only.
 """
 
 from __future__ import annotations
 
+import os
 import socket
+import struct
 import threading
+import time
 
 # TAP controller states (IEEE 1149.1 figure 6-1).
 TLR, RTI, SELDR, CAPDR, SHDR, EX1DR, PADR, EX2DR, UPDR = range(9)
@@ -159,11 +167,16 @@ class FakeJtagServer:
     client while another debugger holds the port).
     """
 
-    def __init__(self, *, mode: str = "tap", idcode: int = DAP_IDCODE) -> None:
+    def __init__(self, *, mode: str = "tap", idcode: int = DAP_IDCODE,
+                 drain_lag: float = 0.0) -> None:
         self.mode = mode
         self.idcode = idcode
+        self.drain_lag = drain_lag
+        self.refuse_next = 0
         self.accepted = 0
         self.refused = 0
+        self.served_at: list[float] = []      # time.time() each served client was accepted
+        self._draining = False
         self.taps: list[JtagTap] = []
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.bind(("127.0.0.1", 0))
@@ -198,14 +211,25 @@ class FakeJtagServer:
                 continue
             with self._lock:
                 busy = self._active is not None
-                if not busy and self.mode != "slam":
+                told = not busy and self.refuse_next > 0
+                if told:
+                    self.refuse_next -= 1
+                draining = self._draining or told
+                if not busy and not draining and self.mode != "slam":
                     self._active = conn
+            if draining:
+                # Accept before drain: the previous client's 'Q' is unread, so this one is a
+                # second client, closed at once; Linux sends that close as an RST.
+                self.refused += 1
+                _reset(conn)
+                continue
             if busy or self.mode == "slam":
                 # jtag_server.c:185-192: extras are accepted and closed at once.
                 self.refused += 1
                 conn.close()
                 continue
             self.accepted += 1
+            self.served_at.append(time.time())
             threading.Thread(target=self._client, args=(conn,), daemon=True).start()
 
     def _client(self, conn: socket.socket) -> None:
@@ -241,7 +265,22 @@ class FakeJtagServer:
                 if quit_:
                     break
         finally:
+            if self.drain_lag > 0 and not self._stop.is_set():
+                with self._lock:
+                    self._draining = True
+                self._stop.wait(self.drain_lag)   # the final 'Q' sits unread; the port is taken
             conn.close()
             with self._lock:
+                self._draining = False
                 if self._active is conn:
                     self._active = None
+
+
+def _reset(conn: socket.socket) -> None:
+    """Close with an RST (SO_LINGER on, 0 s), as Linux does with unread data."""
+    try:
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                        struct.pack("HH" if os.name == "nt" else "ii", 1, 0))
+    except OSError:
+        pass
+    conn.close()

@@ -32,7 +32,8 @@ What it does:
 - tcl RPC (0x1a-terminated): ``version``, ``scan_chain``,
   ``<target> cget -event gdb-attach``, ``shutdown``.
 - A gdb connection records a ``gdb-attach`` event (with the hook it would run).
-- SIGTERM: prints ``shutdown command invoked`` and exits 0.
+- SIGTERM: prints ``shutdown command invoked``, sends the adapter ``Q`` (as
+  ``remote_bitbang_quit`` does) and exits 0; so does ``shutdown``.
 
 ``$STUB_OPENOCD_LOG``: one JSON line per run (``argv``, ``pid``) and per event.
 ``$STUB_OPENOCD_INIT_DELAY``: seconds to wait before ``init`` (a slow board).
@@ -159,6 +160,7 @@ class Stub:
                 return rc
             if self.shutdown_requested:
                 _say("shutdown command invoked")
+                self._bye()
                 return 0
         return self._serve()
 
@@ -249,8 +251,12 @@ class Stub:
             _say(f"Error: Error on socket 'Failed to connect': errno=={exc.errno}, "
                  f"message: {exc.strerror}.")
             return 1
-        sock.settimeout(0.15)          # the board's refusal is an immediate close
+        # remote_bitbang's first read (fill_buf) is the reply to a TDO sample: a served
+        # client gets '0'/'1' back at once, a refused one reads EOF or an RST. A real
+        # exchange, not a silence timeout, so a slow host never mistakes one for the other.
+        sock.settimeout(2.0)
         try:
+            sock.sendall(b"R")
             data = sock.recv(1)
             closed = data == b""
         except TimeoutError:
@@ -365,10 +371,19 @@ class Stub:
             return self.hooks.get(words[0], "")
         return f'invalid command name "{words[0] if words else ""}"'
 
+    def _bye(self) -> None:
+        """remote_bitbang_quit: send ``Q``, then close (the board may not read it at once)."""
+        if self.adapter_sock is not None:
+            try:
+                self.adapter_sock.sendall(b"Q")
+            except OSError:
+                pass
+            self.adapter_sock.close()
+            self.adapter_sock = None
+
     def _quit(self) -> None:
         _say("shutdown command invoked")
-        if self.adapter_sock is not None:
-            self.adapter_sock.close()
+        self._bye()
         sys.exit(0)
 
 

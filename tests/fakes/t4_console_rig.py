@@ -96,6 +96,9 @@ class SingleClientProxy:
             except OSError:
                 _close(client)
                 continue
+            # The timeout was for the connect only: left on, a console idle for 2 s after
+            # its banner timed out in _pump and looked like a swap drop (DEBUG-6921).
+            board.settimeout(None)
             with self._lock:
                 self._pair = (client, board)
                 self.accepted += 1

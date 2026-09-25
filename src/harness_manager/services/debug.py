@@ -60,6 +60,16 @@ Traps handled
   (measured). That is reported as ``HeldError`` (exit 4). ``detect`` while a
   session is up asks the running OpenOCD (``scan_chain`` over its tcl port)
   instead of dialling the board a second time.
+- **The JTAG server accepts before it drains** (Linux lead, B1 v4 step (g),
+  2026-09-25): while the previous session's final ``Q`` is still unread, a new
+  connection counts as a second client and is closed at once, as an RST (a
+  close with unread data), and under load the harness's jtag service also runs
+  over its budget. So HM's OWN just-ended session makes the board look held.
+  Every HM OpenOCD on a board waits ``JTAG_COOLDOWN_S`` after the previous one
+  ended (``<board>.ended`` in the registry, so a CLI run, the swap reopen and a
+  restarted daemon all see it). A reset within ``OWN_RACE_WINDOW_S`` of our own
+  session's end is retried once, after another cooldown; if that is refused too
+  the ``HeldError`` hint also names the drain.
 - **A swap invalidates the DAP.** ``deploy.started`` closes the session
   (synchronously, before the swap proceeds); ``deploy.done`` with
   ``verified: true`` reopens it on the same ports, in a worker thread.
@@ -92,7 +102,7 @@ import zlib
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from harness_manager.core.errors import (
     ActionFailedError,
@@ -123,6 +133,18 @@ DEFAULT_PORT_BASE = 23300
 PORT_SLOTS = 64
 PORT_BLOCK = 4          # gdb (first target), gdb+1 (a second target), telnet, tcl
 CAPABILITY = "debug_dut"
+# The board's jtag_server (6921) serves one client and ACCEPTS BEFORE IT DRAINS: a new
+# connection that arrives while the previous session's final 'Q' is unread is closed at
+# once (an RST on Linux), and OpenOCD reports "Connection reset by peer". The Linux lead's
+# rule (root cause of B1 v4 step (g), 2026-09-25): >= 2 s between OpenOCD sessions on 6921.
+JTAG_COOLDOWN_S = 2.0
+# A reset this soon after HM's own session on the board ended is taken as our own race with
+# that drain, and retried once. Older than this, or none of ours: another debugger holds it.
+OWN_RACE_WINDOW_S = 5.0
+DRAIN_HINT = ("or the harness's JTAG server is still finishing the previous session; "
+              "wait a few seconds and retry")
+
+_T = TypeVar("_T")
 
 
 # --- small portable helpers ------------------------------------------------------------
@@ -408,6 +430,16 @@ class _Live:
 # never mistakes them for orphans.
 _PROCESS_LIVE: dict[str, _Live] = {}
 _PROCESS_LIVE_LOCK = threading.Lock()
+# When this process's last OpenOCD on a board ended (time.monotonic()), same keys. The
+# ``<board>.ended`` file carries the same fact across processes, in wall time.
+_PROCESS_ENDED: dict[str, float] = {}
+
+
+def _was_served(exc: BaseException) -> bool:
+    """Did the OpenOCD that failed with ``exc`` become the board's client (so its end
+    leaves something for the JTAG server to drain)? A reset (``HeldError``: refused at
+    once) and ``UnreachableError`` (never connected) did not; anything else may have."""
+    return not isinstance(exc, (HeldError, UnreachableError))
 
 
 class DebugService:
@@ -421,13 +453,14 @@ class DebugService:
 
     def __init__(self, engine: Any = None, *, port_base: int | None = None,
                  start_timeout: float = 30.0, detect_timeout: float = 30.0,
-                 stop_timeout: float = 3.0) -> None:
+                 stop_timeout: float = 3.0, cooldown: float = JTAG_COOLDOWN_S) -> None:
         self.engine = None if isinstance(engine, EventBus) else engine
         self.bus = _bus_of(engine)
         self.port_base = port_base
         self.start_timeout = start_timeout
         self.detect_timeout = detect_timeout
         self.stop_timeout = stop_timeout
+        self.cooldown = cooldown
         self._resume: dict[str, tuple[BoardSession | None, DebugPorts]] = {}
         self._locks: dict[str, threading.RLock] = {}
         self._guard = threading.Lock()
@@ -504,6 +537,80 @@ class DebugService:
         with self._guard:
             return self._locks.setdefault(board_id, threading.RLock())
 
+    # -- the JTAG server's drain (JTAG_COOLDOWN_S) -----------------------------------------
+
+    def _ended_path(self, board_id: str) -> Path:
+        # Not .json: reap_orphans and the debris checks read *.json as session records.
+        return self.registry_dir / f"{_safe_name(board_id)}.ended"
+
+    def _mark_ended(self, board_id: str, *, pid: int = 0, why: str = "") -> None:
+        """An HM OpenOCD that was the board's client has just ended (quit or killed)."""
+        with _PROCESS_LIVE_LOCK:
+            _PROCESS_ENDED[self._live_key(board_id)] = time.monotonic()
+        # Across processes too: a CLI run after a CLI run, or the daemon restarted by an
+        # update (OTA-D) reopening what the old one closed. Best effort: the in-process
+        # record above already covers the swap reopen and the daemon's own sequences.
+        try:
+            self.registry_dir.mkdir(parents=True, exist_ok=True)
+            path = self._ended_path(board_id)
+            tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")   # not the record's .tmp
+            tmp.write_text(json.dumps({"ended_at": time.time(), "pid": pid,
+                                       "by": os.getpid(), "why": why}))
+            os.replace(tmp, path)
+        except OSError as exc:
+            log.warning("could not record the end of the debug session for %s: %s",
+                        board_id, exc)
+
+    def _since_own_end(self, board_id: str) -> float | None:
+        """Seconds since HM's last OpenOCD on this board ended, or ``None`` if no record."""
+        seen: list[float] = []
+        with _PROCESS_LIVE_LOCK:
+            mono = _PROCESS_ENDED.get(self._live_key(board_id))
+        if mono is not None:
+            seen.append(max(0.0, time.monotonic() - mono))
+        try:
+            wall = float(json.loads(self._ended_path(board_id).read_text())["ended_at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            wall = None
+        if wall is not None:
+            # A clock stepped back reads as "just ended": at worst one cooldown too many.
+            seen.append(max(0.0, time.time() - wall))
+        return min(seen) if seen else None
+
+    def _await_cooldown(self, board_id: str) -> None:
+        """Hold a new OpenOCD until the board's JTAG server has drained HM's previous one."""
+        since = self._since_own_end(board_id)
+        if since is None or since >= self.cooldown:
+            return
+        wait = self.cooldown - since
+        log.info("debug %s: waiting %.1fs for the board's JTAG server to finish the previous "
+                 "session", board_id, wait)
+        time.sleep(wait)
+
+    def _once_more_if_own_race(self, board_id: str, attempt: Callable[[], _T]) -> _T:
+        """Run ``attempt`` (one OpenOCD that dials the board); retry once on our own race.
+
+        ``attempt`` raises ``HeldError`` only for the board's reset (``classify_failure``).
+        If HM's own session on the board ended within ``OWN_RACE_WINDOW_S``, that reset is
+        most likely the JTAG server still draining it: wait one more cooldown, try once
+        more, and if that is refused too, say so in the hint. With no recent session of
+        ours the reset is reported exactly as before, at once.
+        """
+        try:
+            return attempt()
+        except HeldError:
+            since = self._since_own_end(board_id)     # a refused attempt never marks an end
+            if since is None or since >= OWN_RACE_WINDOW_S:
+                raise
+            log.info("debug %s: reset %.1fs after our own session ended; retrying once",
+                     board_id, since)
+        time.sleep(self.cooldown)
+        try:
+            return attempt()
+        except HeldError as exc:
+            hint = f"{exc.hint}, {DRAIN_HINT}" if exc.hint else DRAIN_HINT
+            raise HeldError(exc.message, holder=exc.holder, hint=hint) from exc
+
     # -- events --------------------------------------------------------------------------
 
     def _publish(self, board_id: str, state: str, *, ports: DebugPorts | None = None,
@@ -566,6 +673,7 @@ class DebugService:
             live = self._live_pop(board_id)
             rc = live.proc.returncode if live is not None else None
             self._drop_record(board_id)
+            self._mark_ended(board_id, pid=pid, why="exited")   # when is unknown: count it now
             self._release_ports(rec)
             text = self._log_text(board_id)
             detail = f"OpenOCD exited with code {rc}: {_last_errors(text)}"
@@ -582,6 +690,7 @@ class DebugService:
             else:
                 _kill_pid(pid, self.stop_timeout)
             self._drop_record(board_id)
+            self._mark_ended(board_id, pid=pid, why="reaped")
             self._release_ports(rec)
             detail = f"reaped an orphaned OpenOCD (pid {pid}): {why}"
             self._publish(board_id, "down", detail=detail)
@@ -656,8 +765,8 @@ class DebugService:
                 cfgs = tuple(adapter.openocd_config())      # 13 for a design with no DAP
                 post = _post_config(adapter)
                 target = getattr(adapter, "describe", lambda: "")()
-                return self._start(board_id, session, binary, adapter, cfgs, post, target,
-                                   _prefer)
+                return self._once_more_if_own_race(board_id, lambda: self._start(
+                    board_id, session, binary, adapter, cfgs, post, target, _prefer))
             except HarnessError as exc:
                 # "failed" carries the reason to the GUI (and after a swap, to anyone).
                 self._publish(board_id, "failed", detail=str(exc))
@@ -689,6 +798,8 @@ class DebugService:
             _kill_pid(pid, self.stop_timeout)
         self._drop_record(board_id)
         detail = reason or "stopped"
+        if live is not None or verdict != "elsewhere":        # we ended it: the board drains it
+            self._mark_ended(board_id, pid=pid, why=detail)
         self._release_ports(rec)
         self._publish(board_id, "down", pid=pid, detail=detail)
         return DebugStatus(state="down", pid=pid, detail=detail)
@@ -718,20 +829,30 @@ class DebugService:
             binary = find_openocd()
             cfgs = tuple(adapter.openocd_config())
             argv = detect_argv(binary, adapter, cfgs)
-            try:
-                res = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True,
-                                     text=True, errors="replace", timeout=self.detect_timeout,
-                                     **_popen_flags())
-            except subprocess.TimeoutExpired as exc:
-                raise UnreachableError(
-                    f"OpenOCD detect did not finish within {self.detect_timeout:.0f}s",
-                    hint="the board's JTAG server may be wedged") from exc
-            text = (res.stdout or "") + (res.stderr or "")
-            ids = parse_idcodes(text)
-            if ids:
-                return ids[0]
-            raise classify_failure(text, res.returncode,
-                                   target=getattr(adapter, "describe", lambda: "")())
+            target = getattr(adapter, "describe", lambda: "")()
+            return self._once_more_if_own_race(
+                board_id, lambda: self._detect_once(board_id, argv, target))
+
+    def _detect_once(self, board_id: str, argv: list[str], target: str) -> str:
+        self._await_cooldown(board_id)
+        try:
+            res = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True,
+                                 text=True, errors="replace", timeout=self.detect_timeout,
+                                 **_popen_flags())
+        except subprocess.TimeoutExpired as exc:
+            self._mark_ended(board_id, why="detect timed out")    # killed mid-session
+            raise UnreachableError(
+                f"OpenOCD detect did not finish within {self.detect_timeout:.0f}s",
+                hint="the board's JTAG server may be wedged") from exc
+        text = (res.stdout or "") + (res.stderr or "")
+        ids = parse_idcodes(text)
+        if ids:
+            self._mark_ended(board_id, why="detect")
+            return ids[0]
+        err = classify_failure(text, res.returncode, target=target)
+        if _was_served(err):
+            self._mark_ended(board_id, why="detect failed")
+        raise err
 
     # -- starting -------------------------------------------------------------------------------
 
@@ -772,6 +893,9 @@ class DebugService:
                prefer: DebugPorts | None) -> DebugStatus:
         spawns = 0
         for ports in self._candidates(board_id, prefer):
+            # Before the port check, so the wait never sits between check and bind. Again
+            # after a spawn that failed once it had the board. A no-op when nothing ended lately.
+            self._await_cooldown(board_id)
             with self._guard:
                 if any(p in self._reserved for p in ports.reserved()):
                     continue
@@ -825,10 +949,12 @@ class DebugService:
         self._live_set(board_id, _Live(proc, ports, session, cfgs, board_id))
         try:
             self._wait_until_serving(board_id, proc, ports, target)
-        except BaseException:
+        except BaseException as exc:
             self._live_pop(board_id)
             _terminate(proc, self.stop_timeout)
             self._drop_record(board_id)
+            if _was_served(exc):
+                self._mark_ended(board_id, pid=proc.pid, why="failed to start")
             raise
         record["state"] = "up"
         self._write_record(board_id, record)
