@@ -31,6 +31,8 @@ factory in its own module, and this file wires it in if it exists:
 | ``.sd_ab:make_ab_storage_adapter(session)``    | HUB-SD | ``session.ab_storage``: the config SD A/B by pointer (U8) |
 | ``.settings:mps3_rows(**pack kwargs)``         | SET-PACK | ``Mps3Pack.settings()``: the ``mps3.*`` rows and boards.toml tables |
 | ``.claim:make_claim_adapter(session)``         | LINUX-CLAIM | ``session.claim``: the Linux harness's SSH claim and board-SSH reach |
+| ``.os_slots:make_os_slot_adapter(session)``    | LINUX-SLOTS | ``session.os_slots``: the Linux harness's A/B OS slots (CCR T7-2) |
+| ``.card:make_card_adapter(session)``           | LINUX-SLOTS | ``session.card``: the user microSD, D13 overlay store (CCR LS-1) |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -217,6 +219,8 @@ class Mps3Session(BoardSession):
             ("hub_sd", "hub_sd", "make_hub_sd_adapter"),     # HUB-SD: SD writes via the hub
             ("ab_storage", "sd_ab", "make_ab_storage_adapter"),  # HUB-SD U8: SD A/B view
             ("claim", "claim", "make_claim_adapter"),        # LINUX-CLAIM: SSH claim + reach
+            ("os_slots", "os_slots", "make_os_slot_adapter"),  # CCR T7-2: Linux OS slots A/B
+            ("card", "card", "make_card_adapter"),           # CCR LS-1: user microSD (D13)
         ):
             make = _hook(module, factory)
             if make is not None:
