@@ -575,7 +575,9 @@ class Mps3Claim:
                 return cached
             host = self.board_host()
             try:
-                reply = _identify.identify(host, timeout=IDENTIFY_TIMEOUT_S, retries=1)
+                # info asks once (<= 1 s, cached LAN_TTL_S); a refresh or a claim asks twice
+                reply = _identify.identify(host, timeout=IDENTIFY_TIMEOUT_S,
+                                           retries=1 if refresh else 0)
                 obs = self._from_raw(reply.raw, f"identify {host}", now)
             except (UnreachableError, UsageError) as exc:
                 obs = Observation(None, "", f"identify {host}", now, exc.message)

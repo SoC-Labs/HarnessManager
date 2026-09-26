@@ -253,7 +253,7 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
         _row("boards.*.ssh.key", "path", "", "Boards",
              "The private key Harness Manager's ssh uses for this board (empty: your ssh "
              "default); a claim sends its .pub. The key itself is never read",
-             at="claim.py:839", scope="board", apply="reopen"),
+             at="claim.py:841", scope="board", apply="reopen"),
         _row("boards.*.ssh.host_key", "str", "", "Boards",
              "The board's pinned SSH host key, written by `board claim` (a changed key is "
              "refused; clear it only for a re-provisioned board)", at="claim.py:323",
