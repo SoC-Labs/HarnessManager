@@ -394,6 +394,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # XVC-CORE's fabric-debug routes (docs/API.md "Fabric debug over XVC"), simulated.
     from .x3_mock_xvc import register as register_xvc
     app.state.xvc = register_xvc(app, state, sim, _ok, _accepted)
+    # LINUX-CLAIM's SSH claim routes (docs/API.md "SSH claim of a Linux harness"), simulated.
+    from .lc_mock_claim import register as register_claim
+    app.state.claim = register_claim(app, state, _ok, _accepted)
     # HARNESS-CAT's harness versions routes (docs/API.md "Harness versions"): the real
     # routes and catalogue over a simulated update service.
     from .hcat_mock_harness import register as register_harness
@@ -551,8 +554,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     def info(bid: str) -> dict[str, Any]:
         state.jobs.gate(bid)
         i = eng.info(bid)
+        claim = app.state.claim.get(bid) if hasattr(app.state, "claim") else None
         return _ok(candidate=i.candidate, identity=i.identity, health=i.health,
-                   capabilities=i.capabilities, unavailable=i.unavailable)
+                   capabilities=i.capabilities, unavailable=i.unavailable,
+                   **({"claim": claim} if claim is not None else {}))
 
     @app.get(f"{API}/boards/{{bid}}/lock")
     def lock(bid: str) -> dict[str, Any]:

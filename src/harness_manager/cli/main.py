@@ -352,6 +352,11 @@ def make_parser() -> argparse.ArgumentParser:
     cmd_hubcfg.register(sub)
     verbs["hub"] = sub.choices["hub"]
 
+    # -- board (lane LINUX-CLAIM: the Linux harness's SSH claim and its SSH reach) ----------
+    from . import cmd_claim
+    cmd_claim.register(sub)
+    verbs["board"] = sub.choices["board"]
+
     # -- config (lane SET-API: the settings; through the service when it runs) -------------
     from . import cmd_config
     cmd_config.register(sub)

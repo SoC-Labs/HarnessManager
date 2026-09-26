@@ -127,6 +127,12 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/boards/{bid}/harness/history"),
         ("POST", "/boards/{bid}/harness/rollback"),
     ),
+    # LINUX-CLAIM: served in the mock by tests/fakes/lc_mock_claim.py (a simulated claim).
+    "claim_api": (
+        ("GET", "/boards/{bid}/claim"),
+        ("POST", "/boards/{bid}/claim"),
+        ("GET", "/boards/{bid}/ssh"),
+    ),
     # SET-API: served in the mock by tests/fakes/settings_mock.py (the real routes over a real
     # resolver in a temporary directory).
     "settings_api": (

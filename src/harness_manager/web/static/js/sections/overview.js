@@ -16,6 +16,7 @@ import { ScreenCommand } from "./consoles.js";
 import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./details.js";
 import { debugLive, debugSpecs } from "./debug.js";
 import { ARM_TEXT, REBOOT_GATE, RESET_DUT_GATE, rebootSpec, resetDutSpec } from "./power.js";
+import { ClaimTileRow } from "./claim.js";
 import {
   ActionRow, ArmBox, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner,
 } from "../ui.js";
@@ -277,6 +278,7 @@ function BoardTile({ bid }) {
       <span class="k">Temperature</span><span class="v" data-testid="tile-temp"><${ReadingValue} r=${temp} empty=${readings ? "no sensor" : "reading..."} /></span>
       <span class="k">DUT clock</span><span class="v" data-testid="tile-clock"><${ReadingValue} r=${clk} empty=${readings ? "not reported" : "reading..."} /></span>
       <${PanelTileRow} bid=${bid} />
+      <${ClaimTileRow} bid=${bid} />
     </div>
     <div class="tile-actions">
       <${ActionRow} bid=${bid} panel="reset_dut" spec=${resetDutSpec(bid)} icon="rotate-ccw" compact=${true}

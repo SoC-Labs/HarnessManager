@@ -321,6 +321,22 @@ docs/design/XVC_DEBUG.md is the design. **Scope:** XVC here is the harness's own
 - **Swaps and leases:** `deploy.started` drops the board's slot and stops HM's hw_server before the swap; `deploy.done` (verified) re-attaches with a fresh hw_server on the same port and the new design's probes file; an unverified or failed swap closes the session with the reason. `lease.state` released, expired or lost closes it. Closing the board closes it.
 - **Errors:** 400 USAGE for a bad `which`, `format` or `byo`; 404 ABSENT for no such probes file, or a board that is not open.
 
+### SSH claim of a Linux harness (LINUX-CLAIM, `claim_api.py`)
+
+The Linux harness ships **unclaimed**: key-only SSH with no key. The first `authorized_keys` it is sent (TFTP, net-protocol "TOFU first-key claim") claims it, and every later claim is refused. Once claimed, the harness refuses slot changes from anything but the board itself (S12), so Harness Manager reaches it over SSH, `ssh -J HUB root@BOARD`, with the host key pinned at claim time in boards.toml `boards.<b>.ssh.host_key`.
+
+| Method and path | Returns |
+|---|---|
+| `GET /boards/{bid}/claim?refresh=` | `{board_id, claim}`: `claim` is `BoardInfo.claim` (null on bare metal). `refresh=true` asks the board now, through the hub when there is one |
+| `POST /boards/{bid}/claim` `{confirm: true, key?, adopt?, replace_host_key?}` | 202 job `claim`; the result is `{board_id, claim}` with `claim.action` `claimed` or `adopted` |
+| `GET /boards/{bid}/ssh?command=` | `{board_id, argv}`: the pinned `ssh [-J HUB] -l root BOARD [command]` command line. Nothing is run |
+
+- **`BoardInfo.claim`** (also on `GET /boards/{bid}` and `info --json`, and only on a Linux harness: the key is absent on bare metal): `{state, claimed, host_key, route, user, source, checked_at, live, notes}`. `state` is `mine` (this Harness Manager claimed it, or adopted the claim, and the host key still matches the pin), `other` (claimed by a key this Harness Manager did not claim with: the board does not publish which), `unclaimed` or `unknown`. `claimed` is `{by, key_fp, at, mine}` or null. `host_key` is `{reported, pinned, match}` (`match` false = the board's key changed: SSH to it is refused). `live` false means the state is the last check on record (a board behind a hub: identify is UDP and does not ride the SSH tunnel, so `info` never asks the hub; `refresh=true` does).
+- **Never automatic.** `POST` without `"confirm": true` is 409 REFUSED before anything reaches the board. Nothing in Harness Manager claims a board by itself or re-claims one.
+- **Refusals before the job:** 409 HELD while another job runs; 409 HELD naming the holder when the board is behind a hub and the lease is not this client's; 422 UNAVAILABLE on bare metal. In the job: 409 ALREADY when the board is already claimed (`adopt` pins a claim you made elsewhere), 409 REFUSED when the host key differs from the pin (`replace_host_key`, only for a re-provisioned board) or from the one the board publishes, or when your key does not log in.
+- **The claim's lock:** a harness refusal `slot locked: board claimed (use ssh)` is shown as REFUSED: "this board is claimed by <key fp>; this operation needs the claiming key (use `board claim` only if the board was re-provisioned)". The fabric identity lock, `identity lock: <reason>`, is INCOMPATIBLE.
+- **Events:** `board.claim` `{state, claimed, host_key, route, action?}` after a claim or a refresh.
+
 ### App self-update: apply with a restart, status and settings (OTA-D, `update_api.py`)
 
 docs/design/HM_SELF_UPDATE.md §5 is the design; david's decisions U3 (notify, auto-stage, apply on a click), U4 (the same PTY paths and a re-attach notice, no fd handover) and U6 (the admin policy file) apply. Additive: the routes above are unchanged.

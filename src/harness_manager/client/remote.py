@@ -228,6 +228,7 @@ class RemoteEngine:
         self.consoles = RemoteConsoles(self)
         self.debug = RemoteDebug(self)
         self.xvc = RemoteXvc(self)             # lane XVC-CORE: fabric debug over XVC
+        self.board_claim = RemoteClaim(self)   # lane LINUX-CLAIM: the Linux harness's SSH claim
         self.telemetry = RemoteTelemetry(self)
         self._mu = threading.RLock()
         self._sessions: dict[str, RemoteSession] = {}
@@ -1071,6 +1072,54 @@ class RemoteXvc:
             refresh: bool = False) -> dict[str, Any]:
         payload = self._engine._http.get(self._path(session, f"/ltx?which={q(which)}&format=json"))
         return {k: v for k, v in payload.items() if k not in ("ok", "board_id")}
+
+
+class RemoteClaim:
+    """The SSH claim service (``services.claim``) over the API. The daemon asks the board and
+    writes the pin; ``check_lease`` is left to the route (409 HELD before the job starts)."""
+
+    def __init__(self, engine: RemoteEngine) -> None:
+        self._engine = engine
+
+    def _path(self, session: BoardSession) -> str:
+        return f"/boards/{q(_bid(session))}/claim"
+
+    def check_claimable(self, session: BoardSession) -> None:
+        """Nothing to claim (bare metal): refused here, before the question."""
+        if self.status(session) is None:
+            from harness_manager.services.claim import CAPABILITY, NO_ADAPTER
+
+            raise UnavailableError(CAPABILITY, NO_ADAPTER)
+
+    def status(self, session: BoardSession, *, refresh: bool = False) -> Any:
+        leaf = "?refresh=true" if refresh else ""
+        return self._engine._http.get(self._path(session) + leaf).get("claim")
+
+    def refresh(self, session: BoardSession) -> Any:
+        return self.status(session, refresh=True)
+
+    def claim(self, session: BoardSession, *, confirm: bool, key: str | None = None,
+              adopt: bool = False, replace_host_key: bool = False,
+              progress: Any = None) -> Any:
+        def phase(text: str, _done: int, _total: int) -> None:
+            if progress is not None:
+                progress(text)
+
+        body = {"confirm": bool(confirm), "adopt": bool(adopt),
+                "replace_host_key": bool(replace_host_key)}
+        if key:
+            body["key"] = str(Path(key).expanduser().resolve())
+        out = self._engine.run_job(self._path(session), body, progress=phase)
+        return (out or {}).get("claim") if isinstance(out, dict) else out
+
+    def ssh_argv(self, session: BoardSession, command: Any = (), *, tty: bool = False) -> list[str]:
+        import shlex
+
+        leaf = f"?command={q(shlex.join(list(command)))}" if command else ""
+        argv = list(self._engine._http.get(f"/boards/{q(_bid(session))}/ssh{leaf}")["argv"])
+        if tty and "-t" not in argv:
+            argv.insert(argv.index("-l") if "-l" in argv else len(argv), "-t")
+        return argv
 
 
 class RemoteTelemetry:

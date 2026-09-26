@@ -39,6 +39,8 @@ export const ENDPOINTS = Object.freeze({
   osc: ["GET", "/boards/{bid}/controller/osc"],
   // --- P3 PANEL-UI: the front panel (docs/API.md "Front panel", panel_api.py) ---
   panel: ["GET", "/boards/{bid}/panel"],
+  // --- LINUX-CLAIM: the Linux harness's SSH claim (docs/API.md, claim_api.py) ---
+  claim: ["POST", "/boards/{bid}/claim"],
   panelFrame: ["GET", "/boards/{bid}/panel/frame"],
   identify: ["POST", "/boards/{bid}/identify"],
   // --- end P3 PANEL-UI ---

@@ -94,13 +94,20 @@ def cmd_info(ctx: Ctx) -> int:
         f"control    {info.health.control_channel}",
     ]
     human += [f"note       {n}" for n in info.health.notes]
+    claim = getattr(info, "claim", None)
+    if claim is not None:                    # LINUX-CLAIM: a Linux harness's SSH claim
+        from .cmd_claim import describe
+
+        human.append(f"ssh claim  {describe(claim)}")
     human.append(f"can        {', '.join(sorted(info.capabilities))}")
     human += [f"cannot     {cap}: {why}" for cap, why in sorted(info.unavailable.items())]
-    # The JSON object IS the BoardInfo (candidate/identity/health/capabilities/unavailable).
-    ctx.emit(Result("info", {
-        "candidate": info.candidate, "identity": info.identity, "health": info.health,
-        "capabilities": info.capabilities, "unavailable": info.unavailable,
-    }, rows=[row], human=human))
+    # The JSON object IS the BoardInfo (candidate/identity/health/capabilities/unavailable,
+    # and ``claim`` on a Linux harness only).
+    data = {"candidate": info.candidate, "identity": info.identity, "health": info.health,
+            "capabilities": info.capabilities, "unavailable": info.unavailable}
+    if claim is not None:
+        data["claim"] = claim
+    ctx.emit(Result("info", data, rows=[row], human=human))
     return ExitCode.OK
 
 
