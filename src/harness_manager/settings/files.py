@@ -54,23 +54,48 @@ LEGACY_UPDATES = ("update", "settings.json")
 SCHEMA_VERSION = 1
 STATE_DIR_ENV = "HARNESS_MANAGER_STATE_DIR"
 BOARD_DEFAULTS = "defaults"            # [boards.defaults]: every board's defaults
+BOARD_OWN_KEYS = ("match", "name")     # a board's own: never from [boards.defaults]
 _HEADER = ("Harness Manager settings. The Settings menu and `harness-manager config` edit "
            "this file;\nso can you: comments are kept. Secrets are never here (see "
            "`harness-manager config path`).")
 
 
+#: The state dir of the service this process is (``use_config_dir``), or None.
+_SERVICE_DIR: Path | None = None
+
+
 def config_dir(state_dir: Path | str | None = None,
                env: Mapping[str, str] | None = None) -> Path:
-    """The one rule for where settings live: the caller's own state dir (a service started
-    with ``--state-dir``), else ``$HARNESS_MANAGER_STATE_DIR``, else ``~/.config/harness-manager``.
+    """The one rule for where settings and state live: the caller's own state dir, else the
+    service's own (a service started with ``--state-dir`` or ``--demo``: ``use_config_dir``),
+    else ``$HARNESS_MANAGER_STATE_DIR``, else ``~/.config/harness-manager``.
 
-    ``engine.resolve_state_dir`` and its four copies (SETTINGS.md §12.6) should call this
-    (SET-WIRE)."""
+    Every copy of the rule calls this (SET-WIRE; SETTINGS.md §12.6): the engine's
+    ``resolve_state_dir``, the daemon's ``default_state_dir``, the session lock dir, and
+    the debug, XVC and claim services. So ``boards.toml``, the tunnel dir, the statics and
+    the leases of a ``--state-dir``/``--demo`` service are its own, never the user's."""
     if state_dir is not None:
         return Path(state_dir)
+    if _SERVICE_DIR is not None:
+        return _SERVICE_DIR
     env = os.environ if env is None else env
     raw = env.get(STATE_DIR_ENV, "")
     return Path(raw) if raw else Path.home() / ".config" / "harness-manager"
+
+
+def use_config_dir(path: Path | str | None) -> Path | None:
+    """This process is the service for ``path`` (``daemon.server.run_daemon``): from now on
+    ``config_dir()`` answers it, before ``$HARNESS_MANAGER_STATE_DIR``. ``None`` ends that.
+    Returns the previous one, so a caller can put it back."""
+    global _SERVICE_DIR
+    prev = _SERVICE_DIR
+    _SERVICE_DIR = Path(path) if path is not None else None
+    return prev
+
+
+def service_config_dir() -> Path | None:
+    """The state dir of the service this process is, or None (a CLI, a test)."""
+    return _SERVICE_DIR
 
 
 @dataclass
