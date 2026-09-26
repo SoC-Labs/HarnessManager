@@ -30,7 +30,7 @@ T = 10_000
 APP = {"width": 1440, "height": 1000}
 NEW = "0.2.0"
 OLD = "0.0.1"                       # what the mock "runs" (WeekPlanSim.app_version)
-DOOR = "needs Debug USB or hub (hub install comes after cutover)"
+DOOR = "needs Debug USB here, or a hub that can write its SD"
 POLICY = {"path": "/etc/harness-manager/policy.toml", "self_update": "notify", "channel": "stable",
           "check_interval_s": 43200, "problems": []}
 

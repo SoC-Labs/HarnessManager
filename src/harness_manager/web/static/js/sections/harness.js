@@ -8,9 +8,10 @@
 // - Install shows the plan the daemon computed (GET /harness/releases/{v}?board_id=) and
 //   binds to its fingerprint. A re-key needs the typed "REKEY 0x…" phrase; nothing implies
 //   it. Behind a hub the lease holder installs: the daemon's 409 HELD names who holds it.
-// - U11: harness versions. U8/U9/U10 come later: the config SD is rewritten in place (A/B
-//   by pointer is not yet), the hub door is not built (after cutover), and there is no
-//   automatic revert of a dark board yet. The card says so where it matters.
+// - U11: harness versions. U9/U10 (lane HUB-SD): a board behind the hub installs "via the
+//   hub" (fpgahub writes nanosoc.bit; a client timeout there is expected), with a typed
+//   phrase naming the board, its lease holder and queue, and auto-revert of a board that
+//   stays dark, armed by default. U8 (A/B by pointer) is built but off until its board check.
 
 import { panelState, runJob } from "../actions.js";
 import { call, toApiError } from "../api.js";
@@ -19,10 +20,22 @@ import { html, useEffect } from "../lib.js";
 import { boardState, changed, onBoardEvent, timed } from "../store.js";
 import { ActionRow, ArmBox, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 
-export const DOOR_TEXT = "needs Debug USB or hub (hub install comes after cutover)";
-export const NOT_YET = "Not yet: installs through the hub (after cutover), an A/B config SD and "
-  + "automatic revert of a board that stays dark come later. Today an install rewrites the "
-  + "config SD in place, with a backup first.";
+export const DOOR_TEXT = "needs Debug USB here, or a hub that can write its SD";
+export const NOT_YET = "Not yet: the A/B config SD (U8) waits for its board check. Today a local "
+  + "install rewrites the config SD in place, with a backup first; an install via the hub writes "
+  + "nanosoc.bit only, keeps the previous one, and reverts a board that stays dark.";
+// HUB-SD: what each phase of an install via the hub is doing (update.progress phases).
+export const HUB_PHASE = [
+  ["backup:", "keeping the previous nanosoc.bit (signed, from the cache) as the backup"],
+  ["sd:uploading", "uploading nanosoc.bit to the hub"],
+  ["sd:writing", "writing the SD on the hub: a client timeout here is expected (the hub keeps writing)"],
+  ["sd:verifying", "verifying: waiting for the hub's record of our sha256"],
+  ["sd:verified", "verified by the hub's own record"],
+  ["reboot:", "rebooting over the hub's MCC share (paced)"],
+  ["confirm", "confirming the identity the board reports"],
+  ["revert:", "AUTO-REVERT: writing the previous nanosoc.bit back through the hub"],
+  ["revert-reboot:", "AUTO-REVERT: rebooting into the previous base"],
+];
 
 const VERDICT = {
   fits: { level: "ok", icon: "circle-check", text: "fits" },
@@ -51,6 +64,8 @@ export function hv(bid) {
       open: {},                 // version -> "What changes" open
       pick: "", pickRow: null, done: "", detail: null, detailError: null, detailLoading: false,
       typed: "",                // the typed re-key phrase
+      boardTyped: "",           // HUB-SD: the typed board phrase of an install via the hub
+      autoRevert: null,         // HUB-SD (U10): null = the plan's default (armed)
       history: null, historyError: null, historyOpen: false,
       rollback: null, rollbackError: null,   // {plan, to}: the plan a rollback would run
       stale: "",                // a harness.* event from elsewhere changed the catalogue
@@ -114,6 +129,8 @@ export async function pickRelease(bid, version) {
   h.detailError = null;
   h.detailLoading = true;
   h.typed = "";
+  h.boardTyped = "";
+  h.autoRevert = null;
   h.rollback = null;
   panelState(bid, "harness_install").lines = [];
   changed();
@@ -176,6 +193,12 @@ function whyText(row) {
   return row.why;
 }
 
+function ViaChip({ row }) {
+  if (row.via !== "hub") return null;
+  return html`<${Chip} level="accent" icon="server" testid="via-hub"
+    title="fpgahub on the lab hub writes the config SD; the board is rebooted over its MCC share">via the hub<//>`;
+}
+
 // Why Install cannot open for this row ("" when it can).
 function installBlock(row) {
   if ((row.marks || []).includes("running")) return "the board runs it";
@@ -203,7 +226,7 @@ function Row({ bid, row, h, pinBusy }) {
         <span class="tags">${(row.channels || []).map((c) => html`<span class="tag" key=${c}>${c}</span>`)}</span>
         <${Marks} row=${row} />
       </div>
-      <div class="hrow-verdict"><${VerdictChip} row=${row} />
+      <div class="hrow-verdict"><${VerdictChip} row=${row} /><${ViaChip} row=${row} />
         <span class="secondary small hwhy" data-testid="why">${whyText(row)}</span></div>
       <div class="hrow-facts secondary small">
         <span class="mono">${row.static_id}</span>${` · ${row.impl || "?"} · fw `}<span class="mono">${(row.fw_sha || "?").slice(0, 8)}</span>${
@@ -259,7 +282,9 @@ async function unpin(bid) {
 function outcomeLines(o) {
   if (!o || typeof o !== "object") return [{ kind: "out", text: "done" }];
   const good = o.result === "installed" || o.result === "restored" || o.result === "stored";
-  const out = [{ kind: good ? "ok" : "warnline", text: `${o.result}: ${o.detail || ""}` }];
+  // HUB-SD (U10): a board left dark says so as loudly as the card can
+  const loud = o.result === "dark" || o.result === "auto-reverted" || o.result === "auto-revert-failed";
+  const out = [{ kind: good ? "ok" : loud ? "err" : "warnline", text: `${o.result}: ${o.detail || ""}` }];
   const bad = (o.checks || []).filter((c) => c.check !== "ok");
   for (const c of bad) out.push({ kind: c.check === "unchecked" ? "hint" : "warnline", text: `${c.name}: ${String(c.check).toUpperCase()} (${c.detail})` });
   if (o.restore_hint) out.push({ kind: "hint", text: o.restore_hint });
@@ -267,7 +292,40 @@ function outcomeLines(o) {
 }
 
 function progressText(d) {
-  return `${d.phase || "working"}${d.total > 1 ? `: ${Math.floor((d.done * 100) / d.total)}%` : ""}`;
+  const phase = d.phase || "working";
+  const hub = HUB_PHASE.find(([p]) => phase === p || (p.endsWith(":") && phase.startsWith(p)));
+  const name = hub ? hub[1] : phase;
+  return `${name}${d.total > 1 ? `: ${Math.floor((d.done * 100) / d.total)}%` : ""}`;
+}
+
+// HUB-SD: the typed phrase of an install via the hub (it names the board, its lease holder
+// and the queue) and the auto-revert switch (armed by default: U10).
+function DoorConsent({ bid, h, plan, id }) {
+  if (!plan || plan.via !== "hub") return null;
+  const hub = plan.hub || {};
+  if (h.autoRevert === undefined || h.autoRevert === null) h.autoRevert = !!plan.auto_revert;
+  return html`<div class="stack gap-8" data-testid="harness-door">
+    <${Reason} level="warn" icon="server" testid="harness-door-text" text=${hub.consent_text || plan.board_phrase} />
+    <div class="field rekey"><label for=${`${id}-${bid}`}>Board</label>
+      <input class="input mono grow" id=${`${id}-${bid}`} placeholder=${`type ${plan.board_phrase}`} autocomplete="off" spellcheck="false"
+        value=${h.boardTyped || ""} onInput=${(e) => { h.boardTyped = e.target.value; changed(); }} data-testid="harness-board-phrase" /></div>
+    <label class="check-inline" title="If the board answers neither ping nor version after the REBOOT, write the previous nanosoc.bit back through the hub and REBOOT again">
+      <input type="checkbox" data-testid="harness-auto-revert" checked=${!!h.autoRevert} disabled=${!plan.auto_revert}
+        onChange=${(e) => { h.autoRevert = e.target.checked; changed(); }} />
+      auto-revert if the board stays dark${plan.auto_revert ? "" : " (no backup: unavailable)"}</label>
+  </div>`;
+}
+
+function doorBody(h, plan) {
+  if (!plan || plan.via !== "hub") return {};
+  return { via: "hub", board_phrase: (h.boardTyped || "").trim(), auto_revert: !!h.autoRevert };
+}
+
+function doorGuard(h, plan) {
+  if (plan && plan.via === "hub" && (h.boardTyped || "").trim() !== plan.board_phrase) {
+    return `via the hub: type exactly ${plan.board_phrase}`;
+  }
+  return "";
 }
 
 function PlanSteps({ plan }) {
@@ -297,11 +355,11 @@ function InstallPanel({ bid, h }) {
     key: "harness_install", label: `Install harness ${h.pick}`, busyLabel: "Installing...", budgetS: 900,
     command: `harness install ${bid} ${h.pick}${rekey ? ` --consent "${h.typed.trim()}"` : ""}`,
     run: (ctx) => runJob("harnessInstall", { bid }, { fingerprint: plan.fingerprint, version: h.pick,
-      ...(rekey ? { rekey_phrase: h.typed.trim() } : {}) },
+      ...(rekey ? { rekey_phrase: h.typed.trim() } : {}), ...doorBody(h, plan) },
     (x) => ctx.progress(progressText(x), String(x.phase || "").split(":")[0]), "harness_install"),
     render: outcomeLines,
     renderError: (e) => (e.data && e.data.outcome ? outcomeLines(e.data.outcome) : []),
-    onDone: (ok) => { h.typed = ""; if (ok) { h.done = h.pick; refreshQuietly(bid); } changed(); },
+    onDone: (ok) => { h.typed = ""; h.boardTyped = ""; h.autoRevert = null; if (ok) { h.done = h.pick; refreshQuietly(bid); } changed(); },
   };
   const guard = () => {
     if (done) return "installed: this plan is spent";
@@ -309,8 +367,9 @@ function InstallPanel({ bid, h }) {
     if ((plan.blockers || []).length) return `blocked: ${plan.blockers[0]}`;
     if (plan.up_to_date) return "the board already runs this release";
     if (rekey && h.typed.trim() !== phrase) return `a re-key: type exactly ${phrase}`;
-    return "";
+    return doorGuard(h, plan);
   };
+  const viaHub = !!(plan && plan.via === "hub");
   return html`<div class="card inset" data-testid="harness-install" data-release=${h.pick}>
     <div class="card-head"><h3 class="card-title"><${Icon} name="upload" />Install harness ${h.pick}</h3>
       <span class="spacer"></span>
@@ -333,8 +392,10 @@ function InstallPanel({ bid, h }) {
           <input class="input mono grow" id=${`hv-rk-${bid}`} placeholder=${`type ${phrase}`} autocomplete="off" spellcheck="false"
             value=${h.typed} onInput=${(e) => { h.typed = e.target.value; changed(); }} data-testid="harness-rekey" /></div>
           <p class="secondary small">A re-key changes the static: every overlay and DUT RM keyed to ${(plan.running || {}).shell_id || "the running static"} stops loading.</p>` : null}
+        <${DoorConsent} bid=${bid} h=${h} plan=${plan} id="hv-bp" />
         <${ArmBox} bid=${bid} armKey="harness_install" testid="arm-harness"
-          text="Arm: I understand this writes the board's config SD (after a backup) and reboots the board." />
+          text=${viaHub ? "Arm: I understand the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted over its MCC share."
+            : "Arm: I understand this writes the board's config SD (after a backup) and reboots the board."} />
         <${ActionRow} bid=${bid} panel="harness_install" spec=${install} variant="primary" icon="upload"
           gate=${{ arm: "harness_install", guard }} />`}` : null}
       <${ResultBlock} lines=${p.lines} panel=${p} testid="harness-result" />
@@ -349,6 +410,8 @@ async function askRollback(bid, to) {
   h.rollback = null;
   h.rollbackError = null;
   h.typed = "";
+  h.boardTyped = "";
+  h.autoRevert = null;
   closePick(bid);
   panelState(bid, "harness_install").lines = [];       // the last install's answer is not this one's
   const r = await timed(`harness rollback ${bid} --to ${to}`, () => call("harnessRollback", { bid }, { to }));
@@ -368,7 +431,7 @@ function RollbackPanel({ bid, h }) {
     key: "harness_rollback", label: `Roll back to ${plan.version}`, busyLabel: "Rolling back...", budgetS: 900,
     command: `harness rollback ${bid} --to ${to}`,
     run: (ctx) => runJob("harnessRollback", { bid }, { to, fingerprint: plan.fingerprint,
-      ...(plan.rekey ? { rekey_phrase: h.typed.trim() } : {}) },
+      ...(plan.rekey ? { rekey_phrase: h.typed.trim() } : {}), ...doorBody(h, plan) },
     (x) => ctx.progress(progressText(x), String(x.phase || "").split(":")[0]), "harness_rollback"),
     render: outcomeLines,
     renderError: (e) => (e.data && e.data.outcome ? outcomeLines(e.data.outcome) : []),
@@ -377,7 +440,7 @@ function RollbackPanel({ bid, h }) {
   const guard = () => {
     if ((plan.blockers || []).length) return `blocked: ${plan.blockers[0]}`;
     if (plan.rekey && h.typed.trim() !== plan.consent_phrase) return `a re-key: type exactly ${plan.consent_phrase}`;
-    return "";
+    return doorGuard(h, plan);
   };
   return html`<div class="card inset" data-testid="harness-rollback" data-release=${plan.version}>
     <div class="card-head"><h3 class="card-title"><${Icon} name="undo-2" />Roll back to harness ${plan.version}</h3>
@@ -392,6 +455,7 @@ function RollbackPanel({ bid, h }) {
       ${plan.rekey ? html`<div class="field rekey"><label for=${`hv-rb-${bid}`}>Consent</label>
         <input class="input mono grow" id=${`hv-rb-${bid}`} placeholder=${`type ${plan.consent_phrase}`} autocomplete="off" spellcheck="false"
           value=${h.typed} onInput=${(e) => { h.typed = e.target.value; changed(); }} data-testid="rollback-rekey" /></div>` : null}
+      <${DoorConsent} bid=${bid} h=${h} plan=${plan} id="hv-rbp" />
       <${ArmBox} bid=${bid} armKey="harness_rollback" testid="arm-harness-rollback"
         text="Arm: I understand this writes the board's config SD (after a backup) and reboots the board." />
       <${ActionRow} bid=${bid} panel="harness_install" spec=${spec} variant="primary" icon="undo-2"
@@ -410,7 +474,8 @@ function History({ bid, h }) {
     ${rows.length ? html`<table class="table compact"><thead><tr><th>When</th><th>Harness</th><th>Result</th><th>Replaced</th></tr></thead>
       <tbody>${rows.map((x, i) => html`<tr key=${i} data-version=${x.version}>
         <td class="nowrap">${x.recorded_at ? `${new Date(x.recorded_at * 1000).toISOString().slice(0, 10)} ${clock(x.recorded_at)}` : "?"}</td>
-        <td class="mono">${x.version || "?"}${x.kind && x.kind !== "install" ? html` <span class="tag">${x.kind}</span>` : null}</td>
+        <td class="mono">${x.version || "?"}${x.kind && x.kind !== "install" ? html` <span class="tag">${x.kind}</span>` : null}${
+          x.via === "hub" ? html` <span class="tag">via hub</span>` : null}${x.dark ? html` <span class="tag i-err">dark</span>` : null}</td>
         <td>${x.result}</td><td class="mono">${x.from_version || "-"}</td></tr>`)}</tbody></table>`
     : html`<p class="muted small" data-testid="harness-history-none">No install on ${bid} is recorded by this Harness Manager.</p>`}
   </div>`;
