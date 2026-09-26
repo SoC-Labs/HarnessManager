@@ -63,6 +63,20 @@ owners.
   `restore`, `console`, `debug`, `reset`, `clock`, `lab`, `mcc`, `sd`, `update`,
   `daemon`, `ui`, `app`, `help`. Every verb has `--json` and `--tsv` output and
   documented exit codes (`harness-manager help --tabs`).
+- The settings (`harness-manager config`, the Settings menu) now control what
+  environment variables alone did: OpenOCD, Vivado, hw_server and uv, the app window's
+  browser, the update source and mirrors, the GitHub token (the secret store, between
+  `$HARNESS_MANAGER_GITHUB_TOKEN` and `gh`), the kit hub archive, the debug and XVC port
+  bases, and the MPS3 OpenOCD configs and overlay folders. A variable that is set still
+  wins, as before. A change applies at the next use, except the port bases and the
+  service's port, address and log level, which apply when the service restarts.
+- `daemon start --log-level` reaches the service; without it, and without `--port` or
+  `--listen`, the service uses its settings (`advanced.log_level`, `advanced.port`,
+  `advanced.listen`). A `--state-dir` or `--demo` service reads its own `boards.toml` and
+  settings, never yours.
+- `boards.toml` takes a `[boards.defaults]` table: values every board gets unless its
+  own table says otherwise (never a board's `name` or `match`, and never a meter, hub
+  route or SYSMON table the board does not have).
 
 ### The MPS3 board pack
 - Identify the harness and its health (idle, busy, wedged, offline, service down,
