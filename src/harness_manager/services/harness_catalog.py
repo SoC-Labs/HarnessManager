@@ -222,9 +222,11 @@ def verdict_of(plan: Plan, rel: HarnessRelease, board: BoardView, *, app_version
         bad.append(f"supports {', '.join(rel.compat.board_revs)}; the config SD is for "
                    f"{', '.join(board.sd_revisions)}")
     door: list[str] = []
-    if plan.base and not (board.has_storage and board.has_controller):
+    if plan.base and plan.via == "hub":
+        needs.append("hub-door")              # HUB-SD: installable through the hub
+    elif plan.base and not (board.has_storage and board.has_controller):
         door.append("the base is on the config SD: it needs the MPS3 Debug USB on this machine "
-                    "(or the hub door, not built yet)")
+                    "or a hub that can write it (the hub door)")
         needs.append("debug-usb")
     if plan.os_slot and not board.has_os_slots:
         door.append("it carries an OS slot image: it needs a Linux harness with the slot verbs "
@@ -256,7 +258,10 @@ def _fits_why(plan: Plan) -> str:
         return "overlays only: into the local store; the board is not touched"
     back = any("ROLLBACK" in w for w in plan.warnings)
     what = []
-    if plan.base:
+    if plan.base and plan.via == "hub":
+        what.append("via the hub: it writes nanosoc.bit and the board is rebooted over its MCC "
+                    "share" + (" (auto-revert armed)" if plan.auto_revert else ""))
+    elif plan.base:
         what.append("the config SD is rewritten and the board rebooted")
     if plan.os_slot:
         what.append("the OS image goes to the inactive slot, try-once")
@@ -500,7 +505,7 @@ class HarnessCatalog:
             "verdict": "", "verdict_text": "", "why": "no board: name one for verdicts",
             "needs": [], "reasons": [], "warnings": [], "mode": "", "rekey": False,
             "consent_phrase": "", "doors": [], "touches_board": False, "channel": chans[0],
-            "fingerprint": "",
+            "fingerprint": "", "via": "", "board_phrase": "", "auto_revert": False,
         }
         if view is None:
             row["changes"] = what_changes(rel, None)
@@ -512,7 +517,10 @@ class HarnessCatalog:
                     "mode": plan.mode, "rekey": plan.rekey,
                     "consent_phrase": plan.consent_phrase, "doors": doors_of(plan),
                     "touches_board": plan.base or plan.os_slot,
-                    "fingerprint": plan.fingerprint()})
+                    "fingerprint": plan.fingerprint(),
+                    # HUB-SD: the door the base goes through and its typed consent
+                    "via": plan.via, "board_phrase": plan.board_phrase,
+                    "auto_revert": plan.auto_revert})
         row["changes"] = what_changes(rel, view.identity if view.identity_known else None,
                                       running, plan)
         return row
@@ -536,7 +544,8 @@ class HarnessCatalog:
     def _doors(view: BoardView) -> dict[str, bool]:
         """The install doors this board has here (HARNESS-DIST §3.1)."""
         return {"mcc_sd": view.has_storage and view.has_controller,
-                "ethernet": view.has_os_slots, "host-store": True}
+                "ethernet": view.has_os_slots, "host-store": True,
+                "hub_sd": bool((view.hub_sd or {}).get("available"))}
 
     @staticmethod
     def _channel_summary(name: str, v: VerifiedChannel) -> dict[str, Any]:
@@ -601,13 +610,16 @@ class HarnessCatalog:
 
     def plan(self, session: Any, version: str | None = None, *, channel: str | None = None,
              source: str | None = None, overlays_only: bool = False,
-             verified: VerifiedChannel | None = None) -> tuple[Plan, VerifiedChannel]:
+             verified: VerifiedChannel | None = None,
+             via: str | None = None) -> tuple[Plan, VerifiedChannel]:
         """The install plan (``UpdateService.plan_harness``): ``version`` None is what the
-        board is offered (its pin, else the channel's current release)."""
+        board is offered (its pin, else the channel's current release). ``via`` (HUB-SD):
+        ``hub`` or ``usb``; None lets the planner pick the door."""
         return self.update.plan_harness(session, verified=verified, channel=channel,
                                         source=source, version=version,
                                         overlays_only=overlays_only,
-                                        catalog=self.catalog_id(session.candidate.pack))
+                                        catalog=self.catalog_id(session.candidate.pack),
+                                        via=via)
 
     def locate(self, version: str, *, channel: str | None = None, source: str | None = None,
                pack: str = "mps3") -> VerifiedChannel:

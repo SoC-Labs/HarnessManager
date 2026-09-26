@@ -28,6 +28,7 @@ from typing import Any
 from harness_manager.core.errors import RefusedError
 from harness_manager.core.model import BoardIdentity
 
+from . import hub_door
 from .schema import (
     KIND_OS_SLOT,
     KIND_OVERLAYS,
@@ -78,6 +79,13 @@ class Plan:
     base: bool = False                    # the config SD will be written
     os_slot: bool = False                 # the OS slot will be written
     reboot_wait_s: float | None = None    # None: the pack's own budget for the running harness
+    # HUB-SD (H10, U9/U10): the door a base goes through ("" = the local Debug USB, "hub" =
+    # the board pack's hub SD door), what it is, the typed phrase that names the board, its
+    # lease holder and queue, and whether auto-revert is armed by default (``hub_door``).
+    via: str = ""
+    hub: dict[str, Any] = field(default_factory=dict)
+    board_phrase: str = ""
+    auto_revert: bool = False
 
     @property
     def version(self) -> str:
@@ -93,11 +101,17 @@ class Plan:
             "board": self.board_id, "channel": self.channel, "serial": self.serial,
             "version": self.version, "mode": self.mode, "components": sorted(self.components),
             "running": self.running, "rekey": self.rekey, "base": self.base, "os": self.os_slot,
+            # HUB-SD: only when set, so a local plan's fingerprint is what it always was
+            **({"via": self.via, "board_phrase": self.board_phrase} if self.via else {}),
         }, sort_keys=True)
         return hashlib.sha256(body.encode()).hexdigest()
 
-    def approve(self, *, consent: str = "", by: str = "user") -> Approval:
-        """The user's go-ahead. A re-key needs ``consent`` equal to ``consent_phrase``."""
+    def approve(self, *, consent: str = "", by: str = "user", board_phrase: str = "",
+                auto_revert: bool | None = None) -> Approval:
+        """The user's go-ahead. A re-key needs ``consent`` equal to ``consent_phrase``; a
+        remote door (HUB-SD) needs ``board_phrase`` equal to the plan's (it names the board,
+        the lease holder and the queue). ``auto_revert``: None takes the plan's default
+        (armed on the hub door, U10), False disarms it, True needs a backup to revert to."""
         if self.blockers:
             raise RefusedError(f"this update cannot run: {'; '.join(self.blockers)}",
                                hint="fix the blockers first; `harness-manager update check` lists them")
@@ -107,7 +121,18 @@ class Plan:
                 f"{self.release.identity.static_id if self.release else '?'}); "
                 f"{len(self.unusable)} item(s) become unusable",
                 hint=f"to consent, type exactly: {self.consent_phrase}")
-        return Approval(fingerprint=self.fingerprint(), consent=consent.strip(), by=by)
+        if self.board_phrase and board_phrase.strip() != self.board_phrase:
+            raise RefusedError(
+                f"this install goes through the hub and interrupts whoever uses the board: "
+                f"{(self.hub or {}).get('consent_text') or self.board_phrase}",
+                hint=f"to consent, type exactly: {self.board_phrase}")
+        armed = self.auto_revert if auto_revert is None else bool(auto_revert)
+        if armed and not self.auto_revert and auto_revert:
+            raise RefusedError("auto-revert needs a backup to revert to, and this plan has none",
+                               hint="install without auto-revert, or through a door that keeps "
+                                    "a backup")
+        return Approval(fingerprint=self.fingerprint(), consent=consent.strip(), by=by,
+                        board_phrase=board_phrase.strip(), auto_revert=armed)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -121,6 +146,8 @@ class Plan:
             "warnings": list(self.warnings), "blockers": list(self.blockers),
             "components": list(self.components), "skipped": dict(self.skipped),
             "base": self.base, "os_slot": self.os_slot,
+            "via": self.via, "hub": dict(self.hub), "board_phrase": self.board_phrase,
+            "auto_revert": self.auto_revert,
             "fingerprint": self.fingerprint(),
         }
 
@@ -130,6 +157,8 @@ class Approval:
     fingerprint: str
     consent: str = ""
     by: str = "user"
+    board_phrase: str = ""                # HUB-SD: the typed phrase of a remote door
+    auto_revert: bool = False             # HUB-SD (U10): armed at approval
 
 
 @dataclass(frozen=True)
@@ -146,6 +175,9 @@ class BoardView:
     os_active_sha: str = ""               # the running OS slot image, when the adapter says
     sd_revisions: tuple[str, ...] = ()    # MB/HBI0309<rev> dirs seen on the config SD
     mcc_firmware: str = ""
+    # HUB-SD: the pack's hub SD door (``hub_door``), with the lease holder/mine/queue;
+    # {} when the board is not behind a hub.
+    hub_sd: dict[str, Any] = field(default_factory=dict)
 
 
 def _same_u32(a: str, b: str) -> bool:
@@ -296,12 +328,17 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
               version: str | None = None, overlays_only: bool = False,
               stored_overlays: Iterable[dict[str, str]] = (),
               have_token: bool = False, channel_warnings: Iterable[str] = (),
-              stored_components: Iterable[str] = (), pinned: str = "") -> Plan:
+              stored_components: Iterable[str] = (), pinned: str = "",
+              via: str | None = None) -> Plan:
     """The plan for one board (see the module docstring). Never raises for a board state.
 
     ``pinned`` (HARNESS-CAT): the board's pin. With no ``version``, the plan offers the
     pinned release instead of a newer current one, and a board already past its pin has
     nothing to do (a pin never proposes a rollback; naming the version does).
+
+    ``via`` (HUB-SD): ``"hub"`` sends the base through the pack's hub SD door, ``"usb"``
+    through the local Debug USB; None picks the hub door only for a board with no local
+    Debug USB whose pack offers it (``hub_door.apply``).
     """
     ident = board.identity or BoardIdentity(board_type=board.pack)
     pin_note = ""
@@ -413,10 +450,15 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     # Linux budget even though the pack would pick bare-metal from the running identity.
     plan.reboot_wait_s = LINUX_REBOOT_WAIT_S if rel.identity.impl == "linux" else None
 
-    if plan.base and not board.has_storage:
+    hub_door.apply(plan, rel, channel, board, via=via, running=running,
+                   have_token=have_token)
+    if plan.via == hub_door.VIA_HUB and plan.base and not board.has_controller:
+        plan.blockers.append("the new base runs only after a board REBOOT: it needs the hub's "
+                             "MCC share (tty_00) in the board's hub table")
+    if plan.base and not board.has_storage and plan.via != hub_door.VIA_HUB:
         plan.blockers.append("installing the harness base writes the config SD: it needs the "
                              "MPS3 Debug USB (the V2M-MPS3 volume)")
-    if plan.base and not board.has_controller:
+    if plan.base and not board.has_controller and plan.via != hub_door.VIA_HUB:
         plan.blockers.append("the new base runs only after a board REBOOT: it needs the Debug USB "
                              "MCC console")
     if plan.os_slot and not board.has_os_slots:
@@ -469,7 +511,9 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
     if plan.os_slot:
         s.append(PlanStep("write-os-slot", "write the INACTIVE OS slot, arm try-once "
                                            "(stage0 rolls back if it does not confirm)"))
-    if plan.base:
+    if plan.base and plan.via == hub_door.VIA_HUB:
+        s.extend(PlanStep(*step) for step in hub_door.steps(plan, rel))
+    elif plan.base:
         sd = rel.by_target(TARGET_MCC_SD)[0]
         s.append(PlanStep("backup-sd", "back up the whole config SD (mandatory gate)", sd.name))
         s.append(PlanStep("install-sd", "write the new base to the config SD, journaled, "
@@ -477,7 +521,9 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
     if plan.base or plan.os_slot:
         budget = (f"up to {plan.reboot_wait_s:.0f} s" if plan.reboot_wait_s
                   else "the pack's budget for this harness")
-        s.append(PlanStep("reboot", "reboot the board and witness it go down and come back "
+        how = ("a paced REBOOT over the hub's MCC share (100 ms a character, the only client "
+               "on tty_00), witnessed: " if plan.via == hub_door.VIA_HUB else "")
+        s.append(PlanStep("reboot", f"{how}reboot the board and witness it go down and come back "
                                     f"({budget})"))
         want = rel.identity
         what = f"harness {want.harness or rel.version}"
@@ -485,5 +531,7 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
             what = f"firmware {want.fw_sha[:8]} ({what})"
         s.append(PlanStep("confirm-identity", f"the board must report shell "
                                               f"{want.static_id}, {what}"))
+        if plan.base and plan.via == hub_door.VIA_HUB and plan.auto_revert:
+            s.append(PlanStep(*hub_door.revert_step(plan)))
     if plan.os_slot:
         s.append(PlanStep("confirm-os-slot", "confirm the new slot so stage0 keeps it"))

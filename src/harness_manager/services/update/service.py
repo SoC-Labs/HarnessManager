@@ -54,6 +54,21 @@ def _state_dir(engine: Any, state_dir: Path | None) -> Path:
     return resolve_state_dir(getattr(engine, "config", None))
 
 
+def sd_ab_setting(resolver: Any = None) -> bool:
+    """``updates.sd_ab`` from the settings (U8). Off when unset, unreadable, or not a bool:
+    the A/B pointer install stays off until its 10-minute board check proves the MCC loads
+    another 8.3 ``F0FILE`` name."""
+    try:
+        if resolver is None:
+            from harness_manager.settings import Resolver
+
+            resolver = Resolver.load()
+        value = resolver.resolve("updates.sd_ab").value
+    except Exception:  # noqa: BLE001 - a broken settings file never turns an install mode on
+        return False
+    return value is True
+
+
 def releases_summary(ch: Any) -> dict[str, list[dict[str, Any]]]:
     """The channel's releases as listed, the one it calls current marked (daemon + UI)."""
     return {
@@ -75,7 +90,7 @@ class UpdateService:
                  os_slots_for: Callable[[Any], OsSlotAdapter | None] = default_os_slots,
                  downloader: Downloader | None = None, app_updater: AppUpdater | None = None,
                  policy: Policy | None = None, now: Callable[[], float] = time.time,
-                 leases: Any = None) -> None:
+                 leases: Any = None, sd_ab: bool | Callable[[], bool] | None = None) -> None:
         self.engine = engine
         self.state_dir = _state_dir(engine, state_dir)
         self.state = UpdateState.under(self.state_dir)
@@ -99,6 +114,9 @@ class UpdateService:
         # its ``LeaseService`` here; otherwise one is made on first need (no bus: the
         # daemon's own service is the one that announces lease changes).
         self.leases = leases
+        # HUB-SD (U8): the config SD A/B by pointer, off until the 10-minute board check
+        # (``updates.sd_ab``); None reads the setting when an install asks.
+        self._sd_ab = sd_ab
 
     # -- parts --
 
@@ -122,7 +140,38 @@ class UpdateService:
         return HarnessInstaller(state=self.state, downloader=self.downloader, store=self.store,
                                 bus=self.bus, overlay_handler=self.overlay_handler(pack),
                                 os_slots_for=self.os_slots_for, now=self.now,
-                                lease_check=self.check_lease)
+                                lease_check=self.check_lease, sd_ab=self.sd_ab_enabled)
+
+    def sd_ab_enabled(self) -> bool:
+        """``updates.sd_ab`` (U8): False unless it is set, and False when it cannot be read."""
+        if self._sd_ab is not None:
+            return bool(self._sd_ab() if callable(self._sd_ab) else self._sd_ab)
+        return sd_ab_setting()
+
+    def hub_door_view(self, session: Any) -> dict[str, Any]:
+        """The pack's hub SD door (``session.hub_sd.describe()``) plus the lease as it bears
+        on an install: ``holder``, ``mine``, ``queue`` (HUB-SD). ``{}`` without a door."""
+        door = getattr(session, "hub_sd", None)
+        if door is None:
+            return {}
+        try:
+            out = dict(door.describe())
+        except Exception as exc:  # noqa: BLE001 - a plan never fails for a door's description
+            out = {"available": False, "reason": f"the hub door could not be read: {exc}"}
+        st = self.lease_state(session)
+        out.update(lease_required=bool(st.get("required")), mine=bool(st.get("mine")),
+                   holder=st.get("holder", ""), lease_reason=st.get("reason", ""))
+        queue: list[dict[str, Any]] = []
+        hub = getattr(session, "hub", None)
+        if hub is not None and st.get("required"):
+            try:
+                view = self.lease_service().view(hub, cached_only=True) or {}
+                queue = [{"holder": q.get("holder", ""), "position": q.get("position", 0)}
+                         for q in view.get("queue") or [] if isinstance(q, dict)]
+            except (HarnessError, TypeError):
+                queue = []
+        out["queue"] = queue
+        return out
 
     # -- the hub lease (HARNESS-CAT) --
 
@@ -188,15 +237,17 @@ class UpdateService:
                          identity_known=known, has_storage=storage is not None,
                          has_controller=controller is not None, has_os_slots=slots is not None,
                          os_active_sha=os_sha, sd_revisions=revs,
-                         mcc_firmware=getattr(boot, "firmware", "") or "")
+                         mcc_firmware=getattr(boot, "firmware", "") or "",
+                         hub_sd=self.hub_door_view(session))
 
     def plan_harness(self, session: Any, *, verified: VerifiedChannel | None = None,
                      channel: str | None = None, source: str | None = None,
                      version: str | None = None, overlays_only: bool = False,
                      catalog: str | None = None,
-                     pinned: str | None = None) -> tuple[Plan, VerifiedChannel]:
+                     pinned: str | None = None,
+                     via: str | None = None) -> tuple[Plan, VerifiedChannel]:
         """``pinned`` (HARNESS-CAT): None reads the board's pin (``Pins``) for this channel's
-        catalogue; "" plans as if it had none."""
+        catalogue; "" plans as if it had none. ``via`` (HUB-SD): ``hub``/``usb``/None."""
         verified = verified or self.fetch_channel(channel, source, catalog=catalog)
         if pinned is None:
             pin = self.pins().get(session.candidate.board_id,
@@ -213,7 +264,7 @@ class UpdateService:
                          have_token=self.downloader.has_token(),
                          channel_warnings=verified.warnings,
                          stored_components=StoredComponents(self.state).all(),
-                         pinned=pinned)
+                         pinned=pinned, via=via)
         return plan, verified
 
     def install_harness(self, session: Any, plan: Plan, approval: Approval | None,
@@ -221,9 +272,9 @@ class UpdateService:
         return self.installer(session.candidate.pack).run(session, plan, approval, verified)
 
     def rollback_harness(self, session: Any, *, backup_path: Path | None = None,
-                         wait_s: float | None = None) -> UpdateOutcome:
+                         wait_s: float | None = None, via: str | None = None) -> UpdateOutcome:
         return self.installer(session.candidate.pack).rollback(session, backup_path=backup_path,
-                                                               wait_s=wait_s)
+                                                               wait_s=wait_s, via=via)
 
     # -- check (read-only) --
 

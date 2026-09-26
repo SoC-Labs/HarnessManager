@@ -21,6 +21,15 @@ The flow (each phase is journaled in ``state_dir/update/journal/<board>.json``):
 The same service rolls back (``rollback``): restore the backup, reboot,
 confirm the old identity came back.
 
+**Doors** (HUB-SD). A plan with ``via="hub"`` writes the base through the pack's
+``session.hub_sd`` (the hub SD door: the same StorageAdapter shape, its backup the
+running release's ``.bit`` from the signed cache, which this installer prepares), and
+with ``updates.sd_ab`` on (``sd_ab=True``) a local base goes through
+``session.ab_storage`` (the config SD A/B by pointer, U8). A remote door that leaves the
+board **dark** (no ping, no version ``dark_after_s`` after the REBOOT) is written back
+and REBOOTed when the approval armed auto-revert (U10), and says so loudly
+(``update.dark``, ``update.auto_revert``, the history); not armed, it only reports.
+
 Events on the engine bus: ``update.started``, ``update.progress`` ``{phase, bytes,
 total}``, ``update.done`` ``{version, result}``, ``update.failed`` ``{reason}``.
 """
@@ -51,6 +60,7 @@ from harness_manager.core.session import pid_alive
 from .bundle import OverlayHandler, PreparedRelease, prepare_release
 from .channel import VerifiedChannel
 from .download import Downloader
+from .hub_door import DARK_AFTER_S, VIA_HUB
 from .os_slots import OsSlotAdapter
 from .planner import (
     MODE_NONE,
@@ -80,6 +90,12 @@ RESULT_STORED = "stored"
 RESULT_UP_TO_DATE = "up-to-date"
 RESULT_RESTORED = "restored"
 RESULT_RESTORED_UNCONFIRMED = "restored-not-confirmed"
+# HUB-SD (U10): a remote install that left the board dark
+RESULT_DARK = "dark"                              # not armed: reported, nothing done
+RESULT_REVERTED = "auto-reverted"                 # the previous base is back and answers
+RESULT_REVERT_FAILED = "auto-revert-failed"       # written back, but it did not come back
+#: The A/B view of the local config SD records itself as this door (U8, ``sd_ab``).
+VIA_AB = "ab"
 
 @dataclass
 class UpdateOutcome:
@@ -239,6 +255,27 @@ def _record_fields(plan: Plan) -> dict[str, Any]:
             "static_id": rel.identity.static_id if rel else "", "doors": doors_of(plan)}
 
 
+def _door_settled(storage: Any) -> bool:
+    """A door with nothing in flight (``pending()`` None); False when it cannot say."""
+    try:
+        return storage.pending() is None
+    except HarnessError:
+        return False
+
+
+def _is_previous(now: dict[str, Any], previous: dict[str, Any]) -> bool:
+    """Does the board (``running_summary``) report the identity it ran before (``plan.running``)?
+    The rollback's rule: shell, harness, and a sha/ver32 that does not contradict."""
+    if not now.get("shell_id"):
+        return False
+    if not previous:
+        return True
+    return (_same_u32(now.get("shell_id", ""), previous.get("shell_id", "")) and
+            now.get("harness") == previous.get("harness") and
+            fw_sha_match(previous.get("firmware_sha", ""), now.get("firmware_sha", "")) is not False
+            and ver32_match(previous.get("ver32", ""), now.get("ver32", "")) is not False)
+
+
 def default_os_slots(session: Any) -> OsSlotAdapter | None:
     """``session.os_slots`` when the pack provides it (see the contract change request)."""
     return getattr(session, "os_slots", None)
@@ -265,7 +302,10 @@ class HarnessInstaller:
                  bus: EventBus | None = None, overlay_handler: OverlayHandler | None = None,
                  os_slots_for: Callable[[Any], OsSlotAdapter | None] = default_os_slots,
                  now: Callable[[], float] = time.time,
-                 lease_check: Callable[[Any, str], Any] | None = None) -> None:
+                 lease_check: Callable[[Any, str], Any] | None = None,
+                 sleep: Callable[[float], None] = time.sleep,
+                 sd_ab: bool | Callable[[], bool] = False,
+                 dark_after_s: float = DARK_AFTER_S, dark_poll_s: float = 5.0) -> None:
         self.state = state
         self.downloader = downloader
         self.store = store
@@ -275,6 +315,11 @@ class HarnessInstaller:
         self.now = now
         self.lease_check = lease_check
         self.records = InstallRecords(state)
+        # HUB-SD: the dark budget (U10) and the A/B flag (U8, ``updates.sd_ab``)
+        self.sleep = sleep
+        self.sd_ab = sd_ab
+        self.dark_after_s = dark_after_s
+        self.dark_poll_s = dark_poll_s
 
     # -- events --
 
@@ -287,6 +332,59 @@ class HarnessInstaller:
             self._emit("update.progress", board_id, phase=f"{prefix}{phase}", bytes=done,
                        total=total)
         return emit
+
+    # -- doors (HUB-SD) --
+
+    def _sd_ab_on(self) -> bool:
+        flag = self.sd_ab
+        try:
+            return bool(flag() if callable(flag) else flag)
+        except Exception:  # noqa: BLE001 - an unreadable flag is the default: off
+            return False
+
+    def _door(self, session: Any, via: str = "") -> Any:
+        """The storage a base goes through: the hub SD door (``via="hub"``), the A/B view
+        of the local SD (``via="ab"``, or a local install with ``updates.sd_ab`` on), else
+        T7's ``session.storage``. A door is bound to this installer's state and lease."""
+        if via == VIA_HUB:
+            door = getattr(session, "hub_sd", None)
+        elif via == VIA_AB or (not via and self._sd_ab_on()
+                               and getattr(session, "ab_storage", None) is not None):
+            door = getattr(session, "ab_storage", None)
+        else:
+            return getattr(session, "storage", None)
+        bind = getattr(door, "bind", None)
+        if callable(bind):
+            check = self.lease_check
+            bind(state_dir=self.state.root, board_id=session.candidate.board_id,
+                 lease_check=(lambda what: check(session, what)) if check is not None else None)
+        return door
+
+    def _previous_base(self, storage: Any, plan: Plan, verified: VerifiedChannel,
+                       part: str) -> None:
+        """A door that keeps the running release's base as its backup (the hub door: fpgahub
+        cannot back up the SD) gets it here, downloaded and checked like any component."""
+        b = (plan.hub or {}).get("backup") or {}
+        prev = verified.channel.harness_release(str(b.get("version") or "")) if b else None
+        if prev is None:
+            raise RefusedError("this door keeps the running release's base as its backup, and "
+                               "the channel no longer lists it", hint="plan it again")
+        name = str(b.get("component") or "")
+        prepared = prepare_release(prev, [name], downloader=self.downloader,
+                                   base_url=verified.url, work=self.state.work(prev.version),
+                                   part=part or verified.channel.board.part)
+        storage.set_previous_base(prev.version, prepared.sd_files)
+
+    def _await_identity(self, session: Any) -> BoardIdentity | None:
+        """The identity once ping + version answer, within ``dark_after_s``; None: dark."""
+        end = self.now() + self.dark_after_s
+        while True:
+            ident = self._identity(session)
+            if ident is not None and ident.shell_id:
+                return ident
+            if self.now() >= end:
+                return None
+            self.sleep(self.dark_poll_s)
 
     # -- guards --
 
@@ -322,7 +420,7 @@ class HarnessInstaller:
         backup = (j.get("backup") or {}).get("path", "")
         if j.get("base") is False:
             return self._recover_os_only(session, board_id, journal, j)
-        storage = getattr(session, "storage", None)
+        storage = self._door(session, str(j.get("via") or ""))
         pending: dict | None = {"state": "unknown"}
         if storage is not None:
             try:
@@ -406,6 +504,9 @@ class HarnessInstaller:
         if plan.rekey and approval.consent != plan.consent_phrase:
             raise RefusedError("a re-key needs typed consent",
                                hint=f"type exactly: {plan.consent_phrase}")
+        if plan.board_phrase and approval.board_phrase != plan.board_phrase:
+            raise RefusedError("an install through the hub needs its typed consent",
+                               hint=f"type exactly: {plan.board_phrase}")
         rel = plan.release
         assert rel is not None
         if (plan.base or plan.os_slot) and self.lease_check is not None:
@@ -416,13 +517,16 @@ class HarnessInstaller:
         if plan.mode == MODE_NONE:
             return UpdateOutcome(board_id, rel.version, RESULT_UP_TO_DATE,
                                  f"the board already runs harness {rel.version}")
-        storage = session.storage if plan.base else None
+        storage = self._door(session, plan.via) if plan.base else None
         controller = session.controller if plan.base else None
         slots = self.os_slots_for(session) if plan.os_slot else None
         if plan.base:
             if storage is None or controller is None:
                 raise UnavailableError("harness install", "needs the Debug USB (config SD + MCC)")
             self._check_sd_pending(storage)
+            preflight = getattr(storage, "preflight", None)
+            if callable(preflight):
+                preflight()          # HUB-SD: lease, tty_00, the hub's sd method; nothing yet
         if plan.os_slot and slots is None:
             raise UnavailableError("OS slot update", "this harness offers no OS slot update")
         if plan.running:
@@ -463,10 +567,13 @@ class HarnessInstaller:
         journal.write(phase="verified", version=rel.version, static_id=rel.identity.static_id,
                       identity=_wire(rel.identity), host=socket.gethostname(), pid=os.getpid(),
                       previous=plan.running, base=plan.base, os_slot=plan.os_slot,
-                      from_version=plan.running_release)
+                      from_version=plan.running_release,
+                      via=getattr(storage, "via", "") if storage is not None else "")
         try:
+            if plan.base and getattr(storage, "wants_previous_base", False):
+                self._previous_base(storage, plan, verified, part)
             return self._install(session, plan, prepared, journal, storage, controller, slots,
-                                 stored, skipped)
+                                 stored, skipped, approval=approval)
         except HarnessError as exc:
             self._emit("update.failed", board_id, version=rel.version, reason=str(exc),
                        phase=(journal.read() or {}).get("phase", ""))
@@ -505,9 +612,11 @@ class HarnessInstaller:
 
     def _install(self, session: Any, plan: Plan, prepared: PreparedRelease, journal: Journal,
                  storage: Any, controller: Any, slots: OsSlotAdapter | None,
-                 stored: list[str], skipped: dict[str, str]) -> UpdateOutcome:
+                 stored: list[str], skipped: dict[str, str],
+                 approval: Approval | None = None) -> UpdateOutcome:
         board_id = session.candidate.board_id
         rel = prepared.release
+        via = getattr(storage, "via", "") if storage is not None else ""
         os_info: dict[str, Any] | None = None
         backup: BackupRecord | None = None
         backup_d: dict[str, Any] | None = None
@@ -529,11 +638,17 @@ class HarnessInstaller:
                 storage.install(prepared.sd_files, backup=backup,
                                 progress=self._progress(board_id, "sd:"))
             except HarnessError as exc:
-                journal.write(phase="interrupted", error=str(exc))
+                # HUB-SD: a door that says nothing is in flight wrote nothing it would restore
+                # (a refusal, a failed upload): the journal stays droppable. A door write the
+                # hub has not finished keeps "interrupted", and the door's own hint (never
+                # "roll back now": that is a second write mid-write).
+                settled = bool(via) and _door_settled(storage)
+                journal.write(phase="backed-up" if settled else "interrupted", error=str(exc))
                 raise ActionFailedError(
                     f"writing the config SD failed: {exc.message}",
-                    hint=f"restore the backup: `harness-manager update rollback TARGET` "
-                         f"({backup.path})") from exc
+                    hint=(exc.hint if via and exc.hint else
+                          f"restore the backup: `harness-manager update rollback TARGET` "
+                          f"({backup.path})")) from exc
             journal.write(phase="written")
 
         # -- reboot, witnessed --
@@ -551,15 +666,26 @@ class HarnessInstaller:
                                    wait_s=plan.reboot_wait_s or 180.0)
                 evidence = _evidence(raw, slots)
         except HarnessError as exc:
+            if plan.base and plan.via and self._await_identity(session) is None:
+                return self._on_dark(session, plan, approval, rel, journal, storage, controller,
+                                     backup, backup_d, stored, skipped,
+                                     {"reboot_error": str(exc)}, via)
             return self._finish(board_id, rel, RESULT_WRITTEN, journal,
                                 f"written, not running: the reboot was not witnessed ({exc.message})",
                                 backup_d, restore_hint, stored=stored, skipped=skipped,
                                 os_info=os_info, evidence={"reboot_error": str(exc)},
-                                plan=plan)
+                                plan=plan, via=via)
         journal.write(phase="rebooted", evidence=evidence)
 
         # -- confirm what the board reports --
+        if plan.via:
+            self._emit("update.progress", board_id, phase="confirm", bytes=0, total=1)
         ident = self._identity(session)
+        if plan.base and plan.via and (ident is None or not ident.shell_id):
+            ident = self._await_identity(session)
+            if ident is None:
+                return self._on_dark(session, plan, approval, rel, journal, storage, controller,
+                                     backup, backup_d, stored, skipped, evidence, via)
         confirmed, checks = confirm_identity(rel, ident)
         identity_after = running_summary(ident)
         if plan.os_slot and slots is not None:
@@ -574,14 +700,14 @@ class HarnessInstaller:
                                 f"{ident.harness_version if ident else '?'}",
                                 backup_d, "", checks=checks, identity_after=identity_after,
                                 evidence=evidence, stored=stored, skipped=skipped,
-                                os_info=os_info, previous=plan.running, plan=plan)
+                                os_info=os_info, previous=plan.running, plan=plan, via=via)
         bad = "; ".join(f"{c.name}: {c.detail}" for c in checks if c.check != Check.OK)
         return self._finish(board_id, rel, RESULT_WRITTEN, journal,
                             f"written, not running: after the reboot the board does not report "
                             f"harness {rel.version} ({bad})",
                             backup_d, restore_hint, checks=checks, identity_after=identity_after,
                             evidence=evidence, stored=stored, skipped=skipped, os_info=os_info,
-                            previous=plan.running, plan=plan)
+                            previous=plan.running, plan=plan, via=via)
 
     def _write_os(self, slots: OsSlotAdapter, prepared: PreparedRelease,
                   board_id: str) -> dict[str, Any]:
@@ -631,7 +757,8 @@ class HarnessInstaller:
                 checks: list[PreflightItem] | None = None, identity_after: dict | None = None,
                 evidence: dict | None = None, stored: list[str] | None = None,
                 skipped: dict[str, str] | None = None, os_info: dict | None = None,
-                previous: dict | None = None, plan: Plan | None = None) -> UpdateOutcome:
+                previous: dict | None = None, plan: Plan | None = None, via: str = "",
+                extra: dict[str, Any] | None = None) -> UpdateOutcome:
         out = UpdateOutcome(board_id, rel.version, result, detail, checks=checks or [],
                             identity_after=identity_after or {}, evidence=evidence or {},
                             backup=backup, restore_hint=restore_hint, stored=stored or [],
@@ -642,19 +769,93 @@ class HarnessInstaller:
             "backup": backup, "previous": previous if previous is not None else prior.get("previous"),
             "identity_after": out.identity_after, "detail": detail,
             **(_record_fields(plan) if plan is not None else {}),
+            **({"via": via} if via else {}), **(extra or {}),
         })
         journal.clear()
         topic = "update.done"
         self._emit(topic, board_id, version=rel.version, result=result, detail=detail)
         return out
 
+    # -- a dark board after a remote install (HUB-SD, U10) --
+
+    def _on_dark(self, session: Any, plan: Plan, approval: Approval | None, rel: HarnessRelease,
+                 journal: Journal, storage: Any, controller: Any, backup: BackupRecord | None,
+                 backup_d: dict[str, Any] | None, stored: list[str], skipped: dict[str, str],
+                 evidence: dict[str, Any], via: str) -> UpdateOutcome:
+        """The board answers neither ping nor version after the REBOOT. Armed: write the
+        backup back through the same door, REBOOT, confirm the previous release answers.
+        Not armed: say so, loudly, and touch nothing."""
+        board_id = session.candidate.board_id
+        armed = bool(approval is not None and approval.auto_revert)
+        back_to = plan.running_release or (plan.running or {}).get("harness", "") or "the previous base"
+        dark = (f"DARK: after the REBOOT {board_id} answered neither ping nor version within "
+                f"{self.dark_after_s:.0f} s of harness {rel.version}")
+        log.error("%s (auto-revert %s)", dark, "ARMED" if armed else "not armed")
+        self._emit("update.dark", board_id, version=rel.version, armed=armed, back_to=back_to,
+                   detail=dark)
+        target = board_id
+        if not armed or backup is None:
+            why = ("auto-revert was NOT armed at approval" if not armed
+                   else "there is no backup to revert to")
+            hint = (f"`harness-manager update rollback {target}` writes {back_to}'s base back "
+                    f"({backup.path})" if backup is not None else
+                    "recover it by hand (the platform's JTAG recover, or the Debug USB)")
+            return self._finish(board_id, rel, RESULT_DARK, journal,
+                                f"{dark}; {why}: NOTHING WAS DONE. The config SD holds harness "
+                                f"{rel.version}; the board stays dark until it is written back",
+                                backup_d, hint, evidence=evidence, stored=stored, skipped=skipped,
+                                previous=plan.running, plan=plan, via=via,
+                                extra={"dark": True, "auto_revert": {"armed": armed}})
+        journal.write(phase="auto-reverting")
+        self._emit("update.auto_revert", board_id, phase="start", version=rel.version,
+                   back_to=back_to, detail=f"{dark}: writing {back_to} back")
+        revert: dict[str, Any] = {"armed": True, "back_to": back_to, "backup": backup_d}
+        try:
+            storage.restore(backup, progress=self._progress(board_id, "revert:"))
+            revert["written"] = True
+            raw = controller.reboot(progress=self._progress(board_id, "revert-reboot:"),
+                                    wait_s=plan.reboot_wait_s)
+            revert["reboot"] = _evidence(raw, controller)
+        except HarnessError as exc:
+            revert["error"] = str(exc)
+        ident = self._identity(session)
+        if ident is None or not ident.shell_id:
+            ident = self._await_identity(session)
+        now = running_summary(ident)
+        ok = ident is not None and _is_previous(now, plan.running or {})
+        result = RESULT_REVERTED if ok else RESULT_REVERT_FAILED
+        if ok:
+            detail = (f"{dark}. AUTO-REVERTED: {back_to} was written back through the hub and the "
+                      f"board answers again (shell {now.get('shell_id')}, firmware "
+                      f"{now.get('firmware_sha') or '?'}); harness {rel.version} is NOT installed")
+        else:
+            detail = (f"{dark}. AUTO-REVERT FAILED: "
+                      + (f"writing {back_to} back failed ({revert['error']})" if "error" in revert
+                         else f"{back_to} was written back but the board "
+                              + ("does not answer" if ident is None else
+                                 f"reports shell {now.get('shell_id')}, firmware "
+                                 f"{now.get('firmware_sha') or '?'}"))
+                      + "; recover it by hand")
+        log.error(detail)
+        self._emit("update.auto_revert", board_id, phase="done", version=rel.version,
+                   back_to=back_to, result=result, detail=detail)
+        return self._finish(board_id, rel, result, journal, detail, backup_d,
+                            "" if ok else f"`harness-manager update rollback {target}` writes "
+                                          f"{back_to} back again",
+                            identity_after=now, evidence={**evidence, "revert": revert},
+                            stored=stored, skipped=skipped, previous=plan.running, plan=plan,
+                            via=via, extra={"dark": True, "auto_revert": revert})
+
     # -- rollback --
 
     def rollback(self, session: Any, *, backup_path: Path | None = None,
-                 wait_s: float | None = None) -> UpdateOutcome:
-        """Restore the config SD from a backup, reboot, and confirm the old identity is back."""
+                 wait_s: float | None = None, via: str | None = None) -> UpdateOutcome:
+        """Restore the config SD from a backup, reboot, and confirm the old identity is back.
+        ``via`` (HUB-SD): the door to restore through; None takes the last install's."""
         board_id = session.candidate.board_id
-        storage, controller = session.storage, session.controller
+        if via is None:
+            via = str((self.records.get(board_id) or {}).get("via") or "")
+        storage, controller = self._door(session, via), session.controller
         if storage is None or controller is None:
             raise UnavailableError("harness rollback", "needs the Debug USB (config SD + MCC)")
         if self.lease_check is not None:
@@ -715,6 +916,7 @@ class HarnessInstaller:
                                     "kind": "restore", "from_version": undone,
                                     "static_id": previous.get("shell_id", ""),
                                     "fw_sha": previous.get("firmware_sha", ""),
-                                    "doors": [TARGET_MCC_SD]})
+                                    "doors": [TARGET_MCC_SD],
+                                    **({"via": via} if via else {})})
         self._emit("update.done", board_id, version="rollback", result=result, detail=detail)
         return out
