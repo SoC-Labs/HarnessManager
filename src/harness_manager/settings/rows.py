@@ -241,10 +241,10 @@ INLINE_HUB = (
 )
 
 TOOLS = (
-    # T1 services/debug.py:126,153-172 (find_openocd; SET-WIRE)
+    # T1 services/debug.py:126,153-171 (find_openocd; SET-WIRE)
     Setting("tools.openocd", "path", "", "Tools", "OpenOCD (empty: openocd on PATH)",
             scope="machine", owner="admin", env="HARNESS_MANAGER_OPENOCD"),
-    # T3 services/kit/vivado.py:40,137-163 (discover; SET-WIRE)
+    # T3 services/kit/vivado.py:40,137-161 (discover; SET-WIRE)
     Setting("tools.vivado", "path", "", "Tools",
             "Vivado (empty: found under /tools, /opt, /apps; off: never)", scope="machine",
             owner="admin", env="HARNESS_MANAGER_VIVADO"),
@@ -289,7 +289,7 @@ UPDATES = (
     # U5 download.py:77,116-122,388 (mirrors_from_env, at each download; SET-WIRE)
     Setting("updates.mirrors", "list", [], "Updates", "Mirrors tried by sha256 first",
             scope="machine", owner="admin", env="HARNESS_MANAGER_UPDATE_MIRRORS"),
-    # U6 github.py:48,171-186 (resolve_token: env, the store, gh; SET-WIRE); download.py:108
+    # U6 github.py:48,171-184 (resolve_token: env, the store, gh; SET-WIRE); download.py:108
     Setting("updates.github_token", "str", None, "Updates",
             "A GitHub token for the private (Arm-IP) parts", secret=True,
             env="HARNESS_MANAGER_GITHUB_TOKEN"),
@@ -324,7 +324,7 @@ KITS = (
             "The harness download cache's cap", scope="machine", owner="admin"),
     Setting("kits.cache_max", "size", 0, "Harness + kits",
             "The kit cache's cap (0: no cap)", scope="machine", owner="admin"),
-    # K5-K6 services/kit/service.py:80,83-86,249-259 (KitService.hub; SET-WIRE); cli/cmd_kit.py:94
+    # K5-K6 services/kit/service.py:80,83-86,250-260 (KitService.hub; SET-WIRE); cli/cmd_kit.py:94
     Setting("kits.sources", "list", ["cache", "channel", "hub"], "Harness + kits",
             "Where a kit is looked for, in order", check=_kit_sources),
     Setting("kits.hub_dir", "path", "", "Harness + kits", "The hub's mint archive",
@@ -337,12 +337,12 @@ KITS = (
 )
 
 DEBUG = (
-    # D1 services/debug.py:127,873-881 (_pinned_base; SET-WIRE)
+    # D1 services/debug.py:127,872-880 (_pinned_base; SET-WIRE)
     Setting("debug.port_base", "int", 0, "Debug",
             "Pin the gdb/telnet/tcl ports (0: a slot per board from 23300)", scope="machine",
             owner="admin", env="HARNESS_MANAGER_DEBUG_PORT_BASE", apply="restart",
             advanced=True, check=_port_or_zero),
-    # D2 services/xvc.py:121,1220-1230 (_pinned_base; SET-WIRE)
+    # D2 services/xvc.py:121,1221-1230 (_pinned_base; SET-WIRE)
     Setting("debug.xvc_port_base", "int", 0, "Debug",
             "Pin the XVC relay and hw_server ports (0: a slot per board from 23600)",
             scope="machine", owner="admin", env="HARNESS_MANAGER_XVC_PORT_BASE",
@@ -381,7 +381,7 @@ ADVANCED = (
     Setting("advanced.state_dir", "path", "~/.config/harness-manager", "Advanced",
             "Where settings and state live (set $HARNESS_MANAGER_STATE_DIR to move it)",
             env="HARNESS_MANAGER_STATE_DIR", apply="restart", readonly=True),
-    # V2-V4 daemon/server.py:340-373,495-503 (start_setting; SET-WIRE); cli/cmd_daemon.py:69-83
+    # V2-V4 daemon/server.py:340-366,391-393,495-503,521 (start_setting; SET-WIRE); cli/cmd_daemon.py:69-83
     Setting("advanced.port", "int", 0, "Advanced", "The service's TCP port (0: any free one)",
             scope="machine", apply="restart", check=_port_or_zero),
     Setting("advanced.listen", "str", "127.0.0.1", "Advanced",
