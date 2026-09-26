@@ -186,7 +186,10 @@ def test_a_probed_candidate_keeps_its_route_through_json(client, rig):
     (cand,) = r.json()["candidates"]
     eth = next(lk for lk in cand["links"] if lk["kind"] == "ethernet")
     assert eth["via"] == "ssh" and f"ssh:{HUB}" in eth["detail"]
-    assert any(lk["address"].startswith("hub://") and lk["via"] == "hub" for lk in cand["links"])
+    # MCC-FIX: the MCC is a HUB link (reached on the hub), never a hub:// share link
+    assert any(lk["address"].startswith("hub-mcc://") and lk["via"] == "hub"
+               and lk["kind"] == "hub" for lk in cand["links"])
+    assert not any(lk["address"].startswith("hub://") for lk in cand["links"])
     opened = client.post("/api/v1/boards", json={"candidate": cand, "note": "ui"}, headers=H)
     assert opened.status_code == 200 and opened.json()["info"]["identity"]["shell_id"] == "0x3f1a560f"
     bid = opened.json()["board_id"]
