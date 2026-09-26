@@ -15,7 +15,7 @@ A board with no hub stays the zero-config default: nothing here runs, reads or p
 ``board``, ``shares``, ``baud``, ``start_shares`` (``BOARD_KEYS``). The hub keeps what is
 about the hub: ``transport``, ``host``, ``url``, ``group``, ``jump``, the token, ``ca_file``,
 ``cert_file``, ``key_file``, ``insecure``, ``events``, ``direct``, ``timeout_s``, ``holder``,
-``lease_ttl``, ``request_ttl``, ``queue_timeout`` (``HUB_KEYS``). A board table with ``use``
+``lease_ttl``, ``request_ttl``, ``queue_timeout``, ``stage_dir`` (``HUB_KEYS``). A board table with ``use``
 and a hub key is refused, naming the key: a silent override is how a lab ends up with two
 definitions of one hub.
 
@@ -53,7 +53,10 @@ from .secrets import parse_ref, read_private_file, resolve_secret
 #: The per-hub keys a ``[hubs.<name>]`` table holds (the token is a secret: ``token``).
 HUB_FIELDS = ("transport", "host", "group", "jump", "holder", "url", "ca_file", "cert_file",
               "key_file", "insecure", "events", "direct", "timeout_s", "lease_ttl",
-              "request_ttl", "queue_timeout")
+              "request_ttl", "queue_timeout", "stage_dir")
+#: ``hubs.<name>.stage_dir``'s default: the hub SD door's staging directory, relative to the
+#: hub user's home (``harness_manager_mps3/hub_sd.py`` ``STAGE_DIR``; MCC-FIX).
+DEFAULT_STAGE_DIR = ".cache/harness-manager/hub-sd"
 #: Every key that belongs to the hub, not the board (a board table with ``use`` refuses them).
 HUB_KEYS = frozenset({*HUB_FIELDS, "token", "token_file"})
 #: What a board's ``hub`` table keeps when it names a hub.
@@ -117,6 +120,7 @@ class Hub:
     lease_ttl: int = 3600
     request_ttl: int = 7200
     queue_timeout: int = 3600
+    stage_dir: str = DEFAULT_STAGE_DIR    # the hub SD door's staging dir on the hub (SSH)
     token_ref: str = "store"          # store | file:PATH | env:VAR | fpgahub-login
     machine: bool = False             # defined by the admin policy
     policy: str = ""                  # that policy file
@@ -228,7 +232,8 @@ def resolve_hub(name: str, resolver: Resolver) -> Hub:
                cert_file=v["cert_file"], key_file=v["key_file"], insecure=v["insecure"],
                events=v["events"], direct=v["direct"], timeout_s=int(v["timeout_s"]),
                lease_ttl=int(v["lease_ttl"]), request_ttl=int(v["request_ttl"]),
-               queue_timeout=int(v["queue_timeout"]), token_ref=ref, machine=machine,
+               queue_timeout=int(v["queue_timeout"]), stage_dir=v["stage_dir"],
+               token_ref=ref, machine=machine,
                policy=resolver.policy.path if machine else "", rows=rows,
                token=dict(token.secret or {}), problems=tuple(dict.fromkeys(problems)))
 

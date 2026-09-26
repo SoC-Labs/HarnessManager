@@ -34,8 +34,9 @@ The sequence, single-flight, the lease required (``install``):
 auto-revert of a board that stays dark). The REBOOT itself is the controller's.
 
 Backends. ``SshSdBackend`` (the lab hub today: ``ssh HUB 'sg fpga -c "fpgahub …"'``; the
-``.bit`` is staged in the hub user's ``~/.cache/harness-manager/hub-sd``, the daemon reads
-it by path as the platform's own runbooks do) and ``RestSdBackend`` (fpgahub's
+``.bit`` is staged in the hub user's ``~/.cache/harness-manager/hub-sd``, or the hub's
+``hubs.<name>.stage_dir`` (MCC-FIX: outside ``/home`` when fpgahubd has ``ProtectHome=yes``),
+and the daemon reads it by path as the platform's own runbooks do) and ``RestSdBackend`` (fpgahub's
 ``/api/v1``: the ``.bit`` goes to the hub's bitstream repository, ``POST /bitstreams``, and
 is programmed ``--from`` its id, because a REST client shares no filesystem with the
 daemon). Both are thin; every hub fact they parse is cited to fpgahub v0.3.0.
@@ -234,7 +235,7 @@ def parse_journal(text: str, target: str, method: str = SD_METHOD) -> Completion
 
 
 class SshUploader:
-    """Put a local file at ``remote_rel`` (relative to the hub user's home) over ssh:
+    """Put a local file at ``remote_rel`` (relative to the hub user's home, or absolute) over ssh:
     ``mkdir -p … && cat > X.part && mv -f X.part X``. Never through ``sg``: the file is the
     user's own. ``BatchMode`` so a missing key fails fast."""
 
@@ -569,12 +570,19 @@ class RestSdBackend:
         self._stop.set()
 
 
+def stage_dir_for(hub: Any) -> str:
+    """Where the ``.bit`` is staged on the hub: ``hubs.<name>.stage_dir`` (carried on the
+    hub's ``HubConfig``), else ``STAGE_DIR``. fpgahubd's unit sets ``ProtectHome=yes``
+    (fpgahub systemd/fpgahubd.service): then a directory outside ``/home`` (docs/HUB_MODE.md)."""
+    return str(getattr(getattr(hub, "config", None), "stage_dir", "") or STAGE_DIR).rstrip("/")
+
+
 def backend_for(hub: Any) -> HubSdBackend:
     """The backend for a session's ``Mps3Hub``: REST when its client speaks REST."""
     client = hub.client
     if getattr(client, "transport", "ssh") == "rest":
         return RestSdBackend(client)
-    return SshSdBackend(client)
+    return SshSdBackend(client, stage_dir=stage_dir_for(hub))
 
 
 # --- the backup (the previous release's .bit) ---------------------------------------------------
@@ -1104,7 +1112,8 @@ def describe_for(session: Any) -> dict[str, Any]:
 __all__ = [
     "COMPLETE_BUDGET_S", "Completion", "DOOR", "EXPECTED_TIMEOUT", "HubSdBackend", "HubSdDoor",
     "InFlight", "NANOSOC_BIT", "ProgramInfo", "ProgramReply", "RestApi", "RestSdBackend",
-    "SD_METHOD", "SshSdBackend", "SshUploader", "VIA_HUB", "backend_for", "describe_for",
+    "SD_METHOD", "STAGE_DIR", "SshSdBackend", "SshUploader", "VIA_HUB", "backend_for",
+    "describe_for", "stage_dir_for",
     "make_hub_sd_adapter", "multipart", "parse_journal", "parse_program_list",
     "parse_program_reply", "read_bit_backup", "sd_delta", "sha_matches", "write_bit_backup",
 ]

@@ -95,14 +95,24 @@ def cmd_mcc(ctx: Ctx) -> int:
                             human=reply.splitlines() or ["(no reply text)"]))
             return ExitCode.OK
         # reboot
+        if a.wait is not None and a.wait <= 0:
+            raise UsageError(f"--wait {a.wait:g} is not a wait", hint="give seconds, more than 0")
         ctx.confirm(f"reboot {cand.board_id}? The board reloads from its SD and the running "
                     "design is lost")
         progress = StderrProgress("reboot", ctx.err)
-        ctl.reboot(progress=progress, wait_s=a.wait)
+        # --wait unset = None: the pack's own budget for the running harness (MCC-FIX).
+        evidence = ctl.reboot(progress=progress, wait_s=a.wait)
+    ev = evidence if isinstance(evidence, dict) else {}
+    fpga_file = str(ev.get("fpga_file") or "")
+    human = [f"rebooted   {cand.board_id} (seen: {', '.join(progress.phases) or '-'})"]
+    if fpga_file:
+        human.append(f"MCC loaded {fpga_file}")
     ctx.emit(Result("mcc reboot", {"board_id": cand.board_id, "result": "rebooted",
-                                   "phases": progress.phases},
-                    rows=[[cand.board_id, "rebooted", progress.phases]],
-                    human=[f"rebooted   {cand.board_id} (seen: {', '.join(progress.phases) or '-'})"]))
+                                   "phases": progress.phases, "fpga_file": fpga_file,
+                                   "mcc_firmware": str(ev.get("mcc_firmware") or ""),
+                                   "evidence": ev},
+                    rows=[[cand.board_id, "rebooted", progress.phases, fpga_file]],
+                    human=human))
     return ExitCode.OK
 
 

@@ -260,8 +260,9 @@ def make_parser() -> argparse.ArgumentParser:
     mp = msub.add_parser("reboot", help="reboot and prove it (down, then up)",
                          parents=[fmt, usb], epilog=_epilog("mcc reboot"))
     mp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
-    mp.add_argument("--wait", type=float, default=120.0, metavar="S",
-                    help="how long to wait for the board to come back")
+    mp.add_argument("--wait", type=float, default=None, metavar="S",
+                    help="how long to wait for the board to come back (default: the "
+                         "harness's own budget, 180 s Linux, 120 s bare metal)")
     mp = msub.add_parser("cmd", help="one allowlisted controller command",
                          parents=[fmt, usb], epilog=_epilog("mcc cmd"))
     mp.add_argument("words", nargs="+", metavar="LINE")

@@ -506,6 +506,9 @@ ssh $H "sg fpga -c 'fpgahub target program mps3_01_pl \$HOME/.cache/harness-mana
 
 For either FAIL: the SSH door cannot program from its staging dir. Skip F6 and §G, and report it.
 The fix is on the hub side: a staging dir the daemon can read, or the REST door's `--from <id>`.
+F1 `ProtectHome=yes` plus an F4 FAIL means: set `hubs.<name>.stage_dir` to a group-`fpga` directory
+outside `/home` and `/tmp` that the hub admin creates (`docs/HUB_MODE.md`, "The hub SD door's
+staging directory"); an F4 PASS means the default stays.
 
 A lease answer (409/423) means the hub does not count `david-hm`'s lease as yours: redo §0.3,
 then repeat F4.

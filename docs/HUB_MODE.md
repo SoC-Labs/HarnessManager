@@ -18,6 +18,7 @@ group = "fpga"                           # the fpgahub socket's group ("" = no s
 jump = ""                                # an SSH jump host on the way to the hub (ssh -J)
 holder = ""                              # the lease holder ("" = harness-manager-<user>@<host>)
 lease_ttl = "1h"                         # also request_ttl (2h) and queue_timeout (1h)
+stage_dir = ".cache/harness-manager/hub-sd"  # the hub SD door's staging dir (see below)
 
 [hubs.remote]
 url = "https://mapstone-dev.ecs.soton.ac.uk:7246"   # REST: a token (7245 is mTLS)
@@ -224,6 +225,20 @@ Together with `IPForward=no`, that means options 2 and 3 do not work today, and 
 When all four pass, the session talks to `192.168.10.101:6900…` directly: a `DirectReach`, shown by `GET /boards/{bid}/tunnel` as `mode: direct` with the plan. When any check fails, it opens the SSH tunnel to `hub.host`, and the plan's reason names the first missing piece. With no `hub.host` it fails with that reason.
 
 `direct = "always"` skips the checks, for a user who knows the path works. `direct = "never"` always tunnels. On macOS and Windows the route check reads nothing today, so `auto` falls back to the tunnel; use `always` there if the route exists.
+
+## The hub SD door's staging directory (`hubs.<name>.stage_dir`)
+
+The hub SD door (lane HUB-SD) writes a harness base to the config SD through fpgahub on an SSH hub. It uploads the `.bit` over ssh into a staging directory on the hub, checks its sha256 there, and asks fpgahubd to program that path with `--method sd`. **fpgahubd reads the file itself**, so the directory must be readable by the daemon, not only by you.
+
+- **Default:** `.cache/harness-manager/hub-sd`, relative to your home on the hub (`~/.cache/harness-manager/hub-sd/<sha256>.bit`). Unset, nothing changes.
+- **Set it** with `harness-manager config set hubs.lab.stage_dir /srv/fpga/hm-stage` (an absolute path, or one relative to your hub home; no spaces, `~` or `..`). A REST hub ignores it: its `.bit` goes to the hub's bitstream repository.
+- **When the default cannot work:** fpgahub's own unit file (`systemd/fpgahubd.service`, v0.3.0) sets `ProtectHome=yes` and `PrivateTmp=yes`. With those, fpgahubd sees an empty `/home` and its own `/tmp`, so `bitstream not found` names your staged file. The stage dir must then be **outside `/home` and `/tmp`**: a group-`fpga` directory the hub's admin creates once, for example:
+  ```bash
+  sudo install -d -m 2770 -g fpga /srv/fpga/hm-stage     # or /var/lib/harness-manager-stage
+  ```
+  `ProtectSystem=strict` only makes paths read-only for the daemon, and it only needs to read.
+- **Which case the lab hub is in:** `docs/HIL_LINUX.md` §F1 (the unit's `ProtectHome`) and §F4 (the read probe) answer it.
+- **Unchanged:** the one `program --method sd --force` request is never retried mid-write. The stage dir only changes where the file waits.
 
 ## Events
 

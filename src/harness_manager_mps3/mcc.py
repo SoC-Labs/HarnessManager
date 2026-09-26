@@ -570,7 +570,25 @@ class RebootWitness:
             "shell_id_before": self.shell_id_before,
             "shell_id_after": self.shell_id_after,
             "fpga_configured": self.boot.fpga_configured if self.boot is not None else None,
+            # What the MCC said it loaded (MCC-FIX): "" when the banner had no such line.
+            **boot_fields(self.boot),
         }
+
+
+def sd_path(mcc_path: str) -> str:
+    """An MCC console path as an SD-relative POSIX path:
+    ``\\MB\\HBI0309C\\Nanosoc\\nanosoc.bit`` -> ``MB/HBI0309C/Nanosoc/nanosoc.bit``."""
+    return mcc_path.strip().replace("\\", "/").strip("/")
+
+
+def boot_fields(boot: BootRecord | None) -> dict[str, str]:
+    """The banner's parsed facts a reboot result carries: which ``.bit`` and board file the
+    MCC loaded (SD-relative, so ``updates.sd_ab``'s ``F0FILE`` flip is provable from HM),
+    and the MCC's own firmware. Every value is ``""`` when the banner did not print it."""
+    b = boot or BootRecord()
+    return {"fpga_file": sd_path(b.fpga_file), "board_file": sd_path(b.board_file),
+            "mcc_firmware": b.firmware, "mcc_build_date": b.build_date,
+            "hbi_build": b.hbi_build, "bootloader": b.bootloader}
 
 
 # A shell probe returns the shell_id when ping is answered, ``SHELL_BUSY`` when the

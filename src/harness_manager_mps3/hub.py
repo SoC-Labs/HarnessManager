@@ -130,6 +130,7 @@ class HubConfig:
     lease_ttl: int = 0                 # the lease times asked for (0 = the service's default)
     request_ttl: int = 0
     queue_timeout: int = 0
+    stage_dir: str = ""                # hubs.<name>.stage_dir ("" = hub_sd.STAGE_DIR; MCC-FIX)
 
     @property
     def local(self) -> bool:
@@ -199,7 +200,8 @@ def parse_board_hub(table: Any, *, where: str = "hub", root: Any = None) -> HubC
         rest = replace(rest, hub_name=hub.name, settings_root=str(root) if root else "")
     return replace(cfg, rest=rest, name=hub.name, jump=hub.jump if hub.transport == "ssh" else "",
                    holder=hub.holder, lease_ttl=hub.lease_ttl, request_ttl=hub.request_ttl,
-                   queue_timeout=hub.queue_timeout)
+                   queue_timeout=hub.queue_timeout,
+                   stage_dir=hub.stage_dir if hub.transport == "ssh" else "")
 
 
 def _board_config(candidate: Candidate) -> Any:

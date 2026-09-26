@@ -68,7 +68,7 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "lab dutrx": ("BOARD_ID", "LEN", "FRAMES_WAITING", "RX", "DROP_FULL", "DROP_GIANT", "OVF",
                   "DESYNC", "DATA"),
     "mcc temp|osc": READING_COLUMNS,
-    "mcc reboot": ("BOARD_ID", "RESULT", "PHASES"),
+    "mcc reboot": ("BOARD_ID", "RESULT", "PHASES", "FPGA_FILE"),     # FPGA_FILE: MCC-FIX
     "mcc cmd": ("BOARD_ID", "COMMAND", "REPLY"),
     "sd backup": ("BOARD_ID", "PATH", "SHA256", "FILES", "VOLUME"),
     "sd install": ("BOARD_ID", "FILES", "BACKUP_SHA256"),
