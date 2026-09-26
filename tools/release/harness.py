@@ -180,10 +180,12 @@ def _identity_linux(bundle: Path, lb: dict[str, Any], fw: dict[str, Any],
         dirty.append(f"Linux image_kind {kind or '(none)'!r} (a lab image may carry a baked host key)")
     if comps.get("dirty") is True:
         dirty.append("Linux image built from a dirty tree")
-    # The harness semver: the bundle's own ``harness`` (Linux request L1), else the image's
-    # version record (IMAGE_CONTRACT §6 ``harness``).
-    fw = {"version": str(lb.get("harness") or comps.get("harness", "") or ""),
+    # The harness semver: the bundle's own ``harness`` (Linux request L1), else firmware.json,
+    # else the image's version record (IMAGE_CONTRACT §6 ``harness``).
+    fw = {"version": str(comps.get("harness", "") or ""),
           "sha": str(comps.get("harnessd_sha256", ""))[:8], **fw}
+    if lb.get("harness"):                       # L1: the bundle's own semver wins
+        fw["version"] = str(lb["harness"])
     return _Ident("linux", _hex(lb.get("static_id")), _hex(lb.get("static_usercode")),
                   _hex(lb.get("static_ver32")), fw, "2026.1", dirty)
 

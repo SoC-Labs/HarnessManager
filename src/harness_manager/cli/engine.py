@@ -47,6 +47,8 @@ IN_PROCESS_VERBS: dict[str, str] = {
     "daemon": "manages harness-manager-daemon itself",
     "update": "writes the SD and reboots in this process; a daemon holding the board refuses it by name",
     "ui": "manages harness-manager-daemon itself",
+    "slot": "writes the board's OS slots through the pack's own adapter in this process",
+    "card": "writes the board's user microSD through the pack's own adapter in this process",
     "app": "manages harness-manager-daemon itself",
 }
 

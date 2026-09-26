@@ -347,6 +347,10 @@ def make_parser() -> argparse.ArgumentParser:
     cmd_xvc.register(sub)
     verbs["xvc"] = sub.choices["xvc"]
 
+    # -- slot / card (lane LINUX-SLOTS: the Linux OS slots and the user microSD) ----------
+    from . import cmd_slots
+    verbs.update(cmd_slots.register(sub))
+
     # -- hub (lane SET-HUBS: fpgahub hubs as named settings; never opens a board) ----------
     from . import cmd_hubcfg
     cmd_hubcfg.register(sub)
