@@ -165,4 +165,24 @@ def card_pixel(x: int, y: int, counter: int) -> int:
 
 @functools.lru_cache(maxsize=256)
 def card_picture(counter: int) -> bytes:
-    return le_bytes(array("H", (card_pixel(x, y, counter) for y in range(H) for x in range(W))))
+    """The card for ``counter``. Every row of a band is the same, so one row per band is
+    rendered by ``card_pixel`` and repeated (``test_card_picture_is_card_pixel`` checks)."""
+    rows = {}
+    out = []
+    for y in range(H):
+        band = 0 if y < 4 or y >= H - 4 else 1 if y < (H * 3) // 4 - 4 else 2 if y < (H * 3) // 4 else 3
+        if band not in rows:
+            rows[band] = le_bytes(array("H", (card_pixel(x, y, counter) for x in range(W))))
+        out.append(rows[band])
+    return b"".join(out)
+
+
+def card_counter(frame: bytes) -> int:
+    """The counter a card picture shows: the centre pixel of each of the 16 cells."""
+    y = (H * 3) // 4 + 20
+    value = 0
+    for k in range(16):
+        x = (W * k) // 16 + W // 32
+        px = frame[(y * W + x) * 2] | (frame[(y * W + x) * 2 + 1] << 8)
+        value = (value << 1) | (px == 0xFFFF)
+    return value

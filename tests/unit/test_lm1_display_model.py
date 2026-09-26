@@ -91,6 +91,13 @@ def test_clcd_demo_card(counter: int) -> None:
     assert through_the_wire(card, baseline_regs()).rgb565() == card
 
 
+def test_card_picture_is_card_pixel() -> None:
+    for counter in (0, 0xA5C3):
+        slow = G.le_bytes(array("H", (G.card_pixel(x, y, counter) for y in range(H) for x in range(W))))
+        assert G.card_picture(counter) == slow
+        assert G.card_counter(slow) == counter
+
+
 def test_noise_frame_every_encoding_path() -> None:
     frame = bytearray(os.urandom(w.FRAME_BYTES))
     for t, colour in ((0, 0x1234), (1, 0xFFFF)):

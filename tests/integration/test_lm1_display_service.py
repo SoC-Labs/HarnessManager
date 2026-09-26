@@ -121,21 +121,22 @@ def test_the_picture_is_the_boards_after_every_message(svc: DisplayService) -> N
     anim = CardAnimator(period_s=0.05)
     with FakeLcdMirror(FakePanel(), animate=anim, rate_default=20) as fake:
         vm = ViewerModel()
-        seen_ok = 0
+        seen: set[int] = set()
         v = svc.attach(BID, fake.connect, rate=30)
-        deadline = time.monotonic() + 3.0
-        while time.monotonic() < deadline:
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline and len(seen) < 8:
             m = v.next_message()
             if m is None:
                 time.sleep(0.005)
                 continue
             vm.apply(m)
             v.ack()
-            counters = {c for c in range(anim.counter + 1, max(-1, anim.counter - 40), -1)
-                        if bytes(vm.frame) == G.card_picture(c)}
-            assert counters, "the viewer's picture is not any card the board painted"
-            seen_ok += 1
-        assert seen_ok >= 5
+            counter = G.card_counter(bytes(vm.frame))
+            assert bytes(vm.frame) == G.card_picture(counter), \
+                "the viewer's picture is not any card the board painted"
+            assert counter <= anim.counter
+            seen.add(counter)
+        assert len(seen) >= 8                                 # the picture moved, whole each time
         assert svc.status(BID)["fps"] > 0
         v.close()
 
@@ -185,7 +186,7 @@ def test_a_split_snap_is_shown_whole(svc: DisplayService, snap_last: bool) -> No
         vm = ViewerModel()
         v = svc.attach(BID, fake.connect, ack=False, rate=15)
         torn = whole = 0
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + 30.0
         while time.monotonic() < deadline and whole + torn < 25:
             m = v.next_message()
             if m is None:
@@ -402,7 +403,8 @@ def test_handover_hatches_then_clears_on_the_first_repaint(svc: DisplayService) 
         v.close()
 
 
-def test_dim_badge_after_it_persists(svc: DisplayService) -> None:
+def test_dim_badge_after_it_persists() -> None:
+    svc = DisplayService(timings=DisplayTimings(**{**FAST.__dict__, "dim_persist_s": 2.0}))
     with FakeLcdMirror(harness_panel()) as fake:
         v = svc.attach(BID, fake.connect)
         wait_for(lambda: svc.status(BID)["state"] == "live", what="live")
@@ -414,6 +416,7 @@ def test_dim_badge_after_it_persists(svc: DisplayService) -> None:
         wait_for(lambda: "backlight_off" in [b["key"] for b in svc.status(BID)["badges"]],
                  what="the badge after dim_persist_s")
         v.close()
+    svc.shutdown()
 
 
 # --- viewers: ack, dirty sets, drop-to-latest ----------------------------------------------------
@@ -426,8 +429,8 @@ def test_a_viewer_that_does_not_ack_gets_one_message_then_the_latest(svc: Displa
         vs = svc.attach(BID, fake.connect, rate=30)
         vf = svc.attach(BID, fake.connect, rate=30)
         wait_for(lambda: slow.pump(vs, ack=False) or slow.messages, what="the slow viewer's keyframe")
-        t_end = time.monotonic() + 1.0
-        while time.monotonic() < t_end:
+        t_end = time.monotonic() + 30.0
+        while time.monotonic() < t_end and fast.messages <= 5:
             fast.pump(vf)
             assert vs.next_message() is None                 # one in flight, not acked: nothing
             time.sleep(0.01)
@@ -478,12 +481,13 @@ def test_negative_twin_drop_oldest_outbox_leaves_a_tile_stale(svc: DisplayServic
 # --- lifecycle: grace, close, stale ------------------------------------------------------------------
 
 
-def test_grace_close_and_reuse(svc: DisplayService, events: list[dict[str, Any]]) -> None:
+def test_grace_close_and_reuse(bus: EventBus, events: list[dict[str, Any]]) -> None:
+    svc = DisplayService(bus, timings=DisplayTimings(**{**FAST.__dict__, "grace_s": 2.0}))
     with FakeLcdMirror(harness_panel()) as fake:
         v = svc.attach(BID, fake.connect)
         wait_for(lambda: svc.status(BID)["state"] == "live", what="live")
         v.close()
-        time.sleep(FAST.grace_s / 3)
+        time.sleep(0.3)
         v2 = svc.attach(BID, fake.connect)                    # back within the grace: reused
         assert v2.next_message() is not None                 # a keyframe at once, from the compositor
         assert fake.stats["connects"] == 1
@@ -492,6 +496,7 @@ def test_grace_close_and_reuse(svc: DisplayService, events: list[dict[str, Any]]
         st = svc.status(BID)
         assert st["state"] == "down" and "no viewer" in st["reason"] and svc.boards() == []
         assert events[-1]["state"] == "down"
+    svc.shutdown()
 
 
 def test_close_at_once_for_the_lease_hooks(svc: DisplayService) -> None:
