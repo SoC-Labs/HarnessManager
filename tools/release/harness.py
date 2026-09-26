@@ -163,7 +163,8 @@ def _identity_bare_metal(bundle: Path, mint: dict[str, Any], fw: dict[str, Any])
 
 def _identity_linux(bundle: Path, lb: dict[str, Any], fw: dict[str, Any],
                     findings: list[Finding]) -> _Ident:
-    if lb.get("schema") != "mps3-linux-bundle" or lb.get("schema_version") != 1:
+    # linux_bundle.py writes "schema_version": "1" (a string); v1 either way.
+    if lb.get("schema") != "mps3-linux-bundle" or str(lb.get("schema_version")) != "1":
         raise ReleaseError(f"{bundle}/linux_bundle.json is not an mps3-linux-bundle v1")
     fieldable = lb.get("fieldable") is True and lb.get("mint_kind", "mint") == "mint"
     findings.append(Finding("NOT_FIELDABLE", fieldable,
@@ -179,10 +180,42 @@ def _identity_linux(bundle: Path, lb: dict[str, Any], fw: dict[str, Any],
         dirty.append(f"Linux image_kind {kind or '(none)'!r} (a lab image may carry a baked host key)")
     if comps.get("dirty") is True:
         dirty.append("Linux image built from a dirty tree")
-    fw = {"version": comps.get("harness", ""), "sha": str(comps.get("harnessd_sha256", ""))[:8],
-          **fw}
+    # The harness semver: the bundle's own ``harness`` (Linux request L1), else the image's
+    # version record (IMAGE_CONTRACT §6 ``harness``).
+    fw = {"version": str(lb.get("harness") or comps.get("harness", "") or ""),
+          "sha": str(comps.get("harnessd_sha256", ""))[:8], **fw}
     return _Ident("linux", _hex(lb.get("static_id")), _hex(lb.get("static_usercode")),
                   _hex(lb.get("static_ver32")), fw, "2026.1", dirty)
+
+
+def _slot_frames(img: Path, si: dict[str, Any], warnings: list[str]) -> list[Finding]:
+    """The slot image against ``linux_bundle.json``'s ``slot_image``: stage0 would take it
+    (an S0LB v2 table, every region CRC good), and its frames are the declared ones. The
+    app checks the same at install (``bundle.check_os_component``); refusing here keeps a
+    release that would fail there from being signed."""
+    from harness_manager.services.update import s0lb
+
+    data = img.read_bytes()
+    try:
+        table = s0lb.parse(data)
+    except s0lb.S0lbError as exc:
+        return [Finding("STATIC", False, f"linux_slot.img is not a boot image stage0 would "
+                                         f"take: {exc}")]
+    out = [Finding("STATIC", table.ok, "linux_slot.img: " + ("; ".join(table.problems)
+                                                             if table.problems else
+                                                             "a good S0LB v2 boot table"))]
+    declared = si.get("s0lb")
+    if isinstance(declared, dict) and declared:
+        diff = s0lb.compare(table, declared)
+        out.append(Finding("STATIC", not diff, "linux_slot.img frames "
+                           + ("; ".join(diff) if diff else "match linux_bundle.json")))
+    else:
+        warnings.append("linux_bundle.json declares no slot_image.s0lb: the app's frame check "
+                        "at install will be UNCHECKED for this release")
+    if si.get("bytes") is not None and si.get("bytes") != len(data):
+        out.append(Finding("STATIC", False, f"linux_slot.img is {len(data)} B, linux_bundle.json "
+                                            f"says {si.get('bytes')}"))
+    return out
 
 
 def _scan_aaa(label: str, files: dict[str, Path]) -> list[Finding]:
@@ -349,6 +382,8 @@ def ingest(bundle: Path, version: str, *, catalog: str = "mps3-harness", layout:
         findings.append(Finding("STATIC", prov == ident.static_id,
                                 f"slot image provisioned for {prov or '(none)'}, the static is "
                                 f"{ident.static_id}"))
+        if img.is_file():
+            findings += _slot_frames(img, si, warnings)
         li = eth.get("legal_info") or {}
         if not legal.is_file() or (li.get("sha256") and sha256_file(legal) != li["sha256"]):
             findings.append(Finding("NOT_FIELDABLE", False, "linux_legal_info.tar is missing or "
@@ -402,9 +437,22 @@ def ingest(bundle: Path, version: str, *, catalog: str = "mps3-harness", layout:
                   "name": f"sd-{rev}", "target": "mcc-sd", "kind": "sd", "door": DOOR_MCC_SD,
                   "files": {r: sha256_bytes(b) for r, b in sd_bytes.items()}})
     if lb and img.is_file():
-        comps.append({**put(f"{base}-linux_slot.img", img.read_bytes()), "name": "os-slot",
-                      "target": "user-usd", "kind": "os-slot", "format": "raw",
-                      "door": DOOR_ETHERNET})
+        # The target stays HM's older spelling ``user-usd`` so apps before OTA-C still parse
+        # the channel (the schema reads it as ``ethernet``); ``door`` is FLOW's name. The
+        # declarations the install checks travel with it (schema ``_os_slot_extras``).
+        si = ((lb.get("targets") or {}).get("ethernet") or {}).get("slot_image") or {}
+        prov = ((lb.get("targets") or {}).get("ethernet") or {}).get("provisioned") or {}
+        os_comp: dict[str, Any] = {**put(f"{base}-linux_slot.img", img.read_bytes()),
+                                   "name": "os-slot", "target": "user-usd", "kind": "os-slot",
+                                   "format": "raw", "door": DOOR_ETHERNET,
+                                   "provisioned": {"static_id": _hex(prov.get("static_id"))
+                                                   or ident.static_id}}
+        if isinstance(si.get("s0lb"), dict) and si["s0lb"]:
+            os_comp["s0lb"] = si["s0lb"]
+        if si.get("crc32"):
+            os_comp["crc32"] = si["crc32"]
+        os_comp["bytes"] = img.stat().st_size
+        comps.append(os_comp)
     if groups.get("open"):
         data = deterministic_zip({r: p.read_bytes() for r, p in groups["open"].items()})
         comps.append({**put(f"{base}-overlays-open.zip", data), "name": "overlays-open",
@@ -452,6 +500,8 @@ def ingest(bundle: Path, version: str, *, catalog: str = "mps3-harness", layout:
         entry["source"]["dirty_waiver"] = allow_dirty
     if (bundle / "notes.md").is_file():
         entry["notes"] = (bundle / "notes.md").read_text(encoding="utf-8").strip()
+    elif lb and str(lb.get("release_notes") or "").strip():
+        entry["notes"] = str(lb["release_notes"]).strip()      # Linux request L1
     if lb and legal.is_file():
         a = put(f"{base}-linux_legal_info.tar", legal.read_bytes())
         entry["legal_info"] = a            # published beside the release, never installed
