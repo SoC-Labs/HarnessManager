@@ -1,0 +1,72 @@
+LCD-mirror transport spike (lcd_mirror §6.2 + amendments)  HM=<hm>  board encoder=C -O2 (host)
+tunnel argv (fake ssh): -o ControlPath=none -o ControlMaster=no -o ExitOnForwardFailure=yes -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -o PermitLocalCommand=no -o RequestTTY=no -o HostKeyAlias=harness-manager-mps3-01 -o StrictHostKeyChecking=yes -o PreferredAuthentications=publickey -N -T -J hub.spike -l root -L 127.0.0.1:37373:127.0.0.1:6940 mps3-01-board.spike
+
+== 1. unthrottled (loopback through SshTunnel + FakeSsh), per pattern and RATE ==
+   B/upd: steady-state bytes per UPDATE; key B: keyframe bytes (all parts); ups: UPDATEs/s from the board;
+   kB/s: received by HM; fps_v: distinct board SNAPs/s whose content reached the viewer;
+   p50/p95: SNAP -> applied in the browser stand-in (ms); rtt95: PING->PONG p95 (ms, queued behind UPDATEs);
+   enc_us/diff_us: board encode / tile-diff host CPU per SNAP with a change; hm_us: HM reader CPU per UPDATE;
+   ws_us: daemon WS thread CPU per browser message
+ pattern  flow  hz    cap  B/upd  key B   kB/s   ups fps_v   p50ms   p95ms   rtt95  enc_us diff_us   hm_us  ws_us exact
+a_status  none   5      -    159   7302    5.3   3.3   3.3     1.8    21.3    45.0   182.6   193.3  1412.5 1115.4   yes
+a_status  none  20      -    145   7302    5.4   4.0   4.0     1.9    21.3     5.6   154.9   684.2   937.7  842.0   yes
+  b_card  none   5      -   1037   7934    9.4   4.6   4.6     9.6    20.1    42.5   166.4   144.6  1066.9  900.8   yes
+  b_card  none  20      -    666   7934   12.9  12.0  12.0     4.3    15.5    46.7   128.4   239.9   652.5  673.9   yes
+ c_noise  none   5      -  51773 155571  828.1  16.0   5.3    21.2    54.9     7.9   262.7   152.0  1235.2 1056.5   yes
+ c_noise  none  20      -  51773 155571 1855.8  35.8  11.9    19.4    46.8     0.4   230.4   235.0  1227.5  751.8   yes
+  RATE 50 asked -> board clamps to 20 and echoes 20
+
+== 2. link caps: 1.25 MB/s (10 Mb/s half duplex) and 250 kB/s; one 2 MiB SSH window modelled ==
+ pattern  flow  hz    cap  B/upd  key B   kB/s   ups fps_v   p50ms   p95ms   rtt95  enc_us diff_us   hm_us  ws_us exact   max buffered
+a_status  none  20  1250k    133   7302    3.4   4.0   4.0     8.2    41.2    41.2   124.0   687.0   686.8  858.9   yes   7302
+  b_card  none  20  1250k    653   7934   11.2  12.4  12.8     3.8    24.4    14.3   100.1   218.0   537.4  582.0   yes   7934
+ c_noise  none  20  1250k  51773 155571 1143.3  37.2  12.4   831.5  1532.0  1556.8   238.4   362.4  1620.5  688.9   yes   1977010
+ c_noise  ack2  20  1250k  51773 155571  983.8  19.2   6.4   116.3   162.7    93.3   241.1   197.2  1565.8  708.8   yes   161036
+a_status  none  20   250k    133   7302    3.4   4.0   4.0     2.7    58.3    72.4   115.1   680.9   620.3  888.0   yes   7302
+  b_card  none  20   250k    693   7934   11.7  12.7  12.7     3.5    27.8    17.6   100.6   226.4   542.2  555.9   yes   7934
+ c_noise  none  20   250k  51773 155571  238.6  22.0   7.6  5400.6  9587.0  9257.0   247.3  1507.0  2046.0  932.1   yes   2162353
+ c_noise  ack2  20   250k  51773 155571  238.7   6.0   2.0   578.5   699.5   698.2   331.0   420.9  2041.4  992.6   yes   173661
+
+== 3. fan-out: 4 viewers on one upstream: fast, slow (0.3 s/msg) with and without the WS ack, permessage-deflate ==
+  viewer0: ack=True msgs=57 keys=1 slow_s=0.0 ext=none crc_bad=0 lat_p50=29.5 ms 
+  viewer1: ack=True msgs=9 keys=1 slow_s=0.3 ext=none crc_bad=0 lat_p50=61.4 ms 
+  viewer2: ack=False msgs=55 keys=1 slow_s=0.3 ext=none crc_bad=0 lat_p50=7019.7 ms 
+  viewer3: ack=True msgs=52 keys=1 slow_s=0.0 ext=permessage-deflate; server_max_window_bits=12; client_max_window_bits=12 crc_bad=0 lat_p50=39.7 ms 
+  daemon WS cost 2152.5 us/msg (all viewers); max dirty tiles held for a viewer 300; exact=True crc_ok=173 crc_bad=0
+  one viewer, noise: daemon WS cost 6267.9 us/msg with permessage-deflate (permessage-deflate; server_max_window_bits=12; client_max_window_bits=12) vs 760.5 us/msg without
+
+== 4. behaviours ==
+  argv                     PASS  {}
+  refusal_3rd_client       PASS  {"served": [1, 1], "third": "{\"ok\":false,\"err\":\"lcd_mirror: busy (2 clients)\"}"}
+  seq_gap_key_recovery     PASS  {"gaps_injected": 1, "gaps_seen": 1, "keys_sent": 2, "keys_presented": 2, "key_updates_total": 6, "to_second_key_s": 0.59, "viewer_crc_bad": 0, "viewer_exact": true}
+  no_service               PASS  {"detected_in_s": 0.06, "detail": "no lcd_mirror service on the board (channel 24: open failed: connect failed: Connection refused)"}
+  drop_claim_loss_recover  PASS  {"recovered_s": 2.53, "same_local_port": true, "tunnel_detail_while_refused": "ssh exited with status 255 (dam1n19@mps3-01-board.spike: Permission denied (publickey).); restarting in 0s", "hm_state_while_down": "reconnecting", "reconnects": 2, "tunnel_restarts": 1, "viewer_exact_after": true, "viewer_crc_bad": 0}
+  blind_sw_dut             PASS  {"hello_mode": "sw", "status": "0x0706004f", "hatched": 300, "badges": ["DUT owns the panel", "grey: this image cannot see the DUT's picture", "not exact"]}
+  handover_hatch           PASS  {"hatched_at_key": 300, "hatched_after_repaint": 0, "resets": 1, "viewer_exact": true}
+  png_snapshot             PASS  {"png_B": 1295, "get_ms": 58.5}
+
+== 5. keyframes of the REAL harness screens (clcd.c byte stream, via lcd_mirror_decoder.py) ==
+  boot       {"keyframe": {"B": 7710, "updates": 1, "enc": {"FILL": 121, "PAL1": 130, "RLE16": 49}}}
+  link_down  {"keyframe": {"B": 7914, "updates": 1, "enc": {"FILL": 115, "PAL1": 136, "RLE16": 49}}, "delta_tiles": 67, "delta_B": 984}
+  banner     {"keyframe": {"B": 3883, "updates": 1, "enc": {"FILL": 240, "PAL1": 28, "RLE16": 32}}, "delta_tiles": 269, "delta_B": 3414}
+  regain     {"keyframe": {"B": 7914, "updates": 1, "enc": {"FILL": 115, "PAL1": 136, "RLE16": 49}}, "delta_tiles": 269, "delta_B": 7445}
+
+== 6. per-frame costs (host) and the browser decoder (node) ==
+  c_and_python_encoders_agree                  True
+  board_host_encode_full_frame_ms[a_status]    0.461
+  hm_python_decode_keyframe_ms[a_status]       3.8
+  keyframe[a_status]                           {"B": 7302, "updates": 1, "enc": {"FILL": 133, "PAL1": 118, "RLE16": 49}}
+  board_host_encode_full_frame_ms[b_card]      0.317
+  hm_python_decode_keyframe_ms[b_card]         3.83
+  keyframe[b_card]                             {"B": 7934, "updates": 1, "enc": {"FILL": 152, "PAL1": 112, "PAL2": 23, "RLE16": 13}}
+  board_host_encode_full_frame_ms[c_noise]     0.152
+  hm_python_decode_keyframe_ms[c_noise]        2.91
+  keyframe[c_noise]                            {"B": 155571, "updates": 3, "enc": {"RAW": 300}}
+  board_host_tile_diff_full_frame_ms           0.043
+  hm_png_encode_ms                             7.7
+  browser_js_decoder                           {"node": "v10.24.0", "a_status.upd": {"bytes": 7302, "bit_exact_vs_python": true, "decode_us": 1247, "rgba_full_frame_us": 468.9}, "b_card.upd": {"bytes": 7934, "bit_exact_vs_python": true, "decode_us": 1400, "rgba_full_frame_us": 354.7}, "c_noise.upd": {"bytes": 155425, "bit_exact_vs_python": true, "decode_us": 4114, "rgba_full_frame_us": 188.1}}
+
+section wall times (s): {'1_unthrottled': 11.9, '2_throttled': 37.3, '3_fanout': 21.0, '4_checks': 8.1, '5_real': 1.0, '6_micro': 2.2}
+
+ports bound: 35, all outside 23300-23727/10000-19999: True; live fake-ssh procs after close: []; wall 82.3 s
+RESULT: PASS
