@@ -140,10 +140,18 @@ SHARE_PACE_S = 0.1
 
 
 def timing_for(url: str, base: MccTiming | None = None) -> MccTiming:
-    """The pacing for an MCC console URL: slower across a hub share."""
-    base = base or DEFAULT_TIMING
+    """The pacing for an MCC console URL: slower across a hub share. The settings
+    ``mps3.mcc.pace_ms`` and ``mps3.mcc.share_pace_ms`` move the two paces when someone set
+    them (lane SET-WIRE; read as the controller is made, at a board open)."""
+    from .settings import configured_s
+
+    if base is None:
+        pace = configured_s("mps3.mcc.pace_ms", DEFAULT_TIMING.pace_s)
+        base = DEFAULT_TIMING if pace == DEFAULT_TIMING.pace_s else \
+            replace(DEFAULT_TIMING, pace_s=pace)
     if url.startswith(("tcp://", "hub://")):
-        return replace(base, pace_s=max(base.pace_s, SHARE_PACE_S))
+        share = configured_s("mps3.mcc.share_pace_ms", SHARE_PACE_S)
+        return replace(base, pace_s=max(base.pace_s, share))
     return base
 # Module-level so tests can swap in a fake clock; read at adapter creation time.
 DEFAULT_CLOCK: Callable[[], float] = time.monotonic

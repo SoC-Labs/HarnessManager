@@ -31,10 +31,21 @@ def overlay_env_name(pack: str) -> str:
     return f"HARNESS_MANAGER_{pack.upper()}_OVERLAY_DIRS"
 
 
+def _setting_dirs(ctx: Ctx) -> str:
+    """The pack's ``<pack>.overlay_dirs`` from the settings when its variable is unset (lane
+    SET-WIRE), joined as the variable is; "" when the pack declares none."""
+    try:
+        r = ctx.engine.settings_resolver().resolve(f"{ctx.pack}.overlay_dirs")
+    except Exception:  # noqa: BLE001 - no such row, or a remote engine: only the flag's
+        return ""
+    return os.pathsep.join(str(d) for d in (r.value or []))
+
+
 @contextmanager
 def overlay_dirs(ctx: Ctx) -> Iterator[None]:
     """``--overlay-dir DIR`` (repeatable): put DIRs first on the pack's overlay search
-    path for the length of the verb. The variable is restored afterwards."""
+    path for the length of the verb, ahead of the variable's directories, else those the
+    settings name (``mps3.overlay_dirs``). The variable is restored afterwards."""
     dirs = [str(Path(d)) for d in (getattr(ctx.args, "overlay_dir", None) or ())]
     if not dirs:
         yield
@@ -45,7 +56,8 @@ def overlay_dirs(ctx: Ctx) -> Iterator[None]:
                               hint="give a directory that holds <rm>/manifest.json")
     name = overlay_env_name(ctx.pack)
     old = os.environ.get(name)
-    os.environ[name] = os.pathsep.join(dirs + ([old] if old else []))
+    rest = old if old else _setting_dirs(ctx)
+    os.environ[name] = os.pathsep.join(dirs + ([rest] if rest else []))
     try:
         yield
     finally:

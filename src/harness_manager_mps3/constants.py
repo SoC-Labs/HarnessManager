@@ -6,7 +6,6 @@ lives in the platform repo, prefer importing it from pyverify over copying it.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from pyverify.client import CONTROL_PORT  # noqa: F401 - re-exported; 6900
@@ -108,14 +107,15 @@ DAP_DESIGN_CONFIGS = {
     0x0008: ("nanosoc_iice_chain.cfg", "nanosoc_ops.tcl"),
 }
 
-# Where the OpenOCD target-half configs live. In order: the environment; a platform repo
-# checked out next to this one (a developer's live copy); the copy shipped in this
-# package (openocd_cfg/, vendored from the platform commit named in vendor/README.md).
+# Where the OpenOCD target-half configs live when the setting mps3.openocd_cfg_dir (its
+# variable, then the Settings menu: openocd.config_dir(), read at each use) names none: a
+# platform repo checked out next to this one (a developer's live copy), else the copy
+# shipped in this package (openocd_cfg/, vendored from the platform commit named in
+# vendor/README.md). Never the environment at import (SETTINGS.md §12.9, lane SET-WIRE).
 _default_cfg = Path(__file__).resolve().parents[3] / "mps3-nanosoc-platform" / "host" / "openocd"
 PACKAGED_OPENOCD_CFG = Path(__file__).resolve().parent / "openocd_cfg"
 OPENOCD_CFG_DIR: Path | None = (
-    Path(os.environ["HARNESS_MANAGER_MPS3_OPENOCD_DIR"]) if os.environ.get("HARNESS_MANAGER_MPS3_OPENOCD_DIR")
-    else _default_cfg if _default_cfg.is_dir()
+    _default_cfg if _default_cfg.is_dir()
     else PACKAGED_OPENOCD_CFG if PACKAGED_OPENOCD_CFG.is_dir()
     else None
 )
