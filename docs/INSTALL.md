@@ -291,7 +291,11 @@ unknown key or a bad `check_interval` is only a warning. No environment variable
 or disables the file.
 
 `notify`, `stage` and `check_interval` steer the service's background checks. The service
-does not check in the background yet, so today only `off` and `channel` change anything.
+checks for app updates 60 s after it starts, then every `check_interval` (6 h by default,
+with a little jitter); a failed check retries after 5 minutes, backing off to at most a day.
+With `stage` it stages a new version in the background; with `notify` it only says one
+exists. It never applies an update by itself. With `off`, or on a developer install, it
+does not check at all.
 
 The same file also accepts the settings tables (`docs/design/SETTINGS.md` §4):
 

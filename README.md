@@ -87,18 +87,24 @@ USB cable. After that, daily use needs only the Ethernet cable. The
 
 ### Through a lab hub (the SoC Labs lab)
 
-Lab boards sit behind a hub machine. Harness Manager reaches them through an SSH
-tunnel to the hub, so you need SSH access to the hub. Name the hub once, in
-`~/.config/harness-manager/boards.toml`:
+Lab boards sit behind a hub machine (fpgahub). You need an SSH account on the hub, or an
+fpgahub token. Add the hub once as a named hub, test it, then add the board it offers:
 
-```toml
-[boards."mps3@192.168.10.101:6900"]
-via = "ssh:srv03335"
+```bash
+harness-manager hub add lab --ssh mapstone-dev.ecs.soton.ac.uk
+harness-manager hub test lab                        # never takes a lease
+harness-manager hub targets lab --add mps3_01_pl    # writes the board into boards.toml
 ```
 
-or give it for one command: `harness-manager info 192.168.10.101 --via ssh:srv03335`.
-A hub board is shared, so Harness Manager takes a lease on it for you and keeps it
-while the board is open. The app shows the lease holder and when it ends.
+A hub board is shared, so take its lease before you change anything on it:
+`harness-manager lease acquire 192.168.10.101`, or **Acquire lease** in the app. Harness
+Manager never takes a lease for you. Once it is yours, the service renews it while the
+board is open, and the app shows the holder and when it ends.
+
+`--via ssh:HOST` on one command, or `via = "ssh:HOST"` in `boards.toml`, gives only the
+SSH tunnel: there is no hub, so there is no lease. The
+[user guide](docs/USER_GUIDE.md#32-a-lab-board-behind-a-hub) has the token form and the
+details.
 
 ## Consoles
 
