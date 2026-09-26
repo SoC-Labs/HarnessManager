@@ -710,7 +710,8 @@ class HarnessInstaller:
         identity_after = running_summary(ident)
         if plan.os_slot and slots is not None:
             # The board confirms a healthy boot itself (harnessd); HM checks it runs the new
-            # slot as the default, verified by that boot, and that it IS the release.
+            # slot as the default, booted by stage0, confirmed when the harness says so, and
+            # that it IS the release.
             os_ok, os_info = self._confirm_os(slots, os_info or {}, checks, confirm=confirmed)
             confirmed = confirmed and os_ok
         if confirmed:
@@ -773,10 +774,13 @@ class HarnessInstaller:
 
     def _confirm_os(self, slots: OsSlotAdapter, info: dict[str, Any],
                     checks: list[PreflightItem], *, confirm: bool) -> tuple[bool, dict[str, Any]]:
-        """After the reboot: the board must run the new slot, as the default, verified by
-        the boot (stage0 booted it and harnessd confirmed it). stage0 undoes an image that
-        never comes up healthy by itself; a healthy but WRONG one stays until a person
-        rolls it back (`harness-manager slot rollback`)."""
+        """After the reboot: the board must run the new slot, as the default, booted by
+        stage0 (``verified: boot``) and, when the harness reports it, CONFIRMED by harnessd
+        (``confirmed``; ``verified: boot`` alone is never called a confirm). stage0 undoes
+        an image that never comes up healthy by itself; a healthy but WRONG one stays until
+        a person rolls it back (`harness-manager slot rollback`)."""
+        from harness_manager.services import slot_health
+
         st = slots.status()
         target = info.get("slot", "")
         if st.running != target:
@@ -795,11 +799,31 @@ class HarnessInstaller:
                                 "release: it stays the default until it is rolled back "
                                 "(`harness-manager slot rollback TARGET`)"))
             return False, {**info, "active": st.running, "verified": active.verified}
-        ok = st.default == target and active.verified == VERIFIED_BOOT
+        # LINUX-ANSWERS (S5): `verified: boot` means only that stage0 booted this image, never
+        # that harnessd confirmed it. The confirm is `confirmed` (additive): False right after
+        # the reboot is normal (harnessd confirms >= 2 s after start, once healthy), so it is
+        # read again for up to slot_health.CONFIRM_WAIT_S; absent, it cannot be claimed.
+        if slot_health.confirmed(st) is False:
+            st = slot_health.wait_confirmed(slots.status, sleep=self.sleep)
+            active = st.active_info
+        conf = slot_health.confirmed(st)
+        words = slot_health.boot_words(st, target) or f"verified {active.verified}"
+        if conf is False:
+            checks.append(_item("os slot", False,
+                                f"slot {target} runs as the default, but harnessd has not "
+                                f"confirmed a healthy boot within "
+                                f"{slot_health.CONFIRM_WAIT_S:.0f} s ({words}): if it never "
+                                f"does, stage0 goes back to slot {info.get('previous_slot') or '?'} "
+                                "at the next reset"))
+            return False, {**info, "active": st.running, "default": st.default,
+                           "verified": active.verified, "confirmed": False}
+        ok = st.running == target and st.default == target and active.verified == VERIFIED_BOOT
         checks.append(_item("os slot", ok, f"slot {target} runs, default {st.default or '?'}, "
-                                           f"verified {active.verified}"))
+                                           f"{words}" + ("" if conf is not None else
+                                                         " (the harness does not report its "
+                                                         "confirm)")))
         return ok, {**info, "active": st.running, "default": st.default,
-                    "verified": active.verified}
+                    "verified": active.verified, "confirmed": conf}
 
     def _finish(self, board_id: str, rel: HarnessRelease, result: str, journal: Journal,
                 detail: str, backup: dict[str, Any] | None, restore_hint: str, *,

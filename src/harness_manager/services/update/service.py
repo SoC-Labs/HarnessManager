@@ -24,6 +24,7 @@ from harness_manager import __version__
 from harness_manager.core.errors import AlreadyError, HarnessError, RefusedError
 from harness_manager.core.events import Event, EventBus
 
+from .. import slot_health
 from . import github
 from .app import AppUpdater
 from .appstage import app_dirs, offer_app, prepare_app_release, refuse_if_bad
@@ -225,13 +226,16 @@ class UpdateService:
                                     if p.is_dir() and p.name.upper().startswith("HBI")))
             except (HarnessError, OSError):
                 revs = ()
-        os_sha = os_crc = os_pending = ""
+        os_sha = os_crc = os_pending = fell = fell_crc = running = ""
         if slots is not None:
             try:
                 st = slots.status()
                 active = st.active_info
                 os_sha, os_crc = active.image_sha256, getattr(active, "hdr_crc", "")
                 os_pending = getattr(st, "pending_commit", "")
+                fell, running = slot_health.fell_back(st), st.running
+                bad = st.slots.get(fell) if fell else None
+                fell_crc = bad.hdr_crc if bad is not None else ""
             except HarnessError:
                 os_sha = ""
         witness = getattr(controller, "last_reboot", None)
@@ -240,6 +244,7 @@ class UpdateService:
                          identity_known=known, has_storage=storage is not None,
                          has_controller=controller is not None, has_os_slots=slots is not None,
                          os_active_sha=os_sha, os_active_crc=os_crc, os_pending=os_pending,
+                         os_fell_back=fell, os_running=running, os_fell_back_crc=fell_crc,
                          sd_revisions=revs,
                          mcc_firmware=getattr(boot, "firmware", "") or "",
                          hub_sd=self.hub_door_view(session))

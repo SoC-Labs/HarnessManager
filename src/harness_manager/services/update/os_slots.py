@@ -20,7 +20,11 @@ answers in HARNESS_DISTRIBUTION.md §9)::
 - a slot becomes the default only when it is verified (read back this boot, or it is
   the slot stage0 booted);
 - the board CONFIRMS a healthy boot itself (harnessd writes stage0's marker), so an
-  image that never comes up healthy is undone by stage0 (2 unconfirmed boots). An image
+  image that never comes up healthy is undone by stage0 (2 unconfirmed boots). stage0
+  never writes the card, so after that FALLBACK the default stays on the bad slot
+  (``running != default``, nothing staged) until a ``rollback``. ``verified: boot`` means
+  only that stage0 booted the slot, never that harnessd confirmed it: that is the
+  ``confirmed`` field, when a harness sends it (``services.slot_health``). An image
   that is healthy but wrong is undone by the host: ``verify`` the other slot, then
   ``rollback`` and ``reboot`` (``harness-manager slot rollback``);
 - once the board's SSH is claimed, the mutations are accepted only from the board

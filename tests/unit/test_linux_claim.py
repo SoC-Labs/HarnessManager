@@ -26,6 +26,7 @@ from harness_manager.core.errors import (
     IncompatibleError,
     RefusedError,
     UnavailableError,
+    UnreachableError,
     UsageError,
 )
 from harness_manager.core.model import BoardIdentity, Candidate, Link, LinkKind
@@ -274,7 +275,6 @@ def test_negative_twin_a_changed_host_key_is_refused_loudly(rig_factory):
     res = rig.ssh(["ssh", "-o", f"HostKeyAlias={CL.host_key_alias(rig.session.candidate.board_id)}",
                    "-o", f"UserKnownHostsFile={CL.known_hosts_path(rig.session.candidate.board_id)}",
                    "-o", "StrictHostKeyChecking=yes", "-l", "root", "127.0.0.1"], 5)
-    from harness_manager.core.errors import UnreachableError
     mapped = rig.claim.map_ssh_failure(UnreachableError(f"ssh exited ({res.stderr})"))
     assert isinstance(mapped, CL.HostKeyChangedError)
 
@@ -336,9 +336,13 @@ def test_negative_twin_on_a_board_claimed_by_another_key_it_says_so(rig_factory)
     assert CL.refusal_error("slot B bad: overlaps slot A") is None
 
 
-def test_the_fabric_identity_lock_is_incompatible_not_a_claim_matter():
+def test_the_fabric_identity_lock_is_its_own_lock_not_a_claim_matter():
+    # LINUX-ANSWERS (their assumption 1): two locks; the identity lock is fixable, never
+    # "incompatible, give up"
     exc = CL.refusal_error("identity lock: image 0x0badcafe != fabric 0x5a5a0001", "the swap")
-    assert isinstance(exc, IncompatibleError) and "0x0badcafe" in exc.message
+    assert isinstance(exc, CL.IdentityLockError) and "0x0badcafe" in exc.message
+    assert not isinstance(exc, (CL.ClaimLockedError, IncompatibleError))
+    assert exc.kind == "mismatch" and "push" in exc.hint and "commit" in exc.hint
     # deploy's swap refusal reads the same line as a fabric mismatch (no push, 14)
     assert any(m in "identity lock: no valid stage0 status block" for m in FABRIC_MISMATCH_ERRS)
 
@@ -456,3 +460,138 @@ def test_the_hub_script_is_pyverifys_own_modules():
     assert mods["identify"] == Path(pyverify.identify.__file__).read_text()
     assert mods["pusher"] == Path(pyverify.pusher.__file__).read_text()
     assert len(" ".join(CL.hub_argv("identify", "192.168.10.101", 6899, 2.0))) < 100_000
+
+
+# --- LINUX-ANSWERS (C1, C4, C5): the claim's key, the hub's python, ssh after a claim -----------
+
+
+def test_identify_key_sha256_is_shown_beside_the_host_key(rig_factory):
+    from harness_manager.cli.cmd_claim import claim_human
+
+    rig = rig_factory(claimed=True)
+    fp = "SHA256:" + "k" * 43
+    obs = CL.Mps3Claim._from_raw({"ssh": {"claimed": True, "host_key_sha256": "SHA256:h",
+                                          "key_sha256": fp}}, "identify x", 1.0)
+    assert obs.key_fp == fp
+    st = rig.claim.compose(obs)
+    assert st["claim_key"] == fp and st["claimed"]["key_fp"] == fp
+    assert any(fp in n for n in st["notes"])
+    assert any(line.startswith("claim key  " + fp) for line in claim_human("b", st))
+    exc = CL.refusal_error(CL.SLOT_LOCKED_ERR, status=st)
+    assert fp in exc.message
+
+
+def test_negative_twin_without_key_sha256_nothing_is_invented(rig_factory):
+    from harness_manager.cli.cmd_claim import claim_human
+
+    rig = rig_factory(claimed=True)
+    obs = CL.Mps3Claim._from_raw({"ssh": {"claimed": True, "host_key_sha256": "SHA256:h"}},
+                                 "identify x", 1.0)
+    st = rig.claim.compose(obs)
+    assert obs.key_fp == "" and st["claim_key"] is None and st["claimed"]["key_fp"] is None
+    assert not any(line.startswith("claim key") for line in claim_human("b", st))
+    assert any("does not publish which" in n for n in st["notes"])
+
+
+def _interpreters(tmp_path: Path, **kinds: str) -> Path:
+    """Fake hub interpreters in a PATH of their own: ``good`` runs this test's python, ``old``
+    behaves like the hub's 3.6 (fails the version check, prints 3.6). Each logs its name."""
+    import sys
+
+    bindir = tmp_path / "hub-bin"
+    bindir.mkdir()
+    mark = tmp_path / "ran"
+    for name, kind in kinds.items():
+        body = (f'exec "{sys.executable}" "$@"' if kind == "good" else
+                'case "$2" in *">="*) exit 1;; *print*) echo 3.6; exit 0;; esac\n'
+                'echo "SyntaxError: future feature annotations is not defined" >&2; exit 1')
+        p = bindir / name.replace("_", ".")
+        p.write_text(f'#!/bin/sh\necho {p.name} >> "{mark}"\n{body}\n')
+        p.chmod(0o755)
+    return bindir
+
+
+def _run_pick(bindir: Path) -> tuple[int, str, list[str]]:
+    argv = CL.hub_argv("nosuch", "127.0.0.1", 1, 0.1)
+    argv[0] = "/bin/sh"
+    p = subprocess.run(argv, env={"PATH": str(bindir)}, capture_output=True, text=True,
+                       timeout=60)
+    ran = (bindir.parent / "ran").read_text().split() if (bindir.parent / "ran").exists() else []
+    return p.returncode, p.stdout.strip(), ran
+
+
+def test_the_hub_helper_refuses_clearly_when_the_hub_has_only_python_3_6(tmp_path):
+    rc, out, ran = _run_pick(_interpreters(tmp_path, python3="old"))
+    reply = json.loads(out.splitlines()[-1])
+    assert rc == 127 and reply["ok"] is False and reply["kind"] == CL.NO_PYTHON
+    assert "no python 3.8+ on the hub (python3 is 3.6)" in reply["err"]
+    assert "future feature" not in out                    # the helper never ran on 3.6
+
+
+def test_negative_twin_python3_11_is_tried_first_and_runs_the_helper(tmp_path):
+    rc, out, ran = _run_pick(_interpreters(tmp_path, python3_13="good", python3_11="good",
+                                           python3="old"))
+    assert json.loads(out.splitlines()[-1]) == {"ok": False, "err": "unknown op nosuch"}
+    assert ran and set(ran) == {"python3.11"}             # 3.13 and python3 never asked
+
+
+def test_negative_twin_a_bare_python3_that_is_new_enough_is_used(tmp_path):
+    rc, out, ran = _run_pick(_interpreters(tmp_path, python3="good"))
+    assert json.loads(out.splitlines()[-1])["err"] == "unknown op nosuch"
+    assert CL.HUB_PYTHONS[0] == "python3.11" and CL.HUB_PY_MIN == (3, 8)
+
+
+def test_the_hub_call_turns_no_python_into_a_hint(tmp_path, monkeypatch):
+    bindir = _interpreters(tmp_path, python3="old")
+
+    def factory(host, group, jump=""):
+        def run(argv, timeout=None):
+            argv = ["/bin/sh", *argv[1:]]
+            p = subprocess.run(argv, env={"PATH": str(bindir)}, capture_output=True, text=True,
+                               timeout=timeout)
+            return CL.RunResult(p.returncode, p.stdout, p.stderr)
+        return run
+
+    monkeypatch.setattr(hubmod, "DEFAULT_RUNNER_FACTORY", factory)
+    with pytest.raises(UnreachableError, match="python 3.8") as exc:
+        CL._hub_call(HUB, "", CL.hub_argv("identify", "192.168.10.101", 6899, 1.0), 30)
+    assert "python3.11" in exc.value.hint
+
+
+def test_the_shipped_helper_needs_exactly_python_3_8():
+    # pusher.py imports typing.Literal (3.8) under `from __future__ import annotations`
+    import pyverify.pusher
+
+    src = Path(pyverify.pusher.__file__).read_text()
+    assert "from typing import Literal" in src and "from __future__ import annotations" in src
+    assert CL.HUB_PY_MIN == (3, 8)
+
+
+def test_ssh_refused_after_an_accepted_claim_is_not_lag(rig_factory, monkeypatch):
+    rig = rig_factory()
+
+    def keys_never_synced(argv, timeout):          # mps3-keys-sync missing: dropbear never
+        keep = rig.shell.authorized_keys           # learns the claimed key
+        rig.shell.authorized_keys = b""
+        try:
+            return rig.ssh(argv, timeout)
+        finally:
+            rig.shell.authorized_keys = keep
+
+    monkeypatch.setattr(CL, "DEFAULT_RUN", keys_never_synced)
+    with pytest.raises(RefusedError, match="the claim was accepted") as exc:
+        claim_it(rig)
+    assert "not key-sync lag" in exc.value.hint and "tofu:" in exc.value.hint
+    assert "next boot" in exc.value.hint and rig.shell.ssh_claimed
+
+
+def test_negative_twin_an_adopt_refused_by_the_board_keeps_the_key_hint(rig_factory):
+    rig = rig_factory(claimed=True)
+    rig.shell.authorized_keys = f"{make_key_line('someone-else')} x\n".encode()
+    with pytest.raises(RefusedError, match="claimed by another key") as exc:
+        claim_it(rig, adopt=True)
+    assert "key-sync" not in exc.value.hint
+
+
+def test_the_keys_sync_retry_is_still_6_5_s():
+    assert sum(CL.KEYS_SYNC_RETRIES_S) == 6.5
