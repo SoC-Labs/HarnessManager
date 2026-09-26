@@ -6,7 +6,7 @@
 | ``POST /harness/catalog/refresh`` ``{board_id?, channel?, all?, source?}`` | 202 job ``harness_refresh``: fetch + verify the channels, one plan per release; ``harness.catalog`` |
 | ``GET /harness/releases/{version}?board_id=`` | one release from the cached catalogue; with ``board_id`` its plan and ``fingerprint`` (reads the board's identity) |
 | ``POST /harness/releases/{version}/fetch`` ``{channel?, source?, kit?}`` | 202 job ``harness_fetch`` (engine-wide): download + verify into the cache |
-| ``POST /boards/{bid}/harness/install`` ``{fingerprint, version?, rekey_phrase?, channel?, source?, overlays_only?}`` | 202 job ``harness_install`` |
+| ``POST /boards/{bid}/harness/install`` ``{fingerprint, version?, rekey_phrase?, channel?, source?, overlays_only?, via?, board_phrase?, auto_revert?}`` | 202 job ``harness_install`` |
 | ``PUT /boards/{bid}/harness/pin`` ``{version}`` · ``DELETE /boards/{bid}/harness/pin`` | the board's pin; ``harness.pinned`` |
 | ``GET /boards/{bid}/harness/history?limit=`` | ``{board_id, history, pinned, rollback}`` |
 | ``POST /boards/{bid}/harness/rollback`` ``{to?, fingerprint?, rekey_phrase?, channel?, source?}`` or ``{backup_path, wait_s?}`` | 202 job ``harness_rollback`` |
@@ -57,6 +57,9 @@ from .app import JsonBody, RouteContext, _abs_path, _bool, _number, _obj
 ENGINE = ""
 RESULT_WRITTEN = "written-not-running"
 RESULT_RESTORED = "restored"
+#: HUB-SD (U10): a remote install that left the board dark fails its job too, loudly.
+RESULT_DARK = ("dark", "auto-reverted", "auto-revert-failed")
+VIAS = ("hub", "usb")
 CHANNELS = ("stable", "beta", "dev")
 REMEMBER = 64
 
@@ -156,8 +159,22 @@ def register(ctx: RouteContext) -> None:
             raise UsageError(f"rekey_phrase must be a string, not {phrase!r}")
         return phrase
 
+    def door_args(b: dict[str, Any]) -> tuple[str | None, str, bool | None]:
+        """HUB-SD: ``via`` (hub | usb), the typed ``board_phrase``, ``auto_revert``."""
+        via = _opt_str(b, "via")
+        if via is not None and via not in VIAS:
+            raise UsageError(f"via must be one of {', '.join(VIAS)}, not {via!r}")
+        bp = b.get("board_phrase", "")
+        if bp is not None and not isinstance(bp, str):
+            raise UsageError(f"board_phrase must be a string, not {bp!r}")
+        ar = b.get("auto_revert")
+        if ar is not None and not isinstance(ar, bool):
+            raise UsageError(f"auto_revert must be true or false, not {ar!r}")
+        return via, bp or "", ar
+
     def approve_or_refuse(bid: str, s: Any, cat: Any, plan: Any, fingerprint: str | None,
-                          phrase: str) -> Any:
+                          phrase: str, board_phrase: str = "",
+                          auto_revert: bool | None = None) -> Any:
         """The daemon's consent rules, before any job (see the module doc)."""
         summary = plan_json(plan)
         cat.check_lease(s, plan)                     # 409 HELD, naming the holder
@@ -173,7 +190,8 @@ def register(ctx: RouteContext) -> None:
             raise with_data(RefusedError(f"{bid} already runs harness {plan.version}",
                                          hint="nothing to do"), plan=summary)
         try:
-            return plan.approve(consent=phrase, by="harness-manager-daemon")
+            return plan.approve(consent=phrase, by="harness-manager-daemon",
+                                board_phrase=board_phrase, auto_revert=auto_revert)
         except RefusedError as exc:             # a re-key without the exact typed phrase
             raise with_data(exc, plan=summary) from None
 
@@ -186,6 +204,10 @@ def register(ctx: RouteContext) -> None:
             finally:
                 unsubscribe()
             data = out.as_dict()
+            if out.result in RESULT_DARK:
+                raise with_data(ActionFailedError(
+                    out.detail, hint=out.restore_hint.replace("TARGET", bid) or
+                    "check the board"), outcome=data)
             if out.result == RESULT_WRITTEN:
                 backup = (out.backup or {}).get("path", "")
                 raise with_data(ActionFailedError(
@@ -276,6 +298,7 @@ def register(ctx: RouteContext) -> None:
             raise UsageError("the request needs 'fingerprint' (from GET /harness/releases/"
                              "{version}?board_id=)")
         phrase = consent(b)
+        via, board_phrase, auto_revert = door_args(b)
         overlays_only = _bool(b, "overlays_only", False)
         where = recall(bid, fingerprint)
         channel = _opt_str(b, "channel") or where[0]
@@ -286,8 +309,9 @@ def register(ctx: RouteContext) -> None:
             verified = (cat.locate(version, channel=channel, source=source,
                                    pack=s.candidate.pack) if version else None)
             plan, verified = cat.plan(s, version, channel=channel, source=source,
-                                      overlays_only=overlays_only, verified=verified)
-            approval = approve_or_refuse(bid, s, cat, plan, fingerprint, phrase)
+                                      overlays_only=overlays_only, verified=verified, via=via)
+            approval = approve_or_refuse(bid, s, cat, plan, fingerprint, phrase, board_phrase,
+                                         auto_revert)
         return install_job("harness_install", bid, s, cat, plan, approval, verified)
 
     @api.put("/boards/{bid:path}/harness/pin")
@@ -336,15 +360,18 @@ def register(ctx: RouteContext) -> None:
             wait_s = _number(b, "wait_s") if b.get("wait_s") is not None else None
             if wait_s is not None and wait_s <= 0:
                 raise UsageError("wait_s must be positive")
+            via_b = _opt_str(b, "via")
             with d.gates.op(bid):
-                ctx.require(s, "storage", C.STORAGE_INSTALL)      # 422: needs the Debug USB
+                if via_b != "hub":
+                    ctx.require(s, "storage", C.STORAGE_INSTALL)  # 422: needs the Debug USB
                 ctx.require(s, "controller", C.REBOOT_BOARD)
                 cat.update.check_lease(s, "roll the harness back")
 
             def run(progress: Callable[[str, int, int], None]) -> Any:
                 unsubscribe = forwarding(bid, progress)
                 try:
-                    out = cat.update.rollback_harness(s, backup_path=backup, wait_s=wait_s)
+                    out = cat.update.rollback_harness(s, backup_path=backup, wait_s=wait_s,
+                                                      via=via_b)
                 finally:
                     unsubscribe()
                 data = {**out.as_dict(), "how": "restore"}
@@ -358,6 +385,7 @@ def register(ctx: RouteContext) -> None:
         to = _opt_str(b, "to") or "previous"
         fingerprint = _opt_str(b, "fingerprint")
         phrase = consent(b)
+        via, board_phrase, auto_revert = door_args(b)
         source = _opt_str(b, "source") or sources.get(bid)
         channel = _opt_str(b, "channel")
         with d.gates.op(bid):
@@ -367,6 +395,7 @@ def register(ctx: RouteContext) -> None:
             if not name:
                 raise AbsentError(f"no channel lists harness {target}",
                                   hint="restore an SD backup instead ({backup_path})")
-            plan, verified = cat.plan(s, target, verified=listing.verified[name])
-            approval = approve_or_refuse(bid, s, cat, plan, fingerprint, phrase)
+            plan, verified = cat.plan(s, target, verified=listing.verified[name], via=via)
+            approval = approve_or_refuse(bid, s, cat, plan, fingerprint, phrase, board_phrase,
+                                         auto_revert)
         return install_job("harness_rollback", bid, s, cat, plan, approval, verified)

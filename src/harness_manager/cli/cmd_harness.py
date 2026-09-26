@@ -75,6 +75,19 @@ def _parents() -> tuple[argparse.ArgumentParser, ...]:
     return fmt, usb, src, one
 
 
+def _door_args(ap: argparse.ArgumentParser) -> None:
+    """HUB-SD: the install door and its consent (HARNESS-DIST §8.1)."""
+    ap.add_argument("--door", choices=("hub", "usb"), default=None,
+                    help="where the config SD is written: hub (fpgahub on the lab hub) or "
+                         "usb (the Debug USB here); default: the planner picks")
+    ap.add_argument("--board-phrase", default="", metavar="PHRASE",
+                    help='through the hub: the exact phrase the plan prints ("INSTALL … HELD '
+                         'BY … N QUEUED"); never implied by --yes')
+    ap.add_argument("--no-auto-revert", action="store_true",
+                    help="through the hub: do not write the previous base back if the board "
+                         "stays dark after the REBOOT (armed by default)")
+
+
 def register(subparsers: Any) -> argparse.ArgumentParser:
     """Add ``harness`` and its verbs to the top-level subparsers. Returns the parser."""
     from .output import TSV_COLUMNS
@@ -115,6 +128,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--consent", default="", metavar="PHRASE",
                     help='for a re-key: the exact phrase the plan prints ("REKEY 0x…")')
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    _door_args(ap)
 
     ap = sub.add_parser("pin", help="pin a board to a release (none newer is offered)",
                         parents=[fmt, usb, src, one], epilog=epilog("harness pin"))
@@ -144,6 +158,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--consent", default="", metavar="PHRASE",
                     help='for a re-key: the exact phrase the plan prints ("REKEY 0x…")')
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    _door_args(ap)
 
     ap = sub.add_parser("mirror", help="write an offline mirror: channels + blobs/<sha256>",
                         parents=[fmt, src], epilog=epilog("harness mirror"))
@@ -301,13 +316,34 @@ def _fetch(ctx: Ctx) -> int:
 
 
 def _approve(ctx: Ctx, plan: Any, what: str) -> Any:
-    """The user's consent: the typed phrase for a re-key (never implied by --yes)."""
+    """The user's consent: the typed phrase for a re-key (never implied by --yes), and for
+    an install through the hub the phrase naming the board, its lease holder and queue."""
     a = ctx.args
+    door: dict[str, Any] = {}
+    if getattr(plan, "board_phrase", ""):
+        ctx.note((plan.hub or {}).get("consent_text") or plan.board_phrase)
+        bp = getattr(a, "board_phrase", "") or ("" if a.yes else _ask(ctx, plan.board_phrase))
+        door = {"board_phrase": bp,
+                "auto_revert": False if getattr(a, "no_auto_revert", False) else None}
     if plan.rekey:
         consent = a.consent or ("" if a.yes else cmd_update._ask_phrase(ctx, plan.consent_phrase))
-        return plan.approve(consent=consent)
-    ctx.confirm(what)
-    return plan.approve()
+        return plan.approve(consent=consent, **door)
+    if not door:
+        ctx.confirm(what)
+    return plan.approve(**door)
+
+
+def _ask(ctx: Ctx, phrase: str) -> str:
+    """The typed phrase of a remote install (HUB-SD): the user types it, exactly."""
+    import sys
+
+    stream = ctx.err or sys.stderr
+    stream.write(f"This goes through the hub. To go ahead, type exactly: {phrase}\n> ")
+    stream.flush()
+    try:
+        return sys.stdin.readline().strip()
+    except (OSError, ValueError):
+        return ""
 
 
 def _run_plan(ctx: Ctx, cat: Any, cand: Any, session: Any, plan: Any, verified: Any,
@@ -337,6 +373,9 @@ def _run_plan(ctx: Ctx, cat: Any, cand: Any, session: Any, plan: Any, verified: 
 
 def _outcome(ctx: Ctx, out: Any, layout: str, row: list[Any]) -> int:
     data = out.as_dict()
+    if out.result in ("dark", "auto-reverted", "auto-revert-failed"):     # HUB-SD (U10)
+        raise with_data(ActionFailedError(out.detail, hint=out.restore_hint.replace(
+            "TARGET", ctx.args.target) or "check the board"), outcome=data)
     if out.result == "written-not-running":
         raise with_data(ActionFailedError(out.detail, hint=out.restore_hint.replace(
             "TARGET", ctx.args.target) or "check the board"), outcome=data)
@@ -357,7 +396,8 @@ def _install(ctx: Ctx) -> int:
         verified = cat.locate(a.version, channel=a.channel, source=a.source,
                               pack=cand.pack) if a.version else None
         plan, verified = cat.plan(session, a.version, channel=a.channel, source=a.source,
-                                  overlays_only=a.overlays_only, verified=verified)
+                                  overlays_only=a.overlays_only, verified=verified,
+                                  via=getattr(a, "door", None))
         out = _run_plan(ctx, cat, cand, session, plan, verified, "install")
     backup = (out.backup or {}).get("path", "")
     return _outcome(ctx, out, "harness install",
@@ -434,7 +474,7 @@ def _rollback(ctx: Ctx) -> int:
             unsubscribe = cmd_update._watch(ctx, cand.board_id)
             try:
                 out = cat.update.rollback_harness(session, backup_path=Path(a.backup),
-                                                  wait_s=a.wait)
+                                                  wait_s=a.wait, via=getattr(a, "door", None))
             finally:
                 unsubscribe()
         if out.result != "restored":
@@ -455,7 +495,8 @@ def _rollback(ctx: Ctx) -> int:
             raise AbsentError(f"no channel lists harness {target}",
                               hint="restore an SD backup instead (--backup ZIP)")
         ctx.note(f"rollback   {cand.board_id}: re-install harness {target} (from {name})")
-        plan, verified = cat.plan(session, target, verified=listing.verified[name])
+        plan, verified = cat.plan(session, target, verified=listing.verified[name],
+                                  via=getattr(a, "door", None))
         out = _run_plan(ctx, cat, cand, session, plan, verified, "roll back to")
     data_row = [out.board_id, out.version, out.result, "re-install", out.detail]
     return _outcome(ctx, out, "harness rollback", data_row)
