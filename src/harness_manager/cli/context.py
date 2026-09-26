@@ -47,6 +47,16 @@ USB_ONLY = "-"
 #: only ever signals a holder carrying this tag, and only when it is the caller's own.
 HOLD_TAG = "[cli-hold]"
 
+#: ``--via`` on every verb that opens a board: the metavar and help, in one place so the
+#: verbs cannot disagree (``tunnel.parse_via`` takes ``ssh:HOST`` or ``hub``).
+VIA_METAVAR = "ssh:HOST|hub"
+VIA_HELP = ("reach the shell through an SSH tunnel on HOST (ssh:HOST), or through the hub the "
+            "board's boards.toml hub table names (hub); without --via, the board's boards.toml "
+            "via does the same")
+#: ``--serial`` where it ADDS a link to a TARGET.
+SERIAL_HELP = ("add the board controller's USB serial link (serial:///dev/ttyUSB0, COM7, "
+               "/dev/ttyUSB0)")
+
 
 def serial_url(value: str) -> str:
     return value if "://" in value else f"serial://{value}"

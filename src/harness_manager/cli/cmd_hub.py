@@ -10,7 +10,7 @@
     harness-manager lease respond TARGET ID --release | --keep MINUTES [--message M]
     harness-manager lease force TARGET [--yes] [--confirm-board NAME]
     harness-manager lease leave TARGET
-    harness-manager lease dismiss TARGET          # forget the last forced release (D11)
+    harness-manager lease dismiss TARGET          # forget the last forced release
     harness-manager share list TARGET
     harness-manager share start TARGET NAME      # a share name from boards.toml (mcc, ...) or a /dev path
 
@@ -275,8 +275,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     target_help = "the board (192.168.10.101); its boards.toml hub table names the hub"
 
     vp = subparsers.add_parser(
-        "lease", help="the board's hub lease: show, acquire, request, force, leave, release",
-        description="The hub lease that keeps two people off one shared board. The Harness "
+        "lease", help="the board's hub lease: show, acquire, release, request, requests, respond, "
+                 "force, leave, dismiss",
+        description="The hub lease that keeps two people off one shared board. It needs a hub "
+                    "(`harness-manager hub`), and nothing takes it for you: `acquire` here, or "
+                    "Acquire lease in the app. The Harness "
                     "Manager service heartbeats it while the board is open there. `request` "
                     "asks the holder to give it up; with no answer in 2:00, `force` takes it.",
         parents=[fmt], epilog=_cols("lease"))
@@ -346,7 +349,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                          parents=[fmt], epilog=_cols("lease leave"))
     sp.add_argument("target", metavar="TARGET", help=target_help)
 
-    sp = lsub.add_parser("dismiss", help="forget the last forced release of your lease (D11)",
+    sp = lsub.add_parser("dismiss", help="forget the last forced release of your lease",
                          description="`lease show` reports the last time someone force-released "
                                      "your lease until you dismiss it. Local only: the hub is "
                                      "not asked, and the next forced release is reported again.",

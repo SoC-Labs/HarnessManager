@@ -63,6 +63,10 @@ owners.
   `restore`, `console`, `debug`, `reset`, `clock`, `lab`, `mcc`, `sd`, `update`,
   `daemon`, `ui`, `app`, `help`. Every verb has `--json` and `--tsv` output and
   documented exit codes (`harness-manager help --tabs`).
+- `harness-manager help --tabs`, and the app's Help dialog built from it, cover every
+  verb: new sections for the front panel, hubs and leases, the Linux harness, building
+  a DUT, updates, settings, and the app and service. Every option has help text, and
+  `--via` says it takes `ssh:HOST` or `hub`.
 
 ### The MPS3 board pack
 - Identify the harness and its health (idle, busy, wedged, offline, service down,

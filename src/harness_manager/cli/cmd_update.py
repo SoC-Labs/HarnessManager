@@ -43,7 +43,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event
 
-from .context import Ctx
+from .context import SERIAL_HELP, Ctx
 from .output import TSV_COLUMNS, Result, StderrProgress, with_data
 
 #: TSV layouts for the update verbs (append-only). Registered into the shared table at
@@ -72,7 +72,7 @@ def _parents() -> list[argparse.ArgumentParser]:
                    help="tab-separated rows, append-only columns")
     usb = argparse.ArgumentParser(add_help=False)
     usb.add_argument("--serial", action="append", metavar="URL", default=argparse.SUPPRESS,
-                     help="add the board controller's USB serial link")
+                     help=SERIAL_HELP)
     usb.add_argument("--volume", action="append", metavar="PATH", default=argparse.SUPPRESS,
                      help="add the configuration SD volume (the mounted V2M-MPS3 drive)")
     src = argparse.ArgumentParser(add_help=False)
@@ -88,7 +88,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     for layout, cols in UPDATE_TSV.items():
         TSV_COLUMNS.setdefault(layout, cols)
     fmt, usb, src = _parents()
-    vp = subparsers.add_parser("update", help="check, install and roll back updates",
+    vp = subparsers.add_parser("update", help="updates from the signed channel: check, "
+                                                "harness, app, status, rollback",
                                description="Updates from the signed channel: the harness "
                                            "(config SD + overlays) and the app itself.",
                                parents=[fmt])

@@ -621,7 +621,8 @@ class Mps3Storage:
         """Check a backup archive against its record and its own manifest. Returns the manifest."""
         if not isinstance(record, BackupRecord):
             raise RefusedError("writing the configuration SD needs a verified backup of it first",
-                               hint="run backup() (`harness-manager sd backup`) and pass its record")
+                               hint="run backup() (`harness-manager sd TARGET backup DIR`) "
+                                    "and pass its record")
         path = Path(record.path)
         if not path.is_file():
             raise RefusedError(f"backup {path} does not exist", hint="take a fresh backup")
@@ -706,7 +707,8 @@ class Mps3Storage:
         emit: Progress = progress or (lambda phase, done, total: None)
         if backup is None:
             raise RefusedError("writing the configuration SD needs a verified backup of it first",
-                               hint="run backup() (`harness-manager sd backup`) and pass its record")
+                               hint="run backup() (`harness-manager sd TARGET backup DIR`) "
+                                    "and pass its record")
         root = Path(self.locate())
         self._refuse_if_pending(root, "install")
         plan = self._plan(root, files)

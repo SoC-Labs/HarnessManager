@@ -97,12 +97,13 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                     help="print `set HM_KIT_DIR ...` lines for a Vivado Tcl session")
     ap = sub.add_parser("verify", help="check a kit directory (and it against a board)",
                         parents=[fmt], epilog=ep("kit"))
-    ap.add_argument("dir", metavar="DIR")
+    ap.add_argument("dir", metavar="DIR", help="the kit directory (`kit fetch --out DIR`)")
     target(ap, static=False)
     sub.add_parser("list", help="the cached kits", parents=[fmt], epilog=ep("kit list"))
     ap = sub.add_parser("import", help="a kit dir or zip, or a fielded/<sid>/ dir, into the cache",
                         parents=[fmt], epilog=ep("kit"))
-    ap.add_argument("path", metavar="DIR|ZIP")
+    ap.add_argument("path", metavar="DIR|ZIP",
+                    help="the kit directory or zip (or a fielded/<sid>/ directory)")
     ap = sub.add_parser("guide", help="the build steps, each with its state, and what to do next",
                         parents=[fmt], epilog=ep("kit guide"))
     target(ap)
@@ -113,26 +114,35 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap = sub.add_parser("script", help="write build_rm.tcl, the kit and the XDC kit into a dir",
                         parents=[fmt], epilog=ep("kit"))
     target(ap)
-    ap.add_argument("--design", required=True, metavar="NAME|FILE")
+    ap.add_argument("--design", required=True, metavar="NAME|FILE",
+                    help="required: the RM design, a built-in one (`xdc info`) or a design "
+                         ".json file")
     ap.add_argument("--out", default=None, metavar="DIR",
                     help="the build directory (without it: show the files, write nothing)")
     ap.add_argument("--kit-dir", default=None, metavar="DIR",
                     help="use this exported kit instead of copying one into DIR/kit")
-    ap.add_argument("--jobs", type=int, default=2, help="Vivado threads (default 2)")
-    ap.add_argument("--stop-after", default="bitstream", choices=STAGES)
+    ap.add_argument("--jobs", type=int, default=2, metavar="N", help="Vivado threads (default 2)")
+    ap.add_argument("--stop-after", default="bitstream", choices=STAGES,
+                    help="the last stage the script runs (default bitstream: all of them)")
     ap = sub.add_parser("build", help="the Vivado command for a build dir (HM does not run it yet)",
                         parents=[fmt], epilog=ep("kit"))
-    ap.add_argument("dir", metavar="DIR")
-    ap.add_argument("--stop-after", default="", choices=("",) + STAGES)
-    ap.add_argument("--jobs", type=int, default=None)
+    ap.add_argument("dir", metavar="DIR", help="the build directory `kit script --out` wrote")
+    # "" (the default) keeps the script's own STOP_AFTER; the metavar hides it from the help.
+    ap.add_argument("--stop-after", default="", choices=("",) + STAGES,
+                    metavar="{" + ",".join(STAGES) + "}",
+                    help="stop after this stage (default: what `kit script` wrote)")
+    ap.add_argument("--jobs", type=int, default=None, metavar="N",
+                    help="Vivado threads (default: what `kit script` wrote)")
     ap = sub.add_parser("check", help="a build receipt and its pair, or a bare partial, board-free",
                         parents=[fmt], epilog=ep("kit"))
-    ap.add_argument("path", metavar="RECEIPT|BUILD_DIR|PARTIAL")
+    ap.add_argument("path", metavar="RECEIPT|BUILD_DIR|PARTIAL",
+                    help="a build receipt, the build directory holding one, or a bare partial")
     ap.add_argument("--clearing", default=None, metavar="FILE", help="a bare partial's clearing")
     target(ap)
     ap = sub.add_parser("pack", help="the overlay triple from a passed receipt (--import: into "
                                      "Program)", parents=[fmt], epilog=ep("kit"))
-    ap.add_argument("path", metavar="RECEIPT|BUILD_DIR")
+    ap.add_argument("path", metavar="RECEIPT|BUILD_DIR",
+                    help="a passed build receipt, or the build directory holding one")
     ap.add_argument("--out", default=None, metavar="DIR",
                     help="the overlay root (default: <build dir>/overlay)")
     ap.add_argument("--import", dest="do_import", action="store_true",

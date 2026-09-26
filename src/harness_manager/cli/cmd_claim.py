@@ -37,7 +37,7 @@ from typing import Any
 
 from harness_manager.core.errors import ExitCode, UnavailableError, UsageError
 
-from .context import Ctx
+from .context import VIA_HELP, VIA_METAVAR, Ctx
 from .output import TSV_COLUMNS, Result
 
 CLAIM_TSV: dict[str, tuple[str, ...]] = {
@@ -62,8 +62,7 @@ def _fmt() -> argparse.ArgumentParser:
 def _board() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("target", metavar="TARGET", help=TARGET_HELP)
-    p.add_argument("--via", metavar="ssh:HOST", default=argparse.SUPPRESS,
-                   help="reach the shell through an SSH tunnel on HOST (the lab hub)")
+    p.add_argument("--via", metavar=VIA_METAVAR, default=argparse.SUPPRESS, help=VIA_HELP)
     return p
 
 

@@ -41,7 +41,7 @@ from typing import Any
 from harness_manager.core.capabilities import DEBUG_FABRIC
 from harness_manager.core.errors import ExitCode, UnavailableError
 
-from .context import Ctx, hold, hold_note
+from .context import VIA_HELP, VIA_METAVAR, Ctx, hold, hold_note
 from .output import TSV_COLUMNS, Result
 
 #: TSV layouts (append-only). ``output.TSV_COLUMNS`` carries them; kept here too so the
@@ -70,8 +70,7 @@ def _fmt() -> argparse.ArgumentParser:
 def _board() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("target", metavar="TARGET", help=TARGET_HELP)
-    p.add_argument("--via", metavar="ssh:HOST", default=argparse.SUPPRESS,
-                   help="reach the shell through an SSH tunnel on HOST (the lab hub)")
+    p.add_argument("--via", metavar=VIA_METAVAR, default=argparse.SUPPRESS, help=VIA_HELP)
     return p
 
 

@@ -66,7 +66,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     """Add ``config`` and its actions to the top-level subparsers. Returns the parser."""
     fmt = _parents()
     vp = subparsers.add_parser(
-        "config", help="Harness Manager's settings: list, get, set, secrets, test",
+        "config", help="Harness Manager's settings: list, get, set, unset, secrets, path, "
+                   "test",
         description="Harness Manager's settings (the Settings menu's, from the command line). "
                     "Through the service when it runs, so its open windows hear the change.",
         parents=[fmt])
@@ -94,7 +95,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
     ap = sub.add_parser("unset", help="remove your value: back to the admin's or the default",
                         parents=[fmt], epilog=epilog("config set|unset"))
-    ap.add_argument("key", metavar="KEY")
+    ap.add_argument("key", metavar="KEY", help="e.g. tools.openocd, hubs.lab.host")
 
     for name, help_ in (("set-secret", "store a secret, read from stdin (never the command "
                                        "line)"),

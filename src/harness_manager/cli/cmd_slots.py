@@ -72,8 +72,11 @@ def _fmt() -> argparse.ArgumentParser:
 def _board() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("target", metavar="TARGET", help=TARGET_HELP)
-    p.add_argument("--via", metavar="ssh:HOST", default=argparse.SUPPRESS,
-                   help="reach the shell through an SSH tunnel on HOST (the lab hub)")
+    # The same metavar and help as context.VIA_METAVAR/VIA_HELP (a test keeps them equal).
+    p.add_argument("--via", metavar="ssh:HOST|hub", default=argparse.SUPPRESS,
+                   help="reach the shell through an SSH tunnel on HOST (ssh:HOST), or through "
+                        "the hub the board's boards.toml hub table names (hub); without --via, "
+                        "the board's boards.toml via does the same")
     return p
 
 
@@ -99,14 +102,21 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
     ssub.add_parser("status", help="running, default, where a push goes, the card job",
                     parents=[fmt, board], epilog=epilog("slot"))
     ap = ssub.add_parser("push", help="push a boot image into the free slot and read it back",
+                         description="Push a boot image into the free OS slot and read it "
+                                     "back; it is not committed. --bundle or --static-id is "
+                                     "required: it names the static the image was provisioned "
+                                     "for, never the board's own. Given both, --static-id must "
+                                     "match the bundle's provisioned static.",
                          parents=[fmt, board, yes], epilog=epilog("slot"))
     ap.add_argument("image", nargs="?", default=None, metavar="IMAGE",
                     help="the S0LB boot image (default: linux_slot.img beside --bundle)")
     ap.add_argument("--bundle", default=None, metavar="PATH",
                     help="the release's linux_bundle.json (or its directory): the provisioned "
-                         "static, the image's sha256 and frames")
+                         "static, the image's sha256 and frames (this or --static-id is "
+                         "required)")
     ap.add_argument("--static-id", default="", metavar="ID",
-                    help="the static the image was provisioned for (without --bundle)")
+                    help="the static the image was provisioned for (this or --bundle is "
+                         "required)")
     ap.add_argument("--version", dest="image_version", default="", metavar="V",
                     help="the release this image is (shown by slot status)")
     ap.add_argument("--rollback-first", action="store_true",

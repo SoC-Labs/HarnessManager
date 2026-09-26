@@ -1,0 +1,90 @@
+
+== S1 precedence ==
+PASS  S1.1 nothing set: the schema default
+      {'key': 'tools.openocd', 'value': '', 'source': 'default', 'where': '', 'locked': False, 'shadowed': '', 'capped': '', 'restart': 'live', 'problems': []}
+PASS  S1.2 the user file
+PASS  S1.3 env beats the user file, and says it shadows it
+      {'key': 'tools.openocd', 'value': '/dev/openocd', 'source': 'env', 'where': '$HARNESS_MANAGER_OPENOCD', 'locked': False, 'shadowed': '$HARNESS_MANAGER_OPENOCD', 'capped': '', 'restart': 'live', 'problems': []}
+PASS  S1.4 a policy lock beats env AND the user
+      {'key': 'tools.vivado', 'value': '/tools/Xilinx/Vivado/2024.1/bin/vivado', 'source': 'lock', 'where': '/etc/harness-manager/policy.toml', 'locked': True, 'shadowed': '', 'capped': '', 'restart': 'live', 'problems': []}
+PASS  S1.5 setting a locked key is refused (15 REFUSED), naming the file
+      tools.vivado is set by the administrator's policy /etc/harness-manager/policy.toml
+PASS  S1.6 a policy [default] applies when the user has none
+      {'key': 'updates.mirrors', 'value': ['/lab/mirror'], 'source': 'machine', 'where': '/etc/harness-manager/policy.toml', 'locked': False, 'shadowed': '', 'capped': '', 'restart': 'live', 'problems': []}
+PASS  S1.7 ...and the user may override a machine default
+PASS  S1.8 today's U6 policy keys keep their meaning (cap, pin, interval)
+      {'auto': {'key': 'updates.auto', 'value': 'notify', 'source': 'user', 'where': 'settings.toml', 'locked': False, 'shadowed': '', 'capped': "the administrator's policy /etc/harness-manager/policy.toml allows at most 'notify'", 'restart': 'live', 'problems': []}, 'channel': 'stable', 'check_interval': 43200}
+PASS  S1.9 a bad env value is skipped with a problem, not fatal
+      {'key': 'debug.xvc_port_base', 'value': 23500, 'source': 'user', 'where': 'settings.toml', 'locked': False, 'shadowed': '', 'capped': '', 'restart': 'daemon', 'problems': ["$HARNESS_MANAGER_XVC_PORT_BASE: debug.xvc_port_base: 'twelve' is not a whole number; ignored"]}
+PASS  S1.10 a restart-needing setting says so
+PASS  S1.10b a bad policy lock fails closed: locked at the default, with the reason
+      {'key': 'updates.channel', 'value': 'stable', 'source': 'lock', 'where': '/etc/harness-manager/policy.toml', 'locked': True, 'shadowed': '', 'capped': '', 'restart': 'live', 'problems': ["the policy's value is not valid (updates.channel must be one of stable, beta, dev); the default is used, locked"]}
+PASS  S1.11 a pack declares its own rows; dev-only rows stay out of the menu
+      21 menu rows, 20 with dev-only
+PASS  S1.12 validation refuses a bad value
+      mps3.console.pace_ms must be 0..500 ms
+PASS  S1.13 a secret resolves to set/not set only
+PASS  S1.14 a secret is not set through `config set`
+PASS  S1.15 the user file round-trips, written 0600
+      mode 600; 15 lines
+
+== S2 secrets ==
+PASS  S2.1 this process (ssh, no session bus) sees no keyring, and says why
+      no session bus in this process (an ssh or service session?)
+PASS  S2.2 ...so the secret goes to a private file (0600 in 0700) and says why
+      {'name': 'updates.github_token', 'set': True, 'backend': 'file', 'where': 'a private file', 'reachable': True, 'why': 'no keyring: no session bus in this process (an ssh or service session?)'}
+PASS  S2.3 the index names where, never what
+      {  "updates.github_token": "file" }
+PASS  S2.4 the code that sends it can read it
+PASS  S2.5 env beats the store for a secret too
+      $HARNESS_MANAGER_GITHUB_TOKEN
+PASS  S2.6 a group-readable secret file is refused
+      the secret file /tmp/settings-spike-io2wpzts/state/secrets/updates.github_token is readable by others (mode 644); it is not used
+PASS  S2.7 inside a desktop-like session the secret goes to the Secret Service
+      {"backend": "secret-service", "why": "", "status": {"name": "hubs.lab.token", "set": true, "backend": "secret-service", "where": "the Secret Service (your login keyring)", "reachable": true, "why": ""}, "readback": true}
+PASS  S2.8 back over ssh: 'stored in the keyring, unreachable here', not 'not set'
+      {'name': 'hubs.lab.token', 'set': True, 'backend': 'secret-service', 'where': 'the Secret Service (your login keyring)', 'reachable': False, 'why': 'no session bus in this process (an ssh or service session?)'}
+PASS  S2.9 reading it here fails loudly, with the way out
+      hubs.lab.token is stored in the Secret Service (your login keyring), which this process cannot reach: no session bus in this process (an ssh or service session?) | start the service from your desktop session, or set the secret again here (it moves to a private file)
+PASS  S2.10 no copy of the keyring secret was written to a file
+PASS  S2.11 nothing left running from the throwaway session
+      none
+
+== S3 Test connection: REST (fake fpgahub 0.3.0) ==
+PASS  S3.1 reach, auth, targets, target: all pass; the offer is listed
+      config:  / reach: fpgahub 0.3.0 at 127.0.0.1:32821 / auth: dam1n19@mapstone-dev (role write) / targets: 3 targets on 2 boards / target: mps3_01_pl
+PASS  S3.2 no lease was taken, joined or released
+      ['GET /api/v1/health', 'GET /api/v1/whoami', 'GET /api/v1/groups']
+PASS  S3.3 the token is nowhere in the report
+PASS  S3.4 no token: fails at auth, says where to get one
+      {'step': 'auth', 'ok': False, 'detail': 'no token is set for this hub', 'hint': 'paste the token an fpgahub admin made (fpgahub token create)', 'ms': 0}
+PASS  S3.5 a wrong token: fails at auth (401), with the fix
+      {'step': 'auth', 'ok': False, 'detail': 'whoami: the hub 127.0.0.1:32821 did not accept a credential (HTTP 401: read access: present a Bearer token (fpgahub login) or sign in to the web UI)', 'hint': 'set hub.token_file in boards.toml, or `fpgahub login --addr 127.0.0.1:32821 --token …`; an admin mints tokens (`fpgahub token create`)', 'ms': 66}
+PASS  S3.6 a target the hub does not have: fails at target
+      {'step': 'target', 'ok': False, 'detail': 'mps3_09_pl', 'hint': "this hub has no target 'mps3_09_pl'; pick one above", 'ms': 0}
+PASS  S3.7 a dead port: fails at reach, quickly
+      {'step': 'reach', 'ok': False, 'detail': 'health: cannot reach the hub 127.0.0.1:60113 ([Errno 111] Connection refused)', 'hint': 'check hub.url, and that you are on the campus network or VPN', 'ms': 0}
+PASS  S3.8 plain http off-box: refused at config (the token would cross readable)
+      {'step': 'config', 'ok': False, 'detail': 'hub.url is plain http to hub.example: the Bearer token would cross the network readable', 'hint': "use https (the lab hub's web port 7246 is TLS)", 'ms': 0}
+
+== S4 Test connection: SSH (fake ssh, sg, id, fpgahub) ==
+PASS  S4 ok        -> all pass
+      targets: 3 targets -> 3 targets
+PASS  S4 dns       -> fails at reach
+      reach: ssh: Could not resolve hostname hub.example: Name or service not known | check the host name, and that you are on the campus network or VPN
+PASS  S4 timeout   -> fails at reach
+      reach: ssh: connect to host hub.example port 22: Connection timed out | check the host name, and that you are on the campus network or VPN
+PASS  S4 hostkey   -> fails at auth
+      auth: Host key verification failed. | the hub's host key is not in known_hosts (or changed): run `ssh HOST` once in a terminal and check the fingerprint with the hub admin
+PASS  S4 auth      -> fails at auth
+      auth: dam1n19@hub.example: Permission denied (publickey,gssapi-with-mic). | your SSH key is not accepted: load it into your agent (ssh-add) or add it on the hub
+PASS  S4 nogroup   -> fails at group
+      group: your account on hub.example is not in 'fpga' | ask the hub admin: usermod -aG fpga <you>; then log in again (a new group needs a new login)
+PASS  S4 socket    -> fails at group
+      group: Error: cannot connect to /run/fpgahub/fpgahub.sock: [Errno 13] Permission denied | the fpgahub socket needs group 'fpga'; log in again after being added
+PASS  S4 nofpgahub -> fails at targets
+      targets: fpgahub is not installed on hub.example | is this the hub? (fpgahub runs there)
+PASS  S4.9 the ssh line: BatchMode, ConnectTimeout, the jump; COLUMNS=400 crossed two shells
+      ssh -o ControlPath=none -o BatchMode=yes -o ClearAllForwardings=yes -o ConnectTimeout=10 -J bastion.example hub.example ...
+
+44/44 PASS

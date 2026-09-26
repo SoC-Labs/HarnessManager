@@ -115,7 +115,8 @@ class TrustStore:
             raise RefusedError(
                 f"cannot verify {what}: this build has no pinned update-signing keys",
                 hint="the release keys are not provisioned yet; install updates by hand "
-                     "(`harness-manager sd install`) until they are")
+                     "until they are: `harness-manager sd TARGET backup DIR`, then "
+                     "`harness-manager sd TARGET install BUNDLE_DIR --backup ZIP`")
         try:
             sig = minisign.parse_signature(signature)
         except minisign.SignatureError as exc:
