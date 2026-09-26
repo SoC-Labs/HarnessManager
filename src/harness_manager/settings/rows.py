@@ -1,7 +1,10 @@
 """The core's settings rows: ``docs/design/SETTINGS.md`` Appendix A, minus the pack's.
 
-Each row cites where the value is read today (``path:line``); SET-WIRE switches those readers
-to the resolver, keeping the variable as the env layer. Nothing reads these rows yet.
+Each row cites where the value is read (``path:line``). SET-WIRE switched those readers to
+the resolver (``settings/runtime.py``: ``runtime.value(key)``), keeping the variable as the
+env layer; the ``dev`` rows stay variables only (developer and test seams, SETTINGS.md §2),
+and ``updates.channel``'s variable is also read alone where no user is asked
+(``channel.default_channel``: harness catalogues).
 
 **Declared by the board pack instead (SET-PACK, ``BoardPack.settings()``,
 ``harness_manager_mps3/settings.py``):** the MPS3 rows (``mps3.*``: T2 openocd_cfg_dir, K7
@@ -99,7 +102,7 @@ GENERAL = (
     # G1 web/static/js/theme.js:5,28-31 (stays in the browser: read before first paint)
     Setting("general.theme", "enum", "auto", "General", "Light, dark, or follow the system",
             choices=("auto", "light", "dark")),
-    # G2 web/window.py:38,69,136
+    # G2 web/window.py:39,68-78 (named_app_browser; SET-WIRE)
     Setting("general.app_browser", "str", "", "General",
             "The browser the app window uses (empty: pywebview, else Chrome/Edge/Chromium)",
             scope="machine", env="HARNESS_MANAGER_APP_BROWSER"),
@@ -238,18 +241,18 @@ INLINE_HUB = (
 )
 
 TOOLS = (
-    # T1 services/debug.py:116,131-143
+    # T1 services/debug.py:126,153-172 (find_openocd; SET-WIRE)
     Setting("tools.openocd", "path", "", "Tools", "OpenOCD (empty: openocd on PATH)",
             scope="machine", owner="admin", env="HARNESS_MANAGER_OPENOCD"),
-    # T3 services/kit/vivado.py:39-43,138,161
+    # T3 services/kit/vivado.py:40,137-163 (discover; SET-WIRE)
     Setting("tools.vivado", "path", "", "Tools",
             "Vivado (empty: found under /tools, /opt, /apps; off: never)", scope="machine",
             owner="admin", env="HARNESS_MANAGER_VIVADO"),
-    # T4 services/xvc.py:120,760-786
+    # T4 services/xvc.py:120,760-790 (find_hw_server; SET-WIRE)
     Setting("tools.hw_server", "path", "", "Tools",
             "hw_server (empty: Vivado's, then $XILINX_VIVADO's)", scope="machine",
             owner="admin", env="HARNESS_MANAGER_HW_SERVER"),
-    # T5 services/update/app.py:83,259,300
+    # T5 services/update/app.py:83,227-231,267,310 (_uv_setting; SET-WIRE)
     Setting("tools.uv", "path", "", "Tools", "uv, for the app's self-update (empty: on PATH)",
             scope="machine", owner="admin", env="HARNESS_MANAGER_UV", advanced=True),
     # T6 services/update/github.py:148,154-180
@@ -279,14 +282,14 @@ UPDATES = (
     Setting("updates.check_interval", "duration", 6 * 3600, "Updates",
             "How often the service checks (0: never)", scope="machine", owner="admin",
             check=lambda v: "" if v == 0 or v >= 300 else "must be 0 (never) or at least 5m"),
-    # U4 channel.py:50,80; cli/cmd_update.py:81
+    # U4 channel.py:50,80,104-109 (_source_setting; SET-WIRE); cli/cmd_update.py:81
     Setting("updates.source", "str", "github:SoC-Labs/HarnessManager", "Updates",
             "Where releases come from (github:OWNER/REPO, a URL or a directory)",
             owner="admin", env="HARNESS_MANAGER_UPDATE_SOURCE", check=_source),
-    # U5 download.py:78,114-118
+    # U5 download.py:77,116-122,388 (mirrors_from_env, at each download; SET-WIRE)
     Setting("updates.mirrors", "list", [], "Updates", "Mirrors tried by sha256 first",
             scope="machine", owner="admin", env="HARNESS_MANAGER_UPDATE_MIRRORS"),
-    # U6 github.py:48,171-180; download.py:110
+    # U6 github.py:48,171-186 (resolve_token: env, the store, gh; SET-WIRE); download.py:108
     Setting("updates.github_token", "str", None, "Updates",
             "A GitHub token for the private (Arm-IP) parts", secret=True,
             env="HARNESS_MANAGER_GITHUB_TOKEN"),
@@ -321,7 +324,7 @@ KITS = (
             "The harness download cache's cap", scope="machine", owner="admin"),
     Setting("kits.cache_max", "size", 0, "Harness + kits",
             "The kit cache's cap (0: no cap)", scope="machine", owner="admin"),
-    # K5-K6 services/kit/service.py:80,83-86,247; cli/cmd_kit.py:94
+    # K5-K6 services/kit/service.py:80,83-86,249-259 (KitService.hub; SET-WIRE); cli/cmd_kit.py:94
     Setting("kits.sources", "list", ["cache", "channel", "hub"], "Harness + kits",
             "Where a kit is looked for, in order", check=_kit_sources),
     Setting("kits.hub_dir", "path", "", "Harness + kits", "The hub's mint archive",
@@ -334,12 +337,12 @@ KITS = (
 )
 
 DEBUG = (
-    # D1 services/debug.py:117,122-124,744-748
+    # D1 services/debug.py:127,873-881 (_pinned_base; SET-WIRE)
     Setting("debug.port_base", "int", 0, "Debug",
             "Pin the gdb/telnet/tcl ports (0: a slot per board from 23300)", scope="machine",
             owner="admin", env="HARNESS_MANAGER_DEBUG_PORT_BASE", apply="restart",
             advanced=True, check=_port_or_zero),
-    # D2 services/xvc.py:121,124-128,1215-1219
+    # D2 services/xvc.py:121,1220-1230 (_pinned_base; SET-WIRE)
     Setting("debug.xvc_port_base", "int", 0, "Debug",
             "Pin the XVC relay and hw_server ports (0: a slot per board from 23600)",
             scope="machine", owner="admin", env="HARNESS_MANAGER_XVC_PORT_BASE",
@@ -374,11 +377,11 @@ PANEL = (
 )
 
 ADVANCED = (
-    # V1 engine.py:58,79-86; daemon/server.py:414
+    # V1 settings/files.py:55,67-86 (config_dir, the one rule: SET-WIRE); engine.py:80
     Setting("advanced.state_dir", "path", "~/.config/harness-manager", "Advanced",
             "Where settings and state live (set $HARNESS_MANAGER_STATE_DIR to move it)",
             env="HARNESS_MANAGER_STATE_DIR", apply="restart", readonly=True),
-    # V2-V4 daemon/server.py:416-419; cli/cmd_daemon.py:62
+    # V2-V4 daemon/server.py:340-373,495-503 (start_setting; SET-WIRE); cli/cmd_daemon.py:69-83
     Setting("advanced.port", "int", 0, "Advanced", "The service's TCP port (0: any free one)",
             scope="machine", apply="restart", check=_port_or_zero),
     Setting("advanced.listen", "str", "127.0.0.1", "Advanced",

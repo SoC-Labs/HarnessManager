@@ -42,7 +42,6 @@ import http.client
 import json
 import logging
 import os
-import re
 import shutil
 import urllib.error
 import urllib.request
@@ -107,14 +106,20 @@ def _redact(url: str) -> str:
 
 
 def token_from_env() -> str | None:
+    """The top layer of ``updates.github_token``: ``$HARNESS_MANAGER_GITHUB_TOKEN``. The rest
+    of its chain (the secret store, ``gh auth token``) is ``github.resolve_token``, asked on
+    first need; this one is read up front so a token in the environment is final."""
     tok = os.environ.get(TOKEN_ENV, "").strip()
     return tok or None
 
 
 def mirrors_from_env() -> tuple[str, ...]:
-    """``$HARNESS_MANAGER_UPDATE_MIRRORS``: directories or URLs, split on spaces, ``,``, ``;``."""
-    raw = os.environ.get(MIRRORS_ENV, "")
-    return tuple(m for m in re.split(r"[\s,;]+", raw) if m)
+    """The setting ``updates.mirrors``: ``$HARNESS_MANAGER_UPDATE_MIRRORS`` (directories or
+    URLs, split on spaces, ``,``, ``;``), else the Settings menu / ``settings.toml``, else the
+    admin's ``[default]`` (lane SET-WIRE; the name is kept for its callers)."""
+    from harness_manager.settings import runtime
+
+    return tuple(str(m) for m in runtime.value("updates.mirrors") if m)   # MIRRORS_ENV
 
 
 def mirror_root_of(channel_url: str) -> str | None:
@@ -148,7 +153,8 @@ class Downloader:
     #: The GitHub REST API base (``github.default_api()``); its host may receive the token.
     github_api: str = field(default_factory=github.default_api)
     #: Mirror roots holding ``blobs/<sha256>`` (dirs, ``file://`` or ``http(s)://``).
-    mirrors: tuple[str, ...] = field(default_factory=mirrors_from_env)
+    #: None: the setting ``updates.mirrors``, read at each download (a live row).
+    mirrors: tuple[str, ...] | None = None
     _resolved: str | None = field(default=None, init=False, repr=False)
     _provider_done: bool = field(default=False, init=False, repr=False)
     _releases: dict[tuple[str, str, str], dict[str, str]] = field(
@@ -181,6 +187,12 @@ class Downloader:
                 log.info("the GitHub token provider failed (%s)", type(exc).__name__)
                 self._resolved = None
         return self._resolved
+
+    def forget_token(self) -> None:
+        """Ask the provider again at the next need (the stored token changed:
+        ``settings.changed``). A token given up front stays."""
+        self._provider_done = False
+        self._resolved = None
 
     def has_token(self) -> bool:
         return bool(self._tok())
@@ -373,7 +385,8 @@ class Downloader:
         """The mirror a local channel was read from, then ``mirrors`` (the environment)."""
         roots: list[str] = []
         derived = mirror_root_of(base_url) if base_url else None
-        for r in ((derived,) if derived else ()) + tuple(self.mirrors):
+        mirrors = self.mirrors if self.mirrors is not None else mirrors_from_env()
+        for r in ((derived,) if derived else ()) + tuple(mirrors):
             if r and r not in roots:
                 roots.append(r)
         return roots

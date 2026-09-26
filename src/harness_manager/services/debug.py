@@ -150,16 +150,21 @@ _T = TypeVar("_T")
 # --- small portable helpers ------------------------------------------------------------
 
 
-def find_openocd() -> str:
-    """``$HARNESS_MANAGER_OPENOCD``, else ``openocd`` on PATH, else ``UnavailableError`` (12)."""
-    env = os.environ.get(OPENOCD_ENV)
-    if env:
-        if Path(env).is_file():
-            return str(Path(env))
-        found = shutil.which(env)
+def find_openocd(state_dir: Path | str | None = None) -> str:
+    """The setting ``tools.openocd`` (``$HARNESS_MANAGER_OPENOCD``, then the Settings menu /
+    ``settings.toml``: lane SET-WIRE), else ``openocd`` on PATH, else ``UnavailableError``
+    (12). ``state_dir``: the engine's, whose settings apply."""
+    from harness_manager.settings import runtime
+
+    r = runtime.resolved("tools.openocd", state_dir=state_dir)     # OPENOCD_ENV first
+    configured = r.value
+    if configured:
+        if Path(configured).is_file():
+            return str(Path(configured))
+        found = shutil.which(configured)
         if found:
             return found
-        raise UnavailableError(CAPABILITY, f"{OPENOCD_ENV}={env} does not exist")
+        raise UnavailableError(CAPABILITY, f"{runtime.said(r)} does not exist")
     found = shutil.which("openocd")
     if found:
         return found
@@ -481,8 +486,9 @@ class DebugService:
         sd = getattr(self.engine, "state_dir", None)
         if sd is not None:
             return Path(sd)
-        env = os.environ.get(STATE_DIR_ENV)
-        return Path(env) if env else Path.home() / ".config" / "harness-manager"
+        from harness_manager.settings.files import config_dir  # the one rule (SET-WIRE)
+
+        return config_dir()
 
     @property
     def registry_dir(self) -> Path:
@@ -761,7 +767,7 @@ class DebugService:
                                 hint=f"held by {self._holder(rec)}; 'down --force' takes it")
             try:
                 adapter = self._adapter(session)
-                binary = find_openocd()
+                binary = find_openocd(self.state_dir)
                 cfgs = tuple(adapter.openocd_config())      # 13 for a design with no DAP
                 post = _post_config(adapter)
                 target = getattr(adapter, "describe", lambda: "")()
@@ -826,7 +832,7 @@ class DebugService:
             if rec is not None:
                 raise HeldError(f"the debug session for {board_id} is {verdict}",
                                 holder=self._holder(rec))
-            binary = find_openocd()
+            binary = find_openocd(self.state_dir)
             cfgs = tuple(adapter.openocd_config())
             argv = detect_argv(binary, adapter, cfgs)
             target = getattr(adapter, "describe", lambda: "")()
@@ -864,10 +870,14 @@ class DebugService:
         return adapter
 
     def _pinned_base(self) -> int | None:
+        """``port_base``, else the setting ``debug.port_base`` (``$HARNESS_MANAGER_DEBUG_PORT_BASE``,
+        then the settings as the service started: a ``restart`` row); 0 or unset: none."""
         if self.port_base is not None:
             return self.port_base
-        env = os.environ.get(PORT_BASE_ENV)
-        return int(env) if env else None
+        from harness_manager.settings import runtime
+
+        base = runtime.value("debug.port_base", state_dir=self.state_dir)   # PORT_BASE_ENV
+        return base or None
 
     def _candidates(self, board_id: str, prefer: DebugPorts | None) -> Iterator[DebugPorts]:
         pinned = self._pinned_base()

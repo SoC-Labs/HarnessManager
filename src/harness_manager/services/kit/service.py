@@ -206,8 +206,9 @@ class HubSource:
     @property
     def reason(self) -> str:
         if self.root is None:
-            return (f"no hub archive path: set ${HUB_DIR_ENV} to the mint archive "
-                    "(e.g. /home/david/mints on the hub, or its mount)")
+            return (f"no hub archive path: set ${HUB_DIR_ENV} (or kits.hub_dir in the "
+                    "settings) to the mint archive (e.g. /home/david/mints on the hub, or "
+                    "its mount)")
         if not self.root.is_dir():
             return f"{self.root} is not a directory"
         return ""
@@ -244,8 +245,19 @@ class KitService:
         self.work_dir = Path(work_dir)
         self.adapter_for = adapter_for
         self.channel = channel or ChannelSource()
-        env_hub = os.environ.get(HUB_DIR_ENV, "").strip()
-        self.hub = hub or HubSource(Path(env_hub) if env_hub else None)
+        self._hub = hub
+
+    @property
+    def hub(self) -> HubSource:
+        """The hub source given, else the setting ``kits.hub_dir`` (``HUB_DIR_ENV``, then the
+        settings: lane SET-WIRE), read at each use: the service keeps one KitService, and
+        a change applies to the next fetch (a live row)."""
+        if self._hub is not None:
+            return self._hub
+        from harness_manager.settings import runtime
+
+        root = runtime.value("kits.hub_dir")
+        return HubSource(Path(root) if root else None)
 
     @classmethod
     def for_state_dir(cls, state_dir: Path, store: Any = None, **kw: Any) -> KitService:

@@ -2,7 +2,8 @@
 
 Where it looks, in order:
 
-1. ``$HARNESS_MANAGER_VIVADO``: the ``vivado`` executable (or its install directory).
+1. the setting ``tools.vivado``: ``$HARNESS_MANAGER_VIVADO``, else the Settings menu /
+   ``settings.toml`` (lane SET-WIRE): the ``vivado`` executable (or its install directory).
    ``off`` (or ``none``) turns discovery off: nothing is found and nothing is run
    (the tests set it; a machine with no Vivado may too);
 2. ``vivado`` on ``PATH``;
@@ -54,7 +55,7 @@ class VivadoInstall:
     path: str                 # the vivado executable
     version: str = ""         # "2024.1" from `vivado -version`; "" when it could not be read
     build: int = 0
-    how: str = ""             # "env" | "path" | "xilinx_vivado" | "install root"
+    how: str = ""             # "env" | "setting" | "path" | "xilinx_vivado" | "install root"
     error: str = ""           # why the version could not be read
 
     def to_json(self) -> dict[str, object]:
@@ -133,25 +134,31 @@ def discover(*, runner: Runner = subprocess.run, env: dict[str, str] | None = No
              which: Callable[[str], str | None] = shutil.which,
              roots: tuple[str, ...] | None = None) -> VivadoFound:
     """Find Vivado (the order in the module docstring) and read its version."""
+    from harness_manager.settings import runtime
+
+    # tools.vivado: ENV first (the caller's ``env`` when it gives one), then the settings
+    r = runtime.resolved("tools.vivado", env=env)
     env = dict(os.environ) if env is None else env
     searched: list[str] = []
-    forced = env.get(ENV, "").strip()
+    forced = str(r.value or "").strip()
+    said = f"${ENV}" if r.source == "env" else f"tools.vivado ({r.where})"
     if forced.lower() in OFF:
-        return VivadoFound(None, disabled=True, searched=(f"${ENV}={forced}",),
-                           reason=f"Vivado discovery is off (${ENV}={forced})")
+        return VivadoFound(None, disabled=True, searched=(f"{said}={forced}",),
+                           reason=f"Vivado discovery is off ({said}={forced})")
 
     def make(path: str, how: str) -> VivadoInstall:
         ver, build, err = read_version(path, runner)
         return VivadoInstall(path, ver, build, how, err)
 
     if forced:
-        searched.append(f"${ENV}")
+        searched.append(said)
         p = Path(forced)
         exe = p if p.is_file() else _exe_in(p) if p.is_dir() else None
         if exe is None:
             return VivadoFound(None, searched=tuple(searched),
-                               reason=f"${ENV}={forced} is not a vivado executable or install")
-        return VivadoFound(make(str(exe), "env"), searched=tuple(searched))
+                               reason=f"{said}={forced} is not a vivado executable or install")
+        return VivadoFound(make(str(exe), "env" if r.source == "env" else "setting"),
+                           searched=tuple(searched))
 
     primary: VivadoInstall | None = None
     searched.append("PATH")

@@ -40,7 +40,8 @@ const STATE_LOOK = {
   unchecked: { level: "unk", icon: "circle-help", text: "Unchecked" },
 };
 
-const HOW = { env: "$HARNESS_MANAGER_VIVADO", path: "on PATH", xilinx_vivado: "$XILINX_VIVADO",
+const HOW = { env: "$HARNESS_MANAGER_VIVADO", setting: "in the settings (tools.vivado)",
+  path: "on PATH", xilinx_vivado: "$XILINX_VIVADO",
   "install root": "a standard install root" };
 
 // --- pure helpers (exported for the browser tests) ------------------------------------------
