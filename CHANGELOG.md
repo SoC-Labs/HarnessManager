@@ -119,6 +119,18 @@ owners.
 - DUT console input is paced (20 ms a byte on UART0/UART1), because the nanoSoC UART has
   no receive FIFO: a paste no longer arrives garbled.
 
+### The Linux harness's SSH claim
+- `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key
+  (the harness's TOFU claim), after asking, and only for the lease holder. It pins the
+  board's host key in boards.toml `boards.<b>.ssh.host_key`; a changed key is refused.
+  `--adopt` pins a claim made elsewhere; `--replace-host-key` is for a re-provisioned board.
+- `board claim-status` and `board ssh` (root on the board, through the hub, with the pinned
+  key). `info`, `GET /boards/{bid}` and the Board tile show the claim (`claim`); bare-metal
+  boards are unchanged.
+- The harness's claim lock (`slot locked: board claimed (use ssh)`) reads "this board is
+  claimed by <key>; this operation needs the claiming key"; its fabric identity lock
+  (`identity lock: ...`) refuses a swap as a mismatch (exit 14).
+
 ### The app's pages
 - A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"
   line only when something is wrong, and the details folded away.

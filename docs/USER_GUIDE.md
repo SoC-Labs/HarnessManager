@@ -161,6 +161,23 @@ name = "my-mps3"
 
 The name is only a label. You still address the board by its address.
 
+**A Linux harness: claim it once.** A board running the Linux harness ships unclaimed: its
+SSH takes keys only, and it has none. The first key it is sent claims it, for good:
+
+```bash
+harness-manager board claim 192.168.10.101 --key ~/.ssh/id_ed25519.pub   # asks first
+harness-manager board claim-status 192.168.10.101  # claimed by you, another key, or nobody
+harness-manager board ssh 192.168.10.101           # root on the board, through the hub
+```
+
+`board claim` needs the lease on a board behind a hub, and it never happens by itself.
+It pins the board's SSH host key in boards.toml (`ssh.host_key`); from then on a board
+that answers with a different key is refused, loudly. After a claim the board takes slot
+changes only over your key's SSH, which Harness Manager uses for you. If you claimed the
+board some other way (pyverify, the runbooks), `board claim --adopt` pins it instead. A
+board that was re-provisioned (a new card) is claimed again with `--replace-host-key`.
+`info` shows the claim on its `ssh claim` line; a bare-metal board has none.
+
 ## 5. The capability view
 
 Harness Manager never guesses what your board can do. It asks the board, and it lists
