@@ -609,9 +609,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.get(f"{API}/boards/{{bid}}/card")
     def card(bid: str) -> dict[str, Any]:
         from harness_manager.core.pack import card_status_of
+        from harness_manager.services.slots import card_line
 
         state.jobs.gate(bid)
-        return _ok(card=card_status_of(eng.deploy, state.session(bid)))
+        status = card_status_of(eng.deploy, state.session(bid))
+        return _ok(card=status, line=card_line(status))    # line: LINUX-SLOTS, additive
 
     @app.post(f"{API}/boards/{{bid}}/preflight")
     def preflight(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008

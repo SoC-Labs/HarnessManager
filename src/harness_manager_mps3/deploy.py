@@ -387,6 +387,17 @@ class Mps3Deploy:
 
         return self._shell.call_raw(ask)
 
+    def commit_pusher(self, *, windowed: bool, impl: str,
+                      on_frame: Callable[[BitstreamKind, int], None] | None = None,
+                      ) -> BitstreamPusher:
+        """The pusher a card ``commit`` sends its pair with: 6910 only, windowed exactly when
+        the swap's push is (a WINDOWED shell deadlocks on a plain push), the Linux stall
+        limit. "Keep on the card" and ``harness-manager card commit`` (LINUX-SLOTS) share it."""
+        return _ReportingPusher(on_frame=on_frame or (lambda kind, n: None),
+                                host=self._shell.host, transport="tcp", tcp_port=self.push_port,
+                                windowed=windowed, window=DEFAULT_ACK_WINDOW,
+                                timeout_s=push_timeout_s(impl, TRANSPORT_TCP))
+
     def deploy(self, overlay: OverlayRef, progress: Progress | None = None, *,
                keep_on_card: bool = False) -> DeployResult:
         report: Progress = progress or (lambda phase, done, total: None)
@@ -435,11 +446,9 @@ class Mps3Deploy:
         # when the swap's push is (a WINDOWED shell deadlocks on a plain push).
         commit_pusher = None
         if keep_on_card:
-            commit_pusher = _ReportingPusher(
-                on_frame=on_card_frame, host=host, transport="tcp", tcp_port=self.push_port,
-                windowed=assessment.transport == TRANSPORT_WINDOWED,
-                window=DEFAULT_ACK_WINDOW,
-                timeout_s=push_timeout_s(assessment.impl, TRANSPORT_TCP))
+            commit_pusher = self.commit_pusher(
+                windowed=assessment.transport == TRANSPORT_WINDOWED, impl=assessment.impl,
+                on_frame=on_card_frame)
         self.last_commit_pusher = commit_pusher
 
         tap: _TapTransport | None = None
@@ -568,12 +577,14 @@ def card_status_from(st: Any) -> CardStatus:
             return CardStatus(store=False, reason=f"{NO_STORE} (usd: {err})")
         return CardStatus(store=True, reason=f"the card could not be read (usd: {err or 'no reason'})")
     state, text = str(st.state or ""), str(st.text or "")
+    more = _card_facts(st)
     if state == "no_hw":
-        return CardStatus(store=False, state=state, text=text, reason=NO_STORE)
+        return CardStatus(store=False, state=state, text=text, reason=NO_STORE, **more)
     if not st.present:
-        return CardStatus(store=True, present=False, state=state, text=text, reason=NO_CARD)
+        return CardStatus(store=True, present=False, state=state, text=text, reason=NO_CARD,
+                          **more)
     if st.committable:
-        return CardStatus(store=True, present=True, state=state, text=text)
+        return CardStatus(store=True, present=True, state=state, text=text, **more)
     why = {
         "foreign": "the card in the USER microSD slot holds no harness store (a foreign card); "
                    "format it for the harness first",
@@ -582,7 +593,18 @@ def card_status_from(st: Any) -> CardStatus:
         "unsupported": "the card in the USER microSD slot is not a kind the harness supports",
         "error": f"the card in the USER microSD slot reports an error ({text or 'no code'})",
     }.get(state, f"the card in the USER microSD slot cannot take a design (state {state!r})")
-    return CardStatus(store=True, present=True, state=state, text=text, reason=why)
+    return CardStatus(store=True, present=True, state=state, text=text, reason=why, **more)
+
+
+def _card_facts(st: Any) -> dict[str, Any]:
+    """The rest of the ``usd`` reply (LINUX-SLOTS ``card status``): the capacity, the
+    power-on default, the power-on decision, whether a commit could land."""
+    d = getattr(st, "default", None)
+    default = ({"rm_id": str(d.rm_id), "static_id": str(d.static_id), "slot": str(d.slot)}
+               if d is not None else None)
+    return {"card_mb": getattr(st, "card_mb", None), "default": default,
+            "boot": str(getattr(st, "boot", "") or ""),
+            "committable": bool(getattr(st, "committable", False))}
 
 
 def card_outcome(persist: PersistResult | None) -> CardOutcome:

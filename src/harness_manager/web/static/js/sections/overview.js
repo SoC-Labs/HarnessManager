@@ -8,9 +8,7 @@ import { panelState } from "../actions.js";
 import { capState, valueText } from "../format.js";
 import { existingSession } from "../consoles.js";
 import { html, useEffect } from "../lib.js";
-import {
-  boardState, changed, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection,
-} from "../store.js";
+import { boardState, changed, hasCardStore, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection } from "../store.js";
 import { consoleRows, durationText, leaseLeft, openPty, week } from "../week.js";
 import { ScreenCommand } from "./consoles.js";
 import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./details.js";
@@ -265,16 +263,29 @@ function ReadingValue({ r, empty }) {
     : html`<span class="muted" title=${r.reason}>unavailable</span> <span class="muted small">${r.reason}</span>`;
 }
 
-// LINUX-SLOTS: the user microSD in one line (present / store default / OS slots). Hidden
-// when the daemon does not serve the card route; a harness without a card store says why.
-function CardRow({ b }) {
-  if (b.cardMissing) return null;
+// LINUX-SLOTS: the user microSD in one line (present / store default / OS slots), from the
+// card GET /boards/{bid}/card reads for "Keep on the card" (L1-CARD). A harness with no card
+// store (no "usd" feature) says so; nothing is read for it.
+export function cardLine(b) {
   const c = b.card;
-  let v;
-  if (!c) v = html`<span class="muted">${b.cardError ? "unavailable" : "reading..."}</span>`;
-  else if (!c.available) v = html`<span class="muted" title=${c.reason}>n/a</span>`;
-  else v = html`<span title=${(c.card && c.card.notes || []).join("\n")}>${c.line}</span>`;
-  return html`<span class="k">Card</span><span class="v" data-testid="tile-card">${v}</span>`;
+  if (!hasCardStore(b)) return { text: "no card store on this harness", muted: true };
+  if (!c) return { text: b.cardError ? "unavailable" : "reading...", muted: true };
+  if (!c.store) return { text: c.reason || "no card store", muted: true };
+  if (!c.present) return { text: "none (boots as always)", muted: true };
+  const bits = [c.state || "?"];
+  if (c.default) bits.push(`default ${c.default.rm_name || c.default.rm_id || "?"} [${c.default.slot || "?"}]`);
+  const os = c.os_slots;
+  if (os && os.slots) {
+    bits.push("OS " + Object.keys(os.slots).sort()
+      .map((n) => `${n}:${os.slots[n].state}${n === os.running ? "*" : ""}`).join(" "));
+  }
+  return { text: bits.join(" · "), muted: false, title: (c.notes || []).join("\n") };
+}
+
+function CardRow({ b }) {
+  const l = cardLine(b);
+  return html`<span class="k">Card</span><span class=${`v${l.muted ? " muted" : ""}`} data-testid="tile-card"
+    title=${l.title || ""}>${l.text}</span>`;
 }
 
 function BoardTile({ bid }) {

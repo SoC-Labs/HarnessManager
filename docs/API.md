@@ -56,7 +56,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `GET /boards/{bid}/telemetry` | `engine.telemetry.readings(session)` | `{readings: [Reading]}` |
 | `GET /boards/{bid}/overlays` | `deploy.compatible(session)` | `{loadable: [OverlayRef], blocked: {name: reason}}` |
 | `POST /boards/{bid}/preflight` `{overlay}` | `deploy.preflight` + `core.pack.preflight_refusal` | `{items: [PreflightItem], refusal?: error}` |
-| `GET /boards/{bid}/card` | `deploy.card_status(session)` | `{card: CardStatus}` |
+| `GET /boards/{bid}/card` | `deploy.card_status(session)` | `{card: CardStatus, line}` |
 | `POST /boards/{bid}/deploy` `{overlay, keep_on_card?}` | `deploy.deploy` | 202 job |
 | `POST /boards/{bid}/restore` | `deploy.restore_baseline` | 202 job |
 | `POST /boards/{bid}/reset` `{target}` | `session.resets.reset` | `{ok}` |
@@ -88,6 +88,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 - `overlay` in a request body may be a name, an `rm_id`, or the OverlayRef object itself.
 - **Keep on the card** (L1, decided 2026-09-25: off by default). `POST /deploy` with `keep_on_card: true` also writes the design to the board's user microSD after the verified swap, so the board boots into it at its next power-on. Without it (or `false`) the card is never written. A non-boolean is 400.
   - `GET /boards/{bid}/card` reads the card and writes nothing: `CardStatus` is `{store, present, state, text, reason}`. `store`: the harness keeps designs on a card (the MPS3 harness reports `usd`). `present`: a card is in the slot. `state`/`text`: the store's own words (`empty`, `valid`, `foreign`...; the front panel's card row). `reason`: why a deploy cannot keep its design on the card now, `""` when it can. The web UI shows its "Keep on the card" box only when `store` and `present`.
+    - LINUX-SLOTS adds to `CardStatus` (additive; null/empty where unknown): `card_mb`, `default` (`{rm_id, rm_name, static_id, slot}`: what the board loads at power-on), `boot` (the power-on decision), `committable`, `os_slots` (on the Linux harness: the `slots` object of `GET /boards/{bid}/slots`) and `notes`; and the reply's `line`, the Board tile's Card line (`n/a: <reason>`, `none (boots as always)`, or the store state, the default and the OS slots).
   - `keep_on_card: true` checks the card after the preflight and before any job: a `reason` refuses with 422 UNAVAILABLE (code 12, capability `keep_on_card`), `error.data.{overlay, card}`, and no job. The two plain reasons: `this harness has no microSD store` and `no card in the USER microSD slot`.
   - The job's result (a `DeployResult`) then carries `card: {kept, slot, why}`: `kept` true with the `slot` (`A`/`B`), or false with `why` (the card was pulled, a card write failed...). A failed card write never fails the deploy: the swap stands, and the card keeps the design it had. `card` is `null` when the deploy was not asked to keep. `deploy.done` carries the same `card`; `deploy.started` carries `keep_on_card`; the card write reports progress as phase `card`.
 - `GET /boards/{bid}/overlays` also returns `overlays` (all of them, including blocked ones).
@@ -419,14 +420,13 @@ docs/design/SETTINGS.md is the design (§4, §5, §8, §12.8); david's decisions
 
 ### User microSD and OS slots (LINUX-SLOTS, `card_api.py`)
 
-The board's user microSD (D13: the overlay the board loads at power-on) and, on the Linux harness, its OS slots A/B on the same card (net-protocol v0.14 "Slot images"). Read-only here: the changes (`harness-manager slot push|commit|rollback`, `card commit|clear`) need the lease and a confirm and run in the CLI. No card is not an error: the board then boots exactly as it always has.
+The Linux harness's OS slots A/B on the board's user microSD (net-protocol v0.14 "Slot images"). The card itself is `GET /boards/{bid}/card` (Keep on the card, above), which LINUX-SLOTS extends additively. Read-only here: the changes (`harness-manager slot push|commit|rollback`, `card commit|clear`) need the lease and a confirm and run in the CLI.
 
 | Method and path | Returns |
 |---|---|
-| `GET /boards/{bid}/card` | `{available, reason, card, line}`. `card` is `{present, state, text, card_mb, default: {rm_id, rm_name, static_id, slot} or null, boot, committable, os_slots, notes, line}`; `os_slots` is the `slots` object below on a Linux harness, else null. `line` is the Board tile's one line (`none (boots as always)`, or the store state, the default and the OS slots). |
 | `GET /boards/{bid}/slots` | `{available, reason, slots}`. `slots` is `{card, running, default, target, staged, fabric_sid, seq, pending_commit, slots: {A, B: {state, hdr_crc, len, sid, verified, err, image_sha256, version, running, default}}, job: {act, slot, state, got, len, err}}`. |
 
-- **Not available is not an error:** a harness without a card store (no `usd` feature) or without OS slots (bare metal; a Linux harness with no card or in stage0 rescue) answers 200 with `available: false` and the `reason`. Nothing is sent to the board beyond `version` in that case.
+- **Not available is not an error:** a harness without OS slots (bare metal; a Linux harness with no card or in stage0 rescue) answers 200 with `available: false` and the `reason`. Nothing is sent to the board beyond `version` then.
 - **Errors:** 404 ABSENT for a board that is not open; 409 HELD while a job runs on the board (the board gate); 7 UNREACHABLE when the harness does not answer.
 
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)

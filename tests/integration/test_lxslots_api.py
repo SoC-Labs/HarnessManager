@@ -1,6 +1,6 @@
-"""LINUX-SLOTS: ``GET /boards/{bid}/card`` and ``/slots`` on the real daemon, over pyverify's
-FakeShell through the real engine and MPS3 pack. Twins: a harness without a card store or
-OS slots answers ``available: false`` with the reason, and nothing is sent to change it."""
+"""LINUX-SLOTS: ``GET /boards/{bid}/card`` (L1-CARD's, extended additively) and ``/slots`` on
+the real daemon, over pyverify's FakeShell through the real engine and MPS3 pack. Twins: a
+harness without a card store or OS slots says why, and nothing is sent to change it."""
 
 from __future__ import annotations
 
@@ -50,8 +50,10 @@ def test_the_card_line_names_the_store_and_the_os_slots(api):
     r = client.get(bid_path(bid) + "/card", headers=headers())
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["available"] and body["card"]["present"] and body["card"]["state"] == "empty"
-    assert body["card"]["os_slots"]["running"] == "A"
+    card = body["card"]
+    assert card["store"] and card["present"] and card["state"] == "empty" and not card["reason"]
+    assert card["os_slots"]["running"] == "A" and card["card_mb"] == 15193
+    assert card["default"] is None and card["committable"]
     assert body["line"] == "empty · OS A:valid* B:empty"
     s = client.get(bid_path(bid) + "/slots", headers=headers()).json()
     assert s["available"] and s["slots"]["target"] == "B"
@@ -62,7 +64,8 @@ def test_the_card_line_names_the_store_and_the_os_slots(api):
 def test_twin_no_card_is_a_line_not_an_error(api):
     fake, client, bid = api
     body = client.get(bid_path(bid) + "/card", headers=headers()).json()
-    assert body["available"] and not body["card"]["present"]
+    assert body["card"]["store"] and not body["card"]["present"]
+    assert body["card"]["reason"] == "no card in the USER microSD slot"     # L1-CARD's words
     assert body["line"] == "none (boots as always)"
 
 
@@ -72,22 +75,24 @@ def test_twin_no_card_is_a_line_not_an_error(api):
 def test_twin_bare_metal_has_neither_and_says_why(api):
     fake, client, bid = api
     card = client.get(bid_path(bid) + "/card", headers=headers()).json()
-    assert card["ok"] and not card["available"] and "no user-microSD store" in card["reason"]
+    assert card["ok"] and not card["card"]["store"] and card["card"]["os_slots"] is None
+    assert card["line"] == "n/a: this harness has no microSD store"
     slots = client.get(bid_path(bid) + "/slots", headers=headers()).json()
     assert not slots["available"] and "bare-metal harness has no OS slots" in slots["reason"]
     assert fake.commits == [] and fake.slots is None
 
 
-def test_the_board_tile_reads_the_card_route_and_hides_it_on_an_older_daemon():
+def test_the_board_tile_reads_l1_cards_card_and_only_for_a_harness_with_a_store():
     from pathlib import Path
 
     import harness_manager.web as web
 
     js = Path(web.static_dir()) / "js"
     api_js = (js / "api.js").read_text(encoding="utf-8")
-    assert 'cardStatus: ["GET", "/boards/{bid}/card"]' in api_js
-    assert "|card)\\b/" in api_js                 # routeMissing: a 404 for /card hides the line
+    assert api_js.count('"/boards/{bid}/card"') == 1          # L1-CARD's one endpoint, reused
     tile = (js / "sections" / "overview.js").read_text(encoding="utf-8")
     assert 'data-testid="tile-card"' in tile and "<${CardRow} b=${b} />" in tile
+    assert "if (!hasCardStore(b))" in tile                        # no "usd": nothing is read
     store = (js / "store.js").read_text(encoding="utf-8")
-    assert "b.cardMissing = true" in store and 'call("cardStatus", { bid })' in store
+    assert "if (hasCardStore(b) && !b.card && !b.cardLoading) loadCard(bid);" in store
+    assert store.count("export async function loadCard(") == 1

@@ -205,6 +205,14 @@ class CardStatus:
     state: str = ""
     text: str = ""
     reason: str = ""
+    # --- additive (LINUX-SLOTS ``card status``, CCR LS-1): the rest of the same read, and
+    # what the pack's card adapter adds to it. Defaults keep L1-CARD's shape unchanged.
+    card_mb: int | None = None               # the card's size, once it is ready
+    default: dict[str, str] | None = None    # {rm_id, static_id, slot[, rm_name]}: loaded at power-on
+    boot: str = ""                           # the power-on decision: loaded|skipped|none|failed:<why>
+    committable: bool = False                # a card commit could land now
+    os_slots: SlotStatus | None = None       # Linux: the A/B OS slots on the same card
+    notes: tuple[str, ...] = ()
 
 
 #: "Keep on the card": the capability its refusal names, and the two plain reasons.
@@ -537,30 +545,12 @@ class OsSlotAdapter(Protocol):
         ...
 
 
-#: The user microSD's overlay-store states (net-protocol.md v0.13 ``usd.state``).
-CARD_NO_CARD_STATES = ("no_hw", "none")
-
-
-@dataclass(frozen=True)
-class CardStatus:
-    """``card status``: the user microSD, its D13 overlay store and (Linux) its OS slots."""
-
-    present: bool
-    state: str = ""                  # usd.state: none | init | foreign | empty | valid | stale | ...
-    text: str = ""                   # the CLCD row-4 string
-    card_mb: int | None = None
-    default: dict[str, str] | None = None   # {rm_id, rm_name, static_id, slot}: loaded at power-on
-    boot: str = ""                   # the power-on decision: loaded | skipped | none | failed:<why>
-    committable: bool = False
-    os_slots: SlotStatus | None = None      # Linux: the A/B boot slots on the same card
-    notes: tuple[str, ...] = ()
-    raw: dict[str, Any] = field(default_factory=dict, compare=False)
-
-
 @runtime_checkable
 class CardAdapter(Protocol):
     """``BoardSession.card``: the board's user microSD (D13). No card is not an error:
-    ``status`` says so, and every mutation refuses cleanly without touching anything."""
+    ``status`` says so, and every mutation refuses cleanly without touching anything.
+    ``status`` is L1-CARD's read (``DeployAdapter.card_status``) with the additive fields
+    filled; ``commit`` re-pushes with the deploy adapter's commit pusher rules."""
 
     def card_reason(self) -> str:
         """``""`` when this harness has a user-microSD store; else why not."""

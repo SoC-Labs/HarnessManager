@@ -1017,7 +1017,18 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         s = board(bid)
         with d.gates.op(bid):
             status = card_status_of(d.engine.deploy, s)
-        return _JSON(ok(board_id=bid, card=status))
+            # LINUX-SLOTS (additive): the pack's card adapter names the default's RM and adds
+            # the Linux OS slots on the same card, from this same read; `line` is the Board
+            # tile's one line.
+            annotate = getattr(getattr(s, "card", None), "annotate", None)
+            if status.store and callable(annotate):
+                try:
+                    status = annotate(status)
+                except HarnessError as exc:
+                    log.info("card annotate failed on %s: %s", bid, exc)
+        from harness_manager.services.slots import card_line
+
+        return _JSON(ok(board_id=bid, card=status, line=card_line(status)))
 
     def _preflight(bid: str, s: BoardSession, spec: Any) -> tuple[OverlayRef, list, Any]:
         with d.gates.op(bid):

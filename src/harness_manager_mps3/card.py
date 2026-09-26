@@ -22,16 +22,20 @@ says the board keeps booting as it always has.
 **Which harness.** A harness that does not report the ``usd`` feature has no store
 (today's fielded bare metal): ``card_reason()`` says so and nothing is sent. D13 runs on
 both engines, so a bare-metal image built with it has a card too.
+
+**One reader, one pusher** (L1-CARD, merged first): the card is read with
+``Mps3Deploy.card_status`` and a commit sends its pair with ``Mps3Deploy.commit_pusher``,
+the same as the deploy's "Keep on the card".
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from pyverify import rm_id as rmid
 from pyverify.client import IDENTITY_LOCK_PREFIX
-from pyverify.pusher import BitstreamPusher
 from pyverify.swap import SwapOrchestrator
 
 from harness_manager.core.errors import (
@@ -50,7 +54,6 @@ from .constants import IMPL_LINUX
 log = logging.getLogger(__name__)
 
 CAPABILITY = "user microSD"
-USD_FEATURE = "usd"
 #: The control connection parks for the whole commit (write + read-back of ~3 MB on the
 #: card): the swap's own budget.
 COMMIT_TIMEOUT_S = 300.0
@@ -80,13 +83,17 @@ def card_json(st: CardStatus) -> dict[str, Any]:
 
 
 class Mps3Card:
-    """``core.pack.CardAdapter`` for an MPS3 session (module docstring)."""
+    """``core.pack.CardAdapter`` for an MPS3 session (module docstring).
+
+    The card is read with L1-CARD's reader (``Mps3Deploy.card_status``: ``version`` then
+    ``usd``, nothing written), and a commit sends its pair with the same commit pusher
+    "Keep on the card" uses (``Mps3Deploy.commit_pusher``)."""
 
     def __init__(self, session: Any, *, commit_timeout_s: float = COMMIT_TIMEOUT_S) -> None:
         self._session = session
         self.commit_timeout_s = commit_timeout_s
         #: The pusher the last commit built (tests read its transport).
-        self.last_pusher: BitstreamPusher | None = None
+        self.last_pusher: Any = None
 
     # -- plumbing -------------------------------------------------------------------------------
 
@@ -96,9 +103,15 @@ class Mps3Card:
             raise UnavailableError(CAPABILITY, "no Ethernet link to the harness")
         return shell
 
-    def _catalogue(self) -> Any:
+    def _deploy(self) -> Any:
         deploy = getattr(self._session, "deploy", None)
-        cat = getattr(deploy, "catalogue", None)
+        if deploy is None or not callable(getattr(deploy, "card_status", None)):
+            raise UnavailableError(CAPABILITY, "this session has no deploy adapter to read the "
+                                               "card with")
+        return deploy
+
+    def _catalogue(self) -> Any:
+        cat = getattr(getattr(self._session, "deploy", None), "catalogue", None)
         if cat is None:
             from .overlays import default_catalogue
 
@@ -113,71 +126,61 @@ class Mps3Card:
         except Exception:  # noqa: BLE001 - a name is never worth failing a status for
             return ""
 
+    def _read(self) -> CardStatus:
+        """L1-CARD's read; a harness with no store is ``UnavailableError``."""
+        st = self._deploy().card_status()
+        if not st.store:
+            raise UnavailableError(CAPABILITY, st.reason or "this harness has no microSD store")
+        return st
+
     def card_reason(self) -> str:
         try:
-            live = self._shell().live()
+            self._read()
+        except UnavailableError as exc:
+            return exc.reason
         except HarnessError as exc:
             return f"the harness did not answer: {exc.message}"
-        if not live.version_ok:
-            return "the harness does not answer 'version': it predates the user-microSD store"
-        if USD_FEATURE not in live.features:
-            return (f"this {live.impl or 'bare-metal'} harness has no user-microSD store (it "
-                    "does not report the 'usd' feature; net-protocol v0.13, D13)")
         return ""
-
-    def _need(self) -> None:
-        reason = self.card_reason()
-        if reason:
-            raise UnavailableError(CAPABILITY, reason)
-
-    def _usd(self) -> Any:
-        resp = self._shell().call(lambda c: c.usd())
-        if not resp.ok:
-            raise _usd_error("usd status", resp.err)
-        return resp
 
     # -- status ---------------------------------------------------------------------------------
 
     def status(self) -> CardStatus:
-        self._need()
-        resp = self._usd()
-        return self._status_from(resp)
+        return self.annotate(self._read())
 
-    def _status_from(self, resp: Any) -> CardStatus:
+    def annotate(self, st: CardStatus) -> CardStatus:
+        """L1-CARD's read, completed: the default's RM name, notes, and (Linux) the OS slots
+        on the same card. The daemon's ``GET /card`` calls it on the read it already made."""
         notes: list[str] = []
-        default = None
-        if resp.default is not None:
-            d = resp.default
-            default = {"rm_id": _hex32(d.rm_id), "rm_name": self._rm_name(d.rm_id),
-                       "static_id": _hex32(d.static_id) if d.static_id else "", "slot": d.slot}
-        if resp.state == "stale" and default is not None:
+        default = dict(st.default) if st.default else None
+        if default is not None:
+            default = {"rm_id": _hex32(default.get("rm_id")),
+                       "rm_name": self._rm_name(default.get("rm_id")),
+                       "static_id": _hex32(default["static_id"]) if default.get("static_id")
+                       else "", "slot": default.get("slot", "")}
+        if st.state == "stale" and default is not None:
             notes.append(f"the default was committed for static {default['static_id'] or '?'}, "
                          "not this shell's: it is skipped at power-on (commit one built for "
                          "this shell)")
-        if resp.state == "foreign":
+        if st.state == "foreign":
             notes.append("the card holds no harness store (a PC card?): it is never written; "
                          "`pyverify usd format` makes it a harness card")
-        if not resp.present:
+        if not st.present:
             notes.append("no card: the board boots exactly as it always has")
         os_st = None
         slots = getattr(self._session, "os_slots", None)
-        if resp.present and slots is not None:
+        if st.present and slots is not None:
             try:
                 live = self._shell().live()
                 if live.impl == IMPL_LINUX and not slots.slots_reason():
                     os_st = slots.status()
             except HarnessError as exc:
                 notes.append(f"the OS slots could not be read: {exc.message}")
-        return CardStatus(present=bool(resp.present), state=resp.state, text=resp.text,
-                          card_mb=resp.card_mb, default=default, boot=resp.boot,
-                          committable=bool(resp.committable), os_slots=os_st,
-                          notes=tuple(notes), raw=dict(resp.raw))
+        return replace(st, default=default, os_slots=os_st, notes=tuple(notes))
 
     # -- clear ----------------------------------------------------------------------------------
 
     def clear(self) -> CardStatus:
-        self._need()
-        st = self._usd()
+        st = self._read()
         if not st.present:
             raise RefusedError("no card in the user microSD slot: nothing was changed",
                                hint=NO_CARD_HINT)
@@ -193,8 +196,7 @@ class Mps3Card:
 
     def commit(self, progress: Progress | None = None) -> dict[str, Any]:
         report: Progress = progress or (lambda p, d, t: None)
-        self._need()
-        st = self._usd()
+        st = self._read()
         if not st.present:
             raise RefusedError("no card in the user microSD slot: nothing was written",
                                hint=NO_CARD_HINT)
@@ -202,7 +204,7 @@ class Mps3Card:
             hint = ("a card with no harness store: format it first (`pyverify usd format`)"
                     if st.state == "foreign" else "`harness-manager card status TARGET` says why")
             raise RefusedError(f"the card cannot take a commit now (state {st.state!r}: "
-                               f"{st.text or 'no text'})", hint=hint)
+                               f"{st.reason or st.text or 'no text'})", hint=hint)
         shell = self._shell()
         live = shell.live()
         if not live.rm_id or rmid.is_greybox(live.rm_id):
@@ -211,16 +213,16 @@ class Mps3Card:
                                     "TARGET` makes the greybox the power-on default")
         entry = self._entry(live.rm_id, live.shell_id)
         name = entry.ref.name
-        deploy = getattr(self._session, "deploy", None)
-        port = getattr(deploy, "push_port", None) or getattr(self._session, "push_port", None)
-        from .constants import PUSH_PORT
-        from .deploy import TRANSPORT_TCP, push_timeout_s
-
-        pusher = BitstreamPusher(host=shell.host, transport="tcp", tcp_port=port or PUSH_PORT,
-                                 windowed="windowed" in live.features,
-                                 timeout_s=push_timeout_s(live.impl, TRANSPORT_TCP))
-        self.last_pusher = pusher
         total = entry.overlay.manifest.clearing.len + entry.overlay.manifest.partial.len
+        sent: dict[Any, int] = {}
+
+        def on_frame(kind: Any, n: int) -> None:
+            sent[kind] = n
+            report("commit", sum(sent.values()), total)
+
+        pusher = self._deploy().commit_pusher(windowed="windowed" in live.features,
+                                              impl=live.impl, on_frame=on_frame)
+        self.last_pusher = pusher
         report("commit", 0, total)
         from .shell import Mps3Shell
 

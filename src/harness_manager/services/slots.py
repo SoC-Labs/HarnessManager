@@ -294,7 +294,8 @@ def slot_status_json(st: SlotStatus) -> dict[str, Any]:
 
 def card_status_json(st: CardStatus) -> dict[str, Any]:
     """What the CLI and the API show of a ``CardStatus``."""
-    return {"present": st.present, "state": st.state, "text": st.text, "card_mb": st.card_mb,
+    return {"store": st.store, "present": st.present, "state": st.state, "text": st.text,
+            "reason": st.reason, "card_mb": st.card_mb,
             "default": st.default, "boot": st.boot, "committable": st.committable,
             "os_slots": slot_status_json(st.os_slots) if st.os_slots is not None else None,
             "notes": list(st.notes), "line": card_line(st)}
@@ -304,6 +305,8 @@ def card_line(st: CardStatus | None, reason: str = "") -> str:
     """One line for the Board tile: present / store / default / OS slots."""
     if st is None:
         return reason or "unknown"
+    if not st.store:
+        return f"n/a: {st.reason or 'no card store'}"
     if not st.present:
         return "none (boots as always)"
     bits = [st.state or "?"]

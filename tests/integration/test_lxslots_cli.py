@@ -80,6 +80,7 @@ def test_slot_status_push_commit_status(capsys, linux, bundle):
     rc, out, _ = run(capsys, "--tsv", "slot", "status", target)
     rows = [ln.split("\t") for ln in out.splitlines()]
     assert rc == 0 and [r[1] for r in rows] == ["A", "B"]
+    assert all(len(r) == 12 for r in rows)                         # the `slot` layout
     assert rows[1][4] == "yes" and rows[1][9] == "1.1.0"          # B: default, release 1.1.0
 
 
@@ -143,6 +144,12 @@ def test_twin_card_status_commit_clear_with_a_card(capsys, monkeypatch, tmp_path
         data = json.loads(out)
         assert data["default"]["rm_name"] == "synth" and data["present"] is True
         assert data["os_slots"]["running"] == "A" and "default synth" in data["line"]
+        rc, out, _ = run(capsys, "--tsv", "card", "status", target)
+        row = out.rstrip("\n").split("\t")
+        from harness_manager.cli.output import TSV_COLUMNS
+
+        assert rc == 0 and len(row) == len(TSV_COLUMNS["card"]) == 11
+        assert row[1:6] == ["yes", "valid", "15193", "synth", row[5]] and row[8] == "A"
         rc, out, _ = run(capsys, "card", "clear", target, "--yes")
         assert rc == 0 and "greybox loads at the next power-on" in out
         assert fake.commits and fake.commits[0][0] == "synth"
@@ -160,7 +167,7 @@ def test_bare_metal_slot_and_card_stop_at_exit_12_and_change_nothing(capsys, mon
             rc, out, err = run(capsys, *argv)
             assert rc == 12 and out == "", (argv, err)
         assert "bare-metal harness has no OS slots" in run(capsys, "slot", "status", target)[2]
-        assert "has no user-microSD store" in run(capsys, "card", "status", target)[2]
+        assert "this harness has no microSD store" in run(capsys, "card", "status", target)[2]
         assert fake.commits == [] and len(fake.push_events) == 0 and fake.slots is None
     finally:
         fake.stop()
