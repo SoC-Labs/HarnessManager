@@ -1047,7 +1047,8 @@ the OS slots.
 | `card clear TARGET` | no power-on default: the greybox loads at power-on |
 
 **No card: the board boots exactly as it always has**, and every card change is refused.
-Changes need the lease and a confirm (`--yes` skips it). `card commit` exits 3 when the
+Changes need the lease and a confirm (`--yes` skips it): Harness Manager's rules, not the
+board's (the board has no lease and no confirm on slot acts). `card commit` exits 3 when the
 running overlay is not in this machine's store: program it from here first.
 
 ### 12.3 OS slots A and B
@@ -1062,7 +1063,9 @@ after you commit it and reboot, and a rollback puts the other slot back.
    Behind a hub, start the MCC share first if it is not running:
    `harness-manager share start 192.168.10.101 mcc`. A Linux board takes 2 to 4 minutes to
    come back.
-5. Check it: `slot status` shows the new slot running and default
+5. Check it: `slot status` shows the new slot running and default, and a push now goes to
+   the OTHER slot. It says "booted (not yet confirmed)" until the harness reports that
+   harnessd confirmed the boot: a boot alone is not a confirm.
 
 If it is wrong: `harness-manager slot rollback 192.168.10.101` makes the other slot the
 default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboot).
@@ -1078,6 +1081,15 @@ default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboo
 **What can go wrong**
 - **No free slot:** after a commit and before the reboot, no slot is free. Roll back first,
   or push with `--rollback-first`.
+- **"slot B failed to boot; A is running":** the new image never came up healthy, so stage0
+  went back to the old one, but the default is still B (stage0 tries B again at every power
+  cycle). `harness-manager slot rollback TARGET` makes A the default and frees B.
+- **"identity lock (mismatch)" or "(unknown)":** the card's OS image and the FPGA's static
+  disagree, or one cannot be read. It is not the SSH claim. Push the image built for this
+  static, commit it, reboot.
+- **"no slot record" on verify or rollback:** that slot was written outside Harness Manager
+  (a card image, `dd`, the factory). Push it again from here.
+- **`slot verify` takes minutes** and holds the board's card meanwhile (a push gets EBUSY).
 - **Exit 14:** the image was provisioned for another static than the board runs.
 - **"this board is claimed by <key>; this operation needs the claiming key":** HM is not
   using the claiming key. Use the key you claimed with. `board claim` is only for a
