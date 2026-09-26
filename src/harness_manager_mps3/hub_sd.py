@@ -274,6 +274,7 @@ class SshSdBackend:
     """fpgahub over ssh (``HubClient``'s runner: ``ssh HUB 'sg fpga -c "…"'``)."""
 
     transport = "ssh"
+    STATE_EVERY = 6          # with a readable journal, ask --list only every 6th poll
 
     def __init__(self, client: Any, *, uploader: Callable[[Path, str], None] | None = None,
                  method: str = SD_METHOD, stage_dir: str = STAGE_DIR,
@@ -287,6 +288,7 @@ class SshSdBackend:
         self._since: int | None = None
         self._started = 0.0
         self._fp_before = ""
+        self._polls = 0
 
     @property
     def uploader(self) -> Callable[[Path, str], None]:
@@ -326,6 +328,7 @@ class SshSdBackend:
     def begin(self) -> None:
         self._started = self._clock()
         self._since = None
+        self._polls = 0
         with contextlib.suppress(Exception):
             res = self._run(["date", "-u", "+%s"], 30.0)
             if res.returncode == 0 and res.stdout.strip().isdigit():
@@ -344,15 +347,23 @@ class SshSdBackend:
         return parse_program_reply(res.returncode, res.text)
 
     def completion(self, sha256: str) -> Completion | None:
+        """The journal line first; the hub's ``last programmed fingerprint`` when the journal
+        cannot be read, and every ``STATE_EVERY`` polls anyway (a log format that changed
+        must not leave a finished write unproven)."""
         since = (f"@{self._since}" if self._since is not None else
                  f"-{int((self._clock() - self._started) // 60) + 2}min")
+        self._polls += 1
+        journal_ok = False
         with contextlib.suppress(TimeoutError, HarnessError):
             res = self._run(["journalctl", "-u", "fpgahubd", "--since", since, "--no-pager",
                              "-o", "cat"], 60.0)
             if res.returncode == 0:
+                journal_ok = True
                 found = parse_journal(res.stdout, self.target, self.method)
                 if found is not None:
                     return found
+        if journal_ok and self._polls % self.STATE_EVERY:
+            return None
         with contextlib.suppress(HarnessError):
             after = self.program_info().last_fingerprint
             if after and after != self._fp_before and sha_matches(sha256, after):
