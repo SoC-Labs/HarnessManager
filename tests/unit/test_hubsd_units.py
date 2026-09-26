@@ -181,3 +181,41 @@ def test_twin_a_signed_delta_of_nanosoc_bit_alone_goes_through():
                                                     has_controller=True),
                    via=None, running=old, have_token=False)
     assert local.via == ""                     # a Debug USB here wins, unless via="hub"
+
+
+# --- REST completion from the hub's events ----------------------------------------------------
+
+
+class _Api:
+    def __init__(self, fp=""):
+        self.fp = fp
+
+    def get(self, path):
+        return {"methods": [{"name": "sd", "available": True}], "last_fingerprint": self.fp}
+
+
+def _rest(events, fp=""):
+    from harness_manager_mps3.hub_sd import RestSdBackend
+
+    be = RestSdBackend(SimpleNamespace(target=T, host="hub"), api=_Api(fp))
+    be._events = list(events)
+    return be
+
+
+def _ev(kind, fp, board=T, method="sd"):
+    return {"type": kind, "data": {"board": board, "method": method, "fingerprint": fp,
+                                   "run_id": "program-1"}}
+
+
+def test_rest_completion_is_the_completed_event_naming_the_sha():
+    done = _rest([_ev("board.program_dispatched", "ab" * 32),
+                  _ev("board.program_completed", "ab" * 32)]).completion("ab" * 32)
+    assert done.ok and done.source == "event" and done.sha256 == "ab" * 32
+
+
+def test_twin_rest_a_failed_event_or_another_boards_is_not_a_success():
+    failed = _rest([_ev("board.program_failed", "ab" * 32)]).completion("ab" * 32)
+    assert failed is not None and not failed.ok
+    other = _rest([_ev("board.program_completed", "ab" * 32, board="pynq_z2_01_pl"),
+                   _ev("board.program_completed", "ab" * 32, method="default")])
+    assert other.completion("ab" * 32) is None           # and the hub state did not move
