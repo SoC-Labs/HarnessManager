@@ -1,64 +1,199 @@
-# User guide: Harness Manager on your own MPS3
+# Harness Manager user guide
 
-This guide is for people who own an Arm MPS3 (V2M-MPS3) and want to use it for nanoSoC
-work with no lab hub: one PC, the board, a Debug USB cable and an Ethernet cable.
+This guide is for lab users of Harness Manager (HM) on an Arm MPS3 (V2M-MPS3): a board
+on your desk, or a shared lab board behind a hub. It is organised by what you want to do.
+Each task says when you would do it, where it is in the app, the command, and what can go
+wrong.
 
-You use the Debug USB cable **once**, to back up the board's configuration SD card and
-install the SoC Labs harness onto it. After that, daily work needs only Ethernet.
+Harness Manager version 0.1.0, as on `main`. Every command here is checked against
+`harness-manager <verb> --help` on `main`.
+
+**Marks.** A task that needs more than this PC says so on a **Needs** line:
+
+| Mark | Meaning |
+|---|---|
+| a board | a powered MPS3 running the SoC Labs harness |
+| the Linux harness | the board runs the Linux harness (MicroBlaze V Linux), not bare metal |
+| a hub | the board sits behind a lab hub (fpgahub) |
+| the Debug USB | the MPS3 Debug USB cable is plugged into this PC |
+| signed releases | SoC Labs has published signed releases. **Not live yet:** no release key exists, so every client refuses every channel ([KEYS.md](KEYS.md)) |
 
 Contents:
-1. [What you need](#1-what-you-need)
-2. [Install Harness Manager](#2-install-harness-manager)
-3. [First install on the board (Debug USB)](#3-first-install-on-the-board-debug-usb)
-4. [Daily use over Ethernet](#4-daily-use-over-ethernet)
-5. [The capability view](#5-the-capability-view)
-6. [When something goes wrong: the recovery ladder](#6-when-something-goes-wrong-the-recovery-ladder)
-7. [Asking for help](#7-asking-for-help)
+1. [Install](#1-install)
+2. [First run](#2-first-run)
+3. [Add a board](#3-add-a-board)
+4. [Leases: share a lab board](#4-leases-share-a-lab-board)
+5. [Consoles](#5-consoles)
+6. [Program a design](#6-program-a-design)
+7. [Build your own DUT](#7-build-your-own-dut)
+8. [Debug: OpenOCD and XVC](#8-debug-openocd-and-xvc)
+9. [The front panel](#9-the-front-panel)
+10. [Updates: the harness and the app](#10-updates-the-harness-and-the-app)
+11. [Settings](#11-settings)
+12. [The Linux harness](#12-the-linux-harness)
+13. [Troubleshooting](#13-troubleshooting)
 
-## 1. What you need
+Appendices: [A. Command reference](#a-command-reference),
+[B. Where things are](#b-where-things-are), [C. More documents](#c-more-documents).
 
-- An MPS3 board with its power supply.
-- The Debug USB cable (MPS3 Technical Reference Manual, section 2.18) and an Ethernet
-  cable.
-- A PC running Linux, Windows or macOS, with Python 3.10 or newer (or uv) and git.
-- To debug the DUT: OpenOCD on your PATH, with its remote_bitbang adapter (on by
-  default in OpenOCD builds).
-- Access to the Harness Manager repository (it is private: ask SoC Labs).
-- The harness bundle from SoC Labs: a directory of files for the SD card. The signed
-  update channel (`harness-manager update`) is not live in 0.1.0, so for now the bundle
-  comes from SoC Labs directly.
+---
 
-## 2. Install Harness Manager
+## 1. Install
 
-Install with the serial extra, which the Debug USB needs:
+**When:** once per PC, and again to upgrade.
+
+You need git, and Python 3.10 or newer (or [uv](https://docs.astral.sh/uv/)). The
+repository is private: ask SoC Labs for access and add an SSH key to your GitHub account.
+
+Linux and macOS:
 
 ```bash
 git clone git@github.com:SoC-Labs/HarnessManager.git
 HarnessManager/scripts/install.sh --with-serial
 ```
 
-On Windows: `powershell -ExecutionPolicy Bypass -File HarnessManager\scripts\install.ps1 -WithSerial`.
+Windows (PowerShell):
 
-Check it: `harness-manager version` prints `0.1.0`. Then try the app with demo boards:
-`harness-manager app --demo`. [docs/INSTALL.md](INSTALL.md) has the details.
+```powershell
+git clone git@github.com:SoC-Labs/HarnessManager.git
+powershell -ExecutionPolicy Bypass -File HarnessManager\scripts\install.ps1 -WithSerial
+```
 
-**Linux only:** your user needs access to serial ports. On Ubuntu and Debian:
+It takes about 20 seconds (about 5 with uv). Nothing needs root or Administrator.
+
+| Installer option | Take it when |
+|---|---|
+| `--with-serial` / `-WithSerial` | you own an MPS3: the Debug USB serial ports need pyserial |
+| `--with-app` / `-WithApp` | you want a native window on Windows or macOS (Linux uses a Chrome or Chromium app window) |
+| `--offline DIR` | the PC has no network: install from a wheelhouse |
+| `--no-desktop` | you want no application-menu entry (Linux) |
+| `--uninstall` / `-Uninstall` | you want it gone; your settings and SD backups stay |
+
+Check it: `harness-manager version` prints `0.1.0`.
+
+**Linux only:** to use the Debug USB, your user needs the serial ports:
 `sudo usermod -aG dialout $USER`, then log out and back in.
 
-## 3. First install on the board (Debug USB)
+**Upgrade:** `git pull`, then run the installer again. It keeps your settings and options.
+Once signed releases exist, the app can also update itself ([section 10](#10-updates-the-harness-and-the-app)).
 
-Do these steps in order. Step 2, the backup, is not optional: it is your way back to
-the SD card as it is today.
+**What can go wrong**
+- `harness-manager: command not found`: `~/.local/bin` is not on your PATH. The installer
+  printed the line to add and the full path to use until then. On Windows, open a new
+  terminal.
+- The installer stops: it says why (Python too old, no `python3-venv`, no network, a
+  proxy). Running it again is always safe.
 
-1. **Connect and look.** Connect the Debug USB cable and the Ethernet cable, and power
-   the board on. The configuration SD appears as a drive named `V2M-MPS3`. Run:
+[INSTALL.md](INSTALL.md) has every option, each Linux distribution's prerequisites,
+proxies, the wheelhouse, and the install root.
+
+## 2. First run
+
+**When:** right after installing, or to look around with no hardware.
+
+```bash
+harness-manager app --demo
+```
+
+This opens the app with scripted demo boards. Nothing touches hardware. Close the window
+when you are done; `harness-manager daemon stop --demo` stops the demo service. On Linux,
+the application menu has **Harness Manager** and **Open with Demo Boards**.
+
+![The Overview of a demo board: Design, Consoles, Debug and Board tiles](review/2026-09-25/overview-demo-light.png)
+
+**The layout.**
+- **The rail** (left) lists boards. **+** adds one by address; the circular arrow scans.
+  At the bottom: the theme, the service line, **Settings** (the sliders icon) and **Help**.
+- **The header** shows the selected board: shell, design, harness, build check, health,
+  and for a hub board the tunnel and the lease.
+- **The sections:** Overview, XDC, Build, Program, Consoles, Debug, Power, Clocks, SD card,
+  Update, Activity.
+- **Overview** has four tiles: Design, Consoles, Debug and Board. A "Needs attention" strip
+  appears only when something is wrong. **Details** (folded) holds identity, health counters,
+  telemetry, capabilities and the front panel.
+
+**The app and the command share one session.** A per-user background service
+(harness-manager-daemon) owns the boards. `harness-manager app` and every command talk to
+it, so you can use both at once. `harness-manager daemon status` shows it.
+
+| Command | Use |
+|---|---|
+| `harness-manager app` | the app in its own window |
+| `harness-manager ui` | the same page in a browser tab |
+| `harness-manager ui --no-browser` | print the URL only (for `ssh -L`) |
+| `harness-manager daemon status` | is the service running, and where |
+| `harness-manager daemon stop` | stop it; the next command starts it again |
+| `harness-manager help --tabs` | the help text the app's **Help** shows |
+
+Add `--json` to any verb for one JSON object on stdout, or `--tsv` for tab-separated rows.
+
+**What a board can do: the capability view.** Harness Manager never guesses. It asks the
+board and lists each capability as available or not, and a missing one says what it needs.
+
+```bash
+harness-manager info 192.168.10.101
+```
+
+```text
+control    idle
+can        clock_dut, console_dut, debug_dut, deploy_partial, health, identify, reset_dut
+cannot     console_controller: needs the Debug USB cable
+cannot     reboot_board: needs the Debug USB cable, a networked power plug, or the J7 mod + 'mcc' firmware
+cannot     power_cycle: needs a networked power plug in boards.toml (Shelly, Tasmota or NETIO)
+```
+
+The app shows the same list under **Details > Capabilities**, and greys out a button whose
+capability is missing, with the reason beside it.
+
+**What can go wrong**
+- **The window is blank** (ThinLinc and other remote desktops): the app window now starts
+  without the desktop's D-Bus session bus, which caused it. If something else needs that
+  bus, set `HARNESS_MANAGER_APP_KEEP_DBUS=1`. `harness-manager ui` opens a browser tab
+  instead.
+- **No display** (an SSH session): `app` and `ui` print the URL and the `ssh -L` command
+  that forwards it. Run that on your own machine, then open the URL there.
+- **"Session expired" banner:** the service restarted or the page came from an old link.
+  Run `harness-manager ui` again.
+
+## 3. Add a board
+
+There are two ways to reach a board. Pick the one that matches where it is.
+
+| Where the board is | How HM reaches it | Go to |
+|---|---|---|
+| on your desk, plugged into this PC | Ethernet to `192.168.10.101`; the Debug USB once, for the first install | [3.1](#31-a-board-on-your-desk) |
+| in the lab, behind a hub | the hub (fpgahub) over SSH or its REST API, with a lease | [3.2](#32-a-lab-board-behind-a-hub) |
+
+**Board names.** The app and `info` call a board by its name when it has one, else by its
+address. A hub board takes its name from the hub (`mps3-01`). Name your own in
+`~/.config/harness-manager/boards.toml`; your name always wins. It is a label only: you
+still address the board by its address.
+
+```toml
+[boards."mps3@192.168.10.101:6900"]
+name = "my-mps3"
+```
+
+### 3.1 A board on your desk
+
+**Needs:** a board; the Debug USB for the first install.
+
+**In the app:** click **+** in the rail, type `192.168.10.101`, and click **Add**. Select
+the board, then **Open board**. Opening takes the board's lock for this service; **Close
+board** gives it back.
+
+**First install (once, about 15 minutes).** A new board needs the SoC Labs harness on its
+configuration SD. Do these steps in order. Step 2, the backup, is your way back.
+
+1. **Connect and look.** Plug in the Debug USB and Ethernet, and power the board on. The
+   configuration SD appears as a drive named `V2M-MPS3`.
 
    ```bash
    harness-manager probe
    ```
 
-   It lists the board with its USB links: the board controller's serial port and the SD
-   drive. Typical names:
+   It lists the board with its USB links. The Debug USB adds four serial ports; `probe`
+   says which one is the MCC (the board controller).
 
    | | Serial port (the MCC) | SD drive |
    |---|---|---|
@@ -66,192 +201,964 @@ the SD card as it is today.
    | macOS | `/dev/cu.usbserial-…` | `/Volumes/V2M-MPS3` |
    | Windows | `COM7` | `E:\` |
 
-   The Debug USB adds four serial ports; `probe` says which one is the MCC.
+   In the commands below, `-` means "this board, over USB only".
 
-   In the commands below, `-` means "this board, over USB only", and `--serial` and
-   `--volume` name the port and the drive.
-
-2. **Back up the SD.**
+2. **Back up the SD.** It writes one zip and prints its sha256. Keep it off the board.
 
    ```bash
    harness-manager sd - --volume /media/$USER/V2M-MPS3 backup ~/mps3-backups
    ```
 
-   It writes one zip and prints its sha256. Keep the zip somewhere safe, off the board.
-
-3. **Install the harness bundle.**
+3. **Install the harness bundle** (a directory from SoC Labs):
 
    ```bash
    harness-manager sd - --volume /media/$USER/V2M-MPS3 install ~/harness-bundle \
        --backup ~/mps3-backups/<the zip from step 2>
    ```
 
-   It asks before it writes. It refuses without a backup, and it never writes the board
-   controller's own firmware (`.ebf` files). Writing over USB is slow and can take
-   several minutes. A slow write is not a failed one. **Do not unplug the cable, power
-   off, or start a second write while it runs.** If it is interrupted anyway, the SD
-   keeps a marker, and the next install refuses until you put the backup back
-   (`harness-manager sd - --volume DRIVE restore <zip>`). Then run the install again.
+   It asks first. It refuses without a backup and never writes the MCC's own firmware
+   (`.ebf` files). A USB write can take 5 minutes. A slow write is not a failed one: **do
+   not unplug, power off, or start a second write.**
 
-4. **Reboot the board, so it loads the new harness.**
+4. **Reboot the board** so it loads the new harness. It asks first, then waits until the
+   board has gone down and come back.
 
    ```bash
    harness-manager mcc - --serial /dev/ttyUSB0 reboot
    ```
 
-   It asks first, then waits until the board has gone down and come back. You can also
-   power-cycle the board with its switch.
-
-5. **Check it over Ethernet.** Give your PC's Ethernet port an address on the board's
-   network, for example `192.168.10.1` with netmask `255.255.255.0`. Then:
+5. **Check it over Ethernet.** Give this PC's Ethernet port an address on the board's
+   network (`192.168.10.1`, netmask `255.255.255.0`), then:
 
    ```bash
    harness-manager info 192.168.10.101
    ```
 
-   The board should show the harness version and `control idle`. That is the end of the
-   first install. You can unplug the Debug USB cable.
+   The board shows its harness version and `control idle`. Unplug the Debug USB: daily
+   work needs only Ethernet.
 
-## 4. Daily use over Ethernet
+The app's **SD card** section runs the same four steps (Back up the SD, Install files,
+Reboot and witness it, Restore the backup).
 
-Everything here needs only the Ethernet cable. `TARGET` is `192.168.10.101`.
+![The SD card section: back up, install, reboot, restore](review/2026-09-24/sd-light.png)
 
-```bash
-harness-manager app                               # the app; add the board by its address
-harness-manager overlays 192.168.10.101           # the designs that load on this harness
-harness-manager program 192.168.10.101 nanosoc    # program the DUT partition
-harness-manager console 192.168.10.101 uart0      # the DUT's UART0 (Ctrl-] exits)
-harness-manager debug up 192.168.10.101           # OpenOCD; gdb connects to the port it prints
-harness-manager reset 192.168.10.101              # reset the DUT
-harness-manager clock 192.168.10.101 --dut-mhz 50 # set the DUT clock
-harness-manager restore 192.168.10.101            # back to the baseline design
-```
-
-`program` checks that the design was built for the harness on your board before it
-writes anything, asks you, then confirms the board loaded it.
-
-To have the board boot into the design next time, add `--keep-on-card` (in the app:
-tick **Keep on the card** in Program). It writes the design to the board's user microSD
-after the load is confirmed, and says which slot it went to. It is off by default. It
-needs a harness with a microSD store (the Linux harness) and a card in the USER microSD
-slot; without either it refuses before writing anything, and says which.
-
-Consoles: open them in the app, or run the `screen` command the app shows
-(`screen /tmp/harness-manager-$USER/<board>/uart0`, Linux and macOS;
-`harness-manager pty 192.168.10.101 uart0` prints it too). The app and `screen` can show
-the same console at the same time. The DUT's UART0 runs at the rate the loaded design
-was built with (76800 for nanosoc), so `screen` needs no baud argument.
-
-Debug: connect gdb with `target extended-remote 127.0.0.1:<gdb port>`. Arm DS uses the
-same port through its "Generic GDB" connection. OpenOCD itself must be on your PATH;
-the MPS3 target configs ship with Harness Manager.
-
-The command and the app share one board session through a background service, so you
-can use both at once. `harness-manager daemon status` shows the service.
-
-Board names: the app and `harness-manager info` call a board by its name when it has
-one, and by its address when it does not. A lab board behind a hub takes its name from
-the hub (`mps3-01`). To name your own board, add a `name` to its table in
-`~/.config/harness-manager/boards.toml`; your name always wins:
+**A networked power plug** lets HM power-cycle the board. Add it to `boards.toml`:
 
 ```toml
-[boards."mps3@192.168.10.101:6900"]
-name = "my-mps3"
+[boards."mps3@192.168.10.101:6900".power]
+kind = "shelly_gen2"
+url = "http://192.168.10.50"
 ```
 
-The name is only a label. You still address the board by its address.
+Then `harness-manager power show 192.168.10.101` reads it, and
+`harness-manager power cycle 192.168.10.101` cycles it. On Windows, write paths in
+`boards.toml` with forward slashes, or in single quotes: TOML reads a backslash inside
+double quotes as an escape and refuses the file.
 
-**A Linux harness: claim it once.** A board running the Linux harness ships unclaimed: its
-SSH takes keys only, and it has none. The first key it is sent claims it, for good:
+**What can go wrong**
+- `offline`: check the power, the cable and your PC's address (step 5).
+- An interrupted install leaves a marker, and the next install refuses until you restore
+  the backup: `harness-manager sd - --volume DRIVE restore <zip>`. The app shows a red
+  "Interrupted SD install" banner with **Go to recovery**.
+- More in [section 13](#13-troubleshooting).
+
+### 3.2 A lab board behind a hub
+
+**Needs:** a hub, and either an SSH account on the hub or an fpgahub token.
+
+A hub is a named setting. You add it once, then add boards that use it. **No hub is the
+default:** a board on your desk needs none, and nothing hub-related runs until you add one.
+
+**Step 1: add the hub.** Choose one.
+
+| You have | Command |
+|---|---|
+| an SSH account on the hub (the lab today) | `harness-manager hub add lab --ssh mapstone-dev.ecs.soton.ac.uk` |
+| an fpgahub token (no SSH) | `harness-manager hub add remote --url https://mapstone-dev.ecs.soton.ac.uk:7246 --ca-file ~/lab-hub-ca.pem --token-stdin` |
+
+With `--token-stdin`, paste the token when asked. It goes into the secret store (the OS
+keyring, else a private file), never into a settings file. Use port 7246, not 7245 (7245
+needs a client certificate). Useful extras: `--jump HOST` (an SSH jump host),
+`--lease-ttl 30m`.
+
+**Step 2: test the connection.** It never takes a lease.
 
 ```bash
-harness-manager board claim 192.168.10.101 --key ~/.ssh/id_ed25519.pub   # asks first
-harness-manager board claim-status 192.168.10.101  # claimed by you, another key, or nobody
-harness-manager board ssh 192.168.10.101           # root on the board, through the hub
+harness-manager hub test lab
 ```
 
-`board claim` needs the lease on a board behind a hub, and it never happens by itself.
-It pins the board's SSH host key in boards.toml (`ssh.host_key`); from then on a board
-that answers with a different key is refused, loudly. After a claim the board takes slot
-changes only over your key's SSH, which Harness Manager uses for you. If you claimed the
-board some other way (pyverify, the runbooks), `board claim --adopt` pins it instead. A
-board that was re-provisioned (a new card) is claimed again with `--replace-host-key`.
-`info` shows the claim on its `ssh claim` line; a bare-metal board has none.
+It checks, in order, **config, reach, auth, group, targets, target**, and stops at the first
+failure with the reason and the next step. For example, a login without the `fpga` group
+stops at **group** and prints the admin's `usermod -aG fpga` command.
+`harness-manager config test hubs lab` runs the same test.
 
-## 5. The capability view
+**Step 3: add the board.** List what the hub offers, then add one:
 
-Harness Manager never guesses what your board can do. It asks the board, and it lists
-each capability as available or not. A missing capability always says what it needs.
-
-`harness-manager info 192.168.10.101` over Ethernet alone shows, for example:
-
-```text
-control    idle
-can        clock_dut, console_dut, debug_dut, deploy_partial, health, identify, reset_dut
-cannot     console_controller: needs the Debug USB cable
-cannot     reboot_board: needs the Debug USB cable, a networked power plug, or the J7 mod + 'mcc' firmware
-cannot     storage_backup: needs the Debug USB cable (or a card reader)
-cannot     telemetry_temp: needs the Debug USB cable, a JTAG cable on J17, or newer harness firmware
-cannot     power_cycle: needs a networked power plug in boards.toml (Shelly, Tasmota or NETIO)
+```bash
+harness-manager hub targets lab
+harness-manager hub targets lab --add mps3_01_pl
 ```
 
-The app shows the same list under **Details**, and greys out a button whose capability
-is missing, with the reason next to it.
+`--add` writes the board into `boards.toml`: `hub.use`, the target, its MCC share,
+`via = "hub"`, its address and its name. Then open it in the app, or run
+`harness-manager info 192.168.10.101`.
 
-What the reasons mean:
-- **"needs the Debug USB cable"**: plug it in, then run the command with `--serial` and
-  `--volume`, or reopen the board in the app.
-- **"needs harness firmware with '…'"**: your harness is older than the feature. A newer
-  harness bundle adds it.
-- **"needs a networked power plug in boards.toml"**: Harness Manager can switch a
-  Shelly, Tasmota or NETIO plug. Add the plug to
-  `~/.config/harness-manager/boards.toml`:
+| Hub command | What it does |
+|---|---|
+| `hub list` | the hubs, and boards that still have an inline hub table |
+| `hub add NAME --ssh HOST` or `--url URL` | add a hub (`--update` changes an existing one) |
+| `hub token NAME --stdin` / `--ref file:PATH` / `--clear` | set, point at, or forget your token |
+| `hub test NAME [--target T]` | test the connection; never takes a lease |
+| `hub targets NAME [--add TARGET]` | what the hub offers; `--add` writes a board for one |
+| `hub adopt BOARD [--as NAME]` | "Make this a hub": turn a board's inline hub table into a named hub |
+| `hub remove NAME [--force]` | remove a hub and your stored token for it |
 
-  ```toml
-  [boards."mps3@192.168.10.101:6900".power]
-  kind = "shelly_gen2"
-  url = "http://192.168.10.50"
-  ```
+**In the app:** **+** in the rail has a second field, "through a hub: ssh host". That adds
+a board through an SSH hub for this session. The Settings menu for named hubs, with a
+**Test connection** button, is being built (lane SET-UI). Until it lands, use the `hub`
+commands above.
 
-  On Windows, write a path in `boards.toml` with forward slashes
-  (`"C:/Xilinx/Vivado/2023.2/bin/xsdb.bat"`) or in single quotes
-  (`'C:\Xilinx\Vivado\2023.2\bin\xsdb.bat'`). Inside double quotes, TOML reads each
-  backslash as an escape and refuses the file.
+A board added with **+** and an ssh host, or with `--via ssh:HOST` on one command, gets the
+tunnel only. Leases need a hub table in `boards.toml`, which `hub targets --add` writes.
 
-## 6. When something goes wrong: the recovery ladder
+**Your administrator** may define machine hubs for everyone in the policy file
+([section 11](#11-settings)). You still set your own token: `harness-manager hub token lab --stdin`.
+
+**What can go wrong**
+- `hub test` stops at **auth**: your SSH key is not accepted, or the host key changed.
+- It stops at **group**: your account is not in the `fpga` group. Ask the hub admin.
+- A REST token gets 401: the hub did not accept it. The message names where the token came
+  from.
+- **With a REST token only**, force-release needs an admin token, and lease requests carry
+  no message and no "keep for N minutes". The data plane (consoles, programming) still
+  needs a route to the board, which the lab hub does not offer today, so an SSH account is
+  still needed. [HUB_MODE.md](HUB_MODE.md) explains both.
+
+## 4. Leases: share a lab board
+
+**Needs:** a hub.
+
+**When:** before you change anything on a lab board. A lease is how the hub keeps two
+people off one board, and a lease that lapses lets the hub reset the board under you.
+
+Reading the board works without one. HM refuses these without the lease: XVC, the SSH
+claim, slot and card changes, and harness installs. Programming, reset and debug are not
+refused, but the lab rule is the same: the Overview's "Needs attention" says "This client
+must not drive the board until the lease is yours" when someone else holds it.
+
+**In the app:** the header's **Hub** line shows the tunnel and the lease.
+
+![A hub board: tunnel up, lease yours for 27 minutes, with Release](review/2026-09-24/hub-lease-light.png)
+
+| The lease chip says | You can |
+|---|---|
+| no lease | **Acquire lease** (it may queue; **Cancel** leaves the queue) |
+| lease yours · 27 min | **Release**. The service renews it while the board is open here |
+| leased to alice@lab-pc-07 | **Request board** |
+
+**On the command line.** `TARGET` is the board's address (`192.168.10.101`); its
+`boards.toml` hub table names the hub.
+
+| Command | What it does |
+|---|---|
+| `lease show TARGET` | who holds it and until when, the queue, and the requests |
+| `lease acquire TARGET [--ttl S]` | take it; waits in the queue if someone holds it |
+| `lease release TARGET` | give it back (only a lease this Harness Manager took) |
+| `lease request TARGET --message M` | ask the holder to give it up; waits, with a 2:00 countdown |
+| `lease requests TARGET` | the requests waiting for your answer |
+| `lease respond TARGET ID --release` or `--keep MINUTES` | answer a request (keep: 5, 15, 30 or 60) |
+| `lease force TARGET` | force-release it after the 2:00 ran out (asks first) |
+| `lease leave TARGET` | leave the queue and withdraw your request |
+| `lease dismiss TARGET` | clear the "your lease was force-released" notice |
+
+Default lease lengths: 1 hour for `acquire`, 2 hours once a request succeeds. A hub's
+`lease_ttl`, `request_ttl` and `queue_timeout` change them.
+
+### Ask for a board someone else holds
+
+1. Click **Request board** (or run `harness-manager lease request 192.168.10.101 --message "need it for the 15:00 demo"`).
+2. You join the queue, and the holder's Harness Manager shows your request.
+3. A bar shows your queue position and a 2:00 countdown.
+4. The holder answers **Release now** (the board is yours) or **Keep for N min** (you keep
+   waiting; force becomes possible when their time runs out).
+5. With no answer in 2:00, and you at the head of the queue, **Force release…** turns red.
+
+**Leave queue** (or `lease leave TARGET`, or Ctrl-C on `lease request`) withdraws your
+request at any time.
+
+![Waiting for an answer: position 1, 1:58 left, Leave queue and Force release](review/2026-09-24/lease-request-waiting-light.png)
+
+### Force-release
+
+**Force release…** kicks the holder off the board now: anything they are running stops.
+It asks first. When no Harness Manager session is known to hold the lease, the holder may
+be a script (a soak or a runner). Then you must also **type the board's name**
+(`mps3-01`) before **Force** is enabled. From a script, `--yes` is not enough there: pass
+`--confirm-board mps3-01`.
+
+```bash
+harness-manager lease force 192.168.10.101
+harness-manager lease force 192.168.10.101 --yes --confirm-board mps3-01   # no terminal
+```
+
+![Force release: the confirm names the holder and what stops](review/2026-09-24/lease-force-confirm-light.png)
+
+### When you hold it and someone asks
+
+A banner shows on every page: "`<who>` wants mps3-01: *message*", with a countdown,
+**Release now**, and **Keep for 5 / 15 / 30 / 60 min**. If someone at the board taps the
+request on its front panel, the banner says so. A tap never releases the board.
+
+![The holder's prompt](review/2026-09-24/lease-holder-prompt-light.png)
+
+### When your lease was taken
+
+A red banner says who force-released the board, when and why. Stop driving the board
+until you have the lease again. **Dismiss** (or `lease dismiss TARGET`) clears it; the next
+forced release shows again.
+
+![The force-released banner](review/2026-09-24/lease-victim-banner-light.png)
+
+**What can go wrong**
+- **Force stays grey:** it tells you why: the 2:00 has not run out, the holder answered
+  "keep", you are not at the head of the queue, or (REST hubs) your token is not an admin
+  token.
+- **"you already hold this board (another session)":** the hub keys leases on
+  `user@host`, so a second session of yours gets the board back instead of queueing.
+- **The board passed to someone new while you waited:** your request is sent to them with
+  a fresh 2:00, and force waits for that.
+
+[LEASE_REQUESTS.md](LEASE_REQUESTS.md) has the full rules.
+
+## 5. Consoles
+
+**Needs:** a board.
+
+**When:** to see the DUT's UART output or type into it.
+
+| Console | Link | Rate |
+|---|---|---|
+| `uart0`, `uart1` | Ethernet | fixed by the loaded design: 76800 on nanosoc |
+| `swo` | Ethernet | 2000000 |
+| `mcc` (board controller), `fpga_uart0` … | the Debug USB, or the hub's serial shares | changeable |
+
+**In the app:** the Overview's **Consoles** tile, or the **Consoles** section. **Open**
+shows the console in the page. **Attach with screen** gives the `screen` command to copy.
+**Export to TCP instead** makes a local port for a raw TCP terminal.
+
+![A console with its screen command and fixed rate](review/2026-09-24/console-screen-fixed-baud-light.png)
+
+**On the command line**
+
+| Command | What it does |
+|---|---|
+| `console TARGET uart0` | the console in this terminal; Ctrl-] exits |
+| `console TARGET uart0 --read-only` | output only; no keystrokes sent |
+| `console TARGET uart0 --export 0` | re-export on a free local port (prints it), for PuTTY and similar |
+| `pty TARGET uart0` | make a terminal device and print the `screen` command |
+| `baud TARGET NAME [RATE]` | show a console's rate, or change it where it can change (0 = default) |
+
+```bash
+harness-manager console 192.168.10.101 uart0
+screen /tmp/harness-manager-$USER/<board>/uart0      # Linux and macOS
+```
+
+The app and one `screen` can show the same console at once. `screen` needs no baud
+argument for the Ethernet consoles. For a serial console, the command HM gives carries the
+rate, because `screen` alone sets 9600.
+
+Input to `uart0` and `uart1` is paced at 20 ms a byte, because the nanoSoC UART has no
+receive FIFO. A paste arrives intact, but slowly.
+
+**What can go wrong**
+- **Windows has no `screen`:** use the app, or `--export 0` and a raw TCP terminal.
+- **One `screen` per console.** A second one is refused.
+- **An unknown console name** exits 3 and lists the names.
+
+## 6. Program a design
+
+**Needs:** a board. Behind a hub, hold the lease ([section 4](#4-leases-share-a-lab-board)).
+
+**When:** to load a design (an overlay) into the DUT partition, or go back to the baseline.
+
+**In the app:** **Program** (or **Program…** on the Design tile).
+1. Pick an overlay in **Overlays**. It lists those that load on this shell, and those that
+   do not, with the reason.
+2. Read **Preflight**. A MISMATCH refuses; UNCHECKED items are shown, not passed.
+3. Tick **Arm** ("I understand this reconfigures the partition and resets the DUT").
+4. Click **Program**. **Progress** shows each phase, then "Done. rm_id … is verified by the
+   board".
+
+**Restore baseline** loads the safe design (the greybox) and confirms it.
+
+**On the command line**
+
+```bash
+harness-manager overlays 192.168.10.101           # what loads on this shell
+harness-manager program 192.168.10.101 nanosoc    # preflight, ask, push, verify
+harness-manager restore 192.168.10.101            # back to the baseline
+```
+
+| Option | Use |
+|---|---|
+| `--yes` | do not ask |
+| `--keep-on-card` | also keep it on the board's user microSD, so the board boots into it next time |
+| `--overlay-dir DIR` | look for overlays here first (repeatable) |
+
+A design is chosen by name (`nanosoc`) or by rm_id (`0x01000001`). A push takes seconds
+over Ethernet.
+
+**Keep on the card.** **Needs:** the Linux harness and a card in the USER microSD slot.
+Tick **Keep on the card** in Program, or add `--keep-on-card`. After the load is confirmed,
+HM writes the design to the card and says which slot it went to ("Kept on the card (slot
+B)"). It is off by default: a plain program never writes the card. Without a card store
+or a card, it refuses before writing anything, with the reason. A card write that fails
+does not fail the program: the new design runs, and the card keeps the one it had.
+
+**Related:** reset the DUT with `harness-manager reset 192.168.10.101` (the Board tile's
+**Reset DUT**, after ticking **Arm**). Set its clock with
+`harness-manager clock 192.168.10.101 --dut-mhz 50` or `--preset 25mhz` (the **Clocks**
+section).
+
+**What can go wrong**
+
+| You see | Cause | Do |
+|---|---|---|
+| exit 14, MISMATCH on the shell | the overlay was built for another shell | build or fetch it for this shell ([section 7](#7-build-your-own-dut)) |
+| exit 15 | a corrupt payload or unpaired files | rebuild or re-fetch the overlay |
+| exit 6, "Written, not verified" | the board did not confirm the load | run `info`; then `restore` |
+| `busy` right after a failed push | the harness is finishing that swap, for up to 30 s | wait 30 s, then try again |
+| exit 12 with `--keep-on-card` | no card store (bare metal) or no card | program without it, or insert a card |
+
+On the Linux harness a push always uses TCP and waits up to 30 s for each part.
+
+## 7. Build your own DUT
+
+**Needs:** Vivado 2024.1 on this machine, and the build kit for the board's static (the
+shell). A board is optional: you can build for a static id with no board.
+
+**When:** you have your own RTL and want it as an overlay you can Program.
+
+The journey reads left to right in the app: **XDC**, then **Build**, then **Program**.
+
+### 7.1 XDC: the constraints for your design
+
+**In the app:** the **XDC** section. **Pin model** shows the board, the fielded shell and
+the sources. **Export** has two kits:
+
+| Kit | For | Holds |
+|---|---|---|
+| **RM kit** | a module that loads into the shell's partition | OOC XDC by boundary group, connectivity sheet, pblock facts, wrapper skeleton |
+| **Full board** | a whole-FPGA design (replaces the harness) | pins, IO standards by bank, clocks |
+
+Pick a built-in design (or tick **Paste my own design (JSON)**), then **Preview** or
+**Download zip**. A kit that fails a check is shown, but not exported, until the check is
+fixed.
+
+**On the command line**
+
+```bash
+harness-manager xdc info                                            # the model and the built-in designs
+harness-manager xdc rm-kit --design nanosoc --out ~/kits/nanosoc    # an RM kit
+harness-manager xdc board --design blinky --out ~/kits/blinky       # a full-board export
+```
+
+Built-in designs today: `minimal`, `nanosoc`, `nanosoc_ila` (RM kits) and `blinky`,
+`shield_gpio`, `harness_shell` (full board). `--design FILE.json` takes your own design;
+[XDC_EXPORT.md](XDC_EXPORT.md) has the format. `--static-id ID` builds an RM kit for
+another shell.
+
+### 7.2 Build: from RTL to an overlay
+
+**In the app:** the **Build** section. It shows six steps, each with its state (done,
+next, blocked, failed or unchecked) and what to do next:
+
+| Step | What it checks |
+|---|---|
+| 1 Target | the board's static and partition (47 ports, 148 bits on 0x72BB0A36) |
+| 2 Tools | the Vivado release the kit needs, and the one found here |
+| 3 Kit | the static's build kit is in the cache and its CRC matches the static id |
+| 4 Wrapper and XDC | your design passes the XDC checks; its rm_id |
+| 5 Build | **Generate script** writes `build_rm.tcl`; you run Vivado |
+| 6 Check and add | **Check** the build receipt, then **Add to Program** |
+
+![The Build section, steps 1 to 6, with the Vivado command](review/2026-09-25/build-journey-light.png)
+
+**On the command line.** A typical run for the board at `192.168.10.101`:
+
+1. See where you are: `harness-manager kit guide 192.168.10.101 --design minimal`
+2. Get the kit: `harness-manager kit fetch 192.168.10.101`, or import one you were given:
+   `harness-manager kit import ~/Downloads/0x72BB0A36-kit.zip`
+3. Write the build directory: `harness-manager kit script 192.168.10.101 --design minimal --out ~/builds/minimal`
+4. Print the Vivado command, then run it: `harness-manager kit build ~/builds/minimal`
+5. Check the result: `harness-manager kit check ~/builds/minimal 192.168.10.101`
+6. Make it an overlay in Program: `harness-manager kit pack ~/builds/minimal --import`
+
+With no board, give `--static-id 0x72BB0A36` instead of the address.
+
+| Kit command | What it does |
+|---|---|
+| `kit info [TARGET]` | the static, its kit, the Vivado it needs, the sources |
+| `kit fetch [TARGET] [--source cache\|channel\|hub\|PATH] [--out DIR]` | put the kit in the cache (and export it) |
+| `kit import DIR\|ZIP` | a kit directory or zip, or a `fielded/<sid>/` directory, into the cache |
+| `kit list` | the cached kits |
+| `kit verify DIR [TARGET]` | check a kit directory, and it against a board |
+| `kit guide [TARGET] [--design D] [--build-dir DIR] [--why GATE]` | the steps and their state; `--why` explains one gate |
+| `kit script [TARGET] --design D --out DIR` | write `build_rm.tcl`, the kit and the XDC kit |
+| `kit build DIR` | print the Vivado command (HM does not run Vivado yet) |
+| `kit check RECEIPT\|DIR\|PARTIAL [TARGET]` | check a build receipt and its pair, or a bare partial |
+| `kit pack RECEIPT\|DIR [--import]` | write the overlay; `--import` puts it in Program |
+
+**Times.** Fetching a kit takes seconds from the cache. A small RM builds in about 20
+minutes with 2 threads and 4 to 8 GB of RAM.
+
+**What can go wrong**
+- **No kit:** the kit sources are the cache, the signed channel (not live yet), the hub's
+  mint archive (`HARNESS_MANAGER_KIT_HUB_DIR`), or a path you give. Ask SoC Labs for the
+  kit zip and use `kit import`.
+- **Vivado release:** the generated `build_rm.tcl` refuses another major.minor than the
+  kit's (2024.1). Point HM at the right one with `HARNESS_MANAGER_VIVADO`.
+- **Licence:** only synthesis can tell. Watch for `[Common 17-345] A valid license was not
+  found`, and point `XILINXD_LICENSE_FILE` at the lab server.
+- **Vivado exits 0 even when a gate fails.** The receipt is the verdict. The **When it goes
+  wrong** card (or `kit guide --why GATE`) has one fix per gate.
+- **rm_id:** a design with no `rm_id` gets a proposed one (design ids `0x8000` to `0xFFFF`,
+  the same on every machine for the same name). Add it to your design to keep it.
+- **Paths are on the service's machine.** The service and Vivado run on the same host.
+
+## 8. Debug: OpenOCD and XVC
+
+**Needs:** a board with a debug-capable design loaded (nanosoc; the greybox has no debug
+port). Behind a hub, hold the lease (HM refuses XVC without it).
+
+The **Debug** section has two cards: **DUT debug (OpenOCD)** for the DUT CPU, and **Fabric
+debug (XVC)** for ILAs in the partition.
+
+### 8.1 The DUT CPU: OpenOCD and gdb
+
+**Needs:** OpenOCD 0.12 or later on your PATH (its remote_bitbang adapter is on by
+default). The MPS3 target configs ship with Harness Manager.
+
+**In the app:** **Detect** reads the TAP IDCODE only: no reset, no halt, no register
+written. **Open session** starts OpenOCD for the loaded design; **Connection** shows the
+gdb, telnet and tcl ports (127.0.0.1 only). **Close session** stops it. The Overview's
+Debug tile has **Start** and **Stop**.
+
+**On the command line**
+
+| Command | What it does |
+|---|---|
+| `debug detect TARGET` | the TAP IDCODE (exit 13: the design has no debug port) |
+| `debug up TARGET` | start OpenOCD, print the ports, hold until Ctrl-C |
+| `debug status TARGET` | state, ports, config, pid |
+| `debug down TARGET` | stop it |
+
+Connect gdb with `target extended-remote 127.0.0.1:<gdb port>`. Arm DS uses the same port
+through its "Generic GDB" connection. The session closes by itself before a partition
+swap, and reopens only when you ask.
+
+**Back-to-back sessions.** The board's JTAG server takes one client, and needs a moment
+to finish the last session before it takes the next. So HM waits until 2 seconds after
+its previous OpenOCD on that board ended before it starts another. You see a short pause
+on `debug up` right after `debug detect`, or after closing a session. If the board still
+turns the new one away within 5 seconds of HM's own session, HM retries once by itself.
+
+**What can go wrong**
+- **"OpenOCD not found":** install it, or set `HARNESS_MANAGER_OPENOCD` to its path.
+- **Exit 4, held:** another debugger has the board's JTAG port. The hint may add "or the
+  harness's JTAG server is still finishing the previous session": wait a few seconds and
+  retry.
+- **Exit 13:** the loaded design has no debug port. Program one that has (nanosoc).
+
+### 8.2 ILAs: fabric debug over XVC
+
+**Needs:** Vivado (the Lab Edition is enough) or your own hw_server; a design with ILAs in
+the partition (`nanosoc_ila`); the harness's XVC with its Debug Bridge. Behind a hub, the
+lease.
+
+XVC here reaches only the reconfigurable partition's debug chain: the harness's Debug
+Bridge and the loaded design's debug hub and ILAs. It is never whole-device JTAG: it
+cannot configure or read back the FPGA.
+
+**In the app:** **Debug > Fabric debug (XVC)**.
+1. Click **Open**. HM takes the board's one XVC slot, starts its own hw_server, and shows the
+   **Vivado** URL (`localhost:23707`). To use your own hw_server instead, tick **Bring your
+   own hw_server** first.
+2. Click **Copy Tcl** and paste it into Vivado's Tcl console. It connects to that URL and
+   opens the target.
+3. **Download .ltx** gives the probes file for the loaded design.
+4. **Close** kicks the client, stops hw_server, and frees the board's slot.
+
+![XVC attached: the Vivado URL, the hw_server, the probes file](review/2026-09-25/xvc-attached-light.png)
+
+**On the command line**
+
+```bash
+harness-manager xvc open 192.168.10.101          # the app has the board open: returns at once
+harness-manager xvc tcl 192.168.10.101           # the Vivado Tcl for what is loaded
+harness-manager xvc ltx 192.168.10.101 -o nanosoc_ila.ltx
+harness-manager xvc status 192.168.10.101
+harness-manager xvc close 192.168.10.101
+```
+
+| Option | Use |
+|---|---|
+| `--byo` | bring your own hw_server: HM runs only the relay, and Vivado opens it with `open_hw_target -xvc_url 127.0.0.1:R` |
+| `xvc ltx --rm` / `--static` / `--full` | the RM's probes file, the static's (the MIG view, Linux harness only), or the full-design one |
+| `--for SECONDS` | hold the session this long, then stop |
+
+`xvc open` returns at once when the app already has the board open; the session stays
+there until `xvc close` or you close the board. Otherwise it holds the session in the
+terminal until Ctrl-C, like `debug up`.
+
+**Across a swap:** HM drops the slot and stops its hw_server before the partition swap,
+then reopens the session with a fresh hw_server on the same port and the new design's
+probes file. Vivado reconnects to the same URL; re-run the probes lines of `xvc tcl` to
+load the new probes.
+
+**What can go wrong**
+- **"hw_server not found":** install Vivado or the Lab Edition, set
+  `HARNESS_MANAGER_HW_SERVER`, or open with `--byo`.
+- **The ILAs do not show:** hw_server must be the Vivado release the design's ILAs were
+  built with. Point `HARNESS_MANAGER_HW_SERVER` at that release's `hw_server`.
+- **Held:** another client holds the board's one XVC slot, or (behind a hub) you do not
+  hold the lease.
+- **With `--byo`, your hw_server lingers 20 s** after its last client. Reusing it after a
+  swap gave "No devices detected": wait, or start a fresh one.
+- **"XVC on this harness is unauthenticated":** the bare-metal harness's XVC accepts
+  anyone who can reach the board network. HM opens it for the lease holder only. The
+  Linux harness closes this once it reports its XVC lock.
+
+[design/XVC_DEBUG.md](design/XVC_DEBUG.md) has the design.
+
+## 9. The front panel
+
+**Needs:** a board. The live mirror, who is connected, and Identify need the Linux harness.
+
+**When:** to see what the board's LCD shows, or to find the board in the lab.
+
+**In the app:** the Overview's **Board** tile has a **Panel** line (page, owner, touch) and
+**Identify**. **Details > Front panel** has the full mirror (15 rows of 40 characters),
+who is connected, and recent taps on the glass.
+
+![A Linux board's panel line, blinking after Identify](review/2026-09-25/panel-overview-linux-light.png)
+
+**On the command line**
+
+| Command | What it does |
+|---|---|
+| `panel show TARGET` | page, owner, banner, card, sessions, taps, Identify |
+| `panel mirror TARGET` | the panel's text grid |
+| `identify TARGET [--seconds N]` | blink the panel backlight so you can find the board (1 to 30 s, default 10; 0 stops) |
+
+```bash
+harness-manager identify 192.168.10.101 --seconds 20
+```
+
+**Presence.** For each board it has open, HM says hello to the board every 30 seconds, so
+the panel lists who is connected. The board keeps a session for 90 seconds after its last
+hello, and at most 4. Closing the board stops the hellos. The name shown is your
+`user@host`. (The `panel.presence_who` setting will change it once it is wired:
+[section 11](#11-settings).)
+
+**Taps.** Someone at the board can tap the lease-request banner on the panel. That tells the
+holder; it never releases the board.
+
+**What can go wrong**
+- **On bare metal:** the mirror is rebuilt from what HM read (it says "rebuilt"), and
+  Identify is disabled with "needs harness feature 'locate' (Linux harness)".
+- **"held" (violet):** someone else owns the panel, for example the DUT.
+- **Touch unavailable:** the panel's touch controller did not answer; the reason says why.
+
+## 10. Updates: the harness and the app
+
+**Needs:** signed releases (not live yet). Until SoC Labs publishes them, `update check`
+and `harness list` refuse every channel (exit 15), and the harness comes from SoC Labs as a bundle
+([section 3.1](#31-a-board-on-your-desk)). This section is how it works once they exist.
+
+Two things update separately:
+
+| What | Where in the app | Command |
+|---|---|---|
+| the board's harness (config SD, overlays, OS image) | **Update > Harness versions** | `harness-manager harness …` |
+| this app, Harness Manager itself | the banner at the top, and **Settings** | `harness-manager update app …` |
+
+### 10.1 Harness versions
+
+**Needs:** a board for install, pin and rollback. Behind a hub, the lease.
+
+**When:** to move a board to another harness release, pin it, or go back.
+
+**In the app:** **Update > Harness versions** lists every signed release, each with a
+verdict for this board:
+
+| Verdict | Means |
+|---|---|
+| fits | installs as it is |
+| re-key | another static: every overlay and DUT RM keyed to the running static stops loading. You type `REKEY 0x…` to confirm |
+| needs Debug USB or hub | the config SD must be written through the Debug USB here, or the hub |
+| incompatible | it cannot go on this board; the reason says why |
+
+**What changes** lists exactly what an install changes. **Install…** shows the plan and
+asks. **Pin** keeps the board on a release (nothing newer is offered). **History** shows
+the last installs. **Roll back** reinstalls the release the last install replaced.
+
+![Harness versions: verdicts, What changes, Pin and Install](review/2026-09-25/harness-versions-light.png)
+
+**On the command line**
+
+| Command | What it does |
+|---|---|
+| `harness list [TARGET] [--all]` | the releases, with a verdict for TARGET (`--all`: stable, beta and dev) |
+| `harness show VERSION [TARGET]` | one release: identity, parts, notes, what changes |
+| `harness fetch VERSION [--kit]` | download and verify it into the cache now (`--kit`: also the DUT build kit, 10 to 40 MB) |
+| `harness install TARGET [VERSION]` | install it (asks first) |
+| `harness pin TARGET VERSION` / `harness unpin TARGET` | pin a board to a release, or remove the pin |
+| `harness history TARGET` | the board's last installs, newest first |
+| `harness rollback TARGET [--to previous\|VERSION]` | reinstall the previous release; `--backup ZIP` restores an SD backup instead |
+| `harness mirror DIR [--all]` | write an offline mirror; `--source DIR` then reads it |
+
+`update check`, `update harness` and `update rollback TARGET` are the older spelling and
+still work.
+
+**A re-key** needs the typed phrase the plan prints: in the app a text box, on the command
+line `--consent "REKEY 0x72BB0A36"`. `--yes` never implies it.
+
+**Install through the hub** (a lab board, with its Debug USB on the hub):
+- Only the lease holder can install.
+- The plan names the board, the lease holder and the queue, and you type that exact phrase:
+  `INSTALL mps3_01_pl HELD BY you@host 0 QUEUED`. On the command line:
+  `--door hub --board-phrase "INSTALL mps3_01_pl HELD BY you@host 0 QUEUED"`.
+- fpgahub writes the config SD's `nanosoc.bit`, and the board is rebooted over its MCC
+  share. A release that changes any other SD file needs the Debug USB here.
+- The write itself takes about 70 seconds. Do not start a second install, or reset the
+  board, while it runs.
+- **Auto-revert** is on by default: if the board answers neither ping nor version for 60
+  seconds after the reboot, HM writes the previous `nanosoc.bit` back and reboots again.
+  Untick it (or `--no-auto-revert`) only when you will recover the board yourself.
+
+**An OS image** (Linux harness) installs over Ethernet only when it is for the static the
+board runs. Otherwise it needs the Debug USB or the hub.
+
+**What can go wrong**
+- **"cannot verify channel.json: this build has no pinned update-signing keys"** (exit
+  15): no release key is published yet. Install the harness by hand
+  ([section 3.1](#31-a-board-on-your-desk)).
+- **Private parts** (Arm IP overlays) are skipped without a GitHub token that can read them:
+  `harness-manager config set-secret updates.github_token`.
+- **"written, not running":** the SD was written but the board did not come up on it. Roll
+  back with `harness rollback TARGET`, or restore the SD backup ([section 13](#13-troubleshooting)).
+
+### 10.2 The app itself
+
+**When:** a banner says a new Harness Manager is available.
+
+**In the app:**
+1. The banner says "Harness Manager X is available". **Download** fetches it and builds it
+   beside the running version. (In the default mode it downloads by itself.)
+2. When it is ready: "Harness Manager X is ready: Restart to update". **Later** hides it
+   until the next version.
+3. Click **Restart to update**. If the restart would end a session (GDB, XVC or a `screen`
+   on a console), it lists them and asks first. Running jobs finish first; hub leases are
+   kept.
+4. The restart takes a few seconds. The page reconnects by itself. Consoles keep their
+   PTY paths: re-run `screen` on them.
+5. If the new version fails its health check (30 s), the old one comes back by itself, and
+   the new one is marked bad and never offered again.
+
+![The update banner, ready to restart](review/2026-09-25/update-banner-staged-light.png)
+
+**Settings > Updates** sets the **Channel** (stable, beta, dev) and **Updates** (Off,
+Notify, Stage), and lists bad versions. The service checks 60 seconds after it starts,
+then every 6 hours.
+
+![Settings, Updates, limited by an administrator's policy](review/2026-09-25/update-settings-policy-light.png)
+
+**On the command line**
+
+| Command | What it does |
+|---|---|
+| `update status` | the app's versions, bad marks, last check and last apply |
+| `update check` | read-only: what the channel offers |
+| `update app` | download, stage beside the running one, and switch |
+| `update app --stage-only` | build it, do not switch |
+| `update app --apply` | with the service running: stage, then restart onto it (rolls back by itself if it fails) |
+| `update rollback --app` | switch back to the previous app version |
+
+**What can go wrong**
+- **"this is a developer install":** a `make venv` or `pip install -e` copy never updates
+  itself. Update it with git.
+- **A version will not start:** `HARNESS_MANAGER_USE_INSTALLED=1 harness-manager update rollback --app`
+  runs the installer's copy and switches back.
+- **Choices are disabled:** your administrator's policy file limits them. The Settings card
+  names the file.
+
+[INSTALL.md](INSTALL.md#self-update-and-the-install-root) explains the install root, and
+[RELEASING.md](RELEASING.md) how releases are made.
+
+## 11. Settings
+
+**When:** to point HM at your tools, change update behaviour, or set up hubs and secrets.
+
+**Where settings live**
+
+| File | Holds | Who writes it |
+|---|---|---|
+| `~/.config/harness-manager/settings.toml` | your settings (comments are kept) | you, `harness-manager config`, `hub add` |
+| `~/.config/harness-manager/boards.toml` | boards: names, hubs, power plugs | you, `hub targets --add` |
+| `/etc/harness-manager/policy.toml` (Linux) | your administrator's `[lock]`, `[default]` and `[hubs.*]` | your administrator |
+| the OS keyring, else a 0600 file | secrets: hub tokens, the GitHub token | `config set-secret`, `hub add --token-stdin` |
+
+`harness-manager config path` prints every path on your machine, and where a new secret
+goes. The policy file is `/Library/Application Support/harness-manager/policy.toml` on
+macOS and `%ProgramData%\harness-manager\policy.toml` on Windows.
+
+**Which value wins:** the administrator's lock, then an environment variable, then your
+file, then the administrator's default, then the board pack's, then the built-in
+default. `config get` says where each value came from.
+
+**On the command line**
+
+| Command | What it does |
+|---|---|
+| `config list [SECTION]` | every setting, its value and where it came from |
+| `config get KEY` | one setting: value, source, lock, and any variable that hides it |
+| `config set KEY VALUE [KEY VALUE …]` | change settings, all or nothing |
+| `config unset KEY` | remove your value: back to the administrator's or the default |
+| `config set-secret KEY` | store a secret, read from stdin (never the command line) |
+| `config unset-secret KEY` | remove a secret |
+| `config path` | every file the settings use |
+| `config test SECTION [NAME]` | prove a section works, changing nothing (`config test hubs lab`) |
+
+```bash
+harness-manager config list updates
+harness-manager config set updates.channel beta
+harness-manager config get tools.openocd
+harness-manager config set-secret hubs.lab.token
+```
+
+Sections: general, hubs, boards, tools, updates, harness-kits, debug, consoles, advanced.
+Each change says when it applies: **live** (at the next use), **reopen** (the next time a
+board opens) or **restart** (the service must restart).
+
+**What takes effect today.** On `main`, `config` reads and stores every setting, and the
+update settings and named hubs take effect. The tool paths (`tools.*`), debug ports,
+console and kit settings take effect as each part of HM is wired to them (lane SET-WIRE).
+Until then, the environment variable still works:
+
+| Setting | Variable |
+|---|---|
+| `tools.openocd` | `HARNESS_MANAGER_OPENOCD` |
+| `tools.vivado` | `HARNESS_MANAGER_VIVADO` |
+| `tools.hw_server` | `HARNESS_MANAGER_HW_SERVER` |
+
+**In the app:** **Settings** (the sliders icon at the bottom of the rail) has the
+**Updates** card today. The full Settings menu, with every section and **Test connection**
+for hubs, is being built (lane SET-UI).
+
+**For administrators: the policy file.** One file limits every user on a shared machine.
+HM only reads it, and a user's settings cannot loosen it:
+
+```toml
+self_update = "notify"          # off | notify | stage (default stage)
+channel = "stable"              # the only channel users may use
+check_interval = "12h"
+
+[lock]                          # fixed for every user
+tools.vivado = "/tools/Xilinx/Vivado/2024.1/bin/vivado"
+
+[default]                       # this machine's starting point; a user may change it
+updates.mirrors = ["/lab/mirror"]
+
+[hubs.lab]                      # a machine hub; each user sets their own token
+host = "mapstone-dev.ecs.soton.ac.uk"
+```
+
+It fails closed: a file that cannot be read turns self-update off. Never put a token in it:
+every user can read it, and a `token` in `[hubs.*]` is dropped. Today the update keys and
+the machine hubs are enforced; the other locks and defaults take effect as each setting is
+wired (see "What takes effect today" above). [INSTALL.md](INSTALL.md#shared-lab-machines-the-administrators-policy)
+has every key.
+
+**What can go wrong**
+- **Exit 15 on `config set`:** your administrator's policy locks that key. The message
+  names the policy file.
+- **Your value does not take effect:** a variable in the service's environment hides it.
+  `config get KEY` shows the variable.
+- **A secret stored in a keyring the service cannot reach** (a service started over ssh):
+  `config get KEY` shows it as not reachable. Store it again from the same session, or use
+  a `file:PATH` reference.
+- **A settings file that does not parse** is refused and never overwritten. Fix the file
+  by hand.
+
+## 12. The Linux harness
+
+**Needs:** the Linux harness on the board.
+
+**When:** your board runs the Linux harness (a MicroBlaze V Linux static) instead of the
+bare-metal one. `info` shows it. It adds:
+- an SSH claim, so only your key changes the board;
+- a user microSD with a power-on default design and two OS slots, A and B;
+- Keep on the card ([section 6](#6-program-a-design)), Identify and the live panel mirror
+  ([section 9](#9-the-front-panel));
+- XVC over the board's SSH, and the static's MIG probes ([section 8.2](#82-ilas-fabric-debug-over-xvc)).
+
+[HIL_LINUX.md](HIL_LINUX.md) is the lab's runbook that checks all of this on the lab board,
+step by step, in about 70 minutes.
+
+### 12.1 Claim the board (once)
+
+A Linux harness ships unclaimed: its SSH takes keys only, and it has none. The first key
+it is sent claims it, for good. After that it takes slot changes only over that key's SSH,
+which HM uses for you.
+
+**In the app:** the Board tile's **SSH** line shows "unclaimed", "claimed by you" or
+"claimed by another key". **Claim this board**, then **Claim with my key**, claims it.
+
+**On the command line**
+
+```bash
+harness-manager board claim 192.168.10.101 --key ~/.ssh/id_ed25519.pub   # asks first; behind a hub, needs the lease
+harness-manager board claim-status 192.168.10.101
+harness-manager board ssh 192.168.10.101                    # root on the board, through the hub
+harness-manager board ssh 192.168.10.101 -c 'ls -l /persist'
+```
+
+The claim pins the board's SSH host key in `boards.toml` (`ssh.host_key`). A board that
+answers with another key is refused.
+
+| Situation | Use |
+|---|---|
+| you claimed it another way (pyverify, a runbook) | `board claim TARGET --adopt` pins it |
+| the board was re-provisioned (a new card) | `board claim TARGET --replace-host-key` |
+| you want the ssh command line, not a shell | `board ssh TARGET --print` |
+
+Nothing claims a board by itself.
+
+### 12.2 The user microSD
+
+**In the app:** the Board tile's **Card** line shows the card, its power-on default and
+the OS slots.
+
+| Command | What it does |
+|---|---|
+| `card status TARGET` | present, the store, the power-on default, the OS slots |
+| `card commit TARGET` | the running overlay becomes the power-on default |
+| `card clear TARGET` | no power-on default: the greybox loads at power-on |
+
+**No card: the board boots exactly as it always has**, and every card change is refused.
+Changes need the lease and a confirm (`--yes` skips it). `card commit` exits 3 when the
+running overlay is not in this machine's store: program it from here first.
+
+### 12.3 OS slots A and B
+
+A new OS image goes into the slot that is neither running nor the default. It boots only
+after you commit it and reboot, and a rollback puts the other slot back.
+
+1. See the slots: `harness-manager slot status 192.168.10.101`
+2. Push the image: `harness-manager slot push 192.168.10.101 --bundle ~/release/linux_bundle.json`
+3. Commit it: `harness-manager slot commit 192.168.10.101`
+4. Reboot the board: **Power > Board reboot**, or `harness-manager mcc 192.168.10.101 reboot --wait 240`.
+   Behind a hub, start the MCC share first if it is not running:
+   `harness-manager share start 192.168.10.101 mcc`. A Linux board takes 2 to 4 minutes to
+   come back.
+5. Check it: `slot status` shows the new slot running and default
+
+If it is wrong: `harness-manager slot rollback 192.168.10.101` makes the other slot the
+default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboot).
+
+| Command | What it does |
+|---|---|
+| `slot status TARGET` | running, default, where a push goes, the card job |
+| `slot push TARGET [IMAGE] --bundle PATH` | push into the free slot and read it back (`--static-id ID` instead of `--bundle`) |
+| `slot commit TARGET [--slot A\|B]` | make the pushed slot boot next |
+| `slot rollback TARGET` | make the other slot the default again, and boot it |
+| `slot verify TARGET [--slot A\|B]` | read a slot back off the card |
+
+**What can go wrong**
+- **No free slot:** after a commit and before the reboot, no slot is free. Roll back first,
+  or push with `--rollback-first`.
+- **Exit 14:** the image was provisioned for another static than the board runs.
+- **"this board is claimed by <key>; this operation needs the claiming key":** HM is not
+  using the claiming key. Use the key you claimed with. `board claim` is only for a
+  re-provisioned board.
+- **"Host key changed":** the Board tile shows the pinned and the reported keys, and SSH is
+  refused. If the board was re-provisioned, `board claim TARGET --replace-host-key`.
+- **Exit 12:** the board runs the bare-metal harness, which has no slots or card store.
+- **The DUT does nothing after a reboot or a harness restart:** the partition stays in reset
+  until the first swap. Program a design once.
+
+## 13. Troubleshooting
+
+### 13.1 The board's state
+
+`harness-manager info TARGET` (or the app's header) shows the harness state:
+
+| State | Means | Do |
+|---|---|---|
+| `idle` | ready | nothing |
+| `busy` | another program holds the board, or the harness is finishing a failed swap | close the other program, or wait 30 s |
+| `offline` | nothing answers | check power, the cable, and your PC's address |
+| `wedged` | the harness took the connection and never replied | reboot the board (13.2, step 4) |
+| `rescue` | the harness has no bootable image | install the bundle again (13.2, step 6) |
+
+### 13.2 The recovery ladder
 
 Start at the top. Go down one step only when the step above did not help.
 
-1. **Ask the board.** `harness-manager info TARGET` (or the app's header) shows the
-   harness state and what to do:
-   - `busy`: another program holds the board. Close it, or wait for its job to finish.
-     Right after a failed `deploy`, `busy` means the harness is finishing that swap:
-     wait 30 s, then try again.
-   - `offline`: nothing answers. Check the power, the Ethernet cable, and your PC's
-     address (step 3.5).
-   - `wedged`: the harness took the connection and never replied. Reboot the board
-     (step 4 below).
-   - `rescue`: the harness has no bootable image. Install the bundle again (step 6).
-2. **Load the baseline design.** `harness-manager restore TARGET`. This fixes a DUT
-   design that misbehaves while the harness itself answers.
-3. **Reset the DUT.** `harness-manager reset TARGET`.
-4. **Reboot the board from its SD.** `harness-manager mcc - --serial PORT reboot`, with
-   the Debug USB cable plugged in. This reloads the FPGA from the SD card, as at power-on.
-5. **Power-cycle.** Switch the board off, wait ten seconds, switch it on. With a
-   networked power plug in `boards.toml`: `harness-manager power cycle TARGET`.
-6. **Put the SD back.** Plug in the Debug USB cable, then
-   `harness-manager sd - --volume DRIVE restore ~/mps3-backups/<zip>` and reboot (step 4).
-   Restoring the backup from your first install returns the SD to how it was before
-   Harness Manager touched it. Then install the harness again (section 3, steps 3 and 4).
-7. **Use a card reader.** If the board does not show its SD drive at all, power it off,
-   take out the configuration microSD, and copy your backup onto it with a card reader
-   on your PC: unzip the backup to the card's root. Put it back and power on.
+1. **Ask the board:** `harness-manager info TARGET`.
+2. **Load the baseline:** `harness-manager restore TARGET`. This fixes a misbehaving DUT
+   design while the harness answers.
+3. **Reset the DUT:** `harness-manager reset TARGET`.
+4. **Reboot the board from its SD:** `harness-manager mcc - --serial PORT reboot` with the
+   Debug USB. Behind a hub: `harness-manager share start TARGET mcc` (if the share is not
+   running), then `harness-manager mcc TARGET reboot`.
+5. **Power-cycle:** the switch, off for ten seconds. With a networked plug:
+   `harness-manager power cycle TARGET`.
+6. **Put the SD back:** with the Debug USB,
+   `harness-manager sd - --volume DRIVE restore ~/mps3-backups/<zip>`, then reboot (step 4).
+   Then install the harness again ([section 3.1](#31-a-board-on-your-desk), steps 3 and 4).
+7. **Use a card reader:** if the SD drive does not appear at all, power off, take out the
+   configuration microSD, unzip your backup to its root on your PC, put it back, and power
+   on.
 
-Harness Manager never writes the board controller's firmware (`.ebf` files) and refuses
-the controller commands that erase or reformat (FORMAT, DEL, EEPROM and others), so none
-of these steps changes the board controller itself.
+Harness Manager never writes the MCC's firmware (`.ebf` files) and refuses the MCC commands
+that erase or reformat, so none of these steps changes the board controller.
 
-## 7. Asking for help
+### 13.3 Exit codes
+
+| Code | Name | Means |
+|---|---|---|
+| 0 | OK | done |
+| 1 | FAILED | an internal failure (a bug); the message says so |
+| 2 | USAGE | bad arguments, or an unknown TARGET spelling |
+| 3 | ABSENT | no such board, overlay, console or file |
+| 4 | HELD | someone else holds it; the holder is named |
+| 5 | PORT_BOUND | a local port HM needs is in use |
+| 6 | ACTION_FAILED | the board refused, or the action did not complete |
+| 7 | UNREACHABLE | no route, a timeout, or a refused connection |
+| 8 | ALREADY | already in that state |
+| 12 | UNAVAILABLE | the capability is missing here; the reason says what it needs |
+| 13 | NOTHING_ON_TARGET | the link is fine but nothing answered (no debug port) |
+| 14 | INCOMPATIBLE | identity mismatch (built for another shell or static) |
+| 15 | REFUSED | a safety rule, a lock, or no confirmation |
+
+### 13.4 Common problems
+
+| You see | Do |
+|---|---|
+| a greyed-out button | read the reason beside it; `info` lists what each capability needs |
+| "needs the Debug USB cable" | plug it in and use `--serial` and `--volume`, or reopen the board in the app |
+| "needs harness firmware with '…'" | the harness is older than the feature; a newer harness adds it |
+| "harness-manager-daemon is not answering" | `harness-manager daemon status`; `daemon stop`, then any command starts it again |
+| `power show` or `power cycle` says the service does not pass the power meter | close the board in the app, then run it with `HARNESS_MANAGER_NO_DAEMON=1`, or use the app's **Power** section |
+| exit 4 on debug right after another session | wait a few seconds and retry ([section 8.1](#81-the-dut-cpu-openocd-and-gdb)) |
+| the lease was taken | see [section 4](#4-leases-share-a-lab-board); do not drive the board until it is yours |
+| "this build has no pinned update-signing keys" | signed releases are not published yet ([section 10](#10-updates-the-harness-and-the-app)) |
+| an SD install over USB seems stuck | it can take 5 minutes; do not retry mid-write |
+| a reboot through the hub did nothing | something else was reading the MCC console (`tty_00`) at the same time. Close every other reader of the `mcc` console, then reboot again |
+
+### 13.5 Asking for help
 
 Send SoC Labs:
 - the output of `harness-manager --json info TARGET`;
@@ -259,3 +1166,63 @@ Send SoC Labs:
 - the service log, `~/.config/harness-manager/daemon.log`
   (`%USERPROFILE%\.config\harness-manager\daemon.log` on Windows);
 - what you ran, and what it printed.
+
+The app's **Activity** section lists every command it ran and its result.
+
+---
+
+## A. Command reference
+
+`TARGET` is the board's address (`192.168.10.101[:6900]`), or `-` for a USB-only board
+with `--serial` and `--volume`. Every verb takes `--json` and `--tsv`.
+`harness-manager VERB --help` has the options.
+
+| Verb | What it does | Section |
+|---|---|---|
+| `version`, `packs` | the version; the installed board packs | 1 |
+| `app`, `ui`, `daemon start\|stop\|status`, `help` | the app, the browser UI, the service, the help | 2 |
+| `probe`, `info`, `telemetry` | find boards; identity, health, capabilities; every reading | 2, 3 |
+| `attach`, `detach` | hold the board's session lock in the foreground, and let it go | none |
+| `hub list\|add\|token\|test\|targets\|adopt\|remove` | named hubs | 3.2 |
+| `share list\|start` | the hub's serial shares for a board (there is no stop) | 3.2 |
+| `lease show\|acquire\|release\|request\|requests\|respond\|force\|leave\|dismiss` | the hub lease | 4 |
+| `console`, `pty`, `baud` | consoles, `screen` devices, rates | 5 |
+| `overlays`, `program`, `restore` | designs for the partition | 6 |
+| `reset`, `clock` | reset the DUT; its clock | 6 |
+| `xdc info\|rm-kit\|board` | constraint kits | 7.1 |
+| `kit info\|fetch\|verify\|list\|import\|guide\|script\|build\|check\|pack` | DUT build kits | 7.2 |
+| `debug up\|down\|status\|detect` | OpenOCD for the DUT CPU | 8.1 |
+| `xvc open\|close\|status\|tcl\|ltx` | fabric debug over XVC | 8.2 |
+| `panel show\|mirror`, `identify` | the front panel | 9 |
+| `harness list\|show\|fetch\|install\|pin\|unpin\|history\|rollback\|mirror` | harness versions | 10.1 |
+| `update check\|harness\|app\|status\|rollback` | the app's self-update (and the older harness spelling) | 10.2 |
+| `config list\|get\|set\|unset\|set-secret\|unset-secret\|path\|test` | settings | 11 |
+| `board claim\|claim-status\|ssh` | the Linux harness's SSH claim | 12.1 |
+| `card status\|commit\|clear` | the user microSD | 12.2 |
+| `slot status\|push\|commit\|rollback\|verify` | OS slots A and B | 12.3 |
+| `mcc temp\|osc\|reboot\|cmd`, `sd backup\|install\|restore` | the board controller and its configuration SD | 3.1, 13 |
+| `power show\|cycle` | the power meter and a cold power cycle | 3.1 |
+| `lab TARGET link\|display\|macgen\|dutrx` | lab tools on the shell | none |
+
+## B. Where things are
+
+| What | Linux and macOS | Windows |
+|---|---|---|
+| The command | `~/.local/bin/harness-manager` | `%LOCALAPPDATA%\harness-manager\bin` |
+| The program and self-updated versions | `~/.local/share/harness-manager/` | `%LOCALAPPDATA%\harness-manager\` |
+| Settings, `boards.toml`, SD backups, logs, caches | `~/.config/harness-manager` | `%USERPROFILE%\.config\harness-manager` |
+| Console devices for `screen` | `/tmp/harness-manager-$USER/<board>/` | none (use `--export`) |
+
+## C. More documents
+
+| Document | For |
+|---|---|
+| [INSTALL.md](INSTALL.md) | every install option, the install root, the administrator's policy |
+| [HUB_MODE.md](HUB_MODE.md) | hubs over SSH and REST, tokens, the data plane |
+| [LEASE_REQUESTS.md](LEASE_REQUESTS.md) | the lease request and force rules |
+| [XDC_EXPORT.md](XDC_EXPORT.md) | the pin model, the design format, the kits and their checks |
+| [HIL_LINUX.md](HIL_LINUX.md) | the Linux harness in the lab: the runbook |
+| [API.md](API.md) | the local service's API, for scripts and other front ends |
+| [RELEASING.md](RELEASING.md), [KEYS.md](KEYS.md) | how releases are made and signed |
+| [design/README.md](design/README.md) | the design notes: XVC, build kits, the front panel, harness versions, self-update |
+| [CHANGELOG.md](../CHANGELOG.md) | what changed |
