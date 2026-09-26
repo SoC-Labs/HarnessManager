@@ -118,6 +118,17 @@ owners.
   every share on the board). The lease is heartbeated while the board is open.
 - DUT console input is paced (20 ms a byte on UART0/UART1), because the nanoSoC UART has
   no receive FIFO: a paste no longer arrives garbled.
+- The Linux harness's OS slots: `harness-manager slot status|push|commit|rollback|verify`.
+  A push goes into the slot that is neither running nor the default and is read back by
+  the board; it boots only after `slot commit` and a reboot, and `slot rollback` puts the
+  previous slot back. Once the board's SSH is claimed, the changes go through it. A harness
+  update carrying an OS image installs over Ethernet only when the image is for the static
+  the board runs; otherwise it needs the Debug USB or the hub. The downloaded image is
+  checked against the frames its `linux_bundle.json` declared before it is sent.
+- The board's user microSD: `harness-manager card status|commit|clear` shows what the board
+  loads at power-on, makes the running overlay that default, or clears it. With no card the
+  board boots exactly as it always has, and every change is refused. The Board tile shows a
+  Card line.
 
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key

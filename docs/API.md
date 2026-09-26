@@ -375,7 +375,7 @@ docs/design/HARNESS_DISTRIBUTION.md is the design (§5, §8.2); david's decision
 
 - **A row** (`releases[]`) is `{version, channels, channel, status, released_at, static_id, usercode, impl, fw_sha, harness, ver32, proto, vivado, rekey_in_channel, notes, notes_url, size, cached, components, marks, running, installed, pinned, verdict, verdict_text, why, needs, reasons, warnings, mode, rekey, consent_phrase, doors, touches_board, fingerprint, changes}`.
   - `verdict`: `fits`, `re-key`, `needs-door` (`verdict_text` "needs Debug USB or hub") or `incompatible`; `""` without a board. `why` is the reason in one sentence; `reasons` are the plan's blockers.
-  - `needs`: any of `debug-usb`, `linux-slot`, `newer-app`, `consent`, `hub-lease`.
+  - `needs`: any of `debug-usb`, `linux-slot`, `debug-usb-or-hub` (an OS image provisioned for another static: the Ethernet door carries only an image for the running static; LINUX-SLOTS), `newer-app`, `consent`, `hub-lease`.
   - `marks`: any of `running` (the board reports the release's wire identity, the firmware sha first), `installed` (this HM's last install on the board names it), `written` (written to the SD, not running), `pinned`, `current`, `offered` (what an install with no version gives), `past-pin`.
   - `changes`: what installing it changes: `static` (a re-key: every overlay and DUT RM keyed to the running static stops loading), `firmware`, `impl`, `proto`, `features`, `overlays`, `kit` (the kit's static and Vivado release), `sd_files`, `os_image`, and `summary` lines.
 - **`board`**: `{board_id, pack, identity_known, running, running_release, installed, pinned, lease: {required, mine, holder, target, reason}, doors}`.

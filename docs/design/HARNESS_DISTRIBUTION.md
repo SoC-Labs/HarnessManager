@@ -505,6 +505,16 @@ A KR260 pack brings its own doors. The core never learns what an MCC is. The pla
 | 8 rule 1 | **OK.** HM rolls back before a second push |
 | 9 texts vs codes | **Add a stable `code`** beside `err`. HM matches the code and shows `err` |
 
+**Built (lane LINUX-SLOTS, 2026-09-26), on these answers.** `harness_manager_mps3/os_slots.py`
+(`session.os_slots`, CCR T7-2: the protocol moved to `core.pack`), `card.py` (D13,
+`session.card`), `services/slots.py`, `harness-manager slot|card`, `GET /boards/{bid}/card`
+and `/slots`, and the OS frame check in `bundle.py`. Until the Linux lane freezes the verb:
+item 5 is detected by `version.impl == "linux"` (a `slot` feature is honoured if reported);
+item 6's slot records are assumed (a slot without one cannot be rolled back to once another
+runs: the board refuses, HM says why); item 7's claim is read from `identify.ssh.claimed`,
+or, through the hub (no UDP), from a no-op guarded `rollback` whose lock refusal is the
+answer; item 9 matches the `err` texts (no `code` yet). Rescue provisioning (L3) is not built.
+
 ## 10. Decisions for david
 
 Recommendation first in each. D1 and D5 are **the same decisions as OTA's D1 and D2**; take them once for both.
@@ -561,7 +571,7 @@ Recommendation first in each. D1 and D5 are **the same decisions as OTA's D1 and
 | H9 | UI: the Harness versions card | new `web/static/js/sections/harness.js`; CCR `update.js`, `api.js` (coordinate with OTA-U) | 5 | H8 |
 | H10 | MPS3 `hub_sd` door: lease-held check, upload, `program --method sd --force`, completion by sha, single-flight, backup = previous `.bit`, board + holder consent | new `harness_manager_mps3/hub_sd.py`; CCR `pack.py`, `planner.py` (`BoardView.lease`, `via`) | 8 | D4a, FH-a |
 | H11 | SD A/B by pointer in the local SD door (+ revert), and D6 auto-revert in the executor | CCR: `harness_manager_mps3/sd.py` (T3), `executor.py` | 5 | D3a, 1 board check |
-| H12 | Linux `os_slots` adapter over `pyverify.slot` (status, push, commit, verify, rollback; SSH tunnel when claimed), the **rescue provisioning** of a first install, and the OS-slot frame check | new `harness_manager_mps3/os_slots.py`; CCR `core/pack.py` (T7-2), `bundle.py:406-411` | 8 | L2, L3 |
+| H12 | Linux `os_slots` adapter over `pyverify.slot` (status, push, commit, verify, rollback; SSH tunnel when claimed), the **rescue provisioning** of a first install, and the OS-slot frame check. **Built by LINUX-SLOTS except rescue provisioning (L3)** | new `harness_manager_mps3/os_slots.py`; CCR `core/pack.py` (T7-2), `bundle.py:406-411` | 8 | L2, L3 |
 | H13 | The release tool's `harness` front-end: ingest the platform bundle; the harness refusals; the AAA split; smoke test = the spike on a VirtualMps3; promote and withdraw | `scripts/release/harness.py` (inside OTA-R's tree), from `tests/spikes/harness_dist_publish.py` | 6 | OTA-R, R1 |
 | | **Total** | | **≈ 53 h (≈ 7 days)** | board checks: A/B pointer 10 min, hub door 20 min, Linux rescue at B2 |
 
