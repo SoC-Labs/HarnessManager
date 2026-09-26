@@ -708,4 +708,4 @@ def test_connection(req: Any) -> dict[str, Any]:
             raise UsageError("which hub? `harness-manager config test hubs NAME`",
                              hint="`harness-manager hub list` shows the hubs")
         hub = req.name
-    return test_hub(hub, resolver=resolver).view()
+    return test_hub(hub, resolver=resolver, progress=req.progress).view()

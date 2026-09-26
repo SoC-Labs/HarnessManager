@@ -238,7 +238,9 @@ class Setting:
                 "secret": self.secret, "apply": self.apply, "owner": self.owner,
                 "env": self.env, "env_rank": self.env_rank, "choices": list(self.choices),
                 "readonly": self.readonly, "lockable": self.lockable, "ui": self.ui,
-                "ceiling": self.ceiling, "advanced": self.advanced, "pack": self.pack}
+                "ceiling": self.ceiling, "advanced": self.advanced, "pack": self.pack,
+                # SET-UI: a number's range, when its check says one (``rows._between``)
+                "bounds": list(getattr(self.check, "bounds", ())) or None}
 
 
 def coerce(spec: Setting, raw: Any, *, from_env: bool = False) -> Any:

@@ -82,7 +82,7 @@ def test_the_mock_never_returns_a_secret(mock):
 
 def test_the_mocks_test_route_and_update_settings_event(mock):
     client, _ = mock
-    r = client.post("/api/v1/settings/test", json={"section": "tools"}, headers=AUTH)
+    r = client.post("/api/v1/settings/test", json={"section": "consoles"}, headers=AUTH)
     assert r.status_code == 200 and r.json()["testable"] is False
     with client.websocket_connect(f"/api/v1/events?token={TOKEN}&topics=settings.*") as ws:
         r = client.put("/api/v1/update/settings", json={"auto": "notify"}, headers=AUTH)

@@ -163,7 +163,7 @@ def test_path_names_the_files_and_the_secret_backend(capsys, _policy):
 
 
 def test_test_without_a_tester_exits_12(capsys):
-    rc, _, err = run(capsys, "config", "test", "tools")
+    rc, _, err = run(capsys, "config", "test", "consoles")      # tools: SET-UI Detect
     assert rc == ExitCode.UNAVAILABLE and "not testable yet" in err
 
 

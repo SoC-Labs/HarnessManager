@@ -76,6 +76,13 @@ class Report:
     transport: str
     steps: list[Step] = field(default_factory=list)
     targets: list[dict[str, Any]] = field(default_factory=list)
+    #: SET-UI: told each step as it starts (``(step, index, of)``), so a job shows progress
+    progress: Callable[[str, int, int], None] | None = field(default=None, repr=False,
+                                                              compare=False)
+
+    def starting(self, step: str) -> None:
+        if self.progress is not None:
+            self.progress(step, STEPS.index(step), len(STEPS))
 
     @property
     def ok(self) -> bool:
@@ -117,6 +124,7 @@ def _ms(t0: float) -> int:
 
 
 def _run_step(report: Report, step: str, fn: Callable[[], tuple[str, Any]]) -> Any:
+    report.starting(step)
     t0 = time.monotonic()
     try:
         detail, value = fn()
@@ -165,7 +173,8 @@ def test_hub(hub: Hub | str, *, resolver: Resolver | None = None,
              targets: Sequence[str] | None = None, token: str | None = None,
              run: Runner | None = None, ssh_timeout_s: float = SSH_TIMEOUT_S,
              rest_timeout_s: float = REST_TIMEOUT_S,
-             root: Path | str | None = None, env: Mapping[str, str] | None = None) -> Report:
+             root: Path | str | None = None, env: Mapping[str, str] | None = None,
+             progress: Callable[[str, int, int], None] | None = None) -> Report:
     """Test connection for a hub, by name or as a ``Hub`` (an unsaved one: ``token`` then
     stands in for its stored token). ``targets``: the ones to look for (default: those of
     the boards that use the hub). Never raises for a hub that fails: the report says where."""
@@ -180,8 +189,9 @@ def test_hub(hub: Hub | str, *, resolver: Resolver | None = None,
     wanted = list(targets) if targets is not None else wanted_targets(hub, r)
     bad = hub.config_problems()
     if hub.transport == "rest":
-        return _test_rest(hub, r, wanted, bad, token=token, timeout_s=rest_timeout_s)
-    return _test_ssh(hub, wanted, bad, run=run, timeout_s=ssh_timeout_s)
+        return _test_rest(hub, r, wanted, bad, token=token, timeout_s=rest_timeout_s,
+                          progress=progress)
+    return _test_ssh(hub, wanted, bad, run=run, timeout_s=ssh_timeout_s, progress=progress)
 
 
 # --- REST ----------------------------------------------------------------------------------------
@@ -202,10 +212,11 @@ def rest_config(hub: Hub, *, timeout_s: float | None = None, target: str | None 
 
 
 def _test_rest(hub: Hub, resolver: Resolver, wanted: Sequence[str], problems: list[str], *,
-               token: str | None, timeout_s: float) -> Report:
+               token: str | None, timeout_s: float,
+               progress: Callable[[str, int, int], None] | None = None) -> Report:
     from harness_manager.transports.hub_rest import Credential, RestHubClient
 
-    report = Report(hub.name, "rest")
+    report = Report(hub.name, "rest", progress=progress)
     root = resolver.files.root if resolver.files is not None else None
     state: dict[str, Any] = {}
 
@@ -325,8 +336,9 @@ def _last(text: str) -> str:
 
 
 def _test_ssh(hub: Hub, wanted: Sequence[str], problems: list[str], *, run: Runner | None,
-              timeout_s: float) -> Report:
-    report = Report(hub.name, "ssh")
+              timeout_s: float, progress: Callable[[str, int, int], None] | None = None,
+              ) -> Report:
+    report = Report(hub.name, "ssh", progress=progress)
     host = hub.host
     group = hub.group or None
     if problems or not host or any(c.isspace() for c in host) or host.startswith("-"):
@@ -340,6 +352,7 @@ def _test_ssh(hub: Hub, wanted: Sequence[str], problems: list[str], *, run: Runn
     argv = local_argv(group, listing, markers=True) if hub.local else \
         ssh_argv(host, group, listing, jump=hub.jump, markers=True)
     run = run or _default_run(timeout_s)
+    report.starting("reach")                       # one round trip: reach, auth, group, targets
     t0 = time.monotonic()
     try:
         res = run(argv)
