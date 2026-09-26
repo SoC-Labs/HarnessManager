@@ -12,6 +12,7 @@ and `make check` does not run it (only `tests/unit/test_clcd_mock.py`, which is 
 | Front panel (CLCD) | CLCD-HM | Panel as a read-mostly second face of HM, Linux harness only; shared tokens. | [CLCD_ALIGNMENT.md](CLCD_ALIGNMENT.md) ([mock-ups](clcd/)) |
 | Harness versions from the web | HARNESS-DIST | Publish with OTA's release tool; add a Harness versions catalogue; A/B config SD. | [HARNESS_DISTRIBUTION.md](HARNESS_DISTRIBUTION.md) |
 | HM self-update | OTA | Finish T7: lead-run `make release`, daemon restart, rollback to the installed version. | [HM_SELF_UPDATE.md](HM_SELF_UPDATE.md) |
+| Settings menu | SETTINGS | One schema + resolver (lock > env > user > machine > pack > default); hubs first-class with Test connection; keyring secrets with a 0600 fallback. Built by SET-CORE, SET-PACK, SET-HUBS and SET-API. | [SETTINGS.md](SETTINGS.md) ([spike evidence](../assessment/settings_spike_2026-09-25/spike_output.txt)) |
 
 Decisions on these designs are tracked in the lead's checkpoint page:
 <https://claude.ai/artifact/GsS4um7qyJLCupPfTDet8r>.

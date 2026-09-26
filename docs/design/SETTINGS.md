@@ -3,6 +3,7 @@
 **Lane:** SETTINGS (design + one board-free spike). **Date:** 2026-09-25. **Base:** HM `main` c5e1f79.
 **For:** david, who needs to decide §10. Nothing here is wired into the app.
 **Spike code:** `tests/spikes/settings_*.py` (never collected). **Evidence:** `docs/assessment/settings_spike_2026-09-25/spike_output.txt` (44/44 PASS).
+**On main (2026-09-26):** david decided §10 (D1-D4 here; the code cites them as S1-S4), and SET-CORE, SET-PACK, SET-HUBS and SET-API built it: `harness-manager config`, `harness-manager hub` and the `/settings` routes are its views; the Settings menu (SET-UI) is not on main yet. This file is the design as written on 2026-09-25, so "nothing here is wired" above is that day's state. The spike code stays on branch `team/settings-design`; only its evidence is on main.
 
 Sources are cited as `path:line` in this repo, unless marked otherwise. `plat:` means the mps3-nanosoc-platform checkout, and `lx:` means its `feat/linux-harness` worktree.
 
