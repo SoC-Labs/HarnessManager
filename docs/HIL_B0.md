@@ -223,6 +223,8 @@ Stop at 09:50 whatever is left: W4 (restore greybox) must run before the close-o
 
 ## 6. At the end of B1 v4: Harness Manager on the Linux harness (~10 min, ~10:50)
 
+After the cutover, the Linux harness has its own runbook: [HIL_LINUX.md](HIL_LINUX.md).
+
 Only if B1 v4 reached step (e) (SSH to the board). This runs on the **Linux lead's lease**: do
 not take or request a lease. The board runs the P-mint static `0x61BC6789` with harnessd.
 
