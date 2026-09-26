@@ -181,7 +181,13 @@ class Resolver:
         if spec.env and self.env.get(spec.env, "").strip():
             env_layer = [("env", f"${spec.env}", self.env[spec.env], True)]
         user_layer = []
-        if user_has:
+        if user_has and spec.owner == "dev":
+            # SET-WIRE: a developer seam is its variable only (SETTINGS.md §2), and nothing
+            # reads it from a file, so a file value is shown as ignored, never as in force.
+            problems.append(f"{self.layer.origin.get(key, 'settings.toml')}: {key} is a "
+                            f"developer seam ({_seam(spec)}); ignored")
+            user_has = False
+        elif user_has:
             user_layer.append(("user", self.layer.origin.get(key, "settings.toml"),
                                self.layer.values[key], False))
         parts = split_key(key)
@@ -286,6 +292,9 @@ class Resolver:
             raise UsageError(f"{key} is a secret: `harness-manager config set-secret {key}`")
         if spec.readonly:
             raise UsageError(f"{key} is not set here: {spec.doc}")
+        if spec.owner == "dev":
+            raise UsageError(f"{key} is a developer seam, not a setting: {_seam(spec)}",
+                             hint="the settings file would hold it, and nothing would read it")
         found, _, where = self.policy.lookup(self.policy.lock, key, spec.key)
         if found and spec.lockable and not spec.ceiling:     # a ceiling is a cap, not a lock
             raise RefusedError(f"{key} is set by the administrator's policy "
@@ -371,6 +380,12 @@ class Resolver:
     def _named(self, pattern: list[str]) -> list[str]:
         """The user's keys that fill a pattern's ``*`` parts, sorted."""
         return sorted(k for k in self.layer.values if matches(pattern, split_key(k)))
+
+
+def _seam(spec: Setting) -> str:
+    """How a developer seam is set: its variable, else the pack's kwargs."""
+    return f"set ${spec.env}" if spec.env else \
+        "the pack's own value, set with the service's --pack-overrides"
 
 
 def _lowest(spec: Setting, a: Any, b: Any, problems: list[str], path: str) -> Any:

@@ -562,6 +562,32 @@ def test_negative_twin_a_bad_file_value_is_skipped_and_logged_once(monkeypatch, 
     assert len(said) == 1 and "1024..65535; ignored" in said[0].getMessage()
 
 
+def test_a_developer_seam_is_its_variable_only(monkeypatch, capsys):
+    """``owner="dev"`` rows stay variables (SETTINGS.md §2): ``config set`` refuses them, so
+    the settings file never holds a value nothing reads."""
+    from harness_manager.cli.main import main
+    from harness_manager.settings import Resolver
+
+    rc = main(["config", "set", "mps3.identify.port", "16899"])
+    err = capsys.readouterr().err
+    assert rc == 2 and "$HARNESS_MANAGER_MPS3_IDENTIFY_PORT" in err
+    assert not (state() / "settings.toml").exists()
+    rc = main(["config", "set", "mps3.rbb_port", "7000"])
+    assert rc == 2 and "--pack-overrides" in capsys.readouterr().err
+    got = Resolver(env={}, user={"dev.debug": True}).resolve("dev.debug")
+    assert (got.value, got.source) == (False, "default") and "developer seam" in got.problems[0]
+
+
+def test_negative_twin_a_setting_is_set_and_the_seams_variable_still_works(monkeypatch, capsys):
+    from harness_manager.cli.main import main
+    from harness_manager.settings import Resolver
+
+    assert main(["config", "set", "tools.openocd", "/opt/openocd"]) == 0
+    assert "openocd" in (state() / "settings.toml").read_text()
+    got = Resolver(env={"HARNESS_MANAGER_DEBUG": "1"}, user={}).resolve("dev.debug")
+    assert (got.value, got.source) == (True, "env")
+
+
 def test_board_and_hub_rows_are_not_read_here():
     with pytest.raises(UsageError, match="per board"):
         runtime.value("boards.x.name")
