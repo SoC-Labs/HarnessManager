@@ -149,6 +149,18 @@ owners.
   fixed, a rate selector where it can change, and Export to TCP.
 - Power, Update, Clocks and SD card pages; a lease and tunnel chip for boards behind a
   hub.
+- Settings (the gear in the rail): one dialog with sections for General, Hubs, Boards,
+  Tools, Updates, Harness & kits, Debug, Consoles and Advanced. Each row says where its
+  value comes from (default, yours, lab default, admin, or an environment variable that
+  overrides it), saves when you change it, and has Reset. A setting the admin policy
+  locks is disabled and names the policy file. Secrets (the GitHub token, a hub's token)
+  show only whether they are set and where, never the value. Hubs: add an SSH or REST
+  hub, Test connection step by step (config, reach, auth, group, targets) with the fix
+  for the step that failed, Add this board from what the hub offers, and "Make this a
+  hub" for a hub written inline in `boards.toml`. Tools: Detect finds OpenOCD, Vivado,
+  hw_server and uv and runs only their version probe. A change that needs the service
+  restarted shows a banner until it is; one that applies at the next board open offers
+  Reopen board.
 
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
