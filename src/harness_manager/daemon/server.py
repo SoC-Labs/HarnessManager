@@ -26,6 +26,17 @@ Lane OTA-D (app self-update, additive):
   without binding anything or writing the state dir; exit 0 and one JSON line when they all
   load. The apply step runs it on the new version before it drains.
 - The periodic update checker (``update_checker.py``) starts once the server answers.
+
+Lane SET-WIRE (settings):
+
+- The service is the service for its ``--state-dir``: ``settings.files.use_config_dir`` makes
+  every reader of the state dir (``boards.toml``, ``settings.toml``, the tunnel dir, the
+  statics, the leases) use it, so a ``--state-dir`` or ``--demo`` service never reads the
+  user's own files. It is put back when the service stops.
+- ``--port``, ``--listen`` and ``--log-level``, when not given, come from the settings
+  ``advanced.port``, ``advanced.listen`` and ``advanced.log_level`` (``restart`` rows: read
+  as the service starts). A flag wins, except over the administrator's ``[lock]``, which
+  refuses a different value (15).
 """
 
 from __future__ import annotations
@@ -51,6 +62,7 @@ from harness_manager.core.errors import (
     ActionFailedError,
     HarnessError,
     PortBoundError,
+    RefusedError,
     UsageError,
 )
 
@@ -324,25 +336,61 @@ def self_test() -> int:
     return 0
 
 
-def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
-               pack_overrides: dict[str, dict] | None = None, log_level: str = "info",
+#: A start flag -> its setting (``restart`` rows, lane SET-WIRE).
+START_SETTINGS = {"port": "advanced.port", "listen": "advanced.listen",
+                  "log_level": "advanced.log_level"}
+START_DEFAULTS = {"port": 0, "listen": "127.0.0.1", "log_level": "info"}
+
+
+def start_setting(name: str, given: Any, state_dir: Path) -> Any:
+    """``--port``/``--listen``/``--log-level``: the flag when given, else the setting in
+    ``state_dir`` (``advanced.*``), else the built-in default. A flag that differs from the
+    administrator's ``[lock]`` is refused (15); a settings file that cannot be read never
+    stops the service (the default is used, and the log says why)."""
+    key = START_SETTINGS[name]
+    try:
+        from harness_manager.settings import runtime
+
+        r = runtime.resolved(key, state_dir=state_dir)
+    except Exception as exc:  # noqa: BLE001 - a bad settings file must never stop the service
+        log.warning("%s could not be read (%s); %s", key, exc,
+                    "the flag is used" if given is not None else "the default is used")
+        return START_DEFAULTS[name] if given is None else given
+    if given is None:
+        return r.value
+    if r.locked and given != r.value:
+        flag = "--" + name.replace("_", "-")
+        raise RefusedError(f"{flag} {given} is not allowed: the administrator's policy "
+                           f"{r.where} sets {key} to {r.value!r}",
+                           hint=f"leave {flag} out, or ask your administrator")
+    return given
+
+
+def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None = None,
+               pack_overrides: dict[str, dict] | None = None, log_level: str | None = None,
                demo: bool = False, resume: dict[str, Any] | None = None) -> int:
     """Serve until stopped. Returns 0; raises ``HarnessError`` if it cannot start.
 
+    ``port``, ``listen``, ``log_level``: None reads the settings (``start_setting``).
     ``resume`` (lane OTA-D): a resume file's content. Its port, listen address, token, pack
     overrides and demo flag win over the arguments."""
     import uvicorn
 
     from harness_manager.core.services import EngineConfig
     from harness_manager.engine import Engine
+    from harness_manager.settings import runtime
+    from harness_manager.settings.files import use_config_dir
 
     from .app import create_app
 
     state_dir = Path(state_dir)
     if resume is not None:
-        port, listen = int(resume["port"]), str(resume.get("listen") or listen)
+        port, listen = int(resume["port"]), str(resume.get("listen") or listen or "") or None
         pack_overrides = resume.get("pack_overrides") or pack_overrides
         demo = bool(resume.get("demo", demo))
+    port = start_setting("port", port, state_dir)
+    listen = start_setting("listen", listen, state_dir)
+    log_level = start_setting("log_level", log_level, state_dir)
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -354,6 +402,12 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
         raise _state_error("write its lock file in", state_dir, exc) from None
     engine: Any = None
     wrote = False
+    # SET-WIRE (SETTINGS.md §12.6): this process is the service for state_dir, so every
+    # reader of the state dir (boards.toml, settings.toml, tunnels, statics, leases) uses
+    # it, not $HARNESS_MANAGER_STATE_DIR's or ~/.config's; restart rows keep these files.
+    outer_dir = use_config_dir(state_dir)
+    runtime.refresh()
+    runtime.prime(state_dir)
     try:
         sock = bind_socket(listen, port)
         if not is_loopback(listen):
@@ -429,6 +483,8 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
         if wrote:
             remove_info(state_dir, os.getpid())
         instance.release()
+        use_config_dir(outer_dir)
+        runtime.refresh()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -436,11 +492,14 @@ def _parser() -> argparse.ArgumentParser:
                                 description="SoC Labs Harness Manager local engine service")
     p.add_argument("--state-dir", default=None, metavar="DIR",
                    help="state directory (default: $HARNESS_MANAGER_STATE_DIR or ~/.config/harness-manager)")
-    p.add_argument("--port", type=int, default=0, metavar="N", help="TCP port (0: any free port)")
-    p.add_argument("--listen", default="127.0.0.1", metavar="ADDR",
-                   help="address to bind (default 127.0.0.1; anything else prints a warning)")
-    p.add_argument("--log-level", default="info",
-                   choices=("critical", "error", "warning", "info", "debug"))
+    p.add_argument("--port", type=int, default=None, metavar="N",
+                   help="TCP port (default: the setting advanced.port; 0: any free port)")
+    p.add_argument("--listen", default=None, metavar="ADDR",
+                   help="address to bind (default: the setting advanced.listen, 127.0.0.1; "
+                        "anything off loopback prints a warning)")
+    p.add_argument("--log-level", default=None,
+                   choices=("critical", "error", "warning", "info", "debug"),
+                   help="default: the setting advanced.log_level (info)")
     p.add_argument("--demo", action="store_true",
                    help="serve scripted demo boards (no hardware); use its own --state-dir")
     p.add_argument("--resume", default=None, metavar="FILE",
@@ -457,7 +516,14 @@ def main(argv: list[str] | None = None) -> int:
     from harness_manager.cli.output import error_line
 
     args = _parser().parse_args(argv)
-    logging.basicConfig(level=getattr(logging, args.log_level.upper()),
+    state_dir = Path(args.state_dir) if args.state_dir else default_state_dir()
+    try:
+        level = "info" if args.self_test else start_setting("log_level", args.log_level,
+                                                            state_dir)
+    except HarnessError as exc:
+        sys.stderr.write(error_line(exc).replace("harness-manager:", "harness-manager-daemon:", 1) + "\n")
+        return int(exc.code)
+    logging.basicConfig(level=getattr(logging, str(level).upper()),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.self_test:
         try:
@@ -474,7 +540,6 @@ def main(argv: list[str] | None = None) -> int:
                 raise UsageError(f"--pack-overrides is not JSON: {exc}") from exc
             if not isinstance(overrides, dict):
                 raise UsageError("--pack-overrides must be a JSON object")
-        state_dir = Path(args.state_dir) if args.state_dir else default_state_dir()
         resume = None
         if args.resume:
             from .update_apply import read_resume
@@ -482,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
             resume = read_resume(Path(args.resume))
             Path(args.resume).unlink(missing_ok=True)       # it holds the token: read once
         return run_daemon(state_dir, port=args.port, listen=args.listen,
-                          pack_overrides=overrides, log_level=args.log_level, demo=args.demo,
+                          pack_overrides=overrides, log_level=level, demo=args.demo,
                           resume=resume)
     except HarnessError as exc:
         sys.stderr.write(error_line(exc).replace("harness-manager:", "harness-manager-daemon:", 1) + "\n")

@@ -20,6 +20,11 @@
 - **It never applies anything.** Applying is ``POST /update/app/apply``, on a click.
 
 ``HARNESS_MANAGER_UPDATE_FIRST_CHECK_S`` moves the first check (tests, the spike).
+
+**A settings change applies at once** (lane SET-WIRE; SETTINGS.md §8): once started, the
+checker follows ``settings.changed``, and a change to a key it reads (``WAKE_KEYS``: the
+channel, the mode, the interval, the source, the mirrors, the token) checks now under the
+new settings instead of at the next tick, at most once per ``WAKE_MIN_S``.
 """
 
 from __future__ import annotations
@@ -52,6 +57,11 @@ MIN_BACKOFF_S = 300.0
 MAX_BACKOFF_S = 24 * 3600.0
 DEFERRED_RETRY_S = 600.0
 STAGE_KIND = "update_stage"
+#: The settings a check reads: a change to one checks again at once.
+WAKE_KEYS = frozenset({"updates.channel", "updates.auto", "updates.check_interval",
+                       "updates.source", "updates.mirrors", "updates.github_token"})
+#: The least time between two checks a settings change starts (s).
+WAKE_MIN_S = 5.0
 
 
 def first_check_s() -> float:
@@ -96,13 +106,17 @@ class UpdateChecker:
         self.next_in_s: float | None = None
         self._offline_logged = False
         self._stop = threading.Event()
+        self._kick = threading.Event()       # stop, or a settings change: look again now
         self._thread: threading.Thread | None = None
+        self._unsub: Callable[[], None] | None = None
         self._mu = threading.RLock()        # a job may run its stage on this thread
 
     # -- the timer --
 
     def start(self) -> UpdateChecker:
         if self._thread is None:
+            if self.bus is not None and hasattr(self.bus, "subscribe"):
+                self._unsub = self.bus.subscribe("settings.changed", self._on_settings)
             self._thread = threading.Thread(target=self._loop, daemon=True,
                                             name="harness-manager-daemon-update-check")
             self._thread.start()
@@ -110,10 +124,29 @@ class UpdateChecker:
 
     def stop(self) -> None:
         self._stop.set()
+        self._kick.set()
+        if self._unsub is not None:
+            self._unsub()
+            self._unsub = None
+
+    def _on_settings(self, event: Any) -> None:
+        keys = set((getattr(event, "data", None) or {}).get("keys") or ())
+        if keys & WAKE_KEYS:
+            self._kick.set()
 
     def _loop(self) -> None:
         delay = self.first_delay_s
-        while not self._stop.wait(delay):
+        last = 0.0
+        while True:
+            self._kick.wait(delay)
+            if self._stop.is_set():
+                return
+            if self._kick.is_set():              # a settings change: not too often
+                self._kick.clear()
+                wait = WAKE_MIN_S - (time.monotonic() - last)
+                if wait > 0 and self._stop.wait(wait):
+                    return
+            last = time.monotonic()
             rec = self.tick()
             delay = self.delay_after(rec)
             self.next_in_s = delay

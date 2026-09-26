@@ -33,7 +33,6 @@ from harness_manager.core.session import pid_alive, storage_error
 
 from . import logfile
 from .state import (
-    LOOPBACK,
     DaemonInfo,
     daemon_json_path,
     daemon_log_path,
@@ -145,7 +144,28 @@ def daemon_python(*, windows: bool = os.name == "nt", executable: str = "",
     return executable, None
 
 
-def _spawn(state_dir: Path, port: int, listen: str, demo: bool = False) -> subprocess.Popen:
+def service_argv(state_dir: Path, port: int | None = None, listen: str | None = None,
+                 demo: bool = False, *, log_level: str | None = None,
+                 pack_overrides: dict[str, Any] | None = None) -> list[str]:
+    """The service's own flags, as ``daemon start`` passes them on. A flag left None is not
+    passed, so the service reads its setting (``advanced.port``/``listen``/``log_level``,
+    lane SET-WIRE); ``--pack-overrides`` (the developers' pack kwargs) and ``--log-level``
+    reach the service too (SETTINGS.md §12.7)."""
+    out = ["--state-dir", str(state_dir)]
+    if port is not None:
+        out += ["--port", str(port)]
+    if listen is not None:
+        out += ["--listen", listen]
+    if log_level is not None:
+        out += ["--log-level", log_level]
+    if pack_overrides:
+        out += ["--pack-overrides", json.dumps(pack_overrides, sort_keys=True)]
+    return out + (["--demo"] if demo else [])
+
+
+def _spawn(state_dir: Path, port: int | None, listen: str | None, demo: bool = False, *,
+           log_level: str | None = None,
+           pack_overrides: dict[str, Any] | None = None) -> subprocess.Popen:
     log_path = daemon_log_path(state_dir)
     # Install lane Q3 (from Q2): rotate daemon.log (size cap, backups), and a state dir
     # that cannot be written is a message (exit 6), not "internal error: PermissionError".
@@ -158,8 +178,9 @@ def _spawn(state_dir: Path, port: int, listen: str, demo: bool = False) -> subpr
         raise ActionFailedError(f"cannot start harness-manager-daemon: {err.message}",
                                 hint=err.hint) from None
     python, env = daemon_python()
-    cmd = [python, "-m", "harness_manager.daemon", "--state-dir", str(state_dir),
-           "--port", str(port), "--listen", listen] + (["--demo"] if demo else [])
+    cmd = [python, "-m", "harness_manager.daemon",
+           *service_argv(state_dir, port, listen, demo, log_level=log_level,
+                         pack_overrides=pack_overrides)]
     kwargs: dict[str, Any] = {"stdin": subprocess.DEVNULL, "stdout": fd,
                               "stderr": subprocess.STDOUT, "cwd": str(state_dir),
                               "close_fds": True, "env": env}
@@ -196,16 +217,19 @@ def _log_tail(state_dir: Path, lines: int = 5) -> str:
     return " | ".join(line.strip() for line in text.splitlines()[-lines:] if line.strip())
 
 
-def start(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
-          wait_s: float = START_WAIT_S, demo: bool = False) -> DaemonInfo:
-    """Launch a detached daemon and wait until it answers. ``AlreadyError`` if one runs."""
+def start(state_dir: Path, *, port: int | None = None, listen: str | None = None,
+          wait_s: float = START_WAIT_S, demo: bool = False, log_level: str | None = None,
+          pack_overrides: dict[str, Any] | None = None) -> DaemonInfo:
+    """Launch a detached daemon and wait until it answers. ``AlreadyError`` if one runs.
+    ``port``/``listen``/``log_level`` None: the service reads its settings."""
     state_dir = Path(state_dir)
     current = running(state_dir)
     if current is not None:
         raise AlreadyError(f"harness-manager-daemon is already running (pid {current.pid}, "
                            f"{current.base_url})",
                            hint="`harness-manager daemon stop` stops it")
-    child = _spawn(state_dir, port, listen, demo)
+    child = _spawn(state_dir, port, listen, demo, log_level=log_level,
+                   pack_overrides=pack_overrides)
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         code = child.poll()
@@ -221,7 +245,7 @@ def start(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
                             hint=f"see {daemon_log_path(state_dir)}")
 
 
-def ensure_running(state_dir: Path, *, port: int = 0, listen: str = LOOPBACK,
+def ensure_running(state_dir: Path, *, port: int | None = None, listen: str | None = None,
                    demo: bool = False) -> tuple[DaemonInfo, bool]:
     """(the running daemon, whether this call started it)."""
     current = running(Path(state_dir))

@@ -5,8 +5,11 @@ calls it (the lead wires it in). The verbs follow the CLI's output contract:
 one JSON object with ``--json``, append-only TSV columns with ``--tsv``,
 errors as ``ExitCode``s.
 
-- ``daemon start [--port N] [--listen ADDR] [--foreground]``: start harness-manager-daemon
-  detached (logging to ``<state_dir>/daemon.log``), or run it in this process.
+- ``daemon start [--port N] [--listen ADDR] [--log-level L] [--foreground]``: start
+  harness-manager-daemon detached (logging to ``<state_dir>/daemon.log``), or run it in this
+  process. A flag left out is the service's setting (``advanced.port``, ``advanced.listen``,
+  ``advanced.log_level``: lane SET-WIRE); ``--log-level`` and the hidden developer seam
+  ``--pack-overrides JSON`` are passed on to the service (SETTINGS.md §12.7).
 - ``daemon stop [--force] [--timeout S]``: stop it; refused while a job runs
   unless ``--force``.
 - ``daemon status``: running / unresponsive / stale / stopped.
@@ -18,6 +21,7 @@ errors as ``ExitCode``s.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import webbrowser
@@ -58,11 +62,25 @@ def _demo_parent() -> argparse.ArgumentParser:
     return p
 
 
+LOG_LEVELS = ("critical", "error", "warning", "info", "debug")
+
+
 def _listen_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--port", type=int, default=0, metavar="N",
-                   help="TCP port for the daemon (default: any free port)")
-    p.add_argument("--listen", default="127.0.0.1", metavar="ADDR",
-                   help="address to bind (default 127.0.0.1; anything else prints a warning)")
+    p.add_argument("--port", type=int, default=None, metavar="N",
+                   help="TCP port for the daemon (default: the setting advanced.port; 0, "
+                        "any free port)")
+    p.add_argument("--listen", default=None, metavar="ADDR",
+                   help="address to bind (default: the setting advanced.listen, 127.0.0.1; "
+                        "anything off loopback prints a warning)")
+
+
+def _service_args(p: argparse.ArgumentParser) -> None:
+    """The service's own flags that ``daemon start`` passes on (SETTINGS.md §12.7)."""
+    p.add_argument("--log-level", default=None, choices=LOG_LEVELS,
+                   help="the service's log verbosity (default: the setting "
+                        "advanced.log_level, info)")
+    # Development and test seam, as the service's own: per-pack constructor kwargs.
+    p.add_argument("--pack-overrides", default=None, help=argparse.SUPPRESS)
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -77,6 +95,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     dsub = vp.add_subparsers(dest="daemon_cmd", required=True, metavar="ACTION")
     sp = dsub.add_parser("start", help="start harness-manager-daemon (detached)", parents=[fmt, demo])
     _listen_args(sp)
+    _service_args(sp)
     sp.add_argument("--foreground", action="store_true",
                     help="run in this process until Ctrl-C (for service managers)")
     sp = dsub.add_parser("stop", help="stop harness-manager-daemon", parents=[fmt, demo])
@@ -103,8 +122,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                     "'app' extra) or a Chrome/Edge/Chromium app window with no tabs or "
                     "address bar. Falls back to a browser tab.",
         parents=[fmt, demo], epilog=f"--tsv columns: {' '.join(APP_COLUMNS)}")
-    ap.add_argument("--port", type=int, default=0, metavar="N",
-                    help="TCP port for the daemon (default: any free port)")
+    ap.add_argument("--port", type=int, default=None, metavar="N",
+                    help="TCP port for the daemon (default: the setting advanced.port; 0, "
+                         "any free port)")
     ap.add_argument("--no-native", action="store_true",
                     help="skip pywebview; use a browser app window")
     ap.set_defaults(fn=cmd_app)
@@ -117,13 +137,36 @@ def state_dir(demo: bool = False) -> Path:
     return default_state_dir() / "demo" if demo else default_state_dir()
 
 
-def _check_listen(ctx: Ctx, listen: str, port: int) -> None:
+def _check_listen(ctx: Ctx, listen: str | None, port: int | None,
+                  sdir: Path | None = None) -> None:
+    """A bad ``--port`` is refused here; an address off loopback (the flag's, else the
+    service's setting ``advanced.listen``) is warned about."""
     from harness_manager.daemon.state import is_loopback
 
-    if port < 0 or port > 65535:
+    if port is not None and (port < 0 or port > 65535):
         raise UsageError(f"--port {port} is not a TCP port", hint="0..65535 (0: any free port)")
+    if listen is None:
+        try:
+            from harness_manager.settings import runtime
+
+            listen = str(runtime.value("advanced.listen", state_dir=sdir))
+        except Exception:  # noqa: BLE001 - the service reads it again, and says why
+            return
     if not is_loopback(listen):
         ctx.note("harness-manager: warning: " + NON_LOOPBACK_WARNING.format(addr=listen))
+
+
+def _pack_overrides(raw: str | None) -> dict | None:
+    """``--pack-overrides JSON``, checked here as the service checks it."""
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError as exc:
+        raise UsageError(f"--pack-overrides is not JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise UsageError("--pack-overrides must be a JSON object")
+    return value
 
 
 def cmd_daemon(ctx: Ctx) -> int:
@@ -133,13 +176,16 @@ def cmd_daemon(ctx: Ctx) -> int:
     sdir = state_dir(getattr(a, "demo", False))
     action = a.daemon_cmd
     if action == "start":
-        _check_listen(ctx, a.listen, a.port)
+        _check_listen(ctx, a.listen, a.port, sdir)
+        overrides = _pack_overrides(a.pack_overrides)
         if a.foreground:
             from harness_manager.daemon.server import run_daemon
 
             ctx.note(f"harness-manager-daemon running in the foreground for {sdir}; Ctrl-C stops it")
-            return run_daemon(sdir, port=a.port, listen=a.listen, demo=a.demo)
-        info = control.start(sdir, port=a.port, listen=a.listen, demo=a.demo)
+            return run_daemon(sdir, port=a.port, listen=a.listen, demo=a.demo,
+                              log_level=a.log_level, pack_overrides=overrides)
+        info = control.start(sdir, port=a.port, listen=a.listen, demo=a.demo,
+                             log_level=a.log_level, pack_overrides=overrides)
         data = {"state": "running", "pid": info.pid, "port": info.port, "url": info.base_url,
                 "state_dir": str(sdir), "started": True}
         _emit(ctx, Result("daemon", data, rows=[_row(data)],
@@ -203,7 +249,7 @@ def cmd_ui(ctx: Ctx) -> int:
 
     a = ctx.args
     sdir = state_dir(getattr(a, "demo", False))
-    _check_listen(ctx, a.listen, a.port)
+    _check_listen(ctx, a.listen, a.port, sdir)
     info, started = control.ensure_running(sdir, port=a.port, listen=a.listen, demo=a.demo)
     if a.port and info.port != a.port:
         raise UsageError(f"harness-manager-daemon already runs on port {info.port}, not {a.port}",
@@ -239,7 +285,7 @@ def cmd_app(ctx: Ctx) -> int:
 
     a = ctx.args
     sdir = state_dir(a.demo)
-    _check_listen(ctx, "127.0.0.1", a.port)
+    _check_listen(ctx, None, a.port, sdir)
     info, started = control.ensure_running(sdir, port=a.port, demo=a.demo)
     url = info.ui_url
     stop = "`harness-manager daemon stop --demo`" if a.demo else "`harness-manager daemon stop`"

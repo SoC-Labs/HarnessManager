@@ -16,6 +16,10 @@ two give the same JSON.
 
 **Events.** ``settings.changed {keys, apply, applies, source: "api"}`` after every change
 that wrote something (``PUT /update/settings`` sends it too). It never carries a value.
+The service's readers follow it (lane SET-WIRE): ``settings.runtime.watch`` drops their
+cache, so a ``live`` row applies at its next use; the update checker and the update
+service's token follow it too. ``reopen`` rows apply at the next board open, ``restart``
+rows after a restart, as the reply's ``apply`` says.
 
 The service keeps one ``SettingsContext`` (``d.settings``): its own state dir, its own
 environment (the one the GUI's values come from), the OS's policy file, and its engine's
@@ -32,7 +36,7 @@ from fastapi import Query
 
 from harness_manager.core.errors import UsageError
 from harness_manager.core.events import Event
-from harness_manager.settings import ops, testers
+from harness_manager.settings import ops, runtime, testers
 
 from .app import _JSON, JsonBody, RouteContext, _obj, ok
 
@@ -61,6 +65,9 @@ def register(ctx: RouteContext) -> None:
     d = ctx.daemon
     api = ctx.api
     sctx = settings_context(d)
+
+    # SET-WIRE: the readers' cache follows every change (this route's, /update/settings').
+    runtime.watch(d.bus)
 
     def changed(result: dict[str, Any]) -> None:
         if result.get("changed", True):
