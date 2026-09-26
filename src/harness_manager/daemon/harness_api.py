@@ -371,7 +371,7 @@ def register(ctx: RouteContext) -> None:
                 unsubscribe = forwarding(bid, progress)
                 try:
                     out = cat.update.rollback_harness(s, backup_path=backup, wait_s=wait_s,
-                                                      via=via_b)
+                                                      **({"via": via_b} if via_b else {}))
                 finally:
                     unsubscribe()
                 data = {**out.as_dict(), "how": "restore"}

@@ -473,8 +473,9 @@ def _rollback(ctx: Ctx) -> int:
             ctx.confirm(f"restore the config SD of {cand.board_id} from {a.backup} and reboot it?")
             unsubscribe = cmd_update._watch(ctx, cand.board_id)
             try:
+                door = getattr(a, "door", None)
                 out = cat.update.rollback_harness(session, backup_path=Path(a.backup),
-                                                  wait_s=a.wait, via=getattr(a, "door", None))
+                                                  wait_s=a.wait, **({"via": door} if door else {}))
             finally:
                 unsubscribe()
         if out.result != "restored":

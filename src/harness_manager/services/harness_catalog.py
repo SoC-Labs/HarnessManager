@@ -619,7 +619,7 @@ class HarnessCatalog:
                                         source=source, version=version,
                                         overlays_only=overlays_only,
                                         catalog=self.catalog_id(session.candidate.pack),
-                                        via=via)
+                                        **({"via": via} if via is not None else {}))
 
     def locate(self, version: str, *, channel: str | None = None, source: str | None = None,
                pack: str = "mps3") -> VerifiedChannel:
