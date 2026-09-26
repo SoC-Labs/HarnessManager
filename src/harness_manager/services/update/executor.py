@@ -10,7 +10,8 @@ The flow (each phase is journaled in ``state_dir/update/journal/<board>.json``):
 4. **download + verify** every component (``bundle.prepare_release``): the
    board is still untouched if any check fails;
 5. **overlays** into the content store (no SD write, no reboot);
-6. **OS slot** (Linux): write the inactive slot, arm try-once;
+6. **OS slot** (Linux): push into the board's target slot, read back, commit it as the
+   default (a commit not yet booted is rolled back first: rule 1);
 7. **base** (config SD): ``storage.backup`` (the mandatory gate), then
    ``storage.install`` with that backup, then ``controller.reboot()``, which
    returns its witness evidence (went down, came back);
@@ -57,11 +58,12 @@ from harness_manager.core.model import BoardIdentity, Check
 from harness_manager.core.pack import BackupRecord, PreflightItem
 from harness_manager.core.session import pid_alive
 
+from . import s0lb
 from .bundle import OverlayHandler, PreparedRelease, prepare_release
 from .channel import VerifiedChannel
 from .download import Downloader
 from .hub_door import DARK_AFTER_S, VIA_HUB
-from .os_slots import OsSlotAdapter
+from .os_slots import VERIFIED_BOOT, OsSlotAdapter
 from .planner import (
     MODE_NONE,
     MODE_OVERLAYS,
@@ -78,6 +80,8 @@ from .schema import (
     TARGET_MCC_SD,
     HarnessIdentity,
     HarnessRelease,
+    os_header_crc,
+    os_provisioned_static,
 )
 from .state import InstallRecords, Journal, StoredComponents, UpdateState
 from .version import same_version
@@ -277,8 +281,23 @@ def _is_previous(now: dict[str, Any], previous: dict[str, Any]) -> bool:
 
 
 def default_os_slots(session: Any) -> OsSlotAdapter | None:
-    """``session.os_slots`` when the pack provides it (see the contract change request)."""
-    return getattr(session, "os_slots", None)
+    """``session.os_slots`` when the pack provides it AND it can be used now (CCR T7-2).
+
+    An adapter says why it cannot in ``slots_reason()`` (a bare-metal harness, no card,
+    stage0 rescue): then the board has no OS-slot door, as if there were no adapter.
+    """
+    slots = getattr(session, "os_slots", None)
+    if slots is None:
+        return None
+    reason = getattr(slots, "slots_reason", None)
+    if callable(reason):
+        try:
+            if reason():
+                return None
+        except HarnessError as exc:
+            log.info("os slots unusable: %s", exc)
+            return None
+    return slots
 
 
 def doors_of(plan: Plan) -> list[str]:
@@ -654,7 +673,8 @@ class HarnessInstaller:
         # -- reboot, witnessed --
         journal.write(phase="rebooting")
         restore_hint = (f"`harness-manager update rollback TARGET` restores the backup {backup.path}"
-                        if backup else "")
+                        if backup else "`harness-manager slot rollback TARGET` makes the previous "
+                                       "OS slot the default again" if plan.os_slot else "")
         try:
             if plan.base:
                 raw = controller.reboot(progress=self._progress(board_id, "reboot:"),
@@ -689,8 +709,8 @@ class HarnessInstaller:
         confirmed, checks = confirm_identity(rel, ident)
         identity_after = running_summary(ident)
         if plan.os_slot and slots is not None:
-            # Confirm the new slot only when the board proved it runs the release; an
-            # unconfirmed try-once slot is what lets stage0 fall back at the next boot.
+            # The board confirms a healthy boot itself (harnessd); HM checks it runs the new
+            # slot as the default, verified by that boot, and that it IS the release.
             os_ok, os_info = self._confirm_os(slots, os_info or {}, checks, confirm=confirmed)
             confirmed = confirmed and os_ok
         if confirmed:
@@ -711,46 +731,75 @@ class HarnessInstaller:
 
     def _write_os(self, slots: OsSlotAdapter, prepared: PreparedRelease,
                   board_id: str) -> dict[str, Any]:
+        """Push the image into the board's target slot, read back, commit it as the default.
+
+        The board's contract (net-protocol v0.14 "Slot images"): it never writes the running
+        or the default slot, so after a commit that was not booted there is no target. Rule 1
+        (HARNESS_DISTRIBUTION §9 item 8): HM rolls that commit back first, and records it.
+        """
         part = prepared.os_image
         if part is None:
             raise RefusedError("the plan writes an OS slot but no OS image was prepared")
+        comp = part.component
+        rel = prepared.release
+        sha = comp.asset.sha256
         before = slots.status()
-        target = before.inactive
-        sha = part.component.asset.sha256
-        written = slots.write_inactive(part.blob, sha256=sha, version=prepared.release.version,
-                                       progress=self._progress(board_id, "os:"))
-        if written != target:
-            raise ActionFailedError(f"the OS image went to slot {written}, expected the inactive "
-                                    f"slot {target}", hint="the running slot was not meant to change")
-        after = slots.status()
+        undone = ""
+        if not before.target and before.pending_commit:
+            undone = before.pending_commit
+            self._emit("update.progress", board_id, phase="os:rollback-first", bytes=0, total=0)
+            before = slots.rollback()
+        if not before.target:
+            raise RefusedError(f"the board offers no OS slot to write (running {before.running}, "
+                               f"default {before.default or '?'})",
+                               hint="`harness-manager slot status TARGET` shows the slots")
+        target = before.target
+        after = slots.push(part.blob, static_id=os_provisioned_static(comp, rel), sha256=sha,
+                           version=rel.version, progress=self._progress(board_id, "os:"))
         got = after.slots.get(target)
-        if got is None or got.image_sha256.lower() != sha:
-            raise ActionFailedError(f"slot {target} does not hold the image just written "
-                                    f"(read back {got.image_sha256[:12] if got else 'nothing'})",
-                                    hint="nothing booted it; retry the update")
-        slots.arm_try_once(target)
-        return {"slot": target, "previous_slot": before.active, "sha256": sha}
+        want_crc = os_header_crc(comp) or s0lb.header_crc(part.blob.read_bytes())
+        if after.staged != target or got is None or (
+                want_crc and not _same_u32(got.hdr_crc or "", want_crc)):
+            raise ActionFailedError(f"slot {target} does not hold the image just pushed (read "
+                                    f"back {got.hdr_crc if got else 'nothing'}, want {want_crc})",
+                                    hint="nothing was committed; the board boots as before")
+        committed = slots.commit(target)
+        if committed.default != target:
+            raise ActionFailedError(f"slot {target} was pushed but the board did not make it the "
+                                    f"default (default {committed.default or '?'})",
+                                    hint="nothing boots it; retry the update")
+        return {"slot": target, "previous_slot": before.running, "sha256": sha,
+                "hdr_crc": got.hdr_crc, "rolled_back_first": undone}
 
     def _confirm_os(self, slots: OsSlotAdapter, info: dict[str, Any],
                     checks: list[PreflightItem], *, confirm: bool) -> tuple[bool, dict[str, Any]]:
+        """After the reboot: the board must run the new slot, as the default, verified by
+        the boot (stage0 booted it and harnessd confirmed it). stage0 undoes an image that
+        never comes up healthy by itself; a healthy but WRONG one stays until a person
+        rolls it back (`harness-manager slot rollback`)."""
         st = slots.status()
         target = info.get("slot", "")
-        active = st.active_info
-        if st.active != target or active.image_sha256.lower() != info.get("sha256"):
+        if st.running != target:
             checks.append(_item("os slot", False,
-                                f"the board booted slot {st.active}, not {target}: stage0 "
-                                "rolled back to the old image"))
-            return False, {**info, "active": st.active, "rolled_back": True}
+                                f"the board booted slot {st.running}, not {target}: stage0 went "
+                                "back to the old image (the new one never came up healthy)"))
+            return False, {**info, "active": st.running, "rolled_back": True}
+        active = st.active_info
+        if info.get("hdr_crc") and not _same_u32(active.hdr_crc or "", info["hdr_crc"]):
+            checks.append(_item("os slot", False, f"slot {target} runs another image "
+                                                  f"({active.hdr_crc}, pushed {info['hdr_crc']})"))
+            return False, {**info, "active": st.running}
         if not confirm:
-            checks.append(_item("os slot", None, f"slot {target} booted but is left "
-                                                 "unconfirmed: the board did not prove the release"))
-            return False, {**info, "active": st.active, "state": active.state}
-        slots.confirm(target)
-        st2 = slots.status()
-        ok = st2.active == target and st2.active_info.state == "confirmed"
-        checks.append(_item("os slot", ok, f"slot {target} is "
-                                          f"{st2.active_info.state or 'unconfirmed'}"))
-        return ok, {**info, "active": st2.active, "state": st2.active_info.state}
+            checks.append(_item("os slot", None,
+                                f"slot {target} booted, but the board does not report the "
+                                "release: it stays the default until it is rolled back "
+                                "(`harness-manager slot rollback TARGET`)"))
+            return False, {**info, "active": st.running, "verified": active.verified}
+        ok = st.default == target and active.verified == VERIFIED_BOOT
+        checks.append(_item("os slot", ok, f"slot {target} runs, default {st.default or '?'}, "
+                                           f"verified {active.verified}"))
+        return ok, {**info, "active": st.running, "default": st.default,
+                    "verified": active.verified}
 
     def _finish(self, board_id: str, rel: HarnessRelease, result: str, journal: Journal,
                 detail: str, backup: dict[str, Any] | None, restore_hint: str, *,

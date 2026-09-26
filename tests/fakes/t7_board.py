@@ -10,10 +10,9 @@ with its static_id, harness version, sha and features. ``stale=True`` models a
 board that keeps running the old image whatever the SD says (the
 written-but-not-running case: a different APPFILE, an SD the MCC did not reread).
 
-``FakeOsSlots``: the Linux harness's user-µSD slots A/B with stage0's
-try-once/confirm rule: a try-once slot that is not confirmed healthy before the
-next boot is abandoned and the old slot boots again. ``bad_images`` holds the
-image hashes that "panic", so stage0 rolls back.
+``FakeOsSlots``: the Linux harness's user-µSD slots A/B as the board's slot contract
+has them (push -> staged -> commit -> reboot boots the default). ``bad_images`` holds
+the image hashes that never come up healthy, so stage0 goes back to the old slot.
 
 ``FakeUv``: records every argv and imitates ``uv venv`` / ``uv pip install`` /
 the venv's python, with switches to fail each step.
@@ -24,19 +23,20 @@ from __future__ import annotations
 import re
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from harness_manager.core.model import BoardIdentity, Candidate, Link, LinkKind
 from harness_manager.services.update.os_slots import (
-    SLOT_CONFIRMED,
-    SLOT_EMPTY,
-    SLOT_TRY_ONCE,
+    SLOT_VALID,
+    VERIFIED_BOOT,
+    VERIFIED_NO,
+    VERIFIED_READBACK,
     SlotInfo,
     SlotStatus,
 )
-from tests.fakes.t7_bundles import read_fake_identity
+from tests.fakes.t7_bundles import FIELDED_STATIC, read_fake_identity
 
 
 def _sd_bit(root: Path) -> Path | None:
@@ -100,41 +100,104 @@ def bind_identity_to_sd(vb: Any, *, stale: bool = False) -> dict[str, Any]:
 # --- the OS A/B slots -------------------------------------------------------------------
 
 
+def _other(slot: str) -> str:
+    return "B" if slot == "A" else "A"
+
+
 @dataclass
 class FakeOsSlots:
-    """``OsSlotAdapter`` over an in-memory A/B model (stage0's rules)."""
+    """``OsSlotAdapter`` over an in-memory model of the board's slot contract (net-protocol
+    v0.14 "Slot images"): a push goes to the slot that is neither running nor the default
+    and is read back (``staged``); ``commit`` makes the staged slot the default; a reboot
+    boots the default, unless its image is in ``bad_images`` (it never comes up healthy,
+    so stage0 goes back to the old slot); the board confirms a healthy boot itself."""
 
-    active: str = "A"
+    running: str = "A"
+    default: str = "A"
     slots: dict[str, SlotInfo] = field(default_factory=lambda: {
-        "A": SlotInfo("A", "a" * 64, "1.0.0", SLOT_CONFIRMED), "B": SlotInfo("B")})
+        "A": SlotInfo("A", state=SLOT_VALID, hdr_crc="0xaaaaaaaa", length=64,
+                      verified=VERIFIED_BOOT, image_sha256="a" * 64, version="1.0.0"),
+        "B": SlotInfo("B")})
+    staged: str = ""
+    fabric_sid: str = FIELDED_STATIC
     bad_images: set[str] = field(default_factory=set)
     on_boot: Callable[[SlotInfo], None] | None = None     # the board comes up running this image
     reboot_fails: bool = False
-    board_confirms: bool = True                            # harnessd confirms a healthy boot itself
     calls: list[str] = field(default_factory=list)
-    armed: str = ""
+
+    @property
+    def active(self) -> str:
+        return self.running
+
+    @active.setter
+    def active(self, slot: str) -> None:
+        self.running = self.default = slot
+
+    def slots_reason(self) -> str:
+        return ""
+
+    def _target(self) -> str:
+        return _other(self.running) if self.default == self.running else ""
 
     def status(self) -> SlotStatus:
         self.calls.append("status")
-        return SlotStatus(active=self.active, slots=dict(self.slots))
+        return SlotStatus(running=self.running, slots=dict(self.slots), default=self.default,
+                          target=self._target(), staged=self.staged, fabric_sid=self.fabric_sid)
 
-    def write_inactive(self, image: Path, *, sha256: str, version: str, progress=None) -> str:
-        target = next(n for n in sorted(self.slots) if n != self.active)
-        self.calls.append(f"write:{target}")
+    def push(self, image: Path, *, static_id: str, sha256: str = "", version: str = "",
+             progress=None) -> SlotStatus:
+        from harness_manager.core.errors import IncompatibleError, RefusedError
+
+        target = self._target()
+        if not target:
+            raise RefusedError(f"no free slot: {self.running} runs, {self.default} is the "
+                               "default -- rollback first")
+        if int(static_id, 16) != int(self.fabric_sid, 16):
+            raise IncompatibleError(f"image for {static_id} != fabric {self.fabric_sid}")
+        self.calls.append(f"push:{target}")
         data = Path(image).read_bytes()
         import hashlib
 
-        actual = hashlib.sha256(data).hexdigest()
-        self.slots[target] = SlotInfo(target, actual, version, SLOT_EMPTY)
-        if progress:
-            progress("write", len(data), len(data))
-        return target
+        from tests.fakes.s0lb_image import header_crc
 
-    def arm_try_once(self, slot: str) -> None:
-        self.calls.append(f"arm:{slot}")
-        info = self.slots[slot]
-        self.slots[slot] = SlotInfo(slot, info.image_sha256, info.version, SLOT_TRY_ONCE)
-        self.armed = slot
+        actual = hashlib.sha256(data).hexdigest()
+        self.slots[target] = SlotInfo(target, state=SLOT_VALID, hdr_crc=header_crc(data),
+                                      length=len(data), sid=static_id,
+                                      verified=VERIFIED_READBACK, image_sha256=actual,
+                                      version=version)
+        self.staged = target
+        if progress:
+            progress("readback", len(data), len(data))
+        return self.status()
+
+    def commit(self, slot: str | None = None) -> SlotStatus:
+        from harness_manager.core.errors import RefusedError
+
+        self.calls.append(f"commit:{slot or self.staged}")
+        if not self.staged or (slot and slot != self.staged):
+            raise RefusedError("nothing staged: push an image first")
+        self.default = self.staged
+        return self.status()
+
+    def rollback(self, slot: str | None = None) -> SlotStatus:
+        from harness_manager.core.errors import RefusedError
+
+        dest = _other(self.default)
+        self.calls.append(f"rollback:{dest}")
+        if slot and slot != dest:
+            raise RefusedError(f"slot mismatch: rollback would pick {dest}")
+        if self.slots[dest].verified == VERIFIED_NO:
+            raise RefusedError(f"slot {dest} not verified")
+        self.default = dest
+        return self.status()
+
+    def verify(self, slot: str | None = None, progress=None) -> SlotStatus:
+        dest = slot or _other(self.default)
+        self.calls.append(f"verify:{dest}")
+        info = self.slots[dest]
+        if info.valid and info.verified == VERIFIED_NO:
+            self.slots[dest] = replace(info, verified=VERIFIED_READBACK)
+        return self.status()
 
     def reboot(self, progress=None, wait_s: float = 180.0) -> dict:
         self.calls.append("reboot")
@@ -142,33 +205,21 @@ class FakeOsSlots:
             from harness_manager.core.errors import ActionFailedError
 
             raise ActionFailedError("reboot sent but no restart observed")
-        booted = self.active
-        if self.armed:
-            cand = self.slots[self.armed]
-            if cand.image_sha256 in self.bad_images:
-                # The new image panicked before confirming: stage0 falls back.
-                self.slots[self.armed] = SlotInfo(cand.name, cand.image_sha256, cand.version, "bad")
-            else:
-                booted = self.armed
-                state = SLOT_CONFIRMED if self.board_confirms else SLOT_TRY_ONCE
-                self.slots[booted] = SlotInfo(cand.name, cand.image_sha256, cand.version, state)
-            self.armed = ""
-        self.active = booted
+        want = self.default
+        booted = want
+        if self.slots[want].image_sha256 in self.bad_images:
+            booted = self.running                 # never healthy: stage0 goes back
+        self.running = booted
+        self.staged = ""
+        for name, info in list(self.slots.items()):  # what this boot knew is gone
+            self.slots[name] = replace(info, verified=VERIFIED_BOOT if name == booted and
+                                       info.valid else VERIFIED_NO)
         if self.on_boot:
             self.on_boot(self.slots[booted])
         if progress:
             for i, phase in enumerate(("sent", "down", "up"), 1):
                 progress(phase, i, 3)
         return {"summary": f"booted slot {booted}", "slot": booted}
-
-    def confirm(self, slot: str) -> None:
-        self.calls.append(f"confirm:{slot}")
-        info = self.slots[slot]
-        if slot != self.active:
-            from harness_manager.core.errors import ActionFailedError
-
-            raise ActionFailedError(f"slot {slot} is not running")
-        self.slots[slot] = SlotInfo(slot, info.image_sha256, info.version, SLOT_CONFIRMED)
 
 
 class StubSession:

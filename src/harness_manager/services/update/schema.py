@@ -43,6 +43,13 @@ running harness takes over the network (the OS slot image). HM's older ``mcc-sd`
 (overlays, openocd cfg, ...). ``host-kit`` carries the DUT build kit (kind ``rm-kit``,
 KIT-STORE K4): fetched on demand by the kit service, NEVER by a harness install.
 
+**The OS slot image** (``ethernet`` / ``os-slot``) carries ``linux_bundle.json`` v1's
+declarations about itself when the release tool copies them: ``provisioned.static_id``
+(the static the image is for: the Ethernet door takes it only when it is the fabric's),
+``s0lb`` (the boot table's frames: header CRC, entry point, one ``{dst, len, crc32}``
+per region; the install checks the download against them) and the file's ``crc32`` /
+``bytes`` (``_os_slot_extras``; lane LINUX-SLOTS).
+
 An app release::
 
     {"version": "0.2.0", "status": "current", "requires_python": ">=3.10", "notes": "...",
@@ -495,9 +502,82 @@ def _component(d: Any, where: str) -> Component:
         if not isinstance(sha, str) or not _SHA_RE.match(sha):
             raise _fail(f"{where}.files[{path!r}]", "is not a sha256 digest")
         files[str(path)] = sha.lower()
+    extra = _extra(d, _COMPONENT_KEYS)
+    if kind == KIND_OS_SLOT:
+        _os_slot_extras(extra, where)
     return Component(name=name, target=target, kind=kind, asset=asset, ip_class=ip_class,
                      fmt=fmt, files=files, optional=_bool(d, "optional", where),
-                     static_id=static_id, vivado=vivado, extra=_extra(d, _COMPONENT_KEYS))
+                     static_id=static_id, vivado=vivado, extra=extra)
+
+
+# --- the OS slot image's declarations (linux_bundle.json v1, FLOW_CONTRACT v1.6 §0.1) ---------
+#
+# An ``os-slot`` component may carry what ``linux_bundle.json`` says about the image, as
+# the release tool copies it (all optional, validated when present; kept in ``extra``):
+#
+#   "provisioned": {"static_id": "0x72BB0A36", "sidecar": "version"}
+#                  targets.ethernet.provisioned: the static the rootfs was provisioned for;
+#                  the board refuses the push for any other fabric
+#   "s0lb": {"header_crc32": "0x3E5E9C2C", "num_entries": 1, "entry_pc": "0x80000000",
+#            "regions": [{"dst": "0x80000000", "len": 24354280, "crc32": "0x…"}], …}
+#                  targets.ethernet.slot_image.s0lb: the boot table's FRAMES (header + one
+#                  entry per region), which the install checks the downloaded image against
+#   "crc32": "0x…", "bytes": 24354312       targets.ethernet.slot_image: the whole file
+
+
+def _os_slot_extras(extra: Mapping[str, Any], where: str) -> None:
+    prov = extra.get("provisioned")
+    if prov is not None:
+        prov = _obj(prov, f"{where}.provisioned")
+        if "static_id" in prov:
+            _hex32(_str(prov, "static_id", f"{where}.provisioned"),
+                   f"{where}.provisioned.static_id")
+    if "crc32" in extra:
+        _hex32(_str(extra, "crc32", where), f"{where}.crc32")
+    if "bytes" in extra:
+        _int(extra, "bytes", where, minimum=1)
+    frames = extra.get("s0lb")
+    if frames is None:
+        return
+    frames = _obj(frames, f"{where}.s0lb")
+    for key in ("header_crc32", "entry_pc"):
+        if key in frames:
+            _hex32(_str(frames, key, f"{where}.s0lb"), f"{where}.s0lb.{key}")
+    if "num_entries" in frames:
+        _int(frames, "num_entries", f"{where}.s0lb", minimum=1)
+    regions = frames.get("regions", [])
+    if not isinstance(regions, list):
+        raise _fail(f"{where}.s0lb.regions", "must be a list")
+    for i, r in enumerate(regions):
+        rw = f"{where}.s0lb.regions[{i}]"
+        r = _obj(r, rw)
+        _hex32(_str(r, "dst", rw), f"{rw}.dst")
+        _int(r, "len", rw, minimum=0)
+        _hex32(_str(r, "crc32", rw), f"{rw}.crc32")
+
+
+def os_provisioned_static(comp: Component, release: HarnessRelease | None = None) -> str:
+    """The static an OS slot image was provisioned for (``provisioned.static_id``); the
+    release's own static when the channel does not say (the release tool refuses a
+    bundle whose image is provisioned for another static)."""
+    prov = comp.extra.get("provisioned")
+    sid = prov.get("static_id") if isinstance(prov, Mapping) else None
+    if isinstance(sid, str) and _HEX32_RE.match(sid):
+        return "0x" + sid[2:].lower()
+    return release.identity.static_id if release is not None else ""
+
+
+def os_frames(comp: Component) -> dict[str, Any] | None:
+    """The image's declared S0LB frames (``s0lb``), or None when the channel carries none."""
+    frames = comp.extra.get("s0lb")
+    return dict(frames) if isinstance(frames, Mapping) and frames else None
+
+
+def os_header_crc(comp: Component) -> str:
+    """The declared S0LB table CRC (the board's ``hdr_crc`` for this image), or ""."""
+    frames = os_frames(comp) or {}
+    crc = frames.get("header_crc32")
+    return "0x" + crc[2:].lower() if isinstance(crc, str) and _HEX32_RE.match(crc) else ""
 
 
 _IDENTITY_KEYS = {"static_id", "usercode", "harness", "impl", "proto", "features", "fw_sha",

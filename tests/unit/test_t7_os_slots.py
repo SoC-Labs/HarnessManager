@@ -1,9 +1,10 @@
 """T7: the OS-slot flow (Linux harness, user µSD A/B) through the interface, with a fake.
 
-The real write mechanism (6910 push kind + ``slot`` verb, or SSH) is not frozen,
-so these tests pin the executor's behaviour against ``FakeOsSlots``: write the
-INACTIVE slot only, arm try-once, reboot, and call it installed only when the
-board booted the new slot, reports the new harness, and the slot is confirmed.
+The mechanism is the board's slot contract (net-protocol v0.14; lane LINUX-SLOTS moved
+the seam onto it): push into the free slot, read back, commit it as the default, reboot,
+and call it installed only when the board runs the new slot as the default, verified by
+its boot, and reports the new harness. ``FakeOsSlots`` models that contract; the MPS3
+adapter itself is tested against pyverify's FakeShell (test_lxslots_*).
 """
 
 from __future__ import annotations
@@ -19,15 +20,16 @@ from harness_manager.services.update import RESULT_INSTALLED, RESULT_WRITTEN
 from harness_manager.services.update.channel import ChannelClient
 from harness_manager.services.update.download import Downloader, sha256_file
 from harness_manager.services.update.executor import HarnessInstaller
-from harness_manager.services.update.os_slots import SlotInfo
+from harness_manager.services.update.os_slots import SLOT_VALID, VERIFIED_BOOT, SlotInfo
 from harness_manager.services.update.planner import BoardView, make_plan
 from harness_manager.services.update.state import UpdateState
 from tests.fakes.fake_channel import AssetFile, ChannelBuilder, TestKeys
+from tests.fakes.s0lb_image import header_crc, make_s0lb
 from tests.fakes.t7_board import FakeOsSlots, StubSession
 from tests.fakes.t7_bundles import FIELDED_STATIC, Release
 
 KEYS = TestKeys()
-IMAGE = b"S0LB" + bytes(range(256)) * 16
+IMAGE = make_s0lb()
 
 
 @pytest.fixture
@@ -44,7 +46,9 @@ def world(tmp_path):
                                                             str(b.root / "channel" / "stable"))
     ident = BoardIdentity(board_type="mps3", shell_id=FIELDED_STATIC, harness_version="1.1.0",
                           harness_impl="linux", features=tuple(rel.features))
-    slots = FakeOsSlots(slots={"A": SlotInfo("A", "a" * 64, "1.1.0", "confirmed"),
+    slots = FakeOsSlots(slots={"A": SlotInfo("A", state=SLOT_VALID, hdr_crc="0xaaaaaaaa",
+                                             verified=VERIFIED_BOOT, image_sha256="a" * 64,
+                                             version="1.1.0"),
                                "B": SlotInfo("B")})
     session = StubSession(ident, os_slots=slots)
 
@@ -73,10 +77,11 @@ def test_os_update_writes_the_inactive_slot_and_confirms(world):
     out = w["installer"].run(w["session"], plan, plan.approve(), w["verified"])
     assert out.result == RESULT_INSTALLED, out.detail
     slots = w["slots"]
-    assert slots.active == "B" and slots.slots["B"].state == "confirmed"
-    assert slots.slots["A"].state == "confirmed"                      # the old slot is kept
-    assert [c for c in slots.calls if c != "status"] == ["write:B", "arm:B", "reboot", "confirm:B"]
-    assert out.os_slot["previous_slot"] == "A"
+    assert slots.running == "B" and slots.default == "B"
+    assert slots.slots["B"].verified == VERIFIED_BOOT
+    assert slots.slots["A"].valid                                     # the old slot is kept
+    assert [c for c in slots.calls if c != "status"] == ["push:B", "commit:B", "reboot"]
+    assert out.os_slot["previous_slot"] == "A" and out.os_slot["hdr_crc"] == header_crc(IMAGE)
     assert [e.topic for e in w["events"]][0] == "update.started"
     assert w["events"][-1].topic == "update.done"
 
@@ -87,8 +92,7 @@ def test_a_new_image_that_does_not_confirm_is_rolled_back_by_stage0(world):
     plan = plan_for(w)
     out = w["installer"].run(w["session"], plan, plan.approve(), w["verified"])
     assert out.result == RESULT_WRITTEN
-    assert out.os_slot["rolled_back"] and w["slots"].active == "A"
-    assert "confirm:B" not in w["slots"].calls
+    assert out.os_slot["rolled_back"] and w["slots"].running == "A"
     assert w["session"].ident.harness_version == "1.1.0"            # still the old image
 
 
@@ -193,7 +197,9 @@ def test_a_two_target_release_writes_the_os_slot_then_the_sd_then_reboots_once(t
     verified = ChannelClient(state, dl, KEYS.trust()).fetch("stable",
                                                             str(b.root / "channel" / "stable"))
     log = _Log()
-    slots = FakeOsSlots(slots={"A": SlotInfo("A", "a" * 64, "1.1.0", "confirmed"),
+    slots = FakeOsSlots(slots={"A": SlotInfo("A", state=SLOT_VALID, hdr_crc="0xaaaaaaaa",
+                                             verified=VERIFIED_BOOT, image_sha256="a" * 64,
+                                             version="1.1.0"),
                                "B": SlotInfo("B")})
     # The board runs 1.1.0's firmware (another sha): H2 decides the base by the sha.
     ident = BoardIdentity(board_type="mps3", shell_id=FIELDED_STATIC, harness_version="1.1.0",
@@ -213,7 +219,7 @@ def test_a_two_target_release_writes_the_os_slot_then_the_sd_then_reboots_once(t
         session, plan, plan.approve(), verified)
     assert out.result == RESULT_INSTALLED, out.detail
     order = [c for c in slots.calls if c != "status"]
-    assert order == ["write:B", "arm:B", "reboot", "confirm:B"]
+    assert order == ["push:B", "commit:B", "reboot"]
     assert log == ["sd:backup", "sd:install:4", "mcc:reboot"]
     assert "slots" not in out.evidence and out.evidence["summary"].startswith("REBOOT witnessed")
 
@@ -228,7 +234,9 @@ def test_an_os_only_journal_is_recovered_without_the_debug_usb(world):
                   os_slot=True)
     w["session"].ident = dataclasses.replace(w["session"].ident, harness_version="1.2.0")
     w["slots"].active = "B"
-    w["slots"].slots["B"] = SlotInfo("B", sha256_file_bytes(IMAGE), "1.2.0", "confirmed")
+    w["slots"].slots["B"] = SlotInfo("B", state=SLOT_VALID, hdr_crc=header_crc(IMAGE),
+                                     verified=VERIFIED_BOOT,
+                                     image_sha256=sha256_file_bytes(IMAGE), version="1.2.0")
     plan = plan_for(w)
     out = w["installer"].run(w["session"], plan, plan.approve(), w["verified"])
     assert out.result == "up-to-date" and journal.read() is None

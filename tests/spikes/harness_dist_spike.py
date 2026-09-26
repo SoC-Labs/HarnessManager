@@ -64,6 +64,7 @@ from harness_manager.services.update.trust import (
 from harness_manager_mps3 import mcc as mccmod
 from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.fake_channel import FakeChannelServer
+from tests.fakes.s0lb_image import make_s0lb
 from tests.fakes.t2_overlays import SYNTH2_RM_ID, SYNTH_RM_ID, make_overlay
 from tests.fakes.t3_clock import FakeClock
 from tests.fakes.t7_board import FakeOsSlots, StubSession, bind_identity_to_sd
@@ -147,7 +148,7 @@ def linux_mint(tmp: Path) -> MintRecord:
     return from_linux_bundle(
         bundle, wire_harness="1.0.0", proto="0.14",
         features=[f for f in PRODUCT_V011_FEATURES if f != "windowed"], vivado="2026.1",
-        sd_files=sd_files(bit), os_image=b"S0LB" + b"\x5a" * 65536,
+        sd_files=sd_files(bit), os_image=make_s0lb(b"\x5a" * 65536),   # a real S0LB v2 table
         overlays_open=overlays(tmp, S_LNX, U_LNX, ("synth",)))
 
 

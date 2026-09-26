@@ -18,8 +18,10 @@ checks what the files ARE, not just what they hash to:
   with the right static_id is the one that wiped the FPGA twice in July, so
   the usercode check is not optional when the release declares one. An Arm-IP
   overlay inside a public archive is refused;
-- **OS slot image** (target ``user-usd``): the image hash; the stage0 frame
-  check is UNCHECKED until the FLOW contract lands (never counted as a pass).
+- **OS slot image** (target ``ethernet``, kind ``os-slot``): the image hash (and the
+  declared size and CRC-32), the stage0 frames (an S0LB v2 boot table stage0 would take,
+  whose header CRC, entry point and regions are the ones ``linux_bundle.json`` declared:
+  ``check_os_component``), and the static it was provisioned for.
 
 The result is a list of ``PreflightItem`` and the core ``preflight_refusal``
 rule turns any MISMATCH into the error: identity mismatches exit 14, the rest 15.
@@ -34,6 +36,7 @@ import shutil
 import stat
 import uuid
 import zipfile
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -48,6 +51,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.model import Check
 from harness_manager.core.pack import PreflightItem, preflight_refusal
 
+from . import s0lb
 from .bitheader import BitHeaderError, read_bit_header
 from .download import Downloader, Progress
 from .schema import (
@@ -58,6 +62,8 @@ from .schema import (
     TARGET_MCC_SD,
     Component,
     HarnessRelease,
+    os_frames,
+    os_provisioned_static,
 )
 
 MCC_COMMAND_FILES = frozenset({"reboot.txt", "reset.txt", "shutdown.txt"})   # TRM 100765 §3.2
@@ -363,6 +369,59 @@ def check_overlays(comp: Component, dirs: list[Path], release: HarnessRelease,
     return items
 
 
+def check_os_component(comp: Component, blob: Path, release: HarnessRelease) -> list[PreflightItem]:
+    """The OS slot image against ``linux_bundle.json``'s declarations (lane LINUX-SLOTS).
+
+    - **image hash**: the sha256 the channel signed (the downloader already refused any
+      other), plus the file's size and CRC-32 when the channel copies them;
+    - **stage0 frames**: the file is an S0LB v2 boot table whose table CRC holds and whose
+      every region is inside the file and the DDR window with a good CRC (what stage0 and
+      the board check), AND its frames (header CRC, entry point, each region's dst, len
+      and CRC) are the ones the bundle declared (``s0lb``). A release that declares no
+      frames is UNCHECKED on the comparison (never a pass), never on the self-check;
+    - **provisioned static**: the static the image was provisioned for is the release's
+      (``provisioned.static_id``); a board refuses an image for another fabric.
+    """
+    name = comp.name
+    data = blob.read_bytes()
+    items: list[PreflightItem] = []
+    size_ok = "bytes" not in comp.extra or comp.extra.get("bytes") == len(data)
+    crc = f"0x{zlib.crc32(data) & 0xFFFFFFFF:08x}"
+    crc_ok = "crc32" not in comp.extra or _same_u32(str(comp.extra.get("crc32")), crc)
+    items.append(_item(f"{name}: image hash", size_ok and crc_ok,
+                       f"sha256 {comp.asset.sha256[:12]}… as signed, {len(data)} B, crc32 {crc}"
+                       if size_ok and crc_ok else
+                       f"{len(data)} B crc32 {crc}; the release declares "
+                       f"{comp.extra.get('bytes', '?')} B crc32 {comp.extra.get('crc32', '?')}"))
+    try:
+        table = s0lb.parse(data)
+    except s0lb.S0lbError as exc:
+        items.append(_item(f"{name}: stage0 frames", False, f"not a boot image stage0 would "
+                                                            f"take: {exc}"))
+        return items
+    if not table.ok:
+        items.append(_item(f"{name}: stage0 frames", False, "; ".join(table.problems)))
+        return items
+    declared = os_frames(comp)
+    hdr = f"0x{table.header_crc32:08x}"
+    if declared is None:
+        items.append(_item(f"{name}: stage0 frames", None,
+                           f"a good S0LB v2 table (hdr_crc {hdr}, {table.num_entries} region(s)), "
+                           "but the release declares no frames to compare (linux_bundle.json "
+                           "slot_image.s0lb): not a pass"))
+    else:
+        diff = s0lb.compare(table, declared)
+        items.append(_item(f"{name}: stage0 frames", not diff,
+                           "; ".join(diff) if diff else
+                           f"hdr_crc {hdr}, {table.num_entries} region(s): as the bundle "
+                           "declares"))
+    prov = os_provisioned_static(comp, release)
+    items.append(_item(f"{name}: provisioned static", _same_u32(prov, release.identity.static_id),
+                       f"provisioned for {prov}, the release is {release.identity.static_id}",
+                       identity=True))
+    return items
+
+
 # --- preparation ------------------------------------------------------------------------
 
 
@@ -404,11 +463,7 @@ def prepare_release(release: HarnessRelease, names: list[str], *, downloader: Do
                            if rel.rsplit("/", 1)[-1] == "manifest.json"})
             prepared.checks += check_overlays(comp, dirs, release, handler)
         elif comp.kind == KIND_OS_SLOT:
-            prepared.checks.append(_item(f"{comp.name}: image hash", True,
-                                         f"sha256 {comp.asset.sha256[:12]}… as signed"))
-            prepared.checks.append(_item(
-                f"{comp.name}: stage0 frame", None,
-                "the slot-image frame/compat check waits for FLOW_CONTRACT.md (not a pass)"))
+            prepared.checks += check_os_component(comp, blob, release)
     refusal = prepared.refusal()
     if refusal is not None:
         raise refusal

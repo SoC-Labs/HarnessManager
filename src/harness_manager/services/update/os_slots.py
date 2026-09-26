@@ -1,87 +1,57 @@
-"""The OS-slot seam for Linux harnesses (the Ethernet-updatable target, user µSD).
+"""The OS-slot seam for Linux harnesses (the ``ethernet`` door's OS image, user µSD).
 
-The board's user µSD holds two OS slots (A/B) that stage0 boots from. An OS
-update writes the INACTIVE slot, arms it try-once, reboots, and then the new
-slot must be confirmed healthy; if it is not (a panic, a hang, a failed
-health check), stage0 boots the old slot again. Nothing here writes the card
-itself: the board writes its own card.
+The protocol and its value types now live in ``harness_manager.core.pack`` (CCR T7-2:
+``BoardSession.os_slots``); this module re-exports them for the update service and
+its importers. The MPS3 pack's implementation is ``harness_manager_mps3.os_slots``
+(HARNESS-DIST H12), over ``pyverify.slot``.
 
-The mechanism that carries the write is NOT frozen yet (a 6910 push kind plus
-a ``slot`` verb, or SSH + ``mps3-update``; ``docs/planning/linux_lanes/
-FLOW_CONTRACT.md`` in the platform repo, not landed). So the executor talks
-to this protocol only, and the tests use a fake. A board pack provides an
-implementation as ``session.os_slots`` (see the contract change request).
+The contract (net-protocol.md v0.14 "Slot images"; SLOT_VERB_DRAFT.md with HM's
+answers in HARNESS_DISTRIBUTION.md §9)::
 
-Rescue: a Linux board whose card holds no bootable slot comes up in stage0
-RESCUE (``Health.control_channel == "rescue"``: pingable, TFTP 69, identify
-``mode:"rescue"``, no 6900). Re-provisioning a slot from there (a TFTP push of
-the slot image) belongs behind this same interface, in the pack's implementation.
+    status                               -> target "B", staged null
+    push (6910 kind 2, static_id = the image's PROVISIONED static)
+    poll status until job is ok          -> staged "B"
+    commit                               -> default "B"
+    reboot; identify/version             -> the new image answers
 
-The confirm step: on the Linux image, harnessd writes stage0's CONFIRMED marker
-itself once the boot is healthy (IMAGE_CONTRACT §8). ``confirm`` is therefore
-"make sure it is confirmed": an implementation may confirm from the host or
-wait for the board's own confirm; either way it raises if it cannot see it.
+- the board never writes the running slot nor the default one: after a commit and
+  before the reboot there is no target, so a second push needs a ``rollback`` first
+  (rule 1; HM does that itself before pushing, and says so);
+- a slot becomes the default only when it is verified (read back this boot, or it is
+  the slot stage0 booted);
+- the board CONFIRMS a healthy boot itself (harnessd writes stage0's marker), so an
+  image that never comes up healthy is undone by stage0 (2 unconfirmed boots). An image
+  that is healthy but wrong is undone by the host: ``verify`` the other slot, then
+  ``rollback`` and ``reboot`` (``harness-manager slot rollback``);
+- once the board's SSH is claimed, the mutations are accepted only from the board
+  itself: the pack tunnels them over SSH to the board's 127.0.0.1.
+
+Rescue: a Linux board whose card holds no bootable slot comes up in stage0 RESCUE
+(``Health.control_channel == "rescue"``: pingable, TFTP 69, identify ``mode:"rescue"``,
+no 6900). Provisioning a slot from there is HARNESS-DIST L3 (not frozen yet): the
+adapter reports rescue in ``slots_reason()`` and refuses.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Protocol, runtime_checkable
+from harness_manager.core.pack import (
+    SLOT_ABSENT,
+    SLOT_BAD,
+    SLOT_EMPTY,
+    SLOT_IO,
+    SLOT_VALID,
+    VERIFIED_BOOT,
+    VERIFIED_NO,
+    VERIFIED_READBACK,
+    OsSlotAdapter,
+    Progress,
+    SlotInfo,
+    SlotJob,
+    SlotStatus,
+)
 
-Progress = Callable[[str, int, int], None]
-
-SLOT_EMPTY = "empty"
-SLOT_CONFIRMED = "confirmed"
-SLOT_TRY_ONCE = "try-once"
-SLOT_BAD = "bad"
-
-
-@dataclass(frozen=True)
-class SlotInfo:
-    name: str                 # "A" | "B"
-    image_sha256: str = ""    # "" when empty or unknown
-    version: str = ""
-    state: str = SLOT_EMPTY   # empty | confirmed | try-once | bad
-
-
-@dataclass(frozen=True)
-class SlotStatus:
-    active: str                                   # the slot the board booted
-    slots: dict[str, SlotInfo] = field(default_factory=dict)
-
-    @property
-    def inactive(self) -> str:
-        others = [n for n in sorted(self.slots) if n != self.active]
-        if not others:
-            raise ValueError("the board reports no inactive slot")
-        return others[0]
-
-    @property
-    def active_info(self) -> SlotInfo:
-        return self.slots.get(self.active, SlotInfo(self.active))
-
-
-@runtime_checkable
-class OsSlotAdapter(Protocol):
-    def status(self) -> SlotStatus:
-        """Which slot is running, and what each slot holds."""
-        ...
-
-    def write_inactive(self, image: Path, *, sha256: str, version: str,
-                       progress: Progress | None = None) -> str:
-        """Write ``image`` into the inactive slot; return the slot name. Never the active one."""
-        ...
-
-    def arm_try_once(self, slot: str) -> None:
-        """Boot ``slot`` once at the next reboot; stage0 falls back unless it is confirmed."""
-        ...
-
-    def reboot(self, progress: Progress | None = None, wait_s: float = 180.0) -> dict | None:
-        """Reboot the board and witness it go down and come back (the `reboot` verb)."""
-        ...
-
-    def confirm(self, slot: str) -> None:
-        """Make sure ``slot`` is confirmed (host confirm, or wait for the board's own)."""
-        ...
+__all__ = [
+    "SLOT_ABSENT", "SLOT_BAD", "SLOT_EMPTY", "SLOT_IO", "SLOT_VALID",
+    "VERIFIED_BOOT", "VERIFIED_NO", "VERIFIED_READBACK",
+    "OsSlotAdapter", "Progress", "SlotInfo", "SlotJob", "SlotStatus",
+]

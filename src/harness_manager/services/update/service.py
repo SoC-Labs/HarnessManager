@@ -225,10 +225,13 @@ class UpdateService:
                                     if p.is_dir() and p.name.upper().startswith("HBI")))
             except (HarnessError, OSError):
                 revs = ()
-        os_sha = ""
+        os_sha = os_crc = os_pending = ""
         if slots is not None:
             try:
-                os_sha = slots.status().active_info.image_sha256
+                st = slots.status()
+                active = st.active_info
+                os_sha, os_crc = active.image_sha256, getattr(active, "hdr_crc", "")
+                os_pending = getattr(st, "pending_commit", "")
             except HarnessError:
                 os_sha = ""
         witness = getattr(controller, "last_reboot", None)
@@ -236,7 +239,8 @@ class UpdateService:
         return BoardView(board_id=cand.board_id, pack=cand.pack, identity=ident,
                          identity_known=known, has_storage=storage is not None,
                          has_controller=controller is not None, has_os_slots=slots is not None,
-                         os_active_sha=os_sha, sd_revisions=revs,
+                         os_active_sha=os_sha, os_active_crc=os_crc, os_pending=os_pending,
+                         sd_revisions=revs,
                          mcc_firmware=getattr(boot, "firmware", "") or "",
                          hub_sd=self.hub_door_view(session))
 

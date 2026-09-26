@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -409,6 +409,175 @@ class XvcAdapter(Protocol):
         ...
 
 
+# --- OS boot slots and the user card (CCR T7-2, HARNESS-DIST H12; lane LINUX-SLOTS) ------------
+#
+# A Linux harness boots from one of two OS slots (A/B) on the board's user microSD, and
+# the same card holds the D13 overlay store (the default overlay loaded at power-on).
+# The board writes its own card: a host PUSHES an image into the slot that is neither
+# running nor the default, the board reads it back, and ``commit`` makes it the default
+# stage0 boots next. Every act answers the same status (the state AFTER the act).
+# Wire: net-protocol.md v0.14 "Slot images" + v0.13 "User microSD"; the host side is
+# SLOT_VERB_DRAFT.md with HM's answers (HARNESS_DISTRIBUTION.md §9).
+
+#: A slot's ``state`` as the board reports it.
+SLOT_ABSENT, SLOT_EMPTY, SLOT_BAD, SLOT_VALID, SLOT_IO = "absent", "empty", "bad", "valid", "io"
+#: A slot's ``verified``: ``boot`` = stage0 booted this OS from it; ``readback`` = its region
+#: CRCs were read back off the card this boot and bound to the fabric static_id.
+VERIFIED_NO, VERIFIED_BOOT, VERIFIED_READBACK = "no", "boot", "readback"
+
+
+@dataclass(frozen=True)
+class SlotInfo:
+    """One OS slot. The board's words, plus what THIS host pushed there (when it did)."""
+
+    name: str                       # "A" | "B"
+    state: str = SLOT_EMPTY         # absent | empty | bad | valid | io
+    hdr_crc: str = ""               # "0x........": the S0LB table CRC, the image's identity on the card
+    length: int = 0
+    sid: str = ""                   # the static_id a slot record binds ("" = no record)
+    verified: str = VERIFIED_NO     # no | boot | readback
+    err: str = ""
+    image_sha256: str = ""          # host-side: the image HM pushed under this hdr_crc ("" = unknown)
+    version: str = ""               # host-side: the release HM pushed there ("" = unknown)
+
+    @property
+    def valid(self) -> bool:
+        return self.state == SLOT_VALID
+
+
+@dataclass(frozen=True)
+class SlotJob:
+    """The board's one card job (a push's or a verify's read-back)."""
+
+    act: str = "none"               # none | push | verify
+    slot: str = ""
+    state: str = "idle"             # idle | writing | verifying | ok | failed
+    got: int = 0
+    length: int = 0
+    err: str = ""
+
+
+@dataclass(frozen=True)
+class SlotStatus:
+    """``slot status``: which slot runs, which is the default, where a push would go."""
+
+    running: str                                  # A | B | rescue | none | unknown
+    slots: dict[str, SlotInfo] = field(default_factory=dict)
+    card: bool = True
+    default: str = ""
+    target: str = ""                              # "" = no free slot (rule 1: roll back first)
+    staged: str = ""                              # pushed + read back this boot: what commit flips to
+    fabric_sid: str = ""
+    seq: int = 0
+    job: SlotJob = field(default_factory=SlotJob)
+    raw: dict[str, Any] = field(default_factory=dict, compare=False)
+
+    @property
+    def active(self) -> str:
+        """The slot the board booted (T7's name for ``running``)."""
+        return self.running
+
+    @property
+    def active_info(self) -> SlotInfo:
+        return self.slots.get(self.running, SlotInfo(self.running, state=SLOT_ABSENT))
+
+    @property
+    def inactive(self) -> str:
+        """Where a push goes: the board's ``target``; raises when there is none."""
+        if self.target:
+            return self.target
+        raise ValueError("the board reports no free slot: roll back the pending commit first")
+
+    @property
+    def pending_commit(self) -> str:
+        """The slot committed as the default but not booted yet ("" = none). While there is
+        one the board has no push target (rule 1): it must be rolled back first."""
+        if self.running in ("A", "B") and self.default and self.default != self.running:
+            return self.default
+        return ""
+
+
+@runtime_checkable
+class OsSlotAdapter(Protocol):
+    """``BoardSession.os_slots``: the Linux harness's A/B OS slots (CCR T7-2).
+
+    None on a session whose link cannot carry them; an adapter whose ``slots_reason()``
+    is not "" cannot be used now (a bare-metal harness, no card, stage0 rescue). Every
+    mutation raises ``HarnessError``; nothing here ever writes the running or the default
+    slot (the board refuses it too).
+    """
+
+    def slots_reason(self) -> str:
+        """``""`` when the slot verbs can be used on this board now; else why not."""
+        ...
+
+    def status(self) -> SlotStatus:
+        ...
+
+    def push(self, image: Path, *, static_id: str, sha256: str = "", version: str = "",
+             progress: Progress | None = None) -> SlotStatus:
+        """Push ``image`` (an S0LB boot image provisioned for ``static_id``) into the board's
+        target slot and wait for the card read-back. Returns the status (``staged``)."""
+        ...
+
+    def commit(self, slot: str | None = None) -> SlotStatus:
+        """Make the staged slot the default (``slot`` guards which one)."""
+        ...
+
+    def rollback(self, slot: str | None = None) -> SlotStatus:
+        """Make the other slot the default again (it must be verified)."""
+        ...
+
+    def verify(self, slot: str | None = None, progress: Progress | None = None) -> SlotStatus:
+        """Read ``slot`` back off the card (default: the one that is not the default)."""
+        ...
+
+    def reboot(self, progress: Progress | None = None, wait_s: float = 180.0) -> dict | None:
+        """Reboot the board and witness it go down and come back."""
+        ...
+
+
+#: The user microSD's overlay-store states (net-protocol.md v0.13 ``usd.state``).
+CARD_NO_CARD_STATES = ("no_hw", "none")
+
+
+@dataclass(frozen=True)
+class CardStatus:
+    """``card status``: the user microSD, its D13 overlay store and (Linux) its OS slots."""
+
+    present: bool
+    state: str = ""                  # usd.state: none | init | foreign | empty | valid | stale | ...
+    text: str = ""                   # the CLCD row-4 string
+    card_mb: int | None = None
+    default: dict[str, str] | None = None   # {rm_id, rm_name, static_id, slot}: loaded at power-on
+    boot: str = ""                   # the power-on decision: loaded | skipped | none | failed:<why>
+    committable: bool = False
+    os_slots: SlotStatus | None = None      # Linux: the A/B boot slots on the same card
+    notes: tuple[str, ...] = ()
+    raw: dict[str, Any] = field(default_factory=dict, compare=False)
+
+
+@runtime_checkable
+class CardAdapter(Protocol):
+    """``BoardSession.card``: the board's user microSD (D13). No card is not an error:
+    ``status`` says so, and every mutation refuses cleanly without touching anything."""
+
+    def card_reason(self) -> str:
+        """``""`` when this harness has a user-microSD store; else why not."""
+        ...
+
+    def status(self) -> CardStatus:
+        ...
+
+    def commit(self, progress: Progress | None = None) -> dict[str, Any]:
+        """Persist the RUNNING overlay pair as the power-on default (the v0.13 re-push)."""
+        ...
+
+    def clear(self) -> CardStatus:
+        """Invalidate the default: the board boots the greybox at the next power-on."""
+        ...
+
+
 # --- session and pack ----------------------------------------------------------------
 
 
@@ -435,6 +604,8 @@ class BoardSession(ABC):
     power: PowerAdapter | None = None
     xvc: XvcAdapter | None = None          # CCR X-3: fabric debug over the harness's XVC
     panel: PanelAdapter | None = None      # CCR PANEL-5: the front panel (core.panel)
+    os_slots: OsSlotAdapter | None = None  # CCR T7-2: the Linux harness's A/B OS slots
+    card: CardAdapter | None = None        # CCR LS-1: the user microSD (D13 overlay store)
 
     def close(self) -> None:  # noqa: B027 - optional hook
         """Release anything the session holds. Idempotent."""

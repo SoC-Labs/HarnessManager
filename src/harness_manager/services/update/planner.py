@@ -39,6 +39,8 @@ from .schema import (
     Component,
     HarnessIdentity,
     HarnessRelease,
+    os_header_crc,
+    os_provisioned_static,
 )
 from .version import at_least, compare_safe, same_version
 
@@ -78,6 +80,9 @@ class Plan:
     skipped: dict[str, str] = field(default_factory=dict)
     base: bool = False                    # the config SD will be written
     os_slot: bool = False                 # the OS slot will be written
+    #: Why a door this board does not offer here is needed (LINUX-SLOTS: an OS image for
+    #: another static cannot go through the Ethernet door). Also listed in ``blockers``.
+    needs_door: list[str] = field(default_factory=list)
     reboot_wait_s: float | None = None    # None: the pack's own budget for the running harness
     # HUB-SD (H10, U9/U10): the door a base goes through ("" = the local Debug USB, "hub" =
     # the board pack's hub SD door), what it is, the typed phrase that names the board, its
@@ -86,6 +91,7 @@ class Plan:
     hub: dict[str, Any] = field(default_factory=dict)
     board_phrase: str = ""
     auto_revert: bool = False
+    os_pending: str = ""                  # a committed, unbooted slot rolled back first (rule 1)
 
     @property
     def version(self) -> str:
@@ -148,6 +154,7 @@ class Plan:
             "base": self.base, "os_slot": self.os_slot,
             "via": self.via, "hub": dict(self.hub), "board_phrase": self.board_phrase,
             "auto_revert": self.auto_revert,
+            "needs_door": list(self.needs_door),
             "fingerprint": self.fingerprint(),
         }
 
@@ -173,6 +180,8 @@ class BoardView:
     has_controller: bool = False
     has_os_slots: bool = False
     os_active_sha: str = ""               # the running OS slot image, when the adapter says
+    os_active_crc: str = ""               # the running slot's S0LB table CRC (the board's hdr_crc)
+    os_pending: str = ""                  # a slot committed and not booted yet (rule 1)
     sd_revisions: tuple[str, ...] = ()    # MB/HBI0309<rev> dirs seen on the config SD
     mcc_firmware: str = ""
     # HUB-SD: the pack's hub SD door (``hub_door``), with the lease holder/mine/queue;
@@ -185,6 +194,16 @@ def _same_u32(a: str, b: str) -> bool:
         return int(a, 16) == int(b, 16)
     except (TypeError, ValueError):
         return a.lower() == b.lower()
+
+
+def os_image_running(comp: Component, board: BoardView) -> bool:
+    """Does the board already run this OS image? By the sha256 this host recorded pushing
+    under the running slot, or by the image's declared S0LB table CRC (the board's
+    ``hdr_crc``: what the board itself knows the image by)."""
+    if board.os_active_sha and board.os_active_sha.lower() == comp.asset.sha256:
+        return True
+    want = os_header_crc(comp)
+    return bool(want and board.os_active_crc and _same_u32(want, board.os_active_crc))
 
 
 def running_summary(ident: BoardIdentity | None) -> dict[str, Any]:
@@ -404,8 +423,7 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
         plan.warnings.append(f"this is a ROLLBACK from harness {newer} to "
                              f"{rel.version} (from the signed release history)")
     os_comp = next((c for c in rel.components if c.kind == KIND_OS_SLOT), None)
-    os_needed = os_comp is not None and (
-        not board.os_active_sha or board.os_active_sha.lower() != os_comp.asset.sha256)
+    os_needed = os_comp is not None and not os_image_running(os_comp, board)
     if overlays_only:
         base_needed = os_needed = False
         if not board.identity_known or not ident.shell_id:
@@ -439,6 +457,7 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
 
     plan.base = base_needed
     plan.os_slot = os_needed and os_comp is not None
+    plan.os_pending = board.os_pending if plan.os_slot else ""
     plan.rekey = rekey and (plan.base or plan.os_slot)
     if plan.base and not (board.identity_known and ident.shell_id):
         # The running static_id is unknown, so this install MAY re-key the board: never let
@@ -464,6 +483,19 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     if plan.os_slot and not board.has_os_slots:
         plan.blockers.append("this release carries an OS slot image, but this harness offers no "
                              "OS slot update (a Linux harness with the slot verbs is needed)")
+    if plan.os_slot and os_comp is not None and board.identity_known and ident.shell_id:
+        # LINUX-SLOTS: the Ethernet door carries an OS image only for the RUNNING static
+        # (the board refuses a push provisioned for any other fabric). A Linux release on
+        # another static needs its base through the config SD first: the Debug USB or the
+        # hub, then the image through stage0 rescue (HARNESS-DIST L3, not built yet).
+        prov = os_provisioned_static(os_comp, rel)
+        if not _same_u32(prov, ident.shell_id):
+            why = (f"needs Debug USB or hub: the OS image is provisioned for static {prov}, "
+                   f"the board runs {ident.shell_id.lower()}; the Ethernet door carries only "
+                   "an image for the running static (the base goes through the config SD "
+                   "first, then the image through stage0 rescue, which is not built yet)")
+            plan.needs_door.append(why)
+            plan.blockers.append(why)
 
     if plan.base or plan.os_slot:
         plan.mode = MODE_FULL
@@ -508,9 +540,14 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
                     else f"{c.kind} files")
             s.append(PlanStep("store-overlays", f"{what} into the local store (no SD write)",
                               c.name))
+    if plan.os_slot and plan.os_pending:
+        s.append(PlanStep("rollback-os-slot", f"slot {plan.os_pending} is committed but not "
+                                              "booted: roll it back first, so a slot is free "
+                                              "(rule 1)"))
     if plan.os_slot:
-        s.append(PlanStep("write-os-slot", "write the INACTIVE OS slot, arm try-once "
-                                           "(stage0 rolls back if it does not confirm)"))
+        s.append(PlanStep("write-os-slot", "push the image into the free OS slot, read it back, "
+                                           "commit it as the default (stage0 goes back to the "
+                                           "old slot if it never comes up healthy)"))
     if plan.base and plan.via == hub_door.VIA_HUB:
         s.extend(PlanStep(*step) for step in hub_door.steps(plan, rel))
     elif plan.base:
@@ -534,4 +571,5 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
         if plan.base and plan.via == hub_door.VIA_HUB and plan.auto_revert:
             s.append(PlanStep(*hub_door.revert_step(plan)))
     if plan.os_slot:
-        s.append(PlanStep("confirm-os-slot", "confirm the new slot so stage0 keeps it"))
+        s.append(PlanStep("confirm-os-slot", "the board runs the new slot, as the default, "
+                                             "verified by its boot"))

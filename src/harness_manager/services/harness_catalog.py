@@ -194,7 +194,8 @@ def what_changes(rel: HarnessRelease, ident: BoardIdentity | None,
                                                *(f"+{p}" for p in sd["added"]),
                                                *(f"-{p}" for p in sd["removed"])]))
     if os_image:
-        lines.append("an OS slot image: written to the inactive slot, try-once")
+        lines.append("an OS slot image: pushed to the free slot and committed; stage0 goes "
+                     "back to the old one if it never comes up healthy")
     if not lines:
         lines.append("nothing on the board changes: it reports this release's identity"
                      if fw is not False and not rekey else "the base changes")
@@ -232,6 +233,9 @@ def verdict_of(plan: Plan, rel: HarnessRelease, board: BoardView, *, app_version
         door.append("it carries an OS slot image: it needs a Linux harness with the slot verbs "
                     "and a card")
         needs.append("linux-slot")
+    for why in plan.needs_door:           # LINUX-SLOTS: an OS image for another static
+        door.append(why)
+        needs.append("debug-usb-or-hub")
     if plan.rekey:
         needs.append("consent")
     if bad:
@@ -264,7 +268,7 @@ def _fits_why(plan: Plan) -> str:
     elif plan.base:
         what.append("the config SD is rewritten and the board rebooted")
     if plan.os_slot:
-        what.append("the OS image goes to the inactive slot, try-once")
+        what.append("the OS image goes to the free slot over Ethernet, then a reboot")
     return ("rollback on the same static: " if back else "same static: ") + "; ".join(what)
 
 
