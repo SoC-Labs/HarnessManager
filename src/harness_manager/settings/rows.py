@@ -412,5 +412,8 @@ ADVANCED = (
 CORE_ROWS: tuple[Setting, ...] = (GENERAL + HUBS + BOARDS + INLINE_HUB + TOOLS + UPDATES + KITS
                                   + DEBUG + CONSOLES + PANEL + ADVANCED)
 
-#: Variables that name output markers or install paths, not settings.
-NOT_SETTINGS_ENV = frozenset({"HARNESS_MANAGER_SYSMON", "HARNESS_MANAGER_SYSMON_ERR"})
+#: Variables that name output markers or install paths, not settings; and the demo's review
+#: knob (DEMO-ALL: ``HARNESS_MANAGER_DEMO_UPDATE=staged`` stages a pretend app update in
+#: ``--demo`` only; it is not a setting and never shows in Settings).
+NOT_SETTINGS_ENV = frozenset({"HARNESS_MANAGER_SYSMON", "HARNESS_MANAGER_SYSMON_ERR",
+                              "HARNESS_MANAGER_DEMO_UPDATE"})
