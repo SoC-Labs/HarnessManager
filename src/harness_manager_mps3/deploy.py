@@ -389,14 +389,19 @@ class Mps3Deploy:
 
     def commit_pusher(self, *, windowed: bool, impl: str,
                       on_frame: Callable[[BitstreamKind, int], None] | None = None,
-                      ) -> BitstreamPusher:
+                      stall_s: float | None = None) -> BitstreamPusher:
         """The pusher a card ``commit`` sends its pair with: 6910 only, windowed exactly when
         the swap's push is (a WINDOWED shell deadlocks on a plain push), the Linux stall
-        limit. "Keep on the card" and ``harness-manager card commit`` (LINUX-SLOTS) share it."""
+        limit. "Keep on the card" and ``harness-manager card commit`` (LINUX-SLOTS) share it.
+        ``stall_s`` (SLOT-TIMING, ``harness-manager card commit``): a longer per-chunk stall
+        limit, for the card's slow writes; never a shorter one."""
+        timeout_s = push_timeout_s(impl, TRANSPORT_TCP)
+        if stall_s is not None:
+            timeout_s = max(timeout_s, stall_s)
         return _ReportingPusher(on_frame=on_frame or (lambda kind, n: None),
                                 host=self._shell.host, transport="tcp", tcp_port=self.push_port,
                                 windowed=windowed, window=DEFAULT_ACK_WINDOW,
-                                timeout_s=push_timeout_s(impl, TRANSPORT_TCP))
+                                timeout_s=timeout_s)
 
     def deploy(self, overlay: OverlayRef, progress: Progress | None = None, *,
                keep_on_card: bool = False) -> DeployResult:

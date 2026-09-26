@@ -66,7 +66,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `POST /boards/{bid}/consoles/{name}/export` `{port?}` | `consoles.export_tcp` | `{host, port}` |
 | `GET /boards/{bid}/debug` · `POST .../debug/detect` · `POST .../debug/up` · `POST .../debug/down` | `debug.status`/`detect`/`up`/`down` | `DebugStatus` / `{idcode}` / 202 job / `DebugStatus` |
 | `GET /boards/{bid}/controller/temps` · `/osc` | `session.controller.temperatures`/`oscillators` | `{readings}` |
-| `POST /boards/{bid}/controller/reboot` `{wait_s?}` | `session.controller.reboot` | 202 job; the result is the evidence |
+| `POST /boards/{bid}/controller/reboot` `{wait_s?, force?, consent?}` | `session.controller.reboot` | 202 job; the result is the evidence. SLOT-TIMING: the job fails HELD (naming the card job) while the board's OS-slot card job is `writing` or `verifying`; `force: true` with `consent: "RESET <bid>"` resets anyway (the recovery of a job that never ends), else REFUSED |
 | `POST /boards/{bid}/controller/command` `{line, arm?}` | `session.controller.command` | `{reply}` (allowlist enforced by the adapter) |
 | `GET /boards/{bid}/storage/pending` | `session.storage.pending` | `{pending: obj or null}` |
 | `POST /boards/{bid}/storage/backup` `{dest_dir?}` | `session.storage.backup` | 202 job; the result is a BackupRecord |
@@ -105,7 +105,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 ## Events
 - **Endpoint:** `WS /api/v1/events?token=…&topics=board.*,deploy.*`.
 - **Each text frame:** `{"topic", "board_id", "data", "at"}`, one per `core.events.Event`, with the topics listed in docs/CONTRACTS.md.
-- **Job events:** `job.started`, `job.progress {job, phase, done, total}`, `job.done {job, result}` and `job.failed {job, error}`.
+- **Job events:** `job.started`, `job.progress {job, phase, done, total}`, `job.done {job, result}` and `job.failed {job, error}`. SLOT-TIMING (additive): a long card job's `job.progress` (and `GET /jobs/{id}` `progress`) adds `slot`, `rate_bps`, `eta_s` and `text` ("writing slot B: 12.3 MB / 29 MB, ~6 min left").
 - **Drops:** `events.dropped {dropped}` is sent when a slow client's bounded queue drops its oldest events.
 
 ## The Python client (T13)
@@ -153,7 +153,7 @@ Events: `lease.state {target, state: held|queued|released|expired|lost, holder, 
 | Method and path | Returns |
 |---|---|
 | `GET /boards/{bid}/power` | `{readings: [Reading], cycle_reason, device}`. `cycle_reason` is `""` when the board can be cycled. |
-| `POST /boards/{bid}/power/cycle` `{off_s?}` | 202 job `power_cycle`; the result is the device's evidence. |
+| `POST /boards/{bid}/power/cycle` `{off_s?, force?, consent?}` | 202 job `power_cycle`; the result is the device's evidence. SLOT-TIMING: refused like `controller/reboot` while the card job runs (`force` + `consent: "RESET <bid>"`). |
 | `POST /update/check` `{board_id?, source?, channel?, version?}` | 202 job `update_check`. The result is the check: the channel, the releases, the app update, and the board's plan with `fingerprint`, `mode`, `rekey`, `blockers`, `warnings`, `steps`. Read-only. |
 | `POST /boards/{bid}/update/harness` `{fingerprint, rekey_phrase?, version?}` | 202 job `update_harness`. The plan is recomputed and must match `fingerprint`. A re-key needs `rekey_phrase == "REKEY <static_id>"`. The result is the outcome. |
 | `POST /boards/{bid}/update/rollback` | 202 job `update_rollback` |
@@ -424,10 +424,11 @@ The Linux harness's OS slots A/B on the board's user microSD (net-protocol v0.14
 
 | Method and path | Returns |
 |---|---|
-| `GET /boards/{bid}/slots` | `{available, reason, slots}`. `slots` is `{card, running, default, target, staged, fabric_sid, seq, pending_commit, slots: {A, B: {state, hdr_crc, len, sid, verified, err, image_sha256, version, running, default}}, job: {act, slot, state, got, len, err}}`. |
+| `GET /boards/{bid}/slots` | `{available, reason, slots}`. `slots` is `{card, running, default, target, staged, fabric_sid, seq, pending_commit, slots: {A, B: {state, hdr_crc, len, sid, verified, err, image_sha256, version, running, default}}, job: {act, slot, state, got, len, err, busy, rate_bps, eta_s, text}}`. SLOT-TIMING (additive): `busy` is `writing`/`verifying` (nothing may reset the board meanwhile), `rate_bps`/`eta_s` this service's estimate (the observed rate once the bytes move, else `mps3.slot.card_write_bps`/`card_read_bps`), `text` the one line. |
 
 - **Not available is not an error:** a harness without OS slots (bare metal; a Linux harness with no card or in stage0 rescue) answers 200 with `available: false` and the `reason`. Nothing is sent to the board beyond `version` then.
 - **Errors:** 404 ABSENT for a board that is not open; 409 HELD while a job runs on the board (the board gate); 7 UNREACHABLE when the harness does not answer.
+- **The reset guard (SLOT-TIMING, `services/reset_guard.py`).** While the card job is `writing` or `verifying` (B2 silicon: a reset mid-job wedged the card), every reset is refused HELD with the job named ("MCC REBOOT refused: slot B is being written (12.3/29 MB); a reset now can wedge the card. Wait ~6 min."): `controller/reboot`, `controller/command` REBOOT (409 at once), `power/cycle`, `deploy` and `restore` (the job fails), the harness's own reboot, and the update's reboot step (it waits for the job instead). Only the MCC REBOOT and the power cycle take `force` + `consent`. The card line (`GET /card` `line`) is the job's `text` while it runs.
 
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)
 - **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.

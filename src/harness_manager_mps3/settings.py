@@ -122,7 +122,8 @@ def mps3_rows(*, console_pace_s: float = _c.DUT_CONSOLE_PACE_S,
     return (*_pack_rows(console_pace_s, rbb_port, push_port or _c.PUSH_PORT,
                         tftp_port or TFTP_PORT, DEFAULT_TIMING.pace_s, SHARE_PACE_S),
             *_board_rows(DEFAULT_TARGET, DEFAULT_SHARE_BAUD, REACH_CHOICES,
-                         DEFAULT_HW_SERVER, DEFAULT_DEVICE, SYSMON_MIN_INTERVAL_S))
+                         DEFAULT_HW_SERVER, DEFAULT_DEVICE, SYSMON_MIN_INTERVAL_S),
+            *_slot_rows())
 
 
 def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: int,
@@ -258,4 +259,30 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
              "The board's pinned SSH host key, written by `board claim` (a changed key is "
              "refused; clear it only for a re-provisioned board)", at="claim.py:323",
              scope="board", apply="reopen", check=_host_key),
+    )
+
+
+def _slot_rows() -> tuple[Setting, ...]:
+    """SLOT-TIMING: the OS-slot card jobs' timing. The card's rates are the Linux lead's B2
+    measurements (2026-09-26; ``os_slots.py`` "the card's timing"): one place for them, and
+    every budget and first ETA is derived from them (``os_slots.slot_timeouts``)."""
+    from . import os_slots as _os
+
+    return (
+        _row(_os.CARD_WRITE_BPS_KEY, "int", _os.CARD_WRITE_BPS, "Harness + kits",
+             "How fast the board's user microSD takes a write, bytes a second (B2: ~70 KB/s; "
+             "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:204",
+             scope="pack", advanced=True, env=_os.CARD_WRITE_BPS_ENV, check=_positive),
+        _row(_os.CARD_READ_BPS_KEY, "int", _os.CARD_READ_BPS, "Harness + kits",
+             "How fast the board reads its user microSD back, bytes a second (B2: 14-135 "
+             "KB/s, the slowest is the default)", at="os_slots.py:205", scope="pack",
+             advanced=True, env=_os.CARD_READ_BPS_ENV, check=_positive),
+        _row(_os.JOB_TIMEOUT_KEY, "float", _os.JOB_TIMEOUT_S, "Harness + kits",
+             "The least cap on a whole OS-slot push or verify, in seconds (a bigger image "
+             "gets its size at the card's rates, x1.5)", at="os_slots.py:236", scope="pack",
+             env=_os.JOB_TIMEOUT_ENV, check=_positive),
+        _row(_os.STALL_KEY, "float", _os.STALL_S, "Harness + kits",
+             "How long an OS-slot push or its card job may go without moving a byte before "
+             "it is stuck, in seconds", at="os_slots.py:237", scope="pack",
+             env=_os.STALL_ENV, check=_positive),
     )

@@ -8,7 +8,7 @@ import { panelState } from "../actions.js";
 import { capState, valueText } from "../format.js";
 import { existingSession } from "../consoles.js";
 import { html, useEffect } from "../lib.js";
-import { boardState, changed, hasCardStore, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection } from "../store.js";
+import { boardState, cardJobBusy, changed, hasCardStore, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection } from "../store.js";
 import { consoleRows, durationText, leaseLeft, openPty, week } from "../week.js";
 import { ScreenCommand } from "./consoles.js";
 import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./details.js";
@@ -275,6 +275,12 @@ export function cardLine(b) {
   const bits = [c.state || "?"];
   if (c.default) bits.push(`default ${c.default.rm_name || c.default.rm_id || "?"} [${c.default.slot || "?"}]`);
   const os = c.os_slots;
+  // SLOT-TIMING: a card job that writes or reads back is the line ("writing slot B: 12.3 MB /
+  // 29 MB, ~6 min left"): nothing may reset the board until it ends.
+  if (cardJobBusy(c) && b.cardText) {
+    return { text: b.cardText, muted: false,
+      title: "a reset now can wedge the card: reboot, power cycle, deploy and restore wait for it" };
+  }
   if (os && os.slots) {
     bits.push("OS " + Object.keys(os.slots).sort()
       .map((n) => `${n}:${os.slots[n].state}${n === os.running ? "*" : ""}`).join(" "));

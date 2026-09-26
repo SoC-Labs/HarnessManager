@@ -276,28 +276,46 @@ def report_error(fmt: str, exc: HarnessError, *, out: TextIO | None = None,
 
 class StderrProgress:
     """A ``Progress`` callable: ``(phase, done, total)`` lines on stderr, throttled to
-    phase changes and 10 % steps so a 12 MB write does not print 12 000 lines."""
+    phase changes and 10 % steps so a 12 MB write does not print 12 000 lines.
+
+    SLOT-TIMING: it takes ``detail`` (``core.pack.report_progress``). A long card job's line
+    is its text and rate ("push: writing slot B: 12.3 MB / 29 MB, ~6 min left (70 KB/s)"),
+    printed on a phase change, a 10 % step, or every ``DETAIL_EVERY_S`` (its ETA moves
+    while its bytes do not, in a read-back the board does not count)."""
+
+    takes_detail = True
+    DETAIL_EVERY_S = 30.0
 
     def __init__(self, label: str, err: TextIO | None = None) -> None:
         self.label = label
         self._err = err
         self._last: tuple[str, int] | None = None
+        self._last_at = 0.0
         self.phases: list[str] = []
+        self.lines: list[str] = []
 
-    def __call__(self, phase: str, done: int, total: int) -> None:
+    def __call__(self, phase: str, done: int, total: int,
+                 detail: dict | None = None) -> None:
         if not self.phases or self.phases[-1] != phase:
             self.phases.append(phase)
         step = (100 * done // total // 10) if total else -1
         key = (phase, step)
-        if key == self._last:
+        text = str((detail or {}).get("text") or "")
+        now = time.monotonic()
+        if key == self._last and not (text and now - self._last_at >= self.DETAIL_EVERY_S):
             return
         self._last = key
-        if total:
+        self._last_at = now
+        if text:
+            rate = (detail or {}).get("rate_bps") or 0
+            text = f"{self.label}: {text}" + (f" ({rate / 1000:.0f} KB/s)" if rate else "")
+        elif total:
             text = f"{self.label}: {phase} {done}/{total} ({100 * done // total}%)"
         elif done:
             text = f"{self.label}: {phase} {done}"
         else:
             text = f"{self.label}: {phase}"
+        self.lines.append(text)
         stream = self._err or sys.stderr
         stream.write(text + "\n")
         stream.flush()

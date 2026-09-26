@@ -11,8 +11,10 @@ from pathlib import Path
 from harness_manager.core import capabilities as C
 from harness_manager.core.errors import AbsentError, ExitCode, RefusedError, UsageError
 from harness_manager.core.pack import BackupRecord
+from harness_manager.services import reset_guard
 
 from .context import Ctx
+from .guard import guard_consent, is_reboot_line
 from .output import Result, StderrProgress, reading_human, reading_json, reading_row
 
 # --- reset ---------------------------------------------------------------------------------
@@ -88,17 +90,26 @@ def cmd_mcc(ctx: Ctx) -> int:
                 human=[reading_human(r) for r in readings] or ["no readings"]))
             return ExitCode.OK
         if action == "cmd":
-            reply = ctl.command(a.line)            # the allowlist lives in the adapter
+            if is_reboot_line(a.line):             # SLOT-TIMING: a REBOOT is a reset
+                force, consent = guard_consent(ctx, session, reset_guard.ACTION_MCC_REBOOT)
+                with reset_guard.guarded(session, reset_guard.ACTION_MCC_REBOOT, force=force,
+                                         consent=consent):
+                    reply = ctl.command(a.line)
+            else:
+                reply = ctl.command(a.line)        # the allowlist lives in the adapter
             ctx.emit(Result("mcc cmd", {"board_id": cand.board_id, "command": a.line,
                                         "reply": reply},
                             rows=[[cand.board_id, a.line, reply]],
                             human=reply.splitlines() or ["(no reply text)"]))
             return ExitCode.OK
-        # reboot
+        # reboot. SLOT-TIMING: never while the board's card job writes or reads back.
+        force, consent = guard_consent(ctx, session, reset_guard.ACTION_MCC_REBOOT)
         ctx.confirm(f"reboot {cand.board_id}? The board reloads from its SD and the running "
                     "design is lost")
         progress = StderrProgress("reboot", ctx.err)
-        ctl.reboot(progress=progress, wait_s=a.wait)
+        with reset_guard.guarded(session, reset_guard.ACTION_MCC_REBOOT, force=force,
+                                 consent=consent):
+            ctl.reboot(progress=progress, wait_s=a.wait)
     ctx.emit(Result("mcc reboot", {"board_id": cand.board_id, "result": "rebooted",
                                    "phases": progress.phases},
                     rows=[[cand.board_id, "rebooted", progress.phases]],

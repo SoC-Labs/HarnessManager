@@ -100,9 +100,9 @@ def test_a_pack_declares_no_settings_unless_it_says_so():
 
 def test_negative_twin_the_mps3_pack_says_so():
     rows = pack_rows(Mps3Pack())
-    assert len(rows) == 34 and {s.pack for s in rows} == {"mps3"}
+    assert len(rows) == 38 and {s.pack for s in rows} == {"mps3"}    # +4: SLOT-TIMING
     schema, layer = with_packs(core_schema(), [Mps3Pack()])
-    assert len(schema.rows) == len(core_schema().rows) + 34
+    assert len(schema.rows) == len(core_schema().rows) + 38
     assert layer["mps3.console.pace_ms"] == 20
 
 
@@ -270,6 +270,13 @@ def test_the_defaults_are_the_readers_constants():
     assert (r["mps3.identify.port"].default, r["mps3.push_port"].default,
             r["mps3.tftp_port"].default) == (c.IDENTIFY_PORT, c.PUSH_PORT, TFTP_PORT)
     assert r["boards.*.sysmon.min_interval_s"].default == telemetry.SYSMON_MIN_INTERVAL_S
+    # SLOT-TIMING: the OS-slot card timing rows
+    from harness_manager_mps3 import os_slots
+
+    assert (r["mps3.slot.job_timeout_s"].default, r["mps3.slot.push_timeout_s"].default) \
+        == (os_slots.JOB_TIMEOUT_S, os_slots.STALL_S) == (1800.0, 900.0)
+    assert (r["mps3.slot.card_write_bps"].default, r["mps3.slot.card_read_bps"].default) \
+        == (os_slots.CARD_WRITE_BPS, os_slots.CARD_READ_BPS) == (70_000, 14_000)
 
 
 def test_negative_twin_the_instance_values_are_the_pack_defaults():
@@ -475,7 +482,7 @@ def test_every_mps3_variable_is_a_pack_row_and_every_row_variable_is_read():
     missing, ghosts = _coverage(mps3_rows())
     assert not missing, f"not declared in harness_manager_mps3/settings.py: {missing}"
     assert not ghosts, f"pack rows name variables nothing reads: {ghosts}"
-    assert len(_pack_env_names()) == 8
+    assert len(_pack_env_names()) == 12                            # +4: SLOT-TIMING
     core = {s.env for s in core_schema().rows}
     assert not {n for n in core if n.startswith(PACK_ENV)}         # none is the core's
 

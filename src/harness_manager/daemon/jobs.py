@@ -42,6 +42,7 @@ from typing import Any
 from harness_manager.cli.output import jsonable
 from harness_manager.core.errors import ActionFailedError, HarnessError, HeldError
 from harness_manager.core.events import Event, EventBus
+from harness_manager.core.pack import TAKES_DETAIL, detail_of
 
 from .wire import error_object
 
@@ -256,10 +257,14 @@ class JobManager:
         return job
 
     def _progress_fn(self, job: Job) -> ProgressFn:
-        def progress(phase: str, done: int, total: int) -> None:
+        def progress(phase: str, done: int, total: int,
+                     detail: dict[str, Any] | None = None) -> None:
+            # SLOT-TIMING: a long card job's rate, ETA and one line ride along (additive).
+            extra = detail_of(detail or {})
             now = time.monotonic()
             with job._lock:
-                job.progress = {"phase": phase, "done": int(done or 0), "total": int(total or 0)}
+                job.progress = {"phase": phase, "done": int(done or 0), "total": int(total or 0),
+                                **extra}
                 new_phase = not job.phases or job.phases[-1] != phase
                 if new_phase:
                     job.phases.append(phase)
@@ -270,7 +275,8 @@ class JobManager:
             if due:
                 self._publish("job.progress", job, {"job": job.id, "phase": phase,
                                                     "done": int(done or 0),
-                                                    "total": int(total or 0)})
+                                                    "total": int(total or 0), **extra})
+        setattr(progress, TAKES_DETAIL, True)
         return progress
 
     def _run(self, job: Job, fn: Callable[[ProgressFn], Any],

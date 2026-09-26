@@ -15,9 +15,14 @@ gives three unavailable rows with the reason, never a 0.
 is refused with exit 12 when the device cannot switch the power (a meter-only
 INA260, ``power.cycle = false``, no meter), with the reason.
 
-Exit codes: 0 done; 2 a bad ``--off``; 6 the outlet never reported OFF, or never ON
-again (the board may be unpowered: the message says so); 7 the outlet did not
-answer; 12 the device cannot cycle.
+SLOT-TIMING: ``cycle`` is refused (exit 4, the job named) while the board's OS-slot card job
+writes or reads back: a reset mid-job can wedge the card. ``--force`` with the typed phrase
+``RESET <board_id>`` (``--consent``, or at the prompt; ``--yes`` never implies it) cycles
+anyway: the recovery of a job that never ends (``cli/guard.py``).
+
+Exit codes: 0 done; 2 a bad ``--off``; 4 a card job is running; 6 the outlet never reported
+OFF, or never ON again (the board may be unpowered: the message says so); 7 the outlet did
+not answer; 12 the device cannot cycle; 15 ``--force`` not confirmed.
 
 The lead wires this module into ``cli/main.py`` with ``cmd_power.register(sub)``. Over a
 running harness-manager-daemon it needs the ``RemoteSession`` power proxy (CCR L4-3);
@@ -33,8 +38,10 @@ from typing import Any
 from harness_manager.core import capabilities as C
 from harness_manager.core.errors import ExitCode, UnavailableError
 from harness_manager.core.model import Reading
+from harness_manager.services import reset_guard
 
 from .context import Ctx
+from .guard import add_force_args, guard_consent
 from .output import (
     READING_COLUMNS,
     TSV_COLUMNS,
@@ -96,6 +103,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--off", type=float, default=DEFAULT_OFF_S, metavar="S", dest="off_s",
                     help=f"how long the power stays off (default {DEFAULT_OFF_S:g} s; 2 to 300)")
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    add_force_args(ap)
 
     vp.set_defaults(fn=cmd_power)
     return vp
@@ -162,10 +170,14 @@ def _cycle(ctx: Ctx) -> int:
         if power.cycle_reason:
             raise UnavailableError(C.POWER_CYCLE, power.cycle_reason)
         device = str(getattr(power, "label", "") or "")
+        # SLOT-TIMING: never while the board's card job writes or reads back
+        force, consent = guard_consent(ctx, session, reset_guard.ACTION_POWER_CYCLE)
         ctx.confirm(f"cut the power of {cand.board_id} for {off_s:g} s through {device}? "
                     "Everything running on the board is lost")
         progress = StderrProgress("power cycle", ctx.err)
-        evidence = dict(power.power_cycle(off_s, wait=True, progress=progress))
+        with reset_guard.guarded(session, reset_guard.ACTION_POWER_CYCLE, force=force,
+                                 consent=consent):
+            evidence = dict(power.power_cycle(off_s, wait=True, progress=progress))
     ctx.emit(Result("power cycle", {**evidence, "board_id": cand.board_id, "device": device,
                                     "phases": progress.phases},
                     rows=[[cand.board_id, device, evidence.get("off_s", off_s),

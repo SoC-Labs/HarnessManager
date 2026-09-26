@@ -250,6 +250,29 @@ class DeployResult:
 
 Progress = Callable[[str, int, int], None]   # (phase, done, total)
 
+#: SLOT-TIMING (additive): a ``Progress`` that also takes ``detail=`` says so with this
+#: attribute set True. The detail of a long card job: ``{rate_bps, eta_s, text}``
+#: ("writing slot B: 12.3 MB / 29 MB, ~6 min left"). Every other progress is called as before.
+TAKES_DETAIL = "takes_detail"
+#: The keys a progress ``detail`` carries (an event relays these, and only these).
+DETAIL_KEYS = ("slot", "rate_bps", "eta_s", "text")
+
+
+def detail_of(data: Mapping[str, Any]) -> dict[str, Any]:
+    """The progress detail in an event's data (``DETAIL_KEYS``); {} when it has none."""
+    return {k: data[k] for k in DETAIL_KEYS if k in data}
+
+
+def report_progress(progress: Progress | None, phase: str, done: int, total: int,
+                    detail: Mapping[str, Any] | None = None) -> None:
+    """Call ``progress``; with ``detail`` too when it takes it (``TAKES_DETAIL``)."""
+    if progress is None:
+        return
+    if detail and getattr(progress, TAKES_DETAIL, False):
+        progress(phase, done, total, detail=dict(detail))  # type: ignore[call-arg]
+    else:
+        progress(phase, done, total)
+
 
 @dataclass(frozen=True)
 class BackupRecord:
@@ -432,6 +455,8 @@ SLOT_ABSENT, SLOT_EMPTY, SLOT_BAD, SLOT_VALID, SLOT_IO = "absent", "empty", "bad
 #: A slot's ``verified``: ``boot`` = stage0 booted this OS from it; ``readback`` = its region
 #: CRCs were read back off the card this boot and bound to the fabric static_id.
 VERIFIED_NO, VERIFIED_BOOT, VERIFIED_READBACK = "no", "boot", "readback"
+#: The card job states during which nothing may reset the board (``services.reset_guard``).
+JOB_BUSY = ("writing", "verifying")
 
 
 @dataclass(frozen=True)
@@ -463,6 +488,15 @@ class SlotJob:
     got: int = 0
     length: int = 0
     err: str = ""
+    # SLOT-TIMING (additive): the pack's host-side estimates while the job runs (never the
+    # board's words, so never compared): bytes a second, and seconds to the job's end.
+    rate_bps: float = field(default=0.0, compare=False)
+    eta_s: float | None = field(default=None, compare=False)
+
+    @property
+    def busy(self) -> bool:
+        """Writing or reading back: a reset now can wedge the card (silicon B2, 2026-09-26)."""
+        return self.state in JOB_BUSY
 
 
 @dataclass(frozen=True)
@@ -543,6 +577,12 @@ class OsSlotAdapter(Protocol):
     def reboot(self, progress: Progress | None = None, wait_s: float = 180.0) -> dict | None:
         """Reboot the board and witness it go down and come back."""
         ...
+
+    # Optional (SLOT-TIMING, ``services.reset_guard``): ``busy_job() -> SlotStatus | None``,
+    # the status when the card job is writing or verifying (with the pack's ``rate_bps`` and
+    # ``eta_s``), None when there is none to protect (no OS slots, no card, nothing answers);
+    # ``HeldError`` when the job cannot be read. Without it the guard uses ``slots_reason()``
+    # then ``status()``.
 
 
 @runtime_checkable

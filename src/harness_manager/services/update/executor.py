@@ -55,9 +55,10 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.model import BoardIdentity, Check
-from harness_manager.core.pack import BackupRecord, PreflightItem
+from harness_manager.core.pack import TAKES_DETAIL, BackupRecord, PreflightItem
 from harness_manager.core.session import pid_alive
 
+from .. import reset_guard
 from . import s0lb
 from .bundle import OverlayHandler, PreparedRelease, prepare_release
 from .channel import VerifiedChannel
@@ -324,7 +325,9 @@ class HarnessInstaller:
                  lease_check: Callable[[Any, str], Any] | None = None,
                  sleep: Callable[[float], None] = time.sleep,
                  sd_ab: bool | Callable[[], bool] = False,
-                 dark_after_s: float = DARK_AFTER_S, dark_poll_s: float = 5.0) -> None:
+                 dark_after_s: float = DARK_AFTER_S, dark_poll_s: float = 5.0,
+                 card_wait_s: float | None = None,
+                 card_poll_s: float = reset_guard.WAIT_POLL_S) -> None:
         self.state = state
         self.downloader = downloader
         self.store = store
@@ -339,6 +342,9 @@ class HarnessInstaller:
         self.sd_ab = sd_ab
         self.dark_after_s = dark_after_s
         self.dark_poll_s = dark_poll_s
+        # SLOT-TIMING: a reboot waits for the board's card job (None: 1.5 x its ETA)
+        self.card_wait_s = card_wait_s
+        self.card_poll_s = card_poll_s
 
     # -- events --
 
@@ -347,10 +353,25 @@ class HarnessInstaller:
             self.bus.publish(Event(topic, board_id, data))
 
     def _progress(self, board_id: str, prefix: str = "") -> Callable[[str, int, int], None]:
-        def emit(phase: str, done: int, total: int) -> None:
+        def emit(phase: str, done: int, total: int, detail: dict[str, Any] | None = None) -> None:
+            # SLOT-TIMING: a long card job adds rate_bps, eta_s and its one-line text.
             self._emit("update.progress", board_id, phase=f"{prefix}{phase}", bytes=done,
-                       total=total)
+                       total=total, **(detail or {}))
+        setattr(emit, TAKES_DETAIL, True)
         return emit
+
+    # -- the reboot waits for the card (SLOT-TIMING) --
+
+    def _reboot_when_idle(self, session: Any, board_id: str, prefix: str, action: str,
+                          reboot: Callable[[], Any]) -> Any:
+        """Never reboot while the board's card job writes or reads back (silicon B2: a reset
+        mid-write wedged the card): wait for it (``reset_guard.wait_idle``, progress under
+        ``prefix``), then reboot inside ``reset_guard.guarded``. ``CardBusyError`` when it is
+        still running at the end of the wait: nothing was rebooted."""
+        reset_guard.wait_idle(session, timeout_s=self.card_wait_s, poll_s=self.card_poll_s,
+                              progress=self._progress(board_id, prefix), sleep=self.sleep)
+        with reset_guard.guarded(session, action):
+            return reboot()
 
     # -- doors (HUB-SD) --
 
@@ -677,14 +698,27 @@ class HarnessInstaller:
                                        "OS slot the default again" if plan.os_slot else "")
         try:
             if plan.base:
-                raw = controller.reboot(progress=self._progress(board_id, "reboot:"),
-                                        wait_s=plan.reboot_wait_s)
+                raw = self._reboot_when_idle(
+                    session, board_id, "reboot:", reset_guard.ACTION_MCC_REBOOT,
+                    lambda: controller.reboot(progress=self._progress(board_id, "reboot:"),
+                                              wait_s=plan.reboot_wait_s))
                 evidence = _evidence(raw, controller)
             else:
                 assert slots is not None
-                raw = slots.reboot(progress=self._progress(board_id, "reboot:"),
-                                   wait_s=plan.reboot_wait_s or 180.0)
+                raw = self._reboot_when_idle(
+                    session, board_id, "reboot:", reset_guard.ACTION_HARNESS_REBOOT,
+                    lambda: slots.reboot(progress=self._progress(board_id, "reboot:"),
+                                         wait_s=plan.reboot_wait_s or 180.0))
                 evidence = _evidence(raw, slots)
+        except reset_guard.CardBusyError as exc:
+            # SLOT-TIMING: the card job outlasted the wait; nothing was rebooted.
+            journal.write(phase="written", error=str(exc))
+            return self._finish(board_id, rel, RESULT_WRITTEN, journal,
+                                f"written, not running: the board was NOT rebooted ({exc.message})",
+                                backup_d, "reboot it once `harness-manager slot status TARGET` "
+                                "shows the card job ok or failed", stored=stored,
+                                skipped=skipped, os_info=os_info,
+                                evidence={"reboot_error": str(exc)}, plan=plan, via=via)
         except HarnessError as exc:
             if plan.base and plan.via and self._await_identity(session) is None:
                 return self._on_dark(session, plan, approval, rel, journal, storage, controller,
@@ -862,8 +896,10 @@ class HarnessInstaller:
         try:
             storage.restore(backup, progress=self._progress(board_id, "revert:"))
             revert["written"] = True
-            raw = controller.reboot(progress=self._progress(board_id, "revert-reboot:"),
-                                    wait_s=plan.reboot_wait_s)
+            raw = self._reboot_when_idle(
+                session, board_id, "revert-reboot:", reset_guard.ACTION_MCC_REBOOT,
+                lambda: controller.reboot(progress=self._progress(board_id, "revert-reboot:"),
+                                          wait_s=plan.reboot_wait_s))
             revert["reboot"] = _evidence(raw, controller)
         except HarnessError as exc:
             revert["error"] = str(exc)
@@ -927,11 +963,16 @@ class HarnessInstaller:
         storage.restore(backup, progress=self._progress(board_id, "restore:"))
         journal.clear()
         try:
-            raw = controller.reboot(progress=self._progress(board_id, "reboot:"), wait_s=wait_s)
+            raw = self._reboot_when_idle(
+                session, board_id, "reboot:", reset_guard.ACTION_MCC_REBOOT,
+                lambda: controller.reboot(progress=self._progress(board_id, "reboot:"),
+                                          wait_s=wait_s))
         except HarnessError as exc:
+            not_done = ("was NOT rebooted" if isinstance(exc, reset_guard.CardBusyError)
+                        else "reboot was not witnessed")
             out = UpdateOutcome(board_id, "rollback", RESULT_RESTORED_UNCONFIRMED,
-                                f"the SD is restored from {backup.path}, but the reboot was not "
-                                f"witnessed ({exc.message})",
+                                f"the SD is restored from {backup.path}, but the {not_done} "
+                                f"({exc.message})",
                                 backup={"path": backup.path, "sha256": backup.sha256})
             self._emit("update.done", board_id, version="rollback", result=out.result)
             return out

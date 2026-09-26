@@ -69,7 +69,8 @@ export function boardState(bid) {
         stage: "", keep: false, card: null },
       // Keep on the card: GET /boards/{bid}/card (read only when the harness reports "usd"),
       // and the Program section's tick box (unticked by default, cleared after each deploy).
-      card: null, cardError: null, cardLoading: false, keepOnCard: false,
+      card: null, cardError: null, cardLoading: false, keepOnCard: false, cardFollow: 0,
+      cardText: "",
       debug: null, idcode: "",
       pending: undefined, pendingSeen: false,
       consoles: null, consolesError: null, consolesLine: "", consoleSelected: null,
@@ -436,8 +437,24 @@ export async function loadCard(bid) {
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.cardError = r.error;
   b.card = r.error ? null : (r.data.data.card || null);
+  // SLOT-TIMING: the service's one line ("writing slot B: 12.3 MB / 29 MB, ~6 min left")
+  b.cardText = r.error ? "" : (r.data.data.line || "");
   if (!b.card || !b.card.store || !b.card.present || b.card.reason) b.keepOnCard = false;
   changed();
+  // SLOT-TIMING: while the card job writes or reads back, the Card line follows it.
+  if (cardJobBusy(b.card) && !b.cardFollow) {
+    b.cardFollow = setTimeout(() => { b.cardFollow = 0; loadCard(bid); }, CARD_FOLLOW_MS);
+  }
+}
+
+// How often the Card line re-reads a board whose card job is running (each read is one
+// `slot status`, ~7 sectors off the same card: not faster).
+export const CARD_FOLLOW_MS = 5000;
+
+// SLOT-TIMING: the OS-slot card job is writing or reading back (nothing may reset the board).
+export function cardJobBusy(card) {
+  const job = card && card.os_slots && card.os_slots.job;
+  return !!job && (job.state === "writing" || job.state === "verifying");
 }
 
 export async function runPreflight(bid, name) {

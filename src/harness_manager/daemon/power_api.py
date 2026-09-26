@@ -41,8 +41,9 @@ from harness_manager.core.errors import UnavailableError
 from harness_manager.core.events import Event
 from harness_manager.core.model import Reading
 from harness_manager.power.base import DEFAULT_OFF_S, check_off_s
+from harness_manager.services import reset_guard
 
-from .app import _JSON, JsonBody, RouteContext, _number, _obj, ok
+from .app import _JSON, JsonBody, RouteContext, _number, _obj, ok, reset_force
 
 #: Every meter answers these three rows, in this order (``harness_manager.power.READINGS``).
 POWER_ROWS = (("board_power", "W"), ("supply_voltage", "V"), ("supply_current", "A"))
@@ -94,6 +95,9 @@ def register(ctx: RouteContext) -> None:
             if why:                                                 # a meter-only device
                 raise UnavailableError(C.POWER_CYCLE, why)
             device = str(getattr(power, "label", "") or "")
+        # SLOT-TIMING: never while the board's card job writes or reads back: the job fails
+        # HELD, naming it (checked in the job, like the reboot's)
+        force, consent = reset_force(b)
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             def step(phase: str, done: int, total: int) -> None:
@@ -102,6 +106,8 @@ def register(ctx: RouteContext) -> None:
                     d.bus.publish(Event("power.cycle", bid, {"phase": phase, "off_s": off_s,
                                                              "device": device}))
 
-            return power.power_cycle(off_s, wait=True, progress=step)
+            with reset_guard.guarded(s, reset_guard.ACTION_POWER_CYCLE, force=force,
+                                     consent=consent):
+                return power.power_cycle(off_s, wait=True, progress=step)
 
         return ctx.accepted(d.jobs.submit("power_cycle", bid, run))
