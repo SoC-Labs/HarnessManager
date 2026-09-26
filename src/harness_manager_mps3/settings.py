@@ -141,7 +141,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
         # C1: the pack's kwarg console_pace_s (pack.py:308), paced consoles constants.py:32
         _row("mps3.console.pace_ms", "int", round(console_pace_s * 1000), "Consoles",
              "Delay between characters typed into the DUT's UARTs (0: none; the nanoSoC "
-             "UART has no receive FIFO)", at="pack.py:310", scope="pack", apply="reopen",
+             "UART has no receive FIFO)", at="pack.py:314", scope="pack", apply="reopen",
              check=_ms(0, 500)),
         # C2: MccTiming.pace_s over the Debug USB; SHARE_PACE_S across a hub share
         _row("mps3.mcc.pace_ms", "int", round(mcc_pace_s * 1000), "Consoles",
@@ -154,7 +154,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              check=_ms(50, 1000, " (the MCC drops faster input)")),
         # D4: the pack's kwarg rbb_port (pack.py:306), via --pack-overrides only
         _row("mps3.rbb_port", "int", rbb_port, "Debug",
-             "The board's remote_bitbang JTAG port", at="pack.py:308", scope="pack",
+             "The board's remote_bitbang JTAG port", at="pack.py:312", scope="pack",
              owner="dev", apply="restart", check=_port),
         # D5
         _row("mps3.xvc_port", "int", _c.XVC_PORT, "Debug",
