@@ -417,6 +417,18 @@ docs/design/SETTINGS.md is the design (§4, §5, §8, §12.8); david's decisions
 - **The Host allow-list** (see "Process and security") applies to these routes as to every other.
 - **The mock** (`tests/fakes/settings_mock.py`) serves these routes with this code, over a real resolver in a temporary directory.
 
+### User microSD and OS slots (LINUX-SLOTS, `card_api.py`)
+
+The board's user microSD (D13: the overlay the board loads at power-on) and, on the Linux harness, its OS slots A/B on the same card (net-protocol v0.14 "Slot images"). Read-only here: the changes (`harness-manager slot push|commit|rollback`, `card commit|clear`) need the lease and a confirm and run in the CLI. No card is not an error: the board then boots exactly as it always has.
+
+| Method and path | Returns |
+|---|---|
+| `GET /boards/{bid}/card` | `{available, reason, card, line}`. `card` is `{present, state, text, card_mb, default: {rm_id, rm_name, static_id, slot} or null, boot, committable, os_slots, notes, line}`; `os_slots` is the `slots` object below on a Linux harness, else null. `line` is the Board tile's one line (`none (boots as always)`, or the store state, the default and the OS slots). |
+| `GET /boards/{bid}/slots` | `{available, reason, slots}`. `slots` is `{card, running, default, target, staged, fabric_sid, seq, pending_commit, slots: {A, B: {state, hdr_crc, len, sid, verified, err, image_sha256, version, running, default}}, job: {act, slot, state, got, len, err}}`. |
+
+- **Not available is not an error:** a harness without a card store (no `usd` feature) or without OS slots (bare metal; a Linux harness with no card or in stage0 rescue) answers 200 with `available: false` and the `reason`. Nothing is sent to the board beyond `version` in that case.
+- **Errors:** 404 ABSENT for a board that is not open; 409 HELD while a job runs on the board (the board gate); 7 UNREACHABLE when the harness does not answer.
+
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)
 - **`Candidate` adds `name` and `name_source`.** They appear wherever a candidate does: `POST /probe`, `GET /boards` rows, `POST /boards` and `GET /boards/{bid}` (`info.candidate`), and the CLI's `probe --json` and `info --json`. `name` is the display name (`"mps3-01"`), and `""` means the board has none, so show the address. `name_source` is `config` (boards.toml `name`), `harness` (the board reports it), `hub` (the fpgahub board that owns the hub target, as the hub reports it or boards.toml `hub.board` states it) or `hub-target` (the same, derived from boards.toml `hub.target` by fpgahub's suffix rule with no hub call). The first of these that gives a name wins, in that order; `harness_manager.naming` holds the rule.
 - **A name is display only.** It never keys a board: `board_id` does, and so do boards.toml tables, session locks and leases. A hub id is shown with `_` as `-` (`mps3_01` becomes `mps3-01`).

@@ -15,6 +15,8 @@ export const ENDPOINTS = Object.freeze({
   closeBoard: ["DELETE", "/boards/{bid}"],
   info: ["GET", "/boards/{bid}"],
   telemetry: ["GET", "/boards/{bid}/telemetry"],
+  // LINUX-SLOTS: the user microSD and the OS slots (docs/API.md "User microSD and OS slots").
+  cardStatus: ["GET", "/boards/{bid}/card"],
   overlays: ["GET", "/boards/{bid}/overlays"],
   card: ["GET", "/boards/{bid}/card"],
   preflight: ["POST", "/boards/{bid}/preflight"],
@@ -302,7 +304,7 @@ export async function callBlob(name, params = {}, body = undefined) {
 // board id with the suffix glued on. The page then hides that feature instead of erroring.
 export function routeMissing(err) {
   return !!err && err.status === 404 && (/no such endpoint/.test(err.message)
-    || /\/(lease|tunnel|power|pty|baud)\b/.test(err.message));
+    || /\/(lease|tunnel|power|pty|baud|card)\b/.test(err.message));
 }
 
 export function heldByJob(err) {

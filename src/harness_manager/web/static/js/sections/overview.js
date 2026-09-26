@@ -265,6 +265,18 @@ function ReadingValue({ r, empty }) {
     : html`<span class="muted" title=${r.reason}>unavailable</span> <span class="muted small">${r.reason}</span>`;
 }
 
+// LINUX-SLOTS: the user microSD in one line (present / store default / OS slots). Hidden
+// when the daemon does not serve the card route; a harness without a card store says why.
+function CardRow({ b }) {
+  if (b.cardMissing) return null;
+  const c = b.card;
+  let v;
+  if (!c) v = html`<span class="muted">${b.cardError ? "unavailable" : "reading..."}</span>`;
+  else if (!c.available) v = html`<span class="muted" title=${c.reason}>n/a</span>`;
+  else v = html`<span title=${(c.card && c.card.notes || []).join("\n")}>${c.line}</span>`;
+  return html`<span class="k">Card</span><span class="v" data-testid="tile-card">${v}</span>`;
+}
+
 function BoardTile({ bid }) {
   const b = boardState(bid);
   const readings = b.telemetry;
@@ -277,6 +289,7 @@ function BoardTile({ bid }) {
     <div class="tile-kv">
       <span class="k">Temperature</span><span class="v" data-testid="tile-temp"><${ReadingValue} r=${temp} empty=${readings ? "no sensor" : "reading..."} /></span>
       <span class="k">DUT clock</span><span class="v" data-testid="tile-clock"><${ReadingValue} r=${clk} empty=${readings ? "not reported" : "reading..."} /></span>
+      <${CardRow} b=${b} />
       <${PanelTileRow} bid=${bid} />
       <${ClaimTileRow} bid=${bid} />
     </div>

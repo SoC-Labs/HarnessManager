@@ -5,7 +5,8 @@
 // than bookkeeping, and nothing can show a stale copy.
 
 import {
-  call, EventSocket, heldByJob, jobEvent, onConnection, toApiError, unwrapDebug, unwrapInfo,
+  call, EventSocket, heldByJob, jobEvent, onConnection, routeMissing, toApiError, unwrapDebug,
+  unwrapInfo,
 } from "./api.js";
 import { clock, secs, setCapabilityTitles } from "./format.js";
 
@@ -61,6 +62,7 @@ export function boardState(bid) {
     S.board[bid] = {
       info: null, infoError: null, infoLine: "", infoLoading: false,
       telemetry: null, telemetryError: null, telemetryLine: "", telemetryLoading: false,
+      card: null, cardError: null, cardLoading: false, cardMissing: false,
       overlays: null, overlaysError: null, overlaysLine: "", overlaysLoading: false,
       selectedOverlay: null, preflight: null, preflightFor: null, preflightError: null,
       preflightLine: "", preflightLoading: false, preflightGen: 0,
@@ -364,6 +366,7 @@ export async function refreshInfo(bid) {
     b.infoError = null;
     b.infoOkAt = Date.now() / 1000;
     if (!b.telemetry && !b.telemetryLoading) loadTelemetry(bid);
+    if (!b.card && !b.cardLoading && !b.cardMissing) loadCard(bid);
   }
   changed();
 }
@@ -390,6 +393,26 @@ export async function loadTelemetry(bid) {
   b.telemetryLine = r.line;
   b.telemetryError = r.error;
   if (!r.error) b.telemetry = r.data.data.readings || [];
+  changed();
+}
+
+// LINUX-SLOTS: the Board tile's Card line (GET /boards/{bid}/card, read-only). A daemon
+// without the route hides the line (cardMissing); a harness without a card store answers
+// available:false with the reason, which the line shows.
+export async function loadCard(bid) {
+  const b = boardState(bid);
+  if (b.cardLoading) return;
+  b.cardLoading = true;
+  changed();
+  const r = await timed("card", () => call("cardStatus", { bid }));
+  b.cardLoading = false;
+  if (r.error && deferIfHeld(bid, r.error)) return;
+  if (r.error && routeMissing(r.error)) {
+    b.cardMissing = true;
+  } else {
+    b.cardError = r.error;
+    if (!r.error) b.card = r.data.data;
+  }
   changed();
 }
 

@@ -133,6 +133,11 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/boards/{bid}/claim"),
         ("GET", "/boards/{bid}/ssh"),
     ),
+    # LINUX-SLOTS: served in the mock by tests/fakes/lxslots_mock_card.py (a card per board).
+    "card_api": (
+        ("GET", "/boards/{bid}/card"),
+        ("GET", "/boards/{bid}/slots"),
+    ),
     # SET-API: served in the mock by tests/fakes/settings_mock.py (the real routes over a real
     # resolver in a temporary directory).
     "settings_api": (

@@ -405,6 +405,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # in a temporary directory of the mock's own (never the user's settings or keyring).
     from .settings_mock import register as register_settings
     app.state.settings = register_settings(app, state, _accepted)
+    # LINUX-SLOTS' card routes (docs/API.md "User microSD and OS slots"), simulated.
+    from .lxslots_mock_card import CardSim
+    from .lxslots_mock_card import register as register_card
+    app.state.card = CardSim()
+    register_card(app, state, app.state.card, _ok)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)
