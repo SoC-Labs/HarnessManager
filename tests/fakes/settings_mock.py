@@ -19,7 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI
 
-from harness_manager.daemon import settings_api
+from harness_manager.daemon import hubs_api, settings_api
 from harness_manager.daemon.app import RouteContext
 from harness_manager.settings.ops import SettingsContext
 
@@ -39,7 +39,9 @@ def register(app: FastAPI, state: Any, accepted: Any) -> SettingsContext:
         jobs=SimpleNamespace(submit=lambda kind, board_id, fn: state.jobs.start(board_id, kind,
                                                                                 fn)))
     router = APIRouter(prefix=API)
-    settings_api.register(RouteContext(daemon=daemon, api=router, wsr=None, board=state.session,
-                                       require=None, accepted=accepted))
+    rctx = RouteContext(daemon=daemon, api=router, wsr=None, board=state.session, require=None,
+                        accepted=accepted)
+    settings_api.register(rctx)
+    hubs_api.register(rctx)                   # SET-UI: /hubs (docs/API.md "Hubs")
     app.include_router(router)
     return sctx
