@@ -319,3 +319,40 @@ def test_decode_keeps_up_with_12_fps_full_frames(what: str) -> None:
         f.commit([u], D.decode_parts([u]), key=False)
 
     assert _best_ms(one) < 1000 / 12 / 2
+
+
+# --- HM's end of one connection ----------------------------------------------------------------
+
+
+def test_display_stream_over_a_socket_pair() -> None:
+    import socket
+
+    a, b = socket.socketpair()
+    ds = D.DisplayStream(a)
+    assert ds.read(0.01) == []                                   # a timeout is not an error
+    ds.key()
+    ds.ack(7)
+    assert b.recv(64) == w.key_msg() + w.ack_msg(7)
+    b.sendall(w.pong_msg(3) + b'{"ok":false,"err":"lcd_mirror: bu')
+    assert ds.read(1.0) == [w.Pong(3)]
+    b.close()
+    (ref,) = ds.read(1.0)                                        # the close cut the line short
+    assert isinstance(ref, w.Refusal) and ref.err.startswith('{"ok":false')
+    with pytest.raises(EOFError):
+        ds.read(1.0)
+    ds.close()
+    ds.close()                                                   # idempotent
+    with pytest.raises(EOFError):
+        ds.key()
+
+
+def test_a_source_is_an_adapter_or_a_callable() -> None:
+    marker = object()
+    src = D.as_display_source(lambda: marker)
+    assert src.display_reason() == "" and src.display_connect() is marker
+    adapter = type("A", (), {"display_reason": lambda self: "", "display_connect": lambda self: 1})()
+    assert D.as_display_source(adapter) is adapter and isinstance(adapter, D.DisplayAdapter)
+    with pytest.raises(TypeError):
+        D.as_display_source(42)
+    e = D.DisplayUnavailable("no lcd_mirror service", retry_s=None)
+    assert e.capability == D.DISPLAY_MIRROR and e.retry_s is None and "no lcd_mirror service" in str(e)

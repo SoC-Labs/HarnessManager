@@ -163,6 +163,6 @@ def card_pixel(x: int, y: int, counter: int) -> int:
     return CARD_BARS[min(7, (x * 8) // W)]
 
 
-@functools.lru_cache(maxsize=64)
+@functools.lru_cache(maxsize=256)
 def card_picture(counter: int) -> bytes:
     return le_bytes(array("H", (card_pixel(x, y, counter) for y in range(H) for x in range(W))))

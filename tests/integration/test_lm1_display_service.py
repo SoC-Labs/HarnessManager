@@ -131,7 +131,7 @@ def test_the_picture_is_the_boards_after_every_message(svc: DisplayService) -> N
                 continue
             vm.apply(m)
             v.ack()
-            counters = {c for c in range(max(0, anim.counter - 200), anim.counter + 2)
+            counters = {c for c in range(anim.counter + 1, max(-1, anim.counter - 40), -1)
                         if bytes(vm.frame) == G.card_picture(c)}
             assert counters, "the viewer's picture is not any card the board painted"
             seen_ok += 1
