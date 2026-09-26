@@ -27,6 +27,8 @@ factory in its own module, and this file wires it in if it exists:
 | ``.naming:session_board_name(session, ident)`` | N1   | ``(name, source)``: the hub's confirmed name for an open board |
 | ``.panel:make_panel_adapter(session)``         | P2   | ``session.panel``: the front panel (``core.panel.PanelAdapter``) |
 | ``.xvc:make_xvc_adapter(session)``             | XVC  | ``XvcAdapter``: the harness's XVC, partition-scoped (CCR X-8) |
+| ``.hub_sd:make_hub_sd_adapter(session)``       | HUB-SD | ``session.hub_sd``: the config SD through the hub (H10) |
+| ``.sd_ab:make_ab_storage_adapter(session)``    | HUB-SD | ``session.ab_storage``: the config SD A/B by pointer (U8) |
 | ``.settings:mps3_rows(**pack kwargs)``         | SET-PACK | ``Mps3Pack.settings()``: the ``mps3.*`` rows and boards.toml tables |
 
 A factory may return ``None`` when the session lacks the links it needs. The
@@ -211,6 +213,8 @@ class Mps3Session(BoardSession):
             ("hub", "hub", "make_hub_adapter"),              # L1: leases and shares
             ("panel", "panel", "make_panel_adapter"),        # P2: the front panel (CLCD)
             ("xvc", "xvc", "make_xvc_adapter"),              # CCR X-8: fabric debug (XVC)
+            ("hub_sd", "hub_sd", "make_hub_sd_adapter"),     # HUB-SD: SD writes via the hub
+            ("ab_storage", "sd_ab", "make_ab_storage_adapter"),  # HUB-SD U8: SD A/B view
         ):
             make = _hook(module, factory)
             if make is not None:

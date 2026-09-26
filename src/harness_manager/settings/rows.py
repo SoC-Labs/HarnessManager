@@ -303,6 +303,11 @@ UPDATES = (
     Setting("updates.use_installed", "bool", False, "Updates",
             "Run the installer's version", scope="machine", owner="dev",
             env="HARNESS_MANAGER_USE_INSTALLED"),
+    # U8 (HUB-SD) services/update/service.py sd_ab_setting: the config SD A/B by pointer.
+    # Off until the 10-minute board check proves the MCC loads another 8.3 F0FILE name.
+    Setting("updates.sd_ab", "bool", False, "Updates",
+            "Install the config SD A/B by pointer (off until its board check)",
+            scope="machine", owner="admin", advanced=True),
 )
 
 KITS = (
