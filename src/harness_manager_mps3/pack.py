@@ -30,6 +30,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.hub_sd:make_hub_sd_adapter(session)``       | HUB-SD | ``session.hub_sd``: the config SD through the hub (H10) |
 | ``.sd_ab:make_ab_storage_adapter(session)``    | HUB-SD | ``session.ab_storage``: the config SD A/B by pointer (U8) |
 | ``.settings:mps3_rows(**pack kwargs)``         | SET-PACK | ``Mps3Pack.settings()``: the ``mps3.*`` rows and boards.toml tables |
+| ``.claim:make_claim_adapter(session)``         | LINUX-CLAIM | ``session.claim``: the Linux harness's SSH claim and board-SSH reach |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -215,6 +216,7 @@ class Mps3Session(BoardSession):
             ("xvc", "xvc", "make_xvc_adapter"),              # CCR X-8: fabric debug (XVC)
             ("hub_sd", "hub_sd", "make_hub_sd_adapter"),     # HUB-SD: SD writes via the hub
             ("ab_storage", "sd_ab", "make_ab_storage_adapter"),  # HUB-SD U8: SD A/B view
+            ("claim", "claim", "make_claim_adapter"),        # LINUX-CLAIM: SSH claim + reach
         ):
             make = _hook(module, factory)
             if make is not None:

@@ -103,7 +103,7 @@ JsonBody = Annotated[Any, Body()]
 
 #: Extension router modules, loaded in this order if present (docs/API.md).
 EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "panel_api",
-              "kit_api", "xvc_api", "harness_api", "settings_api")
+              "kit_api", "xvc_api", "harness_api", "settings_api", "claim_api")
 
 
 @dataclass
@@ -1247,10 +1247,6 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
 def _fields(obj: Any) -> dict[str, Any]:
     """A dataclass's fields at the top level of the reply (``BoardInfo``, ``DebugStatus``)."""
-    import dataclasses
-
     from harness_manager.cli.output import jsonable
 
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return {f.name: jsonable(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
-    return dict(jsonable(obj))
+    return dict(jsonable(obj))               # jsonable's field rules (``omit_none``), once

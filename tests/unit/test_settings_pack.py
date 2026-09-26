@@ -100,9 +100,9 @@ def test_a_pack_declares_no_settings_unless_it_says_so():
 
 def test_negative_twin_the_mps3_pack_says_so():
     rows = pack_rows(Mps3Pack())
-    assert len(rows) == 31 and {s.pack for s in rows} == {"mps3"}
+    assert len(rows) == 34 and {s.pack for s in rows} == {"mps3"}
     schema, layer = with_packs(core_schema(), [Mps3Pack()])
-    assert len(schema.rows) == len(core_schema().rows) + 31
+    assert len(schema.rows) == len(core_schema().rows) + 34
     assert layer["mps3.console.pace_ms"] == 20
 
 

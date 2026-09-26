@@ -124,7 +124,10 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
 def jsonable(obj: Any) -> Any:
     """Dataclasses, enums, sets and tuples -> plain JSON types. Bytes become hex."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return {f.name: jsonable(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+        # A field marked ``omit_none`` (BoardInfo.claim) is left out while it is None, so a
+        # field added for one kind of board does not change every other board's JSON.
+        return {f.name: jsonable(getattr(obj, f.name)) for f in dataclasses.fields(obj)
+                if not (f.metadata.get("omit_none") and getattr(obj, f.name) is None)}
     if isinstance(obj, Enum):
         return obj.value
     if isinstance(obj, (bytes, bytearray)):

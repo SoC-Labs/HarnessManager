@@ -1,7 +1,8 @@
 """The MPS3 pack's settings rows (lane SET-PACK; ``docs/design/SETTINGS.md`` §3.2, Appendix A).
 
 ``Mps3Pack.settings()`` returns ``mps3_rows(...)``: the pack's own ``mps3.*`` rows and the
-``boards.toml`` tables this pack reads (``boards.*.hub``, ``xvc``, ``sysmon``, ``estimates``).
+``boards.toml`` tables this pack reads (``boards.*.hub``, ``xvc``, ``sysmon``, ``estimates``,
+``ssh``).
 The Settings menu, ``harness-manager config`` and the API draw them; the core has no MPS3
 code for them.
 
@@ -91,6 +92,12 @@ def _tty(v: Any) -> str:
     return "" if v.startswith("/dev/") else "must be a /dev/... TTY path on the hub"
 
 
+def _host_key(v: Any) -> str:
+    from .claim import check_pin
+
+    return check_pin(v)
+
+
 def _positive(v: Any) -> str:
     return "" if v > 0 else "must be more than 0"
 
@@ -134,7 +141,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
         # C1: the pack's kwarg console_pace_s (pack.py:308), paced consoles constants.py:32
         _row("mps3.console.pace_ms", "int", round(console_pace_s * 1000), "Consoles",
              "Delay between characters typed into the DUT's UARTs (0: none; the nanoSoC "
-             "UART has no receive FIFO)", at="pack.py:308", scope="pack", apply="reopen",
+             "UART has no receive FIFO)", at="pack.py:310", scope="pack", apply="reopen",
              check=_ms(0, 500)),
         # C2: MccTiming.pace_s over the Debug USB; SHARE_PACE_S across a hub share
         _row("mps3.mcc.pace_ms", "int", round(mcc_pace_s * 1000), "Consoles",
@@ -147,7 +154,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              check=_ms(50, 1000, " (the MCC drops faster input)")),
         # D4: the pack's kwarg rbb_port (pack.py:306), via --pack-overrides only
         _row("mps3.rbb_port", "int", rbb_port, "Debug",
-             "The board's remote_bitbang JTAG port", at="pack.py:306", scope="pack",
+             "The board's remote_bitbang JTAG port", at="pack.py:308", scope="pack",
              owner="dev", apply="restart", check=_port),
         # D5
         _row("mps3.xvc_port", "int", _c.XVC_PORT, "Debug",
@@ -239,4 +246,16 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
         _row("boards.*.estimates.vivado_reports", "path", "", "Boards",
              "A directory of Vivado power reports, for the power estimate",
              at="telemetry.py:407", scope="board"),
+        # A.12 L1-L3 (LINUX-CLAIM): the Linux harness's SSH, claimed with your key
+        _row("boards.*.ssh.user", "str", "", "Boards",
+             "The Linux harness's SSH login (empty: root)", at="claim.py:321",
+             scope="board", apply="reopen", check=_word("user name")),
+        _row("boards.*.ssh.key", "path", "", "Boards",
+             "The private key Harness Manager's ssh uses for this board (empty: your ssh "
+             "default); a claim sends its .pub. The key itself is never read",
+             at="claim.py:839", scope="board", apply="reopen"),
+        _row("boards.*.ssh.host_key", "str", "", "Boards",
+             "The board's pinned SSH host key, written by `board claim` (a changed key is "
+             "refused; clear it only for a re-provisioned board)", at="claim.py:323",
+             scope="board", apply="reopen", check=_host_key),
     )

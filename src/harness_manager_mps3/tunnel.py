@@ -546,7 +546,7 @@ class SshTunnel:
                  on_state: Callable[[dict[str, Any]], None] | None = None,
                  label: str = "", user_config: Path | None = None,
                  system_config: Path | None = Path("/etc/ssh/ssh_config"),
-                 jump: str = "", user: str = "") -> None:
+                 jump: str = "", user: str = "", options: Sequence[str] = ()) -> None:
         if not host:
             raise UsageError("an SSH tunnel needs a host")
         if not forwards:
@@ -559,6 +559,9 @@ class SshTunnel:
         #: through the hub). Both empty: today's one-hop tunnel, argv unchanged.
         self.jump = jump
         self.user = user
+        #: LINUX-CLAIM: extra ssh options after SSH_OPTIONS (the pinned host key, the claimed
+        #: key: ``claim.Mps3Claim.pinned_options``). Empty: the argv is unchanged.
+        self.options = tuple(options)
         self.label = label or f"ssh:{host}"
         self._launcher = launcher or DEFAULT_LAUNCHER
         self._ssh = ssh
@@ -637,7 +640,7 @@ class SshTunnel:
         """The ssh command line (it reads the user's config with ``ssh -G``; never connects)."""
         base = ssh_base_argv(self.host, ssh=self._ssh, ssh_g=self._ssh_g,
                              user_config=self._user_config, system_config=self._system_config)
-        argv = [*base, *SSH_OPTIONS, "-N", "-T"]
+        argv = [*base, *SSH_OPTIONS, *self.options, "-N", "-T"]
         if self.jump:
             argv += ["-J", self.jump]
         if self.user:

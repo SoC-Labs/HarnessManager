@@ -65,6 +65,8 @@ LAZY_SERVICES: dict[str, tuple[str, str, str]] = {
     "update": ("harness_manager.services.update", "UpdateService", "update"),
     # CCR X-6: fabric debug over the harness's XVC (lane XVC-CORE).
     "xvc": ("harness_manager.services.xvc", "XvcService", "xvc"),
+    # LINUX-CLAIM: the Linux harness's SSH claim (TOFU) and its SSH reach.
+    "board_claim": ("harness_manager.services.claim", "ClaimService", "ssh_claim"),
 }
 
 #: Health.control_channel states in which the harness serves nothing over Ethernet.
@@ -147,6 +149,11 @@ class Engine:
     def xvc(self) -> Any:
         """Fabric debug over the harness's XVC (CCR X-6). Optional: read it with getattr."""
         return self._service("xvc")
+
+    @property
+    def board_claim(self) -> Any:
+        """The SSH claim of a Linux harness (LINUX-CLAIM). Optional: read it with getattr."""
+        return self._service("board_claim")
 
     @property
     def update(self) -> Any:
@@ -352,6 +359,7 @@ class Engine:
             if reason:
                 available = available - {POWER_CYCLE}
                 unavailable = {**unavailable, POWER_CYCLE: reason}
+        claim = self._claim(entry, identity)
         candidate = self._named(entry, identity)
         with self._lock:
             changed = self._identities.get(board_id) != identity
@@ -362,7 +370,20 @@ class Engine:
                 "rm_name": identity.rm_name, "harness_version": identity.harness_version,
                 "features": list(identity.features),
                 "name": candidate.name, "name_source": candidate.name_source}))
-        return BoardInfo(candidate, identity, health, available, unavailable)
+        return BoardInfo(candidate, identity, health, available, unavailable, claim=claim)
+
+    @staticmethod
+    def _claim(entry: _Open, identity: BoardIdentity) -> dict[str, Any] | None:
+        """LINUX-CLAIM: the session's SSH claim state (None: nothing to claim). Never a hub
+        round trip here (the adapter shows the last check), and never a failed ``info``."""
+        claim = getattr(entry.session, "claim", None)
+        if claim is None:
+            return None
+        try:
+            return claim.claim_status(identity)
+        except Exception:  # noqa: BLE001 - the claim state is never worth failing info
+            log.exception("reading the SSH claim of %s failed", entry.candidate.board_id)
+            return None
 
     def _named(self, entry: _Open, identity: BoardIdentity) -> Candidate:
         """N1: the open board's candidate, renamed when its harness or the session (the

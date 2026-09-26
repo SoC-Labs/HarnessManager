@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class LinkKind(str, Enum):
@@ -123,3 +124,7 @@ class BoardInfo:
     health: Health
     capabilities: frozenset[str]
     unavailable: dict[str, str] = field(default_factory=dict)   # capability -> reason
+    # LINUX-CLAIM: the Linux harness's SSH claim ({state, claimed: {by, key_fp, at} | None,
+    # host_key, ...}; harness_manager_mps3.claim). None where there is no SSH to claim (bare
+    # metal), and then the key is left OUT of the JSON (``omit_none``), so it is unchanged.
+    claim: dict[str, Any] | None = field(default=None, metadata={"omit_none": True})

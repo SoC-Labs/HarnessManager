@@ -281,7 +281,7 @@ class Mps3Xvc:
     def _board_user(self) -> str:
         cfg = self._config()
         user, _ = _ssh_link(self._session.candidate)
-        return cfg.get("user") or user or DEFAULT_BOARD_USER
+        return cfg.get("user") or user or _ssh_user(self._session) or DEFAULT_BOARD_USER
 
     def _direct_port(self) -> int:
         env = os.environ.get(XVC_PORT_ENV, "").strip()
@@ -306,13 +306,22 @@ class Mps3Xvc:
                 return self._tunnel
             host, user = self._board_host(), self._board_user()
             jump = _jump_host(self._session.candidate)
+            # LINUX-CLAIM: a claimed board's pinned host key and claimed key (boards.<b>.ssh),
+            # and the hub's own jump; no pin yet: the user's ssh config, as before.
+            claim, options = self._claim_reach()
+            if claim is not None:
+                jump = claim.proxy_jump()
             label = (f"{self._session.candidate.board_id} xvc: ssh "
                      f"{f'-J {jump} ' if jump else ''}{user}@{host}")
             tunnel = _tunnel.SshTunnel(host, [_tunnel.Forward("xvc", "127.0.0.1", XVC_PORT)],
-                                       jump=jump, user=user, label=label)
+                                       jump=jump, user=user, label=label, options=options)
             try:
                 tunnel.start()
             except UnreachableError as exc:
+                if claim is not None:
+                    mapped = claim.map_ssh_failure(exc)
+                    if mapped is not exc:
+                        raise mapped from exc
                 raise UnreachableError(
                     f"the board-SSH forward for XVC did not come up: {exc.message}",
                     hint=f"check `ssh {f'-J {jump} ' if jump else ''}{user}@{host} true` works "
@@ -320,6 +329,20 @@ class Mps3Xvc:
                          "boards.toml xvc.reach = \"hub\" (unauthenticated)") from exc
             self._tunnel = tunnel
             return tunnel
+
+    def _claim_reach(self) -> tuple[Any, list[str]]:
+        """``(claim adapter, its pinned ssh options)`` when this board's host key is pinned;
+        ``(None, [])`` otherwise. A changed host key raises (``claim.HostKeyChangedError``)."""
+        claim = getattr(self._session, "claim", None)
+        if claim is None:
+            return None, []
+        try:
+            if not claim.config()["host_key"]:
+                return None, []
+        except UsageError:
+            return None, []
+        claim.check_host_key()
+        return claim, claim.pinned_options()
 
     def xvc_open_failures_since(self, t0: float) -> list[str]:
         tunnel = self._tunnel if self._tunnel is not None else getattr(
@@ -446,6 +469,15 @@ def _same(a: object, b: object) -> bool:
         return rmid.parse_rm_id(a) == rmid.parse_rm_id(b)
     except (TypeError, ValueError):
         return str(a).lower() == str(b).lower()
+
+
+def _ssh_user(session: Any) -> str:
+    """boards.toml ``ssh.user`` (LINUX-CLAIM), the board-SSH user for everything else."""
+    claim = getattr(session, "claim", None)
+    try:
+        return claim.config()["user"] if claim is not None else ""
+    except UsageError:
+        return ""
 
 
 def make_xvc_adapter(session: Any) -> Mps3Xvc | None:

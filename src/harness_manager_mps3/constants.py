@@ -65,7 +65,10 @@ REBOOT_WAIT_S_LINUX = 180.0
 #: matched case-insensitively against the reply's ``err``. Replace the tuple with
 #: the one published string when it lands.
 FABRIC_MISMATCH_ERRS = ("fabric mismatch", "static mismatch", "card mismatch",
-                        "efabric", "eskew", "skew")
+                        "efabric", "eskew", "skew",
+                        # the Linux harness's fabric identity lock (net-protocol "Identity
+                        # lock": the card image vs the FPGA static), LINUX-CLAIM
+                        "identity lock")
 
 
 def reboot_wait_s(identity: object | None) -> float:
