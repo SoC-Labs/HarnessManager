@@ -4,6 +4,8 @@ Board-free; needs ``iverilog``/``vvp`` (Icarus 12+) on PATH and nothing else. NO
 (``tests/spikes`` is never collected). Run by hand::
 
     python3 tests/spikes/lcd_mirror_rtl.py            # build, simulate, compare, print a verdict
+    python3 tests/spikes/lcd_mirror_rtl.py --mutant byte-order   # must be caught (also:
+                                                      # wrap-off-by-one, snap-no-clear)
 
 It replays ONE continuous bus history through ``lcd_mirror_rtl/lcdm_snoop.sv`` (a sketch
 of the snooper the design asks the FPGA lane for) with an 8080 bus-functional model
@@ -58,7 +60,21 @@ def history():
     return out
 
 
-def main() -> int:
+#: ``--mutant NAME``: a one-line fault in a temporary copy of the RTL. Each one must FAIL
+#: the comparison (a bench that cannot fail proves nothing).
+MUTANTS = {
+    "byte-order": ("wr_px_q   <= {hi_q, pd_q};", "wr_px_q   <= {pd_q, hi_q};"),
+    "wrap-off-by-one": ("if (col_q >= ec) begin", "if (col_q > ec) begin"),
+    "snap-no-clear": ("        dirty_live <= {NTILES{1'b0}};\n      end else if (changed)",
+                      "      end else if (changed)"),
+}
+
+
+def main(argv=None) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--mutant", choices=sorted(MUTANTS), help="inject one fault; the run must FAIL")
+    args = ap.parse_args(argv)
     if not shutil.which("iverilog"):
         print("iverilog not on PATH: nothing to do")
         return 2
@@ -78,8 +94,14 @@ def main() -> int:
 
         # 2. build + simulate
         t0 = time.perf_counter()
+        rtl = (RTL / "lcdm_snoop.sv").read_text()
+        if args.mutant:
+            old, new = MUTANTS[args.mutant]
+            assert rtl.count(old) == 1, f"mutant {args.mutant}: anchor not found once"
+            rtl = rtl.replace(old, new)
+        (work / "lcdm_snoop.sv").write_text(rtl)
         subprocess.run(["iverilog", "-g2012", "-o", str(work / "sim.vvp"),
-                        str(RTL / "lcdm_snoop.sv"), str(RTL / "tb_lcdm_snoop.sv")], check=True)
+                        str(work / "lcdm_snoop.sv"), str(RTL / "tb_lcdm_snoop.sv")], check=True)
         subprocess.run(["vvp", "-n", str(work / "sim.vvp"), f"+stim={work / 'stim.txt'}",
                         f"+out={work}"], check=True, stdout=subprocess.DEVNULL)
         sim_s = time.perf_counter() - t0
@@ -120,6 +142,10 @@ def main() -> int:
         print(f"  simulated {int(cv['sim_ns']) / 1e6:.1f} ms of bus in {sim_s:.0f} s wall")
         for f in fails:
             print("  FAIL", f)
+        if args.mutant:
+            print(f"MUTANT {args.mutant}:", "caught (the bench FAILS, as it must)" if fails
+                  else "NOT CAUGHT -- the bench is blind to it")
+            return 0 if fails else 1
         print("RESULT:", "PASS" if not fails else f"FAIL ({len(fails)})")
         return 1 if fails else 0
     finally:
