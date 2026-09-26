@@ -7,7 +7,7 @@ their own token, S3). A board names its hub in ``boards.toml``::
     [boards.lab]
     match = ["192.168.10.101"]
     via = "hub"
-    hub = { use = "lab", target = "mps3_01_pl", shares = { mcc = "/dev/mps3_01_pl/tty_00" } }
+    hub = { use = "lab", target = "mps3_01_pl" }
 
 A board with no hub stays the zero-config default: nothing here runs, reads or probes.
 
@@ -491,7 +491,8 @@ def add_board_for_target(hub_name: str, target: str, resolver: Resolver, *,
                          match: Sequence[str] | None = None,
                          details: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Write a ``boards.toml`` entry for ``target`` on the hub (the design's "Add" button):
-    ``hub = { use, target, shares = { mcc = "/dev/<target>/tty_00" } }``, ``via = "hub"``,
+    ``hub = { use, target }``, ``via = "hub"`` (no MCC share: Harness Manager never holds a
+    share on tty_00 and runs the MCC on the hub; MCC-FIX),
     ``name`` (the hub's description) and ``match`` (the target's ``board_ip``) from
     ``details`` (``hubtest.target_details``) unless given. Refused when the key exists or
     another board already has this hub and target."""
@@ -520,11 +521,10 @@ def add_board_for_target(hub_name: str, target: str, resolver: Resolver, *,
         changes[join_key(("boards", key, "name"))] = label[:64].strip()
     changes[join_key(("boards", key, "via"))] = "hub"
     checked = dict(resolver.check_settable(k, v) for k, v in changes.items())
-    hub_table = {"use": hub.name, "target": target,
-                 "shares": {"mcc": f"/dev/{target}/tty_00"}}
+    hub_table = {"use": hub.name, "target": target}
     # The board pack's own rows check its per-board keys, when the resolver has them
-    # (``engine.settings_resolver()``: SET-PACK's boards.*.hub.target / shares.*).
-    for k, v in ((("hub", "target"), target), (("hub", "shares", "mcc"), hub_table["shares"]["mcc"])):
+    # (``engine.settings_resolver()``: SET-PACK's boards.*.hub.target).
+    for k, v in ((("hub", "target"), target),):
         full = join_key(("boards", key, *k))
         if resolver.schema.find(full) is not None:
             resolver.check_settable(full, v)

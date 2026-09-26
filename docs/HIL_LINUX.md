@@ -87,8 +87,9 @@ ssh -o BatchMode=yes -o ControlPath=none -o ClearAllForwardings=yes $H true && e
   - If the folder is gone, copy the hub's copy and point the variable at it:
     `scp -rq $H:/home/david/mints/0x44EE76D5/overlay_mbv $HOME/mint_44EE76D5_overlay_mbv`.
 - boards.toml has the board table from the Thursday HIL: `match = ["192.168.10.101"]`,
-  `via = "ssh:mapstone-dev…"`, and a hub table with `target = "mps3_01_pl"` and
-  `shares = { mcc = "/dev/mps3_01_pl/tty_00" }` (`use = "lab"` instead of `host` is fine too).
+  `via = "ssh:mapstone-dev…"`, and a hub table with `target = "mps3_01_pl"` (`use = "lab"`
+  instead of `host` is fine too). No `shares` are needed: an old `shares = { mcc = … }` entry is
+  ignored, and Harness Manager never starts a share on `tty_00`.
   - Note any `ssh` sub-table with a `host_key`: it predates the cutover card (see §B).
 - `SSH-OK`.
 
@@ -98,10 +99,8 @@ ssh -o BatchMode=yes -o ControlPath=none -o ClearAllForwardings=yes $H true && e
 
 1. Paste this into the **Linux lead's session** and wait for the answer:
    > HM-HIL-LX: I want mps3_01_pl for ~70 min from HH:MM, lease holder `david-hm`, through Harness
-   > Manager. (1) Is the board free: no soak, runner or MCC tool on it? (2) May I start an fpgahub
-   > share on `tty_00` for Harness Manager's MCC REBOOT? It stays running afterwards (fpgahub has
-   > no single-share stop), and while it runs, `soak_linux.py mcc-reboot` refuses (rc 3/4).
-   > Please reply "free" and yes/no to (2).
+   > Manager. Is the board free: no soak, runner or MCC tool on it? Harness Manager's MCC REBOOTs
+   > run pyverify's tools on the hub (no share on `tty_00`). Please reply "free".
 2. When it says "free", check (read-only):
    ```bash
    ssh $H 'pgrep -af "soak_linux.py (accel|tail|boots)"; ps -eo pid,user,args | grep -F tty_00 | grep -v grep; echo END' | tee $EV/0_hub_idle.txt
@@ -111,15 +110,13 @@ ssh -o BatchMode=yes -o ControlPath=none -o ClearAllForwardings=yes $H true && e
    **Expect:**
    - only `END`: no soak runs and nothing reads `tty_00`;
    - `mps3_01_pl on mapstone-dev…: not leased`;
-   - `share list` either shows `/dev/mps3_01_pl/tty_00` or not; note which.
-3. **Choose the MCC path now** and write it down (§D and §G use it):
-   - **`hm`** if `tty_00` is already shared, or the Linux lead said yes to (2): Harness Manager's
-     own `mcc … reboot`.
-   - **`hubtool`** otherwise: the platform's paced REBOOT tool on the hub. It opens no share and
-     keeps the MCC boot log.
-   ```bash
-   echo "MCC=hm" > $EV/0_mcc_path.txt       # or: echo "MCC=hubtool" > $EV/0_mcc_path.txt
-   ```
+   - `share list` shows no `/dev/mps3_01_pl/tty_00`. If it does, someone else's share holds the
+     MCC: every REBOOT below refuses (a second reader). Ask the Linux lead before going on.
+
+   **The MCC path:** Harness Manager runs every MCC operation ON the hub through pyverify (its
+   paced REBOOT writer, or `sd field --already-written` after an SD write). There is no share
+   choice any more: a share on `tty_00` is a second reader that only `share stop` removes, and
+   while one exists the platform's REBOOT refuses (rc 3/4).
 
 ### 0.3 Take the lease through Harness Manager (1 min, may queue)
 
@@ -322,27 +319,20 @@ harness-manager card status $B | tee $EV/d3_card_after_keep.txt
 **Expect:** `default    nanosoc 0x01000001 for static 0x44ee76d5, store slot A|B`.
 
 **D4. REBOOT the board** (2–4 min). The MCC power-cycles it and reloads the FPGA from the config
-SD. Use the path from `0_mcc_path.txt`.
-
-- **`MCC=hm`** (Harness Manager's own REBOOT):
-  ```bash
-  harness-manager share start $B mcc | tee $EV/d4_share.txt
-  harness-manager mcc $B reboot --wait 240 | tee $EV/d4_mcc_reboot.txt
-  ```
-  1. `share start` prints `/dev/mps3_01_pl/tty_00 → 0.0.0.0:<port>  writer -  clients 0`.
-     `clients 0` means nobody else reads `tty_00`. **Clients 1 or more: STOP**, find the reader.
-  2. The reboot asks `reboot <board>? The board reloads from its SD and the running design is
-     lost`. Answer `y`.
-  3. **Expect** `rebooted <board> (seen: sent, down, up)`.
-  4. What it does: it types a CR and checks for the `Cmd>` prompt, then sends REBOOT at 100 ms a
-     character over the share, and proves the board went down and came back.
-  5. **Always pass `--wait 240`.** The verb's default of 120 s is the bare-metal budget, and a
-     Linux boot takes longer.
-- **`MCC=hubtool`** (the platform's paced REBOOT, same rules; keeps the MCC boot log):
-  ```bash
-  ssh $H "sg fpga -c '/usr/bin/python3.11 /home/david/mps3_rollback/soak_linux.py mcc-reboot --log /home/david/mps3_rollback/hil_lx_d4_mcc.log'" | tee $EV/d4_mcc_reboot.txt
-  ```
-  **Expect** `{"tty": "/dev/mps3_01_pl/tty_00", …, "rc": 0, "ack": true, "configuring": true, "complete": true, "failed": false}`.
+SD.
+```bash
+harness-manager mcc $B reboot | tee $EV/d4_mcc_reboot.txt
+```
+1. It asks `reboot <board>? The board reloads from its SD and the running design is lost`.
+   Answer `y`.
+2. **Expect** `rebooted <board> (seen: sent, down, up)`, then `MCC loaded MB/HBI0309C/Nanosoc/nanosoc.bit`.
+3. What it does, on the hub (`ssh $H 'sg fpga -c …'`, the hub's `python3.11`): pyverify's writer
+   checks nothing else reads `tty_00`, types a CR and checks for `Cmd>`, sends REBOOT at 100 ms a
+   character, waits for `Rebooting`, and captures the MCC boot log to `FPGA configuration
+   complete`; then the shell must answer again. No share is started.
+4. The wait is the Linux budget, 180 s, with no `--wait` (MCC-FIX). Add `--wait 240` only if the
+   Linux lead says today's boot is slower.
+5. It refuses while the user microSD's card job writes or reads back (SLOT-TIMING's guard).
 
 **D5. The board came back running nanosoc from the card**
 ```bash
@@ -517,7 +507,6 @@ Leave the staged file where it is. A real install overwrites it.
 
 **F6 (opt-in, +10 min).** **WRITES THE CONFIG SD, then REBOOTs.** Runs only if all of these hold:
 - F4 passed;
-- `MCC=hm`;
 - you opt in;
 - `harness list` shows a published release for this static.
 ```bash
@@ -535,7 +524,10 @@ harness-manager harness install $B <VERSION> --door hub | tee $EV/f6_install.txt
 2. It uploads the `.bit`, then sends one `--method sd --force`. Expect the progress text
    `a client timeout here is expected: the hub keeps writing`.
 3. It waits for the hub journal's `program dispatched: … ok=True … sha256=<12 hex>`.
-4. It sends the paced REBOOT over the `tty_00` share.
+4. It REBOOTs ON the hub with pyverify's `sd field --already-written` (the journal witness of
+   this sha, one reader on `tty_00`, an intact `Cmd>`, then the paced REBOOT). If the MCC answers
+   the first CR with only `\r\n` (it does for a few seconds after an SD write), the REBOOT is
+   tried again, up to 3 times 5 s apart. The write is never retried.
 5. **Expect** the board back on `0x44ee76d5`.
 
 **Never re-run it after a timeout.**
@@ -590,22 +582,13 @@ exit
 
 If anything differs before the `WRITES` line: `sudo umount $M`, `exit`, skip §G.
 
-**G3. REBOOT** with the path from `0_mcc_path.txt`:
-- **`MCC=hubtool`** (strong proof: the MCC log names the file):
-  ```bash
-  ssh $H "sg fpga -c '/usr/bin/python3.11 /home/david/mps3_rollback/soak_linux.py mcc-reboot --log /home/david/mps3_rollback/hil_lx_g3_mcc.log'" | tee $EV/g3_mcc_reboot.txt
-  ssh $H "grep -i 'Configuring FPGA from file' /home/david/mps3_rollback/hil_lx_g3_mcc.log" | tee -a $EV/g3_mcc_reboot.txt
-  ```
-  **Expect:** `rc 0`, and `Configuring FPGA from file \MB\HBI0309C\Nanosoc\nanosoca.bit` → **PASS**.
-- **`MCC=hm`**:
-  ```bash
-  harness-manager mcc $B reboot --wait 240 | tee $EV/g3_mcc_reboot.txt
-  ```
-  **Expect:** `rebooted <board> (seen: sent, down, up)`.
-  - This is **PASS (inferred)** only: Harness Manager's reboot output does not say which file the
-    MCC loaded.
-  - It proves the pointer only if the MCC does not fall back to `nanosoc.bit` on an F0FILE it
-    rejects. That is not verified.
+**G3. REBOOT** (strong proof: the MCC's own boot log names the file):
+```bash
+harness-manager --json mcc $B reboot --yes | tee $EV/g3_mcc_reboot.json
+```
+**Expect:** `"fpga_file": "MB/HBI0309C/Nanosoc/nanosoca.bit"` → **PASS**. The field is the MCC
+banner's `Configuring FPGA from file` line, captured on the hub; `nanosoc.bit` there means the MCC
+fell back or ignored the pointer: **FAIL**, go to G4.
 
 Then:
 ```bash
@@ -687,7 +670,7 @@ harness-manager lease show $B | tee -a $EV/z5_release.txt
 >   as before.
 > - The config SD `F0FILE` is nanosoc.bit. <§G ran: nanosoca.bit, a copy of the RC2 image, is left
 >   on the card. / §G not run.>
-> - The tty_00 fpgahub share is <running since §D / not started>.
+> - No fpgahub share on tty_00 was started (Harness Manager never starts one).
 > - Harness Manager adopted the SSH claim: it pinned the host key and added no key to the board.
 > - Evidence: ~/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux/
 
@@ -715,10 +698,12 @@ Then tell the HM lead the folder is complete.
 | D2: `not kept on the card: <why>` | the card write failed; a card failure never fails the deploy, so the swap stands | record the reason; skip D4 and D5 |
 | any `program`: refused because the power-on load is running | the card's power-on load is in progress | wait for `power-on loaded` (`card status`), then repeat |
 | `stats` `rm_ok: false` after a restart | the partition stays in reset until the first swap | program once |
-| D4 (`hm`): `share start` shows `clients 1+`, or "another client (…) holds the hub share's write slot" | someone else reads `tty_00` | `ssh $H 'ps -eo pid,user,args \| grep -F tty_00'`; have them close it; repeat |
-| D4 (`hm`): `REBOOT sent but no restart observed` | the MCC dropped the REBOOT; nothing happened | safe to repeat **once** |
-| D4 (`hm`): "went down … but did not come back" | a slow or failed Linux boot | wait 2 min, then `info`. Still dark: the Linux lead's ROLLBACK runbook. If the MCC stops answering, david power-cycles |
-| D4/G3 (`hubtool`): `rc 2` / `rc 3` / `rc 4` / `rc 1` | rc 2: not in group `fpga`. rc 3/4: another reader, or an fpgahub share on `tty_00`. rc 1: no echo | nothing was sent for rc 2–4: fix, or switch to `MCC=hm` for rc 3/4. rc 1: repeat once |
+| D4/G3: "another process reads /dev/mps3_01_pl/tty_00 on the hub (pid N: …)" | a second reader: a `cat`, a console, an fpgahub share on `tty_00` | nothing was sent. `ssh $H 'ps -eo pid,user,args \| grep -F tty_00'`; have it closed (a share: ask david, `share stop` stops them all); repeat |
+| D4/G3: "refusing the MCC REBOOT: no intact Cmd>" | the MCC is not at `Cmd>` (a `Debug>` left open, or a reader this account cannot see) | nothing was sent. After an SD write this was already retried 3 times 5 s apart; wait 30 s and repeat once |
+| D4/G3: "the hub has no Python 3.10+ for pyverify's MCC tools" | no `python3.11` on the hub (its `python3` is 3.6) | the hub admin installs one; fpgahub's `/opt/fpgahub/bin/python3.11` counts |
+| D4/G3: "MCC REBOOT refused: slot B is being written …" | the user microSD's card job is running (SLOT-TIMING) | wait for `slot status` to show it done; never force it during the soak |
+| D4: `REBOOT sent … but no restart observed` | the REBOOT was not acknowledged | check `info` in 2 min before anything else; never send a second one on top |
+| D4: "went down … but did not come back" | a slow or failed Linux boot | wait 2 min, then `info`. Still dark: the Linux lead's ROLLBACK runbook. If the MCC stops answering, david power-cycles |
 | E2: "the board-SSH forward for XVC did not come up" | no pinned claim, or the key does not log in | redo B2; check `ssh mps3-b2 true` |
 | E4: `connect_hw_server` answers a different version | a lingering auto-launched hw_server | `pkill -u $USER hw_server`; redo E2 and E3 |
 | E4: a Digilent or USB target is listed | the partition-only filter failed | **STOP XVC** (E5); report it as a Harness Manager bug (`hw_server_argv`) |

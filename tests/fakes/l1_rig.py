@@ -3,12 +3,14 @@
 ``lab(vb, monkeypatch)`` wires the pieces the way Thursday's real run is wired:
 
 - boards.toml in the test's state dir, exactly the table docs/HIL_B0.md tells
-  david to write (``via = "ssh:mapstone-dev…"``, a ``hub`` table with the MCC share);
+  david to write (``via = "ssh:mapstone-dev…"``, a ``hub`` table; no MCC share: MCC-FIX);
 - ``FakeSsh`` as the tunnel's launcher: the board's REAL ports as the hub sees
   them (``192.168.10.101:6900`` …) lead to the ``VirtualMps3``'s ephemeral ports,
   so the pack runs with its real defaults (6900/6910/6921/6930-6932/2542);
-- ``FakeHub`` as every hub runner, with the MCC (``vb.mcc``) on
-  ``/dev/mps3_01_pl/tty_00``, shared or not.
+- ``FakeHub`` behind ``HubTool`` as every hub runner, with the MCC (``vb.mcc``) on
+  ``/dev/mps3_01_pl/tty_00`` behind a real pty (``PtyMcc``): Harness Manager's hub-side MCC
+  reader runs for real against it, pyverify's REBOOT writer is played by ``HubTool``. With
+  ``share_mcc`` someone else's fpgahub share holds tty_00 (the scan sees a second reader).
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import pytest
 
 from harness_manager_mps3 import hub as hubmod
 from harness_manager_mps3 import tunnel as tunmod
+from tests.fakes.hub_mcc_fakes import HubTool, PtyMcc
 from tests.fakes.l1_fake_hub import FakeHub
 from tests.fakes.l1_fake_ssh import FakeSsh
 from tests.fakes.virtual_board import VirtualMps3
@@ -37,7 +40,7 @@ LAB_TOML = f"""\
 [boards.lab]
 match = ["{BOARD_IP}"]
 via = "ssh:{HUB}"
-hub = {{ host = "{HUB}", target = "{TARGET}", shares = {{ mcc = "{MCC_TTY}" }} }}
+hub = {{ host = "{HUB}", target = "{TARGET}" }}
 """
 
 
@@ -62,21 +65,24 @@ class Lab:
     ssh: FakeSsh
     hub: FakeHub
     boards_toml: Path
+    tool: HubTool | None = None
     runners: list[tuple[str, Any]] = field(default_factory=list)
 
 
 @contextmanager
 def lab(vb: VirtualMps3, monkeypatch: pytest.MonkeyPatch, *, state_dir: Path,
-        share_mcc: bool = True, toml: str = LAB_TOML) -> Iterator[Lab]:
+        share_mcc: bool = False, toml: str = LAB_TOML) -> Iterator[Lab]:
     ssh = FakeSsh()
     ssh.route_board(BOARD_IP, board_routes(vb))
     hub = FakeHub(TARGET)
+    pty = None if share_mcc else PtyMcc(vb.mcc)      # a share broker would read it instead
     hub.add_tty(MCC_TTY, vb.mcc, share=share_mcc)
-    rig = Lab(vb, ssh, hub, write_boards_toml(state_dir, toml))
+    tool = HubTool(hub, mcc=vb.mcc, pty=pty, tty=MCC_TTY)
+    rig = Lab(vb, ssh, hub, write_boards_toml(state_dir, toml), tool)
 
-    def runner_factory(host: str, group: str | None) -> FakeHub:
+    def runner_factory(host: str, group: str | None) -> HubTool:
         rig.runners.append((host, group))
-        return hub
+        return tool
 
     monkeypatch.setattr(tunmod, "DEFAULT_LAUNCHER", ssh)
     monkeypatch.setattr(tunmod, "DEFAULT_SSH_G", ssh.ssh_g)
@@ -87,3 +93,5 @@ def lab(vb: VirtualMps3, monkeypatch: pytest.MonkeyPatch, *, state_dir: Path,
         hubmod.SHARES.close_all()
         hub.close()
         ssh.close()
+        if pty is not None:
+            pty.close()

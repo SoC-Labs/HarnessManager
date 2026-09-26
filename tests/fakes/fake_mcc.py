@@ -35,6 +35,9 @@ Modelled behaviours, each from a real observation:
   MCC "re-enumerates the USB stack as it reboots" (mcc.py ``reboot``); the
   FT4232H is a separate USB device, so this is unverified, but a driver must
   survive it.
+- **Post-SD-write quirk (optional).** ``bare_crlf_crs = N`` answers the next N bare CRs
+  with ``\r\n`` only, no prompt: what the MCC does for a few seconds after an SD write
+  (silicon, reproduced twice, 2026-09-26).
 - **Destructive commands** are recorded in ``dangerous`` so tests can prove the
   driver never sends them. ``writes`` records every byte written.
 
@@ -143,6 +146,8 @@ class FakeMcc:
         self.autoboot_aborted = False
         self.ignored_while_booting = 0
         self.closed = False
+        #: MCC-FIX: the next N bare CRs are answered with only CR/LF (the post-SD-write quirk)
+        self.bare_crlf_crs = 0
         self._schedule: list[tuple[float, bytes, Callable[[], None] | None]] = []
         self._autoboot_window: tuple[float, float] | None = None
         self._port_dead_until_usb = False
@@ -274,6 +279,11 @@ class FakeMcc:
     # -- command handling ---------------------------------------------------------
 
     def _feed(self, ch: bytes) -> None:
+        if ch in (b"\r", b"\n") and not self._line.strip() and self.bare_crlf_crs > 0:
+            # The post-SD-write quirk (silicon, 2026-09-26): a bare CR gets only CR/LF.
+            self.bare_crlf_crs -= 1
+            self._out += b"\r\n"
+            return
         self._out += ch  # the MCC echoes
         if ch in (b"\r", b"\n"):
             line = self._line.decode("ascii", "replace").strip()

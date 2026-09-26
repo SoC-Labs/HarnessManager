@@ -3,8 +3,9 @@
 Lane HUB-SD (HARNESS-DIST §5 path (b), §6 (b), H10; david's decisions U9 and U10). A
 board behind the hub has its Debug USB on the hub, not here, so the config SD is written
 by fpgahub (``fpgahub target program TARGET BIT --method sd --force``) and the new base is
-started by the paced REBOOT HM already has (``mcc.py``, 100 ms a character over the
-share). ``session.hub_sd`` is a ``HubSdDoor``: the ``StorageAdapter`` shape the executor
+started by the board's controller, which in hub mode runs ON the hub (``hub_mcc``: pyverify's
+``sd field --already-written``, then the paced REBOOT at 100 ms a character; Harness Manager
+never holds a share on tty_00, MCC-FIX). ``session.hub_sd`` is a ``HubSdDoor``: the ``StorageAdapter`` shape the executor
 drives (``backup`` / ``install`` / ``restore`` / ``load_backup`` / ``pending``), so the
 install flow, its journal and its confirm stay T7's.
 
@@ -15,8 +16,9 @@ The sequence, single-flight, the lease required (``install``):
    ``sd_install`` plugin writes exactly one file, so anything else needs the Debug USB);
 2. the backup is verified: the running release's ``nanosoc.bit`` from the signed cache
    (fpgahub cannot back up the SD), zipped in T3's backup format;
-3. the lease is this client's (``HeldError`` names the holder), and nobody else is on the
-   MCC share ``tty_00`` (one reader: a second one splits the REBOOT);
+3. the lease is this client's (``HeldError`` names the holder), and nothing on the hub reads
+   ``tty_00`` (pyverify's hub-side scan, which sends nothing: a second reader splits the
+   REBOOT);
 4. fpgahub offers an ``sd`` program method (FH-d would say whether it can REACH the card);
 5. the ``.bit`` is uploaded and its sha checked where it landed;
 6. ONE ``program --method sd --force`` request. **Its client times out at 30 s while the
@@ -31,7 +33,8 @@ The sequence, single-flight, the lease required (``install``):
    writes again until the hub's record is read.
 
 ``restore`` runs the same sequence with the backup's ``.bit`` (a rollback, and U10's
-auto-revert of a board that stays dark). The REBOOT itself is the controller's.
+auto-revert of a board that stays dark). The REBOOT itself is the controller's: a proven write
+is left in ``take_written()`` for it (``hub_mcc`` runs ``sd field --already-written`` on it).
 
 Backends. ``SshSdBackend`` (the lab hub today: ``ssh HUB 'sg fpga -c "fpgahub …"'``; the
 ``.bit`` is staged in the hub user's ``~/.cache/harness-manager/hub-sd``, or the hub's
@@ -85,7 +88,7 @@ NANOSOC_BIT = "MB/HBI0309C/Nanosoc/nanosoc.bit"
 VIA_HUB = "hub"
 DOOR = "hub_sd"
 SD_METHOD = "sd"                      # [boards.mps3_01_pl.program.sd] on the lab hub
-MCC_SHARE = "mcc"
+MCC_SHARE = "mcc"                     # boards.toml shares.mcc: names the MCC's tty, never shared
 #: The hub user's staging directory, relative to its home (ssh runs there).
 STAGE_DIR = ".cache/harness-manager/hub-sd"
 #: fpgahub's own client window (``ipc.DaemonClient(timeout=30.0)``): the CLI gives up on a
@@ -736,7 +739,7 @@ class HubSdDoor:
                  mcc_tty: str | None = None, state_dir: Path | None = None,
                  clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep,
                  budget_s: float = COMPLETE_BUDGET_S, poll_s: float = POLL_S,
-                 own_linger: Callable[[str], int] | None = None) -> None:
+                 mcc_scan: Callable[[], None] | None = None) -> None:
         self.hub = hub
         self.backend = backend
         self.board_id = board_id
@@ -746,7 +749,8 @@ class HubSdDoor:
         self.sleep = sleep
         self.budget_s = budget_s
         self.poll_s = poll_s
-        self._own_linger = own_linger
+        self._mcc_scan = mcc_scan
+        self.written: dict[str, Any] | None = None       # the last proven write, for the REBOOT
         self.lease_check: Callable[[str], Any] | None = None
         self.previous: dict[str, Any] | None = None        # {version, files: {rel: Path}}
         self.last: dict[str, Any] = {}                     # the last write's evidence
@@ -796,14 +800,14 @@ class HubSdDoor:
     # -- what the planner is told --
 
     def describe(self) -> dict[str, Any]:
-        """``{available, reason, door, hub, target, transport, sd_method, mcc_share,
+        """``{available, reason, door, hub, target, transport, sd_method, mcc_route, mcc_tty,
         only_paths}`` for ``BoardView.hub_sd`` (cached ``DESCRIBE_TTL_S``; never raises)."""
         now = self.clock()
         if self._describe is not None and now - self._describe[0] < DESCRIBE_TTL_S:
             return dict(self._describe[1])
         out: dict[str, Any] = {"available": False, "reason": "", "door": DOOR, "hub": self.host,
                                "target": self.target, "transport": "", "sd_method": False,
-                               "mcc_share": bool(self.mcc_tty), "mcc_tty": self.mcc_tty or "",
+                               "mcc_route": "hub-tool", "mcc_tty": self.mcc_tty or "",
                                "only_paths": list(self.only_paths)}
         try:
             be = self._backend()
@@ -818,9 +822,6 @@ class HubSdDoor:
             out["last_fingerprint"] = info.last_fingerprint
             if not ok:
                 out["reason"] = f"fpgahub cannot write the SD of {self.target}: {why}"
-            elif not self.mcc_tty:
-                out["reason"] = ("the board's hub table has no MCC share (shares = { mcc = "
-                                 f"\"/dev/{self.target}/tty_00\" }}): nothing could REBOOT it")
             else:
                 out["available"] = True
         self._describe = (now, out)
@@ -915,38 +916,34 @@ class HubSdDoor:
     # -- the sequence --
 
     def preflight(self) -> None:
-        """Before anything is downloaded or written: the lease is ours, nobody else is on
-        tty_00, and the hub offers an ``sd`` method. The executor calls it up front; every
-        write calls it again."""
+        """Before anything is downloaded or written: the lease is ours, nothing on the hub
+        reads tty_00, and the hub offers an ``sd`` method. The executor calls it up front;
+        every write calls it again."""
         if self.lease_check is not None:
             self.lease_check(f"write the config SD of {self.target} through the hub")
-        self._check_mcc_share()
+        self._check_mcc_reader()
         info = self._backend().program_info()
         ok, why = info.methods.get(SD_METHOD, (False, "no 'sd' program method on the hub"))
         if not ok:
             raise UnavailableError("hub SD write", f"fpgahub cannot write the SD of "
                                                    f"{self.target}: {why}")
 
-    def _check_mcc_share(self) -> None:
-        """Exactly one reader on tty_00: ours, at REBOOT time. Anyone attached now refuses."""
+    def _check_mcc_reader(self) -> None:
+        """Nothing else reads tty_00 on the hub: pyverify's second-reader scan, run ON the hub
+        (``hub_mcc.scan_for_hub``). It sends nothing; Harness Manager holds no share there."""
         if not self.mcc_tty:
-            raise UnavailableError("hub SD install", "the board's hub table has no MCC share "
-                                                     "(tty_00): nothing could REBOOT it")
-        client = self.hub.client
-        info = client.share_for(self.mcc_tty)
-        if info is None:
-            raise AbsentError(f"no fpgahub share for {self.mcc_tty} on {self.host}",
-                              hint=f"start it on the hub: fpgahub share start {self.target} "
-                                   f"{self.mcc_tty} (the REBOOT goes through it)")
-        ours = self._own_linger(self.mcc_tty) if self._own_linger is not None else _own_linger(
-            self.hub, self.mcc_tty)
-        readers = int(getattr(info, "readers", 0) or 0)
-        if readers > ours:
-            who = getattr(info, "writer", "") or "another client"
-            raise HeldError(
-                f"{who} is on the MCC console {self.mcc_tty} ({readers} client(s)): a second "
-                "reader on tty_00 splits the REBOOT, so nothing was written",
-                holder=who, hint="ask them to close their MCC console, then install again")
+            raise UnavailableError("hub SD install", "the board's MCC console on the hub is "
+                                                     "unknown: nothing could REBOOT it")
+        if self._mcc_scan is not None:
+            self._mcc_scan()
+            return
+        from .hub_mcc import scan_for_hub
+
+        try:
+            scan_for_hub(self.hub, self.mcc_tty)
+        except HeldError as exc:
+            raise HeldError(f"{exc.message}; nothing was written", holder=exc.holder,
+                            hint=exc.hint) from exc
 
     def _write(self, bit: Path, *, why: str, backup: BackupRecord,
                progress: Progress | None) -> None:
@@ -1003,9 +1000,18 @@ class HubSdDoor:
                          "update rollback TARGET`")
             emit("verified", 1, 1)
             flight.clear()
+            # The controller's REBOOT runs `pyverify sd field --already-written` on this: the
+            # staged path on the hub (SSH; a REST repository id is no path) and its sha.
+            self.written = {"ref": ref if be.transport == "ssh" else "", "sha256": sha,
+                            "source": done.source, "why": why, "at": self.clock()}
         finally:
             with _ACTIVE_LOCK:
                 _ACTIVE.discard(key)
+
+    def take_written(self) -> dict[str, Any] | None:
+        """The last proven write (``ref``, ``sha256``, ``source``), once: the REBOOT after it."""
+        out, self.written = self.written, None
+        return out
 
     def _refusal(self, reply: ProgramReply) -> HarnessError:
         if reply.state == "refused" and ("lease" in reply.message.lower() or "423" in reply.message):
@@ -1068,21 +1074,14 @@ class HubSdDoor:
 
 
 def _mcc_tty(hub: Any) -> str:
+    """The MCC console's path on the hub (``hub_mcc.mcc_tty_for``): never a share."""
+    from .hub_mcc import mcc_tty_for
+
     cfg = getattr(hub, "config", None)
-    shares = dict(getattr(cfg, "shares", {}) or {})
-    if MCC_SHARE in shares:
-        return str(shares[MCC_SHARE])
-    return next((t for t in shares.values() if str(t).endswith("tty_00")), "")
-
-
-def _own_linger(hub: Any, tty: str) -> int:
-    """Our own just-closed share connections the hub may still count (``hub.SHARES``)."""
-    try:
-        from .hub import SHARES, ShareRef
-
-        return SHARES.lingering(ShareRef(hub.host, hub.target, tty))
-    except Exception:  # noqa: BLE001 - a missing route counts as none of ours
-        return 0
+    if cfg is None:
+        target = str(getattr(hub, "target", "") or "")
+        return f"/dev/{target}/tty_00" if target else ""
+    return mcc_tty_for(cfg)
 
 
 # --- the pack hook --------------------------------------------------------------------------------

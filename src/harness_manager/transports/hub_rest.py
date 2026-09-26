@@ -938,6 +938,11 @@ class RestHubClient:
         return next((s for s in self.share_list() if s.tty == tty), None)
 
     def share_start(self, tty: str, baud: int = 115200) -> Any:
+        if str(tty).rstrip("/").endswith("/tty_00"):
+            # MCC-FIX: never a share on the MCC console; refused before the hub is asked.
+            raise RefusedError(f"Harness Manager never starts or uses an fpgahub share on the "
+                               f"MCC console {tty}: the paced REBOOT needs exactly one reader "
+                               "on tty_00", hint="shares are for the FPGA UART lanes tty_01..03")
         info = shape("ShareInfo")
         rows = self._call("share start", "POST", self._t("/shares"),
                           body={"tty_paths": [tty], "baud": int(baud)}).body or []

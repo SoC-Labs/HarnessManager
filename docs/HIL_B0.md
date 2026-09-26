@@ -22,9 +22,12 @@ the command, the expected answer and the evidence file to save.
 2. **Never run `fpgahub share stop`.** It stops every share on the board,
    other people's consoles included. Harness Manager refuses to run it.
 3. During B0 slot 1, **stay off `tty_02`**, because slot 2's console must be
-   the first client there. The boards.toml below shares only `tty_00` (the
-   MCC).
-4. UDP does not cross the SSH tunnel, so identify (6899) and TFTP (69) do not
+   the first client there. The boards.toml below shares nothing.
+4. **Never start an fpgahub share on `tty_00` (the MCC).** The paced REBOOT needs exactly
+   one reader there, a share is a reader that only `share stop` removes (rule 2), and while
+   one exists the platform's tools refuse to REBOOT. Harness Manager runs every MCC operation
+   ON the hub through pyverify instead, and refuses `share start … mcc`.
+5. UDP does not cross the SSH tunnel, so identify (6899) and TFTP (69) do not
    work from srv03335. Deploys push over 6910 TCP.
 
 **The board as of 09-24** (from the ILA mint session's findings,
@@ -36,8 +39,9 @@ the command, the expected answer and the evidence file to save.
 - **A new console client may first see stale output from the previous design.** The shell
   holds UART output while nobody reads 6930. Harness Manager drops its own scrollback
   on a verified swap, but it cannot drop what the shell still holds.
-- **MCC commands over the hub share are paced at 100 ms a character**, the rate the remote REBOOT was
-  proven at. Exactly one program may read `tty_00`, so close any other console on it.
+- **MCC commands run on the hub, paced at 100 ms a character**, the rate the remote REBOOT was
+  proven at (pyverify's hub-side tools over `ssh mapstone-dev 'sg fpga -c …'`). Exactly one
+  program may read `tty_00`, so close any other console on it: the tools refuse otherwise.
 - **After a MicroBlaze warm restart** (watchdog, `reboot`), the partition stays in reset
   until the first swap, and `stats` may show `rm_ok: false`. That is a real state,
   not a Harness Manager fault.
@@ -62,7 +66,7 @@ arrives as an fpgahub TTY share, reached through a second forward.
    [boards.lab]
    match = ["192.168.10.101"]
    via = "ssh:mapstone-dev.ecs.soton.ac.uk"
-   hub = { host = "mapstone-dev.ecs.soton.ac.uk", target = "mps3_01_pl", shares = { mcc = "/dev/mps3_01_pl/tty_00" } }
+   hub = { host = "mapstone-dev.ecs.soton.ac.uk", target = "mps3_01_pl" }
    EOF
    ```
 3. Point the app at OpenOCD, which is not on PATH on srv03335:
@@ -114,26 +118,20 @@ harness-manager lease show 192.168.10.101 | tee $EV/t1_lease_show.txt
 
 ---
 
-## 2. Share the MCC console (`tty_00`)
+## 2. Check nothing reads the MCC console (`tty_00`)
 
+Nothing to start: the MCC is reached ON the hub. Check it is free:
 ```bash
-harness-manager share start 192.168.10.101 mcc | tee $EV/t2_share.txt
+ssh mapstone-dev.ecs.soton.ac.uk 'ps -eo pid,user,args | grep -F tty_00 | grep -v grep; echo END' | tee $EV/t2_tty00.txt
 ```
-- **Expected:** `/dev/mps3_01_pl/tty_00 → 0.0.0.0:<port>  writer -  clients 0`.
-- If the share was already running, the same line comes back.
-- The same command without Harness Manager:
-  `ssh mapstone-dev.ecs.soton.ac.uk 'sg fpga -c "fpgahub share start mps3_01_pl /dev/mps3_01_pl/tty_00 --baud 115200"'`.
-
-**The write slot:** fpgahub passes on only the FIRST client's keystrokes on a
-share. Close any other client on `tty_00` (a socat, the fpgahub web console)
-before the MCC checks. If one is still attached, Harness Manager says
-`another client (…) holds the hub share's write slot` instead of sending
-commands that would be dropped.
+- **Expected:** only `END`. Any line is another reader (a `cat`, a socat, an fpgahub share on
+  `tty_00`): Harness Manager's MCC checks will refuse, naming it. Ask its owner to close it; a
+  share goes only with `share stop`, which stops every share (rule 2), so that is david's call.
 
 **Optional, Thursday only (never during B0 slot 1): the shell console.** Add
-lane 2 to the `shares` in boards.toml:
+lane 2 to boards.toml's hub table:
 ```
-shares = { mcc = "/dev/mps3_01_pl/tty_00", fpga_uart2 = "/dev/mps3_01_pl/tty_02" }
+shares = { fpga_uart2 = "/dev/mps3_01_pl/tty_02" }
 ```
 then run `harness-manager share start 192.168.10.101 fpga_uart2`.
 - It appears as console `fpga_uart2` (alias `shell`), at a rate the share sets.
@@ -154,7 +152,7 @@ harness-manager app
 **Expected on the Overview:**
 - the header shows the shell id and the design;
 - the Ethernet link reads `… via ssh:mapstone-dev.ecs.soton.ac.uk`;
-- the MCC link reads `MCC console over the hub share /dev/mps3_01_pl/tty_00 …`.
+- the MCC link reads `the MCC console /dev/mps3_01_pl/tty_00, reached ON the hub …`.
 
 Evidence of the tunnel (terminal B):
 ```bash
@@ -162,7 +160,7 @@ pgrep -af -- '-N -T' | grep mapstone | tee $EV/t3_tunnel_ps.txt
 ```
 - **Expected:** one `ssh … -o ControlPath=none … -o ExitOnForwardFailure=yes … -L 127.0.0.1:<n>:192.168.10.101:6900 … mapstone-dev.ecs.soton.ac.uk` line.
 - No forward uses local port `2542`.
-- After the first MCC check (R4) a second line appears, forwarding to the share.
+- The MCC check (R4) adds no forward: it runs on the hub over a one-shot ssh.
 
 From here on, CLI commands go through the app's service and share its session.
 The service reads the step 0.3 and 5.1 variables when it starts: if it was
@@ -180,7 +178,7 @@ Work down the list and save each file.
 | R1 | Identity and health | `harness-manager --json info 192.168.10.101 \| tee $EV/r1_info.json` | `shell_id` `0x72bb0a36`, `harness_version` `1.0.0` (every firmware since v0.8 says 1.0.0; Harness Manager names the release by its firmware sha instead), `health.reachable` true; `capabilities` include `console_dut`, `console_controller`, `telemetry_temp` | `r1_info.json` |
 | R2 | A console in the GUI | Consoles → `uart0` → Open | state `up`. Silent on greybox (no DUT UART); nanosoc prints its banner after a DUT reset | screenshot `r2_console_gui.png` |
 | R3 | The same console in `screen` | `harness-manager pty 192.168.10.101 uart0` (lane L2's verb) prints the path, then `screen <path>` | the same bytes as the GUI, at the same time; leave `screen` with `Ctrl-a k` | `r3_screen.txt` (paste) |
-| R4 | MCC temperature over the share | `harness-manager --json mcc 192.168.10.101 temp \| tee $EV/r4_mcc_temp.json` | `mcc_temp` about 35 degC, `source` `mcc-console`; takes ~3 s (paced at 60 ms/char) | `r4_mcc_temp.json` |
+| R4 | MCC temperature, read on the hub | `harness-manager --json mcc 192.168.10.101 temp \| tee $EV/r4_mcc_temp.json` | `mcc_temp` about 35 degC, `source` `mcc-console (hub)`; takes ~5 s (paced at 100 ms/char) | `r4_mcc_temp.json` |
 | R5 | Debug detect | `harness-manager --json debug detect 192.168.10.101 \| tee $EV/r5_debug_detect.json` | on greybox: exit 13, `the loaded design (greybox) has no debug port` (correct: there is nothing to detect); on nanosoc: `idcode` `0x6ba00477` over remote_bitbang through the tunnel | `r5_debug_detect.json` |
 | R6 | The lease | `harness-manager --json lease show 192.168.10.101 \| tee $EV/r6_lease.json` | `holder` `david-hm`, `mine` true, `holder_kind` `hm`; `notes_supported` and `can_revoke` true (SSH hub) | `r6_lease.json` |
 | R7 | Front panel on bare metal | `harness-manager panel show 192.168.10.101 \| tee $EV/r7_panel.txt`, then `harness-manager identify 192.168.10.101; echo rc=$?` | `source rebuilt from what Harness Manager read`; the owner (harness or DUT). Identify: `unavailable — needs harness feature 'locate' (Linux harness)`, rc=12, and the backlight does **not** blink. In the app: the Board tile's Panel line and the Details mirror say "rebuilt" | `r7_panel.txt` |
@@ -251,7 +249,7 @@ not take or request a lease. The board runs the P-mint static `0x61BC6789` with 
    harness-manager lease show 192.168.10.101 | tee -a $EV/c2_release.txt
    ```
    Expected: `released`, then `not leased`.
-3. Leave the shares running. Never `share stop` (rule 2).
+3. Leave any lane shares running. Never `share stop` (rule 2).
 
 ---
 
@@ -261,8 +259,8 @@ not take or request a lease. The board runs the P-mint static `0x61BC6789` with 
 |---|---|---|
 | `the SSH tunnel to mapstone-dev… did not come up: ssh exited with status 255 (…Permission denied (publickey))` | no usable key without a prompt | re-run step 0.4; load the key (`ssh-add`) |
 | `your ssh config gives mapstone-dev… port forwards the tunnel cannot leave out` | a `LocalForward` in an `Include`d file | move it into `~/.ssh/config` itself (the tunnel comments it out there) |
-| R4: `no fpgahub share for /dev/mps3_01_pl/tty_00` | the share is not running | step 2 |
-| R4: `… holds the hub share's write slot` | another client is on `tty_00` | close it, repeat R4 |
+| R4: `another process reads the MCC console /dev/mps3_01_pl/tty_00 … (pid N: …)` | another reader on `tty_00` (a `cat`, an fpgahub share) | step 2; have it closed, repeat R4 |
+| an MCC REBOOT: `no Python 3.10+ for pyverify's MCC tools` | the hub has no `python3.11` (its `python3` is 3.6; reads run on 3.6, a REBOOT does not) | the hub admin installs one; fpgahub's `/opt/fpgahub/bin/python3.11` also counts |
 | R1: `offline`, "the hub … could not reach the shell (channel N: open failed …)" | the hub reached no shell: board off, rebooting, or harness down | check from the hub: the B0 runbook's S2.3 ping block |
 | R1: `busy`, "another client holds the control channel" | a real second client on 6900 (a pyverify run, the hub's poller) | wait, or close the other client |
 | `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh mapstone-dev… 'id -nG'` must list `fpga` |

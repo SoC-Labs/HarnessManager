@@ -2,14 +2,14 @@
 
 A board whose config SD is on the hub (its Debug USB is plugged into the hub, not into
 this machine) can still take a new harness base: the board pack's ``hub_sd`` door writes
-the one file the hub can write, and the pack's controller REBOOTs the board over the
-hub's MCC share. The pack describes the door in ``BoardView.hub_sd`` (``available``,
+the one file the hub can write, and the pack's controller REBOOTs the board ON the hub
+(never through a share on tty_00: MCC-FIX). The pack describes the door in ``BoardView.hub_sd`` (``available``,
 ``reason``, ``target``, ``hub``, ``only_paths``, the lease ``holder``/``mine``/``queue``);
 this module decides whether a plan goes through it and says what that means:
 
 - **when**: ``via="hub"`` asks for it; with no ``via``, a base update on a board with no
   local Debug USB goes through the hub when the pack offers the door. ``via="usb"`` never.
-- **blockers**: the door unavailable (no ``sd`` method, the hub down, no MCC share); the
+- **blockers**: the door unavailable (no ``sd`` method, the hub down, no MCC on it); the
   running release unknown (the door's backup is that release's ``.bit`` from the signed
   cache: fpgahub cannot back up the SD); the running release's SD part private and no
   token; a signed SD file list that differs outside ``only_paths``;

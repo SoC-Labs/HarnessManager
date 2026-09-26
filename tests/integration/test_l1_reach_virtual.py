@@ -1,9 +1,10 @@
 """L1: the lab board through the hub, end to end against the virtual board. Each check has a twin.
 
 The rig (tests/fakes/l1_rig.py) is Thursday's wiring with the network faked:
-boards.toml says ``via = "ssh:mapstone-dev…"`` and names the MCC share, the fake
-ssh forwards the board's real ports to a VirtualMps3, and the fake hub serves the
-virtual MCC on /dev/mps3_01_pl/tty_00. The pack runs with its real port defaults.
+boards.toml says ``via = "ssh:mapstone-dev…"``, the fake ssh forwards the board's real
+ports to a VirtualMps3, and the virtual MCC sits on /dev/mps3_01_pl/tty_00 ON the fake hub,
+read there by Harness Manager's hub-side reader (MCC-FIX: never through a share). The pack
+runs with its real port defaults.
 """
 
 from __future__ import annotations
@@ -44,8 +45,9 @@ def test_boards_toml_routes_the_lab_board_through_the_hub(tmp_path, monkeypatch,
         cand = engine.candidate_for(BOARD_IP)
         eth = next(lk for lk in cand.links if lk.kind == LinkKind.ETHERNET)
         assert eth.via == "ssh" and eth.address == f"{BOARD_IP}:6900" and f"ssh:{HUB}" in eth.detail
-        mcc = next(lk for lk in cand.links if lk.kind == LinkKind.USB_SERIAL)
-        assert mcc.via == "hub" and mcc.address == f"hub://{HUB}/mps3_01_pl{MCC_TTY}"
+        assert not any(lk.kind == LinkKind.USB_SERIAL for lk in cand.links)   # no MCC share
+        mcc = next(lk for lk in cand.links if lk.kind == LinkKind.HUB)
+        assert mcc.via == "hub" and mcc.address == f"hub-mcc://{HUB}/mps3_01_pl{MCC_TTY}"
 
         session = engine.open(cand, note="l1 test")
         info = engine.info(cand.board_id)
@@ -89,55 +91,59 @@ def test_a_console_reads_the_dut_through_the_tunnel(tmp_path, monkeypatch, engin
             assert s.recv(64).startswith(b"nanosoc boot")                  # FakeShell's banner
 
 
-def test_the_mcc_temperature_arrives_over_the_hub_share(tmp_path, monkeypatch, engine):
+def test_the_mcc_temperature_is_read_on_the_hub(tmp_path, monkeypatch, engine):
+    # MCC-FIX: Harness Manager's reader runs ON the hub against tty_00 (here a real pty in
+    # front of the virtual MCC), paced 100 ms a character; no share, no forward to one.
     with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir()) as rig:
         session = engine.open(engine.candidate_for(BOARD_IP))
         (temp,) = session.controller.temperatures()
-        assert temp.available and temp.value == 35.5 and temp.source == "mcc-console"
-        # It went through the share (a second ssh forward to the hub's loopback share port).
-        share_port = rig.hub.shares[MCC_TTY].port
-        assert any(f":127.0.0.1:{share_port}" in " ".join(argv) for argv in rig.ssh.launches)
-        assert b"CFG R TEMP 0" in rig.hub.shares[MCC_TTY].written       # paced, in order
+        assert temp.available and temp.value == 35.5 and temp.source == "mcc-console (hub)"
+        run = rig.tool.reader_runs[-1]
+        assert (run["tty"], run["lines"], run["menu"], run["pace"]) == (
+            MCC_TTY, ["CFG R TEMP 0"], "debug", 0.1)
+        assert vb.mcc.accepted_lines[-3:] == ["DEBUG", "CFG R TEMP 0", "EXIT"]
+        assert vb.mcc.menu == "main"                       # left at Cmd> for the next REBOOT
+        assert rig.tool.share_starts() == [] and rig.hub.shares == {}
+        assert not any(c[:2] == ["fpgahub", "share"] for c in rig.tool.calls)
         assert rig.hub.share_stops == []
 
 
-def test_negative_twin_no_share_running_says_how_to_start_it(tmp_path, monkeypatch, engine):
+def test_negative_twin_a_share_on_tty_00_is_a_second_reader_and_nothing_is_typed(
+        tmp_path, monkeypatch, engine):
+    # Someone else's fpgahub share holds tty_00: the hub-side scan refuses, and Harness
+    # Manager neither uses that share nor types into the MCC.
     with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir(),
-                                          share_mcc=False) as rig:
+                                          share_mcc=True) as rig:
         session = engine.open(engine.candidate_for(BOARD_IP))
         (temp,) = session.controller.temperatures()
-        assert not temp.available
-        assert "no fpgahub share" in temp.reason
-        assert f"fpgahub share start mps3_01_pl {MCC_TTY} --baud 115200" in temp.reason
-        assert MCC_TTY not in rig.hub.shares                              # it did not start one
+        assert not temp.available and "another process reads" in temp.reason
+        assert "tty_share" in temp.reason and vb.mcc.accepted_lines == []
+        assert rig.hub.shares[MCC_TTY].readers == 0 and rig.hub.shares[MCC_TTY].written == b""
 
 
-def test_start_shares_true_starts_the_missing_share(tmp_path, monkeypatch, engine):
+def test_negative_twin_start_shares_never_starts_a_tty_00_share(tmp_path, monkeypatch, engine):
     toml = (f'[boards.lab]\nmatch = ["{BOARD_IP}"]\nvia = "ssh:{HUB}"\n'
             f'hub = {{ host = "{HUB}", target = "mps3_01_pl", shares = {{ mcc = "{MCC_TTY}" }}, '
             'start_shares = true }\n')
-    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir(), share_mcc=False,
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir(),
                                           toml=toml) as rig:
         session = engine.open(engine.candidate_for(BOARD_IP))
         (temp,) = session.controller.temperatures()
-        assert temp.available and temp.value == 35.5
-        assert MCC_TTY in rig.hub.shares
-        assert ["fpgahub", "share", "start", "mps3_01_pl", MCC_TTY, "--baud", "115200"] in rig.hub.calls
+        assert temp.available and temp.value == 35.5         # read on the hub, as ever
+        assert MCC_TTY not in rig.hub.shares and rig.tool.share_starts() == []
+        assert not any(lk.address.startswith("hub://") for lk in session.candidate.links)
 
 
-def test_a_share_whose_write_slot_is_taken_refuses_instead_of_dropping(tmp_path, monkeypatch, engine):
+def test_another_reader_on_tty_00_refuses_the_read_instead_of_typing(tmp_path, monkeypatch, engine):
     with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=state_dir()) as rig:
         session = engine.open(engine.candidate_for(BOARD_IP))
-        other = socket.create_connection(("127.0.0.1", rig.hub.shares[MCC_TTY].port))
-        try:
-            deadline = time.monotonic() + 2
-            while rig.hub.shares[MCC_TTY].readers < 1 and time.monotonic() < deadline:
-                time.sleep(0.01)
-            (temp,) = session.controller.temperatures()
-            assert not temp.available and "write slot" in temp.reason
-            assert rig.hub.shares[MCC_TTY].dropped_writes == 0           # nothing was lost silently
-        finally:
-            other.close()
+        rig.tool.others = [[777, f"cat {MCC_TTY}"]]
+        (temp,) = session.controller.temperatures()
+        assert not temp.available and "pid 777" in temp.reason
+        assert vb.mcc.accepted_lines == []                 # nothing was typed
+        rig.tool.others = []                                # twin: alone again, it reads
+        (temp,) = session.controller.temperatures()
+        assert temp.available and temp.value == 35.5
 
 
 def test_probe_finds_the_board_through_the_tunnel(tmp_path, monkeypatch, engine):
@@ -194,11 +200,15 @@ def test_an_explicit_via_works_without_boards_toml(tmp_path, monkeypatch):
 def test_hub_links_carry_lane_numbers_for_the_console_names():
     cfg = hubmod.HubConfig(HUB, shares={"mcc": MCC_TTY, "lane2": "/dev/mps3_01_pl/tty_02"})
     links = hubmod.share_links(cfg)
-    assert [lk.address.rsplit("/", 1)[1] for lk in links] == ["tty_00", "tty_02"]   # MCC first
+    assert [lk.address.rsplit("/", 1)[1] for lk in links] == ["tty_02"]   # never the MCC's
     from harness_manager_mps3.usb import is_lane_link
 
-    assert not is_lane_link(links[0]) and is_lane_link(links[1])
+    assert is_lane_link(links[0])
     assert all(lk.via == "hub" and lk.kind == LinkKind.USB_SERIAL for lk in links)
+    # twin: a tty_00 under any name is the MCC, and makes no share link either
+    assert hubmod.share_links(hubmod.HubConfig(HUB, shares={"console": MCC_TTY})) == []
+    mcc = hubmod.mcc_link(cfg)
+    assert mcc is not None and mcc.kind == LinkKind.HUB and mcc.address.endswith(MCC_TTY)
 
 
 def test_boards_toml_hub_table_errors_name_the_key(tmp_path):
@@ -231,8 +241,9 @@ def test_the_boards_toml_in_the_hil_doc_routes_the_lab_board(tmp_path, monkeypat
     cand = Mps3Pack().candidate_for_host(BOARD_IP)
     eth = next(lk for lk in cand.links if lk.kind == LinkKind.ETHERNET)
     assert eth.via == "ssh" and f"ssh:{HUB}" in eth.detail
-    (mcc,) = [lk for lk in cand.links if lk.kind == LinkKind.USB_SERIAL]
-    assert mcc.address == f"hub://{HUB}/mps3_01_pl{MCC_TTY}"
+    assert not [lk for lk in cand.links if lk.kind == LinkKind.USB_SERIAL]   # no MCC share
+    (mcc,) = [lk for lk in cand.links if lk.kind == LinkKind.HUB]
+    assert mcc.address == f"hub-mcc://{HUB}/mps3_01_pl{MCC_TTY}"
     cfg = hubmod.hub_config_for(cand)
     assert (cfg.host, cfg.target, cfg.start_shares) == (HUB, "mps3_01_pl", False)
 

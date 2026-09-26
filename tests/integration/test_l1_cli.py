@@ -88,14 +88,36 @@ def test_a_queued_acquire_says_so_on_stderr(capsys, rig, monkeypatch):
     assert rc == ExitCode.OK and "queued at position 1" in err and "held by david-b0" in out
 
 
-def test_share_list_and_start(capsys, rig):
-    rc, out, _ = run(capsys, "--json", "share", "list", BOARD_IP)
-    shares = json.loads(out)["shares"]
-    assert rc == ExitCode.OK and [s["tty"] for s in shares] == [MCC_TTY]
-    rc, out, _ = run(capsys, "--json", "share", "start", BOARD_IP, "mcc")
-    assert rc == ExitCode.OK and json.loads(out)["shares"][0]["port"] == shares[0]["port"]
-    rc, _, err = run(capsys, "share", "start", BOARD_IP, "fpga_uart2")     # not configured
-    assert rc == ExitCode.ABSENT and "mcc" in err
+LANE2 = "/dev/mps3_01_pl/tty_02"
+SHARES_TOML = (f'[boards.lab]\nmatch = ["{BOARD_IP}"]\nvia = "ssh:{HUB}"\n'
+               f'hub = {{ host = "{HUB}", target = "mps3_01_pl", shares = {{ mcc = "{MCC_TTY}", '
+               f'fpga_uart2 = "{LANE2}" }} }}\n')
+
+
+def test_share_list_and_start(capsys, tmp_path, monkeypatch):
+    from tests.fakes.l1_fake_hub import FakeLane
+
+    sd = Path(os.environ["HARNESS_MANAGER_STATE_DIR"])
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=sd, toml=SHARES_TOML) as rig:
+        rig.hub.add_tty(LANE2, FakeLane(), share=True)
+        rc, out, _ = run(capsys, "--json", "share", "list", BOARD_IP)
+        shares = json.loads(out)["shares"]
+        assert rc == ExitCode.OK and [s["tty"] for s in shares] == [LANE2]
+        rc, out, _ = run(capsys, "--json", "share", "start", BOARD_IP, "fpga_uart2")
+        assert rc == ExitCode.OK and json.loads(out)["shares"][0]["port"] == shares[0]["port"]
+        rc, _, err = run(capsys, "share", "start", BOARD_IP, "fpga_uart3")     # not configured
+        assert rc == ExitCode.ABSENT and "fpga_uart2" in err
+
+
+def test_negative_twin_share_start_refuses_the_mcc_by_name_or_path(capsys, tmp_path, monkeypatch):
+    # MCC-FIX: Harness Manager never starts an fpgahub share on tty_00, even when boards.toml
+    # still names one (`mcc`), and even by its /dev path. The hub is never asked.
+    sd = Path(os.environ["HARNESS_MANAGER_STATE_DIR"])
+    with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=sd, toml=SHARES_TOML) as rig:
+        for name in ("mcc", MCC_TTY):
+            rc, _, err = run(capsys, "share", "start", BOARD_IP, name)
+            assert rc == ExitCode.REFUSED and "never starts or uses an fpgahub share" in err
+        assert rig.tool.share_starts() == [] and MCC_TTY not in rig.hub.shares
 
 
 def test_negative_twin_there_is_no_share_stop(capsys, rig):

@@ -7,15 +7,15 @@ raw for packs)::
     match = ["192.168.10.101"]
     via = "ssh:mapstone-dev.ecs.soton.ac.uk"
     hub = { host = "mapstone-dev.ecs.soton.ac.uk", target = "mps3_01_pl",
-            shares = { mcc = "/dev/mps3_01_pl/tty_00" } }
+            shares = { fpga_uart2 = "/dev/mps3_01_pl/tty_02" } }
 
 ``hub`` keys: ``host`` (the hub to ssh into; ``"local"`` when the app runs ON
 the hub), ``url`` (fpgahub's REST API instead of ssh, with ``token_file``,
 ``ca_file``, ... : ``harness_manager.transports.hub_rest``; with both, REST wins
 and ``host`` is only the SSH fallback of the data plane), ``target`` (the fpgahub board name leases and shares use:
 ``mps3_01_pl``, never the chassis ``mps3_01``; pyverify.lease "THE NAME
-AUTHORITY"), ``shares`` (name -> TTY path; ``mcc`` is the board controller,
-``fpga_uart0..3`` the FPGA UART lanes), ``baud`` (the rate the shares run at,
+AUTHORITY"), ``shares`` (name -> TTY path: the FPGA UART lanes ``fpga_uart0..3``;
+``mcc``/tty_00 only names the MCC's path, never shared), ``baud`` (the rate the shares run at,
 default 115200), ``start_shares`` (default false: use a share that is already
 running, never start one), ``group`` (the hub socket's group, default ``fpga``),
 ``board`` (the physical board that owns the target, for ``fpgahub board lease
@@ -33,11 +33,17 @@ lease verbs and its ``SshHubRunner`` (``ssh HUB 'sg fpga -c "fpgahub …"'``) fo
 the share verbs. There is deliberately no way to run ``fpgahub share stop``: it
 stops EVERY share on the board, including other people's consoles (B0 runbook).
 
-The ``hub://`` scheme. A configured share becomes a ``USB_SERIAL`` link whose
-address is ``hub://HOST/TARGET/dev/mps3_01_pl/tty_00`` with ``via="hub"``, so the
-MCC adapter (``mcc.make_controller_adapter``) and the FPGA-lane consoles
-(``usb.serial_console_endpoints``, which keys on ``if0N`` in the detail) drive it
-unchanged. Opening the URL resolves it when it is used: ``fpgahub share list``
+**Never a share on tty_00** (MCC-FIX, the Linux lead and the lead, 2026-09-26). The paced
+MCC REBOOT works only with exactly one reader on ``tty_00``, a share is a reader that cannot
+be stopped on its own, and while one exists the platform's tools refuse to REBOOT. So a
+``shares.mcc`` entry (or any ``…/tty_00``) makes no link, ``resolve_share`` and
+``HubClient.share_start`` refuse it, and the MCC of a hub board is ``hub_mcc``'s: pyverify's
+tools, run ON the hub. Shares stay for the FPGA UART lanes (``tty_01..03``).
+
+The ``hub://`` scheme. A configured lane share becomes a ``USB_SERIAL`` link whose
+address is ``hub://HOST/TARGET/dev/mps3_01_pl/tty_02`` with ``via="hub"``, so the
+FPGA-lane consoles (``usb.serial_console_endpoints``, which keys on ``if0N`` in the
+detail) drive it unchanged. Opening the URL resolves it when it is used: ``fpgahub share list``
 finds the share's TCP port, an SSH forward reaches it (the share listens on the
 hub, ``0.0.0.0:<port>``), and the result is a ``tcp_serial.TcpSerialPort``.
 Resolving late means a share david starts after the board was opened still
@@ -269,20 +275,34 @@ class ShareRef:
         return int(m.group(1)) if m else None
 
 
+def is_mcc_share(name: str, tty: str) -> bool:
+    """The MCC console: the ``mcc`` share name, or FT4232H interface 00 (``…/tty_00``)."""
+    m = _TTY_IF_RE.search(str(tty))
+    return name == "mcc" or (m is not None and m.group(1) == "0")
+
+
+def refuse_mcc_share(tty: str, host: str = "") -> RefusedError:
+    return RefusedError(
+        f"Harness Manager never starts or uses an fpgahub share on the MCC console {tty}"
+        + (f" on {host}" if host else "") + ": the paced REBOOT needs exactly one reader on "
+        "tty_00, and a share is one that cannot be stopped on its own",
+        hint="the MCC of a hub board runs on the hub through pyverify (`harness-manager mcc "
+             "TARGET temp|reboot`); shares are for the FPGA UART lanes tty_01..03")
+
+
 def share_links(cfg: HubConfig) -> list[Link]:
-    """One ``USB_SERIAL`` link per configured share, ``via="hub"``; the MCC first.
+    """One ``USB_SERIAL`` link per configured lane share, ``via="hub"``; never the MCC's.
 
     The detail of a lane share carries ``if0N`` so ``usb.serial_console_endpoints``
-    names it ``fpga_uartN``; the MCC's never does, so ``is_lane_link`` stays False.
+    names it ``fpga_uartN``. A ``mcc`` / ``tty_00`` entry makes no link (MCC-FIX).
     """
     links: list[tuple[int, Link]] = []
     for name, tty in cfg.shares.items():
         ref = ShareRef(cfg.host, cfg.target, tty)
         n = ref.interface
-        if name == "mcc" or n == 0:
-            detail = f"MCC console over the hub share {tty} on {cfg.host}"
-            order = 0
-        elif n is not None:
+        if is_mcc_share(name, tty):
+            continue             # MCC-FIX: never a tty_00 share; hub_mcc runs the MCC on the hub
+        if n is not None:
             detail = f"FPGA UART lane {n} (FT4232H if0{n}) over the hub share {tty} on {cfg.host}"
             order = n
         else:
@@ -293,16 +313,39 @@ def share_links(cfg: HubConfig) -> list[Link]:
     return [lk for _, lk in sorted(links, key=lambda p: p[0])]
 
 
+MCC_ON_HUB_SCHEME = "hub-mcc"
+
+
+def mcc_link(cfg: HubConfig) -> Link | None:
+    """The board controller ON the hub (MCC-FIX): a ``HUB`` link, never a share. It carries
+    the capabilities the MCC gives (reboot, oscillators, temperature, the controller console)
+    when the hub has an SSH login to run pyverify's tools with; a REST-only hub has none."""
+    from .hub_mcc import mcc_tty_for
+
+    rest = cfg.rest
+    host = (getattr(rest, "ssh_host", "") or "") if rest is not None else cfg.host
+    if not host:
+        return None
+    tty = mcc_tty_for(cfg)
+    return Link(LinkKind.HUB, f"{MCC_ON_HUB_SCHEME}://{host}/{cfg.target}{tty}",
+                f"the MCC console {tty}, reached ON the hub {host} (pyverify's tools run "
+                "there; never an fpgahub share)", via=VIA_HUB)
+
+
 def route_candidate(candidate: Candidate, via: str = "") -> Candidate:
-    """The pack hook: apply ``via`` (explicit, else boards.toml) and the hub's share links."""
+    """The pack hook: apply ``via`` (explicit, else boards.toml), the MCC on the hub and the
+    hub's lane share links."""
     if not via and not _tunnel.candidate_via(candidate):
         via = via_for(candidate)
     out = _tunnel.with_via(candidate, via) if via else candidate
     cfg = hub_config_for(out)
-    if cfg is not None and cfg.shares:
+    if cfg is not None:
         from harness_manager.power.config import with_links
 
-        out = with_links(out, share_links(cfg))
+        mcc = mcc_link(cfg)
+        extra = ([mcc] if mcc is not None else []) + (share_links(cfg) if cfg.shares else [])
+        if extra:
+            out = with_links(out, extra)
     return out
 
 
@@ -1171,7 +1214,10 @@ class HubClient:
         return next((s for s in self.share_list() if s.tty == tty), None)
 
     def share_start(self, tty: str, baud: int = DEFAULT_SHARE_BAUD) -> ShareInfo:
-        """Start (or get: fpgahub returns an existing share as it is) the share for ``tty``."""
+        """Start (or get: fpgahub returns an existing share as it is) the share for ``tty``.
+        Never ``tty_00``: that refuses before the hub is asked (MCC-FIX)."""
+        if is_mcc_share("", tty):
+            raise refuse_mcc_share(tty, self.host)
         text = self._share_cmd(["fpgahub", "share", "start", self.target, tty, "--baud", str(baud)],
                                "share start")
         found = [s for s in parse_share_start(text) if s.tty == tty]
@@ -1515,7 +1561,10 @@ SHARES = _ShareRoutes()
 
 
 def resolve_share(ref: ShareRef) -> tuple[ShareInfo, _ShareRoute]:
-    """Find the share (``share list``; ``share start`` only when allowed) and forward to it."""
+    """Find the share (``share list``; ``share start`` only when allowed) and forward to it.
+    Never the MCC's ``tty_00``: refused before the hub is asked (MCC-FIX)."""
+    if is_mcc_share("", ref.tty):
+        raise refuse_mcc_share(ref.tty, ref.host)
     client = SHARES.client(ref)
     info = client.share_for(ref.tty)
     if info is None:
@@ -1755,6 +1804,11 @@ class Mps3Hub:
 
     def share_status(self) -> dict[str, Any]:
         return SHARES.status(self.host, self.target)
+
+    def refuse_share(self, name: str, tty: str) -> None:
+        """``RefusedError`` for the MCC's tty_00 (MCC-FIX), before any client is asked."""
+        if is_mcc_share(name, tty):
+            raise refuse_mcc_share(tty, self.host)
 
     def close(self) -> None:
         SHARES.close_for(self.host, self.target)

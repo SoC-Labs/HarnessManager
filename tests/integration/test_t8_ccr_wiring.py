@@ -108,14 +108,14 @@ def test_a_rest_only_share_is_reached_directly_on_the_hub(hub):
     tf = _token_file(hub)
     _boards_toml(f'[boards.lab]\nmatch = ["192.168.10.101"]\n'
                  f'hub = {{ url = "{hub.url}", token_file = "{tf.as_posix()}", start_shares = true, '
-                 f'shares = {{ mcc = "/dev/mps3_01_pl/tty_00" }} }}\n')
+                 f'shares = {{ fpga_uart2 = "/dev/mps3_01_pl/tty_02" }} }}\n')
     adapter = hubmod.adapter_for(_cand())
-    port = hubmod.open_hub_share(hubmod.share_url_for(adapter.config, "mcc").split("://", 1)[1])
+    port = hubmod.open_hub_share(hubmod.share_url_for(adapter.config, "fpga_uart2").split("://", 1)[1])
     try:
         share = next(iter(hub.shares.values()))
         wait_until(lambda: len(share.clients) == 1)
         route = hubmod.SHARES.status(adapter.host, adapter.target)
-        assert route["/dev/mps3_01_pl/tty_00"]["state"] == "up"          # no SSH tunnel
+        assert route["/dev/mps3_01_pl/tty_02"]["state"] == "up"          # no SSH tunnel
     finally:
         port.close()
 
@@ -125,7 +125,7 @@ def test_a_share_with_an_ssh_host_still_goes_through_the_tunnel(hub, monkeypatch
     tf = _token_file(hub)
     _boards_toml(f'[boards.lab]\nmatch = ["192.168.10.101"]\n'
                  f'hub = {{ url = "{hub.url}", host = "mapstone-dev", token_file = "{tf.as_posix()}", '
-                 f'start_shares = true, shares = {{ mcc = "/dev/mps3_01_pl/tty_00" }} }}\n')
+                 f'start_shares = true, shares = {{ fpga_uart2 = "/dev/mps3_01_pl/tty_02" }} }}\n')
     adapter = hubmod.adapter_for(_cand())
     started = []
 
@@ -136,7 +136,7 @@ def test_a_share_with_an_ssh_host_still_goes_through_the_tunnel(hub, monkeypatch
 
     monkeypatch.setattr(tunmod, "SshTunnel", NoTunnel)
     with pytest.raises(UnreachableError):
-        hubmod.open_hub_share(hubmod.share_url_for(adapter.config, "mcc").split("://", 1)[1])
+        hubmod.open_hub_share(hubmod.share_url_for(adapter.config, "fpga_uart2").split("://", 1)[1])
     assert started == ["mapstone-dev"]                              # hub.host, over ssh
 
 

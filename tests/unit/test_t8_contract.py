@@ -284,7 +284,7 @@ def test_every_body_the_client_sends_validates_against_the_v030_models():
                                    retry_backoff_s=(0.01,), wait_slice_s=0.2)
         lease, _ = a.lease_acquire("x", ttl=600)
         a.lease_heartbeat(lease.token, "x")
-        a.share_start("/dev/mps3_01_pl/tty_00", 115200)
+        a.share_start("/dev/mps3_01_pl/tty_02", 115200)          # a lane: never tty_00
         a.lease_release(lease.token, "x")
         a.lease_cancel()
         fakes.client_for(hub, td).lease_revoke("r")

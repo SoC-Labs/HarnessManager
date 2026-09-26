@@ -12,7 +12,7 @@
     harness-manager lease leave TARGET
     harness-manager lease dismiss TARGET          # forget the last forced release (D11)
     harness-manager share list TARGET
-    harness-manager share start TARGET NAME      # a share name from boards.toml (mcc, ...) or a /dev path
+    harness-manager share start TARGET NAME      # a lane share name from boards.toml or a /dev path (never tty_00)
 
 TARGET is the board, as every other verb takes it (``192.168.10.101``); its
 boards.toml ``hub`` table names the hub and the fpgahub target. These verbs
@@ -356,8 +356,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     vp = subparsers.add_parser(
         "share", help="the hub's TTY shares for the board: list, start (never stop)",
-        description="fpgahub serves a board's USB serial ports (the MCC on tty_00, the FPGA "
-                    "UART lanes) as TCP streams. There is no stop: it stops every share.",
+        description="fpgahub serves a board's USB serial ports (the FPGA UART lanes) as TCP "
+                    "streams. Never the MCC's tty_00: Harness Manager runs the MCC on the hub. "
+                    "There is no stop: it stops every share.",
         parents=[fmt], epilog=_cols("share"))
     ssub = vp.add_subparsers(dest="share_cmd", required=True, metavar="ACTION")
     sp = ssub.add_parser("list", help="running shares", parents=[fmt])
@@ -927,6 +928,9 @@ def cmd_share(ctx: Ctx) -> int:
         shares = hub.client.share_list()
     elif a.share_cmd == "start":
         tty = a.name if a.name.startswith("/dev/") else hub.config.shares.get(a.name)
+        refuse = getattr(hub, "refuse_share", None)       # MCC-FIX: never tty_00 (the pack says)
+        if tty and callable(refuse):
+            refuse(a.name, tty)
         if not tty:
             raise AbsentError(f"no share named {a.name!r} for {cand.board_id}",
                               hint="configured: " + (", ".join(sorted(hub.config.shares)) or "none")
