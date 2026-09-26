@@ -53,6 +53,14 @@ owners.
 - `harness-manager app`: the web UI in its own window (pywebview, or a Chrome, Edge or
   Chromium app window). `harness-manager ui`: the same page in a browser tab.
   `--demo` on either shows scripted boards with no hardware.
+- The demo shows every part of the app, offline: a Linux harness (the user microSD with
+  its OS slots, "Keep on the card", the SSH claim, the front panel with its sessions and
+  Identify, XVC), today's bare-metal v0.11 board (the rebuilt panel, XVC with its
+  warning, the Debug USB pages) and a board behind a hub whose lease someone else holds
+  (the queue, your request, force-release). Harness versions lists a signed demo
+  catalogue with every verdict, a history and a pin; the Build page has a kit for each
+  demo static. `HARNESS_MANAGER_DEMO_UPDATE=staged` also shows the app-update banner (it
+  is off by default, and the demo never applies an update).
 - The app window starts without the desktop's D-Bus session bus, so it is no longer
   blank on ThinLinc. `HARNESS_MANAGER_APP_KEEP_DBUS=1` keeps the bus.
 - With no display (an SSH session), `app` and `ui` print the URL and the `ssh -L`

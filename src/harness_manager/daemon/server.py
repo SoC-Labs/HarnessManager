@@ -363,7 +363,9 @@ def run_daemon(state_dir: Path, *, port: int = 0, listen: str = "127.0.0.1",
         if demo:        # scripted boards, no hardware: `harness-manager ui --demo`
             from harness_manager.demo import DemoEngine
 
-            engine = DemoEngine(console_chatter=True)
+            # The showcase (one board of each harness, every feature), over the demo's own
+            # state dir: its catalogue, kits, pins and history never touch the real one's.
+            engine = DemoEngine(console_chatter=True, showcase=True, state_dir=state_dir)
         else:
             engine = Engine(EngineConfig(state_dir=state_dir,
                                          pack_overrides=pack_overrides or {}))
