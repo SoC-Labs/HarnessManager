@@ -41,7 +41,7 @@ from typing import Any
 
 from harness_manager.core.errors import RefusedError, UsageError
 
-from .files import BOARD_DEFAULTS, SettingsFiles, UserLayer
+from .files import BOARD_DEFAULTS, BOARD_OWN_KEYS, SettingsFiles, UserLayer
 from .packs import with_packs
 from .policy import MachinePolicy, load_machine_policy
 from .rows import CORE_ROWS
@@ -185,7 +185,8 @@ class Resolver:
             user_layer.append(("user", self.layer.origin.get(key, "settings.toml"),
                                self.layer.values[key], False))
         parts = split_key(key)
-        if spec.collection == "boards" and parts[1] != BOARD_DEFAULTS:
+        if spec.collection == "boards" and parts[1] != BOARD_DEFAULTS \
+                and parts[2] not in BOARD_OWN_KEYS:     # what the board is: its own only
             dkey = join_key(("boards", BOARD_DEFAULTS, *parts[2:]))
             if dkey in self.layer.values:
                 user_layer.append(("user", f"{self.layer.origin.get(dkey, 'boards.toml')} "
@@ -294,6 +295,9 @@ class Resolver:
         parts = split_key(key)
         if parts[0] == "boards" and parts[1] == BOARD_DEFAULTS and spec.collection != "boards":
             raise UsageError(f"{key}: boards.{BOARD_DEFAULTS} holds board settings only")
+        if parts[0] == "boards" and parts[1] == BOARD_DEFAULTS and parts[2] in BOARD_OWN_KEYS:
+            raise UsageError(f"{key}: a board's {parts[2]} is its own; boards.{BOARD_DEFAULTS} "
+                             "cannot hold it (power.config.load_boards never reads it there)")
         return key, coerce(spec, value, from_env=text)
 
     def set(self, key: str, value: Any, *, text: bool = False) -> Resolved:
