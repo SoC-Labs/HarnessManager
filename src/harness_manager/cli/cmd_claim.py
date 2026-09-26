@@ -4,7 +4,7 @@ Verbs::
 
     harness-manager board claim        TARGET [--key PUB] [--adopt] [--replace-host-key] [--yes]
     harness-manager board claim-status TARGET        ask the board now (through the hub too)
-    harness-manager board ssh          TARGET [--print] [-- CMD ...]
+    harness-manager board ssh          TARGET [--print] [-c CMD]
 
 **claim** gives your SSH key root on a Linux harness that is still unclaimed (TOFU: the
 first key wins, and the board refuses every later one), then pins the board's host key in
@@ -102,9 +102,9 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                         epilog=f"--tsv columns: {' '.join(CLAIM_TSV['board ssh'])}")
     sp.add_argument("--print", dest="print_only", action="store_true",
                     help="print the ssh command line, do not run it")
-    sp.add_argument("command", nargs="*", metavar="CMD",
-                    help="run this on the board instead of a shell (after `--` when it has "
-                         "options: board ssh TARGET -- ls -l /persist)")
+    sp.add_argument("-c", "--command", default="", metavar="CMD",
+                    help="run this on the board instead of a shell "
+                         "(board ssh TARGET -c 'ls -l /persist')")
     vp.set_defaults(fn=cmd_board)
     return vp
 
@@ -226,7 +226,7 @@ def _claim_status(ctx: Ctx) -> int:
 
 def _ssh(ctx: Ctx) -> int:
     a = ctx.args
-    command = list(a.command or [])
+    command = shlex.split(a.command) if a.command else []
     with ctx.board(note="board ssh") as (cand, session):
         argv = _service(ctx).ssh_argv(session, command, tty=not command and not a.print_only)
         text = shlex.join(argv)

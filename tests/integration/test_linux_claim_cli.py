@@ -85,6 +85,9 @@ def test_cli_claims_an_unclaimed_board_and_info_shows_it(linux, capsys, monkeypa
     rc, out, _ = cli(capsys, monkeypatch, "--json", "board", "ssh", target(shell), "--print")
     argv = json.loads(out)["argv"]
     assert "StrictHostKeyChecking=yes" in argv and argv[-2:] == ["root", "127.0.0.1"]
+    rc, out, _ = cli(capsys, monkeypatch, "board", "ssh", target(shell), "--print", "-c",
+                     "ls -l /persist")
+    assert rc == ExitCode.OK and out.rstrip().endswith("root 127.0.0.1 ls -l /persist")
 
 
 def test_negative_twin_cli_claim_unconfirmed_sends_nothing(linux, capsys, monkeypatch):
