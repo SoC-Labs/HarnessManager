@@ -86,6 +86,14 @@ def _window(v: Any) -> str:
     return "" if re.match(r"^\d{3,5}x\d{3,5}$", v) else "must be WIDTHxHEIGHT, e.g. 1440x900"
 
 
+def _stage_dir(v: Any) -> str:
+    if not v or any(c.isspace() for c in v) or v.startswith(("-", "~")) \
+            or ".." in v.split("/"):
+        return ("must be a directory on the hub: relative to the hub user's home, or absolute; "
+                "no spaces, no '~', no '..'")
+    return ""
+
+
 def _kit_sources(v: Any) -> str:
     bad = [s for s in v if s not in ("cache", "channel", "hub")]
     return f"has unknown sources {bad} (cache, channel, hub)" if bad else ""
@@ -162,6 +170,13 @@ HUBS = (
             advanced=True, check=_positive),
     Setting("hubs.*.queue_timeout", "duration", 3600, "Hubs",
             "How long an acquire waits in the queue", scope="hub", advanced=True),
+    # H19 (MCC-FIX) harness_manager_mps3/hub_sd.py STAGE_DIR, backend_for: where the hub SD
+    # door stages a .bit for fpgahubd to read (SSH hubs). fpgahubd with ProtectHome=yes cannot
+    # read /home: then a group-fpga directory under /var/lib or /srv, made by the hub's admin.
+    Setting("hubs.*.stage_dir", "str", ".cache/harness-manager/hub-sd", "Hubs",
+            "Where the hub SD door stages a .bit on the hub (relative: the hub user's home; "
+            "outside /home when fpgahubd has ProtectHome=yes)", scope="hub", owner="admin",
+            advanced=True, check=_stage_dir),
 )
 
 BOARDS = (

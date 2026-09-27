@@ -3,8 +3,9 @@
 The world: a board behind the lab hub (no Debug USB here), a signed channel on 127.0.0.1
 (T7's ``FakeChannelServer``) with the fielded 1.0.0 and a firmware-only 1.1.0, and
 ``FakeSdHub`` as fpgahub over ssh (``HubClient`` with the fake as its runner): the SD write
-takes 68 s of the fake clock, the CLI's 30 s client window closes first. The MCC share is
-``FakeMccShare``: a REBOOT loads whatever the hub's SD now holds. Nothing here reaches a
+takes 68 s of the fake clock, the CLI's 30 s client window closes first. The controller is
+``hub_mcc.HubMccController`` over the same fake (MCC-FIX: pyverify's tools run ON the hub,
+never a share on tty_00): a REBOOT loads whatever the hub's SD now holds. Nothing here reaches a
 network beyond 127.0.0.1, a real hub, or an SD.
 """
 
@@ -68,7 +69,7 @@ class World:
         else:
             backend = SshSdBackend(client, uploader=self.hub.upload, clock=self.clock)
         self.door = HubSdDoor(self.handle, backend=backend, clock=self.clock,
-                              sleep=self.clock.sleep, own_linger=lambda tty: 0)
+                              sleep=self.clock.sleep)
         self.session = HubSession(self.hub, self.board, self.door, self.handle)
         self.bus = EventBus()
         self.events: list = []
@@ -170,7 +171,7 @@ def test_happy_path_one_write_proven_by_the_journal_then_the_paced_reboot(tmp_pa
     out, plan = w.install()
     assert out.result == RESULT_INSTALLED, out.detail
     assert w.board.identity().firmware_sha == "c0ffee00"
-    assert w.hub.sd_bit == NEW.bit() and w.session.controller.reboots == 1
+    assert w.hub.sd_bit == NEW.bit() and w.hub.mcc_reboots == 1
     assert len(w.program_calls()) == 1 and len(w.hub.writes) == 1
     assert w.door.last["reply"] == "timeout" and w.door.last["completion"] == "journal"
     assert w.door.last["hub_sha"] == sha(NEW.bit())[:12]
@@ -206,7 +207,7 @@ def test_a_sha_mismatch_is_refused_and_nothing_reboots(tmp_path, server):
     with pytest.raises(HarnessError) as err:
         w.install()
     assert "refusing to REBOOT" in err.value.message
-    assert w.session.controller.reboots == 0
+    assert w.hub.mcc_reboots == 0
     assert w.board.identity().firmware_sha == OLD.sha      # still the old image
 
 
@@ -218,7 +219,7 @@ def test_twin_a_failed_write_reported_by_the_hub_is_not_rebooted_either(tmp_path
     with pytest.raises(ActionFailedError) as err:
         w.install()
     assert "the hub reports the SD write failed" in err.value.message
-    assert w.session.controller.reboots == 0 and len(w.hub.writes) == 1
+    assert w.hub.mcc_reboots == 0 and len(w.hub.writes) == 1
 
 
 def test_a_hub_without_the_journal_is_proven_by_its_last_fingerprint(tmp_path, server):
@@ -237,7 +238,7 @@ def test_twin_no_record_at_all_within_the_budget_refuses_and_keeps_the_marker(tm
     with pytest.raises(ActionFailedError) as err:
         w.install()
     assert "may still be writing" in err.value.message and "do NOT reset" in err.value.hint
-    assert w.session.controller.reboots == 0 and len(w.program_calls()) == 1
+    assert w.hub.mcc_reboots == 0 and len(w.program_calls()) == 1
     assert w.door.pending()["state"] == "verifying"      # nothing writes again until proven
 
 
@@ -266,19 +267,23 @@ def test_twin_the_door_itself_checks_the_lease_before_the_upload(tmp_path, serve
 
 def test_someone_else_on_tty_00_is_refused_before_any_upload(tmp_path, server):
     w = World(tmp_path, server)
-    w.hub.share_readers, w.hub.share_writer = 1, "alice@lab-pc"
+    w.hub.tty_others = [[4242, "cat /dev/mps3_01_pl/tty_00"]]    # pyverify's scan sees it
     with pytest.raises(HeldError) as err:
         w.install()
-    assert "tty_00" in err.value.message and "alice@lab-pc" in err.value.message
-    assert w.hub.uploads == [] and w.program_calls() == [] and w.session.controller.reboots == 0
+    assert "tty_00" in err.value.message and "pid 4242" in err.value.message
+    assert "nothing was written" in err.value.message
+    assert w.hub.uploads == [] and w.program_calls() == [] and w.hub.mcc_reboots == 0
+    assert w.hub.mcc_runs and all(r["mode"] == "scan" for r in w.hub.mcc_runs)
 
 
-def test_twin_our_own_lingering_connection_on_tty_00_is_not_someone_else(tmp_path, server):
+def test_twin_a_share_count_is_not_read_any_more_the_hub_scan_decides(tmp_path, server):
+    # MCC-FIX: Harness Manager holds no share on tty_00 and does not read share counts; a
+    # clean hub-side scan lets the install through.
     w = World(tmp_path, server)
     w.hub.share_readers = 1
-    w.door._own_linger = lambda tty: 1               # our console, closed a moment ago
     out, _ = w.install()
-    assert out.result == RESULT_INSTALLED
+    assert out.result == RESULT_INSTALLED, out.detail
+    assert not any(c[:3] == ["fpgahub", "share", "list"] for c in w.hub.calls)
 
 
 def test_a_second_write_while_one_is_in_flight_is_held(tmp_path, server):
@@ -320,7 +325,7 @@ def test_dark_after_the_reboot_with_auto_revert_armed_is_written_back(tmp_path, 
     assert out.result == RESULT_REVERTED, out.detail
     assert "AUTO-REVERTED" in out.detail and "DARK" in out.detail
     assert len(w.hub.writes) == 2 and w.hub.sd_bit == OLD.bit()     # install, then revert
-    assert w.session.controller.reboots == 2
+    assert w.hub.mcc_reboots == 2
     assert w.board.identity().firmware_sha == OLD.sha
     assert "update.dark" in w.topics() and "update.auto_revert" in w.topics()
     rec = w.svc.installer("mps3").records.history(w.session.candidate.board_id)[0]
@@ -334,7 +339,7 @@ def test_twin_dark_without_auto_revert_is_reported_loudly_and_nothing_is_done(tm
     out, _ = w.install(auto_revert=False)
     assert out.result == RESULT_DARK and "NOTHING WAS DONE" in out.detail
     assert "auto-revert was NOT armed" in out.detail and "rollback" in out.restore_hint
-    assert len(w.hub.writes) == 1 and w.session.controller.reboots == 1
+    assert len(w.hub.writes) == 1 and w.hub.mcc_reboots == 1
     dark = [e for e in w.events if e.topic == "update.dark"]
     assert dark and dark[0].data["armed"] is False
     assert "update.auto_revert" not in w.topics()
@@ -398,9 +403,9 @@ def test_a_hub_with_no_sd_method_is_not_a_door(tmp_path, server):
     assert plan.via == "hub" and any("no 'sd' program method" in b for b in plan.blockers)
 
 
-def test_twin_no_mcc_share_means_nothing_could_reboot_it(tmp_path, server):
+def test_twin_no_mcc_on_the_hub_means_nothing_could_reboot_it(tmp_path, server):
     w = World(tmp_path, server)
     w.session.controller = None
     plan, _ = w.plan()
-    assert any("MCC share (tty_00)" in b for b in plan.blockers)
+    assert any("the MCC reached on the hub" in b for b in plan.blockers)
     assert not any("Debug USB" in b for b in plan.blockers)

@@ -55,7 +55,7 @@ def _jump_aware(monkeypatch, rig):
     """L1's rig takes (host, group); a named hub with a jump passes jump= too."""
     def factory(host, group, jump=""):
         rig.runners.append((host, group, jump))
-        return rig.hub
+        return rig.tool
     monkeypatch.setattr(hubmod, "DEFAULT_RUNNER_FACTORY", factory)
 
 
@@ -67,8 +67,9 @@ def test_a_board_naming_an_ssh_hub_opens_through_it_with_the_jump_and_its_lease_
                                           toml=NAMED_TOML) as rig:
         _jump_aware(monkeypatch, rig)
         cand = engine.candidate_for(BOARD_IP)
-        mcc = next(lk for lk in cand.links if lk.kind == LinkKind.USB_SERIAL)
-        assert mcc.via == "hub" and mcc.address == f"hub://{HUB}/{TARGET}{MCC_TTY}"
+        mcc = next(lk for lk in cand.links if lk.kind == LinkKind.HUB)      # MCC-FIX: on the hub
+        assert mcc.via == "hub" and mcc.address == f"hub-mcc://{HUB}/{TARGET}{MCC_TTY}"
+        assert not any(lk.kind == LinkKind.USB_SERIAL for lk in cand.links)
         session = engine.open(cand, note="set-hubs test")
         assert engine.info(cand.board_id).identity.shell_id == "0x3f1a560f"   # through it
         argv = rig.ssh.launches[0]

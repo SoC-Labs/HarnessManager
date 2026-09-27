@@ -70,6 +70,7 @@ from . import identify as _identify
 from .capabilities import HARNESS_STATES
 from .constants import (
     IMPL_BARE_METAL,
+    IMPL_LINUX,
     KNOWN_DESIGNS,
     SSH_PORT,
 )
@@ -679,6 +680,17 @@ class Mps3Shell:
         if not resp.ok:
             raise ActionFailedError("shell refused reset target 'dut'")
 
+    def restart_harness(self) -> int:
+        """Restart a Linux harness WITHOUT reloading the FPGA: harnessd's ``reboot`` verb
+        (net-protocol v0.11). Returns ``in_ms``, the upper bound on the restart; the
+        connection drops, and ``stats().up_ms`` restarting is the witness (``os_slots``)."""
+        resp = self.call(lambda c: c.reboot())
+        if not resp.ok:
+            raise ActionFailedError(f"the harness refused reboot: {resp.err or '?'}",
+                                    hint="it needs the watchdog (the 'reboot' feature); the "
+                                         "board REBOOT (MCC) reloads the FPGA instead")
+        return int(resp.in_ms)
+
 
 # --- reset targets, read from the harness ---------------------------------------------
 
@@ -696,15 +708,23 @@ RESET_TARGET_FEATURES: dict[str, str] = {"reset_rp": "rp", "reset_dbg": "dbg"}
 _BAD_TARGET_ERRS = ("bad target", "unknown reset target")
 
 
+#: MCC-FIX: "Restart the shell" on a Linux harness is harnessd's ``reboot`` verb
+#: (net-protocol v0.11; HARNESSD_CONTRACT "reboot": the watchdog, stage0, Linux again),
+#: a restart with NO FPGA reload. Bare metal keeps its own answer to ``reset shell``.
+SHELL_RESTART_TARGET = "shell"
+
+
 def reset_targets_from(live: ShellLive) -> tuple[str, ...]:
     """The targets a harness declares: an additive ``version.reset_targets`` array
-    when it sends one, else "dut" plus any target a feature name declares."""
+    when it sends one, else "dut" plus any target a feature name declares. A Linux
+    harness adds "shell": its restart is the ``reboot`` verb (``ShellResets.reset``)."""
     declared = live.raw_version.get("reset_targets") if live.version_ok else None
+    linux = [SHELL_RESTART_TARGET] if live.impl == IMPL_LINUX else []
     if isinstance(declared, list) and declared and all(isinstance(t, str) for t in declared):
-        return tuple(dict.fromkeys(declared))
+        return tuple(dict.fromkeys([*declared, *linux]))
     targets = ["dut"]
     targets += [t for f, t in RESET_TARGET_FEATURES.items() if f in live.features]
-    return tuple(dict.fromkeys(targets))
+    return tuple(dict.fromkeys([*targets, *linux]))
 
 
 class ShellResets:
@@ -718,8 +738,10 @@ class ShellResets:
     refusal is a ``UsageError`` that lists what is accepted.
     """
 
-    def __init__(self, shell: Mps3Shell) -> None:
+    def __init__(self, shell: Mps3Shell, session: Any = None) -> None:
         self._shell = shell
+        self._session = session              # for SLOT-TIMING's reset guard (MCC-FIX)
+        self._impl = ""                      # the engine that declared the targets
         self._declared: tuple[str, ...] | None = None
         self._accepted: list[str] = []
         self._refused: set[str] = set()
@@ -727,13 +749,16 @@ class ShellResets:
     def refresh(self) -> None:
         """Forget what was read and learned (after a harness change or a reboot)."""
         self._declared = None
+        self._impl = ""
         self._accepted.clear()
         self._refused.clear()
 
     def reset_targets(self) -> Sequence[str]:
         if self._declared is None:
             try:
-                self._declared = reset_targets_from(self._shell.live())
+                live = self._shell.live()
+                self._declared = reset_targets_from(live)
+                self._impl = live.impl
             except HarnessError:
                 return tuple(dict.fromkeys(["dut", *self._accepted]))   # "dut" is always there
         return tuple(t for t in dict.fromkeys([*self._declared, *self._accepted])
@@ -741,6 +766,12 @@ class ShellResets:
 
     def reset(self, target: str) -> None:
         known = self.reset_targets()
+        if target == SHELL_RESTART_TARGET and target in known and self._impl == IMPL_LINUX:
+            from .mcc import guard_reset
+
+            guard_reset(self._session, "ACTION_HARNESS_REBOOT")   # not mid card job (B2)
+            self._shell.restart_harness()
+            return
         if target not in known and (target not in RESET_VOCABULARY or target in self._refused):
             raise UsageError(f"reset target {target!r} is not supported by this harness",
                              hint="targets: " + ", ".join(known))
@@ -759,4 +790,4 @@ class ShellResets:
 def make_reset_adapter(session: Any) -> ShellResets | None:
     """The reset hook the lead can wire in ``pack.py`` (CCR T12-1). None without a shell."""
     shell = getattr(session, "shell", None)
-    return ShellResets(shell) if shell is not None else None
+    return ShellResets(shell, session) if shell is not None else None

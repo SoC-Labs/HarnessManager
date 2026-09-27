@@ -4,6 +4,7 @@
    them until the board closed: two fds per console reconnection).
 2. ``open_hub_share`` waits for OUR just-closed connection to leave the share instead of
    refusing itself the write slot; anyone else attached still makes the port read-only.
+   (MCC-FIX: shown on FPGA UART lane 1, tty_01; the MCC's tty_00 is never shared.)
 
 Everything runs against L1's fake lab (FakeHub, FakeSsh, a VirtualMps3); nothing reaches
 a hub, runs ssh, or runs fpgahub.
@@ -18,11 +19,13 @@ import pytest
 
 from harness_manager_mps3 import hub as hubmod
 from tests.fakes.l1_fake_hub import FakeLane
-from tests.fakes.l1_rig import HUB, MCC_TTY, TARGET, lab
+from tests.fakes.l1_rig import HUB, TARGET, lab
 from tests.fakes.lr_hub import LaggingShareServer
 from tests.fakes.virtual_board import VirtualMps3
 
 LANE_TTY = "/dev/mps3_01_pl/tty_02"
+#: The write-slot checks run on lane 1 (MCC-FIX: never tty_00).
+SLOT_TTY = "/dev/mps3_01_pl/tty_01"
 
 
 def _wait(predicate, timeout: float = 10.0, what: str = "condition"):
@@ -45,6 +48,7 @@ def _fresh_share_state():
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
     with VirtualMps3(tmp_path) as vb, lab(vb, monkeypatch, state_dir=tmp_path / "state") as r:
+        r.hub.add_tty(SLOT_TTY, FakeLane(banner=b""), share=True)
         yield r
 
 
@@ -53,7 +57,8 @@ def share_lists(r) -> int:
 
 
 def open_mcc():
-    return hubmod.open_hub_share(hubmod.ShareRef(HUB, TARGET, MCC_TTY).url.split("://", 1)[1])
+    """A lane share's port (the name is historical: this was the MCC share before MCC-FIX)."""
+    return hubmod.open_hub_share(hubmod.ShareRef(HUB, TARGET, SLOT_TTY).url.split("://", 1)[1])
 
 
 def recv_until(sock: socket.socket, needle: bytes, timeout: float = 5.0) -> bytes:
@@ -125,7 +130,7 @@ def test_a_share_that_stops_ends_the_console_and_frees_both_sockets(rig):
 
 
 def test_back_to_back_opens_get_the_write_slot_and_the_bytes_reach_the_tty(rig):
-    share = rig.hub.shares[MCC_TTY]
+    share = rig.hub.shares[SLOT_TTY]
     for i in range(5):
         port = open_mcc()
         assert not port.read_only, port.read_only_reason
@@ -137,8 +142,8 @@ def test_back_to_back_opens_get_the_write_slot_and_the_bytes_reach_the_tty(rig):
 
 
 def attach_david(rig) -> socket.socket:
-    """Someone else's console on the MCC share (not through us)."""
-    share = rig.hub.shares[MCC_TTY]
+    """Someone else's console on the lane share (not through us)."""
+    share = rig.hub.shares[SLOT_TTY]
     david = socket.create_connection(("127.0.0.1", share.port), timeout=5)
     _wait(lambda: share.readers == 1, what="david's console to attach")
     return david
@@ -168,7 +173,7 @@ def test_negative_twin_a_stranger_right_after_our_close_is_still_read_only_and_b
     """The hub gives a count, not names: a stranger who attaches just after we closed looks
     like our own lingering connection, so the opener waits, but no longer than SLOT_WAIT_S,
     and still refuses to write."""
-    share = rig.hub.shares[MCC_TTY]
+    share = rig.hub.shares[SLOT_TTY]
     open_mcc().close()
     _wait(lambda: share.readers == 0, what="our connection to leave")
     david = attach_david(rig)
@@ -181,12 +186,12 @@ def test_negative_twin_a_stranger_right_after_our_close_is_still_read_only_and_b
 
 
 def fake_share(readers: int) -> hubmod.ShareInfo:
-    return hubmod.ShareInfo(MCC_TTY, "0.0.0.0", 4000, "127.0.0.1:5000", readers)
+    return hubmod.ShareInfo(SLOT_TTY, "0.0.0.0", 4000, "127.0.0.1:5000", readers)
 
 
 def settle(monkeypatch, readers_seq: list[int], lingering: int) -> tuple[hubmod.ShareInfo, int, float]:
     """``settle_write_slot`` on a scripted ``share list``, with a fake clock."""
-    ref = hubmod.ShareRef(HUB, TARGET, MCC_TTY)
+    ref = hubmod.ShareRef(HUB, TARGET, SLOT_TTY)
     seq = iter(readers_seq[1:])
     lists = {"n": 0}
     now = {"t": 1000.0}
@@ -222,7 +227,7 @@ def test_negative_twin_settle_does_not_wait_when_it_cannot_be_us(monkeypatch, re
 
 
 def test_our_closes_count_for_own_linger_s_and_once_each(rig):
-    ref = hubmod.ShareRef(HUB, TARGET, MCC_TTY)
+    ref = hubmod.ShareRef(HUB, TARGET, SLOT_TTY)
     port = open_mcc()
     port.close()
     port.close()                                             # a second close is not a second one

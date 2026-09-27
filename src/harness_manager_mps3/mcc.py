@@ -63,6 +63,7 @@ The reboot witness:
 
 from __future__ import annotations
 
+import importlib
 import logging
 import re
 import time
@@ -148,6 +149,41 @@ def timing_for(url: str, base: MccTiming | None = None) -> MccTiming:
 # Module-level so tests can swap in a fake clock; read at adapter creation time.
 DEFAULT_CLOCK: Callable[[], float] = time.monotonic
 DEFAULT_SLEEP: Callable[[float], None] = time.sleep
+
+#: The post-SD-write quirk (silicon, reproduced twice, 2026-09-26): straight after an SD
+#: write the MCC answers a bare CR with only ``\r\n`` for a few seconds, so a REBOOT that
+#: needs its ``Cmd>`` is refused. The pre-REBOOT check is tried again, this many times this
+#: far apart, ONLY while the reply is bare CR/LF (``bare_crlf``); any other answer, and
+#: silence, is final. The SD write itself is never retried. Local and hub (``hub_mcc``).
+POST_WRITE_TRIES = 3
+POST_WRITE_GAP_S = 5.0
+_BARE_CRLF = re.compile(r"[\r\n]+")
+
+
+def bare_crlf(text: str | None) -> bool:
+    """True when the MCC's whole answer was CR/LF: the post-SD-write quirk, not a refusal."""
+    return bool(text) and _BARE_CRLF.fullmatch(text) is not None
+
+
+#: SLOT-TIMING's reset guard (their branch): never reset while the board's card job writes or
+#: reads back (B2 2026-09-26: a reboot mid-job left the card with "uSD init error"). Imported by
+#: name, so this runs before and after that module lands.
+RESET_GUARD_MODULE = "harness_manager.services.reset_guard"
+
+
+def guard_reset(session: Any, action: str) -> None:
+    """``reset_guard.check(session, reset_guard.<action>)`` when the module exists. It raises
+    its ``CardBusyError`` (exit 4) while the card job runs; inside a caller's ``guarded``
+    block for this board it passes. ``action``: ``ACTION_MCC_REBOOT``/``ACTION_HARNESS_REBOOT``."""
+    if session is None:
+        return
+    try:
+        rg = importlib.import_module(RESET_GUARD_MODULE)
+    except ModuleNotFoundError as exc:
+        if exc.name != RESET_GUARD_MODULE:
+            raise
+        return
+    rg.check(session, getattr(rg, action))
 
 
 # --- command classification (the allowlist) -------------------------------------------
@@ -439,6 +475,7 @@ class _Console:
         self.port: SerialPort | None = port
         self.menu: str | None = None
         self.transcript = bytearray()
+        self.heard = ""                    # what the last failed sync heard, raw
 
     # -- raw I/O --
 
@@ -507,9 +544,11 @@ class _Console:
     def sync(self) -> None:
         """Bare CR -> prompt. Proves this port is the MCC and learns the menu."""
         self.write_paced("\r")
+        self.heard = ""
         try:
             self.read_until_prompt(self._ctl.timing.reply_timeout_s)
         except TimeoutError as exc:
+            self.heard = str(exc)                # raw: the post-write quirk is bare CR/LF
             heard = str(exc).strip()
             raise NothingOnTargetError(
                 f"no MCC prompt (Cmd>/Debug>) on {self._ctl.url} within "
@@ -570,7 +609,25 @@ class RebootWitness:
             "shell_id_before": self.shell_id_before,
             "shell_id_after": self.shell_id_after,
             "fpga_configured": self.boot.fpga_configured if self.boot is not None else None,
+            # What the MCC said it loaded (MCC-FIX): "" when the banner had no such line.
+            **boot_fields(self.boot),
         }
+
+
+def sd_path(mcc_path: str) -> str:
+    """An MCC console path as an SD-relative POSIX path:
+    ``\\MB\\HBI0309C\\Nanosoc\\nanosoc.bit`` -> ``MB/HBI0309C/Nanosoc/nanosoc.bit``."""
+    return mcc_path.strip().replace("\\", "/").strip("/")
+
+
+def boot_fields(boot: BootRecord | None) -> dict[str, str]:
+    """The banner's parsed facts a reboot result carries: which ``.bit`` and board file the
+    MCC loaded (SD-relative, so ``updates.sd_ab``'s ``F0FILE`` flip is provable from HM),
+    and the MCC's own firmware. Every value is ``""`` when the banner did not print it."""
+    b = boot or BootRecord()
+    return {"fpga_file": sd_path(b.fpga_file), "board_file": sd_path(b.board_file),
+            "mcc_firmware": b.firmware, "mcc_build_date": b.build_date,
+            "hbi_build": b.hbi_build, "bootloader": b.bootloader}
 
 
 # A shell probe returns the shell_id when ping is answered, ``SHELL_BUSY`` when the
@@ -605,6 +662,7 @@ class Mps3Controller:
         self._last_tx: float | None = None
         self.last_reboot: RebootWitness | None = None
         self.last_transcript = b""
+        self.session: Any = None             # for the reset guard (make_controller_adapter)
 
     # -- plumbing --
 
@@ -795,16 +853,33 @@ class Mps3Controller:
                 wait_s = reboot_wait_s(ident_fn()) if ident_fn else reboot_wait_s(None)
             except Exception:  # noqa: BLE001 - an unreadable identity must not block a reboot
                 wait_s = reboot_wait_s(None)
+        guard_reset(self.session, "ACTION_MCC_REBOOT")     # SLOT-TIMING: not mid card job
         emit: Progress = progress or (lambda phase, done, total: None)
         shell_before = self._probe_shell()
         with self._session() as con:
-            con.sync()                      # refuses a port that is not the MCC
+            self._sync_for_reboot(con)      # refuses a port that is not the MCC
             con.goto("main")                # REBOOT is a main-menu command
             con.write_paced("REBOOT\r")
             sent_at = self._clock()
             emit("sent", 1, 3)
             self.last_reboot = self._witness(con, sent_at, wait_s, shell_before, emit)
         return self.last_reboot.as_dict()
+
+    def _sync_for_reboot(self, con: _Console) -> int:
+        """``sync``, tried again while the MCC answers a bare CR with only CR/LF (the
+        post-SD-write quirk, ``POST_WRITE_TRIES``). Returns the attempt that found the prompt."""
+        for attempt in range(1, POST_WRITE_TRIES + 1):
+            try:
+                con.sync()
+                return attempt
+            except NothingOnTargetError:
+                if attempt >= POST_WRITE_TRIES or not bare_crlf(con.heard):
+                    raise
+                log.info("MCC on %s answered a bare CR with CR/LF only (after an SD write); "
+                         "trying again in %.0f s (%d/%d)", self.url, POST_WRITE_GAP_S,
+                         attempt, POST_WRITE_TRIES)
+                self._sleep(POST_WRITE_GAP_S)
+        raise AssertionError("unreachable")     # pragma: no cover
 
     def _probe_shell(self) -> str | None:
         if self._shell_probe is None:
@@ -993,24 +1068,32 @@ def _shell_probe_for(shell: Any, timeout: float) -> ShellProbe:
     return probe
 
 
-def make_controller_adapter(session: Any) -> Mps3Controller | None:
-    """The ``pack.py`` hook. ``None`` when the session has no USB serial link to the MCC.
+def make_controller_adapter(session: Any) -> Any:
+    """The ``pack.py`` hook: the MCC over the local Debug USB, else ON the hub, else ``None``.
 
     The MCC link is the first ``USB_SERIAL`` link that is not an FT4232H FPGA
     lane (``usb.probe_usb`` lists the MCC first). A candidate with only lane
     links gets no controller: typing REBOOT on a lane is the old silent no-op.
+
+    A ``hub://`` link is never the MCC's (MCC-FIX: Harness Manager never holds an fpgahub
+    share on tty_00; ``hub.share_links`` no longer makes one). A board behind a hub gets
+    ``hub_mcc.HubMccController``: every MCC operation runs on the hub through pyverify.
     """
     from .usb import is_lane_link
 
     link = next((lk for lk in session.candidate.links
-                 if lk.kind == LinkKind.USB_SERIAL and not is_lane_link(lk)), None)
+                 if lk.kind == LinkKind.USB_SERIAL and not is_lane_link(lk)
+                 and not lk.address.startswith("hub://")), None)
     if link is None or not link.address:
-        return None
+        from .hub_mcc import make_hub_controller
+
+        return make_hub_controller(session)
     timing = timing_for(serial_url(link.address))
     shell = getattr(session, "shell", None)
     probe = _shell_probe_for(shell, timing.ping_timeout_s) if shell is not None else None
     ctl = Mps3Controller(serial_url(link.address), timing=timing, clock=DEFAULT_CLOCK,
                          sleep=DEFAULT_SLEEP, shell_probe=probe)
+    ctl.session = session
     if shell is not None:
         ctl.identity_fn = session.identity   # reboot's default wait follows the harness impl
     return ctl

@@ -299,8 +299,9 @@ harness-manager hub targets lab
 harness-manager hub targets lab --add mps3_01_pl
 ```
 
-`--add` writes the board into `boards.toml`: `hub.use`, the target, its MCC share,
-`via = "hub"`, its address and its name. Then open it in the app, or run
+`--add` writes the board into `boards.toml`: `hub.use`, the target, `via = "hub"`, its
+address and its name. It adds no MCC share: Harness Manager reaches the board controller ON the
+hub (pyverify's tools over ssh) and never starts a share on `tty_00`. Then open it in the app, or run
 `harness-manager info 192.168.10.101`.
 
 | Hub command | What it does |
@@ -1059,10 +1060,10 @@ after you commit it and reboot, and a rollback puts the other slot back.
 1. See the slots: `harness-manager slot status 192.168.10.101`
 2. Push the image: `harness-manager slot push 192.168.10.101 --bundle ~/release/linux_bundle.json`
 3. Commit it: `harness-manager slot commit 192.168.10.101`
-4. Reboot the board: **Power > Board reboot**, or `harness-manager mcc 192.168.10.101 reboot --wait 240`.
-   Behind a hub, start the MCC share first if it is not running:
-   `harness-manager share start 192.168.10.101 mcc`. A Linux board takes 2 to 4 minutes to
-   come back.
+4. Reboot the board: **Power > Board reboot**, or `harness-manager mcc 192.168.10.101 reboot`.
+   A Linux board gets its own 180 s budget (`--wait` changes it) and takes 2 to 4 minutes to
+   come back. Behind a hub the REBOOT runs on the hub; nothing to start first. The output says
+   which `.bit` the MCC loaded (`MCC loaded …`).
 5. Check it: `slot status` shows the new slot running and default, and a push now goes to
    the OTHER slot. It says "booted (not yet confirmed)" until the harness reports that
    harnessd confirmed the boot: a boot alone is not a confirm.
@@ -1123,8 +1124,9 @@ Start at the top. Go down one step only when the step above did not help.
    design while the harness answers.
 3. **Reset the DUT:** `harness-manager reset TARGET`.
 4. **Reboot the board from its SD:** `harness-manager mcc - --serial PORT reboot` with the
-   Debug USB. Behind a hub: `harness-manager share start TARGET mcc` (if the share is not
-   running), then `harness-manager mcc TARGET reboot`.
+   Debug USB. Behind a hub: `harness-manager mcc TARGET reboot` (it runs on the hub; never
+   start a share on `tty_00`). On a Linux board, **Power > Restart the shell** first restarts
+   the harness alone, without reloading the FPGA.
 5. **Power-cycle:** the switch, off for ten seconds. With a networked plug:
    `harness-manager power cycle TARGET`.
 6. **Put the SD back:** with the Debug USB,
@@ -1168,7 +1170,7 @@ that erase or reformat, so none of these steps changes the board controller.
 | the lease was taken | see [section 4](#4-leases-share-a-lab-board); do not drive the board until it is yours |
 | "this build has no pinned update-signing keys" | signed releases are not published yet ([section 10](#10-updates-the-harness-and-the-app)) |
 | an SD install over USB seems stuck | it can take 5 minutes; do not retry mid-write |
-| a reboot through the hub did nothing | something else was reading the MCC console (`tty_00`) at the same time. Close every other reader of the `mcc` console, then reboot again |
+| a reboot through the hub is refused: "another process reads … tty_00" | something else reads the MCC console on the hub (a `cat`, a console, an fpgahub share on `tty_00`). Nothing was sent. Have it closed, then reboot again |
 
 ### 13.5 Asking for help
 

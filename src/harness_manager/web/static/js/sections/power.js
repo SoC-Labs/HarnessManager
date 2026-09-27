@@ -52,7 +52,8 @@ export function rebootSpec(bid) {
 export const REBOOT_GATE = { capability: "reboot_board", adapter: "controller", arm: "reboot" };
 
 // The reboot job's result is the controller's evidence: {summary, down_after_s, up_after_s,
-// down_evidence[], up_evidence, shell_id_before, shell_id_after, fpga_configured}.
+// down_evidence[], up_evidence, shell_id_before, shell_id_after, fpga_configured, fpga_file,
+// mcc_firmware, ...} (MCC-FIX: fpga_file is the .bit the MCC said it loaded, "" when unknown).
 export function rebootLines(ev) {
   if (!ev || typeof ev !== "object") return [{ kind: "ok", text: "the board went down and came back" }];
   const out = [{ kind: "ok", text: ev.summary || "the board went down and came back" }];
@@ -69,6 +70,7 @@ export function rebootLines(ev) {
     out.push({ kind: ev.fpga_configured ? "out" : "warnline",
       text: `FPGA configured: ${ev.fpga_configured ? "yes" : "NO"}` });
   }
+  if (ev.fpga_file) out.push({ kind: "out", text: `MCC loaded ${ev.fpga_file}` });
   for (const line of [].concat(ev.down_evidence || [])) out.push({ kind: "hint", text: `down: ${line}` });
   if (ev.up_evidence) out.push({ kind: "hint", text: `up: ${typeof ev.up_evidence === "object" ? JSON.stringify(ev.up_evidence) : ev.up_evidence}` });
   return out;

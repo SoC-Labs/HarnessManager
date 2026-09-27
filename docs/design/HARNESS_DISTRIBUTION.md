@@ -318,7 +318,7 @@ Everything else is LRU above a cap, default 2 GB. OTA's app venvs are separate, 
 2. Upload the verified `nanosoc.bit`.
 3. Run `fpgahub target program <tgt> <bit> --method sd --force`, as one request only.
 4. Wait for **completion**, never the HTTP reply. Completion is the `board.program_completed` event, or the journal line `ok=True … sha256=<12hex>`.
-5. Paced REBOOT over the MCC share: 100 ms per character, one reader, CR first (`mcc.py:136-146`).
+5. Paced REBOOT, 100 ms per character, one reader, CR first. Since MCC-FIX (2026-09-26) it runs ON the hub through pyverify (`hub_mcc.py`: `sd field --already-written`), never over a share on tty_00.
 6. Confirm over the tunnel.
 
 **Known traps:**

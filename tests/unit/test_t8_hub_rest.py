@@ -502,17 +502,26 @@ def test_lease_history_without_the_stream_has_no_by(people):
 
 def test_share_start_then_list_and_find(people):
     _, c = people
-    info = c["alice"].share_start("/dev/mps3_01_pl/tty_00", 115200)
-    assert info.tty == "/dev/mps3_01_pl/tty_00" and info.port > 0 and info.host == "0.0.0.0"
-    assert c["bob"].share_for("/dev/mps3_01_pl/tty_00").port == info.port
+    info = c["alice"].share_start("/dev/mps3_01_pl/tty_02", 115200)
+    assert info.tty == "/dev/mps3_01_pl/tty_02" and info.port > 0 and info.host == "0.0.0.0"
+    assert c["bob"].share_for("/dev/mps3_01_pl/tty_02").port == info.port
     assert c["bob"].share_for("/dev/mps3_01_pl/tty_03") is None
+
+
+def test_negative_twin_a_share_on_the_mcc_tty_00_is_refused_before_the_hub(people, hub):
+    from harness_manager.core.errors import RefusedError
+
+    _, c = people
+    with pytest.raises(RefusedError, match="never starts or uses an fpgahub share"):
+        c["alice"].share_start("/dev/mps3_01_pl/tty_00", 115200)
+    assert c["bob"].share_for("/dev/mps3_01_pl/tty_00") is None      # nothing was started
 
 
 def test_share_start_on_a_board_someone_else_holds_is_held(people):
     _, c = people
     c["alice"].lease_acquire("x", ttl=600)
     with pytest.raises(HeldError) as ei:
-        c["bob"].share_start("/dev/mps3_01_pl/tty_00")
+        c["bob"].share_start("/dev/mps3_01_pl/tty_02")
     assert ei.value.holder == "alice@mapstone-dev"
 
 

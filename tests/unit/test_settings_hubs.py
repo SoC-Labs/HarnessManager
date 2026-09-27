@@ -427,11 +427,12 @@ def test_discovery_writes_a_board_that_uses_the_hub_and_opens_through_it():
     out = H.add_board_for_target("lab", "mps3_01_pl", r, details=DETAILS)
     assert out["board"] == "mps3_01_pl" and out["match"] == [ADDR]
     text = (state() / "boards.toml").read_text()
-    assert 'hub = { use = "lab", target = "mps3_01_pl", shares = { mcc = ' \
-           '"/dev/mps3_01_pl/tty_00" } }' in text and 'via = "hub"' in text
+    # MCC-FIX: no MCC share (Harness Manager never holds one on tty_00); the MCC runs on the hub
+    assert 'hub = { use = "lab", target = "mps3_01_pl" }' in text and 'via = "hub"' in text
+    assert "tty_00" not in text
     cfg = hubmod.hub_config_for(cand())
-    assert (cfg.name, cfg.target, cfg.shares) == ("lab", "mps3_01_pl",
-                                                  {"mcc": "/dev/mps3_01_pl/tty_00"})
+    assert (cfg.name, cfg.target, cfg.shares) == ("lab", "mps3_01_pl", {})
+    assert hubmod.mcc_link(cfg).address.endswith("/mps3_01_pl/dev/mps3_01_pl/tty_00")
 
 
 def test_negative_twin_discovery_refuses_a_second_board_for_the_same_target():

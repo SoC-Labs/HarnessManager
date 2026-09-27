@@ -495,8 +495,9 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     hub_door.apply(plan, rel, channel, board, via=via, running=running,
                    have_token=have_token)
     if plan.via == hub_door.VIA_HUB and plan.base and not board.has_controller:
-        plan.blockers.append("the new base runs only after a board REBOOT: it needs the hub's "
-                             "MCC share (tty_00) in the board's hub table")
+        plan.blockers.append("the new base runs only after a board REBOOT: it needs the MCC "
+                             "reached on the hub (an SSH login to the hub; a REST-only hub "
+                             "cannot reach tty_00)")
     if plan.base and not board.has_storage and plan.via != hub_door.VIA_HUB:
         plan.blockers.append("installing the harness base writes the config SD: it needs the "
                              "MPS3 Debug USB (the V2M-MPS3 volume)")
@@ -586,8 +587,9 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
     if plan.base or plan.os_slot:
         budget = (f"up to {plan.reboot_wait_s:.0f} s" if plan.reboot_wait_s
                   else "the pack's budget for this harness")
-        how = ("a paced REBOOT over the hub's MCC share (100 ms a character, the only client "
-               "on tty_00), witnessed: " if plan.via == hub_door.VIA_HUB else "")
+        how = ("on the hub, pyverify's `sd field --already-written` (the journal witness, the "
+               "only reader on tty_00, an intact Cmd>) then a paced REBOOT (100 ms a "
+               "character), witnessed: " if plan.via == hub_door.VIA_HUB else "")
         s.append(PlanStep("reboot", f"{how}reboot the board and witness it go down and come back "
                                     f"({budget})"))
         want = rel.identity

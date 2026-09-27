@@ -15,14 +15,24 @@
   ``fail_write`` (the plugin fails: ``ok=False``), ``refuse`` (HTTP 409 at once),
   ``no_journal`` (journalctl unreadable), ``no_sd_method``;
 - **the MCC share**: ``share_readers`` / ``share_writer`` on tty_00 (``fpgahub share list``);
+  Harness Manager no longer reads it (MCC-FIX: it never holds a share on tty_00);
+- **the MCC ON the hub** (MCC-FIX): pyverify's hub-side writer
+  (``python3.11 -c HUB_MCC_REBOOT_PY '<json>'``, found by ``hub_mcc.PY310_PROBE``):
+  ``tty_others`` (other readers: rc 3), ``mcc_bare_crlf`` (the next N bare CRs answer only
+  ``\r\n``, the post-SD-write quirk: rc 4), the REBOOT itself (``mcc_reboots``,
+  ``on_mcc_reboot``) and its captured boot log (``files``, read back with ``cat``); plus
+  ``fpgahub whoami --json``, ``date +%s`` and the journal probe ``-n 1`` that pyverify's
+  ``sd field --already-written`` asks;
 - **the lease**: ``holder`` and ``queue`` (``fpgahub lease show``).
 
 As an SSH runner it is called with the argv ``HubClient`` builds (``__call__``); the
 uploader is ``upload``. ``rest_api()`` is the same hub behind ``hub_sd.RestApi``'s three
 calls. ``FakeBoard`` is the board: its identity follows the ``.bit`` the MCC last loaded
 (T7's fake bitstreams carry the identity), and a bit in ``dark_shas`` never answers.
-``FakeMccShare`` is the controller: ``reboot()`` loads ``hub.sd_bit`` into the board, the
-way a paced REBOOT on tty_00 reloads the FPGA from the SD.
+``HubSession``'s controller is the real ``hub_mcc.HubMccController`` over this runner: a
+REBOOT loads ``hub.sd_bit`` into the board (``on_mcc_reboot``), the way the paced REBOOT on
+tty_00 reloads the FPGA from the SD. ``FakeMccShare`` (the old share controller) is kept for
+tests that want a controller without the hub tool.
 """
 
 from __future__ import annotations
@@ -33,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pyverify.bootrate import HUB_MCC_REBOOT_PY
 from pyverify.lease import RunResult
 
 from harness_manager.core.errors import ActionFailedError, UnreachableError
@@ -88,6 +99,16 @@ class FakeSdHub:
         self.holder = ME
         self.queue: list[str] = []
         self.on_sd_written: list[Any] = []
+        # the MCC on tty_00, as pyverify's hub-side writer sees it (MCC-FIX)
+        self.hub_python = "/usr/bin/python3.11"
+        self.tty_others: list[list[Any]] = []
+        self.mcc_bare_crlf = 0
+        self.mcc_prompt = "Cmd> "
+        self.mcc_reboots = 0
+        self.mcc_runs: list[dict[str, Any]] = []
+        self.on_mcc_reboot: list[Any] = []
+        self.mcc_configures = True
+        self.files: dict[str, str] = {}
 
     # -- the hub's clock ------------------------------------------------------------------
 
@@ -169,11 +190,27 @@ class FakeSdHub:
         if argv[:2] == ["journalctl", "-u"]:
             if self.no_journal:
                 return RunResult(1, "", "Failed to get journal access: Permission denied\n")
-            since = argv[argv.index("--since") + 1]
-            t0 = float(since[1:]) if since.startswith("@") else 0.0
-            return RunResult(0, "".join(f"{line}\n" for t, line in self.journal if t >= t0), "")
-        if argv[:3] == ["date", "-u", "+%s"]:
+            if "--since" in argv:
+                since = argv[argv.index("--since") + 1]
+                t0 = float(since[1:]) if since.startswith("@") else 0.0
+            else:
+                t0 = 0.0
+            lines = [line for t, line in self.journal if t >= t0]
+            if "-n" in argv:
+                lines = lines[-int(argv[argv.index("-n") + 1]):]
+            return RunResult(0, "".join(f"{line}\n" for line in lines), "")
+        if argv[:3] == ["date", "-u", "+%s"] or argv[:2] == ["date", "+%s"]:
             return RunResult(0, f"{int(self.clock())}\n", "")
+        if argv[:2] == ["sh", "-c"] and "sys.version_info < (3, 10)" in argv[2]:
+            if not self.hub_python:
+                return RunResult(127, "", "")
+            return RunResult(0, f"{self.hub_python}\n", "")
+        if len(argv) == 4 and argv[1:3] == ["-c", HUB_MCC_REBOOT_PY]:
+            return self._mcc_writer(argv[0], json.loads(argv[3]))
+        if argv[:2] == ["sh", "-c"] and argv[2].startswith("cat --") and len(argv) == 5:
+            return RunResult(0, self.files.pop(argv[4], ""), "")
+        if argv[:3] == ["fpgahub", "whoami", "--json"]:
+            return RunResult(0, json.dumps({"holder": ME, "role": "admin"}) + "\n", "")
         if argv[:1] == ["sha256sum"]:
             data = self.staged.get(argv[1])
             if data is None:
@@ -184,6 +221,47 @@ class FakeSdHub:
         if argv[:3] == ["fpgahub", "lease", "show"]:
             return RunResult(0, self._lease_text(), "")
         return RunResult(2, "", f"unexpected hub command {argv}\n")
+
+    def _mcc_writer(self, python: str, args: dict[str, Any]) -> RunResult:
+        """pyverify's HUB_MCC_REBOOT_PY, as the MCC on tty_00 answers it (module doc)."""
+        self.mcc_runs.append({**args, "python": python})
+        out: dict[str, Any] = {"tty": args["tty"], "mode": args["mode"], "sent": False,
+                               "ack": False, "others": [], "prompt": "", "echo": ""}
+
+        def done(rc: int, reason: str | None = None) -> RunResult:
+            out.update(rc=rc, reason=reason)
+            return RunResult(rc, json.dumps(out) + "\n", "")
+
+        if args["tty"] != MCC_TTY:
+            return done(2, f"no such tty {args['tty']} on this host")
+        if self.tty_others:
+            out["others"] = [list(o) for o in self.tty_others]
+            return done(3, f"another process reads {args['tty']}")
+        if args["mode"] == "scan":
+            return done(0)
+        if self.mcc_bare_crlf > 0:
+            self.mcc_bare_crlf -= 1
+            out["prompt"] = "\r\n"
+            return done(4, "no intact Cmd> after a bare CR")
+        out["prompt"] = "\r\n" + self.mcc_prompt
+        if "Cmd>" not in self.mcc_prompt:
+            return done(4, "Debug> submenu, not Cmd>")
+        self.tick()
+        out.update(sent=True, ack=True, echo="REBOOT\r\nRebooting...")
+        self.mcc_reboots += 1
+        for cb in self.on_mcc_reboot:
+            cb()
+        if float(args.get("capture_s") or 0) > 0:
+            from tests.fakes.fake_mcc import BOOT_BANNER
+
+            lines = [ln for ln in BOOT_BANNER if self.mcc_configures
+                     or not ln.startswith("FPGA configuration complete")]
+            text = "\r\n".join(lines) + "\r\nCmd> "
+            if args.get("log"):
+                self.files[args["log"]] = text
+            out.update(configuring=True, complete=self.mcc_configures, failed=False,
+                       log=args.get("log"), tail=text[-400:])
+        return done(0)
 
     def _list_text(self) -> str:
         rows = ["│ default │ vivado_jtag │ no │ yes │ JTAG │"]
@@ -330,17 +408,23 @@ class FakeHubHandle:
 
 class HubSession:
     """A board session behind the hub: no Debug USB here (``storage`` None), a hub, the
-    hub door, the MCC share as the controller."""
+    hub door, and the MCC ON the hub (``hub_mcc.HubMccController`` over the fake runner) as
+    the controller: a REBOOT loads the hub's SD into the board."""
 
     def __init__(self, hub: FakeSdHub, board: FakeBoard, door: Any, handle: FakeHubHandle, *,
                  board_id: str = "mps3@192.168.10.101") -> None:
+        from harness_manager_mps3.hub_mcc import HubMccController
+
         self.candidate = Candidate(pack="mps3", board_id=board_id,
                                    links=(Link(LinkKind.ETHERNET, "192.168.10.101:6900"),))
         self.board = board
         self.hub = handle
         self.hub_sd = door
         self.storage = None
-        self.controller = FakeMccShare(hub, board)
+        hub.on_mcc_reboot.append(lambda: setattr(board, "loaded", hub.sd_bit))
+        self.controller = HubMccController(handle.client._run, target=TARGET, tty=MCC_TTY,
+                                           host=HUB, session=self, clock=hub.clock,
+                                           sleep=hub.clock.sleep)
 
     def identity(self) -> BoardIdentity:
         return self.board.identity()

@@ -203,18 +203,26 @@ def test_the_store_ignores_a_corrupt_file(tmp_path):
 def test_share_list_and_start_parse_the_hub_cli(fake):
     from tests.fakes.fake_mcc import FakeMcc
 
-    fake.add_tty("/dev/mps3_01_pl/tty_00", FakeMcc())
+    fake.add_tty("/dev/mps3_01_pl/tty_02", FakeMcc())
     client = hubmod.HubClient(HUB, runner=fake)
     assert client.share_list() == []
-    started = client.share_start("/dev/mps3_01_pl/tty_00")
+    started = client.share_start("/dev/mps3_01_pl/tty_02")
     assert started.host == "0.0.0.0" and started.remote_host == "127.0.0.1"
     (listed,) = client.share_list()
     assert (listed.tty, listed.port, listed.readers, listed.running) == (
-        "/dev/mps3_01_pl/tty_00", started.port, 0, True)
-    assert client.share_start("/dev/mps3_01_pl/tty_00").port == started.port   # returns the existing
+        "/dev/mps3_01_pl/tty_02", started.port, 0, True)
+    assert client.share_start("/dev/mps3_01_pl/tty_02").port == started.port   # returns the existing
     with pytest.raises(Exception) as exc:                       # the twin: no such device
         client.share_start("/dev/mps3_01_pl/tty_09")
     assert "tty_09" in str(exc.value)
+    # MCC-FIX twin: the MCC's tty_00 is refused before the hub is asked
+    from harness_manager.core.errors import RefusedError
+
+    fake.add_tty("/dev/mps3_01_pl/tty_00", FakeMcc())
+    calls = len(fake.calls)
+    with pytest.raises(RefusedError, match="never starts or uses an fpgahub share"):
+        client.share_start("/dev/mps3_01_pl/tty_00")
+    assert len(fake.calls) == calls and "/dev/mps3_01_pl/tty_00" not in fake.shares
 
 
 def test_hub_errors_map_to_exit_codes():

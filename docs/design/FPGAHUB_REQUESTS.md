@@ -9,7 +9,7 @@
 
 ## What the door does today, and why
 
-The door writes `MB/HBI0309C/Nanosoc/nanosoc.bit` through one `fpgahub target program TARGET BIT --method sd --force`. It then proves the write finished and REBOOTs the board over the hub's MCC share. Four facts of v0.3.0 shape it:
+The door writes `MB/HBI0309C/Nanosoc/nanosoc.bit` through one `fpgahub target program TARGET BIT --method sd --force`. It then proves the write finished and REBOOTs the board ON the hub through pyverify (MCC-FIX, 2026-09-26: never a share on tty_00). Four facts of v0.3.0 shape it:
 
 1. **The program request is synchronous.** The CLI's client gives up after 30 s (`ipc.DaemonClient(timeout=30.0)`). The 12 MB write takes about 68 s. So the CLI always prints `POST /targets/T/program: timed out`, while the daemon keeps writing. A client that reads this as a failure and retries starts a second write. A reset mid-write then darkens the board (2026-07-18).
 2. **The `sd_install` plugin writes one file.** It cannot also change `nanosoc.txt`, so the config SD cannot be A/B by pointer through the hub.

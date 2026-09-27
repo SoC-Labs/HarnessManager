@@ -18,6 +18,7 @@ group = "fpga"                           # the fpgahub socket's group ("" = no s
 jump = ""                                # an SSH jump host on the way to the hub (ssh -J)
 holder = ""                              # the lease holder ("" = harness-manager-<user>@<host>)
 lease_ttl = "1h"                         # also request_ttl (2h) and queue_timeout (1h)
+stage_dir = ".cache/harness-manager/hub-sd"  # the hub SD door's staging dir (see below)
 
 [hubs.remote]
 url = "https://mapstone-dev.ecs.soton.ac.uk:7246"   # REST: a token (7245 is mTLS)
@@ -30,10 +31,10 @@ ca_file = "~/lab-hub-ca.pem"
 [boards.lab]
 match = ["192.168.10.101"]
 via = "hub"
-hub = { use = "lab", target = "mps3_01_pl", shares = { mcc = "/dev/mps3_01_pl/tty_00" } }
+hub = { use = "lab", target = "mps3_01_pl" }
 ```
 
-- **Which keys go where.** The board keeps `use`, `target`, `board`, `shares`, `baud` and `start_shares`. Every other key belongs to the hub. A board table that has `use` and a hub key (`host`, `url`, `token_file`, …) is refused, naming the key.
+- **Which keys go where.** The board keeps `use`, `target`, `board`, `shares`, `baud` and `start_shares`. `shares` is for the FPGA UART lanes (`tty_01..03`) only: see [The MCC behind a hub](#the-mcc-behind-a-hub-never-a-share-on-tty_00). Every other key belongs to the hub. A board table that has `use` and a hub key (`host`, `url`, `token_file`, …) is refused, naming the key.
 - **Machine hubs.** The admin's `/etc/harness-manager/policy.toml` may define `[hubs.<name>]`. Every key the admin wrote is locked (`hub add --update` and `hub remove` exit 15), but each user sets their own token with `harness-manager hub token NAME --stdin`. A `token` in the policy file is dropped, because every user can read that file.
 - **A named REST hub's token, first match wins:** `$FPGAHUB_TOKEN` (only when `$FPGAHUB_ADDR` is unset or names this hub), then your `hubs.<name>.token` (the secret store by default: the OS keyring, else a 0600 file; `file:PATH` is read strictly, so a file others can read is **refused**, not warned about), then the fpgahub login store for this hub. A token stored in a keyring this process cannot reach is an error (exit 7), never quietly replaced by the login store. An inline table keeps T8's order above (`token_file` first).
 - **`jump`** reaches the lease and share commands (`ssh -J`), the share forwards and the board's tunnel.
@@ -203,7 +204,7 @@ UDP 69 (TFTP) and 6899 (identify) also exist. The board, 192.168.10.101, sits on
       - everyone behind one NAT address shares the gate, as fpgahub's own `LEASE_GATES.md` warns.
 
       With the gate off there is no chain at all, and anyone with a route could reach the board.
-3. **TTY shares directly.** fpgahub's shares listen on `0.0.0.0:<share_port_base + i>` (12000 up) on the hub. A REST-only client (CCR T8-1) connects to `HUB:<port>` directly when the hub firewall lets it. The share port has **no authentication**, and the first client to connect holds the write slot. Opening those ports to campus lets anyone on campus type into the MCC, so a firewall scoped to lease holders (or the gate idea extended to shares) must come first.
+3. **TTY shares directly.** fpgahub's shares listen on `0.0.0.0:<share_port_base + i>` (12000 up) on the hub. A REST-only client (CCR T8-1) connects to `HUB:<port>` directly when the hub firewall lets it. The share port has **no authentication**, and the first client to connect holds the write slot. Opening those ports to campus lets anyone on campus type into a console, so a firewall scoped to lease holders (or the gate idea extended to shares) must come first. This is for the FPGA UART lanes only: the MCC's `tty_00` is never shared (above).
 4. **A VPN or WireGuard peer per user, ending on the hub.** It solves the off-campus route and the NAT caveat together: each user gets a unique tunnel IP for the gate. The Linux-harness WireGuard scaffold is the board-side half of this idea, not this.
 5. **An authenticated tunnel in fpgahub (proposal):** `GET /api/v1/targets/{t}/tunnel?port=6900` upgraded to a WebSocket and gated on the lease. It needs no routing and no firewall change, and works through NAT. It is the cleanest option for external users; `transports/__init__.py` has always anticipated it.
 
@@ -224,6 +225,51 @@ Together with `IPForward=no`, that means options 2 and 3 do not work today, and 
 When all four pass, the session talks to `192.168.10.101:6900…` directly: a `DirectReach`, shown by `GET /boards/{bid}/tunnel` as `mode: direct` with the plan. When any check fails, it opens the SSH tunnel to `hub.host`, and the plan's reason names the first missing piece. With no `hub.host` it fails with that reason.
 
 `direct = "always"` skips the checks, for a user who knows the path works. `direct = "never"` always tunnels. On macOS and Windows the route check reads nothing today, so `auto` falls back to the tunnel; use `always` there if the route exists.
+
+## The MCC behind a hub: never a share on `tty_00`
+
+Harness Manager never starts or uses an fpgahub share on the MCC console `tty_00`, on any board
+(the Linux lead and the lead, 2026-09-26). The paced REBOOT works only with exactly one reader on
+`tty_00`; a share is a reader (fpgahub's broker holds the tty), it cannot be stopped on its own
+(`share stop` stops every share, and Harness Manager never runs it), and while one exists the
+platform's own tools refuse to REBOOT (pyverify's writer, rc 3/4).
+
+So every MCC operation of a hub board runs ON the hub, through the hub's SSH runner
+(`ssh HUB 'sg fpga -c …'`; the console is `root:fpga`):
+
+| Operation | What runs on the hub |
+|---|---|
+| `mcc TARGET reboot`, **Power > Board reboot** | pyverify's paced REBOOT writer (`bootrate.HUB_MCC_REBOOT_PY`): refuses a second reader and a missing `Cmd>`, types REBOOT at 100 ms a character, captures the boot log (the result names the `.bit` the MCC loaded) |
+| the REBOOT after a hub SD write (`harness install --door hub`) | pyverify's `sd field --already-written`: the journal witness of that sha, the one-reader scan, then the same paced REBOOT |
+| `mcc TARGET temp` / `osc`, `mcc TARGET cmd "CFG R …"` | Harness Manager's hub-side reader: the same one-reader rule and `Cmd>` check; reads only (no `CFG W`, no `DEBUG`/`EXIT` left open) |
+
+- **Python on the hub.** pyverify's code runs under a Python 3.10+ found on the hub
+  (`python3.11` first, then 3.12, 3.13, 3.10, then fpgahub's `/opt/fpgahub/bin/python3.11`); the
+  lab hub's system `python3` is 3.6 and is never used for it. With none, a REBOOT refuses and says
+  so. The reads are Harness Manager's own script, proven under Python 3.6.
+- **Straight after an SD write** the MCC answers a bare CR with only `\r\n` for a few seconds.
+  The REBOOT is tried again, up to 3 times 5 s apart, only while that is the answer. The SD write
+  is never retried.
+- **Not during a card job.** Every REBOOT and every Linux harness restart first asks the reset
+  guard (lane SLOT-TIMING) and refuses while the user microSD is being written or read back.
+- `share start TARGET mcc` (or its `/dev/…/tty_00` path) is refused before the hub is asked. An old
+  `shares = { mcc = … }` entry in boards.toml is ignored: it only names the MCC's path.
+- A REST-only hub (a token, no SSH login) cannot reach `tty_00`: the board has no controller
+  there, and reboots need the Debug USB or an SSH account on the hub.
+
+## The hub SD door's staging directory (`hubs.<name>.stage_dir`)
+
+The hub SD door (lane HUB-SD) writes a harness base to the config SD through fpgahub on an SSH hub. It uploads the `.bit` over ssh into a staging directory on the hub, checks its sha256 there, and asks fpgahubd to program that path with `--method sd`. **fpgahubd reads the file itself**, so the directory must be readable by the daemon, not only by you.
+
+- **Default:** `.cache/harness-manager/hub-sd`, relative to your home on the hub (`~/.cache/harness-manager/hub-sd/<sha256>.bit`). Unset, nothing changes.
+- **Set it** with `harness-manager config set hubs.lab.stage_dir /srv/fpga/hm-stage` (an absolute path, or one relative to your hub home; no spaces, `~` or `..`). A REST hub ignores it: its `.bit` goes to the hub's bitstream repository.
+- **When the default cannot work:** fpgahub's own unit file (`systemd/fpgahubd.service`, v0.3.0) sets `ProtectHome=yes` and `PrivateTmp=yes`. With those, fpgahubd sees an empty `/home` and its own `/tmp`, so `bitstream not found` names your staged file. The stage dir must then be **outside `/home` and `/tmp`**: a group-`fpga` directory the hub's admin creates once, for example:
+  ```bash
+  sudo install -d -m 2770 -g fpga /srv/fpga/hm-stage     # or /var/lib/harness-manager-stage
+  ```
+  `ProtectSystem=strict` only makes paths read-only for the daemon, and it only needs to read.
+- **Which case the lab hub is in:** `docs/HIL_LINUX.md` §F1 (the unit's `ProtectHome`) and §F4 (the read probe) answer it.
+- **Unchanged:** the one `program --method sd --force` request is never retried mid-write. The stage dir only changes where the file waits.
 
 ## Events
 
