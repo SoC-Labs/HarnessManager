@@ -55,7 +55,8 @@ log = logging.getLogger(__name__)
 
 CAPABILITY = "user microSD"
 #: The control connection parks for the whole commit (write + read-back of ~3 MB on the
-#: card): the swap's own budget.
+#: card): at least this, more for a bigger pair (SLOT-TIMING: the card writes at ~70 KB/s and
+#: reads back at 14-135 KB/s on silicon, so ~3 MB can take ~4.5 min; ``os_slots.budget_s``).
 COMMIT_TIMEOUT_S = 300.0
 NO_CARD_HINT = ("insert a card in the board's user microSD slot; without one the board boots "
                 "exactly as it always has")
@@ -89,8 +90,9 @@ class Mps3Card:
     ``usd``, nothing written), and a commit sends its pair with the same commit pusher
     "Keep on the card" uses (``Mps3Deploy.commit_pusher``)."""
 
-    def __init__(self, session: Any, *, commit_timeout_s: float = COMMIT_TIMEOUT_S) -> None:
+    def __init__(self, session: Any, *, commit_timeout_s: float | None = None) -> None:
         self._session = session
+        #: None: ``commit_budget(pair bytes)``; a number: fixed (a test seam).
         self.commit_timeout_s = commit_timeout_s
         #: The pusher the last commit built (tests read its transport).
         self.last_pusher: Any = None
@@ -220,13 +222,16 @@ class Mps3Card:
             sent[kind] = n
             report("commit", sum(sent.values()), total)
 
+        budget = commit_budget(total)
         pusher = self._deploy().commit_pusher(windowed="windowed" in live.features,
-                                              impl=live.impl, on_frame=on_frame)
+                                              impl=live.impl, on_frame=on_frame,
+                                              stall_s=budget.push_stall_s)
         self.last_pusher = pusher
         report("commit", 0, total)
         from .shell import Mps3Shell
 
-        parked = Mps3Shell(shell.host, shell.port, timeout=self.commit_timeout_s)
+        wait_s = self.commit_timeout_s if self.commit_timeout_s is not None else budget.job_s
+        parked = Mps3Shell(shell.host, shell.port, timeout=wait_s)
         reply = parked.call(lambda c: SwapOrchestrator(c, pusher, commit_pusher=pusher).commit(
             entry.overlay, rm_id=rmid.parse_rm_id(live.rm_id),
             static_id=rmid.parse_rm_id(live.shell_id), features=tuple(live.features)))
@@ -249,6 +254,17 @@ class Mps3Card:
             "overlay store, so its pair cannot be re-pushed to the card",
             hint="import or deploy it from Harness Manager first (the card commit re-pushes "
                  "the running pair; the shell keeps no copy)")
+
+
+def commit_budget(nbytes: int) -> Any:
+    """A card commit's budget (``os_slots.SlotTimeouts``): the parked control connection
+    waits ``max(COMMIT_TIMEOUT_S, the pair written and read back at the card's budget
+    rates)``; the pair's per-chunk stall limit is the OS-slot push's
+    (``mps3.slot.push_timeout_s``, the no-progress limit): the same card, written the same way."""
+    from .os_slots import budget_s, slot_timeouts
+
+    t = slot_timeouts(nbytes)
+    return replace(t, job_s=max(COMMIT_TIMEOUT_S, budget_s(nbytes)), setting_s=COMMIT_TIMEOUT_S)
 
 
 def _usd_error(what: str, err: str) -> HarnessError:

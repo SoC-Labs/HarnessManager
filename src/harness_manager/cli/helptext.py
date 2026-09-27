@@ -217,9 +217,12 @@ USB cable". For a board on USB only, TARGET is - :
 
 mcc TARGET temp            controller temperatures
 mcc TARGET osc             oscillator set-points
-mcc TARGET reboot [--yes] [--wait S]
+mcc TARGET reboot [--yes] [--wait S] [--force [--consent PHRASE]]
                            reboot and prove it (the board goes down, then comes
                            back); the running design is lost. Asks unless --yes.
+                           Refused (exit 4) while an OS-slot card job writes or
+                           reads back; --force + "RESET <board_id>" only to
+                           recover a job that never ends.
 mcc TARGET cmd LINE        one allowlisted controller command; destructive ones
                            (FORMAT, DEL, EEPROM, ...) are refused with exit 15.
 sd TARGET backup DIR       back up the whole SD into a zip in DIR

@@ -72,6 +72,7 @@ from harness_manager.core.pack import (
     card_status_of,
     keep_refusal,
 )
+from harness_manager.services import reset_guard
 
 log = logging.getLogger(__name__)
 
@@ -189,6 +190,8 @@ class DeployService:
                keep_on_card: bool = False) -> DeployResult:
         adapter = self._adapter(session)
         try:
+            # SLOT-TIMING: a swap waits for the board's card job (services.reset_guard).
+            reset_guard.check(session, reset_guard.ACTION_DEPLOY)
             items = list(adapter.preflight(overlay))
             err = refusal(items, overlay.name)
             if err is None and keep_on_card:
@@ -243,4 +246,5 @@ class DeployService:
             raise AbsentError(
                 "no baseline overlay (greybox) is known for the running shell",
                 hint="add the greybox overlay built for this shell to the overlay directories")
-        return self.deploy(session, base)
+        with reset_guard.guarded(session, reset_guard.ACTION_RESTORE):   # SLOT-TIMING
+            return self.deploy(session, base)

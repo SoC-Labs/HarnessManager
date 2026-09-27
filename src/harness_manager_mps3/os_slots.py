@@ -44,9 +44,30 @@ rolls back itself before a second push (HARNESS_DISTRIBUTION §9 item 8).
 image (sha256, release version) it pushed under which ``hdr_crc``
 (``<state>/slots/<board>.json``), so ``status`` can name what each slot holds.
 
-Test seams: ``poll_s``/``job_timeout_s``/``reboot_poll_s`` on the adapter; the push port
-follows the deploy adapter's (``HARNESS_MANAGER_MPS3_PUSH_PORT``); the board-SSH
-forward uses ``tunnel.DEFAULT_LAUNCHER``/``DEFAULT_SSH_G``; identify uses
+**Timing (lane SLOT-TIMING).** Silicon B2 (2026-09-26): the user microSD wrote at ~70 KB/s
+and read back at 14-135 KB/s, so a 29 MB slot took ~12 min to write and ~35 min to verify;
+the usd_spi fix after that run lowers the SPI clock, so the card gets slower still. The
+card's rates come from ONE place, the rows ``mps3.slot.card_write_bps`` and
+``mps3.slot.card_read_bps`` (``card_rates``), and every budget is derived from them. THE
+guard is a stall: a job whose byte count has not moved for ``mps3.slot.push_timeout_s`` (900 s) is
+stuck, and so is a push whose 64 KiB chunk has not gone for as long (pyverify's
+``push_slot_image(timeout_s=)``, never a bound on the transfer). The backstop is a cap on the
+whole job, from the first byte sent: ``max(mps3.slot.job_timeout_s, size / rate each way
+x1.5)`` (1800 s floor; ~62 min for 29 MB at the defaults); a verify's is the read-back alone,
+and a read-back the board does not count bytes for has the cap only. While a job runs,
+``status()`` carries this process's estimates (``job.rate_bps``, ``job.eta_s``: from the
+rate it observes once the bytes move, else the card's rates), and ``push``/``verify`` report
+them (``core.pack.report_progress``). A stuck job, a failed read-back, or a card that stops
+answering is an error that says the card's state; nothing is ever written twice, and
+nothing here starts a verify (``status`` only). pyverify's ``wait_job`` (180 s default) is
+never called: this adapter waits itself. ``reboot()`` refuses while the card job is writing
+or verifying (``services.reset_guard``): the board does not refuse one itself yet (B2: a
+reboot mid-job left the card in "uSD init error").
+
+Test seams: ``poll_s``/``poll_max_s``/``job_timeout_s``/``push_stall_s``/``reboot_poll_s``
+on the adapter; the push port follows the deploy adapter's
+(``HARNESS_MANAGER_MPS3_PUSH_PORT``); the board-SSH forward uses
+``tunnel.DEFAULT_LAUNCHER``/``DEFAULT_SSH_G``; identify uses
 ``HARNESS_MANAGER_MPS3_IDENTIFY_PORT``.
 """
 
@@ -57,10 +78,11 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import zlib
-from collections.abc import Iterator
-from dataclasses import replace
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -78,7 +100,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.model import LinkKind
-from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus
+from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus, report_progress
 
 from .constants import CONTROL_PORT, IMPL_LINUX, PUSH_PORT
 
@@ -90,13 +112,43 @@ SLOT_FEATURE = "slot"
 SLOT_LOCKED_ERR = pv_slot.SLOT_LOCKED_ERR
 #: How the two engines decline a verb they do not have.
 _NO_VERB = ("unknown op", "slot not supported")
-#: Poll the card job every 0.5-1 s, 180 s budget (HARNESS_DISTRIBUTION §9 item 3).
+#: Poll the card job every 0.5 s at first (HARNESS_DISTRIBUTION §9 item 3), then every
+#: ``POLL_MAX_S``: each ``slot status`` reads ~7 sectors off the same card the job is using.
 POLL_S = 0.5
-JOB_TIMEOUT_S = 180.0
+POLL_MAX_S = 2.0
 #: A reboot witness polls this often, and gives up after the caller's budget.
 REBOOT_POLL_S = 0.5
-#: The per-chunk stall limit of the kind-2 push (pyverify's rule: never the whole transfer).
-PUSH_STALL_S = 30.0
+
+# --- the card's timing (SLOT-TIMING) ------------------------------------------------------------
+#: The card's rates, bytes a second, from ONE place: these rows (settings.py), whose defaults
+#: are the Linux lead's B2 measurements (2026-09-26, the real board, the first usd_spi run):
+#: written at ~70 KB/s; read back at 14-135 KB/s, varying a lot, so the default is the
+#: slowest seen (~73 s/MB). A 29 MB slot took ~12 min to write and ~35 min to verify. That
+#: link was marginal and its fix lowers the SPI clock, so the card will get SLOWER: put the
+#: measured rates in these rows when there are some. Every budget and every first ETA uses
+#: them; once the job's bytes move, the ETA uses the rate it observes.
+CARD_WRITE_BPS_KEY = "mps3.slot.card_write_bps"
+CARD_WRITE_BPS_ENV = "HARNESS_MANAGER_MPS3_SLOT_CARD_WRITE_BPS"
+CARD_WRITE_BPS = 70_000
+CARD_READ_BPS_KEY = "mps3.slot.card_read_bps"
+CARD_READ_BPS_ENV = "HARNESS_MANAGER_MPS3_SLOT_CARD_READ_BPS"
+CARD_READ_BPS = 14_000
+#: The cap is the card's time for the job (size / rate, each direction) times this.
+BUDGET_MARGIN = 1.5
+#: THE guard is the stall: a job whose byte count has not moved for ``mps3.slot.push_timeout_s``
+#: (900 s; pyverify's per-chunk push limit is the same number) is stuck. The whole-job cap,
+#: ``max(mps3.slot.job_timeout_s, the size's)``, 1800 s at least, is the backstop (and the
+#: only bound on a read-back the board does not count). pyverify's own defaults (180 s, 30 s)
+#: were too short on silicon; the Linux lead ran B2 with ``--timeout 1800 --push-timeout 900``.
+JOB_TIMEOUT_KEY = "mps3.slot.job_timeout_s"
+JOB_TIMEOUT_ENV = "HARNESS_MANAGER_MPS3_SLOT_JOB_TIMEOUT_S"
+JOB_TIMEOUT_S = 1800.0
+STALL_KEY = "mps3.slot.push_timeout_s"
+STALL_ENV = "HARNESS_MANAGER_MPS3_SLOT_PUSH_TIMEOUT_S"
+STALL_S = 900.0
+#: While a job runs, ``slot status`` may fail now and then (the control port is one client
+#: at a time): a wait keeps reading for this long before it gives up with the last state.
+STATUS_GRACE_S = 60.0
 #: Host-side records kept per board (newest first).
 RECORDS_KEEP = 16
 
@@ -119,6 +171,128 @@ def _hex32(value: Any) -> str:
 def same_u32(a: Any, b: Any) -> bool:
     x, y = _hex32(a), _hex32(b)
     return bool(x) and x == y
+
+
+# --- timing: the budget, and the estimate -------------------------------------------------------
+
+
+def _setting_s(key: str, env: str, default: float) -> float:
+    """A number row's value (seconds, bytes a second). Through the settings reader once lane
+    SET-WIRE's ``settings.value`` is there (the variable, then settings.toml, then the
+    default); until then the variable, then the default. A bad variable is refused, naming
+    it."""
+    from . import settings as _settings
+
+    reader = getattr(_settings, "value", None)
+    if callable(reader):
+        return float(reader(key))
+    raw = os.environ.get(env, "").strip()
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.0
+    if value <= 0:
+        raise UsageError(f"${env}={raw!r} is not a number above 0",
+                         hint=f"fix ${env}, or unset it to use {key} from the settings")
+    return value
+
+
+def card_rates() -> tuple[float, float]:
+    """``(write, read)`` bytes a second: the card's rates, from their rows."""
+    return (_setting_s(CARD_WRITE_BPS_KEY, CARD_WRITE_BPS_ENV, CARD_WRITE_BPS),
+            _setting_s(CARD_READ_BPS_KEY, CARD_READ_BPS_ENV, CARD_READ_BPS))
+
+
+@dataclass(frozen=True)
+class SlotTimeouts:
+    """The budget of one card job (module docstring, "Timing")."""
+
+    job_s: float            # the cap on the whole job, from the first byte sent
+    push_stall_s: float     # THE guard: no bytes moved for this long (push chunk, job's got)
+    setting_s: float        # mps3.slot.job_timeout_s (the cap's floor)
+    size_s: float           # what the image's size asks for at the card's rates
+    write_bps: float = 0.0
+    read_bps: float = 0.0
+
+
+def budget_s(nbytes: int, *, write: bool = True) -> float:
+    """What a card job of ``nbytes`` may take: written (unless ``write`` is False) and read
+    back at the card's rates (``card_rates``), x ``BUDGET_MARGIN``."""
+    wbps, rbps = card_rates()
+    t = nbytes / rbps + (nbytes / wbps if write else 0.0)
+    return BUDGET_MARGIN * t
+
+
+def slot_timeouts(nbytes: int, *, write: bool = True) -> SlotTimeouts:
+    """The budget of a push (``write``) or a verify of ``nbytes``, from the card's rates: the
+    stall ``max(mps3.slot.push_timeout_s, 64 KiB / write rate x1.5)`` (THE guard), and the cap on
+    the whole job ``max(mps3.slot.job_timeout_s, size / rate each way x1.5)`` (a 29 MB push
+    at the default rates: ~62 min; 1800 s alone would cut its read-back)."""
+    from pyverify.pusher import TCP_SEND_CHUNK
+
+    wbps, rbps = card_rates()
+    floor = _setting_s(JOB_TIMEOUT_KEY, JOB_TIMEOUT_ENV, JOB_TIMEOUT_S)
+    stall = _setting_s(STALL_KEY, STALL_ENV, STALL_S)
+    size = budget_s(nbytes, write=write)
+    return SlotTimeouts(job_s=max(floor, size),
+                        push_stall_s=max(stall, BUDGET_MARGIN * TCP_SEND_CHUNK / wbps),
+                        setting_s=floor, size_s=size, write_bps=wbps, read_bps=rbps)
+
+
+class JobMeter:
+    """Rate and ETA of a board's card job, from the ``status`` samples this process read.
+
+    A phase (writing, verifying) whose ``got`` moved over at least a second has a measured
+    rate; otherwise the card's rates stand in (``card_rates``: an ETA that errs long). The ETA is
+    to the END of the job: a write's includes its read-back. A read-back the board does not
+    count (``got`` stays put) is timed from when this process first saw it verifying."""
+
+    MIN_ETA_S = 60.0
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._mu = threading.Lock()
+        self._runs: dict[str, dict[str, Any]] = {}
+
+    def forget(self, board_id: str) -> None:
+        with self._mu:
+            self._runs.pop(board_id, None)
+
+    def estimate(self, board_id: str, job: SlotJob) -> SlotJob:
+        """``job`` with ``rate_bps`` and ``eta_s`` (unchanged when it is not busy)."""
+        if not job.busy:
+            self.forget(board_id)
+            return job
+        now = self._clock()
+        key = (job.act, job.slot, job.length)
+        with self._mu:
+            run = self._runs.get(board_id)
+            if run is None or run["key"] != key:
+                run = self._runs[board_id] = {"key": key, "phase": "", "t0": now,
+                                              "got0": job.got}
+            if run["phase"] != job.state:
+                run.update(phase=job.state, t0=now, got0=job.got)
+            t0, got0 = run["t0"], run["got0"]
+        moved, took = job.got - got0, now - t0
+        measured = moved > 0 and took >= 1.0
+        left = max(job.length - job.got, 0)
+        wbps, rbps = card_rates()
+        if job.state == "writing":
+            rate = moved / took if measured else wbps
+            eta = left / rate + job.length / rbps
+        elif measured:                                   # the board counts its read-back
+            rate = moved / took
+            eta = left / rate
+        else:
+            rate = rbps
+            eta = job.length / rbps - took
+        return replace(job, rate_bps=rate, eta_s=max(eta, self.MIN_ETA_S))
+
+
+#: One meter per process: the daemon's repeated reads of a board sharpen the same estimate.
+METER = JobMeter()
 
 
 # --- the board's status -----------------------------------------------------------------------
@@ -256,13 +430,20 @@ def board_ssh_target(session: Any) -> tuple[str, str, str]:
 class Mps3OsSlots:
     """``core.pack.OsSlotAdapter`` for an MPS3 session (module docstring)."""
 
-    def __init__(self, session: Any, *, poll_s: float = POLL_S,
-                 job_timeout_s: float = JOB_TIMEOUT_S, reboot_poll_s: float = REBOOT_POLL_S,
-                 records: SlotRecords | None = None) -> None:
+    def __init__(self, session: Any, *, poll_s: float = POLL_S, poll_max_s: float = POLL_MAX_S,
+                 job_timeout_s: float | None = None, push_stall_s: float | None = None,
+                 reboot_poll_s: float = REBOOT_POLL_S, records: SlotRecords | None = None,
+                 meter: JobMeter | None = None) -> None:
         self._session = session
         self.poll_s = poll_s
+        self.poll_max_s = poll_max_s
+        #: None: from the settings and the image's size (``slot_timeouts``); a number: fixed.
         self.job_timeout_s = job_timeout_s
+        self.push_stall_s = push_stall_s
         self.reboot_poll_s = reboot_poll_s
+        self.meter = meter or METER
+        #: The budget the last push/verify ran under (tests, and the hand-back's evidence).
+        self.last_timeouts: SlotTimeouts | None = None
         self._records = records
         #: How the last mutation reached the board: "direct" or "board-ssh".
         self.last_route = ""
@@ -361,7 +542,48 @@ class Mps3OsSlots:
         raw = self._ask("status")
         if not raw.get("ok"):
             raise _refusal("status", str(raw.get("err", "")))
-        return self._annotate(parse_status(raw))
+        return self._annotate(self._measured(parse_status(raw)))
+
+    def _measured(self, st: SlotStatus) -> SlotStatus:
+        """``st`` with this process's estimate of its card job (``JobMeter``)."""
+        job = self.meter.estimate(self._session.candidate.board_id, st.job)
+        return st if job is st.job else replace(st, job=job)
+
+    def busy_job(self) -> SlotStatus | None:
+        """The reset guard's read (``services.reset_guard``): the status while the card job
+        is writing or verifying, else None. Nothing is sent to a harness without the slot
+        verbs (``version`` says so first); a harness that does not answer has no job
+        running (None); one whose control port is held cannot say (``HeldError``)."""
+        try:
+            live = self._live()
+        except HeldError:
+            raise
+        except HarnessError:
+            return None
+        if live.version_busy:
+            pass                  # busy mid-request: it cannot say what it is; ask the slots
+        elif not live.version_ok or (live.impl != IMPL_LINUX
+                                     and SLOT_FEATURE not in live.features):
+            return None
+        try:
+            st = self.status()
+        except HeldError:
+            raise
+        except HarnessError as exc:
+            log.info("reset guard: no card job to read on %s: %s",
+                     self._session.candidate.board_id, exc)
+            return None
+        return st if st.job.busy else None
+
+    def timeouts(self, nbytes: int, *, write: bool = True) -> SlotTimeouts:
+        """This push's (``write``) or verify's budget: ``slot_timeouts``, or the seams."""
+        t = slot_timeouts(nbytes, write=write)
+        if self.job_timeout_s is not None:
+            t = replace(t, job_s=float(self.job_timeout_s))
+        if self.push_stall_s is not None:
+            t = replace(t, push_stall_s=float(self.push_stall_s))
+        self.last_timeouts = t
+        return t
 
     # -- the lock -------------------------------------------------------------------------------
 
@@ -439,10 +661,14 @@ class Mps3OsSlots:
         return self._annotate(parse_status(reply))
 
     def verify(self, slot: str | None = None, progress: Progress | None = None) -> SlotStatus:
+        started = time.monotonic()
         reply = self._ask("verify", slot)
         if not reply.get("ok"):
             raise _refusal("verify", str(reply.get("err", "")))
-        st = self._wait_job(progress, phase="verify", before=None)
+        job = parse_status(reply).job
+        budget = self.timeouts(job.length, write=False)
+        st = self._wait_job(progress, phase="verify", before=None,
+                            deadline=started + budget.job_s, stall_s=budget.push_stall_s)
         return st
 
     def push(self, image: Path, *, static_id: str, sha256: str = "", version: str = "",
@@ -471,30 +697,34 @@ class Mps3OsSlots:
                      "static goes through the Debug USB or the hub")
         target = st.target
         locked = self.claimed(st)
+        budget = self.timeouts(len(data))
+        sid = int(_hex32(static_id), 16)
         report("push", 0, len(data))
+        started = time.monotonic()
         try:
             if locked:
                 with self._board_forward() as (host, _ctl, push_port):
-                    pv_slot.push_slot_image(data, host, static_id=int(_hex32(static_id), 16),
-                                            slot=target, via="tcp", port=push_port,
-                                            timeout_s=PUSH_STALL_S)
+                    self._stream(lambda: pv_slot.push_slot_image(
+                        data, host, static_id=sid, slot=target, via="tcp", port=push_port,
+                        timeout_s=budget.push_stall_s), progress, target, st.job)
                 self.last_route = "board-ssh"
             else:
-                pv_slot.push_slot_image(data, self._shell().host,
-                                        static_id=int(_hex32(static_id), 16), slot=target,
-                                        via="tcp", port=self._push_port(),
-                                        timeout_s=PUSH_STALL_S)
+                host, port = self._shell().host, self._push_port()
+                self._stream(lambda: pv_slot.push_slot_image(
+                    data, host, static_id=sid, slot=target, via="tcp", port=port,
+                    timeout_s=budget.push_stall_s), progress, target, st.job)
                 self.last_route = "direct"
         except pv_slot.SlotError as exc:
             raise RefusedError(f"the boot image was refused before sending: {exc}") from exc
         except PushError as exc:
-            raise ActionFailedError(f"the push to slot {target} failed: {exc}",
-                                    hint="the card keeps what it had; try again") from exc
+            raise ActionFailedError(f"the push to slot {target} failed: {exc}; "
+                                    f"{self._state_words()}", hint=_BUSY_HINT) from exc
         except OSError as exc:
             raise UnreachableError(f"the push to slot {target} failed: {exc}") from exc
         report("push", len(data), len(data))
         final = self._wait_job(progress, phase="readback", before=st.job, push_slot=target,
-                               want_crc=facts["hdr_crc"])
+                               want_crc=facts["hdr_crc"], deadline=started + budget.job_s,
+                               stall_s=budget.push_stall_s)
         got = final.slots.get(target)
         if final.staged != target or got is None or not same_u32(got.hdr_crc, facts["hdr_crc"]):
             raise ActionFailedError(
@@ -504,20 +734,98 @@ class Mps3OsSlots:
         self.records.put(facts["hdr_crc"], sha256=sha256 or _sha256(data), version=version)
         return self._annotate(final)
 
+    def _stream(self, send: Callable[[], Any], progress: Progress | None, target: str,
+                before: SlotJob) -> None:
+        """Run the push (``send``) and, while it streams, report the card's write from
+        ``status`` (``got`` counts what reached the card). The board writes as it receives,
+        so a 29 MB push streams for ~12 min. A status that fails meanwhile is skipped: the
+        push's own stall limit is the judge of the transfer."""
+        box: dict[str, BaseException] = {}
+
+        def run() -> None:
+            try:
+                send()
+            except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
+                box["exc"] = exc
+
+        worker = threading.Thread(target=run, name="slot-push", daemon=True)
+        worker.start()
+        t0 = time.monotonic()
+        while True:
+            worker.join(self._poll_every(time.monotonic() - t0))
+            if not worker.is_alive():
+                break
+            try:
+                st = self._measured(parse_status(self._must_ok(self._ask("status"), "status")))
+            except HarnessError as exc:
+                log.debug("status while pushing: %s", exc)
+                continue
+            job = st.job
+            if job != before and job.act == "push" and job.slot == target and job.busy:
+                self._report_job(progress, job.state, job)
+        if "exc" in box:
+            raise box["exc"]
+
+    def _poll_every(self, elapsed: float) -> float:
+        """``poll_s`` for the first 10 s of a job, then ``poll_max_s``."""
+        return self.poll_s if elapsed < 10.0 else max(self.poll_s, self.poll_max_s)
+
+    @staticmethod
+    def _report_job(progress: Progress | None, phase: str, job: SlotJob) -> None:
+        from harness_manager.services.slots import job_detail
+
+        detail = job_detail(job) if job.busy else None
+        report_progress(progress, phase, job.got, job.length, detail)
+
     def _wait_job(self, progress: Progress | None, *, phase: str, before: SlotJob | None,
-                  push_slot: str = "", want_crc: str = "") -> SlotStatus:
-        """Poll ``status`` until the card job is done.
+                  push_slot: str = "", want_crc: str = "",
+                  deadline: float | None = None, stall_s: float | None = None) -> SlotStatus:
+        """Poll ``status`` until the card job is done. THE guard is ``stall_s``: the job's
+        byte count has not moved for that long (a write always counts; a read-back only once
+        the board has counted it); ``deadline`` (the whole job's cap) is the backstop.
 
         After a push (``before`` = the job before it): the board takes the header before
         the host's send completes, so the first status already shows the push's job. A
         push it closed UNREAD (the lock, a running job, a bad header) starts none: the job
         is unchanged and the slot is not staged with this image, which is refused at once.
+        While the job runs, each report carries its rate and ETA (``_report_job``).
         """
-        report: Progress = progress or (lambda p, d, t: None)
-        deadline = time.monotonic() + self.job_timeout_s
+        from harness_manager.services.slots import card_state_words
+
+        t0 = time.monotonic()
+        if deadline is None:
+            deadline = t0 + (self.job_timeout_s if self.job_timeout_s is not None
+                             else JOB_TIMEOUT_S)
+        budget = deadline - t0
         started = before is None
+        last: SlotStatus | None = None
+        silent_since: float | None = None
+        mark: tuple[str, int] | None = None       # (state, got) when the bytes last moved
+        moved_at = t0
+        counted = False                           # this phase counts its bytes
         while True:
-            st = parse_status(self._must_ok(self._ask("status"), "status"))
+            try:
+                reply = self._ask("status")
+            except (HeldError, UnreachableError) as exc:
+                # One client at a time on 6900: a failed read now and then is not the card.
+                # Reads only: nothing is ever sent again that writes.
+                now = time.monotonic()
+                silent_since = silent_since if silent_since is not None else now
+                if now - silent_since < STATUS_GRACE_S and now < deadline:
+                    time.sleep(self._poll_every(now - t0))
+                    continue
+                raise ActionFailedError(
+                    f"the board stopped answering `slot status` during the card job "
+                    f"({exc.message}); last seen: "
+                    f"{card_state_words(last) if last else 'no status yet'}",
+                    hint=_BUSY_HINT) from exc
+            silent_since = None
+            if not reply.get("ok"):
+                err = str(reply.get("err", ""))
+                raise ActionFailedError(
+                    f"the card failed during the job: slot status answers {err!r}; last seen: "
+                    f"{card_state_words(last) if last else 'no status yet'}", hint=_BUSY_HINT)
+            st = last = self._measured(parse_status(reply))
             job = st.job
             if not started:
                 have = st.slots.get(push_slot)
@@ -531,16 +839,38 @@ class Mps3OsSlots:
                         "the header was refused): nothing was written",
                         hint="`harness-manager slot status TARGET` shows the card job")
             if started:
-                report(phase, job.got, job.length)
+                self._report_job(progress, phase, job)
                 if job.state == "failed":
-                    raise _job_failure(job)
+                    raise _job_failure(job, st)
                 if job.state not in ("writing", "verifying"):
                     return st
+                now = time.monotonic()
+                if mark is None or mark[0] != job.state:
+                    counted, mark, moved_at = job.state == "writing", (job.state, job.got), now
+                elif job.got != mark[1]:
+                    counted, mark, moved_at = True, (job.state, job.got), now
+                elif stall_s and counted and now - moved_at >= stall_s:
+                    raise ActionFailedError(
+                        f"the card job made no progress for {now - moved_at:.0f} s (stuck "
+                        f"{job.state}); {card_state_words(st)}",
+                        hint=_BUSY_HINT + f" A longer stall limit: the setting {STALL_KEY}")
             if time.monotonic() >= deadline:
-                raise ActionFailedError(f"the card job is still {job.state} after "
-                                        f"{self.job_timeout_s:.0f} s",
-                                        hint="`harness-manager slot status TARGET` shows it")
-            time.sleep(self.poll_s)
+                raise ActionFailedError(
+                    f"the card job is still {job.state} after its {budget:.0f} s cap; "
+                    f"{card_state_words(st)}",
+                    hint=_BUSY_HINT + f" A longer budget: the setting {JOB_TIMEOUT_KEY}, or "
+                         f"the card's measured rates ({CARD_WRITE_BPS_KEY}, "
+                         f"{CARD_READ_BPS_KEY})")
+            time.sleep(self._poll_every(time.monotonic() - t0))
+
+    def _state_words(self) -> str:
+        """The card's state for an error message: one ``status`` read, never a write."""
+        from harness_manager.services.slots import card_state_words
+
+        try:
+            return card_state_words(self.status())
+        except HarnessError as exc:
+            return f"the card's state cannot be read ({exc.message})"
 
     @staticmethod
     def _must_ok(reply: dict[str, Any], act: str) -> dict[str, Any]:
@@ -553,8 +883,12 @@ class Mps3OsSlots:
     def reboot(self, progress: Progress | None = None, wait_s: float = 180.0) -> dict | None:
         """The ``reboot`` verb, witnessed: the harness's ``up_ms`` (from ``stats``) must
         restart after the request, i.e. be shorter than the time since it was sent."""
+        from harness_manager.services import reset_guard
+
         report: Progress = progress or (lambda p, d, t: None)
         shell = self._shell()
+        # SLOT-TIMING: never while the card job writes or reads back (a reset wedged it).
+        reset_guard.check(self._session, reset_guard.ACTION_HARNESS_REBOOT)
         resp = shell.call(lambda c: c.reboot())
         if not resp.ok:
             raise ActionFailedError(f"the harness refused reboot: {resp.err or '?'}",
@@ -632,9 +966,19 @@ def _refusal(act: str, err: str) -> HarnessError:
     return ActionFailedError(f"slot {act} refused: {err or 'no reason given'}")
 
 
-def _job_failure(job: SlotJob) -> HarnessError:
+#: What to do when a card job went wrong: never a second write over a running one.
+_BUSY_HINT = ("nothing was sent again: `harness-manager slot status TARGET` shows the card job; "
+              "do not push again or reset the board while it says writing or verifying (a "
+              "reset mid-write can wedge the card; only if it never ends, an MCC power cycle)")
+
+
+def _job_failure(job: SlotJob, st: SlotStatus | None = None) -> HarnessError:
+    from harness_manager.services.slots import card_state_words
+
     where = f" {job.slot}" if job.slot else ""
     text = f"the board's {job.act}{where} failed: {job.err}"
+    if st is not None:
+        text += f" ({card_state_words(st)})"
     if "!= fabric" in job.err:
         return IncompatibleError(text, hint="the image is provisioned for another static")
     if job.err.startswith("no free slot"):
@@ -645,7 +989,8 @@ def _job_failure(job: SlotJob) -> HarnessError:
         return RefusedError(text, hint="the slot has no record binding it to this static "
                                        "(written outside harnessd): it can become the default "
                                        "only while it runs; push a known-good image instead")
-    return ActionFailedError(text, hint="the card keeps its previous default; try again")
+    return ActionFailedError(text, hint="the card keeps its previous default; `harness-manager "
+                                        "slot status TARGET` says what the card holds now")
 
 
 def make_os_slot_adapter(session: Any) -> Mps3OsSlots | None:

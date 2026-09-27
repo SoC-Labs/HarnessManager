@@ -292,6 +292,8 @@ function outcomeLines(o) {
 }
 
 function progressText(d) {
+  // SLOT-TIMING: a long card job says itself ("writing slot B: 12.3 MB / 29 MB, ~6 min left")
+  if (d.text) return d.text;
   const phase = d.phase || "working";
   const hub = HUB_PHASE.find(([p]) => phase === p || (p.endsWith(":") && phase.startsWith(p)));
   const name = hub ? hub[1] : phase;

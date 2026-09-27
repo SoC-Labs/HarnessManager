@@ -501,6 +501,16 @@ class _Proxy:
     def _path(self, suffix: str) -> str:
         return f"/boards/{q(self._board_id)}/{suffix}"
 
+    def _forced(self, body: dict[str, Any]) -> dict[str, Any]:
+        """SLOT-TIMING: a reset run inside ``reset_guard.guarded(..., force=True)`` carries its
+        ``force``/``consent`` to the service, which checks the card job itself."""
+        from harness_manager.services import reset_guard
+
+        scope = reset_guard.scope_of(self._board_id)
+        if scope is not None and scope.force:
+            body = {**body, "force": True, "consent": scope.consent}
+        return body
+
 
 class _DeployAdapter(_Proxy):
     def overlays(self) -> Sequence[OverlayRef]:
@@ -572,13 +582,14 @@ class _Telemetry(_Proxy):
 class _Controller(_Proxy):
     def command(self, line: str, *, arm: bool = False) -> str:
         payload = self._engine._http.post(self._path("controller/command"),
-                                          {"line": line, "arm": arm})
+                                          self._forced({"line": line, "arm": arm}))
         return str(payload.get("reply", ""))
 
     def reboot(self, progress: Progress | None = None,
                wait_s: float | None = None) -> dict | None:
         body = {} if wait_s is None else {"wait_s": wait_s}
-        return self._engine.run_job(self._path("controller/reboot"), body, progress=progress)
+        return self._engine.run_job(self._path("controller/reboot"), self._forced(body),
+                                    progress=progress)
 
     def temperatures(self) -> Sequence[Reading]:
         return _readings(self._engine._http.get(self._path("controller/temps")))
@@ -632,7 +643,7 @@ class _Power(_Proxy):
 
     def power_cycle(self, off_s: float = 5.0, *, wait: bool = True,
                     progress: Progress | None = None) -> dict:
-        return self._engine.run_job(self._path("power/cycle"), {"off_s": off_s},
+        return self._engine.run_job(self._path("power/cycle"), self._forced({"off_s": off_s}),
                                     progress=progress)
 
 

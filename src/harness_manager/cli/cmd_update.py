@@ -42,6 +42,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event
+from harness_manager.core.pack import detail_of
 
 from .context import SERIAL_HELP, Ctx
 from .output import TSV_COLUMNS, Result, StderrProgress, with_data
@@ -178,7 +179,8 @@ class _Progress:
             phase = str(d.get("phase", ""))
             head = phase.split(":", 1)[0]
             bar = self.bars.setdefault(head, StderrProgress(f"update {head}", self.ctx.err))
-            bar(phase.split(":", 1)[-1], int(d.get("bytes", 0) or 0), int(d.get("total", 0) or 0))
+            bar(phase.split(":", 1)[-1], int(d.get("bytes", 0) or 0), int(d.get("total", 0) or 0),
+                detail=detail_of(d) or None)            # SLOT-TIMING: the card job's line
         elif ev.topic == "update.started":
             self.ctx.note(f"update: started {d.get('version', '')} ({d.get('mode', '')})")
         elif ev.topic == "update.failed":

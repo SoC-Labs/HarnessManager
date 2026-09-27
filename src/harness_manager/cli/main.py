@@ -31,6 +31,7 @@ from harness_manager.core.errors import ActionFailedError, ExitCode, HarnessErro
 from . import cmd_board, cmd_io, cmd_lab, cmd_program, cmd_system, helptext
 from .context import SERIAL_HELP, VIA_HELP, VIA_METAVAR, Ctx
 from .engine import get_engine
+from .guard import add_force_args
 from .output import TSV_COLUMNS, Result, report_error
 
 log = logging.getLogger(__name__)
@@ -280,6 +281,7 @@ def make_parser() -> argparse.ArgumentParser:
     mp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     mp.add_argument("--wait", type=float, default=120.0, metavar="S",
                     help="how long to wait for the board to come back")
+    add_force_args(mp)
     mp = msub.add_parser("cmd", help="one allowlisted controller command",
                          description="Send one allowlisted command line to the board "
                                      "controller. Destructive ones (FORMAT, DEL, EEPROM, ...) "
@@ -288,6 +290,7 @@ def make_parser() -> argparse.ArgumentParser:
     mp.add_argument("words", nargs="+", metavar="LINE",
                     help="the controller command line, e.g. HELP (only allowlisted commands "
                          "are sent)")
+    add_force_args(mp)
     vp.set_defaults(fn=cmd_board.cmd_mcc)
 
     vp = verb("sd", "the configuration SD: backup, install, restore", parents=(fmt, usb))

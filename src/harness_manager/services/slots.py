@@ -39,7 +39,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event, EventBus
-from harness_manager.core.pack import CardStatus, Progress, SlotStatus
+from harness_manager.core.pack import TAKES_DETAIL, CardStatus, Progress, SlotJob, SlotStatus
 
 OS_CAPABILITY = "OS slot update"
 CARD_CAPABILITY = "user microSD"
@@ -148,8 +148,11 @@ class SlotService:
             self.lease_check(session, what)
 
     def _progress(self, board_id: str, topic: str) -> Progress:
-        def emit(phase: str, done: int, total: int) -> None:
-            self._emit(f"{topic}.progress", board_id, phase=phase, bytes=done, total=total)
+        def emit(phase: str, done: int, total: int, detail: dict[str, Any] | None = None) -> None:
+            # SLOT-TIMING: a long card job adds rate_bps, eta_s and its one-line text.
+            self._emit(f"{topic}.progress", board_id, phase=phase, bytes=done, total=total,
+                       **(detail or {}))
+        setattr(emit, TAKES_DETAIL, True)
         return emit
 
     @staticmethod
@@ -276,6 +279,67 @@ class SlotService:
         return st
 
 
+# --- a long card job, in words (SLOT-TIMING) -------------------------------------------------------
+
+
+def mb(n: int | float) -> str:
+    """Bytes as MB (10^6), one decimal, no ".0": 12300000 -> "12.3", 29000000 -> "29"."""
+    text = f"{n / 1e6:.1f}"
+    return text[:-2] if text.endswith(".0") else text
+
+
+def eta_text(eta_s: float | None) -> str:
+    """"~6 min left" (never a false precision); "" when there is no estimate."""
+    if eta_s is None:
+        return ""
+    if eta_s < 60:
+        return "under a minute left"
+    minutes = round(eta_s / 60)
+    if minutes < 90:
+        return f"~{minutes} min left"
+    return f"~{minutes // 60} h {minutes % 60} min left"
+
+
+def job_text(job: SlotJob) -> str:
+    """The card job in one line: "writing slot B: 12.3 MB / 29 MB, ~6 min left". A read-back
+    whose bytes the board does not count says its size: "verifying slot B (29 MB), ...". ""
+    when no job runs."""
+    if not job.busy:
+        return ""
+    where = f"slot {job.slot}" if job.slot else "the card"
+    what = f"{job.state} {where}"
+    if job.state == "writing" or 0 < job.got < job.length:
+        what += f": {mb(job.got)} MB / {mb(job.length)} MB"
+    elif job.length:
+        what += f" ({mb(job.length)} MB)"
+    left = eta_text(job.eta_s)
+    return f"{what}, {left}" if left else what
+
+
+def card_state_words(st: SlotStatus) -> str:
+    """The card as an error message says it: "card: running A, default A, A valid, B empty;
+    job push B writing 12.3 MB / 29 MB"."""
+    if not st.card:
+        return f"card: none answered (running {st.running})"
+    slots = ", ".join(f"{n} {i.state}" + (f" ({i.err})" if i.err else "")
+                      for n, i in sorted(st.slots.items()))
+    j = st.job
+    if j.act == "none" and j.state == "idle":
+        job = "no job"
+    else:
+        job = f"job {j.act} {j.slot or '-'} {j.state}"
+        if j.busy or j.state == "failed":
+            job += f" {mb(j.got)} MB / {mb(j.length)} MB" if j.length else ""
+        job += f" ({j.err})" if j.err else ""
+    return (f"card: running {st.running}, default {st.default or '?'}, {slots}; {job}")
+
+
+def job_detail(job: SlotJob) -> dict[str, Any]:
+    """The ``detail`` of a progress call for this job (``core.pack.report_progress``)."""
+    return {"slot": job.slot, "rate_bps": round(job.rate_bps), "eta_s":
+            None if job.eta_s is None else round(job.eta_s), "text": job_text(job)}
+
+
 def slot_status_json(st: SlotStatus) -> dict[str, Any]:
     """What the CLI and the API show of a ``SlotStatus``."""
     return {
@@ -288,7 +352,11 @@ def slot_status_json(st: SlotStatus) -> dict[str, Any]:
                       "default": n == st.default}
                   for n, s in sorted(st.slots.items())},
         "job": {"act": st.job.act, "slot": st.job.slot, "state": st.job.state,
-                "got": st.job.got, "len": st.job.length, "err": st.job.err},
+                "got": st.job.got, "len": st.job.length, "err": st.job.err,
+                # SLOT-TIMING (additive): busy = no reset now; the pack's estimates
+                "busy": st.job.busy, "rate_bps": round(st.job.rate_bps),
+                "eta_s": None if st.job.eta_s is None else round(st.job.eta_s),
+                "text": job_text(st.job)},
     }
 
 
@@ -315,6 +383,8 @@ def card_line(st: CardStatus | None, reason: str = "") -> str:
         bits.append(f"default {name} [{st.default.get('slot') or '?'}]")
     if st.os_slots is not None:
         os = st.os_slots
+        if os.job.busy:                    # SLOT-TIMING: the job first, while it runs
+            return job_text(os.job)
         slots = " ".join(f"{n}:{i.state}" + ("*" if n == os.running else "")
                          for n, i in sorted(os.slots.items()))
         bits.append(f"OS {slots}")

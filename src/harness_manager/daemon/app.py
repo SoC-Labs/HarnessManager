@@ -61,6 +61,7 @@ from harness_manager.core.pack import (
     keep_refusal,
     preflight_refusal,
 )
+from harness_manager.services import reset_guard
 
 from .jobs import BoardGates, Job, JobManager, busy_error
 from .outbox import Batch, Outbox
@@ -442,6 +443,15 @@ def _number(body: dict[str, Any], key: str, default: float | None = None) -> flo
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise UsageError(f"{key} must be a number, not {value!r}")
     return float(value)
+
+
+def reset_force(body: dict[str, Any]) -> tuple[bool, str]:
+    """SLOT-TIMING: a reset's ``{force, consent}`` (``services.reset_guard``)."""
+    force = _bool(body, "force", False)
+    consent = body.get("consent", "")
+    if not isinstance(consent, str):
+        raise UsageError("consent must be a string (type exactly: RESET <board_id>)")
+    return force, consent
 
 
 def _bool(body: dict[str, Any], key: str, default: bool) -> bool:
@@ -884,8 +894,17 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         if wait_s is not None and wait_s <= 0:
             raise UsageError("wait_s must be positive")
         ctl = adapter_for_job(bid, s, "controller", C.REBOOT_BOARD)
-        return accepted(d.jobs.submit(
-            "reboot", bid, lambda progress: ctl.reboot(progress=progress, wait_s=wait_s)))
+        # SLOT-TIMING: never while the board's card job writes or reads back: the job fails
+        # HELD, naming it. Checked IN the job, so the 202 still comes at once (Q1/Q2).
+        # {force, consent: "RESET <bid>"} is the recovery of a job that never ends.
+        force, consent = reset_force(b)
+
+        def run(progress: Callable[[str, int, int], None]) -> Any:
+            with reset_guard.guarded(s, reset_guard.ACTION_MCC_REBOOT, force=force,
+                                     consent=consent):
+                return ctl.reboot(progress=progress, wait_s=wait_s)
+
+        return accepted(d.jobs.submit("reboot", bid, run))
 
     @api.post("/boards/{bid:path}/controller/command")
     def controller_command(bid: str, body: JsonBody = None) -> JSONResponse:
@@ -894,7 +913,14 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         line = _str(b, "line")
         arm = _bool(b, "arm", False)
         with d.gates.op(bid):
-            reply = require(s, "controller", C.CONSOLE_CONTROLLER).command(line, arm=arm)
+            ctl = require(s, "controller", C.CONSOLE_CONTROLLER)
+            if reset_guard.is_reboot_line(line):      # SLOT-TIMING: a REBOOT is a reset
+                force, consent = reset_force(b)
+                with reset_guard.guarded(s, reset_guard.ACTION_MCC_REBOOT, force=force,
+                                         consent=consent):
+                    reply = ctl.command(line, arm=arm)
+            else:
+                reply = ctl.command(line, arm=arm)
         return _JSON(ok(board_id=bid, command=line, reply=reply))
 
     @api.get("/boards/{bid:path}/storage/pending")

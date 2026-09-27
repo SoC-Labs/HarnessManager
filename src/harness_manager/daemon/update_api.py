@@ -76,6 +76,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event
+from harness_manager.core.pack import detail_of, report_progress
 
 from .app import _JSON, JsonBody, RouteContext, _abs_path, _bool, _number, _obj, _str, ok
 
@@ -185,8 +186,9 @@ def register(ctx: RouteContext) -> None:
         """``update.progress`` for this board -> the job's progress. Returns the unsubscribe."""
         def on_progress(ev: Event) -> None:
             if ev.board_id == bid:
-                progress(str(ev.data.get("phase", "")), int(ev.data.get("bytes", 0) or 0),
-                         int(ev.data.get("total", 0) or 0))
+                report_progress(progress, str(ev.data.get("phase", "")),  # SLOT-TIMING: +detail
+                                int(ev.data.get("bytes", 0) or 0),
+                                int(ev.data.get("total", 0) or 0), detail_of(ev.data))
 
         return d.bus.subscribe("update.progress", on_progress)
 
