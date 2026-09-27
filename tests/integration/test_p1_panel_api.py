@@ -101,7 +101,9 @@ def test_the_daemon_announces_an_open_board_and_stops_when_it_closes(tmp_path):
 def test_bare_metal_is_never_sent_a_hello(tmp_path):
     with rig(tmp_path, V011_BARE_METAL, beat=True) as (r, client):
         bid = r.open(client)
-        wait_for(lambda: r.presence.presence(bid)["reason"])
+        # 30 s: the first beat's identity read (ping + version) is slow on a loaded box; the
+        # assertion below is what matters: bare metal never gets a hello, however long it takes
+        wait_for(lambda: r.presence.presence(bid)["reason"], timeout=30.0)
         time.sleep(1.5)
         assert r.vb.shell.hellos == [] and not {"hello", "panel", "locate"} & {
             q.get("op") for q in r.vb.shell.requests}
