@@ -215,6 +215,16 @@ owners.
 - The claim through a hub runs its helper with the hub's `python3.11` first and refuses
   clearly when the hub has no Python 3.8+. When SSH refuses the key right after a claim the
   board accepted, the hint says why (the board's key sync), not "wait".
+- **A claimed board: debug, XVC, slots and the card go over SSH to the board.** A claimed
+  Linux harness serves JTAG (6921), XVC (2542), the slot push and `slot commit`/`rollback`,
+  and `card clear`/`card commit`/Keep on the card to the board itself only, so through the
+  hub they were refused. On a board you claimed (or `--adopt`ed) from this Harness Manager
+  they now all go through one SSH forward to the board's loopback (`ssh -J HUB root@BOARD
+  -L …`, the pinned key), opened when one of them needs it, shared, and closed when the last
+  is done and with the board. A board claimed by another key is refused before anything is
+  sent (exit 15, with `board claim TARGET --adopt`). The board's one-line refusal (`… locked:
+  board claimed (use ssh)`) reads as that claim error (exit 15), never "connection closed"
+  or "held by another client". Bare metal and unclaimed boards are unchanged.
 
 ### A good citizen on a shared board (QUIET-POLL)
 - Harness Manager no longer contacts a board in the background unless a window shows it.

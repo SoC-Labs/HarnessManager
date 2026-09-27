@@ -26,6 +26,16 @@ both engines, so a bare-metal image built with it has a card too.
 **One reader, one pusher** (L1-CARD, merged first): the card is read with
 ``Mps3Deploy.card_status`` and a commit sends its pair with ``Mps3Deploy.commit_pusher``,
 the same as the deploy's "Keep on the card".
+
+**The claim lock** (HM_ANSWERS S6, lane CLAIMED-LOCK). On a claimed Linux board the store's
+mutations (``usd`` format/clear/rescan, the re-push ``commit``) are refused for any peer but
+the board itself: ``usd locked: board claimed (use ssh)`` / ``commit locked: ...``, code
+``locked``; ``usd`` status stays open. ``clear`` and ``commit`` ask the session's claim first
+(``claim.lock_route``): a board this Harness Manager claimed is changed through the session's
+board-SSH forward (6900 and 6910 on the board's 127.0.0.1); one claimed by another key, or
+with no pin here, is ``ClaimLockedError`` before anything is sent; otherwise today's path,
+and a lock refusal met there is asked about again (sent through the board's SSH when the
+claim is ours, else ``ClaimLockedError`` with the claim hint).
 """
 
 from __future__ import annotations
@@ -189,10 +199,34 @@ class Mps3Card:
         if st.state == "foreign":
             raise RefusedError("the card holds no harness store (foreign): it is never "
                                "written, and has no default to clear")
-        resp = self._shell().call(lambda c: c.usd_clear())
+        impl = self._shell().live().impl
+        if self._route("card clear", impl) == "board-ssh":
+            resp = self._clear_via_board()
+        else:
+            resp = self._shell().call(lambda c: c.usd_clear())
+            if not resp.ok and slot_words.is_claim_lock(str(resp.err or "")):
+                self._route("card clear", impl, claimed=True)   # not ours: the hint
+                resp = self._clear_via_board()
         if not resp.ok:
             raise _usd_error("card clear", resp.err)
         return self.status()
+
+    # -- the claim lock (CLAIMED-LOCK) -----------------------------------------------------------
+
+    def _route(self, what: str, impl: str, claimed: bool | None = None) -> str:
+        """The claim's route for a store mutation ("" direct, "board-ssh"); a board this
+        Harness Manager cannot enter is ``ClaimLockedError``, before anything is sent."""
+        claim = getattr(self._session, "claim", None)
+        if claim is None or not callable(getattr(claim, "lock_route", None)):
+            return "board-ssh" if claimed else ""
+        return claim.lock_route(what, impl=impl, claimed=claimed)
+
+    def _clear_via_board(self) -> Any:
+        from .os_slots import claim_forward
+        from .shell import Mps3Shell
+
+        with claim_forward(self._session, "card", "the card clear") as (host, ctl, _push):
+            return Mps3Shell(host, ctl).call(lambda c: c.usd_clear())
 
     # -- commit ---------------------------------------------------------------------------------
 
@@ -223,18 +257,33 @@ class Mps3Card:
             report("commit", sum(sent.values()), total)
 
         budget = commit_budget(total)
-        pusher = self._deploy().commit_pusher(windowed="windowed" in live.features,
-                                              impl=live.impl, on_frame=on_frame,
-                                              stall_s=budget.push_stall_s)
-        self.last_pusher = pusher
-        report("commit", 0, total)
+        from .os_slots import claim_forward
         from .shell import Mps3Shell
 
         wait_s = self.commit_timeout_s if self.commit_timeout_s is not None else budget.job_s
-        parked = Mps3Shell(shell.host, shell.port, timeout=wait_s)
-        reply = parked.call(lambda c: SwapOrchestrator(c, pusher, commit_pusher=pusher).commit(
-            entry.overlay, rm_id=rmid.parse_rm_id(live.rm_id),
-            static_id=rmid.parse_rm_id(live.shell_id), features=tuple(live.features)))
+
+        def send(host: str, ctl: int, push: int | None) -> Any:
+            pusher = self._deploy().commit_pusher(windowed="windowed" in live.features,
+                                                  impl=live.impl, on_frame=on_frame,
+                                                  stall_s=budget.push_stall_s, host=host,
+                                                  port=push)
+            self.last_pusher = pusher
+            report("commit", 0, total)
+            parked = Mps3Shell(host, ctl, timeout=wait_s)
+            return parked.call(lambda c: SwapOrchestrator(c, pusher, commit_pusher=pusher).commit(
+                entry.overlay, rm_id=rmid.parse_rm_id(live.rm_id),
+                static_id=rmid.parse_rm_id(live.shell_id), features=tuple(live.features)))
+
+        what = f"the card commit of {name}"
+        if self._route(what, live.impl) == "board-ssh":
+            with claim_forward(self._session, "card", what) as (host, ctl, push):
+                reply = send(host, ctl, push)
+        else:
+            reply = send(shell.host, shell.port, None)
+            if not reply.ok and slot_words.is_claim_lock(str(reply.err or "")):
+                self._route(what, live.impl, claimed=True)     # not ours: the hint
+                with claim_forward(self._session, "card", what) as (host, ctl, push):
+                    reply = send(host, ctl, push)
         if not reply.ok:
             raise _usd_error(f"card commit of {name}", reply.err)
         report("commit", total, total)
@@ -287,6 +336,11 @@ def _usd_error(what: str, err: str) -> HarnessError:
                                  hint="only the running pair can be committed")
     if e == "store busy":
         return HeldError(f"{what}: the card store is busy", hint="try again in a moment")
+    if slot_words.is_claim_lock(e):
+        # S6: `usd locked: board claimed (use ssh)` / `commit locked: ...` (the claim lock)
+        from harness_manager.services.claim import LOCK_HINT
+
+        return slot_words.ClaimLockedError(f"{what}: {e}", hint=LOCK_HINT)
     lock = slot_words.identity_lock_error(e, what)
     if lock is not None:
         # The same words as a swap or a slot act refused by it (LINUX-ANSWERS): mismatch

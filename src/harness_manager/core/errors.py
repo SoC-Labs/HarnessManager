@@ -101,3 +101,9 @@ class IncompatibleError(HarnessError):
 
 class RefusedError(HarnessError):
     code = ExitCode.REFUSED
+
+
+class ClaimLockedError(RefusedError):
+    """The board's SSH is claimed and this connection did not come from the board itself
+    (the Linux harness's claim lock): the claiming key's owner reaches it over SSH to the
+    board. One class wherever the lock is met (slot verbs, the card, XVC, JTAG); exit 15."""

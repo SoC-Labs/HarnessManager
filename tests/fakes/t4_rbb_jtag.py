@@ -175,6 +175,11 @@ class FakeJtagServer:
         self.refuse_next = 0
         self.accepted = 0
         self.refused = 0
+        #: the claim lock (CLAIMED-LOCK, jtag_server.h MPS3_JTAG_LOCKED_LINE): claimed, a
+        #: peer other than ``trusted_peer`` (the board itself) gets one line, then the close
+        self.claimed = False
+        self.trusted_peer = "127.0.0.3"
+        self.lock_refusals = 0
         self.served_at: list[float] = []      # time.time() each served client was accepted
         self._draining = False
         self.taps: list[JtagTap] = []
@@ -206,8 +211,15 @@ class FakeJtagServer:
     def _serve(self) -> None:
         while not self._stop.is_set():
             try:
-                conn, _ = self._sock.accept()
+                conn, peer = self._sock.accept()
             except (TimeoutError, OSError):
+                continue
+            if self.claimed and peer[0] != self.trusted_peer:
+                from tests.fakes.claimed_lock import JTAG_LOCKED_LINE, refuse_with_line
+
+                self.lock_refusals += 1
+                conn.settimeout(None)
+                refuse_with_line(conn, JTAG_LOCKED_LINE)
                 continue
             with self._lock:
                 busy = self._active is not None

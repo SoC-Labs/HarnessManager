@@ -63,7 +63,11 @@ fails never fails the deploy, the swap already stands). ``card_status()`` reads 
 card (``version`` for the ``usd`` feature, then ``usd``) without writing anything; the
 service refuses a keep from it before a byte is pushed. The commit's push is always TCP
 on 6910 (``commit`` takes no TFTP), windowed exactly when the swap's is, and reports
-progress as the ``card`` phase.
+progress as the ``card`` phase. On a claimed Linux board the ``commit`` is refused for any
+peer but the board itself (HM_ANSWERS S6, lane CLAIMED-LOCK): a keep on a board this Harness
+Manager claimed runs the whole deploy through the session's board-SSH forward
+(``claim.hold_forward``), one it cannot enter is ``ClaimLockedError`` before the swap, and a
+lock refusal met anyway is the card's ``why``, with the claim hint.
 
 The shell's own refusals. When the card's image and the running fabric disagree
 the shell refuses ``swap`` with a distinct error line (Linux plan §10a S1; the
@@ -84,6 +88,7 @@ this order, first hit wins:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -191,7 +196,7 @@ def make_deploy_adapter(session: Any) -> Mps3Deploy | None:
     return Mps3Deploy(shell,
                       push_port=getattr(session, "push_port", None),
                       tftp_port=getattr(session, "tftp_port", None),
-                      tunnelled=is_tunnelled(session))
+                      tunnelled=is_tunnelled(session), session=session)
 
 
 def is_tunnelled(session: Any) -> bool:
@@ -322,8 +327,10 @@ class Mps3Deploy:
                  push_port: int | None = None, tftp_port: int | None = None,
                  swap_timeout_s: float = SWAP_TIMEOUT_S,
                  running_usercode: str | int | None = None,
-                 tunnelled: bool = False) -> None:
+                 tunnelled: bool = False, session: Any = None) -> None:
         self._shell = shell
+        #: The board session (CLAIMED-LOCK: its claim decides how "Keep on the card" goes).
+        self._session = session
         #: 6900/6910 are reached through a TCP-only tunnel: never choose TFTP.
         self.tunnelled = tunnelled
         self.catalogue = catalogue if catalogue is not None else OverlayCatalogue()
@@ -389,17 +396,20 @@ class Mps3Deploy:
 
     def commit_pusher(self, *, windowed: bool, impl: str,
                       on_frame: Callable[[BitstreamKind, int], None] | None = None,
-                      stall_s: float | None = None) -> BitstreamPusher:
+                      stall_s: float | None = None, host: str | None = None,
+                      port: int | None = None) -> BitstreamPusher:
         """The pusher a card ``commit`` sends its pair with: 6910 only, windowed exactly when
         the swap's push is (a WINDOWED shell deadlocks on a plain push), the Linux stall
         limit. "Keep on the card" and ``harness-manager card commit`` (LINUX-SLOTS) share it.
         ``stall_s`` (SLOT-TIMING, ``harness-manager card commit``): a longer per-chunk stall
-        limit, for the card's slow writes; never a shorter one."""
+        limit, for the card's slow writes; never a shorter one. ``host``/``port``: another
+        way to 6910 (CLAIMED-LOCK: the claim forward's local end on a claimed board)."""
         timeout_s = push_timeout_s(impl, TRANSPORT_TCP)
         if stall_s is not None:
             timeout_s = max(timeout_s, stall_s)
         return _ReportingPusher(on_frame=on_frame or (lambda kind, n: None),
-                                host=self._shell.host, transport="tcp", tcp_port=self.push_port,
+                                host=host or self._shell.host, transport="tcp",
+                                tcp_port=port or self.push_port,
                                 windowed=windowed, window=DEFAULT_ACK_WINDOW,
                                 timeout_s=timeout_s)
 
@@ -430,86 +440,99 @@ class Mps3Deploy:
             kept[kind] = payload_bytes
             report(PHASE_CARD, sum(kept.values()), total)
 
-        host = self._shell.host
-        timeout_s = assessment.push_timeout_s
-        if assessment.transport == TRANSPORT_WINDOWED:
-            pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
-                                      tcp_port=self.push_port, windowed=True,
-                                      window=DEFAULT_ACK_WINDOW, timeout_s=timeout_s)
-            src = "tcp"
-        elif assessment.transport == TRANSPORT_TCP:
-            pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
-                                      tcp_port=self.push_port, windowed=False,
-                                      timeout_s=timeout_s)
-            src = "tcp"
-        else:
-            pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tftp",
-                                      tftp_port=self.tftp_port, timeout_s=timeout_s)
-            src = "tftp"
-        self.last_pusher = pusher
-        # Keep on the card: ``commit`` takes its pair over 6910 only, windowed exactly
-        # when the swap's push is (a WINDOWED shell deadlocks on a plain push).
-        commit_pusher = None
-        if keep_on_card:
-            commit_pusher = self.commit_pusher(
-                windowed=assessment.transport == TRANSPORT_WINDOWED, impl=assessment.impl,
-                on_frame=on_card_frame)
-        self.last_commit_pusher = commit_pusher
-
-        tap: _TapTransport | None = None
-        swap: _ReportingClient | None = None
+        # CLAIMED-LOCK: keeping the design on the card is the D13 ``commit``, which a claimed
+        # board takes from itself only; a board this Harness Manager claimed gets the whole
+        # deploy through the session's board-SSH forward (the swap is not locked, the commit
+        # rides its connection), one it cannot enter is refused before anything is sent.
+        stack = contextlib.ExitStack()
         try:
-            tap = _TapTransport(_TimedSocketTransport(host, self._shell.port, self.swap_timeout_s))
-            client = ShellClient(host, port=self._shell.port, timeout=self.swap_timeout_s,
-                                 transport=tap)
-            with client:
-                swap = _ReportingClient(client, report, total)
-                orchestrator = SwapOrchestrator(swap, pusher, commit_pusher=commit_pusher)
-                try:
-                    # persist: pyverify's deploy also commits the pair to the user microSD
-                    # after a verified swap when asked (net-protocol v0.13, D1). Only
-                    # "Keep on the card" asks; by default the deploy is the swap only.
-                    res = orchestrator.deploy(ov, src=src, persist=keep_on_card)
-                except PushError as exc:
-                    # A shell that REFUSED the swap replied at once and never armed the
-                    # push, so the push was reset: read that reply to say why. Only the
-                    # DISTINCT refusals (fabric mismatch, EBUSY) replace the push error; a
-                    # swap that failed because the push failed is reported as the push.
-                    early = _pending_reply(tap)
-                    if early is not None:
-                        swap.settled = True       # the shell answered: nothing is parked
-                    err = str((early or {}).get("err", ""))
-                    if early is not None and (_is_fabric_mismatch(err)
-                                              or err.strip().upper() == "EBUSY"):
-                        raise _refusal_error(early, overlay) from exc
-                    said = f"; the shell then said: {err}" if err else ""
-                    raise ActionFailedError(
-                        f"bitstream push of {overlay.name} failed: {exc}{said}",
-                        hint="the swap was parked and will time out with the partition "
-                             "decoupled; restore the baseline") from exc
-        except _ShellBusy as exc:
-            raise HeldError(f"the shell is busy (EBUSY): {overlay.name} was not deployed",
-                            hint="another client holds the control port, or a swap is running",
-                            holder=str(exc.reply.get("holder") or "")) from exc
-        except SwapError as exc:
-            raise _swap_error(exc, overlay, tap.last if tap is not None else {}) from exc
-        except PushError as exc:
-            raise ActionFailedError(
-                f"bitstream push of {overlay.name} failed: {exc}",
-                hint="the swap was parked and will time out with the partition decoupled; "
-                     "restore the baseline") from exc
-        except ShellProtocolError as exc:
-            raise ActionFailedError(f"shell protocol error during the swap: {exc}") from exc
-        except OSError as exc:
-            raise UnreachableError(f"cannot reach the shell at {host}:{self._shell.port}: {exc}",
-                                   hint="check the Ethernet link and the board's IP") from exc
+            host, ctl_port, push_port = self._shell.host, self._shell.port, self.push_port
+            if keep_on_card and self._card_route(assessment.impl) == "board-ssh":
+                from .os_slots import claim_forward
+
+                host, ctl_port, push_port = stack.enter_context(claim_forward(
+                    self._session, "deploy", f"keeping {overlay.name} on the card"))
+            timeout_s = assessment.push_timeout_s
+            if assessment.transport == TRANSPORT_WINDOWED:
+                pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
+                                          tcp_port=push_port, windowed=True,
+                                          window=DEFAULT_ACK_WINDOW, timeout_s=timeout_s)
+                src = "tcp"
+            elif assessment.transport == TRANSPORT_TCP:
+                pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
+                                          tcp_port=push_port, windowed=False,
+                                          timeout_s=timeout_s)
+                src = "tcp"
+            else:
+                pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tftp",
+                                          tftp_port=self.tftp_port, timeout_s=timeout_s)
+                src = "tftp"
+            self.last_pusher = pusher
+            # Keep on the card: ``commit`` takes its pair over 6910 only, windowed exactly
+            # when the swap's push is (a WINDOWED shell deadlocks on a plain push).
+            commit_pusher = None
+            if keep_on_card:
+                commit_pusher = self.commit_pusher(
+                    windowed=assessment.transport == TRANSPORT_WINDOWED, impl=assessment.impl,
+                    on_frame=on_card_frame, host=host, port=push_port)
+            self.last_commit_pusher = commit_pusher
+
+            tap: _TapTransport | None = None
+            swap: _ReportingClient | None = None
+            try:
+                tap = _TapTransport(_TimedSocketTransport(host, ctl_port, self.swap_timeout_s))
+                client = ShellClient(host, port=ctl_port, timeout=self.swap_timeout_s,
+                                     transport=tap)
+                with client:
+                    swap = _ReportingClient(client, report, total)
+                    orchestrator = SwapOrchestrator(swap, pusher, commit_pusher=commit_pusher)
+                    try:
+                        # persist: pyverify's deploy also commits the pair to the user microSD
+                        # after a verified swap when asked (net-protocol v0.13, D1). Only
+                        # "Keep on the card" asks; by default the deploy is the swap only.
+                        res = orchestrator.deploy(ov, src=src, persist=keep_on_card)
+                    except PushError as exc:
+                        # A shell that REFUSED the swap replied at once and never armed the
+                        # push, so the push was reset: read that reply to say why. Only the
+                        # DISTINCT refusals (fabric mismatch, EBUSY) replace the push error; a
+                        # swap that failed because the push failed is reported as the push.
+                        early = _pending_reply(tap)
+                        if early is not None:
+                            swap.settled = True       # the shell answered: nothing is parked
+                        err = str((early or {}).get("err", ""))
+                        if early is not None and (_is_fabric_mismatch(err)
+                                                  or err.strip().upper() == "EBUSY"):
+                            raise _refusal_error(early, overlay) from exc
+                        said = f"; the shell then said: {err}" if err else ""
+                        raise ActionFailedError(
+                            f"bitstream push of {overlay.name} failed: {exc}{said}",
+                            hint="the swap was parked and will time out with the partition "
+                                 "decoupled; restore the baseline") from exc
+            except _ShellBusy as exc:
+                raise HeldError(f"the shell is busy (EBUSY): {overlay.name} was not deployed",
+                                hint="another client holds the control port, or a swap is running",
+                                holder=str(exc.reply.get("holder") or "")) from exc
+            except SwapError as exc:
+                raise _swap_error(exc, overlay, tap.last if tap is not None else {}) from exc
+            except PushError as exc:
+                raise ActionFailedError(
+                    f"bitstream push of {overlay.name} failed: {exc}",
+                    hint="the swap was parked and will time out with the partition decoupled; "
+                         "restore the baseline") from exc
+            except ShellProtocolError as exc:
+                raise ActionFailedError(f"shell protocol error during the swap: {exc}") from exc
+            except OSError as exc:
+                raise UnreachableError(f"cannot reach the shell at {host}:{ctl_port}: {exc}",
+                                       hint="check the Ethernet link and the board's IP") from exc
+            finally:
+                if swap is not None and ((swap.parked and not swap.settled)
+                                         or (swap.committing and not swap.committed_reply)):
+                    # The push (or the wait for the reply) failed with the swap (or a commit)
+                    # still parked: the harness turns new 6900 clients away until its 30 s
+                    # idle timeout fails it. The shell's error mapping reads this (B1 v4).
+                    self._shell.note_failed_push()
         finally:
-            if swap is not None and ((swap.parked and not swap.settled)
-                                     or (swap.committing and not swap.committed_reply)):
-                # The push (or the wait for the reply) failed with the swap (or a commit)
-                # still parked: the harness turns new 6900 clients away until its 30 s
-                # idle timeout fails it. The shell's error mapping reads this (B1 v4).
-                self._shell.note_failed_push()
+            stack.close()
 
         if not res.verified:
             raise ActionFailedError(
@@ -524,6 +547,14 @@ class Mps3Deploy:
         card = card_outcome(getattr(res, "persist", None)) if keep_on_card else None
         return DeployResult(rm_id=rm, verified=True, seconds=time.monotonic() - started,
                             transport=assessment.transport, card=card)
+
+    def _card_route(self, impl: str) -> str:
+        """The claim's route for keeping a design on the card ("" or "board-ssh"); a board
+        this Harness Manager cannot enter is ``ClaimLockedError``, before the swap."""
+        claim = getattr(self._session, "claim", None)
+        if claim is None or not callable(getattr(claim, "lock_route", None)):
+            return ""
+        return claim.lock_route("keeping the design on the card (the card commit)", impl=impl)
 
     # -- checks -----------------------------------------------------------------------
 
@@ -619,6 +650,16 @@ def card_outcome(persist: PersistResult | None) -> CardOutcome:
     if persist.status == PERSIST_COMMITTED:
         return CardOutcome(kept=True, slot=persist.slot)
     if persist.status == PERSIST_FAILED:
+        from .slot_words import is_claim_lock
+
+        if is_claim_lock(str(persist.err or "")):
+            # S6: the board is claimed and this deploy did not come from the board itself
+            return CardOutcome(kept=False, why=(
+                f"the board is claimed, so the card commit needs the claiming key over the "
+                f"board's own SSH ({persist.err}); the card keeps the design it had. Check "
+                "`harness-manager board claim-status TARGET` (a claim made elsewhere: "
+                "`harness-manager board claim TARGET --adopt`), then `harness-manager card "
+                "commit TARGET`"))
         return CardOutcome(kept=False, why=f"the card write failed ({persist.err}); the card "
                                            "keeps the design it had")
     if persist.status == PERSIST_SKIPPED:

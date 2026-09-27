@@ -25,6 +25,20 @@ reason.
   which already forwards 2542 (``tunnel.py``). Unauthenticated: the X6 warning.
 - ``direct``: the shell's own address (a board on your desk). Unauthenticated too.
 
+**The claim lock** (lane CLAIMED-LOCK; the harness's ``xvc_lock``, live on the Linux harness
+since HM_ANSWERS C3). A claimed board answers 2542 for the board itself only: anyone else
+gets one line (``xvc locked: board claimed (use ssh)``, code ``locked``) and the close.
+So on the Linux harness the endpoint asks the session's claim first (``claim.lock_route``):
+
+- a board THIS Harness Manager claimed or adopted: the session's ONE board-SSH forward
+  (``claim.hold_forward("xvc")``, shared with debug, slots and the card), whatever
+  ``reach`` says (the hub and direct reaches are refused there anyway); ``xvc_release``
+  lets it go;
+- a board claimed by another key, or with no pin here: ``ClaimLockedError`` with the claim
+  hint, before anything connects;
+- otherwise (unclaimed, or not known to be claimed): the reach above, unchanged. A lock
+  refusal met there is ``ClaimLockedError`` too (``xvc_locked_error`` words it).
+
 **Probes files** (``xvc_probes``): the RM's ``.ltx`` from the overlay catalogue
 (``ltx_for``: ``ltx_path()``, which serves the store's copy since lane FIXES, CCR X-2), the
 static's (Linux: the MIG view) and a full-design one from ``statics.StaticStore`` or the
@@ -177,6 +191,8 @@ class Mps3Xvc:
         self._store: Any = None
         self._mu = threading.Lock()
         self._tunnel: _tunnel.SshTunnel | None = None
+        #: CLAIMED-LOCK: the session's claim forward while this adapter holds it
+        self._claim_fwd: Any = None
 
     # -- facts ------------------------------------------------------------------------------
 
@@ -202,11 +218,21 @@ class Mps3Xvc:
         ports = getattr(reach, "ports", None) or {}
         return bool(ports.get("xvc"))
 
+    def _claim_plan(self) -> tuple[str, str]:
+        """The claim's ``lock_plan`` for 2542 (``("", "")`` without a claim adapter)."""
+        claim = getattr(self._session, "claim", None)
+        plan = getattr(claim, "lock_plan", None)
+        if not callable(plan):
+            return "", ""
+        return plan(impl=self._impl())
+
     def reach(self) -> str:
         """``board-ssh`` | ``hub-tunnel`` | ``direct`` for this board now."""
         want = self._config()["reach"]
         if want == "board-ssh" or (want == "auto" and self._impl() == IMPL_LINUX):
             return REACH_BOARD_SSH
+        if self._impl() == IMPL_LINUX and self._claim_plan()[0] == REACH_BOARD_SSH:
+            return REACH_BOARD_SSH               # claimed by us: the lock allows nothing else
         if want in ("auto", "hub") and self._has_hub_tunnel():
             return REACH_HUB
         return REACH_DIRECT
@@ -256,6 +282,8 @@ class Mps3Xvc:
         if reach == REACH_BOARD_SSH:
             facts["board_ssh"] = {"host": self._board_host(), "user": self._board_user(),
                                   "jump": _jump_host(self._session.candidate)}
+            if linux and self._claim_plan()[0] == REACH_BOARD_SSH:
+                facts["board_ssh"]["claim_forward"] = True    # the session's shared forward
         return facts
 
     # -- the endpoint -------------------------------------------------------------------------
@@ -288,6 +316,16 @@ class Mps3Xvc:
         return int(env) if env else XVC_PORT
 
     def xvc_endpoint(self) -> tuple[str, int]:
+        if self._impl() == IMPL_LINUX:
+            claim = getattr(self._session, "claim", None)
+            route = claim.lock_route("XVC (2542)", impl=IMPL_LINUX) if callable(
+                getattr(claim, "lock_route", None)) else ""
+            if route == REACH_BOARD_SSH:
+                with self._mu:
+                    if self._claim_fwd is None:
+                        self._claim_fwd = claim.hold_forward("xvc")
+                    fwd = self._claim_fwd
+                return "127.0.0.1", fwd.local_port("xvc")
         reach = self.reach()
         if reach == REACH_BOARD_SSH:
             return "127.0.0.1", self._board_ssh().local_port("xvc")
@@ -345,19 +383,31 @@ class Mps3Xvc:
         return claim, claim.pinned_options()
 
     def xvc_open_failures_since(self, t0: float) -> list[str]:
-        tunnel = self._tunnel if self._tunnel is not None else getattr(
+        tunnel = self._claim_fwd or self._tunnel or getattr(
             getattr(self._session, "reach", None), "tunnel", None)
         if tunnel is None:
             return []
         return list(tunnel.open_failures_since(t0, wait_s=0.5))
 
+    def xvc_locked_error(self, err: str) -> HarnessError | None:
+        """The claim lock's one-line refusal on 2542, in the claim's words (who claimed the
+        board, the way out); None: the service's generic words."""
+        claim = getattr(self._session, "claim", None)
+        words = getattr(claim, "refusal_error", None)
+        return words(err, "XVC (2542)") if callable(words) else None
+
     def xvc_release(self) -> None:
         with self._mu:
             tunnel, self._tunnel = self._tunnel, None
+            claimed, self._claim_fwd = self._claim_fwd, None
         if tunnel is not None:
             tunnel.close()
+        if claimed is not None:
+            self._session.claim.release_forward("xvc")
 
     def tunnel_status(self) -> dict[str, Any] | None:
+        if self._claim_fwd is not None:
+            return self._claim_fwd.status()
         return self._tunnel.status() if self._tunnel is not None else None
 
     # -- probes files -------------------------------------------------------------------------

@@ -17,6 +17,9 @@ not this host's (another host's push, still writing) and ``end_job()`` finishes 
 while a job writes or verifies WEDGES the card (``slot status`` answers ``card io``): what B2
 saw on silicon ("uSD init error"), and the reason nothing may reset the board meanwhile.
 
+The D13 store's claim lock (S6: ``usd`` actions and the re-push ``commit`` refused for a
+peer that is not the board itself on a claimed board) is ``claimed_lock.StoreLock``'s.
+
 ``BoardSsh`` is L1's ``FakeSsh`` whose forwards reach the board FROM the board itself:
 the relayed connection leaves from ``source`` (a FakeShell ``trusted_peer``), so the
 claim lock lets it through while a direct connection from 127.0.0.1 is refused.
@@ -34,13 +37,14 @@ from typing import Any
 from pyverify.testing.fakeshell import FakeShell, _recv_exactly
 
 from harness_manager_mps3.pack import Mps3Pack
+from tests.fakes.claimed_lock import StoreLock
 from tests.fakes.l1_fake_ssh import FakeSsh, FakeSshProcess, _pipe
 
 LINUX_SID = 0x72BB0A36
 TRUSTED = "127.0.0.3"
 
 
-class SlotBoard(FakeShell):
+class SlotBoard(StoreLock, FakeShell):
     def __init__(self, *args: Any, images: dict[int, dict[str, str]] | None = None,
                  unhealthy: set[int] | None = None, write_bps: float | None = None,
                  verify_s: float = 0.0, **kw: Any) -> None:
