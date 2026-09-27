@@ -264,11 +264,12 @@ class DisplayInfo:
     extra: Mapping[str, Any] = field(default_factory=dict)
 
     def supported(self) -> str:
-        """"" when Harness Manager can render this stream, else why not."""
-        if not MAX_MSG_MIN <= self.max_msg <= MAX_MSG_DEFAULT:                  # §6.1
-            return f"max_msg {self.max_msg} (outside {MAX_MSG_MIN}..{MAX_MSG_DEFAULT})"
+        """"" when Harness Manager can render this stream, else why not. The proto first: a
+        newer proto may well allow a bigger ``max_msg`` (REVIEW-W5 8)."""
         if self.proto != PROTO:
             return f"lcd_mirror proto {self.proto} (this Harness Manager speaks proto {PROTO})"
+        if not MAX_MSG_MIN <= self.max_msg <= MAX_MSG_DEFAULT:                  # §6.1
+            return f"max_msg {self.max_msg} (outside {MAX_MSG_MIN}..{MAX_MSG_DEFAULT})"
         if (self.w, self.h, self.tile) != (W, H, TILE):
             return f"a {self.w}x{self.h} panel in {self.tile}-pixel tiles (this Harness Manager renders {W}x{H}/{TILE})"
         if self.fmt != FMT:
@@ -288,23 +289,37 @@ class DisplayInfo:
 _HELLO_KEYS = ("proto", "w", "h", "fmt", "tile", "mode", "static_id", "max_msg")
 
 
+def _max_msg(obj: Mapping[str, Any]) -> int:
+    """HELLO's ``max_msg``: absent is the default (§6.1); a value that is no number (0, null,
+    "", a boolean) is 0, which ``supported`` refuses: never the default (REVIEW-W5 8)."""
+    if "max_msg" not in obj:
+        return MAX_MSG_DEFAULT
+    v = obj["max_msg"]
+    if v is None or isinstance(v, bool) or v == "":
+        return 0
+    return int(v)
+
+
 def parse_hello(body: bytes) -> DisplayInfo:
-    """HELLO's JSON (§6.1). Unknown keys are kept in ``extra``."""
+    """HELLO's JSON (§6.1). Unknown keys are kept in ``extra``. Anything wrong with it is a
+    ``WireError``: deep nesting (``RecursionError``) and ``Infinity`` (``OverflowError``)
+    too."""
     try:
         obj = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise WireError(f"HELLO is not JSON: {exc}") from exc
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise WireError(f"HELLO is not JSON: {type(exc).__name__}: {str(exc)[:80]}") from None
     if not isinstance(obj, dict):
         raise WireError("HELLO is not a JSON object")
     try:
-        max_msg = int(obj.get("max_msg") or MAX_MSG_DEFAULT)                      # §6.1
+        max_msg = _max_msg(obj)                                                   # §6.1
         info = DisplayInfo(proto=int(obj.get("proto", 0)), w=int(obj.get("w", 0)),
                            h=int(obj.get("h", 0)), fmt=str(obj.get("fmt", "")),
                            tile=int(obj.get("tile", 0)), mode=str(obj.get("mode", "")),
                            static_id=str(obj.get("static_id", "")), max_msg=max_msg,
                            extra={k: v for k, v in obj.items() if k not in _HELLO_KEYS})
-    except (TypeError, ValueError) as exc:
-        raise WireError(f"HELLO has a malformed field: {exc}") from exc
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise WireError(f"HELLO has a malformed field: {type(exc).__name__}: "
+                        f"{str(exc)[:80]}") from None
     return info
 
 
@@ -449,19 +464,34 @@ def decode_message(typ: int, body: bytes) -> Message:
 
 
 def parse_refusal(line: bytes) -> Refusal:
+    """The refusal line. Its JSON is the board's; when it will not parse (malformed, nested
+    past the recursion limit) the line itself is the reason."""
     text = line.decode("utf-8", "replace").strip()
     err = text
     try:
         obj = json.loads(text)
         if isinstance(obj, dict) and obj.get("err"):
             err = str(obj["err"])
-    except ValueError:
+    except (ValueError, RecursionError):
         pass
     return Refusal(err, text)
 
 
+def _decoded(typ: int, body: bytes) -> Message:
+    """``decode_message``, where only ``WireError`` escapes (REVIEW-W5 8): the stream is the
+    board's, untrusted, and the compositor's reconnect path catches exactly that."""
+    try:
+        return decode_message(typ, body)
+    except WireError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - any other failure decoding is a bad message
+        raise WireError(f"message type 0x{typ:02x} could not be read: {type(exc).__name__}: "
+                        f"{str(exc)[:80]}") from None
+
+
 class MessageReader:
     """An incremental reader of the board's byte stream: ``feed(bytes) -> [Message]``.
+    Only ``WireError`` escapes ``feed``.
 
     Framing per §6.1. A ``{`` where a message would start is the refusal line (the board
     closes after it): the reader returns a ``Refusal`` and reads nothing more. ``max_msg``
@@ -505,7 +535,7 @@ class MessageReader:
                 break
             body = bytes(buf[HEADER_SIZE:HEADER_SIZE + ln])
             del buf[:HEADER_SIZE + ln]
-            out.append(decode_message(typ, body))
+            out.append(_decoded(typ, body))
         return out
 
     def eof(self) -> Refusal | None:
