@@ -48,7 +48,7 @@ export const SS = {
   error: null,             // the last read's ApiError
   schema: [],              // GET /settings/schema rows
   specs: [],               // [{parts, row}] for matching a concrete key to its declared row
-  listing: null,           // GET /settings: {files, policy, problems, sections, instances}
+  listing: null,           // GET /settings: {files, service, policy, problems, sections, instances}
   rows: {},                // key -> the resolved row (GET /settings rows, then each reply's)
   order: [],               // the keys in the listing's order
   dev: false,              // "Show developer settings" (GET /settings?all=1)
@@ -152,9 +152,14 @@ export async function loadSettings() {
     SS.error = null;
     const d = lst.data.data;
     SS.listing = { files: d.files, policy: d.policy, problems: d.problems || [],
+      service: d.service || { demo: false },
       sections: d.sections || [], instances: d.instances || { hubs: [], boards: [] } };
     takeRows(d.rows, true);
     SS.loaded = true;
+    if (SS.restart.keys.length && SS.restart.demo !== SS.listing.service.demo) {
+      SS.restart = { ...SS.restart, demo: !!SS.listing.service.demo };
+      writeSession(RESTART_KEY, SS.restart);
+    }
   }
   if (hb.error) {
     SS.hubs = null;
@@ -353,16 +358,34 @@ export function openBoards() {
   return S.order.filter((bid) => S.boards[bid] && S.boards[bid].open);
 }
 
-// The open boards a board-scoped key ("boards.<k>.via") is about: the key names the board id,
-// or the board's host is in its match list. Anything else is about every open board.
-export function boardsFor(key) {
-  const open = openBoards();
-  const parts = splitKey(key);
-  if (parts[0] !== "boards" || parts.length < 3) return open;
-  const k = parts[1];
+// The open boards that boards.toml's [boards.<k>] is about: the key names the board id, or the
+// board's host is in its match list.
+function openBoardsOfKey(open, k) {
   const match = (SS.rows[joinKey(["boards", k, "match"])] || {}).value || [];
   return open.filter((bid) => bid === k || match.includes(hostOf(bid)) || match.includes(bid)
     || bid.includes(`@${k}`));
+}
+
+// The open boards a reopen-class key is about (SET-WIRE: its readers run when a board opens):
+// "boards.<k>.*" -> that board; "hubs.<name>.*" -> the boards that use the hub; a pack's row
+// ("mps3.*") -> the open boards of that pack. Anything else is about every open board.
+export function boardsFor(key) {
+  const open = openBoards();
+  const parts = splitKey(key);
+  if (parts[0] === "boards" && parts.length >= 3) return openBoardsOfKey(open, parts[1]);
+  if (parts[0] === "hubs" && parts.length >= 3) {
+    const hub = ((SS.hubs && SS.hubs.hubs) || []).find((h) => h.name === parts[1]);
+    const keys = hub ? hub.boards || [] : [];
+    return open.filter((bid) => keys.some((k) => openBoardsOfKey([bid], k).length));
+  }
+  const spec = specOf(key) || {};
+  if (spec.pack) {
+    return open.filter((bid) => {
+      const cand = (S.boards[bid] || {}).candidate || {};
+      return !cand.pack || cand.pack === spec.pack;
+    });
+  }
+  return open;
 }
 
 export async function reopenBoards(bids, keys) {
@@ -395,13 +418,28 @@ export async function reopenBoards(bids, keys) {
 
 // --- the restart banner -----------------------------------------------------------------------------
 
+// Whether this service is the demo (its restart command differs: `daemon stop --demo`, never the
+// real service's): the listing says so; kept with the pending restart for a reload.
+function serviceDemo() {
+  if (SS.listing && SS.listing.service) return !!SS.listing.service.demo;
+  return typeof SS.restart.demo === "boolean" ? SS.restart.demo : null;
+}
+
 export function noteRestart(keys) {
   if (!keys.length) return;
   const pid = (S.daemon && S.daemon.pid) || SS.restart.pid || 0;
   const had = SS.restart.pid && SS.restart.pid === pid ? SS.restart.keys : [];
-  SS.restart = { pid, keys: [...new Set([...had, ...keys])] };
+  const demo = serviceDemo();
+  SS.restart = { pid, keys: [...new Set([...had, ...keys])], demo };
   writeSession(RESTART_KEY, SS.restart);
+  if (demo === null && !SS.loading) loadSettings();   // learn which service this is first
   changed();
+}
+
+// Is this service the demo? (null: not known yet; the listing is on its way.) The restart note
+// picks the command that restarts THIS service from it.
+export function restartIsDemo() {
+  return serviceDemo();
 }
 
 export function restartPending() {
@@ -427,6 +465,9 @@ onBoardEvent((ev) => {
   if (ev.topic !== "settings.changed") return;
   const d = ev.data || {};
   noteRestart((d.applies && d.applies.restart) || []);
+  // a reopen-class change made elsewhere (the CLI, another tab, the /hubs routes) offers Reopen
+  // when a board open here is one it is about (a new hub no board uses says nothing)
+  for (const k of (d.applies && d.applies.reopen) || []) if (boardsFor(k).length) SS.reopen[k] = true;
   if (!settingsOpen()) return;
   clearTimeout(reloadTimer);
   reloadTimer = setTimeout(loadSettings, 150);

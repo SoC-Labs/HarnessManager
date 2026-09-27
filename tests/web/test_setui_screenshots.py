@@ -1,11 +1,14 @@
 """Lane SET-UI review screenshots, light and dark, over the REAL daemon: the Settings dialog's
 sections as a user meets them (General under an admin policy, Hubs with a tested REST hub and
 a machine hub, a 401 at auth, Boards with the MPS3 pack's rows, Tools with Detect, a secret,
-the restart note).
+the restart note). SET-UI-MERGE adds main's rows: the OS-slot card timing under the MPS3
+pack, an SSH hub's SD stage directory, an MCC entry left in boards.toml (the MCC's path,
+never a share), the developer seams, the restart note's start flag and the demo's Hubs.
 
 They land in tests/web/screenshots/review/ (gitignored); the curated copies for david are
-committed as docs/review/2026-09-26/settings-*.png. Each test asserts the state it
-photographs, so a picture never shows a broken page.
+committed as docs/review/2026-09-26/settings-*.png (SET-UI) and docs/review/2026-09-27/
+settings-*.png (SET-UI-MERGE, the whole set again on today's main). Each test asserts the
+state it photographs, so a picture never shows a broken page.
 """
 
 from __future__ import annotations
@@ -141,3 +144,78 @@ def test_review_settings_secret_and_restart(page_factory, world, review, scheme)
     row(page, "updates.github_token").scroll_into_view_if_needed()
     assert SECRET not in page.content()
     shoot(page, review, f"settings-updates-secret-restart-{scheme}.png")
+
+
+# --- SET-UI-MERGE: main's rows ------------------------------------------------------------------------
+
+
+@SCHEMES
+def test_review_settings_slot_rows_under_the_pack(page_factory, world, review, scheme):  # noqa: F811
+    world(settings='[mps3.slot]\njob_timeout_s = 2400.0\n')
+    page = open_settings(page_factory, "harness-kits", scheme)
+    group = page.locator('[data-testid="setting-group"][data-group="harness-kits:mps3"]')
+    group.locator('[data-action="show-more"]').click()
+    expect(group.locator('[data-key="mps3.slot.card_read_bps"]')).to_be_visible(timeout=T)
+    r = row(page, "mps3.slot.push_timeout_s")
+    r.locator('[data-testid="setting-input"]').fill("0")
+    r.locator('[data-testid="setting-input"]').press("Enter")
+    expect(r.locator('[data-testid="row-error"]')).to_contain_text("more than 0", timeout=T)
+    group.scroll_into_view_if_needed()
+    shoot(page, review, f"settings-harness-kits-slot-{scheme}.png")
+
+
+@SCHEMES
+def test_review_settings_ssh_hub_stage_dir(page_factory, world, review, scheme):  # noqa: F811
+    world(settings='[hubs.lab]\ntransport = "ssh"\nhost = "mapstone-dev.ecs.soton.ac.uk"\n'
+                   'stage_dir = "/srv/fpga/hm-stage"\n')
+    page = open_settings(page_factory, "hubs", scheme)
+    card = page.locator('[data-testid="hub-card"][data-hub="lab"]')
+    card.locator('[data-action="show-more"]').click()
+    expect(row(page, "hubs.lab.stage_dir")).to_be_visible(timeout=T)
+    row(page, "hubs.lab.stage_dir").scroll_into_view_if_needed()
+    shoot(page, review, f"settings-hubs-ssh-stage-dir-{scheme}.png")
+
+
+@SCHEMES
+def test_review_settings_boards_mcc_path_never_a_share(page_factory, world, review, scheme):  # noqa: F811
+    world(settings='[hubs.lab]\ntransport = "ssh"\nhost = "mapstone-dev.ecs.soton.ac.uk"\n',
+          boards='[boards.lab]\nmatch = ["192.168.10.101"]\nname = "mps3-01"\nvia = "hub"\n'
+                 'hub = { use = "lab", target = "mps3_01_pl", shares = { mcc = "/dev/mps3_01_pl/tty_00", '
+                 'fpga_uart1 = "/dev/mps3_01_pl/tty_01" } }\n')
+    page = open_settings(page_factory, "boards", scheme)
+    mcc = page.locator('[data-testid="mcc-path"]')
+    expect(mcc).to_be_visible(timeout=T)
+    mcc.scroll_into_view_if_needed()
+    shoot(page, review, f"settings-boards-mcc-path-{scheme}.png")
+
+
+@SCHEMES
+def test_review_settings_developer_seams(page_factory, world, review, scheme):  # noqa: F811
+    world(env={"HARNESS_MANAGER_DEBUG": "1"})
+    page = open_settings(page_factory, "advanced", scheme)
+    page.locator('[data-action="show-dev"]').check()
+    expect(row(page, "dev.debug")).to_have_attribute("data-dev", "true", timeout=T)
+    row(page, "advanced.log_level").locator("select").select_option("debug")
+    expect(by_id(page, "settings-restart").locator('[data-testid="restart-flags"]')).to_be_visible(timeout=T)
+    page.locator('[data-testid="setting-group"][data-group="advanced:dev"]').scroll_into_view_if_needed()
+    shoot(page, review, f"settings-advanced-dev-seams-{scheme}.png")
+
+
+@SCHEMES
+def test_review_settings_demo_hubs(browser, tmp_path, monkeypatch, request, review, scheme):
+    from tests.web.test_demo_all_browser import make_showcase
+
+    shows = make_showcase(browser, tmp_path, monkeypatch, request)
+    show = next(shows)
+    try:
+        show.daemon.app.state.daemon.settings.demo = True          # as run_daemon --demo does
+        page = show.page(scheme)
+        page.locator('[data-action="settings"]').click()
+        page.locator('[data-testid="settings-nav"] [data-settings-section="hubs"]').click()
+        page.locator('[data-action="hub-add-open"]').click()
+        by_id(page, "hub-add-form").locator('[data-field="host"]').fill("mapstone-dev.ecs.soton.ac.uk")
+        expect(by_id(page, "hubs-demo-note")).to_be_visible(timeout=T)
+        expect(by_id(page, "hub-add-form").locator('[data-action="hub-add-test"]')).to_be_disabled()
+        shoot(page, review, f"settings-demo-hubs-{scheme}.png")
+    finally:
+        shows.close()

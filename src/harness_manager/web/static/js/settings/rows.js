@@ -88,7 +88,7 @@ export function SourceChip({ row }) {
 function inputId(key) { return `set-${key.replace(/[^A-Za-z0-9_-]+/g, "_")}`; }
 
 // A text box that saves on change (blur or Enter), as UPDATE-UI's controls save on click.
-function TextControl({ row, disabled, onSave, placeholder = "", mono = false, type = "text", bounds = null }) {
+function TextControl({ row, disabled, onSave, placeholder = "", mono = false, type = "text", min, max, step }) {
   const shown = valueText(row);
   const [draft, setDraft] = useState(shown);
   const ref = useRef(null);
@@ -101,7 +101,7 @@ function TextControl({ row, disabled, onSave, placeholder = "", mono = false, ty
   };
   return html`<input ref=${ref} id=${inputId(row.key)} class=${`input ${mono ? "mono" : ""} grow-input`}
     type=${type} value=${draft} placeholder=${placeholder} disabled=${disabled}
-    min=${bounds ? bounds[0] : undefined} max=${bounds ? bounds[1] : undefined}
+    min=${min ?? undefined} max=${max ?? undefined} step=${step}
     data-testid="setting-input" spellcheck="false" autocomplete="off"
     onInput=${(e) => setDraft(e.target.value)} onChange=${commit}
     onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } else if (e.key === "Escape" && draft !== shown) { e.stopPropagation(); setDraft(shown); } }} />`;
@@ -120,6 +120,19 @@ function SelectControl({ row, options, disabled, onSave }) {
   return html`<select class="select grow-input" id=${inputId(row.key)} disabled=${disabled} data-testid="setting-input"
     value=${value} onChange=${(e) => onSave(e.target.value)}>
     ${options.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}</select>`;
+}
+
+// The schema's bounds (inclusive, null: no limit; min_exclusive: "more than"), said as the
+// service's checks say them. "" when n is in range (or not a number: the service says why).
+export function outOfBounds(n, lo, hi, above = false) {
+  if (!Number.isFinite(n)) return "";
+  const has = (v) => v !== null && v !== undefined;
+  if (has(lo) && (above ? n <= lo : n < lo)) {
+    if (above) return `must be more than ${lo}`;
+    return has(hi) ? `must be ${lo}..${hi}` : `must be ${lo} or more`;
+  }
+  if (has(hi) && n > hi) return has(lo) ? `must be ${lo}..${hi}` : `must be ${hi} or less`;
+  return "";
 }
 
 function choiceLabel(c) {
@@ -147,17 +160,17 @@ export function Control({ row, disabled, onSave, hubs = [] }) {
     return html`<${SelectControl} row=${row} options=${opts} disabled=${disabled} onSave=${onSave} />`;
   }
   if (type === "int" || type === "float") {
-    const bounds = spec.bounds || null;
+    const [lo, hi] = spec.bounds || [null, null];
+    const above = !!spec.min_exclusive;
     const hex = /i2c_address$/.test(row.key);
-    return html`<${TextControl} row=${row} disabled=${disabled} type=${hex ? "text" : "number"} bounds=${bounds}
+    return html`<${TextControl} row=${row} disabled=${disabled} type=${hex ? "text" : "number"}
+      min=${lo} max=${hi} step=${type === "float" ? "any" : undefined}
       placeholder=${defaultText(row) || hint}
       onSave=${(text) => {
         if (text.trim() === "") { onSave(null); return; }
         const n = Number(hex ? parseInt(text, 16) : text);
-        if (bounds && Number.isFinite(n) && (n < bounds[0] || n > bounds[1])) {
-          onSave(undefined, `${row.key} must be ${bounds[0]}..${bounds[1]}`);
-          return;
-        }
+        const bad = outOfBounds(n, lo, hi, above);
+        if (bad) { onSave(undefined, `${row.key} ${bad}`); return; }
         onSave(text.trim());                // "0x40" too: the service parses it as the CLI does
       }} />`;
   }
@@ -238,6 +251,7 @@ function localError(row, message) {
 
 export function SettingRow({ row, label = "", hubs = [], extra = null, note = null, policyPath = "", quietLock = false }) {
   if (row.secret) return html`<${SecretField} row=${row} label=${label} policyPath=${policyPath} />`;
+  if (row.dev) return html`<${DevRow} row=${row} label=${label} />`;
   const busy = !!SS.busy[row.key];
   const disabled = row.locked || row.readonly || row.source === "env" || busy;
   const canReset = (row.source === "user" || !!row.shadowed) && !row.locked && !row.readonly;
@@ -271,6 +285,27 @@ export function SettingRow({ row, label = "", hubs = [], extra = null, note = nu
         disabled=${busy} onClick=${() => resetSetting(row.key)}><${Icon} name="rotate-ccw" /></button>` : html`<span class="reset-gap"></span>`}
     </div>
     <${RowNotes} row=${row} policyPath=${policyPath} quietLock=${quietLock} note=${note} />
+  </div>`;
+}
+
+// --- a developer seam: shown, never set (SET-WIRE: `config set` refuses it) ----------------------
+
+// SettingsSection's DevGroup marks these ({...row, dev: true}). The value is what the service
+// runs with; the note names how it is set: its variable, else the pack's --pack-overrides.
+export function DevRow({ row, label = "" }) {
+  const how = row.env
+    ? html`set <code data-testid="dev-var">$${row.env}</code> in the service's environment`
+    : html`the pack's own value, set with the service's <code data-testid="dev-var">--pack-overrides</code>`;
+  return html`<div class="srow dev" data-testid="setting-row" data-key=${row.key} data-source=${row.source}
+      data-locked="false" data-dev="true">
+    <${RowLabel} row=${row} label=${label} />
+    <div class="srow-ctl"><span class="mono srow-ro" data-testid="setting-value">${valueText(row) || "—"}</span></div>
+    <div class="srow-meta"><${SourceChip} row=${row} /><span class="reset-gap"></span></div>
+    <div class="srow-notes">
+      <div class="srow-note" data-testid="dev-note"><${Icon} name="file-code" cls="sm" />
+        <span>A developer seam, not a setting: ${how}. It cannot be set here or with <code>config set</code>.</span></div>
+      ${(row.problems || []).map((p) => html`<${Reason} key=${p} level="warn" testid="row-problem" text=${p} />`)}
+    </div>
   </div>`;
 }
 

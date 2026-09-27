@@ -11,7 +11,8 @@ import { Chip, CopyButton, Icon, Reason, Seg, Spinner } from "../ui.js";
 import { HubsSection } from "./hubs.js";
 import { RowGroup, RowLabel } from "./rows.js";
 import {
-  addBoard, adoptInline, detectTool, dismissRestart, joinKey, restartPending, saveSetting, sectionOfRow,
+  addBoard, adoptInline, detectTool, dismissRestart, joinKey, resetSetting, restartIsDemo, restartPending, saveSetting,
+  sectionOfRow,
   SECTIONS, setDev, setSection, specOf, splitKey, SS,
 } from "./state.js";
 
@@ -44,7 +45,7 @@ function sectionRows(id, skip = new Set()) {
     const row = SS.rows[key];
     if (!row || isInstance(key) || skip.has(key) || sectionOfRow(row) !== id) continue;
     const spec = specOf(key) || {};
-    if (spec.ui === false) dev.push({ ...row, readonly: true });
+    if (spec.ui === false) dev.push({ ...row, readonly: true, dev: true, env: row.env || spec.env || "" });
     else if (spec.pack) (packs[spec.pack] = packs[spec.pack] || []).push(row);
     else core.push(row);
   }
@@ -170,6 +171,33 @@ function boardRows(board) {
   return groups;
 }
 
+// MCC-FIX: Harness Manager never uses a share on the MCC's tty_00 (the paced REBOOT needs exactly
+// one reader; the MCC of a hub board runs on the hub). A `shares.mcc` entry (or any .../tty_00)
+// is never a share: it only names the MCC console's path on the hub (hub_mcc.mcc_tty_for), so
+// the dialog shows it as that, never as a share row. Remove is offered when it names the
+// default path (/dev/<target>/tty_00), where removing it changes nothing.
+export function isMccShare(key, value) {
+  const p = splitKey(key);
+  return p[2] === "hub" && p[3] === "shares" && (p[4] === "mcc" || /tty_00$/.test(String(value || "")));
+}
+
+function MccPath({ row, board }) {
+  const target = (SS.rows[joinKey(["boards", board, "hub", "target"])] || {}).value || "mps3_01_pl";
+  const fallback = `/dev/${target}/tty_00`;
+  const busy = !!SS.busy[row.key];
+  const err = SS.rowError[row.key];
+  return html`<div class="mcc-path" data-testid="mcc-path" data-key=${row.key}>
+    <${Icon} name="circle-slash" />
+    <div class="grow"><div><code>${row.key}</code> is never a share: it only names the MCC console's path on the
+      hub, <code>${row.value}</code>. The MCC of a hub board runs on the hub.</div>
+      ${row.value === fallback ? html`<div class="sub">It is the default path: removing it changes nothing.</div>` : null}
+      ${err ? html`<${Reason} level="err" text=${`${err.errName}: ${err.message}`} />` : null}</div>
+    ${row.value === fallback ? html`<button type="button" class="btn sm" data-action="mcc-path-remove" disabled=${busy}
+      title="Remove it from boards.toml" onClick=${() => resetSetting(row.key)}>
+      ${busy ? html`<${Spinner} />` : html`<${Icon} name="trash-2" />`} Remove</button>` : null}
+  </div>`;
+}
+
 function openHere(board) {
   const match = (SS.rows[joinKey(["boards", board, "match"])] || {}).value || [];
   return S.order.filter((bid) => bid === board || match.includes(hostOf(bid)));
@@ -183,6 +211,10 @@ function BoardCard({ board }) {
   const inline = ((SS.hubs && SS.hubs.inline) || []).find((i) => i.board === board);
   const hubs = (SS.listing && SS.listing.instances.hubs) || [];
   const seen = openHere(board);
+  const mccPaths = g.hub.filter((r) => isMccShare(r.key, r.value));
+  g.hub = g.hub.filter((r) => !isMccShare(r.key, r.value));
+  const labels = Object.fromEntries(g.hub.filter((r) => splitKey(r.key)[3] === "shares")
+    .map((r) => [r.key, `${splitKey(r.key)[4]} share (its /dev path on the hub)`]));
   return html`<section class="card board-card" data-testid="board-card" data-board=${board} aria-label=${`Board ${board}`}>
     <div class="card-head">
       <h3 class="card-title"><${Icon} name="circuit-board" /><span class="mono">${board}</span></h3>
@@ -196,7 +228,8 @@ function BoardCard({ board }) {
         <div class="grow">Its hub is written inline (<span class="mono">${inline.host || inline.url}</span>).</div>
         <button type="button" class="btn sm" data-action="hub-adopt" onClick=${() => adoptInline(board)}>Make this a hub</button></div>` : null}
       ${BOARD_TABLES.map((t) => html`<${RowGroup} key=${t.id} id=${`board:${board}:${t.id}`} rows=${g[t.id]}
-        title=${g[t.id].length && t.id !== "board" ? t.title : ""} hubs=${hubs} policyPath=${policyPath()} />`)}
+        title=${g[t.id].length && t.id !== "board" ? t.title : ""} hubs=${hubs} policyPath=${policyPath()} labels=${labels} />
+        ${t.id === "hub" ? mccPaths.map((r) => html`<${MccPath} key=${r.key} row=${r} board=${board} />`) : null}`)}
     </div>
   </section>`;
 }
@@ -260,18 +293,47 @@ function FilesCard() {
   </div>`;
 }
 
+// A --state-dir or --demo service reads and writes its own directory, not the one the
+// advanced.state_dir row resolves to (the variable, else the default): say which it uses.
+function stateDirExtras() {
+  const row = SS.rows["advanced.state_dir"];
+  const dir = ((SS.listing && SS.listing.files) || {}).config_dir || "";
+  if (!row || !dir) return {};
+  const v = String(row.value || "");
+  const same = v === dir || (v.startsWith("~/") && dir.endsWith(v.slice(1)));
+  const demo = !!(SS.listing.service && SS.listing.service.demo);
+  if (same && !demo) return {};
+  return { "advanced.state_dir": { note: html`<div class="srow-note" data-testid="service-dir-note"><${Icon} name="info" cls="sm" />
+    <span>This service ${demo ? "(the demo) " : ""}reads and writes <code>${dir}</code>, its own directory${demo
+      ? ": nothing here changes your own settings" : ""}.</span></div>` } };
+}
+
 // --- the restart note ------------------------------------------------------------------------------
 
 export const RESTART_COMMAND = "harness-manager daemon stop && harness-manager ui";
+export const DEMO_RESTART_COMMAND = "harness-manager daemon stop --demo && harness-manager app --demo";
+// The settings `daemon start` reads when its flag is left out (SET-WIRE): a flag beats them.
+const START_FLAGS = { "advanced.port": "--port", "advanced.listen": "--listen", "advanced.log_level": "--log-level" };
+
+// null until the page knows which service it is (never the real service's command for the demo)
+export function restartCommand() {
+  const demo = restartIsDemo();
+  return demo === null ? null : demo ? DEMO_RESTART_COMMAND : RESTART_COMMAND;
+}
 
 export function RestartNote({ testid = "settings-restart", cls = "" }) {
   const keys = restartPending();
   if (!keys.length) return null;
+  const cmd = restartCommand();
+  const flags = keys.map((k) => START_FLAGS[k]).filter(Boolean);
   return html`<div class=${`restart-note ${cls}`} data-testid=${testid} role="status">
     <${Icon} name="rotate-ccw" />
     <div class="grow"><strong>${keys.length === 1 ? "1 change needs" : `${keys.length} changes need`} the service restarted</strong>
       <span class="secondary"> (${keys.join(", ")}).</span>
-      <div class="small secondary">Restart it: <code>${RESTART_COMMAND}</code> <${CopyButton} text=${RESTART_COMMAND} /></div></div>
+      ${cmd ? html`<div class="small secondary">Restart it: <code data-testid="restart-command">${cmd}</code> <${CopyButton} text=${cmd} /></div>` : null}
+      ${flags.length ? html`<div class="small secondary" data-testid="restart-flags">Start it without${" "}
+        ${flags.map((f, i) => html`${i ? " or " : ""}<code key=${f}>${f}</code>`)}: a flag given to${" "}
+        <code>daemon start</code> wins over the setting.</div>` : null}</div>
     <button type="button" class="btn ghost sm" data-action="restart-dismiss" title="Hide this until the next such change"
       onClick=${dismissRestart}>Later</button>
   </div>`;
@@ -308,7 +370,7 @@ export function SettingsSectionBody({ updatesCard = null }) {
         Harness Manager looks for the tool itself. Detect finds it and runs only its version probe
         (<code>--version</code>, <code>-version</code>); hw_server is never run.</p>`} />`;
     case "advanced":
-      return html`<${GenericSection} id="advanced" after=${html`<${FilesCard} />`} />`;
+      return html`<${GenericSection} id="advanced" extras=${stateDirExtras()} after=${html`<${FilesCard} />`} />`;
     default:
       return html`<${GenericSection} id=${id} />`;
   }

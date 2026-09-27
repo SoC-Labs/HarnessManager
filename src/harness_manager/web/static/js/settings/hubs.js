@@ -20,15 +20,24 @@ export const STEPS = [
   { step: "targets", label: "Targets" },
   { step: "target", label: "Target" },
 ];
-const SSH_FIELDS = ["transport", "host", "group", "jump", "holder", "lease_ttl", "request_ttl", "queue_timeout"];
+// stage_dir (MCC-FIX): where the hub SD door stages a .bit, an SSH hub's only (a REST hub's goes
+// to the hub's bitstream repository, docs/HUB_MODE.md).
+const SSH_FIELDS = ["transport", "host", "group", "jump", "holder", "lease_ttl", "request_ttl", "queue_timeout",
+  "stage_dir"];
 const REST_FIELDS = ["transport", "url", "ca_file", "lease_ttl", "cert_file", "key_file", "insecure", "events",
   "direct", "timeout_s", "request_ttl", "queue_timeout", "host"];
 const ADVANCED = new Set(["jump", "holder", "request_ttl", "queue_timeout", "cert_file", "key_file", "insecure",
-  "events", "direct", "timeout_s", "host"]);
+  "events", "direct", "timeout_s", "host", "stage_dir"]);
 const LABELS = { transport: "Transport", host: "Host", group: "Group", jump: "Jump host", holder: "Lease holder",
   lease_ttl: "Lease time", request_ttl: "Request lease time", queue_timeout: "Queue wait", url: "URL",
   ca_file: "CA file", cert_file: "Client certificate", key_file: "Client key", insecure: "Skip TLS checks",
-  events: "Event stream", direct: "Data plane", timeout_s: "Call timeout", token: "Token" };
+  events: "Event stream", direct: "Data plane", timeout_s: "Call timeout", token: "Token",
+  stage_dir: "SD stage directory" };
+
+function demoService() {
+  return !!(SS.listing && SS.listing.service && SS.listing.service.demo);
+}
+const DEMO_NO_HUB = "The demo reaches no real hub: Test connection and Add this board run only outside --demo.";
 
 function errText(e) {
   return e ? `${e.errName}: ${e.message}${e.hint ? ` (${e.hint})` : ""}` : "";
@@ -176,7 +185,8 @@ export function HubCard({ hub, policyPath }) {
       </div>
       <div class="row">
         <button type="button" class="btn" data-action="hub-test" aria-busy=${test && test.running ? "true" : undefined}
-          disabled=${!!(test && test.running)} onClick=${() => testHub(hub.name)}>
+          disabled=${!!(test && test.running) || demoService()} title=${demoService() ? DEMO_NO_HUB : undefined}
+          onClick=${() => testHub(hub.name)}>
           ${test && test.running ? html`<${Spinner} />` : html`<${Icon} name="plug-zap" />`} Test connection</button>
         <span class="muted small">${rest ? "Three reads: /health, /whoami, /groups." : "One ssh round trip."} No lease is taken.</span>
       </div>
@@ -235,7 +245,8 @@ export function AddHubForm() {
       <div class="row">
         <button type="button" class="btn primary" data-action="hub-add-save" disabled=${!ready || form.busy}
           onClick=${() => addHub({ ...form, name })}>${form.busy ? html`<${Spinner} />` : null} Add hub</button>
-        <button type="button" class="btn" data-action="hub-add-test" disabled=${!ready || (test && test.running)}
+        <button type="button" class="btn" data-action="hub-add-test" disabled=${!ready || (test && test.running) || demoService()}
+          title=${demoService() ? DEMO_NO_HUB : undefined}
           onClick=${() => testHub(name, formTable(form))}>Test before adding</button>
         <button type="button" class="btn ghost" data-action="hub-add-cancel"
           onClick=${() => { SS.hubForm = null; delete SS.tests["hubs:"]; changed(); }}>Cancel</button>
@@ -283,6 +294,7 @@ export function HubsSection({ policyPath }) {
       ${!SS.hubForm ? html`<button type="button" class="btn sm" data-action="hub-add-open" onClick=${openHubForm}>
         <${Icon} name="plus" /> Add a hub</button>` : null}
     </div>
+    ${demoService() ? html`<${Reason} level="unk" icon="circle-slash" testid="hubs-demo-note" text=${DEMO_NO_HUB} />` : null}
     ${SS.hubForm ? html`<${AddHubForm} />` : null}
     ${!hubs.length && !SS.hubForm ? html`<div class="empty-note" data-testid="hubs-empty"><${Icon} name="server" />
       <div><strong>No hub.</strong> Harness Manager talks to boards on your desk or your network directly.

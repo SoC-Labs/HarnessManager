@@ -198,6 +198,19 @@ owners.
   hw_server and uv and runs only their version probe. A change that needs the service
   restarted shows a banner until it is; one that applies at the next board open offers
   Reopen board.
+- Settings, on today's settings (SET-UI-MERGE): Reopen board reopens only the boards a
+  change is about (a hub's row: the boards that use that hub). The restart banner names
+  the `daemon start` flag (`--port`, `--listen`, `--log-level`) that would win over the
+  setting you changed. "Show developer settings" lists the developer seams read-only, each
+  with the variable that sets it. The OS-slot card timing (`mps3.slot.*`) shows under the
+  MPS3 pack in Harness & kits, and an SSH hub has its SD stage directory. Numbers are
+  checked against their range before they are sent ("must be more than 0"). An old
+  `shares.mcc` entry in `boards.toml` shows as what it is, the MCC's path on the hub, never
+  as a share; nothing offers a share on the MCC.
+- `harness-manager app --demo`: the Settings dialog shows the MPS3 pack's rows, writes the
+  demo's own directory only, stores a secret in the demo's own files (never your keyring,
+  so it cannot replace or remove your real token), and reaches no hub: Test connection
+  and Add this board say so instead of running.
 
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
