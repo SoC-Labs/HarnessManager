@@ -63,6 +63,11 @@ RAW_FORMAT = "rgb565le"
 CLOSE_REASON_MAX = 123
 #: The socket's close when the board's upstream ended for good (the console's convention).
 CLOSE_ENDED = 1000
+#: ``GET .../display`` always has every field: a board never opened has these.
+STATUS_DEFAULTS: dict[str, Any] = {
+    "flags": None, "regs": None, "seq": None, "t_ms": None, "frames": None, "resets": None,
+    "rtt_ms": None, "rate": None, "rate_asked": None, "fps": 0.0, "bytes_per_s": 0,
+    "counters": {}}
 
 
 def _flag(value: str | None, name: str, default: bool) -> bool:
@@ -222,7 +227,7 @@ def register(ctx: RouteContext) -> None:
             err = exc
         why = "" if err is None else getattr(err, "reason", "") or err.message
         return _JSON(ok(board_id=bid, available=err is None, unavailable=why,
-                        **service().status(bid)))
+                        **{**STATUS_DEFAULTS, **service().status(bid)}))
 
     # -- the WebSocket --------------------------------------------------------------------------
 
@@ -282,11 +287,12 @@ def register(ctx: RouteContext) -> None:
                 msg = viewer.next_message()
                 if msg is not None:
                     await websocket.send_bytes(msg)
-                if viewer.ended:
-                    st = viewer.status()
-                    await websocket.send_text(json.dumps(st, default=str))
-                    await websocket.close(code=CLOSE_ENDED,
-                                          reason=close_reason(st.get("reason") or "closed"))
+                if viewer.ended:                      # the last word, once, then the close
+                    st = viewer.next_status()
+                    if st is not None:
+                        await websocket.send_text(json.dumps(st, default=str))
+                    why = viewer.status().get("reason") or "closed"
+                    await websocket.close(code=CLOSE_ENDED, reason=close_reason(why))
                     return
 
         def note(exc: HarnessError) -> None:

@@ -230,6 +230,7 @@ def test_a_refusal_is_typed_and_nothing_attaches(reason):
         st = c.get(f"{bid_path()}/display").json()
         assert st["ok"] and st["available"] is False and st["unavailable"] == reason
         assert st["state"] == "down" and st["viewers"] == 0
+        assert {"hello", "flags", "regs", "seq", "rtt_ms", "rate", "fps", "counters"} <= set(st)
         assert adapter.connects == 0 and board.stats["connects"] == 0 and rig.svc.boards() == []
         # the twin: the same board once the adapter says yes
         adapter.reason = ""
@@ -323,6 +324,7 @@ def test_display_state_events_fire_on_state_changes_and_the_end_closes_the_tabs(
         assert end[-1]["data"]["reason"] == "the board was closed"
         tab.pump(1.0)
         assert tab.statuses[-1]["state"] == "down"
+        assert sum(s["state"] == "down" for s in tab.statuses) == 1      # said once
         assert tab.closed == (1000, "the board was closed")
         assert wait_for(lambda: board.clients == 0, what="the board's connection closed")
         assert rig.svc.boards() == []
