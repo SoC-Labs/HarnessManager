@@ -33,19 +33,18 @@ again; a probe that failed (a timeout, no list) is remembered for ``FAILURE_TTL_
 
 from __future__ import annotations
 
-import contextlib
 import os
 import re
-import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from harness_manager.core.proc import run_to_file
 
 __all__ = ["PROBE_TIMEOUT_S", "REMOTE_BITBANG", "AdapterList", "probe_adapters",
            "parse_adapters", "candidates", "fix_hint", "clear_cache"]
@@ -137,33 +136,10 @@ def _last_line(text: str) -> str:
 
 
 def _run(argv: Sequence[str], timeout: float) -> tuple[int | None, str]:
-    """``(exit code, stdout + stderr)``; ``None`` for the code when it timed out (killed)."""
-    flags: dict[str, Any] = {}
-    if os.name == "posix":
-        flags["start_new_session"] = True            # a wrapper's children die with it
-    elif sys.platform == "win32":
-        flags["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    with tempfile.TemporaryFile() as out:
-        proc = subprocess.Popen(list(argv), stdin=subprocess.DEVNULL, stdout=out,
-                                stderr=subprocess.STDOUT, **flags)
-        try:
-            rc: int | None = proc.wait(timeout)
-        except subprocess.TimeoutExpired:
-            _kill(proc)
-            rc = None
-        out.seek(0)
-        return rc, out.read().decode(errors="replace")
-
-
-def _kill(proc: subprocess.Popen) -> None:
-    if os.name == "posix":
-        with contextlib.suppress(OSError):
-            os.killpg(proc.pid, signal.SIGKILL)       # start_new_session: the group is ours
-    with contextlib.suppress(OSError):
-        proc.kill()
-    with contextlib.suppress(subprocess.TimeoutExpired):
-        proc.wait(5.0)
+    """``(exit code, stdout + stderr)``; ``None`` for the code when it timed out (killed).
+    ``core.proc.run_to_file``: output to a file, its own process group killed on timeout,
+    no console window on Windows (shared with the Settings menu's Detect, REVIEW-W5 12)."""
+    return run_to_file(argv, timeout)
 
 
 def _run_with(runner: Runner, argv: Sequence[str], timeout: float) -> tuple[int | None, str]:

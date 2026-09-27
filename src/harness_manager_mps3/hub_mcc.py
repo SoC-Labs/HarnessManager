@@ -121,8 +121,11 @@ PY310_PROBE = py310_probe()
 
 
 def is_mcc_tty(tty: str) -> bool:
-    """``…/tty_00``: the MCC console (FT4232H interface 00)."""
-    return str(tty).rstrip("/").endswith("/tty_00") or str(tty) == "tty_00"
+    """``…/tty_00`` in any spelling, or its by-id alias: the MCC console (FT4232H interface
+    00). The one rule: ``transports.tcp_serial.mcc_tty_reason`` (REVIEW-W5 10)."""
+    from harness_manager.transports.tcp_serial import is_mcc_tty as _rule
+
+    return _rule(tty)
 
 
 def mcc_tty_for(cfg: Any) -> str:

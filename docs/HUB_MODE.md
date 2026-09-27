@@ -254,6 +254,12 @@ So every MCC operation of a hub board runs ON the hub, through the hub's SSH run
   guard (lane SLOT-TIMING) and refuses while the user microSD is being written or read back.
 - `share start TARGET mcc` (or its `/dev/…/tty_00` path) is refused before the hub is asked. An old
   `shares = { mcc = … }` entry in boards.toml is ignored: it only names the MCC's path.
+- **One rule for "is this the MCC?"** (`transports.tcp_serial.mcc_tty_reason`, REVIEW-W5): the
+  path is normalised first (`posixpath.normpath`), so `/dev/mps3_01_pl/tty_00/`,
+  `/dev/mps3_01_pl//tty_00` and `/dev/mps3_01_pl/./tty_00` are all `tty_00`, and the by-id alias
+  of FT4232H interface 00 (`/dev/serial/by-id/…-if00-port0`) is refused with a message. A
+  `/dev/ttyUSBn` cannot be judged on this side (which interface it is depends on the hub's USB
+  order): **use the fpgahub device paths**, `/dev/<target>/tty_01..03`, for lane shares.
 - A REST-only hub (a token, no SSH login) cannot reach `tty_00`: the board has no controller
   there, and reboots need the Debug USB or an SSH account on the hub.
 

@@ -34,7 +34,7 @@ from typing import Any
 
 from fastapi import Query
 
-from harness_manager.core.errors import UsageError
+from harness_manager.core.errors import UnavailableError, UsageError
 from harness_manager.core.events import Event
 from harness_manager.settings import ops, runtime, testers
 
@@ -45,6 +45,15 @@ ENGINE = ""
 #: A PUT /settings/secrets body holds only this.
 SECRET_FIELDS = frozenset({"value"})
 _TRUE = ("1", "true", "yes", "on")
+
+
+def _names_a_path(table: Any) -> bool:
+    """A Detect request ``table`` whose values name a file (a separator, ``~``): the demo
+    refuses it (REVIEW-W5 12). A bare command name is searched for as without a table."""
+    if not isinstance(table, dict):
+        return False
+    return any(isinstance(v, str) and ("/" in v or "\\" in v or v.strip().startswith("~"))
+               for v in table.values())
 
 
 def _flag(value: str) -> bool:
@@ -124,6 +133,12 @@ def register(ctx: RouteContext) -> None:
             return _JSON(ok(**testers.not_testable(sid, name)))
         if sid == "hubs":
             sctx.refuse_in_demo("Test connection")        # before the job (SET-UI-MERGE)
+        if sid == "tools" and sctx.demo and _names_a_path(table):
+            # REVIEW-W5 12: the demo runs no executable a request names; Detect there finds
+            # the tools the service would find itself (or the paths saved in its settings).
+            raise UnavailableError("Detect with a path", "the demo does not run a program a "
+                                   "request names; save the path first, or run Harness "
+                                   "Manager without --demo")
         if not tester.job:
             return _JSON(ok(**ops.test(sctx, sid, name, table)))
         testers.check(tester, name, table)            # a missing name: 400 before the job

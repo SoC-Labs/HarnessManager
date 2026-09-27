@@ -212,6 +212,32 @@ def test_negative_twin_add_board_names_a_hub_that_exists_and_a_target(w):
     assert not (w.state / "boards.toml").exists()
 
 
+def test_add_board_refuses_a_target_that_is_not_a_target_name_before_the_job(w):
+    """REVIEW-W5 11: the target becomes an argument of ``fpgahub target show`` on the hub;
+    an option-like or shell-like one is 400 before any job runs."""
+    w.call("PUT", "/hubs/lab", json={"host": "hub.invalid"})
+    jobs: list[str] = []
+    w.d.bus.subscribe("job.started", lambda e: jobs.append(e.data.get("kind", "")))
+    for target in ("-h", "--help", "x;id", "a b"):
+        r = w.call("POST", "/hubs/lab/boards", json={"target": target})
+        assert r.status_code == 400 and "not an fpgahub target name" in r.text, r.text
+    assert jobs == [] and not (w.state / "boards.toml").exists()
+
+
+def test_the_demo_refuses_a_detect_table_that_names_a_path_before_the_job(w, tmp_path):
+    """REVIEW-W5 12: the demo runs no program a request names."""
+    w.d.settings.demo = True
+    for path in (str(tmp_path / "evil"), "~/bin/evil", "C:\\tools\\evil.exe"):
+        r = w.call("POST", "/settings/test", json={"section": "tools", "name": "openocd",
+                                                   "table": {"openocd": path}})
+        assert r.status_code == 422 and "the demo does not run a program" in r.text, r.text
+    # twin: a bare name (searched for as without a table) is still a Detect job; hw_server is
+    # never run, so nothing runs here
+    r = w.call("POST", "/settings/test", json={"section": "tools", "name": "hw_server",
+                                               "table": {"hw_server": "hw_server"}})
+    assert w.job(r)["state"] == "done"
+
+
 # --- hub Test connection reports progress per step --------------------------------------------------
 
 

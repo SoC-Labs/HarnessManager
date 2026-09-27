@@ -70,6 +70,14 @@ ADDR_ENV = "FPGAHUB_ADDR"
 _NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TARGET = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
 
+
+def check_target(target: object) -> str:
+    """``target`` when it is an fpgahub target name (``_TARGET``, and not option-like: it
+    becomes an argument of ``fpgahub target show`` on the hub), else ``UsageError``."""
+    if not isinstance(target, str) or not _TARGET.match(target) or target.startswith("-"):
+        raise UsageError(f"{target!r} is not an fpgahub target name, e.g. mps3_01_pl")
+    return target
+
 #: The admin policy the hubs are read with; tests point it at a file of their own (the real
 #: one, /etc/harness-manager/policy.toml, has no environment override on purpose: U6).
 POLICY_PATH: Path | None = None
@@ -497,8 +505,7 @@ def add_board_for_target(hub_name: str, target: str, resolver: Resolver, *,
     ``details`` (``hubtest.target_details``) unless given. Refused when the key exists or
     another board already has this hub and target."""
     hub = resolve_hub(hub_name, resolver)
-    if not isinstance(target, str) or not _TARGET.match(target):
-        raise UsageError(f"{target!r} is not an fpgahub target name, e.g. mps3_01_pl")
+    check_target(target)
     key = board_key or target
     if not _NAME.match(key):
         raise UsageError(f"{key!r} is not a board key here (A-Z a-z 0-9 _ -)",

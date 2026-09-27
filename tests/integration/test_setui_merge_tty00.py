@@ -45,3 +45,24 @@ def test_negative_twin_adopt_keeps_a_lane_share_and_the_mccs_path_name(w):  # no
     assert r.status_code == 200 and r.json()["changed"] is True, r.text
     hub = w.file("boards.toml")["boards"]["lab"]["hub"]
     assert hub["use"] == "hub" and hub["shares"] == {"mcc": TTY00, "fpga_uart1": "/dev/mps3_01_pl/tty_01"}
+
+
+BY_ID_00 = "/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if00-port0"
+
+
+def test_put_settings_refuses_the_mccs_by_id_alias_and_a_trailing_slash(w):  # noqa: F811
+    """REVIEW-W5 10: one rule, on normalised paths: the by-id alias of FT4232H interface 00
+    is the MCC too (with a message), as is ``…/tty_00/``."""
+    for tty in (BY_ID_00, TTY00 + "/", "/dev/mps3_01_pl/./tty_00"):
+        r = w.call("PUT", "/settings", json={"boards.lab.hub.shares.fpga_uart0": tty})
+        assert r.status_code == 400 and REASON in r.json()["error"]["message"], (tty, r.text)
+    r = w.call("PUT", "/settings", json={"boards.lab.hub.shares.fpga_uart0": BY_ID_00})
+    assert "FT4232H interface 00" in r.json()["error"]["message"]
+    assert not (w.state / "boards.toml").exists() and w.changed() == []
+
+
+def test_negative_twin_another_interfaces_by_id_name_and_a_ttyusb_are_taken(w):  # noqa: F811
+    r = w.call("PUT", "/settings", json={
+        "boards.lab.hub.shares.fpga_uart1": BY_ID_00.replace("if00", "if01"),
+        "boards.lab.hub.shares.fpga_uart2": "/dev/ttyUSB12"})
+    assert r.status_code == 200, r.text
