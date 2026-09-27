@@ -42,7 +42,12 @@ class Rig:
         r = client.post("/api/v1/boards", json={"target": self.vb.shell_endpoint, "note": "p1"},
                         headers=H)
         assert r.status_code == 200, r.text
-        return r.json()["board_id"]
+        bid = r.json()["board_id"]
+        # QUIET-POLL: presence is background contact, so it beats only while a page views
+        # the board (tests/integration/test_quiet_poll.py has the twins without a viewer).
+        v = client.put(f"{bid_path(bid)}/viewers/p1-page", json={"ttl_s": 300}, headers=H)
+        assert v.status_code == 200, v.text
+        return bid
 
 
 @contextmanager

@@ -431,6 +431,54 @@ forced release shows again.
 
 [LEASE_REQUESTS.md](LEASE_REQUESTS.md) has the full rules.
 
+### HM on a shared board: what it does in the background
+
+A lab board's control port (the MPS3's 6900) serves **one client at a time**. While any
+program holds it, every other connection is turned away, and that can cost someone
+else's run a control call. On 2026-09-27 a 24 h soak died 17 minutes in this way.
+So Harness Manager contacts a board **on its own** (a presence hello, the Overview's
+refresh, the panel and telemetry polls) only when all four of these hold:
+
+1. **A window shows the board.** The app or a browser tab has it selected and on screen.
+   Closing the tab, hiding the window or selecting another board stops it within
+   seconds. A window that goes to sleep stops counting after 45 s.
+2. **The lease is not someone else's.** While another person holds the board's hub lease,
+   HM stops all background contact. The header shows **Paused: lease held by
+   `<who>`**.
+3. **You have not turned it off** (see below).
+4. **The board did not just turn HM away.** If a background connection is refused,
+   reset or times out, HM treats the board as busy with another client. It waits 30 s,
+   then doubles the wait each time, up to 10 min. The header shows
+   **Busy (another client)**, never an error. Any answer from the board ends the wait.
+
+Anything you ask for yourself is not affected: a button, a CLI command, or a job you
+started. It still goes straight to the board. When the lease is someone else's,
+`info` (and the page's **Read now**) says who holds it.
+
+**Consoles.** A console that is already connected when someone else takes the lease stays
+connected until it drops. After that it does not reconnect: it shows **paused: lease held
+by `<who>`** and reconnects by itself once the lease is yours or free. Opening a new
+console on the board while someone else holds its lease is refused, and the message names
+the holder. A board with no hub has no lease, so its consoles work as before.
+
+**The MCC.** If background telemetry finds another program reading the board's MCC
+console, HM treats that like a refused connection: it backs off and shows
+**Busy (another client)**.
+
+Each background call opens the control port, asks one thing and closes it at once. HM
+never keeps a control connection open between polls.
+
+**Turn background contact off.** HM then touches the board only when you ask:
+
+| For | Setting |
+|---|---|
+| every board | `harness-manager config set general.background_poll off` (Settings: General) |
+| one board | `poll = "off"` in its `boards.toml` table (`[boards.defaults]` for all) |
+| back to the default | `general.background_poll on-view`, or `poll = "on-view"` for one board |
+
+A board's `poll` overrides the general setting, both ways. The demo (`--demo`) has
+scripted boards only and polls them as before.
+
 ## 5. Consoles
 
 **Needs:** a board.

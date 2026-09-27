@@ -5,9 +5,10 @@
 // than bookkeeping, and nothing can show a stale copy.
 
 import {
-  call, EventSocket, heldByJob, jobEvent, onConnection, toApiError, unwrapDebug, unwrapInfo,
+  call, EventSocket, heldByJob, jobEvent, onConnection, quietOf, toApiError, unwrapDebug, unwrapInfo,
 } from "./api.js";
 import { clock, secs, setCapabilityTitles } from "./format.js";
+import { onBackgroundState, refreshState, setViewing, VIEWER_ID, viewing } from "./viewer.js";
 
 export const UI_NOTE = "harness-manager-ui";
 const LOG_MAX = 2000;
@@ -80,6 +81,9 @@ export function boardState(bid) {
       job: null,             // {id, kind, at}: a job harness-manager-daemon is running on this board
       session: null,         // GET /boards/{bid}/session: {adapters, reset_targets, job}
       deferred: false,       // a read was refused by the job; read again when it ends
+      // QUIET-POLL: what background contact with this board does now (the daemon's gate:
+      // {allowed, kind, text, holder, retry_in_s, policy}), and the last read it held back.
+      background: null, quiet: null,
     };
   }
   return S.board[bid];
@@ -99,7 +103,43 @@ export function select(bid) {
   try { window.sessionStorage.setItem("harness_manager.selected", bid || ""); } catch (e) { /* ok */ }
   changed();
   const row = S.boards[bid];
+  syncViewing();
   if (row && row.open) openedBoard(bid);
+}
+
+// --- QUIET-POLL: background reads ------------------------------------------------------------
+
+// This page views the selected board while it is open here (viewer.js does the rest).
+export function syncViewing() {
+  const bid = S.selected;
+  setViewing(bid && S.boards[bid] && S.boards[bid].open ? bid : null);
+}
+
+onBackgroundState((bid, state) => {
+  if (!S.board[bid]) return;
+  S.board[bid].background = state;
+  changed();
+});
+
+// The options for a read nobody clicked: marked background, and "I am looking at it" when
+// this page views that board (so its first read never waits for the viewer PUT).
+export function bgOpts(bid) {
+  return { background: true, viewer: viewing() === bid ? VIEWER_ID : "" };
+}
+
+// A background read the daemon held back: keep what the page last read, note why, and say
+// so quietly (never an error). True when it was held back.
+export function heldBack(bid, r) {
+  const q = quietOf(r);
+  const b = boardState(bid);
+  if (!q) {
+    if (!r.error && b.quiet) b.quiet = null;      // the board answered: nothing is held back
+    return false;
+  }
+  b.quiet = { ...q, at: Date.now() };
+  if (r.data.data.background) b.background = r.data.data.background;
+  changed();
+  return true;
 }
 
 export function restoreSelection() {
@@ -172,11 +212,11 @@ function jobEnded(bid, id) {
   const kind = b.job.kind;
   b.job = null;
   b.deferred = false;
-  refreshInfo(bid);
+  refreshInfo(bid, { background: true });   // the job may be another client's: nobody clicked
   if (kind === "deploy" || kind === "restore") {
     loadOverlays(bid);
     if (b.selectedOverlay) runPreflight(bid, b.selectedOverlay);
-    loadCard(bid);
+    loadCard(bid, { background: true });
   }
   if (kind === "debug_up") loadDebug(bid);
   if (kind === "reboot" || kind.startsWith("sd_")) loadPending(bid);
@@ -235,6 +275,7 @@ export async function timed(what, fn) {
 // never came: FLAKE 2026-09-24); only the next list, if any, brought it back.
 export function openedOrClosedHere(bid, open) {
   S.boards[bid] = { ...S.boards[bid], open, openChangedAt: Date.now() };
+  syncViewing();
 }
 
 function newerHere(bid, asked) {
@@ -275,6 +316,7 @@ export async function loadBoards() {
     }
     if (S.boards[row.board_id].open) openedBoard(row.board_id, { quiet: true });
   }
+  syncViewing();
   changed();
   return r;
 }
@@ -330,9 +372,19 @@ async function probeNow(hosts, via = "", auto = false) {
 // After a board is open in the daemon: read everything the workspace shows.
 export function openedBoard(bid, { quiet = false } = {}) {
   const b = boardState(bid);
-  if (b.readOnOpen) return;
+  if (b.readOnOpen) {
+    // QUIET-POLL: its first read came while no page viewed it and was held back; this page
+    // views it now, so read it (only the board's info: the rest follows from it).
+    if (b.quiet && b.quiet.kind === "no_viewer" && viewing() === bid && !b.infoLoading) {
+      refreshInfo(bid, { background: true });
+      for (const fn of openHooks) {
+        try { fn(bid); } catch (e) { /* a hook never breaks the open */ }
+      }
+    }
+    return;
+  }
   b.readOnOpen = true;
-  refreshInfo(bid);
+  refreshInfo(bid, { background: true });   // nobody clicked: the daemon's gate decides
   loadSession(bid);
   loadPending(bid);
   loadDebug(bid);
@@ -342,15 +394,29 @@ export function openedBoard(bid, { quiet = false } = {}) {
   if (!quiet) changed();
 }
 
-export async function refreshInfo(bid) {
+// `background`: a read nobody clicked (QUIET-POLL): the daemon may hold it back.
+export async function refreshInfo(bid, { background = false } = {}) {
   const b = boardState(bid);
+  // A read nobody clicked never supersedes one in flight: the gate may hold it back, and the
+  // newer-wins rule below would then drop the answer the user asked for.
+  if (background && b.infoLoading) return;
   b.infoGen = (b.infoGen || 0) + 1;
   const gen = b.infoGen;
   b.infoLoading = true;
   changed();
-  const r = await timed("info", () => call("info", { bid }));
+  const r = await timed("info", () => call("info", { bid }, undefined, null,
+    background ? bgOpts(bid) : {}));
   if (gen !== b.infoGen) return;          // a newer read is on its way: it wins
   b.infoLoading = false;
+  if (heldBack(bid, r)) {
+    // Asked before this page said it views the board (the list loaded before the selection):
+    // now that it does, read again, once.
+    if (b.quiet.kind === "no_viewer" && viewing() === bid && Date.now() - (b.quietRetryAt || 0) > 5000) {
+      b.quietRetryAt = Date.now();
+      scheduleRefresh(bid, 300);
+    }
+    return;
+  }
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.infoLine = r.line;
   if (r.error) {
@@ -364,9 +430,11 @@ export async function refreshInfo(bid) {
     b.info = unwrapInfo(r.data.data);
     b.infoError = null;
     b.infoOkAt = Date.now() / 1000;
-    if (!b.telemetry && !b.telemetryLoading) loadTelemetry(bid);
+    b.quiet = null;
+    if (!background) refreshState(bid);      // a click: the gate's state may have moved too
+    if (!b.telemetry && !b.telemetryLoading) loadTelemetry(bid, { background: true });
     // LINUX-SLOTS: the Board tile's Card line reads the same card (a harness with "usd").
-    if (hasCardStore(b) && !b.card && !b.cardLoading) loadCard(bid);
+    if (hasCardStore(b) && !b.card && !b.cardLoading) loadCard(bid, { background: true });
   }
   changed();
 }
@@ -377,18 +445,20 @@ export function scheduleRefresh(bid, ms = 250) {
   refreshTimers[bid] = setTimeout(() => {
     if (!S.boards[bid] || !S.boards[bid].open) return;
     if (S.board[bid] && S.board[bid].job) S.board[bid].deferred = true;   // after the job
-    else refreshInfo(bid);
+    else refreshInfo(bid, { background: true });
   }, ms);
 }
 
-export async function loadTelemetry(bid) {
+export async function loadTelemetry(bid, { background = false } = {}) {
   const b = boardState(bid);
   if (b.telemetryLoading) return;
   b.telemetryLoading = true;
   changed();
-  const r = await timed("telemetry", () => call("telemetry", { bid }));
+  const r = await timed("telemetry", () => call("telemetry", { bid }, undefined, null,
+    background ? bgOpts(bid) : {}));
   b.telemetryLoading = false;
   b.telemetryAt = Date.now();
+  if (heldBack(bid, r)) return;
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.telemetryLine = r.line;
   b.telemetryError = r.error;
@@ -420,7 +490,7 @@ export function hasCardStore(b) {
   return Array.isArray(feats) && feats.includes("usd");
 }
 
-export async function loadCard(bid) {
+export async function loadCard(bid, { background = false } = {}) {
   const b = boardState(bid);
   if (!hasCardStore(b)) {
     b.card = null;
@@ -432,8 +502,10 @@ export async function loadCard(bid) {
   if (b.cardLoading) return;
   b.cardLoading = true;
   changed();
-  const r = await timed("card", () => call("card", { bid }));
+  const r = await timed("card", () => call("card", { bid }, undefined, null,
+    background ? bgOpts(bid) : {}));
   b.cardLoading = false;
+  if (heldBack(bid, r)) return;
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.cardError = r.error;
   b.card = r.error ? null : (r.data.data.card || null);
@@ -443,7 +515,8 @@ export async function loadCard(bid) {
   changed();
   // SLOT-TIMING: while the card job writes or reads back, the Card line follows it.
   if (cardJobBusy(b.card) && !b.cardFollow) {
-    b.cardFollow = setTimeout(() => { b.cardFollow = 0; loadCard(bid); }, CARD_FOLLOW_MS);
+    b.cardFollow = setTimeout(() => { b.cardFollow = 0; loadCard(bid, { background: true }); },
+      CARD_FOLLOW_MS);
   }
 }
 

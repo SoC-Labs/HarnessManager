@@ -7,7 +7,8 @@
 
 import { call, routeMissing, toApiError } from "./api.js";
 import {
-  boardState, changed, log, onBoardEvent, onBoardOpened, onJobEnded, S, scheduleRefresh, timed,
+  bgOpts, boardState, changed, heldBack, log, onBoardEvent, onBoardOpened, onJobEnded, S,
+  scheduleRefresh, timed,
 } from "./store.js";
 
 export function week(bid) {
@@ -44,7 +45,9 @@ export function week(bid) {
 
 export async function loadConsoleMeta(bid) {
   const w = week(bid);
-  const r = await timed("consoles", () => call("consoles", { bid }));
+  // QUIET-POLL: read when the board opens, not on a click: the rates come from the board.
+  const r = await timed("consoles", () => call("consoles", { bid }, undefined, null, bgOpts(bid)));
+  if (heldBack(bid, r)) return;
   if (!r.error && Array.isArray(r.data.data.consoles)) {
     w.consoles = r.data.data.consoles;
     for (const c of w.consoles) {

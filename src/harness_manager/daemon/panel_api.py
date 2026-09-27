@@ -16,7 +16,10 @@ docs/API.md "Front panel" (additive):
   skipped (409 HELD would be the answer), except beside a lease job, which never talks to
   the board (it waits on the hub);
 - the hello's lease is the lease service's cached view (``hub_api`` sets ``d.leases``), and
-  its job is the board's running job with its progress.
+  its job is the board's running job with its progress;
+- QUIET-POLL: a beat goes only when the daemon's background gate allows it (``d.quiet``,
+  ``services/quiet.py``): a page views the board, its lease is not someone else's, the
+  policy is not ``off``, and the board did not just turn a connection away.
 
 The reads go through the gate like every other board request (409 HELD naming the job while
 one runs). ``POST /identify`` is short, not a job.
@@ -100,8 +103,13 @@ def register(ctx: RouteContext) -> None:
         with d.gates.op(board_id):
             yield
 
+    # QUIET-POLL: a beat is background contact; the daemon's gate (services/quiet.py) says
+    # when it may go (a viewer, the lease not someone else's, policy, no back-off).
+    quiet = getattr(d, "quiet", None)
     presence = PresenceService(d.bus, lease_view=lease_view, leases=getattr(d, "leases", None),
-                               job_of=job_of, gate=beat_gate)
+                               job_of=job_of, gate=beat_gate,
+                               allow=quiet.check if quiet is not None else None,
+                               noted=quiet.observe if quiet is not None else None)
     d.presence = presence                  # other lanes and tests read it here
 
     def opened(ev: Event) -> None:

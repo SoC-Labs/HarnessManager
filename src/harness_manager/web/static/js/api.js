@@ -127,6 +127,10 @@ export const ENDPOINTS = Object.freeze({
   hubAddBoard: ["POST", "/hubs/{name}/boards"],
   hubAdopt: ["POST", "/hubs/adopt"],
   // --- end SET-UI ---
+  // --- QUIET-POLL: which board this page shows (docs/API.md "Background reads", quiet_api.py)
+  viewerPut: ["PUT", "/boards/{bid}/viewers/{vid}"],
+  viewerDelete: ["DELETE", "/boards/{bid}/viewers/{vid}"],
+  background: ["GET", "/boards/{bid}/background"],
 });
 
 export const ADDITIVE = Object.freeze([]);
@@ -239,7 +243,10 @@ function setConnection(state) {
 
 // --- calls ---------------------------------------------------------------------------------
 
-async function send(name, params, body, accept, query = null) {
+// QUIET-POLL: a read nobody clicked carries X-HM-Background (the daemon then answers it
+// with `quiet` instead of touching the board when its background gate says no); the page's
+// own viewed board also carries X-HM-Viewer.
+async function send(name, params, body, accept, query = null, opts = {}) {
   const [method] = ENDPOINTS[name];
   const url = endpointUrl(name, params);
   // KIT-UI: a query string (GET /boards/{bid}/guide?design=&build_dir=); empty values are left out.
@@ -248,7 +255,10 @@ async function send(name, params, body, accept, query = null) {
   }
   const headers = { Accept: accept };
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (opts.background) headers["X-HM-Background"] = "1";
+  if (opts.viewer) headers["X-HM-Viewer"] = opts.viewer;
   const init = { method, headers, cache: "no-store" };
+  if (opts.keepalive) init.keepalive = true;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
@@ -282,8 +292,8 @@ function failure(res, data) {
   }, res.status);
 }
 
-export async function call(name, params = {}, body = undefined, query = null) {
-  const res = await send(name, params, body, "application/json", query);
+export async function call(name, params = {}, body = undefined, query = null, opts = {}) {
+  const res = await send(name, params, body, "application/json", query, opts || {});
   let data = null;
   try { data = await res.json(); } catch (e) { data = null; }
   if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
@@ -312,6 +322,14 @@ export async function callBlob(name, params = {}, body = undefined) {
 export function routeMissing(err) {
   return !!err && err.status === 404 && (/no such endpoint/.test(err.message)
     || /\/(lease|tunnel|power|pty|baud)\b/.test(err.message));
+}
+
+// QUIET-POLL: the daemon held a background read back (nobody views the board, the lease is
+// someone else's, background reads are off, or the board is busy with another client): the
+// board was not touched. {kind, text, holder, retry_in_s, policy} or null.
+export function quietOf(r) {
+  const d = r && !r.error && r.data && r.data.data;
+  return (d && d.quiet) || null;
 }
 
 export function heldByJob(err) {

@@ -164,6 +164,13 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/hubs/{name}/boards"),
         ("POST", "/hubs/adopt"),
     ),
+    # QUIET-POLL: served in the mock by tests/fakes/qp_mock_quiet.py (the demo's gate: every
+    # background read allowed, viewers counted).
+    "quiet_api": (
+        ("PUT", "/boards/{bid}/viewers/{vid}"),
+        ("DELETE", "/boards/{bid}/viewers/{vid}"),
+        ("GET", "/boards/{bid}/background"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles

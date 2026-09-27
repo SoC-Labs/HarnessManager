@@ -34,6 +34,15 @@ Harness Manager (its lease view says ``mine``) ``panel.tap`` carries ``notify: "
 the open request, so the holder's UI can say "someone at the board tapped the request".
 Nothing here calls release, respond, force or leave.
 
+**Quiet on a shared board** (lane QUIET-POLL, ``services/quiet.py``). A beat is background
+contact: before each one the service asks ``allow(board_id)`` (the daemon's
+``BackgroundGate.check``). While it says no (nobody views the board, the lease is someone
+else's, the policy is ``off``, or the board just turned a connection away) nothing is sent
+and nothing is offered to ride; the board is looked at again at the next beat, or when the
+back-off ends. A beat the BOARD turned away (another client holds the control port: refused,
+reset, timed out) is reported to ``noted(board_id, exc)`` and waits a whole beat; only a beat
+skipped because one of our own jobs holds the board is retried in ``RETRY_S``.
+
 Events: ``panel.state {page, owner, pending, banner, card, count, seq, source, touch,
 sessions}``, ``panel.tap {seq, kind, on, ms_ago, at, notify, request?}``, ``panel.locate
 {state: on|off, until, seconds, who}`` (docs/CONTRACTS.md).
@@ -179,9 +188,11 @@ class _Board:
     last_seq: int | None = None                # None: no contact yet
     unsupported: str = ""                      # why this board gets no hello
     last_error: str = ""
+    quiet: str = ""                            # QUIET-POLL: why no background beat now
     sent: int = 0
     ridden: int = 0
     skipped: int = 0
+    quieted: int = 0                           # beats the background gate held back
     fast: bool = False
     view: dict[str, Any] | None = None
     locate_until: float = 0.0
@@ -200,6 +211,9 @@ class PresenceService:
     ``leases`` is the lease service itself (only its optional ``notify_holder``, CCR
     PANEL-1); ``job_of(board_id)`` returns a running ``HelloJob`` or None; ``gate(board_id)``
     is a context manager that raises ``HeldError`` at once while a job holds the board.
+    ``allow(board_id)`` (QUIET-POLL) returns None when a background beat may go, else why
+    not (``services.quiet.Quiet``, or any object with ``text``); None: always.
+    ``noted(board_id, exc)`` hears a beat the board turned away.
     """
 
     def __init__(self, bus: EventBus | None = None, *,
@@ -211,8 +225,12 @@ class PresenceService:
                  wall: Callable[[], float] = time.time,
                  beat_s: float = BEAT_S, fast_s: float = FAST_BEAT_S,
                  ride_wait_s: float = RIDE_WAIT_S, tick_s: float = TICK_S,
-                 who: str | None = None, app: str | None = None) -> None:
+                 who: str | None = None, app: str | None = None,
+                 allow: Callable[[str], Any] | None = None,
+                 noted: Callable[[str, BaseException], None] | None = None) -> None:
         self.bus = bus
+        self._allow = allow
+        self._noted = noted
         self._lease_view = lease_view
         self._leases = leases
         self._job_of = job_of
@@ -292,6 +310,29 @@ class PresenceService:
     def _interval(self, rec: _Board) -> float:
         return self.fast_s if rec.fast or rec.locate_until > self._wall() else self.beat_s
 
+    def _quiet(self, rec: _Board, panel: Any, now: float) -> bool:
+        """QUIET-POLL: True when the background gate holds this beat back (nothing is sent,
+        and an offered hello is withdrawn so no other connection carries it)."""
+        if self._allow is None:
+            return False
+        try:
+            why = self._allow(rec.board_id)
+        except Exception:  # noqa: BLE001 - a gate that fails holds the beat back
+            log.exception("the background gate for %s failed", rec.board_id)
+            why = "the background gate could not decide"
+        if why is None:
+            rec.quiet = ""
+            return False
+        withdraw = getattr(panel, "withdraw", None)
+        if callable(withdraw):
+            withdraw()
+        rec.quiet = str(getattr(why, "text", why))
+        rec.quieted += 1
+        retry = getattr(why, "retry_in_s", None)
+        after = self.beat_s if not retry else min(self.beat_s, max(self.tick_s, float(retry)))
+        self._later(rec, now, after)
+        return True
+
     def _beat(self, rec: _Board, now: float) -> None:
         panel = getattr(rec.session, "panel", None)
         if panel is None:
@@ -308,9 +349,13 @@ class PresenceService:
                     if rec.armed_at == armed_at:
                         rec.armed_at = None
                 return
+            if self._quiet(rec, panel, now):
+                return
             self._send(rec, panel, now)
             return
         if now < due:
+            return
+        if self._quiet(rec, panel, now):
             return
         try:
             why = panel.support().presence
@@ -346,28 +391,36 @@ class PresenceService:
 
     def _send(self, rec: _Board, panel: Any, now: float) -> None:
         hello = rec.hello or self.build_hello(rec)
-        try:
-            with self._gate(rec.board_id):
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(self._gate(rec.board_id))
+            except HeldError as exc:
+                # One of our jobs holds the board (a swap parks the control port): skip this
+                # beat. Keep the hello offered, so the job's own connections may carry it.
+                rec.skipped += 1
+                self._later(rec, now, RETRY_S, error=f"skipped: {exc.message}")
+                offer = getattr(panel, "offer", None)
+                if callable(offer) and self.ride_wait_s > 0:
+                    with contextlib.suppress(HarnessError):
+                        offer(hello, lambda st, r=rec: self._on_reply(r, st, ridden=True))
+                        with self._mu:
+                            rec.armed_at = now
+                return
+            try:
                 state = panel.hello(hello)
-        except HeldError as exc:
-            # A job holds the board (a swap parks the control port): skip this beat. Keep
-            # the hello offered, so the job's own connections may carry it.
-            rec.skipped += 1
-            self._later(rec, now, RETRY_S, error=f"skipped: {exc.message}")
-            offer = getattr(panel, "offer", None)
-            if callable(offer) and self.ride_wait_s > 0:
-                with contextlib.suppress(HarnessError):
-                    offer(hello, lambda st, r=rec: self._on_reply(r, st, ridden=True))
-                    with self._mu:
-                        rec.armed_at = now
-            return
-        except UnavailableError as exc:
-            rec.unsupported = exc.reason
-            self._later(rec, now, self.beat_s)
-            return
-        except HarnessError as exc:        # not answering: the TTL survives two misses
-            self._later(rec, now, self.beat_s, error=exc.message)
-            return
+            except UnavailableError as exc:
+                rec.unsupported = exc.reason
+                self._later(rec, now, self.beat_s)
+                return
+            except HarnessError as exc:
+                # The BOARD turned the beat away (another client holds the port: refused,
+                # reset, timed out) or did not answer. Never retried sooner than a beat
+                # (QUIET-POLL): the TTL survives two misses, and the gate backs off.
+                if self._noted is not None:
+                    with contextlib.suppress(Exception):
+                        self._noted(rec.board_id, exc)
+                self._later(rec, now, self.beat_s, error=exc.message)
+                return
         self._on_reply(rec, state, ridden=False)
 
     def build_hello(self, rec: _Board) -> Hello:
@@ -462,12 +515,13 @@ class PresenceService:
             if rec is None:
                 return {"active": False, "reason": NOT_BEATING, "sid": "", "last_hello_at": None,
                         "sent": 0, "ridden": 0, "skipped": 0, "last_error": "",
-                        "interval_s": self.beat_s}
+                        "interval_s": self.beat_s, "quiet": "", "quieted": 0}
             return {"active": not rec.unsupported and rec.last_hello_at is not None,
                     "reason": rec.unsupported, "sid": rec.sid,
                     "last_hello_at": rec.last_hello_at, "sent": rec.sent, "ridden": rec.ridden,
                     "skipped": rec.skipped, "last_error": rec.last_error,
-                    "interval_s": self._interval(rec)}
+                    "interval_s": self._interval(rec), "quiet": rec.quiet,
+                    "quieted": rec.quieted}
 
     def _cached(self, board_id: str, what: str, max_age: float,
                 fn: Callable[[], Any]) -> Any:

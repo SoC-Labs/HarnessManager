@@ -173,6 +173,30 @@ function Fact({ label, children, testid = "" }) {
     <span class="fact-label">${label}</span><span class="fact-value">${children}</span></div>`;
 }
 
+// QUIET-POLL: background contact with this board is paused (the lease is someone else's, the
+// board is busy with another client, or background reads are off). Calm, never red: only the
+// reads nobody clicked wait; every button still works. Nothing shows while it may go ahead,
+// or when the only reason is that no page views it (this one does, a moment later).
+export function backgroundWords(st) {
+  if (!st || st.allowed || !st.kind || st.kind === "no_viewer") return null;
+  if (st.kind === "lease") {
+    return { icon: "lock", level: "held", text: `Paused: lease held by ${st.holder || "someone else"}` };
+  }
+  if (st.kind === "busy") return { icon: "timer", level: "held", text: "Busy (another client)" };
+  return { icon: "circle-pause", level: "unk", text: "Background reads off" };
+}
+
+function BackgroundFact({ bid }) {
+  const b = boardState(bid);
+  const st = (b.quiet && b.quiet.kind === "busy") ? { ...(b.background || {}), ...b.quiet, allowed: false }
+    : b.background;
+  const w = backgroundWords(st);
+  if (!w) return null;
+  return html`<${Fact} label="Background" testid="fact-background"><${Chip} level=${w.level}
+    icon=${w.icon} testid="background-chip" title=${`${st.text || w.text}. Explicit actions still work.`}>
+    ${w.text}<//><//>`;
+}
+
 function BoardHeader({ bid }) {
   const row = S.boards[bid] || {};
   const b = boardState(bid);
@@ -225,6 +249,7 @@ function BoardHeader({ bid }) {
         icon=${health.level === "ok" ? "activity" : health.level === "err" ? "circle-x" : "circle-help"}>
         ${health.text}<//><//>
       <${HubFact} bid=${bid} />
+      <${BackgroundFact} bid=${bid} />
     </div>
     <nav class="sections" role="tablist" aria-label="Board sections">
       ${SECTIONS.map((s) => {

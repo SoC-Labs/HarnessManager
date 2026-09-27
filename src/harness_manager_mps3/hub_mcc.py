@@ -371,6 +371,9 @@ class HubMccController:
         self.last_transcript = b""
         self.attempts = 0
         self._python: str | None = None
+        #: CCR QUIET-1: hears each read's outcome (rc 3, another reader of the tty, is a
+        #: HeldError: another client). ``Mps3Session.set_observer`` sets it.
+        self.observer: Callable[[BaseException | None], None] | None = None
 
     def hub_python(self) -> str:
         """The hub's Python 3.10+ for pyverify's hub-side code (``PY310_PROBE``), found once.
@@ -638,7 +641,19 @@ class HubMccController:
         return reply
 
     def _read(self, menu: str, lines: Sequence[str]) -> list[str]:
-        """Run reads on the hub; each reply without its echo and prompt."""
+        """Run reads on the hub; each reply without its echo and prompt. The outcome goes to
+        ``observer`` (QUIET-POLL)."""
+        from .mcc import _tell
+
+        try:
+            out = self._read_on_hub(menu, lines)
+        except BaseException as exc:
+            _tell(self.observer, exc)
+            raise
+        _tell(self.observer, None)
+        return out
+
+    def _read_on_hub(self, menu: str, lines: Sequence[str]) -> list[str]:
         args = {"tty": self.tty, "baud": 115200, "pace": self.pace_s, "menu": menu,
                 "lines": list(lines), "prompt_s": READ_PROMPT_S, "reply_s": READ_REPLY_S,
                 "listen_s": READ_LISTEN_S}

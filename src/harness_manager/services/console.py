@@ -40,10 +40,20 @@ Behaviour
   (``deploy.failed`` with no ``deploy.started``) touches nothing.
 - **Events** on the engine bus (``docs/CONTRACTS.md`` topics):
   ``console.state {name, state, detail, endpoint}`` with state one of
-  ``connecting | up | down | closed``; and ``console.line {name, text}`` per
+  ``connecting | up | down | paused | closed``; and ``console.line {name, text}`` per
   complete line (UTF-8, ``errors="replace"``, trailing CR stripped). A partial
   line idle for ``line_idle_s`` (a prompt such as ``>>> ``) is published with
   ``partial: True`` and is not repeated when its line completes.
+- **A shared lab board** (lane QUIET-POLL). ``lease_holder(board_id)``, when set (the
+  daemon sets it from its lease service), names who holds the board's hub lease when it is
+  someone else's (else ""; a board without a hub has none). While it names someone, an
+  upstream never RE-dials: a live connection is kept until it drops, then the console waits
+  in state ``paused`` ("paused: lease held by X") and dials again when the lease becomes ours
+  or free (``lease.state`` or ``hub.event`` for the board, or the ``lease_recheck_s`` look).
+  An explicit open (``subscribe``, ``export_tcp``, ``pty``) that would need a new board
+  connection is refused ``HeldError`` naming the holder; one that joins a live connection
+  is not (no new connection). ``explicit=False`` (a PTY reopened after an app update) waits
+  paused instead.
 - **Re-export** on ``127.0.0.1`` as raw TCP (``export_tcp``), not a PTY, so it
   works on Windows too. Any raw-TCP terminal attaches: ``nc 127.0.0.1 <port>``,
   ``socat -,raw,echo=0 tcp:127.0.0.1:<port>``, PuTTY "Raw". Each connected
@@ -86,6 +96,7 @@ from urllib.parse import parse_qs, urlparse
 from harness_manager.core.errors import (
     AbsentError,
     HarnessError,
+    HeldError,
     PortBoundError,
     UnavailableError,
     UnreachableError,
@@ -114,6 +125,10 @@ _REFUSAL_WINDOW_S = 1.0
 _READ_SLICE_S = 0.2          # how often the reader thread checks for stop/idle flush
 _WRITE_TIMEOUT_S = 10.0      # a write to the board gives up after this long (whole chunk)
 _LINE_FORCE_FLUSH = 4096     # never hold more than this much of an unterminated line
+#: QUIET-POLL: a console paused for someone else's lease looks at the lease again this often
+#: (besides every lease.state / hub.event for its board).
+LEASE_RECHECK_S = 30.0
+PAUSED = "paused"
 
 #: A serial URL's rate when it has no ``?baud=`` (the ``serial://`` opener's default).
 DEFAULT_SERIAL_BAUD = 115200
@@ -329,6 +344,7 @@ class _Upstream:
         self._wake = threading.Event()
         self._paused = threading.Event()
         self._pause_detail = ""
+        self.lease_paused = ""        # QUIET-POLL: the holder while re-dials wait for the lease
         self._backoff = broker.backoff[0]
         self._line = bytearray()
         self._line_at = 0.0
@@ -509,12 +525,31 @@ class _Upstream:
         self.broker._publish("console.state", self.board_id, {
             "name": self.name, "state": state, "detail": detail, "endpoint": self.endpoint})
 
+    def _lease_wait(self) -> bool:
+        """QUIET-POLL: True (after waiting) while the board's lease is someone else's: no dial.
+        The wait ends on a lease change for the board (``kick``), ``stop``, or the recheck."""
+        holder = self.broker._lease_elsewhere(self.board_id)
+        if not holder:
+            if self.lease_paused:
+                self.lease_paused = ""
+                self._backoff = self.broker.backoff[0]
+            return False
+        detail = f"paused: lease held by {holder}"
+        if self.lease_paused != holder or self.state != PAUSED:
+            self.lease_paused = holder
+            self._set_state(PAUSED, detail)
+        self._wake.wait(self.broker.lease_recheck_s)
+        self._wake.clear()
+        return True
+
     def _run(self) -> None:
         first, cap = self.broker.backoff
         while not self._stop.is_set():
             if self._paused.is_set():
                 self._wake.wait()              # until resume() or stop()
                 self._wake.clear()
+                continue
+            if self._lease_wait():
                 continue
             self._set_state("connecting")
             try:
@@ -735,8 +770,10 @@ class ConsoleBroker:
                  line_idle_s: float = 0.3,
                  baud_ttl_s: float = 3.0,
                  pty_replay_bytes: int = 4096,
-                 pty_options: dict[str, Any] | None = None) -> None:
+                 pty_options: dict[str, Any] | None = None,
+                 lease_recheck_s: float = LEASE_RECHECK_S) -> None:
         self.bus = _bus_of(engine)
+        self.lease_recheck_s = lease_recheck_s
         self.aliases = dict(ALIASES)
         self.backoff = backoff
         self.connect_timeout = connect_timeout
@@ -756,7 +793,9 @@ class ConsoleBroker:
             for topic, handler in (("deploy.started", self._on_swap_start),
                                    ("deploy.done", self._on_swap_done),
                                    ("deploy.failed", self._on_swap_failed),
-                                   ("board.identity", self._on_identity)):
+                                   ("board.identity", self._on_identity),
+                                   ("lease.state", self._on_lease_change),
+                                   ("hub.event", self._on_lease_change)):
                 self._unsubs.append(self.bus.subscribe(topic, handler))
 
     # -- protocol -------------------------------------------------------------------
@@ -796,10 +835,15 @@ class ConsoleBroker:
         return dict(consoles.console_endpoints())
 
     def subscribe(self, session: BoardSession, name: str, *,
-                  replay: bool = True, replay_bytes: int | None = None) -> ConsoleSubscription:
+                  replay: bool = True, replay_bytes: int | None = None,
+                  explicit: bool = True) -> ConsoleSubscription:
         """A new reader of console ``name``. ``replay`` first delivers the scrollback
-        (only its last ``replay_bytes`` when given)."""
+        (only its last ``replay_bytes`` when given). ``explicit`` (a user opened it): refused
+        ``HeldError`` while the board's lease is someone else's and no live connection exists
+        (QUIET-POLL); ``explicit=False`` waits paused instead."""
         key, endpoint = self.resolve(session, name)
+        if explicit:
+            self._refuse_if_leased(session.candidate.board_id, key, name)
         with self._lock:
             return self._upstream(session.candidate.board_id, key, endpoint,
                                   _pace(session, key)).attach(replay, replay_bytes)
@@ -811,6 +855,7 @@ class ConsoleBroker:
         never silently moved, because a terminal profile points at it.
         """
         key, endpoint = self.resolve(session, name)
+        self._refuse_if_leased(session.candidate.board_id, key, name)
         with self._lock:
             up = self._upstream(session.candidate.board_id, key, endpoint, _pace(session, key))
             try:
@@ -879,7 +924,7 @@ class ConsoleBroker:
                                              **self._pty_options)
             return self._ptys
 
-    def pty(self, session: BoardSession, name: str) -> dict[str, Any]:
+    def pty(self, session: BoardSession, name: str, *, explicit: bool = True) -> dict[str, Any]:
         """Console ``name``'s PTY, created if needed: ``{name, path, device, command, clients}``.
 
         ``path`` is ``/tmp/harness-manager-$USER/<board-slug>/<console>``, a symlink to
@@ -889,11 +934,15 @@ class ConsoleBroker:
         if not _pty.supported():
             raise _pty.unavailable()
         key, endpoint = self.resolve(session, name)
+        board_id = session.candidate.board_id
+        if explicit and self.pty_info(board_id, key) is None:
+            self._refuse_if_leased(board_id, key, name)     # QUIET-POLL (a new PTY only)
         row = self._rate_row(session, key, endpoint, live=False)
         serial = _broker_owned(row)
         port = self._pty_manager().open(
             session, key,
-            lambda: self.subscribe(session, key, replay_bytes=self.pty_replay_bytes),
+            lambda: self.subscribe(session, key, replay_bytes=self.pty_replay_bytes,
+                                   explicit=False),
             kind="serial" if serial else "ethernet", baud=row["baud"] if serial else None)
         return self._pty_view(port)
 
@@ -1154,6 +1203,43 @@ class ConsoleBroker:
         for up in self._board_ups(event.board_id):
             up.hold(f"not reconnected: the swap failed at {stage or 'an unknown stage'}"
                     f"{f' ({reason})' if reason else ''}; check what is loaded, then reconnect")
+
+    # -- QUIET-POLL: someone else's lease ---------------------------------------------------
+
+    #: ``board_id -> holder`` when the board's hub lease is someone else's, else "" (the
+    #: daemon sets it from its lease service; None: no lease rule, as in the CLI in-process).
+    lease_holder: Callable[[str], str] | None = None
+
+    def _lease_elsewhere(self, board_id: str) -> str:
+        fn = self.lease_holder
+        if fn is None:
+            return ""
+        try:
+            return str(fn(board_id) or "")
+        except Exception:  # noqa: BLE001 - a lease that cannot be read never blocks a console
+            log.debug("lease of %s for the consoles could not be read", board_id, exc_info=True)
+            return ""
+
+    def _refuse_if_leased(self, board_id: str, key: str, name: str) -> None:
+        """An explicit open that needs a new board connection, while the lease is someone
+        else's: refused, naming the holder. Joining a live connection is not refused."""
+        with self._lock:
+            up = self._ups.get((board_id, key))
+        if up is not None and up.state == "up":
+            return
+        holder = self._lease_elsewhere(board_id)
+        if holder:
+            raise HeldError(f"console {name} of {board_id} is not opened: the hub lease is held "
+                            f"by {holder}, and the board serves one client per console port",
+                            holder=holder,
+                            hint="ask for the board: `harness-manager lease request TARGET`")
+
+    def _on_lease_change(self, event: Event) -> None:
+        """The board's lease may have changed hands: consoles waiting for it look again now
+        (on their own threads: nothing here reads the lease)."""
+        for up in self._board_ups(event.board_id):
+            if up.lease_paused:
+                up.kick()
 
     def reconnect(self, board_id: str) -> None:
         """Re-dial every console of a board now (also ends a pause left by a failed swap)."""

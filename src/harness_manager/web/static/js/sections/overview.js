@@ -367,11 +367,19 @@ export function OverviewSection({ bid }) {
       const every = week(bid).hub ? HUB_TELEMETRY_POLL_MS : TELEMETRY_POLL_MS;
       if (document.visibilityState === "visible" && now.info && !now.job && !now.telemetryLoading
           && Date.now() - (now.telemetryAt || 0) >= every - 1000) {
-        loadTelemetry(bid);
+        loadTelemetry(bid, { background: true });     // QUIET-POLL: nobody clicked
       }
     }, TELEMETRY_POLL_MS);
     return () => clearInterval(timer);
   }, [bid]);
+  if (!b.info && b.quiet && !b.infoError) {
+    // QUIET-POLL: the daemon held the first read back (the lease is someone else's, background
+    // reads are off, the board is busy with another client): nothing was read. Say why, calmly.
+    return html`<div class="card" data-testid="info-quiet"><div class="card-body">
+      <${Reason} text=${b.quiet.text} />
+      <p class="mt-14"><button type="button" class="btn sm" onClick=${() => refreshInfo(bid)}>
+        <${Icon} name="refresh-cw" /> Read now</button></p></div></div>`;
+  }
   if (!b.info) {
     return html`<div class="card" data-testid="info-error"><div class="card-body">
       ${b.infoError ? html`<${Reason} level="err" text=${`${b.infoLine}: ${b.infoError.errName}: ${b.infoError.message}`} />

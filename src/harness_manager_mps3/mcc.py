@@ -642,6 +642,17 @@ SHELL_BUSY = "(busy)"
 # --- the adapter ----------------------------------------------------------------------
 
 
+def _tell(observer: Callable[[BaseException | None], None] | None,
+          exc: BaseException | None) -> None:
+    """CCR QUIET-1: report a read's outcome; the observer's own failure is never the read's."""
+    if observer is None:
+        return
+    try:
+        observer(exc)
+    except Exception:  # noqa: BLE001
+        log.exception("the MCC observer failed")
+
+
 class Mps3Controller:
     """``ControllerAdapter`` for the MPS3 MCC. Opens the port per operation, never holds it."""
 
@@ -661,6 +672,9 @@ class Mps3Controller:
         self._sleep = sleep or time.sleep
         self._shell_probe = shell_probe
         self._opener: Opener = opener or open_serial
+        #: CCR QUIET-1: hears each read's outcome (None, or the error: a HeldError is another
+        #: program holding the port). ``Mps3Session.set_observer`` sets it.
+        self.observer: Callable[[BaseException | None], None] | None = None
         self._last_tx: float | None = None
         self.last_reboot: RebootWitness | None = None
         self.last_transcript = b""
@@ -769,6 +783,15 @@ class Mps3Controller:
 
     def cfg_read(self, items: Iterable[tuple[str, int]]) -> list[str | HarnessError]:
         """Several ``CFG R`` reads in one DEBUG visit. Each result is the reply or its error."""
+        try:
+            out = self._cfg_read(items)
+        except BaseException as exc:
+            _tell(self.observer, exc)
+            raise
+        _tell(self.observer, None)
+        return out
+
+    def _cfg_read(self, items: Iterable[tuple[str, int]]) -> list[str | HarnessError]:
         cmds = [classify(f"CFG R {kind} {dev}") for kind, dev in items]
         results: list[str | HarnessError] = []
         with self._session() as con:

@@ -414,6 +414,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # FakeLcdMirror per demo board (tests/fakes/lm3_mock_display.py).
     from .lm3_mock_display import register as register_display
     app.state.display = register_display(app, state, sim)
+    # QUIET-POLL's viewer routes (docs/API.md "Background reads"): the demo's gate.
+    from .qp_mock_quiet import register as register_quiet
+    app.state.quiet = register_quiet(app, state, _ok)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)

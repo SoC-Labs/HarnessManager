@@ -193,6 +193,33 @@ owners.
   clearly when the hub has no Python 3.8+. When SSH refuses the key right after a claim the
   board accepted, the hint says why (the board's key sync), not "wait".
 
+### A good citizen on a shared board (QUIET-POLL)
+- Harness Manager no longer contacts a board in the background unless a window shows it.
+  On 2026-09-27 a background poll from an idle Harness Manager took the lab MPS3's
+  single-client control port and reset a soak's control call. Presence hellos and the
+  page's own refreshes (Overview, panel, telemetry, card, console rates) now run only
+  while the app or a tab has the board selected and on screen. They stop when the tab
+  closes or looks elsewhere (docs/USER_GUIDE.md "HM on a shared board").
+- While the board's hub lease is someone else's, background contact stops entirely. The
+  header shows "Paused: lease held by `<who>`", and an explicit read (`info`,
+  **Read now**) still works and names the holder.
+- A background connection the board refuses, resets or lets time out is taken to mean
+  "another client is using it". Harness Manager backs off from 30 s up to 10 min and
+  shows "Busy (another client)", never a red error. Your own clicks and commands keep
+  today's behaviour.
+- Consoles on a board whose lease is someone else's: a live console stays connected until
+  it drops, then waits ("paused: lease held by `<who>`") and reconnects once the lease is
+  yours or free. A new console there is refused, naming the holder. A board with no hub
+  is unchanged.
+- Background telemetry that finds another reader on the MCC console backs off like a
+  refused connection ("Busy (another client)").
+- New setting `general.background_poll` (`on-view`, the default, or `off`), and
+  `poll = "off"` per board in `boards.toml`. With `off`, Harness Manager touches the board
+  only when you ask.
+- API (additive): `PUT`/`DELETE /boards/{bid}/viewers/{vid}`, `GET
+  /boards/{bid}/background`, the `X-HM-Background` request header, and a health note on
+  `GET /boards/{bid}` naming the lease holder (docs/API.md "Background reads").
+
 ### The app's pages
 - A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"
   line only when something is wrong, and the details folded away.

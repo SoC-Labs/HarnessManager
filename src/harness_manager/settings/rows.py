@@ -126,6 +126,11 @@ GENERAL = (
     Setting("general.app_keep_dbus", "bool", False, "General",
             "Keep the desktop bus for the app window", scope="machine", owner="dev",
             env="HARNESS_MANAGER_APP_KEEP_DBUS"),
+    # QUIET-POLL services/quiet.py:126,150 (policy_for; the daemon's BackgroundGate.check)
+    Setting("general.background_poll", "enum", "on-view", "General",
+            "Background reads of a board: only while a window shows it (on-view), or never "
+            "(off: Harness Manager touches a board only when you ask)",
+            choices=("on-view", "off")),
 )
 
 HUBS = (
@@ -220,6 +225,10 @@ BOARDS = (
             scope="board", advanced=True, check=_i2c),
     Setting("boards.*.power.device", "int", 0, "Boards", "Which MCP2221A", scope="board",
             advanced=True, check=_between(0, 15)),
+    # QUIET-POLL services/quiet.py:126,139 (policy_for: this board's table or [boards.defaults])
+    Setting("boards.*.poll", "enum", "", "Boards",
+            'Background reads of this board: "on-view", "off", or empty '
+            "(general.background_poll decides)", scope="board", choices=("", "on-view", "off")),
 )
 
 # SET-HUBS: an INLINE hub table's own keys (harness_manager_mps3/hub.py:136-165 for SSH,

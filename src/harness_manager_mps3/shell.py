@@ -43,6 +43,7 @@ the tap is only needed for the EBUSY line.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import socket
 import subprocess
@@ -437,6 +438,12 @@ class Mps3Shell:
         #: adapter sets it to send a pending ``hello`` first (``Mps3Panel.ride``); it sends
         #: nothing unless a hello is waiting. None: connections carry only ``fn``'s requests.
         self.preamble: Preamble | None = None
+        #: QUIET-POLL: when set, ``observer(None)`` after each call the board answered and
+        #: ``observer(exc)`` after each one that failed (refused, reset, timed out, held...),
+        #: for every caller. The daemon sets it to its background gate
+        #: (``services.quiet.BackgroundGate.observe``), so a refusal anyone meets backs off
+        #: the background polls. It never changes the call's result or error.
+        self.observer: Callable[[BaseException | None], None] | None = None
 
     # -- plumbing ---------------------------------------------------------------
 
@@ -463,7 +470,26 @@ class Mps3Shell:
         ``tap.last`` is the reply line pyverify parsed last, as a dict: read keys the
         installed pyverify does not model from it, never send a hand-rolled request.
         ``self.preamble``, when set, runs first on the same connection (CCR PANEL-3).
+        ``self.observer``, when set, hears the outcome (QUIET-POLL).
         """
+        try:
+            result = self._settled_call(fn)
+        except BaseException as exc:
+            self._observe(exc)
+            raise
+        self._observe(None)
+        return result
+
+    def _observe(self, exc: BaseException | None) -> None:
+        observer = self.observer
+        if observer is None:
+            return
+        try:
+            observer(exc)
+        except Exception:  # noqa: BLE001 - the observer's bug is never the caller's error
+            logging.getLogger(__name__).exception("the control-port observer failed")
+
+    def _settled_call(self, fn: Callable[[ShellClient, _TapTransport], T]) -> T:
         try:
             result = self._call_raw(fn)
         except SwapSettlingError:

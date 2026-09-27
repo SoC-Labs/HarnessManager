@@ -94,5 +94,7 @@ def test_the_board_tile_reads_l1_cards_card_and_only_for_a_harness_with_a_store(
     assert 'data-testid="tile-card"' in tile and "<${CardRow} b=${b} />" in tile
     assert "if (!hasCardStore(b))" in tile                        # no "usd": nothing is read
     store = (js / "store.js").read_text(encoding="utf-8")
-    assert "if (hasCardStore(b) && !b.card && !b.cardLoading) loadCard(bid);" in store
+    # (QUIET-POLL: a read after the info read is one nobody clicked: marked background)
+    assert "if (hasCardStore(b) && !b.card && !b.cardLoading) loadCard(bid, { background: true });" \
+        in store
     assert store.count("export async function loadCard(") == 1
