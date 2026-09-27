@@ -20,9 +20,9 @@ from websockets.exceptions import InvalidStatus
 
 from harness_manager.core import display_wire as w
 from harness_manager.core.display import HATCH_RGB565, png_rgb565, rgb888
-from harness_manager.core.errors import ExitCode
+from harness_manager.core.errors import ExitCode, HeldError
 from harness_manager.daemon.app import create_app
-from harness_manager.daemon.display_api import close_reason
+from harness_manager.daemon.display_api import BOARD_CLOSED, close_reason
 from harness_manager.daemon.server import bind_socket, uvicorn_config
 from harness_manager.services.display import DisplayTimings
 from tests.fakes import lm1_golden as G
@@ -31,6 +31,7 @@ from tests.fakes.lm3_display_rig import (
     BOARD,
     FakeClock,
     FakeDisplayAdapter,
+    FakeLeases,
     Tab,
     bid_path,
     connect,
@@ -241,6 +242,69 @@ def test_a_refusal_is_typed_and_nothing_attaches(reason):
         assert board.stats["connects"] >= 1
 
 
+def behind_a_hub(rig: Any, leases: FakeLeases, target: str = "mps3_02_pl") -> None:
+    from types import SimpleNamespace
+
+    rig.engine.session(BOARD).hub = SimpleNamespace(target=target)
+    rig.daemon.daemon.leases = leases                         # hub_api's lease service
+
+
+def test_someone_elses_lease_is_409_held_naming_the_holder_and_nothing_attaches():
+    board, _anim = card_board()
+    adapter = FakeDisplayAdapter(board, reason=HELD_REASON)
+    with board, display_rig(adapter) as rig, http(rig) as c:
+        leases = FakeLeases("alice@hub-02", mine=False)
+        behind_a_hub(rig, leases)
+        r = c.get(f"{bid_path()}/display.png")
+        assert r.status_code == 409, r.text
+        err = r.json()["error"]
+        assert err["name"] == "HELD" and err["holder"] == "alice@hub-02"
+        assert err["message"] == HELD_REASON and err["data"] == {"capability": "display_mirror"}
+        tab = Tab(rig.daemon.display_ws())
+        tab.pump(1.0)
+        assert tab.closed == (4000 + ExitCode.HELD, close_reason(HELD_REASON))
+        assert tab.statuses[0]["state"] == "refused" and tab.statuses[0]["error"] == err
+        st = c.get(f"{bid_path()}/display").json()
+        assert st["available"] is False and st["unavailable"] == HELD_REASON
+        assert adapter.leases_used and all(u is leases for u in adapter.leases_used)
+        assert adapter.leases_before_reason is True           # shared before it was asked
+        assert adapter.connects == 0 and board.stats["connects"] == 0 and rig.svc.boards() == []
+        # nobody holds it: HELD too, holder "nobody"
+        leases.held = False
+        r = c.get(f"{bid_path()}/display.png")
+        assert r.status_code == 409 and r.json()["error"]["holder"] == "nobody"
+        # the twins: the lease is ours, and the adapter's other reason is UNAVAILABLE ...
+        leases.held, leases.mine = True, True
+        adapter.reason = BARE_REASON
+        r = c.get(f"{bid_path()}/display.png")
+        assert r.status_code == 422 and r.json()["error"]["reason"] == BARE_REASON
+        # ... and with none, it opens
+        adapter.reason = ""
+        assert c.get(f"{bid_path()}/display.png").status_code == 200
+        assert board.stats["connects"] == 1
+
+
+def test_a_lease_lost_between_the_check_and_the_connect_ends_typed():
+    board, _anim = card_board()
+    adapter = FakeDisplayAdapter(board)
+    adapter.connect_error = HeldError(HELD_REASON, holder="bob@lab")   # the MPS3 adapter's
+    with board, display_rig(adapter) as rig, http(rig) as c:
+        tab = Tab(rig.daemon.display_ws())
+        tab.pump(2.0)
+        assert tab.closed == (4000 + ExitCode.HELD, close_reason(HELD_REASON))
+        assert tab.statuses[-1]["state"] == "down" and tab.statuses[-1]["reason"] == HELD_REASON
+        r = c.get(f"{bid_path()}/display.png")
+        assert r.status_code == 409 and r.json()["error"]["holder"] == "bob@lab"
+        assert board.stats["connects"] == 0
+        # the twin: an upstream closed with no error of the source's own ends with 1000
+        adapter.connect_error = None
+        tab = Tab(rig.daemon.display_ws())
+        tab.pump_until(lambda t: t.vm.messages >= 1, what="a picture")
+        rig.svc.close(BOARD, "closed: the lease was released")
+        tab.pump(1.0)
+        assert tab.closed == (1000, "closed: the lease was released")
+
+
 def test_no_adapter_is_refused_too_and_a_closed_board_is_absent():
     with display_rig(None) as rig, http(rig) as c:
         r = c.get(f"{bid_path()}/display.png")
@@ -294,8 +358,9 @@ def events(ws: Any, timeout: float = 0.3) -> list[dict[str, Any]]:
 
 def test_display_state_events_fire_on_state_changes_and_the_end_closes_the_tabs():
     frame = G.card_picture(7)
+    calm = DisplayTimings(tick_s=0.02, ping_s=0.1, stale_s=30.0, dead_s=60.0)  # no load flaps
     with FakeLcdMirror(FakePanel(frame), mode="hw") as board, \
-            display_rig(FakeDisplayAdapter(board)) as rig, \
+            display_rig(FakeDisplayAdapter(board), timings=calm) as rig, \
             connect(rig.daemon.events_ws()) as ev, http(rig) as c:
         time.sleep(0.3)                                  # the events socket is subscribed
         tab = Tab(rig.daemon.display_ws())
@@ -321,11 +386,11 @@ def test_display_state_events_fire_on_state_changes_and_the_end_closes_the_tabs(
         assert c.delete(bid_path()).json()["closed"] is True
         end = wait_for(lambda: [e for e in events(ev, 0.1) if e["data"]["state"] == "down"],
                        what="down")
-        assert end[-1]["data"]["reason"] == "the board was closed"
+        assert end[-1]["data"]["reason"] == BOARD_CLOSED
         tab.pump(1.0)
         assert tab.statuses[-1]["state"] == "down"
         assert sum(s["state"] == "down" for s in tab.statuses) == 1      # said once
-        assert tab.closed == (1000, "the board was closed")
+        assert tab.closed == (1000, BOARD_CLOSED)
         assert wait_for(lambda: board.clients == 0, what="the board's connection closed")
         assert rig.svc.boards() == []
 

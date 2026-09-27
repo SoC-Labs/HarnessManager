@@ -12,13 +12,16 @@ docs/design/LCD_MIRROR.md §7.2-§7.4 is the design; docs/API.md "Live display" 
 Rules:
 
 - **The lease holder only (D3).** The source is the board pack's ``display_adapter`` hook
-  (lane LM2: ``pack.display_adapter(session)`` -> a ``DisplayAdapter`` or None; else
-  ``session.display``). Its ``display_reason()`` carries the lease rule and the feature
-  gate. No adapter, or a reason, is refused BEFORE anything attaches: 422 UNAVAILABLE
-  (capability ``display_mirror``) over HTTP; on the WebSocket a text frame
-  ``{state: "refused", reason, error}`` and a close with 4000 + the exit code (4012) and
-  the reason. A missing or wrong token is 401 on every route (the WebSocket's is an HTTP
-  denial, as every HM socket's).
+  (lane LM2: ``BoardPack.display_adapter(session)`` -> a ``DisplayAdapter`` or None; else
+  ``session.display``). It shares the hub API's lease service (``use_leases(d.leases)``,
+  before its first ``display_reason()``), and so does the compositor (``svc.leases``), as
+  XVC's does. ``display_reason()`` carries the feature gate, the lease rule and the claim.
+  No adapter, or a reason, is refused BEFORE anything attaches: 409 HELD naming the
+  ``holder`` when the board is behind a hub whose lease is not this client's (the hub API's
+  view), else 422 UNAVAILABLE (capability ``display_mirror``); on the WebSocket a text
+  frame ``{state: "refused", reason, error}`` and a close with 4000 + the exit code (4004,
+  4012) and the reason. A missing or wrong token is 401 on every route (the WebSocket's is
+  an HTTP denial, as every HM socket's).
 - **Backpressure is per viewer, drop-to-latest.** ``DisplayService`` keeps each tab's dirty
   set; with ``ack=1`` (the default) a tab has ONE message in flight until it acks, and its
   next message holds the latest record of every tile it lacks. A tab that never acks gets
@@ -26,8 +29,10 @@ Rules:
   the oldest frames: a dropped tile stays stale for ever, §7.3).
 - **The upstream** is one per board, shared by every tab, the PNG and the CLI; it closes
   30 s after the last viewer leaves, at once when the board closes. When it ends for good
-  (a lease or claim lost, the board closed) each socket gets the final status and a close
-  with 1000: the client reconnects, and is checked again.
+  (a lease or claim lost, the board closed) each socket gets the final status and a close:
+  4000 + the exit code when the source's own error ended it (``HeldError``: 4004), else
+  1000; the client reconnects, and is checked again. A PNG whose upstream ended that way
+  answers with that error (409 HELD naming the holder).
 - **permessage-deflate is off** for the whole daemon (``server.uvicorn_config``).
 
 Events: ``display.state`` ``{state, mode, owner, badges, reason}`` (docs/CONTRACTS.md), from
@@ -45,7 +50,7 @@ from typing import Any
 from fastapi import Response, WebSocket, WebSocketDisconnect
 
 from harness_manager.core.display import DISPLAY_MIRROR, H, W, owner_name
-from harness_manager.core.errors import HarnessError, UnavailableError, UsageError
+from harness_manager.core.errors import HarnessError, HeldError, UnavailableError, UsageError
 from harness_manager.core.events import Event
 
 from .app import _JSON, RouteContext, _retrieve, ok
@@ -61,8 +66,11 @@ FORMATS = ("png", "raw")
 RAW_FORMAT = "rgb565le"
 #: A WebSocket close reason is at most 123 bytes of UTF-8 (RFC 6455 §5.5).
 CLOSE_REASON_MAX = 123
-#: The socket's close when the board's upstream ended for good (the console's convention).
+#: The socket's close when the board's upstream ended for good with no error of the source's
+#: own (the console's convention); with one, 4000 + its exit code.
 CLOSE_ENDED = 1000
+#: The reason ``session.closed`` gives (the compositor's own words for it, lane LM2).
+BOARD_CLOSED = "closed: the board was closed"
 #: ``GET .../display`` always has every field: a board never opened has these.
 STATUS_DEFAULTS: dict[str, Any] = {
     "flags": None, "regs": None, "seq": None, "t_ms": None, "frames": None, "resets": None,
@@ -113,19 +121,49 @@ def display_source(engine: Any, session: Any) -> Any | None:
     return getattr(session, "display", None)
 
 
-def refusal(adapter: Any, session: Any) -> HarnessError | None:
-    """Why the live picture may not be opened now (D3: the lease holder only; the feature
-    gate), as the typed error the routes answer with; None when it may.
-    ``display_reason()`` may raise a ``HarnessError`` itself (a lease that cannot be read)."""
+def lease_holder(leases: Any, session: Any) -> str | None:
+    """Who holds the board's lease when it is NOT this client (``"nobody"`` when no one
+    does), from the hub API's lease view; None when it is ours, the board has no hub, or
+    the view cannot be read (the adapter's reason then stands as UNAVAILABLE)."""
+    hub = getattr(session, "hub", None)
+    if hub is None or leases is None:
+        return None
+    try:
+        view = leases.view(hub) or {}
+    except HarnessError:
+        return None
+    lease = view.get("lease")
+    if not lease:
+        return "nobody"
+    return None if lease.get("mine") else str(lease.get("holder") or "someone else")
+
+
+def refusal(adapter: Any, session: Any, leases: Any = None) -> HarnessError | None:
+    """Why the live picture may not be opened now, as the typed error the routes answer
+    with; None when it may. The adapter's ``display_reason()`` says why (the feature gate,
+    D3's lease rule, the claim); it is HELD, naming the holder, when the board's lease is
+    someone else's (``lease_holder``), else UNAVAILABLE. ``display_reason()`` may raise a
+    ``HarnessError`` itself."""
     if adapter is None:
         pack = getattr(getattr(session, "candidate", None), "pack", "") or "this"
         return UnavailableError(DISPLAY_MIRROR, f"the {pack} pack has no live display for "
                                                 "this board (the Front panel's text mirror "
                                                 "still shows it)")
+    use = getattr(adapter, "use_leases", None)
+    if leases is not None and callable(use):
+        use(leases)                                   # the hub API's view of "mine" (LM2)
     why = adapter.display_reason()
-    if why:
-        return UnavailableError(DISPLAY_MIRROR, str(why))
-    return None
+    if not why:
+        return None
+    holder = lease_holder(leases, session)
+    if holder is not None:
+        err = HeldError(str(why), holder=holder,
+                        hint="the live display opens for the lease holder only (as XVC): "
+                             "`harness-manager lease request TARGET`")
+        err.reason = str(why)                         # type: ignore[attr-defined]
+        err.data = {"capability": DISPLAY_MIRROR}     # type: ignore[attr-defined]
+        return err
+    return UnavailableError(DISPLAY_MIRROR, str(why))
 
 
 def register(ctx: RouteContext) -> None:
@@ -148,6 +186,9 @@ def register(ctx: RouteContext) -> None:
                     svc = DisplayService(d.engine)
                     owned.append(svc)
                 d.display = svc
+            # Share hub_api's lease service (one cache, one view of "mine"), as xvc_api does.
+            if getattr(svc, "leases", "absent") is None and getattr(d, "leases", None) is not None:
+                svc.leases = d.leases
             return svc
 
     def source_for(bid: str, session: Any) -> Any | None:
@@ -166,7 +207,7 @@ def register(ctx: RouteContext) -> None:
         """The board's adapter once it may be opened; else the typed refusal is raised."""
         session = ctx.board(bid)                      # 404 ABSENT: not open
         adapter = source_for(bid, session)
-        err = refusal(adapter, session)
+        err = refusal(adapter, session, getattr(d, "leases", None))
         if err is not None:
             raise err
         return adapter
@@ -178,7 +219,7 @@ def register(ctx: RouteContext) -> None:
             sources.pop(ev.board_id, None)
             svc = getattr(d, "display", None)
         if svc is not None:
-            svc.close(ev.board_id, "the board was closed")
+            svc.close(ev.board_id, BOARD_CLOSED)
 
     d.bus.subscribe("session.closed", closed)
     original_close = d.close
@@ -222,7 +263,7 @@ def register(ctx: RouteContext) -> None:
     def display_status(bid: str) -> Any:
         session = ctx.board(bid)
         try:
-            err = refusal(source_for(bid, session), session)
+            err = refusal(source_for(bid, session), session, getattr(d, "leases", None))
         except HarnessError as exc:                   # the lease could not be read: say so
             err = exc
         why = "" if err is None else getattr(err, "reason", "") or err.message
@@ -292,7 +333,9 @@ def register(ctx: RouteContext) -> None:
                     if st is not None:
                         await websocket.send_text(json.dumps(st, default=str))
                     why = viewer.status().get("reason") or "closed"
-                    await websocket.close(code=CLOSE_ENDED, reason=close_reason(why))
+                    err = viewer.end_error
+                    code = CLOSE_ENDED if err is None else 4000 + int(err.code)
+                    await websocket.close(code=code, reason=close_reason(why))
                     return
 
         def note(exc: HarnessError) -> None:

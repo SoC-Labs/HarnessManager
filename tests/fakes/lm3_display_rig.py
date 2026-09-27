@@ -44,21 +44,34 @@ def bid_path(board_id: str = BOARD) -> str:
 
 
 class FakeDisplayAdapter:
-    """LM2's adapter shape over a ``FakeLcdMirror`` (None: the connector refuses for good)."""
+    """LM2's adapter shape (``harness_manager_mps3.display.Mps3Display``) over a
+    ``FakeLcdMirror``: ``display_reason``, ``display_connect`` (a NEW connection each time;
+    None board: refused for good; ``connect_error``: raised instead, as the MPS3 adapter's
+    ``HeldError`` naming the holder), ``display_release``, ``use_leases``."""
 
     def __init__(self, board: FakeLcdMirror | None = None, reason: str = "") -> None:
         self.board = board
         self.reason = reason
+        self.connect_error: BaseException | None = None
+        self.leases_used: list[Any] = []
+        self.leases_before_reason: bool | None = None
         self.reasons_asked = 0
         self.connects = 0
         self.released = 0
 
+    def use_leases(self, leases: Any) -> None:
+        self.leases_used.append(leases)
+
     def display_reason(self) -> str:
+        if self.leases_before_reason is None:
+            self.leases_before_reason = bool(self.leases_used)
         self.reasons_asked += 1
         return self.reason
 
     def display_connect(self) -> Any:
         self.connects += 1
+        if self.connect_error is not None:
+            raise self.connect_error
         if self.board is None:
             raise DisplayUnavailable("no lcd_mirror service (test)", retry_s=None)
         return self.board.connect()
@@ -208,6 +221,21 @@ class Tab:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+class FakeLeases:
+    """The hub API's lease service as the display reads it (``view(hub)``, ``LeaseService``)."""
+
+    def __init__(self, holder: str = "", *, mine: bool = False, held: bool = True) -> None:
+        self.holder, self.mine, self.held = holder, mine, held
+        self.views = 0
+
+    def view(self, hub: Any, **_kw: Any) -> dict[str, Any]:
+        self.views += 1
+        if not self.held:
+            return {"lease": None}
+        return {"lease": {"target": getattr(hub, "target", ""), "holder": self.holder,
+                          "mine": self.mine}}
 
 
 class FakeClock:
