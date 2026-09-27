@@ -26,6 +26,8 @@ export function ClaimTileRow({ bid }) {
   const [err, setErr] = useState(null);
   if (!c) return null;
   const changedKey = c.host_key && c.host_key.match === false;
+  // A key pinned here before (host_key.seen_before): said plainly, a warning; any other: loud.
+  const seenBefore = changedKey && c.host_key.seen_before ? String(c.host_key.seen_before).slice(0, 10) : "";
   const claim = async () => {
     setBusy(true); setErr(null);
     try {
@@ -42,7 +44,9 @@ export function ClaimTileRow({ bid }) {
     <span class="v" data-testid="tile-claim" data-claim=${c.state}>
       <span class="mono">${claimText(c)}</span>
       ${!c.live && c.checked_at ? html` <span class="muted small">(last check ${c.checked_at})</span>` : null}
-      ${changedKey ? html`<div><${Reason} level="err" testid="tile-claim-hostkey"
+      ${changedKey && seenBefore ? html`<div><${Reason} level="warn" testid="tile-claim-hostkey"
+        text=${`Host key changed back to one seen on ${seenBefore} (${c.host_key.reported}); on the Linux harness this is usually /persist (the user microSD) mounting or not. SSH is refused until you re-pin it: ${c.state === "unclaimed" ? "board claim" : "board claim --adopt"}, if you trust it.`} /></div>` : null}
+      ${changedKey && !seenBefore ? html`<div><${Reason} level="err" testid="tile-claim-hostkey"
         text=${`Host key changed: pinned ${c.host_key.pinned}, the board reports ${c.host_key.reported}. SSH is refused.`} /></div>` : null}
       ${c.state === "unclaimed" && !armed ? html` <button type="button" class="btn ghost sm" data-action="claim"
         onClick=${() => setArmed(true)}><${Icon} name="lock" /> Claim this board</button>` : null}

@@ -42,7 +42,7 @@ class ClaimSim:
         pinned = HOST_KEY if state == "mine" else None
         out = {"state": state, "claimed": claimed,
                "host_key": {"reported": HOST_KEY, "pinned": pinned,
-                            "match": True if pinned else None},
+                            "match": True if pinned else None, "seen_before": None},
                "route": "lan", "user": "root", "source": "identify (mock)",
                "checked_at": "2026-09-25T12:00:00Z", "live": True, "notes": []}
         if action:

@@ -338,7 +338,7 @@ class DemoClaim:
         pinned = HOST_KEY if self.state == "mine" else None
         return {"state": self.state, "claimed": claimed,
                 "host_key": {"reported": HOST_KEY, "pinned": pinned,
-                             "match": True if pinned else None},
+                             "match": True if pinned else None, "seen_before": None},
                 "route": "lan", "user": "root", "source": "identify (demo)",
                 "checked_at": _iso(time.time()), "live": True, "notes": []}
 

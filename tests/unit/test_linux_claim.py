@@ -293,6 +293,148 @@ def test_a_re_provisioned_board_is_re_claimed_only_with_replace_host_key(rig_fac
         CL.fingerprint(OTHER_BOARD_KEY.split()[1])
 
 
+# --- 3b. a key that changes BACK to one pinned before (/persist on the user microSD, SMALL-4) ----------
+
+THIRD_BOARD_KEY = make_key_line("never-seen-before")
+
+
+def _board_offers(rig: Rig, line: str) -> None:
+    """The board's identify and its dropbear now carry ``line``'s key."""
+    rig.shell.ssh_host_key_sha256 = CL.fingerprint(line.split()[1])
+    rig.ssh.host_key_line = line
+
+
+def _fp(line: str) -> str:
+    return CL.fingerprint(line.split()[1])
+
+
+def _pinned_line(rig: Rig) -> str:
+    toml = boards_toml(rig.state.parent).read_text()
+    return next(ln.split("=", 1)[1].strip().strip('"') for ln in toml.splitlines()
+                if ln.strip().startswith("host_key"))
+
+
+def test_a_host_key_that_changes_back_to_one_seen_before_says_so_plainly(rig_factory):
+    rig = rig_factory()
+    claim_it(rig)                                              # K1 pinned (the card's /persist)
+    _board_offers(rig, OTHER_BOARD_KEY)                        # K2: tmpfs, never seen: loud
+    st = rig.claim.claim_status(refresh=True)
+    assert st["host_key"]["seen_before"] is None
+    assert any("HOST KEY CHANGED" in n for n in st["notes"])
+    claim_it(rig, adopt=True, replace_host_key=True)           # the user trusts K2
+    recs = CL.ClaimRecords().get(rig.session.candidate.board_id)["host_keys_seen"]
+    assert [e["fp"] for e in recs] == [_fp(BOARD_KEY), _fp(OTHER_BOARD_KEY)]   # K1 kept
+    _board_offers(rig, BOARD_KEY)                              # the card mounts again: K1
+    st = rig.claim.claim_status(refresh=True)
+    hk = st["host_key"]
+    assert hk["match"] is False and hk["pinned"] == _fp(OTHER_BOARD_KEY)
+    assert hk["seen_before"] == recs[0]["last"] and hk["seen_before"].endswith("Z")
+    note = next(n for n in st["notes"] if "changed back" in n)
+    assert note.startswith(f"host key changed back to one seen on {hk['seen_before'][:10]}")
+    assert "/persist (the user microSD) mounting or not" in note
+    assert "re-pin with `harness-manager board claim TARGET --adopt` if you trust it" in note
+    assert not any("HOST KEY CHANGED" in n for n in st["notes"])
+    from harness_manager.cli.cmd_claim import claim_human
+
+    human = claim_human("b", st)
+    assert any(ln.startswith("host key   changed back: ") for ln in human)
+    assert not any("CHANGED" in ln for ln in human if ln.startswith("host key"))
+    # never auto-accepted: SSH, a forward and a plain claim are all refused, nothing re-pinned
+    with pytest.raises(CL.HostKeyChangedError, match="changed back to one seen on"):
+        rig.claim.ssh_argv()
+    with pytest.raises(CL.HostKeyChangedError, match="changed back"):
+        rig.claim.open_forward({"control": 6900})
+    with pytest.raises(CL.HostKeyChangedError, match="changed back"):
+        claim_it(rig)
+    assert _pinned_line(rig) == OTHER_BOARD_KEY
+    # the user re-pins it, as the words say: --adopt, no --replace-host-key
+    st = claim_it(rig, adopt=True)
+    assert st["host_key"]["pinned"] == _fp(BOARD_KEY) and st["host_key"]["match"] is True
+    assert _pinned_line(rig) == BOARD_KEY
+    rig.claim.ssh_argv(["true"])                               # SSH works again
+
+
+def test_negative_twin_a_never_seen_key_keeps_the_loud_warning(rig_factory):
+    rig = rig_factory()
+    claim_it(rig)
+    _board_offers(rig, OTHER_BOARD_KEY)
+    claim_it(rig, adopt=True, replace_host_key=True)           # K1 and K2 both seen
+    _board_offers(rig, THIRD_BOARD_KEY)                        # K3: never pinned here
+    for _ in range(2):                                         # looking twice does not soften it
+        st = rig.claim.claim_status(refresh=True)
+        assert st["host_key"]["seen_before"] is None
+        assert any(n.startswith("HOST KEY CHANGED") for n in st["notes"])
+        assert not any("changed back" in n for n in st["notes"])
+    from harness_manager.cli.cmd_claim import claim_human
+
+    assert any(ln.startswith("host key   CHANGED: ") for ln in claim_human("b", st))
+    with pytest.raises(CL.HostKeyChangedError, match="HOST KEY CHANGED"):
+        rig.claim.ssh_argv()
+    with pytest.raises(CL.HostKeyChangedError, match="HOST KEY CHANGED"):
+        claim_it(rig, adopt=True)                              # --adopt is not enough
+    assert _pinned_line(rig) == OTHER_BOARD_KEY
+    seen = CL.ClaimRecords().get(rig.session.candidate.board_id)["host_keys_seen"]
+    assert _fp(THIRD_BOARD_KEY) not in [e["fp"] for e in seen]   # observed is not seen
+
+
+def test_an_unclaimed_board_back_on_a_seen_key_is_re_claimed_without_replace(rig_factory):
+    rig = rig_factory()
+    claim_it(rig)
+    _board_offers(rig, OTHER_BOARD_KEY)
+    claim_it(rig, adopt=True, replace_host_key=True)
+    rig.shell.ssh_claimed, rig.shell.authorized_keys = False, None   # the claim was on tmpfs
+    _board_offers(rig, BOARD_KEY)
+    st = rig.claim.claim_status(refresh=True)
+    note = next(n for n in st["notes"] if "changed back" in n)
+    assert "re-claim with `harness-manager board claim TARGET` if you trust it" in note
+    with pytest.raises(UsageError, match="no claim to adopt"):
+        claim_it(rig, adopt=True)
+    st = claim_it(rig)                                         # explicit: the TOFU claim + pin
+    assert st["action"] == "claimed" and st["host_key"]["pinned"] == _fp(BOARD_KEY)
+    # the twin: unclaimed on a never-seen key still needs --replace-host-key
+    rig.shell.ssh_claimed, rig.shell.authorized_keys = False, None
+    _board_offers(rig, THIRD_BOARD_KEY)
+    with pytest.raises(CL.HostKeyChangedError, match="HOST KEY CHANGED"):
+        claim_it(rig)
+    assert rig.shell.authorized_keys is None
+
+
+def test_the_seen_list_is_small_keeps_first_and_reads_old_records():
+    a, b, c, d, e = ("SHA256:" + ch * 43 for ch in "abcde")
+    seen: list[dict[str, str]] = []
+    for i, fp in enumerate((a, b, a, c, d, e)):
+        seen = CL.with_seen_host_key(seen, fp, f"2026-09-2{i}T00:00:00Z")
+    assert [x["fp"] for x in seen] == [a, c, d, e]            # b, the oldest, went
+    assert CL.SEEN_HOST_KEYS_MAX == 4
+    got_a = next(x for x in seen if x["fp"] == a)
+    assert got_a == {"fp": a, "first": "2026-09-20T00:00:00Z", "last": "2026-09-22T00:00:00Z"}
+    # a record from before the list: its host_key_fp counts, seen at its claim time
+    old = {"host_key_fp": a, "at": "2026-09-24T10:00:00Z"}
+    assert CL.seen_host_keys(old) == [{"fp": a, "first": old["at"], "last": old["at"]}]
+    # the twins: junk is ignored, and an empty record has seen nothing
+    assert CL.seen_host_keys({"host_keys_seen": [{"fp": "nope"}, "x", {"fp": b}]}) == \
+        [{"fp": b, "first": "", "last": ""}]
+    assert CL.seen_host_keys({}) == []
+
+
+def test_the_pinned_key_seen_again_moves_its_last_seen_on(rig_factory):
+    rig = rig_factory()
+    claim_it(rig)
+    bid = rig.session.candidate.board_id
+    records = CL.ClaimRecords()
+    first = records.get(bid)["host_keys_seen"][0]
+    old = "2026-01-01T00:00:00Z"
+    records.update(bid, host_keys_seen=[{**first, "last": old}],
+                   observed={**records.get(bid)["observed"], "at": 0})   # due a write
+    rig.claim.claim_status(refresh=True)                       # identify reports the pinned key
+    now = records.get(bid)["host_keys_seen"][0]
+    assert now["first"] == first["first"] and now["last"] > old
+    # the twin: another key reported is never added (observed is not seen)
+    _board_offers(rig, OTHER_BOARD_KEY)
+    rig.claim.claim_status(refresh=True)
+    assert [e["fp"] for e in CL.ClaimRecords().get(bid)["host_keys_seen"]] == [_fp(BOARD_KEY)]
+
+
 def test_a_host_key_other_than_the_one_identify_publishes_is_never_pinned(rig_factory):
     rig = rig_factory(mitm=make_key_line("someone-in-the-middle"))
     with pytest.raises(CL.HostKeyChangedError, match="NOT pinned"):

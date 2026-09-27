@@ -475,6 +475,28 @@ def test_each_reason_refuses_before_any_forward(rig_factory: Any, name: str, kw:
         assert "harness-manager board claim TARGET" in got               # the claim hint
 
 
+def test_a_host_key_changed_back_to_one_pinned_before_is_said_plainly(rig_factory: Any) -> None:
+    """SMALL-4: the Linux harness's /persist (the user microSD, or tmpfs) flips its host key."""
+    card_fp = CL.fingerprint(make_key_line("the-card-persist").split()[1])
+    rig = rig_factory(reported_key=card_fp)
+    CL.ClaimRecords().update(rig.session.candidate.board_id, host_key_fp=BOARD_FP,
+                             at="2026-09-25T08:00:00Z", host_keys_seen=[
+                                 {"fp": card_fp, "first": "2026-09-20T08:00:00Z",
+                                  "last": "2026-09-24T09:30:00Z"},
+                                 {"fp": BOARD_FP, "first": "2026-09-25T08:00:00Z",
+                                  "last": "2026-09-25T08:00:00Z"}])
+    got = rig.adapter.display_reason()
+    assert got.startswith("host key changed back to one seen on 2026-09-24"), got
+    assert "/persist (the user microSD) mounting or not" in got
+    assert "`harness-manager board claim TARGET --adopt` if you trust it" in got
+    with pytest.raises(DisplayUnavailable) as exc:             # never opened: no auto-accept
+        rig.adapter.display_connect()
+    assert exc.value.reason == got and rig.ssh.launches == []
+    # the twin: a key never pinned here keeps the loud reason
+    rig.observed["host_key"] = "SHA256:" + "A" * 43
+    assert rig.adapter.display_reason().startswith("THE BOARD'S SSH HOST KEY CHANGED")
+
+
 def test_negative_twin_a_claimed_linux_board_with_the_engine_has_no_reason(rig_factory: Any) -> None:
     rig = rig_factory()
     assert rig.adapter.display_reason() == ""

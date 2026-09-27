@@ -156,7 +156,10 @@ def claim_human(board_id: str, st: dict[str, Any] | None) -> list[str]:
         return lines
     hk = st.get("host_key") or {}
     pinned, reported = hk.get("pinned"), hk.get("reported")
-    if pinned and hk.get("match") is False:
+    if pinned and hk.get("match") is False and hk.get("seen_before"):
+        lines.append(f"host key   changed back: pinned {pinned}, the board reports {reported}, "
+                     f"a key pinned here before (last seen {str(hk['seen_before'])[:10]})")
+    elif pinned and hk.get("match") is False:
         lines.append(f"host key   CHANGED: pinned {pinned}, the board reports {reported}")
     elif pinned:
         lines.append(f"host key   {pinned} pinned"

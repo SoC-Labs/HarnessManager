@@ -36,6 +36,16 @@ What Harness Manager adds here:
   (``HostKeyChangedError``), before a connection when identify already shows it, and from
   ssh's own refusal otherwise. Never a ControlMaster (FINDINGS_TRIAGE #20: a lingering forward
   to the board's loopback would pass the claim lock for anyone on this host).
+- **Host keys seen before** (``claims.json`` ``host_keys_seen``: at most ``SEEN_HOST_KEYS_MAX``
+  ``{fp, first, last}``). The Linux harness keeps its host key in ``/persist``: the user
+  microSD when it mounts, tmpfs when it does not, so while the card is intermittent a board's
+  key flips between two. Every key this Harness Manager PINNED for the board (a claim, an
+  adopt, a replace) is remembered, and ``last`` moves on while identify reports the pinned
+  one. A change BACK to one of them says so plainly (``changed_back_words``: "changed back to
+  one seen on <date>", /persist, re-pin with ``--adopt`` if you trust it), and such a key may
+  be re-pinned by ``board claim [--adopt]`` without ``--replace-host-key``. A key only
+  observed is never added, so any other key keeps the loud warning. Nothing is ever accepted
+  automatically: SSH stays refused until you re-pin.
 - **The lock's refusal** (``refusal_error``): ``slot locked: board claimed (use ssh)`` becomes
   ``ClaimLockedError``; the fabric identity lock (``identity lock: <reason>``, a different
   lock: the card image and the FPGA's static disagree, claimed or not) becomes an
@@ -135,6 +145,13 @@ KEY_ONLY: tuple[str, ...] = (
     "-o", "PreferredAuthentications=publickey", "-o", "PasswordAuthentication=no",
     "-o", "KbdInteractiveAuthentication=no",
 )
+
+#: How many host keys a board's pin record remembers (``host_keys_seen``; the Linux harness
+#: flips between two while its user microSD is intermittent).
+SEEN_HOST_KEYS_MAX = 4
+#: Why a Linux board's host key changes back (its /persist, the user microSD or tmpfs).
+PERSIST_NOTE = ("on the Linux harness this is usually /persist (the user microSD) mounting "
+                "or not")
 
 _KEY_TYPES = ("ssh-", "ecdsa-", "sk-")
 _B64 = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
@@ -524,6 +541,43 @@ def _iso(t: float) -> str:
     return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def seen_host_keys(rec: Mapping[str, Any]) -> list[dict[str, str]]:
+    """A claim record's host keys seen before, oldest first: ``[{fp, first, last}]`` (ISO
+    times). A record from before the list counts its ``host_key_fp`` (seen at ``at``)."""
+    out: list[dict[str, str]] = []
+    raw = rec.get("host_keys_seen")
+    for e in raw if isinstance(raw, list) else ():
+        fp = e.get("fp") if isinstance(e, dict) else None
+        if isinstance(fp, str) and _FP.match(fp) and all(o["fp"] != fp for o in out):
+            first = str(e.get("first") or "")
+            out.append({"fp": fp, "first": first, "last": str(e.get("last") or first)})
+    fp = rec.get("host_key_fp")
+    if isinstance(fp, str) and _FP.match(fp) and all(o["fp"] != fp for o in out):
+        at = str(rec.get("at") or "")
+        out.insert(0, {"fp": fp, "first": at, "last": at})
+    return out
+
+
+def with_seen_host_key(seen: Sequence[Mapping[str, str]], fp: str,
+                       at: str) -> list[dict[str, str]]:
+    """``seen`` with ``fp`` seen at ``at`` (moved last; its ``first`` kept), capped at
+    ``SEEN_HOST_KEYS_MAX`` (the oldest go)."""
+    prev = next((e for e in seen if e["fp"] == fp), None)
+    out = [dict(e) for e in seen if e["fp"] != fp]
+    out.append({"fp": fp, "first": (prev or {}).get("first") or at, "last": at})
+    return out[-SEEN_HOST_KEYS_MAX:]
+
+
+def changed_back_words(reported: str, pinned: str, seen_at: str, *,
+                       unclaimed: bool = False) -> str:
+    """The plain words for a host key that changed BACK to one pinned before (never the
+    loud "HOST KEY CHANGED": that is for a key never seen)."""
+    how = ("re-claim with `harness-manager board claim TARGET`" if unclaimed else
+           "re-pin with `harness-manager board claim TARGET --adopt`")
+    return (f"host key changed back to one seen on {seen_at[:10] or 'an earlier day'} "
+            f"({reported}; pinned now: {pinned}); {PERSIST_NOTE}; {how} if you trust it")
+
+
 def _me() -> str:
     try:
         user = getpass.getuser()
@@ -673,10 +727,29 @@ class Mps3Claim:
                 (obs.claimed, obs.host_key, obs.source, obs.key_fp) and \
                 obs.at - float(seen.get("at") or 0) < 600:
             return                           # nothing new: no write on every LAN info
+        extra: dict[str, Any] = {}
+        pinned = ""
+        with contextlib.suppress(UsageError):
+            pin = self.config()["host_key"]
+            pinned = pin_fingerprint(pin) if pin else ""
+        if pinned and obs.host_key == pinned and not obs.source.endswith("(last check)"):
+            rec = self._records.get(self.board_id)
+            if rec.get("host_key_fp") == pinned:     # a pin this Harness Manager made
+                extra["host_keys_seen"] = with_seen_host_key(seen_host_keys(rec), pinned,
+                                                             _iso(obs.at))
         with contextlib.suppress(OSError):
             self._records.update(self.board_id, observed={
                 "claimed": obs.claimed, "host_key": obs.host_key, "source": obs.source,
-                "at": obs.at, **({"key_fp": obs.key_fp} if obs.key_fp else {})})
+                "at": obs.at, **({"key_fp": obs.key_fp} if obs.key_fp else {})}, **extra)
+
+    def seen_before(self, fp: str) -> str:
+        """When ``fp`` was last this board's pinned host key (ISO), else "": a key this
+        Harness Manager pinned for it before (``host_keys_seen``)."""
+        if not fp:
+            return ""
+        rec = self._records.get(self.board_id)
+        e = next((e for e in seen_host_keys(rec) if e["fp"] == fp), None)
+        return (e["last"] or e["first"] or "?") if e is not None else ""
 
     # -- the state --------------------------------------------------------------------------
 
@@ -698,6 +771,7 @@ class Mps3Claim:
         rec = self._records.get(self.board_id)
         reported = obs.host_key
         match = (pinned == reported) if (pinned and reported) else None
+        seen_at = self.seen_before(reported) if match is False else ""
         mine_on_record = bool(pinned) and rec.get("host_key_fp") == pinned
         notes: list[str] = []
         if obs.claimed is None:
@@ -713,7 +787,11 @@ class Mps3Claim:
             state = STATE_MINE
         else:
             state = STATE_OTHER
-        if match is False:
+        if match is False and seen_at:
+            notes.append(changed_back_words(reported, pinned, seen_at,
+                                            unclaimed=obs.claimed is False)
+                         + ". SSH to this board is refused until then")
+        elif match is False:
             notes.append(f"HOST KEY CHANGED: pinned {pinned}, the board reports {reported}. "
                          "SSH to this board is refused until you re-claim it (only if it was "
                          "re-provisioned: `harness-manager board claim TARGET "
@@ -742,7 +820,10 @@ class Mps3Claim:
         return {
             "state": state,
             "claimed": claimed,
-            "host_key": {"reported": reported or None, "pinned": pinned or None, "match": match},
+            # seen_before (additive, SMALL-4): the reported key changed BACK to one this Harness
+            # Manager pinned before: when it last was (ISO); null for a key never seen
+            "host_key": {"reported": reported or None, "pinned": pinned or None, "match": match,
+                         "seen_before": seen_at or None},
             # C1 (additive): identify's ssh.key_sha256, the claim's first key; None = not published
             "claim_key": obs.key_fp or None,
             "route": f"hub {hub}" if hub else "lan",
@@ -796,13 +877,26 @@ class Mps3Claim:
                                hint="the image's identify must carry ssh.host_key_sha256")
         cfg = self.config()
         pinned = pin_fingerprint(cfg["host_key"]) if cfg["host_key"] else ""
-        if pinned and pinned != obs.host_key and not replace_host_key:
+        rec = self._records.get(self.board_id)
+        seen_at = self.seen_before(obs.host_key) if pinned and pinned != obs.host_key else ""
+        # A key pinned here before may be re-pinned by this explicit claim/adopt (the user
+        # microSD's /persist); a key never seen needs --replace-host-key. Never automatic.
+        back_ok = bool(seen_at) and (adopt or not obs.claimed)
+        if pinned and pinned != obs.host_key and not replace_host_key and not back_ok:
+            if seen_at:
+                raise HostKeyChangedError(
+                    changed_back_words(obs.host_key, pinned, seen_at,
+                                       unclaimed=obs.claimed is False)
+                    + ". Nothing was claimed or pinned",
+                    hint="`harness-manager board claim TARGET --adopt` re-pins it")
             raise HostKeyChangedError(
                 f"THE BOARD'S SSH HOST KEY CHANGED: pinned {pinned}, the board now reports "
                 f"{obs.host_key}. Nothing was claimed or pinned",
                 hint="if the board was re-provisioned (a new card or image), claim it again "
                      "with --replace-host-key; otherwise something else answers for it")
-        rec = self._records.get(self.board_id)
+        if back_ok and pinned != obs.host_key:
+            say(f"host key: {obs.host_key} is one this Harness Manager pinned before "
+                f"(seen {seen_at[:10]}); re-pinning it as you asked")
         key_path = self._claim_key_path(key)
         if obs.claimed and not adopt:
             mine = bool(pinned) and pinned == obs.host_key and rec.get("host_key_fp") == pinned
@@ -836,8 +930,11 @@ class Mps3Claim:
             changes["key"] = str(private)
         table = write_ssh_settings(self.candidate, changes)
         self._write_known_hosts(line)
-        self._records.update(self.board_id, by=_me(), key_fp=key_fp or None, at=_iso(time.time()),
-                             host_key_fp=obs.host_key, how="adopt" if adopt else "claim")
+        at = _iso(time.time())
+        seen = with_seen_host_key(seen_host_keys(rec), obs.host_key, at)   # the old pin stays
+        self._records.update(self.board_id, by=_me(), key_fp=key_fp or None, at=at,
+                             host_key_fp=obs.host_key, how="adopt" if adopt else "claim",
+                             host_keys_seen=seen)
         say(f"pinned {obs.host_key} in boards.toml boards.{table}.ssh.host_key")
         now = Observation(True, obs.host_key, obs.source, time.time(),
                           key_fp=obs.key_fp or ("" if obs.claimed else key_fp))
@@ -932,6 +1029,12 @@ class Mps3Claim:
             return
         pinned = pin_fingerprint(pin)
         obs = self.observe()
+        seen_at = self.seen_before(obs.host_key) if obs.host_key != pinned else ""
+        if obs.host_key and obs.host_key != pinned and seen_at:
+            raise HostKeyChangedError(
+                changed_back_words(obs.host_key, pinned, seen_at,
+                                   unclaimed=obs.claimed is False) + ". Refusing to connect",
+                hint="nothing is accepted automatically: re-pin it only if you trust it")
         if obs.host_key and obs.host_key != pinned:
             raise HostKeyChangedError(
                 f"THE BOARD'S SSH HOST KEY CHANGED: pinned {pinned}, the board reports "

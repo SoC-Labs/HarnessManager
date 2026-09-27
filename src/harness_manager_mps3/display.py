@@ -74,7 +74,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 
-from .claim import pin_fingerprint
+from .claim import changed_back_words, pin_fingerprint
 from .constants import IMPL_BARE_METAL, IMPL_LINUX, LCD_MIRROR_PORT
 
 log = logging.getLogger(__name__)
@@ -312,6 +312,11 @@ class Mps3Display:
         if obs.claimed is False:
             return "the board is unclaimed now; " + CLAIM_HINT
         if obs.host_key and obs.host_key != pin_fingerprint(pin):
+            seen = getattr(claim, "seen_before", None)
+            seen_at = seen(obs.host_key) if callable(seen) else ""
+            if seen_at:                      # a key pinned here before: /persist, said plainly
+                return changed_back_words(obs.host_key, pin_fingerprint(pin), seen_at,
+                                          unclaimed=obs.claimed is False)
             return (f"THE BOARD'S SSH HOST KEY CHANGED: pinned {pin_fingerprint(pin)}, the board "
                     f"reports {obs.host_key} (re-claim only if it was re-provisioned: "
                     "`harness-manager board claim TARGET --replace-host-key`)")

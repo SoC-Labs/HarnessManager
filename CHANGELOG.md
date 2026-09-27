@@ -202,6 +202,12 @@ owners.
   (`identity lock: ...`) is a different lock: it now says whether the image and the FPGA's
   static disagree or one cannot be read, and how to fix it over Ethernet (push the right
   image, commit, reboot); it exits 15, no longer 14.
+- A board whose host key changes BACK to one Harness Manager pinned for it before says so
+  plainly: "host key changed back to one seen on <date>; on the Linux harness this is usually
+  /persist (the user microSD) mounting or not; re-pin with `board claim --adopt` if you trust
+  it" (claim status, `board claim-status`, the Board tile, SSH, forwards, the Live display).
+  `board claim --adopt` re-pins such a key without `--replace-host-key`. A key never pinned
+  here keeps the loud warning. Nothing is accepted automatically.
 - The claim through a hub runs its helper with the hub's `python3.11` first and refuses
   clearly when the hub has no Python 3.8+. When SSH refuses the key right after a claim the
   board accepted, the hint says why (the board's key sync), not "wait".
