@@ -33,6 +33,15 @@ BOARD = BOARD_FIELDED
 LOCATE_WHY = "needs harness feature 'locate' (Linux harness)"
 
 
+@pytest.fixture(autouse=True)
+def text_mirror_only(daemon):
+    """These tests are about the text mirror (P3). Since LM4 the Live display replaces it while
+    it is live, and the T14 mock gives every demo board a live display: not this board here."""
+    display = getattr(daemon.app.state, "display", None)
+    if display is not None:
+        display.no_display(BOARD)
+
+
 # --- helpers -----------------------------------------------------------------------------------
 
 

@@ -16,7 +16,8 @@ own LM1 ``FakeLcdMirror`` on 127.0.0.1:0, started on first use:
 Knobs: ``refuse(bid, reason)`` / ``allow(bid)`` (``display_reason``), ``no_display(bid)``
 (the hook returns None: a pack with no live display for that board), ``mirror(bid)`` (the
 board's ``FakeLcdMirror``, to edit its picture or ``handover`` the panel), ``freeze(bid)``
-(the card stops counting), ``close()`` (every fake board and upstream).
+(the card stops counting), ``stall(bid)`` (LM4: frozen, and PINGs go unanswered: the
+upstream goes stale, then reconnects), ``close()`` (every fake board and upstream).
 """
 
 from __future__ import annotations
@@ -138,6 +139,11 @@ class DisplaySim:
     def freeze(self, bid: str, frozen: bool = True) -> None:
         self.mirror(bid)
         self._anims[bid].frozen = frozen
+
+    def stall(self, bid: str, stalled: bool = True) -> None:
+        """The board's service wedges (LM4): the picture stops and PINGs go unanswered."""
+        self.freeze(bid, stalled)
+        self.mirror(bid).answer_pings = not stalled
 
     def close(self) -> None:
         if self.service is not None:
