@@ -195,7 +195,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
         # T2 (read at each use: SET-WIRE dropped the import-time copy, SETTINGS.md §12.9)
         _row("mps3.openocd_cfg_dir", "path", "", "Tools",
              "OpenOCD's MPS3 target configs (empty: the platform checkout beside Harness "
-             "Manager, else the packaged copy)", at="openocd.py:104",
+             "Manager, else the packaged copy)", at="openocd.py:115",
              scope="machine", owner="admin", env="HARNESS_MANAGER_MPS3_OPENOCD_DIR",
              advanced=True),
         # K7 (the core's --overlay-dir puts directories first: cli/cmd_program.py:23-25)
@@ -222,7 +222,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              owner="dev", apply="restart", check=_port),
         # D5
         _row("mps3.xvc_port", "int", _c.XVC_PORT, "Debug",
-             "The XVC port of a board reached directly", at="xvc.py:287", scope="pack",
+             "The XVC port of a board reached directly", at="xvc.py:315", scope="pack",
              owner="dev", env="HARNESS_MANAGER_MPS3_XVC_PORT", check=_port),
         # X4-X5
         _row("mps3.identify.port", "int", _c.IDENTIFY_PORT, "Advanced",
@@ -234,14 +234,14 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              scope="pack", owner="dev", env="HARNESS_MANAGER_MPS3_IDENTIFY_BROADCAST"),
         # X6-X8
         _row("mps3.push_port", "int", push_port, "Advanced",
-             "The bitstream push port (raw or windowed TCP)", at="deploy.py:349",
+             "The bitstream push port (raw or windowed TCP)", at="deploy.py:356",
              scope="pack", owner="dev", env="HARNESS_MANAGER_MPS3_PUSH_PORT", check=_port),
         _row("mps3.tftp_port", "int", tftp_port, "Advanced", "The TFTP push port",
-             at="deploy.py:353", scope="pack", owner="dev",
+             at="deploy.py:360", scope="pack", owner="dev",
              env="HARNESS_MANAGER_MPS3_TFTP_PORT", check=_port),
         _row("mps3.tunnelled", "str", "", "Advanced",
              "Treat the shell as reached through a TCP-only tunnel (no TFTP): on, off, or "
-             "empty for auto", at="deploy.py:208", scope="pack", owner="dev",
+             "empty for auto", at="deploy.py:213", scope="pack", owner="dev",
              env="HARNESS_MANAGER_MPS3_TUNNELLED", apply="reopen", check=_tunnelled),
     )
 
@@ -270,13 +270,13 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
         # B17-B18
         _row("boards.*.xvc.reach", "enum", "auto", "Boards",
              "How XVC reaches the harness: through the hub's tunnel, board SSH or directly",
-             at="xvc.py:126", scope="board", apply="reopen", choices=reach),
+             at="xvc.py:140", scope="board", apply="reopen", choices=reach),
         _row("boards.*.xvc.user", "str", "", "Boards",
              "The board-SSH user for XVC (empty: the board's SSH link, else root)",
-             at="xvc.py:284", scope="board", apply="reopen", check=_word("user name")),
+             at="xvc.py:312", scope="board", apply="reopen", check=_word("user name")),
         _row("boards.*.xvc.host", "str", "", "Boards",
              "The board-SSH host for XVC (empty: the board's own address)",
-             at="xvc.py:130", scope="board", apply="reopen", advanced=True,
+             at="xvc.py:144", scope="board", apply="reopen", advanced=True,
              check=_word("host name")),
         # B19-B20: SYSMON over JTAG (xsdb through hw_server, or an OpenOCD adapter)
         _row("boards.*.sysmon.backend", "enum", "xsdb", "Boards",
@@ -313,15 +313,15 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
              at="telemetry.py:407", scope="board"),
         # A.12 L1-L3 (LINUX-CLAIM): the Linux harness's SSH, claimed with your key
         _row("boards.*.ssh.user", "str", "", "Boards",
-             "The Linux harness's SSH login (empty: root)", at="claim.py:338",
+             "The Linux harness's SSH login (empty: root)", at="claim.py:372",
              scope="board", apply="reopen", check=_word("user name")),
         _row("boards.*.ssh.key", "path", "", "Boards",
              "The private key Harness Manager's ssh uses for this board (empty: your ssh "
              "default); a claim sends its .pub. The key itself is never read",
-             at="claim.py:899", scope="board", apply="reopen"),
+             at="claim.py:940", scope="board", apply="reopen"),
         _row("boards.*.ssh.host_key", "str", "", "Boards",
              "The board's pinned SSH host key, written by `board claim` (a changed key is "
-             "refused; clear it only for a re-provisioned board)", at="claim.py:340",
+             "refused; clear it only for a re-provisioned board)", at="claim.py:374",
              scope="board", apply="reopen", check=_host_key),
     )
 
@@ -335,18 +335,18 @@ def _slot_rows() -> tuple[Setting, ...]:
     return (
         _row(_os.CARD_WRITE_BPS_KEY, "int", _os.CARD_WRITE_BPS, "Harness + kits",
              "How fast the board's user microSD takes a write, bytes a second (B2: ~70 KB/s; "
-             "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:201",
+             "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:205",
              scope="pack", advanced=True, env=_os.CARD_WRITE_BPS_ENV, check=_positive),
         _row(_os.CARD_READ_BPS_KEY, "int", _os.CARD_READ_BPS, "Harness + kits",
              "How fast the board reads its user microSD back, bytes a second (B2: 14-135 "
-             "KB/s, the slowest is the default)", at="os_slots.py:202", scope="pack",
+             "KB/s, the slowest is the default)", at="os_slots.py:206", scope="pack",
              advanced=True, env=_os.CARD_READ_BPS_ENV, check=_positive),
         _row(_os.JOB_TIMEOUT_KEY, "float", _os.JOB_TIMEOUT_S, "Harness + kits",
              "The least cap on a whole OS-slot push or verify, in seconds (a bigger image "
-             "gets its size at the card's rates, x1.5)", at="os_slots.py:233", scope="pack",
+             "gets its size at the card's rates, x1.5)", at="os_slots.py:237", scope="pack",
              env=_os.JOB_TIMEOUT_ENV, check=_positive),
         _row(_os.STALL_KEY, "float", _os.STALL_S, "Harness + kits",
              "How long an OS-slot push or its card job may go without moving a byte before "
-             "it is stuck, in seconds", at="os_slots.py:234", scope="pack",
+             "it is stuck, in seconds", at="os_slots.py:238", scope="pack",
              env=_os.STALL_ENV, check=_positive),
     )
