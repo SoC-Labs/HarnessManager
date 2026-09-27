@@ -115,6 +115,13 @@ TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "config set-secret|unset-secret": ("KEY", "SET", "BACKEND", "WHERE", "REACHABLE", "WHY"),
     "config path": ("WHAT", "PATH", "EXISTS", "VIEW"),
     "config test": ("SECTION", "NAME", "STEP", "OK", "DETAIL", "HINT"),
+    # lane LM5 (cli/cmd_display.py): the Live display, the board's LCD pixel for pixel
+    "display snapshot": ("BOARD_ID", "PATH", "FORMAT", "WIDTH", "HEIGHT", "BYTES", "STATE",
+                         "MODE", "OWNER", "EXACT", "BADGES", "HATCHED", "SEQ"),
+    "display status": ("BOARD_ID", "AVAILABLE", "STATE", "MODE", "OWNER", "EXACT", "BADGES",
+                       "HATCHED", "VIEWERS", "FPS", "RATE", "REASON"),
+    "display show": ("TIME", "BOARD_ID", "STATE", "MODE", "OWNER", "EXACT", "SEQ", "HATCHED",
+                     "FPS", "BADGES"),
 }
 
 

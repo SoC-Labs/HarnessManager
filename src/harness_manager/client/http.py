@@ -82,6 +82,36 @@ class Http:
     def get(self, path: str, **kw: Any) -> dict[str, Any]:
         return self.request("GET", path, **kw)
 
+    def get_bytes(self, path: str, *, timeout: float | None = None) -> tuple[bytes, dict[str, str]]:
+        """``GET`` a route whose success is not JSON (``display.png``): the body and the
+        headers (names lower-cased). A failure is the error envelope, raised as ``request``
+        raises it."""
+        headers = {"Authorization": f"Bearer {self.token}", "Accept": "*/*"}
+        conn = http.client.HTTPConnection(self.host, self.port,
+                                          timeout=timeout or self.timeout)
+        try:
+            conn.request("GET", f"{API}{path}", headers=headers)
+            resp = conn.getresponse()
+            status, raw = resp.status, resp.read()
+            got = {k.lower(): v for k, v in resp.getheaders()}
+        except (OSError, http.client.HTTPException) as exc:
+            raise UnreachableError(
+                f"harness-manager-daemon at {self.base_url} did not answer ({exc})",
+                hint="`harness-manager daemon status` checks it; HARNESS_MANAGER_NO_DAEMON=1 bypasses it") \
+                from exc
+        finally:
+            conn.close()
+        if 200 <= status < 300:
+            return raw, got
+        try:
+            payload = json.loads(raw) if raw else {}
+        except ValueError:
+            payload = {}
+        err = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(err, dict):
+            raise error_from_json(err)
+        raise HarnessError(f"harness-manager-daemon answered HTTP {status} with no error object")
+
     def post(self, path: str, body: Any = None, **kw: Any) -> dict[str, Any]:
         return self.request("POST", path, {} if body is None else body, **kw)
 
