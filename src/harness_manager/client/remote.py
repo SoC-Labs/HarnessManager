@@ -33,6 +33,8 @@ How it behaves where the in-process engine would differ:
   ``/panel`` routes: ``support``/``state``/``frame``/``locate`` as the adapter protocol
   says, plus ``presence()`` and ``identify_until()`` from the daemon's presence service.
   The daemon owns presence, so ``hello`` is UNAVAILABLE and nothing is ``offer``ed.
+- **The Live display** (``engine.display``, ``client/display.py``): the daemon's display
+  routes, the status, a still (PNG or raw) and a live view over its WebSocket.
 - **Not proxied**: the debug adapter's OpenOCD command-line pieces (OpenOCD runs
   in the daemon) and the storage adapter's ``locate``.
 """
@@ -230,6 +232,9 @@ class RemoteEngine:
         self.xvc = RemoteXvc(self)             # lane XVC-CORE: fabric debug over XVC
         self.board_claim = RemoteClaim(self)   # lane LINUX-CLAIM: the Linux harness's SSH claim
         self.telemetry = RemoteTelemetry(self)
+        from .display import RemoteDisplay
+
+        self.display = RemoteDisplay(self)     # the Live display (LCD mirror) routes
         self._mu = threading.RLock()
         self._sessions: dict[str, RemoteSession] = {}
         self._packs: dict[str, RemotePack] | None = None

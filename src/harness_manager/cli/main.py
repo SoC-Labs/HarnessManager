@@ -400,6 +400,11 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_config
     cmd_config.register(sub)
     verbs["config"] = sub.choices["config"]
+
+    # -- display (lane LM5: the Live display, the board's LCD pixel for pixel) -------------
+    from . import cmd_display
+    cmd_display.register(sub)
+    verbs["display"] = sub.choices["display"]
     return p
 
 

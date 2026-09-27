@@ -240,7 +240,28 @@ panel mirror TARGET
     The panel's text grid (read from the board, or rebuilt on bare metal).
 identify TARGET [--seconds N]
     Blink the panel's backlight so you can tell which board it is (Linux
-    harness): 1 to 30 seconds, 10 by default; 0 stops."""
+    harness): 1 to 30 seconds, 10 by default; 0 stops.
+
+The Live display mirrors the panel pixel for pixel (the Linux harness's
+lcd_mirror). It is read-only: nothing reaches the panel. On a board behind a
+hub only the lease holder sees it (exit 4 names the holder); a board without
+lcd_mirror exits 12 with the reason. (`lab TARGET display` is another thing:
+who drives the panel, the harness or the DUT.)
+
+display TARGET snapshot [-o FILE] [--scale 1..4] [--hatch] [--raw]
+    Write the current picture to a PNG (default display-<board>-<time>.png
+    here; -o names the file or a directory) and print its path and one status
+    line: state, mode, owner, exact or not, badges. --scale 2 gives 640x480;
+    --hatch greys the tiles the mirror does not know yet. --raw writes the
+    panel's own 153,600 bytes of RGB565 little-endian instead.
+display TARGET status
+    The mirror's state, mode, owner, badges, rate and viewers, and whether it
+    can open here (the reason when not). --json prints every field.
+display TARGET show [--rate HZ] [--for SECONDS]
+    A live view in this terminal: half-block truecolor at a reduced scale,
+    redrawn in place, when the terminal has truecolor (COLORTERM=truecolor);
+    otherwise one status line per refresh. 4 refreshes a second by default.
+    Ctrl-] exits (Ctrl-C too). --json needs --for and prints one object."""
 
 HUBS = """\
 A lab board sits behind a hub (fpgahub). No hub is the default: a board on your
