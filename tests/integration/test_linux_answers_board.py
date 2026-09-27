@@ -171,6 +171,39 @@ def test_the_identity_lock_refuses_a_flip_to_the_booted_slot_with_the_fix(make, 
     assert not isinstance(exc.value, W.ClaimLockedError) and fake.slots.deflt == "B"
 
 
+@pytest.fixture
+def with_card(tmp_path, monkeypatch):
+    from tests.fakes.t2_overlays import SYNTH_RM_ID, make_overlay, use_overlay_dirs
+
+    root = tmp_path / "overlays"
+    make_overlay(root, "synth", rm_id=SYNTH_RM_ID, static_id=LINUX_SID)
+    use_overlay_dirs(monkeypatch, root)
+    fake = answers_board(usd_card="da", boot_rm_id=SYNTH_RM_ID)
+    monkeypatch.setenv(IDENTIFY_PORT_ENV, str(fake.identify_port))
+    session = board_session(fake)
+    yield fake, session
+    session.close()
+    fake.stop()
+
+
+def test_a_d13_card_commit_refused_by_the_identity_lock_says_push_commit_reboot(with_card):
+    fake, session = with_card
+    fake._op_commit = lambda request: {"ok": False,
+                                       "err": "identity lock: image 0x0badcafe != fabric "
+                                              "0x72bb0a36"}
+    with pytest.raises(W.IdentityLockError) as exc:
+        SlotService().card_commit(session)
+    assert exc.value.kind == W.LOCK_MISMATCH and "card commit of synth" in exc.value.message
+    assert "slot commit" in exc.value.hint and "harness-manager info" not in exc.value.hint
+    assert fake.commits == []
+
+
+def test_twin_the_same_card_commits_when_no_lock_is_reported(with_card):
+    fake, session = with_card
+    out = SlotService().card_commit(session)
+    assert out["rm_name"] == "synth" and fake.commits == [("synth", out["slot"])]
+
+
 # --- 5. additive fields: claimed, the slot feature by name, codes --------------------------------
 
 

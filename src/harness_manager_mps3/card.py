@@ -35,7 +35,6 @@ from dataclasses import replace
 from typing import Any
 
 from pyverify import rm_id as rmid
-from pyverify.client import IDENTITY_LOCK_PREFIX
 from pyverify.swap import SwapOrchestrator
 
 from harness_manager.core.errors import (
@@ -49,6 +48,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.pack import CardStatus, Progress
 
+from . import slot_words
 from .constants import IMPL_LINUX
 
 log = logging.getLogger(__name__)
@@ -287,10 +287,11 @@ def _usd_error(what: str, err: str) -> HarnessError:
                                  hint="only the running pair can be committed")
     if e == "store busy":
         return HeldError(f"{what}: the card store is busy", hint="try again in a moment")
-    if e.startswith(IDENTITY_LOCK_PREFIX):
-        return RefusedError(f"{what}: {e}",
-                            hint="the harness's identity is locked; `harness-manager info "
-                                 "TARGET` shows why")
+    lock = slot_words.identity_lock_error(e, what)
+    if lock is not None:
+        # The same words as a swap or a slot act refused by it (LINUX-ANSWERS): mismatch
+        # (push, commit, reboot) or unknown (which side cannot be read), never "give up".
+        return lock
     if e == "unavailable":
         return UnavailableError(CAPABILITY, "the harness's card store is unavailable")
     return ActionFailedError(f"{what} failed: {e or 'no reason given'}",

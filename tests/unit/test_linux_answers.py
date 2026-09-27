@@ -99,6 +99,35 @@ def test_a_swap_refused_by_the_identity_lock_gets_the_same_words():
                       IncompatibleError)
 
 
+def test_a_d13_card_commit_refused_by_the_identity_lock_gets_the_same_words():
+    # identity.c refuses a D13 `commit` too: the card's words are slot_words', not the old
+    # "the harness's identity is locked; see info" (INTEG-W4, linux-answers' follow-up)
+    from harness_manager_mps3.card import _usd_error
+
+    exc = _usd_error("card commit of nanosoc",
+                     "identity lock: image 0x0badcafe != fabric 0x72bb0a36")
+    assert isinstance(exc, W.IdentityLockError) and exc.kind == W.LOCK_MISMATCH
+    assert exc.code == ExitCode.REFUSED and not isinstance(exc, IncompatibleError)
+    assert "card commit of nanosoc" in exc.message and "0x0badcafe" in exc.message
+    for step in ("slot push", "slot commit", "reboot"):
+        assert step in exc.hint
+    assert "harness-manager info" not in exc.hint
+    unknown = _usd_error("card commit of nanosoc", "identity lock: no valid stage0 status block")
+    assert unknown.kind == W.LOCK_UNKNOWN and unknown.fabric_unknown
+    assert "refuses slot writes" in unknown.hint
+
+
+@pytest.mark.parametrize("err,cls", [("rm mismatch", IncompatibleError),
+                                     ("stale key", IncompatibleError),
+                                     ("store busy", HeldError), ("no card", RefusedError)])
+def test_twin_a_card_commit_refused_for_another_reason_is_not_an_identity_lock(err, cls):
+    from harness_manager_mps3.card import _usd_error
+
+    exc = _usd_error("card commit of nanosoc", err)
+    assert isinstance(exc, cls) and not isinstance(exc, W.IdentityLockError)
+    assert "identity lock" not in exc.message and "slot push" not in (exc.hint or "")
+
+
 # --- 2. fallback detection ----------------------------------------------------------------------
 
 
