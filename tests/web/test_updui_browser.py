@@ -390,6 +390,55 @@ def test_the_admin_policy_disables_what_it_limits_and_says_so(page_factory, daem
     assert sim.update_settings["auto"] == "off"
 
 
+def next_check_text(at: float, every: str = "6 h") -> str:
+    """What the card says for the daemon's ``next_check`` (local HH:MM; the date if not today)."""
+    t = time.localtime(at)
+    same_day = time.strftime("%Y-%m-%d", t) == time.strftime("%Y-%m-%d", time.localtime())
+    when = time.strftime("%H:%M" if same_day else "%Y-%m-%d %H:%M", t)
+    return f"next check at {when}, then every {every}"
+
+
+NOTES = "Faster consoles.\nThe touch bus no longer wedges."
+
+
+@pytest.mark.week_plan("update_api", sim=True)
+def test_settings_shows_the_next_check_time_and_the_notes_collapsed(page_factory, daemon):
+    """SMALL-4: GET /update/app next_check and last_check.notes on the Updates card."""
+    sim = sim_of(daemon)
+    at = time.time() + 2 * 3600
+    sim.app_next_check = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at))
+    sim.app_last_check = {"at": time.time() - 60, "interval_s": 21600, "channel": "stable",
+                          "serial": 4, "available": NEW, "staged": False, "error": "",
+                          "notes": NOTES}
+    page = page_factory(**APP)
+    card = open_settings(page)
+    expect(card.locator('[data-testid="next-check"]')).to_have_text(next_check_text(at), timeout=T)
+    fold = card.locator('[data-testid="last-check-notes"]')
+    expect(fold).to_contain_text(f"What's new in {NEW}")
+    text = card.locator('[data-testid="last-check-notes-text"]')
+    expect(text).to_be_hidden()                                        # collapsed
+    card.locator('[data-action="last-check-notes"]').click()
+    expect(text).to_be_visible()
+    assert text.inner_text() == NOTES
+    assert not page.errors, page.errors
+
+
+@pytest.mark.week_plan("update_api", sim=True)
+def test_negative_twin_without_a_schedule_or_notes_the_card_is_as_before(page_factory, daemon):
+    sim = sim_of(daemon)
+    sim.app_next_check = None                    # an older daemon, or no timer
+    sim.app_last_check = {"at": time.time() - 900, "interval_s": 21600, "channel": "stable",
+                          "serial": 4, "available": "", "error": ""}
+    page = page_factory(**APP)
+    card = open_settings(page)
+    nxt = card.locator('[data-testid="next-check"]')
+    expect(nxt).to_contain_text("about ", timeout=T)
+    expect(nxt).not_to_contain_text("next check at")
+    expect(card.locator('[data-testid="last-check"]')).to_contain_text("up to date")
+    assert card.locator('[data-testid="last-check-notes"]').count() == 0
+    assert not page.errors, page.errors
+
+
 @pytest.mark.week_plan("update_api", sim=True)
 def test_negative_twin_without_a_policy_every_setting_is_the_users(page_factory, daemon):
     sim = sim_of(daemon)

@@ -336,6 +336,25 @@ def test_status_shows_the_pointer_the_staged_version_and_the_effective_mode(worl
     assert body["staged"] == [] and body["bad"][NEW]["reason"] == "exited while starting"
 
 
+def test_status_serves_the_checkers_next_check_as_an_iso_time(world):
+    """SMALL-4: ``next_check`` is the checker's timer (additive); null when no timer runs."""
+    from harness_manager.services.update import selfupdate as su
+
+    w = world
+    body = w["client"].get("/api/v1/update/app", headers=H).json()
+    assert "next_check" in body and body["next_check"] is None       # not started here
+    w["d"].update_checker.next_at = 1_790_000_000.0                  # the timer's next tick
+    body = w["client"].get("/api/v1/update/app", headers=H).json()
+    assert body["next_check"] == "2026-09-21T14:13:20Z"
+    # the twins: self-update off, or a developer install, never checks: null
+    su.save_settings(state_dir(), auto="off")
+    assert w["client"].get("/api/v1/update/app", headers=H).json()["next_check"] is None
+    su.save_settings(state_dir(), auto="stage")
+    assert w["client"].get("/api/v1/update/app", headers=H).json()["next_check"] is not None
+    w["svc"].app().dev_install = "this is a developer install (pip install -e)"
+    assert w["client"].get("/api/v1/update/app", headers=H).json()["next_check"] is None
+
+
 def test_settings_are_capped_by_the_admin_policy(world):
     w = world
     c = w["client"]

@@ -18,6 +18,10 @@
   minutes). ``notify``: published only. ``off``, and every developer install: the checker
   does nothing at all (no fetch, no event).
 - **It never applies anything.** Applying is ``POST /update/app/apply``, on a click.
+- **What it records** (``last_check.json``, served as ``GET /update/app`` ``last_check``): the
+  outcome, and when an update is found ``notes``: the release's signed notes, else a one-line
+  summary (``summary``). ``next_check()`` is when the timer checks next (ISO, UTC; None
+  before ``start`` and after ``stop``): the route serves it as ``next_check`` (SMALL-4).
 
 ``HARNESS_MANAGER_UPDATE_FIRST_CHECK_S`` moves the first check (tests, the spike).
 
@@ -35,6 +39,7 @@ import random
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +109,8 @@ class UpdateChecker:
         self.max_backoff_s = max_backoff_s
         self.backoff_s = 0.0
         self.next_in_s: float | None = None
+        #: when the timer checks next (``now()`` seconds); None: no timer runs
+        self.next_at: float | None = None
         self._offline_logged = False
         self._stop = threading.Event()
         self._kick = threading.Event()       # stop, or a settings change: look again now
@@ -115,6 +122,7 @@ class UpdateChecker:
 
     def start(self) -> UpdateChecker:
         if self._thread is None:
+            self.next_at = self.now() + self.first_delay_s
             if self.bus is not None and hasattr(self.bus, "subscribe"):
                 self._unsub = self.bus.subscribe("settings.changed", self._on_settings)
             self._thread = threading.Thread(target=self._loop, daemon=True,
@@ -125,14 +133,24 @@ class UpdateChecker:
     def stop(self) -> None:
         self._stop.set()
         self._kick.set()
+        self.next_at = None
         if self._unsub is not None:
             self._unsub()
             self._unsub = None
 
     def _on_settings(self, event: Any) -> None:
         keys = set((getattr(event, "data", None) or {}).get("keys") or ())
-        if keys & WAKE_KEYS:
+        if keys & WAKE_KEYS and not self._stop.is_set():
+            if self._thread is not None:
+                self.next_at = self.now()        # checked again at once (WAKE_MIN_S apart)
             self._kick.set()
+
+    def next_check(self) -> str | None:
+        """When the timer checks next, as an ISO time (UTC); None when no timer runs."""
+        at = self.next_at
+        if at is None:
+            return None
+        return datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _loop(self) -> None:
         delay = self.first_delay_s
@@ -150,6 +168,8 @@ class UpdateChecker:
             rec = self.tick()
             delay = self.delay_after(rec)
             self.next_in_s = delay
+            if not self._stop.is_set():
+                self.next_at = self.now() + delay
 
     def delay_after(self, rec: dict[str, Any]) -> float:
         """Seconds to the next check after ``rec`` (the interval, a backoff, or a retry)."""
@@ -219,6 +239,7 @@ class UpdateChecker:
         if offer is None:
             su.write_json(su.last_check_path(self.state_dir), rec)
             return rec
+        rec["notes"] = self.notes(offer) or self.summary(ch, offer)
         staged = self._staged(app, offer.version)
         if eff["auto"] == "stage" and not staged:
             staged = self._stage(svc, verified, offer, ch, rec)
@@ -235,11 +256,24 @@ class UpdateChecker:
         return info.get("state") == STATE_STAGED and \
             app.layout.python(version, windows=app.windows).exists()
 
+    @staticmethod
+    def notes(offer: Any) -> str:
+        """The release's signed notes (plain text), "" when it has none."""
+        return getattr(offer, "notes", "") or (getattr(offer, "extra", None) or {}).get("notes", "")
+
+    @staticmethod
+    def summary(ch: Any, offer: Any) -> str:
+        """One line for an offer whose release has no notes."""
+        where = f" on the {ch.channel} channel" if getattr(ch, "channel", "") else ""
+        url = getattr(offer, "notes_url", "") or ""
+        return (f"harness-manager {offer.version} is available{where} (serial {ch.serial})"
+                + (f"; release notes: {url}" if url else ""))
+
     def _announce(self, ch: Any, offer: Any, staged: bool, rec: dict[str, Any]) -> None:
         key = [offer.version, bool(staged)]
         if rec.get("announced") == key:
             return
-        notes = getattr(offer, "notes", "") or (getattr(offer, "extra", None) or {}).get("notes", "")
+        notes = self.notes(offer)
         if self.bus is not None:
             self.bus.publish(Event("update.available", "", {
                 "channel": ch.channel, "serial": ch.serial, "harness": ch.harness_current,

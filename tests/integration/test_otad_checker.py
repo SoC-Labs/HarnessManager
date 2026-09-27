@@ -233,3 +233,64 @@ def test_the_timer_runs_the_first_check_and_stops(rig):
     assert topics(r, "update.available")
     assert r["checker"].next_in_s == pytest.approx(6 * 3600)
     r["checker"].stop()
+
+
+# --- SMALL-4: last_check.notes and the timer's next_check ------------------------------------------
+
+
+def test_a_found_update_records_its_notes_or_a_one_line_summary(rig):
+    r = rig
+    notes = "Faster consoles.\nThe touch bus no longer wedges."
+    publish_app(r, "0.2.0", serial=1, notes=notes)
+    rec = r["checker"].tick()
+    assert rec["available"] == "0.2.0" and rec["notes"] == notes
+    assert json.loads(su.last_check_path(r["sd"]).read_text())["notes"] == notes
+    assert topics(r, "update.available")[0]["notes"] == notes          # the event is unchanged
+    # a release without notes: one line that says what was found
+    publish_app(r, "0.3.0", serial=2)
+    rec = r["checker"].tick()
+    assert rec["notes"] == "harness-manager 0.3.0 is available on the stable channel (serial 2)"
+    assert "\n" not in rec["notes"]
+
+
+def test_negative_twin_no_update_found_records_no_notes(rig):
+    r = rig
+    publish_app(r, "0.2.0", serial=1, notes="not for you")
+    r["app"].mark_bad("0.2.0", "the daemon exited while starting", phase="start")
+    rec = r["checker"].tick()
+    assert rec["available"] == "" and "notes" not in rec
+    assert "notes" not in json.loads(su.last_check_path(r["sd"]).read_text())
+
+
+def test_next_check_is_the_timers_schedule_and_none_without_one(rig):
+    r = rig
+    clock = [1_790_000_000.0]
+    c = UpdateChecker(lambda: r["svc"], None, r["sd"], first_delay_s=3600, rng=lambda: 0.5,
+                      now=lambda: clock[0])
+    assert c.next_check() is None                                     # no timer yet
+    c.start()
+    try:
+        assert c.next_check() == "2026-09-21T15:13:20Z"               # now + the first delay
+        clock[0] += 60
+        c._on_settings(Event("settings.changed", "", {"keys": ["updates.channel"]}))
+        assert c.next_check() == "2026-09-21T14:14:20Z"               # a change checks at once
+        c._on_settings(Event("settings.changed", "", {"keys": ["theme"]}))
+        assert c.next_check() == "2026-09-21T14:14:20Z"               # the twin: not its key
+    finally:
+        c.stop()
+    assert c.next_check() is None                                     # stopped: none
+
+
+def test_after_a_check_next_check_is_one_interval_on(rig):
+    r = rig
+    publish_app(r, "0.2.0", serial=1)
+    r["checker"].start()
+    deadline = time.monotonic() + 10
+    while r["checker"].next_in_s is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert r["checker"].next_in_s == pytest.approx(6 * 3600)
+    assert r["checker"].next_at == pytest.approx(time.time() + 6 * 3600, abs=30)
+    iso = r["checker"].next_check()
+    assert iso is not None and iso.endswith("Z") and "T" in iso
+    r["checker"].stop()
+    assert r["checker"].next_check() is None

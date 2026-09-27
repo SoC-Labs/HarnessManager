@@ -518,11 +518,25 @@ function Choice({ label, testid, value, options, locked, onPick, busy }) {
   </div>`;
 }
 
+// "HH:MM" of an ISO time (the daemon's next_check), with the date when it is not today.
+function hhmm(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  const t = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const today = new Date();
+  return d.toDateString() === today.toDateString() ? t
+    : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${t}`;
+}
+
 function nextCheck(st) {
   const eff = st.effective || {};
   if (st.dev_install) return "never: this is a developer install";
   if (eff.auto === "off") return `never: ${eff.why || "self-update is off"}`;
   if (!eff.check_interval_s) return "never: the policy's check_interval is 0";
+  // the daemon's own schedule (GET /update/app next_check), when its checker runs
+  const at = st.next_check ? hhmm(st.next_check) : "";
+  if (at) return `next check at ${at}, then every ${hours(eff.check_interval_s)}`;
   const lc = st.last_check;
   if (!lc || !lc.at) return "about a minute after the service starts, then every " + hours(eff.check_interval_s);
   if (lc.error) return `after a back-off (the last check failed), then every ${hours(eff.check_interval_s)}`;
@@ -545,7 +559,17 @@ function LastCheck({ st }) {
   }
   return html`${when}: ${lc.channel ? html`<span class="mono">${lc.channel}</span>${lc.serial ? ` #${lc.serial}` : ""}, ` : ""}${lc.available
     ? html`<strong>${lc.available}</strong> offered${lc.staged ? " (downloaded)" : ""}` : "up to date"}${lc.skipped_bad
-    ? html`<div class="sub">skipped ${lc.skipped_bad.version}: marked bad</div>` : null}`;
+    ? html`<div class="sub">skipped ${lc.skipped_bad.version}: marked bad</div>` : null}${lc.available && lc.notes
+    ? html`<${CheckNotes} version=${lc.available} notes=${lc.notes} />` : null}`;
+}
+
+// The last check's release notes (last_check.notes: the signed notes, or a one-line summary),
+// collapsed until asked for.
+function CheckNotes({ version, notes }) {
+  return html`<details class="check-notes" data-testid="last-check-notes">
+    <summary data-action="last-check-notes">What's new in ${version}</summary>
+    <pre class="update-notes" data-testid="last-check-notes-text">${notes}</pre>
+  </details>`;
 }
 
 export function UpdatesCard() {

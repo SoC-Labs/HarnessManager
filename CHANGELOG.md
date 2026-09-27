@@ -133,6 +133,10 @@ owners.
   `boards.toml`: `harness-manager power show`, and a cold `power cycle`.
 - Signed updates of the harness and the app (`harness-manager update`). The channel is
   not live yet: it refuses every release until the release keys are made.
+- Settings > Updates says when the service checks next ("next check at 14:05, then every
+  6 h") and, when a check found an update, its release notes (collapsed; a one-line
+  summary when the release has none). `GET /update/app` gains `next_check` and
+  `last_check.notes`.
 - Harness versions: `harness-manager harness list|show|fetch|install|pin|unpin|history|
   rollback|mirror` (and the `/harness` API) lists every release of the board's harness
   catalogue with a verdict for the board (fits, re-key, needs Debug USB or hub,

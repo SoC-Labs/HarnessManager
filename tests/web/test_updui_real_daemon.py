@@ -294,3 +294,33 @@ def test_real_daemon_negative_twin_without_a_policy_the_channel_is_the_users(tmp
         expect(beta).to_have_attribute("aria-pressed", "true", timeout=T)
         saved = json.loads((w.state / "update" / "settings.json").read_text())
         assert saved["channel"] == "beta"
+
+
+# --- SMALL-4: next_check and last_check.notes, from the real route ---------------------------------
+
+
+def test_real_daemon_the_card_shows_the_checkers_next_check_and_the_notes(tmp_path, monkeypatch,
+                                                                         pages):
+    from tests.web.test_updui_browser import NOTES, next_check_text
+
+    with World(tmp_path, monkeypatch) as w:
+        at = time.time() + 3 * 3600
+        w.daemon.update_checker.next_at = at                 # the timer (not started here)
+        w.write("last_check.json", {"at": time.time() - 30, "mode": "stage", "interval_s": 21600,
+                                    "error": "", "channel": "stable", "serial": 7,
+                                    "available": NEW, "staged": True, "notes": NOTES})
+        page = pages(w)
+        card = open_settings(page)
+        expect(card.locator('[data-testid="next-check"]')).to_have_text(next_check_text(at),
+                                                                          timeout=T)
+        text = card.locator('[data-testid="last-check-notes-text"]')
+        expect(text).to_be_hidden()
+        card.locator('[data-action="last-check-notes"]').click()
+        expect(text).to_have_text(NOTES)
+        # the twin: no timer runs: the card estimates, as before
+        w.daemon.update_checker.next_at = None
+        page.reload()
+        card = open_settings(page)
+        expect(card.locator('[data-testid="next-check"]')).not_to_contain_text("next check at",
+                                                                               timeout=T)
+        expect(card.locator('[data-testid="next-check"]')).to_contain_text("then every 6 h")

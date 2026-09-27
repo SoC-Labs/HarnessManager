@@ -356,11 +356,21 @@ def register(ctx: RouteContext) -> None:
     def _opt_num(b: dict[str, Any], key: str, default: float | None) -> float | None:
         return _number(b, key) if b.get(key) is not None else default
 
+    def next_check(view: dict[str, Any]) -> str | None:
+        """When the checker looks next (ISO); None when it never will (off, a developer
+        install, a check_interval of 0) or its timer does not run (SMALL-4)."""
+        eff = view.get("effective") or {}
+        if view.get("dev_install") or eff.get("auto") == "off" or \
+                not eff.get("check_interval_s"):
+            return None
+        return d.update_checker.next_check()
+
     @api.get("/update/app")
     def app_status() -> Any:
         svc = service()
         view = su.status_view(svc, d.state_dir)
         view["apply"] = applier.status()
+        view["next_check"] = next_check(view)
         return _JSON(ok(**view))
 
     @api.post("/update/app/apply")

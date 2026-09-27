@@ -256,6 +256,7 @@ class WeekPlanSim:
                                            "check_interval_s": 21600, "problems": []}
         self.app_dev_install = ""
         self.app_last_check: dict[str, Any] | None = None
+        self.app_next_check: str | None = None   # the daemon checker's schedule (ISO; SMALL-4)
         self.app_last_apply: dict[str, Any] | None = None
         self.health_version = ""
         self.app_soft_busy: list[dict[str, Any]] = []    # more soft-busy rows (GDB, XVC), as
@@ -998,7 +999,8 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
                   last_check=sim.app_last_check, last_apply=sim.app_last_apply,
                   policy=dict(sim.app_policy),
                   settings=dict(sim.update_settings), effective=effective(),
-                  dev_install=sim.app_dev_install, apply=apply_view())
+                  dev_install=sim.app_dev_install, apply=apply_view(),
+                  next_check=sim.app_next_check)
 
     @app.post(f"{API}/update/app/apply", status_code=202)
     def app_apply(body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
