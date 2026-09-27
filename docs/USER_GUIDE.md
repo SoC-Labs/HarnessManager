@@ -895,8 +895,8 @@ line `--consent "REKEY 0x72BB0A36"`. `--yes` never implies it.
 - The plan names the board, the lease holder and the queue, and you type that exact phrase:
   `INSTALL mps3_01_pl HELD BY you@host 0 QUEUED`. On the command line:
   `--door hub --board-phrase "INSTALL mps3_01_pl HELD BY you@host 0 QUEUED"`.
-- fpgahub writes the config SD's `nanosoc.bit`, and the board is rebooted over its MCC
-  share. A release that changes any other SD file needs the Debug USB here.
+- fpgahub writes the config SD's `nanosoc.bit`, and the board is rebooted by the MCC on the
+  hub (paced). A release that changes any other SD file needs the Debug USB here.
 - The write itself takes about 70 seconds. Do not start a second install, or reset the
   board, while it runs.
 - **Auto-revert** is on by default: if the board answers neither ping nor version for 60

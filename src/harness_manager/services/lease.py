@@ -931,7 +931,7 @@ class LeaseService:
              max_age_s: float | None = None) -> dict[str, Any] | None:
         """``GET /boards/{bid}/lease`` (docs/LEASE_REQUESTS.md, API)::
 
-            lease:    {target, holder, user, expires_at, mine,
+            lease:    {target, holder, user, expires_at, mine, here,
                        holder_kind: "hm" | "unknown", holder_kind_reason} | null   # D12
             hub:      HOST | null
             board:    the physical board, hub.board_id() (D4) | null
@@ -950,6 +950,11 @@ class LeaseService:
 
         ``reasked`` is known to the process that is waiting (D9's limit): another process
         (the CLI's ``lease show``) says False.
+
+        ``mine`` is by principal: also true when ANOTHER session of the same principal holds
+        it (every lab session is david@mapstone-dev). ``here`` (REVIEW-W5 1, additive) is true
+        only when this process holds the lease token. Background contact goes by ``here``
+        (``services/quiet.py``); explicit actions by ``mine``.
 
         ``holder_kind`` (D12, ``holder_kind()``): ``"hm"`` when a Harness Manager session is
         known to hold the lease (this one, or one that answered our request), else
@@ -1005,7 +1010,8 @@ class LeaseService:
             out["lease"] = {"target": hub.target, "holder": holder,
                             "expires_at": getattr(shown, "expires_at", "")
                             or (stored.expires_at if here and stored else ""),
-                            "mine": mine, "user": getattr(shown, "user", "") or ""}
+                            "mine": mine, "here": here,
+                            "user": getattr(shown, "user", "") or ""}
         queue = list(getattr(shown, "queue", ()) or ())
         out["queue"] = [{"position": int(getattr(e, "position", 0) or 0),
                          "holder": getattr(e, "holder", ""), "user": getattr(e, "user", ""),

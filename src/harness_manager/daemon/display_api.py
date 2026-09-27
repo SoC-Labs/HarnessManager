@@ -48,6 +48,7 @@ import asyncio
 import json
 import logging
 import threading
+from collections import deque
 from typing import Any
 
 from fastapi import Response, WebSocket, WebSocketDisconnect
@@ -72,6 +73,8 @@ FORMATS = ("png", "raw")
 RAW_FORMAT = "rgb565le"
 #: A WebSocket close reason is at most 123 bytes of UTF-8 (RFC 6455 §5.5).
 CLOSE_REASON_MAX = 123
+#: A display socket keeps at most this many unsent error frames (the latest ones).
+NOTES_MAX = 8
 #: The socket's close when the board's upstream ended for good with no error of the source's
 #: own (the console's convention); with one, 4000 + its exit code.
 CLOSE_ENDED = 1000
@@ -111,6 +114,26 @@ def _whole(value: Any, name: str, lo: int, hi: int) -> int:
 def close_reason(text: str) -> str:
     """``text`` cut to a WebSocket close reason (123 bytes of UTF-8, whole characters)."""
     return text.encode("utf-8")[:CLOSE_REASON_MAX].decode("utf-8", "ignore")
+
+
+class Notes:
+    """The error frames a display socket owes its client, the newest ``NOTES_MAX`` only: a
+    client that floods bad text frames and never reads cannot grow it (REVIEW-W5 9). One
+    event loop adds and takes: no lock."""
+
+    def __init__(self, cap: int = NOTES_MAX) -> None:
+        self._q: deque[str] = deque(maxlen=cap)
+
+    def add(self, exc: HarnessError) -> None:
+        self._q.append(json.dumps({"error": error_object(exc)}, default=str))
+
+    def take(self) -> list[str]:
+        out = list(self._q)
+        self._q.clear()
+        return out
+
+    def __len__(self) -> int:
+        return len(self._q)
 
 
 def display_source(engine: Any, session: Any) -> Any | None:
@@ -338,15 +361,15 @@ def register(ctx: RouteContext) -> None:
         except HarnessError as exc:
             await refuse(websocket, exc)
             return
-        notes: list[str] = []                         # error frames for the sender to send
+        notes = Notes()                               # error frames for the sender to send
 
         async def sender() -> None:
             wake.set()                                # the first status, and a ready picture
             while True:
                 await wake.wait()
                 wake.clear()
-                while notes:
-                    await websocket.send_text(notes.pop(0))
+                for text in notes.take():
+                    await websocket.send_text(text)
                 st = viewer.next_status()
                 if st is not None:
                     await websocket.send_text(json.dumps(st, default=str))
@@ -364,7 +387,7 @@ def register(ctx: RouteContext) -> None:
                     return
 
         def note(exc: HarnessError) -> None:
-            notes.append(json.dumps({"error": error_object(exc)}, default=str))
+            notes.add(exc)
             wake.set()
 
         async def receiver() -> None:

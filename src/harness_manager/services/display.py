@@ -112,6 +112,14 @@ class DisplayTimings:
     no_service_retry_s: float = 60.0  # a stream that closes before HELLO, with a known reason
     dim_persist_s: float = 1.0
     fps_window_s: float = 2.0
+    close_join_s: float = 5.0        # ``close`` waits this long for the upstream thread
+
+
+#: One SNAP (a keyframe's parts, or a delta's before ``snap_last``) carries at most one record
+#: per tile, so more than ``NTILES`` records, or more parts than that, is a board that never
+#: ends it: ``WireError``, the reconnect path, never an ever-growing stage (REVIEW-W5 7).
+MAX_SNAP_RECORDS = NTILES
+MAX_SNAP_PARTS = NTILES
 
 
 def _bus_of(engine: Any) -> EventBus | None:
@@ -308,7 +316,6 @@ class _Board:
         self.presents: deque[float] = deque()
         self.rx: deque[tuple[float, int]] = deque()
         self.last_pong = self.clock()
-        self._released = False
         self._last_event: tuple[Any, ...] | None = None
         self.stats = {"connects": 0, "updates": 0, "acks_sent": 0, "keys_sent": 0,
                       "keys_presented": 0, "deltas_presented": 0, "gaps": 0, "refusals": 0,
@@ -430,9 +437,10 @@ class _Board:
             ds.close()
 
     def release(self) -> None:
-        if self._released:
-            return
-        self._released = True
+        """The source drops what it holds for this upstream (the MPS3: its SSH forward).
+        Called by ``close`` and again as the upstream thread ends: no once-only flag, so a
+        forward the thread opened after ``close`` gave up waiting is released too
+        (REVIEW-W5 6; the adapter's release is idempotent)."""
         rel = getattr(self.source, "display_release", None)
         if rel is not None:
             try:
@@ -520,6 +528,15 @@ class _Board:
         t = self.t
         self.set_state("connecting", self.reason if self.state == "reconnecting" else "")
         raw = self.source.display_connect()
+        if self.stop.is_set():
+            # Closed (the lease lost, the board closed) while the connect was under way: the
+            # socket goes, and the forward the connect may have opened goes with it now.
+            try:
+                raw.close()
+            except Exception:  # noqa: BLE001 - closing never raises into the service
+                log.debug("closing a late display stream for %s", self.board_id, exc_info=True)
+            self.release()
+            return "stop"
         ds = DisplayStream(raw)
         with self.lock:
             self.stream = ds
@@ -567,6 +584,7 @@ class _Board:
         resync = True                                # nothing is presented before a whole keyframe
         staging: list[DisplayUpdate] | None = None
         pending: list[DisplayUpdate] = []
+        staged_n = pending_n = 0                     # records in staging / pending
         snap_last_seen = False
         pings: dict[int, float] = {}
         token = 0
@@ -576,9 +594,15 @@ class _Board:
         next_tick = now
         key_sent_at = now
 
+        def bounded(parts: list[DisplayUpdate], records: int, what: str) -> None:
+            if len(parts) > MAX_SNAP_PARTS or records > MAX_SNAP_RECORDS:
+                raise WireError(f"{what} ran to {len(parts)} parts and {records} tile records "
+                                f"without its last (a SNAP has at most {MAX_SNAP_RECORDS})")
+
         def resync_now(why: str) -> None:
-            nonlocal resync, staging, pending, key_sent_at
+            nonlocal resync, staging, pending, key_sent_at, staged_n, pending_n
             resync, staging, pending = True, None, []
+            staged_n = pending_n = 0
             ds.key()                                 # amendment 6: KEY after a gap
             key_sent_at = self.clock()
             self.stats["keys_sent"] += 1
@@ -601,14 +625,18 @@ class _Board:
                     last_seq = u.seq
                     if u.key:
                         if u.key_first:
-                            staging = [u]
+                            staging, staged_n = [u], len(u.tiles)
                         elif staging is not None:
                             staging.append(u)
+                            staged_n += len(u.tiles)
                         else:
                             self.stats["ignored"] += 1          # a key part without its first
+                        if staging is not None:
+                            bounded(staging, staged_n, "a keyframe")
                         if u.key_last and staging is not None:
                             self._present(staging, key=True)
                             staging, pending, resync = None, [], False
+                            staged_n = pending_n = 0
                     elif staging is not None:                    # H3: key parts are consecutive
                         self.stats["protocol_errors"] += 1
                         resync_now("a keyframe was interrupted: waiting for another")
@@ -616,9 +644,11 @@ class _Board:
                         self.stats["ignored"] += 1
                     else:
                         pending.append(u)
+                        pending_n += len(u.tiles)
+                        bounded(pending, pending_n, "a SNAP")
                         if u.snap_last or not snap_last_seen:    # H1: show a SNAP whole
                             self._present(pending, key=False)
-                            pending = []
+                            pending, pending_n = [], 0
                     if u.snap_last:
                         snap_last_seen = True
                 elif isinstance(m, Pong):                # the liveness probe (§6.1 correction 4)
@@ -825,8 +855,8 @@ class DisplayService:
         b.stop.set()
         b.close_stream()
         if b.thread.is_alive() and b.thread is not threading.current_thread():
-            b.thread.join(timeout=5)
-        b.release()
+            b.thread.join(timeout=self.timings.close_join_s)
+        b.release()           # and again as the thread ends, if it is still connecting
         b.announce_end()
         return self.status(board_id)
 

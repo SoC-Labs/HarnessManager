@@ -96,8 +96,10 @@ class LeaseService:    # additions; the existing acquire/release/view/track stay
 
 `GET /boards/{bid}/lease` adds these keys; the old ones are unchanged:
 ```
-lease:  {target, holder, user, expires_at, mine,
+lease:  {target, holder, user, expires_at, mine, here,
          holder_kind: "hm" | "unknown", holder_kind_reason} | null      # D12
+         # mine: by principal (another session of the same principal too);
+         # here: THIS process holds the token (REVIEW-W5; background reads go by it)
 queue:  [{position, holder, user, mine}]
 request: {id, message, created_at, deadline_at, position,
           answer: {answer, minutes, message, at} | null,

@@ -197,6 +197,9 @@ def test_the_hub_argv_survives_pyverifys_own_ssh_quoting():
     assert HUB_MCC_REBOOT_PY in writer
 
 
+@pytest.mark.skipif(os.name != "posix" or not Path("/bin/sh").exists(),
+                    reason="the probe is an sh script run by /bin/sh, with symlinked pythons "
+                           "(the hub's side; REVIEW-W5 16)")
 def test_the_python_probe_takes_310_and_never_the_bare_python3(tmp_path):
     assert "python3" not in hub_mcc.PY310_CANDIDATES              # never the bare one
     assert hub_mcc.PY310_CANDIDATES[0] == "python3.11"            # the hub's, first

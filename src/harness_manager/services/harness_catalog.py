@@ -263,8 +263,8 @@ def _fits_why(plan: Plan) -> str:
     back = any("ROLLBACK" in w for w in plan.warnings)
     what = []
     if plan.base and plan.via == "hub":
-        what.append("via the hub: it writes nanosoc.bit and the board is rebooted over its MCC "
-                    "share" + (" (auto-revert armed)" if plan.auto_revert else ""))
+        what.append("via the hub: it writes nanosoc.bit and the board is rebooted by the MCC "
+                    "on the hub (paced)" + (" (auto-revert armed)" if plan.auto_revert else ""))
     elif plan.base:
         what.append("the config SD is rewritten and the board rebooted")
     if plan.os_slot:

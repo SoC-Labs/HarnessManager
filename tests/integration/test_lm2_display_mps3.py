@@ -15,6 +15,7 @@ forwards stop (two then a good one does not).
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -182,12 +183,19 @@ def rig_factory(monkeypatch: pytest.MonkeyPatch) -> Any:
              block: dict[str, Any] | None = BLOCK, hub: bool = False, leases: Leases | None = None,
              pinned: bool = True, claim: bool = True, claimed: bool | None = True,
              reported_key: str = BOARD_FP, timings: DisplayTimings = FAST,
-             clock: Callable[[], float] | None = None, share_leases: bool = True) -> Rig:
+             clock: Callable[[], float] | None = None, share_leases: bool = True,
+             seed: bool = True) -> Rig:
         fake_ssh = FakeSsh(hub_loopback=False)
         monkeypatch.setattr(tunmod, "DEFAULT_LAUNCHER", fake_ssh)
         monkeypatch.setattr(tunmod, "DEFAULT_SSH_G", fake_ssh.ssh_g)
         shell = StubShell(impl=impl, features=features, block=block)
-        session = Session(_candidate(f"ssh:{HUB_HOST}" if hub else ""), shell,
+        cand = _candidate(f"ssh:{HUB_HOST}" if hub else "")
+        if seed:
+            # What the probe read as the board opened (REVIEW-W5 4: the refusal path knows
+            # the gate from this, never from a read of its own).
+            cand = dataclasses.replace(cand, identity=SimpleNamespace(
+                harness_impl=impl, features=tuple(features)))
+        session = Session(cand, shell,
                           hub=SimpleNamespace(host=HUB_HOST, target=TARGET) if hub else None)
         observed: dict[str, Any] = {"claimed": claimed, "host_key": reported_key}
         if claim:
@@ -537,14 +545,60 @@ def test_negative_twin_a_board_that_could_show_it_is_held_then_the_claim(rig_fac
     rig2 = rig_factory(hub=True, leases=Leases(holder="you@here", mine=True), claim=False)
     err = refusal(rig2.adapter, rig2.session, rig2.leases)
     assert isinstance(err, UnavailableError) and err.reason == D.NO_SSH
-    # a harness that cannot be asked now is not "never": the lease decides (HELD)
+    # a harness whose features are not known is not "never": the lease decides (HELD), and
+    # nothing reads the board to find out (REVIEW-W5 4)
     rig3 = rig_factory(hub=True, leases=Leases(holder="alice@lab", mine=False))
     rig3.session.shell = None
     assert rig3.adapter.display_gate() == ""
-    assert rig3.adapter.display_reason().startswith("the harness did not answer")
+    assert "alice@lab holds" in rig3.adapter.display_reason()
     err = refusal(rig3.adapter, rig3.session, rig3.leases)
     assert isinstance(err, HeldError) and err.holder == "alice@lab"
     assert rig.ssh.launches == [] and rig2.ssh.launches == [] and rig3.ssh.launches == []
+
+
+# --- 5c. the refusal never reads the board (REVIEW-W5 4) ---------------------------------------------
+
+
+def _seeded_rig(rig_factory: Any, clock: Clock, **kw: Any) -> Rig:
+    """A Linux board with lcd_mirror whose identity seeds the facts, on a clock we move."""
+    rig = rig_factory(hub=True, clock=clock, **kw)
+    rig.adapter._clock = clock
+    return rig
+
+
+def test_a_refusal_with_stale_facts_never_reads_the_board(rig_factory: Any) -> None:
+    """Someone else holds the lease and the cached facts are older than FACTS_TTL_S. Before
+    the fix ``facts()`` read ``version`` on 6900 (the single-client port) on the way to the
+    refusal; now the refusal uses what is known (not known is not never)."""
+    clock = Clock()
+    rig = _seeded_rig(rig_factory, clock, leases=Leases(holder="alice@lab", mine=False))
+    assert rig.adapter.display_gate() == ""                   # seeds the cache, no read
+    clock.advance(D.FACTS_TTL_S + 60)                         # the cache is stale now
+    err = refusal(rig.adapter, rig.session, rig.leases)
+    assert isinstance(err, HeldError) and err.holder == "alice@lab"
+    assert rig.adapter.display_reason() and rig.adapter.display_facts()["engine"] is True
+    assert rig.shell.reads == 0, "the refusal read the board"
+    rig.session.candidate = dataclasses.replace(rig.session.candidate, identity=None)
+    rig.adapter._facts = None                                 # nothing known at all
+    assert refusal(rig.adapter, rig.session, rig.leases).holder == "alice@lab"
+    assert rig.adapter.display_gate() == "" and rig.shell.reads == 0
+    with pytest.raises(HeldError):
+        rig.adapter.display_connect()                         # the lease first: still no read
+    assert rig.shell.reads == 0 and rig.ssh.launches == []
+
+
+def test_twin_the_holders_open_reads_version_after_the_lease_check(rig_factory: Any) -> None:
+    """The live ``version`` read belongs to ``_open_forward``, after the lease: the holder's
+    open still reads it (the port, the mode), fresh, once."""
+    clock = Clock()
+    rig = _seeded_rig(rig_factory, clock)
+    clock.advance(D.FACTS_TTL_S + 60)
+    assert refusal(rig.adapter, rig.session, rig.leases) is None and rig.shell.reads == 0
+    with FakeLcdMirror() as board:
+        rig.serve(board)
+        rig.adapter.display_connect().close()
+    assert rig.shell.reads == 1 and rig.adapter.facts().source == "version"
+    assert rig.leases.forgets >= 1                            # the lease asked fresh first
 
 
 # --- 6. the forward is released 30 s after the last viewer (LM1's grace, an injected clock) -----------------

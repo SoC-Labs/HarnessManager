@@ -39,8 +39,9 @@ from harness_manager.core.errors import (
     UnreachableError,
     UsageError,
 )
+from harness_manager.core.proc import no_window
 
-from .hubs import Hub, boards_using, hub_credential, load_resolver, resolve_hub
+from .hubs import Hub, boards_using, check_target, hub_credential, load_resolver, resolve_hub
 from .resolve import Resolver
 from .schema import join_key
 
@@ -326,7 +327,7 @@ def local_argv(group: str | None, remote_argv: Sequence[str], *, markers: bool =
 def _default_run(timeout_s: float) -> Runner:
     def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout_s,
-                              stdin=subprocess.DEVNULL, check=False)
+                              stdin=subprocess.DEVNULL, check=False, **no_window())
     return run
 
 
@@ -426,9 +427,11 @@ def target_details(hub: Hub | str, target: str, *, resolver: Resolver | None = N
                    token: str | None = None) -> dict[str, Any]:
     """``GET /targets/{t}`` (REST) or ``fpgahub target show T`` (SSH): the target's
     ``network`` (``board_ip``, ``hostname``) and ``description``. A read, never a lease.
-    ``HarnessError`` when the hub will not say."""
+    ``HarnessError`` when the hub will not say; ``UsageError`` for a target that is not a
+    target name (it is an argument on the hub: never option-like)."""
     from harness_manager.transports import hub_rest
 
+    check_target(target)
     r = resolver or load_resolver()
     if isinstance(hub, str):
         hub = resolve_hub(hub, r)

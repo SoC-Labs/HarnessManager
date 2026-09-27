@@ -66,6 +66,15 @@ def write_policy(tmp_path: Path, text: str) -> None:
     (tmp_path / "policy.toml").write_text(text, encoding="utf-8")
 
 
+def lit(path: object) -> str:
+    """``path`` as a TOML literal string: no escapes, so a Windows path (``C:\\Users\\…``)
+    reads back exactly; a basic string ``"…"`` would take its backslashes as escapes
+    (REVIEW-W5 16)."""
+    text = str(path)
+    assert "'" not in text and "\n" not in text, text
+    return f"'{text}'"
+
+
 def exe(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/bin/sh\n")
@@ -81,14 +90,14 @@ def test_openocd_from_the_settings_file(tmp_path, monkeypatch):
 
     monkeypatch.delenv(debug.OPENOCD_ENV, raising=False)
     mine = exe(tmp_path / "bin" / "my-openocd")
-    write_settings(f'[tools]\nopenocd = "{mine}"\n')
+    write_settings(f'[tools]\nopenocd = {lit(mine)}\n')
     assert debug.find_openocd() == str(mine)
 
 
 def test_negative_twin_the_openocd_variable_still_wins(tmp_path, monkeypatch):
     from harness_manager.services import debug
 
-    write_settings(f'[tools]\nopenocd = "{exe(tmp_path / "file-openocd")}"\n')
+    write_settings(f'[tools]\nopenocd = {lit(exe(tmp_path / "file-openocd"))}\n')
     env_one = exe(tmp_path / "env-openocd")
     monkeypatch.setenv(debug.OPENOCD_ENV, str(env_one))
     assert debug.find_openocd() == str(env_one)
@@ -99,7 +108,7 @@ def test_a_missing_openocd_names_where_it_was_set(tmp_path, monkeypatch):
     from harness_manager.services import debug
 
     monkeypatch.delenv(debug.OPENOCD_ENV, raising=False)
-    write_settings(f'[tools]\nopenocd = "{tmp_path / "nope"}"\n')
+    write_settings(f'[tools]\nopenocd = {lit(tmp_path / "nope")}\n')
     with pytest.raises(UnavailableError) as exc:
         debug.find_openocd()
     assert f"tools.openocd={tmp_path / 'nope'} (settings.toml) does not exist" in exc.value.reason
@@ -155,9 +164,9 @@ def test_negative_twin_a_live_row_applies_at_its_next_use(tmp_path, monkeypatch)
 
     monkeypatch.delenv(debug.OPENOCD_ENV, raising=False)
     a, b = exe(tmp_path / "a" / "openocd"), exe(tmp_path / "b" / "openocd")
-    write_settings(f'[tools]\nopenocd = "{a}"\n')
+    write_settings(f'[tools]\nopenocd = {lit(a)}\n')
     assert debug.find_openocd() == str(a)
-    write_settings(f'[tools]\nopenocd = "{b}"\n')           # same size, no refresh()
+    write_settings(f'[tools]\nopenocd = {lit(b)}\n')           # same size, no refresh()
     assert debug.find_openocd() == str(b)
 
 
@@ -170,14 +179,14 @@ def test_hw_server_from_the_settings_file(tmp_path, monkeypatch):
     monkeypatch.delenv(xvc.HW_SERVER_ENV, raising=False)
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     mine = exe(tmp_path / "hw" / "hw_server")
-    write_settings(f'[tools]\nhw_server = "{mine}"\n')
+    write_settings(f'[tools]\nhw_server = {lit(mine)}\n')
     assert xvc.find_hw_server() == str(mine)
 
 
 def test_negative_twin_the_hw_server_variable_still_wins(tmp_path, monkeypatch):
     from harness_manager.services import xvc
 
-    write_settings(f'[tools]\nhw_server = "{exe(tmp_path / "file" / "hw_server")}"\n')
+    write_settings(f'[tools]\nhw_server = {lit(exe(tmp_path / "file" / "hw_server"))}\n')
     env_one = exe(tmp_path / "env" / "hw_server")
     monkeypatch.setenv(xvc.HW_SERVER_ENV, str(env_one))
     assert xvc.find_hw_server() == str(env_one)
@@ -216,14 +225,14 @@ def test_the_kit_hub_dir_from_the_settings_applies_to_a_running_service(tmp_path
     monkeypatch.delenv("HARNESS_MANAGER_KIT_HUB_DIR", raising=False)
     kits = KitService(object(), tmp_path / "w")
     assert kits.hub.root is None and "kits.hub_dir" in kits.hub.reason
-    write_settings(f'[kits]\nhub_dir = "{tmp_path / "mints"}"\n')
+    write_settings(f'[kits]\nhub_dir = {lit(tmp_path / "mints")}\n')
     assert kits.hub.root == tmp_path / "mints"               # live: the same service
 
 
 def test_negative_twin_the_kit_hub_variable_wins_and_a_given_hub_is_final(tmp_path, monkeypatch):
     from harness_manager.services.kit import HubSource, KitService
 
-    write_settings(f'[kits]\nhub_dir = "{tmp_path / "file"}"\n')
+    write_settings(f'[kits]\nhub_dir = {lit(tmp_path / "file")}\n')
     monkeypatch.setenv("HARNESS_MANAGER_KIT_HUB_DIR", str(tmp_path / "env"))
     assert KitService(object(), tmp_path / "w").hub.root == tmp_path / "env"
     given = HubSource(tmp_path / "given")
@@ -238,14 +247,14 @@ def test_the_update_source_from_the_settings_file(tmp_path, monkeypatch):
 
     monkeypatch.delenv("HARNESS_MANAGER_UPDATE_SOURCE", raising=False)
     (tmp_path / "mirror").mkdir()
-    write_settings(f'[updates]\nsource = "{tmp_path / "mirror"}"\n')
+    write_settings(f'[updates]\nsource = {lit(tmp_path / "mirror")}\n')
     assert channel_url(None, "stable") == (tmp_path / "mirror" / "channel.json").as_uri()
 
 
 def test_negative_twin_the_source_variable_and_an_explicit_source_win(tmp_path, monkeypatch):
     from harness_manager.services.update.channel import channel_url
 
-    write_settings(f'[updates]\nsource = "{tmp_path / "file"}"\n')
+    write_settings(f'[updates]\nsource = {lit(tmp_path / "file")}\n')
     monkeypatch.setenv("HARNESS_MANAGER_UPDATE_SOURCE", "https://env.example/{channel}/")
     assert channel_url(None, "beta") == "https://env.example/beta/channel.json"
     assert channel_url("https://given.example/", "beta") == "https://given.example/channel.json"
@@ -376,7 +385,7 @@ def test_uv_from_the_settings_file(tmp_path, monkeypatch):
 
     monkeypatch.delenv("HARNESS_MANAGER_UV", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-    write_settings(f'[tools]\nuv = "{tmp_path / "my-uv"}"\n')
+    write_settings(f'[tools]\nuv = {lit(tmp_path / "my-uv")}\n')
     up = AppUpdater(AppLayout(tmp_path / "app"), LocalBusyProbe(state()))
     assert up.find_uv() == str(tmp_path / "my-uv")
 
@@ -384,7 +393,7 @@ def test_uv_from_the_settings_file(tmp_path, monkeypatch):
 def test_negative_twin_the_uv_variable_wins_and_the_installers_uv_is_first(tmp_path, monkeypatch):
     from harness_manager.services.update.app import AppLayout, AppUpdater, LocalBusyProbe
 
-    write_settings(f'[tools]\nuv = "{tmp_path / "file-uv"}"\n')
+    write_settings(f'[tools]\nuv = {lit(tmp_path / "file-uv")}\n')
     monkeypatch.setenv("HARNESS_MANAGER_UV", "/opt/env/uv")
     assert AppUpdater(AppLayout(tmp_path / "a"), LocalBusyProbe(state())).find_uv() == "/opt/env/uv"
     up = AppUpdater(AppLayout(tmp_path / "a"), LocalBusyProbe(state()), uv="/installer/uv")
@@ -399,14 +408,14 @@ def test_the_app_browser_from_the_settings_file(tmp_path, monkeypatch):
 
     monkeypatch.delenv(window.ENV_APP_BROWSER, raising=False)
     chrome = exe(tmp_path / "my-chrome")
-    write_settings(f'[general]\napp_browser = "{chrome}"\n')
+    write_settings(f'[general]\napp_browser = {lit(chrome)}\n')
     assert window.find_app_browser(which=lambda _: None) == str(chrome)
 
 
 def test_negative_twin_the_app_browser_variable_still_wins(tmp_path, monkeypatch):
     from harness_manager.web import window
 
-    write_settings(f'[general]\napp_browser = "{exe(tmp_path / "file-chrome")}"\n')
+    write_settings(f'[general]\napp_browser = {lit(exe(tmp_path / "file-chrome"))}\n')
     env_one = exe(tmp_path / "env-chrome")
     monkeypatch.setenv(window.ENV_APP_BROWSER, str(env_one))
     assert window.find_app_browser(which=lambda _: None) == str(env_one)
@@ -420,7 +429,7 @@ def test_the_openocd_config_dir_from_the_settings_file(tmp_path, monkeypatch):
     from harness_manager_mps3.pack import Mps3Debug
 
     monkeypatch.delenv(openocd.CFG_DIR_ENV, raising=False)
-    write_settings(f'[mps3]\nopenocd_cfg_dir = "{tmp_path / "cfg"}"\n')
+    write_settings(f'[mps3]\nopenocd_cfg_dir = {lit(tmp_path / "cfg")}\n')
     assert openocd.config_dir() == tmp_path / "cfg"
     # the scaffold adapter's search path follows the same setting (no import-time copy)
     assert Mps3Debug(None, 6921).openocd_search_paths() == (tmp_path / "cfg",)
@@ -429,7 +438,7 @@ def test_the_openocd_config_dir_from_the_settings_file(tmp_path, monkeypatch):
 def test_negative_twin_the_openocd_dir_variable_wins_and_nothing_is_read_at_import(tmp_path, monkeypatch):
     from harness_manager_mps3 import constants, openocd
 
-    write_settings(f'[mps3]\nopenocd_cfg_dir = "{tmp_path / "file"}"\n')
+    write_settings(f'[mps3]\nopenocd_cfg_dir = {lit(tmp_path / "file")}\n')
     monkeypatch.setenv(openocd.CFG_DIR_ENV, str(tmp_path / "env"))
     assert openocd.config_dir() == tmp_path / "env"
     before = constants.OPENOCD_CFG_DIR
@@ -444,17 +453,17 @@ def test_the_overlay_dirs_from_the_settings_file(tmp_path, monkeypatch):
     from harness_manager_mps3 import overlays
 
     monkeypatch.delenv(overlays.OVERLAY_DIRS_ENV, raising=False)
-    write_settings(f'[mps3]\noverlay_dirs = ["{tmp_path / "a"}", "{tmp_path / "b"}"]\n')
+    write_settings(f'[mps3]\noverlay_dirs = [{lit(tmp_path / "a")}, {lit(tmp_path / "b")}]\n')
     assert overlays.env_overlay_dirs() == [tmp_path / "a", tmp_path / "b"]
     first = overlays.default_catalogue()
-    write_settings(f'[mps3]\noverlay_dirs = ["{tmp_path / "c"}"]\n')
+    write_settings(f'[mps3]\noverlay_dirs = [{lit(tmp_path / "c")}]\n')
     assert overlays.default_catalogue() is not first         # rebuilt when the setting moves
 
 
 def test_negative_twin_the_overlay_variable_still_wins(tmp_path, monkeypatch):
     from harness_manager_mps3 import overlays
 
-    write_settings(f'[mps3]\noverlay_dirs = ["{tmp_path / "file"}"]\n')
+    write_settings(f'[mps3]\noverlay_dirs = [{lit(tmp_path / "file")}]\n')
     monkeypatch.setenv(overlays.OVERLAY_DIRS_ENV, os.pathsep.join([str(tmp_path / "e1"),
                                                                    str(tmp_path / "e2")]))
     assert overlays.env_overlay_dirs() == [tmp_path / "e1", tmp_path / "e2"]
@@ -469,7 +478,7 @@ def test_overlay_dir_flags_go_ahead_of_the_settings_dirs(tmp_path, monkeypatch):
     monkeypatch.delenv(name, raising=False)
     flag = tmp_path / "flag"
     flag.mkdir()
-    write_settings(f'[mps3]\noverlay_dirs = ["{tmp_path / "file"}"]\n')
+    write_settings(f'[mps3]\noverlay_dirs = [{lit(tmp_path / "file")}]\n')
     ctx = SimpleNamespace(args=SimpleNamespace(overlay_dir=[str(flag)]), pack="mps3",
                           engine=Engine(EngineConfig(state_dir=state())))
     with overlay_dirs(ctx):
@@ -532,7 +541,7 @@ def test_the_admins_lock_beats_the_variable(tmp_path, monkeypatch):
 
     locked = exe(tmp_path / "lab" / "openocd")
     monkeypatch.setenv(debug.OPENOCD_ENV, str(exe(tmp_path / "env" / "openocd")))
-    write_policy(tmp_path, f'[lock]\ntools.openocd = "{locked}"\n')
+    write_policy(tmp_path, f'[lock]\ntools.openocd = {lit(locked)}\n')
     assert debug.find_openocd() == str(locked)
 
 
@@ -540,11 +549,11 @@ def test_negative_twin_the_admins_default_sits_below_the_variable_and_the_user(t
     from harness_manager.services import debug
 
     lab = exe(tmp_path / "lab" / "openocd")
-    write_policy(tmp_path, f'[default]\ntools.openocd = "{lab}"\n')
+    write_policy(tmp_path, f'[default]\ntools.openocd = {lit(lab)}\n')
     monkeypatch.delenv(debug.OPENOCD_ENV, raising=False)
     assert debug.find_openocd() == str(lab)                  # the machine's default
     mine = exe(tmp_path / "mine" / "openocd")
-    write_settings(f'[tools]\nopenocd = "{mine}"\n')
+    write_settings(f'[tools]\nopenocd = {lit(mine)}\n')
     assert debug.find_openocd() == str(mine)                 # the user above it
     env_one = exe(tmp_path / "env" / "openocd")
     monkeypatch.setenv(debug.OPENOCD_ENV, str(env_one))

@@ -16,9 +16,13 @@ does not:
 2. ``no_viewer``: a UI is actually viewing the board: a page that shows it registers a viewer
    (``PUT /boards/{bid}/viewers/{vid}``, refreshed while it stays visible, dropped when it
    closes or looks elsewhere; a viewer that stops refreshing lapses after ``VIEWER_TTL_S``).
-3. ``lease``: the board's hub lease is not held by someone else. "Someone else" is exactly
-   what the lease service decides (``LeaseService.view``: ``lease.mine`` false); fpgahub 0.3.0
-   records one principal per box, and this module invents no rule of its own.
+3. ``lease``: the board's hub lease is not held by anyone but THIS Harness Manager. For
+   background contact "ours" is the lease service's ``lease.here`` (this process holds the
+   lease token), never ``lease.mine``: fpgahub 0.3.0 records one principal per box, and every
+   lab session shares it (david@mapstone-dev), so a soak another session runs looks "mine"
+   (REVIEW-W5 1). A free lease (no holder) lets a viewed board be read. A lease that cannot
+   be read (``lease_unknown``) is quiet too, and asked again on the next background read:
+   not known is not free (REVIEW-W5 2). Explicit actions and consoles keep ``mine``.
 4. ``busy``: the board did not just turn one of our connections away. A connect that was
    refused, reset or timed out means "someone else is using it": background contact backs
    off exponentially (``BACKOFF_FIRST_S`` 30 s, doubling to ``BACKOFF_MAX_S`` 10 min) and the
@@ -73,6 +77,8 @@ KIND_OFF = "off"
 KIND_NO_VIEWER = "no_viewer"
 KIND_LEASE = "lease"
 KIND_BUSY = "busy"
+KIND_LEASE_UNKNOWN = "lease_unknown"   # a hub board whose lease could not be read
+KIND_JOB = "job"                       # a job of this Harness Manager holds the board
 
 #: The request header that marks a read nobody clicked (``X-HM-Background: 1``), and the
 #: one a viewing page adds so its own background read also says it is looking.
@@ -84,7 +90,7 @@ VIEWER_HEADER = "x-hm-viewer"
 class Quiet:
     """Why a background contact is not made now (``BackgroundGate.check``)."""
 
-    kind: str                       # off | no_viewer | lease | busy
+    kind: str                       # off | no_viewer | lease | lease_unknown | busy | job
     text: str                       # one line for the UI and the log
     holder: str = ""                # the lease holder (kind lease; or known beside another kind)
     retry_in_s: float | None = None  # busy: when background contact may resume
@@ -97,21 +103,49 @@ class Quiet:
                 "policy": self.policy, "detail": self.detail}
 
 
+def own_job(exc: BaseException | None) -> str:
+    """The job id when ``exc`` is the daemon's own "a job holds this board" (``jobs.busy_error``:
+    a ``HeldError`` whose ``data`` names the ``job``), else "". That is not another client
+    (REVIEW-W5 5): no back-off."""
+    if not isinstance(exc, HeldError):
+        return ""
+    data = getattr(exc, "data", None)
+    return str(data.get("job") or "") if isinstance(data, dict) else ""
+
+
 def is_contention(exc: BaseException | None, channel: str = "control") -> bool:
     """A connect refused, reset or timed out, or a port another client holds: the board is
     being used by someone else (or is not answering), so background contact backs off. On the
-    MCC console only another reader (``HeldError``) counts."""
+    MCC console only another reader (``HeldError``) counts. Our own job holding the board
+    (``own_job``) never counts."""
+    if own_job(exc):
+        return False
     if channel == "mcc":
         return isinstance(exc, HeldError)
     return isinstance(exc, (HeldError, UnreachableError, ConnectionError, TimeoutError))
 
 
+def _holder_of(lease: dict[str, Any]) -> str:
+    return str(lease.get("holder") or lease.get("user") or "someone else")
+
+
 def lease_elsewhere(view: dict[str, Any] | None) -> str:
-    """The holder when the lease service's view says the lease is someone else's, else ""."""
+    """BACKGROUND contact: the holder when the lease is held and THIS Harness Manager does
+    not hold it (``lease.here`` false: no token here), else "". Another session of the same
+    principal is elsewhere (REVIEW-W5 1). A free lease is ""."""
+    lease = (view or {}).get("lease") or None
+    if not lease or lease.get("here"):
+        return ""
+    return _holder_of(lease)
+
+
+def lease_not_mine(view: dict[str, Any] | None) -> str:
+    """EXPLICIT actions and consoles (unchanged): the holder when the lease service says the
+    lease is not ``mine`` (by principal), else ""."""
     lease = (view or {}).get("lease") or None
     if not lease or lease.get("mine"):
         return ""
-    return str(lease.get("holder") or lease.get("user") or "someone else")
+    return _holder_of(lease)
 
 
 def policy_value(raw: Any) -> str:
@@ -176,9 +210,11 @@ class BackgroundGate:
     """Viewers, the back-off and the verdict for background contact, per board.
 
     ``policy_of(board_id) -> "on-view" | "off"`` (the settings and boards.toml: ``policy_for``)
-    and ``lease_of(board_id) -> holder`` (the lease holder when the lease service says it is
-    someone else's, else "": ``lease_elsewhere``) are the daemon's. None: always ``on-view``;
-    no lease. ``enabled=False`` (the demo): ``check`` always says go ahead.
+    and ``lease_of(board_id) -> holder`` (the lease holder when this Harness Manager does not
+    hold the lease, else "": ``lease_elsewhere``) are the daemon's. None: always ``on-view``;
+    no lease. ``lease_of`` raising means the lease could not be read: background contact is
+    quiet (``lease_unknown``), explicit reads (``holder``) carry on. ``enabled=False`` (the
+    demo): ``check`` always says go ahead.
     """
 
     def __init__(self, *, policy_of: Callable[[str], str] | None = None,
@@ -307,20 +343,30 @@ class BackgroundGate:
 
     def holder(self, board_id: str) -> str:
         """Who holds the board's hub lease when it is someone else's, else "" (the lease
-        service's view, cached; never the board)."""
-        return self._holder(board_id)
+        service's view, cached; never the board). For an explicit read's note: a lease that
+        cannot be read names nobody."""
+        return self._lease(board_id)[0]
 
-    def _holder(self, board_id: str) -> str:
+    def _lease(self, board_id: str) -> tuple[str, str]:
+        """``(holder, unknown)``: ``unknown`` is why the lease could not be read ("" when it
+        could). Background contact treats an unknown lease as quiet (REVIEW-W5 2)."""
         if self.lease_of is None:
-            return ""
+            return "", ""
         try:
-            return str(self.lease_of(board_id) or "")
-        except HarnessError as exc:        # the hub did not answer: no lease known
+            return str(self.lease_of(board_id) or ""), ""
+        except HarnessError as exc:        # the hub did not answer: the lease is not known
             log.debug("lease of %s: %s", board_id, exc.message)
-            return ""
-        except Exception:  # noqa: BLE001 - never a crash in the gate
+            return "", exc.message or type(exc).__name__
+        except Exception as exc:  # noqa: BLE001 - never a crash in the gate
             log.exception("reading the lease of %s failed", board_id)
-            return ""
+            return "", f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+    @staticmethod
+    def _unknown(unknown: str, policy: str) -> Quiet:
+        return Quiet(KIND_LEASE_UNKNOWN, "the hub lease could not be read: Harness Manager "
+                                         "contacts this board only when you ask until it can "
+                                         "(asked again on the next background read)",
+                     policy=policy, detail=unknown)
 
     def check(self, board_id: str) -> Quiet | None:
         """None: a background contact may go ahead now. Otherwise why not.
@@ -337,7 +383,9 @@ class BackgroundGate:
         if not self.viewers(board_id):
             return Quiet(KIND_NO_VIEWER, "nobody is viewing this board: no background reads",
                          policy=policy)
-        holder = self._holder(board_id)
+        holder, unknown = self._lease(board_id)
+        if unknown:
+            return self._unknown(unknown, policy)
         if holder:
             return Quiet(KIND_LEASE, f"the hub lease is held by {holder}: Harness Manager "
                                      "contacts this board only when you ask", holder=holder,
@@ -363,7 +411,7 @@ class BackgroundGate:
                     "detail": ""}
         policy = self._policy(board_id)
         viewers = self.viewers(board_id)
-        holder = self._holder(board_id)
+        holder, unknown = self._lease(board_id)
         q: Quiet | None
         if policy == OFF:
             q = Quiet(KIND_OFF, "background reads are off (general.background_poll or "
@@ -376,6 +424,8 @@ class BackgroundGate:
         elif not viewers:
             q = Quiet(KIND_NO_VIEWER, "nobody is viewing this board: no background reads",
                       policy=policy)
+        elif unknown:
+            q = self._unknown(unknown, policy)
         else:
             q = self._busy(board_id, policy)
         with self._mu:

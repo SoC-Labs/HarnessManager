@@ -34,6 +34,8 @@ read, like an unplugged pyserial port. ``in_waiting`` never blocks.
 
 from __future__ import annotations
 
+import posixpath
+import re
 import select
 import socket
 import threading
@@ -51,6 +53,54 @@ DEFAULT_SHARE_BAUD = 115200   # fpgahub `share start --baud` default; the MCC's 
 
 #: The capability name a refused baud change is reported under (L2's baud API).
 BAUD_CAPABILITY = "console_baud"
+
+
+# --- which hub TTY is the MCC console: THE one rule (REVIEW-W5 10; MCC-FIX) ------------------
+
+#: FT4232H interface N as fpgahub's udev names it on the hub: ``/dev/<target>/tty_0N``
+#: (00 = the MCC, 01..03 = the FPGA UART lanes).
+_TTY_IF = re.compile(r"(?:^|/)tty_0([0-3])$")
+#: The same interface 00 by its by-id alias (``usb-…-if00-port0``).
+_BY_ID_IF00 = re.compile(r"^/dev/serial/by-id/.+-if00-port\d+$")
+#: Why no share may be on the MCC console (MCC-FIX; the Linux lead and the lead, 2026-09-26).
+MCC_TTY_REASON = ("tty_00 is the MCC console; Harness Manager never shares it; the MCC is "
+                  "reached on the hub")
+#: What to name instead of a path this rule cannot judge (``/dev/ttyUSBn``) or refuses.
+FPGAHUB_PATHS_HINT = ("use the fpgahub device paths, /dev/<target>/tty_01..03 (tty_00 is the "
+                      "MCC); a /dev/ttyUSBn or by-id alias cannot be judged here")
+
+
+def norm_tty(tty: object) -> str:
+    """A hub TTY path in the one form every check compares: ``posixpath.normpath`` (no
+    trailing slash, no ``//`` or ``/./``); "" for nothing."""
+    text = str(tty or "").strip()
+    return posixpath.normpath(text) if text else ""
+
+
+def tty_interface(tty: object) -> int | None:
+    """FT4232H interface N of ``…/tty_0N`` (normalised), else None."""
+    m = _TTY_IF.search(norm_tty(tty))
+    return int(m.group(1)) if m else None
+
+
+def mcc_tty_reason(tty: object) -> str:
+    """Why ``tty`` is the MCC console, else "". ``…/tty_00`` in any spelling (a trailing
+    slash, ``//``, ``/./``) and the by-id alias of FT4232H interface 00
+    (``/dev/serial/by-id/*-if00-port0``). A ``/dev/ttyUSBn`` cannot be judged here (the
+    docs say: use the fpgahub device paths)."""
+    p = norm_tty(tty)
+    if not p:
+        return ""
+    if tty_interface(p) == 0:
+        return f"{p} is tty_00, the MCC console"
+    if _BY_ID_IF00.match(p):
+        return (f"{p} is FT4232H interface 00 (the MCC console) by its /dev/serial/by-id "
+                f"name; {FPGAHUB_PATHS_HINT}")
+    return ""
+
+
+def is_mcc_tty(tty: object) -> bool:
+    return bool(mcc_tty_reason(tty))
 
 
 def share_baud_reason(baud: int | None) -> str:

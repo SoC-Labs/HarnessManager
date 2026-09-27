@@ -68,9 +68,11 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 import secrets
 import socket
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -88,6 +90,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.proc import no_window
 from harness_manager.core.transport import SerialPort, register_serial_scheme
 from harness_manager.transports import tcp_serial
 
@@ -111,8 +114,8 @@ SLOT_POLL_S = 0.1
 #: How long a relayed console may keep sending after the share ended its side.
 RELAY_DRAIN_S = 5.0
 
-#: tty_0N is FT4232H interface 0N (fpgahub's udev naming): 00 = MCC, 01..03 = lanes.
-_TTY_IF_RE = re.compile(r"tty_0([0-3])$")
+#: tty_0N is FT4232H interface 0N (fpgahub's udev naming): 00 = MCC, 01..03 = lanes. The one
+#: rule for it, on normalised paths, is ``transports.tcp_serial`` (REVIEW-W5 10).
 _SHARE_LINE = re.compile(r"share\s+(?P<tty>/\S+)\s+\S+\s+(?P<host>\[[^\]]+\]|[^\s:]+):(?P<port>\d+)")
 
 
@@ -171,6 +174,8 @@ def parse_hub_table(table: Any, *, where: str = "hub") -> HubConfig:
             isinstance(k, str) and isinstance(v, str) and v.startswith("/dev/")
             for k, v in shares.items()):
         raise UsageError(f"{where}.shares must map names to /dev/... TTY paths")
+    # One spelling for every check and every hub call (REVIEW-W5 10): ``…/tty_00/`` is tty_00.
+    shares = {k: tcp_serial.norm_tty(v) for k, v in shares.items()}
     baud = table.get("baud", DEFAULT_SHARE_BAUD)
     if not isinstance(baud, int) or isinstance(baud, bool) or baud <= 0:
         raise UsageError(f"{where}.baud must be a positive integer")
@@ -271,20 +276,21 @@ class ShareRef:
 
     @property
     def interface(self) -> int | None:
-        m = _TTY_IF_RE.search(self.tty)
-        return int(m.group(1)) if m else None
+        return tcp_serial.tty_interface(self.tty)
 
 
 def is_mcc_share(name: str, tty: str) -> bool:
-    """The MCC console: the ``mcc`` share name, or FT4232H interface 00 (``…/tty_00``)."""
-    m = _TTY_IF_RE.search(str(tty))
-    return name == "mcc" or (m is not None and m.group(1) == "0")
+    """The MCC console: the ``mcc`` share name, or FT4232H interface 00 in any spelling
+    (``…/tty_00``, ``…/tty_00/``, its by-id alias: ``tcp_serial.mcc_tty_reason``)."""
+    return name == "mcc" or tcp_serial.is_mcc_tty(tty)
 
 
 def refuse_mcc_share(tty: str, host: str = "") -> RefusedError:
+    why = tcp_serial.mcc_tty_reason(tty)
     return RefusedError(
         f"Harness Manager never starts or uses an fpgahub share on the MCC console {tty}"
-        + (f" on {host}" if host else "") + ": the paced REBOOT needs exactly one reader on "
+        + (f" on {host}" if host else "") + (f" ({why})" if why and "by-id" in why else "")
+        + ": the paced REBOOT needs exactly one reader on "
         "tty_00, and a share is one that cannot be stopped on its own",
         hint="the MCC of a hub board runs on the hub through pyverify (`harness-manager mcc "
              "TARGET temp|reboot`); shares are for the FPGA UART lanes tty_01..03")
@@ -414,9 +420,46 @@ def default_runner_factory(host: str, group: str | None, jump: str = "") -> Call
     from pyverify.lease import LocalHubRunner, SshHubRunner
 
     if host in LOCAL_HOSTS:
-        return LocalHubRunner()
+        return _windowless(LocalHubRunner)()
     return JumpSshHubRunner(host, group=group, jump=jump) if jump else \
-        SshHubRunner(host, group=group)
+        _windowless(SshHubRunner)(host, group=group)
+
+
+_WINDOWLESS: dict[type, type] = {}
+
+
+def _windowless(cls: type) -> type:
+    """On Windows, pyverify's hub runner class whose calls open no console window
+    (REVIEW-W5 14: every hub call, the MCC reads and REBOOTs of ``hub_mcc`` among them, is a
+    ``subprocess.run`` of ssh): pyverify's ``HubRunner.__call__`` with
+    ``core.proc.no_window()``. Elsewhere ``cls`` itself, unchanged."""
+    if not no_window():
+        return cls
+    made = _WINDOWLESS.get(cls)
+    if made is not None:
+        return made
+
+    class _Windowless(cls):  # type: ignore[valid-type, misc]
+        def __call__(self, argv: Sequence[str], timeout: float | None = None) -> Any:
+            flags = no_window()
+            from pyverify import lease as _pl
+
+            cmd = self.build(argv)
+            env = dict(os.environ)
+            env.update(getattr(_pl, "_RENDER_ENV", {}))
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                                      env=env, check=False, **flags)
+            except subprocess.TimeoutExpired as exc:
+                raise TimeoutError(f"hub command timed out after {timeout}s: "
+                                   f"{' '.join(cmd)}") from exc
+            except OSError as exc:
+                raise _pl.LeaseError(f"cannot run {cmd[0]}: {exc}") from exc
+            return _pl.RunResult(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+    _Windowless.__name__ = _Windowless.__qualname__ = f"Windowless{cls.__name__}"
+    _WINDOWLESS[cls] = _Windowless
+    return _Windowless
 
 
 _JUMP_RUNNER: Any = None
@@ -447,7 +490,7 @@ def _jump_runner_class() -> Any:
 
 
 def JumpSshHubRunner(host: str, *, group: str | None, jump: str) -> Any:  # noqa: N802
-    return _jump_runner_class()(host, group=group, jump=jump)
+    return _windowless(_jump_runner_class())(host, group=group, jump=jump)
 
 
 #: What the pack uses to reach a hub; tests replace it (tests/fakes/l1_fake_hub.py).

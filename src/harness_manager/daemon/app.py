@@ -69,6 +69,7 @@ from harness_manager.services.quiet import (
     Quiet,
     is_contention,
     lease_elsewhere,
+    lease_not_mine,
     policy_for,
     request_is_background,
 )
@@ -409,9 +410,12 @@ class Daemon:
             links = ()
         return policy_for(board_id, links)
 
-    def _lease_elsewhere(self, board_id: str) -> str:
-        """The lease holder when the lease service says the board's lease is someone else's
-        (its cached view when recent: no extra hub call on every poll)."""
+    def _lease_elsewhere(self, board_id: str,
+                         rule: Callable[[dict[str, Any] | None], str] = lease_elsewhere) -> str:
+        """The lease holder when ``rule`` says the board's lease is not ours (the lease
+        service's cached view when recent: no extra hub call on every poll). The default is
+        the BACKGROUND rule (``lease_elsewhere``: this process holds no token for it); a hub
+        that cannot be asked raises (the gate then stays quiet)."""
         leases = getattr(self, "leases", None)
         if leases is None:
             return ""
@@ -422,11 +426,13 @@ class Daemon:
         if hub is None:
             return ""
         view = leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
-        return lease_elsewhere(view if view is not None else leases.view(hub))
+        return rule(view if view is not None else leases.view(hub))
 
     def _console_lease_holder(self, board_id: str) -> str:
+        # Consoles are explicit (and their re-dial rides an explicit open): the principal
+        # rule, ``mine``, unchanged by REVIEW-W5 1.
         try:
-            return self._lease_elsewhere(board_id)
+            return self._lease_elsewhere(board_id, lease_not_mine)
         except HarnessError as exc:        # the hub did not answer: consoles are not blocked
             log.debug("lease of %s for its consoles: %s", board_id, exc.message)
             return ""
@@ -694,6 +700,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         if bid and is_contention(exc) and request_is_background(request.headers):
             # QUIET-POLL: a background read the board turned away (refused, reset, timed
             # out, held): someone else is using it. Back off, and say "busy", not an error.
+            # Our OWN job holding the board (``jobs.busy_error``: ``data.job``) is not
+            # contention (REVIEW-W5 5): it stays today's 409 HELD, which the page defers on
+            # (``heldByJob``), and nothing backs off.
             body = await run_in_threadpool(d.busy_answer, bid, exc)
             if body is not None:
                 return _JSON(body)

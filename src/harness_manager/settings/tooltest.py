@@ -19,6 +19,9 @@ developer variable, else the tool's own search), then proves it runs:
 **It runs nothing but those probes**, each with a timeout, never through a shell,
 and changes nothing: no file is written and no setting is set (the menu's "Use this path"
 is a separate ``PUT /settings``). A path that does not run is a failed step with the reason.
+Each probe runs the ``openocd_probe`` way (``core.proc.probe_run``, REVIEW-W5 12): its output
+to a file, its process group killed on timeout, no console window on Windows. The demo
+refuses a request ``table`` that names a path (``daemon/settings_api.py``).
 
 The report (``testers`` contract): ``steps: [{step: <tool>, ok, detail, hint}]``, one per
 tool, and ``tools: {<tool>: {path, version, how, key}}`` for the menu (``openocd`` adds
@@ -31,11 +34,13 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from harness_manager.core.errors import UsageError
+from harness_manager.core.proc import probe_run
 from harness_manager.services import openocd_probe
 
 #: tool -> (the setting's key, what the menu calls it)
@@ -60,11 +65,28 @@ def _which(name: str, env: Mapping[str, str]) -> str | None:
 
 
 def _exe(value: str, env: Mapping[str, str]) -> str | None:
-    """A configured value as an executable: a file, or a name on the service's PATH."""
+    """A configured value as an executable: a file, or a name on the service's PATH. On
+    Windows a path without an extension is tried with each ``PATHEXT`` one
+    (``C:\\Xilinx\\…\\hw_server`` is ``hw_server.bat``), then through ``_which``."""
     p = Path(value).expanduser()
     if p.is_file():
         return str(p)
+    if sys.platform == "win32" and not p.suffix:
+        for ext in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").lower().split(";"):
+            if ext and p.with_name(p.name + ext).is_file():
+                return str(p.with_name(p.name + ext))
+        return _which(str(p), env)
     return _which(value, env) if os.sep not in value else None
+
+
+def _hw_server_names() -> tuple[str, ...]:
+    """Vivado's ``bin`` holds ``hw_server`` on Linux, ``hw_server.bat`` on Windows."""
+    return ("hw_server.bat", "hw_server.exe", "hw_server") if sys.platform == "win32" \
+        else ("hw_server",)
+
+
+def _beside(directory: Path) -> str:
+    return next((str(directory / n) for n in _hw_server_names() if (directory / n).is_file()), "")
 
 
 def _probe(argv: list[str], pattern: re.Pattern[str], timeout_s: float,
@@ -91,7 +113,7 @@ def _step(tool: str, ok: bool, detail: str, hint: str = "") -> dict[str, Any]:
 
 
 def detect_one(tool: str, value: str, env: Mapping[str, str], *,
-               runner: Runner = subprocess.run,
+               runner: Runner = probe_run,
                source: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
     """``(step, found)`` for one tool: ``value`` is its resolved setting ("" = search);
     ``source``: where it came from (the resolver's: "env" means its variable set it)."""
@@ -130,11 +152,12 @@ def detect_one(tool: str, value: str, env: Mapping[str, str], *,
                         {"path": "", "version": "", "how": "", "key": key})
         else:
             viv = _which("vivado", env)
-            if viv and (Path(viv).parent / "hw_server").is_file():
-                path, how = str(Path(viv).parent / "hw_server"), "beside vivado"
-            elif env.get("XILINX_VIVADO") and \
-                    (Path(env["XILINX_VIVADO"]) / "bin" / "hw_server").is_file():
-                path, how = str(Path(env["XILINX_VIVADO"]) / "bin" / "hw_server"), "$XILINX_VIVADO"
+            beside = _beside(Path(viv).parent) if viv else ""
+            xil = _beside(Path(env["XILINX_VIVADO"]) / "bin") if env.get("XILINX_VIVADO") else ""
+            if beside:
+                path, how = beside, "beside vivado"
+            elif xil:
+                path, how = xil, "$XILINX_VIVADO"
             else:
                 path, how = _which("hw_server", env) or "", "PATH"
         if not path:
@@ -218,7 +241,7 @@ def _refuse(argv: list[str]) -> Any:  # pragma: no cover - vivado.discover runs 
     raise OSError(f"refused to run {argv!r}: Detect runs only a version probe")
 
 
-def detect_tools(req: Any, *, runner: Runner = subprocess.run) -> dict[str, Any]:
+def detect_tools(req: Any, *, runner: Runner = probe_run) -> dict[str, Any]:
     """The "tools" section tester (``testers.CONVENTION``). ``req.name``: one tool, or all."""
     names = list(TOOLS)
     if req.name:

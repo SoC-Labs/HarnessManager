@@ -148,6 +148,7 @@ def register(ctx: RouteContext) -> None:
         target = b.get("target")
         if not isinstance(target, str) or not target:
             raise UsageError('say which target: {"target": "mps3_01_pl"}')
+        hubs.check_target(target)          # 400 before the job runs `fpgahub target show`
         key = b.get("board") or None
         label = b.get("name")
         for field, v in (("board", key), ("name", label)):

@@ -51,6 +51,7 @@ import contextlib
 import json
 import logging
 import os
+import posixpath
 import re
 import shlex
 import socket
@@ -76,6 +77,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.pack import BackupRecord, Progress
+from harness_manager.core.proc import no_window
 
 from .sd import BACKUP_FORMAT, MANIFEST_NAME, VOLUME_PREFIX, file_sha256, pid_alive
 
@@ -250,7 +252,9 @@ class SshUploader:
         self.host, self.jump, self.timeout_s = host, jump, timeout_s
 
     def argv(self, remote_rel: str) -> list[str]:
-        d = shlex.quote(str(Path(remote_rel).parent))
+        # The hub's path, always POSIX: ``Path`` on Windows would write backslashes into the
+        # remote mkdir (REVIEW-W5 13).
+        d = shlex.quote(posixpath.dirname(remote_rel) or ".")
         part, final = shlex.quote(remote_rel + ".part"), shlex.quote(remote_rel)
         remote = f"mkdir -p {d} && cat > {part} && mv -f {part} {final}"
         opts = ["-o", "ControlPath=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
@@ -262,7 +266,7 @@ class SshUploader:
         with open(local, "rb") as fh:
             try:
                 proc = subprocess.run(self.argv(remote_rel), stdin=fh, capture_output=True,
-                                      timeout=self.timeout_s, check=False)
+                                      timeout=self.timeout_s, check=False, **no_window())
             except subprocess.TimeoutExpired as exc:
                 raise UnreachableError(f"uploading to the hub {self.host} took over "
                                        f"{self.timeout_s:.0f} s") from exc

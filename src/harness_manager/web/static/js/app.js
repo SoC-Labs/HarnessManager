@@ -182,6 +182,7 @@ export function backgroundWords(st) {
   if (st.kind === "lease") {
     return { icon: "lock", level: "held", text: `Paused: lease held by ${st.holder || "someone else"}` };
   }
+  if (st.kind === "lease_unknown") return { icon: "lock", level: "unk", text: "Paused: lease unknown" };
   if (st.kind === "busy") return { icon: "timer", level: "held", text: "Busy (another client)" };
   return { icon: "circle-pause", level: "unk", text: "Background reads off" };
 }

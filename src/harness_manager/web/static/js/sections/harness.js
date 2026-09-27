@@ -31,7 +31,7 @@ export const HUB_PHASE = [
   ["sd:writing", "writing the SD on the hub: a client timeout here is expected (the hub keeps writing)"],
   ["sd:verifying", "verifying: waiting for the hub's record of our sha256"],
   ["sd:verified", "verified by the hub's own record"],
-  ["reboot:", "rebooting over the hub's MCC share (paced)"],
+  ["reboot:", "rebooting by the MCC on the hub (paced)"],
   ["confirm", "confirming the identity the board reports"],
   ["revert:", "AUTO-REVERT: writing the previous nanosoc.bit back through the hub"],
   ["revert-reboot:", "AUTO-REVERT: rebooting into the previous base"],
@@ -196,7 +196,7 @@ function whyText(row) {
 function ViaChip({ row }) {
   if (row.via !== "hub") return null;
   return html`<${Chip} level="accent" icon="server" testid="via-hub"
-    title="fpgahub on the lab hub writes the config SD; the board is rebooted over its MCC share">via the hub<//>`;
+    title="fpgahub on the lab hub writes the config SD; the board is rebooted by the MCC on the hub (paced)">via the hub<//>`;
 }
 
 // Why Install cannot open for this row ("" when it can).
@@ -396,7 +396,7 @@ function InstallPanel({ bid, h }) {
           <p class="secondary small">A re-key changes the static: every overlay and DUT RM keyed to ${(plan.running || {}).shell_id || "the running static"} stops loading.</p>` : null}
         <${DoorConsent} bid=${bid} h=${h} plan=${plan} id="hv-bp" />
         <${ArmBox} bid=${bid} armKey="harness_install" testid="arm-harness"
-          text=${viaHub ? "Arm: I understand the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted over its MCC share."
+          text=${viaHub ? "Arm: I understand the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted by the MCC on the hub (paced)."
             : "Arm: I understand this writes the board's config SD (after a backup) and reboots the board."} />
         <${ActionRow} bid=${bid} panel="harness_install" spec=${install} variant="primary" icon="upload"
           gate=${{ arm: "harness_install", guard }} />`}` : null}
