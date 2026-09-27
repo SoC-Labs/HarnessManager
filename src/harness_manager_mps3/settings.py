@@ -39,7 +39,7 @@ from typing import Any
 
 from pyverify.pusher import TFTP_PORT
 
-from harness_manager.settings.schema import Setting
+from harness_manager.settings.schema import Setting, split_key
 
 from . import constants as _c
 
@@ -130,8 +130,24 @@ def _hub_board(v: Any) -> str:
     return "" if v == "" or valid_name(v) else "must be an fpgahub board id, e.g. mps3_01"
 
 
-def _tty(v: Any) -> str:
-    return "" if v.startswith("/dev/") else "must be a /dev/... TTY path on the hub"
+#: Why no share may be on tty_00 (MCC-FIX; the Linux lead and the lead, 2026-09-26).
+MCC_TTY_REASON = ("tty_00 is the MCC console; Harness Manager never shares it; the MCC is "
+                  "reached on the hub")
+
+
+def _tty(v: Any, key: str = "") -> str:
+    """A hub share's TTY: a /dev path, never tty_00 (the MCC console), except under the name
+    ``mcc``, which only names the MCC's path on the hub (``hub_mcc.mcc_tty_for``), never a
+    share. ``key``: the concrete key (``boards.lab.hub.shares.fpga_uart1``)."""
+    if not v.startswith("/dev/"):
+        return "must be a /dev/... TTY path on the hub"
+    name = split_key(key)[-1] if key else ""
+    if v.rstrip("/").endswith("/tty_00") and name != "mcc":
+        return f"must not be on tty_00: {MCC_TTY_REASON} (only shares.mcc may name its path)"
+    return ""
+
+
+_tty.with_key = True                     # type: ignore[attr-defined]  # the rule needs the name
 
 
 def _host_key(v: Any) -> str:

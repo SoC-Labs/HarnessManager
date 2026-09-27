@@ -165,7 +165,7 @@ class Resolver:
             cap = _lowest(spec, cap, raw, problems, pol.path)
         elif found and spec.lockable:
             try:
-                value = coerce(spec, raw)
+                value = coerce(spec, raw, concrete=key)
             except UsageError as exc:
                 # Fail closed: the admin meant to fix this setting, so it stays fixed, at
                 # the default, and the menu says why, rather than falling open to the user.
@@ -209,7 +209,7 @@ class Resolver:
 
         for source, where, raw, from_env in layers:
             try:
-                value = coerce(spec, raw, from_env=from_env)
+                value = coerce(spec, raw, from_env=from_env, concrete=key)
             except UsageError as exc:
                 problems.append(f"{where}: {exc.message}; ignored")
                 continue
@@ -307,7 +307,7 @@ class Resolver:
         if parts[0] == "boards" and parts[1] == BOARD_DEFAULTS and parts[2] in BOARD_OWN_KEYS:
             raise UsageError(f"{key}: a board's {parts[2]} is its own; boards.{BOARD_DEFAULTS} "
                              "cannot hold it (power.config.load_boards never reads it there)")
-        return key, coerce(spec, value, from_env=text)
+        return key, coerce(spec, value, from_env=text, concrete=key)
 
     def set(self, key: str, value: Any, *, text: bool = False) -> Resolved:
         """A user's change: validated, refused when locked, stored even when an env var

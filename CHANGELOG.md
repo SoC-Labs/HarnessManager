@@ -206,7 +206,9 @@ owners.
   MPS3 pack in Harness & kits, and an SSH hub has its SD stage directory. Numbers are
   checked against their range before they are sent ("must be more than 0"). An old
   `shares.mcc` entry in `boards.toml` shows as what it is, the MCC's path on the hub, never
-  as a share; nothing offers a share on the MCC.
+  as a share; nothing offers a share on the MCC. A share on `tty_00` under any other name is
+  refused, by `config set`, in the files and by "Make this a hub": tty_00 is the MCC
+  console, which Harness Manager never shares.
 - `harness-manager app --demo`: the Settings dialog shows the MPS3 pack's rows, writes the
   demo's own directory only, stores a secret in the demo's own files (never your keyring,
   so it cannot replace or remove your real token), and reaches no hub: Test connection

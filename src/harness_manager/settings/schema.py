@@ -256,11 +256,13 @@ class Setting:
         return {"bounds": [lo, hi], "min_exclusive": above}
 
 
-def coerce(spec: Setting, raw: Any, *, from_env: bool = False) -> Any:
+def coerce(spec: Setting, raw: Any, *, from_env: bool = False, concrete: str | None = None) -> Any:
     """A layer's raw value as the setting's type. ``UsageError`` says why not.
 
     Values from the environment are text, so they are parsed; values from a TOML file
     already have a type, and must have the right one (``"3"`` is not an ``int``).
+    ``concrete``: the key being resolved or set (``boards.lab.hub.shares.fpga_uart1``), for
+    a check whose rule depends on the name (``check_value``).
     """
     key, v = spec.key, raw
     t = spec.type
@@ -323,10 +325,23 @@ def coerce(spec: Setting, raw: Any, *, from_env: bool = False) -> Any:
                 v = [p for p in re.split(r"[\s,;]+", raw) if p]
         if not isinstance(v, list) or not all(isinstance(p, str) for p in v):
             raise UsageError(f"{key} must be a list of strings")
-    why = spec.check(v) if spec.check else ""
+    why = check_value(spec, v, concrete)
     if why:
-        raise UsageError(f"{key} {why}")
+        keyed = concrete if concrete and getattr(spec.check, "with_key", False) else key
+        raise UsageError(f"{keyed} {why}")
     return v
+
+
+def check_value(spec: Setting, v: Any, concrete: str | None = None) -> str:
+    """The row's check on a typed value ("" when it passes). A check marked ``with_key`` also
+    gets the concrete key, for a rule that depends on the name: the MPS3 pack's hub shares,
+    where ``mcc`` may name tty_00 (the MCC console's path) and no share may use it (MCC-FIX;
+    SET-UI-MERGE)."""
+    if not spec.check:
+        return ""
+    if getattr(spec.check, "with_key", False):
+        return spec.check(v, concrete or spec.key)
+    return spec.check(v)
 
 
 # --- the schema --------------------------------------------------------------------------------

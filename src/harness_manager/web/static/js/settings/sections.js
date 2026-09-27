@@ -172,13 +172,18 @@ function boardRows(board) {
 }
 
 // MCC-FIX: Harness Manager never uses a share on the MCC's tty_00 (the paced REBOOT needs exactly
-// one reader; the MCC of a hub board runs on the hub). A `shares.mcc` entry (or any .../tty_00)
-// is never a share: it only names the MCC console's path on the hub (hub_mcc.mcc_tty_for), so
-// the dialog shows it as that, never as a share row. Remove is offered when it names the
-// default path (/dev/<target>/tty_00), where removing it changes nothing.
-export function isMccShare(key, value) {
+// one reader; the MCC of a hub board runs on the hub). A `shares.mcc` entry is never a share: it
+// only names the MCC console's path on the hub (hub_mcc.mcc_tty_for), so the dialog shows it as
+// that, never as a share row. Remove is offered when it names the default path
+// (/dev/<target>/tty_00), where removing it changes nothing. Any other share on tty_00 is
+// refused by the pack's check (the row shows why, with Remove).
+export function isMccShare(key) {
   const p = splitKey(key);
-  return p[2] === "hub" && p[3] === "shares" && (p[4] === "mcc" || /tty_00$/.test(String(value || "")));
+  return p[2] === "hub" && p[3] === "shares" && p[4] === "mcc";
+}
+
+function onTty00(row) {
+  return splitKey(row.key)[3] === "shares" && (row.problems || []).some((p) => p.includes("tty_00"));
 }
 
 function MccPath({ row, board }) {
@@ -211,10 +216,14 @@ function BoardCard({ board }) {
   const inline = ((SS.hubs && SS.hubs.inline) || []).find((i) => i.board === board);
   const hubs = (SS.listing && SS.listing.instances.hubs) || [];
   const seen = openHere(board);
-  const mccPaths = g.hub.filter((r) => isMccShare(r.key, r.value));
-  g.hub = g.hub.filter((r) => !isMccShare(r.key, r.value));
+  const mccPaths = g.hub.filter((r) => isMccShare(r.key));
+  g.hub = g.hub.filter((r) => !isMccShare(r.key));
   const labels = Object.fromEntries(g.hub.filter((r) => splitKey(r.key)[3] === "shares")
     .map((r) => [r.key, `${splitKey(r.key)[4]} share (its /dev path on the hub)`]));
+  // a share left on tty_00 in boards.toml is refused (the row says why): offer to remove it
+  const extras = Object.fromEntries(g.hub.filter(onTty00).map((r) => [r.key, { note: html`<button type="button"
+    class="btn sm" data-action="share-remove" disabled=${!!SS.busy[r.key]} onClick=${() => resetSetting(r.key)}>
+    <${Icon} name="trash-2" /> Remove it from boards.toml</button>` }]));
   return html`<section class="card board-card" data-testid="board-card" data-board=${board} aria-label=${`Board ${board}`}>
     <div class="card-head">
       <h3 class="card-title"><${Icon} name="circuit-board" /><span class="mono">${board}</span></h3>
@@ -228,7 +237,8 @@ function BoardCard({ board }) {
         <div class="grow">Its hub is written inline (<span class="mono">${inline.host || inline.url}</span>).</div>
         <button type="button" class="btn sm" data-action="hub-adopt" onClick=${() => adoptInline(board)}>Make this a hub</button></div>` : null}
       ${BOARD_TABLES.map((t) => html`<${RowGroup} key=${t.id} id=${`board:${board}:${t.id}`} rows=${g[t.id]}
-        title=${g[t.id].length && t.id !== "board" ? t.title : ""} hubs=${hubs} policyPath=${policyPath()} labels=${labels} />
+        title=${g[t.id].length && t.id !== "board" ? t.title : ""} hubs=${hubs} policyPath=${policyPath()} labels=${labels}
+        extras=${extras} />
         ${t.id === "hub" ? mccPaths.map((r) => html`<${MccPath} key=${r.key} row=${r} board=${board} />`) : null}`)}
     </div>
   </section>`;

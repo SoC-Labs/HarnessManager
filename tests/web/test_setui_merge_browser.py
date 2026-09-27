@@ -215,6 +215,34 @@ def test_negative_twin_an_mcc_entry_naming_another_path_is_kept_and_a_lane_share
     expect(page.locator('[data-testid="mcc-path"]')).to_have_count(0)
 
 
+@pytest.mark.mock_too
+def test_a_lane_share_left_on_tty_00_is_refused_with_the_reason_and_can_be_removed(page_factory, world):  # noqa: F811
+    sctx = world(settings='[hubs.lab]\ntransport = "ssh"\nhost = "hub.invalid"\n',
+                 boards=LEGACY.replace('mcc = "/dev/mps3_01_pl/tty_00"', 'fpga_uart0 = "/dev/mps3_01_pl/tty_00"'))
+    page = open_settings(page_factory, "boards")
+    r = row(page, "boards.lab.hub.shares.fpga_uart0")
+    expect(r.locator('[data-testid="row-problem"]')).to_contain_text(
+        "tty_00 is the MCC console; Harness Manager never shares it; the MCC is reached on the hub", timeout=T)
+    expect(r.locator('[data-testid="setting-input"]')).to_have_value("")          # not in force
+    expect(page.locator('[data-testid="mcc-path"]')).to_have_count(0)
+    type_in(r, "/dev/mps3_01_pl/tty_00")                                        # typed again: refused
+    expect(r.locator('[data-testid="row-error"]')).to_contain_text("must not be on tty_00", timeout=T)
+    r.locator('[data-action="share-remove"]').click()
+    expect(row(page, "boards.lab.hub.shares.fpga_uart0")).to_have_count(0, timeout=T)
+    text = (sctx.config_dir / "boards.toml").read_text()
+    assert "tty_00" not in text and 'fpga_uart1 = "/dev/mps3_01_pl/tty_01"' in text
+
+
+@pytest.mark.mock_too
+def test_negative_twin_a_lane_share_on_tty_01_has_no_problem_and_no_remove(page_factory, world):  # noqa: F811
+    world(settings='[hubs.lab]\ntransport = "ssh"\nhost = "hub.invalid"\n',
+          boards=LEGACY.replace('mcc = "/dev/mps3_01_pl/tty_00", ', ""))
+    page = open_settings(page_factory, "boards")
+    r = row(page, "boards.lab.hub.shares.fpga_uart1")
+    expect(r.locator('[data-testid="setting-input"]')).to_have_value("/dev/mps3_01_pl/tty_01", timeout=T)
+    expect(r.locator('[data-testid="row-problem"], [data-action="share-remove"]')).to_have_count(0)
+
+
 # --- apply classes: a hub's reopen-class row reopens the boards that use that hub ---------------------
 
 HUBS = ('[hubs.lab]\ntransport = "ssh"\nhost = "hub.invalid"\n'

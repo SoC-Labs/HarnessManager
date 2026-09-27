@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from harness_manager.core.errors import UnavailableError
+from harness_manager.core.errors import UnavailableError, UsageError
 from harness_manager.demo import DemoEngine
 from harness_manager.settings import ops
 from harness_manager.settings.packs import with_packs
@@ -136,3 +136,65 @@ def test_negative_twin_a_context_without_an_engine_has_the_cores_rows_only(tmp_p
     ctx = ops.SettingsContext(state_dir=tmp_path, env={}, policy_path=tmp_path / "policy.toml")
     keys = {r["key"] for r in ops.schema(ctx)["rows"]}
     assert not any(k.startswith("mps3.") for k in keys)
+
+
+# --- MCC-FIX in the settings: no share on tty_00; shares.mcc only names the MCC's path ------------
+
+TTY00 = "/dev/mps3_01_pl/tty_00"
+REASON = "tty_00 is the MCC console; Harness Manager never shares it; the MCC is reached on the hub"
+
+
+def pack_context(tmp_path: Path, boards: str = "") -> ops.SettingsContext:
+    ctx = ops.SettingsContext(state_dir=tmp_path, env={}, policy_path=tmp_path / "policy.toml")
+    ctx._layers = with_packs(core_schema(), [Mps3Pack()])
+    if boards:
+        (tmp_path / "boards.toml").write_text(boards)
+    return ctx
+
+
+@pytest.mark.parametrize("tty", [TTY00, "/dev/mps3_02_pl/tty_00", "/dev/serial/by-id/x/tty_00/"])
+def test_a_share_on_tty_00_is_refused_by_config_set_and_skipped_in_the_files(tmp_path, tty):
+    ctx = pack_context(tmp_path, f'[boards.lab]\nhub = {{ target = "mps3_01_pl", shares = '
+                                 f'{{ fpga_uart0 = "{tty}" }} }}\n')
+    with pytest.raises(UsageError) as e:
+        ops.set_values(ctx, {"boards.lab.hub.shares.fpga_uart1": tty})
+    assert REASON in e.value.message and "boards.lab.hub.shares.fpga_uart1" in e.value.message
+    assert "fpga_uart1" not in (tmp_path / "boards.toml").read_text()      # nothing written
+    row = ops.listing(ctx, key="boards.lab.hub.shares.fpga_uart0")["rows"][0]
+    assert row["value"] is None and row["source"] == "default"               # the file's: skipped
+    assert any(REASON in p and p.endswith("; ignored") for p in row["problems"])
+
+
+def test_negative_twin_a_lane_share_on_tty_01_and_the_mccs_own_path_name_are_accepted(tmp_path):
+    ctx = pack_context(tmp_path, f'[boards.lab]\nhub = {{ target = "mps3_01_pl", shares = '
+                                 f'{{ mcc = "{TTY00}" }} }}\n')
+    ops.set_values(ctx, {"boards.lab.hub.shares.fpga_uart1": "/dev/mps3_01_pl/tty_01"})
+    mcc = ops.listing(ctx, key="boards.lab.hub.shares.mcc")["rows"][0]
+    assert (mcc["value"], mcc["source"], mcc["problems"]) == (TTY00, "user", [])
+    lane = ops.listing(ctx, key="boards.lab.hub.shares.fpga_uart1")["rows"][0]
+    assert (lane["value"], lane["problems"]) == ("/dev/mps3_01_pl/tty_01", [])
+    ops.set_values(ctx, {"boards.lab.hub.shares.mcc": TTY00})               # its path name: kept
+
+
+def test_adopting_an_inline_hub_with_a_share_on_tty_00_is_refused_and_nothing_changes(tmp_path):
+    from harness_manager.settings import hubs
+
+    text = (f'[boards.lab]\nhub = {{ host = "hub.invalid", target = "mps3_01_pl", shares = '
+            f'{{ fpga_uart0 = "{TTY00}" }} }}\n')
+    ctx = pack_context(tmp_path, text)
+    with pytest.raises(UsageError) as e:
+        hubs.adopt_inline_hub("lab", ctx.resolver())
+    assert REASON in e.value.message and "boards.toml is not changed" in e.value.message
+    assert (tmp_path / "boards.toml").read_text() == text
+    assert not list(tmp_path.glob("boards.toml.bak-*")) and not (tmp_path / "settings.toml").exists()
+
+
+def test_negative_twin_adopting_one_with_a_lane_share_and_the_mccs_path_name_works(tmp_path):
+    from harness_manager.settings import hubs
+
+    ctx = pack_context(tmp_path, f'[boards.lab]\nhub = {{ host = "hub.invalid", target = "mps3_01_pl", '
+                                 f'shares = {{ mcc = "{TTY00}", fpga_uart1 = "/dev/mps3_01_pl/tty_01" }} }}\n')
+    got = hubs.adopt_inline_hub("lab", ctx.resolver())
+    assert got["changed"] is True and got["hub"] == "hub"
+    text = (tmp_path / "boards.toml").read_text()
+    assert 'use = "hub"' in text and TTY00 in text and "tty_01" in text
