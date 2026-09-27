@@ -171,6 +171,8 @@ class FakeLcdMirror:
         #: The board starts every connection at seq 1 (seq_base 0). A test sets it near 2^32
         #: to make a long-lived connection's wrap happen at once.
         self.seq_base = seq_base
+        #: False: PINGs go unanswered (a wedged service or a dead tunnel: HM goes stale, LM4).
+        self.answer_pings = True
         self.lock = threading.RLock()
         self._clients: list[_Client] = []
         self._conn_no = 0
@@ -391,6 +393,8 @@ class FakeLcdMirror:
                 c.next_snap = 0.0
                 self._send(c, w.message(w.T_RATE, bytes([hz])))
             elif typ == w.T_PING and ln >= 4:
+                if not self.answer_pings:
+                    continue
                 self._send(c, w.message(w.T_PONG, body[:4]))
                 self.stats["pongs"] += 1
             elif typ == w.T_ACK and ln >= 4:

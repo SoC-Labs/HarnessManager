@@ -826,6 +826,50 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .pm-inv { background: var(--err); color: var(--on-err); }
 .pm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .pm-list li { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+/* LM4: the Live display (docs/design/LCD_MIRROR.md §7.4). The canvas holds the panel's own
+   pixels; every overlay sits OVER it. The picture is view only (D4): no pointer cursor. */
+.ld { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ld-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 28px; }
+.ld-head .spacer { flex: 1; }
+.ld-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+.ld-title .icon { color: var(--text-3); }
+.chip.spin-icon .icon { animation: spin 1s linear infinite; }
+.ld-scroll { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px; }
+.ld-slot { position: relative; }
+.ld-frame {
+  position: relative; line-height: 0; cursor: default; background: var(--term-bg);
+  outline: 1px solid var(--border-strong);
+}
+.ld-frame.ld-stale { outline: 2px dashed var(--warn); }
+.ld-canvas { display: block; image-rendering: pixelated; cursor: default; }
+.ld-frame.ld-grey .ld-canvas { filter: grayscale(1) opacity(0.45); }
+.ld-frame.ld-dim .ld-canvas { filter: brightness(0.35); }
+.ld-frame.ld-grey.ld-dim .ld-canvas { filter: grayscale(1) opacity(0.45) brightness(0.35); }
+.ld-hatches { position: absolute; inset: 0; pointer-events: none; }
+.ld-hatch {
+  position: absolute; width: 5%; height: calc(100% / 15);
+  background: repeating-linear-gradient(135deg, var(--text-3) 0 1px, transparent 1px 5px);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.ld-badges {
+  position: absolute; left: 6px; top: 6px; right: 6px; display: flex; flex-wrap: wrap; gap: 4px;
+  line-height: normal; pointer-events: none;
+}
+.ld-badges .chip { box-shadow: var(--shadow); }
+.ld-note, .ld-scrim {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 16px; text-align: center; line-height: 1.4; font-size: 13px; font-weight: 600;
+  pointer-events: none;
+}
+.ld-note { align-items: flex-end; }
+.ld-note > span {
+  background: var(--held-soft); color: var(--held); border: 1px solid var(--held-border);
+  border-radius: var(--radius-sm); padding: 6px 10px; box-shadow: var(--shadow-pop);
+}
+.ld-scrim { background: var(--scrim); color: var(--on-badge); }
+.ld-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ld-foot .spacer { flex: 1; }
+.ld-fresh { margin: 0; font-variant-numeric: tabular-nums; }
 .lease-tapped { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; color: var(--held); }
 .lease-tapped .icon { margin-top: 2px; }
 

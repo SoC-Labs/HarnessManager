@@ -66,8 +66,9 @@ def _linux(page: Any, review: Any, scheme: str) -> None:
     page.locator('[data-action="details"]').click()
     expect(by_id(page, "panel-sessions")).to_contain_text("bob@lab-pc-03", timeout=T)
     expect(by_id(page, "panel-touch")).to_be_visible()
-    expect(by_id(page, "panel-mirror")).to_contain_text("MPS3-LX", timeout=T)
     by_id(page, "panel-card").scroll_into_view_if_needed()
+    # LM4: the Linux board's panel is the Live display (the text mirror is its fallback)
+    expect(by_id(page, "live-display")).to_have_attribute("data-live", "yes", timeout=T)
     shoot(page, review, "details-panel-linux", scheme, full=True)
     page.locator('[data-action="details"]').click()             # closed again for the rest
 

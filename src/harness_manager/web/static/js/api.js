@@ -44,6 +44,11 @@ export const ENDPOINTS = Object.freeze({
   panelFrame: ["GET", "/boards/{bid}/panel/frame"],
   identify: ["POST", "/boards/{bid}/identify"],
   // --- end P3 PANEL-UI ---
+  // --- LM4 DISPLAY-UI: the Live display (docs/API.md "Live display", display_api.py). The
+  // socket's ?ack=&rate= and the PNG's ?scale=&hatch= are the query (socketUrl, callBytes).
+  displaySocket: ["WS", "/boards/{bid}/display/ws"],
+  displayPng: ["GET", "/boards/{bid}/display.png"],
+  // --- end LM4 DISPLAY-UI ---
   // Week-plan additions (docs/API.md, frozen): lanes L2 consoles, L1 hub, L4 power and update.
   ptyOpen: ["POST", "/boards/{bid}/consoles/{name}/pty"],
   ptyGet: ["GET", "/boards/{bid}/consoles/{name}/pty"],
@@ -141,6 +146,7 @@ export const EVENT_TOPICS = [
   "board.*", "session.*", "deploy.*", "console.state", "console.pty", "debug.*",
   "controller.*", "storage.*", "update.*", "power.*", "lease.*", "tunnel.*", "job.*", "events.*",
   "panel.*",                           // P3 PANEL-UI: panel.state, panel.tap, panel.locate
+  "display.*",                         // LM4 DISPLAY-UI: display.state (a refused Live display asks again)
   "xvc.*",                             // XVC-UI: xvc.state, the Debug section's XVC card
   "harness.*",                         // UPDATE-UI: harness.catalog|installing|installed|pinned
   "settings.*",                        // SET-UI: settings.changed (the dialog and the restart banner)
@@ -305,6 +311,20 @@ export async function call(name, params = {}, body = undefined, query = null, op
 // JSON, so it throws the same ApiError as call() (with error.data, e.g. the failed checks).
 export async function callBlob(name, params = {}, body = undefined) {
   const res = await send(name, params, body, "application/zip, application/json");
+  const type = res.headers.get("content-type") || "";
+  if (res.ok && !type.startsWith("application/json")) {
+    setConnection("ok");
+    return res.blob();
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  throw failure(res, data);
+}
+
+// LM4: a binary GET with a query (the Live display's PNG snapshot): the body as a Blob. A
+// failure still answers JSON, so it throws the same ApiError as call().
+export async function callBytes(name, params = {}, query = null, accept = "application/octet-stream") {
+  const res = await send(name, params, undefined, `${accept}, application/json`, query);
   const type = res.headers.get("content-type") || "";
   if (res.ok && !type.startsWith("application/json")) {
     setConnection("ok");
