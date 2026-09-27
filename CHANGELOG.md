@@ -204,6 +204,12 @@ owners.
   "another client is using it". Harness Manager backs off from 30 s up to 10 min and
   shows "Busy (another client)", never a red error. Your own clicks and commands keep
   today's behaviour.
+- Consoles on a board whose lease is someone else's: a live console stays connected until
+  it drops, then waits ("paused: lease held by `<who>`") and reconnects once the lease is
+  yours or free. A new console there is refused, naming the holder. A board with no hub
+  is unchanged.
+- Background telemetry that finds another reader on the MCC console backs off like a
+  refused connection ("Busy (another client)").
 - New setting `general.background_poll` (`on-view`, the default, or `off`), and
   `poll = "off"` per board in `boards.toml`. With `off`, Harness Manager touches the board
   only when you ask.

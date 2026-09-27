@@ -313,3 +313,39 @@ def test_twin_a_beat_our_own_job_holds_back_is_retried_sooner():
     clock.t += RETRY_S
     svc.beat_due()
     assert len(panel.sent) == 1
+
+
+# --- per channel (follow-up 4) and the session seam (CCR QUIET-1) ---------------------------------
+
+
+def test_on_the_mcc_only_a_second_reader_is_another_client():
+    g, _ = gate()
+    g.view("b1", "page")
+    g.observe("b1", UnreachableError("the MCC read on the hub timed out"), "mcc")
+    assert g.check("b1") is None, "a hub that did not answer says nothing about other clients"
+    g.observe("b1", HeldError("another process reads the MCC console"), "mcc")
+    assert g.check("b1").kind == Q.KIND_BUSY
+
+
+def test_an_answer_ends_only_the_back_off_its_channel_started():
+    g, _ = gate()
+    g.view("b1", "page")
+    g.observe("b1", HeldError("reset"), "control")
+    g.observe("b1", None, "mcc")
+    assert g.check("b1").kind == Q.KIND_BUSY
+    g.observe("b1", None, "control")
+    assert g.check("b1") is None
+
+
+def test_a_session_without_the_seam_reports_nothing_and_never_fails():
+    from harness_manager.core.pack import BoardSession
+
+    class Bare(BoardSession):
+        def identity(self):
+            raise AssertionError("not read")
+
+        def health(self):
+            raise AssertionError("not read")
+
+    Bare().set_observer(lambda channel, exc: None)     # the default: a no-op
+    Bare().set_observer(None)

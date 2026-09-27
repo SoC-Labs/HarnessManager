@@ -455,6 +455,16 @@ Anything you ask for yourself is not affected: a button, a CLI command, or a job
 started. It still goes straight to the board. When the lease is someone else's,
 `info` (and the page's **Read now**) says who holds it.
 
+**Consoles.** A console that is already connected when someone else takes the lease stays
+connected until it drops. After that it does not reconnect: it shows **paused: lease held
+by `<who>`** and reconnects by itself once the lease is yours or free. Opening a new
+console on the board while someone else holds its lease is refused, and the message names
+the holder. A board with no hub has no lease, so its consoles work as before.
+
+**The MCC.** If background telemetry finds another program reading the board's MCC
+console, HM treats that like a refused connection: it backs off and shows
+**Busy (another client)**.
+
 Each background call opens the control port, asks one thing and closes it at once. HM
 never keeps a control connection open between polls.
 

@@ -390,3 +390,111 @@ def test_the_demo_gate_says_yes_to_everything():
             assert st["background"]["allowed"] and st["background"]["policy"] == "demo"
     finally:
         engine.close_all()
+
+
+# --- follow-up 4: the MCC's second reader inside background telemetry -------------------------------
+
+
+class FakeHubRunner:
+    """The hub runner for ``HubMccController``: the MCC reader's verdict, as the hub prints it.
+    ``rc`` 3 is another reader of tty_00 (another client); 4 is no Cmd> (not contention)."""
+
+    def __init__(self) -> None:
+        self.rc = 0
+        self.calls = 0
+
+    def __call__(self, argv, timeout=None):
+        import json as _json
+        from types import SimpleNamespace
+
+        self.calls += 1
+        lines = _json.loads(argv[-1])["lines"]
+        info = {"rc": self.rc}
+        if self.rc == 0:
+            info["replies"] = [
+                f"{line}\r\n" + ("MB Device 0 Temp: 41.0 degC" if "TEMP" in line else
+                                  f"MB OSC{line.split()[-1]} clock read = 50.0 MHz")
+                for line in lines]
+        elif self.rc == 3:
+            info["others"] = [[4242, "screen /dev/mps3_01_pl/tty_00"]]
+        else:
+            info["reason"] = "no intact Cmd>"
+        return SimpleNamespace(stdout=_json.dumps(info) + "\n", stderr="", returncode=0)
+
+
+def attach_mcc(r: Rig) -> FakeHubRunner:
+    """A hub-mode MCC on the open board, wired to the session's observer (CCR QUIET-1)."""
+    from harness_manager.core.events import Event
+    from harness_manager_mps3.hub_mcc import HubMccController
+
+    runner = FakeHubRunner()
+    session = r.engine.session(r.bid)
+    session.controller = HubMccController(runner, target="mps3_01_pl",
+                                          tty="/dev/mps3_01_pl/tty_00", host="hub")
+    r.d._quiet_opened(Event("session.opened", r.bid, {}))    # as when the board opened
+    return runner
+
+
+def test_an_mcc_second_reader_in_background_telemetry_is_busy_and_backs_off(q):
+    runner = attach_mcc(q)
+    q.view()
+    runner.rc = 3                                     # someone else reads tty_00
+    got = q.background("/telemetry")
+    assert got["quiet"]["kind"] == "busy" and "another client" in got["quiet"]["text"]
+    assert "reads the MCC console" in got["quiet"]["detail"]
+    t0, calls = time.monotonic(), runner.calls
+    answers = [q.background("/telemetry"), q.background()]
+    assert quiet_kinds(answers) == {"busy"} and runner.calls == calls
+    assert q.front.attempts(t0) == 0, "the back-off holds every background read of the board"
+    # An explicit read still answers, today's way: the MCC rows say why.
+    body = q.explicit("/telemetry").json()
+    assert body["ok"] and any("reads the MCC console" in (x.get("reason") or "")
+                              for x in body["readings"])
+
+
+def test_twin_an_mcc_that_is_not_at_its_prompt_is_not_another_client(q):
+    runner = attach_mcc(q)
+    q.view()
+    runner.rc = 4                                     # no Cmd>: nothing about other clients
+    got = q.background("/telemetry")
+    assert "quiet" not in got and got["ok"]
+    assert q.d.quiet.check(q.bid) is None
+    runner.rc = 0                                     # and an answering MCC reads as before
+    got = q.background("/telemetry")
+    assert "quiet" not in got and any(x.get("name") == "mcc_temp" and x.get("value") == 41.0
+                                      for x in got["readings"])
+
+
+def test_twin_an_mcc_answer_does_not_end_a_control_port_back_off(q):
+    runner = attach_mcc(q)
+    session = q.engine.session(q.bid)
+    q.d.quiet.note_busy(q.bid, "reset by peer", channel="control")
+    assert session.controller.temperatures()[0].value == 41.0   # the MCC answers...
+    assert runner.calls == 1 and q.d.quiet.backing_off(q.bid) is not None
+    session.shell.call(lambda c: c.ping())            # ...the control port answering ends it
+    assert q.d.quiet.backing_off(q.bid) is None
+
+
+# --- follow-up 1 through the API: an explicit console under someone else's lease --------------------
+
+
+def test_a_console_opened_while_the_lease_is_elsewhere_is_refused_naming_the_holder(q):
+    from harness_manager.services import pty as _pty
+
+    if not _pty.supported():
+        pytest.skip("this system has no PTYs")
+    attach_hub(q, "alice@lab-pc")
+    r = q.client.post(f"{bid_path(q.bid)}/consoles/uart0/pty", headers=H)
+    assert r.status_code == 409, r.text
+    err = r.json()["error"]
+    assert err["name"] == "HELD" and err["holder"] == "alice@lab-pc"
+
+
+def test_twin_our_own_lease_opens_the_console(q):
+    from harness_manager.services import pty as _pty
+
+    if not _pty.supported():
+        pytest.skip("this system has no PTYs")
+    attach_hub(q, "me@srv03335")
+    r = q.client.post(f"{bid_path(q.bid)}/consoles/uart0/pty", headers=H)
+    assert r.status_code == 200, r.text
