@@ -152,6 +152,23 @@ def test_observe_backs_off_on_contention(exc):
     assert g.check("b1").kind == Q.KIND_BUSY
 
 
+def test_our_own_job_holding_the_board_is_not_another_client():
+    """REVIEW-W5 5: ``jobs.busy_error`` (a HeldError whose data names our job) is not
+    contention: no back-off. Twin: a HeldError with no job still is."""
+    from harness_manager.daemon.jobs import Job, busy_error
+
+    own = busy_error("b1", Job("slot_push", "b1"))
+    assert Q.own_job(own) and not Q.is_contention(own) and not Q.is_contention(own, "mcc")
+    g, _ = gate()
+    g.view("b1", "page")
+    g.observe("b1", own)
+    assert g.check("b1") is None and g.refusals("b1") == 0
+    other = HeldError("another client holds 6900")
+    assert not Q.own_job(other) and Q.is_contention(other)
+    g.observe("b1", other)
+    assert g.check("b1").kind == Q.KIND_BUSY
+
+
 @pytest.mark.parametrize("exc", [ActionFailedError("the board said no"), None])
 def test_twin_observe_ignores_other_failures_and_success(exc):
     g, _ = gate()
@@ -169,10 +186,61 @@ def test_the_demo_gate_says_yes_to_everything():
 # --- the lease service's word, and the policy's -----------------------------------------------------
 
 
-def test_lease_elsewhere_uses_the_lease_services_mine():
-    assert lease_elsewhere({"lease": {"holder": "alice@x", "mine": False}}) == "alice@x"
-    assert lease_elsewhere({"lease": {"holder": "david@mapstone-dev", "mine": True}}) == ""
+def test_lease_elsewhere_goes_by_here_not_by_the_shared_principal():
+    """REVIEW-W5 1: background contact is ours only when THIS Harness Manager holds the
+    lease token (``here``). Another session of the same principal (``mine`` by principal,
+    every lab session is david@mapstone-dev) is elsewhere."""
+    assert lease_elsewhere({"lease": {"holder": "alice@x", "mine": False, "here": False}}) \
+        == "alice@x"
+    other_session = {"lease": {"holder": "david@mapstone-dev", "mine": True, "here": False}}
+    assert lease_elsewhere(other_session) == "david@mapstone-dev"
+    assert lease_elsewhere({"lease": {"holder": "david@mapstone-dev", "mine": True}}) \
+        == "david@mapstone-dev", "no here: not ours"
+    # Twin: this HM holds the token; and a free lease is nobody's.
+    assert lease_elsewhere({"lease": {"holder": "david@mapstone-dev", "mine": True,
+                                      "here": True}}) == ""
     assert lease_elsewhere({"lease": None}) == "" and lease_elsewhere(None) == ""
+
+
+def test_explicit_actions_keep_the_principal_rule():
+    """Consoles and explicit actions are unchanged: ``mine`` by principal."""
+    other_session = {"lease": {"holder": "david@mapstone-dev", "mine": True, "here": False}}
+    assert Q.lease_not_mine(other_session) == ""
+    assert Q.lease_not_mine({"lease": {"holder": "alice@x", "mine": False}}) == "alice@x"
+    assert Q.lease_not_mine({"lease": None}) == "" and Q.lease_not_mine(None) == ""
+
+
+def _unreadable(_b: str) -> str:
+    raise UnreachableError("fpgahub lease status: the hub did not answer")
+
+
+def test_a_lease_that_cannot_be_read_is_quiet_for_background_contact():
+    """REVIEW-W5 2: the gate failed OPEN (an unreadable lease read as free). Now a viewed
+    board whose lease cannot be read is quiet, asked again on every check."""
+    g, _ = gate()
+    g.view("b1", "page")
+    asked = []
+    g.lease_of = lambda b: asked.append(b) or _unreadable(b)
+    q = g.check("b1")
+    assert q.kind == Q.KIND_LEASE_UNKNOWN and "could not be read" in q.text
+    assert "did not answer" in q.detail and q.holder == ""
+    assert g.check("b1").kind == Q.KIND_LEASE_UNKNOWN and len(asked) == 2, "rechecked"
+    st = g.state("b1")
+    assert st["allowed"] is False and st["kind"] == Q.KIND_LEASE_UNKNOWN
+    assert g.holder("b1") == "", "an explicit read's note names nobody (unchanged)"
+    # Any other failure reading it is unknown too (never a crash, never open).
+    g.lease_of = lambda _b: 1 / 0
+    assert g.check("b1").kind == Q.KIND_LEASE_UNKNOWN
+    # Twin: the lease reads (free): the viewed board may be read.
+    g.lease_of = lambda _b: ""
+    assert g.check("b1") is None and g.state("b1")["allowed"] is True
+
+
+def test_twin_an_unreadable_lease_on_an_unviewed_board_says_no_viewer():
+    g, _ = gate()
+    g.lease_of = _unreadable
+    assert g.check("b1").kind == Q.KIND_NO_VIEWER
+    assert g.state("b1")["kind"] == Q.KIND_NO_VIEWER
 
 
 def write(path, text: str) -> None:

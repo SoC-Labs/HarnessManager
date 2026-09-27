@@ -311,6 +311,66 @@ def test_driver_waits_out_a_boot_already_in_progress():
     assert booted == [1] and mcc.boots_completed == 1 and mcc.ignored_while_booting == 0
 
 
+def test_a_read_in_the_silent_autoboot_window_types_nothing_until_it_has_passed():
+    """REVIEW-W5 3: another reader saw the banner go past "Press Enter to stop auto boot...";
+    the MCC now waits 3 s in SILENCE. A 0.2 s listen took that for an idle MCC and its CR
+    stopped the boot (the FPGA never configured). 3.5 s of silence first lets it pass."""
+    clock = FakeClock()
+    booted = []
+    mcc = FakeMcc(clock=clock, down_s=0.5, boot_s=5.0, autoboot_window_s=3.0,
+                  on_boot=lambda: booted.append(1))
+    raw_paced(mcc, clock, "REBOOT\r")
+    heard = b""
+    while b"Press Enter" not in heard:              # someone else reads the banner
+        clock.advance(0.05)
+        heard += mcc.read(4096)
+    window_end = clock() + 3.0 - 0.05
+    clock.advance(0.3)                              # inside the silent window
+    ctl, _, port, _ = make(mcc, clock)
+    (temp,) = ctl.temperatures()
+    assert not mcc.autoboot_aborted and booted == [1] and mcc.boots_completed == 1
+    assert port.byte_times and port.byte_times[0][0] > window_end, "no key in the window"
+    assert temp.available and temp.value == 35.5
+
+
+def test_twin_an_idle_mcc_is_read_after_3_5_s_of_silence():
+    ctl, mcc, port, clock = make()
+    mcc.read(4096)                                  # an idle MCC at its prompt: silent
+    t0 = clock()
+    (temp,) = ctl.temperatures()
+    assert temp.available and port.byte_times[0][0] - t0 >= mccmod.MCC_QUIET_BEFORE_S
+    assert MccTiming(quiet_before_s=0.1).quiet_before_s == 0.1      # a floor in the driver:
+    ctl2, mcc2, port2, clock2 = make(timing=MccTiming(quiet_before_s=0.1))
+    mcc2.read(4096)
+    t1 = clock2()
+    ctl2.temperatures()
+    assert port2.byte_times[0][0] - t1 >= mccmod.MCC_QUIET_BEFORE_S
+
+
+def test_a_read_on_an_mcc_that_is_never_silent_types_nothing():
+    """REVIEW-W5 3: any byte heard starts the 3.5 s again; a port that never goes quiet is
+    refused at ``boot_guard_s`` with nothing typed."""
+    from tests.fakes.fake_mcc import ChatterPort
+
+    clock = FakeClock()
+    port = ChatterPort(clock, every_s=1.0)
+    ctl = Mps3Controller("fake://chatter", clock=clock, sleep=clock.sleep,
+                         opener=lambda url, baud: port, timing=MccTiming(boot_guard_s=30.0))
+    (temp,) = ctl.temperatures()
+    assert not temp.available and "never silent" in temp.reason
+    assert bytes(port.writes) == b"", "nothing typed"
+
+
+def test_twin_a_reboot_does_not_wait_for_the_read_silence():
+    """The REBOOT path is unchanged (its own CR is its sync; the guard waits out a banner)."""
+    clock = FakeClock()
+    ctl, mcc, port, _ = make(slow_boot_mcc(clock), clock)
+    mcc.read(4096)
+    t0 = clock()
+    ctl.reboot(wait_s=120)
+    assert port.byte_times[0][0] - t0 < 1.0
+
+
 def test_guard_gives_up_on_an_endless_boot():
     clock = FakeClock()
     mcc = FakeMcc(clock=clock, down_s=0.0, boot_s=10_000.0, autoboot_window_s=0.0)

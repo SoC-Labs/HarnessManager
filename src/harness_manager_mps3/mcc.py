@@ -117,6 +117,14 @@ _MAX_LINE = 64
 
 # --- timing ---------------------------------------------------------------------------
 
+#: Silence the MCC must keep before the first key of a READ (REVIEW-W5 3). Its banner's
+#: "Press Enter to stop auto boot..." then waits ``AUTORUNDELAY`` (3 s in our config.txt)
+#: in silence, and a CR inside that window STOPS the FPGA boot: a 0.2 s listen cannot tell
+#: that window from an idle MCC at its prompt, 3.5 s of silence can. Any byte heard starts
+#: the wait again. A floor: ``MccTiming.quiet_before_s`` below it is raised to it. The hub
+#: reader (``hub_mcc.HUB_MCC_READ_PY``) keeps the same floor.
+MCC_QUIET_BEFORE_S = 3.5
+
 
 @dataclass(frozen=True)
 class MccTiming:
@@ -124,6 +132,7 @@ class MccTiming:
     reply_timeout_s: float = 5.0            # prompt must return within this (fpgahub DEFAULT_TIMEOUT_S)
     poll_s: float = 0.02
     listen_s: float = 0.2                   # passive listen before the first write of an operation
+    quiet_before_s: float = MCC_QUIET_BEFORE_S  # reads: silence before the first CR (a floor)
     boot_guard_s: float = 120.0             # wait out a boot already in progress
     ping_interval_s: float = 1.0            # reboot witness: shell ping cadence
     ping_timeout_s: float = 1.0
@@ -683,11 +692,14 @@ class Mps3Controller:
     # -- plumbing --
 
     @contextmanager
-    def _session(self) -> Iterator[_Console]:
+    def _session(self, *, quiet: bool = False) -> Iterator[_Console]:
+        """The port, open for one operation. ``quiet`` (reads): the MCC must first keep
+        ``quiet_before_s`` of silence (``MCC_QUIET_BEFORE_S``, REVIEW-W5 3)."""
         port = self._opener(self.url, MCC_BAUD)
         con = _Console(self, port)
         try:
-            self._guard_boot(con)
+            self._guard_boot(con, quiet_s=max(self.timing.quiet_before_s, MCC_QUIET_BEFORE_S)
+                             if quiet else 0.0)
             yield con
         finally:
             self.last_transcript = bytes(con.transcript)
@@ -697,26 +709,48 @@ class Mps3Controller:
                 except OSError:
                     pass
 
-    def _guard_boot(self, con: _Console) -> None:
+    def _guard_boot(self, con: _Console, *, quiet_s: float = 0.0) -> None:
         """Listen first; if the MCC is mid-boot, wait for the banner to finish.
 
         A keypress during "Press Enter to stop auto boot..." stops the boot and
         leaves the FPGA unconfigured, so nothing is typed while a banner runs.
+        ``quiet_s`` (reads): then keep listening until the MCC has been silent that long
+        (its auto-boot window is silent too); any byte heard starts it again. Both waits
+        end at ``boot_guard_s``.
         """
         watch = BootWatch()
-        watch.feed(con.listen(self.timing.listen_s))
-        if not watch.in_progress:
-            return
-        deadline = self._clock() + self.timing.boot_guard_s
-        while watch.in_progress:
+        start = self._clock()
+        deadline = start + self.timing.boot_guard_s
+        first = con.listen(self.timing.listen_s)
+        watch.feed(first)
+        last_rx = self._clock() if first else start
+        while True:
+            if watch.in_progress:
+                while watch.in_progress:
+                    if self._clock() >= deadline:
+                        raise ActionFailedError(
+                            f"the MCC on {self.url} is still booting after "
+                            f"{self.timing.boot_guard_s:.0f}s; "
+                            "not typing (a keypress now would stop auto-boot)",
+                            hint="wait for the boot to finish, then retry",
+                        )
+                    watch.feed(con.listen(self.timing.poll_s * 10))
+                self._settle(con, watch)
+                last_rx = self._clock()
+            if self._clock() - last_rx >= quiet_s:
+                return
             if self._clock() >= deadline:
                 raise ActionFailedError(
-                    f"the MCC on {self.url} is still booting after {self.timing.boot_guard_s:.0f}s; "
-                    "not typing (a keypress now would stop auto-boot)",
-                    hint="wait for the boot to finish, then retry",
+                    f"the MCC on {self.url} was never silent for {quiet_s:.1f}s in "
+                    f"{self.timing.boot_guard_s:.0f}s; not typing (a keypress in its "
+                    "auto-boot window would stop the boot)",
+                    hint="wait for the MCC to go quiet, then retry",
                 )
-            watch.feed(con.listen(self.timing.poll_s * 10))
-        self._settle(con, watch)
+            data = con.listen(min(self.timing.poll_s * 5,
+                                  max(quiet_s - (self._clock() - last_rx), 0.0)))
+            if data:
+                watch.feed(data)
+                last_rx = self._clock()
 
     def _drain_to_prompt(self, con: _Console, watch: BootWatch, after: bytearray) -> None:
         """Read (never type) until the console ends in a prompt.
@@ -761,7 +795,7 @@ class Mps3Controller:
             self.reboot()
             assert self.last_reboot is not None
             return self.last_reboot.summary()
-        with self._session() as con:
+        with self._session(quiet=True) as con:
             con.sync()
             if cmd.head == "DEBUG":
                 con.goto("debug")
@@ -794,7 +828,7 @@ class Mps3Controller:
     def _cfg_read(self, items: Iterable[tuple[str, int]]) -> list[str | HarnessError]:
         cmds = [classify(f"CFG R {kind} {dev}") for kind, dev in items]
         results: list[str | HarnessError] = []
-        with self._session() as con:
+        with self._session(quiet=True) as con:
             con.sync()
             con.goto("debug")
             try:

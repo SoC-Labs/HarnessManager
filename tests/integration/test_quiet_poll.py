@@ -210,12 +210,74 @@ def test_lease_held_by_someone_else_means_zero_background_connects(q):
 
 
 def test_twin_our_own_lease_lets_the_background_reads_through(q):
-    attach_hub(q, "me@srv03335")                       # the lease service says "mine"
+    """REVIEW-W5 1: "our own" is THIS Harness Manager holding the lease token (``here``),
+    acquired through its lease service."""
+    hub, ref = attach_hub(q, "me@srv03335")
+    hub.current = None                                 # free: this HM acquires it itself
+    q.d.leases.acquire(ref, board_id=q.bid, ttl_s=600, heartbeat=False)
+    view = q.explicit("/lease").json()
+    assert view["lease"]["here"] is True and view["lease"]["mine"] is True
     assert q.view()["allowed"] is True
     t0 = time.monotonic()
     assert quiet_kinds(q.round()) == {""} and q.front.attempts(t0) > 0
     assert len(q.vb.shell.hellos) == 1 and q.vb.shell.hellos[0]["role"] == "holder"
     assert not any("held by" in n for n in q.explicit().json()["health"]["notes"])
+
+
+def test_the_same_principal_in_another_session_is_elsewhere_for_background_reads(q):
+    """REVIEW-W5 1: every lab session shares one principal (david@mapstone-dev). A soak
+    another session runs holds the lease as "mine" by principal, but not HERE: background
+    contact stops. (Before the fix this was the twin above and the reads went through.)"""
+    attach_hub(q, "me@srv03335")                       # same principal, no token here
+    view = q.explicit("/lease").json()
+    assert view["lease"]["mine"] is True and view["lease"]["here"] is False
+    state = q.view()
+    assert state["kind"] == "lease" and state["holder"] == "me@srv03335"
+    q.front.strict("another session of this principal holds the lease")
+    answers = [a for _ in range(3) for a in q.round()]
+    q.front.lenient()
+    q.front.assert_clean()
+    assert quiet_kinds(answers) == {"lease"} and q.vb.shell.hellos == []
+    t0 = time.monotonic()                              # explicit: unchanged, still reads
+    body = q.explicit().json()
+    assert body["ok"] and body["identity"]["shell_id"] and q.front.attempts(t0) > 0
+
+
+def test_a_free_lease_still_lets_a_viewed_board_be_read(q):
+    """REVIEW-W5 1 twin: nobody holds the lease (no holder): background reads go ahead."""
+    hub, _ref = attach_hub(q, "alice@lab-pc")
+    hub.current = None
+    assert q.explicit("/lease").json()["lease"] is None
+    assert q.view()["allowed"] is True
+    t0 = time.monotonic()
+    assert quiet_kinds(q.round()) == {""} and q.front.attempts(t0) > 0
+
+
+def test_a_lease_that_cannot_be_read_keeps_background_contact_quiet(q):
+    """REVIEW-W5 2: a hub board whose lease cannot be read is quiet ("lease unknown"),
+    asked again on the next background read; explicit reads carry on. Before the fix the
+    gate failed OPEN (an unreadable lease read as free)."""
+    from harness_manager.core.errors import UnreachableError
+
+    hub, _ref = attach_hub(q, "alice@lab-pc")
+    hub.fail_always["lease_status"] = UnreachableError("the hub did not answer")
+    q.view()
+    q.d.leases.forget(_ref)                            # no cached view: the hub is asked
+    q.front.strict("the lease cannot be read")
+    answers = [a for _ in range(3) for a in q.round()]
+    q.front.lenient()
+    q.front.assert_clean()
+    assert quiet_kinds(answers) == {"lease_unknown"} and q.vb.shell.hellos == []
+    assert all("could not be read" in a["quiet"]["text"] for a in answers)
+    assert "did not answer" in answers[0]["quiet"]["detail"]
+    t0 = time.monotonic()                              # explicit: unchanged
+    body = q.explicit().json()
+    assert body["ok"] and body["identity"]["shell_id"] and q.front.attempts(t0) > 0
+    # Twin: the hub answers again (the lease is free): the next background read goes ahead.
+    del hub.fail_always["lease_status"]
+    hub.current = None
+    t1 = time.monotonic()
+    assert quiet_kinds([q.background()]) == {""} and q.front.attempts(t1) > 0
 
 
 # --- (c) a refused or reset connect: back off, and the interval grows ---------------------------
@@ -246,6 +308,43 @@ def test_a_refused_connect_backs_off_and_the_interval_grows(tmp_path, turn_away)
         r.front.release()
         assert r.explicit().json()["ok"]
         assert quiet_kinds([r.background()]) == {""}
+
+
+def test_our_own_job_is_not_another_client_and_starts_no_back_off(q):
+    """REVIEW-W5 5: a background read that meets OUR OWN job (``jobs.busy_error``) is not
+    "busy (another client)": today's 409 HELD (the page defers on it), and no back-off, so
+    the read after the job goes ahead at once. Before the fix: busy, and a 30 s back-off."""
+    q.view()
+    release = threading.Event()
+    q.d.jobs.submit("slot_push", q.bid, lambda progress: release.wait(20))
+    try:
+        deadline = time.monotonic() + 5
+        while q.d.gates.busy(q.bid) is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        r = q.client.get(f"{bid_path(q.bid)}/telemetry", headers=BG)
+        assert r.status_code == 409, r.text
+        err = r.json()["error"]
+        assert err["name"] == "HELD" and " job " in f"{err.get('holder')} {err['message']}"
+        st = background_state(q)
+        assert st["kind"] == "" and st["refusals"] == 0 and q.d.quiet.backing_off(q.bid) is None
+    finally:
+        release.set()
+    deadline = time.monotonic() + 5
+    while q.d.gates.busy(q.bid) is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert quiet_kinds([q.background("/telemetry")]) == {""}
+
+
+def test_twin_another_clients_held_port_still_backs_off(q):
+    """REVIEW-W5 5 twin: a HELD that is not our job (another client on the control port)
+    still backs off and says busy."""
+    q.view()
+    q.front.hold()
+    try:
+        assert quiet_kinds([q.background()]) == {"busy"}
+        assert q.d.quiet.backing_off(q.bid) is not None
+    finally:
+        q.front.release()
 
 
 def test_twin_an_explicit_read_while_busy_keeps_todays_error(q):

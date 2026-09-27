@@ -102,9 +102,10 @@ def test_the_view_has_exactly_the_api_shape(world):
     note = world.queued_by_hand(BOB, age_s=30, message="hi")
     va, vb = a.svc.view(a.hub), b.svc.view(b.hub)
     assert set(va) == VIEW_KEYS == set(vb)
-    assert set(va["lease"]) == {"target", "holder", "user", "expires_at", "mine",
-                                "holder_kind", "holder_kind_reason"}              # D12
+    assert set(va["lease"]) == {"target", "holder", "user", "expires_at", "mine", "here",
+                                "holder_kind", "holder_kind_reason"}  # D12; here: REVIEW-W5
     assert va["lease"]["holder_kind"] == "hm"                     # this session holds it
+    assert va["lease"]["here"] is True and vb["lease"]["here"] is False   # the token is a's
     assert vb["lease"]["holder_kind"] == "unknown"                # not answered: maybe a script
     assert set(va["queue"][0]) == {"position", "holder", "user", "mine"}
     assert va["request"] is None and va["taken"] is None and va["hub"] == HOST

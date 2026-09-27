@@ -65,11 +65,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from harness_manager.core.capabilities import DISPLAY_MIRROR
 from harness_manager.core.display import DisplayUnavailable
 from harness_manager.core.errors import (
     ActionFailedError,
     HarnessError,
     HeldError,
+    UnavailableError,
     UnreachableError,
     UsageError,
 )
@@ -193,23 +195,44 @@ class Mps3Display:
             keep = self._facts[1] if self._facts is not None else None
             self._facts = (self._clock(), MirrorFacts.of_identity(identity, keep))
 
-    def facts(self, *, fresh: bool = False) -> MirrorFacts:
-        """The harness's mirror facts, cached ``facts_ttl_s``; the open board's identity seeds
-        them, so asking costs no read. ``fresh``: ``version`` read now (a harness that does
-        not answer falls back to what is known)."""
+    def known_facts(self) -> MirrorFacts | None:
+        """What is known WITHOUT asking the board: the cached facts (of any age; a stale
+        cache takes the open board's identity when it has one), else the identity's, else
+        None. REVIEW-W5 4: the refusal path (``display_gate``, ``display_reason``, the status)
+        uses only this; not known is not never."""
         now = self._clock()
         with self._mu:
             cached = self._facts[1] if self._facts is not None else None
             age = now - self._facts[0] if self._facts is not None else None
-        if not fresh and cached is not None and age is not None and age < self._ttl:
+        if cached is not None and age is not None and age < self._ttl:
             return cached
         seed = getattr(self._session.candidate, "identity", None)
-        seeded = MirrorFacts.of_identity(seed) if seed is not None and (
+        seeded = MirrorFacts.of_identity(seed, cached) if seed is not None and (
             getattr(seed, "features", ()) or getattr(seed, "harness_impl", "")) else None
-        if not fresh and cached is None and seeded is not None:
+        if seeded is not None:
             with self._mu:
                 self._facts = (now, seeded)
             return seeded
+        return cached
+
+    def facts(self, *, fresh: bool = False) -> MirrorFacts:
+        """The harness's mirror facts. Not ``fresh``: ``known_facts`` only, never a read of
+        the board (``UnavailableError`` when nothing is known yet). ``fresh``: ``version``
+        read now (a harness that does not answer falls back to what is known); only
+        ``_open_forward`` asks for that, after the lease check."""
+        if not fresh:
+            known = self.known_facts()
+            if known is None:
+                raise UnavailableError(DISPLAY_MIRROR, "the harness's features are not known "
+                                                       "yet (its version is read when the "
+                                                       "live display opens)")
+            return known
+        now = self._clock()
+        with self._mu:
+            cached = self._facts[1] if self._facts is not None else None
+        seed = getattr(self._session.candidate, "identity", None)
+        seeded = MirrorFacts.of_identity(seed) if seed is not None and (
+            getattr(seed, "features", ()) or getattr(seed, "harness_impl", "")) else None
         try:
             got = self._read_live()
         except HarnessError:
@@ -329,30 +352,28 @@ class Mps3Display:
         answer a gate 422 before they look at the lease: taking the lease would not help."""
         if self._closed:
             return ""
-        try:
-            f = self.facts()
-        except HarnessError:
-            return ""
-        return self._gate_reason(f)
+        f = self.known_facts()                 # never a read of the board (REVIEW-W5 4)
+        return self._gate_reason(f) if f is not None else ""
 
     def display_reason(self) -> str:
-        """"" when the mirror can be opened now; else why not (the capability line)."""
+        """"" when the mirror can be opened now; else why not (the capability line). Never
+        reads the board: the gate from what is known (``known_facts``; nothing known skips
+        it, and ``_open_forward`` reads ``version`` after the lease check), the lease view,
+        the claim on record."""
         if self._closed:
             return CLOSED
-        try:
-            f = self.facts()
-        except HarnessError as exc:
-            return f"the harness did not answer: {exc.message}"
-        return self._gate_reason(f) or self._lease(fresh=False)[0] or self._claim_reason()
+        f = self.known_facts()
+        gate = self._gate_reason(f) if f is not None else ""
+        return gate or self._lease(fresh=False)[0] or self._claim_reason()
 
     def display_facts(self) -> dict[str, Any]:
-        """What a status view shows about the reach (additive, for the daemon's status)."""
+        """What a status view shows about the reach (additive, for the daemon's status).
+        What is known only: never a read of the board."""
         with self._mu:
             tunnel = self._tunnel
-        try:
-            facts: dict[str, Any] = self.facts().to_json()
-        except HarnessError as exc:
-            facts = {"error": exc.message}
+        known = self.known_facts()
+        facts: dict[str, Any] = known.to_json() if known is not None else {
+            "error": "the harness's features are not known yet"}
         return {**facts, "reach": "board-ssh", "lease_holder_only": True,
                 "forward": tunnel.status() if tunnel is not None else None}
 
@@ -374,11 +395,17 @@ class Mps3Display:
                                         timeout=CONNECT_TIMEOUT_S)
 
     def _open_forward(self) -> Any:
+        known = self.known_facts()
+        why = self._gate_reason(known) if known is not None else ""
+        if why:
+            raise DisplayUnavailable(why, retry_s=None)
+        self._require_lease(fresh=True)      # D3: never a forward for anyone but the holder
+        # The live ``version`` read (the port, the mode) only now, after the lease check:
+        # nobody else's board is read on the way to a refusal (REVIEW-W5 4).
         f = self.facts(fresh=True)
         why = self._gate_reason(f)
         if why:
             raise DisplayUnavailable(why, retry_s=None)
-        self._require_lease(fresh=True)      # D3: never a forward for anyone but the holder
         why = self._claim_reason()
         if why:
             raise DisplayUnavailable(why, retry_s=None)

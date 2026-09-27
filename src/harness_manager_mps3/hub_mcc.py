@@ -30,8 +30,9 @@ hub through the hub runner (``ssh HUB 'sg fpga -c …'``; the console is ``root:
 - **reads** (``CFG R TEMP/OSC/V/SCC``, ``HELP``): ``HUB_MCC_READ_PY`` below (Harness Manager's
   own, proven under a real Python 3.6: ``tests/unit/test_mcc_fix_hub.py``), shipped the way
   LINUX-CLAIM ships pyverify's modules (``sh -c`` picks the hub's newest ``python3``). It keeps
-  pyverify's one-reader rule and ``Cmd>`` check, listens first (an idle MCC is silent; a
-  talking one is booting, and a key in the auto-boot window would stop the boot), types each
+  pyverify's one-reader rule and ``Cmd>`` check, listens first for ``READ_LISTEN_S`` (3.5 s:
+  an idle MCC is silent, a talking one is booting, and its ~3 s auto-boot window is silent
+  too, where a key would stop the boot), types each
   read at 100 ms a character, enters DEBUG for ``CFG R`` and always leaves with EXIT. It
   refuses anything but those reads itself: nothing that changes state goes this way.
 
@@ -63,6 +64,7 @@ from harness_manager.core.model import Reading
 from harness_manager.core.pack import Progress
 
 from .mcc import (
+    MCC_QUIET_BEFORE_S,
     OSC_CAVEAT,
     OSC_COUNT,
     POST_WRITE_GAP_S,
@@ -91,7 +93,10 @@ CAPTURE_MAX_S = 150.0
 READ_TIMEOUT_S = 90.0
 READ_PROMPT_S = 3.0
 READ_REPLY_S = 5.0
-READ_LISTEN_S = 0.3
+#: Silence before the first CR of a read (REVIEW-W5 3; ``mcc.MCC_QUIET_BEFORE_S``): the MCC's
+#: auto-boot window is ~3 s of silence, and a CR in it STOPS the FPGA boot. The reader script
+#: holds the same floor (``LISTEN_MIN_S``) whatever it is sent.
+READ_LISTEN_S = MCC_QUIET_BEFORE_S
 PING_INTERVAL_S = 1.0
 PING_TIMEOUT_S = 1.0
 LOG_DIR = "/tmp"
@@ -169,6 +174,7 @@ HUB_MCC_READ_PY = r'''
 import json, os, re, select, sys, time
 A = json.loads(sys.argv[1])
 TTY = A["tty"]
+LISTEN_MIN_S = 3.5
 OUT = {"tty": TTY, "others": [], "prompt": "", "menu": "", "replies": [], "heard": ""}
 PROMPT = re.compile(br"(Cmd|Debug)>\s*$")
 READ = re.compile(r"^(HELP|\?|CFG R (OSC|TEMP|V|SCC) \d{1,2})$")
@@ -282,7 +288,7 @@ try:
     fd = open_raw()
 except OSError as exc:
     done(2, "cannot open %s: %s" % (TTY, exc))
-heard, _ = read_for(fd, A["listen_s"], False)
+heard, _ = read_for(fd, max(float(A.get("listen_s") or 0), LISTEN_MIN_S), False)
 if heard:
     OUT["heard"] = heard.decode("utf-8", "replace")[-200:]
     done(6, "the MCC is talking (booting?): not typing")

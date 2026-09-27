@@ -386,3 +386,51 @@ class SilentPort:
 
     def close(self) -> None:
         self.closed = True
+
+
+class SilentWindowMcc(FakeMcc):
+    """REVIEW-W5 3: an MCC just past "Press Enter to stop auto boot..." (someone else, or
+    nobody, read that line): it waits ``window_s`` in SILENCE, where a key stops the boot,
+    then prints the rest of the banner ``step_s`` a line and ends at its prompt."""
+
+    def enter_window(self, window_s: float = 3.0, step_s: float = 0.05) -> None:
+        now = self._clock()
+        self.booting = True
+        self._autoboot_window = (now, now + window_s)
+        t = now + window_s + step_s
+        for line in BOOT_BANNER[BOOT_BANNER.index(AUTOBOOT_LINE) + 1:]:
+            self._schedule.append((t, line.encode() + b"\r\n",
+                                   self._fpga_done if line == FPGA_DONE_LINE else None))
+            t += step_s
+        self._schedule.append((t, PROMPT_MAIN, self._boot_done))
+
+
+class ChatterPort:
+    """REVIEW-W5 3: a port that is never silent (a byte every ``every_s``) and records every
+    byte written to it."""
+
+    def __init__(self, clock: Callable[[], float], every_s: float = 1.0) -> None:
+        self._clock = clock
+        self.every_s = every_s
+        self._next = clock()
+        self.writes = bytearray()
+
+    def write(self, data: bytes) -> int:
+        self.writes += data
+        return len(data)
+
+    @property
+    def in_waiting(self) -> int:
+        return 1 if self._clock() >= self._next else 0
+
+    def read(self, size: int = 1) -> bytes:
+        if self._clock() < self._next:
+            return b""
+        self._next = self._clock() + self.every_s
+        return b"."
+
+    def reset_input_buffer(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
