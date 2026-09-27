@@ -150,7 +150,8 @@ function toolExtras() {
     out[key] = {
       ctl: html`<button type="button" class="btn sm" data-action="tool-detect" data-tool=${tool}
         aria-busy=${t && t.running ? "true" : undefined} disabled=${!!(t && t.running)}
-        title="Find it and run its version probe (nothing else)" onClick=${() => detectTool(tool)}>
+        title=${tool === "openocd" ? "Find it, run its version probe and list its adapters (nothing else)"
+          : "Find it and run its version probe (nothing else)"} onClick=${() => detectTool(tool)}>
         ${t && t.running ? html`<${Spinner} />` : html`<${Icon} name="scan-search" />`} Detect</button>`,
       note: html`<${ToolResult} tool=${tool} row=${row} />`,
     };
@@ -378,7 +379,9 @@ export function SettingsSectionBody({ updatesCard = null }) {
       return html`<${GenericSection} id="tools" extras=${toolExtras()} promote=${new Set(Object.keys(TOOL_KEYS))}
         before=${html`<p class="secondary">Empty means
         Harness Manager looks for the tool itself. Detect finds it and runs only its version probe
-        (<code>--version</code>, <code>-version</code>); hw_server is never run.</p>`} />`;
+        (<code>--version</code>, <code>-version</code>); for OpenOCD it also lists the adapters
+        (<code>-c "adapter list"</code>), which must include remote_bitbang; hw_server is never
+        run.</p>`} />`;
     case "advanced":
       return html`<${GenericSection} id="advanced" extras=${stateDirExtras()} after=${html`<${FilesCard} />`} />`;
     default:

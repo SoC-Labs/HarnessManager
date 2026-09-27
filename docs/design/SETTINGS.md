@@ -313,7 +313,7 @@ The result drives the UI: a green tick per step, or the failed step with its hin
 | **General** | theme (stays in `localStorage`, read before first paint by `theme-boot.js`; moving it to the service would flash the page on load), the app window's browser, the identify default (10 s) | none |
 | **Hubs** | §6: add, edit, remove, test, discover | Test connection per hub |
 | **Boards** | per board: name (the first write N1 lacks), address and `match`, route (`via`), hub and target, shares, power meter, XVC reach, telemetry tables. A pack's own rows render under its heading. | Probe (existing `POST /boards`), Test power (a read, never a cycle) |
-| **Tools** | OpenOCD, OpenOCD cfg dir, Vivado, hw_server, uv, `gh` | **Detect** fills the path from PATH and `$XILINX_VIVADO` and runs `--version`, showing "OpenOCD 0.12.0 at /usr/bin/openocd". A path that does not run is refused. |
+| **Tools** | OpenOCD, OpenOCD cfg dir, Vivado, hw_server, uv, `gh` | **Detect** fills the path from PATH and `$XILINX_VIVADO` and runs `--version`, showing "OpenOCD 0.12.0 at /usr/bin/openocd". A path that does not run is refused. OpenOCD also lists its adapters and passes only with remote_bitbang (DEBUG-OCD). |
 | **Updates** | UPDATE-UI's card (channel, mode, status), plus source, mirrors, GitHub token, and the policy note | Check now (existing `POST /update/check`) |
 | **Harness + kits** | channels shown, per-board pins (read-only; pin from the board's Update page), harness cache cap (planned 2 GB), kit cache cap (planned 1 GiB), kit sources, trust keys (read-only fingerprints) | Test source (reads `channel.json`, verifies it) |
 | **Debug** | OpenOCD debug port base, XVC port base, hw_server mode (own / `--byo` default) | Detect hw_server |
