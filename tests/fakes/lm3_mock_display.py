@@ -10,7 +10,8 @@ own LM1 ``FakeLcdMirror`` on 127.0.0.1:0, started on first use:
 - every demo board: live, the clcd_demo test card repainting about three times a second,
   in the snooper's ``hw`` mode (exact);
 - behind a hub (``WeekPlanSim.behind_hub``): the lease holder only (D3). Another holder, or
-  none, is refused with the reason.
+  none, is refused as the daemon refuses it: 409 HELD naming the holder (the routes read
+  the hub's lease through ``SimLeases``, as the daemon reads the hub API's).
 
 Knobs: ``refuse(bid, reason)`` / ``allow(bid)`` (``display_reason``), ``no_display(bid)``
 (the hook returns None: a pack with no live display for that board), ``mirror(bid)`` (the
@@ -51,6 +52,18 @@ class SimDisplayAdapter:
 
     def display_release(self) -> None:
         pass
+
+
+class SimLeases:
+    """The hub API's lease service as the display routes read it: ``view(hub)`` from the
+    week-plan sim's hubs (``behind_hub``)."""
+
+    def __init__(self, week_plan: Any) -> None:
+        self.week_plan = week_plan
+
+    def view(self, hub: Any, **_kw: Any) -> dict[str, Any]:
+        record = getattr(self.week_plan, "hubs", {}).get(hub.board_id) or {}
+        return {"lease": record.get("lease")}
 
 
 class _EveryPack:
@@ -143,9 +156,24 @@ def register(app: FastAPI, state: Any, week_plan: Any) -> DisplaySim:
     daemon = SimpleNamespace(
         engine=SimpleNamespace(packs=lambda: _EveryPack(sim)), bus=state.engine.bus,
         check_token=lambda presented: bool(presented) and presented == state.token,
-        display=sim.service, close=lambda: None)
+        display=sim.service, leases=SimLeases(week_plan), close=lambda: None)
+    views: dict[str, tuple[Any, Any]] = {}
+
+    def board(bid: str) -> Any:
+        """The demo session as the routes see it: its candidate, and its hub when the
+        week-plan sim put it behind one (one view per session, so its adapter is kept)."""
+        session = state.session(bid)                 # 404 ABSENT: not open
+        held = views.get(bid)
+        if held is None or held[0] is not session:
+            held = (session, SimpleNamespace(candidate=session.candidate, hub=None))
+            views[bid] = held
+        hub = getattr(week_plan, "hubs", {}).get(bid)
+        held[1].hub = (SimpleNamespace(board_id=bid, target=hub["target"])
+                       if hub is not None else None)
+        return held[1]
+
     api, wsr = APIRouter(prefix=API), APIRouter(prefix=API)
-    display_api.register(RouteContext(daemon=daemon, api=api, wsr=wsr, board=state.session,
+    display_api.register(RouteContext(daemon=daemon, api=api, wsr=wsr, board=board,
                                       require=None, accepted=None))
     app.include_router(wsr)
     app.include_router(api)

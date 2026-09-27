@@ -92,11 +92,12 @@ def test_the_lease_rule_and_a_board_without_a_display_are_refused_as_the_daemon_
     open_board(client, BOARD_FIELDED)
     app.state.sim.behind_hub(BOARD_FIELDED, lease="other", holder="alice@lab-pc-07")
     code, first = refused(client, ws_url(BOARD_FIELDED))
-    assert code == 4000 + ExitCode.UNAVAILABLE and first["state"] == "refused"
+    assert code == 4000 + ExitCode.HELD and first["state"] == "refused"
     assert first["reason"] == ("the live display is for the lease holder only: "
                                "alice@lab-pc-07 holds mps3_01_pl")
+    assert first["error"]["name"] == "HELD" and first["error"]["holder"] == "alice@lab-pc-07"
     r = client.get(f"/api/v1/boards/{enc(BOARD_FIELDED)}/display.png", headers=AUTH)
-    assert r.status_code == 422 and r.json()["error"]["reason"] == first["reason"]
+    assert r.status_code == 409 and r.json()["error"] == first["error"]
     # the twin: the lease is mine
     app.state.sim.behind_hub(BOARD_FIELDED, lease="mine")
     assert client.get(f"/api/v1/boards/{enc(BOARD_FIELDED)}/display",
