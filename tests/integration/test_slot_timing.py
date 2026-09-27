@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import io
+import os
 import sys
 import threading
 import time
@@ -106,6 +107,46 @@ def test_twin_a_small_image_gets_the_1800s_floor_and_the_rows_move_it(monkeypatc
     monkeypatch.setenv(O.STALL_ENV, "not-a-number")
     with pytest.raises(UsageError, match=O.STALL_ENV):
         O.slot_timeouts(1)
+
+
+@pytest.fixture
+def settings_file(tmp_path, monkeypatch):
+    """This test's own ``settings.toml`` (under its ``$HARNESS_MANAGER_STATE_DIR``) and policy
+    file, with the settings reader's cache forgotten before and after."""
+    from harness_manager.settings import runtime
+
+    runtime.reset()
+    monkeypatch.setattr(runtime, "POLICY_PATH", tmp_path / "policy.toml")
+    root = Path(os.environ["HARNESS_MANAGER_STATE_DIR"])
+    root.mkdir(parents=True, exist_ok=True)
+
+    def write(text: str) -> None:
+        (root / "settings.toml").write_text(text, encoding="utf-8")
+
+    yield write
+    runtime.reset()
+
+
+def test_a_settings_toml_card_rate_sizes_the_budget(settings_file):
+    # SET-WIRE: the rows are read through the pack's settings.value, so the Settings menu /
+    # settings.toml moves the budget where only the variable did (INTEG-W4)
+    settings_file("[mps3.slot]\ncard_write_bps = 35000\njob_timeout_s = 7200\n")
+    assert O.card_rates() == (35_000.0, 14_000.0)
+    t = O.slot_timeouts(MB29)
+    assert t.write_bps == 35_000 and t.read_bps == 14_000
+    assert t.size_s == pytest.approx(1.5 * (MB29 / 35_000 + MB29 / 14_000))
+    assert O.slot_timeouts(1_000_000).job_s == 7200.0            # the floor, from the file
+    assert O.slot_timeouts(1_000_000).push_stall_s == 900.0      # a row the file leaves alone
+
+
+def test_twin_the_variable_still_wins_and_a_bad_file_value_is_skipped(settings_file,
+                                                                      monkeypatch):
+    settings_file("[mps3.slot]\ncard_write_bps = 35000\n")
+    monkeypatch.setenv(O.CARD_WRITE_BPS_ENV, "140000")
+    assert O.card_rates()[0] == 140_000                          # env over the user's file
+    monkeypatch.delenv(O.CARD_WRITE_BPS_ENV)
+    settings_file("[mps3.slot]\ncard_write_bps = 0\n")          # not above 0: never a / 0
+    assert O.card_rates()[0] == O.CARD_WRITE_BPS
 
 
 def test_the_push_hands_pyverify_the_stall_limit(linux, tmp_path, monkeypatch):

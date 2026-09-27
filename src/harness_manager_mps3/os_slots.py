@@ -185,33 +185,21 @@ def same_u32(a: Any, b: Any) -> bool:
 # --- timing: the budget, and the estimate -------------------------------------------------------
 
 
-def _setting_s(key: str, env: str, default: float) -> float:
-    """A number row's value (seconds, bytes a second). Through the settings reader once lane
-    SET-WIRE's ``settings.value`` is there (the variable, then settings.toml, then the
-    default); until then the variable, then the default. A bad variable is refused, naming
-    it."""
-    from . import settings as _settings
+def _setting_s(key: str) -> float:
+    """A number row's value (seconds, bytes a second) where it is read: the pack's settings
+    reader (``settings.value``, lane SET-WIRE): the row's variable, then the Settings menu /
+    ``settings.toml``, then the admin's ``[default]``, then the row's default (the constants
+    above). Each row's check takes only a number above 0: a bad variable is refused, naming
+    it (``UsageError``); a bad file value is skipped, logged once, for the next layer."""
+    from .settings import value
 
-    reader = getattr(_settings, "value", None)
-    if callable(reader):
-        return float(reader(key))
-    raw = os.environ.get(env, "").strip()
-    if not raw:
-        return float(default)
-    try:
-        value = float(raw)
-    except ValueError:
-        value = 0.0
-    if value <= 0:
-        raise UsageError(f"${env}={raw!r} is not a number above 0",
-                         hint=f"fix ${env}, or unset it to use {key} from the settings")
-    return value
+    return float(value(key))
 
 
 def card_rates() -> tuple[float, float]:
     """``(write, read)`` bytes a second: the card's rates, from their rows."""
-    return (_setting_s(CARD_WRITE_BPS_KEY, CARD_WRITE_BPS_ENV, CARD_WRITE_BPS),
-            _setting_s(CARD_READ_BPS_KEY, CARD_READ_BPS_ENV, CARD_READ_BPS))
+    return (_setting_s(CARD_WRITE_BPS_KEY),       # CARD_WRITE_BPS_ENV first
+            _setting_s(CARD_READ_BPS_KEY))        # CARD_READ_BPS_ENV first
 
 
 @dataclass(frozen=True)
@@ -242,8 +230,8 @@ def slot_timeouts(nbytes: int, *, write: bool = True) -> SlotTimeouts:
     from pyverify.pusher import TCP_SEND_CHUNK
 
     wbps, rbps = card_rates()
-    floor = _setting_s(JOB_TIMEOUT_KEY, JOB_TIMEOUT_ENV, JOB_TIMEOUT_S)
-    stall = _setting_s(STALL_KEY, STALL_ENV, STALL_S)
+    floor = _setting_s(JOB_TIMEOUT_KEY)           # JOB_TIMEOUT_ENV first
+    stall = _setting_s(STALL_KEY)                 # STALL_ENV first
     size = budget_s(nbytes, write=write)
     return SlotTimeouts(job_s=max(floor, size),
                         push_stall_s=max(stall, BUDGET_MARGIN * TCP_SEND_CHUNK / wbps),
