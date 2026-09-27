@@ -387,7 +387,7 @@ Default lease lengths: 1 hour for `acquire`, 2 hours once a request succeeds. A 
 **Leave queue** (or `lease leave TARGET`, or Ctrl-C on `lease request`) withdraws your
 request at any time.
 
-![Waiting for an answer: position 1, 1:58 left, Leave queue and Force release](review/2026-09-24/lease-request-waiting-light.png)
+![Waiting for an answer: position 1, 1:59 left, Leave queue and Force release](review/2026-09-24/lease-request-waiting-light.png)
 
 ### Force-release
 
