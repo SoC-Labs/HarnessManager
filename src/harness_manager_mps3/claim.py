@@ -20,7 +20,8 @@ What Harness Manager adds here:
   ``unclaimed`` or ``unknown``; ``claimed = {by, key_fp, at}`` or None. On the LAN identify is
   one UDP round trip. Through a hub UDP cannot ride the SSH tunnel, so the probe runs ON the
   hub: pyverify's own ``identify`` module, shipped in the ssh command (``_hub_script``), run
-  by the hub's newest python3 (its system python may be 3.6). ``info`` never does that hub
+  by python3.11 when the hub has it, else another python 3.8+ (``HUB_PYTHONS``; the hub's
+  system python3 is 3.6, which is refused with a clear message). ``info`` never does that hub
   round trip (it shows the last check, from ``claims.json``); ``board claim-status`` and the
   claim itself do.
 - **The claim** (``claim``): never automatic. The TFTP ``authorized_keys`` put is pyverify's
@@ -37,7 +38,10 @@ What Harness Manager adds here:
   to the board's loopback would pass the claim lock for anyone on this host).
 - **The lock's refusal** (``refusal_error``): ``slot locked: board claimed (use ssh)`` becomes
   ``ClaimLockedError``; the fabric identity lock (``identity lock: <reason>``, a different
-  thing: the card image and the FPGA's static disagree) becomes an ``IncompatibleError``.
+  lock: the card image and the FPGA's static disagree, claimed or not) becomes an
+  ``IdentityLockError`` (mismatch or unknown, with the Ethernet fix; ``slot_words``).
+- **After a claim the board accepted** mps3-keys-sync has already run (the Linux lead's C5),
+  so ssh refusing the key is never lag: ``KEYS_SYNC_HINT`` says what it is instead.
 
 Bare metal has none of this: ``claim_status`` is None (no ``claim`` key in ``info``) and the
 claim is ``UnavailableError``.
@@ -73,7 +77,6 @@ from harness_manager.core.errors import (
     ActionFailedError,
     AlreadyError,
     HarnessError,
-    IncompatibleError,
     RefusedError,
     UnavailableError,
     UnreachableError,
@@ -81,6 +84,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.model import LinkKind
 
+from . import slot_words as _slot_words
 from .constants import IMPL_LINUX
 
 log = logging.getLogger(__name__)
@@ -108,8 +112,18 @@ LAN_TTL_S = 30.0
 IDENTIFY_TIMEOUT_S = 1.0
 HUB_TIMEOUT_S = 30.0
 SSH_TIMEOUT_S = 30.0
-#: After a fresh claim harnessd runs mps3-keys-sync (<= 2 s) before dropbear knows the key.
+#: After a fresh claim harnessd runs mps3-keys-sync (<= 2 s) BEFORE its final TFTP ACK, and
+#: dropbear re-reads authorized_keys on every login, so the key normally works at once (the
+#: Linux lead's C5; B2 confirmed it). These retries (6.5 s in all) are margin.
 KEYS_SYNC_RETRIES_S = (0.5, 1.0, 2.0, 3.0)
+#: When ssh still refuses after a claim that was ACCEPTED, the cause is not lag (C5).
+KEYS_SYNC_HINT = (
+    "this is not key-sync lag (the board syncs the key before it acknowledges the claim). "
+    "Either the private key ssh used is not the claimed one (check boards.<b>.ssh.key, "
+    "--key), or the board's mps3-keys-sync is missing or failing: its harness log (the "
+    "console on tty_02, or `pyverify log`) shows `tofu: … exit N` or `tofu: … not present`, "
+    "and the claim then applies only after the board's next boot. Reboot it "
+    "(`harness-manager mcc TARGET reboot`), then `harness-manager board claim TARGET --adopt`")
 
 #: One-shot ssh options (no forwards of ours, so the config's are cleared).
 ONE_SHOT_OPTIONS: tuple[str, ...] = (
@@ -134,8 +148,11 @@ class HostKeyChangedError(RefusedError):
     """The board's SSH host key is not the one pinned: refused, loudly, never re-trusted."""
 
 
-class ClaimLockedError(RefusedError):
-    """The harness refused an operation because the board is claimed (S12)."""
+#: The harness refused an operation because the board is claimed (S12). One class with the
+#: slot adapter's (``slot_words``): the claim lock is one thing wherever it is met.
+ClaimLockedError = _slot_words.ClaimLockedError
+#: The fabric identity lock (a different lock: the card's image vs the FPGA's static).
+IdentityLockError = _slot_words.IdentityLockError
 
 
 # --- fingerprints and key lines ------------------------------------------------------------------
@@ -341,11 +358,27 @@ def write_ssh_settings(candidate: Any, changes: Mapping[str, str | None]) -> str
 
 # --- the hub-side probe: pyverify's own modules, run on the hub ------------------------------------
 
-#: The hub's system python may be 3.6; pyverify needs 3.8+. The newest one found runs the
-#: script (``$0``); the arguments follow.
-_PY_PICK = ('for p in python3.13 python3.12 python3.11 python3.10 python3.9 python3.8 python3; '
-            'do command -v "$p" >/dev/null 2>&1 && exec "$p" -c "$0" "$@"; done; '
-            'echo "harness-manager: no python3 on the hub" >&2; exit 127')
+#: What the shipped helper really needs: pyverify's ``identify.py`` and ``pusher.py`` import
+#: ``typing.Literal`` (3.8) under ``from __future__ import annotations`` (3.7), so 3.8. The
+#: hub's system ``python3`` is 3.6 and ``/usr/bin/python3.11`` exists (the Linux lead's C4;
+#: B1 used it). No contract guarantees either.
+HUB_PY_MIN = (3, 8)
+#: The order the hub's interpreters are tried: python3.11 first, then the others. Each must
+#: PROVE it is ``HUB_PY_MIN`` or newer before it runs the helper, so a bare ``python3`` runs
+#: it only when it is new enough. With none: one JSON line saying so (``NO_PYTHON``).
+HUB_PYTHONS = ("python3.11", "python3.13", "python3.12", "python3.10", "python3.9",
+               "python3.8", "python3")
+NO_PYTHON = "NoPython"
+_PY_PICK = (
+    f'for p in {" ".join(HUB_PYTHONS)}; do '
+    'command -v "$p" >/dev/null 2>&1 || continue; '
+    f'"$p" -c "import sys; sys.exit(0 if sys.version_info >= {HUB_PY_MIN!r} else 1)" '
+    '>/dev/null 2>&1 || continue; '
+    'exec "$p" -c "$0" "$@"; done; '
+    'v=$(python3 -c "import sys; print(\'%d.%d\' % sys.version_info[:2])" 2>/dev/null); '
+    f'printf \'{{"ok": false, "kind": "{NO_PYTHON}", "err": "no python '
+    f'{HUB_PY_MIN[0]}.{HUB_PY_MIN[1]}+ on the hub (python3 is %s)"}}\\n\' "${{v:-absent}}"; '
+    'exit 127')
 
 _DRIVER = r'''
 import base64, json, sys, types, zlib
@@ -416,6 +449,14 @@ def _hub_call(hub: str, jump: str, argv: Sequence[str], timeout: float) -> dict[
     for line in reversed(out):
         with contextlib.suppress(ValueError):
             obj = json.loads(line)
+            if isinstance(obj, dict) and obj.get("kind") == NO_PYTHON:
+                raise UnreachableError(
+                    f"the hub {hub} cannot run Harness Manager's identify/TFTP helper: "
+                    f"{obj.get('err')}",
+                    hint=f"the helper needs Python {HUB_PY_MIN[0]}.{HUB_PY_MIN[1]}+ on the hub "
+                         "(it tries python3.11 first): install one there (e.g. `dnf install "
+                         "python3.11`); identify and TFTP are UDP, so they cannot go through "
+                         "the SSH tunnel instead")
             if isinstance(obj, dict) and "ok" in obj:
                 return obj
     why = (getattr(res, "stderr", "") or "").strip().splitlines()
@@ -475,6 +516,8 @@ class Observation:
     source: str
     at: float
     error: str = ""
+    #: ``ssh.key_sha256``: the claim's FIRST key (C1, additive; "" = not published)
+    key_fp: str = ""
 
 
 def _iso(t: float) -> str:
@@ -592,7 +635,7 @@ class Mps3Claim:
                 return Observation(claimed if isinstance(claimed, bool) else None,
                                    str(seen.get("host_key") or ""),
                                    f"{seen.get('source') or 'identify via ' + hub} (last check)",
-                                   float(seen["at"]))
+                                   float(seen["at"]), key_fp=str(seen.get("key_fp") or ""))
             return Observation(None, "", f"identify via {hub}", now,
                                "not checked through the hub yet (identify is UDP: it does not "
                                "ride the SSH tunnel); `harness-manager board claim-status` asks "
@@ -615,21 +658,25 @@ class Mps3Claim:
         ssh = raw.get("ssh") if isinstance(raw.get("ssh"), dict) else {}
         claimed = ssh.get("claimed") if isinstance(ssh.get("claimed"), bool) else None
         key = ssh.get("host_key_sha256") if isinstance(ssh.get("host_key_sha256"), str) else ""
+        # C1 (additive): the fingerprint of the claim's first key, when the image publishes it
+        first = ssh.get("key_sha256") if isinstance(ssh.get("key_sha256"), str) else ""
         err = "" if ssh else "the board's identify has no ssh block (bare metal, or an older image)"
-        return Observation(claimed, key, source, at, err)
+        return Observation(claimed, key, source, at, err, first)
 
     def _remember(self, obs: Observation) -> None:
         if obs.claimed is None:
             return
         seen = self._records.get(self.board_id).get("observed") or {}
         if not obs.source.endswith("(last check)") and isinstance(seen, dict) and \
-                (seen.get("claimed"), seen.get("host_key"), seen.get("source")) == \
-                (obs.claimed, obs.host_key, obs.source) and obs.at - float(seen.get("at") or 0) < 600:
+                (seen.get("claimed"), seen.get("host_key"), seen.get("source"),
+                 seen.get("key_fp") or "") == \
+                (obs.claimed, obs.host_key, obs.source, obs.key_fp) and \
+                obs.at - float(seen.get("at") or 0) < 600:
             return                           # nothing new: no write on every LAN info
         with contextlib.suppress(OSError):
             self._records.update(self.board_id, observed={
                 "claimed": obs.claimed, "host_key": obs.host_key, "source": obs.source,
-                "at": obs.at})
+                "at": obs.at, **({"key_fp": obs.key_fp} if obs.key_fp else {})})
 
     # -- the state --------------------------------------------------------------------------
 
@@ -672,9 +719,16 @@ class Mps3Claim:
                          "re-provisioned: `harness-manager board claim TARGET "
                          "--replace-host-key`)")
         if state == STATE_OTHER and match is not False:
-            notes.append("claimed by a key this Harness Manager did not claim with; the board "
-                         "does not publish which. If it is yours (pyverify claim, another "
-                         "machine): `harness-manager board claim TARGET --adopt`")
+            which = (f"the board says its first claimed key is {obs.key_fp}" if obs.key_fp else
+                     "the board does not publish which")
+            notes.append(f"claimed by a key this Harness Manager did not claim with; {which}. "
+                         "If it is yours (pyverify claim, another machine): `harness-manager "
+                         "board claim TARGET --adopt`")
+        elif state == STATE_MINE and obs.key_fp and rec.get("key_fp") and \
+                obs.key_fp != rec.get("key_fp"):
+            notes.append(f"the board's first claimed key is {obs.key_fp}, not the key this "
+                         f"Harness Manager recorded ({rec.get('key_fp')}); a claim file may "
+                         "hold several keys, and the board publishes only the first")
         if config_error:
             notes.append(config_error)
         claimed: dict[str, Any] | None = None
@@ -682,12 +736,15 @@ class Mps3Claim:
             claimed = {"by": rec.get("by") or "you", "key_fp": rec.get("key_fp") or None,
                        "at": rec.get("at") or None, "mine": True}
         elif state == STATE_OTHER:
-            claimed = {"by": "another key", "key_fp": None, "at": None, "mine": False}
+            claimed = {"by": "another key", "key_fp": obs.key_fp or None, "at": None,
+                       "mine": False}
         hub, _ = self.route()
         return {
             "state": state,
             "claimed": claimed,
             "host_key": {"reported": reported or None, "pinned": pinned or None, "match": match},
+            # C1 (additive): identify's ssh.key_sha256, the claim's first key; None = not published
+            "claim_key": obs.key_fp or None,
             "route": f"hub {hub}" if hub else "lan",
             "user": cfg["user"] or DEFAULT_USER,
             "source": obs.source,
@@ -782,7 +839,8 @@ class Mps3Claim:
         self._records.update(self.board_id, by=_me(), key_fp=key_fp or None, at=_iso(time.time()),
                              host_key_fp=obs.host_key, how="adopt" if adopt else "claim")
         say(f"pinned {obs.host_key} in boards.toml boards.{table}.ssh.host_key")
-        now = Observation(True, obs.host_key, obs.source, time.time())
+        now = Observation(True, obs.host_key, obs.source, time.time(),
+                          key_fp=obs.key_fp or ("" if obs.claimed else key_fp))
         with self._mu:
             if self._lan is not None:
                 self._lan = now              # the board is claimed now: no stale "unclaimed"
@@ -931,11 +989,15 @@ class Mps3Claim:
                              "the board's CLCD or serial console")
             if res.returncode != 0:
                 why = _stderr_line(res.stderr) or f"ssh exited with status {res.returncode}"
+                if "permission denied" in res.stderr.lower() and fresh:
+                    raise RefusedError(
+                        f"the board's SSH refused your key ({why}): the claim was accepted, "
+                        f"but the key does not log in after {sum(KEYS_SYNC_RETRIES_S):g} s",
+                        hint=KEYS_SYNC_HINT)
                 if "permission denied" in res.stderr.lower():
                     raise RefusedError(
-                        f"the board's SSH refused your key ({why})"
-                        + (": the claim was accepted, but the key does not log in" if fresh else
-                           ": the board is claimed by another key"),
+                        f"the board's SSH refused your key ({why}): the board is claimed by "
+                        "another key",
                         hint="check the key (boards.<b>.ssh.key, --key) is the one that claimed it")
                 raise UnreachableError(f"SSH to {host} failed: {why}",
                                        hint="the claim state is unchanged unless it said "
@@ -1006,7 +1068,9 @@ def refusal_error(err: str, what: str = "this operation", *,
     """Map a harness refusal line to the error Harness Manager shows; None if it is not one.
 
     - ``slot locked: board claimed (use ssh)`` (S12, the claim lock) -> ``ClaimLockedError``;
-    - ``identity lock: <reason>`` (the fabric identity lock) -> ``IncompatibleError``.
+    - ``identity lock: <reason>`` (the fabric identity lock, a DIFFERENT lock: the card's image
+      and the FPGA's static disagree, claimed or not) -> ``IdentityLockError`` (a refusal with
+      the fix, never "incompatible": ``slot_words``).
     """
     text = (err or "").strip()
     low = text.lower()
@@ -1016,6 +1080,8 @@ def refusal_error(err: str, what: str = "this operation", *,
         fp = claimed.get("key_fp") if claimed.get("mine") else None
         if claimed.get("mine"):
             who = fp or "your key"
+        elif state == "other" and claimed.get("key_fp"):
+            who = f"another key ({claimed['key_fp']}, the board's first claimed key)"
         elif state == "other":
             who = "another key (the board does not publish which)"
         else:
@@ -1030,14 +1096,7 @@ def refusal_error(err: str, what: str = "this operation", *,
             f"this board is claimed by {who}; {what} needs the claiming key (use `board claim` "
             f"only if the board was re-provisioned) [harness: {text}]", hint=hint)
         return exc
-    if low.startswith(IDENTITY_LOCK_PREFIX):
-        reason = text[len(IDENTITY_LOCK_PREFIX):].strip()
-        return IncompatibleError(
-            f"the harness refused {what}: its fabric identity is locked ({reason}); the card's "
-            "image and the FPGA's static disagree",
-            hint="nothing was changed; `info` shows the skew. Put the image that belongs to "
-                 "this static on the card, or load the static the image was built for")
-    return None
+    return _slot_words.identity_lock_error(text, what)
 
 
 def make_claim_adapter(session: Any) -> Mps3Claim | None:

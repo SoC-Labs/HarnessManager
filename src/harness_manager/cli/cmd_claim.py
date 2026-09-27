@@ -163,6 +163,8 @@ def claim_human(board_id: str, st: dict[str, Any] | None) -> list[str]:
                      + (f" (boards.toml boards.{st['table']}.ssh.host_key)" if st.get("table") else ""))
     elif reported:
         lines.append(f"host key   {reported} (the board's; not pinned)")
+    if st.get("claim_key"):                  # identify ssh.key_sha256 (C1), when published
+        lines.append(f"claim key  {st['claim_key']} (the board's first claimed key)")
     lines.append(f"route      {st.get('route')}  user {st.get('user')}")
     lines += [f"note       {n}" for n in st.get("notes") or ()]
     return lines

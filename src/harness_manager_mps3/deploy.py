@@ -776,6 +776,13 @@ def _refusal_error(reply: dict, overlay: OverlayRef) -> HarnessError:
     if err.strip().upper() == "EBUSY":
         return HeldError(f"the shell is busy (EBUSY): {overlay.name} was not deployed",
                          hint="another client holds the control port, or a swap is running")
+    # LINUX-ANSWERS: the Linux harness's identity lock is its own lock (not the SSH claim,
+    # and not "incompatible, give up"): a push of the right image, a commit and a reboot fix it
+    from .slot_words import identity_lock_error
+
+    lock = identity_lock_error(err, f"the swap to {overlay.name}")
+    if lock is not None:
+        return lock
     if _is_fabric_mismatch(err):
         return IncompatibleError(
             f"the shell refused {overlay.name}: the running fabric does not match the "

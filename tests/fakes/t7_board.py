@@ -11,8 +11,12 @@ board that keeps running the old image whatever the SD says (the
 written-but-not-running case: a different APPFILE, an SD the MCC did not reread).
 
 ``FakeOsSlots``: the Linux harness's user-µSD slots A/B as the board's slot contract
-has them (push -> staged -> commit -> reboot boots the default). ``bad_images`` holds
-the image hashes that never come up healthy, so stage0 goes back to the old slot.
+has them (push -> staged -> commit -> reboot boots the default if it is valid and
+healthy, else the other slot, else rescue; the Linux lead's S9). ``bad_images`` (image
+hashes) and ``unhealthy`` (slot names, ``{"B"}``) never come up healthy, so stage0 falls
+back and the default STAYS on the bad slot. ``reports_confirmed`` adds ``slot status``
+``confirmed`` (S5, additive): false after a reboot until ``confirm_after`` status reads,
+never when it is -1.
 
 ``FakeUv``: records every argv and imitates ``uv venv`` / ``uv pip install`` /
 the venv's python, with switches to fail each step.
@@ -124,6 +128,10 @@ class FakeOsSlots:
     on_boot: Callable[[SlotInfo], None] | None = None     # the board comes up running this image
     reboot_fails: bool = False
     calls: list[str] = field(default_factory=list)
+    unhealthy: set[str] = field(default_factory=set)      # slot names that never come up
+    reports_confirmed: bool = False
+    confirm_after: int = 0                                # status reads until confirmed; -1 never
+    _unconfirmed_reads: int = 0
 
     @property
     def active(self) -> str:
@@ -137,12 +145,20 @@ class FakeOsSlots:
         return ""
 
     def _target(self) -> str:
+        if self.running not in ("A", "B"):               # rescue: the slot that is not the default
+            return _other(self.default)
         return _other(self.running) if self.default == self.running else ""
 
     def status(self) -> SlotStatus:
         self.calls.append("status")
+        raw: dict[str, Any] = {}
+        if self.reports_confirmed:
+            confirmed = self.confirm_after >= 0 and self._unconfirmed_reads >= self.confirm_after
+            raw["confirmed"] = confirmed and self.running in ("A", "B")
+            self._unconfirmed_reads += 1
         return SlotStatus(running=self.running, slots=dict(self.slots), default=self.default,
-                          target=self._target(), staged=self.staged, fabric_sid=self.fabric_sid)
+                          target=self._target(), staged=self.staged, fabric_sid=self.fabric_sid,
+                          raw=raw)
 
     def push(self, image: Path, *, static_id: str, sha256: str = "", version: str = "",
              progress=None) -> SlotStatus:
@@ -206,15 +222,21 @@ class FakeOsSlots:
 
             raise ActionFailedError("reboot sent but no restart observed")
         want = self.default
-        booted = want
-        if self.slots[want].image_sha256 in self.bad_images:
-            booted = self.running                 # never healthy: stage0 goes back
+
+        def healthy(name: str) -> bool:
+            info = self.slots.get(name)
+            return (info is not None and info.valid and name not in self.unhealthy
+                    and info.image_sha256 not in self.bad_images)
+
+        # stage0: the default if it comes up healthy, else the other slot, else rescue
+        booted = want if healthy(want) else _other(want) if healthy(_other(want)) else "rescue"
         self.running = booted
         self.staged = ""
+        self._unconfirmed_reads = 0
         for name, info in list(self.slots.items()):  # what this boot knew is gone
             self.slots[name] = replace(info, verified=VERIFIED_BOOT if name == booted and
                                        info.valid else VERIFIED_NO)
-        if self.on_boot:
+        if self.on_boot and booted != "rescue":
             self.on_boot(self.slots[booted])
         if progress:
             for i, phase in enumerate(("sent", "down", "up"), 1):

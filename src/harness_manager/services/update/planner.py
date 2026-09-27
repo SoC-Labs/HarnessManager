@@ -92,6 +92,9 @@ class Plan:
     board_phrase: str = ""
     auto_revert: bool = False
     os_pending: str = ""                  # a committed, unbooted slot rolled back first (rule 1)
+    #: LINUX-ANSWERS (S5): the default slot stage0 fell back FROM (it did not come up
+    #: healthy; the default stays on it until a rollback). "" = no fallback.
+    os_fell_back: str = ""
 
     @property
     def version(self) -> str:
@@ -155,6 +158,7 @@ class Plan:
             "via": self.via, "hub": dict(self.hub), "board_phrase": self.board_phrase,
             "auto_revert": self.auto_revert,
             "needs_door": list(self.needs_door),
+            "os_fell_back": self.os_fell_back or None,
             "fingerprint": self.fingerprint(),
         }
 
@@ -182,6 +186,11 @@ class BoardView:
     os_active_sha: str = ""               # the running OS slot image, when the adapter says
     os_active_crc: str = ""               # the running slot's S0LB table CRC (the board's hdr_crc)
     os_pending: str = ""                  # a slot committed and not booted yet (rule 1)
+    # LINUX-ANSWERS (S5): a fallback: the default slot that failed to boot, the slot running
+    # instead, and the failed slot's hdr_crc ("" = none; ``slot_health.fell_back``)
+    os_fell_back: str = ""
+    os_running: str = ""
+    os_fell_back_crc: str = ""
     sd_revisions: tuple[str, ...] = ()    # MB/HBI0309<rev> dirs seen on the config SD
     mcc_firmware: str = ""
     # HUB-SD: the pack's hub SD door (``hub_door``), with the lease holder/mine/queue;
@@ -458,6 +467,20 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     plan.base = base_needed
     plan.os_slot = os_needed and os_comp is not None
     plan.os_pending = board.os_pending if plan.os_slot else ""
+    plan.os_fell_back = board.os_fell_back
+    if board.os_fell_back:
+        # LINUX-ANSWERS (S5): stage0 went back to the other slot and the default stayed on
+        # the bad one; rollback is the fix (an OS write here does it first).
+        run = board.os_running or "the other slot"
+        plan.warnings.append(
+            f"slot {board.os_fell_back} failed to boot; {run} is running; roll back to make "
+            f"{run} the default (`harness-manager slot rollback TARGET`)"
+            + (": this update does that first" if plan.os_slot else ""))
+        if plan.os_slot and os_comp is not None and board.os_fell_back_crc and \
+                _same_u32(os_header_crc(os_comp) or "", board.os_fell_back_crc):
+            plan.warnings.append(f"slot {board.os_fell_back} holds THIS release's OS image "
+                                 f"(hdr_crc {board.os_fell_back_crc}) and it did not boot: "
+                                 "pushing it again will most likely fail the same way")
     plan.rekey = rekey and (plan.base or plan.os_slot)
     if plan.base and not (board.identity_known and ident.shell_id):
         # The running static_id is unknown, so this install MAY re-key the board: never let
@@ -540,7 +563,12 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
                     else f"{c.kind} files")
             s.append(PlanStep("store-overlays", f"{what} into the local store (no SD write)",
                               c.name))
-    if plan.os_slot and plan.os_pending:
+    if plan.os_slot and plan.os_fell_back:
+        s.append(PlanStep("rollback-os-slot", f"slot {plan.os_fell_back} failed to boot and "
+                                              "stage0 went back to the other slot: roll back "
+                                              "first, so the running slot is the default again "
+                                              "and a slot is free"))
+    elif plan.os_slot and plan.os_pending:
         s.append(PlanStep("rollback-os-slot", f"slot {plan.os_pending} is committed but not "
                                               "booted: roll it back first, so a slot is free "
                                               "(rule 1)"))
@@ -571,5 +599,7 @@ def _steps(plan: Plan, rel: HarnessRelease) -> None:
         if plan.base and plan.via == hub_door.VIA_HUB and plan.auto_revert:
             s.append(PlanStep(*hub_door.revert_step(plan)))
     if plan.os_slot:
-        s.append(PlanStep("confirm-os-slot", "the board runs the new slot, as the default, "
-                                             "verified by its boot"))
+        s.append(PlanStep("confirm-os-slot", "the board runs the new slot as the default, "
+                                             "booted by stage0, and harnessd confirms a "
+                                             "healthy boot (when the harness reports it; a "
+                                             "boot alone is not a confirm)"))

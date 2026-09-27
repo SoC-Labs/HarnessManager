@@ -22,10 +22,19 @@ The OS slots are the Linux harness's (``version.impl == "linux"``); the card sto
 **No card: the board boots exactly as it always has**, and every card change is refused.
 
 Every change needs the board's lease (behind a hub) and a confirm (``--yes`` skips it); the
-status verbs need neither. A push names the static the image was provisioned for (from
-``--bundle``, or ``--static-id``), never the board's own. After a ``slot commit`` and before
-the reboot no slot is free (rule 1): ``slot rollback`` first, or ``slot push
---rollback-first``.
+status verbs need neither. Both are Harness Manager's own rules: the board has no lease and
+no confirm on slot acts (an unclaimed board takes them from anyone; a claimed one only from
+itself, through its SSH, which Harness Manager uses). A push names the static the image was
+provisioned for (from ``--bundle``, or ``--static-id``), never the board's own. After a
+``slot commit`` and before the reboot no slot is free (rule 1): ``slot rollback`` first, or
+``slot push --rollback-first``. The same holds after a FALLBACK (the default slot failed to
+boot and stage0 went back to the other one): ``slot status`` says so, and ``slot rollback``
+makes the running slot the default again.
+
+``verified: boot`` means stage0 booted the slot, not that harnessd confirmed the boot:
+status says "booted (not yet confirmed)" until the harness reports ``confirmed``. ``slot
+verify`` reads a whole slot back and holds the board's card for minutes (other card jobs
+get EBUSY meanwhile): it runs only when asked, never from a status read.
 
 These verbs always run in this process (like ``update``): they need the board pack's own
 slot and card adapters.
@@ -131,7 +140,8 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
                     help="do not reboot into it now (it boots at the next reboot)")
     ap.add_argument("--wait", type=float, default=180.0, metavar="S",
                     help="how long the reboot may take (default 180)")
-    ap = ssub.add_parser("verify", help="read a slot back off the card (open to anyone)",
+    ap = ssub.add_parser("verify", help="read a slot back off the card (open to anyone; holds "
+                                        "the card for minutes, other card jobs get EBUSY)",
                          parents=[fmt, board], epilog=epilog("slot"))
     ap.add_argument("--slot", choices=("A", "B"), default=None,
                     help="which slot (default: the one that is not the default)")
@@ -167,9 +177,10 @@ def _service(ctx: Ctx) -> Any:
 
 
 def slot_json(board_id: str, st: SlotStatus) -> dict[str, Any]:
+    from harness_manager.services.slot_health import extend_json
     from harness_manager.services.slots import slot_status_json
 
-    return {"board_id": board_id, **slot_status_json(st)}
+    return {"board_id": board_id, **extend_json(slot_status_json(st), st)}
 
 
 def _job(st: SlotStatus) -> str:
@@ -180,38 +191,54 @@ def _job(st: SlotStatus) -> str:
 
 
 def slot_rows(board_id: str, st: SlotStatus, detail: str = "") -> list[list[Any]]:
+    from harness_manager.services import slot_health
+
+    fell = slot_health.fell_back(st)
     return [[board_id, n, s.state, "yes" if n == st.running else "no",
              "yes" if n == st.default else "no", "yes" if n == st.target else "no",
-             s.verified, s.hdr_crc, s.length or "", s.version, _job(st), detail or s.err]
+             s.verified, s.hdr_crc, s.length or "", s.version, _job(st),
+             detail or s.err or ("failed to boot (stage0 fell back)" if n == fell else "")]
             for n, s in sorted(st.slots.items())] or \
         [[board_id, "", "", st.running, st.default, st.target, "", "", "", "", _job(st),
           detail or ("no card" if not st.card else "")]]
 
 
 def slot_human(board_id: str, st: SlotStatus) -> list[str]:
+    from harness_manager.services import slot_health
+
     if not st.card:
         return [f"slots      {board_id}: no user microSD card (running {st.running})"]
+    fell = slot_health.fell_back(st)
+    nowhere = ("no slot (roll back first: the default failed to boot)" if fell else
+               "no slot (roll back the pending commit first)")
     lines = [f"slots      {board_id}: running {st.running}, default {st.default or '?'}, "
-             f"a push goes to {st.target or 'no slot (roll back the pending commit first)'}"]
+             f"a push goes to {st.target or nowhere}"]
     for n, s in sorted(st.slots.items()):
         marks = [m for m, on in (("running", n == st.running), ("default", n == st.default),
-                                 ("staged", n == st.staged), ("target", n == st.target)) if on]
+                                 ("staged", n == st.staged), ("target", n == st.target),
+                                 ("FAILED TO BOOT", n == fell)) if on]
         what = s.state + (f" hdr_crc {s.hdr_crc} {s.length} B" if s.valid else "")
-        what += f", verified {s.verified}" if s.valid else ""
+        what += f", {slot_health.boot_words(st, n)}" if s.valid else ""
         what += f", release {s.version}" if s.version else ""
         what += f" ({s.err})" if s.err else ""
         lines.append(f"  {n}        {what}" + (f"  [{', '.join(marks)}]" if marks else ""))
     lines.append(f"job        {_job(st)}")
-    if st.pending_commit:
-        lines.append(f"note       slot {st.pending_commit} is committed and boots at the next "
+    unbooted = slot_health.committed_unbooted(st)
+    if unbooted:
+        lines.append(f"note       slot {unbooted} is committed and boots at the next "
                      "reboot; no slot is free until then (rule 1)")
+    lines += [f"note       {n}" for n in slot_health.notes(st)]
     return lines
 
 
 def card_json(board_id: str, st: CardStatus) -> dict[str, Any]:
+    from harness_manager.services.slot_health import extend_json
     from harness_manager.services.slots import card_status_json
 
-    return {"board_id": board_id, **card_status_json(st)}
+    doc = card_status_json(st)
+    if st.os_slots is not None and isinstance(doc.get("os_slots"), dict):
+        extend_json(doc["os_slots"], st.os_slots)
+    return {"board_id": board_id, **doc}
 
 
 def card_rows(board_id: str, st: CardStatus) -> list[list[Any]]:
@@ -283,12 +310,23 @@ def cmd_slot(ctx: Ctx) -> int:
             out = svc.commit(session, ctx.args.slot)
             return _slot_result(ctx, bid, out, out["note"])
         if act == "rollback":
-            svc.slots(session)
-            ctx.confirm(f"roll {bid}'s OS slot back"
-                        + ("" if ctx.args.no_reboot else " and reboot it into the other slot")
-                        + "?")
+            from harness_manager.services import slot_health
+
+            before = svc.status(session)
+            fell = slot_health.fell_back(before)
+            if fell:
+                # A fallback: the running slot becomes the default again; nothing reboots.
+                ctx.confirm(f"slot {fell} of {bid} failed to boot and {before.running} is "
+                            f"running: make {before.running} the default again?")
+            else:
+                ctx.confirm(f"roll {bid}'s OS slot back"
+                            + ("" if ctx.args.no_reboot else " and reboot it into the other slot")
+                            + "?")
             out = svc.rollback(session, reboot=not ctx.args.no_reboot, wait_s=ctx.args.wait,
                                progress=StderrProgress("rollback", ctx.err))
+            if fell:
+                out["note"] = (f"slot {out['slot']} is the default again (slot {fell} failed to "
+                               f"boot); slot {fell} is free for a push")
             note = out.get("note") or (f"slot {out['slot']} runs again (rebooted)"
                                        if out["rebooted"] else f"slot {out['slot']} is the default")
             return _slot_result(ctx, bid, out, note)

@@ -349,13 +349,19 @@ Once the board is **claimed**, the same steps run over an SSH tunnel to the boar
 **Known traps:**
 - **The static cannot change from here.** The FPGA cannot reach the MCC SD, and the MPS3 has no FPGA configuration flash.
 - A second push after `commit` needs a rollback first.
-- The read-back runs at about 1 s/MB, so ≈ 30 s for 24 MB.
+- **The card is slow.** Silicon B2 (2026-09-26) measured about 70 KB/s written and 14–135 KB/s read back; the Linux lead budgets about 30 s/MB (a 29 MB slot: minutes to write, more to verify). The numbers HM uses live in ONE place, lane SLOT-TIMING's constants (`harness_manager_mps3/os_slots.py`: the card rates and the budgets derived from them, settings rows `mps3.slot.*`); do not copy them here. pyverify's `wait_job` default (180 s) is too short.
+- `verify` is a read, but it holds the board's one card job (other card jobs get `EBUSY`) for minutes: HM starts one only when a person asks (`slot verify`, `slot rollback`), never from a status read.
 - stage0 catches only unhealthy images: a confirmed-but-wrong image stays.
+- **A fallback leaves the default on the bad slot.** stage0 never writes the card; when the default does not come up healthy it boots the other slot, and `slot status` reads `running A, default B, target null, staged null` (between a commit and its reboot, `staged == default` instead). A push is then refused (`no free slot … rollback first`) until `rollback` makes A the default; until then every power cycle or MCC REBOOT tries B twice more (about 2 × 43 s of watchdog timeouts).
+- **`verified: boot` is not a confirm.** It means only that the slot runs and its table CRC is stage0's `image_hdr_crc`. harnessd confirms a healthy boot later (≥ 2 s after start), and only the proposed `confirmed` field says so.
+- **A slot written outside harnessd has no record** (`stage0_mkcard.py` + `dd`, `mps3-slot write`, the factory): its `verify` fails with `no slot record: static_id unknown`, so a rollback to it after a reboot is refused. Push it again from HM (the board fix that stamps booted slots is the Linux lead's change 1).
+- **Two locks.** The claim lock (`slot locked: board claimed (use ssh)`) refuses slot changes from any peer but the board itself; the identity lock (`identity lock: <reason>`) refuses swap/commit and a flip to a boot-only-verified slot when the fabric and the image disagree. Both are fixed over Ethernet (the board's SSH; a push of the right image + commit + reboot), except a fabric whose static_id stage0 cannot give.
 
 **Guard:**
 - A release with a different `static_id` is shown as "needs Debug USB or hub" and is not planned here.
 - Check `provisioned.static_id` == `shell_id` before pushing.
-- After the reboot, running == default == target, and the slot is `verified`.
+- After the reboot, running == default == the new slot, and `target` is the OTHER slot (where the next push goes). The new slot shows `verified: boot`; HM calls it confirmed only when `confirmed` says so, and "booted (not yet confirmed)" until then.
+- After a fallback (`running != default`, `staged` null), status says "slot B failed to boot; A is running; roll back to make A the default", and the planner puts a rollback first.
 - A wrong image is undone with `verify` + `rollback` + `reboot`.
 
 ### (d) Standalone, Ethernet only, bare metal
@@ -497,7 +503,7 @@ A KR260 pack brings its own doors. The core never learns what an MCC is. The pla
 |---|---|
 | 1 `verify` act | **Keep.** HM needs it to roll back after rebooting into the new image |
 | 2 nested objects | **Fine.** Keep `a`, `b` and `job` |
-| 3 async + poll | **Poll**: every 0.5–1 s, with a 180 s budget. This keeps 6900 free |
+| 3 async + poll | **Poll**: every 0.5–1 s, which keeps 6900 free. The budget is NOT 180 s: the card runs at tens of KB/s (B2), so it comes from the image's size and the card's rates, lane SLOT-TIMING's constants (`harness_manager_mps3/os_slots.py`, rows `mps3.slot.*`) |
 | 4 no card | **Agree** |
 | 5 feature bit | HM gates on feature **names**. Add a named feature `slot`; its bit number does not matter to HM |
 | 6 slot records | **Yes.** HM shows each slot's version and can flip to a confirmed slot |
@@ -514,6 +520,16 @@ item 6's slot records are assumed (a slot without one cannot be rolled back to o
 runs: the board refuses, HM says why); item 7's claim is read from `identify.ssh.claimed`,
 or, through the hub (no UDP), from a no-op guarded `rollback` whose lock refusal is the
 answer; item 9 matches the `err` texts (no `code` yet). Rescue provisioning (L3) is not built.
+
+**The Linux lead's answers (2026-09-26, `HM_ANSWERS_2026-09-26.md` on feat/linux-harness),
+taken by lane LINUX-ANSWERS.** Item 6: harnessd writes a slot record only after its own push's
+read-back, never at commit or at boot, so a slot written by mkcard/dd/`mps3-slot write` has
+none (the stamp-on-boot fix is their change 1); HM explains the `no slot record` verify
+failure. Items 5, 7, 9: HM reads `slot` (a feature NAME), `claimed` and `confirmed` in `slot
+status`, `code` beside `err`, `job.code` and identify's `ssh.key_sha256` when present, and
+never requires them (`harness_manager_mps3/slot_words.py`, `services/slot_health.py`). The
+two locks are modelled separately, a fallback is detected (`running != default`, nothing
+staged), and `verified: boot` is never called confirmed.
 
 ## 10. Decisions for david
 

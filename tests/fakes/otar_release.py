@@ -208,7 +208,7 @@ def write_bundle(root: Path, mint: MintRecord, *, dirty: bool = False,
         (root / "linux_slot.img").write_bytes(mint.os_image)
         legal = b"legal-info tar (fake)\n"
         (root / "linux_legal_info.tar").write_bytes(legal)
-        doc = {"schema": "mps3-linux-bundle", "schema_version": 1, "mint_kind": "mint",
+        doc = {"schema": "mps3-linux-bundle", "schema_version": "1", "mint_kind": "mint",
                "fieldable": True, "shell_cpu": "mbv", "static_id": mint.static_id,
                "static_usercode": mint.usercode, "static_ver32": mint.ver32 or "0x01000000",
                "targets": {

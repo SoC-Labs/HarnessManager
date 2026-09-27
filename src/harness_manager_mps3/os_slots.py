@@ -8,13 +8,20 @@ CCR T7-2). It speaks the v0.14 ``slot`` verb and the 6910 kind-2 push through
 The flow (net-protocol.md "Slot images"; SLOT_VERB_DRAFT.md §1)::
 
     status -> push (kind 2, static_id = the image's PROVISIONED static) -> poll the job
-           -> commit -> reboot (witnessed) -> status: running == default == the new slot
+           -> commit -> reboot (witnessed) -> status: running == default == the new slot,
+              and target == the OTHER slot (where the next push goes)
 
-**Which harness.** Only ``version.impl == "linux"`` has the slot verbs, and there is
-no ``features`` bit for them (net-protocol v0.14; HM asked for a named ``slot`` feature,
-HARNESS_DISTRIBUTION §9 item 5). So: a bare-metal harness is refused WITHOUT sending
+**Which harness.** Only ``version.impl == "linux"`` has the slot verbs, and no harness
+reports a ``features`` entry for them yet (the Linux lead appends ``slot``, S3; HM matches
+the NAME, never a bit number). So: a bare-metal harness is refused WITHOUT sending
 anything; a Linux harness that answers ``unknown op`` / ``slot not supported`` is an
 older image. A feature named ``slot`` is honoured when a harness reports it.
+
+**Two locks** (``slot_words``): the claim lock below, and the fabric IDENTITY lock
+(``identity lock: <reason>``: the card's image and the FPGA's static disagree, claimed or
+not), which is fixed by pushing the right image, committing it and rebooting. A failed or
+refused act is classified by the reply's ``code`` when the harness sends one (additive,
+S3), else by its ``err`` text.
 
 **The lock** (David, 2026-09-24). Once the board's SSH is claimed, ``commit``,
 ``rollback`` and the push are accepted only from the board itself. ``status`` and
@@ -28,8 +35,9 @@ older image. A feature named ``slot`` is honoured when a harness reports it.
   cannot (UDP does not cross the hub's SSH tunnel), by a LOCK PROBE: ``rollback``
   guarded with the current default slot. A rollback always picks the slot that is not
   the default, so an unlocked board refuses the guard (``slot mismatch``) and changes
-  nothing, while a locked one answers the lock refusal. (Question for the Linux lead:
-  put ``claimed`` in the ``slot status`` reply, and this probe goes.)
+  nothing, while a locked one answers the lock refusal. When ``slot status`` carries
+  ``claimed`` (the Linux lead's S2, additive) that answers, and neither identify nor the
+  probe is asked.
 
 The board-SSH forward is ``ssh -J HUB USER@BOARD -L ...:127.0.0.1:6900 -L ...:6910``
 (``tunnel.SshTunnel``, the same reach as XVC's; boards.toml ``xvc = {user, host}``
@@ -102,6 +110,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.model import LinkKind
 from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus, report_progress
 
+from . import slot_words
 from .constants import CONTROL_PORT, IMPL_LINUX, PUSH_PORT
 
 log = logging.getLogger(__name__)
@@ -518,7 +527,8 @@ class Mps3OsSlots:
             return f"slot status failed: {exc.message}"
         if not raw.get("ok"):
             err = str(raw.get("err", ""))
-            if any(k in err.lower() for k in _NO_VERB):
+            if any(k in err.lower() for k in _NO_VERB) or \
+                    slot_words.reply_code(raw) == "not_supported":
                 return f"this Linux harness does not have the slot verb ({err}): update its image"
             return f"slot status refused: {err}"
         st = parse_status(raw)
@@ -541,7 +551,7 @@ class Mps3OsSlots:
     def status(self) -> SlotStatus:
         raw = self._ask("status")
         if not raw.get("ok"):
-            raise _refusal("status", str(raw.get("err", "")))
+            raise _reply_refusal("status", raw)
         return self._annotate(self._measured(parse_status(raw)))
 
     def _measured(self, st: SlotStatus) -> SlotStatus:
@@ -589,8 +599,13 @@ class Mps3OsSlots:
 
     def claimed(self, st: SlotStatus | None = None) -> bool:
         """Is the board's SSH claimed (so mutations must come from the board itself)?"""
+        from harness_manager.services import slot_health
+
         from .shell import identify_quietly
 
+        known = slot_health.claimed(st) if st is not None else None
+        if known is not None:                     # slot status says it (S2): nothing to ask
+            return known
         shell = self._shell()
         if not _tunnelled(self._session):
             reply = identify_quietly(shell.host, 0.5)
@@ -600,6 +615,9 @@ class Mps3OsSlots:
         # The lock probe: a rollback guarded with the current default is refused by an
         # unlocked board ("slot mismatch") and changes nothing (module docstring).
         st = st or self.status()
+        known = slot_health.claimed(st)
+        if known is not None:
+            return known
         if not st.default:
             return False
         reply = self._ask("rollback", st.default)
@@ -607,7 +625,7 @@ class Mps3OsSlots:
             log.warning("the slot lock probe was ACCEPTED on %s: %s",
                         self._session.candidate.board_id, reply)
             return False
-        return str(reply.get("err", "")) == SLOT_LOCKED_ERR
+        return _locked(reply)
 
     @contextlib.contextmanager
     def _board_forward(self) -> Iterator[tuple[str, int, int]]:
@@ -640,7 +658,7 @@ class Mps3OsSlots:
         """``commit``/``rollback``: direct; again through the board's SSH if it is locked."""
         reply = self._ask(act, slot)
         self.last_route = "direct"
-        if not reply.get("ok") and str(reply.get("err", "")) == SLOT_LOCKED_ERR:
+        if not reply.get("ok") and _locked(reply):
             with self._board_forward() as (host, ctl, _push):
                 reply = self._one(host, ctl, act, slot)
             self.last_route = "board-ssh"
@@ -651,20 +669,20 @@ class Mps3OsSlots:
     def commit(self, slot: str | None = None) -> SlotStatus:
         reply = self._mutate("commit", slot)
         if not reply.get("ok"):
-            raise _refusal("commit", str(reply.get("err", "")))
+            raise _reply_refusal("commit", reply)
         return self._annotate(parse_status(reply))
 
     def rollback(self, slot: str | None = None) -> SlotStatus:
         reply = self._mutate("rollback", slot)
         if not reply.get("ok"):
-            raise _refusal("rollback", str(reply.get("err", "")))
+            raise _reply_refusal("rollback", reply)
         return self._annotate(parse_status(reply))
 
     def verify(self, slot: str | None = None, progress: Progress | None = None) -> SlotStatus:
         started = time.monotonic()
         reply = self._ask("verify", slot)
         if not reply.get("ok"):
-            raise _refusal("verify", str(reply.get("err", "")))
+            raise _reply_refusal("verify", reply)
         job = parse_status(reply).job
         budget = self.timeouts(job.length, write=False)
         st = self._wait_job(progress, phase="verify", before=None,
@@ -684,6 +702,13 @@ class Mps3OsSlots:
             raise HeldError(f"the board's card is busy ({st.job.act} {st.job.slot} "
                             f"{st.job.state})", hint="wait for it, then try again")
         if not st.target:
+            from harness_manager.services import slot_health
+
+            bad = slot_health.fell_back(st)
+            if bad:
+                raise RefusedError(f"no free slot: slot {bad} failed to boot and stage0 went "
+                                   f"back to {st.running}, which is not the default yet; "
+                                   "nothing was pushed", hint=slot_health.fallback_hint(st))
             if st.pending_commit:
                 raise RefusedError(f"no free slot: slot {st.pending_commit} is committed and "
                                    f"not booted yet; nothing was pushed", hint=RULE1_HINT)
@@ -875,7 +900,7 @@ class Mps3OsSlots:
     @staticmethod
     def _must_ok(reply: dict[str, Any], act: str) -> dict[str, Any]:
         if not reply.get("ok"):
-            raise _refusal(act, str(reply.get("err", "")))
+            raise _reply_refusal(act, reply)
         return reply
 
     # -- reboot ---------------------------------------------------------------------------------
@@ -941,29 +966,10 @@ def _tunnelled(session: Any) -> bool:
     return is_tunnelled(session) or getattr(session, "reach", None) is not None
 
 
-def _refusal(act: str, err: str) -> HarnessError:
-    """The board refused a ``slot`` act: the error class its reason means."""
-    low = err.lower()
-    if err.strip().upper() == "EBUSY":
-        return HeldError(f"slot {act}: the board's card is busy (EBUSY)",
-                         hint="a push or a verify is running; wait for it")
-    if err == SLOT_LOCKED_ERR:
-        return HeldError(f"slot {act}: {err}",
-                         hint="the board is claimed: only its own SSH may change the slots")
-    if any(k in low for k in _NO_VERB):
-        return UnavailableError(CAPABILITY, f"this harness does not have the slot verb ({err})")
-    if low == "no card" or low == "card io":
-        return RefusedError(f"slot {act}: {err}: nothing was changed",
-                            hint="insert the board's user microSD card")
-    if "!= fabric" in low:
-        return IncompatibleError(f"slot {act}: {err}")
-    if low.startswith("nothing staged"):
-        return RefusedError(f"slot {act}: {err}", hint="push an image first "
-                            "(`harness-manager slot push TARGET IMAGE`)")
-    if "not verified" in low or "changed since it was verified" in low:
-        return RefusedError(f"slot {act}: {err}", hint="verify it first "
-                            "(`harness-manager slot verify TARGET --slot X`)")
-    return ActionFailedError(f"slot {act} refused: {err or 'no reason given'}")
+def _refusal(act: str, err: str, code: str = "", st: SlotStatus | None = None) -> HarnessError:
+    """The board refused a ``slot`` act: the error class its ``code`` (else its reason)
+    means (``slot_words.refusal``)."""
+    return slot_words.refusal(act, err, code, st)
 
 
 #: What to do when a card job went wrong: never a second write over a running one.
@@ -972,25 +978,22 @@ _BUSY_HINT = ("nothing was sent again: `harness-manager slot status TARGET` show
               "reset mid-write can wedge the card; only if it never ends, an MCC power cycle)")
 
 
+def _locked(reply: dict[str, Any]) -> bool:
+    """The claim lock's refusal (by its ``code`` when sent, else its text)."""
+    return slot_words.is_claim_lock(str(reply.get("err", "")), slot_words.reply_code(reply))
+
+
+def _reply_refusal(act: str, reply: dict[str, Any]) -> HarnessError:
+    return _refusal(act, str(reply.get("err", "")), slot_words.reply_code(reply))
+
+
 def _job_failure(job: SlotJob, st: SlotStatus | None = None) -> HarnessError:
+    """A failed card job; its ``job.code`` (in the reply ``st`` came from) when sent."""
     from harness_manager.services.slots import card_state_words
 
-    where = f" {job.slot}" if job.slot else ""
-    text = f"the board's {job.act}{where} failed: {job.err}"
-    if st is not None:
-        text += f" ({card_state_words(st)})"
-    if "!= fabric" in job.err:
-        return IncompatibleError(text, hint="the image is provisioned for another static")
-    if job.err.startswith("no free slot"):
-        return RefusedError(text, hint=RULE1_HINT)
-    if "no slot record" in job.err:
-        # SLOT_VERB_DRAFT §5 item 6: a slot written by stage0_mkcard.py / mps3-slot write has
-        # no record binding it to a static, so it can be made the default only while it runs.
-        return RefusedError(text, hint="the slot has no record binding it to this static "
-                                       "(written outside harnessd): it can become the default "
-                                       "only while it runs; push a known-good image instead")
-    return ActionFailedError(text, hint="the card keeps its previous default; `harness-manager "
-                                        "slot status TARGET` says what the card holds now")
+    code = slot_words.reply_code((st.raw or {}).get("job")) if st is not None else ""
+    return slot_words.job_failure(job, code, st,
+                                  extra=card_state_words(st) if st is not None else "")
 
 
 def make_os_slot_adapter(session: Any) -> Mps3OsSlots | None:

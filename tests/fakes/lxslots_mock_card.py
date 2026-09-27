@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from harness_manager.core.pack import CardStatus, SlotInfo, SlotStatus
+from harness_manager.services.slot_health import extend_json
 from harness_manager.services.slots import slot_status_json
 
 API = "/api/v1"
@@ -54,4 +55,5 @@ def register(app: FastAPI, state: Any, sim: CardSim, ok: Any) -> None:
         st = sim.card(bid).os_slots
         if bid in sim.no_store or st is None:
             return ok(board_id=bid, available=False, reason=NO_SLOTS, slots=None)
-        return ok(board_id=bid, available=True, reason="", slots=slot_status_json(st))
+        return ok(board_id=bid, available=True, reason="",
+                  slots=extend_json(slot_status_json(st), st))

@@ -129,6 +129,12 @@ owners.
   update carrying an OS image installs over Ethernet only when the image is for the static
   the board runs; otherwise it needs the Debug USB or the hub. The downloaded image is
   checked against the frames its `linux_bundle.json` declared before it is sent.
+- `slot status` says when the new slot failed to boot ("slot B failed to boot; A is
+  running; roll back to make A the default"), and an update rolls back first. A booted
+  slot reads "booted (not yet confirmed)" until the harness reports harnessd's confirm, and
+  an update waits up to 30 s for that confirm when the harness reports it. A slot written
+  outside Harness Manager (a card image, `dd`) is explained when its read-back finds no
+  record.
 - The board's user microSD: `harness-manager card status|commit|clear` shows what the board
   loads at power-on, makes the running overlay that default, or clears it. With no card the
   board boots exactly as it always has, and every change is refused. The Board tile shows a
@@ -143,8 +149,13 @@ owners.
   key). `info`, `GET /boards/{bid}` and the Board tile show the claim (`claim`); bare-metal
   boards are unchanged.
 - The harness's claim lock (`slot locked: board claimed (use ssh)`) reads "this board is
-  claimed by <key>; this operation needs the claiming key"; its fabric identity lock
-  (`identity lock: ...`) refuses a swap as a mismatch (exit 14).
+  claimed by <key>; this operation needs the claiming key". The fabric identity lock
+  (`identity lock: ...`) is a different lock: it now says whether the image and the FPGA's
+  static disagree or one cannot be read, and how to fix it over Ethernet (push the right
+  image, commit, reboot); it exits 15, no longer 14.
+- The claim through a hub runs its helper with the hub's `python3.11` first and refuses
+  clearly when the hub has no Python 3.8+. When SSH refuses the key right after a claim the
+  board accepted, the hint says why (the board's key sync), not "wait".
 
 ### The app's pages
 - A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"

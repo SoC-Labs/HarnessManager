@@ -90,7 +90,8 @@ def from_fielded_mint(mint_json: dict[str, Any], **files: Any) -> MintRecord:
 
 def from_linux_bundle(bundle: dict[str, Any], **files: Any) -> MintRecord:
     """Linux: ``prod/linux_bundle.json`` (mps3-linux-bundle v1) already names both doors."""
-    if bundle.get("schema") != "mps3-linux-bundle" or bundle.get("schema_version") != 1:
+    # linux_bundle.py writes "schema_version": "1", a STRING (the Linux lead's S7)
+    if bundle.get("schema") != "mps3-linux-bundle" or str(bundle.get("schema_version")) != "1":
         raise ValueError("not an mps3-linux-bundle v1 manifest")
     if not bundle.get("fieldable"):
         raise ValueError("a prototype (P-mint) bundle is never published (FLOW §5)")

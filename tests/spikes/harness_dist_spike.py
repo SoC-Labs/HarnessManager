@@ -138,7 +138,7 @@ def bare_metal_mint(tmp: Path, static_id: str, usercode: str, fw_sha: str,
 
 def linux_mint(tmp: Path) -> MintRecord:
     # The shape tools/linux_bundle.py writes (FLOW_CONTRACT §0.1), trimmed to what is read.
-    bundle = {"schema": "mps3-linux-bundle", "schema_version": 1, "mint_kind": "mint",
+    bundle = {"schema": "mps3-linux-bundle", "schema_version": "1", "mint_kind": "mint",
               "fieldable": True, "shell_cpu": "mbv", "static_id": S_LNX,
               "static_usercode": U_LNX, "static_ver32": "0x01000000",
               "targets": {"mcc_sd": {}, "ethernet": {"components": {

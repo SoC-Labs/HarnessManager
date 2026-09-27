@@ -157,7 +157,9 @@ def test_twin_a_slot_with_no_record_cannot_be_rolled_back_to_after_a_reboot(monk
         before = slot_ops(fake)
         with pytest.raises(RefusedError, match="no slot record") as exc:
             SlotService().rollback(session, wait_s=10)
-        assert "only while it runs" in exc.value.hint
+        # S1: harnessd stamps a record only on its own push; say so, and how to fix it
+        assert "written outside harnessd" in exc.value.hint
+        assert "Push it again from Harness Manager" in exc.value.hint
         after = slot_ops(fake)
         assert (after["default"], after["running"]) == (before["default"], before["running"])
         assert fake.boots == ["B"]

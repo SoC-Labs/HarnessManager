@@ -3,10 +3,12 @@
 ``SlotBoard`` is ``FakeShell(profile="linux", slots=..., usd_card=...)`` (pyverify's own
 model of harnessd's ``slot`` verb, the kind-2 push, the lock, ``usd`` and the re-push
 ``commit``) plus the one thing the vendored double does not model: a ``reboot`` BOOTS
-stage0's pick. After the restart the board runs the default slot (unless its image is
-``unhealthy``: stage0 goes back to the other slot), what this boot had read back is
-forgotten, and the harness reports the version the booted image carries (``images``:
-hdr_crc -> {harness_version, harness_sha}).
+stage0's pick (the Linux lead's S9): the default slot if it is valid and healthy, else the
+other slot if it is, else rescue (``running`` "rescue"; the fake keeps answering 6900). A
+slot or image in ``unhealthy`` (slot names such as ``{"B"}``, or hdr_crcs) never comes up
+healthy, so stage0 falls back and the DEFAULT STAYS on it. What this boot had read back
+is forgotten (``staged``, the read-back, the job), and the harness reports the version
+the booted image carries (``images``: hdr_crc -> {harness_version, harness_sha}).
 
 SLOT-TIMING's slow-job knobs (the card's speed, so a job lasts): ``write_bps`` receives a
 push at that rate, counting ``job.got`` as the bytes reach the "card" (as harnessd does);
@@ -114,10 +116,11 @@ class SlotBoard(FakeShell):
                 m.card = "io"
             want = m.deflt
             sl = m.slot.get(want, {})
-            ok = sl.get("state") == "valid" and sl.get("hdr_crc") not in self.unhealthy
-            booted = want if ok else ("B" if want == "A" else "A")
+            ok = self._healthy(want, sl)
+            booted = want if ok else self._fallback(want)
             m.running = booted
-            m.boot_crc = int(m.slot[booted].get("hdr_crc", 0) or 0)
+            m.boot_crc = int(m.slot.get(booted, {}).get("hdr_crc", 0) or 0)
+            m._pending = None
             m.staged = None
             m.vcrc = {"A": 0, "B": 0}
             m.vsid = {"A": 0, "B": 0}
@@ -127,6 +130,17 @@ class SlotBoard(FakeShell):
                 self.harness_version = ver.get("harness_version", self.harness_version)
                 self.harness_sha = ver.get("harness_sha", self.harness_sha)
             self.boots.append(booted)
+
+    # -- stage0's pick (S9) -------------------------------------------------------------------
+
+    def _healthy(self, name: str, sl: dict[str, Any] | None = None) -> bool:
+        sl = self.slots.slot.get(name, {}) if sl is None else sl
+        return (sl.get("state") == "valid" and name not in self.unhealthy
+                and sl.get("hdr_crc") not in self.unhealthy)
+
+    def _fallback(self, want: str) -> str:
+        other = "B" if want == "A" else "A"
+        return other if self._healthy(other) else "rescue"
 
 
 def slot_board(**kw: Any) -> SlotBoard:
