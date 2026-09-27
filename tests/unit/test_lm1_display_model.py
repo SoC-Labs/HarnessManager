@@ -363,3 +363,46 @@ def test_a_source_is_an_adapter_or_a_callable() -> None:
         D.as_display_source(42)
     e = D.DisplayUnavailable("no lcd_mirror service", retry_s=None)
     assert e.capability == D.DISPLAY_MIRROR and e.retry_s is None and "no lcd_mirror service" in str(e)
+
+
+# --- REGS is a raw log, never reset: MODE wins after RESETS changes (the board's correction) ------
+
+
+def _commit(f: D.DisplayFrame, u: w.DisplayUpdate, *, key: bool) -> None:
+    f.commit([u], D.decode_parts([u]), key=key)
+
+
+def _upd(seq: int, resets: int, *, regs: bytes | None = None, mode: int | None = None) -> w.DisplayUpdate:
+    key = regs is not None
+    status = w.ST_FMT_OK | w.S_SNAP_LAST | (w.S_KEY_BITS if key else 0)
+    body = w.update_body(seq, 0, 0, resets, status, 0, w.ALL_VALID,
+                         [w.record(0, w.E_FILL, b"\x00\x00")], regs=regs, mode=mode)
+    return w.parse_update(body)
+
+
+def test_mode_wins_after_a_reset_and_regs_stand_in_until_then() -> None:
+    log = bytearray(baseline_regs())                              # R16 0x20 in the raw log
+    f = D.DisplayFrame()
+    _commit(f, _upd(1, 0, regs=bytes(log)), key=True)
+    assert f.mode_regs().r16 == 0x20                              # no MODE yet: REGS stand in
+    _commit(f, _upd(2, 1, mode=0x00090500), key=False)            # a reset: MODE says R16 = 0x00
+    assert f.mode_regs().r16 == 0x00
+    _commit(f, _upd(3, 1, regs=bytes(log)), key=True)             # the log still says 0x20 (stale)
+    assert f.mode_regs().r16 == 0x00                              # MODE since the reset wins
+    assert f.regs_for_viewer()[0x16] == 0x00 and f.regs_for_viewer()[0x1F] == log[0x1F]
+    _commit(f, _upd(4, 2, regs=bytes(log)), key=True)             # another reset, no MODE since
+    assert f.mode_regs().r16 == 0x20                              # the log is all there is
+    f.new_connection()
+    _commit(f, _upd(1, 1, regs=bytes(log)), key=True)
+    assert f.mode_regs().r16 == 0x20                              # an old connection's MODE is dropped
+
+
+def test_negative_twin_mode_taken_from_regs_would_be_stale_after_a_reset() -> None:
+    """What the model did before the correction (MODE derived from each keyframe's REGS)
+    shows the pre-reset MADCTL; the corrected model shows the panel's."""
+    log = bytes(baseline_regs())
+    f = D.DisplayFrame()
+    _commit(f, _upd(1, 1, mode=0x00090500), key=False)
+    _commit(f, _upd(2, 1, regs=log), key=True)
+    assert w.mode_regs(w.mode_word(log)).r16 == 0x20              # the naive reading
+    assert f.mode_regs().r16 == 0x00                              # the panel's state

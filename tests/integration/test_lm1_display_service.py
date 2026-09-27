@@ -12,10 +12,13 @@ its picture is checked against the board's.
 from __future__ import annotations
 
 import collections
+import json
 import os
 import threading
 import time
+import zlib
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -576,3 +579,174 @@ def test_noise_at_12_fps_is_exact_after_settling(svc: DisplayService) -> None:
         wait_for(lambda: converged(vm, v, fake), what="exact")
         assert svc.status(BID)["counters"]["protocol_errors"] == 0
         v.close()
+
+
+# --- the board's §6.1 corrections (platform feat/lcd-mirror d86ce81) ------------------------------
+
+
+def test_seq_starts_at_1_and_the_first_ack_is_1(svc: DisplayService) -> None:
+    with FakeLcdMirror(harness_panel()) as fake:
+        v = svc.attach(BID, fake.connect)
+        wait_for(lambda: svc.status(BID)["state"] == "live", what="live")
+        assert svc.status(BID)["seq"] == 1                   # a one-part keyframe: seq 1
+        wait_for(lambda: "first_ack" in fake.stats, what="an ACK")
+        assert fake.stats["first_ack"] == 1                  # never ACK 0: it acknowledges nothing
+        v.close()
+
+
+def test_a_long_connection_crosses_the_seq_wrap_without_a_gap(svc: DisplayService) -> None:
+    anim = CardAnimator(period_s=0.05)
+    with FakeLcdMirror(FakePanel(), animate=anim, rate_default=20, seq_base=0xFFFFFFFD) as fake:
+        vm = ViewerModel()
+        v = svc.attach(BID, fake.connect, rate=20)
+        wait_for(lambda: svc.status(BID)["counters"]["deltas_presented"] >= 6, what="past the wrap")
+        st = svc.status(BID)
+        assert st["counters"]["gaps"] == 0 and st["counters"]["keys_sent"] == 1
+        assert st["seq"] < 100                               # it wrapped
+        with fake.lock:
+            anim.frozen = True
+        wait_for(lambda: converged(vm, v, fake), what="exact")
+        v.close()
+
+
+def test_a_still_screen_stays_live_on_pongs_alone() -> None:
+    """No heartbeat UPDATEs: a still screen is silent but for PONGs, and must stay live
+    (the board's correction 4). fps counts whole SNAPs that carried tiles: 0 here."""
+    t = DisplayTimings(grace_s=5, ping_s=0.1, stale_s=0.6, dead_s=3.0, tick_s=0.02,
+                       backoff_s=(0.05,), fps_window_s=0.5)
+    svc = DisplayService(timings=t)
+    try:
+        with FakeLcdMirror(harness_panel()) as fake:
+            v = svc.attach(BID, fake.connect)
+            wait_for(lambda: svc.status(BID)["state"] == "live", what="live")
+            updates = fake.stats["updates"]
+            t_end = time.monotonic() + 3 * t.stale_s
+            while time.monotonic() < t_end:
+                assert svc.status(BID)["state"] == "live"
+                time.sleep(0.05)
+            assert fake.stats["updates"] == updates          # the board sent nothing new
+            assert svc.status(BID)["counters"]["pongs"] >= 5
+            assert svc.status(BID)["fps"] == 0
+            with fake.edit() as p:                           # a header-only change: not a frame
+                p.csr ^= w.ST_STANDBY
+            wait_for(lambda: svc.status(BID)["flags"]["standby"], what="the header change")
+            assert svc.status(BID)["fps"] == 0
+            with fake.edit() as p:
+                p.fill_tile(3, 0x1234)
+            wait_for(lambda: svc.status(BID)["fps"] > 0, what="a frame with tiles")
+            v.close()
+    finally:
+        svc.shutdown()
+
+
+def test_negative_twin_updates_without_pongs_go_stale() -> None:
+    """The twin of the above: a board that keeps sending UPDATEs but never answers a PING is
+    stale; UPDATEs are not the liveness probe."""
+    t = DisplayTimings(grace_s=5, ping_s=0.1, stale_s=0.6, dead_s=30.0, tick_s=0.02, backoff_s=(0.05,))
+    svc = DisplayService(timings=t)
+    try:
+        with FakeLcdMirror(FakePanel(), animate=CardAnimator(period_s=0.05), rate_default=20) as fake:
+            real = fake._control
+
+            def no_pongs(c: Any, rbuf: bytearray) -> None:
+                keep = bytearray()
+                while len(rbuf) >= 8:
+                    _m, typ, _r, ln = w.HEADER.unpack_from(rbuf)
+                    if len(rbuf) < 8 + ln:
+                        break
+                    if typ != w.T_PING:
+                        keep += rbuf[:8 + ln]
+                    del rbuf[:8 + ln]
+                keep += rbuf
+                rbuf[:] = keep
+                real(c, rbuf)
+
+            fake._control = no_pongs
+            v = svc.attach(BID, fake.connect, rate=20)
+            wait_for(lambda: svc.status(BID)["counters"]["deltas_presented"] >= 1, what="deltas")
+            wait_for(lambda: svc.status(BID)["state"] == "stale", what="stale")
+            n = svc.status(BID)["counters"]["deltas_presented"]
+            wait_for(lambda: svc.status(BID)["counters"]["deltas_presented"] > n, what="more deltas")
+            assert svc.status(BID)["state"] == "stale"           # UPDATEs did not un-stale it
+            fake._control = real
+            wait_for(lambda: svc.status(BID)["state"] == "live", what="a PONG ends stale")
+            v.close()
+    finally:
+        svc.shutdown()
+
+
+class _VectorBoard:
+    """The board's own bytes (tests/fixtures/lcdmirror_wire): HELLO, then on KEY the split
+    keyframe; PONGs answered; ACKs recorded."""
+
+    DIR = Path(__file__).resolve().parents[1] / "fixtures" / "lcdmirror_wire"
+
+    def __init__(self) -> None:
+        from tests.fakes.lm1_fake_lcd_mirror import bind_ephemeral
+
+        self.manifest = json.loads((self.DIR / "manifest.json").read_text())
+        self.key = next(e for e in self.manifest["vectors"] if e["kind"] == "keyframe")
+        self.srv = bind_ephemeral()
+        self.srv.listen(2)
+        self.port = self.srv.getsockname()[1]
+        self.acks: list[int] = []
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        try:
+            conn, _ = self.srv.accept()
+        except OSError:
+            return
+        with conn:
+            conn.sendall((self.DIR / "hello.bin").read_bytes())
+            buf = bytearray()
+            while True:
+                try:
+                    data = conn.recv(4096)
+                except OSError:
+                    return
+                if not data:
+                    return
+                buf += data
+                while len(buf) >= 8:
+                    _m, typ, _r, ln = w.HEADER.unpack_from(buf)
+                    if len(buf) < 8 + ln:
+                        break
+                    body = bytes(buf[8:8 + ln])
+                    del buf[:8 + ln]
+                    if typ == w.T_KEY:
+                        for part in self.key["parts"]:
+                            conn.sendall((self.DIR / part).read_bytes())
+                    elif typ == w.T_PING:
+                        conn.sendall(w.pong_msg(w.U32.unpack(body)[0]))
+                    elif typ == w.T_RATE:
+                        conn.sendall(w.message(w.T_RATE, bytes([min(30, body[0])])))
+                    elif typ == w.T_ACK:
+                        self.acks.append(w.U32.unpack(body)[0])
+
+    def connect(self) -> Any:
+        import socket
+
+        return socket.create_connection(("127.0.0.1", self.port), timeout=5)
+
+    def close(self) -> None:
+        self.srv.close()
+
+
+def test_the_boards_own_bytes_through_the_compositor(svc: DisplayService) -> None:
+    board = _VectorBoard()
+    try:
+        vm = ViewerModel()
+        v = svc.attach(BID, board.connect)
+        wait_for(lambda: svc.status(BID)["state"] == "live", what="the board's keyframe presented")
+        st = svc.status(BID)
+        assert st["hello"]["static_id"] == "0x5a5a0001" and st["mode"] == "sw" and st["hatched"] == 0
+        assert st["seq"] == board.key["seq_first"] + 2 and st["rate"] == 20
+        pic = svc.picture(BID)
+        assert zlib.crc32(pic.rgb565) == board.key["frame_crc"]
+        wait_for(lambda: board.acks[-3:] == [100, 101, 102], what="each part ACKed")
+        vm.pump(v)
+        assert vm.keys == 1 and zlib.crc32(bytes(vm.frame)) == board.key["frame_crc"]
+        v.close()
+    finally:
+        board.close()
