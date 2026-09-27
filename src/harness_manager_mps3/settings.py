@@ -288,15 +288,15 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
              at="telemetry.py:407", scope="board"),
         # A.12 L1-L3 (LINUX-CLAIM): the Linux harness's SSH, claimed with your key
         _row("boards.*.ssh.user", "str", "", "Boards",
-             "The Linux harness's SSH login (empty: root)", at="claim.py:321",
+             "The Linux harness's SSH login (empty: root)", at="claim.py:338",
              scope="board", apply="reopen", check=_word("user name")),
         _row("boards.*.ssh.key", "path", "", "Boards",
              "The private key Harness Manager's ssh uses for this board (empty: your ssh "
              "default); a claim sends its .pub. The key itself is never read",
-             at="claim.py:841", scope="board", apply="reopen"),
+             at="claim.py:899", scope="board", apply="reopen"),
         _row("boards.*.ssh.host_key", "str", "", "Boards",
              "The board's pinned SSH host key, written by `board claim` (a changed key is "
-             "refused; clear it only for a re-provisioned board)", at="claim.py:323",
+             "refused; clear it only for a re-provisioned board)", at="claim.py:340",
              scope="board", apply="reopen", check=_host_key),
     )
 
@@ -310,18 +310,18 @@ def _slot_rows() -> tuple[Setting, ...]:
     return (
         _row(_os.CARD_WRITE_BPS_KEY, "int", _os.CARD_WRITE_BPS, "Harness + kits",
              "How fast the board's user microSD takes a write, bytes a second (B2: ~70 KB/s; "
-             "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:204",
+             "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:201",
              scope="pack", advanced=True, env=_os.CARD_WRITE_BPS_ENV, check=_positive),
         _row(_os.CARD_READ_BPS_KEY, "int", _os.CARD_READ_BPS, "Harness + kits",
              "How fast the board reads its user microSD back, bytes a second (B2: 14-135 "
-             "KB/s, the slowest is the default)", at="os_slots.py:205", scope="pack",
+             "KB/s, the slowest is the default)", at="os_slots.py:202", scope="pack",
              advanced=True, env=_os.CARD_READ_BPS_ENV, check=_positive),
         _row(_os.JOB_TIMEOUT_KEY, "float", _os.JOB_TIMEOUT_S, "Harness + kits",
              "The least cap on a whole OS-slot push or verify, in seconds (a bigger image "
-             "gets its size at the card's rates, x1.5)", at="os_slots.py:236", scope="pack",
+             "gets its size at the card's rates, x1.5)", at="os_slots.py:233", scope="pack",
              env=_os.JOB_TIMEOUT_ENV, check=_positive),
         _row(_os.STALL_KEY, "float", _os.STALL_S, "Harness + kits",
              "How long an OS-slot push or its card job may go without moving a byte before "
-             "it is stuck, in seconds", at="os_slots.py:237", scope="pack",
+             "it is stuck, in seconds", at="os_slots.py:234", scope="pack",
              env=_os.STALL_ENV, check=_positive),
     )
