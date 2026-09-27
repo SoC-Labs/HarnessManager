@@ -20,6 +20,7 @@ import { ageText, clock, hostOf } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, onBoardEvent, onJobEnded, S, timed } from "../store.js";
 import { ActionRow, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
+import { LiveDisplay } from "../display.js";        // LM4: the Live display, over the text mirror
 
 const STATE_CACHE_MS = 1000;        // the daemon reuses a GET /panel answer this long
 const FRAME_CACHE_MS = 3000;        // ... and a GET /panel/frame answer this long
@@ -425,7 +426,7 @@ export function PanelCard({ bid }) {
         ? html`<div class="mb-12"><${Reason} level="unk" icon="circle-help" testid="panel-rebuilt"
             text=${`Rebuilt from what Harness Manager read, not read from the panel. This harness (bare metal) reports only who owns the panel; the live mirror, who is connected and Identify need the Linux harness.`} /></div>`
         : html`<p class="muted small mb-12" data-testid="panel-read-age">Read from the panel${p.observed_at ? `, ${ageText(p.observed_at, now)}` : ""}.</p>`}
-      <${Mirror} f=${f} />
+      <${LiveDisplay} bid=${bid}><${Mirror} f=${f} /><//>
       <dl class="kv mt-14">
         <dt>Page</dt><dd data-testid="panel-page"><${Parts} parts=${[{ key: "page", ...pagePart(p) }]} /></dd>
         <dt>Owner</dt><dd data-testid="panel-owner"><${Parts} parts=${[{ key: "owner", ...ownerPart(p) }]} /></dd>
