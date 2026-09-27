@@ -78,6 +78,7 @@ def _name(v: Any) -> str:
 def _between(lo: float, hi: float, unit: str = "") -> Any:
     def check(v: Any) -> str:
         return "" if lo <= v <= hi else f"must be {lo:g}..{hi:g}{unit}"
+    check.bounds = (lo, hi)            # type: ignore[attr-defined]  # SET-UI: the menu's range
     return check
 
 

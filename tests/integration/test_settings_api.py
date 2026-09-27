@@ -240,7 +240,7 @@ def test_a_secret_sent_the_wrong_way_is_refused_without_repeating_it(w):
 
 
 def test_a_section_without_a_tester_answers_not_testable_yet(w):
-    r = w.call("POST", "/settings/test", json={"section": "tools"})
+    r = w.call("POST", "/settings/test", json={"section": "consoles"})   # tools: SET-UI Detect
     assert r.status_code == 200
     assert r.json()["testable"] is False and "not testable yet" in r.json()["why"]
     assert w.call("POST", "/settings/test", json={"section": "nope"}).status_code == 400

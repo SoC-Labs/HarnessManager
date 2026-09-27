@@ -108,8 +108,8 @@ export const ENDPOINTS = Object.freeze({
   harnessHistory: ["GET", "/boards/{bid}/harness/history"],
   harnessRollback: ["POST", "/boards/{bid}/harness/rollback"],
   // --- end UPDATE-UI ---
-  // --- SET-API: the settings (docs/API.md "Settings", settings_api.py). No UI calls these
-  // yet (SET-UI, after the cutover). The query (?section=&key=&all=) is the call's query
+  // --- SET-API: the settings (docs/API.md "Settings", settings_api.py). The Settings dialog
+  // (SET-UI, js/settings/*) calls them. The query (?section=&key=&all=) is the call's query
   // argument; {key} is a setting's key, URL-encoded. A secret is written, never read back.
   settings: ["GET", "/settings"],
   settingsSchema: ["GET", "/settings/schema"],
@@ -119,6 +119,14 @@ export const ENDPOINTS = Object.freeze({
   settingsSecretUnset: ["DELETE", "/settings/secrets/{key}"],
   settingsTest: ["POST", "/settings/test"],
   // --- end SET-API ---
+  // --- SET-UI: the Settings dialog's Hubs section (docs/API.md "Hubs in the Settings dialog",
+  // hubs_api.py). Test connection and Tools Detect are settingsTest above ({section, name}).
+  hubs: ["GET", "/hubs"],
+  hubPut: ["PUT", "/hubs/{name}"],
+  hubRemove: ["DELETE", "/hubs/{name}"],
+  hubAddBoard: ["POST", "/hubs/{name}/boards"],
+  hubAdopt: ["POST", "/hubs/adopt"],
+  // --- end SET-UI ---
 });
 
 export const ADDITIVE = Object.freeze([]);
@@ -131,6 +139,7 @@ export const EVENT_TOPICS = [
   "panel.*",                           // P3 PANEL-UI: panel.state, panel.tap, panel.locate
   "xvc.*",                             // XVC-UI: xvc.state, the Debug section's XVC card
   "harness.*",                         // UPDATE-UI: harness.catalog|installing|installed|pinned
+  "settings.*",                        // SET-UI: settings.changed (the dialog and the restart banner)
 ];
 
 const TOKEN_KEY = "harness_manager.token";
