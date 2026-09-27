@@ -11,7 +11,9 @@ drift from the real one (``XvcStatus``/``vivado_tcl``, ``PanelState``/``rebuilt_
   slot (the overlay store's slots A/B, nanosoc on A) with the OS slots A/B on it; its SSH
   claimed by you; the front panel read from the glass (sessions, touch health, a tap);
   Identify; an XVC session that opens (board-SSH reach, no warning: the lock is on).
-  Ethernet and SSH only, so the Debug-USB capabilities say why they are missing.
+  Ethernet and SSH only, so the Debug-USB capabilities say why they are missing. Its Live
+  display mirrors the panel from an in-memory lcd_mirror board (``demo_display``, LM4); the
+  two bare-metal boards say why they have none (the leased one: 409 HELD naming alice).
   (``tests/fakes``: ``lxslots_board``/``lxslots_mock_card``, ``lc_mock_claim``,
   ``clcd_panel_shell``/``p1_mock_panel``, ``x3_mock_xvc``.)
 - ``BOARD_V011`` (mps3-01): today's fielded bare-metal harness, v0.11 on 0x72BB0A36, with
@@ -88,7 +90,9 @@ HUB_MCC_TTY = f"/dev/{HUB_TARGET}/tty_00"
 
 #: The Linux harness's front-panel features, and its XVC lock (docs/design/XVC_DEBUG.md §7.1).
 PANEL_FEATURES = ("presence", "panel", "locate")
-LINUX_DEMO_FEATURES = cat.LINUX_FEATURES + ("identify", "usd") + PANEL_FEATURES + ("xvc_lock",)
+#: ... and ``lcd_mirror`` (LM4): the Live display, the in-memory board of ``demo_display``.
+LINUX_DEMO_FEATURES = cat.LINUX_FEATURES + ("identify", "usd") + PANEL_FEATURES + ("xvc_lock",
+                                                                                  "lcd_mirror")
 V011_DEMO_FEATURES = cat.V011
 
 HOST_KEY = "SHA256:dEm0hOsTkEyOfThELinuxHaRnEsSmPs3lXdEmO0q1"
@@ -923,7 +927,10 @@ class DemoXvcAdapter:
 def adapters(engine: Any, board: Any) -> dict[str, Any]:
     """The extra adapters a showcase board's session carries (``BoardSession`` attributes)."""
     bid = board.candidate.board_id
-    out: dict[str, Any] = {"panel": DemoPanel(engine, bid), "xvc": DemoXvcAdapter(engine, bid)}
+    from harness_manager.demo_display import DemoDisplay  # LM4: the Live display
+
+    out: dict[str, Any] = {"panel": DemoPanel(engine, bid), "xvc": DemoXvcAdapter(engine, bid),
+                           "display": DemoDisplay(engine, bid)}
     if board.kind == "linux":
         slots = DemoOsSlots(engine, bid)
         out.update(claim=DemoClaim(engine, bid), os_slots=slots,
