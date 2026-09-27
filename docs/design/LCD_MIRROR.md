@@ -1,6 +1,8 @@
 # A pixel-exact, live mirror of the MPS3 LCD in Harness Manager
 
-> **Status:** design, lane LCD-MIRROR, 2026-09-26. Nothing here is wired into the app.
+> **Status:** design, lane LCD-MIRROR, 2026-09-26. Built so far: LM1 (the core:
+> `core/display_wire.py`, `core/display.py`, `services/display.py`) and LM2 (the MPS3 adapter
+> and its lease hooks, §7.1-§7.2). The daemon API, UI and CLI (LM3-LM5) are not wired yet.
 >
 > **Decides:** david (§8).
 >
@@ -222,26 +224,49 @@ x36. Events are ≥ 4 cycles apart and the sketch needs 3. There is no extra BRA
   6. KEY after a `seq` gap or on start gets a full keyframe with REGS at the next UPDATE;
      RATE is clamped and the clamp is echoed.
 
-### 6.1 HM's byte-level reading (implemented by the transport spike; confirm or correct: H1)
+### 6.1 HM's byte-level reading (confirmed by the board side, with six corrections)
+
+The Linux lead built `mps3-lcdmirror` to this reading (platform `feat/lcd-mirror` d86ce81;
+`docs/contracts/net-protocol.md` v0.15 "LCD mirror (TCP 6940)") and checked in wire vectors,
+which HM parses (`tests/fixtures/lcdmirror_wire/`, `tests/unit/test_lm1_display_wire.py`). HM's
+one module for the wire is `core/display_wire.py`. **The six board-confirmed corrections**, all
+applied there and in the text below:
+
+1. **RATE's clamp** is echoed in the board's own `0x11` reply, at once. Nothing about the rate
+   rides an UPDATE.
+2. **`seq`** is per connection and **1 for the first UPDATE** (+1 each, wraps at 2^32), so an
+   `ACK 0` acknowledges nothing.
+3. **owner 3 (unknown) is reserved**; sw mode sends only 0 and 1.
+4. **There are no heartbeat UPDATEs.** Nothing changed means no UPDATE, so PING is the liveness
+   probe (HM keys `stale` on PONG alone, §7.2).
+5. **`max_msg` (4096..65536) bounds the WHOLE message**, the 8-byte header included; a longer
+   one is corrupt.
+6. **REGS is the snooper's raw register log, never reset.** After `resets` changes, R16, R17,
+   R36 and R01 come from MODE, not REGS (`core/display.py` `DisplayFrame.mode_regs`).
 
 **Framing**
 - `'L' 'M' u8 type, u8 rsvd=0, u32 len` (LE), then `len` bytes.
 - A first byte `{` is the refusal line.
 
 **0x01 HELLO**
-- JSON `{"proto":1,"w":320,"h":240,"fmt":"rgb565le","tile":16,"mode":"hw"|"sw","static_id":"0x…","max_msg":65536}`.
+- JSON `{"proto":1,"w":320,"h":240,"fmt":"rgb565le","tile":16,"mode":"hw"|"sw","static_id":"0x…","max_msg":65536}`,
+  plus H3's `boot_id`, `rate`, `rate_max` (30) and `clients_max` (2). `max_msg` counts the
+  8-byte header (correction 5).
 
 **0x02 UPDATE**
 - Fields in order:
-  - `u32 seq`, `u32 t_ms`, `u32 frames`, `u32 resets`, `u32 status`;
-  - `u8 owner` (0 harness, 1 DUT, 3 unknown);
+  - `u32 seq` (1 for a connection's first UPDATE: correction 2), `u32 t_ms`, `u32 frames`,
+    `u32 resets`, `u32 status`;
+  - `u8 owner` (0 harness, 1 DUT; 3 unknown is reserved: correction 3);
   - `u8 valid[38]` (bit t = tile t, LSB first);
-  - `u8 regs[256]` if `key_first`, else `u32 mode` (`{R01,R36,R17,R16}`);
+  - `u8 regs[256]` if `key_first` (a raw log, never reset: correction 6), else `u32 mode`
+    (`{R01,R36,R17,R16}`, the panel's decoded state);
   - `u16 ntiles`, then the tiles.
 - `status` bits:
   - [10:0]: the CSR `STATUS`;
   - [16] `exact`, [17] `text_only`, [18] `blind`;
-  - [24] `key`, [25] `key_first`, [26] `key_last`.
+  - [24] `key`, [25] `key_first`, [26] `key_last`, [27] `snap_last` (H1).
+- Nothing changed: no UPDATE at all (correction 4).
 - Tile `idx = ty*20 + tx`, pixels row-major.
 
 | Encoding | Payload |
@@ -254,8 +279,10 @@ x36. Events are ≥ 4 cycles apart and the sketch needs 3. There is no extra BRA
 
 **Client messages**
 - `0x10` KEY.
-- `0x11` RATE: `u8` hz; the board echoes the clamped value in a `0x11` of its own.
-- `0x12` PING `u32`, answered by `0x13` PONG `u32`.
+- `0x11` RATE: `u8` hz; the board echoes the clamped value in a `0x11` of its own, at once
+  (correction 1).
+- `0x12` PING `u32`, answered by `0x13` PONG `u32` at any time: the liveness probe.
+- `0x14` ACK `u32 seq` (H1): cumulative; the board keeps at most 2 UPDATEs unacknowledged.
 
 ## 7. Harness Manager
 
@@ -271,11 +298,11 @@ Plain `display` is taken: it collides with `lab display` (`cli/cmd_lab.py:82-104
 | Layer | File (new unless noted) | What |
 |---|---|---|
 | Model + protocol | `core/display.py` | `DisplayInfo` (w, h, fmt, tile, mode, static_id, max_msg). `DisplayUpdate` (seq, t_ms, frames, resets, status, owner, valid, regs\|mode, tiles). `DisplayAdapter`: `display_reason()`, `display_info()`, `open_stream(rate)`, `display_release()`. `DisplayStream`: `read()`, `key()`, `rate()`, `ping()`, `close()`. Also the board-agnostic 5-encoding tile decoder and `badges()` |
-| Session | `core/pack.py` (edit) | `BoardSession.display: DisplayAdapter \| None`, beside `panel` (`:596`); a CONTRACTS row |
+| Session | `core/pack.py` (edit) | `BoardSession.display: DisplayAdapter \| None`, beside `panel`; the pack hook `BoardPack.display_adapter(session) -> DisplayAdapter \| None` (default: `session.display`); a CONTRACTS row |
 | Service | `services/display.py` | `DisplayService`: one upstream per board; the compositor (the latest record per tile plus the decoded frame); per-viewer dirty sets; open, grace-close and reconnect; lease/claim hooks; the `display.state` event |
 | Daemon | `daemon/display_api.py` (in `EXTENSIONS`) | the routes in §7.3 |
-| MPS3 | `harness_manager_mps3/display.py`, hooked in `pack.py` | Gate on `version.features` ∋ `lcd_mirror`, with the port from `version.lcd_mirror.port` (default 6940). Reach the board through `claim.open_forward({"lcd_mirror": port})` (`claim.py:962-979`), the XVC/GDB path. When the Linux lead lands `pyverify.lcd_mirror` and a `FakeLcdMirror`, use them (the one-codec rule `panel.py` follows) |
-| Capability | `harness_manager_mps3/capabilities.py` (edit) | `CapabilitySpec(C.DISPLAY_MIRROR, …, via(L.SSH, features=("lcd_mirror",)))`, with the hint "needs the Linux harness with lcd_mirror and a claimed board" |
+| MPS3 | `harness_manager_mps3/display.py` (`Mps3Display`), hooked in `pack.py` (`session.display`; `Mps3Pack.display_adapter`) | Gate on the ENGINE name `lcd_mirror` in `version.features` (no bit: a bit number never counts), Linux only, with the port from `version.lcd_mirror.port` (default 6940). Reach the board through `claim.open_forward({"lcd_mirror": port})`, the XVC/GDB path: one forward per session, a new socket per connect. Reasons in the order a user fixes them: bare metal, no engine, the lease (D3, naming the holder), the claim |
+| Capability | `harness_manager_mps3/capabilities.py` (edit) | `CapabilitySpec(C.DISPLAY_MIRROR, "Live display", via(L.ETHERNET\|L.HUB\|L.SSH, features=("lcd_mirror",)))` (a real MPS3 candidate carries Ethernet or hub links, not SSH), with the hint "needs the Linux harness with lcd_mirror and a claimed board"; the adapter's `display_reason()` says which |
 | Web | `web/static/js/display.js`; `sections/panel.js` (edit) | the Live display canvas at the top of the Front panel card; today's text mirror becomes its fallback |
 | CLI | `cli/cmd_display.py` | `display snapshot TARGET --out x.png [--scale 2] [--raw]`; `display show TARGET` |
 
@@ -295,12 +322,12 @@ Plain `display` is taken: it collides with `lab display` (`cli/cmd_lab.py:82-104
 | Last viewer leaves | Closes after 30 s; a returning viewer reuses the upstream | — |
 | `seq` gap | Stops presenting, sends `KEY`, stages the keyframe, presents it on `key_last` | `seq_gap_key_recovery` PASS |
 | Tunnel drop or board reboot | Same local port; the reader reconnects, sends KEY and shows "reconnecting" over the last picture | `drop_claim_loss_recover` PASS, 2.5 s |
-| Claim lost, key refused, host key changed | State `down` with ssh's reason (`map_ssh_failure`); stops after 3 restarts; falls back to the text mirror | same |
+| Claim lost, key refused, host key changed | State `down` with ssh's reason (`map_ssh_failure`). A changed host key stops at once; a forward that does not come up 3 times in a row stops (`Mps3Display`); falls back to the text mirror | same |
 | Image without the service | Gated on the feature. As a backup, ssh's "open failed … Connection refused" gives "no lcd_mirror service", with a retry after 60 s | `no_service` PASS, 0.03 s |
 | Third client | The board's JSON refusal line: state `refused`, back off. Each HM daemon uses one of the board's two slots | `refusal_3rd_client` PASS |
-| Lease released, expired or lost | Closes at once, as XVC does (`services/xvc.py:1667-1681`) | — |
+| Lease released, expired or lost | Closes at once, as XVC does: `DisplayService` hears `lease.state` on the bus and closes that board's upstream ("closed: the lease was lost"), which drops the forward. `session.closed` does the same. The next connect asks the lease again, fresh | — |
 | KVM handover | `resets+1` and VALID=0 give hatching until the new owner paints | `handover_hatch` PASS: 300, then 0 |
-| Liveness | `PING` every 1 s. `stale` after 3 s with no UPDATE or PONG; reconnect after 10 s | — |
+| Liveness | `PING` every 1 s is the probe: the board sends no heartbeat UPDATEs (correction 4), so `stale` after 3 s with no **PONG** (an UPDATE does not count); reconnect after 10 s | — |
 
 ### 7.3 Daemon API
 

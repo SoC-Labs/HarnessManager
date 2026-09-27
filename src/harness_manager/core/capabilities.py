@@ -42,6 +42,9 @@ POWER_CYCLE = "power_cycle"
 FRONT_PANEL = "front_panel"   # read the panel's state and its mirror
 LOCATE = "locate"             # show which board this is (blink the panel)
 PRESENCE = "presence"         # tell the board who is connected (hello)
+# The live, pixel-exact mirror of a board's screen (docs/design/LCD_MIRROR.md §7.1, lane LM2).
+# NOT plain "display": that is `lab display` and `mps3.display_flip`.
+DISPLAY_MIRROR = "display_mirror"
 
 
 @dataclass(frozen=True)
