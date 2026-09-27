@@ -172,7 +172,12 @@ def runner_from_hub(hub: Any) -> Any:
 #: missing or will not open, 3 another process names or holds the tty (NOTHING sent), 4 a bare
 #: CR did not bring back an intact prompt (NOTHING else sent), 5 a read got no prompt back,
 #: 6 the MCC was talking before we typed (booting: NOTHING sent), 7 a line that is not a read.
-#: The second-reader scan and the raw open are pyverify's (bootrate.HUB_MCC_REBOOT_PY).
+#: The second-reader scan and the raw open are pyverify's (bootrate.HUB_MCC_REBOOT_PY). The
+#: scan lists ``[pid, cmd]``: a process seen HOLDING the tty (``/proc/<pid>/fd``) carries
+#: ``HOLDS_OPEN`` first; one whose command line only NAMES it (a soak that takes it as an
+#: argument) is listed as it is, since a root process's fds are invisible and one that names
+#: it may open it at any moment. Unlike pyverify's writer (which checks the command line
+#: first), this reader checks the fds first, so a ``cat TTY`` of our own shows as holding it.
 HUB_MCC_READ_PY = r'''
 import json, os, re, select, sys, time
 A = json.loads(sys.argv[1])
@@ -222,21 +227,26 @@ def others():
         except OSError:
             continue
         cmd = " ".join(argv)[:160]
-        if any(c in names or c.split(",", 1)[0] in names
-               for x in argv[1:] for c in (x, x.split("=", 1)[-1])):
-            hits.append([pid, cmd])
-            continue
+        # The fds first (readable for our own processes only): a `cat TTY` that has it open
+        # says so. Then the command line: a process that names the tty counts even when its
+        # fds are invisible (root) or it has not opened it yet.
         try:
             fds = os.listdir("/proc/%d/fd" % pid)
         except OSError:
-            continue
+            fds = []
+        holds = False
         for fd in fds:
             try:
                 if os.path.realpath("/proc/%d/fd/%s" % (pid, fd)) == real:
-                    hits.append([pid, "(holds it open) " + cmd])
+                    holds = True
                     break
             except OSError:
                 pass
+        if holds:
+            hits.append([pid, "(holds it open) " + cmd])
+        elif any(c in names or c.split(",", 1)[0] in names
+                 for x in argv[1:] for c in (x, x.split("=", 1)[-1])):
+            hits.append([pid, cmd])
     return hits
 
 def open_raw():
@@ -286,7 +296,10 @@ if not os.path.exists(TTY):
     done(2, "no such tty %s on this host" % TTY)
 OUT["others"] = others()
 if OUT["others"]:
-    done(3, "another process reads %s" % TTY)
+    if any(c.startswith("(holds it open) ") for _, c in OUT["others"]):
+        done(3, "another process has %s open" % TTY)
+    done(3, "another process names %s on its command line, so it may open it at any moment"
+         % TTY)
 try:
     fd = open_raw()
 except OSError as exc:
@@ -344,6 +357,43 @@ def _last_json(text: str) -> dict[str, Any] | None:
 
 def _others(info: dict[str, Any]) -> str:
     return "; ".join(f"pid {p}: {c}" for p, c in info.get("others") or []) or "?"
+
+
+#: The one-reader scan's mark for a process seen holding the tty open (``/proc/<pid>/fd``):
+#: pyverify's writer and ``HUB_MCC_READ_PY`` both put it before the command. Without it, the
+#: process only NAMES the tty on its command line (the scan counts it all the same).
+HOLDS_OPEN = "(holds it open) "
+
+
+def other_readers(tty: str, info: dict[str, Any]) -> str:
+    """What the one-reader scan found, in words that say what it saw: a process that HAS the
+    MCC console open (its fd was seen), or one that NAMES it on its command line and so may
+    open it at any moment (a root process's fds are invisible: the scan counts it anyway)."""
+    held: list[str] = []
+    named: list[str] = []
+    for pid, cmd in info.get("others") or []:
+        cmd = str(cmd)
+        if cmd.startswith(HOLDS_OPEN):
+            held.append(f"pid {pid}: {cmd[len(HOLDS_OPEN):]}")
+        else:
+            named.append(f"pid {pid}: {cmd}")
+    parts: list[str] = []
+    if held:
+        who = "another process" if len(held) == 1 else "other processes"
+        parts.append(f"{who} on the hub {'has' if len(held) == 1 else 'have'} the MCC console "
+                     f"{tty} open ({'; '.join(held)})")
+    if named:
+        one = len(named) == 1
+        if held:
+            who = "another" if one else "others"
+            what = "it"
+        else:
+            who = ("another process" if one else "other processes") + " on the hub"
+            what = f"the MCC console {tty}"
+        parts.append(f"{who} {'names' if one else 'name'} {what} on "
+                     f"{'its command line' if one else 'their command lines'}, so "
+                     f"{'it' if one else 'they'} may open it at any moment ({'; '.join(named)})")
+    return ", and ".join(parts) or f"another process on the hub reads the MCC console {tty} (?)"
 
 
 # --- the controller -------------------------------------------------------------------------------
@@ -411,7 +461,8 @@ class HubMccController:
 
     def scan(self) -> None:
         """pyverify's second-reader check of ``tty_00`` on the hub. Sends nothing; raises
-        ``HeldError`` when another process reads the tty (a share, a ``cat``, a console)."""
+        ``HeldError`` when another process has the tty open (a share, a ``cat``, a console)
+        or names it on its command line (``other_readers`` says which)."""
         r = self._resetter()
         out = r.scan()
         info = r.last_info or {}
@@ -419,11 +470,11 @@ class HubMccController:
             return
         if info.get("rc") == 3:
             raise HeldError(
-                f"another process reads the MCC console {self.tty} on the hub ({_others(info)}): "
-                "a second reader on tty_00 splits the REBOOT, so nothing was sent",
+                f"{other_readers(self.tty, info)}: a second reader on tty_00 splits the REBOOT, "
+                "so nothing was sent",
                 holder=_others(info),
                 hint="stop that reader (an fpgahub share on tty_00 goes only with `share stop`, "
-                     "which stops every share: ask whoever started it)")
+                     "which stops every share): ask whoever runs it")
         if info.get("rc") == 2:
             raise UnavailableError("reboot_board", f"the MCC console on the hub: {info.get('reason')} "
                                    "(the hub account needs group fpga)")
@@ -615,11 +666,10 @@ class HubMccController:
         rc = info.get("rc")
         if rc == 3:
             return HeldError(
-                f"refusing the MCC REBOOT: another process reads {self.tty} on the hub "
-                f"({_others(info)}). Nothing was sent",
+                f"refusing the MCC REBOOT: {other_readers(self.tty, info)}. Nothing was sent",
                 holder=_others(info),
-                hint="a second reader eats the MCC's echo; stop it (an fpgahub share on "
-                     "tty_00 counts), then retry")
+                hint="a second reader eats the MCC's echo; ask whoever runs it to stop it (an "
+                     "fpgahub share on tty_00 counts), then retry")
         if rc == 4:
             return NothingOnTargetError(
                 f"refusing the MCC REBOOT: {info.get('reason') or 'no intact Cmd>'} on "
@@ -691,9 +741,9 @@ class HubMccController:
         if rc == 0 and len(replies) == len(lines):
             return [strip_echo(raw, line) for raw, line in zip(replies, lines, strict=True)]
         if rc == 3:
-            raise HeldError(f"another process reads the MCC console {self.tty} on the hub "
-                            f"({_others(info)}): nothing was typed", holder=_others(info),
-                            hint="the MCC takes one reader; ask whoever holds it")
+            raise HeldError(f"{other_readers(self.tty, info)}: nothing was typed",
+                            holder=_others(info),
+                            hint="the MCC takes one reader; ask whoever runs it")
         if rc == 4:
             raise NothingOnTargetError(f"no MCC prompt on {self.tty} after a bare CR (heard "
                                        f"{str(info.get('prompt') or '')!r})",
@@ -792,6 +842,7 @@ def scan_for_hub(hub: Any, tty: str) -> None:
 
 
 __all__ = [
-    "HUB_MCC_READ_PY", "HUB_PACE_S", "HubMccController", "PY310_PROBE", "ROUTE_TOOL", "is_mcc_tty",
-    "make_hub_controller", "mcc_tty_for", "runner_for", "runner_from_hub", "scan_for_hub",
+    "HOLDS_OPEN", "HUB_MCC_READ_PY", "HUB_PACE_S", "HubMccController", "PY310_PROBE", "ROUTE_TOOL",
+    "is_mcc_tty", "make_hub_controller", "mcc_tty_for", "other_readers", "runner_for",
+    "runner_from_hub", "scan_for_hub",
 ]

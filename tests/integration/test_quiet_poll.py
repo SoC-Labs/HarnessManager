@@ -540,14 +540,14 @@ def test_an_mcc_second_reader_in_background_telemetry_is_busy_and_backs_off(q):
     runner.rc = 3                                     # someone else reads tty_00
     got = q.background("/telemetry")
     assert got["quiet"]["kind"] == "busy" and "another client" in got["quiet"]["text"]
-    assert "reads the MCC console" in got["quiet"]["detail"]
+    assert "names the MCC console" in got["quiet"]["detail"]
     t0, calls = time.monotonic(), runner.calls
     answers = [q.background("/telemetry"), q.background()]
     assert quiet_kinds(answers) == {"busy"} and runner.calls == calls
     assert q.front.attempts(t0) == 0, "the back-off holds every background read of the board"
     # An explicit read still answers, today's way: the MCC rows say why.
     body = q.explicit("/telemetry").json()
-    assert body["ok"] and any("reads the MCC console" in (x.get("reason") or "")
+    assert body["ok"] and any("names the MCC console" in (x.get("reason") or "")
                               for x in body["readings"])
 
 

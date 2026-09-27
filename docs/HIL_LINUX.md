@@ -18,6 +18,39 @@
 >
 > Out of time? Skip §G, then F6. Never skip §Z.
 
+## Netboot mode (card unusable): read this first
+
+The lab board's user microSD is **intermittent**. On 2026-09-27 the Linux lead (with david's
+approval) zeroed both OS slot headers on it (LBA 67584 and 198656; 4 KB backups of each on the
+hub in `/home/david/pv_soak/card_backup/`). The board now netboots stage0 → Linux, and the soak
+image mounts `/persist` on tmpfs (`mps3.persist=off`). Until the Linux lead says the card is back:
+
+1. **Skip everything that reads or writes the card, its slots or the config SD A/B:**
+   - §C2 (the card);
+   - §D2, D3 and D5 (keep on the card);
+   - §G (config SD A/B);
+   - §Z1, and Z2's `card status`.
+
+   Never run `slot push|commit|rollback`, `card clear` or `program --keep-on-card` in this mode.
+2. **§C1 is the netboot check.** `slot status` answers, and both slots read
+   `empty (no S0LB header)`. That is the zeroed headers, not a fault.
+3. **The SSH host key changes.** The harness keeps its host key in `/persist`, so the key on
+   tmpfs is not the one the card held (and it changes back when the card returns). Harness
+   Manager says so: `host key changed back to one seen on <date> (…); on the Linux harness this
+   is usually /persist (the user microSD) mounting or not; re-pin with harness-manager board
+   claim TARGET --adopt if you trust it`. SSH, and everything over it, is refused until you
+   re-pin:
+   - check the fingerprint against B1's `host key SHA256:…` line;
+   - then `harness-manager board claim $B --adopt --key ~/.ssh/id_ed25519.pub`.
+
+   A key never pinned here shows the loud `HOST KEY CHANGED` instead: ask the Linux lead before
+   any `--replace-host-key`. B3's `persist.state` names tmpfs, not the card: expected here.
+4. **The hub MCC read and REBOOT refuse while any process on the hub names `tty_00` on its
+   command line, and the soak does.** The words are `another process on the hub names the MCC
+   console /dev/mps3_01_pl/tty_00 on its command line, so it may open it at any moment (pid N:
+   …)`. Nothing is sent. Do not ask for the soak to be stopped for this: skip D4 while it runs.
+   When nothing names `tty_00`, D4 may run; expect the greybox back (netbooted), not nanosoc.
+
 Every step lists the command, the expected answer and the evidence file (under `$EV`).
 Commands run in **terminal B** unless a step says otherwise.
 
@@ -698,7 +731,8 @@ Then tell the HM lead the folder is complete.
 | D2: `not kept on the card: <why>` | the card write failed; a card failure never fails the deploy, so the swap stands | record the reason; skip D4 and D5 |
 | any `program`: refused because the power-on load is running | the card's power-on load is in progress | wait for `power-on loaded` (`card status`), then repeat |
 | `stats` `rm_ok: false` after a restart | the partition stays in reset until the first swap | program once |
-| D4/G3: "another process reads /dev/mps3_01_pl/tty_00 on the hub (pid N: …)" | a second reader: a `cat`, a console, an fpgahub share on `tty_00` | nothing was sent. `ssh $H 'ps -eo pid,user,args \| grep -F tty_00'`; have it closed (a share: ask david, `share stop` stops them all); repeat |
+| D4/G3: "another process on the hub has the MCC console /dev/mps3_01_pl/tty_00 open (pid N: …)" | a second reader: a `cat`, a console, an fpgahub share on `tty_00` | nothing was sent. `ssh $H 'ps -eo pid,user,args \| grep -F tty_00'`; have it closed (a share: ask david, `share stop` stops them all); repeat |
+| D4/G3: "another process on the hub names the MCC console /dev/mps3_01_pl/tty_00 on its command line, so it may open it at any moment (pid N: …)" | a process that takes `tty_00` as an argument (the soak does). The scan cannot see a root process's open files, so it counts every process that names the tty | nothing was sent. Ask whoever runs it; repeat once it has stopped |
 | D4/G3: "refusing the MCC REBOOT: no intact Cmd>" | the MCC is not at `Cmd>` (a `Debug>` left open, or a reader this account cannot see) | nothing was sent. After an SD write this was already retried 3 times 5 s apart; wait 30 s and repeat once |
 | D4/G3: "the hub has no Python 3.10+ for pyverify's MCC tools" | no `python3.11` on the hub (its `python3` is 3.6) | the hub admin installs one; fpgahub's `/opt/fpgahub/bin/python3.11` counts |
 | D4/G3: "MCC REBOOT refused: slot B is being written …" | the user microSD's card job is running (SLOT-TIMING) | wait for `slot status` to show it done; never force it during the soak |

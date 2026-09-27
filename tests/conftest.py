@@ -10,6 +10,27 @@ from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.virtual_board import VirtualMps3
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_daemon_outlives_the_session(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """A daemon (or OTA apply helper) that a test started must be gone when the session ends.
+    One left running under this session's pytest tmp dir, or under an ``/tmp/otad-*``
+    install this session made (``proc_sweep.track``), fails the run, naming it, and is then
+    stopped. Only this session's own dirs are looked at: a daemon of another run, or the
+    user's own, is never counted and never signalled."""
+    from tests.fakes import proc_sweep
+
+    base = str(tmp_path_factory.getbasetemp()).rstrip("/") + "/"
+    yield
+    markers = [base, *proc_sweep.session_markers()]
+    left = proc_sweep.leaked_daemons(markers)
+    if not left:
+        return
+    for marker in markers:
+        proc_sweep.sweep(marker, only=proc_sweep.DAEMON_MODULE)
+    pytest.fail("a daemon a test started outlived the session (stopped now):\n"
+                + "\n".join(f"  pid {pid}: {cmd[:300]}" for pid, cmd in left), pytrace=False)
+
+
 @pytest.fixture(autouse=True)
 def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Never let a test touch the user's real ~/.config/harness-manager, nor the PTY links

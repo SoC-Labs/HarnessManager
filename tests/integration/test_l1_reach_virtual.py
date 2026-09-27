@@ -116,7 +116,8 @@ def test_negative_twin_a_share_on_tty_00_is_a_second_reader_and_nothing_is_typed
                                           share_mcc=True) as rig:
         session = engine.open(engine.candidate_for(BOARD_IP))
         (temp,) = session.controller.temperatures()
-        assert not temp.available and "another process reads" in temp.reason
+        # the broker runs as another user: the scan sees its command line, not its fds
+        assert not temp.available and "names the MCC console" in temp.reason
         assert "tty_share" in temp.reason and vb.mcc.accepted_lines == []
         assert rig.hub.shares[MCC_TTY].readers == 0 and rig.hub.shares[MCC_TTY].written == b""
 
