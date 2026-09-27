@@ -36,6 +36,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
@@ -62,6 +63,15 @@ from harness_manager.core.pack import (
     preflight_refusal,
 )
 from harness_manager.services import reset_guard
+from harness_manager.services.quiet import (
+    VIEWER_HEADER,
+    BackgroundGate,
+    Quiet,
+    is_contention,
+    lease_elsewhere,
+    policy_for,
+    request_is_background,
+)
 
 from .jobs import BoardGates, Job, JobManager, busy_error
 from .outbox import Batch, Outbox
@@ -104,7 +114,8 @@ JsonBody = Annotated[Any, Body()]
 
 #: Extension router modules, loaded in this order if present (docs/API.md).
 EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "panel_api",
-              "kit_api", "xvc_api", "harness_api", "settings_api", "claim_api", "card_api")
+              "kit_api", "xvc_api", "harness_api", "settings_api", "claim_api", "card_api",
+              "quiet_api")
 
 
 @dataclass
@@ -133,6 +144,14 @@ class _JSON(JSONResponse):
 
 class _Unauthorised(Exception):
     pass
+
+
+class _Quiet(Exception):
+    """QUIET-POLL: a background read the gate held back; ``body`` is the whole answer."""
+
+    def __init__(self, body: dict[str, Any]) -> None:
+        super().__init__(body.get("quiet", {}).get("text", "quiet"))
+        self.body = body
 
 
 # --- static files ---------------------------------------------------------------------------
@@ -366,6 +385,70 @@ class Daemon:
         self._mu = threading.Lock()
         self._candidates: dict[str, Candidate] = {}
         self._unlog = self.bus.subscribe("*", _log_event)
+        # QUIET-POLL (services/quiet.py): background contact with a board happens only while
+        # a UI views it, never while its hub lease is someone else's, never under policy
+        # "off", and backs off when the board turns a connection away. The demo's boards are
+        # scripted (``fake_boards``): its gate says yes to everything.
+        self.quiet = BackgroundGate(policy_of=self._poll_policy, lease_of=self._lease_elsewhere,
+                                    enabled=not getattr(engine, "fake_boards", False))
+        self._unquiet = [self.bus.subscribe("session.opened", self._quiet_opened),
+                         self.bus.subscribe("session.closed", self._quiet_closed)]
+
+    # -- QUIET-POLL -------------------------------------------------------------------------
+
+    def _poll_policy(self, board_id: str) -> str:
+        try:
+            links = self.engine.session(board_id).candidate.links
+        except HarnessError:
+            links = ()
+        return policy_for(board_id, links)
+
+    def _lease_elsewhere(self, board_id: str) -> str:
+        """The lease holder when the lease service says the board's lease is someone else's
+        (its cached view when recent: no extra hub call on every poll)."""
+        leases = getattr(self, "leases", None)
+        if leases is None:
+            return ""
+        try:
+            hub = getattr(self.engine.session(board_id), "hub", None)
+        except HarnessError:
+            return ""
+        if hub is None:
+            return ""
+        view = leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
+        return lease_elsewhere(view if view is not None else leases.view(hub))
+
+    def _quiet_opened(self, ev: Event) -> None:
+        """The board pack reports every control-port connection's outcome to the gate, so a
+        refusal any caller meets backs the background polls off (``Mps3Shell.observer``)."""
+        try:
+            session = self.engine.session(ev.board_id)
+        except HarnessError:
+            return
+        shell = getattr(session, "shell", None)
+        if shell is not None and hasattr(shell, "observer"):
+            bid, gate = ev.board_id, self.quiet
+            shell.observer = lambda exc: gate.observe(bid, exc)
+
+    def _quiet_closed(self, ev: Event) -> None:
+        self.quiet.forget(ev.board_id)
+
+    def background_state(self, board_id: str) -> dict[str, Any]:
+        return self.quiet.state(board_id)
+
+    def quiet_answer(self, board_id: str, q: Quiet) -> dict[str, Any]:
+        """The answer to a background read the gate held back: 200, the board untouched."""
+        return ok(board_id=board_id, quiet=q.public(), background=self.quiet.state(board_id))
+
+    def busy_answer(self, board_id: str, exc: HarnessError) -> dict[str, Any] | None:
+        """A background read the board turned away: the back-off starts (the pack's observer
+        has usually noted it already; noting twice never lengthens it) and the answer says
+        "busy (another client)". None when the gate does not treat it as quiet (the demo)."""
+        if not self.quiet.enabled:
+            return None
+        self.quiet.note_busy(board_id, exc.message)
+        q = self.quiet.check(board_id)
+        return self.quiet_answer(board_id, q) if q is not None else None
 
     def check_token(self, presented: str | None) -> bool:
         return bool(presented) and hmac.compare_digest(presented.encode("utf-8"),
@@ -388,9 +471,15 @@ class Daemon:
 
     def close(self) -> None:
         self._unlog()
+        for unsub in self._unquiet:
+            unsub()
         self.hub.close()
         self.jobs.shutdown(wait=False)
 
+
+#: How old a lease view the background gate trusts without asking the hub (the presence
+#: beat's rule, CCR PANEL-2).
+LEASE_VIEW_MAX_AGE_S = 60.0
 
 #: Engine events worth a line in daemon.log: the board's life story for a field report
 #: (Q2). Never console bytes or progress ticks; no event here carries a token.
@@ -572,8 +661,19 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     # -- errors and headers ----------------------------------------------------------------
 
     @app.exception_handler(HarnessError)
-    async def _harness_error(_request: Request, exc: HarnessError) -> JSONResponse:
+    async def _harness_error(request: Request, exc: HarnessError) -> JSONResponse:
+        bid = request.path_params.get("bid") if request.method in ("GET", "HEAD") else None
+        if bid and is_contention(exc) and request_is_background(request.headers):
+            # QUIET-POLL: a background read the board turned away (refused, reset, timed
+            # out, held): someone else is using it. Back off, and say "busy", not an error.
+            body = await run_in_threadpool(d.busy_answer, bid, exc)
+            if body is not None:
+                return _JSON(body)
         return _JSON(error_body(exc), status_code=http_status(exc))
+
+    @app.exception_handler(_Quiet)
+    async def _quiet(_request: Request, exc: _Quiet) -> JSONResponse:
+        return _JSON(exc.body)
 
     @app.exception_handler(_Unauthorised)
     async def _unauthorised(_request: Request, _exc: _Unauthorised) -> JSONResponse:
@@ -618,6 +718,24 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         if scheme.lower() != "bearer" or not d.check_token(value.strip()):
             raise _Unauthorised()
 
+    def background_gate(request: Request) -> None:
+        """QUIET-POLL: a read nobody clicked (``X-HM-Background: 1``) of an open board goes
+        ahead only when the background gate says so; otherwise it is answered at once, 200
+        with ``quiet`` (why) and ``background`` (the gate's state), and the board is not
+        touched. A viewing page's own read says so too (``X-HM-Viewer``). Actions (anything
+        but GET) and reads without the header are never gated."""
+        if request.method not in ("GET", "HEAD") or not request_is_background(request.headers):
+            return
+        bid = request.path_params.get("bid")
+        if not bid or bid not in d.engine.open_boards():
+            return                       # not a board, or not open: the route says so
+        viewer = str(request.headers.get(VIEWER_HEADER, "") or "").strip()
+        if viewer:
+            d.quiet.view(bid, viewer[:64])
+        q = d.quiet.check(bid)
+        if q is not None:
+            raise _Quiet(d.quiet_answer(bid, q))
+
     async def ws_auth(websocket: WebSocket) -> bool:
         if d.check_token(websocket.query_params.get("token")):
             return True
@@ -640,7 +758,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     app.add_api_route("/health", health, methods=["GET"])
     app.add_api_route(f"{API}/health", health, methods=["GET"])
 
-    api = APIRouter(prefix=API, dependencies=[Depends(require_auth)])
+    api = APIRouter(prefix=API, dependencies=[Depends(require_auth), Depends(background_gate)])
     wsr = APIRouter(prefix=API)
 
     def accepted(job: Job) -> JSONResponse:
@@ -1173,7 +1291,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         board(bid)
         with d.gates.op(bid):
             board_info = d.engine.info(bid)
-        return _JSON(ok(**_fields(board_info)))
+        # QUIET-POLL: what background contact with this board does now, and the lease holder
+        # when it is someone else's (an explicit read names them). Never touches the board.
+        return _JSON(ok(**_fields(board_info), background=d.background_state(bid)))
 
     @api.delete("/boards/{bid:path}")
     def close(bid: str) -> JSONResponse:

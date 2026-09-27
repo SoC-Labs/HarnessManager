@@ -782,6 +782,10 @@ class DemoEngine:
     ``HARNESS_MANAGER_DEMO_UPDATE``; anything else is off.
     """
 
+    #: QUIET-POLL: scripted boards only, so background reads need no etiquette: the
+    #: service's background gate (services/quiet.py) says yes to everything in the demo.
+    fake_boards = True
+
     def __init__(self, *, speed: float = 1.0, console_chatter: bool = False,
                  showcase: bool = False, state_dir: Path | str | None = None,
                  app_update: str | None = None) -> None:
