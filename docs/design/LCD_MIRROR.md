@@ -1,8 +1,10 @@
 # A pixel-exact, live mirror of the MPS3 LCD in Harness Manager
 
 > **Status:** design, lane LCD-MIRROR, 2026-09-26. Built so far: LM1 (the core:
-> `core/display_wire.py`, `core/display.py`, `services/display.py`) and LM2 (the MPS3 adapter
-> and its lease hooks, §7.1-§7.2). The daemon API, UI and CLI (LM3-LM5) are not wired yet.
+> `core/display_wire.py`, `core/display.py`, `services/display.py`), LM2 (the MPS3 adapter
+> and its lease hooks, §7.1-§7.2), LM3 (the daemon API, §7.3) and LM4 (the web UI,
+> `web/static/js/display.js`, §7.4-§7.6; the demo's in-memory board, `demo_display.py`).
+> The CLI (LM5) is not wired yet.
 >
 > **Decides:** david (§8).
 >
@@ -391,6 +393,21 @@ daemon CPU per message, for nothing on localhost.
 - After 3 s of silence: `stale` (dashed border, with the age).
 - After 10 s, or on socket loss: `reconnecting` (a scrim over the last picture). The browser
   socket reconnects with a 0.5-8 s back-off, like `EventSocket`.
+
+**As built (LM4).**
+- Whole device pixels come from Blink's own pixel snapping of the canvas box; a sub-pixel
+  `translate` nudge was tried and made edges blend, so there is none. The browser test
+  checks every panel pixel as a k x k block of one colour at dpr 1 and 2, 1x and 2x.
+- The dim badges are the daemon's (its 1 s `DimDebounce`); the page draws what the status
+  frames say and never debounces again.
+- Pause sends `{"rate": 0}` and holds the ack of any frame still in flight, so a second tab
+  keeping the board's rate up cannot move this tab's picture; Resume draws it, then acks.
+- The socket opens only while the card is on screen (IntersectionObserver) and the tab is
+  visible; a typed refusal (4002/4003/4004/4012) shows the text mirror and asks again only on
+  a lease, session, identity or `display.state` event, or Try again, never on a timer.
+- Measured in Chrome 149 (headless, software raster): a keyframe's decode plus
+  `putImageData` takes 0.5-0.6 ms (median; noise, the clcd_demo card, the harness page) and
+  at most 7 ms cold, against 83 ms for a frame at 12 fps (docs/review/2026-09-27/display-perf.json).
 
 ### 7.5 Fallback
 

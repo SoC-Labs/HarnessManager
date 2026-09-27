@@ -172,6 +172,15 @@ owners.
   passed through. The web page and the `display` command come next.
 - The service no longer compresses its WebSocket messages (permessage-deflate): on the
   local machine it only cost CPU.
+- The web page shows it: **Live display** at the top of the board's Front panel card
+  (Details). The picture is exact, pixel for pixel, at 1x or 2x (whole screen pixels on any
+  display), with Pause and a Snapshot (PNG). Tiles the panel has not drawn since a reset are
+  hatched; the picture is greyed while the DUT owns the panel and the harness cannot see it,
+  dimmed when the backlight or the display is off for a second or more, and badged when the
+  glass may differ. "stale" and "reconnecting" show over the last picture. The picture is
+  view only: a click does nothing to the board. It is open only while it is on screen: a
+  hidden card or a background tab closes it. When it is refused, the text mirror stays, with
+  the reason (and who holds the lease). `app --demo` shows it on the Linux demo board.
 
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key
