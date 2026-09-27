@@ -628,6 +628,10 @@ def open_pty(d: Any, session: Any, name: str) -> dict[str, Any]:
     broker = d.engine.consoles
     fn = getattr(broker, "pty", None)
     if getattr(broker, "reason", None) is None and callable(fn):
+        # Not a click (QUIET-POLL): under someone else's lease the PTY comes back and its
+        # console waits, paused, instead of the reopen being refused.
+        if hasattr(type(broker), "lease_holder"):
+            return fn(session, name, explicit=False)
         return fn(session, name)
     fallback = getattr(d, "fallback_ptys", None)
     if fallback is None:

@@ -12,7 +12,8 @@ import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
 
 const CONSOLE_CAPS = ["console_dut", "console_shell", "console_controller"];
 const ENDINGS = { LF: "\n", CR: "\r", CRLF: "\r\n" };
-const STATE_LEVEL = { up: "ok", connecting: "", down: "warn", closed: "" };
+// QUIET-POLL: "paused" waits for the board's lease (someone else holds it): calm, not a fault.
+const STATE_LEVEL = { up: "ok", connecting: "", down: "warn", closed: "", paused: "held" };
 
 function Terminal({ session }) {
   const ref = useRef(null);
