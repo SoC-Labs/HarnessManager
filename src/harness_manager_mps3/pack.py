@@ -33,6 +33,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.claim:make_claim_adapter(session)``         | LINUX-CLAIM | ``session.claim``: the Linux harness's SSH claim and board-SSH reach |
 | ``.os_slots:make_os_slot_adapter(session)``    | LINUX-SLOTS | ``session.os_slots``: the Linux harness's A/B OS slots (CCR T7-2) |
 | ``.card:make_card_adapter(session)``           | LINUX-SLOTS | ``session.card``: the user microSD, D13 overlay store (CCR LS-1) |
+| ``.display:make_display_adapter(session)``     | LM2  | ``session.display``: the live LCD mirror (``Mps3Pack.display_adapter`` is the pack hook) |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -225,6 +226,7 @@ class Mps3Session(BoardSession):
             ("claim", "claim", "make_claim_adapter"),        # LINUX-CLAIM: SSH claim + reach
             ("os_slots", "os_slots", "make_os_slot_adapter"),  # CCR T7-2: Linux OS slots A/B
             ("card", "card", "make_card_adapter"),           # CCR LS-1: user microSD (D13)
+            ("display", "display", "make_display_adapter"),  # LM2: the live LCD mirror
         ):
             make = _hook(module, factory)
             if make is not None:
@@ -298,7 +300,11 @@ class Mps3Session(BoardSession):
         return health
 
     def close(self) -> None:
-        """Close the hub's share forwards, then the board's SSH tunnel (L1). Idempotent."""
+        """Close the live display's forward (LM2: never left open, FINDINGS_TRIAGE #20), the
+        hub's share forwards, then the board's SSH tunnel (L1). Idempotent."""
+        display = getattr(self, "display", None)
+        if display is not None and hasattr(display, "close"):
+            display.close()                   # never raises
         hub = getattr(self, "hub", None)
         try:
             if hub is not None:
@@ -353,6 +359,13 @@ class Mps3Pack(BoardPack):
         harness-manager-daemon calls it when it starts. Returns what it stopped."""
         reap = _hook("tunnel", "reap_orphans")
         return [f"ssh tunnel pid {pid}" for pid in reap()] if reap is not None else []
+
+    def display_adapter(self, session: BoardSession) -> Any:
+        """The pack hook ``display_adapter`` (lane LM2; the daemon's display API calls it): the
+        session's live display adapter (``.display:display_adapter``), made once per session,
+        or None (no Ethernet shell)."""
+        hook = _hook("display", "display_adapter")
+        return hook(session) if hook is not None else getattr(session, "display", None)
 
     def hub_for(self, candidate: Candidate) -> Any:
         """The board's hub adapter (leases, shares) without opening it; None without a hub (L1)."""

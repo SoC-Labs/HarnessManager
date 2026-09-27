@@ -24,6 +24,8 @@ NEEDS_PANEL = ("needs the Ethernet link and harness firmware with 'panel' (Linux
                "or 'clcd_kvm'")
 NEEDS_LOCATE = "needs harness feature 'locate' (Linux harness)"
 NEEDS_PRESENCE = "needs harness feature 'presence' (Linux harness)"
+#: The live display (lane LM2). The adapter (``display.py``) says which of these is missing.
+NEEDS_LCD_MIRROR = "needs the Linux harness with lcd_mirror and a claimed board"
 
 SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.IDENTIFY, "Identify the harness", (via(L.ETHERNET), via(L.HUB))),
@@ -95,6 +97,15 @@ SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.PRESENCE, "Show who is connected on the panel",
                    (via(L.ETHERNET, features=("presence",)), via(L.HUB, features=("presence",))),
                    needs_hint=NEEDS_PRESENCE),
+    # The live, pixel-exact LCD mirror (lane LM2, docs/design/LCD_MIRROR.md §7.1). ``lcd_mirror``
+    # is an ENGINE name in version.features (net-protocol v0.15: no bit), matched by name. The
+    # board serves it on its loopback only, reached over the claimed board SSH: the Ethernet or
+    # hub link is how HM finds the board, the SSH link how the demo names it. The adapter adds
+    # what a link cannot say: claimed, and (D3) the lease holder only.
+    CapabilitySpec(C.DISPLAY_MIRROR, "Live display",
+                   (via(L.ETHERNET, features=("lcd_mirror",)), via(L.HUB, features=("lcd_mirror",)),
+                    via(L.SSH, features=("lcd_mirror",))),
+                   needs_hint=NEEDS_LCD_MIRROR),
 )
 
 #: What each harness state means, and what to do about it. ``shell.py`` puts these
