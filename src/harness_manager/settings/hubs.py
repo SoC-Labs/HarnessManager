@@ -595,6 +595,17 @@ def adopt_inline_hub(board_key: str, resolver: Resolver, *,
     if unknown:
         raise UsageError(f"boards.{board_key}.hub has unknown keys: {', '.join(unknown)}; "
                          "it is not changed")
+    # The board keeps its shares: checked as `config set` checks them, by the pack's rows when
+    # the resolver has them (a share on tty_00, the MCC console, is refused: MCC-FIX).
+    shares = table.get("shares") if isinstance(table.get("shares"), dict) else {}
+    for share, tty in shares.items():
+        full = join_key(("boards", board_key, "hub", "shares", str(share)))
+        if resolver.schema.find(full) is not None:
+            try:
+                resolver.check_settable(full, tty)
+            except UsageError as exc:
+                raise UsageError(f"{exc.message}; boards.toml is not changed",
+                                 hint=f"fix boards.{board_key}.hub.shares first") from None
     url = table.get("url") or ""
     host = table.get("host") or ""
     if not url and not host:
@@ -713,4 +724,4 @@ def test_connection(req: Any) -> dict[str, Any]:
             raise UsageError("which hub? `harness-manager config test hubs NAME`",
                              hint="`harness-manager hub list` shows the hubs")
         hub = req.name
-    return test_hub(hub, resolver=resolver).view()
+    return test_hub(hub, resolver=resolver, progress=req.progress).view()

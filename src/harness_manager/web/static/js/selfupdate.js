@@ -21,6 +21,9 @@ import { ageText, clock } from "./format.js";
 import { html, useLayoutEffect, useRef } from "./lib.js";
 import { changed, log, onBoardEvent, onEventsReconnected, timed } from "./store.js";
 import { Card, Chip, Icon, Reason, Spinner } from "./ui.js";
+// SET-UI: the dialog's sections (js/settings/*); the dialog stays this one (SETTINGS.md §7)
+import { RestartNote, SettingsNav, SettingsSectionBody } from "./settings/sections.js";
+import { loadSettings, SECTIONS, setSection, SS, whenOpen } from "./settings/state.js";
 
 const DISMISS_KEY = "harness_manager.update.dismissed";
 const NOTES_KEY = "harness_manager.update.notes";
@@ -366,7 +369,8 @@ function outcomeBanner(la, running) {
 // the offer (staged: Restart to update; available: download it).
 export function AppUpdateBanners() {
   const st = U.status;
-  const out = [];
+  // SET-UI: settings changes that wait for a service restart (the restart banner)
+  const out = [html`<${RestartNote} key="settings-restart" testid="restart-banner" cls="banner" />`];
   if (!st) return out;
   const la = lastOutcome(st);
   if (la && !U.applying) out.push(outcomeBanner(la, st.running));
@@ -612,32 +616,47 @@ export function UpdatesCard() {
   <//>`;
 }
 
-export function openSettings() {
+// SET-UI: openSettings("hubs") deep-links to a section; a click handler's event (or nothing)
+// opens the section last used in this tab, the Updates section the first time (where the
+// gear, its badge and the board's "Open settings" link have always led).
+export function openSettings(section) {
+  if (typeof section === "string" && SECTIONS.some((s) => s.id === section)) setSection(section);
   U.settingsOpen = true;
   U.settingsError = null;
   changed();
   loadAppUpdate();
+  loadSettings();
 }
+whenOpen(() => U.settingsOpen);
 
 function SettingsModal() {
   const ref = useRef(null);
   const close = () => { U.settingsOpen = false; changed(); };
   useEscape(ref, close);
+  const current = SECTIONS.find((s) => s.id === SS.section);
   return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) close(); }}>
     <div class="modal settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" ref=${ref}
       data-testid="settings">
       <div class="modal-head"><${Icon} name="sliders-horizontal" /><h2 class="card-title" id="settings-title">Settings</h2>
         <span class="muted small">this machine's Harness Manager</span><span class="grow"></span>
+        ${SS.loading ? html`<${Spinner} />` : null}
         <button type="button" class="btn ghost sm icon-only" aria-label="Close settings" data-action="settings-close"
           data-autofocus onClick=${close}><${Icon} name="x" /></button></div>
-      <div class="modal-scroll"><${UpdatesCard} /></div>
+      <div class="modal-body settings-body">
+        <${SettingsNav} />
+        <div class="modal-scroll settings-pane" data-testid="settings-pane" data-settings-section=${SS.section}>
+          ${SS.section !== "updates" ? html`<h3 class="pane-title">${current ? current.label : SS.section}</h3>` : null}
+          <${SettingsSectionBody} updatesCard=${html`<${UpdatesCard} />`} />
+        </div>
+      </div>
+      <${RestartNote} cls="foot" />
     </div>
   </div>`;
 }
 
 export function SettingsButton() {
   const o = offer();
-  const title = o ? `Settings: Harness Manager ${o.version} is ${o.kind === "staged" ? "ready" : "available"}` : "Settings: app updates";
+  const title = o ? `Settings: Harness Manager ${o.version} is ${o.kind === "staged" ? "ready" : "available"}` : "Settings: hubs, boards, tools, updates";
   return html`<button type="button" class="btn ghost sm icon-only settings-btn" data-action="settings" onClick=${openSettings}
     aria-label="Settings" title=${title}><${Icon} name="sliders-horizontal" />${o ? html`<span class="badge-dot" data-testid="settings-badge"></span>` : null}</button>`;
 }

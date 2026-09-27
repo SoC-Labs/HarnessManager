@@ -63,6 +63,8 @@ class Tester:
 #: function, runs as a job, needs a name).
 CONVENTION: dict[str, tuple[str, str, bool, bool]] = {
     "hubs": ("harness_manager.settings.hubs", "test_connection", True, True),
+    # SET-UI: the Tools section's Detect (version probes only; a job: `vivado -version` is slow)
+    "tools": ("harness_manager.settings.tooltest", "detect_tools", True, False),
 }
 
 _REGISTRY: dict[str, Tester] = {}

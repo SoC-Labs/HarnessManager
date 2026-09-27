@@ -66,6 +66,7 @@ import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 from harness_manager.core.capabilities import CapabilitySpec, negotiate
 from harness_manager.core.errors import (
@@ -279,6 +280,14 @@ class DemoPack(BoardPack):
 
     def open(self, candidate: Candidate) -> BoardSession:
         raise UsageError("the demo pack opens boards through DemoEngine.open")
+
+    def settings(self) -> Iterable[Any]:
+        """The MPS3 pack's settings rows with its own defaults, so the demo's Settings dialog
+        shows what an MPS3 install shows (lane SET-UI-MERGE): the consoles' pacing, the
+        OS-slot card timing, each board's hub, SSH and XVC tables."""
+        from harness_manager_mps3.settings import mps3_rows
+
+        return mps3_rows()
 
 
 # --- sessions and adapters ---------------------------------------------------------------

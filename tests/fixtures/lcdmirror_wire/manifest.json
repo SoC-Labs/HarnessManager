@@ -1,0 +1,11 @@
+{"what": "LCD mirror 6940 wire vectors (lcdmirror_vectors.c)", "vectors": [
+  {"file": "hello.bin", "kind": "hello"},
+  {"file": "update_fill.bin", "kind": "update", "seq": 10, "t_ms": 123456, "status": 134348875, "owner": 0, "tiles": [[0, 0, 2, 2996616827]]},
+  {"file": "update_pal1.bin", "kind": "update", "seq": 11, "t_ms": 123456, "status": 134348875, "owner": 0, "tiles": [[21, 1, 36, 3897059826]]},
+  {"file": "update_pal2.bin", "kind": "update", "seq": 12, "t_ms": 123456, "status": 134348875, "owner": 0, "tiles": [[42, 2, 72, 1004320483]]},
+  {"file": "update_rle16.bin", "kind": "update", "seq": 13, "t_ms": 123456, "status": 134348875, "owner": 0, "tiles": [[63, 3, 24, 173938052]]},
+  {"file": "update_raw.bin", "kind": "update", "seq": 14, "t_ms": 123456, "status": 134348875, "owner": 0, "tiles": [[299, 4, 512, 1378341707]]},
+  {"file": "key_split_*.bin", "kind": "keyframe", "parts": ["key_split_1.bin", "key_split_2.bin", "key_split_3.bin"], "seq_first": 100, "valid_count": 300, "frame_crc": 4160091878},
+  {"file": "refusal_busy.txt", "kind": "refusal"},
+  {"file": "refusal_not_loopback.txt", "kind": "refusal"}
+]}

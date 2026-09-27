@@ -436,6 +436,10 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
         app = create_app(engine, token=token, state_dir=state_dir, shutdown=request_shutdown,
                          allowed_hosts=host_allow_list(state_dir, listen))
         daemon = app.state.daemon
+        if demo and getattr(daemon, "settings", None) is not None:
+            # The demo's Settings: its own files only, no OS keyring, no real hub
+            # (ops.SettingsContext.demo; lane SET-UI-MERGE).
+            daemon.settings.demo = True
         # What a restart for an app update hands the next daemon (lane OTA-D).
         daemon.runtime = {"port": sock.getsockname()[1], "listen": listen,
                           "log_level": log_level, "pack_overrides": pack_overrides or {},

@@ -78,11 +78,16 @@ def _name(v: Any) -> str:
 def _between(lo: float, hi: float, unit: str = "") -> Any:
     def check(v: Any) -> str:
         return "" if lo <= v <= hi else f"must be {lo:g}..{hi:g}{unit}"
+    check.bounds = (lo, hi)            # type: ignore[attr-defined]  # SET-UI: the menu's range
     return check
 
 
 def _positive(v: Any) -> str:
     return "" if v > 0 else "must be more than 0"
+
+
+_positive.bounds = (0, None)            # type: ignore[attr-defined]  # SET-UI: more than 0
+_positive.min_exclusive = True          # type: ignore[attr-defined]
 
 
 def _window(v: Any) -> str:

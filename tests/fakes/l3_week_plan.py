@@ -148,6 +148,15 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("DELETE", "/settings/secrets/{key}"),
         ("POST", "/settings/test"),
     ),
+    # SET-UI: the Settings dialog's Hubs section (settings/hubs.py over HTTP), served in the
+    # mock by tests/fakes/settings_mock.py with the real routes, as settings_api is.
+    "hubs_api": (
+        ("GET", "/hubs"),
+        ("PUT", "/hubs/{name}"),
+        ("DELETE", "/hubs/{name}"),
+        ("POST", "/hubs/{name}/boards"),
+        ("POST", "/hubs/adopt"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles

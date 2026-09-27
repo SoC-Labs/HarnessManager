@@ -122,6 +122,8 @@ def register(ctx: RouteContext) -> None:
         sid, tester = ops.find_tester(sctx, section)
         if tester is None:
             return _JSON(ok(**testers.not_testable(sid, name)))
+        if sid == "hubs":
+            sctx.refuse_in_demo("Test connection")        # before the job (SET-UI-MERGE)
         if not tester.job:
             return _JSON(ok(**ops.test(sctx, sid, name, table)))
         testers.check(tester, name, table)            # a missing name: 400 before the job

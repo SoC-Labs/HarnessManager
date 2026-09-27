@@ -1,0 +1,2 @@
+# The board's wire vectors are fixtures, not build output (the root .gitignore ignores *.bin).
+!*.bin
