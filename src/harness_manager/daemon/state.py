@@ -34,9 +34,11 @@ LOOPBACK = "127.0.0.1"
 
 
 def default_state_dir() -> Path:
-    """The engine's rule: ``$HARNESS_MANAGER_STATE_DIR``, else ``~/.config/harness-manager``."""
-    base = os.environ.get("HARNESS_MANAGER_STATE_DIR")
-    return Path(base) if base else Path.home() / ".config" / "harness-manager"
+    """The engine's rule (``settings.files.config_dir``): the service's own state dir inside
+    a service, else ``$HARNESS_MANAGER_STATE_DIR``, else ``~/.config/harness-manager``."""
+    from harness_manager.settings.files import config_dir
+
+    return config_dir()
 
 
 def daemon_json_path(state_dir: Path) -> Path:

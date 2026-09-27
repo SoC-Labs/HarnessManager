@@ -41,7 +41,7 @@ from typing import Any
 
 from harness_manager.core.errors import RefusedError, UsageError
 
-from .files import BOARD_DEFAULTS, SettingsFiles, UserLayer
+from .files import BOARD_DEFAULTS, BOARD_OWN_KEYS, SettingsFiles, UserLayer
 from .packs import with_packs
 from .policy import MachinePolicy, load_machine_policy
 from .rows import CORE_ROWS
@@ -181,11 +181,18 @@ class Resolver:
         if spec.env and self.env.get(spec.env, "").strip():
             env_layer = [("env", f"${spec.env}", self.env[spec.env], True)]
         user_layer = []
-        if user_has:
+        if user_has and spec.owner == "dev":
+            # SET-WIRE: a developer seam is its variable only (SETTINGS.md §2), and nothing
+            # reads it from a file, so a file value is shown as ignored, never as in force.
+            problems.append(f"{self.layer.origin.get(key, 'settings.toml')}: {key} is a "
+                            f"developer seam ({_seam(spec)}); ignored")
+            user_has = False
+        elif user_has:
             user_layer.append(("user", self.layer.origin.get(key, "settings.toml"),
                                self.layer.values[key], False))
         parts = split_key(key)
-        if spec.collection == "boards" and parts[1] != BOARD_DEFAULTS:
+        if spec.collection == "boards" and parts[1] != BOARD_DEFAULTS \
+                and parts[2] not in BOARD_OWN_KEYS:     # what the board is: its own only
             dkey = join_key(("boards", BOARD_DEFAULTS, *parts[2:]))
             if dkey in self.layer.values:
                 user_layer.append(("user", f"{self.layer.origin.get(dkey, 'boards.toml')} "
@@ -285,6 +292,9 @@ class Resolver:
             raise UsageError(f"{key} is a secret: `harness-manager config set-secret {key}`")
         if spec.readonly:
             raise UsageError(f"{key} is not set here: {spec.doc}")
+        if spec.owner == "dev":
+            raise UsageError(f"{key} is a developer seam, not a setting: {_seam(spec)}",
+                             hint="the settings file would hold it, and nothing would read it")
         found, _, where = self.policy.lookup(self.policy.lock, key, spec.key)
         if found and spec.lockable and not spec.ceiling:     # a ceiling is a cap, not a lock
             raise RefusedError(f"{key} is set by the administrator's policy "
@@ -294,6 +304,9 @@ class Resolver:
         parts = split_key(key)
         if parts[0] == "boards" and parts[1] == BOARD_DEFAULTS and spec.collection != "boards":
             raise UsageError(f"{key}: boards.{BOARD_DEFAULTS} holds board settings only")
+        if parts[0] == "boards" and parts[1] == BOARD_DEFAULTS and parts[2] in BOARD_OWN_KEYS:
+            raise UsageError(f"{key}: a board's {parts[2]} is its own; boards.{BOARD_DEFAULTS} "
+                             "cannot hold it (power.config.load_boards never reads it there)")
         return key, coerce(spec, value, from_env=text)
 
     def set(self, key: str, value: Any, *, text: bool = False) -> Resolved:
@@ -367,6 +380,12 @@ class Resolver:
     def _named(self, pattern: list[str]) -> list[str]:
         """The user's keys that fill a pattern's ``*`` parts, sorted."""
         return sorted(k for k in self.layer.values if matches(pattern, split_key(k)))
+
+
+def _seam(spec: Setting) -> str:
+    """How a developer seam is set: its variable, else the pack's kwargs."""
+    return f"set ${spec.env}" if spec.env else \
+        "the pack's own value, set with the service's --pack-overrides"
 
 
 def _lowest(spec: Setting, a: Any, b: Any, problems: list[str], path: str) -> Any:

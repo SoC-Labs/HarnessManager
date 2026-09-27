@@ -67,7 +67,6 @@ from .constants import (
     DEFAULT_SHELL_HOST,
     DUT_CONSOLE_PACE_S,
     JTAG_RBB_PORT,
-    OPENOCD_CFG_DIR,
     PACED_CONSOLES,
     PUSH_PORT,
     XVC_PORT,
@@ -163,7 +162,12 @@ class Mps3Debug:
         )
 
     def openocd_search_paths(self) -> tuple[Path, ...]:
-        return (OPENOCD_CFG_DIR,) if OPENOCD_CFG_DIR else ()
+        # SET-WIRE: the setting (its variable, then the settings), not the import-time copy
+        # (SETTINGS.md §12.9), so the search path and config_dir() never disagree.
+        from .openocd import config_dir
+
+        cfg = config_dir()
+        return (cfg,) if cfg else ()
 
     def openocd_config(self) -> tuple[str, ...]:
         ident = self._session.identity()
@@ -420,9 +424,13 @@ class Mps3Pack(BoardPack):
             host, port = parse_endpoint(eth.address, CONTROL_PORT)
             shell = Mps3Shell(host, port)
         try:
+            # mps3.console.pace_ms (reopen): the settings, else this pack's own pace
+            from .settings import configured_s
+
+            pace_s = configured_s("mps3.console.pace_ms", self._console_pace_s)
             return Mps3Session(candidate, shell, console_ports, rbb_port,
                                push_port=push_port, tftp_port=tftp_port,
-                               console_pace_s=self._console_pace_s, reach=reach)
+                               console_pace_s=pace_s, reach=reach)
         except BaseException:
             if reach is not None:
                 reach.close()

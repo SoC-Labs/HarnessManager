@@ -118,6 +118,15 @@ class UpdateService:
         # HUB-SD (U8): the config SD A/B by pointer, off until the 10-minute board check
         # (``updates.sd_ab``); None reads the setting when an install asks.
         self._sd_ab = sd_ab
+        # SET-WIRE: a token stored or cleared through the settings applies to the next
+        # download, not after a restart (updates.github_token is a live row).
+        if self.bus is not None and hasattr(self.bus, "subscribe"):
+            self.bus.subscribe("settings.changed", self._on_settings_changed)
+
+    def _on_settings_changed(self, event: Any) -> None:
+        keys = (getattr(event, "data", None) or {}).get("keys") or ()
+        if "updates.github_token" in keys and hasattr(self.downloader, "forget_token"):
+            self.downloader.forget_token()
 
     # -- parts --
 

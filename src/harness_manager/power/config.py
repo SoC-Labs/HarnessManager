@@ -1,8 +1,17 @@
 """Per-board add-on settings: ``boards.toml``.
 
-The file lives in the state directory (``$HARNESS_MANAGER_STATE_DIR``, else
-``~/.config/harness-manager``; the engine's rule, ``harness_manager.engine.resolve_state_dir``).
-A missing file is not an error: it means "nothing configured".
+The file lives in the state directory (the engine's rule,
+``harness_manager.engine.resolve_state_dir`` = ``settings.files.config_dir``: the service's own
+state dir inside a ``--state-dir``/``--demo`` service, else ``$HARNESS_MANAGER_STATE_DIR``,
+else ``~/.config/harness-manager``). A missing file is not an error: it means "nothing
+configured".
+
+``[boards.defaults]`` (lane SET-WIRE; the settings resolver's board layer, SETTINGS.md §4.2)
+holds values for every board: a board's own table wins key by key, then the defaults, then
+the reader's own default. ``match`` and ``name`` are the board's own and never come from it.
+A table whose presence turns something on (``power``: a meter; ``hub``: a hub route;
+``sysmon``, ``estimates``) is never added by the defaults: they fill in the keys of that
+table when the board has one.
 
 Schema (every table is optional)::
 
@@ -49,6 +58,12 @@ from harness_manager.core.model import Candidate, Link, LinkKind
 log = logging.getLogger(__name__)
 
 BOARDS_FILE = "boards.toml"
+#: ``[boards.defaults]``: every board's defaults (``settings.files.BOARD_DEFAULTS``).
+BOARD_DEFAULTS = "defaults"
+#: A board's own keys: what the board is, never a default for another.
+OWN_KEYS = ("match", "name")
+#: Tables whose presence turns a feature on: the defaults only fill in the board's own.
+SWITCH_TABLES = ("power", "hub", "sysmon", "estimates")
 KINDS = ("shelly_gen2", "tasmota", "netio", "ina260_mcp2221")
 HTTP_KINDS = ("shelly_gen2", "tasmota", "netio")
 DEFAULT_OUTLET = {"shelly_gen2": 0, "tasmota": 1, "netio": 1}
@@ -176,13 +191,33 @@ def load_boards(path: Path | None = None) -> BoardsConfig:
     boards = data.get("boards", {})
     if not isinstance(boards, dict):
         raise ConfigError(f"{path}: [boards] must be a table of board tables")
+    defaults = boards.get(BOARD_DEFAULTS, {})
+    if not isinstance(defaults, dict):
+        raise ConfigError(f"{path}: boards.{BOARD_DEFAULTS} must be a table")
+    defaults = {k: v for k, v in defaults.items() if k not in OWN_KEYS}
     out: list[BoardConfig] = []
     for key, table in boards.items():
+        if key == BOARD_DEFAULTS:
+            continue
         if not isinstance(table, dict):
             raise ConfigError(f"{path}: boards.{key!r} must be a table")
-        out.append(_board(path, key, table))
+        own = {k: v for k, v in defaults.items() if k not in SWITCH_TABLES or k in table}
+        out.append(_board(path, key, with_defaults(table, own)))
     _warn_if_readable(path, data)
     return BoardsConfig(tuple(out), path)
+
+
+def with_defaults(own: dict[str, Any], defaults: Mapping[str, Any]) -> dict[str, Any]:
+    """The board's table over ``[boards.defaults]``, key by key (tables merge, the board's
+    own value wins; a list or a value is replaced whole): the resolver's board layer."""
+    if not defaults:
+        return own
+    out = dict(defaults)
+    for k, v in own.items():
+        base = out.get(k)
+        out[k] = with_defaults(v, base) if isinstance(v, dict) and isinstance(base, dict) \
+            else v
+    return out
 
 
 def _board(path: Path, key: str, table: dict[str, Any]) -> BoardConfig:

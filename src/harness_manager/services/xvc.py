@@ -757,20 +757,24 @@ def _is_file(path: Path) -> bool:
         return False
 
 
-def find_hw_server() -> str:
-    """The hw_server of the user's Vivado: ``$HARNESS_MANAGER_HW_SERVER``, else the one next to
+def find_hw_server(state_dir: Path | str | None = None) -> str:
+    """The hw_server of the user's Vivado: the setting ``tools.hw_server``
+    (``$HARNESS_MANAGER_HW_SERVER``, then the settings: lane SET-WIRE), else the one next to
     ``vivado`` on PATH, else ``$XILINX_VIVADO/bin``, else ``hw_server`` on PATH (a Lab Edition).
 
     Never a remote one (the hub's shared 3121 is another Vivado release).
     """
-    env = os.environ.get(HW_SERVER_ENV, "").strip()
-    if env:
-        if _is_file(Path(env)):
-            return str(Path(env))
-        found = shutil.which(env)
+    from harness_manager.settings import runtime
+
+    r = runtime.resolved("tools.hw_server", state_dir=state_dir)     # HW_SERVER_ENV first
+    configured = r.value
+    if configured:
+        if _is_file(Path(configured)):
+            return str(Path(configured))
+        found = shutil.which(configured)
         if found:
             return found
-        raise UnavailableError(CAPABILITY, f"{HW_SERVER_ENV}={env} does not exist")
+        raise UnavailableError(CAPABILITY, f"{runtime.said(r)} does not exist")
     vivado = shutil.which("vivado")
     if vivado:
         for d in dict.fromkeys((Path(vivado).parent, Path(vivado).resolve().parent)):
@@ -1095,8 +1099,9 @@ class XvcService:
         sd = getattr(self.engine, "state_dir", None)
         if sd is not None:
             return Path(sd)
-        env = os.environ.get(STATE_DIR_ENV)
-        return Path(env) if env else Path.home() / ".config" / "harness-manager"
+        from harness_manager.settings.files import config_dir  # the one rule (SET-WIRE)
+
+        return config_dir()
 
     @property
     def registry_dir(self) -> Path:
@@ -1214,10 +1219,15 @@ class XvcService:
     # -- ports -------------------------------------------------------------------------------
 
     def _pinned_base(self) -> int | None:
+        """``port_base``, else the setting ``debug.xvc_port_base``
+        (``$HARNESS_MANAGER_XVC_PORT_BASE``, then the settings as the service started: a
+        ``restart`` row); 0 or unset: none."""
         if self.port_base is not None:
             return self.port_base
-        env = os.environ.get(PORT_BASE_ENV)
-        return int(env) if env else None
+        from harness_manager.settings import runtime
+
+        base = runtime.value("debug.xvc_port_base", state_dir=self.state_dir)  # PORT_BASE_ENV
+        return base or None
 
     def _candidates(self, board_id: str) -> Iterator[XvcPorts]:
         pinned = self._pinned_base()
@@ -1397,7 +1407,7 @@ class XvcService:
         reason = str(adapter.xvc_reason() or "")
         if reason:
             raise UnavailableError(CAPABILITY, reason)
-        binary = "" if byo else (self.hw_server_binary or find_hw_server())
+        binary = "" if byo else (self.hw_server_binary or find_hw_server(self.state_dir))
         return adapter, ident, binary
 
     def open(self, session: BoardSession, *, byo: bool = False) -> XvcStatus:

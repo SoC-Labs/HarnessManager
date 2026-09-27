@@ -32,7 +32,6 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import logging
-import os
 import threading
 import weakref
 from dataclasses import dataclass
@@ -79,13 +78,12 @@ _PROCESS_HOLDERS_LOCK = threading.Lock()
 
 
 def resolve_state_dir(config: EngineConfig | None = None) -> Path:
-    """``config.state_dir``, else ``$HARNESS_MANAGER_STATE_DIR``, else ``~/.config/harness-manager``."""
-    if config is not None and config.state_dir is not None:
-        return Path(config.state_dir)
-    env = os.environ.get(STATE_DIR_ENV)
-    if env:
-        return Path(env)
-    return Path.home() / ".config" / "harness-manager"
+    """``config.state_dir``, else the service's own (a ``--state-dir``/``--demo`` service),
+    else ``$HARNESS_MANAGER_STATE_DIR``, else ``~/.config/harness-manager``: the one rule,
+    ``settings.files.config_dir`` (SET-WIRE)."""
+    from harness_manager.settings.files import config_dir
+
+    return config_dir(config.state_dir if config is not None else None)
 
 
 @dataclass

@@ -77,7 +77,7 @@ def channel_url(source: str | None, channel: str, catalog: str | None = None) ->
     """Where ``channel.json`` is: a URL template with ``{channel}`` (and ``{catalog}``), a
     base URL ending in ``/``, a file URL, a local directory/file (a mirror), or a
     ``github:OWNER/REPO`` source (the rolling ``channel-<catalog>-<channel>`` release)."""
-    src = (source or os.environ.get(SOURCE_ENV, "") or DEFAULT_SOURCE).strip()
+    src = (source or _source_setting() or DEFAULT_SOURCE).strip()
     gh = github.source_url(src, channel, catalog)
     if gh is not None:
         return gh
@@ -101,7 +101,19 @@ def channel_url(source: str | None, channel: str, catalog: str | None = None) ->
     return src
 
 
+def _source_setting() -> str:
+    """The setting ``updates.source``: ``SOURCE_ENV``, then the Settings menu /
+    ``settings.toml``, then the admin's ``[default]`` (lane SET-WIRE)."""
+    from harness_manager.settings import runtime
+
+    return str(runtime.value("updates.source") or "")
+
+
 def default_channel() -> str:
+    """The channel when a caller names none (a harness catalogue; the app's checker passes
+    the user's own, ``selfupdate.effective``). Deliberately the variable only, not the whole
+    ``updates.channel`` row: that row's file value is the APP's channel (the Updates card),
+    and reading it here would move every harness check onto it (lane SET-WIRE)."""
     return os.environ.get(CHANNEL_ENV, "").strip() or DEFAULT_CHANNEL
 
 

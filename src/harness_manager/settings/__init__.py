@@ -1,7 +1,8 @@
 """Harness Manager's settings: one schema, one resolver, the files and the secret store.
 
-Lane SET-CORE (``docs/design/SETTINGS.md``; david's decisions S1-S4, 2026-09-25). Nothing
-in the app reads settings through here yet: SET-WIRE switches the ``os.environ`` readers.
+Lane SET-CORE (``docs/design/SETTINGS.md``; david's decisions S1-S4, 2026-09-25). The app
+reads its settings through ``runtime`` (lane SET-WIRE): each former ``os.environ`` reader
+asks ``runtime.value(key)``, so the variable still wins and ``settings.toml`` speaks below it.
 
 - ``schema``: ``Setting`` rows and ``Schema`` (a pack adds its rows: SET-PACK);
 - ``packs``: a board pack's rows (``BoardPack.settings()``) and its defaults, the pack layer;
@@ -9,7 +10,8 @@ in the app reads settings through here yet: SET-WIRE switches the ``os.environ``
 - ``policy``: the admin policy's ``[lock]``, ``[default]``, ``[hubs.*]`` and U6's keys;
 - ``files``: ``settings.toml`` and ``boards.toml`` (tomlkit, 0600, the migration);
 - ``secrets``: the OS keyring, the 0600 file fallback and the index;
-- ``resolve``: the precedence, and ``set``/``unset``.
+- ``resolve``: the precedence, and ``set``/``unset``;
+- ``runtime``: a value where it is used (cached per process; ``live``/``reopen``/``restart``).
 
     >>> r = Resolver.load()                       # the real files, env and policy
     >>> r.resolve("tools.openocd").view()         # value, source, shadowed, locked, ...

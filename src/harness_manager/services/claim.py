@@ -16,7 +16,6 @@ the ``ssh -J HUB root@BOARD`` reach). This service adds the rules every front en
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -50,8 +49,9 @@ class ClaimService:
         sd = getattr(self.engine, "state_dir", None)
         if sd is not None:
             return Path(sd)
-        env = os.environ.get(STATE_DIR_ENV)
-        return Path(env) if env else Path.home() / ".config" / "harness-manager"
+        from harness_manager.settings.files import config_dir  # the one rule (SET-WIRE)
+
+        return config_dir()
 
     @staticmethod
     def adapter(session: Any) -> Any:

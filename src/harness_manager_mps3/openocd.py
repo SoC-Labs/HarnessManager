@@ -43,7 +43,6 @@ Three rules from the configs themselves:
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,11 +96,14 @@ def design_debug(design: int) -> DesignDebug:
 
 
 def config_dir() -> Path | None:
-    """``$HARNESS_MANAGER_MPS3_OPENOCD_DIR`` (read at call time), else ``OPENOCD_CFG_DIR``:
-    the platform repo's when it is checked out alongside, else the packaged copy."""
-    env = os.environ.get(CFG_DIR_ENV)
-    if env:
-        return Path(env)
+    """The setting ``mps3.openocd_cfg_dir``, read at call time: ``CFG_DIR_ENV``, then the
+    Settings menu / ``settings.toml`` (lane SET-WIRE); else ``OPENOCD_CFG_DIR``: the
+    platform repo's when it is checked out alongside, else the packaged copy."""
+    from .settings import value
+
+    configured = value("mps3.openocd_cfg_dir")      # CFG_DIR_ENV first
+    if configured:
+        return Path(configured)
     return OPENOCD_CFG_DIR
 
 

@@ -3,7 +3,8 @@
 The page is the same one ``harness-manager ui`` opens in a browser tab. Only the
 window differs. The launcher tries, in order:
 
-1. ``$HARNESS_MANAGER_APP_BROWSER``: a Chromium-family executable the user names;
+1. the setting ``general.app_browser`` (``$HARNESS_MANAGER_APP_BROWSER``, then the Settings
+   menu / ``settings.toml``): a Chromium-family executable the user names;
 2. pywebview (the optional ``app`` extra): a native window, using WebView2 on
    Windows, WKWebView on macOS, and GTK/Qt WebKit on Linux. It runs in this
    process and returns when the window closes;
@@ -64,9 +65,21 @@ class Launched:
     pid: int | None = None
 
 
+def named_app_browser() -> str:
+    """The setting ``general.app_browser``: ``ENV_APP_BROWSER``, then the Settings menu /
+    ``settings.toml`` (lane SET-WIRE); "" when neither names one. A settings file that
+    cannot be read names none (the window still opens)."""
+    try:
+        from harness_manager.settings import runtime
+
+        return str(runtime.value("general.app_browser") or "").strip()
+    except Exception:  # noqa: BLE001 - never worth failing to open the window
+        return os.environ.get(ENV_APP_BROWSER, "").strip()
+
+
 def find_app_browser(which: Callable[[str], str | None] = shutil.which) -> str | None:
     """The Chromium-family executable to use for app mode, or None."""
-    named = os.environ.get(ENV_APP_BROWSER, "").strip()
+    named = named_app_browser()
     if named:
         return named if (Path(named).is_file() or which(named)) else None
     for name in PATH_NAMES:
@@ -133,7 +146,7 @@ def open_window(url: str, profile_dir: Path, *, native: bool = True,
                 which: Callable[[str], str | None] = shutil.which,
                 browser_open: Callable[[str], bool] = webbrowser.open) -> Launched:
     """Open ``url`` as an application window; say how (see the module docstring)."""
-    named = os.environ.get(ENV_APP_BROWSER, "").strip()
+    named = named_app_browser()
     notes: list[str] = []
     if native and not named:
         got = _try_pywebview(url)

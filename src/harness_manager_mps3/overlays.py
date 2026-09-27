@@ -310,8 +310,11 @@ def _overlay_dirs(directory: Path) -> list[Path]:
 
 
 def env_overlay_dirs() -> list[Path]:
-    raw = os.environ.get(OVERLAY_DIRS_ENV, "")
-    return [Path(p) for p in raw.split(os.pathsep) if p.strip()]
+    """The setting ``mps3.overlay_dirs``, read at each load: ``OVERLAY_DIRS_ENV`` (split on
+    ``os.pathsep``), else the Settings menu / ``settings.toml`` (lane SET-WIRE)."""
+    from .settings import value
+
+    return [Path(p) for p in value("mps3.overlay_dirs") if str(p).strip()]   # OVERLAY_DIRS_ENV
 
 
 # --- the catalogue --------------------------------------------------------------------
@@ -533,9 +536,10 @@ _default: tuple[str, OverlayCatalogue] | None = None
 
 
 def default_catalogue() -> OverlayCatalogue:
-    """A process-wide catalogue over ``$HARNESS_MANAGER_MPS3_OVERLAY_DIRS``, rebuilt when it changes."""
+    """A process-wide catalogue over the setting ``mps3.overlay_dirs``
+    (``$HARNESS_MANAGER_MPS3_OVERLAY_DIRS``, then the settings), rebuilt when it changes."""
     global _default
-    key = os.environ.get(OVERLAY_DIRS_ENV, "")
+    key = os.pathsep.join(str(d) for d in env_overlay_dirs())      # OVERLAY_DIRS_ENV
     if _default is None or _default[0] != key:
         _default = (key, OverlayCatalogue())
     return _default[1]

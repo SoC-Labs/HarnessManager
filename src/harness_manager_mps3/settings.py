@@ -6,11 +6,16 @@
 The Settings menu, ``harness-manager config`` and the API draw them; the core has no MPS3
 code for them.
 
-**Nothing reads a value through these rows yet.** The pack still reads its variables from
-``os.environ`` and still validates its own ``boards.toml`` tables (``hub.parse_hub_table``,
-``xvc.xvc_config``, ``sysmon.make_sysmon_reader``, ``telemetry._estimates_from``). Switching
-the readers to the resolver is lane SET-WIRE. Every default here comes from the constant the
-reader uses today, so the two cannot drift; ``READ_AT`` names where each value is read
+**Reading them (lane SET-WIRE).** ``value(key)`` is the pack's reader: the resolver's value
+for an ``mps3.*`` row, so ``mps3.openocd_cfg_dir`` and ``mps3.overlay_dirs`` take the
+Settings menu / ``settings.toml`` where their variable is not set. The developer seams
+(``owner="dev"``: the identify, push, TFTP and XVC ports, ``tunnelled``) stay variables only,
+as the design says (SETTINGS.md §2: env-only rows). The board tables are still validated by
+the pack's own parsers (``hub.parse_hub_table``, ``xvc.xvc_config``,
+``sysmon.make_sysmon_reader``, ``telemetry._estimates_from``), over the table
+``power.config.load_boards`` gives them: the board's own, over ``[boards.defaults]``, from
+the service's own config dir. Every default here comes from the constant the reader uses,
+so the two cannot drift; ``READ_AT`` names where each value is read
 (``harness_manager_mps3/<file>:<line>``, checked by ``tests/unit/test_settings_pack.py``).
 
 **Pack defaults.** A row's default is this pack instance's value: ``Mps3Pack(console_pace_s=0)``
@@ -39,6 +44,39 @@ from harness_manager.settings.schema import Setting
 from . import constants as _c
 
 PACK = "mps3"
+
+
+def value(key: str, *, state_dir: Any = None) -> Any:
+    """An ``mps3.*`` row's value where it is read (``settings.runtime.value`` with this pack's
+    rows): the variable, then the Settings menu / ``settings.toml``, then the admin's
+    ``[default]``, then the pack's default."""
+    return resolved(key, state_dir=state_dir).value
+
+
+def resolved(key: str, *, state_dir: Any = None) -> Any:
+    """``value``'s row, with where it came from (``settings.runtime.resolved``)."""
+    from harness_manager.settings import runtime
+
+    runtime.add_rows(_rows(), pack=PACK)
+    return runtime.resolved(key, state_dir=state_dir)
+
+
+def configured_s(key: str, own: float) -> float:
+    """A pacing row (``*_ms``) in seconds, where someone set it (the admin's lock or
+    ``[default]``, the Settings menu); else ``own``: this pack instance's value (its kwarg,
+    ``--pack-overrides``), which is the row's pack layer. Read when a board opens (reopen)."""
+    r = resolved(key)
+    return own if r.source in ("pack", "default") else r.value / 1000.0
+
+
+_ROWS: list[tuple[Setting, ...]] = []
+
+
+def _rows() -> tuple[Setting, ...]:
+    """This pack's rows with its default kwargs, built once (the readers' defaults)."""
+    if not _ROWS:
+        _ROWS.append(mps3_rows())
+    return _ROWS[0]
 
 #: Where each value is read today, by key: ``file:line`` under ``harness_manager_mps3/``.
 #: Filled as the rows are built (``mps3_rows``). SET-WIRE switches these readers.
@@ -129,20 +167,20 @@ def mps3_rows(*, console_pace_s: float = _c.DUT_CONSOLE_PACE_S,
 def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: int,
                mcc_pace_s: float, share_pace_s: float) -> tuple[Setting, ...]:
     return (
-        # T2 (also frozen at import, constants.py:113; SETTINGS.md §12.9: SET-WIRE drops it)
+        # T2 (read at each use: SET-WIRE dropped the import-time copy, SETTINGS.md §12.9)
         _row("mps3.openocd_cfg_dir", "path", "", "Tools",
              "OpenOCD's MPS3 target configs (empty: the platform checkout beside Harness "
-             "Manager, else the packaged copy)", at="openocd.py:102",
+             "Manager, else the packaged copy)", at="openocd.py:104",
              scope="machine", owner="admin", env="HARNESS_MANAGER_MPS3_OPENOCD_DIR",
              advanced=True),
         # K7 (the core's --overlay-dir puts directories first: cli/cmd_program.py:23-25)
         _row("mps3.overlay_dirs", "list", [], "Harness + kits",
-             "Extra overlay directories, searched first", at="overlays.py:313",
+             "Extra overlay directories, searched first", at="overlays.py:317",
              env="HARNESS_MANAGER_MPS3_OVERLAY_DIRS", env_split="pathsep"),
-        # C1: the pack's kwarg console_pace_s (pack.py:308), paced consoles constants.py:32
+        # C1: the pack's kwarg console_pace_s (pack.py:318), paced consoles constants.py:31
         _row("mps3.console.pace_ms", "int", round(console_pace_s * 1000), "Consoles",
              "Delay between characters typed into the DUT's UARTs (0: none; the nanoSoC "
-             "UART has no receive FIFO)", at="pack.py:314", scope="pack", apply="reopen",
+             "UART has no receive FIFO)", at="pack.py:318", scope="pack", apply="reopen",
              check=_ms(0, 500)),
         # C2: MccTiming.pace_s over the Debug USB; SHARE_PACE_S across a hub share
         _row("mps3.mcc.pace_ms", "int", round(mcc_pace_s * 1000), "Consoles",
@@ -153,9 +191,9 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              "Delay between characters sent to the MCC across a hub share",
              at="mcc.py:140", scope="pack", apply="reopen", advanced=True,
              check=_ms(50, 1000, " (the MCC drops faster input)")),
-        # D4: the pack's kwarg rbb_port (pack.py:306), via --pack-overrides only
+        # D4: the pack's kwarg rbb_port (pack.py:316), via --pack-overrides (daemon start passes it on)
         _row("mps3.rbb_port", "int", rbb_port, "Debug",
-             "The board's remote_bitbang JTAG port", at="pack.py:312", scope="pack",
+             "The board's remote_bitbang JTAG port", at="pack.py:316", scope="pack",
              owner="dev", apply="restart", check=_port),
         # D5
         _row("mps3.xvc_port", "int", _c.XVC_PORT, "Debug",

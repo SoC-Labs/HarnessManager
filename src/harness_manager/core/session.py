@@ -26,10 +26,11 @@ from .errors import ActionFailedError, HeldError
 
 
 def default_lock_dir() -> Path:
-    base = os.environ.get("HARNESS_MANAGER_STATE_DIR")
-    if base:
-        return Path(base) / "locks"
-    return Path.home() / ".config" / "harness-manager" / "locks"
+    """``locks/`` in the state dir: the one rule, ``settings.files.config_dir`` (the service's
+    own, else ``$HARNESS_MANAGER_STATE_DIR``, else ``~/.config/harness-manager``)."""
+    from harness_manager.settings.files import config_dir
+
+    return config_dir() / "locks"
 
 
 def _safe_name(board_id: str) -> str:

@@ -224,6 +224,13 @@ def lock_names(lock_text: str) -> set[str]:
     return names
 
 
+def _uv_setting(state_dir: Path | str | None = None) -> str:
+    """The setting ``tools.uv``: ``UV_ENV``, then the Settings menu / ``settings.toml``."""
+    from harness_manager.settings import runtime
+
+    return str(runtime.value("tools.uv", state_dir=state_dir) or "").strip()
+
+
 @dataclass
 class AppUpdater:
     layout: AppLayout
@@ -256,7 +263,8 @@ class AppUpdater:
                        state_dir=Path(state_dir), **kw)
         info = _launch.read_json(root / _launch.INSTALL_JSON) or {}
         uv = str(info.get("uv") or "")
-        if os.environ.get(UV_ENV, "").strip() or not uv or not Path(uv).exists():
+        # tools.uv (UV_ENV, then the settings) beats the installer's record (find_uv)
+        if _uv_setting(state_dir) or not uv or not Path(uv).exists():
             uv = ""
         extras = tuple(e for e in info.get("extras") or () if isinstance(e, str))
         return cls(AppLayout(root), LocalBusyProbe(state_dir), uv=uv or None, extras=extras,
@@ -297,7 +305,9 @@ class AppUpdater:
         self._save(st)
 
     def find_uv(self) -> str:
-        cand = self.uv or os.environ.get(UV_ENV, "").strip() or shutil.which("uv")
+        """The installer's uv (unless the setting names one), else the setting ``tools.uv``
+        (``$HARNESS_MANAGER_UV``, then the settings: lane SET-WIRE), else uv on PATH."""
+        cand = self.uv or _uv_setting(self.state_dir) or shutil.which("uv")
         if not cand:
             raise UnavailableError("app self-update",
                                    "needs `uv` (https://docs.astral.sh/uv/) on PATH, or $HARNESS_MANAGER_UV")

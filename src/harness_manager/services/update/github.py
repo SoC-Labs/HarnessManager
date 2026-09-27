@@ -170,6 +170,15 @@ def gh_cli_token(*, runner: Runner | None = None, gh: str | None = None) -> str 
 
 def resolve_token(env: Mapping[str, str] | None = None, *, runner: Runner | None = None,
                   gh: str | None = None) -> str | None:
-    """The GitHub token: ``$HARNESS_MANAGER_GITHUB_TOKEN``, else ``gh auth token``."""
-    tok = (env if env is not None else os.environ).get(TOKEN_ENV, "").strip()
-    return tok or gh_cli_token(runner=runner, gh=gh)
+    """The GitHub token, the setting ``updates.github_token`` (lane SET-WIRE):
+    ``$HARNESS_MANAGER_GITHUB_TOKEN`` (in ``env`` when given), else the one the user stored
+    (``harness-manager config set-secret updates.github_token``: the OS keyring or a 0600
+    file) or referenced in ``settings.toml``, else ``gh auth token``.
+
+    A token stored where this process cannot reach (a keyring over ssh) raises
+    ``UnreachableError`` rather than quietly using ``gh``'s."""
+    from harness_manager.settings import runtime
+
+    got = runtime.secret("updates.github_token", env_var=TOKEN_ENV, env=env,
+                         legacy=[("gh", lambda: gh_cli_token(runner=runner, gh=gh))])
+    return got.value if got is not None and got.value else None
