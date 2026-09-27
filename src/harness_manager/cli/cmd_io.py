@@ -294,6 +294,12 @@ def cmd_debug(ctx: Ctx) -> int:
     a = ctx.args
     action = a.debug_cmd
     note = hold_note("debug up") if action == "up" else ""
+    if action in ("up", "detect"):
+        # DEBUG-OCD: an OpenOCD without the board's adapter is refused before the board
+        # (and its SSH tunnel) is opened. Local engines only: the daemon checks its own.
+        check = getattr(ctx.engine.debug, "openocd", None)
+        if callable(check):
+            check()
     with ctx.board(note=note) as (cand, session):
         svc = ctx.engine.debug
         if action == "detect":
@@ -308,9 +314,17 @@ def cmd_debug(ctx: Ctx) -> int:
                 f"the debug server for {cand.board_id} failed to start: "
                 f"{st.detail or 'no detail given'}",
                 hint="`harness-manager debug status TARGET` shows the last state"), status=st)
-        ctx.emit(Result("debug up|down|status", {"board_id": cand.board_id, "status": st},
-                        rows=[_status_row(cand.board_id, st)],
-                        human=_status_human(cand.board_id, st)))
+        data: dict[str, Any] = {"board_id": cand.board_id, "status": st}
+        human = _status_human(cand.board_id, st)
+        report = getattr(svc, "openocd_report", None)
+        ocd = report(session) if action == "status" and callable(report) else None
+        if ocd:                                         # the adapter verdict (DEBUG-OCD)
+            data["openocd"] = ocd
+            human.append(f"openocd    {ocd.get('detail', '')}")
+            if ocd.get("hint"):
+                human.append(f"           fix: {ocd['hint']}")
+        ctx.emit(Result("debug up|down|status", data,
+                        rows=[_status_row(cand.board_id, st)], human=human))
         if action == "up":
             # The engine stops a board's debug server when its session closes, so this
             # process IS the server's owner: hold until Ctrl-C, `detach`, or --for.

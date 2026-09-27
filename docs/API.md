@@ -64,7 +64,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `GET /boards/{bid}/consoles` | `consoles.names` | `{names}` |
 | `WS /boards/{bid}/consoles/{name}` | `consoles.subscribe` | binary frames both ways (bytes from and to the board); text frame `{"state":...}` on a state change |
 | `POST /boards/{bid}/consoles/{name}/export` `{port?}` | `consoles.export_tcp` | `{host, port}` |
-| `GET /boards/{bid}/debug` · `POST .../debug/detect` · `POST .../debug/up` · `POST .../debug/down` | `debug.status`/`detect`/`up`/`down` | `DebugStatus` / `{idcode}` / 202 job / `DebugStatus` |
+| `GET /boards/{bid}/debug` · `POST .../debug/detect` · `POST .../debug/up` · `POST .../debug/down` | `debug.status`/`detect`/`up`/`down` | `DebugStatus` (GET adds `openocd: {ok, path, need, adapters, detail, hint}`: the OpenOCD this service would run and whether it has remote_bitbang) / `{idcode}` / 202 job / `DebugStatus` |
 | `GET /boards/{bid}/controller/temps` · `/osc` | `session.controller.temperatures`/`oscillators` | `{readings}` |
 | `POST /boards/{bid}/controller/reboot` `{wait_s?, force?, consent?}` | `session.controller.reboot` | 202 job; the result is the evidence. SLOT-TIMING: the job fails HELD (naming the card job) while the board's OS-slot card job is `writing` or `verifying`; `force: true` with `consent: "RESET <bid>"` resets anyway (the recovery of a job that never ends), else REFUSED |
 | `POST /boards/{bid}/controller/command` `{line, arm?}` | `session.controller.command` | `{reply}` (allowlist enforced by the adapter) |

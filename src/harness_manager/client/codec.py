@@ -168,7 +168,7 @@ def error_from_json(err: dict[str, Any]) -> HarnessError:
         exc = HeldError(message, holder=str(err.get("holder") or ""), hint=hint)
     elif cls is UnavailableError:
         exc = UnavailableError(str(err.get("capability") or "?"),
-                               str(err.get("reason") or message))
+                               str(err.get("reason") or message), hint=hint)
     else:
         exc = cls(message, hint=hint)
         if cls is HarnessError:

@@ -69,11 +69,16 @@ arrives as an fpgahub TTY share, reached through a second forward.
    hub = { host = "mapstone-dev.ecs.soton.ac.uk", target = "mps3_01_pl" }
    EOF
    ```
-3. Point the app at OpenOCD, which is not on PATH on srv03335:
+3. Point the app at OpenOCD, which is not on PATH on srv03335. Use xPack OpenOCD
+   0.12, the build the lab hub uses. Do not use the SoC Labs build
+   (`~/SoCLabs/soclabs-openocd`): it has only jlink, buspirate and hostio4, no
+   remote_bitbang, so `debug up` refuses it (exit 12, naming it and its adapters).
    ```bash
-   export HARNESS_MANAGER_OPENOCD=$HOME/SoCLabs/soclabs-openocd/install/bin/openocd
+   export HARNESS_MANAGER_OPENOCD=$HOME/opt/xpack-openocd/xpack-openocd-0.12.0-7/bin/openocd
    export HARNESS_MANAGER_MPS3_OPENOCD_DIR=$HOME/SoCLabs/mps3-nanosoc-platform/host/openocd
+   $HARNESS_MANAGER_OPENOCD -c "adapter list" -c shutdown 2>&1 | grep remote_bitbang
    ```
+   Expected: a `remote_bitbang { jtag swd }` line.
 4. Check that ssh to the hub works without a prompt. The tunnel uses
    `BatchMode`, so a prompt would fail it.
    ```bash

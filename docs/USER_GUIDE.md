@@ -637,8 +637,20 @@ debug (XVC)** for ILAs in the partition.
 
 ### 8.1 The DUT CPU: OpenOCD and gdb
 
-**Needs:** OpenOCD 0.12 or later on your PATH (its remote_bitbang adapter is on by
-default). The MPS3 target configs ship with Harness Manager.
+**Needs:** OpenOCD 0.12 or later, built with the **remote_bitbang** adapter, on your PATH
+or in `tools.openocd`. The MPS3 target configs ship with Harness Manager.
+
+Most builds have remote_bitbang, but not all: the SoC Labs build has only jlink, buspirate
+and hostio4. Check yours (it loads no config and touches no hardware):
+
+```bash
+openocd -c "adapter list" -c shutdown 2>&1 | grep remote_bitbang
+```
+
+No line means no remote_bitbang. We recommend **xPack OpenOCD 0.12** (the build the lab hub
+uses). HM checks this itself before it starts OpenOCD: a configured OpenOCD without
+remote_bitbang is refused, and with none configured HM takes the first `openocd` on PATH
+that has it. `debug status` shows which one it would use.
 
 **In the app:** **Detect** reads the TAP IDCODE only: no reset, no halt, no register
 written. **Open session** starts OpenOCD for the loaded design; **Connection** shows the
@@ -651,7 +663,7 @@ Debug tile has **Start** and **Stop**.
 |---|---|
 | `debug detect TARGET` | the TAP IDCODE (exit 13: the design has no debug port) |
 | `debug up TARGET` | start OpenOCD, print the ports, hold until Ctrl-C |
-| `debug status TARGET` | state, ports, config, pid |
+| `debug status TARGET` | state, ports, config, pid, and which OpenOCD (does it have remote_bitbang?) |
 | `debug down TARGET` | stop it |
 
 Connect gdb with `target extended-remote 127.0.0.1:<gdb port>`. Arm DS uses the same port
@@ -666,6 +678,11 @@ turns the new one away within 5 seconds of HM's own session, HM retries once by 
 
 **What can go wrong**
 - **"OpenOCD not found":** install it, or set `HARNESS_MANAGER_OPENOCD` to its path.
+- **Exit 12, "has no remote_bitbang adapter":** that OpenOCD was built without it. The
+  message names the binary and the adapters it has. Install xPack OpenOCD 0.12, then set
+  `tools.openocd` (Settings → Tools, or `harness-manager config set tools.openocd PATH`).
+  If `HARNESS_MANAGER_OPENOCD` is set, it overrides the setting: point it at the new one
+  or unset it.
 - **Exit 4, held:** another debugger has the board's JTAG port. The hint may add "or the
   harness's JTAG server is still finishing the previous session": wait a few seconds and
   retry.
