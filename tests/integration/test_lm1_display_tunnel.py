@@ -120,4 +120,6 @@ def test_tunnel_drop_and_refused_key_recover_on_the_same_port(rig: Any) -> None:
         assert svc.status("mps3-01")["counters"]["connects"] >= 2
         v.close()
         svc.close("mps3-01", "test over")
-        assert src.released == 1
+        # close() releases, and the upstream thread again as it ends: no once-only flag, so a
+        # forward a late connect opened is released too (REVIEW-W5 6; release is idempotent)
+        assert 1 <= src.released <= 2
