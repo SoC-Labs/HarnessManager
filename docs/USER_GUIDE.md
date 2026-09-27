@@ -1096,8 +1096,10 @@ On a board **you claimed from this Harness Manager** (or pinned with `--adopt`),
 all of these through one SSH connection to the board (`ssh -J HUB root@BOARD -L …`), opened
 when one of them needs it and closed when the last one is done. You do nothing extra.
 On a board **claimed by another key**, they are refused before anything is sent (exit 15):
-if the claim is yours, `board claim TARGET --adopt`. Bare metal and unclaimed boards are
-unchanged. Reads (`slot status`, `card status`, `info`, the consoles) stay open.
+if the claim is yours, `board claim TARGET --adopt`. Bare metal and unclaimed boards go
+the usual way, through the hub (or the LAN): XVC on an unclaimed Linux board too, since it
+has no lock and no key on its SSH yet. Reads (`slot status`, `card status`, `info`, the
+consoles) stay open.
 
 **In the app:** the Board tile's **SSH** line shows "unclaimed", "claimed by you" or
 "claimed by another key". **Claim this board**, then **Claim with my key**, claims it.

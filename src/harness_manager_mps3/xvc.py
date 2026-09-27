@@ -15,15 +15,20 @@ reason.
     [boards.lab]
     xvc = { reach = "auto", user = "root" }     # auto | hub | board-ssh | direct
 
-- ``board-ssh`` (D-X1; ``auto`` on the Linux harness): ``ssh -J HUB root@BOARD -L
-  127.0.0.1:<p>:127.0.0.1:2542`` through ``tunnel.SshTunnel`` (``jump``/``user``, CCR X-1).
-  The user's key on the board is the authentication, and the hub's port-22 lease gate
-  the lease. With the harness's XVC lock (feature ``xvc_lock``, a HARNESSD request for
-  after cutover) 2542 answers only the board itself; without it the reach still works
-  and the adapter warns exactly as on bare-metal.
-- ``hub`` (``auto`` on bare-metal, behind a hub): the board's existing hub tunnel,
-  which already forwards 2542 (``tunnel.py``). Unauthenticated: the X6 warning.
-- ``direct``: the shell's own address (a board on your desk). Unauthenticated too.
+- ``board-ssh`` (D-X1; ``auto`` on a Linux board THIS Harness Manager claimed or adopted,
+  lane XVC-UNCLAIMED): ``ssh -J HUB root@BOARD -L 127.0.0.1:<p>:127.0.0.1:2542``. For a
+  board we claimed it is the session's one claim forward (``claim.hold_forward``, below);
+  ``reach = "board-ssh"`` asked for explicitly on any other Linux board is this adapter's
+  own ``tunnel.SshTunnel`` (``jump``/``user``, CCR X-1; the pin when there is one). The
+  user's key on the board is the authentication, and the hub's port-22 lease gate the
+  lease. With the harness's XVC lock (feature ``xvc_lock``) 2542 answers only the board
+  itself; without it the reach still works and the adapter warns exactly as on bare-metal.
+- ``hub`` (``auto`` on bare metal and on a Linux board that is not claimed, or whose claim
+  is not ours or not known here; behind a hub): the board's existing hub tunnel, which
+  already forwards 2542 (``tunnel.py``). An unclaimed board has no lock, so 2542 answers
+  it; its SSH has no key to log in with yet. Unauthenticated: the X6 warning.
+- ``direct``: the shell's own address (a board on your desk; ``auto`` there for the same
+  boards as ``hub``). Unauthenticated too.
 
 **The claim lock** (lane CLAIMED-LOCK; the harness's ``xvc_lock``, live on the Linux harness
 since HM_ANSWERS C3). A claimed board answers 2542 for the board itself only: anyone else
@@ -36,8 +41,9 @@ So on the Linux harness the endpoint asks the session's claim first (``claim.loc
   lets it go;
 - a board claimed by another key, or with no pin here: ``ClaimLockedError`` with the claim
   hint, before anything connects;
-- otherwise (unclaimed, or not known to be claimed): the reach above, unchanged. A lock
-  refusal met there is ``ClaimLockedError`` too (``xvc_locked_error`` words it).
+- otherwise (unclaimed, or not known to be claimed): the hub tunnel or the LAN, as on bare
+  metal. A lock refusal met there (a claim this Harness Manager did not know about) is
+  ``ClaimLockedError`` too (``xvc_locked_error`` words it: `board claim-status`, `--adopt`).
 
 **Probes files** (``xvc_probes``): the RM's ``.ltx`` from the overlay catalogue
 (``ltx_for``: ``ltx_path()``, which serves the store's copy since lane FIXES, CCR X-2), the
@@ -88,6 +94,12 @@ NO_DBGBR_REASON = "needs harness firmware with 'xvc_dbgbr' (v0.11 or later)"
 NO_LOCK_NOTE = ("this Linux harness does not report the XVC lock ('xvc_lock') yet, so 2542 "
                 "still answers anyone on the board network; the board-SSH reach is yours, "
                 "the port is not")
+#: XVC-UNCLAIMED: a Linux board that is not claimed from here goes the unauthenticated way.
+NOT_CLAIMED_NOTE = ("XVC goes the unauthenticated way (the hub tunnel or the LAN) because this "
+                    "Harness Manager has not claimed this Linux board: an unclaimed board has "
+                    "no lock, so 2542 answers anyone on the board network. Claimed from here "
+                    "(`harness-manager board claim TARGET`, or `--adopt` for a claim made "
+                    "elsewhere), XVC goes over the board's own SSH")
 PARKED_NOTE = ("after a harness restart the partition stays parked until the next swap: "
                "swap once to bring the RM's ILAs back")
 MIG_NOTE = ("the static MIG calibration hub sits behind the same Debug Bridge: load the "
@@ -227,9 +239,14 @@ class Mps3Xvc:
         return plan(impl=self._impl())
 
     def reach(self) -> str:
-        """``board-ssh`` | ``hub-tunnel`` | ``direct`` for this board now."""
+        """``board-ssh`` | ``hub-tunnel`` | ``direct`` for this board now.
+
+        Board SSH when asked for (``reach = "board-ssh"``), or on a Linux board this Harness
+        Manager claimed (the claim lock lets nothing else in, whatever ``reach`` says). Every
+        other board, an unclaimed Linux one included (no lock, and no key on its SSH yet):
+        the hub tunnel, else the LAN (XVC-UNCLAIMED)."""
         want = self._config()["reach"]
-        if want == "board-ssh" or (want == "auto" and self._impl() == IMPL_LINUX):
+        if want == "board-ssh":
             return REACH_BOARD_SSH
         if self._impl() == IMPL_LINUX and self._claim_plan()[0] == REACH_BOARD_SSH:
             return REACH_BOARD_SSH               # claimed by us: the lock allows nothing else
@@ -268,9 +285,7 @@ class Mps3Xvc:
         auth = self._authenticated(reach)
         notes: list[str] = []
         if linux and not auth:
-            notes.append(NO_LOCK_NOTE if reach == REACH_BOARD_SSH else
-                         "the hub tunnel is not authenticated; the board-SSH reach is "
-                         "(boards.toml xvc.reach = \"auto\")")
+            notes.append(NO_LOCK_NOTE if reach == REACH_BOARD_SSH else NOT_CLAIMED_NOTE)
         notes.append(MIG_NOTE if linux else NO_MIG_NOTE)
         if not linux:
             notes.append(PARKED_NOTE)

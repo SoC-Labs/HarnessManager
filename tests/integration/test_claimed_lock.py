@@ -307,6 +307,14 @@ def test_xvc_on_a_board_we_claimed_rides_the_claim_forward(lab, xvc):
     assert rig.session.claim.forward_status() is None
 
 
+def test_twin_xvc_auto_on_an_unclaimed_linux_board_uses_the_hub_tunnel(lab, xvc):
+    rig = lab(claimed=False, observed=False)                  # XVC-UNCLAIMED: no lock
+    st = xvc.open(rig.session, byo=True)
+    assert st.board_slot == "ours" and st.reach == "hub-tunnel"
+    assert rig.ssh.board_launches() == [] and rig.xvc.lock_refusals == 0
+    assert rig.xvc.events("connect")[0][2].startswith("127.0.0.1:")       # the hub's relay
+
+
 def test_twin_xvc_on_bare_metal_uses_the_hub_tunnel(lab, xvc):
     rig = lab(claimed=False, profile="bare-metal")
     st = xvc.open(rig.session, byo=True)
@@ -327,12 +335,9 @@ def test_debug_and_xvc_share_one_claim_forward(lab, stub, debug, xvc):
     assert rig.session.claim.forward_status() is None
 
 
-def test_xvc_meeting_the_lock_line_is_a_typed_claim_error_never_retried(lab, xvc,
-                                                                         monkeypatch):
-    rig = lab()                             # claimed, not known here, reach = hub: refused
-    from harness_manager_mps3 import xvc as mx
-
-    monkeypatch.setattr(mx, "xvc_config", lambda cand: {"reach": "hub"})   # the hub tunnel
+def test_xvc_meeting_the_lock_line_is_a_typed_claim_error_never_retried(lab, xvc):
+    rig = lab()                             # claimed, not known here: auto takes the hub tunnel
+    assert rig.session.xvc.reach() == "hub-tunnel"
     with pytest.raises(ClaimLockedError) as exc:
         xvc.open(rig.session, byo=True)
     assert "xvc locked: board claimed (use ssh)" in exc.value.message

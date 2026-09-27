@@ -223,8 +223,10 @@ harness-manager xvc status $B | tee $EV/a3_xvc.txt
 **Expect:**
 - state `down`;
 - the scope line ("scoped to the reconfigurable partition's debug chain … never whole-device JTAG");
-- reach `board-ssh`;
-- the note that this Linux harness does not report `xvc_lock` yet (no note if it does);
+- reach `board-ssh` when this Harness Manager already holds the claim (B1 would say
+  `claimed by you`), with no lock note (the harness reports `xvc_lock`); before §B's adopt,
+  reach `hub-tunnel` with the note `XVC goes the unauthenticated way … Claimed from here …`
+  (an `xvc open` then would meet the board's lock: exit 15, the adopt hint). §E runs after B2;
 - the MIG note.
 
 **A4. The finger test** (CLCD-HM R6): a held touch must not starve the network.

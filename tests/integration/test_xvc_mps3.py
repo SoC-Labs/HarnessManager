@@ -4,9 +4,12 @@ The board is a ``VirtualMps3``; the harness's XVC server is the fake one on 127.
 (``tests/fakes/xvc_server.py``). The lab rig (``tests/fakes/l1_rig.py``) fakes ssh and the
 hub, so the two reaches run for real without a network:
 
-- bare-metal: the hub tunnel's own forward of 2542 (``FakeSsh`` routes the board's 2542);
-- Linux: ``ssh -J HUB root@BOARD -L 127.0.0.1:p:127.0.0.1:2542`` (the board's loopback
-  2542 routed to the fake), CCR X-1.
+- bare-metal, and a Linux board this Harness Manager has not claimed (XVC-UNCLAIMED: no
+  lock, no key on its SSH yet): the hub tunnel's own forward of 2542 (``FakeSsh`` routes
+  the board's 2542);
+- a Linux board this Harness Manager claimed: ``ssh -J HUB root@BOARD -L
+  127.0.0.1:p:127.0.0.1:2542`` (the board's loopback 2542 routed to the fake; the session's
+  claim forward, CLAIMED-LOCK), CCR X-1.
 
 No hw_server runs (``byo``) except where a test names it (the fake one). Each check has
 a negative twin.
@@ -31,6 +34,7 @@ from harness_manager.services.lease import LeaseService
 from harness_manager_mps3 import xvc as MX
 from harness_manager_mps3.pack import Mps3Pack
 from harness_manager_mps3.statics import StaticStore
+from tests.fakes.claimed_lock import board_key_fp, observed_claimed, pin_claim
 from tests.fakes.l1_rig import BOARD_IP, HUB, lab
 from tests.fakes.t2_overlays import (
     FIELDED_USERCODE,
@@ -174,16 +178,21 @@ def test_bare_metal_behind_the_hub_uses_the_hub_tunnel_for_the_lease_holder_only
         wait_for(lambda: not fake.attached, what="the board's slot to free")
 
 
-# --- Linux: board SSH through the hub (D-X1, CCR X-1) ----------------------------------------------------
+# --- Linux: board SSH through the hub when claimed from here (D-X1, CCR X-1) -------------------------
 
 
-def linux_lab_open(tmp_path, monkeypatch, engine, fake, profile):
+def linux_lab_open(tmp_path, monkeypatch, engine, fake, profile, *, claimed: bool = True):
+    """A Linux board behind the hub; ``claimed``: this Harness Manager claimed it (the pin
+    and its record), else nothing is known of a claim here."""
     vb = VirtualMps3(tmp_path, profile).__enter__()
     ctx = lab(vb, monkeypatch, state_dir=state_dir())
     rig = ctx.__enter__()
     rig.ssh.routes[("127.0.0.1", 2542)] = ("127.0.0.1", fake.port)     # the BOARD's loopback
+    rig.ssh.routes[(BOARD_IP, 2542)] = ("127.0.0.1", fake.port)        # the hub's view of it
     cand = engine.candidate_for(BOARD_IP)
     session = engine.open(cand, note="xvc linux")
+    if claimed:
+        pin_claim(session)
     take_lease(session)
     return vb, ctx, rig, session
 
@@ -197,8 +206,9 @@ def test_linux_uses_ssh_jump_to_the_boards_loopback_and_warns_without_the_lock(
         argv = rig.ssh.launches[-1]
         assert argv[-1] == BOARD_IP
         assert argv[argv.index("-J") + 1] == HUB and argv[argv.index("-l") + 1] == "root"
-        spec = argv[argv.index("-L") + 1]
-        assert spec.startswith("127.0.0.1:") and spec.endswith(":127.0.0.1:2542")
+        specs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-L"]
+        assert any(s.startswith("127.0.0.1:") and s.endswith(":127.0.0.1:2542") for s in specs)
+        assert not any(BOARD_IP in s for s in specs)
         assert "ControlPath=none" in argv and "ExitOnForwardFailure=yes" in argv
         # No lock on this harness yet: the same warning as bare-metal, and why.
         assert X.UNAUTHENTICATED_WARNING in st.warnings
@@ -224,6 +234,50 @@ def test_negative_twin_a_linux_harness_with_the_xvc_lock_carries_no_warning(
         assert st.reach == "board-ssh" and X.UNAUTHENTICATED_WARNING not in st.warnings
         assert session.xvc.xvc_facts()["authenticated"] is True
         assert "never whole-device JTAG" in st.scope
+    finally:
+        engine.close_all()
+        ctx.__exit__(None, None, None)
+        vb.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize("known", ["unclaimed", "not known"])
+def test_negative_twin_an_unclaimed_linux_board_uses_the_hub_tunnel_like_bare_metal(
+        tmp_path, monkeypatch, engine, fake, known):
+    """XVC-UNCLAIMED: an unclaimed board has no lock (2542 answers the hub) and no key on
+    its SSH, so ``auto`` goes the hub tunnel's way; so does a board whose claim is not known
+    here (a claim met there is the typed lock error: tests/integration/test_claimed_lock.py)."""
+    vb, ctx, rig, session = linux_lab_open(tmp_path, monkeypatch, engine, fake, LINUX_HARNESSD,
+                                           claimed=False)
+    try:
+        if known == "unclaimed":
+            observed_claimed(session.candidate.board_id, board_key_fp(), claimed=False)
+        assert session.xvc.reach() == MX.REACH_HUB
+        st = engine.xvc.open(session, byo=True)
+        assert st.reach == "hub-tunnel" and X.UNAUTHENTICATED_WARNING in st.warnings
+        assert len(rig.ssh.launches) == 1                   # the board's one tunnel, no new ssh
+        assert all(a[-1] != BOARD_IP for a in rig.ssh.launches)
+        facts = session.xvc.xvc_facts()
+        assert facts["authenticated"] is False and MX.NOT_CLAIMED_NOTE in facts["notes"]
+        assert "board_ssh" not in facts
+        with X.XvcClient("127.0.0.1", st.relay_port) as c:
+            assert read_idcode(c) == IDCODE
+        engine.xvc.close(session)
+    finally:
+        engine.close_all()
+        ctx.__exit__(None, None, None)
+        vb.__exit__(None, None, None)
+
+
+def test_an_explicit_board_ssh_reach_on_an_unclaimed_linux_board_is_still_honoured(
+        tmp_path, monkeypatch, engine, fake):
+    vb, ctx, rig, session = linux_lab_open(tmp_path, monkeypatch, engine, fake, LINUX_HARNESSD,
+                                           claimed=False)
+    try:
+        rig.boards_toml.write_text(rig.boards_toml.read_text().replace(
+            "[boards.lab]\n", '[boards.lab]\nxvc = { reach = "board-ssh" }\n'))
+        assert session.xvc.reach() == MX.REACH_BOARD_SSH
+        st = engine.xvc.open(session, byo=True)
+        assert st.reach == "board-ssh" and rig.ssh.launches[-1][-1] == BOARD_IP
     finally:
         engine.close_all()
         ctx.__exit__(None, None, None)

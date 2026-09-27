@@ -210,7 +210,7 @@ What Harness Manager does:
 
 - **A board this Harness Manager claimed** (`board claim`, or `board claim --adopt` for a claim made elsewhere): each of those paths goes through **one SSH forward per board session**, `ssh -J HUB -l root BOARD -L 127.0.0.1:p:127.0.0.1:6900 -L …:6910 -L …:6921 -L …:2542`, with the pinned host key and your claimed key (`claim.hold_forward`, the same reach as the live display). It opens when the first of them needs it, is shared by all of them, and closes when the last lets go and when the session closes: a forward to the board's loopback never lingers on this host.
 - **A board claimed by another key, or claimed with no pin here**: refused before anything is sent (exit 15), with the way out: `harness-manager board claim TARGET --adopt` if the claim is yours.
-- **Bare metal, and a board that is not claimed**: the hub tunnel, as before.
+- **Bare metal, and a board that is not claimed**: the hub tunnel, as before. XVC too: an unclaimed Linux board has no lock (2542 answers the hub) and no key on its SSH yet, so `xvc.reach = "auto"` takes the hub tunnel (or the LAN) there, and board SSH only on a board claimed from here (`xvc.reach = "board-ssh"` still forces it).
 - **A board whose claim state is not known here** (through a hub, `info` never asks; `board claim-status` does): the hub tunnel is tried. If the board refuses, the one-line refusal becomes `ClaimLockedError` (exit 15) with the claim hint, never "connection closed" or "held by another client". Run `board claim-status TARGET` and try again.
 
 ### Options, best first

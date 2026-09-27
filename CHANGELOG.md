@@ -225,6 +225,10 @@ owners.
   sent (exit 15, with `board claim TARGET --adopt`). The board's one-line refusal (`… locked:
   board claimed (use ssh)`) reads as that claim error (exit 15), never "connection closed"
   or "held by another client". Bare metal and unclaimed boards are unchanged.
+- XVC on an **unclaimed** Linux board goes through the hub tunnel (or the LAN), like bare
+  metal: it has no lock, and its SSH has no key to log in with yet, so the board-SSH reach
+  failed there. `xvc.reach = "auto"` takes board SSH only on a board claimed from here;
+  `xvc.reach = "board-ssh"` still forces it. `xvc status` says which, and why.
 
 ### A good citizen on a shared board (QUIET-POLL)
 - Harness Manager no longer contacts a board in the background unless a window shows it.
