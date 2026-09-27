@@ -215,6 +215,18 @@ class DisplayViewer:
     def in_flight(self) -> int | None:
         return self._inflight
 
+    @property
+    def ended(self) -> bool:
+        """The board's upstream closed for good (``close``: a lease or a claim lost, the board
+        closed; a source that refused for good): nothing more comes; attach again (LM3)."""
+        return self._board.finished
+
+    @property
+    def end_error(self) -> HarnessError | None:
+        """The source's own error when one ended the upstream (``HeldError`` naming the lease
+        holder, a ``DisplayUnavailable`` for good, a claim lost), else None (LM3)."""
+        return self._board.end_error
+
     def pending(self) -> bool:
         """``next_message()`` would return something now."""
         b = self._board
@@ -287,6 +299,7 @@ class _Board:
         self.idle_since: float | None = None
         self.finished = False
         self.end_reason = ""
+        self.end_error: HarnessError | None = None   # the source's own error, when one ended it
         self.rate_asked: int | None = None
         self.rate_echo: int | None = None
         self.rtt_ms: float | None = None
@@ -467,7 +480,7 @@ class _Board:
                     wait = self.t.refused_retry_s
                 except DisplayUnavailable as exc:
                     if exc.retry_s is None:
-                        self.end_reason = exc.reason
+                        self.end_reason, self.end_error = exc.reason, exc
                         return
                     self.set_state("down", exc.reason)
                     wait = exc.retry_s
@@ -486,7 +499,7 @@ class _Board:
                         wait = self.t.backoff_s[min(attempt, len(self.t.backoff_s) - 1)]
                         attempt += 1
                 except HarnessError as exc:        # claim lost, key refused, host key changed
-                    self.end_reason = exc.message
+                    self.end_reason, self.end_error = exc.message, exc
                     return
                 finally:
                     self.close_stream()
@@ -770,6 +783,8 @@ class DisplayService:
                     vb.cond.wait(min(left, 0.25))
                 if vb.frame.presented:
                     return vb.frame.picture(badge_list=vb.badge_list())
+                if vb.finished and vb.end_error is not None:
+                    raise vb.end_error                   # the source's own, typed (LM3)
                 state, reason = vb.state, vb.reason
             raise DisplayUnavailable(
                 f"no picture from the board within {wait_s:g} s ({state}"

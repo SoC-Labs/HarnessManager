@@ -105,7 +105,7 @@ JsonBody = Annotated[Any, Body()]
 #: Extension router modules, loaded in this order if present (docs/API.md).
 EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "panel_api",
               "kit_api", "xvc_api", "harness_api", "settings_api", "claim_api", "card_api",
-              "hubs_api")                  # SET-UI: the Settings dialog's Hubs section
+              "hubs_api", "display_api")   # SET-UI: Settings > Hubs; LM3: the Live display
 
 
 @dataclass
