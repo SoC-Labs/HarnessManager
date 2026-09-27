@@ -137,6 +137,13 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
     "card_api": (
         ("GET", "/boards/{bid}/slots"),
     ),
+    # LM3: served in the mock by tests/fakes/lm3_mock_display.py (the real routes over a
+    # FakeLcdMirror per demo board).
+    "display_api": (
+        ("WS", "/boards/{bid}/display/ws"),
+        ("GET", "/boards/{bid}/display"),
+        ("GET", "/boards/{bid}/display.png"),
+    ),
     # SET-API: served in the mock by tests/fakes/settings_mock.py (the real routes over a real
     # resolver in a temporary directory).
     "settings_api": (

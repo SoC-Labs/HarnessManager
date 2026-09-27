@@ -162,6 +162,17 @@ owners.
   board boots exactly as it always has, and every change is refused. The Board tile shows a
   Card line.
 
+### The Live display (the LCD mirror)
+- The service serves a live, pixel-exact copy of the board's 320x240 LCD to the lease
+  holder only (`/api/v1/boards/{bid}/display`: a WebSocket, the status and a PNG or the raw
+  RGB565 frame; docs/API.md "Live display"). Everyone else, a board without the Linux
+  harness's `lcd_mirror`, and a bare-metal board get the reason, and the Front panel's text
+  mirror as before. Nothing is shown before a whole picture has arrived, a browser tab that
+  falls behind skips to the newest picture instead of queueing old ones, and touch is not
+  passed through. The web page and the `display` command come next.
+- The service no longer compresses its WebSocket messages (permessage-deflate): on the
+  local machine it only cost CPU.
+
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key
   (the harness's TOFU claim), after asking, and only for the lease holder. It pins the

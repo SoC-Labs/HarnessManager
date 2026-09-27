@@ -410,6 +410,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     from .lxslots_mock_card import register as register_card
     app.state.card = CardSim()
     register_card(app, state, app.state.card, _ok)
+    # LM3's Live display routes (docs/API.md "Live display"): the real display_api over a
+    # FakeLcdMirror per demo board (tests/fakes/lm3_mock_display.py).
+    from .lm3_mock_display import register as register_display
+    app.state.display = register_display(app, state, sim)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)
