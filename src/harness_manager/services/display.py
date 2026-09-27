@@ -207,6 +207,12 @@ class DisplayViewer:
     def in_flight(self) -> int | None:
         return self._inflight
 
+    @property
+    def ended(self) -> bool:
+        """The board's upstream closed for good (``close``: a lease or a claim lost, the board
+        closed; a source that refused for good): nothing more comes; attach again (LM3)."""
+        return self._board.finished
+
     def pending(self) -> bool:
         """``next_message()`` would return something now."""
         b = self._board
