@@ -184,6 +184,10 @@ owners.
   view only: a click does nothing to the board. It is open only while it is on screen: a
   hidden card or a background tab closes it. When it is refused, the text mirror stays, with
   the reason (and who holds the lease). `app --demo` shows it on the Linux demo board.
+- A board that can never show the Live display (the bare-metal harness, an image without
+  `lcd_mirror`) now says so (422 UNAVAILABLE, exit 12) even when someone else holds its
+  lease, instead of naming the holder (409 HELD, exit 4): taking the lease would not help.
+  The lease comes next, then the claim. The web page and `display` answer alike.
 
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key

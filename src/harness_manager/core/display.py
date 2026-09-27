@@ -19,7 +19,7 @@ Board-agnostic and importable with no daemon:
 - ``DisplayStream``: HM's end of one lcd_mirror connection over any socket-like byte
   stream (``read``/``key``/``rate``/``ping``/``ack``/``close``).
 - ``DisplayAdapter``: what a board pack provides (``display_reason``, ``display_connect``,
-  optionally ``display_diagnose`` and ``display_release``). A bare callable that returns a
+  optionally ``display_gate``, ``display_diagnose`` and ``display_release``). A bare callable that returns a
   connected byte stream is accepted wherever an adapter is (``as_display_source``).
 - ``DisplayPicture`` + ``png_rgb565``: a still of the presented picture (``display.png``,
   ``display snapshot``).
@@ -577,6 +577,10 @@ class DisplayAdapter(Protocol):
     stops: down with that reason) or ``OSError`` (a transient: retried with back-off).
 
     Optional:
+    ``display_gate()``: why the board can NEVER show the mirror as it is now (the feature
+    gate: the bare-metal harness, an image without ``lcd_mirror``), else "" (also when it is
+    not known now). The routes answer it 422 UNAVAILABLE before they look at the lease
+    (``daemon.display_api.refusal``); ``display_reason()`` still gives it first too.
     ``display_diagnose(since)``: after a stream that closed before HELLO (an SSH ``-L``
     accepts, then closes, when the far end refuses), the reason if the transport knows one
     since monotonic time ``since`` ("no lcd_mirror service on the board (...)"), else "".

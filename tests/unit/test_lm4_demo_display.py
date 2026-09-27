@@ -204,6 +204,7 @@ def open_(eng, bid):
 def test_the_linux_board_has_a_live_display_and_the_bare_metal_boards_say_why(showcase):
     lx = open_(showcase, BOARD_LINUX)
     assert isinstance(lx.display, DemoDisplay) and lx.display.display_reason() == ""
+    assert lx.display.display_gate() == ""
     assert "lcd_mirror" in lx.identity().features
     info = showcase.info(BOARD_LINUX)
     assert "display_mirror" in info.capabilities
@@ -213,6 +214,7 @@ def test_the_linux_board_has_a_live_display_and_the_bare_metal_boards_say_why(sh
     for bid in (BOARD_V011, BOARD_LEASED):                # the twins
         s = open_(showcase, bid)
         assert s.display.display_reason() == NEEDS_LINUX.format(impl="bare-metal")
+        assert s.display.display_gate() == s.display.display_reason()   # never, not the lease
         with pytest.raises(DisplayUnavailable):
             s.display.display_connect()
         assert "display_mirror" not in showcase.info(bid).capabilities
@@ -226,3 +228,4 @@ def test_a_linux_image_without_the_engine_says_so(showcase):
 
     board.identity = replace(board.identity, features=tuple(feats))
     assert lx.display.display_reason() == NO_ENGINE
+    assert lx.display.display_gate() == NO_ENGINE

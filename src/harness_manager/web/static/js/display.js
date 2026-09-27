@@ -19,7 +19,9 @@
 //   VALID, grey while the DUT owns the panel and this image cannot see it, the badges,
 //   stale and reconnecting. The canvas always holds the panel's own pixels.
 // - Refused (409 HELD, 422 UNAVAILABLE, a board that is not open): today's text mirror
-//   with a one-line reason (§7.5). Never an error page.
+//   with a one-line reason (§7.5). Never an error page. The daemon picks which (its
+//   display_api.refusal): a board that can never show it (bare metal, no lcd_mirror) is 422
+//   even behind someone else's lease, so the line names a holder only for a 409.
 
 import { callBytes, socketCloseReason, socketUrl } from "./api.js";
 import { boardName } from "./format.js";

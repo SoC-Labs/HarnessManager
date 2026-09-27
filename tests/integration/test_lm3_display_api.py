@@ -284,6 +284,41 @@ def test_someone_elses_lease_is_409_held_naming_the_holder_and_nothing_attaches(
         assert board.stats["connects"] == 1
 
 
+def test_a_board_that_can_never_show_it_is_422_even_when_someone_else_holds_the_lease():
+    """The order (SMALL-4): can't ever (the gate) 422, then the lease 409, then the rest 422."""
+    board, _anim = card_board()
+    adapter = FakeDisplayAdapter(board, reason=HELD_REASON, gate=BARE_REASON)
+    with board, display_rig(adapter) as rig, http(rig) as c:
+        leases = FakeLeases("alice@hub-02", mine=False)
+        behind_a_hub(rig, leases)
+        r = c.get(f"{bid_path()}/display.png")
+        assert r.status_code == 422, r.text
+        err = r.json()["error"]
+        assert err["name"] == "UNAVAILABLE" and err["capability"] == "display_mirror"
+        assert err["reason"] == BARE_REASON and "holder" not in err
+        assert "alice" not in err["message"]
+        tab = Tab(rig.daemon.display_ws())
+        tab.pump(1.0)
+        assert tab.closed == (4000 + ExitCode.UNAVAILABLE, close_reason(BARE_REASON))
+        assert tab.statuses == [{"state": "refused", "reason": BARE_REASON, "error": err}]
+        st = c.get(f"{bid_path()}/display").json()
+        assert st["available"] is False and st["unavailable"] == BARE_REASON
+        assert leases.views == 0                              # the lease was never asked
+        assert adapter.connects == 0 and board.stats["connects"] == 0 and rig.svc.boards() == []
+        # the twins: the gate lifted, alice's lease is 409 naming her ...
+        adapter.gate = ""
+        r = c.get(f"{bid_path()}/display.png")
+        assert r.status_code == 409 and r.json()["error"]["holder"] == "alice@hub-02"
+        # ... the lease ours, the adapter's claim reason is 422 ...
+        leases.mine = True
+        adapter.reason = "needs a claimed board"
+        r = c.get(f"{bid_path()}/display.png")
+        assert r.status_code == 422 and r.json()["error"]["reason"] == "needs a claimed board"
+        # ... and with none, it opens
+        adapter.reason = ""
+        assert c.get(f"{bid_path()}/display.png").status_code == 200
+
+
 def test_a_lease_lost_between_the_check_and_the_connect_ends_typed():
     board, _anim = card_board()
     adapter = FakeDisplayAdapter(board)

@@ -26,10 +26,11 @@ import pytest
 from harness_manager.core import capabilities as C
 from harness_manager.core.capabilities import negotiate
 from harness_manager.core.display import DisplayUnavailable
-from harness_manager.core.errors import HeldError, UnreachableError
+from harness_manager.core.errors import ExitCode, HeldError, UnavailableError, UnreachableError
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.core.pack import BoardPack
+from harness_manager.daemon.display_api import refusal
 from harness_manager.services.display import DisplayService, DisplayTimings
 from harness_manager_mps3 import claim as CL
 from harness_manager_mps3 import display as D
@@ -478,6 +479,50 @@ def test_negative_twin_a_claimed_linux_board_with_the_engine_has_no_reason(rig_f
     rig = rig_factory()
     assert rig.adapter.display_reason() == ""
     assert rig.adapter.facts().engine and rig.adapter.display_facts()["reach"] == "board-ssh"
+
+
+# --- 5b. the gate is answered before the lease (``display_api.refusal``, SMALL-4) -------------------
+
+
+GATES = [
+    ("bare-metal", {"impl": "bare-metal", "features": BITS, "block": None},
+     D.NEEDS_LINUX.format(impl="bare-metal")),
+    ("no-engine", {"features": BITS, "block": None}, D.NO_ENGINE),
+]
+
+
+@pytest.mark.parametrize("name, kw, gate", GATES, ids=[g[0] for g in GATES])
+def test_a_board_that_can_never_show_it_is_unavailable_whoever_holds_the_lease(
+        rig_factory: Any, name: str, kw: dict[str, Any], gate: str) -> None:
+    rig = rig_factory(hub=True, leases=Leases(holder="alice@lab", mine=False), **kw)
+    assert rig.adapter.display_gate() == gate
+    assert rig.adapter.display_reason() == gate                  # still its first reason
+    views = rig.leases.views
+    err = refusal(rig.adapter, rig.session, rig.leases)
+    assert isinstance(err, UnavailableError), err                # 422, not 409 naming alice
+    assert err.code == ExitCode.UNAVAILABLE and err.reason == gate and "alice" not in err.message
+    assert rig.leases.views == views                             # the lease was not asked
+    assert rig.ssh.launches == []
+
+
+def test_negative_twin_a_board_that_could_show_it_is_held_then_the_claim(rig_factory: Any) -> None:
+    rig = rig_factory(hub=True, leases=Leases(holder="alice@lab", mine=False))
+    assert rig.adapter.display_gate() == ""                      # the gate is not the lease
+    err = refusal(rig.adapter, rig.session, rig.leases)
+    assert isinstance(err, HeldError) and err.holder == "alice@lab"
+    assert err.code == ExitCode.HELD
+    # the lease is ours, no SSH to the board: the third step, UNAVAILABLE with the claim hint
+    rig2 = rig_factory(hub=True, leases=Leases(holder="you@here", mine=True), claim=False)
+    err = refusal(rig2.adapter, rig2.session, rig2.leases)
+    assert isinstance(err, UnavailableError) and err.reason == D.NO_SSH
+    # a harness that cannot be asked now is not "never": the lease decides (HELD)
+    rig3 = rig_factory(hub=True, leases=Leases(holder="alice@lab", mine=False))
+    rig3.session.shell = None
+    assert rig3.adapter.display_gate() == ""
+    assert rig3.adapter.display_reason().startswith("the harness did not answer")
+    err = refusal(rig3.adapter, rig3.session, rig3.leases)
+    assert isinstance(err, HeldError) and err.holder == "alice@lab"
+    assert rig.ssh.launches == [] and rig2.ssh.launches == [] and rig3.ssh.launches == []
 
 
 # --- 6. the forward is released 30 s after the last viewer (LM1's grace, an injected clock) -----------------

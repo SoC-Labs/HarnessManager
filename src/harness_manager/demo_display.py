@@ -310,6 +310,10 @@ class DemoDisplay:
         self.connects = 0
 
     def display_reason(self) -> str:
+        """The gate is the demo's only reason (no claim, no forward)."""
+        return self.display_gate()
+
+    def display_gate(self) -> str:
         """The MPS3 adapter's gate (LM2), in its words: the Linux harness, then the engine."""
         from harness_manager_mps3.display import (
             IMPL_BARE_METAL,

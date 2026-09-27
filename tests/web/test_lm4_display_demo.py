@@ -2,8 +2,9 @@
 
 The REAL daemon app over ``DemoEngine(showcase=True)``: the Linux showcase board (mps3-lx)
 mirrors its panel from the in-memory lcd_mirror board of ``harness_manager.demo_display``
-(nothing is reached, no socket is opened for it); the bare-metal board is refused 422 with
-the MPS3 adapter's words, and the board behind the hub 409 naming alice. Each has its twin.
+(nothing is reached, no socket is opened for it); the bare-metal boards are refused 422 with
+the MPS3 adapter's words, the one behind the hub too although alice holds its lease (a board
+that can never show it says so before the lease: SMALL-4). Each has its twin.
 """
 
 from __future__ import annotations
@@ -89,11 +90,13 @@ def test_the_demo_bare_metal_boards_fall_back_to_the_text_mirror(showcase):
     expect(by_id(page, "live-reason")).to_have_text(f"Live display: {NEEDS_LINUX}")
     expect(by_id(page, "panel-mirror")).to_have_attribute("data-source", "rebuilt")
     expect(by_id(page, "live-canvas")).to_have_count(0)
-    # behind the hub, alice holds the lease: 409 names her (D3)
+    # behind the hub, alice holds the lease, but the board is bare metal: never, so 422 with
+    # the gate's words, and alice is not named (taking her lease would not help)
     open_board(page, BOARD_LEASED)
     show_display(page)
-    expect(by_id(page, "live-display")).to_have_attribute("data-refused", "HELD", timeout=T)
-    expect(by_id(page, "live-reason")).to_contain_text("the lease is held by alice@")
+    expect(by_id(page, "live-display")).to_have_attribute("data-refused", "UNAVAILABLE", timeout=T)
+    expect(by_id(page, "live-reason")).to_have_text(f"Live display: {NEEDS_LINUX}")
+    expect(by_id(page, "live-reason")).not_to_contain_text("alice")
     expect(by_id(page, "panel-mirror")).to_be_visible()
     # the twin: the Linux board, in the same page, is live
     open_board(page, BOARD_LINUX)

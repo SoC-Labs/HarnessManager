@@ -16,9 +16,12 @@ Rules:
   ``session.display``). It shares the hub API's lease service (``use_leases(d.leases)``,
   before its first ``display_reason()``), and so does the compositor (``svc.leases``), as
   XVC's does. ``display_reason()`` carries the feature gate, the lease rule and the claim.
-  No adapter, or a reason, is refused BEFORE anything attaches: 409 HELD naming the
-  ``holder`` when the board is behind a hub whose lease is not this client's (the hub API's
-  view), else 422 UNAVAILABLE (capability ``display_mirror``); on the WebSocket a text
+  No adapter, or a reason, is refused BEFORE anything attaches, in this order (``refusal``):
+  a board that can NEVER show it (no adapter, or the adapter's ``display_gate()``: the
+  bare-metal harness, an image without ``lcd_mirror``) is 422 UNAVAILABLE whoever holds the
+  lease; then 409 HELD naming the ``holder`` when the board is behind a hub whose lease is
+  not this client's (the hub API's view); then 422 UNAVAILABLE (capability
+  ``display_mirror``) for the claim or the reach; on the WebSocket a text
   frame ``{state: "refused", reason, error}`` and a close with 4000 + the exit code (4004,
   4012) and the reason. A missing or wrong token is 401 on every route (the WebSocket's is
   an HTTP denial, as every HM socket's).
@@ -60,6 +63,9 @@ log = logging.getLogger(__name__)
 
 #: The board pack's hook (lane LM2): ``pack.display_adapter(session)`` -> adapter or None.
 HOOK = "display_adapter"
+#: The adapter's optional hook: why the board can NEVER show the live display as it is now
+#: (the feature gate: the bare-metal harness, an image without ``lcd_mirror``), else "".
+GATE_HOOK = "display_gate"
 #: ``GET display.png``: how long a first picture may take (the upstream opens, KEY, keyframe).
 PICTURE_WAIT_S = 10.0
 FORMATS = ("png", "raw")
@@ -138,12 +144,28 @@ def lease_holder(leases: Any, session: Any) -> str | None:
     return None if lease.get("mine") else str(lease.get("holder") or "someone else")
 
 
+def gate_reason(adapter: Any) -> str:
+    """Why the board can NEVER show the live display as it is now (the adapter's optional
+    ``display_gate()``: the bare-metal harness, an image without ``lcd_mirror``), else "".
+    An adapter without the hook has no gate of its own: its ``display_reason()`` stands."""
+    gate = getattr(adapter, GATE_HOOK, None)
+    if not callable(gate):
+        return ""
+    return str(gate() or "")
+
+
 def refusal(adapter: Any, session: Any, leases: Any = None) -> HarnessError | None:
-    """Why the live picture may not be opened now, as the typed error the routes answer
-    with; None when it may. The adapter's ``display_reason()`` says why (the feature gate,
-    D3's lease rule, the claim); it is HELD, naming the holder, when the board's lease is
-    someone else's (``lease_holder``), else UNAVAILABLE. ``display_reason()`` may raise a
-    ``HarnessError`` itself."""
+    """Why the live picture may not be opened now, as the typed error the routes (and the
+    CLI's ``display``) answer with; None when it may. In the order a user fixes them:
+
+    1. the board can NEVER show it (no adapter, or ``gate_reason``: the bare-metal harness,
+       an image without ``lcd_mirror``): 422 UNAVAILABLE, even when someone else holds the
+       lease (taking the lease would not help);
+    2. the adapter's ``display_reason()`` says no and the board's lease is someone else's
+       (``lease_holder``): 409 HELD naming the holder;
+    3. any other reason (the claim, the reach): 422 UNAVAILABLE.
+
+    ``display_gate()`` and ``display_reason()`` may raise a ``HarnessError`` themselves."""
     if adapter is None:
         pack = getattr(getattr(session, "candidate", None), "pack", "") or "this"
         return UnavailableError(DISPLAY_MIRROR, f"the {pack} pack has no live display for "
@@ -152,6 +174,9 @@ def refusal(adapter: Any, session: Any, leases: Any = None) -> HarnessError | No
     use = getattr(adapter, "use_leases", None)
     if leases is not None and callable(use):
         use(leases)                                   # the hub API's view of "mine" (LM2)
+    never = gate_reason(adapter)
+    if never:
+        return UnavailableError(DISPLAY_MIRROR, never)
     why = adapter.display_reason()
     if not why:
         return None

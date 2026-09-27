@@ -45,13 +45,17 @@ def bid_path(board_id: str = BOARD) -> str:
 
 class FakeDisplayAdapter:
     """LM2's adapter shape (``harness_manager_mps3.display.Mps3Display``) over a
-    ``FakeLcdMirror``: ``display_reason``, ``display_connect`` (a NEW connection each time;
-    None board: refused for good; ``connect_error``: raised instead, as the MPS3 adapter's
-    ``HeldError`` naming the holder), ``display_release``, ``use_leases``."""
+    ``FakeLcdMirror``: ``display_reason``, ``display_gate`` (``gate``: a board that can never
+    show it; ``display_reason`` gives it first, as the MPS3 adapter's does), ``display_connect``
+    (a NEW connection each time; None board: refused for good; ``connect_error``: raised
+    instead, as the MPS3 adapter's ``HeldError`` naming the holder), ``display_release``,
+    ``use_leases``."""
 
-    def __init__(self, board: FakeLcdMirror | None = None, reason: str = "") -> None:
+    def __init__(self, board: FakeLcdMirror | None = None, reason: str = "",
+                 gate: str = "") -> None:
         self.board = board
         self.reason = reason
+        self.gate = gate
         self.connect_error: BaseException | None = None
         self.leases_used: list[Any] = []
         self.leases_before_reason: bool | None = None
@@ -62,11 +66,14 @@ class FakeDisplayAdapter:
     def use_leases(self, leases: Any) -> None:
         self.leases_used.append(leases)
 
+    def display_gate(self) -> str:
+        return self.gate
+
     def display_reason(self) -> str:
         if self.leases_before_reason is None:
             self.leases_before_reason = bool(self.leases_used)
         self.reasons_asked += 1
-        return self.reason
+        return self.gate or self.reason
 
     def display_connect(self) -> Any:
         self.connects += 1

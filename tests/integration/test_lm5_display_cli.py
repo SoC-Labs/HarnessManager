@@ -330,6 +330,31 @@ def test_held_is_exit_4_and_names_the_holder(via, monkeypatch, tmp_path, capsys)
         assert board.stats["connects"] >= 1
 
 
+def test_a_board_that_can_never_show_it_is_exit_12_even_when_the_lease_is_someone_elses(
+        via, monkeypatch, tmp_path, capsys):
+    """The daemon's order, in both ways (SMALL-4): the gate, then the lease, then the rest."""
+    with still_board() as board, reach(via, board, monkeypatch) as where:
+        leases = FakeLeases("alice@hub-02", mine=False)
+        where.behind_hub(leases, monkeypatch)
+        where.adapter.gate, where.adapter.reason = BARE, HELD
+        for argv in (("snapshot", "-o", str(tmp_path / "x.png")), ("show", "--for", "0.2")):
+            rc, out, err = cli(capsys, "--json", "display", TARGET, *argv)
+            assert rc == ExitCode.UNAVAILABLE, (argv, err)
+            e = json.loads(out)["error"]
+            assert e["name"] == "UNAVAILABLE" and e["reason"] == BARE and "holder" not in e
+            assert err.strip() == f"harness-manager: display_mirror is unavailable — {BARE}"
+        rc, out, _ = cli(capsys, "--json", "display", TARGET, "status")
+        st = json.loads(out)
+        assert rc == 0 and st["available"] is False and st["unavailable"] == BARE
+        assert leases.views == 0 and board.stats["connects"] == 0
+        # the twin: the gate lifted, the same lease is exit 4 naming alice
+        where.adapter.gate = ""
+        rc, out, err = cli(capsys, "--json", "display", TARGET, "snapshot", "-o",
+                           str(tmp_path / "y.png"))
+        assert rc == ExitCode.HELD and json.loads(out)["error"]["holder"] == "alice@hub-02"
+        assert board.stats["connects"] == 0
+
+
 def test_a_lease_lost_after_the_check_ends_the_view_typed(via, monkeypatch, capsys):
     with still_board() as board, reach(via, board, monkeypatch) as where:
         where.adapter.connect_error = HeldError(HELD, holder="alice@hub-02")

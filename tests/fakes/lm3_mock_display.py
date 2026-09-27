@@ -13,7 +13,9 @@ own LM1 ``FakeLcdMirror`` on 127.0.0.1:0, started on first use:
   none, is refused as the daemon refuses it: 409 HELD naming the holder (the routes read
   the hub's lease through ``SimLeases``, as the daemon reads the hub API's).
 
-Knobs: ``refuse(bid, reason)`` / ``allow(bid)`` (``display_reason``), ``no_display(bid)``
+Knobs: ``refuse(bid, reason)`` / ``allow(bid)`` (``display_reason``), ``gate(bid, reason)``
+(``display_gate``: a board that can never show it, 422 whoever holds its lease; ``allow``
+lifts it too), ``no_display(bid)``
 (the hook returns None: a pack with no live display for that board), ``mirror(bid)`` (the
 board's ``FakeLcdMirror``, to edit its picture or ``handover`` the panel), ``freeze(bid)``
 (the card stops counting), ``stall(bid)`` (LM4: frozen, and PINGs go unanswered: the
@@ -45,8 +47,11 @@ class SimDisplayAdapter:
         self.sim = sim
         self.bid = bid
 
+    def display_gate(self) -> str:
+        return self.sim.gate_reason(self.bid)
+
     def display_reason(self) -> str:
-        return self.sim.reason(self.bid)
+        return self.sim.gate_reason(self.bid) or self.sim.reason(self.bid)
 
     def display_connect(self) -> Any:
         return self.sim.mirror(self.bid).connect()
@@ -86,6 +91,7 @@ class DisplaySim:
         self._mirrors: dict[str, FakeLcdMirror] = {}
         self._anims: dict[str, CardAnimator] = {}
         self._reasons: dict[str, str] = {}
+        self._gates: dict[str, str] = {}
         self._none: set[str] = set()
         self.service: DisplayService | None = None
 
@@ -112,15 +118,25 @@ class DisplaySim:
                 return f"{LEASE_ONLY}: {lease['holder']} holds {hub['target']}"
         return ""
 
+    def gate_reason(self, bid: str) -> str:
+        with self._lock:
+            return self._gates.get(bid, "")
+
     # -- knobs ------------------------------------------------------------------------------------
 
     def refuse(self, bid: str, reason: str) -> None:
         with self._lock:
             self._reasons[bid] = reason
 
+    def gate(self, bid: str, reason: str) -> None:
+        """The board can never show it (the bare-metal harness): 422 before the lease."""
+        with self._lock:
+            self._gates[bid] = reason
+
     def allow(self, bid: str) -> None:
         with self._lock:
             self._reasons.pop(bid, None)
+            self._gates.pop(bid, None)
             self._none.discard(bid)
 
     def no_display(self, bid: str) -> None:

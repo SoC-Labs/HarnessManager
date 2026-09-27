@@ -350,6 +350,29 @@ def test_a_409_shows_the_text_mirror_and_names_the_holder(page_factory, daemon):
     assert not page.errors, page.errors
 
 
+def test_a_board_that_can_never_show_it_is_422_even_behind_someone_elses_lease(page_factory,
+                                                                               daemon):
+    """The routes' order (SMALL-4): the gate (422) before the lease (409)."""
+    why = "needs the Linux harness with lcd_mirror (this board runs the bare-metal harness)"
+    daemon.app.state.sim.behind_hub(BOARD, lease="other", holder=HOLDER)
+    sim(daemon).gate(BOARD, why)
+    page = live_page(page_factory)
+    root = by_id(page, "live-display")
+    expect(root).to_have_attribute("data-refused", "UNAVAILABLE", timeout=T)
+    text_mirror_shown(page)
+    reason = by_id(page, "live-reason")
+    expect(reason).to_have_text(f"Live display: {why}")
+    expect(reason).not_to_contain_text(HOLDER)               # no "(the lease is held by ...)"
+    assert "held" not in reason.get_attribute("class")
+    # the twin: the gate lifted, the same lease is 409 naming the holder
+    sim(daemon).allow(BOARD)
+    page.locator('[data-action="live-retry"]').click()
+    expect(root).to_have_attribute("data-refused", "HELD", timeout=T)
+    expect(reason).to_contain_text(f"the live display is for the lease holder only: {HOLDER} holds")
+    assert "held" in reason.get_attribute("class")
+    assert not page.errors, page.errors
+
+
 HIDE = """() => {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
   document.dispatchEvent(new Event('visibilitychange'));

@@ -18,6 +18,10 @@ in the order a user fixes them:
 3. a board behind a hub whose lease is not yours (D3): the holder is named;
 4. an unclaimed board, or no SSH: the claim hint.
 
+1-2 are the gate (``display_gate``): the board can never show it as it is, so the routes
+answer them 422 UNAVAILABLE before they look at the lease (a bare-metal board someone else
+leases says "needs the Linux harness", not "alice holds it").
+
 **The reach** is the one XVC and the on-board GDB server use: ``claim.open_forward`` =
 ``ssh -J HUB -l root <pinned host key, claimed key> -N -T -L 127.0.0.1:<p>:127.0.0.1:6940
 BOARD`` (a real ``tunnel.SshTunnel``: ``ControlPath=none``, ``BatchMode``,
@@ -312,6 +316,19 @@ class Mps3Display:
                     f"reports {obs.host_key} (re-claim only if it was re-provisioned: "
                     "`harness-manager board claim TARGET --replace-host-key`)")
         return ""
+
+    def display_gate(self) -> str:
+        """Why this board can NEVER show the mirror as it is now (reasons 1-2: the bare-metal
+        harness, an image without the engine), else "". A harness that cannot be asked now is
+        "" (not known is not never; ``display_reason`` says it did not answer). The routes
+        answer a gate 422 before they look at the lease: taking the lease would not help."""
+        if self._closed:
+            return ""
+        try:
+            f = self.facts()
+        except HarnessError:
+            return ""
+        return self._gate_reason(f)
 
     def display_reason(self) -> str:
         """"" when the mirror can be opened now; else why not (the capability line)."""
