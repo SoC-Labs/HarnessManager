@@ -332,7 +332,11 @@ class _Controller:
                 "down_after_s": 0.3, "up_after_s": 0.9,
                 "down_evidence": ["the MCC printed its boot banner"],
                 "up_evidence": "the MCC boot banner completed with 'FPGA configuration complete.'",
-                "shell_id_before": None, "shell_id_after": None, "fpga_configured": True}
+                "shell_id_before": None, "shell_id_after": None, "fpga_configured": True,
+                # MCC-FIX: what the MCC said it loaded (mcc.boot_fields), SD-relative
+                "fpga_file": "MB/HBI0309C/Nanosoc/nanosoc.bit",
+                "board_file": "MB/HBI0309C/Nanosoc/nanosoc.txt", "mcc_firmware": "v1.3.2",
+                "mcc_build_date": "Apr 20 2018", "hbi_build": "567", "bootloader": "v1.0.0"}
 
     def temperatures(self) -> Sequence[Reading]:
         return [r for r in self._e._board(self._bid).readings if r.unit == "degC"]

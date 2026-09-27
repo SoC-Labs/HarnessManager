@@ -10,6 +10,7 @@ real product going on the network where the demo does not).
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import socket
 import subprocess
@@ -218,6 +219,56 @@ def test_the_leased_board_shows_alice_the_queue_your_request_and_force(showcase)
     showcase.job(f"{B}/lease/force", {"confirm": True, "confirm_board": "mps3-02"})
     after = showcase.get(f"{B}/lease")
     assert after["lease"]["mine"] and [q["holder"] for q in after["queue"]] == ["bob@lab-pc-03"]
+
+
+def test_the_leased_boards_mcc_is_reached_on_the_hub_never_a_tty_00_share(showcase):
+    # MCC-FIX, in the demo's shape (INTEG-W4): the MCC is a HUB link the pack's mcc_link makes
+    # (hub-mcc://HOST/TARGET/dev/TARGET/tty_00, via hub), no hub:// share link, no MCC console
+    links = showcase.cands[BOARD_LEASED]["links"]
+    (mcc,) = [lk for lk in links if lk["kind"] == "hub"]
+    assert mcc["address"] == ("hub-mcc://mapstone-dev.ecs.soton.ac.uk/mps3_02_pl"
+                              "/dev/mps3_02_pl/tty_00")
+    assert mcc["via"] == "hub" and "never an fpgahub share" in mcc["detail"]
+    assert not any(lk["address"].startswith("hub://") for lk in links)
+    showcase.open(BOARD_LEASED)
+    B = showcase.b(BOARD_LEASED)
+    assert "mcc" not in showcase.get(f"{B}/consoles")["names"]
+    temps = [r for r in showcase.get(f"{B}/telemetry")["readings"] if r["name"] == "mcc_temp"]
+    assert temps and temps[0]["source"] == "mcc-console (hub)"
+    info = showcase.get(B)
+    assert {"console_controller", "reboot_board"} <= set(info["capabilities"])
+
+
+def test_negative_twin_the_debug_usb_boards_mcc_is_its_own_usb_and_the_reboot_names_the_bit(
+        showcase):
+    links = showcase.cands[BOARD_V011]["links"]
+    assert not any(lk["kind"] == "hub" for lk in links)
+    assert any(lk["kind"] == "usb_serial" for lk in links)
+    showcase.open(BOARD_V011)
+    B = showcase.b(BOARD_V011)
+    ev = showcase.job(f"{B}/controller/reboot", {})["result"]
+    # MCC-FIX's evidence: the .bit the MCC said it loaded (the UI's "MCC loaded ..." line)
+    assert ev["fpga_file"] == "MB/HBI0309C/Nanosoc/nanosoc.bit" and ev["fpga_configured"]
+
+
+def test_the_linux_boards_slots_carry_confirmed_and_claimed(showcase):
+    # LINUX-ANSWERS' additive fields (S2/S5), as the demo's Linux harness reports them
+    from harness_manager.services import slot_health
+
+    showcase.open(BOARD_LINUX)
+    slots = showcase.get(f"{showcase.b(BOARD_LINUX)}/slots")["slots"]
+    assert slots["confirmed"] is True and slots["claimed"] is True
+    assert slots["fell_back"] is None and slots["committed_unbooted"] is None
+    assert slots["slots"]["A"]["boot"] == "booted, confirmed healthy"
+    assert slots["slots"]["B"]["boot"] == "read back this boot"
+    assert any("SSH is claimed" in n for n in slots["notes"])
+    assert not any("does not report" in n for n in slots["notes"])
+    # twin: without the fields (a harness that does not send them) the same slots read
+    # "booted (not yet confirmed)": the demo carries them, the product did not change
+    st = showcase.engine.session(BOARD_LINUX).os_slots.status()
+    bare = dataclasses.replace(st, raw={})
+    assert slot_health.boot_words(bare, "A") == "booted (not yet confirmed)"
+    assert slot_health.claimed(bare) is None
 
 
 def test_negative_twin_boards_not_behind_a_hub_have_no_lease(showcase):

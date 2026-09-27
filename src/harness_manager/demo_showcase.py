@@ -22,7 +22,8 @@ drift from the real one (``XvcStatus``/``vivado_tcl``, ``PanelState``/``rebuilt_
 - ``BOARD_LEASED`` (mps3-02): a v0.11 board behind the hub (mapstone-dev), its hub lease
   held by alice (no Harness Manager session answers for her) with bob queued behind your
   own request, which alice has not answered in time: Request, the queue and Force-release
-  are all live (``tests/fakes/lrb_fake_hub.py``'s hub, in miniature).
+  are all live (``tests/fakes/lrb_fake_hub.py``'s hub, in miniature). Its MCC is reached ON
+  the hub (a ``hub-mcc://`` link), never through a share on ``tty_00`` (MCC-FIX).
 
 Nothing here opens a socket or starts a process: the XVC ports and the tunnel's ports are
 made up (nothing listens on them), the hub is in memory, the claim is scripted.
@@ -82,6 +83,8 @@ BOARD_LEASED = "mps3@192.168.10.106:6900"
 HUB_HOST = "mapstone-dev.ecs.soton.ac.uk"
 HUB_TARGET = "mps3_02_pl"
 HUB_BOARD = "mps3_02"
+#: The MCC's console on the hub (``hub_mcc.mcc_tty_for``'s default for the target).
+HUB_MCC_TTY = f"/dev/{HUB_TARGET}/tty_00"
 
 #: The Linux harness's front-panel features, and its XVC lock (docs/design/XVC_DEBUG.md §7.1).
 PANEL_FEATURES = ("presence", "panel", "locate")
@@ -184,8 +187,11 @@ def script() -> dict[str, Any]:
         candidate=Candidate(
             "mps3", BOARD_LEASED,
             (_eth("192.168.10.106", "shell control channel, through the hub's ssh tunnel"),
-             Link(LinkKind.HUB, f"hub://{HUB_HOST.split('.')[0]}/{HUB_BOARD}",
-                  f"fpgahub 0.3.0 on {HUB_HOST}: lease {HUB_TARGET}, MCC share")),
+             # MCC-FIX: the MCC is reached ON the hub (a HUB link, as hub.mcc_link makes it),
+             # never through an fpgahub share on tty_00
+             Link(LinkKind.HUB, f"hub-mcc://{HUB_HOST}/{HUB_TARGET}{HUB_MCC_TTY}",
+                  f"the MCC console {HUB_MCC_TTY}, reached ON the hub {HUB_HOST} (pyverify's "
+                  "tools run there; never an fpgahub share)", via="hub")),
             label="MPS3 nanosoc_upy on shell 0x72bb0a36 (via mapstone-dev)",
             evidence="listed by the hub (fpgahub 0.3.0)", name="mps3-02", name_source="hub"),
         identity=BoardIdentity(board_type="mps3", shell_id=cat.S_ILA.lower(),
@@ -195,10 +201,12 @@ def script() -> dict[str, Any]:
                                harness_impl="bare-metal", proto="0.11",
                                usercode=cat.U_ILA.lower(), ver32="0x01000000"),
         health=Health(reachable=True, control_channel="idle", counters=_counters(52)),
-        consoles=("uart0", "uart1", "swo", "mcc", "shell"),
+        # no "mcc" console: nothing streams tty_00 from the hub (one reader, MCC-FIX); the
+        # MCC's reads and REBOOT run on the hub (`mcc` verbs, Power > Board reboot)
+        consoles=("uart0", "uart1", "swo", "shell"),
         readings=[
             Reading("dut_clk", 25.0, "MHz", source="shell-6900", reason="preset"),
-            Reading("mcc_temp", 39.5, "degC", source="mcc-console (hub share)"),
+            Reading("mcc_temp", 39.5, "degC", source="mcc-console (hub)"),
             Reading.unavailable("board_power", "W", "the MPS3 has no power sensor; add a "
                                 "metered plug or an INA260"),
         ],
@@ -352,7 +360,10 @@ class DemoClaim:
 
 
 class DemoOsSlots:
-    """``session.os_slots``: OS slots A (running, the default) and B (a verified older image)."""
+    """``session.os_slots``: OS slots A (running, the default) and B (a verified older image).
+    The reply carries the Linux lead's additive fields (LINUX-ANSWERS, S2/S5): ``confirmed``
+    (harnessd confirmed this boot, so A is "booted, confirmed healthy", not "booted (not yet
+    confirmed)") and ``claimed`` (the board's SSH, claimed by you: ``DemoClaim``)."""
 
     def __init__(self, engine: Any, board_id: str) -> None:
         self._e, self._bid = engine, board_id
@@ -367,7 +378,8 @@ class DemoOsSlots:
             slots={"A": SlotInfo("A", state="valid", hdr_crc="0x3e5e9c2c", length=24354312,
                                  sid=sid, verified="boot", version="2.0.0"),
                    "B": SlotInfo("B", state="valid", hdr_crc="0x1d0c55a1", length=24100864,
-                                 sid=sid, verified="readback", version="2.0.0-rc2")})
+                                 sid=sid, verified="readback", version="2.0.0-rc2")},
+            raw={"confirmed": True, "claimed": True})
 
     def _refuse(self, *_: Any, **__: Any) -> Any:
         raise RefusedError("the demo does not write the card: the OS slots are scripted",
