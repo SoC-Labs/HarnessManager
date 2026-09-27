@@ -232,6 +232,45 @@ def test_twin_unset_the_stage_dir_is_todays_path(hermetic):
     assert hub_sd.stage_dir_for(SimpleNamespace()) == hub_sd.STAGE_DIR
 
 
+def test_the_stage_dir_is_the_resolvers_the_admins_default_and_lock_reach_it(hermetic,
+                                                                          tmp_path):
+    # SET-WIRE: hubs.<name>.stage_dir is read through the resolver (settings.hubs.resolve_hub):
+    # the admin's policy [default] under the user's file, its [lock] over it (INTEG-W4)
+    policy = tmp_path / "no-policy.toml"                       # H.POLICY_PATH (hermetic)
+    (hermetic / "boards.toml").write_text(USE_LAB)
+    (hermetic / "settings.toml").write_text(f'[hubs.lab]\nhost = "{HOST}"\n')
+    policy.write_text('[default]\nhubs.lab.stage_dir = "/srv/fpga/lab-default"\n')
+    cfg = hubmod.hub_config_for(lab_candidate())
+    assert cfg.stage_dir == "/srv/fpga/lab-default"
+    assert ssh_backend(cfg).stage_dir == "/srv/fpga/lab-default"
+    (hermetic / "settings.toml").write_text(
+        f'[hubs.lab]\nhost = "{HOST}"\nstage_dir = "/srv/fpga/mine"\n')
+    assert hubmod.hub_config_for(lab_candidate()).stage_dir == "/srv/fpga/mine"
+    policy.write_text('[lock]\nhubs.lab.stage_dir = "/srv/fpga/locked"\n')
+    assert hubmod.hub_config_for(lab_candidate()).stage_dir == "/srv/fpga/locked"
+
+
+def test_twin_a_service_reads_its_own_hubs_stage_dir_never_the_users(hermetic, tmp_path):
+    # SET-WIRE's one state-dir rule: a --state-dir/--demo service (use_config_dir) reads its
+    # own boards.toml and [hubs.*], so its hub door stages where ITS settings say
+    from harness_manager.settings.files import use_config_dir
+
+    (hermetic / "boards.toml").write_text(USE_LAB)
+    (hermetic / "settings.toml").write_text(
+        f'[hubs.lab]\nhost = "{HOST}"\nstage_dir = "/srv/fpga/user"\n')
+    svc = tmp_path / "svc"
+    svc.mkdir()
+    (svc / "boards.toml").write_text(USE_LAB)
+    (svc / "settings.toml").write_text(
+        f'[hubs.lab]\nhost = "{HOST}"\nstage_dir = "/srv/fpga/service"\n')
+    prev = use_config_dir(svc)
+    try:
+        assert hubmod.hub_config_for(lab_candidate()).stage_dir == "/srv/fpga/service"
+    finally:
+        use_config_dir(prev)
+    assert hubmod.hub_config_for(lab_candidate()).stage_dir == "/srv/fpga/user"
+
+
 def test_the_stage_dir_row_is_declared_and_refuses_a_bad_value():
     row = next(s for s in CORE_ROWS if s.key == "hubs.*.stage_dir")
     assert row.default == hub_sd.STAGE_DIR and row.scope == "hub"
