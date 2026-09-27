@@ -216,3 +216,23 @@ def test_exe_tries_pathext_for_a_windows_path_without_an_extension(
     monkeypatch.setattr(tooltest.sys, "platform", "linux")
     assert tooltest._hw_server_names() == ("hw_server",)
     assert tooltest._exe(str(tmp_path / "hw_server"), {"PATH": ""}) is None
+
+
+# --- the lead's text fixes: no reboot "over the MCC share" since MCC-FIX ---------------------------
+
+
+def test_no_text_says_the_board_is_rebooted_over_an_mcc_share() -> None:
+    """MCC-FIX: there is no MCC share; the reboot runs on the hub. The words the UI, the
+    catalog and the guide show say so."""
+    import re
+
+    root = Path(__file__).resolve().parents[2]
+    stale = re.compile(r"rebooted over its MCC\s+share|over the hub's MCC share", re.I)
+    files = [root / "docs" / "USER_GUIDE.md",
+             root / "src/harness_manager/web/static/js/sections/harness.js",
+             root / "src/harness_manager/services/harness_catalog.py"]
+    for f in files:
+        assert not stale.search(f.read_text(encoding="utf-8")), f
+    assert "rebooting by the MCC on the hub (paced)" in files[1].read_text(encoding="utf-8")
+    # twin: the pattern does find the old words
+    assert stale.search("the board is rebooted over its MCC\n  share. A release")
