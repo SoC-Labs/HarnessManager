@@ -54,6 +54,12 @@ class SettingsContext:
 
     ``env``/``policy_path``/``keyrings`` default to the process's own: ``os.environ``, the
     OS's policy file, the OS keyrings (``$HARNESS_MANAGER_KEYRING=off``: none).
+
+    ``demo`` (the ``--demo`` service, set by ``run_daemon``; lane SET-UI-MERGE): the demo's
+    settings are its own state dir's and nothing else. No OS keyring (the keyring is keyed
+    by the setting's name, so a demo secret would replace, or Remove would delete, your
+    real one): its secrets go to its own private files. No real hub is reached: a hub's
+    Test connection and "Add this board" are refused (``refuse_in_demo``).
     """
 
     state_dir: Path | None = None
@@ -61,6 +67,7 @@ class SettingsContext:
     policy_path: Path | None = None
     keyrings: Sequence[Any] | None = None
     engine: Any = None
+    demo: bool = False
     _store: SecretStore | None = field(default=None, init=False, repr=False)
     _layers: tuple[Schema, dict[str, Any]] | None = field(default=None, init=False, repr=False)
 
@@ -81,8 +88,20 @@ class SettingsContext:
     def store(self) -> SecretStore:
         root = self.config_dir
         if self._store is None or self._store.root != root:
-            self._store = SecretStore(root, keyrings=self.keyrings, env=self.environ())
+            # the demo: its own private files only, never the OS keyring (see the class)
+            keyrings = [] if self.demo else self.keyrings
+            self._store = SecretStore(root, keyrings=keyrings, env=self.environ())
         return self._store
+
+    def refuse_in_demo(self, what: str) -> None:
+        """``UnavailableError`` in the demo for ``what`` reaches a real hub (the demo's boards
+        and hub are scripted, in memory)."""
+        if self.demo:
+            from harness_manager.core.errors import UnavailableError
+
+            raise UnavailableError(what, "the demo reaches no real hub (its boards and hub "
+                                         "are scripted); run Harness Manager without --demo "
+                                         "to use a real one")
 
     def _own_engine(self) -> bool:
         """The engine's own resolver serves: it has one, and its config dir is ours."""
@@ -200,6 +219,7 @@ def listing(ctx: SettingsContext, *, section: str | None = None, key: str | None
         rows = r.listing(section=find_section(r.schema, section) if section else None,
                          include_dev=include_dev)
     return {"schema_version": SCHEMA_VERSION, "files": files_view(ctx, r),
+            "service": {"demo": ctx.demo},
             "policy": policy_view(ctx, r), "problems": list(dict.fromkeys(r.problems)),
             "sections": sections(r.schema), "instances": r.instances(),
             "rows": [row(x) for x in rows]}
@@ -323,6 +343,8 @@ def test(ctx: SettingsContext, section: str, name: str = "", table: Mapping[str,
     sid, t = find_tester(ctx, section)
     if t is None:
         return testers.not_testable(sid, name)
+    if sid == "hubs":
+        ctx.refuse_in_demo("Test connection")
     req = testers.TestRequest(sid, name, table, ctx.resolver(),
                               progress or (lambda _s, _d, _t: None))
     return testers.run(t, req)

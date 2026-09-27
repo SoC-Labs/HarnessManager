@@ -99,9 +99,13 @@ def _port(v: Any) -> str:
     return "" if 1 <= v <= 65535 else "must be a port, 1..65535"
 
 
+_port.bounds = (1, 65535)                # type: ignore[attr-defined]  # the menu's range (SET-UI)
+
+
 def _ms(lo: int, hi: int, why: str = "") -> Any:
     def check(v: Any) -> str:
         return "" if lo <= v <= hi else f"must be {lo}..{hi} ms{why}"
+    check.bounds = (lo, hi)              # type: ignore[attr-defined]  # the menu's range (SET-UI)
     return check
 
 
@@ -142,6 +146,11 @@ def _positive(v: Any) -> str:
 
 def _not_negative(v: Any) -> str:
     return "" if v >= 0 else "must be 0 or more"
+
+
+# The menu's ranges (SET-UI, ``Setting.bounds_view``): the checks stay the judge.
+_positive.bounds, _positive.min_exclusive = (0, None), True        # type: ignore[attr-defined]
+_not_negative.bounds = (0, None)                                    # type: ignore[attr-defined]
 
 
 # --- the rows -----------------------------------------------------------------------------------

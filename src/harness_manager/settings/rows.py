@@ -86,6 +86,10 @@ def _positive(v: Any) -> str:
     return "" if v > 0 else "must be more than 0"
 
 
+_positive.bounds = (0, None)            # type: ignore[attr-defined]  # SET-UI: more than 0
+_positive.min_exclusive = True          # type: ignore[attr-defined]
+
+
 def _window(v: Any) -> str:
     return "" if re.match(r"^\d{3,5}x\d{3,5}$", v) else "must be WIDTHxHEIGHT, e.g. 1440x900"
 

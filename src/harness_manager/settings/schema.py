@@ -239,8 +239,21 @@ class Setting:
                 "env": self.env, "env_rank": self.env_rank, "choices": list(self.choices),
                 "readonly": self.readonly, "lockable": self.lockable, "ui": self.ui,
                 "ceiling": self.ceiling, "advanced": self.advanced, "pack": self.pack,
-                # SET-UI: a number's range, when its check says one (``rows._between``)
-                "bounds": list(getattr(self.check, "bounds", ())) or None}
+                **self.bounds_view()}
+
+    def bounds_view(self) -> dict[str, Any]:
+        """SET-UI: a number's range, when its check declares one (``check.bounds = (lo, hi)``,
+        inclusive, ``None`` an open end; ``check.min_exclusive``: "more than ``lo``"). The menu
+        uses it for the input's limits and to refuse a value before sending it; the check
+        stays the judge. An int's "more than ``lo``" is ``lo + 1``, inclusive."""
+        b = getattr(self.check, "bounds", None) if self.type in ("int", "float") else None
+        if not b:
+            return {"bounds": None, "min_exclusive": False}
+        lo, hi = b
+        above = bool(getattr(self.check, "min_exclusive", False)) and lo is not None
+        if above and self.type == "int":
+            lo, above = int(lo) + 1, False
+        return {"bounds": [lo, hi], "min_exclusive": above}
 
 
 def coerce(spec: Setting, raw: Any, *, from_env: bool = False) -> Any:

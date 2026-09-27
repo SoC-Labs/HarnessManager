@@ -154,6 +154,7 @@ def register(ctx: RouteContext) -> None:
             if v is not None and not isinstance(v, str):
                 raise UsageError(f"{field} must be text")
         hubs.resolve_hub(hubs.check_name(name), sctx.resolver())      # 400 before the job
+        sctx.refuse_in_demo("Add this board")          # it reads the target on the hub
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             progress("details", 0, 2)
