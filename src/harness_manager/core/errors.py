@@ -85,8 +85,8 @@ class UnavailableError(HarnessError):
 
     code = ExitCode.UNAVAILABLE
 
-    def __init__(self, capability: str, reason: str) -> None:
-        super().__init__(f"{capability} is unavailable: {reason}")
+    def __init__(self, capability: str, reason: str, *, hint: str = "") -> None:
+        super().__init__(f"{capability} is unavailable: {reason}", hint=hint)
         self.capability = capability
         self.reason = reason
 

@@ -1050,6 +1050,14 @@ class RemoteDebug:
     def status(self, session: BoardSession) -> DebugStatus:
         return from_json(DebugStatus, self._engine._http.get(f"/boards/{q(_bid(session))}/debug"))
 
+    def openocd_report(self, session: BoardSession | None = None) -> dict[str, Any] | None:
+        """The daemon's OpenOCD verdict (``services.debug.openocd_report``): it runs OpenOCD,
+        so its binary is the one that counts. ``None``: an older daemon, or no board."""
+        if session is None:
+            return None
+        got = self._engine._http.get(f"/boards/{q(_bid(session))}/debug").get("openocd")
+        return got if isinstance(got, dict) else None
+
 
 class RemoteXvc:
     """The XVC service (``services.xvc``) over the API. The relay and hw_server run in, and

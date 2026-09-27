@@ -37,6 +37,11 @@ What it does:
 
 ``$STUB_OPENOCD_LOG``: one JSON line per run (``argv``, ``pid``) and per event.
 ``$STUB_OPENOCD_INIT_DELAY``: seconds to wait before ``init`` (a slow board).
+
+The adapter probe (``-c "adapter list" -c shutdown``, lane DEBUG-OCD) prints OpenOCD
+0.12's list and exits; it is logged as ``probe`` (not ``argv``), so ``runs()`` still
+counts only real sessions. ``$STUB_OPENOCD_ADAPTERS``: the comma-separated list (default
+``STUB_ADAPTERS``, with remote_bitbang; ``jlink,buspirate,hostio4`` is the SoC Labs build).
 """
 
 from __future__ import annotations
@@ -51,6 +56,7 @@ import sys
 import time
 from pathlib import Path
 
+STUB_ADAPTERS = "ftdi,jlink,remote_bitbang"
 PROBE_VARS = ("RBB_HOST", "RBB_PORT", "TRANSPORT_MODE", "XVC_HOST", "XVC_PORT")
 PORT_CMDS = ("gdb_port", "telnet_port", "tcl_port", "bindto")
 LOOPBACK = ("127.0.0.1", "localhost")
@@ -137,6 +143,8 @@ class Stub:
     # -- command line -----------------------------------------------------------------
 
     def run(self) -> int:
+        if "adapter list" in self.argv:
+            return self._adapter_list()
         _log({"argv": self.argv, "pid": os.getpid()})
         _say("Open On-Chip Debugger 0.12.0 (stub_openocd)")
         items: list[tuple[str, str]] = []
@@ -163,6 +171,18 @@ class Stub:
                 self._bye()
                 return 0
         return self._serve()
+
+    def _adapter_list(self) -> int:
+        """``-c "adapter list" -c shutdown``: OpenOCD 0.12's words, and no config, no init."""
+        _log({"probe": self.argv, "pid": os.getpid()})
+        _say("Open On-Chip Debugger 0.12.0 (stub_openocd)")
+        _say("The following debug adapters are available:")
+        names = os.environ.get("STUB_OPENOCD_ADAPTERS", STUB_ADAPTERS)
+        for i, name in enumerate([n for n in names.split(",") if n], 1):
+            _say(f"{i}: {name}")
+        _say("")
+        _say("shutdown command invoked")
+        return 0
 
     def _file(self, name: str) -> int | None:
         self.seen_f = True

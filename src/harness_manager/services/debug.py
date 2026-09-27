@@ -42,6 +42,12 @@ with ``tests/fakes/t4_rbb_jtag.py``):
 
 Traps handled
 -------------
+- **An OpenOCD built without the adapter** (the SoC Labs build has only jlink, buspirate
+  and hostio4) fails deep inside OpenOCD: "The specified debug interface was not found
+  (remote_bitbang)". ``find_openocd`` asks each binary for its adapters first
+  (``openocd_probe``: ``-c "adapter list" -c shutdown``, no config, no hardware, cached),
+  before any board I/O or OpenOCD session, and refuses one without it (exit 12), naming
+  it, what it has and the fix (lane DEBUG-OCD).
 - **A taken gdb port does NOT stop OpenOCD** (measured, 0.12): it logs
   ``couldn't bind gdb to socket on port N: Address already in use`` and keeps
   running with no gdb server, still holding the board's JTAG port. So ``up``
@@ -117,11 +123,13 @@ from harness_manager.core.errors import (
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession, DebugAdapter
 from harness_manager.core.services import DebugStatus
+from harness_manager.services import openocd_probe
+from harness_manager.services.openocd_probe import REMOTE_BITBANG
 
 log = logging.getLogger(__name__)
 
-__all__ = ["DebugService", "DebugPorts", "find_openocd", "up_argv", "detect_argv",
-           "parse_idcodes", "classify_failure"]
+__all__ = ["DebugService", "DebugPorts", "find_openocd", "openocd_report", "up_argv",
+           "detect_argv", "parse_idcodes", "classify_failure"]
 
 OPENOCD_ENV = "HARNESS_MANAGER_OPENOCD"
 PORT_BASE_ENV = "HARNESS_MANAGER_DEBUG_PORT_BASE"
@@ -150,25 +158,58 @@ _T = TypeVar("_T")
 # --- small portable helpers ------------------------------------------------------------
 
 
-def find_openocd(state_dir: Path | str | None = None) -> str:
+def find_openocd(state_dir: Path | str | None = None, *, need: str = REMOTE_BITBANG) -> str:
     """The setting ``tools.openocd`` (``$HARNESS_MANAGER_OPENOCD``, then the Settings menu /
-    ``settings.toml``: lane SET-WIRE), else ``openocd`` on PATH, else ``UnavailableError``
-    (12). ``state_dir``: the engine's, whose settings apply."""
+    ``settings.toml``: lane SET-WIRE), else the first ``openocd`` on PATH built with ``need``,
+    else ``UnavailableError`` (12). ``state_dir``: the engine's, whose settings apply.
+
+    Every binary is asked for its adapters first (``openocd_probe``: ``-c "adapter list"
+    -c shutdown``, no config, no hardware; cached), so one built without ``need`` (the SoC
+    Labs build has only jlink, buspirate and hostio4) is refused here, naming it, what it
+    has and what to install, instead of failing inside OpenOCD. A configured binary is the
+    only one tried; with none configured, every ``openocd`` on PATH is, in order."""
     from harness_manager.settings import runtime
 
     r = runtime.resolved("tools.openocd", state_dir=state_dir)     # OPENOCD_ENV first
     configured = r.value
     if configured:
-        if Path(configured).is_file():
-            return str(Path(configured))
-        found = shutil.which(configured)
-        if found:
+        found = str(Path(configured)) if Path(configured).is_file() else shutil.which(configured)
+        if not found:
+            raise UnavailableError(CAPABILITY, f"{runtime.said(r)} does not exist")
+        probe = openocd_probe.probe_adapters(found)
+        if probe.has(need):
             return found
-        raise UnavailableError(CAPABILITY, f"{runtime.said(r)} does not exist")
-    found = shutil.which("openocd")
-    if found:
-        return found
-    raise UnavailableError(CAPABILITY, f"OpenOCD not found — install it or set {OPENOCD_ENV}")
+        who = runtime.said(r) + (f" ({found})" if found != configured else "")
+        why = (f"has no {need} adapter (it has: {probe.shown()})" if probe.listed
+               else f"could not be asked for its adapters: {probe.error}")
+        raise UnavailableError(CAPABILITY, f"{who} {why}", hint=openocd_probe.fix_hint(
+            need, env_var=OPENOCD_ENV if r.source == "env" else ""))
+    paths = openocd_probe.candidates("openocd")
+    if not paths:
+        raise UnavailableError(CAPABILITY, f"OpenOCD not found — install it or set {OPENOCD_ENV}")
+    probes = []
+    for path in paths:
+        probe = openocd_probe.probe_adapters(path)
+        if probe.has(need):
+            return path
+        probes.append(probe)
+    each = "; ".join(f"{p.binary} ({p.shown() if p.listed else p.error})" for p in probes)
+    raise UnavailableError(CAPABILITY, f"no OpenOCD on PATH has the {need} adapter: {each}",
+                           hint=openocd_probe.fix_hint(need))
+
+
+def openocd_report(state_dir: Path | str | None = None, *,
+                   need: str = REMOTE_BITBANG) -> dict[str, Any]:
+    """The adapter verdict, read-only, for ``debug status``: never raises. ``ok``: HM would
+    run ``path`` and it has ``need``; else ``detail`` and ``hint`` say why and what to do."""
+    try:
+        path = find_openocd(state_dir, need=need)
+    except HarnessError as exc:
+        return {"ok": False, "path": "", "need": need, "adapters": [],
+                "detail": getattr(exc, "reason", exc.message), "hint": exc.hint}
+    probe = openocd_probe.probe_adapters(path)            # cached by find_openocd
+    return {"ok": True, "path": path, "need": need, "adapters": list(probe.adapters),
+            "detail": probe.verdict(need), "hint": ""}
 
 
 def port_in_use(port: int) -> bool:
@@ -402,7 +443,8 @@ def classify_failure(text: str, returncode: int | None, *, target: str = "") -> 
         # Measured: a v0.12.0 build configured without it says exactly this.
         return UnavailableError(CAPABILITY, f"this OpenOCD was built without the {m.group(1)} "
                                             "adapter; install one that has it (0.12 builds "
-                                            "with --enable-remote-bitbang)")
+                                            "with --enable-remote-bitbang)",
+                                hint=openocd_probe.fix_hint(m.group(1)))
     if "Failed to connect" in text or "Connection refused" in text:
         return UnreachableError(f"OpenOCD could not connect to the board's JTAG server{where}",
                                 hint="is the board up and the harness loaded? (6921 on the shell)")
@@ -746,6 +788,18 @@ class DebugService:
             if verdict == "starting":
                 return self._status_of(rec, "starting", f"starting, held by {self._holder(rec)}")
             return self._status_of(rec, "up", f"held by {self._holder(rec)}")
+
+    def openocd(self) -> str:
+        """The OpenOCD ``up`` and ``detect`` would run (``find_openocd``), else
+        ``UnavailableError`` (12). Only the adapter probe runs: no board, no tunnel, so the CLI
+        asks this before it opens the board."""
+        return find_openocd(self.state_dir)
+
+    def openocd_report(self, session: BoardSession | None = None) -> dict[str, Any]:
+        """``openocd_report`` with this service's settings: the verdict ``debug status``
+        shows (the daemon's ``GET /boards/{bid}/debug`` carries it as ``openocd``). Read-only;
+        never raises. ``session``: unused (the binary is the machine's, not the board's)."""
+        return openocd_report(self.state_dir)
 
     def up(self, session: BoardSession, *, _prefer: DebugPorts | None = None) -> DebugStatus:
         """Start OpenOCD for the loaded design and wait until it serves gdb.

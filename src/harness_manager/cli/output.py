@@ -243,7 +243,9 @@ def with_data(exc: HarnessError, **data: Any) -> HarnessError:
 
 def error_line(exc: HarnessError) -> str:
     if isinstance(exc, UnavailableError):
-        return f"harness-manager: {exc.capability} is unavailable — {exc.reason}"
+        # The reason is the missing prerequisite; a hint, when given, is how to get it.
+        fix = f"; {exc.hint}" if exc.hint else ""
+        return f"harness-manager: {exc.capability} is unavailable — {exc.reason}{fix}"
     hint = exc.hint or DEFAULT_HINTS.get(exc.code, "")
     return f"harness-manager: {exc.message} — {hint}" if hint else f"harness-manager: {exc.message}"
 

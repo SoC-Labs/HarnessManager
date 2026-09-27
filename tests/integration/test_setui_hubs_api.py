@@ -236,10 +236,16 @@ def fake(path: Path, body: str) -> Path:
     return path
 
 
+# DEBUG-OCD: OpenOCD's step also lists its adapters (`-c "adapter list" -c shutdown`).
+OCD_ADAPTERS = ('case "$2" in "adapter list") printf "The following debug adapters are '
+                'available:\\n1: ftdi\\n2: remote_bitbang\\n" >&2;; esac\n')
+
+
 @pytest.mark.skipif(os.name != "posix", reason="/bin/sh scripts stand in for the tools")
 def test_tools_detect_runs_only_version_probes_and_never_hw_server(w, tmp_path):
     bindir = tmp_path / "bin"
-    ocd = fake(bindir / "openocd", 'echo "Open On-Chip Debugger 0.12.0+dev-01234" >&2\n')
+    ocd = fake(bindir / "openocd", 'echo "Open On-Chip Debugger 0.12.0+dev-01234" >&2\n'
+               + OCD_ADAPTERS)
     uv = fake(bindir / "uv", 'echo "uv 0.4.30"\n')
     viv = fake(tmp_path / "Vivado" / "2024.1" / "bin" / "vivado", 'echo "vivado v2024.1 (64-bit)"\n')
     hw = fake(tmp_path / "Vivado" / "2024.1" / "bin" / "hw_server", 'echo RAN > "$0.ran"\n')
@@ -249,17 +255,34 @@ def test_tools_detect_runs_only_version_probes_and_never_hw_server(w, tmp_path):
     res = st["result"]
     assert res["passed"] is True, res
     details = {s["step"]: s["detail"] for s in res["steps"]}
-    assert details["openocd"] == f"OpenOCD 0.12.0+dev-01234 at {ocd}"
+    assert details["openocd"] == (f"OpenOCD 0.12.0+dev-01234 at {ocd}: has remote_bitbang "
+                                  "(2 adapters)")
     assert details["uv"] == f"uv 0.4.30 at {uv}"
     assert details["vivado"] == f"Vivado 2024.1 at {viv}"
     assert details["hw_server"].startswith(f"hw_server 2024.1 at {hw}")
     assert res["tools"]["openocd"] == {"path": str(ocd), "version": "0.12.0+dev-01234",
-                                       "how": "PATH", "key": "tools.openocd"}
-    assert Path(f"{ocd}.argv").read_text().split() == ["--version"]
+                                       "how": "PATH", "key": "tools.openocd",
+                                       "adapters": ["ftdi", "remote_bitbang"]}
+    assert Path(f"{ocd}.argv").read_text().splitlines() == ["--version",
+                                                            "-c adapter list -c shutdown"]
     assert Path(f"{uv}.argv").read_text().split() == ["--version"]
     assert Path(f"{viv}.argv").read_text().split() == ["-version"]
     assert not Path(f"{hw}.argv").exists() and not Path(f"{hw}.ran").exists()
     assert not (w.state / "settings.toml").read_text().count("openocd")    # nothing written
+
+
+@pytest.mark.skipif(os.name != "posix", reason="/bin/sh scripts stand in for the tools")
+def test_negative_twin_an_openocd_without_remote_bitbang_fails_its_step_with_the_fix(w, tmp_path):
+    from harness_manager.services.openocd_probe import fix_hint
+
+    ocd = fake(tmp_path / "bin" / "openocd", 'echo "Open On-Chip Debugger 0.12.0" >&2\n'
+               + OCD_ADAPTERS.replace("1: ftdi\\n2: remote_bitbang", "1: jlink\\n2: hostio4"))
+    w.call("PUT", "/settings", json={"tools.openocd": str(ocd)})
+    res = w.job(w.call("POST", "/settings/test", json={"section": "tools", "name": "openocd"}))["result"]
+    (step,) = res["steps"]
+    assert res["passed"] is False and step["ok"] is False
+    assert step["detail"] == f"OpenOCD 0.12.0 at {ocd}: no remote_bitbang (it has: jlink, hostio4)"
+    assert step["hint"] == fix_hint() and res["tools"]["openocd"]["adapters"] == ["jlink", "hostio4"]
 
 
 @pytest.mark.skipif(os.name != "posix", reason="/bin/sh scripts stand in for the tools")

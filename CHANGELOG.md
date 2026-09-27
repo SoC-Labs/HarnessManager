@@ -119,7 +119,10 @@ owners.
 - Console rates: `harness-manager baud` and the app show each console's rate. Serial
   consoles change rate; Ethernet consoles report the loaded design's fixed rate (76800
   on nanosoc) and say why they cannot change it.
-- A debug server for the DUT CPU (OpenOCD), for gdb and Arm DS.
+- A debug server for the DUT CPU (OpenOCD), for gdb and Arm DS. An OpenOCD built without
+  the remote_bitbang adapter is refused before it starts, naming it and the adapters it
+  has; with none configured, HM takes the first `openocd` on PATH that has remote_bitbang.
+  `debug status` says which OpenOCD it would use.
 - Reset the DUT, set the DUT clock, read temperatures and oscillators.
 - The board controller (MCC) over the Debug USB: temperatures, oscillators, a reboot
   that proves the board came back, and allowlisted commands (destructive ones are

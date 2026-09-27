@@ -173,7 +173,9 @@ always safe. [docs/INSTALL.md](docs/INSTALL.md#when-the-install-stops) lists eac
 **A feature is greyed out.** The app, and `harness-manager info`, say what it needs,
 for example "needs the Debug USB cable". See the user guide.
 
-**Debug says OpenOCD is missing.** Debugging needs OpenOCD (0.12 or later) on your PATH.
+**Debug says OpenOCD is missing.** Debugging needs OpenOCD (0.12 or later) built with the
+remote_bitbang adapter, on your PATH or in `tools.openocd`. Some builds lack it (check with
+`openocd -c "adapter list" -c shutdown`); xPack OpenOCD 0.12 has it.
 The MPS3 target configs ship with Harness Manager.
 
 **Anything else.** `harness-manager daemon status` shows the background service, and

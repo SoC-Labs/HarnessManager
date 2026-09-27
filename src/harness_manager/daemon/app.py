@@ -1165,7 +1165,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
     @api.get("/boards/{bid:path}/debug")
     def debug_status(bid: str) -> JSONResponse:
-        return _JSON(ok(board_id=bid, **_fields(d.engine.debug.status(board(bid)))))
+        st = d.engine.debug.status(board(bid))
+        # DEBUG-OCD: which OpenOCD this service would run, and whether it has the adapter.
+        report = getattr(d.engine.debug, "openocd_report", None)
+        extra = {"openocd": report()} if callable(report) else {}
+        return _JSON(ok(board_id=bid, **_fields(st), **extra))
 
     # -- one board: the bare routes, last ------------------------------------------------------
 

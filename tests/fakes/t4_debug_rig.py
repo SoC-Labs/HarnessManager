@@ -52,7 +52,8 @@ def use_stub(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> StubRig:
     monkeypatch.setenv("STUB_OPENOCD_LOG", str(rig.log))
     monkeypatch.setenv("HARNESS_MANAGER_MPS3_OPENOCD_DIR", str(rig.cfg_dir))
     monkeypatch.delenv("HARNESS_MANAGER_DEBUG_PORT_BASE", raising=False)
-    for var in ("STUB_OPENOCD_IDCODE", "STUB_OPENOCD_INIT_DELAY", "STUB_OPENOCD_NO_ADAPTER"):
+    for var in ("STUB_OPENOCD_IDCODE", "STUB_OPENOCD_INIT_DELAY", "STUB_OPENOCD_NO_ADAPTER",
+                "STUB_OPENOCD_ADAPTERS"):
         monkeypatch.delenv(var, raising=False)
     return rig
 

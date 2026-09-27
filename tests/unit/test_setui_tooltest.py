@@ -35,13 +35,55 @@ class Recorder:
         return subprocess.run(argv, **kw)                     # noqa: S603 - a fake in tmp_path
 
 
-def test_openocd_on_the_path_is_proven_by_its_version_and_nothing_else(tmp_path):
-    ocd = exe(tmp_path / "bin" / "openocd", 'echo "Open On-Chip Debugger 0.12.0" >&2\n')
+# An OpenOCD 0.12 that prints its version, and its adapter list for `-c "adapter list"`.
+OCD_012 = ('echo "Open On-Chip Debugger 0.12.0" >&2\n'
+           'case "$2" in "adapter list") printf "The following debug adapters are available:\\n'
+           '1: ftdi\\n2: remote_bitbang\\n\\n" >&2;; esac\n')
+OCD_SOCLABS = OCD_012.replace("1: ftdi\\n2: remote_bitbang", "1: jlink\\n2: buspirate\\n3: hostio4")
+
+
+def test_openocd_on_the_path_is_proven_by_its_version_and_its_adapters_and_nothing_else(tmp_path):
+    ocd = exe(tmp_path / "bin" / "openocd", OCD_012)
     run = Recorder()
     step, found = tooltest.detect_one("openocd", "", {"PATH": str(tmp_path / "bin")}, runner=run)
-    assert step == {"step": "openocd", "ok": True, "detail": f"OpenOCD 0.12.0 at {ocd}", "hint": ""}
-    assert found == {"path": str(ocd), "version": "0.12.0", "how": "PATH", "key": "tools.openocd"}
-    assert run.argv == [[str(ocd), "--version"]]
+    assert step == {"step": "openocd", "ok": True, "hint": "",
+                    "detail": f"OpenOCD 0.12.0 at {ocd}: has remote_bitbang (2 adapters)"}
+    assert found == {"path": str(ocd), "version": "0.12.0", "how": "PATH", "key": "tools.openocd",
+                     "adapters": ["ftdi", "remote_bitbang"]}
+    assert run.argv == [[str(ocd), "--version"], [str(ocd), "-c", "adapter list", "-c", "shutdown"]]
+
+
+def test_negative_twin_an_openocd_without_remote_bitbang_fails_with_the_fix(tmp_path):
+    from harness_manager.services import openocd_probe
+
+    ocd = exe(tmp_path / "soclabs" / "openocd", OCD_SOCLABS)
+    step, found = tooltest.detect_one("openocd", str(ocd), {"PATH": ""}, runner=Recorder())
+    assert step["ok"] is False
+    assert step["detail"] == f"OpenOCD 0.12.0 at {ocd}: no remote_bitbang (it has: jlink, buspirate, hostio4)"
+    assert step["hint"] == openocd_probe.fix_hint()
+    assert found["adapters"] == ["jlink", "buspirate", "hostio4"] and found["how"] == "setting"
+    # set by the variable: the hint says the variable, which overrides the setting
+    step, _ = tooltest.detect_one("openocd", str(ocd), {"PATH": ""}, runner=Recorder(),
+                                  source="env")
+    assert "$HARNESS_MANAGER_OPENOCD" in step["hint"] and "unset it" in step["hint"]
+
+
+def test_the_path_search_takes_the_first_openocd_with_remote_bitbang(tmp_path):
+    bad = exe(tmp_path / "a" / "openocd", OCD_SOCLABS)
+    good = exe(tmp_path / "b" / "openocd", OCD_012)
+    path = f"{bad.parent}{os.pathsep}{good.parent}"
+    step, found = tooltest.detect_one("openocd", "", {"PATH": path}, runner=Recorder())
+    assert step["ok"] is True and found["path"] == str(good)          # as debug up picks
+    # twin: none has it: each is named, with what it has
+    step, found = tooltest.detect_one("openocd", "", {"PATH": str(bad.parent)}, runner=Recorder())
+    assert step["ok"] is False and "jlink, buspirate, hostio4" in step["detail"]
+    other = exe(tmp_path / "c" / "openocd", OCD_SOCLABS.replace("hostio4", "cmsis-dap"))
+    step, found = tooltest.detect_one("openocd", "", {"PATH": f"{bad.parent}{os.pathsep}{other.parent}"},
+                                      runner=Recorder())
+    assert step["ok"] is False and found["path"] == str(bad)
+    assert step["detail"].startswith("no openocd on the service's PATH has remote_bitbang: ")
+    assert str(bad) in step["detail"] and str(other) in step["detail"] and "cmsis-dap" in step["detail"]
+    assert "xPack OpenOCD 0.12" in step["hint"]
 
 
 def test_negative_twin_openocd_not_on_the_path_runs_nothing_and_says_how_to_fix_it(tmp_path):

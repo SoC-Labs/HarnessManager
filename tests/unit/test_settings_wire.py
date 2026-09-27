@@ -39,6 +39,17 @@ def fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     runtime.reset()
 
 
+@pytest.fixture(autouse=True)
+def _openocd_has_the_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests are about which path wins, and ``exe()`` writes an empty script, so the
+    adapter probe says yes. The probe itself (lane DEBUG-OCD), and the same precedence with
+    binaries that really list adapters: tests/integration/test_debug_openocd_probe.py."""
+    from harness_manager.services import openocd_probe
+
+    monkeypatch.setattr(openocd_probe, "probe_adapters", lambda binary, **_: openocd_probe
+                        .AdapterList(str(binary), (openocd_probe.REMOTE_BITBANG,)))
+
+
 def state() -> Path:
     return Path(os.environ["HARNESS_MANAGER_STATE_DIR"])
 
