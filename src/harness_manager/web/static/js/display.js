@@ -319,9 +319,12 @@ export class DisplayClient {
   get isWanted() { return this.wanted.mounted && this.wanted.visible && this.wanted.inView; }
 
   want(part) {
+    const was = this.isWanted;
     Object.assign(this.wanted, part);
     if (!this.isWanted) {
       this.close(this.wanted.visible ? "the Live display was scrolled away" : "the tab was hidden");
+    } else if (!was && this.refusal) {
+      this.retry();                        // back on screen: a refusal is asked again, once
     } else if (!this.ws && !this.refusal) {
       this.connect();
     }

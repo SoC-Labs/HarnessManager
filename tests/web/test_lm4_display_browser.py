@@ -350,6 +350,29 @@ def test_a_409_shows_the_text_mirror_and_names_the_holder(page_factory, daemon):
     assert not page.errors, page.errors
 
 
+HIDE = """() => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  document.dispatchEvent(new Event('visibilitychange'));
+}"""
+SHOW = HIDE.replace("'hidden'", "'visible'")
+
+
+def test_a_refused_view_asks_again_when_it_comes_back_on_screen_and_not_before(page_factory, daemon):
+    daemon.app.state.sim.behind_hub(BOARD, lease="other", holder=HOLDER)
+    page = live_page(page_factory)
+    root = by_id(page, "live-display")
+    expect(root).to_have_attribute("data-refused", "HELD", timeout=T)
+    page.evaluate(HIDE)
+    daemon.app.state.sim.behind_hub(BOARD, lease="mine")  # no event says so
+    page.wait_for_timeout(2500)
+    # the twin: a refused view never polls: hidden, or with no event, it asks nothing
+    expect(root).to_have_attribute("data-refused", "HELD")
+    assert viewers(daemon) == 0
+    page.evaluate(SHOW)                                   # back on screen: asked again, once
+    is_live(page)
+    expect(by_id(page, "panel-mirror")).to_have_count(0)
+
+
 def test_a_422_shows_the_text_mirror_and_the_reason(page_factory, daemon):
     sim(daemon).no_display(BOARD)                         # a pack with no live display for it
     page = live_page(page_factory)
