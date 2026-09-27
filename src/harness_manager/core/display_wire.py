@@ -4,12 +4,28 @@ Lane LM1 (DISPLAY-CORE), from ``docs/design/LCD_MIRROR.md`` §6. The contract is
 LCDMIRROR-FPGA §6.2 plus the HM lead's six amendments; the byte layout is HM's reading of
 it (§6.1), plus H1 (``ACK``, ``snap_last``) and the small rules of H3.
 
-**One module on purpose.** The board side (the Linux lead's ``mps3-lcdmirror``) confirms
-or corrects §6.1 and checks in wire vectors. Every place that depends on a byte-level
-assumption is marked with a ``# §6.1`` comment (``# H1`` / ``# H3`` for the requests), so
-a correction lands here as a one-file change. Nothing else in Harness Manager packs or
-unpacks these bytes: ``core.display`` (the model), ``services.display`` (the compositor),
-the fakes and the tests all go through this module.
+**One module on purpose.** Every place that depends on a byte-level fact is marked with a
+``# §6.1`` comment (``# H1`` / ``# H3`` for the requests), so a correction lands here as a
+one-file change. Nothing else in Harness Manager packs or unpacks these bytes:
+``core.display`` (the model), ``services.display`` (the compositor), the fakes and the
+tests all go through this module.
+
+**Confirmed by the board side.** The Linux lead built ``mps3-lcdmirror`` to this reading
+(platform ``feat/lcd-mirror`` d86ce81; ``docs/contracts/net-protocol.md`` v0.15 "LCD mirror
+(TCP 6940)") and checked in wire vectors, copied to ``tests/fixtures/lcdmirror_wire/`` and
+parsed by ``tests/unit/test_lm1_display_wire.py``. Their corrections, applied here:
+
+1. RATE's clamp is echoed in the board's own ``0x11`` reply, at once; nothing about the
+   rate rides an UPDATE.
+2. ``seq`` is per connection and 1 for the first UPDATE (+1 each, wraps at 2^32), so an
+   ``ACK 0`` acknowledges nothing.
+3. owner 3 (unknown) is reserved; sw mode sends only 0 and 1.
+4. There are no heartbeat UPDATEs: nothing changed means no UPDATE, and PING is the
+   liveness probe (``services.display`` keys ``stale`` on PONG).
+5. ``max_msg`` (4096..65536) bounds the WHOLE message, the 8-byte header included (H3);
+   a longer one is corrupt.
+6. REGS is the snooper's raw register log, never reset: after RESETS changes, R16, R17,
+   R36 and R01 come from MODE (``core.display.DisplayFrame.mode_regs``).
 
 Stdlib only; no daemon, no board.
 
@@ -46,6 +62,7 @@ TILE_BYTES = TILE_PX * 2                          # 512
 FRAME_BYTES = W * H * 2                           # 153,600
 VALID_BYTES = (NTILES + 7) // 8                   # 38: §6.1 u8 valid[38]
 REGS_SIZE = 256                                   # §6.1 u8 regs[256]: byte i = last datum to index i
+                                                  # (a raw log, never reset: correction 6)
 
 # --- framing ---------------------------------------------------------------------------------
 
@@ -54,28 +71,32 @@ HEADER = struct.Struct("<2sBBI")                  # §6.1 'L' 'M' u8 type, u8 rs
 HEADER_SIZE = HEADER.size                         # 8
 REFUSAL_BYTE = 0x7B                               # §6.1 a first byte '{' is the refusal line
 REFUSAL_MAX = 4096                                # longest refusal line read before giving up
-#: Amendment 5: ``max_msg`` <= 64 KiB, in HELLO. H3 says it counts the 8-byte header; the
-#: reader accepts a body of up to ``max_msg`` so either reading of H3 parses.
+#: Amendment 5 + H3 (confirmed): ``max_msg`` in HELLO bounds a WHOLE board message, the
+#: 8-byte header included; the board keeps it within 4096..65536.
 MAX_MSG_DEFAULT = 65536                           # §6.1 / H3
-MAX_MSG_CEILING = 1 << 20                         # never buffer more for one message
+MAX_MSG_MIN = 4096                                # §6.1 (LCDM_MIN_MSG)
 
 T_HELLO = 0x01                                    # §6.1
 T_UPDATE = 0x02                                   # §6.1
 T_KEY = 0x10                                      # §6.1 client
-T_RATE = 0x11                                     # §6.1 client u8 hz; the board echoes a 0x11
+T_RATE = 0x11                                     # §6.1 client u8 hz; the board's own 0x11 u8
+                                                  # reply is the clamp (correction 1)
 T_PING = 0x12                                     # §6.1 client u32
 T_PONG = 0x13                                     # §6.1 board u32 (the PING's)
-T_ACK = 0x14                                      # H1 client u32 seq (cumulative)
+T_ACK = 0x14                                      # H1 client u32 seq (cumulative; seq starts
+                                                  # at 1, so ACK 0 acknowledges nothing: correction 2)
 TYPE_NAMES = {T_HELLO: "HELLO", T_UPDATE: "UPDATE", T_KEY: "KEY", T_RATE: "RATE",
               T_PING: "PING", T_PONG: "PONG", T_ACK: "ACK"}
 
 #: H1: the board keeps at most this many UPDATEs unacknowledged.
 ACK_WINDOW = 2                                    # H1
-RATE_MAX = 255                                    # §6.1 RATE is a u8; the board clamps lower
+RATE_MAX = 255                                    # §6.1 RATE is a u8; the board clamps to
+                                                  # 0..HELLO rate_max (30), 0 = pause
 
 # --- UPDATE ----------------------------------------------------------------------------------
 
-#: §6.1: u32 seq, u32 t_ms, u32 frames, u32 resets, u32 status, u8 owner, u8 valid[38] (59 B)
+#: §6.1: u32 seq, u32 t_ms, u32 frames, u32 resets, u32 status, u8 owner, u8 valid[38] (59 B).
+#: seq: per connection, 1 for the first UPDATE, +1 each, wraps at 2^32 (correction 2).
 UPDATE_FIXED = struct.Struct(f"<IIIIIB{VALID_BYTES}s")
 MODE_WORD = struct.Struct("<I")                   # §6.1 u32 mode, when not key_first
 U16 = struct.Struct("<H")
@@ -99,7 +120,8 @@ ST_CSR_MASK = 0x7FF
 # the wire's own bits
 S_EXACT = 1 << 16          # §6.1 amendment 4: hw and not viol, fmt_ok, not approx (H3)
 S_TEXT_ONLY = 1 << 17      # §6.1 amendment 4: sw mode (exact only for the harness's text)
-S_BLIND = 1 << 18          # §6.1 amendment 4: sw mode while the DUT owns the panel
+S_BLIND = 1 << 18          # §6.1 amendment 4: sw mode while the DUT owns the panel (or the
+                           # KVM drives it mid-handover)
 S_KEY = 1 << 24            # §6.1 a part of a keyframe
 S_KEY_FIRST = 1 << 25      # §6.1 its first part: regs[256] in place of the mode word
 S_KEY_LAST = 1 << 26       # §6.1 its last part
@@ -109,7 +131,8 @@ S_FRAMING = S_KEY_BITS | S_SNAP_LAST
 
 OWNER_HARNESS = 0          # §6.1 u8 owner
 OWNER_DUT = 1              # §6.1
-OWNER_UNKNOWN = 3          # §6.1 (any other value reads as unknown)
+OWNER_UNKNOWN = 3          # §6.1 reserved; sw mode sends only 0/1 (correction 3). Any other
+                           # value reads as unknown too
 OWNER_NAMES = {OWNER_HARNESS: "harness", OWNER_DUT: "dut"}
 
 MODES = ("hw", "sw")       # §6.1 HELLO "mode"
@@ -129,7 +152,7 @@ class WireError(ValueError):
 
 
 class ModeRegs(NamedTuple):
-    """The four registers the mode word carries (§6.1 ``{R01,R36,R17,R16}``)."""
+    """The four registers the mode word carries (§6.1: R16 | R17<<8 | R36<<16 | R01<<24)."""
 
     r01: int               # display mode (partial, idle, ...)
     r36: int               # panel characteristic (SS/GS/BGR...)
@@ -219,7 +242,7 @@ class StatusFlags:
 
 
 def owner_name(owner: int) -> str:
-    return OWNER_NAMES.get(owner, "unknown")                       # §6.1 3 (and others) = unknown
+    return OWNER_NAMES.get(owner, "unknown")                       # §6.1 3 (reserved) = unknown
 
 
 # --- messages --------------------------------------------------------------------------------
@@ -242,6 +265,8 @@ class DisplayInfo:
 
     def supported(self) -> str:
         """"" when Harness Manager can render this stream, else why not."""
+        if not MAX_MSG_MIN <= self.max_msg <= MAX_MSG_DEFAULT:                  # §6.1
+            return f"max_msg {self.max_msg} (outside {MAX_MSG_MIN}..{MAX_MSG_DEFAULT})"
         if self.proto != PROTO:
             return f"lcd_mirror proto {self.proto} (this Harness Manager speaks proto {PROTO})"
         if (self.w, self.h, self.tile) != (W, H, TILE):
@@ -276,8 +301,7 @@ def parse_hello(body: bytes) -> DisplayInfo:
         info = DisplayInfo(proto=int(obj.get("proto", 0)), w=int(obj.get("w", 0)),
                            h=int(obj.get("h", 0)), fmt=str(obj.get("fmt", "")),
                            tile=int(obj.get("tile", 0)), mode=str(obj.get("mode", "")),
-                           static_id=str(obj.get("static_id", "")),
-                           max_msg=max(HEADER_SIZE + 1, min(MAX_MSG_CEILING, max_msg)),
+                           static_id=str(obj.get("static_id", "")), max_msg=max_msg,
                            extra={k: v for k, v in obj.items() if k not in _HELLO_KEYS})
     except (TypeError, ValueError) as exc:
         raise WireError(f"HELLO has a malformed field: {exc}") from exc
@@ -441,7 +465,7 @@ class MessageReader:
 
     Framing per §6.1. A ``{`` where a message would start is the refusal line (the board
     closes after it): the reader returns a ``Refusal`` and reads nothing more. ``max_msg``
-    bounds a body (set it from HELLO).
+    bounds a whole message, header included (set it from HELLO).
     """
 
     def __init__(self, max_msg: int = MAX_MSG_DEFAULT) -> None:
@@ -475,8 +499,8 @@ class MessageReader:
             magic, typ, _rsvd, ln = HEADER.unpack_from(buf)          # §6.1 rsvd is not checked
             if magic != MAGIC:
                 raise WireError(f"not an lcd_mirror message (magic {bytes(magic)!r})")
-            if ln > self.max_msg:                                    # H3 (lenient: body <= max_msg)
-                raise WireError(f"message of {ln} B is over max_msg {self.max_msg}")
+            if HEADER_SIZE + ln > self.max_msg:                      # H3: the header counts
+                raise WireError(f"message of {HEADER_SIZE + ln} B is over max_msg {self.max_msg}")
             if len(buf) < HEADER_SIZE + ln:
                 break
             body = bytes(buf[HEADER_SIZE:HEADER_SIZE + ln])
@@ -520,6 +544,8 @@ def pong_msg(token: int) -> bytes:
 
 
 def ack_msg(seq: int) -> bytes:
+    """Every UPDATE up to ``seq`` is consumed (H1, cumulative). ``seq`` 0 acknowledges
+    nothing on a fresh connection: the first UPDATE is seq 1 (correction 2)."""
     return message(T_ACK, U32.pack(seq & 0xFFFFFFFF))                 # H1 u32 seq
 
 
@@ -528,6 +554,8 @@ def hello_msg(info: DisplayInfo) -> bytes:
 
 
 def refusal_line(err: str) -> bytes:
+    """``{"ok":false,"err":"lcd_mirror: busy (2 clients)"}\\n`` (or ``not loopback (use an ssh
+    port forward)``): the board's two refusals, byte for byte."""
     return (json.dumps({"ok": False, "err": err}, separators=(",", ":")) + "\n").encode()   # §6.1
 
 

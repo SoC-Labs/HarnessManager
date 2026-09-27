@@ -6,7 +6,8 @@ H1 as the Linux lead is building it (``lcdmirror_main.c``, uncommitted):
 
 - at most ``clients_max`` (2) clients; the next one gets ONE refusal line, then close;
 - HELLO first (``proto, w, h, fmt, tile, mode, static_id, max_msg``, plus H3's
-  ``boot_id, rate, rate_max, clients_max``); nothing until the client's KEY;
+  ``boot_id, rate, rate_max, clients_max``); nothing until the client's KEY; ``seq`` 1 for
+  the first UPDATE of a connection, +1 each (the board's §6.1 correction);
 - per client, at most ``rate`` SNAPs a second, and only while it has room: at most
   ``window`` UPDATEs unACKed (H1; ``window=None`` models a board without flow control);
 - a SNAP carries the tiles that CHANGED against what this client holds, plus tiles that
@@ -14,8 +15,9 @@ H1 as the Linux lead is building it (``lcdmirror_main.c``, uncommitted):
   its first part. Every tile in its smallest encoding, cut into UPDATEs of at most
   ``max_msg`` (header included, H3), all with one t_ms/frames; the last carries
   ``snap_last`` (H1; ``snap_last=False`` models a board without it);
-- nothing changed: no UPDATE (PING is the liveness probe); ``RATE`` clamps to
-  0..``rate_max`` (0 = pause) and is echoed; PING -> PONG at any time;
+- nothing changed: no UPDATE, ever (no heartbeats: PING is the liveness probe); ``RATE``
+  clamps to 0..``rate_max`` (0 = pause) and the clamp is the board's own ``0x11`` reply;
+  PING -> PONG at any time; owner 0/1 only (3 is reserved);
 - status: the CSR bits, then ``exact`` (hw, no viol, fmt_ok, no approx) or ``text_only``
   (sw) and ``blind`` (sw while the DUT owns the panel).
 
@@ -130,8 +132,8 @@ class _Client:
         self.key_req = False
         self.rate = fake.rate_default
         self.next_snap = 0.0
-        self.seq = (no * 1_000_003 + 0xFFFFFF00) & 0xFFFFFFFF   # per connection; wraps early
-        self.acked = self.seq
+        self.seq = fake.seq_base & 0xFFFFFFFF          # per connection: the first UPDATE is
+        self.acked = self.seq                          # seq_base + 1 = 1 (ACK 0 acks nothing)
         self.parts: list[tuple[list[bytes], int]] = []           # (records, flags) to send
         self.snap_hdr: tuple[Any, ...] | None = None
         self.held = bytearray(w.FRAME_BYTES)                      # what this client holds
@@ -153,7 +155,7 @@ class FakeLcdMirror:
                  window: int | None = w.ACK_WINDOW, clients_max: int = 2, snap_last: bool = True,
                  static_id: str = STATIC_ID, boot_id: str = "fake-boot-1",
                  animate: Callable[[FakePanel, float], None] | None = None,
-                 poll_s: float = 0.005) -> None:
+                 poll_s: float = 0.005, seq_base: int = 0) -> None:
         self.panel = panel or FakePanel()
         self.mode = mode
         self.max_msg = max_msg
@@ -166,6 +168,9 @@ class FakeLcdMirror:
         self.boot_id = boot_id
         self.animate = animate
         self.poll_s = poll_s
+        #: The board starts every connection at seq 1 (seq_base 0). A test sets it near 2^32
+        #: to make a long-lived connection's wrap happen at once.
+        self.seq_base = seq_base
         self.lock = threading.RLock()
         self._clients: list[_Client] = []
         self._conn_no = 0
@@ -391,6 +396,7 @@ class FakeLcdMirror:
             elif typ == w.T_ACK and ln >= 4:
                 a = w.U32.unpack_from(body)[0]
                 self.stats["acks"] += 1
+                self.stats.setdefault("first_ack", a)
                 # newer than what it holds, never beyond what was sent (lcdmirror_main.c)
                 if 0 < ((a - c.acked) & 0xFFFFFFFF) < 0x80000000 and \
                         ((c.seq - a) & 0xFFFFFFFF) < 0x80000000:

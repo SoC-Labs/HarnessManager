@@ -17,8 +17,12 @@ WebSocket; neither is needed here.
   staged and shown whole on ``snap_last`` (once the board has shown it sets that bit;
   before, each UPDATE is shown as it comes). A keyframe is staged and shown on ``key_last``.
 - A ``seq`` gap: stop presenting, send ``KEY``, show the next whole keyframe.
-- ``PING`` every 1 s. No UPDATE or PONG for 3 s: ``stale``; for 10 s, or the stream ends:
-  ``reconnecting`` over the last picture, with back-off; the new connection sends KEY.
+- ``PING`` every 1 s is the liveness probe: the board sends no heartbeat UPDATEs (nothing
+  changed = no UPDATE; the board's §6.1 correction), so a still screen is silent but for
+  its PONGs. No PONG for 3 s: ``stale``; for 10 s, or the stream ends: ``reconnecting``
+  over the last picture, with back-off; the new connection sends KEY.
+- ``fps`` counts whole SNAPs that carried tiles (a header-only change is not a frame).
+- The RATE clamp is the board's own ``0x11`` reply (``status()["rate"]``), never an UPDATE.
 - The last viewer leaves: the upstream closes 30 s later (a returning viewer reuses it).
 - ``close(board, reason)`` closes it at once (the lease hooks, lane LM2).
 - The board's refusal line (a third client): ``refused``, try again in 10 s. A source that
@@ -90,7 +94,7 @@ class DisplayTimings:
 
     grace_s: float = 30.0            # close the upstream this long after the last viewer
     ping_s: float = 1.0
-    stale_s: float = 3.0             # no UPDATE or PONG: stale
+    stale_s: float = 3.0             # no PONG: stale (PING is the liveness probe)
     dead_s: float = 10.0             # ... reconnect
     tick_s: float = 0.1              # the reader's poll: pings, clocks, rate changes
     hello_timeout_s: float = 10.0
@@ -117,7 +121,7 @@ class _Refused(ConnectionError):
 
 
 class _Dead(ConnectionError):
-    """The board went silent (no UPDATE or PONG for ``dead_s``)."""
+    """The board stopped answering PINGs for ``dead_s``."""
 
 
 class _BeforeHello(ConnectionError):
@@ -282,7 +286,7 @@ class _Board:
         self.dims: frozenset[str] = frozenset()
         self.presents: deque[float] = deque()
         self.rx: deque[tuple[float, int]] = deque()
-        self.last_rx = self.clock()
+        self.last_pong = self.clock()
         self._released = False
         self._last_event: tuple[Any, ...] | None = None
         self.stats = {"connects": 0, "updates": 0, "acks_sent": 0, "keys_sent": 0,
@@ -528,6 +532,7 @@ class _Board:
         with self.lock:
             self.info = info
             self.frame.info = info
+            self.frame.new_connection()
         self.rate_asked = self.wanted_rate()
         ds.rate(self.rate_asked)
         ds.key()                                     # amendment 6: KEY on start
@@ -545,7 +550,7 @@ class _Board:
         pings: dict[int, float] = {}
         token = 0
         now = self.clock()
-        self.last_rx = now
+        self.last_pong = now                         # the clock starts at HELLO
         next_ping = now
         next_tick = now
         key_sent_at = now
@@ -564,7 +569,6 @@ class _Board:
             msgs = ds.read(t.tick_s)
             now = self.clock()
             for m in msgs:
-                self.last_rx = now
                 if isinstance(m, DisplayUpdate):
                     u = m
                     self.stats["updates"] += 1
@@ -596,10 +600,9 @@ class _Board:
                             pending = []
                     if u.snap_last:
                         snap_last_seen = True
-                    if self.state == "stale" and not resync:
-                        self.set_state("live", "")
-                elif isinstance(m, Pong):
+                elif isinstance(m, Pong):                # the liveness probe (§6.1 correction 4)
                     self.stats["pongs"] += 1
+                    self.last_pong = now
                     sent = pings.pop(m.token, None)
                     if sent is not None:
                         self.rtt_ms = (now - sent) * 1e3
@@ -632,11 +635,11 @@ class _Board:
                 ds.key()                             # the board answers PING but sent no keyframe
                 key_sent_at = now
                 self.stats["keys_sent"] += 1
-            silence = now - self.last_rx
+            silence = now - self.last_pong
             if silence >= t.dead_s:
-                raise _Dead(f"no UPDATE or PONG from the board for {silence:.0f} s")
+                raise _Dead(f"the board has not answered a PING for {silence:.0f} s")
             if silence >= t.stale_s and self.state == "live":
-                self.set_state("stale", f"no UPDATE or PONG for {silence:.0f} s")
+                self.set_state("stale", f"no answer to PING for {silence:.0f} s")
             want = self.wanted_rate()
             if want != self.rate_asked:
                 self.rate_asked = want
@@ -657,13 +660,14 @@ class _Board:
         now = self.clock()
         with self.lock:
             self.frame.commit(parts, decoded, key=key)
-            self.presents.append(now)
+            if decoded:                          # fps: whole SNAPs that carried tiles
+                self.presents.append(now)
             while self.presents and now - self.presents[0] > self.t.fps_window_s:
                 self.presents.popleft()
             self.stats["keys_presented" if key else "deltas_presented"] += 1
             self.dims = self.debounce.update(self.frame.flags(), now)
             self.cond.notify_all()
-        if self.state != "live":
+        if self.state not in ("live", "stale"):       # stale ends on a PONG, not an UPDATE
             self.set_state("live", "")
         self.publish()
         self._wake_all()

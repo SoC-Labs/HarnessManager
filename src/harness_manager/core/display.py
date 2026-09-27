@@ -94,8 +94,9 @@ CALIBRATED_MADCTL = frozenset({0x20, 0xE0})   # R16: board-proven right way up /
 PANEL_ANCHOR = 0x09                           # R36: board-proven companion value
 DISPMODE_NORMAL = 0x00                        # R01
 COLMOD_565 = 0x05                             # R17
-#: Partial area and vertical scroll (0x0A-0x15). ASSUMED: the register file holds 0 where
-#: nothing was written since the reset (the snooper's and the model's shadows start at 0).
+#: Partial area and vertical scroll (0x0A-0x15). ASSUMED: the register log holds 0 where
+#: nothing was written. The log is never reset (the board's §6.1 correction), so "set" means
+#: written since the mirror started, not since the last panel reset: conservative.
 SCROLL_PARTIAL = range(0x0A, 0x16)
 DIM_PERSIST_S = 1.0                           # §7.4: a dim state must persist 1 s to show
 
@@ -266,8 +267,9 @@ class DisplayFrame:
         self.owner = OWNER_UNKNOWN
         self.status = 0                                   # without the framing bits
         self.seq = self.t_ms = self.frames = self.resets = 0
-        self.regs: bytes | None = None                    # the last 256 REGS (keyframes)
-        self.mode: int | None = None                      # the latest mode word
+        self.regs: bytes | None = None                    # the last 256 REGS (keyframes): a raw log
+        self.mode: int | None = None                      # the latest MODE word (never from REGS)
+        self.mode_resets: int | None = None               # RESETS when that MODE word came
         self.presented = False
         self.version = 0                                  # +1 per commit
 
@@ -288,9 +290,8 @@ class DisplayFrame:
         for u in parts:
             if u.regs is not None:
                 self.regs = u.regs
-                self.mode = wire.mode_word(u.regs)
             elif u.mode is not None:
-                self.mode = u.mode
+                self.mode, self.mode_resets = u.mode, u.resets
         last = parts[-1]                                  # H1: one t_ms/frames across the parts
         self.seq, self.t_ms, self.frames, self.resets = last.seq, last.t_ms, last.frames, last.resets
         self.status = last.status & ~S_FRAMING
@@ -307,9 +308,23 @@ class DisplayFrame:
         return StatusFlags(self.status)
 
     def mode_regs(self) -> ModeRegs:
+        """R01, R36, R17, R16 as the panel holds them. REGS is the snooper's raw register
+        log, never reset (the board's §6.1 correction): after RESETS changes, its four can
+        be pre-reset values. So MODE (the decoded state) wins whenever one has come since
+        the last reset; REGS stand in only until then (a keyframe in one part carries no
+        MODE); then an older MODE; then the calibrated anchor."""
+        if self.mode is not None and self.mode_resets == self.resets:
+            return wire.mode_regs(self.mode)
+        if self.regs is not None:
+            return wire.mode_regs(wire.mode_word(self.regs))
         if self.mode is not None:
             return wire.mode_regs(self.mode)
         return ModeRegs(DISPMODE_NORMAL, PANEL_ANCHOR, COLMOD_565, 0x20)
+
+    def new_connection(self) -> None:
+        """A new upstream connection: a MODE word from the last one may be stale, so the
+        next keyframe's REGS stand in until this connection sends MODE."""
+        self.mode = self.mode_resets = None
 
     def panel_regs(self) -> PanelRegs:
         return PanelRegs.of(self.mode_regs(), self.regs)
@@ -341,7 +356,7 @@ class DisplayFrame:
 
     def header_sig(self) -> tuple[Any, ...]:
         """What a viewer must be told about even when no tile changed."""
-        return (self.valid, self.owner, self.status, self.mode, self.resets)
+        return (self.valid, self.owner, self.status, self.mode_regs(), self.resets)
 
     def viewer_update(self, tiles: Iterable[int], *, key: bool) -> bytes:
         """One UPDATE in the board's own layout (§7.3): the records forwarded as the board
@@ -349,9 +364,8 @@ class DisplayFrame:
         recs = [r for r in (self.records[t] for t in sorted(tiles)) if r is not None]
         status = self.status | S_SNAP_LAST | (S_KEY_BITS if key else 0)
         regs = self.regs_for_viewer()
-        mode = self.mode if self.mode is not None else wire.mode_word(regs)
         return wire.update_msg(self.seq, self.t_ms, self.frames, self.resets, status, self.owner,
-                               self.valid, recs, regs=regs, mode=mode)
+                               self.valid, recs, regs=regs, mode=wire.mode_word(regs))
 
     def picture(self, *, badge_list: Sequence[Badge] = ()) -> DisplayPicture:
         return DisplayPicture(rgb565=self.rgb565(), valid=self.valid,
