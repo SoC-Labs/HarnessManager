@@ -104,8 +104,8 @@ class HubTool:
         self.reader_runs.append(dict(args))
         if self.readers():                  # the script's /proc scan would find them on a hub
             return RunResult(3, json.dumps({"tty": args["tty"], "others": self.readers(),
-                                            "rc": 3, "reason": "another process reads "
-                                            + args["tty"]}) + "\n", "")
+                                            "rc": 3, "reason": "another process names or "
+                                            "has " + args["tty"]}) + "\n", "")
         if self.pty is not None and args["tty"] == self.tty:
             args["tty"] = self.pty.path
         run = [self.python, "-c", HUB_MCC_READ_PY] if self.python else argv[:4]

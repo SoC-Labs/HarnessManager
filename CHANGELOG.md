@@ -236,6 +236,10 @@ owners.
   is unchanged.
 - Background telemetry that finds another reader on the MCC console backs off like a
   refused connection ("Busy (another client)").
+- A hub MCC read or REBOOT refused for another reader of `tty_00` says what the hub saw: a
+  process that "has the MCC console open", or one that "names the MCC console on its
+  command line, so it may open it at any moment" (it is still refused: the hub cannot show
+  another account's open files).
 - New setting `general.background_poll` (`on-view`, the default, or `off`), and
   `poll = "off"` per board in `boards.toml`. With `off`, Harness Manager touches the board
   only when you ask.

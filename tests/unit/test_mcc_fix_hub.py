@@ -11,7 +11,10 @@ Each check has a negative twin.
   and harness restart mid-job, and a check nested in ``guarded`` neither refuses twice nor
   blocks ``--force``;
 - the Linux-only restart is harnessd's ``reboot`` verb;
-- the hub-side reader runs under a real Python 3.6 (skipped only when none is installed).
+- the hub-side reader runs under a real Python 3.6 (skipped only when none is installed);
+- a second reader of tty_00 is refused in words that say what the scan saw: a process that HAS
+  the tty open (its fd), or one that only NAMES it on its command line (and so may open it at
+  any moment), on the reader (a real Python 3.6 and a real pty) and on the REBOOT path.
 
 Nothing reaches a hub, a board or a network beyond 127.0.0.1.
 """
@@ -45,7 +48,12 @@ from harness_manager.services import reset_guard
 from harness_manager_mps3 import hub as hubmod
 from harness_manager_mps3 import hub_mcc
 from harness_manager_mps3 import mcc as mccmod
-from harness_manager_mps3.hub_mcc import HUB_MCC_READ_PY, PY310_PROBE, HubMccController
+from harness_manager_mps3.hub_mcc import (
+    HOLDS_OPEN,
+    HUB_MCC_READ_PY,
+    PY310_PROBE,
+    HubMccController,
+)
 from harness_manager_mps3.identify import IDENTIFY_PORT_ENV
 from harness_manager_mps3.mcc import POST_WRITE_GAP_S, POST_WRITE_TRIES, Mps3Controller
 from harness_manager_mps3.shell import Mps3Shell, ShellResets
@@ -569,3 +577,128 @@ def test_twin_under_python_36_a_talking_mcc_is_not_typed_into():
         (temp,) = hub_controller(tool).temperatures()
         assert not temp.available and "talking" in temp.reason
     assert mcc.accepted_lines == []
+
+
+# --- 9. "has it open" vs "names it on its command line" ---------------------------------------------
+#
+# 2026-09-27: the first real hub MCC read was refused with "another process reads the MCC
+# console" for a soak that only NAMED tty_00 on its command line. The scan still refuses it (a
+# root process's fds are invisible, and one that names the tty may open it at any moment); the
+# words now say which of the two it saw.
+
+#: Opens the tty named in its environment (never on its command line) and holds it.
+_HOLD = ("import os, sys, time\n"
+         "fd = os.open(os.environ['HM_TEST_TTY'], os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)\n"
+         "sys.stdout.write('ready\\n'); sys.stdout.flush(); time.sleep(120)\n")
+#: Opens nothing: the tty is only an argument (``sys.argv[1]``), as a soak's is.
+_NAME = "import sys, time; sys.stdout.write('ready\\n'); sys.stdout.flush(); time.sleep(120)"
+
+
+def _bystander(argv: list[str], **env: str) -> subprocess.Popen:
+    """Another process on the "hub" (not the reader's ancestor), ready: it has exec'd (its
+    command line is its own) and, for the holder, has the tty open."""
+    proc = subprocess.Popen(argv, env={**os.environ, **env}, stdout=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL, text=True)
+    assert proc.stdout.readline().strip() == "ready"
+    return proc
+
+
+def _stop(proc: subprocess.Popen) -> None:
+    proc.kill()
+    proc.wait(timeout=10)
+    proc.stdout.close()
+
+
+def test_the_scan_mark_is_the_same_in_the_reader_and_pyverifys_writer():
+    # the REBOOT path's words come from pyverify's scan: its "holds it open" mark must be ours
+    assert HOLDS_OPEN == "(holds it open) "
+    assert f'"{HOLDS_OPEN}" + cmd' in HUB_MCC_READ_PY
+    assert HOLDS_OPEN in HUB_MCC_REBOOT_PY
+
+
+@pytest.mark.skipif(PY36 is None, reason="no Python 3.6 on this machine (the lab hub's python3)")
+@pytest.mark.parametrize("names_it", [False, True], ids=["fd-only", "fd-and-argv"])
+def test_under_python_36_a_process_holding_tty_00_is_said_to_have_it_open(names_it):
+    # fd-and-argv is a `cat TTY`: the reader looks at the fds first, so it says "open" too
+    mcc = FakeMcc()
+    with PtyMcc(mcc) as pty:
+        holder = _bystander([sys.executable, "-c", _HOLD, *([pty.path] if names_it else [])],
+                            HM_TEST_TTY=pty.path)
+        try:
+            tool = HubTool(pty=pty, python=PY36)
+            ctl = hub_controller(tool)
+            with pytest.raises(HeldError) as exc:
+                ctl.command("CFG R TEMP 0")
+        finally:
+            _stop(holder)
+    err = exc.value
+    assert err.message.startswith(f"another process on the hub has the MCC console {MCC_TTY} "
+                                  f"open (pid {holder.pid}: ")
+    assert "command line" not in err.message and "nothing was typed" in err.message
+    assert "ask whoever runs it" in err.hint and str(holder.pid) in err.holder
+    assert ctl.last_info["rc"] == 3 and ctl.last_info["reason"] == f"another process has {MCC_TTY} open"
+    assert [p for p, _ in ctl.last_info["others"]] == [holder.pid]
+    assert ctl.last_info["others"][0][1].startswith(HOLDS_OPEN)
+    assert mcc.accepted_lines == [] and mcc.menu == "main"          # nothing was typed
+
+
+@pytest.mark.skipif(PY36 is None, reason="no Python 3.6 on this machine (the lab hub's python3)")
+def test_twin_under_python_36_a_process_naming_tty_00_is_refused_but_not_said_to_read_it():
+    mcc = FakeMcc()
+    with PtyMcc(mcc) as pty:
+        # a soak that takes the tty as an argument but does not have it open (yet)
+        namer = _bystander([sys.executable, "-c", _NAME, pty.path])
+        try:
+            tool = HubTool(pty=pty, python=PY36)
+            ctl = hub_controller(tool)
+            with pytest.raises(HeldError) as exc:          # still refused: it may open it
+                ctl.command("CFG R TEMP 0")
+        finally:
+            _stop(namer)
+    err = exc.value
+    assert err.message.startswith(
+        f"another process on the hub names the MCC console {MCC_TTY} on its command line, so "
+        f"it may open it at any moment (pid {namer.pid}: ")
+    assert " open (" not in err.message and "reads" not in err.message
+    assert "nothing was typed" in err.message and "ask whoever runs it" in err.hint
+    assert ctl.last_info["rc"] == 3 and "on its command line" in ctl.last_info["reason"]
+    assert [p for p, _ in ctl.last_info["others"]] == [namer.pid]
+    assert not ctl.last_info["others"][0][1].startswith(HOLDS_OPEN)
+    assert mcc.accepted_lines == [] and mcc.menu == "main"          # nothing was typed
+
+
+def test_the_reboot_refusal_says_the_writer_saw_the_tty_open():
+    # pyverify's writer marks a process it saw holding the tty (its fd): "has it open"
+    mcc = FakeMcc()
+    tool = HubTool(mcc=mcc)
+    tool.others = [[4242, f"{HOLDS_OPEN}picocom -b 115200"]]
+    with pytest.raises(HeldError) as exc:
+        hub_controller(tool).reboot(wait_s=180)
+    assert exc.value.message == (
+        f"refusing the MCC REBOOT: another process on the hub has the MCC console {MCC_TTY} "
+        "open (pid 4242: picocom -b 115200). Nothing was sent")
+    assert "ask whoever runs it" in exc.value.hint
+    assert len(tool.writer_runs) == 1 and mcc.reboots == 0
+
+
+def test_twin_the_reboot_refusal_says_a_named_tty_may_be_opened():
+    # the soak of 2026-09-27: named on its command line, fd not seen. Still refused.
+    mcc = FakeMcc()
+    tool = HubTool(mcc=mcc)
+    tool.others = [[3239, f"python3.11 soak_linux.py --mcc-tty {MCC_TTY}"]]
+    with pytest.raises(HeldError) as exc:
+        hub_controller(tool).reboot(wait_s=180)
+    assert exc.value.message == (
+        f"refusing the MCC REBOOT: another process on the hub names the MCC console {MCC_TTY} "
+        "on its command line, so it may open it at any moment (pid 3239: python3.11 "
+        f"soak_linux.py --mcc-tty {MCC_TTY}). Nothing was sent")
+    assert "ask whoever runs it" in exc.value.hint
+    assert len(tool.writer_runs) == 1 and mcc.reboots == 0
+    # both at once: each named for what it is
+    tool.others.append([4242, f"{HOLDS_OPEN}cat"])
+    with pytest.raises(HeldError) as exc:
+        hub_controller(tool).scan()
+    assert exc.value.message.startswith(
+        f"another process on the hub has the MCC console {MCC_TTY} open (pid 4242: cat), and "
+        "another names it on its command line, so it may open it at any moment (pid 3239: ")
+    assert "ask whoever runs it" in exc.value.hint and mcc.reboots == 0

@@ -264,7 +264,8 @@ not take or request a lease. The board runs the P-mint static `0x61BC6789` with 
 |---|---|---|
 | `the SSH tunnel to mapstone-dev… did not come up: ssh exited with status 255 (…Permission denied (publickey))` | no usable key without a prompt | re-run step 0.4; load the key (`ssh-add`) |
 | `your ssh config gives mapstone-dev… port forwards the tunnel cannot leave out` | a `LocalForward` in an `Include`d file | move it into `~/.ssh/config` itself (the tunnel comments it out there) |
-| R4: `another process reads the MCC console /dev/mps3_01_pl/tty_00 … (pid N: …)` | another reader on `tty_00` (a `cat`, an fpgahub share) | step 2; have it closed, repeat R4 |
+| R4: `another process on the hub has the MCC console /dev/mps3_01_pl/tty_00 open (pid N: …)` | another reader on `tty_00` (a `cat`, an fpgahub share) | step 2; have it closed (ask whoever runs it), repeat R4 |
+| R4: `another process on the hub names the MCC console /dev/mps3_01_pl/tty_00 on its command line, so it may open it at any moment (pid N: …)` | a process that takes `tty_00` as an argument (a soak, a script). The scan cannot see a root process's open files, so it counts every process that names the tty | step 2; ask whoever runs it; repeat R4 once it has stopped |
 | an MCC REBOOT: `no Python 3.10+ for pyverify's MCC tools` | the hub has no `python3.11` (its `python3` is 3.6; reads run on 3.6, a REBOOT does not) | the hub admin installs one; fpgahub's `/opt/fpgahub/bin/python3.11` also counts |
 | R1: `offline`, "the hub … could not reach the shell (channel N: open failed …)" | the hub reached no shell: board off, rebooting, or harness down | check from the hub: the B0 runbook's S2.3 ping block |
 | R1: `busy`, "another client holds the control channel" | a real second client on 6900 (a pyverify run, the hub's poller) | wait, or close the other client |

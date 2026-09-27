@@ -1235,7 +1235,8 @@ that erase or reformat, so none of these steps changes the board controller.
 | the lease was taken | see [section 4](#4-leases-share-a-lab-board); do not drive the board until it is yours |
 | "this build has no pinned update-signing keys" | signed releases are not published yet ([section 10](#10-updates-the-harness-and-the-app)) |
 | an SD install over USB seems stuck | it can take 5 minutes; do not retry mid-write |
-| a reboot through the hub is refused: "another process reads … tty_00" | something else reads the MCC console on the hub (a `cat`, a console, an fpgahub share on `tty_00`). Nothing was sent. Have it closed, then reboot again |
+| a reboot or an MCC read through the hub is refused: "another process on the hub has … tty_00 open" | something else reads the MCC console on the hub (a `cat`, a console, an fpgahub share on `tty_00`). Nothing was sent. Ask whoever runs it to close it, then try again |
+| the same, but "… names … tty_00 on its command line, so it may open it at any moment" | a process on the hub takes the MCC console as an argument (a soak, a script). It may not have it open now, but the hub cannot show another account's open files, so it counts. Nothing was sent. Ask whoever runs it; try again once it has stopped |
 
 ### 13.5 Asking for help
 
