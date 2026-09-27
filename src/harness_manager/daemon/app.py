@@ -394,6 +394,11 @@ class Daemon:
                                     enabled=not getattr(engine, "fake_boards", False))
         self._unquiet = [self.bus.subscribe("session.opened", self._quiet_opened),
                          self.bus.subscribe("session.closed", self._quiet_closed)]
+        # QUIET-POLL follow-up 1: the console broker never re-dials a board whose lease is
+        # someone else's, and refuses a new explicit console there (services/console.py).
+        broker = getattr(engine, "consoles", None) if self.quiet.enabled else None
+        if broker is not None and hasattr(type(broker), "lease_holder"):
+            broker.lease_holder = self._console_lease_holder
 
     # -- QUIET-POLL -------------------------------------------------------------------------
 
@@ -419,17 +424,25 @@ class Daemon:
         view = leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
         return lease_elsewhere(view if view is not None else leases.view(hub))
 
+    def _console_lease_holder(self, board_id: str) -> str:
+        try:
+            return self._lease_elsewhere(board_id)
+        except HarnessError as exc:        # the hub did not answer: consoles are not blocked
+            log.debug("lease of %s for its consoles: %s", board_id, exc.message)
+            return ""
+
     def _quiet_opened(self, ev: Event) -> None:
-        """The board pack reports every control-port connection's outcome to the gate, so a
-        refusal any caller meets backs the background polls off (``Mps3Shell.observer``)."""
+        """The session reports each call on the board's single-client channels to the gate
+        (CCR QUIET-1, ``BoardSession.set_observer``), so a refusal any caller meets backs the
+        background polls off."""
         try:
             session = self.engine.session(ev.board_id)
         except HarnessError:
             return
-        shell = getattr(session, "shell", None)
-        if shell is not None and hasattr(shell, "observer"):
+        seam = getattr(session, "set_observer", None)
+        if callable(seam):
             bid, gate = ev.board_id, self.quiet
-            shell.observer = lambda exc: gate.observe(bid, exc)
+            seam(lambda channel, exc: gate.observe(bid, exc, channel))
 
     def _quiet_closed(self, ev: Event) -> None:
         self.quiet.forget(ev.board_id)
@@ -724,6 +737,18 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         response.headers.setdefault("X-Frame-Options", "DENY")
         if request.url.path.startswith(API) or request.url.path == "/health":
             response.headers["Cache-Control"] = "no-store"
+        seen = request.scope.get("state", {}).get("qp_seen")
+        if seen is not None:
+            # QUIET-POLL: a background read that met another client on the way (the MCC's
+            # second reader inside telemetry, say: the read itself still "succeeded") says
+            # "busy (another client)", as a refused connect does, and the back-off stands.
+            bid, before = seen
+            if d.quiet.refusals(bid) > before:
+                q = await run_in_threadpool(d.quiet.check, bid)
+                if q is not None and q.kind == "busy":
+                    body = await run_in_threadpool(d.quiet_answer, bid, q)
+                    response = _JSON(body)
+                    response.headers["Cache-Control"] = "no-store"
         return response
 
     # -- auth -----------------------------------------------------------------------------
@@ -750,6 +775,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         q = d.quiet.check(bid)
         if q is not None:
             raise _Quiet(d.quiet_answer(bid, q))
+        request.state.qp_seen = (bid, d.quiet.refusals(bid))   # checked after the read
 
     async def ws_auth(websocket: WebSocket) -> bool:
         if d.check_token(websocket.query_params.get("token")):

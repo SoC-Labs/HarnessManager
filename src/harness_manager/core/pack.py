@@ -252,6 +252,14 @@ class DeployResult:
 
 Progress = Callable[[str, int, int], None]   # (phase, done, total)
 
+#: CCR QUIET-1 (lane QUIET-POLL): ``observer(channel, exc)`` after each call a session makes on
+#: one of the board's single-client channels. ``exc`` is None when the board answered, else the
+#: error the call met. Channels: ``CONTACT_CONTROL`` (the harness's control port) and
+#: ``CONTACT_MCC`` (the board controller's console); a pack may add its own.
+ContactObserver = Callable[[str, "BaseException | None"], None]
+CONTACT_CONTROL = "control"
+CONTACT_MCC = "mcc"
+
 #: SLOT-TIMING (additive): a ``Progress`` that also takes ``detail=`` says so with this
 #: attribute set True. The detail of a long card job: ``{rate_bps, eta_s, text}``
 #: ("writing slot B: 12.3 MB / 29 MB, ~6 min left"). Every other progress is called as before.
@@ -639,6 +647,12 @@ class BoardSession(ABC):
     os_slots: OsSlotAdapter | None = None  # CCR T7-2: the Linux harness's A/B OS slots
     card: CardAdapter | None = None        # CCR LS-1: the user microSD (D13 overlay store)
     display: DisplayAdapter | None = None  # LM2: the live display mirror (core.display)
+
+    def set_observer(self, observer: ContactObserver | None) -> None:  # noqa: B027 - optional
+        """CCR QUIET-1 (lane QUIET-POLL): report each call on the board's single-client
+        channels to ``observer(channel, exc)`` (``ContactObserver``); None stops it. The
+        service uses it to back its background reads off while another client holds the
+        board. It must never change a call's result or error. Default: nothing is reported."""
 
     def close(self) -> None:  # noqa: B027 - optional hook
         """Release anything the session holds. Idempotent."""

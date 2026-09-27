@@ -30,8 +30,13 @@ today's behaviour, and when the lease is someone else's the answer names the hol
 
 **Single-client etiquette** is the board pack's (the MPS3 shell opens 6900, asks, and closes
 at once: one call per connection, never an idle connection parked between polls). The pack
-reports each connection's outcome here (``observe``), so a refusal met by ANY caller, a
-presence beat, a background read or a user's own click, starts the back-off.
+reports each call's outcome here through the session's observer seam (CCR QUIET-1,
+``BoardSession.set_observer``; ``observe``), so a refusal met by ANY caller, a presence
+beat, a background read or a user's own click, starts the back-off. Per channel: on the
+control port a refused, reset or timed-out connect counts; on the MCC console only a second
+reader (``HeldError``: another program reads it) counts, since a hub that did not answer says
+nothing about other clients. An answer on a channel ends only the back-off that channel
+started.
 
 The demo (``harness-manager app --demo``) has scripted boards only: its gate is disabled
 (``enabled=False``) and says yes to everything.
@@ -92,9 +97,12 @@ class Quiet:
                 "policy": self.policy, "detail": self.detail}
 
 
-def is_contention(exc: BaseException | None) -> bool:
+def is_contention(exc: BaseException | None, channel: str = "control") -> bool:
     """A connect refused, reset or timed out, or a port another client holds: the board is
-    being used by someone else (or is not answering), so background contact backs off."""
+    being used by someone else (or is not answering), so background contact backs off. On the
+    MCC console only another reader (``HeldError``) counts."""
+    if channel == "mcc":
+        return isinstance(exc, HeldError)
     return isinstance(exc, (HeldError, UnreachableError, ConnectionError, TimeoutError))
 
 
@@ -153,7 +161,7 @@ def _warn_once(message: str) -> None:
 
 
 class _Board:
-    __slots__ = ("viewers", "until", "delay", "detail", "refusals")
+    __slots__ = ("viewers", "until", "delay", "detail", "refusals", "channel")
 
     def __init__(self) -> None:
         self.viewers: dict[str, float] = {}      # viewer id -> monotonic expiry
@@ -161,6 +169,7 @@ class _Board:
         self.delay = 0.0                          # the back-off's current step (0: none)
         self.detail = ""
         self.refusals = 0
+        self.channel = ""                         # the channel whose refusal set the back-off
 
 
 class BackgroundGate:
@@ -231,16 +240,23 @@ class BackgroundGate:
 
     # -- contention -------------------------------------------------------------------------
 
-    def observe(self, board_id: str, exc: BaseException | None) -> None:
-        """A connection's outcome, from the board pack (any caller): None answered, a
-        contention error backs off, anything else says nothing about other clients."""
+    def observe(self, board_id: str, exc: BaseException | None, channel: str = "control") -> None:
+        """A call's outcome on one of the board's channels, from the board pack (any caller):
+        None answered, a contention error backs off, anything else says nothing about other
+        clients."""
         if exc is None:
-            self.note_ok(board_id)
-        elif is_contention(exc):
+            self.note_ok(board_id, channel)
+        elif is_contention(exc, channel):
             self.note_busy(board_id, getattr(exc, "message", "") or str(exc)
-                           or type(exc).__name__)
+                           or type(exc).__name__, channel=channel)
 
-    def note_busy(self, board_id: str, why: str = "") -> float:
+    def refusals(self, board_id: str) -> int:
+        """How many refusals this board has met (a caller compares it before and after)."""
+        with self._mu:
+            rec = self._boards.get(board_id)
+            return rec.refusals if rec is not None else 0
+
+    def note_busy(self, board_id: str, why: str = "", *, channel: str = "control") -> float:
         """The board turned a connection away. Returns the back-off now in force (s).
 
         Refusals met while a back-off runs (a user's own click, the rest of one read) do not
@@ -251,6 +267,7 @@ class BackgroundGate:
             rec = self._get(board_id)
             rec.refusals += 1
             rec.detail = why or rec.detail
+            rec.channel = channel
             if now < rec.until:
                 return rec.until - now
             rec.delay = first if rec.delay <= 0 else min(rec.delay * 2, cap)
@@ -260,12 +277,13 @@ class BackgroundGate:
                  why or "the board turned a connection away")
         return delay
 
-    def note_ok(self, board_id: str) -> None:
-        """A call was answered: the port was free, so the back-off ends."""
+    def note_ok(self, board_id: str, channel: str | None = None) -> None:
+        """A call was answered: that channel was free, so the back-off it started ends (None:
+        whatever started it)."""
         with self._mu:
             rec = self._boards.get(board_id)
-            if rec is not None:
-                rec.until, rec.delay, rec.detail = 0.0, 0.0, ""
+            if rec is not None and (channel is None or rec.channel in ("", channel)):
+                rec.until, rec.delay, rec.detail, rec.channel = 0.0, 0.0, "", ""
 
     def backing_off(self, board_id: str) -> tuple[float, float, str] | None:
         """``(remaining_s, step_s, why)`` while a back-off runs, else None."""

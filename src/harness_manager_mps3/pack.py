@@ -237,6 +237,21 @@ class Mps3Session(BoardSession):
     def link(self, kind: LinkKind) -> Link | None:
         return next((lk for lk in self.candidate.links if lk.kind == kind), None)
 
+    def set_observer(self, observer: Any) -> None:
+        """CCR QUIET-1: the control port's calls (``Mps3Shell.observer``) and the MCC's reads
+        (the controller's ``observer``: a second reader of its console is another client)
+        report to ``observer(channel, exc)``. Applies to the adapters the session has now."""
+        from harness_manager.core.pack import CONTACT_CONTROL, CONTACT_MCC
+
+        def on(channel: str) -> Any:
+            return None if observer is None else (lambda exc: observer(channel, exc))
+
+        if self.shell is not None:
+            self.shell.observer = on(CONTACT_CONTROL)
+        controller = getattr(self, "controller", None)
+        if controller is not None and hasattr(controller, "observer"):
+            controller.observer = on(CONTACT_MCC)
+
     def board_name(self, identity: BoardIdentity | None = None) -> tuple[str, str]:
         """``(name, source)`` for the open board beyond its candidate: the hub's name (N1)."""
         name = _hook("naming", "session_board_name")
