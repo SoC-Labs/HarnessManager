@@ -18,7 +18,7 @@ import { panelState } from "../actions.js";
 import { call, heldByJob, routeMissing } from "../api.js";
 import { ageText, clock, hostOf } from "../format.js";
 import { html, useEffect } from "../lib.js";
-import { boardState, changed, onBoardEvent, onJobEnded, S, timed } from "../store.js";
+import { bgOpts, boardState, changed, heldBack, onBoardEvent, onJobEnded, S, timed } from "../store.js";
 import { ActionRow, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 
 const STATE_CACHE_MS = 1000;        // the daemon reuses a GET /panel answer this long
@@ -71,13 +71,16 @@ function addTap(f, d) {
 
 // --- reads ---------------------------------------------------------------------------------------
 
+// Every panel read is one nobody clicked (the tile's poll, an event, a mount): QUIET-POLL marks
+// them background, and one the daemon held back keeps what the page last showed.
 export async function loadPanel(bid) {
   const f = front(bid);
   if (f.loading) { f.again = true; return; }
   f.loading = true;
-  const r = await timed("panel show", () => call("panel", { bid }));
+  const r = await timed("panel show", () => call("panel", { bid }, undefined, null, bgOpts(bid)));
   f.loading = false;
   f.line = r.line;
+  if (heldBack(bid, r)) { f.again = false; changed(); return; }
   if (r.error) {
     if (routeMissing(r.error)) f.unsupported = true;
     else if (heldByJob(r.error)) f.deferred = true;       // read again when the job ends
@@ -109,9 +112,11 @@ export async function loadFrame(bid) {
   if (f.frameLoading) { f.frameAgain = true; return; }
   f.frameLoading = true;
   f.frameAskedAt = Date.now();
-  const r = await timed("panel mirror", () => call("panelFrame", { bid }));
+  const r = await timed("panel mirror", () => call("panelFrame", { bid }, undefined, null,
+    bgOpts(bid)));
   f.frameLoading = false;
   f.frameLine = r.line;
+  if (heldBack(bid, r)) { f.frameAgain = false; changed(); return; }
   if (r.error) {
     if (routeMissing(r.error)) f.unsupported = true;
     else if (heldByJob(r.error)) f.deferred = true;
