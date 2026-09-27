@@ -70,8 +70,10 @@ def test_the_kit_ui_block_in_api_js_is_separate_and_the_query_is_additive():
     api = (JS / "api.js").read_text()
     block = api.split("// --- KIT-UI:", 1)[1].split("// --- end KIT-UI ---", 1)[0]
     assert set(re.findall(r"^\s+(\w+): \[", block, re.M)) == set(KIT_ROUTES)
-    # call() keeps its three-argument form; the query is a fourth, optional argument
-    assert "export async function call(name, params = {}, body = undefined, query = null)" in api
+    # call() keeps its three-argument form; the query is a fourth, optional argument (and
+    # QUIET-POLL's request options a fifth: the background marker)
+    assert "export async function call(name, params = {}, body = undefined, query = null, " \
+        "opts = {})" in api
 
 
 def test_the_section_colours_come_from_tokens_only():
