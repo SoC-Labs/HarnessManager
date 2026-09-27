@@ -23,6 +23,7 @@ from harness_manager.core.errors import (
 from harness_manager.services.slots import SlotService, push_source
 from harness_manager_mps3 import tunnel as T
 from harness_manager_mps3.identify import IDENTIFY_PORT_ENV
+from tests.fakes.claimed_lock import board_key_fp, pin_claim
 from tests.fakes.lxslots_board import LINUX_SID, TRUSTED, BoardSsh, board_session, slot_board
 from tests.fakes.s0lb_image import header_crc, linux_bundle_s0lb, make_s0lb
 from tests.fakes.t2_overlays import SYNTH_RM_ID, make_overlay, use_overlay_dirs
@@ -236,12 +237,15 @@ def test_twin_the_board_refuses_it_too_when_the_host_check_is_bypassed(linux, im
 
 @pytest.fixture
 def claimed(monkeypatch):
-    fake = slot_board(ssh_claimed=True, slots={"trusted_peer": TRUSTED})
+    """A board THIS Harness Manager claimed (CLAIMED-LOCK: its pin and its record)."""
+    fake = slot_board(ssh_claimed=True, slots={"trusted_peer": TRUSTED},
+                      ssh_host_key_sha256=board_key_fp())
     monkeypatch.setenv(IDENTIFY_PORT_ENV, str(fake.identify_port))
     ssh = BoardSsh(fake)
     monkeypatch.setattr(T, "DEFAULT_LAUNCHER", ssh)
     monkeypatch.setattr(T, "DEFAULT_SSH_G", ssh.ssh_g)
     session = board_session(fake)
+    pin_claim(session)
     yield fake, session, ssh
     session.close()
     ssh.close()

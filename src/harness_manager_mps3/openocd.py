@@ -39,6 +39,16 @@ Three rules from the configs themselves:
    202-215), and ``halt`` fails on an unexamined core.
 3. **One client.** The board's jtag_server serves one OpenOCD at a time
    (jtag_server.c:185-192); a second is accepted and closed at once.
+
+**The claim lock** (lane CLAIMED-LOCK). A claimed Linux board serves 6921 to the board itself
+only; through the hub's tunnel it answers one line (``jtag locked: board claimed (use ssh)``,
+code ``locked``) and closes. So ``openocd_config`` asks the session's claim
+(``claim.lock_route``) before OpenOCD starts: a board this Harness Manager claimed is dialled
+through the session's board-SSH forward (``claim.hold_forward("debug")``: RBB_HOST
+127.0.0.1, RBB_PORT its local end of ``-L ...:127.0.0.1:6921``), held while the OpenOCD runs
+and let go by ``debug_release`` (the debug service calls it when the OpenOCD ends); a board
+claimed by another key, or with no pin here, is ``ClaimLockedError`` with the claim hint
+before anything dials. Bare metal and unclaimed boards keep the shell's endpoint.
 """
 
 from __future__ import annotations
@@ -46,6 +56,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pyverify import rm_id as rmid
 
@@ -147,6 +158,11 @@ class Mps3DebugAdapter:
         self.rbb_port = rbb_port
         self._cfg_dir = cfg_dir
         self._last: DesignDebug | None = None
+        #: CLAIMED-LOCK: the route ``openocd_config`` chose ("" the shell's endpoint,
+        #: "board-ssh" the claim forward) and the forward while an OpenOCD holds it.
+        self.route = ""
+        self._impl = ""
+        self._forward: Any = None
 
     @property
     def cfg_dir(self) -> Path | None:
@@ -155,6 +171,7 @@ class Mps3DebugAdapter:
     def design(self) -> DesignDebug:
         """Ask the board what is loaded and return its debug recipe (or raise 13)."""
         ident = self._session.identity()
+        self._impl = str(getattr(ident, "harness_impl", "") or "")
         if not ident.rm_id:
             raise NothingOnTargetError("the board reports no loaded design",
                                        hint="load nanosoc, nanosoc_upy or nanosoc_iice first")
@@ -167,11 +184,37 @@ class Mps3DebugAdapter:
         # Rule 1: these are consumed by the target half, so they precede every -f.
         # RBB_HOST first: callers and tests key on it. TRANSPORT_MODE is pinned so a
         # future default flip in the config cannot silently change the path.
+        host, port = self._endpoint()
         return (
-            f"set RBB_HOST {self.host}",
-            f"set RBB_PORT {self.rbb_port}",
+            f"set RBB_HOST {host}",
+            f"set RBB_PORT {port}",
             "set TRANSPORT_MODE rbb",
         )
+
+    # -- the claim lock (CLAIMED-LOCK) ---------------------------------------------------
+
+    def _claim_route(self) -> str:
+        """The claim's route for 6921 ("" or "board-ssh"); ``ClaimLockedError`` for a board
+        this Harness Manager cannot enter, before anything dials."""
+        claim = getattr(self._session, "claim", None)
+        if claim is None or not callable(getattr(claim, "lock_route", None)):
+            return ""
+        return claim.lock_route("the debug session (JTAG 6921)", impl=self._impl)
+
+    def _endpoint(self) -> tuple[str, int]:
+        """Where OpenOCD dials: the shell's (hub tunnel or LAN), or on a claimed board the
+        local end of the session's board-SSH forward (held until ``debug_release``)."""
+        if self.route != "board-ssh":
+            return self.host, self.rbb_port
+        if self._forward is None:
+            self._forward = self._session.claim.hold_forward("debug")
+        return "127.0.0.1", self._forward.local_port("rbb")
+
+    def debug_release(self) -> None:
+        """The OpenOCD ended (``services.debug`` calls it): let the claim forward go."""
+        forward, self._forward = self._forward, None
+        if forward is not None:
+            self._session.claim.release_forward("debug")
 
     def openocd_search_paths(self) -> tuple[Path, ...]:
         d = self.cfg_dir
@@ -179,6 +222,7 @@ class Mps3DebugAdapter:
 
     def openocd_config(self) -> tuple[str, ...]:
         recipe = self.design()
+        self.route = self._claim_route()          # a locked board is refused here, first
         d = self.cfg_dir
         missing = [c for c in recipe.configs if d is None or not (d / c).is_file()]
         if missing:
@@ -199,6 +243,8 @@ class Mps3DebugAdapter:
                      for target, proc in recipe.gdb_attach)
 
     def describe(self) -> str:
+        if self.route == "board-ssh":
+            return "remote_bitbang 127.0.0.1:6921 on the board, through its SSH (claimed)"
         return f"remote_bitbang {self.host}:{self.rbb_port}"
 
 

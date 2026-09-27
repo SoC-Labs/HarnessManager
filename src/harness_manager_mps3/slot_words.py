@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from harness_manager.core import errors as _errors
 from harness_manager.core.errors import (
     ActionFailedError,
     HarnessError,
@@ -73,9 +74,10 @@ _UNKNOWN_FABRIC = ("no stage0 status block mapped", "no valid stage0 status bloc
 _UNKNOWN_IMAGE = ("image static_id not provisioned",)
 
 
-class ClaimLockedError(RefusedError):
-    """The claim lock: the board is claimed and this peer is not the board itself (S12).
-    ``claim.ClaimLockedError`` is this class."""
+#: The claim lock: the board is claimed and this peer is not the board itself (S12).
+#: ``claim.ClaimLockedError`` is this class, and so is the core one the board-agnostic XVC
+#: and debug services raise (CLAIMED-LOCK): one lock, one class.
+ClaimLockedError = _errors.ClaimLockedError
 
 
 class IdentityLockError(RefusedError):

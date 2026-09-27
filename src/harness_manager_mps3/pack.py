@@ -316,10 +316,12 @@ class Mps3Session(BoardSession):
 
     def close(self) -> None:
         """Close the live display's forward (LM2: never left open, FINDINGS_TRIAGE #20), the
+        claim forward (CLAIMED-LOCK: debug, XVC, slots and card on a claimed board), the
         hub's share forwards, then the board's SSH tunnel (L1). Idempotent."""
-        display = getattr(self, "display", None)
-        if display is not None and hasattr(display, "close"):
-            display.close()                   # never raises
+        for part in ("display", "claim"):
+            adapter = getattr(self, part, None)
+            if adapter is not None and hasattr(adapter, "close"):
+                adapter.close()               # never raises
         hub = getattr(self, "hub", None)
         try:
             if hub is not None:

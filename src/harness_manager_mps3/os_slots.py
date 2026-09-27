@@ -27,9 +27,14 @@ S3), else by its ``err`` text.
 ``rollback`` and the push are accepted only from the board itself. ``status`` and
 ``verify`` stay open. The adapter:
 
-- sends ``commit``/``rollback`` direct; on ``slot locked: board claimed (use ssh)`` it
-  sends the SAME request again through an SSH forward to the board's 127.0.0.1
-  (a locked refusal changes nothing, so the retry is safe);
+- asks the session's claim first (``claim.lock_route``, lane CLAIMED-LOCK): a board this
+  Harness Manager claimed or adopted gets ``commit``/``rollback`` and the push through the
+  board's own SSH at once; a board claimed by another key, or with no pin here, is
+  ``ClaimLockedError`` (the claim hint) before anything is sent;
+- otherwise sends ``commit``/``rollback`` direct; on ``slot locked: board claimed (use ssh)``
+  it asks the claim again, now knowing the board is claimed, and sends the SAME request
+  through the board's SSH when the claim is ours (a locked refusal changes nothing, so the
+  retry is safe), else raises ``ClaimLockedError`` with the claim hint;
 - decides the push route BEFORE pushing, because a locked push is closed unread and
   says nothing: by ``identify.ssh.claimed`` (UDP 6899) when identify answers; when it
   cannot (UDP does not cross the hub's SSH tunnel), by a LOCK PROBE: ``rollback``
@@ -39,9 +44,9 @@ S3), else by its ``err`` text.
   ``claimed`` (the Linux lead's S2, additive) that answers, and neither identify nor the
   probe is asked.
 
-The board-SSH forward is ``ssh -J HUB USER@BOARD -L ...:127.0.0.1:6900 -L ...:6910``
-(``tunnel.SshTunnel``, the same reach as XVC's; boards.toml ``xvc = {user, host}``
-names the login). It is opened per mutation and closed after it.
+The board-SSH forward is the session's ONE claim forward (``claim.hold_forward``: ``ssh -J
+HUB -l root <pinned host key, claimed key> -L ...:127.0.0.1:6900 -L ...:6910 ... BOARD``),
+shared with debug, XVC and the card, held for the length of one mutation.
 
 **Rule 1.** After a ``commit`` and before the reboot the board has no push target.
 ``push`` refuses that locally with the fix (``slot rollback``); the update executor
@@ -107,11 +112,10 @@ from harness_manager.core.errors import (
     UnreachableError,
     UsageError,
 )
-from harness_manager.core.model import LinkKind
 from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus, report_progress
 
 from . import slot_words
-from .constants import CONTROL_PORT, IMPL_LINUX, PUSH_PORT
+from .constants import IMPL_LINUX, PUSH_PORT
 
 log = logging.getLogger(__name__)
 
@@ -401,24 +405,22 @@ class SlotRecords:
 # --- the board's own SSH (the lock's way through) -----------------------------------------------
 
 
-def board_ssh_target(session: Any) -> tuple[str, str, str]:
-    """``(host, user, jump)`` for ``ssh -J JUMP USER@HOST``: the Linux harness's SSH, as the
-    XVC board-SSH reach finds it (boards.toml ``xvc = {user, host}``, the candidate's SSH
-    link, the hub it is reached through)."""
-    from .xvc import DEFAULT_BOARD_USER, _jump_host, _ssh_link, xvc_config
-
-    cand = session.candidate
-    cfg = xvc_config(cand)
-    link_user, link_host = _ssh_link(cand)
-    host = cfg.get("host") or link_host or getattr(getattr(session, "reach", None),
-                                                    "remote_host", "") or ""
-    if not host:
-        eth = next((lk for lk in cand.links if lk.kind == LinkKind.ETHERNET), None)
-        if eth is not None:
-            from .shell import parse_endpoint
-
-            host = parse_endpoint(eth.address, CONTROL_PORT)[0]
-    return host, cfg.get("user") or link_user or DEFAULT_BOARD_USER, _jump_host(cand)
+@contextlib.contextmanager
+def claim_forward(session: Any, user: str, what: str) -> Iterator[tuple[str, int, int]]:
+    """``(host, control, push)`` through the session's claim forward (the board's own SSH to
+    its 127.0.0.1), held for the ``with``. A session with no claim adapter cannot have one."""
+    claim = getattr(session, "claim", None)
+    if claim is None or not callable(getattr(claim, "forwarded", None)):
+        raise UnreachableError(f"{what}: the board is claimed and this session has no SSH to it",
+                               hint="`harness-manager board claim-status TARGET`")
+    try:
+        with claim.forwarded(user) as t:
+            yield "127.0.0.1", t.local_port("control"), t.local_port("push")
+    except UnreachableError as exc:
+        raise UnreachableError(
+            f"the board is claimed, so {what} must go through its SSH, and that did not come up: "
+            f"{exc.message}", hint=exc.hint or "check `harness-manager board claim-status "
+                                               "TARGET` (your key is the claimed one)") from exc
 
 
 # --- the adapter --------------------------------------------------------------------------------
@@ -615,38 +617,30 @@ class Mps3OsSlots:
             return False
         return _locked(reply)
 
-    @contextlib.contextmanager
-    def _board_forward(self) -> Iterator[tuple[str, int, int]]:
-        """``(host, control, push)`` through the board's own SSH to its 127.0.0.1."""
-        from . import tunnel as _tunnel
+    def _route(self, what: str, claimed: bool | None = None) -> str:
+        """The claim's route for a slot mutation ("" direct, "board-ssh"); a board this
+        Harness Manager cannot enter is ``ClaimLockedError``, before anything is sent."""
+        claim = getattr(self._session, "claim", None)
+        if claim is None or not callable(getattr(claim, "lock_route", None)):
+            return "board-ssh" if claimed else ""
+        return claim.lock_route(what, impl=IMPL_LINUX, claimed=claimed)
 
-        host, user, jump = board_ssh_target(self._session)
-        if not host:
-            raise UnreachableError("no board address for the board-SSH forward",
-                                   hint="set boards.toml xvc = { host = \"...\" }")
-        label = (f"{self._session.candidate.board_id} slot: ssh "
-                 f"{f'-J {jump} ' if jump else ''}{user}@{host}")
-        t = _tunnel.SshTunnel(host, [_tunnel.Forward("control", "127.0.0.1", CONTROL_PORT),
-                                     _tunnel.Forward("push", "127.0.0.1", PUSH_PORT)],
-                              jump=jump, user=user, label=label, restart=False)
-        try:
-            t.start()
-        except UnreachableError as exc:
-            raise UnreachableError(
-                f"the board is claimed, so slot changes go through its SSH, and that did not "
-                f"come up: {exc.message}",
-                hint=f"check `ssh {f'-J {jump} ' if jump else ''}{user}@{host} true` works "
-                     "without a prompt (your key is the claimed one)") from exc
-        try:
-            yield "127.0.0.1", t.local_port("control"), t.local_port("push")
-        finally:
-            t.close()
+    def _board_forward(self) -> Any:
+        """``(host, control, push)`` through the session's claim forward (a ``with``)."""
+        return claim_forward(self._session, "slot", "slot changes")
 
     def _mutate(self, act: str, slot: str | None) -> dict[str, Any]:
-        """``commit``/``rollback``: direct; again through the board's SSH if it is locked."""
+        """``commit``/``rollback``: through the board's SSH when the claim is ours; else
+        direct, and again through the board's SSH if the board says it is locked."""
+        if self._route(f"slot {act}") == "board-ssh":
+            with self._board_forward() as (host, ctl, _push):
+                reply = self._one(host, ctl, act, slot)
+            self.last_route = "board-ssh"
+            return reply
         reply = self._ask(act, slot)
         self.last_route = "direct"
         if not reply.get("ok") and _locked(reply):
+            self._route(f"slot {act}", claimed=True)   # not ours: ClaimLockedError, the hint
             with self._board_forward() as (host, ctl, _push):
                 reply = self._one(host, ctl, act, slot)
             self.last_route = "board-ssh"
@@ -709,7 +703,7 @@ class Mps3OsSlots:
                 hint="the Ethernet door carries only an image for the running static; a new "
                      "static goes through the Debug USB or the hub")
         target = st.target
-        locked = self.claimed(st)
+        locked = self._route("slot push", claimed=self.claimed(st)) == "board-ssh"
         budget = self.timeouts(len(data))
         sid = int(_hex32(static_id), 16)
         report("push", 0, len(data))

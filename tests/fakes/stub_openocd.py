@@ -23,7 +23,9 @@ What it does:
 - ``init`` (explicit, or implied after the command line) connects to
   ``RBB_HOST:RBB_PORT`` like the remote_bitbang adapter: refused ->
   ``Failed to connect``; accepted then closed at once (the board's
-  single-client refusal) -> ``remote_bitbang_fill_buf ... reset by peer``. It
+  single-client refusal) -> ``remote_bitbang_fill_buf ... reset by peer``; a byte
+  that is not '0'/'1' (the claim lock's JSON line) -> ``remote_bitbang: invalid read
+  response: {(123)`` (remote_bitbang.c ``char_to_int``). It
   then reports the IDCODE from ``$STUB_OPENOCD_IDCODE`` (default 0x6ba00477;
   ``none`` -> ``all zeroes``). ``$STUB_OPENOCD_NO_ADAPTER=1`` skips the dial.
 - Binds telnet and tcl before ``init`` and gdb inside it, printing OpenOCD's
@@ -275,6 +277,7 @@ class Stub:
         # client gets '0'/'1' back at once, a refused one reads EOF or an RST. A real
         # exchange, not a silence timeout, so a slow host never mistakes one for the other.
         sock.settimeout(2.0)
+        data = b""
         try:
             sock.sendall(b"R")
             data = sock.recv(1)
@@ -283,6 +286,14 @@ class Stub:
             closed = False
         except OSError:
             closed = True
+        if data and data not in (b"0", b"1"):
+            # remote_bitbang.c char_to_int: anything but '0'/'1' (the claim lock's one JSON
+            # line starts with '{') quits the adapter, then says so.
+            c = data.decode("latin-1")
+            _say("Info : remote_bitbang interface quit")
+            _say(f"Error: remote_bitbang: invalid read response: {c}({ord(c)})")
+            sock.close()
+            return 1
         if closed:
             _say("Error: Error on socket 'remote_bitbang_fill_buf': errno==104, "
                  "message: Connection reset by peer.")

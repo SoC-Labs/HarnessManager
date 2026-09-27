@@ -66,6 +66,12 @@ Traps handled
   (measured). That is reported as ``HeldError`` (exit 4). ``detect`` while a
   session is up asks the running OpenOCD (``scan_chain`` over its tcl port)
   instead of dialling the board a second time.
+- **The claim lock** (CLAIMED-LOCK): a claimed Linux board refuses 6921 to any peer but
+  itself with one JSON line, which OpenOCD reads as ``invalid read response: {(123)``:
+  that is ``ClaimLockedError`` (exit 15, the claim hint), never "held". The pack routes a
+  board this Harness Manager claimed over the board's SSH instead; when an OpenOCD ends
+  (down, a failed start, a detect) the adapter's optional ``debug_release()`` lets that
+  route go.
 - **The JTAG server accepts before it drains** (Linux lead, B1 v4 step (g),
   2026-09-25): while the previous session's final ``Q`` is still unread, a new
   connection counts as a second client and is closed at once, as an RST (a
@@ -113,6 +119,7 @@ from typing import Any, TypeVar
 from harness_manager.core.errors import (
     ActionFailedError,
     AlreadyError,
+    ClaimLockedError,
     HarnessError,
     HeldError,
     NothingOnTargetError,
@@ -406,6 +413,12 @@ _NO_CHAIN_RE = re.compile(r"JTAG scan chain interrogation failed: all (zeroes|on
 _CANT_FIND_RE = re.compile(r"Can't find (\S+)")
 _BEFORE_INIT_RE = re.compile(r"The '(\w+)' command must be used before 'init'")
 _NO_DRIVER_RE = re.compile(r"The specified debug interface was not found \((\S+)\)")
+# The claim lock (CLAIMED-LOCK): a claimed Linux board answers any peer but itself on 6921 with
+# ONE JSON line ({"ok":false,"err":"jtag locked: board claimed (use ssh)","code":"locked"})
+# and closes. remote_bitbang's first sample reads its '{' and OpenOCD 0.12 says
+# "remote_bitbang: invalid read response: {(123)" (remote_bitbang.c char_to_int). A JTAG
+# server answers '0'/'1' only, so a '{' is that line and nothing else.
+_LOCKED_RE = re.compile(r"invalid read response: \{\(123\)")
 _DEAD_IDS = {"0x00000000", "0xffffffff"}
 
 
@@ -445,6 +458,13 @@ def classify_failure(text: str, returncode: int | None, *, target: str = "") -> 
                                             "adapter; install one that has it (0.12 builds "
                                             "with --enable-remote-bitbang)",
                                 hint=openocd_probe.fix_hint(m.group(1)))
+    if _LOCKED_RE.search(text):
+        from harness_manager.services.claim import LOCK_HINT
+
+        return ClaimLockedError(
+            f"the board's JTAG server{where} refused this connection with the claim lock's "
+            "one-line refusal: the board is claimed, and it serves 6921 only to a connection "
+            "from the board itself", hint=LOCK_HINT)
     if "Failed to connect" in text or "Connection refused" in text:
         return UnreachableError(f"OpenOCD could not connect to the board's JTAG server{where}",
                                 hint="is the board up and the harness loaded? (6921 on the shell)")
@@ -485,8 +505,21 @@ _PROCESS_ENDED: dict[str, float] = {}
 def _was_served(exc: BaseException) -> bool:
     """Did the OpenOCD that failed with ``exc`` become the board's client (so its end
     leaves something for the JTAG server to drain)? A reset (``HeldError``: refused at
-    once) and ``UnreachableError`` (never connected) did not; anything else may have."""
-    return not isinstance(exc, (HeldError, UnreachableError))
+    once), the claim lock's refusal (``ClaimLockedError``: refused at accept) and
+    ``UnreachableError`` (never connected) did not; anything else may have."""
+    return not isinstance(exc, (HeldError, ClaimLockedError, UnreachableError))
+
+
+def _release_route(session: Any) -> None:
+    """The OpenOCD this session started has ended: let the pack drop what it opened to
+    reach the board's JTAG server (the MPS3's board-SSH forward on a claimed board,
+    CLAIMED-LOCK), through the adapter's optional ``debug_release()``. Never raises."""
+    release = getattr(getattr(session, "debug", None), "debug_release", None)
+    if callable(release):
+        try:
+            release()
+        except Exception:  # noqa: BLE001 - ending a session must always finish
+            log.exception("releasing the debug route failed")
 
 
 class DebugService:
@@ -830,6 +863,7 @@ class DebugService:
             except HarnessError as exc:
                 # "failed" carries the reason to the GUI (and after a swap, to anyone).
                 self._publish(board_id, "failed", detail=str(exc))
+                _release_route(session)
                 raise
 
     def down(self, session: BoardSession, *, force: bool = False,
@@ -854,6 +888,7 @@ class DebugService:
         live = self._live_pop(board_id)
         if live is not None:
             _terminate(live.proc, self.stop_timeout)
+            _release_route(live.session)
         elif verdict != "elsewhere":
             _kill_pid(pid, self.stop_timeout)
         self._drop_record(board_id)
@@ -886,12 +921,15 @@ class DebugService:
             if rec is not None:
                 raise HeldError(f"the debug session for {board_id} is {verdict}",
                                 holder=self._holder(rec))
-            binary = find_openocd(self.state_dir)
-            cfgs = tuple(adapter.openocd_config())
-            argv = detect_argv(binary, adapter, cfgs)
-            target = getattr(adapter, "describe", lambda: "")()
-            return self._once_more_if_own_race(
-                board_id, lambda: self._detect_once(board_id, argv, target))
+            try:
+                binary = find_openocd(self.state_dir)
+                cfgs = tuple(adapter.openocd_config())
+                argv = detect_argv(binary, adapter, cfgs)
+                target = getattr(adapter, "describe", lambda: "")()
+                return self._once_more_if_own_race(
+                    board_id, lambda: self._detect_once(board_id, argv, target))
+            finally:
+                _release_route(session)           # a one-shot OpenOCD: done with the route
 
     def _detect_once(self, board_id: str, argv: list[str], target: str) -> str:
         self._await_cooldown(board_id)

@@ -15,6 +15,10 @@ ones:
   first is not disturbed (xvc_server.c:516-527).
 - **Swap gating.** While ``gated`` is set, ``getinfo:``/``settck:`` still answer and a
   complete ``shift:`` STALLS unanswered until the gate clears (xvc_server.c:495-497).
+- **The claim lock** (CLAIMED-LOCK, xvc_server.h ``MPS3_XVC_LOCKED_LINE``). With ``claimed``
+  set, a peer other than ``trusted_peer`` (the board itself) gets ONE line, ``{"ok":false,
+  "err":"xvc locked: board claimed (use ssh)","code":"locked"}``, then the close, checked at
+  accept and before the single-client rule (``lock_refusals`` counts them).
 
 Behind the protocol sits a single IEEE 1149.1 TAP (default IDCODE 0x0A003093, what
 Vivado reported for ``debug_bridge_0`` on silicon, platform
@@ -130,6 +134,10 @@ class FakeXvcServer:
         self.accept_bits = 4 * max_bits
         self.gated = threading.Event()
         self.stats = Stats()
+        #: the claim lock (tests.fakes.claimed_lock): claimed, and who "the board itself" is
+        self.claimed = False
+        self.trusted_peer = "127.0.0.3"
+        self.lock_refusals = 0
         self._log_limit = log_limit
         self._mu = threading.Lock()
         self._client: socket.socket | None = None
@@ -213,6 +221,13 @@ class FakeXvcServer:
             except OSError:
                 return
             peer_s = f"{peer[0]}:{peer[1]}"
+            if self.claimed and peer[0] != self.trusted_peer:
+                from tests.fakes.claimed_lock import XVC_LOCKED_LINE, refuse_with_line
+
+                self.lock_refusals += 1
+                self.event("locked", peer_s)
+                refuse_with_line(conn, XVC_LOCKED_LINE)
+                continue
             with self._mu:
                 busy = self._client is not None
                 if not busy:

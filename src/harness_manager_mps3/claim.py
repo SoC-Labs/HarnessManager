@@ -52,6 +52,25 @@ What Harness Manager adds here:
   ``IdentityLockError`` (mismatch or unknown, with the Ethernet fix; ``slot_words``).
 - **After a claim the board accepted** mps3-keys-sync has already run (the Linux lead's C5),
   so ssh refusing the key is never lag: ``KEYS_SYNC_HINT`` says what it is instead.
+- **The claim lock's reach** (lane CLAIMED-LOCK). A claimed board serves some things to the
+  board itself only (a loopback peer: the far end of ``ssh -L ...:127.0.0.1:PORT``): XVC 2542
+  and JTAG 6921 (one line ``{"ok":false,"err":"xvc|jtag locked: board claimed (use ssh)",
+  "code":"locked"}``, then the close), the slot push (6910 kind 2: closed unread), ``slot
+  commit``/``rollback`` (``slot locked: ...``) and the D13 store's ``usd`` actions and re-push
+  ``commit`` (``usd|commit locked: ...``, code ``locked``). Through the hub the board sees the
+  HUB as the peer, so each of those paths asks ``lock_plan``/``lock_route`` first:
+
+  - ``board-ssh``: a board THIS Harness Manager claimed or adopted (a pinned key line, and
+    ``claims.json`` says the pin is ours) that is not known to be unclaimed now: the path
+    goes through the session's ONE board-SSH forward (``hold_forward``: ``open_forward`` of
+    ``LOCKED_FORWARDS``, shared by every user, closed when the last lets go and with the
+    session: FINDINGS_TRIAGE #20);
+  - direct (``ROUTE_DIRECT``): bare metal, a board known unclaimed, or one not known to be
+    claimed that is not ours: today's path, unchanged (a refusal met there is parsed into
+    ``ClaimLockedError``);
+  - ``locked``: a board known claimed that this Harness Manager cannot enter (another key's
+    claim, or no pin here): ``lock_route`` raises ``ClaimLockedError`` with the claim hint
+    before anything is sent.
 
 Bare metal has none of this: ``claim_status`` is None (no ``claim`` key in ``info``) and the
 claim is ``UnavailableError``.
@@ -77,7 +96,7 @@ import tempfile
 import threading
 import time
 import zlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,7 +114,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.model import LinkKind
 
 from . import slot_words as _slot_words
-from .constants import IMPL_LINUX
+from .constants import CONTROL_PORT, IMPL_LINUX, JTAG_RBB_PORT, PUSH_PORT, XVC_PORT
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +164,21 @@ KEY_ONLY: tuple[str, ...] = (
     "-o", "PreferredAuthentications=publickey", "-o", "PasswordAuthentication=no",
     "-o", "KbdInteractiveAuthentication=no",
 )
+
+#: The claim-locked services the session's ONE board-SSH forward carries (CLAIMED-LOCK), each
+#: to the board's own 127.0.0.1: the slot verbs and the card store's verbs (6900), the slot
+#: push and the card commit's pair (6910), JTAG remote_bitbang (6921) and XVC (2542).
+LOCKED_FORWARDS: dict[str, int] = {"control": CONTROL_PORT, "push": PUSH_PORT,
+                                   "rbb": JTAG_RBB_PORT, "xvc": XVC_PORT}
+#: ``lock_plan``'s answers: today's path, the claim forward, refused before sending.
+ROUTE_DIRECT = ""
+ROUTE_BOARD_SSH = "board-ssh"
+ROUTE_LOCKED = "locked"
+#: The way out of a claim this Harness Manager cannot enter.
+LOCKED_HINT = ("if the claim is yours (pyverify claim, another machine), pin it here: "
+               "`harness-manager board claim TARGET --adopt`; if the board was re-provisioned, "
+               "unclaim it on the serial console (mps3-unclaim), then `harness-manager board "
+               "claim TARGET`")
 
 #: How many host keys a board's pin record remembers (``host_keys_seen``; the Linux harness
 #: flips between two while its user microSD is intermittent).
@@ -594,6 +628,13 @@ class Mps3Claim:
         self._records = records or ClaimRecords()
         self._mu = threading.Lock()
         self._lan: Observation | None = None
+        # CLAIMED-LOCK: the session's one board-SSH forward, and who holds it
+        self._fwd_mu = threading.RLock()
+        self._fwd: Any = None
+        self._fwd_users: dict[str, int] = {}
+        self._closed = False
+        #: forwards opened over the session's life (tests, status)
+        self.forwards_opened = 0
 
     # -- facts --------------------------------------------------------------------------------
 
@@ -1153,6 +1194,123 @@ class Mps3Claim:
                 hint="if the board was re-provisioned, re-claim it: `harness-manager board "
                      "claim TARGET --replace-host-key`")
         return exc
+
+    # -- the claim lock's reach (CLAIMED-LOCK) ----------------------------------------------
+
+    def lock_plan(self, *, impl: str | None = None,
+                  claimed: bool | None = None) -> tuple[str, str]:
+        """How a claim-locked path reaches this board (module docstring, "The claim lock's
+        reach"): ``(ROUTE_DIRECT, "")``, ``(ROUTE_BOARD_SSH, "")`` or ``(ROUTE_LOCKED, why)``.
+        Never raises, and never asks a hub (through one, identify's last check is used).
+
+        ``impl``: the harness's ``version.impl`` when the caller has it (else the session's
+        identity is read). ``claimed``: what the caller knows now (slot status's ``claimed``,
+        a lock refusal just met); it wins over identify's."""
+        if (impl if impl is not None else self._impl()) != IMPL_LINUX:
+            return ROUTE_DIRECT, ""
+        bad = ""
+        try:
+            pin = self.config()["host_key"]
+        except UsageError as exc:
+            pin, bad = "", exc.message
+        pinned = ""
+        with contextlib.suppress(UsageError):
+            pinned = pin_fingerprint(pin) if pin else ""
+        rec = self._records.get(self.board_id)
+        ours = bool(pinned) and rec.get("host_key_fp") == pinned
+        mine = ours and not pin.startswith("SHA256:")
+        obs: Observation | None = None
+        known = claimed
+        if known is None:
+            obs = self.observe()
+            known = obs.claimed
+        if known is False:
+            return ROUTE_DIRECT, ""              # unclaimed now: nothing is locked
+        if mine:
+            return ROUTE_BOARD_SSH, ""
+        if known is None:
+            return ROUTE_DIRECT, ""              # not known to be claimed: today's path
+        if bad:
+            return ROUTE_LOCKED, ("the board is claimed, and its SSH settings here cannot be "
+                                  f"used ({bad})")
+        if ours:
+            return ROUTE_LOCKED, ("the board is claimed, and this Harness Manager's pin for it "
+                                  f"is a fingerprint only ({pin}): ssh needs the key")
+        if pinned:
+            return ROUTE_LOCKED, ("the board is claimed, and the host key pinned in boards.toml "
+                                  "is not one this Harness Manager claimed or adopted")
+        seen = rec.get("observed") if isinstance(rec.get("observed"), dict) else {}
+        first = (obs.key_fp if obs is not None else "") or str(seen.get("key_fp") or "")
+        which = (f"the board says its first claimed key is {first}" if first else
+                 "the board does not publish which")
+        return ROUTE_LOCKED, ("the board is claimed by a key this Harness Manager did not "
+                              f"claim or adopt ({which})")
+
+    def lock_route(self, what: str, *, impl: str | None = None,
+                   claimed: bool | None = None) -> str:
+        """``lock_plan``'s route for ``what``; a board this Harness Manager cannot enter is
+        ``ClaimLockedError`` (the claim hint), raised before anything is sent."""
+        route, why = self.lock_plan(impl=impl, claimed=claimed)
+        if route == ROUTE_LOCKED:
+            raise ClaimLockedError(f"{what} needs the claiming key over the board's own SSH: "
+                                   f"{why}; nothing was changed", hint=LOCKED_HINT)
+        return route
+
+    def hold_forward(self, user: str) -> Any:
+        """The session's ONE board-SSH forward (``LOCKED_FORWARDS`` through ``open_forward``:
+        the pinned host key, the claimed key, ``-J`` the hub), opened by its first user and
+        shared. ``release_forward(user)`` lets go; the last one out closes it, and so does
+        ``close`` (FINDINGS_TRIAGE #20: a forward to the board's loopback never lingers).
+        Raises what ``open_forward`` raises (a changed host key, loudly)."""
+        with self._fwd_mu:
+            if self._closed:
+                raise UnreachableError("the board session is closed")
+            if self._fwd is None:
+                self._fwd = self.open_forward(LOCKED_FORWARDS,
+                                              label=f"{self.board_id} claim forward")
+                self.forwards_opened += 1
+            self._fwd_users[user] = self._fwd_users.get(user, 0) + 1
+            return self._fwd
+
+    def release_forward(self, user: str) -> None:
+        """``user`` is done with the forward (idempotent); the last user's release closes it."""
+        with self._fwd_mu:
+            n = self._fwd_users.pop(user, 0)
+            if n > 1:
+                self._fwd_users[user] = n - 1
+            if self._fwd_users or self._fwd is None:
+                return
+            tunnel, self._fwd = self._fwd, None
+        tunnel.close()
+
+    @contextlib.contextmanager
+    def forwarded(self, user: str) -> Iterator[Any]:
+        """``hold_forward`` for the length of a ``with`` (one slot or card mutation)."""
+        tunnel = self.hold_forward(user)
+        try:
+            yield tunnel
+        finally:
+            self.release_forward(user)
+
+    def forward_status(self) -> dict[str, Any] | None:
+        """The forward's ``SshTunnel.status()`` and who holds it; None when none is open."""
+        with self._fwd_mu:
+            tunnel, users = self._fwd, sorted(self._fwd_users)
+        if tunnel is None:
+            return None
+        return {**tunnel.status(), "users": users}
+
+    def close(self) -> None:
+        """The session is closing: drop the forward for good. Idempotent; never raises."""
+        with self._fwd_mu:
+            self._closed = True
+            tunnel, self._fwd = self._fwd, None
+            self._fwd_users.clear()
+        if tunnel is not None:
+            try:
+                tunnel.close()
+            except Exception:  # noqa: BLE001 - closing a session must always finish
+                log.exception("closing the claim forward of %s failed", self.board_id)
 
     # -- the lock's refusal -----------------------------------------------------------------
 

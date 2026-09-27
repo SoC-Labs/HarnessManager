@@ -12,21 +12,71 @@ the ``ssh -J HUB root@BOARD`` reach). This service adds the rules every front en
 - ``status`` is what ``info`` shows (``BoardInfo.claim``); ``refresh=True`` asks the board now,
   through the hub when there is one (``info`` never does that round trip).
 - A change publishes ``board.claim`` ``{board_id, state, ...}`` on the bus.
+
+**The claim lock's one-line refusal** (CLAIMED-LOCK; net-protocol "The lock", HM_ANSWERS C3):
+on a claimed board a port that serves only the board itself (XVC 2542, JTAG 6921) answers any
+other peer with ONE line, ``{"ok":false,"err":"<what> locked: board claimed (use ssh)",
+"code":"locked"}``, then closes. ``lock_refusal`` reads that line and ``lock_error`` makes it
+the ``ClaimLockedError`` every front end shows, instead of "connection closed".
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from harness_manager.core.errors import HarnessError, HeldError, RefusedError, UnavailableError
+from harness_manager.core.errors import (
+    ClaimLockedError,
+    HarnessError,
+    HeldError,
+    RefusedError,
+    UnavailableError,
+)
 from harness_manager.core.events import Event, EventBus
 
 CAPABILITY = "ssh_claim"
 STATE_DIR_ENV = "HARNESS_MANAGER_STATE_DIR"
 NO_ADAPTER = ("this board's pack has no SSH claim (the claim is for the Linux harness; "
               "bare metal has no SSH)")
+#: The refusal's stable code, and the words every locked verb's ``err`` carries.
+LOCKED_CODE = "locked"
+LOCKED_WORDS = "board claimed"
+#: The way out, when nothing more is known about who claimed the board.
+LOCK_HINT = ("the board's SSH is claimed, so it serves this only to a connection from the "
+             "board itself. If your key claimed it, Harness Manager goes through the board's "
+             "SSH: check `harness-manager board claim-status TARGET` (a claim made elsewhere: "
+             "`harness-manager board claim TARGET --adopt`)")
+
+
+def lock_refusal(data: bytes | str | None) -> str:
+    """The ``err`` of the harness's one-line claim-lock refusal, or "" when ``data`` is not
+    one. A JSON object with ``ok`` false and ``code`` "locked" (or, from an image before the
+    code, an ``err`` that says "board claimed")."""
+    if not data:
+        return ""
+    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
+    line = text.strip().splitlines()[0] if text.strip() else ""
+    if not line.startswith("{"):
+        return ""
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return ""
+    if not isinstance(obj, dict) or obj.get("ok") is not False:
+        return ""
+    err = str(obj.get("err") or "")
+    if obj.get("code") == LOCKED_CODE or LOCKED_WORDS in err.lower():
+        return err or f"locked: {LOCKED_WORDS}"
+    return ""
+
+
+def lock_error(err: str, what: str, *, hint: str = "") -> ClaimLockedError:
+    """``what`` refused by the claim lock (``err``: the harness's words)."""
+    return ClaimLockedError(
+        f"{what} was refused: the board is claimed, and this connection did not come from "
+        f"the board itself [harness: {err or 'locked'}]", hint=hint or LOCK_HINT)
 
 
 def _bus_of(engine: Any) -> EventBus | None:

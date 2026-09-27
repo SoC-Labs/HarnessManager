@@ -44,6 +44,14 @@ the board's ``hub`` adapter is asked through ``LeaseService.view`` and anything 
 too. ``lease.state`` released/expired/lost closes the session. A board with no hub has
 no lease; the session lock (one Harness Manager per board) is the gate.
 
+**The claim lock (CLAIMED-LOCK).** A claimed Linux board answers 2542 only for the board
+itself: any other peer (the hub's tunnel) gets ONE line, ``{"ok":false,"err":"xvc locked:
+board claimed (use ssh)","code":"locked"}``, and the close. The relay reads that line as
+the ``locked`` slot and ``open`` fails with ``ClaimLockedError`` (exit 15, the claim hint;
+the adapter's ``xvc_locked_error(err)`` words it when it has one), never "held" and never
+retried. The MPS3 adapter reaches a board this Harness Manager claimed over the board's
+own SSH, so it meets the lock only when the claim state was not known.
+
 **hw_server (D-X2).** HM runs its own: ``-q -p0 -s TCP:127.0.0.1:H -e "set
 auto-open-servers xilinx-xvc:127.0.0.1:R" -e "set jtag-port-filter Xilinx/XVC/127.0.0.1:R"``
 (the XVC cable only, never a local USB one: ``hw_server_argv``), never ``-d`` or ``-I`` (a daemonised or
@@ -85,6 +93,7 @@ from harness_manager.core.capabilities import DEBUG_FABRIC
 from harness_manager.core.errors import (
     ActionFailedError,
     AlreadyError,
+    ClaimLockedError,
     HarnessError,
     HeldError,
     PortBoundError,
@@ -94,6 +103,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession
+from harness_manager.services.claim import lock_error, lock_refusal
 
 log = logging.getLogger(__name__)
 
@@ -256,8 +266,9 @@ class XvcClient:
 
 
 def probe(host: str, port: int, *, timeout: float = 3.0) -> dict[str, Any]:
-    """``{state: free|held|refused|timeout, info, rtt_ms}``. It TAKES the slot for one getinfo,
-    so it is only for the lease holder, and never right before an attach."""
+    """``{state: free|held|locked|refused|timeout, info, rtt_ms}``. It TAKES the slot for one
+    getinfo, so it is only for the lease holder, and never right before an attach. ``locked``:
+    the claim lock's one-line refusal (``info`` is it)."""
     t0 = time.perf_counter()
     try:
         c = XvcClient(host, port, timeout=timeout)
@@ -267,7 +278,8 @@ def probe(host: str, port: int, *, timeout: float = 3.0) -> dict[str, Any]:
         return {"state": "timeout", "info": str(exc), "rtt_ms": None}
     try:
         info = c.getinfo()
-        state = "free" if info.startswith(GETINFO_REPLY_PREFIX) else "held"
+        state = "free" if info.startswith(GETINFO_REPLY_PREFIX) else (
+            "locked" if lock_refusal(info) else "held")
     except (XvcClosed, ConnectionResetError, BrokenPipeError, XvcProtocolError):
         info, state = "", "held"             # accept-then-close: another client has the slot
     except OSError as exc:
@@ -347,19 +359,28 @@ class XvcRelay:
 
     ``endpoint()`` gives the upstream (host, port); it is called on every (re)connect,
     so an adapter may open a forward lazily. ``board_slot``: ``ours`` (we hold it),
-    ``held`` (someone else does), ``refused`` (nothing serves it), ``down`` (lost,
-    reconnecting), ``released`` (dropped on purpose: a swap or a close).
+    ``held`` (someone else does), ``refused`` (nothing serves it), ``locked`` (the claim
+    lock refused us: its one line, or the adapter before connecting), ``failed`` (the
+    adapter could not give an endpoint), ``down`` (lost, reconnecting), ``released``
+    (dropped on purpose: a swap or a close). ``locked`` and ``failed`` are never retried.
+
+    ``locked_error(err)``: the pack's words for the claim lock's refusal (who claimed the
+    board, the way out); None: the generic ``services.claim.lock_error``.
     """
 
     def __init__(self, endpoint: Callable[[], tuple[str, int]], *, port: int = 0,
                  on_change: Callable[[], None] | None = None,
                  refused_why: Callable[[float], str] | None = None,
+                 locked_error: Callable[[str], HarnessError | None] | None = None,
                  identify_peer: bool = True, connect_timeout: float = 5.0,
                  backoff_s: Sequence[float] = (0.5, 1.0, 2.0, 5.0, 10.0),
                  label: str = "") -> None:
         self._endpoint = endpoint
         self._on_change = on_change
         self._refused_why = refused_why
+        self._locked_error = locked_error
+        #: The typed error behind a ``locked``/``failed`` slot (``acquire`` raises it).
+        self.error: HarnessError | None = None
         self.identify_peer = identify_peer
         self.connect_timeout = connect_timeout
         self._backoff = tuple(backoff_s) or (1.0,)
@@ -463,7 +484,10 @@ class XvcRelay:
             if state != "held" or time.monotonic() + delay > deadline or self._stop.is_set():
                 with self._mu:
                     self.board_slot, self.slot_detail = state, detail
+                    error = self.error
                 self._changed()
+                if state in ("locked", "failed") and error is not None:
+                    raise error                  # typed, with its way out; never retried
                 if state == "held":
                     raise HeldError(f"the board's XVC slot is held by another client ({detail})",
                                     holder="another XVC client on the board",
@@ -475,13 +499,31 @@ class XvcRelay:
             time.sleep(delay)
             delay = min(delay * 2, 1.0)
 
+    def _locked(self, err: str) -> tuple[str, str]:
+        """The claim lock's refusal line (``err``) as the ``locked`` slot and its error."""
+        exc: HarnessError | None = None
+        if self._locked_error is not None:
+            try:
+                exc = self._locked_error(err)
+            except Exception:  # noqa: BLE001 - the pack's words are only a refinement
+                log.exception("%s: the pack's claim-lock words failed", self.label)
+        self.error = exc or lock_error(err, "XVC (the board's 2542)")
+        return "locked", self.error.message
+
     def _connect_once(self) -> tuple[str, str]:
-        """``(ours|held|refused, detail)``; on ``ours`` the upstream is installed."""
+        """``(ours|held|refused|locked|failed, detail)``; on ``ours`` the upstream is
+        installed. ``locked``/``failed`` leave their typed error in ``self.error``."""
         t0 = time.monotonic()
         try:
             host, port = self._endpoint()
-        except HarnessError as exc:
+        except ClaimLockedError as exc:          # the pack refused before connecting
+            self.error = exc
+            return "locked", exc.message
+        except UnreachableError as exc:
             return "refused", exc.message
+        except HarnessError as exc:              # a changed host key, a bad setting: typed
+            self.error = exc
+            return "failed", exc.message
         try:
             up = socket.create_connection((host, port), timeout=self.connect_timeout)
         except ConnectionRefusedError:
@@ -495,6 +537,10 @@ class XvcRelay:
             up.sendall(GETINFO)
             info = read_reply(reader, 0).decode("ascii", "replace").strip()
             if not info.startswith(GETINFO_REPLY_PREFIX):
+                locked = lock_refusal(info)
+                if locked:                       # the claim lock's one line, then its close
+                    _close(up)
+                    return self._locked(locked)
                 raise XvcProtocolError(f"unexpected getinfo reply {info!r}")
             up.settimeout(None)
         except (XvcClosed, ConnectionResetError, BrokenPipeError, XvcProtocolError) as exc:
@@ -1435,6 +1481,7 @@ class XvcService:
                 relay = XvcRelay(adapter.xvc_endpoint, port=ports.relay,
                                  on_change=lambda: self._publish_live(board_id),
                                  refused_why=self._refused_why(adapter),
+                                 locked_error=getattr(adapter, "xvc_locked_error", None),
                                  label=f"xvc relay {board_id}")
                 live = _Live(board_id, session, adapter, relay, ports, "byo" if byo else "m1",
                              binary=binary, rm_id=rm_id, rm_name=rm_name, facts=facts)
