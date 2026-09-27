@@ -461,6 +461,58 @@ def test_twin_force_with_the_phrase_resets_during_the_job(capsys, cli):
     assert power.cycles == 1
 
 
+@pytest.fixture
+def cli_real_mcc(monkeypatch):
+    """``cli`` with the REAL MPS3 controller (a local Debug-USB ``Mps3Controller`` on a fake
+    MCC), bound to the CLI's own session: its ``reboot()`` asks the reset guard itself
+    (MCC-FIX's ``guard_reset``), inside the CLI's ``guarded`` block."""
+    from harness_manager_mps3.mcc import Mps3Controller
+    from tests.fakes.fake_mcc import FakeMcc
+    from tests.fakes.t3_clock import FakeClock, RecordingPort
+
+    fake = _board(monkeypatch)
+    clock = FakeClock()
+    mcc = FakeMcc(clock=clock, down_s=1.0, boot_s=25.0, autoboot_window_s=3.0)
+    port = RecordingPort(mcc, clock)
+
+    def make(session):
+        ctl = Mps3Controller("fake://integ-w4", clock=clock, sleep=clock.sleep,
+                             opener=lambda url, baud: port)
+        ctl.session = session
+        return ctl
+
+    monkeypatch.setenv("HARNESS_MANAGER_NO_DAEMON", "1")
+    monkeypatch.setenv(PUSH_PORT_ENV, str(fake.raw_tcp_port))
+    monkeypatch.setattr("harness_manager_mps3.mcc.make_controller_adapter", make)
+    yield fake, f"{fake.host}:{fake.control_port}", mcc
+    fake.stop()
+
+
+def test_the_cli_and_the_real_controller_both_guard_and_force_reaches_through(capsys,
+                                                                               cli_real_mcc):
+    fake, target, mcc = cli_real_mcc
+    bid = f"mps3@{target}"
+    fake.hold_job("writing")
+    rc, _, err = run(capsys, "mcc", target, "reboot", "--yes")
+    assert rc == 4 and "MCC REBOOT refused: slot B is being written" in err
+    assert err.count("refused") == 1 and mcc.reboots == 0          # one refusal, not two
+    rc, out, err = run(capsys, "mcc", target, "reboot", "--yes", "--force",
+                       "--consent", f"RESET {bid}")
+    assert rc == 0, err
+    assert mcc.reboots == 1 and "MCC loaded MB/HBI0309C/Nanosoc/nanosoc.bit" in out
+    rc, _, err = run(capsys, "mcc", target, "cmd", "REBOOT", "--force", "--consent",
+                     f"RESET {bid}")
+    assert rc == 0, err
+    assert mcc.reboots == 2
+
+
+def test_twin_idle_the_real_controller_reboots_without_force(capsys, cli_real_mcc):
+    fake, target, mcc = cli_real_mcc
+    rc, _, err = run(capsys, "mcc", target, "reboot", "--yes")
+    assert rc == 0, err
+    assert mcc.reboots == 1
+
+
 def test_force_is_not_offered_for_a_harness_reboot_or_a_swap(linux):
     fake, session = linux
     for action in (reset_guard.ACTION_HARNESS_REBOOT, reset_guard.ACTION_DEPLOY):

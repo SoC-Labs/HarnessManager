@@ -63,7 +63,6 @@ The reboot witness:
 
 from __future__ import annotations
 
-import importlib
 import logging
 import re
 import time
@@ -84,6 +83,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.model import LinkKind, Reading
 from harness_manager.core.pack import Progress
 from harness_manager.core.transport import SerialPort, open_serial
+from harness_manager.services import reset_guard
 
 from .constants import MCC_CHAR_PACE_S
 
@@ -165,25 +165,19 @@ def bare_crlf(text: str | None) -> bool:
     return bool(text) and _BARE_CRLF.fullmatch(text) is not None
 
 
-#: SLOT-TIMING's reset guard (their branch): never reset while the board's card job writes or
-#: reads back (B2 2026-09-26: a reboot mid-job left the card with "uSD init error"). Imported by
-#: name, so this runs before and after that module lands.
-RESET_GUARD_MODULE = "harness_manager.services.reset_guard"
-
-
 def guard_reset(session: Any, action: str) -> None:
-    """``reset_guard.check(session, reset_guard.<action>)`` when the module exists. It raises
-    its ``CardBusyError`` (exit 4) while the card job runs; inside a caller's ``guarded``
-    block for this board it passes. ``action``: ``ACTION_MCC_REBOOT``/``ACTION_HARNESS_REBOOT``."""
+    """SLOT-TIMING's reset guard (``harness_manager.services.reset_guard``): never reset
+    while the board's card job writes or reads back (B2 2026-09-26: a reboot mid-job left
+    the card with "uSD init error"). ``reset_guard.check(session, reset_guard.<action>)``: it
+    raises its ``CardBusyError`` (exit 4) while the card job runs. Inside a caller's
+    ``guarded`` block for this board on this thread (the CLI's and the daemon's MCC REBOOT,
+    with or without ``--force``) it passes without asking the board again, so the two layers
+    never both refuse and ``--force`` reaches through. ``action``: ``ACTION_MCC_REBOOT`` /
+    ``ACTION_HARNESS_REBOOT``. A controller with no session (built by hand) has no board
+    to ask."""
     if session is None:
         return
-    try:
-        rg = importlib.import_module(RESET_GUARD_MODULE)
-    except ModuleNotFoundError as exc:
-        if exc.name != RESET_GUARD_MODULE:
-            raise
-        return
-    rg.check(session, getattr(rg, action))
+    reset_guard.check(session, getattr(reset_guard, action))
 
 
 # --- command classification (the allowlist) -------------------------------------------

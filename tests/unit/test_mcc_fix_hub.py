@@ -7,7 +7,9 @@ Each check has a negative twin.
 - the post-SD-write quirk (a bare CR answered with only CR/LF) is retried, a real refusal is not,
   and the retry is bounded; locally too;
 - the hub door's REBOOT is pyverify's ``sd field --already-written`` on the hub;
-- SLOT-TIMING's reset guard is asked before every REBOOT and harness restart;
+- SLOT-TIMING's reset guard (the real module, reading a held card job) refuses every REBOOT
+  and harness restart mid-job, and a check nested in ``guarded`` neither refuses twice nor
+  blocks ``--force``;
 - the Linux-only restart is harnessd's ``reboot`` verb;
 - the hub-side reader runs under a real Python 3.6 (skipped only when none is installed).
 
@@ -22,7 +24,8 @@ import shlex
 import shutil
 import subprocess
 import sys
-import types
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,21 +41,23 @@ from harness_manager.core.errors import (
     UnavailableError,
 )
 from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.services import reset_guard
 from harness_manager_mps3 import hub as hubmod
 from harness_manager_mps3 import hub_mcc
 from harness_manager_mps3 import mcc as mccmod
 from harness_manager_mps3.hub_mcc import HUB_MCC_READ_PY, PY310_PROBE, HubMccController
+from harness_manager_mps3.identify import IDENTIFY_PORT_ENV
 from harness_manager_mps3.mcc import POST_WRITE_GAP_S, POST_WRITE_TRIES, Mps3Controller
 from harness_manager_mps3.shell import Mps3Shell, ShellResets
 from tests.fakes.fake_mcc import FakeMcc, SilentPort
 from tests.fakes.hub_mcc_fakes import MCC_TTY, HubTool, PtyMcc
 from tests.fakes.l1_fake_hub import FakeHub, FakeLane
+from tests.fakes.lxslots_board import LINUX_SID, board_session, slot_board
 from tests.fakes.t3_clock import FakeClock, RecordingPort
 
 HUB = "mapstone-dev.ecs.soton.ac.uk"
 TARGET = "mps3_01_pl"
 LANE2 = "/dev/mps3_01_pl/tty_02"
-GUARD = mccmod.RESET_GUARD_MODULE
 
 
 class Sleeps:
@@ -365,91 +370,148 @@ def test_twin_without_a_door_write_the_reboot_is_the_plain_paced_reboot():
     assert [r["mode"] for r in hub.mcc_runs] == ["reboot"]
 
 
-# --- 6. SLOT-TIMING's reset guard before every reboot ------------------------------------------------
+# --- 6. SLOT-TIMING's reset guard before every reboot: the REAL module --------------------------------
+#
+# ``harness_manager.services.reset_guard`` exists now (INTEG-W4 merged SLOT-TIMING first), so
+# ``mcc.guard_reset`` imports it outright: no stand-in. The card job is a Linux SlotBoard's
+# (``hold_job``), read through the real MPS3 session's ``Mps3OsSlots.busy_job``.
 
-
-class CardBusy(HeldError):
-    pass
+A_RECORDED = {"state": "valid", "hdr_crc": 0x3E5E9C2C, "len": 24354312, "sid": LINUX_SID}
+MB29 = 29_000_000
 
 
 @pytest.fixture
-def guard(monkeypatch):
-    """A stand-in for ``harness_manager.services.reset_guard`` (it lands in SLOT-TIMING's
-    branch): ``busy`` decides; ``asked`` records every check."""
-    mod = types.ModuleType(GUARD)
-    mod.ACTION_MCC_REBOOT, mod.ACTION_HARNESS_REBOOT = "MCC REBOOT", "harness reboot"
-    mod.busy, mod.asked = False, []
-
-    def check(session, action, **_kw):
-        mod.asked.append((session, action))
-        if mod.busy:
-            raise CardBusy(f"{action} refused: slot B is being written (12.3/29 MB); a reset "
-                           "now can wedge the card", holder="the card job")
-
-    mod.check = check
-    monkeypatch.setitem(sys.modules, GUARD, mod)
-    return mod
+def card_board(monkeypatch):
+    """A Linux board whose card job a test holds, and the real MPS3 session on it."""
+    fake = slot_board(slots={"a": A_RECORDED})
+    monkeypatch.setenv(IDENTIFY_PORT_ENV, str(fake.identify_port))
+    session = board_session(fake)
+    try:
+        yield fake, session
+    finally:
+        session.close()
+        fake.stop()
 
 
-def test_the_guard_refuses_a_hub_reboot_mid_card_job(guard):
+def local_mcc() -> tuple[FakeMcc, FakeClock]:
+    clock = FakeClock()
+    return FakeMcc(clock=clock, down_s=1.0, boot_s=25.0, autoboot_window_s=3.0), clock
+
+
+def test_guard_reset_is_the_real_module_not_an_optional_import():
+    assert mccmod.reset_guard is reset_guard
+    assert not hasattr(mccmod, "RESET_GUARD_MODULE")
+
+
+def test_the_real_guard_refuses_a_local_reboot_mid_card_job(card_board):
+    fake, session = card_board
+    mcc, clock = local_mcc()
+    ctl = local(mcc, clock)
+    ctl.session = session
+    fake.hold_job("writing")
+    with pytest.raises(reset_guard.CardBusyError, match="slot B is being written") as exc:
+        ctl.reboot(wait_s=120)
+    assert exc.value.message.startswith("MCC REBOOT refused") and exc.value.code == 4
+    with pytest.raises(reset_guard.CardBusyError):
+        ctl.command("REBOOT")                                    # `mcc cmd REBOOT`: the same
+    assert mcc.accepted_lines == [] and mcc.reboots == 0
+    fake.end_job()                                               # twin: the job ended
+    ctl.reboot(wait_s=120)
+    assert mcc.reboots == 1
+
+
+def test_the_real_guard_refuses_a_hub_reboot_mid_card_job(card_board):
+    fake, session = card_board
     mcc = FakeMcc()
     tool = HubTool(mcc=mcc)
-    session = SimpleNamespace(candidate=None)
-    guard.busy = True
-    with pytest.raises(CardBusy, match="being written"):
+    fake.hold_job("verifying", got=MB29, length=MB29)
+    with pytest.raises(reset_guard.CardBusyError, match="slot B is being read back"):
         hub_controller(tool, session=session).reboot(wait_s=180)
+    with pytest.raises(reset_guard.CardBusyError):
+        hub_controller(tool, session=session).command("REBOOT")
     assert tool.calls == [] and mcc.reboots == 0
-    assert guard.asked == [(session, "MCC REBOOT")]
-    guard.busy = False                                             # twin: idle card, it reboots
+    fake.end_job()                                               # twin: idle card, it reboots
     hub_controller(tool, session=session).reboot(wait_s=180)
     assert mcc.reboots == 1
 
 
-def test_the_guard_refuses_a_local_reboot_mid_card_job(guard):
-    clock = FakeClock()
-    mcc = FakeMcc(clock=clock, down_s=1.0, boot_s=25.0, autoboot_window_s=3.0)
-    ctl = local(mcc, clock)
-    ctl.session = SimpleNamespace(candidate=None)
-    guard.busy = True
-    with pytest.raises(CardBusy):
-        ctl.reboot(wait_s=120)
-    assert mcc.accepted_lines == [] and mcc.reboots == 0
-    guard.busy = False
-    ctl.reboot(wait_s=120)
-    assert mcc.reboots == 1 and [a for _, a in guard.asked] == ["MCC REBOOT"] * 2
-
-
-def test_twin_without_the_guard_module_a_reboot_goes_ahead(monkeypatch):
-    monkeypatch.setitem(sys.modules, GUARD, None)                  # import -> ModuleNotFoundError
+def test_twin_a_board_with_no_card_job_to_protect_reboots_freely():
+    # bare metal (no OS slots): the real guard has nothing to read, so the reboot goes ahead
     mcc = FakeMcc()
-    hub_controller(HubTool(mcc=mcc), session=SimpleNamespace()).reboot(wait_s=180)
+    hub_controller(HubTool(mcc=mcc), session=SimpleNamespace(candidate=None)).reboot(wait_s=180)
     assert mcc.reboots == 1
+
+
+def test_a_check_nested_in_guarded_does_not_refuse_twice_and_force_reaches_through(card_board):
+    fake, session = card_board
+    bid = session.candidate.board_id
+    mcc, clock = local_mcc()
+    ctl = local(mcc, clock)
+    ctl.session = session
+    reads: list[int] = []
+    probe = session.os_slots.busy_job
+
+    def counted():
+        reads.append(1)
+        return probe()
+
+    session.os_slots.busy_job = counted
+    # the CLI/daemon layer checked (idle) and holds the scope; a job that starts after that
+    # is not read again by the pack's own check: one read, one reboot
+    with reset_guard.guarded(session, reset_guard.ACTION_MCC_REBOOT):
+        fake.hold_job("writing")
+        ctl.reboot(wait_s=120)
+    assert mcc.reboots == 1 and len(reads) == 1 and reset_guard.scope_of(bid) is None
+    # --force with the typed phrase (the CLI's --force/--consent): the outer layer reads the
+    # job and lets it go; the inner check passes, so the forced reboot happens
+    with reset_guard.guarded(session, reset_guard.ACTION_MCC_REBOOT, force=True,
+                             consent=f"RESET {bid}") as job:
+        assert job is not None and job.state == "writing"
+        ctl.reboot(wait_s=120)
+    assert mcc.reboots == 2 and len(reads) == 2
+    # twin: another thread is not inside this thread's scope: its check reads and refuses
+    seen: list[BaseException] = []
+
+    def other() -> None:
+        try:
+            mccmod.guard_reset(session, "ACTION_MCC_REBOOT")
+        except reset_guard.CardBusyError as exc:
+            seen.append(exc)
+
+    with reset_guard.guarded(session, reset_guard.ACTION_MCC_REBOOT, force=True,
+                             consent=f"RESET {bid}"):
+        t = threading.Thread(target=other)
+        t.start()
+        t.join(10)
+    assert len(seen) == 1
+    # twin: --force without the phrase is refused by the outer layer; the MCC is untouched
+    with pytest.raises(RefusedError, match="typed phrase"):
+        with reset_guard.guarded(session, reset_guard.ACTION_MCC_REBOOT, force=True,
+                                 consent="RESET"):
+            ctl.reboot(wait_s=120)
+    # twin: outside any guarded block the pack's own check reads the job and refuses
+    with pytest.raises(reset_guard.CardBusyError):
+        ctl.reboot(wait_s=120)
+    assert mcc.reboots == 2
 
 
 # --- 7. the Linux-only restart is harnessd's `reboot` verb ------------------------------------------
 
 
-@pytest.fixture
-def linux_shell():
-    fs = FakeShell.ephemeral(static_id=0x3F1A560F, profile="linux")
-    fs.start()
-    try:
-        yield fs
-    finally:
-        fs.stop()
-
-
-def test_restart_the_shell_on_linux_is_the_reboot_verb_without_an_fpga_reload(linux_shell, guard):
-    resets = ShellResets(Mps3Shell(linux_shell.host, linux_shell.control_port),
-                         SimpleNamespace(candidate=None))
+def test_restart_the_shell_on_linux_is_the_reboot_verb_without_an_fpga_reload(card_board):
+    fake, session = card_board
+    resets = ShellResets(Mps3Shell(fake.host, fake.control_port), session)
     assert "shell" in resets.reset_targets()
     resets.reset("shell")
-    assert len(linux_shell.reboots) == 1                            # harnessd restarts itself
-    assert [a for _, a in guard.asked] == ["harness reboot"]
-    guard.busy = True                                               # twin: mid card job, refused
-    with pytest.raises(CardBusy):
+    assert len(fake.reboots) == 1                                   # harnessd restarts itself
+    deadline = time.monotonic() + 10
+    while not fake.boots and time.monotonic() < deadline:          # wait for it to come back
+        time.sleep(0.02)
+    assert fake.boots == ["A"]
+    fake.hold_job("writing")                                        # twin: mid card job, refused
+    with pytest.raises(reset_guard.CardBusyError, match="harness reboot refused"):
         resets.reset("shell")
-    assert len(linux_shell.reboots) == 1
+    assert len(fake.reboots) == 1 and not fake.wedged
 
 
 def test_twin_bare_metal_has_no_reboot_verb_restart():
