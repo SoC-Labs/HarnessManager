@@ -76,6 +76,11 @@ function sync() {
   timer = setInterval(() => { if (viewing()) put(viewing()); }, HEARTBEAT_MS);
 }
 
+// The gate's state again now (after a read the user asked for: the lease may have moved).
+export function refreshState(bid) {
+  if (!unsupported && bid && viewing() === bid) put(bid);
+}
+
 // The store calls this whenever the selection or a board's open state changes.
 export function setViewing(bid) {
   if (bid === wanted) return;

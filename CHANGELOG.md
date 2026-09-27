@@ -197,8 +197,8 @@ owners.
   `poll = "off"` per board in `boards.toml`. With `off`, Harness Manager touches the board
   only when you ask.
 - API (additive): `PUT`/`DELETE /boards/{bid}/viewers/{vid}`, `GET
-  /boards/{bid}/background`, the `X-HM-Background` request header, and `background` on
-  `GET /boards/{bid}` (docs/API.md "Background reads").
+  /boards/{bid}/background`, the `X-HM-Background` request header, and a health note on
+  `GET /boards/{bid}` naming the lease holder (docs/API.md "Background reads").
 
 ### The app's pages
 - A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"

@@ -287,6 +287,11 @@ class BackgroundGate:
             log.exception("reading the background policy of %s failed", board_id)
             return ON_VIEW
 
+    def holder(self, board_id: str) -> str:
+        """Who holds the board's hub lease when it is someone else's, else "" (the lease
+        service's view, cached; never the board)."""
+        return self._holder(board_id)
+
     def _holder(self, board_id: str) -> str:
         if self.lease_of is None:
             return ""

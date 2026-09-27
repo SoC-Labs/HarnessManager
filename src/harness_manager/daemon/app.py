@@ -436,6 +436,20 @@ class Daemon:
     def background_state(self, board_id: str) -> dict[str, Any]:
         return self.quiet.state(board_id)
 
+    def with_lease_note(self, board_id: str, info: Any) -> Any:
+        """``info`` with a health note naming the lease holder when the board's hub lease is
+        someone else's (QUIET-POLL: explicit reads say who holds it). Never touches the board."""
+        if not self.quiet.enabled or not dataclasses.is_dataclass(info):
+            return info
+        holder = self.quiet.holder(board_id)
+        health = getattr(info, "health", None)
+        if not holder or health is None:
+            return info
+        note = (f"the hub lease is held by {holder}: Harness Manager reads this board only "
+                "when you ask (background reads are paused)")
+        return dataclasses.replace(info, health=dataclasses.replace(
+            health, notes=(*health.notes, note)))
+
     def quiet_answer(self, board_id: str, q: Quiet) -> dict[str, Any]:
         """The answer to a background read the gate held back: 200, the board untouched."""
         return ok(board_id=board_id, quiet=q.public(), background=self.quiet.state(board_id))
@@ -1291,9 +1305,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         board(bid)
         with d.gates.op(bid):
             board_info = d.engine.info(bid)
-        # QUIET-POLL: what background contact with this board does now, and the lease holder
-        # when it is someone else's (an explicit read names them). Never touches the board.
-        return _JSON(ok(**_fields(board_info), background=d.background_state(bid)))
+        # QUIET-POLL: an explicit read while the lease is someone else's names the holder (a
+        # health note, so the shape stays BoardInfo's; GET .../background has the rest).
+        return _JSON(ok(**_fields(d.with_lease_note(bid, board_info))))
 
     @api.delete("/boards/{bid:path}")
     def close(bid: str) -> JSONResponse:

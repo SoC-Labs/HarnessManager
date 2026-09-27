@@ -443,7 +443,7 @@ A lab board's control port serves one client at a time, so harness-manager-daemo
 
 - **`background`:** `{allowed, kind, text, holder, retry_in_s, policy, viewers, refusals, detail}`. `kind` is `""` when background contact may go ahead, else `off`, `lease` (the lease is `holder`'s), `no_viewer` or `busy` ("busy (another client)", `retry_in_s` until it may resume). `holder` is filled whenever the lease is someone else's, whatever the `kind`. None of these routes touches the board or takes its gate.
 - **Marking a read as background:** a `GET` with `X-HM-Background: 1` on an open board's route is answered by the gate: when it says no, 200 `{ok, board_id, quiet: {kind, text, holder, retry_in_s, policy, detail}, background}` and the board is not touched. When the board turns such a read away (HELD, UNREACHABLE: refused, reset, timed out), the back-off starts and the answer is the same 200 `quiet` with `kind: busy`, never an error. `X-HM-Viewer: <vid>` on a background read also registers that viewer (a page's first read after a selection). Anything but `GET`, and every read without the header, behaves as before.
-- **Explicit reads name the holder:** `GET /boards/{bid}` adds `background` (the same object), so a read the user asked for while the lease is someone else's says who holds it.
+- **Explicit reads name the holder:** while the lease is someone else's, `GET /boards/{bid}` (and so `harness-manager info`) adds a `health.notes` line naming the holder ("the hub lease is held by alice@lab-pc: ..."); the shape stays BoardInfo's.
 - **The demo** (`--demo`) has scripted boards only: its gate allows everything (`policy: "demo"`).
 
 ## Board names (lane N1, additive; CCR N1-1 to N1-4)

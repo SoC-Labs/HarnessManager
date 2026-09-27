@@ -156,11 +156,18 @@ def test_a_viewing_pages_own_read_registers_it(q):
     assert q.d.quiet.viewers(q.bid) == 1
 
 
+def background_state(r: Rig) -> dict:
+    return r.explicit("/background").json()["background"]
+
+
 def test_explicit_reads_are_never_gated(q):
     t0 = time.monotonic()
     body = q.explicit().json()
     assert body["ok"] and body["identity"]["shell_id"] and q.front.attempts(t0) > 0
-    assert body["background"]["kind"] == "no_viewer" and body["background"]["allowed"] is False
+    st = background_state(q)
+    assert st["kind"] == "no_viewer" and st["allowed"] is False
+    assert set(body) - {"claim"} == {"ok", "candidate", "identity", "health", "capabilities",
+                                     "unavailable"}, "info keeps BoardInfo's shape"
 
 
 # --- (b) the lease is someone else's: background contact stops entirely -------------------------
@@ -193,12 +200,13 @@ def test_lease_held_by_someone_else_means_zero_background_connects(q):
     q.front.assert_clean()
     assert quiet_kinds(answers) == {"lease"} and q.vb.shell.hellos == []
     assert {a["quiet"]["holder"] for a in answers} == {"alice@lab-pc"}
-    # An explicit read still works, and names the holder.
+    # An explicit read still works, and names the holder (a health note; `info` prints it).
     t0 = time.monotonic()
     body = q.explicit().json()
     assert body["ok"] and body["identity"]["shell_id"] and q.front.attempts(t0) > 0
-    assert body["background"]["holder"] == "alice@lab-pc"
-    assert "alice@lab-pc" in body["background"]["text"]
+    assert any("held by alice@lab-pc" in n for n in body["health"]["notes"])
+    st = background_state(q)
+    assert st["holder"] == "alice@lab-pc" and "alice@lab-pc" in st["text"]
 
 
 def test_twin_our_own_lease_lets_the_background_reads_through(q):
@@ -207,6 +215,7 @@ def test_twin_our_own_lease_lets_the_background_reads_through(q):
     t0 = time.monotonic()
     assert quiet_kinds(q.round()) == {""} and q.front.attempts(t0) > 0
     assert len(q.vb.shell.hellos) == 1 and q.vb.shell.hellos[0]["role"] == "holder"
+    assert not any("held by" in n for n in q.explicit().json()["health"]["notes"])
 
 
 # --- (c) a refused or reset connect: back off, and the interval grows ---------------------------
@@ -283,7 +292,8 @@ def test_policy_off_means_zero_background_connects(q):
         q.front.lenient()
         assert quiet_kinds(answers) == {"off"} and q.vb.shell.hellos == []
         body = q.explicit().json()                   # explicit: still works
-        assert body["ok"] and body["background"]["policy"] == "off"
+        assert body["ok"] and body["identity"]["shell_id"]
+        assert background_state(q)["policy"] == "off"
     finally:
         write_settings("")
 
@@ -375,6 +385,8 @@ def test_the_demo_gate_says_yes_to_everything():
             opened = client.post("/api/v1/boards", json={"candidate": cand}, headers=H)
             assert opened.status_code == 200, opened.text
             body = client.get(bid_path(cand["board_id"]), headers=BG).json()
-            assert body["ok"] and "quiet" not in body and body["background"]["allowed"]
+            assert body["ok"] and "quiet" not in body
+            st = client.get(f"{bid_path(cand['board_id'])}/background", headers=H).json()
+            assert st["background"]["allowed"] and st["background"]["policy"] == "demo"
     finally:
         engine.close_all()

@@ -8,7 +8,7 @@ import {
   call, EventSocket, heldByJob, jobEvent, onConnection, quietOf, toApiError, unwrapDebug, unwrapInfo,
 } from "./api.js";
 import { clock, secs, setCapabilityTitles } from "./format.js";
-import { onBackgroundState, setViewing, VIEWER_ID, viewing } from "./viewer.js";
+import { onBackgroundState, refreshState, setViewing, VIEWER_ID, viewing } from "./viewer.js";
 
 export const UI_NOTE = "harness-manager-ui";
 const LOG_MAX = 2000;
@@ -431,7 +431,7 @@ export async function refreshInfo(bid, { background = false } = {}) {
     b.infoError = null;
     b.infoOkAt = Date.now() / 1000;
     b.quiet = null;
-    if (r.data.data.background) b.background = r.data.data.background;
+    if (!background) refreshState(bid);      // a click: the gate's state may have moved too
     if (!b.telemetry && !b.telemetryLoading) loadTelemetry(bid, { background: true });
     // LINUX-SLOTS: the Board tile's Card line reads the same card (a harness with "usd").
     if (hasCardStore(b) && !b.card && !b.cardLoading) loadCard(bid, { background: true });
