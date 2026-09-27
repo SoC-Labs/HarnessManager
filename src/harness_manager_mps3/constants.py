@@ -15,6 +15,10 @@ DEFAULT_SHELL_HOST = "192.168.10.101"   # firmware/common/net_proto.h:35-38 (com
 JTAG_RBB_PORT = 6921                    # firmware jtag_server; OpenOCD remote_bitbang
 XVC_PORT = 2542                         # firmware xvc_server (Debug Bridge target by default)
 PUSH_PORT = 6910                        # raw/windowed bitstream push
+#: The Linux harness's LCD mirror (mps3-lcdmirror, net-protocol v0.15): 127.0.0.1 ONLY on the
+#: board, so it is reached through an SSH forward (``display.py``). ``version.lcd_mirror.port``
+#: overrides it when the board says.
+LCD_MIRROR_PORT = 6940
 
 #: The firmware's clearing arena: the largest clearing the shell can hold for the
 #: next swap-away (firmware/platform/Makefile:187,193 SWAP_CLEARING_ARENA_BYTES,

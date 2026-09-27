@@ -238,14 +238,31 @@ class Setting:
                 "secret": self.secret, "apply": self.apply, "owner": self.owner,
                 "env": self.env, "env_rank": self.env_rank, "choices": list(self.choices),
                 "readonly": self.readonly, "lockable": self.lockable, "ui": self.ui,
-                "ceiling": self.ceiling, "advanced": self.advanced, "pack": self.pack}
+                "ceiling": self.ceiling, "advanced": self.advanced, "pack": self.pack,
+                **self.bounds_view()}
+
+    def bounds_view(self) -> dict[str, Any]:
+        """SET-UI: a number's range, when its check declares one (``check.bounds = (lo, hi)``,
+        inclusive, ``None`` an open end; ``check.min_exclusive``: "more than ``lo``"). The menu
+        uses it for the input's limits and to refuse a value before sending it; the check
+        stays the judge. An int's "more than ``lo``" is ``lo + 1``, inclusive."""
+        b = getattr(self.check, "bounds", None) if self.type in ("int", "float") else None
+        if not b:
+            return {"bounds": None, "min_exclusive": False}
+        lo, hi = b
+        above = bool(getattr(self.check, "min_exclusive", False)) and lo is not None
+        if above and self.type == "int":
+            lo, above = int(lo) + 1, False
+        return {"bounds": [lo, hi], "min_exclusive": above}
 
 
-def coerce(spec: Setting, raw: Any, *, from_env: bool = False) -> Any:
+def coerce(spec: Setting, raw: Any, *, from_env: bool = False, concrete: str | None = None) -> Any:
     """A layer's raw value as the setting's type. ``UsageError`` says why not.
 
     Values from the environment are text, so they are parsed; values from a TOML file
     already have a type, and must have the right one (``"3"`` is not an ``int``).
+    ``concrete``: the key being resolved or set (``boards.lab.hub.shares.fpga_uart1``), for
+    a check whose rule depends on the name (``check_value``).
     """
     key, v = spec.key, raw
     t = spec.type
@@ -308,10 +325,23 @@ def coerce(spec: Setting, raw: Any, *, from_env: bool = False) -> Any:
                 v = [p for p in re.split(r"[\s,;]+", raw) if p]
         if not isinstance(v, list) or not all(isinstance(p, str) for p in v):
             raise UsageError(f"{key} must be a list of strings")
-    why = spec.check(v) if spec.check else ""
+    why = check_value(spec, v, concrete)
     if why:
-        raise UsageError(f"{key} {why}")
+        keyed = concrete if concrete and getattr(spec.check, "with_key", False) else key
+        raise UsageError(f"{keyed} {why}")
     return v
+
+
+def check_value(spec: Setting, v: Any, concrete: str | None = None) -> str:
+    """The row's check on a typed value ("" when it passes). A check marked ``with_key`` also
+    gets the concrete key, for a rule that depends on the name: the MPS3 pack's hub shares,
+    where ``mcc`` may name tty_00 (the MCC console's path) and no share may use it (MCC-FIX;
+    SET-UI-MERGE)."""
+    if not spec.check:
+        return ""
+    if getattr(spec.check, "with_key", False):
+        return spec.check(v, concrete or spec.key)
+    return spec.check(v)
 
 
 # --- the schema --------------------------------------------------------------------------------

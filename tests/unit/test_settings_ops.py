@@ -248,9 +248,9 @@ def test_paths_name_every_file_and_where_a_secret_would_go(world):
 
 def test_a_section_without_a_tester_is_not_testable_yet(world):
     ctx, _, _, _ = world
-    got = ops.test(ctx, "tools")
-    assert got == {"section": "tools", "name": "", "testable": False, "passed": None,
-                   "steps": [], "why": "the tools settings are not testable yet"}
+    got = ops.test(ctx, "consoles")          # SET-UI: tools has a tester now (Detect)
+    assert got == {"section": "consoles", "name": "", "testable": False, "passed": None,
+                   "steps": [], "why": "the consoles settings are not testable yet"}
 
 
 def test_negative_twin_a_registered_tester_runs_and_its_report_is_shaped(world):
@@ -263,16 +263,16 @@ def test_negative_twin_a_registered_tester_runs_and_its_report_is_shaped(world):
                                        {"step": "auth", "ok": False, "detail": "401",
                                         "hint": "a new token"}], "targets": []}
 
-    testers.register("Tools", fake)
+    testers.register("Consoles", fake)
     try:
-        got = ops.test(ctx, "tools", "x")
+        got = ops.test(ctx, "consoles", "x")
     finally:
-        testers.unregister("tools")
+        testers.unregister("consoles")
     assert got["testable"] is True and got["passed"] is False and got["why"] == "auth: 401"
     assert got["targets"] == [] and [s["step"] for s in got["steps"]] == ["reach", "auth"]
-    assert seen["req"].section == "tools" and seen["req"].name == "x"
+    assert seen["req"].section == "consoles" and seen["req"].name == "x"
     assert seen["req"].resolver is not None
-    assert ops.test(ctx, "tools")["testable"] is False                 # unregistered again
+    assert ops.test(ctx, "consoles")["testable"] is False              # unregistered again
 
 
 def test_a_tester_that_needs_a_name_refuses_without_one(world):

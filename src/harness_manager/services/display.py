@@ -24,7 +24,13 @@ WebSocket; neither is needed here.
 - ``fps`` counts whole SNAPs that carried tiles (a header-only change is not a frame).
 - The RATE clamp is the board's own ``0x11`` reply (``status()["rate"]``), never an UPDATE.
 - The last viewer leaves: the upstream closes 30 s later (a returning viewer reuses it).
-- ``close(board, reason)`` closes it at once (the lease hooks, lane LM2).
+- ``close(board, reason)`` closes it at once. The lease hooks (lane LM2, D3: only the lease
+  holder sees the picture) call it, wired as XVC's (``services.xvc``): on the bus,
+  ``lease.state`` released/expired/lost closes that board's upstream ("closed: the lease was
+  lost"), and ``session.closed`` closes it with the board. Either close releases the source
+  (``display_release``: the MPS3 drops its SSH forward), and the next viewer's connect asks
+  the lease again. ``leases`` (the daemon's ``LeaseService``, as for XVC) is handed to every
+  source that takes it (``use_leases``), so the source's "is it mine" is the hub API's.
 - The board's refusal line (a third client): ``refused``, try again in 10 s. A source that
   raises ``DisplayUnavailable``: ``down`` with its reason, again after its ``retry_s`` (None:
   not until a viewer asks again). Any other ``HarnessError`` (claim lost, key refused, host
@@ -83,6 +89,8 @@ __all__ = ["DisplayService", "DisplayViewer", "DisplayTimings", "TOPIC", "STATES
 CAPABILITY = DISPLAY_MIRROR
 TOPIC = "display.state"
 STATES = ("down", "connecting", "syncing", "live", "stale", "reconnecting", "refused")
+#: ``lease.state`` states that end the holder's view (D3), as ``services.xvc`` closes XVC.
+LEASE_ENDS = ("released", "expired", "lost")
 #: What a viewer asks for unless it says (the board clamps: 20-30 Hz is the panel's own pace).
 DEFAULT_RATE_HZ = 20
 _SEQ_MASK = 0xFFFFFFFF
@@ -207,6 +215,18 @@ class DisplayViewer:
     def in_flight(self) -> int | None:
         return self._inflight
 
+    @property
+    def ended(self) -> bool:
+        """The board's upstream closed for good (``close``: a lease or a claim lost, the board
+        closed; a source that refused for good): nothing more comes; attach again (LM3)."""
+        return self._board.finished
+
+    @property
+    def end_error(self) -> HarnessError | None:
+        """The source's own error when one ended the upstream (``HeldError`` naming the lease
+        holder, a ``DisplayUnavailable`` for good, a claim lost), else None (LM3)."""
+        return self._board.end_error
+
     def pending(self) -> bool:
         """``next_message()`` would return something now."""
         b = self._board
@@ -279,6 +299,7 @@ class _Board:
         self.idle_since: float | None = None
         self.finished = False
         self.end_reason = ""
+        self.end_error: HarnessError | None = None   # the source's own error, when one ended it
         self.rate_asked: int | None = None
         self.rate_echo: int | None = None
         self.rtt_ms: float | None = None
@@ -459,7 +480,7 @@ class _Board:
                     wait = self.t.refused_retry_s
                 except DisplayUnavailable as exc:
                     if exc.retry_s is None:
-                        self.end_reason = exc.reason
+                        self.end_reason, self.end_error = exc.reason, exc
                         return
                     self.set_state("down", exc.reason)
                     wait = exc.retry_s
@@ -478,7 +499,7 @@ class _Board:
                         wait = self.t.backoff_s[min(attempt, len(self.t.backoff_s) - 1)]
                         attempt += 1
                 except HarnessError as exc:        # claim lost, key refused, host key changed
-                    self.end_reason = exc.message
+                    self.end_reason, self.end_error = exc.message, exc
                     return
                 finally:
                     self.close_stream()
@@ -679,20 +700,30 @@ class _Board:
 class DisplayService:
     """Live display mirrors, one upstream per board (``docs/design/LCD_MIRROR.md`` §7.1).
 
-    ``engine``: the Engine (its ``bus``), an ``EventBus`` or None. ``timings``: the
-    compositor's clocks (``DisplayTimings``). ``clock``: monotonic seconds (tests).
+    ``engine``: the Engine (its ``bus``), an ``EventBus`` or None; with a bus the lease and
+    session hooks are wired (the module docstring). ``timings``: the compositor's clocks
+    (``DisplayTimings``). ``clock``: monotonic seconds (tests). ``leases``: the lease service
+    handed to sources (``use_leases``); the daemon sets the hub API's, as it does for XVC.
     """
 
     def __init__(self, engine: Any = None, *, timings: DisplayTimings | None = None,
                  default_rate: int = DEFAULT_RATE_HZ,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic, leases: Any = None) -> None:
         self.bus = _bus_of(engine)
         self.timings = timings or DisplayTimings()
         self.default_rate = default_rate
         self.clock = clock
+        self.leases = leases
         self._boards: dict[str, _Board] = {}
         self._guard = threading.Lock()
         self._last: dict[str, _Board] = {}           # the board as it ended, per board
+        self.threads: list[threading.Thread] = []    # lease/session close workers (tests join)
+        self._unsubs: list[Callable[[], None]] = []
+        if self.bus is not None:
+            self._unsubs += [
+                self.bus.subscribe("lease.state", self._on_lease_state),
+                self.bus.subscribe("session.closed", self._on_session_closed),
+            ]
 
     # -- viewers ----------------------------------------------------------------------------
 
@@ -701,6 +732,9 @@ class DisplayService:
         """A new viewer of ``board_id``; opens the board's upstream through ``source`` (a
         ``DisplayAdapter`` or a connector callable) when none is open."""
         src = as_display_source(source)
+        use_leases = getattr(src, "use_leases", None)
+        if self.leases is not None and callable(use_leases):
+            use_leases(self.leases)              # one view of "mine" with the hub API (D3)
         start = False
         with self._guard:
             b = self._boards.get(board_id)
@@ -749,6 +783,8 @@ class DisplayService:
                     vb.cond.wait(min(left, 0.25))
                 if vb.frame.presented:
                     return vb.frame.picture(badge_list=vb.badge_list())
+                if vb.finished and vb.end_error is not None:
+                    raise vb.end_error                   # the source's own, typed (LM3)
                 state, reason = vb.state, vb.reason
             raise DisplayUnavailable(
                 f"no picture from the board within {wait_s:g} s ({state}"
@@ -798,5 +834,29 @@ class DisplayService:
         for bid in self.boards():
             self.close(bid, reason)
 
+    # -- the lease and session hooks (lane LM2) -----------------------------------------------
+
+    def _on_lease_state(self, event: Event) -> None:
+        state = str(event.data.get("state") or "")
+        if state in LEASE_ENDS:
+            self._close_soon(event.board_id, f"closed: the lease was {state}")
+
+    def _on_session_closed(self, event: Event) -> None:
+        self._close_soon(event.board_id, "closed: the board was closed")
+
+    def _close_soon(self, board_id: str, reason: str) -> None:
+        """Close at once, on a worker: ``close`` joins the reader, and the publisher must not
+        wait for it (as ``services.xvc`` does on a lease change)."""
+        with self._guard:
+            if board_id not in self._boards:
+                return
+        worker = threading.Thread(target=self.close, args=(board_id, reason), daemon=True,
+                                  name=f"display-close-{board_id}")
+        self.threads.append(worker)
+        worker.start()
+
     def shutdown(self) -> None:
+        for unsub in self._unsubs:
+            unsub()
+        self._unsubs.clear()
         self.close_all("Harness Manager is shutting down")

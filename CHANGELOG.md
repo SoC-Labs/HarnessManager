@@ -162,6 +162,17 @@ owners.
   board boots exactly as it always has, and every change is refused. The Board tile shows a
   Card line.
 
+### The Live display (the LCD mirror)
+- The service serves a live, pixel-exact copy of the board's 320x240 LCD to the lease
+  holder only (`/api/v1/boards/{bid}/display`: a WebSocket, the status and a PNG or the raw
+  RGB565 frame; docs/API.md "Live display"). Everyone else, a board without the Linux
+  harness's `lcd_mirror`, and a bare-metal board get the reason, and the Front panel's text
+  mirror as before. Nothing is shown before a whole picture has arrived, a browser tab that
+  falls behind skips to the newest picture instead of queueing old ones, and touch is not
+  passed through. The web page and the `display` command come next.
+- The service no longer compresses its WebSocket messages (permessage-deflate): on the
+  local machine it only cost CPU.
+
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key
   (the harness's TOFU claim), after asking, and only for the lease holder. It pins the
@@ -207,6 +218,33 @@ owners.
   fixed, a rate selector where it can change, and Export to TCP.
 - Power, Update, Clocks and SD card pages; a lease and tunnel chip for boards behind a
   hub.
+- Settings (the gear in the rail): one dialog with sections for General, Hubs, Boards,
+  Tools, Updates, Harness & kits, Debug, Consoles and Advanced. Each row says where its
+  value comes from (default, yours, lab default, admin, or an environment variable that
+  overrides it), saves when you change it, and has Reset. A setting the admin policy
+  locks is disabled and names the policy file. Secrets (the GitHub token, a hub's token)
+  show only whether they are set and where, never the value. Hubs: add an SSH or REST
+  hub, Test connection step by step (config, reach, auth, group, targets) with the fix
+  for the step that failed, Add this board from what the hub offers, and "Make this a
+  hub" for a hub written inline in `boards.toml`. Tools: Detect finds OpenOCD, Vivado,
+  hw_server and uv and runs only their version probe. A change that needs the service
+  restarted shows a banner until it is; one that applies at the next board open offers
+  Reopen board.
+- Settings, on today's settings (SET-UI-MERGE): Reopen board reopens only the boards a
+  change is about (a hub's row: the boards that use that hub). The restart banner names
+  the `daemon start` flag (`--port`, `--listen`, `--log-level`) that would win over the
+  setting you changed. "Show developer settings" lists the developer seams read-only, each
+  with the variable that sets it. The OS-slot card timing (`mps3.slot.*`) shows under the
+  MPS3 pack in Harness & kits, and an SSH hub has its SD stage directory. Numbers are
+  checked against their range before they are sent ("must be more than 0"). An old
+  `shares.mcc` entry in `boards.toml` shows as what it is, the MCC's path on the hub, never
+  as a share; nothing offers a share on the MCC. A share on `tty_00` under any other name is
+  refused, by `config set`, in the files and by "Make this a hub": tty_00 is the MCC
+  console, which Harness Manager never shares.
+- `harness-manager app --demo`: the Settings dialog shows the MPS3 pack's rows, writes the
+  demo's own directory only, stores a secret in the demo's own files (never your keyring,
+  so it cannot replace or remove your real token), and reaches no hub: Test connection
+  and Add this board say so instead of running.
 
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.

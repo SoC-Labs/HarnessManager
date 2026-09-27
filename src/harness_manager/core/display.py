@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from harness_manager.core import display_wire as wire
+from harness_manager.core.capabilities import DISPLAY_MIRROR  # noqa: F401 - re-exported
 from harness_manager.core.display_wire import (  # noqa: F401 - re-exported for callers
     ALL_VALID,
     E_FILL,
@@ -84,8 +85,9 @@ from harness_manager.core.display_wire import (  # noqa: F401 - re-exported for 
 )
 from harness_manager.core.errors import UnavailableError
 
-#: The capability (§7.1). Plain ``display`` is taken (``lab display``, ``mps3.display_flip``).
-DISPLAY_MIRROR = "display_mirror"
+#: The capability (§7.1) is ``DISPLAY_MIRROR`` ("display_mirror"). Plain ``display`` is taken
+#: (``lab display``, ``mps3.display_flip``). The name lives with the other shared capability
+#: names (``core.capabilities``) and is re-exported here.
 DISPLAY_MIRROR_TITLE = "Live display"
 
 # --- the panel's calibrated anchor (§3): anything else is badged, never pretended -----------

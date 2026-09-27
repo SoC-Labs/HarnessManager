@@ -30,6 +30,8 @@ from .panel import PanelAdapter
 if TYPE_CHECKING:
     from harness_manager.settings.schema import Setting
 
+    from .display import DisplayAdapter
+
 
 @dataclass(frozen=True)
 class ProbeHints:
@@ -636,6 +638,7 @@ class BoardSession(ABC):
     panel: PanelAdapter | None = None      # CCR PANEL-5: the front panel (core.panel)
     os_slots: OsSlotAdapter | None = None  # CCR T7-2: the Linux harness's A/B OS slots
     card: CardAdapter | None = None        # CCR LS-1: the user microSD (D13 overlay store)
+    display: DisplayAdapter | None = None  # LM2: the live display mirror (core.display)
 
     def close(self) -> None:  # noqa: B027 - optional hook
         """Release anything the session holds. Idempotent."""
@@ -659,6 +662,13 @@ class BoardPack(ABC):
 
     @abstractmethod
     def open(self, candidate: Candidate) -> BoardSession: ...
+
+    def display_adapter(self, session: BoardSession) -> DisplayAdapter | None:
+        """The pack hook ``display_adapter`` (docs/design/LCD_MIRROR.md §7.1, lane LM2): the
+        board's live display mirror (``core.display.DisplayAdapter``), or None when the board
+        has none. One adapter per session (it holds the board's forward), so every caller
+        gets the same object. Default: the session's ``display`` adapter."""
+        return getattr(session, "display", None)
 
     def settings(self) -> Iterable[Setting]:
         """The pack's own settings rows (CCR SET-PACK-1, docs/design/SETTINGS.md §3.2).

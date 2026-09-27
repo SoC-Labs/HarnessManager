@@ -137,6 +137,13 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
     "card_api": (
         ("GET", "/boards/{bid}/slots"),
     ),
+    # LM3: served in the mock by tests/fakes/lm3_mock_display.py (the real routes over a
+    # FakeLcdMirror per demo board).
+    "display_api": (
+        ("WS", "/boards/{bid}/display/ws"),
+        ("GET", "/boards/{bid}/display"),
+        ("GET", "/boards/{bid}/display.png"),
+    ),
     # SET-API: served in the mock by tests/fakes/settings_mock.py (the real routes over a real
     # resolver in a temporary directory).
     "settings_api": (
@@ -147,6 +154,15 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("PUT", "/settings/secrets/{key}"),
         ("DELETE", "/settings/secrets/{key}"),
         ("POST", "/settings/test"),
+    ),
+    # SET-UI: the Settings dialog's Hubs section (settings/hubs.py over HTTP), served in the
+    # mock by tests/fakes/settings_mock.py with the real routes, as settings_api is.
+    "hubs_api": (
+        ("GET", "/hubs"),
+        ("PUT", "/hubs/{name}"),
+        ("DELETE", "/hubs/{name}"),
+        ("POST", "/hubs/{name}/boards"),
+        ("POST", "/hubs/adopt"),
     ),
     # QUIET-POLL: served in the mock by tests/fakes/qp_mock_quiet.py (the demo's gate: every
     # background read allowed, viewers counted).

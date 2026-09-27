@@ -153,6 +153,25 @@ def bind_socket(listen: str, port: int) -> socket.socket:
     return sock
 
 
+def uvicorn_config(app: Any, *, log_level: str = "info", **overrides: Any) -> Any:
+    """The daemon's ``uvicorn.Config`` (``run_daemon`` serves with exactly this).
+
+    - ``log_config=None``: uvicorn's own lines go through the root handler, so they carry
+      the same timestamps as ours (its default formatter has none) and the token filter.
+    - ``ws_per_message_deflate=False`` (lane LM3, docs/design/LCD_MIRROR.md §7.3): every
+      browser offers permessage-deflate and uvicorn accepts it by default. On loopback it
+      buys nothing and costs about 9x the daemon's CPU per Live display message (6.3 ms
+      against 0.7 ms on the noise pattern); the display's tiles are already encoded.
+    """
+    import uvicorn
+
+    options: dict[str, Any] = {"log_level": log_level, "access_log": False, "lifespan": "on",
+                               "timeout_graceful_shutdown": 5, "log_config": None,
+                               "ws_per_message_deflate": False}
+    options.update(overrides)
+    return uvicorn.Config(app, **options)
+
+
 def _server_class() -> type:
     import uvicorn
 
@@ -436,16 +455,16 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
         app = create_app(engine, token=token, state_dir=state_dir, shutdown=request_shutdown,
                          allowed_hosts=host_allow_list(state_dir, listen))
         daemon = app.state.daemon
+        if demo and getattr(daemon, "settings", None) is not None:
+            # The demo's Settings: its own files only, no OS keyring, no real hub
+            # (ops.SettingsContext.demo; lane SET-UI-MERGE).
+            daemon.settings.demo = True
         # What a restart for an app update hands the next daemon (lane OTA-D).
         daemon.runtime = {"port": sock.getsockname()[1], "listen": listen,
                           "log_level": log_level, "pack_overrides": pack_overrides or {},
                           "demo": demo}
         daemon.resumed = resume
-        # log_config=None: uvicorn's own lines go through the root handler, so they carry
-        # the same timestamps as ours (its default formatter has none) and the token filter.
-        config = uvicorn.Config(app, log_level=log_level, access_log=False, lifespan="on",
-                                timeout_graceful_shutdown=5, log_config=None)
-        server = _server_class()(config)
+        server = _server_class()(uvicorn_config(app, log_level=log_level))
         holder["server"] = server
         install_redaction()
         info = new_info(port=sock.getsockname()[1], token=token, version=__version__,
