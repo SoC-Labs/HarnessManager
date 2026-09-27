@@ -192,6 +192,27 @@ The session needs the board's TCP ports:
 
 UDP 69 (TFTP) and 6899 (identify) also exist. The board, 192.168.10.101, sits on a point-to-point /24 whose only other host is the hub's `mps3_01_pl` NIC (192.168.10.1).
 
+### A claimed Linux board: debug, XVC, slots and the card go over SSH to the board
+
+Once a Linux board's SSH is claimed, the harness serves some ports to **the board itself only**: a connection whose peer is the board's own 127.0.0.1, which is what the far end of `ssh root@board -L …:127.0.0.1:PORT` is. Through the hub tunnel above, the board sees the **hub** as the peer and refuses:
+
+| What | Port | The refusal on a claimed board |
+|---|---|---|
+| XVC | 2542 | one line `{"ok":false,"err":"xvc locked: board claimed (use ssh)","code":"locked"}`, then the close |
+| JTAG (`debug up`) | 6921 | one line `{"ok":false,"err":"jtag locked: board claimed (use ssh)","code":"locked"}`, then the close |
+| a slot push (kind 2) | 6910 | closed unread |
+| `slot commit` / `slot rollback` | 6900 | `slot locked: board claimed (use ssh)` |
+| `card clear` (the `usd` actions) and `card commit` / Keep on the card | 6900 | `usd locked: …` / `commit locked: …`, code `locked` |
+
+Reads stay open: `slot status`, `card status`, `info`, the consoles, a swap.
+
+What Harness Manager does:
+
+- **A board this Harness Manager claimed** (`board claim`, or `board claim --adopt` for a claim made elsewhere): each of those paths goes through **one SSH forward per board session**, `ssh -J HUB -l root BOARD -L 127.0.0.1:p:127.0.0.1:6900 -L …:6910 -L …:6921 -L …:2542`, with the pinned host key and your claimed key (`claim.hold_forward`, the same reach as the live display). It opens when the first of them needs it, is shared by all of them, and closes when the last lets go and when the session closes: a forward to the board's loopback never lingers on this host.
+- **A board claimed by another key, or claimed with no pin here**: refused before anything is sent (exit 15), with the way out: `harness-manager board claim TARGET --adopt` if the claim is yours.
+- **Bare metal, and a board that is not claimed**: the hub tunnel, as before.
+- **A board whose claim state is not known here** (through a hub, `info` never asks; `board claim-status` does): the hub tunnel is tried. If the board refuses, the one-line refusal becomes `ClaimLockedError` (exit 15) with the claim hint, never "connection closed" or "held by another client". Run `board claim-status TARGET` and try again.
+
 ### Options, best first
 
 1. **The SSH tunnel.** This is today's method and still the only working one. It needs an SSH account on the hub. `hub.host` next to `hub.url` keeps it as the fallback. The ethernet gate never applies to it: the forwarded connections start on the hub itself (the OUTPUT chain), not in FORWARD.

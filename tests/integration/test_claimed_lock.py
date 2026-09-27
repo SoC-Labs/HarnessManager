@@ -435,6 +435,17 @@ def test_card_clear_meeting_the_usd_lock_is_a_typed_claim_error(lab):
     assert rig.mutations("usd", "clear") == [("usd", "clear", "127.0.0.1")]
 
 
+def test_the_store_locks_words_are_the_claim_lock_and_their_twin_is_not():
+    from harness_manager_mps3.card import _usd_error
+
+    for err in ("usd locked: board claimed (use ssh)", "commit locked: board claimed (use ssh)"):
+        exc = _usd_error("card clear", err)
+        assert isinstance(exc, ClaimLockedError) and exc.hint == LOCK_HINT
+    assert not isinstance(_usd_error("card clear", "store busy"), ClaimLockedError)
+    assert not isinstance(_usd_error("card clear", "identity lock: image 0x1 != fabric 0x2"),
+                          ClaimLockedError)
+
+
 def test_card_commit_on_a_board_claimed_by_another_key_is_refused_before_sending(lab, overlays):
     rig = lab(observed=True, usd_card="da", boot_rm_id=SYNTH_RM_ID)
     with pytest.raises(ClaimLockedError, match="card commit"):

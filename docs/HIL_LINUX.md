@@ -353,8 +353,10 @@ load: **Keep on the card PASS.**
 
 ## E. XVC W5 on nanosoc_ila (10 min, read only on the board)
 
-Needs §B's adopt. On the Linux harness, XVC goes over the board's own SSH
-(`ssh -J hub root@board -L …:2542`), with the pinned host key.
+Needs §B's adopt. On a claimed Linux board, XVC goes over the board's own SSH: the
+session's one claim forward (`ssh -J hub -l root board -L …:127.0.0.1:2542`, plus 6900,
+6910 and 6921 for slots, the card and `debug up`), with the pinned host key. Through the
+hub the claimed board would refuse it with `xvc locked: board claimed (use ssh)`.
 
 **E1. Load the ILA design** (a swap; not kept on the card). It asks; answer `y`.
 ```bash
@@ -704,7 +706,9 @@ Then tell the HM lead the folder is complete.
 | D4/G3: "MCC REBOOT refused: slot B is being written …" | the user microSD's card job is running (SLOT-TIMING) | wait for `slot status` to show it done; never force it during the soak |
 | D4: `REBOOT sent … but no restart observed` | the REBOOT was not acknowledged | check `info` in 2 min before anything else; never send a second one on top |
 | D4: "went down … but did not come back" | a slow or failed Linux boot | wait 2 min, then `info`. Still dark: the Linux lead's ROLLBACK runbook. If the MCC stops answering, david power-cycles |
-| E2: "the board-SSH forward for XVC did not come up" | no pinned claim, or the key does not log in | redo B2; check `ssh mps3-b2 true` |
+| E2: "the SSH tunnel to 192.168.10.101 did not come up" (or, older, "the board-SSH forward for XVC did not come up") | the key does not log in | redo B2; check `ssh mps3-b2 true` |
+| E2 (exit 15): "XVC (2542) needs the claiming key over the board's own SSH" | no pinned claim here: nothing was sent | redo B2's `--adopt` |
+| E2 (exit 15): "XVC … was refused: the board is claimed" | the claim was not known here, so HM went through the hub and the board sent its lock line | `board claim-status $B`, then E2 again (or B2's `--adopt`) |
 | E4: `connect_hw_server` answers a different version | a lingering auto-launched hw_server | `pkill -u $USER hw_server`; redo E2 and E3 |
 | E4: a Digilent or USB target is listed | the partition-only filter failed | **STOP XVC** (E5); report it as a Harness Manager bug (`hw_server_argv`) |
 | F2: `sd … no (…no USB mass-storage device…)` | the hub-path pin is back | record it; skip F6 and §G (the fix is the Linux lead's `mps3_fix_hub_path.sh`) |

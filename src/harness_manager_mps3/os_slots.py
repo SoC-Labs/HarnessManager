@@ -410,17 +410,20 @@ def claim_forward(session: Any, user: str, what: str) -> Iterator[tuple[str, int
     """``(host, control, push)`` through the session's claim forward (the board's own SSH to
     its 127.0.0.1), held for the ``with``. A session with no claim adapter cannot have one."""
     claim = getattr(session, "claim", None)
-    if claim is None or not callable(getattr(claim, "forwarded", None)):
+    if claim is None or not callable(getattr(claim, "hold_forward", None)):
         raise UnreachableError(f"{what}: the board is claimed and this session has no SSH to it",
                                hint="`harness-manager board claim-status TARGET`")
     try:
-        with claim.forwarded(user) as t:
-            yield "127.0.0.1", t.local_port("control"), t.local_port("push")
-    except UnreachableError as exc:
+        t = claim.hold_forward(user)
+    except UnreachableError as exc:            # only the forward's own failure is worded here
         raise UnreachableError(
             f"the board is claimed, so {what} must go through its SSH, and that did not come up: "
             f"{exc.message}", hint=exc.hint or "check `harness-manager board claim-status "
                                                "TARGET` (your key is the claimed one)") from exc
+    try:
+        yield "127.0.0.1", t.local_port("control"), t.local_port("push")
+    finally:
+        claim.release_forward(user)
 
 
 # --- the adapter --------------------------------------------------------------------------------

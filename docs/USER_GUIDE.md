@@ -683,6 +683,11 @@ port). Behind a hub, hold the lease (HM refuses XVC without it).
 The **Debug** section has two cards: **DUT debug (OpenOCD)** for the DUT CPU, and **Fabric
 debug (XVC)** for ILAs in the partition.
 
+**A claimed Linux board** serves JTAG and XVC only over SSH to the board itself. On a board
+you claimed from this Harness Manager, both go through that SSH for you; on one claimed by
+another key they are refused before anything connects (exit 15; `board claim TARGET
+--adopt` if the claim is yours). See 12.1.
+
 ### 8.1 The DUT CPU: OpenOCD and gdb
 
 **Needs:** OpenOCD 0.12 or later, built with the **remote_bitbang** adapter, on your PATH
@@ -1075,8 +1080,24 @@ step by step, in about 70 minutes.
 ### 12.1 Claim the board (once)
 
 A Linux harness ships unclaimed: its SSH takes keys only, and it has none. The first key
-it is sent claims it, for good. After that it takes slot changes only over that key's SSH,
-which HM uses for you.
+it is sent claims it, for good. After that it takes slot changes, card changes, JTAG
+(`debug up`) and XVC only over that key's SSH, which HM uses for you.
+
+**What goes over SSH to the board once it is claimed.** A claimed board refuses these to
+anyone but itself, including everything that comes through the hub:
+
+| You run | Refused through the hub with |
+|---|---|
+| `debug up` (JTAG 6921), `xvc open` (2542) | one line `… locked: board claimed (use ssh)`, then the close |
+| `slot push`, `slot commit`, `slot rollback` | `slot locked: board claimed (use ssh)` (a push is closed unread) |
+| `card clear`, `card commit`, **Keep on the card** | `usd locked: …` / `commit locked: …` |
+
+On a board **you claimed from this Harness Manager** (or pinned with `--adopt`), HM sends
+all of these through one SSH connection to the board (`ssh -J HUB root@BOARD -L …`), opened
+when one of them needs it and closed when the last one is done. You do nothing extra.
+On a board **claimed by another key**, they are refused before anything is sent (exit 15):
+if the claim is yours, `board claim TARGET --adopt`. Bare metal and unclaimed boards are
+unchanged. Reads (`slot status`, `card status`, `info`, the consoles) stay open.
 
 **In the app:** the Board tile's **SSH** line shows "unclaimed", "claimed by you" or
 "claimed by another key". **Claim this board**, then **Claim with my key**, claims it.
@@ -1160,6 +1181,13 @@ default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboo
 - **"this board is claimed by <key>; this operation needs the claiming key":** HM is not
   using the claiming key. Use the key you claimed with. `board claim` is only for a
   re-provisioned board.
+- **"… needs the claiming key over the board's own SSH: the board is claimed by a key this
+  Harness Manager did not claim or adopt" (exit 15):** nothing was sent. If the claim is
+  yours (pyverify, another machine), `board claim TARGET --adopt`, then run it again.
+- **"… was refused: the board is claimed, and this connection did not come from the board
+  itself" (exit 15), from `debug up` or `xvc open`:** HM did not know the board was
+  claimed, so it went through the hub. `board claim-status TARGET` reads the claim; if it is
+  yours, run it again (it now goes over SSH), else `--adopt`.
 - **"Host key changed":** the Board tile shows the pinned and the reported keys, and SSH is
   refused. If the board was re-provisioned, `board claim TARGET --replace-host-key`.
 - **Exit 12:** the board runs the bare-metal harness, which has no slots or card store.

@@ -96,7 +96,7 @@ import tempfile
 import threading
 import time
 import zlib
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1282,15 +1282,6 @@ class Mps3Claim:
                 return
             tunnel, self._fwd = self._fwd, None
         tunnel.close()
-
-    @contextlib.contextmanager
-    def forwarded(self, user: str) -> Iterator[Any]:
-        """``hold_forward`` for the length of a ``with`` (one slot or card mutation)."""
-        tunnel = self.hold_forward(user)
-        try:
-            yield tunnel
-        finally:
-            self.release_forward(user)
 
     def forward_status(self) -> dict[str, Any] | None:
         """The forward's ``SshTunnel.status()`` and who holds it; None when none is open."""
