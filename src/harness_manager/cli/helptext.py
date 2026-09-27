@@ -51,18 +51,24 @@ TARGET, in every verb that talks to a board:
     --serial URL     add the board controller's USB serial link:
                      serial:///dev/ttyUSB0, serial://COM7, or a bare /dev/ttyUSB0 or COM7
     --volume PATH    add the configuration SD volume (the mounted V2M-MPS3 drive)
+    --via ssh:HOST   reach the shell through an SSH tunnel on HOST
+    --via hub        reach it through the hub its boards.toml hub table names
+                     (without --via, the board's boards.toml via does the same)
 
 One program owns a board at a time (the board's ports take one client each).
 Each verb takes the board's session lock for as long as it runs; `attach`
 keeps it until you `detach`. A verb that finds the board held exits 4 and
-names the holder."""
+names the holder.
+
+`harness-manager help VERB` prints one verb's options. The app's Help shows these
+sections; `harness-manager help --tabs` prints them."""
 
 QUICK_START = """\
     harness-manager probe --host 192.168.10.101     is a board there?
     harness-manager info 192.168.10.101             identity, health, what it can and cannot do
     harness-manager overlays 192.168.10.101         which designs load on this shell
     harness-manager program 192.168.10.101 nanosoc  program a partition (asks first; --yes skips)
-    harness-manager console 192.168.10.101 uart0    stream the DUT's UART0 (Ctrl-C stops)
+    harness-manager console 192.168.10.101 uart0    the DUT's UART0 here (Ctrl-] exits)
     harness-manager debug up 192.168.10.101         start OpenOCD for the loaded design
     harness-manager reset 192.168.10.101 dut        reset the DUT
     harness-manager restore 192.168.10.101          back to the baseline design (greybox)
@@ -70,6 +76,9 @@ QUICK_START = """\
 Add --json for scripts and the GUI, --tsv for shell pipelines."""
 
 SYSTEM = """\
+version                    the Harness Manager version
+packs                      the installed board packs
+help [VERB] [--tabs [TAB]] one verb's options, or these help sections
 probe [--host ADDR]... [--serial URL]... [--volume PATH]... [--timeout S] [--no-scan]
     Look for boards. Without addresses it scans the default shell address and
     USB. --no-scan looks only at the addresses given. Exit 3 if none answers.
@@ -132,10 +141,13 @@ baud TARGET NAME [RATE]
     reopens its port; uart0/uart1 need harness firmware with 'uart_baud' (the
     loaded design fixes 76800 otherwise). Exit 12 with the reason when it
     cannot change.
-console TARGET NAME [--for SECONDS]
-    Stream a console (uart0, uart1, swo, ...) to stdout until Ctrl-C or --for.
-    --tsv prints one NAME<TAB>TEXT row per line. --json needs --for and prints
-    one object with the text collected.
+console TARGET NAME [--read-only] [--for SECONDS]
+    A console (uart0, uart1, swo, ...) in this terminal, interactive: what you
+    type goes to the board, Ctrl-C included (a MicroPython REPL needs it), and
+    Ctrl-] exits. --read-only only shows the output. With --read-only, --for,
+    --json or --tsv, or when stdout is not a terminal, it streams to stdout
+    until Ctrl-C or --for. --tsv prints one NAME<TAB>TEXT row per line. --json
+    needs --for and prints one object with the text collected.
 console TARGET NAME --export PORT [--for SECONDS]
     Re-export the console on 127.0.0.1:PORT for an external terminal (PORT 0
     picks a free one). Prints the port on stdout, then holds until Ctrl-C or
@@ -153,7 +165,20 @@ debug detect TARGET        non-intrusive: the TAP IDCODE, or exit 13 when the
                            loaded design has no debug port (greybox has none)
 
 Connect gdb with `target extended-remote 127.0.0.1:<gdb port>`; Arm DS uses the
-same port through its "Generic GDB" connection."""
+same port through its "Generic GDB" connection.
+
+xvc open TARGET [--byo] [--for SECONDS]
+    Debug the loaded design's ILAs in Vivado over XVC. It reaches the
+    reconfigurable partition's debug chain only (the harness's Debug Bridge
+    and the design's ILAs), never whole-device JTAG. Takes the board's one XVC
+    slot and starts HM's hw_server, and holds them until Ctrl-C, `detach`, or
+    --for; the session reopens after every partition swap. --byo runs only the
+    relay, for your own hw_server. A hub board needs your lease.
+xvc close TARGET           kick the client, stop hw_server, free the board's slot
+xvc status TARGET          state, the Vivado URL, who is attached, the probes files
+xvc tcl TARGET [--byo]     the Vivado Tcl snippet for the loaded design
+xvc ltx TARGET [--rm | --static | --full] [-o FILE]
+                           the probes file (.ltx) for the loaded design"""
 
 RESET = """\
 reset TARGET [WHAT]
@@ -162,7 +187,13 @@ reset TARGET [WHAT]
     other exits 2 and lists them.
 clock TARGET [--dut-mhz N | --preset NAME]
     With no option, list the clocks. --dut-mhz 50 or --preset 50mhz sets the
-    DUT clock and prints what the board reports back."""
+    DUT clock and prints what the board reports back.
+power show TARGET
+    W, V and A from the board's power meter (set up in boards.toml), and
+    whether it can cycle the supply.
+power cycle TARGET [--off S] [--yes]
+    Cut the board's supply through the meter's outlet, then switch it back on
+    (5 s off by default). Asks first unless --yes."""
 
 LAB = """\
 lab TARGET link up|down|pulse
@@ -197,6 +228,181 @@ sd TARGET install BUNDLE_DIR --backup ZIP [--yes]
                            files are never written. Runs after the next reboot.
 sd TARGET restore ZIP [--yes]
                            put a backup back"""
+
+PANEL = """\
+panel show TARGET
+    What the board's front panel (the LCD) shows: page, owner, banner, card,
+    sessions, taps, Identify.
+panel mirror TARGET
+    The panel's text grid (read from the board, or rebuilt on bare metal).
+identify TARGET [--seconds N]
+    Blink the panel's backlight so you can tell which board it is (Linux
+    harness): 1 to 30 seconds, 10 by default; 0 stops."""
+
+HUBS = """\
+A lab board sits behind a hub (fpgahub). No hub is the default: a board on your
+desk needs none. Add the hub once, then the boards it offers.
+
+hub add NAME --ssh HOST | --url URL [--token-stdin]
+    Add a hub: your SSH account on HOST, or fpgahub's REST API with a token.
+    --update changes an existing one.
+hub list                   the hubs, and boards with an inline hub table
+hub test NAME              test the connection (config, reach, auth, group,
+                           targets, target); never takes a lease
+hub targets NAME [--add TARGET]
+                           what the hub offers; --add writes a board for one
+hub token NAME --stdin | --ref REF | --clear
+                           set, point at or forget your token for the hub
+hub adopt BOARD [--as NAME]
+                           turn a board's inline hub table into a named hub
+hub remove NAME [--force]  remove a hub and your stored token for it
+
+lease show TARGET          who holds it, until when; the queue and the requests
+lease acquire TARGET [--ttl S]
+                           take it; waits in the queue if someone holds it
+lease release TARGET       give it back (only a lease this Harness Manager took)
+lease request TARGET [--message M]
+                           ask the holder to give it up; waits, with a 2:00
+                           countdown
+lease requests TARGET      the requests waiting for your answer
+lease respond TARGET ID --release | --keep MINUTES
+                           answer a request: release now, or keep it N minutes
+lease force TARGET         force-release it after 2:00 with no answer (asks first)
+lease leave TARGET         leave the queue and withdraw your request
+lease dismiss TARGET       forget the last forced release of your lease
+A lease needs a hub, and nothing takes one for you: run `lease acquire`, or use
+Acquire lease in the app. The service renews it while the board is open there.
+--via ssh:HOST (or via = "ssh:HOST" in boards.toml) is a tunnel only: no hub,
+so no lease. --via hub goes through the board's hub.
+
+share list TARGET          the hub's running TTY shares for the board
+share start TARGET NAME    start one (mcc, fpga_uart2, ... from boards.toml, or a
+                           /dev path). There is no stop: it stops every share."""
+
+LINUX = """\
+The Linux harness takes slot changes only over SSH, from the key that claimed it.
+
+board claim TARGET [--key PUB] [--adopt] [--yes]
+    Claim an unclaimed Linux harness with your SSH key and pin its host key
+    (asks first; a hub board needs your lease). --adopt: the board is already
+    claimed with your key.
+board claim-status TARGET  is it claimed, and by this Harness Manager's key?
+board ssh TARGET [-c CMD] [--print]
+                           ssh in as root, with the pinned host key
+
+slot status TARGET         OS slots A and B: running, default, where a push goes
+slot push TARGET [IMAGE] --bundle PATH | --static-id ID [--yes]
+    Push a boot image into the free slot and read it back; it is not
+    committed. --bundle or --static-id names the static the image was
+    provisioned for (never the board's own).
+slot commit TARGET [--slot A|B]
+                           the pushed slot boots next (at the next reboot)
+slot rollback TARGET [--no-reboot] [--wait S]
+                           the other slot becomes the default again, and boots
+slot verify TARGET [--slot A|B]
+                           read a slot back off the card
+
+card status TARGET         the user microSD: present, the store, the power-on
+                           default, the OS slots
+card commit TARGET [--yes] the RUNNING overlay becomes the power-on default
+card clear TARGET [--yes]  no power-on default: the greybox loads at power-on
+No card: the board boots exactly as it always has. The card verbs need a harness
+with the microSD store. Every change asks first (--yes skips it), and a hub board
+needs your lease."""
+
+BUILD = """\
+kit info [TARGET] [--static-id ID]
+    The static a DUT is built for, its build kit, the Vivado it needs, and
+    the sources. TARGET reads the static from a board.
+kit fetch [TARGET] [--static-id ID] [--out DIR]
+    Put the static's kit (the locked DCP, CRC-checked) in the cache; --out
+    also exports it into DIR.
+kit guide [TARGET] [--design NAME|FILE] [--build-dir DIR]
+    The build steps, each with its state, and what to do next.
+kit script [TARGET] --design NAME|FILE [--out DIR]
+    Write build_rm.tcl, the kit and the XDC kit into DIR. Without --out it
+    shows the files and writes nothing.
+kit build DIR [--stop-after STAGE] [--jobs N]
+    The Vivado command for a build directory. Harness Manager does not run
+    Vivado yet: run the command yourself.
+kit check RECEIPT|BUILD_DIR|PARTIAL [TARGET]
+    Check a build receipt and its pair, or a bare partial, board-free.
+kit pack RECEIPT|BUILD_DIR [--import]
+    The overlay from a passed receipt; --import adds it to Program.
+kit list                   the cached kits
+kit verify DIR [TARGET]    check a kit directory (and it against a board)
+kit import DIR|ZIP         add a kit (or a fielded/<sid>/ directory) to the cache
+
+xdc info                   the board pack's pin model: board, fielded shell,
+                           sources, built-in designs
+xdc rm-kit [--design NAME|FILE] [--out DIR] [--static-id ID]
+                           the RM kit: OOC XDC, connectivity sheet, pblock
+                           facts, wrapper skeleton
+xdc board [--design NAME|FILE] [--out DIR]
+                           the full-board export: pins, IO standards by bank,
+                           clocks"""
+
+UPDATES = """\
+update check [TARGET]
+    Read-only: what the signed channel offers, and with TARGET the plan for
+    that board.
+update harness TARGET [--version V] [--yes]
+    Install the channel's harness on a board (asks first). A re-key also needs
+    --consent with the exact phrase the plan prints ("REKEY 0x...").
+update app [--stage-only | --apply] [--yes]
+    Update this app: download, stage side by side, switch. --apply restarts a
+    running service onto it, and it rolls back by itself if the new version
+    does not come up.
+update status              the app's versions, bad marks, last check and apply
+update rollback TARGET [--backup ZIP]
+                           restore a board's config SD backup, reboot, confirm
+update rollback --app      switch back to the previous app version
+The service checks for app updates in the background: 60 s after it starts,
+then every 6 h by default (the admin policy's check_interval).
+
+harness list [TARGET] [--all]
+                           the harness releases, with a verdict for TARGET
+harness show VERSION [TARGET]
+                           one release: identity, parts, notes, what changes
+harness fetch VERSION [--kit]
+                           download and verify a release into the cache now
+harness install TARGET [VERSION] [--yes]
+                           install a release on a board (asks first)
+harness pin TARGET VERSION pin a board to a release (none newer is offered)
+harness unpin TARGET       remove the board's pin
+harness history TARGET [--limit N]
+                           the board's last installs, newest first
+harness rollback TARGET [--to VERSION | --backup ZIP]
+                           re-install the previous release, or restore a backup
+harness mirror DIR [--all] write an offline mirror: channels and blobs"""
+
+SETTINGS = """\
+config list [SECTION] [--all]
+    Every setting, its value and where it came from: lock (the admin's),
+    env, user, machine, pack or default.
+config get KEY             one setting: value, source, lock, env shadowing
+config set KEY VALUE [KEY VALUE ...]
+                           change settings, all or nothing
+config unset KEY           remove your value: back to the admin's or the default
+config set-secret KEY      store a secret, read from stdin (never the command line)
+config unset-secret KEY    remove a secret from the store (clear-secret: the same)
+config path                every file the settings use, and where a new secret goes
+config test SECTION [NAME] prove a section's settings work, e.g. config test hubs lab
+It goes through the service when that runs, so the app's open windows see the
+change. Secrets go into the OS keyring, else a private file."""
+
+APP = """\
+app [--demo] [--no-native] [--port N]
+    Harness Manager in its own window (starts harness-manager-daemon if
+    needed). --demo: scripted boards, no hardware.
+ui [--demo] [--no-browser] [--port N] [--listen ADDR]
+    The web UI in a browser (starts harness-manager-daemon if needed). It
+    prints the URL; --no-browser only prints it (to open it through `ssh -L`).
+daemon start [--demo] [--foreground]
+daemon stop [--demo] [--force]
+daemon status [--demo]
+    harness-manager-daemon, the local service that owns the boards, so the
+    CLI, the app and long sessions share one board session."""
 
 TROUBLESHOOTING = """\
 exit 7, "refused" or "did not answer"
@@ -246,6 +452,13 @@ TABS: tuple[tuple[str, Callable[[], str]], ...] = (
     ("Reset", lambda: RESET),
     ("Lab", lambda: LAB),
     ("Board controller", lambda: CONTROLLER),
+    ("Front panel", lambda: PANEL),
+    ("Hubs and leases", lambda: HUBS),
+    ("Linux harness", lambda: LINUX),
+    ("Build a DUT", lambda: BUILD),
+    ("Updates", lambda: UPDATES),
+    ("Settings", lambda: SETTINGS),
+    ("App and service", lambda: APP),
     ("Output", _output_tab),
     ("Exit codes", _exit_codes_tab),
     ("Troubleshooting", lambda: TROUBLESHOOTING),

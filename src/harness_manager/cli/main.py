@@ -29,7 +29,7 @@ from typing import Any, NoReturn
 from harness_manager.core.errors import ActionFailedError, ExitCode, HarnessError, UsageError
 
 from . import cmd_board, cmd_io, cmd_lab, cmd_program, cmd_system, helptext
-from .context import Ctx
+from .context import SERIAL_HELP, VIA_HELP, VIA_METAVAR, Ctx
 from .engine import get_engine
 from .output import TSV_COLUMNS, Result, report_error
 
@@ -60,13 +60,10 @@ def _fmt_parent() -> argparse.ArgumentParser:
 def _usb_parent() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--serial", action="append", metavar="URL", default=argparse.SUPPRESS,
-                   help="add the board controller's USB serial link (serial:///dev/ttyUSB0, "
-                        "COM7, /dev/ttyUSB0)")
+                   help=SERIAL_HELP)
     p.add_argument("--volume", action="append", metavar="PATH", default=argparse.SUPPRESS,
                    help="add the configuration SD volume (the mounted V2M-MPS3 drive)")
-    p.add_argument("--via", metavar="ssh:HOST", default=argparse.SUPPRESS,
-                   help="reach the shell through an SSH tunnel on HOST (the lab hub); "
-                        "boards.toml via does the same")
+    p.add_argument("--via", metavar=VIA_METAVAR, default=argparse.SUPPRESS, help=VIA_HELP)
     return p
 
 
@@ -120,9 +117,9 @@ def make_parser() -> argparse.ArgumentParser:
                     help="serial port to try (repeatable)")
     vp.add_argument("--volume", action="append", default=[], metavar="PATH",
                     help="mounted volume to try (repeatable)")
-    vp.add_argument("--timeout", type=float, default=2.0, metavar="S")
-    vp.add_argument("--via", default="", metavar="ssh:HOST",
-                    help="reach the hosts through an SSH tunnel on HOST (the lab hub)")
+    vp.add_argument("--timeout", type=float, default=2.0, metavar="S",
+                    help="how long each address may take to answer (default 2 s)")
+    vp.add_argument("--via", default="", metavar=VIA_METAVAR, help=VIA_HELP)
     vp.add_argument("--no-scan", action="store_true",
                     help="look only at the addresses given; no default address, no USB scan")
     vp.set_defaults(fn=cmd_system.cmd_probe)
@@ -187,7 +184,9 @@ def make_parser() -> argparse.ArgumentParser:
     vp.add_argument("--read-only", action="store_true",
                     help="only show the output; do not send keystrokes (the default in a "
                          "terminal is interactive: Ctrl-] exits)")
-    _for_arg(vp, "stream or export")
+    vp.add_argument("--for", dest="for_s", type=float, default=None, metavar="SECONDS",
+                    help="stream (read-only) or export for this long, then stop (default: "
+                         "until Ctrl-] in a terminal, else until Ctrl-C)")
     vp.set_defaults(fn=cmd_io.cmd_console)
 
     vp = verb("debug", "OpenOCD debug server for the loaded design", parents=(fmt,))
@@ -227,24 +226,38 @@ def make_parser() -> argparse.ArgumentParser:
     vp = verb("lab", "lab tools on the shell: link, display, macgen, dutrx", parents=(fmt, usb))
     target(vp)
     lsub = vp.add_subparsers(dest="lab_cmd", required=True, metavar="TOOL")
-    lp = lsub.add_parser("link", help="virtual-PHY link event", parents=[fmt, usb],
-                         epilog=_epilog("lab link"))
-    lp.add_argument("event", choices=("up", "down", "pulse"))
-    lp = lsub.add_parser("display", help="who drives the CLCD panel", parents=[fmt, usb],
-                         epilog=_epilog("lab display"))
-    lp.add_argument("owner", choices=("harness", "dut", "toggle", "query"))
+    lp = lsub.add_parser("link", help="virtual-PHY link event",
+                         description="Inject a link event on the virtual PHY the DUT's "
+                                     "Ethernet sees.",
+                         parents=[fmt, usb], epilog=_epilog("lab link"))
+    lp.add_argument("event", choices=("up", "down", "pulse"),
+                    help="up or down sets the link state; pulse is a momentary event (the "
+                         "state stays)")
+    lp = lsub.add_parser("display", help="who drives the CLCD panel",
+                         description="Who drives the on-board CLCD panel: the harness or the "
+                                     "DUT. A flip waits for the handover to land; if it has "
+                                     "not landed in time the verb says INCONCLUSIVE and exits 6.",
+                         parents=[fmt, usb], epilog=_epilog("lab display"))
+    lp.add_argument("owner", choices=("harness", "dut", "toggle", "query"),
+                    help="give the panel to the harness or the DUT, toggle it, or only query "
+                         "who has it")
     lp.add_argument("--timeout", type=float, default=cmd_lab.DISPLAY_TIMEOUT_S, metavar="S",
                     help="how long a flip may take to land")
-    lp = lsub.add_parser("macgen", help="MAC traffic generator/checker", parents=[fmt, usb],
-                         epilog=_epilog("lab macgen"))
+    lp = lsub.add_parser("macgen", help="MAC traffic generator/checker",
+                         description="Drive the MAC traffic generator/checker; prints its "
+                                     "tx/rx/err counters.",
+                         parents=[fmt, usb], epilog=_epilog("lab macgen"))
     lp.add_argument("--gen", action=argparse.BooleanOptionalAction, default=True,
                     help="generator on (default) or off")
     lp.add_argument("--chk", action=argparse.BooleanOptionalAction, default=True,
                     help="checker on (default) or off")
     lp.add_argument("--inject", default="none", metavar="FAULT",
                     help="arm a fault on the next frame (none, bad_fcs, runt, giant, ...)")
-    lp = lsub.add_parser("dutrx", help="frames the DUT transmitted", parents=[fmt, usb],
-                         epilog=_epilog("lab dutrx"))
+    lp = lsub.add_parser("dutrx", help="frames the DUT transmitted",
+                         description="Read up to N frames the DUT transmitted, with the capture "
+                                     "counters. \"No frame waiting\" is a result (exit 0), not "
+                                     "an error.",
+                         parents=[fmt, usb], epilog=_epilog("lab dutrx"))
     lp.add_argument("--frames", type=int, default=1, metavar="N", help="read up to N frames")
     vp.set_defaults(fn=cmd_lab.cmd_lab)
 
@@ -253,35 +266,53 @@ def make_parser() -> argparse.ArgumentParser:
               parents=(fmt, usb))
     target(vp)
     msub = vp.add_subparsers(dest="mcc_cmd", required=True, metavar="ACTION")
-    msub.add_parser("temp", help="controller temperatures", parents=[fmt, usb],
-                    epilog=_epilog("mcc temp|osc"))
-    msub.add_parser("osc", help="oscillator set-points", parents=[fmt, usb],
-                    epilog=_epilog("mcc temp|osc"))
+    msub.add_parser("temp", help="controller temperatures",
+                    description="The board controller's temperatures.",
+                    parents=[fmt, usb], epilog=_epilog("mcc temp|osc"))
+    msub.add_parser("osc", help="oscillator set-points",
+                    description="The board controller's oscillator set-points.",
+                    parents=[fmt, usb], epilog=_epilog("mcc temp|osc"))
     mp = msub.add_parser("reboot", help="reboot and prove it (down, then up)",
+                         description="Reboot the board controller and prove it: the board "
+                                     "goes down, then comes back. The running design is lost. "
+                                     "Asks first unless --yes.",
                          parents=[fmt, usb], epilog=_epilog("mcc reboot"))
     mp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     mp.add_argument("--wait", type=float, default=120.0, metavar="S",
                     help="how long to wait for the board to come back")
     mp = msub.add_parser("cmd", help="one allowlisted controller command",
+                         description="Send one allowlisted command line to the board "
+                                     "controller. Destructive ones (FORMAT, DEL, EEPROM, ...) "
+                                     "are refused with exit 15.",
                          parents=[fmt, usb], epilog=_epilog("mcc cmd"))
-    mp.add_argument("words", nargs="+", metavar="LINE")
+    mp.add_argument("words", nargs="+", metavar="LINE",
+                    help="the controller command line, e.g. HELP (only allowlisted commands "
+                         "are sent)")
     vp.set_defaults(fn=cmd_board.cmd_mcc)
 
     vp = verb("sd", "the configuration SD: backup, install, restore", parents=(fmt, usb))
     target(vp)
     ssub = vp.add_subparsers(dest="sd_cmd", required=True, metavar="ACTION")
-    sp = ssub.add_parser("backup", help="back up the SD into a zip in DIR", parents=[fmt, usb],
-                         epilog=_epilog("sd backup"))
-    sp.add_argument("dir", metavar="DIR")
+    sp = ssub.add_parser("backup", help="back up the SD into a zip in DIR",
+                         description="Back up the whole configuration SD into a new zip in "
+                                     "DIR. `sd install` needs it.",
+                         parents=[fmt, usb], epilog=_epilog("sd backup"))
+    sp.add_argument("dir", metavar="DIR", help="the directory the backup zip is written into")
     sp = ssub.add_parser("install", help="write a harness bundle (backup mandatory)",
+                         description="Write a harness bundle onto the configuration SD. The "
+                                     "backup is mandatory; .ebf files are never written. The "
+                                     "board runs it after the next reboot.",
                          parents=[fmt, usb], epilog=_epilog("sd install"))
-    sp.add_argument("bundle", metavar="BUNDLE_DIR")
+    sp.add_argument("bundle", metavar="BUNDLE_DIR",
+                    help="the harness bundle: a directory laid out like the SD")
     sp.add_argument("--backup", required=True, metavar="ZIP",
                     help="the backup `sd backup` made of this SD")
     sp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
-    sp = ssub.add_parser("restore", help="put a backup back", parents=[fmt, usb],
-                         epilog=_epilog("sd restore"))
-    sp.add_argument("zip", metavar="ZIP")
+    sp = ssub.add_parser("restore", help="put a backup back",
+                         description="Put a backup that `sd backup` made back onto the "
+                                     "configuration SD.",
+                         parents=[fmt, usb], epilog=_epilog("sd restore"))
+    sp.add_argument("zip", metavar="ZIP", help="the backup zip `sd backup` wrote")
     sp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     vp.set_defaults(fn=cmd_board.cmd_sd)
 

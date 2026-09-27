@@ -33,7 +33,7 @@ from typing import Any
 from harness_manager.core import capabilities as C
 from harness_manager.core.errors import ExitCode
 
-from .context import Ctx
+from .context import SERIAL_HELP, VIA_HELP, VIA_METAVAR, Ctx
 from .output import Result, jsonable
 
 TARGET_HELP = "shell address host[:port], or - for a USB-only board (with --serial/--volume)"
@@ -49,11 +49,10 @@ def _parents() -> list[argparse.ArgumentParser]:
                    help="tab-separated rows, append-only columns")
     usb = argparse.ArgumentParser(add_help=False)
     usb.add_argument("--serial", action="append", metavar="URL", default=argparse.SUPPRESS,
-                     help="add the board controller's USB serial link")
+                     help=SERIAL_HELP)
     usb.add_argument("--volume", action="append", metavar="PATH", default=argparse.SUPPRESS,
                      help="add the configuration SD volume (the mounted V2M-MPS3 drive)")
-    usb.add_argument("--via", metavar="ssh:HOST", default=argparse.SUPPRESS,
-                     help="reach the shell through an SSH tunnel on HOST (the lab hub)")
+    usb.add_argument("--via", metavar=VIA_METAVAR, default=argparse.SUPPRESS, help=VIA_HELP)
     return [fmt, usb]
 
 

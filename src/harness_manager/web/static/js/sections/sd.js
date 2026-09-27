@@ -37,7 +37,7 @@ function SdRecoveryCard({ bid }) {
         text="Arm: I understand this rewrites the configuration SD from the backup taken before the install." />
       <${ActionRow} bid=${bid} panel="sd_restore" spec=${spec} variant="primary" icon="undo-2"
         gate=${{ capability: "storage_install", adapter: "storage", arm: "sd_restore",
-          guard: () => (backup ? "" : "the journal names no backup; restore by hand with harness-manager sd restore") }} />
+          guard: () => (backup ? "" : "the journal names no backup; restore by hand with harness-manager sd TARGET restore ZIP") }} />
       <${ResultBlock} lines=${p.lines} panel=${p} testid="sd-result" />
     </div>
   <//>`;

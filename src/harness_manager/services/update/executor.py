@@ -921,7 +921,8 @@ class HarnessInstaller:
             chosen = (record.get("backup") or {}).get("path", "")
         if not chosen:
             raise RefusedError(f"no backup is recorded for {board_id}",
-                               hint="pass --backup ZIP (a backup `harness-manager sd backup` made)")
+                               hint="pass --backup ZIP (a backup "
+                                    "`harness-manager sd TARGET backup DIR` made)")
         backup = storage.load_backup(Path(chosen))
         self._emit("update.started", board_id, version="rollback", mode="restore")
         storage.restore(backup, progress=self._progress(board_id, "restore:"))

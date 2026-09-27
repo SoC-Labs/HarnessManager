@@ -46,7 +46,7 @@ from harness_manager.core.errors import (
 )
 
 from . import cmd_update
-from .context import Ctx
+from .context import SERIAL_HELP, Ctx
 from .output import Result, with_data
 
 TARGET_HELP = cmd_update.TARGET_HELP
@@ -62,7 +62,7 @@ def _parents() -> tuple[argparse.ArgumentParser, ...]:
                    help="tab-separated rows, append-only columns")
     usb = argparse.ArgumentParser(add_help=False)
     usb.add_argument("--serial", action="append", metavar="URL", default=argparse.SUPPRESS,
-                     help="add the board controller's USB serial link")
+                     help=SERIAL_HELP)
     usb.add_argument("--volume", action="append", metavar="PATH", default=argparse.SUPPRESS,
                      help="add the configuration SD volume (the mounted V2M-MPS3 drive)")
     src = argparse.ArgumentParser(add_help=False)
@@ -95,7 +95,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     fmt, usb, src, one = _parents()
     vp = subparsers.add_parser(
         "harness", parents=[fmt],
-        help="harness versions: list, show, fetch, install, pin, history, roll back, mirror",
+        help="harness versions: list, show, fetch, install, pin, unpin, history, rollback, "
+             "mirror",
         description="The harness versions catalogue: every signed release of this board "
                     "pack's harness, with what it would do to a board.")
     sub = vp.add_subparsers(dest="harness_cmd", required=True, metavar="ACTION")
@@ -110,12 +111,12 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
     ap = sub.add_parser("show", help="one release: identity, parts, notes, what changes",
                         parents=[fmt, usb, src, one], epilog=epilog("harness show"))
-    ap.add_argument("version", metavar="VERSION")
+    ap.add_argument("version", metavar="VERSION", help="the release, e.g. 1.2.0 (`harness list`)")
     ap.add_argument("target", nargs="?", default=None, metavar="TARGET", help=TARGET_HELP)
 
     ap = sub.add_parser("fetch", help="download and verify a release into the cache now",
                         parents=[fmt, src, one], epilog=epilog("harness fetch"))
-    ap.add_argument("version", metavar="VERSION")
+    ap.add_argument("version", metavar="VERSION", help="the release, e.g. 1.2.0 (`harness list`)")
     ap.add_argument("--kit", action="store_true", help="also the DUT build kit (10-40 MB)")
 
     ap = sub.add_parser("install", help="install a release on a board (asks first)",
@@ -133,7 +134,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap = sub.add_parser("pin", help="pin a board to a release (none newer is offered)",
                         parents=[fmt, usb, src, one], epilog=epilog("harness pin"))
     ap.add_argument("target", metavar="TARGET", help=TARGET_HELP)
-    ap.add_argument("version", metavar="VERSION")
+    ap.add_argument("version", metavar="VERSION", help="the release to pin the board to")
     ap.add_argument("--no-check", action="store_true",
                     help="do not look the version up in the channels (offline)")
 
@@ -144,7 +145,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap = sub.add_parser("history", help="a board's last installs, newest first",
                         parents=[fmt, usb], epilog=epilog("harness history"))
     ap.add_argument("target", metavar="TARGET", help=TARGET_HELP)
-    ap.add_argument("--limit", type=int, default=None, metavar="N")
+    ap.add_argument("--limit", type=int, default=None, metavar="N",
+                    help="show at most the N newest installs (default: every one kept)")
 
     ap = sub.add_parser("rollback", help="re-install the previous release (or restore a backup)",
                         parents=[fmt, usb, src, one], epilog=epilog("harness rollback"))
@@ -152,7 +154,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--to", default="previous", metavar="previous|VERSION",
                     help="the release to go back to (default: the one the last install replaced)")
     ap.add_argument("--backup", default=None, metavar="ZIP",
-                    help="restore this config-SD backup instead (T7's rollback)")
+                    help="restore this config-SD backup instead, and reboot (the same as "
+                         "`update rollback TARGET --backup ZIP`)")
     ap.add_argument("--wait", type=float, default=None, metavar="S",
                     help="with --backup: how long to wait for the board to come back")
     ap.add_argument("--consent", default="", metavar="PHRASE",
@@ -162,7 +165,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
     ap = sub.add_parser("mirror", help="write an offline mirror: channels + blobs/<sha256>",
                         parents=[fmt, src], epilog=epilog("harness mirror"))
-    ap.add_argument("dir", metavar="DIR")
+    ap.add_argument("dir", metavar="DIR", help="the directory to write the mirror into")
     ap.add_argument("--channel", action="append", default=None, metavar="NAME",
                     help="a channel to mirror (repeatable; default stable)")
     ap.add_argument("--all", action="store_true", help="stable, beta and dev")

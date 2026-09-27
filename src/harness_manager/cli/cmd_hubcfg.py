@@ -68,7 +68,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
         TSV_COLUMNS.setdefault(layout, cols)
     fmt = _fmt()
     vp = subparsers.add_parser(
-        "hub", help="fpgahub hubs: list, add, test, targets, adopt, remove",
+        "hub", help="fpgahub hubs: list, add, token, test, targets, adopt, remove",
         description="fpgahub hubs as named settings: a board refers to one with "
                     "hub = { use = NAME, target = ... } in boards.toml. No hub at all is "
                     "the default: boards on your desk or your network need none.",
@@ -116,7 +116,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
     tp = sub.add_parser("token", help="set, point at or clear your token for a hub",
                         parents=[fmt], epilog=ep("hub"))
-    tp.add_argument("name", metavar="NAME")
+    tp.add_argument("name", metavar="NAME", help="the hub (`hub list`)")
     which = tp.add_mutually_exclusive_group(required=True)
     which.add_argument("--stdin", action="store_true",
                        help="read it from stdin (a prompt without echo on a terminal)")
@@ -126,13 +126,13 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
     xp = sub.add_parser("test", help="test the connection: never takes a lease",
                         parents=[fmt], epilog=ep("hub test"))
-    xp.add_argument("name", metavar="NAME")
+    xp.add_argument("name", metavar="NAME", help="the hub (`hub list`)")
     xp.add_argument("--target", action="append", default=None, metavar="T",
                     help="a target to look for (default: those of the boards using the hub)")
 
     gp = sub.add_parser("targets", help="what the hub offers; --add writes a board for one",
                         parents=[fmt], epilog=ep("hub targets"))
-    gp.add_argument("name", metavar="NAME")
+    gp.add_argument("name", metavar="NAME", help="the hub (`hub list`)")
     gp.add_argument("--add", metavar="TARGET", default=None,
                     help="write a boards.toml entry for TARGET that uses this hub")
     gp.add_argument("--board", metavar="KEY", default=None,
@@ -150,7 +150,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
     rp = sub.add_parser("remove", help="remove a hub and your stored token for it",
                         parents=[fmt], epilog=ep("hub change"))
-    rp.add_argument("name", metavar="NAME")
+    rp.add_argument("name", metavar="NAME", help="the hub (`hub list`)")
     rp.add_argument("--force", action="store_true", help="even while boards use it")
     vp.set_defaults(fn=cmd_hub)
     return vp

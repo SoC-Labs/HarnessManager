@@ -34,7 +34,7 @@ from harness_manager.core import capabilities as C
 from harness_manager.core.errors import ExitCode, UnavailableError
 from harness_manager.core.model import Reading
 
-from .context import Ctx
+from .context import SERIAL_HELP, Ctx
 from .output import (
     READING_COLUMNS,
     TSV_COLUMNS,
@@ -66,7 +66,7 @@ def _parents() -> list[argparse.ArgumentParser]:
                    help="tab-separated rows, append-only columns")
     usb = argparse.ArgumentParser(add_help=False)
     usb.add_argument("--serial", action="append", metavar="URL", default=argparse.SUPPRESS,
-                     help="add the board controller's USB serial link")
+                     help=SERIAL_HELP)
     usb.add_argument("--volume", action="append", metavar="PATH", default=argparse.SUPPRESS,
                      help="add the configuration SD volume (the mounted V2M-MPS3 drive)")
     return [fmt, usb]

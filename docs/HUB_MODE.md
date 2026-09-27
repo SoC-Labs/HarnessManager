@@ -1,6 +1,6 @@
 # Hub mode: Harness Manager with an fpgahub token, no SSH
 
-**Status (2026-09-24, team T8):** the REST transport, the event stream and the `via = "hub"` planner are built and tested against a fake hub that is checked against fpgahub v0.3.0's own app. None of it has run against the real hub yet. Wiring it into the pack and the daemon needs the CCRs T8-1 to T8-5; until they land, `boards.toml` with `url` is refused as an unknown key.
+**Status (2026-09-26):** the REST transport, the event stream and the `via = "hub"` planner are built, tested against a fake hub that is checked against fpgahub v0.3.0's own app, and wired into the pack and the daemon (the T8-1 to T8-5 CCRs are merged). A hub with a `url`, as a named hub (`harness-manager hub add NAME --url URL`) or in a board's `hub` table, is accepted. None of it has run against the real hub yet.
 
 Today Harness Manager reaches the lab hub (fpgahub on mapstone-dev) over SSH: `ssh HUB 'sg fpga -c "fpgahub …"'` for leases and shares, `ssh -N -L` for the board's ports. Hub mode replaces the first half with fpgahub's own REST API and its event stream, so a user with an **fpgahub token** and no SSH account can lease the board, see the queue and read the hub's shares. The second half, the board's own TCP ports, needs a route through the hub, which the lab hub does not offer today (see [The data plane](#the-data-plane)).
 
