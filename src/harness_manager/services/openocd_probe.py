@@ -100,11 +100,11 @@ class AdapterList:
 def fix_hint(need: str = REMOTE_BITBANG, *, env_var: str = "") -> str:
     """The next action when no usable binary was found. ``env_var``: the variable that chose
     the binary, which overrides the setting, so it must change (or go) too."""
-    where = ("then set tools.openocd (Settings → Tools, or "
+    where = ("then set tools.openocd (Settings -> Tools, or "
              "`harness-manager config set tools.openocd PATH`)")
     if env_var:
         where = (f"then point ${env_var} at it (it overrides tools.openocd), or unset it and "
-                 "set tools.openocd (Settings → Tools, or "
+                 "set tools.openocd (Settings -> Tools, or "
                  "`harness-manager config set tools.openocd PATH`)")
     return (f"use an OpenOCD with {need}, e.g. xPack OpenOCD 0.12 (the build the lab hub "
             f"uses), {where}")

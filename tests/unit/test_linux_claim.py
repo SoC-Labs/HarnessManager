@@ -12,6 +12,7 @@ launcher replaced by ``FakeSsh``. Nothing reaches a real host.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -635,6 +636,11 @@ def test_negative_twin_without_key_sha256_nothing_is_invented(rig_factory):
     assert any("does not publish which" in n for n in st["notes"])
 
 
+#: REVIEW-W5 16: these stand the hub's interpreters in as /bin/sh scripts; Windows has none.
+NEEDS_SH = pytest.mark.skipif(os.name != "posix" or not Path("/bin/sh").exists(),
+                              reason="the hub's shell and interpreters are /bin/sh scripts here")
+
+
 def _interpreters(tmp_path: Path, **kinds: str) -> Path:
     """Fake hub interpreters in a PATH of their own: ``good`` runs this test's python, ``old``
     behaves like the hub's 3.6 (fails the version check, prints 3.6). Each logs its name."""
@@ -662,6 +668,7 @@ def _run_pick(bindir: Path) -> tuple[int, str, list[str]]:
     return p.returncode, p.stdout.strip(), ran
 
 
+@NEEDS_SH
 def test_the_hub_helper_refuses_clearly_when_the_hub_has_only_python_3_6(tmp_path):
     rc, out, ran = _run_pick(_interpreters(tmp_path, python3="old"))
     reply = json.loads(out.splitlines()[-1])
@@ -670,6 +677,7 @@ def test_the_hub_helper_refuses_clearly_when_the_hub_has_only_python_3_6(tmp_pat
     assert "future feature" not in out                    # the helper never ran on 3.6
 
 
+@NEEDS_SH
 def test_negative_twin_python3_11_is_tried_first_and_runs_the_helper(tmp_path):
     rc, out, ran = _run_pick(_interpreters(tmp_path, python3_13="good", python3_11="good",
                                            python3="old"))
@@ -677,12 +685,14 @@ def test_negative_twin_python3_11_is_tried_first_and_runs_the_helper(tmp_path):
     assert ran and set(ran) == {"python3.11"}             # 3.13 and python3 never asked
 
 
+@NEEDS_SH
 def test_negative_twin_a_bare_python3_that_is_new_enough_is_used(tmp_path):
     rc, out, ran = _run_pick(_interpreters(tmp_path, python3="good"))
     assert json.loads(out.splitlines()[-1])["err"] == "unknown op nosuch"
     assert CL.HUB_PYTHONS[0] == "python3.11" and CL.HUB_PY_MIN == (3, 8)
 
 
+@NEEDS_SH
 def test_the_hub_call_turns_no_python_into_a_hint(tmp_path, monkeypatch):
     bindir = _interpreters(tmp_path, python3="old")
 

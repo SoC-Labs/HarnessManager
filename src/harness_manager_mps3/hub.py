@@ -68,9 +68,11 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 import secrets
 import socket
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -88,6 +90,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.proc import no_window
 from harness_manager.core.transport import SerialPort, register_serial_scheme
 from harness_manager.transports import tcp_serial
 
@@ -417,9 +420,46 @@ def default_runner_factory(host: str, group: str | None, jump: str = "") -> Call
     from pyverify.lease import LocalHubRunner, SshHubRunner
 
     if host in LOCAL_HOSTS:
-        return LocalHubRunner()
+        return _windowless(LocalHubRunner)()
     return JumpSshHubRunner(host, group=group, jump=jump) if jump else \
-        SshHubRunner(host, group=group)
+        _windowless(SshHubRunner)(host, group=group)
+
+
+_WINDOWLESS: dict[type, type] = {}
+
+
+def _windowless(cls: type) -> type:
+    """On Windows, pyverify's hub runner class whose calls open no console window
+    (REVIEW-W5 14: every hub call, the MCC reads and REBOOTs of ``hub_mcc`` among them, is a
+    ``subprocess.run`` of ssh): pyverify's ``HubRunner.__call__`` with
+    ``core.proc.no_window()``. Elsewhere ``cls`` itself, unchanged."""
+    if not no_window():
+        return cls
+    made = _WINDOWLESS.get(cls)
+    if made is not None:
+        return made
+
+    class _Windowless(cls):  # type: ignore[valid-type, misc]
+        def __call__(self, argv: Sequence[str], timeout: float | None = None) -> Any:
+            flags = no_window()
+            from pyverify import lease as _pl
+
+            cmd = self.build(argv)
+            env = dict(os.environ)
+            env.update(getattr(_pl, "_RENDER_ENV", {}))
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                                      env=env, check=False, **flags)
+            except subprocess.TimeoutExpired as exc:
+                raise TimeoutError(f"hub command timed out after {timeout}s: "
+                                   f"{' '.join(cmd)}") from exc
+            except OSError as exc:
+                raise _pl.LeaseError(f"cannot run {cmd[0]}: {exc}") from exc
+            return _pl.RunResult(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+    _Windowless.__name__ = _Windowless.__qualname__ = f"Windowless{cls.__name__}"
+    _WINDOWLESS[cls] = _Windowless
+    return _Windowless
 
 
 _JUMP_RUNNER: Any = None
@@ -450,7 +490,7 @@ def _jump_runner_class() -> Any:
 
 
 def JumpSshHubRunner(host: str, *, group: str | None, jump: str) -> Any:  # noqa: N802
-    return _jump_runner_class()(host, group=group, jump=jump)
+    return _windowless(_jump_runner_class())(host, group=group, jump=jump)
 
 
 #: What the pack uses to reach a hub; tests replace it (tests/fakes/l1_fake_hub.py).

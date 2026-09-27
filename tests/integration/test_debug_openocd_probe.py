@@ -38,7 +38,7 @@ from tests.fakes.t5_fake_engine import FakeEngine
 XPACK = Path.home() / "opt/xpack-openocd/xpack-openocd-0.12.0-7/bin/openocd"
 SOCLABS_BUILD = Path.home() / "SoCLabs/soclabs-openocd/install/bin/openocd"
 FIX_WORDS = ("xPack OpenOCD 0.12", "harness-manager config set tools.openocd PATH",
-             "Settings → Tools")
+             "Settings -> Tools")
 
 # What the real builds print (srv03335, 2026-09-27), trimmed.
 REAL_0120 = """Open On-Chip Debugger 0.12.0-g9ea7f3d-dirty (2026-09-24-08:41)

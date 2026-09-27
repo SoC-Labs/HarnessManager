@@ -943,7 +943,7 @@ def cmd_share(ctx: Ctx) -> int:
         raise UsageError(f"unknown share action {a.share_cmd!r}")
     rows = [[hub.target, hub.host, s.tty, f"{s.host}:{s.port}", s.writer, s.readers, s.running]
             for s in shares]
-    human = [f"{s.tty} → {s.host}:{s.port}  writer {s.writer or '-'}  clients {s.readers}"
+    human = [f"{s.tty} -> {s.host}:{s.port}  writer {s.writer or '-'}  clients {s.readers}"
              for s in shares] or [f"no shares running for {hub.target} on {hub.host}"]
     data = {"board_id": cand.board_id, "hub": hub.host, "target": hub.target,
             "shares": [{"tty": s.tty, "host": s.host, "port": s.port, "writer": s.writer,

@@ -39,6 +39,7 @@ from harness_manager.core.errors import (
     UnreachableError,
     UsageError,
 )
+from harness_manager.core.proc import no_window
 
 from .hubs import Hub, boards_using, check_target, hub_credential, load_resolver, resolve_hub
 from .resolve import Resolver
@@ -326,7 +327,7 @@ def local_argv(group: str | None, remote_argv: Sequence[str], *, markers: bool =
 def _default_run(timeout_s: float) -> Runner:
     def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout_s,
-                              stdin=subprocess.DEVNULL, check=False)
+                              stdin=subprocess.DEVNULL, check=False, **no_window())
     return run
 
 

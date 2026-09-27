@@ -304,6 +304,16 @@ function FilesCard() {
   </div>`;
 }
 
+// One spelling for a directory before two are compared: "\\" as "/", no trailing "/"
+// (a Windows service reports C:\\Users\\me\\..., the row may say C:/Users/me/...; REVIEW-W5 17).
+export function sameDir(a, b) {
+  const norm = (p) => String(p || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const v = norm(a), dir = norm(b);
+  if (!v || !dir) return false;
+  if (v === dir) return true;
+  return v.startsWith("~/") && dir.endsWith(v.slice(1));
+}
+
 // A --state-dir or --demo service reads and writes its own directory, not the one the
 // advanced.state_dir row resolves to (the variable, else the default): say which it uses.
 function stateDirExtras() {
@@ -311,7 +321,7 @@ function stateDirExtras() {
   const dir = ((SS.listing && SS.listing.files) || {}).config_dir || "";
   if (!row || !dir) return {};
   const v = String(row.value || "");
-  const same = v === dir || (v.startsWith("~/") && dir.endsWith(v.slice(1)));
+  const same = sameDir(v, dir);
   const demo = !!(SS.listing.service && SS.listing.service.demo);
   if (same && !demo) return {};
   return { "advanced.state_dir": { note: html`<div class="srow-note" data-testid="service-dir-note"><${Icon} name="info" cls="sm" />
