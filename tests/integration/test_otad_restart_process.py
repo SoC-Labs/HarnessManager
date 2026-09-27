@@ -8,8 +8,12 @@ and PTY dir, and a virtual MPS3 in this process. ``POST /update/app/apply`` then
 rest by itself: the real ``--self-test``, the drain, the resume file, the detached helper
 under the OLD interpreter, the pointer switch, the new daemon with ``--resume``, the health
 check and, for the broken versions, the rollback. Every process a test starts is stopped by
-it (the daemon through its API, the helper by the pid it recorded), and ``/tmp/otad-*`` is
-removed at the end.
+it, pass or fail: the daemon through its API, then every process that still names the
+test's own dir (each daemon and helper takes ``--state-dir``), the helper first, whether or
+not ``daemon.json`` names it yet (``tests/fakes/proc_sweep.py``). ``/tmp/otad-*`` is removed
+at the end, after the same sweep over the whole install; a reaper does both if the test
+process itself is killed, and the session guard (``tests/conftest.py``) fails a run that
+leaves a daemon behind.
 """
 
 from __future__ import annotations
@@ -19,7 +23,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import socket
 import subprocess
 import tempfile
@@ -32,6 +35,7 @@ import httpx
 import pytest
 
 from harness_manager.services import pty as ptymod
+from tests.fakes import proc_sweep
 from tests.fakes.l2_rig import PtyClient
 from tests.fakes.otad_install import FakeInstall, env
 from tests.fakes.t13_daemon import pack_overrides, recv_json_until, ws_connect
@@ -44,16 +48,24 @@ pytestmark = [
 ]
 
 OLD, GOOD, DIES_AT_START, DIES_LATER = "0.1.0", "0.2.0", "0.3.0", "0.4.0"
+HELPER = "harness_manager.daemon.update_apply"
 
 
 @pytest.fixture(scope="module")
 def install():
     base = Path(tempfile.mkdtemp(prefix="otad-", dir="/tmp"))
+    marker = proc_sweep.track(base)                  # the session guard checks it at the end
+    reaper = proc_sweep.start_reaper(base)           # if this process is killed outright
     try:
         yield FakeInstall.build(base / "i", {OLD: "ok", GOOD: "ok", DIES_AT_START: "dies-at-start",
                                              DIES_LATER: "dies-after:2"})
     finally:
-        shutil.rmtree(base, ignore_errors=True)
+        try:
+            proc_sweep.sweep(marker, first=(HELPER,))  # anything a world's close missed
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+            if reaper is not None:
+                reaper.wait(timeout=30)              # it sees the base gone and exits
 
 
 _SEQ = itertools.count(1)
@@ -156,37 +168,43 @@ class World:
     # -- clean-up: only what this test started --
 
     def close(self) -> None:
-        marker = str(self.inst.base)
+        """Stop every process this world started, whatever the test left behind. The daemon
+        ``daemon.json`` names is asked to stop (it closes its board); then every process that
+        still names this world's dir is stopped, the apply helper first (it would start, or
+        roll back to, another daemon). That covers a daemon the helper started that has not
+        written ``daemon.json`` yet, and each step runs even when one before it raised."""
+        marker = str(self.work) + "/"
+        try:
+            self._ask_the_daemon_to_stop(marker)
+        finally:
+            try:
+                proc_sweep.sweep(marker, first=(HELPER,))
+            finally:
+                for proc in self.procs:
+                    if proc.poll() is None:
+                        proc.kill()
+                    proc.wait(timeout=10)
+                self.vb.__exit__(None, None, None)
+
+    def _ask_the_daemon_to_stop(self, marker: str) -> None:
         info = self.state / "daemon.json"
-        if info.exists():
-            try:
-                pid = json.loads(info.read_text())["pid"]
-                if _ours(pid, marker):
-                    try:
-                        with self.api() as c:
-                            c.post("/daemon/shutdown", json={"force": True})
-                    except httpx.HTTPError:
-                        pass
-                    deadline = time.monotonic() + 15
-                    while _ours(pid, marker) and time.monotonic() < deadline:
-                        time.sleep(0.1)
-                    if _ours(pid, marker):
-                        os.kill(pid, signal.SIGKILL)
-            except (OSError, ValueError, KeyError):
-                pass
-        helper = self.state / "update" / "apply.json"
-        if helper.exists():
-            try:
-                pid = json.loads(helper.read_text())["pid"]
-                if _ours(pid, "update_apply"):
-                    os.kill(pid, signal.SIGKILL)
-            except (OSError, ValueError, KeyError):
-                pass
-        for proc in self.procs:
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait(timeout=10)
-        self.vb.__exit__(None, None, None)
+        token = getattr(self, "token", None)
+        if not info.exists() or token is None:
+            return
+        try:
+            pid = json.loads(info.read_text())["pid"]
+        except (OSError, ValueError, KeyError):
+            return
+        if not _ours(pid, marker):
+            return
+        try:
+            with self.api() as c:
+                c.post("/daemon/shutdown", json={"force": True}, timeout=5)
+        except httpx.HTTPError:
+            return
+        deadline = time.monotonic() + 10
+        while _ours(pid, marker) and time.monotonic() < deadline:
+            time.sleep(0.1)
 
 
 @pytest.fixture
