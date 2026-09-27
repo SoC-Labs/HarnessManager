@@ -37,8 +37,22 @@ Test and demo knobs (not part of the Engine protocol):
 - ``failures["controller.reboot.confirm"]``: REBOOT sent, no restart observed;
 - ``set_card(board_id, state)``: a card in the board's user microSD slot, its store in
   ``state`` ("empty", "valid", "foreign"...), or None to take it out. "Keep on the card"
-  also needs the harness to report ``usd`` (``set_features``). No demo board has either
-  until a test or the demo sets them.
+  also needs the harness to report ``usd`` (``set_features``). No classic board has either
+  until a test sets them.
+
+**The showcase** (``DemoEngine(showcase=True, state_dir=...)``, what ``harness-manager app
+--demo`` and ``ui --demo`` serve): three other boards, one of each harness, so every part of
+the app has something to show (``harness_manager.demo_showcase``): a Linux harness
+(``BOARD_LINUX``: the card, OS slots, the SSH claim, the front panel read from the glass,
+Identify, XVC), today's bare-metal v0.11 board (``BOARD_V011``: the rebuilt panel, Identify
+unavailable, XVC with its warning, every harness-catalogue verdict, the Debug USB) and a board
+behind a hub whose lease alice holds (``BOARD_LEASED``: the queue, a request, force-release).
+The showcase engine also has what the classic one leaves to the real engine: ``xvc``,
+``board_claim``, ``update`` (a signed catalogue in the demo's state dir,
+``harness_manager.demo_catalog``) and ``kit_channel`` (the DUT build kits from that
+catalogue), all offline. ``HARNESS_MANAGER_DEMO_UPDATE=staged`` (or ``app_update="staged"``)
+stages a pretend app update so the banner shows; it is off by default. The classic three
+boards stay the default of ``DemoEngine()`` (the tests' fixture).
 """
 
 from __future__ import annotations
@@ -149,6 +163,8 @@ class _Board:
     sd_journal: dict | None = None
     card: str | None = None          # the user microSD's store state; None = no card
     card_slot: str = "B"             # the slot the last kept design went to
+    overlay_shell: str = SHELL_FIELDED   # the static the demo's overlays are keyed to
+    kind: str = ""                   # showcase: "linux" | "bare-metal" | "leased" ("": classic)
 
 
 def _eth(host: str) -> Link:
@@ -231,8 +247,11 @@ def _script() -> dict[str, _Board]:
     return {b.candidate.board_id: b for b in boards}
 
 
-def _overlays() -> list[OverlayRef]:
-    def ov(name: str, design: int, shell: str = SHELL_FIELDED, size: int = 412_160) -> OverlayRef:
+def _overlays(static: str = SHELL_FIELDED) -> list[OverlayRef]:
+    """The overlay store: every design keyed to ``static`` but one, keyed to an old static."""
+    old = SHELL_OLD if static == SHELL_FIELDED else SHELL_FIELDED
+
+    def ov(name: str, design: int, shell: str = static, size: int = 412_160) -> OverlayRef:
         rm = "0x00000000" if design == 0 else f"0x0100{design:04x}"
         return OverlayRef(name=name, rm_id=rm, static_id=shell, static_usercode="0x5f3a9c11",
                           source=f"fielded/{name}/manifest.json", size_bytes=size,
@@ -240,7 +259,7 @@ def _overlays() -> list[OverlayRef]:
 
     return [ov("greybox", 0x0000, size=86_016), ov("nanosoc", 0x0001), ov("nanosoc_upy", 0x0005),
             ov("nanosoc_iice", 0x0008, size=498_304), ov("led", 0x001E, size=102_400),
-            ov("nanosoc_multicore", 0x0003, shell=SHELL_OLD, size=640_512)]
+            ov("nanosoc_multicore", 0x0003, shell=old, size=640_512)]
 
 
 # --- the pack ---------------------------------------------------------------------------
@@ -367,18 +386,26 @@ class DemoSession(BoardSession):
         self.candidate = candidate
         self.resets = _Resets(engine, candidate.board_id)
         self.closed = False
+        board = engine._board(candidate.board_id)
+        if board.kind:          # the showcase: panel, claim, OS slots, card, hub (demo_showcase)
+            from harness_manager.demo_showcase import adapters
+
+            for name, adapter in adapters(engine, board).items():
+                setattr(self, name, adapter)
 
     @property  # type: ignore[override]
     def controller(self):  # noqa: D401 - follows the board's live links
         board = self._e._board(self.candidate.board_id)
         kinds = {lk.kind for lk in board.candidate.links}
-        return _Controller(self._e, board.candidate.board_id) if LinkKind.USB_SERIAL in kinds else None
+        return _Controller(self._e, board.candidate.board_id) \
+            if kinds & {LinkKind.USB_SERIAL, LinkKind.HUB} else None
 
     @property  # type: ignore[override]
     def storage(self):  # noqa: D401 - follows the board's live links
         board = self._e._board(self.candidate.board_id)
         kinds = {lk.kind for lk in board.candidate.links}
-        return _Storage(self._e, board.candidate.board_id) if LinkKind.USB_MSD in kinds else None
+        return _Storage(self._e, board.candidate.board_id) \
+            if kinds & {LinkKind.USB_MSD, LinkKind.HUB} else None
 
     def identity(self) -> BoardIdentity:
         return self._e._board(self.candidate.board_id).identity
@@ -430,15 +457,18 @@ class DemoDeploy:
     def __init__(self, engine: DemoEngine) -> None:
         self._e = engine
 
+    def _store(self, session: BoardSession) -> list[OverlayRef]:
+        return _overlays(self._e._board(session.candidate.board_id).overlay_shell)
+
     def overlays(self, session: BoardSession) -> Sequence[OverlayRef]:
         self._e._enter("deploy.overlays", session.candidate.board_id)
-        return _overlays()
+        return self._store(session)
 
     def compatible(self, session: BoardSession) -> tuple[list[OverlayRef], dict[str, str]]:
         self._e._enter("deploy.compatible", session.candidate.board_id)
         ok: list[OverlayRef] = []
         why: dict[str, str] = {}
-        for ov in _overlays():
+        for ov in self._store(session):
             bad = [i for i in self._items(session, ov) if i.check is Check.MISMATCH]
             if bad:
                 why[ov.name] = "; ".join(f"{i.name}: {i.detail}" for i in bad)
@@ -543,7 +573,7 @@ class DemoDeploy:
 
     def restore_baseline(self, session: BoardSession) -> DeployResult:
         self._e._enter("deploy.restore_baseline", session.candidate.board_id)
-        greybox = next(o for o in _overlays() if o.name == "greybox")
+        greybox = next(o for o in self._store(session) if o.name == "greybox")
         return self.deploy(session, greybox)
 
 
@@ -739,9 +769,18 @@ class DemoTelemetry:
 
 
 class DemoEngine:
-    """Implements ``harness_manager.core.services.Engine`` over three scripted boards."""
+    """Implements ``harness_manager.core.services.Engine`` over three scripted boards.
 
-    def __init__(self, *, speed: float = 1.0, console_chatter: bool = False) -> None:
+    ``showcase=True``: the showcase's three boards and its offline services (the module
+    docstring); ``state_dir`` is where its catalogue, kits, pins and history live (a
+    temporary directory, removed by ``close_all``, when not given). ``app_update``:
+    ``"staged"`` stages a pretend app update (the banner); None reads
+    ``HARNESS_MANAGER_DEMO_UPDATE``; anything else is off.
+    """
+
+    def __init__(self, *, speed: float = 1.0, console_chatter: bool = False,
+                 showcase: bool = False, state_dir: Path | str | None = None,
+                 app_update: str | None = None) -> None:
         self.bus = EventBus()
         self.store = DemoStore()
         self.deploy = DemoDeploy(self)
@@ -753,13 +792,42 @@ class DemoEngine:
         self.failures: dict[str, HarnessError] = {}
         self.calls: list[tuple[str, tuple]] = []
         self._lock = threading.RLock()
-        self._boards = _script()
+        self.showcase = showcase
+        if state_dir is not None:
+            # Only when there is one: code that reads ``getattr(engine, "state_dir", DEFAULT)``
+            # keeps its default for a classic engine without one.
+            self.state_dir = Path(state_dir)
+        self._temp_state: Path | None = None
+        self._boards = _script() if not showcase else self._showcase(app_update)
         self._sessions: dict[str, DemoSession] = {}
         self._mine: dict[str, LockOwner] = {}
         self._pack = DemoPack()
         self._chatter_stop = threading.Event()
         if console_chatter:
             threading.Thread(target=self._chatter, daemon=True, name="demo-chatter").start()
+
+    def _showcase(self, app_update: str | None) -> dict[str, _Board]:
+        """The showcase's boards, and its services over the demo's own state dir."""
+        import tempfile
+
+        from harness_manager import demo_catalog as cat
+        from harness_manager import demo_showcase as show
+        from harness_manager.services.claim import ClaimService
+
+        if getattr(self, "state_dir", None) is None:
+            self.state_dir = self._temp_state = Path(tempfile.mkdtemp(prefix="hm-demo-"))
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        fixtures = self.state_dir / "demo-fixtures"
+        staged = cat.staged_from_env() if app_update is None else app_update == cat.UPDATE_STAGED
+        self.catalog = cat.DemoCatalog(fixtures)
+        self.update = cat.update_service(self, self.state_dir, self.catalog, staged=staged)
+        self.kit_channel = cat.kit_channel(self.update, self.catalog)
+        cat.seed_kit(self.state_dir, self.catalog, self.kit_channel)
+        cat.seed_history(self.state_dir, show.BOARD_V011, show.BOARD_LINUX)
+        self.xvc = show.DemoXvc(self, fixtures / "xvc")
+        self.board_claim = ClaimService(self)
+        self._hub_state = show.DemoHubState(show.me())
+        return show.script()
 
     # -- the Engine protocol ------------------------------------------------------------
 
@@ -840,7 +908,9 @@ class DemoEngine:
         board = self._board(board_id)
         kinds = [lk.kind for lk in board.candidate.links]
         available, unavailable = negotiate(_specs(), kinds, board.identity.features)
-        return BoardInfo(board.candidate, board.identity, board.health, available, unavailable)
+        claim = getattr(self.session(board_id), "claim", None)      # LINUX-CLAIM (showcase)
+        return BoardInfo(board.candidate, board.identity, board.health, available, unavailable,
+                         claim=claim.claim_status(board.identity) if claim is not None else None)
 
     def close(self, board_id: str) -> None:
         self._enter("close", board_id)
@@ -862,6 +932,14 @@ class DemoEngine:
             self.close(bid)
         self.consoles._shutdown()
         self._chatter_stop.set()
+        xvc = getattr(self, "xvc", None)
+        if xvc is not None:
+            xvc.close_all()
+        if self._temp_state is not None:
+            from harness_manager.demo_catalog import cleanup
+
+            cleanup(self._temp_state)
+            self._temp_state = None
 
     def lock_owner(self, board_id: str) -> LockOwner | None:
         """Who holds the board right now (any process), without opening it."""

@@ -61,8 +61,10 @@ def kit_service(engine: Any) -> KitService:
         store = ContentStore(state / "store")
     from harness_manager.services.update.kits import kit_channel_source
 
-    # OTA-C: the signed channel's rm-kit, through the update service (token, mirrors)
-    return KitService(store, state / "kits", channel=kit_channel_source(state))
+    # OTA-C: the signed channel's rm-kit, through the update service (token, mirrors). An
+    # engine may bring its own (the demo's reads its local catalogue, never the network).
+    channel = getattr(engine, "kit_channel", None) or kit_channel_source(state)
+    return KitService(store, state / "kits", channel=channel)
 
 
 def static_arg(value: Any, key: str = "static_id") -> str:

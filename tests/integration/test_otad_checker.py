@@ -226,7 +226,9 @@ def test_the_timer_runs_the_first_check_and_stops(rig):
     publish_app(r, "0.2.0", serial=1)
     r["checker"].start()
     deadline = time.monotonic() + 10
-    while not topics(r, "update.available") and time.monotonic() < deadline:
+    # The event is published inside the tick; next_in_s is set after it returns: wait for both.
+    while (not topics(r, "update.available") or r["checker"].next_in_s is None) \
+            and time.monotonic() < deadline:
         time.sleep(0.05)
     assert topics(r, "update.available")
     assert r["checker"].next_in_s == pytest.approx(6 * 3600)
