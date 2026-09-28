@@ -23,6 +23,8 @@ The MPS3 checks run through LM2's rig (the REAL claim forward, ``tunnel.SshTunne
 rig (a real uvicorn, a fake pack). Every check has its negative twin.
 """
 
+# ruff: noqa: F811 - the tests take the fixture imported from the lane test below
+
 from __future__ import annotations
 
 import time

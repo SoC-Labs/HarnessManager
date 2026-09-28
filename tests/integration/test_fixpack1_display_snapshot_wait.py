@@ -11,6 +11,8 @@ LM5's two ways to a board (in-process and a real daemon) over LM3's fake adapter
 takes 1.5 s, the old budget is 1 s and the new one 3 s. Each check has its twin.
 """
 
+# ruff: noqa: F811 - the tests take the fixture imported from the lane test below
+
 from __future__ import annotations
 
 import json
