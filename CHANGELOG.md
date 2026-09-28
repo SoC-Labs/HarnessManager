@@ -156,6 +156,8 @@ owners.
 - The board controller (MCC) over the Debug USB: temperatures, oscillators, a reboot
   that proves the board came back, and allowlisted commands (destructive ones are
   refused).
+- The MCC temperature says what it measures: "the SLR0 die diode via U53 (MPS3 schematic
+  p4); not ambient" (was "sensor identity unverified").
 - A reboot of a Linux board waits up to 300 s by default (was 180 s): with the Linux
   lead's stage0 DDR settle, a cold MCC boot answers after ~190 s. Bare metal keeps 120 s;
   `--wait` still overrides both.
