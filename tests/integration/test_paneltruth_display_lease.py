@@ -127,7 +127,8 @@ def test_twin_the_hub_says_someone_else_holds_it_refused_by_name(rig_factory: An
     world.fake.steal("alice@lab")
     world.svc.forget(world.hub)                               # the hub's event: it changed
     reason = rig.adapter.display_reason()
-    assert "lease holder only" in reason and f"holds {TARGET}" in reason
+    # LEASE-BOARD: the board by fpgahub's name once the service knows it (mps3_01)
+    assert "lease holder only" in reason and "alice@lab holds mps3_01 " in reason
     with pytest.raises(HeldError) as exc:
         rig.adapter.display_connect()
     assert exc.value.holder == "alice@lab" and rig.ssh.launches == []
@@ -162,7 +163,7 @@ def test_twin_a_hub_that_refuses_us_is_not_a_hiccup(rig_factory: Any, world: Any
     world.runner.fail = "dam1n19@hub: Permission denied (publickey).\n"
     with pytest.raises(DisplayUnavailable) as exc:
         rig.adapter.display_connect()
-    assert exc.value.reason.startswith(f"could not confirm your lease on {TARGET} with the hub")
+    assert exc.value.reason.startswith("could not confirm your lease on mps3_01 with the hub")
     assert "Permission denied" in exc.value.detail and rig.ssh.launches == []
     assert exc.value.retry_s == D.LEASE_RETRY_S
 

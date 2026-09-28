@@ -403,8 +403,8 @@ class Mps3Display:
         hub = getattr(self._session, "hub", None)
         if hub is None:
             return LeaseCheck()
-        target = getattr(hub, "target", "") or "the board"
         leases = self._lease_service()
+        target = self._lease_name(leases, hub)
         view = self._recent_view(leases, hub)
         if view is None:
             try:
@@ -424,6 +424,17 @@ class Mps3Display:
                               f"{target} (ask for it: `harness-manager lease request TARGET`)",
                               "held", who)
         return LeaseCheck(holder=str(lease.get("holder") or ""))
+
+    @staticmethod
+    def _lease_name(leases: Any, hub: Any) -> str:
+        """What the lease's words call the board (LEASE-BOARD: fpgahub's board, ``mps3_01``,
+        when the lease service knows it without asking the hub; else the target)."""
+        from harness_manager.services.lease import lease_name
+
+        target = getattr(hub, "target", "") or "the board"
+        board_of = getattr(leases, "board_of", None)
+        board = board_of(hub, ask=False) if callable(board_of) else ""
+        return lease_name(board if isinstance(board, str) else "", target)
 
     @staticmethod
     def _recent_view(leases: Any, hub: Any) -> dict[str, Any] | None:
