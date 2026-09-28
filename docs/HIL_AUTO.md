@@ -7,8 +7,80 @@
 >
 > **Who:** david starts it, on srv03335, with his lease. No agent runs it.
 > **When:** the HM nights, Mon 28, Tue 29, Wed 30 Sep and Fri 2 Oct, 18:00 → 08:30.
+>
+> **Where:** in the app (the board's **Checks** section, below). The command line is the
+> fallback, and when a Harness Manager service is running it hands the run to it.
 
-## Run it overnight
+## In the app
+
+The run lives in the Harness Manager service (lane HIL-GUI, `services/hil_runs.py`). No
+`daemon stop`, no `lease acquire --ttl`, no tmux, no `source`: the service keeps the board open
+for the run and keeps the lease until the run ends.
+
+1. **17:30: the announcement.** Open the board, then **Checks**.
+   - **Plan** is picked from the board: bare metal → `bare-metal`; the Linux harness with no
+     user microSD → `linux-nocard` (board 2); with a blank card (no valid OS slot) →
+     `linux-netboot`; with a usable card → `linux`. The line under it says why. Pick another
+     to override it.
+   - **Writes:** Read only, or Safe (the swaps and the MCC read; greybox is put back).
+   - **Run until** (default the next 08:30) **every** 30 min.
+   - **Start:** Now, or **At** a time (18:00): the service begins the run then.
+   - Press **Write the announcement**. The **Announcement** box shows `ANNOUNCE.txt` as the run
+     would write it; **Copy** puts it on the clipboard for the 17:30 message. Nothing is sent.
+2. **The lease.** The line above Start says what happens:
+   - **yours** (this Harness Manager holds it): the service heartbeats it until the run ends,
+     however long that is;
+   - **free:** tick **Take the lease for the run**. The service takes it when the run starts,
+     keeps it until the run ends, then releases it;
+   - **someone else's** (or your hub name in another session or tool): Start is off, and the
+     line names the holder. Ask for the board (Request board) or wait. Nothing is ever forced.
+3. **Start** (or **Schedule for 18:00**). The panel shows the iteration, the check it is on,
+   the pass/fail/skipped counts for this iteration and the whole run, the first failure with
+   its hint and evidence file, when the next iteration starts, and the last lines of its log.
+   The **Checks** tab has a badge, and a banner says a run is on while you look at the board.
+   You can close the app: the run goes on in the service.
+4. **Stop** finishes the check it is on, puts greybox back and writes `REPORT.md` (the same as
+   Ctrl-C to the command line). A scheduled run that has not started is cancelled.
+5. **08:30: Past runs** lists every run on the board, newest first. Open one for its
+   `REPORT.md`; with more than one iteration, each iteration's own report is a button. The
+   evidence folder is `<state dir>/checks/<board>/<YYYYMMDD-HHMMSS>-<plan>/` (the run's
+   Evidence line), laid out as below.
+
+**The service's settings apply, not your shell's.** The run's commands run in the service's
+environment, so what `env.sh`/`env_b2.sh` export for the command line must be settings the
+service reads. Once per machine (`config set` says when a change needs the board reopened or
+the service restarted):
+
+```bash
+harness-manager config set mps3.overlay_dirs $HOME/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv
+harness-manager config set tools.hw_server /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/hw_server
+```
+
+(`D1`'s overlays check says so when they are missing: "the overlays folder is gone or keyed to
+another static".) The board and its hub come from `boards.toml`, as for every other verb.
+
+While a run is active the board cannot be closed, and `harness-manager daemon stop` refuses
+(naming the run); `--force` stops each run first (it restores greybox, up to 3 min) and then
+the service. A service that is killed ends the run where it is. A run is an explicit action,
+so QUIET-POLL's viewer rules do not gate it: it runs with no window open, paced by its own
+rules (`--gap`, `--interval`).
+
+**Our own service is not another holder.** The run's commands are Harness Manager's CLI
+through this service (it shares the service's board session), so the app having the board
+open no longer makes them refuse. A different process or client still stops the run: another
+host's card job, another client on the control port, someone else's lease.
+
+## From the command line (the fallback)
+
+`python -m tools.hil run …` (or `make hil-auto`) with the same options as before. With a
+Harness Manager service running for the state dir it does not run the checks itself: it hands
+the run to the service (`POST /boards/{bid}/checks`, `--take-lease` when the lease is free),
+prints its progress and exits with its code; Ctrl-C there is Stop. The app shows the same run.
+With no service running (or `--in-process`) it runs here, every command on the CLI's
+in-process engine, as below: then nothing heartbeats the lease, so take it with a `--ttl`
+that outlasts the run, and a service holding the board makes every command refuse (exit 4).
+
+## Run it overnight (command line, no service)
 
 1. **17:30: write the announcement** (sends nothing to the board or the hub):
    ```bash
@@ -26,9 +98,10 @@
    harness-manager daemon stop
    harness-manager lease acquire $B --ttl 54000 --holder david-hm
    ```
-   - `daemon stop`: the runner's commands run on the CLI's in-process engine, never through
-     the service. A service holding the board (the app open on it) makes every command
-     refuse (exit 4), and the runner stops.
+   - `daemon stop`: with no service running, the runner's commands run on the CLI's
+     in-process engine (with a service running, the run goes to it: "In the app"). A service
+     holding the board while the runner is `--in-process` makes every command refuse
+     (exit 4), and the runner stops.
    - `--ttl 54000` is 15 h, past 08:30. Nothing heartbeats the lease overnight. The runner
      stops `--margin` (10 min) before it expires, so a swap never outlives it.
 3. **Start it in tmux.** A tmux window does not inherit this shell's variables: set them
@@ -49,7 +122,9 @@
 ## Board 2: the nightly run
 
 Board 2 (`mps3_02_pl`, `192.168.11.101`, boards.toml `lab2`) is Harness Manager's own board: HIL-AUTO
-runs on it every HM night. It has **no user microSD** and no JTAG, so the plan is `linux-nocard`
+runs on it every HM night. **In the app:** open board 2, **Checks**: the plan is picked as
+`linux-nocard` (no user microSD), writes Safe, until 08:30 every 30 min, Start at 18:00. The
+steps below are the command-line fallback. It has **no user microSD** and no JTAG, so the plan is `linux-nocard`
 (HIL_LINUX.md "Card-less mode"): swaps and the MCC read only, **no reset of any kind**.
 `tools/hil/env_b2.sh` sets `B`, `T`, `MCC_TTY`, `EV` and `RUN` (`…/2026-09-hil-auto/<MMDD>-b2`).
 
@@ -102,12 +177,14 @@ exits 2.
 | `--gap S` | 3 | seconds between two commands |
 | `--max-unreachable N` | 3 | tries of a read check before an unreachable board stops the run |
 | `--announce-only` | off | write `ANNOUNCE.txt` and exit |
+| `--take-lease` | off | through a service: when the lease is free, the service takes it for the run and releases it at the end |
+| `--in-process` | off | never hand the run to a running service: run it here on the CLI's in-process engine |
 
 `python -m tools.hil plans [--plan P]` prints every check: id, section, tier, command.
 
 ## What it runs, and what stays manual
 
-The plans are `tools/hil/plans.py`. Check ids are the runbook's; a lettered id (`E1b`, `R7b`)
+The plans are `src/harness_manager/checks/plans.py` (`tools/hil/plans.py` is the same module). Check ids are the runbook's; a lettered id (`E1b`, `R7b`)
 is a second command of that check. `tests/unit/test_hil_auto_plans.py` fails when a runbook
 check with an **Expect** has no plan entry, or the other way round, and when the netboot or
 nocard plan's skips differ from the runbook's Netboot mode or Card-less mode list.
@@ -152,7 +229,7 @@ and B3 expect a card-backed board.
 | R2, R3, R8, R9, W2, W3 | the app, `screen`, gdb |
 | 0.1, 3, Z3–Z6, 7 | setup and close-out: the lease is released by david, never by the runner |
 
-## The safety rules (enforced in `tools/hil/run.py`)
+## The safety rules (enforced in `harness_manager/checks/run.py`, on both routes)
 
 1. **The lease.** Before anything touches the board, `lease show` must say `lease.here`: this
    Harness Manager holds the token. Asked again before every section, every safe check and the
@@ -163,7 +240,10 @@ and B3 expect a card-backed board.
 3. **Stops (exit 2):** an unexpected identity; a refusal (exit 15, the claim lock); HELD
    (exit 4: another holder, a busy control channel, or the reset guard's card job, which it
    never forces); the lease lost; the board unreachable `--max-unreachable` times (reads back
-   off 30 s, doubling to 10 min; a write is never retried).
+   off 30 s, doubling to 10 min; a write is never retried). A HELD from this Harness
+   Manager's own request on the control port (`error.data.reason: OWN_REQUEST`) is not
+   another holder: a read is asked again after the back-off, a write fails that check and the
+   run goes on.
 4. **The MCC read:** another reader on `tty_00` (the soak names it) is "skipped (tty_00
    busy)", never retried, never a failure.
 5. **The end state**, in a `finally`: if it swapped the partition, it restores greybox (while
@@ -199,7 +279,9 @@ With `--repeat`, the top report lists each iteration and which checks failed in 
 |---|---|
 | `refused to start: the board is not leased` / `held by …` | take the lease (step 2); `lease show $B` must say `yours` |
 | `refused to start: the lease expires at …` | take it with a longer `--ttl` |
-| `HELD (exit 4): … is in use` at the first board check | the service holds the board: `harness-manager daemon stop` |
+| `HELD (exit 4): … is in use` at the first board check | `--in-process` while a service holds the board: drop `--in-process` (the run goes to the service), or `harness-manager daemon stop` |
+| `refused to start: the hub lease on … is held by …` (app or service) | someone else's lease: Start names them. Request the board, or wait |
+| `refused to start: nobody holds the hub lease … take it for the run` | tick **Take the lease for the run** (`--take-lease`) |
 | `HELD (exit 4): slot B is being written …` | a card job is running: someone else is using the board. Ask the Linux lead |
 | `an unexpected identity` | the board is not on the expected static: HIL_LINUX.md's failure table (A1 row) |
 | `refused (exit 15)` | a safety rail or the claim lock; the message says which |
