@@ -39,7 +39,10 @@ def fake():
 def events():
     bus = EventBus()
     seen: list[dict] = []
-    bus.subscribe("lease.*", lambda ev: seen.append({"board": ev.board_id, **ev.data}))
+    # ``board`` here is the event's board id; LEASE-BOARD's ``board`` in the data (the hub's
+    # physical board) is kept as ``hub_board``.
+    bus.subscribe("lease.*", lambda ev: seen.append({**ev.data, "board": ev.board_id,
+                                                     "hub_board": ev.data.get("board")}))
     return bus, seen
 
 
@@ -51,8 +54,9 @@ def test_acquire_stores_the_token_privately_and_says_held(tmp_path, fake, events
     bus, seen = events
     s = svc(tmp_path, bus)
     out = s.acquire(Hub(fake), board_id="b1", ttl_s=600, holder="hm-test", heartbeat=False)
-    assert out["lease"] == {"target": "mps3_01_pl", "holder": "hm-test", "expires_at": EXPIRES,
-                            "mine": True}
+    # LEASE-BOARD: ``board`` is additive; None here, as nothing has asked this hub for it yet
+    assert out["lease"] == {"target": "mps3_01_pl", "board": None, "holder": "hm-test",
+                            "expires_at": EXPIRES, "mine": True}
     assert "token" not in out["lease"]                          # the token never leaves the store
     stored = s.store.get(HUB, "mps3_01_pl")
     assert stored is not None and stored.token.startswith("tok-") and stored.ttl_s == 600

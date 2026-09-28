@@ -351,6 +351,15 @@ must not drive the board until the lease is yours" when someone else holds it.
 header's **Hub** line shows the tunnel and the lease. The Overview's Board tile repeats the
 badge on its **Hub lease** line.
 
+**Which name the lease uses.** The hub knows the board by two names: the physical board
+(`mps3_03`) and the target it is leased as (`mps3_03_pl`). Both names are current, and
+neither is deprecated. HM's lease text uses the board name and shows the target as a
+detail: "mps3_03 on mapstone-dev (target mps3_03_pl)". HM takes the lease on the target,
+the same name the platform's scripts (pyverify) use, so everyone shares one lease and one
+queue. If the hub gives the target no board of its own, the text uses the target alone.
+[docs/HUB_MODE.md](HUB_MODE.md#boards-and-targets-the-name-hm-shows-the-name-it-leases-on)
+explains why.
+
 ![The board list: mps3-02 held by alice with your request in her queue, mps3-03 free](review/2026-09-28/lease-held-and-free-light.png)
 
 | The board list says | The header's lease chip | It means | You can |
@@ -369,13 +378,13 @@ board with no hub has no lease badge.
 
 ![mps3-03 is yours: Release lease in the header and on the Board tile](review/2026-09-28/lease-yours-light.png)
 
-**Release lease** always asks first: "Release mps3_03_pl? Others can take it; background
-checks pause." It names who is next in the queue, and says why when a job on the board
-stops it (releasing mid-deploy hands a half-programmed board to the next person).
+**Release lease** always asks first: "Release mps3_03? Others can take it; background
+checks pause. The hub leases it as target mps3_03_pl." It names who is next in the queue,
+and says why when a job on the board stops it (releasing mid-deploy hands a half-programmed board to the next person).
 Force-release is separate, red, and only for someone else's lease ([Force-release](#force-release)).
 
 **Closing a board you hold.** **Close board** on a board whose lease this Harness Manager
-holds asks "Also release the lease on mps3_03_pl?":
+holds asks "Also release the lease on mps3_03?":
 
 - **Release and close:** others can take the board now.
 - **Keep the lease:** it stays yours until it expires, but nothing renews it while the
@@ -389,7 +398,9 @@ Over the API, `DELETE /boards/{bid}?release=true` does both.
 ![Close board asks whether to release the lease too](review/2026-09-28/lease-close-confirm-light.png)
 
 **On the command line.** `TARGET` is the board's address (`192.168.10.101`); its
-`boards.toml` hub table names the hub.
+`boards.toml` hub table names the hub. The output names the hub's board, with the target
+it is leased as: `mps3-01 (mps3_01 on mapstone-dev, target mps3_01_pl): held by …`.
+`--json` has both `board` and `target`, and the `lease` TSV ends with a BOARD column.
 
 | Command | What it does |
 |---|---|

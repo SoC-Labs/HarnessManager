@@ -93,7 +93,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -476,6 +476,22 @@ def view_confirm_error(view: dict[str, Any], confirm_board: Any, names: list[str
     return confirm_board_error(kind, reason, confirm_board, names, target)
 
 
+def lease_name(board: str | None, target: str) -> str:
+    """LEASE-BOARD: what lease text calls the leased thing. fpgahub's physical board
+    (``mps3_01``, its "chassis") when it is known, else the hub target (``mps3_01_pl``) as
+    before. The lease itself is still taken on the target (docs/HUB_MODE.md "Boards and
+    targets"): this is only the name people read."""
+    return (board or "").strip() or target
+
+
+def lease_detail(board: str | None, target: str) -> str:
+    """``mps3_01 (target mps3_01_pl)`` when the board is known and is not the target itself;
+    else just the name ``lease_name`` gives (an unknown board, or a single-target board whose
+    board id is its target's name)."""
+    name = lease_name(board, target)
+    return f"{name} (target {target})" if name != target else name
+
+
 def _answer_public(answer: Any) -> dict[str, Any] | None:
     if answer is None:
         return None
@@ -511,11 +527,18 @@ class StoredLease:
     expires_at: str = ""
     acquired_at: float = 0.0
     principal: str = ""       # the holder the hub recorded (``name@host``), "" if unknown
+    # LEASE-BOARD: no ``board`` field here on purpose. This file is shared with every other
+    # Harness Manager on the machine (the CLI and the service), and an older one reads it with
+    # ``StoredLease(**data)``: an extra key would make it drop the lease (and its token). The
+    # board is looked up when the lease is shown (``LeaseService.board_of``), never stored.
 
-    def public(self, *, mine: bool = True) -> dict[str, Any]:
-        """The API's ``lease`` object. The token never leaves this process."""
-        return {"target": self.target, "holder": self.principal or self.holder,
-                "expires_at": self.expires_at, "mine": mine}
+    def public(self, *, mine: bool = True, board: str | None = None) -> dict[str, Any]:
+        """The API's ``lease`` object. The token never leaves this process. ``board``
+        (LEASE-BOARD, additive): the physical board the target belongs to, or None when this
+        process does not know it."""
+        return {"target": self.target, "board": board or None,
+                "holder": self.principal or self.holder, "expires_at": self.expires_at,
+                "mine": mine}
 
 
 class LeaseStore:
@@ -531,8 +554,10 @@ class LeaseStore:
     def get(self, hub: str, target: str) -> StoredLease | None:
         try:
             data = json.loads(self._path(hub, target).read_text(encoding="utf-8"))
-            return StoredLease(**data)
-        except (OSError, ValueError, TypeError):
+            # Keys a newer Harness Manager added are ignored, not a reason to lose the token.
+            known = {f.name for f in fields(StoredLease)}
+            return StoredLease(**{k: v for k, v in data.items() if k in known})
+        except (OSError, ValueError, TypeError, AttributeError):
             return None
 
     def put(self, lease: StoredLease) -> None:
@@ -626,6 +651,13 @@ class _Incoming:
 
 def _hk(hub: Any) -> tuple[str, str]:
     return (hub.host, hub.target)
+
+
+def _configured_board(hub: Any) -> str:
+    """boards.toml ``hub.board`` (the MPS3 pack's ``hub.config.board``), with no hub call;
+    ``""`` when the adapter has none."""
+    board = getattr(getattr(hub, "config", None), "board", "")
+    return board.strip() if isinstance(board, str) else ""
 
 
 def _pack_attr(client: Any, name: str, default: Any = None) -> Any:
@@ -742,13 +774,19 @@ class LeaseService:
             self._forget(hub)
 
     def _board_id(self, hub: Any) -> str | None:
-        """D4: the physical board that owns the target (``hub.board_id()``: ``mps3_01``)."""
+        """D4: the physical board that owns the target (``hub.board_id()``: ``mps3_01``).
+        Asked once per hub and kept; boards.toml ``hub.board`` answers with no hub call."""
         key = _hk(hub)
         with self._mu:
             known = self._chassis.get(key)
             failed = self._chassis_failed.get(key)
         if known:
             return known
+        configured = _configured_board(hub)
+        if configured:
+            with self._mu:
+                self._chassis[key] = configured
+            return configured
         fn = getattr(hub.client, "board_id", None)
         if not callable(fn) or (failed is not None and self._clock() - failed < PRINCIPAL_RETRY_S):
             return None
@@ -764,6 +802,25 @@ class LeaseService:
             else:
                 self._chassis_failed[key] = self._clock()
         return board or None
+
+    def board_of(self, hub: Any, *, ask: bool = True) -> str:
+        """LEASE-BOARD: the physical board (fpgahub's chassis, ``mps3_01``) the lease's target
+        belongs to, for what people read; ``""`` when unknown. The lease is still taken on the
+        target (docs/HUB_MODE.md "Boards and targets"). ``ask=False`` never calls the hub: only
+        boards.toml ``hub.board`` or an answer this process already has (events, every
+        render); ``ask=True`` asks the hub at most once per hub per process (``_board_id``)."""
+        if hub is None:
+            return ""
+        if not ask:
+            with self._mu:
+                known = self._chassis.get(_hk(hub))
+            return known or _configured_board(hub)
+        return self._board_id(hub) or ""
+
+    def _named(self, hub: Any) -> str:
+        """The name lease messages use: the board when this process knows it, else the target
+        (never a hub call: a message is not a reason to ask)."""
+        return lease_name(self.board_of(hub, ask=False), hub.target)
 
     def forget(self, hub: Any) -> None:
         """Drop the cached view for ``hub`` (the hub said something changed; T8)."""
@@ -912,7 +969,10 @@ class LeaseService:
     def _emit(self, board_id: str, hub: Any, state: str, holder: str = "", expires_at: str = "",
               *, warning: str = "") -> None:
         self._forget(hub)
-        data = {"target": hub.target, "state": state, "holder": holder, "expires_at": expires_at}
+        # LEASE-BOARD: ``board`` (additive) is the physical board when this process knows it
+        # (never a hub call from an event), else None; ``target`` stays what was leased.
+        data = {"target": hub.target, "board": self.board_of(hub, ask=False) or None,
+                "state": state, "holder": holder, "expires_at": expires_at}
         if warning:
             data["warning"] = warning             # additive: the state stands, something failed
         self._publish(TOPIC, board_id, data)
@@ -1007,7 +1067,7 @@ class LeaseService:
         here = held and stored is not None and holder in ids
         mine = held and (here or (bool(principal) and holder == principal))
         if held:
-            out["lease"] = {"target": hub.target, "holder": holder,
+            out["lease"] = {"target": hub.target, "board": out["board"], "holder": holder,
                             "expires_at": getattr(shown, "expires_at", "")
                             or (stored.expires_at if here and stored else ""),
                             "mine": mine, "here": here,
@@ -1198,7 +1258,8 @@ class LeaseService:
                 # Already ours: say so rather than queue behind ourselves.
                 if heartbeat:
                     self.track(board_id, hub)
-                return {"lease": stored.public(), "already": True}
+                return {"lease": stored.public(board=self.board_of(hub, ask=False)),
+                        "already": True}
         cancel = cancel or threading.Event()
         key = board_id or f"{hub.host}/{hub.target}"
         with self._mu:
@@ -1229,7 +1290,7 @@ class LeaseService:
                 # --holder is taken literally, so the name we asked for cancels nothing.
                 removed = hub.client.lease_cancel(self._principal(hub) or holder)
             raise ActionFailedError(
-                f"the lease request for {hub.target} was cancelled"
+                f"the lease request for {self._named(hub)} was cancelled"
                 + ("; its queue entry was removed" if removed else ""),
                 hint="acquire again when you want the board") from None
         finally:
@@ -1240,7 +1301,7 @@ class LeaseService:
         self._emit(board_id, hub, "held", record.principal or holder, expires_at)
         if heartbeat:
             self.track(board_id, hub, announced=True)
-        return {"lease": record.public()}
+        return {"lease": record.public(board=self.board_of(hub, ask=False))}
 
     def _store_grant(self, hub: Any, holder: str, lease: Any, expires_at: str, ttl_s: int) -> StoredLease:
         """Keep a granted lease, with the principal the hub recorded it under."""
@@ -1268,7 +1329,7 @@ class LeaseService:
         if stored is None:
             shown = self._show(hub, fresh=True)
             who = f"held by {shown.holder}" if shown.held else "not leased"
-            raise AbsentError(f"this Harness Manager holds no lease on {hub.target} ({who})",
+            raise AbsentError(f"this Harness Manager holds no lease on {self._named(hub)} ({who})",
                               hint="a lease taken outside Harness Manager is released where it was "
                                    "taken (fpgahub lease release --token …)")
         return self._release_stored(board_id, hub, stored)
@@ -1278,7 +1339,8 @@ class LeaseService:
         self.store.drop(hub.host, hub.target)
         self.untrack(board_id)
         self._emit(board_id, hub, "released", stored.principal or stored.holder)
-        return {"ok": True, "released": stored.public(mine=True)}
+        return {"ok": True,
+                "released": stored.public(mine=True, board=self.board_of(hub, ask=False))}
 
     # -- requests: the requester --------------------------------------------------------------------
 
@@ -1309,20 +1371,21 @@ class LeaseService:
             # CCR-A2: fpgahub keys leases on the principal, so an acquire would hand this
             # session the lease another session of ours holds, token and all. Refuse.
             ours = self.store.get(hub.host, hub.target)
-            raise AlreadyError(f"you already hold {hub.target}"
+            raise AlreadyError(f"you already hold {self._named(hub)}"
                                + ("" if ours is not None else " (another session)"),
                                hint="use it there, or release it there first")
         asked = status.holder if status.held else ""
         key = _hk(hub)
         cancel = cancel or threading.Event()
         gate = board_id or f"{hub.host}/{hub.target}"
+        named = self._named(hub)                  # before the lock: it takes the lock itself
         with self._mu:
             prior = self._outgoing.get(key)
             if prior is not None:
-                raise AlreadyError(f"a request for {hub.target} is already waiting",
+                raise AlreadyError(f"a request for {named} is already waiting",
                                    hint="watch it, or leave the queue to withdraw it")
             if gate in self._acquiring:
-                raise AlreadyError(f"an acquire for {hub.target} is already waiting",
+                raise AlreadyError(f"an acquire for {named} is already waiting",
                                    hint="cancel it first (DELETE the lease)")
             self._acquiring[gate] = cancel
         report = progress or (lambda *_: None)
@@ -1499,7 +1562,7 @@ class LeaseService:
         self._emit(board_id, hub, "held", record.principal or holder, expires_at)
         if heartbeat:
             self.track(board_id, hub, announced=True)
-        out: dict[str, Any] = {"lease": record.public()}
+        out: dict[str, Any] = {"lease": record.public(board=self.board_of(hub, ask=False))}
         if already:
             out["already"] = True
         return out
@@ -1571,12 +1634,12 @@ class LeaseService:
         ids = self._my_ids(hub, stored, principal)
         if stored is None or not shown.held or shown.holder not in ids:
             who = f"{shown.holder} holds it" if shown.held else "nobody holds it"
-            raise RefusedError(f"only the holder answers requests for {hub.target}, and this "
+            raise RefusedError(f"only the holder answers requests for {self._named(hub)}, and this "
                                f"Harness Manager does not hold it ({who})")
         notes = self._notes(hub, fresh=True)
         note = next((n for n in notes if n.id == request_id), None)
         if note is None:
-            raise AbsentError(f"no request {request_id} for {hub.target} (withdrawn, or it expired)",
+            raise AbsentError(f"no request {request_id} for {self._named(hub)} (withdrawn, or it expired)",
                               hint="list the requests again")
         now = self._wall()
         reply = _pack_attr(hub.client, "AnswerNote", AnswerNote)(
@@ -1610,7 +1673,7 @@ class LeaseService:
         self._board_for(hub, board_id)
         if confirm is not True:
             raise UsageError("force-release needs confirm: true",
-                             hint=f"are you sure? This kicks the holder off {hub.target} now; "
+                             hint=f"are you sure? This kicks the holder off {self._named(hub)} now; "
                                   "anything they are running on the board is interrupted")
         self._need(hub, "lease_status", "list_requests", "get_answer", "lease_revoke",
                    "delete_request")
@@ -1619,7 +1682,7 @@ class LeaseService:
         holder = hub_holder(hub)
         if status.held and status.holder == principal:
             ours = self.store.get(hub.host, hub.target)
-            raise AlreadyError(f"{hub.target} is already yours"
+            raise AlreadyError(f"{self._named(hub)} is already yours"
                                + ("" if ours is not None else " (another session holds it)")
                                + "; there is nothing to force",
                                hint="release it there first if this session should have it")
@@ -1631,7 +1694,7 @@ class LeaseService:
             # Someone ahead of us got the board since we asked: its holder was never asked.
             self._reissue(out, principal, status.holder)
             raise ForceRefusedError(
-                f"force-release of {hub.target} is refused: {status.holder} holds it now and was "
+                f"force-release of {self._named(hub)} is refused: {status.holder} holds it now and was "
                 f"not asked; the request was sent to them (deadline {out.note.deadline_at})",
                 time_left_s=REQUEST_WINDOW_S, request_id=out.note.id)
         notes = self._notes(hub, fresh=True)
@@ -1641,20 +1704,20 @@ class LeaseService:
         position = self._position(queue, principal)
         check = force_check(note, answer, position, self._wall())
         if check.available and not status.held:
-            check = ForceCheck(False, f"nobody holds {hub.target} now: there is nothing to force; "
+            check = ForceCheck(False, f"nobody holds {self._named(hub)} now: there is nothing to force; "
                                       "your queued request is granted at its next poll", "refused")
         if not check.available:
             rid = getattr(note, "id", "") if note is not None else ""
             if check.kind == "early":
-                raise ForceTooEarlyError(f"{hub.target}: {check.reason}",
+                raise ForceTooEarlyError(f"{self._named(hub)}: {check.reason}",
                                          time_left_s=check.time_left_s, request_id=rid,
                                          deadline_at=getattr(note, "deadline_at", ""),
                                          hint="wait for the answer or the deadline")
-            raise ForceRefusedError(f"force-release of {hub.target} is refused: {check.reason}",
+            raise ForceRefusedError(f"force-release of {self._named(hub)} is refused: {check.reason}",
                                     time_left_s=check.time_left_s, request_id=rid)
         can, why = self._can_revoke(hub)
         if not can:
-            raise ForceRefusedError(f"force-release of {hub.target} is refused: {why}",
+            raise ForceRefusedError(f"force-release of {self._named(hub)} is refused: {why}",
                                     request_id=note.id,
                                     hint="an admin credential can force-release; or wait")
         kind, kind_why = holder_kind(answer, notes_ok=self._notes_supported(hub)[0])
@@ -1670,7 +1733,7 @@ class LeaseService:
         log.warning("force-released %s from %s: %s", hub.target, victim, reason)
         lease, expires_at, pos = self._acquire_once(hub, holder, ttl_s)
         if lease is None:
-            raise ActionFailedError(f"{hub.target} was revoked from {victim}, but the hub did not "
+            raise ActionFailedError(f"{self._named(hub)} was revoked from {victim}, but the hub did not "
                                     f"promote this client (queue position {pos or '?'})",
                                     hint="see the queue: harness-manager lease show")
         result = self._granted(board_id, hub, holder, lease, expires_at, ttl_s, heartbeat=heartbeat)
