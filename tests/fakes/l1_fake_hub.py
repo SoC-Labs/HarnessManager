@@ -43,7 +43,7 @@ class FakeLane:
     """An FPGA UART lane (e.g. the shell console on tty_02) as a serial fake: it prints
     ``banner`` once, then echoes what it is sent."""
 
-    def __init__(self, banner: bytes = b"mps3-harness login: ") -> None:
+    def __init__(self, banner: bytes = b"mps3-01 login: ") -> None:   # v0.16: the label
         self._out = bytearray(banner)
         self.received = bytearray()
 
