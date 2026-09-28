@@ -730,6 +730,11 @@ class LeaseService:
         self._views: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         # PANEL-1: taps on the front panel's request banner, request id -> (seq, tapped_at)
         self._taps: dict[tuple[str, str], dict[str, tuple[int, str]]] = {}
+        # PANEL-TRUTH: when the hub last confirmed that THIS process holds each hub's lease (a
+        # view that said ``here``, a heartbeat it took, our acquire): (monotonic time, the
+        # lease). A forget (a hub event, a note) keeps it; only a lease that ended here, or a
+        # view that says otherwise, drops it. ``held_here`` reads it.
+        self._here: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 
     # -- hub reads (cached) -----------------------------------------------------------------------
 
@@ -1021,6 +1026,11 @@ class LeaseService:
     def _emit(self, board_id: str, hub: Any, state: str, holder: str = "", expires_at: str = "",
               *, warning: str = "") -> None:
         self._forget(hub)
+        if state == "held" and not warning:
+            self._confirm_here(hub, holder, expires_at)      # we hold it: the hub said so
+        elif state != "held":
+            with self._mu:
+                self._here.pop(_hk(hub), None)                # queued, released, expired, lost
         # LEASE-BOARD: ``board`` (additive) is the physical board when this process knows it
         # (never a hub call from an event), else None; ``target`` stays what was leased.
         data = {"target": hub.target, "board": self.board_of(hub, ask=False) or None,
@@ -1151,7 +1161,35 @@ class LeaseService:
         out["taken"] = {**taken, "at": iso_norm(taken.get("at"))} if taken else None
         with self._mu:
             self._views[_hk(hub)] = (self._clock(), copy.deepcopy(out))
+            if here:
+                self._here[_hk(hub)] = (self._clock(), copy.deepcopy(out["lease"]))
+            else:
+                self._here.pop(_hk(hub), None)
         return out
+
+    def _confirm_here(self, hub: Any, holder: str, expires_at: str) -> None:
+        board = self.board_of(hub, ask=False) or None      # before the lock: it takes it too
+        with self._mu:
+            self._here[_hk(hub)] = (self._clock(), {
+                "target": hub.target, "board": board, "holder": holder,
+                "expires_at": expires_at, "mine": True, "here": True, "user": ""})
+
+    def held_here(self, hub: Any, *, max_age_s: float) -> tuple[float, dict[str, Any]] | None:
+        """PANEL-TRUTH: when the hub last confirmed that this process holds ``hub``'s lease (a
+        view that said ``here``, a heartbeat it took, our acquire), as ``(age_s, lease)``: at
+        most ``max_age_s`` old, and only while the lease's token is still stored here. None
+        otherwise. Never a hub call: the fallback for a hub read that failed transiently (the
+        hub's sshd reset one ssh), so one hub hiccup does not undo what the hub just said."""
+        if hub is None:
+            return None
+        with self._mu:
+            hit = self._here.get(_hk(hub))
+        if hit is None:
+            return None
+        age = self._clock() - hit[0]
+        if age > max_age_s or self.store.get(hub.host, hub.target) is None:
+            return None
+        return age, copy.deepcopy(hit[1])
 
     def _taps_for(self, hub: Any, live: set[str]) -> dict[str, str]:
         """PANEL-1: request id -> tapped_at, for the notes still on the hub (the rest go)."""
@@ -1955,6 +1993,9 @@ class LeaseService:
             return
         if expires_at:
             self.store.put(StoredLease(**{**asdict(stored), "expires_at": expires_at}))
+        # PANEL-TRUTH: the hub took our token: it is ours, here, as of now
+        self._confirm_here(tr.hub, stored.principal or stored.holder,
+                           expires_at or stored.expires_at)
         if not tr.announced or expires_at != stored.expires_at:
             tr.announced = True
             self._emit(board_id, tr.hub, "held", stored.principal or stored.holder,

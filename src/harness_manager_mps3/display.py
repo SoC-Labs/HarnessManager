@@ -34,13 +34,29 @@ port. ``display_release`` (the compositor's grace ran out, or ``close``) drops i
 the session drops it for good, so it never outlives the board (FINDINGS_TRIAGE #20: a
 lingering forward to the board's loopback passes the claim lock for anyone on this host).
 
-**D3, the lease.** A board behind a hub: the forward is opened only for the lease holder
-(``LeaseService.view``, asked fresh before every forward is opened, as XVC does; the cached
-view on a reconnect over an open forward). Someone else's lease, or nobody's, refuses with
-``HeldError`` naming the holder, so the compositor stops. A hub that cannot be asked is
-``DisplayUnavailable`` with a retry, and still nothing opens. A board with no hub has no
-lease: allowed. Lease loss or release closes the display at once: ``DisplayService`` hears
-``lease.state`` on the bus (the XVC wiring), and its close calls ``display_release``.
+**D3, the lease.** A board behind a hub: the forward is opened only for the lease holder.
+Someone else's lease, or nobody's, refuses with ``HeldError`` naming the holder, so the
+compositor stops. A board with no hub has no lease: allowed. Lease loss or release closes
+the display at once: ``DisplayService`` hears ``lease.state`` on the bus (the XVC wiring),
+and its close calls ``display_release``.
+
+PANEL-TRUTH (david, 2026-09-28: the hub's sshd reset ONE ``lease show`` and the display said
+"cannot confirm you hold the lease ... kex_exchange_identification: read: Connection reset
+by peer" while the heartbeat held the lease). Where the answer comes from (``_lease``):
+
+1. the lease service's own view (``LeaseService.view(cached_only=True)``) while it is at
+   most ``LEASE_VIEW_MAX_AGE_S`` (60 s) old: no hub call. Every lease change drops it
+   (``lease.state``), so a lease taken or lost a moment ago is asked again;
+2. else the hub, through the service's cache and single-flight (``view(hub)``);
+3. a hub read that fails TRANSIENTLY (``hub_hiccup``: an sshd reset, kex, a timeout) falls
+   back to the last time the hub confirmed that THIS process holds it (``held_here``: a
+   view that said ``here``, a heartbeat it took), at most ``LEASE_GOOD_MAX_AGE_S`` old;
+4. otherwise the display says ``CHECKING`` ("checking your lease with the hub...") as
+   ``connecting``, never the raw ssh error (that is the ``detail``, behind Details), and
+   asks again with back-off (``LEASE_BACKOFF_S``). Nothing opens meanwhile (D3 holds).
+
+``display_reason`` (the routes' refusal) refuses only on an ANSWER (someone else's lease,
+nobody's): a hub that did not answer is not a refusal; the connect checks again.
 
 **Failures.** A forward that does not come up is an ``UnreachableError`` (the compositor
 retries with back-off); after ``OPEN_FAILURES_MAX`` in a row it is an ``ActionFailedError``
@@ -68,6 +84,7 @@ Test seams: ``tunnel.DEFAULT_LAUNCHER``/``DEFAULT_SSH_G`` (FakeSsh), ``leases=``
 from __future__ import annotations
 
 import logging
+import re
 import socket
 import threading
 import time
@@ -87,7 +104,7 @@ from harness_manager.core.errors import (
 )
 
 from .claim import changed_back_words, pin_fingerprint
-from .constants import IMPL_BARE_METAL, IMPL_LINUX, LCD_MIRROR_PORT
+from .constants import IMPL_LINUX, LCD_MIRROR_PORT
 
 log = logging.getLogger(__name__)
 
@@ -100,14 +117,27 @@ FORWARD = "lcd_mirror"
 FACTS_TTL_S = 300.0
 #: The design's "stops after 3 restarts": forwards that fail to come up, in a row.
 OPEN_FAILURES_MAX = 3
-#: A hub that cannot be asked about the lease: try again after this long (never opened meanwhile).
+#: A hub that cannot be asked about the lease (not a transient hiccup): try again after this
+#: long (never opened meanwhile).
 LEASE_RETRY_S = 30.0
+#: PANEL-TRUTH: the lease service's view is used as it is while at most this old (no hub call).
+LEASE_VIEW_MAX_AGE_S = 60.0
+#: ... and a transient hub failure falls back to the last "yours, here" at most this old.
+LEASE_GOOD_MAX_AGE_S = 300.0
+#: ... else "checking" and asked again after these waits (the last one repeats).
+LEASE_BACKOFF_S = (2.0, 5.0, 10.0, 20.0, 30.0)
+#: What the display says while it does that (the hub's own words go to ``detail``).
+CHECKING = "checking your lease with the hub..."
 #: Connecting to the forward's local port (it is ours, on loopback).
 CONNECT_TIMEOUT_S = 5.0
 #: How long ssh's "open failed" line gets to arrive after the close (Q2; ``pack.py``).
 OPEN_FAILURE_GRACE_S = 0.5
 
 NEEDS_LINUX = "needs the Linux harness with lcd_mirror (this board runs the {impl} harness)"
+#: PANEL-TRUTH: a harness that did not say which it is (no ``version.impl`` at all) is never
+#: called bare metal: it is said as it is.
+NEEDS_LINUX_UNKNOWN = ("needs the Linux harness with lcd_mirror (this harness does not say "
+                       "which it is)")
 NO_ENGINE = ("the Live display needs a harness image with lcd_mirror (this image has none: its "
              "version.features does not name it); update the board's Linux image")
 CLAIM_HINT = ("needs a claimed board: the live display is reached over SSH with your claimed "
@@ -115,6 +145,39 @@ CLAIM_HINT = ("needs a claimed board: the live display is reached over SSH with 
               "elsewhere)")
 NO_SSH = "this session has no SSH to the board; " + CLAIM_HINT
 CLOSED = "the board session is closed"
+
+
+#: ssh's and the hub client's words for a failure that passes by itself (the hub's sshd
+#: throttling new connections, MaxStartups; a reset in the identification exchange; a timeout;
+#: the hub's one-shot slots all busy). Not a refused key, an unknown host or a hub error.
+_HUB_HICCUP = re.compile(
+    r"kex_exchange_identification|ssh_exchange_identification|reset by peer|"
+    r"closed by remote host|connection closed by|timed out|did not answer .* in time|"
+    r"broken pipe|temporarily unavailable|connection refused|no route to host|"
+    r"waited \S+ for one of", re.IGNORECASE)
+
+
+def hub_hiccup(exc: BaseException) -> bool:
+    """A hub read that failed in a way that passes by itself (PANEL-TRUTH): worth a fallback
+    to what the hub last said and a quiet retry, never a headline."""
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    if not isinstance(exc, UnreachableError):
+        return False
+    return bool(_HUB_HICCUP.search(str(getattr(exc, "message", "") or exc)))
+
+
+@dataclass(frozen=True)
+class LeaseCheck:
+    """``Mps3Display._lease``'s answer: ``reason`` "" when the lease is this client's (or the
+    board has none); ``kind`` "", ``held``, ``nobody``, ``checking`` or ``unknown``;
+    ``detail`` the hub's own words when it did not answer; ``retry_s`` when to ask again."""
+
+    reason: str = ""
+    kind: str = ""
+    holder: str = ""
+    detail: str = ""
+    retry_s: float = LEASE_RETRY_S
 
 
 def _port(value: Any) -> int | None:
@@ -165,7 +228,8 @@ class MirrorFacts:
                    proto, "version")
 
     def to_json(self) -> dict[str, Any]:
-        return {"impl": self.impl or IMPL_BARE_METAL, "engine": self.engine, "port": self.port,
+        # PANEL-TRUTH: "" when the harness did not say (never guessed as bare metal)
+        return {"impl": self.impl, "engine": self.engine, "port": self.port,
                 "mode": self.mode, "proto": self.proto, "source": self.source}
 
 
@@ -179,9 +243,13 @@ class Mps3Display:
 
     def __init__(self, session: Any, *, leases: Any = None,
                  clock: Callable[[], float] = time.monotonic,
-                 facts_ttl_s: float = FACTS_TTL_S) -> None:
+                 facts_ttl_s: float = FACTS_TTL_S,
+                 lease_backoff_s: tuple[float, ...] = LEASE_BACKOFF_S) -> None:
         self._session = session
         self._leases = leases
+        #: PANEL-TRUTH: the waits between lease checks the hub did not answer (a test seam)
+        self.lease_backoff_s = tuple(lease_backoff_s) or LEASE_BACKOFF_S
+        self._lease_misses = 0               # hub reads in a row that did not answer
         self._clock = clock
         self._ttl = facts_ttl_s
         self._mu = threading.RLock()
@@ -308,7 +376,7 @@ class Mps3Display:
     @staticmethod
     def _gate_reason(f: MirrorFacts) -> str:
         if f.impl != IMPL_LINUX:
-            return NEEDS_LINUX.format(impl=f.impl or IMPL_BARE_METAL)
+            return NEEDS_LINUX.format(impl=f.impl) if f.impl else NEEDS_LINUX_UNKNOWN
         if not f.engine:
             return NO_ENGINE
         return ""
@@ -326,41 +394,91 @@ class Mps3Display:
             self._leases = LeaseService(config_dir())
         return self._leases
 
-    def _lease(self, *, fresh: bool) -> tuple[str, str, str]:
-        """``(reason, kind, holder)``: kind "" (yours, or no hub), ``held`` (someone else's),
-        ``nobody`` or ``unknown`` (the hub did not answer)."""
+    def _lease(self) -> LeaseCheck:
+        """Is the board's lease this client's? The module docstring's PANEL-TRUTH order: the
+        service's view while recent, else the hub; a transient hub failure falls back to the
+        last "yours, here", else says ``CHECKING``. ``kind``: "" (yours, or no hub), ``held``
+        (someone else's), ``nobody``, ``checking`` (the hub did not answer this time) or
+        ``unknown`` (it could not be asked)."""
         hub = getattr(self._session, "hub", None)
         if hub is None:
-            return "", "", ""
-        target = getattr(hub, "target", "") or "the board"
+            return LeaseCheck()
         leases = self._lease_service()
-        if fresh:
-            forget = getattr(leases, "forget", None)
-            if callable(forget):
-                forget(hub)                  # a fresh answer: a lease taken a moment ago counts
-        try:
-            view = leases.view(hub)
-        except HarnessError as exc:
-            return (f"cannot confirm you hold the lease on {target}: {exc.message}", "unknown",
-                    "")
+        target = self._lease_name(leases, hub)
+        view = self._recent_view(leases, hub)
+        if view is None:
+            try:
+                view = leases.view(hub)
+            except HarnessError as exc:
+                return self._lease_unanswered(leases, hub, target, exc)
+        with self._mu:
+            self._lease_misses = 0
         lease = (view or {}).get("lease")
         if not lease:
-            return (f"the live display is for the lease holder only, and nobody holds {target} "
-                    "(take it: `harness-manager lease acquire TARGET`)", "nobody", "nobody")
+            return LeaseCheck(f"the live display is for the lease holder only, and nobody holds "
+                              f"{target} (take it: `harness-manager lease acquire TARGET`)",
+                              "nobody", "nobody")
         if not lease.get("mine"):
             who = str(lease.get("holder") or "someone else")
-            return (f"the live display is for the lease holder only: {who} holds {target} "
-                    "(ask for it: `harness-manager lease request TARGET`)", "held", who)
-        return "", "", str(lease.get("holder") or "")
+            return LeaseCheck(f"the live display is for the lease holder only: {who} holds "
+                              f"{target} (ask for it: `harness-manager lease request TARGET`)",
+                              "held", who)
+        return LeaseCheck(holder=str(lease.get("holder") or ""))
 
-    def _require_lease(self, *, fresh: bool) -> None:
-        why, kind, holder = self._lease(fresh=fresh)
-        if not why:
+    @staticmethod
+    def _lease_name(leases: Any, hub: Any) -> str:
+        """What the lease's words call the board (LEASE-BOARD: fpgahub's board, ``mps3_01``,
+        when the lease service knows it without asking the hub; else the target)."""
+        from harness_manager.services.lease import lease_name
+
+        target = getattr(hub, "target", "") or "the board"
+        board_of = getattr(leases, "board_of", None)
+        board = board_of(hub, ask=False) if callable(board_of) else ""
+        return lease_name(board if isinstance(board, str) else "", target)
+
+    @staticmethod
+    def _recent_view(leases: Any, hub: Any) -> dict[str, Any] | None:
+        """The lease service's own view while at most ``LEASE_VIEW_MAX_AGE_S`` old (no hub
+        call); None when it has none that recent, or cannot say (a service without it)."""
+        if not callable(getattr(leases, "held_here", None)):
+            return None                          # not the daemon's LeaseService: ask it
+        return leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
+
+    def _lease_unanswered(self, leases: Any, hub: Any, target: str,
+                          exc: HarnessError) -> LeaseCheck:
+        """The hub did not answer the lease read. A transient failure with a recent "yours,
+        here" stands on it; otherwise ``checking`` (transient) or ``unknown``, with the hub's
+        own words as the detail, never the headline."""
+        transient = hub_hiccup(exc)
+        held = getattr(leases, "held_here", None)
+        good = held(hub, max_age_s=LEASE_GOOD_MAX_AGE_S) if transient and callable(held) else None
+        if good is not None:
+            age, lease = good
+            log.info("the hub did not answer the lease read for %s (%s); it said %.0f s ago that "
+                     "this Harness Manager holds it: going on", target, exc.message, age)
+            with self._mu:
+                self._lease_misses = 0
+            return LeaseCheck(holder=str(lease.get("holder") or ""))
+        with self._mu:
+            n = self._lease_misses
+            self._lease_misses += 1
+        if transient:
+            waits = self.lease_backoff_s
+            wait = waits[min(n, len(waits) - 1)]
+            return LeaseCheck(CHECKING, "checking", detail=exc.message, retry_s=wait)
+        return LeaseCheck(f"could not confirm your lease on {target} with the hub; trying "
+                          "again", "unknown", detail=exc.message, retry_s=LEASE_RETRY_S)
+
+    def _require_lease(self) -> None:
+        got = self._lease()
+        if not got.reason:
             return
-        if kind == "unknown":
-            raise DisplayUnavailable(why, retry_s=LEASE_RETRY_S)
-        raise HeldError(why, holder=holder, hint="the live display opens for the lease holder "
-                                                 "only (the same rule as XVC)")
+        if got.kind in ("checking", "unknown"):
+            raise DisplayUnavailable(got.reason, retry_s=got.retry_s, state="connecting",
+                                     detail=got.detail)
+        raise HeldError(got.reason, holder=got.holder,
+                        hint="the live display opens for the lease holder only (the same rule "
+                             "as XVC)")
 
     def _claim_reason(self) -> str:
         """"" when the board can be reached over SSH with a pinned host key; else the hint."""
@@ -414,7 +532,12 @@ class Mps3Display:
             return CLOSED
         f = self.known_facts()
         gate = self._gate_reason(f) if f is not None else ""
-        return gate or self._lease(fresh=False)[0] or self._claim_reason()
+        if gate:
+            return gate
+        got = self._lease()
+        # A hub that did not answer is not a refusal: the connect asks again ("checking").
+        lease = "" if got.kind in ("checking", "unknown") else got.reason
+        return lease or self._claim_reason()
 
     def display_facts(self) -> dict[str, Any]:
         """What a status view shows about the reach (additive, for the daemon's status).
@@ -439,7 +562,7 @@ class Mps3Display:
         if tunnel is None:
             tunnel = self._open_forward()
         else:
-            self._require_lease(fresh=False)
+            self._require_lease()
             self._check_forward(tunnel)
         return socket.create_connection(("127.0.0.1", tunnel.local_port(FORWARD)),
                                         timeout=CONNECT_TIMEOUT_S)
@@ -449,7 +572,7 @@ class Mps3Display:
         why = self._gate_reason(known) if known is not None else ""
         if why:
             raise DisplayUnavailable(why, retry_s=None)
-        self._require_lease(fresh=True)      # D3: never a forward for anyone but the holder
+        self._require_lease()                # D3: never a forward for anyone but the holder
         # The live ``version`` read (the port, the mode) only now, after the lease check:
         # nobody else's board is read on the way to a refusal (REVIEW-W5 4).
         f = self.facts(fresh=True)
@@ -554,5 +677,6 @@ def display_adapter(session: Any) -> Mps3Display | None:
     return made
 
 
-__all__ = ["CLAIM_HINT", "FORWARD", "LCD_MIRROR_FEATURE", "MirrorFacts", "Mps3Display",
-           "NEEDS_LINUX", "NO_ENGINE", "NO_SSH", "display_adapter", "make_display_adapter"]
+__all__ = ["CHECKING", "CLAIM_HINT", "FORWARD", "LCD_MIRROR_FEATURE", "LeaseCheck", "MirrorFacts",
+           "Mps3Display", "NEEDS_LINUX", "NO_ENGINE", "NO_SSH", "display_adapter", "hub_hiccup",
+           "make_display_adapter"]

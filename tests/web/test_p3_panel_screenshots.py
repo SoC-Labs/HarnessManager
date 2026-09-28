@@ -86,7 +86,7 @@ def test_review_panel_bare_metal_rebuilt(page_factory, review, scheme):
     page = page_factory(scheme, **APP)
     open_board(page)
     expect(page.locator('[data-testid="tile-locate-line"]')).to_contain_text(
-        "needs harness feature 'locate'", timeout=T)
+        "harness feature 'locate'", timeout=T)
     page.screenshot(path=str(review / f"panel-overview-bare-metal-{scheme}.png"))
     details(page)
     expect(page.locator('[data-testid="panel-mirror"]')).to_have_attribute("data-source", "rebuilt")

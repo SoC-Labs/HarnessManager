@@ -8,8 +8,9 @@ docs/design/CLCD_ALIGNMENT.md §2, §5 is the design; david's decisions of 2026-
   ``seq``) and a ring of tap events.
 - **A tap on a lease-request banner notifies the holder.** It never releases.
 - **Only the Linux harness changes its panel.** Bare metal stays byte-identical, and Harness
-  Manager falls back by feature bit: the owner from ``display``, a mirror rebuilt from what
-  it read, and Identify greyed out with the reason.
+  Manager falls back by FEATURE (never by a harness type guessed from a missing one: a Linux
+  image may lack them too, PANEL-TRUTH): the owner from ``display``, a mirror rebuilt from
+  what it read, and Identify greyed out with the reason.
 
 This module is board-agnostic: the model, the ``hello`` message with its field caps, and
 the session adapter ``PanelAdapter``: ``BoardSession.panel`` (CCR PANEL-5), None when the
@@ -57,9 +58,12 @@ ROWS, COLS = 15, 40
 #: frame uses only ``t`` and ``i``; the Linux harness's renderer (R2/R4) defines the rest.
 ROLE_TEXT, ROLE_INVERTED = "t", "i"
 
-SOURCE_PANEL = "panel"       # read from the panel (the Linux harness's `panel`/`hello`)
-SOURCE_REBUILT = "rebuilt"   # rebuilt by Harness Manager from what it read (bare metal)
+SOURCE_PANEL = "panel"       # read from the panel (a harness image with `panel`/`hello`)
+SOURCE_REBUILT = "rebuilt"   # rebuilt by Harness Manager from what it read (no `panel`)
 REBUILT_NOTE = "rebuilt from what Harness Manager read, not read from the panel"
+#: PANEL-TRUTH: what a rebuilt frame shows for a fact Harness Manager did not read ("?" read
+#: as broken). The UI's legend says it: "not reported by this image".
+UNKNOWN = "\u2014"
 
 
 #: LOCATE: ``locate``'s ``who`` (the banner "IDENTIFY: <who>" on a 40-column row: 30 left).
@@ -232,12 +236,17 @@ class PanelFrame:
 
 @dataclass(frozen=True)
 class PanelSupport:
-    """What this board's panel can do now: "" when it can, else the reason it cannot."""
+    """What this board's panel can do now: "" when it can, else the reason it cannot.
+
+    PANEL-TRUTH: ``impl`` is the harness's own word for what it is (``version.impl``:
+    ``linux``, ``bare-metal``), "" when it did not say. A reason names a missing FEATURE,
+    never a harness type guessed from it: a Linux image may lack ``panel`` too."""
 
     front_panel: str = ""
     presence: str = ""
     locate: str = ""
     source: str = SOURCE_PANEL              # where state() comes from on this board
+    impl: str = ""                          # additive: the harness's version.impl, "" unknown
 
 
 _ROLE_RANK = {r: i for i, r in enumerate(ROLES)}

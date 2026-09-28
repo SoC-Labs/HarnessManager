@@ -316,16 +316,17 @@ class DemoDisplay:
     def display_gate(self) -> str:
         """The MPS3 adapter's gate (LM2), in its words: the Linux harness, then the engine."""
         from harness_manager_mps3.display import (
-            IMPL_BARE_METAL,
             IMPL_LINUX,
             LCD_MIRROR_FEATURE,
             NEEDS_LINUX,
+            NEEDS_LINUX_UNKNOWN,
             NO_ENGINE,
         )
 
         ident = self._e._board(self._bid).identity
-        if ident.harness_impl != IMPL_LINUX:
-            return NEEDS_LINUX.format(impl=ident.harness_impl or IMPL_BARE_METAL)
+        if ident.harness_impl != IMPL_LINUX:       # PANEL-TRUTH: an unsaid impl is not bare metal
+            return (NEEDS_LINUX.format(impl=ident.harness_impl) if ident.harness_impl
+                    else NEEDS_LINUX_UNKNOWN)
         if LCD_MIRROR_FEATURE not in (ident.features or ()):
             return NO_ENGINE
         return ""

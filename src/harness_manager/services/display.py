@@ -32,9 +32,11 @@ WebSocket; neither is needed here.
   the lease again. ``leases`` (the daemon's ``LeaseService``, as for XVC) is handed to every
   source that takes it (``use_leases``), so the source's "is it mine" is the hub API's.
 - The board's refusal line (a third client): ``refused``, try again in 10 s. A source that
-  raises ``DisplayUnavailable``: ``down`` with its reason, again after its ``retry_s`` (None:
-  not until a viewer asks again). Any other ``HarnessError`` (claim lost, key refused, host
-  key changed): ``down``, and the upstream stops.
+  raises ``DisplayUnavailable``: its ``state`` (``down``, or PANEL-TRUTH ``connecting`` for a
+  step under way: the lease being checked with a hub that did not answer) with its reason
+  and ``detail``, again after its ``retry_s`` (None: not until a viewer asks again). Any
+  other ``HarnessError`` (claim lost, key refused, host key changed): ``down``, and the
+  upstream stops.
 - FIX-PACK-1: a stream that closes before HELLO asks the source again whether the board can
   show the mirror at all (``display_regate()``, else ``display_gate()``): an image that lost
   the engine (a reboot into one without ``lcd_mirror``) ends the upstream with that reason at
@@ -49,7 +51,9 @@ ever gets fewer, fresher messages, and never slows the others. Its first message
 keyframe. The events ``Outbox`` is NOT used: it drops the OLDEST frames, which leaves tiles
 stale for ever (§7.3).
 
-Events: ``display.state`` ``{state, mode, owner, badges, reason}`` on every change.
+Events: ``display.state`` ``{state, mode, owner, badges, reason}`` on every change. The
+status (the WebSocket's text frames, ``GET .../display``) also has ``detail`` (PANEL-TRUTH,
+additive): the raw cause behind a reason, "" mostly.
 States: ``down``, ``connecting``, ``syncing`` (waiting for a whole keyframe), ``live``,
 ``stale``, ``reconnecting``, ``refused``.
 """
@@ -264,7 +268,7 @@ class DisplayViewer:
         (state, reason, badges, owner, mode, rate), else None."""
         st = self._board.status()
         sig = (st["state"], st["reason"], tuple(b["key"] for b in st["badges"]), st["owner"],
-               st["mode"], st["rate"])
+               st["mode"], st["rate"], st.get("detail", ""))
         if sig == self._status_sig:
             return None
         self._status_sig = sig
@@ -307,6 +311,7 @@ class _Board:
         self.frame = DisplayFrame()
         self.viewers: list[DisplayViewer] = []
         self.state, self.reason = "down", ""
+        self.detail = ""             # PANEL-TRUTH: the raw cause behind the reason, or ""
         self.info: DisplayInfo | None = None
         self.stop = threading.Event()
         self.stream: DisplayStream | None = None
@@ -354,11 +359,11 @@ class _Board:
 
     # -- state ------------------------------------------------------------------------------
 
-    def set_state(self, state: str, reason: str = "") -> None:
+    def set_state(self, state: str, reason: str = "", detail: str = "") -> None:
         with self.lock:
-            if self.finished or (state, reason) == (self.state, self.reason):
+            if self.finished or (state, reason, detail) == (self.state, self.reason, self.detail):
                 return                               # a finished board keeps its last word
-            self.state, self.reason = state, reason
+            self.state, self.reason, self.detail = state, reason, detail
             self.cond.notify_all()
         self.publish()
         self._wake_all()
@@ -381,6 +386,7 @@ class _Board:
                 bps = (self.rx[-1][1] - self.rx[0][1]) / (self.rx[-1][0] - self.rx[0][0])
             return {
                 "board": self.board_id, "state": self.state, "reason": self.reason,
+                "detail": self.detail,
                 "mode": self.info.mode if self.info else "",
                 "hello": self.info.to_json() if self.info else None,
                 "owner": owner_name(f.owner) if f.presented else "unknown",
@@ -426,7 +432,7 @@ class _Board:
         (published by whoever finishes it, once the locks are released)."""
         if self.finished:
             return
-        self.state, self.reason = "down", reason
+        self.state, self.reason, self.detail = "down", reason, ""
         self.finished = True
         if self.svc._boards.get(self.board_id) is self:
             del self.svc._boards[self.board_id]
@@ -512,7 +518,8 @@ class _Board:
                     if exc.retry_s is None:
                         self.end_reason, self.end_error = exc.reason, exc
                         return
-                    self.set_state("down", exc.reason)
+                    self.set_state(getattr(exc, "state", "down") or "down", exc.reason,
+                                   getattr(exc, "detail", "") or "")
                     wait = exc.retry_s
                 except (OSError, EOFError, WireError, UnreachableError) as exc:
                     if self.stop.is_set():
@@ -563,7 +570,12 @@ class _Board:
 
     def _session(self) -> str:
         t = self.t
-        self.set_state("connecting", self.reason if self.state == "reconnecting" else "")
+        # A reconnect keeps its reason; so does a step still under way (PANEL-TRUTH: the lease
+        # being checked with the hub), so the line does not flicker between tries.
+        if self.state in ("reconnecting", "connecting"):
+            self.set_state("connecting", self.reason, self.detail)
+        else:
+            self.set_state("connecting")
         raw = self.source.display_connect()
         if self.stop.is_set():
             # Closed (the lease lost, the board closed) while the connect was under way: the
@@ -872,9 +884,9 @@ class DisplayService:
         last = self._last.get(board_id)
         if last is not None:
             return last.status()
-        return {"board": board_id, "state": "down", "reason": "", "mode": "", "hello": None,
-                "owner": "unknown", "badges": [], "presented": False, "hatched": NTILES,
-                "viewers": 0}
+        return {"board": board_id, "state": "down", "reason": "", "detail": "", "mode": "",
+                "hello": None, "owner": "unknown", "badges": [], "presented": False,
+                "hatched": NTILES, "viewers": 0}
 
     def boards(self) -> list[str]:
         with self._guard:

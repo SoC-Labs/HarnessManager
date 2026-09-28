@@ -21,6 +21,7 @@ from harness_manager.core.panel import LOCATE_WHO_MAX, PanelState, PanelSupport,
 from harness_manager.daemon.panel_api import identify_lease_note, lease_for_identify
 from harness_manager.services import presence as S
 from harness_manager.services.presence import LocateLimiter, PresenceService
+from harness_manager_mps3.capabilities import NEEDS_LOCATE
 
 WALL = 1_790_000_000.0
 ME = "dam1n19@srv03335"
@@ -230,7 +231,7 @@ def test_twin_bare_metal_is_refused_with_the_reason_and_sent_nothing(tmp_path):
             with pytest.raises(UnavailableError) as exc:
                 session.panel.locate(5, ME)
             assert exc.value.capability == C.LOCATE
-            assert exc.value.reason == "needs harness feature 'locate' (Linux harness)"
+            assert exc.value.reason == NEEDS_LOCATE
             assert "locate" not in {q.get("op") for q in vb.shell.requests}
         finally:
             engine.close_all()

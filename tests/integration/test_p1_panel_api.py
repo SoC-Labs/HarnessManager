@@ -20,9 +20,14 @@ with warnings.catch_warnings():
     from fastapi.testclient import TestClient
 
 from harness_manager.daemon.app import create_app
+from harness_manager_mps3.capabilities import NEEDS_LOCATE, NEEDS_PRESENCE
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL, PanelVirtualMps3
 from tests.fakes.l4_service import H, hold_board
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for
+from tests.fakes.virtual_board import LINUX_HARNESSD
+
+#: PANEL-TRUTH: words naming a harness TYPE; a reason from a missing feature never has one.
+TYPE_WORDS = ("bare metal", "bare-metal", "Linux harness")
 
 
 class Rig:
@@ -107,7 +112,7 @@ def test_bare_metal_is_never_sent_a_hello(tmp_path):
         time.sleep(1.5)
         assert r.vb.shell.hellos == [] and not {"hello", "panel", "locate"} & {
             q.get("op") for q in r.vb.shell.requests}
-        assert "Linux harness" in r.presence.presence(bid)["reason"]
+        assert r.presence.presence(bid)["reason"] == NEEDS_PRESENCE     # by feature, no type
 
 
 def test_a_tap_on_the_glass_becomes_one_panel_tap_event(linux):
@@ -175,7 +180,26 @@ def test_get_panel_on_bare_metal_is_rebuilt_and_identify_is_greyed_with_the_reas
     assert body["panel"]["owner"] == "harness" and body["panel"]["page"] == ""
     assert "rebuilt from what Harness Manager read" in body["panel"]["note"]
     assert body["identify"]["available"] is False
-    assert body["identify"]["reason"] == "needs harness feature 'locate' (Linux harness)"
+    assert body["identify"]["reason"] == NEEDS_LOCATE
+    assert body["support"]["impl"] == "bare-metal"      # the harness's own word (the twin below)
+
+
+def test_panel_truth_a_linux_image_without_panel_features_says_linux_never_bare_metal(tmp_path):
+    """david's board 1 (2026-09-28): the Linux harness rc2_v6 has 'clcd_kvm' but not 'panel',
+    'presence' or 'locate'. The body names no type in any reason; ``support.impl`` says
+    "linux", from the harness itself; the rebuilt NET row is never this computer's
+    loopback (a fake board lives there, so it is unknown here)."""
+    with rig(tmp_path, LINUX_HARNESSD) as (r, client):
+        bid = r.open(client)
+        body = client.get(f"{bid_path(bid)}/panel", headers=H).json()
+        assert body["panel"]["source"] == "rebuilt" and body["support"]["impl"] == "linux"
+        texts = [body["reason"], body["identify"]["reason"], body["panel"]["note"],
+                 *(v for k, v in body["support"].items() if k not in ("source", "impl"))]
+        for text in texts:
+            assert not any(w in text for w in TYPE_WORDS), text
+        frame = client.get(f"{bid_path(bid)}/panel/frame", headers=H).json()
+        assert frame["rows"][5].rstrip() == "NET : \u2014"
+        assert "127.0.0.1" not in "".join(frame["rows"]) and "?" not in "".join(frame["rows"])
 
 
 def test_the_panel_routes_are_held_while_a_job_runs(linux):
@@ -228,7 +252,7 @@ def test_identify_on_bare_metal_is_422_with_the_reason_and_sends_nothing(bare):
     resp = client.post(f"{bid_path(bid)}/identify", json={"seconds": 5}, headers=H)
     err = resp.json()["error"]
     assert resp.status_code == 422 and err["name"] == "UNAVAILABLE"
-    assert err["capability"] == "locate" and "Linux harness" in err["reason"]
+    assert err["capability"] == "locate" and err["reason"] == NEEDS_LOCATE
     assert r.vb.shell.locates == [] and "locate" not in {q.get("op") for q in r.vb.shell.requests}
 
 

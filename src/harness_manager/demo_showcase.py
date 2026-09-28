@@ -259,8 +259,9 @@ def script() -> dict[str, Any]:
 
 
 class DemoPanel:
-    """``session.panel``: the Linux harness's panel (read from the glass), or bare metal's
-    rebuilt view with Identify and presence unavailable (``harness_manager_mps3.panel``)."""
+    """``session.panel``: an image with ``panel`` (read from the glass), or one without it
+    (bare metal, or a Linux image before R1-R3): the rebuilt view, with Identify and presence
+    unavailable (``harness_manager_mps3.panel``)."""
 
     def __init__(self, engine: Any, board_id: str) -> None:
         self._e, self._bid = engine, board_id
@@ -286,7 +287,8 @@ class DemoPanel:
         return PanelSupport(front_panel="" if panel or "clcd_kvm" in f else NEEDS_PANEL,
                             presence="" if "presence" in f else NEEDS_PRESENCE,
                             locate="" if "locate" in f else NEEDS_LOCATE,
-                            source=SOURCE_PANEL if panel else SOURCE_REBUILT)
+                            source=SOURCE_PANEL if panel else SOURCE_REBUILT,
+                            impl=self._e._board(self._bid).identity.harness_impl or "")
 
     def _sessions(self) -> tuple[PanelSession, ...]:
         mine_age = max(0.0, time.time() - self._hello_at) if self._hello_at else 3.0

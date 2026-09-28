@@ -671,7 +671,9 @@ def read_panel(session: Any, *, reason_for: Callable[[str], str] | None = None,
     """``{panel: PanelState | None, reason, identify: {available, reason, until}, support}``.
 
     ``panel`` is None, with the reason, when this board has no front panel HM can read. A
-    bare-metal board answers with ``source: "rebuilt"`` and Identify unavailable.
+    board whose image lacks ``panel`` (bare metal v0.11, and Linux images before R1-R3)
+    answers with ``source: "rebuilt"`` and Identify unavailable; ``support.impl`` is the
+    harness's own ``version.impl`` ("" when it did not say).
     ``with_state=False``: what the board can do only; ``panel`` is None and the panel is not
     read (``reason`` is set only when it could not be read at all). ``identify.until`` is
     the adapter's ``identify_until()`` when it has one (a daemon session's proxy).
@@ -683,7 +685,7 @@ def read_panel(session: Any, *, reason_for: Callable[[str], str] | None = None,
         return {"panel": None, "reason": why,
                 "identify": {"available": False, "reason": locate_why, "until": None},
                 "support": {"front_panel": why, "presence": why, "locate": locate_why,
-                            "source": ""}}
+                            "source": "", "impl": ""}}
     support = panel.support()
     reason, got = "", None
     if support.front_panel:

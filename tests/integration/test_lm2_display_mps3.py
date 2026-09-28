@@ -293,7 +293,9 @@ def test_someone_elses_lease_is_refused_by_name_and_no_forward_opens(rig_factory
         assert "lease holder only" in reason and f"alice@lab holds {TARGET}" in reason
         with pytest.raises(HeldError) as exc:
             rig.adapter.display_connect()
-        assert exc.value.holder == "alice@lab" and rig.leases.forgets >= 1   # asked fresh
+        # asked (PANEL-TRUTH: this fake keeps no view, so each check asks the hub; the daemon's
+        # LeaseService answers from its own view while it is under 60 s old)
+        assert exc.value.holder == "alice@lab" and rig.leases.views >= 1
         v = rig.svc.attach(BID, rig.adapter)
         wait_for(lambda: rig.status()["state"] == "down" and "alice@lab" in rig.status()["reason"],
                  what="down, naming the holder")
@@ -313,7 +315,8 @@ def test_negative_twin_your_lease_opens_through_the_hub(rig_factory: Any) -> Non
         assert rig.adapter.display_reason() == ""
         argv = rig.ssh.launches[0]
         assert argv[argv.index("-J") + 1] == HUB_HOST
-        assert rig.leases.forgets >= 1 and rig.leases.views >= 2       # asked fresh, then cached
+        # PANEL-TRUTH: asked, never forced fresh (one hub hiccup must not decide it)
+        assert rig.leases.views >= 2 and rig.leases.forgets == 0
         v.close()
 
 
@@ -323,10 +326,15 @@ def test_nobodys_lease_and_an_unanswering_hub_open_nothing(rig_factory: Any) -> 
     with pytest.raises(HeldError):
         rig.adapter.display_connect()
     rig.leases.held, rig.leases.fail = True, "the hub did not answer"
-    assert rig.adapter.display_reason().startswith(f"cannot confirm you hold the lease on {TARGET}")
+    # PANEL-TRUTH: a hub that did not answer is not a refusal (the connect asks again), and
+    # its own words are the detail, never the headline
+    assert rig.adapter.display_reason() == ""
     with pytest.raises(DisplayUnavailable) as exc:
         rig.adapter.display_connect()
-    assert exc.value.retry_s == D.LEASE_RETRY_S                   # a transient: asked again later
+    assert exc.value.reason == (f"could not confirm your lease on {TARGET} with the hub; "
+                                "trying again")
+    assert exc.value.state == "connecting" and exc.value.detail == "the hub did not answer"
+    assert exc.value.retry_s == D.LEASE_RETRY_S                   # asked again later
     assert rig.ssh.launches == []
 
 
@@ -599,7 +607,7 @@ def test_twin_the_holders_open_reads_version_after_the_lease_check(rig_factory: 
         rig.serve(board)
         rig.adapter.display_connect().close()
     assert rig.shell.reads == 1 and rig.adapter.facts().source == "version"
-    assert rig.leases.forgets >= 1                            # the lease asked fresh first
+    assert rig.leases.views >= 1                              # the lease asked first
 
 
 # --- 6. the forward is released 30 s after the last viewer (LM1's grace, an injected clock) -----------------

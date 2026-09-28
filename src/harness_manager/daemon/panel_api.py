@@ -6,7 +6,7 @@ docs/API.md "Front panel" (additive):
 |---|---|
 | ``GET /boards/{bid}/panel`` | ``{panel: PanelState or null, reason, identify: {available, reason, until}, support, presence}``; ``?state=0`` leaves the panel unread (``panel`` null) |
 | ``GET /boards/{bid}/panel/frame`` | ``{rows, roles, source, observed_at, note}`` |
-| ``POST /boards/{bid}/identify`` ``{seconds?}`` | ``{until, until_ms, seconds, next_at, lease_holder?, note?, opened_for_identify?}``; 422 UNAVAILABLE with the reason on bare metal; 409 ALREADY within 10 s of the last start |
+| ``POST /boards/{bid}/identify`` ``{seconds?}`` | ``{until, until_ms, seconds, next_at, lease_holder?, note?, opened_for_identify?}``; 422 UNAVAILABLE with the reason on an image without ``locate``; 409 ALREADY within 10 s of the last start |
 
 ``harness_manager.services.presence.PresenceService`` does the work. This module wires it:
 

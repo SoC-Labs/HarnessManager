@@ -16,6 +16,7 @@ import time
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
+from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from tests.fakes.clcd_panel_shell import PANEL_FEATURES
 from tests.fakes.p1_mock_panel import PanelSim
 
@@ -26,7 +27,7 @@ pytestmark = [pytest.mark.browser]
 T = 10_000
 APP = {"width": 1440, "height": 900}
 BOARD = BOARD_FIELDED
-LOCATE_WHY = "needs harness feature 'locate' (Linux harness)"
+LOCATE_WHY = NEEDS_LOCATE
 
 
 @pytest.fixture

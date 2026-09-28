@@ -12,6 +12,7 @@ import time
 
 from harness_manager.core.services import EngineConfig
 from harness_manager.engine import Engine
+from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.clcd_panel_shell import LINUX_LOCATE, LINUX_PANEL, V011_BARE_METAL
 from tests.fakes.l4_service import H
@@ -127,8 +128,7 @@ def test_bare_metal_not_open_here_is_422_with_the_reason_and_sends_nothing(tmp_p
         bid = known(r, client)
         resp = post(client, bid, 5)
         err = resp.json()["error"]
-        assert resp.status_code == 422 and err["reason"] == \
-            "needs harness feature 'locate' (Linux harness)"
+        assert resp.status_code == 422 and err["reason"] == NEEDS_LOCATE
         assert "locate" not in {q.get("op") for q in r.vb.shell.requests}
         assert r.engine.open_boards() == []
 

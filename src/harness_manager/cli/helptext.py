@@ -235,15 +235,16 @@ sd TARGET restore ZIP [--yes]
 PANEL = """\
 panel show TARGET
     What the board's front panel (the LCD) shows: page, owner, banner, card,
-    sessions, taps, Identify.
+    sessions, taps, Identify, and what this harness image does not report.
 panel mirror TARGET
-    The panel's text grid (read from the board, or rebuilt on bare metal).
+    The panel's text grid (read from the board, or rebuilt when the image does
+    not send it: harness feature 'panel').
 identify TARGET [--seconds N]
     Blink the board's panel backlight, with an IDENTIFY banner naming you, so
-    you can tell which board it is (Linux harness): 1 to 30 seconds, 5 by
-    default; 0 stops (so does a tap on the panel). No hub lease is needed. At
-    most once every 10 s per board (exit 8 says when to try again). The app's
-    sidebar has the same thing: the Identify icon on each board.
+    you can tell which board it is (harness feature 'locate'): 1 to 30 seconds,
+    5 by default; 0 stops (so does a tap on the panel). No hub lease is needed.
+    At most once every 10 s per board (exit 8 says when to try again). The
+    app's sidebar has the same thing: the Identify icon on each board.
 
 The Live display mirrors the panel pixel for pixel (the Linux harness's
 lcd_mirror). It is read-only: nothing reaches the panel. On a board behind a

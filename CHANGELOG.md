@@ -231,6 +231,35 @@ owners.
   lease, instead of naming the holder (409 HELD, exit 4): taking the lease would not help.
   The lease comes next, then the claim. The web page and `display` answer alike.
 
+- The Live display rides out one busy hub (PANEL-TRUTH, 2026-09-28). With the lease held
+  and heartbeated, it said "cannot confirm you hold the lease on mps3_01_pl: lease show on
+  mapstone-dev... failed: ... kex_exchange_identification: read: Connection reset by peer":
+  the hub's ssh server had turned ONE connection away, and the display asked the hub afresh
+  on every open. Now it takes the lease service's own view while it is under a minute old;
+  a hub read that fails that way stands on the last time the hub said the lease is yours
+  here (a view or a heartbeat, under 5 minutes old); else it says "checking your lease with
+  the hub..." with a spinner, puts ssh's words behind **Details**, and asks again (2 s, 5 s,
+  10 s, 20 s, then every 30 s). Someone else's lease is still refused, by name.
+
+### The Front panel card says what the image reports (PANEL-TRUTH)
+- The card named the Linux harness "bare metal" because its image lacked the optional
+  features `panel`, `presence` and `locate`. Every word is now about what THIS image
+  reports, by feature; the harness type comes only from the harness's own `version.impl`
+  (`support.impl` in `GET .../panel`, additive), and only when it said.
+- One headline: **Live**, **Read**, **Rebuilt** or **Not available**, with the reason in
+  plain words. The Live display comes first, the rebuilt text is its fallback, labelled
+  once. The card shows only the rows the image reports, and one line "Not reported by this
+  image: page, touch health, who is connected, recent taps", with the features behind it.
+  The Board tile's panel line leaves out a page the image does not report.
+- The rebuilt text shows its `NET` as the board's own address, never `127.0.0.1` (the SSH
+  tunnel's local end, on this computer), and a fact Harness Manager did not read as "—"
+  with the legend "not reported by this image", never "?". Its `DUT` row follows a swap at
+  once (every identity read updates it; it was up to 5 minutes behind).
+- The reasons read "Identify isn't available on this harness image yet (harness feature
+  'locate')" and "this harness image doesn't report who is connected (harness feature
+  'presence')" in the app, `panel show`, `identify` and the API. `panel show` adds
+  `harness` (from `version.impl`) and one `missing` line.
+
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key
   (the harness's TOFU claim), after asking, and only for the lease holder. It pins the

@@ -18,8 +18,10 @@ from harness_manager.cli.engine import set_engine_factory
 from harness_manager.cli.main import main
 from harness_manager.cli.output import TSV_COLUMNS
 from harness_manager.core.errors import ExitCode
+from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL, PanelVirtualMps3
 from tests.fakes.t13_daemon import LiveDaemon, engine_for
+from tests.fakes.virtual_board import LINUX_HARNESSD
 
 
 def run(capsys, *argv: str) -> tuple[int, str, str]:
@@ -51,6 +53,12 @@ def linux(tmp_path, in_process) -> Iterator[PanelVirtualMps3]:
 @pytest.fixture
 def bare(tmp_path, in_process) -> Iterator[PanelVirtualMps3]:
     yield from board(tmp_path, V011_BARE_METAL)
+
+
+@pytest.fixture
+def lx_nopanel(tmp_path, in_process) -> Iterator[PanelVirtualMps3]:
+    """PANEL-TRUTH: the Linux harness without 'panel', 'presence', 'locate' (rc2_v6)."""
+    yield from board(tmp_path, LINUX_HARNESSD)
 
 
 # --- the verbs exist, and `identify` was free ---------------------------------------------------
@@ -86,11 +94,24 @@ def test_panel_show_on_bare_metal_says_rebuilt_and_why_identify_is_off(bare, cap
     rc, out, _ = run(capsys, "--json", "panel", "show", bare.shell_endpoint)
     body = json.loads(out)
     assert rc == 0 and body["panel"]["source"] == "rebuilt" and body["panel"]["owner"] == "harness"
-    assert body["identify"] == {"available": False, "until": None,
-                                "reason": "needs harness feature 'locate' (Linux harness)"}
+    assert body["identify"] == {"available": False, "until": None, "reason": NEEDS_LOCATE}
     rc, out, _ = run(capsys, "panel", "show", bare.shell_endpoint)
     assert "rebuilt from what Harness Manager read" in out
-    assert "identify   unavailable: needs harness feature 'locate' (Linux harness)" in out
+    assert f"identify   unavailable: {NEEDS_LOCATE}" in out
+    # PANEL-TRUTH: what it does not report, on one line, by feature; the type from its impl
+    assert ("missing    not reported by this image: page, who is connected, recent taps "
+            "(harness feature 'panel' and 'presence')") in out
+    assert "harness    bare-metal harness" in out and "sessions   " not in out
+
+
+def test_panel_truth_panel_show_on_a_linux_image_without_panel_never_says_bare_metal(
+        lx_nopanel, capsys):
+    rc, out, _ = run(capsys, "panel", "show", lx_nopanel.shell_endpoint)
+    assert rc == 0 and "harness    Linux harness" in out
+    assert "bare metal" not in out and "bare-metal" not in out
+    assert "not reported by this image: page, who is connected, recent taps" in out
+    rc, out, _ = run(capsys, "panel", "mirror", lx_nopanel.shell_endpoint)
+    assert "?" not in out and "127.0.0.1" not in out and "NET : \u2014" in out
 
 
 def test_panel_show_tsv_is_one_row_of_its_columns(linux, capsys):
@@ -131,7 +152,7 @@ def test_identify_blinks_a_linux_board(linux, capsys):
 def test_identify_on_bare_metal_is_exit_12_with_the_reason(bare, capsys):
     rc, out, err = run(capsys, "identify", bare.shell_endpoint)
     assert rc == ExitCode.UNAVAILABLE and out == ""
-    assert "needs harness feature 'locate' (Linux harness)" in err
+    assert NEEDS_LOCATE in err
     assert bare.shell.locates == []
 
 

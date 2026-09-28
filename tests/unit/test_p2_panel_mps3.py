@@ -20,10 +20,16 @@ from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.core.panel import COLS, ROWS, Hello, HelloLease
 from harness_manager.core.services import EngineConfig
 from harness_manager.engine import Engine
+from harness_manager_mps3.capabilities import NEEDS_LOCATE, NEEDS_PRESENCE
 from harness_manager_mps3.pack import Mps3Pack
-from harness_manager_mps3.panel import Mps3Panel, rebuilt_frame
+from harness_manager_mps3.panel import Mps3Panel, board_address, rebuilt_frame
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL, PanelVirtualMps3
-from tests.fakes.virtual_board import FIELDED_3F1A560F
+from tests.fakes.virtual_board import FIELDED_3F1A560F, LINUX_HARNESSD
+
+DASH = "\u2014"            # PANEL-TRUTH: a fact HM did not read (core.panel.UNKNOWN)
+#: PANEL-TRUTH: words that name a harness TYPE. A reason built from a missing feature never
+#: says one (the Linux harness rc2_v6 lacks 'panel', 'presence' and 'locate' too).
+TYPE_WORDS = ("bare metal", "bare-metal", "Linux harness", "linux harness")
 
 PANEL_OPS = {"hello", "panel", "locate"}
 
@@ -60,6 +66,16 @@ def bare(tmp_path: Path) -> Iterator[Board]:
         b.engine.close_all()
 
 
+@pytest.fixture
+def lx_nopanel(tmp_path: Path) -> Iterator[Board]:
+    """PANEL-TRUTH: the Linux harness (``impl: linux``) with 'clcd_kvm' but WITHOUT 'panel',
+    'presence' and 'locate': the image david's board 1 ran on 2026-09-28 (rc2_v6)."""
+    with PanelVirtualMps3(tmp_path / "lxn", LINUX_HARNESSD) as vb:
+        b = Board(vb, tmp_path / "lxn")
+        yield b
+        b.engine.close_all()
+
+
 HELLO = Hello(sid="a1b2c3d4", who="david@srv03335", app="hm/0.1.0", name="mps3-01",
               role="holder", lease=HelloLease(by="david@mapstone-dev", left=4332, q=1))
 
@@ -76,10 +92,35 @@ def test_the_linux_harness_offers_panel_presence_and_locate(linux):
 def test_bare_metal_v011_offers_the_panel_owner_only_with_the_reasons(bare):
     info = bare.engine.info(bare.bid)
     assert C.FRONT_PANEL in info.capabilities
-    assert info.unavailable[C.LOCATE] == "needs harness feature 'locate' (Linux harness)"
-    assert info.unavailable[C.PRESENCE] == "needs harness feature 'presence' (Linux harness)"
+    assert info.unavailable[C.LOCATE] == NEEDS_LOCATE == (
+        "Identify isn't available on this harness image yet (harness feature 'locate')")
+    assert info.unavailable[C.PRESENCE] == NEEDS_PRESENCE == (
+        "this harness image doesn't report who is connected (harness feature 'presence')")
     sup = bare.panel.support()
-    assert sup.source == "rebuilt" and "Linux harness" in sup.locate
+    assert sup.source == "rebuilt" and "'locate'" in sup.locate
+    assert sup.impl == "bare-metal"          # the harness's own word, for a view to name it
+
+
+def test_panel_truth_a_linux_image_without_the_panel_features_is_never_called_bare_metal(
+        lx_nopanel):
+    """david's board 1 (2026-09-28): rc2_v6 is the Linux harness without 'panel', 'presence'
+    and 'locate'. Every reason is by feature; the type comes from its own impl."""
+    info = lx_nopanel.engine.info(lx_nopanel.bid)
+    assert info.identity.harness_impl == "linux" and "clcd_kvm" in info.identity.features
+    sup = lx_nopanel.panel.support()
+    assert sup.source == "rebuilt" and sup.impl == "linux"
+    reasons = [sup.front_panel, sup.presence, sup.locate, info.unavailable[C.LOCATE],
+               info.unavailable[C.PRESENCE], lx_nopanel.panel.state().note]
+    for text in reasons:
+        assert not any(w in text for w in TYPE_WORDS), text
+    assert "'presence'" in sup.presence and "'locate'" in sup.locate
+
+
+def test_negative_twin_the_harness_type_is_named_only_from_its_own_impl(bare, lx_nopanel):
+    # the same features, two harnesses: only impl tells them apart, and it does
+    assert bare.panel.support().impl == "bare-metal"
+    assert lx_nopanel.panel.support().impl == "linux"
+    assert bare.panel.support().presence == lx_nopanel.panel.support().presence
 
 
 def test_a_usb_only_board_has_no_panel_adapter(tmp_path):
@@ -161,7 +202,7 @@ def test_a_harness_that_drops_a_verb_it_announced_is_read_again_and_refused(linu
     linux.vb.shell.features = tuple(f for f in linux.vb.shell.features if f != "presence")
     with pytest.raises(UnavailableError, match="declined the hello"):
         linux.panel.hello(HELLO)                    # the cached features still said yes
-    with pytest.raises(UnavailableError, match="Linux harness"):
+    with pytest.raises(UnavailableError, match="harness feature 'presence'"):
         linux.panel.hello(HELLO)                    # read again: the bit is gone
     assert linux.panel.support().presence and "hello" in linux.ops()
 
@@ -239,10 +280,10 @@ def test_bare_metal_mirror_is_rebuilt_from_what_hm_read(bare):
 def test_bare_metal_refuses_hello_and_identify_with_the_reason_and_sends_neither(bare):
     with pytest.raises(UnavailableError) as hello:
         bare.panel.hello(HELLO)
-    assert hello.value.capability == C.PRESENCE and "Linux harness" in hello.value.reason
+    assert hello.value.capability == C.PRESENCE and hello.value.reason == NEEDS_PRESENCE
     with pytest.raises(UnavailableError) as loc:
         bare.panel.locate(10, "david@srv03335")
-    assert loc.value.capability == C.LOCATE and "Linux harness" in loc.value.reason
+    assert loc.value.capability == C.LOCATE and loc.value.reason == NEEDS_LOCATE
     with pytest.raises(UnavailableError):
         bare.panel.offer(HELLO, lambda _s: None)
     bare.panel.state()
@@ -283,8 +324,63 @@ def test_the_rebuilt_frame_never_invents_what_hm_did_not_read():
                           wall=1.0)
     text = "\n".join(frame.rows)
     assert "MPS3-01" in frame.rows[0] and "NET : 192.168.10.101" in text
-    assert "SWAP: ?" in text and "UP  : ?" in text, "unknown facts are '?', never a guess"
+    # PANEL-TRUTH: an unknown fact is an em dash (the UI's legend: "not reported by this
+    # image"), never "?", which reads as broken, and never a guess
+    assert f"SWAP: {DASH}" in text and f"UP  : {DASH}" in text and f"MAC {DASH}" in text
+    assert "?" not in text
     assert all(len(r) == COLS for r in frame.rows) and len(frame.rows) == ROWS
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", ""])
+def test_panel_truth_net_is_never_a_tunnel_end(host):
+    """Through a hub the shell connects to its SSH tunnel's local end: that is this
+    computer, not the board. The NET row says it does not know instead."""
+    frame = rebuilt_frame(name="mps3-01", identity=None, host=host, owner="harness", wall=1.0)
+    assert frame.rows[5] == f"NET : {DASH}".ljust(COLS)
+    assert "127.0.0.1" not in "\n".join(frame.rows)
+
+
+def _session(links, *, remote_host="", shell_host="127.0.0.1"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(candidate=Candidate("mps3", "mps3-01", tuple(links)),
+                           reach=SimpleNamespace(remote_host=remote_host) if remote_host else None,
+                           shell=SimpleNamespace(host=shell_host))
+
+
+def test_panel_truth_net_is_the_boards_own_address_through_a_hub():
+    # the hub reaches the board at 192.168.10.101; this computer at 127.0.0.1:<forward>
+    eth = Link(LinkKind.ETHERNET, "192.168.10.101:6900", "via the hub", via="hub")
+    assert board_address(_session([eth], remote_host="192.168.10.101")) == "192.168.10.101"
+    assert board_address(_session([eth])) == "192.168.10.101"          # the link says it too
+    lan = Link(LinkKind.ETHERNET, "10.0.0.7:6900", "direct")
+    assert board_address(_session([lan], shell_host="10.0.0.7")) == "10.0.0.7"
+
+
+def test_negative_twin_net_is_unknown_when_only_a_loopback_names_the_board():
+    fake = Link(LinkKind.ETHERNET, "127.0.0.1:16900", "a fake on loopback")
+    assert board_address(_session([fake])) == ""
+    assert board_address(_session([])) == ""
+
+
+def test_panel_truth_the_rebuilt_dut_row_follows_an_identity_read_at_once(bare):
+    """The rebuilt DUT row came from an identity cached 5 minutes: a swap showed the old
+    design. Every identity read (engine.info) is noted on the panel now."""
+    assert bare.panel.frame().rows[2].startswith("DUT : ")
+    before = bare.panel.frame().rows[2]
+    ident = bare.engine.info(bare.bid).identity
+    from dataclasses import replace
+
+    bare.panel.note_identity(replace(ident, rm_name="nanosoc_upy", rm_id="0x01000005"))
+    assert bare.panel.frame().rows[2] == "DUT : nanosoc_upy".ljust(COLS) != before
+    # the twin: an identity without features says nothing (FIX-PACK-1 item 3): kept as it was
+    bare.panel.note_identity(replace(ident, rm_name="led", features=()))
+    assert bare.panel.frame().rows[2] == "DUT : nanosoc_upy".ljust(COLS)
+    # and engine.info is what notes it
+    seen: list = []
+    bare.panel.note_identity = seen.append
+    bare.engine.info(bare.bid)
+    assert [i.shell_id for i in seen] == [ident.shell_id]
 
 
 def test_the_wire_is_json_lines_the_fake_can_read():

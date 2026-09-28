@@ -22,11 +22,16 @@
 //   with a one-line reason (§7.5). Never an error page. The daemon picks which (its
 //   display_api.refusal): a board that can never show it (bare metal, no lcd_mirror) is 422
 //   even behind someone else's lease, so the line names a holder only for a 409.
+// - PANEL-TRUTH: while the daemon checks the lease with the hub (a hub that reset one ssh:
+//   status "connecting" with a reason and a detail), the line says so with a spinner, and
+//   the raw error (ssh's words) is behind "Details", never the headline. displayLive(bid)
+//   tells the Front panel card's headline whether the picture is on screen; a client
+//   re-renders the page (store.changed) only when that flips.
 
 import { callBytes, socketCloseReason, socketUrl } from "./api.js";
 import { boardName } from "./format.js";
 import { html, useEffect, useMemo, useRef, useState } from "./lib.js";
-import { onBoardEvent, S } from "./store.js";
+import { changed, onBoardEvent, S } from "./store.js";
 import { Chip, Icon, Reason, Seg, Spinner } from "./ui.js";
 
 // --- the wire (core/display_wire.py; LCD_MIRROR.md §6.1) -----------------------------------------
@@ -243,6 +248,7 @@ export class DisplayClient {
     this.opened = false;                 // this socket reached onopen
     this.wanted = { mounted: false, visible: document.visibilityState !== "hidden", inView: false };
     this.status = null;                  // the latest status text frame
+    this.wasLive = false;                // PANEL-TRUTH: what displayLive() last said
     this.refusal = null;                 // {reason, name, holder, code}: the typed refusal
     this.failure = "";                   // why the socket closed (untyped)
     this.presented = false;              // a picture is in the backing store
@@ -297,6 +303,7 @@ export class DisplayClient {
 
   unmount() {
     LIVE.delete(this);
+    if (this.wasLive) { this.wasLive = false; changed(); }
     document.removeEventListener("visibilitychange", this.onVisibility);
     window.removeEventListener("pagehide", this.onPageHide);
     if (this.io) this.io.disconnect();
@@ -316,7 +323,11 @@ export class DisplayClient {
 
   listen(fn) { this.listeners.add(fn); }
 
-  notify() { for (const fn of this.listeners) fn(); }
+  notify() {
+    const live = this.presented && !this.refusal;
+    if (live !== this.wasLive) { this.wasLive = live; changed(); }   // the card's headline
+    for (const fn of this.listeners) fn();
+  }
 
   get isWanted() { return this.wanted.mounted && this.wanted.visible && this.wanted.inView; }
 
@@ -606,6 +617,12 @@ export class DisplayClient {
 // For the browser tests and the devtools console: each mounted Live display's counters.
 window.__harness_managerDisplay = () => [...LIVE].map((c) => c.debug());
 
+// PANEL-TRUTH: a mounted Live display of this board has the board's own picture on screen.
+export function displayLive(bid) {
+  for (const c of LIVE) if (c.bid === bid && c.presented && !c.refusal) return true;
+  return false;
+}
+
 // --- the component ----------------------------------------------------------------------------
 
 function agoText(ms) {
@@ -665,7 +682,12 @@ function fallbackLine(c) {
   }
   const st = c.status;
   if (st && (st.state === "down" || st.state === "refused") && st.reason) {
-    return { level: "unk", icon: "circle-slash", text: `Live display: ${st.reason}`, kind: st.state };
+    return { level: "unk", icon: "circle-slash", text: `Live display: ${st.reason}`, kind: st.state, detail: st.detail || "" };
+  }
+  // PANEL-TRUTH: still connecting, and the daemon says what it is doing (checking the lease
+  // with the hub): a spinner and its words; the raw error only behind Details.
+  if (st && st.state === "connecting" && st.reason && c.socket === "open") {
+    return { level: "", icon: "loader-circle", text: `Live display: ${st.reason}`, kind: "checking", detail: st.detail || "" };
   }
   if (st && st.state === "reconnecting" && st.reason && c.socket === "open") {
     return { level: "unk", icon: "circle-help", text: `Live display: reconnecting to the board (${st.reason})`, kind: "reconnecting" };
@@ -788,7 +810,10 @@ export function LiveDisplay({ bid, children = null }) {
           ${note.busy ? html`<${Spinner} />` : html`<${Icon} name="download" />`}Snapshot</button>
       </div>
       ${note.text ? html`<${Reason} level="err" text=${`Snapshot: ${note.text}`} testid="live-snapshot-error" />` : null}`
-      : html`<${Reason} level=${fb.level} icon=${fb.icon} text=${fb.text} testid="live-reason" />
+      : html`${fb.kind === "checking" ? html`<p class="reason" data-testid="live-reason"><${Spinner} /><span>${fb.text}</span></p>`
+        : html`<${Reason} level=${fb.level} icon=${fb.icon} text=${fb.text} testid="live-reason" />`}
+      ${fb.detail ? html`<details class="ld-detail" data-testid="live-detail"><summary class="muted small"><${Icon} name="chevron-right" cls="sm chev" />Details</summary>
+        <p class="mono small secondary">${fb.detail}</p></details>` : null}
       ${children}`}
   </div>`;
 }

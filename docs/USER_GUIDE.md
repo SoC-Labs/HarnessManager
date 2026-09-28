@@ -891,13 +891,32 @@ load the new probes.
 
 ## 9. The front panel
 
-**Needs:** a board. The live mirror, who is connected, and Identify need the Linux harness.
+**Needs:** a board. What the card shows depends on what the board's harness image reports:
+the panel's own text needs the harness feature `panel`, who is connected needs `presence`,
+Identify needs `locate`, and the Live display needs the Linux harness with `lcd_mirror`.
 
 **When:** to see what the board's LCD shows, or to find the board in the lab.
 
 **In the app:** the Overview's **Board** tile has a **Panel** line (page, owner, touch) and
-**Identify**. **Details > Front panel** has the full mirror (15 rows of 40 characters),
-who is connected, recent taps on the glass, and Identify with a choice of 5 to 30 seconds.
+**Identify**. **Details > Front panel** starts with one headline that says what the card
+shows:
+
+| Headline | Means |
+|---|---|
+| **Live** | the Live display has the board's own picture |
+| **Read** | the text was read from the panel ("Read from the panel, 3 s ago") |
+| **Rebuilt** | this image does not send its panel's text, so Harness Manager rebuilt it from what it read. A fact it did not read shows as "—" ("not reported by this image") |
+| **Not available** | the reason, in plain words |
+
+Then the Live display, with the text mirror under it when there is no live picture, the rows
+the image reports (owner, page, touch, who is connected, recent taps), Identify with a choice
+of 5 to 30 seconds, and one line **Not reported by this image: ...** for the rest. Open that
+line for the harness features each one needs, and for the harness type as the harness itself
+reports it (`version.impl`).
+Harness Manager never guesses the type from a missing feature: a Linux image may lack
+`panel` too.
+
+![The Linux harness without the panel features: Live, and what it does not report](review/2026-09-28/panel-linux-no-panel-live-light.png)
 
 **Which board is which? Identify.** Every board card in the sidebar has a small Identify
 icon (a magnifier), and so does the Board tile.
@@ -910,8 +929,8 @@ You do not need to open the board or hold its hub lease. What to expect:
 - **A second press while it blinks does nothing.**
 - **A tap on the panel stops the blink.** The count in the app still runs to its end.
 - **The DUT owns the panel:** only the backlight blinks, with no banner.
-- **Disabled icon:** its tooltip says why, for example "needs harness feature 'locate'
-  (Linux harness)" on bare metal, or "Not read yet" before a scan.
+- **Disabled icon:** its tooltip says why, for example "Identify isn't available on this
+  harness image yet (harness feature 'locate')", or "Not read yet" before a scan.
 - **Never automatic:** Harness Manager sends it only when you click, or when you run
   `identify`.
 
@@ -939,8 +958,16 @@ hello, and at most 4. Closing the board stops the hellos. The name shown is your
 holder; it never releases the board.
 
 **What can go wrong**
-- **On bare metal:** the mirror is rebuilt from what HM read (it says "rebuilt"), and
-  Identify is disabled with "needs harness feature 'locate' (Linux harness)".
+- **"Rebuilt":** the image has no `panel` (bare metal v0.11, and Linux images before the
+  panel features). The text is rebuilt from what HM read; `NET` is the board's own address,
+  never your SSH tunnel's `127.0.0.1`. Identify is disabled with "Identify isn't available
+  on this harness image yet (harness feature 'locate')".
+- **"Live display: checking your lease with the hub...":** the hub did not answer the
+  lease read this time (its ssh server turns connections away when it is busy). The display
+  asks again by itself and opens when the hub answers; **Details** shows the hub's own
+  words. If the hub said a moment ago that the lease is yours, it opens straight away.
+- **"Live display: the live display is for the lease holder only: alice holds ...":**
+  someone else holds the lease. Ask for it (`lease request`).
 - **"held" (violet):** someone else owns the panel, for example the DUT.
 - **Touch unavailable:** the panel's touch controller did not answer; the reason says why.
 

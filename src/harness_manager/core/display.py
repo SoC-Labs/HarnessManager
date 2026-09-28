@@ -106,11 +106,19 @@ DIM_PERSIST_S = 1.0                           # §7.4: a dim state must persist 
 class DisplayUnavailable(UnavailableError):
     """The mirror cannot be reached now, with the reason (``no lcd_mirror service``, ``claim
     lost``). ``retry_s``: when the compositor tries again (None: not until a viewer asks
-    again)."""
+    again).
 
-    def __init__(self, reason: str, *, retry_s: float | None = 60.0) -> None:
+    PANEL-TRUTH (additive): ``state`` is what the compositor shows meanwhile: ``down`` (the
+    default), or ``connecting`` for a step still under way (the lease being checked with a
+    hub that did not answer this time: "checking your lease with the hub..."). ``detail`` is
+    the raw cause (ssh's words), for a Details disclosure, never the headline."""
+
+    def __init__(self, reason: str, *, retry_s: float | None = 60.0, state: str = "down",
+                 detail: str = "") -> None:
         super().__init__(DISPLAY_MIRROR, reason)
         self.retry_s = retry_s
+        self.state = state if state in ("down", "connecting") else "down"
+        self.detail = detail
 
 
 # --- badges (§7.4) ---------------------------------------------------------------------------
