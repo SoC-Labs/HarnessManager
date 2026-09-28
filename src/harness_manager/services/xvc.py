@@ -1311,12 +1311,28 @@ class XvcService:
 
     # -- identity and probes files ------------------------------------------------------------
 
+    def _last_read(self, board_id: str) -> Any:
+        """FIX-PACK-2: the identity the engine's last ``info`` read (None without one, or one
+        without features: a held board's identify answer says nothing about XVC)."""
+        last = getattr(self.engine, "last_identity", None)
+        try:
+            ident = last(board_id) if callable(last) else None
+        except Exception:  # noqa: BLE001 - a cache read is never worth failing a status
+            return None
+        return ident if ident is not None and tuple(getattr(ident, "features", ()) or ()) \
+            else None
+
     def _identity(self, session: BoardSession) -> Any:
         try:
             ident = session.identity()
         except HarnessError as exc:
-            log.info("xvc: identity read failed (%s); using the probe's", exc)
-            ident = getattr(session.candidate, "identity", None)
+            # FIX-PACK-2: the engine's last read before the probe's (the probe may be an
+            # identify answer with no features, or an image the board has since left)
+            ident = (self._last_read(session.candidate.board_id)
+                     or getattr(session.candidate, "identity", None))
+            log.info("xvc: identity read failed (%s); using the %s", exc,
+                     "last info read" if ident is not getattr(session.candidate, "identity",
+                                                              None) else "probe's")
         note = getattr(session.xvc, "xvc_note_identity", None) if session.xvc else None
         if ident is not None and callable(note):
             note(ident)
@@ -1401,9 +1417,13 @@ class XvcService:
             rm_id=live.rm_id, rm_name=live.rm_name, detail=detail)
 
     def identity_known(self, session: BoardSession) -> bool:
-        """Has this service read the board's identity (or did the probe carry one)?"""
-        return (session.candidate.board_id in self._known
-                or getattr(session.candidate, "identity", None) is not None)
+        """Has this service or the engine's ``info`` read the board's identity (or did the
+        probe carry one with features)? FIX-PACK-2 item 4: a probe's identity without
+        features (UDP identify, a held board) is not known: the first status reads it."""
+        board_id = session.candidate.board_id
+        probe = getattr(session.candidate, "identity", None)
+        return (board_id in self._known or self._last_read(board_id) is not None
+                or (probe is not None and bool(tuple(getattr(probe, "features", ()) or ()))))
 
     def status(self, session: BoardSession, *, refresh: bool = False) -> XvcStatus:
         """The session's state. Never touches the board (safe while a job runs), unless

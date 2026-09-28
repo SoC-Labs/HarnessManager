@@ -226,7 +226,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              owner="dev", apply="restart", check=_port),
         # D5
         _row("mps3.xvc_port", "int", _c.XVC_PORT, "Debug",
-             "The XVC port of a board reached directly", at="xvc.py:330", scope="pack",
+             "The XVC port of a board reached directly", at="xvc.py:340", scope="pack",
              owner="dev", env="HARNESS_MANAGER_MPS3_XVC_PORT", check=_port),
         # X4-X5
         _row("mps3.identify.port", "int", _c.IDENTIFY_PORT, "Advanced",
@@ -274,13 +274,13 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
         # B17-B18
         _row("boards.*.xvc.reach", "enum", "auto", "Boards",
              "How XVC reaches the harness: through the hub's tunnel, board SSH or directly",
-             at="xvc.py:152", scope="board", apply="reopen", choices=reach),
+             at="xvc.py:153", scope="board", apply="reopen", choices=reach),
         _row("boards.*.xvc.user", "str", "", "Boards",
              "The board-SSH user for XVC (empty: the board's SSH link, else root)",
-             at="xvc.py:327", scope="board", apply="reopen", check=_word("user name")),
+             at="xvc.py:337", scope="board", apply="reopen", check=_word("user name")),
         _row("boards.*.xvc.host", "str", "", "Boards",
              "The board-SSH host for XVC (empty: the board's own address)",
-             at="xvc.py:156", scope="board", apply="reopen", advanced=True,
+             at="xvc.py:157", scope="board", apply="reopen", advanced=True,
              check=_word("host name")),
         # B19-B20: SYSMON over JTAG (xsdb through hw_server, or an OpenOCD adapter)
         _row("boards.*.sysmon.backend", "enum", "xsdb", "Boards",

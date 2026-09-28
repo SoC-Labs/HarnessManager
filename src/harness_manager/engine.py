@@ -336,6 +336,12 @@ class Engine:
                               hint="open it first (engine.open(candidate))")
         return entry
 
+    def last_identity(self, board_id: str) -> BoardIdentity | None:
+        """FIX-PACK-2: the identity the last ``info`` of this open board read, or None (not
+        read yet, or closed). A read: it never touches the board."""
+        with self._lock:
+            return self._identities.get(board_id)
+
     def lock_owner(self, board_id: str) -> LockOwner | None:
         """Who holds the board's session lock right now (any process), or None."""
         return SessionLock(board_id, lock_dir=self.lock_dir).owner()
@@ -413,8 +419,11 @@ class Engine:
         identity read (``display_note_identity``), so its cached facts (the ``lcd_mirror``
         engine) follow the image the board runs now, not the one it ran when it opened.
         PANEL-TRUTH: so does its front panel adapter (``session.panel.note_identity``): the
-        rebuilt mirror's DUT row follows a swap at once."""
-        for attr, hook in (("display", "display_note_identity"), ("panel", "note_identity")):
+        rebuilt mirror's DUT row follows a swap at once. FIX-PACK-2 item 4: so does its XVC
+        adapter (``session.xvc.xvc_note_identity``): ``xvc status`` states the capability
+        from the image the board runs now, not the probe's identity."""
+        for attr, hook in (("display", "display_note_identity"), ("panel", "note_identity"),
+                           ("xvc", "xvc_note_identity")):
             note = getattr(getattr(entry.session, attr, None), hook, None)
             if not callable(note):
                 continue
