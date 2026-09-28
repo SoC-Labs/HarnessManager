@@ -521,7 +521,9 @@ def test_a_board_behind_a_hub_shows_its_tunnel_and_lease_and_releases_it(page_fa
     # fpgahub's ISO expiry: 1620 s from now reads as 27 min, never NaN.
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text(re.compile(r"lease yours · 2[67] min"))
     assert page.locator('[data-testid="attention"]').count() == 0
-    page.locator('[data-testid="fact-hub"] [data-action="lease_release"]').click()
+    # LEASE-UI: Release asks first (tests/web/test_lease_ui_browser.py has the rest)
+    page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
+    page.locator('[data-testid="release-confirm"] [data-action="release_confirm"]').click()
     expect(page.locator('[data-testid="lease-chip"]')).to_have_text("no lease", timeout=T)
     expect(page.locator('[data-attention="lease"]')).to_contain_text("Not leased on mapstone-dev")
     page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()

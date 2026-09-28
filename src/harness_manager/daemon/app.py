@@ -428,6 +428,23 @@ class Daemon:
         view = leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
         return rule(view if view is not None else leases.view(hub))
 
+    def release_lease_here(self, board_id: str) -> dict[str, Any] | None:
+        """LEASE-UI: release the board's hub lease when THIS Harness Manager holds it (its
+        token is in the store), for ``DELETE /boards/{bid}?release=true``. None when there is
+        no hub, no lease service or no lease held here (another session's lease is theirs to
+        release); a hub that refuses or cannot be reached raises, and the board stays open."""
+        leases = getattr(self, "leases", None)
+        if leases is None:
+            return None
+        try:
+            hub = getattr(self.engine.session(board_id), "hub", None)
+        except HarnessError:
+            return None
+        if hub is None or leases.store.get(hub.host, hub.target) is None:
+            return None
+        out = leases.release(hub, board_id=board_id)
+        return out.get("released")
+
     def _console_lease_holder(self, board_id: str) -> str:
         # Consoles are explicit (and their re-dial rides an explicit open): the principal
         # rule, ``mine``, unchanged by REVIEW-W5 1.
@@ -575,6 +592,16 @@ def reset_force(body: dict[str, Any]) -> tuple[bool, str]:
     if not isinstance(consent, str):
         raise UsageError("consent must be a string (type exactly: RESET <board_id>)")
     return force, consent
+
+
+def _query_flag(value: str | None, name: str) -> bool:
+    """A true/false query parameter (absent or empty: false)."""
+    low = (value or "").strip().lower()
+    if low in ("", "0", "false", "no"):
+        return False
+    if low in ("1", "true", "yes"):
+        return True
+    raise UsageError(f"{name} must be true or false, not {value!r}")
 
 
 def _bool(body: dict[str, Any], key: str, default: bool) -> bool:
@@ -1362,14 +1389,21 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         return _JSON(ok(**_fields(d.with_lease_note(bid, board_info))))
 
     @api.delete("/boards/{bid:path}")
-    def close(bid: str) -> JSONResponse:
+    def close(bid: str, release: str | None = None) -> JSONResponse:
+        # LEASE-UI (additive): ``?release=true`` releases the hub lease THIS Harness Manager
+        # holds on the board first; a failed release leaves the board open. ``released`` is
+        # the lease given back, or null when none was held here.
+        want = _query_flag(release, "release")
         job = d.gates.busy(bid)
         if job is not None:
             raise busy_error(bid, job)
         was_open = bid in d.engine.open_boards()
+        extra: dict[str, Any] = {}
+        if want:
+            extra["released"] = d.release_lease_here(bid) if was_open else None
         with d.gates.op(bid):
             d.engine.close(bid)
-        return _JSON(ok(board_id=bid, closed=was_open))
+        return _JSON(ok(board_id=bid, closed=was_open, **extra))
 
     @api.api_route("/{rest:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
     def unknown(rest: str, request: Request) -> JSONResponse:

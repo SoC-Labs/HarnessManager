@@ -133,7 +133,8 @@ def test_selecting_a_board_renders_identity_with_unchecked_as_a_warning(page_fac
         assert chip.get_attribute("data-level") == "unk", testid
         assert "Unchecked" in chip.inner_text()
     assert "not a pass" in page.locator('[data-testid="id-build-note"]').inner_text()
-    assert "Yours" in page.locator('[data-testid="lock-chip"]').inner_text()
+    # LEASE-UI: the board lock says "Open" ("Yours" is the hub lease's word now)
+    assert "Open" in page.locator('[data-testid="lock-chip"]').inner_text()
     no_missing_icons(page)
     assert page.errors == []
 

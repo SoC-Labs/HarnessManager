@@ -41,12 +41,13 @@ Test and demo knobs (not part of the Engine protocol):
   until a test sets them.
 
 **The showcase** (``DemoEngine(showcase=True, state_dir=...)``, what ``harness-manager app
---demo`` and ``ui --demo`` serve): three other boards, one of each harness, so every part of
-the app has something to show (``harness_manager.demo_showcase``): a Linux harness
+--demo`` and ``ui --demo`` serve): four other boards, one of each harness and a spare, so
+every part of the app has something to show (``harness_manager.demo_showcase``): a Linux harness
 (``BOARD_LINUX``: the card, OS slots, the SSH claim, the front panel read from the glass,
 Identify, XVC), today's bare-metal v0.11 board (``BOARD_V011``: the rebuilt panel, Identify
 unavailable, XVC with its warning, every harness-catalogue verdict, the Debug USB) and a board
-behind a hub whose lease alice holds (``BOARD_LEASED``: the queue, a request, force-release).
+behind a hub whose lease alice holds (``BOARD_LEASED``: the queue, a request, force-release),
+plus a free board on the same hub (``BOARD_SPARE``, LEASE-UI: free, then yours).
 The showcase engine also has what the classic one leaves to the real engine: ``xvc``,
 ``board_claim``, ``update`` (a signed catalogue in the demo's state dir,
 ``harness_manager.demo_catalog``) and ``kit_channel`` (the DUT build kits from that
@@ -165,7 +166,7 @@ class _Board:
     card: str | None = None          # the user microSD's store state; None = no card
     card_slot: str = "B"             # the slot the last kept design went to
     overlay_shell: str = SHELL_FIELDED   # the static the demo's overlays are keyed to
-    kind: str = ""                   # showcase: "linux" | "bare-metal" | "leased" ("": classic)
+    kind: str = ""       # showcase: "linux" | "bare-metal" | "leased" | "spare" ("": classic)
 
 
 def _eth(host: str) -> Link:
@@ -784,7 +785,7 @@ class DemoTelemetry:
 class DemoEngine:
     """Implements ``harness_manager.core.services.Engine`` over three scripted boards.
 
-    ``showcase=True``: the showcase's three boards and its offline services (the module
+    ``showcase=True``: the showcase's four boards and its offline services (the module
     docstring); ``state_dir`` is where its catalogue, kits, pins and history live (a
     temporary directory, removed by ``close_all``, when not given). ``app_update``:
     ``"staged"`` stages a pretend app update (the banner); None reads
@@ -844,6 +845,8 @@ class DemoEngine:
         self.xvc = show.DemoXvc(self, fixtures / "xvc")
         self.board_claim = ClaimService(self)
         self._hub_state = show.DemoHubState(show.me())
+        self._hub_spare = show.DemoHubState(show.me(), target=show.SPARE_TARGET,
+                                            board=show.SPARE_BOARD, free=True)   # LEASE-UI
         return show.script()
 
     # -- the Engine protocol ------------------------------------------------------------

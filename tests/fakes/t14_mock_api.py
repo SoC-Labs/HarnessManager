@@ -85,6 +85,9 @@ OPEN_POINTS: dict[str, str] = {
     "POST /boards": "candidate = a Candidate object; {board_id, info} with info null + info_error "
                     "when the first read fails (the session is open); 409 ALREADY when open",
     "GET /boards": "every board the daemon has probed or opened, open or not, plus `job`",
+    "DELETE /boards/{bid}": "?release=true (LEASE-UI) releases the lease THIS Harness Manager "
+                            "holds (lease.here) first and adds `released` (null: none held "
+                            "here); a failed release leaves the board open",
     "401": "error REFUSED (15): 'session expired: run harness-manager ui again'",
     "jobs": "while a job runs on a board, the board's other requests are 409 HELD naming it",
     "POST /deploy": "preflight first; a refusal is 409 (14/15) with error.data.{overlay, "
@@ -542,10 +545,16 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
             return _ok(board_id=cand.board_id, info=None, info_error=error_json(exc)["error"])
 
     @app.delete(f"{API}/boards/{{bid}}")
-    def close_board(bid: str) -> dict[str, Any]:
+    def close_board(bid: str, release: str | None = None) -> dict[str, Any]:
+        # LEASE-UI: ``?release=true`` releases the lease THIS Harness Manager holds first
+        # (harness-manager-daemon: ``Daemon.release_lease_here``); ``released`` is it, or null.
+        want = str(release or "").strip().lower()
+        if want not in ("", "0", "false", "no", "1", "true", "yes"):
+            raise UsageError(f"release must be true or false, not {release!r}")
         state.jobs.gate(bid)
+        extra = {"released": sim.release_here(bid)} if want in ("1", "true", "yes") else {}
         eng.close(bid)
-        return _ok()
+        return _ok(**extra)
 
     @app.get(f"{API}/boards/{{bid}}/session")
     def session_view(bid: str) -> dict[str, Any]:

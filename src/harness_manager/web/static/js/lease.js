@@ -13,6 +13,10 @@
 // - the VICTIM: a banner "<board> was force-released by <by> at <time>: <reason>" that
 //   stays until dismissed (across reloads) and is written to Activity.
 //
+// LEASE-UI adds who holds it in words (the rail's badge: Yours, Held by X, Free, Queued), a
+// Release that always asks first, and Close board asking whether to release a lease this
+// Harness Manager holds. "Yours" is `lease.here`, never `mine` (leaseWho, week.js).
+//
 // Every countdown runs to a time the daemon read from the hub's note (deadline_at, an
 // answer's at + minutes), never to a timer this page started. docs/LEASE_REQUESTS.md D1-D8
 // amend the frozen API: a keep answer is a phase of the request job (D1), leaving ends it
@@ -23,10 +27,13 @@
 import { gateReason, interlock, panelState, runAction, runJob } from "./actions.js";
 import { call, routeMissing } from "./api.js";
 import { boardName, clock, hostOf } from "./format.js";
+import { leaseSpecs } from "./hub.js";
 import { html, useLayoutEffect, useRef, useState } from "./lib.js";
 import { changed, log, onBoardEvent, S, timed } from "./store.js";
-import { epochOf, loadHub, onHubLoaded, scheduleHub, week } from "./week.js";
-import { Icon, Reason, ResultBlock, Spinner } from "./ui.js";
+import {
+  durationText, epochOf, leaseLeft, leaseWho, loadHub, onHubLoaded, scheduleHub, week,
+} from "./week.js";
+import { Chip, Icon, Reason, ResultBlock, Spinner } from "./ui.js";
 
 export const KEEP_MINUTES = [5, 15, 30, 60];
 const NOTE_MAX = 500;                   // characters; a note on the hub is at most 4 KiB
@@ -133,6 +140,8 @@ const L = {
   zeroSeen: new Set(),       // request ids whose countdown this page saw reach zero
   seenReq: {},               // bid -> {id, deadline_at}: the request as last read
   reasked: {},               // bid -> {holder, deadline_at}: D9, a new holder was asked
+  release: null,             // {bid, trigger}: LEASE-UI, the Release confirm
+  closing: null,             // {bid, trigger, doClose, busy, error}: LEASE-UI, Close asks
 };
 
 // --- the requester -------------------------------------------------------------------------------
@@ -344,12 +353,13 @@ function RequestBar({ bid }) {
     testid=${`result-${p.panel}`} />`);
   if (!active) {
     // The request is over: held, withdrawn, or refused. Its result stays until closed.
-    const mine = hub && hub.lease && hub.lease.mine;
+    const mine = leaseWho(bid).state === "here";
     return html`<div class=${`banner lease-bar ${mine ? "ok" : ""}`} role="status" data-testid="lease-request">
       <${Icon} name=${mine ? "lock" : "info"} />
       <div class="grow">
         <strong data-testid="req-title">${mine ? `${name} is yours.` : `Your request for ${name} is over.`}</strong>
         ${resultBlocks}
+        ${mine ? html`<div class="lease-actions"><${ReleaseButton} bid=${bid} /></div>` : null}
       </div>
       <button type="button" class="btn ghost sm icon-only" aria-label="Close this result" title="Close"
         data-action="lease_request_dismiss" onClick=${dismiss}><${Icon} name="x" /></button>
@@ -702,6 +712,200 @@ function ForceConfirm() {
   </div>`;
 }
 
+// --- LEASE-UI: whose lease it is, Release, and closing a board you hold ------------------------------
+//
+// "Yours" is `here` (THIS Harness Manager holds the lease token), never `mine`: every lab
+// session shares one fpgahub principal, so a lease another session or a soak took under it is
+// "held by david@mapstone-dev (another session)" (leaseWho, week.js).
+
+// "Held by alice@lab-pc-07"; the same principal elsewhere says so.
+export function heldText(who) {
+  return who.state === "elsewhere" ? `Held by ${who.holder} (another session)` : `Held by ${who.holder}`;
+}
+
+function leaseWhere(who) {
+  return `${who.target || "the board's target"} on ${who.host || "the hub"}`;
+}
+
+// The rail's badge: an icon and words (never colour alone). Only what the page already read
+// (GET /lease for an open board behind a hub): a board with no hub, or not read, has none.
+export function LeaseBadge({ bid, prefix = "rail" }) {
+  const who = leaseWho(bid);
+  if (who.state === "none" || who.state === "unread") return null;
+  let chip;
+  if (who.state === "here") {
+    const left = leaseLeft(who.lease);
+    chip = html`<${Chip} level="ok" icon="user" cls="lease-badge" testid=${`${prefix}-lease-badge`}
+      title=${`Your hub lease: ${leaseWhere(who)}, held by this Harness Manager${left !== null ? `, ${durationText(left)} left` : ""}`}>Yours<//>`;
+  } else if (who.state === "free") {
+    chip = html`<${Chip} icon="lock-open" cls="lease-badge" testid=${`${prefix}-lease-badge`}
+      title=${`Free: nobody holds ${leaseWhere(who)}`}>Free<//>`;
+  } else if (who.state === "unknown") {
+    chip = html`<${Chip} level="unk" icon="circle-help" cls="lease-badge" testid=${`${prefix}-lease-badge`}
+      title=${`The lease could not be read from ${who.host || "the hub"}: ${who.error}`}>Lease unknown<//>`;
+  } else {
+    const text = heldText(who);
+    chip = html`<${Chip} level="held" icon="lock" cls="lease-badge" testid=${`${prefix}-lease-badge`}
+      title=${`${text}: ${leaseWhere(who)}${who.state === "elsewhere"
+        ? ". Your hub name, but not this Harness Manager: another session, or a script you run" : ""}`}>
+      <span class="lease-badge-text">${text}</span><//>`;
+  }
+  const queue = who.queued && who.state !== "here"
+    ? html`<${Chip} level="accent" icon=${who.requested ? "send" : "clock"} cls="lease-badge" testid=${`${prefix}-lease-queued`}
+        title=${who.requested ? "You asked for it: your request is in the queue" : "You are queued for it"}>
+        ${who.requested ? "Requested" : "Queued"}${who.position ? ` · #${who.position}` : ""}<//>` : null;
+  return html`<div class="board-lease" data-testid=${`${prefix}-lease-row`} data-lease=${who.state}>${chip}${queue}</div>`;
+}
+
+// Release: prominent wherever a lease you hold is shown; it always asks first.
+export function ReleaseButton({ bid, compact = true }) {
+  const p = panelState(bid, "lease");
+  const running = p.running === "lease_release";
+  return html`<button type="button" class=${`btn release ${compact ? "sm" : ""}`} data-action="lease_release_open"
+    aria-haspopup="dialog" aria-busy=${running ? "true" : undefined}
+    title="Give the hub lease back so others can take the board (asks first)"
+    onClick=${(e) => { if (!running) openReleaseConfirm(bid, e.currentTarget); }}>
+    ${running ? html`<${Spinner} /> Releasing...` : html`<${Icon} name="lock-open" /> Release lease`}</button>`;
+}
+
+export function openReleaseConfirm(bid, trigger = null) {
+  L.release = { bid, trigger: trigger || document.activeElement };
+  changed();
+}
+
+function closeRelease() {
+  const t = L.release && L.release.trigger;
+  L.release = null;
+  changed();
+  if (t && t.isConnected) setTimeout(() => t.focus(), 0);
+}
+
+// Why Release cannot run now ("" when it can): a job on the board (releasing mid-deploy hands
+// a half-programmed board to the next person), or a lease action already running.
+function releaseWhy(bid) {
+  return gateReason(bid, "lease", "lease_release", {});
+}
+
+function confirmRelease() {
+  const r = L.release;
+  if (!r || releaseWhy(r.bid)) return;          // the dialog says why; nothing runs
+  closeRelease();
+  runAction(r.bid, "lease", leaseSpecs(r.bid).release);
+}
+
+// Who gets the board next when this lease goes: the first one queued who is not us.
+function nextHolder(who) {
+  const q = ((who.hub && who.hub.queue) || []).find((e) => e && !e.mine && e.holder);
+  return q ? q.holder : "";
+}
+
+function ReleaseConfirm() {
+  const ref = useRef(null);
+  useDialogKeys(ref, closeRelease);
+  const bid = L.release.bid;
+  const who = leaseWho(bid);
+  const target = who.target || leaseBoardName(bid);
+  const next = nextHolder(who);
+  const why = releaseWhy(bid);
+  return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) closeRelease(); }}>
+    <div class="modal small" role="alertdialog" aria-modal="true" aria-labelledby="release-title"
+      aria-describedby="release-what" ref=${ref} data-testid="release-confirm" data-board=${bid}>
+      <div class="modal-head"><${Icon} name="lock-open" /><h2 class="card-title" id="release-title"
+        data-testid="release-title">Release ${target}?</h2></div>
+      <div class="modal-pad">
+        <p id="release-what" data-testid="release-what">Others can take it${next
+          ? html`: <strong>${next}</strong> is next in the queue and gets it` : null}; background checks pause.</p>
+        <p class="secondary small">${leaseBoardName(bid)} stays open here. Once someone else holds the lease,
+          this page reads the board only when you click, and nothing you run should drive it until the lease
+          is yours again (Acquire lease, or Request board).</p>
+        ${why ? html`<${Reason} level="warn" icon="circle-slash" testid="release-why" text=${`Not now: ${why}.`} />` : null}
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" data-action="release_cancel" onClick=${closeRelease} data-autofocus>Cancel</button>
+        <button type="button" class="btn primary" data-action="release_confirm" onClick=${confirmRelease}
+          aria-disabled=${why ? "true" : undefined} title=${why || undefined}>
+          <${Icon} name="lock-open" /> Release</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Close board: a board whose lease THIS Harness Manager holds asks whether to release it too
+// (DELETE /boards/{bid}?release=true does both, the release first). Any other board closes at
+// once. `doClose({release})` is the header's close; it resolves to the timed() result.
+export function requestClose(bid, trigger, doClose) {
+  if (leaseWho(bid).state !== "here") return doClose({ release: false });
+  L.closing = { bid, trigger: trigger || document.activeElement, doClose, busy: "", error: null };
+  changed();
+  return null;
+}
+
+function endClosing() {
+  const t = L.closing && L.closing.trigger;
+  L.closing = null;
+  changed();
+  if (t && t.isConnected) setTimeout(() => t.focus(), 0);
+}
+
+async function closeWith(release) {
+  const c = L.closing;
+  if (!c || c.busy) return;
+  c.busy = release ? "release" : "keep";
+  c.error = null;
+  changed();
+  const r = await c.doClose({ release });
+  if (L.closing !== c) return;
+  if (r && r.error) {
+    c.busy = "";
+    c.error = r;              // the board stays open: say why, here, and let them choose again
+    changed();
+    return;
+  }
+  L.closing = null;           // the board closed: its header (and the trigger) are gone
+  changed();
+}
+
+function CloseConfirm() {
+  const ref = useRef(null);
+  const c = L.closing;
+  useDialogKeys(ref, () => { if (!L.closing || !L.closing.busy) endClosing(); });
+  const bid = c.bid;
+  const who = leaseWho(bid);
+  const target = who.target || leaseBoardName(bid);
+  const at = epochOf(who.lease && who.lease.expires_at);
+  const busy = c.busy;
+  const err = c.error && c.error.error;
+  const keepText = `it stays yours${at ? ` until ${clock(at)}` : ""}, but nothing renews it while the board `
+    + "is closed. Open the board again to keep renewing it.";
+  return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget && !busy) endClosing(); }}>
+    <div class="modal small" role="alertdialog" aria-modal="true" aria-labelledby="close-lease-title"
+      aria-describedby="close-lease-what" ref=${ref} data-testid="close-confirm" data-board=${bid}>
+      <div class="modal-head"><${Icon} name="lock" /><h2 class="card-title" id="close-lease-title"
+        data-testid="close-title">Also release the lease on ${target}?</h2></div>
+      <div class="modal-pad">
+        <p id="close-lease-what">You are closing <strong>${leaseBoardName(bid)}</strong>, and this Harness Manager
+          holds its hub lease on ${who.host || "the hub"}.</p>
+        <ul class="close-choices">
+          <li><strong>Release and close:</strong> others can take the board now.</li>
+          <li data-testid="close-keep-what"><strong>Keep the lease:</strong> ${keepText}</li>
+        </ul>
+        ${err ? html`<${Reason} level="err" testid="close-error"
+          text=${`${c.error.line}: ${err.errName}: ${err.message}. The board is still open.`} />` : null}
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-action="close_cancel" disabled=${!!busy}
+          onClick=${endClosing} data-autofocus>Cancel</button>
+        <button type="button" class="btn" data-action="close_keep" disabled=${!!busy}
+          aria-busy=${busy === "keep" ? "true" : undefined} onClick=${() => closeWith(false)}>
+          ${busy === "keep" ? html`<${Spinner} /> Closing...` : "Keep the lease"}</button>
+        <button type="button" class="btn primary" data-action="close_release" disabled=${!!busy}
+          aria-busy=${busy === "release" ? "true" : undefined} onClick=${() => closeWith(true)}>
+          ${busy === "release" ? html`<${Spinner} /> Releasing...` : html`<${Icon} name="lock-open" /> Release and close`}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 // --- what the workspace renders ------------------------------------------------------------------------
 
 function openBoards() {
@@ -719,7 +923,9 @@ export function LeaseBanners({ bid }) {
     ${order.map((id) => html`<${HolderPrompts} key=${`h-${id}`} bid=${id} />`)}
     ${bid && hubOf(bid) ? html`<${RequestBar} bid=${bid} />` : null}
     ${L.form ? html`<${RequestForm} key=${`f-${L.form.bid}`} />` : null}
-    ${L.confirm ? html`<${ForceConfirm} key=${`c-${L.confirm.bid}`} />` : null}`;
+    ${L.confirm ? html`<${ForceConfirm} key=${`c-${L.confirm.bid}`} />` : null}
+    ${L.release ? html`<${ReleaseConfirm} key=${`r-${L.release.bid}`} />` : null}
+    ${L.closing ? html`<${CloseConfirm} key=${`x-${L.closing.bid}`} />` : null}`;
 }
 
 // --- events, reads and the countdown ticker --------------------------------------------------------
@@ -802,5 +1008,6 @@ setInterval(() => {
 // For tests and the devtools console.
 window.__harness_managerLease = () => JSON.parse(JSON.stringify({
   form: L.form && { bid: L.form.bid }, confirm: L.confirm && { bid: L.confirm.bid },
+  release: L.release && { bid: L.release.bid }, closing: L.closing && { bid: L.closing.bid },
   answers: L.answers, dismissedTaken: L.dismissedTaken,
 }));

@@ -19,7 +19,7 @@ import { ProgramSection } from "./sections/program.js";
 import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
 import { HubFact } from "./hub.js";
-import { LeaseBanners } from "./lease.js";
+import { LeaseBadge, LeaseBanners, requestClose } from "./lease.js";
 import {
   boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, S,
   sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
@@ -75,10 +75,12 @@ function BoardItem({ bid }) {
         <span class="board-name" data-testid="rail-name"
           title=${named.name ? `${bid} · ${nameSourceText(named)}` : bid}>${boardName(named, bid)}</span>
         ${(b && b.job) || (row.job && !(b && b.readOnOpen)) ? html`<span class="i-muted" title="a job is running on this board"><${Spinner} /></span>` : null}
-        ${mine ? html`<${Chip} level="accent" icon="user" cls="lock-chip">Yours<//>`
+        ${mine ? html`<${Chip} level="accent" icon="plug-zap" cls="lock-chip" testid="rail-open"
+            title="Open in this Harness Manager: its board lock is this daemon's (the hub lease is the line below)">Open<//>`
           : held ? html`<${Chip} level="warn" icon="lock" cls="lock-chip" title=${`held by ${holderText(row.holder)}`}>
               ${row.holder.user || "held"}<//>` : null}
       </div>
+      ${mine ? html`<${LeaseBadge} bid=${bid} />` : null}
       <div class="board-row2">
         <span class="pack">${(cand.pack || String(bid).split("@")[0] || "").toUpperCase()}</span>
         ${design ? html` · ${design}` : html` · <span class="muted">design not read</span>`}
@@ -198,6 +200,27 @@ function BackgroundFact({ bid }) {
     ${w.text}<//><//>`;
 }
 
+// DELETE /boards/{bid}; `release` (LEASE-UI) releases this Harness Manager's hub lease on it
+// first (?release=true). Resolves to the timed() result; the board stays open on an error.
+async function closeBoardNow(bid, { release = false } = {}) {
+  const r = await timed(`close ${bid}${release ? " (and release its lease)" : ""}`,
+    () => call("closeBoard", { bid }, undefined, release ? { release: "true" } : null));
+  log(r.error ? "error" : "info", "session", r.error ? `${r.line}  ${r.error.message}` : r.line, bid);
+  if (!r.error) {
+    if (release) {
+      const rel = r.data.data.released;
+      log("info", "lease", rel ? `lease on ${rel.target} released: other hub users may take the board`
+        : "no hub lease was held here: nothing to release", bid);
+    }
+    openedOrClosedHere(bid, false);
+    S.boards[bid].holder = null;
+    closeBoardConsoles(bid);
+    delete S.board[bid];
+  }
+  changed();
+  return r;
+}
+
 function BoardHeader({ bid }) {
   const row = S.boards[bid] || {};
   const b = boardState(bid);
@@ -206,17 +229,8 @@ function BoardHeader({ bid }) {
   const ident = (info && info.identity) || cand.identity || {};
   const failed = b.infoError && b.infoError.errName !== "ABSENT";
   const health = failed ? { level: "err", text: "Not answering", detail: b.infoError.message } : healthOf(info);
-  const close = async () => {
-    const r = await timed(`close ${bid}`, () => call("closeBoard", { bid }));
-    log(r.error ? "error" : "info", "session", r.error ? `${r.line}  ${r.error.message}` : r.line, bid);
-    if (!r.error) {
-      openedOrClosedHere(bid, false);
-      S.boards[bid].holder = null;
-      closeBoardConsoles(bid);
-      delete S.board[bid];
-    }
-    changed();
-  };
+  // LEASE-UI: a board whose hub lease THIS Harness Manager holds asks first (lease.js).
+  const close = (e) => requestClose(bid, e.currentTarget, (o) => closeBoardNow(bid, o));
   return html`<header class="board-header" data-testid="board-header">
     <div class="header-row1">
       <div class="header-titles">
@@ -231,10 +245,10 @@ function BoardHeader({ bid }) {
         ${row.open ? html`<button type="button" class="btn ghost sm icon-only" data-action="refresh-board"
             aria-label="Read the board again" title="Read the board again" onClick=${() => refreshInfo(bid)}
             aria-busy=${b.infoLoading ? "true" : undefined}>${b.infoLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}</button>` : null}
-        ${row.open ? html`<${Chip} level="accent" icon="user" testid="lock-chip"
-            title=${row.holder ? `locked to ${holderText(row.holder)}` : "locked to this daemon"}>Yours<//>
-          <button type="button" class="btn sm" onClick=${close}
-            title="Release the board's lock so other tools can use it">Close board</button>`
+        ${row.open ? html`<${Chip} level="accent" icon="plug-zap" testid="lock-chip"
+            title=${`Open here: the board lock is ${row.holder ? holderText(row.holder) : "this daemon"}'s. The hub lease is its own line below.`}>Open<//>
+          <button type="button" class="btn sm" data-action="close-board" onClick=${close}
+            title="Release the board's lock so other tools can use it (asks about the hub lease when it is yours)">Close board</button>`
         : null}
       </div>
     </div>

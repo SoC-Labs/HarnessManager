@@ -347,15 +347,46 @@ claim, slot and card changes, and harness installs. Programming, reset and debug
 refused, but the lab rule is the same: the Overview's "Needs attention" says "This client
 must not drive the board until the lease is yours" when someone else holds it.
 
-**In the app:** the header's **Hub** line shows the tunnel and the lease.
+**In the app:** each open board behind a hub has a lease badge in the board list, and the
+header's **Hub** line shows the tunnel and the lease. The Overview's Board tile repeats the
+badge on its **Hub lease** line.
 
-![A hub board: tunnel up, lease yours for 27 minutes, with Release](review/2026-09-24/hub-lease-light.png)
+![The board list: mps3-02 held by alice with your request in her queue, mps3-03 free](review/2026-09-28/lease-held-and-free-light.png)
 
-| The lease chip says | You can |
-|---|---|
-| no lease | **Acquire lease** (it may queue; **Cancel** leaves the queue) |
-| lease yours · 27 min | **Release**. The service renews it while the board is open here |
-| leased to alice@lab-pc-07 | **Request board** |
+| The board list says | The header's lease chip | It means | You can |
+|---|---|---|---|
+| **Yours** | lease yours · 27 min | this Harness Manager holds the lease | **Release lease** (asks first). The service renews it while the board is open here |
+| **Free** | no lease | nobody holds it | **Acquire lease** (it may queue; **Cancel** leaves the queue) |
+| **Held by alice@lab-pc-07** | leased to alice@lab-pc-07 | someone else holds it | **Request board** |
+| **Held by david@mapstone-dev (another session)** | leased to david@mapstone-dev (another session) | your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner) | nothing here: use the board there, or release it there |
+| **Requested · #1** or **Queued** (beside Held by) | requested · position 1 | you are waiting for it | **Leave queue** (the bar above the header) |
+
+"Yours" means this Harness Manager holds the lease's token, not just your name: every lab
+session shares one hub principal (david@mapstone-dev), so a lease another session took is
+named as such, and background checks on the board stay paused while it holds it. The
+board lock's chip says **Open** (the board is open here); the lease is its own badge. A
+board with no hub has no lease badge.
+
+![mps3-03 is yours: Release lease in the header and on the Board tile](review/2026-09-28/lease-yours-light.png)
+
+**Release lease** always asks first: "Release mps3_03_pl? Others can take it; background
+checks pause." It names who is next in the queue, and says why when a job on the board
+stops it (releasing mid-deploy hands a half-programmed board to the next person).
+Force-release is separate, red, and only for someone else's lease ([Force-release](#force-release)).
+
+**Closing a board you hold.** **Close board** on a board whose lease this Harness Manager
+holds asks "Also release the lease on mps3_03_pl?":
+
+- **Release and close:** others can take the board now.
+- **Keep the lease:** it stays yours until it expires, but nothing renews it while the
+  board is closed. Open the board again to keep renewing it.
+- **Cancel:** the board stays open.
+
+Any other board (no hub, a free lease, someone else's) closes without asking. If the
+release fails (the hub does not answer), the board stays open and the dialog says why.
+Over the API, `DELETE /boards/{bid}?release=true` does both.
+
+![Close board asks whether to release the lease too](review/2026-09-28/lease-close-confirm-light.png)
 
 **On the command line.** `TARGET` is the board's address (`192.168.10.101`); its
 `boards.toml` hub table names the hub.

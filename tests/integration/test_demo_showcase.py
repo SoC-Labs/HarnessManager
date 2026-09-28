@@ -30,7 +30,7 @@ from harness_manager import demo_catalog as cat
 from harness_manager.core.errors import ExitCode, HarnessError
 from harness_manager.daemon.app import create_app
 from harness_manager.demo import DemoEngine
-from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_V011
+from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_SPARE, BOARD_V011
 from tests.fakes.kit_fakes import FIXTURE
 
 TOKEN = "demo-all"
@@ -150,11 +150,14 @@ class Demo:
 
 
 def test_three_showcase_boards_each_a_different_harness(showcase):
-    assert list(showcase.cands) == [BOARD_LINUX, BOARD_V011, BOARD_LEASED]
+    # ... and LEASE-UI's spare (mps3-03): a second board behind the hub, its lease free
+    assert list(showcase.cands) == [BOARD_LINUX, BOARD_V011, BOARD_LEASED, BOARD_SPARE]
     impl = {bid: showcase.open(bid)["identity"]["harness_impl"] for bid in showcase.cands}
-    assert impl == {BOARD_LINUX: "linux", BOARD_V011: "bare-metal", BOARD_LEASED: "bare-metal"}
+    assert impl == {BOARD_LINUX: "linux", BOARD_V011: "bare-metal", BOARD_LEASED: "bare-metal",
+                    BOARD_SPARE: "bare-metal"}
     names = {bid: c["name"] for bid, c in showcase.cands.items()}
-    assert names == {BOARD_LINUX: "mps3-lx", BOARD_V011: "mps3-01", BOARD_LEASED: "mps3-02"}
+    assert names == {BOARD_LINUX: "mps3-lx", BOARD_V011: "mps3-01", BOARD_LEASED: "mps3-02",
+                     BOARD_SPARE: "mps3-03"}
 
 
 def test_the_linux_board_shows_card_slots_claim_panel_identify_and_xvc(showcase):
@@ -219,6 +222,55 @@ def test_the_leased_board_shows_alice_the_queue_your_request_and_force(showcase)
     showcase.job(f"{B}/lease/force", {"confirm": True, "confirm_board": "mps3-02"})
     after = showcase.get(f"{B}/lease")
     assert after["lease"]["mine"] and [q["holder"] for q in after["queue"]] == ["bob@lab-pc-03"]
+
+
+# --- LEASE-UI: the spare board (a free lease), and DELETE /boards/{bid}?release=true ---------------
+
+
+def _spare_held_here(showcase: Demo) -> str:
+    showcase.open(BOARD_SPARE)
+    B = showcase.b(BOARD_SPARE)
+    view = showcase.get(f"{B}/lease")
+    assert view["hub"] and view["lease"] is None and view["queue"] == []      # free
+    showcase.job(f"{B}/lease")                                                 # Acquire
+    lease = showcase.get(f"{B}/lease")["lease"]
+    assert lease["here"] and lease["mine"] and lease["target"] == "mps3_03_pl"
+    return B
+
+
+def test_close_with_release_gives_the_lease_back_before_closing(showcase):
+    B = _spare_held_here(showcase)
+    out = showcase.get(f"{B}?release=true", method="DELETE")
+    assert out["closed"] is True and out["released"]["target"] == "mps3_03_pl"
+    assert BOARD_SPARE not in showcase.engine.open_boards()
+    showcase.open(BOARD_SPARE)
+    assert showcase.get(f"{B}/lease")["lease"] is None                         # free again
+
+
+def test_negative_twin_a_plain_close_keeps_the_lease(showcase):
+    B = _spare_held_here(showcase)
+    out = showcase.get(B, method="DELETE")
+    assert out["closed"] is True and "released" not in out                     # as before
+    showcase.open(BOARD_SPARE)
+    lease = showcase.get(f"{B}/lease")["lease"]
+    assert lease is not None and lease["here"]                                 # still ours
+
+
+def test_close_with_release_leaves_someone_elses_lease_alone(showcase):
+    showcase.open(BOARD_LEASED)
+    B = showcase.b(BOARD_LEASED)
+    out = showcase.get(f"{B}?release=true", method="DELETE")
+    assert out["closed"] is True and out["released"] is None                   # nothing held here
+    showcase.open(BOARD_LEASED)
+    assert showcase.get(f"{B}/lease")["lease"]["holder"] == "alice@lab-pc-07"
+
+
+def test_close_release_must_be_true_or_false_and_a_bad_one_closes_nothing(showcase):
+    B = _spare_held_here(showcase)
+    r = showcase.get(f"{B}?release=maybe", method="DELETE", status=400)
+    assert r["error"]["name"] == "USAGE"
+    assert BOARD_SPARE in showcase.engine.open_boards()
+    assert showcase.get(f"{B}/lease")["lease"]["here"]
 
 
 def test_the_leased_boards_mcc_is_reached_on_the_hub_never_a_tty_00_share(showcase):

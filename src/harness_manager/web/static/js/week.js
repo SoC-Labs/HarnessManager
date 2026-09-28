@@ -137,6 +137,8 @@ export async function loadHub(bid) {
     // and taken (the last force release of my lease); an older daemon has none of them.
     const d = lease || {};
     w.hub = { host: d.hub || (tunnel && tunnel.host) || "", lease: lease ? d.lease : null, tunnel,
+      // LEASE-UI: a lease read that failed is not a free lease (REVIEW-W5 2: not known is not free)
+      leaseError: lr.error ? `${lr.error.errName}: ${lr.error.message}` : "",
       queue: Array.isArray(d.queue) ? d.queue : [], request: d.request || null,
       incoming: Array.isArray(d.incoming) ? d.incoming : [], taken: d.taken || null,
       board: d.board || "",                          // D4: the physical board (mps3_01)
@@ -155,6 +157,37 @@ export async function loadHub(bid) {
 // lease.js follows every read of the lease (the victim banner, the countdowns).
 const hubHooks = [];
 export function onHubLoaded(fn) { hubHooks.push(fn); }
+
+// LEASE-UI: who holds this board's hub lease, as every lease badge says it (the rail, the
+// header, the Board tile, the Close dialog). Only what GET /lease last said: nothing here
+// reads the hub or the board.
+//   here       THIS Harness Manager holds it (it has the lease token: `lease.here`);
+//   elsewhere  the same hub principal, another session or tool (`mine` without `here`):
+//              every lab session shares one fpgahub principal, so `mine` is not "yours";
+//   other      someone else; free: nobody; unknown: the read failed (not known is not free);
+//   none       no hub; unread: not read yet.
+// A daemon from before `here` (REVIEW-W5) sends only `mine`: that reads as `here`, as then.
+export function leaseWho(bid) {
+  const b = S.board[bid];
+  const w = b && b.week;
+  if (!w || (!w.hubLoaded && !w.hubUnsupported)) return { state: "unread" };
+  const hub = w.hub;
+  if (!hub) return { state: "none" };
+  const lease = hub.lease || null;
+  const req = hub.request || null;
+  const kind = b.job && b.job.kind;
+  const base = {
+    hub, lease, host: hub.host || "", target: (lease && lease.target) || "",
+    requested: !!req || kind === "lease_request", position: (req && req.position) || null,
+    queued: !!req || !!w.leaseQueued || kind === "lease" || kind === "lease_request",
+  };
+  if (!lease && hub.leaseError) return { ...base, state: "unknown", holder: "", error: hub.leaseError };
+  if (!lease) return { ...base, state: "free", holder: "" };
+  const here = lease.here === undefined ? !!lease.mine : !!lease.here;
+  if (here) return { ...base, state: "here", holder: lease.holder || "", queued: false, requested: false };
+  if (lease.mine) return { ...base, state: "elsewhere", holder: lease.holder || "your hub name" };
+  return { ...base, state: "other", holder: lease.holder || "someone else" };
+}
 
 // expires_at: fpgahub's ISO 8601 ("2026-09-25T12:00:00+00:00"), or epoch seconds.
 export function epochOf(v) {

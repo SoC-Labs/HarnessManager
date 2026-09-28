@@ -9,7 +9,7 @@ import { capState, valueText } from "../format.js";
 import { existingSession } from "../consoles.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, cardJobBusy, changed, hasCardStore, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection } from "../store.js";
-import { consoleRows, durationText, leaseLeft, openPty, week } from "../week.js";
+import { consoleRows, durationText, leaseLeft, leaseWho, openPty, week } from "../week.js";
 import { ScreenCommand } from "./consoles.js";
 import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./details.js";
 import { debugLive, debugSpecs } from "./debug.js";
@@ -19,7 +19,7 @@ import {
   ActionRow, ArmBox, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner,
 } from "../ui.js";
 import { leaseSpecs } from "../hub.js";
-import { openRequestForm, requestActive } from "../lease.js";
+import { LeaseBadge, openRequestForm, ReleaseButton, requestActive } from "../lease.js";
 import { PanelCard, PanelTileRow } from "./panel.js";          // P3 PANEL-UI
 import { loadXvc, viewState, xvc } from "./xvc.js";             // UPDATE-UI: the tile's XVC line
 
@@ -82,10 +82,18 @@ export function attentionItems(bid) {
     const lease = hub.lease;
     const left = leaseLeft(lease);
     const specs = leaseSpecs(bid);
-    if (!lease) {
+    const who = leaseWho(bid);
+    if (who.state === "unknown") {
+      out.push({ key: "lease", level: "unk", title: `The lease on ${hub.host} could not be read.`,
+        text: `${sentence(who.error)} It may be held: not known is not free. The page reads it again every 30 s.` });
+    } else if (!lease) {
       out.push({ key: "lease", level: "warn", title: `Not leased on ${hub.host}.`,
         text: "Another hub user can take this board at any time. Fix: acquire the lease.",
         action: specs.acquire });
+    } else if (who.state === "elsewhere") {
+      // LEASE-UI: your hub name, but not this Harness Manager (every lab session shares it).
+      out.push({ key: "lease", level: "warn", title: `Leased to ${lease.holder} in another session.`,
+        text: `Your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner)${left !== null ? `; it ends in ${durationText(left)}` : ""}. Background checks are paused. Use the board there, or release it there first.` });
     } else if (!lease.mine) {
       const asked = requestActive(bid);
       out.push({ key: "lease", level: "err", title: `Leased to ${lease.holder || "someone else"} on ${hub.host}.`,
@@ -294,6 +302,15 @@ function CardRow({ b }) {
     title=${l.title || ""}>${l.text}</span>`;
 }
 
+// LEASE-UI: the hub lease in one line, the same words as the rail, and Release when it is
+// yours (it asks first). Nothing for a board with no hub.
+function LeaseTileRow({ bid }) {
+  const who = leaseWho(bid);
+  if (who.state === "none" || who.state === "unread") return null;
+  return html`<span class="k">Hub lease</span><span class="v lease-tile" data-testid="tile-lease" data-lease=${who.state}>
+    <${LeaseBadge} bid=${bid} prefix="tile" />${who.state === "here" ? html`<${ReleaseButton} bid=${bid} />` : null}</span>`;
+}
+
 function BoardTile({ bid }) {
   const b = boardState(bid);
   const readings = b.telemetry;
@@ -309,6 +326,7 @@ function BoardTile({ bid }) {
       <${CardRow} b=${b} />
       <${PanelTileRow} bid=${bid} />
       <${ClaimTileRow} bid=${bid} />
+      <${LeaseTileRow} bid=${bid} />
     </div>
     <div class="tile-actions">
       <${ActionRow} bid=${bid} panel="reset_dut" spec=${resetDutSpec(bid)} icon="rotate-ccw" compact=${true}

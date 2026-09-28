@@ -289,15 +289,21 @@ class WeekPlanSim:
     def behind_hub(self, bid: str, *, host: str = "mapstone-dev", target: str = "mps3_01_pl",
                    tunnel: str = "up", lease: str = "mine", expires_in_s: float = 1800,
                    holder: str = "", detail: str = "") -> None:
-        """Put a board behind a hub. ``lease``: mine | other | none."""
+        """Put a board behind a hub. ``lease``: mine | elsewhere | other | none.
+
+        ``mine`` is held by THIS Harness Manager (``mine`` and ``here``, REVIEW-W5);
+        ``elsewhere`` by the same hub principal in another session or tool (``mine`` without
+        ``here``: every lab session shares one principal); ``other`` by someone else."""
         me = f"{getpass.getuser()}@harness-manager"
         record = None
-        if lease == "mine":
+        if lease in ("mine", "elsewhere"):
             record = {"target": target, "holder": me, "user": getpass.getuser(),
-                      "expires_at": _iso(time.time() + expires_in_s), "mine": True}
+                      "expires_at": _iso(time.time() + expires_in_s), "mine": True,
+                      "here": lease == "mine"}
         elif lease == "other":
             record = {"target": target, "holder": holder or "alice@lab-pc-07", "user": "alice",
-                      "expires_at": _iso(time.time() + expires_in_s), "mine": False}
+                      "expires_at": _iso(time.time() + expires_in_s), "mine": False,
+                      "here": False}
         with self._lock:
             self.hubs[bid] = {"host": host, "target": target, "tunnel": tunnel,
                               "detail": detail, "lease": record, "restarts": 0}
@@ -325,6 +331,20 @@ class WeekPlanSim:
                 hub["restarts"] += 1
             hub["tunnel"], hub["detail"] = state, detail
         self.publish("tunnel.state", bid, self.tunnel_view(bid) or {})
+
+    def release_here(self, bid: str) -> dict[str, Any] | None:
+        """LEASE-UI: ``DELETE /boards/{bid}?release=true`` releases the lease THIS Harness
+        Manager holds (``here``) before the close; None when none is held here."""
+        with self._lock:
+            hub = self.hubs.get(bid)
+            lease = hub and hub["lease"]
+            if not lease or not lease.get("here", lease.get("mine")):
+                return None
+            released = {k: lease[k] for k in ("target", "holder", "expires_at")}
+            hub["lease"] = None
+        self.publish("lease.state", bid, {"target": released["target"], "state": "released",
+                                          "holder": released["holder"], "expires_at": ""})
+        return {**released, "mine": True}
 
     def release_other(self, bid: str) -> None:
         """The other holder releases: a queued lease job then gets it."""
@@ -677,7 +697,7 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
                 finally:
                     sim._lease_cancel.pop(bid, None)
             hub["lease"] = {"target": hub["target"], "holder": me, "user": getpass.getuser(),
-                            "expires_at": _iso(time.time() + ttl), "mine": True}
+                            "expires_at": _iso(time.time() + ttl), "mine": True, "here": True}
             progress("held", 1, 1)
             sim.publish("lease.state", bid, {"target": hub["target"], "state": "held",
                                              "holder": me, "expires_at": hub["lease"]["expires_at"]})
@@ -695,7 +715,8 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         if pending is not None:
             pending.set()
             return ok(cancelled=True)
-        if not hub["lease"] or not hub["lease"]["mine"]:
+        # Only the session that holds the token can release (``here``, REVIEW-W5).
+        if not hub["lease"] or not hub["lease"].get("here", hub["lease"]["mine"]):
             who = f"held by {hub['lease']['holder']}" if hub["lease"] else "not leased"
             raise AbsentError(f"this Harness Manager holds no lease on {hub['target']} ({who})",
                               hint="a lease taken outside Harness Manager is released where it "

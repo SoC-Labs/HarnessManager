@@ -333,7 +333,7 @@ class LeaseRequestSim:
             if req is not None:
                 queue = [(p, False) for p in self.ahead.get(bid, [])] + [(me(), True)]
             lease = hub.get("lease")
-            if lease and lease.get("mine"):
+            if lease and lease.get("here", lease.get("mine")):      # incoming: the token's
                 queue = [(n["by"], False) for n in self.inbox.get(bid, [])]
                 answers = self.answers.get(bid, {})
                 out["incoming"] = [{**n, "answer": dict(answers[n["id"]])      # D5
@@ -367,7 +367,8 @@ class LeaseRequestSim:
                 return {}
             req = self.outgoing.get(bid)
             kind, why = holder_kind(req.get("answer") if req else None, asked=req is not None,
-                                    here=bool(lease.get("mine")), notes_ok=not self.notes_reason)
+                                    here=bool(lease.get("here", lease.get("mine"))),
+                                    mine=bool(lease.get("mine")), notes_ok=not self.notes_reason)
             return {"holder_kind": kind, "holder_kind_reason": why}
 
     def board_of(self, bid: str) -> str:
@@ -384,7 +385,7 @@ class LeaseRequestSim:
             self.ahead.pop(bid, None)
             hub["lease"] = {"target": hub["target"], "holder": me(), "user": getpass.getuser(),
                             "expires_at": iso(time.time() + (req or {}).get("ttl", 3600)),
-                            "mine": True}
+                            "mine": True, "here": True}
             if req is not None:
                 req["held"].set()
         self.publish("lease.state", bid, {"target": hub["target"], "state": "held",
