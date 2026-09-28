@@ -2,8 +2,9 @@
 
 The runbooks (``docs/HIL_LINUX.md``, ``docs/HIL_B0.md``) are parsed here: every check id with
 an **Expect** (a table row, for HIL_B0) must have a plan entry, every plan entry must name a
-check the runbook has, and the Linux runbook's "Netboot mode" skip list must be exactly what
-the netboot plan skips. Each rule has its negative twin (a doctored runbook fails it).
+check the runbook has, and the Linux runbook's "Netboot mode" and "Card-less mode" skip lists
+must be exactly what the netboot and nocard plans skip. Each rule has its negative twin (a
+doctored runbook fails it).
 """
 
 from __future__ import annotations
@@ -56,11 +57,12 @@ def b0_checks(text: str) -> tuple[dict[str, bool], set[str]]:
     return ids, sections
 
 
-def netboot_skips(text: str) -> set[str]:
-    """The check ids the Netboot preface's item 1 skips (``§G``: every G check; ``Z2's `card
-    status``` : the Z2 follow-on that runs ``card status``)."""
-    block = text.split("## Netboot mode", 1)[1].split("\n2. ", 1)[0]
+def preface_skips(text: str, heading: str) -> set[str]:
+    """The check ids a mode preface's item 1 skips: its bullet lines (``§G``: every G check;
+    ``Z2's `card status``` : the Z2 follow-on that runs ``card status``)."""
+    block = text.split(f"## {heading}", 1)[1].split("\n2. ", 1)[0]
     block = block.split("Never run", 1)[0]
+    block = "\n".join(line for line in block.splitlines() if line.lstrip().startswith("- "))
     out: set[str] = set()
     plan = P.build("linux")
     for m in re.finditer(r"§?(?P<id>[A-Z]\d?)(?P<part>'s `card status`)?", block):
@@ -75,6 +77,14 @@ def netboot_skips(text: str) -> set[str]:
         else:
             out.add(cid)
     return out
+
+
+def netboot_skips(text: str) -> set[str]:
+    return preface_skips(text, "Netboot mode")
+
+
+def cardless_skips(text: str) -> set[str]:
+    return preface_skips(text, "Card-less mode")
 
 
 def base(cid: str) -> str:
@@ -99,7 +109,7 @@ def drift(runbook_ids: dict[str, bool], sections: set[str], plan: P.Plan) -> lis
 # --- the runbooks and the plans -----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["linux", "linux-netboot"])
+@pytest.mark.parametrize("name", ["linux", "linux-netboot", "linux-nocard"])
 def test_every_linux_runbook_check_has_a_plan_entry_and_vice_versa(name):
     ids, sections = linux_checks(LINUX_MD.read_text(encoding="utf-8"))
     assert {"A1", "B3", "C1", "D4", "E1", "G2", "Z2", "0.3"} <= set(ids)   # the parser works
@@ -142,6 +152,78 @@ def test_the_netboot_plan_skips_exactly_what_the_netboot_preface_lists():
     plan = P.build("linux-netboot")
     card_skipped = {c.id for c in plan.checks() if c.skip and "D4" not in c.id}
     assert card_skipped == skips
+
+
+def test_the_nocard_plan_skips_exactly_what_the_cardless_preface_lists():
+    skips = cardless_skips(LINUX_MD.read_text(encoding="utf-8"))
+    assert {"C2", "D2", "D3", "D4", "D5", "F6", "G1", "G2", "G3", "G4", "Z1", "Z2c"} == skips
+    plan = P.build("linux-nocard")
+    assert {c.id for c in plan.checks() if c.skip} == skips
+    assert all(c.skip.startswith("no user microSD") for c in plan.checks() if c.skip)
+
+
+def test_twin_a_skip_added_to_the_cardless_preface_fails_the_comparison():
+    text = LINUX_MD.read_text(encoding="utf-8").replace(
+        "   - §F6 and §G (the config SD, then an MCC REBOOT);",
+        "   - §F6 and §G (the config SD, then an MCC REBOOT);\n   - §E1;")
+    assert "E1" in cardless_skips(text)
+    assert {c.id for c in P.build("linux-nocard").checks() if c.skip} != cardless_skips(text)
+
+
+def test_twin_the_netboot_plan_does_not_match_the_cardless_preface():
+    skips = cardless_skips(LINUX_MD.read_text(encoding="utf-8"))
+    netboot = {c.id for c in P.build("linux-netboot").checks() if c.skip}
+    assert netboot != skips and skips - netboot == {"F6"}
+
+
+def test_the_nocard_c1_expects_the_no_card_answer():
+    """harnessd says card:false; HM's CLI says so as exit 12 with the slot service's reason."""
+    c1 = next(c for c in P.build("linux-nocard").checks() if c.id == "C1")
+    got = {(e.path, e.op, e.value) for e in c1.expects}
+    assert got == {("error.name", "eq", "UNAVAILABLE"),
+                   ("error.reason", "prefix", "no user microSD card in the slot")}
+    assert c1.tier == P.READ and c1.argv == ("slot", "status", "{B}") and c1.exit_ok == (12,)
+    # twin: the netboot plan's C1 wants the two zeroed slots, which a card-less board lacks
+    nb = next(c for c in P.build("linux-netboot").checks() if c.id == "C1")
+    assert {e.path for e in nb.expects} >= {"slots.A.state", "slots.B.state"}
+
+
+def test_the_nocard_plan_resets_nothing_and_keeps_the_swaps_and_the_mcc_read():
+    plan = P.build("linux-nocard")
+    runs = {c.id: c for c in plan.checks() if not c.skip and c.tier != P.MANUAL}
+    assert {i for i, c in runs.items() if c.tier == P.SAFE} == {"D4a", "E1", "Z2"}
+    assert [c.argv for c in runs.values() if c.tier == P.SAFE] == [
+        ("mcc", "{B}", "temp"), ("program", "{B}", "nanosoc_ila", "--yes"), ("restore", "{B}")]
+    reboots = {c.id for c in plan.checks()
+               if c.tier == P.MANUAL and "REBOOT" in (c.why + c.title).upper()}
+    assert reboots == {"D4", "F6", "G3"}
+    assert all(next(c for c in plan.checks() if c.id == i).skip for i in reboots)
+
+
+def test_section_f_is_never_unattended_in_any_plan():
+    """§F runs raw ssh/fpgahub on the hub: manual in every Linux plan, no argv to send, and
+    F3 says it stages the board's own bake (HIL_LINUX.md F3's per-board table)."""
+    for name in ("linux", "linux-netboot", "linux-nocard"):
+        f = [c for c in P.build(name).checks() if c.section == "F"]
+        assert [c.id for c in f] == ["F1", "F2", "F3", "F4", "F6"], name
+        assert all(c.tier == P.MANUAL and not c.argv for c in f), name
+        f3 = next(c for c in f if c.id == "F3")
+        assert "board's row" in f3.why and "own" in f3.title.lower()
+
+
+def test_f3_names_each_boards_own_bake():
+    text = LINUX_MD.read_text(encoding="utf-8")
+    f3 = text.split("**F3. ", 1)[1].split("**F4. ", 1)[0]
+    rows = {m.group(1): m.group(0) for m in re.finditer(r"^\| (\d) \(`lab2?`\) \|.*$", f3, re.M)}
+    assert set(rows) == {"1", "2"}
+    assert "mps3_01_pl" in rows["1"] and "0xC457D656" in rows["1"] and "192.168.10.101" in rows["1"]
+    assert rows["1"].count("286ae54d2a2b8c15e8b610df8088d37e5c3b3c706aa9206aceade2b503f081b4") == 1
+    assert "/home/david/pv_rb/config_rm_greybox_stage0.bit" in rows["1"]
+    assert "mps3_02_pl" in rows["2"] and "0x6FAE6A0B" in rows["2"] and "192.168.11.101" in rows["2"]
+    assert rows["2"].count("f206f788f7497b650b6f0408ebb2fbdb795edb749784a3ec42e6caaaa3df5058") == 1
+    assert "286ae54d" not in rows["2"] and "f206f788" not in rows["1"]
+    # the command stages $BAKE only when its sha256 is the row's; nothing names one board's bit
+    assert 'if [ "$SHA" = "$BAKE_SHA" ]; then' in f3 and "pv_rb" not in f3.split("```bash")[1]
 
 
 def test_twin_the_full_linux_plan_skips_none_of_them():

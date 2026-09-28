@@ -58,6 +58,7 @@ def bare() -> ScriptedHm:
 
 
 @pytest.mark.parametrize("plan,hm", [("linux-netboot", ScriptedHm()),
+                                     ("linux-nocard", ScriptedHm(card=False)),
                                      ("linux", ScriptedHm(netboot=False, claim="mine")),
                                      ("bare-metal", bare())])
 def test_a_healthy_board_passes_every_automatic_check(tmp_path, plan, hm):
@@ -123,6 +124,7 @@ def test_a_lease_lost_mid_run_stops_before_the_next_section_and_leaves_the_board
 
 
 @pytest.mark.parametrize("plan,hm", [("linux-netboot", ScriptedHm()),
+                                     ("linux-nocard", ScriptedHm(card=False)),
                                      ("linux", ScriptedHm(netboot=False, claim="mine")),
                                      ("bare-metal", bare())])
 def test_writes_none_never_sends_a_write_verb(tmp_path, plan, hm):
@@ -133,6 +135,25 @@ def test_writes_none_never_sends_a_write_verb(tmp_path, plan, hm):
     skipped = {c["id"] for c in summary(tmp_path / "ev" / "iter-001")["checks"]
                if c["reason"].startswith("--writes none")}
     assert skipped == {c.id for c in P.build(plan).checks() if c.tier == P.SAFE and not c.skip}
+
+
+def test_the_nocard_plan_on_a_card_less_board_sends_no_card_slot_or_reset_verb(tmp_path):
+    hm = ScriptedHm(card=False)
+    rc = run(tmp_path / "ev", hm, "--writes", "safe", "--repeat", "2", "--interval", "60",
+             plan="linux-nocard")
+    assert rc == EXIT_PASS
+    assert [verb_of(a) for a in hm.calls if is_write(a)] == ["mcc temp", "program", "restore"] * 2
+    assert not {"card status", "slot push", "slot commit", "slot rollback", "card clear",
+                "mcc reboot", "mcc cmd", "reset", "power", "sd"} & set(hm.verbs())
+    v = verdicts(tmp_path / "ev" / "iter-001")
+    assert v["C1"] == "pass" and v["C2"] == v["D4"] == v["F6"] == v["G3"] == "skipped"
+
+
+def test_twin_the_nocard_plan_fails_c1_on_a_board_with_a_card(tmp_path):
+    rc = run(tmp_path / "ev", ScriptedHm(), plan="linux-nocard")       # a blank card is in
+    s = summary(tmp_path / "ev")
+    assert rc == EXIT_FAIL and s["first_failure"]["id"] == "C1"
+    assert s["first_failure"]["reason"].startswith("exit 0, expected 12")
 
 
 def test_twin_writes_safe_sends_the_swaps_and_the_mcc_read_and_nothing_else(tmp_path):

@@ -46,6 +46,42 @@
 4. **08:30: read `$RUN/REPORT.md`.** Its first line says PASS, FAIL or STOPPED. Then
    `harness-manager lease release $B`.
 
+## Board 2: the nightly run
+
+Board 2 (`mps3_02_pl`, `192.168.11.101`, boards.toml `lab2`) is Harness Manager's own board: HIL-AUTO
+runs on it every HM night. It has **no user microSD** and no JTAG, so the plan is `linux-nocard`
+(HIL_LINUX.md "Card-less mode"): swaps and the MCC read only, **no reset of any kind**.
+`tools/hil/env_b2.sh` sets `B`, `T`, `MCC_TTY`, `EV` and `RUN` (`…/2026-09-hil-auto/<MMDD>-b2`).
+
+1. **17:30: the announcement** (sends nothing):
+   ```bash
+   source ~/SoCLabs/harness-manager/tools/hil/env_b2.sh
+   cd ~/SoCLabs/harness-manager
+   .venv/bin/python -m tools.hil run --plan linux-nocard --board $B --evidence $RUN \
+     --writes safe --repeat 30 --interval 1800 --until 08:30 --announce-only
+   ```
+2. **18:00: free the board for the runner, then a 15 h lease:**
+   ```bash
+   harness-manager daemon stop
+   harness-manager lease acquire 192.168.11.101 --ttl 54000 --holder david-hm
+   ```
+3. **Start it in tmux** (set the variables again inside it):
+   ```bash
+   tmux new -s hil-b2
+   source ~/SoCLabs/harness-manager/tools/hil/env_b2.sh
+   cd ~/SoCLabs/harness-manager
+   .venv/bin/python -m tools.hil run --plan linux-nocard --board $B --evidence $RUN \
+     --writes safe --repeat 30 --interval 1800 --until 08:30
+   ```
+   One iteration is about 5 min (two verified swaps of ~75 s each, the reads, the MCC read),
+   then 30 min of rest: about 25 iterations by 08:20. `--until` ends it; `--repeat 30` is the cap.
+4. **08:30:** read `$RUN/REPORT.md`, then `harness-manager lease release 192.168.11.101`.
+
+After a warm reset board 2 sits in stage0 rescue until the Linux lead pushes an image; its claim
+and host key change on every netboot. HIL-AUTO never resets it. A board that went to rescue is
+`unreachable` (the run stops, exit 2, and REPORT.md says where); a changed host key refuses SSH
+(exit 15, a stop): re-adopt it (HIL_LINUX.md Netboot mode 3) and ask the Linux lead.
+
 **Stop it early:** `Ctrl-C` in its tmux window, or `kill -INT <pid>` (the pid is in
 `ANNOUNCE.txt`). It finishes the check it is on, puts greybox back, writes the report, and
 exits 2.
@@ -54,8 +90,8 @@ exits 2.
 
 | Option | Default | What it does |
 |---|---|---|
-| `--plan` | (required) | `linux-netboot` (HIL_LINUX.md in Netboot mode), `linux` (the card usable again), `bare-metal` (HIL_B0.md) |
-| `--board` | (required) | the board, `192.168.10.101` |
+| `--plan` | (required) | `linux-netboot` (HIL_LINUX.md in Netboot mode: a blank card), `linux-nocard` (Card-less mode: board 2, no user microSD), `linux` (the card usable again), `bare-metal` (HIL_B0.md) |
+| `--board` | (required) | the board: `192.168.10.101` (board 1), `192.168.11.101` (board 2) |
 | `--evidence DIR` | (required) | a new folder; one holding evidence is refused (never overwritten) |
 | `--writes` | `none` | `none`: read-only checks. `safe`: also the swap-and-restore checks, the MCC read and (bare metal) `identify` |
 | `--repeat N`, `--interval S` | 1, 900 | N iterations, S seconds apart (at least 60) |
@@ -73,7 +109,8 @@ exits 2.
 
 The plans are `tools/hil/plans.py`. Check ids are the runbook's; a lettered id (`E1b`, `R7b`)
 is a second command of that check. `tests/unit/test_hil_auto_plans.py` fails when a runbook
-check with an **Expect** has no plan entry, or the other way round.
+check with an **Expect** has no plan entry, or the other way round, and when the netboot or
+nocard plan's skips differ from the runbook's Netboot mode or Card-less mode list.
 
 **`linux-netboot`** (per iteration):
 
@@ -85,8 +122,17 @@ check with an **Expect** has no plan entry, or the other way round.
   on the card), E1b identity; Z2 restore greybox, Z2b identity;
 - **skipped (Netboot mode):** C2, D2, D3, D5, §G, Z1, Z2's `card status` (Z2c), and D4.
 
-**`linux`:** the same, plus C2 and Z2c (the card's default line is C2's); C1 and B3 expect a
-card-backed board.
+**`linux-nocard`** (board 2): the same as `linux-netboot`, except:
+
+- C1 expects the card-less answer: `slot status` exits 12, `no user microSD card in the slot`
+  (the harness said `card: false`, no slots). Harness Manager reports a card-less board as
+  unavailable; it never prints `card: false` itself;
+- D4, F6 and §G are skipped, not manual: no reset of any kind on a board with no card and no
+  JTAG. Every skip reason starts "no user microSD";
+- the safe checks are the same three: D4a (MCC read), E1 (program `nanosoc_ila`), Z2 (restore).
+
+**`linux`:** the same as `linux-netboot`, plus C2 and Z2c (the card's default line is C2's); C1
+and B3 expect a card-backed board.
 
 **`bare-metal`:** 1 (lease), 2 (no share on `tty_00`), R1, R5 (needs
 `HARNESS_MANAGER_OPENOCD` from HIL_B0.md 0.3), R6, R7, R10, R11 read; R4 (MCC), R7b
@@ -99,7 +145,7 @@ card-backed board.
 | D2, D3, D5, Z1 | write the user microSD (keep on the card, card clear) |
 | D4, G3 | an MCC REBOOT power-cycles the board |
 | §G (G1, G2, G4), F6 | write the config SD (sudo mount on the hub; the SD door) |
-| F1–F4 | raw `ssh`/`fpgahub` on the hub, not Harness Manager verbs |
+| F1–F4 | raw `ssh`/`fpgahub` on the hub, not Harness Manager verbs. §F is manual in every plan (a test holds it), and F3 stages the board's OWN bake from HIL_LINUX.md F3's per-board table |
 | B2 | a trust decision: it pins the board's host key and asks `y` |
 | A4 | a finger on the panel |
 | E2–E5, W5 | Vivado, read by a person |

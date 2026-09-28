@@ -119,11 +119,13 @@ def refused(message: str) -> Answer:
 
 
 class ScriptedHm:
-    """A board and a hub, as the CLI's JSON shows them. ``impl`` ``linux`` or ``bare-metal``."""
+    """A board and a hub, as the CLI's JSON shows them. ``impl`` ``linux`` or ``bare-metal``;
+    ``card`` False: no user microSD at all (board 2: ``slot status`` answers ``card: false``)."""
 
     def __init__(self, *, static: str = "0x44ee76d5", impl: str = "linux",
-                 netboot: bool = True, claim: str = "other") -> None:
+                 netboot: bool = True, claim: str = "other", card: bool = True) -> None:
         self.static, self.impl, self.netboot, self.claim = static, impl, netboot, claim
+        self.card = card
         self.rm = GREYBOX
         self.calls: list[list[str]] = []
         self.lease_here = True
@@ -198,15 +200,22 @@ class ScriptedHm:
         return 0, {"ok": True, "claim": {"state": self.claim, "host_key": {"match": None}}}
 
     def v_board_ssh(self, _a: list[str]) -> tuple[int, Any]:
-        return 0, ("backing=tmpfs storage=ok\n" if self.netboot
+        return 0, ("backing=tmpfs storage=ok\n" if self.netboot or not self.card
                    else "backing=card dev=/dev/mmcblk0p3 storage=ok\n")
 
     def v_slot_status(self, _a: list[str]) -> tuple[int, Any]:
+        if not self.card:
+            # harnessd: card:false, ok; HM's slot service: UNAVAILABLE (os_slots.slots_reason)
+            reason = "no user microSD card in the slot (the OS slots live on it)"
+            return _err(12, "UNAVAILABLE", f"OS slot update is unavailable: {reason}",
+                        capability="OS slot update", reason=reason)
         st = "empty" if self.netboot else "valid"
-        return 0, {"ok": True, "running": "A", "default": "A", "job": {"busy": False},
-                   "slots": {"A": {"state": st}, "B": {"state": st}}}
+        return 0, {"ok": True, "card": True, "running": "A", "default": "A",
+                   "job": {"busy": False}, "slots": {"A": {"state": st}, "B": {"state": st}}}
 
     def v_card_status(self, _a: list[str]) -> tuple[int, Any]:
+        if not self.card:
+            return 0, {"ok": True, "present": False, "state": "no card", "line": ""}
         return 0, {"ok": True, "present": True, "state": "valid",
                    "line": "none: the greybox loads at power-on"}
 
