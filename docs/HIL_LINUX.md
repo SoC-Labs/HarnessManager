@@ -1,5 +1,10 @@
 # HIL: Harness Manager on the Linux harness (after cutover, ~70 min)
 
+> **Unattended:** [HIL_AUTO.md](HIL_AUTO.md) runs this runbook's automatic checks overnight
+> (`python -m tools.hil run --plan linux-netboot …`), saves the evidence and writes `REPORT.md`; it lists
+> the checks that stay manual and why. `tools/hil/plans.py` holds this runbook as data: a test fails
+> when a check with an **Expect** here has no plan entry.
+
 > **When:** after the Linux soak and the cutover, when the Linux lead says the board is free
 > (about **Sun 27 Sep 20:00** or later). **Who:** david, at srv03335, alone. No agent takes the
 > lease or touches the board.

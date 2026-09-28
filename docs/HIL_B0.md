@@ -1,5 +1,10 @@
 # HIL: the lab MPS3 through the hub (Thu 09-24 test, Fri 09-25 B0)
 
+> **Unattended:** [HIL_AUTO.md](HIL_AUTO.md) runs this runbook's automatic checks overnight
+> (`python -m tools.hil run --plan bare-metal …`), saves the evidence and writes `REPORT.md`; it lists
+> the checks that stay manual and why. `tools/hil/plans.py` holds this runbook as data: a test fails
+> when a check row here has no plan entry, or the other way round.
+
 > **Friday 25 Sep, 09:00–10:00 is Harness Manager's slot** (bare-metal `0x72BB0A36`; agreed with the
 > Linux lead at 03:05). B1 v4 starts at 10:00 on its own lease, so this slot must end with the board
 > restored to greybox and the lease released by **09:55**.
