@@ -1,7 +1,7 @@
 """The demo's showcase boards: one of each harness, so ``app --demo`` shows every feature.
 
 ``DemoEngine(showcase=True)`` (what ``harness-manager app --demo`` / ``ui --demo`` serve)
-scripts three boards, each for a different set of features. Their adapters are modelled on
+scripts four boards, each for a different set of features. Their adapters are modelled on
 the lanes' test fakes and built on the product's own types and helpers, so a shape cannot
 drift from the real one (``XvcStatus``/``vivado_tcl``, ``PanelState``/``rebuilt_frame``,
 ``SlotStatus``, ``CardStatus``, the lease service's notes):
@@ -26,6 +26,9 @@ drift from the real one (``XvcStatus``/``vivado_tcl``, ``PanelState``/``rebuilt_
   own request, which alice has not answered in time: Request, the queue and Force-release
   are all live (``tests/fakes/lrb_fake_hub.py``'s hub, in miniature). Its MCC is reached ON
   the hub (a ``hub-mcc://`` link), never through a share on ``tty_00`` (MCC-FIX).
+- ``BOARD_SPARE`` (mps3-03, LEASE-UI): another board behind the same hub whose lease is FREE,
+  so the lease badges show all three states: free, yours (Acquire it) and held by alice
+  (mps3-02); Release and Close board's "also release the lease?" work on it.
 
 Nothing here opens a socket or starts a process: the XVC ports and the tunnel's ports are
 made up (nothing listens on them), the hub is in memory, the claim is scripted.
@@ -81,12 +84,16 @@ CONTROL_PORT = 6900
 BOARD_LINUX = "mps3@192.168.10.104:6900"
 BOARD_V011 = "mps3@192.168.10.105:6900"
 BOARD_LEASED = "mps3@192.168.10.106:6900"
+BOARD_SPARE = "mps3@192.168.10.107:6900"
 
 HUB_HOST = "mapstone-dev.ecs.soton.ac.uk"
 HUB_TARGET = "mps3_02_pl"
 HUB_BOARD = "mps3_02"
 #: The MCC's console on the hub (``hub_mcc.mcc_tty_for``'s default for the target).
 HUB_MCC_TTY = f"/dev/{HUB_TARGET}/tty_00"
+#: LEASE-UI: the spare board's target on the same hub; nobody holds its lease.
+SPARE_TARGET = "mps3_03_pl"
+SPARE_BOARD = "mps3_03"
 
 #: The Linux harness's front-panel features, and its XVC lock (docs/design/XVC_DEBUG.md §7.1).
 PANEL_FEATURES = ("presence", "panel", "locate")
@@ -131,7 +138,7 @@ def _eth(host: str, detail: str = "shell control channel") -> Link:
     return Link(LinkKind.ETHERNET, f"{host}:{CONTROL_PORT}", detail)
 
 
-# --- the three boards ----------------------------------------------------------------------------
+# --- the four boards -----------------------------------------------------------------------------
 
 
 def script() -> dict[str, Any]:
@@ -215,7 +222,32 @@ def script() -> dict[str, Any]:
                                 "metered plug or an INA260"),
         ],
         port_base=3383, overlay_shell=cat.S_ILA.lower(), kind="leased")
-    boards = (linux, v011, leased)
+    spare_mcc = f"/dev/{SPARE_TARGET}/tty_00"
+    spare = _Board(
+        candidate=Candidate(
+            "mps3", BOARD_SPARE,
+            (_eth("192.168.10.107", "shell control channel, through the hub's ssh tunnel"),
+             Link(LinkKind.HUB, f"hub-mcc://{HUB_HOST}/{SPARE_TARGET}{spare_mcc}",
+                  f"the MCC console {spare_mcc}, reached ON the hub {HUB_HOST} (pyverify's "
+                  "tools run there; never an fpgahub share)", via="hub")),
+            label="MPS3 nanosoc on shell 0x72bb0a36 (via mapstone-dev)",
+            evidence="listed by the hub (fpgahub 0.3.0)", name="mps3-03", name_source="hub"),
+        identity=BoardIdentity(board_type="mps3", shell_id=cat.S_ILA.lower(),
+                               rm_id="0x01000001", rm_name="nanosoc",
+                               harness_version="1.0.0", firmware_sha=cat.FW_ILA,
+                               features=V011_DEMO_FEATURES, build_check=Check.OK,
+                               harness_impl="bare-metal", proto="0.11",
+                               usercode=cat.U_ILA.lower(), ver32="0x01000000"),
+        health=Health(reachable=True, control_channel="idle", counters=_counters(9)),
+        consoles=("uart0", "uart1", "swo", "shell"),
+        readings=[
+            Reading("dut_clk", 50.0, "MHz", source="shell-6900", reason="preset"),
+            Reading("mcc_temp", 38.0, "degC", source="mcc-console (hub)"),
+            Reading.unavailable("board_power", "W", "the MPS3 has no power sensor; add a "
+                                "metered plug or an INA260"),
+        ],
+        port_base=3393, overlay_shell=cat.S_ILA.lower(), kind="spare")
+    boards = (linux, v011, leased, spare)
     for b in boards:
         b.candidate = DemoCandidate(**{f: getattr(b.candidate, f) for f in (
             "pack", "board_id", "links", "label", "evidence", "name", "name_source")},
@@ -443,42 +475,53 @@ class _Status:
 
 
 class DemoHubState:
-    """The hub's state for the leased board, shared by every session (in memory)."""
+    """The hub's state for one target, shared by every session (in memory). By default the
+    leased board's (alice holds it, bob queues behind your request); ``free=True`` is a target
+    nobody holds or queues for (the spare board, LEASE-UI)."""
 
-    def __init__(self, me: str) -> None:
+    def __init__(self, me: str, *, target: str = HUB_TARGET, board: str = HUB_BOARD,
+                 free: bool = False) -> None:
         from harness_manager.services.lease import RequestNote
 
         now = time.time()
         self.mu = threading.Lock()
         self.me = me
-        self.current: dict[str, Any] | None = {
+        self.target, self.board = target, board
+        self._tokens = 0
+        if free:
+            self.current: dict[str, Any] | None = None
+            self.queue: list[tuple[str, str]] = []
+            self.notes: dict[str, Any] = {}
+            self.answers: dict[str, Any] = {}
+            self.history: list[dict[str, Any]] = []
+            return
+        self.current = {
             "holder": "alice@lab-pc-07", "user": "alice", "token": "tok-alice",
             "expires_at": _iso(now + 47 * 60)}
-        self.queue: list[tuple[str, str]] = [(me, me.split("@")[0]), ("bob@lab-pc-03", "bob")]
+        self.queue = [(me, me.split("@")[0]), ("bob@lab-pc-03", "bob")]
         # Your request, 3 minutes old, unanswered: its 2-minute deadline has passed, so
         # force-release is offered (docs/LEASE_REQUESTS.md).
-        self.notes: dict[str, Any] = {
+        self.notes = {
             "r-demo-0001": RequestNote(id="r-demo-0001", by=me, user=me.split("@")[0],
                                        host=me.split("@", 1)[-1],
                                        message="demo: I need mps3-02 for the DUT bring-up",
                                        created_at=_iso(now - 180),
                                        deadline_at=_iso(now - 60))}
-        self.answers: dict[str, Any] = {}
-        self.history: list[dict[str, Any]] = [
+        self.answers = {}
+        self.history = [
             {"ts": _iso(now - 5400), "event": "lease.granted", "board": HUB_TARGET,
              "holder": "alice@lab-pc-07"},
             {"ts": _iso(now - 1200), "event": "lease.queued", "board": HUB_TARGET,
              "holder": me, "position": 1},
             {"ts": _iso(now - 600), "event": "lease.queued", "board": HUB_TARGET,
              "holder": "bob@lab-pc-03", "position": 2}]
-        self._tokens = 0
 
     def token(self) -> str:
         self._tokens += 1
         return f"tok-demo-{self._tokens:04d}"
 
     def log(self, event: str, **kw: Any) -> None:
-        self.history.append({"ts": _iso(time.time()), "event": event, "board": HUB_TARGET, **kw})
+        self.history.append({"ts": _iso(time.time()), "event": event, "board": self.target, **kw})
 
     def promote(self) -> None:
         if self.current is None and self.queue:
@@ -502,7 +545,7 @@ class DemoHubClient:
 
     def __init__(self, hub: DemoHubState) -> None:
         self.hub = hub
-        self.host, self.target = HUB_HOST, HUB_TARGET
+        self.host, self.target = HUB_HOST, hub.target
 
     def principal(self) -> str:
         return self.hub.me
@@ -514,7 +557,7 @@ class DemoHubClient:
     lease_show = lease_status
 
     def board_id(self) -> str:
-        return HUB_BOARD
+        return self.hub.board
 
     def can_revoke(self) -> tuple[bool, str]:
         return True, ""
@@ -538,18 +581,18 @@ class DemoHubClient:
                         h.log("lease.granted", holder=me)
                     cur = h.current
                     assert cur is not None
-                    say(f"lease granted: {holder} holds {HUB_TARGET}")
-                    return (Lease(token=cur["token"], holder=holder, target=HUB_TARGET),
+                    say(f"lease granted: {holder} holds {self.target}")
+                    return (Lease(token=cur["token"], holder=holder, target=self.target),
                             cur["expires_at"])
                 if me not in [p for p, _ in h.queue]:
                     h.queue.append((me, me.split("@")[0]))
                     h.log("lease.queued", holder=me, position=len(h.queue))
                 pos = [p for p, _ in h.queue].index(me) + 1
-            say(f"queued at position {pos} for {HUB_TARGET} as {holder}; re-acquiring in "
+            say(f"queued at position {pos} for {self.target} as {holder}; re-acquiring in "
                 f"{poll_s}s")
             if waited >= timeout_s:
                 self.lease_cancel(holder)
-                raise AbsentError(f"gave up waiting for {HUB_TARGET} after {timeout_s}s")
+                raise AbsentError(f"gave up waiting for {self.target} after {timeout_s}s")
             (sleep or time.sleep)(poll_s)
             waited += poll_s
 
@@ -593,7 +636,7 @@ class DemoHubClient:
             self.hub.log("lease.admin_revoked", by=by, reason=f"{reason} (by {by})",
                          prior_holder=prior["holder"])
             self.hub.promote()
-        return {"revoked": [HUB_TARGET], "by": by}
+        return {"revoked": [self.target], "by": by}
 
     def lease_history(self, limit: int = 50) -> list[dict[str, Any]]:
         with self.hub.mu:
@@ -624,10 +667,10 @@ class DemoHubRef:
     """``session.hub``: ``host``, ``target`` and ``client``."""
 
     def __init__(self, client: DemoHubClient) -> None:
-        self.host, self.target, self.client = HUB_HOST, HUB_TARGET, client
+        self.host, self.target, self.client = HUB_HOST, client.target, client
 
     def board_id(self) -> str:
-        return HUB_BOARD
+        return self.client.hub.board
 
 
 class DemoReach:
@@ -937,6 +980,8 @@ def adapters(engine: Any, board: Any) -> dict[str, Any]:
                    card=DemoCard(engine, bid, slots))
     if board.kind == "leased":
         out.update(hub=DemoHubRef(DemoHubClient(engine._hub_state)), reach=DemoReach())
+    if board.kind == "spare":                # LEASE-UI: the same hub, a free target
+        out.update(hub=DemoHubRef(DemoHubClient(engine._hub_spare)), reach=DemoReach())
     return out
 
 
@@ -951,4 +996,4 @@ def me() -> str:
     return f"{user}@{socket.gethostname().split('.')[0]}"
 
 
-__all__ = ["BOARD_LEASED", "BOARD_LINUX", "BOARD_V011", "DemoXvc", "adapters", "me", "script"]
+__all__ = ["BOARD_LEASED", "BOARD_LINUX", "BOARD_SPARE", "BOARD_V011", "DemoXvc", "adapters", "me", "script"]

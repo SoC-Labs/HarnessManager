@@ -4,12 +4,12 @@
 // and the request's own bar (queue position, countdown, Leave queue, Force) sits above.
 
 import { runJob } from "./actions.js";
-import { openRequestForm, requestActive } from "./lease.js";
+import { openRequestForm, ReleaseButton, requestActive } from "./lease.js";
 import { call } from "./api.js";
 import { clock } from "./format.js";
 import { html } from "./lib.js";
 import { boardState } from "./store.js";
-import { durationText, epochOf, leaseLeft, loadHub, week } from "./week.js";
+import { durationText, epochOf, leaseLeft, leaseWho, loadHub, week } from "./week.js";
 import { ActionRow, Chip, Icon } from "./ui.js";
 
 // POST .../lease {ttl_s?} (60-86400; the daemon's default is 3600 and it heartbeats the lease
@@ -62,13 +62,16 @@ function tunnelTitle(t, hub) {
   return parts.join("; ");
 }
 
-// The header's "Hub" fact: tunnel and lease chips, and the lease action that fits.
+// The header's "Hub" fact: tunnel and lease chips, and the lease action that fits. LEASE-UI:
+// "yours" is THIS Harness Manager holding the token (`here`); the same hub principal in
+// another session is someone else here, named as such, with no Release (only that session can).
 export function HubFact({ bid }) {
   const w = week(bid);
   const hub = w.hub;
   if (!hub) return null;
   const t = hub.tunnel;
   const lease = hub.lease;
+  const who = leaseWho(bid);
   const left = leaseLeft(lease);
   const specs = leaseSpecs(bid);
   const job = boardState(bid).job;
@@ -76,16 +79,30 @@ export function HubFact({ bid }) {
   const requesting = requestActive(bid);
   const req = hub.request;
   let leaseChip;
-  if (!lease) {
+  if (who.state === "unknown") {
+    leaseChip = html`<${Chip} level="unk" icon="circle-help" testid="lease-chip" title=${`${hub.host}: the lease could not be read: ${who.error}`}>lease unknown<//>`;
+  } else if (!lease) {
     leaseChip = html`<${Chip} level="warn" icon="lock-open" testid="lease-chip" title=${`${hub.host}: nobody holds this board's lease`}>no lease<//>`;
-  } else if (lease.mine) {
+  } else if (who.state === "here") {
     leaseChip = html`<${Chip} level=${left !== null && left < 300 ? "warn" : "accent"} icon="lock" testid="lease-chip"
-      title=${`${lease.target} on ${hub.host}, held by ${lease.holder}${lease.user ? ` (user ${lease.user})` : ""}; the daemon renews it while the board is open`}>
+      title=${`${lease.target} on ${hub.host}, held by ${lease.holder}${lease.user ? ` (user ${lease.user})` : ""}: this Harness Manager holds it and renews it while the board is open`}>
       lease yours${left !== null ? ` · ${durationText(left)}` : ""}<//>`;
+  } else if (who.state === "elsewhere") {
+    leaseChip = html`<${Chip} level="held" icon="lock" testid="lease-chip"
+      title=${`${lease.target} on ${hub.host}, held under your hub name by another session or tool (a soak, a runner), not this Harness Manager${left !== null ? `; it ends in ${durationText(left)}` : ""}. Release it there.`}>
+      leased to ${lease.holder} (another session)<//>`;
   } else {
     leaseChip = html`<${Chip} level="err" icon="lock" testid="lease-chip"
       title=${`${lease.target} on ${hub.host}, held by ${lease.holder}${lease.user ? ` (user ${lease.user})` : ""}${left !== null ? `; theirs ends in ${durationText(left)}` : ""}`}>leased to ${lease.holder || "someone else"}<//>`;
   }
+  const acquireRow = html`<${ActionRow} bid=${bid} panel="lease" spec=${specs.acquire} compact=${true} showReason=${false} gate=${{}} />`;
+  let action;
+  if (who.state === "here") action = acquiring ? acquireRow : html`<${ReleaseButton} bid=${bid} />`;
+  else if (who.state === "elsewhere") {
+    action = html`<span class="muted small" data-testid="lease-elsewhere-note">only that session can release it</span>`;
+  } else if (lease) action = requesting ? null : html`<${RequestButton} bid=${bid} />`;
+  else if (who.state === "unknown") action = null;      // read it again first: it may be held
+  else action = acquireRow;
   return html`<div class="fact hub-fact" data-testid="fact-hub">
     <span class="fact-label">Hub</span>
     <span class="fact-value row">
@@ -95,10 +112,7 @@ export function HubFact({ bid }) {
       ${leaseChip}
       ${requesting ? html`<span class="muted small" data-testid="lease-requested"><${Icon} name="send" cls="sm" /> requested${req && req.position ? ` · position ${req.position}` : ""}</span>`
         : w.leaseQueued ? html`<span class="muted small" data-testid="lease-queued"><${Icon} name="clock" cls="sm" /> queued</span>` : null}
-      ${lease && lease.mine && !acquiring
-        ? html`<${ActionRow} bid=${bid} panel="lease" spec=${specs.release} variant="ghost" compact=${true} showReason=${false} gate=${{}} />`
-        : lease && !lease.mine ? (requesting ? null : html`<${RequestButton} bid=${bid} />`)
-        : html`<${ActionRow} bid=${bid} panel="lease" spec=${specs.acquire} compact=${true} showReason=${false} gate=${{}} />`}
+      ${action}
       ${acquiring ? html`<${ActionRow} bid=${bid} panel="lease_cancel" spec=${specs.cancel} variant="ghost" compact=${true}
         showReason=${false} gate=${{ whileJob: true }} />` : null}
     </span>

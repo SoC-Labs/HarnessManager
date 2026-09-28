@@ -50,7 +50,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `POST /probe` `{hosts?, serial_ports?, volumes?, scan_usb?, scan_network?, timeout_s?}` | `engine.probe(ProbeHints)` | `{candidates: [Candidate]}` (includes `identity` when probed) |
 | `GET /boards` | open boards + lock owners | `{boards: [{board_id, open: bool, holder?: LockOwner, candidate}]}` |
 | `POST /boards` `{target?, candidate?, note?}` | `engine.open(...)` | `{board_id, info: BoardInfo}` |
-| `DELETE /boards/{bid}` | `engine.close(bid)` | `{ok}` |
+| `DELETE /boards/{bid}?release=` | `engine.close(bid)` | `{ok}`. `release=true` (additive, LEASE-UI) first releases the hub lease THIS Harness Manager holds on the board (`lease.here`) and adds `released`: the lease given back (`{target, holder, expires_at, mine}`), or null when none was held here (no hub, a free lease, or someone else's, including another session of the same principal, which only that session can release). A release the hub refuses or does not answer fails the call and the board stays open. 400 USAGE when `release` is not true or false. Without it the lease is kept, not renewed while closed, as before. |
 | `GET /boards/{bid}` | `engine.info(bid)` | `BoardInfo` |
 | `GET /boards/{bid}/lock` | `engine.lock_owner(bid)` | `{holder: LockOwner or null}` |
 | `GET /boards/{bid}/telemetry` | `engine.telemetry.readings(session)` | `{readings: [Reading]}` |

@@ -56,8 +56,9 @@ owners.
 - The demo shows every part of the app, offline: a Linux harness (the user microSD with
   its OS slots, "Keep on the card", the SSH claim, the front panel with its sessions and
   Identify, XVC), today's bare-metal v0.11 board (the rebuilt panel, XVC with its
-  warning, the Debug USB pages) and a board behind a hub whose lease someone else holds
-  (the queue, your request, force-release). Harness versions lists a signed demo
+  warning, the Debug USB pages), a board behind a hub whose lease someone else holds
+  (the queue, your request, force-release) and a board on the same hub whose lease is
+  free (take it, release it, close it). Harness versions lists a signed demo
   catalogue with every verdict, a history and a pin; the Build page has a kit for each
   demo static. `HARNESS_MANAGER_DEMO_UPDATE=staged` also shows the app-update banner (it
   is off by default, and the demo never applies an update).
@@ -295,6 +296,26 @@ owners.
   demo's own directory only, stores a secret in the demo's own files (never your keyring,
   so it cannot replace or remove your real token), and reaches no hub: Test connection
   and Add this board say so instead of running.
+- Whose lease is it (LEASE-UI). Each open board behind a hub has a badge in the board
+  list, an icon and words: **Yours** (this Harness Manager holds the lease), **Held by
+  alice@lab-pc-07**, **Free**, and **Requested · #1** or **Queued** while you wait. A lease
+  held under your own hub name by another session or a script (every lab session shares
+  one fpgahub principal) says **Held by david@mapstone-dev (another session)**, never
+  Yours, and offers no Release: only that session can. The board lock's chip (in the list
+  and the header) now says **Open** instead of Yours. A board with no hub has no badge.
+- **Release lease** is a real button wherever a lease you hold is shown: the header's Hub
+  line, the Board tile's new "Hub lease" line, and the request bar once the board is
+  yours. It always asks first ("Release mps3_01_pl? Others can take it; background checks
+  pause."), naming who is next in the queue, and says why when a job on the board stops
+  it. Force release stays a separate, red, typed confirm.
+- **Close board** on a board whose lease this Harness Manager holds asks "Also release the
+  lease on mps3_01_pl?": **Release and close**, **Keep the lease** (it stays yours until
+  it expires, but nothing renews it while the board is closed) or **Cancel**. Any other
+  board closes without asking. A release that fails leaves the board open and says why.
+  The API: `DELETE /boards/{bid}?release=true` releases this Harness Manager's lease
+  first and returns `released` (additive; without it, close is unchanged).
+- The demo has a fourth board, mps3-03, behind the same hub with a free lease, so the
+  badges show free, yours (Acquire it) and held by alice (mps3-02).
 
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
