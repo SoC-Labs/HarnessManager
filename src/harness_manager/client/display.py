@@ -34,8 +34,9 @@ from .http import q
 
 log = logging.getLogger(__name__)
 
-#: The PNG route waits up to 10 s for a keyframe (``display_api.PICTURE_WAIT_S``); a little more.
-STILL_TIMEOUT_S = 30.0
+#: The PNG route waits up to 30 s for a keyframe (``display_api.PICTURE_WAIT_S``, the SSH
+#: forward coming up included); the request a little more, so the route's own error arrives.
+STILL_TIMEOUT_S = 45.0
 #: How far back ``fps`` counts drawn UPDATEs.
 FPS_WINDOW_S = 2.0
 #: A WebSocket close code 4000 + an exit code carries the source's own error (``display_api``).

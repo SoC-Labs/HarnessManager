@@ -854,9 +854,11 @@ class DisplayService:
                 if vb.finished and vb.end_error is not None:
                     raise vb.end_error                   # the source's own, typed (LM3)
                 state, reason = vb.state, vb.reason
+            still = (": it is still opening (the SSH forward to the board, then a whole "
+                     "keyframe); try again" if state in ("connecting", "syncing") else "")
             raise DisplayUnavailable(
                 f"no picture from the board within {wait_s:g} s ({state}"
-                + (f": {reason})" if reason else ")"), retry_s=None)
+                + (f": {reason})" if reason else ")") + still, retry_s=None)
         finally:
             v.close()
 

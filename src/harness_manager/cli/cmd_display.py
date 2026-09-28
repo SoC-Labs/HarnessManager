@@ -73,8 +73,15 @@ from .output import Result, tsv_line
 DEFAULT_RATE_HZ = 4.0
 RATE_MIN_HZ, RATE_MAX_HZ = 0.2, 30.0
 #: How long an in-process snapshot waits for the first whole picture (the daemon's PNG route
-#: waits as long).
-PICTURE_WAIT_S = 10.0
+#: waits as long). FIX-PACK-1: 30 s, not 10: a cold start over ``ssh -J hub root@board``
+#: spends most of 10 s bringing the SSH forward up, and the first try timed out on silicon.
+PICTURE_WAIT_S = 30.0
+#: Human mode: a snapshot still waiting after this long says what it waits for, and again
+#: every ``PROGRESS_EVERY_S`` (stderr; never with --json or --tsv).
+PROGRESS_AFTER_S = 0.5
+PROGRESS_EVERY_S = 10.0
+OPENING = ("opening the SSH forward to the board's lcd_mirror and waiting for the first "
+           "picture (up to {wait:g} s)...")
 #: The compositor clocks of an in-process view (None: the service's own). A test seam.
 TIMINGS: Any = None
 TARGET_HELP = "shell address host[:port] (the board's harness)"
@@ -405,10 +412,41 @@ def _write(path: Path, data: bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
+@contextlib.contextmanager
+def _waiting_words(ctx: Ctx, wait_s: float) -> Any:
+    """FIX-PACK-1, human mode: while the first picture has not come after
+    ``PROGRESS_AFTER_S``, say so on stderr ("opening the SSH forward..."), then every
+    ``PROGRESS_EVERY_S``. A picture that comes at once (an upstream already live) says
+    nothing."""
+    if ctx.fmt != "human":
+        yield
+        return
+    done = threading.Event()
+
+    def speak() -> None:
+        t0 = time.monotonic()
+        if done.wait(PROGRESS_AFTER_S):
+            return
+        ctx.note(OPENING.format(wait=wait_s))
+        while not done.wait(PROGRESS_EVERY_S):
+            ctx.note(f"still waiting for the first picture ({time.monotonic() - t0:.0f} s of "
+                     f"{wait_s:g} s)...")
+
+    worker = threading.Thread(target=speak, daemon=True, name="display-snapshot-words")
+    worker.start()
+    try:
+        yield
+    finally:
+        done.set()
+        worker.join(timeout=1.0)
+
+
 def _snapshot(ctx: Ctx, board_id: str, disp: Any) -> int:
     a = ctx.args
     raw = bool(a.raw)
-    data, meta = disp.still(fmt="raw" if raw else "png", scale=a.scale, hatch=bool(a.hatch))
+    with _waiting_words(ctx, PICTURE_WAIT_S):
+        data, meta = disp.still(fmt="raw" if raw else "png", scale=a.scale,
+                                hatch=bool(a.hatch))
     try:
         st = disp.status()
     except HarnessError as exc:                        # the picture stands without it

@@ -83,7 +83,8 @@ FORGET_JOBS = {"reboot": "the board rebooted (MCC REBOOT)",
                "update_rollback": "the harness image was rolled back",
                "harness_rollback": "the harness image was rolled back"}
 #: ``GET display.png``: how long a first picture may take (the upstream opens, KEY, keyframe).
-PICTURE_WAIT_S = 10.0
+#: FIX-PACK-1: 30 s, the CLI's too: a cold SSH forward through the hub took most of 10 s.
+PICTURE_WAIT_S = 30.0
 FORMATS = ("png", "raw")
 RAW_FORMAT = "rgb565le"
 #: A WebSocket close reason is at most 123 bytes of UTF-8 (RFC 6455 §5.5).
