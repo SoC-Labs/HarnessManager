@@ -31,7 +31,8 @@ import { leaseSpecs } from "./hub.js";
 import { html, useLayoutEffect, useRef, useState } from "./lib.js";
 import { changed, log, onBoardEvent, S, timed } from "./store.js";
 import {
-  durationText, epochOf, leaseLeft, leaseWho, loadHub, onHubLoaded, scheduleHub, week,
+  durationText, epochOf, leaseLeft, leaseName, leaseTargetNote, leaseWhere, leaseWho, loadHub,
+  onHubLoaded, scheduleHub, week,
 } from "./week.js";
 import { Chip, Icon, Reason, ResultBlock, Spinner } from "./ui.js";
 
@@ -204,7 +205,8 @@ function requestSpec(bid, message) {
         return [{ kind: "warnline", text: `the holder answered: keep for ${a.minutes} min${a.message ? `: ${quoted(a.message)}` : ""}` }];
       }
       const at = r && r.lease && epochOf(r.lease.expires_at);
-      return [{ kind: "ok", text: `${name} is yours: lease held${r && r.lease && r.lease.target ? ` on ${r.lease.target}` : ""}${at ? ` until ${clock(at)}` : ""}` }];
+      const on = r && r.lease && leaseName(r.lease);           // LEASE-BOARD: mps3_01
+      return [{ kind: "ok", text: `${name} is yours: lease held${on ? ` on ${on}` : ""}${at ? ` until ${clock(at)}` : ""}` }];
     },
     onDone: () => loadHub(bid),
   };
@@ -723,10 +725,6 @@ export function heldText(who) {
   return who.state === "elsewhere" ? `Held by ${who.holder} (another session)` : `Held by ${who.holder}`;
 }
 
-function leaseWhere(who) {
-  return `${who.target || "the board's target"} on ${who.host || "the hub"}`;
-}
-
 // The rail's badge: an icon and words (never colour alone). Only what the page already read
 // (GET /lease for an open board behind a hub): a board with no hub, or not read, has none.
 export function LeaseBadge({ bid, prefix = "rail" }) {
@@ -804,7 +802,8 @@ function ReleaseConfirm() {
   useDialogKeys(ref, closeRelease);
   const bid = L.release.bid;
   const who = leaseWho(bid);
-  const target = who.target || leaseBoardName(bid);
+  const target = leaseName(who) || leaseBoardName(bid);        // LEASE-BOARD: mps3_01
+  const note = leaseTargetNote(who);
   const next = nextHolder(who);
   const why = releaseWhy(bid);
   return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) closeRelease(); }}>
@@ -815,6 +814,7 @@ function ReleaseConfirm() {
       <div class="modal-pad">
         <p id="release-what" data-testid="release-what">Others can take it${next
           ? html`: <strong>${next}</strong> is next in the queue and gets it` : null}; background checks pause.</p>
+        ${note ? html`<p class="secondary small" data-testid="release-target">${"The hub leases it as target "}<code>${note}</code>.</p>` : null}
         <p class="secondary small">${leaseBoardName(bid)} stays open here. Once someone else holds the lease,
           this page reads the board only when you click, and nothing you run should drive it until the lease
           is yours again (Acquire lease, or Request board).</p>
@@ -871,7 +871,8 @@ function CloseConfirm() {
   useDialogKeys(ref, () => { if (!L.closing || !L.closing.busy) endClosing(); });
   const bid = c.bid;
   const who = leaseWho(bid);
-  const target = who.target || leaseBoardName(bid);
+  const target = leaseName(who) || leaseBoardName(bid);        // LEASE-BOARD: mps3_01
+  const note = leaseTargetNote(who);
   const at = epochOf(who.lease && who.lease.expires_at);
   const busy = c.busy;
   const err = c.error && c.error.error;
@@ -884,7 +885,8 @@ function CloseConfirm() {
         data-testid="close-title">Also release the lease on ${target}?</h2></div>
       <div class="modal-pad">
         <p id="close-lease-what">You are closing <strong>${leaseBoardName(bid)}</strong>, and this Harness Manager
-          holds its hub lease on ${who.host || "the hub"}.</p>
+          holds its hub lease on ${who.host || "the hub"}${note
+          ? html` <span class="secondary" data-testid="close-target">(target <code>${note}</code>)</span>` : null}.</p>
         <ul class="close-choices">
           <li><strong>Release and close:</strong> others can take the board now.</li>
           <li data-testid="close-keep-what"><strong>Keep the lease:</strong> ${keepText}</li>

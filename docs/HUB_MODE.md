@@ -126,6 +126,58 @@ harness-manager hub remove NAME [--force]
 
 The token is sent only in the `Authorization` header. It never appears in a URL, a log line, an error message or a `repr`; the tests check all four.
 
+## Boards and targets: the name HM shows, the name it leases on
+
+fpgahub 0.3.0 has two names for the lab board. The **board** (`mps3_01`, called "chassis"
+before v0.2.0) is the physical enclosure; fpgahub calls it the canonical lease unit. A
+**target** (`mps3_01_pl`) is one addressable part inside it: a PS, a PL or an MCC. fpgahub
+puts a target in a board by an explicit `chassis` in its config, else by stripping a
+`_ps`, `_pl` or `_mcc` suffix (`grouping.chassis_of`). On the lab hub, board `mps3_01` has
+one target, `mps3_01_pl`.
+
+**HM shows the board.** The lease badge, the header's lease chip, the Release and Close
+dialogs, lease messages and the CLI name `mps3_01`. The target appears as a detail:
+`mps3-01 (mps3_01 on HUB, target mps3_01_pl)`. JSON adds `board` beside `target`
+(`GET /boards/{bid}/lease` and its `lease`, the acquire and request results, `released`,
+the CLI's `--json`). The `lease` TSV appends a BOARD column, and `lease.state` events carry
+`board`. When the hub maps the target to no separate board, the text shows the target as
+before. In that case `board` is the target's own name (fpgahub's standalone board, and what
+REST reports for a target no group lists), or null when the SSH hub named no board or did
+not answer.
+
+HM finds the board in `hub.board` in `boards.toml`, with no hub call. Without it, HM asks
+the hub once per hub per process and keeps the answer: `fpgahub board list --json` over
+SSH, `GET /groups` over REST. Events and messages never ask the hub.
+
+**HM leases on the target:** `fpgahub lease … mps3_01_pl` over SSH,
+`/api/v1/targets/{t}/lease*` over REST. It does not switch to the board-level
+`fpgahub board lease …`, for four reasons:
+
+1. **The target form is not deprecated.** fpgahub 0.3.0's `UPGRADING.md` says
+   "top-level `fpgahub lease …` | unchanged". The README lists these verbs as the
+   "single-target board shortcuts", and `/targets/{t}/lease` as "per-target lease
+   addressing (the board remains the canonical lease unit)". Only revoke is board-level
+   only. HM's force-release already uses it: `fpgahub board lease revoke`,
+   `POST /boards/{b}/lease/revoke`.
+2. **On a board with one target, both forms act on one lease.** Both forms write the same
+   per-target lease record. Both share one queue, which fpgahub keys by board
+   (`LeaseManager._cid_of`). A token from either form releases and heartbeats through
+   either form, and a revoke kicks both.
+3. **pyverify uses the target form.** pyverify is the platform's single lease dialect, and
+   its scripts and the Linux lead's soak runs lease through it. If HM switched, two lease
+   forms would share one board. If the board ever gains a second target (an `_mcc`, a
+   `_ps`), a board-level acquire would take every target. It could then fail on fpgahub's
+   409 for mixed holders, which pyverify never sees.
+4. **HM's own files are keyed by the target.** These are the token file
+   (`<state_dir>/leases/`) and the request notes on the hub
+   (`/tmp/harness-manager-lease/<target>/`). If they were re-keyed, HM sessions running
+   different versions would stop seeing each other's requests. For the same reason the
+   token file never gains a `board` key: an older HM would drop a lease whose file has a
+   key it does not know.
+
+Look at this again if pyverify moves to `fpgahub board lease …`, or if the lab board gains
+a second target.
+
 ## What is different from SSH mode
 
 | | SSH mode | Hub mode (REST) |

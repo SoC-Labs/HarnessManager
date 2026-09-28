@@ -46,8 +46,8 @@ def test_mine_uses_the_principal_the_hub_recorded_not_the_holder_we_asked_for(wo
     and our own lease showed as someone else's."""
     a = world.session(DAVID)
     out = a.svc.acquire(a.hub, board_id=BID, holder="david-hm", heartbeat=False)
-    assert out["lease"] == {"target": TARGET, "holder": DAVID, "expires_at": out["lease"]["expires_at"],
-                            "mine": True}
+    assert out["lease"] == {"target": TARGET, "board": out["lease"]["board"], "holder": DAVID,
+                            "expires_at": out["lease"]["expires_at"], "mine": True}
     stored = a.svc.store.get(HOST, TARGET)
     assert stored.principal == DAVID and stored.holder == "david-hm"
     v = a.svc.view(a.hub)["lease"]
@@ -102,8 +102,9 @@ def test_the_view_has_exactly_the_api_shape(world):
     note = world.queued_by_hand(BOB, age_s=30, message="hi")
     va, vb = a.svc.view(a.hub), b.svc.view(b.hub)
     assert set(va) == VIEW_KEYS == set(vb)
-    assert set(va["lease"]) == {"target", "holder", "user", "expires_at", "mine", "here",
+    assert set(va["lease"]) == {"target", "board", "holder", "user", "expires_at", "mine", "here",
                                 "holder_kind", "holder_kind_reason"}  # D12; here: REVIEW-W5
+    assert va["lease"]["board"] == "mps3_01" and va["lease"]["target"] == TARGET   # LEASE-BOARD
     assert va["lease"]["holder_kind"] == "hm"                     # this session holds it
     assert va["lease"]["here"] is True and vb["lease"]["here"] is False   # the token is a's
     assert vb["lease"]["holder_kind"] == "unknown"                # not answered: maybe a script

@@ -5,7 +5,7 @@ docs/API.md, "Week-plan additions: the hub" (frozen):
 | Method and path | Returns |
 |---|---|
 | ``GET /boards/{bid}/tunnel`` | ``{tunnel: {via, host, state, ports: {remote: local}, detail} or null}`` |
-| ``GET /boards/{bid}/lease`` | ``{lease: {target, holder, expires_at, mine} or null, hub: HOST or null}`` |
+| ``GET /boards/{bid}/lease`` | ``{lease: {target, board, holder, expires_at, mine} or null, hub: HOST or null}`` |
 | ``POST /boards/{bid}/lease`` ``{ttl_s?}`` | 202 job ``lease``; done when HELD (it may queue); result ``{lease}`` |
 | ``DELETE /boards/{bid}/lease`` | ``{ok}``: releases this client's lease (or cancels its queued request) |
 
@@ -21,9 +21,11 @@ docs/LEASE_REQUESTS.md, "API" (frozen 2026-09-24, lane LR-C):
 
 ``GET /lease`` adds ``queue``, ``request``, ``incoming`` (each with its ``answer``, D5),
 ``taken`` and ``board`` (D4): the lease service's ``view`` builds them (lane LR-B) and
-the route passes the view through.
+the route passes the view through. LEASE-BOARD adds ``board`` to every ``lease`` object
+(``GET``, the acquire and request jobs' results, ``released``) and to ``lease.state``: the
+physical board (``mps3_01``) when known, else null. ``target`` stays: it is what is leased.
 
-Events: ``lease.state {target, state, holder, expires_at}``; ``tunnel.state``
+Events: ``lease.state {target, board, state, holder, expires_at}``; ``tunnel.state``
 (the tunnel's status) whenever an open board's tunnel changes state (CCR L1-4
 appends the topic). A board whose hub is reached over fpgahub's REST API (T8,
 CCR T8-2) also streams the hub's own events while it is open: ``hub.event`` and
@@ -74,6 +76,7 @@ from harness_manager.core.events import Event
 from harness_manager.services.lease import (
     DEFAULT_TTL_S,
     LeaseService,
+    lease_name,
     typed_names,
     view_confirm_error,
 )
@@ -274,7 +277,9 @@ def register(ctx: RouteContext) -> None:
         ttl = _ttl(b)
         message = clean_message(b.get("message"))
         hub = hub_of(bid)
-        refusal = request_refusal(full_view(leases.view(hub)), hub.target)
+        view = full_view(leases.view(hub))
+        # LEASE-BOARD: refusals name the physical board (mps3_01) when the view knows it.
+        refusal = request_refusal(view, lease_name(view.get("board"), hub.target))
         if refusal is not None:
             raise refusal
         cancel = threading.Event()
@@ -330,7 +335,7 @@ def register(ctx: RouteContext) -> None:
         confirm_board = b.get("confirm_board")
         hub = hub_of(bid)
         view = full_view(leases.view(hub))
-        refusal = force_refusal(view, _now(), hub.target)
+        refusal = force_refusal(view, _now(), lease_name(view.get("board"), hub.target))
         if refusal is not None:
             raise refusal
         # D12: a holder no Harness Manager session answered for may be a script: the board's

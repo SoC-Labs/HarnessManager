@@ -375,7 +375,7 @@ def test_negative_twin_force_answered_y_goes_ahead(capsys, world, monkeypatch):
     monkeypatch.setattr(cmd_hub, "_hub", lambda ctx: (_Cand(name="lab-left"), _Hub()))
     rc, out, err = run(capsys, "lease", "force", TARGET_ARG)
     assert rc == ExitCode.OK and f"kicks {ALICE} off lab-left (hub board mps3_01) now" in err
-    assert f"lab-left ({TARGET} on {HUB}): force-released" in out
+    assert f"lab-left (mps3_01 on {HUB}, target {TARGET}): force-released" in out   # LEASE-BOARD
     assert len(world.revoked) == 1 and world.holder == ME
 
 
@@ -410,7 +410,8 @@ def test_force_of_a_holder_that_never_answered_asks_for_the_board_name(capsys, w
     monkeypatch.setattr("sys.stdin", io.StringIO("mps3-01\n"))
     rc, out, err = run(capsys, "lease", "force", TARGET_ARG)
     assert rc == ExitCode.OK, err
-    assert f"mps3-01 ({TARGET} on {HUB}): force-released" in out and world.holder == ME
+    assert f"mps3-01 (mps3_01 on {HUB}, target {TARGET}): force-released" in out \
+        and world.holder == ME
     assert world.forced_with[-1]["confirm_board"] == "mps3-01"
     assert world.forced_with[-1]["board_names"] == ("mps3-01", "192.168.10.101:6900")
 
@@ -489,7 +490,7 @@ def test_show_prints_the_queue_and_the_requests(capsys, world):
     assert d["queue"][0]["mine"] and d["incoming"] == [] and d["taken"] is None
     rc, out, _ = run(capsys, "--tsv", "lease", "show", TARGET_ARG)
     row = out.rstrip("\n").split("\t")
-    assert len(row) == len(cmd_hub.LEASE_COLUMNS) == 13
+    assert len(row) == len(cmd_hub.LEASE_COLUMNS) == 14 and row[13] == "mps3_01"   # + BOARD
     assert row[:4] == [TARGET, HUB, "held", ALICE] and row[6:11] == ["1", "1", rid, "-", "true"]
 
 
@@ -502,7 +503,7 @@ def test_negative_twin_show_as_the_holder_lists_incoming_and_a_forced_release(ca
     rc, out, _ = run(capsys, "lease", "show", TARGET_ARG)
     assert f"your lease was force-released by {BOB}" in out
     rc, out, _ = run(capsys, "--tsv", "lease", "show", TARGET_ARG)
-    assert out.rstrip("\n").split("\t")[-1] == BOB
+    assert out.rstrip("\n").split("\t")[-2:] == [BOB, "mps3_01"]            # TAKEN_BY, BOARD
 
 
 def test_the_real_hub_adapter_path_reaches_the_new_verbs(capsys, tmp_path, monkeypatch):
@@ -517,7 +518,7 @@ def test_the_real_hub_adapter_path_reaches_the_new_verbs(capsys, tmp_path, monke
         rc, out, _ = run(capsys, "--json", "lease", "leave", TARGET_ARG)
         assert rc == ExitCode.OK and json.loads(out) == {
             "ok": True, "board_id": json.loads(out)["board_id"], "name": "mps3-01", "hub": HUB,
-            "target": TARGET, "left": False}
+            "target": TARGET, "board": "mps3_01", "left": False}
         assert rig.hub.current is None                          # the fake hub was not asked
 
 
