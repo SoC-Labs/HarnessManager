@@ -264,6 +264,20 @@ export function log(level, source, text, board = "", at = null) {
   changed();
 }
 
+// --- the service's own environment (FIX-PACK-2) -------------------------------------------
+
+// GET /daemon/env: {env, overrides, warning}. The service keeps the environment of the shell
+// that started it, so a tool variable there can hide the user's setting; the app says so.
+export async function loadServiceEnv() {
+  const r = await timed("daemon env", () => call("daemonEnv"));
+  if (!r.error) {
+    const d = r.data.data || {};
+    S.serviceEnv = { env: d.env || {}, overrides: d.overrides || [], warning: d.warning || "" };
+    changed();
+  }
+  return r;
+}
+
 // --- timed reads ------------------------------------------------------------------------
 
 // A read with its "$ what (rc N, T s)" line. Returns {data} or {error}.
@@ -821,6 +835,11 @@ export async function start() {
     S.packs = p.data.data.packs || {};
     setCapabilityTitles(p.data.data.capabilities);
   }
+  // FIX-PACK-2: the variables the service started with; read again when a setting changes
+  // (yours may now be hidden, or not) and when the service answers again (it may be new).
+  loadServiceEnv();
+  onBoardEvent((ev) => { if (ev.topic === "settings.changed") loadServiceEnv(); });
+  onEventsReconnected(() => loadServiceEnv());
   const r = await loadBoards();
   // SIDEBAR-UX: the user's order decides the first board; it is read at start (never
   // waited for long: a settings service that does not answer leaves the page's order).

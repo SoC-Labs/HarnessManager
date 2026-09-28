@@ -24,7 +24,8 @@ def test_s8_ethernet_only(tmp_path, mps3_pack):
         # Works over the one Ethernet cable on today's firmware:
         assert {C.DEPLOY_PARTIAL, C.CONSOLE_DUT, C.DEBUG_DUT, C.RESET_DUT, C.CLOCK_DUT} <= avail
         # Needs USB, newer firmware, or add-on hardware; each says which:
-        assert "Debug USB" in unavail[C.REBOOT_BOARD] and "'mcc'" in unavail[C.REBOOT_BOARD]
+        # FIX-PACK-2: the harness's own MCC route is v0.18's 'mccif'/'mcc_local' (was 'mcc')
+        assert "Debug USB" in unavail[C.REBOOT_BOARD] and "'mcc_local'" in unavail[C.REBOOT_BOARD]
         assert "SSH" in unavail[C.CONSOLE_SHELL] or "Debug USB" in unavail[C.CONSOLE_SHELL]
         assert "no power sensor" in unavail[C.TELEMETRY_POWER]
 

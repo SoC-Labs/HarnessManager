@@ -9,10 +9,18 @@ joins or releases a lease, never starts a share, and never shows a token.
   targets on offer). There is no group step: the token carries a role.
 - **SSH** (pyverify's ``SshHubRunner``, so the quoting is the one real use gets, plus
   ``ConnectTimeout=10``, which pyverify's options lack, and ``-J`` for a jump host): ONE
-  round trip, ``echo HM-TEST:login; id -Gn; echo HM-TEST:ids; sg fpga -c 'fpgahub board list
-  --json'``. The markers say how far it got: no login marker is reach or auth (ssh's own
-  message says which), a login without the group is the group, a group without a board
-  list is fpgahub. On the hub itself (``host = "local"``) the same line runs locally.
+  round trip, ``echo HM-TEST:login; id -Gn; echo HM-TEST:ids; sg fpga -c true </dev/null
+  >/dev/null && echo HM-TEST:sg=ok || echo HM-TEST:sg=no; echo HM-TEST:list; sg fpga -c
+  'fpgahub board list --json'`` (shell-neutral: sh, bash or csh). The
+  markers say how far it got: no login marker is reach or auth (ssh's own message says
+  which), a login whose ``sg fpga -c true`` fails is the group, a group without a board list
+  is fpgahub. On the hub itself (``host = "local"``) the same line runs locally.
+- **The group is what ``sg`` says, not ``id -Gn``** (FIX-PACK-2 item 3): Harness Manager
+  only ever uses the group through ``sg GROUP -c``, and on the lab hub a stale sssd/nscd
+  cache leaves ``fpga`` out of ``id -Gn`` while ``getent group fpga`` lists the user and
+  ``sg fpga`` works. So ``sg`` decides the step; ``id -Gn`` disagreeing is a ``note`` on the
+  passed step, never a failure. A hub whose output has no ``sg`` marker falls back to
+  ``id -Gn``.
 - **target** checks the targets the boards using this hub name (or the ones asked for)
   are on offer.
 
@@ -25,6 +33,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -54,6 +63,9 @@ SSH_CONNECT_TIMEOUT_S = 10
 SSH_TIMEOUT_S = 20.0
 REST_TIMEOUT_S = 5.0
 LOGIN_MARK, IDS_MARK = "HM-TEST:login", "HM-TEST:ids"
+#: FIX-PACK-2 item 3: ``sg GROUP -c true``'s verdict (``=ok`` or ``=no``; sg's own words are on
+#: stderr), then the board list after LIST_MARK.
+SG_MARK, LIST_MARK = "HM-TEST:sg", "HM-TEST:list"
 
 Runner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
 
@@ -65,10 +77,13 @@ class Step:
     detail: str = ""
     hint: str = ""
     ms: int = 0
+    #: FIX-PACK-2: something worth knowing about a step that passed (``id -Gn`` disagreeing
+    #: with ``sg``); never a failure. ``""`` for none.
+    note: str = ""
 
     def view(self) -> dict[str, Any]:
         return {"step": self.step, "ok": self.ok, "detail": self.detail, "hint": self.hint,
-                "ms": self.ms}
+                "ms": self.ms, "note": self.note}
 
 
 @dataclass
@@ -312,7 +327,7 @@ def ssh_argv(host: str, group: str | None, remote_argv: Sequence[str], *, jump: 
     opts = base[1:-2]
     extra = ["-o", f"ConnectTimeout={connect_timeout_s}"] + (["-J", jump] if jump else [])
     if markers:
-        remote = f"echo {LOGIN_MARK}; id -Gn; echo {IDS_MARK}; {remote}"
+        remote = _markers(group) + remote
     return ["ssh", *opts, *extra, host, remote]
 
 
@@ -320,8 +335,33 @@ def local_argv(group: str | None, remote_argv: Sequence[str], *, markers: bool =
     """The same line for a hub this process runs on (``host = "local"``)."""
     remote = _remote(remote_argv, group)
     if markers:
-        remote = f"echo {LOGIN_MARK}; id -Gn; echo {IDS_MARK}; {remote}"
+        remote = _markers(group) + remote
     return ["sh", "-c", remote]
+
+
+def _markers(group: str | None) -> str:
+    """The test's prefix: who logged in, ``id -Gn``, then (with a group) whether ``sg GROUP -c
+    true`` works (the way Harness Manager uses the group), then the board list's marker. ``sg``
+    reads no terminal (``</dev/null``): a group it would ask a password for is a ``no``. Only
+    ``;``, ``&&``, ``||``, ``<`` and ``>`` are used, so the hub's login shell may be sh, bash
+    or csh (ssh runs the line with it); sg's own words go to stderr (the failure reads them)."""
+    head = f"echo {LOGIN_MARK}; id -Gn; echo {IDS_MARK}; "
+    if group:
+        q = shlex.quote(group)
+        head += (f"sg {q} -c true </dev/null >/dev/null && echo {SG_MARK}=ok "
+                 f"|| echo {SG_MARK}=no; ")
+    return head + f"echo {LIST_MARK}; "
+
+
+def _sg_verdict(text: str) -> str:
+    """``"ok"``, ``"no"`` or ``""`` (no verdict) from the output between IDS_MARK and LIST_MARK."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line == f"{SG_MARK}=ok":
+            return "ok"
+        if line == f"{SG_MARK}=no":
+            return "no"
+    return ""
 
 
 def _default_run(timeout_s: float) -> Runner:
@@ -382,16 +422,37 @@ def _test_ssh(hub: Hub, wanted: Sequence[str], problems: list[str], *, run: Runn
     report.steps.append(Step("auth", True, "on this machine" if hub.local else
                              "logged in with your SSH key", ms=ms))
     ids = out.split(LOGIN_MARK, 1)[1].split(IDS_MARK, 1)[0].split()
-    rest = out.split(IDS_MARK, 1)[1] if IDS_MARK in out else ""
-    if group and group not in ids:
+    after = out.split(IDS_MARK, 1)[1] if IDS_MARK in out else ""
+    sg_part, rest = after.split(LIST_MARK, 1) if LIST_MARK in after else ("", after)
+    sg = _sg_verdict(sg_part) if group else ""
+    sg_words = _last(err) if sg == "no" else ""
+    note = ""
+    if group and sg == "no":
+        # the way HM uses the group does not work: that is the group step, whatever id says
+        listed = (f"`id -Gn` lists {group!r}, but " if group in ids else "")
+        report.steps.append(Step(
+            "group", False, f"{listed}`sg {group} -c true` fails on {host}"
+            + (f": {sg_words}" if sg_words else ""),
+            (f"your account is in {group!r} but sg refuses it: log in again (a new group "
+             "needs a new login), or ask the hub admin to check the group's members")
+            if group in ids else
+            (f"ask the hub admin: `usermod -aG {group} <you>`, then log in again (a new "
+             "group needs a new login)"), ms))
+        return report
+    if group and sg == "ok" and group not in ids:
+        note = (f"`id -Gn` on {host} does not list {group!r}, but `sg {group}` works, which is "
+                "how Harness Manager uses it: the hub's group cache (sssd/nscd) is stale. "
+                "Nothing to do here")
+    if group and not sg and group not in ids:      # a hub that ran no sg check: id decides
         report.steps.append(Step("group", False, f"your account on {host} is not in {group!r}",
                                  f"ask the hub admin: `usermod -aG {group} <you>`, then log in "
                                  "again (a new group needs a new login)", ms))
         return report
+    group_ok = Step("group", True, (f"`sg {group}` works" if sg == "ok" else f"in {group!r}")
+                    if group else "no sg wrapper", ms=ms, note=note)
     if res.returncode != 0:
         if re.search(r"command not found|No such file", err):
-            report.steps.append(Step("group", True, f"in {group!r}" if group else
-                                     "no sg wrapper", ms=ms))
+            report.steps.append(group_ok)
             report.steps.append(Step("targets", False, f"fpgahub is not installed on {host}",
                                      "is this the hub? (fpgahub runs there)", ms))
         elif re.search(r"Permission denied|Errno 13|Invalid password|failed to crypt", err,
@@ -403,8 +464,7 @@ def _test_ssh(hub: Hub, wanted: Sequence[str], problems: list[str], *, run: Runn
             report.steps.append(Step("targets", False, _last(err) or
                                      f"exit {res.returncode}", "", ms))
         return report
-    report.steps.append(Step("group", True, f"in {group!r}" if group else "no sg wrapper",
-                             ms=ms))
+    report.steps.append(group_ok)
     try:
         data = json.loads(rest)
         groups = data.get("groups", []) if isinstance(data, dict) else []

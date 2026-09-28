@@ -34,7 +34,7 @@ READING_COLUMNS = ("BOARD_ID", "NAME", "VALUE", "UNIT", "SOURCE", "AGE_S", "REAS
 DEBUG_COLUMNS = ("BOARD_ID", "STATE", "GDB", "TELNET", "TCL", "PID", "CONFIG", "DETAIL")
 
 TSV_COLUMNS: dict[str, tuple[str, ...]] = {
-    "daemon": ("STATE", "PID", "PORT", "URL", "STATE_DIR"),
+    "daemon": ("STATE", "PID", "PORT", "URL", "STATE_DIR", "ENV_WARNING"),   # +FIX-PACK-2
     "ui": ("URL", "PORT", "PID", "STARTED"),
     "app": ("URL", "PORT", "PID", "STARTED", "WINDOW"),
     "update check": ("CHANNEL", "SERIAL", "HARNESS_CURRENT", "APP_CURRENT", "APP_UPDATE",

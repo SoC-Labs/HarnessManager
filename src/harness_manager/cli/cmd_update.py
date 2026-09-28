@@ -143,7 +143,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                     help="the backup to restore (default: the one the last update took)")
     ap.add_argument("--wait", type=float, default=None, metavar="S",
                     help="how long to wait for the board to come back (default: 120 s "
-                         "bare-metal, 180 s Linux)")
+                         "bare-metal, 300 s Linux)")
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
 
     vp.set_defaults(fn=cmd_update)

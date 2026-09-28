@@ -79,5 +79,6 @@ def test_reboot_wait_by_engine(impl, want):
 
 
 def test_reboot_wait_numbers_are_the_agreed_ones():
-    assert (REBOOT_WAIT_S_BARE_METAL, REBOOT_WAIT_S_LINUX) == (120.0, 180.0)
+    # FIX-PACK-2 item 7: Linux 180 -> 300 s (stage0's DDR settle: a cold boot is ~190 s)
+    assert (REBOOT_WAIT_S_BARE_METAL, REBOOT_WAIT_S_LINUX) == (120.0, 300.0)
     assert reboot_wait_s(None) == 120.0

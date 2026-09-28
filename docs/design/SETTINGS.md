@@ -265,7 +265,7 @@ The test proves each of these in order and stops at the first failure: **config 
 | config | `parse_rest_table`. Plain http off-box is refused, because the token would cross the network readable (S3.8). | a host name, no spaces, no leading `-` |
 | reach | `GET /health` (anonymous) reports the fpgahub version. A dead port fails in under 3 s (S3.7). | **One** ssh round trip with `BatchMode`, `ConnectTimeout=10` and `-J jump`. The markers `echo HM-TEST:login; id -Gn; echo HM-TEST:ids; sg fpga -c 'fpgahub board list --json'` show how far it got. "Could not resolve" or "timed out" means reach. |
 | auth | `GET /whoami` reports the holder and role. No token or a 401 fails here, with the fix (S3.4, S3.5). | "Permission denied (publickey)" or "Host key verification failed" fails here, with the fix (S4 auth/hostkey). |
-| group | not applicable (the token has a role) | login worked but `fpga` is missing from `id -Gn`, or the socket said EACCES: "ask the hub admin: usermod -aG fpga you; log in again" (S4 nogroup/socket) |
+| group | not applicable (the token has a role) | login worked but `sg fpga -c true` fails, or the socket said EACCES: "ask the hub admin: usermod -aG fpga you; log in again" (S4 nogroup/socket). FIX-PACK-2: `sg` decides; `fpga` missing from `id -Gn` while `sg` works (a stale sssd/nscd cache) passes with a `note` |
 | targets | `GET /groups` lists what the hub offers: 3 targets on 2 boards in the fake | `fpgahub board list --json`; "command not found" means this is not the hub (S4 nofpgahub) |
 | target | the board's configured target is in that list (S3.6) | same |
 

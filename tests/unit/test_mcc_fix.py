@@ -48,13 +48,33 @@ def slow_mcc(clock: FakeClock, boot_s: float, **kw) -> FakeMcc:
 # --- 1. the reboot budget: the harness's own, unless --wait says otherwise ------------------
 
 
-def test_a_linux_board_reboot_waits_up_to_180_s_by_default():
-    assert REBOOT_WAIT_S_LINUX == 180.0
+#: FIX-PACK-2 item 7: stage0's 10 s DDR settle put a cold Linux MCC boot at ~190 s median to
+#: answer 6900 (188.6 s max measured). This fake MCC comes back at ~190 s.
+BOOT_S_190 = 197.5
+
+
+def test_a_linux_board_reboot_waits_up_to_300_s_by_default():
+    assert REBOOT_WAIT_S_LINUX == 300.0
     clock = FakeClock()
     ctl = controller(slow_mcc(clock, boot_s=150.0), clock, "linux")
     out = ctl.reboot()                                  # no wait_s: the pack's budget
-    # up after ~145 s: past the bare-metal 120 s, inside the Linux 180 s
+    # up after ~145 s: past the bare-metal 120 s, inside the Linux 300 s
     assert 120 < out["up_after_s"] < 180 and ctl.last_reboot.boot.fpga_configured
+
+
+def test_a_linux_board_up_at_190_s_passes_the_default_budget():
+    """FIX-PACK-2 item 7: tomorrow's D4 (a cold MCC boot with stage0's DDR settle)."""
+    clock = FakeClock()
+    ctl = controller(slow_mcc(clock, boot_s=BOOT_S_190), clock, "linux")
+    out = ctl.reboot()                                  # no wait_s: the pack's budget
+    assert 189 < out["up_after_s"] < 192 and ctl.last_reboot.boot.fpga_configured
+
+
+def test_twin_the_old_180_s_budget_fails_on_the_board_up_at_190_s():
+    clock = FakeClock()
+    ctl = controller(slow_mcc(clock, boot_s=BOOT_S_190), clock, "linux")
+    with pytest.raises(ActionFailedError, match="within 180s"):
+        ctl.reboot(wait_s=180.0)                        # what MCC-FIX's default was
 
 
 def test_twin_bare_metal_keeps_its_120_s_budget():
@@ -106,7 +126,7 @@ def spy_reboot(fake: FakeEngine, result: dict | None) -> list:
 def test_the_cli_leaves_the_wait_to_the_board_when_wait_is_not_given(fake, capsys):
     seen = spy_reboot(fake, None)
     assert main(["--json", "mcc", T, "reboot", "--yes"]) == ExitCode.OK
-    assert seen == [None]                   # the pack picks 180 s Linux / 120 s bare metal
+    assert seen == [None]                   # the pack picks 300 s Linux / 120 s bare metal
 
 
 def test_twin_the_cli_passes_an_explicit_wait_and_refuses_a_bad_one(fake, capsys):

@@ -426,6 +426,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # QUIET-POLL's viewer routes (docs/API.md "Background reads"): the demo's gate.
     from .qp_mock_quiet import register as register_quiet
     app.state.quiet = register_quiet(app, state, _ok)
+    # FIX-PACK-2: the service's own tool variables (docs/API.md), scripted.
+    from .fp2_mock_env import register as register_env
+    register_env(app, _ok)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)
@@ -881,7 +884,8 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         adapter = state.session(bid).controller
         if adapter is None:
             raise UnavailableError(C.REBOOT_BOARD, "needs the Debug USB cable, a networked "
-                                                   "power plug, or the J7 mod + 'mcc' firmware")
+                                                   "power plug, or harness firmware with "
+                                                   "'mccif' or 'mcc_local' (net-protocol v0.18)")
         # No wait_s: the adapter picks it by harness implementation (T12: Linux waits longer).
         wait_s = float(body["wait_s"]) if body.get("wait_s") is not None else None
         return _accepted(state.jobs.start(

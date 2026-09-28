@@ -92,7 +92,7 @@ def test_driver_enters_debug_for_cfg_and_leaves_with_exit():
     (temp,) = ctl.temperatures()
     assert temp.available and temp.value == 35.5
     assert (temp.name, temp.unit, temp.source) == ("mcc_temp", "degC", "mcc-console")
-    assert "unverified" in temp.reason and "IOFPGA_TMP" in temp.reason
+    assert temp.reason == "the SLR0 die diode via U53 (MPS3 schematic p4); not ambient"
     assert mcc.accepted_lines == ["DEBUG", "CFG R TEMP 0", "EXIT"]
     assert mcc.menu == "main"                   # the next REBOOT lands in the main menu
 

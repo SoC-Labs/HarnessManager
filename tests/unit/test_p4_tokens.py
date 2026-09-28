@@ -36,7 +36,8 @@ G = _load()
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     """A copy of every file the generator reads or writes."""
-    for rel in (G.TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.APP_CSS, G.INDEX_HTML):
+    for rel in (G.TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.GLYPHS_OUT, G.APP_CSS,
+                G.INDEX_HTML):
         dst = tmp_path / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO / rel, dst)
@@ -140,7 +141,8 @@ def test_index_html_must_load_tokens_css_before_app_css(tree):
 
 
 def test_a_windows_checkout_with_crlf_line_ends_is_fresh(tree):
-    for rel in (G.TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.APP_CSS, G.INDEX_HTML):
+    for rel in (G.TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.GLYPHS_OUT, G.APP_CSS,
+                G.INDEX_HTML):
         p = tree / rel
         p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
     assert G.check(tree) == []
@@ -249,3 +251,77 @@ def test_tokens_css_has_the_same_two_dark_blocks():
     forced = css[css.index(':root[data-theme="dark"] {'):]
     body = re.compile(r"--[a-z0-9-]+: [^;]+;")
     assert body.findall(media) == body.findall(forced) != []
+
+
+# --- clcd_glyphs.h: the panel's extension glyphs (FIX-PACK-2 item 8) ------------------------------
+
+
+def _glyph_bitmaps(text: str) -> list[list[int]]:
+    body = text.split("font8x16_ext[CLCD_FONT_EXT_COUNT][16] = {", 1)[1].split("};", 1)[0]
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+    return [[int(v, 16) for v in re.findall(r"0x([0-9A-F]{2})", blk)]
+            for blk in re.findall(r"\{([^{}]*)\}", body)]
+
+
+def _load_mock():
+    spec = importlib.util.spec_from_file_location("clcd_mock_fp2", REPO / "tools" / "clcd_mock.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["clcd_mock_fp2"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_glyph_header_is_the_one_table_the_mock_renders_with():
+    mock = _load_mock()
+    table = G.CLCD_GLYPHS
+    assert {n: (ch, rows) for n, (ch, rows) in mock.GLYPHS.items()} == table   # one table
+    assert [ord(ch) for ch, _ in table.values()] == list(range(0x80, 0x87))
+    text = (REPO / G.GLYPHS_OUT).read_text()
+    assert _glyph_bitmaps(text) == [rows for _ch, rows in table.values()]
+    assert f'#define CLCD_GLYPHS_SHA256 "{G.glyphs_sha256()}"' in text
+    assert "#define CLCD_FONT_EXT_FIRST 0x80" in text and "#define CLCD_FONT_EXT_COUNT 7" in text
+    assert "#define CLCD_GLYPH_HELD 0x83" in text
+    # the header comment: the source commit, the generator command, who vendors it
+    assert re.search(r"^ \* source commit:  [0-9a-f]{12}", text, re.M)
+    assert "Regenerate in Harness Manager: python3 tools/gen_tokens.py" in text
+    assert "vendored by the Linux harness (firmware/clcd/HM_VENDORED.md)" in text
+
+
+def test_a_bitmap_edited_in_the_generated_glyph_header_fails_the_gate(tree):
+    _edit(tree / G.GLYPHS_OUT, "        0x8C, /* #...##.. */", "        0x8D, /* #...##.# */")
+    assert G.check(tree) == ["design/generated/clcd_glyphs.h is stale (it does not match "
+                             "tools/gen_tokens.py CLCD_GLYPHS): run: python3 tools/gen_tokens.py"]
+    tool = str(REPO / "tools" / "gen_tokens.py")
+    bad = subprocess.run([sys.executable, tool, "--check", "--root", str(tree)],
+                         capture_output=True, text=True, timeout=60)
+    assert bad.returncode == 1 and "clcd_glyphs.h is stale" in bad.stderr
+    assert G.write(tree) == [G.GLYPHS_OUT] and G.check(tree) == []
+
+
+def test_twin_the_source_commit_line_alone_is_not_drift_and_is_not_rewritten(tree):
+    path = tree / G.GLYPHS_OUT
+    text = path.read_text()
+    moved = re.sub(r"^( \* source commit:  ).*$", r"\g<1>0123456789ab", text, flags=re.M)
+    assert moved != text
+    path.write_text(moved)
+    assert G.check(tree) == [] and G.write(tree) == []
+    assert path.read_text() == moved                        # a new HEAD alone rewrites nothing
+
+
+def test_the_glyph_header_compiles_as_c99_and_holds_the_table(tmp_path):
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+    if cc is None:
+        pytest.skip("no C compiler on PATH")
+    src = tmp_path / "g.c"
+    src.write_text('#include <stdio.h>\n#include "clcd_glyphs.h"\n#include "clcd_palette.h"\n'
+                   "int main(void) {\n  for (int g = 0; g < CLCD_FONT_EXT_COUNT; g++) {\n"
+                   '    for (int y = 0; y < 16; y++) printf("%02X", font8x16_ext[g][y]);\n'
+                   '    printf(" %02X\\n", CLCD_FONT_EXT_FIRST + g);\n  }\n  return 0;\n}\n')
+    exe = tmp_path / "g"
+    subprocess.run([cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-pedantic",
+                    "-I", str(REPO / G.GLYPHS_OUT.parent), str(src), "-o", str(exe)],
+                   check=True, capture_output=True, timeout=60)
+    out = subprocess.run([str(exe)], check=True, capture_output=True, text=True, timeout=30).stdout
+    want = ["".join(f"{b:02X}" for b in rows) + f" {ord(ch):02X}"
+            for ch, rows in G.CLCD_GLYPHS.values()]
+    assert out.split("\n")[:-1] == want

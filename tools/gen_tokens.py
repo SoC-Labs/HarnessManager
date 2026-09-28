@@ -10,6 +10,13 @@ written down. This script generates, from it:
 - ``design/generated/clcd_palette.h``: the panel roles as RGB565 words for the Linux
   harness's panel renderer (decision P3: the panel palette changes there only). Its header
   carries the ``tokens.json`` sha256; the platform vendors it unchanged.
+- ``design/generated/clcd_glyphs.h`` (FIX-PACK-2 item 8): the panel's extension glyphs
+  0x80-0x86 as 8x16 bitmaps, from ``CLCD_GLYPHS`` below, the ONE glyph table
+  (``tools/clcd_mock.py`` renders with it). The Linux harness vendors it with
+  ``clcd_palette.h`` (firmware/clcd/HM_VENDORED.md) in place of generating its own
+  ``font8x16_ext.h``. Its header names the glyphs' sha256 and the Harness Manager commit it
+  was generated at; that one line is left out of the drift comparison (a file cannot hold
+  the commit that adds it, and every later commit would otherwise make it stale).
 
 ``--check`` is the drift gate (``make check``): it fails when an output is stale or
 missing, or when ``app.css`` has colours of its own: a token it redefines, a colour
@@ -30,6 +37,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -39,6 +47,7 @@ TOKENS = Path("design/tokens.json")
 CSS_OUT = Path("src/harness_manager/web/static/css/tokens.css")
 PALETTE_OUT = Path("design/generated/palette.json")
 HEADER_OUT = Path("design/generated/clcd_palette.h")
+GLYPHS_OUT = Path("design/generated/clcd_glyphs.h")
 APP_CSS = Path("src/harness_manager/web/static/css/app.css")
 INDEX_HTML = Path("src/harness_manager/web/static/index.html")
 JS_DIR = Path("src/harness_manager/web/static/js")
@@ -349,22 +358,128 @@ def render_header(tokens: dict, sha: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- clcd_glyphs.h: the panel's extension glyphs (FIX-PACK-2 item 8) -----------------------------
+
+GLYPH_FIRST = 0x80
+#: The front panel's PROPOSED status glyphs for the Linux renderer's extended font, from
+#: 0x80 in this order, each an 8x16 stand-in for the lucide icon the web UI uses for the same
+#: state. Rows not listed are blank; "#" is a lit pixel, bit 7 the leftmost. THE ONE TABLE:
+#: tools/clcd_mock.py renders with it and clcd_glyphs.h carries it to the Linux harness.
+CLCD_GLYPH_ART: dict[str, dict[int, str]] = {
+    "ok": {4: "......#.", 5: ".....##.", 6: ".....#..", 7: "#...##..", 8: "##.##...",
+           9: ".###....", 10: "..#....."},
+    "err": {4: "##...##.", 5: "###.###.", 6: ".#####..", 7: "..###...", 8: ".#####..",
+            9: "###.###.", 10: "##...##."},
+    "warn": {2: "...#....", 3: "..###...", 4: "..#.#...", 5: ".##.##..", 6: ".#.#.#..",
+             7: "##.#.##.", 8: "#..#..#.", 9: "#.....#.", 10: "#..#..#.", 11: "#######."},
+    "held": {2: "..###...", 3: ".#...#..", 4: ".#...#..", 5: ".#...#..", 6: "#######.",
+             7: "#######.", 8: "###.###.", 9: "###.###.", 10: "#######.", 11: "#######."},
+    "user": {2: "..###...", 3: ".#####..", 4: ".#####..", 5: ".#####..", 6: "..###...",
+             8: ".#####..", 9: "#######.", 10: "#######.", 11: "#######."},
+    "unk": {2: "..###...", 3: ".#...#..", 4: ".....#..", 5: "....#...", 6: "...#....",
+            7: "...#....", 9: "...#....", 10: "...#...."},
+    "dot": {5: "..###...", 6: ".#####..", 7: ".#####..", 8: ".#####..", 9: "..###..."},
+}
+GENERATE_GLYPHS = "python3 tools/gen_tokens.py"
+VENDORED_BY = "vendored by the Linux harness (firmware/clcd/HM_VENDORED.md)"
+_COMMIT_LINE = " * source commit:"
+
+
+def _art(rows: dict[int, str]) -> list[int]:
+    out = [0] * 16
+    for r, s in rows.items():
+        out[r] = int(s.replace(".", "0").replace("#", "1"), 2)
+    return out
+
+
+#: name -> (the character, 16 scanlines): what tools/clcd_mock.py's ``GLYPHS`` is.
+CLCD_GLYPHS: dict[str, tuple[str, list[int]]] = {
+    name: (chr(GLYPH_FIRST + i), _art(rows)) for i, (name, rows) in enumerate(CLCD_GLYPH_ART.items())}
+
+
+def glyphs_sha256(glyphs: dict[str, tuple[str, list[int]]] | None = None) -> str:
+    """The bitmaps' fingerprint: sha256 of every scanline byte, in code order."""
+    glyphs = CLCD_GLYPHS if glyphs is None else glyphs
+    return hashlib.sha256(bytes(b for _ch, rows in glyphs.values() for b in rows)).hexdigest()
+
+
+def source_commit(root: Path = ROOT) -> str:
+    """The Harness Manager commit the glyphs are generated at (``+`` uncommitted changes to
+    this generator), or why it is not known."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                              timeout=10, check=True).stdout.strip()
+    try:
+        head = git("rev-parse", "--short=12", "HEAD")
+        dirty = git("status", "--porcelain", "--", "tools/gen_tokens.py")
+    except (OSError, subprocess.SubprocessError):
+        return "unknown (not a git checkout)"
+    return f"{head}{' (+ changes to tools/gen_tokens.py not yet committed)' if dirty else ''}"
+
+
+def render_glyphs(commit: str = "") -> str:
+    sha = glyphs_sha256()
+    names = list(CLCD_GLYPHS)
+    lines = [
+        "/* clcd_glyphs.h: the MPS3 front panel's extension glyphs, 0x80-0x86, as 8x16 bitmaps.",
+        " *",
+        " * GENERATED by Harness Manager tools/gen_tokens.py from its CLCD_GLYPHS table (the one",
+        " * glyph table: tools/clcd_mock.py renders with it): do not edit.",
+        f" * Regenerate in Harness Manager: {GENERATE_GLYPHS}",
+        f" * This file is {VENDORED_BY}, with clcd_palette.h.",
+        " *",
+        f"{_COMMIT_LINE}  {commit or 'unknown'}",
+        f" * glyphs sha256:  {glyphs_sha256()}",
+        " * layout:         16 scanlines per glyph, top first; bit 7 = the leftmost pixel",
+        " *",
+        " * font8x16_ext[c - CLCD_FONT_EXT_FIRST] is the bitmap of character c.",
+        " */",
+        "#ifndef CLCD_GLYPHS_H",
+        "#define CLCD_GLYPHS_H",
+        "",
+        "#include <stdint.h>",
+        "",
+        f"#define CLCD_GLYPHS_SHA256 \"{sha}\"",
+        f"#define CLCD_FONT_EXT_FIRST 0x{GLYPH_FIRST:02X}",
+        f"#define CLCD_FONT_EXT_COUNT {len(names)}",
+        "",
+    ]
+    width = max(len(n) for n in names)
+    for name, (ch, _rows) in CLCD_GLYPHS.items():
+        lines.append(f"#define CLCD_GLYPH_{name.upper().ljust(width)} 0x{ord(ch):02X}")
+    lines += ["", "static const uint8_t font8x16_ext[CLCD_FONT_EXT_COUNT][16] = {"]
+    for name, (ch, rows) in CLCD_GLYPHS.items():
+        lines.append(f"    /* 0x{ord(ch):02X} {name} */ {{")
+        for b in rows:
+            art = format(b, "08b").replace("0", ".").replace("1", "#")
+            lines.append(f"        0x{b:02X}, /* {art} */")
+        lines.append("    },")
+    lines += ["};", "", "#endif /* CLCD_GLYPHS_H */"]
+    return "\n".join(lines) + "\n"
+
+
+def _compared(text: str) -> str:
+    """What the drift gate compares: everything but the source-commit line."""
+    return "\n".join(ln for ln in text.split("\n") if not ln.startswith(_COMMIT_LINE))
+
+
 # --- generate and check ----------------------------------------------------------------------
 
 
-def outputs(tokens: dict, raw: bytes) -> dict[Path, str]:
+def outputs(tokens: dict, raw: bytes, commit: str = "") -> dict[Path, str]:
     sha = sha256_of(raw)
     return {CSS_OUT: render_css(tokens, sha), PALETTE_OUT: render_palette(tokens, sha),
-            HEADER_OUT: render_header(tokens, sha)}
+            HEADER_OUT: render_header(tokens, sha), GLYPHS_OUT: render_glyphs(commit)}
 
 
 def write(root: Path = ROOT) -> list[Path]:
-    """Write every output that differs from what is on disk; the paths written."""
+    """Write every output that differs from what is on disk (the source-commit line alone is
+    no difference); the paths written."""
     tokens, raw = load(root)
     written = []
-    for rel, text in outputs(tokens, raw).items():
+    for rel, text in outputs(tokens, raw, source_commit(root)).items():
         path = root / rel
-        if path.is_file() and text_of(path.read_bytes()) == text:
+        if path.is_file() and _compared(text_of(path.read_bytes())) == _compared(text):
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
@@ -461,8 +576,10 @@ def check(root: Path = ROOT) -> list[str]:
         path = root / rel
         if not path.is_file():
             problems.append(f"{rel.as_posix()} is missing: {REGENERATE}")
-        elif text_of(path.read_bytes()) != text:
-            problems.append(f"{rel.as_posix()} is stale (it does not match {TOKENS.as_posix()}): "
+        elif _compared(text_of(path.read_bytes())) != _compared(text):
+            source = ("tools/gen_tokens.py CLCD_GLYPHS" if rel == GLYPHS_OUT
+                      else TOKENS.as_posix())
+            problems.append(f"{rel.as_posix()} is stale (it does not match {source}): "
                             f"{REGENERATE}")
     problems += app_css_problems(text_of((root / APP_CSS).read_bytes()), tokens)
     problems += reference_problems(root, tokens)

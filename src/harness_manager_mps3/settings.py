@@ -206,35 +206,35 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
         _row("mps3.overlay_dirs", "list", [], "Harness + kits",
              "Extra overlay directories, searched first", at="overlays.py:317",
              env="HARNESS_MANAGER_MPS3_OVERLAY_DIRS", env_split="pathsep"),
-        # C1: the pack's kwarg console_pace_s (pack.py:318), paced consoles constants.py:31
+        # C1: the pack's kwarg console_pace_s (pack.py:375), paced consoles constants.py:31
         _row("mps3.console.pace_ms", "int", round(console_pace_s * 1000), "Consoles",
              "Delay between characters typed into the DUT's UARTs (0: none; the nanoSoC "
-             "UART has no receive FIFO)", at="pack.py:318", scope="pack", apply="reopen",
+             "UART has no receive FIFO)", at="pack.py:375", scope="pack", apply="reopen",
              check=_ms(0, 500)),
         # C2: MccTiming.pace_s over the Debug USB; SHARE_PACE_S across a hub share
         _row("mps3.mcc.pace_ms", "int", round(mcc_pace_s * 1000), "Consoles",
              "Delay between characters sent to the MCC over the Debug USB",
-             at="mcc.py:123", scope="pack", apply="reopen", advanced=True,
+             at="mcc.py:132", scope="pack", apply="reopen", advanced=True,
              check=_ms(50, 1000, " (the MCC drops faster input)")),
         _row("mps3.mcc.share_pace_ms", "int", round(share_pace_s * 1000), "Consoles",
              "Delay between characters sent to the MCC across a hub share",
-             at="mcc.py:140", scope="pack", apply="reopen", advanced=True,
+             at="mcc.py:150", scope="pack", apply="reopen", advanced=True,
              check=_ms(50, 1000, " (the MCC drops faster input)")),
-        # D4: the pack's kwarg rbb_port (pack.py:316), via --pack-overrides (daemon start passes it on)
+        # D4: the pack's kwarg rbb_port (pack.py:373), via --pack-overrides (daemon start passes it on)
         _row("mps3.rbb_port", "int", rbb_port, "Debug",
-             "The board's remote_bitbang JTAG port", at="pack.py:316", scope="pack",
+             "The board's remote_bitbang JTAG port", at="pack.py:373", scope="pack",
              owner="dev", apply="restart", check=_port),
         # D5
         _row("mps3.xvc_port", "int", _c.XVC_PORT, "Debug",
-             "The XVC port of a board reached directly", at="xvc.py:330", scope="pack",
+             "The XVC port of a board reached directly", at="xvc.py:340", scope="pack",
              owner="dev", env="HARNESS_MANAGER_MPS3_XVC_PORT", check=_port),
         # X4-X5
         _row("mps3.identify.port", "int", _c.IDENTIFY_PORT, "Advanced",
-             "The identify probe's UDP port", at="identify.py:78", scope="pack",
+             "The identify probe's UDP port", at="identify.py:79", scope="pack",
              owner="dev", env="HARNESS_MANAGER_MPS3_IDENTIFY_PORT", check=_port),
         _row("mps3.identify.broadcast", "list", [], "Advanced",
              "Discovery targets, addr[:port] (empty: 255.255.255.255 and "
-             f"{_c.DEFAULT_SHELL_HOST}; a list replaces both)", at="identify.py:94",
+             f"{_c.DEFAULT_SHELL_HOST}; a list replaces both)", at="identify.py:95",
              scope="pack", owner="dev", env="HARNESS_MANAGER_MPS3_IDENTIFY_BROADCAST"),
         # X6-X8
         _row("mps3.push_port", "int", push_port, "Advanced",
@@ -274,13 +274,13 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
         # B17-B18
         _row("boards.*.xvc.reach", "enum", "auto", "Boards",
              "How XVC reaches the harness: through the hub's tunnel, board SSH or directly",
-             at="xvc.py:152", scope="board", apply="reopen", choices=reach),
+             at="xvc.py:153", scope="board", apply="reopen", choices=reach),
         _row("boards.*.xvc.user", "str", "", "Boards",
              "The board-SSH user for XVC (empty: the board's SSH link, else root)",
-             at="xvc.py:327", scope="board", apply="reopen", check=_word("user name")),
+             at="xvc.py:337", scope="board", apply="reopen", check=_word("user name")),
         _row("boards.*.xvc.host", "str", "", "Boards",
              "The board-SSH host for XVC (empty: the board's own address)",
-             at="xvc.py:156", scope="board", apply="reopen", advanced=True,
+             at="xvc.py:157", scope="board", apply="reopen", advanced=True,
              check=_word("host name")),
         # B19-B20: SYSMON over JTAG (xsdb through hw_server, or an OpenOCD adapter)
         _row("boards.*.sysmon.backend", "enum", "xsdb", "Boards",

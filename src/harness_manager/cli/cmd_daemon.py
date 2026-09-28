@@ -32,7 +32,7 @@ from harness_manager.core.errors import ExitCode, UsageError
 from .context import Ctx
 from .output import TSV_COLUMNS, Result, tsv_field
 
-DAEMON_COLUMNS = ("STATE", "PID", "PORT", "URL", "STATE_DIR")
+DAEMON_COLUMNS = ("STATE", "PID", "PORT", "URL", "STATE_DIR", "ENV_WARNING")   # +FIX-PACK-2
 UI_COLUMNS = ("URL", "PORT", "PID", "STARTED")
 APP_COLUMNS = ("URL", "PORT", "PID", "STARTED", "WINDOW")
 
@@ -213,8 +213,33 @@ def cmd_daemon(ctx: Ctx) -> int:
         human.append(f"boards     {st['boards_open']} open")
     if st.get("detail"):
         human.append(f"detail     {st['detail']}")
+    human += _env_lines(st)
     _emit(ctx, Result("daemon", st, rows=[_row(st)], human=human))
     return ExitCode.OK
+
+
+def _env_lines(st: dict) -> list[str]:
+    """FIX-PACK-2 item 6: the service's own variables (what it STARTED with, from the shell
+    that started it), each setting one overrides, and the warning when a tool variable hides
+    your own setting."""
+    env = st.get("env")
+    if env is None:
+        return []
+    if not env:
+        return ["env        no HARNESS_MANAGER_* or tool variables in the service's environment"]
+    by_var = {o.get("var"): o for o in st.get("env_overrides") or []}
+    lines = []
+    for var, value in env.items():
+        o = by_var.get(var)
+        what = ""
+        if o is not None:
+            what = (f"  (sets {o['key']}; hides your own value)" if o.get("hides_yours")
+                    else f"  (sets {o['key']})" if o.get("in_effect")
+                    else f"  ({o['key']}: not in effect)")
+        lines.append(f"env        {var}={value}{what}")
+    if st.get("env_warning"):
+        lines.append(f"warning    {st['env_warning']}")
+    return lines
 
 
 def _emit(ctx: Ctx, result: Result) -> None:
@@ -241,7 +266,7 @@ def can_open_browser() -> bool:
 
 def _row(data: dict) -> list:
     return [data.get("state"), data.get("pid"), data.get("port"), data.get("url"),
-            data.get("state_dir")]
+            data.get("state_dir"), data.get("env_warning", "")]
 
 
 def cmd_ui(ctx: Ctx) -> int:

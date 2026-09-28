@@ -156,6 +156,31 @@ owners.
 - The board controller (MCC) over the Debug USB: temperatures, oscillators, a reboot
   that proves the board came back, and allowlisted commands (destructive ones are
   refused).
+- "Find boards on the network" is available on any Ethernet link where the board answers
+  identify (UDP 6899). It needed a harness feature `identify` that no image lists, so it
+  was unavailable everywhere. Through a hub it says "not through a hub" (UDP does not
+  cross the tunnel).
+- A hub's Test connection checks the group the way Harness Manager uses it, `sg fpga -c
+  true`. On the lab hub `id -Gn` misses `fpga` (a stale group cache) while `sg fpga` works:
+  that is now a pass with a note, not a failure.
+- `xvc status` (and Debug > Fabric) says what the board reports now: a board found by UDP
+  identify, or read while another client held its control port, no longer says "needs
+  harness firmware with 'xvc_dbgbr'" while the board reports it.
+- `harness-manager daemon status`, Settings → Advanced and a warning line in the app show
+  the tool variables the service started with (`HARNESS_MANAGER_*`). The service keeps
+  the environment of the shell that started it, so a `HARNESS_MANAGER_OPENOCD` from an old
+  terminal could override your OpenOCD setting unseen; the app now says so, and names the
+  way out (stop the service, start it from a clean shell).
+- Ready for net-protocol v0.18 (mint 4): a harness that lists `mccif` (in-fabric SCC) or
+  `mcc_local` (USB loopback) offers board reboot and oscillators without the Debug USB,
+  gated on the route its `mcc status` reports. Rebooting and oscillators over the harness
+  say "pending v0.18" until Harness Manager drives them; the Debug USB and the hub work as
+  before.
+- The MCC temperature says what it measures: "the SLR0 die diode via U53 (MPS3 schematic
+  p4); not ambient" (was "sensor identity unverified").
+- A reboot of a Linux board waits up to 300 s by default (was 180 s): with the Linux
+  lead's stage0 DDR settle, a cold MCC boot answers after ~190 s. Bare metal keeps 120 s;
+  `--wait` still overrides both.
 - The configuration SD: backup, install and restore. A backup comes first, `.ebf` files
   are never written, and an interrupted install can be recovered.
 - Board power from a networked plug (Shelly, Tasmota, NETIO) or an INA260, set in
@@ -273,6 +298,10 @@ owners.
   'locate')" and "this harness image doesn't report who is connected (harness feature
   'presence')" in the app, `panel show`, `identify` and the API. `panel show` adds
   `harness` (from `version.impl`) and one `missing` line.
+- `tools/gen_tokens.py` also generates `design/generated/clcd_glyphs.h`: the panel's
+  extension glyphs 0x80-0x86 as 8x16 bitmaps, from the one glyph table the panel mock
+  uses, for the Linux harness to vendor beside `clcd_palette.h`; `make check` fails when
+  it drifts.
 
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key

@@ -24,8 +24,8 @@ Hardware facts this driver is built on, with their sources:
    DEBUG for CFG commands and always leaves with EXIT, so the next REBOOT is
    typed at the main menu (fpgahub mcc.py ``debug()``).
 4. **Replies** (live board, 2026-07-14 and 2026-09-23):
-   ``CFG R TEMP 0`` -> ``MB Device 0 Temp: 35.5 degC`` (the sensor is probably
-   the FPGA die via IOFPGA_TMP; unverified);
+   ``CFG R TEMP 0`` -> ``MB Device 0 Temp: 35.5 degC``: the SLR0 die's temperature
+   diode, read through U53 (MPS3 schematic p4), not the ambient (``TEMP_CAVEAT``);
    ``CFG R OSC n`` -> ``MB OSC<n> clock read = 25.000 MHz`` (a set-point, not
    a measurement);
    ``CFG R V n`` -> ``ERROR: Unable to perform requested function`` on every
@@ -91,7 +91,8 @@ log = logging.getLogger(__name__)
 
 MCC_BAUD = 115200            # 8N1 (fpgahub tty_share.SerialConfig)
 PROMPT_RE = re.compile(r"(Cmd|Debug)>\s*$")
-TEMP_CAVEAT = "sensor identity unverified (probably FPGA die via IOFPGA_TMP)"
+#: What ``CFG R TEMP 0`` measures (FIX-PACK-2, david 2026-09-28, from the MPS3 schematic).
+TEMP_CAVEAT = "the SLR0 die diode via U53 (MPS3 schematic p4); not ambient"
 OSC_CAVEAT = "the MCC reports the programmed set-point, not a measured frequency"
 OSC_COUNT = 6                # OSC0..OSC5 answer CFG R OSC (boot log OSCCLK0..5)
 

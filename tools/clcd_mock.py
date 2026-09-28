@@ -64,37 +64,6 @@ def parse_font_header(text: str) -> list[list[int]]:
     return [vals[i * 16:(i + 1) * 16] for i in range(95)]
 
 
-def _art(rows: dict[int, str]) -> list[int]:
-    out = [0] * 16
-    for r, s in rows.items():
-        out[r] = int(s.replace(".", "0").replace("#", "1"), 2)
-    return out
-
-
-#: PROPOSED status glyphs for a Linux renderer's extended font (0x80-0x86), each an
-#: 8x16 stand-in for the lucide icon the web UI uses for the same state.
-GLYPHS: dict[str, tuple[str, list[int]]] = {
-    "ok": ("\x80", _art({4: "......#.", 5: ".....##.", 6: ".....#..", 7: "#...##..",
-                         8: "##.##...", 9: ".###....", 10: "..#....."})),
-    "err": ("\x81", _art({4: "##...##.", 5: "###.###.", 6: ".#####..", 7: "..###...",
-                          8: ".#####..", 9: "###.###.", 10: "##...##."})),
-    "warn": ("\x82", _art({2: "...#....", 3: "..###...", 4: "..#.#...", 5: ".##.##..",
-                           6: ".#.#.#..", 7: "##.#.##.", 8: "#..#..#.", 9: "#.....#.",
-                           10: "#..#..#.", 11: "#######."})),
-    "held": ("\x83", _art({2: "..###...", 3: ".#...#..", 4: ".#...#..", 5: ".#...#..",
-                           6: "#######.", 7: "#######.", 8: "###.###.", 9: "###.###.",
-                           10: "#######.", 11: "#######."})),
-    "user": ("\x84", _art({2: "..###...", 3: ".#####..", 4: ".#####..", 5: ".#####..",
-                           6: "..###...", 8: ".#####..", 9: "#######.", 10: "#######.",
-                           11: "#######."})),
-    "unk": ("\x85", _art({2: "..###...", 3: ".#...#..", 4: ".....#..", 5: "....#...",
-                          6: "...#....", 7: "...#....", 9: "...#....", 10: "...#...."})),
-    "dot": ("\x86", _art({5: "..###...", 6: ".#####..", 7: ".#####..", 8: ".#####..",
-                          9: "..###..."})),
-}
-G = {name: ch for name, (ch, _rows) in GLYPHS.items()}
-
-
 def load_font(path: Path = FONT_PATH) -> dict[str, list[int]]:
     data = json.loads(path.read_text())
     font = {chr(0x20 + i): g for i, g in enumerate(data["glyphs"])}
@@ -118,6 +87,13 @@ def _gen_tokens():
 _GT = _gen_tokens()
 rgb565, rgb565_hex, resolve, panel_palette = _GT.rgb565, _GT.rgb565_hex, _GT.resolve, _GT.panel_palette
 css_block = _GT.css_block
+
+#: PROPOSED status glyphs for a Linux renderer's extended font (0x80-0x86), each an 8x16
+#: stand-in for the lucide icon the web UI uses for the same state. FIX-PACK-2 item 8: the
+#: ONE table is ``tools/gen_tokens.py``'s ``CLCD_GLYPHS``, which also generates
+#: ``design/generated/clcd_glyphs.h`` for the Linux harness; this mock renders with it.
+GLYPHS: dict[str, tuple[str, list[int]]] = _GT.CLCD_GLYPHS
+G = {name: ch for name, (ch, _rows) in GLYPHS.items()}
 
 
 def load_tokens(path: Path = TOKENS_PATH) -> dict:

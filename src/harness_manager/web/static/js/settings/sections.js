@@ -304,6 +304,24 @@ function FilesCard() {
   </div>`;
 }
 
+// FIX-PACK-2: the variables the service started with (GET /daemon/env, read at start and on
+// settings.changed): the same list as `harness-manager daemon status`.
+function ServiceEnvCard() {
+  const e = S.serviceEnv;
+  if (!e) return null;
+  const env = e.env || {};
+  const by = Object.fromEntries((e.overrides || []).map((o) => [o.var, o]));
+  const names = Object.keys(env);
+  const what = (o) => (o.hides_yours ? `sets ${o.key}; hides your own value` : o.in_effect ? `sets ${o.key}` : `${o.key}: not in effect`);
+  return html`<div class="sgroup" data-testid="service-env">
+    <div class="sgroup-head"><h3>The service's environment</h3><span class="muted small">what it started with (the shell that started it, not yours); the same as <code>harness-manager daemon status</code></span></div>
+    ${e.warning ? html`<${Reason} level="warn" testid="service-env-warning" text=${e.warning} />` : null}
+    ${names.length ? html`<dl class="kv">${names.map((n) => html`<dt key=${`t${n}`} class="mono small-text">${n}</dt>
+        <dd key=${`d${n}`} class="mono small-text" data-var=${n}>${env[n]}${by[n] ? html`<div class="sub">${what(by[n])}</div>` : null}</dd>`)}</dl>`
+      : html`<p class="muted small" data-testid="service-env-none">No HARNESS_MANAGER_* or tool variables: every setting comes from your files.</p>`}
+  </div>`;
+}
+
 // One spelling for a directory before two are compared: "\\" as "/", no trailing "/"
 // (a Windows service reports C:\\Users\\me\\..., the row may say C:/Users/me/...; REVIEW-W5 17).
 export function sameDir(a, b) {
@@ -393,7 +411,7 @@ export function SettingsSectionBody({ updatesCard = null }) {
         (<code>-c "adapter list"</code>), which must include remote_bitbang; hw_server is never
         run.</p>`} />`;
     case "advanced":
-      return html`<${GenericSection} id="advanced" extras=${stateDirExtras()} after=${html`<${FilesCard} />`} />`;
+      return html`<${GenericSection} id="advanced" extras=${stateDirExtras()} after=${html`<${FilesCard} /><${ServiceEnvCard} />`} />`;
     default:
       return html`<${GenericSection} id=${id} />`;
   }

@@ -46,7 +46,7 @@ from .output import TSV_COLUMNS, Result, with_data
 
 HUB_TSV: dict[str, tuple[str, ...]] = {
     "hub": ("NAME", "TRANSPORT", "WHERE", "MACHINE", "TOKEN", "BOARDS"),
-    "hub test": ("HUB", "STEP", "OK", "DETAIL", "HINT"),
+    "hub test": ("HUB", "STEP", "OK", "DETAIL", "HINT", "NOTE"),     # NOTE: FIX-PACK-2
     "hub targets": ("HUB", "BOARD", "TARGET", "ROLE", "USED_BY"),
     "hub change": ("HUB", "ACTION", "BOARD", "DETAIL"),
 }
@@ -318,7 +318,9 @@ def _remove(ctx: Ctx, r: Any) -> int:
 def _step_line(s: dict[str, Any]) -> str:
     mark = "ok  " if s["ok"] else "FAIL"
     line = f"  {mark} {s['step']:<8} {s['detail']}"
-    return line + (f"  [{s['ms']} ms]" if s.get("ms") else "")
+    line += f"  [{s['ms']} ms]" if s.get("ms") else ""
+    # FIX-PACK-2: a passed step's note (`id -Gn` disagreeing with `sg`), never a failure
+    return line + (f"\n       {'':<8} note: {s['note']}" if s.get("note") else "")
 
 
 def _test(ctx: Ctx, r: Any) -> int:
@@ -327,8 +329,8 @@ def _test(ctx: Ctx, r: Any) -> int:
     a = ctx.args
     report = hubtest.test_hub(a.name, resolver=r, targets=a.target)
     v = report.view()
-    rows = [[a.name, s["step"], "yes" if s["ok"] else "no", s["detail"], s["hint"]]
-            for s in v["steps"]]
+    rows = [[a.name, s["step"], "yes" if s["ok"] else "no", s["detail"], s["hint"],
+             s.get("note", "")] for s in v["steps"]]
     if report.ok:
         human = [f"hub {a.name} ({v['transport'].upper()}): every step passed"]
         human += [_step_line(s) for s in v["steps"]]

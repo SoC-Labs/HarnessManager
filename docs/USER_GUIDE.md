@@ -146,7 +146,7 @@ it, so you can use both at once. `harness-manager daemon status` shows it.
 | `harness-manager app` | the app in its own window |
 | `harness-manager ui` | the same page in a browser tab |
 | `harness-manager ui --no-browser` | print the URL only (for `ssh -L`) |
-| `harness-manager daemon status` | is the service running, and where |
+| `harness-manager daemon status` | is the service running, and where; the tool variables it started with |
 | `harness-manager daemon stop` | stop it; the next command starts it again |
 | `harness-manager help --tabs` | the help text the app's **Help** shows |
 
@@ -163,7 +163,7 @@ harness-manager info 192.168.10.101
 control    idle
 can        clock_dut, console_dut, debug_dut, deploy_partial, health, identify, reset_dut
 cannot     console_controller: needs the Debug USB cable
-cannot     reboot_board: needs the Debug USB cable, a networked power plug, or the J7 mod + 'mcc' firmware
+cannot     reboot_board: needs the Debug USB cable, a networked power plug, or harness firmware with 'mccif' or 'mcc_local' (net-protocol v0.18)
 cannot     power_cycle: needs a networked power plug in boards.toml (Shelly, Tasmota or NETIO)
 ```
 
@@ -313,8 +313,10 @@ harness-manager hub test lab
 ```
 
 It checks, in order, **config, reach, auth, group, targets, target**, and stops at the first
-failure with the reason and the next step. For example, a login without the `fpga` group
-stops at **group** and prints the admin's `usermod -aG fpga` command.
+failure with the reason and the next step. For example, a login where `sg fpga` does not
+work stops at **group** and prints the admin's `usermod -aG fpga` command. The group step
+checks what Harness Manager really uses, `sg fpga -c true`: when `sg` works but `id -Gn`
+does not list `fpga` (a stale group cache on the hub), the step passes with a note.
 `harness-manager config test hubs lab` runs the same test.
 
 **Step 3: add the board.** List what the hub offers, then add one:
@@ -826,7 +828,11 @@ turns the new one away within 5 seconds of HM's own session, HM retries once by 
   message names the binary and the adapters it has. Install xPack OpenOCD 0.12, then set
   `tools.openocd` (Settings → Tools, or `harness-manager config set tools.openocd PATH`).
   If `HARNESS_MANAGER_OPENOCD` is set, it overrides the setting: point it at the new one
-  or unset it.
+  or unset it. It is the SERVICE's variable that counts, and the service keeps the
+  environment of the shell that started it (an app or `ui` from another shell reuses the
+  running service). `harness-manager daemon status` lists the variables the service
+  started with, as do Settings → Advanced and a warning line in the app. To drop one:
+  `harness-manager daemon stop`, then start the app from a shell without it.
 - **Exit 4, held:** another debugger has the board's JTAG port. The hint may add "or the
   harness's JTAG server is still finishing the previous session": wait a few seconds and
   retry.
@@ -1283,8 +1289,8 @@ after you commit it and reboot, and a rollback puts the other slot back.
 2. Push the image: `harness-manager slot push 192.168.10.101 --bundle ~/release/linux_bundle.json`
 3. Commit it: `harness-manager slot commit 192.168.10.101`
 4. Reboot the board: **Power > Board reboot**, or `harness-manager mcc 192.168.10.101 reboot`.
-   A Linux board gets its own 180 s budget (`--wait` changes it) and takes 2 to 4 minutes to
-   come back. Behind a hub the REBOOT runs on the hub; nothing to start first. The output says
+   A Linux board gets its own 300 s budget (`--wait` changes it) and takes 3 to 4 minutes to
+   come back (a cold boot answers after ~190 s since stage0's DDR settle). Behind a hub the REBOOT runs on the hub; nothing to start first. The output says
    which `.bit` the MCC loaded (`MCC loaded …`).
 5. Check it: `slot status` shows the new slot running and default, and a push now goes to
    the OTHER slot. It says "booted (not yet confirmed)" until the harness reports that

@@ -73,7 +73,7 @@ def plan_for(w):
 def test_os_update_writes_the_inactive_slot_and_confirms(world):
     w = world
     plan = plan_for(w)
-    assert plan.os_slot and not plan.base and plan.reboot_wait_s == 180.0
+    assert plan.os_slot and not plan.base and plan.reboot_wait_s == 300.0
     out = w["installer"].run(w["session"], plan, plan.approve(), w["verified"])
     assert out.result == RESULT_INSTALLED, out.detail
     slots = w["slots"]
@@ -214,7 +214,7 @@ def test_a_two_target_release_writes_the_os_slot_then_the_sd_then_reboots_once(t
                      has_storage=True, has_controller=True, has_os_slots=True,
                      os_active_sha="a" * 64, sd_revisions=("HBI0309C",))
     plan = make_plan(verified.channel, view, app_version="0.1.0")
-    assert plan.base and plan.os_slot and plan.reboot_wait_s == 180.0
+    assert plan.base and plan.os_slot and plan.reboot_wait_s == 300.0
     out = HarnessInstaller(state=state, downloader=dl, store=None).run(
         session, plan, plan.approve(), verified)
     assert out.result == RESULT_INSTALLED, out.detail

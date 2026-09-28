@@ -296,6 +296,11 @@ function Banners({ bid }) {
       <div class="grow"><strong>harness-manager-daemon is not answering.</strong>${" "}The page keeps what it
       last read and retries. Check it with${" "}<code>harness-manager daemon status</code>.</div></div>`);
   }
+  if (S.serviceEnv && S.serviceEnv.warning) {
+    // FIX-PACK-2: a tool variable the service started with hides the user's own setting
+    out.push(html`<div class="banner warn" role="status" key="env" data-testid="env-banner">
+      <${Icon} name="triangle-alert" /><div class="grow">${sentence(S.serviceEnv.warning)}</div></div>`);
+  }
   const b = bid && S.board[bid];
   if (b && b.infoError && b.infoError.errName !== "ABSENT") {
     out.push(html`<div class="banner warn" role="status" key="stale" data-testid="stale-banner">

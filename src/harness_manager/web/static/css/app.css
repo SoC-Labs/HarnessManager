@@ -1182,7 +1182,7 @@ body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; }
 .secret-dots { letter-spacing: 1px; color: var(--text-2); font-size: 11px; }
 .secret-dots.none { letter-spacing: 0; color: var(--text-3); }
 .secret-status { font-size: 12.5px; color: var(--text-2); min-width: 0; overflow-wrap: anywhere; }
-.tool-result .hint, .test-fail .hint { color: var(--text-3); font-size: 12px; }
+.tool-result .hint, .test-fail .hint, .test-notes .hint { color: var(--text-3); font-size: 12px; }
 .hub-card .card-head, .board-card .card-head { gap: 10px; flex-wrap: wrap; }
 .hub-card .card-title .icon, .board-card .card-title .icon { color: var(--accent-text); }
 .ellipsis { min-width: 0; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

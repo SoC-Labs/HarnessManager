@@ -46,8 +46,9 @@ import json
 import os
 import secrets
 import socket
+import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -475,3 +476,85 @@ def probe_identify(hints: ProbeHints, found: Sequence[Candidate]) -> list[Candid
         known_addrs.add(addr)
         out.append(cand)
     return out
+
+
+# --- "Find boards on the network" (FIX-PACK-2 item 1) ---------------------------------
+
+#: How long one probe's answer stands for ``info`` (a silent board is not asked on every read).
+DISCOVER_OK_TTL_S = 60.0
+DISCOVER_FAIL_TTL_S = 30.0
+DISCOVER_TIMEOUT_S = 0.5
+NOT_THROUGH_HUB = ("not through a hub: identify is UDP 6899 on the board's own network, and "
+                   "UDP does not cross the hub's SSH tunnel this board is reached by; run "
+                   "Harness Manager on the board's network to find boards there")
+NOT_THROUGH_TUNNEL = ("not through an SSH tunnel: identify is UDP 6899 on the board's own "
+                      "network, and UDP does not cross the tunnel this board is reached by")
+
+
+def discover_route_reason(session: Any) -> str:
+    """Why this board's route alone rules identify out (``""`` when it does not): a hub, or
+    any other TCP-only tunnel. A HUB link wins, so a hub board says "not through a hub"
+    even when its Ethernet link is marked ``via ssh:HUB``."""
+    from .deploy import is_tunnelled
+    from .tunnel import VIA_HUB, candidate_via
+
+    cand = getattr(session, "candidate", None)
+    links = tuple(getattr(cand, "links", ()) or ())
+    via = candidate_via(cand) if cand is not None else ""
+    if via == VIA_HUB or any(lk.kind == LinkKind.HUB for lk in links):
+        return NOT_THROUGH_HUB
+    if via or getattr(session, "reach", None) is not None or is_tunnelled(session):
+        return NOT_THROUGH_TUNNEL
+    return ""
+
+
+class DiscoverWitness:
+    """Is "Find boards on the network" usable for this board? A successful identify is the
+    proof: one unicast probe to the board's own address (``probe``: ``identify()``, so a
+    test points it at a fake), its answer kept ``DISCOVER_OK_TTL_S`` (a silence
+    ``DISCOVER_FAIL_TTL_S``), so ``info`` does not ask on every read. Every harness image
+    that serves identify answers it (Linux from v0.11, bare metal from FOLD A-v0.12); no
+    image lists an ``identify`` feature, so the feature is never the gate."""
+
+    def __init__(self, probe: Callable[..., Any] | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self._probe = probe
+        self._clock = clock
+        self._mu = threading.Lock()
+        self._last: tuple[str, str, float] | None = None     # (host, reason, at)
+        self.probes = 0                                       # how many were sent (tests)
+
+    def reason(self, session: Any) -> str:
+        """``""`` when a board on this route answered identify recently, else why not."""
+        route = discover_route_reason(session)
+        if route:
+            return route
+        shell = getattr(session, "shell", None)
+        host = str(getattr(shell, "host", "") or "")
+        if not host:
+            return "no Ethernet link to the board"
+        now = self._clock()
+        with self._mu:
+            last = self._last
+        if last is not None and last[0] == host:
+            ttl = DISCOVER_FAIL_TTL_S if last[1] else DISCOVER_OK_TTL_S
+            if now - last[2] < ttl:
+                return last[1]
+        why = self._ask(host)
+        with self._mu:
+            self._last = (host, why, now)
+        return why
+
+    def _ask(self, host: str) -> str:
+        ask = self._probe or identify
+        self.probes += 1
+        try:
+            reply = ask(host, timeout=DISCOVER_TIMEOUT_S, retries=0)
+        except (UnreachableError, UsageError) as exc:
+            return (f"the board did not answer identify from here ({exc.message}); a harness "
+                    "that serves it (Linux v0.11 or later, bare metal FOLD A-v0.12 or later) "
+                    "answers on the board's own network unless something drops UDP 6899")
+        if not getattr(reply, "ok", False):
+            raw = getattr(reply, "raw", None) or {}
+            return f"the board answered identify with a refusal: {raw.get('err') or raw}"
+        return ""

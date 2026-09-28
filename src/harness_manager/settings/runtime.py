@@ -93,6 +93,12 @@ def add_rows(rows: Sequence[Setting], *, pack: str) -> None:
         _schema[0] = None
 
 
+def schema() -> Schema:
+    """Every row this process knows: the core's and each pack's that ``add_rows`` gave
+    (FIX-PACK-2: the service lists the variables its rows name)."""
+    return _layers()[0]
+
+
 def _layers() -> tuple[Schema, dict[str, Any], int]:
     with _mu:
         if _schema[0] is None:

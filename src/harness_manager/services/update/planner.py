@@ -48,9 +48,11 @@ MODE_FULL = "full"            # base and/or OS, plus overlays
 MODE_OVERLAYS = "overlays"    # host store only: no SD write, no reboot
 MODE_NONE = "none"            # nothing to do
 
-#: The witness budget when the RELEASE boots Linux (TEAM_PLAN §4a: 180 s). Otherwise None:
-#: the pack picks it from the running harness (``constants.reboot_wait_s``, T12-6).
-LINUX_REBOOT_WAIT_S = 180.0
+#: The witness budget when the RELEASE boots Linux (TEAM_PLAN §4a said 180 s; FIX-PACK-2
+#: item 7: 300 s, the MPS3 pack's ``REBOOT_WAIT_S_LINUX``, since stage0's DDR settle put a
+#: cold MCC boot at ~190 s). Otherwise None: the pack picks it from the running harness
+#: (``constants.reboot_wait_s``, T12-6).
+LINUX_REBOOT_WAIT_S = 300.0
 
 
 @dataclass(frozen=True)

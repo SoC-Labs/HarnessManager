@@ -336,6 +336,12 @@ class Engine:
                               hint="open it first (engine.open(candidate))")
         return entry
 
+    def last_identity(self, board_id: str) -> BoardIdentity | None:
+        """FIX-PACK-2: the identity the last ``info`` of this open board read, or None (not
+        read yet, or closed). A read: it never touches the board."""
+        with self._lock:
+            return self._identities.get(board_id)
+
     def lock_owner(self, board_id: str) -> LockOwner | None:
         """Who holds the board's session lock right now (any process), or None."""
         return SessionLock(board_id, lock_dir=self.lock_dir).owner()
@@ -366,6 +372,7 @@ class Engine:
             if reason:
                 available = available - {POWER_CYCLE}
                 unavailable = {**unavailable, POWER_CYCLE: reason}
+        available, unavailable = self._session_reasons(entry, available, unavailable, identity)
         claim = self._claim(entry, identity)
         net_identity = self._net_identity(entry)
         if net_identity is not None and net_identity.get("status") == "clash":
@@ -386,13 +393,37 @@ class Engine:
                          net_identity=net_identity)
 
     @staticmethod
+    def _session_reasons(entry: _Open, available: frozenset[str], unavailable: dict[str, str],
+                         identity: BoardIdentity) -> tuple[frozenset[str], dict[str, str]]:
+        """FIX-PACK-2: the session's own word on capabilities its links and features allow
+        but it knows it cannot use now (optional ``session.capability_reasons(available,
+        identity) -> {name: reason}``; the MPS3's: a recent identify answer, the harness's
+        MCC route). It only narrows: a name that is not available, or an empty reason, is
+        ignored. Never a failed ``info``."""
+        hook = getattr(entry.session, "capability_reasons", None)
+        if not callable(hook):
+            return available, unavailable
+        try:
+            said = dict(hook(frozenset(available), identity) or {})
+        except Exception:  # noqa: BLE001 - a session's narrowing is never worth failing info
+            log.exception("the capability reasons of %s failed", entry.candidate.board_id)
+            return available, unavailable
+        lost = {str(n): str(r) for n, r in said.items() if n in available and r}
+        if not lost:
+            return available, unavailable
+        return available - frozenset(lost), {**unavailable, **lost}
+
+    @staticmethod
     def _note_display_identity(entry: _Open, identity: BoardIdentity) -> None:
         """FIX-PACK-1: the session's live display adapter (``session.display``) hears every
         identity read (``display_note_identity``), so its cached facts (the ``lcd_mirror``
         engine) follow the image the board runs now, not the one it ran when it opened.
         PANEL-TRUTH: so does its front panel adapter (``session.panel.note_identity``): the
-        rebuilt mirror's DUT row follows a swap at once."""
-        for attr, hook in (("display", "display_note_identity"), ("panel", "note_identity")):
+        rebuilt mirror's DUT row follows a swap at once. FIX-PACK-2 item 4: so does its XVC
+        adapter (``session.xvc.xvc_note_identity``): ``xvc status`` states the capability
+        from the image the board runs now, not the probe's identity."""
+        for attr, hook in (("display", "display_note_identity"), ("panel", "note_identity"),
+                           ("xvc", "xvc_note_identity")):
             note = getattr(getattr(entry.session, attr, None), hook, None)
             if not callable(note):
                 continue

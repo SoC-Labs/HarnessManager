@@ -71,7 +71,8 @@ test: venv
 	$(BIN)/pytest -q
 
 # Design tokens (decision P4): design/tokens.json is the one source; tools/gen_tokens.py
-# (stdlib only) writes the web UI's tokens.css and design/generated/{palette.json,clcd_palette.h}.
+# (stdlib only) writes the web UI's tokens.css and design/generated/{palette.json,clcd_palette.h,
+# clcd_glyphs.h} (the panel's extension glyphs 0x80-0x86, from its CLCD_GLYPHS table).
 tokens: venv
 	$(BIN)/python tools/gen_tokens.py
 

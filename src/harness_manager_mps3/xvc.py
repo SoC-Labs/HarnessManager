@@ -56,6 +56,7 @@ Test seams: ``XVC_PORT_ENV`` (the board's XVC port for a DIRECT board; the lab's
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -209,9 +210,18 @@ class Mps3Xvc:
     # -- facts ------------------------------------------------------------------------------
 
     def xvc_note_identity(self, identity: Any) -> None:
-        """The service read the board's identity: use it (features, impl, rm, static)."""
-        if identity is not None:
-            self._ident = identity
+        """Someone read the board's identity (the XVC service, or the engine's ``info``): use
+        it (features, impl, rm, static). FIX-PACK-2 item 4: an identity without features (UDP
+        identify while another client holds 6900, a ``version`` that answered EBUSY) says
+        nothing about XVC: its other facts are used, the features last read are kept (not
+        known is not never)."""
+        if identity is None:
+            return
+        if not tuple(getattr(identity, "features", ()) or ()):
+            known = tuple(getattr(self._ident, "features", ()) or ())
+            if known and dataclasses.is_dataclass(identity):
+                identity = dataclasses.replace(identity, features=known)
+        self._ident = identity
 
     def use_store(self, store: Any) -> None:
         self._store = store

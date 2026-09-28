@@ -13,8 +13,8 @@ import { loadPower, week } from "../week.js";
 import { ActionRow, ArmBox, Card, Reason, ResultBlock, Spinner } from "../ui.js";
 
 // The engine picks the reboot wait by harness implementation (bare-metal ~120 s, Linux
-// 180 s: constants.reboot_wait_s), so the UI sends none and budgets for the longer one.
-const REBOOT_BUDGET_S = 210;
+// 300 s: constants.reboot_wait_s), so the UI sends none and budgets for the longer one.
+const REBOOT_BUDGET_S = 330;
 
 export const ARM_TEXT = {
   reset_dut: "Arm: I understand this resets the DUT CPU (the harness keeps running).",

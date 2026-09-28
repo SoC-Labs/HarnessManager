@@ -116,6 +116,16 @@ def status(state_dir: Path) -> dict[str, Any]:
             out["boards_open"] = sum(1 for b in payload.get("boards", []) if b.get("open"))
     except (OSError, http.client.HTTPException):
         pass
+    # FIX-PACK-2 item 6: the variables the SERVICE started with (the starter's shell, not
+    # yours), which of them override a setting, and the one-line warning (service_env.py).
+    try:
+        code, payload = _request(info, "GET", "/api/v1/daemon/env", timeout=5.0)
+        if code == 200:
+            out["env"] = payload.get("env") or {}
+            out["env_overrides"] = payload.get("overrides") or []
+            out["env_warning"] = payload.get("warning") or ""
+    except (OSError, http.client.HTTPException):
+        pass
     return out
 
 

@@ -78,6 +78,8 @@ export function TestSteps({ test, transport }) {
         ${failed.step === "auth" && transport === "rest" ? html`<div class="hint">Here: Set or Replace the token above, then test again.</div>` : null}</div>`
       : res && res.passed ? html`<div class="test-ok small" data-testid="test-passed">${ran.map((s) => html`<div key=${s.step}>
           <span class="step-name">${s.step}</span> ${s.detail}</div>`)}</div>` : null}
+    ${res && ran.some((s) => s.ok && s.note) ? html`<div class="test-notes small" data-testid="test-notes">${ran.filter((s) => s.ok && s.note).map((s) => html`<div class="hint" key=${s.step} data-step=${s.step}>
+          <span class="step-name">${s.step}</span> note: ${s.note}</div>`)}</div>` : null}
     ${test.running ? html`<div class="secondary small"><${Spinner} /> Testing${test.phase ? `: ${test.phase}` : ""}… (reads only: no lease is taken)</div>` : null}
   </div>`;
 }

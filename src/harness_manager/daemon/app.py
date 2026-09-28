@@ -119,7 +119,8 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
               "kit_api", "xvc_api", "harness_api", "settings_api", "claim_api", "card_api",
               "hubs_api", "display_api",   # SET-UI: Settings > Hubs; LM3: the Live display
               "quiet_api",                 # QUIET-POLL: viewers and the background gate
-              "identity_api")              # BOARD-ID: label/IP/MAC and the fix
+              "identity_api",              # BOARD-ID: label/IP/MAC and the fix
+              "env_api")                   # FIX-PACK-2: the service's own tool variables
 
 
 @dataclass
@@ -1107,7 +1108,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def controller_reboot(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         b = _obj(body)
-        # No wait_s: the pack picks it from the harness (180 s Linux, 120 s bare-metal).
+        # No wait_s: the pack picks it from the harness (300 s Linux, 120 s bare-metal).
         wait_s = _number(b, "wait_s") if b.get("wait_s") is not None else None
         if wait_s is not None and wait_s <= 0:
             raise UsageError("wait_s must be positive")

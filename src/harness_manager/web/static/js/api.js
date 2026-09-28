@@ -77,6 +77,7 @@ export const ENDPOINTS = Object.freeze({
   boardXdc: ["GET", "/boards/{bid}/xdc"],
   boardXdcExport: ["POST", "/boards/{bid}/xdc/export"],
   helpTabs: ["GET", "/help/tabs"],
+  daemonEnv: ["GET", "/daemon/env"],          // FIX-PACK-2: the service's own tool variables
   job: ["GET", "/jobs/{id}"],
   events: ["WS", "/events"],
   // --- KIT-UI: the Build section (docs/API.md "DUT build kits and the build guide") ---

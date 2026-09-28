@@ -406,8 +406,9 @@ harness-manager mcc $B reboot | tee $EV/d4_mcc_reboot.txt
    checks nothing else reads `tty_00`, types a CR and checks for `Cmd>`, sends REBOOT at 100 ms a
    character, waits for `Rebooting`, and captures the MCC boot log to `FPGA configuration
    complete`; then the shell must answer again. No share is started.
-4. The wait is the Linux budget, 180 s, with no `--wait` (MCC-FIX). Add `--wait 240` only if the
-   Linux lead says today's boot is slower.
+4. The wait is the Linux budget, 300 s, with no `--wait` (MCC-FIX; FIX-PACK-2 raised it from
+   180 s: stage0's 10 s DDR settle puts a cold boot at ~190 s to 6900, 205 s to SSH). Add
+   `--wait` only if the Linux lead says today's boot is slower still.
 5. It refuses while the user microSD's card job writes or reads back (SLOT-TIMING's guard).
 
 **D5. The board came back running nanosoc from the card**
@@ -787,7 +788,7 @@ Then tell the HM lead the folder is complete.
 | What you see | Cause | Do this |
 |---|---|---|
 | `lease acquire`: `queued at position N` | someone still holds the board | Ctrl-C (it leaves the queue); ask the Linux lead. Never `lease force` |
-| `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh $H id -nG` must list `fpga` |
+| `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh $H 'sg fpga -c true'` must succeed (`id -nG` can miss `fpga` from a stale group cache while `sg` works) |
 | A1: `offline`, "the hub … could not reach the shell" | board rebooting, harnessd down, or a stale tunnel | wait 60 s and repeat A1; then `ssh mps3-b2 true`; then ask the Linux lead |
 | A1: `harness_impl` not `linux`, or `shell_id` not `0x44ee76d5` | the board is not on RC2 (rolled back?) | **STOP**; ask the Linux lead |
 | B1: `unclaimed` | the claim was lost (a RAM boot keeps it on tmpfs) or never made | **never claim**; ask the Linux lead |
