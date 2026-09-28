@@ -120,7 +120,8 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
               "hubs_api", "display_api",   # SET-UI: Settings > Hubs; LM3: the Live display
               "quiet_api",                 # QUIET-POLL: viewers and the background gate
               "identity_api",              # BOARD-ID: label/IP/MAC and the fix
-              "env_api")                   # FIX-PACK-2: the service's own tool variables
+              "env_api",                   # FIX-PACK-2: the service's own tool variables
+              "hil_api")                   # HIL-GUI: the unattended checks, from the app
 
 
 @dataclass
@@ -389,6 +390,13 @@ class Daemon:
         self.console_limits = console_limits
         self._mu = threading.Lock()
         self._candidates: dict[str, Candidate] = {}
+        # HIL-GUI: an extension that needs a board to stay open (a checks run) refuses its
+        # close here, and the service's stop without force: ``guard(board_id)`` /
+        # ``guard(force)`` raise the refusal (HELD, naming what holds it). With force, a
+        # shutdown guard may instead return ``(drain, wait_s)``: the service keeps serving
+        # while ``drain()`` runs (a run puts greybox back through it), then stops.
+        self.close_guards: list[Callable[[str], None]] = []
+        self.shutdown_guards: list[Callable[[bool], tuple[Callable[[], None], float] | None]] = []
         self._unlog = self.bus.subscribe("*", _log_event)
         # QUIET-POLL (services/quiet.py): background contact with a board happens only while
         # a UI views it, never while its hub lease is someone else's, never under policy
@@ -551,6 +559,8 @@ _LOGGED = {
     "update.rolled_back": ("from", "to", "phase", "reason"),
     # lane SET-API: which settings changed and what they need (never a value)
     "settings.changed": ("keys", "apply", "source"),
+    # lane HIL-GUI: a checks run's life (never its per-check progress)
+    "checks.state": ("run", "state", "result", "plan", "writes", "reason"),
 }
 
 
@@ -1033,6 +1043,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def stop_daemon(body: JsonBody = None) -> JSONResponse:
         b = _obj(body)
         force = _bool(b, "force", False)
+        drains = [drain for guard in d.shutdown_guards    # HIL-GUI: a checks run, unless forced
+                  if (drain := guard(force)) is not None]
         running = d.jobs.running()
         if running and not force:
             names = ", ".join(f"{j.describe()} on {j.board_id}" for j in running)
@@ -1045,6 +1057,23 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         if d.shutdown is None:
             raise UnavailableError("daemon_shutdown",
                                    "this server was not started by `harness-manager daemon`")
+        if drains:
+            # HIL-GUI: the service goes on serving while each drain runs (a checks run's
+            # restore goes through it), then stops; the answer says how long that may take.
+            shutdown = d.shutdown
+
+            def drain_then_stop() -> None:
+                for drain, _wait in drains:
+                    try:
+                        drain()
+                    except Exception:  # noqa: BLE001 - never keep the service from stopping
+                        log.exception("a shutdown drain failed")
+                shutdown()
+
+            threading.Thread(target=drain_then_stop, daemon=True,
+                             name="harness-manager-daemon-drain").start()
+            return _JSON(ok(stopping=True, pid=os.getpid(),
+                            wait_s=max(wait for _drain, wait in drains)))
         threading.Timer(0.2, d.shutdown).start()
         return _JSON(ok(stopping=True, pid=os.getpid()))
 
@@ -1406,6 +1435,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         # holds on the board first; a failed release leaves the board open. ``released`` is
         # the lease given back, or null when none was held here.
         want = _query_flag(release, "release")
+        for guard in d.close_guards:           # HIL-GUI: a checks run keeps its board open
+            guard(bid)
         job = d.gates.busy(bid)
         if job is not None:
             raise busy_error(bid, job)

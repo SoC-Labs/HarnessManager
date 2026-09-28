@@ -1,9 +1,9 @@
 # HIL: Harness Manager on the Linux harness (after cutover, ~70 min)
 
 > **Unattended:** [HIL_AUTO.md](HIL_AUTO.md) runs this runbook's automatic checks overnight
-> (`python -m tools.hil run --plan linux-netboot …`; on board 2, which has no user microSD,
+> (the app's **Checks** section, or `python -m tools.hil run --plan linux-netboot …`; on board 2, which has no user microSD,
 > `--plan linux-nocard`), saves the evidence and writes `REPORT.md`; it lists the checks that stay
-> manual and why. `tools/hil/plans.py` holds this runbook as data: a test fails when a check with
+> manual and why. `harness_manager/checks/plans.py` (`tools/hil/plans.py`) holds this runbook as data: a test fails when a check with
 > an **Expect** here has no plan entry, or when a plan's skips differ from its preface below.
 
 > **When:** after the Linux soak and the cutover, when the Linux lead says the board is free

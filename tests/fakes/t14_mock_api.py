@@ -429,6 +429,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # FIX-PACK-2: the service's own tool variables (docs/API.md), scripted.
     from .fp2_mock_env import register as register_env
     register_env(app, _ok)
+    # HIL-GUI's checks routes (docs/API.md "HIL checks"): the plans, no runs.
+    from .hil_gui_mock import register as register_checks
+    register_checks(app, state, _ok)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)

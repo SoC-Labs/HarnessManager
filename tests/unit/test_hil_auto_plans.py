@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.hil import plans as P
-from tools.hil.run import READ_ARGV, SAFE_ARGV, allowed
+from harness_manager.checks import plans as P
+from harness_manager.checks.run import READ_ARGV, SAFE_ARGV, allowed
 
 ROOT = Path(__file__).resolve().parents[2]
 LINUX_MD = ROOT / "docs" / "HIL_LINUX.md"

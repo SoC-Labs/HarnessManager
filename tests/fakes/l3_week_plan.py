@@ -181,6 +181,14 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("DELETE", "/boards/{bid}/viewers/{vid}"),
         ("GET", "/boards/{bid}/background"),
     ),
+    # HIL-GUI: served in the mock by tests/fakes/hil_gui_mock.py (the plans and the defaults;
+    # no runs: the real service runs them).
+    "hil_api": (
+        ("GET", "/boards/{bid}/checks"),
+        ("POST", "/boards/{bid}/checks"),
+        ("DELETE", "/boards/{bid}/checks"),
+        ("GET", "/boards/{bid}/checks/{run}/report"),
+    ),
 }
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles

@@ -17,6 +17,7 @@ import { PowerSection } from "./sections/power.js";
 import { ProgramSection } from "./sections/program.js";
 import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
+import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
 import { LeaseBanners, requestClose } from "./lease.js";
 import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
@@ -41,6 +42,8 @@ export const SECTIONS = [
   { key: "clocks", label: "Clocks", icon: "clock", render: ClocksSection },
   { key: "sd", label: "SD card", icon: "hard-drive", render: SdSection },
   { key: "update", label: "Update", icon: "rocket", render: UpdateSection },
+  // HIL-GUI: the unattended runbooks (docs/HIL_AUTO.md "In the app")
+  { key: "checks", label: "Checks", icon: "list-checks", render: ChecksSection },
   { key: "activity", label: "Activity", icon: "history", render: ActivitySection },
 ];
 
@@ -196,7 +199,9 @@ function BoardHeader({ bid }) {
     </div>
     <nav class="sections" role="tablist" aria-label="Board sections">
       ${SECTIONS.map((s) => {
-        const badge = s.key === "sd" && b.pending ? html`<span class="badge" aria-label="needs attention">!</span>` : null;
+        const badge = s.key === "sd" && b.pending ? html`<span class="badge" aria-label="needs attention">!</span>`
+          : s.key === "checks" && checksRun(bid) ? html`<span class="badge run" data-testid="checks-tab-badge"
+              aria-label="a checks run is active" title="A checks run is active on this board"><${Icon} name="play" /></span>` : null;
         return html`<button type="button" role="tab" key=${s.key} class="section-tab"
           data-section=${s.key} aria-selected=${sectionOf(bid) === s.key ? "true" : "false"}
           onClick=${() => setSection(bid, s.key)}><${Icon} name=${s.icon} cls="sm" />${s.label}${badge}</button>`;
@@ -398,6 +403,7 @@ function Workspace() {
     <${AppUpdateBanners} />
     <${Banners} bid=${bid} />
     <${LeaseBanners} bid=${bid} />
+    <${ChecksBanner} bid=${bid} />
     <${BoardHeader} bid=${bid} />
     <div class=${`section-body ${section.fill ? "fill" : ""}`} role="tabpanel"
       data-testid=${`section-${section.key}`} aria-label=${section.label}>

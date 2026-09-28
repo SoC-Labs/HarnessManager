@@ -31,7 +31,8 @@ Contents:
 10. [Updates: the harness and the app](#10-updates-the-harness-and-the-app)
 11. [Settings](#11-settings)
 12. [The Linux harness](#12-the-linux-harness)
-13. [Troubleshooting](#13-troubleshooting)
+13. [Checks: the HIL runbooks, unattended](#13-checks-the-hil-runbooks-unattended)
+14. [Troubleshooting](#14-troubleshooting)
 
 Appendices: [A. Command reference](#a-command-reference),
 [B. Where things are](#b-where-things-are), [C. More documents](#c-more-documents).
@@ -285,7 +286,7 @@ double quotes as an escape and refuses the file.
 - An interrupted install leaves a marker, and the next install refuses until you restore
   the backup: `harness-manager sd - --volume DRIVE restore <zip>`. The app shows a red
   "Interrupted SD install" banner with **Go to recovery**.
-- More in [section 13](#13-troubleshooting).
+- More in [section 14](#14-troubleshooting).
 
 ### 3.2 A lab board behind a hub
 
@@ -1058,7 +1059,7 @@ board runs. Otherwise it needs the Debug USB or the hub.
 - **Private parts** (Arm IP overlays) are skipped without a GitHub token that can read them:
   `harness-manager config set-secret updates.github_token`.
 - **"written, not running":** the SD was written but the board did not come up on it. Roll
-  back with `harness rollback TARGET`, or restore the SD backup ([section 13](#13-troubleshooting)).
+  back with `harness rollback TARGET`, or restore the SD backup ([section 14](#14-troubleshooting)).
 
 ### 10.2 The app itself
 
@@ -1336,9 +1337,55 @@ default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboo
 - **The DUT does nothing after a reboot or a harness restart:** the partition stays in reset
   until the first swap. Program a design once.
 
-## 13. Troubleshooting
+## 13. Checks: the HIL runbooks, unattended
 
-### 13.1 The board's state
+**Needs:** a board, a hub (the checks hold its lease).
+
+**When:** you want the lab runbooks ([HIL_LINUX.md](HIL_LINUX.md), [HIL_B0.md](HIL_B0.md))
+checked overnight without you: every check a machine can judge, every half hour, until the
+morning, with the evidence and a `REPORT.md`. The checks that need a person stay manual and
+the report lists them. [HIL_AUTO.md](HIL_AUTO.md) has the details and the safety rules.
+
+**Where:** the board's **Checks** section.
+
+1. **Plan:** picked from the board, with the reason under it: bare metal → `bare-metal`; the
+   Linux harness with no user microSD → `linux-nocard`; with a blank card → `linux-netboot`;
+   with a usable card → `linux`. Choose another to override it.
+2. **Writes:** Read only, or Safe (it also swaps an overlay in and puts greybox back, and
+   reads the MCC once per iteration). It never writes a card, a slot or an SD, never reboots,
+   never claims, never forces anything.
+3. **Run until** (default the next 08:30) **every** 15 to 60 minutes (default 30); **Start**
+   now, or **At** a time: the service starts it then.
+4. **The lease** decides whether Start works:
+   - yours: the service keeps it until the run ends (no long `--ttl` needed);
+   - free: tick **Take the lease for the run**: the service takes it at the start and gives it
+     back at the end;
+   - someone else's: Start is off and says who holds it. Ask for the board, or wait.
+5. **Write the announcement** fills the **Announcement** box with what the run will do (start,
+   planned end, what it changes, what it never does). **Copy** it into your message.
+6. **Start.** The panel follows the run: the iteration, the check it is on, the counts, the
+   first failure, the next start. You can close the app; the run goes on in the service.
+   **Stop** finishes the check it is on, puts greybox back and writes the report.
+7. **Past runs** lists the runs on this board. Open one for its report, and each iteration's.
+
+While a run is on, the board cannot be closed and `harness-manager daemon stop` refuses; the
+**Checks** tab has a badge. Anything you do on the board meanwhile may stop the run (the run
+stops for any other holder, by design).
+
+**From a terminal** (a checkout): `python -m tools.hil run --plan … --board … --evidence DIR
+--writes safe --until 08:30 --interval 1800`. With the service running, it hands the run to
+the service and follows it; Ctrl-C is Stop. `--in-process` runs it in the terminal instead
+(then stop the service first, and take the lease with a `--ttl` that outlasts the run).
+
+**What can go wrong:**
+- `refused to start: the hub lease … is held by …`: someone else's lease; the run never forces.
+- `STOPPED for safety` in the report: an unexpected identity, a refusal, another holder, the
+  lease lost, or the board unreachable. `REPORT.md` names the check and its hint; the board is
+  put back on greybox when the run swapped it and the lease is still yours.
+
+## 14. Troubleshooting
+
+### 14.1 The board's state
 
 `harness-manager info TARGET` (or the app's header) shows the harness state:
 
@@ -1347,10 +1394,10 @@ default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboo
 | `idle` | ready | nothing |
 | `busy` | another program holds the board, or the harness is finishing a failed swap | close the other program, or wait 30 s |
 | `offline` | nothing answers | check power, the cable, and your PC's address |
-| `wedged` | the harness took the connection and never replied | reboot the board (13.2, step 4) |
-| `rescue` | the harness has no bootable image | install the bundle again (13.2, step 6) |
+| `wedged` | the harness took the connection and never replied | reboot the board (14.2, step 4) |
+| `rescue` | the harness has no bootable image | install the bundle again (14.2, step 6) |
 
-### 13.2 The recovery ladder
+### 14.2 The recovery ladder
 
 Start at the top. Go down one step only when the step above did not help.
 
@@ -1374,7 +1421,7 @@ Start at the top. Go down one step only when the step above did not help.
 Harness Manager never writes the MCC's firmware (`.ebf` files) and refuses the MCC commands
 that erase or reformat, so none of these steps changes the board controller.
 
-### 13.3 Exit codes
+### 14.3 Exit codes
 
 | Code | Name | Means |
 |---|---|---|
@@ -1392,7 +1439,7 @@ that erase or reformat, so none of these steps changes the board controller.
 | 14 | INCOMPATIBLE | identity mismatch (built for another shell or static) |
 | 15 | REFUSED | a safety rule, a lock, or no confirmation |
 
-### 13.4 Common problems
+### 14.4 Common problems
 
 | You see | Do |
 |---|---|
@@ -1408,7 +1455,7 @@ that erase or reformat, so none of these steps changes the board controller.
 | a reboot or an MCC read through the hub is refused: "another process on the hub has … tty_00 open" | something else reads the MCC console on the hub (a `cat`, a console, an fpgahub share on `tty_00`). Nothing was sent. Ask whoever runs it to close it, then try again |
 | the same, but "… names … tty_00 on its command line, so it may open it at any moment" | a process on the hub takes the MCC console as an argument (a soak, a script). It may not have it open now, but the hub cannot show another account's open files, so it counts. Nothing was sent. Ask whoever runs it; try again once it has stopped |
 
-### 13.5 Asking for help
+### 14.5 Asking for help
 
 Send SoC Labs:
 - the output of `harness-manager --json info TARGET`;
@@ -1450,9 +1497,10 @@ with `--serial` and `--volume`. Every verb takes `--json` and `--tsv`.
 | `board claim\|claim-status\|ssh` | the Linux harness's SSH claim | 12.1 |
 | `card status\|commit\|clear` | the user microSD | 12.2 |
 | `slot status\|push\|commit\|rollback\|verify` | OS slots A and B | 12.3 |
-| `mcc temp\|osc\|reboot\|cmd`, `sd backup\|install\|restore` | the board controller and its configuration SD | 3.1, 13 |
+| `mcc temp\|osc\|reboot\|cmd`, `sd backup\|install\|restore` | the board controller and its configuration SD | 3.1, 14 |
 | `power show\|cycle` | the power meter and a cold power cycle | 3.1 |
 | `lab TARGET link\|display\|macgen\|dutrx` | lab tools on the shell | none |
+| `python -m tools.hil run\|plans` (a checkout) | the HIL runbooks, unattended; hands the run to a running service | 13 |
 
 ## B. Where things are
 
@@ -1472,6 +1520,7 @@ with `--serial` and `--volume`. Every verb takes `--json` and `--tsv`.
 | [LEASE_REQUESTS.md](LEASE_REQUESTS.md) | the lease request and force rules |
 | [XDC_EXPORT.md](XDC_EXPORT.md) | the pin model, the design format, the kits and their checks |
 | [HIL_LINUX.md](HIL_LINUX.md) | the Linux harness in the lab: the runbook |
+| [HIL_AUTO.md](HIL_AUTO.md) | the runbooks unattended: the Checks section and the command line |
 | [API.md](API.md) | the local service's API, for scripts and other front ends |
 | [RELEASING.md](RELEASING.md), [KEYS.md](KEYS.md) | how releases are made and signed |
 | [design/README.md](design/README.md) | the design notes: XVC, build kits, the front panel, harness versions, self-update |

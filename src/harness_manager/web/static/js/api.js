@@ -140,6 +140,13 @@ export const ENDPOINTS = Object.freeze({
   viewerPut: ["PUT", "/boards/{bid}/viewers/{vid}"],
   viewerDelete: ["DELETE", "/boards/{bid}/viewers/{vid}"],
   background: ["GET", "/boards/{bid}/background"],
+  // --- HIL-GUI: the Checks section (docs/API.md "HIL checks", hil_api.py). The report's
+  // ?iteration=&name= is the call's query argument.
+  checks: ["GET", "/boards/{bid}/checks"],
+  checksStart: ["POST", "/boards/{bid}/checks"],
+  checksStop: ["DELETE", "/boards/{bid}/checks"],
+  checksReport: ["GET", "/boards/{bid}/checks/{run}/report"],
+  // --- end HIL-GUI
 });
 
 export const ADDITIVE = Object.freeze([]);
@@ -154,6 +161,7 @@ export const EVENT_TOPICS = [
   "xvc.*",                             // XVC-UI: xvc.state, the Debug section's XVC card
   "harness.*",                         // UPDATE-UI: harness.catalog|installing|installed|pinned
   "settings.*",                        // SET-UI: settings.changed (the dialog and the restart banner)
+  "checks.*",                          // HIL-GUI: checks.state, checks.progress (the Checks section)
 ];
 
 const TOKEN_KEY = "harness_manager.token";

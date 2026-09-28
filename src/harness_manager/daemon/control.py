@@ -355,6 +355,10 @@ def stop(state_dir: Path, *, force: bool = False, timeout: float = STOP_WAIT_S) 
         if err:
             raise error_from_json(err)
         raise UnreachableError(f"harness-manager-daemon refused to stop (HTTP {code})")
+    wait = payload.get("wait_s") if isinstance(payload, dict) else None
+    if isinstance(wait, (int, float)) and not isinstance(wait, bool) and wait > 0:
+        # HIL-GUI: it finishes something first (a checks run puts greybox back): give it that
+        timeout = max(timeout, float(wait) + STOP_WAIT_S)
     if _wait_gone(info.pid, timeout):
         return "stopped"
     # It did not go (or never answered): terminate it. Board locks it held go stale

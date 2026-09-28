@@ -9,6 +9,27 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### Checks: the HIL runbooks, unattended, from the app (HIL-GUI)
+- A **Checks** section per board runs the lab runbooks' automatic checks overnight in the
+  Harness Manager service: no `daemon stop`, no long `lease acquire --ttl`, no tmux. The
+  plan is picked from the board (bare metal, the Linux harness with no card, a blank card, or
+  a usable card) and can be overridden; writes read only or safe; run until a time (default
+  the next 08:30) every 30 min; start now or at a time (18:00).
+- The lease: yours is kept (heartbeated) until the run ends; a free one can be taken for the
+  run and is given back at the end; someone else's turns Start off and names them. Nothing is
+  ever forced.
+- A live panel (iteration, check, counts, first failure, next start), **Stop** (finishes the
+  check, puts greybox back, writes `REPORT.md`), past runs with each `REPORT.md`, and the
+  17:30 announcement (`ANNOUNCE.txt`) with a Copy button.
+- The run's commands go through the service, so the app having the board open is no longer
+  "another holder"; a different process or client still stops the run. While a run is on,
+  the board cannot be closed and `daemon stop` refuses (`--force` stops the run first).
+- `python -m tools.hil run` hands the run to a running service and follows it (Ctrl-C is
+  Stop); `--in-process` keeps the old way. The runner is now `harness_manager.checks` (in the
+  wheel); `tools/hil` is its command line.
+- API: `GET`/`POST`/`DELETE /boards/{bid}/checks`, `GET /boards/{bid}/checks/{run}/report`;
+  events `checks.state`, `checks.progress` (docs/API.md, docs/CONTRACTS.md).
+
 ### Identify: which board is which (LOCATE)
 - Every board card in the sidebar, and the Board tile, has an **Identify** icon. One click
   blinks the board's panel backlight for 5 seconds. While the harness owns the panel, the
