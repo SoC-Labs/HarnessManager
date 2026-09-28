@@ -90,7 +90,7 @@ class SimPanel:
                             presence="" if "presence" in f else NEEDS_PRESENCE,
                             locate="" if "locate" in f else NEEDS_LOCATE,
                             source=SOURCE_PANEL if panel else SOURCE_REBUILT,
-                            impl=self.sim.engine.info(self.bid).identity.harness_impl or "")
+                            impl=self.sim.engine._board(self.bid).identity.harness_impl or "")
 
     def state(self) -> PanelState:
         self.sim.calls.append(("state", self.bid))
