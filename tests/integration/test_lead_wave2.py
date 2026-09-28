@@ -120,7 +120,8 @@ def test_ui_demo_serves_scripted_boards_from_its_own_state_dir(capsys, monkeypat
             base = url.split("#")[0].rstrip("/")
             found = c.post(base + "/api/v1/probe", json={}).json()["candidates"]
             index = c.get(base + "/")
-        assert len(found) == 3 and all(cand["pack"] == "mps3" for cand in found)
+        # the showcase: three boards, one of each harness, and LEASE-UI's spare (mps3-03)
+        assert len(found) == 4 and all(cand["pack"] == "mps3" for cand in found)
         assert index.status_code == 200 and "script-src 'self'" in index.headers[
             "content-security-policy"]
         # Negative twin: the real daemon's state dir holds no daemon; the demo never shares it.
