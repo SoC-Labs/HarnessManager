@@ -181,6 +181,12 @@ def rm_kit(model: PinModel, design: Design) -> Kit:
                 if t not in members:
                     findings.append(Finding("missing_pin", f"use.{g}.timed", f"{t} is not in group {g}",
                                             hint=f"{g}: {', '.join(sorted(members))}"))
+        outs = {s.name for s in signals if s.group == g and s.rm_dir == "out" and s.name != "rm_id"}
+        for t in design.tied(g):
+            if t not in outs:
+                findings.append(Finding("missing_pin", f"use.{g}.tie",
+                                        f"{t} is not an output of group {g} the skeleton can tie",
+                                        hint=f"{g} outputs: {', '.join(sorted(outs)) or 'none'}"))
         if timed:
             findings.append(Finding("timed_group", g, "kept out of the false paths: the RM times "
                                     "this group's data against its clock; the shell side owns the "
@@ -461,13 +467,14 @@ def _render_skeleton(model: PinModel, design: Design, sid: str, signals: list[An
             val = f"32'h{int(rm_id, 0):08X}" if rm_id else "32'h0000_0000"
             lines.append(f"  assign rm_id = {val};  // this RM's identity (the overlay manifest's rm_id)")
             continue
-        if s.group in use:
+        clamp = int(s.clamp or 0)
+        if s.group in use and s.name not in design.tied(s.group):
             lines.append(f"  // assign {s.name} = ...;")
             continue
-        clamp = int(s.clamp or 0)
+        tie = "  // not driven by this design: its safe-idle value" if s.group in use else ""
         val = f"'{clamp}" if s.width > 1 and clamp in (0, 1) and clamp == 0 else \
             (f"{s.width}'d{clamp}" if s.width > 1 else f"1'b{clamp}")
-        lines.append(f"  assign {s.name} = {val};")
+        lines.append(f"  assign {s.name} = {val};{tie}")
     lines += ["", "endmodule", ""]
     return "\n".join(lines)
 

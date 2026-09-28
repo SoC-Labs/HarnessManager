@@ -199,9 +199,11 @@ def register(ctx: RouteContext) -> None:
         sid = hex32(parse_u32(ident.shell_id)) if ident.shell_id else ""
         kit = kits.get(sid) if sid else None
         profile = kits.profile(pack, sid) if sid else None
-        found = vivado.discover()
-        checks = [vivado.check_release(found, profile.vivado if profile else "",
-                                       profile.vivado_build if profile else 0)]
+        rel = profile.vivado if profile else ""
+        found = vivado.discover(want=rel)                  # KIT-RC2: the kit's release first
+        checks = [vivado.check_release(found, rel, profile.vivado_build if profile else 0)]
+        pc = vivado.check_path(found, rel)
+        checks += [pc] if pc is not None else []
         if kit is not None:
             checks += kits.check_against_board(kit.manifest, ident, pack)
         return _JSON(ok(board_id=bid, static_id=sid or None, cached=kit is not None,

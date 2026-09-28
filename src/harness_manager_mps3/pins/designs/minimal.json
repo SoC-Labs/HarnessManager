@@ -2,5 +2,5 @@
  "kind": "rm",
  "name": "minimal",
  "title": "the smallest RM: clock, resets and rm_id; every other group tied off (fpga/rp/_template)",
- "use": {"clkrst": {}, "status": {}}
+ "use": {"clkrst": {}, "status": {"tie": ["dut_lockup", "irq_out"]}}
 }

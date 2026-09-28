@@ -137,6 +137,24 @@ def vivado_command(script_dir: Path, *, stop_after: str = "", jobs: int | None =
     return argv
 
 
+_PARAM_BLOCK = re.compile(r"^array set P \{\n(.*?)^\}", re.M | re.S)
+_PARAM_LINE = re.compile(r"^\s+([A-Z_]+)\s+\{(.*)\}\s*$")
+
+
+def script_params(text: str) -> dict[str, str]:
+    """The ``array set P {...}`` block of a generated ``build_rm.tcl``: ``{NAME: value}``
+    (the value as rendered, braces stripped). ``{}`` for a file that is not one."""
+    m = _PARAM_BLOCK.search(text)
+    if m is None:
+        return {}
+    out = {}
+    for line in m.group(1).splitlines():
+        lm = _PARAM_LINE.match(line)
+        if lm:
+            out[lm.group(1)] = lm.group(2)
+    return out
+
+
 # --- markers in a Vivado log ---------------------------------------------------------------------
 
 _MARK = re.compile(r"^(HM_GATE|HM_STAGE|HM_RECEIPT|HM_RM_BUILD_COMPLETE|HM_RM_BUILD_FAILED|"
