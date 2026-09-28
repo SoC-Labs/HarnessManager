@@ -17,7 +17,7 @@ developer variable, else the tool's own search), then proves it runs:
   release wins over another release on PATH, never over the setting) and flags: the detail
   says which release the kits need, when the chosen one is not it, and when the ``vivado``
   on PATH (what a bare ``vivado`` runs) is another release (KIT-RC2). The other releases
-  found under the install roots are listed, not run;
+  found under the install roots are in ``others`` (not run);
 - **hw_server is never run.** Started with an option it does not know, it may bind 3121 and
   serve; its release comes from its path (``/…/Vivado/2024.1/bin/hw_server``), as
   ``services/xvc.py`` reads it. It must be an executable file.
@@ -133,7 +133,10 @@ def kit_releases() -> list[tuple[str, str]]:
 
 
 def _vivado_detail(found: Any, kits: list[tuple[str, str]]) -> tuple[str, str]:
-    """``(detail, hint)`` for a Vivado that runs: the kits' releases, PATH, the others."""
+    """``(detail, hint)`` for a Vivado that runs. With no kit cached it is the plain
+    ``Vivado <rel> at <path>`` (nothing asks for a release); with kits, their releases, and
+    PATH's vivado when it is not one of them. The other installed releases are in the
+    found dict's ``others``, not the detail."""
     from harness_manager.services.kit import vivado as V
     from harness_manager.services.kit.schema import release_major_minor as mm
 
@@ -157,11 +160,6 @@ def _vivado_detail(found: Any, kits: list[tuple[str, str]]) -> tuple[str, str]:
                 parts.append(f"`vivado` on PATH is {b.version} ({b.path}): a bare `vivado` runs "
                              "that one, so the build commands name the full path")
                 break
-    elif found.on_path is not None and found.on_path.path != inst.path:
-        parts.append(f"`vivado` on PATH is {found.on_path.version or '?'} ({found.on_path.path})")
-    rest = sorted({o.version for o in found.others if o.version and o.version != inst.version})
-    if rest:
-        parts.append(f"also installed (not run): {', '.join(rest)}")
     return "; ".join(parts), hint
 
 
@@ -191,7 +189,8 @@ def detect_one(tool: str, value: str, env: Mapping[str, str], *,
                            which=lambda n: _which(n, env), roots=roots,
                            want=[r for _, r in kits])
         extra = {"want": list(found.want), "kits": [{"static_id": s, "release": r} for s, r in kits],
-                 "on_path": found.on_path.to_json() if found.on_path else None}
+                 "on_path": found.on_path.to_json() if found.on_path else None,
+                 "others": [{"path": o.path, "version": o.version} for o in found.others]}
         inst = found.install
         if inst is None:
             return (_step(tool, False, found.reason or "Vivado was not found",

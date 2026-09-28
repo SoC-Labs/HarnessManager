@@ -191,10 +191,11 @@ def test_detect_prefers_and_flags_the_cached_kits_release(tree):
     assert "the cached kits need 2026.1 (0x44EE76D5)" in step["detail"]
     assert "`vivado` on PATH is 2024.1" in step["detail"]
     assert found["on_path"]["version"] == "2024.1" and found["want"] == ["2026.1"]
-    # twin: no kit cached: PATH first, as before, and the other releases are listed
+    # twin: no kit cached: PATH first and the detail as before; the others are listed apart
     step, found = tooltest.detect_one("vivado", "", env, runner=ByPath(), kits=[], roots=roots)
     assert found["path"] == str(tree["2024.1"])
-    assert "also installed (not run): 2025.2, 2026.1" in step["detail"]
+    assert step["detail"] == f"Vivado 2024.1 at {tree['2024.1']}"
+    assert {o["version"] for o in found["others"]} == {"2025.2", "2026.1"}
     # twin: a setting of the wrong release is kept, and the hint names the right one
     step, found = tooltest.detect_one("vivado", str(tree["2024.1"]), env, runner=ByPath(),
                                       kits=[(RC2, "2026.1")], roots=roots)

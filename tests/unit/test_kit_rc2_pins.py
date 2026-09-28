@@ -231,3 +231,17 @@ def _shells() -> list[str]:
     finally:
         sys.path.pop(0)
     return list(gen_mps3_pins.SHELLS)
+
+
+def test_drift_every_shell_matches_partition_pins_at_its_own_commit():
+    # test_t10_model checks the default shell; this checks each shell the model holds
+    from tests.fakes.t10_platform import git_show, md_boundary
+
+    doc = pins.load_model()
+    for sid, sh in doc["shells"].items():
+        md = git_show(sh["platform"]["commit"], "docs/contracts/partition-pins.md")
+        mine = [(g["id"], s["name"], s["shell_dir"], s["width_symbol"] or str(s["width"]))
+                for g in sh["rp_boundary"]["groups"] for s in g["signals"]]
+        assert md_boundary(md) == mine, sid
+        # twin: a moved signal in that file is caught
+        assert md_boundary(md.replace("| `jtag_tdo` | I |", "| `jtag_tdo` | O |")) != mine
