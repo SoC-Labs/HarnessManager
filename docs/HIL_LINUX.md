@@ -1,9 +1,10 @@
 # HIL: Harness Manager on the Linux harness (after cutover, ~70 min)
 
 > **Unattended:** [HIL_AUTO.md](HIL_AUTO.md) runs this runbook's automatic checks overnight
-> (`python -m tools.hil run --plan linux-netboot …`), saves the evidence and writes `REPORT.md`; it lists
-> the checks that stay manual and why. `tools/hil/plans.py` holds this runbook as data: a test fails
-> when a check with an **Expect** here has no plan entry.
+> (`python -m tools.hil run --plan linux-netboot …`; on board 2, which has no user microSD,
+> `--plan linux-nocard`), saves the evidence and writes `REPORT.md`; it lists the checks that stay
+> manual and why. `tools/hil/plans.py` holds this runbook as data: a test fails when a check with
+> an **Expect** here has no plan entry, or when a plan's skips differ from its preface below.
 
 > **When:** after the Linux soak and the cutover, when the Linux lead says the board is free
 > (about **Sun 27 Sep 20:00** or later). **Who:** david, at srv03335, alone. No agent takes the
@@ -56,6 +57,31 @@ image mounts `/persist` on tmpfs (`mps3.persist=off`). Until the Linux lead says
    …)`. Nothing is sent. Do not ask for the soak to be stopped for this: skip D4 while it runs.
    When nothing names `tty_00`, D4 may run; expect the greybox back (netbooted), not nanosoc.
 
+## Card-less mode (no user microSD: board 2): read this first
+
+Board 2 (`mps3_02_pl`, `192.168.11.101`, boards.toml `lab2`) is Harness Manager's own board. It has
+**no user microSD** and no JTAG cable. It netboots stage0 → Linux (the Linux lead pushes the image;
+`/persist` is tmpfs), and a failed cold boot needs a person to press PB0. Netboot mode items 3
+and 4 hold here too. Start every terminal with
+`source ~/SoCLabs/harness-manager/tools/hil/env_b2.sh` (it sets `B`, `T`, `MCC_TTY`, `EV`, `RUN`
+and F3's `BAKE`), and run HIL-AUTO with `--plan linux-nocard`.
+
+1. **Skip everything that needs the user microSD, and every reset:**
+   - §C2 (the card);
+   - §D2, D3, D4 and D5 (keep on the card, then the REBOOT);
+   - §F6 and §G (the config SD, then an MCC REBOOT);
+   - §Z1, and Z2's `card status`.
+
+   Never run `slot push|commit|rollback`, `card clear`, `program --keep-on-card`, `mcc reboot`
+   or `harness install` on this board.
+2. **§C1 is the card-less check.** The harness answers `slot status` with `card: false` and no
+   slots; Harness Manager says so as exit 12: `OS slot update is unavailable: no user microSD
+   card in the slot (the OS slots live on it)`. That is the empty slot, not a fault. Two
+   `empty (no S0LB header)` slots mean a blank card is in: use Netboot mode instead.
+3. **§F3 stages board 2's OWN bake** (its row in F3's table), never board 1's.
+4. **Where a step names board 1** (`192.168.10.101`, `mps3_01_pl`, `/dev/mps3_01_pl/tty_00`), use
+   board 2's: `$B`, `$T`, `$MCC_TTY`.
+
 Every step lists the command, the expected answer and the evidence file (under `$EV`).
 Commands run in **terminal B** unless a step says otherwise.
 
@@ -93,6 +119,9 @@ Commands run in **terminal B** unless a step says otherwise.
   cleared the store's power-on default after its test, so expect none unless the Linux lead set one.
 - **Vivado:** the RC2 mint and its ILAs are 2026.1:
   `/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/`.
+- **Board 2** (`mps3_02_pl`, `192.168.11.101`, boards.toml `lab2`): the same static, UserID and
+  overlays, but its own stage0 bake (build `0x6FAE6A0B`, sha256 `f206f788…`, rescue IP
+  `192.168.11.101`) and no user microSD: read Card-less mode.
 
 ---
 
@@ -107,6 +136,10 @@ cat > $HOME/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux/env.sh <<'EO
 export EV=$HOME/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux
 export B=192.168.10.101
 export H=mapstone-dev.ecs.soton.ac.uk
+# board 1's hub target and its own base image (F3's table); board 2: tools/hil/env_b2.sh
+export T=mps3_01_pl
+export BAKE=/home/david/pv_rb/config_rm_greybox_stage0.bit
+export BAKE_SHA=286ae54d2a2b8c15e8b610df8088d37e5c3b3c706aa9206aceade2b503f081b4
 # main's code: the checkout's venv, not an installed release's launcher
 export PATH=$HOME/SoCLabs/harness-manager/.venv/bin:$PATH
 # RC2's overlays (static 0x44EE76D5)
@@ -312,6 +345,8 @@ harness-manager slot status $B | tee $EV/c1_slot_status.txt
 - `slots <board>: running A, default A, a push goes to B`;
 - slots A and B both `valid`, with a `hdr_crc` and `verified`;
 - a `job` line with no job running.
+- **Card-less (board 2):** exit 12, `OS slot update is unavailable: no user microSD card in
+  the slot (the OS slots live on it)`: the harness said `card: false`, no slots.
 
 **C2. The card**
 ```bash
@@ -461,7 +496,8 @@ pgrep -af hw_server || echo NO-HW-SERVER
 
 **What the door does** (`hub_sd.py`, HARNESS-DIST §6 (b)):
 1. It uploads the `.bit` over ssh into the hub user's `~/.cache/harness-manager/hub-sd/<sha256>.bit`.
-2. It sends **one** `fpgahub target program mps3_01_pl <that path> --method sd --force`.
+2. It sends **one** `fpgahub target program <target> <that path> --method sd --force`
+   (`$T`: `mps3_01_pl` for board 1, `mps3_02_pl` for board 2).
 3. fpgahubd reads the file **by path**.
 
 **Why it may fail:** the unit file in the fpgahub repo sets `ProtectHome=yes`, which hides `/home`
@@ -485,7 +521,7 @@ ssh $H 'systemctl show fpgahubd -p ProtectHome -p PrivateTmp -p User -p ReadOnly
 
 **F2. The hub offers an `sd` method** (read). This is the query behind the door's "available".
 ```bash
-ssh $H 'sg fpga -c "fpgahub target program mps3_01_pl --list"' | tee $EV/f2_program_list.txt
+ssh $H "sg fpga -c 'fpgahub target program $T --list'" | tee $EV/f2_program_list.txt
 ```
 **Expect:**
 - a row `sd │ sd_install │ … │ yes │ …`;
@@ -493,19 +529,37 @@ ssh $H 'sg fpga -c "fpgahub target program mps3_01_pl --list"' | tee $EV/f2_prog
 
 `sd … no (<reason>)` means the door is unavailable. Record the reason and skip F6 and §G.
 
-**F3. Stage RC2's own base image the way Harness Manager does.**
+**F3. Stage the board's OWN base image the way Harness Manager does.**
 - Writes only the hub user's cache: 13 MB, and the SD is not touched.
-- These bytes are the image the board runs: the 2026-09-27 re-bake, which exists only on the hub
-  (`/home/david/pv_rb/`). The RC2 build dir on srv03335 (`…/build_mint3_rc2_linux/prod/`) still
-  holds the original bake, so the first command copies the re-bake here (a read on the hub).
+- Each board has its own stage0 bake: same static and UserID, but stage0's rescue IP and build id
+  are baked into BRAM. **Never stage one board's bake for the other**: board 1's bit on board 2
+  would put board 2's rescue on `192.168.10.101`, a subnet the hub cannot reach from board 2's NIC,
+  and board 2 has no JTAG to recover.
+- Both bakes exist only on the hub. The RC2 build dir on srv03335 (`…/build_mint3_rc2_linux/prod/`)
+  still holds the original bake, so the first command copies the board's bake here (a read on the
+  hub). `env.sh` (board 1) and `tools/hil/env_b2.sh` (board 2) set `T`, `BAKE` and `BAKE_SHA` from
+  this table:
+
+| Board | Hub target (`$T`) | Rescue IP | stage0 build | The bake on the hub (`$BAKE`) | sha256 (`$BAKE_SHA`) |
+|---|---|---|---|---|---|
+| 1 (`lab`) | `mps3_01_pl` | `192.168.10.101` | `0xC457D656` | `/home/david/pv_rb/config_rm_greybox_stage0.bit` (the 2026-09-27 re-bake) | `286ae54d2a2b8c15e8b610df8088d37e5c3b3c706aa9206aceade2b503f081b4` |
+| 2 (`lab2`) | `mps3_02_pl` | `192.168.11.101` | `0x6FAE6A0B` | `/home/david/mps3_02_pack/sd_tree/MB/HBI0309C/Nanosoc/nanosoc.bit` (board 2's config-SD bake, 2026-09-28) | `f206f788f7497b650b6f0408ebb2fbdb795edb749784a3ec42e6caaaa3df5058` |
+
 ```bash
-BIT=$HOME/rc2_rebake_stage0.bit; scp -q $H:/home/david/pv_rb/config_rm_greybox_stage0.bit $BIT
-SHA=$(sha256sum $BIT | cut -c1-64); echo "$SHA" | tee $EV/f3_stage.txt
-ssh -o ControlPath=none -o BatchMode=yes -o ConnectTimeout=15 $H "mkdir -p .cache/harness-manager/hub-sd && cat > .cache/harness-manager/hub-sd/$SHA.bit.part && mv -f .cache/harness-manager/hub-sd/$SHA.bit.part .cache/harness-manager/hub-sd/$SHA.bit" < $BIT
-ssh $H "sha256sum .cache/harness-manager/hub-sd/$SHA.bit; namei -l \$HOME/.cache/harness-manager/hub-sd/$SHA.bit" | tee -a $EV/f3_stage.txt
+echo "board $B target $T bake $BAKE want $BAKE_SHA" | tee $EV/f3_stage.txt
+BIT=$HOME/${T}_stage0_bake.bit; scp -q $H:$BAKE $BIT
+SHA=$(sha256sum $BIT | cut -c1-64); echo "$SHA" | tee -a $EV/f3_stage.txt
+if [ "$SHA" = "$BAKE_SHA" ]; then
+  ssh -o ControlPath=none -o BatchMode=yes -o ConnectTimeout=15 $H "mkdir -p .cache/harness-manager/hub-sd && cat > .cache/harness-manager/hub-sd/$SHA.bit.part && mv -f .cache/harness-manager/hub-sd/$SHA.bit.part .cache/harness-manager/hub-sd/$SHA.bit" < $BIT
+  ssh $H "sha256sum .cache/harness-manager/hub-sd/$SHA.bit; namei -l \$HOME/.cache/harness-manager/hub-sd/$SHA.bit" | tee -a $EV/f3_stage.txt
+else
+  echo "STOP: $BIT is $SHA, not $T's bake $BAKE_SHA: nothing staged" | tee -a $EV/f3_stage.txt
+fi
 ```
 **Expect:**
-- `SHA` = `286ae54d2a2b8c15e8b610df8088d37e5c3b3c706aa9206aceade2b503f081b4`;
+- the first line names the board you mean (`$T` = the board's row);
+- `SHA` = the row's sha256, and no `STOP:` line. `STOP:` means the wrong bit or the wrong env
+  file: nothing was staged. Skip F4 and F6;
 - the hub's `sha256sum` prints the same;
 - `namei` shows each directory's owner and mode.
 
@@ -523,12 +577,12 @@ v0.3.0's `dispatch_program` works in this order:
 So a "no such method" refusal proves the daemon read the file, and nothing was dispatched. The
 first command is the control, with a file that does not exist.
 ```bash
-ssh $H "sg fpga -c 'fpgahub target program mps3_01_pl \$HOME/.cache/harness-manager/hub-sd/no-such-file.bit --method hm-read-probe'" 2>&1 | tee $EV/f4_probe_control.txt
-ssh $H "sg fpga -c 'fpgahub target program mps3_01_pl \$HOME/.cache/harness-manager/hub-sd/$SHA.bit --method hm-read-probe'" 2>&1 | tee $EV/f4_probe.txt
+ssh $H "sg fpga -c 'fpgahub target program $T \$HOME/.cache/harness-manager/hub-sd/no-such-file.bit --method hm-read-probe'" 2>&1 | tee $EV/f4_probe_control.txt
+ssh $H "sg fpga -c 'fpgahub target program $T \$HOME/.cache/harness-manager/hub-sd/$SHA.bit --method hm-read-probe'" 2>&1 | tee $EV/f4_probe.txt
 ```
 **Expect:**
 - **Control:** an error naming `bitstream not found: /home/david/.cache/harness-manager/hub-sd/no-such-file.bit`.
-- **Probe:** an error naming `board 'mps3_01_pl' has no program method 'hm-read-probe' (available: […])`.
+- **Probe:** an error naming `board '<$T>' has no program method 'hm-read-probe' (available: […])`.
   → **PASS:** the daemon found, read and hashed Harness Manager's staged file.
   - `skip: bitstream_loaded already at sha256=…` is a PASS too: the daemon read it, and a skip
     writes nothing.
@@ -550,7 +604,8 @@ then repeat F4.
 
 Leave the staged file where it is. A real install overwrites it.
 
-**F6 (opt-in, +10 min).** **WRITES THE CONFIG SD, then REBOOTs.** Runs only if all of these hold:
+**F6 (opt-in, +10 min).** **WRITES THE CONFIG SD, then REBOOTs.** Never on a card-less board
+(Card-less mode 1). Runs only if all of these hold:
 - F4 passed;
 - you opt in;
 - `harness list` shows a published release for this static.

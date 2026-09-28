@@ -463,6 +463,19 @@ owners.
 - The `rm_timing` gate says why a slack is empty: an RM with no registers (such as
   `minimal`) has no path of its own, and a register with no timed path has no slack.
 
+### Unattended HIL on board 2 (`tools/hil`, HIL-B2)
+- A `linux-nocard` plan for a board with no user microSD (board 2, `mps3_02_pl`,
+  `192.168.11.101`): C1 expects the card-less answer (`slot status` exit 12, "no user
+  microSD card in the slot"); C2, D2-D5, F6, §G, Z1 and Z2c are skipped ("no user
+  microSD"); `--writes safe` keeps the two swaps and the MCC temperature read. No reset of
+  any kind. `docs/HIL_LINUX.md` has a Card-less mode preface, and the drift test holds the
+  plan's skips to it.
+- `tools/hil/env_b2.sh` sets board 2's address, hub target, MCC tty and evidence folders;
+  `docs/HIL_AUTO.md` has board 2's nightly recipe.
+- HIL_LINUX.md F3 stages each board's OWN base image from a per-board table (board 1's
+  re-bake `286ae54d…`, board 2's bake `f206f788…`) and refuses a bit whose sha256 is not
+  the board's row. §F stays manual in every plan.
+
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
 - Windows and macOS run the unit tests and the installer in CI; they have not been used

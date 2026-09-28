@@ -1010,7 +1010,7 @@ def make_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run a plan against the board")
     r.add_argument("--plan", required=True, choices=sorted(P.PLANS))
-    r.add_argument("--board", required=True, metavar="ADDR", help="the board (192.168.10.101)")
+    r.add_argument("--board", required=True, metavar="ADDR", help="the board (192.168.10.101 board 1, 192.168.11.101 board 2)")
     r.add_argument("--evidence", required=True, type=Path, metavar="DIR")
     r.add_argument("--writes", choices=("none", "safe"), default="none",
                    help="none (default): read-only checks. safe: also swap-and-restore and "
