@@ -102,6 +102,23 @@ def _stage_dir(v: Any) -> str:
     return ""
 
 
+#: SIDEBAR-UX: at most this many board ids in the sidebar's order or favourites.
+BOARD_LIST_MAX = 500
+
+
+def _board_ids(v: Any) -> str:
+    """A list of board ids (``mps3@192.168.10.101:6900``): each printable, 1-256 characters,
+    no spaces at either end, none twice."""
+    if len(v) > BOARD_LIST_MAX:
+        return f"must name at most {BOARD_LIST_MAX} boards"
+    bad = [b for b in v if not b or len(b) > 256 or not b.isprintable() or b.strip() != b]
+    if bad:
+        return f"has entries that are not board ids: {bad[:3]}"
+    if len(set(v)) != len(v):
+        return "names a board more than once"
+    return ""
+
+
 def _kit_sources(v: Any) -> str:
     bad = [s for s in v if s not in ("cache", "channel", "hub")]
     return f"has unknown sources {bad} (cache, channel, hub)" if bad else ""
@@ -131,6 +148,15 @@ GENERAL = (
             "Background reads of a board: only while a window shows it (on-view), or never "
             "(off: Harness Manager touches a board only when you ask)",
             choices=("on-view", "off")),
+    # SIDEBAR-UX web/static/js/sidebar.js:loadPrefs (GET /settings?section=general) and
+    # savePrefs (PUT /settings): the sidebar's order and favourites, per user, not per browser.
+    # Keyed by board id; a board missing from the order goes after the ordered ones.
+    Setting("general.board_order", "list", [], "General",
+            "The order of the boards in the sidebar, by board id (drag a board, or Alt+Up and "
+            "Alt+Down on it)", advanced=True, check=_board_ids),
+    Setting("general.favourite_boards", "list", [], "General",
+            "The boards pinned at the top of the sidebar, by board id (a board's star)",
+            advanced=True, check=_board_ids),
 )
 
 HUBS = (

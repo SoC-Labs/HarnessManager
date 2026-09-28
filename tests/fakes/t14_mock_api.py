@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import dataclasses
 import itertools
 import json
 import socket
@@ -84,7 +85,9 @@ OPEN_POINTS: dict[str, str] = {
     "POST /boards/{bid}/debug/down": "DebugStatus fields flattened next to ok",
     "POST /boards": "candidate = a Candidate object; {board_id, info} with info null + info_error "
                     "when the first read fails (the session is open); 409 ALREADY when open",
-    "GET /boards": "every board the daemon has probed or opened, open or not, plus `job`",
+    "GET /boards": "every board the daemon has probed or opened, open or not, plus `job`; "
+                   "SIDEBAR-UX: and every board boards.toml configures (source config, not "
+                   "contacted), each row with `source` and, when it has a table, `configured`",
     "DELETE /boards/{bid}": "?release=true (LEASE-UI) releases the lease THIS Harness Manager "
                             "holds (lease.here) first and adds `released` (null: none held "
                             "here); a failed release leaves the board open",
@@ -501,14 +504,17 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     # -- boards ---------------------------------------------------------------------------
 
-    def board_row(c: Candidate) -> dict[str, Any]:
+    def board_row(c: Candidate, source: str = "", conf: dict[str, Any] | None = None) -> dict[str, Any]:
         is_open = c.board_id in eng.open_boards()
         holder: LockOwner | None
         try:
             holder = eng.lock_owner(c.board_id)
         except HarnessError:
             holder = None
-        row: dict[str, Any] = {"board_id": c.board_id, "open": is_open, "candidate": c}
+        row: dict[str, Any] = {"board_id": c.board_id, "open": is_open, "candidate": c,
+                               "source": source or ("open" if is_open else "probe")}
+        if conf is not None:
+            row["configured"] = conf
         if holder is not None:
             row["holder"] = holder
         running = state.jobs.running(c.board_id)
@@ -518,7 +524,13 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     @app.get(f"{API}/boards")
     def boards() -> dict[str, Any]:
-        return _ok(boards=[board_row(c) for c in state.known()])
+        # SIDEBAR-UX: the boards boards.toml configures too (the daemon's own listing,
+        # daemon/configured.py), built from the file with no contact.
+        from harness_manager.daemon.configured import board_rows
+
+        known = {c.board_id: c for c in state.known()}
+        return _ok(boards=[board_row(c, source, conf) for _bid, c, source, conf in
+                           board_rows(eng, known, set(eng.open_boards()))])
 
     @app.post(f"{API}/boards")
     def open_board(body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:  # noqa: B008
@@ -533,6 +545,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
             cand = eng.candidate_for(str(target))
         else:
             cand = state.lookup(str(cdata.get("board_id", ""))) or _candidate_from_json(cdata)
+            from harness_manager.daemon import configured as _conf  # SIDEBAR-UX, as the daemon
+
+            if cand.evidence == _conf.EVIDENCE:
+                cand = dataclasses.replace(cand, evidence=_conf.OPENED)
         eng.open(cand, note=str(body.get("note") or UI_NOTE))
         state.remember([cand])
         via = str(body.get("via") or "")
