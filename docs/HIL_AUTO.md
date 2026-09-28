@@ -19,7 +19,8 @@
      --writes safe --repeat 40 --interval 1200 --until 08:30 --announce-only
    ```
    It prints `$RUN/ANNOUNCE.txt`: start, planned end, plan, writes mode, what it changes and
-   what it never does. Paste it into the 17:30 announcement.
+   what it never does. Paste it into the 17:30 announcement. The run rewrites it at the start
+   with its own start time and pid.
 2. **18:00: free the board for the runner, then take the lease** (terminal B):
    ```bash
    harness-manager daemon stop
@@ -30,9 +31,13 @@
      refuse (exit 4), and the runner stops.
    - `--ttl 54000` is 15 h, past 08:30. Nothing heartbeats the lease overnight. The runner
      stops `--margin` (10 min) before it expires, so a swap never outlives it.
-3. **Start it in tmux** (same shell, so it has `env.sh`):
+3. **Start it in tmux.** A tmux window does not inherit this shell's variables: set them
+   again inside it.
    ```bash
    tmux new -s hil
+   source ~/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux/env.sh
+   export RUN=$HOME/SoCLabs/harness-manager/docs/evidence/2026-09-hil-auto/$(date +%m%d)
+   cd ~/SoCLabs/harness-manager
    .venv/bin/python -m tools.hil run --plan linux-netboot --board $B --evidence $RUN \
      --writes safe --repeat 40 --interval 1200 --until 08:30
    ```
