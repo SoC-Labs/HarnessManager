@@ -742,7 +742,7 @@ export function handleEvent(ev) {
   }
   if (bid && ev.topic === "job.started") setJob(bid, (ev.data || {}).job, (ev.data || {}).kind);
   if (bid && (ev.topic === "job.done" || ev.topic === "job.failed")) jobEnded(bid, (ev.data || {}).job);
-  if (ev.topic !== "job.progress") {
+  if (ev.topic !== "job.progress" && ev.topic !== "checks.progress") {
     log(eventLevel(ev), ev.topic, eventText(ev), bid, ev.at);
   }
   if (!bid) return;
