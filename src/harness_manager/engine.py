@@ -422,10 +422,12 @@ class Engine:
         if is_unavailable(svc):
             return None
         try:
-            return svc.status(entry.session, cheap=True)
+            out = svc.status(entry.session, cheap=True)
         except Exception:  # noqa: BLE001 - the identity check is never worth failing info
             log.exception("reading the network identity of %s failed", entry.candidate.board_id)
             return None
+        # nothing known yet (identify silent, no last check): no key, so info is unchanged
+        return out if out is not None and out.get("reported") else None
 
     def _named(self, entry: _Open, identity: BoardIdentity) -> Candidate:
         """N1: the open board's candidate, renamed when its harness or the session (the

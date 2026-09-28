@@ -129,6 +129,16 @@ def human(board_id: str, st: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def info_line(st: dict[str, Any]) -> str:
+    """``info``'s one line: the verdict, what the board reports, the worst finding."""
+    rep = st.get("reported") or {}
+    what = " · ".join(str(rep.get(f) or "?") for f in ("label", "ip", "mac")) if rep else "not read"
+    worst = next((f["text"] for f in st.get("findings") or () if f.get("level") in ("err", "warn")),
+                 "")
+    tail = "" if st.get("live", True) else f" [last check {st.get('checked_at')}]"
+    return f"{str(st.get('status') or 'unknown')}: {what}{tail}" + (f"; {worst}" if worst else "")
+
+
 def row(board_id: str, st: dict[str, Any] | None, action: str = "") -> list[Any]:
     st = st or {}
     rep = st.get("reported") or {}

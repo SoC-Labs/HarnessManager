@@ -129,3 +129,24 @@ def test_twin_bad_values_are_usage_errors_and_nothing_is_sent(capsys, board):
     rc, _, err = run(capsys, "board", "identity", target, "--clear", "--label", "A")
     assert rc == 2 and "--clear goes alone" in err
     assert fake.identity_sets == []
+
+
+def test_info_shows_the_identity_line_and_its_json_key(capsys, board):
+    fake, target = board()
+    rc, out, err = run(capsys, "info", target)
+    assert rc == 0, err
+    line = next(ln for ln in out.splitlines() if ln.startswith("identity   "))
+    assert line.startswith("identity   unset: ") and "02:00:00:4d:50:53" in line
+    assert "identity not set" in line
+    rc, out, _ = run(capsys, "--json", "info", target)
+    assert json.loads(out)["net_identity"]["status"] == "unset"
+    assert fake.identity_reads == 0                  # info asked identify only, never 6900
+
+
+def test_twin_a_board_that_does_not_answer_identify_has_no_identity_in_info(capsys, board,
+                                                                            monkeypatch):
+    fake, target = board()
+    monkeypatch.setenv(IDENTIFY_PORT_ENV, "9")       # nothing answers there
+    rc, out, err = run(capsys, "--json", "info", target)
+    assert rc == 0, err
+    assert "net_identity" not in json.loads(out)

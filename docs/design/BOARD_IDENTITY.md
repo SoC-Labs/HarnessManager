@@ -57,7 +57,7 @@ ip/mac/label); (3) the image default: label `MPS3` (no number), 192.168.10.101/2
 | Source | What | When |
 |---|---|---|
 | 6900 `identity` (feature `identity`) | label, hostname, ip, mac, source per field, stage0, override, pending, persist | `board identity`, `GET /identity`, the Board tile's own load. Never inside `info` |
-| UDP identify (LAN only) | mac, ip, `label` once v0.16 | `info` (the claim's cached identify, 30 s) and older images |
+| UDP identify (LAN only) | mac, ip, `label` once v0.16 | `info` (cached 30 s; never a control-port connection) and older images |
 | 6900 `stats` | mac | older images behind a hub (UDP does not cross the tunnel) |
 | the hub record: `fpgahub target show T` (SSH runner) or `GET /targets/{t}` (REST) | `network.{board_ip, board_mac, hostname, host_ip}`, `discovered_mac`, the owning board (`mps3_02`) | `board identity`, `GET /identity?refresh=true`; cached for the session |
 | the other hub targets | the same, for every member `fpgahub board list --json` names | `board identity` and `refresh=true` only |
@@ -132,3 +132,20 @@ set_identity(session, want: dict) -> {"persisted", "pending", "applies", "route"
 Lease held here; the board claimed by this HM; a typed confirm; never during a card job;
 refused on bare metal and on a netbooted board with the reason; only the warm `reboot`
 verb; the MAC the hub has wrong is never proposed.
+
+## 8. As built (lane BOARD-ID, 2026-09-28)
+
+| Piece | Where |
+|---|---|
+| Rules, plan, the boards seen, the service | `src/harness_manager/services/board_identity.py` (`engine.board_identity`) |
+| MPS3 adapter, the seam (`HarnessdSetter`, `SshCommandSetter`, `PendingSetter`) | `src/harness_manager_mps3/net_identity.py` (`session.net_identity`; one hook line in `pack.py`) |
+| Hub records | `HubClient.target_info(name)`/`groups()` (SSH), `RestHubClient.target_info(name)` |
+| `info` | `BoardInfo.net_identity`; a clash adds a `Health` note |
+| CLI | `board identity TARGET [--from-hub | --label/--ip/--mac/--hostname | --clear] [--consent] [--wait]` (`cli/cmd_identity.py`) |
+| API | `GET/POST /boards/{bid}/identity` (`daemon/identity_api.py`), `RemoteIdentity` |
+| Web | the Board tile's Identity row and Fix identity dialog (`web/static/js/sections/identity.js`) |
+| Fakes | `tests/fakes/idn_board.py` (the v0.16 verbs on the slot board), `tests/fakes/idn_mock_identity.py` (T14 mock) |
+
+Not wired yet: nothing reads `identify.label` beyond the cheap read (v0.16 adds it); the SSH
+setter is selectable (`Mps3NetIdentity(setter=SshCommandSetter())`) but never the default.
+

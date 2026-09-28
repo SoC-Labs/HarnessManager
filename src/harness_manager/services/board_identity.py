@@ -78,6 +78,8 @@ DEFAULT_LABELS = ("MPS3", "MPS3-01")
 LABEL_MAX = 23
 #: A board seen longer ago than this no longer counts for a clash.
 SEEN_MAX_AGE_S = 14 * 24 * 3600.0
+#: A report that did not change is written to seen.json at most this often (info polls).
+SEEN_REFRESH_S = 300.0
 #: The reboot the fix waits for (the Linux harness's own budget).
 REBOOT_WAIT_S = 180.0
 
@@ -561,7 +563,10 @@ class IdentityService:
                 rec["hub"] = dict(hub)
             if refresh:
                 rec["hub_others"] = [o for o in others if o.get("kind") == "hub"]
-            self.seen.update(bid, **rec)
+            same_report = all(prev.get(k) == rec.get(k) for k in (*FIELDS, "target", "address"))
+            if not same_report or refresh or "hub" in rec and prev.get("hub") != rec["hub"] \
+                    or time.time() - float(prev.get("at") or 0) > SEEN_REFRESH_S:
+                self.seen.update(bid, **rec)
         self._publish(session, out)
         return out
 

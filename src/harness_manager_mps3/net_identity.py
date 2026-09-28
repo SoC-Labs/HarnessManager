@@ -251,7 +251,7 @@ class Mps3NetIdentity:
         self._read: dict[str, Any] | None = None
         self._read_at = 0.0
         self._quick: dict[str, Any] | None = None
-        self._quick_at = 0.0
+        self._quick_at = -READ_TTL_S
         self._hub_rec: dict[str, Any] | None = None
         self._live: Any = None
         #: How the last change reached the board, and the setter that made it (tests).
@@ -292,15 +292,15 @@ class Mps3NetIdentity:
         if cheap:
             if full is not None:
                 return full if now - full_at < READ_TTL_S else {**full, "last_check": True}
-            if quick is not None and now - quick_at < READ_TTL_S:
-                return quick
+            if now - quick_at < READ_TTL_S:
+                return quick                    # the last answer, or the last silence
             if self._tunnelled():
                 return None                     # through a hub: never a call from info
             out = self._from_identify(impl="")
             if out is not None:
                 out["feature_known"] = False
-                with self._mu:
-                    self._quick, self._quick_at = out, now
+            with self._mu:                      # a silent board is not asked again for a while
+                self._quick, self._quick_at = out, now
             return out
         if not refresh and full is not None and now - full_at < READ_TTL_S:
             return full
@@ -455,6 +455,7 @@ class Mps3NetIdentity:
         self.last_set = dict(out)
         with self._mu:
             self._read = self._quick = None     # the next read asks the board
+            self._quick_at = -READ_TTL_S
         return out
 
     def warm_reboot(self, progress: Any, wait_s: float) -> dict[str, Any]:
@@ -467,6 +468,7 @@ class Mps3NetIdentity:
         witness = slots.reboot(progress=progress, wait_s=wait_s)
         with self._mu:
             self._read = self._quick = None
+            self._quick_at = -READ_TTL_S
             self._live = None
         resets = getattr(self._session, "resets", None)
         if resets is not None and callable(getattr(resets, "refresh", None)):
