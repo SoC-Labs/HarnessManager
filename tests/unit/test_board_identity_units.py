@@ -186,6 +186,29 @@ def test_v7_board2_default_label_is_identity_not_set_never_a_label_clash():
     assert {(x["field"]) for x in f if x["kind"] == "clash"} == {"mac"}
 
 
+def test_v7_a_default_label_is_not_also_differs_from_the_hub():
+    """"identity not set (default label)" says it: no "differs" for the label. The MAC that is
+    not the hub's still differs, and the duplicate MAC is still a clash."""
+    f = BI.compare(BOARD2_TONIGHT, HUB2, [seen_board1()])
+    differs = [x["field"] for x in f if x["kind"] == "differs"]
+    assert "label" not in differs and differs == ["mac"]
+    assert [x["field"] for x in f if x["kind"] == "clash"] == ["mac"]
+    sourceless = {**BOARD2_TONIGHT, "source": {}}                    # identify: no source
+    assert "label" not in [x["field"] for x in BI.compare(sourceless, HUB2, [])
+                           if x["kind"] == "differs"]
+
+
+def test_v7_twin_a_set_label_unlike_the_hubs_still_differs():
+    baked = {**BOARD2_TONIGHT, "label": "BENCH-2",
+             "source": {**BOARD2_TONIGHT["source"], "label": "stage0"}}
+    f = BI.compare(baked, HUB2, [])
+    differs = {x["field"]: x["text"] for x in f if x["kind"] == "differs"}
+    assert differs["label"] == "label BENCH-2 differs from the hub's mps3_02_pl: MPS3-02"
+    assert BI.summarise(f, baked) == "unset"            # the MAC is still the image default
+    fixed = {**baked, "mac": "02:00:00:00:02:fe", "source": {**baked["source"], "mac": "stage0"}}
+    assert BI.summarise(BI.compare(fixed, HUB2, []), fixed) == "differs"
+
+
 def test_v7_twin_board1_with_its_own_mac_leaves_board2_unset_not_clashing():
     f = BI.compare(BOARD2_TONIGHT, HUB2, [seen_board1(mac="02:00:00:00:01:fe")])
     assert [x for x in f if x["kind"] == "clash"] == []

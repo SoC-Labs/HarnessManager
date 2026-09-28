@@ -301,6 +301,8 @@ def test_v7_board2_tonight_is_identity_not_set_and_its_only_clash_is_the_mac(lab
     unset = [f["text"] for f in st["findings"] if f["kind"] == "unset"]
     assert unset and unset[0].startswith("identity not set (default label, MAC)")
     assert st["reported"]["hostname"] == "mps3"                  # the label lower-cased
+    differs = {f["field"] for f in st["findings"] if f["kind"] == "differs"}
+    assert "label" not in differs and "mac" in differs, "default label: unset, not differs"
 
 
 def test_v7_twin_board1_with_its_own_mac_leaves_board2_identity_not_set(lab, tmp_path):

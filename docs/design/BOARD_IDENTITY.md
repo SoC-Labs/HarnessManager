@@ -66,7 +66,7 @@ The shipped contract is additive over the draft above; where it differs, HM foll
 | replies | `identity`, `identity_set`, `locate` carry `"op"` | taken with or without |
 | bare metal | `identity not supported`, code `not_supported` | UNAVAILABLE (bare metal named); `unknown op` is an image older than v0.16 |
 | identify | `label` after `ssh`, before `ports`; `ip` is the DHCP lease while `dhcp:true` | a lease is kept as `lease`, never compared as the board's IP |
-| default label | `MPS3` (no number) | never a label clash on either side ("identity not set (default label)"); a duplicate MAC or IP still is |
+| default label | `MPS3` (no number) | never a label clash on either side ("identity not set (default label)"), nor a label "differs" from the hub record; a duplicate MAC or IP is still a clash, and an IP or MAC unlike the hub's still differs |
 
 Board 2 before its identity bake reports `MPS3`, the old MAC 02:00:00:4d:50:53 and its own
 IP (192.168.11.101, from stage0): HM shows "identity not set (default label, MAC)", and a

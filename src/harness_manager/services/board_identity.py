@@ -318,7 +318,8 @@ def compare(reported: Mapping[str, Any] | None, hub: Mapping[str, Any] | None,
     every OTHER board this Harness Manager has seen and every other target the hub lists.
 
     V7-ALIGN: a label that is the image default on EITHER side is not a clash (it is "identity
-    not set"); a duplicate MAC or IP is, whatever its source (two boards on one network)."""
+    not set"), nor a difference from the hub record; a duplicate MAC or IP is a clash whatever
+    its source (two boards on one network), and an IP or MAC unlike the hub's still differs."""
     out: list[dict[str, Any]] = []
     if not reported:
         return out
@@ -366,6 +367,8 @@ def compare(reported: Mapping[str, Any] | None, hub: Mapping[str, Any] | None,
                 continue
             if f == "mac" and hub.get("mac_suspect"):
                 continue
+            if f == "label" and my_label_default:
+                continue            # "identity not set (default label)" already says it
             out.append(_finding("differs", "warn",
                                 f"{f} {_shown(f, mine)} differs from the hub's {target}: "
                                 f"{_shown(f, theirs)}", field_name=f, other=target))
