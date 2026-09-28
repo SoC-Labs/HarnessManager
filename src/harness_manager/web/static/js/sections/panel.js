@@ -39,6 +39,7 @@ export function front(bid) {
   const b = boardState(bid);
   if (!b.front) {
     b.front = {
+      bid,                   // FIX-PACK-1: whose it is (the mirror's Read now)
       body: null,            // GET /panel: {panel, reason, identify, support, presence}
       error: null, line: "", loading: false, again: false, readAt: 0, retries: 0,
       // FIX-PACK-1: the quiet answer of the last held-back read of the state / the mirror
@@ -390,7 +391,7 @@ function runs(row, roles) {
 
 const ROLE_CLASS = { i: "pm-inv" };      // a rebuilt frame: t text, i inverted (today's red)
 
-function Mirror({ f, bid }) {
+function Mirror({ f }) {
   const fr = f.frame;
   if (!fr) {
     if (f.frameError) {
@@ -399,7 +400,7 @@ function Mirror({ f, bid }) {
     if (f.frameQuiet) {
       return html`<${QuietNote} testid="panel-mirror-quiet" action="panel-mirror-read-now"
         text=${quietWords(f.frameQuiet)} busy=${f.frameLoading && f.frameExplicit}
-        onRead=${() => loadFrame(bid, { explicit: true })} />`;
+        onRead=${() => loadFrame(f.bid, { explicit: true })} />`;
     }
     return html`<p class="muted small"><${Spinner} /> Reading the panel's text...</p>`;
   }
@@ -493,7 +494,7 @@ export function PanelCard({ bid }) {
         ? html`<div class="mb-12"><${Reason} level="unk" icon="circle-help" testid="panel-rebuilt"
             text=${`Rebuilt from what Harness Manager read, not read from the panel. This harness (bare metal) reports only who owns the panel; the live mirror, who is connected and Identify need the Linux harness.`} /></div>`
         : html`<p class="muted small mb-12" data-testid="panel-read-age">Read from the panel${p.observed_at ? `, ${ageText(p.observed_at, now)}` : ""}.</p>`}
-      <${LiveDisplay} bid=${bid}><${Mirror} f=${f} bid=${bid} /><//>
+      <${LiveDisplay} bid=${bid}><${Mirror} f=${f} /><//>
       <dl class="kv mt-14">
         <dt>Page</dt><dd data-testid="panel-page"><${Parts} parts=${[{ key: "page", ...pagePart(p) }]} /></dd>
         <dt>Owner</dt><dd data-testid="panel-owner"><${Parts} parts=${[{ key: "owner", ...ownerPart(p) }]} /></dd>

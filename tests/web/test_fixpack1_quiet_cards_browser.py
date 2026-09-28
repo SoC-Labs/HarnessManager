@@ -115,6 +115,14 @@ def test_the_board_tiles_read_now_reads_every_held_back_line(page_factory, daemo
                                                                            timeout=T)
     expect(page.locator('[data-testid="tile-temp"]')).not_to_have_text("not read", timeout=T)
     expect(tile).to_have_count(0, timeout=T)
+    # The panel's state was read (a click), its text mirror not yet: the card opened later
+    # asks for the mirror in the background, which is held back: the mirror says so too.
+    details(page)
+    note = page.locator('[data-testid="panel-mirror-quiet"]')
+    expect(note).to_contain_text("Background reads are off", timeout=T)
+    note.locator('[data-action="panel-mirror-read-now"]').click()
+    expect(page.locator('[data-testid="panel-mirror"] [data-row="0"]')).to_have_text(
+        LINUX_STATUS_ROWS[0], timeout=T)
     assert page.errors == []
 
 
