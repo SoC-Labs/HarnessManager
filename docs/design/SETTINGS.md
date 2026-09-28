@@ -522,6 +522,8 @@ The columns:
 | G3 | `general.window_size` | app window size | const `WINDOW_SIZE` (`web/window.py:41`) | 1440×900 | U | | L | U | ✓ (remember last) |
 | G4 | `general.app_keep_dbus` | keep the desktop bus for the app window | env `HARNESS_MANAGER_APP_KEEP_DBUS` (`web/window.py:39,90-93`) | off | M | | L | Dev | env |
 | G5 | `general.open_browser` | whether `ui` opens a browser | env `BROWSER`/`DISPLAY`/`WAYLAND_DISPLAY` (`cli/cmd_daemon.py:189-193`) | auto | U | | L | Dev | env |
+| G6 | `general.board_order` | the sidebar's order of the boards, by board id (SIDEBAR-UX) | the web UI (`web/static/js/sidebar.js` loadPrefs/savePrefs over `GET`/`PUT /settings`) | [] | U | | L | U | ✓ (advanced; drag or Alt+Up/Down sets it) |
+| G7 | `general.favourite_boards` | the boards pinned at the top of the sidebar, by board id (SIDEBAR-UX) | the web UI (`web/static/js/sidebar.js`) | [] | U | | L | U | ✓ (advanced; a board's star sets it) |
 
 ### A.2 Hubs (`[hubs.<name>]`)
 

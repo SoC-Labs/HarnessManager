@@ -389,6 +389,27 @@ owners.
   first and returns `released` (additive; without it, close is unchanged).
 - The demo has a fourth board, mps3-03, behind the same hub with a free lease, so the
   badges show free, yours (Acquire it) and held by alice (mps3-02).
+- **The board list, your way (SIDEBAR-UX).** Drag a board card to reorder the list (a
+  line shows where it lands; on a touch screen, drag its grip), or focus it and press
+  **Alt+Up** / **Alt+Down** (a screen reader hears the new place). A click without a drag
+  still opens the board. The star on a card pins it in a **Favourites** group at the top;
+  unstarring puts it back where it was. The order and the favourites are your settings
+  (`general.board_order`, `general.favourite_boards`), shared by every window and the app,
+  not kept per browser; the demo keeps its own. A new window starts on the first board.
+- **Boards in `boards.toml` no longer vanish after the service restarts.** Every board
+  your `boards.toml` configures is listed, as **not open** with its route ("through the
+  hub mapstone-dev"), and nothing contacts it until you press **Open board**, which goes
+  through its own `via` and hub. A board that is neither in `boards.toml` nor open is not
+  listed after a restart, as before. The API: `GET /boards` rows add `source` (`open`,
+  `probe` or `config`) and `configured` (the table's key, via, hub, target, match and
+  name; additive).
+- **Scan** also offers your `boards.toml` boards ("no boards answered on this network; 1
+  more in boards.toml"), since a board behind a hub never answers a scan.
+- **+ Add a board by address** uses the matching `boards.toml` entry's route: type
+  `192.168.10.101` and the hub field fills with `hub`, with a line naming the entry
+  (`boards.toml lab: through the hub mapstone-dev`). A route you type wins. Adding a board
+  whose entry says `via = "hub"` now finds it: the probe goes through the hub's SSH host
+  (it used to try a tunnel with no host and report "no boards answered").
 
 ### Building a DUT for the RC2 static (Vivado 2026.1)
 - Vivado 2025.1 and later install as `<root>/<release>/Vivado/bin/vivado`; HM now finds that

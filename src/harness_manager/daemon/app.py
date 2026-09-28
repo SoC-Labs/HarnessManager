@@ -74,6 +74,7 @@ from harness_manager.services.quiet import (
     request_is_background,
 )
 
+from . import configured
 from .jobs import BoardGates, Job, JobManager, busy_error
 from .outbox import Batch, Outbox
 from .wire import (
@@ -948,9 +949,15 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def boards() -> JSONResponse:
         open_ids = set(d.engine.open_boards())
         rows = []
-        for board_id, cand in sorted(d.known().items()):
+        # SIDEBAR-UX (daemon/configured.py): the boards boards.toml configures are listed
+        # too, built from the file with no contact (source "config"), so a restart never
+        # drops them from the sidebar; `configured` says how each is reached.
+        for board_id, cand, source, conf in configured.board_rows(d.engine, d.known(),
+                                                                  open_ids):
             row: dict[str, Any] = {"board_id": board_id, "open": board_id in open_ids,
-                                   "candidate": cand}
+                                   "candidate": cand, "source": source}
+            if conf is not None:
+                row["configured"] = conf
             holder = d.engine.lock_owner(board_id)
             if holder is not None:
                 row["holder"] = owner_json(holder)
@@ -971,6 +978,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                 raise UsageError("via goes with target, not with a candidate",
                                  hint="a candidate from POST /probe already carries its route")
             cand = from_json(Candidate, b["candidate"])
+            if cand.evidence == configured.EVIDENCE:
+                # SIDEBAR-UX: a boards.toml board is contacted now; its row stops saying not
+                cand = dataclasses.replace(cand, evidence=configured.OPENED)
         elif b.get("target"):
             target = _str(b, "target")
             pack = _str(b, "pack", "mps3")

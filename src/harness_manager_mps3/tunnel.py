@@ -960,18 +960,52 @@ def _open_hub_reach(candidate: Candidate, eth: Link, remote_ports: Mapping[str, 
                           ssh_host=ssh_host, ssh_fallback=fallback, control_port=CONTROL_PORT)
 
 
+def probe_route(candidate: Candidate) -> tuple[str, str]:
+    """``(via, jump)`` for a probe of ``candidate``: ``("ssh:HOST", jump)`` through a tunnel,
+    ``("", "")`` direct.
+
+    A ``via="hub"`` candidate (boards.toml ``via = "hub"``) is probed through the SSH tunnel
+    to its hub's host: the route ``open_reach`` falls back to. Before SIDEBAR-UX the probe
+    passed ``"hub"`` on as an SSH host, the tunnel had no host, and a board added by the
+    address its boards.toml entry matches was "not answering" until the hub was typed in.
+    ``UsageError`` when the hub has no SSH host (a REST-only hub: no tunnel to probe with).
+    """
+    via = candidate_via(candidate)
+    if not via:
+        return "", ""
+    if via != VIA_HUB:
+        host = parse_via(via)
+        return via, _hub_jump(candidate, host)
+    from . import hub as _hub
+
+    cfg = _hub.hub_config_for(candidate)
+    if cfg is None:
+        raise UsageError(f"via = \"hub\" needs a hub table for {candidate.board_id} in boards.toml")
+    rest = cfg.rest
+    ssh_host = (rest.ssh_host if rest is not None else cfg.host) or ""
+    if not ssh_host:
+        raise UsageError(f"{candidate.board_id} is reached through a hub with no SSH host, so "
+                         "a probe cannot tunnel to it",
+                         hint="open it instead, or give the hub a host (harness-manager hub "
+                              "add NAME --ssh HOST)")
+    return f"{VIA_SSH}:{ssh_host}", cfg.jump if ssh_host == cfg.host else ""
+
+
 @contextlib.contextmanager
 def probe_reach(host_spec: str, via: str, *, timeout_s: float = 2.0,
                 launcher: Launcher | None = None,
-                ssh_g: Callable[[Sequence[str]], str] | None = None):
-    """A short-lived tunnel for a probe: only the control port. Yields ``(host, port)``."""
+                ssh_g: Callable[[Sequence[str]], str] | None = None, jump: str = ""):
+    """A short-lived tunnel for a probe: only the control port. Yields ``(host, port)``.
+    ``jump``: an SSH jump host on the way to the hub (``probe_route``)."""
     from .shell import parse_endpoint
 
     hub = parse_via(via)
+    if not hub:
+        raise UsageError(f"a probe tunnel needs ssh:HOST, not {via!r}")
     rhost, rport = parse_endpoint(host_spec, CONTROL_PORT)
     tunnel = SshTunnel(hub, [Forward("control", rhost, rport)], launcher=launcher, ssh_g=ssh_g,
                        restart=False, ready_timeout_s=max(READY_TIMEOUT_S, timeout_s),
-                       label=f"probe {rhost}:{rport} via ssh:{hub}")
+                       label=f"probe {rhost}:{rport} via ssh:{hub}", jump=jump)
     tunnel.start()
     try:
         yield "127.0.0.1", tunnel.local_port("control")

@@ -3,8 +3,7 @@
 import { ApiError, call, hasToken, initToken } from "./api.js";
 import { closeBoardConsoles } from "./consoles.js";
 import {
-  boardName, boardTitle, clock, designText, liveTitle, healthOf, holderAge, holderText, LINK_ICONS,
-  linkName, nameSourceText,
+  boardName, boardTitle, clock, liveTitle, healthOf, holderAge, holderText, nameSourceText,
 } from "./format.js";
 import { html, render, useEffect, useState } from "./lib.js";
 import { ActivitySection } from "./sections/activity.js";
@@ -19,8 +18,8 @@ import { ProgramSection } from "./sections/program.js";
 import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
 import { HubFact } from "./hub.js";
-import { LocateButton } from "./locate.js";          // LOCATE: Identify on each board card
-import { LeaseBadge, LeaseBanners, requestClose } from "./lease.js";
+import { LeaseBanners, requestClose } from "./lease.js";
+import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
 import {
   boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, S,
   sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
@@ -47,78 +46,6 @@ export const SECTIONS = [
 
 // --- the rail ------------------------------------------------------------------------------
 
-function BoardItem({ bid }) {
-  const row = S.boards[bid] || {};
-  const cand = row.candidate || {};
-  const b = S.board[bid];
-  const ident = (b && b.info && b.info.identity) || cand.identity || null;
-  const named = (b && b.info && b.info.candidate) || cand;     // N1: the latest name
-  const design = designText(ident);
-  const shell = ident && ident.shell_id;
-  const mine = !!row.open;
-  const held = !mine && row.holder;
-  let dot = "unk";
-  let dotTitle = "not checked";
-  if (mine && b && b.info) {
-    const h = healthOf(b.info);
-    dot = h.level;
-    dotTitle = `${h.text}: ${h.detail}`;
-  } else if (cand.evidence) {
-    dot = "ok";
-    dotTitle = `found: ${cand.evidence}`;
-  }
-  const kinds = [...new Set((cand.links || []).map((l) => l.kind))];
-  return html`<li class="board-li">
-    <button type="button" class="board-item" aria-current=${S.selected === bid ? "true" : "false"}
-      data-board=${bid} onClick=${() => select(bid)}>
-      <div class="board-row1">
-        <span class=${`dot ${dot}`} title=${dotTitle}></span>
-        <span class="board-name" data-testid="rail-name"
-          title=${named.name ? `${bid} · ${nameSourceText(named)}` : bid}>${boardName(named, bid)}</span>
-        ${(b && b.job) || (row.job && !(b && b.readOnOpen)) ? html`<span class="i-muted" title="a job is running on this board"><${Spinner} /></span>` : null}
-        ${mine ? html`<${Chip} level="accent" icon="plug-zap" cls="lock-chip" testid="rail-open"
-            title="Open in this Harness Manager: its board lock is this daemon's (the hub lease is the line below)">Open<//>`
-          : held ? html`<${Chip} level="warn" icon="lock" cls="lock-chip" title=${`held by ${holderText(row.holder)}`}>
-              ${row.holder.user || "held"}<//>` : null}
-      </div>
-      ${mine ? html`<${LeaseBadge} bid=${bid} />` : null}
-      <div class="board-row2">
-        <span class="pack">${(cand.pack || String(bid).split("@")[0] || "").toUpperCase()}</span>
-        ${design ? html` · ${design}` : html` · <span class="muted">design not read</span>`}
-        ${shell ? html` · <span class="mono">${shell}</span>` : null}
-      </div>
-      <div class="board-row3">
-        ${kinds.map((k) => html`<span key=${k} title=${linkName(k)}><${Icon} name=${LINK_ICONS[k] || "link"} cls="sm" /></span>`)}
-        <span class="links-text">${kinds.map(linkName).join(" · ")}</span>
-      </div>
-    </button>
-    <${LocateButton} bid=${bid} where="rail" />
-  </li>`;
-}
-
-// A board by address, optionally through a hub's SSH tunnel (L1: POST /probe {via:
-// "ssh:HOST"}). The candidate it finds carries that route, so opening it needs no via.
-function AddByAddress({ onDone }) {
-  const [value, setValue] = useState("");
-  const [hub, setHub] = useState("");
-  const submit = (e) => {
-    e.preventDefault();
-    const host = value.trim();
-    if (!host) return;
-    const h = hub.trim();
-    probe([host], h ? (h.startsWith("ssh:") ? h : `ssh:${h}`) : "");
-    setValue("");
-    onDone();
-  };
-  return html`<form class="rail-add" onSubmit=${submit}>
-    <input class="input mono" placeholder="192.168.10.101[:6900]" aria-label="Board address"
-      value=${value} onInput=${(e) => setValue(e.target.value)} autofocus />
-    <button type="submit" class="btn sm">Add</button>
-    <input class="input mono via" placeholder="through a hub: ssh host (optional)" aria-label="Through a hub (ssh host)"
-      data-testid="add-via" value=${hub} onInput=${(e) => setHub(e.target.value)} />
-  </form>`;
-}
-
 function Rail() {
   const [adding, setAdding] = useState(false);
   const conn = S.connection;
@@ -140,7 +67,7 @@ function Rail() {
         <button type="button" class="btn ghost sm icon-only" title="Add a board by address"
           aria-label="Add a board by address" aria-expanded=${adding ? "true" : "false"}
           onClick=${() => setAdding(!adding)}><${Icon} name="plus" /></button>
-        <button type="button" class="btn ghost sm icon-only" title="Scan for boards"
+        <button type="button" class="btn ghost sm icon-only" title="Scan for boards (and list the boards.toml ones)"
           aria-label="Scan for boards" data-action="rescan"
           aria-busy=${S.scan.running ? "true" : undefined} onClick=${() => { if (!S.scan.running) probe(); }}>
           ${S.scan.running ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}</button>
@@ -149,9 +76,8 @@ function Rail() {
     ${adding ? html`<${AddByAddress} onDone=${() => setAdding(false)} />` : null}
     ${S.scan.line ? html`<div class=${`rail-status ${S.scan.level === "err" ? "err" : ""}`}
       data-testid="scan-line">${S.scan.line}</div>` : null}
-    <ul class="board-list">
-      ${S.order.map((bid) => html`<${BoardItem} key=${bid} bid=${bid} />`)}
-    </ul>
+    <${ScanOffer} />
+    <${BoardList} />
     <div class="rail-foot">
       <${Seg} label="Theme" value=${S.theme} onChange=${(v) => { applyTheme(v); changed(); }}
         options=${[
@@ -313,14 +239,17 @@ function BoardPreview({ bid }) {
   };
   const packTitle = S.packs[cand.pack] || cand.pack || "";
   const held = row.holder;
+  const fromConfig = row.source === "config";       // SIDEBAR-UX: listed from boards.toml
   return html`<div class="section-body"><div class="preview stack">
     <section class="card" aria-label="Board">
       <div class="card-head"><h2 class="card-title" data-testid="preview-name"><${Icon} name="server" />${cand.name
         ? `${cand.name} · ${cand.label || boardTitle(cand, bid)}` : cand.label || boardTitle(cand, bid)}</h2></div>
-      <p class="card-sub">${packTitle}${cand.evidence ? ` · found: ${cand.evidence}` : ""}</p>
+      <p class="card-sub">${packTitle}${fromConfig ? " · in boards.toml: not contacted until you open it"
+        : cand.evidence ? ` · found: ${cand.evidence}` : ""}</p>
       <div class="card-body">
         <dl class="kv">
           <dt>Board id</dt><dd class="mono">${bid}</dd>
+          ${row.configured ? html`<dt>Route</dt><dd data-testid="preview-route">boards.toml <b>${row.configured.key}</b>: ${routeText(row.configured)}${row.configured.target ? html` <span class="mono sub">${row.configured.target}</span>` : null}</dd>` : null}
           <dt>Links</dt><dd>${(cand.links || []).map((l) => html`<${LinkLine} key=${l.kind + l.address} link=${l} />`)}</dd>
           <dt>Shell</dt><dd class="mono">${ident ? ident.shell_id || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
           <dt>Design</dt><dd>${ident ? html`${ident.rm_name || "unknown"} <span class="mono sub">${ident.rm_id}</span>` : html`<span class="muted">read when opened</span>`}</dd>
@@ -487,6 +416,7 @@ function App() {
 window.__harness_managerState = () => JSON.parse(JSON.stringify({
   connection: S.connection, eventsUp: S.eventsUp, selected: S.selected, boards: S.boards,
   jobs: Object.fromEntries(Object.entries(S.board).map(([bid, b]) => [bid, b.job])),
+  sidebar: { order: SIDEBAR.order, favs: SIDEBAR.favs, where: SIDEBAR.where },
   log: S.log.slice(-80),
 }));
 
@@ -494,5 +424,6 @@ initTheme();
 initToken();
 render(html`<${App} />`, document.getElementById("app"));
 if (!hasToken()) S.connection = "auth";
+startSidebar();
 start();
 startSelfUpdate();

@@ -21,6 +21,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.hub:route_candidate(candidate, via)``       | L1   | the candidate routed ``via`` (boards.toml ``via``/``hub``) |
 | ``.tunnel:open_reach(candidate, ports)``       | L1   | ``Reach``: the SSH tunnel's local ports, or None (direct) |
 | ``.tunnel:probe_reach(spec, via, ...)``        | L1   | a short tunnel for a probe (control port only) |
+| ``.tunnel:probe_route(candidate)``            | SIDEBAR-UX | the probe's ``(via, jump)``: ``via="hub"`` tunnels to the hub's host |
 | ``.hub:make_hub_adapter(session)``             | L1   | ``Mps3Hub`` (leases, shares) when the board has a hub |
 | ``.hub:relay_share_consoles(endpoints, cand)`` | L1   | the endpoints, each ``hub://`` share as a ``tcp://`` relay |
 | ``.naming:name_candidate(candidate)``          | N1   | the candidate with its display name (boards.toml, harness, hub table) |
@@ -397,13 +398,14 @@ class Mps3Pack(BoardPack):
         return {"push": self._push_port or PUSH_PORT, "rbb": self._rbb_port,
                 **self._console_ports, "xvc": XVC_PORT}
 
-    def _identity(self, host: str, port: int, via: str, timeout_s: float) -> BoardIdentity:
+    def _identity(self, host: str, port: int, via: str, timeout_s: float,
+                  jump: str = "") -> BoardIdentity:
         if not via:
             return Mps3Shell(host, port, timeout=timeout_s).identity()
         probe_reach = _hook("tunnel", "probe_reach")   # L1
         if probe_reach is None:
             raise UsageError("this build cannot reach a board through an SSH tunnel")
-        with probe_reach(f"{host}:{port}", via, timeout_s=timeout_s) as (lhost, lport):
+        with probe_reach(f"{host}:{port}", via, timeout_s=timeout_s, jump=jump) as (lhost, lport):
             # SERIAL-6900: the probe's tunnel reaches the same single-client port
             shell = Mps3Shell(lhost, lport, timeout=timeout_s,
                               gate_key=ctlgate.key_for(host, port))
@@ -418,10 +420,12 @@ class Mps3Pack(BoardPack):
             for spec in hosts:
                 cand = self.candidate_for_host(spec, via)
                 host, port = parse_endpoint(spec, CONTROL_PORT)
-                cand_via = _hook("tunnel", "candidate_via")
+                # SIDEBAR-UX: a via="hub" candidate (boards.toml) is probed through its
+                # hub's SSH tunnel, the route its open falls back to (tunnel.probe_route).
+                route = _hook("tunnel", "probe_route")
                 try:
-                    ident = self._identity(host, port, cand_via(cand) if cand_via else "",
-                                           hints.timeout_s)
+                    tvia, jump = route(cand) if route else ("", "")
+                    ident = self._identity(host, port, tvia, hints.timeout_s, jump)
                 except HarnessError:
                     continue
                 found.append(Candidate(
