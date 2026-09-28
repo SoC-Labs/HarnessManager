@@ -14,6 +14,7 @@ and `make check` does not run it (only `tests/unit/test_clcd_mock.py`, which is 
 | Harness versions from the web | HARNESS-DIST | Publish with OTA's release tool; add a Harness versions catalogue; A/B config SD. | [HARNESS_DISTRIBUTION.md](HARNESS_DISTRIBUTION.md) |
 | HM self-update | OTA | Finish T7: lead-run `make release`, daemon restart, rollback to the installed version. | [HM_SELF_UPDATE.md](HM_SELF_UPDATE.md) |
 | Settings menu | SETTINGS | One schema + resolver (lock > env > user > machine > pack > default); hubs first-class with Test connection; keyring secrets with a 0600 fallback. Built by SET-CORE, SET-PACK, SET-HUBS and SET-API. | [SETTINGS.md](SETTINGS.md) ([spike evidence](../assessment/settings_spike_2026-09-25/spike_output.txt)) |
+| Board identity | BOARD-ID | Detect label/IP/MAC clashes (board vs its hub record vs other boards); "Fix identity" = `identity_set` over the claim forward + the warm `reboot` verb, never MCC REBOOT; netboot refuses (stage0 bake). Feature-gated on `identity` (net-protocol v0.16). | [BOARD_IDENTITY.md](BOARD_IDENTITY.md) |
 
 Decisions on these designs are tracked in the lead's checkpoint page:
 <https://claude.ai/artifact/GsS4um7qyJLCupPfTDet8r>.

@@ -400,6 +400,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # LINUX-CLAIM's SSH claim routes (docs/API.md "SSH claim of a Linux harness"), simulated.
     from .lc_mock_claim import register as register_claim
     app.state.claim = register_claim(app, state, _ok, _accepted)
+    # BOARD-ID's identity routes (docs/API.md "Board identity"), simulated.
+    from .idn_mock_identity import register as register_identity
+    app.state.identity = register_identity(app, state, _ok, _accepted)
     # HARNESS-CAT's harness versions routes (docs/API.md "Harness versions"): the real
     # routes and catalogue over a simulated update service.
     from .hcat_mock_harness import register as register_harness
@@ -576,9 +579,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         state.jobs.gate(bid)
         i = eng.info(bid)
         claim = app.state.claim.get(bid) if hasattr(app.state, "claim") else None
+        net = app.state.identity.get(bid) if hasattr(app.state, "identity") else None
         return _ok(candidate=i.candidate, identity=i.identity, health=i.health,
                    capabilities=i.capabilities, unavailable=i.unavailable,
-                   **({"claim": claim} if claim is not None else {}))
+                   **({"claim": claim} if claim is not None else {}),
+                   **({"net_identity": net} if net is not None else {}))
 
     @app.get(f"{API}/boards/{{bid}}/lock")
     def lock(bid: str) -> dict[str, Any]:

@@ -18,6 +18,7 @@ import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./det
 import { debugLive, debugSpecs } from "./debug.js";
 import { ARM_TEXT, REBOOT_GATE, RESET_DUT_GATE, rebootSpec, resetDutSpec } from "./power.js";
 import { ClaimTileRow } from "./claim.js";
+import { IdentityTileRow } from "./identity.js";                // BOARD-ID: label/IP/MAC
 import {
   ActionRow, ArmBox, Card, Chip, CopyButton, Icon, QuietNote, Reason, ResultBlock, Spinner,
 } from "../ui.js";
@@ -355,6 +356,7 @@ function BoardTile({ bid }) {
       <${CardRow} b=${b} />
       <${PanelTileRow} bid=${bid} />
       <${ClaimTileRow} bid=${bid} />
+      <${IdentityTileRow} bid=${bid} />
       <${LeaseTileRow} bid=${bid} />
     </div>
     ${quiet ? html`<div class="mt-8"><${QuietNote} testid="tile-board-quiet" action="tile-read-now"

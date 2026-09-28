@@ -136,8 +136,9 @@ class ClaimService:
             self.leases = LeaseService(self.state_dir, self.bus)
         return self.leases
 
-    def check_lease(self, session: Any) -> str:
-        """``""`` for a board with no hub; the holder when the lease is ours; else HeldError."""
+    def check_lease(self, session: Any, *, what: str = "claiming") -> str:
+        """``""`` for a board with no hub; the holder when the lease is ours; else HeldError.
+        ``what``: the change, for the words (BOARD-ID shares this check)."""
         hub = getattr(session, "hub", None)
         if hub is None:
             return ""
@@ -151,16 +152,16 @@ class ClaimService:
         except HarnessError as exc:
             raise HeldError(f"cannot confirm you hold the lease on {target}: {exc.message}",
                             holder="unknown (the hub did not answer)",
-                            hint="claiming is for the lease holder only; retry when the hub "
+                            hint=f"{what} is for the lease holder only; retry when the hub "
                                  "answers (`harness-manager lease show TARGET`)") from exc
         lease = (view or {}).get("lease")
         if not lease:
-            raise HeldError(f"claiming is for the lease holder only, and nobody holds {target}",
+            raise HeldError(f"{what} is for the lease holder only, and nobody holds {target}",
                             holder="nobody",
                             hint="take the lease first: `harness-manager lease acquire TARGET`")
         if not lease.get("mine"):
             who = lease.get("holder") or "someone else"
-            raise HeldError(f"claiming is for the lease holder only: {who} holds {target}",
+            raise HeldError(f"{what} is for the lease holder only: {who} holds {target}",
                             holder=who,
                             hint="ask for the board: `harness-manager lease request TARGET`")
         return str(lease.get("holder") or "")

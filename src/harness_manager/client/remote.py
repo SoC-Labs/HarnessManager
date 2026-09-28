@@ -231,6 +231,7 @@ class RemoteEngine:
         self.debug = RemoteDebug(self)
         self.xvc = RemoteXvc(self)             # lane XVC-CORE: fabric debug over XVC
         self.board_claim = RemoteClaim(self)   # lane LINUX-CLAIM: the Linux harness's SSH claim
+        self.board_identity = RemoteIdentity(self)   # lane BOARD-ID: label/IP/MAC and the fix
         self.telemetry = RemoteTelemetry(self)
         from .display import RemoteDisplay
 
@@ -1224,6 +1225,37 @@ class RemoteClaim:
         if tty and "-t" not in argv:
             argv.insert(argv.index("-l") if "-l" in argv else len(argv), "-t")
         return argv
+
+
+class RemoteIdentity:
+    """The board identity service (``services.board_identity``) over the API. The daemon reads
+    the board and the hub and runs the fix; the checks that need the lease run in its route
+    (409 HELD before the job starts)."""
+
+    def __init__(self, engine: RemoteEngine) -> None:
+        self._engine = engine
+
+    def _path(self, session: BoardSession) -> str:
+        return f"/boards/{q(_bid(session))}/identity"
+
+    def status(self, session: BoardSession, *, refresh: bool = False,
+               cheap: bool = False) -> Any:
+        leaf = "?refresh=true" if refresh else ""
+        return self._engine._http.get(self._path(session) + leaf).get("identity")
+
+    def fix(self, session: BoardSession, *, confirm: str, want: Any = None,
+            from_hub: bool = False, clear: bool = False, wait_s: float | None = None,
+            progress: Any = None) -> Any:
+        def phase(text: str, _done: int, _total: int) -> None:
+            if progress is not None:
+                progress(text)
+
+        body: dict[str, Any] = {"confirm": confirm, "from_hub": bool(from_hub),
+                                "clear": bool(clear), **dict(want or {})}
+        if wait_s is not None:
+            body["wait_s"] = wait_s
+        out = self._engine.run_job(self._path(session), body, progress=phase)
+        return out if isinstance(out, dict) else {}
 
 
 class RemoteTelemetry:

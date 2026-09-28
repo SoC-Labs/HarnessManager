@@ -148,7 +148,7 @@ def test_twin_the_jargon_pattern_catches_the_old_strings():
 
 #: Verbs whose one-line summary is "what: a, b, c": each subverb must be in the list.
 LISTED = ("lease", "hub", "harness", "update", "config", "daemon", "lab", "mcc", "sd", "slot",
-          "card", "share")
+          "card", "share", "board")
 #: A subverb the summary names by a group word.
 GROUPED = {"config": {"set-secret": "secrets", "unset-secret": "secrets",
                       "clear-secret": "secrets"}}
@@ -173,6 +173,13 @@ def test_the_summaries_the_docs_lane_found_short_now_name_their_subverbs():
                         "harness": ("unpin",), "config": ("unset", "path"),
                         "update": ("app", "status")}.items():
         assert all(re.search(rf"\b{n}\b", s[verb]) for n in names), (verb, s[verb])
+
+
+def test_twin_the_board_summary_before_board_identity_is_reported():
+    old = "the Linux harness's SSH: claim it with your key, check the claim, ssh in"
+    subverbs = list(_verbs(_verbs(make_parser())["board"]))
+    assert "identity" in subverbs
+    assert unnamed_subverbs("board", old, subverbs) == ["claim-status", "identity"]
 
 
 def test_twin_a_summary_that_drops_a_subverb_is_reported():

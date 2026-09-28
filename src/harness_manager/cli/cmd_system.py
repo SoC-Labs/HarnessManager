@@ -99,6 +99,11 @@ def cmd_info(ctx: Ctx) -> int:
         from .cmd_claim import describe
 
         human.append(f"ssh claim  {describe(claim)}")
+    net = getattr(info, "net_identity", None)
+    if net is not None:                      # BOARD-ID: label/IP/MAC against the hub entry
+        from .cmd_identity import info_line
+
+        human.append(f"identity   {info_line(net)}")
     human.append(f"can        {', '.join(sorted(info.capabilities))}")
     human += [f"cannot     {cap}: {why}" for cap, why in sorted(info.unavailable.items())]
     # The JSON object IS the BoardInfo (candidate/identity/health/capabilities/unavailable,
@@ -107,6 +112,8 @@ def cmd_info(ctx: Ctx) -> int:
             "capabilities": info.capabilities, "unavailable": info.unavailable}
     if claim is not None:
         data["claim"] = claim
+    if net is not None:
+        data["net_identity"] = net
     ctx.emit(Result("info", data, rows=[row], human=human))
     return ExitCode.OK
 

@@ -41,6 +41,9 @@ export const ENDPOINTS = Object.freeze({
   panel: ["GET", "/boards/{bid}/panel"],
   // --- LINUX-CLAIM: the Linux harness's SSH claim (docs/API.md, claim_api.py) ---
   claim: ["POST", "/boards/{bid}/claim"],
+  // --- BOARD-ID: the board's label/IP/MAC and the fix (docs/API.md "Board identity") ---
+  netIdentity: ["GET", "/boards/{bid}/identity"],
+  netIdentityFix: ["POST", "/boards/{bid}/identity"],
   panelFrame: ["GET", "/boards/{bid}/panel/frame"],
   identify: ["POST", "/boards/{bid}/identify"],
   // --- end P3 PANEL-UI ---

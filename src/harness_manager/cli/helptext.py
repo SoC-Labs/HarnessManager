@@ -313,6 +313,14 @@ board claim TARGET [--key PUB] [--adopt] [--yes]
 board claim-status TARGET  is it claimed, and by this Harness Manager's key?
 board ssh TARGET [-c CMD] [--print]
                            ssh in as root, with the pinned host key
+board identity TARGET      the board's label, IP and MAC against its hub entry
+                           and the other boards: differences and clashes
+board identity TARGET --from-hub | --label L [--ip A/N] [--mac M] | --clear
+    Make the board match its hub entry (or the values given). Asks for a
+    typed phrase (the new label); needs the lease and your claim; never while
+    the card is written. The harness restarts warm (its reboot verb, never an
+    MCC REBOOT) and the identity is read back. A netbooted board takes its
+    identity from the stage0 bake: that is refused, with the fix.
 
 slot status TARGET         OS slots A and B: running, default, where a push goes
 slot push TARGET [IMAGE] --bundle PATH | --static-id ID [--yes]
