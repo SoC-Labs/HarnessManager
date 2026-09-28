@@ -34,6 +34,7 @@ factory in its own module, and this file wires it in if it exists:
 | ``.os_slots:make_os_slot_adapter(session)``    | LINUX-SLOTS | ``session.os_slots``: the Linux harness's A/B OS slots (CCR T7-2) |
 | ``.card:make_card_adapter(session)``           | LINUX-SLOTS | ``session.card``: the user microSD, D13 overlay store (CCR LS-1) |
 | ``.display:make_display_adapter(session)``     | LM2  | ``session.display``: the live LCD mirror (``Mps3Pack.display_adapter`` is the pack hook) |
+| ``.net_identity:make_identity_adapter(session)`` | BOARD-ID | ``session.net_identity``: the board's label/IP/MAC, its hub record, the fix seam |
 
 A factory may return ``None`` when the session lacks the links it needs. The
 capability view then explains why.
@@ -228,6 +229,7 @@ class Mps3Session(BoardSession):
             ("os_slots", "os_slots", "make_os_slot_adapter"),  # CCR T7-2: Linux OS slots A/B
             ("card", "card", "make_card_adapter"),           # CCR LS-1: user microSD (D13)
             ("display", "display", "make_display_adapter"),  # LM2: the live LCD mirror
+            ("net_identity", "net_identity", "make_identity_adapter"),  # BOARD-ID: label/IP/MAC
         ):
             make = _hook(module, factory)
             if make is not None:

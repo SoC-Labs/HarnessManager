@@ -128,3 +128,8 @@ class BoardInfo:
     # host_key, ...}; harness_manager_mps3.claim). None where there is no SSH to claim (bare
     # metal), and then the key is left OUT of the JSON (``omit_none``), so it is unchanged.
     claim: dict[str, Any] | None = field(default=None, metadata={"omit_none": True})
+    # BOARD-ID: the board's network identity (label, IP, MAC) against its hub record and the
+    # other boards ({status, level, reported, hub, findings, fix, notes, checked_at, live};
+    # services.board_identity). None where there is no Ethernet harness to ask, and then the
+    # key is left OUT of the JSON (``omit_none``).
+    net_identity: dict[str, Any] | None = field(default=None, metadata={"omit_none": True})

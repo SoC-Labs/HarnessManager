@@ -66,6 +66,9 @@ LAZY_SERVICES: dict[str, tuple[str, str, str]] = {
     "xvc": ("harness_manager.services.xvc", "XvcService", "xvc"),
     # LINUX-CLAIM: the Linux harness's SSH claim (TOFU) and its SSH reach.
     "board_claim": ("harness_manager.services.claim", "ClaimService", "ssh_claim"),
+    # BOARD-ID: the board's label/IP/MAC, its clashes, and the fix.
+    "board_identity": ("harness_manager.services.board_identity", "IdentityService",
+                       "board identity"),
 }
 
 #: Health.control_channel states in which the harness serves nothing over Ethernet.
@@ -152,6 +155,11 @@ class Engine:
     def board_claim(self) -> Any:
         """The SSH claim of a Linux harness (LINUX-CLAIM). Optional: read it with getattr."""
         return self._service("board_claim")
+
+    @property
+    def board_identity(self) -> Any:
+        """The board's network identity (BOARD-ID). Optional: read it with getattr."""
+        return self._service("board_identity")
 
     @property
     def update(self) -> Any:
@@ -359,6 +367,11 @@ class Engine:
                 available = available - {POWER_CYCLE}
                 unavailable = {**unavailable, POWER_CYCLE: reason}
         claim = self._claim(entry, identity)
+        net_identity = self._net_identity(entry)
+        if net_identity is not None and net_identity.get("status") == "clash":
+            health = dataclasses.replace(health, notes=(*health.notes, *(
+                f"identity clash: {f['text']}" for f in net_identity.get("findings") or ()
+                if f.get("kind") == "clash")))
         candidate = self._named(entry, identity)
         with self._lock:
             changed = self._identities.get(board_id) != identity
@@ -369,7 +382,8 @@ class Engine:
                 "rm_name": identity.rm_name, "harness_version": identity.harness_version,
                 "features": list(identity.features),
                 "name": candidate.name, "name_source": candidate.name_source}))
-        return BoardInfo(candidate, identity, health, available, unavailable, claim=claim)
+        return BoardInfo(candidate, identity, health, available, unavailable, claim=claim,
+                         net_identity=net_identity)
 
     @staticmethod
     def _note_display_identity(entry: _Open, identity: BoardIdentity) -> None:
@@ -396,6 +410,21 @@ class Engine:
             return claim.claim_status(identity)
         except Exception:  # noqa: BLE001 - the claim state is never worth failing info
             log.exception("reading the SSH claim of %s failed", entry.candidate.board_id)
+            return None
+
+    def _net_identity(self, entry: _Open) -> dict[str, Any] | None:
+        """BOARD-ID: the board's label/IP/MAC against its hub record and the boards seen
+        (None: nothing to ask). ``cheap``: no control-port connection and no hub call here;
+        never a failed ``info``."""
+        if getattr(entry.session, "net_identity", None) is None:
+            return None
+        svc = self.board_identity
+        if is_unavailable(svc):
+            return None
+        try:
+            return svc.status(entry.session, cheap=True)
+        except Exception:  # noqa: BLE001 - the identity check is never worth failing info
+            log.exception("reading the network identity of %s failed", entry.candidate.board_id)
             return None
 
     def _named(self, entry: _Open, identity: BoardIdentity) -> Candidate:

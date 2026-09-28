@@ -792,8 +792,13 @@ class RestHubClient:
             self._board = board or self.target
             return self._board
 
-    def target_info(self) -> dict[str, Any]:
-        """``GET /targets/{t}`` (fpgahub ``BoardResponse``): network, access (the gates), ..."""
+    def target_info(self, name: str = "") -> dict[str, Any]:
+        """``GET /targets/{t}`` (fpgahub ``BoardResponse``): network, access (the gates), ...
+        ``name``: another target on the same hub (BOARD-ID: the other boards' records)."""
+        if name and name != self.target:
+            if not _NAME_RE.fullmatch(name):
+                raise UsageError(f"{name!r} is not a target name")
+            return self._call("target", "GET", f"/targets/{name}").body or {}
         return self._call("target", "GET", self._t()).body or {}
 
     def groups(self) -> list[dict[str, Any]]:

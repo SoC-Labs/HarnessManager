@@ -1457,6 +1457,25 @@ class HubClient:
             self._board_id = owners[0]
         return self._board_id
 
+    def target_info(self, name: str = "") -> dict[str, Any]:
+        """``fpgahub target show T`` (default: this client's target): fpgahub's
+        ``BoardResponse`` (``network.{board_ip, board_mac, hostname, host_ip}``,
+        ``discovered_mac``, ...), the same object REST's ``GET /targets/{t}`` returns. A read
+        (BOARD-ID)."""
+        target = _check_name(name or self.target, "target")
+        text = self._hub_out(["fpgahub", "target", "show", target], "target show")
+        data = _json_from(_ANSI.sub("", text), f"fpgahub target show {target}")
+        if not isinstance(data, dict):
+            raise UnreachableError(f"fpgahub target show {target} printed no target: "
+                                   f"{_snippet(text)}")
+        return data
+
+    def groups(self) -> list[dict[str, Any]]:
+        """``fpgahub board list --json``'s groups as REST's ``GET /groups`` shapes them:
+        ``[{board, members: [{name}]}]`` (BOARD-ID: the hub's other targets)."""
+        pairs = parse_groups(self._hub_out(["fpgahub", "board", "list", "--json"], "board list"))
+        return [{"board": b, "members": [{"name": m} for m in members]} for b, members in pairs]
+
     def lease_revoke(self, reason: str) -> dict[str, Any]:
         """Force-release the target: ``fpgahub board lease revoke BOARD --reason R --yes``.
 
