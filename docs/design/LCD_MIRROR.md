@@ -337,7 +337,7 @@ Plain `display` is taken: it collides with `lab display` (`cli/cmd_lab.py:82-104
 |---|---|
 | `WS /api/v1/boards/{bid}/display/ws?ack=1` | A text frame first: `{state, hello, reason}`. Then **binary** frames, each one UPDATE in the board's own layout with the tile records forwarded **as the board encoded them**. The first is a full keyframe built from the latest record per tile. Later text frames carry `{state, detail, rtt_ms, rate, badges}`. The client sends `{"ack": seq}` after drawing, and optionally `{"rate": hz}` |
 | `GET /api/v1/boards/{bid}/display` | state, mode, owner, decoded status, badges, hatched count, seq, t_ms, rtt, rate, fps, bytes/s, viewers, reason |
-| `GET /api/v1/boards/{bid}/display.png?scale=1\|2&hatch=1` | The presented picture: 8 ms to encode. It opens the upstream if needed and waits ≤10 s for a keyframe. `?format=raw` gives RGB565 LE for tests |
+| `GET /api/v1/boards/{bid}/display.png?scale=1\|2&hatch=1` | The presented picture: 8 ms to encode. It opens the upstream if needed and waits ≤30 s for a keyframe (FIX-PACK-1: a cold forward through the hub took most of 10 s). `?format=raw` gives RGB565 LE for tests |
 | event `display.state` | `{state, mode, owner, badges, reason}`, so the Board tile can say "Live display: DUT owns it" |
 
 **Backpressure is per viewer, drop-to-latest.**
