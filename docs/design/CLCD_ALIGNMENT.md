@@ -267,7 +267,7 @@ A watcher's HM also knows the holder from `lease show`, so the badge survives wh
 | Output | Consumer |
 |---|---|
 | `web/static/css/tokens.css` | the `:root` blocks now at `app.css:8-127` move there; CSP-safe, same origin |
-| `clcd_palette.h` | a role table of RGB565 words plus the extended glyphs, handed to the platform with the tokens' sha256 in its header |
+| `clcd_palette.h` + `clcd_glyphs.h` | a role table of RGB565 words (the tokens' sha256 in its header), and (FIX-PACK-2) the extended glyphs 0x80-0x86 as 8x16 bitmaps from `gen_tokens.py`'s `CLCD_GLYPHS`, the one table `clcd_mock.py` renders with (the glyphs' sha256 and the HM commit in its header); both handed to the platform, which vendors them (firmware/clcd/HM_VENDORED.md) |
 | `web/static/panel/palette.json` + `font8x16.json` | HM's pixel-true mirror |
 
 **The owner is this repo (decision D4).**
@@ -418,7 +418,7 @@ Capability routes: `front_panel` via Ethernet/hub with feature `panel`, falling 
 | **R1** | `hello` verb + session table (≤ 4, TTL, relative-time ageing), feature `presence`; net-protocol.md; **pyverify `ShellClient.hello` + FakeShell `_op_hello`** (the one-codec rule, TEAM_PLAN §4) | coordinator service module | 6 h |
 | **R2** | `panel` verb (state, frame, page); clcd.c seams `mps3_clcd_title_right`/`_session_row`/`_overlay`; page-aware `clcd_hittest`; the 8-entry event ring; feature `panel`; pyverify + FakeShell | `clcd.c` (weak defaults) + `harnessd` (strong providers) | 8 h |
 | **R3** | `locate` verb: `clcd_kvm_set_backlight` blink from the clcd tick, an identify banner, a tap = event; feature `locate` | `clcd.c`/`clcd_kvm.c` + harnessd | 4 h |
-| **R4** | The colour-role renderer: a per-cell role plane + the `mps3_clcd_palette()` seam (default = today) + glyphs 0x80-0x86 from the generated `clcd_palette.h`; D3's label changes behind the same seam; `clcd_preview` learns roles | `clcd.c`, `font8x16.h` extension, `tools/clcd_preview.c` | 8 h |
+| **R4** | The colour-role renderer: a per-cell role plane + the `mps3_clcd_palette()` seam (default = today) + glyphs 0x80-0x86 from the generated `clcd_glyphs.h`; D3's label changes behind the same seam; `clcd_preview` learns roles | `clcd.c`, `font8x16.h` extension, `tools/clcd_preview.c` | 8 h |
 | **R5** | Board-side program progress (row 3 + bar) from `swap_fsm_icap_bytes()`/length | `clcd.c` + swap_fsm accessor | 3 h |
 | **R6** | **Bench, B1 window, about 10 min:** one red fill + one `#e4e7ec` patch (white point); a locate blink seen with the DUT owning the panel; **a finger held on a banner while pinging 6900 at 10 Hz** (the v0.11 touch fix has never had a finger) | B1 runbook item 5 | 10 min |
 | **R7** | Doc and bug fixes found here: `clcd_preview --json` escaping; `CLCD_PANEL_FACTS.md` §7.1/§9; the clcd_demo README; `B1_RUNBOOK_LINUX.md:279-280`; the SWD 6920 row on the apps page | various | 1 h |

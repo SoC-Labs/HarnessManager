@@ -276,6 +276,10 @@ owners.
   'locate')" and "this harness image doesn't report who is connected (harness feature
   'presence')" in the app, `panel show`, `identify` and the API. `panel show` adds
   `harness` (from `version.impl`) and one `missing` line.
+- `tools/gen_tokens.py` also generates `design/generated/clcd_glyphs.h`: the panel's
+  extension glyphs 0x80-0x86 as 8x16 bitmaps, from the one glyph table the panel mock
+  uses, for the Linux harness to vendor beside `clcd_palette.h`; `make check` fails when
+  it drifts.
 
 ### The Linux harness's SSH claim
 - `harness-manager board claim TARGET` claims an unclaimed Linux harness with your SSH key
