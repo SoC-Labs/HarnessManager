@@ -274,7 +274,7 @@ not take or request a lease. The board runs the P-mint static `0x61BC6789` with 
 | an MCC REBOOT: `no Python 3.10+ for pyverify's MCC tools` | the hub has no `python3.11` (its `python3` is 3.6; reads run on 3.6, a REBOOT does not) | the hub admin installs one; fpgahub's `/opt/fpgahub/bin/python3.11` also counts |
 | R1: `offline`, "the hub … could not reach the shell (channel N: open failed …)" | the hub reached no shell: board off, rebooting, or harness down | check from the hub: the B0 runbook's S2.3 ping block |
 | R1: `busy`, "another client holds the control channel" | a real second client on 6900 (a pyverify run, the hub's poller) | wait, or close the other client |
-| `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh mapstone-dev… 'id -nG'` must list `fpga` |
+| `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh mapstone-dev… 'sg fpga -c true'` must succeed (`id -nG` can miss `fpga` from a stale group cache while `sg` works) |
 | a probe finds nothing | boards.toml missing or `match` wrong; UDP discovery never crosses the tunnel | check `~/.config/harness-manager/boards.toml`; open by address |
 | `ssh … -N -T` processes left after the app was killed (not closed) | a hard kill skips the tunnel's close | start the app again: from Q2 (`team/q2-robust`) the service stops a killed owner's tunnels, OpenOCD and PTY links when it starts, and says so in `daemon.log`. On an older build: `pkill -f -- '-N -T .*mapstone-dev'` (only Harness Manager's tunnels run with `-N -T`) |
 

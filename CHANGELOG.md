@@ -160,6 +160,9 @@ owners.
   identify (UDP 6899). It needed a harness feature `identify` that no image lists, so it
   was unavailable everywhere. Through a hub it says "not through a hub" (UDP does not
   cross the tunnel).
+- A hub's Test connection checks the group the way Harness Manager uses it, `sg fpga -c
+  true`. On the lab hub `id -Gn` misses `fpga` (a stale group cache) while `sg fpga` works:
+  that is now a pass with a note, not a failure.
 - The MCC temperature says what it measures: "the SLR0 die diode via U53 (MPS3 schematic
   p4); not ambient" (was "sensor identity unverified").
 - A reboot of a Linux board waits up to 300 s by default (was 180 s): with the Linux

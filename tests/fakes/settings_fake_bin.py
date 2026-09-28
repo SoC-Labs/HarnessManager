@@ -10,7 +10,9 @@ the fake ``ssh`` never connects anywhere, whatever host it is given.
 Scenarios: ``ok``, ``dns``, ``timeout``, ``hostkey``, ``auth`` (exit 255, "Permission
 denied (publickey)"), ``nogroup`` (the account is not in ``fpga``), ``socket`` (in the group
 by ``id``, but the socket refuses: the membership came after the login), ``nofpgahub``,
-``badjson``.
+``badjson``; FIX-PACK-2: ``stalecache`` (the lab hub: ``id -Gn`` misses ``fpga`` from a stale
+sssd/nscd cache, but ``sg fpga`` works and so does everything after it) and ``sgrefuses``
+(``id -Gn`` lists ``fpga`` but ``sg`` refuses it).
 
 ``fpgahub`` answers ``board list --json`` and ``target show T`` (fpgahub 0.3.0's
 ``console.print_json`` of ``GET /targets/{t}``) from ``t8_hub_rest.FakeFpgahub``'s lab
@@ -90,14 +92,16 @@ def _sg(args: list[str]) -> int:
     if len(args) != 3 or args[1] != "-c":
         print("usage: sg group [-c command]", file=sys.stderr)
         return 2
-    if scenario == "nogroup":
+    _log({"sg": args})
+    if scenario in ("nogroup", "sgrefuses"):
         print("Password: Invalid password.", file=sys.stderr)
         return 1
     return subprocess.run(["sh", "-c", args[2]], check=False).returncode
 
 
 def _id(args: list[str]) -> int:
-    groups = ["dam1n19", "fp"] + ([] if os.environ.get(SCENARIO_ENV) == "nogroup" else ["fpga"])
+    missing = os.environ.get(SCENARIO_ENV) in ("nogroup", "stalecache")
+    groups = ["dam1n19", "fp"] + ([] if missing else ["fpga"])
     print(" ".join(groups))
     return 0
 

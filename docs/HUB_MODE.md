@@ -55,10 +55,11 @@ harness-manager hub remove NAME [--force]
 
 **`hub test`** proves, in order, and stops at the first failure with the reason and the next step: **config → reach → auth → group → targets → target**. It never takes, joins or releases a lease, and never starts a share.
 - Over REST it makes three reads: `GET /health`, `/whoami`, `/groups`.
-- Over SSH it makes **one** round trip with pyverify's own quoting, plus `ConnectTimeout=10`: `echo HM-TEST:login; id -Gn; echo HM-TEST:ids; sg fpga -c 'fpgahub board list --json'`. The markers show how far it got:
+- Over SSH it makes **one** round trip with pyverify's own quoting, plus `ConnectTimeout=10`: `echo HM-TEST:login; id -Gn; echo HM-TEST:ids;` then whether `sg fpga -c true` works (`HM-TEST:sg=ok|no`), `echo HM-TEST:list; sg fpga -c 'fpgahub board list --json'`. The markers show how far it got:
   - a dead host or DNS failure stops at **reach**;
   - `Permission denied (publickey)` or a host-key failure stops at **auth**;
-  - a login without the `fpga` group stops at **group**, with the admin's `usermod -aG fpga` command;
+  - a login where `sg fpga -c true` fails stops at **group**, with the admin's `usermod -aG fpga` command (or "log in again" when `id -Gn` lists the group but `sg` refuses it);
+  - `sg fpga` working while `id -Gn` does not list `fpga` (the lab hub's stale sssd/nscd cache) passes **group** with a note: Harness Manager only ever uses the group through `sg`;
   - no fpgahub on the host stops at **targets**.
 - The **target** step checks that the targets of the boards using the hub (or `--target`) are on offer.
 

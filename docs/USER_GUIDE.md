@@ -313,8 +313,10 @@ harness-manager hub test lab
 ```
 
 It checks, in order, **config, reach, auth, group, targets, target**, and stops at the first
-failure with the reason and the next step. For example, a login without the `fpga` group
-stops at **group** and prints the admin's `usermod -aG fpga` command.
+failure with the reason and the next step. For example, a login where `sg fpga` does not
+work stops at **group** and prints the admin's `usermod -aG fpga` command. The group step
+checks what Harness Manager really uses, `sg fpga -c true`: when `sg` works but `id -Gn`
+does not list `fpga` (a stale group cache on the hub), the step passes with a note.
 `harness-manager config test hubs lab` runs the same test.
 
 **Step 3: add the board.** List what the hub offers, then add one:

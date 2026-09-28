@@ -788,7 +788,7 @@ Then tell the HM lead the folder is complete.
 | What you see | Cause | Do this |
 |---|---|---|
 | `lease acquire`: `queued at position N` | someone still holds the board | Ctrl-C (it leaves the queue); ask the Linux lead. Never `lease force` |
-| `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh $H id -nG` must list `fpga` |
+| `lease show` exits 7, "your account on the hub needs the 'fpga' group" | fpgahub 0.3.0's socket group | `ssh $H 'sg fpga -c true'` must succeed (`id -nG` can miss `fpga` from a stale group cache while `sg` works) |
 | A1: `offline`, "the hub … could not reach the shell" | board rebooting, harnessd down, or a stale tunnel | wait 60 s and repeat A1; then `ssh mps3-b2 true`; then ask the Linux lead |
 | A1: `harness_impl` not `linux`, or `shell_id` not `0x44ee76d5` | the board is not on RC2 (rolled back?) | **STOP**; ask the Linux lead |
 | B1: `unclaimed` | the claim was lost (a RAM boot keeps it on tmpfs) or never made | **never claim**; ask the Linux lead |

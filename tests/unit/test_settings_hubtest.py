@@ -166,6 +166,61 @@ def test_ssh_target_details_read_fpgahub_target_show(lab, fake_bin):
         HT.target_details("lab", "mps3_09_pl", resolver=lab, run=fake_bin("ok"))
 
 
+# --- FIX-PACK-2 item 3: the group is what `sg` says ---------------------------------------------
+
+
+def test_a_stale_group_cache_passes_the_group_with_a_note(lab, fake_bin, lease_spy):
+    """The lab hub: `id -Gn` misses fpga (stale sssd/nscd), `sg fpga` works: HM's way works."""
+    rep = HT.test_hub("lab", resolver=lab, run=fake_bin("stalecache"))
+    assert rep.ok and rep.code == 0 and [s.step for s in rep.steps] == list(HT.STEPS)
+    group = next(s for s in rep.steps if s.step == "group")
+    assert group.ok and group.detail == "`sg fpga` works"
+    assert "`id -Gn`" in group.note and "stale" in group.note and "sg fpga" in group.note
+    assert group.view()["note"] == group.note
+    sg = [json.loads(x)["sg"] for x in fake_bin.log.read_text().splitlines() if '"sg"' in x]
+    assert ["fpga", "-c", "true"] in sg                    # the check HM relies on ran
+    assert lease_spy == []
+
+
+def test_negative_twin_when_sg_fails_too_the_group_fails_with_the_admins_command(lab, fake_bin):
+    rep = HT.test_hub("lab", resolver=lab, run=fake_bin("nogroup"))
+    bad = rep.failure()
+    assert rep.failed == "group" and "`sg fpga -c true` fails" in bad.detail
+    assert "Invalid password" in bad.detail and "usermod -aG fpga" in bad.hint
+
+
+def test_twin_id_lists_the_group_but_sg_refuses_it_is_a_failure_not_a_note(lab, fake_bin):
+    rep = HT.test_hub("lab", resolver=lab, run=fake_bin("sgrefuses"))
+    bad = rep.failure()
+    assert rep.failed == "group" and bad.detail.startswith("`id -Gn` lists 'fpga', but")
+    assert "log in again" in bad.hint and "usermod" not in bad.hint
+
+
+def test_twin_a_healthy_hub_has_no_note(lab, fake_bin):
+    rep = HT.test_hub("lab", resolver=lab, run=fake_bin("ok"))
+    assert all(s.note == "" for s in rep.steps) and rep.ok
+
+
+def test_an_answer_without_the_sg_marker_falls_back_to_id(lab):
+    """A hub whose shell printed no sg verdict (the old line): `id -Gn` decides, as before."""
+    def run(argv):
+        out = f"{HT.LOGIN_MARK}\nme users\n{HT.IDS_MARK}\n{{\"groups\": []}}\n"
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    rep = HT.test_hub("lab", resolver=lab, run=run)
+    assert rep.failed == "group" and "is not in 'fpga'" in rep.failure().detail
+
+
+def test_the_cli_prints_a_passed_steps_note():
+    from harness_manager.cli import cmd_hubcfg
+
+    line = cmd_hubcfg._step_line({"step": "group", "ok": True, "detail": "`sg fpga` works",
+                                  "ms": 12, "note": "`id -Gn` ... stale"})
+    assert "note: `id -Gn` ... stale" in line
+    assert "note" not in cmd_hubcfg._step_line({"step": "reach", "ok": True, "detail": "x",
+                                                "ms": 0, "note": ""})
+
+
 # --- REST --------------------------------------------------------------------------------------
 
 
