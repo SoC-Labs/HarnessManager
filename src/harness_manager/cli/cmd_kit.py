@@ -12,7 +12,8 @@ Verbs::
                                                     the six steps, each with its state, and what to do next
     kit script [TARGET | --static-id ID] --design D --out DIR [--jobs N] [--stop-after STAGE]
                                                     build_rm.tcl + the kit + the XDC kit + README
-    kit build  DIR [--stop-after STAGE] [--jobs N]  prints the Vivado command (HM does not run it yet)
+    kit build  DIR [--stop-after STAGE] [--jobs N]  prints the Vivado command, with the full path of
+                                                    the kit's release (HM does not run it yet)
     kit check  RECEIPT|BUILD_DIR|PARTIAL [--clearing C] [--static-id ID] [TARGET]
                                                     the receipt, its files and the pair, board-free
     kit pack   RECEIPT|BUILD_DIR [--out DIR] [--import]   the overlay triple (+ into Program)
@@ -23,8 +24,9 @@ usercode) to the checks; the kits live in the engine's content store
 (``$HARNESS_MANAGER_VIVADO=off`` turns that off).
 
 Exit codes: 0 done; 2 bad arguments; 3 no such kit, receipt or source; 12 the pack has no
-build kit; 14 the kit or build is for another static than the board (identity); 15 a
-check failed (every check is listed with ``--json``, in ``error.data.checks``).
+build kit, or (``kit build``) no Vivado of the kit's release is found; 14 the kit or build
+is for another static than the board (identity), or (``kit check``) than ``--static-id``;
+15 a check failed (every check is listed with ``--json``, in ``error.data.checks``).
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from harness_manager.core.errors import AbsentError, ExitCode, UsageError
+from harness_manager.core.errors import AbsentError, ExitCode, UnavailableError, UsageError
 from harness_manager.core.model import BoardIdentity
 from harness_manager.core.pack import KitCheck, kit_refusal
 
@@ -228,9 +230,11 @@ def _info(ctx: Ctx) -> int:
     sid = _static(ctx, ident)
     kit = kits.get(sid)
     profile = kits.profile(ctx.pack, sid)
-    found = vivado.discover()
     rel = profile.vivado if profile else ""
+    found = vivado.discover(want=rel)
     checks = [vivado.check_release(found, rel, profile.vivado_build if profile else 0)]
+    pc = vivado.check_path(found, rel)
+    checks += [pc] if pc is not None else []
     if kit is not None:
         checks += kits.check_against_board(kit.manifest, ident, ctx.pack)
     data = {"static_id": sid, "board_id": bid or None, "cached": kit is not None,
@@ -394,20 +398,47 @@ def _script(ctx: Ctx) -> int:
 
 
 def _build(ctx: Ctx) -> int:
-    from harness_manager.services.kit import render
+    """Print the command, never run it. It names the FULL path of the Vivado discovery chose
+    for the script's release (``tools.vivado``, PATH, the install roots): a bare ``vivado``
+    runs whatever PATH has first (``/etc/profile.d`` may put 2024.1 there). No Vivado of
+    that release here: UNAVAILABLE (12), with what was found."""
+    from harness_manager.services.kit import render, vivado
 
     d = Path(ctx.args.dir)
-    if not (d / render.SCRIPT_NAME).is_file():
+    script = d / render.SCRIPT_NAME
+    if not script.is_file():
         raise AbsentError(f"{d} holds no {render.SCRIPT_NAME}",
                           hint="harness-manager kit script ... --out DIR writes it")
-    cmd = render.vivado_command(d.resolve(), stop_after=ctx.args.stop_after, jobs=ctx.args.jobs)
+    params = render.script_params(script.read_text(encoding="utf-8", errors="replace"))
+    rel = params.get("VIVADO_VERSION", "")
+    if not rel:
+        raise UsageError(f"{script} names no VIVADO_VERSION: not a build_rm.tcl that "
+                         "Harness Manager wrote", hint="harness-manager kit script ... --out DIR")
+    found = vivado.discover(want=rel)
+    inst = vivado.matching(found, rel)
+    if inst is None:
+        c = vivado.check_release(found, rel)
+        err = UnavailableError("vivado", f"no Vivado {rel} to run {script}: {c.detail}",
+                               hint=f"install Vivado {rel}, or point $HARNESS_MANAGER_VIVADO "
+                                    "(or tools.vivado) at its vivado or its install directory; "
+                                    "`harness-manager config test tools vivado` shows what is "
+                                    "found")
+        raise with_data(err, vivado=found.to_json(), release=rel)
+    cmd = render.vivado_command(d.resolve(), stop_after=ctx.args.stop_after, jobs=ctx.args.jobs,
+                                vivado=inst.path)
     line = " ".join(cmd)
-    data = {"dir": str(d), "command": cmd, "ran": False,
+    pc = vivado.check_path(found, rel)
+    notes = [f"Vivado {inst.version} ({inst.how}); the kit needs {rel}"]
+    if pc is not None and pc.state == "warning":
+        notes.append(pc.detail)
+    data = {"dir": str(d), "command": cmd, "ran": False, "vivado": found.to_json(),
+            "release": rel, "checks": [c.__dict__ for c in ([pc] if pc else [])],
             "note": "Harness Manager does not run Vivado yet: run this command yourself"}
-    ctx.emit(Result("kit", data, rows=[["-", "command", "vivado", "not-run", line]],
-                    human=[line, "(Harness Manager does not run Vivado yet: run the command "
-                                 "above; the verdict is the last HM_RM_BUILD_* line and the "
-                                 "receipt in out/)"]))
+    ctx.emit(Result("kit", data, rows=[["-", "command", inst.path, "not-run", line]],
+                    human=[line, *[f"  {n}" for n in notes],
+                           "(Harness Manager does not run Vivado yet: run the command "
+                           "above; the verdict is the last HM_RM_BUILD_* line and the "
+                           "receipt in out/)"]))
     return ExitCode.OK
 
 

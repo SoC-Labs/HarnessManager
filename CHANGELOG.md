@@ -333,6 +333,29 @@ owners.
 - The demo has a fourth board, mps3-03, behind the same hub with a free lease, so the
   badges show free, yours (Acquire it) and held by alice (mps3-02).
 
+### Building a DUT for the RC2 static (Vivado 2026.1)
+- Vivado 2025.1 and later install as `<root>/<release>/Vivado/bin/vivado`; HM now finds that
+  layout, searches `/research/CAD/Xilinx/Vivado` and the 2025.1 installer's `/tools/Xilinx`,
+  and takes an install directory in `tools.vivado` / `HARNESS_MANAGER_VIVADO`. A path that
+  names no vivado says which one you probably meant.
+- With a kit that needs 2026.1, an installed 2026.1 wins over another release on PATH, and
+  Settings → Tools → Detect prefers the cached kits' release and says when the `vivado` on
+  PATH is another one.
+- `kit build` and `kit script` print the full path of the Vivado of the kit's release (a bare
+  `vivado` runs whatever your login profile put first); `kit build` fails (exit 12) when
+  there is none. The guide's Tools step is not done while PATH's `vivado` is another release.
+- `kit script --design minimal` builds its wrapper skeleton (no `-tclargs RM_SOURCES=` needed),
+  and the skeleton ties `dut_lockup` and `irq_out` off. A design can name such outputs with
+  `"use": {"status": {"tie": [...]}}`.
+- `kit check --static-id ID` on a receipt of another static refuses (exit 14) instead of
+  ignoring the flag.
+- The pin model describes more than one shell (`tools/gen_mps3_pins.py --shell`, `--all`),
+  and now holds RC2 (`0x44EE76D5`, from its record at platform 6beea09) beside the fielded
+  `0x72BB0A36`: `kit import`, `kit script` and the XDC kits work for RC2. RC2 is marked not
+  fielded, and its RM kits name its own `dut_clk` buffer (`BUFGCE_X2Y47`).
+- The `rm_timing` gate says why a slack is empty: an RM with no registers (such as
+  `minimal`) has no path of its own, and a register with no timed path has no slack.
+
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
 - Windows and macOS run the unit tests and the installer in CI; they have not been used

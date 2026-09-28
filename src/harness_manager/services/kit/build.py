@@ -123,13 +123,29 @@ def check_any(kits: Any, path: Path, *, clearing: Path | None = None, static_id:
     """``kit check`` for the CLI and the API: a receipt (or a build dir: its newest receipt)
     with its files and pair, else a bare partial (``clearing`` beside it). With the kit of
     the static cached, the pair is held to its ``rp.frames``; with a board identity, the
-    build's static to the board's (identity). Returns (checks, facts, static_id, receipt)."""
+    build's static to the board's (identity). Returns (checks, facts, static_id, receipt).
+
+    ``static_id`` with a receipt (KIT-RC2): the static the caller expects. It is compared
+    with the receipt's (the CRC-32 the build computed) and a difference REFUSES, as an
+    identity check (``expected_static``, exit 14): a partial for another static must never
+    look like it passed because the flag was ignored. With a bare partial it picks the kit
+    whose frame box the pair is held to."""
     p = Path(path)
     if p.is_dir() or p.suffix.lower() == ".json":
         r = load(p)
         checks = receipt_checks(r)
         facts: dict[str, Any] = {"receipt": r.to_json()}
         sid = r.get("static_id")
+        if static_id:
+            try:
+                want = hex32(parse_u32(static_id))
+            except (TypeError, ValueError):
+                want = str(static_id)
+            same = bool(sid) and same_id(want, sid)
+            checks.append(KitCheck("expected_static", "ok" if same else "mismatch",
+                                   f"built for {sid or 'no static'}; --static-id is {want}"
+                                   + ("" if same else ": this build is not for the static you "
+                                                      "named"), identity=True))
         files = receipt_files(r)
         if r.state == "passed" and files.get("partial") and files["partial"].is_file():
             kit = kits.get(sid) if sid else None

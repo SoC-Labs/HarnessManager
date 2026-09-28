@@ -65,7 +65,7 @@ def tsv_ok(out: str, layout: str) -> None:
 # --- the journey, transcript style ---------------------------------------------------------------
 
 
-def test_the_journey_from_kit_to_program(tmp_path, capsys):
+def test_the_journey_from_kit_to_program(tmp_path, capsys, fake_vivado):
     # import the fixture kit (a lab user's fielded/<sid>/ goes the same way)
     rc, out, _ = run(capsys, "kit", "import", str(kf.FIXTURE))
     assert rc == 0 and "cached: mps3/0x72BB0A36/vivado-2024.1" in out
@@ -89,9 +89,11 @@ def test_the_journey_from_kit_to_program(tmp_path, capsys):
     # write the build dir
     rc, out, _ = run(capsys, "kit", "script", "--static-id", "0x72BB0A36", "--design",
                      str(dfile), "--out", str(bdir))
-    assert rc == 0 and (bdir / "build_rm.tcl").is_file() and "next: vivado -mode batch" in out
+    # KIT-RC2: the command names the discovered Vivado of the kit's release, never a bare one
+    assert rc == 0 and (bdir / "build_rm.tcl").is_file() and f"next: {fake_vivado} -mode batch" in out
     rc, out, _ = run(capsys, "kit", "build", str(bdir))
     assert rc == 0 and "does not run Vivado yet" in out and "-source" in out
+    assert out.startswith(f"{fake_vivado} -mode batch")
     # "Vivado ran": the receipt and the pair it names
     receipt = kf.passed_build(bdir)
     rc, out, _ = run(capsys, "kit", "check", str(receipt))

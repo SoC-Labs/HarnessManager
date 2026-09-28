@@ -56,6 +56,19 @@ The MPS3 model is `src/harness_manager_mps3/pins/mps3_board_pins.json`. It is **
 
 Options: `--platform DIR` (default `../mps3-nanosoc-platform` or `$HM_PLATFORM_DIR`), `--ref BRANCH` (or `$HM_PLATFORM_REF`), `--pkg FILE`.
 
+**More than one shell.** The model describes every shell in the generator's `SHELLS` list (`SID@REF`, the default shell first); `--check` regenerates exactly that list. Today it is `0x72BB0A36@feat/rm-ila-mint` (the default, fielded) and RC2, `0x44EE76D5@6beea093…`: the platform commit on `feat/linux-harness` that published `fielded/0x44EE76D5/`. RC2 is pinned to that commit, not the branch, because a minted static never changes and that branch's head moves every day. Before RC2 was in the model, `kit script --static-id 0x44EE76D5` refused (`xdc:static_id`: the model had no such shell).
+
+```
+.venv/bin/python tools/gen_mps3_pins.py --shell 0x72BB0A36@feat/rm-ila-mint --shell 0x44EE76D5@BRANCH
+.venv/bin/python tools/gen_mps3_pins.py --all --ref feat/rm-ila-mint --ref BRANCH   # every fielded/<sid>/ that matches a ref
+```
+
+Each shell is read at its own ref and checked against its own record: its `owns`, `free`, `rp_boundary`, `boundary_clocks`, `connectivity` and `pblock`, and its `platform` ref and commit. The board-level facts (package, pinmap nets, banks, connectors) are the default shell's. A source whose bytes at a shell's ref differ from the default shell's gets its own key, `<key>@<sid>`. A shell's pins that the Arm pinmap does not place (the Linux shell's DDR4, under `SHELL_CPU=mbv`) are listed in its `notes`, not modelled. With `--all`, a record that no ref's sources match is left out and named on stderr, never modelled from the wrong files.
+
+A second shell is `fielded: true` only when `docs/FIELDED_SHELL.md` at its own ref names it (`fielded_src` cites the row otherwise): a release candidate such as RC2 has a record before the cutover, and the board nets it alone places stay at their pinmap level. A pblock fact that differs for one shell lives in `tools/mps3_pin_facts.py` `SHELL_PBLOCK`, citing that shell's own record: RC2's `dut_clk` enters the partition from `BUFGCE_X2Y47`, not `X2Y24` (`fielded/0x44EE76D5/README.md`).
+
+RC2 in the model: the same 47-port / 148-bit / 20-INTF boundary as `0x72BB0A36`; it owns the seven `USD_*` nets as well (`usd_spi`); 117 DDR4 pins are noted; `fielded: false` (docs/FIELDED_SHELL.md still names `0x72BB0A36`); `dut_clk_hd_clk_src` `BUFGCE_X2Y47`, so its RM kit's OOC XDC names X2Y47.
+
 The generator refuses to write a wrong model: it exits 2 if the three boundary renders disagree, a shell file differs from the fielded build input, a shell pin is not in the pinmap, a bank needs two voltages, or a cited sentence has left its file.
 
 ## Designs
@@ -86,6 +99,7 @@ A design is a JSON document. The built-in designs are in `src/harness_manager_mp
 
 - **`use`**: the boundary groups the RM drives or reads: `clkrst`, `jtag`, `dbgbscan`, `eth`, `uart`, `status`, `gpio`, `qspi`. A group that is not listed is tied off.
   - `{"timed": true}`, or a list of signals, keeps that group's data out of the false paths, for an RM that times it synchronously (a MAC's RMII data, a QSPI controller). With `eth` timed, `phy_rmii_ref_clk` is declared.
+  - `{"tie": ["dut_lockup", "irq_out"]}` names outputs of a USED group that the RM does not drive: the skeleton ties them to their safe-idle value (as the platform's `_template` does), instead of leaving `// assign ... = ...;` for you to fill. The built-in `minimal` uses it: it drives only `rm_id` from `status`. A name that is not an output of the group (or is `rm_id`) is a `missing_pin` error.
 - **`clocks`**: extra boundary clocks, such as `jtag_tck` (OOC-only) or `phy_rmii_ref_clk` (an RM debug hub's clock). The form `{"port", "period_ns"}` is checked against the shell's clock contract.
 - **`wrapper`**: an ANSI (System)Verilog header, relative to the design file. Alternatively, `"ports": [{"name", "dir", "width"}]`. The port list is checked against the boundary, like the platform's `pin_check`.
 - **`pins`**: package-pin requests. The partition has no IO sites, so each one fails with the reason.

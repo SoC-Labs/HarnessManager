@@ -441,8 +441,15 @@ set rc [catch {
     rset rm_wns $wns
     rset rm_whs $whs
     set tok [expr { ($wns eq "" || $wns >= 0) && ($whs eq "" || $whs >= 0) }]
+    # An empty slack is not a parse failure: an RM with no registers (minimal: every output
+    # a constant) has no path of its own, and a register with no timed path has no slack.
+    if { $nregs == 0 } {
+        set tdetail "your RM has no registers (every output a constant, as minimal's): no path of its own to time"
+    } else {
+        set tdetail "your RM's paths ($nregs registers): setup WNS [expr {$wns eq "" ? "none (no timed path)" : "$wns ns"}], hold WHS [expr {$whs eq "" ? "none (no timed path)" : "$whs ns"}]"
+    }
     if { $tok || $P(ALLOW_TIMING_FAIL) ne "1" } {
-        gate rm_timing $tok "your RM's paths ($nregs registers): setup WNS $wns ns, hold WHS $whs ns"
+        gate rm_timing $tok $tdetail
     } else {
         note rm_timing "NEGATIVE SLACK ALLOWED: setup WNS $wns ns, hold WHS $whs ns"
     }

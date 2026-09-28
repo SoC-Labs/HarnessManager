@@ -11,7 +11,13 @@ developer variable, else the tool's own search), then proves it runs:
   ``remote_bitbang``, the adapter the board's JTAG server speaks; the SoC Labs build (jlink,
   buspirate, hostio4) fails with the fix. With no setting, every ``openocd`` on the service's
   PATH is tried in order and the first with remote_bitbang is taken, as ``debug up`` does;
-- ``vivado -version`` (``services/kit/vivado.py``: the same parser and search);
+- ``vivado -version`` (``services/kit/vivado.py``: the same parser and search, both install
+  layouts: ``<rel>/bin/vivado`` and 2025.1+'s ``<rel>/Vivado/bin/vivado``). When kits are
+  cached, their Vivado releases are what Detect prefers (an installed Vivado of a kit's
+  release wins over another release on PATH, never over the setting) and flags: the detail
+  says which release the kits need, when the chosen one is not it, and when the ``vivado``
+  on PATH (what a bare ``vivado`` runs) is another release (KIT-RC2). The other releases
+  found under the install roots are in ``others`` (not run);
 - **hw_server is never run.** Started with an option it does not know, it may bind 3121 and
   serve; its release comes from its path (``/…/Vivado/2024.1/bin/hw_server``), as
   ``services/xvc.py`` reads it. It must be an executable file.
@@ -112,11 +118,59 @@ def _step(tool: str, ok: bool, detail: str, hint: str = "") -> dict[str, Any]:
     return {"step": tool, "ok": ok, "detail": detail, "hint": hint}
 
 
+def kit_releases() -> list[tuple[str, str]]:
+    """``[(static_id, vivado release)]`` of the cached kits (the process's state dir): what
+    Detect prefers and flags. Never raises: no kit, or no readable store, is ``[]``."""
+    try:
+        from harness_manager.engine import resolve_state_dir
+        from harness_manager.services.kit import KitService
+
+        kits = KitService.for_state_dir(resolve_state_dir()).list()
+        return [(k.static_id, k.manifest.vivado.release) for k in kits
+                if k.manifest.vivado.release]
+    except Exception:  # noqa: BLE001 - Detect must never fail on the kit cache
+        return []
+
+
+def _vivado_detail(found: Any, kits: list[tuple[str, str]]) -> tuple[str, str]:
+    """``(detail, hint)`` for a Vivado that runs. With no kit cached it is the plain
+    ``Vivado <rel> at <path>`` (nothing asks for a release); with kits, their releases, and
+    PATH's vivado when it is not one of them. The other installed releases are in the
+    found dict's ``others``, not the detail."""
+    from harness_manager.services.kit import vivado as V
+    from harness_manager.services.kit.schema import release_major_minor as mm
+
+    inst = found.install
+    parts = [f"Vivado {inst.version} at {inst.path}"]
+    hint = ""
+    if kits:
+        need = sorted({r for _, r in kits})
+        by = "; ".join(f"{r} ({', '.join(s for s, rr in kits if rr == r)})" for r in need)
+        if mm(inst.version) in {mm(r) for r in need}:
+            parts.append(f"the cached kits need {by}")
+        else:
+            other = next((o for o in found.others if mm(o.version) in {mm(r) for r in need}), None)
+            parts.append(f"NOT the release the cached kits need: {by}")
+            hint = (f"Vivado {other.version} is installed at {other.path}: use that path"
+                    if other else f"install Vivado {need[-1]}")
+        for r in need:
+            pc = V.check_path(found, r)
+            if pc is not None and pc.state == "warning":
+                b = found.on_path
+                parts.append(f"`vivado` on PATH is {b.version} ({b.path}): a bare `vivado` runs "
+                             "that one, so the build commands name the full path")
+                break
+    return "; ".join(parts), hint
+
+
 def detect_one(tool: str, value: str, env: Mapping[str, str], *,
-               runner: Runner = probe_run,
-               source: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
+               runner: Runner = probe_run, source: str = "",
+               kits: list[tuple[str, str]] | None = None,
+               roots: tuple[str, ...] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """``(step, found)`` for one tool: ``value`` is its resolved setting ("" = search);
-    ``source``: where it came from (the resolver's: "env" means its variable set it)."""
+    ``source``: where it came from (the resolver's: "env" means its variable set it).
+    ``kits``: ``[(static_id, release)]`` for Vivado (default: the cached kits'); ``roots``:
+    Vivado's install roots (a test seam; default: the standard ones)."""
     key, label = TOOLS[tool]
     value = (value or "").strip()
     fix = f"set {key} to the {label} executable, or clear it to search again"
@@ -128,20 +182,26 @@ def detect_one(tool: str, value: str, env: Mapping[str, str], *,
         if value.lower() in V.OFF:
             return (_step(tool, True, f"off: Harness Manager never looks for Vivado ({key})"),
                     {"path": "", "version": "", "how": "off", "key": key})
+        kits = kit_releases() if kits is None else kits
         found = V.discover(runner=lambda argv, **kw: runner(argv, **kw) if argv[1:] == ["-version"]
                            else _refuse(argv),
                            env={**env, V.ENV: value},
-                           which=lambda n: _which(n, env))
+                           which=lambda n: _which(n, env), roots=roots,
+                           want=[r for _, r in kits])
+        extra = {"want": list(found.want), "kits": [{"static_id": s, "release": r} for s, r in kits],
+                 "on_path": found.on_path.to_json() if found.on_path else None,
+                 "others": [{"path": o.path, "version": o.version} for o in found.others]}
         inst = found.install
         if inst is None:
             return (_step(tool, False, found.reason or "Vivado was not found",
                           fix if value else f"install Vivado, or set {key}"),
-                    {"path": "", "version": "", "how": "", "key": key})
+                    {"path": "", "version": "", "how": "", "key": key, **extra})
         if not inst.version:
             return (_step(tool, False, f"{inst.path} does not run: {inst.error}", fix),
-                    {"path": inst.path, "version": "", "how": inst.how, "key": key})
-        return (_step(tool, True, f"Vivado {inst.version} at {inst.path}"),
-                {"path": inst.path, "version": inst.version, "how": inst.how, "key": key})
+                    {"path": inst.path, "version": "", "how": inst.how, "key": key, **extra})
+        detail, hint = _vivado_detail(found, kits)
+        return (_step(tool, True, detail, hint),
+                {"path": inst.path, "version": inst.version, "how": inst.how, "key": key, **extra})
 
     if tool == "hw_server":
         path, how = "", ""

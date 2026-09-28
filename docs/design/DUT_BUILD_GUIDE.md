@@ -34,7 +34,7 @@ Every row is a fact of **the kit for one static** (KIT-STORE's `kit.json`: `viva
 | Static | Harness | Vivado | Partition | Kit |
 |---|---|---|---|---|
 | `0x72BB0A36` (fielded 2026-09-24) | bare-metal MicroBlaze | **2024.1** | `u_rp_dut` / `pblock_rp_dut`, 47 ports / 148 bits | ≈ 10.2 MB |
-| mint 3 (RC2, not yet minted) | MicroBlaze V Linux | **2026.1** (INTEG) | the same boundary, unchanged for RC2 (47 / 148) | ≈ 38 MB (KIT-STORE §2.1) |
+| `0x44EE76D5` (RC2, minted; record at platform 6beea09; NOT fielded yet) | MicroBlaze V Linux | **2026.1** | the same boundary (47 / 148); `dut_clk` from `BUFGCE_X2Y47` | on the hub, `0x44EE76D5/kit/` (internal: AMD IP) |
 
 The rest of this table is for 0x72BB0A36:
 
@@ -53,10 +53,10 @@ The rest of this table is for 0x72BB0A36:
 | # | Step | What the user does | What HM checks | The failure it catches |
 |---|---|---|---|---|
 | 1 | **Target** | Picks a board, or names a static_id with no board attached | the board's live `shell_id`; is there a kit for (static_id, Vivado)? | building for the static that is *minted* rather than the one *fielded* (`docs/FIELDED_SHELL.md`: "They are routinely not [equal]") |
-| 2 | **Tools** | Installs Vivado 2024.1 | the CLI finds `vivado` on PATH, `$XILINX_VIVADO` or the standard install roots, and runs `vivado -version` | wrong release: the DCP will not open, after a download and a wait |
+| 2 | **Tools** | Installs the kit's Vivado release (2024.1 for 0x72BB0A36, 2026.1 for RC2) | the CLI finds `vivado` in `tools.vivado`, on PATH, `$XILINX_VIVADO` or the install roots (both layouts: `<rel>/bin/vivado` and 2025.1+'s `<rel>/Vivado/bin/vivado`; `/research/CAD/Xilinx/Vivado` is a root), prefers the kit's release, and runs `vivado -version`. Not done while the `vivado` on PATH is another release (KIT-RC2) | wrong release: the DCP will not open, after a download and a wait; a bare `vivado` that runs the login profile's 2024.1 |
 | 3 | **Kit** | `harness-manager kit fetch` (KIT-STORE) | zlib CRC-32 of `static_routed_locked.dcp` == static_id (`build_dfx.tcl:725`); the kit's sha256s | a wrong, stale or corrupt DCP: the whole class behind `fetch_fielded.sh` and the "re-minted by accident" warnings |
 | 4 | **Wrapper and XDC** | `harness-manager xdc rm-kit --design my_rm.json` (T10), then fills in the skeleton | the wrapper's ports against the boundary (47 ports / 148 bits: missing port, width, direction); clock periods against partition-timing; `rm_id` unique in the catalogue | the drift that `pin_check` catches, which otherwise fails at link or `pr_verify` after a full synth (`_template/README.md` "Why the boundary is not negotiable") |
-| 5 | **Build** | `harness-manager kit script`, then `vivado -mode batch -source build_rm.tcl` (or `kit build`, which runs it) | ~25 gates inside Vivado (§3.2). The receipt records each one. | a black-boxed (empty) RM; the wrong rm_id; a clockless OOC synth; RP pins moved; HDPR-16/18/50; negative slack in *your* paths; `pr_verify` incompatible; a clearing over 256 KiB |
+| 5 | **Build** | `harness-manager kit script`, then `kit build`, which PRINTS the command (with the full path of the kit's Vivado release) for you to run | ~25 gates inside Vivado (§3.2). The receipt records each one. | a black-boxed (empty) RM; the wrong rm_id; a clockless OOC synth; RP pins moved; HDPR-16/18/50; negative slack in *your* paths; `pr_verify` incompatible; a clearing over 256 KiB |
 | 6 | **Check** | `harness-manager kit check out/my_rm_build.json` | receipt ↔ files (crc32, len), receipt static_id ↔ the board, a partial-pair stream check (§4), the `.ltx` pairing | a file copied from the wrong build; swapped partial and clearing; a full image offered as a partial; a half-copied file |
 | 7 | **Add** | `harness-manager kit pack … --import` ("Add to Program") | writes the overlay triple (manifest per `overlay-manifest.md`) and imports it into the content store, which refuses a bad CRC (`overlays.import_overlay`) | a hand-written manifest claiming a static it was not built against |
 | 8 | **Program and debug** | Program (existing), then Consoles, Debug and ILA (XVC lane) | the existing deploy preflight: shell_id, crc/len, pair, clearing fits, transport, USERCODE; after the swap the shell reads rm_id back | everything that is only knowable on the board |
@@ -263,8 +263,12 @@ harness-manager kit guide   [TARGET | --static-id ID] [--vivado VER]   # the ste
 harness-manager kit fetch   …                                          # KIT-STORE
 harness-manager kit script  --design my_rm.json --out build/my_rm [TARGET | --static-id ID]
                                                                        # build_rm.tcl + OOC XDC + skeleton + README
-harness-manager kit build   build/my_rm [--stop-after synth] [--jobs 2] # prints the Vivado command ("ran": false); you run it
-harness-manager kit check   build/my_rm/out/my_rm_build.json [TARGET]  # receipt + files + stream checks (+ live shell_id)
+harness-manager kit build   build/my_rm [--stop-after synth] [--jobs 2] # PRINTS the Vivado command; HM does not run it
+                                                                       # (it names the full path of a Vivado of the
+                                                                       # kit's release; exit 12 when there is none)
+harness-manager kit check   build/my_rm/out/my_rm_build.json [TARGET] [--static-id ID]
+                                                                       # receipt + files + stream checks (+ live shell_id);
+                                                                       # --static-id must be the receipt's (else exit 14)
 harness-manager kit check   PARTIAL.bin --clearing CLEAR.bin [--static-id ID]   # no receipt: stream checks only
 harness-manager kit pack    build/my_rm/out/my_rm_build.json [--import] [--out DIR]  # the overlay triple, into Program
 ```
@@ -282,6 +286,12 @@ Build a DUT for mps3-01 (static 0x72BB0A36, kit mps3/0x72BB0A36/vivado-2024.1)
   -      6 check     waits for a passed build
 next: fix the timing, then: harness-manager kit build build/my_rm
 ```
+
+`kit build` only prints the command (`vivado -mode batch -source build_rm.tcl ...`); running
+Vivado, and streaming its `HM_STAGE`/`HM_GATE` lines, is not built yet (§7 option 1). The
+command starts with the full path of the Vivado that discovery chose for the kit's release
+(`tools.vivado`, PATH, the install roots), because a bare `vivado` runs whatever is first
+on PATH; with no Vivado of that release it fails (exit 12) and says what it found.
 
 - Exit codes follow `core.errors`: 0 passed; 15 REFUSED for a failed check, with every check in `--json`; 12 UNAVAILABLE when no Vivado or kit is found.
 - `kit guide` prints the steps as TSV/JSON like every other verb.

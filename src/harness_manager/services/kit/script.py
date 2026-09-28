@@ -17,9 +17,15 @@ verb reads:
   0x8000-0xFFFF, stable per name, david K8) and the skeleton and the script agree on it;
 - ``build``: ``{top, sources, include_dirs, defines, synth_hook, synth_dcp, rm_xdc}``,
   paths relative to the design file. ``top`` defaults to ``rm_<name>`` (the skeleton's
-  module). With no ``sources``, the design's ``wrapper`` is the one source.
+  module). With no ``sources``, the design's ``wrapper`` is the one source. With neither
+  (and no synth hook or DCP), the XDC kit's own skeleton ``xdc/<name>_wrapper_skeleton.sv``
+  is the one source (KIT-RC2): a design that names no RTL, such as the built-in
+  ``minimal``, builds as its skeleton, and the ``sources`` note says so.
 
-Nothing here runs Vivado.
+The printed command (``command``, README.txt) names the FULL path of the Vivado discovery
+chose when it is the kit's release (``vivado.command_vivado``): a bare ``vivado`` runs
+whatever is first on PATH, which on a lab box can be another release. Nothing here runs
+Vivado, except ``vivado -version`` through discovery.
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ from harness_manager.core.errors import AbsentError, RefusedError, UsageError
 from harness_manager.core.pack import KitCheck, kit_refusal
 
 from . import render
+from . import vivado as viv
 from .schema import hex32, parse_u32
 from .service import CachedKit, KitService
 
@@ -54,6 +61,8 @@ class BuildScript:
     command: list[str] = field(default_factory=list)
     out_dir: Path | None = None
     written: list[Path] = field(default_factory=list)
+    vivado: str = "vivado"                     # what the command starts with (a full path when found)
+    vivado_release: str = ""                   # the kit's release
 
     @property
     def receipt(self) -> str:
@@ -64,6 +73,7 @@ class BuildScript:
                 "static_id": self.static_id, "kit_id": self.kit_id,
                 "files": dict(self.files), "params": dict(self.params),
                 "checks": [c.__dict__ for c in self.checks], "command": list(self.command),
+                "vivado": self.vivado, "vivado_release": self.vivado_release,
                 "receipt": self.receipt,
                 "out_dir": str(self.out_dir) if self.out_dir else None,
                 "written": [str(p) for p in self.written]}
@@ -90,11 +100,12 @@ def _rel_to(design: Any, value: str) -> str:
 
 def make_script(kits: KitService, *, pack: str, static_id: str, design: str | dict[str, Any],
                 out_dir: Path | None = None, kit_dir: Path | None = None, jobs: int = 2,
-                stop_after: str = "bitstream", board: str = "", store: Any = None
-                ) -> BuildScript:
+                stop_after: str = "bitstream", board: str = "", store: Any = None,
+                vivado: viv.VivadoFound | None = None) -> BuildScript:
     """Render the build directory for ``design`` against the cached kit of ``static_id``;
     write it when ``out_dir`` is given. ``RefusedError`` (15) when the design fails an
-    XDC check or its rm_id is 0; warnings (an rm_id clash, a proposed rm_id) are listed."""
+    XDC check or its rm_id is 0; warnings (an rm_id clash, a proposed rm_id, no Vivado of
+    the kit's release here) are listed. ``vivado``: a discovery result (default: run it)."""
     kit: CachedKit = kits.require(static_id)
     adapter = kits.adapter_for(pack)
     profile = adapter.build_profile(static_id, kit.manifest)
@@ -147,10 +158,21 @@ def make_script(kits: KitService, *, pack: str, static_id: str, design: str | di
     sources = [_rel_to(d, s) for s in b.get("sources") or []]
     if not sources and d.wrapper_path:
         sources = [render.tcl_path(d.wrapper_path)]
+    skeleton = f"{XDC_SUBDIR}/{d.name}_wrapper_skeleton.sv"
     if not sources and not b.get("synth_hook") and not b.get("synth_dcp"):
-        checks.append(KitCheck("sources", "warning",
-                               "the design names no RTL (build.sources, or a wrapper): set them, "
-                               "or pass -tclargs RM_SOURCES=\"a.sv b.sv\""))
+        if skeleton in files:
+            # KIT-RC2: a design that names no RTL builds as its skeleton (minimal)
+            sources = [skeleton]
+            checks.append(KitCheck("sources", "warning",
+                                   f"the design names no RTL (build.sources, or a wrapper): "
+                                   f"RM_SOURCES is the XDC kit's skeleton {skeleton}, which "
+                                   f"drives rm_id and ties every other output off. For your "
+                                   f"own RTL set build.sources, or pass -tclargs "
+                                   f"RM_SOURCES=\"a.sv b.sv\""))
+        else:
+            checks.append(KitCheck("sources", "warning",
+                                   "the design names no RTL (build.sources, or a wrapper): set "
+                                   "them, or pass -tclargs RM_SOURCES=\"a.sv b.sv\""))
     kit_rel = render.tcl_path(kit_dir) if kit_dir else KIT_SUBDIR
     locked = kit.manifest.locked_static.path
     ref = kit.manifest.pr_verify_ref
@@ -174,14 +196,23 @@ def make_script(kits: KitService, *, pack: str, static_id: str, design: str | di
         "STOP_AFTER": stop_after or "bitstream",
     }
     files[render.SCRIPT_NAME] = render.render(values)
-    command = render.vivado_command(out_dir or Path("."), jobs=None)
+    found = vivado if vivado is not None else viv.discover(want=profile.vivado)
+    vexe = viv.command_vivado(found, profile.vivado)
+    if vexe == "vivado":                          # none of the kit's release here: say so
+        checks.append(viv.check_release(found, profile.vivado, profile.vivado_build))
+    else:
+        pc = viv.check_path(found, profile.vivado)
+        if pc is not None and pc.state == "warning":
+            checks.append(pc)
+    command = render.vivado_command(out_dir or Path("."), jobs=None, vivado=vexe)
     result = BuildScript(d.name, rm_id, proposed, profile.static_id, kit.manifest.kit_id,
-                         files, values, checks, command)
+                         files, values, checks, command, vivado=vexe,
+                         vivado_release=profile.vivado)
     files["README.txt"] = _readme(result, kit)
     if out_dir is not None:
         result.out_dir = Path(out_dir)
         result.written = write(result, kits, kit, out_dir, export_kit=kit_dir is None)
-        result.command = render.vivado_command(Path(out_dir).resolve())
+        result.command = render.vivado_command(Path(out_dir).resolve(), vivado=vexe)
     return result
 
 
@@ -211,7 +242,12 @@ def _readme(r: BuildScript, kit: CachedKit) -> str:
         f"part {m.part}, partition {m.rp.inst} ({m.rp.ports} ports / {m.rp.bits} bits).",
         "",
         "1. Build (about 20 min for a small RM with 2 threads; 4-8 GB of RAM):",
-        "     vivado -mode batch -source build_rm.tcl -log build_rm.log -journal build_rm.jou",
+        f"     {r.vivado} -mode batch -source build_rm.tcl -log build_rm.log -journal build_rm.jou",
+        (f"   ({r.vivado} is Vivado {m.vivado.release} on the machine that wrote this; elsewhere use "
+         f"that release's vivado: a bare `vivado` runs whatever is first on PATH)"
+         if r.vivado != "vivado" else
+         f"   (`vivado` must be Vivado {m.vivado.release}: check with `vivado -version`, or run "
+         f"`harness-manager kit build .` for the full path)"),
         "   Vivado exits 0 even when a gate fails: the verdict is the last HM_RM_BUILD_* line",
         f"   and {r.receipt}. Synth only: -tclargs STOP_AFTER=synth",
         "2. Check the pair, with no board and no Vivado:",

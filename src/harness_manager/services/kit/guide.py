@@ -4,7 +4,7 @@ Harness Manager works out from what it can detect (KIT-GUIDE KG-A; docs/design/D
 | # | step | done when |
 |---|---|---|
 | 1 | target  | a static is known (the board's live ``shell_id``, or ``--static-id``) and the pack can build for it |
-| 2 | tools   | the Vivado found has the kit's major.minor release |
+| 2 | tools   | the Vivado found has the kit's major.minor release, and so does the ``vivado`` on PATH (if any) |
 | 3 | kit     | the kit is cached, every blob re-hashes, its DCP's CRC-32 is the static_id, and it matches the board |
 | 4 | wrapper | the design passes every XDC-kit check (T10), with its rm_id checked for clashes |
 | 5 | build   | a receipt with ``state: passed`` is in the build directory |
@@ -31,7 +31,7 @@ from harness_manager.core.pack import KitCheck
 from . import build, render
 from .schema import hex32, parse_u32, release_major_minor, same_id
 from .service import KitService
-from .vivado import VivadoFound, check_release, discover
+from .vivado import VivadoFound, check_path, check_release, command_vivado, discover, matching
 
 STEPS = (("target", "Target"), ("tools", "Tools"), ("kit", "Kit"),
          ("wrapper", "Wrapper and XDC"), ("build", "Build"), ("check", "Check and add"))
@@ -113,6 +113,10 @@ CHECK_HELP: dict[str, str] = {
     "board_static": "the build is for another static than the board runs: fetch the board's kit, "
                     "generate the script again and rebuild. A partial for another static can "
                     "destroy the FPGA's configuration, and the static_id alone cannot see it.",
+    "expected_static": "the build is for another static than the one --static-id names (the "
+                       "receipt's static_id is the CRC-32 of the DCP the build opened): build "
+                       "again with `kit script --static-id ID`, or check it without the flag "
+                       "to see which static it is for.",
     "kit": "the kit of the build's static is not cached, so the partition's frames were not "
            "compared: fetch the kit, then check again.",
     "bit_header_length": "not a Xilinx .bit: use the .bit or .bin the build wrote in out/.",
@@ -147,6 +151,9 @@ CHECK_HELP: dict[str, str] = {
     "usercode": "the kit is for another implementation run of this static: fetch the kit again "
                 "from the release that fielded the board.",
     "vivado": GATE_HELP["vivado_version"],
+    "vivado_path": "the `vivado` on PATH is another release than the kit's (a login profile may "
+                   "put one first): run the full path `kit build` prints, or put the kit's "
+                   "release first on PATH (`export PATH=<its bin>:$PATH`).",
 }
 
 
@@ -256,13 +263,17 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
 
     # 2 tools -------------------------------------------------------------------------------
     s = steps["tools"]
-    found = vivado if vivado is not None else discover()
     need = profile.vivado if profile else ""
+    found = vivado if vivado is not None else discover(want=need)
     c = check_release(found, need, profile.vivado_build if profile else 0)
-    s.checks = [c]
+    # KIT-RC2: the `vivado` on PATH is what a bare `vivado` (a README, a habit) runs; a wrong
+    # release there is never "done", even when the chosen Vivado is right
+    pc = check_path(found, need)
+    s.checks = [c] + ([pc] if pc is not None else [])
     same_release = bool(found.install and need and release_major_minor(
         found.install.version) == release_major_minor(need))
-    if c.state == "ok" or same_release:             # a build-number difference only warns
+    path_wrong = pc is not None and pc.state == "warning"
+    if (c.state == "ok" or same_release) and not path_wrong:   # a build number only warns
         raw["tools"] = "done"
     elif c.state == "unchecked":
         raw["tools"] = "unchecked" if found.found else "todo"
@@ -270,10 +281,13 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
         raw["tools"] = "todo"
     have = (f"Vivado {found.install.version or '?'} at {found.install.path}"
             if found.install else "no Vivado found")
-    s.detail = f"{c.detail if c.state != 'ok' else have}; {LICENCE}"
+    s.detail = (f"{pc.detail}; " if path_wrong and same_release else "") + \
+        f"{c.detail if c.state != 'ok' else have}; {LICENCE}"
     if raw["tools"] == "todo":
-        s.actions = [_cmd(f"install Vivado {need or '(the kit names the release)'} and put it "
-                          f"on PATH, or set HARNESS_MANAGER_VIVADO")]
+        right = matching(found, need)
+        s.actions = ([_cmd(f"export PATH={Path(right.path).parent}:$PATH")] if right else
+                     [_cmd(f"install Vivado {need or '(the kit names the release)'} and put it "
+                           f"on PATH, or set HARNESS_MANAGER_VIVADO")])
 
     # 3 kit ---------------------------------------------------------------------------------
     s = steps["kit"]
@@ -328,7 +342,7 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
     else:
         found_r = build.find_receipts(Path(build_dir))
         script = Path(build_dir) / render.SCRIPT_NAME
-        run = render.vivado_command(Path(build_dir))
+        run = render.vivado_command(Path(build_dir), vivado=command_vivado(found, need))
         if not found_r:
             raw["build"] = "todo"
             s.detail = (f"no receipt in {build_dir}/out yet" if script.is_file() else

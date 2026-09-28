@@ -9,6 +9,8 @@ and directions come from the constraint files and the Xilinx package file.
 
 from __future__ import annotations
 
+from typing import Any
+
 #: Short ids for the Arm pinmap's groups (fpga/monolithic/nanosoc_mps3.xdc banner titles,
 #: matched by prefix), with the peripheral each group reaches on the board.
 GROUPS: list[tuple[str, str, str]] = [
@@ -254,6 +256,18 @@ PBLOCK: list[dict] = [
     {"key": "icap", "value": "CONFIG_SITE_X0Y0 (clock region X5Y1, SLR0)",
      "cite": ("fpga/dfx/prod_results_2026-07-06-realshell/dryrun_slr.txt", "CONFIG/ICAP site CONFIG_SITE_X0Y0: clock region X5Y1 SLR SLR0")},
 ]
+
+#: Per-shell pblock facts that differ from PBLOCK's, keyed by static_id: they replace the
+#: fact of the same key for that shell only, and cite the shell's own record.
+SHELL_PBLOCK: dict[str, list[dict[str, Any]]] = {
+    # RC2 (MicroBlaze V): the same pblock, but dut_clk enters from another BUFGCE. Only an OOC
+    # implementation reads HD.CLK_SRC; a DFX link into the locked static does not.
+    "0x44EE76D5": [
+        {"key": "dut_clk_hd_clk_src", "value": "BUFGCE_X2Y47",
+         "cite": ("fielded/0x44EE76D5/README.md",
+                  "**`dut_clk` enters the partition from `BUFGCE_X2Y47`.**")},
+    ],
+}
 
 #: IO standard -> the VCCO it needs (UltraScale SelectIO, UG571). Inputs of a few
 #: standards are VCCO-independent; the generator only uses what the board's own

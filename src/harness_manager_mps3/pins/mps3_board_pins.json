@@ -28,6 +28,18 @@
   ]
  },
  "sources": {
+  "0x44ee76d5_readme_md": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "fielded/0x44EE76D5/README.md",
+   "role": "cited prose",
+   "sha256": "f031afe74df18a3c6443298435dcc147f66c7e34a088afc22fb2020ab5e2b8bd",
+   "last_changed": {
+    "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+    "date": "2026-09-28"
+   }
+  },
   "board_manager_harness_handover_md": {
    "repo": "mps3-nanosoc-platform",
    "ref": "feat/rm-ila-mint",
@@ -113,6 +125,18 @@
     "date": "2026-09-10"
    }
   },
+  "fielded_shell_md": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "docs/FIELDED_SHELL.md",
+   "role": "what the board runs (the fielded row)",
+   "sha256": "f96bf73b4628c3303c79b5198cce0e09b743af1425f414c2f723f9b1c2056a00",
+   "last_changed": {
+    "commit": "d3c0ee9a637ef66df3ed2ca5b3a9b15917b8347d",
+    "date": "2026-09-24"
+   }
+  },
   "handover_rm_ila_over_xvc_md": {
    "repo": "mps3-nanosoc-platform",
    "ref": "feat/rm-ila-mint",
@@ -137,6 +161,18 @@
     "date": "2026-09-24"
    }
   },
+  "mint_record_0x44ee76d5": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "fielded/0x44EE76D5/mint.json",
+   "role": "the fielded mint record of 0x44EE76D5",
+   "sha256": "ef9367339607d9cab5b1deb070981ee4516c926a33684057bad485ec88db3494",
+   "last_changed": {
+    "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+    "date": "2026-09-28"
+   }
+  },
   "mps3_harness_touch_xdc": {
    "repo": "mps3-nanosoc-platform",
    "ref": "feat/rm-ila-mint",
@@ -159,6 +195,19 @@
    "sha256": "3e5298823e9e1780b82d2a8fb602ec8688486c8aac3aec1871aed0cc03aad2cf",
    "last_changed": {
     "commit": "2b590068ef82ece4800f3e2c2cbbd44480c53905",
+    "date": "2026-09-23"
+   },
+   "fielded_static_input": true
+  },
+  "mps3_harness_xdc@0x44EE76D5": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "fpga/shell/constraints/mps3_harness.xdc",
+   "role": "a fielded-shell pin constraint file",
+   "sha256": "5a315471829c6d26ecc0e8cb0c910710431f41ee1ddadf7e560627ba838f482e",
+   "last_changed": {
+    "commit": "36506d5dd7d74429a6e58e68ffa1db1f768956f3",
     "date": "2026-09-23"
    },
    "fielded_static_input": true
@@ -197,6 +246,18 @@
    "last_changed": {
     "commit": "3970e39e8567b6f47efae894fa4ede853baa4d5e",
     "date": "2026-09-24"
+   }
+  },
+  "net_protocol_md@0x44EE76D5": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "docs/contracts/net-protocol.md",
+   "role": "cited prose",
+   "sha256": "fec8f220258f7502994193f5dc9f7ff06bf6090535c1f130dfd2b2a4b51ec2ea",
+   "last_changed": {
+    "commit": "9d59699f5f07a1ae0da77bcefd390ccef0a64f4d",
+    "date": "2026-09-27"
    }
   },
   "partition_pins": {
@@ -298,6 +359,19 @@
    },
    "fielded_static_input": true
   },
+  "shell_bd_tcl@0x44EE76D5": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "fpga/shell/bd/shell_bd.tcl",
+   "role": "cited prose",
+   "sha256": "0b8ffc8ef2d3180d35e29b263bc0110b5b4cb90df476841fddbfc44d7a7ebea7",
+   "last_changed": {
+    "commit": "6c2465fda5884c186ca8a71d360e2ed110dfd8af",
+    "date": "2026-09-24"
+   },
+   "fielded_static_input": true
+  },
   "shell_regmap_md": {
    "repo": "mps3-nanosoc-platform",
    "ref": "feat/rm-ila-mint",
@@ -310,6 +384,18 @@
     "date": "2026-09-23"
    }
   },
+  "shell_regmap_md@0x44EE76D5": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "docs/contracts/shell-regmap.md",
+   "role": "cited prose",
+   "sha256": "68becca1fc132fc8af6a579698cfa3cce200f3525de5fce2b506296060d45b77",
+   "last_changed": {
+    "commit": "6c2465fda5884c186ca8a71d360e2ed110dfd8af",
+    "date": "2026-09-24"
+   }
+  },
   "shell_top": {
    "repo": "mps3-nanosoc-platform",
    "ref": "feat/rm-ila-mint",
@@ -319,6 +405,19 @@
    "sha256": "3c3e96ffcb433ef4476f02283af88330515dfa8b2e88a3ac6fd368d7b41b8f60",
    "last_changed": {
     "commit": "2b590068ef82ece4800f3e2c2cbbd44480c53905",
+    "date": "2026-09-23"
+   },
+   "fielded_static_input": true
+  },
+  "shell_top@0x44EE76D5": {
+   "repo": "mps3-nanosoc-platform",
+   "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "commit": "6beea093ff5e11517282b44034bdf59d0cbef746",
+   "path": "fpga/shell/shell_top.sv",
+   "role": "the fielded static's top (shell port directions)",
+   "sha256": "fbeda30b60165bd68e1995fe925a8e8ee8a8a28ddd2a525dba44a5bd475606a5",
+   "last_changed": {
+    "commit": "36506d5dd7d74429a6e58e68ffa1db1f768956f3",
     "date": "2026-09-23"
    },
    "fielded_static_input": true
@@ -7801,6 +7900,10 @@
     "SHELL_TOUCH": "1"
    },
    "mint_record": "mint_record:1",
+   "platform": {
+    "ref": "feat/rm-ila-mint",
+    "commit": "e54363022f896c2589b9277e5867d402923e3b9a"
+   },
    "owns": {
     "CFG_DATAOUT": {
      "shell_port": "CFG_DATAOUT",
@@ -10802,6 +10905,3108 @@
      "src": "dryrun_slr_txt:8"
     }
    }
+  },
+  "0x44EE76D5": {
+   "static_id": "0x44EE76D5",
+   "fielded": false,
+   "usercode": "0xFB1F8C76",
+   "flags": {
+    "SHELL_CPU": "mbv",
+    "SHELL_REALPHY": "0",
+    "SHELL_TOUCH": "1"
+   },
+   "mint_record": "mint_record_0x44ee76d5:1",
+   "platform": {
+    "ref": "6beea093ff5e11517282b44034bdf59d0cbef746",
+    "commit": "6beea093ff5e11517282b44034bdf59d0cbef746"
+   },
+   "owns": {
+    "CFG_DATAOUT": {
+     "shell_port": "CFG_DATAOUT",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:346",
+      "shell_top@0x44EE76D5:112"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {},
+     "function": "MCC-facing tie-offs (board-manager handover Lane D, D1). MPS3 TRM",
+     "shell_dir": "out"
+    },
+    "CLCD_BL": {
+     "shell_port": "CLCD_BL",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:319",
+      "shell_top@0x44EE76D5:104"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "out"
+    },
+    "CLCD_CS": {
+     "shell_port": "CLCD_CS",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:315",
+      "shell_top@0x44EE76D5:102"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "out"
+    },
+    "CLCD_PD[10]": {
+     "shell_port": "CLCD_PD[10]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:295",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_PD[11]": {
+     "shell_port": "CLCD_PD[11]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:296",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_PD[12]": {
+     "shell_port": "CLCD_PD[12]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:297",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_PD[13]": {
+     "shell_port": "CLCD_PD[13]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:298",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_PD[14]": {
+     "shell_port": "CLCD_PD[14]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:299",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_PD[15]": {
+     "shell_port": "CLCD_PD[15]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:300",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_PD[16]": {
+     "shell_port": "CLCD_PD[16]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:301",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_PD[17]": {
+     "shell_port": "CLCD_PD[17]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:302",
+      "shell_top@0x44EE76D5:99"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "inout"
+    },
+    "CLCD_RD": {
+     "shell_port": "CLCD_RD",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:311",
+      "shell_top@0x44EE76D5:100"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "out"
+    },
+    "CLCD_RS": {
+     "shell_port": "CLCD_RS",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:313",
+      "shell_top@0x44EE76D5:101"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "out"
+    },
+    "CLCD_RST": {
+     "shell_port": "CLCD_RST",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:321",
+      "shell_top@0x44EE76D5:133"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "out"
+    },
+    "CLCD_TINT": {
+     "shell_port": "CLCD_TINT",
+     "src": [
+      "mps3_harness_touch_xdc:26",
+      "shell_top@0x44EE76D5:131"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "Phase-2 CLCD resistive-touch I2C pads",
+     "shell_dir": "in"
+    },
+    "CLCD_TSCL": {
+     "shell_port": "CLCD_TSCL",
+     "src": [
+      "mps3_harness_touch_xdc:18",
+      "shell_top@0x44EE76D5:129"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {
+      "PULLUP": "true"
+     },
+     "function": "Phase-2 CLCD resistive-touch I2C pads",
+     "shell_dir": "inout"
+    },
+    "CLCD_TSDA": {
+     "shell_port": "CLCD_TSDA",
+     "src": [
+      "mps3_harness_touch_xdc:22",
+      "shell_top@0x44EE76D5:130"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {
+      "PULLUP": "true"
+     },
+     "function": "Phase-2 CLCD resistive-touch I2C pads",
+     "shell_dir": "inout"
+    },
+    "CLCD_WR_SCL": {
+     "shell_port": "CLCD_WR_SCL",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:317",
+      "shell_top@0x44EE76D5:103"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "CLCD (QVGA HX8347-D, 8-bit 8080 parallel)",
+     "shell_dir": "out"
+    },
+    "ETH_INT": {
+     "shell_port": "ETH_INT",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:115",
+      "shell_top@0x44EE76D5:65"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {
+      "PULLTYPE": "PULLUP"
+     },
+     "function": "LAN9220 Ethernet SMC interface (10/100, promiscuous per spec",
+     "shell_dir": "in"
+    },
+    "ETH_nCS": {
+     "shell_port": "ETH_nCS",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:111",
+      "shell_top@0x44EE76D5:63"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "LAN9220 Ethernet SMC interface (10/100, promiscuous per spec",
+     "shell_dir": "out"
+    },
+    "ETH_nOE": {
+     "shell_port": "ETH_nOE",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:113",
+      "shell_top@0x44EE76D5:64"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "LAN9220 Ethernet SMC interface (10/100, promiscuous per spec",
+     "shell_dir": "out"
+    },
+    "IOFPGA_SYSWDT": {
+     "shell_port": "IOFPGA_SYSWDT",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:344",
+      "shell_top@0x44EE76D5:111"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {},
+     "function": "MCC-facing tie-offs (board-manager handover Lane D, D1). MPS3 TRM",
+     "shell_dir": "out"
+    },
+    "OSCCLK[1]": {
+     "shell_port": "OSCCLK1",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:42",
+      "shell_top@0x44EE76D5:48"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "Board oscillator",
+     "shell_dir": "in"
+    },
+    "QSPI_D0": {
+     "shell_port": "QSPI_D0",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:271",
+      "shell_top@0x44EE76D5:87"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLUP": "true"
+     },
+     "function": "External QSPI flash (SST26VF064B)",
+     "shell_dir": "inout"
+    },
+    "QSPI_D1": {
+     "shell_port": "QSPI_D1",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:274",
+      "shell_top@0x44EE76D5:88"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLUP": "true"
+     },
+     "function": "External QSPI flash (SST26VF064B)",
+     "shell_dir": "inout"
+    },
+    "QSPI_D2": {
+     "shell_port": "QSPI_D2",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:277",
+      "shell_top@0x44EE76D5:89"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLUP": "true"
+     },
+     "function": "External QSPI flash (SST26VF064B)",
+     "shell_dir": "inout"
+    },
+    "QSPI_D3": {
+     "shell_port": "QSPI_D3",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:280",
+      "shell_top@0x44EE76D5:90"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLUP": "true"
+     },
+     "function": "External QSPI flash (SST26VF064B)",
+     "shell_dir": "inout"
+    },
+    "QSPI_SCLK": {
+     "shell_port": "QSPI_SCLK",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:283",
+      "shell_top@0x44EE76D5:91"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {},
+     "function": "External QSPI flash (SST26VF064B)",
+     "shell_dir": "inout"
+    },
+    "QSPI_nCS": {
+     "shell_port": "QSPI_nCS",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:285",
+      "shell_top@0x44EE76D5:92"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {},
+     "function": "External QSPI flash (SST26VF064B)",
+     "shell_dir": "inout"
+    },
+    "SMBF_ADDR[0]": {
+     "shell_port": "SMBF_ADDR[0]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:134",
+      "shell_top@0x44EE76D5:66"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_ADDR[1]": {
+     "shell_port": "SMBF_ADDR[1]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:135",
+      "shell_top@0x44EE76D5:66"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_ADDR[2]": {
+     "shell_port": "SMBF_ADDR[2]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:136",
+      "shell_top@0x44EE76D5:66"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_ADDR[3]": {
+     "shell_port": "SMBF_ADDR[3]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:137",
+      "shell_top@0x44EE76D5:66"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_ADDR[4]": {
+     "shell_port": "SMBF_ADDR[4]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:138",
+      "shell_top@0x44EE76D5:66"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_ADDR[5]": {
+     "shell_port": "SMBF_ADDR[5]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:139",
+      "shell_top@0x44EE76D5:66"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_ADDR[6]": {
+     "shell_port": "SMBF_ADDR[6]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:140",
+      "shell_top@0x44EE76D5:66"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_DATA[0]": {
+     "shell_port": "SMBF_DATA[0]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:143",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[1]": {
+     "shell_port": "SMBF_DATA[1]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:144",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[2]": {
+     "shell_port": "SMBF_DATA[2]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:145",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[3]": {
+     "shell_port": "SMBF_DATA[3]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:146",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[4]": {
+     "shell_port": "SMBF_DATA[4]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:147",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[5]": {
+     "shell_port": "SMBF_DATA[5]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:148",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[6]": {
+     "shell_port": "SMBF_DATA[6]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:149",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[7]": {
+     "shell_port": "SMBF_DATA[7]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:150",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[8]": {
+     "shell_port": "SMBF_DATA[8]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:151",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[9]": {
+     "shell_port": "SMBF_DATA[9]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:152",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[10]": {
+     "shell_port": "SMBF_DATA[10]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:153",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[11]": {
+     "shell_port": "SMBF_DATA[11]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:154",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[12]": {
+     "shell_port": "SMBF_DATA[12]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:155",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[13]": {
+     "shell_port": "SMBF_DATA[13]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:156",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[14]": {
+     "shell_port": "SMBF_DATA[14]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:157",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_DATA[15]": {
+     "shell_port": "SMBF_DATA[15]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:158",
+      "shell_top@0x44EE76D5:67"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "inout"
+    },
+    "SMBF_FIFOSEL": {
+     "shell_port": "SMBF_FIFOSEL",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:167",
+      "shell_top@0x44EE76D5:68"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_nOE": {
+     "shell_port": "SMBF_nOE",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:169",
+      "shell_top@0x44EE76D5:69"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_nRST": {
+     "shell_port": "SMBF_nRST",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:173",
+      "shell_top@0x44EE76D5:71"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBF_nWE": {
+     "shell_port": "SMBF_nWE",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:171",
+      "shell_top@0x44EE76D5:70"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "SMBF_* static memory bus (shared: LAN9220 register/FIFO port + the USB",
+     "shell_dir": "out"
+    },
+    "SMBM_nWAIT": {
+     "shell_port": "SMBM_nWAIT",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:340",
+      "shell_top@0x44EE76D5:109"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {},
+     "function": "MCC-facing tie-offs (board-manager handover Lane D, D1). MPS3 TRM",
+     "shell_dir": "out"
+    },
+    "UART_RX_F[2]": {
+     "shell_port": "MB_UART_RXD",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:243",
+      "shell_top@0x44EE76D5:76"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "MicroBlaze bring-up/console UART",
+     "shell_dir": "in"
+    },
+    "UART_TX_F[2]": {
+     "shell_port": "MB_UART_TXD",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:241",
+      "shell_top@0x44EE76D5:75"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "MicroBlaze bring-up/console UART",
+     "shell_dir": "out"
+    },
+    "USD_CLK": {
+     "shell_port": "USD_CLK",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:364",
+      "shell_top@0x44EE76D5:120"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {},
+     "function": "USER microSD slot (D13; usd_spi_0 @0x44A4_0000 in SPI mode)",
+     "shell_dir": "out"
+    },
+    "USD_CMD": {
+     "shell_port": "USD_CMD",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:366",
+      "shell_top@0x44EE76D5:121"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLTYPE": "PULLUP"
+     },
+     "function": "USER microSD slot (D13; usd_spi_0 @0x44A4_0000 in SPI mode)",
+     "shell_dir": "inout"
+    },
+    "USD_DAT[0]": {
+     "shell_port": "USD_DAT[0]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:369",
+      "shell_top@0x44EE76D5:122"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLTYPE": "PULLUP"
+     },
+     "function": "USER microSD slot (D13; usd_spi_0 @0x44A4_0000 in SPI mode)",
+     "shell_dir": "inout"
+    },
+    "USD_DAT[1]": {
+     "shell_port": "USD_DAT[1]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:370",
+      "shell_top@0x44EE76D5:122"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLTYPE": "PULLUP"
+     },
+     "function": "USER microSD slot (D13; usd_spi_0 @0x44A4_0000 in SPI mode)",
+     "shell_dir": "inout"
+    },
+    "USD_DAT[2]": {
+     "shell_port": "USD_DAT[2]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:371",
+      "shell_top@0x44EE76D5:122"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLTYPE": "PULLUP"
+     },
+     "function": "USER microSD slot (D13; usd_spi_0 @0x44A4_0000 in SPI mode)",
+     "shell_dir": "inout"
+    },
+    "USD_DAT[3]": {
+     "shell_port": "USD_DAT[3]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:372",
+      "shell_top@0x44EE76D5:122"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLTYPE": "PULLUP"
+     },
+     "function": "USER microSD slot (D13; usd_spi_0 @0x44A4_0000 in SPI mode)",
+     "shell_dir": "inout"
+    },
+    "USD_NCD": {
+     "shell_port": "USD_NCD",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:381",
+      "shell_top@0x44EE76D5:123"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {
+      "PULLTYPE": "PULLUP"
+     },
+     "function": "USER microSD slot (D13; usd_spi_0 @0x44A4_0000 in SPI mode)",
+     "shell_dir": "in"
+    },
+    "USER_SW[0]": {
+     "shell_port": "USER_SW[0]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:90",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_SW[1]": {
+     "shell_port": "USER_SW[1]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:91",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_SW[2]": {
+     "shell_port": "USER_SW[2]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:92",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_SW[3]": {
+     "shell_port": "USER_SW[3]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:93",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_SW[4]": {
+     "shell_port": "USER_SW[4]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:94",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_SW[5]": {
+     "shell_port": "USER_SW[5]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:95",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_SW[6]": {
+     "shell_port": "USER_SW[6]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:96",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_SW[7]": {
+     "shell_port": "USER_SW[7]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:97",
+      "shell_top@0x44EE76D5:57"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_SW[7:0]",
+     "shell_dir": "in"
+    },
+    "USER_nLED[0]": {
+     "shell_port": "USER_nLED[0]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:74",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nLED[1]": {
+     "shell_port": "USER_nLED[1]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:75",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nLED[2]": {
+     "shell_port": "USER_nLED[2]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:76",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nLED[3]": {
+     "shell_port": "USER_nLED[3]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:77",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nLED[4]": {
+     "shell_port": "USER_nLED[4]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:78",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nLED[5]": {
+     "shell_port": "USER_nLED[5]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:79",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nLED[6]": {
+     "shell_port": "USER_nLED[6]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:80",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nLED[7]": {
+     "shell_port": "USER_nLED[7]",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:81",
+      "shell_top@0x44EE76D5:56"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "USER_nLED[7:0] (active-low)",
+     "shell_dir": "out"
+    },
+    "USER_nPB[0]": {
+     "shell_port": "USER_nPB0",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:58",
+      "shell_top@0x44EE76D5:49"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "Push-button USER_nPB[0] (active-low)",
+     "shell_dir": "in"
+    },
+    "USER_nPB[1]": {
+     "shell_port": "USER_nPB1",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:67",
+      "shell_top@0x44EE76D5:50"
+     ],
+     "iostandard": "LVCMOS18",
+     "props": {},
+     "function": "Push-button USER_nPB[1] (active-low, AT32)",
+     "shell_dir": "in"
+    },
+    "WDOG_RREQ": {
+     "shell_port": "WDOG_RREQ",
+     "src": [
+      "mps3_harness_xdc@0x44EE76D5:342",
+      "shell_top@0x44EE76D5:110"
+     ],
+     "iostandard": "LVCMOS33",
+     "props": {},
+     "function": "MCC-facing tie-offs (board-manager handover Lane D, D1). MPS3 TRM",
+     "shell_dir": "out"
+    }
+   },
+   "free": [
+    "AUD_LRCK",
+    "AUD_MCLK",
+    "AUD_SCL",
+    "AUD_SCLK",
+    "AUD_SDA",
+    "AUD_SDIN",
+    "AUD_SDOUT",
+    "AUD_nRST",
+    "CB_RUN",
+    "CB_nPOR",
+    "CB_nRST",
+    "CFG_CLK",
+    "CFG_DATAIN",
+    "CFG_LOAD",
+    "CFG_WnR",
+    "CFG_nRST",
+    "CLCD_TNC",
+    "CS_TCK",
+    "CS_TDI",
+    "CS_TDO",
+    "CS_TMS",
+    "CS_T_CLK",
+    "CS_T_CTL",
+    "CS_T_D[0]",
+    "CS_T_D[1]",
+    "CS_T_D[2]",
+    "CS_T_D[3]",
+    "CS_T_D[4]",
+    "CS_T_D[5]",
+    "CS_T_D[6]",
+    "CS_T_D[7]",
+    "CS_T_D[8]",
+    "CS_T_D[9]",
+    "CS_T_D[10]",
+    "CS_T_D[11]",
+    "CS_T_D[12]",
+    "CS_T_D[13]",
+    "CS_T_D[14]",
+    "CS_T_D[15]",
+    "CS_nDET",
+    "CS_nSRST",
+    "CS_nTRST",
+    "EMMC_CLK",
+    "EMMC_CMD",
+    "EMMC_DAT[0]",
+    "EMMC_DAT[1]",
+    "EMMC_DAT[2]",
+    "EMMC_DAT[3]",
+    "EMMC_DAT[4]",
+    "EMMC_DAT[5]",
+    "EMMC_DAT[6]",
+    "EMMC_DAT[7]",
+    "EMMC_DS",
+    "EMMC_nRST",
+    "HDMI_CSCL",
+    "HDMI_CSDA",
+    "HDMI_INT",
+    "IOFPGA_NRST",
+    "IOFPGA_NSPIR",
+    "MMB_DATA[0]",
+    "MMB_DATA[1]",
+    "MMB_DATA[2]",
+    "MMB_DATA[3]",
+    "MMB_DATA[4]",
+    "MMB_DATA[5]",
+    "MMB_DATA[6]",
+    "MMB_DATA[7]",
+    "MMB_DATA[8]",
+    "MMB_DATA[9]",
+    "MMB_DATA[10]",
+    "MMB_DATA[11]",
+    "MMB_DATA[12]",
+    "MMB_DATA[13]",
+    "MMB_DATA[14]",
+    "MMB_DATA[15]",
+    "MMB_DATA[16]",
+    "MMB_DATA[17]",
+    "MMB_DATA[18]",
+    "MMB_DATA[19]",
+    "MMB_DATA[20]",
+    "MMB_DATA[21]",
+    "MMB_DATA[22]",
+    "MMB_DATA[23]",
+    "MMB_DE",
+    "MMB_HS",
+    "MMB_IDCLK",
+    "MMB_SCK",
+    "MMB_SD[0]",
+    "MMB_SD[1]",
+    "MMB_SD[2]",
+    "MMB_SD[3]",
+    "MMB_VS",
+    "MMB_WS",
+    "OSCCLK[0]",
+    "OSCCLK[2]",
+    "OSCCLK[3]",
+    "OSCCLK[4]",
+    "OSCCLK[5]",
+    "PB_IRQ",
+    "SH0_IO[0]",
+    "SH0_IO[1]",
+    "SH0_IO[2]",
+    "SH0_IO[3]",
+    "SH0_IO[4]",
+    "SH0_IO[5]",
+    "SH0_IO[6]",
+    "SH0_IO[7]",
+    "SH0_IO[8]",
+    "SH0_IO[9]",
+    "SH0_IO[10]",
+    "SH0_IO[11]",
+    "SH0_IO[12]",
+    "SH0_IO[13]",
+    "SH0_IO[14]",
+    "SH0_IO[15]",
+    "SH0_IO[16]",
+    "SH0_IO[17]",
+    "SH1_IO[0]",
+    "SH1_IO[1]",
+    "SH1_IO[2]",
+    "SH1_IO[3]",
+    "SH1_IO[4]",
+    "SH1_IO[5]",
+    "SH1_IO[6]",
+    "SH1_IO[7]",
+    "SH1_IO[8]",
+    "SH1_IO[9]",
+    "SH1_IO[10]",
+    "SH1_IO[11]",
+    "SH1_IO[12]",
+    "SH1_IO[13]",
+    "SH1_IO[14]",
+    "SH1_IO[15]",
+    "SH1_IO[16]",
+    "SH1_IO[17]",
+    "SH_ADC_CK",
+    "SH_ADC_CS",
+    "SH_ADC_DI",
+    "SH_ADC_DO",
+    "SH_nRST",
+    "SMBM_A[16]",
+    "SMBM_A[17]",
+    "SMBM_A[18]",
+    "SMBM_A[19]",
+    "SMBM_A[20]",
+    "SMBM_A[21]",
+    "SMBM_A[22]",
+    "SMBM_A[23]",
+    "SMBM_A[24]",
+    "SMBM_A[25]",
+    "SMBM_CLK",
+    "SMBM_D[0]",
+    "SMBM_D[1]",
+    "SMBM_D[2]",
+    "SMBM_D[3]",
+    "SMBM_D[4]",
+    "SMBM_D[5]",
+    "SMBM_D[6]",
+    "SMBM_D[7]",
+    "SMBM_D[8]",
+    "SMBM_D[9]",
+    "SMBM_D[10]",
+    "SMBM_D[11]",
+    "SMBM_D[12]",
+    "SMBM_D[13]",
+    "SMBM_D[14]",
+    "SMBM_D[15]",
+    "SMBM_nBL[0]",
+    "SMBM_nBL[1]",
+    "SMBM_nE[1]",
+    "SMBM_nE[2]",
+    "SMBM_nE[3]",
+    "SMBM_nE[4]",
+    "SMBM_nOE",
+    "SMBM_nWE",
+    "UART_RX_F[0]",
+    "UART_RX_F[1]",
+    "UART_RX_F[3]",
+    "UART_TX_F[0]",
+    "UART_TX_F[1]",
+    "UART_TX_F[3]",
+    "USB_DACK",
+    "USB_DREQ",
+    "USB_INT",
+    "USB_nCS",
+    "USER_nLED[8]",
+    "USER_nLED[9]"
+   ],
+   "clocks": [
+    {
+     "port": "OSCCLK1",
+     "net": "OSCCLK[1]",
+     "name": "dut_clk",
+     "period_ns": 20.0,
+     "src": "mps3_harness_xdc@0x44EE76D5:44"
+    }
+   ],
+   "rp_boundary": {
+    "totals": {
+     "ports": 47,
+     "bits": 148,
+     "decoupler_intfs": 20
+    },
+    "ngpio": 16,
+    "direction_convention": "shell_dir is the shell's view (O = shell drives); rm_dir is the RM's port direction",
+    "groups": [
+     {
+      "id": "clkrst",
+      "signals": [
+       {
+        "name": "dut_clk",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": "dut",
+        "note": "DRP-reconfigurable DUT system clock",
+        "src": [
+         "partition_pins:44",
+         "rp_dut_stub:24"
+        ]
+       },
+       {
+        "name": "dut_resetn",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": "dut",
+        "note": "reset #1 — DUT system reset (host register)",
+        "src": [
+         "partition_pins:44",
+         "rp_dut_stub:25"
+        ]
+       },
+       {
+        "name": "rp_resetn",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": "dut",
+        "note": "reset #2 — reconfig reset, held through swap",
+        "src": [
+         "partition_pins:44",
+         "rp_dut_stub:26"
+        ]
+       },
+       {
+        "name": "dbg_resetn",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": "dut",
+        "note": "reset #3 — debug/SRST from OpenOCD path",
+        "src": [
+         "partition_pins:44",
+         "rp_dut_stub:27"
+        ]
+       }
+      ]
+     },
+     {
+      "id": "jtag",
+      "signals": [
+       {
+        "name": "jtag_tck",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "TCK → DUT dap_swclktck",
+        "src": [
+         "partition_pins:60",
+         "rp_dut_stub:29"
+        ]
+       },
+       {
+        "name": "jtag_tms",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "TMS → DUT dap_swditms",
+        "src": [
+         "partition_pins:60",
+         "rp_dut_stub:30"
+        ]
+       },
+       {
+        "name": "jtag_tdi",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "TDI → DUT dap_tdi",
+        "src": [
+         "partition_pins:60",
+         "rp_dut_stub:31"
+        ]
+       },
+       {
+        "name": "jtag_tdo",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "TDO ← DUT dap_tdo",
+        "src": [
+         "partition_pins:60",
+         "rp_dut_stub:32"
+        ]
+       }
+      ]
+     },
+     {
+      "id": "dbgbscan",
+      "signals": [
+       {
+        "name": "dbg_bscan_bscanid_en",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN id-enable from debug_bridge_0 m0_bscan (ILA-over-XVC)",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:36"
+        ]
+       },
+       {
+        "name": "dbg_bscan_capture",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN CAPTURE from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:37"
+        ]
+       },
+       {
+        "name": "dbg_bscan_drck",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN DRCK (gated TCK) from debug_bridge_0 m0_bscan; 80 ns clock in RM OOC XDCs",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:38"
+        ]
+       },
+       {
+        "name": "dbg_bscan_reset",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN RESET (TAP test-logic-reset) from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:39"
+        ]
+       },
+       {
+        "name": "dbg_bscan_runtest",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN RUNTEST from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:40"
+        ]
+       },
+       {
+        "name": "dbg_bscan_sel",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN SEL (user instruction selected) from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:41"
+        ]
+       },
+       {
+        "name": "dbg_bscan_shift",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN SHIFT from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:42"
+        ]
+       },
+       {
+        "name": "dbg_bscan_tck",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN TCK from debug_bridge_0 m0_bscan, 80 ns (12.5 MHz) off a static BUFGCE",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:43"
+        ]
+       },
+       {
+        "name": "dbg_bscan_tdi",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN TDI from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:44"
+        ]
+       },
+       {
+        "name": "dbg_bscan_tms",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN TMS from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:45"
+        ]
+       },
+       {
+        "name": "dbg_bscan_update",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "BSCAN UPDATE from debug_bridge_0 m0_bscan",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:46"
+        ]
+       },
+       {
+        "name": "dbg_bscan_tdo",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "BSCAN TDO from the RM's debug_bridge (mode 1); 0 when no RM hub",
+        "src": [
+         "partition_pins:88",
+         "rp_dut_stub:47"
+        ]
+       }
+      ]
+     },
+     {
+      "id": "eth",
+      "signals": [
+       {
+        "name": "phy_rmii_ref_clk",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "50 MHz REF_CLK sourced by shell (DUT = ref-in)",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:49"
+        ]
+       },
+       {
+        "name": "phy_rmii_crs_dv",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "carrier-sense / RX-valid to DUT MAC",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:50"
+        ]
+       },
+       {
+        "name": "phy_rmii_rxd",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 2,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "RX data to DUT MAC",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:51"
+        ]
+       },
+       {
+        "name": "phy_rmii_txd",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 2,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "TX data from DUT MAC",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:52"
+        ]
+       },
+       {
+        "name": "phy_rmii_tx_en",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "TX enable from DUT MAC",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:53"
+        ]
+       },
+       {
+        "name": "mdc",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "MDIO clock from DUT (DUT = MDIO master)",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:54"
+        ]
+       },
+       {
+        "name": "mdio_o",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "MDIO out from DUT",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:55"
+        ]
+       },
+       {
+        "name": "mdio_oe",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "MDIO output-enable from DUT",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:56"
+        ]
+       },
+       {
+        "name": "mdio_i",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "MDIO in to DUT (virtual-PHY register model reply)",
+        "src": [
+         "partition_pins:106",
+         "rp_dut_stub:57"
+        ]
+       }
+      ]
+     },
+     {
+      "id": "uart",
+      "signals": [
+       {
+        "name": "uart_tx_tdata",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 8,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "DUT → host console bytes",
+        "src": [
+         "partition_pins:121",
+         "rp_dut_stub:59"
+        ]
+       },
+       {
+        "name": "uart_tx_tvalid",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "",
+        "src": [
+         "partition_pins:121",
+         "rp_dut_stub:60"
+        ]
+       },
+       {
+        "name": "uart_tx_tready",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "",
+        "src": [
+         "partition_pins:121",
+         "rp_dut_stub:61"
+        ]
+       },
+       {
+        "name": "uart_rx_tdata",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 8,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "host → DUT console bytes",
+        "src": [
+         "partition_pins:121",
+         "rp_dut_stub:62"
+        ]
+       },
+       {
+        "name": "uart_rx_tvalid",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "",
+        "src": [
+         "partition_pins:121",
+         "rp_dut_stub:63"
+        ]
+       },
+       {
+        "name": "uart_rx_tready",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "",
+        "src": [
+         "partition_pins:121",
+         "rp_dut_stub:64"
+        ]
+       },
+       {
+        "name": "swo",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "Cortex-M SWO/ITM single-wire trace (relayed like UART)",
+        "src": [
+         "partition_pins:121",
+         "rp_dut_stub:65"
+        ]
+       }
+      ]
+     },
+     {
+      "id": "status",
+      "signals": [
+       {
+        "name": "rm_id",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 32,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "RM identity register — read back for RM-load verify",
+        "src": [
+         "partition_pins:134",
+         "rp_dut_stub:67"
+        ]
+       },
+       {
+        "name": "dut_lockup",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "core lockup indicator (telemetry/watchdog)",
+        "src": [
+         "partition_pins:134",
+         "rp_dut_stub:68"
+        ]
+       },
+       {
+        "name": "irq_out",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "spare DUT IRQ/event to shell (optional)",
+        "src": [
+         "partition_pins:134",
+         "rp_dut_stub:69"
+        ]
+       }
+      ]
+     },
+     {
+      "id": "gpio",
+      "signals": [
+       {
+        "name": "dut_gpio_o",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 16,
+        "width_symbol": "NGPIO",
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "DUT drive value → shell → board pad",
+        "src": [
+         "partition_pins:148",
+         "rp_dut_stub:71"
+        ]
+       },
+       {
+        "name": "dut_gpio_oe",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 16,
+        "width_symbol": "NGPIO",
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "DUT output-enable (per-bit tristate)",
+        "src": [
+         "partition_pins:148",
+         "rp_dut_stub:72"
+        ]
+       },
+       {
+        "name": "dut_gpio_i",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 16,
+        "width_symbol": "NGPIO",
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "board pad → shell → DUT sample",
+        "src": [
+         "partition_pins:148",
+         "rp_dut_stub:73"
+        ]
+       }
+      ]
+     },
+     {
+      "id": "qspi",
+      "signals": [
+       {
+        "name": "qspi_sclk",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "SPI clock, RP → shell → SCLK pad (AT25)",
+        "src": [
+         "partition_pins:172",
+         "rp_dut_stub:77"
+        ]
+       },
+       {
+        "name": "qspi_csn",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 1,
+        "width_symbol": null,
+        "clamp": 1,
+        "decoupled": true,
+        "domain": null,
+        "note": "chip-select (active-low), RP → shell → nCS pad (AT24)",
+        "src": [
+         "partition_pins:172",
+         "rp_dut_stub:78"
+        ]
+       },
+       {
+        "name": "qspi_io_o",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 4,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "IO0-3 drive value, RP → shell → data pads",
+        "src": [
+         "partition_pins:172",
+         "rp_dut_stub:79"
+        ]
+       },
+       {
+        "name": "qspi_io_oe",
+        "shell_dir": "I",
+        "rm_dir": "out",
+        "width": 4,
+        "width_symbol": null,
+        "clamp": 0,
+        "decoupled": true,
+        "domain": null,
+        "note": "IO0-3 per-lane output-enable, RP → shell (SoC `QSPI_IO_e`)",
+        "src": [
+         "partition_pins:172",
+         "rp_dut_stub:80"
+        ]
+       },
+       {
+        "name": "qspi_io_i",
+        "shell_dir": "O",
+        "rm_dir": "in",
+        "width": 4,
+        "width_symbol": null,
+        "clamp": null,
+        "decoupled": false,
+        "domain": null,
+        "note": "IO0-3 sampled at the pad, shell → RP (SoC `QSPI_IO_i`)",
+        "src": [
+         "partition_pins:172",
+         "rp_dut_stub:81"
+        ]
+       }
+      ]
+     }
+    ],
+    "src": [
+     "partition_pins:1",
+     "boundary_yaml:1",
+     "rp_dut_stub:1"
+    ]
+   },
+   "boundary_clocks": [
+    {
+     "signal": "dut_clk",
+     "period_ns": 20.0,
+     "waveform": [
+      0.0,
+      10.0
+     ],
+     "drp": true,
+     "declare": "always",
+     "async_group": "dut_clk",
+     "static_clock": "clk_out1_shell_bd_clk_wiz_dut_0",
+     "src": "partition_timing_md:48"
+    },
+    {
+     "signal": "phy_rmii_ref_clk",
+     "period_ns": 20.0,
+     "waveform": [
+      0.0,
+      10.0
+     ],
+     "drp": false,
+     "declare": "when_timed",
+     "async_group": "phy_rmii_ref_clk",
+     "static_clock": "clk_out2_shell_bd_clk_wiz_shell_0",
+     "src": "partition_timing_md:49"
+    },
+    {
+     "signal": "dbg_bscan_tck",
+     "period_ns": 80.0,
+     "waveform": [
+      0.0,
+      40.0
+     ],
+     "drp": false,
+     "declare": "always",
+     "async_group": "dbg_bscan",
+     "static_clock": "debug_bridge_0 soft-BSCAN TCK (generated, static BUFGCE)",
+     "src": "partition_timing_md:51"
+    },
+    {
+     "signal": "dbg_bscan_drck",
+     "period_ns": 80.0,
+     "waveform": [
+      0.0,
+      40.0
+     ],
+     "drp": false,
+     "ooc_only": true,
+     "declare": "always",
+     "async_group": "dbg_bscan",
+     "static_clock": "(gated TCK; no clock object in the static)",
+     "src": "partition_timing_md:52"
+    },
+    {
+     "signal": "jtag_tck",
+     "period_ns": 100.0,
+     "waveform": [
+      0.0,
+      50.0
+     ],
+     "drp": false,
+     "ooc_only": true,
+     "declare": "on_request",
+     "async_group": "jtag_tck",
+     "static_clock": "(none: firmware bit-banged, kHz-class; an OOC-only clock for SW-DP logic)",
+     "src": "partition_timing_md:50"
+    }
+   ],
+   "connectivity": [
+    {
+     "signal": "dut_clk",
+     "group": "clkrst",
+     "bits": null,
+     "via": "MMCM DRP at 0x44AB_0000; `harness-manager clock`",
+     "rows": [
+      {
+       "bit": null,
+       "static": "clk_wiz_dut MMCM clk_out1 (DRP-reconfigurable, default 50 MHz)",
+       "board_net": "OSCCLK[1]",
+       "pin": "AK16"
+      }
+     ],
+     "src": "partition_timing_md:48"
+    },
+    {
+     "signal": "dut_resetn",
+     "group": "clkrst",
+     "bits": null,
+     "via": "`harness-manager reset dut`",
+     "rows": [
+      {
+       "bit": null,
+       "static": "dut_clkrst: DUT system reset (host register)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_pins:48"
+    },
+    {
+     "signal": "rp_resetn",
+     "group": "clkrst",
+     "bits": null,
+     "via": "every partial load",
+     "rows": [
+      {
+       "bit": null,
+       "static": "dfx_ctl: reconfiguration reset, held through a swap",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_pins:49"
+    },
+    {
+     "signal": "dbg_resetn",
+     "group": "clkrst",
+     "bits": null,
+     "via": "OpenOCD reset over TCP 6921",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug/SRST from the OpenOCD path",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_pins:50"
+    },
+    {
+     "signal": "jtag_tck",
+     "group": "jtag",
+     "bits": null,
+     "via": "OpenOCD remote_bitbang on TCP 6921",
+     "rows": [
+      {
+       "bit": null,
+       "static": "jtag_bb CSR bit-banger (JTAGBB at 0x44A7_0000)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:364"
+    },
+    {
+     "signal": "jtag_tms",
+     "group": "jtag",
+     "bits": null,
+     "via": "OpenOCD remote_bitbang on TCP 6921",
+     "rows": [
+      {
+       "bit": null,
+       "static": "jtag_bb CSR bit-banger (JTAGBB at 0x44A7_0000)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_regmap_md@0x44EE76D5:172"
+    },
+    {
+     "signal": "jtag_tdi",
+     "group": "jtag",
+     "bits": null,
+     "via": "OpenOCD remote_bitbang on TCP 6921",
+     "rows": [
+      {
+       "bit": null,
+       "static": "jtag_bb CSR bit-banger (JTAGBB at 0x44A7_0000)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_regmap_md@0x44EE76D5:172"
+    },
+    {
+     "signal": "jtag_tdo",
+     "group": "jtag",
+     "bits": null,
+     "via": "OpenOCD remote_bitbang on TCP 6921",
+     "rows": [
+      {
+       "bit": null,
+       "static": "jtag_bb CSR bit-banger (sampled TDO; decoupler clamps 0)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_regmap_md@0x44EE76D5:172"
+    },
+    {
+     "signal": "dbg_bscan_bscanid_en",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_capture",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_drck",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_reset",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_runtest",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_sel",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_shift",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_tck",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_tdi",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_tms",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_update",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "dbg_bscan_tdo",
+     "group": "dbgbscan",
+     "bits": null,
+     "via": "Xilinx Virtual Cable on TCP 2542 (an RM with a mode-1 debug_bridge hub + ILAs)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "debug_bridge_0 (mode 2, AXI-to-BSCAN) m0_bscan master",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:362"
+    },
+    {
+     "signal": "phy_rmii_ref_clk",
+     "group": "eth",
+     "bits": null,
+     "via": "always running (also the RM debug-hub clock)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "clk_wiz_shell clk_out2, fixed 50 MHz RMII reference",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_timing_md:49"
+    },
+    {
+     "signal": "phy_rmii_crs_dv",
+     "group": "eth",
+     "bits": null,
+     "via": "shell lab tools (`harness-manager lab link|macgen|dutrx`)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the shell's in-fabric virtual PHY (eth_mac_test_subsystem_0)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:113"
+    },
+    {
+     "signal": "phy_rmii_rxd",
+     "group": "eth",
+     "bits": [
+      1,
+      0
+     ],
+     "via": "shell lab tools (`harness-manager lab macgen`)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the shell's in-fabric virtual PHY (eth_mac_test_subsystem_0)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:113"
+    },
+    {
+     "signal": "phy_rmii_txd",
+     "group": "eth",
+     "bits": [
+      1,
+      0
+     ],
+     "via": "shell lab tools (`harness-manager lab dutrx`)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the shell's in-fabric virtual PHY (eth_mac_test_subsystem_0)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:113"
+    },
+    {
+     "signal": "phy_rmii_tx_en",
+     "group": "eth",
+     "bits": null,
+     "via": "shell lab tools (`harness-manager lab dutrx`)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the shell's in-fabric virtual PHY (eth_mac_test_subsystem_0)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:113"
+    },
+    {
+     "signal": "mdc",
+     "group": "eth",
+     "bits": null,
+     "via": "-",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the virtual PHY's MDIO register model (mdio_phy_model)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_pins:117"
+    },
+    {
+     "signal": "mdio_o",
+     "group": "eth",
+     "bits": null,
+     "via": "-",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the virtual PHY's MDIO register model (mdio_phy_model)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_pins:117"
+    },
+    {
+     "signal": "mdio_oe",
+     "group": "eth",
+     "bits": null,
+     "via": "-",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the virtual PHY's MDIO register model (mdio_phy_model)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_pins:117"
+    },
+    {
+     "signal": "mdio_i",
+     "group": "eth",
+     "bits": null,
+     "via": "-",
+     "rows": [
+      {
+       "bit": null,
+       "static": "the virtual PHY's MDIO register model (mdio_phy_model)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "partition_pins:117"
+    },
+    {
+     "signal": "uart_tx_tdata",
+     "group": "uart",
+     "bits": [
+      7,
+      0
+     ],
+     "via": "console uart0 on TCP 6930",
+     "rows": [
+      {
+       "bit": null,
+       "static": "uart_bridge_0 async FIFO -> MicroBlaze",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:365"
+    },
+    {
+     "signal": "uart_tx_tvalid",
+     "group": "uart",
+     "bits": null,
+     "via": "console uart0 on TCP 6930",
+     "rows": [
+      {
+       "bit": null,
+       "static": "uart_bridge_0 async FIFO -> MicroBlaze",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:298"
+    },
+    {
+     "signal": "uart_tx_tready",
+     "group": "uart",
+     "bits": null,
+     "via": "console uart0 on TCP 6930",
+     "rows": [
+      {
+       "bit": null,
+       "static": "uart_bridge_0 async FIFO -> MicroBlaze",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:298"
+    },
+    {
+     "signal": "uart_rx_tdata",
+     "group": "uart",
+     "bits": [
+      7,
+      0
+     ],
+     "via": "console uart0 on TCP 6930",
+     "rows": [
+      {
+       "bit": null,
+       "static": "uart_bridge_0 async FIFO <- MicroBlaze",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:298"
+    },
+    {
+     "signal": "uart_rx_tvalid",
+     "group": "uart",
+     "bits": null,
+     "via": "console uart0 on TCP 6930",
+     "rows": [
+      {
+       "bit": null,
+       "static": "uart_bridge_0 async FIFO <- MicroBlaze",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:298"
+    },
+    {
+     "signal": "uart_rx_tready",
+     "group": "uart",
+     "bits": null,
+     "via": "console uart0 on TCP 6930",
+     "rows": [
+      {
+       "bit": null,
+       "static": "uart_bridge_0 async FIFO <- MicroBlaze",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_bd_tcl@0x44EE76D5:298"
+    },
+    {
+     "signal": "swo",
+     "group": "uart",
+     "bits": null,
+     "via": "console swo on TCP 6932",
+     "rows": [
+      {
+       "bit": null,
+       "static": "swo_uart_rx in uart_bridge_0",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "net_protocol_md@0x44EE76D5:367"
+    },
+    {
+     "signal": "rm_id",
+     "group": "status",
+     "bits": [
+      31,
+      0
+     ],
+     "via": "`harness-manager info` (rm_id)",
+     "rows": [
+      {
+       "bit": null,
+       "static": "dfx_ctl: DFXCTL.RM_ID (0x44A1_0010), read back after every load",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_regmap_md@0x44EE76D5:246"
+    },
+    {
+     "signal": "dut_lockup",
+     "group": "status",
+     "bits": null,
+     "via": "shell diag",
+     "rows": [
+      {
+       "bit": null,
+       "static": "dfx_ctl: DFXCTL.RM_STATUS[1] (0x44A1_0014)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_regmap_md@0x44EE76D5:247"
+    },
+    {
+     "signal": "irq_out",
+     "group": "status",
+     "bits": null,
+     "via": "shell diag",
+     "rows": [
+      {
+       "bit": null,
+       "static": "dfx_ctl: DFXCTL.RM_STATUS[2] (0x44A1_0014, 2-FF synced)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_regmap_md@0x44EE76D5:247"
+    },
+    {
+     "signal": "dut_gpio_o",
+     "group": "gpio",
+     "bits": [
+      7,
+      0
+     ],
+     "via": "the user LEDs",
+     "rows": [
+      {
+       "bit": 0,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[0]",
+       "pin": "AU32"
+      },
+      {
+       "bit": 1,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[1]",
+       "pin": "AU30"
+      },
+      {
+       "bit": 2,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[2]",
+       "pin": "AU31"
+      },
+      {
+       "bit": 3,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[3]",
+       "pin": "AR32"
+      },
+      {
+       "bit": 4,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[4]",
+       "pin": "AT33"
+      },
+      {
+       "bit": 5,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[5]",
+       "pin": "AW30"
+      },
+      {
+       "bit": 6,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[6]",
+       "pin": "AW31"
+      },
+      {
+       "bit": 7,
+       "static": "board_gpio pads [7:0] -> USER_nLED[7:0] (lit when o & oe)",
+       "board_net": "USER_nLED[7]",
+       "pin": "AR30"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:607"
+    },
+    {
+     "signal": "dut_gpio_oe",
+     "group": "gpio",
+     "bits": [
+      7,
+      0
+     ],
+     "via": "the user LEDs",
+     "rows": [
+      {
+       "bit": 0,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[0]",
+       "pin": "AU32"
+      },
+      {
+       "bit": 1,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[1]",
+       "pin": "AU30"
+      },
+      {
+       "bit": 2,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[2]",
+       "pin": "AU31"
+      },
+      {
+       "bit": 3,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[3]",
+       "pin": "AR32"
+      },
+      {
+       "bit": 4,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[4]",
+       "pin": "AT33"
+      },
+      {
+       "bit": 5,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[5]",
+       "pin": "AW30"
+      },
+      {
+       "bit": 6,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[6]",
+       "pin": "AW31"
+      },
+      {
+       "bit": 7,
+       "static": "board_gpio pads [7:0] output enable (LED lit when o & oe)",
+       "board_net": "USER_nLED[7]",
+       "pin": "AR30"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:606"
+    },
+    {
+     "signal": "dut_gpio_i",
+     "group": "gpio",
+     "bits": [
+      7,
+      0
+     ],
+     "via": "-",
+     "rows": [
+      {
+       "bit": null,
+       "static": "board_gpio pads [7:0] read back the LED drive (no input path)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:608"
+    },
+    {
+     "signal": "dut_gpio_i",
+     "group": "gpio",
+     "bits": [
+      15,
+      8
+     ],
+     "via": "the DIP switches",
+     "rows": [
+      {
+       "bit": 8,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[0]",
+       "pin": "BA29"
+      },
+      {
+       "bit": 9,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[1]",
+       "pin": "BB29"
+      },
+      {
+       "bit": 10,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[2]",
+       "pin": "BA32"
+      },
+      {
+       "bit": 11,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[3]",
+       "pin": "BA33"
+      },
+      {
+       "bit": 12,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[4]",
+       "pin": "BA30"
+      },
+      {
+       "bit": 13,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[5]",
+       "pin": "BB30"
+      },
+      {
+       "bit": 14,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[6]",
+       "pin": "AY33"
+      },
+      {
+       "bit": 15,
+       "static": "board_gpio pads [15:8] <- USER_SW[7:0] (DIP switches)",
+       "board_net": "USER_SW[7]",
+       "pin": "AY31"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:608"
+    },
+    {
+     "signal": "dut_gpio_o",
+     "group": "gpio",
+     "bits": [
+      15,
+      8
+     ],
+     "via": "`harness-manager lab display dut`",
+     "rows": [
+      {
+       "bit": 8,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[10]",
+       "pin": "AN17"
+      },
+      {
+       "bit": 9,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[11]",
+       "pin": "AP16"
+      },
+      {
+       "bit": 10,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[12]",
+       "pin": "AP18"
+      },
+      {
+       "bit": 11,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[13]",
+       "pin": "AR18"
+      },
+      {
+       "bit": 12,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[14]",
+       "pin": "AM16"
+      },
+      {
+       "bit": 13,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[15]",
+       "pin": "AN16"
+      },
+      {
+       "bit": 14,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[16]",
+       "pin": "AR17"
+      },
+      {
+       "bit": 15,
+       "static": "clcd_kvm display tunnel: 8080 data PD[7:0] -> CLCD_PD[17:10] while the DUT owns the panel",
+       "board_net": "CLCD_PD[17]",
+       "pin": "AR16"
+      }
+     ],
+     "src": "dut_display_tunnel_md:68"
+    },
+    {
+     "signal": "dut_gpio_oe",
+     "group": "gpio",
+     "bits": [
+      15,
+      8
+     ],
+     "via": "`harness-manager lab display dut`",
+     "rows": [
+      {
+       "bit": null,
+       "static": "clcd_kvm display tunnel: control byte (cs, wr, rs, rd, pd_oe, busy, req, spare)",
+       "board_net": null,
+       "pin": null
+      }
+     ],
+     "src": "dut_display_tunnel_md:72"
+    },
+    {
+     "signal": "qspi_sclk",
+     "group": "qspi",
+     "bits": null,
+     "via": "the QSPI flash",
+     "rows": [
+      {
+       "bit": null,
+       "static": "decoupler clamp (0) -> shell_top IOBUF -> SST26VF064B SCLK",
+       "board_net": "QSPI_SCLK",
+       "pin": "AT25"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:533"
+    },
+    {
+     "signal": "qspi_csn",
+     "group": "qspi",
+     "bits": null,
+     "via": "the QSPI flash",
+     "rows": [
+      {
+       "bit": null,
+       "static": "decoupler clamp (1 = deselected) -> shell_top IOBUF -> SST26VF064B nCS",
+       "board_net": "QSPI_nCS",
+       "pin": "AT24"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:534"
+    },
+    {
+     "signal": "qspi_io_o",
+     "group": "qspi",
+     "bits": [
+      3,
+      0
+     ],
+     "via": "the QSPI flash",
+     "rows": [
+      {
+       "bit": 0,
+       "static": "decoupler clamp (0) -> shell_top IOBUF -> SST26VF064B IO0",
+       "board_net": "QSPI_D0",
+       "pin": "AU24"
+      },
+      {
+       "bit": 1,
+       "static": "decoupler clamp (0) -> shell_top IOBUF -> SST26VF064B IO1",
+       "board_net": "QSPI_D1",
+       "pin": "AV24"
+      },
+      {
+       "bit": 2,
+       "static": "decoupler clamp (0) -> shell_top IOBUF -> SST26VF064B IO2",
+       "board_net": "QSPI_D2",
+       "pin": "AV21"
+      },
+      {
+       "bit": 3,
+       "static": "decoupler clamp (0) -> shell_top IOBUF -> SST26VF064B IO3",
+       "board_net": "QSPI_D3",
+       "pin": "AV22"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:535"
+    },
+    {
+     "signal": "qspi_io_oe",
+     "group": "qspi",
+     "bits": [
+      3,
+      0
+     ],
+     "via": "the QSPI flash",
+     "rows": [
+      {
+       "bit": 0,
+       "static": "decoupler clamp (0) -> shell_top IOBUF tristate for IO0",
+       "board_net": "QSPI_D0",
+       "pin": "AU24"
+      },
+      {
+       "bit": 1,
+       "static": "decoupler clamp (0) -> shell_top IOBUF tristate for IO1",
+       "board_net": "QSPI_D1",
+       "pin": "AV24"
+      },
+      {
+       "bit": 2,
+       "static": "decoupler clamp (0) -> shell_top IOBUF tristate for IO2",
+       "board_net": "QSPI_D2",
+       "pin": "AV21"
+      },
+      {
+       "bit": 3,
+       "static": "decoupler clamp (0) -> shell_top IOBUF tristate for IO3",
+       "board_net": "QSPI_D3",
+       "pin": "AV22"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:535"
+    },
+    {
+     "signal": "qspi_io_i",
+     "group": "qspi",
+     "bits": [
+      3,
+      0
+     ],
+     "via": "the QSPI flash",
+     "rows": [
+      {
+       "bit": 0,
+       "static": "pad sample of SST26VF064B IO0 (non-CDC pass-through, not decoupled)",
+       "board_net": "QSPI_D0",
+       "pin": "AU24"
+      },
+      {
+       "bit": 1,
+       "static": "pad sample of SST26VF064B IO1 (non-CDC pass-through, not decoupled)",
+       "board_net": "QSPI_D1",
+       "pin": "AV24"
+      },
+      {
+       "bit": 2,
+       "static": "pad sample of SST26VF064B IO2 (non-CDC pass-through, not decoupled)",
+       "board_net": "QSPI_D2",
+       "pin": "AV21"
+      },
+      {
+       "bit": 3,
+       "static": "pad sample of SST26VF064B IO3 (non-CDC pass-through, not decoupled)",
+       "board_net": "QSPI_D3",
+       "pin": "AV22"
+      }
+     ],
+     "src": "shell_top@0x44EE76D5:231"
+    }
+   ],
+   "pblock": {
+    "name": {
+     "value": "pblock_rp_dut",
+     "src": "dfx_floorplan_xdc:28"
+    },
+    "rp_instance": {
+     "value": "u_rp_dut",
+     "src": "dfx_floorplan_xdc:19"
+    },
+    "clock_regions": {
+     "value": [
+      "X2Y0",
+      "X3Y0",
+      "X2Y1",
+      "X3Y1"
+     ],
+     "src": "dfx_floorplan_xdc:73"
+    },
+    "slr": {
+     "value": "SLR0",
+     "src": "dryrun_slr_txt:6"
+    },
+    "site_types": {
+     "value": [
+      "SLICE",
+      "DSP48E2",
+      "RAMB18",
+      "RAMB36"
+     ],
+     "src": "dfx_floorplan_xdc:74"
+    },
+    "slice_range": {
+     "value": "SLICE_X48Y0:SLICE_X95Y119",
+     "src": "build_tcl:98"
+    },
+    "snapping_mode": {
+     "value": "ON",
+     "src": "dfx_floorplan_xdc:131"
+    },
+    "exclude_placement_contain_routing": {
+     "value": true,
+     "src": "services_partition_md:80"
+    },
+    "capacity": {
+     "value": {
+      "LUT": 42824,
+      "FF": 85648,
+      "CLB": 5353
+     },
+     "src": "services_partition_md:81"
+    },
+    "bram_tiles": {
+     "value": 144,
+     "src": "dfx_floorplan_xdc:70"
+    },
+    "reference_use": {
+     "value": "rm_nanosoc: 7,903 LUT (18.5%), 16.5 BRAM tiles (11.5%)",
+     "src": "dfx_floorplan_xdc:69"
+    },
+    "io_sites": {
+     "value": 0,
+     "src": "dfx_floorplan_xdc:58"
+    },
+    "no_clock_or_bscan_sites": {
+     "value": "no BUFG, BSCAN or IOB site: the RM may hold no clock buffer, BSCANE2 or pad",
+     "src": "handover_rm_ila_over_xvc_md:65"
+    },
+    "dut_clk_hd_clk_src": {
+     "value": "BUFGCE_X2Y47",
+     "src": "0x44ee76d5_readme_md:34"
+    },
+    "icap": {
+     "value": "CONFIG_SITE_X0Y0 (clock region X5Y1, SLR0)",
+     "src": "dryrun_slr_txt:8"
+    }
+   },
+   "fielded_src": "fielded_shell_md:11",
+   "notes": [
+    "DDR4 SODIMM (banks 49-51): 117 pins placed by fpga/shell/constraints/mbv/ddr4_pins.xdc (SHELL_CPU=mbv) are this shell's but not modelled: the Arm pinmap does not place them"
+   ]
   }
  }
 }

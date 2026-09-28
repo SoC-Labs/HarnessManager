@@ -7,7 +7,9 @@ Two kinds (docs/XDC_EXPORT.md has the full reference):
 - ``use``: the boundary groups the RM drives or reads, each with options:
   ``{"timed": true}`` (or a list of signals) keeps that group's data out of the
   false paths, for a group the RM times synchronously (a MAC's RMII data, a QSPI
-  controller). Groups not listed are tied off.
+  controller); ``{"tie": ["dut_lockup", "irq_out"]}`` names outputs of the group the
+  RM does not drive, which the skeleton ties to their safe-idle value. Groups not
+  listed are tied off.
 - ``clocks``: extra boundary clocks to declare (``"jtag_tck"``, ``"phy_rmii_ref_clk"``),
   or ``{"port", "period_ns"}`` objects; checked against the shell's clock contract.
 - ``ports`` or ``wrapper``: the RM's port list, inline or from an ANSI (System)Verilog
@@ -64,6 +66,13 @@ class Design:
     def timed(self, group: str) -> bool | list[str]:
         opt = self.use.get(group, {}).get("timed", False)
         return list(opt) if isinstance(opt, list) else bool(opt)
+
+    def tied(self, group: str) -> list[str]:
+        """Outputs of a USED group that the design does not drive (``{"tie": [...]}``): the
+        skeleton ties them to their safe-idle value, as it does a group the design does
+        not use (the built-in ``minimal`` uses ``status`` for ``rm_id`` only)."""
+        opt = self.use.get(group, {}).get("tie", [])
+        return [str(x) for x in opt] if isinstance(opt, list) else []
 
     @property
     def clocks(self) -> list[dict[str, Any]]:
