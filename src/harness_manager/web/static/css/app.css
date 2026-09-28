@@ -820,6 +820,19 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .pl.busy { color: var(--accent-text); }
 .pl-sep { color: var(--text-3); }
 .rebuilt-tag { color: var(--unk); border-style: dashed; border-color: var(--unk-border); background: var(--unk-soft); }
+/* LOCATE: the Identify icon on each sidebar card (beside the card's button, not inside it)
+   and in the Board tile. */
+.board-li { position: relative; }
+.locate-rail { position: absolute; right: 8px; bottom: 10px; }
+.locate-rail .locate-btn { height: 24px; width: 26px; }
+.locate-btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.locate-btn.blinking, .locate-btn.sending { opacity: 1; color: var(--accent-text); background: var(--accent-soft); }
+.locate-btn.wait { opacity: 0.6; }
+.locate-count { font-weight: 600; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.locate-tile { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.locate-line { font-size: 12.5px; }
+.locate-line.muted { color: var(--text-3); }
+.locate-note, .locate-by { font-size: 12px; color: var(--text-2); display: inline-flex; align-items: center; gap: 4px; }
 .identify { margin-top: 6px; }
 .identify .action-main { display: flex; align-items: center; flex-wrap: wrap; }
 .identify .btn { min-width: 0; }

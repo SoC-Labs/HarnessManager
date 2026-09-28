@@ -23,13 +23,14 @@ import {
 } from "../store.js";
 import { ActionRow, Card, Chip, Icon, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
 import { LiveDisplay } from "../display.js";        // LM4: the Live display, over the text mirror
+import { LocateButton } from "../locate.js";         // LOCATE: the Board tile's Identify
 
 const STATE_CACHE_MS = 1000;        // the daemon reuses a GET /panel answer this long
 const FRAME_CACHE_MS = 3000;        // ... and a GET /panel/frame answer this long
 const POLL_MS = 30000;              // a slow re-read while the page shows the panel
 const RETRIES = 2;                  // stale answers re-asked after an event, at most
 export const IDENTIFY_SECONDS = [5, 10, 20, 30];
-const IDENTIFY_DEFAULT_S = 10;
+const IDENTIFY_DEFAULT_S = 5;       // LOCATE: 5 s, as the sidebar's and the tile's button
 const TAPS_SHOWN = 5;
 export const REBUILT_TEXT = "rebuilt from what Harness Manager read, not read from the panel";
 
@@ -322,7 +323,7 @@ function identifySpec(bid, seconds) {
     command: `identify ${hostOf(bid)} --seconds ${seconds}`,
     run: async () => (await call("identify", { bid }, { seconds })).data,
     render: (r) => [{ kind: "ok", text: seconds
-      ? `the panel's backlight blinks until ${clock(Number(r.until))}` : "the blink is stopped" }],
+      ? `the board's LEDs and panel blink until ${clock(Number(r.until))}` : "the blink is stopped" }],
     onDone: (ok, r) => {
       if (ok) f.until = seconds ? Number(r && r.until) || 0 : 0;
     },
@@ -365,14 +366,15 @@ function usePanelReads(bid) {
   }, [bid]);
 }
 
-// Two cells of the tile's key/value grid: "Panel" and its line, with Identify under it.
+// Two cells of the tile's key/value grid: "Panel" and its line, with Identify under it (LOCATE:
+// the one-click 5 s button, the same as the sidebar's; Details keeps the full control).
 export function PanelTileRow({ bid }) {
   usePanelReads(bid);
   const f = front(bid);
   return html`<span class="k">Panel</span>
     <span class="v" data-testid="tile-panel">
       <span class="panel-line" data-testid="tile-panel-line"><${Parts} parts=${lineParts(f)} />${" "}<${RebuiltTag} f=${f} testid="tile-panel-rebuilt" /></span>
-      ${f.body && f.body.panel ? html`<${IdentifyControl} bid=${bid} testid="tile-identify" />` : null}
+      <${LocateButton} bid=${bid} where="tile" />
     </span>`;
 }
 

@@ -173,6 +173,7 @@ class PanelEvent:
     on: str = ""                # identify | request | nav | ...
     ms_ago: int = 0
     at: float = 0.0             # epoch seconds on THIS host (read time minus ms_ago)
+    who: str = ""               # LOCATE: a ``k:"locate"`` entry names who asked (board side)
 
 
 @dataclass(frozen=True)

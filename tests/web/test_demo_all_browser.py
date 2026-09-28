@@ -119,7 +119,7 @@ def test_the_linux_board_shows_card_claim_panel_identify_and_xvc(showcase):
     expect(by_id(page, "tile-claim")).to_contain_text("claimed by you")
     expect(by_id(page, "tile-panel-line")).to_contain_text("harness owns it", timeout=T)
     expect(by_id(page, "tile-panel-rebuilt")).to_have_count(0)
-    expect(page.locator('[data-testid="tile-identify"] button')).to_be_enabled()
+    expect(by_id(page, "tile-locate")).to_have_attribute("data-state", "idle")     # LOCATE
     expect(by_id(page, "tile-xvc")).to_have_attribute("data-state", "down", timeout=T)
     section(page, "program")
     expect(by_id(page, "keep-on-card")).to_be_enabled(timeout=T)
@@ -135,8 +135,8 @@ def test_negative_twin_the_bare_metal_board_shows_the_rebuilt_panel_and_no_card(
     expect(by_id(page, "tile-card")).to_have_text("no card store on this harness", timeout=T)
     expect(by_id(page, "tile-claim")).to_have_count(0)                  # no SSH on bare metal
     expect(by_id(page, "tile-panel-rebuilt")).to_be_visible(timeout=T)
-    expect(page.locator('[data-testid="tile-identify"] button')).to_be_disabled()
-    expect(by_id(page, "tile-identify")).to_contain_text("needs harness feature 'locate'")
+    expect(by_id(page, "tile-locate")).to_have_attribute("aria-disabled", "true")   # LOCATE
+    expect(by_id(page, "tile-locate-line")).to_contain_text("needs harness feature 'locate'")
     section(page, "program")
     expect(by_id(page, "keep-card")).to_have_count(0)
     section(page, "debug")

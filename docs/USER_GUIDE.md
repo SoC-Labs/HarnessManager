@@ -858,7 +858,22 @@ load the new probes.
 
 **In the app:** the Overview's **Board** tile has a **Panel** line (page, owner, touch) and
 **Identify**. **Details > Front panel** has the full mirror (15 rows of 40 characters),
-who is connected, and recent taps on the glass.
+who is connected, recent taps on the glass, and Identify with a choice of 5 to 30 seconds.
+
+**Which board is which? Identify.** Every board card in the sidebar has a small Identify
+icon (a magnifier), and so does the Board tile.
+1. Click it. The board blinks its user LEDs and its panel's backlight for 5 seconds, and
+   the panel shows an IDENTIFY banner with your name and the board's IP.
+2. Watch the icon count down 5-4-3-2-1.
+
+You do not need to open the board or hold its hub lease. What to expect:
+- **Once every 10 s per board.** The icon says when it can go again.
+- **A lease held by someone else:** only LED0 and the panel blink. Their DUT's LEDs are
+  left alone, and their Harness Manager shows "Identified by you".
+- **Disabled icon:** its tooltip says why, for example "needs harness feature 'locate'
+  (Linux harness)" on bare metal, or "Not read yet" before a scan.
+- **Never automatic:** Harness Manager sends it only when you click, or when you run
+  `identify`.
 
 ![A Linux board's panel line, blinking after Identify](review/2026-09-25/panel-overview-linux-light.png)
 
@@ -868,7 +883,7 @@ who is connected, and recent taps on the glass.
 |---|---|
 | `panel show TARGET` | page, owner, banner, card, sessions, taps, Identify |
 | `panel mirror TARGET` | the panel's text grid |
-| `identify TARGET [--seconds N]` | blink the panel backlight so you can find the board (1 to 30 s, default 10; 0 stops) |
+| `identify TARGET [--seconds N]` | blink the board's LEDs and panel so you can find it (1 to 30 s, default 5; 0 stops; exit 8 within 10 s of the last one) |
 
 ```bash
 harness-manager identify 192.168.10.101 --seconds 20

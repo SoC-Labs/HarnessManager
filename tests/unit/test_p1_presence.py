@@ -488,7 +488,8 @@ def test_read_says_identify_is_available_on_a_linux_board_and_why_not_on_bare_me
 def test_identify_blinks_and_publishes_and_a_board_without_locate_refuses_with_the_reason():
     svc, panel, _clock, events, session = rig()
     out = svc.identify("b1", session, 10)
-    assert out == {"until": WALL + 10, "seconds": 10} and panel.locates == [(10, "david@srv03335")]
+    assert out == {"until": WALL + 10, "seconds": 10, "next_at": WALL + S.IDENTIFY_EVERY_S}
+    assert panel.locates == [(10, "david@srv03335")]
     assert topics(events, "panel.locate")[0].data["state"] == "on"
     bare = FakePanel(locate="needs harness feature 'locate' (Linux harness)")
     svc2, panel2, _c, _e, session2 = rig(panel=bare)
@@ -506,7 +507,7 @@ def test_a_board_with_no_panel_adapter_answers_null_with_the_reason():
 
 
 def test_identify_seconds_are_checked_before_the_board():
-    assert S.check_seconds(None) == 10 and S.check_seconds(0) == 0 and S.check_seconds(30) == 30
+    assert S.check_seconds(None) == 5 and S.check_seconds(0) == 0 and S.check_seconds(30) == 30
     for bad in (31, -1, 2.5, True, "10"):
         with pytest.raises(Exception, match="seconds must be"):
             S.check_seconds(bad)

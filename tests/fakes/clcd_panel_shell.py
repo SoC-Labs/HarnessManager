@@ -9,8 +9,12 @@ The Linux harness side (R1-R3) is not built yet, so this fake IS the wire until 
   ``{ok, op, sessions: N, panel: {page, owner, pending, banner, card, seq}, events}``.
 - ``panel`` (feature ``panel``): the state with the session list and ``touch``; with
   ``frame`` ``"a"``/``"b"`` the rows 0-7 / 8-14 and their role codes, with ``true`` all 15.
-- ``locate`` (feature ``locate``): ``{s: 1-30, who}`` blinks, ``{s: 0}`` stops;
-  ``{ok, until_ms}``.
+- ``locate`` (feature ``locate``): ``{s: 1-30, who, leds?}`` blinks, ``{s: 0}`` stops;
+  ``{ok, until_ms, leds, panel}``. LOCATE (docs/design/BOARD_LOCATE.md §2): a start within
+  ``locate_every_s`` (10 s) of the last start is refused with ``retry_ms`` (a stop never
+  is); ``leds`` is ``all`` (default) or ``hb``; ``panel`` is ``banner`` while the harness
+  owns the panel, else ``backlight``; each start puts a ``k:"locate"`` entry naming ``who``
+  in the ring, and the panel object carries ``locate: {who, until_ms}`` while it runs.
 - the tap ring: 8 events, ``seq`` rising, never acknowledged (``tap(on)`` makes one).
 
 A profile without the features answers those ops ``unknown op`` (the v0.11 bare-metal
@@ -103,6 +107,10 @@ class PanelFakeShell(HarnessFakeShell):
         self.seq = 0
         self.locate_until = 0.0
         self.locates: list[dict[str, Any]] = []
+        self.locate_every_s = 10.0                              # LOCATE: the board's own limit
+        self.locate_started: float | None = None
+        self.locate_who = ""
+        self.ring_who: dict[int, str] = {}                      # seq -> who (k:"locate")
         self.hellos: list[dict[str, Any]] = []                  # every hello, as received
         self.requests: list[dict[str, Any]] = []                # every request, as received
         self._panel_mu = threading.Lock()
@@ -162,13 +170,18 @@ class PanelFakeShell(HarnessFakeShell):
     def _events(self) -> list[dict[str, Any]]:
         now = self.board_clock()
         with self._panel_mu:
-            return [{"seq": seq, "k": k, "on": on, "ms_ago": int(max(0.0, now - at) * 1000)}
+            return [{"seq": seq, "k": k, "on": on, "ms_ago": int(max(0.0, now - at) * 1000),
+                     **({"who": self.ring_who[seq]} if seq in self.ring_who else {})}
                     for seq, k, on, at in self.ring]
 
     def _panel(self) -> dict[str, Any]:
-        return {"page": self.page, "owner": self.display_owner,
-                "pending": self.display_owner != self.display_target,
-                "banner": self.banner, "card": self.card, "seq": self.seq}
+        out: dict[str, Any] = {"page": self.page, "owner": self.display_owner,
+                               "pending": self.display_owner != self.display_target,
+                               "banner": self.banner, "card": self.card, "seq": self.seq}
+        left = self.locate_until - self.board_clock()
+        if left > 0:
+            out["locate"] = {"who": self.locate_who, "until_ms": int(left * 1000)}
+        return out
 
     def _op_hello(self, request: dict[str, Any]) -> dict[str, Any]:
         self.hellos.append(dict(request))
@@ -204,12 +217,25 @@ class PanelFakeShell(HarnessFakeShell):
         return reply
 
     def _op_locate(self, request: dict[str, Any]) -> dict[str, Any]:
-        s = request.get("s")
-        if isinstance(s, bool) or not isinstance(s, int) or not 0 <= s <= 30:
+        s, leds = request.get("s"), request.get("leds", "all")
+        if isinstance(s, bool) or not isinstance(s, int) or not 0 <= s <= 30 \
+                or leds not in ("all", "hb"):
             return {"ok": False, "err": "bad args"}
+        now = self.board_clock()
+        if s and self.locate_started is not None and now - self.locate_started < self.locate_every_s:
+            retry_ms = int((self.locate_every_s - (now - self.locate_started)) * 1000) + 1
+            return {"ok": False, "err": f"locate: rate limited, retry in {-(-retry_ms // 1000)} s",
+                    "retry_ms": retry_ms}
         self.locates.append(dict(request))
-        self.locate_until = self.board_clock() + s
-        return {"ok": True, "until_ms": s * 1000}
+        self.locate_until = now + s
+        if s:
+            self.locate_started = now
+            self.locate_who = str(request.get("who") or "")
+            seq = self.tap("", k="locate")
+            self.ring_who[seq] = self.locate_who
+        panel = "banner" if self.display_owner == "harness" else "backlight"
+        return {"ok": True, "until_ms": s * 1000, "leds": leds if s else "none",
+                "panel": panel if s else "none"}
 
 
 class PanelVirtualMps3(VirtualMps3):

@@ -44,7 +44,7 @@ from collections.abc import Callable
 from typing import Any
 
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import UnavailableError
+from harness_manager.core.errors import AlreadyError, UnavailableError
 from harness_manager.core.model import BoardIdentity
 from harness_manager.core.panel import (
     COLS,
@@ -81,6 +81,8 @@ FEATURES_TTL_S = 300.0
 #: 1.25 KB, at the harness's 1280 B reply limit (docs/design §2.5).
 FRAME_HALVES = (("a", 0, 8), ("b", 8, ROWS))
 LOCATE_MAX_S = 30
+#: ``locate``'s optional ``leds`` (BOARD_LOCATE.md §2): all eight user LEDs, or LED0 only.
+LOCATE_LEDS = ("all", "hb")
 
 
 def _request(client: Any, msg: dict[str, Any]) -> dict[str, Any]:
@@ -124,7 +126,8 @@ def _events(raw: Any, wall: float) -> tuple[PanelEvent, ...]:
             continue
         ms = ms if isinstance(ms, int) and not isinstance(ms, bool) and ms >= 0 else 0
         out.append(PanelEvent(seq=seq, kind=str(e.get("k") or "tap"), on=str(e.get("on") or ""),
-                              ms_ago=ms, at=wall - ms / 1000.0))
+                              ms_ago=ms, at=wall - ms / 1000.0,
+                              who=ascii_field(str(e.get("who") or ""), WHO_MAX)))
     return tuple(sorted(out, key=lambda ev: ev.seq))
 
 
@@ -412,14 +415,28 @@ class Mps3Panel:
 
     # -- Identify ---------------------------------------------------------------------------
 
-    def locate(self, seconds: int, who: str) -> float:
+    def locate(self, seconds: int, who: str, *, leds: str = "") -> float:
+        """``leds`` (docs/design/BOARD_LOCATE.md §2): ``"hb"`` blinks LED0 only, never the
+        DUT's LEDs (the daemon asks for it when the hub lease is someone else's); "" leaves
+        the board's default (``"all"``)."""
         if "locate" not in self._features():
             raise UnavailableError(C.LOCATE, NEEDS_LOCATE)
         s = max(0, min(LOCATE_MAX_S, int(seconds)))
-        msg = {"op": "locate", "s": s}
+        msg: dict[str, Any] = {"op": "locate", "s": s}
         if s and who:
             msg["who"] = ascii_field(who, WHO_MAX)
+        if s and leds in LOCATE_LEDS:
+            msg["leds"] = leds
         reply = self._shell.call_raw(lambda c, _tap: _request(c, msg))
+        retry_ms = reply.get("retry_ms")
+        if not reply.get("ok") and isinstance(retry_ms, int) and not isinstance(retry_ms, bool):
+            # The board's own limit (BOARD_LOCATE.md §2): another client identified it just
+            # now. The feature is fine, so nothing is forgotten.
+            err = AlreadyError(f"the board declined Identify: {reply.get('err') or 'too soon'}",
+                               hint=f"try again in {max(1, -(-retry_ms // 1000))} s")
+            err.data = {"retry_after_s": round(max(0, retry_ms) / 1000.0, 1),  # type: ignore[attr-defined]
+                        "next_at": self._wall() + max(0, retry_ms) / 1000.0}
+            raise err
         refusal = _declined(reply, C.LOCATE, "Identify")
         if refusal is not None:
             self.forget()

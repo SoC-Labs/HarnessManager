@@ -43,9 +43,16 @@ back-off ends. A beat the BOARD turned away (another client holds the control po
 reset, timed out) is reported to ``noted(board_id, exc)`` and waits a whole beat; only a beat
 skipped because one of our own jobs holds the board is retried in ``RETRY_S``.
 
+**Identify** (lane LOCATE, docs/design/BOARD_LOCATE.md) is an explicit action, never a beat:
+at most one start per board every ``IDENTIFY_EVERY_S`` (``LocateLimiter``; a stop is never
+limited), 5 s by default. A ``k:"locate"`` entry in the board's ring (someone identified the
+board, from any Harness Manager) is published as ``panel.locate`` with ``source: "board"``,
+the ``who`` and ``mine``, never as a tap: that is how a lease holder hears of it.
+
 Events: ``panel.state {page, owner, pending, banner, card, count, seq, source, touch,
 sessions}``, ``panel.tap {seq, kind, on, ms_ago, at, notify, request?}``, ``panel.locate
-{state: on|off, until, seconds, who}`` (docs/CONTRACTS.md).
+{state: on|off, until, seconds, who}`` (docs/CONTRACTS.md), and from the ring ``panel.locate
+{state: "on", source: "board", who, mine, at, seq}``.
 """
 
 from __future__ import annotations
@@ -66,7 +73,7 @@ from typing import Any
 from harness_manager import __version__
 from harness_manager.cli.output import jsonable
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import HarnessError, HeldError, UnavailableError
+from harness_manager.core.errors import AlreadyError, HarnessError, HeldError, UnavailableError
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.panel import (
     BEAT_S,
@@ -95,8 +102,13 @@ TICK_S = 1.0
 #: a frame at most once every 3 s. Within that, the last answer is reused.
 STATE_CACHE_S = 1.0
 FRAME_CACHE_S = 3.0
-IDENTIFY_DEFAULT_S = 10
+IDENTIFY_DEFAULT_S = 5
 IDENTIFY_MAX_S = 30
+#: LOCATE: one Identify start per board this often, whoever asks here (the board keeps its
+#: own limit too, BOARD_LOCATE.md §2). A stop (0 s) is never limited.
+IDENTIFY_EVERY_S = 10.0
+#: A ring entry of this kind is an Identify someone started (BOARD_LOCATE.md §2 step 4).
+KIND_LOCATE = "locate"
 NO_ADAPTER = "this board has no front panel Harness Manager can reach"
 NOT_BEATING = "presence runs in the Harness Manager service (harness-manager-daemon)"
 
@@ -172,6 +184,60 @@ def _changed(a: PanelState | None, b: PanelState) -> bool:
         [(s.sid, s.role) for s in a.sessions] != [(s.sid, s.role) for s in b.sessions]
 
 
+# --- Identify's rate limit ----------------------------------------------------------------------
+
+
+class LocateLimiter:
+    """At most one Identify start per board every ``every_s`` (lane LOCATE).
+
+    ``claim(board_id)`` takes the slot or raises ``AlreadyError`` (409) saying when the next
+    one may go (``data``: ``retry_after_s`` and ``next_at``, epoch). ``release(board_id)``
+    gives a claimed slot back when the start never reached the board (it was refused or
+    unavailable), so a click that did nothing does not cost the user 10 s.
+    """
+
+    def __init__(self, every_s: float = IDENTIFY_EVERY_S, *,
+                 clock: Callable[[], float] = time.monotonic,
+                 wall: Callable[[], float] = time.time) -> None:
+        self.every_s = every_s
+        self._clock, self._wall = clock, wall
+        self._mu = threading.Lock()
+        self._last: dict[str, float] = {}
+
+    def wait_s(self, board_id: str) -> float:
+        """Seconds until the next start may go (0: now)."""
+        with self._mu:
+            last = self._last.get(board_id)
+        return 0.0 if last is None else max(0.0, self.every_s - (self._clock() - last))
+
+    def next_at(self, board_id: str) -> float:
+        """The epoch time the next start may go (now when it may go now)."""
+        return self._wall() + self.wait_s(board_id)
+
+    def claim(self, board_id: str) -> float:
+        """Take the slot; returns its claim time (for ``release``)."""
+        with self._mu:
+            now = self._clock()
+            last = self._last.get(board_id)
+            if last is not None and now - last < self.every_s:
+                wait = self.every_s - (now - last)
+                secs = max(1, int(wait + 0.999))
+                err = AlreadyError(
+                    f"{board_id} was identified {now - last:.0f} s ago; Identify goes at most "
+                    f"once every {self.every_s:.0f} s per board",
+                    hint=f"try again in {secs} s")
+                err.data = {"retry_after_s": round(wait, 1),        # type: ignore[attr-defined]
+                            "next_at": self._wall() + wait}
+                raise err
+            self._last[board_id] = now
+            return now
+
+    def release(self, board_id: str, claimed: float) -> None:
+        with self._mu:
+            if self._last.get(board_id) == claimed:
+                del self._last[board_id]
+
+
 # --- the per-board record ------------------------------------------------------------------
 
 
@@ -245,6 +311,7 @@ class PresenceService:
         self.app = app or default_app()
         self._mu = threading.RLock()
         self._boards: dict[str, _Board] = {}
+        self.limiter = LocateLimiter(clock=clock, wall=wall)     # LOCATE: 1 start / 10 s
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -477,6 +544,13 @@ class PresenceService:
         return news
 
     def _tap(self, rec: _Board, ev: PanelEvent) -> None:
+        if ev.kind == KIND_LOCATE:
+            # LOCATE: someone started an Identify (maybe from another Harness Manager). Not a
+            # tap: the holder's note ("identified by ...") is built from this.
+            self._publish(TOPIC_LOCATE, rec.board_id, {
+                "state": "on", "source": "board", "who": ev.who, "mine": ev.who == self.who,
+                "at": ev.at, "seq": ev.seq})
+            return
         data: dict[str, Any] = {"seq": ev.seq, "kind": ev.kind, "on": ev.on, "ms_ago": ev.ms_ago,
                                 "at": ev.at, "notify": ""}
         if ev.on == TAP_REQUEST:
@@ -565,9 +639,20 @@ class PresenceService:
         return self._cached(board_id, "frame", FRAME_CACHE_S, panel.frame)
 
     def identify(self, board_id: str, session: Any, seconds: int,
-                 who: str | None = None) -> dict[str, Any]:
-        """Blink the board for ``seconds`` (0 stops). Publishes ``panel.locate``."""
-        out = identify(session, seconds, who or self.who, wall=self._wall)
+                 who: str | None = None, *, leds: str = "") -> dict[str, Any]:
+        """Blink the board for ``seconds`` (0 stops). Publishes ``panel.locate``.
+
+        A start takes the board's slot in ``limiter`` first (409 ALREADY within
+        ``IDENTIFY_EVERY_S`` of the last one, nothing sent); a start that fails gives it back.
+        ``leds`` goes to the board as is (``"hb"``: LED0 only, BOARD_LOCATE.md §2)."""
+        claimed = self.limiter.claim(board_id) if seconds else None
+        try:
+            out = identify(session, seconds, who or self.who, wall=self._wall, leds=leds)
+        except BaseException:
+            if claimed is not None:
+                self.limiter.release(board_id, claimed)
+            raise
+        out["next_at"] = self.limiter.next_at(board_id)
         with self._mu:
             rec = self._boards.get(board_id)
             if rec is not None:
@@ -626,12 +711,14 @@ def read_panel(session: Any, *, reason_for: Callable[[str], str] | None = None,
 
 
 def identify(session: Any, seconds: int, who: str, *,
-             wall: Callable[[], float] = time.time) -> dict[str, Any]:
+             wall: Callable[[], float] = time.time, leds: str = "") -> dict[str, Any]:
     panel = require_panel(session, C.LOCATE)
     why = panel.support().locate
     if why:
         raise UnavailableError(C.LOCATE, why)
-    until = panel.locate(int(seconds), who)
+    # ``leds`` only when asked for: an adapter written before LOCATE takes (seconds, who).
+    until = (panel.locate(int(seconds), who, leds=leds) if leds
+             else panel.locate(int(seconds), who))
     return {"until": until if seconds else wall(), "seconds": int(seconds)}
 
 
