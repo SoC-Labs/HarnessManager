@@ -6,6 +6,8 @@
 #   make tokens-check  fail if they are stale, or app.css has colours of its own (in check)
 #   make web-deps  Playwright for the web UI browser tests (they skip without it)
 #   make hil     hardware-in-the-loop read-only tier (board window + lease only)
+#   make hil-auto HIL_ARGS='--plan linux-netboot --board 192.168.10.101 --evidence DIR'
+#                the HIL runbooks unattended (docs/HIL_AUTO.md; david runs it, with the lease)
 #
 # Release (lane L5):
 #   make dist            sdist + wheel in dist/, with the vendored pyverify wheel, constraints.txt
@@ -42,7 +44,7 @@ BIN        = $(VENV)/bin
 RELEASE    = $(BIN)/python -m tools.release
 RELEASE_COMMON = $(if $(MIRROR),--mirror $(MIRROR)) $(if $(PUBLISH),--publish) $(RELEASE_ARGS)
 
-.PHONY: venv check lint test hil web-deps clean dist install-local smoke-install vendor-pyverify \
+.PHONY: venv check lint test hil hil-auto web-deps clean dist install-local smoke-install vendor-pyverify \
 	wheelhouse lock release release-harness release-promote tokens tokens-check
 
 venv: $(BIN)/harness-manager
@@ -61,7 +63,7 @@ web-deps: venv
 	$(BIN)/pip install -q --find-links vendor -e '.[webtest]'
 
 lint: venv
-	$(BIN)/ruff check src tests tools/release tools/gen_tokens.py
+	$(BIN)/ruff check src tests tools/release tools/gen_tokens.py tools/hil
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck scripts/*.sh; \
 	else echo "lint: shellcheck not found, scripts/*.sh not checked"; fi
 
@@ -81,6 +83,11 @@ check: lint tokens-check test
 
 hil: venv
 	HARNESS_MANAGER_HIL=1 $(BIN)/pytest -q -m hil tests/hil
+
+# The runbooks as an unattended runner (lane HIL-AUTO). Nothing here takes a lease.
+HIL_ARGS ?=
+hil-auto: venv
+	$(BIN)/python -m tools.hil run $(HIL_ARGS)
 
 # The sdist, then the wheel built from it (python -m build), plus the pyverify wheel the
 # install needs, so dist/ alone installs: pip install dist/mps3_pyverify-*.whl, then

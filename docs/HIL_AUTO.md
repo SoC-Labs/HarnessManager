@@ -1,0 +1,161 @@
+# HIL, unattended: the runner
+
+> One runner for [HIL_LINUX.md](HIL_LINUX.md) and [HIL_B0.md](HIL_B0.md). It runs every check
+> a machine can judge, through Harness Manager's own CLI (`harness-manager --json …`), saves
+> each answer as evidence, and writes `REPORT.md`. The checks that need a person, a GUI,
+> Vivado, or a write it must not make stay manual; the report lists them.
+>
+> **Who:** david starts it, on srv03335, with his lease. No agent runs it.
+> **When:** the HM nights, Mon 28, Tue 29, Wed 30 Sep and Fri 2 Oct, 18:00 → 08:30.
+
+## Run it overnight
+
+1. **17:30: write the announcement** (sends nothing to the board or the hub):
+   ```bash
+   source ~/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux/env.sh
+   export RUN=$HOME/SoCLabs/harness-manager/docs/evidence/2026-09-hil-auto/$(date +%m%d)
+   cd ~/SoCLabs/harness-manager
+   .venv/bin/python -m tools.hil run --plan linux-netboot --board $B --evidence $RUN \
+     --writes safe --repeat 40 --interval 1200 --until 08:30 --announce-only
+   ```
+   It prints `$RUN/ANNOUNCE.txt`: start, planned end, plan, writes mode, what it changes and
+   what it never does. Paste it into the 17:30 announcement. The run rewrites it at the start
+   with its own start time and pid.
+2. **18:00: free the board for the runner, then take the lease** (terminal B):
+   ```bash
+   harness-manager daemon stop
+   harness-manager lease acquire $B --ttl 54000 --holder david-hm
+   ```
+   - `daemon stop`: the runner's commands run on the CLI's in-process engine, never through
+     the service. A service holding the board (the app open on it) makes every command
+     refuse (exit 4), and the runner stops.
+   - `--ttl 54000` is 15 h, past 08:30. Nothing heartbeats the lease overnight. The runner
+     stops `--margin` (10 min) before it expires, so a swap never outlives it.
+3. **Start it in tmux.** A tmux window does not inherit this shell's variables: set them
+   again inside it.
+   ```bash
+   tmux new -s hil
+   source ~/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux/env.sh
+   export RUN=$HOME/SoCLabs/harness-manager/docs/evidence/2026-09-hil-auto/$(date +%m%d)
+   cd ~/SoCLabs/harness-manager
+   .venv/bin/python -m tools.hil run --plan linux-netboot --board $B --evidence $RUN \
+     --writes safe --repeat 40 --interval 1200 --until 08:30
+   ```
+   Detach with `Ctrl-b d`. Without tmux: `nohup <the same command> > $RUN.log 2>&1 &`.
+   From the checkout, `make hil-auto HIL_ARGS='--plan … --board … --evidence …'` is the same.
+4. **08:30: read `$RUN/REPORT.md`.** Its first line says PASS, FAIL or STOPPED. Then
+   `harness-manager lease release $B`.
+
+**Stop it early:** `Ctrl-C` in its tmux window, or `kill -INT <pid>` (the pid is in
+`ANNOUNCE.txt`). It finishes the check it is on, puts greybox back, writes the report, and
+exits 2.
+
+## The options
+
+| Option | Default | What it does |
+|---|---|---|
+| `--plan` | (required) | `linux-netboot` (HIL_LINUX.md in Netboot mode), `linux` (the card usable again), `bare-metal` (HIL_B0.md) |
+| `--board` | (required) | the board, `192.168.10.101` |
+| `--evidence DIR` | (required) | a new folder; one holding evidence is refused (never overwritten) |
+| `--writes` | `none` | `none`: read-only checks. `safe`: also the swap-and-restore checks, the MCC read and (bare metal) `identify` |
+| `--repeat N`, `--interval S` | 1, 900 | N iterations, S seconds apart (at least 60) |
+| `--until HH:MM` (or `--deadline`) | none | no check starts after `until − margin`; then it restores and exits. `HH:MM` is the next one; an ISO time also works |
+| `--margin MIN` | 10 | the quiet minutes before `--until` and before the lease expires |
+| `--stop-on-first-fail` | off | end at the first failed check (still restores) |
+| `--expect-static HEX` | the runbook's | the static the board must run (`0x44ee76d5` Linux RC2, `0x72bb0a36` bare metal) |
+| `--gap S` | 3 | seconds between two commands |
+| `--max-unreachable N` | 3 | tries of a read check before an unreachable board stops the run |
+| `--announce-only` | off | write `ANNOUNCE.txt` and exit |
+
+`python -m tools.hil plans [--plan P]` prints every check: id, section, tier, command.
+
+## What it runs, and what stays manual
+
+The plans are `tools/hil/plans.py`. Check ids are the runbook's; a lettered id (`E1b`, `R7b`)
+is a second command of that check. `tests/unit/test_hil_auto_plans.py` fails when a runbook
+check with an **Expect** has no plan entry, or the other way round.
+
+**`linux-netboot`** (per iteration):
+
+- **read:** 0.2 (no share on `tty_00`), 0.3 (lease held here), 0.4 (version), A1 identity
+  (shell `0x44ee76d5`, `harness_impl linux`: anything else **stops**), A2 panel, A3 XVC status,
+  B1 claim status, B3 `persist.state` (only once B2's adopt pinned the claim here), C1 slots
+  (both `empty`), D1 overlays;
+- **safe** (`--writes safe`): D4a the MCC read on the hub; E1 program `nanosoc_ila` (not kept
+  on the card), E1b identity; Z2 restore greybox, Z2b identity;
+- **skipped (Netboot mode):** C2, D2, D3, D5, §G, Z1, Z2's `card status` (Z2c), and D4.
+
+**`linux`:** the same, plus C2 and Z2c (the card's default line is C2's); C1 and B3 expect a
+card-backed board.
+
+**`bare-metal`:** 1 (lease), 2 (no share on `tty_00`), R1, R5 (needs
+`HARNESS_MANAGER_OPENOCD` from HIL_B0.md 0.3), R6, R7, R10, R11 read; R4 (MCC), R7b
+(`identify`, refused on bare metal), W1/W1b, W4/W4b safe.
+
+**Manual, and why:**
+
+| Checks | Why never unattended |
+|---|---|
+| D2, D3, D5, Z1 | write the user microSD (keep on the card, card clear) |
+| D4, G3 | an MCC REBOOT power-cycles the board |
+| §G (G1, G2, G4), F6 | write the config SD (sudo mount on the hub; the SD door) |
+| F1–F4 | raw `ssh`/`fpgahub` on the hub, not Harness Manager verbs |
+| B2 | a trust decision: it pins the board's host key and asks `y` |
+| A4 | a finger on the panel |
+| E2–E5, W5 | Vivado, read by a person |
+| R2, R3, R8, R9, W2, W3 | the app, `screen`, gdb |
+| 0.1, 3, Z3–Z6, 7 | setup and close-out: the lease is released by david, never by the runner |
+
+## The safety rules (enforced in `tools/hil/run.py`)
+
+1. **The lease.** Before anything touches the board, `lease show` must say `lease.here`: this
+   Harness Manager holds the token. Asked again before every section, every safe check and the
+   final restore; lost means stop. It never acquires, requests, forces or releases one.
+2. **The allow-list.** Every command must match an exact argv shape for the `--writes` mode.
+   Nothing else is ever sent: no `--keep-on-card`, no `--force`, no slot, card or SD verbs,
+   no `mcc reboot`/`mcc cmd`, no `share start` (never a share on `tty_00`), no `board claim`.
+3. **Stops (exit 2):** an unexpected identity; a refusal (exit 15, the claim lock); HELD
+   (exit 4: another holder, a busy control channel, or the reset guard's card job, which it
+   never forces); the lease lost; the board unreachable `--max-unreachable` times (reads back
+   off 30 s, doubling to 10 min; a write is never retried).
+4. **The MCC read:** another reader on `tty_00` (the soak names it) is "skipped (tty_00
+   busy)", never retried, never a failure.
+5. **The end state**, in a `finally`: if it swapped the partition, it restores greybox (while
+   the lease is still here; a reset-guard refusal is asked again every 60 s for up to 40 min,
+   never forced) and reads the identity back. **The SSH claim:** it never claims, so the claim
+   ends as it started (B1's state, read again at the end). Harness Manager has no verb to
+   unclaim: only `mps3-unclaim` on the board's serial console does that.
+6. **Pace:** `--gap` between commands, `--interval` of at least 60 s, back-offs, no loops.
+
+## The evidence
+
+```
+$RUN/
+  ANNOUNCE.txt        what it will do (written first)
+  0_lease_gate.json   the start's lease check
+  summary.json        the run: exit, end state, every iteration's counts and first failure
+  REPORT.md           the same, to read
+  end_restore.json    the final restore, when one was needed
+  iter-001/           one per iteration (with --repeat > 1; one iteration writes here directly)
+    a1_info.json …    one per check, the runbook's file name: the command, exit, seconds,
+                      verdict, why, the CLI's JSON, stderr
+    summary.json  REPORT.md
+```
+
+**REPORT.md:** the result line (PASS exit 0, FAIL exit 1, STOPPED exit 2 with the reason); the
+end state (partition, claim); the first failure with its runbook id, hint and evidence file;
+a pass/fail/stopped/manual/skipped table per runbook section; every check; the manual list.
+With `--repeat`, the top report lists each iteration and which checks failed in which.
+
+## When it stops or refuses
+
+| REPORT.md says | Do this |
+|---|---|
+| `refused to start: the board is not leased` / `held by …` | take the lease (step 2); `lease show $B` must say `yours` |
+| `refused to start: the lease expires at …` | take it with a longer `--ttl` |
+| `HELD (exit 4): … is in use` at the first board check | the service holds the board: `harness-manager daemon stop` |
+| `HELD (exit 4): slot B is being written …` | a card job is running: someone else is using the board. Ask the Linux lead |
+| `an unexpected identity` | the board is not on the expected static: HIL_LINUX.md's failure table (A1 row) |
+| `refused (exit 15)` | a safety rail or the claim lock; the message says which |
+| `the board was unreachable N times` | HIL_LINUX.md's A1 `offline` row |
+| partition: `NOT attempted` / `not restored` | put greybox back by hand: `harness-manager restore $B` |
