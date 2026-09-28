@@ -323,7 +323,7 @@ function identifySpec(bid, seconds) {
     command: `identify ${hostOf(bid)} --seconds ${seconds}`,
     run: async () => (await call("identify", { bid }, { seconds })).data,
     render: (r) => [{ kind: "ok", text: seconds
-      ? `the board's LEDs and panel blink until ${clock(Number(r.until))}` : "the blink is stopped" }],
+      ? `the panel blinks until ${clock(Number(r.until))}` : "the blink is stopped" }],
     onDone: (ok, r) => {
       if (ok) f.until = seconds ? Number(r && r.until) || 0 : 0;
     },

@@ -9,10 +9,10 @@ Verbs::
 ``identify`` is a new top-level verb: no verb had the name (``probe`` finds boards over UDP
 identify, and the capability "Identify the harness" is ``identify``; this one's capability is
 ``locate``, docs/design/CLCD_ALIGNMENT.md §5). ``--seconds 0`` stops a blink. The board blinks
-its user LEDs and its panel's backlight, with an IDENTIFY banner while the harness owns the
-panel (docs/design/BOARD_LOCATE.md). 5 s by default. Through harness-manager-daemon a start
-goes at most once every 10 s per board (exit 8, ALREADY, says when the next may go); no hub
-lease is needed.
+its panel's backlight at 2 Hz, with "IDENTIFY: <user>@<host> via Harness Manager" on the panel
+while the harness owns it; a tap on the panel stops it (docs/design/BOARD_LOCATE.md). 5 s by
+default. Through harness-manager-daemon a start goes at most once every 10 s per board (exit
+8, ALREADY, says when the next may go); no hub lease is needed.
 
 On a bare-metal harness (v0.11) ``panel show`` gives the KVM owner only and says the state
 is rebuilt; ``panel mirror`` is rebuilt from what Harness Manager read (``source: rebuilt``);
@@ -82,12 +82,12 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
     ap.add_argument("target", metavar="TARGET", help=TARGET_HELP)
     vp.set_defaults(fn=cmd_panel)
 
-    ip = subparsers.add_parser("identify", help="blink the board's LEDs and panel so you can find it",
-                               description="Identify: blink the board's user LEDs and panel "
-                                           "backlight, with an IDENTIFY banner on the panel, so "
-                                           "you can tell which board it is (Linux harness). No "
-                                           "hub lease is needed; at most once every 10 s per "
-                                           "board.",
+    ip = subparsers.add_parser("identify", help="blink the board's panel so you can find it",
+                               description="Identify: blink the board's panel backlight, with "
+                                           "an IDENTIFY banner naming you on the panel, so you "
+                                           "can tell which board it is (Linux harness). A tap "
+                                           "on the panel stops it. No hub lease is needed; at "
+                                           "most once every 10 s per board.",
                                parents=[fmt, usb], epilog=epilog("identify"))
     ip.add_argument("target", metavar="TARGET", help=TARGET_HELP)
     ip.add_argument("--seconds", type=int, default=DEFAULT_SECONDS, metavar="N",

@@ -1,19 +1,18 @@
-# Board locate: blink the LEDs and the panel so you can find the board
+# Board locate: blink the panel so you can find the board
 
-Lane LOCATE, 2026-09-28. A request to the Linux lead for one harnessd verb, plus what
-Harness Manager (HM) already does with it. Nothing in the platform repos changed.
+Lane LOCATE, 2026-09-28. What can blink on an MPS3, the harnessd `locate` verb as the Linux
+lead confirmed it, what Harness Manager (HM) builds on it, and the requests left for later.
+Nothing in the platform repos changed.
 
 **Why.** There are now two MPS3s in the lab: `mps3_01_pl` at 192.168.10.101 and `mps3_02_pl`
-at 192.168.11.101. On 2026-09-28 board 2 showed board 1's identity on its LCD. The cause is
-that the panel's name is a compile-time constant (`MPS3_BOARD_NAME "MPS3-01"`, `lx:firmware/clcd/clcd.h:86-100`),
+at 192.168.11.101. On 2026-09-28 board 2 showed board 1's identity on its LCD. The cause:
+the panel's name is a compile-time constant (`MPS3_BOARD_NAME "MPS3-01"`, `lx:firmware/clcd/clcd.h:86-100`),
 and so is the default IP (`lx:firmware/common/net_proto.h:33-38`). david asked for a button
 that makes the physical board blink for 5 seconds.
 
-**The ask, in one line.** Add a `locate` verb that blinks the user LEDs and the CLCD
-backlight for `s` seconds, shows an `IDENTIFY` banner with the requester and the board's
-live IP while the harness owns the panel, and records who asked in the panel's event
-ring. Report it as feature `locate`. This is R3 of `CLCD_ALIGNMENT.md` §5.3, with the LEDs
-and the ring event added.
+**Status.** The Linux lead confirmed the board side on 2026-09-28. It is `locate`, to HM's own
+R3 (`CLCD_ALIGNMENT.md:242,364,420`), and it ships in images **rc2_v7/v7n (Tuesday evening)**.
+HM is built against exactly that wire, modelled in its fake.
 
 Source prefixes: `lx:` is `mps3-nanosoc-platform-lx` (`feat/linux-harness`, 6beea09);
 `fw:` is `mps3-nanosoc-platform` (the fielded tree, b2b83d3). Both were only read.
@@ -24,136 +23,87 @@ Source prefixes: `lx:` is `mps3-nanosoc-platform-lx` (`feat/linux-harness`, 6bee
 
 | What | Who drives it | Can the harness blink it? | Evidence |
 |---|---|---|---|
-| **User LEDs `USER_nLED[7:0]`** (8 of the board's 10; active low) | the static shell's `board_gpio_0` at `0x44AA_0000`. Pads `[7:0]` are the LEDs; a LED lights when its pad is driven high (`pad_o & pad_oe`) | **Yes.** `OWN` is a per-bit mux: 0 = the DUT's `dut_gpio_o/oe` drive the pad, 1 = the harness's `OUT/OE` do. `OWN` resets to 0, so **the DUT owns every LED by default**. Both engines already take **LED0** (`OWN |= 1`) for the 1 Hz heartbeat; LEDs 1-7 belong to the DUT through the RP boundary | `lx:fpga/shell/shell_top.sv:54-56,595-608`; `lx:fpga/shell/ip/board_gpio/board_gpio.sv:8-16,205,339-349`; `lx:fpga/shell/constraints/mps3_harness.xdc:71-82`; `lx:docs/contracts/shell-regmap.md:875,956-959`; `lx:docs/contracts/partition-pins.md:151-153`; heartbeat: `lx:firmware/platform/src/main.c:116-119,261-265`, `lx:src/linux_harness/sw/harnessd/main_linux.c:252-270` |
-| `USER_nLED[9:8]` | nobody under the shell | **No.** Only the monolithic build pins them. Adding them changes the static's pins, so a re-key and a mint. Not worth it | `fw:fpga/monolithic/nanosoc_mps3.xdc:189-211` vs `lx:fpga/shell/constraints/mps3_harness.xdc:74-82` |
-| **CLCD backlight** (on/off, no PWM) | the CLCD KVM, because the harness sets `bl_rst_src=1` at init | **Yes, even while the DUT owns the panel.** `clcd_kvm_set_backlight()` is a safe read-modify-write of `CTRL[5]`. It costs 0 pixel bytes | `lx:firmware/clcd_kvm/clcd_kvm.h:55-67,108-109`; `lx:firmware/common/platform_regs.h:765,768`; `docs/design/CLCD_ALIGNMENT.md` §1.1 (backlight row) |
-| **CLCD text** (a banner) | `clcd.c`, 40x15 text, rows 10-12 are the banner rows | **Only while the harness owns the panel.** The fault banners use rows 10-12 today. An identify banner must rank below them | `lx:firmware/clcd/clcd.c:918-935`; `CLCD_ALIGNMENT.md` §5.3 (`mps3_clcd_overlay()`) |
-| **MCC LEDs** | the MCC's own firmware | **No.** The FPGA cannot command the MCC, and its command set (REBOOT/RESET/SHUTDOWN, as console words or MSD command files) has no LED verb. HM does not touch the MCC for this | `fw:docs/internal/HANDOVER_ETH_MCC_CONTROL.md:15-17,82-86` |
+| **CLCD backlight** (on/off, no PWM) | the CLCD KVM, because the harness sets `bl_rst_src=1` at init | **Yes, even while the DUT owns the panel.** `clcd_kvm_set_backlight()` is a safe read-modify-write of `CTRL[5]`. It costs 0 pixel bytes. **This is what `locate` blinks** | `lx:firmware/clcd_kvm/clcd_kvm.h:55-67,108-109`; `lx:firmware/common/platform_regs.h:765,768`; `CLCD_ALIGNMENT.md` §1.1 |
+| **CLCD text** (a banner) | `clcd.c`: 40x15 text; rows 10-12 are the banner rows | **Only while the harness owns the panel.** The fault banners use rows 10-12 today | `lx:firmware/clcd/clcd.c:918-935` |
+| **User LEDs `USER_nLED[7:0]`** (8 of the board's 10; active low) | **the static shell** owns the pads, through `board_gpio_0` at `0x44AA_0000`. `OWN` is a per-bit mux: 0 = the DUT's `dut_gpio_o/oe` drive the pad, 1 = the harness's `OUT/OE` do. `OWN` resets to 0, so **the DUT owns every LED by default**, through the RP boundary. Both engines take **LED0** (`OWN \|= 1`) for the 1 Hz heartbeat | **Possible, but not in `locate`** (the Linux lead: out of scope). A later request, §4.1 | `lx:fpga/shell/shell_top.sv:54-56,595-608`; `lx:fpga/shell/ip/board_gpio/board_gpio.sv:8-16,205,339-349`; `lx:fpga/shell/constraints/mps3_harness.xdc:71-82`; `lx:docs/contracts/shell-regmap.md:875,956-959`; `lx:docs/contracts/partition-pins.md:151-153`; heartbeat: `lx:firmware/platform/src/main.c:116-119,261-265`, `lx:src/linux_harness/sw/harnessd/main_linux.c:252-270` |
+| `USER_nLED[9:8]` | nobody under the shell | **No.** Only the monolithic build pins them. Pinning them changes the static, which means a re-key and a mint | `fw:fpga/monolithic/nanosoc_mps3.xdc:189-211` vs `lx:fpga/shell/constraints/mps3_harness.xdc:74-82` |
+| **MCC LEDs** | the MCC's own firmware | **No.** The FPGA cannot command the MCC. Its command set (REBOOT/RESET/SHUTDOWN, as console words or MSD command files) has no LED verb. HM does not touch the MCC for this | `fw:docs/internal/HANDOVER_ETH_MCC_CONTROL.md:15-17,82-86` |
 
-**The Linux harness, today:**
+**The Linux harness today:**
 - harnessd reaches `board_gpio_0` through UIO. The device tree binds it as `generic-uio`
-  ("gpio", harnessd-owned), so there is no sysfs `gpio`/`leds` node for anyone else
+  ("gpio", harnessd-owned), so there is no sysfs `gpio` or `leds` node
   (`lx:src/linux_harness/shell_linux.dts:266-271`).
-- The CLCD, the KVM and touch run inside harnessd too (`CLCD_ALIGNMENT.md` §1.2).
-- There is no `locate`, `hello` or `panel` verb. `version.features` ends at bit 15
-  (`xvc_lock`) (`lx:firmware/common/net_proto.h:154-181`).
+- The CLCD, the KVM and touch run inside harnessd (`CLCD_ALIGNMENT.md` §1.2).
 
-**Bare metal (v0.11, fielded 0x72BB0A36)** has no `locate` verb either. UDP 6899 `identify`
-answers "what is at this address?"; it blinks nothing (`lx:docs/contracts/net-protocol.md:1136-1180`).
-DL4 freezes bare-metal platform code, so HM treats `locate` as Linux-only. Bare metal shows
-the button disabled, with the reason "needs harness feature 'locate' (Linux harness)".
+**Bare metal (v0.11, fielded 0x72BB0A36)** has no `locate`. UDP 6899 `identify` answers
+"what is at this address?" and blinks nothing (`lx:docs/contracts/net-protocol.md:1136-1180`).
+DL4 freezes bare-metal platform code, so HM treats `locate` as Linux-only. On bare metal
+the button is disabled, with the reason "needs harness feature 'locate' (Linux harness)".
 
-## 2. The verb
+## 2. The verb (confirmed by the Linux lead, images rc2_v7/v7n)
 
 ```
--> {"op":"locate","s":5,"who":"david@srv03335"}                      (<= 256 B)
-<- {"ok":true,"until_ms":5000,"leds":"all","panel":"banner"}
+-> {"op":"locate","s":5,"who":"dam1n19@srv03335 via HM"}      (6900; s 1-30)
+<- {"ok":true,"until_ms":5000}
 
--> {"op":"locate","s":5,"who":"bob@lab-pc-03","leds":"hb"}           (not the lease holder)
-<- {"ok":true,"until_ms":5000,"leds":"hb","panel":"backlight"}       (the DUT owns the panel)
-
--> {"op":"locate","s":0}                                             (stop; always accepted)
+-> {"op":"locate","s":0}                                         (stop)
 <- {"ok":true,"until_ms":0}
 ```
 
-| Key | Request | Notes |
-|---|---|---|
-| `s` | int 0-30 | seconds. 0 stops a running blink. HM sends 5 |
-| `who` | optional, printable ASCII, at most 20 chars (HM's `WHO_MAX`) | shown on the banner and recorded in the ring |
-| `leds` | optional: `"all"` (default) or `"hb"` | `all` borrows LEDs 0-7. `hb` blinks LED0 only, which the harness already owns, and never touches the DUT's bits. HM sends `hb` when the board's hub lease is someone else's |
-
-| Key | Reply | Notes |
-|---|---|---|
-| `until_ms` | int | ms until it stops, on the board's clock (0 after a stop) |
-| `leds` | `"all"` \| `"hb"` \| `"none"` | what actually blinks. `none` = the GPIO block is absent (a bitstream without it) |
-| `panel` | `"banner"` \| `"backlight"` \| `"none"` | `banner` = banner plus backlight; `backlight` = the DUT owns the panel, so only the backlight blinks; `none` = no CLCD in this build |
-
-### What the board does for `s` seconds
-
-1. **LEDs** (`leds:"all"`): snapshot `OWN`, `OE` and `OUT`. Set `OWN |= 0xFF` and `OE |= 0xFF`.
-   Alternate `OUT[7:0]` between `0x55` and `0xAA` every 250 ms (a 2 Hz chase, which the
-   1 Hz heartbeat never looks like). At the end, write the snapshot back exactly.
-   For `leds:"hb"`: toggle LED0 every 125 ms, then hand it back to the heartbeat.
-2. **Backlight**: toggle `clcd_kvm_set_backlight()` every 250 ms. At the end it must be on.
-3. **Banner** (only while the harness owns the panel), rows 10-12 inverted, through the
-   `mps3_clcd_overlay()` seam, ranked below every fault banner:
-   ```
-   row 10   >>>>>>>>>>>>  IDENTIFY  <<<<<<<<<<<<
-   row 11   asked by david@srv03335         5 s
-   row 12   192.168.11.101  02:00:00:4d:50:53
-   ```
-   Row 12 is the board's **live** IP and MAC, not `MPS3_BOARD_NAME`, because the name is
-   what went wrong today. Painting it costs the same as today's fault banner. Blinking
-   costs nothing more: the blink is the backlight, not a repaint.
-4. **Ring event**: append `{"seq":N,"k":"locate","on":"","who":"david@srv03335","ms_ago":0}`
-   to the panel's event ring (the ring R1/R2 already specify). The ring is never
-   acknowledged, so **every** HM watching the board sees it at its next `hello` or `panel`
-   read, even if the 5 s blink fell between two 30 s beats. That is how the lease holder
-   learns someone identified the board.
-5. While it runs, the `panel` reply (and a `hello` reply's `panel`) carries
-   `"locate":{"who":"…","until_ms":N}`. It is absent otherwise.
-
-### Refusals and limits
-
-| Case | Answer |
+| Board behaviour | As confirmed |
 |---|---|
-| a start within **10 s** of the last start, whoever asks | `{"ok":false,"err":"locate: rate limited, retry in 7 s","retry_ms":7000}` (a stop is never limited) |
-| `s` not an int 0-30, `leds` not `all`/`hb` | `{"ok":false,"err":"locate: bad s"}` |
-| `mode:"nohw"` (no fabric) | today's `no fabric: <why>` |
-| a swap has 6900 parked | today's EBUSY; HM says "busy (a swap)" |
-| the DUT owns the panel | **not a refusal**: backlight only, reply `panel:"backlight"` |
-| the lease is someone else's | **not a refusal on the board** (it cannot see the hub). HM sends `leds:"hb"` so another person's DUT LEDs are never borrowed |
+| Blink | the **backlight** at 2 Hz, from the CLCD tick |
+| Banner | "IDENTIFY: \<who\>", only while the harness owns the panel. While the DUT owns it: the backlight only |
+| Stop | `s:0`, or **a tap on the panel** |
+| Restore | the backlight goes back on at the end, and on harnessd start |
+| Feature | `locate` in `version.features` |
+| Access | **no claim lock**: any peer, so HM goes over the normal hub tunnel |
+| Not in this image | `hello` and `panel` (R1/R2), user LEDs, a board-side rate limit, a ring entry |
 
-**Restore rules (harnessd crash or restart).** At start, harnessd writes `OWN` to the
-heartbeat bit alone, so a blink cut short never leaves LEDs 1-7 away from the DUT. Only
-harnessd writes `OWN` (`shell-regmap.md:875`). It also turns the backlight on (clcd init
-already does this).
+**What HM sends.**
+- `s:5`. `who` is `"<user>@<host> via Harness Manager"`, shortened to `"... via HM"` when that
+  does not fit 30 characters (the 40-column banner row, less "IDENTIFY: "). See
+  `core.panel.locate_who`.
+- Stop sends `s:0`.
+- Nothing else: no `leds`, and no `hello` or `panel`, which this image does not have.
 
-**Feature.** `locate`, **appended** as the next free `version.features` bit after the ones
-already taken (`xvc_lock` = 15; the lcd_mirror lane's name follows its own seam). Announce
-it only when the verb is linked. Bare metal never sets it.
-
-**Cost to the loop.** 2 register writes per 250 ms tick from the clcd service slot (GPIO
-`OUT` and KVM `CTRL`), plus one banner paint while the harness owns the panel. No touch I/O.
-
-### What it disturbs, said plainly
-
-- **A DUT that reads back its LED pins** sees the chase on `dut_gpio_i[7:1]` for `s`
-  seconds: the pad readback loops the driven value (`shell_top.sv:606-608`). Its own
-  `dut_gpio_o` is untouched. `leds:"hb"` avoids this, so HM uses it on a board someone
-  else holds.
-- **A DUT that owns the panel** sees its picture blink with the backlight. Its pixels are
-  untouched.
-
-## 3. What Harness Manager does with it (built, against a fake)
+## 3. What Harness Manager does with it (built, against the fake)
 
 | Where | What |
 |---|---|
-| Sidebar board card and the Board tile | an **Identify** icon button. Enabled when the board reports `locate`; otherwise disabled, with the reason as its tooltip. One click sends `locate` for 5 s and shows a 5-4-3-2-1 countdown. A second press while it runs sends nothing |
-| Details > Front panel | the existing Identify control (1-30 s, and Stop) |
+| Sidebar board card, Board tile | an **Identify** icon button. It is enabled when the board reports `locate`; otherwise it is disabled, with the reason as its tooltip. One click sends `locate` for 5 s and counts down from the answer's `until_ms`. A small **Stop** square next to the count sends `s:0` |
+| A second press while it runs | **ignored**: nothing is sent, and the blink is neither extended nor restarted. Stop is the only way to end it early from HM |
+| Details > Front panel | the existing Identify control (5-30 s, and Stop) |
 | CLI | `harness-manager identify TARGET [--seconds N]` (default 5; 0 stops) |
-| Daemon | `POST /boards/{bid}/identify`: at most one start per board per 10 s (409 ALREADY, with `retry_after_s`). It also works on a board that is known but not open here: the daemon opens it for the one request (never tracked for presence) and closes it again |
-| Lease | **not required** (see below). When the hub lease is someone else's, HM sends `leds:"hb"` and the answer names the holder |
-| Holder's note | a `locate` ring event from someone else becomes `panel.locate {source:"board", who, mine:false}`. The holder's app shows "Identified by bob@lab-pc-03 at 14:02:05" |
-| Never | automatic or background. Identify is an explicit click or command; no poll, beat or page load sends it (QUIET-POLL) |
+| Daemon `POST /boards/{bid}/identify` | at most one start per board every 10 s, whoever asks through this daemon: 409 ALREADY with `retry_after_s`. A stop is never limited, and a start that failed does not count. The answer carries `until_ms` (the board's) and `next_at`. It works on a board the daemon knows but has not open: the daemon opens it for the one request and closes it again, and never tracks it for presence |
+| Lease | **not required**, because the board has no claim lock. When the hub lease is someone else's, the answer names the holder, and the board's banner shows them who asked |
+| Never | automatic or background. Only a click or a command sends it (QUIET-POLL) |
 
-**Why no lease is needed.** Identify changes nothing a user relies on: no bitstream, no
-console, no reset, and at most 30 s of LEDs and backlight. Its main use is telling boards
-apart *before* you lease one. The risk is bounded four ways:
-- a board-side rate limit and an HM-side one (1 per 10 s);
-- the 30 s cap;
-- `leds:"hb"` on a board someone else holds;
-- the holder is told who did it.
+**A tap on the glass stops the blink early.** This image has no panel read (R1/R2), so
+HM cannot see that happen. Its countdown runs to the end, and the tooltip says so.
 
-One limit is not HM's to lift: a hub with `gate_ethernet` drops a non-holder's traffic to
-the board NIC (`docs/HUB_MODE.md:223-225`). There, Identify fails UNREACHABLE with the
-hub's reason.
+**Why no lease.** Identify changes nothing a user relies on: no bitstream, console, reset or
+pixels, and at most 30 s of backlight. Its main use is telling boards apart *before* you
+lease one. Three limits bound the risk: HM's 10 s limit, the 30 s cap, and the banner naming
+who asked. One limit is not HM's to lift: a hub with `gate_ethernet` drops a non-holder's
+traffic to the board NIC (`docs/HUB_MODE.md:223-225`). There, Identify fails UNREACHABLE with
+the reason.
 
-## 4. Open questions for the Linux lead
+## 4. Later board-side requests (not in rc2_v7/v7n)
 
-1. Does the 250 ms tick come from the clcd service slot or its own slot? Either works; HM
-   only reads `until_ms`.
-2. Is `0x55`/`0xAA` distinct enough from the DUTs we ship? `rm_led` drives the low 4 bits
-   from a counter (`fw:fpga/dfx/rms/rm_led/rm_led.sv:39,163-166`).
-3. Should the `who` on row 11 be clipped to 16 characters (the panel's session width), as
-   the `hello` row is?
+1. **User LEDs.** The static shell owns the LED pads (§1), so harnessd could blink them too.
+   Add `"leds":"all"|"hb"` to `locate`:
+   - **`all`**: snapshot `OWN`/`OE`/`OUT`, set `OWN|=0xFF` and `OE|=0xFF`, alternate
+     `OUT[7:0]` between `0x55` and `0xAA` every 250 ms, then write the snapshot back.
+   - **`hb`**: toggle LED0 only, which the harness already owns.
+   - HM would send `hb` when the hub lease is someone else's: while LEDs 1-7 are borrowed,
+     a DUT reading back its LED pins sees the chase (`shell_top.sv:606-608`).
+   - At start, harnessd sets `OWN` back to the heartbeat bit.
+   - Cost: one register write per tick.
+2. **The holder hears of it.** Once `hello`/`panel` (R1/R2) exist, put a
+   `{"k":"locate","who":…}` entry in the panel's event ring. Then the lease holder's HM can
+   say "Identified by …" even if the 5 s fell between two 30 s beats.
+3. **A tap-stop HM can see.** With R2, `panel` carries `locate: {who, until_ms}` while it
+   runs, so a stop from the glass ends HM's countdown too.
+4. **The `who` cap.** HM sends at most 30 characters. Please confirm the banner shows all 30,
+   or say where it clips.

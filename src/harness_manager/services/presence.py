@@ -45,14 +45,13 @@ skipped because one of our own jobs holds the board is retried in ``RETRY_S``.
 
 **Identify** (lane LOCATE, docs/design/BOARD_LOCATE.md) is an explicit action, never a beat:
 at most one start per board every ``IDENTIFY_EVERY_S`` (``LocateLimiter``; a stop is never
-limited), 5 s by default. A ``k:"locate"`` entry in the board's ring (someone identified the
-board, from any Harness Manager) is published as ``panel.locate`` with ``source: "board"``,
-the ``who`` and ``mine``, never as a tap: that is how a lease holder hears of it.
+limited), 5 s by default. The board is told who asked as ``"<user>@<host> via Harness
+Manager"`` (``core.panel.locate_who``: its IDENTIFY banner has 30 columns for it), and the
+answer carries ``until_ms``, the board's own "how long", for the countdown.
 
 Events: ``panel.state {page, owner, pending, banner, card, count, seq, source, touch,
 sessions}``, ``panel.tap {seq, kind, on, ms_ago, at, notify, request?}``, ``panel.locate
-{state: on|off, until, seconds, who}`` (docs/CONTRACTS.md), and from the ring ``panel.locate
-{state: "on", source: "board", who, mine, at, seq}``.
+{state: on|off, until, seconds, who}`` (docs/CONTRACTS.md).
 """
 
 from __future__ import annotations
@@ -86,6 +85,7 @@ from harness_manager.core.panel import (
     PanelEvent,
     PanelFrame,
     PanelState,
+    locate_who,
 )
 
 log = logging.getLogger(__name__)
@@ -107,8 +107,6 @@ IDENTIFY_MAX_S = 30
 #: LOCATE: one Identify start per board this often, whoever asks here (the board keeps its
 #: own limit too, BOARD_LOCATE.md §2). A stop (0 s) is never limited.
 IDENTIFY_EVERY_S = 10.0
-#: A ring entry of this kind is an Identify someone started (BOARD_LOCATE.md §2 step 4).
-KIND_LOCATE = "locate"
 NO_ADAPTER = "this board has no front panel Harness Manager can reach"
 NOT_BEATING = "presence runs in the Harness Manager service (harness-manager-daemon)"
 
@@ -544,13 +542,6 @@ class PresenceService:
         return news
 
     def _tap(self, rec: _Board, ev: PanelEvent) -> None:
-        if ev.kind == KIND_LOCATE:
-            # LOCATE: someone started an Identify (maybe from another Harness Manager). Not a
-            # tap: the holder's note ("identified by ...") is built from this.
-            self._publish(TOPIC_LOCATE, rec.board_id, {
-                "state": "on", "source": "board", "who": ev.who, "mine": ev.who == self.who,
-                "at": ev.at, "seq": ev.seq})
-            return
         data: dict[str, Any] = {"seq": ev.seq, "kind": ev.kind, "on": ev.on, "ms_ago": ev.ms_ago,
                                 "at": ev.at, "notify": ""}
         if ev.on == TAP_REQUEST:
@@ -639,15 +630,14 @@ class PresenceService:
         return self._cached(board_id, "frame", FRAME_CACHE_S, panel.frame)
 
     def identify(self, board_id: str, session: Any, seconds: int,
-                 who: str | None = None, *, leds: str = "") -> dict[str, Any]:
+                 who: str | None = None) -> dict[str, Any]:
         """Blink the board for ``seconds`` (0 stops). Publishes ``panel.locate``.
 
         A start takes the board's slot in ``limiter`` first (409 ALREADY within
-        ``IDENTIFY_EVERY_S`` of the last one, nothing sent); a start that fails gives it back.
-        ``leds`` goes to the board as is (``"hb"``: LED0 only, BOARD_LOCATE.md §2)."""
+        ``IDENTIFY_EVERY_S`` of the last one, nothing sent); a start that fails gives it back."""
         claimed = self.limiter.claim(board_id) if seconds else None
         try:
-            out = identify(session, seconds, who or self.who, wall=self._wall, leds=leds)
+            out = identify(session, seconds, who or self.who, wall=self._wall)
         except BaseException:
             if claimed is not None:
                 self.limiter.release(board_id, claimed)
@@ -711,15 +701,20 @@ def read_panel(session: Any, *, reason_for: Callable[[str], str] | None = None,
 
 
 def identify(session: Any, seconds: int, who: str, *,
-             wall: Callable[[], float] = time.time, leds: str = "") -> dict[str, Any]:
+             wall: Callable[[], float] = time.time) -> dict[str, Any]:
+    """``{until, until_ms, seconds}``: ``until_ms`` is how long the board said it blinks
+    (0 after a stop), for a countdown that does not depend on this host's clock. ``who``
+    reaches the board as ``locate_who(who)`` ("<user>@<host> via Harness Manager")."""
     panel = require_panel(session, C.LOCATE)
     why = panel.support().locate
     if why:
         raise UnavailableError(C.LOCATE, why)
-    # ``leds`` only when asked for: an adapter written before LOCATE takes (seconds, who).
-    until = (panel.locate(int(seconds), who, leds=leds) if leds
-             else panel.locate(int(seconds), who))
-    return {"until": until if seconds else wall(), "seconds": int(seconds)}
+    until = panel.locate(int(seconds), locate_who(who))
+    now = wall()                 # after the answer: until - now is the board's until_ms
+    if not seconds:
+        return {"until": now, "until_ms": 0, "seconds": 0}
+    return {"until": until, "until_ms": max(0, round((until - now) * 1000)),
+            "seconds": int(seconds)}
 
 
 def check_seconds(value: Any, default: int = IDENTIFY_DEFAULT_S) -> int:

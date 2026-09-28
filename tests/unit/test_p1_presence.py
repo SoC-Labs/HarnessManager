@@ -488,8 +488,9 @@ def test_read_says_identify_is_available_on_a_linux_board_and_why_not_on_bare_me
 def test_identify_blinks_and_publishes_and_a_board_without_locate_refuses_with_the_reason():
     svc, panel, _clock, events, session = rig()
     out = svc.identify("b1", session, 10)
-    assert out == {"until": WALL + 10, "seconds": 10, "next_at": WALL + S.IDENTIFY_EVERY_S}
-    assert panel.locates == [(10, "david@srv03335")]
+    assert out == {"until": WALL + 10, "until_ms": 10_000, "seconds": 10,
+                   "next_at": WALL + S.IDENTIFY_EVERY_S}
+    assert panel.locates == [(10, "david@srv03335 via HM")], "LOCATE: core.panel.locate_who"
     assert topics(events, "panel.locate")[0].data["state"] == "on"
     bare = FakePanel(locate="needs harness feature 'locate' (Linux harness)")
     svc2, panel2, _c, _e, session2 = rig(panel=bare)

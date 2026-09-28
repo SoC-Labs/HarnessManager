@@ -273,7 +273,7 @@ class DemoPanel:
         # LOCATE: the blink is the board's, not this session's: a board identified while it
         # was not open (the daemon opens it for that one request) still shows the banner.
         glass = engine.__dict__.setdefault("_demo_locate", {})
-        self._glass = glass.setdefault(board_id, {"until": 0.0, "who": "", "leds": ""})
+        self._glass = glass.setdefault(board_id, {"until": 0.0, "who": ""})
 
     def _features(self) -> frozenset[str]:
         return frozenset(self._e._board(self._bid).identity.features)
@@ -306,10 +306,7 @@ class DemoPanel:
         card = (f"{board.identity.rm_name} [{board.card_slot}]" if board.card == "valid"
                 else board.card or "")
         with self._mu:
-            events = tuple(PanelEvent(seq=s, kind="locate" if on == "locate" else "tap",
-                                      on="" if on == "locate" else on,
-                                      ms_ago=int((now - at) * 1000), at=at,
-                                      who=self._glass["who"] if on == "locate" else "")
+            events = tuple(PanelEvent(seq=s, on=on, ms_ago=int((now - at) * 1000), at=at)
                            for s, on, at in self._ring)
             seq = self._seq
         sessions = self._sessions()
@@ -332,14 +329,12 @@ class DemoPanel:
         rows = [r.format(who=_who()[:15]).ljust(40)[:40] for r in SWAP_ROWS_LX]
         roles = ["t" * 40 for _ in rows]
         if self._blinking():
-            # BOARD_LOCATE.md §2 step 3: rows 10-12 inverted, the live IP and MAC on row 12.
+            # BOARD_LOCATE.md §2: the banner rows 10-12 inverted, "IDENTIFY: <who>" on row 11.
             with self._mu:
                 who = self._glass["who"]
-                left = max(0, int(self._glass["until"] - time.time() + 0.999))
-            host = self._bid.split("@", 1)[-1].rsplit(":", 1)[0]
-            rows[10] = ">>>>>>>>>>>>  IDENTIFY  <<<<<<<<<<<<".center(40)
-            rows[11] = f"asked by {who[:20]:<20} {left:>3} s".ljust(40)[:40]
-            rows[12] = f"{host}  02:00:00:4d:50:53".ljust(40)[:40]
+            rows[10] = " " * 40
+            rows[11] = f"IDENTIFY: {who}".ljust(40)[:40]
+            rows[12] = " " * 40
             for r in (10, 11, 12):
                 roles[r] = "i" * 40
         return PanelFrame(rows=tuple(rows), roles="".join(roles), source=SOURCE_PANEL,
@@ -355,19 +350,17 @@ class DemoPanel:
         st = self.state()
         return replace(st, sessions=())          # a hello reply carries the count only
 
-    def locate(self, seconds: int, who: str, *, leds: str = "") -> float:
-        """The fake blink (LOCATE): while it runs the glass shows the IDENTIFY banner in rows
-        10-12 (docs/design/BOARD_LOCATE.md §2), the state's banner says ``identify``, and the
-        ring gets a ``locate`` entry naming who asked."""
+    def locate(self, seconds: int, who: str) -> float:
+        """The fake blink (LOCATE, the Linux lead's R3): the backlight blinks, and while the
+        harness owns the panel (it always does here) the glass shows "IDENTIFY: <who>" in the
+        banner rows 10-12 (docs/design/BOARD_LOCATE.md §2); the state's banner says
+        ``identify``."""
         why = self.support().locate
         if why:
             raise UnavailableError(C.LOCATE, why)
         until = time.time() + seconds if seconds else 0.0
         with self._mu:
-            self._glass.update(until=until, who=who, leds=leds or "all")
-            if seconds:
-                self._seq += 1
-                self._ring = [*self._ring, (self._seq, "locate", time.time())][-8:]
+            self._glass.update(until=until, who=who)
         return until or time.time()
 
     def _blinking(self) -> bool:

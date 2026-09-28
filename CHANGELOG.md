@@ -11,15 +11,16 @@ owners.
 
 ### Identify: which board is which (LOCATE)
 - Every board card in the sidebar, and the Board tile, has an **Identify** icon. One click
-  blinks the board's user LEDs and panel for 5 seconds, and the icon counts down. It needs
-  no hub lease, and the board does not have to be open. A second press while it runs sends
-  nothing.
+  blinks the board's panel backlight for 5 seconds. While the harness owns the panel, the
+  panel also shows "IDENTIFY: you@host via Harness Manager". The icon counts down, and a
+  small square stops it early.
+- It needs no hub lease, and the board does not have to be open. A second press while it
+  runs sends nothing.
 - The icon is disabled, with the reason as its tooltip, when the board does not report the
-  harness feature `locate`. Bare metal (v0.11) does not; the Linux harness will
-  (docs/design/BOARD_LOCATE.md is the request to the Linux lead).
-- At most one Identify per board every 10 s (409 ALREADY / exit 8, saying when). On a
-  board whose lease is someone else's only LED0 and the panel blink, and the holder's app
-  shows "Identified by ...".
+  harness feature `locate`. The Linux harness has it from images rc2_v7/v7n; bare metal
+  (v0.11) does not (docs/design/BOARD_LOCATE.md).
+- At most one Identify per board every 10 s (409 ALREADY / exit 8, saying when). When
+  someone else holds the lease, the answer names them.
 - `harness-manager identify TARGET` now blinks for 5 s by default (was 10).
 
 ### Install

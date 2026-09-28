@@ -1,25 +1,29 @@
-"""Lane LOCATE: Identify's rate limit, the lease rule, the board's ring, the MPS3 wire.
+"""Lane LOCATE: Identify's rate limit, the lease note, ``who``, ``until_ms``, the MPS3 wire.
 
-docs/design/BOARD_LOCATE.md. Board-free: the presence service over a recording panel, and
-the MPS3 adapter over the ``PanelFakeShell`` (which follows the design's wire). Every check
-has its negative twin.
+docs/design/BOARD_LOCATE.md. The board side is the Linux lead's confirmed ``locate`` (images
+rc2_v7/v7n): ``{op, s, who}`` -> ``{ok, until_ms}``, the backlight at 2 Hz, the banner only while
+the harness owns the panel, a tap stops it, no ``hello``/``panel``. Board-free: the presence
+service over a recording panel, and the MPS3 adapter over ``PanelFakeShell``'s
+``LINUX_LOCATE`` profile. Every check has its negative twin.
 """
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 import pytest
 
+from harness_manager.core import capabilities as C
 from harness_manager.core.errors import AlreadyError, UnavailableError
 from harness_manager.core.events import EventBus
-from harness_manager.core.panel import PanelEvent, PanelState, PanelSupport
-from harness_manager.daemon.panel_api import identify_leds, lease_for_identify
+from harness_manager.core.panel import LOCATE_WHO_MAX, PanelState, PanelSupport, locate_who
+from harness_manager.daemon.panel_api import identify_lease_note, lease_for_identify
 from harness_manager.services import presence as S
 from harness_manager.services.presence import LocateLimiter, PresenceService
 
 WALL = 1_790_000_000.0
-ME = "david@srv03335"
+ME = "dam1n19@srv03335"
 
 
 class Clock:
@@ -31,24 +35,21 @@ class Clock:
 
 
 class Panel:
-    """A panel adapter that records every locate (and the ``leds`` it was asked for)."""
+    """A panel adapter that records every locate as the board would get it."""
 
-    def __init__(self, *, locate: str = "", fail: Exception | None = None) -> None:
-        self.why, self.fail = locate, fail
-        self.locates: list[tuple[int, str, str]] = []
-        self.reply = PanelState(page="status", owner="harness", count=1)
+    def __init__(self, *, locate: str = "") -> None:
+        self.why = locate
+        self.locates: list[tuple[int, str]] = []
 
     def support(self) -> PanelSupport:
         return PanelSupport(locate=self.why)
 
-    def locate(self, seconds: int, who: str, *, leds: str = "") -> float:
-        if self.fail is not None:
-            raise self.fail
-        self.locates.append((seconds, who, leds))
+    def locate(self, seconds: int, who: str) -> float:
+        self.locates.append((seconds, who))
         return WALL + seconds
 
     def hello(self, _hello):
-        return self.reply
+        return PanelState()
 
 
 def rig(panel: Panel | None = None):
@@ -76,7 +77,7 @@ def test_one_start_per_board_every_10_s_and_the_refusal_says_when():
         svc.identify("b2", session, 5)
     assert exc.value.data["retry_after_s"] == 6.0 and "try again in 6 s" in exc.value.hint
     assert exc.value.data["next_at"] == WALL + 6
-    assert [s for s, _w, _l in panel.locates] == [5], "the refused one never reached the board"
+    assert [s for s, _w in panel.locates] == [5], "the refused one never reached the board"
 
 
 def test_twin_after_10_s_another_board_or_a_stop_goes():
@@ -86,7 +87,7 @@ def test_twin_after_10_s_another_board_or_a_stop_goes():
     svc.identify("b2", session, 0)                    # a stop is never limited
     clock.t += 10
     svc.identify("b2", session, 5)
-    assert [s for s, _w, _l in panel.locates] == [5, 5, 0, 5]
+    assert [s for s, _w in panel.locates] == [5, 5, 0, 5]
 
 
 def test_a_start_that_failed_gives_its_slot_back():
@@ -113,7 +114,38 @@ def test_the_default_is_5_s():
     assert S.IDENTIFY_DEFAULT_S == 5 and S.check_seconds(None) == 5
 
 
-# --- leds: never another person's DUT LEDs -----------------------------------------------------
+# --- who, and until_ms -------------------------------------------------------------------------
+
+
+def test_who_says_harness_manager_and_fits_the_banner():
+    assert locate_who("d@lab") == "d@lab via Harness Manager"
+    assert locate_who(ME) == f"{ME} via HM", "36 characters would not fit: the short form"
+    assert LOCATE_WHO_MAX == 30 and len(locate_who(ME)) <= 30
+
+
+def test_twin_a_long_or_odd_who_is_clipped_never_overflowing():
+    long = "a-very-long-user-name@a-very-long-host-name"
+    assert locate_who(long) == long[:30] and "via" not in locate_who(long)
+    assert locate_who("dé@lab") == "d?@lab via Harness Manager", "printable ASCII only"
+
+
+def test_the_board_hears_who_via_harness_manager_and_the_answer_has_until_ms():
+    svc, panel, _clock, events, session = rig()
+    out = svc.identify("b2", session, 5)
+    assert panel.locates == [(5, f"{ME} via HM")]
+    assert out["until_ms"] == 5000 and out["until"] == WALL + 5
+    loc = [e.data for e in events if e.topic == "panel.locate"]
+    assert loc[0]["state"] == "on" and loc[0]["who"] == ME
+
+
+def test_twin_a_stop_is_until_ms_0():
+    svc, panel, _clock, _events, session = rig()
+    out = svc.identify("b2", session, 0)
+    assert out == {"until": WALL, "until_ms": 0, "seconds": 0, "next_at": WALL}
+    assert panel.locates == [(0, f"{ME} via HM")]
+
+
+# --- the lease: not needed, named when someone else has it -------------------------------------
 
 
 class Leases:
@@ -125,86 +157,25 @@ class Leases:
         return self._view
 
 
-def test_a_lease_held_elsewhere_blinks_led0_only_and_names_the_holder():
+def test_a_lease_held_elsewhere_is_named_in_the_answer():
     leases = Leases({"lease": {"holder": "alice@mapstone-dev", "mine": False}})
-    holder, known = lease_for_identify(leases, SimpleNamespace(hub=object()))
-    assert (holder, known) == ("alice@mapstone-dev", True)
+    holder = lease_for_identify(leases, SimpleNamespace(hub=object()))
+    assert holder == "alice@mapstone-dev"
     assert leases.calls == [(True, 60.0)], "the cached view only: Identify never waits on the hub"
-    leds, extra = identify_leds(holder, known)
-    assert leds == "hb" and extra["lease_holder"] == "alice@mapstone-dev"
-    assert "their DUT's LEDs are left alone" in extra["note"]
+    extra = identify_lease_note(holder)
+    assert extra["lease_holder"] == "alice@mapstone-dev"
+    assert "Identify needs no lease" in extra["note"]
 
 
-def test_twin_my_lease_a_free_one_or_no_hub_blinks_every_led():
-    for view in ({"lease": {"holder": "david@srv03335", "mine": True}}, {"lease": None}):
-        holder, known = lease_for_identify(Leases(view), SimpleNamespace(hub=object()))
-        assert identify_leds(holder, known) == ("", {})
-    assert lease_for_identify(Leases(None), SimpleNamespace(hub=None)) == ("", True)
-    assert lease_for_identify(None, SimpleNamespace(hub=object())) == ("", True)
+def test_twin_my_lease_a_free_one_no_view_or_no_hub_names_nobody():
+    for view in ({"lease": {"holder": ME, "mine": True}}, {"lease": None}, None):
+        assert lease_for_identify(Leases(view), SimpleNamespace(hub=object())) == ""
+    assert lease_for_identify(Leases(None), SimpleNamespace(hub=None)) == ""
+    assert lease_for_identify(None, SimpleNamespace(hub=object())) == ""
+    assert identify_lease_note("") == {}
 
 
-def test_a_lease_not_read_yet_is_treated_as_someone_elses():
-    holder, known = lease_for_identify(Leases(None), SimpleNamespace(hub=object()))
-    assert (holder, known) == ("", False)
-    leds, extra = identify_leds(holder, known)
-    assert leds == "hb" and "not been read yet" in extra["note"] and "lease_holder" not in extra
-
-
-def test_leds_go_to_the_adapter_only_when_asked_for():
-    svc, panel, clock, _events, session = rig()
-    svc.identify("b2", session, 5, leds="hb")
-    clock.t += 10
-    svc.identify("b2", session, 5)
-    assert [lds for _s, _w, lds in panel.locates] == ["hb", ""]
-
-    class OldPanel(Panel):                           # an adapter written before LOCATE
-        def locate(self, seconds, who):              # type: ignore[override]
-            self.locates.append((seconds, who, "-"))
-            return WALL + seconds
-
-    svc2, old, _c, _e, session2 = rig(OldPanel())
-    svc2.identify("b2", session2, 5)
-    assert old.locates == [(5, ME, "-")]
-
-
-# --- the board's ring: someone identified the board -------------------------------------------
-
-
-def _reply(*events: PanelEvent) -> PanelState:
-    return PanelState(page="status", owner="harness", count=1, seq=max(e.seq for e in events),
-                      events=events)
-
-
-def test_a_locate_in_the_ring_from_someone_else_is_a_panel_locate_for_the_holder():
-    svc, panel, _clock, events, session = rig()
-    svc.track("b2", session)
-    panel.reply = _reply(PanelEvent(seq=1, kind="tap", on="nav", ms_ago=100, at=WALL))
-    svc.beat_due()
-    panel.reply = _reply(PanelEvent(seq=1, kind="tap", on="nav", ms_ago=100, at=WALL),
-                         PanelEvent(seq=2, kind="locate", ms_ago=50, at=WALL - 0.05,
-                                    who="bob@lab-pc-03"))
-    svc.beat_due(now=svc._clock() + 31)
-    loc = [e.data for e in events if e.topic == "panel.locate"]
-    assert loc == [{"state": "on", "source": "board", "who": "bob@lab-pc-03", "mine": False,
-                    "at": WALL - 0.05, "seq": 2}]
-    assert not [e for e in events if e.topic == "panel.tap" and e.data["seq"] == 2], \
-        "a locate is not a tap"
-
-
-def test_twin_my_own_locate_in_the_ring_is_mine_and_a_tap_stays_a_tap():
-    svc, panel, _clock, events, session = rig()
-    svc.track("b2", session)
-    panel.reply = _reply(PanelEvent(seq=1, kind="tap", on="request", ms_ago=10, at=WALL))
-    svc.beat_due()
-    panel.reply = _reply(PanelEvent(seq=1, kind="tap", on="request", ms_ago=10, at=WALL),
-                         PanelEvent(seq=2, kind="locate", ms_ago=5, at=WALL, who=ME))
-    svc.beat_due(now=svc._clock() + 31)
-    loc = [e.data for e in events if e.topic == "panel.locate"]
-    assert len(loc) == 1 and loc[0]["mine"] is True
-    assert [e.data["on"] for e in events if e.topic == "panel.tap"] == ["request"]
-
-
-# --- the MPS3 wire (the PanelFakeShell follows BOARD_LOCATE.md §2) --------------------------------
+# --- the MPS3 wire: exactly the Linux lead's locate (rc2_v7/v7n) ---------------------------------
 
 
 @pytest.fixture
@@ -212,9 +183,9 @@ def board(tmp_path):
     from harness_manager.core.services import EngineConfig
     from harness_manager.engine import Engine
     from harness_manager_mps3.pack import Mps3Pack
-    from tests.fakes.clcd_panel_shell import LINUX_PANEL, PanelVirtualMps3
+    from tests.fakes.clcd_panel_shell import LINUX_LOCATE, PanelVirtualMps3
 
-    with PanelVirtualMps3(tmp_path / "lx", LINUX_PANEL) as vb:
+    with PanelVirtualMps3(tmp_path / "lx", LINUX_LOCATE) as vb:
         engine = Engine(EngineConfig(state_dir=tmp_path / "state"),
                         packs={"mps3": Mps3Pack(console_ports=vb.console_ports)})
         session = engine.open(vb.candidate(), note="locate")
@@ -222,40 +193,67 @@ def board(tmp_path):
         engine.close_all()
 
 
-def test_mps3_sends_leds_hb_only_when_asked_and_reads_who_from_the_ring(board):
+def test_mps3_sends_op_s_who_only_and_takes_until_ms(board):
     vb, session = board
-    session.panel.locate(5, ME, leds="hb")
-    assert vb.shell.locates[-1] == {"op": "locate", "s": 5, "who": ME, "leds": "hb"}
-    state = session.panel.state()
-    loc = [e for e in state.events if e.kind == "locate"]
-    assert len(loc) == 1 and loc[0].who == ME and loc[0].on == ""
+    until = session.panel.locate(5, locate_who(ME))
+    assert vb.shell.locates == [{"op": "locate", "s": 5, "who": f"{ME} via HM"}]
+    assert vb.shell.blinking and vb.shell.banner_text == f"IDENTIFY: {ME} via HM"
+    assert 4.0 < until - time.time() <= 5.5
 
 
-def test_twin_mps3_sends_no_leds_by_default_and_a_tap_names_nobody(board):
-    vb, session = board
-    session.panel.locate(5, ME)
-    assert vb.shell.locates[-1] == {"op": "locate", "s": 5, "who": ME}
-    vb.shell.tap("identify")
-    taps = [e for e in session.panel.state().events if e.kind == "tap"]
-    assert taps and all(e.who == "" for e in taps)
-
-
-def test_the_boards_own_limit_is_already_with_the_wait_and_forgets_nothing(board):
-    vb, session = board
-    session.panel.locate(5, ME)
-    before = session.panel._ident
-    with pytest.raises(AlreadyError) as exc:
-        session.panel.locate(5, "bob@lab-pc-03")      # another client, 0 s later
-    assert "rate limited" in exc.value.message and 9 <= exc.value.data["retry_after_s"] <= 10
-    assert session.panel._ident is before, "the feature is fine: nothing forgotten"
-    assert len(vb.shell.locates) == 1
-
-
-def test_twin_a_stop_is_never_limited_by_the_board(board):
+def test_twin_mps3_stop_sends_s_0_alone(board):
     vb, session = board
     session.panel.locate(5, ME)
     session.panel.locate(0, ME)
-    assert [q["s"] for q in vb.shell.locates] == [5, 0]
+    assert vb.shell.locates[-1] == {"op": "locate", "s": 0} and not vb.shell.blinking
+
+
+def test_the_rc2_image_has_locate_without_hello_or_panel(board):
+    vb, session = board
+    sup = session.panel.support()
+    assert sup.locate == "" and "presence" in sup.presence and sup.source == "rebuilt"
+    session.panel.locate(5, ME)
+    assert not {"hello", "panel"} & {q.get("op") for q in vb.shell.requests}
+
+
+def test_twin_bare_metal_is_refused_with_the_reason_and_sent_nothing(tmp_path):
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
+    from harness_manager_mps3.pack import Mps3Pack
+    from tests.fakes.clcd_panel_shell import V011_BARE_METAL, PanelVirtualMps3
+
+    with PanelVirtualMps3(tmp_path / "bm", V011_BARE_METAL) as vb:
+        engine = Engine(EngineConfig(state_dir=tmp_path / "state"),
+                        packs={"mps3": Mps3Pack(console_ports=vb.console_ports)})
+        session = engine.open(vb.candidate(), note="locate")
+        try:
+            with pytest.raises(UnavailableError) as exc:
+                session.panel.locate(5, ME)
+            assert exc.value.capability == C.LOCATE
+            assert exc.value.reason == "needs harness feature 'locate' (Linux harness)"
+            assert "locate" not in {q.get("op") for q in vb.shell.requests}
+        finally:
+            engine.close_all()
+
+
+# --- the fake is the board the Linux lead described ----------------------------------------------
+
+
+def test_the_fake_a_tap_stops_it_and_harnessd_restart_restores_it(board):
+    vb, session = board
+    session.panel.locate(5, ME)
+    vb.shell.tap("nav")
+    assert not vb.shell.blinking and vb.shell.locate_tap_stops == 1
+    session.panel.locate(5, ME)
+    vb.shell.restart_harnessd()
+    assert not vb.shell.blinking
+
+
+def test_twin_the_fake_the_dut_owning_the_panel_blinks_the_backlight_only(board):
+    vb, session = board
+    vb.shell.display_owner = vb.shell.display_target = "dut"
+    session.panel.locate(5, ME)
+    assert vb.shell.blinking and vb.shell.banner_text == ""
 
 
 # --- the demo's fake blink ------------------------------------------------------------------------
@@ -268,14 +266,11 @@ def test_the_demo_linux_board_blinks_with_the_banner_on_its_glass():
     engine = DemoEngine(speed=0.0, showcase=True)
     try:
         panel = DemoPanel(engine, BOARD_LINUX)
-        panel.locate(5, "bob@lab-pc-03")
+        panel.locate(5, "bob@lab-pc-03 via HM")
         frame = DemoPanel(engine, BOARD_LINUX).frame()      # a later session sees it too
-        assert "IDENTIFY" in frame.rows[10] and "asked by bob@lab-pc-03" in frame.rows[11]
+        assert frame.rows[11].rstrip() == "IDENTIFY: bob@lab-pc-03 via HM"
         assert frame.roles[400:520] == "i" * 120, "rows 10-12 inverted"
-        state = panel.state()
-        assert state.banner == "identify"
-        assert [(e.kind, e.who) for e in state.events if e.kind == "locate"] == [
-            ("locate", "bob@lab-pc-03")]
+        assert panel.state().banner == "identify"
     finally:
         engine.close_all()
 

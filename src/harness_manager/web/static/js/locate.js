@@ -1,23 +1,25 @@
 // Identify from the sidebar and the Board tile (lane LOCATE; docs/design/BOARD_LOCATE.md).
 //
 // One small icon button per board, <LocateButton bid where="rail"|"tile">. A click asks the
-// board to blink its user LEDs and panel for 5 s (POST /boards/{bid}/identify {seconds: 5})
-// and counts 5-4-3-2-1 on the button. It is:
+// board to blink its panel for 5 s (POST /boards/{bid}/identify {seconds: 5}; the Linux
+// harness's `locate`: the backlight at 2 Hz, and an "IDENTIFY: <who>" banner while the harness
+// owns the panel) and counts down on the button from the answer's until_ms. It is:
 // - enabled only when the board reports the harness feature "locate" (the identity HM already
 //   read: the probe's, or the open board's). Otherwise it is aria-disabled, and the tooltip
 //   says why. Nothing is asked of the board to decide;
 // - explicit only: no poll, event or page load ever sends it, and it never rides bgOpts
-//   (QUIET-POLL). A second press while one is on its way or running sends nothing;
+//   (QUIET-POLL);
+// - one at a time: a second press while it is on its way or blinking is IGNORED (it neither
+//   extends nor restarts the blink). Stop (the small square beside the count) sends seconds 0;
 // - allowed without the hub lease. The daemon lets one start go per board every 10 s
-//   (409 ALREADY, with retry_after_s): the button then says when it can go again;
-// - told when someone else identified the board (a panel.locate event from the board's own
-//   ring, source "board", mine false): "Identified by bob@lab-pc-03 at 14:02:05".
+//   (409 ALREADY, with retry_after_s): the button then says when it can go again.
+// A tap on the panel stops the blink on the board; this image has no panel read (R1/R2) to
+// tell Harness Manager, so the count runs to its end regardless.
 //
 // The sidebar's hook (SIDEBAR-UX): app.js BoardItem renders <LocateButton bid where="rail" />
 // as the <li>'s second child, beside (not inside) the card's own <button>.
 
 import { call } from "./api.js";
-import { clock } from "./format.js";
 import { html } from "./lib.js";
 import { changed, log, onBoardEvent, S, timed } from "./store.js";
 import { Icon, Spinner } from "./ui.js";
@@ -34,13 +36,12 @@ const LS = {};
 export function locateState(bid) {
   if (!LS[bid]) {
     LS[bid] = {
-      sending: false,      // the POST is on its way
+      sending: false,      // a start or a stop is on its way
       until: 0,            // ms: the countdown runs until then (0: not blinking)
       waitUntil: 0,        // ms: the daemon's 10 s limit said "not before then"
       error: null,         // the last failure (ApiError)
       line: "",            // "$ identify ... (rc, s)"
-      note: "",            // the answer's note (another person's lease)
-      by: null,            // {who, at}: someone else identified this board
+      note: "",            // the answer's note (someone else's lease)
     };
   }
   return LS[bid];
@@ -60,7 +61,8 @@ export function locateWhy(bid) {
   const feats = ident && Array.isArray(ident.features) ? ident.features : [];
   if (feats.includes(LOCATE_FEATURE)) return "";
   if (unavailable && unavailable.locate) return `Cannot: ${unavailable.locate}`;
-  if (!feats.length) return NOT_READ;
+  // No features at all: not read yet, unless the open board was read (an older harness).
+  if (!feats.length && !(b && b.info)) return NOT_READ;
   return `Cannot: ${NEEDS_LOCATE}`;
 }
 
@@ -84,7 +86,13 @@ function tick() {
   }, 250);
 }
 
-// The click. Returns at once when it may not go (disabled, on its way, blinking, waiting).
+async function send(bid, seconds) {
+  return timed(`identify ${bid} --seconds ${seconds}`,
+    () => call("identify", { bid }, { seconds }));
+}
+
+// The click. Returns at once when it may not go: disabled, on its way, blinking (a second
+// press is ignored), or inside the daemon's 10 s window.
 export async function locate(bid) {
   const st = locateState(bid);
   if (st.sending || blinking(bid) || st.waitUntil > Date.now() || locateWhy(bid)) return;
@@ -92,8 +100,7 @@ export async function locate(bid) {
   st.error = null;
   st.note = "";
   changed();
-  const r = await timed(`identify ${bid} --seconds ${LOCATE_SECONDS}`,
-    () => call("identify", { bid }, { seconds: LOCATE_SECONDS }));
+  const r = await send(bid, LOCATE_SECONDS);
   st.sending = false;
   st.line = r.line;
   if (r.error) {
@@ -106,28 +113,45 @@ export async function locate(bid) {
     log("error", "identify", `${r.line}  ${r.error.errName}: ${r.error.message}`, bid);
   } else {
     const d = r.data.data || {};
-    // The countdown is the 5 s asked for, from the answer (not the daemon's clock).
-    st.until = Date.now() + Number(d.seconds || LOCATE_SECONDS) * 1000;
+    // The countdown is the board's own "how long" (until_ms), not this host's clock.
+    const ms = d.until_ms !== undefined ? Number(d.until_ms) : Number(d.seconds || LOCATE_SECONDS) * 1000;
+    st.until = Date.now() + Math.max(0, ms);
     st.waitUntil = d.next_at ? Math.max(Date.now(), Number(d.next_at) * 1000) : 0;
     st.note = d.note || "";
-    log("info", "identify", `${r.line}  blinking for ${d.seconds} s${d.note ? ` (${d.note})` : ""}`, bid);
+    log("info", "identify", `${r.line}  blinking for ${Math.round(ms / 1000)} s${d.note ? ` (${d.note})` : ""}`, bid);
     tick();
   }
   changed();
 }
 
-// Someone started an Identify: this page (the daemon's own event) or another Harness Manager
-// (the board's ring, source "board"). Neither sends anything.
+// Stop: seconds 0 (never rate-limited). Only while it blinks.
+export async function stopLocate(bid) {
+  const st = locateState(bid);
+  if (st.sending || !blinking(bid)) return;
+  st.sending = true;
+  changed();
+  const r = await send(bid, 0);
+  st.sending = false;
+  st.line = r.line;
+  if (r.error) {
+    st.error = r.error;
+    log("error", "identify", `${r.line}  ${r.error.errName}: ${r.error.message}`, bid);
+  } else {
+    st.until = 0;
+    log("info", "identify", `${r.line}  stopped`, bid);
+  }
+  changed();
+}
+
+// An Identify from elsewhere (the CLI, another tab, Details) shows here too; nothing is sent.
 onBoardEvent((ev) => {
   if (ev.topic !== "panel.locate" || !ev.board_id) return;
   const st = locateState(ev.board_id);
   const d = ev.data || {};
-  if (d.source === "board") {
-    if (!d.mine) st.by = { who: d.who || "someone", at: Number(d.at) || Number(ev.at) || Date.now() / 1000 };
-  } else if (d.state === "on" && !st.sending && !(st.until > Date.now())) {
-    const secs = Number(d.seconds) || 0;       // an Identify from the CLI or another tab
+  if (d.state === "on" && !st.sending && !(st.until > Date.now())) {
+    const secs = Number(d.seconds) || 0;
     if (secs > 0) { st.until = Date.now() + secs * 1000; tick(); }
-  } else if (d.state === "off") {
+  } else if (d.state === "off" && !st.sending) {
     st.until = 0;
   }
   changed();
@@ -136,12 +160,11 @@ onBoardEvent((ev) => {
 function title(why, st) {
   if (why) return why;
   if (st.sending) return "Asking the board...";
-  if (st.until > Date.now()) return `Blinking: ${left(st.until)} s left`;
+  if (st.until > Date.now()) return `Blinking: ${left(st.until)} s left (another press does nothing; the square stops it)`;
   if (st.waitUntil > Date.now()) {
     return `Identified just now: once every 10 s per board. Again in ${left(st.waitUntil)} s`;
   }
-  const by = st.by ? ` (last identified by ${st.by.who} at ${clock(st.by.at)})` : "";
-  return `Identify: blink this board's LEDs and panel for ${LOCATE_SECONDS} s${by}`;
+  return `Identify: blink this board's panel for ${LOCATE_SECONDS} s`;
 }
 
 export function LocateButton({ bid, where = "rail" }) {
@@ -152,23 +175,26 @@ export function LocateButton({ bid, where = "rail" }) {
   const wait = !on && st.waitUntil > now;
   const state = why ? "disabled" : st.sending ? "sending" : on ? "blinking" : wait ? "wait" : "idle";
   const off = state !== "idle";
-  const tip = title(why, st);
   const label = on ? `Identify: blinking, ${left(st.until)} seconds left` : "Identify this board";
   return html`<span class=${`locate locate-${where}`} data-testid=${`${where}-locate-wrap`}>
     <button type="button" class=${`btn ghost sm icon-only locate-btn ${state}`}
       data-testid=${`${where}-locate`} data-action="locate" data-board=${bid} data-state=${state}
-      aria-disabled=${off ? "true" : undefined} aria-label=${label} title=${tip}
+      aria-disabled=${off ? "true" : undefined} aria-label=${label} title=${title(why, st)}
       onClick=${(e) => { e.stopPropagation(); if (!off) locate(bid); }}>
       ${st.sending ? html`<${Spinner} />`
         : on ? html`<span class="locate-count" data-testid=${`${where}-locate-count`}>${left(st.until)}</span>`
           : html`<${Icon} name="scan-search" />`}
     </button>
-    ${where === "tile" ? html`<${TileLine} bid=${bid} st=${st} why=${why} wait=${wait} />` : null}
+    ${on ? html`<button type="button" class="btn ghost sm icon-only locate-stop"
+        data-testid=${`${where}-locate-stop`} data-action="locate-stop" data-board=${bid}
+        aria-label="Stop blinking" title="Stop blinking"
+        onClick=${(e) => { e.stopPropagation(); stopLocate(bid); }}><${Icon} name="square" /></button>` : null}
+    ${where === "tile" ? html`<${TileLine} st=${st} why=${why} wait=${wait} />` : null}
   </span>`;
 }
 
-// The Board tile has room for words: what happened, and who else identified the board.
-function TileLine({ bid, st, why, wait }) {
+// The Board tile has room for words.
+function TileLine({ st, why, wait }) {
   const on = st.until > Date.now();
   let text = "";
   let level = "muted";
@@ -176,8 +202,7 @@ function TileLine({ bid, st, why, wait }) {
   else if (on) { text = `blinking, ${left(st.until)} s left`; level = "busy"; }
   else if (wait) { text = `identified: again in ${left(st.waitUntil)} s`; }
   else if (st.error) { text = `${st.error.errName}: ${st.error.message}`; level = "err"; }
-  else { text = `Identify: blink LEDs and panel for ${LOCATE_SECONDS} s`; }
+  else { text = `Identify: blink the panel for ${LOCATE_SECONDS} s`; }
   return html`<span class=${`locate-line pl ${level}`} data-testid="tile-locate-line">${text}</span>
-    ${st.note ? html`<span class="locate-note muted small" data-testid="tile-locate-note">${st.note}</span>` : null}
-    ${st.by ? html`<span class="locate-by" data-testid="tile-locate-by"><${Icon} name="scan-search" cls="sm" />Identified by ${st.by.who} at ${clock(st.by.at)}</span>` : null}`;
+    ${st.note ? html`<span class="locate-note muted small" data-testid="tile-locate-note">${st.note}</span>` : null}`;
 }

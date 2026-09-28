@@ -17,8 +17,8 @@ disagree on their shape. Knobs publish the events the daemon would: ``tap(bid, o
 
 Lane LOCATE adds, additively: Identify goes through the product's own ``LocateLimiter`` (one
 start per board every 10 s, 409 ALREADY), a board that is not open is identified all the
-same (``opened_for_identify``, as the daemon does), ``locates`` counts every locate the
-boards were sent (``(bid, seconds, who, leds)``), and ``calls`` every read or locate a
+same (``opened_for_identify``, as the daemon does), the answer carries ``until_ms``,
+``locates`` counts every locate the boards were sent (``(bid, seconds, who)``), and ``calls`` every read or locate a
 simulated panel served (``("state"|"frame"|"locate", bid)``, over both servers) so a browser
 test can prove the page asked the boards nothing on its own.
 
@@ -52,6 +52,7 @@ from harness_manager.core.panel import (
     PanelSession,
     PanelState,
     PanelSupport,
+    locate_who,
     touch_health,
 )
 from harness_manager.services.presence import (
@@ -123,13 +124,13 @@ class SimPanel:
         return PanelFrame(rows=b["rows"] or LINUX_STATUS_ROWS, roles=b["roles"] or "t" * 600,
                           source=SOURCE_PANEL, observed_at=time.time())
 
-    def locate(self, seconds: int, who: str, *, leds: str = "") -> float:
+    def locate(self, seconds: int, who: str) -> float:
         why = self.support().locate
         if why:
             raise UnavailableError(C.LOCATE, why)
         until = time.time() + seconds
         self.sim.boards[self.bid]["locate_until"] = until if seconds else 0.0
-        self.sim.locates.append((self.bid, seconds, who, leds))
+        self.sim.locates.append((self.bid, seconds, who))
         self.sim.calls.append(("locate", self.bid))
         return until
 
@@ -143,7 +144,7 @@ class PanelSim:
         self.leases: Any = None
         #: LOCATE: the product's limiter, every locate sent, every front-panel request
         self.limiter = LocateLimiter()
-        self.locates: list[tuple[str, int, str, str]] = []
+        self.locates: list[tuple[str, int, str]] = []
         self.calls: list[tuple[str, str]] = []
 
     def board(self, bid: str) -> dict[str, Any]:
@@ -263,7 +264,7 @@ def register(app: FastAPI, state: Any, sim: PanelSim, ok: Any) -> None:
             raise UnavailableError(C.LOCATE, why)
         claimed = sim.limiter.claim(bid) if seconds else None
         try:
-            until = adapter.locate(seconds, default_who())
+            until = adapter.locate(seconds, locate_who(default_who()))
         except BaseException:
             if claimed is not None:
                 sim.limiter.release(bid, claimed)
@@ -273,4 +274,4 @@ def register(app: FastAPI, state: Any, sim: PanelSim, ok: Any) -> None:
             "who": default_who()}))
         extra = {} if opened else {"opened_for_identify": True}
         return ok(board_id=bid, until=until if seconds else time.time(), seconds=seconds,
-                  next_at=sim.limiter.next_at(bid), **extra)
+                  until_ms=seconds * 1000, next_at=sim.limiter.next_at(bid), **extra)

@@ -6,7 +6,7 @@ docs/API.md "Front panel" (additive):
 |---|---|
 | ``GET /boards/{bid}/panel`` | ``{panel: PanelState or null, reason, identify: {available, reason, until}, support, presence}``; ``?state=0`` leaves the panel unread (``panel`` null) |
 | ``GET /boards/{bid}/panel/frame`` | ``{rows, roles, source, observed_at, note}`` |
-| ``POST /boards/{bid}/identify`` ``{seconds?}`` | ``{until, seconds, next_at, leds?, lease_holder?, note?, opened_for_identify?}``; 422 UNAVAILABLE with the reason on bare metal; 409 ALREADY within 10 s of the last start |
+| ``POST /boards/{bid}/identify`` ``{seconds?}`` | ``{until, until_ms, seconds, next_at, lease_holder?, note?, opened_for_identify?}``; 422 UNAVAILABLE with the reason on bare metal; 409 ALREADY within 10 s of the last start |
 
 ``harness_manager.services.presence.PresenceService`` does the work. This module wires it:
 
@@ -30,11 +30,10 @@ a command), so the background gate never holds it back and no beat ever sends it
 - at most one start per board every 10 s, whoever asks through this daemon
   (``PresenceService.limiter``): 409 ALREADY with ``data.retry_after_s``; a stop (0 s) is
   never limited, and a start that failed gives its slot back;
-- **no lease needed.** When the board's hub lease is someone else's (the lease service's
-  CACHED view: Identify never waits on the hub), or it has not been read yet, the board is
-  asked for ``leds: "hb"`` (LED0 only: another person's DUT LEDs are left alone) and the
-  answer names the holder (``lease_holder``, ``note``). The board records who asked, so the
-  holder's Harness Manager hears of it (``panel.locate`` with ``source: "board"``);
+- **no lease needed** (the Linux harness's ``locate`` has no claim lock: any peer, so it goes
+  over the normal hub tunnel). When the board's hub lease is someone else's (the lease
+  service's CACHED view: Identify never waits on the hub) the answer names the holder
+  (``lease_holder``, ``note``); the board's banner shows them who asked;
 - a board this daemon knows but has not open (the sidebar's other boards) is opened for
   the one request and closed again (``opened_for_identify: true``), as the CLI's
   ``identify`` does; presence never tracks it. 409 HELD when another process holds it.
@@ -103,36 +102,28 @@ def beat_lease_view(leases: Any, hub: Any) -> dict[str, Any] | None:
     return cached if cached is not None else leases.view(hub)
 
 
-def lease_for_identify(leases: Any, session: Any) -> tuple[str, bool]:
-    """``(holder, known)`` for an Identify (lane LOCATE): the hub lease's holder when it is not
-    ours (the EXPLICIT rule, ``lease_not_mine``), from the lease service's CACHED view only, so
-    Identify never waits on the hub. ``known`` is False for a board behind a hub whose lease
-    this daemon has no recent view of. A board with no hub (or no lease service): ``("", True)``."""
+def lease_for_identify(leases: Any, session: Any) -> str:
+    """The hub lease's holder when it is not ours, for an Identify's note (lane LOCATE): the
+    EXPLICIT rule (``lease_not_mine``) over the lease service's CACHED view only, so Identify
+    never waits on the hub. "" with no hub, no lease service, or no recent view."""
     hub = getattr(session, "hub", None)
     if leases is None or hub is None:
-        return "", True
+        return ""
     try:
         view = leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
     except HarnessError:
-        view = None
-    if view is None:
-        return "", False
-    return lease_not_mine(view), True
+        return ""
+    return lease_not_mine(view) if view is not None else ""
 
 
-def identify_leds(holder: str, known: bool) -> tuple[str, dict[str, Any]]:
-    """``(leds, extra answer keys)``. A lease held by someone else, or one not read yet, blinks
-    LED0 only (``"hb"``, docs/design/BOARD_LOCATE.md §2): another person's DUT LEDs are never
-    borrowed. Otherwise "" (the board's default: all eight LEDs)."""
-    if holder:
-        return "hb", {"leds": "hb", "lease_holder": holder,
-                      "note": f"the hub lease is {holder}'s: only LED0 and the panel blink "
-                              "(their DUT's LEDs are left alone), and the board records that "
-                              "you asked"}
-    if not known:
-        return "hb", {"leds": "hb", "note": "this board's hub lease has not been read yet: "
-                                            "only LED0 and the panel blink"}
-    return "", {}
+def identify_lease_note(holder: str) -> dict[str, Any]:
+    """The answer's extra keys when someone else holds the hub lease: Identify needs no lease
+    (the board's ``locate`` has no claim lock), and the board's banner names who asked."""
+    if not holder:
+        return {}
+    return {"lease_holder": holder,
+            "note": f"the hub lease is {holder}'s: Identify needs no lease; the board's "
+                    "banner shows who asked"}
 
 
 def register(ctx: RouteContext) -> None:
@@ -230,11 +221,9 @@ def register(ctx: RouteContext) -> None:
 
     def locate_on(bid: str, s: Any, seconds: int) -> dict[str, Any]:
         require_panel(s, C.LOCATE, reason_for(s)(C.LOCATE))
-        holder, known = (lease_for_identify(getattr(d, "leases", None), s) if seconds
-                         else ("", True))
-        leds, extra = identify_leds(holder, known) if seconds else ("", {})
-        out = presence.identify(bid, s, seconds, leds=leds)
-        out.update(extra)
+        holder = lease_for_identify(getattr(d, "leases", None), s) if seconds else ""
+        out = presence.identify(bid, s, seconds)
+        out.update(identify_lease_note(holder))
         return out
 
     def identify_closed(bid: str, seconds: int) -> dict[str, Any]:

@@ -1,7 +1,8 @@
 """Lane LOCATE on the real harness-manager-daemon: ``POST /boards/{bid}/identify``.
 
-The app wraps the real Engine and MPS3 pack over ``PanelVirtualMps3`` (the Linux harness's
-``locate`` as docs/design/BOARD_LOCATE.md §2 defines it, and the fielded v0.11 without it).
+The app wraps the real Engine and MPS3 pack over ``PanelVirtualMps3``: ``LINUX_LOCATE`` is the
+Linux harness's rc2_v7/v7n image as the Linux lead confirmed it (``locate`` only, no
+``hello``/``panel``: docs/design/BOARD_LOCATE.md §2), and the fielded v0.11 has none.
 Each behaviour has its negative twin.
 """
 
@@ -12,7 +13,7 @@ import time
 from harness_manager.core.services import EngineConfig
 from harness_manager.engine import Engine
 from harness_manager_mps3.pack import Mps3Pack
-from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL
+from tests.fakes.clcd_panel_shell import LINUX_LOCATE, LINUX_PANEL, V011_BARE_METAL
 from tests.fakes.l4_service import H
 from tests.fakes.t13_daemon import bid_path
 from tests.integration.test_p1_panel_api import rig
@@ -38,10 +39,11 @@ def post(client, bid, seconds=None):
 
 
 def test_one_start_per_board_every_10_s_is_409_already_with_the_wait(tmp_path):
-    with rig(tmp_path, LINUX_PANEL) as (r, client):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
         bid = r.open(client)
         first = post(client, bid, 5).json()
         assert first["ok"] and first["seconds"] == 5 and first["next_at"] > time.time() + 9
+        assert 4900 <= first["until_ms"] <= 5000, "the board's own until_ms, for the countdown"
         again = post(client, bid, 5)
         err = again.json()["error"]
         assert again.status_code == 409 and err["name"] == "ALREADY"
@@ -50,33 +52,43 @@ def test_one_start_per_board_every_10_s_is_409_already_with_the_wait(tmp_path):
 
 
 def test_twin_a_stop_goes_at_once_and_a_start_goes_again_after_the_window(tmp_path):
-    with rig(tmp_path, LINUX_PANEL) as (r, client):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
         bid = r.open(client)
         r.presence.limiter.every_s = 0.3
-        r.vb.shell.locate_every_s = 0.3
         assert post(client, bid, 5).json()["ok"]
-        assert post(client, bid, 0).json()["ok"], "a stop is never limited"
+        stop = post(client, bid, 0).json()
+        assert stop["ok"] and stop["until_ms"] == 0, "a stop is never limited"
+        assert r.vb.shell.locates[-1] == {"op": "locate", "s": 0} and not r.vb.shell.blinking
         time.sleep(0.4)
         assert post(client, bid, 5).json()["ok"]
         assert [q["s"] for q in r.vb.shell.locates] == [5, 0, 5]
 
 
-def test_the_boards_own_limit_is_409_already_too(tmp_path):
-    with rig(tmp_path, LINUX_PANEL) as (r, client):
+def test_the_board_hears_exactly_op_s_who_via_harness_manager(tmp_path):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
         bid = r.open(client)
-        r.presence.limiter.every_s = 0.0          # another Harness Manager: only the board knows
-        assert post(client, bid, 5).json()["ok"]
-        again = post(client, bid, 5)
-        assert again.status_code == 409 and again.json()["error"]["name"] == "ALREADY"
-        assert "rate limited" in again.json()["error"]["message"]
-        assert len(r.vb.shell.locates) == 1
+        assert post(client, bid).json()["ok"]
+        (sent,) = r.vb.shell.locates
+        assert set(sent) == {"op", "s", "who"} and sent["s"] == 5
+        assert sent["who"].endswith((" via Harness Manager", " via HM")) and len(sent["who"]) <= 30
+        assert r.vb.shell.banner_text == f"IDENTIFY: {sent['who']}"
+        assert not {"hello", "panel"} & {q.get("op") for q in r.vb.shell.requests}, \
+            "rc2_v7 has no hello/panel: none is ever sent"
+
+
+def test_twin_the_dut_owning_the_panel_still_blinks_the_backlight(tmp_path):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
+        bid = r.open(client)
+        r.vb.shell.display_owner = r.vb.shell.display_target = "dut"
+        assert post(client, bid).json()["ok"]
+        assert r.vb.shell.blinking and r.vb.shell.banner_text == ""
 
 
 # --- a board that is not open here ------------------------------------------------------------
 
 
 def test_a_known_board_not_open_here_is_opened_for_the_one_identify(tmp_path):
-    with rig(tmp_path, LINUX_PANEL) as (r, client):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
         bid = known(r, client)
         got = post(client, bid).json()
         assert got["ok"] and got["seconds"] == 5 and got["opened_for_identify"] is True
@@ -89,7 +101,7 @@ def test_a_known_board_not_open_here_is_opened_for_the_one_identify(tmp_path):
 
 
 def test_twin_a_board_another_engine_holds_is_409_held_and_nothing_is_sent(tmp_path):
-    with rig(tmp_path, LINUX_PANEL) as (r, client):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
         bid = known(r, client)
         other = Engine(EngineConfig(state_dir=r.engine.config.state_dir),
                        packs={"mps3": Mps3Pack(console_ports=r.vb.console_ports)})
@@ -104,7 +116,7 @@ def test_twin_a_board_another_engine_holds_is_409_held_and_nothing_is_sent(tmp_p
 
 
 def test_twin_a_board_this_daemon_never_saw_is_404(tmp_path):
-    with rig(tmp_path, LINUX_PANEL) as (r, client):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
         resp = post(client, "mps3@192.0.2.9:6900", 5)
         assert resp.status_code == 404 and resp.json()["error"]["name"] == "ABSENT"
         assert r.vb.shell.locates == []
@@ -125,7 +137,8 @@ def test_bare_metal_not_open_here_is_422_with_the_reason_and_sends_nothing(tmp_p
 
 
 def test_no_background_contact_ever_sends_a_locate(tmp_path):
-    """The presence beat runs (a page views the board) and the panel is read: no locate."""
+    """The presence beat runs (a page views the board; a harness with R1/R2, so there IS a
+    beat) and the panel is read in the background: no locate."""
     with rig(tmp_path, LINUX_PANEL, beat=True) as (r, client):
         bid = r.open(client)
         deadline = time.monotonic() + 15
@@ -139,7 +152,7 @@ def test_no_background_contact_ever_sends_a_locate(tmp_path):
 
 
 def test_twin_the_explicit_request_is_the_one_locate(tmp_path):
-    with rig(tmp_path, LINUX_PANEL, beat=True) as (r, client):
+    with rig(tmp_path, LINUX_LOCATE, beat=True) as (r, client):
         bid = r.open(client)
         assert post(client, bid).json()["ok"]
         time.sleep(1.5)
@@ -165,14 +178,16 @@ def test_cli_identify_blinks_5_s_by_default(tmp_path, capsys, monkeypatch):
     from tests.fakes.t13_daemon import engine_for
 
     monkeypatch.setenv("HARNESS_MANAGER_NO_DAEMON", "1")
-    with PanelVirtualMps3(tmp_path, LINUX_PANEL) as vb:
+    with PanelVirtualMps3(tmp_path, LINUX_LOCATE) as vb:
         previous = set_engine_factory(lambda _args: engine_for(vb))
         try:
             rc, out, _ = _run(capsys, "--json", "identify", vb.shell_endpoint)
-            assert rc == 0 and json.loads(out)["seconds"] == 5
+            body = json.loads(out)
+            assert rc == 0 and body["seconds"] == 5 and body["until_ms"] > 4000
             assert vb.shell.locates[-1] == {"op": "locate", "s": 5, "who": vb.shell.locate_who}
+            assert vb.shell.locate_who.endswith((" via Harness Manager", " via HM"))
             rc, out, _ = _run(capsys, "help", "identify")
-            assert rc == 0 and "LEDs" in out and "default 5" in out
+            assert rc == 0 and "IDENTIFY banner" in out and "default 5" in out
         finally:
             set_engine_factory(previous)
 
@@ -184,7 +199,7 @@ def test_twin_cli_a_second_identify_through_the_daemon_within_10_s_is_exit_8(tmp
     from tests.fakes.t13_daemon import LiveDaemon, engine_for
 
     monkeypatch.delenv("HARNESS_MANAGER_NO_DAEMON", raising=False)
-    with PanelVirtualMps3(tmp_path, LINUX_PANEL) as vb:
+    with PanelVirtualMps3(tmp_path, LINUX_LOCATE) as vb:
         eng = engine_for(vb)
         with LiveDaemon(eng):
             rc, _out, _ = _run(capsys, "identify", vb.shell_endpoint)

@@ -239,11 +239,11 @@ panel show TARGET
 panel mirror TARGET
     The panel's text grid (read from the board, or rebuilt on bare metal).
 identify TARGET [--seconds N]
-    Blink the board's user LEDs and panel backlight, with an IDENTIFY banner,
-    so you can tell which board it is (Linux harness): 1 to 30 seconds, 5 by
-    default; 0 stops. No hub lease is needed. At most once every 10 s per
-    board (exit 8 says when to try again). The app's sidebar has the same
-    thing: the Identify icon on each board.
+    Blink the board's panel backlight, with an IDENTIFY banner naming you, so
+    you can tell which board it is (Linux harness): 1 to 30 seconds, 5 by
+    default; 0 stops (so does a tap on the panel). No hub lease is needed. At
+    most once every 10 s per board (exit 8 says when to try again). The app's
+    sidebar has the same thing: the Identify icon on each board.
 
 The Live display mirrors the panel pixel for pixel (the Linux harness's
 lcd_mirror). It is read-only: nothing reaches the panel. On a board behind a

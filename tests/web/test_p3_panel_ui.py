@@ -154,8 +154,10 @@ def test_negative_twin_identify_on_bare_metal_is_disabled_with_the_reason(page_f
     expect(button).to_have_attribute("title", f"Cannot: {LOCATE_WHY}")
     expect(tile.locator('[data-testid="reason-identify"]')).to_have_text(f"Cannot: {LOCATE_WHY}")
     expect(tile.locator('[data-testid="identify-seconds"]')).to_be_disabled()
+    button.scroll_into_view_if_needed()          # the Details card may be below the fold
     button.click(force=True)                     # aria-disabled: an interlock, nothing is sent
-    expect(tile.locator('[data-testid="identify-result"]')).to_contain_text("Nothing was run.")
+    expect(tile.locator('[data-testid="identify-result"]')).to_contain_text("Nothing was run.",
+                                                                            timeout=T)
     expect(tile.locator('[data-testid="identify-result"]')).to_contain_text(
         "$ identify 192.168.10.101:6900 --seconds 5  (not run)")
     assert psim.boards[BOARD]["locate_until"] == 0.0 and psim.locates == []
