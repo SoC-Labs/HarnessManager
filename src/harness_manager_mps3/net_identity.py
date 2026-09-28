@@ -250,6 +250,8 @@ class Mps3NetIdentity:
         self._mu = threading.Lock()
         self._read: dict[str, Any] | None = None
         self._read_at = 0.0
+        self._quick: dict[str, Any] | None = None
+        self._quick_at = 0.0
         self._hub_rec: dict[str, Any] | None = None
         self._live: Any = None
         #: How the last change reached the board, and the setter that made it (tests).
@@ -278,30 +280,42 @@ class Mps3NetIdentity:
     # -- reading --------------------------------------------------------------------------------
 
     def read(self, *, refresh: bool = False, cheap: bool = False) -> dict[str, Any] | None:
+        """A FULL read (``refresh``, or none cached within ``READ_TTL_S``): the ``identity``
+        verb when the image has it, else identify (LAN) or ``stats.mac``; it knows the
+        image's features (``feature_known``). ``cheap`` (``info``): the last full read (marked
+        ``last_check`` when old), else identify on the LAN (cached apart: it never stands in
+        for a full read), else nothing; never a control-port connection."""
         now = time.monotonic()
         with self._mu:
-            cached = self._read
-            fresh = cached is not None and now - self._read_at < READ_TTL_S
+            full, full_at = self._read, self._read_at
+            quick, quick_at = self._quick, self._quick_at
         if cheap:
-            if cached is not None:
-                return cached if fresh else {**cached, "last_check": True}
+            if full is not None:
+                return full if now - full_at < READ_TTL_S else {**full, "last_check": True}
+            if quick is not None and now - quick_at < READ_TTL_S:
+                return quick
             if self._tunnelled():
                 return None                     # through a hub: never a call from info
             out = self._from_identify(impl="")
-        elif not refresh and fresh:
-            return cached
+            if out is not None:
+                out["feature_known"] = False
+                with self._mu:
+                    self._quick, self._quick_at = out, now
+            return out
+        if not refresh and full is not None and now - full_at < READ_TTL_S:
+            return full
+        live = self.live()
+        if FEATURE in live.features:
+            reply = self._shell().call_raw(lambda c, _tap: request(c, {"op": "identity"}))
+            if not reply.get("ok"):
+                raise set_error(reply, "identity")
+            out = parse_identity(reply, impl=live.impl)
         else:
-            live = self.live()
-            if FEATURE in live.features:
-                reply = self._shell().call_raw(lambda c, _tap: request(c, {"op": "identity"}))
-                if not reply.get("ok"):
-                    raise set_error(reply, "identity")
-                out = parse_identity(reply, impl=live.impl)
-            else:
-                out = None if self._tunnelled() else self._from_identify(impl=live.impl)
-                if out is None:                     # through a hub, or no identify: stats.mac
-                    out = self._from_stats(impl=live.impl or "bare-metal")
+            out = None if self._tunnelled() else self._from_identify(impl=live.impl)
+            if out is None:                     # through a hub, or no identify: stats.mac
+                out = self._from_stats(impl=live.impl or "bare-metal")
         if out is not None:
+            out["feature_known"] = True
             with self._mu:
                 self._read, self._read_at = out, now
         return out
@@ -405,7 +419,7 @@ class Mps3NetIdentity:
         if impl and impl != IMPL_LINUX:
             return ("UNAVAILABLE", "the bare-metal harness has no identity store: its label, IP "
                     "and MAC are compiled into the firmware (MPS3_MAC0..5, MPS3_DEFAULT_IP_*)", "")
-        if not reported.get("feature"):
+        if not reported.get("feature") and reported.get("feature_known"):
             if self.setter is not None:
                 return "", "", ""
             return "UNAVAILABLE", PENDING_WHY, ""
@@ -440,7 +454,7 @@ class Mps3NetIdentity:
         out = self._setter()(self._session, dict(want))
         self.last_set = dict(out)
         with self._mu:
-            self._read = None                   # the next read asks the board
+            self._read = self._quick = None     # the next read asks the board
         return out
 
     def warm_reboot(self, progress: Any, wait_s: float) -> dict[str, Any]:
@@ -452,7 +466,7 @@ class Mps3NetIdentity:
                                                "reboot verb): nothing was rebooted")
         witness = slots.reboot(progress=progress, wait_s=wait_s)
         with self._mu:
-            self._read = None
+            self._read = self._quick = None
             self._live = None
         resets = getattr(self._session, "resets", None)
         if resets is not None and callable(getattr(resets, "refresh", None)):
