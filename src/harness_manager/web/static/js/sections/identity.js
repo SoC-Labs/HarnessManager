@@ -43,7 +43,11 @@ function problemText(st) {
   const bad = (st.findings || []).filter((f) => f.level === "err" || f.level === "warn");
   if (!bad.length) return "";
   const head = st.status === "clash" ? "Identity clash: " : st.status === "unset" ? "Identity not set: " : "Not its hub entry: ";
-  return head + bad.map((f) => f.text).join("; ") + ".";
+  const text = bad.map((f) => f.text).join("; ");
+  // V7-ALIGN: the finding already says "identity not set (default label, ...)": not twice.
+  const lead = head.slice(0, -2).toLowerCase();
+  if (text.toLowerCase().startsWith(lead)) return text.charAt(0).toUpperCase() + text.slice(1) + ".";
+  return head + text + ".";
 }
 
 function FixDialog({ bid, st, onClose }) {

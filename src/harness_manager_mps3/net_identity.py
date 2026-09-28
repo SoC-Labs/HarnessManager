@@ -4,19 +4,31 @@
 rules every front end shares are ``harness_manager.services.board_identity``'s, and the
 design is docs/design/BOARD_IDENTITY.md.
 
-What the board says (net-protocol v0.16, the Linux lead's contract of 2026-09-28; images
-rc2_v7/v7n):
+What the board says (net-protocol v0.16 AS SHIPPED, platform ``feat/linux-harness`` 18622e5;
+images rc2_v7/v7n; V7-ALIGN checked every point below against that commit):
 
 - **6900 ``identity``** (a read, any peer), when ``version.features`` has ``identity``:
   ``{label, hostname, ip ("a.b.c.d/n"), mac (12 hex), source{field: override|stage0|default|
   label}, stage0{label, ip, mac}, override, pending, persist}``;
 - **6900 ``identity_set``** (CLAIM-LOCKED like ``slot``/``usd``): any of ``{label, hostname, ip,
-  mac}`` or ``{"clear": true}`` -> ``{persisted, pending, applies: "reboot"}``; codes
-  ``locked``, ``no_persist`` (netboot or no card: the stage0 bake IS the identity),
-  ``invalid`` (names the field). It applies at the next WARM ``reboot``;
+  mac}`` (``""`` DROPS that key from the override) or ``{"clear": true}`` -> ``{op, persisted,
+  pending, applies: "reboot"}``; refusals IN THIS ORDER: ``locked`` (checked first, whatever
+  the request holds), ``no_persist`` (netboot or no card: the stage0 bake IS the identity),
+  ``invalid`` ("invalid <field>: <why>"); ``io`` for a write that failed. It applies at the
+  next WARM ``reboot``. The label is 1-19 of ``[A-Z0-9-]`` (a stage0 bake holds 8);
+- **the new replies carry ``"op"``** (``identity``, ``identity_set``, ``locate``), unlike the
+  older verbs: tolerated, never required;
+- **bare metal** (a v0.16 coordinator) answers both ``identity not supported``, code
+  ``not_supported``; an image older than v0.16 answers ``unknown op``;
 - **identify** (UDP 6899, the board's own network only) has ``mac`` and ``ip`` on every image
-  and ``label`` from v0.16. An image without ``identity`` is read from identify on the LAN
-  and from ``stats.mac`` through a hub (UDP does not cross the tunnel).
+  and ``label`` from v0.16 (after ``ssh``, before ``ports``). Its ``ip`` is the resolved static
+  address, EXCEPT while a DHCP lease is held (``dhcp: true``): then it is the lease, which is
+  not the board's identity (HM keeps it as ``lease`` and leaves ``ip`` empty). An image
+  without ``identity`` is read from identify on the LAN and from ``stats.mac`` through a hub
+  (UDP does not cross the tunnel);
+- **the default hostname** is the label in lower case (``mps3-01`` after board 1's bake;
+  ``mps3`` without one); it was ``mps3-harness``. HM files the board's SSH key by board id
+  (``claim.host_key_alias``), never by host name, so nothing here depends on it.
 
 What Harness Manager adds here:
 
@@ -96,35 +108,54 @@ def parse_identity(raw: Mapping[str, Any], *, impl: str = "", via: str = "identi
         return out
 
     label = raw.get("label")
-    return {
+    ip = raw.get("ip") if isinstance(raw.get("ip"), str) else ""
+    lease = ""
+    if via == "identify" and raw.get("dhcp") is True:
+        # v0.16: identify's ip is the DHCP lease while one is held, not the board's identity
+        # (its static address is then a secondary): never compared, kept as ``lease``
+        ip, lease = "", ip
+    out = {
         "label": label if isinstance(label, str) else "",
         "hostname": raw.get("hostname") if isinstance(raw.get("hostname"), str) else "",
-        "ip": raw.get("ip") if isinstance(raw.get("ip"), str) else "",
+        "ip": ip,
         "mac": BI.norm_mac(raw.get("mac")),
         "source": {k: str(v) for k, v in src.items() if k in BI.FIELDS},
         "stage0": sub("stage0"), "override": sub("override"), "pending": sub("pending"),
         "persist": persist if isinstance(persist, bool) else None,
         "via": via, "feature": via == "identity", "impl": impl, "at": _iso(at),
     }
+    if lease:
+        out["lease"] = lease
+    return out
 
 
 def request(client: Any, msg: dict[str, Any]) -> dict[str, Any]:
-    """One request pyverify does not model (``identity``, ``identity_set``: v0.16), on the
+    """One request the VENDORED pyverify does not model (``identity``, ``identity_set``: v0.16;
+    pyverify at 18622e5 has ``identity()``/``identity_set()``, the same raw request), on the
     connection ``Mps3Shell.call_raw`` opened (``panel._request``'s way)."""
     return client._request(msg)
 
 
+#: V7-ALIGN: a v0.16 bare-metal coordinator declines both verbs with this code.
+NOT_SUPPORTED_WHY = ("the bare-metal harness has no identity store: its label, IP and MAC are "
+                     "compiled into the firmware (MPS3_MAC0..5, MPS3_DEFAULT_IP_*)")
+
+
 def set_error(reply: Mapping[str, Any], what: str = "identity_set") -> HarnessError:
-    """A refused ``identity_set`` as the error Harness Manager shows (the reply's ``code``)."""
+    """A refused ``identity``/``identity_set`` as the error Harness Manager shows (the reply's
+    ``code``: ``locked``, ``no_persist``, ``invalid``, ``not_supported``; ``unknown op`` from an
+    image older than v0.16)."""
     code = slot_words.reply_code(dict(reply))
     err = str(reply.get("err") or "")
+    if code == "not_supported":
+        return UnavailableError(CAPABILITY, f"{NOT_SUPPORTED_WHY} [harness: {err or code}]")
     if code == "no_persist":
         return RefusedError(f"{NETBOOT_WHY} [harness: {err or code}]; nothing was changed",
                             hint=NETBOOT_HINT)
     if code == "invalid":
         return UsageError(f"the board refused the identity: {err or 'invalid'}; nothing was "
-                          "changed", hint="label: fits the LCD row; ip: a.b.c.d/n; mac: unicast, "
-                                          "non-zero")
+                          "changed", hint=f"label: 1-{BI.LABEL_MAX} of A-Z, 0-9 and -; ip: "
+                                          "a.b.c.d/nn (nn 8-30); mac: unicast, non-zero")
     if code == "locked" or slot_words.is_claim_lock(err, code):
         from harness_manager.services.claim import lock_error
 
@@ -415,16 +446,24 @@ class Mps3NetIdentity:
     # -- can it be fixed ------------------------------------------------------------------------
 
     def fix_reason(self, reported: Mapping[str, Any]) -> tuple[str, str, str]:
+        """V7-ALIGN: in the board's order (net-protocol v0.16 ``identity_set``): no identity
+        verbs at all (``not_supported`` / an older image), then the claim (``locked``), then no
+        card (``no_persist``); a bad value (``invalid``) is the caller's, last."""
         impl = str(reported.get("impl") or "")
         if impl and impl != IMPL_LINUX:
-            return ("UNAVAILABLE", "the bare-metal harness has no identity store: its label, IP "
-                    "and MAC are compiled into the firmware (MPS3_MAC0..5, MPS3_DEFAULT_IP_*)", "")
+            return "UNAVAILABLE", NOT_SUPPORTED_WHY, ""
         if not reported.get("feature") and reported.get("feature_known"):
             if self.setter is not None:
                 return "", "", ""
             return "UNAVAILABLE", PENDING_WHY, ""
+        claimed = self._claim_reason()
+        if claimed[0]:
+            return claimed
         if reported.get("persist") is False:
             return "REFUSED", NETBOOT_WHY + "; Harness Manager never sets it", NETBOOT_HINT
+        return "", "", ""
+
+    def _claim_reason(self) -> tuple[str, str, str]:
         claim = getattr(self._session, "claim", None)
         plan = getattr(claim, "lock_plan", None)
         if callable(plan):

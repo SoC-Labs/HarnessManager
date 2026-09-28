@@ -73,9 +73,17 @@ FIELDS = ("label", "hostname", "ip", "mac")
 #: ``source`` "default"), and what every older image gives every board.
 DEFAULT_MAC = "02:00:00:4d:50:53"
 DEFAULT_IP = "192.168.10.101"
-DEFAULT_LABELS = ("MPS3", "MPS3-01")
-#: The LCD row the label is drawn in holds this many characters (clcd.c ``s_board_name``).
-LABEL_MAX = 23
+#: V7-ALIGN: the SHIPPED image default label (identity_core.h ``MPS3_ID_DEFAULT_LABEL``): no
+#: number, the same on every board, so it never makes a label clash on its own.
+DEFAULT_LABEL = "MPS3"
+#: ``MPS3`` and the pre-v0.16 LCD's compiled ``MPS3-01`` (never on the wire; kept for callers).
+DEFAULT_LABELS = (DEFAULT_LABEL, "MPS3-01")
+#: V7-ALIGN (net-protocol v0.16 as shipped): ``identity_set`` takes a label of 1-19 of
+#: ``[A-Z0-9-]`` (the CLCD row-0 field); a stage0 bake (``S0_LABEL``) holds at most 8.
+LABEL_MAX = 19
+LABEL_BAKE_MAX = 8
+#: The host name the board takes (RFC 1123 labels, <= 63 in all).
+HOSTNAME_MAX = 63
 #: A board seen longer ago than this no longer counts for a clash.
 SEEN_MAX_AGE_S = 14 * 24 * 3600.0
 #: A report that did not change is written to seen.json at most this often (info polls).
@@ -88,8 +96,12 @@ STATUS_UNSET = "unset"
 STATUS_DIFFERS = "differs"
 STATUS_CLASH = "clash"
 STATUS_UNKNOWN = "unknown"
-_LABEL_RE = re.compile(r"^[\x20-\x7e]{1," + str(LABEL_MAX) + r"}$")
-_HOSTNAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+_LABEL_RE = re.compile(r"^[A-Z0-9-]{1," + str(LABEL_MAX) + r"}$")
+#: One dot-separated label of a host name (identity_core.c ``id_check_hostname``).
+_HOST_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$")
+#: V7-ALIGN: what an empty string in ``identity_set`` means on the board: that key is DROPPED
+#: from the override (the field then comes from the stage0 bake, else the image default).
+DROP = ""
 
 
 # --- normalising ------------------------------------------------------------------------------
@@ -186,32 +198,76 @@ def hub_mac_suspect(record: Mapping[str, Any]) -> str:
     return ""
 
 
+def hostname_problem(text: str) -> str:
+    """Why the board would refuse this host name (RFC 1123: dot-separated labels of
+    ``[A-Za-z0-9-]``, none starting or ending with ``-``, at most 63 in all), or ``""``."""
+    if not text:
+        return "empty"
+    if len(text) > HOSTNAME_MAX:
+        return f"longer than {HOSTNAME_MAX} characters"
+    if not all(_HOST_LABEL_RE.match(part) for part in text.split(".")):
+        return "not an RFC 1123 host name"
+    return ""
+
+
+def ip_problem(text: str) -> tuple[str, str]:
+    """``(why, "")`` when the board would refuse this address, else ``("", "a.b.c.d/nn")``
+    (no prefix = /24). The board's rules (net-protocol v0.16): the prefix 8-30, a usable host
+    address: not 0/8, 127/8 or >= 224, nor the network or broadcast address of its prefix."""
+    m = re.fullmatch(r"(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:/(\d{1,2}))?", text or "")
+    if not m:
+        return ("empty" if not text else "not a dotted quad"), ""
+    octets = [int(x) for x in m.groups()[:4]]
+    prefix = int(m.group(5)) if m.group(5) is not None else 24
+    if any(o > 255 for o in octets):
+        return "not a dotted quad", ""
+    if not 8 <= prefix <= 30:
+        return "prefix not in 8..30", ""
+    if octets[0] in (0, 127) or octets[0] >= 224:
+        return "not a usable host address", ""
+    value = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]
+    host = 0xFFFFFFFF >> prefix
+    if value & host == 0:
+        return "the network address of its prefix", ""
+    if value & host == host:
+        return "the broadcast address of its prefix", ""
+    return "", "{}.{}.{}.{}/{}".format(*octets, prefix)
+
+
 def validate_want(want: Mapping[str, Any]) -> dict[str, str]:
     """The fields a person asked for, checked as the board checks them (``invalid`` there).
-    ``UsageError`` naming the field; the IP gains /24 when it has no prefix."""
+    ``UsageError`` naming the field; the IP gains /24 when it has no prefix.
+
+    V7-ALIGN: ``""`` is kept (``DROP``): the board takes it as "drop this key from the
+    override" (net-protocol v0.16 ``identity_set``). ``None`` means "not given"."""
     out: dict[str, str] = {}
     for key, value in want.items():
         if key not in FIELDS:
             raise UsageError(f"{key!r} is not an identity field", hint="label, hostname, ip, mac")
-        if value is None or value == "":
+        if value is None:
             continue
         text = str(value).strip()
+        if text == DROP:
+            out[key] = DROP
+            continue
         if key == "label":
             if not _LABEL_RE.match(text):
                 raise UsageError(f"label {text!r} does not fit the LCD row",
-                                 hint=f"1-{LABEL_MAX} printable ASCII characters, e.g. MPS3-02")
+                                 hint=f"1-{LABEL_MAX} of A-Z, 0-9 and -, e.g. MPS3-02 (a stage0 "
+                                      f"bake holds at most {LABEL_BAKE_MAX})")
             out[key] = text
         elif key == "hostname":
-            if not _HOSTNAME_RE.match(text):
-                raise UsageError(f"hostname {text!r} is not a host name",
-                                 hint="lowercase letters, digits and -, e.g. mps3-02")
+            why = hostname_problem(text)
+            if why:
+                raise UsageError(f"hostname {text!r} is not a host name: {why}",
+                                 hint="letters, digits and -, dot-separated, e.g. mps3-02")
             out[key] = text
         elif key == "ip":
-            addr = ip_addr(text if "/" in text else text + "/24")
-            if not addr:
-                raise UsageError(f"ip {text!r} is not an IPv4 address",
-                                 hint="a.b.c.d or a.b.c.d/nn, e.g. 192.168.11.101/24")
-            out[key] = text if "/" in text else f"{addr}/24"
+            why, canon = ip_problem(text)
+            if why:
+                raise UsageError(f"ip {text!r} is not a usable IPv4 address: {why}",
+                                 hint="a.b.c.d or a.b.c.d/nn (nn 8-30), e.g. 192.168.11.101/24")
+            out[key] = canon
         else:
             mac = norm_mac(text)
             if not mac_is_unicast_nonzero(mac):
@@ -242,21 +298,41 @@ def _shown(field_name: str, value: Any) -> str:
     return str(value or "")
 
 
+def label_is_default(label: Any, source: Any) -> bool:
+    """V7-ALIGN: the label is the image default every board gets (``source`` ``default``;
+    with no source, the shipped default ``MPS3``). Such a label is "identity not set", never a
+    clash on its own: board 2 keeps ``MPS3`` until its stage0 identity bake is fielded."""
+    if source:
+        return source == "default"
+    return str(label or "").strip().upper() == DEFAULT_LABEL
+
+
+_NAMES = {"label": "label", "hostname": "hostname", "ip": "IP", "mac": "MAC"}
+
+
 def compare(reported: Mapping[str, Any] | None, hub: Mapping[str, Any] | None,
             others: Sequence[Mapping[str, Any]] = ()) -> list[dict[str, Any]]:
     """The findings, worst first (docs/design/BOARD_IDENTITY.md §4).
 
-    ``others``: ``{who, kind: "board"|"hub", label, ip, mac, hostname}`` for every OTHER
-    board this Harness Manager has seen and every other target the hub lists."""
+    ``others``: ``{who, kind: "board"|"hub", label, ip, mac, hostname, label_source?}`` for
+    every OTHER board this Harness Manager has seen and every other target the hub lists.
+
+    V7-ALIGN: a label that is the image default on EITHER side is not a clash (it is "identity
+    not set"); a duplicate MAC or IP is, whatever its source (two boards on one network)."""
     out: list[dict[str, Any]] = []
     if not reported:
         return out
+    source = reported.get("source") if isinstance(reported.get("source"), Mapping) else {}
+    my_label_default = label_is_default(reported.get("label"), source.get("label"))
     # 1. clashes: the strongest signal
     for o in others:
         who = str(o.get("who") or "another board")
         for f in ("mac", "ip", "label"):
             mine, theirs = reported.get(f), o.get(f)
             if f == "mac" and o.get("kind") == "hub" and o.get("mac_suspect"):
+                continue
+            if f == "label" and (my_label_default or (
+                    o.get("kind") != "hub" and label_is_default(theirs, o.get("label_source")))):
                 continue
             if same(f, mine, theirs):
                 what = {"mac": "MAC", "ip": "IP", "label": "label"}[f]
@@ -267,16 +343,19 @@ def compare(reported: Mapping[str, Any] | None, hub: Mapping[str, Any] | None,
                     text = f"this board reports the same {what} as {who}: {_shown(f, mine)}"
                 out.append(_finding("clash", "err", text, field_name=f, other=who))
     # 2. the image default: every board gets the same one
-    source = reported.get("source") if isinstance(reported.get("source"), Mapping) else {}
     defaults = [f for f in FIELDS if source.get(f) == "default"]
-    if not source and reported.get("mac") and norm_mac(reported.get("mac")) == DEFAULT_MAC:
-        defaults = ["mac"]
+    if not source:
+        if reported.get("mac") and norm_mac(reported.get("mac")) == DEFAULT_MAC:
+            defaults.append("mac")
+        if reported.get("label") and my_label_default:
+            defaults.insert(0, "label")
     if defaults:
         vals = ", ".join(f"{f} {_shown(f, reported.get(f))}" for f in defaults)
+        names = ", ".join(_NAMES[f] for f in defaults)
         out.append(_finding("unset", "warn",
-                            f"identity not set: {vals} {'is' if len(defaults) == 1 else 'are'} "
-                            "the image default, which every board gets",
-                            field_name=",".join(defaults)))
+                            f"identity not set (default {names}): {vals} "
+                            f"{'is' if len(defaults) == 1 else 'are'} the image default, which "
+                            "every board gets", field_name=",".join(defaults)))
     # 3. the board's own hub record
     if hub:
         target = str(hub.get("target") or "its hub target")
@@ -341,8 +420,15 @@ def want_from_hub(hub: Mapping[str, Any] | None) -> tuple[dict[str, str], list[s
 def phrase_for(board_id: str, want: Mapping[str, Any], reported: Mapping[str, Any] | None) -> str:
     """What a person types to go ahead: the board's label after the change, else
     ``IDENTITY <board_id>``."""
+    if want.get("label") == DROP and "label" in want:
+        return f"IDENTITY {board_id}"           # the label goes back to the bake: not known here
     label = str(want.get("label") or (reported or {}).get("label") or "").strip()
     return label or f"IDENTITY {board_id}"
+
+
+def _override_has(reported: Mapping[str, Any] | None, field_name: str) -> bool:
+    ovr = (reported or {}).get("override")
+    return isinstance(ovr, Mapping) and field_name in ovr
 
 
 def plan_fix(board_id: str, reported: Mapping[str, Any] | None, hub: Mapping[str, Any] | None, *,
@@ -365,6 +451,12 @@ def plan_fix(board_id: str, reported: Mapping[str, Any] | None, hub: Mapping[str
         if f not in full:
             continue
         cur = (reported or {}).get(f)
+        if full[f] == DROP:
+            # V7-ALIGN: "" drops the key from the board's override; nothing to drop = no change
+            if _override_has(reported, f):
+                changes.append({"field": f, "from": _shown(f, cur) if f != "ip" else str(cur or ""),
+                                "to": DROP, "drop": True})
+            continue
         if same(f, cur, full[f]) and (f != "ip" or ip_prefix(cur) in (None, ip_prefix(full[f]))):
             continue
         changes.append({"field": f, "from": _shown(f, cur) if f != "ip" else str(cur or ""),
@@ -434,7 +526,8 @@ class SeenIdentities:
             if now - float(rec.get("at") or 0) > SEEN_MAX_AGE_S:
                 continue
             out.append({"who": rec.get("name") or bid, "kind": "board", "board_id": bid,
-                        **{f: rec.get(f, "") for f in FIELDS}})
+                        **{f: rec.get(f, "") for f in FIELDS},
+                        "label_source": rec.get("label_source", "")})
         return out
 
 
@@ -557,13 +650,16 @@ class IdentityService:
                "live": bool(reported) and not (reported or {}).get("last_check")}
         if reported and not reported.get("last_check"):
             rec: dict[str, Any] = {f: reported.get(f, "") for f in FIELDS}
+            src = reported.get("source") if isinstance(reported.get("source"), Mapping) else {}
+            rec["label_source"] = str(src.get("label") or "")     # V7-ALIGN: default = no clash
             rec.update(target=target, address=address, at=time.time(),
                        name=getattr(getattr(session, "candidate", None), "name", "") or "")
             if hub and not hub.get("last_check"):
                 rec["hub"] = dict(hub)
             if refresh:
                 rec["hub_others"] = [o for o in others if o.get("kind") == "hub"]
-            same_report = all(prev.get(k) == rec.get(k) for k in (*FIELDS, "target", "address"))
+            same_report = all(prev.get(k) == rec.get(k)
+                              for k in (*FIELDS, "label_source", "target", "address"))
             if not same_report or refresh or "hub" in rec and prev.get("hub") != rec["hub"] \
                     or time.time() - float(prev.get("at") or 0) > SEEN_REFRESH_S:
                 self.seen.update(bid, **rec)
@@ -595,6 +691,18 @@ class IdentityService:
         if name:
             raise refusal_error(name, message, hint)
 
+    def refusal_first(self, session: Any, reported: Mapping[str, Any] | None) -> None:
+        """V7-ALIGN: the board's order of refusals (net-protocol v0.16 ``identity_set``):
+        ``locked``, then ``no_persist``, then ``invalid``. A value it would refuse is only
+        reported once the board could take a change at all: call this before raising the
+        ``UsageError`` for a bad value. No I/O beyond what ``read`` did."""
+        ad = getattr(session, "net_identity", None)
+        if ad is None or not reported:
+            return
+        name, message, hint = ad.fix_reason(reported)
+        if name:
+            raise refusal_error(name, message, hint)
+
     @staticmethod
     def check_reset(session: Any) -> None:
         """Never while the card is being written or read back: the fix ends in a reboot."""
@@ -616,8 +724,12 @@ class IdentityService:
         say("reading the board's identity and its hub record")
         before = self.status(session, refresh=True) or {}
         reported = before.get("reported")
-        plan = plan_fix(bid, reported, before.get("hub"), want=want, from_hub=from_hub,
-                        clear=clear)
+        try:
+            plan = plan_fix(bid, reported, before.get("hub"), want=want, from_hub=from_hub,
+                            clear=clear)
+        except UsageError:
+            self.refusal_first(session, reported)
+            raise
         if not plan["changes"] or (not clear and not plan["want"]):
             return {"board_id": bid, "action": "none", "changes": [], "verified": True,
                     "identity": before, "notes": ["the board already matches: nothing to do"]
@@ -629,7 +741,7 @@ class IdentityService:
             raise RefusedError("changing a board's identity needs the typed phrase: nothing was "
                                "changed", hint=f"type exactly: {plan['phrase']}")
         body = {"clear": True} if clear else dict(plan["want"])
-        say("setting " + (", ".join(f"{c['field']} {c['to']}" for c in plan["changes"])
+        say("setting " + (", ".join(change_text(c) for c in plan["changes"])
                           if not clear else "the identity back to the stage0 bake"))
         set_reply = ad.set_identity(body)
         say("rebooting the harness (warm: the reboot verb; never an MCC REBOOT)")
@@ -680,13 +792,24 @@ class IdentityService:
                                                                    "board_mac")}}))
 
 
+def change_text(change: Mapping[str, Any]) -> str:
+    """One planned change in words: ``label MPS3-02``, or ``hostname dropped (...)``."""
+    if change.get("drop"):
+        return f"{change['field']} dropped from the board's own setting (back to the stage0 bake, " \
+               "else the image default)"
+    return f"{change['field']} {change['to']}"
+
+
 def _verified(plan: Mapping[str, Any], after: Mapping[str, Any] | None, *,
               clear: bool) -> tuple[bool, list[str]]:
     if not after:
         return False, []
     if clear:
         return not after.get("override") and not after.get("pending"), []
-    bad = [f for f, v in plan["want"].items() if not same(f, after.get(f), v)]
+    src = after.get("source") if isinstance(after.get("source"), Mapping) else {}
+    bad = [f for f, v in plan["want"].items()
+           if (src.get(f) == "override" or _override_has(after, f) if v == DROP
+               else not same(f, after.get(f), v))]
     if after.get("pending"):
         bad.append("pending")
     return not bad, bad

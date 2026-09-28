@@ -6,7 +6,7 @@ docs/API.md "Board identity" (bearer auth and the error envelope as everywhere):
 | Method and path | Returns |
 |---|---|
 | ``GET /boards/{bid}/identity?refresh=`` | ``{board_id, identity}``: ``BoardInfo.net_identity`` read now (the board: one control-port read, or identify; the hub record once per session). ``refresh=true`` asks the hub again, and for its other targets |
-| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, clear?, wait_s?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes}`` |
+| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, unset?, clear?, wait_s?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes}`` |
 
 Rules:
 
@@ -19,6 +19,11 @@ Rules:
   identity is the stage0 bake) or a claim that is not this Harness Manager's; 400 USAGE for
   a value the board would refuse. In the job: 409 HELD while the card is written or read
   back (the reset guard).
+- **V7-ALIGN (net-protocol v0.16 as shipped).** The board's order: the claim (``locked``),
+  then no card (``no_persist``), then a bad value (``invalid``): a 400 for a bad value comes
+  only when the board could take a change at all. ``unset`` (a list of field names) drops
+  those keys from the board's own setting (the wire's ``""``); a field sent as ``""`` is
+  still "not given", as before.
 - **The reboot is the harness's own ``reboot`` verb** (warm), never an MCC REBOOT.
 
 Events: ``board.net_identity`` ``{status, reported, hub}`` when what the board reports, or
@@ -35,6 +40,20 @@ from harness_manager.services import board_identity as BI
 
 from .app import _JSON, JsonBody, RouteContext, _bool, _obj, ok
 from .xvc_api import _flag
+
+
+def _unset(b: dict[str, Any]) -> list[str]:
+    """``unset``: the fields to drop from the board's override (V7-ALIGN)."""
+    value = b.get("unset")
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(k, str) for k in value):
+        raise UsageError("unset must be a list of field names", hint="label, hostname, ip, mac")
+    bad = [k for k in value if k not in BI.FIELDS]
+    if bad:
+        raise UsageError(f"unset: {bad[0]!r} is not an identity field",
+                         hint="label, hostname, ip, mac")
+    return list(dict.fromkeys(value))
 
 
 def _opt_str(b: dict[str, Any], key: str) -> str | None:
@@ -75,6 +94,10 @@ def register(ctx: RouteContext) -> None:
             raise RefusedError("changing a board's identity needs the typed phrase: nothing was "
                                "changed", hint='send {"confirm": "<identity.fix.phrase>"}')
         want = {k: v for k in BI.FIELDS if (v := _opt_str(b, k)) is not None}
+        for k in _unset(b):
+            if k in want:
+                raise UsageError(f"{k} is both set and unset", hint="give one")
+            want[k] = BI.DROP                               # the wire's "": drop that key
         from_hub = _bool(b, "from_hub", False)
         clear = _bool(b, "clear", False)
         if clear and (want or from_hub):
@@ -82,7 +105,11 @@ def register(ctx: RouteContext) -> None:
         if not (want or from_hub or clear):
             raise UsageError("nothing to change", hint="send from_hub, or label/ip/mac/hostname, "
                                                       "or clear")
-        BI.validate_want(want)                              # 400 before the job
+        invalid: UsageError | None = None
+        try:
+            BI.validate_want(want)                          # 400 before the job ...
+        except UsageError as exc:
+            invalid = exc                                   # ... after the board's refusals
         wait = b.get("wait_s")
         if wait is not None and (isinstance(wait, bool) or not isinstance(wait, (int, float))
                                  or wait <= 0):
@@ -93,8 +120,10 @@ def register(ctx: RouteContext) -> None:
             if st is None:
                 raise UnavailableError(BI.CAPABILITY, BI.NO_ADAPTER)
             ref = (st.get("fix") or {}).get("refusal")
-            if ref:                                         # bare metal, netboot, the claim
+            if ref:                                         # bare metal, the claim, netboot
                 raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "")
+            if invalid is not None:                         # the board's order: invalid last
+                raise invalid
             svc.check_lease(s)                              # 409 HELD naming the holder
 
         def run(progress: Callable[[str, int, int], None]) -> Any:

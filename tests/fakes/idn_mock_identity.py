@@ -24,9 +24,11 @@ API = "/api/v1"
 HUB2 = {"target": "mps3_02_pl", "board": "mps3_02", "label": "MPS3-02",
         "board_ip": "192.168.11.101", "prefix": 24, "board_mac": "02:00:00:00:02:fe",
         "hostname": "mps3-02-pl", "discovered_mac": "", "mac_suspect": ""}
+#: V7-ALIGN: a "default" label is always MPS3 on the shipped image, so a board with board 1's
+#: label has it from a bake (board 1's stage0 bake here); the MAC is the image's.
 AS_BOARD1 = {"label": "MPS3-01", "hostname": "mps3-01", "ip": "192.168.10.101/24",
              "mac": "02:00:00:4d:50:53",
-             "source": {"label": "default", "ip": "default", "mac": "default",
+             "source": {"label": "stage0", "ip": "stage0", "mac": "default",
                         "hostname": "label"},
              "stage0": None, "override": None, "pending": None, "persist": True,
              "via": "identity", "feature": True, "impl": "linux", "at": "2026-09-28T13:30:00Z"}
@@ -36,6 +38,11 @@ AS_BOARD2 = {**AS_BOARD1, "label": "MPS3-02", "hostname": "mps3-02", "ip": "192.
                         "hostname": "label"}}
 BOARD1_SEEN = {"who": "mps3-01", "kind": "board", "label": "MPS3-01", "ip": "192.168.10.101/24",
                "mac": "02:00:00:4d:50:53", "hostname": "mps3-01"}
+#: V7-ALIGN: board 2 on rc2_v7 before its identity bake is fielded: the generic label and the
+#: old MAC, its IP already its own (stage0).
+BOARD2_TONIGHT = {**AS_BOARD1, "label": "MPS3", "hostname": "mps3", "ip": "192.168.11.101/24",
+                  "source": {"label": "default", "ip": "stage0", "mac": "default",
+                             "hostname": "label"}}
 
 
 def compose(bid: str, reported: dict[str, Any], hub: dict[str, Any] | None,
@@ -71,6 +78,12 @@ class IdentitySim:
 
     def matching(self, bid: str) -> None:
         self.set(bid, AS_BOARD2)
+
+    def board2_tonight(self, bid: str, *, board1_mac: str = "02:00:00:4d:50:53") -> None:
+        """Board 2 with the generic label and the old MAC; board 1 seen with ``board1_mac``
+        (its own after its bake, or still the old one: a real MAC clash)."""
+        self.set(bid, BOARD2_TONIGHT, others=[{**BOARD1_SEEN, "mac": board1_mac,
+                                               "label_source": "stage0"}])
 
     def get(self, bid: str) -> dict[str, Any] | None:
         with self._mu:

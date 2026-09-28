@@ -119,3 +119,57 @@ def test_twin_a_netbooted_board_is_refused_before_the_job(api):
     err = r.json()["error"]
     assert err["name"] == "REFUSED" and "stage0 bake" in err["message"]
     assert fake.identity_sets == [] and fake.reboots == []
+
+
+# --- V7-ALIGN: the shipped contract (net-protocol v0.16, platform 18622e5) ----------------------
+
+
+@pytest.mark.parametrize("api", [{"persist": False}], indirect=True)
+def test_v7_a_bad_value_on_a_netbooted_board_is_409_for_the_card_not_400(api):
+    """The board's order: ``locked``, ``no_persist``, THEN ``invalid``."""
+    fake, client, bid = api
+    client.get(bid_path(bid) + "/identity", headers=headers())
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "x", "label": "lower-case"},
+                    headers=headers())
+    assert r.status_code == 409, r.text
+    assert "stage0 bake" in r.json()["error"]["message"]
+    assert fake.identity_sets == [] and fake.reboots == []
+
+
+def test_v7_twin_a_bad_value_on_a_board_that_can_take_it_is_400(api):
+    fake, client, bid = api
+    client.get(bid_path(bid) + "/identity", headers=headers())
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "x", "label": "lower-case"},
+                    headers=headers())
+    assert r.status_code == 400 and "A-Z" in r.json()["error"]["hint"]
+    assert fake.identity_sets == []
+
+
+def test_v7_unset_sends_the_wires_empty_string_and_the_key_is_dropped(api):
+    fake, client, bid = api
+    fake.override = {"hostname": "bench"}
+    fake.running = {**fake.running, "hostname": "bench",
+                    "source": {**fake.running["source"], "hostname": "override"}}
+    client.get(bid_path(bid) + "/identity", headers=headers())
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "MPS3", "unset": ["hostname"],
+                                                       "wait_s": 20}, headers=headers())
+    assert r.status_code == 202, r.text
+    job = wait_job(client, r.json()["job"])
+    assert job["state"] == "done", job
+    assert fake.identity_sets[0][1] == {"hostname": ""} and fake.override is None
+    assert job["result"]["verified"] is True
+
+
+def test_v7_twin_an_empty_string_field_is_still_not_given_and_unset_is_checked(api):
+    fake, client, bid = api
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "MPS3", "hostname": ""},
+                    headers=headers())
+    assert r.status_code == 400 and "nothing to change" in r.json()["error"]["message"]
+    for bad in (["colour"], "hostname", [1]):
+        r = client.post(bid_path(bid) + "/identity", json={"confirm": "MPS3", "unset": bad},
+                        headers=headers())
+        assert r.status_code == 400, bad
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "MPS3", "hostname": "a",
+                                                       "unset": ["hostname"]}, headers=headers())
+    assert r.status_code == 400 and "both set and unset" in r.json()["error"]["message"]
+    assert fake.identity_sets == []

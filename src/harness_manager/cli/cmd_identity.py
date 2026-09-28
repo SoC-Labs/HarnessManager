@@ -8,6 +8,8 @@ Verbs::
     harness-manager board identity TARGET --from-hub       make the board match its hub entry
     harness-manager board identity TARGET --label L [--ip A/N] [--mac M] [--hostname H]
     harness-manager board identity TARGET --clear          back to the stage0 bake
+    harness-manager board identity TARGET --unset hostname drop one field of the board's own
+                                                            setting (net-protocol v0.16 "")
 
 A change needs the typed phrase (the new label, else ``IDENTITY <board_id>``; ``--consent``
 gives it; ``--yes`` never does), the lease (behind a hub), the board claimed by this Harness
@@ -27,7 +29,7 @@ import argparse
 import sys
 from typing import Any
 
-from harness_manager.core.errors import ExitCode, RefusedError, UnavailableError
+from harness_manager.core.errors import ExitCode, RefusedError, UnavailableError, UsageError
 from harness_manager.services import board_identity as BI
 
 from .context import Ctx
@@ -52,13 +54,17 @@ def add_parser(sub: Any, parents: list[argparse.ArgumentParser]) -> argparse.Arg
                    help="make the board match its hub entry (label from the hub's board, IP, "
                         "and MAC unless the hub's looks like its own adapter)")
     g.add_argument("--label", default=None, metavar="LABEL",
-                   help="the LCD label, e.g. MPS3-02 (at most 23 characters)")
+                   help=f"the LCD label, e.g. MPS3-02 (1-{BI.LABEL_MAX} of A-Z, 0-9 and -; a "
+                        f"stage0 bake holds at most {BI.LABEL_BAKE_MAX})")
     g.add_argument("--ip", default=None, metavar="A.B.C.D[/N]",
                    help="the board's address, e.g. 192.168.11.101/24 (/24 when no prefix)")
     g.add_argument("--mac", default=None, metavar="MAC",
                    help="the board's MAC, unicast and non-zero, e.g. 02:00:00:00:02:fe")
     g.add_argument("--hostname", default=None, metavar="NAME",
                    help="the board's host name (by default it follows the label)")
+    g.add_argument("--unset", action="append", default=None, choices=BI.FIELDS, metavar="FIELD",
+                   help="drop FIELD (label, hostname, ip, mac) from the board's own setting: it "
+                        "comes from the stage0 bake again, else the image default (repeatable)")
     g.add_argument("--clear", action="store_true",
                    help="drop the board's own setting: back to the stage0 bake, else the "
                         "image default")
@@ -82,7 +88,18 @@ def _service(ctx: Ctx) -> Any:
 
 
 def _want(a: argparse.Namespace) -> dict[str, str]:
-    return {k: getattr(a, k) for k in BI.FIELDS if getattr(a, k, None)}
+    want = {k: getattr(a, k) for k in BI.FIELDS if getattr(a, k, None)}
+    for k in getattr(a, "unset", None) or ():
+        if k in want:
+            raise UsageError(f"--{k} and --unset {k} together", hint="give one")
+        want[k] = BI.DROP                  # the board drops that key from its override
+    return want
+
+
+def _chg(c: dict[str, Any]) -> str:
+    if c.get("drop"):
+        return f"{c['field']} {c['from'] or '-'} -> (dropped: the stage0 bake, else the default)"
+    return f"{c['field']} {c['from'] or '-'} -> {c['to']}"
 
 
 def _fmt(rep: dict[str, Any] | None) -> str:
@@ -121,7 +138,7 @@ def human(board_id: str, st: dict[str, Any] | None) -> list[str]:
     fix = st.get("fix") or {}
     changes = fix.get("changes") or []
     if changes:
-        what = ", ".join(f"{c['field']} {c['from'] or '-'} -> {c['to']}" for c in changes)
+        what = ", ".join(_chg(c) for c in changes)
         ref = fix.get("refusal")
         lines.append(f"fix        {what}: " + (f"cannot: {ref['message']}" if ref else
                                                 "`harness-manager board identity TARGET "
@@ -170,8 +187,6 @@ def cmd_identity(ctx: Ctx) -> int:
     want = _want(a)
     change = bool(a.from_hub or want or a.clear)
     if a.clear and (a.from_hub or want):
-        from harness_manager.core.errors import UsageError
-
         raise UsageError("--clear goes alone", hint="clear first, then set what you want")
     with ctx.board(note="board identity") as (cand, session):
         svc = _service(ctx)
@@ -182,8 +197,15 @@ def cmd_identity(ctx: Ctx) -> int:
             return ExitCode.OK
         if st is None:
             raise UnavailableError(BI.CAPABILITY, BI.NO_ADAPTER)
-        plan = BI.plan_fix(cand.board_id, st.get("reported"), st.get("hub"), want=want,
-                           from_hub=a.from_hub, clear=a.clear)
+        try:
+            plan = BI.plan_fix(cand.board_id, st.get("reported"), st.get("hub"), want=want,
+                               from_hub=a.from_hub, clear=a.clear)
+        except UsageError:
+            # V7-ALIGN: the board's order: locked, then no_persist, then invalid
+            ref = (st.get("fix") or {}).get("refusal")
+            if ref:
+                raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "") from None
+            raise
         if not plan["changes"] or (not a.clear and not plan["want"]):
             ctx.emit(Result("board identity", {"board_id": cand.board_id, "identity": st,
                                                "action": "none", "notes": plan["notes"]},
@@ -195,7 +217,7 @@ def cmd_identity(ctx: Ctx) -> int:
         ref = (st.get("fix") or {}).get("refusal")
         if ref:                                   # before the question: a refusal after it is rude
             raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "")
-        what = ", ".join(f"{c['field']} {c['from'] or '-'} -> {c['to']}" for c in plan["changes"])
+        what = ", ".join(_chg(c) for c in plan["changes"])
         consent = _phrase(ctx, plan["phrase"],
                           f"change the identity of {cand.board_id}: {what}? The harness then "
                           "restarts (its reboot verb, warm: the FPGA is not reloaded) and the "
