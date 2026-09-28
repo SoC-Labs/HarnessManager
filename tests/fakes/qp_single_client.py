@@ -26,18 +26,33 @@ SERIAL-6900 additions (both off by default, so QUIET-POLL's tests see what they 
 - ``close_lag_s``: the lagging close through an SSH forward. The server learns that a client
   closed only that long after it did (ssh forwarded the next channel's open before the old
   channel's EOF), so a connect that follows a close more closely than that is turned away.
+
+FIX-PACK-1: ``transport(lands)`` plays the connect/refusal race in a FIXED order. A real
+connect with a timeout is non-blocking: the kernel completes the handshake, Python polls,
+then reads ``SO_ERROR``. When this front's RST lands before that read, the connect itself
+raises ``ConnectionResetError``; after it, the first send/recv does. Which one won was up to
+the scheduler (the 1-in-3 flake: a connect-time reset was mapped to UNREACHABLE). The
+returned pyverify ``SocketTransport`` waits until this front has decided on ITS connect and,
+when it was turned away, until the refusal reached the socket, then: ``"connect"`` reads
+``SO_ERROR`` as the losing connect does (the reset is raised by the connect), ``"recv"``
+leaves it for the first exchange. A sequence cycles, one entry per connect.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
+import os
 import select
 import socket
 import struct
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from pyverify.client import SocketTransport
 
 #: The soak's source address (any 127/8 address is loopback on Linux).
 SOAK_IP = "127.0.0.2"
@@ -85,6 +100,9 @@ class SingleClientFront:
         self.conns: list[Conn] = []
         self.turned_away: list[tuple[float, str]] = []      # (when, "hm" | "soak")
         self.violations: list[str] = []
+        #: Each connect's outcome in order, "served" or "refused" (a refusal once it is SENT).
+        self.outcomes: list[str] = []
+        self._decided = threading.Condition(self._mu)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._accept, daemon=True, name="qp-front")
         self._thread.start()
@@ -157,10 +175,18 @@ class SingleClientFront:
                     self._active_sock = conn
                     self.conns.append(self._active)
                     active = self._active
+                    self._decide("served")
             if busy:
                 self._refuse(conn)
+                with self._mu:
+                    self._decide("refused")
                 continue
             threading.Thread(target=self._serve, args=(conn, active), daemon=True).start()
+
+    def _decide(self, outcome: str) -> None:
+        """Record a connect's outcome (``_mu`` held) and wake ``transport``'s waiters."""
+        self.outcomes.append(outcome)
+        self._decided.notify_all()
 
     def _refuse(self, conn: socket.socket) -> None:
         if self.turn_away == "rst":
@@ -215,6 +241,48 @@ class SingleClientFront:
         self._stop.set()
         self._srv.close()
         self._thread.join(timeout=2.0)
+
+    # -- the connect/refusal race, in a fixed order (FIX-PACK-1, module docstring) ---------
+
+    def outcome_after(self, n: int, timeout: float = 5.0) -> str:
+        """The outcome of connect number ``n`` (0-based), waiting for this front to decide."""
+        with self._decided:
+            self._decided.wait_for(lambda: len(self.outcomes) > n, timeout)
+            return self.outcomes[n] if len(self.outcomes) > n else ""
+
+    def transport(self, lands: str | Sequence[str] = "connect",
+                  base: type = SocketTransport) -> type:
+        """A ``base`` (pyverify ``SocketTransport``) subclass whose connect to this front ends
+        only once the front decided, with a turn-away's reset landing where ``lands`` says:
+        "connect" (the connect raises it) or "recv" (the first exchange meets it)."""
+        front = self
+        order = itertools.cycle([lands] if isinstance(lands, str) else list(lands))
+        mu = threading.Lock()
+
+        class RacedTransport(base):  # type: ignore[misc, valid-type]
+            #: The resets this class raised from the connect (the tests count them).
+            raised: list[OSError] = []
+
+            def __init__(self, host: str, port: int = 6900, timeout: float = 5.0) -> None:
+                with mu:
+                    where = next(order)
+                with front._mu:
+                    n = len(front.outcomes)
+                super().__init__(host, port, timeout)
+                if front.outcome_after(n, timeout) != "refused":
+                    return                                   # served: an ordinary socket
+                # The refusal was sent: wait until it reached this socket (readable).
+                select.select([self._sock], [], [], timeout)
+                if where != "connect":
+                    return
+                err = self._sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if err:                                      # what the losing connect reads
+                    self._sock.close()
+                    exc = OSError(err, os.strerror(err))
+                    RacedTransport.raised.append(exc)
+                    raise exc
+
+        return RacedTransport
 
 
 def _peer_gone(sock: socket.socket | None) -> bool:

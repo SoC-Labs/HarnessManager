@@ -272,6 +272,12 @@ owners.
   1 s; waiting for our own request (a swap holds the port for its whole run) says so after
   10 s and never counts as another client. Only a refusal that outlasts that is someone
   else, and backs off as before.
+- A read that meets another client's hold of the control port now always answers 409
+  HELD ("another client probably holds the control port"). About one read in three
+  answered 502 UNREACHABLE instead, when the board's reset landed while the connect itself
+  was still finishing; a deploy's swap connection failed the same way. That reset is now
+  a turn-away like any other, retried as our own ghost right after our own close. A
+  connect nothing listens for is still UNREACHABLE.
 - The service answers two identical board reads in flight with one read of the board.
 - `slot status` and `card status` go through the running service like every other read
   (they were refused by its lock). `--overlay-dir` while the service holds the board says

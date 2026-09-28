@@ -492,11 +492,13 @@ class Mps3Deploy:
             try:
                 while True:
                     tap, swap = None, None
-                    tap = _TapTransport(_TimedSocketTransport(host, ctl_port,
-                                                              self.swap_timeout_s))
-                    client = ShellClient(host, port=ctl_port, timeout=self.swap_timeout_s,
-                                         transport=tap)
                     try:
+                        # Inside the try (FIX-PACK-1): a reset that lands during the connect
+                        # is a turn-away too, retried as our own ghost, never "unreachable".
+                        tap = _TapTransport(_TimedSocketTransport(host, ctl_port,
+                                                                  self.swap_timeout_s))
+                        client = ShellClient(host, port=ctl_port, timeout=self.swap_timeout_s,
+                                             transport=tap)
                         with client:
                             swap = _ReportingClient(client, report, total)
                             orchestrator = SwapOrchestrator(swap, pusher,
@@ -826,8 +828,11 @@ def _check_usercode(entry: CatalogueEntry, running: str | int | None) -> Preflig
 def _ghost(exc: BaseException, tap: _TapTransport | None, swap: Any) -> bool:
     """The swap connection was turned away at its first exchange (SERIAL-6900): closed
     unanswered or reset before any reply line, nothing parked. A refused connect (nothing
-    listens) is not: that is no ghost."""
-    if tap is None or tap.replies or isinstance(exc, ConnectionRefusedError):
+    listens) is not: that is no ghost. A reset that lands during the connect itself (no tap
+    yet: the RST beat the socket's own check) is the same turn-away (FIX-PACK-1)."""
+    if tap is None:
+        return isinstance(exc, (ConnectionResetError, ConnectionAbortedError))
+    if tap.replies or isinstance(exc, ConnectionRefusedError):
         return False
     if swap is not None and (getattr(swap, "parked", False) or getattr(swap, "committing", False)):
         return False

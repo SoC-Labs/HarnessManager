@@ -36,6 +36,7 @@ from harness_manager.engine import Engine
 from harness_manager.services import quiet
 from harness_manager.services.slots import SlotService
 from harness_manager_mps3 import ctlgate
+from harness_manager_mps3 import deploy as deploymod
 from harness_manager_mps3 import pack as packmod
 from harness_manager_mps3.pack import Mps3Pack
 from harness_manager_mps3.shell import ShellProbes
@@ -371,11 +372,12 @@ TURNED_AWAY = "closed the connection"
 
 
 @contextmanager
-def card_board(tmp_path: Path, **front_kw: Any) -> Iterator[tuple[Any, SingleClientFront, Any]]:
+def card_board(tmp_path: Path, turn_away: str = "eof",
+               **front_kw: Any) -> Iterator[tuple[Any, SingleClientFront, Any]]:
     root = tmp_path / "overlays"
     make_overlay(root, "synth", rm_id=SYNTH_RM_ID, static_id=LINUX_SID)
     fake = slot_board(usd_card="da", boot_rm_id=SYNTH2_RM_ID)
-    front = SingleClientFront(fake, turn_away="eof", **front_kw)
+    front = SingleClientFront(fake, turn_away=turn_away, **front_kw)
     pk = Mps3Pack(console_ports=fake.console_ports, push_port=fake.raw_tcp_port,
                   tftp_port=fake.tftp_port)
     session = pk.open(pk.candidate_for_host(front.endpoint))
@@ -444,6 +446,32 @@ def test_twin_the_same_program_without_the_retry_is_refused(tmp_path, capsys, mo
         rc, _out, err = program(capsys, monkeypatch, fake, front, tmp_path)
         assert rc != 0 and ("closed the connection" in err or "reset the connection" in err), err
         assert fake.commits == []
+
+
+def test_a_swap_connect_the_board_resets_during_the_connect_is_our_ghost(tmp_path, capsys,
+                                                                         monkeypatch):
+    """FIX-PACK-1: the swap's connection opened inside the board's reap window, turned away
+    with a RESET that lands during the connect itself (the fake fixes that order). It was
+    raised outside the ghost retry, so the program failed UNREACHABLE; now it is retried like
+    every other turn-away and the program goes through."""
+    with card_board(tmp_path, turn_away="rst", close_lag_s=0.3) as (fake, front, _session):
+        raced = front.transport("connect", base=deploymod._TimedSocketTransport)
+        monkeypatch.setattr(deploymod, "_TimedSocketTransport", raced)
+        rc, out, err = program(capsys, monkeypatch, fake, front, tmp_path)
+        assert rc == 0, err
+        assert json.loads(out)["result"]["verified"] and fake.commits
+        assert raced.raised, "the swap's connect met the reset at least once"
+        gate = ctlgate.gate_for(ctlgate.key_of_address(front.endpoint, 6900))
+        assert gate.stats.reaped >= len(raced.raised)
+
+
+def test_twin_a_refused_swap_connect_is_no_ghost():
+    """Twin: nothing listening (ECONNREFUSED) is not a turn-away, with or without a tap; a
+    reset during the connect (no tap yet) is."""
+    assert not deploymod._ghost(ConnectionRefusedError(111, "refused"), None, None)
+    assert deploymod._ghost(ConnectionResetError(104, "reset"), None, None)
+    assert deploymod._ghost(ConnectionAbortedError(10053, "aborted"), None, None)
+    assert not deploymod._ghost(TimeoutError("slow"), None, None)
 
 
 def gaps(front: SingleClientFront, since: float) -> list[float]:

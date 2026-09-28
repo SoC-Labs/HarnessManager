@@ -224,9 +224,12 @@ def _is_ebusy(exc: HeldError) -> bool:
 
 def _turned_away_at_once(exc: HeldError, taps: Sequence[Any]) -> bool:
     """The board accepted and closed (or reset) the connection before any reply line: the
-    single-client refusal, not EBUSY, a settling swap, or our own gate's wait."""
+    single-client refusal, not EBUSY, a settling swap, or our own gate's wait. A reset that
+    lands during the connect itself (``at_connect``, no tap yet) is the same refusal."""
     if _is_ebusy(exc) or isinstance(exc, SwapSettlingError) or ctlgate.is_own_request(exc):
         return False
+    if getattr(exc, "at_connect", False):
+        return True
     return bool(taps) and not any(getattr(t, "replies", 0) for t in taps)
 
 
@@ -480,6 +483,18 @@ class Mps3Shell:
                 f"shell at {where} refused the connection",
                 hint="nothing listens on the control port: is the board powered and the "
                      "harness running?") from exc
+        except (ConnectionResetError, ConnectionAbortedError) as exc:
+            # FIX-PACK-1: the board ACCEPTED the connect and reset it before the connect
+            # call returned (the RST beat the socket's own SO_ERROR check; Windows reports
+            # WSAECONNABORTED). That is the single-client turn-away seen one step earlier,
+            # never "unreachable": HELD, and our own ghost's retry covers it
+            # (``_turned_away_at_once``). Before the fix it answered 502 UNREACHABLE about
+            # one explicit read in three while another client held the port.
+            err = HeldError(
+                f"shell at {where} reset the connection",
+                hint="another client probably holds the control port, or the board is restarting")
+            err.at_connect = True                    # turned away before any exchange
+            raise err from exc
         except TimeoutError as exc:
             raise ShellSilentError(
                 f"shell at {where} did not answer within {self.timeout}s",

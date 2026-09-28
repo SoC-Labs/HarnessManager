@@ -27,6 +27,7 @@ with warnings.catch_warnings():
 from harness_manager.daemon.app import create_app
 from harness_manager.settings import runtime
 from harness_manager_mps3 import ctlgate
+from harness_manager_mps3 import shell as shellmod
 from harness_manager_mps3.shell import ShellProbes
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, PanelVirtualMps3
 from tests.fakes.l4_service import H
@@ -353,12 +354,53 @@ def test_twin_another_clients_held_port_still_backs_off(q):
         q.front.release()
 
 
-def test_twin_an_explicit_read_while_busy_keeps_todays_error(q):
+@pytest.mark.parametrize("lands", ["connect", "recv"])
+def test_twin_an_explicit_read_while_busy_keeps_todays_error(q, monkeypatch, lands):
+    """FIX-PACK-1: this failed about 1 in 3, alone: the other client's RST sometimes landed
+    DURING the connect (Python reads ``SO_ERROR`` after its poll), which was mapped to 502
+    UNREACHABLE. The fake now fixes the race's order (``SingleClientFront.transport``): the
+    reset lands in the connect, or at the first exchange. Both are the turn-away: 409 HELD."""
     q.view()
+    monkeypatch.setattr(shellmod, "SocketTransport", q.front.transport(lands))
     q.front.hold()
+    try:
+        r = q.explicit()
+        assert r.status_code == 409, r.text
+        assert r.json()["error"]["name"] == "HELD"
+    finally:
+        q.front.release()
+
+
+def test_a_turn_away_is_held_whatever_the_retry_history(q, monkeypatch):
+    """FIX-PACK-1: straight after our own close (the board opened a moment ago), a
+    turn-away is retried as our own ghost (SERIAL-6900, 20 x 50 ms). The resets alternate
+    between the connect and the first exchange: every one is retried, and the answer after the
+    last is HELD, never the UNREACHABLE the last retry's connect used to give."""
+    q.view()
+    monkeypatch.setattr(shellmod, "SocketTransport", q.front.transport(["recv", "connect"]))
+    q.front.hold()
+    gate = q.engine.session(q.bid).shell.gate()
+    reaped, t0 = gate.stats.reaped, time.monotonic()
+    try:
+        r = q.explicit()
+    finally:
+        q.front.release()
+    assert r.status_code == 409 and r.json()["error"]["name"] == "HELD", r.text
+    assert gate.stats.reaped - reaped == len(ctlgate.REAP_RETRY_S)
+    assert len(q.front.refused("hm", t0)) == len(ctlgate.REAP_RETRY_S) + 1
+
+
+def test_twin_nothing_listening_is_still_unreachable_not_held(q, monkeypatch):
+    """FIX-PACK-1 twin: a connect REFUSED (nothing listens on 6900) is not a turn-away: it
+    is not retried as a ghost and stays UNREACHABLE (502), exactly as before."""
+    q.view()
+    monkeypatch.setattr(shellmod, "SocketTransport", q.front.transport("connect"))
+    q.front.close()                                    # the listener is gone: ECONNREFUSED
+    gate = q.engine.session(q.bid).shell.gate()
+    reaped = gate.stats.reaped
     r = q.explicit()
-    assert r.status_code == 409 and r.json()["error"]["name"] == "HELD"
-    q.front.release()
+    assert r.status_code == 502 and r.json()["error"]["name"] == "UNREACHABLE", r.text
+    assert gate.stats.reaped == reaped
 
 
 def test_the_presence_beat_backs_off_too_and_never_retries_within_a_beat(q):
