@@ -206,10 +206,10 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
         _row("mps3.overlay_dirs", "list", [], "Harness + kits",
              "Extra overlay directories, searched first", at="overlays.py:317",
              env="HARNESS_MANAGER_MPS3_OVERLAY_DIRS", env_split="pathsep"),
-        # C1: the pack's kwarg console_pace_s (pack.py:366), paced consoles constants.py:31
+        # C1: the pack's kwarg console_pace_s (pack.py:375), paced consoles constants.py:31
         _row("mps3.console.pace_ms", "int", round(console_pace_s * 1000), "Consoles",
              "Delay between characters typed into the DUT's UARTs (0: none; the nanoSoC "
-             "UART has no receive FIFO)", at="pack.py:366", scope="pack", apply="reopen",
+             "UART has no receive FIFO)", at="pack.py:375", scope="pack", apply="reopen",
              check=_ms(0, 500)),
         # C2: MccTiming.pace_s over the Debug USB; SHARE_PACE_S across a hub share
         _row("mps3.mcc.pace_ms", "int", round(mcc_pace_s * 1000), "Consoles",
@@ -220,9 +220,9 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              "Delay between characters sent to the MCC across a hub share",
              at="mcc.py:150", scope="pack", apply="reopen", advanced=True,
              check=_ms(50, 1000, " (the MCC drops faster input)")),
-        # D4: the pack's kwarg rbb_port (pack.py:364), via --pack-overrides (daemon start passes it on)
+        # D4: the pack's kwarg rbb_port (pack.py:373), via --pack-overrides (daemon start passes it on)
         _row("mps3.rbb_port", "int", rbb_port, "Debug",
-             "The board's remote_bitbang JTAG port", at="pack.py:364", scope="pack",
+             "The board's remote_bitbang JTAG port", at="pack.py:373", scope="pack",
              owner="dev", apply="restart", check=_port),
         # D5
         _row("mps3.xvc_port", "int", _c.XVC_PORT, "Debug",

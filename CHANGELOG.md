@@ -166,6 +166,11 @@ owners.
 - `xvc status` (and Debug > Fabric) says what the board reports now: a board found by UDP
   identify, or read while another client held its control port, no longer says "needs
   harness firmware with 'xvc_dbgbr'" while the board reports it.
+- Ready for net-protocol v0.18 (mint 4): a harness that lists `mccif` (in-fabric SCC) or
+  `mcc_local` (USB loopback) offers board reboot and oscillators without the Debug USB,
+  gated on the route its `mcc status` reports. Rebooting and oscillators over the harness
+  say "pending v0.18" until Harness Manager drives them; the Debug USB and the hub work as
+  before.
 - The MCC temperature says what it measures: "the SLR0 die diode via U53 (MPS3 schematic
   p4); not ambient" (was "sensor identity unverified").
 - A reboot of a Linux board waits up to 300 s by default (was 180 s): with the Linux

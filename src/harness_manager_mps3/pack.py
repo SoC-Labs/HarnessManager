@@ -232,6 +232,7 @@ class Mps3Session(BoardSession):
             ("card", "card", "make_card_adapter"),           # CCR LS-1: user microSD (D13)
             ("display", "display", "make_display_adapter"),  # LM2: the live LCD mirror
             ("net_identity", "net_identity", "make_identity_adapter"),  # BOARD-ID: label/IP/MAC
+            ("harness_mcc", "harness_mcc", "make_harness_mcc_adapter"),  # FIX-PACK-2: v0.18 MCC
         ):
             make = _hook(module, factory)
             if make is not None:
@@ -264,8 +265,16 @@ class Mps3Session(BoardSession):
 
         - ``discover_network``: a recent identify answer from the board is the proof
           (``identify.DiscoverWitness``); through a hub it is "not through a hub".
+        - ``reboot_board``/``clock_board`` offered only by the harness's MCC route (v0.18
+          ``mccif``/``mcc_local``): the route ``mcc status`` reports must serve the act, and
+          Harness Manager must drive it (``harness_mcc``: reboot and osc are PENDING v0.18).
         """
         out: dict[str, str] = {}
+        hmcc = getattr(self, "harness_mcc", None)
+        if hmcc is not None:
+            out.update(hmcc.capability_reasons(
+                available, tuple(getattr(identity, "features", ()) or ()),
+                [lk.kind for lk in self.candidate.links]))
         if C.DISCOVER_NETWORK in available:
             witness = getattr(self, "_discover", None)
             if witness is None:

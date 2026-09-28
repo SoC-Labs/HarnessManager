@@ -881,7 +881,8 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         adapter = state.session(bid).controller
         if adapter is None:
             raise UnavailableError(C.REBOOT_BOARD, "needs the Debug USB cable, a networked "
-                                                   "power plug, or the J7 mod + 'mcc' firmware")
+                                                   "power plug, or harness firmware with "
+                                                   "'mccif' or 'mcc_local' (net-protocol v0.18)")
         # No wait_s: the adapter picks it by harness implementation (T12: Linux waits longer).
         wait_s = float(body["wait_s"]) if body.get("wait_s") is not None else None
         return _accepted(state.jobs.start(

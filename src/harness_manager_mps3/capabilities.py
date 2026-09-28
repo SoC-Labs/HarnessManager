@@ -37,6 +37,17 @@ NEEDS_LCD_MIRROR = "needs the Linux harness with lcd_mirror and a claimed board"
 #: recent identify answer the proof (identify.DiscoverWitness), and names a hub or tunnel.
 NEEDS_ETHERNET_LAN = ("needs an Ethernet link on the board's own network (identify is UDP "
                       "6899)")
+#: FIX-PACK-2 item 2: the MCC through the harness (net-protocol v0.18, mint 4): the features
+#: ``mccif`` (in-fabric SCC) and ``mcc_local`` (the USB loopback), with the route read from
+#: ``mcc status`` (``harness_mcc.py``); ``mcc`` is the pre-v0.18 alias (the J7 mod).
+HARNESS_MCC = ("mccif", "mcc_local", "mcc")
+NEEDS_MCC_HARNESS = "harness firmware with 'mccif' or 'mcc_local' (net-protocol v0.18)"
+
+
+def _via_harness_mcc(*links: L) -> tuple:
+    """One route per harness MCC feature name (any of them; ``mcc status`` says the route)."""
+    return tuple(via(*links, features=(f,)) for f in HARNESS_MCC)
+
 
 SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.IDENTIFY, "Identify the harness", (via(L.ETHERNET), via(L.HUB))),
@@ -61,11 +72,11 @@ SPECS: tuple[CapabilitySpec, ...] = (
                    (via(L.USB_SERIAL), via(L.HUB)), needs_hint=NEEDS_USB),
     CapabilitySpec(C.REBOOT_BOARD, "Reboot the board (reload from SD)",
                    (via(L.USB_SERIAL), via(L.USB_MSD), via(L.HUB), via(L.SMART_POWER),
-                    via(L.ETHERNET, features=("mcc",))),
-                   needs_hint=NEEDS_USB + ", a networked power plug, or the J7 mod + 'mcc' firmware"),
+                    *_via_harness_mcc(L.ETHERNET)),
+                   needs_hint=NEEDS_USB + ", a networked power plug, or " + NEEDS_MCC_HARNESS),
     CapabilitySpec(C.CLOCK_BOARD, "Board oscillators",
-                   (via(L.USB_SERIAL), via(L.HUB), via(L.ETHERNET, features=("mcc",))),
-                   needs_hint=NEEDS_USB + ", or the J7 mod + 'mcc' firmware"),
+                   (via(L.USB_SERIAL), via(L.HUB), *_via_harness_mcc(L.ETHERNET)),
+                   needs_hint=NEEDS_USB + ", or " + NEEDS_MCC_HARNESS),
     CapabilitySpec(C.STORAGE_BACKUP, "Back up the configuration SD", (via(L.USB_MSD), via(L.HUB)),
                    needs_hint=NEEDS_USB + " (or a card reader)"),
     CapabilitySpec(C.STORAGE_INSTALL, "Install a harness onto the SD", (via(L.USB_MSD), via(L.HUB)),

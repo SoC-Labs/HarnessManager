@@ -163,7 +163,7 @@ harness-manager info 192.168.10.101
 control    idle
 can        clock_dut, console_dut, debug_dut, deploy_partial, health, identify, reset_dut
 cannot     console_controller: needs the Debug USB cable
-cannot     reboot_board: needs the Debug USB cable, a networked power plug, or the J7 mod + 'mcc' firmware
+cannot     reboot_board: needs the Debug USB cable, a networked power plug, or harness firmware with 'mccif' or 'mcc_local' (net-protocol v0.18)
 cannot     power_cycle: needs a networked power plug in boards.toml (Shelly, Tasmota or NETIO)
 ```
 
