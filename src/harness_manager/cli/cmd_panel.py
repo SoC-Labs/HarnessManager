@@ -281,7 +281,11 @@ def _show_human(body: dict[str, Any]) -> list[str]:
 
 
 def _mirror_human(frame: dict[str, Any]) -> list[str]:
-    rows = list(frame.get("rows") or ())
+    from harness_manager.core.panel import frame_text
+
+    # PANEL-V017: a status glyph (U+0080-U+0086) prints as its one-column stand-in, never as
+    # a C1 control character; --json keeps the characters as the board sent them.
+    rows = list(frame_text(frame.get("rows") or ()))
     width = len(rows[0]) if rows else 40
     out = ["+" + "-" * width + "+"] + [f"|{r}|" for r in rows] + ["+" + "-" * width + "+"]
     if frame.get("source") == "rebuilt":

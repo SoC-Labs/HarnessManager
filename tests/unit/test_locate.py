@@ -277,7 +277,10 @@ def test_the_demo_linux_board_blinks_with_the_banner_on_its_glass():
         panel.locate(5, "bob@lab-pc-03 via HM")
         frame = DemoPanel(engine, BOARD_LINUX).frame()      # a later session sees it too
         assert frame.rows[11].rstrip() == "IDENTIFY: bob@lab-pc-03 via HM"
-        assert frame.roles[400:520] == "i" * 120, "rows 10-12 inverted"
+        # PANEL-V017: the wire's letter for the harness's IDENTIFY banner, banner-busy ("t"),
+        # never "i" (that is "ok" on the wire)
+        assert frame.roles[400:520] == "t" * 120, "rows 10-12: the banner-busy role"
+        assert {frame.role_at(r, 0) for r in (10, 11, 12)} == {"banner-busy"}
         assert panel.state().banner == "identify"
     finally:
         engine.close_all()

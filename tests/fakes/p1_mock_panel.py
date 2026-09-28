@@ -45,8 +45,10 @@ from harness_manager.core import capabilities as C
 from harness_manager.core.errors import HeldError, UnavailableError
 from harness_manager.core.events import Event
 from harness_manager.core.panel import (
+    ROLE_TEXT,
     SOURCE_PANEL,
     SOURCE_REBUILT,
+    THEME_TODAY,
     PanelEvent,
     PanelFrame,
     PanelSession,
@@ -122,8 +124,9 @@ class SimPanel:
                                  host=self.bid.split("@", 1)[-1].rsplit(":", 1)[0],
                                  owner=self.sim.boards[self.bid]["owner"], wall=time.time())
         b = self.sim.boards[self.bid]
-        return PanelFrame(rows=b["rows"] or LINUX_STATUS_ROWS, roles=b["roles"] or "t" * 600,
-                          source=SOURCE_PANEL, observed_at=time.time())
+        return PanelFrame(rows=b["rows"] or LINUX_STATUS_ROWS, roles=b["roles"] or ROLE_TEXT * 600,
+                          source=SOURCE_PANEL, observed_at=time.time(),
+                          theme=b.get("theme") or THEME_TODAY)
 
     def locate(self, seconds: int, who: str) -> float:
         why = self.support().locate
@@ -191,11 +194,13 @@ class PanelSim:
         self._state_changed(bid)
 
     def set_rows(self, bid: str, rows: tuple[str, ...] | None, *, banner: str = "",
-                 roles: str = "") -> None:
-        """What the glass shows now (None: the healthy status page) and its banner."""
+                 roles: str = "", theme: str = "") -> None:
+        """What the glass shows now (None: the healthy status page), its banner, its role
+        codes (the wire's letters, "" = all text) and the palette (PANEL-V017: ``today`` or
+        ``aligned``, "" = today)."""
         b = self.board(bid)
         b["rows"] = tuple(r.ljust(40)[:40] for r in rows) if rows else None
-        b["roles"], b["banner"] = roles, banner
+        b["roles"], b["banner"], b["theme"] = roles, banner, theme
         self._state_changed(bid)
 
     def watcher(self, bid: str, who: str = "bob@srv03340", role: str = "watch") -> None:

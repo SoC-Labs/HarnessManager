@@ -33,6 +33,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from harness_manager.core import panel_codes as _codes
+
 #: The harness's request line limit (platform ``firmware/common/net_if.h``, MPS3_NET_LINE_MAX).
 LINE_MAX = 256
 WHO_MAX = 20        # user@host (the panel shows 16)
@@ -54,9 +56,47 @@ FAST_BEAT_S = 10.0
 ROLES = ("holder", "owner", "watch")
 #: The panel's text grid.
 ROWS, COLS = 15, 40
-#: Per-cell role codes of a frame (``PanelFrame.roles``, ROWS*COLS characters). A rebuilt
-#: frame uses only ``t`` and ``i``; the Linux harness's renderer (R2/R4) defines the rest.
-ROLE_TEXT, ROLE_INVERTED = "t", "i"
+
+# --- the frame's vocabulary (PANEL-V017: net-protocol v0.17 as the Linux harness shipped it) ---
+#
+# A frame (``PanelFrame.roles``, ROWS*COLS characters) gives each cell a role CODE:
+# ``chr(ord("a") + i)`` for the i-th colour role of design/tokens.json ``panel.roles`` (the
+# order of clcd_palette.h's enum): ``a`` text ... ``i`` ok ... ``q`` banner-err ... ``t``
+# banner-busy, ``u`` banner-held. ``panel_codes`` is GENERATED from tokens.json
+# (tools/gen_panel_codes.py), and the web UI's js/panel_codes.js with it: one vocabulary.
+#: The colour roles in the wire's order (``ROLE_NAMES[i]`` has the code ``chr(97 + i)``).
+ROLE_NAMES: tuple[str, ...] = _codes.ROLES
+#: A status glyph cell is ``chr(code)``, 0x80-0x86 (``\u0080``-``\u0086`` on the wire).
+GLYPH_NAMES: dict[str, str] = {chr(code): g[0] for code, g in _codes.GLYPHS.items()}
+#: The palette a frame's roles are drawn in (the frame's ``theme``): ``today`` = today's
+#: pixels (every role white on black, every ``banner-*`` white on red); ``aligned`` = the
+#: tokens' colours (``--panel-theme aligned``). "" when the harness did not say.
+THEME_TODAY, THEME_ALIGNED = "today", "aligned"
+
+
+def role_code(name: str) -> str:
+    """A role's one-letter code on the wire; ValueError for a name the tokens do not define."""
+    return chr(ord("a") + ROLE_NAMES.index(name))
+
+
+def role_name(code: str) -> str:
+    """A code's role, "" for a code the tokens do not define (drawn as ``text``)."""
+    i = ord(code) - ord("a") if len(code) == 1 else -1
+    return ROLE_NAMES[i] if 0 <= i < len(ROLE_NAMES) else ""
+
+
+def is_banner_role(name: str) -> bool:
+    """The banner roles: white on red in the ``today`` theme (today's inverted rows)."""
+    return name.startswith("banner-")
+
+
+#: What a rebuilt frame (and today's layout) uses: plain text, and today's inverted rows.
+#: The harness's today theme gives an inverted row a banner role: ``banner-err`` unless the
+#: banner says otherwise (the DUT notice is ``banner-held``, an IDENTIFY ``banner-busy``).
+ROLE_TEXT = role_code("text")                 # "a"
+ROLE_INVERTED = role_code("banner-err")       # "q"
+ROLE_DUT_NOTICE = role_code("banner-held")    # "u": "DUT HAS THE DISPLAY", rows 6-8
+ROLE_IDENTIFY = role_code("banner-busy")      # "t": "IDENTIFY: <who>", rows 10-12
 
 SOURCE_PANEL = "panel"       # read from the panel (a harness image with `panel`/`hello`)
 SOURCE_REBUILT = "rebuilt"   # rebuilt by Harness Manager from what it read (no `panel`)
@@ -235,11 +275,30 @@ class PanelState:
 
 @dataclass(frozen=True)
 class PanelFrame:
-    rows: tuple[str, ...]                   # ROWS strings of COLS characters
+    rows: tuple[str, ...]                   # ROWS strings of COLS characters (a glyph: chr(0x80+))
     roles: str = ""                         # ROWS*COLS role codes, or "" when not known
     source: str = SOURCE_PANEL
     observed_at: float = 0.0
     note: str = ""
+    #: PANEL-V017, additive: the palette the roles are drawn in (``THEME_TODAY``,
+    #: ``THEME_ALIGNED``), "" when the harness did not say.
+    theme: str = ""
+
+    def role_at(self, row: int, col: int) -> str:
+        """The cell's role name (``text`` for a code the tokens do not define), "" when the
+        frame carries no roles."""
+        if len(self.roles) != ROWS * COLS:
+            return ""
+        return role_name(self.roles[row * COLS + col]) or "text"
+
+
+def frame_text(rows: Iterable[str]) -> tuple[str, ...]:
+    """The rows for a terminal: a status glyph as its one-column stand-in (the status
+    grammar's ASCII, ``tools/gen_panel_codes.py``), so no C1 control byte is printed."""
+    return tuple("".join(_STAND_IN.get(ch, ch) for ch in str(row)) for row in rows)
+
+
+_STAND_IN = {chr(code): g[2] for code, g in _codes.GLYPHS.items()}
 
 
 @dataclass(frozen=True)

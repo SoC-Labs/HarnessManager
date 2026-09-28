@@ -21,7 +21,11 @@ never sent a hello; its features are looked at again every beat.
 host last read it (the lease service's cached view: no extra hub calls) in RELATIVE seconds,
 and a running job. ``core.panel.hello_message`` caps every field; the worst case is 251 B.
 
-**The reply** is the panel's state and its ring of tap events. ``panel.state`` is published
+**The reply** is the panel's state and its ring of tap events. It is rendered from the
+panel as COMMITTED: what the hello itself asks the panel to draw (the lease badge, a
+lease-request banner) shows from the panel's next refresh, up to 250 ms later, so its
+``banner`` may still be the one before (PANEL-V017). Nothing here waits for it or reads
+it back: the next reply, or a ``panel`` read, carries it. ``panel.state`` is published
 when the state changes; each tap is published once as ``panel.tap`` (de-duplicated by
 ``seq``: the ring is never acknowledged, so every Harness Manager sees every tap). On first
 contact only taps from the last beat are news. A ``seq`` that goes backwards means the
@@ -98,8 +102,10 @@ RIDE_WAIT_S = 5.0
 #: After a beat skipped because a job held the board, try again this soon.
 RETRY_S = 10.0
 TICK_S = 1.0
-#: Reads are rate-limited on the board (docs/design §5.3): the state at most once a second,
-#: a frame at most once every 3 s. Within that, the last answer is reused.
+#: HM's OWN pacing (docs/design §5.3): the state at most once a second, a frame (both
+#: halves) at most once every 3 s; within that, the last answer is reused. The board does
+#: not rate-limit either verb (net-protocol v0.17: every reply is rendered from memory, no
+#: I/O), so this is the only limit: keep it (PANEL-V017).
 STATE_CACHE_S = 1.0
 FRAME_CACHE_S = 3.0
 IDENTIFY_DEFAULT_S = 5

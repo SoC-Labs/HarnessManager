@@ -900,6 +900,10 @@ body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; }
 .panel-mirror.rebuilt { border-style: dashed; border-color: var(--unk-border); }
 .pm-row { white-space: pre; min-height: 1.4em; }
 .pm-inv { background: var(--err); color: var(--on-err); }
+/* PANEL-V017: a status glyph (0x80-0x86) drawn from its 8x16 bitmap, one cell wide; the aligned
+   theme's colours are the glass's own (js/panel_codes.js), set on the runs. */
+.pm-glyph { display: inline-block; width: 1ch; height: 1.4em; vertical-align: top; }
+.pm-glyph svg { display: block; width: 100%; height: 100%; fill: currentColor; }
 .pm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .pm-list li { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 /* PANEL-TRUTH: the Front panel card's one headline, the rebuilt text's legend, and the one

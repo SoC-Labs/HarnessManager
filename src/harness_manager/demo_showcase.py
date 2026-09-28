@@ -67,8 +67,11 @@ from harness_manager.core.model import (
 from harness_manager.core.pack import SlotInfo, SlotStatus
 from harness_manager.core.panel import (
     REBUILT_NOTE,
+    ROLE_IDENTIFY,
+    ROLE_TEXT,
     SOURCE_PANEL,
     SOURCE_REBUILT,
+    THEME_TODAY,
     PanelEvent,
     PanelFrame,
     PanelSession,
@@ -329,18 +332,19 @@ class DemoPanel:
             return rebuilt_frame(name=board.candidate.name, identity=board.identity, host=host,
                                  owner="harness", wall=time.time())
         rows = [r.format(who=_who()[:15]).ljust(40)[:40] for r in SWAP_ROWS_LX]
-        roles = ["t" * 40 for _ in rows]
+        roles = [ROLE_TEXT * 40 for _ in rows]
         if self._blinking():
-            # BOARD_LOCATE.md §2: the banner rows 10-12 inverted, "IDENTIFY: <who>" on row 11.
+            # BOARD_LOCATE.md §2: the banner rows 10-12 inverted, "IDENTIFY: <who>" on row 11,
+            # in the role the Linux harness gives them (banner-busy, PANEL-V017).
             with self._mu:
                 who = self._glass["who"]
             rows[10] = " " * 40
             rows[11] = f"IDENTIFY: {who}".ljust(40)[:40]
             rows[12] = " " * 40
             for r in (10, 11, 12):
-                roles[r] = "i" * 40
+                roles[r] = ROLE_IDENTIFY * 40
         return PanelFrame(rows=tuple(rows), roles="".join(roles), source=SOURCE_PANEL,
-                          observed_at=time.time())
+                          observed_at=time.time(), theme=THEME_TODAY)
 
     def hello(self, hello: Any) -> PanelState:
         why = self.support().presence

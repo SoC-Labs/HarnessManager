@@ -1,14 +1,25 @@
-"""``PanelFakeShell``: the Linux harness's front-panel verbs, as docs/design/CLCD_ALIGNMENT.md
-§2.2, §2.5 and §5.3 define them, on top of ``HarnessFakeShell`` (lane P2).
+"""``PanelFakeShell``: the Linux harness's front-panel verbs on top of ``HarnessFakeShell``
+(lane P2), as the Linux harness SHIPPED them (PANEL-V017: net-protocol v0.17, platform
+feat/panel-aligned f0f5d6f ``panel_linux.c``/``presence_core.c``, 33ec49d ``clcd.c``):
 
-The Linux harness side (R1-R3) is not built yet, so this fake IS the wire until it is:
-
-- ``hello`` (feature ``presence``): the request line is at most 256 B (``MPS3_NET_LINE_MAX``);
-  the board keeps at most 4 sessions (the oldest is dropped), lists each for its ``ttl``
-  after its last hello, ordered holder > owner > watch, most recent first; the reply is
-  ``{ok, op, sessions: N, panel: {page, owner, pending, banner, card, seq}, events}``.
-- ``panel`` (feature ``panel``): the state with the session list and ``touch``; with
-  ``frame`` ``"a"``/``"b"`` the rows 0-7 / 8-14 and their role codes, with ``true`` all 15.
+- **the line layer**: a request line over 256 characters (``MPS3_NET_LINE_MAX``, the newline
+  not counted) is refused whole, whatever its verb: ``{"ok":false,"err":"bad json"}``.
+- ``hello`` (feature ``presence``): the board keeps at most 4 sessions (the oldest is
+  dropped), lists each for its ``ttl`` after its last hello, ordered holder > owner > watch,
+  most recent first; the reply is ``{ok, op, sessions: N, panel: {page, owner, pending,
+  banner, card, seq}, events}``. A refusal is ``code`` ``invalid`` with the board's words
+  (``invalid sid: 1-8 printable characters``, ...); ``sid`` is clipped to 8, not refused.
+  The lease request a hello relays (``lease.req`` with ``rl`` left) is drawn as the banner
+  (rows 10-12, role ``banner-held``) at the panel's NEXT refresh: ``banner_lag_s`` (0.25 s,
+  clcd's reformat) after the hello, so the hello's own reply does not show it yet.
+- ``panel`` (feature ``panel``): the state (with ``op``) with the session list and
+  ``touch``; ``frame`` ``"a"``/``"b"`` gives ONLY ``{ok, op, frame, theme, rows, roles}``
+  (rows 0-7 / 8-14, one role code per cell, ``chr(ord("a") + i)`` in design/tokens.json
+  order); ``frame:true`` or any other value is refused (``code`` ``invalid``: a whole frame
+  does not fit one reply). ``page`` is claim-locked first (``ssh_claimed``: ``code``
+  ``locked``), then judged (``invalid``), then refused while the DUT owns the panel
+  (``held``), else set.
+- ``version.features`` lists ``locate``, ``presence``, ``panel`` in the board's order.
 - ``locate`` (feature ``locate``): ``{s: 1-30, who}`` blinks, ``{s: 0}`` stops;
   ``{ok, op, until_ms}``. V7-ALIGN: as SHIPPED (platform 18622e5, locate_linux.c): ``s`` 0-30,
   ``who`` at most 32 printable ASCII, else ``{ok: false, err: "invalid s: ..."|"invalid who:
@@ -53,8 +64,15 @@ LINE_MAX = 256
 MAX_SESSIONS = 4
 RING = 8
 ROWS, COLS = 15, 40
-PANEL_FEATURES = ("presence", "panel", "locate")
+#: The board's order (net-protocol v0.17: "after locate, in that order").
+PANEL_FEATURES = ("locate", "presence", "panel")
 _RANK = {"holder": 0, "owner": 1, "watch": 2}
+#: clcd's reformat period: what a hello asks the panel to draw shows this much later.
+REFRESH_S = 0.25
+#: Role codes, written here from the board's clcd_palette.h enum order (a = text, q =
+#: banner-err, u = banner-held), independently of the host's generated table.
+CODE_TEXT, CODE_BANNER_HELD = "a", "u"
+_BAD_JSON = {"ok": False, "err": "bad json"}
 
 #: The Linux harness with the front-panel verbs (R1-R3), and the bare-metal v0.11 without.
 LINUX_PANEL = replace(LINUX_HARNESSD, name=LINUX_HARNESSD.name.replace("linux", "linux-panel"),
@@ -102,9 +120,13 @@ class PanelFakeShell(HarnessFakeShell):
                  touch_present: bool = True, touch_cal: bool = True,
                  touch_ok: bool | None = None, touch_bus_lost: int | None = None,
                  touch_recoveries: int | None = None, locate_reply_op: bool = True,
-                 locate_decline: str = "", **kwargs: Any) -> None:
+                 locate_decline: str = "", theme: str = "today",
+                 banner_lag_s: float = REFRESH_S, **kwargs: Any) -> None:
         super().__init__(host, **kwargs)
         self.board_clock = board_clock
+        self.theme = theme
+        self.banner_lag_s = banner_lag_s
+        self.request: tuple[str, str, float, float] | None = None   # (req, by, arrived, until)
         self.locate_reply_op = locate_reply_op
         self.locate_decline = locate_decline
         self.page = page
@@ -114,7 +136,7 @@ class PanelFakeShell(HarnessFakeShell):
         self.touch_cal = touch_cal
         self.set_touch_health(touch_ok, touch_bus_lost, touch_recoveries)
         self.rows = list(LINUX_STATUS_ROWS)
-        self.roles = "t" * (ROWS * COLS)
+        self.roles = CODE_TEXT * (ROWS * COLS)
         self.board_sessions: dict[str, BoardSession] = {}
         self.ring: list[tuple[int, str, str, float]] = []      # (seq, k, on, at)
         self.seq = 0
@@ -178,6 +200,32 @@ class PanelFakeShell(HarnessFakeShell):
             self.ring.clear()
             self.seq = 0
 
+    def request_banner(self) -> tuple[str, str, str]:
+        """The lease-request banner's three lines as the glass shows them NOW ("" when none):
+        a relayed request is drawn from the refresh after its hello, until its ``rl`` ends."""
+        if self.request is None:
+            return ("", "", "")
+        req, by, arrived, until = self.request
+        now = self.board_clock()
+        if now < arrived + self.banner_lag_s or now >= until:
+            return ("", "", "")
+        return (f"{req} wants this board", f"held by {by or 'nobody'}",
+                f"tap: tell {by or 'the holder'} you are here")
+
+    def drawn_banner(self) -> str:
+        """The state's ``banner``: a fault banner (``banner``) outranks the request."""
+        return self.banner or self.request_banner()[0]
+
+    def frame_cells(self) -> tuple[list[str], str]:
+        """The committed grid and its role codes, the request banner drawn over rows 10-12."""
+        rows, roles = list(self.rows), self.roles
+        lines = self.request_banner()
+        if lines[0] and not self.banner:
+            for i, text in enumerate(lines):
+                rows[10 + i] = text.center(COLS)[:COLS]
+            roles = roles[:10 * COLS] + CODE_BANNER_HELD * (3 * COLS) + roles[13 * COLS:]
+        return rows, roles
+
     def live_sessions(self) -> list[BoardSession]:
         now = self.board_clock()
         with self._panel_mu:
@@ -190,12 +238,12 @@ class PanelFakeShell(HarnessFakeShell):
                        peer: str | None = None) -> dict[str, Any]:
         self.requests.append(dict(request))
         op = request.get("op")
+        if not self.busy and not self.hung and \
+                len(json.dumps(request, separators=(",", ":")).encode()) > LINE_MAX:
+            return dict(_BAD_JSON)             # the line layer: refused whole, any verb
         if op in ("hello", "panel", "locate") and not self.busy and not self.hung:
             if op not in self.panel_verbs:
                 return {"ok": False, "err": f"unknown op {op!r}"}
-            line = len(json.dumps(request, separators=(",", ":")).encode()) + 1
-            if line > LINE_MAX:
-                return {"ok": False, "err": f"line too long ({line} B > {LINE_MAX})"}
             return getattr(self, f"_op_{op}")(request)
         return super().handle_control(request, peer)
 
@@ -208,40 +256,103 @@ class PanelFakeShell(HarnessFakeShell):
     def _panel(self) -> dict[str, Any]:
         return {"page": self.page, "owner": self.display_owner,
                 "pending": self.display_owner != self.display_target,
-                "banner": self.banner, "card": self.card, "seq": self.seq}
+                "banner": self.drawn_banner(), "card": self.card, "seq": self.seq}
+
+    @staticmethod
+    def _hello_refusal(request: dict[str, Any]) -> str:
+        """presence_core.c ``pres_parse_hello``'s checks, in its order ("" = accepted)."""
+        def is_int(v: Any) -> bool:
+            return isinstance(v, int) and not isinstance(v, bool)
+
+        v = request.get("v", 1)
+        if not is_int(v) or v < 1:
+            return "invalid v: an integer >= 1"
+        sid = request.get("sid")
+        if not isinstance(sid, str) or not sid[:8]:
+            return "invalid sid: 1-8 printable characters"
+        if not isinstance(request.get("who"), str):
+            return "invalid who: a string (user@host)"
+        for key in ("app", "name"):
+            if key in request and not isinstance(request[key], str):
+                return f"invalid {key}: a string"
+        if "role" in request and request["role"] not in _RANK:
+            return "invalid role: holder, owner or watch"
+        if "ttl" in request and not is_int(request["ttl"]):
+            return "invalid ttl: an integer (30-300 s)"
+        lease = request.get("lease")
+        if lease is not None:
+            if not isinstance(lease, dict):
+                return "invalid lease: a flat object"
+            for key in ("by", "req"):
+                if key in lease and not isinstance(lease[key], str):
+                    return f"invalid lease.{key}: a string"
+            if any(key in lease and not is_int(lease[key]) for key in ("left", "q", "rl")):
+                return "invalid lease: left, q and rl are integers"
+        job = request.get("job")
+        if job is not None:
+            if not isinstance(job, dict):
+                return "invalid job: a flat object"
+            if ("k" in job and not isinstance(job["k"], str)) or ("p" in job and not is_int(job["p"])):
+                return "invalid job: {k: string, p: integer}"
+        return ""
 
     def _op_hello(self, request: dict[str, Any]) -> dict[str, Any]:
         self.hellos.append(dict(request))
-        sid, who, role = request.get("sid"), request.get("who"), request.get("role", "watch")
-        if not (isinstance(sid, str) and 1 <= len(sid) <= 8 and isinstance(who, str)
-                and role in _RANK):
-            return {"ok": False, "err": "bad args"}
+        why = self._hello_refusal(request)
+        if why:
+            return {"ok": False, "err": why, "code": "invalid"}
+        sid, who, role = str(request["sid"])[:8], request["who"], request.get("role", "watch")
         ttl = request.get("ttl", 90)
-        ttl = ttl if isinstance(ttl, int) and not isinstance(ttl, bool) else 90
+        now = self.board_clock()
         with self._panel_mu:
             self.board_sessions[sid] = BoardSession(
-                sid, who, role, self.board_clock(), max(30, min(300, ttl)),
+                sid, who[:20], role, now, max(30, min(300, ttl)),
                 str(request.get("app", "")), request.get("lease"), request.get("job"))
             if len(self.board_sessions) > MAX_SESSIONS:
                 oldest = min(self.board_sessions.values(), key=lambda s: s.seen)
                 del self.board_sessions[oldest.sid]
+        lease = request.get("lease") or {}
+        if lease.get("req") and lease.get("rl"):
+            if self.request is None or self.request[0] != lease["req"]:
+                self.request = (str(lease["req"]), str(lease.get("by") or ""), now,
+                                now + min(600, int(lease["rl"])))
+        elif isinstance(request.get("lease"), dict):
+            self.request = None              # this session's lease names no open request
+        # The reply is rendered from the COMMITTED panel: what this hello asks to draw is not
+        # in it until the next refresh (banner_lag_s).
         return {"ok": True, "op": "hello", "sessions": len(self.live_sessions()),
                 "panel": self._panel(), "events": self._events()}
 
     def _op_panel(self, request: dict[str, Any]) -> dict[str, Any]:
+        has_frame = "frame" in request and request["frame"] is not False
+        if "page" in request:
+            if self.ssh_claimed:
+                return {"ok": False, "err": "panel locked: board claimed (use ssh)",
+                        "code": "locked"}
+            if has_frame:
+                return {"ok": False, "err": "invalid request: page takes no frame",
+                        "code": "invalid"}
+            if request["page"] not in ("status", "apps"):
+                return {"ok": False, "err": "invalid page: status or apps", "code": "invalid"}
+            if self.display_owner == "dut" or self.display_owner != self.display_target:
+                return {"ok": False, "err": "dut owns the panel", "code": "held"}
+            self.page = request["page"]
+            return {"ok": True, "op": "panel", "page": self.page}
+        if has_frame:
+            part = request["frame"]
+            if part not in ("a", "b"):
+                return {"ok": False, "code": "invalid",
+                        "err": 'invalid frame: "a" (rows 0-7) then "b" (rows 8-14)'}
+            r0, r1 = (0, 8) if part == "a" else (8, ROWS)
+            rows, roles = self.frame_cells()
+            return {"ok": True, "op": "panel", "frame": part, "theme": self.theme,
+                    "rows": rows[r0:r1], "roles": roles[r0 * COLS:r1 * COLS]}
         now = self.board_clock()
-        reply: dict[str, Any] = {"ok": True, **self._panel(),
-                                 "touch": {"present": self.touch_present, "cal": self.touch_cal},
-                                 "sessions": [{"sid": s.sid, "who": s.who, "role": s.role,
-                                               "age_s": int(now - s.seen)}
-                                              for s in self.live_sessions()],
-                                 "events": self._events()}
-        part = request.get("frame")
-        if part in (True, "a", "b"):
-            r0, r1 = {True: (0, ROWS), "a": (0, 8), "b": (8, ROWS)}[part]
-            reply["rows"] = self.rows[r0:r1]
-            reply["roles"] = self.roles[r0 * COLS:r1 * COLS]
-        return reply
+        return {"ok": True, "op": "panel", **self._panel(),
+                "touch": {"present": self.touch_present, "cal": self.touch_cal},
+                "sessions": [{"sid": s.sid, "who": s.who, "role": s.role,
+                              "age_s": int(now - s.seen)} for s in self.live_sessions()],
+                "events": self._events()}
 
     def _op_locate(self, request: dict[str, Any]) -> dict[str, Any]:
         if self.locate_decline == "not_supported":
