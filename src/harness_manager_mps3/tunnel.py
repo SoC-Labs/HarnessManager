@@ -58,6 +58,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import random
 import re
 import shutil
 import socket
@@ -103,6 +104,10 @@ READY_TIMEOUT_S = 30.0
 #: A first start whose local port was taken meanwhile picks new ports, this many tries in all.
 START_ATTEMPTS = 3
 BACKOFF_S = (1.0, 2.0, 5.0, 10.0, 30.0)
+#: FIX-PACK-1 5c: each restart wait is stretched by up to this fraction, at random, so the
+#: tunnels a hub dropped together (an sshd restart, a network blip) do not all come back
+#: in the same second and meet its MaxStartups throttle again. Never shorter than the step.
+BACKOFF_JITTER = 0.5
 _POLL_S = 0.25
 _STDERR_KEEP = 4096
 #: How long an exited ssh's stderr reader gets to reach the end of the pipe (see poll()).
@@ -543,6 +548,8 @@ class SshTunnel:
                  ssh_g: Callable[[Sequence[str]], str] | None = None,
                  ready_timeout_s: float = READY_TIMEOUT_S, restart: bool = True,
                  backoff_s: Sequence[float] = BACKOFF_S,
+                 backoff_jitter: float = BACKOFF_JITTER,
+                 rand: Callable[[], float] = random.random,
                  on_state: Callable[[dict[str, Any]], None] | None = None,
                  label: str = "", user_config: Path | None = None,
                  system_config: Path | None = Path("/etc/ssh/ssh_config"),
@@ -571,6 +578,9 @@ class SshTunnel:
         self.ready_timeout_s = ready_timeout_s
         self._restart = restart
         self._backoff = tuple(backoff_s) or (1.0,)
+        self._jitter = max(0.0, float(backoff_jitter))
+        self._rand = rand
+        self.waits: list[float] = []        # each restart's wait, jittered (tests)
         self._watchers: list[Callable[[dict[str, Any]], None]] = [on_state] if on_state else []
         taken: set[int] = set()
         fixed: list[Forward] = []
@@ -776,6 +786,8 @@ class SshTunnel:
                 self._closing.wait(_POLL_S)
                 continue
             wait = self._backoff[min(attempt, len(self._backoff) - 1)]
+            wait *= 1.0 + self._jitter * min(1.0, max(0.0, self._rand()))   # FIX-PACK-1 5c
+            self.waits.append(wait)
             if proc is not None:
                 why = _explain(_stderr_of(proc))
                 last_failure = f"ssh exited with status {rc}{f' ({why})' if why else ''}"

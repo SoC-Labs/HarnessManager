@@ -69,6 +69,7 @@ import contextlib
 import json
 import logging
 import os
+import random
 import re
 import secrets
 import socket
@@ -422,7 +423,143 @@ def default_runner_factory(host: str, group: str | None, jump: str = "") -> Call
     if host in LOCAL_HOSTS:
         return _windowless(LocalHubRunner)()
     return JumpSshHubRunner(host, group=group, jump=jump) if jump else \
-        _windowless(SshHubRunner)(host, group=group)
+        _capped(_windowless(SshHubRunner))(host, group=group)
+
+
+# --- FIX-PACK-1 (5a, 5d): a good citizen on the hub's sshd ------------------------------------
+#
+# The first real-board session (2026-09-28) met "kex_exchange_identification: read: Connection
+# reset by peer" on `lease show` and the request watcher: the hub's sshd throttling new
+# connections (MaxStartups: it starts dropping unauthenticated connections past 10 at once).
+# SERIAL-6900 counted 2-6 long-lived plus 3-12 one-shot ssh connections per hub, none reused
+# (ControlPath=none everywhere). So each one-shot hub command (every ``fpgahub ...`` through
+# ``ssh HUB``) takes one of ``HUB_ONE_SHOT_MAX`` slots per hub, and one reset in the
+# identification exchange, before authentication (nothing ran on the hub), is tried once
+# more after a short, jittered pause. A command that started on the hub is never re-run.
+# ControlMaster is deliberately NOT used (it needs a hub-side check first).
+
+#: One-shot ssh commands in flight to one hub, at most (sshd's MaxStartups starts at 10).
+HUB_ONE_SHOT_MAX = 4
+#: How long a command waits for a slot when it gives no timeout of its own.
+HUB_SLOT_WAIT_S = 60.0
+#: The pause before the one retry of a reset in the identification exchange, plus up to
+#: ``HUB_KEX_RETRY_JITTER_S`` so the commands sshd turned away together do not return together.
+HUB_KEX_RETRY_S = 0.5
+HUB_KEX_RETRY_JITTER_S = 0.5
+#: ssh's words for a connection dropped in the identification exchange (before the key
+#: exchange, so before authentication): nothing ran on the hub.
+_PRE_AUTH_RESET = re.compile(
+    r"(?:kex|ssh)_exchange_identification:.*(?:reset by peer|closed by remote host)",
+    re.IGNORECASE)
+
+_hub_slots: dict[str, threading.BoundedSemaphore] = {}
+_hub_slots_mu = threading.Lock()
+
+
+@dataclass
+class HubRunStats:
+    """What the capped runners did (tests, and a status that wants it)."""
+
+    calls: int = 0
+    waited: int = 0          # calls that had to wait for a slot
+    retried: int = 0         # pre-auth resets tried once more
+    in_flight: int = 0
+    max_in_flight: int = 0
+
+
+HUB_RUN_STATS: dict[str, HubRunStats] = {}
+
+
+def hub_slots(hub: str) -> threading.BoundedSemaphore:
+    """The one-shot slots of ``hub`` (made once, ``HUB_ONE_SHOT_MAX`` of them)."""
+    with _hub_slots_mu:
+        sem = _hub_slots.get(hub)
+        if sem is None:
+            sem = _hub_slots[hub] = threading.BoundedSemaphore(max(1, HUB_ONE_SHOT_MAX))
+            HUB_RUN_STATS.setdefault(hub, HubRunStats())
+        return sem
+
+
+def forget_hub_slots() -> None:
+    """Drop every hub's slots and stats (tests; a changed ``HUB_ONE_SHOT_MAX``)."""
+    with _hub_slots_mu:
+        _hub_slots.clear()
+        HUB_RUN_STATS.clear()
+
+
+def reset_before_auth(result: Any) -> bool:
+    """``result`` (a pyverify ``RunResult``) is ssh's own failure in the identification
+    exchange: exit 255, nothing on stdout, and ssh's words for a reset or a close there.
+    Nothing ran on the hub, so it may be tried again."""
+    if getattr(result, "returncode", None) != 255 or (getattr(result, "stdout", "") or "").strip():
+        return False
+    return bool(_PRE_AUTH_RESET.search(getattr(result, "stderr", "") or ""))
+
+
+_CAPPED: dict[type, type] = {}
+
+
+def _capped(cls: type) -> type:
+    """pyverify's ssh hub runner ``cls`` under this hub's one-shot slots, with the one retry
+    of a pre-auth reset (the section above). A subclass, so ``isinstance(r, SshHubRunner)``
+    holds and pyverify builds and quotes every argv as before; it compares equal to the plain
+    runner of the same hub and group."""
+    made = _CAPPED.get(cls)
+    if made is not None:
+        return made
+
+    class _Capped(cls):  # type: ignore[valid-type, misc]
+        def __eq__(self, other: object) -> bool:
+            from pyverify.lease import SshHubRunner
+
+            if not isinstance(other, SshHubRunner):
+                return NotImplemented
+            return (self.hub, self.group, getattr(self, "jump", "")) == \
+                (other.hub, other.group, getattr(other, "jump", ""))
+
+        __hash__ = None  # type: ignore[assignment]
+
+        def __call__(self, argv: Sequence[str], timeout: float | None = None) -> Any:
+            hub = str(self.hub)
+            sem = hub_slots(hub)
+            stats = HUB_RUN_STATS.setdefault(hub, HubRunStats())
+            for attempt in (0, 1):
+                self._take_slot(sem, stats, hub, timeout)
+                try:
+                    result = super().__call__(argv, timeout=timeout)
+                finally:
+                    with _hub_slots_mu:
+                        stats.in_flight -= 1
+                    sem.release()
+                if attempt or not reset_before_auth(result):
+                    return result
+                with _hub_slots_mu:
+                    stats.retried += 1
+                log.info("hub %s reset the ssh connection before authentication (%s): "
+                         "trying once more", hub, (result.stderr or "").strip()[:160])
+                time.sleep(HUB_KEX_RETRY_S + random.uniform(0.0, HUB_KEX_RETRY_JITTER_S))
+            return result                                         # not reached
+
+        @staticmethod
+        def _take_slot(sem: threading.BoundedSemaphore, stats: HubRunStats, hub: str,
+                       timeout: float | None) -> None:
+            with _hub_slots_mu:
+                stats.calls += 1
+            if not sem.acquire(blocking=False):
+                with _hub_slots_mu:
+                    stats.waited += 1
+                wait = HUB_SLOT_WAIT_S if timeout is None else max(0.0, float(timeout))
+                if not sem.acquire(timeout=wait):
+                    raise TimeoutError(
+                        f"hub command waited {wait:g}s for one of {HUB_ONE_SHOT_MAX} ssh "
+                        f"connections to {hub} (Harness Manager's own commands fill them)")
+            with _hub_slots_mu:
+                stats.in_flight += 1
+                stats.max_in_flight = max(stats.max_in_flight, stats.in_flight)
+
+    _Capped.__name__ = _Capped.__qualname__ = f"Capped{cls.__name__}"
+    _CAPPED[cls] = _Capped
+    return _Capped
 
 
 _WINDOWLESS: dict[type, type] = {}
@@ -490,7 +627,7 @@ def _jump_runner_class() -> Any:
 
 
 def JumpSshHubRunner(host: str, *, group: str | None, jump: str) -> Any:  # noqa: N802
-    return _windowless(_jump_runner_class())(host, group=group, jump=jump)
+    return _capped(_windowless(_jump_runner_class()))(host, group=group, jump=jump)
 
 
 #: What the pack uses to reach a hub; tests replace it (tests/fakes/l1_fake_hub.py).

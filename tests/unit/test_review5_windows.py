@@ -43,7 +43,9 @@ def test_the_hub_runner_passes_no_window_on_windows(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     plain = hub.default_runner_factory("hub.invalid", "fpga")
-    assert type(plain) is SshHubRunner
+    # FIX-PACK-1 5a (updated deliberately): pyverify's SshHubRunner under the per-hub
+    # one-shot cap, a subclass whose call is pyverify's own; still not the windowless one.
+    assert isinstance(plain, SshHubRunner) and "Windowless" not in type(plain).__name__
     plain(["fpgahub", "whoami"], timeout=5)
     assert "creationflags" not in seen[-1]
     monkeypatch.setattr(hub, "no_window", lambda: {"creationflags": 0})

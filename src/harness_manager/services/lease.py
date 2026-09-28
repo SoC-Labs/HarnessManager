@@ -133,6 +133,9 @@ ACQUIRE_TIMEOUT_S = 3600.0
 #: How long a ``lease show`` answer is reused. Each one is an ssh round trip to the hub,
 #: and a UI chip may poll; our own acquire/release/heartbeat results replace it at once.
 VIEW_TTL_S = 10.0
+#: FIX-PACK-1 5b: how long a caller waits for the same hub read another caller has in
+#: flight before it asks the hub itself (the read's own ssh timeout ends it well before).
+SHARED_READ_WAIT_S = 120.0
 #: The holder has this long to answer a request before the requester may force it.
 REQUEST_WINDOW_S = 120
 #: What a board without a hub cannot do (view()'s notes_reason and revoke_reason).
@@ -624,6 +627,18 @@ class _Incoming:
     announced: dict[str, float] = field(default_factory=dict)   # id -> its created_at (wall)
 
 
+class _Flight:
+    """One hub read in flight (``LeaseService._cached``): its answer or error, once done."""
+
+    __slots__ = ("done", "error", "gen", "value")
+
+    def __init__(self, gen: int) -> None:
+        self.done = threading.Event()
+        self.gen = gen
+        self.value: Any = None
+        self.error: BaseException | None = None
+
+
 def _hk(hub: Any) -> tuple[str, str]:
     return (hub.host, hub.target)
 
@@ -664,6 +679,12 @@ class LeaseService:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._cache: dict[tuple[str, str, str], tuple[float, Any]] = {}
+        # FIX-PACK-1 5b: the hub read in flight per cache key (single-flight), and each hub's
+        # generation (``_forget`` moves it: a read begun before is neither shared nor kept).
+        self._inflight: dict[tuple[str, str, str], _Flight] = {}
+        self._gen: dict[tuple[str, str], int] = {}
+        self.hub_reads = 0                       # hub calls made through the cache (tests)
+        self.shared_reads = 0                    # callers that shared one in flight (tests)
         self._principals: dict[tuple[str, str], str] = {}
         self._principal_failed: dict[tuple[str, str], float] = {}
         self._outgoing: dict[tuple[str, str], _Outgoing] = {}
@@ -688,16 +709,46 @@ class LeaseService:
         return hub
 
     def _cached(self, hub: Any, what: str, fn: Callable[[], Any], *, fresh: bool = False) -> Any:
+        """``fn()`` (a hub read), cached ``VIEW_TTL_S``. FIX-PACK-1 5b, single-flight:
+        callers that miss the cache while the same read is in flight share its answer (or its
+        error) instead of each opening an ssh to the hub (the hub's sshd reset them under
+        load). A ``fresh`` caller never joins a read begun before it asked, and a read begun
+        before a ``forget`` is neither joined nor cached after it."""
         key = (hub.host, hub.target, what)
         now = self._clock()
         with self._mu:
             hit = self._cache.get(key)
-        if not fresh and hit is not None and now - hit[0] < VIEW_TTL_S:
-            return hit[1]
-        value = fn()
+            if not fresh and hit is not None and now - hit[0] < VIEW_TTL_S:
+                return hit[1]
+            gen = self._gen.get(key[:2], 0)
+            flight = self._inflight.get(key)
+            if fresh or flight is None or flight.gen != gen:
+                flight, lead = _Flight(gen), True
+                self._inflight[key] = flight
+            else:
+                lead = False
+                self.shared_reads += 1
+        if not lead:
+            if flight.done.wait(SHARED_READ_WAIT_S):
+                if flight.error is not None:
+                    raise flight.error
+                return flight.value
+            return fn()                  # the read in flight never ended: ask on our own
         with self._mu:
-            self._cache[key] = (now, value)
-        return value
+            self.hub_reads += 1
+        try:
+            flight.value = fn()
+        except BaseException as exc:
+            flight.error = exc
+            raise
+        finally:
+            with self._mu:
+                if self._inflight.get(key) is flight:
+                    del self._inflight[key]
+                if flight.error is None and self._gen.get(key[:2], 0) == flight.gen:
+                    self._cache[key] = (now, flight.value)
+            flight.done.set()
+        return flight.value
 
     def _remember(self, hub: Any, what: str, value: Any) -> None:
         with self._mu:
@@ -830,6 +881,7 @@ class LeaseService:
 
     def _forget(self, hub: Any) -> None:
         with self._mu:
+            self._gen[_hk(hub)] = self._gen.get(_hk(hub), 0) + 1   # FIX-PACK-1 5b
             for k in [k for k in self._cache if k[:2] == _hk(hub)]:
                 del self._cache[k]
             self._views.pop(_hk(hub), None)           # PANEL-2: never hand out a stale view

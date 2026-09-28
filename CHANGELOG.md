@@ -267,6 +267,15 @@ owners.
   longer spins on "Reading the panel..." for ever, and neither do the Board tile's panel,
   card, temperature and clock lines or the Telemetry card. Each says why ("Background
   reads are off") and has **Read now**, which reads once, explicitly.
+- Harness Manager is gentler on the hub's sshd. On 2026-09-28 the hub reset `lease show`
+  and the request watcher mid-handshake ("kex_exchange_identification: read: Connection
+  reset by peer"): its sshd throttles new connections (MaxStartups), and Harness Manager
+  opened 3 to 12 one-shot ssh connections per hub, none reused. Now at most 4 one-shot hub
+  commands run at once per hub (the rest wait their turn), views of one hub's lease that
+  are in flight at the same time share one hub read, a tunnel's restart wait gets a random
+  extra of up to half its step, and a connection the hub resets before authentication
+  (nothing ran) is tried once more. A command that started on the hub is never run again.
+  SSH connection sharing (ControlMaster) is not used: it needs a check on the hub first.
 - Background telemetry that finds another reader on the MCC console backs off like a
   refused connection ("Busy (another client)").
 - A hub MCC read or REBOOT refused for another reader of `tty_00` says what the hub saw: a
