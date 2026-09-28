@@ -583,7 +583,8 @@ On the Linux harness a push always uses TCP and waits up to 30 s for each part.
 
 ## 7. Build your own DUT
 
-**Needs:** Vivado 2024.1 on this machine, and the build kit for the board's static (the
+**Needs:** the Vivado release the static was built with (2024.1 for 0x72BB0A36, 2026.1
+for RC2 0x44EE76D5) on this machine, and the build kit for the board's static (the
 shell). A board is optional: you can build for a static id with no board.
 
 **When:** you have your own RTL and want it as an overlay you can Program.
@@ -654,8 +655,8 @@ With no board, give `--static-id 0x72BB0A36` instead of the address.
 | `kit verify DIR [TARGET]` | check a kit directory, and it against a board |
 | `kit guide [TARGET] [--design D] [--build-dir DIR] [--why GATE]` | the steps and their state; `--why` explains one gate |
 | `kit script [TARGET] --design D --out DIR` | write `build_rm.tcl`, the kit and the XDC kit |
-| `kit build DIR` | print the Vivado command (HM does not run Vivado yet) |
-| `kit check RECEIPT\|DIR\|PARTIAL [TARGET]` | check a build receipt and its pair, or a bare partial |
+| `kit build DIR` | print the Vivado command, with the full path of a Vivado of the kit's release (HM does not run Vivado yet); exit 12 when there is none |
+| `kit check RECEIPT\|DIR\|PARTIAL [TARGET] [--static-id ID]` | check a build receipt and its pair, or a bare partial; `--static-id` must be the receipt's static, or the check refuses (exit 14) |
 | `kit pack RECEIPT\|DIR [--import]` | write the overlay; `--import` puts it in Program |
 
 **Times.** Fetching a kit takes seconds from the cache. A small RM builds in about 20
@@ -666,7 +667,18 @@ minutes with 2 threads and 4 to 8 GB of RAM.
   mint archive (`HARNESS_MANAGER_KIT_HUB_DIR`), or a path you give. Ask SoC Labs for the
   kit zip and use `kit import`.
 - **Vivado release:** the generated `build_rm.tcl` refuses another major.minor than the
-  kit's (2024.1). Point HM at the right one with `HARNESS_MANAGER_VIVADO`.
+  kit's. HM finds Vivado in `tools.vivado` (or `HARNESS_MANAGER_VIVADO`: the `vivado`
+  executable, or its install directory such as `/research/CAD/Xilinx/Vivado/2026.1`), on
+  PATH, and under the install roots, in both layouts: `<root>/<release>/bin/vivado`
+  (2024.x) and `<root>/<release>/Vivado/bin/vivado` (2025.1 and later). With no setting,
+  an installed Vivado of the kit's release wins over another release on PATH.
+- **The `vivado` on PATH is another release.** A login profile can put 2024.1 first on
+  PATH. `kit build` and `kit script` print the full path of the right one, and the guide's
+  **Tools** step stays at next until PATH agrees: run the full path, or
+  `export PATH=<its bin>:$PATH`.
+- **No RTL in the design:** `minimal` names none, so `kit script` builds its wrapper
+  skeleton (`xdc/minimal_wrapper_skeleton.sv`: `rm_id` driven, every other output tied off)
+  and says so.
 - **Licence:** only synthesis can tell. Watch for `[Common 17-345] A valid license was not
   found`, and point `XILINXD_LICENSE_FILE` at the lab server.
 - **Vivado exits 0 even when a gate fails.** The receipt is the verdict. The **When it goes
