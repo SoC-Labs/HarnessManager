@@ -84,6 +84,9 @@ export function boardState(bid) {
       // QUIET-POLL: what background contact with this board does now (the daemon's gate:
       // {allowed, kind, text, holder, retry_in_s, policy}), and the last read it held back.
       background: null, quiet: null,
+      // FIX-PACK-1: the quiet answer of the last held-back telemetry / card read (null once
+      // one was answered): the Board tile and the Telemetry card show it instead of spinning.
+      telemetryQuiet: null, cardQuiet: null,
     };
   }
   return S.board[bid];
@@ -140,6 +143,19 @@ export function heldBack(bid, r) {
   if (r.data.data.background) b.background = r.data.data.background;
   changed();
   return true;
+}
+
+// FIX-PACK-1: a background read held back BEFORE the card had anything to show (background
+// reads are off, the lease is someone else's, the board is busy): the card says why, calmly,
+// with a Read now, never a spinner that waits for a read that will not come.
+export function quietWords(q) {
+  if (!q) return "";
+  if (q.kind === "off") return "Background reads are off";
+  if (q.kind === "lease") return `Background reads paused: the hub lease is held by ${q.holder || "someone else"}`;
+  if (q.kind === "lease_unknown") return "Background reads paused: the hub lease could not be read";
+  if (q.kind === "busy") return "Background reads paused: the board is busy (another client)";
+  if (q.kind === "no_viewer") return "Not read yet: this page is not viewing the board";
+  return q.text || "Background reads are paused";
 }
 
 export function restoreSelection() {
@@ -414,6 +430,13 @@ export async function refreshInfo(bid, { background = false } = {}) {
     if (b.quiet.kind === "no_viewer" && viewing() === bid && Date.now() - (b.quietRetryAt || 0) > 5000) {
       b.quietRetryAt = Date.now();
       scheduleRefresh(bid, 300);
+    } else if (b.info) {
+      // FIX-PACK-1: the page shows the board (the open's own answer) but the reads that follow
+      // a good read (telemetry, the card line) were not made either: the Board tile says why,
+      // with Read now, instead of "reading..." while nothing reads.
+      if (!b.telemetry && !b.telemetryLoading) b.telemetryQuiet = b.quiet;
+      if (hasCardStore(b) && !b.card && !b.cardLoading) b.cardQuiet = b.quiet;
+      changed();
     }
     return;
   }
@@ -458,7 +481,8 @@ export async function loadTelemetry(bid, { background = false } = {}) {
     background ? bgOpts(bid) : {}));
   b.telemetryLoading = false;
   b.telemetryAt = Date.now();
-  if (heldBack(bid, r)) return;
+  if (heldBack(bid, r)) { b.telemetryQuiet = b.quiet; changed(); return; }
+  b.telemetryQuiet = null;
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.telemetryLine = r.line;
   b.telemetryError = r.error;
@@ -505,7 +529,8 @@ export async function loadCard(bid, { background = false } = {}) {
   const r = await timed("card", () => call("card", { bid }, undefined, null,
     background ? bgOpts(bid) : {}));
   b.cardLoading = false;
-  if (heldBack(bid, r)) return;
+  if (heldBack(bid, r)) { b.cardQuiet = b.quiet; changed(); return; }
+  b.cardQuiet = null;
   if (r.error && deferIfHeld(bid, r.error)) return;
   b.cardError = r.error;
   b.card = r.error ? null : (r.data.data.card || null);

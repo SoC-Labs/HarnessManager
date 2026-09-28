@@ -18,8 +18,10 @@ import { panelState } from "../actions.js";
 import { call, heldByJob, routeMissing } from "../api.js";
 import { ageText, clock, hostOf } from "../format.js";
 import { html, useEffect } from "../lib.js";
-import { bgOpts, boardState, changed, heldBack, onBoardEvent, onJobEnded, S, timed } from "../store.js";
-import { ActionRow, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
+import {
+  bgOpts, boardState, changed, heldBack, onBoardEvent, onJobEnded, quietWords, S, timed,
+} from "../store.js";
+import { ActionRow, Card, Chip, Icon, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
 import { LiveDisplay } from "../display.js";        // LM4: the Live display, over the text mirror
 
 const STATE_CACHE_MS = 1000;        // the daemon reuses a GET /panel answer this long
@@ -39,6 +41,10 @@ export function front(bid) {
     b.front = {
       body: null,            // GET /panel: {panel, reason, identify, support, presence}
       error: null, line: "", loading: false, again: false, readAt: 0, retries: 0,
+      // FIX-PACK-1: the quiet answer of the last held-back read of the state / the mirror
+      // (null once one was answered), and a Read now asked while a read was in flight.
+      quiet: null, frameQuiet: null, againNow: false, frameAgainNow: false, explicit: false,
+      frameExplicit: false,
       unsupported: false,    // a daemon without the front-panel routes
       deferred: false,       // a read waits for the board's job
       eventAt: 0,            // the daemon's time of the last panel.state event
@@ -73,15 +79,30 @@ function addTap(f, d) {
 // --- reads ---------------------------------------------------------------------------------------
 
 // Every panel read is one nobody clicked (the tile's poll, an event, a mount): QUIET-POLL marks
-// them background, and one the daemon held back keeps what the page last showed.
-export async function loadPanel(bid) {
+// them background, and one the daemon held back keeps what the page last showed. `explicit`
+// (Read now, FIX-PACK-1) is a click: never held back.
+export async function loadPanel(bid, { explicit = false } = {}) {
   const f = front(bid);
-  if (f.loading) { f.again = true; return; }
+  if (f.loading) {
+    if (explicit) f.againNow = true; else f.again = true;
+    return;
+  }
   f.loading = true;
-  const r = await timed("panel show", () => call("panel", { bid }, undefined, null, bgOpts(bid)));
+  f.explicit = explicit;
+  changed();
+  const r = await timed("panel show", () => call("panel", { bid }, undefined, null,
+    explicit ? {} : bgOpts(bid)));
   f.loading = false;
+  f.explicit = false;
   f.line = r.line;
-  if (heldBack(bid, r)) { f.again = false; changed(); return; }
+  if (heldBack(bid, r)) {
+    f.quiet = boardState(bid).quiet;
+    f.again = false;
+    if (f.againNow) { f.againNow = false; loadPanel(bid, { explicit: true }); }
+    changed();
+    return;
+  }
+  f.quiet = null;
   if (r.error) {
     if (routeMissing(r.error)) f.unsupported = true;
     else if (heldByJob(r.error)) f.deferred = true;       // read again when the job ends
@@ -104,20 +125,35 @@ export async function loadPanel(bid) {
     f.deferred = false;
     f.readAt = Date.now();
   }
-  if (f.again) { f.again = false; loadPanel(bid); }
+  if (f.againNow) { f.againNow = false; f.again = false; loadPanel(bid, { explicit: true }); }
+  else if (f.again) { f.again = false; loadPanel(bid); }
   changed();
 }
 
-export async function loadFrame(bid) {
+export async function loadFrame(bid, { explicit = false } = {}) {
   const f = front(bid);
-  if (f.frameLoading) { f.frameAgain = true; return; }
+  if (f.frameLoading) {
+    if (explicit) f.frameAgainNow = true; else f.frameAgain = true;
+    return;
+  }
   f.frameLoading = true;
+  f.frameExplicit = explicit;
   f.frameAskedAt = Date.now();
+  changed();
   const r = await timed("panel mirror", () => call("panelFrame", { bid }, undefined, null,
-    bgOpts(bid)));
+    explicit ? {} : bgOpts(bid)));
   f.frameLoading = false;
+  f.frameExplicit = false;
   f.frameLine = r.line;
-  if (heldBack(bid, r)) { f.frameAgain = false; changed(); return; }
+  if (heldBack(bid, r)) {
+    f.frameQuiet = boardState(bid).quiet;
+    f.frameAgain = false;
+    if (f.frameAgainNow) { f.frameAgainNow = false; loadFrame(bid, { explicit: true }); }
+    changed();
+    return;
+  }
+  f.frameQuiet = null;
+  if (f.frameAgainNow) { f.frameAgainNow = false; f.frameAgain = false; loadFrame(bid, { explicit: true }); }
   if (r.error) {
     if (routeMissing(r.error)) f.unsupported = true;
     else if (heldByJob(r.error)) f.deferred = true;
@@ -139,6 +175,14 @@ export async function loadFrame(bid) {
 }
 
 const frameTimers = {};
+
+// FIX-PACK-1: Read now: one explicit read of the panel's state, and of its mirror when a Front
+// panel card shows it. A click, so never held back.
+export function readPanelNow(bid) {
+  const f = front(bid);
+  loadPanel(bid, { explicit: true });
+  if (f.cards > 0) loadFrame(bid, { explicit: true });
+}
 
 // The mirror again, no sooner than the daemon's 3 s reuse of the last one this page asked for.
 function scheduleFrame(bid) {
@@ -232,6 +276,8 @@ function pagePart(p) {
 export function lineParts(f) {
   if (f.unsupported) return [{ key: "none", text: "this harness-manager-daemon has no front-panel routes", level: "unk", icon: "circle-slash" }];
   if (f.error && !f.body) return [{ key: "err", text: `${f.error.errName}: ${f.error.message}`, level: "err", icon: "circle-x" }];
+  // FIX-PACK-1: held back before the first read: say so (the Board tile has Read now).
+  if (!f.body && f.quiet) return [{ key: "quiet", text: "not read", level: "unk", icon: "circle-pause", title: quietWords(f.quiet) }];
   if (!f.body) return [{ key: "loading", text: "reading...", level: "muted" }];
   const p = f.body.panel;
   if (!p) return [{ key: "none", text: `not available: ${f.body.reason || "this board has no front panel Harness Manager can reach"}`, level: "unk", icon: "circle-slash" }];
@@ -256,7 +302,10 @@ function RebuiltTag({ f, testid }) {
 export function identifyWhy(bid) {
   const f = front(bid);
   if (f.unsupported) return "Cannot: this harness-manager-daemon has no front-panel routes";
-  if (!f.body) return f.error ? `Cannot: ${f.error.message}` : "reading the panel...";
+  if (!f.body) {
+    if (f.error) return `Cannot: ${f.error.message}`;
+    return f.quiet ? `Not read yet: ${quietWords(f.quiet)}` : "reading the panel...";
+  }
   const id = f.body.identify || {};
   if (!id.available) return `Cannot: ${id.reason || f.body.reason || "this board cannot identify itself"}`;
   return "";
@@ -341,12 +390,18 @@ function runs(row, roles) {
 
 const ROLE_CLASS = { i: "pm-inv" };      // a rebuilt frame: t text, i inverted (today's red)
 
-function Mirror({ f }) {
+function Mirror({ f, bid }) {
   const fr = f.frame;
   if (!fr) {
-    return f.frameError
-      ? html`<${Reason} level="err" testid="panel-mirror-error" text=${`${f.frameError.errName}: ${f.frameError.reason || f.frameError.message}`} />`
-      : html`<p class="muted small"><${Spinner} /> Reading the panel's text...</p>`;
+    if (f.frameError) {
+      return html`<${Reason} level="err" testid="panel-mirror-error" text=${`${f.frameError.errName}: ${f.frameError.reason || f.frameError.message}`} />`;
+    }
+    if (f.frameQuiet) {
+      return html`<${QuietNote} testid="panel-mirror-quiet" action="panel-mirror-read-now"
+        text=${quietWords(f.frameQuiet)} busy=${f.frameLoading && f.frameExplicit}
+        onRead=${() => loadFrame(bid, { explicit: true })} />`;
+    }
+    return html`<p class="muted small"><${Spinner} /> Reading the panel's text...</p>`;
   }
   const rows = Array.isArray(fr.rows) ? fr.rows : [];
   const roles = String(fr.roles || "");
@@ -422,8 +477,15 @@ export function PanelCard({ bid }) {
   let body;
   if (f.unsupported || !f.body || !p) {
     const parts = lineParts(f);
-    body = html`<${Reason} level=${parts[0].level === "err" ? "err" : "unk"} icon=${parts[0].icon || ""}
-      testid="panel-unavailable" text=${parts[0].key === "loading" ? "Reading the panel..." : parts[0].text} />`;
+    if (parts[0].key === "quiet") {
+      // FIX-PACK-1: background reads are off (or paused): never a spinner that waits for ever.
+      body = html`<${QuietNote} testid="panel-quiet" action="panel-read-now" busy=${f.loading && f.explicit}
+        text=${quietWords(f.quiet)}
+        onRead=${() => readPanelNow(bid)} />`;
+    } else {
+      body = html`<${Reason} level=${parts[0].level === "err" ? "err" : "unk"} icon=${parts[0].icon || ""}
+        testid="panel-unavailable" text=${parts[0].key === "loading" ? "Reading the panel..." : parts[0].text} />`;
+    }
   } else {
     const touch = touchPart(p.touch);
     body = html`
@@ -431,7 +493,7 @@ export function PanelCard({ bid }) {
         ? html`<div class="mb-12"><${Reason} level="unk" icon="circle-help" testid="panel-rebuilt"
             text=${`Rebuilt from what Harness Manager read, not read from the panel. This harness (bare metal) reports only who owns the panel; the live mirror, who is connected and Identify need the Linux harness.`} /></div>`
         : html`<p class="muted small mb-12" data-testid="panel-read-age">Read from the panel${p.observed_at ? `, ${ageText(p.observed_at, now)}` : ""}.</p>`}
-      <${LiveDisplay} bid=${bid}><${Mirror} f=${f} /><//>
+      <${LiveDisplay} bid=${bid}><${Mirror} f=${f} bid=${bid} /><//>
       <dl class="kv mt-14">
         <dt>Page</dt><dd data-testid="panel-page"><${Parts} parts=${[{ key: "page", ...pagePart(p) }]} /></dd>
         <dt>Owner</dt><dd data-testid="panel-owner"><${Parts} parts=${[{ key: "owner", ...ownerPart(p) }]} /></dd>

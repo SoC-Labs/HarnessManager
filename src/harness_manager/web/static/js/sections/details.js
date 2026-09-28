@@ -4,8 +4,8 @@
 
 import { ageText, CAPABILITY_ORDER, capTitle, clock, healthOf, valueText } from "../format.js";
 import { html, useState } from "../lib.js";
-import { boardState, loadTelemetry } from "../store.js";
-import { Card, CheckChip, Chip, Icon, LinkLine, Reason, Spinner } from "../ui.js";
+import { boardState, loadTelemetry, quietWords } from "../store.js";
+import { Card, CheckChip, Chip, Icon, LinkLine, QuietNote, Reason, Spinner } from "../ui.js";
 
 export function IdentityCard({ info }) {
   const cand = info.candidate || {};
@@ -102,7 +102,12 @@ export function TelemetryCard({ bid }) {
           <td class="muted nowrap">${ok && r.observed_at ? ageText(r.observed_at) : "-"}</td>
         </tr>`;
       })}</tbody></table>`
-      : html`<p class="muted pad-x">${b.telemetryLoading ? "Reading..." : readings ? "No readings." : "Not read yet."}</p>`}
+      : !readings && b.telemetryQuiet
+        // FIX-PACK-1: held back before the first read: why, and one explicit read.
+        ? html`<div class="pad-x"><${QuietNote} testid="telemetry-quiet" action="telemetry-read-now"
+            text=${quietWords(b.telemetryQuiet)}
+            busy=${b.telemetryLoading} onRead=${() => loadTelemetry(bid)} /></div>`
+        : html`<p class="muted pad-x">${b.telemetryLoading ? "Reading..." : readings ? "No readings." : "Not read yet."}</p>`}
     ${b.telemetryLine ? html`<p class="muted mono pad-x pad-y small">${b.telemetryLine}</p>` : null}
   <//>`;
 }

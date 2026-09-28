@@ -57,6 +57,16 @@ export function Reason({ text, level = "", icon = "", testid = "" }) {
 
 export function Spinner() { return html`<${Icon} name="loader-circle" cls="spin" />`; }
 
+// FIX-PACK-1: a card whose background read the daemon held back before it had anything to
+// show: why (calm, never red) and one explicit read. `busy` while that read runs.
+export function QuietNote({ text, onRead, busy = false, testid = "", action = "read-now" }) {
+  return html`<div class="quiet-note" data-testid=${testid || undefined}>
+    <${Reason} icon="circle-pause" text=${text} />
+    <p class="mt-8"><button type="button" class="btn sm" data-action=${action} disabled=${busy}
+      aria-busy=${busy ? "true" : undefined} onClick=${onRead}>
+      ${busy ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`} Read now</button></p></div>`;
+}
+
 // The "$ command  (rc N, T s)" box. lines: [{kind, ...}] from actions.js.
 export function ResultBlock({ lines, placeholder = "", panel = null, testid = "" }) {
   const running = panel && panel.running;

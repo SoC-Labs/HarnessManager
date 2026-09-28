@@ -8,7 +8,10 @@ import { panelState } from "../actions.js";
 import { capState, valueText } from "../format.js";
 import { existingSession } from "../consoles.js";
 import { html, useEffect } from "../lib.js";
-import { boardState, cardJobBusy, changed, hasCardStore, loadConsoles, loadOverlays, loadTelemetry, refreshInfo, S, setSection } from "../store.js";
+import {
+  boardState, cardJobBusy, changed, hasCardStore, loadCard, loadConsoles, loadOverlays, loadTelemetry,
+  quietWords, refreshInfo, S, setSection,
+} from "../store.js";
 import { consoleRows, durationText, leaseLeft, leaseWho, openPty, week } from "../week.js";
 import { ScreenCommand } from "./consoles.js";
 import { CapabilitiesCard, HealthCard, IdentityCard, TelemetryCard } from "./details.js";
@@ -16,11 +19,11 @@ import { debugLive, debugSpecs } from "./debug.js";
 import { ARM_TEXT, REBOOT_GATE, RESET_DUT_GATE, rebootSpec, resetDutSpec } from "./power.js";
 import { ClaimTileRow } from "./claim.js";
 import {
-  ActionRow, ArmBox, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner,
+  ActionRow, ArmBox, Card, Chip, CopyButton, Icon, QuietNote, Reason, ResultBlock, Spinner,
 } from "../ui.js";
 import { leaseSpecs } from "../hub.js";
 import { LeaseBadge, openRequestForm, ReleaseButton, requestActive } from "../lease.js";
-import { PanelCard, PanelTileRow } from "./panel.js";          // P3 PANEL-UI
+import { front, PanelCard, PanelTileRow, readPanelNow } from "./panel.js";   // P3 PANEL-UI
 import { loadXvc, viewState, xvc } from "./xvc.js";             // UPDATE-UI: the tile's XVC line
 
 // --- needs attention ----------------------------------------------------------------------
@@ -277,7 +280,12 @@ function ReadingValue({ r, empty }) {
 export function cardLine(b) {
   const c = b.card;
   if (!hasCardStore(b)) return { text: "no card store on this harness", muted: true };
-  if (!c) return { text: b.cardError ? "unavailable" : "reading...", muted: true };
+  if (!c) {
+    if (b.cardError) return { text: "unavailable", muted: true };
+    // FIX-PACK-1: held back before the first read (the tile says why, with Read now).
+    if (b.cardQuiet) return { text: "not read", muted: true, title: quietWords(b.cardQuiet) };
+    return { text: "reading...", muted: true };
+  }
   if (!c.store) return { text: c.reason || "no card store", muted: true };
   if (!c.present) return { text: "none (boots as always)", muted: true };
   const bits = [c.state || "?"];
@@ -311,23 +319,46 @@ function LeaseTileRow({ bid }) {
     <${LeaseBadge} bid=${bid} prefix="tile" />${who.state === "here" ? html`<${ReleaseButton} bid=${bid} />` : null}</span>`;
 }
 
+// FIX-PACK-1: the Board tile's reads the daemon held back before any answer (background reads
+// off, the lease elsewhere, busy): the first such reason, or null. They show "not read", and
+// the tile says why once, with Read now, instead of "reading..." for ever.
+export function tileQuiet(bid) {
+  const b = boardState(bid);
+  const f = front(bid);
+  return (!b.telemetry && b.telemetryQuiet) || (hasCardStore(b) && !b.card && b.cardQuiet)
+    || (!f.body && f.quiet) || null;
+}
+
+// One explicit read of each held-back part: a click, so never held back.
+function readTileNow(bid) {
+  const b = boardState(bid);
+  if (!b.telemetry && b.telemetryQuiet) loadTelemetry(bid);
+  if (hasCardStore(b) && !b.card && b.cardQuiet) loadCard(bid);
+  if (!front(bid).body) readPanelNow(bid);
+}
+
 function BoardTile({ bid }) {
   const b = boardState(bid);
   const readings = b.telemetry;
   const temp = pickTemperature(readings);
   const clk = (readings || []).find((r) => r.name === "dut_clk");
+  const quiet = tileQuiet(bid);
+  const waiting = readings ? "" : b.telemetryQuiet ? "not read" : "reading...";
+  const reading = b.telemetryLoading || b.cardLoading || front(bid).loading;
   const pr = panelState(bid, "reset_dut");
   const pb = panelState(bid, "reboot");
   const last = [pr, pb].filter((p) => p.lines && p.lines.length).sort((x, y) => y.startedAt - x.startedAt)[0];
   return html`<${Tile} title="Board" icon="circuit-board" testid="tile-board">
     <div class="tile-kv">
-      <span class="k">Temperature</span><span class="v" data-testid="tile-temp"><${ReadingValue} r=${temp} empty=${readings ? "no sensor" : "reading..."} /></span>
-      <span class="k">DUT clock</span><span class="v" data-testid="tile-clock"><${ReadingValue} r=${clk} empty=${readings ? "not reported" : "reading..."} /></span>
+      <span class="k">Temperature</span><span class="v" data-testid="tile-temp"><${ReadingValue} r=${temp} empty=${waiting || "no sensor"} /></span>
+      <span class="k">DUT clock</span><span class="v" data-testid="tile-clock"><${ReadingValue} r=${clk} empty=${waiting || "not reported"} /></span>
       <${CardRow} b=${b} />
       <${PanelTileRow} bid=${bid} />
       <${ClaimTileRow} bid=${bid} />
       <${LeaseTileRow} bid=${bid} />
     </div>
+    ${quiet ? html`<div class="mt-8"><${QuietNote} testid="tile-board-quiet" action="tile-read-now"
+      text=${quietWords(quiet)} busy=${reading} onRead=${() => readTileNow(bid)} /></div>` : null}
     <div class="tile-actions">
       <${ActionRow} bid=${bid} panel="reset_dut" spec=${resetDutSpec(bid)} icon="rotate-ccw" compact=${true}
         gate=${RESET_DUT_GATE}><${ArmBox} bid=${bid} armKey="reset_dut" compact=${true} text=${ARM_TEXT.reset_dut} /><//>

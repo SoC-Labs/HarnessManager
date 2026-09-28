@@ -249,6 +249,11 @@ owners.
   it drops, then waits ("paused: lease held by `<who>`") and reconnects once the lease is
   yours or free. A new console there is refused, naming the holder. A board with no hub
   is unchanged.
+- With background reads off (`general.background_poll = off`, or a board's `poll = off`)
+  or paused (the lease is someone else's, the board is busy), the Front panel card no
+  longer spins on "Reading the panel..." for ever, and neither do the Board tile's panel,
+  card, temperature and clock lines or the Telemetry card. Each says why ("Background
+  reads are off") and has **Read now**, which reads once, explicitly.
 - Background telemetry that finds another reader on the MCC console backs off like a
   refused connection ("Busy (another client)").
 - A hub MCC read or REBOOT refused for another reader of `tty_00` says what the hub saw: a
