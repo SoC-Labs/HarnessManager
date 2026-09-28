@@ -5,7 +5,9 @@
 - **Linux, netboot** (``docs/HIL_LINUX.md`` Netboot mode): pyverify's FakeShell as
   ``SlotBoard`` (profile ``linux``, both OS slot headers zeroed, the SSH claim taken by another
   key) behind the same kind of hub (``claimed_lock.HubAndBoardSsh``), its claim probe answered
-  from the board's identify port.
+  from the board's identify port;
+- **Linux, card-less** (Card-less mode: board 2): the same ``SlotBoard`` with no user microSD
+  at all (``slots card: False``: harnessd answers ``card: false`` and no slots).
 
 In both, the lease is taken through the CLI first (``lease acquire``), so the lease service
 says ``here``, as it will for david. Every safety rule has its twin against the real CLI.
@@ -173,7 +175,7 @@ class LinuxLab:
 
 @contextmanager
 def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
-              static: int = LX_STATIC) -> Iterator[LinuxLab]:
+              static: int = LX_STATIC, card: bool = True) -> Iterator[LinuxLab]:
     from harness_manager_mps3 import hub as hubmod
     from harness_manager_mps3 import tunnel as T
     from tests.fakes.claimed_lock import TRUSTED, HubAndBoardSsh, board_key_fp, route_board
@@ -188,10 +190,12 @@ def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
     use_overlay_dirs(monkeypatch, overlays(tmp_path / "ov", static,
                                            "greybox", "nanosoc", "nanosoc_ila"))
     zeroed = {"state": "empty", "err": "no S0LB header"}       # Netboot mode: both headers gone
+    slots: dict[str, Any] = {"trusted_peer": TRUSTED, "running": "none", "a": zeroed,
+                             "b": dict(zeroed)}
+    if not card:
+        slots = {"trusted_peer": TRUSTED, "running": "none", "card": False}   # board 2
     fake = slot_board(profile="linux", static_id=static, ssh_claimed=True,
-                      ssh_host_key_sha256=board_key_fp(),
-                      slots={"trusted_peer": TRUSTED, "running": "none", "a": zeroed,
-                             "b": dict(zeroed)})
+                      ssh_host_key_sha256=board_key_fp(), slots=slots)
     ssh = HubAndBoardSsh()
     route_board(ssh, {6900: fake.control_port, 6910: fake.raw_tcp_port})
     monkeypatch.setattr(T, "DEFAULT_LAUNCHER", ssh)
@@ -290,3 +294,51 @@ def test_the_lease_taken_away_mid_run_stops_and_the_board_is_left_alone(lx, tmp_
         s["end_state"]["restore"]
     assert "restore" not in [verb_of(a) for a in hm.calls]
     assert s["end_state"]["greybox"] is False
+
+
+# --- the Linux lab, card-less (board 2) ------------------------------------------------------------
+
+
+@pytest.fixture
+def nocard(tmp_path, monkeypatch) -> Iterator[LinuxLab]:
+    with linux_lab(tmp_path, monkeypatch, card=False) as rig:
+        yield rig
+
+
+def test_the_linux_nocard_plan_passes_against_a_card_less_board(nocard, tmp_path, capsys):
+    acquire(capsys)
+    rc, hm = hil(tmp_path / "ev", "linux-nocard", "--writes", "safe")
+    s = summary(tmp_path / "ev")
+    v = verdicts(tmp_path / "ev")
+    assert rc == EXIT_PASS, (v, s["first_failure"])
+    assert {k for k, x in v.items() if x == "pass"} == {
+        "0.2", "0.3", "0.4", "A1", "A2", "A3", "B1", "C1", "D1", "D4a", "E1", "E1b", "Z2", "Z2b"}
+    assert {k for k, x in v.items() if x == "skipped"} >= {
+        "C2", "D2", "D3", "D4", "D5", "F6", "G1", "G2", "G3", "G4", "Z1", "Z2c"}
+    # harnessd said card:false; the real CLI says it as exit 12 with the slot service's reason
+    c1 = json.loads((tmp_path / "ev" / "c1_slot_status.json").read_text())
+    assert c1["exit"] == 12 and c1["stdout_json"]["error"]["reason"].startswith(
+        "no user microSD card in the slot")
+    # the swaps and the MCC read, and not one card, slot or reset verb
+    assert [verb_of(a) for a in hm.calls if is_write(a)] == ["mcc temp", "program", "restore"]
+    assert not {"card status", "slot push", "slot commit", "slot rollback", "card clear",
+                "mcc reboot", "mcc cmd", "reset", "power"} & {verb_of(a) for a in hm.calls}
+    assert nocard.fake.boots == [] and nocard.fake.current_rm_id == 0
+    assert s["end_state"]["greybox"] is True
+
+
+def test_twin_the_netboot_plan_fails_c1_on_the_same_card_less_board(nocard, tmp_path, capsys):
+    acquire(capsys)
+    rc, _ = hil(tmp_path / "ev", "linux-netboot")
+    s = summary(tmp_path / "ev")
+    assert rc == 1 and s["first_failure"]["id"] == "C1"
+    assert s["first_failure"]["reason"].startswith("exit 12, expected 0")
+    assert "no user microSD card in the slot" in s["first_failure"]["reason"]
+
+
+def test_twin_the_nocard_plan_fails_c1_on_a_blank_card(lx, tmp_path, capsys):
+    acquire(capsys)
+    rc, _ = hil(tmp_path / "ev", "linux-nocard")
+    s = summary(tmp_path / "ev")
+    assert rc == 1 and s["first_failure"]["id"] == "C1"
+    assert s["first_failure"]["reason"].startswith("exit 0, expected 12")

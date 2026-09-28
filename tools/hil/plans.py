@@ -1,9 +1,12 @@
 """The HIL runbooks as data (lane HIL-AUTO): one ``Check`` per runbook check, grouped by the
 runbook's own sections.
 
-- ``linux`` / ``linux-netboot``: ``docs/HIL_LINUX.md`` (``-netboot``: its "Netboot mode"
-  preface: the checks that touch the user microSD, its slots or the config SD are skipped,
-  and C1/B3 expect what a netbooted board says);
+- ``linux`` / ``linux-netboot`` / ``linux-nocard``: ``docs/HIL_LINUX.md``. ``-netboot``: its
+  "Netboot mode" preface (a blank card): the checks that touch the user microSD, its slots or
+  the config SD are skipped, and C1/B3 expect what a netbooted board says. ``-nocard``: its
+  "Card-less mode" preface (board 2, no user microSD at all): the same skips plus D4 and F6
+  (no reset of any kind), and C1 expects Harness Manager's answer to the harness's
+  ``card: false``: ``slot status`` exit 12, "no user microSD card in the slot";
 - ``bare-metal``: ``docs/HIL_B0.md``.
 
 A check's ``id`` is the runbook's (``A1``, ``R4``, ``0.3``). One runbook check that runs two
@@ -149,10 +152,35 @@ def _mcc_temp(check_id: str, section: str, title: str, evidence: str) -> Check:
 # --- docs/HIL_LINUX.md ----------------------------------------------------------------------------
 
 
-def linux(*, netboot: bool, static: str = LINUX_STATIC) -> Plan:
+#: The Linux plans: ``card`` (the card usable), ``netboot`` (a blank card, both slot headers
+#: zeroed: HIL_LINUX.md "Netboot mode"), ``nocard`` (no user microSD at all: "Card-less mode")
+LINUX_MODES = {"linux": "card", "linux-netboot": "netboot", "linux-nocard": "nocard"}
+NO_CARD = "no user microSD"
+
+
+def linux(*, mode: str = "card", static: str = LINUX_STATIC) -> Plan:
+    if mode not in LINUX_MODES.values():
+        raise ValueError(f"unknown Linux plan mode {mode!r}")
+    netboot = mode in ("netboot", "nocard")         # nocard: it can only netboot
+    nocard = mode == "nocard"
     nb = "netboot mode: " if netboot else ""
-    card_skip = (nb + "the user microSD is unusable (HIL_LINUX.md, Netboot mode 1)") if netboot else ""
-    g_skip = (nb + "§G reads and writes the config SD A/B (Netboot mode 1)") if netboot else ""
+    if nocard:
+        card_skip = f"{NO_CARD} (HIL_LINUX.md, Card-less mode 1)"
+        g_skip = (f"{NO_CARD} (Card-less mode 1): §G writes the config SD and ends in an MCC "
+                  "REBOOT, and a card-less board gets no reset of any kind")
+    else:
+        card_skip = (nb + "the user microSD is unusable (HIL_LINUX.md, Netboot mode 1)") \
+            if netboot else ""
+        g_skip = (nb + "§G reads and writes the config SD A/B (Netboot mode 1)") if netboot else ""
+    if nocard:
+        d4_skip = (f"{NO_CARD} (Card-less mode 1): nothing to boot from the card, and no MCC "
+                   "REBOOT on a card-less board (a failed cold boot needs a person at PB0)")
+    elif netboot:
+        d4_skip = nb + "skip D4 while the soak names tty_00 (Netboot mode 4)"
+    else:
+        d4_skip = ""
+    f6_skip = (f"{NO_CARD} (Card-less mode 1): F6 writes the config SD, then REBOOTs: no reset "
+               "of any kind on a card-less board") if nocard else ""
     s0 = Section("0", "Setup", (
         Check("0.1", "0", "The evidence folder and the environment", MANUAL,
               why="david's setup before the run: env.sh (overlay dirs, hw_server), boards.toml, "
@@ -160,7 +188,7 @@ def linux(*, netboot: bool, static: str = LINUX_STATIC) -> Plan:
         Check("0.2", "0", "Nothing reads the MCC console: no share on tty_00", READ,
               ("share", "list", "{B}"),
               (E("shares", "no_item_endswith", ("tty", "/tty_00"),
-                 "share list shows no /dev/mps3_01_pl/tty_00"),),
+                 "share list shows no /dev/<hub target>/tty_00"),),
               evidence="0_shares_before",
               hint="someone else's share holds the MCC: every REBOOT refuses. Ask the Linux "
                    "lead; never `share stop` (it stops every share). The hub-side `pgrep` half "
@@ -222,7 +250,16 @@ def linux(*, netboot: bool, static: str = LINUX_STATIC) -> Plan:
               needs_why="needs B2's adopt (B1 did not say `claimed by you`)",
               hint="the key does not log in: redo B2; check `ssh mps3-b2 true`"),
     ))
-    if netboot:
+    c1_ok: tuple[int, ...] = (0,)
+    if nocard:
+        # harnessd answers `slot status` with card:false and no slots (slot_linux.c
+        # mps3_slot_op); Harness Manager's slot service reports that as UNAVAILABLE (exit 12)
+        # with os_slots.slots_reason's words, so the JSON has no `card` field to read.
+        c1_ok = (12,)
+        c1 = (E("error.name", "eq", "UNAVAILABLE", "exit 12, unavailable"),
+              E("error.reason", "prefix", "no user microSD card in the slot",
+                "no user microSD card in the slot (the harness's card:false): not a fault"))
+    elif netboot:
         c1 = (E("slots.A.state", "eq", "empty", "slot A empty (no S0LB header): the zeroed "
                                                 "headers, not a fault"),
               E("slots.B.state", "eq", "empty", "slot B empty (no S0LB header)"),
@@ -233,8 +270,13 @@ def linux(*, netboot: bool, static: str = LINUX_STATIC) -> Plan:
               E("slots.B.state", "eq", "valid", "slot B valid"),
               E("job.busy", "false", said="a job line with no job running"))
     sC = Section("C", "OS slots and the user microSD (read)", (
-        Check("C1", "C", "The OS slots" + (" (the netboot check)" if netboot else ""), READ,
-              ("slot", "status", "{B}"), c1, evidence="c1_slot_status"),
+        Check("C1", "C", "The OS slots" + (" (the card-less check)" if nocard
+                                           else " (the netboot check)" if netboot else ""),
+              READ, ("slot", "status", "{B}"), c1, exit_ok=c1_ok, evidence="c1_slot_status",
+              hint=("exit 0 with slots: a card is in the slot, so this is not a card-less board "
+                    "(use --plan linux-netboot, or linux). Another exit-12 reason (rescue, the "
+                    "harness did not answer): HIL_LINUX.md's failure table, A1 rows"
+                    if nocard else "")),
         Check("C2", "C", "The card", READ, ("card", "status", "{B}"),
               (E("present", "true", said="card <board>: valid"),
                E("state", "eq", "valid", "valid")),
@@ -255,9 +297,7 @@ def linux(*, netboot: bool, static: str = LINUX_STATIC) -> Plan:
         _mcc_temp("D4a", "D", "The MCC read on the hub (the one-reader scan D4's REBOOT needs)",
                   "d4a_mcc_temp"),
         Check("D4", "D", "REBOOT the board", MANUAL,
-              why="an MCC REBOOT is never unattended (it power-cycles the board)",
-              skip=(nb + "skip D4 while the soak names tty_00 (Netboot mode 4)") if netboot
-              else ""),
+              why="an MCC REBOOT is never unattended (it power-cycles the board)", skip=d4_skip),
         Check("D5", "D", "The board came back running nanosoc from the card", MANUAL,
               why="follows D4", skip=card_skip),
     ))
@@ -280,11 +320,15 @@ def linux(*, netboot: bool, static: str = LINUX_STATIC) -> Plan:
               why="a person reads get_hw_targets/get_hw_ilas in Vivado"),
         Check("E5", "E", "Close XVC", MANUAL, why="follows E2"),
     ))
+    # §F is never unattended, in every plan: raw ssh/fpgahub on the hub (no HM verb, so the
+    # allow-list could not send it anyway), and F3 must stage THIS board's own bake (a table).
     sF = Section("F", "The hub SD door", tuple(
-        Check(cid, "F", title, MANUAL, why=why) for cid, title, why in (
+        Check(cid, "F", title, MANUAL, why=why, skip=f6_skip if cid == "F6" else "")
+        for cid, title, why in (
             ("F1", "How the daemon is sandboxed", "raw ssh on the hub, not an HM verb"),
             ("F2", "The hub offers an sd method", "raw fpgahub on the hub, not an HM verb"),
-            ("F3", "Stage RC2's base image", "writes the hub user's cache over raw ssh"),
+            ("F3", "Stage the board's own base image",
+             "writes the hub user's cache over raw ssh, from the board's row of F3's table"),
             ("F4", "The read probe", "raw fpgahub on the hub, not an HM verb"),
             ("F6", "The door, for real (opt-in)", "WRITES THE CONFIG SD, then REBOOTs"),
         )))
@@ -319,7 +363,7 @@ def linux(*, netboot: bool, static: str = LINUX_STATIC) -> Plan:
         Check("Z6", "Z", "Send the evidence", MANUAL,
               why="the runner writes summary.json and REPORT.md; david sends the folder"),
     ))
-    name = "linux-netboot" if netboot else "linux"
+    name = next(n for n, m in LINUX_MODES.items() if m == mode)
     return Plan(name, "docs/HIL_LINUX.md", static, "linux",
                 (s0, sA, sB, sC, sD, sE, sF, sG, sZ))
 
@@ -430,8 +474,9 @@ def bare_metal(*, static: str = BARE_METAL_STATIC) -> Plan:
 
 
 PLANS: dict[str, Callable[..., Plan]] = {
-    "linux-netboot": lambda **kw: linux(netboot=True, **kw),
-    "linux": lambda **kw: linux(netboot=False, **kw),
+    "linux-netboot": lambda **kw: linux(mode="netboot", **kw),
+    "linux-nocard": lambda **kw: linux(mode="nocard", **kw),
+    "linux": lambda **kw: linux(mode="card", **kw),
     "bare-metal": bare_metal,
 }
 
