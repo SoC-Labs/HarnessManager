@@ -130,7 +130,7 @@ def linux_harnessd_profile(static_id: int | None = None) -> FirmwareProfile:
     ``impl:"linux"``, ``lmb_kb`` 128, NO ``windowed`` (config_agent is built plain,
     the kernel paces TCP), the v0.11 verbs, identify on UDP 6899, diag keys it has
     no source for OMITTED, ``up_ms`` = process uptime + additive ``os_up_ms``, a
-    reboot ~30-40 s longer than bare-metal (the pack's witness budget: 180 s)."""
+    reboot ~30-40 s longer than bare-metal (the pack's witness budget: 300 s since FIX-PACK-2)."""
     sid, final = ((static_id, True) if static_id is not None else
                   _static_id_from_env("HARNESS_MANAGER_T12_LINUX_STATIC_ID",
                                       LINUX_MINT3_STATIC_ID_PLACEHOLDER))

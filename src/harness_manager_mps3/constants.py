@@ -55,10 +55,12 @@ SSH_PORT = 22                           # dropbear on the Linux harness (DL5)
 
 #: The reboot witness budget, per engine. Bare-metal: the MCC REBOOT witness
 #: default (mcc.py). Linux: MCC config + stage0 reading the OS image over SPI +
-#: a kernel boot, ~30-40 s longer; plan §10 "Timing" agrees 180 s until the
-#: B1/B2 board windows measure it.
+#: a kernel boot. FIX-PACK-2 item 7 (2026-09-28): the Linux lead's stage0 cold-start
+#: fix adds a 10 s DDR settle, so a cold MCC boot now answers 6900 after ~190 s
+#: median (188.6 s max measured; 205 s to SSH), up from ~145 s: the old 180 s ran
+#: out just before the board came up. 300 s leaves room; a failure only waits longer.
 REBOOT_WAIT_S_BARE_METAL = 120.0
-REBOOT_WAIT_S_LINUX = 180.0
+REBOOT_WAIT_S_LINUX = 300.0
 
 
 #: The shell's DISTINCT refusal of ``swap``/``commit`` when the card's image and

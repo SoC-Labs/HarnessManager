@@ -1283,8 +1283,8 @@ after you commit it and reboot, and a rollback puts the other slot back.
 2. Push the image: `harness-manager slot push 192.168.10.101 --bundle ~/release/linux_bundle.json`
 3. Commit it: `harness-manager slot commit 192.168.10.101`
 4. Reboot the board: **Power > Board reboot**, or `harness-manager mcc 192.168.10.101 reboot`.
-   A Linux board gets its own 180 s budget (`--wait` changes it) and takes 2 to 4 minutes to
-   come back. Behind a hub the REBOOT runs on the hub; nothing to start first. The output says
+   A Linux board gets its own 300 s budget (`--wait` changes it) and takes 3 to 4 minutes to
+   come back (a cold boot answers after ~190 s since stage0's DDR settle). Behind a hub the REBOOT runs on the hub; nothing to start first. The output says
    which `.bit` the MCC loaded (`MCC loaded …`).
 5. Check it: `slot status` shows the new slot running and default, and a push now goes to
    the OTHER slot. It says "booted (not yet confirmed)" until the harness reports that

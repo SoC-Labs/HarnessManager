@@ -107,7 +107,7 @@ def test_linux_identity_health_and_reboot_budget(tmp_path):
         ident = session.identity()
         health = session.health()
     assert ident.harness_impl == "linux" and "windowed" not in ident.features
-    assert reboot_wait_s(ident) == 180.0
+    assert reboot_wait_s(ident) == 300.0
     assert health.control_channel == "idle"
     assert not set(LINUX_OMITTED_DIAG_KEYS) & set(health.counters)    # absent, not 0
     assert "icap_bytes" in health.counters

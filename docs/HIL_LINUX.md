@@ -406,8 +406,9 @@ harness-manager mcc $B reboot | tee $EV/d4_mcc_reboot.txt
    checks nothing else reads `tty_00`, types a CR and checks for `Cmd>`, sends REBOOT at 100 ms a
    character, waits for `Rebooting`, and captures the MCC boot log to `FPGA configuration
    complete`; then the shell must answer again. No share is started.
-4. The wait is the Linux budget, 180 s, with no `--wait` (MCC-FIX). Add `--wait 240` only if the
-   Linux lead says today's boot is slower.
+4. The wait is the Linux budget, 300 s, with no `--wait` (MCC-FIX; FIX-PACK-2 raised it from
+   180 s: stage0's 10 s DDR settle puts a cold boot at ~190 s to 6900, 205 s to SSH). Add
+   `--wait` only if the Linux lead says today's boot is slower still.
 5. It refuses while the user microSD's card job writes or reads back (SLOT-TIMING's guard).
 
 **D5. The board came back running nanosoc from the card**

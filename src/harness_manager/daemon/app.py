@@ -1107,7 +1107,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def controller_reboot(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         b = _obj(body)
-        # No wait_s: the pack picks it from the harness (180 s Linux, 120 s bare-metal).
+        # No wait_s: the pack picks it from the harness (300 s Linux, 120 s bare-metal).
         wait_s = _number(b, "wait_s") if b.get("wait_s") is not None else None
         if wait_s is not None and wait_s <= 0:
             raise UsageError("wait_s must be positive")

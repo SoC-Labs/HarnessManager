@@ -184,7 +184,7 @@ def test_an_os_image_needs_an_os_slot_capable_harness(tmp_path):
     plan = make_plan(ch, board(), app_version="0.1.0")
     assert plan.os_slot and any("OS slot" in x for x in plan.blockers)
     ok = make_plan(ch, board(os_slots=True), app_version="0.1.0")
-    assert ok.os_slot and not ok.blockers and ok.reboot_wait_s == 180.0
+    assert ok.os_slot and not ok.blockers and ok.reboot_wait_s == 300.0
     assert make_plan(channel(tmp_path, Release("1.1.0")), board(), app_version="0.1.0").reboot_wait_s is None
     assert "write-os-slot" in [s.action for s in ok.steps]
 

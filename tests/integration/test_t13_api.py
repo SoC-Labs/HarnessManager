@@ -404,7 +404,7 @@ def test_a_usb_board_id_with_slashes_routes_and_its_jobs_run(usb_board, tmp_path
                 frames = events_until(ws, "job.done", r.json()["job"])
             assert frames[-1]["data"]["result"]["backup"]["sha256"] == record["sha256"]
             # a reboot is a job whose progress is the witness phases; with no wait_s the
-            # pack picks the wait from the harness (T12: 120 s bare-metal, 180 s Linux)
+            # pack picks the wait from the harness (T12: 120 s bare-metal, 300 s Linux)
             with c.websocket_connect(f"/api/v1/events?token={TOKEN}&topics=job.*") as ws:
                 job = c.post(f"{B}/controller/reboot", json={}, headers=H).json()["job"]
                 frames = events_until(ws, "job.done", job)

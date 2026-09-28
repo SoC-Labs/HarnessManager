@@ -156,6 +156,9 @@ owners.
 - The board controller (MCC) over the Debug USB: temperatures, oscillators, a reboot
   that proves the board came back, and allowlisted commands (destructive ones are
   refused).
+- A reboot of a Linux board waits up to 300 s by default (was 180 s): with the Linux
+  lead's stage0 DDR settle, a cold MCC boot answers after ~190 s. Bare metal keeps 120 s;
+  `--wait` still overrides both.
 - The configuration SD: backup, install and restore. A backup comes first, `.ebf` files
   are never written, and an interrupted install can be recovered.
 - Board power from a networked plug (Shelly, Tasmota, NETIO) or an INA260, set in
