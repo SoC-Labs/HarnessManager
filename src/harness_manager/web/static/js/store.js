@@ -18,9 +18,9 @@ export const S = {
   eventsUp: false,
   version: "",
   packs: {},
-  boards: {},                // board_id -> {board_id, open, holder, candidate}
+  boards: {},                // board_id -> {board_id, open, holder, candidate, source, configured?}
   order: [],                 // board ids in rail order
-  scan: { running: false, line: "", level: "" },
+  scan: { running: false, line: "", level: "", offer: [] },   // offer: boards.toml boards (SIDEBAR-UX)
   selected: null,
   sections: {},              // board_id -> section key
   theme: "system",
@@ -373,16 +373,34 @@ async function probeNow(hosts, via = "", auto = false) {
   mergeBoards(cands.map((c) => ({ board_id: c.board_id, candidate: c })));
   await loadBoards();
   const n = cands.length;
+  // SIDEBAR-UX: a scan also offers the boards boards.toml configures (GET /boards lists
+  // them, not contacted): they may be behind a hub, where no scan of this network finds
+  // them; Open reaches each through its own via/hub.
+  const found = new Set(cands.map((c) => c.board_id));
+  const offer = hosts ? [] : S.order.filter((bid) => S.boards[bid] && S.boards[bid].configured
+    && !S.boards[bid].open && !found.has(bid));
+  const more = offer.length ? `; ${offer.length} more in boards.toml (not contacted)` : "";
   S.scan = {
     running: false,
-    line: n ? `${r.line}: ${n} board${n === 1 ? "" : "s"}`
-      : `${r.line}: no boards answered. Check the Ethernet link, or add one by address.`,
-    level: n ? "" : "warn",
+    line: n ? `${r.line}: ${n} board${n === 1 ? "" : "s"}${more}`
+      : offer.length ? `${r.line}: no boards answered on this network${more}`
+        : `${r.line}: no boards answered. Check the Ethernet link, or add one by address.`,
+    level: n || offer.length ? "" : "warn",
+    offer,
   };
-  log(n ? "info" : "warning", "probe", S.scan.line);
-  if (!S.selected && S.order.length) select(S.order[0]);
+  log(n || offer.length ? "info" : "warning", "probe", S.scan.line);
+  if (!S.selected && S.order.length) select(firstBoard() || S.order[0]);
   if (hosts && cands.length) select(cands[0].board_id);
   changed();
+}
+
+// SIDEBAR-UX: the board the rail shows first (favourites and the user's order), selected
+// when nothing is; sidebar.js sets it.
+let firstBoard = () => S.order[0];
+let firstReady = Promise.resolve();
+export function setFirstBoard(fn, ready = null) {
+  firstBoard = fn;
+  if (ready) firstReady = ready;
 }
 
 // After a board is open in the daemon: read everything the workspace shows.
@@ -804,11 +822,14 @@ export async function start() {
     setCapabilityTitles(p.data.data.capabilities);
   }
   const r = await loadBoards();
+  // SIDEBAR-UX: the user's order decides the first board; it is read at start (never
+  // waited for long: a settings service that does not answer leaves the page's order).
+  await Promise.race([firstReady, new Promise((ok) => { setTimeout(ok, 2000); })]);
   // A board clicked while this list loaded stays selected: the event socket's own read
   // can draw the rail first, and selecting here would switch the user's pick back.
   if (!S.selected) {
     if (saved && S.boards[saved]) select(saved);
-    else if (S.order.length) select(S.order[0]);
+    else if (S.order.length) select(firstBoard() || S.order[0]);
   }
   if (!r.error && !S.order.length) probe(null, "", { auto: true });
   // Holders change under us (other users, the CLI): re-read the list now and then.
