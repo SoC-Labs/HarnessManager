@@ -169,6 +169,11 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/hubs/{name}/boards"),
         ("POST", "/hubs/adopt"),
     ),
+    # FIX-PACK-2: the service's own tool variables; served in the mock by
+    # tests/fakes/fp2_mock_env.py (the real describe over a scripted environment).
+    "env_api": (
+        ("GET", "/daemon/env"),
+    ),
     # QUIET-POLL: served in the mock by tests/fakes/qp_mock_quiet.py (the demo's gate: every
     # background read allowed, viewers counted).
     "quiet_api": (

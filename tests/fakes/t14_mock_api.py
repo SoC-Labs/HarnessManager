@@ -426,6 +426,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # QUIET-POLL's viewer routes (docs/API.md "Background reads"): the demo's gate.
     from .qp_mock_quiet import register as register_quiet
     app.state.quiet = register_quiet(app, state, _ok)
+    # FIX-PACK-2: the service's own tool variables (docs/API.md), scripted.
+    from .fp2_mock_env import register as register_env
+    register_env(app, _ok)
     # Lease requests, force release and leaving the queue (LR-A..C build the real ones).
     sim.requests = LeaseRequestSim(sim)
     register_lease_requests(app, state, sim.requests, _ok, _accepted)

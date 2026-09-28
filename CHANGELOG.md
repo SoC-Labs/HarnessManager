@@ -166,6 +166,11 @@ owners.
 - `xvc status` (and Debug > Fabric) says what the board reports now: a board found by UDP
   identify, or read while another client held its control port, no longer says "needs
   harness firmware with 'xvc_dbgbr'" while the board reports it.
+- `harness-manager daemon status`, Settings → Advanced and a warning line in the app show
+  the tool variables the service started with (`HARNESS_MANAGER_*`). The service keeps
+  the environment of the shell that started it, so a `HARNESS_MANAGER_OPENOCD` from an old
+  terminal could override your OpenOCD setting unseen; the app now says so, and names the
+  way out (stop the service, start it from a clean shell).
 - Ready for net-protocol v0.18 (mint 4): a harness that lists `mccif` (in-fabric SCC) or
   `mcc_local` (USB loopback) offers board reboot and oscillators without the Debug USB,
   gated on the route its `mcc status` reports. Rebooting and oscillators over the harness

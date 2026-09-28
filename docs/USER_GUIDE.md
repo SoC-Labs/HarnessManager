@@ -146,7 +146,7 @@ it, so you can use both at once. `harness-manager daemon status` shows it.
 | `harness-manager app` | the app in its own window |
 | `harness-manager ui` | the same page in a browser tab |
 | `harness-manager ui --no-browser` | print the URL only (for `ssh -L`) |
-| `harness-manager daemon status` | is the service running, and where |
+| `harness-manager daemon status` | is the service running, and where; the tool variables it started with |
 | `harness-manager daemon stop` | stop it; the next command starts it again |
 | `harness-manager help --tabs` | the help text the app's **Help** shows |
 
@@ -828,7 +828,11 @@ turns the new one away within 5 seconds of HM's own session, HM retries once by 
   message names the binary and the adapters it has. Install xPack OpenOCD 0.12, then set
   `tools.openocd` (Settings → Tools, or `harness-manager config set tools.openocd PATH`).
   If `HARNESS_MANAGER_OPENOCD` is set, it overrides the setting: point it at the new one
-  or unset it.
+  or unset it. It is the SERVICE's variable that counts, and the service keeps the
+  environment of the shell that started it (an app or `ui` from another shell reuses the
+  running service). `harness-manager daemon status` lists the variables the service
+  started with, as do Settings → Advanced and a warning line in the app. To drop one:
+  `harness-manager daemon stop`, then start the app from a shell without it.
 - **Exit 4, held:** another debugger has the board's JTAG port. The hint may add "or the
   harness's JTAG server is still finishing the previous session": wait a few seconds and
   retry.

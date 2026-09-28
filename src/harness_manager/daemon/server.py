@@ -400,8 +400,12 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
     from harness_manager.settings import runtime
     from harness_manager.settings.files import use_config_dir
 
+    from . import service_env
     from .app import create_app
 
+    # FIX-PACK-2 item 6: the environment this service started with (the starter's, whole:
+    # control._spawn), before anything else reads it; shown by GET /daemon/env
+    env_at_start = service_env.capture()
     state_dir = Path(state_dir)
     if resume is not None:
         port, listen = int(resume["port"]), str(resume.get("listen") or listen or "") or None
@@ -464,6 +468,7 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
                           "log_level": log_level, "pack_overrides": pack_overrides or {},
                           "demo": demo}
         daemon.resumed = resume
+        daemon.env_at_start = env_at_start
         server = _server_class()(uvicorn_config(app, log_level=log_level))
         holder["server"] = server
         install_redaction()
@@ -478,6 +483,7 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
                  info.base_url, state_dir,
                  f" (resumed after {resume.get('reason', 'a restart')}: "
                  f"{len(resume.get('boards') or [])} board(s))" if resume is not None else "")
+        service_env.log_at_start(env_at_start)
         _stop_on_hangup(server)
         threading.Thread(target=_after_start, args=(server, daemon, resume), daemon=True,
                          name="harness-manager-daemon-after-start").start()

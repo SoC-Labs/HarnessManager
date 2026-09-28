@@ -119,7 +119,8 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
               "kit_api", "xvc_api", "harness_api", "settings_api", "claim_api", "card_api",
               "hubs_api", "display_api",   # SET-UI: Settings > Hubs; LM3: the Live display
               "quiet_api",                 # QUIET-POLL: viewers and the background gate
-              "identity_api")              # BOARD-ID: label/IP/MAC and the fix
+              "identity_api",              # BOARD-ID: label/IP/MAC and the fix
+              "env_api")                   # FIX-PACK-2: the service's own tool variables
 
 
 @dataclass
