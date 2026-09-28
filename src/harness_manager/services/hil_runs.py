@@ -73,6 +73,7 @@ CAPABILITY = "HIL checks"
 
 SCHEDULED, STARTING, RUNNING, STOPPING = "scheduled", "starting", "running", "stopping"
 DONE, CANCELLED, REFUSED, FAILED = "done", "cancelled", "refused", "failed"
+INTERRUPTED = "interrupted"          # a past run whose service process ended mid-run
 ACTIVE = (SCHEDULED, STARTING, RUNNING, STOPPING)
 RESULT = {R.EXIT_PASS: "PASS", R.EXIT_FAIL: "FAIL", R.EXIT_STOP: "STOPPED"}
 
@@ -158,6 +159,7 @@ class Run:
     stop_requested: bool = False
     lines: deque = field(default_factory=lambda: deque(maxlen=40))
     n_lines: int = 0
+    mu: threading.Lock = field(default_factory=threading.Lock)     # lines, read by the API
     runner: Any = None
     thread: threading.Thread | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
@@ -171,6 +173,8 @@ class Run:
 
     def public(self) -> dict[str, Any]:
         r = self.req
+        with self.mu:
+            lines, n_lines = list(self.lines), self.n_lines
         return {
             "id": self.id, "board_id": self.board_id, "target": self.target, "state": self.state,
             "result": self.result, "exit": self.exit, "reason": self.reason or None,
@@ -184,7 +188,7 @@ class Run:
             "first_failure": self.first_failure, "last_check": self.last_check,
             "lease": dict(self.lease),
             "stop_requested": self.stop_requested, "announce": self.announce,
-            "log": list(self.lines), "log_total": self.n_lines, "route": R.ROUTE_SERVICE,
+            "log": lines, "log_total": n_lines, "route": R.ROUTE_SERVICE,
         }
 
     def row(self) -> dict[str, Any]:
@@ -291,6 +295,12 @@ class HilRuns:
         out = []
         for row in reversed(rows[-HISTORY:]):
             item = dict(live.row() if live is not None and live.id == row.get("id") else row)
+            if item.get("state") in ACTIVE and (live is None or live.id != item.get("id")):
+                # A run of an earlier service process that never ended here: it stopped
+                # with that process (killed, or restarted). Its REPORT.md says where it was.
+                item.update(state=INTERRUPTED, reason="the service stopped while the run was on: "
+                                                      "REPORT.md of the last iteration says where "
+                                                      "it was (the board may be left swapped)")
             ev = Path(str(row.get("evidence") or ""))
             summary = _load_json(ev / "summary.json") if row.get("evidence") else None
             item["report"] = (ev / "REPORT.md").is_file() if row.get("evidence") else False
@@ -863,8 +873,9 @@ class HilRuns:
 
     def _say(self, run: Run, text: str) -> None:
         stamp = datetime.fromtimestamp(self.clock()).strftime("%H:%M:%S")
-        run.lines.append(f"{stamp}  {text}")
-        run.n_lines += 1
+        with run.mu:
+            run.lines.append(f"{stamp}  {text}")
+            run.n_lines += 1
         log.info("checks %s on %s: %s", run.id, run.board_id, text)
 
     def _publish_state(self, run: Run) -> None:

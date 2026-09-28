@@ -53,6 +53,7 @@ start).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -1197,7 +1198,8 @@ def main(argv: Sequence[str] | None = None, *, invoker: Invoker | None = None,
         return EXIT_STOP
     if invoker is None and not a.hm and not a.in_process:
         service = running_service()
-        if service is not None:
+        # --announce-only goes to the service only for a board open there: it never opens one
+        if service is not None and (not a.announce_only or open_in(service, a.board)):
             return through_service(service, a, sleep=sleep)
     plan = P.build(a.plan, static=a.expect_static)
     now = datetime.fromtimestamp(clock()).astimezone()
@@ -1252,6 +1254,16 @@ def running_service() -> Any:
         return None
 
 
+def open_in(remote: Any, target: str) -> bool:
+    """Whether the service has ``target`` open (its own state: no board contact)."""
+    try:
+        bid = remote.candidate_for(target).board_id
+        rows = remote.http.get("/boards").get("boards") or []
+    except Exception:  # noqa: BLE001 - not known: the announcement is written here
+        return False
+    return any(r.get("board_id") == bid and r.get("open") for r in rows if isinstance(r, dict))
+
+
 def service_body(a: argparse.Namespace) -> dict[str, Any]:
     """The command line's options as ``POST /boards/{bid}/checks`` takes them."""
     body: dict[str, Any] = {
@@ -1280,14 +1292,18 @@ def through_service(remote: Any, a: argparse.Namespace, *,
     def say(text: str) -> None:
         print(f"hil: {text}", file=sys.stderr, flush=True)
 
-    try:
-        opened = http.post("/boards", {"target": a.board, "note": "hil-auto (checks run)"})
-        bid = str(opened.get("board_id") or "")
-    except AlreadyError as exc:
-        bid = str((getattr(exc, "data", None) or {}).get("board_id") or "") or             remote.candidate_for(a.board).board_id
-    except HarnessError as exc:
-        say(f"refused to start: the service could not open {a.board}: {exc.message}")
-        return EXIT_STOP
+    bid = remote.candidate_for(a.board).board_id
+    opened_here = False
+    if not a.announce_only:               # the announcement alone never opens the board
+        try:
+            opened = http.post("/boards", {"target": a.board, "note": "hil-auto (checks run)"})
+            bid = str(opened.get("board_id") or bid)
+            opened_here = True
+        except AlreadyError:
+            pass                              # open in the service already (the app): shared
+        except HarnessError as exc:
+            say(f"refused to start: the service could not open {a.board}: {exc.message}")
+            return EXIT_STOP
     path = f"/boards/{q(bid)}/checks"
     body = service_body(a)
     try:
@@ -1336,6 +1352,11 @@ def through_service(remote: Any, a: argparse.Namespace, *,
                 say(f"ended: {last.get('state')}, {last.get('result') or '?'}"
                     + (f" ({last.get('reason')})" if last.get("reason") else "")
                     + f"; {Path(str(last.get('evidence') or run['evidence'])) / 'REPORT.md'}")
+                if opened_here:
+                    # We opened the board in the service for this run: close it again (the
+                    # service then stops heartbeating the lease; the lease stays yours).
+                    with contextlib.suppress(HarnessError):
+                        http.delete(f"/boards/{q(bid)}")
                 return int(code) if isinstance(code, int) else EXIT_STOP
             lines = now.get("log") or []
             total = int(now.get("log_total") or len(lines))
