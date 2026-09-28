@@ -189,6 +189,14 @@ owners.
   view only: a click does nothing to the board. It is open only while it is on screen: a
   hidden card or a background tab closes it. When it is refused, the text mirror stays, with
   the reason (and who holds the lease). `app --demo` shows it on the Linux demo board.
+- The Live display follows the image the board runs now. On 2026-09-28 the board rebooted
+  from an image with `lcd_mirror` into one without it, and the display kept what it knew
+  and showed "connecting" for ever. Now a stream that closes before the board's first
+  reply asks the board again, and an image without the engine ends the display with "the
+  Live display needs a harness image with lcd_mirror (this image has none...)". A reboot,
+  a power cycle, a new harness image or a changed SSH host key drops what the display knew
+  and its SSH forward, and every identity read updates it. When the image names the engine
+  but nothing listens on 6940, the display stops after 3 tries with ssh's reason.
 - A board that can never show the Live display (the bare-metal harness, an image without
   `lcd_mirror`) now says so (422 UNAVAILABLE, exit 12) even when someone else holds its
   lease, instead of naming the holder (409 HELD, exit 4): taking the lease would not help.

@@ -14,7 +14,8 @@ and ``stats.lcd_mirror``; all three appear only while the mirror is configured (
 in the order a user fixes them:
 
 1. bare metal: ``needs the Linux harness with lcd_mirror``;
-2. Linux without the engine: ``this harness image has no lcd_mirror``;
+2. Linux without the engine: ``the Live display needs a harness image with lcd_mirror (this
+   image has none...)``;
 3. a board behind a hub whose lease is not yours (D3): the holder is named;
 4. an unclaimed board, or no SSH: the claim hint.
 
@@ -47,6 +48,15 @@ and the compositor stops with ssh's reason (the design's "stops after 3 restarts
 changed host key is the claim's loud ``HostKeyChangedError`` at once. A stream that closes
 before HELLO is diagnosed from ssh's "open failed" lines (``display_diagnose``): "no
 lcd_mirror service on the board".
+
+**Stale facts (FIX-PACK-1).** On 2026-09-28 the board rebooted from an image with
+``lcd_mirror`` into one without it, and the Live display kept its cached facts and spun on
+"connecting". Now: every identity read (``engine.info``) is noted here
+(``display_note_identity``); a reboot, a power cycle or a changed SSH host key
+(``display_forget``, from the daemon's events) drops the facts AND the forward, and until a
+fresh read nothing is seeded from the open's (old) identity, so the next open re-gates on a
+live ``version``; and a stream that closes before HELLO re-gates at once
+(``display_regate``): an image without the engine ends the display with ``NO_ENGINE``.
 
 Nothing here reads REGS or MODE: the picture's panel registers are the model's
 (``DisplayFrame.mode_regs``: MODE after RESETS changes, REGS being a raw log never reset).
@@ -98,8 +108,8 @@ CONNECT_TIMEOUT_S = 5.0
 OPEN_FAILURE_GRACE_S = 0.5
 
 NEEDS_LINUX = "needs the Linux harness with lcd_mirror (this board runs the {impl} harness)"
-NO_ENGINE = ("this harness image has no lcd_mirror (its version.features does not name it): "
-             "update the board's Linux image")
+NO_ENGINE = ("the Live display needs a harness image with lcd_mirror (this image has none: its "
+             "version.features does not name it); update the board's Linux image")
 CLAIM_HINT = ("needs a claimed board: the live display is reached over SSH with your claimed "
               "key (`harness-manager board claim TARGET`, or `--adopt` for a claim made "
               "elsewhere)")
@@ -179,7 +189,12 @@ class Mps3Display:
         self._tunnel: Any = None
         self._closed = False
         self._failures = 0
+        #: FIX-PACK-1: the facts were dropped (a reboot, a new host key): nothing is seeded
+        #: from the open's identity (it predates the change) until a fresh read or a new
+        #: identity is noted.
+        self._forgotten = False
         self.opens = 0                       # forwards opened (tests, status)
+        self.forgets = 0                     # facts dropped (tests)
 
     @property
     def board_id(self) -> str:
@@ -194,6 +209,33 @@ class Mps3Display:
         with self._mu:
             keep = self._facts[1] if self._facts is not None else None
             self._facts = (self._clock(), MirrorFacts.of_identity(identity, keep))
+            self._forgotten = False
+
+    def display_forget(self, why: str = "") -> None:
+        """FIX-PACK-1: the board may run another image now (a reboot, a power cycle, a changed
+        SSH host key): drop the cached facts and the forward. The next open re-gates on a
+        live ``version`` read; until then the gate is "not known" (never the old answer)."""
+        with self._mu:
+            self._facts = None
+            self._forgotten = True
+            self._failures = 0
+            self.forgets += 1
+        log.info("the live display of %s forgets what it knew%s", self.board_id,
+                 f": {why}" if why else "")
+        self.display_release()
+
+    def display_regate(self) -> str:
+        """FIX-PACK-1: the stream closed before HELLO, over this session's own forward (the
+        lease holder's): read ``version`` again and return the gate ("" when the image may
+        still show it, or it cannot be read now). An image that lost the engine answers
+        ``NO_ENGINE``: the compositor ends the display with it instead of reconnecting."""
+        if self._closed:
+            return ""
+        try:
+            f = self.facts(fresh=True)
+        except HarnessError:
+            return ""
+        return self._gate_reason(f)
 
     def known_facts(self) -> MirrorFacts | None:
         """What is known WITHOUT asking the board: the cached facts (of any age; a stale
@@ -206,6 +248,9 @@ class Mps3Display:
             age = now - self._facts[0] if self._facts is not None else None
         if cached is not None and age is not None and age < self._ttl:
             return cached
+        with self._mu:
+            if self._forgotten:
+                return cached                # dropped: the open's identity is older (None)
         seed = getattr(self._session.candidate, "identity", None)
         seeded = MirrorFacts.of_identity(seed, cached) if seed is not None and (
             getattr(seed, "features", ()) or getattr(seed, "harness_impl", "")) else None
@@ -230,8 +275,9 @@ class Mps3Display:
         now = self._clock()
         with self._mu:
             cached = self._facts[1] if self._facts is not None else None
+            forgotten = self._forgotten
         seed = getattr(self._session.candidate, "identity", None)
-        seeded = MirrorFacts.of_identity(seed) if seed is not None and (
+        seeded = MirrorFacts.of_identity(seed) if seed is not None and not forgotten and (
             getattr(seed, "features", ()) or getattr(seed, "harness_impl", "")) else None
         try:
             got = self._read_live()
@@ -242,6 +288,7 @@ class Mps3Display:
             return fallback
         with self._mu:
             self._facts = (now, got)
+            self._forgotten = False
         return got
 
     def _read_live(self) -> MirrorFacts:

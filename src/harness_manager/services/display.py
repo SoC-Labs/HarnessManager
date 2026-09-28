@@ -35,6 +35,11 @@ WebSocket; neither is needed here.
   raises ``DisplayUnavailable``: ``down`` with its reason, again after its ``retry_s`` (None:
   not until a viewer asks again). Any other ``HarnessError`` (claim lost, key refused, host
   key changed): ``down``, and the upstream stops.
+- FIX-PACK-1: a stream that closes before HELLO asks the source again whether the board can
+  show the mirror at all (``display_regate()``, else ``display_gate()``): an image that lost
+  the engine (a reboot into one without ``lcd_mirror``) ends the upstream with that reason at
+  once. One closed before HELLO with a known reason (nothing listens: ``display_diagnose``)
+  ``no_service_max`` (3) times in a row, with no HELLO between, stops with that reason too.
 
 **Viewers: per-viewer dirty sets, drop-to-latest, never stale.** A viewer's dirty set is the
 tiles whose latest record it has not been sent. ``next_message()`` sends exactly those, as
@@ -110,6 +115,7 @@ class DisplayTimings:
     backoff_s: tuple[float, ...] = (0.2, 0.5, 1.0, 2.0, 4.0, 8.0)
     refused_retry_s: float = 10.0    # the board's refusal line (its client slots are full)
     no_service_retry_s: float = 60.0  # a stream that closes before HELLO, with a known reason
+    no_service_max: int = 3          # ... that many in a row (FIX-PACK-1): stop, with the reason
     dim_persist_s: float = 1.0
     fps_window_s: float = 2.0
     close_join_s: float = 5.0        # ``close`` waits this long for the upstream thread
@@ -308,6 +314,7 @@ class _Board:
         self.finished = False
         self.end_reason = ""
         self.end_error: HarnessError | None = None   # the source's own error, when one ended it
+        self.no_service = 0          # streams closed before HELLO with a known reason, in a row
         self.rate_asked: int | None = None
         self.rate_echo: int | None = None
         self.rtt_ms: float | None = None
@@ -469,6 +476,21 @@ class _Board:
             log.exception("display_diagnose failed for %s", self.board_id)
             return ""
 
+    def _regate(self) -> str:
+        """FIX-PACK-1: after a stream that closed before HELLO, the source's word on whether the
+        board can show the mirror AT ALL as it is now (its image may have changed under us: a
+        reboot into one without the engine). ``display_regate()`` reads what decides it again;
+        a source without it: ``display_gate()``. "" when it may still (or cannot say)."""
+        fn = getattr(self.source, "display_regate", None) or getattr(self.source, "display_gate",
+                                                                     None)
+        if not callable(fn):
+            return ""
+        try:
+            return str(fn() or "")
+        except Exception:  # noqa: BLE001 - a re-gate is best effort
+            log.exception("re-gating the display of %s failed", self.board_id)
+            return ""
+
     def _run(self) -> None:
         attempt = 0
         try:
@@ -499,7 +521,22 @@ class _Board:
                         self.stats["protocol_errors"] += 1
                     why = exc.message if isinstance(exc, HarnessError) else str(exc) or type(exc).__name__
                     diag = self._diagnose(t0) if isinstance(exc, (_BeforeHello, UnreachableError)) else ""
+                    # FIX-PACK-1: nothing answered where the mirror should be. The image may
+                    # have changed (a reboot into one without lcd_mirror): ask the source
+                    # again, and a board that can no longer show it ends here with that
+                    # reason, never "connecting" for ever.
+                    gate = self._regate() if diag or isinstance(exc, _BeforeHello) else ""
+                    if gate:
+                        self.end_reason, self.end_error = gate, DisplayUnavailable(gate,
+                                                                                   retry_s=None)
+                        return
                     if diag:
+                        self.no_service += 1
+                        if self.no_service >= max(1, self.t.no_service_max):
+                            reason = f"{diag}: stopped after {self.no_service} tries"
+                            self.end_reason = reason
+                            self.end_error = DisplayUnavailable(reason, retry_s=None)
+                            return
                         self.set_state("down", diag)
                         wait = self.t.no_service_retry_s
                     else:
@@ -566,6 +603,7 @@ class _Board:
         why = info.supported()
         if why:
             raise DisplayUnavailable(f"this board's lcd_mirror serves {why}", retry_s=None)
+        self.no_service = 0                          # the service answered
         ds.reader.max_msg = info.max_msg
         with self.lock:
             self.info = info
@@ -873,6 +911,11 @@ class DisplayService:
 
     def _on_session_closed(self, event: Event) -> None:
         self._close_soon(event.board_id, "closed: the board was closed")
+
+    def close_soon(self, board_id: str, reason: str) -> None:
+        """``close`` on a worker (a bus handler must not wait for the reader); FIX-PACK-1: the
+        daemon's re-gate after an identity change ends the board's upstream with the gate."""
+        self._close_soon(board_id, reason)
 
     def _close_soon(self, board_id: str, reason: str) -> None:
         """Close at once, on a worker: ``close`` joins the reader, and the publisher must not

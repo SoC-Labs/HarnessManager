@@ -67,6 +67,21 @@ HOOK = "display_adapter"
 #: The adapter's optional hook: why the board can NEVER show the live display as it is now
 #: (the feature gate: the bare-metal harness, an image without ``lcd_mirror``), else "".
 GATE_HOOK = "display_gate"
+#: The adapter's optional hook (FIX-PACK-1): drop its cached facts and its forward, because
+#: the board may run another image now.
+FORGET_HOOK = "display_forget"
+#: The events that mean it (``board.claim`` too, when its host key no longer matches).
+FORGET_ON = {"controller.reboot": "the board rebooted (MCC REBOOT)",
+             "power.cycle": "the board was power cycled",
+             "session.opened": "the board's session was opened again"}
+#: ... and the daemon's jobs that reboot the board or change its image (as they start and end).
+FORGET_JOBS = {"reboot": "the board rebooted (MCC REBOOT)",
+               "power_cycle": "the board was power cycled",
+               "sd_install": "the board's SD card was written",
+               "sd_restore": "the board's SD card was restored",
+               "update_harness": "the harness image was updated",
+               "update_rollback": "the harness image was rolled back",
+               "harness_rollback": "the harness image was rolled back"}
 #: ``GET display.png``: how long a first picture may take (the upstream opens, KEY, keyframe).
 PICTURE_WAIT_S = 10.0
 FORMATS = ("png", "raw")
@@ -270,6 +285,70 @@ def register(ctx: RouteContext) -> None:
             svc.close(ev.board_id, BOARD_CLOSED)
 
     d.bus.subscribe("session.closed", closed)
+
+    # -- FIX-PACK-1: the board may run another image: drop what the adapter knew, re-gate ------
+
+    jobs: dict[str, str] = {}                         # a running board-changing job -> why
+    forgets: list[threading.Thread] = []              # the forget workers (tests join them)
+    d.display_forgets = forgets
+
+    def forget(ev: Event) -> None:
+        """A reboot, a power cycle, a new image or a changed SSH host key: the adapter's
+        cached facts (and its forward) go, so the next open re-gates on a fresh read
+        (``display_forget``)."""
+        data = ev.data or {}
+        why = FORGET_ON.get(ev.topic, "")
+        if ev.topic == "board.claim":
+            host_key = data.get("host_key")
+            if not (isinstance(host_key, dict) and host_key.get("match") is False):
+                return                                # a claim refresh with the same key
+            why = "the board's SSH host key changed"
+        elif ev.topic == "job.started":
+            why = FORGET_JOBS.get(str(data.get("kind") or ""), "")
+            if not why:
+                return
+            with guard:
+                jobs[str(data.get("job") or "")] = why
+        elif ev.topic in ("job.done", "job.failed"):
+            with guard:
+                why = jobs.pop(str(data.get("job") or ""), "")
+            if not why:
+                return
+        with guard:
+            held = sources.get(ev.board_id)
+        fn = getattr(held[1], FORGET_HOOK, None) if held is not None else None
+        if not callable(fn):
+            return
+
+        def run() -> None:
+            try:
+                fn(why)                                # closes the forward: never on the bus
+            except Exception:  # noqa: BLE001 - a worker never dies loudly
+                log.exception("the display adapter of %s failed to forget", ev.board_id)
+
+        worker = threading.Thread(target=run, daemon=True, name=f"display-forget-{ev.board_id}")
+        forgets.append(worker)
+        worker.start()
+
+    def identity(ev: Event) -> None:
+        """The engine noted the new identity on the adapter (``engine.info``): a board that can
+        no longer show the mirror (the image lost ``lcd_mirror``) ends its upstream with that
+        reason now, instead of reconnecting to a service that is not there."""
+        with guard:
+            held = sources.get(ev.board_id)
+            svc = getattr(d, "display", None)
+        if held is None or svc is None or ev.board_id not in svc.boards():
+            return
+        try:
+            gate = gate_reason(held[1])
+        except HarnessError:
+            return
+        if gate:
+            svc.close_soon(ev.board_id, gate)
+
+    for topic in (*FORGET_ON, "board.claim", "job.started", "job.done", "job.failed"):
+        d.bus.subscribe(topic, forget)
+    d.bus.subscribe("board.identity", identity)
     original_close = d.close
 
     def close() -> None:

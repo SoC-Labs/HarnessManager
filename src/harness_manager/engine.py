@@ -336,6 +336,7 @@ class Engine:
         """Identity + health + the capability view for an open board."""
         entry = self._get(board_id)
         identity = entry.session.identity()
+        self._note_display_identity(entry, identity)
         health = entry.session.health()
         links = [lk.kind for lk in entry.candidate.links]
         available, unavailable = negotiate(entry.pack.capability_specs(), links,
@@ -369,6 +370,20 @@ class Engine:
                 "features": list(identity.features),
                 "name": candidate.name, "name_source": candidate.name_source}))
         return BoardInfo(candidate, identity, health, available, unavailable, claim=claim)
+
+    @staticmethod
+    def _note_display_identity(entry: _Open, identity: BoardIdentity) -> None:
+        """FIX-PACK-1: the session's live display adapter (``session.display``) hears every
+        identity read (``display_note_identity``), so its cached facts (the ``lcd_mirror``
+        engine) follow the image the board runs now, not the one it ran when it opened."""
+        note = getattr(getattr(entry.session, "display", None), "display_note_identity", None)
+        if not callable(note):
+            return
+        try:
+            note(identity)
+        except Exception:  # noqa: BLE001 - the display's cache is never worth failing info
+            log.exception("noting the identity of %s on its display failed",
+                          entry.candidate.board_id)
 
     @staticmethod
     def _claim(entry: _Open, identity: BoardIdentity) -> dict[str, Any] | None:
