@@ -7801,6 +7801,10 @@
     "SHELL_TOUCH": "1"
    },
    "mint_record": "mint_record:1",
+   "platform": {
+    "ref": "feat/rm-ila-mint",
+    "commit": "e54363022f896c2589b9277e5867d402923e3b9a"
+   },
    "owns": {
     "CFG_DATAOUT": {
      "shell_port": "CFG_DATAOUT",
