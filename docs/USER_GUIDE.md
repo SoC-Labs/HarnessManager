@@ -451,6 +451,11 @@ refresh, the panel and telemetry polls) only when all four of these hold:
    then doubles the wait each time, up to 10 min. The header shows
    **Busy (another client)**, never an error. Any answer from the board ends the wait.
 
+HM's own requests to one board take the port one at a time, in the order they were asked,
+so they never turn each other away and never count as another client. The board lets go
+of a closed connection a moment late, so a connection HM opens right after its own is
+tried again for up to a second before it counts.
+
 Anything you ask for yourself is not affected: a button, a CLI command, or a job you
 started. It still goes straight to the board. When the lease is someone else's,
 `info` (and the page's **Read now**) says who holds it.

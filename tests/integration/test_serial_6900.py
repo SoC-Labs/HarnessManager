@@ -17,6 +17,7 @@ records every refusal. Every check has its negative twin, mostly the gate turned
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -30,6 +31,8 @@ import httpx
 import pytest
 
 from harness_manager.core.errors import ExitCode, HarnessError, HeldError
+from harness_manager.core.services import EngineConfig
+from harness_manager.engine import Engine
 from harness_manager.services import quiet
 from harness_manager.services.slots import SlotService
 from harness_manager_mps3 import ctlgate
@@ -562,3 +565,118 @@ def test_which_reads_are_shared():
     assert key("GET", bid + "/debug/detect") is None
     assert key("GET", "/api/v1/boards/mps3@usb/dev/ttyUSB0/card") is None
     assert key("GET", bid, X_HM_Background="1") != key("GET", bid)
+
+
+# --- 7. item 4a: `slot status` / `card status` go through the service -----------------------------
+
+
+@contextmanager
+def card_service(tmp_path: Path) -> Iterator[tuple[Any, LiveDaemon, str]]:
+    fake = slot_board(usd_card="da")
+    eng = Engine(EngineConfig(state_dir=Path(os.environ["HARNESS_MANAGER_STATE_DIR"]),
+                              pack_overrides={"mps3": {
+                                  "console_ports": fake.console_ports,
+                                  "push_port": fake.raw_tcp_port,
+                                  "tftp_port": fake.tftp_port}}))
+    target = f"{fake.host}:{fake.control_port}"
+    try:
+        with LiveDaemon(eng, write_json=True) as live:
+            live.app.state.daemon.presence._stop.set()
+            with live.client() as c:
+                r = c.post("/api/v1/boards", json={"target": target, "note": "the page"})
+                assert r.status_code == 200, r.text
+            yield fake, live, target
+            eng.close_all()
+    finally:
+        fake.stop()
+
+
+def test_card_and_slot_status_go_through_the_service_that_holds_the_board(tmp_path, capsys,
+                                                                          monkeypatch):
+    monkeypatch.delenv("HARNESS_MANAGER_NO_DAEMON", raising=False)
+    with card_service(tmp_path) as (_fake, _live, target):
+        rc, out, err = run_cli(capsys, "card", "status", target, "--json")
+        assert rc == 0, err
+        doc = json.loads(out)
+        assert doc["present"] and doc["os_slots"]["running"] == "A", doc
+        rc, out, err = run_cli(capsys, "slot", "status", target, "--json")
+        assert rc == 0, err
+        assert json.loads(out)["running"] == "A"
+        rc, out, err = run_cli(capsys, "card", "status", target)
+        assert rc == 0 and "os slots" in out, out
+
+
+def test_twin_in_process_card_status_is_refused_by_the_services_lock(tmp_path, capsys,
+                                                                     monkeypatch):
+    with card_service(tmp_path) as (_fake, _live, target):
+        monkeypatch.setenv("HARNESS_MANAGER_NO_DAEMON", "1")        # the old routing
+        rc, _out, err = run_cli(capsys, "card", "status", target, "--json")
+        assert rc == ExitCode.HELD and "in use" in err, err
+
+
+def test_the_remote_slot_proxy_reads_once_and_leaves_the_reset_guard_to_the_service(tmp_path):
+    from harness_manager.client.remote import RemoteEngine
+    from harness_manager.services import reset_guard
+
+    with card_service(tmp_path) as (fake, live, target):
+        remote = RemoteEngine(live.base_url, live.token,
+                              state_dir=Path(os.environ["HARNESS_MANAGER_STATE_DIR"]))
+        session = remote.open(remote.candidate_for(target))
+        assert session.os_slots is not None and session.card is not None
+        before = len(fake.requests) if hasattr(fake, "requests") else None
+        assert reset_guard.busy_job(session) is None, "the service guards its own resets"
+        if before is not None:
+            assert len(fake.requests) == before, "and this client read nothing for it"
+        st = SlotService().status(session)             # slots_reason + status: one GET
+        assert st.running == "A" and not hasattr(session.os_slots, "push")
+
+
+def test_card_changes_still_run_in_process():
+    from harness_manager.cli.engine import wants_daemon
+
+    ns = SimpleNamespace
+    assert wants_daemon(ns(cmd="card", card_cmd="status"))
+    assert wants_daemon(ns(cmd="slot", slot_cmd="status"))
+    assert not wants_daemon(ns(cmd="card", card_cmd="commit"))
+    assert not wants_daemon(ns(cmd="slot", slot_cmd="push"))
+    assert not wants_daemon(ns(cmd="update"))
+
+
+# --- 8. item 4b: --overlay-dir while the service holds the board ------------------------------------
+
+
+def test_overlay_dir_while_the_service_holds_the_board_says_how(tmp_path, capsys):
+    root = tmp_path / "overlays"
+    make_overlay(root, "synth")
+    with card_service(tmp_path) as (_fake, _live, target):
+        rc, _out, err = run_cli(capsys, "overlays", target, "--overlay-dir", str(root))
+        assert rc == ExitCode.HELD, err
+        assert "--overlay-dir runs in this process" in err
+        assert f"config set mps3.overlay_dirs {root}" in err
+    # Twin: no service holds the board: the flag works in this process, as before.
+    fake = slot_board(usd_card="da")
+    try:
+        rc, out, err = run_cli(capsys, "overlays", f"{fake.host}:{fake.control_port}",
+                               "--overlay-dir", str(root))
+        assert rc == 0 and "synth" in out, err
+    finally:
+        fake.stop()
+
+
+# --- 9. item 4c: mps3.overlay_dirs applies at the next listing -------------------------------------
+
+
+def test_overlay_dirs_set_after_the_board_opened_are_seen_at_the_next_listing(tmp_path,
+                                                                             monkeypatch):
+    from harness_manager_mps3.overlays import OverlayCatalogue
+
+    root = tmp_path / "later"
+    make_overlay(root, "synth")
+    monkeypatch.delenv("HARNESS_MANAGER_MPS3_OVERLAY_DIRS", raising=False)
+    cat = OverlayCatalogue()                       # a session's catalogue, already in use
+    assert [r.name for r in cat.refs()] == []
+    use_overlay_dirs(monkeypatch, root)            # the Settings dialog sets the directory
+    assert [r.name for r in cat.refs()] == ["synth"], "no reopen needed"
+    # Twin: taken away again, it is gone at the next listing too.
+    monkeypatch.delenv("HARNESS_MANAGER_MPS3_OVERLAY_DIRS")
+    assert [r.name for r in cat.refs()] == []

@@ -13,7 +13,9 @@ Step 3 is skipped, and the verb runs on the in-process engine, when:
 
 - ``$HARNESS_MANAGER_NO_DAEMON`` is set (to anything but ``0``);
 - the verb is one of ``IN_PROCESS_VERBS``: ``attach``/``detach`` are about THIS
-  process holding the board's lock; ``daemon``/``ui`` manage the daemon itself;
+  process holding the board's lock; ``daemon``/``ui`` manage the daemon itself. Their
+  read-only sub-verbs in ``SERVICE_READS`` (``slot status``, ``card status``) still go
+  through the service: it holds the board, so an in-process read is refused by its lock;
 - the verb was given ``--overlay-dir``: that sets the overlay search path in
   this process's environment, which the daemon cannot see.
 
@@ -52,6 +54,13 @@ IN_PROCESS_VERBS: dict[str, str] = {
     "app": "manages harness-manager-daemon itself",
 }
 
+#: Read-only sub-verbs of an ``IN_PROCESS_VERBS`` verb that go through a running service like
+#: every other read (SERIAL-6900 4a): verb -> (the sub-verb's dest, the sub-verbs).
+SERVICE_READS: dict[str, tuple[str, frozenset[str]]] = {
+    "slot": ("slot_cmd", frozenset({"status"})),
+    "card": ("card_cmd", frozenset({"status"})),
+}
+
 EngineFactory = Callable[[argparse.Namespace | None], Any]
 
 _factory: EngineFactory | None = None
@@ -85,11 +94,17 @@ def wants_daemon(args: argparse.Namespace | None) -> bool:
     if daemon_disabled():
         return False
     if args is not None:
-        if getattr(args, "cmd", None) in IN_PROCESS_VERBS:
+        cmd = getattr(args, "cmd", None)
+        if cmd in IN_PROCESS_VERBS and not _service_read(cmd, args):
             return False
         if getattr(args, "overlay_dir", None):
             return False
     return True
+
+
+def _service_read(cmd: str, args: argparse.Namespace) -> bool:
+    dest, subs = SERVICE_READS.get(cmd, ("", frozenset()))
+    return bool(dest) and getattr(args, dest, None) in subs
 
 
 def daemon_engine(args: argparse.Namespace | None = None) -> Any | None:

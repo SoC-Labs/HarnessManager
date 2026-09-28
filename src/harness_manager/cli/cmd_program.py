@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from typing import Any
 
 from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
     ExitCode,
     HarnessError,
+    HeldError,
 )
 from harness_manager.core.model import Check
 from harness_manager.core.pack import (
@@ -67,8 +69,46 @@ def overlay_dirs(ctx: Ctx) -> Iterator[None]:
             os.environ[name] = old
 
 
+SERVICE_NAME = "harness-manager-daemon"
+
+
+def _service_holds(exc: HeldError) -> bool:
+    """The board's lock is the Harness Manager service's (or a service runs here)."""
+    if SERVICE_NAME in f"{exc.holder} {exc.hint} {exc.message}":
+        return True
+    try:
+        from harness_manager.daemon.state import discover
+
+        return discover() is not None
+    except Exception:  # noqa: BLE001 - no state dir, or a broken record: say nothing more
+        return False
+
+
+@contextmanager
+def board_for(ctx: Ctx) -> Iterator[tuple[Any, Any]]:
+    """``overlay_dirs`` then ``ctx.board()``. ``--overlay-dir`` keeps the verb in this process
+    (the directory is this process's), so while the service holds the board the open is
+    refused by its lock: say how to give the service the directory instead (SERIAL-6900 4b)."""
+    with overlay_dirs(ctx), ExitStack() as stack:
+        try:
+            pair = stack.enter_context(ctx.board())
+        except HeldError as exc:
+            dirs = [str(Path(d)) for d in (getattr(ctx.args, "overlay_dir", None) or ())]
+            if not dirs or "is in use" not in exc.message or not _service_holds(exc):
+                raise
+            joined = os.pathsep.join(dirs)
+            raise HeldError(
+                f"{exc.message}: --overlay-dir runs in this process, and the Harness Manager "
+                "service holds the board", holder=exc.holder,
+                hint=f"give the service the directory instead: `harness-manager config set "
+                     f"{ctx.pack}.overlay_dirs {joined}` (read at its next listing), then run "
+                     "this again without --overlay-dir; or close the board in the app "
+                     "first") from exc
+        yield pair
+
+
 def cmd_overlays(ctx: Ctx) -> int:
-    with overlay_dirs(ctx), ctx.board() as (cand, session):
+    with board_for(ctx) as (cand, session):
         loadable, refused = ctx.engine.deploy.compatible(session)
     rows, human = [], []
     for o in loadable:
@@ -165,7 +205,7 @@ def _check_verified(board_id: str, r: DeployResult, **data: object) -> None:
 
 
 def cmd_program(ctx: Ctx) -> int:
-    with overlay_dirs(ctx), ctx.board() as (cand, session):
+    with board_for(ctx) as (cand, session):
         deploy = ctx.engine.deploy
         overlay = _find_overlay(list(deploy.overlays(session)), ctx.args.rm)
         items = list(deploy.preflight(session, overlay))
@@ -202,7 +242,7 @@ def cmd_program(ctx: Ctx) -> int:
 
 
 def cmd_restore(ctx: Ctx) -> int:
-    with overlay_dirs(ctx), ctx.board() as (cand, session):
+    with board_for(ctx) as (cand, session):
         with ctx.bus_progress(cand.board_id, "deploy"):
             result = ctx.engine.deploy.restore_baseline(session)
     _check_verified(cand.board_id, result)
