@@ -296,7 +296,7 @@ docs/design/DUT_BUILD_KIT_STORAGE.md and docs/design/DUT_BUILD_GUIDE.md are the 
 - **Checks** are `{name, state, detail, identity}` with `state` `ok`, `mismatch`, `warning` or `unchecked`. Any `mismatch` refuses: 409 with name INCOMPATIBLE (14) when it is an identity check (the board's static or usercode), else REFUSED (15). `warning` and `unchecked` never refuse. A Vivado release that differs from the kit's is a `warning` here; the generated `build_rm.tcl` refuses another major.minor itself (david K4).
 - **User rm_ids** (david K8): a design with no `rm_id` gets a proposal (design id `0x8000`-`0xFFFF`, stable per name, `rm_id_proposed: true`); a clash with the overlay catalogue is a `warning`.
 - **Events:** `kit.progress {static_id, phase, bytes, total}` during a fetch; `kit.stored {static_id, source, kit_id}` when a kit enters the cache (docs/CONTRACTS.md).
-- **Not yet:** the `channel` source reports itself unavailable until lane OTA-C adds the `rm-kit` channel kind; HM does not run Vivado (`kit build` prints the command).
+- **Not yet:** the `channel` source is wired (OTA-C: a harness release's `host-kit`/`rm-kit` component, fetched through the update service), but it finds no kit until a signed harness release carries one, which waits for the release keys (U2); HM does not run Vivado (`kit build` prints the command).
 - **Errors:** 400 USAGE for a bad id, path, `format`, `jobs` or `stop_after`; 404 ABSENT for a kit not in the cache, a missing receipt or file, or a board that is not open; 422 UNAVAILABLE for a pack with no build kit.
 
 ### Fabric debug over XVC (XVC-CORE, `xvc_api.py`)

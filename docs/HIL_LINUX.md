@@ -74,7 +74,8 @@ Commands run in **terminal B** unless a step says otherwise.
 
 - **Static:** RC2 `0x44EE76D5`, UserID `0xFB1F8C76`, USR_ACCESS `0x01000000`, the Linux harness
   (harnessd, `impl: linux`). The base image on the config SD is `config_rm_greybox_stage0.bit`,
-  sha256 `8a30ade887b1…` (full hash in §F3).
+  sha256 `286ae54d2a2b…` (full hash in §F3), stage0 build `0xC457D656`.
+  It is the 2026-09-27 re-bake of RC2: same static and UserID, new stage0 in BRAM.
 - **Address:** `192.168.10.101`. Only the hub `mapstone-dev.ecs.soton.ac.uk` reaches it (fpgahub
   target `mps3_01_pl`), so Harness Manager tunnels through the hub (boards.toml `via`).
 - **Overlays:** keyed to `0x44EE76D5`, in the RC2 build `…/build_mint3_rc2_linux/overlay_mbv`:
@@ -489,15 +490,17 @@ ssh $H 'sg fpga -c "fpgahub target program mps3_01_pl --list"' | tee $EV/f2_prog
 
 **F3. Stage RC2's own base image the way Harness Manager does.**
 - Writes only the hub user's cache: 13 MB, and the SD is not touched.
-- These bytes are the image the board runs.
+- These bytes are the image the board runs: the 2026-09-27 re-bake, which exists only on the hub
+  (`/home/david/pv_rb/`). The RC2 build dir on srv03335 (`…/build_mint3_rc2_linux/prod/`) still
+  holds the original bake, so the first command copies the re-bake here (a read on the hub).
 ```bash
-BIT=$HOME/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/prod/config_rm_greybox_stage0.bit
+BIT=$HOME/rc2_rebake_stage0.bit; scp -q $H:/home/david/pv_rb/config_rm_greybox_stage0.bit $BIT
 SHA=$(sha256sum $BIT | cut -c1-64); echo "$SHA" | tee $EV/f3_stage.txt
 ssh -o ControlPath=none -o BatchMode=yes -o ConnectTimeout=15 $H "mkdir -p .cache/harness-manager/hub-sd && cat > .cache/harness-manager/hub-sd/$SHA.bit.part && mv -f .cache/harness-manager/hub-sd/$SHA.bit.part .cache/harness-manager/hub-sd/$SHA.bit" < $BIT
 ssh $H "sha256sum .cache/harness-manager/hub-sd/$SHA.bit; namei -l \$HOME/.cache/harness-manager/hub-sd/$SHA.bit" | tee -a $EV/f3_stage.txt
 ```
 **Expect:**
-- `SHA` = `8a30ade887b12713065e1cd1b7411520fc56bb9ffcda5f5439be48d97cebc7c5`;
+- `SHA` = `286ae54d2a2b8c15e8b610df8088d37e5c3b3c706aa9206aceade2b503f081b4`;
 - the hub's `sha256sum` prints the same;
 - `namei` shows each directory's owner and mode.
 
@@ -613,7 +616,7 @@ exit
 **Expect:**
 - one `V2M-MPS3` link, then `0`;
 - `APPFILE: Nanosoc\nanosoc.txt` and `F0FILE: nanosoc.bit`;
-- `nanosoc.bit` hashes to `8a30ade887b1…` (RC2: the right card), and `nanosoca.bit` hashes the same;
+- `nanosoc.bit` hashes to `286ae54d2a2b…` (the RC2 re-bake: the right card), and `nanosoca.bit` hashes the same;
 - `diff` shows **only** the `F0FILE` line; `F0FILE: nanosoca.bit`;
 - the unmount leaves `0`.
 

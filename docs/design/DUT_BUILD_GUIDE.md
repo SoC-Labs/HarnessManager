@@ -263,7 +263,7 @@ harness-manager kit guide   [TARGET | --static-id ID] [--vivado VER]   # the ste
 harness-manager kit fetch   …                                          # KIT-STORE
 harness-manager kit script  --design my_rm.json --out build/my_rm [TARGET | --static-id ID]
                                                                        # build_rm.tcl + OOC XDC + skeleton + README
-harness-manager kit build   build/my_rm [--stop-after synth] [--jobs 2] # runs Vivado locally; streams HM_STAGE/HM_GATE
+harness-manager kit build   build/my_rm [--stop-after synth] [--jobs 2] # prints the Vivado command ("ran": false); you run it
 harness-manager kit check   build/my_rm/out/my_rm_build.json [TARGET]  # receipt + files + stream checks (+ live shell_id)
 harness-manager kit check   PARTIAL.bin --clearing CLEAR.bin [--static-id ID]   # no receipt: stream checks only
 harness-manager kit pack    build/my_rm/out/my_rm_build.json [--import] [--out DIR]  # the overlay triple, into Program

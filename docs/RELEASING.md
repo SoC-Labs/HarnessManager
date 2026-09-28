@@ -13,10 +13,12 @@ the whole signed release into `dist/release/`, verifies it, and writes the `gh` 
 
 - **The keys (david's U2).** No signing key is pinned in `trust.PINNED_KEYS`, so no client
   would trust a channel yet, and `--publish` refuses. See [KEYS.md](KEYS.md).
-- **Private hosting (U1) needs OTA-C.** Today's client fetches `channel.json` without a
-  token, and its schema refuses a private app wheel. Until OTA-C lands, the tool marks the
-  app assets `access: public` and says so, and `--publish` of a private-repo app release
-  refuses.
+
+Private hosting (U1) is not a blocker any more. OTA-C (commit `4e1d394`) taught the client
+to fetch `channel.json` with the GitHub token and to accept a private app wheel. The tool
+now emits the real `access: github-token` (the default), and `--publish` of a private-repo
+app release is allowed. A client that reads from GitHub needs a token
+(`$HARNESS_MANAGER_GITHUB_TOKEN`, else `gh auth token`); a mirror needs none.
 
 The design is `docs/design/HM_SELF_UPDATE.md` §4 (app) and
 `docs/design/HARNESS_DISTRIBUTION.md` §4 (harness).
@@ -129,8 +131,10 @@ also carries `firmware.{version, sha, stamped}`. Once firmware stamps VERSION wi
 tag (U7), `stamped` becomes true.
 
 Each component names its FLOW door in `door`: `mcc_sd` (the config SD and an MCC REBOOT)
-or `ethernet` (the slot image and the overlays). The app's schema `target` stays
-`mcc-sd`, `user-usd` or `host-store`.
+or `ethernet` (the slot image and the overlays). The tool writes the schema `target` as
+`mcc-sd`, `user-usd`, `host-store` or, for the kit, `host-kit`. `mcc-sd` and `user-usd` are
+HM's older spellings: apps from before OTA-C parse them too, and today's client reads them
+as `mcc_sd` and `ethernet`.
 
 ## Withdraw a release
 
@@ -166,22 +170,28 @@ A mirror adds `blobs/<sha256>` for a lookup by hash (HARNESS-DIST H5).
 `make dist` deletes `dist/`, including `dist/release/`. That is harmless: a published
 channel's base is always the live one.
 
-## Fields for OTA-C
+## Fields the client parses (OTA-C)
 
-The tool emits what the app's schema accepts today. It also emits these fields, which the
-current parser keeps but does not read:
+OTA-C (commit `4e1d394`) landed, so the client's parser now reads every field the tool
+emits except a few informational ones:
 
-| Field | Today | After OTA-C |
-|---|---|---|
-| `catalog` (top level) | kept in `extra` | anti-rollback serials keyed by (catalogue, channel) |
-| `artifacts[].kind: dep` | ignored | parsed; the stage step installs pyverify from it |
-| `notes` (per release) | kept in `extra` | shown as the signed release notes |
-| `access: github-token` on app assets | refused, so the tool emits `public` | allowed (U1) |
-| `target: host-kit`, `kind: rm-kit` | refused, so the kit is left out, with a warning | the kit ships (KIT-STORE K4) |
-| `door`, `firmware`, `source`, `lock_info`, `legal_info`, `tag`, `vivado` | kept in `extra` | informational |
+| Field | What the client does with it |
+|---|---|
+| `catalog` (top level) | keys the anti-rollback serials by (catalogue, channel); a caller that names a catalogue refuses a document of another one |
+| `artifacts[].kind: dep` | downloads and sha-checks the pyverify wheel; the stage step pins the lock to it |
+| `notes` (per release) | shows them as the signed release notes (`harness show`, the harness panel, the update checker) |
+| `access: github-token` | fetches the asset with the token (U1). The tool emits it for app assets too |
+| `target: host-kit`, `kind: rm-kit` | parses the kit, and the kit service fetches it on demand by static. A harness install never downloads it (KIT-STORE K4) |
+| `vivado` (release, kit) | records the Vivado release a kit needs |
+| `door`, `firmware`, `source`, `lock_info`, `legal_info`, `tag` | kept in `extra`: informational |
 
-The tool checks the schema at run time, so it emits the real `access` and the kit as soon
-as OTA-C's parser accepts them.
+The tool still probes its own tree's schema at run time (`schema_allows_private_app`,
+`schema_has_host_kit`), so it never emits a field that parser would refuse. On this tree
+both probes pass.
+
+**Still pending:** no client trusts a channel until the release keys are pinned (david's
+U2, [KEYS.md](KEYS.md)). Until then nothing is published, so no kit or private asset is
+fetched in the field.
 
 ## Tests
 
