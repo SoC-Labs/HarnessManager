@@ -1,0 +1,1 @@
+{"error": {"code": 4, "hint": "another client probably holds the control port (one client at a time)", "holder": "", "message": "shell at 127.0.0.1:36001 closed the connection", "name": "HELD"}, "ok": false}

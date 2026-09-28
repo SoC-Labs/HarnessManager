@@ -1,0 +1,1 @@
+harness-manager: shell at 127.0.0.1:40149 closed the connection — another client probably holds the control port (one client at a time)

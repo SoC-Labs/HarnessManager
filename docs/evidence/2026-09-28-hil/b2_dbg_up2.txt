@@ -1,0 +1,8 @@
+debug      mps3@192.168.11.101:6900: up
+gdb        127.0.0.1:23344
+telnet     127.0.0.1:23346
+tcl        127.0.0.1:23347
+config     nanosoc_mps3_jtag.cfg nanosoc_ops.tcl
+pid        3117636
+detail     gdb 127.0.0.1:23344
+debug server up for mps3@192.168.11.101:6900; Ctrl-C or `harness-manager detach 192.168.11.101` stops it

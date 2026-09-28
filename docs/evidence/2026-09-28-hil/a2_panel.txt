@@ -1,0 +1,7 @@
+panel      harness owns it
+source     rebuilt from what Harness Manager read, not read from the panel
+banner     -
+touch      ok
+sessions   not known
+identify   unavailable: needs harness feature 'locate' (Linux harness)
+presence   not announced: needs harness feature 'presence' (Linux harness)

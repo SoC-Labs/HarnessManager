@@ -1,0 +1,30 @@
+09:24:49
++ command ------------------+ function ---------------------------------+
+| CAP "fname" [/A]          | captures serial data to a file            |
+|                           |  [/A option appends data to a file]       |
+| FILL "fname" [nnnn]       | create a file filled with text            |
+|                           |  [nnnn - number of lines, default=1000]   |
+| TYPE "fname"              | displays the content of a text file       |
+| REN "fname1" "fname2"     | renames a file 'fname1' to 'fname2'       |
+| COPY "fin" ["fin2"] "fout"| copies a file 'fin' to 'fout' file        |
+|                           |  ['fin2' option merges 'fin' and 'fin2']  |
+| DEL "fname"               | deletes a file                            |
+| DIR "[mask]"              | displays a list of files in the directory |
+| FORMAT [label]            | formats Flash Memory Card                 |
+| USB_ON                    | Enable usb                                |
+| USB_OFF                   | Disable usb                               |
+| SHUTDOWN                  | Shutdown PSU (leave micro running)        |
+| REBOOT                    | Power cycle system and reboot             |
+| RESET                     | Reset Board using CB_nRST                 |
+| DEBUG                     | Enters debug menu                         |
+| EEPROM                    | Enters eeprom menu                        |
+| HELP  or  ?               | displays this help                        |
+|                                                                       |
+| THE FOLLOWING COMMANDS ARE ONLY AVAILABLE IN RUN MODE                 |
+| READ_AXI "fname"          | Read system memory to file 'fname'        |
+|          "address"        | from address to end address               |
+|          "end_address"    |                                           |
+| WRITE_AXI "fname"         | Write file 'fname' to system memory       |
+|           "address"       | at address                                |
++---------------------------+-------------------------------------------+
+rc=0

@@ -1,0 +1,5 @@
+xvc        mps3@192.168.11.101:6900: down
+cannot     needs harness firmware with 'xvc_dbgbr' (v0.11 or later)
+detail     closed
+scope      XVC here is scoped to the reconfigurable partition's debug chain: the harness's Debug Bridge and the debug hub and ILAs of the design loaded in the partition. It is never whole-device JTAG: it cannot configure or read back the FPGA.
+warning    XVC on this harness is unauthenticated: anyone who can reach the board network can attach. Accepted until the Linux cutover; Harness Manager opens it for the lease holder only.

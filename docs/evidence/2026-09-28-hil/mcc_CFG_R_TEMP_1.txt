@@ -1,0 +1,3 @@
+09:24:57
+harness-manager: the MCC refused 'CFG R TEMP 1': ERROR: Undefined — check `harness-manager info TARGET`, then retry
+rc=6

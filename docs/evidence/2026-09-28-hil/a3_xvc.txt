@@ -1,0 +1,2 @@
+xvc        mps3@192.168.10.101:6900: down
+scope      XVC here is scoped to the reconfigurable partition's debug chain: the harness's Debug Bridge and the debug hub and ILAs of the design loaded in the partition. It is never whole-device JTAG: it cannot configure or read back the FPGA.

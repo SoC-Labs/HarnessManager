@@ -1,0 +1,1 @@
+{"board_id": "mps3@192.168.10.101:6900", "ok": true, "readings": [{"age_s": 0.002, "available": true, "name": "mcc_temp", "observed_at": 1790583868.8448896, "reason": "sensor identity unverified (probably FPGA die via IOFPGA_TMP)", "source": "mcc-console (hub)", "unit": "degC", "value": 35.0}]}

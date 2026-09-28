@@ -1,0 +1,63 @@
+{
+ "ok": true,
+ "board_id": "mps3@192.168.10.101:6900",
+ "available": true,
+ "reason": "",
+ "slots": {
+  "card": true,
+  "running": "B",
+  "default": "B",
+  "target": "A",
+  "staged": "",
+  "fabric_sid": "0x44ee76d5",
+  "seq": 2,
+  "pending_commit": "",
+  "slots": {
+   "A": {
+    "state": "empty",
+    "hdr_crc": "",
+    "len": 0,
+    "sid": "",
+    "verified": "no",
+    "err": "",
+    "image_sha256": "",
+    "version": "",
+    "running": false,
+    "default": false,
+    "boot": ""
+   },
+   "B": {
+    "state": "valid",
+    "hdr_crc": "0x20b7c5a3",
+    "len": 29357576,
+    "sid": "0x44ee76d5",
+    "verified": "boot",
+    "err": "",
+    "image_sha256": "",
+    "version": "",
+    "running": true,
+    "default": true,
+    "boot": "booted, confirmed healthy"
+   }
+  },
+  "job": {
+   "act": "none",
+   "slot": "",
+   "state": "idle",
+   "got": 0,
+   "len": 0,
+   "err": "",
+   "busy": false,
+   "rate_bps": 0,
+   "eta_s": null,
+   "text": ""
+  },
+  "fell_back": null,
+  "committed_unbooted": null,
+  "confirmed": true,
+  "claimed": true,
+  "notes": [
+   "the board's SSH is claimed: slot push, commit and rollback are taken only from the board itself (Harness Manager goes through its SSH)"
+  ]
+ }
+}

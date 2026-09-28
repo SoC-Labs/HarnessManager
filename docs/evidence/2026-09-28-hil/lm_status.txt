@@ -1,0 +1,3 @@
+display    mps3@192.168.10.101:6900: down  mode -  owner unknown  no picture yet  badges -
+available  no: cannot confirm you hold the lease on mps3_01_pl: lease show on mapstone-dev.ecs.soton.ac.uk failed: lease show failed: kex_exchange_identification: read: Connection reset by peer
+rate       - (asked -), 0 fps, 0 B/s, 0 viewers

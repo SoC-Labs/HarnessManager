@@ -1,0 +1,10 @@
+xvc        mps3@192.168.11.101:6900: ready (m1)
+vivado     connect_hw_server -url localhost:23623   (`harness-manager xvc tcl 192.168.11.101`)
+relay      127.0.0.1:23622   board slot: ours   reach: board-ssh
+hw_server  /apps/Xilinx/Vivado/2024.1/bin/hw_server (2024.1)  pid 3071560
+attached   -
+probes     nanosoc_ila.ltx (rm)
+scope      XVC here is scoped to the reconfigurable partition's debug chain: the harness's Debug Bridge and the debug hub and ILAs of the design loaded in the partition. It is never whole-device JTAG: it cannot configure or read back the FPGA.
+warning    the probes file was written by Vivado 2026.1; this hw_server is 2024.1: use Vivado 2026.1 or newer
+warning    a partition swap closes this session; it reopens on the new design
+XVC open for mps3@192.168.11.101:6900; Ctrl-C or `harness-manager detach 192.168.11.101` closes it

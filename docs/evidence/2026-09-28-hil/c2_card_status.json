@@ -1,0 +1,20 @@
+{
+ "ok": true,
+ "board_id": "mps3@192.168.10.101:6900",
+ "card": {
+  "store": true,
+  "present": true,
+  "state": "empty",
+  "text": "empty",
+  "reason": "",
+  "card_mb": 15193,
+  "default": null,
+  "boot": "none",
+  "committable": true,
+  "os_slots": null,
+  "notes": [
+   "the OS slots could not be read: shell at 127.0.0.1:36001 closed the connection"
+  ]
+ },
+ "line": "empty"
+}

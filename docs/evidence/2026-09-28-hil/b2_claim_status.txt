@@ -1,0 +1,4 @@
+claim      mps3@192.168.10.101:6900: claimed by you (SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo, dam1n19@srv03335, 2026-09-28T08:49:30Z)
+host key   SHA256:QVPQjqL8bXdCd68Qm/GitUGFg9dMY89YPccf1kzuSmk pinned
+claim key  SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo (the board's first claimed key)
+route      hub mapstone-dev.ecs.soton.ac.uk  user root
