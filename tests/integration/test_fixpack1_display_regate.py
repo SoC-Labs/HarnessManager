@@ -196,6 +196,10 @@ def test_an_identity_read_updates_the_display_gate(rig_factory: Any):
     # the twin: an identity that names the engine says yes again
     rig.adapter.display_note_identity(SimpleNamespace(harness_impl="linux", features=ENGINE))
     assert rig.adapter.display_gate() == ""
+    # ... and one with no features at all (UDP identify while another client holds 6900, a
+    # version that answered EBUSY) says nothing: it never gates the engine away
+    rig.adapter.display_note_identity(SimpleNamespace(harness_impl="linux", features=()))
+    assert rig.adapter.display_gate() == ""
     assert rig.shell.reads == 0                                     # never a read of the board
 
 

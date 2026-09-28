@@ -203,8 +203,11 @@ class Mps3Display:
     # -- the harness's facts ----------------------------------------------------------------
 
     def display_note_identity(self, identity: Any) -> None:
-        """Someone read the board's identity: use its features and impl."""
-        if identity is None:
+        """Someone read the board's identity: use its features and impl. FIX-PACK-1: an
+        identity without features says nothing about the engine (UDP identify while another
+        client holds 6900, a ``version`` that answered EBUSY): it is ignored, never read as
+        "this image has no lcd_mirror" (not known is not never)."""
+        if identity is None or not tuple(getattr(identity, "features", ()) or ()):
             return
         with self._mu:
             keep = self._facts[1] if self._facts is not None else None
