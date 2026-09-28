@@ -67,7 +67,15 @@ UNKNOWN = "\u2014"
 
 
 #: LOCATE: ``locate``'s ``who`` (the banner "IDENTIFY: <who>" on a 40-column row: 30 left).
+#: What ``locate_who`` composes to, so "via Harness Manager" is on the glass.
 LOCATE_WHO_MAX = COLS - len("IDENTIFY: ")
+#: V7-ALIGN: the board's own cap on ``who`` (net-protocol v0.16 as shipped, locate_linux.c
+#: ``LOCATE_WHO_MAX``): at most 32 printable ASCII characters, else ``invalid``. The banner
+#: clips at the row's end (30 shown); a longer ``who`` is refused, so HM clips to this.
+LOCATE_WHO_WIRE_MAX = 32
+#: V7-ALIGN: ``locate``'s ``s`` is 0-30 and its ``until_ms`` is RELATIVE (ms from the reply to
+#: the end, 0 = stopped), so it is never more than this.
+LOCATE_MAX_MS = 30_000
 LOCATE_VIA = " via Harness Manager"
 LOCATE_VIA_SHORT = " via HM"
 

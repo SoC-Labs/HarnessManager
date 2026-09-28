@@ -15,9 +15,16 @@ from types import SimpleNamespace
 import pytest
 
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import AlreadyError, UnavailableError
+from harness_manager.core.errors import AlreadyError, UnavailableError, UsageError
 from harness_manager.core.events import EventBus
-from harness_manager.core.panel import LOCATE_WHO_MAX, PanelState, PanelSupport, locate_who
+from harness_manager.core.panel import (
+    LOCATE_MAX_MS,
+    LOCATE_WHO_MAX,
+    LOCATE_WHO_WIRE_MAX,
+    PanelState,
+    PanelSupport,
+    locate_who,
+)
 from harness_manager.daemon.panel_api import identify_lease_note, lease_for_identify
 from harness_manager.services import presence as S
 from harness_manager.services.presence import LocateLimiter, PresenceService
@@ -290,3 +297,80 @@ def test_twin_the_demo_board_after_a_stop_and_bare_metal_show_no_banner():
             DemoPanel(engine, BOARD_V011).locate(5, ME)
     finally:
         engine.close_all()
+
+
+# --- V7-ALIGN: locate as SHIPPED (net-protocol v0.16, platform 18622e5, locate_linux.c) ---------
+
+
+def test_v7_who_up_to_the_boards_32_reaches_it_unclipped(board):
+    vb, session = board
+    assert LOCATE_WHO_WIRE_MAX == 32 and LOCATE_WHO_MAX == 30, "32 on the wire, 30 on the glass"
+    session.panel.locate(5, "w" * 32)
+    assert vb.shell.locates[-1]["who"] == "w" * 32 and vb.shell.blinking
+
+
+def test_v7_twin_a_longer_who_is_clipped_to_32_never_refused(board):
+    vb, session = board
+    session.panel.locate(5, "w" * 40 + "\t")
+    assert vb.shell.locates[-1]["who"] == "w" * 32 and vb.shell.blinking
+    # the board itself refuses 33, and anything not printable ASCII
+    assert vb.shell.handle_control({"op": "locate", "s": 5, "who": "w" * 33}) == {
+        "ok": False, "err": "invalid who: a string of <= 32 characters", "code": "invalid"}
+    assert vb.shell.handle_control({"op": "locate", "s": 5, "who": "a\tb"})["code"] == "invalid"
+
+
+def test_v7_until_ms_is_relative_ms_from_the_answer(board, monkeypatch):
+    vb, session = board
+    monkeypatch.setattr(vb.shell, "_op_locate",
+                        lambda req: {"ok": True, "op": "locate", "until_ms": 3000})
+    until = session.panel.locate(5, ME)
+    assert 2.5 < until - time.time() <= 3.5, "the board said 3 s from now"
+
+
+def test_v7_twin_an_absolute_until_ms_is_not_believed(board, monkeypatch):
+    """A draft read until_ms as an absolute epoch. The shipped board never sends more than s
+    seconds, so such a value is not a countdown of years: the asked s."""
+    vb, session = board
+    epoch_ms = int(time.time() * 1000) + 5000
+    monkeypatch.setattr(vb.shell, "_op_locate",
+                        lambda req: {"ok": True, "op": "locate", "until_ms": epoch_ms})
+    until = session.panel.locate(5, ME)
+    assert 4.5 < until - time.time() <= 5.5
+
+
+def test_v7_locate_ms_the_rules():
+    from harness_manager_mps3.panel import locate_ms
+
+    assert LOCATE_MAX_MS == 30_000
+    assert locate_ms({"until_ms": 3000}, 5) == 3000.0
+    assert locate_ms({"until_ms": 0}, 0) == 0.0
+    # twins: not believed -> s seconds
+    for bad in (None, "3000", True, -1, 5001, 1_790_000_000_000):
+        assert locate_ms({"until_ms": bad}, 5) == 5000.0, bad
+    assert locate_ms({}, 5) == 5000.0 and locate_ms({"until_ms": 40_000}, 30) == 30_000.0
+
+
+def test_v7_invalid_is_a_usage_error_and_the_features_are_kept(board, monkeypatch):
+    vb, session = board
+    monkeypatch.setattr(vb.shell, "_op_locate", lambda req: {
+        "ok": False, "err": "invalid who: printable ASCII only", "code": "invalid"})
+    with pytest.raises(UsageError, match="invalid who"):
+        session.panel.locate(5, ME)
+    assert session.panel._forgot is False, "HM sent something wrong: the image still has locate"
+
+
+def test_v7_twin_not_supported_is_unavailable_and_the_features_are_read_again(board):
+    vb, session = board
+    vb.shell.locate_decline = "not_supported"          # a build without the panel
+    with pytest.raises(UnavailableError, match="locate not supported") as exc:
+        session.panel.locate(5, ME)
+    assert exc.value.capability == C.LOCATE and session.panel._forgot is True
+
+
+def test_v7_the_reply_carries_op_and_one_without_it_is_taken_too(board):
+    vb, session = board
+    assert vb.shell.handle_control({"op": "locate", "s": 2}) == {
+        "ok": True, "op": "locate", "until_ms": 2000}
+    vb.shell.locate_reply_op = False                   # a draft's reply
+    until = session.panel.locate(5, ME)
+    assert 4.0 < until - time.time() <= 5.5

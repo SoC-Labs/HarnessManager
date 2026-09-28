@@ -26,6 +26,21 @@ import { Icon, Spinner } from "./ui.js";
 
 export const LOCATE_SECONDS = 5;
 export const LOCATE_FEATURE = "locate";
+// V7-ALIGN (net-protocol v0.16 as shipped): locate's s is 0-30 and until_ms is RELATIVE (ms
+// from the answer to the end; 0 = stopped), so it is never more than this.
+export const LOCATE_MAX_MS = 30000;
+
+// The countdown's length from the daemon's answer: until_ms when it is a relative count the
+// board could have given (0..the asked seconds, at most 30 s); anything else (missing, not a
+// number, an absolute epoch) is not believed and the asked seconds are used.
+export function countdownMs(d, asked = LOCATE_SECONDS) {
+  const data = d || {};
+  let secs = Number(data.seconds !== undefined ? data.seconds : asked);
+  if (!Number.isFinite(secs)) secs = asked;
+  const cap = Math.min(LOCATE_MAX_MS, Math.max(0, secs) * 1000);
+  const ms = data.until_ms === undefined || data.until_ms === null ? NaN : Number(data.until_ms);
+  return Number.isFinite(ms) && ms >= 0 && ms <= cap ? ms : cap;
+}
 // PANEL-TRUTH: harness_manager_mps3.capabilities.NEEDS_LOCATE, word for word: by feature,
 // never a harness type guessed from a missing one.
 export const NEEDS_LOCATE = "Identify isn't available on this harness image yet (harness feature 'locate')";
@@ -115,9 +130,9 @@ export async function locate(bid) {
     log("error", "identify", `${r.line}  ${r.error.errName}: ${r.error.message}`, bid);
   } else {
     const d = r.data.data || {};
-    // The countdown is the board's own "how long" (until_ms), not this host's clock.
-    const ms = d.until_ms !== undefined ? Number(d.until_ms) : Number(d.seconds || LOCATE_SECONDS) * 1000;
-    st.until = Date.now() + Math.max(0, ms);
+    // The countdown is the board's own "how long" (until_ms, RELATIVE), not this host's clock.
+    const ms = countdownMs(d, LOCATE_SECONDS);
+    st.until = Date.now() + ms;
     st.waitUntil = d.next_at ? Math.max(Date.now(), Number(d.next_at) * 1000) : 0;
     st.note = d.note || "";
     log("info", "identify", `${r.line}  blinking for ${Math.round(ms / 1000)} s${d.note ? ` (${d.note})` : ""}`, bid);

@@ -259,6 +259,31 @@ def test_the_countdown_follows_the_boards_until_ms(page_factory, daemon, engine,
 
 
 @pytest.mark.mock_too
+def test_v7_an_absolute_until_ms_is_not_believed_the_count_is_the_asked_5(page_factory, daemon,
+                                                                           engine, psim):
+    """V7-ALIGN: until_ms is RELATIVE (net-protocol v0.16 as shipped). An answer carrying an
+    absolute epoch in ms (a draft's reading) must not start a count of years: the asked 5 s.
+    The twin is the test above: a relative 3000 counts from 3."""
+    import time as _time
+
+    linux(engine)
+    page = page_factory(**APP)
+    loaded(page)
+
+    def epoch(route):
+        response = route.fetch()
+        body = response.json()
+        body["until_ms"] = int(_time.time() * 1000) + 5000
+        route.fulfill(response=response, json=body)
+
+    page.route("**/identify", epoch)
+    rail(page).click()
+    count = page.locator('[data-testid="rail-locate-count"]')
+    expect(count).to_have_text(re.compile(r"^[45]$"), timeout=T)
+    expect(count).to_have_count(0, timeout=6500)          # gone after about 5 s
+
+
+@pytest.mark.mock_too
 def test_negative_twin_the_default_answer_counts_from_5(page_factory, daemon, engine, psim):
     linux(engine)
     page = page_factory(**APP)
