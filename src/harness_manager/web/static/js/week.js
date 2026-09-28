@@ -178,6 +178,8 @@ export function leaseWho(bid) {
   const kind = b.job && b.job.kind;
   const base = {
     hub, lease, host: hub.host || "", target: (lease && lease.target) || "",
+    // LEASE-BOARD: fpgahub's physical board (mps3_01), when GET /lease named it
+    board: (lease && lease.board) || hub.board || "",
     requested: !!req || kind === "lease_request", position: (req && req.position) || null,
     queued: !!req || !!w.leaseQueued || kind === "lease" || kind === "lease_request",
   };
@@ -187,6 +189,25 @@ export function leaseWho(bid) {
   if (here) return { ...base, state: "here", holder: lease.holder || "", queued: false, requested: false };
   if (lease.mine) return { ...base, state: "elsewhere", holder: lease.holder || "your hub name" };
   return { ...base, state: "other", holder: lease.holder || "someone else" };
+}
+
+// LEASE-BOARD: what lease text calls the leased thing: fpgahub's physical board (mps3_01)
+// when GET /lease named it, else the hub target (mps3_01_pl) as before. The lease itself is
+// still taken on the target (docs/HUB_MODE.md "Boards and targets"); this is the name people
+// read. `who` is leaseWho's (or anything with board and target).
+export function leaseName(who) {
+  return (who && (who.board || who.target)) || "";
+}
+
+// The target, as a detail, only when it is not the name already ("" otherwise).
+export function leaseTargetNote(who) {
+  return who && who.board && who.target && who.board !== who.target ? who.target : "";
+}
+
+// "mps3_01 on mapstone-dev (target mps3_01_pl)"; "mps3_01_pl on mapstone-dev" with no board.
+export function leaseWhere(who) {
+  const note = leaseTargetNote(who);
+  return `${leaseName(who) || "the board's target"} on ${(who && who.host) || "the hub"}${note ? ` (target ${note})` : ""}`;
 }
 
 // expires_at: fpgahub's ISO 8601 ("2026-09-25T12:00:00+00:00"), or epoch seconds.
@@ -280,7 +301,7 @@ onBoardEvent((ev) => {
   if (ev.topic === "lease.state") {
     w.leaseQueued = d.state === "queued";
     if (d.state === "lost" || d.state === "expired") {
-      log("warning", "lease", `the lease on ${d.target || bid} was ${d.state}`, bid);
+      log("warning", "lease", `the lease on ${d.board || d.target || bid} was ${d.state}`, bid);
     }
     scheduleHub(bid);
   }

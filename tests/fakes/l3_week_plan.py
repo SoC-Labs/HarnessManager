@@ -208,6 +208,14 @@ def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, timezone.utc).replace(microsecond=0).isoformat()
 
 
+def hub_board(hub: dict[str, Any]) -> str:
+    """LEASE-BOARD: the physical board a mock hub's target belongs to, as the daemon's
+    ``lease.board`` says it: ``set_board`` (lease requests' knob), else the target without its
+    ``_pl`` (fpgahub's suffix rule). A board set to the target itself is the twin: no
+    separate board, so the page shows the target unchanged."""
+    return hub.get("board") or hub["target"].rsplit("_", 1)[0]
+
+
 def _slug(board_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", board_id)
 
@@ -341,9 +349,11 @@ class WeekPlanSim:
             if not lease or not lease.get("here", lease.get("mine")):
                 return None
             released = {k: lease[k] for k in ("target", "holder", "expires_at")}
+            released["board"] = hub_board(hub)                   # LEASE-BOARD (additive)
             hub["lease"] = None
-        self.publish("lease.state", bid, {"target": released["target"], "state": "released",
-                                          "holder": released["holder"], "expires_at": ""})
+        self.publish("lease.state", bid, {"target": released["target"], "board": released["board"],
+                                          "state": "released", "holder": released["holder"],
+                                          "expires_at": ""})
         return {**released, "mine": True}
 
     def release_other(self, bid: str) -> None:
@@ -655,6 +665,8 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         if hub is None:
             return ok(lease=None, hub=None, **more)
         lease = dict(hub["lease"]) if hub["lease"] else None
+        if lease is not None:
+            lease["board"] = hub_board(hub)                     # LEASE-BOARD: as GET /lease has it
         if lease is not None and sim.requests is not None:
             lease.update(sim.requests.lease_keys(bid))          # D12: holder_kind
         return ok(lease=lease, hub=hub["host"], **more)
@@ -679,8 +691,9 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
                 return {"lease": dict(hub["lease"]), "already": True}
             if hub["lease"]:
                 progress("queued", 1, 0)
-                sim.publish("lease.state", bid, {"target": hub["target"], "state": "queued",
-                                                 "holder": me, "expires_at": ""})
+                sim.publish("lease.state", bid, {"target": hub["target"], "board": hub_board(hub),
+                                                 "state": "queued", "holder": me,
+                                                 "expires_at": ""})
                 freed = sim._lease_freed.setdefault(bid, threading.Event())
                 sim._lease_cancel[bid] = cancel
                 try:
@@ -699,9 +712,11 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
             hub["lease"] = {"target": hub["target"], "holder": me, "user": getpass.getuser(),
                             "expires_at": _iso(time.time() + ttl), "mine": True, "here": True}
             progress("held", 1, 1)
-            sim.publish("lease.state", bid, {"target": hub["target"], "state": "held",
-                                             "holder": me, "expires_at": hub["lease"]["expires_at"]})
-            return {"lease": {k: hub["lease"][k] for k in ("target", "holder", "expires_at")}}
+            sim.publish("lease.state", bid, {"target": hub["target"], "board": hub_board(hub),
+                                             "state": "held", "holder": me,
+                                             "expires_at": hub["lease"]["expires_at"]})
+            return {"lease": {**{k: hub["lease"][k] for k in ("target", "holder", "expires_at")},
+                              "board": hub_board(hub)}}
 
         return accepted(jobs.start(bid, "lease", work))
 
@@ -722,9 +737,11 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
                               hint="a lease taken outside Harness Manager is released where it "
                                    "was taken (fpgahub lease release --token …)")
         released = {k: hub["lease"][k] for k in ("target", "holder", "expires_at")}
+        released["board"] = hub_board(hub)
         hub["lease"] = None
-        sim.publish("lease.state", bid, {"target": released["target"], "state": "released",
-                                         "holder": released["holder"], "expires_at": ""})
+        sim.publish("lease.state", bid, {"target": released["target"], "board": released["board"],
+                                         "state": "released", "holder": released["holder"],
+                                         "expires_at": ""})
         return ok(released={**released, "mine": True})
 
     # -- power_api (as built by L4: daemon/power_api.py) ----------------------------------
