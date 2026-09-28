@@ -44,10 +44,10 @@ the button is disabled, with the reason "needs harness feature 'locate' (Linux h
 
 ```
 -> {"op":"locate","s":5,"who":"dam1n19@srv03335 via HM"}      (6900; s 1-30)
-<- {"ok":true,"until_ms":5000}
+<- {"ok":true,"op":"locate","until_ms":5000}                   (until_ms: ms from now)
 
 -> {"op":"locate","s":0}                                         (stop)
-<- {"ok":true,"until_ms":0}
+<- {"ok":true,"op":"locate","until_ms":0}
 ```
 
 | Board behaviour | As confirmed |
@@ -60,10 +60,21 @@ the button is disabled, with the reason "needs harness feature 'locate' (Linux h
 | Access | **no claim lock**: any peer, so HM goes over the normal hub tunnel |
 | Not in this image | `hello` and `panel` (R1/R2), user LEDs, a board-side rate limit, a ring entry |
 
+**As shipped (V7-ALIGN, net-protocol v0.16, platform `feat/linux-harness` 18622e5,
+`locate_linux.c`).** The answer is `{"ok":true,"op":"locate","until_ms":N}`: it carries `op`
+(HM takes it with or without). `until_ms` is RELATIVE, ms from the answer to the end (0 =
+stopped), never more than `s * 1000`; HM does not believe a larger value (an absolute epoch,
+say) and counts the asked seconds (`harness_manager_mps3.panel.locate_ms`, `locate.js`
+`countdownMs`). `s` is 0-30; `who` is at most **32** printable ASCII characters. Anything else
+is `{"ok":false,"err":"invalid s: …"|"invalid who: …","code":"invalid"}`, which HM shows as
+USAGE (it sent something wrong) without forgetting the image's features. A build without the
+panel, and bare metal, answer `locate not supported`, code `not_supported` (UNAVAILABLE).
+
 **What HM sends.**
 - `s:5`. `who` is `"<user>@<host> via Harness Manager"`, shortened to `"... via HM"` when that
-  does not fit 30 characters (the 40-column banner row, less "IDENTIFY: "). See
-  `core.panel.locate_who`.
+  does not fit 30 characters (the 40-column banner row, less "IDENTIFY: ": what the glass
+  shows). See `core.panel.locate_who`. The adapter clips any `who` to the board's 32
+  (`core.panel.LOCATE_WHO_WIRE_MAX`), so the board never refuses it.
 - Stop sends `s:0`.
 - Nothing else: no `leds`, and no `hello` or `panel`, which this image does not have.
 
@@ -105,5 +116,6 @@ the reason.
    say "Identified by …" even if the 5 s fell between two 30 s beats.
 3. **A tap-stop HM can see.** With R2, `panel` carries `locate: {who, until_ms}` while it
    runs, so a stop from the glass ends HM's countdown too.
-4. **The `who` cap.** HM sends at most 30 characters. Please confirm the banner shows all 30,
-   or say where it clips.
+4. **The `who` cap.** ANSWERED by the shipped image (18622e5): the wire takes at most 32; the
+   banner draws "IDENTIFY: " plus `who` clipped at the row's 40th column, so 30 show. HM
+   composes to 30 and clips anything else to 32.

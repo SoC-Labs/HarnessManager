@@ -25,7 +25,7 @@ stage0's rescue address.
 | **Real IP** | `lx:.../rootfs_overlay/etc/init.d/S41mps3net`: DHCP first (`:101`), then `MPS3_NET_STATIC` (`etc/mps3/net.conf:12`, 192.168.10.101/24) as a permanent secondary if `arping -D` finds it free (`:64-65`). The hub's dnsmasq gives board 2 192.168.11.101 (evidence `docs/evidence/2026-09-linux-b2/board2_commission/netboot.txt:7-9`, keyed on MAC 02:00:00:4d:50:53); board 2's link is its own, so DAD finds .10.101 free and board 2 holds BOTH (`claim_ssh.txt:3`: `lease=192.168.11.101 static101=added`) | net.conf may be edited: `/etc/mps3` is an overlay on `/persist/etc-mps3/upper` (`S12mps3persist:194-205`) | image default only (`/persist` is tmpfs) |
 | **identify / version `ip`** | `lx:src/linux_harness/sw/harnessd/platform_linux.c:165-182`: `SIOCGIFADDR` on eth0 = the first address added (the lease if it came in the foreground attempt, else .10.101). identify's `board` is the constant `"mps3"` (`firmware/identify/identify.c:163`) | as left | as left |
 | **MAC** | the DT: `lx:src/linux_harness/shell_linux.dts:341` `local-mac-address = [02 00 00 4D 50 53]`; eth0 reads it; harnessd reports sysfs (`platform_linux.c:117-131`, fallback the same constant `:120`); the LCD MAC row reads that (`clcd.c:966-970`) | image DTB | image DTB |
-| **Hostname** | `lx:.../configs/mbv_harness_defconfig:78` `mps3-harness`; `net.conf:24` `MPS3_HOSTNAME=` empty | `mps3-harness` unless net.conf is edited | `mps3-harness` |
+| **Hostname** | `lx:.../configs/mbv_harness_defconfig:78` `mps3-harness`; `net.conf:24` `MPS3_HOSTNAME=` empty (v0.16: the label lower-cased, §2.1) | `mps3-harness` unless net.conf is edited | `mps3-harness` |
 | **stage0 rescue** | `lx:src/linux_soc/hw/fw_stage0/stage0.c:78-80` `S0_IP` (#ifndef, default .10.101), `:81-98` `MPS3_MAC0..5` (default 02:00:00:4D:50:53), both via `S0_EXTRA_DEFS` (`Makefile:51,69`). Board 2's bake (build 0x6FAE6A0B) changed only the rescue address and build id (platform `6850cda`); Linux never read it | per-board | per-board |
 | **Kernel cmdline** | `shell_linux.dts:34`: console + uio only. `mps3.net=` and `mps3.persist=` are honoured but nothing sets them | - | - |
 
@@ -51,6 +51,26 @@ ip/mac/label); (3) the image default: label `MPS3` (no number), 192.168.10.101/2
   must fit the LCD row). Applied by the WARM `reboot` verb only.
 - `mps3-identity get|set k=v…|clear` on the board edits the same file (for SSH users).
 - `identify` gains `label`; `version.features` gains `identity`.
+
+### 2.1 As shipped (V7-ALIGN, platform `feat/linux-harness` 18622e5, images rc2_v7/v7n)
+
+The shipped contract is additive over the draft above; where it differs, HM follows it:
+
+| Point | Shipped | HM |
+|---|---|---|
+| `identity_set` refusals | in this order: `locked` (first, whatever the request holds), `no_persist` ("identity: no persistent /persist (use the card)"), `invalid` ("invalid <field>: <why>"); `io` for a failed write | `fix_reason` checks the claim before the card; a bad value is reported only after both (service `fix`, CLI, API: 409 before 400) |
+| `""` for a field | DROPS that key from the override | `validate_want` keeps `""` (`DROP`); CLI `--unset FIELD`, API `unset: [..]`; a field sent as `""` to the API is still "not given" |
+| label | 1-19 of `[A-Z0-9-]` (a stage0 bake: <= 8) | `LABEL_MAX` 19, the same charset |
+| hostname | RFC 1123, dot-separated, <= 63; default = the label lower-cased (`mps3-01`; `mps3` with no bake), was `mps3-harness` | the same check. HM files SSH keys by board id, never by host name |
+| ip | `a.b.c.d/nn`, nn 8-30, a usable host (not 0/8, 127/8, >= 224, network, broadcast) | the same check |
+| replies | `identity`, `identity_set`, `locate` carry `"op"` | taken with or without |
+| bare metal | `identity not supported`, code `not_supported` | UNAVAILABLE (bare metal named); `unknown op` is an image older than v0.16 |
+| identify | `label` after `ssh`, before `ports`; `ip` is the DHCP lease while `dhcp:true` | a lease is kept as `lease`, never compared as the board's IP |
+| default label | `MPS3` (no number) | never a label clash on either side ("identity not set (default label)"), nor a label "differs" from the hub record; a duplicate MAC or IP is still a clash, and an IP or MAC unlike the hub's still differs |
+
+Board 2 before its identity bake reports `MPS3`, the old MAC 02:00:00:4d:50:53 and its own
+IP (192.168.11.101, from stage0): HM shows "identity not set (default label, MAC)", and a
+clash only on the MAC while board 1 still has that MAC too.
 
 ## 3. What HM reads
 

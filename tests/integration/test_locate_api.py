@@ -65,6 +65,28 @@ def test_twin_a_stop_goes_at_once_and_a_start_goes_again_after_the_window(tmp_pa
         assert [q["s"] for q in r.vb.shell.locates] == [5, 0, 5]
 
 
+def test_v7_the_daemon_answers_the_boards_relative_until_ms(tmp_path, monkeypatch):
+    """V7-ALIGN: until_ms is RELATIVE on the wire and in the daemon's answer: 3000 from the
+    board is about 3000 here (and ``until`` is about now + 3)."""
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
+        bid = r.open(client)
+        monkeypatch.setattr(r.vb.shell, "_op_locate",
+                            lambda req: {"ok": True, "op": "locate", "until_ms": 3000})
+        body = post(client, bid, 5).json()
+        assert body["ok"] and 2900 <= body["until_ms"] <= 3000
+        assert 2.5 < body["until"] - time.time() <= 3.5
+
+
+def test_v7_twin_an_absolute_until_ms_from_a_board_is_not_passed_on(tmp_path, monkeypatch):
+    with rig(tmp_path, LINUX_LOCATE) as (r, client):
+        bid = r.open(client)
+        epoch_ms = int(time.time() * 1000) + 5000
+        monkeypatch.setattr(r.vb.shell, "_op_locate",
+                            lambda req: {"ok": True, "op": "locate", "until_ms": epoch_ms})
+        body = post(client, bid, 5).json()
+        assert body["ok"] and 4900 <= body["until_ms"] <= 5000, "the asked 5 s, not years"
+
+
 def test_the_board_hears_exactly_op_s_who_via_harness_manager(tmp_path):
     with rig(tmp_path, LINUX_LOCATE) as (r, client):
         bid = r.open(client)

@@ -96,3 +96,31 @@ def test_twin_a_netbooted_board_shows_the_refusal_and_nothing_to_press(page_fact
     expect(page.locator('[data-testid="identity-dialog"]')).to_have_count(0)
     assert sim.posts == []
     assert not page.errors, page.errors
+
+
+# --- V7-ALIGN: board 2 before its identity bake (net-protocol v0.16 as shipped) -----------------
+
+
+def test_v7_board2s_default_label_says_identity_not_set_not_a_clash(page_factory, daemon):
+    daemon.app.state.identity.board2_tonight(BOARD_FIELDED, board1_mac="02:00:00:00:01:fe")
+    page = page_factory()
+    open_board(page)
+    row = page.locator('[data-testid="tile-identity"]')
+    expect(row).to_have_attribute("data-status", "unset", timeout=T)
+    warn = page.locator('[data-testid="tile-identity-warning"]')
+    expect(warn).to_contain_text("Identity not set (default label, MAC)")
+    assert "identity not set: identity not set" not in warn.inner_text().lower()
+    assert "clash" not in warn.inner_text().lower()
+    assert not page.errors, page.errors
+
+
+def test_v7_twin_board2_sharing_board1s_old_mac_is_a_mac_clash_only(page_factory, daemon):
+    daemon.app.state.identity.board2_tonight(BOARD_FIELDED)          # board 1: the same old MAC
+    page = page_factory()
+    open_board(page)
+    row = page.locator('[data-testid="tile-identity"]')
+    expect(row).to_have_attribute("data-status", "clash", timeout=T)
+    warn = page.locator('[data-testid="tile-identity-warning"]')
+    expect(warn).to_contain_text("Identity clash: this board reports the same MAC as mps3-01")
+    assert "same label" not in warn.inner_text()
+    assert not page.errors, page.errors

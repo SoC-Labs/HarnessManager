@@ -10,9 +10,14 @@ The Linux harness side (R1-R3) is not built yet, so this fake IS the wire until 
 - ``panel`` (feature ``panel``): the state with the session list and ``touch``; with
   ``frame`` ``"a"``/``"b"`` the rows 0-7 / 8-14 and their role codes, with ``true`` all 15.
 - ``locate`` (feature ``locate``): ``{s: 1-30, who}`` blinks, ``{s: 0}`` stops;
-  ``{ok, until_ms}``. LOCATE: exactly what the Linux lead confirmed for rc2_v7/v7n
-  (docs/design/BOARD_LOCATE.md §2): the backlight blinks at 2 Hz (``blinking``); the
-  "IDENTIFY: <who>" banner shows only while the harness owns the panel (``banner_text``);
+  ``{ok, op, until_ms}``. V7-ALIGN: as SHIPPED (platform 18622e5, locate_linux.c): ``s`` 0-30,
+  ``who`` at most 32 printable ASCII, else ``{ok: false, err: "invalid s: ..."|"invalid who:
+  ...", code: "invalid"}``; ``until_ms`` RELATIVE (``s * 1000``); the reply carries ``op``
+  (``locate_reply_op=False``: a draft's reply without it); ``locate_decline="not_supported"``
+  is a build without the panel (``locate not supported``). LOCATE: what the Linux lead
+  confirmed for rc2_v7/v7n (docs/design/BOARD_LOCATE.md §2): the backlight blinks at 2 Hz
+  (``blinking``); the "IDENTIFY: <who>" banner shows only while the harness owns the panel
+  (``banner_text``);
   a tap on the glass stops it (``tap()``); a harnessd restart restores the backlight
   (``restart_harnessd()``). No rate limit, no LEDs, nothing in the ring.
   ``LINUX_LOCATE`` is that image: ``locate`` without ``presence``/``panel`` (R1/R2 are not
@@ -96,9 +101,12 @@ class PanelFakeShell(HarnessFakeShell):
                  page: str = "status", banner: str = "", card: str = "nanosoc [A]",
                  touch_present: bool = True, touch_cal: bool = True,
                  touch_ok: bool | None = None, touch_bus_lost: int | None = None,
-                 touch_recoveries: int | None = None, **kwargs: Any) -> None:
+                 touch_recoveries: int | None = None, locate_reply_op: bool = True,
+                 locate_decline: str = "", **kwargs: Any) -> None:
         super().__init__(host, **kwargs)
         self.board_clock = board_clock
+        self.locate_reply_op = locate_reply_op
+        self.locate_decline = locate_decline
         self.page = page
         self.banner = banner
         self.card = card
@@ -236,15 +244,23 @@ class PanelFakeShell(HarnessFakeShell):
         return reply
 
     def _op_locate(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.locate_decline == "not_supported":
+            return {"ok": False, "err": "locate not supported", "code": "not_supported"}
         s, who = request.get("s"), request.get("who", "")
-        if isinstance(s, bool) or not isinstance(s, int) or not 0 <= s <= 30 \
-                or not isinstance(who, str):
-            return {"ok": False, "err": "bad args"}
+        if isinstance(s, bool) or not isinstance(s, int) or not 0 <= s <= 30:
+            return {"ok": False, "err": "invalid s: 0..30 (seconds; 0 stops)", "code": "invalid"}
+        if not isinstance(who, str) or len(who) > 32:
+            return {"ok": False, "err": "invalid who: a string of <= 32 characters",
+                    "code": "invalid"}
+        if any(not " " <= ch <= "~" for ch in who):
+            return {"ok": False, "err": "invalid who: printable ASCII only", "code": "invalid"}
         self.locates.append(dict(request))
         self.locate_until = self.board_clock() + s
         if s:
             self.locate_who = who
-        return {"ok": True, "until_ms": s * 1000}
+        if not self.locate_reply_op:
+            return {"ok": True, "until_ms": s * 1000}
+        return {"ok": True, "op": "locate", "until_ms": s * 1000}
 
 
 class PanelVirtualMps3(VirtualMps3):

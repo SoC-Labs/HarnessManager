@@ -34,9 +34,14 @@ from tests.fakes.idn_board import (
 )
 from tests.fakes.lxslots_board import TRUSTED, BoardSsh, board_session
 
-#: Board 2 today: board 1's identity, every field the image default.
+#: Board 2 with board 1's identity: board 1's stage0 bake (label, IP) and the image's MAC.
+#: V7-ALIGN: on the shipped image a "default" label is always ``MPS3``, never ``MPS3-01``.
 AS_BOARD1 = {"label": "MPS3-01", "ip": "192.168.10.101/24", "mac": BOARD1_MAC,
-             "source": {"label": "default", "ip": "default", "mac": "default"}}
+             "source": {"label": "stage0", "ip": "stage0", "mac": "default"}}
+#: Board 2 on rc2_v7 before its identity bake is fielded: the generic label and the old MAC;
+#: its IP is already its own, from stage0.
+BOARD2_TONIGHT = {"label": "MPS3", "ip": "192.168.11.101/24", "mac": BOARD1_MAC,
+                  "source": {"label": "default", "ip": "stage0", "mac": "default"}}
 #: Board 2 as its hub entry says.
 AS_BOARD2 = {"label": "MPS3-02", "ip": "192.168.11.101/24", "mac": BOARD2_MAC,
              "source": {"label": "stage0", "ip": "stage0", "mac": "stage0"}}
@@ -281,3 +286,155 @@ def test_the_verify_says_so_when_the_board_did_not_take_it(lab, monkeypatch):
     with pytest.raises(ActionFailedError, match="does not report the new identity"):
         svc.fix(session, confirm="MPS3-02", from_hub=True, wait_s=20)
     assert len(fake.identity_sets) == 1 and len(fake.reboots) == 1
+
+
+# --- V7-ALIGN: the shipped contract (net-protocol v0.16, platform 18622e5) ----------------------
+
+
+def test_v7_board2_tonight_is_identity_not_set_and_its_only_clash_is_the_mac(lab):
+    """Board 2 keeps label MPS3 and the old MAC; this HM saw board 1 with the same MAC. The
+    label alone is never a clash; the duplicate MAC still is."""
+    fake, session, svc = lab(running=BOARD2_TONIGHT)
+    st = svc.status(session, refresh=True)
+    clashes = {(f["field"], f["other"]) for f in st["findings"] if f["kind"] == "clash"}
+    assert clashes == {("mac", "mps3-01")}
+    unset = [f["text"] for f in st["findings"] if f["kind"] == "unset"]
+    assert unset and unset[0].startswith("identity not set (default label, MAC)")
+    assert st["reported"]["hostname"] == "mps3"                  # the label lower-cased
+    differs = {f["field"] for f in st["findings"] if f["kind"] == "differs"}
+    assert "label" not in differs and "mac" in differs, "default label: unset, not differs"
+
+
+def test_v7_twin_board1_with_its_own_mac_leaves_board2_identity_not_set(lab, tmp_path):
+    import time
+
+    fake, session, svc = lab(running=BOARD2_TONIGHT)
+    svc.seen.update("mps3@192.168.10.101:6900", label="MPS3-01", label_source="stage0",
+                    mac="02:00:00:00:01:fe", at=time.time())
+    st = svc.status(session, refresh=True)
+    assert [f for f in st["findings"] if f["kind"] == "clash"] == []
+    assert st["status"] == "unset"
+
+
+def test_v7_the_claim_is_checked_before_the_card_like_the_board(lab):
+    """The board's order: ``locked`` first, then ``no_persist``. A netbooted board that is
+    claimed by a key this HM never pinned is refused for the CLAIM."""
+    fake, session, svc = lab(pinned=False, persist=False)
+    st = svc.status(session, refresh=True)
+    assert "claim-locked" in st["fix"]["refusal"]["message"]
+    with pytest.raises(RefusedError, match="claim-locked"):
+        svc.fix(session, confirm="MPS3-02", from_hub=True)
+    assert nothing_sent(fake)
+    # the board itself says the same, whatever the request holds
+    reply = fake.handle_control({"op": "identity_set", "label": "no good"}, peer="10.9.9.9")
+    assert reply == {"ok": False, "err": "identity locked: board claimed (use ssh)",
+                     "code": "locked"}
+
+
+def test_v7_twin_our_claim_on_a_netbooted_board_is_refused_for_the_card(lab):
+    fake, session, svc = lab(persist=False)
+    with pytest.raises(RefusedError, match="stage0 bake"):
+        svc.fix(session, confirm="MPS3-02", from_hub=True)
+    assert nothing_sent(fake)
+
+
+def test_v7_a_bad_value_on_a_netbooted_board_is_refused_for_the_card_not_the_value(lab):
+    """``invalid`` comes last: a label the board would refuse, on a board that cannot take a
+    change at all, is refused for the card (REFUSED), not for the label (USAGE)."""
+    fake, session, svc = lab(persist=False)
+    with pytest.raises(RefusedError, match="stage0 bake"):
+        svc.fix(session, confirm="x", want={"label": "lower-case"})
+    assert nothing_sent(fake)
+    assert fake.handle_control({"op": "identity_set", "label": "lower-case"}, peer=TRUSTED) == {
+        "ok": False, "err": "identity: no persistent /persist (use the card)",
+        "code": "no_persist"}
+
+
+def test_v7_twin_a_bad_value_on_a_board_that_can_take_it_is_a_usage_error(lab):
+    from harness_manager.core.errors import UsageError
+
+    fake, session, svc = lab()
+    with pytest.raises(UsageError, match="A-Z"):
+        svc.fix(session, confirm="x", want={"label": "lower-case"})
+    assert nothing_sent(fake)
+    reply = fake.handle_control({"op": "identity_set", "label": "lower-case"}, peer=TRUSTED)
+    assert reply == {"ok": False, "err": "invalid label: not [A-Z0-9-]", "code": "invalid"}
+
+
+def test_v7_the_boards_refusal_codes_map_to_hm_errors_through_the_setter(lab):
+    """Straight to the board (no pre-check): each shipped code as its HM error."""
+    from harness_manager.core.errors import UsageError
+
+    fake, session, svc = lab()
+    setter = HarnessdSetter()
+    with pytest.raises(UsageError, match="invalid label: longer than 19"):
+        setter(session, {"label": "X" * 20})
+    fake.persist = False
+    with pytest.raises(RefusedError, match="stage0 bake"):
+        setter(session, {"label": "X" * 20})         # no_persist beats invalid
+    assert fake.identity_sets == []
+
+
+BOARD2_BAKE = {"label": "MPS3-02", "ip": "192.168.11.101/24", "mac": BOARD2_MAC}
+
+
+def test_v7_an_empty_string_drops_the_key_from_the_boards_override(lab):
+    fake, session, svc = lab(running=AS_BOARD2, stage0=BOARD2_BAKE)
+    fake.override = {"hostname": "bench"}
+    fake.running = {**fake.running, "hostname": "bench",
+                    "source": {**fake.running["source"], "hostname": "override"}}
+    out = svc.fix(session, confirm="MPS3-02", want={"hostname": ""}, wait_s=20)
+    assert fake.identity_sets[0][1] == {"hostname": ""}, "the wire's empty string"
+    assert out["verified"] is True and fake.override is None
+    rep = out["identity"]["reported"]
+    assert rep["hostname"] == "mps3-02" and rep["source"]["hostname"] == "label"
+
+
+def test_v7_twin_dropping_a_key_the_override_does_not_hold_sends_nothing(lab):
+    fake, session, svc = lab(running=AS_BOARD2, stage0=BOARD2_BAKE)
+    out = svc.fix(session, confirm="MPS3-02", want={"hostname": ""}, wait_s=20)
+    assert out["action"] == "none" and nothing_sent(fake)
+
+
+def test_v7_a_reply_without_op_is_taken_as_well_as_one_with_it(lab):
+    """The new replies carry ``op`` (shipped); a draft's did not. Both are taken."""
+    for reply_op in (True, False):
+        fake, session, svc = lab(reply_op=reply_op)
+        out = svc.fix(session, confirm="MPS3-02", from_hub=True, wait_s=20)
+        assert out["verified"] is True and out["set"]["applies"] == "reboot"
+
+
+def test_v7_identify_carries_the_label_before_ports(lab):
+    from harness_manager_mps3 import identify as I
+
+    fake, session, svc = lab(running=AS_BOARD2)
+    reply = I.identify("127.0.0.1", port=fake.identify_port, timeout=2.0)
+    keys = list(reply.raw)
+    assert reply.raw["label"] == "MPS3-02" and keys[-1] == "ports"
+    assert keys.index("label") == keys.index("ssh") + 1
+    got = session.net_identity._from_identify(impl="linux")
+    assert got["label"] == "MPS3-02" and got["ip"] == "192.168.11.101"
+
+
+def test_v7_twin_identify_on_a_dhcp_lease_is_not_the_boards_ip(lab):
+    fake, session, svc = lab(running=AS_BOARD2)
+    fake.dhcp = True                                 # identify's ip is now the lease
+    got = session.net_identity._from_identify(impl="linux")
+    assert got["ip"] == "" and got["lease"] == "192.168.11.101"
+    assert got["label"] == "MPS3-02"
+
+
+def test_v7_bare_metal_not_supported_is_unavailable_with_the_reason(lab):
+    """A v0.16 bare-metal coordinator declines both verbs: ``identity not supported``, code
+    ``not_supported``: UNAVAILABLE, bare metal named."""
+    fake, session, svc = lab(has_identity=False, decline="not_supported")
+    with pytest.raises(UnavailableError, match="bare-metal harness has no identity store"):
+        HarnessdSetter()(session, {"label": "MPS3-02"})
+    assert fake.identity_sets == []
+
+
+def test_v7_twin_an_image_older_than_v016_is_pending_the_linux_lead(lab):
+    fake, session, svc = lab(has_identity=False)                 # "unknown op"
+    with pytest.raises(UnavailableError, match="pending the Linux lead's interface"):
+        HarnessdSetter()(session, {"label": "MPS3-02"})
+    assert fake.identity_sets == []

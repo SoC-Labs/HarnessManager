@@ -22,6 +22,20 @@ owners.
 - At most one Identify per board every 10 s (409 ALREADY / exit 8, saying when). When
   someone else holds the lease, the answer names them.
 - `harness-manager identify TARGET` now blinks for 5 s by default (was 10).
+- Aligned to the images as built (rc2_v7/v7n, net-protocol v0.16): the countdown follows the
+  board's relative `until_ms` and ignores a value longer than the blink asked for; `who` may
+  be up to 32 characters on the wire; a refusal of a bad request is a usage error, and a
+  build without the panel says "locate not supported".
+
+### Board identity: shipped contract (V7-ALIGN)
+- `board identity --label` takes what the board takes: 1-19 of A-Z, 0-9 and - (was 23 of any
+  printable). Host names may have dots; an IP needs a prefix of 8-30 and a usable address.
+- `board identity TARGET --unset hostname` (API `unset: ["hostname"]`) drops one field of the
+  board's own setting, so it follows the stage0 bake again.
+- A refused change names the same reason the board would: the claim first, then no card,
+  then a bad value.
+- A board still on the image's default label `MPS3` shows "identity not set (default label)"
+  and is never a clash with another board on the label alone; a shared MAC still is.
 
 ### Install
 - `scripts/install.sh` (Linux, macOS) and `scripts/install.ps1` (Windows): one command

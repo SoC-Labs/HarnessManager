@@ -53,12 +53,13 @@ from collections.abc import Callable
 from typing import Any
 
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import UnavailableError
+from harness_manager.core.errors import UnavailableError, UsageError
 from harness_manager.core.model import BoardIdentity, LinkKind
 from harness_manager.core.panel import (
     COLS,
     LINE_MAX,
-    LOCATE_WHO_MAX,
+    LOCATE_MAX_MS,
+    LOCATE_WHO_WIRE_MAX,
     REBUILT_NOTE,
     ROLE_INVERTED,
     ROLE_TEXT,
@@ -460,25 +461,43 @@ class Mps3Panel:
     # -- Identify ---------------------------------------------------------------------------
 
     def locate(self, seconds: int, who: str) -> float:
-        """The Linux harness's ``locate`` (docs/design/BOARD_LOCATE.md §2, confirmed by the
-        Linux lead for rc2_v7): ``{op, s, who}`` -> ``{ok, until_ms}``; ``s: 0`` stops. The
-        board blinks the panel's backlight at 2 Hz, with an "IDENTIFY: <who>" banner while
-        the harness owns the panel; a tap on the glass stops it early."""
+        """The Linux harness's ``locate`` (docs/design/BOARD_LOCATE.md §2; net-protocol v0.16 as
+        shipped, platform 18622e5): ``{op, s, who}`` -> ``{ok, op, until_ms}``; ``s: 0`` stops.
+        The board blinks the panel's backlight at 2 Hz, with an "IDENTIFY: <who>" banner while
+        the harness owns the panel; a tap on the glass stops it early.
+
+        V7-ALIGN: ``who`` is at most 32 printable ASCII characters on the wire
+        (``LOCATE_WHO_WIRE_MAX``; the board refuses more with ``invalid``); ``until_ms`` is
+        RELATIVE (ms from the reply to the end), so a value past ``s`` seconds (an absolute
+        epoch, say) is not believed: ``s`` seconds instead. ``invalid`` is a ``UsageError``
+        (HM sent something wrong; the features are not forgotten); ``not_supported`` (a build
+        without the panel) and anything else are ``UnavailableError``."""
         if "locate" not in self._features():
             raise UnavailableError(C.LOCATE, NEEDS_LOCATE)
         s = max(0, min(LOCATE_MAX_S, int(seconds)))
         msg: dict[str, Any] = {"op": "locate", "s": s}
         if s and who:
-            msg["who"] = ascii_field(who, LOCATE_WHO_MAX)
+            msg["who"] = ascii_field(who, LOCATE_WHO_WIRE_MAX)
         reply = self._shell.call_raw(lambda c, _tap: _request(c, msg))
+        if not reply.get("ok") and reply.get("code") == "invalid":
+            raise UsageError(f"the harness refused Identify: {reply.get('err') or 'invalid'}",
+                             hint=f"s 0-{LOCATE_MAX_S}; who at most {LOCATE_WHO_WIRE_MAX} "
+                                  "printable ASCII characters")
         refusal = _declined(reply, C.LOCATE, "Identify")
         if refusal is not None:
             self.forget()
             raise refusal
-        until_ms = reply.get("until_ms", s * 1000)
-        if not isinstance(until_ms, (int, float)) or isinstance(until_ms, bool):
-            until_ms = s * 1000
-        return self._wall() + max(0.0, float(until_ms)) / 1000.0
+        return self._wall() + locate_ms(reply, s) / 1000.0
+
+
+def locate_ms(reply: dict[str, Any], s: int) -> float:
+    """``locate``'s ``until_ms`` as ms from now (V7-ALIGN: RELATIVE, 0 = stopped). Missing, not
+    a number, negative, or past ``s`` seconds (and ``LOCATE_MAX_MS``): ``s`` seconds."""
+    until_ms = reply.get("until_ms", s * 1000)
+    if not isinstance(until_ms, (int, float)) or isinstance(until_ms, bool) or until_ms < 0 \
+            or until_ms > min(LOCATE_MAX_MS, s * 1000):
+        return float(s * 1000)
+    return float(until_ms)
 
 
 def make_panel_adapter(session: Any) -> Mps3Panel | None:
@@ -497,5 +516,5 @@ def make_panel_adapter(session: Any) -> Mps3Panel | None:
     return panel
 
 
-__all__ = ["LINE_MAX", "Mps3Panel", "board_address", "make_panel_adapter", "parse_hello_reply",
-           "parse_state", "rebuilt_frame"]
+__all__ = ["LINE_MAX", "Mps3Panel", "board_address", "locate_ms", "make_panel_adapter",
+           "parse_hello_reply", "parse_state", "rebuilt_frame"]

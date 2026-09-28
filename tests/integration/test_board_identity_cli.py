@@ -150,3 +150,53 @@ def test_twin_a_board_that_does_not_answer_identify_has_no_identity_in_info(caps
     rc, out, err = run(capsys, "--json", "info", target)
     assert rc == 0, err
     assert "net_identity" not in json.loads(out)
+
+
+# --- V7-ALIGN: the shipped contract (net-protocol v0.16, platform 18622e5) ----------------------
+
+
+def test_v7_the_label_check_is_the_boards_19_of_a_z_0_9(capsys, board):
+    fake, target = board()
+    rc, _, err = run(capsys, "board", "identity", target, "--label", "X" * 20)
+    assert rc == 2 and "1-19 of A-Z" in err
+    rc, _, err = run(capsys, "board", "identity", target, "--label", "mps3-02")
+    assert rc == 2 and "does not fit the LCD row" in err
+    assert fake.identity_sets == []
+
+
+def test_v7_twin_a_19_character_label_is_taken(capsys, board):
+    fake, target = board()
+    label = "BENCH-0123456789-XY"
+    assert len(label) == 19
+    rc, out, err = run(capsys, "board", "identity", target, "--label", label, "--consent", label,
+                       "--wait", "20")
+    assert rc == 0, err
+    assert fake.identity_sets[0][1] == {"label": label}
+
+
+def test_v7_a_bad_value_on_a_netbooted_board_is_refused_for_the_card(capsys, board):
+    """The board's order: ``no_persist`` before ``invalid``."""
+    fake, target = board(persist=False)
+    rc, _, err = run(capsys, "board", "identity", target, "--label", "lower-case")
+    assert rc == 15 and "stage0 bake" in err
+    assert fake.identity_sets == []
+
+
+def test_v7_unset_drops_the_key_with_the_wires_empty_string(capsys, board):
+    fake, target = board()
+    fake.override = {"hostname": "bench"}
+    fake.running = {**fake.running, "hostname": "bench",
+                    "source": {**fake.running["source"], "hostname": "override"}}
+    rc, out, err = run(capsys, "board", "identity", target, "--unset", "hostname",
+                       "--consent", "MPS3", "--wait", "20")
+    assert rc == 0, err
+    assert fake.identity_sets[0][1] == {"hostname": ""} and fake.override is None
+    assert "dropped" in out
+
+
+def test_v7_twin_unset_of_a_key_not_in_the_override_changes_nothing(capsys, board):
+    fake, target = board()
+    rc, out, _ = run(capsys, "board", "identity", target, "--unset", "hostname")
+    assert rc == 0 and "nothing to change" in out and fake.identity_sets == []
+    rc, _, err = run(capsys, "board", "identity", target, "--unset", "label", "--label", "A")
+    assert rc == 2 and "together" in err
