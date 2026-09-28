@@ -171,11 +171,14 @@ class LinuxLab:
     hub: Any
     tool: Any
     ssh: Any
+    #: HIL-GUI: the single-client control port in front of the fake (``single_client=True``)
+    front: Any = None
 
 
 @contextmanager
 def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
-              static: int = LX_STATIC, card: bool = True) -> Iterator[LinuxLab]:
+              static: int = LX_STATIC, card: bool = True,
+              single_client: bool = False) -> Iterator[LinuxLab]:
     from harness_manager_mps3 import hub as hubmod
     from harness_manager_mps3 import tunnel as T
     from tests.fakes.claimed_lock import TRUSTED, HubAndBoardSsh, board_key_fp, route_board
@@ -197,7 +200,15 @@ def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
     fake = slot_board(profile="linux", static_id=static, ssh_claimed=True,
                       ssh_host_key_sha256=board_key_fp(), slots=slots)
     ssh = HubAndBoardSsh()
-    route_board(ssh, {6900: fake.control_port, 6910: fake.raw_tcp_port})
+    front = None
+    if single_client:
+        # HIL-GUI: the control port serves ONE client, as the real harness's does, so another
+        # client holding it (a soak) turns Harness Manager away (tests/fakes/qp_single_client.py)
+        from tests.fakes.qp_single_client import SingleClientFront
+
+        front = SingleClientFront(fake, turn_away="eof")
+    route_board(ssh, {6900: front.port if front is not None else fake.control_port,
+                      6910: fake.raw_tcp_port})
     monkeypatch.setattr(T, "DEFAULT_LAUNCHER", ssh)
     monkeypatch.setattr(T, "DEFAULT_SSH_G", ssh.ssh_g)
     hub = FakeHub("mps3_01_pl")
@@ -211,8 +222,10 @@ def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
     write_boards_toml(state_dir(), f'[boards.lab]\nmatch = ["{BOARD}"]\nvia = "ssh:{HUB}"\n'
                                    f'hub = {{ host = "{HUB}", target = "mps3_01_pl" }}\n')
     try:
-        yield LinuxLab(fake, hub, tool, ssh)
+        yield LinuxLab(fake, hub, tool, ssh, front)
     finally:
+        if front is not None:
+            front.close()
         hubmod.SHARES.close_all()
         hub.close()
         ssh.close()

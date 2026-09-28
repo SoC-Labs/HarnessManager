@@ -183,6 +183,54 @@ def test_twin_a_different_client_holding_the_board_still_stops_the_run(nocard, c
         assert nocard.fake.accepted_pushes == []
 
 
+def test_on_a_single_client_port_the_services_own_session_is_not_another_holder(
+        tmp_path, monkeypatch, capsys):
+    """The control port serves one client, as on the lab board: the app's session (the
+    service) and the run's commands share it through the service's gate, so the whole plan,
+    swaps included, passes and nothing is turned away."""
+    with linux_lab(tmp_path, monkeypatch, card=False, single_client=True) as lab:
+        monkeypatch.delenv("HARNESS_MANAGER_NO_DAEMON", raising=False)
+        monkeypatch.setenv("HARNESS_MANAGER_CLI_ENGINE", "harness_manager.cli.engine:require_service")
+        with service() as svc:
+            svc.open()
+            acquire(capsys)
+            assert svc.start(plan="linux-nocard", writes="safe", repeat=1,
+                             until="").status_code == 200
+            last = svc.wait_end()
+            assert last["result"] == "PASS", (last["reason"],
+                                              summary(last["evidence"])["first_failure"])
+            assert lab.fake.current_rm_id == 0
+
+
+def test_twin_another_process_holding_the_control_port_stops_the_run(tmp_path, monkeypatch,
+                                                                     capsys):
+    """Another process (a soak) takes the board's single-client control port mid-run: the next
+    command is turned away (HELD), and the run stops there: that one IS another holder."""
+    with linux_lab(tmp_path, monkeypatch, card=False, single_client=True) as lab:
+        monkeypatch.delenv("HARNESS_MANAGER_NO_DAEMON", raising=False)
+        monkeypatch.setenv("HARNESS_MANAGER_CLI_ENGINE", "harness_manager.cli.engine:require_service")
+        with service() as svc:
+            svc.open()
+            acquire(capsys)
+            real = svc.hm.__class__.__call__
+
+            def soak_after_a1(hm, argv, timeout):
+                out = real(hm, argv, timeout)
+                if verb_of(argv) == "info":
+                    lab.front.hold()                     # the soak connects and stays
+                return out
+
+            svc.hm.__class__ = type("SoakHm", (InProcessHm,), {"__call__": soak_after_a1})
+            assert svc.start(plan="linux-nocard", writes="none", repeat=1,
+                             until="").status_code == 200
+            last = svc.wait_end()
+            s = summary(last["evidence"])
+            assert last["result"] == "STOPPED", (last["reason"], s.get("first_failure"))
+            assert s["stopped"]["check"] == "A2" and "HELD" in s["stopped"]["reason"]
+            assert lab.front.turned_away, "the soak turned Harness Manager away"
+            assert BID in svc.d.engine.open_boards()     # the service still holds the board
+
+
 # --- the lease is held for the run's length ---------------------------------------------------------
 
 
