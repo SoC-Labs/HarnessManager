@@ -5,6 +5,7 @@ Verbs::
     harness-manager board claim        TARGET [--key PUB] [--adopt] [--replace-host-key] [--yes]
     harness-manager board claim-status TARGET        ask the board now (through the hub too)
     harness-manager board ssh          TARGET [--print] [-c CMD]
+    harness-manager board identity     TARGET [--from-hub | --label/--ip/--mac | --clear]
 
 **claim** gives your SSH key root on a Linux harness that is still unclaimed (TOFU: the
 first key wins, and the board refuses every later one), then pins the board's host key in
@@ -72,10 +73,11 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
         TSV_COLUMNS.setdefault(layout, cols)
     fmt, board = _fmt(), _board()
     vp = subparsers.add_parser(
-        "board", help="the Linux harness's SSH: claim it with your key, check the claim, ssh in",
-        description="The Linux harness's SSH claim (TOFU) and its SSH reach. A claim gives "
-                    "your key root on the board, pins its host key, and from then on the "
-                    "board takes slot changes only over that SSH.",
+        "board", help="the board's SSH and identity: claim, claim-status, ssh, identity "
+                      "(label, IP and MAC against its hub entry, and the fix)",
+        description="The Linux harness's SSH claim (TOFU) and its SSH reach, and the board's "
+                    "identity. A claim gives your key root on the board, pins its host key, "
+                    "and from then on the board takes slot changes only over that SSH.",
         parents=[fmt])
     sub = vp.add_subparsers(dest="board_cmd", required=True, metavar="ACTION")
     cols = " ".join(CLAIM_TSV["board claim"])
@@ -104,6 +106,10 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     sp.add_argument("-c", "--command", default="", metavar="CMD",
                     help="run this on the board instead of a shell "
                          "(board ssh TARGET -c 'ls -l /persist')")
+    from . import cmd_identity  # BOARD-ID: label/IP/MAC and the fix
+
+    cmd_identity.add_parser(sub, [fmt, board])
+    TSV_COLUMNS.setdefault("board identity", cmd_identity.TSV)
     vp.set_defaults(fn=cmd_board)
     return vp
 
@@ -118,7 +124,10 @@ def _service(ctx: Ctx) -> Any:
 
 
 def cmd_board(ctx: Ctx) -> int:
-    return {"claim": _claim, "claim-status": _claim_status, "ssh": _ssh}[ctx.args.board_cmd](ctx)
+    from .cmd_identity import cmd_identity
+
+    return {"claim": _claim, "claim-status": _claim_status, "ssh": _ssh,
+            "identity": cmd_identity}[ctx.args.board_cmd](ctx)
 
 
 # --- the view ---------------------------------------------------------------------------------
