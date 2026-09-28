@@ -9,8 +9,9 @@ joins or releases a lease, never starts a share, and never shows a token.
   targets on offer). There is no group step: the token carries a role.
 - **SSH** (pyverify's ``SshHubRunner``, so the quoting is the one real use gets, plus
   ``ConnectTimeout=10``, which pyverify's options lack, and ``-J`` for a jump host): ONE
-  round trip, ``echo HM-TEST:login; id -Gn; echo HM-TEST:ids; <sg fpga -c true, as
-  HM-TEST:sg=ok|no>; echo HM-TEST:list; sg fpga -c 'fpgahub board list --json'``. The
+  round trip, ``echo HM-TEST:login; id -Gn; echo HM-TEST:ids; sg fpga -c true </dev/null
+  >/dev/null && echo HM-TEST:sg=ok || echo HM-TEST:sg=no; echo HM-TEST:list; sg fpga -c
+  'fpgahub board list --json'`` (shell-neutral: sh, bash or csh). The
   markers say how far it got: no login marker is reach or auth (ssh's own message says
   which), a login whose ``sg fpga -c true`` fails is the group, a group without a board list
   is fpgahub. On the hub itself (``host = "local"``) the same line runs locally.
@@ -62,8 +63,8 @@ SSH_CONNECT_TIMEOUT_S = 10
 SSH_TIMEOUT_S = 20.0
 REST_TIMEOUT_S = 5.0
 LOGIN_MARK, IDS_MARK = "HM-TEST:login", "HM-TEST:ids"
-#: FIX-PACK-2 item 3: ``sg GROUP -c true``'s verdict (``=ok``, or ``=no`` plus its words), then
-#: the board list after LIST_MARK.
+#: FIX-PACK-2 item 3: ``sg GROUP -c true``'s verdict (``=ok`` or ``=no``; sg's own words are on
+#: stderr), then the board list after LIST_MARK.
 SG_MARK, LIST_MARK = "HM-TEST:sg", "HM-TEST:list"
 
 Runner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
@@ -341,25 +342,26 @@ def local_argv(group: str | None, remote_argv: Sequence[str], *, markers: bool =
 def _markers(group: str | None) -> str:
     """The test's prefix: who logged in, ``id -Gn``, then (with a group) whether ``sg GROUP -c
     true`` works (the way Harness Manager uses the group), then the board list's marker. ``sg``
-    reads no terminal (``</dev/null``): a group it would ask a password for is a ``no``."""
+    reads no terminal (``</dev/null``): a group it would ask a password for is a ``no``. Only
+    ``;``, ``&&``, ``||``, ``<`` and ``>`` are used, so the hub's login shell may be sh, bash
+    or csh (ssh runs the line with it); sg's own words go to stderr (the failure reads them)."""
     head = f"echo {LOGIN_MARK}; id -Gn; echo {IDS_MARK}; "
     if group:
         q = shlex.quote(group)
-        head += (f"if HM_SG=$(sg {q} -c true </dev/null 2>&1); then echo {SG_MARK}=ok; "
-                 f"else echo \"{SG_MARK}=no $HM_SG\"; fi; ")
+        head += (f"sg {q} -c true </dev/null >/dev/null && echo {SG_MARK}=ok "
+                 f"|| echo {SG_MARK}=no; ")
     return head + f"echo {LIST_MARK}; "
 
 
-def _sg_verdict(text: str) -> tuple[str, str]:
-    """``("ok"|"no"|"", words)`` from the part of the output between IDS_MARK and LIST_MARK."""
+def _sg_verdict(text: str) -> str:
+    """``"ok"``, ``"no"`` or ``""`` (no verdict) from the output between IDS_MARK and LIST_MARK."""
     for line in text.splitlines():
         line = line.strip()
-        if line.startswith(f"{SG_MARK}=ok"):
-            return "ok", ""
-        if line.startswith(f"{SG_MARK}=no"):
-            words = line[len(SG_MARK) + 3:].strip()
-            return "no", " ".join(words.split())
-    return "", ""
+        if line == f"{SG_MARK}=ok":
+            return "ok"
+        if line == f"{SG_MARK}=no":
+            return "no"
+    return ""
 
 
 def _default_run(timeout_s: float) -> Runner:
@@ -422,7 +424,8 @@ def _test_ssh(hub: Hub, wanted: Sequence[str], problems: list[str], *, run: Runn
     ids = out.split(LOGIN_MARK, 1)[1].split(IDS_MARK, 1)[0].split()
     after = out.split(IDS_MARK, 1)[1] if IDS_MARK in out else ""
     sg_part, rest = after.split(LIST_MARK, 1) if LIST_MARK in after else ("", after)
-    sg, sg_words = _sg_verdict(sg_part) if group else ("", "")
+    sg = _sg_verdict(sg_part) if group else ""
+    sg_words = _last(err) if sg == "no" else ""
     note = ""
     if group and sg == "no":
         # the way HM uses the group does not work: that is the group step, whatever id says
