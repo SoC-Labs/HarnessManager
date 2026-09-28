@@ -60,6 +60,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.model import BoardIdentity, Candidate, Health, Link, LinkKind
 from harness_manager.core.pack import BoardPack, BoardSession, ProbeHints
 
+from . import ctlgate
 from .capabilities import HARNESS_STATES, SPECS
 from .constants import (
     CONSOLE_PORTS,
@@ -401,7 +402,11 @@ class Mps3Pack(BoardPack):
         if probe_reach is None:
             raise UsageError("this build cannot reach a board through an SSH tunnel")
         with probe_reach(f"{host}:{port}", via, timeout_s=timeout_s) as (lhost, lport):
-            return Mps3Shell(lhost, lport, timeout=timeout_s).identity()
+            # SERIAL-6900: the probe's tunnel reaches the same single-client port
+            shell = Mps3Shell(lhost, lport, timeout=timeout_s,
+                              gate_key=ctlgate.key_for(host, port))
+            shell.lagging_close = True
+            return shell.identity()
 
     def probe(self, hints: ProbeHints) -> list[Candidate]:
         found: list[Candidate] = []
@@ -446,13 +451,16 @@ class Mps3Pack(BoardPack):
         console_ports, rbb_port = self._console_ports, self._rbb_port
         push_port, tftp_port = self._push_port, self._tftp_port
         shell = None
+        # SERIAL-6900: every shell of this board shares the gate of its own control address
+        gate_key = ctlgate.key_of_address(eth.address, CONTROL_PORT) if eth is not None else ""
         if reach is not None:
-            shell = Mps3Shell(reach.host, reach.ports["control"])
+            shell = Mps3Shell(reach.host, reach.ports["control"], gate_key=gate_key)
+            shell.lagging_close = True             # through ssh -L (ctlgate)
             console_ports = {n: reach.ports[n] for n in self._console_ports}
             rbb_port, push_port, tftp_port = reach.ports["rbb"], reach.ports["push"], None
         elif eth is not None:
             host, port = parse_endpoint(eth.address, CONTROL_PORT)
-            shell = Mps3Shell(host, port)
+            shell = Mps3Shell(host, port, gate_key=gate_key)
         try:
             # mps3.console.pace_ms (reopen): the settings, else this pack's own pace
             from .settings import configured_s

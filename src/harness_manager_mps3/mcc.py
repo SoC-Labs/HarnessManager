@@ -1111,7 +1111,9 @@ def serial_url(address: str) -> str:
 def _shell_probe_for(shell: Any, timeout: float) -> ShellProbe:
     from .shell import Mps3Shell
 
-    pinger = Mps3Shell(shell.host, shell.port, timeout=timeout)
+    pinger = Mps3Shell(shell.host, shell.port, timeout=timeout,
+                       gate_key=str(getattr(shell, "gate_key", "") or ""))
+    pinger.lagging_close = bool(getattr(shell, "lagging_close", False))
 
     def probe() -> str | None:
         try:

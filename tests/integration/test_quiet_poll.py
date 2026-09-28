@@ -26,6 +26,7 @@ with warnings.catch_warnings():
 
 from harness_manager.daemon.app import create_app
 from harness_manager.settings import runtime
+from harness_manager_mps3 import ctlgate
 from harness_manager_mps3.shell import ShellProbes
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, PanelVirtualMps3
 from tests.fakes.l4_service import H
@@ -284,10 +285,15 @@ def test_a_lease_that_cannot_be_read_keeps_background_contact_quiet(q):
 
 
 @pytest.mark.parametrize("turn_away", ["rst", "eof"])
-def test_a_refused_connect_backs_off_and_the_interval_grows(tmp_path, turn_away):
+def test_a_refused_connect_backs_off_and_the_interval_grows(tmp_path, turn_away, monkeypatch):
+    # SERIAL-6900: a refusal within REAP_WINDOW_S of our own close is retried as our own
+    # ghost (the board reaps a closed client a pass later). Here the soak takes the port well
+    # after our last connection, so every refusal is someone else's (scaled down, as above).
+    monkeypatch.setattr(ctlgate, "REAP_WINDOW_S", 0.1)
     with rig(tmp_path, turn_away=turn_away) as r:
         r.open()
         r.view()
+        time.sleep(0.15)
         r.front.hold()                                 # the soak holds the control port
         t0 = time.monotonic()
         answers = []

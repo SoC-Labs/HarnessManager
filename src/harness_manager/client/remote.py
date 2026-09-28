@@ -721,6 +721,82 @@ class _Panel(_Proxy):
             else None
 
 
+class _Reads(_Proxy):
+    """A read the service answers in one GET (SERIAL-6900 4a): the ``*_reason`` check and
+    the status that follows it are ONE request (the answer is kept for ``VIEW_S``). Reads
+    only: the changes (``harness-manager slot|card push/commit/rollback/verify/clear``) run
+    on the in-process engine, so these proxies have no such methods."""
+
+    VIEW_S = 1.0
+    ROUTE = ""
+
+    def __init__(self, engine: RemoteEngine, board_id: str, *,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        super().__init__(engine, board_id)
+        self._clock = clock
+        self._view: tuple[float, dict[str, Any]] | None = None
+
+    def _read(self) -> dict[str, Any]:
+        now = self._clock()
+        if self._view is not None and now - self._view[0] < self.VIEW_S:
+            return self._view[1]
+        payload = self._engine._http.get(self._path(self.ROUTE))
+        self._view = (now, payload)
+        return payload
+
+    def _fresh(self) -> dict[str, Any]:
+        payload = self._read()
+        self._view = None                    # a status is read once; the next one asks again
+        return payload
+
+
+class _OsSlots(_Reads):
+    """``session.os_slots``'s reads over ``GET /boards/{bid}/slots`` (the service's own
+    adapter answers; nothing here touches the board)."""
+
+    ROUTE = "slots"
+    CAPABILITY = "OS slot update"
+
+    def busy_job(self) -> None:
+        """The reset guard's read (``services.reset_guard``): the service checks the card job
+        itself when it runs the reset (``_Proxy._forced`` carries ``--force``), so this
+        client adds no read of its own: None, as before it had this proxy."""
+        return None
+
+    def slots_reason(self) -> str:
+        payload = self._read()
+        return "" if payload.get("available") else str(payload.get("reason")
+                                                       or "the service reports no OS slots")
+
+    def status(self) -> Any:
+        from harness_manager.services.slots import slot_status_from_json
+
+        payload = self._fresh()
+        if not payload.get("available"):
+            raise UnavailableError(self.CAPABILITY, str(payload.get("reason") or
+                                                        "the service reports no OS slots"))
+        return slot_status_from_json(payload.get("slots") or {})
+
+
+class _Card(_Reads):
+    """``session.card``'s reads over ``GET /boards/{bid}/card`` (the default's RM name and
+    the Linux OS slots included: the service annotates its own read)."""
+
+    ROUTE = "card"
+    CAPABILITY = "user microSD"
+
+    def card_reason(self) -> str:
+        card = self._read().get("card") or {}
+        if not card.get("store"):
+            return str(card.get("reason") or "this harness has no microSD store")
+        return ""
+
+    def status(self) -> CardStatus:
+        from harness_manager.services.slots import card_status_from_json
+
+        return card_status_from_json(self._fresh().get("card") or {"store": False})
+
+
 class _LabClient(_Proxy):
     """The pyverify ``ShellClient`` verbs ``cli/cmd_lab.py`` uses, as daemon lab calls.
 
@@ -794,6 +870,10 @@ class RemoteSession(BoardSession):
         self.power = _Power(engine, bid) if has("power") else None
         self.panel = _Panel(engine, bid) if has("panel") else None
         self.shell = RemoteLabShell(engine, bid) if has("shell") else None
+        # SERIAL-6900 4a: the reads of the OS slots and the card (a service that predates
+        # them does not list them: no adapter, and the verb says so)
+        self.os_slots = _OsSlots(engine, bid) if has("os_slots") else None
+        self.card = _Card(engine, bid) if has("card") else None
 
     def identity(self) -> Any:
         return self._engine.info(self.candidate.board_id).identity

@@ -114,7 +114,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus, report_progress
 
-from . import slot_words
+from . import ctlgate, slot_words
 from .constants import IMPL_LINUX, PUSH_PORT
 
 log = logging.getLogger(__name__)
@@ -478,6 +478,18 @@ class Mps3OsSlots:
         ``HarnessError``s; a refusal is returned for the caller to judge."""
         if slot not in (None, "A", "B"):
             raise UsageError(f"slot must be A or B, not {slot!r}")
+        # SERIAL-6900: pyverify opens this connection itself; it still holds the board's
+        # control gate (direct or through the claim forward: the same single-client port).
+        shell = getattr(self._session, "shell", None)
+        forward = shell is not None and (host, port) != (shell.host, shell.port)
+        with ctlgate.held(shell, f"slot {act}", lagging=True if forward else None) as gate:
+            reply = self._one_request(host, port, act, slot)
+            if gate is not None:
+                gate.note_close()
+            return reply
+
+    @staticmethod
+    def _one_request(host: str, port: int, act: str, slot: str | None) -> dict[str, Any]:
         try:
             return pv_slot.slot_request(host, act, slot, port=port, timeout=5.0)
         except pv_slot.SlotError as exc:

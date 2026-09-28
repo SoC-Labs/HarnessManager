@@ -149,7 +149,7 @@ from harness_manager.services.deploy import (
     refusal,
 )
 
-from . import constants
+from . import constants, ctlgate
 from .constants import FABRIC_MISMATCH_ERRS, IMPL_LINUX, PUSH_PORT
 from .overlays import CatalogueEntry, OverlayCatalogue
 from .shell import Mps3Shell, ShellLive, _ShellBusy, _TapTransport
@@ -479,35 +479,44 @@ class Mps3Deploy:
 
             tap: _TapTransport | None = None
             swap: _ReportingClient | None = None
+            # SERIAL-6900: the parked swap connection holds the board's control gate for its
+            # whole run, so nothing else in this process opens 6900 under it.
+            forward = (host, ctl_port) != (self._shell.host, self._shell.port)
+            gate = stack.enter_context(ctlgate.held(self._shell, f"the swap to {overlay.name}",
+                                                    lagging=True if forward else None))
+            # SERIAL-6900: the swap's first exchange is pyverify's ``ping`` (swap.py). Turned
+            # away unanswered right after our own preflight closed (the board has not reaped
+            # it yet), it is our own ghost: open again, 20 x 50 ms. Once the ping answered,
+            # the connection is ours and nothing is ever re-sent.
+            delays = iter(gate.reap_delays() if gate is not None else ())
             try:
-                tap = _TapTransport(_TimedSocketTransport(host, ctl_port, self.swap_timeout_s))
-                client = ShellClient(host, port=ctl_port, timeout=self.swap_timeout_s,
-                                     transport=tap)
-                with client:
-                    swap = _ReportingClient(client, report, total)
-                    orchestrator = SwapOrchestrator(swap, pusher, commit_pusher=commit_pusher)
+                while True:
+                    tap, swap = None, None
+                    tap = _TapTransport(_TimedSocketTransport(host, ctl_port,
+                                                              self.swap_timeout_s))
+                    client = ShellClient(host, port=ctl_port, timeout=self.swap_timeout_s,
+                                         transport=tap)
                     try:
-                        # persist: pyverify's deploy also commits the pair to the user microSD
-                        # after a verified swap when asked (net-protocol v0.13, D1). Only
-                        # "Keep on the card" asks; by default the deploy is the swap only.
-                        res = orchestrator.deploy(ov, src=src, persist=keep_on_card)
-                    except PushError as exc:
-                        # A shell that REFUSED the swap replied at once and never armed the
-                        # push, so the push was reset: read that reply to say why. Only the
-                        # DISTINCT refusals (fabric mismatch, EBUSY) replace the push error; a
-                        # swap that failed because the push failed is reported as the push.
-                        early = _pending_reply(tap)
-                        if early is not None:
-                            swap.settled = True       # the shell answered: nothing is parked
-                        err = str((early or {}).get("err", ""))
-                        if early is not None and (_is_fabric_mismatch(err)
-                                                  or err.strip().upper() == "EBUSY"):
-                            raise _refusal_error(early, overlay) from exc
-                        said = f"; the shell then said: {err}" if err else ""
-                        raise ActionFailedError(
-                            f"bitstream push of {overlay.name} failed: {exc}{said}",
-                            hint="the swap was parked and will time out with the partition "
-                                 "decoupled; restore the baseline") from exc
+                        with client:
+                            swap = _ReportingClient(client, report, total)
+                            orchestrator = SwapOrchestrator(swap, pusher,
+                                                            commit_pusher=commit_pusher)
+                            res = self._swap(orchestrator, ov, src, keep_on_card, tap, swap,
+                                             overlay)
+                        break
+                    except (ConnectionError, ShellProtocolError) as exc:
+                        if not _ghost(exc, tap, swap):
+                            raise
+                        delay = next(delays, None)
+                        if delay is None:
+                            raise HeldError(
+                                f"the shell at {host}:{ctl_port} closed the swap's connection "
+                                f"unanswered: {overlay.name} was not deployed",
+                                hint="another client probably holds the control port (one "
+                                     "client at a time); nothing was sent to the partition"
+                            ) from exc
+                        gate.stats.reaped += 1
+                        time.sleep(delay)
             except _ShellBusy as exc:
                 raise HeldError(f"the shell is busy (EBUSY): {overlay.name} was not deployed",
                                 hint="another client holds the control port, or a swap is running",
@@ -525,6 +534,8 @@ class Mps3Deploy:
                 raise UnreachableError(f"cannot reach the shell at {host}:{ctl_port}: {exc}",
                                        hint="check the Ethernet link and the board's IP") from exc
             finally:
+                if gate is not None and tap is not None and tap.replies:
+                    gate.note_close()
                 if swap is not None and ((swap.parked and not swap.settled)
                                          or (swap.committing and not swap.committed_reply)):
                     # The push (or the wait for the reply) failed with the swap (or a commit)
@@ -547,6 +558,32 @@ class Mps3Deploy:
         card = card_outcome(getattr(res, "persist", None)) if keep_on_card else None
         return DeployResult(rm_id=rm, verified=True, seconds=time.monotonic() - started,
                             transport=assessment.transport, card=card)
+
+    @staticmethod
+    def _swap(orchestrator: Any, ov: Any, src: str, keep_on_card: bool, tap: _TapTransport,
+              swap: _ReportingClient, overlay: OverlayRef) -> Any:
+        try:
+            # persist: pyverify's deploy also commits the pair to the user microSD after a
+            # verified swap when asked (net-protocol v0.13, D1). Only "Keep on the card"
+            # asks; by default the deploy is the swap only.
+            return orchestrator.deploy(ov, src=src, persist=keep_on_card)
+        except PushError as exc:
+            # A shell that REFUSED the swap replied at once and never armed the push, so the
+            # push was reset: read that reply to say why. Only the DISTINCT refusals (fabric
+            # mismatch, EBUSY) replace the push error; a swap that failed because the push
+            # failed is reported as the push.
+            early = _pending_reply(tap)
+            if early is not None:
+                swap.settled = True       # the shell answered: nothing is parked
+            err = str((early or {}).get("err", ""))
+            if early is not None and (_is_fabric_mismatch(err)
+                                      or err.strip().upper() == "EBUSY"):
+                raise _refusal_error(early, overlay) from exc
+            said = f"; the shell then said: {err}" if err else ""
+            raise ActionFailedError(
+                f"bitstream push of {overlay.name} failed: {exc}{said}",
+                hint="the swap was parked and will time out with the partition "
+                     "decoupled; restore the baseline") from exc
 
     def _card_route(self, impl: str) -> str:
         """The claim's route for keeping a design on the card ("" or "board-ssh"); a board
@@ -784,6 +821,20 @@ def _check_usercode(entry: CatalogueEntry, running: str | int | None) -> Preflig
             f"overlay built against static implementation 0x{want:08x}, the board runs "
             f"0x{have:08x}; loading it would destroy the FPGA configuration (gen_manifest.py)")
     return PreflightItem(ITEM_USERCODE, Check.OK, f"0x{have:08x}")
+
+
+def _ghost(exc: BaseException, tap: _TapTransport | None, swap: Any) -> bool:
+    """The swap connection was turned away at its first exchange (SERIAL-6900): closed
+    unanswered or reset before any reply line, nothing parked. A refused connect (nothing
+    listens) is not: that is no ghost."""
+    if tap is None or tap.replies or isinstance(exc, ConnectionRefusedError):
+        return False
+    if swap is not None and (getattr(swap, "parked", False) or getattr(swap, "committing", False)):
+        return False
+    if isinstance(exc, ShellProtocolError):
+        text = str(exc)
+        return "EOF" in text or "closed" in text.lower()
+    return True
 
 
 class _TimedSocketTransport(SocketTransport):

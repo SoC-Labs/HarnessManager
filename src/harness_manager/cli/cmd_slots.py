@@ -36,8 +36,10 @@ status says "booted (not yet confirmed)" until the harness reports ``confirmed``
 verify`` reads a whole slot back and holds the board's card for minutes (other card jobs
 get EBUSY meanwhile): it runs only when asked, never from a status read.
 
-These verbs always run in this process (like ``update``): they need the board pack's own
-slot and card adapters.
+The changes always run in this process (like ``update``): they need the board pack's own
+slot and card adapters. The two status verbs go through the Harness Manager service when one
+runs (SERIAL-6900 4a: ``GET /boards/{bid}/slots`` and ``/card``), like every other read: the
+service holds the board, so an in-process read would be refused by its lock.
 
 Exit codes: 0 done; 2 usage; 3 the running overlay is not in the local store (card commit);
 4 not the lease holder, or the card is busy; 6 the board refused or a job failed; 7 the

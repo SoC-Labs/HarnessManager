@@ -260,6 +260,22 @@ owners.
 - API (additive): `PUT`/`DELETE /boards/{bid}/viewers/{vid}`, `GET
   /boards/{bid}/background`, the `X-HM-Background` request header, and a health note on
   `GET /boards/{bid}` naming the lease holder (docs/API.md "Background reads").
+- Harness Manager no longer turns itself away from a board (SERIAL-6900). On 2026-09-28 the
+  lab MPS3 refused Harness Manager's own connections: the page's refresh and a CLI command
+  opened the single-client control port at the same moment, and a connection opened right
+  after one closed met the old one before the board had let it go (the board reaps a
+  closed client only on its next pass). `program --keep-on-card` was refused at its reset
+  guard every time, and each refusal counted as "another client". Now each board's control
+  port is used by one request at a time in each Harness Manager process, in arrival order;
+  a request turned away unanswered right after one of ours closed is tried again for up to
+  1 s; waiting for our own request (a swap holds the port for its whole run) says so after
+  10 s and never counts as another client. Only a refusal that outlasts that is someone
+  else, and backs off as before.
+- The service answers two identical board reads in flight with one read of the board.
+- `slot status` and `card status` go through the running service like every other read
+  (they were refused by its lock). `--overlay-dir` while the service holds the board says
+  how to give it the directory instead, and `mps3.overlay_dirs` now applies to a board that
+  is already open, at its next listing.
 
 ### The app's pages
 - A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"

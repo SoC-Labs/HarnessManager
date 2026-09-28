@@ -322,13 +322,18 @@ def env_overlay_dirs() -> list[Path]:
 
 @dataclass
 class OverlayCatalogue:
-    """Loads lazily on first use. Call ``reload()`` after the directories change."""
+    """Loads lazily on first use, and again whenever its search directories change: the
+    setting ``mps3.overlay_dirs`` is read at each listing (``apply: live``, SERIAL-6900 4c:
+    a board already open in the service sees a directory set after it opened). Call
+    ``reload()`` after a directory's contents change."""
 
     dirs: tuple[Path, ...] = ()
     use_env: bool = True
     store: Any = None                           # a harness-manager ContentStore, optional
     _entries: list[CatalogueEntry] | None = field(default=None, init=False, repr=False)
     _rejects: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _loaded_from: tuple[tuple[str, Path], ...] | None = field(default=None, init=False,
+                                                              repr=False)
 
     def __post_init__(self) -> None:
         self.dirs = tuple(Path(d) for d in self.dirs)
@@ -353,8 +358,10 @@ class OverlayCatalogue:
     # -- queries --------------------------------------------------------------------
 
     def entries(self) -> list[CatalogueEntry]:
-        if self._entries is None:
-            self._entries = self._load()
+        search = tuple(self.search_dirs())
+        if self._entries is None or search != self._loaded_from:
+            self._entries = self._load(search)
+            self._loaded_from = search
         return list(self._entries)
 
     def refs(self) -> list[OverlayRef]:
@@ -402,7 +409,7 @@ class OverlayCatalogue:
 
     # -- loading --------------------------------------------------------------------
 
-    def _load(self) -> list[CatalogueEntry]:
+    def _load(self, search: Iterable[tuple[str, Path]] | None = None) -> list[CatalogueEntry]:
         self._rejects = {}
         seen: set[tuple[str, int, int]] = set()
         entries: list[CatalogueEntry] = []
@@ -417,7 +424,7 @@ class OverlayCatalogue:
             seen.add(key)
             entries.append(entry)
 
-        for origin, root in self.search_dirs():
+        for origin, root in (self.search_dirs() if search is None else search):
             for d in _overlay_dirs(root):
                 manifest_path = d / "manifest.json"
                 try:

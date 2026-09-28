@@ -39,7 +39,14 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.events import Event, EventBus
-from harness_manager.core.pack import TAKES_DETAIL, CardStatus, Progress, SlotJob, SlotStatus
+from harness_manager.core.pack import (
+    TAKES_DETAIL,
+    CardStatus,
+    Progress,
+    SlotInfo,
+    SlotJob,
+    SlotStatus,
+)
 
 OS_CAPABILITY = "OS slot update"
 CARD_CAPABILITY = "user microSD"
@@ -358,6 +365,64 @@ def slot_status_json(st: SlotStatus) -> dict[str, Any]:
                 "eta_s": None if st.job.eta_s is None else round(st.job.eta_s),
                 "text": job_text(st.job)},
     }
+
+
+def _int(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _text(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
+def slot_status_from_json(doc: dict[str, Any]) -> SlotStatus:
+    """``slot_status_json`` (plus ``slot_health.extend_json``'s keys) back to a ``SlotStatus``:
+    what the CLI reads from the service's ``GET /slots`` and ``GET /card`` (SERIAL-6900 4a).
+    ``raw`` keeps the board's own words the view reads (``confirmed``, ``claimed``)."""
+    slots: dict[str, SlotInfo] = {}
+    for name, one in (doc.get("slots") or {}).items():
+        if not isinstance(one, dict):
+            continue
+        slots[str(name)] = SlotInfo(
+            name=str(name), state=_text(one.get("state")), hdr_crc=_text(one.get("hdr_crc")),
+            length=_int(one.get("len")), sid=_text(one.get("sid")),
+            verified=_text(one.get("verified")) or "no", err=_text(one.get("err")),
+            image_sha256=_text(one.get("image_sha256")), version=_text(one.get("version")))
+    job = doc.get("job") if isinstance(doc.get("job"), dict) else {}
+    rate = job.get("rate_bps")
+    eta = job.get("eta_s")
+    raw = {k: doc[k] for k in ("confirmed", "claimed") if isinstance(doc.get(k), bool)}
+    return SlotStatus(
+        running=_text(doc.get("running")) or "unknown", slots=slots,
+        card=bool(doc.get("card", False)), default=_text(doc.get("default")),
+        target=_text(doc.get("target")), staged=_text(doc.get("staged")),
+        fabric_sid=_text(doc.get("fabric_sid")), seq=_int(doc.get("seq")),
+        job=SlotJob(act=_text(job.get("act")) or "none", slot=_text(job.get("slot")),
+                    state=_text(job.get("state")) or "idle", got=_int(job.get("got")),
+                    length=_int(job.get("len")), err=_text(job.get("err")),
+                    rate_bps=float(rate) if isinstance(rate, (int, float))
+                    and not isinstance(rate, bool) else 0.0,
+                    eta_s=float(eta) if isinstance(eta, (int, float))
+                    and not isinstance(eta, bool) else None),
+        raw=raw)
+
+
+def card_status_from_json(doc: dict[str, Any]) -> CardStatus:
+    """``card_status_json`` back to a ``CardStatus`` (the service's ``GET /card``: SERIAL-6900
+    4a), with its OS slots."""
+    default = doc.get("default")
+    mb = doc.get("card_mb")
+    os_doc = doc.get("os_slots")
+    return CardStatus(
+        store=bool(doc.get("store", False)), present=bool(doc.get("present", False)),
+        state=_text(doc.get("state")), text=_text(doc.get("text")),
+        reason=_text(doc.get("reason")),
+        card_mb=mb if isinstance(mb, int) and not isinstance(mb, bool) else None,
+        default={str(k): _text(v) for k, v in default.items()} if isinstance(default, dict)
+        else None,
+        boot=_text(doc.get("boot")), committable=bool(doc.get("committable", False)),
+        os_slots=slot_status_from_json(os_doc) if isinstance(os_doc, dict) else None,
+        notes=tuple(str(n) for n in doc.get("notes") or ()))
 
 
 def card_status_json(st: CardStatus) -> dict[str, Any]:

@@ -113,12 +113,21 @@ def own_job(exc: BaseException | None) -> str:
     return str(data.get("job") or "") if isinstance(data, dict) else ""
 
 
+def own_request(exc: BaseException | None) -> bool:
+    """``exc`` is a wait for THIS Harness Manager's own request on the board's single-client
+    port that ran out (the pack's per-board control gate, lane SERIAL-6900: an exception with
+    a true ``own_request``). Nobody else is on the port: never contention."""
+    return bool(getattr(exc, "own_request", False))
+
+
 def is_contention(exc: BaseException | None, channel: str = "control") -> bool:
     """A connect refused, reset or timed out, or a port another client holds: the board is
     being used by someone else (or is not answering), so background contact backs off. On the
     MCC console only another reader (``HeldError``) counts. Our own job holding the board
-    (``own_job``) never counts."""
-    if own_job(exc):
+    (``own_job``) never counts, and neither does a wait on our own control gate
+    (``own_request``, SERIAL-6900): only a refusal met while this process held the gate, so
+    really from someone else, does."""
+    if own_job(exc) or own_request(exc):
         return False
     if channel == "mcc":
         return isinstance(exc, HeldError)

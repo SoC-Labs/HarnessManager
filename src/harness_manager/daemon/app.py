@@ -93,7 +93,7 @@ log = logging.getLogger(__name__)
 
 API = "/api/v1"
 ADAPTERS = ("deploy", "consoles", "debug", "resets", "clocks", "telemetry", "controller",
-            "storage", "power", "panel")
+            "storage", "power", "panel", "os_slots", "card")
 #: WebSocket frames: consoles send board bytes in frames of at most this size.
 MAX_WS_FRAME = 64 * 1024
 
@@ -759,6 +759,18 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                     response = _JSON(body)
                     response.headers["Cache-Control"] = "no-store"
         return response
+
+    # SERIAL-6900: an identical board read already in flight answers this one too (one read
+    # of the single-client port, two replies). Added after ``_guard``, so it runs outside it
+    # and shares the finished answer.
+    from .coalesce import GetCoalescer
+
+    coalescer = GetCoalescer(API)
+    app.state.coalescer = coalescer
+
+    @app.middleware("http")
+    async def _coalesce(request: Request, call_next):
+        return await coalescer(request, call_next)
 
     # -- auth -----------------------------------------------------------------------------
 
