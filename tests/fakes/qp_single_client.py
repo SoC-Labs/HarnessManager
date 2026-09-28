@@ -18,6 +18,14 @@ front can:
 - ``strict(reason)``: from now on ANY connection is a violation (the counting fake of the
   brief: "fails if any background connect happens while the lease is someone else's");
   ``lenient()`` ends it. ``violations`` lists them; ``assert_clean()`` fails the test.
+
+SERIAL-6900 additions (both off by default, so QUIET-POLL's tests see what they always saw):
+
+- ``reply_delay_s``: each request takes that long to answer, so a connection stays open long
+  enough for a concurrent one to meet it (harnessd's card reads take tens of ms);
+- ``close_lag_s``: the lagging close through an SSH forward. The server learns that a client
+  closed only that long after it did (ssh forwarded the next channel's open before the old
+  channel's EOF), so a connect that follows a close more closely than that is turned away.
 """
 
 from __future__ import annotations
@@ -57,9 +65,12 @@ class Conn:
 
 
 class SingleClientFront:
-    def __init__(self, shell: Any, *, turn_away: str = "rst") -> None:
+    def __init__(self, shell: Any, *, turn_away: str = "rst", reply_delay_s: float = 0.0,
+                 close_lag_s: float = 0.0) -> None:
         self.shell = shell
         self.turn_away = turn_away
+        self.reply_delay_s = reply_delay_s
+        self.close_lag_s = close_lag_s
         self._srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._srv.bind(("127.0.0.1", 0))
@@ -132,7 +143,8 @@ class SingleClientFront:
             with self._mu:
                 if self._strict and who == "hm":
                     self.violations.append(f"a connect at {now:.3f} while {self._strict}")
-                if self._active is not None and _peer_gone(self._active_sock):
+                if self._active is not None and not self.close_lag_s \
+                        and _peer_gone(self._active_sock):
                     # The client closed before this connect arrived (its FIN came first); a
                     # real server has seen it by now, whatever this fake's threads did.
                     self._active.closed = self._active.closed or now
@@ -179,6 +191,8 @@ class SingleClientFront:
                     except ValueError:
                         req = {}
                     op = str(req.get("op", "")) if isinstance(req, dict) else ""
+                    if self.reply_delay_s:
+                        time.sleep(self.reply_delay_s)
                     reply = self.shell.handle_control(
                         {k: v for k, v in req.items() if k != "soak"}, peer="127.0.0.1") \
                         if isinstance(req, dict) else {"ok": False, "err": "malformed"}
@@ -187,9 +201,15 @@ class SingleClientFront:
         finally:
             with self._mu:
                 rec.closed = rec.closed or time.monotonic()
-                if self._active is rec:
+                lag = self.close_lag_s
+                if self._active is rec and not lag:
                     self._active, self._active_sock = None, None
             conn.close()
+            if lag:                       # the server hears of the close only now (ssh -L)
+                time.sleep(lag)
+                with self._mu:
+                    if self._active is rec:
+                        self._active, self._active_sock = None, None
 
     def close(self) -> None:
         self._stop.set()

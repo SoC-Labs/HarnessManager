@@ -226,7 +226,9 @@ class Mps3Card:
         from .shell import Mps3Shell
 
         with claim_forward(self._session, "card", "the card clear") as (host, ctl, _push):
-            return Mps3Shell(host, ctl).call(lambda c: c.usd_clear())
+            # SERIAL-6900: the board's own 127.0.0.1:6900 is the same single-client port
+            return _forwarded(Mps3Shell(host, ctl, gate_key=_gate_key(self._shell()))).call(
+                lambda c: c.usd_clear())
 
     # -- commit ---------------------------------------------------------------------------------
 
@@ -269,7 +271,9 @@ class Mps3Card:
                                                   port=push)
             self.last_pusher = pusher
             report("commit", 0, total)
-            parked = Mps3Shell(host, ctl, timeout=wait_s)
+            parked = Mps3Shell(host, ctl, timeout=wait_s, gate_key=_gate_key(shell))
+            parked.lagging_close = host != shell.host or ctl != shell.port or \
+                bool(getattr(shell, "lagging_close", False))
             return parked.call(lambda c: SwapOrchestrator(c, pusher, commit_pusher=pusher).commit(
                 entry.overlay, rm_id=rmid.parse_rm_id(live.rm_id),
                 static_id=rmid.parse_rm_id(live.shell_id), features=tuple(live.features)))
@@ -303,6 +307,18 @@ class Mps3Card:
             "overlay store, so its pair cannot be re-pushed to the card",
             hint="import or deploy it from Harness Manager first (the card commit re-pushes "
                  "the running pair; the shell keeps no copy)")
+
+
+def _gate_key(shell: Any) -> str:
+    """The board's control gate (SERIAL-6900) for a shell opened on a claim forward."""
+    key = getattr(shell, "gate_key", "")
+    return key if isinstance(key, str) else ""
+
+
+def _forwarded(shell: Any) -> Any:
+    """A shell on the claim's board-SSH forward: its close lags (``ctlgate``)."""
+    shell.lagging_close = True
+    return shell
 
 
 def commit_budget(nbytes: int) -> Any:

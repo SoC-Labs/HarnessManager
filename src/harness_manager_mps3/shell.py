@@ -67,6 +67,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.model import BoardIdentity, Check, Health
 
+from . import ctlgate
 from . import identify as _identify
 from .capabilities import HARNESS_STATES
 from .constants import (
@@ -221,6 +222,14 @@ def _is_ebusy(exc: HeldError) -> bool:
     return bool(getattr(exc, "ebusy", False))
 
 
+def _turned_away_at_once(exc: HeldError, taps: Sequence[Any]) -> bool:
+    """The board accepted and closed (or reset) the connection before any reply line: the
+    single-client refusal, not EBUSY, a settling swap, or our own gate's wait."""
+    if _is_ebusy(exc) or isinstance(exc, SwapSettlingError) or ctlgate.is_own_request(exc):
+        return False
+    return bool(taps) and not any(getattr(t, "replies", 0) for t in taps)
+
+
 def _says_swap_settling(reply: dict[str, Any]) -> bool:
     """An EBUSY line that names a swap in progress (an additive ``swap`` key, the name
     ``stats`` uses, with any state but ``idle``). No harness sends it yet."""
@@ -251,12 +260,15 @@ class _TapTransport:
     def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.last: dict[str, Any] = {}
+        #: Reply lines read on this connection (SERIAL-6900: 0 = turned away before any reply).
+        self.replies = 0
 
     def send_line(self, payload: bytes) -> None:
         self._inner.send_line(payload)
 
     def recv_line(self) -> bytes:
         line = self._inner.recv_line()
+        self.replies += 1
         self.last = _json_obj(line)
         if self.last.get("ok") is False and str(self.last.get("err", "")).strip().upper() == "EBUSY":
             raise _ShellBusy(self.last)
@@ -428,11 +440,23 @@ Preamble = Callable[[ShellClient, _TapTransport], None]
 
 class Mps3Shell:
     def __init__(self, host: str, port: int, *, timeout: float = 3.0,
-                 probes: ShellProbes | None = None) -> None:
+                 probes: ShellProbes | None = None, gate_key: str = "") -> None:
         self.host = host
         self.port = port
         self.timeout = timeout
         self.probes = probes or DEFAULT_PROBES
+        #: SERIAL-6900: the board's control-port gate (``ctlgate``): one connection at a time
+        #: per board in this process. The key is the BOARD's own control address, so a shell
+        #: on a tunnel's local port (or a claim forward) shares its board's gate; by default
+        #: this shell's own address.
+        self.gate_key = gate_key or ctlgate.key_for(host, port)
+        #: How long a call waits for this process's own request in flight on the board
+        #: (None: ``ctlgate.GATE_WAIT_S``).
+        self.gate_wait_s: float | None = None
+        #: This shell reaches the board through an SSH forward (the hub tunnel, a probe's
+        #: tunnel, a claim forward): our close reaches the board later, so back-to-back
+        #: calls are paced longer (``ctlgate.PACE_FORWARD_S``). The pack sets it.
+        self.lagging_close = False
         #: CCR PANEL-3: when set, ``call_raw`` runs ``preamble(client, tap)`` on every
         #: connection it opens, before ``fn``, inside the same error mapping. The panel
         #: adapter sets it to send a pending ``hello`` first (``Mps3Panel.ride``); it sends
@@ -471,14 +495,46 @@ class Mps3Shell:
         installed pyverify does not model from it, never send a hand-rolled request.
         ``self.preamble``, when set, runs first on the same connection (CCR PANEL-3).
         ``self.observer``, when set, hears the outcome (QUIET-POLL).
+
+        SERIAL-6900: the whole open/ask/close holds the board's control gate (``gate()``),
+        so this process never races itself for the single-client port; a wait for our own
+        request that runs out is ``ctlgate.OwnRequestBusyError`` (never "another client").
         """
         try:
-            result = self._settled_call(fn)
+            result = self._gated_call(fn)
         except BaseException as exc:
             self._observe(exc)
             raise
         self._observe(None)
         return result
+
+    def gate(self) -> ctlgate.ControlGate:
+        """This board's control-port gate (SERIAL-6900)."""
+        return ctlgate.gate_for(self.gate_key)
+
+    def _gated_call(self, fn: Callable[[ShellClient, _TapTransport], T]) -> T:
+        gate = self.gate()
+        with gate.slot(f"{self.host}:{self.port}", wait_s=self.gate_wait_s):
+            gate.pace(self.lagging_close)
+            delays = iter(gate.reap_delays())
+            while True:
+                taps: list[_TapTransport] = []
+                try:
+                    return self._settled_call(fn, taps)
+                except HeldError as exc:
+                    # Turned away before any reply, right after our own previous connection
+                    # closed: the board has not reaped that one yet (ctlgate, "our own
+                    # ghost"). Try again (20 x 50 ms); after that it is someone else.
+                    if not _turned_away_at_once(exc, taps):
+                        raise
+                    delay = next(delays, None)
+                    if delay is None:
+                        raise
+                    gate.stats.reaped += 1
+                    time.sleep(delay)
+                finally:
+                    if any(t.replies for t in taps):
+                        gate.note_close()
 
     def _observe(self, exc: BaseException | None) -> None:
         observer = self.observer
@@ -489,9 +545,10 @@ class Mps3Shell:
         except Exception:  # noqa: BLE001 - the observer's bug is never the caller's error
             logging.getLogger(__name__).exception("the control-port observer failed")
 
-    def _settled_call(self, fn: Callable[[ShellClient, _TapTransport], T]) -> T:
+    def _settled_call(self, fn: Callable[[ShellClient, _TapTransport], T],
+                      taps: list[_TapTransport] | None = None) -> T:
         try:
-            result = self._call_raw(fn)
+            result = self._call_raw(fn, taps)
         except SwapSettlingError:
             raise
         except (ShellRefusedError, HeldError) as exc:
@@ -505,10 +562,13 @@ class Mps3Shell:
         clear_failed_push(self.host, self.port)
         return result
 
-    def _call_raw(self, fn: Callable[[ShellClient, _TapTransport], T]) -> T:
+    def _call_raw(self, fn: Callable[[ShellClient, _TapTransport], T],
+                  taps: list[_TapTransport] | None = None) -> T:
         where = f"{self.host}:{self.port}"
         preamble = self.preamble
         tap = self._connect()
+        if taps is not None:
+            taps.append(tap)
         try:
             with ShellClient(self.host, self.port, timeout=self.timeout, transport=tap) as client:
                 if preamble is not None:
@@ -528,7 +588,7 @@ class Mps3Shell:
             raise ShellWedgedError(
                 f"shell at {where} accepted the connection but did not reply within "
                 f"{self.timeout}s", hint=HARNESS_STATES["harness.wedged"]) from exc
-        except (ConnectionResetError, ConnectionAbortedError) as exc:
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as exc:
             # lwIP (bare-metal) or the kernel (Linux) may RST the extra client instead
             # of closing it; a board restarting mid-request looks the same. Windows
             # reports the same accept-then-close as WSAECONNABORTED (WinError 10053).
@@ -668,6 +728,10 @@ class Mps3Shell:
                 notes.append(f"at most {exc.remaining_s:.0f} s more (the swap's idle timeout)")
             return Health(reachable=True, control_channel="busy", notes=tuple(notes))
         except HeldError as exc:
+            if ctlgate.is_own_request(exc):
+                # SERIAL-6900: our own request holds the port (a swap, a commit): busy, but
+                # nobody else is on it.
+                return Health(reachable=True, control_channel="busy", notes=(exc.message,))
             notes = [HARNESS_STATES["harness.busy"]]
             if exc.holder:
                 notes.append(f"held by {exc.holder}")
