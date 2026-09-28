@@ -254,7 +254,7 @@ docs/design/CLCD_ALIGNMENT.md is the design (§2, §5). The Linux harness's verb
 |---|---|
 | `GET /boards/{bid}/panel` | `{panel: PanelState or null, reason, identify: {available, reason, until}, support: {front_panel, presence, locate, source}, presence: {active, reason, sid, last_hello_at, sent, ridden, skipped, last_error, interval_s}}`. `?state=0`: the same without reading the board's panel (`panel` null; `reason` only when it cannot be read at all) |
 | `GET /boards/{bid}/panel/frame` | `{rows: [15 strings of 40], roles, source, observed_at, note}` |
-| `POST /boards/{bid}/identify` `{seconds?}` | `{until, seconds}`: the board blinks its panel until `until` (epoch seconds). `seconds` is 0-30 (default 10); 0 stops a blink. |
+| `POST /boards/{bid}/identify` `{seconds?}` | `{until, until_ms, seconds, next_at}`: the board blinks its panel until `until` (epoch seconds); `until_ms` is the board's own "how long" (0 after a stop), for a countdown. `seconds` is 0-30 (default 5); 0 stops a blink. `next_at`: when the next start may go. Additive (LOCATE): `lease_holder` and `note` when the hub lease is someone else's; `opened_for_identify: true` when the board was not open here. |
 
 - **`PanelState`:** `{page, owner, pending, banner, card, touch: {present, cal, ok, bus_lost, recoveries, reason}, sessions: [{sid, who, role, age_s, mine}], count, seq, events: [{seq, kind, on, ms_ago, at}], source, observed_at, note}`.
   - `source` is `panel` (read from the panel: the Linux harness) or `rebuilt` (bare metal: the owner from `display`, everything else unknown; `note` says it was rebuilt from what Harness Manager read).
@@ -263,6 +263,12 @@ docs/design/CLCD_ALIGNMENT.md is the design (§2, §5). The Linux harness's verb
 - **`panel` is null** with `reason` when the board has no front panel Harness Manager can reach (a USB-only board, or a pack with no panel adapter).
 - **Identify on bare metal:** `identify.available` is false with the reason ("needs harness feature 'locate' (Linux harness)"); `POST /identify` is 422 UNAVAILABLE with the same reason, and nothing is sent to the board. A bad `seconds` is 400 USAGE, before the board.
 - **Gates:** all three go through the board gate: 409 HELD naming the job while one runs. `POST /identify` is short, not a job.
+- **Identify (LOCATE, docs/design/BOARD_LOCATE.md):**
+  - **Explicit only.** No beat, poll or page load sends it, and the background gate never holds it back.
+  - **Rate limit.** At most one start per board every 10 s, whoever asks through this daemon: 409 ALREADY, `data: {retry_after_s, next_at}`, hint "try again in N s". The board's own limit answers the same way. A stop (`seconds: 0`) is never limited. A start that failed does not count.
+  - **What the board does** (the Linux harness's `locate`, images rc2_v7/v7n): the panel's backlight blinks at 2 Hz, with "IDENTIFY: \<user\>@\<host\> via Harness Manager" on the panel while the harness owns it. A tap on the panel stops it; the daemon cannot see that in this image.
+  - **No hub lease needed.** The board has no claim lock. When the lease is someone else's, the answer names the holder.
+  - **A board that is not open here** (one the daemon knows from a probe) is opened for the one request and closed again: `opened_for_identify: true`. It is never tracked for presence. 409 HELD when another process holds it; 404 ABSENT for a board the daemon never saw.
 - **Rate:** the board rate-limits reads, so `GET /panel` reuses an answer up to 1 s old and `GET /panel/frame` one up to 3 s old.
 - **The mirror:** `rows` are 15 strings of 40 characters; `roles` is 600 per-cell role codes (`t` text, `i` inverted in a rebuilt frame; the Linux renderer's codes otherwise), or `""` when not known.
 

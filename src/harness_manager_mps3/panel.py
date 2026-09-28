@@ -10,6 +10,10 @@ the model. Two harness generations, told apart by feature bit (``version.feature
 | ``clcd_kvm`` only (bare metal, v0.11) | ``display`` query: the owner only | REBUILT from what HM read | UNAVAILABLE, with the reason | UNAVAILABLE, with the reason |
 | neither | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
 
+``locate()`` gates on its own bit: the Linux harness images rc2_v7/v7n report ``locate``
+without ``presence``/``panel`` (R1/R2 are not in them), so Identify works there while the
+state and the mirror follow the ``clcd_kvm`` row (lane LOCATE).
+
 Bare metal keeps its panel exactly as it is (decision P3): nothing here sends it a new verb.
 A board without ``locate`` never gets a ``display`` toggle as a stand-in: that would disturb
 a DUT that owns the panel.
@@ -49,13 +53,13 @@ from harness_manager.core.model import BoardIdentity
 from harness_manager.core.panel import (
     COLS,
     LINE_MAX,
+    LOCATE_WHO_MAX,
     REBUILT_NOTE,
     ROLE_INVERTED,
     ROLE_TEXT,
     ROWS,
     SOURCE_PANEL,
     SOURCE_REBUILT,
-    WHO_MAX,
     Hello,
     OnReply,
     PanelEvent,
@@ -413,12 +417,16 @@ class Mps3Panel:
     # -- Identify ---------------------------------------------------------------------------
 
     def locate(self, seconds: int, who: str) -> float:
+        """The Linux harness's ``locate`` (docs/design/BOARD_LOCATE.md §2, confirmed by the
+        Linux lead for rc2_v7): ``{op, s, who}`` -> ``{ok, until_ms}``; ``s: 0`` stops. The
+        board blinks the panel's backlight at 2 Hz, with an "IDENTIFY: <who>" banner while
+        the harness owns the panel; a tap on the glass stops it early."""
         if "locate" not in self._features():
             raise UnavailableError(C.LOCATE, NEEDS_LOCATE)
         s = max(0, min(LOCATE_MAX_S, int(seconds)))
-        msg = {"op": "locate", "s": s}
+        msg: dict[str, Any] = {"op": "locate", "s": s}
         if s and who:
-            msg["who"] = ascii_field(who, WHO_MAX)
+            msg["who"] = ascii_field(who, LOCATE_WHO_MAX)
         reply = self._shell.call_raw(lambda c, _tap: _request(c, msg))
         refusal = _declined(reply, C.LOCATE, "Identify")
         if refusal is not None:

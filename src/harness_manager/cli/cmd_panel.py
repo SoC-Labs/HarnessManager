@@ -4,11 +4,15 @@ Verbs::
 
     harness-manager panel show   TARGET            what the panel shows, who is connected, Identify
     harness-manager panel mirror TARGET            the panel's 15 x 40 text grid
-    harness-manager identify     TARGET [--seconds N]   blink the panel so you can find the board
+    harness-manager identify     TARGET [--seconds N]   blink the board so you can find it
 
 ``identify`` is a new top-level verb: no verb had the name (``probe`` finds boards over UDP
 identify, and the capability "Identify the harness" is ``identify``; this one's capability is
-``locate``, docs/design/CLCD_ALIGNMENT.md §5). ``--seconds 0`` stops a blink.
+``locate``, docs/design/CLCD_ALIGNMENT.md §5). ``--seconds 0`` stops a blink. The board blinks
+its panel's backlight at 2 Hz, with "IDENTIFY: <user>@<host> via Harness Manager" on the panel
+while the harness owns it; a tap on the panel stops it (docs/design/BOARD_LOCATE.md). 5 s by
+default. Through harness-manager-daemon a start goes at most once every 10 s per board (exit
+8, ALREADY, says when the next may go); no hub lease is needed.
 
 On a bare-metal harness (v0.11) ``panel show`` gives the KVM owner only and says the state
 is rebuilt; ``panel mirror`` is rebuilt from what Harness Manager read (``source: rebuilt``);
@@ -21,7 +25,8 @@ too; in-process it is the board pack's adapter and the board is read once (a CLI
 a session worth announcing: it sends no ``hello``).
 
 Exit codes: 0 done; 4 the board is busy (a job, or another client on its control port);
-7 the board did not answer; 12 this board cannot do it (the reason says why).
+7 the board did not answer; 8 identified less than 10 s ago (try again when it says);
+12 this board cannot do it (the reason says why).
 """
 
 from __future__ import annotations
@@ -37,7 +42,7 @@ from .context import SERIAL_HELP, VIA_HELP, VIA_METAVAR, Ctx
 from .output import Result, jsonable
 
 TARGET_HELP = "shell address host[:port], or - for a USB-only board (with --serial/--volume)"
-DEFAULT_SECONDS = 10
+DEFAULT_SECONDS = 5
 
 
 def _parents() -> list[argparse.ArgumentParser]:
@@ -78,8 +83,11 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
     vp.set_defaults(fn=cmd_panel)
 
     ip = subparsers.add_parser("identify", help="blink the board's panel so you can find it",
-                               description="Identify: blink the board's panel backlight so you "
-                                           "can tell which board it is (Linux harness).",
+                               description="Identify: blink the board's panel backlight, with "
+                                           "an IDENTIFY banner naming you on the panel, so you "
+                                           "can tell which board it is (Linux harness). A tap "
+                                           "on the panel stops it. No hub lease is needed; at "
+                                           "most once every 10 s per board.",
                                parents=[fmt, usb], epilog=epilog("identify"))
     ip.add_argument("target", metavar="TARGET", help=TARGET_HELP)
     ip.add_argument("--seconds", type=int, default=DEFAULT_SECONDS, metavar="N",

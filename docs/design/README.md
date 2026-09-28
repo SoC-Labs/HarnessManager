@@ -10,6 +10,7 @@ and `make check` does not run it (only `tests/unit/test_clcd_mock.py`, which is 
 | DUT build kit storage | KIT-STORE | Per-static signed kit on the release channel, cached by HM; not on SD. | [DUT_BUILD_KIT_STORAGE.md](DUT_BUILD_KIT_STORAGE.md) |
 | DUT build guide | KIT-GUIDE | A "Build" section driving a generated `build_rm.tcl`; receipt binds partial to static. | [DUT_BUILD_GUIDE.md](DUT_BUILD_GUIDE.md) ([template](../../src/harness_manager/services/kit/templates/build_rm.tcl.template), built by KIT-CORE) |
 | Front panel (CLCD) | CLCD-HM | Panel as a read-mostly second face of HM, Linux harness only; shared tokens. | [CLCD_ALIGNMENT.md](CLCD_ALIGNMENT.md) ([mock-ups](clcd/)) |
+| Board locate (Identify) | LOCATE | The Linux lead's `locate` (rc2_v7) blinks the CLCD backlight with an "IDENTIFY: <who>" banner; HM's sidebar/Board-tile button is built against it (5 s, 1 per 10 s, no lease). User LEDs are a later request. | [BOARD_LOCATE.md](BOARD_LOCATE.md) |
 | Live LCD mirror | LCD-MIRROR | Pixel-exact mirror from an 8080 bus snooper behind the KVM (mint 4); interim harness-only shadow; one wire, HM built now. | [LCD_MIRROR.md](LCD_MIRROR.md) ([evidence](lcd_mirror/)) |
 | Harness versions from the web | HARNESS-DIST | Publish with OTA's release tool; add a Harness versions catalogue; A/B config SD. | [HARNESS_DISTRIBUTION.md](HARNESS_DISTRIBUTION.md) |
 | HM self-update | OTA | Finish T7: lead-run `make release`, daemon restart, rollback to the installed version. | [HM_SELF_UPDATE.md](HM_SELF_UPDATE.md) |

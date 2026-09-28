@@ -54,9 +54,9 @@ def test_review_panel_linux_overview_and_details(page_factory, daemon, engine, r
         "status page · harness owns it · touch unknown", timeout=T)
     panel.set_touch(BOARD, True)
     expect(page.locator('[data-testid="tile-panel-line"]')).to_contain_text("touch ok", timeout=T)
-    page.locator('[data-testid="tile-identify"] [data-action="identify"]').click()
-    expect(page.locator('[data-testid="tile-identify"] [data-testid="identify-until"]')).to_contain_text(
-        re.compile(r"blinking until"), timeout=T)
+    page.locator('[data-testid="tile-locate"]').click()                   # LOCATE: 5 s, one click
+    expect(page.locator('[data-testid="tile-locate-line"]')).to_contain_text(
+        re.compile(r"blinking, \d s left"), timeout=T)
     page.wait_for_timeout(300)
     page.screenshot(path=str(review / f"panel-overview-linux-{scheme}.png"))
     details(page)
@@ -85,7 +85,7 @@ def test_review_panel_dut_held_and_touch_lost(page_factory, daemon, engine, revi
 def test_review_panel_bare_metal_rebuilt(page_factory, review, scheme):
     page = page_factory(scheme, **APP)
     open_board(page)
-    expect(page.locator('[data-testid="tile-identify"] [data-testid="reason-identify"]')).to_contain_text(
+    expect(page.locator('[data-testid="tile-locate-line"]')).to_contain_text(
         "needs harness feature 'locate'", timeout=T)
     page.screenshot(path=str(review / f"panel-overview-bare-metal-{scheme}.png"))
     details(page)

@@ -113,9 +113,11 @@ def test_identify_on_linux_blinks_for_the_chosen_seconds_and_stops(page_factory,
     page = page_factory(**APP)
     open_board(page)
     expect(line(page)).to_have_text("status page · harness owns it · touch unknown", timeout=T)
-    tile = page.locator('[data-testid="tile-identify"]')
+    # LOCATE: the tile has the one-click 5 s button; the chosen-seconds control is in Details.
+    details(page)
+    tile = page.locator('[data-testid="panel-identify"]')
     select = tile.locator('[data-testid="identify-seconds"]')
-    expect(select).to_have_value("10")                             # the default
+    expect(select).to_have_value("5")                              # the default (LOCATE: 5 s)
     select.select_option("20")
     t0 = time.time()
     tile.locator('[data-action="identify"]').click()
@@ -136,22 +138,30 @@ def test_identify_on_linux_blinks_for_the_chosen_seconds_and_stops(page_factory,
 def test_negative_twin_identify_on_bare_metal_is_disabled_with_the_reason(page_factory, daemon, engine, psim):
     page = page_factory(**APP)
     open_board(page)                                            # v0.11: no "locate"
-    tile = page.locator('[data-testid="tile-identify"]')
+    # LOCATE: the tile's one-click button, disabled with the reason as its tooltip
+    tile_button = page.locator('[data-testid="tile-locate"]')
+    expect(tile_button).to_have_attribute("aria-disabled", "true", timeout=T)
+    expect(tile_button).to_have_attribute("title", f"Cannot: {LOCATE_WHY}")
+    expect(page.locator('[data-testid="tile-locate-line"]')).to_have_text(f"Cannot: {LOCATE_WHY}")
+    tile_button.click(force=True)                # aria-disabled: nothing is sent
+    # the line says it is rebuilt; the Details card too, with Identify disabled there as well
+    expect(line(page)).to_contain_text("page not reported · harness owns it · touch unknown")
+    expect(page.locator('[data-testid="tile-panel-rebuilt"]')).to_have_text("rebuilt")
+    details(page)
+    tile = page.locator('[data-testid="panel-identify"]')
     button = tile.locator('[data-action="identify"]')
     expect(button).to_have_attribute("aria-disabled", "true", timeout=T)
     expect(button).to_have_attribute("title", f"Cannot: {LOCATE_WHY}")
     expect(tile.locator('[data-testid="reason-identify"]')).to_have_text(f"Cannot: {LOCATE_WHY}")
     expect(tile.locator('[data-testid="identify-seconds"]')).to_be_disabled()
+    button.scroll_into_view_if_needed()          # the Details card may be below the fold
     button.click(force=True)                     # aria-disabled: an interlock, nothing is sent
-    expect(tile.locator('[data-testid="identify-result"]')).to_contain_text("Nothing was run.")
+    expect(tile.locator('[data-testid="identify-result"]')).to_contain_text("Nothing was run.",
+                                                                            timeout=T)
     expect(tile.locator('[data-testid="identify-result"]')).to_contain_text(
-        "$ identify 192.168.10.101:6900 --seconds 10  (not run)")
-    assert psim.boards[BOARD]["locate_until"] == 0.0
+        "$ identify 192.168.10.101:6900 --seconds 5  (not run)")
+    assert psim.boards[BOARD]["locate_until"] == 0.0 and psim.locates == []
     assert tile.locator('[data-testid="identify-until"]').count() == 0
-    # the line says it is rebuilt; the Details card too, with Identify disabled there as well
-    expect(line(page)).to_contain_text("page not reported · harness owns it · touch unknown")
-    expect(page.locator('[data-testid="tile-panel-rebuilt"]')).to_have_text("rebuilt")
-    details(page)
     card = page.locator('[data-testid="panel-card"]')
     expect(card.locator('[data-testid="panel-rebuilt"]')).to_contain_text(
         "Rebuilt from what Harness Manager read, not read from the panel")

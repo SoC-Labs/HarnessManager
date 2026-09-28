@@ -240,7 +240,7 @@ def test_identify_seconds_are_checked_before_the_board(linux):
         assert resp.status_code == 400 and resp.json()["error"]["name"] == "USAGE"
     assert r.vb.shell.locates == []
     ok = client.post(f"{bid_path(bid)}/identify", json={}, headers=H).json()
-    assert ok["seconds"] == 10, "the default"
+    assert ok["seconds"] == 5, "the default (LOCATE: 5 s)"
 
 
 def test_a_board_that_is_not_open_is_404(linux):

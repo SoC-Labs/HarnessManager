@@ -19,6 +19,7 @@ import { ProgramSection } from "./sections/program.js";
 import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
 import { HubFact } from "./hub.js";
+import { LocateButton } from "./locate.js";          // LOCATE: Identify on each board card
 import { LeaseBadge, LeaseBanners, requestClose } from "./lease.js";
 import {
   boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, S,
@@ -67,7 +68,7 @@ function BoardItem({ bid }) {
     dotTitle = `found: ${cand.evidence}`;
   }
   const kinds = [...new Set((cand.links || []).map((l) => l.kind))];
-  return html`<li>
+  return html`<li class="board-li">
     <button type="button" class="board-item" aria-current=${S.selected === bid ? "true" : "false"}
       data-board=${bid} onClick=${() => select(bid)}>
       <div class="board-row1">
@@ -91,6 +92,7 @@ function BoardItem({ bid }) {
         <span class="links-text">${kinds.map(linkName).join(" · ")}</span>
       </div>
     </button>
+    <${LocateButton} bid=${bid} where="rail" />
   </li>`;
 }
 

@@ -92,7 +92,7 @@ def _linux(page: Any, review: Any, scheme: str) -> None:
 def _bare_metal(page: Any, review: Any, scheme: str) -> None:
     open_board(page, BOARD_V011)
     expect(by_id(page, "tile-panel-rebuilt")).to_be_visible(timeout=T)
-    expect(page.locator('[data-testid="tile-identify"] button')).to_be_disabled()
+    expect(by_id(page, "tile-locate")).to_have_attribute("aria-disabled", "true")   # LOCATE
     expect(by_id(page, "tile-temp")).to_contain_text("41", timeout=T)
     shoot(page, review, "overview-bare-metal", scheme)
 

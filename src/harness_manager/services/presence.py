@@ -43,6 +43,12 @@ back-off ends. A beat the BOARD turned away (another client holds the control po
 reset, timed out) is reported to ``noted(board_id, exc)`` and waits a whole beat; only a beat
 skipped because one of our own jobs holds the board is retried in ``RETRY_S``.
 
+**Identify** (lane LOCATE, docs/design/BOARD_LOCATE.md) is an explicit action, never a beat:
+at most one start per board every ``IDENTIFY_EVERY_S`` (``LocateLimiter``; a stop is never
+limited), 5 s by default. The board is told who asked as ``"<user>@<host> via Harness
+Manager"`` (``core.panel.locate_who``: its IDENTIFY banner has 30 columns for it), and the
+answer carries ``until_ms``, the board's own "how long", for the countdown.
+
 Events: ``panel.state {page, owner, pending, banner, card, count, seq, source, touch,
 sessions}``, ``panel.tap {seq, kind, on, ms_ago, at, notify, request?}``, ``panel.locate
 {state: on|off, until, seconds, who}`` (docs/CONTRACTS.md).
@@ -66,7 +72,7 @@ from typing import Any
 from harness_manager import __version__
 from harness_manager.cli.output import jsonable
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import HarnessError, HeldError, UnavailableError
+from harness_manager.core.errors import AlreadyError, HarnessError, HeldError, UnavailableError
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.panel import (
     BEAT_S,
@@ -79,6 +85,7 @@ from harness_manager.core.panel import (
     PanelEvent,
     PanelFrame,
     PanelState,
+    locate_who,
 )
 
 log = logging.getLogger(__name__)
@@ -95,8 +102,11 @@ TICK_S = 1.0
 #: a frame at most once every 3 s. Within that, the last answer is reused.
 STATE_CACHE_S = 1.0
 FRAME_CACHE_S = 3.0
-IDENTIFY_DEFAULT_S = 10
+IDENTIFY_DEFAULT_S = 5
 IDENTIFY_MAX_S = 30
+#: LOCATE: one Identify start per board this often, whoever asks here (the board keeps its
+#: own limit too, BOARD_LOCATE.md §2). A stop (0 s) is never limited.
+IDENTIFY_EVERY_S = 10.0
 NO_ADAPTER = "this board has no front panel Harness Manager can reach"
 NOT_BEATING = "presence runs in the Harness Manager service (harness-manager-daemon)"
 
@@ -172,6 +182,60 @@ def _changed(a: PanelState | None, b: PanelState) -> bool:
         [(s.sid, s.role) for s in a.sessions] != [(s.sid, s.role) for s in b.sessions]
 
 
+# --- Identify's rate limit ----------------------------------------------------------------------
+
+
+class LocateLimiter:
+    """At most one Identify start per board every ``every_s`` (lane LOCATE).
+
+    ``claim(board_id)`` takes the slot or raises ``AlreadyError`` (409) saying when the next
+    one may go (``data``: ``retry_after_s`` and ``next_at``, epoch). ``release(board_id)``
+    gives a claimed slot back when the start never reached the board (it was refused or
+    unavailable), so a click that did nothing does not cost the user 10 s.
+    """
+
+    def __init__(self, every_s: float = IDENTIFY_EVERY_S, *,
+                 clock: Callable[[], float] = time.monotonic,
+                 wall: Callable[[], float] = time.time) -> None:
+        self.every_s = every_s
+        self._clock, self._wall = clock, wall
+        self._mu = threading.Lock()
+        self._last: dict[str, float] = {}
+
+    def wait_s(self, board_id: str) -> float:
+        """Seconds until the next start may go (0: now)."""
+        with self._mu:
+            last = self._last.get(board_id)
+        return 0.0 if last is None else max(0.0, self.every_s - (self._clock() - last))
+
+    def next_at(self, board_id: str) -> float:
+        """The epoch time the next start may go (now when it may go now)."""
+        return self._wall() + self.wait_s(board_id)
+
+    def claim(self, board_id: str) -> float:
+        """Take the slot; returns its claim time (for ``release``)."""
+        with self._mu:
+            now = self._clock()
+            last = self._last.get(board_id)
+            if last is not None and now - last < self.every_s:
+                wait = self.every_s - (now - last)
+                secs = max(1, int(wait + 0.999))
+                err = AlreadyError(
+                    f"{board_id} was identified {now - last:.0f} s ago; Identify goes at most "
+                    f"once every {self.every_s:.0f} s per board",
+                    hint=f"try again in {secs} s")
+                err.data = {"retry_after_s": round(wait, 1),        # type: ignore[attr-defined]
+                            "next_at": self._wall() + wait}
+                raise err
+            self._last[board_id] = now
+            return now
+
+    def release(self, board_id: str, claimed: float) -> None:
+        with self._mu:
+            if self._last.get(board_id) == claimed:
+                del self._last[board_id]
+
+
 # --- the per-board record ------------------------------------------------------------------
 
 
@@ -245,6 +309,7 @@ class PresenceService:
         self.app = app or default_app()
         self._mu = threading.RLock()
         self._boards: dict[str, _Board] = {}
+        self.limiter = LocateLimiter(clock=clock, wall=wall)     # LOCATE: 1 start / 10 s
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -566,8 +631,18 @@ class PresenceService:
 
     def identify(self, board_id: str, session: Any, seconds: int,
                  who: str | None = None) -> dict[str, Any]:
-        """Blink the board for ``seconds`` (0 stops). Publishes ``panel.locate``."""
-        out = identify(session, seconds, who or self.who, wall=self._wall)
+        """Blink the board for ``seconds`` (0 stops). Publishes ``panel.locate``.
+
+        A start takes the board's slot in ``limiter`` first (409 ALREADY within
+        ``IDENTIFY_EVERY_S`` of the last one, nothing sent); a start that fails gives it back."""
+        claimed = self.limiter.claim(board_id) if seconds else None
+        try:
+            out = identify(session, seconds, who or self.who, wall=self._wall)
+        except BaseException:
+            if claimed is not None:
+                self.limiter.release(board_id, claimed)
+            raise
+        out["next_at"] = self.limiter.next_at(board_id)
         with self._mu:
             rec = self._boards.get(board_id)
             if rec is not None:
@@ -627,12 +702,19 @@ def read_panel(session: Any, *, reason_for: Callable[[str], str] | None = None,
 
 def identify(session: Any, seconds: int, who: str, *,
              wall: Callable[[], float] = time.time) -> dict[str, Any]:
+    """``{until, until_ms, seconds}``: ``until_ms`` is how long the board said it blinks
+    (0 after a stop), for a countdown that does not depend on this host's clock. ``who``
+    reaches the board as ``locate_who(who)`` ("<user>@<host> via Harness Manager")."""
     panel = require_panel(session, C.LOCATE)
     why = panel.support().locate
     if why:
         raise UnavailableError(C.LOCATE, why)
-    until = panel.locate(int(seconds), who)
-    return {"until": until if seconds else wall(), "seconds": int(seconds)}
+    until = panel.locate(int(seconds), locate_who(who))
+    now = wall()                 # after the answer: until - now is the board's until_ms
+    if not seconds:
+        return {"until": now, "until_ms": 0, "seconds": 0}
+    return {"until": until, "until_ms": max(0, round((until - now) * 1000)),
+            "seconds": int(seconds)}
 
 
 def check_seconds(value: Any, default: int = IDENTIFY_DEFAULT_S) -> int:

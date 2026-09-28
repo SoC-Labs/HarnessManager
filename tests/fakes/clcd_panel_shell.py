@@ -10,7 +10,13 @@ The Linux harness side (R1-R3) is not built yet, so this fake IS the wire until 
 - ``panel`` (feature ``panel``): the state with the session list and ``touch``; with
   ``frame`` ``"a"``/``"b"`` the rows 0-7 / 8-14 and their role codes, with ``true`` all 15.
 - ``locate`` (feature ``locate``): ``{s: 1-30, who}`` blinks, ``{s: 0}`` stops;
-  ``{ok, until_ms}``.
+  ``{ok, until_ms}``. LOCATE: exactly what the Linux lead confirmed for rc2_v7/v7n
+  (docs/design/BOARD_LOCATE.md §2): the backlight blinks at 2 Hz (``blinking``); the
+  "IDENTIFY: <who>" banner shows only while the harness owns the panel (``banner_text``);
+  a tap on the glass stops it (``tap()``); a harnessd restart restores the backlight
+  (``restart_harnessd()``). No rate limit, no LEDs, nothing in the ring.
+  ``LINUX_LOCATE`` is that image: ``locate`` without ``presence``/``panel`` (R1/R2 are not
+  in it), so ``hello``/``panel`` answer ``unknown op``.
 - the tap ring: 8 events, ``seq`` rising, never acknowledged (``tap(on)`` makes one).
 
 A profile without the features answers those ops ``unknown op`` (the v0.11 bare-metal
@@ -48,6 +54,9 @@ _RANK = {"holder": 0, "owner": 1, "watch": 2}
 #: The Linux harness with the front-panel verbs (R1-R3), and the bare-metal v0.11 without.
 LINUX_PANEL = replace(LINUX_HARNESSD, name=LINUX_HARNESSD.name.replace("linux", "linux-panel"),
                       features=LINUX_HARNESSD.features + PANEL_FEATURES)
+#: LOCATE: the rc2_v7/v7n images: ``locate`` (R3) only; ``hello``/``panel`` (R1/R2) are not in it.
+LINUX_LOCATE = replace(LINUX_HARNESSD, name=LINUX_HARNESSD.name.replace("linux", "linux-locate"),
+                       features=LINUX_HARNESSD.features + ("locate",))
 V011_BARE_METAL = FIELDED_ILA_V011
 
 #: A Linux status page (docs/design/clcd/source/preview_lx_feat-linux-harness.txt, healthy).
@@ -103,6 +112,8 @@ class PanelFakeShell(HarnessFakeShell):
         self.seq = 0
         self.locate_until = 0.0
         self.locates: list[dict[str, Any]] = []
+        self.locate_who = ""
+        self.locate_tap_stops = 0                               # blinks a tap on the glass ended
         self.hellos: list[dict[str, Any]] = []                  # every hello, as received
         self.requests: list[dict[str, Any]] = []                # every request, as received
         self._panel_mu = threading.Lock()
@@ -124,8 +135,29 @@ class PanelFakeShell(HarnessFakeShell):
             else:
                 self.stats_extra[key] = value
 
+    @property
+    def blinking(self) -> bool:
+        """The backlight blinks at 2 Hz (a ``locate`` is running)."""
+        return self.locate_until > self.board_clock()
+
+    @property
+    def banner_text(self) -> str:
+        """The IDENTIFY banner, shown only while the harness owns the panel ("" otherwise:
+        with the DUT owning it only the backlight blinks)."""
+        if not self.blinking or self.display_owner != "harness":
+            return ""
+        return f"IDENTIFY: {self.locate_who}"[:COLS]
+
+    def restart_harnessd(self) -> None:
+        """harnessd restarted: the blink ends and the backlight is on again."""
+        self.locate_until = 0.0
+
     def tap(self, on: str, *, k: str = "tap", ago_s: float = 0.0) -> int:
-        """A touch on the glass: one event in the ring. Returns its ``seq``."""
+        """A touch on the glass: one event in the ring. Returns its ``seq``. A running
+        ``locate`` stops (the Linux lead's R3: a tap on the panel stops it)."""
+        if self.blinking:
+            self.locate_until = self.board_clock()
+            self.locate_tap_stops += 1
         with self._panel_mu:
             self.seq += 1
             self.ring.append((self.seq, k, on, self.board_clock() - ago_s))
@@ -204,11 +236,14 @@ class PanelFakeShell(HarnessFakeShell):
         return reply
 
     def _op_locate(self, request: dict[str, Any]) -> dict[str, Any]:
-        s = request.get("s")
-        if isinstance(s, bool) or not isinstance(s, int) or not 0 <= s <= 30:
+        s, who = request.get("s"), request.get("who", "")
+        if isinstance(s, bool) or not isinstance(s, int) or not 0 <= s <= 30 \
+                or not isinstance(who, str):
             return {"ok": False, "err": "bad args"}
         self.locates.append(dict(request))
         self.locate_until = self.board_clock() + s
+        if s:
+            self.locate_who = who
         return {"ok": True, "until_ms": s * 1000}
 
 

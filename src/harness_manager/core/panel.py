@@ -62,6 +62,23 @@ SOURCE_REBUILT = "rebuilt"   # rebuilt by Harness Manager from what it read (bar
 REBUILT_NOTE = "rebuilt from what Harness Manager read, not read from the panel"
 
 
+#: LOCATE: ``locate``'s ``who`` (the banner "IDENTIFY: <who>" on a 40-column row: 30 left).
+LOCATE_WHO_MAX = COLS - len("IDENTIFY: ")
+LOCATE_VIA = " via Harness Manager"
+LOCATE_VIA_SHORT = " via HM"
+
+
+def locate_who(who: str) -> str:
+    """``who`` for the board's IDENTIFY banner (lane LOCATE, the Linux lead's R3):
+    ``"<user>@<host> via Harness Manager"``, else ``"... via HM"`` when that does not fit in
+    ``LOCATE_WHO_MAX``, else the ``user@host`` clipped. Printable ASCII only."""
+    base = ascii_field(who, LOCATE_WHO_MAX)
+    for tail in (LOCATE_VIA, LOCATE_VIA_SHORT):
+        if len(base) + len(tail) <= LOCATE_WHO_MAX:
+            return base + tail
+    return base
+
+
 def ascii_field(value: Any, limit: int) -> str:
     """Printable ASCII only (the panel font's range, one byte per character, so the line
     budget holds), clipped to ``limit``. Anything else becomes ``?``."""

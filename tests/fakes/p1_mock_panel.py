@@ -15,6 +15,13 @@ mirror by ``harness_manager_mps3.panel.rebuilt_frame``, so the mock and the daem
 disagree on their shape. Knobs publish the events the daemon would: ``tap(bid, on)`` ->
 ``panel.tap``, ``set_owner(bid, owner)`` -> ``panel.state``; Identify -> ``panel.locate``.
 
+Lane LOCATE adds, additively: Identify goes through the product's own ``LocateLimiter`` (one
+start per board every 10 s, 409 ALREADY), a board that is not open is identified all the
+same (``opened_for_identify``, as the daemon does), the answer carries ``until_ms``,
+``locates`` counts every locate the boards were sent (``(bid, seconds, who)``), and ``calls`` every read or locate a
+simulated panel served (``("state"|"frame"|"locate", bid)``, over both servers) so a browser
+test can prove the page asked the boards nothing on its own.
+
 Lane P3 (the web UI) adds, additively: ``set_touch(bid, ok, bus_lost=, recoveries=)`` and
 ``set_rows(bid, rows, banner=)`` publish ``panel.state`` as the daemon does when they change;
 ``leases`` (the mock's ``LeaseRequestSim``) is told of a tap on the request banner, as
@@ -35,7 +42,7 @@ from fastapi import Body, FastAPI
 
 from harness_manager.cli.output import jsonable
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import UnavailableError
+from harness_manager.core.errors import HeldError, UnavailableError
 from harness_manager.core.events import Event
 from harness_manager.core.panel import (
     SOURCE_PANEL,
@@ -45,10 +52,12 @@ from harness_manager.core.panel import (
     PanelSession,
     PanelState,
     PanelSupport,
+    locate_who,
     touch_health,
 )
 from harness_manager.services.presence import (
     NO_ADAPTER,
+    LocateLimiter,
     check_seconds,
     default_who,
     read_panel,
@@ -71,7 +80,8 @@ class SimPanel:
         self.bid = bid
 
     def _features(self) -> frozenset[str]:
-        return frozenset(self.sim.engine.info(self.bid).identity.features)
+        # The board's identity, open or not (LOCATE: a board not open here is identified too).
+        return frozenset(self.sim.engine._board(self.bid).identity.features)
 
     def support(self) -> PanelSupport:
         f = self._features()
@@ -82,6 +92,7 @@ class SimPanel:
                             source=SOURCE_PANEL if panel else SOURCE_REBUILT)
 
     def state(self) -> PanelState:
+        self.sim.calls.append(("state", self.bid))
         b = self.sim.boards[self.bid]
         now = time.time()
         stats = {"touch_ok": b["touch_ok"], "touch_bus_lost": b["touch_lost"],
@@ -102,6 +113,7 @@ class SimPanel:
                           source=SOURCE_PANEL, observed_at=now)
 
     def frame(self) -> PanelFrame:
+        self.sim.calls.append(("frame", self.bid))
         if self.support().source == SOURCE_REBUILT:
             ident = self.sim.engine.info(self.bid).identity
             return rebuilt_frame(name=getattr(self.sim.engine.session(self.bid).candidate,
@@ -118,6 +130,8 @@ class SimPanel:
             raise UnavailableError(C.LOCATE, why)
         until = time.time() + seconds
         self.sim.boards[self.bid]["locate_until"] = until if seconds else 0.0
+        self.sim.locates.append((self.bid, seconds, who))
+        self.sim.calls.append(("locate", self.bid))
         return until
 
 
@@ -128,6 +142,10 @@ class PanelSim:
         self._mu = threading.Lock()
         #: the lease side of a request tap (``notify_holder(bid, seq=, at=)``), or None
         self.leases: Any = None
+        #: LOCATE: the product's limiter, every locate sent, every front-panel request
+        self.limiter = LocateLimiter()
+        self.locates: list[tuple[str, int, str]] = []
+        self.calls: list[tuple[str, str]] = []
 
     def board(self, bid: str) -> dict[str, Any]:
         with self._mu:
@@ -233,11 +251,27 @@ def register(app: FastAPI, state: Any, sim: PanelSim, ok: Any) -> None:
 
     @app.post(f"{API}/boards/{{bid}}/identify")
     def identify(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:  # noqa: B008
-        state.session(bid)
+        board = state.engine._board(bid)                  # 404 ABSENT for an unknown board
         seconds = check_seconds((body or {}).get("seconds"))
+        opened = bid in state.engine.open_boards()
+        if not opened and board.owner is not None:         # the daemon's transient open
+            who = board.owner.describe()
+            raise HeldError(f"{bid} is in use", holder=who, hint=f"held by {who}")
         state.jobs.gate(bid)
-        until = sim.adapter(bid).locate(seconds, default_who())
+        adapter = sim.adapter(bid)
+        why = adapter.support().locate
+        if why:
+            raise UnavailableError(C.LOCATE, why)
+        claimed = sim.limiter.claim(bid) if seconds else None
+        try:
+            until = adapter.locate(seconds, locate_who(default_who()))
+        except BaseException:
+            if claimed is not None:
+                sim.limiter.release(bid, claimed)
+            raise
         state.engine.bus.publish(Event("panel.locate", bid, {
             "state": "on" if seconds else "off", "until": until, "seconds": seconds,
             "who": default_who()}))
-        return ok(board_id=bid, until=until if seconds else time.time(), seconds=seconds)
+        extra = {} if opened else {"opened_for_identify": True}
+        return ok(board_id=bid, until=until if seconds else time.time(), seconds=seconds,
+                  until_ms=seconds * 1000, next_at=sim.limiter.next_at(bid), **extra)

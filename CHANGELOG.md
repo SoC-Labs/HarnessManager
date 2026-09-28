@@ -9,6 +9,20 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### Identify: which board is which (LOCATE)
+- Every board card in the sidebar, and the Board tile, has an **Identify** icon. One click
+  blinks the board's panel backlight for 5 seconds. While the harness owns the panel, the
+  panel also shows "IDENTIFY: you@host via Harness Manager". The icon counts down, and a
+  small square stops it early.
+- It needs no hub lease, and the board does not have to be open. A second press while it
+  runs sends nothing.
+- The icon is disabled, with the reason as its tooltip, when the board does not report the
+  harness feature `locate`. The Linux harness has it from images rc2_v7/v7n; bare metal
+  (v0.11) does not (docs/design/BOARD_LOCATE.md).
+- At most one Identify per board every 10 s (409 ALREADY / exit 8, saying when). When
+  someone else holds the lease, the answer names them.
+- `harness-manager identify TARGET` now blinks for 5 s by default (was 10).
+
 ### Install
 - `scripts/install.sh` (Linux, macOS) and `scripts/install.ps1` (Windows): one command
   makes a private venv, installs Harness Manager, and puts `harness-manager` on your PATH.
