@@ -10,9 +10,12 @@ Verbs::
 identify, and the capability "Identify the harness" is ``identify``; this one's capability is
 ``locate``, docs/design/CLCD_ALIGNMENT.md §5). ``--seconds 0`` stops a blink.
 
-On a bare-metal harness (v0.11) ``panel show`` gives the KVM owner only and says the state
-is rebuilt; ``panel mirror`` is rebuilt from what Harness Manager read (``source: rebuilt``);
-``identify`` fails with exit 12 and the reason (it needs the Linux harness's ``locate``).
+On a harness image without ``panel`` (bare metal v0.11, and Linux images before R1-R3)
+``panel show`` gives the KVM owner only, says the state is rebuilt and lists what the image
+does not report (by feature; PANEL-TRUTH: never a harness type guessed from a missing
+feature, only the harness's own ``version.impl``); ``panel mirror`` is rebuilt from what
+Harness Manager read (``source: rebuilt``, unknown facts as an em dash); ``identify`` fails
+with exit 12 and the reason (the image has no ``locate``).
 
 Both ways the verbs go through ``session.panel`` (CCR PANEL-5), like every other adapter.
 Over a running harness-manager-daemon that is the daemon's proxy (``client.remote``: its
@@ -72,14 +75,16 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
     ap = sub.add_parser("show", help="page, owner, banner, card, sessions, taps, Identify",
                         parents=[fmt, usb], epilog=epilog("panel show"))
     ap.add_argument("target", metavar="TARGET", help=TARGET_HELP)
-    ap = sub.add_parser("mirror", help="the panel's text grid (read, or rebuilt on bare metal)",
+    ap = sub.add_parser("mirror", help="the panel's text grid (read, or rebuilt when the image "
+                                       "does not send it)",
                         parents=[fmt, usb], epilog=epilog("panel mirror"))
     ap.add_argument("target", metavar="TARGET", help=TARGET_HELP)
     vp.set_defaults(fn=cmd_panel)
 
     ip = subparsers.add_parser("identify", help="blink the board's panel so you can find it",
                                description="Identify: blink the board's panel backlight so you "
-                                           "can tell which board it is (Linux harness).",
+                                           "can tell which board it is (a harness image with "
+                                           "feature 'locate').",
                                parents=[fmt, usb], epilog=epilog("identify"))
     ip.add_argument("target", metavar="TARGET", help=TARGET_HELP)
     ip.add_argument("--seconds", type=int, default=DEFAULT_SECONDS, metavar="N",
@@ -189,6 +194,26 @@ def _sessions_text(panel: dict[str, Any]) -> str:
     return str(panel.get("count") or 0) if panel.get("source") == "panel" else "not known"
 
 
+#: PANEL-TRUTH: what a rebuilt state cannot say, and the harness feature that would say it.
+NOT_REPORTED = (("page", "panel"), ("who is connected", "presence"), ("recent taps", "panel"))
+
+
+def not_reported(panel: dict[str, Any], support: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """``(what, features)`` this image does not report: by capability, never by a harness
+    type guessed from a missing feature (the web UI's "Not reported by this image" line)."""
+    if panel.get("source") != "rebuilt":
+        return [], []
+    what = [w for w, _ in NOT_REPORTED if not (w == "who is connected" and not support.get("presence"))]
+    feats = ["panel"] + (["presence"] if support.get("presence") else [])
+    return what, feats
+
+
+def impl_words(support: dict[str, Any]) -> str:
+    """The harness type in words, from its own ``version.impl`` only; "" when it did not say."""
+    impl = str(support.get("impl") or "")
+    return {"linux": "Linux harness", "bare-metal": "bare-metal harness"}.get(impl, impl)
+
+
 def _headline(panel: dict[str, Any]) -> str:
     parts = []
     if panel.get("page"):
@@ -217,17 +242,26 @@ def _show_human(body: dict[str, Any]) -> list[str]:
                      else f"identify   unavailable: {ident.get('reason') or 'unknown'}")
     if panel is None:
         return [f"panel      unavailable: {body.get('reason') or 'unknown'}", identify_line]
+    support = body.get("support") or {}
     out = [f"panel      {_headline(panel)}"]
+    if impl_words(support):
+        out.append(f"harness    {impl_words(support)}")
     if panel.get("source") == "rebuilt":
-        out.append(f"source     {panel.get('note') or 'rebuilt'}")
+        out.append(f"source     {panel.get('note') or 'rebuilt'} (this harness image does not "
+                   "send its panel's text)")
     out.append(f"banner     {panel.get('banner') or '-'}")
     if panel.get("card"):
         out.append(f"card       {panel['card']}")
     out.append(f"touch      {_touch_text(panel.get('touch') or {})}")
-    out.append(f"sessions   {_sessions_text(panel)}")
+    missing, feats = not_reported(panel, support)
+    if "who is connected" not in missing:
+        out.append(f"sessions   {_sessions_text(panel)}")
     for ev in panel.get("events") or []:
         out.append(f"tap        #{ev.get('seq')} on {ev.get('on') or '?'}, "
                    f"{(ev.get('ms_ago') or 0) / 1000:.1f}s ago")
+    if missing:
+        out.append(f"missing    not reported by this image: {', '.join(missing)} "
+                   f"(harness feature {' and '.join(repr(f) for f in feats)})")
     out.append(identify_line)
     presence = body.get("presence") or {}
     if presence.get("active"):

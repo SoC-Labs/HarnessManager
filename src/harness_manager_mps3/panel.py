@@ -2,13 +2,18 @@
 is the hook ``pack.py`` calls.
 
 docs/design/CLCD_ALIGNMENT.md §2, §5.2, §5.3 is the wire; ``harness_manager.core.panel`` is
-the model. Two harness generations, told apart by feature bit (``version.features``):
+the model. What a board can do is told apart by FEATURE (``version.features``), never by a
+harness type guessed from a missing one (PANEL-TRUTH: the Linux harness rc2_v6 has
+``clcd_kvm`` but not ``panel``/``presence``/``locate``, like bare metal v0.11):
 
 | Features | ``state()`` | ``frame()`` | ``hello()`` | ``locate()`` |
 |---|---|---|---|---|
-| ``panel`` (Linux harness, R2) | the ``panel`` verb | ``panel`` ``frame:"a"`` + ``"b"`` | ``presence`` (R1): the ``hello`` verb | ``locate`` (R3) |
-| ``clcd_kvm`` only (bare metal, v0.11) | ``display`` query: the owner only | REBUILT from what HM read | UNAVAILABLE, with the reason | UNAVAILABLE, with the reason |
+| ``panel`` (R2) | the ``panel`` verb | ``panel`` ``frame:"a"`` + ``"b"`` | ``presence`` (R1): the ``hello`` verb | ``locate`` (R3) |
+| ``clcd_kvm`` without ``panel`` (bare metal v0.11, Linux before R1-R3) | ``display`` query: the owner only | REBUILT from what HM read | UNAVAILABLE, with the reason | UNAVAILABLE, with the reason |
 | neither | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
+
+``support().impl`` carries the harness's own ``version.impl`` so a view can name the type
+when (and only when) the harness said it.
 
 Bare metal keeps its panel exactly as it is (decision P3): nothing here sends it a new verb.
 A board without ``locate`` never gets a ``display`` toggle as a stand-in: that would disturb
@@ -45,7 +50,7 @@ from typing import Any
 
 from harness_manager.core import capabilities as C
 from harness_manager.core.errors import UnavailableError
-from harness_manager.core.model import BoardIdentity
+from harness_manager.core.model import BoardIdentity, LinkKind
 from harness_manager.core.panel import (
     COLS,
     LINE_MAX,
@@ -55,6 +60,7 @@ from harness_manager.core.panel import (
     ROWS,
     SOURCE_PANEL,
     SOURCE_REBUILT,
+    UNKNOWN,
     WHO_MAX,
     Hello,
     OnReply,
@@ -169,7 +175,7 @@ def parse_hello_reply(reply: dict[str, Any], *, wall: float) -> PanelState:
     return parse_state(merged, wall=wall)
 
 
-# --- the rebuilt mirror (bare metal) ------------------------------------------------------
+# --- the rebuilt mirror (an image without `panel`) ----------------------------------------
 
 
 def _row(text: str) -> str:
@@ -180,10 +186,34 @@ def _centred(text: str) -> str:
     return _row(" " * ((COLS - len(text)) // 2) + text)
 
 
+def board_address(session: Any) -> str:
+    """The board's OWN address for the rebuilt NET row (PANEL-TRUTH): where the hub (or this
+    LAN) reaches it (``session.reach.remote_host``), else the configured Ethernet link's
+    host, else the shell's. Never a loopback address: through a hub the shell connects to
+    its SSH tunnel's local end (127.0.0.1), which is this computer, not the board. ""
+    when nothing names the board's own address."""
+    from .identify import is_loopback
+    from .shell import parse_endpoint
+
+    seen = [str(getattr(getattr(session, "reach", None), "remote_host", "") or "")]
+    cand = getattr(session, "candidate", None)
+    for lk in getattr(cand, "links", ()) or ():
+        if lk.kind == LinkKind.ETHERNET:
+            seen.append(parse_endpoint(lk.address, 0)[0])
+            break
+    seen.append(str(getattr(getattr(session, "shell", None), "host", "") or ""))
+    return next((h for h in seen if h and not is_loopback(h)), "")
+
+
 def rebuilt_frame(*, name: str, identity: BoardIdentity | None, host: str, owner: str,
                   wall: float) -> PanelFrame:
-    """Today's (v0.11) panel layout with only the facts Harness Manager read; ``?`` where it
-    does not know. It is labelled as rebuilt: it was not read from the glass."""
+    """Today's (v0.11) panel layout with only the facts Harness Manager read, and ``UNKNOWN``
+    ("\u2014") where it did not read one (never "?", which reads as broken, and never a
+    guess). ``host`` is the board's own address (``board_address``); a loopback one (a
+    tunnel's end) is not the board's and shows as unknown. It is labelled as rebuilt: it
+    was not read from the glass."""
+    from .identify import is_loopback
+
     roles = [ROLE_TEXT * COLS for _ in range(ROWS)]
     if owner == "dut":
         # The KVM notice the harness leaves on the glass (clcd.c:543-553), rows 6-8 inverted.
@@ -195,22 +225,24 @@ def rebuilt_frame(*, name: str, identity: BoardIdentity | None, host: str, owner
             roles[r] = ROLE_INVERTED * COLS
     else:
         ident = identity or BoardIdentity(board_type="mps3")
-        design = ident.rm_name or ident.rm_id or "?"
-        shell = ident.shell_id.upper().replace("0X", "0x") if ident.shell_id else "?"
+        design = ident.rm_name or ident.rm_id or UNKNOWN
+        shell = ident.shell_id.upper().replace("0X", "0x") if ident.shell_id else UNKNOWN
+        net = host if host and not is_loopback(host) else UNKNOWN
+        title = str(getattr(ident, "label", "") or "") or name or "MPS3"
         rows = [
-            _row(f"{(name or 'MPS3').upper():<20}nanoSoC harness"),
+            _row(f"{title.upper()[:19]:<20}nanoSoC harness"),
             "-" * COLS,
             _row(f"DUT : {design}"),
-            _row("SWAP: ?"),
+            _row(f"SWAP: {UNKNOWN}"),
             _row(f"SID : {shell}"),
-            _row(f"NET : {host or '?'}"),
-            _row("UP  : ?"),
-            _row("DUT : ?"),
-            _row("ICAP: ?"),
-            _row("CFG : ?"),
+            _row(f"NET : {net}"),
+            _row(f"UP  : {UNKNOWN}"),
+            _row(f"DUT : {UNKNOWN}"),
+            _row(f"ICAP: {UNKNOWN}"),
+            _row(f"CFG : {UNKNOWN}"),
             " " * COLS, " " * COLS, " " * COLS,
             "-" * COLS,
-            _row("MAC ?"),
+            _row(f"MAC {UNKNOWN}"),
         ]
     return PanelFrame(rows=tuple(rows), roles="".join(roles), source=SOURCE_REBUILT,
                       observed_at=wall, note=REBUILT_NOTE)
@@ -267,6 +299,16 @@ class Mps3Panel:
             self._ident = None
             self._forgot = True
 
+    def note_identity(self, identity: BoardIdentity | None) -> None:
+        """PANEL-TRUTH: someone read the board's identity (``engine.info``): the rebuilt
+        mirror's DUT and SID rows follow a swap at once, not 5 minutes later. An identity
+        without features says nothing about them (FIX-PACK-1 item 3): it is ignored."""
+        if identity is None or not tuple(identity.features or ()):
+            return
+        with self._mu:
+            self._ident = (self._clock(), identity)
+            self._forgot = False
+
     def _features(self) -> frozenset[str]:
         return frozenset(self.identity().features)
 
@@ -277,7 +319,8 @@ class Mps3Panel:
             front_panel="" if panel or "clcd_kvm" in f else NEEDS_PANEL,
             presence="" if "presence" in f else NEEDS_PRESENCE,
             locate="" if "locate" in f else NEEDS_LOCATE,
-            source=SOURCE_PANEL if panel else SOURCE_REBUILT)
+            source=SOURCE_PANEL if panel else SOURCE_REBUILT,
+            impl=str(self.identity().harness_impl or ""))
 
     # -- reads ------------------------------------------------------------------------------
 
@@ -316,7 +359,7 @@ class Mps3Panel:
         owner = self.state().owner
         cand = self._session.candidate
         return rebuilt_frame(name=getattr(cand, "name", ""), identity=self.identity(),
-                             host=self._shell.host, owner=owner, wall=self._wall())
+                             host=board_address(self._session), owner=owner, wall=self._wall())
 
     def _read_frame(self) -> PanelFrame:
         def ask(c: Any, _tap: Any) -> list[dict[str, Any]]:
@@ -446,5 +489,5 @@ def make_panel_adapter(session: Any) -> Mps3Panel | None:
     return panel
 
 
-__all__ = ["LINE_MAX", "Mps3Panel", "make_panel_adapter", "parse_hello_reply", "parse_state",
-           "rebuilt_frame"]
+__all__ = ["LINE_MAX", "Mps3Panel", "board_address", "make_panel_adapter", "parse_hello_reply",
+           "parse_state", "rebuilt_frame"]

@@ -187,7 +187,8 @@ def test_the_linux_board_shows_card_slots_claim_panel_identify_and_xvc(showcase)
 def test_negative_twin_the_bare_metal_board_has_none_of_the_linux_lines(showcase):
     info = showcase.open(BOARD_V011)
     assert "claim" not in info                                   # no SSH to claim
-    assert info["unavailable"]["locate"].startswith("needs harness feature 'locate'")
+    assert info["unavailable"]["locate"].startswith("Identify isn't available on this harness "
+                                                    "image yet")
     B = showcase.b(BOARD_V011)
     assert showcase.get(f"{B}/card")["line"].startswith("n/a: this harness has no microSD")
     assert showcase.get(f"{B}/slots")["available"] is False

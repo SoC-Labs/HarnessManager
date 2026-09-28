@@ -20,6 +20,7 @@ import time
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED
+from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from tests.fakes.clcd_panel_shell import LINUX_STATUS_ROWS, PANEL_FEATURES
 from tests.fakes.p1_mock_panel import PanelSim
 
@@ -30,7 +31,7 @@ pytestmark = [pytest.mark.browser]
 T = 10_000
 APP = {"width": 1440, "height": 900}
 BOARD = BOARD_FIELDED
-LOCATE_WHY = "needs harness feature 'locate' (Linux harness)"
+LOCATE_WHY = NEEDS_LOCATE
 
 
 @pytest.fixture(autouse=True)
@@ -148,17 +149,23 @@ def test_negative_twin_identify_on_bare_metal_is_disabled_with_the_reason(page_f
         "$ identify 192.168.10.101:6900 --seconds 10  (not run)")
     assert psim.boards[BOARD]["locate_until"] == 0.0
     assert tile.locator('[data-testid="identify-until"]').count() == 0
-    # the line says it is rebuilt; the Details card too, with Identify disabled there as well
-    expect(line(page)).to_contain_text("page not reported · harness owns it · touch unknown")
+    # the line says it is rebuilt (PANEL-TRUTH: a page the image does not report is left out);
+    # the Details card too, with Identify disabled there as well
+    expect(line(page)).to_contain_text("harness owns it · touch unknown")
+    assert "page" not in line(page).inner_text()
     expect(page.locator('[data-testid="tile-panel-rebuilt"]')).to_have_text("rebuilt")
     details(page)
     card = page.locator('[data-testid="panel-card"]')
+    expect(card.locator('[data-testid="panel-headline"]')).to_have_attribute("data-state", "rebuilt")
     expect(card.locator('[data-testid="panel-rebuilt"]')).to_contain_text(
         "Rebuilt from what Harness Manager read, not read from the panel")
     expect(card.locator('[data-testid="panel-mirror"]')).to_have_attribute("data-source", "rebuilt")
     expect(card.locator('[data-testid="panel-identify"] [data-testid="reason-identify"]')).to_have_text(
         f"Cannot: {LOCATE_WHY}")
-    expect(card.locator('[data-testid="panel-sessions-none"]')).to_contain_text("not reported")
+    # PANEL-TRUTH: the rows it does not report are one line, not rows of "not reported"
+    expect(card.locator('[data-testid="panel-not-reported"]')).to_contain_text(
+        "Not reported by this image: page, touch health, who is connected, recent taps")
+    assert card.locator('[data-testid="panel-sessions-none"]').count() == 0
 
 
 # --- the mirror ------------------------------------------------------------------------------------

@@ -20,10 +20,15 @@ from harness_manager.core.model import LinkKind as L
 
 NEEDS_USB = "needs the Debug USB cable"
 #: The front panel's reasons (P2). Bare metal keeps its panel as it is (decision P3).
-NEEDS_PANEL = ("needs the Ethernet link and harness firmware with 'panel' (Linux harness) "
-               "or 'clcd_kvm'")
-NEEDS_LOCATE = "needs harness feature 'locate' (Linux harness)"
-NEEDS_PRESENCE = "needs harness feature 'presence' (Linux harness)"
+#: PANEL-TRUTH (david, 2026-09-28): a reason says what THIS IMAGE does not report, by
+#: capability and feature name, never a harness type guessed from a missing feature: the
+#: Linux harness rc2_v6 lacks 'panel', 'presence' and 'locate' too. The UI names the type
+#: only from the harness's own ``version.impl`` (``PanelSupport.impl``).
+NEEDS_PANEL = ("needs the Ethernet link and a harness image that reports its front panel "
+               "(harness feature 'panel' or 'clcd_kvm')")
+NEEDS_LOCATE = "Identify isn't available on this harness image yet (harness feature 'locate')"
+NEEDS_PRESENCE = ("this harness image doesn't report who is connected "
+                  "(harness feature 'presence')")
 #: The live display (lane LM2). The adapter (``display.py``) says which of these is missing.
 NEEDS_LCD_MIRROR = "needs the Linux harness with lcd_mirror and a claimed board"
 
@@ -84,9 +89,10 @@ SPECS: tuple[CapabilitySpec, ...] = (
     # "dut_egress not present", which the lab verb reports as such).
     CapabilitySpec("mps3.dut_egress", "Read frames the DUT transmitted",
                    (via(L.ETHERNET), via(L.HUB))),
-    # The front panel (lane P1/P2, docs/design/CLCD_ALIGNMENT.md §5.2). The Linux harness
-    # reports 'panel'/'presence'/'locate'; bare metal (v0.11) falls back to the KVM owner
-    # ('clcd_kvm') with a mirror rebuilt from what Harness Manager read.
+    # The front panel (lane P1/P2, docs/design/CLCD_ALIGNMENT.md §5.2). An image that
+    # reports 'panel'/'presence'/'locate' has them; one with only 'clcd_kvm' (bare metal
+    # v0.11, and Linux images before R1-R3) falls back to the KVM owner with a mirror
+    # rebuilt from what Harness Manager read.
     CapabilitySpec(C.FRONT_PANEL, "Front panel (LCD) state",
                    (via(L.ETHERNET, features=("panel",)), via(L.HUB, features=("panel",)),
                     via(L.ETHERNET, features=("clcd_kvm",)), via(L.HUB, features=("clcd_kvm",))),

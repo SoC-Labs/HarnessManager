@@ -136,7 +136,7 @@ def test_negative_twin_the_bare_metal_board_shows_the_rebuilt_panel_and_no_card(
     expect(by_id(page, "tile-claim")).to_have_count(0)                  # no SSH on bare metal
     expect(by_id(page, "tile-panel-rebuilt")).to_be_visible(timeout=T)
     expect(page.locator('[data-testid="tile-identify"] button')).to_be_disabled()
-    expect(by_id(page, "tile-identify")).to_contain_text("needs harness feature 'locate'")
+    expect(by_id(page, "tile-identify")).to_contain_text("harness feature 'locate'")
     section(page, "program")
     expect(by_id(page, "keep-card")).to_have_count(0)
     section(page, "debug")

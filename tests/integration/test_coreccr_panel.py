@@ -39,6 +39,7 @@ from harness_manager.core.panel import (
 from harness_manager.core.services import EngineConfig
 from harness_manager.engine import Engine
 from harness_manager.services.presence import NOT_BEATING
+from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, V011_BARE_METAL, PanelVirtualMps3
 from tests.fakes.t13_daemon import TOKEN, LiveDaemon, bid_path, engine_for, state_dir
@@ -189,10 +190,11 @@ def test_support_alone_never_reads_the_panel(tmp_path):
             before = len(vb.shell.requests)
             support = rs.panel.support()
             assert isinstance(support, PanelSupport) and support.source == "rebuilt"
+            assert support.impl == "bare-metal"          # PANEL-TRUTH: through the daemon too
             assert not PANEL_READS & set(ops(vb, before)), "?state=0 leaves the panel unread"
             with pytest.raises(UnavailableError) as exc:        # bare metal: no Identify
                 rs.panel.locate(3, "core@ccr")
-            assert "Linux harness" in exc.value.reason and vb.shell.locates == []
+            assert exc.value.reason == NEEDS_LOCATE and vb.shell.locates == []
 
 
 def test_twin_state_does_read_the_panel(tmp_path):

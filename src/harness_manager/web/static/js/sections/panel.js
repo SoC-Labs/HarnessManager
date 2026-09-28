@@ -5,8 +5,16 @@
 // - P6: "held" (violet) means someone else has it: here, the DUT owns the panel;
 // - P2: a tap on the panel's lease-request banner notifies the holder (lease.js shows
 //   "tapped on the panel"); it never releases;
-// - P3: these are the Linux harness's features. On bare metal (v0.11) the mirror is rebuilt
-//   from what Harness Manager read, and says so, and Identify is disabled with the reason.
+// - P3: these are harness features ('panel', 'presence', 'locate'). On an image without
+//   'panel' the mirror is rebuilt from what Harness Manager read, and says so, and Identify is
+//   disabled with the reason.
+// - PANEL-TRUTH (david, 2026-09-28): every word here is about what THIS IMAGE reports, by
+//   capability and feature. The harness type is named only from its own version.impl
+//   (support.impl), never guessed from a missing feature: the Linux harness rc2_v6 lacks
+//   'panel', 'presence' and 'locate' too. The card has one headline (Live / Read / Rebuilt /
+//   Not available), the Live display first, the rebuilt text as its fallback, and only the
+//   rows the image reports, with one "Not reported by this image" line (features behind a
+//   disclosure).
 //
 // Reads (docs/API.md "Front panel"): GET .../panel (the state; the daemon reuses an answer
 // up to 1 s old) and GET .../panel/frame (the 15 x 40 text grid; up to 3 s old). The
@@ -23,6 +31,7 @@ import {
 } from "../store.js";
 import { ActionRow, Card, Chip, Icon, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
 import { LiveDisplay } from "../display.js";        // LM4: the Live display, over the text mirror
+import { displayLive } from "../display.js";        // PANEL-TRUTH: the headline's "Live"
 
 const STATE_CACHE_MS = 1000;        // the daemon reuses a GET /panel answer this long
 const FRAME_CACHE_MS = 3000;        // ... and a GET /panel/frame answer this long
@@ -32,6 +41,9 @@ export const IDENTIFY_SECONDS = [5, 10, 20, 30];
 const IDENTIFY_DEFAULT_S = 10;
 const TAPS_SHOWN = 5;
 export const REBUILT_TEXT = "rebuilt from what Harness Manager read, not read from the panel";
+// PANEL-TRUTH: a fact the rebuilt text does not have (core/panel.py UNKNOWN), and its legend.
+export const UNKNOWN_MARK = "\u2014";
+export const NOT_REPORTED = "not reported by this image";
 
 // --- per-board state ---------------------------------------------------------------------------
 
@@ -270,10 +282,43 @@ export function touchPart(t) {
 
 function pagePart(p) {
   return p.page ? { text: `${p.page} page`, level: "" }
-    : { text: "page not reported", level: "unk", title: p.source === "rebuilt" ? "a bare-metal harness does not say which page it shows" : "" };
+    : { text: "page not reported", level: "unk", title: "this harness image does not report which page the panel shows (harness feature 'panel')" };
 }
 
-// The Board tile's parts: [{text, level, icon, title, key}].
+// PANEL-TRUTH: the harness type in words, from its own version.impl only ("" when it did not
+// say). Never from a missing feature.
+export function implWords(support) {
+  const impl = (support && support.impl) || "";
+  return { linux: "Linux harness", "bare-metal": "bare-metal harness" }[impl] || "";
+}
+
+// "this Linux harness image" when the harness said what it is, else "this harness image".
+function thisImage(support) {
+  const w = implWords(support);
+  return `this ${w || "harness"} image`;
+}
+
+// What the image does not report, by capability, with the feature that would report it:
+// [{key, what, feature}] (the card's one "Not reported by this image" line).
+export function notReported(f) {
+  const p = f.body && f.body.panel;
+  if (!p) return [];
+  const support = f.body.support || {};
+  const out = [];
+  if (!p.page) out.push({ key: "page", what: "page", feature: "harness feature 'panel'" });
+  const t = p.touch || {};
+  if (t.ok !== true && t.ok !== false) out.push({ key: "touch", what: "touch health", feature: "the harness's stats (touch_ok)" });
+  if (p.source === "rebuilt") {
+    // a rebuilt state lists no one (the list comes with 'panel'; 'presence' announces us)
+    out.push({ key: "sessions", what: "who is connected",
+      feature: support.presence ? "harness feature 'presence'" : "harness feature 'panel'" });
+    out.push({ key: "taps", what: "recent taps", feature: "harness feature 'panel'" });
+  }
+  return out;
+}
+
+// The Board tile's parts: [{text, level, icon, title, key}]. PANEL-TRUTH: a page the image
+// does not report is left out (the Front panel card lists what is not reported).
 export function lineParts(f) {
   if (f.unsupported) return [{ key: "none", text: "this harness-manager-daemon has no front-panel routes", level: "unk", icon: "circle-slash" }];
   if (f.error && !f.body) return [{ key: "err", text: `${f.error.errName}: ${f.error.message}`, level: "err", icon: "circle-x" }];
@@ -282,7 +327,8 @@ export function lineParts(f) {
   if (!f.body) return [{ key: "loading", text: "reading...", level: "muted" }];
   const p = f.body.panel;
   if (!p) return [{ key: "none", text: `not available: ${f.body.reason || "this board has no front panel Harness Manager can reach"}`, level: "unk", icon: "circle-slash" }];
-  return [{ key: "page", ...pagePart(p) }, { key: "owner", ...ownerPart(p) }, { key: "touch", ...touchPart(p.touch) }];
+  const page = p.page ? [{ key: "page", ...pagePart(p) }] : [];
+  return [...page, { key: "owner", ...ownerPart(p) }, { key: "touch", ...touchPart(p.touch) }];
 }
 
 function Parts({ parts }) {
@@ -295,7 +341,7 @@ function RebuiltTag({ f, testid }) {
   const p = f.body && f.body.panel;
   if (!p || p.source !== "rebuilt") return null;
   return html`<span class="tag rebuilt-tag" data-testid=${testid}
-    title=${`${p.note || REBUILT_TEXT}. The live panel needs the Linux harness.`}>rebuilt</span>`;
+    title=${`${p.note || REBUILT_TEXT}: ${thisImage(f.body.support)} does not send its panel's text (harness feature 'panel')`}>rebuilt</span>`;
 }
 
 // --- Identify ------------------------------------------------------------------------------------
@@ -407,6 +453,8 @@ function Mirror({ f }) {
   const rows = Array.isArray(fr.rows) ? fr.rows : [];
   const roles = String(fr.roles || "");
   const rebuilt = fr.source === "rebuilt";
+  // PANEL-TRUTH: a fact Harness Manager did not read is an em dash, and the legend says why.
+  const unknown = rebuilt && rows.some((row) => String(row).includes(UNKNOWN_MARK));
   return html`<div class=${`panel-mirror ${rebuilt ? "rebuilt" : ""}`} data-testid="panel-mirror"
       data-source=${fr.source || ""} role="group"
       aria-label=${`The front panel's text, ${rows.length} rows${rebuilt ? `, ${REBUILT_TEXT}` : ""}`}>
@@ -415,17 +463,16 @@ function Mirror({ f }) {
       return html`<div class="pm-row" key=${r} data-row=${r}>${runs(text, roles.slice(r * 40, r * 40 + 40))
         .map((run, i) => html`<span key=${i} class=${ROLE_CLASS[run.r] || undefined}>${run.text}</span>`)}</div>`;
     })}
-  </div>`;
+  </div>
+  ${unknown ? html`<p class="muted small pm-legend" data-testid="panel-mirror-legend"><span class="mono">${UNKNOWN_MARK}</span> ${NOT_REPORTED}</p>` : null}`;
 }
 
 const ROLE_WORDS = { holder: "holds the lease", owner: "has it open", watch: "watching" };
 
+// Only on an image that reports them (PANEL-TRUTH: the card leaves the row out otherwise, and
+// its "Not reported by this image" line says so).
 function Sessions({ f }) {
   const p = f.body.panel;
-  const support = f.body.support || {};
-  if (p.source === "rebuilt") {
-    return html`<span class="muted" data-testid="panel-sessions-none">not reported: ${support.presence || "needs the Linux harness"}</span>`;
-  }
   const list = p.sessions || [];
   if (!list.length) {
     return html`<span class="muted" data-testid="panel-sessions-none">${p.count ? `${plural(p.count, "session", "sessions")}, not listed yet` : "no Harness Manager connected"}</span>`;
@@ -443,8 +490,6 @@ function Sessions({ f }) {
 const TAP_WORDS = { request: "the lease request", identify: "Identify (found it)", nav: "next page" };
 
 function Taps({ f }) {
-  const p = f.body.panel;
-  if (p.source === "rebuilt") return html`<span class="muted" data-testid="panel-taps-none">not reported by a bare-metal harness</span>`;
   if (!f.taps.length) return html`<span class="muted" data-testid="panel-taps-none">none</span>`;
   return html`<ul class="pm-list" data-testid="panel-taps">${f.taps.slice(0, TAPS_SHOWN).map((t) => html`<li key=${t.seq}
       data-tap=${t.seq} data-on=${t.on}>
@@ -457,6 +502,49 @@ function OwnerChip({ p }) {
   const o = ownerPart(p);
   return html`<${Chip} level=${o.level === "busy" ? "accent" : o.level} testid="panel-owner-chip"
     icon=${o.level === "ok" ? "circle-check" : o.level === "held" ? "lock" : o.level === "busy" ? "" : "circle-help"}>${o.text}<//>`;
+}
+
+// PANEL-TRUTH: the card's one headline: what the card shows now, in plain words.
+//   live      the Live display has the board's own picture;
+//   read      the text was read from the panel (an image with 'panel');
+//   rebuilt   Harness Manager rebuilt the text from what it read (an image without it);
+//   none      nothing to show, and why.
+export function headline(f, live) {
+  const p = f.body && f.body.panel;
+  if (live) return { state: "live", level: "ok", chip: "Live", text: "the board's own picture, as its panel shows it now" };
+  if (!p) return null;
+  if (p.source === "rebuilt") {
+    return { state: "rebuilt", level: "unk", chip: "Rebuilt",
+      text: `Rebuilt from what Harness Manager read, not read from the panel: ${thisImage(f.body.support)} does not send its panel's text.` };
+  }
+  return { state: "read", level: "", chip: "Read", text: "" };
+}
+
+function Headline({ f, h }) {
+  const p = f.body.panel;
+  const now = Date.now() / 1000;
+  return html`<div class="panel-headline mb-12" data-testid="panel-headline" data-state=${h.state}>
+    <${Chip} level=${h.level} testid="panel-headline-chip">${h.chip}<//>
+    ${h.state === "rebuilt" ? html`<span class="secondary small" data-testid="panel-rebuilt">${h.text}</span>`
+      : h.state === "read" ? html`<span class="muted small" data-testid="panel-read-age">Read from the panel${p.observed_at ? `, ${ageText(p.observed_at, now)}` : ""}.</span>`
+        : html`<span class="muted small" data-testid="panel-live-note">${h.text}</span>`}
+  </div>`;
+}
+
+// One line for everything the image does not report; the features behind a disclosure.
+function NotReported({ f }) {
+  const items = notReported(f);
+  if (!items.length) return null;
+  const support = f.body.support || {};
+  const impl = implWords(support);
+  return html`<details class="panel-missing mt-8" data-testid="panel-not-reported"
+      data-missing=${items.map((i) => i.key).join(" ")}>
+    <summary class="muted small"><${Icon} name="chevron-right" cls="sm chev" />Not reported by this image: ${items.map((i) => i.what).join(", ")}</summary>
+    <ul class="pm-list muted small" data-testid="panel-not-reported-details">
+      ${items.map((i) => html`<li key=${i.key} data-missing=${i.key}>${i.what}: needs ${i.feature}</li>`)}
+      <li key="impl" data-testid="panel-impl">${impl ? `the harness says it is the ${impl}` : "the harness did not say which harness it is"}${support.impl ? ` (version.impl "${support.impl}")` : ""}</li>
+    </ul>
+  </details>`;
 }
 
 export function PanelCard({ bid }) {
@@ -473,8 +561,7 @@ export function PanelCard({ bid }) {
     return () => { g.cards -= 1; clearInterval(timer); };
   }, [bid]);
   const p = f.body && f.body.panel;
-  const actions = p ? html`<span class="row"><${RebuiltTag} f=${f} testid="panel-rebuilt-tag" /><${OwnerChip} p=${p} /></span>` : null;
-  const now = Date.now() / 1000;
+  const actions = p ? html`<span class="row"><${OwnerChip} p=${p} /></span>` : null;
   let body;
   if (f.unsupported || !f.body || !p) {
     const parts = lineParts(f);
@@ -483,28 +570,34 @@ export function PanelCard({ bid }) {
       body = html`<${QuietNote} testid="panel-quiet" action="panel-read-now" busy=${f.loading && f.explicit}
         text=${quietWords(f.quiet)}
         onRead=${() => readPanelNow(bid)} />`;
+    } else if (parts[0].key === "loading") {
+      body = html`<${Reason} level="unk" testid="panel-unavailable" text="Reading the panel..." />`;
     } else {
-      body = html`<${Reason} level=${parts[0].level === "err" ? "err" : "unk"} icon=${parts[0].icon || ""}
-        testid="panel-unavailable" text=${parts[0].key === "loading" ? "Reading the panel..." : parts[0].text} />`;
+      // PANEL-TRUTH: one headline, "Not available", and the reason in plain words.
+      body = html`<div class="panel-headline" data-testid="panel-headline" data-state="none">
+        <${Chip} level=${parts[0].level === "err" ? "err" : "unk"} testid="panel-headline-chip">Not available<//>
+        <${Reason} level=${parts[0].level === "err" ? "err" : "unk"} icon=${parts[0].icon || ""}
+          testid="panel-unavailable" text=${parts[0].text} />
+      </div>`;
     }
   } else {
     const touch = touchPart(p.touch);
+    const missing = new Set(notReported(f).map((i) => i.key));
+    const h = headline(f, displayLive(bid));
     body = html`
-      ${p.source === "rebuilt"
-        ? html`<div class="mb-12"><${Reason} level="unk" icon="circle-help" testid="panel-rebuilt"
-            text=${`Rebuilt from what Harness Manager read, not read from the panel. This harness (bare metal) reports only who owns the panel; the live mirror, who is connected and Identify need the Linux harness.`} /></div>`
-        : html`<p class="muted small mb-12" data-testid="panel-read-age">Read from the panel${p.observed_at ? `, ${ageText(p.observed_at, now)}` : ""}.</p>`}
+      <${Headline} f=${f} h=${h} />
       <${LiveDisplay} bid=${bid}><${Mirror} f=${f} /><//>
       <dl class="kv mt-14">
-        <dt>Page</dt><dd data-testid="panel-page"><${Parts} parts=${[{ key: "page", ...pagePart(p) }]} /></dd>
         <dt>Owner</dt><dd data-testid="panel-owner"><${Parts} parts=${[{ key: "owner", ...ownerPart(p) }]} /></dd>
+        ${missing.has("page") ? null : html`<dt>Page</dt><dd data-testid="panel-page"><${Parts} parts=${[{ key: "page", ...pagePart(p) }]} /></dd>`}
         ${p.banner ? html`<dt>Banner</dt><dd class="mono" data-testid="panel-banner">${p.banner}</dd>` : null}
         ${p.card ? html`<dt>Card</dt><dd class="mono" data-testid="panel-card-slot">${p.card}</dd>` : null}
-        <dt>Touch</dt><dd data-testid="panel-touch"><${Parts} parts=${[{ key: "touch", ...touch }]} /></dd>
-        <dt>Sessions</dt><dd><${Sessions} f=${f} /></dd>
-        <dt>Recent taps</dt><dd><${Taps} f=${f} /></dd>
+        ${missing.has("touch") ? null : html`<dt>Touch</dt><dd data-testid="panel-touch"><${Parts} parts=${[{ key: "touch", ...touch }]} /></dd>`}
+        ${missing.has("sessions") ? null : html`<dt>Sessions</dt><dd><${Sessions} f=${f} /></dd>`}
+        ${missing.has("taps") ? null : html`<dt>Recent taps</dt><dd><${Taps} f=${f} /></dd>`}
         <dt>Identify</dt><dd><${IdentifyControl} bid=${bid} testid="panel-identify" /></dd>
-      </dl>`;
+      </dl>
+      <${NotReported} f=${f} />`;
   }
   return html`<${Card} title="Front panel" icon="monitor" actions=${actions} testid="panel-card">${body}<//>`;
 }
