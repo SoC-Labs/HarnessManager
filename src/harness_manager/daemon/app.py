@@ -119,7 +119,8 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
               "kit_api", "xvc_api", "harness_api", "settings_api", "claim_api", "card_api",
               "hubs_api", "display_api",   # SET-UI: Settings > Hubs; LM3: the Live display
               "quiet_api",                 # QUIET-POLL: viewers and the background gate
-              "identity_api")              # BOARD-ID: label/IP/MAC and the fix
+              "identity_api",              # BOARD-ID: label/IP/MAC and the fix
+              "hil_api")                   # HIL-GUI: the unattended checks, from the app
 
 
 @dataclass
@@ -388,6 +389,11 @@ class Daemon:
         self.console_limits = console_limits
         self._mu = threading.Lock()
         self._candidates: dict[str, Candidate] = {}
+        # HIL-GUI: an extension that needs a board to stay open (a checks run) refuses its
+        # close here, and the service's stop without force: ``guard(board_id)`` /
+        # ``guard(force)`` raise the refusal (HELD, naming what holds it).
+        self.close_guards: list[Callable[[str], None]] = []
+        self.shutdown_guards: list[Callable[[bool], None]] = []
         self._unlog = self.bus.subscribe("*", _log_event)
         # QUIET-POLL (services/quiet.py): background contact with a board happens only while
         # a UI views it, never while its hub lease is someone else's, never under policy
@@ -550,6 +556,8 @@ _LOGGED = {
     "update.rolled_back": ("from", "to", "phase", "reason"),
     # lane SET-API: which settings changed and what they need (never a value)
     "settings.changed": ("keys", "apply", "source"),
+    # lane HIL-GUI: a checks run's life (never its per-check progress)
+    "checks.state": ("run", "state", "result", "plan", "writes", "reason"),
 }
 
 
@@ -1032,6 +1040,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def stop_daemon(body: JsonBody = None) -> JSONResponse:
         b = _obj(body)
         force = _bool(b, "force", False)
+        for guard in d.shutdown_guards:        # HIL-GUI: a checks run, unless forced
+            guard(force)
         running = d.jobs.running()
         if running and not force:
             names = ", ".join(f"{j.describe()} on {j.board_id}" for j in running)
@@ -1405,6 +1415,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         # holds on the board first; a failed release leaves the board open. ``released`` is
         # the lease given back, or null when none was held here.
         want = _query_flag(release, "release")
+        for guard in d.close_guards:           # HIL-GUI: a checks run keeps its board open
+            guard(bid)
         job = d.gates.busy(bid)
         if job is not None:
             raise busy_error(bid, job)
