@@ -58,6 +58,20 @@ owners.
 - A board still on the image's default label `MPS3` shows "identity not set (default label)"
   and is never a clash with another board on the label alone; a shared MAC still is.
 
+### Front panel: the Linux harness's presence and panel as shipped (PANEL-V017)
+- The Front panel card's text mirror reads the colour of every cell as the board sends it
+  (net-protocol v0.17): one letter per role, in the order of `design/tokens.json`. It used
+  to invert every `i` cell, and on the wire `i` is "ok". In today's look the banners are
+  white on red; with the board's aligned look (`--panel-theme aligned`) the mirror shows the
+  panel's own colours.
+- The panel's status glyphs (tick, cross, warning, lock, person, question, dot) are drawn
+  in the mirror as the panel draws them; `harness-manager panel mirror` prints a
+  one-character stand-in instead of an invisible control character.
+- A hello the board refuses is reported (presence's last error) and Harness Manager keeps
+  the board's feature list; only a board that lacks the verb is read again.
+- Row 0 of the panel keeps the board's own label (it tells boards apart); your Harness
+  Manager shows in the `hm` row.
+
 ### Install
 - `scripts/install.sh` (Linux, macOS) and `scripts/install.ps1` (Windows): one command
   makes a private venv, installs Harness Manager, and puts `harness-manager` on your PATH.

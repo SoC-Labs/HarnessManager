@@ -208,10 +208,26 @@ def test_a_harness_that_drops_a_verb_it_announced_is_read_again_and_refused(linu
 
 
 def test_the_harness_refuses_a_line_over_256_bytes_and_accepts_a_capped_one(linux):
+    """PANEL-V017: as the board SHIPPED it (net-protocol v0.17): a line over 256 characters is
+    refused whole at the line layer with the tokenizer's words, ``bad json`` (no code), and
+    the session table is unchanged; HM's capped hello of the same person is accepted."""
     too_long = {"op": "hello", "v": 1, "sid": "a1", "who": "w" * 300, "app": "hm",
                 "role": "watch", "ttl": 90}
-    assert linux.vb.shell.handle_control(too_long)["err"].startswith("line too long")
+    assert linux.vb.shell.handle_control(too_long) == {"ok": False, "err": "bad json"}
+    assert linux.vb.shell.board_sessions == {}, "refused whole: nothing joined"
     assert linux.panel.hello(Hello(sid="a1", who="w" * 300, app="hm")).count >= 1
+
+
+def test_negative_twin_a_line_of_exactly_256_characters_is_not_refused(linux):
+    """The limit is the characters before the newline: 256 passes, 257 is ``bad json``."""
+    base = {"op": "hello", "v": 1, "sid": "a1", "who": "", "app": "hm", "role": "watch",
+            "ttl": 90}
+    pad = 256 - len(json.dumps(base, separators=(",", ":")))
+    fits = {**base, "who": "w" * pad}
+    over = {**base, "who": "w" * (pad + 1)}
+    assert len(json.dumps(fits, separators=(",", ":"))) == 256
+    assert linux.vb.shell.handle_control(fits)["ok"] is True
+    assert linux.vb.shell.handle_control(over) == {"ok": False, "err": "bad json"}
 
 
 # --- riding a connection HM makes anyway ---------------------------------------------------------
@@ -271,10 +287,15 @@ def test_bare_metal_mirror_is_rebuilt_from_what_hm_read(bare):
     frame = bare.panel.frame()
     assert frame.source == "rebuilt" and len(frame.rows) == ROWS
     assert frame.rows[4].startswith("SID : 0x72BB0A36")
-    assert frame.roles == "t" * (ROWS * COLS)
+    # PANEL-V017: the wire's letters (design/tokens.json order): "a" text; the DUT notice
+    # rows take the role the Linux harness gives them in today's theme, "u" banner-held
+    assert frame.roles == "a" * (ROWS * COLS) and frame.theme == "today"
+    assert {frame.role_at(r, c) for r in range(ROWS) for c in range(COLS)} == {"text"}
     bare.vb.shell.display_owner = bare.vb.shell.display_target = "dut"
     dut = bare.panel.frame()
-    assert dut.rows[6].strip() == "DUT HAS THE DISPLAY" and dut.roles[6 * COLS] == "i"
+    assert dut.rows[6].strip() == "DUT HAS THE DISPLAY" and dut.roles[6 * COLS] == "u"
+    assert [dut.role_at(r, 0) for r in (5, 6, 7, 8, 9)] == \
+        ["text", "banner-held", "banner-held", "banner-held", "text"]
 
 
 def test_bare_metal_refuses_hello_and_identify_with_the_reason_and_sends_neither(bare):

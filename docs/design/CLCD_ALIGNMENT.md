@@ -165,15 +165,22 @@ The QR code is not worth building now.
 | `sid` | 8 hex chars, random per (HM daemon, board open) |
 | `who` | `user@host` |
 | `app` | `hm/<version>` |
-| `name` | the N1 name (the panel shows it on row 0, so the glass and the rail say the same `mps3-01`) |
+| `name` | the N1 name. **As shipped (net-protocol v0.17): kept, not drawn.** Row 0 shows the board's own resolved label (v0.16 "Identity"), not `name`: see §4.4 (decided 2026-09-28) |
 | `role` | `holder` (this session holds the hub lease), `owner` (standalone: this daemon has the board open and ran the last write job) or `watch` |
 | `lease.by`, `lease.req` | **user part only** |
 | `lease.left`, `lease.rl` | **relative seconds**. The board has no wall clock it can trust (bare metal has none; the Linux image may lack NTP), so it ages them on its own monotonic clock from the moment the hello arrived |
-| `job` | a running HM job, `k` + percent |
+| `job` | a running HM job, `k` + percent. Kept, not drawn in v0.17 |
 
 - **Budget:** printable ASCII only, clipped per field (`who` 20, `name` 16, users 12, `app` 12). The worst case is **251 B** against the 256 B line buffer (`tests/unit/test_clcd_mock.py::test_the_worst_case_hello_fits_the_harness_line_buffer`).
 - If the Linux lanes raise `MPS3_NET_LINE_MAX` for harnessd, the caps can relax.
-- The reply is at most about 400 B, well inside 1280.
+- The reply is at most about 400 B, well inside 1280 (the board measured its worst case: 780 B).
+
+**As the Linux harness shipped it (net-protocol v0.17, platform `feat/panel-aligned` f0f5d6f; lane PANEL-V017 aligned HM and its fakes):**
+- **The line limit** is 256 characters, the newline not counted. A longer line is refused whole at the line layer with the tokenizer's words, `{"ok":false,"err":"bad json"}` (no code), and the session table is unchanged. HM's worst case (251 B with its newline) stays inside it.
+- **A refusal** is `code` `invalid` with the board's words (`invalid sid: 1-8 printable characters`, `invalid who: ...`, `invalid role: holder, owner or watch`, `invalid ttl: ...`, `invalid lease: ...`, `invalid job: ...`). HM reports it (a usage error, presence's `last_error`) and KEEPS the harness's feature list: only a missing verb (`unknown op`, `code` `not_supported`) makes HM read the features again.
+- **The reply's `panel.banner` can lag by one panel refresh (250 ms):** the reply is rendered from the committed panel, so a lease-request banner this hello asks for is not in its own reply. HM never waits for it or reads it back; the next reply or `panel` read carries it.
+- **No rate limit on the board** for `hello` or `panel` (every reply is rendered from memory). HM's own pacing (§5.3) is the only one, and it stays.
+- **Features** `presence` and `panel` come after `locate` in `version.features`; HM reads them as a set (any order).
 
 ### 2.3 Multiple sessions
 
@@ -212,11 +219,16 @@ A watcher's HM also knows the holder from `lease show`, so the badge survives wh
                                       "card":"nanosoc [A]","touch":{"present":true,"cal":true},
                                       "sessions":[{"sid":"a1b2c3d4","who":"david@srv03335","role":"holder","age_s":12}],
                                       "seq":17,"events":[...]}
--> {"op":"panel","frame":true}    <- ... + "rows":[15 x 40-char strings],"roles":"<per-cell role codes, 600 chars>"
--> {"op":"panel","page":"apps"}   <- {"ok":true,"page":"apps"}   (only while the harness owns the panel)
+-> {"op":"panel","frame":"a"}     <- {"ok":true,"op":"panel","frame":"a","theme":"today","rows":[8 x 40 cells],"roles":"<320 codes>"}
+-> {"op":"panel","frame":"b"}     <- ... rows 8-14: 7 rows, 280 codes
+-> {"op":"panel","page":"apps"}   <- {"ok":true,"op":"panel","page":"apps"}   (only while the harness owns the panel; claim-locked)
 ```
 
-- `frame:true` is about 1.25 KB, near the 1280 limit. So `roles` is sent run-length encoded, or split: `frame:"a"` gives rows 0-7 and `frame:"b"` rows 8-14. The Linux lane picks one and measures it.
+- **The frame comes in two halves (as shipped, v0.17):** a whole frame is about 1.3 KB, over the 1280 B reply limit, so `frame:"a"` gives rows 0-7 and `frame:"b"` rows 8-14, each reply carrying ONLY `ok`, `op`, `frame`, `theme`, `rows`, `roles`. `frame:true` (or any value but `"a"`/`"b"`) is refused: `{"ok":false,"err":"invalid frame: \"a\" (rows 0-7) then \"b\" (rows 8-14)","code":"invalid"}`. HM only ever asks `"a"` then `"b"`, on one connection.
+- **A row** is 40 cells of printable ASCII, a status glyph as `\u0080`-`\u0086` (one character each; HM draws it from the glyph table's 8x16 bitmap).
+- **A role code** is `chr(ord("a") + i)` for the i-th colour role of `design/tokens.json` `panel.roles`, the order of the generated `clcd_palette.h` enum: `a` text, `b` label, `c` value, `d` rule, `e` chrome, `f` title, `g` title-held, `h` title-warn, `i` ok, `j` warn, `k` err, `l` busy, `m` unk, `n` held, `o` bar, `p` track, `q` banner-err, `r` banner-warn, `s` banner-ok, `t` banner-busy, `u` banner-held. HM decodes it with ONE table generated from the tokens (`tools/gen_panel_codes.py` writes `core/panel_codes.py` and the web UI's `js/panel_codes.js`), and its rebuilt frames use the same letters (`a` text, `u` the DUT notice, as the Linux harness sends in today's theme).
+- **`theme`** names the palette: `today` (the default: every role white on black, every `banner-*` white on red; today's inverted rows are `q`, the DUT notice `u`, an IDENTIFY banner `t`, the lease-request banner `u`) or `aligned` (`--panel-theme aligned`: the tokens' colours). HM's text mirror draws `today` as today's look and `aligned` in the glass's own colours.
+- **A page change is claim-locked** (`{"ok":false,"err":"panel locked: board claimed (use ssh)","code":"locked"}`, first), then judged (`invalid`), then refused while the DUT owns the panel (`held`). HM sends no page change today. **For the future:** a page set from HM must go through the session's claim forward (CLAIMED-LOCK's `lock_route`, as `identity_set` does) and map `locked` to the claim hint; the MPS3 adapter's refusal mapping already turns `locked` into `ClaimLockedError` and `held` into a refusal naming the code.
 - **Events are a ring of 8 with a rising `seq`.** Each HM remembers the last `seq` it saw. Nothing is acknowledged or deleted, so two HMs both see a tap.
 
 **HM shows:**
@@ -301,13 +313,13 @@ A watcher's HM also knows the holder from `lease show`, so the badge survives wh
 
 | Concept | HM says | Panel today | Panel proposed |
 |---|---|---|---|
-| the board | `mps3-01` (N1) | `MPS3-01` (build constant) | `mps3-01`, from `hello.name`, then the N1 `name` key (via the `clcd_set_board_name` seam) |
+| the board | `mps3-01` (N1) | `MPS3-01` (build constant) | **decided 2026-09-28: the board's own label** (net-protocol v0.16 "Identity": `mps3-01`, resolved on the board) on row 0; it tells boards apart. `hello.name` is accepted but not drawn |
 | the static | shell `0x72bb0a36` | `SID :` | `shell 0x72BB0A36` |
 | what the partition holds | Design | `DUT :` (row 2) | `design nanosoc v1.0 ✓verified` |
 | loading it | Program | `SWAP:` | `prog #001 loaded … last ok` |
 | user microSD | card (D13) | `USD :` | `card nanosoc [A]` |
 | hub lease | Lease chip | none | row 0 badge `🔒 david 1h12m, 1 waiting` |
-| a Harness Manager | the app | none | `hm david@srv03335 +1 watching` |
+| a Harness Manager | the app | none | `hm david@srv03335 +1 watching`: HM's session identity (`who`) shows in the session row (row 11), never on row 0 |
 | the engine | harness (bare-metal / linux) | `nanoSoC harness`, `SYS : linux` | `sys linux ssh claimed …` |
 
 **Hex case:** HM prints lower case (`hm:src/harness_manager_mps3/shell.py:97-107`), the panel upper case. Leave each as it is; hex is not prose.
@@ -359,8 +371,8 @@ Capability routes: `front_panel` via Ethernet/hub with feature `panel`, falling 
 
 | Verb | Request | Reply | Rate limits |
 |---|---|---|---|
-| `hello` | §2.2; ≤ 256 B | `{ok, sessions, panel, events}` | host: ≤ 1 per 10 s per `sid` (30 s normally). Board: repaint rows 0/11 only when their text changes; hellos from one `sid` less than 2 s apart get a reply but cause no repaint |
-| `panel` | `{}` \| `{"frame":true}` \| `{"page":"status"\|"apps"}` | §2.5 | ≤ 1/s per client; `frame` ≤ 1 per 3 s. A page change only while the harness owns the panel, else `{"ok":false,"err":"dut owns the panel"}` |
+| `hello` | §2.2; ≤ 256 characters | `{ok, op, sessions, panel, events}` | host: ≤ 1 per 10 s per `sid` (30 s normally). Board: no rate limit (v0.17); what one `sid` draws changes at most once per 2 s (a sooner hello is answered and refreshes the TTL, drawn at the next commit) |
+| `panel` | `{}` \| `{"frame":"a"\|"b"}` \| `{"page":"status"\|"apps"}` | §2.5 | host: ≤ 1/s per client, a frame (both halves) ≤ 1 per 3 s; board: no rate limit (v0.17). A page change is claim-locked (`locked`), and only while the harness owns the panel, else `{"ok":false,"err":"dut owns the panel","code":"held"}` |
 | `locate` | `{"s":1-30,"who":"…"}`; `{"s":0}` stops | `{ok, until_ms}` | one at a time (a new one replaces it); blink period 500 ms, from the clcd service tick; the backlight is restored to on when it ends, or if harnessd restarts (clcd init) |
 
 **Feature bits** in `version.features`: `presence`, `panel`, `locate`.

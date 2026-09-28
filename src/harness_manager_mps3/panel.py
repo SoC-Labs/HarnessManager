@@ -53,7 +53,13 @@ from collections.abc import Callable
 from typing import Any
 
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import UnavailableError, UsageError
+from harness_manager.core.errors import (
+    ClaimLockedError,
+    HarnessError,
+    RefusedError,
+    UnavailableError,
+    UsageError,
+)
 from harness_manager.core.model import BoardIdentity, LinkKind
 from harness_manager.core.panel import (
     COLS,
@@ -61,11 +67,12 @@ from harness_manager.core.panel import (
     LOCATE_MAX_MS,
     LOCATE_WHO_WIRE_MAX,
     REBUILT_NOTE,
-    ROLE_INVERTED,
+    ROLE_DUT_NOTICE,
     ROLE_TEXT,
     ROWS,
     SOURCE_PANEL,
     SOURCE_REBUILT,
+    THEME_TODAY,
     UNKNOWN,
     Hello,
     OnReply,
@@ -78,6 +85,7 @@ from harness_manager.core.panel import (
     encode_hello,
     hello_message,
     order_sessions,
+    role_name,
     touch_health,
 )
 
@@ -117,12 +125,44 @@ def _stats(client: Any, tap: Any) -> dict[str, Any] | None:
     return reply if reply.get("ok") else None
 
 
-def _declined(reply: dict[str, Any], capability: str, what: str) -> UnavailableError | None:
-    """The harness said no. "unknown op" means it lacks the verb despite the feature bit."""
+def _missing_verb(reply: dict[str, Any]) -> bool:
+    """The harness lacks the verb despite its feature bit: "unknown op" (an image without
+    it), or ``code`` ``not_supported`` (net-protocol v0.17: a build without the panel)."""
+    return reply.get("code") == "not_supported" or \
+        str(reply.get("err") or "").startswith("unknown op")
+
+
+def _declined(reply: dict[str, Any], capability: str, what: str) -> HarnessError | None:
+    """The harness said no. PANEL-V017: only a MISSING verb (``_missing_verb``) is
+    ``UnavailableError``, the one refusal after which the caller reads the features again
+    (``forget``). Any other refusal is reported as it came and the features are KEPT: a
+    request the harness judged (``code`` ``invalid``) is a ``UsageError``, the claim lock
+    (``locked``) a ``ClaimLockedError``, the rest (``held``, ``too_large``, ...) a
+    ``RefusedError`` naming the code."""
     if reply.get("ok"):
         return None
     err = str(reply.get("err") or "no reason given")
-    return UnavailableError(capability, f"the harness declined {what}: {err}")
+    code = str(reply.get("code") or "")
+    if _missing_verb(reply):
+        return UnavailableError(capability, f"the harness declined {what}: {err}")
+    if code == "invalid":
+        return UsageError(f"the harness refused {what}: {err}",
+                          hint="Harness Manager sent something this harness image does not "
+                               "accept; nothing changed on the board")
+    if code == "locked":
+        return ClaimLockedError(f"the harness refused {what}: {err}",
+                                hint="the board's SSH is claimed: reach it over SSH")
+    return RefusedError(f"the harness refused {what}: {err}" + (f" ({code})" if code else ""))
+
+
+def _raise_declined(panel: Mps3Panel, reply: dict[str, Any], capability: str,
+                    what: str) -> None:
+    refusal = _declined(reply, capability, what)
+    if refusal is None:
+        return
+    if isinstance(refusal, UnavailableError):
+        panel.forget()                          # the verb is gone: read the features again
+    raise refusal
 
 
 def _events(raw: Any, wall: float) -> tuple[PanelEvent, ...]:
@@ -180,6 +220,29 @@ def parse_hello_reply(reply: dict[str, Any], *, wall: float) -> PanelState:
     return parse_state(merged, wall=wall)
 
 
+def frame_from_halves(replies: list[dict[str, Any]], *, wall: float) -> PanelFrame:
+    """The ``panel`` ``frame`` halves (net-protocol v0.17: ``{ok, op, frame, theme, rows,
+    roles}`` each, nothing else) as one frame. A row is 40 cells, a status glyph one
+    character (``\\u0080``-``\\u0086``); ``roles`` is one code per cell in design/tokens.json
+    order (``core.panel.role_name``). Roles that do not cover the grid, or name no role, are
+    dropped whole (the mirror then draws plain text); ``theme`` is the halves' own when they
+    agree, else "" (a flip between the two reads)."""
+    rows: list[str] = []
+    roles = ""
+    themes = set()
+    for reply in replies:
+        rows += [_row(str(r)) for r in reply.get("rows") or ()]
+        roles += str(reply.get("roles") or "")
+        themes.add(str(reply.get("theme") or ""))
+    if len(rows) != ROWS:
+        raise UnavailableError(C.FRONT_PANEL, f"the harness sent {len(rows)} rows, not {ROWS}")
+    if len(roles) != ROWS * COLS or not all(role_name(c) for c in set(roles)):
+        roles = ""
+    theme = themes.pop() if len(themes) == 1 else ""
+    return PanelFrame(rows=tuple(rows), roles=roles, source=SOURCE_PANEL, observed_at=wall,
+                      theme=theme)
+
+
 # --- the rebuilt mirror (an image without `panel`) ----------------------------------------
 
 
@@ -221,13 +284,15 @@ def rebuilt_frame(*, name: str, identity: BoardIdentity | None, host: str, owner
 
     roles = [ROLE_TEXT * COLS for _ in range(ROWS)]
     if owner == "dut":
-        # The KVM notice the harness leaves on the glass (clcd.c:543-553), rows 6-8 inverted.
+        # The KVM notice the harness leaves on the glass (clcd.c:543-553), rows 6-8 inverted:
+        # the role the Linux harness gives those rows in today's theme (banner-held, white on
+        # red there), so a rebuilt frame and a read one speak one vocabulary (PANEL-V017).
         rows = [" " * COLS] * ROWS
         rows[0] = "-" * 11 + " nanoSoC harness " + "-" * 12
         rows[6], rows[8] = _centred("DUT HAS THE DISPLAY"), _centred("PRESS  PB1  TO RETURN")
         rows[14] = "-" * COLS
         for r in (6, 7, 8):
-            roles[r] = ROLE_INVERTED * COLS
+            roles[r] = ROLE_DUT_NOTICE * COLS
     else:
         ident = identity or BoardIdentity(board_type="mps3")
         design = ident.rm_name or ident.rm_id or UNKNOWN
@@ -250,7 +315,7 @@ def rebuilt_frame(*, name: str, identity: BoardIdentity | None, host: str, owner
             _row(f"MAC {UNKNOWN}"),
         ]
     return PanelFrame(rows=tuple(rows), roles="".join(roles), source=SOURCE_REBUILT,
-                      observed_at=wall, note=REBUILT_NOTE)
+                      observed_at=wall, note=REBUILT_NOTE, theme=THEME_TODAY)
 
 
 # --- the adapter ---------------------------------------------------------------------------
@@ -338,10 +403,7 @@ class Mps3Panel:
                 return reply, (_stats(c, tap) if stats_too else None)
 
             reply, stats = self._shell.call_raw(ask)
-            refusal = _declined(reply, C.FRONT_PANEL, "the panel read")
-            if refusal is not None:
-                self.forget()
-                raise refusal
+            _raise_declined(self, reply, C.FRONT_PANEL, "the panel read")
             return parse_state(reply, wall=self._wall(), stats=stats)
         if "clcd_kvm" in f:
             def ask_owner(c: Any, tap: Any) -> tuple[Any, dict[str, Any] | None]:
@@ -378,19 +440,8 @@ class Mps3Panel:
 
         replies = self._shell.call_raw(ask)
         for reply in replies:
-            refusal = _declined(reply, C.FRONT_PANEL, "the frame read")
-            if refusal is not None:
-                raise refusal
-        rows: list[str] = []
-        roles = ""
-        for reply in replies:
-            rows += [_row(str(r)) for r in reply.get("rows") or ()]
-            roles += str(reply.get("roles") or "")
-        if len(rows) != ROWS:
-            raise UnavailableError(C.FRONT_PANEL, f"the harness sent {len(rows)} rows, "
-                                                  f"not {ROWS}")
-        return PanelFrame(rows=tuple(rows), roles=roles if len(roles) == ROWS * COLS else "",
-                          source=SOURCE_PANEL, observed_at=self._wall())
+            _raise_declined(self, reply, C.FRONT_PANEL, "the frame read")
+        return frame_from_halves(replies, wall=self._wall())
 
     # -- presence ---------------------------------------------------------------------------
 
@@ -401,10 +452,7 @@ class Mps3Panel:
     def _send_hello(self, c: Any, hello: Hello) -> PanelState:
         encode_hello(hello)                     # ValueError over LINE_MAX: never on the wire
         reply = _request(c, hello_message(hello))
-        refusal = _declined(reply, C.PRESENCE, "the hello")
-        if refusal is not None:
-            self.forget()
-            raise refusal
+        _raise_declined(self, reply, C.PRESENCE, "the hello")
         return parse_hello_reply(reply, wall=self._wall())
 
     def hello(self, hello: Hello) -> PanelState:
@@ -483,10 +531,7 @@ class Mps3Panel:
             raise UsageError(f"the harness refused Identify: {reply.get('err') or 'invalid'}",
                              hint=f"s 0-{LOCATE_MAX_S}; who at most {LOCATE_WHO_WIRE_MAX} "
                                   "printable ASCII characters")
-        refusal = _declined(reply, C.LOCATE, "Identify")
-        if refusal is not None:
-            self.forget()
-            raise refusal
+        _raise_declined(self, reply, C.LOCATE, "Identify")
         return self._wall() + locate_ms(reply, s) / 1000.0
 
 
@@ -516,5 +561,5 @@ def make_panel_adapter(session: Any) -> Mps3Panel | None:
     return panel
 
 
-__all__ = ["LINE_MAX", "Mps3Panel", "board_address", "locate_ms", "make_panel_adapter",
-           "parse_hello_reply", "parse_state", "rebuilt_frame"]
+__all__ = ["LINE_MAX", "Mps3Panel", "board_address", "frame_from_halves", "locate_ms",
+           "make_panel_adapter", "parse_hello_reply", "parse_state", "rebuilt_frame"]

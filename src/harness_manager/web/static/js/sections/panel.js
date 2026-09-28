@@ -33,6 +33,7 @@ import { ActionRow, Card, Chip, Icon, QuietNote, Reason, ResultBlock, Spinner } 
 import { LiveDisplay } from "../display.js";        // LM4: the Live display, over the text mirror
 import { LocateButton } from "../locate.js";         // LOCATE: the Board tile's Identify
 import { displayLive } from "../display.js";        // PANEL-TRUTH: the headline's "Live"
+import { GLYPHS, ROLE_COLOURS, ROLES } from "../panel_codes.js";   // PANEL-V017: generated
 
 const STATE_CACHE_MS = 1000;        // the daemon reuses a GET /panel answer this long
 const FRAME_CACHE_MS = 3000;        // ... and a GET /panel/frame answer this long
@@ -426,18 +427,63 @@ export function PanelTileRow({ bid }) {
 
 // --- the Front panel card (Details) ---------------------------------------------------------------
 
-function runs(row, roles) {
+// PANEL-V017: a cell's role CODE is String.fromCharCode(97 + i) for ROLES[i], design/tokens.json's
+// panel roles in order (net-protocol v0.17: a text ... i ok ... q banner-err ... u banner-held);
+// ROLES, their glass colours and the status glyphs come from js/panel_codes.js, GENERATED from
+// the tokens and the panel's glyph table with core/panel_codes.py (tools/gen_panel_codes.py):
+// one vocabulary. A code the tokens do not define is drawn as text.
+export function roleOf(code) {
+  const i = code ? code.charCodeAt(0) - 97 : -1;
+  return i >= 0 && i < ROLES.length ? ROLES[i] : "text";
+}
+
+// Runs of cells with one role; a status glyph (0x80-0x86) is a run of its own.
+export function runs(row, roles) {
   const out = [];
   let cur = null;
   for (let i = 0; i < row.length; i += 1) {
-    const r = roles[i] || "t";
-    if (!cur || cur.r !== r) { cur = { r, text: "" }; out.push(cur); }
+    const role = roleOf(roles[i]);
+    const glyph = GLYPHS[row.charCodeAt(i)] ? row.charCodeAt(i) : 0;
+    if (glyph || !cur || cur.role !== role || cur.glyph) {
+      cur = { role, glyph, text: "" };
+      out.push(cur);
+    }
     cur.text += row[i];
   }
   return out;
 }
 
-const ROLE_CLASS = { i: "pm-inv" };      // a rebuilt frame: t text, i inverted (today's red)
+// A glyph as the panel draws it: its 8x16 bitmap (bit 7 the leftmost pixel), in the run's colour.
+function glyphPath(rows) {
+  let d = "";
+  rows.forEach((bits, y) => {
+    for (let x = 0; x < 8; x += 1) if (bits & (0x80 >> x)) d += `M${x} ${y}h1v1h-1z`;
+  });
+  return d;
+}
+const GLYPH_PATHS = Object.fromEntries(Object.entries(GLYPHS).map(([code, g]) => [code, glyphPath(g.rows)]));
+
+// How a run looks. The today theme (and a rebuilt frame, and a harness that did not say): every
+// role but the banners is plain text, the banners today's white on red (pm-inv). The aligned
+// theme: the role's own colours, as the glass shows them.
+function runProps(run, aligned) {
+  if (aligned) {
+    const [fg, bg] = ROLE_COLOURS[run.role] || ROLE_COLOURS.text;
+    return { style: `color: ${fg}; background: ${bg}` };
+  }
+  return { cls: run.role.startsWith("banner-") ? "pm-inv" : undefined };
+}
+
+function Run({ run, aligned }) {
+  const p = runProps(run, aligned);
+  if (run.glyph) {
+    const g = GLYPHS[run.glyph];
+    return html`<span class=${`pm-glyph ${p.cls || ""}`} style=${p.style} data-role=${run.role}
+      data-glyph=${g.name} role="img" aria-label=${g.name}><svg viewBox="0 0 8 16" preserveAspectRatio="none"
+      aria-hidden="true"><path d=${GLYPH_PATHS[run.glyph]} /></svg></span>`;
+  }
+  return html`<span class=${p.cls} style=${p.style} data-role=${run.role}>${run.text}</span>`;
+}
 
 function Mirror({ f }) {
   const fr = f.frame;
@@ -455,15 +501,17 @@ function Mirror({ f }) {
   const rows = Array.isArray(fr.rows) ? fr.rows : [];
   const roles = String(fr.roles || "");
   const rebuilt = fr.source === "rebuilt";
+  const aligned = fr.theme === "aligned";
   // PANEL-TRUTH: a fact Harness Manager did not read is an em dash, and the legend says why.
   const unknown = rebuilt && rows.some((row) => String(row).includes(UNKNOWN_MARK));
-  return html`<div class=${`panel-mirror ${rebuilt ? "rebuilt" : ""}`} data-testid="panel-mirror"
-      data-source=${fr.source || ""} role="group"
+  return html`<div class=${`panel-mirror ${rebuilt ? "rebuilt" : ""} ${aligned ? "aligned" : ""}`} data-testid="panel-mirror"
+      data-source=${fr.source || ""} data-theme=${fr.theme || ""} role="group"
+      style=${aligned ? `background: ${ROLE_COLOURS.text[1]}` : undefined}
       aria-label=${`The front panel's text, ${rows.length} rows${rebuilt ? `, ${REBUILT_TEXT}` : ""}`}>
     ${rows.map((row, r) => {
       const text = String(row).padEnd(40).slice(0, 40);
       return html`<div class="pm-row" key=${r} data-row=${r}>${runs(text, roles.slice(r * 40, r * 40 + 40))
-        .map((run, i) => html`<span key=${i} class=${ROLE_CLASS[run.r] || undefined}>${run.text}</span>`)}</div>`;
+        .map((run, i) => html`<${Run} key=${i} run=${run} aligned=${aligned} />`)}</div>`;
     })}
   </div>
   ${unknown ? html`<p class="muted small pm-legend" data-testid="panel-mirror-legend"><span class="mono">${UNKNOWN_MARK}</span> ${NOT_REPORTED}</p>` : null}`;
