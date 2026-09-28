@@ -109,15 +109,16 @@ def test_the_tsv_row_appends_the_request_columns():
     v["queue"] = [{"position": 1, "holder": "me@here", "mine": True}]
     v["request"]["answer"] = {"answer": "keep", "minutes": 15}
     v["taken"] = {"by": "bob@x"}
+    v["board"] = "mps3_01"                                  # LEASE-BOARD: BOARD is appended
     row = h._row(T, "hub", v)
-    assert len(row) == len(h.LEASE_COLUMNS)
-    assert row[6:] == [1, 1, "r1", "keep:15", True, 0, "bob@x"]
+    assert len(row) == len(h.LEASE_COLUMNS) and h.LEASE_COLUMNS[-1] == "BOARD"
+    assert row[6:] == [1, 1, "r1", "keep:15", True, 0, "bob@x", "mps3_01"]
 
 
 def test_negative_twin_an_old_view_still_fills_every_column():
     row = h._row(T, "hub", {"lease": None, "hub": "hub"})
     assert len(row) == len(h.LEASE_COLUMNS) and row[2] == "free"
-    assert row[6:] == [0, None, "", "", "", 0, ""]
+    assert row[6:] == [0, None, "", "", "", 0, "", ""]      # no board known: an empty BOARD
     assert h.full_view({"lease": None, "hub": None, "queue": None}) == {
         "lease": None, "hub": None, "queue": [], "request": None, "incoming": [], "taken": None}
 

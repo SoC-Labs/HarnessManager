@@ -21,6 +21,13 @@ service has the board open: the service and the CLI keep the lease token in
 the same place (``<state_dir>/leases``), and the service heartbeats a lease the
 CLI took as soon as the board is open there.
 
+Which hub name is shown (LEASE-BOARD, docs/HUB_MODE.md "Boards and targets"): the
+lease is taken on the fpgahub TARGET (``mps3_01_pl``, pyverify's name, so HM and
+the platform's scripts share one lease and one queue), and the output names the
+physical BOARD it belongs to (``mps3_01``) with the target as a detail:
+``mps3-01 (mps3_01 on HUB, target mps3_01_pl)``. JSON adds ``board`` beside
+``target``; the ``lease`` TSV appends a BOARD column.
+
 ``lease acquire`` blocks until the hub grants the lease (it may queue; the
 queue place is kept). Ctrl-C while queued removes the queue entry. There is no
 ``share stop``: fpgahub stops EVERY share on the board with it.
@@ -76,6 +83,7 @@ from harness_manager.services.lease import (
     confirm_board_error,
     default_holder,
     hub_holder,
+    lease_name,
     typed_names,
     view_confirm_error,
 )
@@ -85,8 +93,8 @@ from .output import TSV_COLUMNS, Result
 
 #: The TSV layouts are in ``output.TSV_COLUMNS`` (append-only). ``lease``: L1's six
 #: columns, then the queue length, my place in it, my request, its answer (``keep:15`` /
-#: ``release``), whether force-release is open, the incoming requests (for my lease), and
-#: who force-released my lease last.
+#: ``release``), whether force-release is open, the incoming requests (for my lease),
+#: who force-released my lease last, and (LEASE-BOARD) the physical board, "" when unknown.
 LEASE_COLUMNS = TSV_COLUMNS["lease"]
 
 # --- lease-request rules shared with the daemon (daemon/hub_api.py imports these) ----------
@@ -438,10 +446,11 @@ def _row(target: str, hub: str, view: dict[str, Any]) -> list[Any]:
     req = view["request"]
     answer = _answer_field((req or {}).get("answer"))
     taken = view["taken"]
+    # LEASE-BOARD appends BOARD (the physical board, "" when unknown): TSV layouts only grow.
     return head + [len(queue), mine if mine is not None else (req or {}).get("position"),
                    (req or {}).get("id", ""), answer,
                    "" if req is None else bool(req.get("force_available")),
-                   len(view["incoming"]), (taken or {}).get("by", "")]
+                   len(view["incoming"]), (taken or {}).get("by", ""), view.get("board") or ""]
 
 
 def _clock(iso: Any) -> str:
@@ -644,8 +653,11 @@ class _Countdown:
 
 
 def _lease_result(cand: Any, hub: Any, lease: dict[str, Any], human: list[str],
-                  **extra: Any) -> Result:
-    view = {"lease": lease, "hub": hub.host}
+                  board: str = "", **extra: Any) -> Result:
+    """LEASE-BOARD: ``board`` (the physical board, null when unknown) beside ``lease.target``,
+    at the top as ``lease show`` has it, and in the lease object."""
+    lease = {**lease, "board": lease.get("board") or board or None}
+    view = {"lease": lease, "hub": hub.host, "board": board or None}
     return Result("lease", {"board_id": cand.board_id, "name": _name(cand), **view, **extra},
                   rows=[_row(hub.target, hub.host, view)], human=human)
 
@@ -659,11 +671,12 @@ def _request(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     if refusal is not None:
         raise refusal
     countdown = _Countdown(ctx, svc, cand, hub)
+    board = svc.board_of(hub, ask=False)          # the view above asked the hub already
 
     def progress(phase: str, done: int, _total: int) -> None:
         if phase == "queued":
             where = f" at position {done}" if done else ""
-            countdown.note(f"queued{where} for {_where(cand, hub)} (Ctrl-C leaves the queue)")
+            countdown.note(f"queued{where} for {_where(cand, hub, board)} (Ctrl-C leaves the queue)")
         elif phase in ("notified", "answered"):
             countdown.arm(phase)
         elif phase == "force-available":
@@ -682,25 +695,28 @@ def _request(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
         countdown.close()
     if out.get("lease"):
         lease = out["lease"]
-        human = [f"{_where(cand, hub)}: yours, held by {lease['holder']} until "
+        human = [f"{_where(cand, hub, board)}: yours, held by {lease['holder']} until "
                  f"{lease.get('expires_at') or '?'}"
                  + (" (already yours)" if out.get("already") else ""),
                  "the Harness Manager service extends it while the board is open there"]
-        _emit(ctx, _lease_result(cand, hub, lease, human,
+        _emit(ctx, _lease_result(cand, hub, lease, human, board,
                                  **{k: v for k, v in out.items() if k not in ("lease", "ok")}))
         return ExitCode.OK
     if out.get("left"):
         # D7: the request was withdrawn (lease leave, the UI's Leave queue): no board.
-        raise ActionFailedError(f"the request for {_where(cand, hub)} ended: you left the queue",
+        raise ActionFailedError(f"the request for {_where(cand, hub, board)} ended: you left "
+                                "the queue",
                                 hint=f"`harness-manager lease request {a.target}` asks again")
-    raise ActionFailedError(f"the request for {hub.target} ended without the board ({out})",
+    raise ActionFailedError(f"the request for {lease_name(board, hub.target)} ended without the "
+                            f"board ({out})",
                             hint=f"`harness-manager lease show {a.target}`")
 
 
 def _force(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     a = ctx.args
     view = full_view(svc.view(hub))
-    refusal = force_refusal(view, _now(), hub.target)
+    hub_board = view.get("board") or ""
+    refusal = force_refusal(view, _now(), lease_name(hub_board, hub.target))
     if refusal is not None:
         raise refusal
     lease = view["lease"] or {}
@@ -731,10 +747,10 @@ def _force(ctx: Ctx, cand: Any, hub: Any, svc: Any) -> int:
     out = svc.force(cand.board_id, hub, confirm=True, confirm_board=confirm_board,
                     board_names=names)
     lease = out.get("lease") or {}
-    human = [f"{_where(cand, hub)}: force-released; yours, held by "
+    human = [f"{_where(cand, hub, hub_board)}: force-released; yours, held by "
              f"{lease.get('holder', '?')} until {lease.get('expires_at') or '?'}",
              f"{holder} is told who took it and why"]
-    _emit(ctx, _lease_result(cand, hub, lease, human,
+    _emit(ctx, _lease_result(cand, hub, lease, human, hub_board,
                              **{k: v for k, v in out.items() if k not in ("lease", "ok")}))
     return ExitCode.OK
 
@@ -803,11 +819,22 @@ def _name(cand: Any) -> str:
     return getattr(cand, "name", "") or ""
 
 
-def _where(cand: Any, hub: Any) -> str:
-    """``mps3-01 (mps3_01_pl on HUB)`` when the board has a name (N1), else ``mps3_01_pl on HUB``.
-    Offline: the name comes with the candidate (boards.toml, the hub table)."""
+def _where(cand: Any, hub: Any, board: str = "") -> str:
+    """Where a lease is, in words. LEASE-BOARD: the hub's physical board (``mps3_01``) when it
+    is known, with the target it is leased as (``mps3_01_pl``) as a detail::
+
+        mps3-01 (mps3_01 on HUB, target mps3_01_pl)     the board has a name (N1)
+        mps3_01 on HUB (target mps3_01_pl)              it has none
+
+    With the board unknown (or the same as the target) it is what it always was:
+    ``mps3-01 (mps3_01_pl on HUB)``, ``mps3_01_pl on HUB``. The name comes with the candidate
+    (boards.toml, the hub table); ``board`` from ``LeaseService.board_of``."""
     name = _name(cand)
-    return f"{name} ({hub.target} on {hub.host})" if name else f"{hub.target} on {hub.host}"
+    label = lease_name(board, hub.target)
+    detail = f"target {hub.target}" if label != hub.target else ""
+    if name:
+        return f"{name} ({label} on {hub.host}{', ' + detail if detail else ''})"
+    return f"{label} on {hub.host}" + (f" ({detail})" if detail else "")
 
 
 def _principal(hub: Any) -> str:
@@ -828,19 +855,26 @@ def cmd_lease(ctx: Ctx) -> int:
     svc = _service()
     if a.lease_cmd == "show":
         view = full_view(svc.view(hub))
+        if view.get("lease"):
+            view["lease"].setdefault("board", view.get("board"))     # an older service's view
         _emit(ctx, Result("lease", {"board_id": cand.board_id, "name": _name(cand), **view},
                           rows=[_row(hub.target, hub.host, view)],
-                          human=_human_view(_where(cand, hub), hub.target, view, _now())))
+                          human=_human_view(_where(cand, hub, view.get("board") or ""),
+                                            hub.target, view, _now())))
         return ExitCode.OK
     if a.lease_cmd == "acquire":
         holder = a.holder or hub_holder(hub)             # SET-HUB-3: the hub's holder
 
         def progress(phase: str, done: int, _total: int) -> None:
+            # LEASE-BOARD: name the board. Asked only once the hub has answered (queued), so
+            # an unreachable hub costs one timeout, not two; cached after the first ask.
             if phase == "queued":
                 where = f" at position {done}" if done else ""
-                ctx.note(f"queued{where} for {hub.target} as {holder}; waiting (Ctrl-C leaves the queue)")
+                ctx.note(f"queued{where} for {_where(cand, hub, svc.board_of(hub))} as {holder}; "
+                         "waiting (Ctrl-C leaves the queue)")
             elif phase == "acquire":
-                ctx.note(f"asking {hub.host} for {hub.target} as {holder} ...")
+                ctx.note(f"asking {hub.host} for {_where(cand, hub, svc.board_of(hub, ask=False))}"
+                         f" as {holder} ...")
 
         try:
             out = svc.acquire(hub, board_id=cand.board_id, ttl_s=a.ttl, holder=holder,
@@ -852,18 +886,23 @@ def cmd_lease(ctx: Ctx) -> int:
             ctx.note("left the queue" if removed else "not queued")
             raise
         lease = out["lease"]
-        human = [f"{_where(cand, hub)}: held by {lease['holder']}"
+        board = svc.board_of(hub)                 # after the grant: the hub answers
+        human = [f"{_where(cand, hub, board)}: held by {lease['holder']}"
                  f" until {lease.get('expires_at') or '?'}" + (" (already yours)" if out.get("already")
                                                                 else ""),
                  "the Harness Manager service extends it while the board is open there"]
-        _emit(ctx, _lease_result(cand, hub, lease, human))
+        _emit(ctx, _lease_result(cand, hub, lease, human, board))
         return ExitCode.OK
     if a.lease_cmd == "release":
         out = svc.release(hub, board_id=cand.board_id)
-        view = {"lease": None, "hub": hub.host}
-        _emit(ctx, Result("lease", {"board_id": cand.board_id, **view, "released": out.get("released")},
+        board = svc.board_of(hub)                 # after the release: the hub answered
+        released = out.get("released")
+        if isinstance(released, dict):
+            released = {**released, "board": released.get("board") or board or None}
+        view = {"lease": None, "hub": hub.host, "board": board or None}
+        _emit(ctx, Result("lease", {"board_id": cand.board_id, **view, "released": released},
                           rows=[_row(hub.target, hub.host, view)],
-                          human=[f"{_where(cand, hub)}: released"]))
+                          human=[f"{_where(cand, hub, board)}: released"]))
         return ExitCode.OK
     if a.lease_cmd == "request":
         return _request(ctx, cand, hub, svc)
@@ -876,10 +915,11 @@ def cmd_lease(ctx: Ctx) -> int:
         lines = _incoming_lines(hub.target, incoming, _now())
         if not incoming:
             mine = (view["lease"] or {}).get("mine")
-            lines = [f"no requests for {_where(cand, hub)}"
+            lines = [f"no requests for {_where(cand, hub, view.get('board') or '')}"
                      + ("" if mine else " (you do not hold it; requests go to the holder)")]
         _emit(ctx, Result("lease requests", {"board_id": cand.board_id, "name": _name(cand),
                                              "hub": hub.host, "target": hub.target,
+                                             "board": view.get("board") or None,
                                              "incoming": incoming},
                           rows=rows, human=lines))
         return ExitCode.OK
@@ -888,10 +928,12 @@ def cmd_lease(ctx: Ctx) -> int:
         message = clean_message(a.message)
         answer, minutes = ("release", 0) if a.release else ("keep", keep_minutes(a.keep))
         out = svc.respond(cand.board_id, hub, rid, answer, minutes=minutes, message=message)
-        human = ([f"released {_where(cand, hub)}: the requester gets it next"]
+        board = svc.board_of(hub)
+        human = ([f"released {_where(cand, hub, board)}: the requester gets it next"]
                  if answer == "release" else
-                 [f"told the requester you keep {_where(cand, hub)} for {minutes} more min"])
-        data = {"board_id": cand.board_id, "name": _name(cand), "target": hub.target, "id": rid,
+                 [f"told the requester you keep {_where(cand, hub, board)} for {minutes} more min"])
+        data = {"board_id": cand.board_id, "name": _name(cand), "target": hub.target,
+                "board": board or None, "id": rid,
                 "answer": answer,
                 "minutes": minutes, "message": message,
                 **{k: v for k, v in out.items() if k != "ok"}}
@@ -903,23 +945,26 @@ def cmd_lease(ctx: Ctx) -> int:
     if a.lease_cmd == "leave":
         out = svc.leave(cand.board_id, hub)
         left = bool(out.get("left"))
+        board = svc.board_of(hub)
         _emit(ctx, Result("lease leave", {"board_id": cand.board_id, "name": _name(cand),
-                                          "hub": hub.host, "target": hub.target, "left": left},
+                                          "hub": hub.host, "target": hub.target,
+                                          "board": board or None, "left": left},
                           rows=[[hub.target, hub.host, left]],
-                          human=[f"left the queue for {_where(cand, hub)}; the request is "
+                          human=[f"left the queue for {_where(cand, hub, board)}; the request is "
                                  "withdrawn" if left else
-                                 f"not in the queue for {_where(cand, hub)}"]))
+                                 f"not in the queue for {_where(cand, hub, board)}"]))
         return ExitCode.OK
     if a.lease_cmd == "dismiss":
         # D11: local (the service's own record); like `leave`, running it twice is fine.
         dismissed = bool(svc.dismiss_taken(hub))
+        board = svc.board_of(hub, ask=False)      # local: boards.toml hub.board, no hub call
         _emit(ctx, Result("lease dismiss", {"board_id": cand.board_id, "name": _name(cand),
                                             "hub": hub.host, "target": hub.target,
-                                            "dismissed": dismissed},
+                                            "board": board or None, "dismissed": dismissed},
                           rows=[[hub.target, hub.host, dismissed]],
-                          human=[f"dismissed the forced release of {_where(cand, hub)}"
+                          human=[f"dismissed the forced release of {_where(cand, hub, board)}"
                                  if dismissed else
-                                 f"no forced release of {_where(cand, hub)} to dismiss"]))
+                                 f"no forced release of {_where(cand, hub, board)} to dismiss"]))
         return ExitCode.OK
     raise UsageError(f"unknown lease action {a.lease_cmd!r}")
 

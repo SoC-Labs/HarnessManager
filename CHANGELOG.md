@@ -163,6 +163,16 @@ owners.
   The MCC and FPGA UART lanes work over the hub's serial shares. `harness-manager lease`
   and `share` manage the hub lease and shares (there is no `share stop`: it would stop
   every share on the board). The lease is heartbeated while the board is open.
+- Lease text names the hub's physical board (`mps3_01`), with the fpgahub target it is
+  leased as (`mps3_01_pl`) as a detail. This covers the lease badge, the Release and Close
+  dialogs, lease messages, and `lease show|acquire|release` ("mps3-01 (mps3_01 on HUB,
+  target mps3_01_pl)"). `mps3_01_pl` is not deprecated. HM still leases on the target,
+  the same name pyverify uses, so HM and the platform's scripts share one lease and one
+  queue (docs/HUB_MODE.md, "Boards and targets"). JSON adds `board` beside `target` in
+  `GET /lease`, the acquire, request and release results, and `lease.state`. The `lease`
+  TSV appends a BOARD column. The board comes from `hub.board` in `boards.toml`, else the
+  hub, asked once and kept. When the hub gives the target no board of its own, the text
+  shows the target as before.
 - DUT console input is paced (20 ms a byte on UART0/UART1), because the nanoSoC UART has
   no receive FIFO: a paste no longer arrives garbled.
 - The Linux harness's OS slots: `harness-manager slot status|push|commit|rollback|verify`.

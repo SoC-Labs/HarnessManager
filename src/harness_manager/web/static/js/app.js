@@ -211,7 +211,7 @@ async function closeBoardNow(bid, { release = false } = {}) {
   if (!r.error) {
     if (release) {
       const rel = r.data.data.released;
-      log("info", "lease", rel ? `lease on ${rel.target} released: other hub users may take the board`
+      log("info", "lease", rel ? `lease on ${rel.board || rel.target} released: other hub users may take the board`
         : "no hub lease was held here: nothing to release", bid);
     }
     openedOrClosedHere(bid, false);

@@ -50,7 +50,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `POST /probe` `{hosts?, serial_ports?, volumes?, scan_usb?, scan_network?, timeout_s?}` | `engine.probe(ProbeHints)` | `{candidates: [Candidate]}` (includes `identity` when probed) |
 | `GET /boards` | open boards + lock owners | `{boards: [{board_id, open: bool, holder?: LockOwner, candidate}]}` |
 | `POST /boards` `{target?, candidate?, note?}` | `engine.open(...)` | `{board_id, info: BoardInfo}` |
-| `DELETE /boards/{bid}?release=` | `engine.close(bid)` | `{ok}`. `release=true` (additive, LEASE-UI) first releases the hub lease THIS Harness Manager holds on the board (`lease.here`) and adds `released`: the lease given back (`{target, holder, expires_at, mine}`), or null when none was held here (no hub, a free lease, or someone else's, including another session of the same principal, which only that session can release). A release the hub refuses or does not answer fails the call and the board stays open. 400 USAGE when `release` is not true or false. Without it the lease is kept, not renewed while closed, as before. |
+| `DELETE /boards/{bid}?release=` | `engine.close(bid)` | `{ok}`. `release=true` (additive, LEASE-UI) first releases the hub lease THIS Harness Manager holds on the board (`lease.here`) and adds `released`: the lease given back (`{target, board, holder, expires_at, mine}`), or null when none was held here (no hub, a free lease, or someone else's, including another session of the same principal, which only that session can release). A release the hub refuses or does not answer fails the call and the board stays open. 400 USAGE when `release` is not true or false. Without it the lease is kept, not renewed while closed, as before. |
 | `GET /boards/{bid}` | `engine.info(bid)` | `BoardInfo` |
 | `GET /boards/{bid}/lock` | `engine.lock_owner(bid)` | `{holder: LockOwner or null}` |
 | `GET /boards/{bid}/telemetry` | `engine.telemetry.readings(session)` | `{readings: [Reading]}` |
@@ -142,11 +142,11 @@ Events: `console.state` gains `{baud}` when the rate changes, and `console.pty {
 |---|---|
 | `POST /probe` `{..., via?}` and `POST /boards` `{target?, via?}` | `via: "ssh:HOST"` reaches a board through an SSH tunnel (the lab hub). The candidate's Ethernet link is then `via="ssh"`. A `via` in boards.toml does the same without the field. |
 | `GET /boards/{bid}/tunnel` | `{tunnel: {via, host, state: up|down|starting, ports: {remote: local}, detail} or null}` |
-| `GET /boards/{bid}/lease` | `{lease: {target, holder, expires_at, mine, here} or null, hub: HOST or null}`. null when the board is not behind a hub. `mine` is by principal (another session of the same principal counts); `here` (additive, REVIEW-W5) is true only when this Harness Manager holds the lease token. |
+| `GET /boards/{bid}/lease` | `{lease: {target, board, holder, expires_at, mine, here} or null, hub: HOST or null}`. null when the board is not behind a hub. `mine` is by principal (another session of the same principal counts); `here` (additive, REVIEW-W5) is true only when this Harness Manager holds the lease token. `board` (additive, LEASE-BOARD) is fpgahub's physical board the target belongs to (`mps3_01`), null when unknown; `target` is still what is leased (docs/HUB_MODE.md, "Boards and targets"). The acquire and request jobs' `lease` results carry it too. |
 | `POST /boards/{bid}/lease` `{ttl_s?}` | 202 job `lease`. It completes when the lease is HELD (it may queue); the result is `{lease}`. The daemon heartbeats it while the board is open. |
 | `DELETE /boards/{bid}/lease` | `{ok}` releases this client's lease. |
 
-Events: `lease.state {target, state: held|queued|released|expired|lost, holder, expires_at}`.
+Events: `lease.state {target, board, state: held|queued|released|expired|lost, holder, expires_at}` (`board` additive, LEASE-BOARD: null until the service knows it; an event never asks the hub).
 
 ### Power and update (L4, `power_api.py`, `update_api.py`)
 

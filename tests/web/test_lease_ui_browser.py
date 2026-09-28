@@ -35,6 +35,7 @@ T = 10_000
 APP = {"width": 1440, "height": 900}
 BOARD = BOARD_FIELDED               # "mps3-01" (N1, from the hub), behind mapstone-dev
 TARGET = "mps3_01_pl"
+HUB_BOARD = "mps3_01"               # LEASE-BOARD: fpgahub's physical board, what the text says
 ME = f"{getpass.getuser()}@harness-manager"        # the mock's principal (this and other sessions)
 ALICE = "alice@lab-pc-07"
 
@@ -101,7 +102,8 @@ def test_the_rail_says_yours_when_this_harness_manager_holds_the_lease(page_fact
     badge = row.locator('[data-testid="rail-lease-badge"]')
     expect(badge).to_have_text("Yours")
     expect(badge.locator("svg")).to_have_count(1)                      # an icon, and words
-    expect(badge).to_have_attribute("title", re.compile(rf"{TARGET} on mapstone-dev, held by this Harness Manager"))
+    expect(badge).to_have_attribute("title", re.compile(
+        rf"{HUB_BOARD} on mapstone-dev \(target {TARGET}\), held by this Harness Manager"))
     # the board lock is its own chip ("Open"), never a second "Yours"
     expect(rail(page).locator('[data-testid="rail-open"]')).to_have_text("Open")
     assert rail(page).get_by_text("Yours", exact=True).count() == 1
@@ -196,7 +198,9 @@ def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_facto
     dialog = by_id(page, "release-confirm")
     expect(dialog).to_be_visible()
     assert dialog.get_attribute("role") == "alertdialog"
-    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {TARGET}?")
+    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {HUB_BOARD}?")
+    expect(dialog.locator('[data-testid="release-target"]')).to_have_text(
+        f"The hub leases it as target {TARGET}.")
     expect(dialog.locator('[data-testid="release-what"]')).to_have_text(
         "Others can take it; background checks pause.")
     expect(dialog.locator('[data-action="release_cancel"]')).to_be_focused()
@@ -213,7 +217,7 @@ def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_facto
     dialog.locator('[data-action="release_confirm"]').click()
     expect(by_id(page, "lease-chip")).to_have_text("no lease", timeout=T)
     expect(rail(page).locator('[data-testid="rail-lease-badge"]')).to_have_text("Free")
-    expect(by_id(page, "lease-result")).to_contain_text(f"lease on {TARGET} released")
+    expect(by_id(page, "lease-result")).to_contain_text(f"lease on {HUB_BOARD} released")
     assert lease_record(daemon) is None
 
 
@@ -246,6 +250,52 @@ def test_a_release_blocked_by_a_running_job_says_so_and_releases_nothing(page_fa
     assert lease_record(daemon) is not None
 
 
+# --- LEASE-BOARD: the physical board's name, the target as a detail ---------------------------------------
+
+
+@HUB
+def test_lease_text_names_the_board_with_the_target_as_a_detail(page_factory, daemon):
+    """david: "why does the lease say mps3_01_pl; isn't that deprecated?" The lease is still
+    taken on the target (pyverify's name; docs/HUB_MODE.md); the text names fpgahub's board."""
+    page = hub_page(page_factory, daemon, "mine")
+    where = f"{HUB_BOARD} on mapstone-dev (target {TARGET})"
+    expect(by_id(page, "lease-chip")).to_have_attribute("title", re.compile(re.escape(where)))
+    expect(rail(page).locator('[data-testid="rail-lease-badge"]')).to_have_attribute(
+        "title", re.compile(re.escape(where)))
+    expect(by_id(page, "tile-lease").locator('[data-testid="tile-lease-badge"]')).to_have_attribute(
+        "title", re.compile(re.escape(where)))
+    page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
+    dialog = by_id(page, "release-confirm")
+    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {HUB_BOARD}?")
+    expect(dialog.locator("code")).to_have_text(TARGET)
+    assert page.errors == []
+
+
+@HUB
+def test_negative_twin_a_target_with_no_board_of_its_own_reads_as_before(page_factory, daemon):
+    # The hub maps the target to no separate board (fpgahub's standalone group: board = target).
+    sim(daemon).behind_hub(BOARD, lease="mine")
+    sim(daemon).requests.set_board(BOARD, TARGET)
+    page = page_factory(**APP)
+    open_board(page)
+    expect(by_id(page, "lease-chip")).to_have_attribute(
+        "title", re.compile(rf"^{TARGET} on mapstone-dev, held by "))
+    badge = rail(page).locator('[data-testid="rail-lease-badge"]')
+    expect(badge).to_have_attribute("title", re.compile(rf"{TARGET} on mapstone-dev, held by this"))
+    assert "(target" not in (badge.get_attribute("title") or "")
+    page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
+    dialog = by_id(page, "release-confirm")
+    expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {TARGET}?")
+    assert dialog.locator('[data-testid="release-target"]').count() == 0
+    dialog.locator('[data-action="release_cancel"]').click()
+    close_board(page)
+    close = by_id(page, "close-confirm")
+    expect(close.locator('[data-testid="close-title"]')).to_have_text(
+        f"Also release the lease on {TARGET}?")
+    assert close.locator('[data-testid="close-target"]').count() == 0
+    assert page.errors == []
+
+
 # --- Close board asks about the lease ------------------------------------------------------------------
 
 
@@ -260,7 +310,9 @@ def test_close_asks_about_a_lease_you_hold_and_cancel_leaves_the_board_open(page
     close_board(page)
     dialog = by_id(page, "close-confirm")
     expect(dialog).to_be_visible()
-    expect(dialog.locator('[data-testid="close-title"]')).to_have_text(f"Also release the lease on {TARGET}?")
+    expect(dialog.locator('[data-testid="close-title"]')).to_have_text(
+        f"Also release the lease on {HUB_BOARD}?")
+    expect(dialog.locator('[data-testid="close-target"]')).to_have_text(f"(target {TARGET})")
     expect(dialog.locator('[data-testid="close-keep-what"]')).to_contain_text(
         re.compile(r"it stays yours until \d\d:\d\d:\d\d, but nothing renews it while the board is closed"))
     for action, text in (("close_release", "Release and close"), ("close_keep", "Keep the lease"),
@@ -378,6 +430,17 @@ def test_the_demo_shows_free_yours_and_held_by_alice(showcase):
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
     demo_open(page, BOARD_SPARE)
     expect(spare.locator('[data-testid="rail-lease-badge"]')).to_have_text("Free", timeout=T)
+    assert not page.errors, page.errors
+
+
+def test_the_demo_names_the_hub_board_in_the_lease_badge(showcase):
+    # LEASE-BOARD over the real daemon: the demo hub's board is mps3_02 (target mps3_02_pl).
+    page = showcase.page()
+    demo_open(page, BOARD_LEASED)
+    badge = rail(page, BOARD_LEASED).locator('[data-testid="rail-lease-badge"]')
+    expect(badge).to_have_attribute("title", re.compile(
+        r"Held by alice@lab-pc-07: mps3_02 on mapstone-dev\.ecs\.soton\.ac\.uk "
+        r"\(target mps3_02_pl\)"), timeout=T)
     assert not page.errors, page.errors
 
 

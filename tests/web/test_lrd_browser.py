@@ -318,7 +318,8 @@ def test_a_release_answer_gives_us_the_board(page_factory, daemon):
     page, bar = requester(page_factory, daemon)
     reqs(daemon).answer(BOARD, "release")
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours", timeout=T)
-    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text(f"{NAME} is yours: lease held on mps3_01_pl")
+    expect(bar.locator('[data-testid="result-lease_req"]')).to_contain_text(   # LEASE-BOARD
+        re.compile(rf"{NAME} is yours: lease held on mps3_01 until "))
     assert reqs(daemon).revokes == []                                           # nothing forced
 
 

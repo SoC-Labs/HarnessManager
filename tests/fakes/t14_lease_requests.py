@@ -417,7 +417,8 @@ class LeaseRequestSim:
         hub = self.hub(bid)
         with self._lock:
             if hub["lease"] and hub["lease"]["mine"]:
-                return {"lease": {k: hub["lease"][k] for k in ("target", "holder", "expires_at")}}
+                return {"lease": {**{k: hub["lease"][k] for k in ("target", "holder", "expires_at")},
+                                  "board": self.board_of(bid)}}         # LEASE-BOARD
             held, cancel = threading.Event(), threading.Event()
             req = {"id": f"q{uuid.uuid4().hex[:8]}", "message": message, "created": time.time(),
                    "window": self.window_s, "ttl": ttl, "answer": None, "held": held,
@@ -442,7 +443,8 @@ class LeaseRequestSim:
             if held.wait(0.05):
                 progress("held", 1, 1)
                 lease = hub["lease"]
-                return {"lease": {k: lease[k] for k in ("target", "holder", "expires_at")}}
+                return {"lease": {**{k: lease[k] for k in ("target", "holder", "expires_at")},
+                                  "board": self.board_of(bid)}}         # LEASE-BOARD
             if cancel.is_set():
                 return {"left": True}            # D7: leaving is not a failure
             # D1: a keep answer is a phase, not the end: we stay queued, and force can open
@@ -560,7 +562,8 @@ class LeaseRequestSim:
         self._promote(bid)
         progress("held", 1, 1)
         lease = hub["lease"]
-        return {"lease": {k: lease[k] for k in ("target", "holder", "expires_at")},
+        return {"lease": {**{k: lease[k] for k in ("target", "holder", "expires_at")},
+                          "board": self.board_of(bid)},
                 "revoked": [prior], "by": me()}
 
 
