@@ -140,9 +140,10 @@ dialogs, lease messages and the CLI name `mps3_01`. The target appears as a deta
 `mps3-01 (mps3_01 on HUB, target mps3_01_pl)`. JSON adds `board` beside `target`
 (`GET /boards/{bid}/lease` and its `lease`, the acquire and request results, `released`,
 the CLI's `--json`). The `lease` TSV appends a BOARD column, and `lease.state` events carry
-`board`. When the hub maps the target to no separate board (a standalone board named
-after its target, or a hub that did not answer), the text shows the target as before, and
-`board` is null.
+`board`. When the hub maps the target to no separate board, the text shows the target as
+before. In that case `board` is the target's own name (fpgahub's standalone board, and what
+REST reports for a target no group lists), or null when the SSH hub named no board or did
+not answer.
 
 HM finds the board in `hub.board` in `boards.toml`, with no hub call. Without it, HM asks
 the hub once per hub per process and keeps the answer: `fpgahub board list --json` over
@@ -166,8 +167,7 @@ SSH, `GET /groups` over REST. Events and messages never ask the hub.
    its scripts and the Linux lead's soak runs lease through it. If HM switched, two lease
    forms would share one board. If the board ever gains a second target (an `_mcc`, a
    `_ps`), a board-level acquire would take every target. It could then fail on fpgahub's
-   409 for mixed holders, which pyverify never sees. It would also make the hub's
-   board-level SSE events (`board: null`) the only record of HM's lease.
+   409 for mixed holders, which pyverify never sees.
 4. **HM's own files are keyed by the target.** These are the token file
    (`<state_dir>/leases/`) and the request notes on the hub
    (`/tmp/harness-manager-lease/<target>/`). If they were re-keyed, HM sessions running
