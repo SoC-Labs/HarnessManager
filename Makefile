@@ -63,7 +63,7 @@ web-deps: venv
 	$(BIN)/pip install -q --find-links vendor -e '.[webtest]'
 
 lint: venv
-	$(BIN)/ruff check src tests tools/release tools/gen_tokens.py tools/hil
+	$(BIN)/ruff check src tests tools/release tools/gen_tokens.py tools/gen_panel_codes.py tools/hil
 	@if command -v shellcheck >/dev/null 2>&1; then shellcheck scripts/*.sh; \
 	else echo "lint: shellcheck not found, scripts/*.sh not checked"; fi
 
