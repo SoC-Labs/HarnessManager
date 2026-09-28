@@ -104,6 +104,7 @@ the application menu has **Harness Manager** and **Open with Demo Boards**.
 **The layout.**
 - **The rail** (left) lists boards. **+** adds one by address; the circular arrow scans.
   At the bottom: the theme, the service line, **Settings** (the sliders icon) and **Help**.
+  [The sidebar](#the-sidebar-order-favourites-and-your-boardstoml-boards) below has the details.
 - **The header** shows the selected board: shell, design, harness, build check, health,
   and for a hub board the tunnel and the lease.
 - **The sections:** Overview, XDC, Build, Program, Consoles, Debug, Power, Clocks, SD card,
@@ -111,6 +112,30 @@ the application menu has **Harness Manager** and **Open with Demo Boards**.
 - **Overview** has four tiles: Design, Consoles, Debug and Board. A "Needs attention" strip
   appears only when something is wrong. **Details** (folded) holds identity, health counters,
   telemetry, capabilities and the front panel.
+
+### The sidebar: order, favourites and your boards.toml boards
+
+![The sidebar: two favourites at the top, a boards.toml board not yet opened](review/2026-09-28/sidebar-favourites-light.png)
+
+| To | Do |
+|---|---|
+| reorder the boards | drag a card (touch: drag its grip, the dots at its left edge). A line shows where it lands. A click without a drag still opens the board. |
+| reorder with the keyboard | focus a card (Tab), then **Alt+Up** or **Alt+Down**. A screen reader hears the new position. |
+| pin a board at the top | click its star (or Tab to the star, then Space). It moves to **Favourites**. Click again to put it back where it was. |
+
+- **Your order and favourites follow you, not the browser.** They are settings
+  (`general.board_order` and `general.favourite_boards`, lists of board ids), so every window
+  and the app share them. `harness-manager config get general.board_order` prints the order.
+  The demo (`app --demo`) keeps its own.
+- **Boards in `boards.toml` are always listed**, also straight after the service restarts. One
+  that is not open shows **not open** and its route (`through the hub mapstone-dev`).
+  Nothing contacts it until you click it and press **Open board**; then it goes through its own
+  `via` and hub.
+- **Scan** (the circular arrow) looks on this network, and also lists your `boards.toml`
+  boards under the status line: a board behind a hub never answers a scan.
+- **+ (Add by address)** uses the matching `boards.toml` entry: type `192.168.10.101` and the
+  second field fills with that entry's route (`hub`), with a line naming the entry. Type another
+  route to override it.
 
 **The app and the command share one session.** A per-user background service
 (harness-manager-daemon) owns the boards. `harness-manager app` and every command talk to
@@ -314,8 +339,11 @@ hub (pyverify's tools over ssh) and never starts a share on `tty_00`. Then open 
 | `hub adopt BOARD [--as NAME]` | "Make this a hub": turn a board's inline hub table into a named hub |
 | `hub remove NAME [--force]` | remove a hub and your stored token for it |
 
-**In the app:** **+** in the rail has a second field, "through a hub: ssh host". That adds
-a board through an SSH hub for this session. The Settings menu for named hubs, with a
+**In the app:** once the board is in `boards.toml`, it is listed in the rail as **not open**;
+select it and press **Open board**. **+** in the rail has a second field, "through a hub".
+For an address a `boards.toml` entry names, it fills with that entry's route (`hub`) by
+itself. For any other address, type an SSH host: that adds a board through an SSH hub for
+this session. The Settings menu for named hubs, with a
 **Test connection** button, is being built (lane SET-UI). Until it lands, use the `hub`
 commands above.
 
