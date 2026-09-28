@@ -398,6 +398,17 @@ owners.
   fielded, and its RM kits name its own `dut_clk` buffer (`BUFGCE_X2Y47`).
 - The `rm_timing` gate says why a slack is empty: an RM with no registers (such as
   `minimal`) has no path of its own, and a register with no timed path has no slack.
+- The guide's Tools step names the licence the build needs, by the kit's release: "a device
+  licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1:
+  Enterprise); the static's IP needs none". It stays *unchecked*: only synthesis can check
+  it, and unchecked is never a pass.
+- The guide launches the kit's Vivado once (`-mode batch` with a two-line Tcl, 60 s, no
+  design). Vivado 2026.1 with no licence file exits 42, and the Tools step now fails with
+  "Vivado 2026.1 did not start: no licence file (set XILINXD_LICENSE_FILE or
+  LM_LICENSE_FILE)" and the `export` to copy, before you reach the build. Any other failed
+  start shows its exit code. `vivado -version` could not catch this: it exits 0 with no
+  licence. A start does not prove the KU115 licence, and the guide says so. The web page's
+  Tools card has a **Starts** row.
 
 ### Unattended HIL on board 2 (`tools/hil`, HIL-B2)
 - A `linux-nocard` plan for a board with no user microSD (board 2, `mps3_02_pl`,

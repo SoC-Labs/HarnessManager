@@ -4,8 +4,9 @@ over the real harness-manager-daemon (``kit_api`` in ``EXTENSIONS``) and over th
 
 The demo boards run the previous static 0x3F1A560F; ``fielded(engine)`` moves the USB board
 to 0x72BB0A36, the fixture kit's static (``tests/fakes/kit_fixture``). Vivado is never run:
-``HARNESS_MANAGER_VIVADO`` is ``off`` (tests/conftest.py), or a fake script that only prints
-a version (``kit_fakes.fake_vivado_script``). Every test has its negative twin.
+``HARNESS_MANAGER_VIVADO`` is ``off`` (tests/conftest.py), or a fake script that prints a
+version and answers the guide's launch (``kit_fakes.fake_vivado_script``, KIT-LIC). Every
+test has its negative twin.
 """
 
 from __future__ import annotations
@@ -212,6 +213,40 @@ def test_a_vivado_of_another_release_warns_and_its_twin_the_kits_release_does_no
     expect(page.locator('[data-testid="vivado-mismatch"]')).to_have_count(0)
     expect(card).to_have_attribute("data-failing", "false")
     assert card.get_attribute("open") is None
+    assert page.errors == []
+
+
+def test_a_vivado_that_does_not_start_fails_tools_and_its_twin_starts(
+        page_factory, daemon, engine, tmp_path, monkeypatch):
+    # KIT-LIC: 2026.1 with no licence file exits 42 at launch; the fake plays it for 2024.1
+    from harness_manager.services.kit import launch
+
+    fielded(engine)
+    import_kit(daemon)
+    for k in launch.LICENCE_ENV:
+        monkeypatch.delenv(k, raising=False)
+    bad = kf.fake_vivado_script(tmp_path / "nolic", release="2024.1", launch="no-licence")
+    monkeypatch.setenv("HARNESS_MANAGER_VIVADO", str(bad))
+    page = page_factory("light")
+    open_build(page)
+    expect_state(page, "tools", "failed")
+    chip = page.locator('[data-testid="vivado-launch-chip"]')
+    expect(chip).to_have_text("does not start")
+    expect(page.locator('[data-testid="vivado-launch"]')).to_contain_text(
+        "no licence file (set XILINXD_LICENSE_FILE or LM_LICENSE_FILE)")
+    expect(page.locator('[data-testid="step-tools-reason"]')).to_contain_text(
+        "export XILINXD_LICENSE_FILE=PORT@SERVER")
+    expect(page.locator('[data-testid="licence"]')).to_contain_text(
+        "Vivado 2024.1 Enterprise (2026.1: Core or higher)")
+    expect_state(page, "build", "blocked")
+    # the twin: a Vivado that starts
+    right = kf.fake_vivado_script(tmp_path / "v2024", release="2024.1")
+    monkeypatch.setenv("HARNESS_MANAGER_VIVADO", str(right))
+    refresh(page)
+    expect_state(page, "tools", "done")
+    expect(chip).to_have_text("starts")
+    expect(page.locator('[data-testid="vivado-launch"]')).to_contain_text("Vivado 2024.1 starts")
+    expect(page.locator('[data-testid="licence"]')).to_contain_text("[Common 17-345]")
     assert page.errors == []
 
 

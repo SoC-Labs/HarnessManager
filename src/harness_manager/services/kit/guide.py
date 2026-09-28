@@ -4,7 +4,7 @@ Harness Manager works out from what it can detect (KIT-GUIDE KG-A; docs/design/D
 | # | step | done when |
 |---|---|---|
 | 1 | target  | a static is known (the board's live ``shell_id``, or ``--static-id``) and the pack can build for it |
-| 2 | tools   | the Vivado found has the kit's major.minor release, and so does the ``vivado`` on PATH (if any) |
+| 2 | tools   | the Vivado found has the kit's major.minor release, and so does the ``vivado`` on PATH (if any); that Vivado starts (``launch.py``) |
 | 3 | kit     | the kit is cached, every blob re-hashes, its DCP's CRC-32 is the static_id, and it matches the board |
 | 4 | wrapper | the design passes every XDC-kit check (T10), with its rm_id checked for clashes |
 | 5 | build   | a receipt with ``state: passed`` is in the build directory |
@@ -12,8 +12,13 @@ Harness Manager works out from what it can detect (KIT-GUIDE KG-A; docs/design/D
 
 States: ``done`` · ``next`` (can be done now; ``Guide.next`` is the first such step) ·
 ``blocked`` (waits for an earlier step) · ``failed`` (a check said no: the detail
-says which) · ``unchecked`` (HM cannot tell from here; never a pass). The licence is always
-unchecked: only a synth run can tell.
+says which) · ``unchecked`` (HM cannot tell from here; never a pass).
+
+The licence (KIT-LIC, ``licence.py``): the Tools step says which device licence the kit's
+release needs (2026.1: Core or higher; 2024.1: Enterprise; the static's IP needs none) and
+shows it as unchecked, always: only synthesis asks for it. It also launches the kit's Vivado
+once (``launch.py``): 2026.1 does not start without a licence file (exit 42), which fails
+the step; a start does not prove the device licence.
 
 Board-agnostic: the pack answers through its ``KitAdapter``.
 """
@@ -28,7 +33,7 @@ from harness_manager.core.errors import AbsentError, HarnessError, UnavailableEr
 from harness_manager.core.model import BoardIdentity
 from harness_manager.core.pack import KitCheck
 
-from . import build, render
+from . import build, launch, licence, render
 from .schema import hex32, parse_u32, release_major_minor, same_id
 from .service import KitService
 from .vivado import VivadoFound, check_path, check_release, command_vivado, discover, matching
@@ -39,9 +44,6 @@ STATES = ("done", "next", "blocked", "failed", "unchecked")
 #: What each step needs done first (a step with a prerequisite not done is ``blocked``).
 NEEDS = {"target": (), "tools": (), "kit": ("target",), "wrapper": ("target",),
          "build": ("tools", "kit", "wrapper"), "check": ("build",)}
-LICENCE = ("licence: unchecked (only synthesis can tell; the error to watch for is "
-           "[Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at "
-           "the lab server)")
 
 #: One card per gate of build_rm.tcl: what it means and the fix (KIT-GUIDE §5.4).
 GATE_HELP: dict[str, str] = {
@@ -281,13 +283,33 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
         raw["tools"] = "todo"
     have = (f"Vivado {found.install.version or '?'} at {found.install.path}"
             if found.install else "no Vivado found")
+    part = profile.part if profile else ""
+    # KIT-LIC: launch the Vivado `kit build` prints (the kit's release); 2026.1 exits 42
+    # with no licence file. A start does not prove the device licence: synthesis checks it.
+    right = matching(found, need)
+    started = launch.probe(right.path, release=right.version) if right is not None else None
+    started = started if started is not None and started.ran else None   # off: nothing ran
+    said = ""
+    if started is not None:
+        s.checks.append(started.check())
+        said = started.detail
+        if started.ok:
+            note = licence.tier_note(part, need, started.tier)
+            said += (f"; {note}" if note else
+                     f"; that does not prove the device licence{' for ' if part else ''}"
+                     f"{licence.device_of(part)}: synthesis still checks it")
     s.detail = (f"{pc.detail}; " if path_wrong and same_release else "") + \
-        f"{c.detail if c.state != 'ok' else have}; {LICENCE}"
+        f"{c.detail if c.state != 'ok' else have}; " + (f"{said}; " if said else "") + \
+        licence.line(part, need, sid if profile else None)
     if raw["tools"] == "todo":
-        right = matching(found, need)
         s.actions = ([_cmd(f"export PATH={Path(right.path).parent}:$PATH")] if right else
                      [_cmd(f"install Vivado {need or '(the kit names the release)'} and put it "
                            f"on PATH, or set HARNESS_MANAGER_VIVADO")])
+    if started is not None and started.state == "failed":
+        raw["tools"] = "failed"
+        s.reason = f"fix: {started.fix}"
+        if started.action:
+            s.actions = [_cmd(started.action)] + s.actions
 
     # 3 kit ---------------------------------------------------------------------------------
     s = steps["kit"]
@@ -412,8 +434,9 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
             s.actions = [_cmd(f"harness-manager kit pack {rel} --import")]
 
     _resolve(steps, raw)
+    vj = {**found.to_json(), "launch": started.to_json() if started is not None else None}
     return Guide(pack, sid, board_id, kit.manifest.kit_id if kit else "",
-                 profile.__dict__ if profile else None, found.to_json(),
+                 profile.__dict__ if profile else None, vj,
                  design if isinstance(design, str) else (str(design.get("name")) if design else ""),
                  str(build_dir) if build_dir else "", list(steps.values()), rm_info,
                  receipt.to_json() if receipt is not None else None)

@@ -346,7 +346,7 @@ function TargetCard({ step }) {
   return html`<${StepCard} step=${step}><${Actions} step=${step} /><//>`;
 }
 
-// --- 2 tools (K4) --------------------------------------------------------------------------------
+// --- 2 tools (K4; KIT-LIC: does it start, and which device licence) -----------------------------
 
 function ToolsCard({ step, g }) {
   const v = g.vivado || {};
@@ -356,6 +356,7 @@ function ToolsCard({ step, g }) {
   const mismatch = !!(need && have && majorMinor(have) !== majorMinor(need));
   const buildDiff = !!(need && have && !mismatch && needBuild && v.build && v.build !== needBuild);
   const licence = String(step.detail || "").split(/; licence: /)[1] || "";
+  const launch = v.launch;                  // KIT-LIC: the kit's Vivado launched once
   const check = (step.checks || [])[0];
   return html`<${StepCard} step=${{ ...step, detail: "" }}>
     <dl class="kv">
@@ -369,6 +370,11 @@ function ToolsCard({ step, g }) {
           <div class="sub mono">${v.path}</div><div class="sub">found ${HOW[v.how] || v.how || "?"}${v.error ? `; ${v.error}` : ""}</div>`
         : html`<span class="muted">none: ${v.reason || "not found"}</span>`}</dd>
       ${(v.others || []).length ? html`<dt>Also installed</dt><dd>${v.others.map((o) => html`<div key=${o.path} class="sub mono">${o.version} ${o.path}</div>`)}</dd>` : null}
+      ${launch ? html`<dt>Starts</dt><dd data-testid="vivado-launch"><div class="line"><${Chip} testid="vivado-launch-chip"
+          level=${launch.state === "ok" ? "ok" : launch.state === "failed" ? "err" : "unk"}
+          icon=${launch.state === "ok" ? "circle-check" : launch.state === "failed" ? "circle-x" : "circle-help"}>${
+          launch.state === "ok" ? "starts" : launch.state === "failed" ? "does not start" : "unchecked"}<//></div>
+        <div class="sub">${launch.detail}</div></dd>` : null}
       <dt>Licence</dt><dd data-testid="licence"><div class="line"><${Chip} level="unk" icon="circle-help">unchecked<//></div>
         <div class="sub">${String(licence || "").replace(/^unchecked\s*\((.*)\)$/, "$1") || "only synthesis can tell"}</div></dd>
     </dl>

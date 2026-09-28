@@ -42,7 +42,7 @@ The rest of this table is for 0x72BB0A36:
 |---|---|---|
 | Vivado | **exactly the kit's release**: 2024.1 for this static | A routed DCP opens only in the release that wrote it. 2024.1 refuses a 2026.1 DCP with `[Runs 36-378]` (KIT-STORE spike). The kit records the release; the `.bit` header says `Version=2024.1`. |
 | Part | `xcku115-flvb1760-1-c` | `build_dfx.tcl:78`; the partial's `.bit` header |
-| Licence | A licence that covers the KU115, which is probably Vivado ML **Enterprise** (the lab's floating server). DFX itself needs no separate licence in 2024.1. | Not detectable without running synth: the failure is `[Common 17-345] A valid license was not found`. The guide shows this as *unchecked*, and the script's `part_installed` gate only proves the device files exist. **Verify** that KU115 is outside the free ML Standard list. |
+| Licence | **A device licence for the xcku115, needed from synthesis on.** Vivado **2024.1**: Enterprise (the free Standard covers only the KU025/KU035). Vivado **2026.1**: **Core or higher** (the free Basic has neither the KU115 nor DFX), and 2026.1 does not even start without a licence file (exit 42). **No IP licence**: every IP in both statics (0x72BB0A36, 0x44EE76D5) is no-charge "Included" IP. `open_checkpoint` and `pr_verify` need no licence. | Measured 28 Sep 2026 on srv03335 with both locked DCPs (platform `docs/planning/OVERLAY_BUILD_FLOW_PROPOSAL_2026-09-28.md` §4): with no licence, synth, opt, place, route and `write_bitstream` all stop with `[Common 17-345] A valid license was not found`. HM cannot see the device licence without synthesising, so the guide names it and shows it *unchecked* (never a pass). It does launch the kit's Vivado once (§5.2): a 2026.1 with no licence file fails the Tools step. The script's `part_installed` gate only proves the device files exist. |
 | OS | Linux or Windows (the script uses no `exec`, no python and no shell) | template design |
 | RAM | **Measured: 4.0 GB peak** for a small RM, end to end (the spike: 3.0 GB at synth, 3.6 at opt, 4.4 GB reported by Vivado at route). Plan for 8 GB for a nanoSoC-sized RM. | §9; KIT-STORE (open_checkpoint 2.8 GB, 57 s) |
 | Disk | The kit is ~10 MB (`static_routed_locked.dcp` 10,152,801 B). It needs no second, reference DCP (§3.3). One build writes 20–40 MB. The Vivado install with UltraScale is tens of GB. | `fielded/0x72BB0A36/mint.json` |
@@ -205,7 +205,7 @@ States are `done` · `next` · `blocked` · `failed` · `unchecked`, driven only
 | Card | done when | blocked / failed shows |
 |---|---|---|
 | 1 Target | the board reported `shell_id` and a kit exists for it (KIT-STORE `kit info`) | "no kit for 0x… (Vivado …)": ask the lab, or pick a static that has one |
-| 2 Tools | `vivado -version` = the kit's version (CLI/local daemon only) | the version found and the one needed. The licence is always shown *unchecked*, with the error text to watch for. |
+| 2 Tools | `vivado -version` = the kit's version (CLI/local daemon only), and that Vivado **starts** | the version found and the one needed. **Starts** (KIT-LIC, `services/kit/launch.py`): HM launches the Vivado `kit build` prints once, `vivado -mode batch -nolog -nojournal -notrace -source hm_launch.tcl` (`puts HM_LAUNCH_OK; exit 0`, no design, in a scratch directory, 60 s timeout, cached per binary and licence variables). `-version` cannot tell: it exits 0 with no licence, even on 2026.1. Exit 42 fails the step: "Vivado 2026.1 did not start: no licence file (set XILINXD_LICENSE_FILE or LM_LICENSE_FILE)", with the `export` to copy; any other exit fails it with its code; a timeout is *unchecked*. A start does not prove the device licence (synthesis checks it), but the licence tier Vivado prints is shown, and the free tier is named as not covering the KU115. **Licence** is always *unchecked*, worded by the kit's release: "a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none", with the error text to watch for. |
 | 3 Kit | the kit is fetched and its CRC == static_id (KIT-STORE's "Build kit" card: Fetch, Download zip, Copy Vivado command) | "the file is not this static": re-fetch (KIT-STORE) |
 | 4 Wrapper & XDC | the design passes every XDC-kit check with its `wrapper` | the first failing check, with its hint (T10's findings) |
 | 5 Build | a receipt with `state: passed` exists in the chosen out dir | `failed`: the gate, its detail and the troubleshooting card below. `stopped`: "finish the build" |
@@ -222,7 +222,7 @@ After step 6 comes Program → Consoles/Debug.
 │ Build a DUT for this board                                  kit: mps3/0x72BB0A36/vivado-2024.1 │
 │                                                                             │
 │ ✓ 1 Target    static 0x72BB0A36 (fielded 2026-09-24), partition u_rp_dut    │
-│ ✓ 2 Tools     Vivado 2024.1 at /apps/Xilinx/Vivado/2024.1  · licence: unchecked (?) │
+│ ✓ 2 Tools     Vivado 2024.1 at /apps/Xilinx/Vivado/2024.1 · starts · licence: unchecked (?) │
 │ ✓ 3 Kit       static_routed_locked.dcp  CRC 0x72BB0A36 = board ✓           │
 │ ✓ 4 Wrapper   my_rm.json · 47/47 ports · rm_id 0x010080F0 (unused)  [XDC ▸] │
 │ ▶ 5 Build     ┌───────────────────────────────────────────────────────────┐ │
@@ -254,7 +254,8 @@ Each card says what the gate means, the likely cause, and the fix. Each cites a 
 | `rm_timing` | real negative slack in your RM, or an RM-internal async crossing or generated clock left unconstrained | add `RM_XDC` (`read_xdc -cell`, `build_dfx.tcl:311-349`; `fpga/rp/eth_ss/eth_ss_rm.xdc` is the worked example). `ALLOW_TIMING_FAIL=1` is for experiments only. |
 | `pr_verify` | the static in the build is not the reference | fetch the kit again, and do not mix kits |
 | `clearing_fits` | the RM is too large for the harness's clearing arena | shrink the RM or ask for a harness with a larger `clr_max` |
-| (synth) licence error `[Common 17-345]` | no licence for KU115 | point `XILINXD_LICENSE_FILE` at the lab server |
+| (synth) licence error `[Common 17-345]` | no device licence for the KU115 (2024.1: Enterprise; 2026.1: Core or higher) | point `XILINXD_LICENSE_FILE` at the lab server |
+| (start) Vivado 2026.1 exits 42 | no licence file at all: 2026.1 does not start without one | `export XILINXD_LICENSE_FILE=PORT@SERVER` (or `LM_LICENSE_FILE`); the guide's Tools step says so before the build |
 
 ### 5.5 The CLI path
 
@@ -278,7 +279,7 @@ harness-manager kit pack    build/my_rm/out/my_rm_build.json [--import] [--out D
 ```
 Build a DUT for mps3-01 (static 0x72BB0A36, kit mps3/0x72BB0A36/vivado-2024.1)
   done   1 target    the board runs 0x72BB0A36 (fielded 2026-09-24)
-  done   2 tools     Vivado 2024.1 at /apps/Xilinx/Vivado/2024.1/bin/vivado   licence: unchecked
+  done   2 tools     Vivado 2024.1 at /apps/Xilinx/Vivado/2024.1/bin/vivado; Vivado 2024.1 starts; licence: unchecked (…)
   done   3 kit       ~/.cache/harness-manager/kits/mps3/0x72BB0A36/2024.1  CRC-32 0x72BB0A36 = board
   done   4 wrapper   my_rm.json: 47/47 ports, clocks match, rm_id 0x010080F0 unused
   FAILED 5 build     gate rm_timing: your RM's paths: setup WNS -0.412 ns (receipt build/my_rm/out/my_rm_build.json)
