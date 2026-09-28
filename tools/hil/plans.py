@@ -423,8 +423,8 @@ def bare_metal(*, static: str = BARE_METAL_STATIC) -> Plan:
               evidence="r7_panel"),
         Check("R7b", "4", "Identify on bare metal (refused: no blink)", SAFE,
               ("identify", "{B}"),
-              (E("error.message", "contains", "needs harness feature 'locate'",
-                 "unavailable — needs harness feature 'locate' (Linux harness), rc=12"),),
+              (E("error.message", "contains", "harness feature 'locate'",
+                 "unavailable — Identify isn't available on this harness image yet (harness feature 'locate'), rc=12"),),
               exit_ok=(12,), evidence="r7b_identify",
               writes="none expected (bare metal refuses; a harness with 'locate' blinks the "
                      "backlight)"),

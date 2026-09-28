@@ -39,7 +39,7 @@ def test_a_demo_board_is_bare_metal_rebuilt_with_identify_greyed(mock):
     client, _sim, _engine = mock
     body = client.get(f"/api/v1/boards/{BID}/panel", headers=AUTH).json()
     assert body["panel"]["source"] == "rebuilt" and body["panel"]["owner"] == "harness"
-    assert body["identify"]["available"] is False and "Linux harness" in body["identify"]["reason"]
+    assert body["identify"]["available"] is False and "harness feature 'locate'" in body["identify"]["reason"]
     assert body["presence"]["active"] is False
     r = client.post(f"/api/v1/boards/{BID}/identify", json={"seconds": 5}, headers=AUTH)
     assert r.status_code == 422 and r.json()["error"]["capability"] == "locate"
