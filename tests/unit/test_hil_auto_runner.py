@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from harness_manager.checks import plans as P
+from harness_manager.checks.run import EXIT_FAIL, EXIT_PASS, EXIT_STOP, Options, Runner, main
 from tests.fakes.hil_auto import ScriptedHm, held, is_write, refused, unreachable, verb_of
-from tools.hil import plans as P
-from tools.hil.run import EXIT_FAIL, EXIT_PASS, EXIT_STOP, Options, Runner, main
 
 B = "192.168.10.101"
 SID = "0x44ee76d5"
@@ -387,7 +387,7 @@ def test_until_stops_cleanly_mid_plan_restores_and_exits(tmp_path):
 def test_until_with_hh_mm_is_the_next_such_time():
     from datetime import datetime
 
-    from tools.hil.run import parse_until
+    from harness_manager.checks.run import parse_until
     now = datetime(2026, 9, 28, 18, 0).astimezone()
     assert parse_until("08:30", now) == now.replace(hour=8, minute=30) + __import__(
         "datetime").timedelta(days=1)
@@ -489,7 +489,7 @@ def test_twin_an_unavailable_reading_for_another_reason_is_a_failure(tmp_path):
 def test_the_subprocess_invoker_passes_argv_and_exit_and_gives_no_stdin():
     import sys
 
-    from tools.hil.run import SubprocessInvoker
+    from harness_manager.checks.run import SubprocessInvoker
     inv = SubprocessInvoker([sys.executable, "-c",
                              "import json, sys; d = sys.stdin.read(); "
                              "print(json.dumps({'argv': sys.argv[1:], 'stdin': d})); "
@@ -501,7 +501,7 @@ def test_the_subprocess_invoker_passes_argv_and_exit_and_gives_no_stdin():
 def test_twin_a_command_that_outlives_its_timeout_is_stopped_and_has_no_exit():
     import sys
 
-    from tools.hil.run import SubprocessInvoker
+    from harness_manager.checks.run import SubprocessInvoker
     out = SubprocessInvoker([sys.executable, "-c", "import time; time.sleep(60)"])([], 1.0)
     assert out.rc is None and "timed out after 1 s" in out.stderr and out.seconds < 20
 
@@ -559,7 +559,7 @@ def test_twin_a_lease_that_expires_mid_run_ends_the_run_before_it_and_restores(t
 def test_the_subprocess_invoker_never_uses_a_running_service():
     import sys
 
-    from tools.hil.run import SubprocessInvoker
+    from harness_manager.checks.run import SubprocessInvoker
     inv = SubprocessInvoker([sys.executable, "-c",
                              "import os; print(os.environ.get('HARNESS_MANAGER_NO_DAEMON'))"])
     assert inv([], 30.0).stdout.strip() == "1"

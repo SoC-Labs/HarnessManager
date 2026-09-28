@@ -1,6 +1,8 @@
-"""Harness Manager's HIL runbooks, unattended (lane HIL-AUTO): ``python -m tools.hil``.
+"""``python -m tools.hil``: the HIL runbooks, unattended, from a checkout (lane HIL-AUTO).
 
-``plans.py`` holds ``docs/HIL_LINUX.md`` and ``docs/HIL_B0.md`` as data; ``run.py`` drives
-Harness Manager's CLI against the board and writes the evidence. ``docs/HIL_AUTO.md`` says how
-david runs it. A lab tool, like ``tools/release``: it is not in the wheel.
+A thin command line. The runner, the plans and the reports are ``harness_manager.checks``
+(in the wheel since HIL-GUI, so the service can run them: the app's Checks section,
+``docs/HIL_AUTO.md`` "In the app"). ``tools.hil.run`` and ``tools.hil.plans`` are those modules
+under their old names, so ``make hil-auto`` and every command in the runbooks still work.
+``env_b2.sh`` (board 2's variables) stays here: it is lab data, not product.
 """

@@ -25,10 +25,10 @@ from typing import Any
 
 import pytest
 
+from harness_manager.checks.run import EXIT_PASS, EXIT_STOP
+from harness_manager.checks.run import main as hil_main
 from harness_manager.cli.main import main as hm_main
 from tests.fakes.hil_auto import HubProbe, InProcessHm, is_write, verb_of
-from tools.hil.run import EXIT_PASS, EXIT_STOP
-from tools.hil.run import main as hil_main
 
 BOARD = "192.168.10.101"
 LX_STATIC = 0x44EE76D5

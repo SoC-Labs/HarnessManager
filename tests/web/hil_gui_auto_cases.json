@@ -1,0 +1,121 @@
+[
+ [
+  {
+   "harness_impl": "bare-metal"
+  },
+  null,
+  "bare-metal"
+ ],
+ [
+  {
+   "harness_impl": ""
+  },
+  null,
+  "bare-metal"
+ ],
+ [
+  null,
+  null,
+  "bare-metal"
+ ],
+ [
+  {
+   "harness_impl": "linux",
+   "features": [
+    "usd"
+   ]
+  },
+  {
+   "store": true,
+   "present": false,
+   "state": ""
+  },
+  "linux-nocard"
+ ],
+ [
+  {
+   "harness_impl": "linux",
+   "features": [
+    "usd"
+   ]
+  },
+  {
+   "store": true,
+   "present": true,
+   "state": "valid",
+   "os_slots": {
+    "slots": {
+     "A": {
+      "state": "empty"
+     },
+     "B": {
+      "state": "empty"
+     }
+    }
+   }
+  },
+  "linux-netboot"
+ ],
+ [
+  {
+   "harness_impl": "linux",
+   "features": [
+    "usd"
+   ]
+  },
+  {
+   "store": true,
+   "present": true,
+   "state": "valid",
+   "os_slots": {
+    "slots": {
+     "A": {
+      "state": "valid"
+     },
+     "B": {
+      "state": "empty"
+     }
+    }
+   }
+  },
+  "linux"
+ ],
+ [
+  {
+   "harness_impl": "linux",
+   "features": [
+    "usd"
+   ]
+  },
+  {
+   "store": true,
+   "present": true,
+   "state": "valid"
+  },
+  "linux"
+ ],
+ [
+  {
+   "harness_impl": "linux",
+   "features": [
+    "usd"
+   ]
+  },
+  {
+   "store": true,
+   "present": true,
+   "state": "empty"
+  },
+  "linux-netboot"
+ ],
+ [
+  {
+   "harness_impl": "linux",
+   "features": [
+    "usd"
+   ]
+  },
+  null,
+  "linux-netboot"
+ ]
+]

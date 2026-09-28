@@ -20,7 +20,10 @@ Step 3 is skipped, and the verb runs on the in-process engine, when:
   this process's environment, which the daemon cannot see.
 
 A daemon that is recorded but does not answer ``/api/v1/health`` within a
-second is not used. The CLI only ever uses the frozen
+second is not used. ``require_service`` (HIL-GUI) is the factory for a caller that must go
+through the service and nowhere else (the HIL checks' subprocesses, through
+``$HARNESS_MANAGER_CLI_ENGINE``): it waits a little longer for the service, then says
+UNREACHABLE, never the in-process engine (whose board lock the service holds). The CLI only ever uses the frozen
 ``harness_manager.core.services.Engine`` protocol, so every verb behaves the same
 over any of them.
 """
@@ -31,6 +34,7 @@ import argparse
 import importlib
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -118,6 +122,37 @@ def daemon_engine(args: argparse.Namespace | None = None) -> Any | None:
     except Exception:  # noqa: BLE001 - no daemon, or a broken one: use the in-process engine
         log.debug("harness-manager-daemon discovery failed", exc_info=True)
         return None
+
+
+#: ``require_service``: how many times, and how long each, the service's health is asked.
+REQUIRE_TRIES = 3
+REQUIRE_TIMEOUT_S = 5.0
+
+
+def require_service(args: argparse.Namespace | None = None) -> Any:
+    """An engine factory (``$HARNESS_MANAGER_CLI_ENGINE=harness_manager.cli.engine:require_service``):
+    the service running for this state dir, asked up to ``REQUIRE_TRIES`` times, else
+    UNREACHABLE (exit 7). Never the in-process engine: a busy service is not a missing one."""
+    del args
+    from harness_manager.core.errors import UnreachableError
+
+    last = ""
+    for attempt in range(REQUIRE_TRIES):
+        try:
+            from harness_manager.client import RemoteEngine
+
+            remote = RemoteEngine.discover(timeout=REQUIRE_TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001 - said below, as UNREACHABLE
+            remote, last = None, f"{type(exc).__name__}: {exc}"
+        if remote is not None:
+            return remote
+        if attempt + 1 < REQUIRE_TRIES:
+            time.sleep(1.0)
+    raise UnreachableError("the Harness Manager service for this state dir did not answer"
+                           + (f" ({last})" if last else ""),
+                           hint="this command goes only through the service "
+                                "(HARNESS_MANAGER_CLI_ENGINE=…require_service); "
+                                "`harness-manager daemon status` checks it")
 
 
 def get_engine(args: argparse.Namespace | None = None) -> Any:

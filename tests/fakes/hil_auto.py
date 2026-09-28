@@ -1,4 +1,4 @@
-"""Fakes for lane HIL-AUTO's runner (``tools/hil``).
+"""Fakes for lane HIL-AUTO's runner (``harness_manager.checks``; ``tools/hil`` is its command line).
 
 - ``InProcessHm``: Harness Manager's REAL CLI (``harness_manager.cli.main.main``) run in this
   process, stdout/stderr captured, stdin empty (a prompt fails, as under the runner's
@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from tools.hil.run import Outcome
+from harness_manager.checks.run import Outcome
 
 #: The verbs that change something (the board, its cards, the SD, the hub, the lease, the
 #: claim). ``--writes none`` must never send one; ``--writes safe`` only program/restore.
