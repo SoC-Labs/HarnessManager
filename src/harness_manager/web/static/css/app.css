@@ -838,6 +838,20 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .pm-inv { background: var(--err); color: var(--on-err); }
 .pm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .pm-list li { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+/* PANEL-TRUTH: the Front panel card's one headline, the rebuilt text's legend, and the one
+   "Not reported by this image" line (its features behind the disclosure). */
+.panel-headline { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; line-height: 1.5; }
+.panel-headline > .chip { flex: none; }
+.panel-headline > span { min-width: 0; flex: 1 1 16em; overflow-wrap: anywhere; }
+.panel-headline > .reason { flex: 1 1 16em; }
+.pm-legend { margin: 6px 0 0; }
+.panel-missing > summary, .ld-detail > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px;
+}
+.panel-missing > summary::-webkit-details-marker, .ld-detail > summary::-webkit-details-marker { display: none; }
+.panel-missing[open] > summary .chev, .ld-detail[open] > summary .chev { transform: rotate(90deg); }
+.panel-missing > .pm-list { margin: 6px 0 0 20px; }
+.ld-detail > p { margin: 4px 0 0 20px; overflow-wrap: anywhere; }
 /* LM4: the Live display (docs/design/LCD_MIRROR.md §7.4). The canvas holds the panel's own
    pixels; every overlay sits OVER it. The picture is view only (D4): no pointer cursor. */
 .ld { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

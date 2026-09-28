@@ -13,7 +13,10 @@ own LM1 ``FakeLcdMirror`` on 127.0.0.1:0, started on first use:
   none, is refused as the daemon refuses it: 409 HELD naming the holder (the routes read
   the hub's lease through ``SimLeases``, as the daemon reads the hub API's).
 
-Knobs: ``refuse(bid, reason)`` / ``allow(bid)`` (``display_reason``), ``gate(bid, reason)``
+Knobs: ``refuse(bid, reason)`` / ``allow(bid)`` (``display_reason``), ``checking(bid, times,
+detail)`` (PANEL-TRUTH: the MPS3 adapter's lease check meets a hub that does not answer
+``times`` times: "checking your lease with the hub..." as ``connecting``, the hub's words as
+the detail, asked again after ``CHECK_RETRY_S``), ``gate(bid, reason)``
 (``display_gate``: a board that can never show it, 422 whoever holds its lease; ``allow``
 lifts it too), ``no_display(bid)``
 (the hook returns None: a pack with no live display for that board), ``mirror(bid)`` (the
@@ -30,14 +33,20 @@ from typing import Any
 
 from fastapi import APIRouter, FastAPI
 
+from harness_manager.core.display import DisplayUnavailable
 from harness_manager.daemon import display_api
 from harness_manager.daemon.app import RouteContext
 from harness_manager.services.display import DisplayService
+from harness_manager_mps3.display import CHECKING
 
 from .lm1_fake_lcd_mirror import CardAnimator, FakeLcdMirror, FakePanel
 
 API = "/api/v1"
 LEASE_ONLY = "the live display is for the lease holder only"
+#: What the hub's sshd said to the lease read on 2026-09-28 (the MPS3 adapter's detail).
+HUB_RESET = ("lease show on mapstone-dev.ecs.soton.ac.uk failed: lease show failed: "
+             "kex_exchange_identification: read: Connection reset by peer")
+CHECK_RETRY_S = 0.8
 
 
 class SimDisplayAdapter:
@@ -54,6 +63,10 @@ class SimDisplayAdapter:
         return self.sim.gate_reason(self.bid) or self.sim.reason(self.bid)
 
     def display_connect(self) -> Any:
+        detail = self.sim.take_check(self.bid)
+        if detail:                                  # the adapter's "checking" (PANEL-TRUTH)
+            raise DisplayUnavailable(CHECKING, retry_s=CHECK_RETRY_S, state="connecting",
+                                     detail=detail)
         return self.sim.mirror(self.bid).connect()
 
     def display_release(self) -> None:
@@ -93,6 +106,7 @@ class DisplaySim:
         self._reasons: dict[str, str] = {}
         self._gates: dict[str, str] = {}
         self._none: set[str] = set()
+        self._checks: dict[str, list[Any]] = {}       # bid -> [tries left, detail]
         self.service: DisplayService | None = None
 
     # -- the pack hook (lane LM2's name) --------------------------------------------------------
@@ -123,6 +137,19 @@ class DisplaySim:
             return self._gates.get(bid, "")
 
     # -- knobs ------------------------------------------------------------------------------------
+
+    def checking(self, bid: str, times: int = 3, detail: str = HUB_RESET) -> None:
+        """The lease check meets a hub that does not answer ``times`` times, then it does."""
+        with self._lock:
+            self._checks[bid] = [times, detail]
+
+    def take_check(self, bid: str) -> str:
+        with self._lock:
+            left = self._checks.get(bid)
+            if not left or left[0] <= 0:
+                return ""
+            left[0] -= 1
+            return str(left[1])
 
     def refuse(self, bid: str, reason: str) -> None:
         with self._lock:
