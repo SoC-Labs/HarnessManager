@@ -34,7 +34,7 @@ Every row is a fact of **the kit for one static** (KIT-STORE's `kit.json`: `viva
 | Static | Harness | Vivado | Partition | Kit |
 |---|---|---|---|---|
 | `0x72BB0A36` (fielded 2026-09-24) | bare-metal MicroBlaze | **2024.1** | `u_rp_dut` / `pblock_rp_dut`, 47 ports / 148 bits | ≈ 10.2 MB |
-| mint 3 (RC2, not yet minted) | MicroBlaze V Linux | **2026.1** (INTEG) | the same boundary, unchanged for RC2 (47 / 148) | ≈ 38 MB (KIT-STORE §2.1) |
+| `0x44EE76D5` (RC2, minted; record at platform 6beea09; NOT fielded yet) | MicroBlaze V Linux | **2026.1** | the same boundary (47 / 148); `dut_clk` from `BUFGCE_X2Y47` | on the hub, `0x44EE76D5/kit/` (internal: AMD IP) |
 
 The rest of this table is for 0x72BB0A36:
 

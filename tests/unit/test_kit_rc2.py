@@ -5,8 +5,8 @@
 - the printed command names the full path of the matching Vivado;
 - ``minimal`` builds as its skeleton, which ties ``dut_lockup``/``irq_out`` off;
 - ``kit check --static-id`` against a receipt of another static refuses;
-- the pin model with more than one shell (a hand-made two-shell document here; the
-  generator's own tests against the platform repo are in ``test_kit_rc2_pins.py``).
+- the pin model holds RC2 as a second, not-fielded shell (the generator's own tests
+  against the platform repo are in ``test_kit_rc2_pins.py``).
 
 Vivado is never run: fake install trees and a runner that answers ``-version`` from the
 path. Every test has its negative twin. The opt-in test at the end reads the real 2026.1
@@ -369,29 +369,37 @@ def test_negative_twin_a_bare_partial_still_takes_static_id_as_the_kit(tmp_path,
     assert not any(x.name == "kit" and x.state == "unchecked" for x in checks)   # RC2's kit used
 
 
-# --- item 1: a pin model with two shells, read the way the kit flow reads it ------------------------
+# --- item 1: the committed model holds RC2 (from its record at platform 6beea09) -------------------
 
 
-def two_shell_doc(extra: str = RC2) -> dict:
-    """The committed model plus a copy of its shell relabelled: the shape the generator
-    writes for 0x72BB0A36 + RC2 (tests/unit/test_kit_rc2_pins.py proves the generator)."""
+def single_shell_doc() -> dict:
+    """The committed model with RC2 taken out: what HM had before the record was published."""
     doc = pins.load_model()
-    sh = copy.deepcopy(doc["shells"][doc["default_shell"]])
-    sh["static_id"] = extra
-    doc["shells"][extra] = sh
+    doc["shells"].pop(RC2)
     return doc
 
 
-def test_the_committed_model_names_each_shells_platform_commit():
+def test_the_committed_model_holds_rc2_as_a_second_not_fielded_shell():
     doc = pins.load_model()
+    assert list(doc["shells"]) == [SID, RC2] and doc["default_shell"] == SID
+    rc2, base = doc["shells"][RC2], doc["shells"][SID]
+    assert rc2["fielded"] is False and base["fielded"] is True       # the board still runs SID
+    assert rc2["platform"]["commit"].startswith("6beea09")
+    assert rc2["rp_boundary"] == base["rp_boundary"]                 # 47 ports / 148 bits / 20
+    assert rc2["pblock"]["dut_clk_hd_clk_src"]["value"] == "BUFGCE_X2Y47"
+    assert base["pblock"]["dut_clk_hd_clk_src"]["value"] == "BUFGCE_X2Y24"
+    assert set(rc2["owns"]) - set(base["owns"]) == {
+        "USD_CLK", "USD_CMD", "USD_DAT[0]", "USD_DAT[1]", "USD_DAT[2]", "USD_DAT[3]", "USD_NCD"}
+    assert any("DDR4" in n for n in rc2["notes"])
+    # a release candidate never makes a board net hw-proven
+    assert doc["nets"]["USD_CLK"]["verified"] == "pinmap"
     for sid, sh in doc["shells"].items():
         assert sh["platform"]["ref"] and len(sh["platform"]["commit"]) == 40, sid
-    assert doc["shells"][doc["default_shell"]]["platform"]["commit"] == \
-        doc["status"]["platform_commit"]
+    assert doc["shells"][SID]["platform"]["commit"] == doc["status"]["platform_commit"]
 
 
-def test_a_second_shell_in_the_model_gets_its_own_rm_kit():
-    model = PinModel(two_shell_doc(), pack="mps3")
+def test_rc2s_rm_kit_is_its_own():
+    model = PinModel(pins.load_model(), pack="mps3")
     d = xdc.from_doc({"kind": "rm", "name": "minimal", "static_id": RC2,
                       "use": {"clkrst": {}, "status": {"tie": ["dut_lockup", "irq_out"]}}},
                      origin="inline")
@@ -399,25 +407,26 @@ def test_a_second_shell_in_the_model_gets_its_own_rm_kit():
     assert not [f for f in k.findings if f.code == "static_id"]
     assert k.facts["static_id"] == RC2 and k.facts["boundary"]["ports"] == 47
     assert f"every partition port of static {RC2}" in k.files["minimal_wrapper_skeleton.sv"]
+    assert "HD.CLK_SRC BUFGCE_X2Y47" in k.files["minimal_ooc.xdc"]
     # twin: a static the model does not describe is a static_id finding (and falls back)
     d.doc["static_id"] = "0x12345678"
     k = xdc.rm_kit(model, d)
     assert [f.severity for f in k.findings if f.code == "static_id"] == ["error"]
 
 
-def test_kit_script_for_rc2_needs_rc2_in_the_pin_model(rc2_kits, store, monkeypatch):
-    # today (single-shell model): the XDC kit refuses the static it does not describe
-    with pytest.raises(RefusedError, match="has no shell '0x44EE76D5'"):
-        script.make_script(rc2_kits, pack="mps3", static_id=RC2, design="minimal", store=store,
-                           vivado=found_with(None))
-    # with RC2 in the model (what the generator writes once its record lands): it builds
-    doc = two_shell_doc()
-    monkeypatch.setattr(pins, "load_model", lambda: copy.deepcopy(doc))
+def test_kit_script_for_rc2_builds_the_minimal_skeleton(rc2_kits, store, monkeypatch):
     s = script.make_script(rc2_kits, pack="mps3", static_id=RC2, design="minimal", store=store,
                            vivado=found_with(None))
     assert s.static_id == RC2 and s.params["VIVADO_VERSION"] == "2026.1"
     assert s.params["RM_SOURCES"] == "xdc/minimal_wrapper_skeleton.sv"
     assert not [c for c in s.checks if c.name.startswith("xdc") and c.state == "mismatch"]
+    assert "HD.CLK_SRC BUFGCE_X2Y47" in s.files["xdc/minimal_ooc.xdc"]
+    # twin: the model as it was before the record (no RC2): the XDC kit refuses the static
+    doc = single_shell_doc()
+    monkeypatch.setattr(pins, "load_model", lambda: copy.deepcopy(doc))
+    with pytest.raises(RefusedError, match="has no shell '0x44EE76D5'"):
+        script.make_script(rc2_kits, pack="mps3", static_id=RC2, design="minimal", store=store,
+                           vivado=found_with(None))
 
 
 # --- opt-in: the real 2026.1, read-only ------------------------------------------------------------
@@ -433,3 +442,35 @@ def test_opt_in_the_real_2026_1_is_found_by_its_install_dir(monkeypatch, tmp_pat
     assert f.install is not None and f.install.version.startswith("2026.1"), f
     assert f.install.path == str(REAL_2026 / "Vivado" / "bin" / "vivado")
     assert f.install.build > 0
+
+
+# --- the rm_timing gate's detail (Tcl, run in Python's own interpreter) ---------------------------
+
+
+def _rm_timing(wns: str, whs: str, nregs: int) -> tuple[str, str]:
+    """The template's rm_timing block, run with rp_slack/gate/rset stubbed: (verdict, detail)."""
+    tkinter = pytest.importorskip("tkinter")
+    text = render.template_text()
+    a = text.index("    lassign [rp_slack $rp] wns whs nregs")
+    b = text.index("    close_project", a)
+    tcl = tkinter.Tcl()
+    tcl.eval(f'proc rp_slack {{rp}} {{ return [list "{wns}" "{whs}" {nregs}] }}')
+    tcl.eval("proc rset {k v} {}")
+    tcl.eval("proc gate {n ok d} { set ::G [list $n [expr {$ok ? \"PASS\" : \"FAIL\"}] $d] }")
+    tcl.eval("proc note {n d} { set ::G [list $n NOTE $d] }")
+    tcl.eval("set rp u_rp_dut; array set P {ALLOW_TIMING_FAIL 0}")
+    tcl.eval(text[a:b])
+    _, verdict, detail = tcl.eval("set ::G").split(" ", 2)
+    return verdict, detail.strip("{}")
+
+
+def test_rm_timing_says_why_a_slack_is_empty():
+    v, d = _rm_timing("", "", 0)                   # minimal: every output a constant
+    assert v == "PASS" and "no registers" in d and "WNS" not in d
+    v, d = _rm_timing("", "", 12)                  # registers, but no timed path
+    assert v == "PASS" and "setup WNS none (no timed path)" in d
+    # twins: real slacks print as before, and a negative one fails
+    v, d = _rm_timing("0.412", "0.031", 12)
+    assert v == "PASS" and "setup WNS 0.412 ns, hold WHS 0.031 ns" in d
+    v, d = _rm_timing("-0.412", "0.031", 12)
+    assert v == "FAIL" and "setup WNS -0.412 ns" in d

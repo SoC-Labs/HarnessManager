@@ -312,8 +312,12 @@ owners.
   `"use": {"status": {"tie": [...]}}`.
 - `kit check --static-id ID` on a receipt of another static refuses (exit 14) instead of
   ignoring the flag.
-- The pin model can describe more than one shell (`tools/gen_mps3_pins.py --shell`, `--all`);
-  RC2 joins it when its fielded record is published.
+- The pin model describes more than one shell (`tools/gen_mps3_pins.py --shell`, `--all`),
+  and now holds RC2 (`0x44EE76D5`, from its record at platform 6beea09) beside the fielded
+  `0x72BB0A36`: `kit import`, `kit script` and the XDC kits work for RC2. RC2 is marked not
+  fielded, and its RM kits name its own `dut_clk` buffer (`BUFGCE_X2Y47`).
+- The `rm_timing` gate says why a slack is empty: an RM with no registers (such as
+  `minimal`) has no path of its own, and a register with no timed path has no slack.
 
 ### Known limits
 - The board has a fixed address, 192.168.10.101, and there is no network discovery yet.

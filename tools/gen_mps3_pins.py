@@ -75,8 +75,10 @@ OUT = REPO / "src" / "harness_manager_mps3" / "pins" / "mps3_board_pins.json"
 DEFAULT_REF = "feat/rm-ila-mint"
 DEFAULT_STATIC = "0x72BB0A36"
 #: The shells the committed model describes, ``SID@REF``, the default shell first. RC2
-#: (0x44EE76D5, the Linux lead's record) joins when its fielded/ record is published.
-SHELLS = ["0x72BB0A36@feat/rm-ila-mint"]
+#: (0x44EE76D5) is pinned to the commit that published its record (feat/linux-harness
+#: 6beea09): a minted static never changes, and the branch head moves every day.
+SHELLS = ["0x72BB0A36@feat/rm-ila-mint",
+          "0x44EE76D5@6beea093ff5e11517282b44034bdf59d0cbef746"]
 PART = "xcku115-flvb1760-1-c"
 PKG_CANDIDATES = [
     "{xilinx}/data/parts/xilinx/kintexu/public/ibis/pkg/xcku115_flvb1760.pkg",
@@ -214,7 +216,10 @@ def cite(plat: Platform, sources: Sources, path: str, pattern: str, role: str = 
 
 
 def _key(path: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", Path(path).name.lower()).strip("_")
+    name = Path(path).name
+    if path.startswith("fielded/"):          # fielded/<sid>/README.md: one per record
+        name = f"{Path(path).parent.name}_{name}"
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
 # --- parsers -----------------------------------------------------------------------------------

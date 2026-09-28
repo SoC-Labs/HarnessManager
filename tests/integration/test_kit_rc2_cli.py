@@ -94,3 +94,20 @@ def test_kit_check_static_id_must_be_the_receipts(bdir, capsys):
     assert rc == 0 and "expected_static" in out
     rc, _, err = run(capsys, "kit", "check", str(d), "--static-id", "0x44EE76D5")
     assert rc == ExitCode.INCOMPATIBLE and "expected_static" in err and "0x44EE76D5" in err
+
+
+def test_rc2_loose_fielded_dir_imports_and_scripts(tmp_path, capsys, monkeypatch):
+    # fielded/0x44EE76D5/ as fetch_fielded.sh leaves it (a fake DCP whose CRC is RC2)
+    rc2 = "0x44EE76D5"
+    loose = kf.fielded_dir(tmp_path / "fielded" / rc2, rc2, release="2026.1")
+    rc, out, err = run(capsys, "kit", "import", str(loose))
+    assert rc == 0 and "cached: mps3/0x44EE76D5/vivado-2026.1" in out, err
+    monkeypatch.setenv(vivado.ENV, "off")
+    rc, out, err = run(capsys, "kit", "script", "--static-id", rc2, "--design", "minimal",
+                       "--out", str(tmp_path / "b"))
+    assert rc == 0, err
+    assert "HD.CLK_SRC BUFGCE_X2Y47" in (tmp_path / "b" / "xdc" / "minimal_ooc.xdc").read_text()
+    # twin: a static the pin model does not describe is refused at import (exit 12)
+    other = kf.fielded_dir(tmp_path / "fielded" / "0x12345678", "0x12345678", release="2026.1")
+    rc, _, err = run(capsys, "kit", "import", str(other))
+    assert rc == ExitCode.UNAVAILABLE and "0x12345678" in err
