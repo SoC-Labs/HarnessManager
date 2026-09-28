@@ -31,6 +31,12 @@ NEEDS_PRESENCE = ("this harness image doesn't report who is connected "
                   "(harness feature 'presence')")
 #: The live display (lane LM2). The adapter (``display.py``) says which of these is missing.
 NEEDS_LCD_MIRROR = "needs the Linux harness with lcd_mirror and a claimed board"
+#: FIX-PACK-2 item 1: "Find boards on the network" is UDP 6899 identify, which every Linux
+#: harness since v0.11 and bare metal since FOLD A-v0.12 serves, and none lists as a
+#: feature. So it needs only an Ethernet link; the session's ``capability_reasons`` makes a
+#: recent identify answer the proof (identify.DiscoverWitness), and names a hub or tunnel.
+NEEDS_ETHERNET_LAN = ("needs an Ethernet link on the board's own network (identify is UDP "
+                      "6899)")
 
 SPECS: tuple[CapabilitySpec, ...] = (
     CapabilitySpec(C.IDENTIFY, "Identify the harness", (via(L.ETHERNET), via(L.HUB))),
@@ -78,8 +84,8 @@ SPECS: tuple[CapabilitySpec, ...] = (
     # ~3 s; Linux: sync + WDOG + a full OS boot, see constants.reboot_wait_s).
     CapabilitySpec(C.RESET_SHELL, "Restart the shell", (via(L.ETHERNET, features=("reboot",)),
                                                          via(L.HUB, features=("reboot",)))),
-    CapabilitySpec(C.DISCOVER_NETWORK, "Find boards on the network",
-                   (via(L.ETHERNET, features=("identify",)),)),
+    CapabilitySpec(C.DISCOVER_NETWORK, "Find boards on the network", (via(L.ETHERNET),),
+                   needs_hint=NEEDS_ETHERNET_LAN),
     # Pack-specific "lab" capabilities (the CLI's `lab` verbs).
     CapabilitySpec("mps3.display_flip", "Hand the CLCD panel to the DUT",
                    (via(L.ETHERNET, features=("clcd_kvm",)), via(L.HUB, features=("clcd_kvm",)))),

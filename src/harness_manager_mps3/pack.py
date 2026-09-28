@@ -51,6 +51,7 @@ from typing import Any
 
 from pyverify import rm_id as rmid
 
+from harness_manager.core import capabilities as C
 from harness_manager.core.capabilities import CapabilitySpec
 from harness_manager.core.errors import (
     HarnessError,
@@ -255,6 +256,26 @@ class Mps3Session(BoardSession):
         controller = getattr(self, "controller", None)
         if controller is not None and hasattr(controller, "observer"):
             controller.observer = on(CONTACT_MCC)
+
+    def capability_reasons(self, available: frozenset[str],
+                           identity: BoardIdentity | None = None) -> dict[str, str]:
+        """FIX-PACK-2 (the engine's ``session.capability_reasons`` seam): capabilities the
+        links and features allow that this board cannot use now, with why. It only narrows.
+
+        - ``discover_network``: a recent identify answer from the board is the proof
+          (``identify.DiscoverWitness``); through a hub it is "not through a hub".
+        """
+        out: dict[str, str] = {}
+        if C.DISCOVER_NETWORK in available:
+            witness = getattr(self, "_discover", None)
+            if witness is None:
+                from .identify import DiscoverWitness
+
+                witness = self._discover = DiscoverWitness()
+            why = witness.reason(self)
+            if why:
+                out[C.DISCOVER_NETWORK] = why
+        return out
 
     def board_name(self, identity: BoardIdentity | None = None) -> tuple[str, str]:
         """``(name, source)`` for the open board beyond its candidate: the hub's name (N1)."""

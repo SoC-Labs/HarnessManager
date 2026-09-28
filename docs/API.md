@@ -525,3 +525,7 @@ docs/design/BOARD_IDENTITY.md is the design. Every Linux image today gives every
 - **Events:** `board.found` and `board.identity` add `name` and `name_source`.
 - **TSV:** `probe` and `info` append a `NAME` column.
 - **The web UI** shows the name in the rail, in the header (with the design and shell under it), on the preview card and in the window title (`mps3-01 · Harness Manager`). A board with no name shows its address, as before.
+
+## FIX-PACK-2 (additive)
+- **`discover_network` ("Find boards on the network") needs only an Ethernet link**, no harness feature: identify (UDP 6899) is served by every Linux harness since v0.11 and bare metal since FOLD A-v0.12, and no image lists it in `version.features`. `BoardInfo` makes a recent identify answer from the board the proof (one unicast probe; an answer stands 60 s, a silence 30 s); otherwise it is unavailable with why: `not through a hub: ...` for a board reached through a hub (UDP does not cross its SSH tunnel; nothing is sent), `not through an SSH tunnel: ...` for another tunnel, `the board did not answer identify from here (...)`, or `needs an Ethernet link on the board's own network (identify is UDP 6899)` (the `needs_hint`).
+- **The engine asks the session last** (`session.capability_reasons(available, identity) -> {capability: reason}`, optional, duck-typed like `claim` and `net_identity`): a board pack may withdraw a capability its links and features allow, with the reason. It only narrows; a failing hook is logged and ignored.

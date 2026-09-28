@@ -366,6 +366,7 @@ class Engine:
             if reason:
                 available = available - {POWER_CYCLE}
                 unavailable = {**unavailable, POWER_CYCLE: reason}
+        available, unavailable = self._session_reasons(entry, available, unavailable, identity)
         claim = self._claim(entry, identity)
         net_identity = self._net_identity(entry)
         if net_identity is not None and net_identity.get("status") == "clash":
@@ -384,6 +385,27 @@ class Engine:
                 "name": candidate.name, "name_source": candidate.name_source}))
         return BoardInfo(candidate, identity, health, available, unavailable, claim=claim,
                          net_identity=net_identity)
+
+    @staticmethod
+    def _session_reasons(entry: _Open, available: frozenset[str], unavailable: dict[str, str],
+                         identity: BoardIdentity) -> tuple[frozenset[str], dict[str, str]]:
+        """FIX-PACK-2: the session's own word on capabilities its links and features allow
+        but it knows it cannot use now (optional ``session.capability_reasons(available,
+        identity) -> {name: reason}``; the MPS3's: a recent identify answer, the harness's
+        MCC route). It only narrows: a name that is not available, or an empty reason, is
+        ignored. Never a failed ``info``."""
+        hook = getattr(entry.session, "capability_reasons", None)
+        if not callable(hook):
+            return available, unavailable
+        try:
+            said = dict(hook(frozenset(available), identity) or {})
+        except Exception:  # noqa: BLE001 - a session's narrowing is never worth failing info
+            log.exception("the capability reasons of %s failed", entry.candidate.board_id)
+            return available, unavailable
+        lost = {str(n): str(r) for n, r in said.items() if n in available and r}
+        if not lost:
+            return available, unavailable
+        return available - frozenset(lost), {**unavailable, **lost}
 
     @staticmethod
     def _note_display_identity(entry: _Open, identity: BoardIdentity) -> None:

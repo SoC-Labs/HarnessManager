@@ -156,6 +156,10 @@ owners.
 - The board controller (MCC) over the Debug USB: temperatures, oscillators, a reboot
   that proves the board came back, and allowlisted commands (destructive ones are
   refused).
+- "Find boards on the network" is available on any Ethernet link where the board answers
+  identify (UDP 6899). It needed a harness feature `identify` that no image lists, so it
+  was unavailable everywhere. Through a hub it says "not through a hub" (UDP does not
+  cross the tunnel).
 - The MCC temperature says what it measures: "the SLR0 die diode via U53 (MPS3 schematic
   p4); not ambient" (was "sensor identity unverified").
 - A reboot of a Linux board waits up to 300 s by default (was 180 s): with the Linux
