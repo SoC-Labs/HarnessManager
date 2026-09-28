@@ -382,6 +382,33 @@ def test_one_run_per_board_and_the_board_stays_open_while_it_runs(nocard, capsys
         assert svc.call("DELETE", bid_path(BID)[len("/api/v1"):]).status_code == 200
 
 
+def test_a_forced_service_stop_lets_the_run_restore_greybox_through_it_first(nocard, capsys):
+    """``daemon stop --force`` mid-run: the service stops the run and keeps serving until the
+    run has put greybox back THROUGH it, then stops (without force it refuses, above)."""
+    with service() as svc:
+        svc.open()
+        acquire(capsys)
+        real = svc.hm.__class__.__call__
+        answers = []
+
+        def stop_service_after_program(hm, argv, timeout):
+            out = real(hm, argv, timeout)
+            if "program" in argv and not answers:
+                answers.append(svc.call("POST", "/daemon/shutdown", json={"force": True}))
+            return out
+
+        svc.hm.__class__ = type("ForceHm", (InProcessHm,), {"__call__": stop_service_after_program})
+        assert svc.start(plan="linux-nocard", writes="safe", repeat=3, interval_s=600,
+                         until="").status_code == 200
+        assert svc.live.stopped.wait(120), "the service did not stop after the run ended"
+        assert answers and answers[0].status_code == 200 and answers[0].json()["wait_s"] > 0
+        last = svc.d.checks.status(BID)["last"]
+        s = summary(last["evidence"])
+        assert last["result"] == "STOPPED" and s["end_state"]["greybox"] is True, s["end_state"]
+        assert nocard.fake.current_rm_id == 0
+        assert [verb_of(a) for a in svc.hm.calls].count("restore") == 1
+
+
 def test_auto_picks_the_plan_from_the_board(nocard, capsys):
     with service() as svc:
         svc.open()

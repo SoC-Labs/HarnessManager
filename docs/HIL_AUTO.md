@@ -60,8 +60,8 @@ harness-manager config set tools.hw_server /research/CAD/Xilinx/Vivado/2026.1/Vi
 another static".) The board and its hub come from `boards.toml`, as for every other verb.
 
 While a run is active the board cannot be closed, and `harness-manager daemon stop` refuses
-(naming the run); `--force` stops each run first (it restores greybox, up to 3 min) and then
-the service. A service that is killed ends the run where it is. A run is an explicit action,
+(naming the run); `--force` stops each run first, and the service keeps serving while the
+run restores greybox through it (up to 3 min), then stops. A service that is killed ends the run where it is. A run is an explicit action,
 so QUIET-POLL's viewer rules do not gate it: it runs with no window open, paced by its own
 rules (`--gap`, `--interval`).
 

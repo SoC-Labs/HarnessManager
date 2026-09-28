@@ -391,9 +391,11 @@ class Daemon:
         self._candidates: dict[str, Candidate] = {}
         # HIL-GUI: an extension that needs a board to stay open (a checks run) refuses its
         # close here, and the service's stop without force: ``guard(board_id)`` /
-        # ``guard(force)`` raise the refusal (HELD, naming what holds it).
+        # ``guard(force)`` raise the refusal (HELD, naming what holds it). With force, a
+        # shutdown guard may instead return ``(drain, wait_s)``: the service keeps serving
+        # while ``drain()`` runs (a run puts greybox back through it), then stops.
         self.close_guards: list[Callable[[str], None]] = []
-        self.shutdown_guards: list[Callable[[bool], None]] = []
+        self.shutdown_guards: list[Callable[[bool], tuple[Callable[[], None], float] | None]] = []
         self._unlog = self.bus.subscribe("*", _log_event)
         # QUIET-POLL (services/quiet.py): background contact with a board happens only while
         # a UI views it, never while its hub lease is someone else's, never under policy
@@ -1040,8 +1042,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def stop_daemon(body: JsonBody = None) -> JSONResponse:
         b = _obj(body)
         force = _bool(b, "force", False)
-        for guard in d.shutdown_guards:        # HIL-GUI: a checks run, unless forced
-            guard(force)
+        drains = [drain for guard in d.shutdown_guards    # HIL-GUI: a checks run, unless forced
+                  if (drain := guard(force)) is not None]
         running = d.jobs.running()
         if running and not force:
             names = ", ".join(f"{j.describe()} on {j.board_id}" for j in running)
@@ -1054,6 +1056,23 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         if d.shutdown is None:
             raise UnavailableError("daemon_shutdown",
                                    "this server was not started by `harness-manager daemon`")
+        if drains:
+            # HIL-GUI: the service goes on serving while each drain runs (a checks run's
+            # restore goes through it), then stops; the answer says how long that may take.
+            shutdown = d.shutdown
+
+            def drain_then_stop() -> None:
+                for drain, _wait in drains:
+                    try:
+                        drain()
+                    except Exception:  # noqa: BLE001 - never keep the service from stopping
+                        log.exception("a shutdown drain failed")
+                shutdown()
+
+            threading.Thread(target=drain_then_stop, daemon=True,
+                             name="harness-manager-daemon-drain").start()
+            return _JSON(ok(stopping=True, pid=os.getpid(),
+                            wait_s=max(wait for _drain, wait in drains)))
         threading.Timer(0.2, d.shutdown).start()
         return _JSON(ok(stopping=True, pid=os.getpid()))
 

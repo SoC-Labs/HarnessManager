@@ -639,12 +639,15 @@ class HilRuns:
             err.data = {"run": run.id, "kind": "checks"}   # type: ignore[attr-defined]
             raise err
 
-    def guard_shutdown(self, force: bool) -> None:
-        """``POST /daemon/shutdown``: refused while a run is active, unless forced (then the
-        runs are stopped, and the service waits for them to put greybox back)."""
+    def guard_shutdown(self, force: bool) -> tuple[Callable[[], None], float] | None:
+        """``POST /daemon/shutdown``: refused while a run is active, unless forced. Forced, the
+        service first stops every run and waits (up to ``CLOSE_WAIT_S``) for each to put
+        greybox back THROUGH it, still serving, then stops (``app.stop_daemon``'s drain)."""
         with self._mu:
             runs = list(self._active.values())
-        if runs and not force:
+        if runs and force:
+            return (lambda: self.close(CLOSE_WAIT_S)), CLOSE_WAIT_S
+        if runs:
             names = ", ".join(f"run {r.id} on {r.board_id} ({r.state})" for r in runs)
             err = HeldError(f"harness-manager-daemon has checks running: {names}",
                             holder="harness-manager-daemon checks",
@@ -653,6 +656,7 @@ class HilRuns:
                                  "service exits")
             err.data = {"runs": [r.id for r in runs]}   # type: ignore[attr-defined]
             raise err
+        return None
 
     def close(self, wait_s: float = CLOSE_WAIT_S) -> None:
         """The service is stopping: stop every run and wait (bounded) for its end state."""
