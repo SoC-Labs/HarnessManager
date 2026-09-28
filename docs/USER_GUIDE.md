@@ -754,8 +754,12 @@ minutes with 2 threads and 4 to 8 GB of RAM.
 - **No RTL in the design:** `minimal` names none, so `kit script` builds its wrapper
   skeleton (`xdc/minimal_wrapper_skeleton.sv`: `rm_id` driven, every other output tied off)
   and says so.
-- **Licence:** only synthesis can tell. Watch for `[Common 17-345] A valid license was not
-  found`, and point `XILINXD_LICENSE_FILE` at the lab server.
+- **Licence:** the device licence for the xcku115 is needed from synthesis on: Vivado 2026.1
+  Core or higher (2024.1: Enterprise); the statics' IP needs none. Only synthesis can check
+  it, so the guide shows it *unchecked*. Watch for `[Common 17-345] A valid license was not
+  found`, and point `XILINXD_LICENSE_FILE` at the lab server. Vivado 2026.1 does not even
+  start without a licence file (exit 42): the guide launches the kit's Vivado once and fails
+  its **Tools** step with the `export` to run.
 - **Vivado exits 0 even when a gate fails.** The receipt is the verdict. The **When it goes
   wrong** card (or `kit guide --why GATE`) has one fix per gate.
 - **rm_id:** a design with no `rm_id` gets a proposed one (design ids `0x8000` to `0xFFFF`,

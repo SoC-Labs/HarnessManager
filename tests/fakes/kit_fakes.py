@@ -318,14 +318,44 @@ class FakeVivado:
         return subprocess.CompletedProcess(argv, 0, out, "")
 
 
-def fake_vivado_script(dest: Path, release: str = "2024.1", build: int = 5076996) -> Path:
-    """An executable ``vivado`` that prints a version and exits: for the CLI and API tests
-    (``HARNESS_MANAGER_VIVADO=<it>``). POSIX sh; the tests that use it skip on Windows."""
+#: What a fake ``vivado -mode batch -source X`` does (KIT-LIC; the real outputs, measured
+#: 2026-09-28 on srv03335, are in services/kit/launch.py's docstring).
+LAUNCHES = ("ok", "no-licence", "error", "hang")
+
+
+def fake_vivado_script(dest: Path, release: str = "2024.1", build: int = 5076996, *,
+                       launch: str = "ok", tier: str = "ENTERPRISE") -> Path:
+    """An executable ``vivado`` for the CLI and API tests (``HARNESS_MANAGER_VIVADO=<it>``).
+    ``-version`` prints a version and exits 0, always (as the real 2026.1 does with no
+    licence). A launch (``-source X``) does what ``launch`` says: ``ok`` prints the licence
+    tier and the banner and runs X's ``puts`` lines, exit 0; ``no-licence`` is 2026.1 with no
+    licence file (exit 42); ``error`` exits 1; ``hang`` starts a child that sleeps (its pid in
+    ``<dest>/vivado.child``) and waits for it. POSIX sh; the tests that use it skip on
+    Windows."""
+    assert launch in LAUNCHES, launch
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     exe = dest / "vivado"
+    started = {
+        "ok": (f"echo 'INFO: [Common 17-3922] A valid Vivado Design Suite {tier} license has "
+               "been detected. Your current license is active and will expire on Permanent.'\n"
+               f"echo '****** Vivado v{release} (64-bit)'\n"
+               'sed -n "s/^puts //p" "$src"\n'
+               "echo 'INFO: [Common 17-206] Exiting Vivado'\nexit 0\n"),
+        "no-licence": ("echo 'ERROR: Vivado Design Suite cannot be launched because a valid "
+                       "license was not found. Visit the Vivado Licensing page to choose and "
+                       "generate the right license.'\nexit 42\n"),
+        "error": ("echo 'ERROR: [Common 17-39] source failed due to earlier errors.'\n"
+                  "exit 1\n"),
+        "hang": f"sleep 600 &\necho $! > '{dest / 'vivado.child'}'\nwait\n",
+    }[launch]
     exe.write_text("#!/bin/sh\n"
-                   f"echo 'vivado v{release} (64-bit)'\n"
-                   f"echo 'SW Build {build} on Wed May 22 18:36:09 MDT 2024'\n", encoding="utf-8")
+                   'case " $* " in *" -version "*)\n'
+                   f"  echo 'vivado v{release} (64-bit)'\n"
+                   f"  echo 'SW Build {build} on Wed May 22 18:36:09 MDT 2024'\n"
+                   "  exit 0;;\nesac\n"
+                   'src=""; prev=""\n'
+                   'for a in "$@"; do [ "$prev" = "-source" ] && src="$a"; prev="$a"; done\n'
+                   + started, encoding="utf-8")
     exe.chmod(0o755)
     return exe

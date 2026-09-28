@@ -25,9 +25,8 @@ from tests.fakes.virtual_board import VirtualMps3, ila_mint_bake_profile
 
 @pytest.fixture(autouse=True)
 def fake_vivado(tmp_path, monkeypatch):
-    exe = tmp_path / "Vivado" / "2024.1" / "bin" / "vivado"
-    exe.parent.mkdir(parents=True)
-    exe.write_text("")
+    # KIT-LIC: the guide launches it, so it must run (a licensed start)
+    exe = kf.fake_vivado_script(tmp_path / "Vivado" / "2024.1" / "bin")
     monkeypatch.setenv(vivado.ENV, str(exe))
     monkeypatch.setattr(vivado, "read_version", lambda path, runner=None, timeout_s=0:
                         ("2024.1", 5076996, ""))

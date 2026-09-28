@@ -53,12 +53,14 @@ def _kill(proc: subprocess.Popen[bytes]) -> None:
         proc.wait(5.0)
 
 
-def run_to_file(argv: Sequence[str], timeout: float) -> tuple[int | None, str]:
+def run_to_file(argv: Sequence[str], timeout: float, *,
+                cwd: str | os.PathLike[str] | None = None) -> tuple[int | None, str]:
     """``(exit code, stdout + stderr)``; ``None`` for the code when it timed out (the group
-    was killed). ``OSError`` when it cannot start."""
+    was killed). ``OSError`` when it cannot start. ``cwd``: where the child runs (a tool
+    that drops files where it starts, such as Vivado, is given a scratch directory)."""
     with tempfile.TemporaryFile() as out:
         proc = subprocess.Popen(list(argv), stdin=subprocess.DEVNULL, stdout=out,
-                                stderr=subprocess.STDOUT, **_group_flags())
+                                stderr=subprocess.STDOUT, cwd=cwd, **_group_flags())
         try:
             rc: int | None = proc.wait(timeout)
         except subprocess.TimeoutExpired:
