@@ -27,6 +27,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | Topic | Meaning |
 |---|---|
 | `board.found`, `board.lost`, `board.identity` | discovery and identity changes |
+| `board.net_identity` `{status, reported, hub}` | the board's network identity (label, IP, MAC) as HM reads it changed, or a clash/default/difference was found or cleared (BOARD-ID; `services/board_identity.py`) |
 | `session.opened`, `session.closed` | session lifecycle |
 | `deploy.started` `{..., keep_on_card}`, `deploy.progress` `{phase, bytes, total}`, `deploy.done` `{rm_id, verified, card}`, `deploy.failed` `{reason}` | partition programming (`card`: `{kept, slot, why}` when the deploy was asked to keep the design on the card, else null; its write is phase `card`) |
 | `console.line` `{name, text, partial?}`, `console.state` `{name, state: connecting\|up\|down\|paused\|closed, detail, endpoint}` (`paused`, QUIET-POLL: waiting for the board's lease, "paused: lease held by X") | consoles |

@@ -61,8 +61,8 @@ def test_open_info_close_on_the_fielded_board(vboard: VirtualMps3, state: Path):
     assert lock is not None and lock.pid == os.getpid() and lock.note == "t1 integration"
     eng.close(cand.board_id)
     assert eng.lock_owner(cand.board_id) is None
-    assert [e.topic for e in seen] == ["session.opened", "board.identity", "session.closed"]
-    assert seen[1].data["shell_id"].lower() == "0x3f1a560f"
+    assert [e.topic for e in seen] == ["session.opened", "board.net_identity", "board.identity", "session.closed"]
+    assert seen[2].data["shell_id"].lower() == "0x3f1a560f"
 
 
 def test_usb_links_light_up_controller_capabilities(tmp_path: Path, state: Path):
