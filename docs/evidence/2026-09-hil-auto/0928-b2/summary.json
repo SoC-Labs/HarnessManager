@@ -1,0 +1,62 @@
+{
+  "board": "192.168.11.101",
+  "end_state": {
+    "changed": false,
+    "claim": {
+      "end": null,
+      "note": "the runner never runs `board claim`; Harness Manager has no verb to unclaim (mps3-unclaim on the board's serial console is the only way)",
+      "start": null,
+      "unchanged": true
+    },
+    "greybox": null,
+    "restore": "not needed: the runner did not swap the partition"
+  },
+  "ended": "2026-09-28T21:09:27+01:00",
+  "ended_early": null,
+  "exit": 2,
+  "failed_in": {},
+  "iterations": [
+    {
+      "counts": {
+        "fail": 0,
+        "manual": 1,
+        "pass": 3,
+        "skipped": 37,
+        "stopped": 1
+      },
+      "dir": "/home/dam1n19/SoCLabs/harness-manager/docs/evidence/2026-09-hil-auto/0928-b2/iter-001",
+      "ended_early": null,
+      "exit": 2,
+      "first_failure": {
+        "evidence": "a1_info.json",
+        "hint": "`harness_impl` not linux or shell_id not the static: the board is not on RC2 (rolled back?): STOP, ask the Linux lead. `offline`: wait 60 s, repeat; then ask the Linux lead",
+        "id": "A1",
+        "reason": "A1: HELD (exit 4): mps3@192.168.11.101:6900 is in use \u2014 held by dam1n19 on srv03335 (pid 3115305, 22707s): harness-manager-daemon: harness-manager-ui. Another holder, or the reset guard's card job: the runner never forces",
+        "verdict": "stopped"
+      },
+      "n": 1,
+      "stopped": {
+        "check": "A1",
+        "reason": "A1: HELD (exit 4): mps3@192.168.11.101:6900 is in use \u2014 held by dam1n19 on srv03335 (pid 3115305, 22707s): harness-manager-daemon: harness-manager-ui. Another holder, or the reset guard's card job: the runner never forces"
+      }
+    }
+  ],
+  "plan": "linux-nocard",
+  "refused_start": null,
+  "repeat": 30,
+  "runbook": "docs/HIL_LINUX.md",
+  "sent": [
+    "--json lease show 192.168.11.101",
+    "--json share list 192.168.11.101",
+    "--json lease show 192.168.11.101",
+    "--json version",
+    "--json lease show 192.168.11.101",
+    "--json lease show 192.168.11.101",
+    "--json info 192.168.11.101",
+    "--json lease show 192.168.11.101",
+    "--json board claim-status 192.168.11.101"
+  ],
+  "started": "2026-09-28T21:08:21+01:00",
+  "static": "0x44ee76d5",
+  "writes": "safe"
+}

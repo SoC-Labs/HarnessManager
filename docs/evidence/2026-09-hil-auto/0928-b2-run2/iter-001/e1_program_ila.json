@@ -1,0 +1,94 @@
+{
+  "argv": [
+    "program",
+    "192.168.11.101",
+    "nanosoc_ila",
+    "--yes"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 68.826,
+      "stderr_tail": "preflight:\n  ok        control channel free  127.0.0.1:61887 answered (it serves one client at a time)\n  ok        shell_id matches  0x44ee76d5\n  ok        crc and length  clearing 193352 B crc 0x424b488a, partial 2579924 B crc 0x10a91f36\n  ok        clearing pairs partial  nanosoc_ila_clear.bin + nanosoc_ila.bin, both framed with rm_id 0x0100000a\n  ok        clearing fits  193352 B of the 262144 B clearing arena\n  ok        transport  tcp: mps3-harnessd takes a plain push on 6910 (the kernel paces TCP; 'windowed' is absent by design); push inactivity limit 30 s (the send blocks while 6910 parks a partial behind the outgoing clearing)\n  unchecked static_usercode matches  needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76) (not a pass)\ndeploy: started nanosoc_ila 0x0100000a\ndeploy: guard 0/1 (0%)\ndeploy: guard 1/1 (100%)\ndeploy: swap 1/1 (100%)\ndeploy: push 0/2773276 (0%)\ndeploy: push 193352/2773276 (6%)\ndeploy: push 2773276/2773276 (100%)\ndeploy: verify 0/1 (0%)\ndeploy: verify 1/1 (100%)\ndeploy: done card=None overlay=nanosoc_ila rm_id=0x0100000a seconds=67.2 transport=tcp verified=True\n"
+    }
+  ],
+  "command": "harness-manager --json program 192.168.11.101 nanosoc_ila --yes",
+  "exit": 0,
+  "failures": [],
+  "hint": "refused because the power-on load is running: wait for `power-on loaded`; a card job running: the reset guard (never --force)",
+  "id": "E1",
+  "reason": "",
+  "seconds": 68.826,
+  "section": "E",
+  "started": "2026-09-28T21:15:29+01:00",
+  "stderr": "preflight:\n  ok        control channel free  127.0.0.1:61887 answered (it serves one client at a time)\n  ok        shell_id matches  0x44ee76d5\n  ok        crc and length  clearing 193352 B crc 0x424b488a, partial 2579924 B crc 0x10a91f36\n  ok        clearing pairs partial  nanosoc_ila_clear.bin + nanosoc_ila.bin, both framed with rm_id 0x0100000a\n  ok        clearing fits  193352 B of the 262144 B clearing arena\n  ok        transport  tcp: mps3-harnessd takes a plain push on 6910 (the kernel paces TCP; 'windowed' is absent by design); push inactivity limit 30 s (the send blocks while 6910 parks a partial behind the outgoing clearing)\n  unchecked static_usercode matches  needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76) (not a pass)\ndeploy: started nanosoc_ila 0x0100000a\ndeploy: guard 0/1 (0%)\ndeploy: guard 1/1 (100%)\ndeploy: swap 1/1 (100%)\ndeploy: push 0/2773276 (0%)\ndeploy: push 193352/2773276 (6%)\ndeploy: push 2773276/2773276 (100%)\ndeploy: verify 0/1 (0%)\ndeploy: verify 1/1 (100%)\ndeploy: done card=None overlay=nanosoc_ila rm_id=0x0100000a seconds=67.2 transport=tcp verified=True\n",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "ok": true,
+    "overlay": {
+      "ip_class": "unknown",
+      "ltx_sha256": "ba4e4bb3b4374fc03dce5a3b0c3aced0e06b470c636ac0654921578ff9667600",
+      "name": "nanosoc_ila",
+      "receipt_sha256": "",
+      "rm_id": "0x0100000a",
+      "size_bytes": 2773276,
+      "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/nanosoc_ila/manifest.json",
+      "static_id": "0x44ee76d5",
+      "static_usercode": "0xfb1f8c76"
+    },
+    "preflight": [
+      {
+        "check": "ok",
+        "detail": "127.0.0.1:61887 answered (it serves one client at a time)",
+        "identity": false,
+        "name": "control channel free"
+      },
+      {
+        "check": "ok",
+        "detail": "0x44ee76d5",
+        "identity": true,
+        "name": "shell_id matches"
+      },
+      {
+        "check": "ok",
+        "detail": "clearing 193352 B crc 0x424b488a, partial 2579924 B crc 0x10a91f36",
+        "identity": false,
+        "name": "crc and length"
+      },
+      {
+        "check": "ok",
+        "detail": "nanosoc_ila_clear.bin + nanosoc_ila.bin, both framed with rm_id 0x0100000a",
+        "identity": false,
+        "name": "clearing pairs partial"
+      },
+      {
+        "check": "ok",
+        "detail": "193352 B of the 262144 B clearing arena",
+        "identity": false,
+        "name": "clearing fits"
+      },
+      {
+        "check": "ok",
+        "detail": "tcp: mps3-harnessd takes a plain push on 6910 (the kernel paces TCP; 'windowed' is absent by design); push inactivity limit 30 s (the send blocks while 6910 parks a partial behind the outgoing clearing)",
+        "identity": false,
+        "name": "transport"
+      },
+      {
+        "check": "unchecked",
+        "detail": "needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76)",
+        "identity": true,
+        "name": "static_usercode matches"
+      }
+    ],
+    "result": {
+      "card": null,
+      "rm_id": "0x0100000a",
+      "seconds": 67.21338683203794,
+      "transport": "tcp",
+      "verified": true
+    }
+  },
+  "tier": "safe",
+  "title": "Load the ILA design (a swap; not kept on the card)",
+  "verdict": "pass"
+}

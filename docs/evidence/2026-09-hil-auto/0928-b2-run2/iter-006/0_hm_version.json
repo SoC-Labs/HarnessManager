@@ -1,0 +1,30 @@
+{
+  "argv": [
+    "version"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 0.309,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json version",
+  "exit": 0,
+  "failures": [],
+  "hint": "",
+  "id": "0.4",
+  "reason": "",
+  "seconds": 0.309,
+  "section": "0",
+  "started": "2026-09-29T00:07:26+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "engine": "harness_manager.engine.Engine",
+    "ok": true,
+    "version": "0.1.0"
+  },
+  "tier": "read",
+  "title": "The Harness Manager version",
+  "verdict": "pass"
+}

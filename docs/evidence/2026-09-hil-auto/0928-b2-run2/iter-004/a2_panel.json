@@ -1,0 +1,70 @@
+{
+  "argv": [
+    "panel",
+    "show",
+    "192.168.11.101"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 1.22,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json panel show 192.168.11.101",
+  "exit": 0,
+  "failures": [],
+  "hint": "",
+  "id": "A2",
+  "reason": "",
+  "seconds": 1.22,
+  "section": "A",
+  "started": "2026-09-28T22:57:53+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "identify": {
+      "available": false,
+      "reason": "Identify isn't available on this harness image yet (harness feature 'locate')",
+      "until": null
+    },
+    "ok": true,
+    "panel": {
+      "banner": "",
+      "card": "",
+      "count": 0,
+      "events": [],
+      "note": "rebuilt from what Harness Manager read, not read from the panel",
+      "observed_at": 1790632677.471903,
+      "owner": "harness",
+      "page": "",
+      "pending": false,
+      "seq": 0,
+      "sessions": [],
+      "source": "rebuilt",
+      "touch": {
+        "bus_lost": 0,
+        "cal": null,
+        "ok": true,
+        "present": null,
+        "reason": "",
+        "recoveries": 0
+      }
+    },
+    "presence": {
+      "active": false,
+      "reason": "presence runs in the Harness Manager service (harness-manager-daemon)"
+    },
+    "reason": "",
+    "support": {
+      "front_panel": "",
+      "impl": "linux",
+      "locate": "Identify isn't available on this harness image yet (harness feature 'locate')",
+      "presence": "this harness image doesn't report who is connected (harness feature 'presence')",
+      "source": "rebuilt"
+    }
+  },
+  "tier": "read",
+  "title": "Front panel",
+  "verdict": "pass"
+}

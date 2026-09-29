@@ -1,0 +1,14 @@
+HM HIL-AUTO on 192.168.11.101 (docs/HIL_LINUX.md, plan linux-nocard)
+start        2026-09-28T21:13:01+01:00 on srv03335 (pid 3195567)
+planned end  2026-09-29T08:30:00+01:00; no check starts after 2026-09-29T08:20:00+01:00
+runs         30 iteration(s), every 1800 s; 15 automatic checks each; writes safe
+expects      static 0x44ee76d5 (linux harness); any other identity stops it
+lease        taken by david beforehand, with a --ttl that outlasts the run; the runner only checks it is held here (and stops --margin before it expires), and never acquires, requests, forces or releases one
+changes      each iteration:
+  - E1 Load the ILA design (a swap; not kept on the card): partition swap to nanosoc_ila (Z2 swaps back)
+  - Z2 Greybox: partition swap back to greybox
+  - D4a: one paced MCC read on the hub's tty_00 per iteration; skipped (never retried) while anything else names or holds tty_00
+never        no card or slot writes, no SD writes, no MCC REBOOT, no fpgahub share, no lease or SSH-claim change, never --force
+end state    greybox (restored in a finally if the runner swapped the partition); the SSH claim as it was
+evidence     /home/dam1n19/SoCLabs/harness-manager/docs/evidence/2026-09-hil-auto/0928-b2-run2
+stop it      kill -INT 3195567 (or Ctrl-C in its tmux): it finishes the check, restores greybox, writes REPORT.md

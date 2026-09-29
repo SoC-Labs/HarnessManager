@@ -1,0 +1,37 @@
+{
+  "argv": [
+    "restore",
+    "192.168.11.101"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 46.794,
+      "stderr_tail": "deploy: started greybox 0x00000000\ndeploy: guard 0/1 (0%)\ndeploy: guard 1/1 (100%)\ndeploy: swap 1/1 (100%)\ndeploy: push 0/1427980 (0%)\ndeploy: push 68828/1427980 (4%)\ndeploy: push 1427980/1427980 (100%)\ndeploy: verify 0/1 (0%)\ndeploy: verify 1/1 (100%)\ndeploy: done card=None overlay=greybox rm_id=0x00000000 seconds=45.2 transport=tcp verified=True\n"
+    }
+  ],
+  "command": "harness-manager --json restore 192.168.11.101",
+  "exit": 0,
+  "failures": [],
+  "hint": "refused by the reset guard (a card job): the runner waits, then reports; never --force",
+  "id": "Z2",
+  "reason": "",
+  "seconds": 46.794,
+  "section": "Z",
+  "started": "2026-09-29T08:19:32+01:00",
+  "stderr": "deploy: started greybox 0x00000000\ndeploy: guard 0/1 (0%)\ndeploy: guard 1/1 (100%)\ndeploy: swap 1/1 (100%)\ndeploy: push 0/1427980 (0%)\ndeploy: push 68828/1427980 (4%)\ndeploy: push 1427980/1427980 (100%)\ndeploy: verify 0/1 (0%)\ndeploy: verify 1/1 (100%)\ndeploy: done card=None overlay=greybox rm_id=0x00000000 seconds=45.2 transport=tcp verified=True\n",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "ok": true,
+    "result": {
+      "card": null,
+      "rm_id": "0x00000000",
+      "seconds": 45.18255362100899,
+      "transport": "tcp",
+      "verified": true
+    }
+  },
+  "tier": "safe",
+  "title": "Greybox",
+  "verdict": "pass"
+}

@@ -1,0 +1,58 @@
+{
+  "argv": [
+    "board",
+    "claim-status",
+    "192.168.11.101"
+  ],
+  "attempts": [
+    {
+      "exit": 7,
+      "seconds": 0.622,
+      "stderr_tail": "harness-manager: the SSH tunnel to mapstone-dev.ecs.soton.ac.uk did not come up: ssh exited with status 255 (ssh: connect to host mapstone-dev.ecs.soton.ac.uk port 22: Connection reset by peer) \u2014 check `ssh mapstone-dev.ecs.soton.ac.uk true` works without a prompt (BatchMode), and that you are on the campus network or VPN\n"
+    },
+    {
+      "exit": 0,
+      "seconds": 1.434,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json board claim-status 192.168.11.101",
+  "exit": 0,
+  "failures": [],
+  "hint": "`unclaimed`: never claim; ask the Linux lead (a claim now would lock their keys out). HOST KEY CHANGED: see the failure table (B2 rows)",
+  "id": "B1",
+  "reason": "",
+  "seconds": 1.434,
+  "section": "B",
+  "started": "2026-09-29T00:42:47+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "claim": {
+      "checked_at": "2026-09-28T23:43:22Z",
+      "claim_key": "SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo",
+      "claimed": {
+        "at": "2026-09-28T13:34:41Z",
+        "by": "dam1n19@srv03335",
+        "key_fp": "SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo",
+        "mine": true
+      },
+      "host_key": {
+        "match": true,
+        "pinned": "SHA256:pTP7bOvZ4CpWbgwMwt+yiwr/DfjTPV5pN6l00AjqmEM",
+        "reported": "SHA256:pTP7bOvZ4CpWbgwMwt+yiwr/DfjTPV5pN6l00AjqmEM",
+        "seen_before": null
+      },
+      "live": true,
+      "notes": [],
+      "route": "hub mapstone-dev.ecs.soton.ac.uk",
+      "source": "identify via mapstone-dev.ecs.soton.ac.uk",
+      "state": "mine",
+      "user": "root"
+    },
+    "ok": true
+  },
+  "tier": "read",
+  "title": "Who claimed the board?",
+  "verdict": "pass"
+}

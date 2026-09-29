@@ -1,0 +1,53 @@
+{
+  "argv": [
+    "lease",
+    "show",
+    "192.168.11.101"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 2.802,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json lease show 192.168.11.101",
+  "exit": 0,
+  "failures": [],
+  "hint": "david takes it before the run (`harness-manager lease acquire $B --ttl \u2026 --holder david-hm`); the runner never acquires one",
+  "id": "0.3",
+  "reason": "",
+  "seconds": 2.802,
+  "section": "0",
+  "started": "2026-09-28T21:47:47+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board": "mps3_02",
+    "board_id": "mps3@192.168.11.101:6900",
+    "can_revoke": true,
+    "hub": "mapstone-dev.ecs.soton.ac.uk",
+    "incoming": [],
+    "lease": {
+      "board": "mps3_02",
+      "expires_at": "2026-09-29T08:12:49.061549Z",
+      "here": true,
+      "holder": "david@mapstone-dev",
+      "holder_kind": "hm",
+      "holder_kind_reason": "this Harness Manager session holds it",
+      "mine": true,
+      "target": "mps3_02_pl",
+      "user": "david"
+    },
+    "name": "mps3-02",
+    "notes_reason": "",
+    "notes_supported": true,
+    "ok": true,
+    "queue": [],
+    "request": null,
+    "revoke_reason": "",
+    "taken": null
+  },
+  "tier": "read",
+  "title": "The lease is held here",
+  "verdict": "pass"
+}

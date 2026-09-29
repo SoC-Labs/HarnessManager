@@ -1,0 +1,30 @@
+{
+  "argv": [
+    "board",
+    "ssh",
+    "192.168.11.101",
+    "-c",
+    "cat /run/mps3/persist.state"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 22.526,
+      "stderr_tail": "ssh: ssh -o ControlPath=none -o ControlMaster=no -o ConnectTimeout=15 -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o HostKeyAlias=harness-manager-c702e7e3a9ec -o UserKnownHostsFile=/home/dam1n19/.config/harness-manager/ssh/known_hosts.c702e7e3a9ec -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o CheckHostIP=no -o UpdateHostKeys=no -J mapstone-dev.ecs.soton.ac.uk -l root 192.168.11.101 cat /run/mps3/persist.state\n"
+    }
+  ],
+  "command": "harness-manager board ssh 192.168.11.101 -c 'cat /run/mps3/persist.state'",
+  "exit": 0,
+  "failures": [],
+  "hint": "the key does not log in: redo B2; check `ssh mps3-b2 true`",
+  "id": "B3",
+  "reason": "",
+  "seconds": 22.526,
+  "section": "B",
+  "started": "2026-09-29T07:07:03+01:00",
+  "stderr": "ssh: ssh -o ControlPath=none -o ControlMaster=no -o ConnectTimeout=15 -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o HostKeyAlias=harness-manager-c702e7e3a9ec -o UserKnownHostsFile=/home/dam1n19/.config/harness-manager/ssh/known_hosts.c702e7e3a9ec -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o CheckHostIP=no -o UpdateHostKeys=no -J mapstone-dev.ecs.soton.ac.uk -l root 192.168.11.101 cat /run/mps3/persist.state\n",
+  "stdout": "backing=tmpfs reason=cmdline storage=ok\n",
+  "tier": "read",
+  "title": "The pinned SSH works",
+  "verdict": "pass"
+}

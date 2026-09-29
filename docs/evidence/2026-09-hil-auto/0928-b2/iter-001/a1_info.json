@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "info",
+    "192.168.11.101"
+  ],
+  "attempts": [
+    {
+      "exit": 4,
+      "seconds": 0.584,
+      "stderr_tail": "harness-manager: mps3@192.168.11.101:6900 is in use \u2014 held by dam1n19 on srv03335 (pid 3115305, 22707s): harness-manager-daemon: harness-manager-ui\n"
+    }
+  ],
+  "command": "harness-manager --json info 192.168.11.101",
+  "exit": 4,
+  "failures": [],
+  "hint": "`harness_impl` not linux or shell_id not the static: the board is not on RC2 (rolled back?): STOP, ask the Linux lead. `offline`: wait 60 s, repeat; then ask the Linux lead",
+  "id": "A1",
+  "reason": "A1: HELD (exit 4): mps3@192.168.11.101:6900 is in use \u2014 held by dam1n19 on srv03335 (pid 3115305, 22707s): harness-manager-daemon: harness-manager-ui. Another holder, or the reset guard's card job: the runner never forces",
+  "seconds": 0.584,
+  "section": "A",
+  "started": "2026-09-28T21:09:14+01:00",
+  "stderr": "harness-manager: mps3@192.168.11.101:6900 is in use \u2014 held by dam1n19 on srv03335 (pid 3115305, 22707s): harness-manager-daemon: harness-manager-ui\n",
+  "stdout_json": {
+    "error": {
+      "code": 4,
+      "hint": "held by dam1n19 on srv03335 (pid 3115305, 22707s): harness-manager-daemon: harness-manager-ui",
+      "holder": "dam1n19 on srv03335 (pid 3115305, 22707s): harness-manager-daemon: harness-manager-ui",
+      "message": "mps3@192.168.11.101:6900 is in use",
+      "name": "HELD"
+    },
+    "ok": false
+  },
+  "tier": "read",
+  "title": "Identity",
+  "verdict": "stopped"
+}
