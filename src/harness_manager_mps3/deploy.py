@@ -63,7 +63,13 @@ fails never fails the deploy, the swap already stands). ``card_status()`` reads 
 card (``version`` for the ``usd`` feature, then ``usd``) without writing anything; the
 service refuses a keep from it before a byte is pushed. The commit's push is always TCP
 on 6910 (``commit`` takes no TFTP), windowed exactly when the swap's is, and reports
-progress as the ``card`` phase. On a claimed Linux board the ``commit`` is refused for any
+progress as the ``card`` phase. It is budgeted as ``harness-manager card commit`` is
+(KEEP-BUDGET, ``card.commit_budget``): the pair's per-chunk stall limit is the card's
+(``mps3.slot.push_timeout_s``, 900 s, not the swap push's 30 s: the card stalls > 30 s),
+and the control connection waits ``max(SWAP_TIMEOUT_S, the pair written and read back at
+the card's rates)`` (nanosoc's 2.47 MB: ~318 s); a plain deploy keeps 30 s and 300 s. The
+board's own 30 s commit idle abort (``MPS3_SWAP_AWAIT_IDLE_MS``) is worded as the board's.
+On a claimed Linux board the ``commit`` is refused for any
 peer but the board itself (HM_ANSWERS S6, lane CLAIMED-LOCK): a keep on a board this Harness
 Manager claimed runs the whole deploy through the session's board-SSH forward
 (``claim.hold_forward``), one it cannot enter is ``ClaimLockedError`` before the swap, and a
@@ -91,6 +97,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -344,6 +351,9 @@ class Mps3Deploy:
         self.last_pusher: BitstreamPusher | None = None
         #: The pusher a kept deploy built for the card's commit (None when not asked).
         self.last_commit_pusher: BitstreamPusher | None = None
+        #: The last deploy's control-connection (6900) timeout: ``swap_timeout_s``, or
+        #: more when it kept the design on the card (KEEP-BUDGET). Tests read it.
+        self.last_control_timeout_s: float | None = None
 
     # -- configuration ----------------------------------------------------------------
 
@@ -401,9 +411,11 @@ class Mps3Deploy:
         """The pusher a card ``commit`` sends its pair with: 6910 only, windowed exactly when
         the swap's push is (a WINDOWED shell deadlocks on a plain push), the Linux stall
         limit. "Keep on the card" and ``harness-manager card commit`` (LINUX-SLOTS) share it.
-        ``stall_s`` (SLOT-TIMING, ``harness-manager card commit``): a longer per-chunk stall
-        limit, for the card's slow writes; never a shorter one. ``host``/``port``: another
-        way to 6910 (CLAIMED-LOCK: the claim forward's local end on a claimed board)."""
+        ``stall_s`` (SLOT-TIMING): a longer per-chunk stall limit, for the card's slow
+        writes; never a shorter one. Both callers pass the card's
+        (``card.commit_budget(n).push_stall_s``, >= 900 s; KEEP-BUDGET for the deploy's
+        keep). ``host``/``port``: another way to 6910 (CLAIMED-LOCK: the claim forward's
+        local end on a claimed board)."""
         timeout_s = push_timeout_s(impl, TRANSPORT_TCP)
         if stall_s is not None:
             timeout_s = max(timeout_s, stall_s)
@@ -470,12 +482,24 @@ class Mps3Deploy:
             self.last_pusher = pusher
             # Keep on the card: ``commit`` takes its pair over 6910 only, windowed exactly
             # when the swap's push is (a WINDOWED shell deadlocks on a plain push).
+            # KEEP-BUDGET: budgeted as ``card commit`` is (the same card, written the same
+            # way): the pair's per-chunk stall limit is the card's (>= 900 s, not 30 s: the
+            # card stalls > 30 s mid-write on silicon), and the control connection, which
+            # parks for the swap AND the commit's write + read-back, waits at least the
+            # card's time for the pair. A plain deploy keeps 30 s / ``swap_timeout_s``.
             commit_pusher = None
+            ctl_timeout_s = self.swap_timeout_s
             if keep_on_card:
+                from .card import commit_budget
+
+                budget = commit_budget(total)
+                ctl_timeout_s = max(self.swap_timeout_s, budget.job_s)
                 commit_pusher = self.commit_pusher(
                     windowed=assessment.transport == TRANSPORT_WINDOWED, impl=assessment.impl,
-                    on_frame=on_card_frame, host=host, port=push_port)
+                    on_frame=on_card_frame, stall_s=budget.push_stall_s, host=host,
+                    port=push_port)
             self.last_commit_pusher = commit_pusher
+            self.last_control_timeout_s = ctl_timeout_s
 
             tap: _TapTransport | None = None
             swap: _ReportingClient | None = None
@@ -496,8 +520,8 @@ class Mps3Deploy:
                         # Inside the try (FIX-PACK-1): a reset that lands during the connect
                         # is a turn-away too, retried as our own ghost, never "unreachable".
                         tap = _TapTransport(_TimedSocketTransport(host, ctl_port,
-                                                                  self.swap_timeout_s))
-                        client = ShellClient(host, port=ctl_port, timeout=self.swap_timeout_s,
+                                                                  ctl_timeout_s))
+                        client = ShellClient(host, port=ctl_port, timeout=ctl_timeout_s,
                                              transport=tap)
                         with client:
                             swap = _ReportingClient(client, report, total)
@@ -682,6 +706,24 @@ def _card_facts(st: Any) -> dict[str, Any]:
             "committable": bool(getattr(st, "committable", False))}
 
 
+#: The board's own commit idle abort (overlay_store.c ``commit_watch``: OVLSTORE_ETIMEOUT when
+#: the card consumed no byte for ``MPS3_SWAP_AWAIT_IDLE_MS``, 30 s), whatever HM waits.
+BOARD_IDLE_ABORT_WHY = (
+    "the board gave up ({err}): the card accepted no bytes for 30 s (the harness's own idle "
+    "limit; a Linux harness fix is due in v2.1); the swap stands and the card keeps the "
+    "design it had")
+
+
+def board_idle_abort(err: str) -> bool:
+    """True when a commit's ``err`` is the BOARD's idle abort (the contract name ``timeout``;
+    ``ETIMEOUT``/``idle`` spellings too), never HM's own: a push that failed here
+    (``push failed: ... timed out``) or a reply that never came (``... not received``)."""
+    e = err.strip().lower()
+    if not e or e.startswith("push failed") or "not received" in e:
+        return False
+    return re.search(r"\b(?:ovlstore_)?e?timeout\b|\bidle\b", e) is not None
+
+
 def card_outcome(persist: PersistResult | None) -> CardOutcome:
     """What pyverify's persist step did, as the deploy result's ``card``."""
     if persist is None:
@@ -699,6 +741,8 @@ def card_outcome(persist: PersistResult | None) -> CardOutcome:
                 "`harness-manager board claim-status TARGET` (a claim made elsewhere: "
                 "`harness-manager board claim TARGET --adopt`), then `harness-manager card "
                 "commit TARGET`"))
+        if board_idle_abort(str(persist.err or "")):
+            return CardOutcome(kept=False, why=BOARD_IDLE_ABORT_WHY.format(err=persist.err))
         return CardOutcome(kept=False, why=f"the card write failed ({persist.err}); the card "
                                            "keeps the design it had")
     if persist.status == PERSIST_SKIPPED:

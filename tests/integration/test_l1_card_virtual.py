@@ -108,7 +108,8 @@ def test_negative_twin_keep_on_card_persists_and_reports_the_slot(
     assert phases.index("card") > phases.index("verify")
     assert "card" not in phases[:phases.index("verify")]
     pusher = session.deploy.last_commit_pusher
-    assert (pusher.transport, pusher.windowed, pusher.timeout_s) == ("tcp", False, 30.0)
+    # KEEP-BUDGET: the card's stall row (900 s), as `card commit`; never the swap push's 30 s
+    assert (pusher.transport, pusher.windowed, pusher.timeout_s) == ("tcp", False, 900.0)
 
 
 def test_a_second_keep_goes_to_the_other_slot(tmp_path, monkeypatch, overlays):

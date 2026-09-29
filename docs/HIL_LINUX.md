@@ -379,7 +379,10 @@ harness-manager program $B nanosoc --keep-on-card | tee $EV/d2_program_keep.txt
 It prints the preflight, then `card: …; the design will be kept on it`, then asks
 `program nanosoc (0x01000001) into <board> and keep it on the card?`. Answer `y`.
 
-**Expect** (1–2 min):
+**Expect** (about 4 min: the swap takes seconds, then the card phase ~3.5 min, the ~2.5 MB
+pair written at ~70 KB/s, ~35 s, then read back at ~14 KB/s, ~3 min; the `card` progress sits
+still during the read-back). Harness Manager waits up to 900 s on a card that stops taking
+bytes and ~318 s for the commit's reply (KEEP-BUDGET, as `card commit`):
 - **Preflight:** every item `ok`, except `static_usercode matches … (not a pass)`, which is
   unchecked (it needs JTAG).
 - **Result:** `programmed nanosoc (0x01000001) into <board> in N s via tcp; verified`. It is TCP
@@ -797,6 +800,7 @@ Then tell the HM lead the folder is complete.
 | B2: `the board's SSH refused your key` | the claim is not your srv03335 key | stop §B, skip §E, ask the Linux lead. `ssh -o BatchMode=yes mps3-b2 true` shows whether your alias's key logs in; if it does, pass that key's `.pub` to `--key` |
 | D2: exit 12, "user microSD …" | no card, or the harness reports no `usd` | `card status` says which; skip §D |
 | D2: `not kept on the card: <why>` | the card write failed; a card failure never fails the deploy, so the swap stands | record the reason; skip D4 and D5 |
+| D2: `not kept on the card: the board gave up (timeout): …` | the BOARD's own 30 s idle abort (`commit_watch`, `MPS3_SWAP_AWAIT_IDLE_MS`): the card took no bytes for 30 s. Not Harness Manager, which waits up to 900 s; the harness fix is due in Linux v2.1 | record the reason and send it to the Linux lead; skip D4 and D5 |
 | any `program`: refused because the power-on load is running | the card's power-on load is in progress | wait for `power-on loaded` (`card status`), then repeat |
 | `stats` `rm_ok: false` after a restart | the partition stays in reset until the first swap | program once |
 | D4/G3: "another process on the hub has the MCC console /dev/mps3_01_pl/tty_00 open (pid N: …)" | a second reader: a `cat`, a console, an fpgahub share on `tty_00` | nothing was sent. `ssh $H 'ps -eo pid,user,args \| grep -F tty_00'`; have it closed (a share: ask david, `share stop` stops them all); repeat |
