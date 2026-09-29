@@ -375,3 +375,18 @@ def test_not_fresh_says_why_only_for_a_carried_view():
     assert leasemod.not_fresh(None) == ""
     why = leasemod.not_fresh({"stale": {"confirmed_at": iso_utc(START), "error": "reset"}})
     assert why.startswith("the hub did not answer (reset)") and "last confirmed" in why
+
+
+def test_twin_a_release_with_others_queued_is_not_carried_as_free(rig):
+    rig.acquire()
+    rig.clock.advance(leasemod.READ_RETRY_S + 1.0)
+    rig.svc.view(rig.hub)
+    # bob waits behind us, as the last view saw it (the L1 fake prints no queue; fpgahub 0.3.0
+    # does, and LR-B's view lists it)
+    with rig.svc._mu:
+        rig.svc._known[(HUB, TARGET)].view["queue"] = [
+            {"position": 1, "holder": "bob@lab-pc-03", "user": "bob", "mine": False}]
+    rig.svc.release(rig.hub, board_id="b1")
+    assert rig.seen[-1]["state"] == "released" and rig.seen[-1]["source"] == "release"
+    [v] = rig.fail_reads(1, spaced=False)                  # bob may hold it now: not "free"
+    assert isinstance(v, UnreachableError)

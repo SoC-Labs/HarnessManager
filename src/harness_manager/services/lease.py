@@ -1136,8 +1136,14 @@ class LeaseService:
                              "holder_kind": kind, "holder_kind_reason": why}
             base["queue"] = [e for e in base.get("queue") or [] if not e.get("mine")]
         known = _Known(self._clock(), self._wall(), source, base)
+        # A release with others queued hands the board to the head of the queue at once:
+        # "not leased" is then not a state to carry (a failed read says unknown instead).
+        handed_on = holder is None and any(not e.get("mine") for e in base.get("queue") or [])
         with self._mu:
-            self._known[key] = known
+            if handed_on:
+                self._known.pop(key, None)
+            else:
+                self._known[key] = known
             self._misses.pop(key, None)            # our own answer is a hub answer
         return known
 
