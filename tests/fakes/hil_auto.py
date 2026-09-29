@@ -118,14 +118,28 @@ def refused(message: str) -> Answer:
     return lambda _hm, _argv: _err(15, "REFUSED", message)
 
 
+#: HIL-IDLOC: the Linux images a board may run tonight. ``v7n`` (the release rc2_v7n,
+#: net-protocol v0.16: the ``identity`` and ``locate`` features, no bake: label ``MPS3``
+#: source ``default``); ``v6n`` (older: neither, the image's hard-coded board 1 identity)
+IMAGES = {"v7n": {"harness_version": "2.0.0", "features": ["usd", "stats", "identity", "locate"]},
+          "v6n": {"harness_version": "1.9.0", "features": ["usd", "stats"]}}
+V16_DEFAULT = {"label": "MPS3", "hostname": "mps3", "ip": "192.168.10.101",
+               "mac": "02:00:00:4d:50:53"}
+
+
 class ScriptedHm:
     """A board and a hub, as the CLI's JSON shows them. ``impl`` ``linux`` or ``bare-metal``;
-    ``card`` False: no user microSD at all (board 2: ``slot status`` answers ``card: false``)."""
+    ``card`` False: no user microSD at all (board 2: ``slot status`` answers ``card: false``);
+    ``image`` (Linux) one of ``IMAGES``."""
 
     def __init__(self, *, static: str = "0x44ee76d5", impl: str = "linux",
-                 netboot: bool = True, claim: str = "other", card: bool = True) -> None:
+                 netboot: bool = True, claim: str = "other", card: bool = True,
+                 image: str = "v6n") -> None:
         self.static, self.impl, self.netboot, self.claim = static, impl, netboot, claim
         self.card = card
+        self.image = image
+        #: HIL-IDLOC: every ``identify`` start (seconds), as the board would blink
+        self.blinks: list[int] = []
         self.rm = GREYBOX
         self.calls: list[list[str]] = []
         self.lease_here = True
@@ -176,10 +190,11 @@ class ScriptedHm:
         static = self.static
         if self.static_after_swap and self.rm != GREYBOX:
             static = self.static_after_swap
-        features = ["usd", "stats"] if self.impl == "linux" else ["clcd", "windowed"]
+        img = IMAGES[self.image] if self.impl == "linux" else {
+            "harness_version": "1.0.0", "features": ["clcd", "windowed"]}
         ident = {"shell_id": static, "harness_impl": self.impl, "rm_id": self.rm,
-                 "harness_version": "1.0.0", "features": features, "ver32": "",
-                 "usercode": ""}
+                 "harness_version": img["harness_version"], "features": list(img["features"]),
+                 "ver32": "", "usercode": ""}
         body: dict[str, Any] = {
             "ok": True, "identity": ident, "health": {"reachable": True},
             "capabilities": ["console_dut", "console_controller", "telemetry_temp"]}
@@ -238,9 +253,45 @@ class ScriptedHm:
         return 0, {"ok": True, "result": {"verified": True, "rm_id": GREYBOX,
                                           "transport": "tcp", "card": None}}
 
-    def v_identify(self, _a: list[str]) -> tuple[int, Any]:
-        return _err(12, "UNAVAILABLE", "locate is unavailable: needs harness feature 'locate' "
-                                       "(Linux harness)")
+    def has(self, feature: str) -> bool:
+        return self.impl == "linux" and feature in IMAGES[self.image]["features"]
+
+    def v_identify(self, a: list[str]) -> tuple[int, Any]:
+        if not self.has("locate"):
+            return _err(12, "UNAVAILABLE", "locate is unavailable: needs harness feature "
+                                           "'locate' (Linux harness)")
+        words = [w for w in a if w != "--json"]
+        seconds = int(words[words.index("--seconds") + 1]) if "--seconds" in words else 5
+        self.blinks.append(seconds)
+        return 0, {"ok": True, "board_id": words[1], "until": 1_790_000_005.0,
+                   "until_ms": seconds * 1000 - 12, "seconds": seconds, "next_at": 0.0}
+
+    def v_board_identity(self, a: list[str]) -> tuple[int, Any]:
+        """``board identity B``: v7n answers its identity verb (no bake: the image default,
+        ``unset``); v6n has no verb, identify gives board 1's hard-coded identity, which the
+        hub's other target (board 1) also has: a clash (recorded by A5, never failed)."""
+        words = [w for w in a if w != "--json"]
+        hub = {"target": "mps3_02_pl", "label": "MPS3-02", "board_ip": "192.168.11.101",
+               "board_mac": "02:00:00:00:02:fe"}
+        if self.has("identity"):
+            reported = {**V16_DEFAULT, "source": {f: "default" for f in V16_DEFAULT},
+                        "stage0": None, "override": None, "pending": None, "persist": False,
+                        "via": "identity", "feature": True, "impl": "linux"}
+            findings = [{"kind": "unset", "level": "warn",
+                         "text": "identity not set (default label, MAC): ..."}]
+            status = "unset"
+        else:
+            reported = {"label": "", "hostname": "", "ip": "192.168.10.101",
+                        "mac": "02:00:00:4d:50:53", "source": {}, "stage0": None,
+                        "override": None, "pending": None, "persist": None, "via": "identify",
+                        "feature": False, "impl": "linux"}
+            findings = [{"kind": "clash", "level": "err",
+                         "text": "this board reports mps3_01_pl's IP 192.168.10.101 ..."}]
+            status = "clash"
+        return 0, {"ok": True, "board_id": words[2], "identity": {
+            "status": status, "level": "warn" if status == "unset" else "err",
+            "reported": reported, "hub": hub, "findings": findings, "fix": None,
+            "notes": [f["text"] for f in findings], "live": True}}
 
     def v_debug_detect(self, _a: list[str]) -> tuple[int, Any]:
         return _err(13, "NOTHING_ON_TARGET", "the loaded design (greybox) has no debug port")

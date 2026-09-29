@@ -27,8 +27,9 @@ The safety rules are here, in code, the same on both routes:
    section, before every ``safe`` check and before the final restore; lost = stop. The runner
    never acquires, requests, forces or releases a lease: ``allowed`` has no such argv.
 2. **What may be sent.** ``allowed``: every command passes an exact allow-list of argv shapes
-   for the ``--writes`` mode. ``none``: reads only. ``safe``: plus ``program <overlay> --yes``,
-   ``restore``, ``mcc temp`` and ``identify``. Nothing else, ever: no ``--keep-on-card``, no
+   for the ``--writes`` mode. ``none``: reads only (``board identity`` without a change flag
+   among them). ``safe``: plus ``program <overlay> --yes``, ``restore``, ``mcc temp`` and
+   ``identify`` (a blink of at most 5 s). Nothing else, ever: no ``--keep-on-card``, no
    ``--force``/``--consent``, no slot/card/sd verbs, no ``mcc reboot``/``mcc cmd``, no
    ``share start``, no ``board claim``. A refused argv stops the run (exit 2) unsent.
 3. **Stops** (exit 2; ``Runner._verdict``): an unexpected identity (an ``Expect(stop=True)``,
@@ -112,12 +113,14 @@ READ_ARGV: tuple[tuple[str, ...], ...] = (
     ("share", "list", "{B}"),
     ("debug", "detect", "{B}"),
     ("harness", "list", "{B}"),
+    ("board", "identity", "{B}"),                  # A5: the read (no --from-hub, no --label)
 )
 SAFE_ARGV: tuple[tuple[str, ...], ...] = (
     ("program", "{B}", "{RM}", "--yes"),
     ("restore", "{B}"),
     ("mcc", "{B}", "temp"),
     ("identify", "{B}"),
+    ("identify", "{B}", "--seconds", "5"),         # A6: a 5 s blink, nothing persistent
 )
 _RM = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
 
@@ -306,6 +309,26 @@ def evaluate(exp: P.Expect, data: Any, stdout: str, facts: dict[str, Any]) -> st
         return ""
     want = f"{op} {v!r}" if op not in ("present", "true", "false", "none") else op
     return f"{exp.path}: expected {want}, got {shown}" + (f" ({exp.said})" if exp.said else "")
+
+
+_NOTE_FIELD = re.compile(r"\{(?P<path>[^{}]+)\}")
+
+
+def note_text(template: str, data: Any, facts: dict[str, Any]) -> str:
+    """A check's ``note`` with its fields filled: ``{a.b}`` from the JSON, ``{fact:x}`` from a
+    fact an earlier check recorded; ``-`` for one that is missing or empty."""
+    def fill(m: re.Match[str]) -> str:
+        path = m.group("path")
+        if path.startswith("fact:"):
+            got = facts.get(path[5:], _MISSING)
+        else:
+            got = resolve(data, path) if isinstance(data, dict) else _MISSING
+        if got is _MISSING or got in ("", None) or got == []:
+            return "-"
+        if isinstance(got, list):
+            return ",".join(map(str, got))
+        return str(got)
+    return _NOTE_FIELD.sub(fill, template) if template else ""
 
 
 # --- results -------------------------------------------------------------------------------------
@@ -712,8 +735,8 @@ class Runner:
             attempts.append({"exit": out.rc, "seconds": round(out.seconds, 3),
                              "stderr_tail": out.stderr[-2000:]})
             res.exit, res.seconds, res.attempts = out.rc, round(out.seconds, 3), len(attempts)
-            unreachable = out.rc in (None, HM_UNREACHABLE) and HM_UNREACHABLE not in c.exit_ok
-            own = out.rc == HM_HELD and HM_HELD not in c.exit_ok and _own_request(data)
+            unreachable = out.rc in (None, HM_UNREACHABLE) and HM_UNREACHABLE not in c.exits
+            own = out.rc == HM_HELD and HM_HELD not in c.exits and _own_request(data)
             if (unreachable or own) and c.tier == P.READ and not self._time_up() \
                     and len(attempts) < self.o.max_unreachable:
                 what = ("busy with this Harness Manager's own request" if own
@@ -746,13 +769,15 @@ class Runner:
         """Pass, fail, skip; or raise ``SafetyStop``. The rules in the module docstring (3)."""
         rc = out.rc
         err = _err_text(data, out)
-        if rc is None or (rc == HM_UNREACHABLE and rc not in c.exit_ok):
+        exits = c.exits
+        alt = next((a for a in c.answers if a.exit == rc), None)
+        if rc is None or (rc == HM_UNREACHABLE and rc not in exits):
             what = "timed out" if rc is None else "unreachable (exit 7)"
             if c.tier == P.SAFE:
                 raise SafetyStop(f"{c.id} {what}: a write is never retried ({err})", c.id)
             raise SafetyStop(f"the board was unreachable {len(attempts)} times at {c.id} "
                              f"({err})", c.id)
-        if rc == HM_HELD and rc not in c.exit_ok:
+        if rc == HM_HELD and rc not in exits:
             if c.mcc and _tty00_busy(data, out.stderr):
                 res.verdict, res.reason = SKIPPED, f"tty_00 busy: {err} (not retried)"
                 return
@@ -766,9 +791,9 @@ class Runner:
                 return
             raise SafetyStop(f"{c.id}: HELD (exit 4): {err}. Another holder, or the reset "
                              "guard's card job: the runner never forces", c.id)
-        if rc == HM_REFUSED and rc not in c.exit_ok:
+        if rc == HM_REFUSED and rc not in exits:
             raise SafetyStop(f"{c.id}: refused (exit 15): {err}", c.id)
-        if rc == HM_INCOMPATIBLE and rc not in c.exit_ok:
+        if rc == HM_INCOMPATIBLE and rc not in exits:
             raise SafetyStop(f"{c.id}: an unexpected identity (exit 14): {err}", c.id)
         busy = _mcc_reading_busy(data) if c.mcc and rc == 0 else ""
         if busy:
@@ -776,13 +801,13 @@ class Runner:
             # words (hub_mcc.other_readers): the same "tty_00 busy", not a failure.
             res.verdict, res.reason = SKIPPED, f"tty_00 busy: {busy} (not retried)"
             return
-        if rc not in c.exit_ok:
-            res.failures.append(f"exit {rc}, expected {' or '.join(map(str, c.exit_ok))}: {err}")
+        if rc not in exits:
+            res.failures.append(f"exit {rc}, expected {' or '.join(map(str, exits))}: {err}")
         elif not c.text and not isinstance(data, dict):
             res.failures.append("no JSON object on stdout")
         else:
             stops: list[str] = []
-            for exp in c.expects:
+            for exp in (alt.expects if alt is not None else c.expects):
                 why = evaluate(exp, data, out.stdout, it.facts)
                 if why:
                     (stops if exp.stop else res.failures).append(why)
@@ -796,6 +821,7 @@ class Runner:
             res.verdict, res.reason = FAIL, "; ".join(res.failures)
         else:
             res.verdict = PASS
+            res.reason = alt.note if alt is not None else note_text(c.note, data, it.facts)
 
     def _learn(self, c: P.Check, it: Iteration, data: Any, *, passed: bool) -> None:
         if isinstance(data, dict):

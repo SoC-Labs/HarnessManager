@@ -141,14 +141,18 @@ def test_a_run_through_the_service_that_holds_the_board_passes(nocard, capsys):
         assert run["state"] in ("starting", "running") and run["route"] == "service"
         last = svc.wait_end()
         v = verdicts(last["evidence"])
-        assert last["state"] == "done" and passed(last), (v, last["reason"])
+        assert last["state"] == "done" and passed(last), (
+            [(c["id"], c["reason"]) for c in summary(last["evidence"])["checks"]
+             if c["verdict"] == "fail"], last["reason"])
         assert {k for k, x in v.items() if x == "pass"} - {"D4a"} == {
-            "0.2", "0.3", "0.4", "A1", "A2", "A3", "B1", "C1", "D1", "E1", "E1b", "Z2", "Z2b"}
+            "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "C1", "D1", "E1", "E1b",
+            "Z2", "Z2b"}
         # every command went through the service, which still holds the board
         assert BID in svc.d.engine.open_boards()
         assert nocard.fake.current_rm_id == 0 and summary(last["evidence"])["end_state"]["greybox"]
-        assert [verb_of(a) for a in svc.hm.calls if is_write(a)] == ["mcc temp", "program",
-                                                                      "restore"]
+        # A6 through the service: this image has no 'locate', so it is refused (exit 12)
+        assert [verb_of(a) for a in svc.hm.calls if is_write(a)] == ["identify", "mcc temp",
+                                                                      "program", "restore"]
         announce = (Path(last["evidence"]) / "ANNOUNCE.txt").read_text()
         assert "in the Harness Manager service" in announce and "heartbeats it" in announce
         assert "the app's Checks section: Stop" in announce

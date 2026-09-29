@@ -168,7 +168,7 @@ exits 2.
 | `--plan` | (required) | `linux-netboot` (HIL_LINUX.md in Netboot mode: a blank card), `linux-nocard` (Card-less mode: board 2, no user microSD), `linux` (the card usable again), `bare-metal` (HIL_B0.md) |
 | `--board` | (required) | the board: `192.168.10.101` (board 1), `192.168.11.101` (board 2) |
 | `--evidence DIR` | (required) | a new folder; one holding evidence is refused (never overwritten) |
-| `--writes` | `none` | `none`: read-only checks. `safe`: also the swap-and-restore checks, the MCC read and (bare metal) `identify` |
+| `--writes` | `none` | `none`: read-only checks. `safe`: also the swap-and-restore checks, the MCC read and `identify` (Linux A6: a 5 s blink; bare metal R7b: refused) |
 | `--repeat N`, `--interval S` | 1, 900 | N iterations, S seconds apart (at least 60) |
 | `--until HH:MM` (or `--deadline`) | none | no check starts after `until − margin`; then it restores and exits. `HH:MM` is the next one; an ISO time also works |
 | `--margin MIN` | 10 | the quiet minutes before `--until` and before the lease expires |
@@ -185,7 +185,8 @@ exits 2.
 ## What it runs, and what stays manual
 
 The plans are `src/harness_manager/checks/plans.py` (`tools/hil/plans.py` is the same module). Check ids are the runbook's; a lettered id (`E1b`, `R7b`)
-is a second command of that check. `tests/unit/test_hil_auto_plans.py` fails when a runbook
+is a second command of that check. A check may accept a second answer (A6: exit 12, the image
+has no `locate`); its pass line then says which (`not on this image`). `tests/unit/test_hil_auto_plans.py` fails when a runbook
 check with an **Expect** has no plan entry, or the other way round, and when the netboot or
 nocard plan's skips differ from the runbook's Netboot mode or Card-less mode list.
 
@@ -193,10 +194,15 @@ nocard plan's skips differ from the runbook's Netboot mode or Card-less mode lis
 
 - **read:** 0.2 (no share on `tty_00`), 0.3 (lease held here), 0.4 (version), A1 identity
   (shell `0x44ee76d5`, `harness_impl linux`: anything else **stops**), A2 panel, A3 XVC status,
-  B1 claim status, B3 `persist.state` (only once B2's adopt pinned the claim here), C1 slots
+  A5 `board identity` (net-protocol v0.16: the verdict and what the board reports are
+  recorded, a mismatch is never a failure; the pass line names the image, A1's
+  `harness_version` and `features`), B1 claim status, B3 `persist.state` (only once B2's adopt pinned the claim here), C1 slots
   (both `empty`), D1 overlays;
-- **safe** (`--writes safe`): D4a the MCC read on the hub; E1 program `nanosoc_ila` (not kept
-  on the card), E1b identity; Z2 restore greybox, Z2b identity;
+- **safe** (`--writes safe`): A6 `identify --seconds 5` (a 5 s backlight blink with an
+  IDENTIFY banner; nothing persistent, no claim lock. It passes as a blink on an image with the
+  `locate` feature, or as exit 12 naming `harness feature 'locate'` on one without: "not on this
+  image"; any other answer fails); D4a the MCC read on the hub; E1 program `nanosoc_ila` (not
+  kept on the card), E1b identity; Z2 restore greybox, Z2b identity;
 - **skipped (Netboot mode):** C2, D2, D3, D5, §G, Z1, Z2's `card status` (Z2c), and D4.
 
 **`linux-nocard`** (board 2): the same as `linux-netboot`, except:
@@ -206,7 +212,8 @@ nocard plan's skips differ from the runbook's Netboot mode or Card-less mode lis
   unavailable; it never prints `card: false` itself;
 - D4, F6 and §G are skipped, not manual: no reset of any kind on a board with no card and no
   JTAG. Every skip reason starts "no user microSD";
-- the safe checks are the same three: D4a (MCC read), E1 (program `nanosoc_ila`), Z2 (restore).
+- the safe checks are the same four: A6 (locate), D4a (MCC read), E1 (program `nanosoc_ila`),
+  Z2 (restore).
 
 **`linux`:** the same as `linux-netboot`, plus C2 and Z2c (the card's default line is C2's); C1
 and B3 expect a card-backed board.

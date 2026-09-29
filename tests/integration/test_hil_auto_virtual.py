@@ -246,8 +246,16 @@ def test_the_linux_netboot_plan_passes_against_the_linux_harness_fake(lx, tmp_pa
     v = verdicts(tmp_path / "ev")
     assert rc == EXIT_PASS, (v, s["first_failure"])
     assert {k for k, x in v.items() if x == "pass"} == {
-        "0.2", "0.3", "0.4", "A1", "A2", "A3", "B1", "C1", "D1", "D4a", "E1", "E1b", "Z2", "Z2b"}
+        "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "C1", "D1", "D4a", "E1", "E1b",
+        "Z2", "Z2b"}
     assert v["B3"] == "skipped"                                # claimed by another key: no adopt
+    # HIL-IDLOC: this FakeShell is an image without the v0.16 identity and locate features (v6n)
+    a5 = json.loads((tmp_path / "ev" / "a5_identity.json").read_text())
+    assert a5["exit"] == 0 and a5["stdout_json"]["identity"]["reported"]["feature"] is False
+    a6 = json.loads((tmp_path / "ev" / "a6_locate.json").read_text())
+    assert a6["exit"] == 12 and "harness feature 'locate'" in a6["stdout_json"]["error"]["message"]
+    assert next(c for c in s["checks"] if c["id"] == "A6")["reason"].startswith(
+        "not on this image")
     assert lx.fake.current_rm_id == 0 and s["end_state"]["greybox"] is True
     assert s["end_state"]["claim"] == {**s["end_state"]["claim"], "start": "other",
                                        "end": "other", "unchanged": True}
@@ -325,7 +333,8 @@ def test_the_linux_nocard_plan_passes_against_a_card_less_board(nocard, tmp_path
     v = verdicts(tmp_path / "ev")
     assert rc == EXIT_PASS, (v, s["first_failure"])
     assert {k for k, x in v.items() if x == "pass"} == {
-        "0.2", "0.3", "0.4", "A1", "A2", "A3", "B1", "C1", "D1", "D4a", "E1", "E1b", "Z2", "Z2b"}
+        "0.2", "0.3", "0.4", "A1", "A2", "A3", "A5", "A6", "B1", "C1", "D1", "D4a", "E1", "E1b",
+        "Z2", "Z2b"}
     assert {k for k, x in v.items() if x == "skipped"} >= {
         "C2", "D2", "D3", "D4", "D5", "F6", "G1", "G2", "G3", "G4", "Z1", "Z2c"}
     # harnessd said card:false; the real CLI says it as exit 12 with the slot service's reason
@@ -333,7 +342,9 @@ def test_the_linux_nocard_plan_passes_against_a_card_less_board(nocard, tmp_path
     assert c1["exit"] == 12 and c1["stdout_json"]["error"]["reason"].startswith(
         "no user microSD card in the slot")
     # the swaps and the MCC read, and not one card, slot or reset verb
-    assert [verb_of(a) for a in hm.calls if is_write(a)] == ["mcc temp", "program", "restore"]
+    # (A6's identify is refused on this image: no feature 'locate', nothing blinks)
+    assert [verb_of(a) for a in hm.calls if is_write(a)] == ["identify", "mcc temp", "program",
+                                                             "restore"]
     assert not {"card status", "slot push", "slot commit", "slot rollback", "card clear",
                 "mcc reboot", "mcc cmd", "reset", "power"} & {verb_of(a) for a in hm.calls}
     assert nocard.fake.boots == [] and nocard.fake.current_rm_id == 0

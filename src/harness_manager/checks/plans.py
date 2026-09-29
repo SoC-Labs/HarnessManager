@@ -56,6 +56,17 @@ class Expect:
 
 
 @dataclass(frozen=True)
+class Answer:
+    """Another answer a check accepts (lane HIL-IDLOC): exit ``exit`` checked against
+    ``expects`` instead of the check's own. ``note`` is the pass reason in the report (A6 on
+    an image without the harness feature ``locate``: "not on this image")."""
+
+    exit: int
+    expects: tuple[Expect, ...]
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class Check:
     id: str
     section: str
@@ -87,6 +98,16 @@ class Check:
     mcc: bool = False
     #: per-check timeout (s)
     timeout_s: float = 180.0
+    #: other answers that pass, by exit code (A6: exit 12, the image has no ``locate``)
+    answers: tuple[Answer, ...] = ()
+    #: the pass reason in the report: ``{a.b}`` from the JSON, ``{fact:x}`` a recorded fact
+    #: (A5: which image answered and what it said)
+    note: str = ""
+
+    @property
+    def exits(self) -> tuple[int, ...]:
+        """Every exit code that is an expected answer: ``exit_ok`` and the ``answers``'."""
+        return self.exit_ok + tuple(a.exit for a in self.answers)
 
 
 @dataclass(frozen=True)
@@ -147,6 +168,67 @@ def _mcc_temp(check_id: str, section: str, title: str, evidence: str) -> Check:
         writes="", evidence=evidence, mcc=True, timeout_s=120.0,
         hint="nothing was sent. Another reader on tty_00 is reported as skipped (tty_00 "
              "busy), never retried; anything else: HIL failure table, R4/D4 rows")
+
+
+# --- A5/A6: net-protocol v0.16 identity and locate (lane HIL-IDLOC) ----------------------------
+
+#: ``board identity``'s verdicts (``services.board_identity.STATUS_*``)
+IDENTITY_STATUSES = ("ok", "unset", "differs", "clash", "unknown")
+#: where a v0.16 field came from: the board's own setting (/persist), the stage0 bake, the
+#: image default (``identity.source.<field>`` on the wire)
+IDENTITY_SOURCES = ("override", "stage0", "default")
+#: A6's blink (1-30 s) and the refusal of an image without ``locate`` (R7b's words)
+LOCATE_S = 5
+NO_LOCATE = "harness feature 'locate'"
+
+
+def identity_and_locate() -> tuple[Check, ...]:
+    """A5 and A6 (HIL_LINUX.md §A). Both pass on an image with the v0.16 ``identity`` and
+    ``locate`` features (rc2_v7n) AND on one without them (v6n): A5 records what the board
+    says (a label that is not its hub's is a finding, never a failure); A6 blinks, or is
+    refused with exit 12 naming the feature. Anything else fails."""
+    return (
+        Check("A5", "A", "Board identity (net-protocol v0.16)", READ,
+              ("board", "identity", "{B}"),
+              (E("identity.status", "in", IDENTITY_STATUSES,
+                 "a verdict (ok, unset, differs, clash or unknown): recorded, a label "
+                 "mismatch is not a failure"),
+               E("identity.reported.source.label", "in", IDENTITY_SOURCES,
+                 "the label's source (override = /persist, stage0 = the bake, default) when "
+                 "the image has the identity verb", optional=True),
+               E("identity.reported.label", "regex", r"^[A-Za-z0-9-]{1,32}$",
+                 "a label (MPS3 on v7n with no bake) when the board reports one",
+                 optional=True)),
+              evidence="a5_identity",
+              record={"id_status": "identity.status", "id_label": "identity.reported.label",
+                      "id_source": "identity.reported.source.label",
+                      "id_via": "identity.reported.via", "id_verb": "identity.reported.feature"},
+              note="{identity.status}: label {identity.reported.label} (source "
+                   "{identity.reported.source.label}), hostname {identity.reported.hostname}, "
+                   "ip {identity.reported.ip}, mac {identity.reported.mac}, via "
+                   "{identity.reported.via}; image {fact:harness_version}, features "
+                   "{fact:features}",
+              hint="exit 12: the pack has no identity service (update Harness Manager). "
+                   "A label, IP or MAC unlike the hub's (v6n reports board 1's MPS3-01, "
+                   "192.168.10.101, 02:00:00:4d:50:53 on every board) is recorded, not failed"),
+        Check("A6", "A", "Locate: blink the panel", SAFE,
+              ("identify", "{B}", "--seconds", str(LOCATE_S)),
+              (E("seconds", "eq", LOCATE_S, f"blinks {LOCATE_S} s"),
+               E("until_ms", "range", (1, 30_000), "the board's own countdown (until_ms)")),
+              answers=(Answer(12, (
+                  E("error.name", "eq", "UNAVAILABLE", "exit 12, unavailable"),
+                  E("error.message", "contains", NO_LOCATE,
+                    f"Identify isn't available on this harness image ({NO_LOCATE})")),
+                  note=f"not on this image: refused, exit 12 ({NO_LOCATE})"),),
+              evidence="a6_locate",
+              note=f"blinked {LOCATE_S} s: IDENTIFY: <this Harness Manager's user@host> on the "
+                   "panel",
+              writes=f"none persistent: a {LOCATE_S} s backlight blink and an IDENTIFY banner "
+                     "(no claim lock; an image without 'locate' refuses)",
+              hint="exit 12 with another reason, or any other exit: a Harness Manager or "
+                   "harness bug (A1 says which image); exit 8 ALREADY: another Identify on "
+                   "this board in the last 10 s"),
+    )
 
 
 # --- docs/HIL_LINUX.md ----------------------------------------------------------------------------
@@ -213,7 +295,9 @@ def linux(*, mode: str = "card", static: str = LINUX_STATIC) -> Plan:
                E("identity.features", "has", "usd", "features lists usd"),
                E("health.reachable", "true", said="health.reachable true"),
                E("claim", "present", said="a claim block")),
-              evidence="a1_info", record={"rm_id": "identity.rm_id"},
+              evidence="a1_info",
+              record={"rm_id": "identity.rm_id", "features": "identity.features",
+                      "harness_version": "identity.harness_version"},
               hint="`harness_impl` not linux or shell_id not the static: the board is not on "
                    "RC2 (rolled back?): STOP, ask the Linux lead. `offline`: wait 60 s, "
                    "repeat; then ask the Linux lead"),
@@ -229,6 +313,7 @@ def linux(*, mode: str = "card", static: str = LINUX_STATIC) -> Plan:
               evidence="a3_xvc"),
         Check("A4", "A", "The finger test", MANUAL,
               why="a person holds a finger on the panel for 10 s"),
+        *identity_and_locate(),
     ))
     sB = Section("B", "The SSH claim: check it, adopt it, never re-claim", (
         Check("B1", "B", "Who claimed the board?", READ, ("board", "claim-status", "{B}"),
