@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from harness_manager import __version__
+from harness_manager.core import lifecycle
 from harness_manager.core.errors import (
     ActionFailedError,
     HarnessError,
@@ -449,6 +450,9 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
         engine.packs()               # bad pack settings fail here, before anyone connects
         if not demo:
             reap_debris(engine)
+            # SSH-MUX: this process is the long-lived service (a pack may keep its hub ssh
+            # connections for reuse; they are let go by the stop hooks below)
+            lifecycle.mark_service()
         holder: dict[str, uvicorn.Server] = {}
 
         def request_shutdown() -> None:
@@ -507,6 +511,10 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
             except Exception:  # noqa: BLE001 - shutting down must finish
                 log.exception("closing the boards failed")
             log.info("boards closed in %.1f s", time.monotonic() - t0)
+        ran = lifecycle.run_stop_hooks()      # SSH-MUX: e.g. the hub ssh masters it started
+        if ran:
+            log.info("service stop hooks ran: %s", ", ".join(ran))
+        lifecycle.mark_service(False)
         if wrote:
             remove_info(state_dir, os.getpid())
         instance.release()

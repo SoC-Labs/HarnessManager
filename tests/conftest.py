@@ -48,6 +48,10 @@ def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # SET-CORE: never reach the user's real OS keyring (the secret store falls back to its
     # 0600 file); a test that wants a keyring passes its own stub backend.
     monkeypatch.setenv("HARNESS_MANAGER_KEYRING", "off")
+    # SSH-MUX: a service started in a test never keeps hub ssh masters, nor makes their
+    # directory beside the user's live service; tests/unit/test_hub_ssh_mux.py turns it on
+    # over a directory of its own.
+    monkeypatch.setenv("HARNESS_MANAGER_HUB_SSH_MUX", "0")
 
 
 @pytest.fixture(autouse=True)
