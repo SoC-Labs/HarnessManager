@@ -339,18 +339,18 @@ def _slot_rows() -> tuple[Setting, ...]:
     return (
         _row(_os.CARD_WRITE_BPS_KEY, "int", _os.CARD_WRITE_BPS, "Harness + kits",
              "How fast the board's user microSD takes a write, bytes a second (B2: ~70 KB/s; "
-             "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:205",
+             "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:211",
              scope="pack", advanced=True, env=_os.CARD_WRITE_BPS_ENV, check=_positive),
         _row(_os.CARD_READ_BPS_KEY, "int", _os.CARD_READ_BPS, "Harness + kits",
              "How fast the board reads its user microSD back, bytes a second (B2: 14-135 "
-             "KB/s, the slowest is the default)", at="os_slots.py:206", scope="pack",
+             "KB/s, the slowest is the default)", at="os_slots.py:212", scope="pack",
              advanced=True, env=_os.CARD_READ_BPS_ENV, check=_positive),
         _row(_os.JOB_TIMEOUT_KEY, "float", _os.JOB_TIMEOUT_S, "Harness + kits",
              "The least cap on a whole OS-slot push or verify, in seconds (a bigger image "
-             "gets its size at the card's rates, x1.5)", at="os_slots.py:237", scope="pack",
+             "gets its size at the card's rates, x1.5)", at="os_slots.py:243", scope="pack",
              env=_os.JOB_TIMEOUT_ENV, check=_positive),
         _row(_os.STALL_KEY, "float", _os.STALL_S, "Harness + kits",
              "How long an OS-slot push or its card job may go without moving a byte before "
-             "it is stuck, in seconds", at="os_slots.py:238", scope="pack",
+             "it is stuck, in seconds", at="os_slots.py:244", scope="pack",
              env=_os.STALL_ENV, check=_positive),
     )
