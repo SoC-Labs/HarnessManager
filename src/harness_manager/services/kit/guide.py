@@ -60,6 +60,9 @@ GATE_HELP: dict[str, str] = {
     "source_present": "a file in RM_SOURCES does not exist: fix the path in the design.",
     "sources_given": "no RTL was named: set build.sources in the design, or RM_SOURCES.",
     "ooc_xdc_present": "the OOC XDC is missing: `harness-manager xdc rm-kit` writes it.",
+    "generic_file_present": "a file named by build.generics ({\"path\": ...}) does not "
+                            "exist: fix the path in the design. Vivado would only warn "
+                            "([Synth 8-4445]) and build a blank memory.",
     "pr_verify_ref_present": "PR_VERIFY_REF names a file that does not exist: leave it empty "
                              "(the locked static is the reference) or fix the path.",
     "synth_dcp_present": "RM_SYNTH_DCP names a file that does not exist: fix the path, or "

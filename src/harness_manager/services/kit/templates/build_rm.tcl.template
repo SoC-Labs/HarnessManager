@@ -63,6 +63,8 @@ array set P {
     RM_SOURCES        {{{RM_SOURCES}}}
     RM_INCLUDE_DIRS   {{{RM_INCLUDE_DIRS}}}
     RM_DEFINES        {{{RM_DEFINES}}}
+    RM_GENERICS       {{{RM_GENERICS}}}
+    RM_GENERIC_FILES  {{{RM_GENERIC_FILES}}}
     RM_SYNTH_HOOK     {{{RM_SYNTH_HOOK}}}
     RM_SYNTH_DCP      {{{RM_SYNTH_DCP}}}
     RM_OOC_XDC        {{{RM_OOC_XDC}}}
@@ -84,6 +86,10 @@ array set P {
 # CLEARING_MAX      bytes; the harness stages a bigger clearing to QSPI, and the
 #                   next swap-away then fails closed (HM deploy preflight (d))
 # RM_SOURCES        .sv/.v/.vhd files, in order. Or leave empty and read them in
+# RM_GENERICS       NAME=VALUE top-level parameters, one -generic each (a $readmemh
+#                   image's path is ABSOLUTE: Vivado's cwd is not this directory)
+# RM_GENERIC_FILES  the files those generics name; preflight refuses a missing one
+#                   ($readmemh of a missing file is only a warning, and a blank ROM)
 # RM_SYNTH_HOOK     a Tcl file sourced inside the synth project (filelists,
 #                   read_ip, create_ip for an RM debug hub, set_property ...)
 # RM_SYNTH_DCP      skip synthesis: an out-of-context synth checkpoint of RM_TOP
@@ -108,7 +114,7 @@ proc here_path { p } {
 foreach k {STATIC_DCP PR_VERIFY_REF RM_SYNTH_HOOK RM_SYNTH_DCP RM_OOC_XDC RM_XDC OUT_DIR} {
     set P($k) [here_path $P($k)]
 }
-foreach k {RM_SOURCES RM_INCLUDE_DIRS} {
+foreach k {RM_SOURCES RM_INCLUDE_DIRS RM_GENERIC_FILES} {
     set l {}
     foreach f $P($k) { lappend l [here_path $f] }
     set P($k) $l
@@ -318,6 +324,9 @@ set rc [catch {
         }
         gate ooc_xdc_present [file isfile $P(RM_OOC_XDC)] \
             "$P(RM_OOC_XDC) (harness-manager xdc rm-kit writes it)"
+        foreach f $P(RM_GENERIC_FILES) {
+            gate generic_file_present [file isfile $f] $f
+        }
     } else {
         gate synth_dcp_present [file isfile $P(RM_SYNTH_DCP)] $P(RM_SYNTH_DCP)
     }
@@ -342,6 +351,8 @@ set rc [catch {
         set sargs [list -mode out_of_context -top $P(RM_TOP) -part $P(PART)]
         if { $P(RM_INCLUDE_DIRS) ne "" } { lappend sargs -include_dirs $P(RM_INCLUDE_DIRS) }
         foreach d $P(RM_DEFINES) { lappend sargs -verilog_define $d }
+        # -generic is REPEATED, one per generic: Vivado takes no list
+        foreach g $P(RM_GENERICS) { lappend sargs -generic $g }
         synth_design {*}$sargs
         # read AFTER synth_design: it names ports and synthesised pins
         # (_template/ooc_synth.tcl:69-80)

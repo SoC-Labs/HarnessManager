@@ -743,6 +743,42 @@ next, blocked, failed or unchecked) and what to do next:
 
 With no board, give `--static-id 0x72BB0A36` instead of the address.
 
+**Your own RTL: the design's `build` object.** The built-in designs (`minimal`, `nanosoc`,
+`nanosoc_ila`) describe the partition's ports and timing only. To build your DUT, write a
+design `.json` (docs/XDC_EXPORT.md, "An RM design") and add `rm_id` and `build`. Every
+path is relative to the design file, or absolute:
+
+```json
+{
+ "kind": "rm", "name": "my_soc", "rm_id": "0x01008001",
+ "use": {"clkrst": {}, "jtag": {}, "uart": {}, "status": {}, "gpio": {}},
+ "clocks": ["jtag_tck"],
+ "wrapper": "rtl/rp_my_soc_wrapper.sv",
+ "build": {
+  "top": "rp_my_soc_wrapper",
+  "sources": ["rtl/my_pkg.sv", "rtl/my_core.v", "rtl/rp_my_soc_wrapper.sv"],
+  "include_dirs": ["rtl/include"],
+  "defines": ["RAM_PRELOAD"],
+  "generics": {"IMEM_IMG": {"path": "fw/image.hex"}, "NCORES": 1}
+ }
+}
+```
+
+| Key | What it is |
+|---|---|
+| `top` | the RM's top module; default `rm_<name>` (the skeleton's) |
+| `sources` | HDL files, **in compile order** (a SystemVerilog package before its users). `.vhd`/`.vhdl` are read as VHDL, `.v` as Verilog-2001, anything else as SystemVerilog. List every file: there are no globs. A `.hex`, `.xci`, `.xdc`, `.tcl` or `.dcp` here is refused with the key that takes it |
+| `include_dirs` | `` `include `` search directories |
+| `defines` | `` `define `` names (`NAME` or `NAME=VALUE`) |
+| `generics` | top-level parameters, `{NAME: value}`: a string, a number, or `{"path": FILE}` for a `$readmemh` image. A path is written absolute (Vivado's working directory is not yours) and a missing file stops the build at preflight (Vivado itself only warns, and builds a blank memory) |
+| `synth_hook` | a Tcl file sourced inside the synthesis project, after `sources`: a filelist of your own, `read_ip` for Xilinx IP, `set_property` |
+| `synth_dcp` | skip synthesis: an out-of-context synth checkpoint of `top` |
+| `rm_xdc` | RM-internal timing exceptions, applied to the partition after the link |
+
+A design with no `sources`, no `synth_hook` and no `synth_dcp` builds as its skeleton only
+when that skeleton is a whole RM (`minimal`). Otherwise `kit script` names the outputs the
+skeleton leaves undriven, and the build stops at preflight until you give the RTL.
+
 | Kit command | What it does |
 |---|---|
 | `kit info [TARGET]` | the static, its kit, the Vivado it needs, the sources |
