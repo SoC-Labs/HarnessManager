@@ -1,0 +1,4 @@
+harness-manager: no build receipt in /tmpdir/claude-74755/kit-night/home/builds/minimal — build_rm.tcl writes <rm>_build.json in its OUT_DIR; run the build first
+
+harness-manager: no build receipt in /tmpdir/claude-74755/kit-night/home/builds/minimal — build_rm.tcl writes <rm>_build.json in its OUT_DIR; run the build first
+=== rc=3 took=4s

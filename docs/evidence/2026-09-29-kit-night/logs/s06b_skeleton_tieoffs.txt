@@ -1,0 +1,3 @@
+73:  assign dut_lockup = 1'b0;  // not driven by this design: its safe-idle value
+74:  assign irq_out = 1'b0;  // not driven by this design: its safe-idle value
+=== rc=0 took=1s

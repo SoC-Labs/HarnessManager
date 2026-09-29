@@ -208,7 +208,7 @@ def make_script(kits: KitService, *, pack: str, static_id: str, design: str | di
     result = BuildScript(d.name, rm_id, proposed, profile.static_id, kit.manifest.kit_id,
                          files, values, checks, command, vivado=vexe,
                          vivado_release=profile.vivado)
-    files["README.txt"] = _readme(result, kit)
+    files["README.txt"] = _readme(result, kit, _design_arg(d.origin, d.name))
     if out_dir is not None:
         result.out_dir = Path(out_dir)
         result.written = write(result, kits, kit, out_dir, export_kit=kit_dir is None)
@@ -234,14 +234,26 @@ def write(result: BuildScript, kits: KitService, kit: CachedKit, out_dir: Path, 
     return written
 
 
-def _readme(r: BuildScript, kit: CachedKit) -> str:
+def _design_arg(origin: str, name: str) -> str:
+    """What ``--design`` takes to name this design again: a built-in's name, a design file's
+    path, or a placeholder for an inline design (KIT-NIGHT: the README said
+    ``<your design .json>`` for the built-in ``minimal`` too)."""
+    if origin.startswith("builtin:"):
+        return name
+    if origin and origin != "inline":
+        return origin
+    return "<your design .json>"
+
+
+def _readme(r: BuildScript, kit: CachedKit, design_arg: str = "<your design .json>") -> str:
     m = kit.manifest
     return "\n".join([
         f"Build {r.design} (rm_id {r.rm_id}) for static {r.static_id}",
         f"kit {r.kit_id}: Vivado {m.vivado.release} exactly (another major.minor is refused),",
         f"part {m.part}, partition {m.rp.inst} ({m.rp.ports} ports / {m.rp.bits} bits).",
         "",
-        "1. Build (about 20 min for a small RM with 2 threads; 4-8 GB of RAM):",
+        "1. Build (a small RM: about 20 min on an idle machine, up to an hour on a loaded one;",
+        "   measured 56 min for minimal on RC2 at load 50 with 4 threads; 4-8 GB of RAM):",
         f"     {r.vivado} -mode batch -source build_rm.tcl -log build_rm.log -journal build_rm.jou",
         (f"   ({r.vivado} is Vivado {m.vivado.release} on the machine that wrote this; elsewhere use "
          f"that release's vivado: a bare `vivado` runs whatever is first on PATH)"
@@ -256,6 +268,6 @@ def _readme(r: BuildScript, kit: CachedKit) -> str:
         f"     harness-manager kit pack {r.receipt} --import",
         "",
         "Every step, with its state: harness-manager kit guide --static-id "
-        f"{r.static_id} --design <your design .json> --build-dir .",
+        f"{r.static_id} --design {design_arg} --build-dir .",
         "",
     ])

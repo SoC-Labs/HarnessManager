@@ -1,0 +1,12 @@
+state dir /tmpdir/claude-74755/kit-night/home/.config/harness-manager; simulated live shell_id 0x72BB0A36 (NO board), clr_max 262144
+catalogue: 1 overlay(s); rejects: none
+
+minimal  rm_id 0x0100f28a  static 0x44ee76d5  origin store  size 1311884  ip_class unknown  -> REFUSED
+  mismatch   shell_id matches overlay built for shell 0x44ee76d5, the board runs 0x72bb0a36 (a shell rebuild invalidates every partial; overlay-manifest.md)
+  ok         crc and length clearing 67748 B crc 0x0b0f0205, partial 1244136 B crc 0x5bab2009
+  ok         clearing pairs partial both payload blobs were imported for rm_id 0x0100f28a
+  ok         clearing fits  67748 B of the 262144 B the harness's clr_max
+  unchecked  static_usercode matches needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76)
+  MISMATCH   pyverify       Overlay.validate: static_id mismatch: manifest=0x44ee76d5 running shell=0x72bb0a36 (a shell rebuild invalidates every stored partial — overlay-manifest.md)
+  (not run)  control/transport need a live shell
+=== rc=1 took=2s

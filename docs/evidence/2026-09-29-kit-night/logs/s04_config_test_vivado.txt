@@ -1,0 +1,4 @@
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado
+tools vivado: PASS
+  ok    vivado   Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado; the cached kits need 2026.1 (0x44EE76D5)
+=== rc=0 took=5s

@@ -749,7 +749,7 @@ With no board, give `--static-id 0x72BB0A36` instead of the address.
 | `kit fetch [TARGET] [--source cache\|channel\|hub\|PATH] [--out DIR]` | put the kit in the cache (and export it) |
 | `kit import DIR\|ZIP` | a kit directory or zip, or a `fielded/<sid>/` directory, into the cache |
 | `kit list` | the cached kits |
-| `kit verify DIR [TARGET]` | check a kit directory, and it against a board |
+| `kit verify DIR\|ZIP [TARGET]` | check a kit directory or a kit zip (nothing is cached), and it against a board |
 | `kit guide [TARGET] [--design D] [--build-dir DIR] [--why GATE]` | the steps and their state; `--why` explains one gate |
 | `kit script [TARGET] --design D --out DIR` | write `build_rm.tcl`, the kit and the XDC kit |
 | `kit build DIR` | print the Vivado command, with the full path of a Vivado of the kit's release (HM does not run Vivado yet); exit 12 when there is none |

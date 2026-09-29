@@ -366,7 +366,8 @@ kit check RECEIPT|BUILD_DIR|PARTIAL [TARGET]
 kit pack RECEIPT|BUILD_DIR [--import]
     The overlay from a passed receipt; --import adds it to Program.
 kit list                   the cached kits
-kit verify DIR [TARGET]    check a kit directory (and it against a board)
+kit verify DIR|ZIP [TARGET]
+                           check a kit directory or zip (and it against a board)
 kit import DIR|ZIP         add a kit (or a fielded/<sid>/ directory) to the cache
 
 xdc info                   the board pack's pin model: board, fielded shell,

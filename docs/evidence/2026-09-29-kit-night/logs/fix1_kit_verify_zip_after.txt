@@ -1,0 +1,8 @@
+mps3_rc2_0x44EE76D5_kit.zip: kit mps3/0x44EE76D5/vivado-2026.1
+  ok        files                        14 files match kit.json (size and sha256)
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  unchecked shell_id                     no board: the kit was not compared with a running static
+  ok        part                         xcku115-flvb1760-1-c
+  ok        boundary                     kit 47 ports / 148 bits, pin model 47 / 148
+0x44EE76D5  mps3/0x44EE76D5/vivado-2026.1      38287216 B  path:/tmpdir/claude-74755/kit-night/home/mps3_rc2_0x44EE76D5_kit.zip
+=== rc=0 took=3s

@@ -1,0 +1,32 @@
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-night/home/builds/minimal_head/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-night/home/builds/minimal_head/xdc/minimal_wrapper_skeleton.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-night/home/builds/minimal_head/xdc/minimal_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100F28A, RM_ID is 0x0100F28A (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_STAGE impl
+HM_GATE rp_pins_opt PASS 148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)
+HM_GATE drc_routed PASS no HDPR-16/18/50, no Error
+HM_GATE rm_timing PASS your RM has no registers (every output a constant, as minimal's): no path of its own to time
+HM_STAGE verify
+HM_GATE pr_verify PASS compatible with static_routed_locked.dcp
+HM_STAGE bitstream
+HM_GATE ltx NOTE no debug core in the partition: no .ltx
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-night/home/builds/minimal_head/out/minimal_partial.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-night/home/builds/minimal_head/out/minimal_partial_clear.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-night/home/builds/minimal_head/out/minimal_partial.bit
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-night/home/builds/minimal_head/out/minimal_partial_clear.bit
+HM_GATE clearing_fits PASS clearing 67748 B, the harness holds 1048576 B
+HM_RECEIPT /tmpdir/claude-74755/kit-night/home/builds/minimal_head/out/minimal_build.json
+HM_RM_BUILD_COMPLETE rm=minimal rm_id=0x0100F28A static_id=0x44EE76D5 partial=/tmpdir/claude-74755/kit-night/home/builds/minimal_head/out/minimal_partial.bin

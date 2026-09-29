@@ -1,0 +1,11 @@
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  NEXT   2 Tools            `vivado` on PATH is Vivado 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado), not this kit's 2026.1: a bare `vivado` runs 2024.1, and build_rm.tcl refuses it. Run the full path Harness Manager prints (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado), or put its bin first on PATH: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH; Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  minimal: 47 ports / 148 bits checked; rm_id 0x0100F28A (warning: no rm_id: HM proposes 0x0100F28A)
+  -      5 Build            no build directory yet
+                            waits for 2 tools
+  -      6 Check and add    no passed build yet
+                            waits for 5 build
+next: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH
+=== rc=0 took=39s

@@ -1,0 +1,3 @@
+overlay minimal (0x0100F28A) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-night/home/builds/minimal/overlay/minimal
+imported into the store (3f84f88675bf): it shows in Program
+=== rc=0 took=2s

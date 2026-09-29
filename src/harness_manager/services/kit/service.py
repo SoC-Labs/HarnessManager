@@ -45,7 +45,7 @@ import shutil
 import tempfile
 import uuid
 import zipfile
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -346,24 +346,32 @@ class KitService:
                                                          "fielded/<sid>/ directory")
         self.work_dir.mkdir(parents=True, exist_ok=True)
         if path.is_file():
-            if path.suffix.lower() != ".zip" and not zipfile.is_zipfile(path):
-                raise UsageError(f"{path} is neither a kit directory nor a zip")
-            tmp = self.work_dir / f".unzip-{uuid.uuid4().hex}"
-            try:
-                from harness_manager.services.update.bundle import safe_extract
-
-                safe_extract(path, tmp)
-                root = _kit_root(tmp)
-                if root is None:
-                    raise KitFormatError(f"{path.name} holds no kit.json",
-                                         hint="a kit zip has kit.json at its root or one "
-                                              "directory down")
+            with self._unzipped(path) as root:
                 return self._import_kit_dir(root, source)
-            finally:
-                shutil.rmtree(tmp, ignore_errors=True)
         if (path / KIT_JSON).is_file():
             return self._import_kit_dir(path, source)
         return self._import_loose(path, source)
+
+    @contextlib.contextmanager
+    def _unzipped(self, path: Path) -> Iterator[Path]:
+        """A kit zip, extracted into the work dir while the caller needs it: yields the kit's
+        root (``kit.json`` at the top or one directory down). Removed afterwards, always."""
+        if path.suffix.lower() != ".zip" and not zipfile.is_zipfile(path):
+            raise UsageError(f"{path} is neither a kit directory nor a zip")
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.work_dir / f".unzip-{uuid.uuid4().hex}"
+        try:
+            from harness_manager.services.update.bundle import safe_extract
+
+            safe_extract(path, tmp)
+            root = _kit_root(tmp)
+            if root is None:
+                raise KitFormatError(f"{path.name} holds no kit.json",
+                                     hint="a kit zip has kit.json at its root or one "
+                                          "directory down")
+            yield root
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def _import_kit_dir(self, root: Path, source: str) -> ImportResult:
         manifest = load_kit_json(root / KIT_JSON)
@@ -517,8 +525,17 @@ class KitService:
 
     def verify_dir(self, kit_dir: Path, identity: BoardIdentity | None = None,
                    *, pack: str | None = None) -> tuple[KitManifest, list[KitCheck]]:
-        """A kit directory on disk (what Vivado will open): files, CRC, and with a board
-        its live static (identity items)."""
+        """A kit directory on disk (what Vivado will open), or the kit zip a user was handed
+        (KIT-NIGHT: checked as it is, nothing cached, the same checks ``import`` makes):
+        files, CRC, and with a board its live static (identity items)."""
+        kit_dir = Path(kit_dir)
+        if kit_dir.is_file():
+            with self._unzipped(kit_dir) as root:
+                return self._verify_root(root, identity, pack)
+        return self._verify_root(kit_dir, identity, pack)
+
+    def _verify_root(self, kit_dir: Path, identity: BoardIdentity | None,
+                     pack: str | None) -> tuple[KitManifest, list[KitCheck]]:
         manifest = load_kit_json(Path(kit_dir) / KIT_JSON)
         checks = verify_dir_files(manifest, Path(kit_dir))
         if identity is not None or pack:

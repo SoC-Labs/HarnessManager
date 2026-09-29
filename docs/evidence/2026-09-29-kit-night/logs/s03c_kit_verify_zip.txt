@@ -1,0 +1,2 @@
+harness-manager: cannot read mps3_rc2_0x44EE76D5_kit.zip/kit.json: Not a directory — is this a kit directory?
+=== rc=15 took=1s

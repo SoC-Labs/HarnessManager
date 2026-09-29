@@ -590,7 +590,7 @@ function BuildCard({ bid, step, g, x }) {
       <p class="sub">${Object.keys(s.files || {}).length} files${s.out_dir ? html`, written to <span class="mono">${s.out_dir}</span>` : ", not written (preview; the zip holds them with the kit)"}. The receipt will be <span class="mono">${s.receipt}</span>.</p>
       <div><div class="sub-head">Run it (Vivado ${(g.profile || {}).vivado || ""}, on the machine that holds the files)</div>
         <${Cmd} text=${cmd} testid="script-command" wrap=${true} /></div>
-      <p class="sub">About 20 minutes for a small RM with 2 threads, 4-8 GB of RAM. Vivado exits 0 even when a gate fails: the verdict is the receipt. Then Refresh.</p>
+      <p class="sub">A small RM takes about 20 minutes on an idle machine and up to an hour on a loaded one, with 4-8 GB of RAM. Vivado exits 0 even when a gate fails: the verdict is the receipt. Then Refresh.</p>
     </div>` : null}
     <${Actions} step=${step} />
   <//>`;
