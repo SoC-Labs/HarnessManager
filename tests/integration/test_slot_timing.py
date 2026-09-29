@@ -398,6 +398,46 @@ def test_a_harness_from_53f49b4_refuses_its_own_reboot_mid_job(linux):
     assert fake.reboots == [] and not fake.wedged
 
 
+@pytest.fixture
+def raced(monkeypatch):
+    """The guard reads the card idle, then a job starts before the reboot lands (another
+    host's push): what ``check`` saw, and then the job."""
+    def race(fake, state="writing"):
+        def check(session, action, **kw):
+            fake.hold_job(state, got=12_300_000, length=MB29)
+            return None
+        monkeypatch.setattr(reset_guard, "check", check)
+    return race
+
+
+@pytest.mark.parametrize("via", ["os_slots", "reset shell"])
+def test_an_ebusy_reboot_during_a_card_job_is_refused_in_the_guards_words(linux, raced, via):
+    fake, session = linux
+    raced(fake)
+    with pytest.raises(reset_guard.CardBusyError) as exc:
+        if via == "os_slots":
+            session.os_slots.reboot(wait_s=5)
+        else:
+            session.resets.reset("shell")
+    assert exc.value.code == 4
+    assert exc.value.message.startswith("harness reboot refused: slot B is being written "
+                                        "(12.3/29 MB); a reset now can wedge the card.")
+    assert "another client" not in exc.value.message
+    assert fake.reboots == [] and not fake.wedged
+
+
+def test_twin_an_ebusy_reboot_mid_swap_is_not_called_a_card_job(linux, monkeypatch):
+    from harness_manager.core.errors import HeldError
+
+    fake, session = linux
+    monkeypatch.setattr(reset_guard, "check", lambda session, action, **kw: None)
+    fake._swap_in_flight = True                        # EBUSY with no card job
+    with pytest.raises(HeldError) as exc:
+        session.os_slots.reboot(wait_s=5)
+    assert not isinstance(exc.value, reset_guard.CardBusyError)
+    assert fake.reboots == []
+
+
 class FakeController:
     def __init__(self) -> None:
         self.reboots = 0
