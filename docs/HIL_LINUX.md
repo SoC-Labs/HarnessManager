@@ -158,7 +158,8 @@ ssh -o BatchMode=yes -o ControlPath=none -o ClearAllForwardings=yes $H true && e
 - The overlay list includes `greybox`, `nanosoc` and `nanosoc_ila`.
   - If the folder is gone, copy the hub's copy and point the variable at it:
     `scp -rq $H:/home/david/mints/0x44EE76D5/overlay_mbv $HOME/mint_44EE76D5_overlay_mbv`.
-- boards.toml has the board table from the Thursday HIL: `match = ["192.168.10.101"]`,
+- boards.toml has the board table from the Thursday HIL (24 Sep; that session has no evidence
+  file, see [HIL_B0.md](HIL_B0.md)): `match = ["192.168.10.101"]`,
   `via = "ssh:mapstone-dev…"`, and a hub table with `target = "mps3_01_pl"` (`use = "lab"`
   instead of `host` is fine too). No `shares` are needed: an old `shares = { mcc = … }` entry is
   ignored, and Harness Manager never starts a share on `tty_00`.

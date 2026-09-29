@@ -17,10 +17,10 @@ Static on both: RC2 `0x44EE76D5`.
 |---|---|---|---|
 | B1 | `board claim --adopt --replace-host-key`; claim-status "claimed by you", host key pinned, claim key from identify `ssh.key_sha256` | 1 | `b1_claim_status.txt` |
 | B2 | Re-adopt after the card boot: the new permanent host key is pinned | 1 | `b2_claim_status.txt` |
-| A1 | Identity: `linux`, shell `0x44ee76d5`, ver32 `0x01000000`; features include `usd`, `slot`, `xvc_lock` | 1, 2 | `a1_info_2.json`, `lm_info.json` |
+| A1 | Identity: `linux`, shell `0x44ee76d5`, ver32 `0x01000000`; features include `usd`, `slot`, `xvc_lock` | 1, 2 | board 1: `a1_info_2.json`, `lm_info.json`; board 2 (21:13, the night run): `../2026-09-hil-auto/0928-b2-run2/iter-001/a1_info.json` |
 | A2 | Front panel: the rebuilt mirror, touch ok (the panel wording is being corrected: lane PANEL-TRUTH) | 1 | `a2_panel.txt` |
 | A3 | XVC status: down, scoped to the RP debug chain | 1 | `a3_xvc.txt` |
-| D4a | MCC temperature read ON the hub (no fpgahub share on tty_00): 35.0 °C (board 1), 37.4 °C (board 2) | 1, 2 | `d4_mcc_temp.json` |
+| D4a | MCC temperature read ON the hub (no fpgahub share on tty_00): 35.0 °C (board 1); 37.4 °C (board 2, from the session notes; no evidence file). Board 2's recorded readings are the night run's: 36.7 °C at 21:15, 35.5–36.7 °C over 20 rounds | 1, 2 | board 1: `d4_mcc_temp.json`; board 2: `../2026-09-hil-auto/0928-b2-run2/iter-*/d4a_mcc_temp.json` |
 | — | The hub MCC one-reader refusal (27 Sep 22:03: another process named tty_00 on its command line; nothing typed) | 1 | `d4_mcc_temp_first_refused_2026-09-27.json` |
 | — | MCC research: `HELP` lists READ_AXI/WRITE_AXI (run mode); `CFG R TEMP 1..7` → "ERROR: Undefined" (only TEMP 0 answers) | 1 | `mcc_*.txt` |
 | C1 | Slot status: running B, default B, B valid "booted, confirmed healthy", A empty, `claimed`/`confirmed` fields present | 1 | `c1_slot_status.json` |
@@ -28,9 +28,25 @@ Static on both: RC2 `0x44EE76D5`.
 | LM | **Live LCD mirror first light**: live, mode sw, owner harness (board 1 11:34, board 2 14:36) | 1, 2 | `first_light_2x.png`, `board2_first_light_2x.png`, `lm_*.txt`, `b2_snap.txt` |
 | D1 | Overlay list: 13 overlays load on `0x44ee76d5` (after SERIAL-6900) | 2 | `b2_overlays.txt` |
 | E1 | `program nanosoc_ila`: 2.8 MB over TCP in 78.8 s, verified | 2 | `b2_e1_program_ila.txt` |
-| — | `program nanosoc`: 73.2 s, verified; `program greybox` (restore): 38.7 s, verified | 2 | `b2_dbg_program_nanosoc.txt` |
-| E2 | `xvc open` over the claim forward: ready in 22 s, board XVC slot ours (daemon log) | 2 | `b2_e2_xvc_open.txt`, `b2_e3_xvc_status.txt` |
-| debug | `debug up` with xPack OpenOCD 0.12 over the claim forward: gdb 127.0.0.1:23344 | 2 | `b2_dbg_up2.txt` |
+| — | `program nanosoc`: 73.2 s, verified; `program greybox` (restore): 38.7 s, verified (README only: no evidence file; the cited file holds the nanosoc push only) | 2 | `b2_dbg_program_nanosoc.txt` (nanosoc) |
+| E2 | `xvc open` over the claim forward: ready, board XVC slot ours; "in 22 s" is README only (no evidence file: the files hold no timing) | 2 | `b2_e2_xvc_open.txt`, `b2_e3_xvc_status.txt` |
+| debug | `debug up` over the claim forward: gdb 127.0.0.1:23344. "With xPack OpenOCD 0.12" is README only (no evidence file: the file names no OpenOCD path), and no GDB session was recorded after it | 2 | `b2_dbg_up2.txt` |
+
+## Not recorded
+
+Stated above, or claimed for these sessions elsewhere, with no evidence file behind them:
+
+- Board 2's MCC temperature, 37.4 °C (D4a): from the session notes. `d4_mcc_temp.json` holds
+  board 1's 35.0 °C only.
+- The daytime `program greybox` restore on board 2, 38.7 s: no file. The night run's restores
+  are recorded (38.7–45.5 s, `../2026-09-hil-auto/0928-b2-run2/iter-*/z2_restore.json`).
+- E2's "ready in 22 s": the files hold no timing.
+- `debug up` "with xPack OpenOCD 0.12": the file names no OpenOCD path, and no GDB session
+  after `debug up` is recorded.
+- The Live display's first-light times (board 1 11:34, board 2 14:36): the files carry no time.
+- An earlier HM board session, 24 Sep (HIL_B0.md's Thursday test: open the board, a
+  heartbeated lease, three consoles): no evidence file in this repo or the platform repo.
+  HIL_B0.md's `$EV` folder, `docs/evidence/2026-09-hil`, was never committed.
 
 ## Failed, then fixed on main
 
