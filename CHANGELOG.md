@@ -175,6 +175,10 @@ owners.
   card, the program is refused before anything is written, with the reason. The
   report says "Kept on the card (slot B)" or why not; a card write that fails never
   fails the program.
+- Keep on the card now waits as long as `card commit` does (KEEP-BUDGET): up to 900 s on a
+  card that stops taking bytes (was 30 s) and the card's time for the pair's write and
+  read-back (nanosoc: ~318 s; was 300 s). A card the board itself gave up on (its own 30 s
+  idle limit) says so.
 - DUT consoles (UART0, UART1, SWO) over Ethernet; the MCC and the FPGA UARTs over the
   Debug USB.
 - Each console can also be a terminal device for `screen`
