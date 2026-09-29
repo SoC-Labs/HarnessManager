@@ -33,6 +33,7 @@ from harness_manager.core.errors import (
     HeldError,
     RefusedError,
     UnavailableError,
+    UnreachableError,
     UsageError,
 )
 from harness_manager.core.events import Event
@@ -290,6 +291,10 @@ class WeekPlanSim:
         self.restart_hold = threading.Event()
         self.restart_hold.set()
         self.requests: Any = None            # t14_lease_requests.LeaseRequestSim (the mock sets it)
+        # LEASE-FRESH: how GET /lease answers when the hub read fails, per board: "" (it does
+        # not fail), "stale" (the service carries the last known state: fewer than 3 failed
+        # reads in a row) or "unknown" (it escalated: 502 UNREACHABLE)
+        self.lease_reads: dict[str, str] = {}
 
     # -- helpers -------------------------------------------------------------------------
 
@@ -333,6 +338,18 @@ class WeekPlanSim:
         with self._lock:
             self.hubs[bid] = {"host": host, "target": target, "tunnel": tunnel,
                               "detail": detail, "lease": record, "restarts": 0}
+
+    def lease_read_fails(self, bid: str, mode: str = "stale") -> None:
+        """LEASE-FRESH: the hub's sshd resets the next reads of ``bid``'s lease. ``stale``: the
+        lease service still answers with the state it last knew (our acquire's), marked
+        ``stale``; ``unknown``: it has given up (502, as after 3 failed reads)."""
+        with self._lock:
+            self.lease_reads[bid] = mode
+
+    def _confirmed(self, hub: dict[str, Any], source: str) -> str:
+        at = _iso(time.time())
+        hub["confirmed"] = {"confirmed_at": at, "source": source}
+        return at
 
     def tunnel_view(self, bid: str) -> dict[str, Any] | None:
         """``GET .../tunnel`` as L1 built it (``Reach.status()`` plus the hub's shares)."""
@@ -682,6 +699,15 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         more = sim.requests.view(bid) if sim.requests is not None else {}
         if hub is None:
             return ok(lease=None, hub=None, **more)
+        reads = sim.lease_reads.get(bid, "")
+        reset = (f"lease show on {hub['host']} failed: lease show failed: ssh: connect to host "
+                 f"{hub['host']} port 22: Connection reset by peer")
+        if reads == "unknown":
+            raise UnreachableError(f"the hub did not answer 3 lease reads in a row; the last: {reset}")
+        if reads == "stale":
+            more = {**more, "stale": {**hub.get("confirmed", {"confirmed_at": _iso(time.time()),
+                                                                "source": "show"}),
+                                      "misses": 1, "error": reset}}
         lease = dict(hub["lease"]) if hub["lease"] else None
         if lease is not None:
             lease["board"] = hub_board(hub)                     # LEASE-BOARD: as GET /lease has it
@@ -730,9 +756,12 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
             hub["lease"] = {"target": hub["target"], "holder": me, "user": getpass.getuser(),
                             "expires_at": _iso(time.time() + ttl), "mine": True, "here": True}
             progress("held", 1, 1)
+            # LEASE-FRESH: the acquire's answer IS the state (source, here, at: additive)
+            at = sim._confirmed(hub, "acquire")
             sim.publish("lease.state", bid, {"target": hub["target"], "board": hub_board(hub),
                                              "state": "held", "holder": me,
-                                             "expires_at": hub["lease"]["expires_at"]})
+                                             "expires_at": hub["lease"]["expires_at"],
+                                             "source": "acquire", "here": True, "at": at})
             return {"lease": {**{k: hub["lease"][k] for k in ("target", "holder", "expires_at")},
                               "board": hub_board(hub)}}
 
@@ -757,9 +786,11 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
         released = {k: hub["lease"][k] for k in ("target", "holder", "expires_at")}
         released["board"] = hub_board(hub)
         hub["lease"] = None
+        at = sim._confirmed(hub, "release")
         sim.publish("lease.state", bid, {"target": released["target"], "board": released["board"],
                                          "state": "released", "holder": released["holder"],
-                                         "expires_at": ""})
+                                         "expires_at": "", "source": "release", "here": False,
+                                         "at": at})
         return ok(released={**released, "mine": True})
 
     # -- power_api (as built by L4: daemon/power_api.py) ----------------------------------
