@@ -460,6 +460,11 @@ owners.
   connect, or in the key exchange) is tried again, up to 3 attempts. A read-only command is
   also tried again when the connection dropped mid-way. Acquire, release and other writes
   that may have run are never repeated.
+- The service shares one ssh connection per hub (OpenSSH multiplexing) instead of opening a
+  new one, with a new key exchange, for every hub call: with one board open that was about
+  8 connections a minute, which is what made the lab hub reset connections. Off on Windows
+  and with `HARNESS_MANAGER_HUB_SSH_MUX=0`; the service closes its own shared connections
+  when it stops (docs/HUB_MODE.md "SSH to the hub").
 
 ### The app's pages
 - A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"
