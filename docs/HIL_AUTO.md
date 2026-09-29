@@ -148,8 +148,10 @@ steps below are the command-line fallback. It has **no user microSD** and no JTA
    .venv/bin/python -m tools.hil run --plan linux-nocard --board $B --evidence $RUN \
      --writes safe --repeat 30 --interval 1800 --until 08:30
    ```
-   One iteration is about 5 min (two verified swaps of ~75 s each, the reads, the MCC read),
-   then 30 min of rest: about 25 iterations by 08:20. `--until` ends it; `--repeat 30` is the cap.
+   One iteration is about 5 min (two verified swaps, `nanosoc_ila` in 67–80 s and the greybox
+   restore in 40–47 s, the reads, the MCC read), then 30 min of rest: the night of 28–29 Sep ran
+   20 iterations, 21:13 to 08:20 (`docs/evidence/2026-09-hil-auto/0928-b2-run2/`). `--until`
+   ends it; `--repeat 30` is the cap.
 4. **08:30:** read `$RUN/REPORT.md`, then `harness-manager lease release 192.168.11.101`.
 
 After a warm reset board 2 sits in stage0 rescue until the Linux lead pushes an image; its claim

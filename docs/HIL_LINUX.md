@@ -379,10 +379,13 @@ harness-manager program $B nanosoc --keep-on-card | tee $EV/d2_program_keep.txt
 It prints the preflight, then `card: …; the design will be kept on it`, then asks
 `program nanosoc (0x01000001) into <board> and keep it on the card?`. Answer `y`.
 
-**Expect** (about 4 min: the swap takes seconds, then the card phase ~3.5 min, the ~2.5 MB
-pair written at ~70 KB/s, ~35 s, then read back at ~14 KB/s, ~3 min; the `card` progress sits
-still during the read-back). Harness Manager waits up to 900 s on a card that stops taking
-bytes and ~318 s for the commit's reply (KEEP-BUDGET, as `card commit`):
+**Expect** (about 5 min). The push and swap take about 75 s: `nanosoc` took 73.2 s through
+the hub on board 2 (`docs/evidence/2026-09-28-hil/b2_dbg_program_nanosoc.txt`). Then the card
+phase, ~3.5 min: an estimate from the card's rates, not yet measured on silicon (H1 on board 1,
+Thu 1 Oct, measures it). The ~2.5 MB pair is written at ~70 KB/s, ~35 s, then read back at
+~14 KB/s, ~3 min; the `card` progress sits still during the read-back. Harness Manager waits
+up to 900 s on a card that stops taking bytes and ~318 s for the commit's reply (KEEP-BUDGET,
+as `card commit`):
 - **Preflight:** every item `ok`, except `static_usercode matches … (not a pass)`, which is
   unchecked (it needs JTAG).
 - **Result:** `programmed nanosoc (0x01000001) into <board> in N s via tcp; verified`. It is TCP

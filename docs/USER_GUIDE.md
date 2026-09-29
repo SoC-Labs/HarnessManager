@@ -632,8 +632,20 @@ harness-manager restore 192.168.10.101            # back to the baseline
 | `--keep-on-card` | also keep it on the board's user microSD, so the board boots into it next time |
 | `--overlay-dir DIR` | look for overlays here first (repeatable) |
 
-A design is chosen by name (`nanosoc`) or by rm_id (`0x01000001`). A push takes seconds
-over Ethernet.
+A design is chosen by name (`nanosoc`) or by rm_id (`0x01000001`).
+
+**How long a push takes** depends on the harness. Measured on the lab boards:
+
+| Harness | Design (pair size) | Measured | Evidence |
+|---|---|---|---|
+| Linux | `greybox` (1.4 MB) | 38.7–45.5 s (20 restores) | `docs/evidence/2026-09-hil-auto/0928-b2-run2/iter-*/z2_restore.json` |
+| Linux | `nanosoc` (2.5 MB) | 73.2 s (once) | `docs/evidence/2026-09-28-hil/b2_dbg_program_nanosoc.txt` |
+| Linux | `nanosoc_ila` (2.8 MB) | 67.2–79.1 s (21 pushes) | `…/0928-b2-run2/iter-*/e1_program_ila.json`, `docs/evidence/2026-09-28-hil/b2_e1_program_ila.txt` |
+| bare metal | 13 designs | 3–7 s each | the platform repo's `docs/evidence/2026-09-w3/sweep_20260924.txt` (tag v1.1.0) |
+
+The Linux times are HM's own `seconds`, through the hub (board 2, 28–29 Sep). Timed from
+the command's start, the longest was 80.6 s. The bare-metal times are pyverify's windowed
+push, run on the hub (24 Sep). HM's own push on bare metal has no recorded time.
 
 **Keep on the card.** **Needs:** the Linux harness and a card in the USER microSD slot.
 Tick **Keep on the card** in Program, or add `--keep-on-card`. After the load is confirmed,
