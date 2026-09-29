@@ -5,6 +5,11 @@
 > the checks that stay manual and why. `harness_manager/checks/plans.py` (`tools/hil/plans.py`) holds this runbook as data: a test fails
 > when a check row here has no plan entry, or the other way round.
 
+> **No evidence from this runbook is committed.** Its `$EV` folder, `docs/evidence/2026-09-hil`,
+> was never committed, so the Thu 24 Sep session (open the board, a heartbeated lease, three
+> consoles) has no evidence file in this repo or the platform repo. HM's first recorded board
+> sessions are 27–28 Sep, on the Linux harness: [the 28-hil README](evidence/2026-09-28-hil/README.md).
+
 > **Friday 25 Sep, 09:00–10:00 is Harness Manager's slot** (bare-metal `0x72BB0A36`; agreed with the
 > Linux lead at 03:05). B1 v4 starts at 10:00 on its own lease, so this slot must end with the board
 > restored to greybox and the lease released by **09:55**.

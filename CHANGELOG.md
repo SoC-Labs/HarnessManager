@@ -570,7 +570,14 @@ owners.
   the board's row. §F stays manual in every plan.
 
 ### Known limits
-- The board has a fixed address, 192.168.10.101, and there is no network discovery yet.
+- Finding boards (was: "The board has a fixed address, 192.168.10.101, and there is no
+  network discovery yet"; superseded by BOARD-ID and FIX-PACK-2). The lab has two boards, both
+  through the hub: `mps3_01_pl` at 192.168.10.101 and `mps3_02_pl` at 192.168.11.101. Each
+  board's label, IP and MAC are read and set with `board identity` (BOARD-ID; the board needs
+  image rc2_v7/v7n), and two boards that share one are flagged. "Find boards on the network"
+  needs an Ethernet link on the board's own network and an identify answer (UDP 6899). It
+  never works through a hub or an SSH tunnel, so a lab board is added by its address or from
+  the hub (`hub targets --add`).
 - Windows and macOS run the unit tests and the installer in CI; they have not been used
   with a real board. `install.ps1` does not yet use `constraints.txt`, the wheelhouse or
   a Start-menu entry.

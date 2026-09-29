@@ -317,8 +317,9 @@ host = "mapstone-dev.ecs.soton.ac.uk"
 disagrees with its `[lock]` entry, the top-level key is used and a warning says so.
 `updates.auto` is a ceiling: a user may still choose a lower mode. Never put a token in
 this file, because every user can read it. A `token` in a `[hubs.*]` table is dropped with
-a warning. Only the update keys take effect today. The other locks, defaults and hubs take
-effect as the Settings lanes wire each setting to them.
+a warning. The update keys, the machine hubs, and the locks and defaults of every setting
+Harness Manager reads take effect; a few rows are stored but not read yet (USER_GUIDE.md
+section 11, "What takes effect").
 
 ## Without the installer
 

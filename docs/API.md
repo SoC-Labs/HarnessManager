@@ -399,7 +399,7 @@ docs/design/HARNESS_DISTRIBUTION.md is the design (§5, §8.2); david's decision
 
 ### Settings (SET-API, `settings_api.py`)
 
-docs/design/SETTINGS.md is the design (§4, §5, §8, §12.8); david's decisions S1-S4 (2026-09-25) apply. One settings model (`harness_manager.settings`: SET-CORE's schema, resolver, files and secret store); these routes, `harness-manager config` and the Settings menu (SET-UI, after the cutover) are views of it. The routes and the CLI run the same code (`settings/ops.py`), so `config --json` prints these shapes. Additive: `GET`/`PUT /update/settings` are unchanged.
+docs/design/SETTINGS.md is the design (§4, §5, §8, §12.8); david's decisions S1-S4 (2026-09-25) apply. One settings model (`harness_manager.settings`: SET-CORE's schema, resolver, files and secret store); these routes, `harness-manager config` and the Settings dialog (SET-UI) are views of it. The routes and the CLI run the same code (`settings/ops.py`), so `config --json` prints these shapes. Additive: `GET`/`PUT /update/settings` are unchanged.
 
 | Method and path | Returns |
 |---|---|
