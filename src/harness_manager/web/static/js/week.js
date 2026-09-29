@@ -326,9 +326,9 @@ onBoardEvent((ev) => {
         lease: held ? { ...(w.hub.lease || {}), target: d.target || "", board: d.board || w.hub.board || null,
           holder: d.holder || "", expires_at: d.expires_at || "", mine: true, here: true } : null };
       changed();
+      if (d.source !== "heartbeat") refreshState(bid);    // the Background line moves with it
     }
     scheduleHub(bid);
-    refreshState(bid);           // the Background line: the gate's answer moved with the lease
   }
   if (ev.topic === "power.cycle") {
     if (d.phase === "off") w.powerPhases = [];
