@@ -233,7 +233,7 @@ In the window, open the board `192.168.10.101`. **Expect** on the Overview:
 
 ---
 
-## A. The Linux harness through Harness Manager (7 min, read only)
+## A. The Linux harness through Harness Manager (8 min; A6 blinks the panel)
 
 **A1. Identity**
 ```bash
@@ -284,6 +284,39 @@ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["panel"]["touch"
 - `ok` True before and after;
 - write `bus_lost` and `recoveries` before and after into `a4_finger.txt`. A rise in `bus_lost` is
   the touch-bus wedge: tell the Linux lead.
+
+**A5. Board identity** (net-protocol v0.16, read only): which label, IP and MAC the board says it
+has, and where each came from.
+```bash
+harness-manager --json board identity $B | tee $EV/a5_identity.json
+```
+**Expect** exit 0 and:
+- `identity.status` one of `ok`, `unset`, `differs`, `clash`, `unknown`: **recorded, never a
+  failure**. A label, IP or MAC unlike the hub's is a finding for the morning report;
+- on an image with the `identity` feature (rc2_v7n; `identity.reported.via` `identity`): the
+  label and its source, `identity.reported.source.label` `override` (the board's /persist
+  setting), `stage0` (the bake) or `default`. With no bake the label is the image default
+  `MPS3` (host name `mps3`), status `unset`;
+- on an older image (v6n; no `identity` feature, `via` `identify` or `stats`): no source, and the
+  image's hard-coded board 1 identity (`MPS3-01`, `192.168.10.101`, `02:00:00:4D:50:53`) on
+  every board, so `differs` or `clash` against the hub. Also recorded, not failed.
+
+The runner's pass line names the image that answered (A1's `harness_version` and `features`),
+so a v7n answer and a v6n one tell apart in `REPORT.md`. FAIL only on another exit or no JSON.
+
+**A6. Locate** (`--writes safe`; nothing persistent, no claim lock): a 5 s backlight blink with an
+`IDENTIFY: <user>@<host> via Harness Manager` banner on the panel.
+```bash
+harness-manager --json identify $B --seconds 5 | tee $EV/a6_locate.json
+```
+**Expect** either:
+- exit 0, `seconds` 5 and `until_ms` (the board's countdown) on an image with the `locate` feature
+  (rc2_v7n): the panel blinks for 5 s; or
+- exit 12, `error.name` `UNAVAILABLE`, the message naming `harness feature 'locate'` on an image
+  without it (v6n): PASS, "not on this image" (the bare-metal plan's R7b is the same refusal).
+
+Exit 12 with another reason, or any other exit, is a FAIL. With `--writes none` the runner skips
+A6 (it is `safe`, not `read`).
 
 ---
 

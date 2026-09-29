@@ -142,7 +142,8 @@ def test_the_nocard_plan_on_a_card_less_board_sends_no_card_slot_or_reset_verb(t
     rc = run(tmp_path / "ev", hm, "--writes", "safe", "--repeat", "2", "--interval", "60",
              plan="linux-nocard")
     assert rc == EXIT_PASS
-    assert [verb_of(a) for a in hm.calls if is_write(a)] == ["mcc temp", "program", "restore"] * 2
+    assert [verb_of(a) for a in hm.calls if is_write(a)] == ["identify", "mcc temp", "program",
+                                                             "restore"] * 2
     assert not {"card status", "slot push", "slot commit", "slot rollback", "card clear",
                 "mcc reboot", "mcc cmd", "reset", "power", "sd"} & set(hm.verbs())
     v = verdicts(tmp_path / "ev" / "iter-001")
@@ -160,7 +161,7 @@ def test_twin_writes_safe_sends_the_swaps_and_the_mcc_read_and_nothing_else(tmp_
     hm = ScriptedHm()
     run(tmp_path / "ev", hm, "--writes", "safe")
     writes = [verb_of(a) for a in hm.calls if is_write(a)]
-    assert writes == ["mcc temp", "program", "restore"]
+    assert writes == ["identify", "mcc temp", "program", "restore"]
     assert not any("--keep-on-card" in a or "--force" in a for a in hm.calls)
 
 
@@ -604,3 +605,194 @@ def test_twin_a_hub_that_never_answers_the_lease_check_stops(tmp_path):
     s = summary(tmp_path / "ev")
     assert "did not answer the lease check 3 times" in s["stopped"]["reason"]
     assert s["stopped"]["check"] == "A1" and "info" not in hm.verbs()
+
+
+# --- HIL-IDLOC: A5 board identity and A6 locate on both images -----------------------------------
+
+
+def _ev(ev: Path, name: str) -> dict:
+    return json.loads((ev / name).read_text())
+
+
+def _result(ev: Path, cid: str) -> dict:
+    return next(c for c in summary(ev)["checks"] if c["id"] == cid)
+
+
+@pytest.mark.parametrize("plan,card", [("linux-nocard", False), ("linux-netboot", True)])
+def test_v7n_passes_a5_and_a6_with_its_identity_and_a_blink(tmp_path, plan, card):
+    hm = ScriptedHm(image="v7n", card=card)
+    rc = run(tmp_path / "ev", hm, "--writes", "safe", plan=plan)
+    assert rc == EXIT_PASS, summary(tmp_path / "ev")["first_failure"]
+    v = verdicts(tmp_path / "ev")
+    assert v["A5"] == v["A6"] == "pass" and v["A4"] == "manual"
+    assert hm.blinks == [5]                                    # one 5 s blink, nothing else
+    a5 = _result(tmp_path / "ev", "A5")
+    # the pass line names the image and what it said: the v0.16 default, no bake
+    assert a5["reason"].startswith("unset: label MPS3 (source default), hostname mps3")
+    assert "via identity; image 2.0.0, features usd,stats,identity,locate" in a5["reason"]
+    ev = _ev(tmp_path / "ev", "a5_identity.json")
+    assert ev["command"] == f"harness-manager --json board identity {B}"
+    assert ev["stdout_json"]["identity"]["reported"]["source"]["label"] == "default"
+    a6 = _result(tmp_path / "ev", "A6")
+    assert a6["exit"] == 0 and a6["reason"].startswith("blinked 5 s")
+    assert _ev(tmp_path / "ev", "a6_locate.json")["argv"] == ["identify", B, "--seconds", "5"]
+    assert "A5" in (tmp_path / "ev" / "REPORT.md").read_text()
+
+
+@pytest.mark.parametrize("plan,card", [("linux-nocard", False), ("linux-netboot", True)])
+def test_twin_v6n_passes_a5_as_recorded_and_a6_as_not_on_this_image(tmp_path, plan, card):
+    hm = ScriptedHm(image="v6n", card=card)
+    rc = run(tmp_path / "ev", hm, "--writes", "safe", plan=plan)
+    assert rc == EXIT_PASS, summary(tmp_path / "ev")["first_failure"]
+    assert hm.blinks == []                                    # refused: nothing blinked
+    a5 = _result(tmp_path / "ev", "A5")
+    # board 1's hard-coded identity on this board: a clash, recorded, never a failure
+    assert a5["verdict"] == "pass" and a5["reason"].startswith("clash: label - (source -)")
+    assert "via identify; image 1.9.0, features usd,stats" in a5["reason"]
+    a6 = _result(tmp_path / "ev", "A6")
+    assert (a6["verdict"], a6["exit"]) == ("pass", 12)
+    assert a6["reason"] == "not on this image: refused, exit 12 (harness feature 'locate')"
+
+
+def test_twin_locate_refused_for_another_reason_fails_a6(tmp_path):
+    hm = ScriptedHm(image="v6n")
+    hm.add("identify", lambda _hm, _a: (12, {"ok": False, "error": {
+        "code": 12, "name": "UNAVAILABLE", "hint": "",
+        "message": "Identify is unavailable: this board has no front panel HM can read"}}))
+    rc = run(tmp_path / "ev", hm, "--writes", "safe")
+    a6 = _result(tmp_path / "ev", "A6")
+    assert rc == EXIT_FAIL and a6["verdict"] == "fail"
+    assert "harness feature 'locate'" in a6["reason"] and "no front panel" in a6["reason"]
+    assert verdicts(tmp_path / "ev")["Z2"] == "pass"          # a fail is not a stop
+
+
+@pytest.mark.parametrize("rc_body", [
+    (1, {"ok": False, "error": {"code": 1, "name": "ACTION_FAILED", "hint": "",
+                                "message": "locate failed: the board said invalid"}}),
+    (0, {"ok": True, "board_id": B, "seconds": 0, "until_ms": 0}),     # did not blink
+])
+def test_twin_locate_any_other_answer_fails_a6_even_on_v7n(tmp_path, rc_body):
+    hm = ScriptedHm(image="v7n")
+    hm.add("identify", lambda _hm, _a: rc_body)
+    rc = run(tmp_path / "ev", hm, "--writes", "safe")
+    assert rc == EXIT_FAIL and _result(tmp_path / "ev", "A6")["verdict"] == "fail"
+
+
+@pytest.mark.parametrize("answer", [
+    lambda _hm, _a: (1, "Traceback (most recent call last):\n  ...\nKeyError: 'label'\n"),
+    lambda _hm, _a: (0, "not json\n"),
+    lambda _hm, _a: (0, {"ok": True, "board_id": B}),              # no identity block
+    lambda _hm, _a: (0, {"ok": True, "board_id": B, "identity": {"status": "fine"}}),
+])
+def test_twin_the_identity_verb_crashing_or_malformed_fails_a5(tmp_path, answer):
+    hm = ScriptedHm(image="v7n")
+    hm.add("board identity", answer)
+    rc = run(tmp_path / "ev", hm)
+    a5 = _result(tmp_path / "ev", "A5")
+    assert rc == EXIT_FAIL and a5["verdict"] == "fail", a5
+
+
+def test_twin_a_v7n_source_outside_the_contract_fails_a5(tmp_path):
+    hm = ScriptedHm(image="v7n")
+    real = hm.v_board_identity
+
+    def odd(_hm, argv):
+        rc, body = real(argv)
+        body["identity"]["reported"]["source"]["label"] = "guess"
+        return rc, body
+    hm.add("board identity", odd)
+    rc = run(tmp_path / "ev", hm)
+    assert rc == EXIT_FAIL and "source" in _result(tmp_path / "ev", "A5")["reason"]
+
+
+@pytest.mark.parametrize("image", ["v7n", "v6n"])
+def test_writes_none_skips_a6_and_still_reads_a5(tmp_path, image):
+    hm = ScriptedHm(image=image, card=False)
+    rc = run(tmp_path / "ev", hm, plan="linux-nocard")
+    assert rc == EXIT_PASS
+    v = verdicts(tmp_path / "ev")
+    assert v["A5"] == "pass" and v["A6"] == "skipped"
+    assert _result(tmp_path / "ev", "A6")["reason"].startswith("--writes none")
+    assert "identify" not in hm.verbs() and hm.blinks == []
+    assert "board identity" in hm.verbs()
+
+
+# --- the Harness Manager commit that ran (0.4's evidence, summary.json, REPORT.md) -------------
+
+
+def _git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                           *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _checkout(root: Path) -> Path:
+    pkg = root / "src" / "harness_manager"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("x = 1\n")
+    _git(root, "init", "-q")
+    _git(root, "add", "src")
+    _git(root, "commit", "-q", "-m", "one")
+    return pkg
+
+
+def test_hm_commit_is_the_checkouts_full_sha_and_its_dirty_flag(tmp_path):
+    from harness_manager.checks.run import commit_words, hm_commit
+
+    pkg = _checkout(tmp_path / "repo")
+    sha = _git(tmp_path / "repo", "rev-parse", "HEAD")
+    assert hm_commit(pkg) == {"sha": sha, "dirty": False} and len(sha) == 40
+    (pkg / "new.py").write_text("")                        # untracked: not a change to HEAD
+    assert hm_commit(pkg)["dirty"] is False
+    (pkg / "__init__.py").write_text("x = 2\n")            # a tracked file changed
+    assert hm_commit(pkg) == {"sha": sha, "dirty": True}
+    assert commit_words(hm_commit(pkg)) == f"HM {sha[:12]}-dirty"
+    assert commit_words({"sha": sha, "dirty": False}) == f"HM {sha[:12]}"
+
+
+@pytest.mark.parametrize("where", ["no repo", "another repo"])
+def test_twin_hm_commit_outside_its_own_checkout_is_unknown_never_an_error(tmp_path, where):
+    from harness_manager.checks.run import commit_words, hm_commit
+
+    if where == "no repo":
+        pkg = tmp_path / "site-packages" / "harness_manager"
+        pkg.mkdir(parents=True)
+        (tmp_path / "site-packages" / ".git").write_text("gitdir: /nonexistent\n")  # not a repo
+    else:                                                  # a wheel in a venv inside a repo
+        _checkout(tmp_path / "repo")
+        pkg = tmp_path / "repo" / ".venv" / "lib" / "site-packages" / "harness_manager"
+        pkg.mkdir(parents=True)
+    assert hm_commit(pkg) == {"sha": "unknown", "dirty": None}
+    assert commit_words(hm_commit(pkg)) == "HM unknown"
+
+
+def test_the_runner_records_this_checkouts_commit_in_0_4_and_the_reports(tmp_path):
+    from harness_manager.checks.run import hm_commit
+
+    want = hm_commit()                                    # this worktree (a git checkout)
+    assert want["sha"] != "unknown" and len(want["sha"]) == 40
+    rc = run(tmp_path / "ev", ScriptedHm())
+    assert rc == EXIT_PASS
+    ev = _ev(tmp_path / "ev", "0_hm_version.json")
+    assert ev["stdout_json"]["version"] == "0.0.0-test"    # additive: the CLI's answer is kept
+    assert ev["hm_commit"] == want
+    assert summary(tmp_path / "ev")["hm_commit"] == want
+    head = (tmp_path / "ev" / "REPORT.md").read_text().splitlines()[:5]
+    assert any(line.startswith(f"- HM {want['sha'][:12]}") for line in head), head
+    # and only 0.4's evidence carries it
+    assert "hm_commit" not in _ev(tmp_path / "ev", "a1_info.json")
+
+
+def test_twin_not_a_git_checkout_records_unknown_and_still_passes(tmp_path, monkeypatch):
+    from harness_manager.checks import run as R
+
+    monkeypatch.setattr(R, "hm_commit", lambda *_a, **_k: {"sha": "unknown", "dirty": None})
+    rc = run(tmp_path / "ev", ScriptedHm(), "--repeat", "2", "--interval", "60")
+    assert rc == EXIT_PASS
+    for it in ("iter-001", "iter-002"):
+        ev = _ev(tmp_path / "ev" / it, "0_hm_version.json")
+        assert ev["verdict"] == "pass" and ev["hm_commit"] == {"sha": "unknown", "dirty": None}
+        assert "- HM unknown" in (tmp_path / "ev" / it / "REPORT.md").read_text()
+    assert "- HM unknown" in (tmp_path / "ev" / "REPORT.md").read_text()      # the aggregate
+    assert summary(tmp_path / "ev")["hm_commit"]["sha"] == "unknown"

@@ -124,11 +124,11 @@ def test_every_b0_runbook_row_has_a_plan_entry_and_vice_versa():
 
 def test_twin_a_new_runbook_check_with_an_expect_fails_the_drift_test():
     text = LINUX_MD.read_text(encoding="utf-8").replace(
-        "**A4. The finger test**", "**A5. A new check**\n**Expect:** something.\n\n"
+        "**A4. The finger test**", "**A9. A new check**\n**Expect:** something.\n\n"
                                    "**A4. The finger test**")
     ids, sections = linux_checks(text)
     assert drift(ids, sections, P.build("linux-netboot")) == [
-        "A5 has an Expect in docs/HIL_LINUX.md but no entry in plan linux-netboot"]
+        "A9 has an Expect in docs/HIL_LINUX.md but no entry in plan linux-netboot"]
 
 
 def test_twin_a_check_the_runbook_dropped_fails_the_drift_test():
@@ -191,9 +191,10 @@ def test_the_nocard_c1_expects_the_no_card_answer():
 def test_the_nocard_plan_resets_nothing_and_keeps_the_swaps_and_the_mcc_read():
     plan = P.build("linux-nocard")
     runs = {c.id: c for c in plan.checks() if not c.skip and c.tier != P.MANUAL}
-    assert {i for i, c in runs.items() if c.tier == P.SAFE} == {"D4a", "E1", "Z2"}
+    assert {i for i, c in runs.items() if c.tier == P.SAFE} == {"A6", "D4a", "E1", "Z2"}
     assert [c.argv for c in runs.values() if c.tier == P.SAFE] == [
-        ("mcc", "{B}", "temp"), ("program", "{B}", "nanosoc_ila", "--yes"), ("restore", "{B}")]
+        ("identify", "{B}", "--seconds", "5"), ("mcc", "{B}", "temp"),
+        ("program", "{B}", "nanosoc_ila", "--yes"), ("restore", "{B}")]
     reboots = {c.id for c in plan.checks()
                if c.tier == P.MANUAL and "REBOOT" in (c.why + c.title).upper()}
     assert reboots == {"D4", "F6", "G3"}
@@ -290,6 +291,11 @@ def test_expect_static_overrides_the_runbooks_static():
     ["board", "ssh", B, "-c", "reboot"], ["board", "ssh", B],
     ["harness", "install", B, "1.1.0"], ["power", "cycle", B], ["reset", B],
     ["info", "10.0.0.9"],                             # another board
+    # HIL-IDLOC: A5 is the identity READ; every change flag is a write the runner never sends
+    ["board", "identity", B, "--from-hub"], ["board", "identity", B, "--label", "MPS3-02"],
+    ["board", "identity", B, "--clear"], ["board", "identity", B, "--unset", "label"],
+    ["board", "identity", B, "--from-hub", "--consent", "MPS3-02"],
+    ["identify", B, "--seconds", "30"], ["identify", B, "--seconds", "0"],
 ])
 def test_the_allow_list_refuses_every_write_in_both_modes(argv):
     assert not allowed(argv, B, "safe")
@@ -302,3 +308,38 @@ def test_twin_the_swaps_and_the_mcc_read_pass_only_with_writes_safe():
         assert not allowed(argv, B, "none")
     assert all("{RM}" not in s for s in READ_ARGV)
     assert {s[0] for s in SAFE_ARGV} == {"program", "restore", "mcc", "identify"}
+
+
+# --- HIL-IDLOC: A5 board identity, A6 locate ------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["linux", "linux-netboot", "linux-nocard"])
+def test_a5_and_a6_follow_a3_in_every_linux_plan(name):
+    plan = P.build(name)
+    sa = next(s for s in plan.sections if s.id == "A")
+    assert [c.id for c in sa.checks] == ["A1", "A2", "A3", "A4", "A5", "A6"]
+    a5, a6 = sa.checks[4], sa.checks[5]
+    assert (a5.tier, a5.argv, a5.skip) == (P.READ, ("board", "identity", "{B}"), "")
+    assert (a6.tier, a6.argv, a6.skip) == (P.SAFE, ("identify", "{B}", "--seconds", "5"), "")
+    # A5 fails on no verdict only: the label and its source are optional (a v6n has neither)
+    assert [e.path for e in a5.expects if not e.optional] == ["identity.status"]
+    assert a5.exits == (0,) and "{fact:features}" in a5.note
+    # A6: a blink (exit 0) or the refusal naming the feature (exit 12), nothing else
+    assert a6.exits == (0, 12)
+    refusal = a6.answers[0]
+    assert refusal.note.startswith("not on this image") and any(
+        e.op == "contains" and e.value == "harness feature 'locate'" for e in refusal.expects)
+    # A1 records what A5's pass line names: the image that answered
+    a1 = sa.checks[0]
+    assert a1.record["features"] == "identity.features"
+    assert a1.record["harness_version"] == "identity.harness_version"
+
+
+def test_twin_bare_metal_has_no_a5_or_a6():
+    assert not {"A5", "A6"} & {c.id for c in P.build("bare-metal").checks()}
+
+
+def test_a5_is_a_read_and_a6_needs_writes_safe():
+    assert allowed(["board", "identity", B], B, "none")
+    assert allowed(["identify", B, "--seconds", "5"], B, "safe")
+    assert not allowed(["identify", B, "--seconds", "5"], B, "none")
