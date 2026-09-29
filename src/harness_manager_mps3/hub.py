@@ -74,13 +74,16 @@ import re
 import secrets
 import socket
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
+from harness_manager.core import lifecycle
 from harness_manager.core.errors import (
     AbsentError,
     HarnessError,
@@ -433,24 +436,55 @@ def default_runner_factory(host: str, group: str | None, jump: str = "") -> Call
 # connections (MaxStartups: it starts dropping unauthenticated connections past 10 at once).
 # SERIAL-6900 counted 2-6 long-lived plus 3-12 one-shot ssh connections per hub, none reused
 # (ControlPath=none everywhere). So each one-shot hub command (every ``fpgahub ...`` through
-# ``ssh HUB``) takes one of ``HUB_ONE_SHOT_MAX`` slots per hub, and one reset in the
-# identification exchange, before authentication (nothing ran on the hub), is tried once
-# more after a short, jittered pause. A command that started on the hub is never re-run.
-# ControlMaster is deliberately NOT used (it needs a hub-side check first).
+# ``ssh HUB``) takes one of ``HUB_ONE_SHOT_MAX`` slots per hub. ControlMaster is deliberately
+# NOT used (it needs a hub-side check first).
+#
+# LEASE-FRESH (2026-09-29): the same throttle also answers "ssh: connect to host HUB port 22:
+# Connection reset by peer" (the TCP connect itself reset), which was not retried at all, and
+# one retry was not always enough. The retry rule, in ``retry_kind`` (this one place, so every
+# hub command through ssh follows it):
+#
+# - turned away BEFORE the remote command could start (the connect reset, or a reset or close
+#   in ssh's identification exchange, before authentication): nothing ran on the hub, so ANY
+#   command, even ``lease acquire``/``release``, may be tried again;
+# - dropped AFTER the connection was up ("client_loop: send disconnect: Connection reset by
+#   peer", "Connection to HUB closed by remote host"): the command may have run, so only a
+#   READ-ONLY command (``hub_read_only``: ``lease show``, ``whoami``, the note list ...) is
+#   tried again; ``lease acquire``, ``release``, ``heartbeat``, ``cancel``, a revoke or a note
+#   write never is (its answer is then the failure);
+# - anything else (refused, no route, the command's own exit status, output on stdout): never.
+#
+# At most ``HUB_ATTEMPTS`` (3) attempts, after ``HUB_KEX_RETRY_S`` then 3x that (0.5 s, 1.5 s),
+# each plus up to ``HUB_KEX_RETRY_JITTER_S`` so the commands sshd turned away together do not
+# return together: at most three connections for one read, never a storm.
 
 #: One-shot ssh commands in flight to one hub, at most (sshd's MaxStartups starts at 10).
 HUB_ONE_SHOT_MAX = 4
 #: How long a command waits for a slot when it gives no timeout of its own.
 HUB_SLOT_WAIT_S = 60.0
-#: The pause before the one retry of a reset in the identification exchange, plus up to
-#: ``HUB_KEX_RETRY_JITTER_S`` so the commands sshd turned away together do not return together.
+#: Attempts at one hub command that ssh turned away (the first one included).
+HUB_ATTEMPTS = 3
+#: The pause before the first retry (the second waits three times as long), plus up to
+#: ``HUB_KEX_RETRY_JITTER_S``.
 HUB_KEX_RETRY_S = 0.5
 HUB_KEX_RETRY_JITTER_S = 0.5
-#: ssh's words for a connection dropped in the identification exchange (before the key
-#: exchange, so before authentication): nothing ran on the hub.
+#: ssh's words for a connection turned away before the remote command could start: a reset or
+#: close in the identification exchange (before the key exchange, so before authentication),
+#: or the TCP connect itself reset. Nothing ran on the hub.
 _PRE_AUTH_RESET = re.compile(
-    r"(?:kex|ssh)_exchange_identification:.*(?:reset by peer|closed by remote host)",
+    r"(?:kex|ssh)_exchange_identification:.*(?:reset by peer|closed by remote host)"
+    r"|ssh: connect to host \S+ port \d+: connection reset by peer",
     re.IGNORECASE)
+#: ssh's words for a connection dropped after it was up: the command may have run.
+_DROPPED = re.compile(r"connection reset by peer|closed by remote host|broken pipe",
+                      re.IGNORECASE)
+#: Hub commands that only read (``fpgahub`` verb words), safe to run twice.
+_READ_ONLY_FPGAHUB = (("lease", "show"), ("whoami",), ("board", "list"),
+                      ("board", "lease", "show"), ("target", "show"),
+                      ("target", "lease-history"), ("share", "list"))
+#: The note script's read ops (``NOTE_SCRIPT``: ``list`` prunes notes past their age, which
+#: is the same whether it runs once or twice).
+_READ_ONLY_NOTE_OPS = ("list", "get")
 
 _hub_slots: dict[str, threading.BoundedSemaphore] = {}
 _hub_slots_mu = threading.Lock()
@@ -488,12 +522,288 @@ def forget_hub_slots() -> None:
 
 
 def reset_before_auth(result: Any) -> bool:
-    """``result`` (a pyverify ``RunResult``) is ssh's own failure in the identification
-    exchange: exit 255, nothing on stdout, and ssh's words for a reset or a close there.
-    Nothing ran on the hub, so it may be tried again."""
+    """``result`` (a pyverify ``RunResult``) is ssh's own failure before the remote command
+    could start: exit 255, nothing on stdout, and ssh's words for a reset of the connect or a
+    reset or close in the identification exchange. Nothing ran on the hub, so it may be tried
+    again, whatever the command."""
     if getattr(result, "returncode", None) != 255 or (getattr(result, "stdout", "") or "").strip():
         return False
     return bool(_PRE_AUTH_RESET.search(getattr(result, "stderr", "") or ""))
+
+
+def dropped_after_start(result: Any) -> bool:
+    """``result`` is ssh's exit 255 for a connection dropped after it was up (a reset or a
+    close by the hub), not before: the command may have run."""
+    if getattr(result, "returncode", None) != 255 or reset_before_auth(result):
+        return False
+    return bool(_DROPPED.search(getattr(result, "stderr", "") or ""))
+
+
+def hub_read_only(argv: Sequence[str]) -> bool:
+    """``argv`` only reads the hub (``fpgahub lease show``, ``whoami``, a note ``list``/``get``
+    ...): running it twice changes nothing. Everything else (acquire, release, heartbeat,
+    cancel, revoke, share start, a note put/del) is not."""
+    words = [str(w) for w in argv]
+    if words[:1] == ["fpgahub"]:
+        rest = [w for w in words[1:] if not w.startswith("-")]
+        return any(rest[:len(verb)] == list(verb) for verb in _READ_ONLY_FPGAHUB)
+    if words[:2] == ["sh", "-c"] and len(words) > 4 and words[3] == "hm-lease":
+        return words[4] in _READ_ONLY_NOTE_OPS
+    return False
+
+
+def retry_kind(argv: Sequence[str], result: Any) -> str:
+    """Why ``result`` of ``argv`` may be tried again: ``"before"`` (turned away before the
+    command started: any command), ``"read"`` (dropped after it was up, and ``argv`` only
+    reads), or ``""`` (never: the command may have run, or it was not ssh turning it away)."""
+    if reset_before_auth(result):
+        return "before"
+    if dropped_after_start(result) and hub_read_only(argv):
+        return "read"
+    return ""
+
+
+def retry_delay_s(attempt: int) -> float:
+    """The pause before retry ``attempt`` (1, 2): ``HUB_KEX_RETRY_S`` then three times it, each
+    plus up to ``HUB_KEX_RETRY_JITTER_S``."""
+    return HUB_KEX_RETRY_S * (3 ** (attempt - 1)) + random.uniform(0.0, HUB_KEX_RETRY_JITTER_S)
+
+
+# --- SSH-MUX (2026-09-29): one ssh connection per hub, reused ------------------------------------
+#
+# The hub logged 549 accepted ssh connections in an hour from the machine running the service
+# (~9/min, a full key exchange each): that rate is what trips its sshd MaxStartups. So the
+# service's one-shot hub commands share ONE connection per hub (OpenSSH multiplexing):
+# ``ControlMaster=auto``, ``ControlPath=<dir>/%C``, ``ControlPersist=10m``, put in ONE place,
+# the capped runner's ``build`` (every lease verb, the notes, whoami, board list, target show,
+# the MCC tools on the hub, the claim's hub commands). The rules:
+#
+# - only in the long-lived service (``core.lifecycle.is_service``): a CLI verb has no stop to
+#   close a master at, so it keeps one connection per call (pyverify's ``ControlPath=none``);
+# - ``<dir>`` is Harness Manager's own: ``$XDG_RUNTIME_DIR/harness-manager/ssh/<pid>``, else
+#   ``/tmp/harness-manager-$USER/ssh/<pid>`` (mode 0700, owned by us; never ~/.ssh), one per
+#   service process, so the masters in it are the ones this process started;
+# - off on Windows (OpenSSH for Windows has no ControlMaster), with
+#   ``HARNESS_MANAGER_HUB_SSH_MUX=0``, or ``HUB_SSH_MUX = False``; off, with one log line,
+#   when the socket path would pass the Unix limit (ssh binds ``<path>.<16 chars>`` first)
+#   or the directory is not ours;
+# - when the service stops (``lifecycle.run_stop_hooks``), ``ssh -O exit`` closes each master
+#   in its own directory, and nothing else (another service's directory is never touched);
+# - the SSH tunnels (``tunnel.py``, ``ssh -N -L``) keep ``ControlPath=none``/``ControlMaster=
+#   no``: a long-lived forward never becomes, or rides on, the master whose life the one-shot
+#   commands share; the settings' "Test hub" keeps its own fresh connection (it tests one);
+# - the retry rule above still holds: a stale socket is unlinked by ssh (``auto``), a master
+#   that dies mid-command is "dropped after start" (read-only commands are tried again);
+# - a hub whose sshd refuses a session on the shared connection (``mux_refused``: nothing ran)
+#   gets the command again at once on a connection of its own, and no reuse for the rest of
+#   the process (said once).
+
+#: The constant switch (``HARNESS_MANAGER_HUB_SSH_MUX=0`` is the environment's).
+HUB_SSH_MUX = True
+HUB_SSH_MUX_ENV = "HARNESS_MANAGER_HUB_SSH_MUX"
+#: Where the per-process directories go instead of the default (tests; a short path).
+HUB_SSH_MUX_DIR_ENV = "HARNESS_MANAGER_HUB_SSH_MUX_DIR"
+#: How long a master outlives its last command.
+HUB_SSH_PERSIST = "10m"
+#: ``sun_path``: 104 bytes on macOS and the BSDs, 108 on Linux; the smaller holds everywhere.
+SOCKET_PATH_MAX = 104
+#: ``%C`` is a 40-character hash; ssh first binds ``<ControlPath>.<16 random chars>``.
+_MUX_NAME = re.compile(r"^[0-9a-f]{40}$")
+_MUX_BIND_EXTRA = 1 + 40 + 1 + 16
+_mux_mu = threading.Lock()
+_mux_dir: Path | None = None
+_mux_warned: set[str] = set()
+_mux_off_hubs: set[str] = set()            # hubs that refused a session on a shared connection
+#: ssh's words when a session on a shared connection could not be opened (nothing ran).
+_MUX_REFUSED = re.compile(r"session open refused by peer|mux_client_hello_exchange|"
+                          r"control ?socket connect|mux_client_request_session: session "
+                          r"request failed", re.IGNORECASE)
+
+
+def mux_refused(result: Any) -> bool:
+    """``result`` is ssh's exit 255 because the shared connection would not take the session:
+    the command never started, so it may run again on a connection of its own."""
+    if getattr(result, "returncode", None) != 255 or (getattr(result, "stdout", "") or "").strip():
+        return False
+    return bool(_MUX_REFUSED.search(getattr(result, "stderr", "") or ""))
+
+
+def mux_off_for(hub: str, why: str) -> None:
+    """No shared connection to ``hub`` for the rest of this process."""
+    with _mux_mu:
+        _mux_off_hubs.add(hub)
+    _warn_mux_once(f"{hub} refused a session on the shared connection ({why[:160]}); "
+                   "each command there gets its own connection")
+
+
+def _user() -> str:
+    for var in ("USER", "LOGNAME", "USERNAME"):
+        if os.environ.get(var):
+            return re.sub(r"[^A-Za-z0-9._-]", "_", os.environ[var])
+    return str(os.getuid()) if hasattr(os, "getuid") else "user"
+
+
+def mux_off_reason() -> str:
+    """"" when the service's hub ssh commands share one connection per hub, else why not."""
+    if not HUB_SSH_MUX:
+        return "switched off (hub.HUB_SSH_MUX)"
+    env = os.environ.get(HUB_SSH_MUX_ENV, "").strip().lower()
+    if env in ("0", "off", "no", "false"):
+        return f"switched off ({HUB_SSH_MUX_ENV}={env})"
+    if sys.platform == "win32":
+        return "OpenSSH for Windows has no ControlMaster"
+    if not lifecycle.is_service():
+        return "not the service: a CLI verb keeps one connection per call"
+    return ""
+
+
+def mux_base() -> Path:
+    """The parent of the per-process directories (see the section above)."""
+    given = os.environ.get(HUB_SSH_MUX_DIR_ENV, "").strip()
+    if given:
+        return Path(given)
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if runtime and os.path.isdir(runtime):
+        return Path(runtime) / "harness-manager" / "ssh"
+    return Path("/tmp") / f"harness-manager-{_user()}" / "ssh"
+
+
+def _warn_mux_once(why: str) -> None:
+    with _mux_mu:
+        if why in _mux_warned:
+            return
+        _mux_warned.add(why)
+    log.warning("hub ssh connections are not reused: %s", why)
+
+
+def _ours(path: Path) -> bool:
+    """``path`` is a directory this user owns and nobody else can enter (0700)."""
+    st = path.stat()
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        return False
+    return (st.st_mode & 0o077) == 0
+
+
+def _sweep_dead(base: Path) -> None:
+    """Remove the empty per-process directories of services that are gone."""
+    with contextlib.suppress(OSError):
+        for d in base.iterdir():
+            if not d.name.isdigit() or int(d.name) == os.getpid():
+                continue
+            try:
+                os.kill(int(d.name), 0)
+                continue                               # still running: its own
+            except ProcessLookupError:
+                pass
+            except OSError:
+                continue
+            with contextlib.suppress(OSError):
+                d.rmdir()                              # only when empty: a live master stays
+
+
+def mux_dir() -> Path | None:
+    """This process's socket directory, made (0700) the first time; None when multiplexing
+    cannot be used here (said once in the log)."""
+    global _mux_dir
+    with _mux_mu:
+        if _mux_dir is not None and _mux_dir.is_dir():
+            return _mux_dir
+    base = mux_base()
+    d = base / str(os.getpid())
+    need = len(os.fsencode(str(d))) + _MUX_BIND_EXTRA
+    if need >= SOCKET_PATH_MAX:
+        _warn_mux_once(f"the socket path under {d} would be {need} bytes, over the "
+                       f"{SOCKET_PATH_MAX - 1}-byte Unix limit (set {HUB_SSH_MUX_DIR_ENV} to a "
+                       "shorter directory)")
+        return None
+    try:
+        made = [p for p in (base.parent, base, d) if not p.exists()]
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for p in made:
+            with contextlib.suppress(OSError):
+                os.chmod(p, 0o700)
+        if not (_ours(base) and _ours(d)):
+            _warn_mux_once(f"{base} is not a private directory of this user")
+            return None
+    except OSError as exc:
+        _warn_mux_once(f"cannot make {d}: {exc}")
+        return None
+    _sweep_dead(base)
+    with _mux_mu:
+        _mux_dir = d
+    lifecycle.on_service_stop("hub ssh masters", close_own_masters)
+    return d
+
+
+def mux_options() -> list[str]:
+    """The ssh options that reuse one connection per hub, or [] (``mux_off_reason``)."""
+    if mux_off_reason():
+        return []
+    d = mux_dir()
+    if d is None:
+        return []
+    return ["-o", "ControlMaster=auto", "-o", f"ControlPath={d}/%C",
+            "-o", f"ControlPersist={HUB_SSH_PERSIST}"]
+
+
+def with_mux(cmd: Sequence[str], hub: str = "") -> list[str]:
+    """``cmd`` (an ``ssh …`` argv) with pyverify's ``ControlPath=none`` replaced by
+    ``mux_options()`` (ssh takes the FIRST value of an option, so it is replaced, not
+    followed); ``cmd`` unchanged when multiplexing is off (or ``hub`` refused it)."""
+    cmd = list(cmd)
+    with _mux_mu:
+        refused = bool(hub) and hub in _mux_off_hubs
+    opts = [] if refused else mux_options()
+    if not opts or not cmd or os.path.basename(cmd[0]) not in ("ssh", "ssh.exe"):
+        return cmd
+    out: list[str] = [cmd[0]]
+    placed = False
+    i = 1
+    while i < len(cmd):
+        if cmd[i] == "-o" and i + 1 < len(cmd) and \
+                cmd[i + 1].split("=", 1)[0].strip().lower() in ("controlpath", "controlmaster",
+                                                               "controlpersist"):
+            if not placed:
+                out += opts
+                placed = True
+            i += 2
+            continue
+        out.append(cmd[i])
+        i += 1
+    if not placed:
+        out[1:1] = opts
+    return out
+
+
+def close_own_masters(*, ssh: str = "ssh", timeout_s: float = 5.0) -> list[str]:
+    """The service stops: ``ssh -O exit`` each master in THIS process's socket directory (the
+    masters it started), then remove the directory. Another process's directory, or a master
+    anywhere else, is never touched. Returns the socket names it asked to exit."""
+    global _mux_dir
+    with _mux_mu:
+        d, _mux_dir = _mux_dir, None
+    if d is None or not d.is_dir():
+        return []
+    closed: list[str] = []
+    for sock in sorted(d.iterdir()):
+        if not _MUX_NAME.match(sock.name):
+            continue
+        try:
+            subprocess.run([ssh, "-o", f"ControlPath={sock}", "-o", "BatchMode=yes", "-O", "exit",
+                            "harness-manager-hub"], capture_output=True, text=True,
+                           timeout=timeout_s, check=False, **no_window())
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log.warning("closing the hub ssh master %s: %s", sock.name, exc)
+        closed.append(sock.name)
+    for leftover in d.iterdir() if d.is_dir() else ():
+        if _MUX_NAME.match(leftover.name):
+            with contextlib.suppress(OSError):
+                leftover.unlink()                  # a master that did not answer: its socket
+    with contextlib.suppress(OSError):
+        d.rmdir()
+    if closed:
+        log.info("closed %d hub ssh master(s) this service started", len(closed))
+    return closed
 
 
 _CAPPED: dict[type, type] = {}
@@ -519,11 +829,15 @@ def _capped(cls: type) -> type:
 
         __hash__ = None  # type: ignore[assignment]
 
+        def build(self, argv: Sequence[str]) -> list[str]:
+            return with_mux(super().build(argv), str(self.hub))   # SSH-MUX: the one place
+
         def __call__(self, argv: Sequence[str], timeout: float | None = None) -> Any:
             hub = str(self.hub)
             sem = hub_slots(hub)
             stats = HUB_RUN_STATS.setdefault(hub, HubRunStats())
-            for attempt in (0, 1):
+            attempts = max(1, int(HUB_ATTEMPTS))
+            for attempt in range(1, attempts + 1):
                 self._take_slot(sem, stats, hub, timeout)
                 try:
                     result = super().__call__(argv, timeout=timeout)
@@ -531,13 +845,20 @@ def _capped(cls: type) -> type:
                     with _hub_slots_mu:
                         stats.in_flight -= 1
                     sem.release()
-                if attempt or not reset_before_auth(result):
+                if mux_refused(result) and hub not in _mux_off_hubs:
+                    mux_off_for(hub, (result.stderr or "").strip())    # SSH-MUX: nothing ran
+                    kind = "before"
+                else:
+                    kind = retry_kind(argv, result)        # LEASE-FRESH: the rule above
+                if attempt >= attempts or not kind:
                     return result
                 with _hub_slots_mu:
                     stats.retried += 1
-                log.info("hub %s reset the ssh connection before authentication (%s): "
-                         "trying once more", hub, (result.stderr or "").strip()[:160])
-                time.sleep(HUB_KEX_RETRY_S + random.uniform(0.0, HUB_KEX_RETRY_JITTER_S))
+                log.info("hub %s turned the ssh connection away %s (%s): attempt %d of %d",
+                         hub, "before the command started" if kind == "before"
+                         else "during a read-only command", (result.stderr or "").strip()[:160],
+                         attempt + 1, attempts)
+                time.sleep(retry_delay_s(attempt))
             return result                                         # not reached
 
         @staticmethod

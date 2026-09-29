@@ -446,6 +446,26 @@ owners.
   how to give it the directory instead, and `mps3.overlay_dirs` now applies to a board that
   is already open, at its next listing.
 
+### The lease right after you take it (LEASE-FRESH)
+- Acquire, Release and the heartbeat's own answers are the lease state: the rail card, the
+  header chip, the Background line and the Overview show "Yours" (or "no lease") at once,
+  without waiting for the next `lease show`.
+- One hub read that fails (the lab hub's sshd resets connections under load) no longer turns
+  a lease you just took into "Lease unknown" / "Needs attention". The page keeps the state
+  it last knew, with a quiet note ("last confirmed 21:06:31; the hub didn't answer the last
+  read, reading again"). It says "lease unknown" only after 3 failed reads in a row, once
+  the known expiry has passed, or when nothing is known. A board last seen free is still
+  treated as unknown for background reads.
+- A hub command that ssh turned away before it started ("Connection reset by peer" on
+  connect, or in the key exchange) is tried again, up to 3 attempts. A read-only command is
+  also tried again when the connection dropped mid-way. Acquire, release and other writes
+  that may have run are never repeated.
+- The service shares one ssh connection per hub (OpenSSH multiplexing) instead of opening a
+  new one, with a new key exchange, for every hub call: with one board open that was about
+  8 connections a minute, which is what made the lab hub reset connections. Off on Windows
+  and with `HARNESS_MANAGER_HUB_SSH_MUX=0`; the service closes its own shared connections
+  when it stops (docs/HUB_MODE.md "SSH to the hub").
+
 ### The app's pages
 - A simpler Overview: four tiles (Design, Consoles, Debug, Board), a "Needs attention"
   line only when something is wrong, and the details folded away.

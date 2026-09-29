@@ -141,8 +141,20 @@ def _holder_of(lease: dict[str, Any]) -> str:
 def lease_elsewhere(view: dict[str, Any] | None) -> str:
     """BACKGROUND contact: the holder when the lease is held and THIS Harness Manager does
     not hold it (``lease.here`` false: no token here), else "". Another session of the same
-    principal is elsewhere (REVIEW-W5 1). A free lease is ""."""
-    lease = (view or {}).get("lease") or None
+    principal is elsewhere (REVIEW-W5 1). A free lease is "".
+
+    LEASE-FRESH: a view the lease service carried over a failed hub read (``stale``) is the
+    last known state. A lease held HERE stands (it is ours until its expiry, the service
+    carries it only for a few minutes and fewer than three failed reads, and the heartbeat
+    keeps running). A board last seen FREE raises instead (quiet: ``lease_unknown``): it may
+    have been taken since, and not known is not free."""
+    view = view or {}
+    lease = view.get("lease") or None
+    stale = view.get("stale") or None
+    if stale and not lease:
+        raise UnreachableError(f"the hub did not answer the last lease read; the board was last "
+                               f"seen free at {stale.get('confirmed_at') or '?'}: "
+                               f"{stale.get('error') or 'no answer'}")
     if not lease or lease.get("here"):
         return ""
     return _holder_of(lease)

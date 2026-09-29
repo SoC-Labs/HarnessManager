@@ -32,7 +32,7 @@ import { html, useLayoutEffect, useRef, useState } from "./lib.js";
 import { changed, log, onBoardEvent, S, timed } from "./store.js";
 import {
   durationText, epochOf, leaseLeft, leaseName, leaseTargetNote, leaseWhere, leaseWho, loadHub,
-  onHubLoaded, scheduleHub, week,
+  onHubLoaded, scheduleHub, staleNote, week,
 } from "./week.js";
 import { Chip, Icon, Reason, ResultBlock, Spinner } from "./ui.js";
 
@@ -734,7 +734,7 @@ export function LeaseBadge({ bid, prefix = "rail" }) {
   if (who.state === "here") {
     const left = leaseLeft(who.lease);
     chip = html`<${Chip} level="ok" icon="user" cls="lease-badge" testid=${`${prefix}-lease-badge`}
-      title=${`Your hub lease: ${leaseWhere(who)}, held by this Harness Manager${left !== null ? `, ${durationText(left)} left` : ""}`}>Yours<//>`;
+      title=${`Your hub lease: ${leaseWhere(who)}, held by this Harness Manager${left !== null ? `, ${durationText(left)} left` : ""}${who.stale ? `; ${staleNote(who.stale)}` : ""}`}>Yours<//>`;
   } else if (who.state === "free") {
     chip = html`<${Chip} icon="lock-open" cls="lease-badge" testid=${`${prefix}-lease-badge`}
       title=${`Free: nobody holds ${leaseWhere(who)}`}>Free<//>`;

@@ -6,6 +6,8 @@
 // hides it or says so calmly: nothing errors because a lane has not landed.
 
 import { call, routeMissing, toApiError } from "./api.js";
+import { clock } from "./format.js";
+import { refreshState } from "./viewer.js";
 import {
   bgOpts, boardState, changed, heldBack, log, onBoardEvent, onBoardOpened, onJobEnded, S,
   scheduleRefresh, timed,
@@ -145,7 +147,10 @@ export async function loadHub(bid) {
       // T8 hub mode over REST: no request messages or Keep; force only with an admin token.
       // Absent keys (a daemon or hub mode without them) mean both work.
       notesOk: d.notes_supported !== false, notesReason: d.notes_reason || "",
-      revokeOk: d.can_revoke !== false, revokeReason: d.revoke_reason || "" };
+      revokeOk: d.can_revoke !== false, revokeReason: d.revoke_reason || "",
+      // LEASE-FRESH: the hub did not answer the last read and the service answered with the
+      // state it last knew ({confirmed_at, source, misses, error}); absent on a fresh read
+      stale: (lease && d.stale) || null };
   }
   w.hubAt = Date.now();
   for (const fn of hubHooks) {
@@ -182,6 +187,7 @@ export function leaseWho(bid) {
     board: (lease && lease.board) || hub.board || "",
     requested: !!req || kind === "lease_request", position: (req && req.position) || null,
     queued: !!req || !!w.leaseQueued || kind === "lease" || kind === "lease_request",
+    stale: hub.stale || null,                        // LEASE-FRESH: last known, reading again
   };
   if (!lease && hub.leaseError) return { ...base, state: "unknown", holder: "", error: hub.leaseError };
   if (!lease) return { ...base, state: "free", holder: "" };
@@ -189,6 +195,14 @@ export function leaseWho(bid) {
   if (here) return { ...base, state: "here", holder: lease.holder || "", queued: false, requested: false };
   if (lease.mine) return { ...base, state: "elsewhere", holder: lease.holder || "your hub name" };
   return { ...base, state: "other", holder: lease.holder || "someone else" };
+}
+
+// LEASE-FRESH: the quiet note for a lease the service carried over a failed hub read ("" for a
+// fresh one): when the hub last confirmed it, and that the page reads it again.
+export function staleNote(stale) {
+  if (!stale) return "";
+  const at = epochOf(stale.confirmed_at);
+  return `last confirmed ${at === null ? "a moment ago" : clock(at)}; the hub didn't answer the last read, reading again`;
 }
 
 // LEASE-BOARD: what lease text calls the leased thing: fpgahub's physical board (mps3_01)
@@ -302,6 +316,17 @@ onBoardEvent((ev) => {
     w.leaseQueued = d.state === "queued";
     if (d.state === "lost" || d.state === "expired") {
       log("warning", "lease", `the lease on ${d.board || d.target || bid} was ${d.state}`, bid);
+    }
+    // LEASE-FRESH: our own acquire, heartbeat or release answered: that IS the lease state.
+    // Show it now (the rail, the header, the Overview); the read that follows agrees, or the
+    // service carries this state over a hub hiccup.
+    if (d.source && !d.warning && w.hub && (d.state === "held" || d.state === "released")) {
+      const held = d.state === "held" && d.here;
+      w.hub = { ...w.hub, leaseError: "", stale: null,
+        lease: held ? { ...(w.hub.lease || {}), target: d.target || "", board: d.board || w.hub.board || null,
+          holder: d.holder || "", expires_at: d.expires_at || "", mine: true, here: true } : null };
+      changed();
+      if (d.source !== "heartbeat") refreshState(bid);    // the Background line moves with it
     }
     scheduleHub(bid);
   }

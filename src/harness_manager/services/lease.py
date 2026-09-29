@@ -70,6 +70,32 @@ requests ``principal``, ``lease_status``, ``board_id``, ``lease_revoke``,
 ``put_answer``, ``get_answer``). A client without the request verbs (L1's) still
 works for show/acquire/heartbeat/release; the request verbs then say what is missing.
 
+**Fresh after an action, calm through a hiccup (LEASE-FRESH, 2026-09-29).** Our own acquire,
+release and heartbeat answers ARE the lease state: ``lease.state`` carries it at once, with
+``source`` (``acquire``, ``release``, ``heartbeat``), ``here`` and ``at`` (additive), and the
+service keeps it as the last known state, without waiting for a ``lease show``. A read of the
+hub that fails (the hub's sshd resets connections under load) then does not undo it:
+``view()`` answers with the last known state, marked ``stale`` (``{confirmed_at, source,
+misses, error}``, additive: absent on a fresh view), while ALL of these hold:
+
+- a state is known here (our acquire, release, heartbeat, or a read that worked);
+- it was confirmed at most ``KNOWN_MAX_AGE_S`` (5 min) ago;
+- fewer than ``READ_MISSES_MAX`` (3) reads in a row failed (reads that fail within
+  ``READ_RETRY_S`` of the last counted one are the same hiccup: one miss; at the page's 30 s
+  cadence the third miss comes ~60-90 s after the last good read);
+- a held lease has not passed its expiry (a lease held here with no readable expiry counts
+  from when it was confirmed plus its TTL), and one held HERE still has its token stored here;
+- our release is not carried as "not leased" when others were queued (the hub hands the
+  board to the head of the queue at once).
+
+Otherwise the read's error is raised as before ("lease unknown": not known is not free).
+While a carried state stands the hub is not asked again sooner than ``READ_RETRY_S``.
+Background contact (``services/quiet.py``) goes ahead on a carried lease held HERE (it is
+ours until its expiry, and the heartbeat keeps running), but a carried FREE state is treated
+as unknown (quiet): a board last seen free may have been taken meanwhile. The explicit gates
+that need a fresh confirmation (a harness install, XVC, the SSH claim: ``forget`` then
+``view``) refuse a carried state as they refuse an unanswered read (``not_fresh``).
+
 Events: ``lease.state {target, state: held|queued|released|expired|lost, holder,
 expires_at}``, and ``lease.wanted``, ``lease.answered``, ``lease.force_available``,
 ``lease.taken``, ``lease.left`` (docs/LEASE_REQUESTS.md), and ``lease.tapped {id, by, at}``
@@ -136,6 +162,14 @@ VIEW_TTL_S = 10.0
 #: FIX-PACK-1 5b: how long a caller waits for the same hub read another caller has in
 #: flight before it asks the hub itself (the read's own ssh timeout ends it well before).
 SHARED_READ_WAIT_S = 120.0
+#: LEASE-FRESH: a known lease state carries a failed hub read only if it was confirmed (our
+#: acquire, release or heartbeat, or a read that worked) at most this long ago ...
+KNOWN_MAX_AGE_S = 300.0
+#: ... and only for fewer than this many failed reads in a row: the third says "unknown".
+READ_MISSES_MAX = 3
+#: Reads that fail within this long of the last counted miss are the same hiccup (one miss),
+#: and while a known state carries the hub is not asked again sooner (its load stays low).
+READ_RETRY_S = 20.0
 #: The holder has this long to answer a request before the requester may force it.
 REQUEST_WINDOW_S = 120
 #: What a board without a hub cannot do (view()'s notes_reason and revoke_reason).
@@ -652,6 +686,25 @@ class _Incoming:
     announced: dict[str, float] = field(default_factory=dict)   # id -> its created_at (wall)
 
 
+@dataclass
+class _Known:
+    """LEASE-FRESH: the last lease state this process knows for a hub, and where it came from."""
+
+    at: float                 # monotonic: when it was confirmed
+    wall: float               # epoch seconds, the same moment (what people read)
+    source: str               # acquire | release | heartbeat | show
+    view: dict[str, Any]      # the view as it stood then (``lease`` None: nobody held it)
+
+
+@dataclass
+class _Misses:
+    """LEASE-FRESH: the failed hub reads in a row for one hub (a read that works clears it)."""
+
+    count: int = 0
+    last: float = float("-inf")    # monotonic: the last counted miss
+    error: str = ""
+
+
 class _Flight:
     """One hub read in flight (``LeaseService._cached``): its answer or error, once done."""
 
@@ -735,6 +788,9 @@ class LeaseService:
         # lease). A forget (a hub event, a note) keeps it; only a lease that ended here, or a
         # view that says otherwise, drops it. ``held_here`` reads it.
         self._here: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+        # LEASE-FRESH: the last known state per hub, and the failed reads since it
+        self._known: dict[tuple[str, str], _Known] = {}
+        self._misses: dict[tuple[str, str], _Misses] = {}
 
     # -- hub reads (cached) -----------------------------------------------------------------------
 
@@ -879,8 +935,14 @@ class LeaseService:
         return lease_name(self.board_of(hub, ask=False), hub.target)
 
     def forget(self, hub: Any) -> None:
-        """Drop the cached view for ``hub`` (the hub said something changed; T8)."""
+        """Drop the cached view for ``hub`` (the hub said something changed; T8). LEASE-FRESH:
+        the next view asks the hub even while a failed read is recent (a caller that forgets
+        wants a fresh answer); if that read fails too, it counts as another miss."""
         self._forget(hub)
+        with self._mu:
+            miss = self._misses.get(_hk(hub))
+            if miss is not None:
+                miss.last = float("-inf")
 
     def on_hub_event(self, ev: Event) -> None:
         """``hub.event`` (T8, fpgahub's event stream): a lease change seconds before a poll.
@@ -1024,20 +1086,139 @@ class LeaseService:
             self.bus.publish(Event(topic, board_id, data))
 
     def _emit(self, board_id: str, hub: Any, state: str, holder: str = "", expires_at: str = "",
-              *, warning: str = "") -> None:
+              *, warning: str = "", source: str = "") -> None:
+        """``lease.state``. ``source`` (LEASE-FRESH): the hub's own answer to OUR ``acquire``,
+        ``release`` or ``heartbeat`` says this state: it becomes the last known state at once
+        (``_know``), and the event says so (``source``, ``here``, ``at``, additive), so a page
+        shows it without waiting for a ``lease show``."""
         self._forget(hub)
         if state == "held" and not warning:
             self._confirm_here(hub, holder, expires_at)      # we hold it: the hub said so
         elif state != "held":
             with self._mu:
                 self._here.pop(_hk(hub), None)                # queued, released, expired, lost
+        if state in ("expired", "lost"):
+            with self._mu:
+                self._known.pop(_hk(hub), None)               # ours ended: nothing to carry
         # LEASE-BOARD: ``board`` (additive) is the physical board when this process knows it
         # (never a hub call from an event), else None; ``target`` stays what was leased.
-        data = {"target": hub.target, "board": self.board_of(hub, ask=False) or None,
-                "state": state, "holder": holder, "expires_at": expires_at}
+        data: dict[str, Any] = {"target": hub.target, "board": self.board_of(hub, ask=False) or None,
+                                "state": state, "holder": holder, "expires_at": expires_at}
         if warning:
             data["warning"] = warning             # additive: the state stands, something failed
+        elif source and state in ("held", "released"):
+            known = self._know(hub, source, holder if state == "held" else None, expires_at)
+            data.update(source=source, here=state == "held", at=iso_utc(known.wall))
         self._publish(TOPIC, board_id, data)
+
+    # -- LEASE-FRESH: the last known state ------------------------------------------------------
+
+    def _know(self, hub: Any, source: str, holder: str | None, expires_at: str = "") -> _Known:
+        """Our own action's answer as the last known state: held HERE by ``holder`` until
+        ``expires_at``, or (``holder`` None) not leased. Never a hub call: what is not in the
+        answer (the queue, the notes) is kept from the last view, or empty."""
+        key = _hk(hub)
+        with self._mu:
+            prior = self._known.get(key)
+            last = self._views.get(key)
+        base = copy.deepcopy(prior.view if prior is not None else last[1] if last is not None
+                             else {"lease": None, "hub": hub.host, "board": None, "queue": [],
+                                   "request": None, "incoming": [], "taken": None,
+                                   "notes_supported": self._notes_supported(hub)[0],
+                                   "notes_reason": self._notes_supported(hub)[1],
+                                   "can_revoke": True, "revoke_reason": ""})
+        board = self.board_of(hub, ask=False) or base.get("board") or None
+        base.update(hub=hub.host, board=board, request=None)
+        if holder is None:
+            base.update(lease=None, incoming=[])
+        else:
+            kind, why = holder_kind(here=True, mine=True)
+            base["lease"] = {"target": hub.target, "board": board, "holder": holder,
+                             "expires_at": expires_at, "mine": True, "here": True, "user": "",
+                             "holder_kind": kind, "holder_kind_reason": why}
+            base["queue"] = [e for e in base.get("queue") or [] if not e.get("mine")]
+        known = _Known(self._clock(), self._wall(), source, base)
+        # A release with others queued hands the board to the head of the queue at once:
+        # "not leased" is then not a state to carry (a failed read says unknown instead).
+        handed_on = holder is None and any(not e.get("mine") for e in base.get("queue") or [])
+        with self._mu:
+            if handed_on:
+                self._known.pop(key, None)
+            else:
+                self._known[key] = known
+            self._misses.pop(key, None)            # our own answer is a hub answer
+        return known
+
+    def _read_failed(self, hub: Any, exc: HarnessError) -> tuple[int, _Known | None]:
+        """Count a failed read (one per ``READ_RETRY_S``: one hiccup, many callers)."""
+        key, now = _hk(hub), self._clock()
+        with self._mu:
+            miss = self._misses.setdefault(key, _Misses())
+            if miss.count == 0 or now - miss.last >= READ_RETRY_S:
+                miss.count += 1
+                miss.last = now
+            miss.error = exc.message or type(exc).__name__
+            return miss.count, self._known.get(key)
+
+    def _why_not_carried(self, hub: Any, known: _Known | None, misses: int) -> str:
+        """"" when ``known`` may stand in for a failed read, else why not (plain words)."""
+        if known is None:
+            return "no lease state is known here yet"
+        if misses >= READ_MISSES_MAX:
+            return f"the hub did not answer {misses} lease reads in a row"
+        if self._clock() - known.at > KNOWN_MAX_AGE_S:
+            return (f"the lease was last confirmed at {_hhmmss(known.wall)}, over "
+                    f"{int(KNOWN_MAX_AGE_S // 60)} minutes ago")
+        lease = known.view.get("lease")
+        if not lease:
+            return ""
+        until = parse_utc(lease.get("expires_at"))
+        stored = self.store.get(hub.host, hub.target) if lease.get("here") else None
+        if lease.get("here"):
+            if stored is None:
+                return "this Harness Manager no longer holds the lease's token"
+            if until is None:
+                until = known.wall + stored.ttl_s
+        if until is not None and until <= self._wall():
+            return f"the lease it last knew ended at {_hhmmss(until)}"
+        return ""
+
+    def _stale_view(self, hub: Any, known: _Known, misses: int, error: str) -> dict[str, Any]:
+        out = copy.deepcopy(known.view)
+        taken = self.store.get_taken(hub.host, hub.target)
+        out["taken"] = {**taken, "at": iso_norm(taken.get("at"))} if taken else None
+        out["stale"] = {"confirmed_at": iso_utc(known.wall), "source": known.source,
+                        "misses": misses, "error": error}
+        return out
+
+    def _carried(self, hub: Any, exc: HarnessError | None) -> dict[str, Any] | None:
+        """LEASE-FRESH. ``exc`` None (before a read): the last known state while a failed read
+        is recent (``READ_RETRY_S``: the hub is not asked again sooner), else None (read).
+        ``exc`` (a read failed): the last known state, marked ``stale``, when it may stand in
+        (``_why_not_carried``); otherwise ``exc`` is raised, saying why when a state was known."""
+        key = _hk(hub)
+        if exc is None:
+            with self._mu:
+                miss = self._misses.get(key)
+                known = self._known.get(key)
+                if miss is None or miss.count == 0 or self._clock() - miss.last >= READ_RETRY_S:
+                    return None
+                misses, error = miss.count, miss.error
+            if known is None or self._why_not_carried(hub, known, misses):
+                return None
+            return self._stale_view(hub, known, misses, error)
+        misses, known = self._read_failed(hub, exc)
+        why = self._why_not_carried(hub, known, misses)
+        if why:
+            if known is None:
+                raise exc
+            log.info("the lease on %s is unknown: %s (%s)", hub.target, why, exc.message)
+            raise UnreachableError(f"{why}; the last: {exc.message}", hint=exc.hint) from exc
+        log.info("the hub %s did not answer a lease read (%d in a row): the state confirmed at "
+                 "%s (%s) stands: %s", hub.host, misses, _hhmmss(known.wall), known.source,
+                 exc.message)
+        assert known is not None
+        return self._stale_view(hub, known, misses, exc.message or type(exc).__name__)
 
     def _board_for(self, hub: Any, board_id: str = "") -> str:
         key = _hk(hub)
@@ -1108,7 +1289,15 @@ class LeaseService:
                "notes_supported": notes_ok, "notes_reason": "" if notes_ok else notes_why,
                "can_revoke": can, "revoke_reason": "" if can else why}
         self._drop_at_edges(hub)
-        shown = self._show(hub)
+        carried = self._carried(hub, None)          # LEASE-FRESH: a hiccup is recent
+        if carried is not None:
+            return carried
+        try:
+            shown = self._show(hub)
+        except UnreachableError as exc:             # the hub did not answer (not "free")
+            stale = self._carried(hub, exc)         # the last known state, or it raises
+            assert stale is not None
+            return stale
         stored = self.store.get(hub.host, hub.target)
         principal = self._principal(hub)
         ids = self._my_ids(hub, stored, principal)
@@ -1161,6 +1350,8 @@ class LeaseService:
         out["taken"] = {**taken, "at": iso_norm(taken.get("at"))} if taken else None
         with self._mu:
             self._views[_hk(hub)] = (self._clock(), copy.deepcopy(out))
+            self._known[_hk(hub)] = _Known(self._clock(), self._wall(), "show", copy.deepcopy(out))
+            self._misses.pop(_hk(hub), None)           # LEASE-FRESH: the hub answered
             if here:
                 self._here[_hk(hub)] = (self._clock(), copy.deepcopy(out["lease"]))
             else:
@@ -1388,7 +1579,7 @@ class LeaseService:
                 self._acquiring.pop(key, None)
         record = self._store_grant(hub, holder, lease, expires_at, ttl_s)
         report("held", 1, 1)
-        self._emit(board_id, hub, "held", record.principal or holder, expires_at)
+        self._emit(board_id, hub, "held", record.principal or holder, expires_at, source="acquire")
         if heartbeat:
             self.track(board_id, hub, announced=True)
         return {"lease": record.public(board=self.board_of(hub, ask=False))}
@@ -1428,7 +1619,7 @@ class LeaseService:
         hub.client.lease_release(stored.token, stored.holder)
         self.store.drop(hub.host, hub.target)
         self.untrack(board_id)
-        self._emit(board_id, hub, "released", stored.principal or stored.holder)
+        self._emit(board_id, hub, "released", stored.principal or stored.holder, source="release")
         return {"ok": True,
                 "released": stored.public(mine=True, board=self.board_of(hub, ask=False))}
 
@@ -1649,7 +1840,7 @@ class LeaseService:
         self._delete_our_notes(hub, record.principal)
         if report is not None:
             report("held", 1, 1)
-        self._emit(board_id, hub, "held", record.principal or holder, expires_at)
+        self._emit(board_id, hub, "held", record.principal or holder, expires_at, source="acquire")
         if heartbeat:
             self.track(board_id, hub, announced=True)
         out: dict[str, Any] = {"lease": record.public(board=self.board_of(hub, ask=False))}
@@ -1999,6 +2190,10 @@ class LeaseService:
         if not tr.announced or expires_at != stored.expires_at:
             tr.announced = True
             self._emit(board_id, tr.hub, "held", stored.principal or stored.holder,
+                       expires_at or stored.expires_at, source="heartbeat")
+        else:
+            # LEASE-FRESH: the same expiry, no event; still a fresh answer from the hub
+            self._know(tr.hub, "heartbeat", stored.principal or stored.holder,
                        expires_at or stored.expires_at)
 
     def _holder_now(self, hub: Any) -> str:
@@ -2061,6 +2256,23 @@ class LeaseService:
         t = self._thread
         if t is not None and t is not threading.current_thread():
             t.join(timeout=2.0)
+
+
+def not_fresh(view: Any) -> str:
+    """LEASE-FRESH: why ``view`` is not a fresh hub answer (it is the last known state, carried
+    over a failed read: ``stale``), in plain words; "" when it is fresh. For the gates that
+    must confirm the lease with the hub (an install, XVC, the claim)."""
+    stale = (view or {}).get("stale") if isinstance(view, dict) else None
+    if not stale:
+        return ""
+    at = parse_utc(stale.get("confirmed_at"))
+    when = f"; it was last confirmed at {_hhmmss(at)}" if at is not None else ""
+    return f"the hub did not answer ({stale.get('error') or 'no answer'}){when}"
+
+
+def _hhmmss(t: float) -> str:
+    """Epoch seconds as local ``HH:MM:SS`` (what a person reads in a note)."""
+    return datetime.fromtimestamp(t).strftime("%H:%M:%S")
 
 
 def _local_user() -> str:

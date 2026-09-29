@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 from harness_manager.core.errors import HarnessError, HeldError
+from harness_manager.services.lease import not_fresh
 
 
 def lease_state(session: Any, leases: Any) -> dict[str, Any]:
@@ -44,6 +45,11 @@ def lease_state(session: Any, leases: Any) -> dict[str, Any]:
     except HarnessError as exc:
         out["holder"] = "unknown (the hub did not answer)"
         out["reason"] = f"cannot confirm you hold the lease on {target}: {exc.message}"
+        return out
+    stale = not_fresh(view)                  # LEASE-FRESH: a carried state is not an answer
+    if stale:
+        out["holder"] = "unknown (the hub did not answer)"
+        out["reason"] = f"cannot confirm you hold the lease on {target}: {stale}"
         return out
     lease = (view or {}).get("lease")
     if not lease:

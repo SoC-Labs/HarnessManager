@@ -35,6 +35,7 @@ from harness_manager.core.errors import (
     UnavailableError,
 )
 from harness_manager.core.events import Event, EventBus
+from harness_manager.services.lease import not_fresh
 
 CAPABILITY = "ssh_claim"
 STATE_DIR_ENV = "HARNESS_MANAGER_STATE_DIR"
@@ -154,6 +155,12 @@ class ClaimService:
                             holder="unknown (the hub did not answer)",
                             hint=f"{what} is for the lease holder only; retry when the hub "
                                  "answers (`harness-manager lease show TARGET`)") from exc
+        stale = not_fresh(view)             # LEASE-FRESH: a carried state is not an answer
+        if stale:
+            raise HeldError(f"cannot confirm you hold the lease on {target}: {stale}",
+                            holder="unknown (the hub did not answer)",
+                            hint=f"{what} is for the lease holder only; retry when the hub "
+                                 "answers (`harness-manager lease show TARGET`)")
         lease = (view or {}).get("lease")
         if not lease:
             raise HeldError(f"{what} is for the lease holder only, and nobody holds {target}",

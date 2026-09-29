@@ -351,6 +351,32 @@ The hub SD door (lane HUB-SD) writes a harness base to the config SD through fpg
 - **Which case the lab hub is in:** `docs/HIL_LINUX.md` §F1 (the unit's `ProtectHome`) and §F4 (the read probe) answer it.
 - **Unchanged:** the one `program --method sd --force` request is never retried mid-write. The stage dir only changes where the file waits.
 
+## SSH to the hub: one connection, reused (SSH-MUX, 2026-09-29)
+
+The hub's sshd turns new connections away when too many arrive together (MaxStartups:
+`kex_exchange_identification: read: Connection reset by peer`). A service with one board
+open made about 8 hub calls a minute (the request watch lists notes every 10 s, the page
+reads `lease show` every 30 s), each a new connection with a full key exchange: the hub
+logged 549 in an hour. Now:
+
+- **The service shares one ssh connection per hub** (OpenSSH multiplexing:
+  `ControlMaster=auto`, `ControlPath=<dir>/%C`, `ControlPersist=10m`) for every one-shot
+  hub command: the lease verbs, the request notes, `whoami`, `board list`, `target show`,
+  the MCC tools on the hub, the claim's hub commands. Same calls, one connection.
+- `<dir>` is `$XDG_RUNTIME_DIR/harness-manager/ssh/<pid>`, else
+  `/tmp/harness-manager-$USER/ssh/<pid>` (mode 0700; never `~/.ssh`). When the service
+  stops it closes the masters in its own directory (`ssh -O exit`), and no others.
+- Off: on Windows (no ControlMaster there), with `HARNESS_MANAGER_HUB_SSH_MUX=0` in the
+  service's environment, when the socket path would be too long for a Unix socket, or when
+  the hub refuses a session on the shared connection (the log says why, once).
+- A CLI verb keeps one connection per call. The SSH tunnels (`ssh -N -L`) keep a
+  connection of their own (`ControlPath=none`): a long-lived forward never becomes the
+  shared master. The settings' "Test hub" tests a fresh connection.
+- A hub command ssh turned away BEFORE it started (a reset on connect or in the key
+  exchange) is tried again, up to 3 attempts; a read-only one is also tried again when the
+  connection dropped mid-way. Acquire, release and other writes that may have run are never
+  repeated.
+
 ## Events
 
 While a REST board is open, the daemon (CCR T8-2) holds one `GET /api/v1/events` stream per board. The token rides in the header, never the URL. The `types` filter asks for the lease and share events only. Two topics are published:

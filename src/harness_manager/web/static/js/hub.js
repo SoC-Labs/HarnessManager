@@ -10,7 +10,7 @@ import { clock } from "./format.js";
 import { html } from "./lib.js";
 import { boardState } from "./store.js";
 import {
-  durationText, epochOf, leaseLeft, leaseName, leaseWhere, leaseWho, loadHub, week,
+  durationText, epochOf, leaseLeft, leaseName, leaseWhere, leaseWho, loadHub, staleNote, week,
 } from "./week.js";
 import { ActionRow, Chip, Icon } from "./ui.js";
 
@@ -89,7 +89,7 @@ export function HubFact({ bid }) {
     leaseChip = html`<${Chip} level="warn" icon="lock-open" testid="lease-chip" title=${who.board ? `${hub.host}: nobody holds the lease on ${who.board}` : `${hub.host}: nobody holds this board's lease`}>no lease<//>`;
   } else if (who.state === "here") {
     leaseChip = html`<${Chip} level=${left !== null && left < 300 ? "warn" : "accent"} icon="lock" testid="lease-chip"
-      title=${`${where}, held by ${lease.holder}${lease.user ? ` (user ${lease.user})` : ""}: this Harness Manager holds it and renews it while the board is open`}>
+      title=${`${where}, held by ${lease.holder}${lease.user ? ` (user ${lease.user})` : ""}: this Harness Manager holds it and renews it while the board is open${who.stale ? `; ${staleNote(who.stale)}` : ""}`}>
       lease yours${left !== null ? ` · ${durationText(left)}` : ""}<//>`;
   } else if (who.state === "elsewhere") {
     leaseChip = html`<${Chip} level="held" icon="lock" testid="lease-chip"
@@ -114,6 +114,8 @@ export function HubFact({ bid }) {
       ${t ? html`<${Chip} level=${TUNNEL_LEVEL[t.state] || "unk"} icon=${t.state === "up" ? "cable" : "unplug"} testid="tunnel-chip"
         title=${tunnelTitle(t, hub)}>tunnel ${t.state}<//>` : null}
       ${leaseChip}
+      ${who.stale ? html`<span class="muted small" data-testid="lease-stale"
+        title=${who.stale.error ? `The last read: ${who.stale.error}` : ""}>${staleNote(who.stale)}</span>` : null}
       ${requesting ? html`<span class="muted small" data-testid="lease-requested"><${Icon} name="send" cls="sm" /> requested${req && req.position ? ` · position ${req.position}` : ""}</span>`
         : w.leaseQueued ? html`<span class="muted small" data-testid="lease-queued"><${Icon} name="clock" cls="sm" /> queued</span>` : null}
       ${action}
