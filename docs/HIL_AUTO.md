@@ -272,11 +272,14 @@ $RUN/
   iter-001/           one per iteration (with --repeat > 1; one iteration writes here directly)
     a1_info.json …    one per check, the runbook's file name: the command, exit, seconds,
                       verdict, why, the CLI's JSON, stderr
+    0_hm_version.json also `hm_commit`: {sha (full), dirty} of the checkout that ran
     summary.json  REPORT.md
 ```
 
-**REPORT.md:** the result line (PASS exit 0, FAIL exit 1, STOPPED exit 2 with the reason); the
-end state (partition, claim); the first failure with its runbook id, hint and evidence file;
+**REPORT.md:** the result line (PASS exit 0, FAIL exit 1, STOPPED exit 2 with the reason);
+`HM <sha12>` (`-dirty` when a tracked file differs from that commit; `HM unknown` when the
+runner's `harness_manager` is not `src/harness_manager` of a git checkout: never a failure;
+`summary.json` has it as `hm_commit`); the end state (partition, claim); the first failure with its runbook id, hint and evidence file;
 a pass/fail/stopped/manual/skipped table per runbook section; every check; the manual list.
 With `--repeat`, the top report lists each iteration and which checks failed in which.
 

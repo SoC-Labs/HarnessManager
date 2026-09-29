@@ -216,6 +216,43 @@ class SubprocessInvoker:
                            time.monotonic() - t0)
 
 
+UNKNOWN_COMMIT = "unknown"
+
+
+def hm_commit(pkg_dir: Path | str | None = None) -> dict[str, Any]:
+    """The Harness Manager checkout this runner imports: ``{sha, dirty}`` (the full sha;
+    ``dirty`` True when a tracked file differs from it). ``pkg_dir`` is the
+    ``harness_manager`` package (this module's). A package that is not ``<repo>/src/
+    harness_manager`` in a git checkout (a wheel, git missing, no repo) is
+    ``{sha: "unknown", dirty: None}``: never an error, never another repo's commit."""
+    unknown: dict[str, Any] = {"sha": UNKNOWN_COMMIT, "dirty": None}
+    pkg = Path(pkg_dir) if pkg_dir is not None else Path(__file__).resolve().parents[1]
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(pkg), *args], stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=10.0,
+                              check=True).stdout.strip()
+    try:
+        top = Path(git("rev-parse", "--show-toplevel")).resolve()
+        if (top / "src" / pkg.name).resolve() != pkg.resolve():
+            return unknown                  # a wheel inside some other repo (a venv in it)
+        sha = git("rev-parse", "--verify", "HEAD")
+        dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return unknown
+    if not re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", sha):
+        return unknown
+    return {"sha": sha, "dirty": dirty}
+
+
+def commit_words(commit: dict[str, Any]) -> str:
+    """``HM <sha12>`` (``-dirty`` when a tracked file differs), or ``HM unknown``."""
+    sha = str(commit.get("sha") or UNKNOWN_COMMIT)
+    if sha == UNKNOWN_COMMIT:
+        return f"HM {UNKNOWN_COMMIT}"
+    return f"HM {sha[:12]}" + ("-dirty" if commit.get("dirty") else "")
+
+
 def default_hm() -> list[str]:
     """This checkout's Harness Manager, run by the same Python (the venv's)."""
     return [sys.executable, "-m", "harness_manager.cli.main"]
@@ -451,8 +488,11 @@ class Runner:
                  clock: Callable[[], float] = time.time,
                  sleep: Callable[[float], None] | None = None,
                  log: Callable[[str], None] | None = None,
-                 notify: Callable[[str, dict[str, Any]], None] | None = None) -> None:
+                 notify: Callable[[str, dict[str, Any]], None] | None = None,
+                 commit: dict[str, Any] | None = None) -> None:
         self.plan, self.o, self.invoke_raw = plan, opts, invoker
+        #: the Harness Manager checkout that ran (``hm_commit``): 0.4's evidence and REPORT.md
+        self.commit = commit if commit is not None else hm_commit()
         #: progress for a watcher (the service's run manager): ``notify(kind, data)``, kind
         #: ``iteration``, ``check``, ``result``, ``iteration_end``, ``waiting``, ``end_state``,
         #: ``end``. It never changes the run; an exception in it is logged and ignored.
@@ -760,6 +800,7 @@ class Runner:
                          "stdout_json" if not c.text else "stdout":
                          data if not c.text else out.stdout,
                          **({"stdout_raw": out.stdout} if not c.text and data is None else {}),
+                         **({"hm_commit": self.commit} if c.argv == ("version",) else {}),
                          "stderr": out.stderr[-20000:]})
         self.log(f"{c.id} {res.verdict}" + (f": {res.reason}" if res.reason else ""))
         return res
@@ -923,7 +964,7 @@ class Runner:
         o = self.o
         agg = {"plan": self.plan.name, "runbook": self.plan.runbook, "board": o.board,
                "writes": o.writes, "static": self.plan.static, "started": _iso(started),
-               "ended": _iso(self.clock()), "exit": code,
+               "ended": _iso(self.clock()), "exit": code, "hm_commit": self.commit,
                "refused_start": self.refused_start or None, "end_state": self.end,
                "ended_early": self.ended_early or None,
                "repeat": o.repeat,
@@ -986,7 +1027,7 @@ def _ff(it: Iteration) -> dict[str, Any] | None:
 def iteration_summary(runner: Runner, it: Iteration) -> dict[str, Any]:
     return {"plan": runner.plan.name, "runbook": runner.plan.runbook, "board": runner.o.board,
             "writes": runner.o.writes, "static": runner.plan.static, "iteration": it.n,
-            "started": it.started, "ended": it.ended, "exit": it.exit_code(),
+            "hm_commit": runner.commit, "started": it.started, "ended": it.ended, "exit": it.exit_code(),
             "stopped": it.stopped, "ended_early": it.ended_early or None,
             "sections": it.counts(), "totals": _totals(it), "first_failure": _ff(it),
             "facts": it.facts, "checks": [asdict(r) for r in it.results]}
@@ -1025,6 +1066,7 @@ def iteration_report(runner: Runner, it: Iteration, summary: dict[str, Any], *,
                                                        if runner.end.get("stop") else "")
     lines = [f"# HIL-AUTO: {plan.name} on {o.board}", "",
              f"- {_headline(code, stopped, runner.refused_start if final else '', runner.halt.is_set())}",
+             f"- {commit_words(runner.commit)} (the Harness Manager checkout that ran)",
              f"- plan `{plan.name}` ({plan.runbook}), `--writes {o.writes}`, static "
              f"`{plan.static}`, iteration {it.n} of {o.repeat}",
              f"- ran {it.started} → {it.ended}"]
@@ -1068,6 +1110,7 @@ def aggregate_report(runner: Runner, agg: dict[str, Any]) -> str:
     lines = [f"# HIL-AUTO: {plan.name} on {o.board}, {len(runner.iterations)} of {o.repeat} "
              "iterations", "",
              f"- {_headline(agg['exit'], stopped, runner.refused_start, runner.halt.is_set())}",
+             f"- {commit_words(runner.commit)} (the Harness Manager checkout that ran)",
              f"- plan `{plan.name}` ({plan.runbook}), `--writes {o.writes}`, every "
              f"{o.interval_s:g} s",
              f"- ran {agg['started']} → {agg['ended']}", *_end_lines(runner.end)]

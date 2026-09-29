@@ -715,3 +715,84 @@ def test_writes_none_skips_a6_and_still_reads_a5(tmp_path, image):
     assert _result(tmp_path / "ev", "A6")["reason"].startswith("--writes none")
     assert "identify" not in hm.verbs() and hm.blinks == []
     assert "board identity" in hm.verbs()
+
+
+# --- the Harness Manager commit that ran (0.4's evidence, summary.json, REPORT.md) -------------
+
+
+def _git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                           *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _checkout(root: Path) -> Path:
+    pkg = root / "src" / "harness_manager"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("x = 1\n")
+    _git(root, "init", "-q")
+    _git(root, "add", "src")
+    _git(root, "commit", "-q", "-m", "one")
+    return pkg
+
+
+def test_hm_commit_is_the_checkouts_full_sha_and_its_dirty_flag(tmp_path):
+    from harness_manager.checks.run import commit_words, hm_commit
+
+    pkg = _checkout(tmp_path / "repo")
+    sha = _git(tmp_path / "repo", "rev-parse", "HEAD")
+    assert hm_commit(pkg) == {"sha": sha, "dirty": False} and len(sha) == 40
+    (pkg / "new.py").write_text("")                        # untracked: not a change to HEAD
+    assert hm_commit(pkg)["dirty"] is False
+    (pkg / "__init__.py").write_text("x = 2\n")            # a tracked file changed
+    assert hm_commit(pkg) == {"sha": sha, "dirty": True}
+    assert commit_words(hm_commit(pkg)) == f"HM {sha[:12]}-dirty"
+    assert commit_words({"sha": sha, "dirty": False}) == f"HM {sha[:12]}"
+
+
+@pytest.mark.parametrize("where", ["no repo", "another repo"])
+def test_twin_hm_commit_outside_its_own_checkout_is_unknown_never_an_error(tmp_path, where):
+    from harness_manager.checks.run import commit_words, hm_commit
+
+    if where == "no repo":
+        pkg = tmp_path / "site-packages" / "harness_manager"
+        pkg.mkdir(parents=True)
+        (tmp_path / "site-packages" / ".git").write_text("gitdir: /nonexistent\n")  # not a repo
+    else:                                                  # a wheel in a venv inside a repo
+        _checkout(tmp_path / "repo")
+        pkg = tmp_path / "repo" / ".venv" / "lib" / "site-packages" / "harness_manager"
+        pkg.mkdir(parents=True)
+    assert hm_commit(pkg) == {"sha": "unknown", "dirty": None}
+    assert commit_words(hm_commit(pkg)) == "HM unknown"
+
+
+def test_the_runner_records_this_checkouts_commit_in_0_4_and_the_reports(tmp_path):
+    from harness_manager.checks.run import hm_commit
+
+    want = hm_commit()                                    # this worktree (a git checkout)
+    assert want["sha"] != "unknown" and len(want["sha"]) == 40
+    rc = run(tmp_path / "ev", ScriptedHm())
+    assert rc == EXIT_PASS
+    ev = _ev(tmp_path / "ev", "0_hm_version.json")
+    assert ev["stdout_json"]["version"] == "0.0.0-test"    # additive: the CLI's answer is kept
+    assert ev["hm_commit"] == want
+    assert summary(tmp_path / "ev")["hm_commit"] == want
+    head = (tmp_path / "ev" / "REPORT.md").read_text().splitlines()[:5]
+    assert any(line.startswith(f"- HM {want['sha'][:12]}") for line in head), head
+    # and only 0.4's evidence carries it
+    assert "hm_commit" not in _ev(tmp_path / "ev", "a1_info.json")
+
+
+def test_twin_not_a_git_checkout_records_unknown_and_still_passes(tmp_path, monkeypatch):
+    from harness_manager.checks import run as R
+
+    monkeypatch.setattr(R, "hm_commit", lambda *_a, **_k: {"sha": "unknown", "dirty": None})
+    rc = run(tmp_path / "ev", ScriptedHm(), "--repeat", "2", "--interval", "60")
+    assert rc == EXIT_PASS
+    for it in ("iter-001", "iter-002"):
+        ev = _ev(tmp_path / "ev" / it, "0_hm_version.json")
+        assert ev["verdict"] == "pass" and ev["hm_commit"] == {"sha": "unknown", "dirty": None}
+        assert "- HM unknown" in (tmp_path / "ev" / it / "REPORT.md").read_text()
+    assert "- HM unknown" in (tmp_path / "ev" / "REPORT.md").read_text()      # the aggregate
+    assert summary(tmp_path / "ev")["hm_commit"]["sha"] == "unknown"
