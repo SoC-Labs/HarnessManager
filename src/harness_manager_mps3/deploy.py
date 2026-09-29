@@ -65,11 +65,11 @@ service refuses a keep from it before a byte is pushed. The commit's push is alw
 on 6910 (``commit`` takes no TFTP), windowed exactly when the swap's is, and reports
 progress as the ``card`` phase. It is budgeted as ``harness-manager card commit`` is
 (KEEP-BUDGET, ``card.commit_budget``): the pair's per-chunk stall limit is the card's
-(``mps3.slot.push_timeout_s``, 900 s, not the swap push's 30 s; the card stalls > 30 s
-mid-write on silicon), and the control connection waits ``max(SWAP_TIMEOUT_S, the pair
-written and read back at the card's rates)`` (nanosoc's 2.47 MB: ~318 s). A plain deploy
-keeps 30 s and 300 s. The board has its own 30 s idle limit on a commit
-(``MPS3_SWAP_AWAIT_IDLE_MS``): its ``timeout`` refusal is worded as the board's. On a claimed Linux board the ``commit`` is refused for any
+(``mps3.slot.push_timeout_s``, 900 s, not the swap push's 30 s: the card stalls > 30 s),
+and the control connection waits ``max(SWAP_TIMEOUT_S, the pair written and read back at
+the card's rates)`` (nanosoc's 2.47 MB: ~318 s); a plain deploy keeps 30 s and 300 s. The
+board's own 30 s commit idle abort (``MPS3_SWAP_AWAIT_IDLE_MS``) is worded as the board's.
+On a claimed Linux board the ``commit`` is refused for any
 peer but the board itself (HM_ANSWERS S6, lane CLAIMED-LOCK): a keep on a board this Harness
 Manager claimed runs the whole deploy through the session's board-SSH forward
 (``claim.hold_forward``), one it cannot enter is ``ClaimLockedError`` before the swap, and a
