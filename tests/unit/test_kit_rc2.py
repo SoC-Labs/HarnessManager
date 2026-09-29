@@ -474,3 +474,54 @@ def test_rm_timing_says_why_a_slack_is_empty():
     assert v == "PASS" and "setup WNS 0.412 ns, hold WHS 0.031 ns" in d
     v, d = _rm_timing("-0.412", "0.031", 12)
     assert v == "FAIL" and "setup WNS -0.412 ns" in d
+
+
+# --- KIT-NANOSOC: a skeleton with undriven outputs is not a build ---------------------------------
+
+
+def test_builtin_nanosoc_does_not_build_as_its_skeleton(kits26, store):
+    """The built-in nanosoc is constraints-only: seven used groups, no RTL. Building its
+    skeleton gave an overlay named nanosoc with the fielded nanosoc's rm_id and no logic."""
+    s = script.make_script(kits26, pack="mps3", static_id=SID, design="nanosoc",
+                           store=store, vivado=found_with(None))
+    assert s.rm_id == "0x01000001"
+    assert s.params["RM_SOURCES"] == ""
+    assert "RM_SOURCES        {}" in s.files["build_rm.tcl"]
+    note = next(c for c in s.checks if c.name == "sources")
+    assert note.state == "warning"
+    assert "is not an RM" in note.detail and "jtag_tdo" in note.detail
+    assert "built-in 'nanosoc'" in note.detail and "build.sources" in note.detail
+    # the kit still carries the skeleton to start from
+    assert "  // assign jtag_tdo = ...;" in s.files["xdc/nanosoc_wrapper_skeleton.sv"]
+
+
+def test_negative_twin_a_complete_skeleton_still_builds(kits26, store, tmp_path):
+    # minimal (status tied) and a file design that ties every output of its used groups
+    s = script.make_script(kits26, pack="mps3", static_id=SID, design="minimal",
+                           store=store, vivado=found_with(None))
+    assert s.params["RM_SOURCES"] == "xdc/minimal_wrapper_skeleton.sv"
+    d = {"kind": "rm", "name": "tied_all", "rm_id": "0x010080F1",
+         "use": {"clkrst": {}, "status": {"tie": ["dut_lockup", "irq_out"]}}}
+    p = tmp_path / "tied_all.json"
+    p.write_text(json.dumps(d))
+    s = script.make_script(kits26, pack="mps3", static_id=SID, design=str(p), store=store,
+                           vivado=found_with(None))
+    assert s.params["RM_SOURCES"] == "xdc/tied_all_wrapper_skeleton.sv"
+    note = next(c for c in s.checks if c.name == "sources")
+    assert "is not an RM" not in note.detail and "built-in" not in note.detail
+    # a file design with an undriven output: empty RM_SOURCES, and no built-in sentence
+    d["use"]["status"] = {"tie": ["dut_lockup"]}
+    p.write_text(json.dumps(d))
+    s = script.make_script(kits26, pack="mps3", static_id=SID, design=str(p), store=store,
+                           vivado=found_with(None))
+    note = next(c for c in s.checks if c.name == "sources")
+    assert s.params["RM_SOURCES"] == "" and "(irq_out)" in note.detail
+    assert "built-in" not in note.detail
+
+
+def test_the_rm_kit_names_what_its_skeleton_leaves_undriven():
+    assert xdc.export("mps3", "rm-kit", "minimal").facts["skeleton_undriven"] == []
+    und = xdc.export("mps3", "rm-kit", "nanosoc").facts["skeleton_undriven"]
+    assert "jtag_tdo" in und and "qspi_io_oe" in und and "swo" in und
+    # twin: rm_id and unused groups are never in the list (the skeleton drives or ties them)
+    assert "rm_id" not in und and "dbg_bscan_tdo" not in und and "mdc" not in und

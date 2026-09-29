@@ -20,7 +20,10 @@ verb reads:
   module). With no ``sources``, the design's ``wrapper`` is the one source. With neither
   (and no synth hook or DCP), the XDC kit's own skeleton ``xdc/<name>_wrapper_skeleton.sv``
   is the one source (KIT-RC2): a design that names no RTL, such as the built-in
-  ``minimal``, builds as its skeleton, and the ``sources`` note says so.
+  ``minimal``, builds as its skeleton, and the ``sources`` note says so. Only when that
+  skeleton is a complete RM, though (KIT-NANOSOC): a design whose used groups have outputs
+  the skeleton leaves undriven (the built-in ``nanosoc``) gets an empty RM_SOURCES and a
+  ``sources`` warning that names them, never an empty RM under its name and rm_id.
 
 The printed command (``command``, README.txt) names the FULL path of the Vivado discovery
 chose when it is the kit's release (``vivado.command_vivado``): a bare ``vivado`` runs
@@ -159,8 +162,28 @@ def make_script(kits: KitService, *, pack: str, static_id: str, design: str | di
     if not sources and d.wrapper_path:
         sources = [render.tcl_path(d.wrapper_path)]
     skeleton = f"{XDC_SUBDIR}/{d.name}_wrapper_skeleton.sv"
+    undriven = list((xkit.facts.get("skeleton_undriven") or []) if xkit is not None else [])
     if not sources and not b.get("synth_hook") and not b.get("synth_dcp"):
-        if skeleton in files:
+        if skeleton in files and undriven:
+            # KIT-NANOSOC: the skeleton leaves the used groups' outputs to the design, so it is
+            # not an RM. Building it would give an overlay with the design's name and rm_id
+            # (the built-in `nanosoc`: 0x01000001, the fielded nanosoc's) and no logic, which
+            # the shell's rm_id check after a swap cannot tell apart. RM_SOURCES stays empty:
+            # the build stops at preflight (sources_given) unless -tclargs RM_SOURCES names RTL.
+            shown = ", ".join(undriven[:6]) + (f" and {len(undriven) - 6} more"
+                                               if len(undriven) > 6 else "")
+            builtin = (f" The built-in {d.name!r} describes the partition ports and timing "
+                       "only; to build it, write a design .json with build.sources (the RTL, "
+                       "in order), build.include_dirs and build.defines."
+                       if d.origin.startswith("builtin:") else "")
+            checks.append(KitCheck("sources", "warning",
+                                   f"the design names no RTL (build.sources, or a wrapper), and "
+                                   f"its skeleton {skeleton} is not an RM: it leaves "
+                                   f"{len(undriven)} outputs of the groups the design uses "
+                                   f"undriven ({shown}). RM_SOURCES is empty, so the build "
+                                   f"stops at preflight: set build.sources, or pass -tclargs "
+                                   f"RM_SOURCES=\"a.sv b.sv\".{builtin}"))
+        elif skeleton in files:
             # KIT-RC2: a design that names no RTL builds as its skeleton (minimal)
             sources = [skeleton]
             checks.append(KitCheck("sources", "warning",

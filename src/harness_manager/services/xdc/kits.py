@@ -291,8 +291,18 @@ def rm_kit(model: PinModel, design: Design) -> Kit:
     facts = {"static_id": sid, "boundary": shell["rp_boundary"]["totals"],
              "clocks": {k: v["period_ns"] for k, v in declared.items()},
              "groups_used": [g for g in groups if g in use], "pblock": pblock,
+             "skeleton_undriven": [s.name for s in signals if _left_to_design(s, design, use)],
              "model": _provenance(model)}
     return Kit("rm-kit", design.summary() | {"static_id": sid}, files, findings, facts)
+
+
+def _left_to_design(s: Any, design: Design, use: dict[str, Any]) -> bool:
+    """An output the skeleton leaves to the design (``// assign X = ...;``): an output of a
+    USED group, other than ``rm_id`` and the group's ``tie`` list. A design with none of
+    these is a complete RM as its skeleton (``minimal``); one with any is not (KIT-NANOSOC:
+    the built-in ``nanosoc`` names seven used groups and no RTL)."""
+    return (s.rm_dir == "out" and s.name != "rm_id" and s.group in use
+            and s.name not in design.tied(s.group))
 
 
 def _timed_signals(design: Design, signals: list[Any]) -> set[str]:
@@ -468,7 +478,7 @@ def _render_skeleton(model: PinModel, design: Design, sid: str, signals: list[An
             lines.append(f"  assign rm_id = {val};  // this RM's identity (the overlay manifest's rm_id)")
             continue
         clamp = int(s.clamp or 0)
-        if s.group in use and s.name not in design.tied(s.group):
+        if _left_to_design(s, design, use):
             lines.append(f"  // assign {s.name} = ...;")
             continue
         tie = "  // not driven by this design: its safe-idle value" if s.group in use else ""
