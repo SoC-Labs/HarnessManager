@@ -346,9 +346,14 @@ hub (pyverify's tools over ssh) and never starts a share on `tty_00`. Then open 
 select it and press **Open board**. **+** in the rail has a second field, "through a hub".
 For an address a `boards.toml` entry names, it fills with that entry's route (`hub`) by
 itself. For any other address, type an SSH host: that adds a board through an SSH hub for
-this session. The Settings menu for named hubs, with a
-**Test connection** button, is being built (lane SET-UI). Until it lands, use the `hub`
-commands above.
+this session.
+
+**Settings → Hubs** does what the `hub` commands do: **Add a hub** (SSH or REST, with **Test
+before adding**), **Test connection** step by step (config, reach, auth, group, targets; no
+lease is taken) with the fix for the step that failed, **Add this board** from what the hub
+offers, **Make this a hub** for a hub written inline in `boards.toml`, and **Remove**. The
+group step runs `sg fpga -c true`, the way HM uses the group. When `id -Gn` on the hub leaves
+`fpga` out (a stale group cache) but `sg` works, the step passes with a note.
 
 A board added with **+** and an ssh host, or with `--via ssh:HOST` on one command, gets the
 tunnel only. Leases need a hub table in `boards.toml`, which `hub targets --add` writes.
@@ -1165,10 +1170,16 @@ Sections: general, hubs, boards, tools, updates, harness-kits, debug, consoles, 
 Each change says when it applies: **live** (at the next use), **reopen** (the next time a
 board opens) or **restart** (the service must restart).
 
-**What takes effect today.** On `main`, `config` reads and stores every setting, and the
-update settings and named hubs take effect. The tool paths (`tools.*`), debug ports,
-console and kit settings take effect as each part of HM is wired to them (lane SET-WIRE).
-Until then, the environment variable still works:
+**What takes effect.** `config` and the Settings dialog read and store every setting. HM
+reads these where it uses them (lane SET-WIRE): the tools (OpenOCD, Vivado, hw_server, uv),
+the app window's browser, the update settings, source and mirrors, the GitHub token, named
+hubs, the kit hub archive, the debug and XVC port bases, the MPS3 OpenOCD configs, overlay
+folders and card timing (`mps3.slot.*`), and the service's port, address and log level. A
+few rows are stored but not read yet: the console rows (line ending, scrollback, font size),
+`panel.identify_s`, `panel.presence_who`, `kits.jobs`, `general.window_size` and
+`debug.hw_server_mode`.
+
+A variable in the service's environment still wins over your file. The common ones:
 
 | Setting | Variable |
 |---|---|
@@ -1176,9 +1187,19 @@ Until then, the environment variable still works:
 | `tools.vivado` | `HARNESS_MANAGER_VIVADO` |
 | `tools.hw_server` | `HARNESS_MANAGER_HW_SERVER` |
 
-**In the app:** **Settings** (the sliders icon at the bottom of the rail) has the
-**Updates** card today. The full Settings menu, with every section and **Test connection**
-for hubs, is being built (lane SET-UI).
+**In the app:** **Settings** (the sliders icon at the bottom of the rail) is one dialog with
+sections for General, Hubs, Boards, Tools, Updates, Harness & kits, Debug, Consoles and
+Advanced. Each row says where its value comes from (default, yours, lab default, admin, the
+pack, or a variable that overrides it), saves when you change it, and has **Reset**. A row
+the policy locks is disabled and names the policy file.
+- **Hubs:** add a hub, **Test connection**, **Add this board**
+  ([section 3.2](#32-a-lab-board-behind-a-hub)).
+- **Tools → Detect** finds OpenOCD, Vivado, hw_server and uv and runs only their version
+  probe. OpenOCD must list the remote_bitbang adapter.
+- **Advanced** shows the files in use and **The service's environment**: the
+  `HARNESS_MANAGER_*` and tool variables the service started with, and which of your values
+  each one hides (the same list as `harness-manager daemon status`).
+- A change that needs the service restarted shows a banner with the command to restart it.
 
 **For administrators: the policy file.** One file limits every user on a shared machine.
 HM only reads it, and a user's settings cannot loosen it:
@@ -1199,9 +1220,9 @@ host = "mapstone-dev.ecs.soton.ac.uk"
 ```
 
 It fails closed: a file that cannot be read turns self-update off. Never put a token in it:
-every user can read it, and a `token` in `[hubs.*]` is dropped. Today the update keys and
-the machine hubs are enforced; the other locks and defaults take effect as each setting is
-wired (see "What takes effect today" above). [INSTALL.md](INSTALL.md#shared-lab-machines-the-administrators-policy)
+every user can read it, and a `token` in `[hubs.*]` is dropped. The update keys, the machine
+hubs, and the locks and defaults of every setting HM reads are enforced (see "What takes
+effect" above). [INSTALL.md](INSTALL.md#shared-lab-machines-the-administrators-policy)
 has every key.
 
 **What can go wrong**
