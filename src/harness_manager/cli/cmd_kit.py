@@ -5,7 +5,7 @@ Verbs::
     kit info   [TARGET | --static-id ID]           the static, its kit, the Vivado it needs, sources
     kit fetch  [TARGET | --static-id ID] [--out DIR] [--source cache|channel|hub|PATH]
                [--print-tcl]                        the kit into the cache (and a plain dir)
-    kit verify DIR [TARGET]                         a kit directory: files, CRC-32 = static_id, the board
+    kit verify DIR|ZIP [TARGET]                     a kit directory or zip: files, CRC-32 = static_id, the board
     kit list                                        cached kits
     kit import DIR|ZIP                              a kit dir or zip, or loose mint files (fielded/<sid>/)
     kit guide  [TARGET | --static-id ID] [--design D] [--build-dir DIR] [--why GATE]
@@ -97,9 +97,11 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                     help="take it from this source only")
     ap.add_argument("--print-tcl", action="store_true",
                     help="print `set HM_KIT_DIR ...` lines for a Vivado Tcl session")
-    ap = sub.add_parser("verify", help="check a kit directory (and it against a board)",
+    ap = sub.add_parser("verify", help="check a kit directory or zip (and it against a board)",
                         parents=[fmt], epilog=ep("kit"))
-    ap.add_argument("dir", metavar="DIR", help="the kit directory (`kit fetch --out DIR`)")
+    ap.add_argument("dir", metavar="DIR|ZIP",
+                    help="the kit directory (`kit fetch --out DIR`), or a kit zip (checked "
+                         "as it is; nothing is cached)")
     target(ap, static=False)
     sub.add_parser("list", help="the cached kits", parents=[fmt], epilog=ep("kit list"))
     ap = sub.add_parser("import", help="a kit dir or zip, or a fielded/<sid>/ dir, into the cache",
