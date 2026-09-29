@@ -36,12 +36,15 @@ untouched. The ride is the shell's explicit hook (CCR PANEL-3): ``make_panel_ada
 ``Mps3Shell.preamble`` to ``ride``, which ``call_raw`` runs on each connection before its
 own requests; with nothing armed it sends nothing.
 
-**One codec, until R1-R3 land in pyverify.** ``hello``, ``panel`` and ``locate`` have no
+**One codec, until R1-R3 land in pyverify.** ``hello`` and ``panel`` have no
 ``ShellClient`` method yet, so they go through pyverify's own request framing
 (``ShellClient._request``: its transport, its reply validation) with the op this module
-builds. The FakeShell profile in ``tests/fakes/clcd_panel_shell.py`` answers them exactly as
-the design's wire says. ``stats`` uses ``ShellClient.stats()`` when the installed pyverify has
-it. CCR PANEL-4 (to the Linux lead): ``ShellClient.hello/panel/locate`` + FakeShell ``_op_*``.
+builds. ``locate`` has one since platform 3f7cea2 (``ShellClient.locate``, and FakeShell's
+``_op_locate`` on the linux profile): HM keeps building it too, the same bytes
+(tests/integration/test_pyverify_vendored.py), so an older pyverify still works. The
+FakeShell profile in ``tests/fakes/clcd_panel_shell.py`` answers them exactly as the design's
+wire says. ``stats`` uses ``ShellClient.stats()`` when the installed pyverify has it. CCR
+PANEL-4 (to the Linux lead): ``ShellClient.hello/panel`` + FakeShell ``_op_*``.
 """
 
 from __future__ import annotations

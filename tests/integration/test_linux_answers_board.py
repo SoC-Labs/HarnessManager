@@ -231,6 +231,8 @@ def test_twin_without_claimed_the_adapter_asks_identify_then_probes(make, monkey
 def test_the_slot_feature_is_matched_by_name_on_any_harness(make):
     fake, session = make()
     fake.impl = None                                         # version: a bare-metal harness
+    # (the vendored linux profile reports `slot` since platform 3f7cea2: take it out first)
+    fake.features = tuple(f for f in fake.features if f != "slot")
     assert "has no OS slots" in session.os_slots.slots_reason()
     fake.features = (*fake.features, "slot")                 # a harness that reports `slot`
     fresh = board_session(fake)

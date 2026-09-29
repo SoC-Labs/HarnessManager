@@ -364,17 +364,38 @@ def test_the_harness_reboot_is_refused_during_a_card_job(linux, state, words):
     assert fake.reboots == [] and not fake.wedged
 
 
-def test_twin_idle_the_harness_reboots_and_why_the_guard_exists(linux):
+def test_twin_idle_the_harness_reboots_and_why_the_guard_exists(monkeypatch):
+    fake = _board(monkeypatch, refuses_reboot_in_job=False)      # an image before 53f49b4
+    session = board_session(fake)
+    try:
+        assert session.os_slots.reboot(wait_s=10)["up_after_s"] > 0       # idle: allowed
+        assert len(fake.reboots) == 1 and not fake.wedged
+        # What the guard prevents (B2: "uSD init error"): a reboot sent past it, mid-write,
+        # to a harness that does not refuse it itself.
+        fake.hold_job("writing")
+        session.shell.call(lambda c: c.reboot())
+        deadline = time.monotonic() + 5
+        while not fake.wedged and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert fake.wedged
+    finally:
+        session.close()
+        fake.stop()
+
+
+def test_a_harness_from_53f49b4_refuses_its_own_reboot_mid_job(linux):
+    # harnessd 53f49b4 (the vendored FakeShell since platform 3f7cea2): reboot answers EBUSY
+    # while the card job runs, so a reboot sent past HM's guard no longer wedges that card
+    # (the guard still covers older images, the MCC REBOOT and a power cycle).
+    from harness_manager.core.errors import HeldError
+
     fake, session = linux
-    assert session.os_slots.reboot(wait_s=10)["up_after_s"] > 0       # idle: allowed
-    assert len(fake.reboots) == 1 and not fake.wedged
-    # What the guard prevents (B2: "uSD init error"): a reboot sent past it, mid-write.
     fake.hold_job("writing")
-    session.shell.call(lambda c: c.reboot())
-    deadline = time.monotonic() + 5
-    while not fake.wedged and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert fake.wedged
+    with pytest.raises(HeldError) as exc:
+        session.shell.call(lambda c: c.reboot())
+    assert getattr(exc.value, "ebusy", False)
+    time.sleep(0.3)                                    # > reboot_in_ms: nothing restarts
+    assert fake.reboots == [] and not fake.wedged
 
 
 class FakeController:

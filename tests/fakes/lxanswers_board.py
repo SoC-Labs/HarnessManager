@@ -11,6 +11,10 @@ when present and never needs them:
 - ``codes``: a refusal carries ``code`` beside ``err``, a failed job ``job.code`` (S3/C2),
   from the codes the Linux lead proposed, matched on today's texts.
 
+The vendored FakeShell (pyverify from platform 3f7cea2, harnessd 9d59699) sends all three
+itself, always. With a knob off this board models an image from before them (rc2_v6 and
+older) and takes the field out again, so the twins still show HM never needs it.
+
 ``slot_acts`` records every ``slot`` act the board received (a test can prove nothing sent
 a ``verify`` nobody asked for).
 """
@@ -64,6 +68,12 @@ class AnswersBoard(SlotBoard):
     def _op_slot(self, request: dict[str, Any], peer: str | None) -> dict[str, Any]:
         self.slot_acts.append(str(request.get("act")))
         reply = super()._op_slot(request, peer)
+        # the vendored model sends code / confirmed / claimed / job.code: an older image not
+        reply.pop("code", None)
+        reply.pop("confirmed", None)
+        reply.pop("claimed", None)
+        if isinstance(reply.get("job"), dict):
+            reply["job"].pop("code", None)
         if self.codes and not reply.get("ok"):
             code = code_for(str(reply.get("err", "")), VERB_CODES)
             if code:

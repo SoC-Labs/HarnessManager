@@ -130,9 +130,11 @@ def parse_identity(raw: Mapping[str, Any], *, impl: str = "", via: str = "identi
 
 
 def request(client: Any, msg: dict[str, Any]) -> dict[str, Any]:
-    """One request the VENDORED pyverify does not model (``identity``, ``identity_set``: v0.16;
-    pyverify at 18622e5 has ``identity()``/``identity_set()``, the same raw request), on the
-    connection ``Mps3Shell.call_raw`` opened (``panel._request``'s way)."""
+    """One ``identity``/``identity_set`` request (v0.16) through pyverify's framing, on the
+    connection ``Mps3Shell.call_raw`` opened (``panel._request``'s way). The vendored pyverify
+    (platform 3f7cea2) has ``ShellClient.identity()``/``identity_set()``; HM builds the same
+    request itself, byte for byte (tests/integration/test_pyverify_vendored.py), so a pyverify
+    older than 18622e5 (an editable checkout) still works."""
     return client._request(msg)
 
 

@@ -3,7 +3,9 @@
 HM's OWN model of the Linux lead's contract, ALIGNED (lane V7-ALIGN) to what shipped in platform
 ``feat/linux-harness`` 18622e5 (images rc2_v7/v7n): the rules, the refusal texts and their
 order are those of pyverify's own model there (``pyverify.testing.fakeshell._IdentityModel``,
-``identity_check``), written into this file because HM's vendored pyverify predates it:
+``identity_check``), written into this file when HM's vendored pyverify predated it. The
+vendored pyverify has it since platform 3f7cea2; tests/integration/test_pyverify_vendored.py holds
+this model to it (the rules, the refusal texts):
 
 - ``identity`` (a read, any peer): ``{label, hostname, ip "a.b.c.d/n", mac (12 hex), source,
   stage0, override, pending, persist}``. Each field resolves override > stage0 > the image
@@ -117,7 +119,13 @@ class IdentityBoard(SlotBoard):
         self.decline = decline
         self.reply_op = reply_op
         if has_identity:
-            self.features = (*self.features, "identity")
+            if "identity" not in self.features:
+                self.features = (*self.features, "identity")
+        else:
+            # the vendored linux profile (pyverify from platform 3f7cea2) is a v0.16 image, with
+            # `identity` and `locate`: an image without the verbs (rc2_v6) has neither
+            self.features = tuple(f for f in self.features if f not in ("identity", "locate"))
+            self.identity = None                   # nor identify's `label`
         self.persist = persist
         self.stage0 = dict(stage0) if stage0 else None
         self.override: dict[str, Any] | None = None
@@ -223,7 +231,8 @@ class IdentityBoard(SlotBoard):
     def _identify_serve(self) -> None:
         """The vendored FakeShell's UDP 6899 loop (one datagram in, one out; malformed =
         silent; rate-limited; silent while hung), answering with ``identify_reply`` above: the
-        vendored loop calls its module's reply builder, which predates ``label``."""
+        vendored loop calls its module's reply builder, whose ``label`` (from platform 3f7cea2)
+        is the vendored model's, not this board's."""
         sock = self._identify_sock
         tokens = float(self.identify_rate_per_s)
         last = time.monotonic()
