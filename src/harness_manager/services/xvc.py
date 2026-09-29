@@ -104,6 +104,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession
 from harness_manager.services.claim import lock_error, lock_refusal
+from harness_manager.services.lease import not_fresh
 
 log = logging.getLogger(__name__)
 
@@ -1250,6 +1251,12 @@ class XvcService:
                             holder="unknown (the hub did not answer)",
                             hint="XVC opens for the lease holder only; retry when the hub "
                                  "answers (`harness-manager lease show TARGET`)") from exc
+        stale = not_fresh(view)             # LEASE-FRESH: a carried state is not an answer
+        if stale:
+            raise HeldError(f"cannot confirm you hold the lease on {target}: {stale}",
+                            holder="unknown (the hub did not answer)",
+                            hint="XVC opens for the lease holder only; retry when the hub "
+                                 "answers (`harness-manager lease show TARGET`)")
         lease = (view or {}).get("lease")
         if not lease:
             raise HeldError(f"XVC is for the lease holder only, and nobody holds {target}",

@@ -342,3 +342,36 @@ def test_twin_three_attempts_at_most_then_the_read_fails(ssh):
 ])
 def test_retry_kind_reads_the_command_and_sshs_words(argv, rc, out, err, kind):
     assert hubmod.retry_kind(argv, SimpleNamespace(returncode=rc, stdout=out, stderr=err)) == kind
+
+
+# --- the explicit gates want a fresh answer ---------------------------------------------------------
+
+
+def test_an_install_gate_refuses_a_carried_lease_it_cannot_confirm(rig):
+    from harness_manager.services.update.lease_gate import lease_state
+
+    session = SimpleNamespace(hub=rig.hub)
+    rig.acquire()
+    rig.fail_reads(1, spaced=False)                        # carried: fine for the page ...
+    shows = rig.fake.shows
+    rig.fake.fail_show = 1                                 # ... the gate's own read fails too
+    st = lease_state(session, rig.svc)
+    assert rig.fake.shows == shows + 1, "forget(): the gate asked the hub, not the carry"
+    assert not st["mine"] and st["holder"].startswith("unknown")
+    assert "cannot confirm you hold the lease" in st["reason"] and "last confirmed" in st["reason"]
+
+
+def test_twin_an_install_gate_passes_when_the_hub_answers(rig):
+    from harness_manager.services.update.lease_gate import lease_state
+
+    rig.acquire()
+    rig.fail_reads(1, spaced=False)
+    st = lease_state(SimpleNamespace(hub=rig.hub), rig.svc)   # the hub answers this time
+    assert st["mine"] and st["reason"] == ""
+
+
+def test_not_fresh_says_why_only_for_a_carried_view():
+    assert leasemod.not_fresh({"lease": None}) == ""
+    assert leasemod.not_fresh(None) == ""
+    why = leasemod.not_fresh({"stale": {"confirmed_at": iso_utc(START), "error": "reset"}})
+    assert why.startswith("the hub did not answer (reset)") and "last confirmed" in why

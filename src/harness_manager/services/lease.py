@@ -90,7 +90,9 @@ Otherwise the read's error is raised as before ("lease unknown": not known is no
 While a carried state stands the hub is not asked again sooner than ``READ_RETRY_S``.
 Background contact (``services/quiet.py``) goes ahead on a carried lease held HERE (it is
 ours until its expiry, and the heartbeat keeps running), but a carried FREE state is treated
-as unknown (quiet): a board last seen free may have been taken meanwhile.
+as unknown (quiet): a board last seen free may have been taken meanwhile. The explicit gates
+that need a fresh confirmation (a harness install, XVC, the SSH claim: ``forget`` then
+``view``) refuse a carried state as they refuse an unanswered read (``not_fresh``).
 
 Events: ``lease.state {target, state: held|queued|released|expired|lost, holder,
 expires_at}``, and ``lease.wanted``, ``lease.answered``, ``lease.force_available``,
@@ -931,8 +933,14 @@ class LeaseService:
         return lease_name(self.board_of(hub, ask=False), hub.target)
 
     def forget(self, hub: Any) -> None:
-        """Drop the cached view for ``hub`` (the hub said something changed; T8)."""
+        """Drop the cached view for ``hub`` (the hub said something changed; T8). LEASE-FRESH:
+        the next view asks the hub even while a failed read is recent (a caller that forgets
+        wants a fresh answer); if that read fails too, it counts as another miss."""
         self._forget(hub)
+        with self._mu:
+            miss = self._misses.get(_hk(hub))
+            if miss is not None:
+                miss.last = float("-inf")
 
     def on_hub_event(self, ev: Event) -> None:
         """``hub.event`` (T8, fpgahub's event stream): a lease change seconds before a poll.
@@ -2240,6 +2248,18 @@ class LeaseService:
         t = self._thread
         if t is not None and t is not threading.current_thread():
             t.join(timeout=2.0)
+
+
+def not_fresh(view: Any) -> str:
+    """LEASE-FRESH: why ``view`` is not a fresh hub answer (it is the last known state, carried
+    over a failed read: ``stale``), in plain words; "" when it is fresh. For the gates that
+    must confirm the lease with the hub (an install, XVC, the claim)."""
+    stale = (view or {}).get("stale") if isinstance(view, dict) else None
+    if not stale:
+        return ""
+    at = parse_utc(stale.get("confirmed_at"))
+    when = f"; it was last confirmed at {_hhmmss(at)}" if at is not None else ""
+    return f"the hub did not answer ({stale.get('error') or 'no answer'}){when}"
 
 
 def _hhmmss(t: float) -> str:
