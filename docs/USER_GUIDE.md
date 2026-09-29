@@ -674,7 +674,9 @@ section).
 | `busy` right after a failed push | the harness is finishing that swap, for up to 30 s | wait 30 s, then try again |
 | exit 12 with `--keep-on-card` | no card store (bare metal) or no card | program without it, or insert a card |
 
-On the Linux harness a push always uses TCP and waits up to 30 s for each part.
+On the Linux harness a push always uses TCP. It gives up when a chunk waits more than 30 s
+(the harness parks the design behind the outgoing clearing); the whole push takes longer
+(the times above).
 
 ## 7. Build your own DUT
 
