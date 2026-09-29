@@ -163,3 +163,39 @@ def test_the_path_vivado_from_settings64_is_printed_without_a_double_slash(tmp_p
     f = vivado.discover(runner=ByPath(), env={}, which=lambda _: None, roots=(),
                         want="2026.1")
     assert f.install is None and f.on_path is None
+
+
+# --- the build dir's README names the design the user built -----------------------------------
+
+
+def _spike_design(tmp_path: Path) -> Path:
+    import json
+
+    p = tmp_path / "spike_rm.json"
+    p.write_text(json.dumps({"kind": "rm", "name": "spike_rm", "rm_id": "0x010080F0",
+                             "use": {"clkrst": {}, "status": {}, "gpio": {"timed": True}},
+                             "build": {"sources": [str(kf.SPIKE_RM)], "top": "rm_spike_rm"}}))
+    return p
+
+
+def test_the_readme_names_the_design_it_was_written_for(kits, tmp_path, monkeypatch):
+    from harness_manager.services.kit import script
+
+    monkeypatch.setenv(vivado.ENV, "off")
+    kits.import_(kf.FIXTURE)
+    # the runbook's built-in minimal: `--design minimal`, not a placeholder
+    s = script.make_script(kits, pack="mps3", static_id=kf.STATIC_ID, design="minimal")
+    readme = s.files["README.txt"]
+    assert "--design minimal --build-dir ." in readme
+    assert "<your design .json>" not in readme
+    assert "up to an hour on a loaded one" in readme              # the measured time
+    # twin: a design file is named by its path
+    p = _spike_design(tmp_path)
+    s = script.make_script(kits, pack="mps3", static_id=kf.STATIC_ID, design=str(p))
+    assert f"--design {p.resolve()} --build-dir ." in s.files["README.txt"]
+    # twin: an inline design (the API's) has no name to give: the placeholder stays
+    import json
+
+    doc = json.loads(p.read_text())
+    s = script.make_script(kits, pack="mps3", static_id=kf.STATIC_ID, design=doc)
+    assert "--design <your design .json> --build-dir ." in s.files["README.txt"]
