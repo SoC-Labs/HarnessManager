@@ -168,12 +168,13 @@ def test_twin_a_command_that_started_or_another_failure_is_never_rerun(monkeypat
     assert got.returncode == rc and len(fake.calls) == 1
 
 
-def test_twin_only_one_retry_then_the_reset_is_the_answer(monkeypatch):
-    fake = FakeRun([(255, "", KEX), (255, "", KEX), (0, "never\n", "")])
+def test_twin_at_most_three_attempts_then_the_reset_is_the_answer(monkeypatch):
+    # LEASE-FRESH: three attempts (was two), never more: the hub's load stays low.
+    fake = FakeRun([(255, "", KEX), (255, "", KEX), (255, "", KEX), (0, "never\n", "")])
     monkeypatch.setattr(subprocess, "run", fake)
     got = hubmod.default_runner_factory(HUB, "fpga", jump="bastion.invalid")(["fpgahub", "x"])
     assert got.returncode == 255 and "kex_exchange_identification" in got.stderr
-    assert len(fake.calls) == 2
+    assert len(fake.calls) == hubmod.HUB_ATTEMPTS == 3
 
 
 def test_reset_before_auth_reads_sshs_own_words():

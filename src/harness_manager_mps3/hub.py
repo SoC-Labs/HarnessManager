@@ -433,24 +433,55 @@ def default_runner_factory(host: str, group: str | None, jump: str = "") -> Call
 # connections (MaxStartups: it starts dropping unauthenticated connections past 10 at once).
 # SERIAL-6900 counted 2-6 long-lived plus 3-12 one-shot ssh connections per hub, none reused
 # (ControlPath=none everywhere). So each one-shot hub command (every ``fpgahub ...`` through
-# ``ssh HUB``) takes one of ``HUB_ONE_SHOT_MAX`` slots per hub, and one reset in the
-# identification exchange, before authentication (nothing ran on the hub), is tried once
-# more after a short, jittered pause. A command that started on the hub is never re-run.
-# ControlMaster is deliberately NOT used (it needs a hub-side check first).
+# ``ssh HUB``) takes one of ``HUB_ONE_SHOT_MAX`` slots per hub. ControlMaster is deliberately
+# NOT used (it needs a hub-side check first).
+#
+# LEASE-FRESH (2026-09-29): the same throttle also answers "ssh: connect to host HUB port 22:
+# Connection reset by peer" (the TCP connect itself reset), which was not retried at all, and
+# one retry was not always enough. The retry rule, in ``retry_kind`` (this one place, so every
+# hub command through ssh follows it):
+#
+# - turned away BEFORE the remote command could start (the connect reset, or a reset or close
+#   in ssh's identification exchange, before authentication): nothing ran on the hub, so ANY
+#   command, even ``lease acquire``/``release``, may be tried again;
+# - dropped AFTER the connection was up ("client_loop: send disconnect: Connection reset by
+#   peer", "Connection to HUB closed by remote host"): the command may have run, so only a
+#   READ-ONLY command (``hub_read_only``: ``lease show``, ``whoami``, the note list ...) is
+#   tried again; ``lease acquire``, ``release``, ``heartbeat``, ``cancel``, a revoke or a note
+#   write never is (its answer is then the failure);
+# - anything else (refused, no route, the command's own exit status, output on stdout): never.
+#
+# At most ``HUB_ATTEMPTS`` (3) attempts, after ``HUB_KEX_RETRY_S`` then 3x that (0.5 s, 1.5 s),
+# each plus up to ``HUB_KEX_RETRY_JITTER_S`` so the commands sshd turned away together do not
+# return together: at most three connections for one read, never a storm.
 
 #: One-shot ssh commands in flight to one hub, at most (sshd's MaxStartups starts at 10).
 HUB_ONE_SHOT_MAX = 4
 #: How long a command waits for a slot when it gives no timeout of its own.
 HUB_SLOT_WAIT_S = 60.0
-#: The pause before the one retry of a reset in the identification exchange, plus up to
-#: ``HUB_KEX_RETRY_JITTER_S`` so the commands sshd turned away together do not return together.
+#: Attempts at one hub command that ssh turned away (the first one included).
+HUB_ATTEMPTS = 3
+#: The pause before the first retry (the second waits three times as long), plus up to
+#: ``HUB_KEX_RETRY_JITTER_S``.
 HUB_KEX_RETRY_S = 0.5
 HUB_KEX_RETRY_JITTER_S = 0.5
-#: ssh's words for a connection dropped in the identification exchange (before the key
-#: exchange, so before authentication): nothing ran on the hub.
+#: ssh's words for a connection turned away before the remote command could start: a reset or
+#: close in the identification exchange (before the key exchange, so before authentication),
+#: or the TCP connect itself reset. Nothing ran on the hub.
 _PRE_AUTH_RESET = re.compile(
-    r"(?:kex|ssh)_exchange_identification:.*(?:reset by peer|closed by remote host)",
+    r"(?:kex|ssh)_exchange_identification:.*(?:reset by peer|closed by remote host)"
+    r"|ssh: connect to host \S+ port \d+: connection reset by peer",
     re.IGNORECASE)
+#: ssh's words for a connection dropped after it was up: the command may have run.
+_DROPPED = re.compile(r"connection reset by peer|closed by remote host|broken pipe",
+                      re.IGNORECASE)
+#: Hub commands that only read (``fpgahub`` verb words), safe to run twice.
+_READ_ONLY_FPGAHUB = (("lease", "show"), ("whoami",), ("board", "list"),
+                      ("board", "lease", "show"), ("target", "show"),
+                      ("target", "lease-history"), ("share", "list"))
+#: The note script's read ops (``NOTE_SCRIPT``: ``list`` prunes notes past their age, which
+#: is the same whether it runs once or twice).
+_READ_ONLY_NOTE_OPS = ("list", "get")
 
 _hub_slots: dict[str, threading.BoundedSemaphore] = {}
 _hub_slots_mu = threading.Lock()
@@ -488,12 +519,51 @@ def forget_hub_slots() -> None:
 
 
 def reset_before_auth(result: Any) -> bool:
-    """``result`` (a pyverify ``RunResult``) is ssh's own failure in the identification
-    exchange: exit 255, nothing on stdout, and ssh's words for a reset or a close there.
-    Nothing ran on the hub, so it may be tried again."""
+    """``result`` (a pyverify ``RunResult``) is ssh's own failure before the remote command
+    could start: exit 255, nothing on stdout, and ssh's words for a reset of the connect or a
+    reset or close in the identification exchange. Nothing ran on the hub, so it may be tried
+    again, whatever the command."""
     if getattr(result, "returncode", None) != 255 or (getattr(result, "stdout", "") or "").strip():
         return False
     return bool(_PRE_AUTH_RESET.search(getattr(result, "stderr", "") or ""))
+
+
+def dropped_after_start(result: Any) -> bool:
+    """``result`` is ssh's exit 255 for a connection dropped after it was up (a reset or a
+    close by the hub), not before: the command may have run."""
+    if getattr(result, "returncode", None) != 255 or reset_before_auth(result):
+        return False
+    return bool(_DROPPED.search(getattr(result, "stderr", "") or ""))
+
+
+def hub_read_only(argv: Sequence[str]) -> bool:
+    """``argv`` only reads the hub (``fpgahub lease show``, ``whoami``, a note ``list``/``get``
+    ...): running it twice changes nothing. Everything else (acquire, release, heartbeat,
+    cancel, revoke, share start, a note put/del) is not."""
+    words = [str(w) for w in argv]
+    if words[:1] == ["fpgahub"]:
+        rest = [w for w in words[1:] if not w.startswith("-")]
+        return any(rest[:len(verb)] == list(verb) for verb in _READ_ONLY_FPGAHUB)
+    if words[:2] == ["sh", "-c"] and len(words) > 4 and words[3] == "hm-lease":
+        return words[4] in _READ_ONLY_NOTE_OPS
+    return False
+
+
+def retry_kind(argv: Sequence[str], result: Any) -> str:
+    """Why ``result`` of ``argv`` may be tried again: ``"before"`` (turned away before the
+    command started: any command), ``"read"`` (dropped after it was up, and ``argv`` only
+    reads), or ``""`` (never: the command may have run, or it was not ssh turning it away)."""
+    if reset_before_auth(result):
+        return "before"
+    if dropped_after_start(result) and hub_read_only(argv):
+        return "read"
+    return ""
+
+
+def retry_delay_s(attempt: int) -> float:
+    """The pause before retry ``attempt`` (1, 2): ``HUB_KEX_RETRY_S`` then three times it, each
+    plus up to ``HUB_KEX_RETRY_JITTER_S``."""
+    return HUB_KEX_RETRY_S * (3 ** (attempt - 1)) + random.uniform(0.0, HUB_KEX_RETRY_JITTER_S)
 
 
 _CAPPED: dict[type, type] = {}
@@ -523,7 +593,8 @@ def _capped(cls: type) -> type:
             hub = str(self.hub)
             sem = hub_slots(hub)
             stats = HUB_RUN_STATS.setdefault(hub, HubRunStats())
-            for attempt in (0, 1):
+            attempts = max(1, int(HUB_ATTEMPTS))
+            for attempt in range(1, attempts + 1):
                 self._take_slot(sem, stats, hub, timeout)
                 try:
                     result = super().__call__(argv, timeout=timeout)
@@ -531,13 +602,16 @@ def _capped(cls: type) -> type:
                     with _hub_slots_mu:
                         stats.in_flight -= 1
                     sem.release()
-                if attempt or not reset_before_auth(result):
+                kind = retry_kind(argv, result)            # LEASE-FRESH: the rule above
+                if attempt >= attempts or not kind:
                     return result
                 with _hub_slots_mu:
                     stats.retried += 1
-                log.info("hub %s reset the ssh connection before authentication (%s): "
-                         "trying once more", hub, (result.stderr or "").strip()[:160])
-                time.sleep(HUB_KEX_RETRY_S + random.uniform(0.0, HUB_KEX_RETRY_JITTER_S))
+                log.info("hub %s turned the ssh connection away %s (%s): attempt %d of %d",
+                         hub, "before the command started" if kind == "before"
+                         else "during a read-only command", (result.stderr or "").strip()[:160],
+                         attempt + 1, attempts)
+                time.sleep(retry_delay_s(attempt))
             return result                                         # not reached
 
         @staticmethod
