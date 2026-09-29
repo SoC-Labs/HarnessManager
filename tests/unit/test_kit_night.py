@@ -4,6 +4,9 @@ Vivado 2026.1, 29 Sep 2026; docs/evidence/2026-09-29-kit-night/) found, fixed bo
 - ``kit verify`` takes the kit zip a user was handed (it said exit 15 "cannot read
   <zip>/kit.json: Not a directory"): checked as it is, the checks ``import`` makes, nothing
   cached, the extraction removed;
+- the ``vivado`` found on PATH is normalised: AMD's ``settings64.sh`` puts
+  ``/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin`` on PATH, and the ``//`` reached the
+  printed build command, ``README.txt`` and the guide.
 
 Every check has a negative twin. Vivado is never run.
 """
@@ -11,6 +14,7 @@ Every check has a negative twin. Vivado is never run.
 from __future__ import annotations
 
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -113,3 +117,49 @@ def test_cli_kit_verify_zip_passes_and_a_tampered_zip_is_refused(tmp_path, capsy
     rc = cli_main.main(["kit", "verify", str(note)])
     err = capsys.readouterr().err
     assert rc == ExitCode.USAGE and "neither a kit directory nor a zip" in err
+
+
+# --- the PATH vivado, normalised --------------------------------------------------------------
+
+
+class ByPath:
+    """Answers ``vivado -version`` with the release in the executable's path."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self, argv, **_):
+        self.calls.append(argv[0])
+        rel = vivado.release_of_path(argv[0]) or "2099.9"
+        return subprocess.CompletedProcess(argv, 0, f"vivado v{rel} (64-bit)\nSW Build 1 on x\n",
+                                           "")
+
+
+def install(root: Path, rel: str) -> Path:
+    exe = root / rel / "Vivado" / "bin" / "vivado"
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    return exe
+
+
+def test_the_path_vivado_from_settings64_is_printed_without_a_double_slash(tmp_path):
+    root = tmp_path / "research" / "CAD" / "Xilinx" / "Vivado"
+    exe = install(root, "2026.1")
+    doubled = f"{root}//2026.1/Vivado/bin/vivado"            # what settings64.sh gives
+    assert Path(doubled).is_file() and "//" in doubled
+    run = ByPath()
+    f = vivado.discover(runner=run, env={}, which=lambda _: doubled, roots=(), want="2026.1")
+    assert f.install.path == str(exe) and "//" not in f.install.path
+    assert f.install.how == "path" and f.install.version == "2026.1"
+    assert f.on_path.path == str(exe)
+    assert vivado.command_vivado(f, "2026.1") == str(exe)
+    assert run.calls == [str(exe)]
+    # twin: a clean PATH spelling is kept exactly as it was
+    f = vivado.discover(runner=ByPath(), env={}, which=lambda _: str(exe), roots=(),
+                        want="2026.1")
+    assert f.install.path == str(exe)
+    # and no vivado on PATH at all is still None, not "."
+    f = vivado.discover(runner=ByPath(), env={}, which=lambda _: None, roots=(),
+                        want="2026.1")
+    assert f.install is None and f.on_path is None

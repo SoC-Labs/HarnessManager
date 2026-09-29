@@ -271,6 +271,9 @@ def discover(*, runner: Runner = subprocess.run, env: dict[str, str] | None = No
         return VivadoInstall(path, ver, build, how, err)
 
     bare = which("vivado")
+    # KIT-NIGHT: AMD's settings64.sh puts ``<root>//<rel>/Vivado/bin`` on PATH; the printed
+    # command, the README and the guide showed that ``//``. Same file, clean spelling.
+    bare = os.path.normpath(bare) if bare else bare
     ran: list[VivadoInstall] = []            # the PATH one, when it was run
 
     def path_view(chosen: VivadoInstall | None) -> VivadoInstall | None:
