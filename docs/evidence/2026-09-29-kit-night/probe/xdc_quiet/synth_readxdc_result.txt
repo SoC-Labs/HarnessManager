@@ -1,0 +1,6 @@
+# synth-only read_xdc: original vs -quiet
+KN_PHASE original
+CRITICAL WARNING: [Common 17-69] Command failed: Port dut_clk is not connected to any net, cannot set HD.CLK_SRC. [/tmpdir/claude-74755/kit-night/home/builds/minimal/xdc/minimal_ooc.xdc:23]
+KN_PHASE quiet
+KN_CLOCKS dut_clk dbg_bscan_tck dbg_bscan_drck
+KN_DONE

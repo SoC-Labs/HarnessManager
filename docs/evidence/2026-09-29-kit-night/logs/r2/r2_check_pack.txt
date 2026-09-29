@@ -1,0 +1,7 @@
+the build minimal: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 24 gates
+  ok        rm_id                        the netlist drives 0x0100F28A
+  ok        static_id                    built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)
+overlay minimal (0x0100F28A) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-night/home/builds/minimal_head/overlay/minimal
+next: harness-manager kit pack /tmpdir/claude-74755/kit-night/home/builds/minimal_head --import  (or: harness-manager program TARGET minimal --overlay-dir /tmpdir/claude-74755/kit-night/home/builds/minimal_head/overlay)
+=== rc=0 took=2s

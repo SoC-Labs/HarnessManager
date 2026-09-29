@@ -1,0 +1,12 @@
+0x44EE76D5  mps3/0x44EE76D5/vivado-2026.1      38287216 B  path:/tmpdir/claude-74755/kit-night/home/mps3_rc2_0x44EE76D5_kit.zip
+static     0x44EE76D5
+kit        mps3/0x44EE76D5/vivado-2026.1, 38287216 B, from path:/tmpdir/claude-74755/kit-night/home/mps3_rc2_0x44EE76D5_kit.zip
+partition  u_rp_dut / pblock_rp_dut, 47 ports / 148 bits, part xcku115-flvb1760-1-c
+vivado     needs 2026.1; found 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado
+sources    cache, channel, hub (unavailable)
+  ok        vivado                       Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado
+  warning   vivado_path                  `vivado` on PATH is Vivado 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado), not this kit's 2026.1: a bare `vivado` runs 2024.1, and build_rm.tcl refuses it. Run the full path Harness Manager prints (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado), or put its bin first on PATH: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH
+  unchecked shell_id                     no board: the kit was not compared with a running static
+  ok        part                         xcku115-flvb1760-1-c
+  ok        boundary                     kit 47 ports / 148 bits, pin model 47 / 148
+=== rc=0 took=7s

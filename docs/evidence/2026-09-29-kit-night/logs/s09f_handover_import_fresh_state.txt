@@ -1,0 +1,11 @@
+no kits cached: harness-manager kit fetch --static-id ID
+the build minimal: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 24 gates
+  ok        rm_id                        the netlist drives 0x0100F28A
+overlay minimal (0x0100F28A) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-night/state2-overlay/minimal
+imported into the store (3f84f88675bf): it shows in Program
+state dir /tmpdir/claude-74755/kit-night/state2; simulated live shell_id 0x44EE76D5 (NO board), clr_max 1048576
+catalogue: 1 overlay(s); rejects: none
+
+minimal  rm_id 0x0100f28a  static 0x44ee76d5  origin store  size 1311884  ip_class unknown  -> PROGRAMMABLE (board-free items)
+=== rc=0 took=4s

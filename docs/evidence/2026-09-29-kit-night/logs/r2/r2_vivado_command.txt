@@ -1,0 +1,1 @@
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.jou -tclargs JOBS=4

@@ -1,0 +1,10 @@
+1244136 out/minimal_partial.bin
+67748 out/minimal_partial_clear.bin
+1244372 out/minimal_partial.bit
+67995 out/minimal_partial_clear.bit
+41277027 out/minimal_routed.dcp
+16472 out/minimal_synth.dcp
+410 overlay/minimal/manifest.json
+1244136 overlay/minimal/minimal.bin
+3887 overlay/minimal/minimal_build.json
+67748 overlay/minimal/minimal_clear.bin

@@ -1,0 +1,374 @@
+
+=== 20:55:57 $ echo HOME=$HOME; echo STATE=$HARNESS_MANAGER_STATE_DIR; echo TMPDIR=$TMPDIR; which harness-manager vivado; ls -la ~ ~/.config 2>&1; sha256sum mps3_rc2_0x44EE76D5_kit.zip
+HOME=/tmpdir/claude-74755/kit-night/home
+STATE=/tmpdir/claude-74755/kit-night/home/.config/harness-manager
+TMPDIR=/tmpdir/claude-74755/kit-night/tmp
+/home/dam1n19/SoCLabs/hm-kit-night/.venv/bin/harness-manager
+/apps/Xilinx/Vivado/2024.1/bin/vivado
+ls: cannot access '/tmpdir/claude-74755/kit-night/home/.config': No such file or directory
+/tmpdir/claude-74755/kit-night/home:
+total 36860
+drwxr-xr-x. 2 dam1n19 fp       49 Sep 29 20:55 .
+drwxr-xr-x. 9 dam1n19 fp      182 Sep 29 20:55 ..
+-rw-r--r--. 1 dam1n19 fp 37740608 Sep 29 20:55 mps3_rc2_0x44EE76D5_kit.zip
+95768b649dc2325ac3c8d2f14a5aa3da58d4f5554a0e56fda775a8defa7e906f  mps3_rc2_0x44EE76D5_kit.zip
+=== rc=0 took=0s
+
+=== 20:56:10 $ harness-manager kit list; harness-manager config path 2>&1 | head -20; harness-manager --version 2>&1 | head -2; git -C /home/dam1n19/SoCLabs/hm-kit-night rev-parse --short HEAD
+no kits cached: harness-manager kit fetch --static-id ID
+config_dir      /tmpdir/claude-74755/kit-night/home/.config/harness-manager
+settings        /tmpdir/claude-74755/kit-night/home/.config/harness-manager/settings.toml  (not there)
+boards          /tmpdir/claude-74755/kit-night/home/.config/harness-manager/boards.toml  (not there)
+policy          /etc/harness-manager/policy.toml  (not there)
+secrets         /tmpdir/claude-74755/kit-night/home/.config/harness-manager/secrets  (not there)
+secrets_index   /tmpdir/claude-74755/kit-night/home/.config/harness-manager/secrets/index.json  (not there)
+legacy_updates  /tmpdir/claude-74755/kit-night/home/.config/harness-manager/update/settings.json  (not there)
+new secrets go to a private file (no keyring: the Secret Service (your login keyring): no session bus in this process (an ssh or service session?); KWallet: no session bus in this process (an ssh or service session?))
+Harness Manager 0.1.0
+506a5ef
+=== rc=0 took=2s
+
+=== 20:56:17 $ harness-manager kit import mps3_rc2_0x44EE76D5_kit.zip
+cached: mps3/0x44EE76D5/vivado-2026.1 (38287216 B)
+  ok        files                        14 files match kit.json (size and sha256)
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+=== rc=0 took=2s
+
+=== 20:56:19 $ harness-manager kit list; harness-manager kit info --static-id 0x44EE76D5
+0x44EE76D5  mps3/0x44EE76D5/vivado-2026.1      38287216 B  path:/tmpdir/claude-74755/kit-night/home/mps3_rc2_0x44EE76D5_kit.zip
+static     0x44EE76D5
+kit        mps3/0x44EE76D5/vivado-2026.1, 38287216 B, from path:/tmpdir/claude-74755/kit-night/home/mps3_rc2_0x44EE76D5_kit.zip
+partition  u_rp_dut / pblock_rp_dut, 47 ports / 148 bits, part xcku115-flvb1760-1-c
+vivado     needs 2026.1; found 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado
+sources    cache, channel, hub (unavailable)
+  ok        vivado                       Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado
+  warning   vivado_path                  `vivado` on PATH is Vivado 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado), not this kit's 2026.1: a bare `vivado` runs 2024.1, and build_rm.tcl refuses it. Run the full path Harness Manager prints (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado), or put its bin first on PATH: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH
+  unchecked shell_id                     no board: the kit was not compared with a running static
+  ok        part                         xcku115-flvb1760-1-c
+  ok        boundary                     kit 47 ports / 148 bits, pin model 47 / 148
+=== rc=0 took=7s
+
+=== 20:56:33 $ harness-manager kit verify mps3_rc2_0x44EE76D5_kit.zip
+harness-manager: cannot read mps3_rc2_0x44EE76D5_kit.zip/kit.json: Not a directory — is this a kit directory?
+=== rc=15 took=1s
+
+=== 20:56:34 $ harness-manager kit fetch --static-id 0x44EE76D5 --out ~/kitdir && harness-manager kit verify ~/kitdir
+kit mps3/0x44EE76D5/vivado-2026.1 from cache -> /tmpdir/claude-74755/kit-night/home/kitdir
+  ok        files                        14 files match their sha256
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  unchecked shell_id                     no board: the kit was not compared with a running static
+  ok        part                         xcku115-flvb1760-1-c
+  ok        boundary                     kit 47 ports / 148 bits, pin model 47 / 148
+next: harness-manager kit script --static-id 0x44EE76D5 --design my_rm.json --out build/my_rm --kit-dir /tmpdir/claude-74755/kit-night/home/kitdir
+/tmpdir/claude-74755/kit-night/home/kitdir: kit mps3/0x44EE76D5/vivado-2026.1
+  ok        files                        14 files match kit.json (size and sha256)
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  unchecked shell_id                     no board: the kit was not compared with a running static
+  ok        part                         xcku115-flvb1760-1-c
+  ok        boundary                     kit 47 ports / 148 bits, pin model 47 / 148
+=== rc=0 took=2s
+
+=== 20:56:42 $ source /research/CAD/Xilinx/Vivado/2026.1/Vivado/settings64.sh; which vivado; harness-manager config test tools vivado
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado
+tools vivado: PASS
+  ok    vivado   Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado; the cached kits need 2026.1 (0x44EE76D5)
+=== rc=0 took=5s
+
+=== 20:56:47 $ harness-manager config test tools vivado
+tools vivado: PASS
+  ok    vivado   Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; the cached kits need 2026.1 (0x44EE76D5); `vivado` on PATH is 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado): a bare `vivado` runs that one, so the build commands name the full path
+=== rc=0 took=6s
+
+=== 20:56:59 $ source /research/CAD/Xilinx/Vivado/2026.1/Vivado/settings64.sh; harness-manager kit guide --static-id 0x44EE76D5 --design minimal
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  done   2 Tools            Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  minimal: 47 ports / 148 bits checked; rm_id 0x0100F28A (warning: no rm_id: HM proposes 0x0100F28A)
+  NEXT   5 Build            no build directory yet
+  -      6 Check and add    no passed build yet
+                            waits for 5 build
+next: harness-manager kit script --static-id 0x44EE76D5 --design minimal --out build/minimal
+=== rc=0 took=35s
+
+=== 20:57:40 $ source /research/CAD/Xilinx/Vivado/2026.1/Vivado/settings64.sh; harness-manager kit script --static-id 0x44EE76D5 --design minimal --out ~/builds/minimal
+minimal (rm_id 0x0100F28A, proposed) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   rm_id_proposed               the design names no rm_id; HM proposes 0x0100F28A (add it to the design to keep it)
+  warning   sources                      the design names no RTL (build.sources, or a wrapper): RM_SOURCES is the XDC kit's skeleton xdc/minimal_wrapper_skeleton.sv, which drives rm_id and ties every other output off. For your own RTL set build.sources, or pass -tclargs RM_SOURCES="a.sv b.sv"
+wrote 22 files to /tmpdir/claude-74755/kit-night/home/builds/minimal
+next: /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_build.json
+=== rc=0 took=4s
+
+=== 20:57:49 $ grep -n -e "assign dut_lockup" -e "assign irq_out" ~/builds/minimal/xdc/minimal_wrapper_skeleton.sv
+73:  assign dut_lockup = 1'b0;  // not driven by this design: its safe-idle value
+74:  assign irq_out = 1'b0;  // not driven by this design: its safe-idle value
+=== rc=0 took=1s
+
+=== 20:57:56 $ harness-manager kit build ~/builds/minimal --jobs 4
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.jou -tclargs JOBS=4
+  Vivado 2026.1 (install root); the kit needs 2026.1
+  `vivado` on PATH is Vivado 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado), not this kit's 2026.1: a bare `vivado` runs 2024.1, and build_rm.tcl refuses it. Run the full path Harness Manager prints (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado), or put its bin first on PATH: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the last HM_RM_BUILD_* line and the receipt in out/)
+=== rc=0 took=6s
+
+=== 20:58:02 $ harness-manager --json kit build ~/builds/minimal --jobs 4
+{"checks": [{"detail": "`vivado` on PATH is Vivado 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado), not this kit's 2026.1: a bare `vivado` runs 2024.1, and build_rm.tcl refuses it. Run the full path Harness Manager prints (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado), or put its bin first on PATH: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH", "identity": false, "name": "vivado_path", "state": "warning"}], "command": ["/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "-mode", "batch", "-source", "/tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.tcl", "-log", "/tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.log", "-journal", "/tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.jou", "-tclargs", "JOBS=4"], "dir": "/tmpdir/claude-74755/kit-night/home/builds/minimal", "note": "Harness Manager does not run Vivado yet: run this command yourself", "ok": true, "ran": false, "release": "2026.1", "vivado": {"build": 6511674, "disabled": false, "error": "", "found": true, "how": "install root", "on_path": {"build": 5076996, "error": "", "how": "path", "path": "/apps/Xilinx/Vivado/2024.1/bin/vivado", "version": "2024.1"}, "others": [{"build": 0, "error": "", "how": "install root", "path": "/apps/Xilinx/Vivado/2021.1/bin/vivado", "version": "2021.1"}, {"build": 0, "error": "", "how": "install root", "path": "/research/CAD/Xilinx/Vivado/2025.2/Vivado/bin/vivado", "version": "2025.2"}, {"build": 5076996, "error": "", "how": "path", "path": "/apps/Xilinx/Vivado/2024.1/bin/vivado", "version": "2024.1"}], "path": "/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "reason": "", "version": "2026.1", "want": ["2026.1"]}}
+=== rc=0 took=7s
+
+=== 20:58:23 $ nice -n 10 /usr/bin/time -v -o /tmpdir/claude-74755/kit-night/logs/s07_time_v.txt /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.jou -tclargs JOBS=4 > /tmpdir/claude-74755/kit-night/logs/s07c_vivado_stdout.txt 2>&1; echo vivado_rc=$?
+
+=== 20:59:39 $ echo cmd
+cmd
+=== rc=0 took=1s
+
+=== 21:01:33 $ harness-manager kit guide --static-id 0x44EE76D5 --design minimal
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  NEXT   2 Tools            `vivado` on PATH is Vivado 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado), not this kit's 2026.1: a bare `vivado` runs 2024.1, and build_rm.tcl refuses it. Run the full path Harness Manager prints (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado), or put its bin first on PATH: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH; Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  minimal: 47 ports / 148 bits checked; rm_id 0x0100F28A (warning: no rm_id: HM proposes 0x0100F28A)
+  -      5 Build            no build directory yet
+                            waits for 2 tools
+  -      6 Check and add    no passed build yet
+                            waits for 5 build
+next: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH
+=== rc=0 took=39s
+
+=== 21:02:12 $ harness-manager kit guide --static-id 0x44EE76D5 --design minimal --build-dir ~/builds/minimal
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  NEXT   2 Tools            `vivado` on PATH is Vivado 2024.1 (/apps/Xilinx/Vivado/2024.1/bin/vivado), not this kit's 2026.1: a bare `vivado` runs 2024.1, and build_rm.tcl refuses it. Run the full path Harness Manager prints (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado), or put its bin first on PATH: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH; Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  minimal: 47 ports / 148 bits checked; rm_id 0x0100F28A (warning: no rm_id: HM proposes 0x0100F28A)
+  -      5 Build            no receipt in /tmpdir/claude-74755/kit-night/home/builds/minimal/out yet
+                            waits for 2 tools
+  -      6 Check and add    no passed build yet
+                            waits for 5 build
+next: export PATH=/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin:$PATH
+=== rc=0 took=36s
+
+=== 21:03:27 $ for g in rm_timing pr_verify tcl_error clearing_fits sources_given; do harness-manager kit guide --why $g; done
+rm_timing: negative slack in the RM's own paths, or an RM-internal async crossing left unconstrained: add an RM_XDC (read_xdc -cell). ALLOW_TIMING_FAIL=1 is for experiments only.
+pr_verify: the static in the build is not the reference: fetch the kit again, and do not mix kits.
+tcl_error: a Tcl or Vivado error outside any gate: read build_rm.log at the line before HM_RM_BUILD_FAILED.
+clearing_fits: the clearing is larger than the harness's arena: shrink the RM, or ask for a harness with a larger clr_max.
+sources_given: no RTL was named: set build.sources in the design, or RM_SOURCES.
+=== rc=0 took=4s
+
+=== 21:43:22 $ harness-manager kit check ~/builds/minimal; echo; harness-manager kit pack ~/builds/minimal --import
+harness-manager: no build receipt in /tmpdir/claude-74755/kit-night/home/builds/minimal — build_rm.tcl writes <rm>_build.json in its OUT_DIR; run the build first
+
+harness-manager: no build receipt in /tmpdir/claude-74755/kit-night/home/builds/minimal — build_rm.tcl writes <rm>_build.json in its OUT_DIR; run the build first
+=== rc=3 took=4s
+vivado_rc=0
+=== rc=0 took=3388s
+
+=== 21:55:41 $ harness-manager kit check ~/builds/minimal
+the build minimal: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 24 gates
+  ok        rm_id                        the netlist drives 0x0100F28A
+  ok        static_id                    built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)
+  ok        partial                      minimal_partial.bin: 1244136 B, CRC-32 0x5BAB2009 as built
+  ok        clearing                     minimal_partial_clear.bin: 67748 B, CRC-32 0x0B0F0205 as built
+  ok        partial: bit_header_length   header declares 1244136 B, payload is 1244136 B
+  ok        partial: part                xcku115-flvb1760-1-c (want xcku115-flvb1760-1-c)
+  ok        partial: partial_flag        PARTIAL=TRUE
+  ok        partial: stream              2 sections, every packet walked to DESYNC, 196800 FDRI words, 6239 frames
+  ok        partial: idcode              0x0390D093=SLR0
+  ok        partial: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        partial: role                the commands say 'partial'
+  ok        partial: frame_box           {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}
+  ok        partial: vocabulary          commands and registers are a subset of the reference partial's
+  ok        bit_bin_pair                 minimal_partial.bin carries the payload of minimal_partial.bit
+  ok        clearing: stream             3 sections, every packet walked to DESYNC, 11562 FDRI words, 286 frames
+  ok        clearing: idcode             0x0390D093=SLR0
+  ok        clearing: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        clearing: role               the commands say 'clearing'
+  ok        clearing: frame_box          {'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}
+  ok        clearing: vocabulary         commands and registers are a subset of the reference clearing's
+  ok        clearing_fits                clearing payload 67748 B of the 1048576 B the harness holds
+  ok        clearing_pairs_partial       the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}
+  unchecked static_binding               a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it
+=== rc=0 took=2s
+
+=== 21:55:43 $ harness-manager kit check ~/builds/minimal --static-id 0x44EE76D5
+the build minimal: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 24 gates
+  ok        rm_id                        the netlist drives 0x0100F28A
+  ok        static_id                    built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)
+  ok        partial                      minimal_partial.bin: 1244136 B, CRC-32 0x5BAB2009 as built
+  ok        clearing                     minimal_partial_clear.bin: 67748 B, CRC-32 0x0B0F0205 as built
+  ok        expected_static              built for 0x44EE76D5; --static-id is 0x44EE76D5
+  ok        partial: bit_header_length   header declares 1244136 B, payload is 1244136 B
+  ok        partial: part                xcku115-flvb1760-1-c (want xcku115-flvb1760-1-c)
+  ok        partial: partial_flag        PARTIAL=TRUE
+  ok        partial: stream              2 sections, every packet walked to DESYNC, 196800 FDRI words, 6239 frames
+  ok        partial: idcode              0x0390D093=SLR0
+  ok        partial: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        partial: role                the commands say 'partial'
+  ok        partial: frame_box           {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}
+  ok        partial: vocabulary          commands and registers are a subset of the reference partial's
+  ok        bit_bin_pair                 minimal_partial.bin carries the payload of minimal_partial.bit
+  ok        clearing: stream             3 sections, every packet walked to DESYNC, 11562 FDRI words, 286 frames
+  ok        clearing: idcode             0x0390D093=SLR0
+  ok        clearing: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        clearing: role               the commands say 'clearing'
+  ok        clearing: frame_box          {'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}
+  ok        clearing: vocabulary         commands and registers are a subset of the reference clearing's
+  ok        clearing_fits                clearing payload 67748 B of the 1048576 B the harness holds
+  ok        clearing_pairs_partial       the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}
+  unchecked static_binding               a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it
+=== rc=0 took=3s
+
+=== 21:55:46 $ harness-manager --json kit check ~/builds/minimal --static-id 0x44EE76D5
+{"checks": [{"detail": "the build passed 24 gates", "identity": false, "name": "build", "state": "ok"}, {"detail": "the netlist drives 0x0100F28A", "identity": false, "name": "rm_id", "state": "ok"}, {"detail": "built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)", "identity": false, "name": "static_id", "state": "ok"}, {"detail": "minimal_partial.bin: 1244136 B, CRC-32 0x5BAB2009 as built", "identity": false, "name": "partial", "state": "ok"}, {"detail": "minimal_partial_clear.bin: 67748 B, CRC-32 0x0B0F0205 as built", "identity": false, "name": "clearing", "state": "ok"}, {"detail": "built for 0x44EE76D5; --static-id is 0x44EE76D5", "identity": true, "name": "expected_static", "state": "ok"}, {"detail": "header declares 1244136 B, payload is 1244136 B", "identity": false, "name": "partial: bit_header_length", "state": "ok"}, {"detail": "xcku115-flvb1760-1-c (want xcku115-flvb1760-1-c)", "identity": false, "name": "partial: part", "state": "ok"}, {"detail": "PARTIAL=TRUE", "identity": false, "name": "partial: partial_flag", "state": "ok"}, {"detail": "2 sections, every packet walked to DESYNC, 196800 FDRI words, 6239 frames", "identity": false, "name": "partial: stream", "state": "ok"}, {"detail": "0x0390D093=SLR0", "identity": false, "name": "partial: idcode", "state": "ok"}, {"detail": "no IPROG, AXSS, WBSTAR or SLR pass-through", "identity": false, "name": "partial: device_global_writes", "state": "ok"}, {"detail": "the commands say 'partial'", "identity": false, "name": "partial: role", "state": "ok"}, {"detail": "{'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}", "identity": false, "name": "partial: frame_box", "state": "ok"}, {"detail": "commands and registers are a subset of the reference partial's", "identity": false, "name": "partial: vocabulary", "state": "ok"}, {"detail": "minimal_partial.bin carries the payload of minimal_partial.bit", "identity": false, "name": "bit_bin_pair", "state": "ok"}, {"detail": "3 sections, every packet walked to DESYNC, 11562 FDRI words, 286 frames", "identity": false, "name": "clearing: stream", "state": "ok"}, {"detail": "0x0390D093=SLR0", "identity": false, "name": "clearing: idcode", "state": "ok"}, {"detail": "no IPROG, AXSS, WBSTAR or SLR pass-through", "identity": false, "name": "clearing: device_global_writes", "state": "ok"}, {"detail": "the commands say 'clearing'", "identity": false, "name": "clearing: role", "state": "ok"}, {"detail": "{'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}", "identity": false, "name": "clearing: frame_box", "state": "ok"}, {"detail": "commands and registers are a subset of the reference clearing's", "identity": false, "name": "clearing: vocabulary", "state": "ok"}, {"detail": "clearing payload 67748 B of the 1048576 B the harness holds", "identity": false, "name": "clearing_fits", "state": "ok"}, {"detail": "the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}", "identity": false, "name": "clearing_pairs_partial", "state": "ok"}, {"detail": "a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it", "identity": false, "name": "static_binding", "state": "unchecked"}], "facts": {"pair": {"clearing": {"bytes": 67748, "cmds": ["AGHIGH", "DESYNC", "MFW", "NULL", "RCRC", "SHUTDOWN", "WCFG"], "crc32": "0x0b0f0205", "file": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial_clear.bin", "frames": {"block_types": [0], "by_block": {"0": {"columns": [101, 193], "rows": [0, 1]}}, "columns": [101, 193], "far_distinct": 286, "rows": [0, 1]}, "header": {"date": null, "declared_len": null, "design": null, "part": null, "time": null, "tokens": {}}, "kind": "bin", "payload_bytes": 67748, "payload_sha256": "810683ab4addbd96ec77602199b6261da6ed0fd3a4df401a8c938e7440bf5ce4", "regs": ["CMD", "COR0", "CRC", "CTL0", "CTL1", "FAR", "FDRI", "IDCODE", "MASK", "MFWR"], "role": "clearing", "sections": [{"axss": [], "cmds": ["RCRC", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "DESYNC"], "crc_writes": 1, "end": "desync", "far_count": 299, "fdri_words": 11562, "idcodes": ["0x0390D093"], "mfwr_writes": 246, "offset": 80, "regs": {"CMD": 79, "CRC": 1, "CTL0": 1, "CTL1": 2, "FAR": 299, "FDRI": 52, "IDCODE": 1, "MASK": 3, "MFWR": 246}, "unknown": []}, {"axss": [], "cmds": ["SHUTDOWN", "RCRC", "DESYNC"], "crc_writes": 0, "end": "desync", "far_count": 0, "fdri_words": 0, "idcodes": [], "mfwr_writes": 0, "offset": 65828, "regs": {"CMD": 3, "COR0": 1}, "unknown": []}, {"axss": [], "cmds": ["RCRC", "SHUTDOWN", "AGHIGH", "DESYNC"], "crc_writes": 2, "end": "desync", "far_count": 1, "fdri_words": 0, "idcodes": ["0x0390D093"], "mfwr_writes": 0, "offset": 66580, "regs": {"CMD": 4, "CRC": 2, "CTL1": 1, "FAR": 1, "IDCODE": 1, "MASK": 1}, "unknown": []}], "sha256": "810683ab4addbd96ec77602199b6261da6ed0fd3a4df401a8c938e7440bf5ce4"}, "partial": {"bytes": 1244372, "cmds": ["DESYNC", "GRESTORE", "LFRM", "MFW", "NULL", "RCRC", "SHUTDOWN", "START", "WCFG"], "crc32": "0x52cf87ec", "file": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial.bit", "frames": {"block_types": [0, 1], "by_block": {"0": {"columns": [94, 200], "rows": [0, 1]}, "1": {"columns": [6, 11], "rows": [0, 1]}}, "columns": [6, 200], "far_distinct": 6239, "rows": [0, 1]}, "header": {"date": "2026/09/29", "declared_len": 1244136, "design": "shell_top", "part": "xcku115-flvb1760-1-c", "time": "21:54:28", "tokens": {"COMPRESS": "TRUE", "PARTIAL": "TRUE", "SW_CRC": "e6c55e45", "SW_HDR_SHA256": "e43e01efc00819bcbe12983093f0a78f7b2e342f51a5a510c5708509057e85ed", "UserID": "0XFFFFFFFF", "Version": "2026.1"}}, "kind": "bit", "payload_bytes": 1244136, "payload_sha256": "86e27c2e9bc064d297473db43c92b5681bc21c026e7475dadf08f7cb134e4f81", "regs": ["CMD", "COR0", "CRC", "CTL0", "CTL1", "FAR", "FDRI", "IDCODE", "MASK", "MFWR"], "role": "partial", "sections": [{"axss": [], "cmds": ["RCRC", "SHUTDOWN", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "GRESTORE", "LFRM", "START", "DESYNC"], "crc_writes": 2, "end": "desync", "far_count": 6321, "fdri_words": 191634, "idcodes": ["0x0390D093"], "mfwr_writes": 5925, "offset": 80, "regs": {"CMD": 664, "COR0": 1, "CRC": 2, "CTL0": 3, "CTL1": 2, "FAR": 6321, "FDRI": 403, "IDCODE": 1, "MASK": 5, "MFWR": 5925}, "unknown": []}, {"axss": [], "cmds": ["RCRC", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "DESYNC"], "crc_writes": 1, "end": "desync", "far_count": 147, "fdri_words": 5166, "idcodes": ["0x0390D093"], "mfwr_writes": 120, "offset": 1212348, "regs": {"CMD": 49, "CRC": 1, "CTL0": 1, "CTL1": 2, "FAR": 147, "FDRI": 26, "IDCODE": 1, "MASK": 3, "MFWR": 120}, "unknown": []}], "sha256": "eb2324025aa30b6573ad752eb3f183aeceae754b42cfd640460c9b12d92fa209"}}, "receipt": {"built": "2026-09-29T20:54:48Z", "clearing_bin": "minimal_partial_clear.bin", "clearing_crc32": "0x0B0F0205", "clearing_len": "67748", "gates": [{"detail": "running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it", "gate": "vivado_version", "verdict": "PASS"}, {"detail": "xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)", "gate": "part_installed", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/kit/static/static_routed_locked.dcp", "gate": "static_dcp_present", "verdict": "PASS"}, {"detail": "CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5", "gate": "static_id", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/xdc/minimal_wrapper_skeleton.sv", "gate": "source_present", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/xdc/minimal_ooc.xdc (harness-manager xdc rm-kit writes it)", "gate": "ooc_xdc_present", "verdict": "PASS"}, {"detail": "none", "gate": "no_black_boxes", "verdict": "PASS"}, {"detail": "148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)", "gate": "boundary_bits", "verdict": "PASS"}, {"detail": "the netlist drives rm_id 0x0100F28A, RM_ID is 0x0100F28A (the shell compares them after every swap)", "gate": "rm_id_match", "verdict": "PASS"}, {"detail": "OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)", "gate": "ooc_clocks", "verdict": "PASS"}, {"detail": "u_rp_dut in static_routed_locked.dcp", "gate": "rp_cell", "verdict": "PASS"}, {"detail": "148 partition pins after link, the boundary has 148", "gate": "rp_pins_link", "verdict": "PASS"}, {"detail": "22 clocks propagated from the static", "gate": "clocks_after_link", "verdict": "PASS"}, {"detail": "no HDPR-16/18/50, no Error", "gate": "drc_hdpr_link", "verdict": "PASS"}, {"detail": "148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)", "gate": "rp_pins_opt", "verdict": "PASS"}, {"detail": "no HDPR-16/18/50, no Error", "gate": "drc_routed", "verdict": "PASS"}, {"detail": "your RM's paths (3 registers): setup WNS none (no timed path), hold WHS none (no timed path)", "gate": "rm_timing", "verdict": "PASS"}, {"detail": "compatible with static_routed_locked.dcp", "gate": "pr_verify", "verdict": "PASS"}, {"detail": "no debug core in the partition: no .ltx", "gate": "ltx", "verdict": "NOTE"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial.bin", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial_clear.bin", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial.bit", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial_clear.bit", "gate": "artefact", "verdict": "PASS"}, {"detail": "clearing 67748 B, the harness holds 1048576 B", "gate": "clearing_fits", "verdict": "PASS"}], "kit_id": "mps3/0x44EE76D5/vivado-2026.1", "part": "xcku115-flvb1760-1-c", "partial_bin": "minimal_partial.bin", "partial_crc32": "0x5BAB2009", "partial_len": "1244136", "path": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_build.json", "pr_verify_ref": "static_routed_locked.dcp", "rm_id": "0x0100F28A", "rm_id_netlist": "0x0100F28A", "rm_name": "minimal", "rm_top": "rm_minimal", "rm_whs": "", "rm_wns": "", "rp_inst": "u_rp_dut", "stage": "bitstream", "state": "passed", "static_id": "0x44EE76D5", "static_usercode": "0xFB1F8C76", "vivado": "2026.1"}}, "ok": true, "passed": true, "static_id": "0x44EE76D5"}
+=== rc=0 took=2s
+
+=== 21:55:53 $ harness-manager kit pack ~/builds/minimal --import
+overlay minimal (0x0100F28A) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-night/home/builds/minimal/overlay/minimal
+imported into the store (3f84f88675bf): it shows in Program
+=== rc=0 took=2s
+
+=== 21:56:01 $ harness-manager overlays
+harness-manager: harness-manager overlays: the following arguments are required: TARGET — run `harness-manager overlays --help`
+=== rc=2 took=1s
+
+=== 21:56:02 $ python /tmpdir/claude-74755/kit-night/overlays_boardfree.py 0x44EE76D5 1048576
+state dir /tmpdir/claude-74755/kit-night/home/.config/harness-manager; simulated live shell_id 0x44EE76D5 (NO board), clr_max 1048576
+Traceback (most recent call last):
+  File "/tmpdir/claude-74755/kit-night/overlays_boardfree.py", line 27, in <module>
+    print(f"catalogue: {len(cat.entries())} overlay(s); rejects: {cat.rejects() or 'none'}")
+                                                                  ^^^^^^^^^^^^^
+TypeError: 'dict' object is not callable
+=== rc=1 took=1s
+
+=== 21:56:03 $ python /tmpdir/claude-74755/kit-night/overlays_boardfree.py 0x72BB0A36 262144
+state dir /tmpdir/claude-74755/kit-night/home/.config/harness-manager; simulated live shell_id 0x72BB0A36 (NO board), clr_max 262144
+Traceback (most recent call last):
+  File "/tmpdir/claude-74755/kit-night/overlays_boardfree.py", line 27, in <module>
+    print(f"catalogue: {len(cat.entries())} overlay(s); rejects: {cat.rejects() or 'none'}")
+                                                                  ^^^^^^^^^^^^^
+TypeError: 'dict' object is not callable
+=== rc=1 took=2s
+
+=== 21:56:11 $ python /tmpdir/claude-74755/kit-night/overlays_boardfree.py 0x44EE76D5 1048576
+state dir /tmpdir/claude-74755/kit-night/home/.config/harness-manager; simulated live shell_id 0x44EE76D5 (NO board), clr_max 1048576
+catalogue: 1 overlay(s); rejects: none
+
+minimal  rm_id 0x0100f28a  static 0x44ee76d5  origin store  size 1311884  ip_class unknown  -> PROGRAMMABLE (board-free items)
+  ok         shell_id matches 0x44ee76d5
+  ok         crc and length clearing 67748 B crc 0x0b0f0205, partial 1244136 B crc 0x5bab2009
+  ok         clearing pairs partial both payload blobs were imported for rm_id 0x0100f28a
+  ok         clearing fits  67748 B of the 1048576 B the harness's clr_max
+  unchecked  static_usercode matches needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76)
+  ok         pyverify       Overlay.validate(expected_static_id=0x44EE76D5) passed
+  (not run)  control/transport need a live shell
+=== rc=0 took=2s
+
+=== 21:56:13 $ python /tmpdir/claude-74755/kit-night/overlays_boardfree.py 0x72BB0A36 262144
+state dir /tmpdir/claude-74755/kit-night/home/.config/harness-manager; simulated live shell_id 0x72BB0A36 (NO board), clr_max 262144
+catalogue: 1 overlay(s); rejects: none
+
+minimal  rm_id 0x0100f28a  static 0x44ee76d5  origin store  size 1311884  ip_class unknown  -> REFUSED
+  mismatch   shell_id matches overlay built for shell 0x44ee76d5, the board runs 0x72bb0a36 (a shell rebuild invalidates every partial; overlay-manifest.md)
+  ok         crc and length clearing 67748 B crc 0x0b0f0205, partial 1244136 B crc 0x5bab2009
+  ok         clearing pairs partial both payload blobs were imported for rm_id 0x0100f28a
+  ok         clearing fits  67748 B of the 262144 B the harness's clr_max
+  unchecked  static_usercode matches needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76)
+  MISMATCH   pyverify       Overlay.validate: static_id mismatch: manifest=0x44ee76d5 running shell=0x72bb0a36 (a shell rebuild invalidates every stored partial — overlay-manifest.md)
+  (not run)  control/transport need a live shell
+=== rc=1 took=2s
+
+=== 21:56:39 $ export HARNESS_MANAGER_STATE_DIR=/tmpdir/claude-74755/kit-night/state2; harness-manager kit list; harness-manager kit check /tmpdir/claude-74755/kit-night/handover/minimal_0x0100F28A/out/minimal_build.json --static-id 0x44EE76D5 | head -3; harness-manager kit pack /tmpdir/claude-74755/kit-night/handover/minimal_0x0100F28A/out/minimal_build.json --out /tmpdir/claude-74755/kit-night/state2-overlay --import; python /tmpdir/claude-74755/kit-night/overlays_boardfree.py 0x44EE76D5 1048576 | head -4
+no kits cached: harness-manager kit fetch --static-id ID
+the build minimal: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 24 gates
+  ok        rm_id                        the netlist drives 0x0100F28A
+overlay minimal (0x0100F28A) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-night/state2-overlay/minimal
+imported into the store (3f84f88675bf): it shows in Program
+state dir /tmpdir/claude-74755/kit-night/state2; simulated live shell_id 0x44EE76D5 (NO board), clr_max 1048576
+catalogue: 1 overlay(s); rejects: none
+
+minimal  rm_id 0x0100f28a  static 0x44ee76d5  origin store  size 1311884  ip_class unknown  -> PROGRAMMABLE (board-free items)
+=== rc=0 took=4s
+
+=== 21:57:02 $ source /research/CAD/Xilinx/Vivado/2026.1/Vivado/settings64.sh; harness-manager kit guide --static-id 0x44EE76D5 --design minimal --build-dir ~/builds/minimal
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  done   2 Tools            Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  minimal: 47 ports / 148 bits checked; rm_id 0x0100F28A (warning: no rm_id: HM proposes 0x0100F28A)
+  done   5 Build            minimal passed 24 gates (minimal_build.json; static 0x44EE76D5)
+  done   6 Check and add    minimal 0x0100F28A is in the store: Program it
+=== rc=0 took=57s
+
+=== 21:58:17 $ source /research/CAD/Xilinx/Vivado/2026.1/Vivado/settings64.sh; harness-manager --json kit guide --static-id 0x44EE76D5 --design minimal --build-dir ~/builds/minimal
+{"board_id": "", "build_dir": "/tmpdir/claude-74755/kit-night/home/builds/minimal", "design": "minimal", "kit_id": "mps3/0x44EE76D5/vivado-2026.1", "next": null, "ok": true, "pack": "mps3", "profile": {"boundary_bits": 148, "boundary_ports": 47, "clr_max": 1048576, "harness_impl": "linux", "kit_id": "mps3/0x44EE76D5/vivado-2026.1", "pack": "mps3", "part": "xcku115-flvb1760-1-c", "rp_inst": "u_rp_dut", "rp_pblock": "pblock_rp_dut", "source": "kit", "static_id": "0x44EE76D5", "static_usercode": "0xFB1F8C76", "user_design_ids": [32768, 65535], "vivado": "2026.1", "vivado_build": 6511674}, "receipt": {"built": "2026-09-29T20:54:48Z", "clearing_bin": "minimal_partial_clear.bin", "clearing_crc32": "0x0B0F0205", "clearing_len": "67748", "gates": [{"detail": "running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it", "gate": "vivado_version", "verdict": "PASS"}, {"detail": "xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)", "gate": "part_installed", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/kit/static/static_routed_locked.dcp", "gate": "static_dcp_present", "verdict": "PASS"}, {"detail": "CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5", "gate": "static_id", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/xdc/minimal_wrapper_skeleton.sv", "gate": "source_present", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/xdc/minimal_ooc.xdc (harness-manager xdc rm-kit writes it)", "gate": "ooc_xdc_present", "verdict": "PASS"}, {"detail": "none", "gate": "no_black_boxes", "verdict": "PASS"}, {"detail": "148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)", "gate": "boundary_bits", "verdict": "PASS"}, {"detail": "the netlist drives rm_id 0x0100F28A, RM_ID is 0x0100F28A (the shell compares them after every swap)", "gate": "rm_id_match", "verdict": "PASS"}, {"detail": "OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)", "gate": "ooc_clocks", "verdict": "PASS"}, {"detail": "u_rp_dut in static_routed_locked.dcp", "gate": "rp_cell", "verdict": "PASS"}, {"detail": "148 partition pins after link, the boundary has 148", "gate": "rp_pins_link", "verdict": "PASS"}, {"detail": "22 clocks propagated from the static", "gate": "clocks_after_link", "verdict": "PASS"}, {"detail": "no HDPR-16/18/50, no Error", "gate": "drc_hdpr_link", "verdict": "PASS"}, {"detail": "148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)", "gate": "rp_pins_opt", "verdict": "PASS"}, {"detail": "no HDPR-16/18/50, no Error", "gate": "drc_routed", "verdict": "PASS"}, {"detail": "your RM's paths (3 registers): setup WNS none (no timed path), hold WHS none (no timed path)", "gate": "rm_timing", "verdict": "PASS"}, {"detail": "compatible with static_routed_locked.dcp", "gate": "pr_verify", "verdict": "PASS"}, {"detail": "no debug core in the partition: no .ltx", "gate": "ltx", "verdict": "NOTE"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial.bin", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial_clear.bin", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial.bit", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_partial_clear.bit", "gate": "artefact", "verdict": "PASS"}, {"detail": "clearing 67748 B, the harness holds 1048576 B", "gate": "clearing_fits", "verdict": "PASS"}], "kit_id": "mps3/0x44EE76D5/vivado-2026.1", "part": "xcku115-flvb1760-1-c", "partial_bin": "minimal_partial.bin", "partial_crc32": "0x5BAB2009", "partial_len": "1244136", "path": "/tmpdir/claude-74755/kit-night/home/builds/minimal/out/minimal_build.json", "pr_verify_ref": "static_routed_locked.dcp", "rm_id": "0x0100F28A", "rm_id_netlist": "0x0100F28A", "rm_name": "minimal", "rm_top": "rm_minimal", "rm_whs": "", "rm_wns": "", "rp_inst": "u_rp_dut", "stage": "bitstream", "state": "passed", "static_id": "0x44EE76D5", "static_usercode": "0xFB1F8C76", "vivado": "2026.1"}, "rm_id": {"name": "minimal", "proposed": true, "rm_id": "0x0100F28A"}, "static_id": "0x44EE76D5", "steps": [{"actions": [], "checks": [], "detail": "static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c", "id": "target", "n": 1, "reason": "", "state": "done", "title": "Target"}, {"actions": [], "checks": [{"detail": "Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado", "identity": false, "name": "vivado", "state": "ok"}, {"detail": "`vivado` on PATH is Vivado 2026.1 (/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado)", "identity": false, "name": "vivado_path", "state": "ok"}, {"detail": "Vivado 2026.1 starts (licence tier: ENTERPRISE)", "identity": false, "name": "vivado_launch", "state": "ok"}], "detail": "Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)", "id": "tools", "n": 2, "reason": "", "state": "done", "title": "Tools"}, {"actions": [], "checks": [{"detail": "14 files match their sha256", "identity": false, "name": "files", "state": "ok"}, {"detail": "CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id", "identity": false, "name": "static_id", "state": "ok"}, {"detail": "no board: the kit was not compared with a running static", "identity": true, "name": "shell_id", "state": "unchecked"}, {"detail": "xcku115-flvb1760-1-c", "identity": false, "name": "part", "state": "ok"}, {"detail": "kit 47 ports / 148 bits, pin model 47 / 148", "identity": false, "name": "boundary", "state": "ok"}], "detail": "mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id", "id": "kit", "n": 3, "reason": "", "state": "done", "title": "Kit"}, {"actions": [], "checks": [{"detail": "no rm_id: HM proposes 0x0100F28A", "identity": false, "name": "rm_id_proposed", "state": "warning"}, {"detail": "design id 0xF28A is 'minimal''s own", "identity": false, "name": "rm_id_clash", "state": "ok"}, {"detail": "jtag, dbgbscan, eth, uart, gpio, qspi: not used by this design: tie the outputs to their safe-idle value (the skeleton does)", "identity": false, "name": "xdc:tied_off", "state": "ok"}], "detail": "minimal: 47 ports / 148 bits checked; rm_id 0x0100F28A (warning: no rm_id: HM proposes 0x0100F28A)", "id": "wrapper", "n": 4, "reason": "", "state": "done", "title": "Wrapper and XDC"}, {"actions": [], "checks": [], "detail": "minimal passed 24 gates (minimal_build.json; static 0x44EE76D5)", "id": "build", "n": 5, "reason": "", "state": "done", "title": "Build"}, {"actions": [{"kind": "copy", "text": "harness-manager program TARGET minimal"}], "checks": [{"detail": "the build passed 24 gates", "identity": false, "name": "build", "state": "ok"}, {"detail": "the netlist drives 0x0100F28A", "identity": false, "name": "rm_id", "state": "ok"}, {"detail": "built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)", "identity": false, "name": "static_id", "state": "ok"}, {"detail": "minimal_partial.bin: 1244136 B, CRC-32 0x5BAB2009 as built", "identity": false, "name": "partial", "state": "ok"}, {"detail": "minimal_partial_clear.bin: 67748 B, CRC-32 0x0B0F0205 as built", "identity": false, "name": "clearing", "state": "ok"}, {"detail": "2 sections, every packet walked to DESYNC, 196800 FDRI words, 6239 frames", "identity": false, "name": "partial: stream", "state": "ok"}, {"detail": "0x0390D093=SLR0", "identity": false, "name": "partial: idcode", "state": "ok"}, {"detail": "no IPROG, AXSS, WBSTAR or SLR pass-through", "identity": false, "name": "partial: device_global_writes", "state": "ok"}, {"detail": "the commands say 'partial'", "identity": false, "name": "partial: role", "state": "ok"}, {"detail": "{'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}", "identity": false, "name": "partial: frame_box", "state": "ok"}, {"detail": "commands and registers are a subset of the reference partial's", "identity": false, "name": "partial: vocabulary", "state": "ok"}, {"detail": "3 sections, every packet walked to DESYNC, 11562 FDRI words, 286 frames", "identity": false, "name": "clearing: stream", "state": "ok"}, {"detail": "0x0390D093=SLR0", "identity": false, "name": "clearing: idcode", "state": "ok"}, {"detail": "no IPROG, AXSS, WBSTAR or SLR pass-through", "identity": false, "name": "clearing: device_global_writes", "state": "ok"}, {"detail": "the commands say 'clearing'", "identity": false, "name": "clearing: role", "state": "ok"}, {"detail": "{'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}", "identity": false, "name": "clearing: frame_box", "state": "ok"}, {"detail": "commands and registers are a subset of the reference clearing's", "identity": false, "name": "clearing: vocabulary", "state": "ok"}, {"detail": "clearing payload 67748 B of the 1048576 B the harness holds", "identity": false, "name": "clearing_fits", "state": "ok"}, {"detail": "the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}", "identity": false, "name": "clearing_pairs_partial", "state": "ok"}, {"detail": "a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it", "identity": false, "name": "static_binding", "state": "unchecked"}], "detail": "minimal 0x0100F28A is in the store: Program it", "id": "check", "n": 6, "reason": "", "state": "done", "title": "Check and add"}], "troubleshooting": {"checks": {"bit_bin_pair": "the .bin is not the .bit's payload: a .bin from another build; copy out/ again.", "bit_header_length": "not a Xilinx .bit: use the .bit or .bin the build wrote in out/.", "board_static": "the build is for another static than the board runs: fetch the board's kit, generate the script again and rebuild. A partial for another static can destroy the FPGA's configuration, and the static_id alone cannot see it.", "build": "the build did not pass: fix the gate its receipt names, then run the build again.", "clearing": "the clearing is not the file the build wrote (another build's, or half-copied): copy out/ from the build again, or rebuild.", "clearing_fits": "the clearing is larger than the harness's arena: shrink the RM, or ask for a harness with a larger clr_max.", "clearing_pairs_partial": "the clearing's frames are not inside the partial's: a clearing from another RM.", "device_global_writes": "the stream writes IPROG, AXSS or WBSTAR, or passes to another SLR: a partial never does. It is a full image: use this build's partial.", "expected_static": "the build is for another static than the one --static-id names (the receipt's static_id is the CRC-32 of the DCP the build opened): build again with `kit script --static-id ID`, or check it without the flag to see which static it is for.", "files": "a kit file does not match its sha256 (corrupt or edited): fetch the kit again.", "frame_box": "frames outside the partition: a partial for another partition or another floorplan.", "idcode": "another device's bitstream, or a multi-SLR image: use this build's pair.", "kit": "the kit of the build's static is not cached, so the partition's frames were not compared: fetch the kit, then check again.", "ltx": "the .ltx is not the one the build wrote: copy out/ again; a stale .ltx names probes the partial does not have.", "part": "a bitstream for another device: use this build's pair.", "partial": "the partial is not the file the build wrote (another build's, or half-copied): copy out/ from the build again, or rebuild.", "partial_flag": "a full image, not a partial: use the <name>_partial.bit the build wrote.", "rm_id": "the netlist drives another rm_id than RM_ID (or 0, the greybox's): make the wrapper's localparam and the design's rm_id one value, then rebuild.", "rm_id_clash": "the design id is another design's: Program and the CLCD would show that name. Take the rm_id HM proposes (add it to the design to keep it).", "rm_id_range": "the design id is in the platform's range: user designs take 0x8000-0xFFFF. Take the rm_id HM proposes.", "role": "the partial and the clearing are swapped (a partial issues START, a clearing AGHIGH): swap the two files.", "shell_id": "the kit is for another static than the board runs: fetch the board's own kit.", "static_id": "the receipt names no static: it was not written by build_rm.tcl, or was edited; rebuild.", "stream": "the file is truncated or not a configuration stream: copy it again.", "usercode": "the kit is for another implementation run of this static: fetch the kit again from the release that fielded the board.", "vivado": "another Vivado ran the script. A kit needs the release that wrote its static (2024.1 refuses a 2026.1 DCP with [Runs 36-378]): run that one.", "vivado_path": "the `vivado` on PATH is another release than the kit's (a login profile may put one first): run the full path `kit build` prints, or put the kit's release first on PATH (`export PATH=<its bin>:$PATH`).", "vocabulary": "commands or registers the kit's own partials never use: not a partial of this partition.", "xdc": "the design fails an XDC check: fix the port or group it names (the XDC section previews the same checks).", "xdc:static_id": "HM's pin model describes another static, so it cannot write this kit's XDCs or check the wrapper: build for the static the model has (the XDC section names it)."}, "gates": [{"fix": "another Vivado ran the script. A kit needs the release that wrote its static (2024.1 refuses a 2026.1 DCP with [Runs 36-378]): run that one.", "gate": "vivado_version"}, {"fix": "the device family is not installed with this Vivado: add UltraScale (Kintex) with the Vivado installer.", "gate": "part_installed"}, {"fix": "the kit's DCP is not where the script looks: run `harness-manager kit script` again, or fetch the kit.", "gate": "static_dcp_present"}, {"fix": "the DCP is not the kit's static (a wrong, stale or corrupt copy): `harness-manager kit fetch` again. Never rebuild the static.", "gate": "static_id"}, {"fix": "RM_ID must be a 32-bit hex literal such as 0x01008000.", "gate": "rm_id_format"}, {"fix": "rm_id 0 is the greybox's: give the RM its own (HM proposes one).", "gate": "rm_id_nonzero"}, {"fix": "a file in RM_SOURCES does not exist: fix the path in the design.", "gate": "source_present"}, {"fix": "no RTL was named: set build.sources in the design, or RM_SOURCES.", "gate": "sources_given"}, {"fix": "the OOC XDC is missing: `harness-manager xdc rm-kit` writes it.", "gate": "ooc_xdc_present"}, {"fix": "PR_VERIFY_REF names a file that does not exist: leave it empty (the locked static is the reference) or fix the path.", "gate": "pr_verify_ref_present"}, {"fix": "RM_SYNTH_DCP names a file that does not exist: fix the path, or leave it empty to synthesise from RM_SOURCES.", "gate": "synth_dcp_present"}, {"fix": "RM_XDC names a file that does not exist: fix the path in the design.", "gate": "rm_xdc_present"}, {"fix": "a module synthesised as a black box: a source file is missing from RM_SOURCES; the listed cells name the missing modules.", "gate": "no_black_boxes"}, {"fix": "the wrapper's ports are not the partition's: start again from the kit's wrapper skeleton (xdc/<name>_wrapper_skeleton.sv).", "gate": "boundary_bits"}, {"fix": "rm_id is driven by logic: drive rm_id from one constant.", "gate": "rm_id_constant"}, {"fix": "the netlist's rm_id differs from RM_ID: make the localparam and the design's rm_id one value (HM writes the manifest from the netlist's).", "gate": "rm_id_match"}, {"fix": "nothing was timed: read the kit's OOC XDC (xdc/<name>_ooc.xdc).", "gate": "ooc_clocks"}, {"fix": "the partition instance is not in the static: the wrong kit for this script.", "gate": "rp_cell"}, {"fix": "the partition's pin count changed at link: the wrong kit for this static, or a static-side debug core; tell the lab.", "gate": "rp_pins_link"}, {"fix": "no clock reached the partition: the wrong kit, or a broken static.", "gate": "clocks_after_link"}, {"fix": "HDPR-16: an ILA with no RM-side debug hub (add the dbgbscan group and an RM-side debug_bridge); HDPR-18/50: a BUFG, MMCM, BSCAN or pad inside the RM (generate no clocks in the RM).", "gate": "drc_hdpr_link"}, {"fix": "opt_design changed the partition's pins: a static-side debug core punched hub ports into it; tell the lab.", "gate": "rp_pins_opt"}, {"fix": "a routed DRC error inside the partition: read <name>_drc.rpt.", "gate": "drc_routed"}, {"fix": "negative slack in the RM's own paths, or an RM-internal async crossing left unconstrained: add an RM_XDC (read_xdc -cell). ALLOW_TIMING_FAIL=1 is for experiments only.", "gate": "rm_timing"}, {"fix": "the static in the build is not the reference: fetch the kit again, and do not mix kits.", "gate": "pr_verify"}, {"fix": "the .ltx was not written: rerun the bitstream stage.", "gate": "ltx_written"}, {"fix": "a bitstream file is missing: rerun the bitstream stage.", "gate": "artefact"}, {"fix": "the clearing is larger than the harness's arena: shrink the RM, or ask for a harness with a larger clr_max.", "gate": "clearing_fits"}, {"fix": "a Tcl or Vivado error outside any gate: read build_rm.log at the line before HM_RM_BUILD_FAILED.", "gate": "tcl_error"}]}, "vivado": {"build": 6511674, "disabled": false, "error": "", "found": true, "how": "path", "launch": {"action": "", "detail": "Vivado 2026.1 starts (licence tier: ENTERPRISE)", "fix": "", "no_licence": false, "path": "/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado", "ran": true, "rc": 0, "release": "2026.1", "seconds": 17.4, "state": "ok", "tier": "ENTERPRISE"}, "on_path": {"build": 6511674, "error": "", "how": "path", "path": "/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado", "version": "2026.1"}, "others": [{"build": 0, "error": "", "how": "install root", "path": "/apps/Xilinx/Vivado/2021.1/bin/vivado", "version": "2021.1"}, {"build": 0, "error": "", "how": "install root", "path": "/apps/Xilinx/Vivado/2024.1/bin/vivado", "version": "2024.1"}, {"build": 0, "error": "", "how": "install root", "path": "/research/CAD/Xilinx/Vivado/2025.2/Vivado/bin/vivado", "version": "2025.2"}], "path": "/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado", "reason": "", "version": "2026.1", "want": ["2026.1"]}}
+=== rc=0 took=23s
+
+=== 22:02:15 $ harness-manager kit verify mps3_rc2_0x44EE76D5_kit.zip; harness-manager kit list
+mps3_rc2_0x44EE76D5_kit.zip: kit mps3/0x44EE76D5/vivado-2026.1
+  ok        files                        14 files match kit.json (size and sha256)
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  unchecked shell_id                     no board: the kit was not compared with a running static
+  ok        part                         xcku115-flvb1760-1-c
+  ok        boundary                     kit 47 ports / 148 bits, pin model 47 / 148
+0x44EE76D5  mps3/0x44EE76D5/vivado-2026.1      38287216 B  path:/tmpdir/claude-74755/kit-night/home/mps3_rc2_0x44EE76D5_kit.zip
+=== rc=0 took=3s
+
+=== 22:02:18 $ source /research/CAD/Xilinx/Vivado/2026.1/Vivado/settings64.sh; harness-manager kit build ~/builds/minimal --jobs 4 | head -2; harness-manager config test tools vivado
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.jou -tclargs JOBS=4
+  Vivado 2026.1 (path); the kit needs 2026.1
+tools vivado: PASS
+  ok    vivado   Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; the cached kits need 2026.1 (0x44EE76D5)
+=== rc=0 took=7s
+
+=== 22:03:54 $ cd /tmpdir/claude-74755/kit-night/probe && nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -nojournal -log /tmpdir/claude-74755/kit-night/probe/regs.log -source /tmpdir/claude-74755/kit-night/probe/regs.tcl > /tmpdir/claude-74755/kit-night/probe/regs.out 2>&1; echo vivado_rc=$?
+vivado_rc=0
+=== rc=0 took=121s
+
+=== 22:06:42 $ cd /tmpdir/claude-74755/kit-night/probe && nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -nojournal -log /tmpdir/claude-74755/kit-night/probe/slack.log -source /tmpdir/claude-74755/kit-night/probe/slack.tcl > /tmpdir/claude-74755/kit-night/probe/slack.out 2>&1; echo vivado_rc=$?
+vivado_rc=0
+=== rc=0 took=116s
+
+=== 22:08:56 $ cd /tmpdir/claude-74755/kit-night/probe && nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -nojournal -log /tmpdir/claude-74755/kit-night/probe/slack2.log -source /tmpdir/claude-74755/kit-night/probe/slack2.tcl > /tmpdir/claude-74755/kit-night/probe/slack2.out 2>&1; echo vivado_rc=$?
+vivado_rc=0
+=== rc=0 took=95s
+
+=== 22:10:54 $ source /research/CAD/Xilinx/Vivado/2026.1/Vivado/settings64.sh; git -C /home/dam1n19/SoCLabs/hm-kit-night rev-parse --short HEAD; harness-manager kit script --static-id 0x44EE76D5 --design minimal --out ~/builds/minimal_head && harness-manager kit build ~/builds/minimal_head --jobs 4 && tail -3 ~/builds/minimal_head/README.txt
+96f80fa
+minimal (rm_id 0x0100F28A, proposed) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   rm_id_proposed               the design names no rm_id; HM proposes 0x0100F28A (add it to the design to keep it)
+  warning   sources                      the design names no RTL (build.sources, or a wrapper): RM_SOURCES is the XDC kit's skeleton xdc/minimal_wrapper_skeleton.sv, which drives rm_id and ties every other output off. For your own RTL set build.sources, or pass -tclargs RM_SOURCES="a.sv b.sv"
+wrote 22 files to /tmpdir/claude-74755/kit-night/home/builds/minimal_head
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-night/home/builds/minimal_head/out/minimal_build.json
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.jou -tclargs JOBS=4
+  Vivado 2026.1 (path); the kit needs 2026.1
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the last HM_RM_BUILD_* line and the receipt in out/)
+     harness-manager kit pack out/minimal_build.json --import
+
+Every step, with its state: harness-manager kit guide --static-id 0x44EE76D5 --design minimal --build-dir .
+=== rc=0 took=10s
+
+=== 22:11:11 $ nice -n 10 /usr/bin/time -v -o /tmpdir/claude-74755/kit-night/logs/r2_time_v.txt /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.tcl -log /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.log -journal /tmpdir/claude-74755/kit-night/home/builds/minimal_head/build_rm.jou -tclargs JOBS=4 > /tmpdir/claude-74755/kit-night/logs/r2_vivado_stdout.txt 2>&1; echo vivado_rc=$?
+
+=== 22:14:22 $ cd /tmpdir/claude-74755/kit-night/probe/xdcq && nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -nojournal -log /tmpdir/claude-74755/kit-night/probe/xdcq/xdcq.log -source /tmpdir/claude-74755/kit-night/probe/xdcq/xdcq.tcl > /tmpdir/claude-74755/kit-night/probe/xdcq/xdcq.out 2>&1; echo vivado_rc=$?
+vivado_rc=0
+=== rc=0 took=79s
+
+=== 22:15:59 $ cd /tmpdir/claude-74755/kit-night/probe/xdcq && nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-night/home/builds/minimal/build_rm.tcl -log /tmpdir/claude-74755/kit-night/probe/xdcq/link_quiet.log -journal /tmpdir/claude-74755/kit-night/probe/xdcq/link_quiet.jou -tclargs JOBS=2 STOP_AFTER=link OUT_DIR=/tmpdir/claude-74755/kit-night/probe/xdcq/out RM_OOC_XDC=/tmpdir/claude-74755/kit-night/probe/xdcq/minimal_ooc_quiet.xdc > /tmpdir/claude-74755/kit-night/probe/xdcq/link_quiet.out 2>&1; echo vivado_rc=$?
+vivado_rc=0
+=== rc=0 took=239s
+vivado_rc=0
+=== rc=0 took=1718s
+
+=== 22:39:59 $ harness-manager kit check ~/builds/minimal_head --static-id 0x44EE76D5 | head -4; harness-manager kit pack ~/builds/minimal_head --out ~/builds/minimal_head/overlay
+the build minimal: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 24 gates
+  ok        rm_id                        the netlist drives 0x0100F28A
+  ok        static_id                    built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)
+overlay minimal (0x0100F28A) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-night/home/builds/minimal_head/overlay/minimal
+next: harness-manager kit pack /tmpdir/claude-74755/kit-night/home/builds/minimal_head --import  (or: harness-manager program TARGET minimal --overlay-dir /tmpdir/claude-74755/kit-night/home/builds/minimal_head/overlay)
+=== rc=0 took=2s
