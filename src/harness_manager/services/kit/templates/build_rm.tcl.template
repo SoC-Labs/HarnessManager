@@ -193,8 +193,13 @@ proc netlist_rm_id { objs } {
 # Worst setup and hold slack over paths that START or END in the RP -- your
 # RM's paths, not the static's headline (the static is locked and was signed
 # off at the mint; a negative headline elsewhere is not yours to fix).
+# Not yours: at the link Vivado gives every partition clock input the RM leaves
+# unloaded a flop of its own (u_rp_dut/HD_PR_Connection_S_IN_FDCE_<port>, D and
+# CLR tied to GND), so the clock net has a load. minimal on RC2 has three
+# (dut_clk, dbg_bscan_tck, phy_rmii_ref_clk; KIT-NIGHT): they are not counted.
 proc rp_slack { rp_inst } {
     set regs [get_cells -quiet -hierarchical -filter "NAME =~ ${rp_inst}/* && IS_SEQUENTIAL"]
+    set regs [lsearch -all -inline -not -glob $regs "*/HD_PR_Connection_*"]
     if { [llength $regs] == 0 } { return [list "" "" 0] }
     set out {}
     foreach kind {-setup -hold} {

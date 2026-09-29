@@ -199,3 +199,41 @@ def test_the_readme_names_the_design_it_was_written_for(kits, tmp_path, monkeypa
     doc = json.loads(p.read_text())
     s = script.make_script(kits, pack="mps3", static_id=kf.STATIC_ID, design=doc)
     assert "--design <your design .json> --build-dir ." in s.files["README.txt"]
+
+
+# --- rm_timing counts the RM's own flops, not Vivado's DFX connection loads ------------------
+
+
+def _rp_slack(cells: list[str], slack: str = "1.5") -> list[str]:
+    """The template's ``rp_slack``, run in Python's Tcl with ``get_cells`` answering
+    ``cells`` and every path having ``slack``: [wns, whs, nregs], plus what reached
+    ``get_timing_paths``."""
+    tkinter = pytest.importorskip("tkinter")
+    from harness_manager.services.kit import render
+
+    text = render.template_text()
+    a = text.index("proc rp_slack")
+    b = text.index("\n}\n", a) + 3
+    tcl = tkinter.Tcl()
+    tcl.eval("proc get_cells {args} { return $::CELLS }")
+    tcl.eval("set ::SEEN {}")
+    tcl.eval("proc get_timing_paths {args} { lappend ::SEEN [lindex $args end]; return p }")
+    tcl.eval(f"proc get_property {{k p}} {{ return {slack} }}")
+    tcl.call("set", "::CELLS", tuple(cells))
+    tcl.eval(text[a:b])
+    got = tcl.eval("rp_slack u_rp_dut")
+    seen = tcl.eval("lsort -unique [concat {*}$::SEEN]")
+    return [*tcl.splitlist(got), seen]
+
+
+def test_rm_timing_does_not_count_vivados_hd_pr_connection_flops():
+    # what minimal on RC2 really had after the link (the routed DCP, 29 Sep): three flops
+    # Vivado inserted on the unloaded clock inputs; the receipt said "(3 registers)"
+    inserted = [f"u_rp_dut/HD_PR_Connection_S_IN_FDCE_{p}"
+                for p in ("dbg_bscan_tck", "dut_clk", "phy_rmii_ref_clk")]
+    wns, whs, n, seen = _rp_slack(inserted)
+    assert (wns, whs, n) == ("", "", "0")                  # -> "your RM has no registers"
+    assert seen == ""                                      # nothing was timed for them
+    # twin: the RM's own flop beside them is counted and timed, the inserted ones are not
+    wns, whs, n, seen = _rp_slack([*inserted, "u_rp_dut/cnt_reg[0]"])
+    assert (wns, whs, n) == ("1.5", "1.5", "1") and seen == "{u_rp_dut/cnt_reg[0]}"
