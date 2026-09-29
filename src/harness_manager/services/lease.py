@@ -84,7 +84,9 @@ misses, error}``, additive: absent on a fresh view), while ALL of these hold:
   ``READ_RETRY_S`` of the last counted one are the same hiccup: one miss; at the page's 30 s
   cadence the third miss comes ~60-90 s after the last good read);
 - a held lease has not passed its expiry (a lease held here with no readable expiry counts
-  from when it was confirmed plus its TTL), and one held HERE still has its token stored here.
+  from when it was confirmed plus its TTL), and one held HERE still has its token stored here;
+- our release is not carried as "not leased" when others were queued (the hub hands the
+  board to the head of the queue at once).
 
 Otherwise the read's error is raised as before ("lease unknown": not known is not free).
 While a carried state stands the hub is not asked again sooner than ``READ_RETRY_S``.
