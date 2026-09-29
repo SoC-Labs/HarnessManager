@@ -114,6 +114,10 @@ notes_supported: bool                  # messages and keep answers work (False o
 notes_reason: str                      # why not; "" when supported
 can_revoke: bool                       # this client may force-release (REST: admin token only)
 revoke_reason: str                     # why not; "" when it may
+stale:  {confirmed_at, source, misses, error}   # LEASE-FRESH, additive: ABSENT on a fresh
+        # read; present when the hub did not answer and this is the state last known
+        # (source: acquire | release | heartbeat | show). 3 failed reads in a row, a state
+        # over 5 min old, a passed expiry, or no known state: the read's error instead.
 ```
 
 - `reasked` is true, and `reasked_at` is when, once the request was re-sent to a new holder
