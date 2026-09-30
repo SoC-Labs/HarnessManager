@@ -5,7 +5,7 @@
  * Regenerate in Harness Manager: python3 tools/gen_tokens.py
  * This file is vendored by the Linux harness (firmware/clcd/HM_VENDORED.md), with clcd_palette.h.
  *
- * source commit:  a90e374a844b (+ changes to tools/gen_tokens.py not yet committed)
+ * source commit:  c74a1cfe734c
  * glyphs sha256:  b28180da76c99e975ba6d342740b5a22ff85925a70dcd939a04cf360fbe59f71
  * layout:         16 scanlines per glyph, top first; bit 7 = the leftmost pixel
  *
