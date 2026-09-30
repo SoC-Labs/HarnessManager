@@ -101,7 +101,8 @@ array set P {
 #                   read_ip, create_ip for an RM debug hub, set_property ...)
 # RM_SYNTH_DCP      skip synthesis: an out-of-context synth checkpoint of RM_TOP
 # RM_OOC_XDC        the XDC kit's <name>_ooc.xdc ("harness-manager xdc rm-kit")
-# RM_XDC            optional RM-internal timing exceptions, applied -cell RP_INST
+# RM_XDC            optional RM-internal timing exceptions and floorplan (child pblocks:
+#                   hm_save_floorplan below), read_xdc -cell RP_INST after the link
 # STOP_AFTER        preflight | synth | link | impl | verify | bitstream (= all)
 # ALLOW_TIMING_FAIL 1 = report negative slack in your RM but still write bits
 

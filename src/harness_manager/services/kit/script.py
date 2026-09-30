@@ -116,7 +116,7 @@ NOT_HDL = {
     ".mif": "build.generics, as {\"NAME\": {\"path\": FILE}} (a memory init file)",
     ".xci": "build.synth_hook (read_ip, then generate_target)",
     ".xcix": "build.synth_hook (read_ip, then generate_target)",
-    ".xdc": "build.rm_xdc (RM-internal timing, applied -cell after link)",
+    ".xdc": "build.rm_xdc (RM-internal timing and floorplan, applied -cell after link)",
     ".tcl": "build.synth_hook (sourced inside the synth project)",
     ".dcp": "build.synth_dcp (an out-of-context synth checkpoint of the top)",
     ".edf": "build.synth_hook (read_edif)",
