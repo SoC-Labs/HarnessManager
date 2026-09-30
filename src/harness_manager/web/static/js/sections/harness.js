@@ -257,8 +257,8 @@ function Row({ bid, row, h, pinBusy, netboot, focus }) {
     </div>
     ${fold ? null : html`<div class="hrow-verdict"><${VerdictChip} row=${row} /><${ViaChip} row=${row} />
       <span class="secondary small hwhy" data-testid="why" title=${whyText(row)}>${whyText(row)}</span></div>`}
-    ${fold || picked ? null : html`<div class="small muted os-facts">${facts}
-      ${" · "}<button type="button" class="link-btn" data-action="changes" aria-expanded=${open ? "true" : "false"}
+    ${fold || picked ? null : html`<div class="os-facts-row"><span class="small muted os-facts" title=${facts}>${facts}</span>
+      <button type="button" class="link-btn" data-action="changes" aria-expanded=${open ? "true" : "false"}
         onClick=${toggle}>${open ? "Hide what changes" : "What changes"}</button></div>`}
     ${open && !fold ? html`<div class="hrow-more">
       <${Changes} changes=${row.changes} />

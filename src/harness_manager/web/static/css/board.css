@@ -224,7 +224,9 @@
 .os-rels .hrow-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .os-rels .hrow-top .chip { height: 19px; font-size: 11px; }
 .os-rels .hrow .reason { margin: 0; font-size: 12.5px; }
-.os-facts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-facts-row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.os-facts { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-facts-row .link-btn { flex: none; font-size: 11.5px; }
 .os-fold .reason span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .os-more { margin-top: 12px; }
 .os-more > summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); }
