@@ -26,6 +26,10 @@
 # directory this script is in, so the whole build directory can be moved as it is):
 #   vivado -mode batch -source build_rm.tcl -log build_rm.log -journal build_rm.jou
 #   vivado -mode batch -source build_rm.tcl -tclargs RM_SOURCES="a.sv b.sv" JOBS=4
+# Or in your own Vivado, which stays open after it (-mode gui or -mode tcl, the same arguments),
+# or one that is already open (its Tcl console):
+#   cd <this directory>; set argv {STOP_AFTER=link}; source build_rm.tcl
+# STOP_AFTER=link leaves the linked design open to floorplan: see hm_save_floorplan below.
 #
 # Derived from the platform's own RM flow, which is proven on silicon:
 #   mps3-nanosoc-platform fpga/dfx/build_dfx.tcl (feat/rm-ila-mint @ e5436302)
@@ -101,10 +105,16 @@ array set P {
 # STOP_AFTER        preflight | synth | link | impl | verify | bitstream (= all)
 # ALLOW_TIMING_FAIL 1 = report negative slack in your RM but still write bits
 
-foreach arg $argv {
-    if { [regexp {^([A-Z_]+)=(.*)$} $arg -> k v] } {
-        if { ![info exists P($k)] } { error "build_rm.tcl: unknown parameter '$k' in -tclargs" }
-        set P($k) $v
+# -tclargs NAME=VALUE win over the values above. In a Vivado that is already open (the GUI's
+# Tcl console, vivado -mode tcl), `set argv {NAME=VALUE ...}` before `source build_rm.tcl`
+# does the same: Vivado starts every session with argv {} and keeps the last one set, so set
+# it every time. With no argv at all (unset), the values above stand.
+if { [info exists ::argv] } {
+    foreach arg $::argv {
+        if { [regexp {^([A-Z_]+)=(.*)$} $arg -> k v] } {
+            if { ![info exists P($k)] } { error "build_rm.tcl: unknown parameter '$k' in -tclargs" }
+            set P($k) $v
+        }
     }
 }
 
@@ -265,6 +275,52 @@ proc drc_blockers {} {
         }
     }
     return [lsort -unique $bad]
+}
+
+# The floorplan loop (KIT-INTERACTIVE). STOP_AFTER=link leaves the linked design open in the
+# GUI, in -mode tcl, or in a Vivado that sourced this script. Draw your pblocks INSIDE the
+# partition's (children of RP_PBLOCK: create_pblock; resize_pblock within its range;
+# set_property PARENT <RP_PBLOCK>; add_cells_to_pblock), then type
+#     hm_save_floorplan FILE
+# and give FILE as RM_XDC (the design's build.rm_xdc): the next build reads it with
+# read_xdc -cell RP_INST after the link, and each pblock comes back as <RP_INST>_<name>, a
+# child of RP_PBLOCK. Not `write_xdc -cell`: it also writes the partition's own pblock, which,
+# read back -cell, becomes a second top-level pblock over the same area and takes your
+# RM's cells out of RP_PBLOCK (docs/evidence/2026-09-30-kit-interactive). The partition's
+# pblock itself is the static's: it cannot move or grow.
+proc hm_save_floorplan { file } {
+    global P
+    set rp $P(RP_INST)
+    set kids [lsort [get_pblocks -quiet -filter "PARENT == $P(RP_PBLOCK)"]]
+    if { [llength $kids] == 0 } {
+        error "hm_save_floorplan: no pblock inside $P(RP_PBLOCK); make yours its child: set_property PARENT $P(RP_PBLOCK) \[get_pblocks NAME\]"
+    }
+    set fh [open $file w]
+    puts $fh "# The floorplan of $P(RM_NAME) inside $P(RP_PBLOCK) (static $P(STATIC_ID)), written by"
+    puts $fh "# hm_save_floorplan in build_rm.tcl. It is RM_XDC: read_xdc -cell $rp after the link"
+    puts $fh "# makes each pblock ${rp}_<name>, a child of $P(RP_PBLOCK). Names are relative to $rp."
+    set pre "[string map {/ _} $rp]_"
+    foreach pb $kids {
+        # read -cell prefixes the name with <RP_INST>_; strip it, so a second round trip keeps it
+        set n [expr { [string first $pre $pb] == 0 ? [string range $pb [string length $pre] end] : $pb }]
+        set cells {}
+        foreach c [get_cells -quiet -of_objects $pb] {
+            if { [string first "$rp/" $c] == 0 } { set c [string range $c [string length "$rp/"] end] }
+            lappend cells "{$c}"
+        }
+        puts $fh "create_pblock $n"
+        puts $fh "resize_pblock \[get_pblocks $n\] -add {[get_property GRID_RANGES $pb]}"
+        foreach prop {EXCLUDE_PLACEMENT CONTAIN_ROUTING} {
+            if { [get_property $prop $pb] } { puts $fh "set_property $prop 1 \[get_pblocks $n\]" }
+        }
+        if { [llength $cells] } {
+            puts $fh "add_cells_to_pblock \[get_pblocks $n\] \[get_cells \[list \\"
+            puts $fh "    [join $cells " \\\n    "]\]\]"
+        }
+    }
+    close $fh
+    puts "hm_save_floorplan: [llength $kids] pblock(s) inside $P(RP_PBLOCK) -> $file (give it as RM_XDC)"
+    return $file
 }
 
 set ::receipt [dict create]

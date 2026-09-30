@@ -98,6 +98,28 @@ def receipt_files(r: BuildReceipt) -> dict[str, Path]:
     return out
 
 
+def build_dir_of(r: BuildReceipt) -> Path:
+    """The build directory a receipt belongs to (``kit script`` layout: ``<dir>/out/``)."""
+    return r.path.parent.parent if r.path.parent.name == "out" else r.path.parent
+
+
+def stopped_words(r: BuildReceipt) -> str:
+    """A ``stopped`` receipt in words (KIT-INTERACTIVE): a ``STOP_AFTER`` run that ended
+    where it was asked to, with every gate up to there passed. It is not a failure (a
+    failed gate writes ``failed``), and not a build to pack: it has no pair yet."""
+    n = sum(g.verdict == "PASS" for g in r.gates)
+    return (f"stopped after {r.stage} (STOP_AFTER={r.stage}), not a failure: the {n} gates "
+            f"up to there passed; there is no pair to check or pack until the build runs "
+            f"to the end")
+
+
+def finish_hint(r: BuildReceipt) -> str:
+    """The command that prints how to run a stopped build to the end. ``--stop-after
+    bitstream`` is explicit: a script written with ``kit script --stop-after link`` keeps
+    stopping there otherwise."""
+    return f"harness-manager kit build {build_dir_of(r)} --stop-after bitstream"
+
+
 def receipt_checks(r: BuildReceipt) -> list[KitCheck]:
     """Every check a receipt must pass before it becomes an overlay (module docstring)."""
     checks: list[KitCheck] = []

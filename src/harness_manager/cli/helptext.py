@@ -358,9 +358,11 @@ kit guide [TARGET] [--design NAME|FILE] [--build-dir DIR]
 kit script [TARGET] --design NAME|FILE [--out DIR]
     Write build_rm.tcl, the kit and the XDC kit into DIR. Without --out it
     shows the files and writes nothing.
-kit build DIR [--stop-after STAGE] [--jobs N]
-    The Vivado command for a build directory. Harness Manager does not run
-    Vivado yet: run the command yourself.
+kit build DIR [--stop-after STAGE] [--jobs N] [--gui]
+    The Vivado command for a build directory, and the Tcl line for a Vivado
+    that is already open; --gui: the GUI command (it stays open, so
+    --stop-after link leaves the design to floorplan). Harness Manager does
+    not run Vivado yet: run the command yourself.
 kit check RECEIPT|BUILD_DIR|PARTIAL [TARGET]
     Check a build receipt and its pair, or a bare partial, board-free.
 kit pack RECEIPT|BUILD_DIR [--import]

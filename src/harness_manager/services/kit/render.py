@@ -125,20 +125,70 @@ def profile_values(profile: BuildProfile, *, board: str = "") -> dict[str, str]:
     }
 
 
-def vivado_command(script_dir: Path, *, stop_after: str = "", jobs: int | None = None,
-                   vivado: str = "vivado") -> list[str]:
-    """The command ``kit build`` runs (or prints): a batch run of the script, logged beside it."""
-    d = Path(script_dir)
-    argv = [vivado, "-mode", "batch", "-source", tcl_path(d / SCRIPT_NAME),
-            "-log", tcl_path(d / "build_rm.log"), "-journal", tcl_path(d / "build_rm.jou")]
+#: The ways to run the script (KIT-INTERACTIVE, proven on Vivado 2026.1 in
+#: docs/evidence/2026-09-30-kit-interactive): ``batch`` runs it and exits; ``gui`` and ``tcl``
+#: run it and stay open, so a ``STOP_AFTER=link`` leaves the linked design open to floorplan.
+MODES = ("batch", "gui", "tcl")
+
+
+def tclargs(*, stop_after: str = "", jobs: int | None = None) -> list[str]:
+    """The ``NAME=VALUE`` words for ``-tclargs`` (or ``set argv``): only what was asked for,
+    so the script's own values stand for the rest."""
     extra = []
     if stop_after:
+        if stop_after not in STAGES:
+            raise UsageError(f"STOP_AFTER must be one of {', '.join(STAGES)}")
         extra.append(f"STOP_AFTER={stop_after}")
     if jobs:
         extra.append(f"JOBS={int(jobs)}")
+    return extra
+
+
+def vivado_command(script_dir: Path, *, stop_after: str = "", jobs: int | None = None,
+                   vivado: str = "vivado", mode: str = "batch") -> list[str]:
+    """The command ``kit build`` prints: a run of the script, logged beside it. ``mode``
+    ``batch`` (the default) exits at the end; ``gui`` and ``tcl`` stay open after it."""
+    if mode not in MODES:
+        raise UsageError(f"mode must be one of {', '.join(MODES)}")
+    d = Path(script_dir)
+    argv = [vivado, "-mode", mode, "-source", tcl_path(d / SCRIPT_NAME),
+            "-log", tcl_path(d / "build_rm.log"), "-journal", tcl_path(d / "build_rm.jou")]
+    extra = tclargs(stop_after=stop_after, jobs=jobs)
     if extra:
         argv += ["-tclargs", *extra]
     return argv
+
+
+#: Where ``source_tcl``'s line runs. A design already open there stays open: Vivado 2026.1
+#: opens the build's own projects beside it (in -mode tcl and in the GUI; KIT-INTERACTIVE A2/A3),
+#: each linked static holding about 3 GB more.
+SOURCE_WHEN = ("its Tcl console; a design already open stays open beside the build's, so "
+               "close_project it first to save memory")
+SOURCE_LOG = ("its HM_ lines go to that session's log, not build_rm.log; the receipt, "
+              "out/<name>_build.json, is the verdict either way")
+
+
+def stays_open(rp_inst: str, rp_pblock: str) -> str:
+    """What to do with the linked design that ``STOP_AFTER=link`` leaves open in the GUI, in
+    ``-mode tcl`` or in a session that sourced the script: the floorplan loop, as proven in
+    docs/evidence/2026-09-30-kit-interactive. ``hm_save_floorplan`` is a proc the script
+    defines; ``write_xdc -cell`` is NOT the way (it writes the partition's own pblock too,
+    which read back ``-cell`` takes the RM's cells out of it)."""
+    return (f"after link the design stays open (GUI, -mode tcl, or the Tcl line): floorplan "
+            f"your RM in a child pblock of {rp_pblock} (create_pblock, resize_pblock inside it, "
+            f"set_property PARENT {rp_pblock}, add_cells_to_pblock), save it with "
+            f"`hm_save_floorplan FILE` (not write_xdc -cell), and name FILE as the design's "
+            f"build.rm_xdc (read_xdc -cell {rp_inst} after the next link)")
+
+
+def source_tcl(script_dir: Path, *, stop_after: str = "", jobs: int | None = None) -> str:
+    """One Tcl line for a Vivado that is ALREADY running (its Tcl console, or ``vivado -mode
+    tcl``): ``cd {DIR}; set argv {...}; source build_rm.tcl``. ``set argv`` is always there,
+    ``{}`` too: a session keeps its ``argv`` (from ``-tclargs``, or the last ``set argv``), and
+    the script reads it, so a line without it would run with whatever the last one set."""
+    d = tcl_word(tcl_path(Path(script_dir)), "the build directory")
+    words = " ".join(tclargs(stop_after=stop_after, jobs=jobs))
+    return f"cd {{{d}}}; set argv {{{words}}}; source {SCRIPT_NAME}"
 
 
 _PARAM_BLOCK = re.compile(r"^array set P \{\n(.*?)^\}", re.M | re.S)
