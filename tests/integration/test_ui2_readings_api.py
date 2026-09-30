@@ -96,9 +96,6 @@ def test_the_hooks_keep_the_answer_and_telemetry_and_give_the_info_keys(demo):
     readings_api.note_telemetry(d, BOARD_USB, None)
 
 
-@pytest.mark.xfail(strict=True, reason="CCR UI2-G4-1: app.py's info()/telemetry() hooks "
-                                       "(readings_api.info_extra / note_telemetry) are not "
-                                       "applied yet; remove this marker when they are")
 def test_the_real_daemons_board_read_carries_the_readings_keys(demo):
     eng, c = demo
     info = c.get(bid_path(BOARD_USB), headers=H).json()

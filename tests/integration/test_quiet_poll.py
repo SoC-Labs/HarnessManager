@@ -169,7 +169,9 @@ def test_explicit_reads_are_never_gated(q):
     st = background_state(q)
     assert st["kind"] == "no_viewer" and st["allowed"] is False
     assert set(body) - {"claim"} == {"ok", "candidate", "identity", "health", "capabilities",
-                                     "unavailable"}, "info keeps BoardInfo's shape"
+                                     "unavailable", "answer_ms", "uptime_s", "os_uptime_s",
+                                     "readings_at", "readings_source", "stats"}, \
+        "info keeps BoardInfo's shape, plus UI2 G4's readings (docs/API.md \"Readings\")"
 
 
 # --- (b) the lease is someone else's: background contact stops entirely -------------------------

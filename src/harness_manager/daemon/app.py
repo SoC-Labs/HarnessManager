@@ -915,6 +915,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
         return Ctx(argparse.Namespace(), d.engine, "json").require(session, attr, capability)
 
+    from .readings_api import info_extra, note_telemetry     # UI2 G4 (CCR UI2-G4-1)
+
     # -- extension routers (week plan lanes) ------------------------------------------------
     # Each lane adds routes in its own module ``harness_manager.daemon.<name>`` with
     # ``register(ctx: RouteContext)``. They load HERE, before this file's
@@ -1068,7 +1070,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         out: dict[str, Any] = {"board_id": cand.board_id}
         try:
             with d.gates.op(cand.board_id):
-                out["info"] = d.engine.info(cand.board_id)
+                t0 = time.monotonic()
+                got = d.engine.info(cand.board_id)
+                answer_ms = (time.monotonic() - t0) * 1000.0
+            # UI2 G4 (readings_api): answer_ms, the uptimes and stats beside the first read
+            out["info"] = {**_fields(got), **info_extra(d, cand.board_id, got, answer_ms)}
         except HarnessError as exc:
             # The session is open (the lock is held); the board did not answer yet.
             out["info"] = None
@@ -1331,6 +1337,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         s = board(bid)
         with d.gates.op(bid):
             readings = list(d.engine.telemetry.readings(s))
+        note_telemetry(d, bid, readings)            # UI2 G4 (readings_api): the history
         now = time.time()
         return _JSON(ok(board_id=bid, readings=[reading_json(r, now) for r in readings]))
 
@@ -1486,10 +1493,14 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def info(bid: str) -> JSONResponse:
         board(bid)
         with d.gates.op(bid):
+            t0 = time.monotonic()
             board_info = d.engine.info(bid)
+            answer_ms = (time.monotonic() - t0) * 1000.0
         # QUIET-POLL: an explicit read while the lease is someone else's names the holder (a
         # health note, so the shape stays BoardInfo's; GET .../background has the rest).
-        return _JSON(ok(**_fields(d.with_lease_note(bid, board_info))))
+        # UI2 G4 (readings_api): answer_ms, the uptimes and stats (docs/API.md "Readings").
+        return _JSON(ok(**_fields(d.with_lease_note(bid, board_info)),
+                        **info_extra(d, bid, board_info, answer_ms)))
 
     @api.delete("/boards/{bid:path}")
     def close(bid: str, release: str | None = None) -> JSONResponse:
