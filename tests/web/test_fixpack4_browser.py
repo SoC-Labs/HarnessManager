@@ -110,8 +110,9 @@ def test_the_header_refresh_rereads_the_card_line_and_the_sd_journal(page_factor
                                       "backup": {"path": str(tmp_path / "b.zip")}})
     cards, journals = len(engine.called("deploy.card_status")), len(engine.called("storage.pending"))
     page.locator('[data-action="refresh-board"]').click()
-    expect(tile).to_have_text("none (boots as always)", timeout=T)
     expect(by_id(page, "sd-banner")).to_be_visible(timeout=T)
+    section(page, "overview")                    # a journal found first opens the SD tab
+    expect(tile).to_have_text("none (boots as always)", timeout=T)
     assert len(engine.called("deploy.card_status")) > cards
     assert len(engine.called("storage.pending")) > journals
     assert page.errors == []
@@ -230,3 +231,80 @@ def test_negative_twin_the_update_lease_line_is_yours_when_held_here(page_factor
     page, _card = harness_lease_page(page_factory, daemon, "mine")
     expect(by_id(page, "harness-lease").first).to_contain_text("You hold this board's hub lease",
                                                                timeout=T)
+
+
+# --- 10: who may drive the board: the same rule on every tab ---------------------------------------
+
+
+def hub_board_page(page_factory: Any, daemon: Any, lease: str) -> Any:
+    # BOARD_USB: the demo board that can do everything (Debug USB: reboot, SD, resets)
+    sim(daemon).behind_hub(BOARD_USB, lease=lease)
+    page = page_factory(**APP)
+    open_board(page, BOARD_USB)
+    page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    return page
+
+
+def classes(page: Any, action: str, within: str = "") -> str:
+    return page.locator(f'{within} [data-action="{action}"]'.strip()).first.get_attribute("class") or ""
+
+
+@HUB
+def test_on_a_board_someone_else_leases_program_and_friends_are_off_and_not_primary(page_factory, daemon):
+    page = hub_board_page(page_factory, daemon, "other")
+    held = "is for the lease holder only: alice@lab-pc-07 holds this board"
+    tile = by_id(page, "tile-board")
+    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_have_text(f"Reset DUT {held}", timeout=T)
+    expect(tile.locator('[data-testid="reason-reboot"]')).to_have_text(f"Reboot {held}")
+    assert "danger" not in classes(page, "reboot", '[data-testid="tile-board"]')
+    expect(by_id(page, "tile-debug").locator('[data-testid="reason-up"]')).to_have_text(f"Debug {held}")
+    assert "primary" not in classes(page, "up", '[data-testid="tile-debug"]')
+    section(page, "program")
+    expect(by_id(page, "reason-program")).to_have_text(f"Program {held}", timeout=T)
+    expect(page.locator('[data-action="program"]')).to_have_attribute("aria-disabled", "true")
+    assert "primary" not in classes(page, "program")
+    expect(by_id(page, "reason-restore")).to_have_text(f"Restore baseline {held}")
+    section(page, "debug")
+    expect(by_id(page, "debug-card").locator('[data-testid="reason-up"]')).to_have_text(f"Debug {held}")
+    expect(by_id(page, "debug-card").locator('[data-testid="reason-detect"]')).to_have_text(f"Debug {held}")
+    assert "primary" not in classes(page, "xvc_open")
+    section(page, "power")
+    expect(by_id(page, "reboot-card").locator('[data-testid="reason-reboot"]')).to_have_text(
+        f"Reboot {held}")
+    assert "danger" not in classes(page, "reboot", '[data-testid="reboot-card"]')
+    expect(by_id(page, "reset-dut").locator('[data-testid="reason-reset_dut"]')).to_have_text(
+        f"Reset DUT {held}")
+    assert page.errors == []
+
+
+@HUB
+def test_negative_twin_the_lease_holder_gets_the_primary_buttons(page_factory, daemon):
+    page = hub_board_page(page_factory, daemon, "mine")
+    tile = by_id(page, "tile-board")
+    expect(tile.locator('[data-action="reboot"]')).to_be_visible(timeout=T)
+    expect(tile.locator('[data-testid="reason-reboot"]')).not_to_contain_text("lease holder")
+    assert "danger" in classes(page, "reboot", '[data-testid="tile-board"]')
+    assert "primary" in classes(page, "up", '[data-testid="tile-debug"]')
+    section(page, "program")
+    expect(page.locator('[data-action="program"]')).to_be_visible(timeout=T)
+    assert "primary" in classes(page, "program")
+    expect(by_id(page, "reason-program")).not_to_contain_text("lease holder")
+
+
+@HUB
+def test_your_other_sessions_lease_does_not_let_you_program_here(page_factory, daemon):
+    page = hub_board_page(page_factory, daemon, "elsewhere")
+    section(page, "program")
+    expect(by_id(page, "reason-program")).to_have_text(
+        f"Program is for the lease holder only: {ME} holds this board in another session, "
+        "not this Harness Manager", timeout=T)
+    assert "primary" not in classes(page, "program")
+
+
+def test_negative_twin_a_board_with_no_hub_has_no_lease_rule(page_factory):
+    page = page_factory(**APP)
+    open_board(page)
+    section(page, "program")
+    expect(page.locator('[data-action="program"]')).to_be_visible(timeout=T)
+    expect(by_id(page, "reason-program")).not_to_contain_text("lease", timeout=T)
+    assert "primary" in classes(page, "program")

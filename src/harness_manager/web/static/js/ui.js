@@ -8,6 +8,7 @@ import {
   checkIcon, checkLabel, checkLevel, elapsedSince, LINK_ICONS, linkName, secs, VIA_NAMES,
 } from "./format.js";
 import { html, useState } from "./lib.js";
+import { holderOnly } from "./week.js";
 
 export function Icon({ name, cls = "", label = "" }) {
   const inner = ICONS[name] || ICONS["circle-help"];
@@ -105,6 +106,10 @@ export function ActionRow({ bid, panel, spec, gate = {}, variant = "", icon = ""
   const why = gateReason(bid, panel, spec.key, gate);
   const running = p.running === spec.key;
   const blocked = !!why && !running;
+  // FIX-PACK-4: not the lease holder on a hub board: never the blue (or red) button that says
+  // "click me"; the one-line reason below says why, as every gated button does.
+  const notYours = blocked && !!gate.holder && !!holderOnly(bid, gate.holder);
+  const look = notYours && (variant === "primary" || variant === "danger") ? "" : variant;
   const onClick = () => {
     if (running) return;
     if (why) {
@@ -121,7 +126,7 @@ export function ActionRow({ bid, panel, spec, gate = {}, variant = "", icon = ""
   if (quietArm && reason.startsWith("not armed")) reason = "";   // a sibling already says it
   return html`<div class=${`action-row ${compact ? "compact" : ""}`}>
     <div class="action-main">${children}
-    <button type="button" class=${`btn ${variant} ${compact ? "sm" : ""}`} data-action=${spec.key}
+    <button type="button" class=${`btn ${look} ${compact ? "sm" : ""}`} data-action=${spec.key}
       aria-disabled=${blocked ? "true" : undefined} aria-busy=${running ? "true" : undefined}
       title=${blocked ? why : undefined} onClick=${onClick}>${label}</button></div>
     ${showReason && reason ? html`<${Reason} text=${reason}

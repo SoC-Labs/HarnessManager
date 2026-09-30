@@ -10,10 +10,14 @@
 // - A capability the board lacks disables the button AND shows the engine's reason.
 // - An intrusive action is armed by a tick box, which clears after each run.
 // - An interlock that stops a click says so and ends with "Nothing was run."
+// - FIX-PACK-4: an action that drives the board names itself in `holder` ("Program"): on a
+//   board behind a hub it runs for the lease holder only (week.js holderOnly, the rule the
+//   XVC card, Checks and the daemon's gates use), and its button is then not the primary.
 
 import { call, jobFinished, toApiError, waitJob } from "./api.js";
 import { capState, secs } from "./format.js";
 import { boardState, changed, jobLabel, log, S, setJob } from "./store.js";
+import { holderOnly } from "./week.js";
 
 export const NOTHING_RUN = "Nothing was run.";
 export const ARM_REASON = "not armed: tick the arm box first";
@@ -57,6 +61,10 @@ export function gateReason(bid, panel, key, opts = {}) {
     if (b.job.kind === "lease_request") return "waiting for the hub lease: your request is queued (Leave queue stops waiting)";
     if (b.job.kind === "lease_force") return "waiting for the force release to finish";
     return `waiting for the ${jobLabel(b.job.kind)} job to finish (harness-manager-daemon holds the board)`;
+  }
+  if (opts.holder) {
+    const why = holderOnly(bid, opts.holder);
+    if (why) return why;
   }
   if (opts.guard) {
     const why = opts.guard();

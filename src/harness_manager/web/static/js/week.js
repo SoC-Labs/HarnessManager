@@ -197,8 +197,9 @@ export function leaseWho(bid) {
   return { ...base, state: "other", holder: lease.holder || "someone else" };
 }
 
-// FIX-PACK-4: the ONE lease rule every gated button uses (XVC, harness install, Program,
-// Restore baseline, Reset DUT, Reboot, Restart shell, Power-cycle, Debug): on a board behind a
+// FIX-PACK-4: the ONE lease rule every gated button uses (XVC, Program, Restore baseline,
+// Reset DUT, Reboot, Restart shell, Power-cycle, the DUT clock, Debug; actions.js `holder`,
+// and the Update tab's lease line reads the catalogue's `here`): on a board behind a
 // hub only THIS Harness Manager holding the lease (leaseWho "here") may drive it; "" when it
 // may (or the board has no hub), else the one-line reason the button shows. `what` names the
 // action ("XVC", "Program"). Another session of your own hub name ("elsewhere") is not you

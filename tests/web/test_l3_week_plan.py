@@ -566,7 +566,9 @@ def test_a_queued_lease_holds_the_board_and_can_be_cancelled(page_factory, daemo
     page.locator(LEAVE_QUEUE).click()
     expect(page.locator('[data-testid="lease-requested"]')).to_have_count(0, timeout=T)
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to alice@lab-pc-07")
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("not armed")
+    # the job no longer holds the board; the lease rule (FIX-PACK-4: the holder only) does
+    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text(
+        "Reset DUT is for the lease holder only: alice@lab-pc-07")
     assert not engine.called("resets.reset")
 
 
@@ -672,7 +674,8 @@ def test_negative_twin_a_newer_list_ends_a_job_whose_end_the_page_missed(page_fa
     missed["quiet"] = False
     sockets[-1].send(json.dumps({"topic": "events.dropped", "board_id": "",
                                  "data": {"dropped": 1}, "at": time.time()}))
-    expect(reason).to_contain_text("not armed", timeout=T)         # the list ended it
+    # the list ended it: the lease rule (FIX-PACK-4, alice holds it) is what stops a reset now
+    expect(reason).to_contain_text("Reset DUT is for the lease holder only", timeout=T)
     assert page_state(page)["jobs"][BOARD_USB] is None
 
 

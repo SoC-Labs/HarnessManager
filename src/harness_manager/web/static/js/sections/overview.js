@@ -257,7 +257,7 @@ function DebugTile({ bid }) {
     <div class="mt-8">${live
       ? html`<${ActionRow} bid=${bid} panel="debug" spec=${stop} icon="square" compact=${true} gate=${{}} />`
       : html`<${ActionRow} bid=${bid} panel="debug" spec=${start} variant="primary" icon="play" compact=${true}
-          gate=${{ capability: "debug_dut" }} />`}</div>
+          gate=${{ capability: "debug_dut", holder: "Debug" }} />`}</div>
     ${p.lines && p.lines.length && p.running ? html`<p class="muted small mt-8">${p.lines[p.lines.length - 1].text || ""}</p>` : null}
   <//>`;
 }

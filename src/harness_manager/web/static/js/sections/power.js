@@ -36,7 +36,8 @@ export function resetDutSpec(bid, target = "dut") {
   };
 }
 
-export const RESET_DUT_GATE = { capability: "reset_dut", adapter: "resets", arm: "reset_dut" };
+// FIX-PACK-4: `holder`: on a hub board, the lease holder only (actions.js gateReason).
+export const RESET_DUT_GATE = { capability: "reset_dut", adapter: "resets", arm: "reset_dut", holder: "Reset DUT" };
 
 export function rebootSpec(bid) {
   return {
@@ -49,7 +50,7 @@ export function rebootSpec(bid) {
   };
 }
 
-export const REBOOT_GATE = { capability: "reboot_board", adapter: "controller", arm: "reboot" };
+export const REBOOT_GATE = { capability: "reboot_board", adapter: "controller", arm: "reboot", holder: "Reboot" };
 
 // The reboot job's result is the controller's evidence: {summary, down_after_s, up_after_s,
 // down_evidence[], up_evidence, shell_id_before, shell_id_after, fpga_configured, fpga_file,
@@ -167,7 +168,7 @@ function PowerSupplyCard({ bid }) {
             onInput=${(e) => { b.powerOffS = e.target.value; changed(); }} /><span class="muted small">seconds (${OFF_S.min} to ${OFF_S.max})</span></div>
         <${ArmBox} bid=${bid} armKey="power_cycle" testid="arm-power" text=${ARM_TEXT.power_cycle} />
         <${ActionRow} bid=${bid} panel="power_cycle" spec=${powerCycleSpec(bid, pw.device)} variant="danger" icon="power"
-          gate=${{ arm: "power_cycle", guard: () => offGuard(b) }} />
+          gate=${{ arm: "power_cycle", guard: () => offGuard(b), holder: "Power-cycle" }} />
         ${w.powerPhases.length ? html`<div class="steps">${phases.map((ph) => html`<div key=${ph}
           class=${`step ${w.powerPhases.includes(ph) ? "done" : ""}`}><div class="bar"></div><span>outlet ${ph}</span></div>`)}</div>` : null}
         <${ResultBlock} lines=${p.lines} panel=${p} testid="power-result" />` : null}
@@ -211,7 +212,7 @@ function ShellRestartCard({ bid }) {
     <div class="actions">
       <${ArmBox} bid=${bid} armKey="reset_shell" text="Arm: I understand every console and the debug session drop while the shell restarts." />
       <${ActionRow} bid=${bid} panel="reset_shell" spec=${spec} icon="refresh-cw"
-        gate=${{ capability: "reset_shell", adapter: "resets", arm: "reset_shell",
+        gate=${{ capability: "reset_shell", adapter: "resets", arm: "reset_shell", holder: "Restart shell",
           guard: () => {
             const t = resetTargets(bid);
             return t && !t.includes("shell") ? "Cannot: this board's reset adapter offers no 'shell' target" : "";

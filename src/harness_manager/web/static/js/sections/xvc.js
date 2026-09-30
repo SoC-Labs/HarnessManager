@@ -307,7 +307,9 @@ export function XvcCard({ bid }) {
   const pref = ltx.preferred ? ltx[ltx.preferred] : tclLtx;
   const design = { name: st.rm_name || ident.rm_name || "", id: st.rm_id || ident.rm_id || "" };
   const att = st.attached;
-  const openGuard = () => (st.reason ? `Cannot: ${st.reason}` : "") || lease
+  // FIX-PACK-4: the lease rule is the gate's `holder` (actions.js), so Open is never the
+  // primary button for someone who may not use it; Close stays for an open session.
+  const openGuard = () => (st.reason ? `Cannot: ${st.reason}` : "")
     || (st.open ? "the session is already open" : "");
   const closeGuard = () => (st.open ? "" : lease || "no XVC session is open");
   const byoLocked = !!st.open || !!p.running;
@@ -337,7 +339,7 @@ export function XvcCard({ bid }) {
             <span>Bring your own hw_server (<code>--byo</code>): Harness Manager starts none, and your
               Vivado opens the relay itself with <code>open_hw_target -xvc_url</code>.</span>
           </label>
-          <${ActionRow} bid=${bid} panel="xvc" spec=${open} variant="primary" icon="play" gate=${{ guard: openGuard }} />
+          <${ActionRow} bid=${bid} panel="xvc" spec=${open} variant="primary" icon="play" gate=${{ guard: openGuard, holder: "XVC" }} />
           <${ActionRow} bid=${bid} panel="xvc" spec=${close} icon="square" gate=${{ guard: closeGuard }} />
           <${ResultBlock} lines=${p.lines} panel=${p} testid="xvc-result"
             placeholder="The relay and hw_server listen on 127.0.0.1 only. A swap closes the session and re-attaches it." />
