@@ -116,7 +116,8 @@ export function referenceUse(text) {
 
 const num = (n) => (Number.isInteger(n) ? n.toLocaleString("en-GB") : String(n));
 const pctText = (p) => (p === 0 ? "0 %" : p < 0.1 ? "<0.1 %" : `${p.toFixed(1)} %`);
-const mmss = (s) => `${Math.floor(s / 60)} min ${String(Math.floor(s % 60)).padStart(2, "0")} s`;
+const mmss = (s) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`
+  : `${Math.floor(s / 60)} min ${String(Math.floor(s % 60)).padStart(2, "0")} s`);
 const absPath = (p) => /^\//.test(String(p || "").trim());
 
 // --- per-board state, kept for this tab of the browser (sessionStorage) -------------------
@@ -149,7 +150,7 @@ function st(bid) {
       guide: null, guideError: null, guideLoading: false, guideAt: 0, guideSeq: 0,
       kit: null, kitError: null, cat: null, catError: null, loaded: false,
       src: "example", ex: "", rtl: "", rtlName: "", scan: null, scanError: null, scanBusy: false,
-      gens: [], rmXdc: "", paste: SAMPLE, preview: null, previewError: null, previewBusy: false,
+      gens: [], rmXdc: "", paste: "", preview: null, previewError: null, previewBusy: false,
       saveBusy: false, savedJson: "", saveError: null,
       chosen: false, buildDir: "", jobs: "4", way: "batch", stopAfter: false,
       script: null, scriptError: null, scriptBusy: "", written: "", run: null, zipSaved: "",
@@ -245,6 +246,18 @@ function designArg(x) {
   return d;
 }
 
+// A build directory under the home of a path this page has seen (the RTL folder, a pasted
+// source, the kit's folder): "/home/you/builds/<name>". "" when no such path is known.
+function suggestDir(x) {
+  const p = x.src === "paste" ? parsedPaste(x).obj : null;
+  const seen = [x.src === "rtl" ? x.rtl : "", ((p && p.build && p.build.sources) || [])[0] || "", x.sourcePath];
+  for (const s of seen) {
+    const m = String(s || "").trim().match(/^(\/home\/[^/]+|\/Users\/[^/]+)\//);
+    if (m) return `${m[1]}/builds/${designName(x) || "my_rm"}`;
+  }
+  return "";
+}
+
 function designName(x) {
   if (x.src === "example") return x.ex || "";
   if (x.src === "rtl") return (x.scan && x.scan.name) || x.rtlName.trim() || "";
@@ -268,6 +281,7 @@ function troubleFix(g, name, checks) {
 function designProblem(x) {
   const g = x.guide;
   if (x.src === "paste") {
+    if (!x.paste.trim()) return { todo: "Paste your design .json: kind, name, use, and its build (the format: USER_GUIDE §7.2)." };
     const p = parsedPaste(x);
     if (p.error) return { err: { gate: "json", title: "the pasted design is not JSON", text: p.error,
       fix: "Paste the design .json exactly as it is in the file." } };
@@ -570,6 +584,7 @@ async function writeDir(bid, { stopAfter = st(bid).stopAfter } = {}) {
     x.stopAfter = !!stopAfter;
   } catch (e) {
     x.scriptError = toApiError(e);
+    if (x.run) x.stopAfter = x.run.stop_after === "link";     // the directory keeps what it had
   }
   x.scriptBusy = "";
   persist(bid);
@@ -1087,11 +1102,9 @@ function Constraints({ bid, f, locked, edit }) {
             <li>clocks: no BUFG or MMCM (HDPR-18); dut_clk and the others come from the static</li>
             <li>change <span class="mono">${pbName}</span>, or use Tcl control flow (if, foreach, puts)</li></ul></div>
         </div>
-        <div class="bd-cf-draw"><${Icon} name="layers" /><span>Rather draw a nested pblock?
-          <button type="button" class="link" data-testid="bd-to-floorplan" disabled=${locked || x.src === "example"}
+        <div class="bd-cf-draw"><${Icon} name="layers" /><span>Rather draw a nested pblock?${" "}<button type="button" class="link" data-testid="bd-to-floorplan" disabled=${locked || x.src === "example"}
             onClick=${() => { x.way = x.way === "session" ? "session" : "gui"; x.stopAfter = true; persist(bid);
-              toast("Build: Vivado GUI, stop after link: the linked design stays open to floorplan", { icon: "layers" }); changed(); }}>Stop after link to floorplan</button>
-          in Vivado, then write it to your rm_xdc. <span class="muted">Being proven now: one test build.</span></span></div>
+              toast("Build: Vivado GUI, stop after link: the linked design stays open to floorplan", { icon: "layers" }); changed(); }}>Stop after link to floorplan</button>${" "}in Vivado, then write it to your rm_xdc. <span class="muted">Being proven now: one test build.</span></span></div>
       </div>
       <${Pblock} g=${g} />
     </div>
@@ -1185,7 +1198,7 @@ function DesignPanel({ bid, f }) {
     </div>`;
   } else {
     src = html`<div class="stack-sm"><textarea class="input mono bd-json" rows="11" aria-label="Design JSON" data-testid="build-design-json"
-        disabled=${locked} value=${x.paste} onInput=${(e) => edit(() => (x.paste = e.target.value))}></textarea>
+        placeholder=${SAMPLE} disabled=${locked} value=${x.paste} onInput=${(e) => edit(() => (x.paste = e.target.value))}></textarea>
       <div class="small muted">A pasted design lives only in this page; give paths absolute (on harness-manager-daemon's host). The format: USER_GUIDE §7.2.</div></div>`;
   }
   return html`<${Panel} f=${f} k="design" title="Your design">
@@ -1241,7 +1254,7 @@ function Way({ bid, x }) {
     <div class="bd-way-note">${note}${it && it.watch ? html` <span class="muted">Watches: ${it.watch}.</span>` : null}</div>
     <label class=${`bd-stop${x.stopAfter ? " on" : ""}`} title="STOP_AFTER=link: the script returns after link, before close_project, so the static with your RM linked in stays open. The receipt says stopped.">
       <input type="checkbox" data-testid="bd-stop-after" checked=${!!x.stopAfter} disabled=${!!x.scriptBusy}
-        onChange=${(e) => { const on = e.target.checked; if (on && x.way === "batch") x.way = "gui"; writeDir(bid, { stopAfter: on }); }} />
+        onChange=${(e) => { const on = e.target.checked; if (on && x.way === "batch") x.way = "gui"; x.stopAfter = on; writeDir(bid, { stopAfter: on }); }} />
       <span><b>Stop after link to floorplan</b> <span class="mono small">STOP_AFTER=link</span>: the linked design stays open; draw nested pblocks inside the partition, write them to your rm_xdc, build again. Harness Manager writes the build directory again with it.</span></label>
   </div>`;
 }
@@ -1261,7 +1274,7 @@ function Stages({ at, failed = false, testid = "build-stages" }) {
 
 function Expect() {
   return html`<div class="bd-expect"><div class="bd-expect-t">What to expect</div><ul>
-    <li><${Icon} name="circle-check" /><span><b>The verdict is the receipt</b> (<span class="mono">out/&lt;name&gt;_build.json</span>), or the last line of build_rm.log that <i>starts</i> with <span class="mono">HM_RM_BUILD_</span>: <code>grep -E '^HM_RM_BUILD_' build_rm.log | tail -1</code>. The log also echoes the script, so HM_RM_BUILD_FAILED is in its text even after a pass: Harness Manager never reads echoed text.</span></li>
+    <li><${Icon} name="circle-check" /><span><b>The verdict is the receipt</b> (<span class="mono">${"out/<name>_build.json"}</span>), or the last line of build_rm.log that <i>starts</i> with <span class="mono">HM_RM_BUILD_</span>: <code>grep -E '^HM_RM_BUILD_' build_rm.log | tail -1</code>. The log also echoes the script, so HM_RM_BUILD_FAILED is in its text even after a pass: Harness Manager never reads echoed text.</span></li>
     <li><${Icon} name="info" /><span><b>Vivado exits 0 even when a gate fails</b>: its exit code says nothing.</span></li>
     <li><${Icon} name="triangle-alert" /><span><b>About 18-21 CRITICAL WARNINGs are expected</b>, not failures: from Harness Manager's out-of-context XDC on the tied-off ports, and from the static's debug_bridge.</span></li>
   </ul></div>`;
@@ -1289,6 +1302,9 @@ function BuildPanel({ bid, f }) {
         <select id=${`bd-jobs-${bid}`} class="select" value=${x.jobs} onChange=${(e) => { x.jobs = e.target.value; persist(bid); changed(); }}>
           ${["2", "4", "8"].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}</select>
         <span class="small muted">4-8 GB of RAM either way</span></div>
+      ${!x.buildDir.trim() && suggestDir(x) ? html`<div class="small muted">Under your home:
+        <button type="button" class="link small mono" data-testid="build-dir-suggest"
+          onClick=${() => { x.buildDir = suggestDir(x); persist(bid); changed(); }}>${suggestDir(x)}</button></div>` : null}
       <${PathsHint} />
       ${x.buildDir.trim() && !dirOk ? html`<${Reason} level="warn" testid="build-dir-hint" text="Give the build directory as an absolute path (harness-manager-daemon's working directory is not yours)." />` : null}
       ${errs}
@@ -1333,9 +1349,9 @@ function BuildPanel({ bid, f }) {
           <li><b>Leave it running.</b> <span class="sub">A small RM takes about 30 minutes on a quiet machine and up to an hour on a loaded one; a nanosoc-sized RM about 50. 4-8 GB of RAM.</span></li>
           <li><b>Come back to Check.</b> <span class="sub">Harness Manager reads the receipt, checks it and says what's next.</span></li>
         </ol>
-        <div class="bd-watch" data-testid="bd-watch"><span class="dot accent bd-blink"></span>Watching <span class="mono">${x.written}</span> ·
-          ${guideRun ? html`<span class="warn-text">build_rm.log stops at ${guideRun.stage} (${clock(guideRun.log_mtime)}) with no verdict: that run died</span>`
-            : x.way === "session" ? "no receipt yet (your open Vivado writes no build_rm.log)" : "no build_rm.log yet"}</div>`}
+        <div class="bd-watch" data-testid="bd-watch"><span class="dot accent bd-blink"></span><span>Watching <span class="mono">${x.written}</span></span>
+          ${guideRun ? html`<span class="warn-text">· build_rm.log stops at ${guideRun.stage} (${clock(guideRun.log_mtime)}) with no verdict: that run died</span>`
+            : html`<span>· ${x.way === "session" ? "no receipt yet (your open Vivado writes no build_rm.log)" : "no build_rm.log yet"}</span>`}</div>`}
       <${Expect} />
       ${errs}
       ${running ? html`<details class="bd-more"><summary>The command it runs</summary><div><${Way} bid=${bid} x=${x} /></div></details>`
@@ -1535,7 +1551,7 @@ function Foot({ bid, f }) {
         <div class="bd-cli-t">Your constraints</div>
         <div class="small secondary">An rm_xdc lives in the design .json's build, as a path relative to the design file; kit script writes it into build_rm.tcl as RM_XDC. A built-in carries none: use a design .json.</div>
         <${CopyLine} text=${`grep -E 'RM_XDC|STOP_AFTER' ${dir}/build_rm.tcl`} /></div></details>
-    <details class="card bd-fold" data-testid="trouble-card" open=${fails.length > 0}><summary><${Icon} name="chevron-right" />Every build gate and its fix (${(t.gates || []).length})${fails.length ? html` <${Chip} level="err" cls="bd-mini">${fails.length} failing<//>` : null}</summary>
+    <details class="card bd-fold" data-testid="trouble-card"><summary><${Icon} name="chevron-right" />Every build gate and its fix (${(t.gates || []).length})${fails.length ? html` <${Chip} level="err" cls="bd-mini">${fails.length} failing<//>` : null}</summary>
       <div data-testid="trouble-list">
         ${fails.map((v) => html`<${TroubleItem} key=${`f-${v.card}`} ...${v} fix=${fixOf(v.card)} failing=${true} />`)}
         ${(t.gates || []).filter((gg) => !failing.has(gg.gate)).map((gg) => html`<${TroubleItem} key=${gg.gate}

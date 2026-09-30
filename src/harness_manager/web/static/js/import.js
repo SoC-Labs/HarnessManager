@@ -16,7 +16,7 @@
 // so an import needs no lease. A good one lands on the Workbench, picked.
 
 import { call, callUpload, toApiError } from "./api.js";
-import { bytesText, hexId } from "./format.js";
+import { boardName, bytesText, hexId } from "./format.js";
 import { html, useState } from "./lib.js";
 import { closeModal, ModalShell, registerModal, setModalBusy } from "./modal.js";
 import { boardState, changed, loadOverlays, navigate, runPreflight, S } from "./store.js";
@@ -94,7 +94,8 @@ function ImportDialog({ bid, way: startWay = "file" }) {
   const [m] = useState(() => ({ way: startWay, file: null, path: "", pick: null, over: false,
     busy: "", res: null, err: null, done: null, note: "" }));
   const reset = () => { m.res = null; m.err = null; m.done = null; m.note = ""; };
-  const board = (S.boards[bid] && S.boards[bid].candidate && S.boards[bid].candidate.name) || bid;
+  const info = boardState(bid).info || {};
+  const board = boardName(info.candidate || (S.boards[bid] || {}).candidate || null, bid);
   const here = boardStatic(bid);
   const built = builtList().filter((x) => !x.added);
 
@@ -169,8 +170,7 @@ function ImportDialog({ bid, way: startWay = "file" }) {
         onDragOver=${(e) => { e.preventDefault(); if (!m.over) { m.over = true; redraw(); } }}
         onDragLeave=${() => { m.over = false; redraw(); }} onDrop=${onDrop}>
       <${Icon} name="folder-input" />
-      <div>Drop a <code>.zip</code> here: a packed overlay folder (<code>manifest.json</code> + the partial + the clearing), or a build's
-        <code>out/</code> holding its receipt <code>&lt;name&gt;_build.json</code> and the pair it names.</div>
+      <div>Drop a <code>.zip</code> here: a packed overlay folder (<code>manifest.json</code> + the partial + the clearing), or a build's <code>out/</code> holding its receipt <code>${"<name>_build.json"}</code> and the pair it names.</div>
       <label class="btn sm imp-file"><${Icon} name="upload" />Choose a zip…
         <input type="file" accept=".zip,application/zip" data-testid="import-file" disabled=${!!m.busy}
           onChange=${(e) => choose(e.target.files && e.target.files[0])} /></label></div>`;
@@ -234,10 +234,9 @@ function ImportDialog({ bid, way: startWay = "file" }) {
     ${res && !m.err && !m.done && res.passed ? html`<${Reason} level="ok" testid="import-checked" text=${`${res.name} passes: Check and import puts it in the overlay store.`} />` : null}
     ${res && !m.err && !m.done && !res.passed ? html`<${Reason} level="err" testid="import-would-refuse" text=${`${res.name} would be refused: ${(res.groups || []).filter((g) => g.state === "mismatch").map((g) => `${g.title}: ${g.detail}`).join("; ")}.`} />` : null}
     ${m.err ? html`<div class="outcome err" role="alert" data-testid="import-refused" data-error=${m.err.errName}><${Icon} name="circle-x" /><span>
-        <b>${refused ? "Refused" : "Not imported"}</b> <span class="exit-code" data-testid="import-exit">${exitOf(m.err)}</span>
-        ${m.err.message}${m.err.hint ? html` <span class="muted">(${m.err.hint})</span>` : ""}. Nothing was imported.
+        <b>${refused ? "Refused" : "Not imported"}</b> <span class="exit-code" data-testid="import-exit">${exitOf(m.err)}</span>${" "}${m.err.message}${m.err.hint ? html` <span class="muted">(${m.err.hint})</span>` : ""}. Nothing was imported.
         ${m.err.errName === "INCOMPATIBLE" ? html` Rebuild it against this board's kit (the Build tab), or import it on a board that runs ${res ? res.static_id : "its shell"}.` : null}</span></div>` : null}
-    ${res && res.kind === "receipt" && !res.upload ? html`<div><div class="small muted">The same from a shell</div>
+    ${res && res.kind === "receipt" && m.way !== "file" ? html`<div><div class="small muted">The same from a shell</div>
       <div class="copy-row"><code>harness-manager kit pack ${res.path} --import</code></div></div>` : null}
   <//>`;
 }
