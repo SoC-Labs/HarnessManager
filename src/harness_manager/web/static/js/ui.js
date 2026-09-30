@@ -206,3 +206,17 @@ export function useReveal(bid, part, ref) {
   }, [bid, part, at]);
   return hit;
 }
+// The deploy's thin phase bar (format.js deployBar): the header's Design fact and the sidebar
+// card. The byte count and rate are the caller's title.
+export function MiniBar({ bar, testid = "" }) {
+  if (!bar) return null;
+  return html`<span class="pgm-bar mini" aria-hidden="true" data-testid=${testid || undefined}
+    data-phase=${bar.phase}>${bar.segs.map((p) => html`<span key=${p.k} class=${`pgm-seg ${p.state}`}
+      data-seg=${p.k} style=${{ flexGrow: p.w }}><i style=${{ width: `${Math.round(p.fill * 1000) / 10}%` }}></i></span>`)}</span>`;
+}
+
+// The Debug USB tag of a sidebar card (format.js usbRoute): USB · hub / USB · PC / no USB.
+export function UsbTag({ usb, testid = "" }) {
+  return html`<span class=${`usb-tag ${usb.to}`} title=${`Debug USB: ${usb.fact}: ${usb.detail}`}
+    data-testid=${testid || undefined} data-usb=${usb.to}><${Icon} name=${usb.icon} cls="sm" />${usb.tag}</span>`;
+}
