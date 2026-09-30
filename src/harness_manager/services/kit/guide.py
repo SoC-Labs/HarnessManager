@@ -34,7 +34,7 @@ from harness_manager.core.errors import AbsentError, HarnessError, UnavailableEr
 from harness_manager.core.model import BoardIdentity
 from harness_manager.core.pack import KitCheck
 
-from . import build, launch, licence, render
+from . import build, floorplan, launch, licence, render
 from .schema import hex32, parse_u32, release_major_minor, same_id
 from .service import KitService
 from .vivado import VivadoFound, check_path, check_release, command_vivado, discover, matching
@@ -203,6 +203,14 @@ class Guide:
     #: The newest receipt in ``build_dir`` as ``BuildReceipt.to_json`` (its gates and where
     #: it stopped), or None.
     receipt: dict[str, Any] | None = None
+    #: UI2 G8 (additive): a build in ``build_dir`` with no verdict yet (``RunningBuild.to_json``:
+    #: stage, stage_index, stages, started_at, stage_started_at, log, log_mtime, fresh,
+    #: elapsed_s, stage_elapsed_s), or None; the partition pblock's facts from the pack's pin
+    #: model (``floorplan.pblock_facts``), or None; the receipt's ``<name>_util.rpt`` against
+    #: the pblock (``floorplan.utilisation``), or None.
+    running: dict[str, Any] | None = None
+    pblock: dict[str, Any] | None = None
+    utilisation: dict[str, Any] | None = None
 
     @property
     def next(self) -> Step | None:
@@ -215,7 +223,9 @@ class Guide:
                 "design": self.design, "build_dir": self.build_dir, "rm_id": self.rm_id,
                 "steps": [s.to_json() for s in self.steps],
                 "next": ({"step": nxt.id, "actions": nxt.actions} if nxt else None),
-                "receipt": self.receipt, "troubleshooting": troubleshooting()}
+                "receipt": self.receipt, "troubleshooting": troubleshooting(),
+                "running": self.running, "pblock": self.pblock,
+                "utilisation": self.utilisation}
 
 
 def builds_dir(name: str, *, windows: bool | None = None) -> str:
@@ -370,6 +380,7 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
     # 5 build -------------------------------------------------------------------------------
     s = steps["build"]
     receipt = None
+    going = None
     name = rm_info.get("name") or "my_rm"
     if build_dir is None:
         raw["build"] = "todo"
@@ -469,11 +480,17 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
 
     _resolve(steps, raw)
     vj = {**found.to_json(), "launch": started.to_json() if started is not None else None}
+    # UI2 G8: the build's progress, the fixed floorplan, and the build's use of it
+    pblock = floorplan.pblock_facts(pack, sid) if sid and profile is not None else None
+    util = (floorplan.build_utilisation(receipt, pblock)
+            if receipt is not None and receipt.state == "passed" else None)
     return Guide(pack, sid, board_id, kit.manifest.kit_id if kit else "",
                  profile.__dict__ if profile else None, vj,
                  design if isinstance(design, str) else (str(design.get("name")) if design else ""),
                  str(build_dir) if build_dir else "", list(steps.values()), rm_info,
-                 receipt.to_json() if receipt is not None else None)
+                 receipt.to_json() if receipt is not None else None,
+                 running=going.to_json() if going is not None else None,
+                 pblock=pblock, utilisation=util)
 
 
 def _hhmm(ts: float) -> str:

@@ -70,6 +70,8 @@ class BuildScript:
     written: list[Path] = field(default_factory=list)
     vivado: str = "vivado"                     # what the command starts with (a full path when found)
     vivado_release: str = ""                   # the kit's release
+    stop_after: str = "bitstream"              # UI2 G8 (d): the STOP_AFTER the run commands carry
+    jobs: int = 2
 
     @property
     def receipt(self) -> str:
@@ -83,7 +85,18 @@ class BuildScript:
                 "vivado": self.vivado, "vivado_release": self.vivado_release,
                 "receipt": self.receipt,
                 "out_dir": str(self.out_dir) if self.out_dir else None,
-                "written": [str(p) for p in self.written]}
+                "written": [str(p) for p in self.written],
+                "run": self.run()}
+
+    def run(self) -> dict[str, Any]:
+        """UI2 G8 (d), additive: "Run it your way" (``render.run_commands``) for the build
+        directory (``out_dir``, else ``.``: the directory the files are written to), with the
+        request's ``stop_after`` (the script's own default is ``bitstream``: no argument)."""
+        where = Path(self.out_dir).resolve() if self.out_dir else Path(".")
+        stop = self.stop_after if self.stop_after and self.stop_after != "bitstream" else ""
+        out = render.run_commands(where, vivado=self.vivado, stop_after=stop)
+        out["receipt"] = self.receipt
+        return out
 
 
 def _design(pack: str, spec: str | dict[str, Any]) -> Any:
@@ -302,7 +315,8 @@ def make_script(kits: KitService, *, pack: str, static_id: str, design: str | di
     command = render.vivado_command(out_dir or Path("."), jobs=None, vivado=vexe)
     result = BuildScript(d.name, rm_id, proposed, profile.static_id, kit.manifest.kit_id,
                          files, values, checks, command, vivado=vexe,
-                         vivado_release=profile.vivado)
+                         vivado_release=profile.vivado, stop_after=stop_after or "bitstream",
+                         jobs=jobs)
     files["README.txt"] = _readme(result, kit, _design_arg(d.origin, d.name))
     if out_dir is not None:
         result.out_dir = Path(out_dir)

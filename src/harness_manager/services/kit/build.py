@@ -51,6 +51,57 @@ class RunningBuild:
     log: Path
     mtime: float
     fresh: bool         # written within RUNNING_FRESH_S: running; else it died
+    # UI2 G8 (a), additive: when Vivado started (the log's "# Start of session at:" line)
+    # and when the stage started (the marker's clock seconds, ``HM_STAGE <n> <seconds>``,
+    # when the script prints them; None otherwise: an older build_rm.tcl prints the name only)
+    started_at: float | None = None
+    stage_started_at: float | None = None
+
+    @property
+    def stage_index(self) -> int:
+        """The stage's place in ``build_rm.tcl``'s order (1-based), 0 for a name it lacks."""
+        from .render import STAGES
+
+        return STAGES.index(self.stage) + 1 if self.stage in STAGES else 0
+
+    def to_json(self, now: float | None = None) -> dict[str, Any]:
+        """The guide's ``running`` (docs/API.md "Import a design, and the build's ...")."""
+        from .render import STAGES
+
+        now = time.time() if now is None else now
+        return {"stage": self.stage, "stage_index": self.stage_index,
+                "stages": list(STAGES), "started_at": self.started_at,
+                "stage_started_at": self.stage_started_at, "log": str(self.log),
+                "log_mtime": self.mtime, "fresh": self.fresh,
+                "elapsed_s": round(now - self.started_at, 1)
+                if self.started_at is not None else None,
+                "stage_elapsed_s": round(now - self.stage_started_at, 1)
+                if self.stage_started_at is not None else None}
+
+
+#: Vivado's log header: ``# Start of session at: Wed Sep 30 00:16:42 2026`` (local time; the
+#: build runs on this host, david K6).
+_SESSION_START = re.compile(r"^# Start of session at:\s*(.+?)\s*$", re.M)
+
+
+def session_started_at(text: str) -> float | None:
+    """When the Vivado session that wrote this log started (epoch seconds), or None."""
+    m = _SESSION_START.search(text[:20000])
+    if m is None:
+        return None
+    try:
+        return time.mktime(time.strptime(m.group(1), "%a %b %d %H:%M:%S %Y"))
+    except (ValueError, OverflowError):
+        return None
+
+
+def _clock_seconds(word: str) -> float | None:
+    """A marker's clock seconds: a plausible epoch (after 2020), else None."""
+    try:
+        value = float(word)
+    except ValueError:
+        return None
+    return value if 1.5e9 < value < 1e11 else None
 
 
 def running_build(build_dir: Path, *, now: float | None = None,
@@ -59,7 +110,11 @@ def running_build(build_dir: Path, *, now: float | None = None,
     ``build_rm.log`` has an ``HM_STAGE`` with no ``HM_RM_BUILD_*`` after it. The receipt is
     written only at the end, so until then the directory looks unbuilt (or shows the LAST
     run's receipt), and the guide offered the Vivado command again: a second Vivado in the
-    same directory overwrites ``out/``. None when there is no log or its run has ended."""
+    same directory overwrites ``out/``. None when there is no log or its run has ended.
+
+    The parser takes the marker's first word as the stage (``split()[0]``), so a script that
+    prints ``HM_STAGE <n> <clock seconds>`` (UI2 G8) and one that prints the name alone both
+    parse; the seconds, when there, are ``stage_started_at``."""
     log = Path(build_dir) / LOG_NAME
     try:
         st = log.stat()
@@ -69,15 +124,19 @@ def running_build(build_dir: Path, *, now: float | None = None,
     from .render import parse_markers
 
     stage = ""
+    stage_at: float | None = None
     for mark, rest in parse_markers(text):
         if mark == "HM_STAGE":
-            stage = rest.split()[0] if rest else "?"
+            words = rest.split()
+            stage = words[0] if words else "?"
+            stage_at = _clock_seconds(words[1]) if len(words) > 1 else None
         elif mark.startswith("HM_RM_BUILD_"):
-            stage = ""
+            stage, stage_at = "", None
     if not stage:
         return None
     now = time.time() if now is None else now
-    return RunningBuild(stage, log, st.st_mtime, now - st.st_mtime <= fresh_s)
+    return RunningBuild(stage, log, st.st_mtime, now - st.st_mtime <= fresh_s,
+                        started_at=session_started_at(text), stage_started_at=stage_at)
 
 
 def find_receipts(build_dir: Path) -> list[Path]:
@@ -88,14 +147,31 @@ def find_receipts(build_dir: Path) -> list[Path]:
     return sorted(set(found), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
+def plain_name(name: str) -> bool:
+    """A file name beside the receipt: no directory part, not ``.``/``..`` (UI2 G5)."""
+    return bool(name) and "/" not in name and "\\" not in name and name not in (".", "..") \
+        and ":" not in name
+
+
 def receipt_files(r: BuildReceipt) -> dict[str, Path]:
-    """The files the receipt names, resolved beside it: ``partial``, ``clearing``, ``ltx``."""
+    """The files the receipt names, resolved beside it: ``partial``, ``clearing``, ``ltx``.
+    ``build_rm.tcl`` writes their names only (``file tail``); a name with a directory part
+    (``../x``, an absolute path) is not resolved: the role is then missing, which
+    ``receipt_checks`` refuses (UI2 G5: a receipt that arrives from elsewhere must never
+    point the import at a file outside its build)."""
     base = r.path.parent
     out = {}
     for role, key in (("partial", "partial_bin"), ("clearing", "clearing_bin"), ("ltx", "ltx")):
-        if r.get(key):
-            out[role] = base / r.get(key)
+        name = r.get(key)
+        if name and plain_name(name):
+            out[role] = base / name
     return out
+
+
+def unsafe_file_fields(r: BuildReceipt) -> list[str]:
+    """The receipt's file fields whose value is not a plain name (``receipt_files`` skips them)."""
+    return [key for key in ("partial_bin", "clearing_bin", "ltx")
+            if r.get(key) and not plain_name(r.get(key))]
 
 
 def receipt_checks(r: BuildReceipt) -> list[KitCheck]:
@@ -125,10 +201,16 @@ def receipt_checks(r: BuildReceipt) -> list[KitCheck]:
                            if sid else "the receipt names no static_id"))
     checks.append(KitCheck("timing", "ok", timing_words(r)))
     files = receipt_files(r)
+    unsafe = unsafe_file_fields(r)
     for role in ("partial", "clearing", "ltx"):
         p = files.get(role)
         if p is None:
-            if role != "ltx":
+            key = {"partial": "partial_bin", "clearing": "clearing_bin", "ltx": "ltx"}[role]
+            if key in unsafe:
+                checks.append(KitCheck(role, "mismatch",
+                                       f"the receipt's {key} {r.get(key)!r} is not a file name "
+                                       "beside it (build_rm.tcl writes names only): refused"))
+            elif role != "ltx":
                 checks.append(KitCheck(role, "mismatch", f"the receipt names no {role}"))
             continue
         if not p.is_file():

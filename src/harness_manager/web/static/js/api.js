@@ -90,6 +90,19 @@ export const ENDPOINTS = Object.freeze({
   kitCheck: ["POST", "/kits/check"],
   kitPack: ["POST", "/kits/pack"],
   // --- end KIT-UI ---
+  // --- ui2 api-build --- UI v2's readings, OS slots and card, import and build (docs/API.md
+  // "Readings kept by this service", "OS slots and the card: roll back, commit, clear",
+  // "Import a design, and the build's progress, floorplan and utilisation"). The history's
+  // ?name=&since=&limit= is the call's query argument; guide's ?static_id=&design=&build_dir=.
+  readingsHistory: ["GET", "/boards/{bid}/readings/history"],
+  slots: ["GET", "/boards/{bid}/slots"],
+  slotRollback: ["POST", "/boards/{bid}/slots/rollback"],
+  cardCommit: ["POST", "/boards/{bid}/card/commit"],
+  cardClear: ["POST", "/boards/{bid}/card/clear"],
+  overlayImport: ["POST", "/overlays/import"],
+  designScan: ["POST", "/kits/design/scan"],
+  guide: ["GET", "/guide"],
+  // --- end ui2 api-build ---
   // --- XVC-UI: the Debug section's XVC card (docs/API.md "Fabric debug over XVC", xvc_api.py).
   // The query is part of the template (callBlob takes no query argument): pass byo "" (the
   // open session's mode), "true" or "false"; which "auto" (the full-design file when the

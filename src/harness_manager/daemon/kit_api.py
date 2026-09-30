@@ -15,6 +15,12 @@
 | ``POST /guide/script`` ``{static_id, design, pack?, out_dir?, kit_dir?, jobs?, stop_after?, format?}`` | the build directory's files (``format: "zip"``: a zip with the kit) |
 | ``POST /kits/check`` ``{path, clearing?, static_id?, board_id?}`` | ``{passed, checks, facts}`` (200 either way: a query) |
 | ``POST /kits/pack`` ``{path, out_dir?, import?}`` | ``{overlay_dir, imported}``; 409 REFUSED with ``error.data.checks`` |
+| ``POST /overlays/import`` ``{path, board_id?, static_id?, check_only?}`` | UI2 G5: ``{kind, path, name, rm_id, static_id, passed, checks, groups, overlay_dir, imported}``; 409 INCOMPATIBLE/REFUSED with ``error.data`` = the same |
+| ``POST /kits/design/scan`` ``{path, name?, top?, static_id?, board_id?, rm_id?, out?}`` | UI2 G8 (e): ``{path, kind, name, top, tops, sources, include_dirs, defines, packages, generics, use, ports, rm_id, rm_id_proposed, left_out, warnings, design, written}`` |
+
+UI2 G8 (additive): the guide adds ``running``, ``pblock`` and ``utilisation``; ``POST /kits/check``
+adds ``facts.utilisation`` and ``facts.pblock``; ``POST /guide/script`` adds ``run`` ("Run it your
+way": batch, the Vivado GUI, your open Vivado).
 
 Paths (``path``, ``out_dir``, ``build_dir``, a ``design`` file) are ABSOLUTE paths on the
 daemon's host: the build runs there (david K6: Vivado on the user's machine, driven by
@@ -37,7 +43,16 @@ from harness_manager.cli.output import with_data
 from harness_manager.core.errors import UsageError
 from harness_manager.core.events import Event
 from harness_manager.core.pack import KitCheck, kit_refusal
-from harness_manager.services.kit import KitService, build, guide, script, vivado
+from harness_manager.services.kit import (
+    KitService,
+    build,
+    floorplan,
+    guide,
+    overlay_import,
+    rtl_scan,
+    script,
+    vivado,
+)
 from harness_manager.services.kit.schema import hex32, parse_u32
 
 from .app import _JSON, JsonBody, RouteContext, _abs_path, _obj, ok
@@ -269,6 +284,7 @@ def register(ctx: RouteContext) -> None:
         checks, facts, sid = check_path(kits, path, clearing=b.get("clearing"),
                                         static_id=b.get("static_id"), ident=ident)
         passed = kit_refusal(checks, "") is None
+        add_floorplan(facts, sid)
         return _JSON(ok(passed=passed, static_id=sid, checks=checks_json(checks), facts=facts))
 
     @api.post("/kits/pack")
@@ -288,6 +304,69 @@ def register(ctx: RouteContext) -> None:
         imported = adapter.import_overlay(kits.store, od) if do_import else None
         return _JSON(ok(overlay_dir=str(od), manifest=str(od / "manifest.json"),
                         imported=imported, checks=checks_json(checks)))
+
+    # -- UI2-API-BUILD G5: import a design from a path (the Import dialog) ----------------------
+
+    @api.post("/overlays/import")
+    def overlays_import(body: JsonBody = None) -> Any:
+        b = _obj(body)
+        path = _abs_path(b.get("path"), "path")
+        check_only = b.get("check_only", False)
+        if not isinstance(check_only, bool):
+            raise UsageError("check_only must be true or false")
+        sid = static_arg(b["static_id"]) if b.get("static_id") else ""
+        bid = str(b["board_id"]) if b.get("board_id") else ""
+        ident = board_identity(ctx, bid) if bid else None
+        pack = pack_of(bid) if bid else "mps3"
+        if check_only:
+            res = overlay_import.check_design(kits, path, identity=ident, static_id=sid,
+                                              pack=pack, store=kits.store)
+        else:
+            res = overlay_import.import_design(kits, path, identity=ident, static_id=sid,
+                                               pack=pack, store=kits.store)
+            d.bus.publish(Event("kit.imported", bid, {
+                "name": res.name, "rm_id": res.rm_id, "static_id": res.static_id,
+                "kind": res.kind, "sha256": (res.imported or {}).get("sha256", "")}))
+        return _JSON(ok(board_id=bid or None, **res.to_json()))
+
+    # -- UI2-API-BUILD G8 (e): My RTL, a folder or a .f list into a design -----------------------
+
+    @api.post("/kits/design/scan")
+    def design_scan(body: JsonBody = None) -> Any:
+        b = _obj(body)
+        path = _abs_path(b.get("path"), "path")
+        for key in ("name", "top", "rm_id"):
+            if b.get(key) is not None and not (isinstance(b[key], str) and b[key]):
+                raise UsageError(f"{key} must be a non-empty string")
+        bid = str(b["board_id"]) if b.get("board_id") else ""
+        sid = static_arg(b["static_id"]) if b.get("static_id") else ""
+        if bid and not sid:
+            ident = board_identity(ctx, bid)
+            sid = hex32(parse_u32(ident.shell_id)) if ident.shell_id else ""
+        pack = pack_of(bid) if bid else "mps3"
+        out = _abs_path(b["out"], "out") if b.get("out") else None
+        adapter = kits.adapter_for(pack)
+        found = rtl_scan.scan(path, name=b.get("name") or "", top=b.get("top") or "",
+                              pack=pack, static_id=sid, rm_id=b.get("rm_id") or "",
+                              adapter=adapter, store=kits.store)
+        if out is not None:
+            rtl_scan.write_design(found, out)
+        return _JSON(ok(static_id=sid or None, **found.to_json()))
+
+
+def add_floorplan(facts: dict[str, Any], static_id: str, pack: str = "mps3") -> None:
+    """UI2 G8 (b) (c): the pblock's facts and the receipt's ``<name>_util.rpt`` against it,
+    into ``kit check``'s facts (additive; None when there is none)."""
+    pblock = floorplan.pblock_facts(pack, static_id) if static_id else None
+    facts["pblock"] = pblock
+    receipt = facts.get("receipt") or {}
+    util = None
+    path = receipt.get("path") if isinstance(receipt, dict) else None
+    name = receipt.get("rm_name") if isinstance(receipt, dict) else None
+    if path and name and build.plain_name(str(name)):
+        rpt = Path(path).parent / f"{name}_util.rpt"
+        util = floorplan.utilisation(rpt, pblock) if rpt.is_file() else None
+    facts["utilisation"] = util
 
 
 def check_path(kits: KitService, path: Path, *, clearing: Any = None, static_id: Any = None,

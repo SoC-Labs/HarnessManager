@@ -419,6 +419,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     from .lxslots_mock_card import register as register_card
     app.state.card = CardSim()
     register_card(app, state, app.state.card, _ok)
+    # --- ui2 api-build --- (G4 readings history, G6 slot rollback and card commit/clear)
+    ui2_register(app, state, app.state.card)
+    # --- end ui2 api-build ---
     # LM3's Live display routes (docs/API.md "Live display"): the real display_api over a
     # FakeLcdMirror per demo board (tests/fakes/lm3_mock_display.py).
     from .lm3_mock_display import register as register_display
@@ -605,13 +608,15 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.get(f"{API}/boards/{{bid}}")
     def info(bid: str) -> dict[str, Any]:
         state.jobs.gate(bid)
+        t0 = time.monotonic()                                   # ui2 api-build (G4)
         i = eng.info(bid)
+        extra = ui2_info_extra(app, state, bid, (time.monotonic() - t0) * 1000.0)  # G4
         claim = app.state.claim.get(bid) if hasattr(app.state, "claim") else None
         net = app.state.identity.get(bid) if hasattr(app.state, "identity") else None
         return _ok(candidate=i.candidate, identity=i.identity, health=i.health,
                    capabilities=i.capabilities, unavailable=i.unavailable,
                    **({"claim": claim} if claim is not None else {}),
-                   **({"net_identity": net} if net is not None else {}))
+                   **({"net_identity": net} if net is not None else {}), **extra)
 
     @app.get(f"{API}/boards/{{bid}}/lock")
     def lock(bid: str) -> dict[str, Any]:
@@ -621,8 +626,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     def telemetry(bid: str) -> dict[str, Any]:
         state.jobs.gate(bid)
         now = time.time()
-        return _ok(readings=[reading_json(r, now) for r in
-                             eng.telemetry.readings(state.session(bid))])
+        readings = list(eng.telemetry.readings(state.session(bid)))
+        ui2_history(app, state).note_readings(bid, readings)   # ui2 api-build (G4)
+        return _ok(readings=[reading_json(r, now) for r in readings])
 
     # -- deploy ---------------------------------------------------------------------------
 
@@ -992,6 +998,155 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
         mount_static(app, "/")
     return app
+
+
+# --- ui2 api-build ---
+# UI2-API-BUILD (docs/planning/UI_V2_PLAN.md §2 G4, G6; docs/API.md "Readings kept by this
+# service" and "OS slots and the card: roll back, commit, clear"): the readings history (the
+# real ``services.history`` ring, fed by the mock's telemetry route and seeded by the engine
+# as the daemon's is), the additive keys of GET /boards/{bid} (``info_fields`` over the same
+# ``facts_of`` seam), and the slot and card changes over ``CardSim``: 400 without confirm, 422
+# with the reason when the board has no OS slots or card, 409 HELD while a job runs, then a
+# 202 job whose result is the daemon's shape. The kit routes (G5, G8) are the real kit_api's
+# (tests/fakes/kit_mock.py).
+
+
+def ui2_history(app: FastAPI, state: Any) -> Any:
+    from harness_manager.services.history import ReadingsHistory
+
+    hist = getattr(app.state, "readings", None)
+    if hist is None:
+        seed = getattr(state.engine, "readings_seed", None)
+        hist = app.state.readings = ReadingsHistory(seed=seed if callable(seed) else None)
+    return hist
+
+
+def ui2_info_extra(app: FastAPI, state: Any, bid: str, answer_ms: float) -> dict[str, Any]:
+    from harness_manager.services.history import facts_of, info_fields
+
+    ui2_history(app, state).note_answer(bid, answer_ms)
+    try:
+        session = state.session(bid)
+    except HarnessError:
+        session = None
+    return info_fields(answer_ms, facts_of(session))
+
+
+def _ui2_confirmed(body: dict[str, Any], what: str) -> None:
+    if body.get("confirm") is not True:
+        raise UsageError(f"to {what}, send confirm: true",
+                         hint="the page asks first; the CLI asks, or takes --yes")
+
+
+def ui2_register(app: FastAPI, state: Any, sim: Any) -> None:
+    """The ui2 api-build routes the mock serves itself (the kit routes are the real ones)."""
+    from harness_manager.core.pack import SlotStatus
+    from harness_manager.services.history import query_args
+    from harness_manager.services.slot_health import extend_json
+    from harness_manager.services.slots import card_line, card_status_json, slot_status_json
+
+    from .lxslots_mock_card import NO_SLOTS
+
+    @app.get(f"{API}/boards/{{bid}}/readings/history")
+    def readings_history(bid: str, name: str | None = None, since: str | None = None,
+                         limit: str | None = None) -> dict[str, Any]:
+        hist = ui2_history(app, state)
+        names, when, count = query_args(name, since, limit, hist.capacity)
+        return _ok(**hist.history(bid, names=names, since=when, limit=count))
+
+    def slots_json(st: SlotStatus) -> dict[str, Any]:
+        return extend_json(slot_status_json(st), st)
+
+    def card_json(bid: str) -> dict[str, Any]:
+        doc = card_status_json(sim.card(bid))
+        return doc
+
+    @app.post(f"{API}/boards/{{bid}}/slots/rollback", status_code=202)
+    def slots_rollback(bid: str, body: dict[str, Any] = Body(default_factory=dict)  # noqa: B008
+                       ) -> JSONResponse:
+        state.session(bid)
+        _ui2_confirmed(body, "roll the OS slot back")
+        reboot = body.get("reboot", True)
+        if not isinstance(reboot, bool):
+            raise UsageError(f"reboot must be true or false, not {reboot!r}")
+        state.jobs.gate(bid)
+        st = sim.card(bid).os_slots
+        if bid in sim.no_store or st is None:
+            raise UnavailableError("OS slot update", NO_SLOTS)
+
+        def run(progress: Callable[[str, int, int], None]) -> Any:
+            import dataclasses as dc
+
+            now = sim.card(bid).os_slots
+            progress("rollback", 0, 0)
+            other = "B" if now.running == "A" else "A"
+            if now.pending_commit:
+                after = dc.replace(now, default=now.running)
+                note, rebooted = f"the commit of slot {now.pending_commit} is undone", False
+            else:
+                info = now.slots.get(other)
+                if info is None or not info.valid:
+                    raise RefusedError(f"slot {other} holds no valid image to roll back to "
+                                       f"({info.state if info else 'absent'})",
+                                       hint="push a known-good image instead")
+                after = dc.replace(now, default=other, running=other if reboot else now.running,
+                                   target="" if not reboot else now.running)
+                rebooted = reboot
+                note = (f"slot {other} runs again (rebooted)" if reboot
+                        else f"slot {other} boots at the next reboot")
+            sim.cards[bid] = dc.replace(sim.card(bid), os_slots=after)
+            return {"board_id": bid, "act": "rollback", "slot": after.default,
+                    "rebooted": rebooted, "fell_back": None, "note": note,
+                    "slots": slots_json(after)}
+
+        return _accepted(state.jobs.start(bid, "slot_rollback", run))
+
+    def card_change(bid: str, body: dict[str, Any], kind: str, what: str,
+                    change: Callable[[], dict[str, Any]]) -> JSONResponse:
+        state.session(bid)
+        _ui2_confirmed(body, what)
+        state.jobs.gate(bid)
+        card = sim.card(bid)
+        if bid in sim.no_store or not card.store:
+            raise UnavailableError("user microSD", "this harness has no microSD store")
+        if not card.present:
+            raise UnavailableError("user microSD", "no card in the USER microSD slot")
+        return _accepted(state.jobs.start(bid, kind, lambda progress: change()))
+
+    @app.post(f"{API}/boards/{{bid}}/card/commit", status_code=202)
+    def card_commit(bid: str, body: dict[str, Any] = Body(default_factory=dict)  # noqa: B008
+                    ) -> JSONResponse:
+        def change() -> dict[str, Any]:
+            import dataclasses as dc
+
+            ident = state.engine.info(bid).identity
+            old = sim.card(bid)
+            slot = "A" if (old.default or {}).get("slot") == "B" else "B"
+            committed = {"rm_id": ident.rm_id, "rm_name": ident.rm_name,
+                         "static_id": ident.shell_id, "slot": slot}
+            sim.cards[bid] = dc.replace(old, default=dict(committed), state="valid",
+                                        boot="loaded")
+            return {"board_id": bid, "committed": committed, "card": card_json(bid),
+                    "line": card_line(sim.card(bid)),
+                    "note": f"{ident.rm_name or ident.rm_id} is the power-on default "
+                            f"(store slot {slot})"}
+
+        return card_change(bid, body, "card_commit",
+                           "write the running overlay to the card as its power-on default",
+                           change)
+
+    @app.post(f"{API}/boards/{{bid}}/card/clear", status_code=202)
+    def card_clear(bid: str, body: dict[str, Any] = Body(default_factory=dict)  # noqa: B008
+                   ) -> JSONResponse:
+        def change() -> dict[str, Any]:
+            import dataclasses as dc
+
+            sim.cards[bid] = dc.replace(sim.card(bid), default=None, boot="greybox")
+            return {"board_id": bid, "card": card_json(bid), "line": card_line(sim.card(bid)),
+                    "note": "no power-on default: the greybox loads at the next power-on"}
+
+        return card_change(bid, body, "card_clear", "clear the card's power-on default", change)
+# --- end ui2 api-build ---
 
 
 # --- running it ---------------------------------------------------------------------------
