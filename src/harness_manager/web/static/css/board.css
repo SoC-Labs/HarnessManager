@@ -54,9 +54,11 @@
 .os-rels .hwhy { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .os-rels .hrow-verdict { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .bt-caps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
-.bt-caps li { padding: 6px 0; border-top: 1px solid var(--border); }
+.bt-caps li { padding: 4px 0; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.4; }
 .bt-caps li:first-child { border-top: 0; }
 .bt-caps b { font-weight: 500; }
+.bt-cando { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.bt-cando .cap { font-size: 11.5px; padding: 0 7px; line-height: 20px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text-2); }
 .bt-sub-h { font-size: 12px; color: var(--text-3); margin-bottom: 4px; }
 
 /* --- Recover: one dense row per step, a column head over the "what it keeps" matrix ------------- */
@@ -65,14 +67,14 @@
 .rc-head .reason { margin: 0; }
 .rc-grad { flex: 0 1 110px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--ok), var(--accent) 30%, var(--warn) 65%, var(--err)); }
 .rc-cols {
-  display: grid; grid-template-columns: 26px minmax(0, 1fr) 356px 176px; gap: 0 12px; align-items: end; padding: 0 16px 5px;
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) 356px 168px; gap: 0 12px; align-items: end; padding: 0 16px 5px;
   font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3);
 }
 .rc-cols-step { display: flex; align-items: center; gap: 8px; }
 .rc-cols-keep { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; text-align: center; letter-spacing: .02em; }
 .rc-list { list-style: none; margin: 0; padding: 0; }
 .rc-row {
-  display: grid; grid-template-columns: 26px minmax(0, 1fr) 356px 176px; gap: 6px 12px; align-items: center;
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) 356px 168px; gap: 6px 12px; align-items: center;
   padding: 9px 16px; border-top: 1px solid var(--border);
 }
 .rc-row.armed { box-shadow: inset 3px 0 0 var(--warn); background: var(--surface-2); }
@@ -97,13 +99,14 @@
 .rc-sev { display: inline-flex; gap: 2px; color: var(--sev); }
 .rc-sev i { width: 9px; height: 4px; border-radius: 1px; background: var(--border-strong); }
 .rc-sev i.on { background: currentColor; }
-.rc-time { height: 20px; font-size: 11.5px; padding: 0; border: 0; gap: 3px; color: var(--text-3); background: transparent; }
+.bt .rc-time { height: 20px; font-size: 11.5px; padding: 0; border: 0; gap: 3px; color: var(--text-3); background: transparent; }
 .rc-time .icon { width: 12px; height: 12px; color: var(--text-3); }
 .rc-d { font-size: 12.5px; color: var(--text-2); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
 .rc-keeps { grid-column: 3; grid-row: 1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .rc-acts { grid-column: 4; grid-row: 1; display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
 .rc-acts .arm-inline { height: 28px; }
-.rc-go { min-width: 96px; justify-content: center; }
+.rc-go { min-width: 90px; justify-content: center; }
+.rc-acts .arm-inline { padding: 0 7px; }
 .rc-extra { grid-column: 2 / -1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .rc-extra .reason { margin: 0; font-size: 12.5px; }
 .rc-extra .field { margin: 0; }

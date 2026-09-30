@@ -16,7 +16,7 @@ import {
   identityOf, isLinux, loadSlots, mccRoute, osKind, slotsOf, USB_WORDS,
 } from "./boardfacts.js";
 import {
-  HarnessRollbackFoot, HarnessRollbackPanels, offeredText, ReleasesCard,
+  HarnessRollbackFoot, HarnessRollbackPanels, NOT_YET, offeredText, ReleasesCard,
 } from "./harness.js";
 import { heldLines } from "./power.js";
 import { ConfigSdCard, SdRecovery } from "./sd.js";
@@ -229,7 +229,8 @@ function NetbootHere({ bid }) {
 
 function routeText(bid) {
   const r = mccRoute(bid);
-  return `${(USB_WORDS[r.to] || USB_WORDS.unknown).nav}${r.reason ? `: ${r.reason}` : ""}`;
+  const hub = r.to === "hub" ? (boardState(bid).week && boardState(bid).week.hub) : null;
+  return `${(USB_WORDS[r.to] || USB_WORDS.unknown).nav}${hub && hub.host ? ` (${hub.host})` : ""}`;
 }
 
 export function VersionsPage({ bid }) {
@@ -241,7 +242,8 @@ export function VersionsPage({ bid }) {
   if (kind === "card") here = html`<${CardHere} bid=${bid} />`;
   else if (kind === "netboot") here = html`<${NetbootHere} bid=${bid} />`;
   else if (kind === "bm") {
-    here = html`<${ConfigSdCard} bid=${bid} route=${routeText(bid)}
+    here = html`<${ConfigSdCard} bid=${bid} route=${routeText(bid)} routeWhy=${mccRoute(bid).reason}
+      note=${html`<p class="small muted mt-8" data-testid="harness-not-yet"><${Icon} name="info" cls="sm" /> ${NOT_YET}</p>`}
       foot=${html`<${HarnessRollbackFoot} bid=${bid} /><span class="grow"></span>
         <button type="button" class="link-btn" onClick=${() => openActivity(bid)}>History in Activity</button>`}
       after=${html`<${HarnessRollbackPanels} bid=${bid} />`} />`;

@@ -172,7 +172,7 @@ export function SdRecovery({ bid }) {
 // Board › Versions' left card on a bare-metal board: the configuration SD (the route it is
 // reached by, what it holds, this page's last backup, Back up now), the Roll back at its
 // foot, and the by-hand install flow in a fold.
-export function ConfigSdCard({ bid, route, foot = null, after = null }) {
+export function ConfigSdCard({ bid, route, routeWhy = "", foot = null, after = null, note = null }) {
   const b = boardState(bid);
   const w = week(bid);
   const id = (b.info && b.info.identity) || {};
@@ -183,8 +183,8 @@ export function ConfigSdCard({ bid, route, foot = null, after = null }) {
   return html`<${Card} title="Configuration SD" icon="hard-drive" cls="os-here" testid="config-sd"
       sub="The MCC's SD card. A harness install writes it (after a backup), then reboots.">
     <dl class="kv">
-      <dt>Route</dt><dd class="small">${route}</dd>
-      <dt>Holds</dt><dd class="small">what the board runs: harness ${id.harness_version || "?"} · shell <span class="mono">${id.shell_id || "?"}</span></dd>
+      <dt>Route</dt><dd class="small" title=${routeWhy}>${route}</dd>
+      <dt>Holds</dt><dd class="small">harness ${id.harness_version || "?"} · shell <span class="mono">${id.shell_id || "?"}</span></dd>
       <dt>Last backup</dt><dd class="small" data-testid="config-sd-backup">${last
         ? html`<span class="mono">${last.path}</span>${last.files ? ` · ${last.files} files` : ""}`
         : html`<span class="muted">none taken from this page</span>`}</dd>
@@ -197,5 +197,6 @@ export function ConfigSdCard({ bid, route, foot = null, after = null }) {
     ${after}
     <details class="os-more" data-testid="sd-more"><summary data-action="sd-more">Install files onto the SD by hand…</summary>
       <${InstallFlow} bid=${bid} /></details>
+    ${note}
   <//>`;
 }

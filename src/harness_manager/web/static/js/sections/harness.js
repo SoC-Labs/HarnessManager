@@ -627,7 +627,8 @@ export function ReleasesCard({ bid, linux = false, netboot = false }) {
           ${cat.at ? html`<span class="muted"> · listed ${clock(cat.at)}</span>` : null}</div>
         <${LeaseLine} lease=${board.lease} />
         ${h.stale ? html`<${Reason} level="warn" testid="harness-stale" text=${`Changed since this list was built (${h.stale}): Refresh.`} />` : null}
-        ${(cat.warnings || []).map((w) => html`<${Reason} key=${w} level="warn" text=${w} />`)}
+        ${(cat.warnings || []).filter((w) => !(board.lease && board.lease.required && /hub lease/.test(w)))
+          .map((w) => html`<${Reason} key=${w} level="warn" text=${w} />`)}
         <ul class="hrows" data-testid="harness-rows">${rows.map((row) => html`<${Row} key=${row.version} bid=${bid} row=${row} h=${h}
           pinBusy=${!!pp.running} netboot=${netboot} focus=${focus} />`)}</ul>
         ${pp.lines && pp.lines.length ? html`<${ResultBlock} lines=${pp.lines} panel=${pp} testid="harness-pin-result" />` : null}` : null}
@@ -637,7 +638,6 @@ export function ReleasesCard({ bid, linux = false, netboot = false }) {
           onClick=${() => { h.historyOpen = !h.historyOpen; if (h.historyOpen) loadHistory(bid); changed(); }}>
           <${Icon} name="history" /> ${h.historyOpen ? "Hide the history" : "History"}</button></div>` : null}
       ${h.historyOpen && cat ? html`<${History} bid=${bid} h=${h} />` : null}
-      ${linux ? null : html`<p class="secondary small" data-testid="harness-not-yet"><${Icon} name="info" cls="sm" /> ${NOT_YET}</p>`}
     </div>
   <//>`;
 }

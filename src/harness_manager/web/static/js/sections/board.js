@@ -13,7 +13,7 @@ import { boardName, capTitle as capTitleOf, clock } from "../format.js";
 import { html, useEffect, useLayoutEffect, useRef } from "../lib.js";
 import { boardState, changed, navigate, S, select, timed } from "../store.js";
 import { durationText, leaseLeft, leaseWho, week } from "../week.js";
-import { Card, Chip, Icon, Reason } from "../ui.js";
+import { Card, Chip, Icon, LinkLine, Reason } from "../ui.js";
 import {
   featuresOf, hasCap, identityOf, isLinux, mccRoute, osKind, USB_WORDS,
 } from "./boardfacts.js";
@@ -222,11 +222,14 @@ function About({ bid }) {
   const hub = row.hub || null;
   const feats = featuresOf(b);
   const missing = Object.entries(b.info.unavailable || {});
+  const links = ((b.info.candidate || {}).links) || [];
   return html`<${Card} title="About this board" icon="info" testid="about-card"
       sub="The fixed facts, and what this board cannot do.">
     <div class="bt-about">
-      <dl class="kv">
+      <dl class="kv" data-testid="identity-card">
         <dt>Board id</dt><dd class="mono small">${bid}</dd>
+        <dt>Links</dt><dd>${links.length ? links.map((l) => html`<${LinkLine} key=${l.kind + l.address} link=${l} />`)
+          : html`<span class="muted small">none reported</span>`}</dd>
         ${hub ? html`<dt>Hub target</dt><dd class="mono small">${hub.target || "?"} · ${hub.host}</dd>` : null}
         <dt>Shell</dt><dd class="mono small" data-testid="about-shell">${id.shell_id || "unknown"}</dd>
         <dt>Harness</dt><dd class="small" data-testid="about-harness">${id.harness_version || "unknown"}${id.harness_impl ? ` · ${id.harness_impl}` : ""}${id.proto ? ` · protocol ${id.proto}` : ""}
@@ -237,10 +240,12 @@ function About({ bid }) {
         <dt>Features</dt><dd>${feats.length ? html`<div class="tags" data-testid="about-features">${feats.map((f) => html`<span class="tag" key=${f}>${f}</span>`)}</div>`
           : html`<span class="muted">none reported</span>`}</dd>
       </dl>
-      <div><div class="bt-sub-h">Not available here</div>
+      <div data-testid="capabilities-card"><div class="bt-sub-h">Not available here</div>
         ${missing.length ? html`<ul class="bt-caps" data-testid="about-missing">${missing.map(([n, why]) => html`<li key=${n} data-capability=${n}>
           <b>${capTitleOf(n)}</b>: ${why}</li>`)}</ul>`
-          : html`<p class="small muted">Everything this board pack offers is available.</p>`}</div>
+          : html`<p class="small muted">Everything this board pack offers is available.</p>`}
+        <details class="os-more"><summary>What it can do here (${(b.info.capabilities || []).length})</summary>
+          <div class="bt-cando">${(b.info.capabilities || []).map((n) => html`<span class="cap" key=${n} data-capability=${n} title=${n}>${capTitleOf(n)}</span>`)}</div></details></div>
     </div><//>`;
 }
 
