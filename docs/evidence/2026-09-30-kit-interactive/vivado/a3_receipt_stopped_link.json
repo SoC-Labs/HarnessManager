@@ -1,0 +1,30 @@
+{
+  "schema": "harness-manager-rm-build", "schema_version": 1,
+  "state": "stopped", "stage": "link",
+  "kit_id": "mps3/0x44EE76D5/vivado-2026.1",
+  "part": "xcku115-flvb1760-1-c",
+  "rm_id": "0x0100B8C6",
+  "rm_id_netlist": "0x0100B8C6",
+  "rm_name": "lfsr_floor",
+  "rm_top": "rm_lfsr_floor",
+  "rp_inst": "u_rp_dut",
+  "static_id": "0x44EE76D5",
+  "static_usercode": "0xFB1F8C76",
+  "vivado": "2026.1",
+  "gates": [
+    {"gate": "vivado_version", "verdict": "PASS", "detail": "running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it"},
+    {"gate": "part_installed", "verdict": "PASS", "detail": "xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)"},
+    {"gate": "static_dcp_present", "verdict": "PASS", "detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/kit/static/static_routed_locked.dcp"},
+    {"gate": "static_id", "verdict": "PASS", "detail": "CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5"},
+    {"gate": "source_present", "verdict": "PASS", "detail": "/tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv"},
+    {"gate": "ooc_xdc_present", "verdict": "PASS", "detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)"},
+    {"gate": "no_black_boxes", "verdict": "PASS", "detail": "none"},
+    {"gate": "boundary_bits", "verdict": "PASS", "detail": "148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)"},
+    {"gate": "rm_id_match", "verdict": "PASS", "detail": "the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)"},
+    {"gate": "ooc_clocks", "verdict": "PASS", "detail": "OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)"},
+    {"gate": "rp_cell", "verdict": "PASS", "detail": "u_rp_dut in static_routed_locked.dcp"},
+    {"gate": "rp_pins_link", "verdict": "PASS", "detail": "148 partition pins after link, the boundary has 148"},
+    {"gate": "clocks_after_link", "verdict": "PASS", "detail": "22 clocks propagated from the static"},
+    {"gate": "drc_hdpr_link", "verdict": "PASS", "detail": "no HDPR-16/18/50, no Error"}
+  ]
+}

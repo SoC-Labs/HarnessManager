@@ -164,6 +164,100 @@ The script writes it after a pass, a failed gate or `STOP_AFTER`. It holds:
 
 HM derives the overlay manifest from it. Nobody writes a manifest by hand.
 
+A `stopped` receipt is not a failure: every gate up to `stage` passed (a failed gate writes
+`failed`). `kit check` says "stopped after <stage> (STOP_AFTER=<stage>), not a failure" and exits
+0; `kit pack` still refuses it (it has no pair); the guide's Build step is *next*, with the
+command that runs the build to the end (`-tclargs STOP_AFTER=bitstream`, so a script written
+with `kit script --stop-after link` does not stop there again). Before KIT-INTERACTIVE, `kit
+check` said "failed 1 check" and exited 15.
+
+### 3.5 Run it in your own Vivado (KIT-INTERACTIVE)
+
+Proven board-free on Vivado 2026.1 with the RC2 kit (static 0x44EE76D5), 30 Sep 2026:
+`docs/evidence/2026-09-30-kit-interactive/`. The same script, the same gates, the same receipt
+in every way; only what Vivado does after the script differs.
+
+| Way | Command (`kit build DIR` prints it) | After the script | Proven |
+|---|---|---|---|
+| Batch | `vivado -mode batch -source DIR/build_rm.tcl -log DIR/build_rm.log -journal DIR/build_rm.jou [-tclargs …]` | exits | KIT-NIGHT, and A4 here |
+| Tcl shell | the same with `-mode tcl` | the `Vivado%` prompt, the design open | A1: 5 min 24 s to link |
+| GUI (`kit build DIR --gui`) | the same with `-mode gui` | the GUI, the design open | A3 (under `xvfb-run -a`): 5 min to link; the markers and `HM_RM_BUILD_STOPPED after=link` land in `build_rm.log` |
+| A Vivado that is already open | in its Tcl console: `cd {DIR}; set argv {STOP_AFTER=link}; source build_rm.tcl` | the prompt, the design open | A2 |
+
+What sourcing into a running Vivado needs to know (A2, A3):
+- **`argv`.** Vivado starts every session with `argv {}` (`argc 0`) and keeps whatever was set
+  last, and the script reads it. So `set argv {…}` before every `source` (`kit build` always
+  prints it, `set argv {}` too). With `argv` unset the script used to stop with `can't read
+  "argv": no such variable` before any marker; it now builds with its own values.
+- **A design already open stays open.** Vivado 2026.1 opens the build's projects beside it, in
+  `-mode tcl` and in the GUI: re-sourcing with the linked design still open ran synth and link
+  again and left `project_static_routed_locked` and `project_static_routed_locked_2` open
+  (A3). Nothing is closed that the script did not open. Each linked static holds about 3 GB
+  (peak RSS 3.1 GB with one, 6.3 GB with two), so `close_project` the old one first.
+- **The log.** In a running session the `HM_` lines go to that session's log (`vivado.log`
+  where it started), not `DIR/build_rm.log`. The receipt is the verdict either way. The GUI and
+  `-mode tcl` commands name `-log DIR/build_rm.log`, so there it is the same file as batch.
+- **Batch is unchanged.** A batch run to the link with the old template (`1a127de`) and one
+  with the new, same design and kit: the 19 `HM_` lines and the receipts are identical (paths
+  aside). A test runs the script in Python's Tcl and pins the preflight markers.
+
+### 3.6 Floorplan: stop after link, nested pblocks via `rm_xdc`
+
+The partition's pblock (`pblock_rp_dut` on MPS3: `SLICE_X48Y0:SLICE_X95Y119`, `RAMB18_X6Y0:X11Y47`,
+`RAMB36_X6Y0:X11Y23`, `DSP48E2_X9Y0:X17Y47`, `EXCLUDE_PLACEMENT` and `CONTAIN_ROUTING`) is the
+static's: it cannot move or grow. **Inside it, your RM can have pblocks of its own**, and
+Vivado 2026.1 builds them (A4):
+
+1. `harness-manager kit build DIR --gui --stop-after link` (or the Tcl line with
+   `set argv {STOP_AFTER=link}`). It stops with the linked design open.
+2. Make a child pblock and put your cells in it:
+   ```tcl
+   create_pblock pblock_lfsr
+   resize_pblock [get_pblocks pblock_lfsr] -add {SLICE_X80Y90:SLICE_X87Y104}
+   set_property PARENT pblock_rp_dut [get_pblocks pblock_lfsr]
+   add_cells_to_pblock [get_pblocks pblock_lfsr] [get_cells -hierarchical -filter {NAME =~ u_rp_dut/* && IS_PRIMITIVE && REF_NAME != GND && REF_NAME != VCC && NAME !~ *HD_PR_Connection* && NAME !~ *HD_Inserted*}]
+   ```
+   Vivado accepts it: `PARENT=pblock_rp_dut`, `SNAPPING_MODE NESTED`, no HDPR DRC.
+3. Save it: **`hm_save_floorplan FILE`** (a proc `build_rm.tcl` defines, so it is there in every
+   way above). It writes each child of `RP_PBLOCK` with its ranges, its
+   `EXCLUDE_PLACEMENT`/`CONTAIN_ROUTING` and its cells, names relative to `RP_INST`: the form
+   `read_xdc -cell RP_INST` reads. A second round trip gives the same file.
+4. Put FILE in the design as `build.rm_xdc` (or `-tclargs RM_XDC=FILE`), `kit script` again, and
+   build. After the link the script reads it `-cell u_rp_dut`; the pblock comes back as
+   `u_rp_dut_pblock_lfsr`, a child of `pblock_rp_dut`.
+
+**`rm_xdc` used to crash Vivado.** The first builds with an `rm_xdc` (A4 here; no build had
+set one before) segfaulted Vivado 2026.1 right after `clocks_after_link` (exit 139,
+`HASCUtils::getXDCName` in `hs_err_pid*.log`; 2 of 2, two different files): the script read the
+file with `read_xdc -cell $rp_cell`, a cell object from before `read_checkpoint -cell`, which is
+stale after it. Vivado says so in every build's log: `WARNING: [Vivado 12-12435] Any Tcl
+variable pointing to design objects become invalid when read_checkpoint is executed subsequently
+after open_checkpoint.` It now asks for the cell again, `read_xdc -cell [get_cells $rp]`, as the
+sessions above did without a crash. A test pins the spelling.
+
+**Not `write_xdc -cell u_rp_dut -exclude_timing`.** It writes the partition's own pblock too
+(`create_pblock pblock_rp_dut`, its ranges, `CONTAIN_ROUTING`, `EXCLUDE_PLACEMENT`, and
+`set_property HD.RECONFIGURABLE true [current_design]`). Read back `-cell u_rp_dut`, Vivado
+prefixes every pblock the file creates with `u_rp_dut_`: `pblock_rp_dut` becomes a second,
+top-level (`PARENT=ROOT`) pblock `u_rp_dut_pblock_rp_dut` over the same area, which takes the
+RM's cells, leaves `pblock_rp_dut` with none, and raises HDPR-141 ("Reconfigurable Pblocks must
+not overlap static pblocks": Vivado now takes the copy for the reconfigurable pblock and the real
+one for a static one). A full build with that file fails at `place_design`: `ERROR: [DRC PLDE-1]
+Design Exceptions: ERROR: u_rp_dut/GND_HD_Inserted_Inst_dbg_bscan_tdo constrained such that no
+valid location exists on the device`.
+
+**Not the lines the journal echoes either.** A pblock assigned by hand is journalled with full
+names (`[get_cells [list {u_rp_dut/lfsr_q_reg[0]} …]]`); read `-cell u_rp_dut` they do not
+resolve, and the child pblock stays empty with only `CRITICAL WARNING: [Vivado 12-1433] Expecting
+a non-empty list of cells to be added to the pblock` (A4c). Names relative to `u_rp_dut`, or a
+`-filter` on `NAME`, work; `hm_save_floorplan` writes the relative names.
+
+**Limits.** No pads (the partition has no IO sites), no clock buffers, MMCMs or BSCANs in the
+RM (none in the pblock: use the shell's clocks and BSCAN legs), child pblocks inside the
+partition's ranges only, and HM's XDC checker (`services/xdc/syntax.py`) is not run on
+`rm_xdc` (it would accept every file above, the two that fail too: it checks syntax, not
+what `-cell` scoping does).
+
 ## 4. Validation before deploy, without Vivado (spike (b))
 
 `tools/spike_kit_guide/partial_check.py` reads a `.bit` or `.bin`. Its packet walker always skips a packet's payload by its count, so frame data is never read as headers (the failure mode `tools/bit_identity.py` warns about). A stream it cannot walk to DESYNC is reported as unparsed, never as clean.
@@ -265,9 +359,12 @@ harness-manager kit guide   [TARGET | --static-id ID] [--vivado VER]   # the ste
 harness-manager kit fetch   …                                          # KIT-STORE
 harness-manager kit script  --design my_rm.json --out build/my_rm [TARGET | --static-id ID]
                                                                        # build_rm.tcl + OOC XDC + skeleton + README
-harness-manager kit build   build/my_rm [--stop-after synth] [--jobs 2] # PRINTS the Vivado command; HM does not run it
+harness-manager kit build   build/my_rm [--stop-after synth] [--jobs 2] [--gui]
+                                                                       # PRINTS the Vivado command; HM does not run it
                                                                        # (it names the full path of a Vivado of the
-                                                                       # kit's release; exit 12 when there is none)
+                                                                       # kit's release; exit 12 when there is none),
+                                                                       # --gui the GUI one, and the Tcl line for a
+                                                                       # Vivado already open (§3.5)
 harness-manager kit check   build/my_rm/out/my_rm_build.json [TARGET] [--static-id ID]
                                                                        # receipt + files + stream checks (+ live shell_id);
                                                                        # --static-id must be the receipt's (else exit 14)
@@ -289,8 +386,11 @@ Build a DUT for mps3-01 (static 0x72BB0A36, kit mps3/0x72BB0A36/vivado-2024.1)
 next: fix the timing, then: harness-manager kit build build/my_rm
 ```
 
-`kit build` only prints the command (`vivado -mode batch -source build_rm.tcl ...`); running
-Vivado, and streaming its `HM_STAGE`/`HM_GATE` lines, is not built yet (§7 option 1). The
+`kit build` only prints the command (`vivado -mode batch -source build_rm.tcl ...`; with
+`--gui`, `-mode gui`), then the line for a Vivado that is already open (`cd {DIR}; set argv
+{…}; source build_rm.tcl`), and `--json` has all of them (`commands.batch|gui|tcl`,
+`source_tcl`, `stays_open`); running Vivado, and streaming its `HM_STAGE`/`HM_GATE` lines, is
+not built yet (§7 option 1). The
 command starts with the full path of the Vivado that discovery chose for the kit's release
 (`tools.vivado`, PATH, the install roots), because a bare `vivado` runs whatever is first
 on PATH; with no Vivado of that release it fails (exit 12) and says what it found.

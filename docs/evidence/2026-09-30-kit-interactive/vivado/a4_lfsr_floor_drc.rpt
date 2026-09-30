@@ -1,0 +1,135 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2026 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2026.1 (lin64) Build 6511674 Tue Jun 16 11:01:26 MDT 2026
+| Date         : Wed Sep 30 18:44:38 2026
+| Host         : srv03335 running 64-bit Red Hat Enterprise Linux release 8.10 (Ootpa)
+| Command      : report_drc -file /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_drc.rpt
+| Design       : shell_top
+| Device       : xcku115-flvb1760-1-c
+| Speed File   : -1
+| Design State : Fully Routed
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Report DRC
+
+Table of Contents
+-----------------
+1. REPORT SUMMARY
+2. REPORT DETAILS
+
+1. REPORT SUMMARY
+-----------------
+            Netlist: netlist
+          Floorplan: checkpoint_static_routed_locked
+      Design limits: <entire design considered>
+           Ruledeck: default
+             Max checks: <unlimited>
+             Checks found: 16
++-----------+----------+--------------------------------------+--------+
+| Rule      | Severity | Description                          | Checks |
++-----------+----------+--------------------------------------+--------+
+| BUFC-1    | Warning  | Input Buffer Connections             | 6      |
+| PDCN-1569 | Warning  | LUT equation term check              | 3      |
+| REQP-1877 | Warning  | BUFGCE_has_no_loads                  | 5      |
+| REQP-1934 | Warning  | RAMB18E2_nochange_collision_advisory | 1      |
+| RTSTAT-10 | Warning  | No routable loads                    | 1      |
++-----------+----------+--------------------------------------+--------+
+
+2. REPORT DETAILS
+-----------------
+BUFC-1#1 Warning
+Input Buffer Connections  
+Input buffer u_qspi_ncs_iobuf/IBUFCTRL_INST (in u_qspi_ncs_iobuf macro) has no loads. It is recommended to have an input buffer drive an internal load.
+Related violations: <none>
+
+BUFC-1#2 Warning
+Input Buffer Connections  
+Input buffer u_qspi_sclk_iobuf/IBUFCTRL_INST (in u_qspi_sclk_iobuf macro) has no loads. It is recommended to have an input buffer drive an internal load.
+Related violations: <none>
+
+BUFC-1#3 Warning
+Input Buffer Connections  
+Input buffer u_usd_cmd_iobuf/IBUFCTRL_INST (in u_usd_cmd_iobuf macro) has no loads. It is recommended to have an input buffer drive an internal load.
+Related violations: <none>
+
+BUFC-1#4 Warning
+Input Buffer Connections  
+Input buffer u_usd_dat1_iobuf/IBUFCTRL_INST (in u_usd_dat1_iobuf macro) has no loads. It is recommended to have an input buffer drive an internal load.
+Related violations: <none>
+
+BUFC-1#5 Warning
+Input Buffer Connections  
+Input buffer u_usd_dat2_iobuf/IBUFCTRL_INST (in u_usd_dat2_iobuf macro) has no loads. It is recommended to have an input buffer drive an internal load.
+Related violations: <none>
+
+BUFC-1#6 Warning
+Input Buffer Connections  
+Input buffer u_usd_dat3_iobuf/IBUFCTRL_INST (in u_usd_dat3_iobuf macro) has no loads. It is recommended to have an input buffer drive an internal load.
+Related violations: <none>
+
+PDCN-1569#1 Warning
+LUT equation term check  
+Used physical LUT pin 'A1' of cell u_shell/shell_bd_i/debug_bridge_0/inst/bs_switch_1/inst/BSCAN_SWITCH.EXT_BSCAN.bscan_switch/temp_curid[31]_i_1 (pin u_shell/shell_bd_i/debug_bridge_0/inst/bs_switch_1/inst/BSCAN_SWITCH.EXT_BSCAN.bscan_switch/temp_curid[31]_i_1/I0) in site SLICE_X98Y95 is not included in the LUT equation: 'O6=(A6+~A6)*((A3*A2)+(A3*(~A2)*(~A4))+((~A3)))'. If this cell is a user instantiated LUT in the design, please remove connectivity to the pin or change the equation and/or INIT string of the LUT to prevent this issue. If the cell is inferred or IP created LUT, please regenerate the IP and/or resynthesize the design to attempt to correct the issue.
+Related violations: <none>
+
+PDCN-1569#2 Warning
+LUT equation term check  
+Used physical LUT pin 'A2' of cell u_shell/shell_bd_i/mig_dbg_hub/inst/xsdbm/inst/BSCANID.u_xsdbm_id/EXT_BSCAN.id_state[0]_i_1 (pin u_shell/shell_bd_i/mig_dbg_hub/inst/xsdbm/inst/BSCANID.u_xsdbm_id/EXT_BSCAN.id_state[0]_i_1/I0) in site SLICE_X96Y63 is not included in the LUT equation: 'O6=(A6+~A6)*((A1))'. If this cell is a user instantiated LUT in the design, please remove connectivity to the pin or change the equation and/or INIT string of the LUT to prevent this issue. If the cell is inferred or IP created LUT, please regenerate the IP and/or resynthesize the design to attempt to correct the issue.
+Related violations: <none>
+
+PDCN-1569#3 Warning
+LUT equation term check  
+Used physical LUT pin 'A5' of cell u_shell/shell_bd_i/debug_bridge_0/inst/bs_switch_1/inst/BSCAN_SWITCH.EXT_BSCAN.bscan_switch/temp_curid[31]_i_1 (pin u_shell/shell_bd_i/debug_bridge_0/inst/bs_switch_1/inst/BSCAN_SWITCH.EXT_BSCAN.bscan_switch/temp_curid[31]_i_1/I1) in site SLICE_X98Y95 is not included in the LUT equation: 'O6=(A6+~A6)*((A3*A2)+(A3*(~A2)*(~A4))+((~A3)))'. If this cell is a user instantiated LUT in the design, please remove connectivity to the pin or change the equation and/or INIT string of the LUT to prevent this issue. If the cell is inferred or IP created LUT, please regenerate the IP and/or resynthesize the design to attempt to correct the issue.
+Related violations: <none>
+
+REQP-1877#1 Warning
+BUFGCE_has_no_loads  
+Global Clock buffer BUFGCE cell u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/u_bufg_addn_ui_clk_1 has no loads and may be unnecessarily using clock routing/distribution resources. This buffer should be removed from the design.
+Related violations: <none>
+
+REQP-1877#2 Warning
+BUFGCE_has_no_loads  
+Global Clock buffer BUFGCE cell u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/u_bufg_addn_ui_clk_2 has no loads and may be unnecessarily using clock routing/distribution resources. This buffer should be removed from the design.
+Related violations: <none>
+
+REQP-1877#3 Warning
+BUFGCE_has_no_loads  
+Global Clock buffer BUFGCE cell u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/u_bufg_addn_ui_clk_3 has no loads and may be unnecessarily using clock routing/distribution resources. This buffer should be removed from the design.
+Related violations: <none>
+
+REQP-1877#4 Warning
+BUFGCE_has_no_loads  
+Global Clock buffer BUFGCE cell u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/u_bufg_addn_ui_clk_4 has no loads and may be unnecessarily using clock routing/distribution resources. This buffer should be removed from the design.
+Related violations: <none>
+
+REQP-1877#5 Warning
+BUFGCE_has_no_loads  
+Global Clock buffer BUFGCE cell u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/u_bufg_dbg_clk has no loads and may be unnecessarily using clock routing/distribution resources. This buffer should be removed from the design.
+Related violations: <none>
+
+REQP-1934#1 Warning
+RAMB18E2_nochange_collision_advisory  
+Synchronous clocking is detected for BRAM (u_shell/shell_bd_i/axi_hwicap_0/U0/ICAP_NOT_SHARED.HWICAP_CTRL_I/IPIC_IF_I/RD_FIFO.RDDATA_FIFO_I/gnuram_async_fifo.xpm_fifo_base_inst/gen_sdpram.xpm_memory_base_inst/gen_wr_a.gen_word_narrow.mem_reg) in SDP mode with NO_CHANGE write-mode. This is the preferred mode for best power characteristics. However, NO_CHANGE may exhibit address collisions if the same address appears on both read and write ports resulting in unknown or corrupted read data. It is suggested to confirm via simulation that an address collision never occurs and if so it is suggested to try and avoid this situation. If address collisions cannot be avoided, the write-mode may be set to READ_FIRST which guarantees that the read data is the prior contents of the memory at the cost of additional power in the design. See the FPGA Memory Resources User Guide for additional information.
+Related violations: <none>
+
+RTSTAT-10#1 Warning
+No routable loads  
+304 net(s) have no routable loads. The problem bus(es) and/or net(s) are u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/addn_ui_clkout1,
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/addn_ui_clkout2,
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/addn_ui_clkout3,
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/addn_ui_clkout4,
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_infrastructure/dbg_clk,
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_riu/LMB_CE_riu,
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_riu/LMB_UE_riu,
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/cal_RESET_n_reg[7]_0[1],
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/cal_RESET_n_reg[7]_0[2],
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/cal_RESET_n_reg[7]_0[3],
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/cal_RESET_n_reg[7]_0[4],
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/cal_RESET_n_reg[7]_0[5],
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/cal_RESET_n_reg[7]_0[6],
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/cal_RESET_n_reg[7]_0[7],
+u_shell/shell_bd_i/ddr4_0/inst/u_ddr4_mem_intfc/u_ddr_cal_top/ch1_mcal_clb2phy_fifo_rden_reg[103]_0[103:0]
+ (the first 15 of 178 listed).
+Related violations: <none>
+
+

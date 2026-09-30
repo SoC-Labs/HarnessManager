@@ -1,0 +1,3 @@
+overlay lfsr_floor (0x0100B8C6) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/overlay/lfsr_floor
+imported into the store (1fb30cdb7df5): it shows in Program
+=== rc=0 took=1s

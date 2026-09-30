@@ -1,0 +1,51 @@
+# Run 1: the A4 full build (batch, RM_XDC = lfsr_floor_floorplan.xdc), template at 67f4261: Vivado 2026.1 segfaults
+# right after clocks_after_link, i.e. at 'read_xdc -cell $rp_cell $P(RM_XDC)'.
+A4FULL start 17:54:33 load=19.66 18.31 28.34
+A4FULL vivado rc=139 end 18:04:34 load=62.30 57.30 43.88
+=== rc=0 took=601s
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_GATE rm_xdc_present PASS /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+read_checkpoint: Time (s): cpu = 00:02:03 ; elapsed = 00:05:34 . Memory (MB): peak = 3723.523 ; gain = 0.000 ; free physical = 3855 ; free virtual = 123230
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+Abnormal program termination (11)
+Please check '/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/hs_err_pid3860606.log' for details
+segfault in /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/unwrapped/lnx64.o/vivado -exec vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_
+
+# Run 2 (repro): another build dir, another RM_XDC (write_xdc -cell's output), STOP_AFTER=link: the same crash, the same place.
+REPRO start 18:05:40 load=57.72 56.66 44.55
+REPRO vivado rc=139 end 18:14:24 load=42.34 48.46 46.49
+=== rc=0 took=529s
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_GATE rm_xdc_present PASS /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_write_xdc_cell.xdc
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+Abnormal program termination (11)
+Please check '/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/hs_err_pid4002331.log' for details
+segfault in /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/unwrapped/lnx64.o/vivado -exec vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm

@@ -1,0 +1,51 @@
+# Batch, STOP_AFTER=link JOBS=4 RM_XDC= : build_rm.tcl rendered from the 1a127de template (lfsr_cmp_old) and from this lane's (lfsr_cmp_new), same design and kit.
+# Every line of build_rm.log that starts with HM_, the build dir's name replaced by lfsr_DIR. diff: no difference (and the receipts are identical too).
+cmp_old start 18:53:06 load=16.51 21.13 28.51
+cmp_old vivado rc=0 end 18:57:12 load=21.47 19.72 26.05
+cmp_new start 18:57:13 load=21.47 19.72 26.05
+cmp_new vivado rc=0 end 19:01:32 load=15.09 18.95 24.41
+=== rc=0 took=507s
+--- old template (1a127de) ---
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_DIR/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_DIR/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_DIR/out/lfsr_floor_build.json
+HM_RM_BUILD_STOPPED after=link
+--- new template (89a0202) ---
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_DIR/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_DIR/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_DIR/out/lfsr_floor_build.json
+HM_RM_BUILD_STOPPED after=link
+--- diff ---
+(none)
+cmp_old: 4:06.87 wall, peak RSS 3177412 kB
+cmp_new: 4:19.57 wall, peak RSS 3104100 kB

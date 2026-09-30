@@ -1,0 +1,18 @@
+{
+ "kind": "rm",
+ "name": "lfsr_floor",
+ "title": "KIT-INTERACTIVE: a 32-bit LFSR on dut_clk driving the GPIO outputs, floorplanned into a child pblock of pblock_rp_dut",
+ "rm_id": "0x0100B8C6",
+ "use": {
+  "clkrst": {},
+  "status": {},
+  "gpio": {}
+ },
+ "build": {
+  "top": "rm_lfsr_floor",
+  "sources": [
+   "rtl/rm_lfsr_floor.sv"
+  ],
+  "rm_xdc": "lfsr_floor_floorplan.xdc"
+ }
+}

@@ -9,6 +9,39 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### Run the build in your own Vivado (KIT-INTERACTIVE)
+- **`kit build DIR --gui`** prints the GUI command (`vivado -mode gui -source …/build_rm.tcl
+  -log …/build_rm.log …`): the GUI stays open after the script, so `--stop-after link` leaves
+  the linked design there to floorplan. `-mode tcl` does the same at a `Vivado%` prompt.
+- `kit build` also prints the one line for a Vivado that is already open:
+  `cd {DIR}; set argv {STOP_AFTER=link}; source build_rm.tcl`. It always sets `argv` (`{}`
+  too): a session keeps the last one. `--json` gains `mode`, `commands` (`batch`, `gui`,
+  `tcl`), `source_tcl` and `stays_open`; `command` is the one asked for (batch by default).
+- **Floorplan with nested pblocks.** After `STOP_AFTER=link`, draw pblocks inside the
+  partition's pblock, then type `hm_save_floorplan FILE` (a proc `build_rm.tcl` now defines)
+  and give FILE as the design's `build.rm_xdc`: the next build reads it `-cell u_rp_dut`, as a
+  child of `pblock_rp_dut`. `write_xdc -cell u_rp_dut` does not work for this: it writes the
+  partition's own pblock too, which read back becomes a second top-level pblock that takes
+  the RM's cells, and the build then fails at `place_design` (DRC PLDE-1). Nor do the lines
+  the journal echoes: their full `u_rp_dut/…` names match nothing under `read_xdc -cell`, so
+  the pblock stays empty. Proven on Vivado 2026.1 with the RC2 kit: a full build with a child
+  pblock passed all 25 gates with every assigned cell placed inside it
+  (docs/evidence/2026-09-30-kit-interactive).
+- **`build.rm_xdc` crashed Vivado 2026.1.** `build_rm.tcl` read it with
+  `read_xdc -cell $rp_cell`, a cell object taken before `read_checkpoint -cell`: Vivado
+  segfaulted there (exit 139, `HASCUtils::getXDCName`; 2 of 2 batch links, with two
+  different files). No build had set `rm_xdc` before. It now asks for the cell again
+  (`read_xdc -cell [get_cells $rp]`).
+- `build_rm.tcl` sourced into a session with no `argv` at all builds with its own values (it
+  stopped with `can't read "argv"`). Batch prints the same markers as before.
+- **A `STOP_AFTER` build is not a failure.** `kit check` of a `stopped` receipt says
+  "stopped after link (STOP_AFTER=link), not a failure: the 14 gates up to there passed" and
+  exits 0 (it said "failed 1 check", exit 15); `--json` has `state: stopped`,
+  `stopped_after`, `passed: false`. `kit pack` still refuses it. The guide's Build step
+  offers the command with `-tclargs STOP_AFTER=bitstream`, which runs a script written with
+  `--stop-after link` to the end.
+- docs: USER_GUIDE 7.2 "Run it in your own Vivado" and "Floorplan"; DUT_BUILD_GUIDE §3.5-3.6.
+
 ### Findings from a clean-account run of the guide (FIX-PACK-3)
 - **The installer's PATH advice reaches a login shell.** bash: add the line to `~/.bashrc`
   and to the file a login shell reads (`~/.bash_profile`, `~/.bash_login` or `~/.profile`,

@@ -1,0 +1,304 @@
+
+=== 17:16:55 $ harness-manager kit list; harness-manager config path
+no kits cached: harness-manager kit fetch --static-id ID
+config_dir      /tmpdir/claude-74755/kit-interactive/home/.config/harness-manager
+settings        /tmpdir/claude-74755/kit-interactive/home/.config/harness-manager/settings.toml  (not there)
+boards          /tmpdir/claude-74755/kit-interactive/home/.config/harness-manager/boards.toml  (not there)
+policy          /etc/harness-manager/policy.toml  (not there)
+secrets         /tmpdir/claude-74755/kit-interactive/home/.config/harness-manager/secrets  (not there)
+secrets_index   /tmpdir/claude-74755/kit-interactive/home/.config/harness-manager/secrets/index.json  (not there)
+legacy_updates  /tmpdir/claude-74755/kit-interactive/home/.config/harness-manager/update/settings.json  (not there)
+new secrets go to a private file (no keyring: the Secret Service (your login keyring): no session bus in this process (an ssh or service session?); KWallet: no session bus in this process (an ssh or service session?))
+=== rc=0 took=4s
+
+=== 17:16:59 $ harness-manager kit import /tmpdir/claude-74755/kit-interactive/kit/mps3_rc2_0x44EE76D5_kit.zip
+cached: mps3/0x44EE76D5/vivado-2026.1 (38287216 B)
+  ok        files                        14 files match kit.json (size and sha256)
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+=== rc=0 took=5s
+
+=== 17:17:11 $ harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_skel --jobs 4
+lfsr_floor (rm_id 0x0100B8C6, proposed) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   rm_id_proposed               the design names no rm_id; HM proposes 0x0100B8C6 (add it to the design to keep it)
+  warning   sources                      the design names no RTL (build.sources, or a wrapper), and its skeleton xdc/lfsr_floor_wrapper_skeleton.sv is not an RM: it leaves 4 outputs of the groups the design uses undriven (dut_lockup, irq_out, dut_gpio_o, dut_gpio_oe). RM_SOURCES is empty, so the build stops at preflight: set build.sources, or pass -tclargs RM_SOURCES="a.sv b.sv".
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_skel
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_skel/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_skel/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_skel/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_skel/out/lfsr_floor_build.json
+=== rc=0 took=8s
+
+=== 17:18:00 $ harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --jobs 4
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_build.json
+=== rc=0 took=5s
+
+=== 17:18:05 $ harness-manager kit build /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --stop-after link --jobs 4
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou -tclargs STOP_AFTER=link JOBS=4
+  Vivado 2026.1 (path); the kit needs 2026.1
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the receipt's state (out/<name>_build.json), or the last line of build_rm.log that STARTS with HM_RM_BUILD_ (`grep -E '^HM_RM_BUILD_' build_rm.log | tail -1`; the log also echoes the script, whose text holds HM_RM_BUILD_FAILED))
+=== rc=0 took=5s
+
+=== 17:19:53 $ /tmpdir/claude-74755/kit-interactive/runs/a1/run.sh
+A1 start 17:19:55 load=58.26 68.71 66.18
+
+=== 17:22:41 $ harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2 --jobs 4 --stop-after link
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/out/lfsr_floor_build.json
+=== rc=0 took=6s
+A1 vivado rc=0 end 17:25:18 load=46.79 56.87 62.05
+=== rc=0 took=325s
+
+=== 17:25:35 $ /tmpdir/claude-74755/kit-interactive/runs/a2/run.sh
+A2 start 17:25:36 load=44.08 55.78 61.61
+
+=== 17:25:38 $ harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor; echo; harness-manager kit guide --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --build-dir /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+harness-manager: the build lfsr_floor failed 1 check (build: the build stopped after link (STOP_AFTER): finish it) — every check is listed with --json
+
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  done   2 Tools            Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  lfsr_floor: 47 ports / 148 bits checked; rm_id 0x0100B8C6
+  NEXT   5 Build            stopped after link (STOP_AFTER): finish the build
+  -      6 Check and add    no passed build yet
+                            waits for 5 build
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou
+=== rc=0 took=15s
+
+=== 17:26:01 $ harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+harness-manager: the build lfsr_floor failed 1 check (build: the build stopped after link (STOP_AFTER): finish it) — every check is listed with --json
+=== rc=15 took=1s
+
+=== 17:26:08 $ harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+the build lfsr_floor: stopped after link (STOP_AFTER=link), not a failure: the 14 gates up to there passed; there is no pair to check or pack until the build runs to the end
+next: harness-manager kit build /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --stop-after bitstream
+=== rc=0 took=1s
+
+=== 17:26:09 $ harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --static-id 0x72BB0A36
+harness-manager: the build lfsr_floor does not match (expected_static: built for 0x44EE76D5; --static-id is 0x72BB0A36: this build is not for the static you named) — use the kit, build or board of the same static
+=== rc=14 took=1s
+
+=== 17:26:42 $ harness-manager kit build /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --stop-after link --jobs 4 --gui
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode gui -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou -tclargs STOP_AFTER=link JOBS=4
+  Vivado 2026.1 (path); the kit needs 2026.1
+In a Vivado that is already open (its Tcl console, with no design open: close_project first), type:
+  cd {/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor}; set argv {STOP_AFTER=link JOBS=4}; source build_rm.tcl
+  (its HM_ lines go to that session's log, not build_rm.log; the receipt, out/<name>_build.json, is the verdict either way)
+  after link the design stays open (GUI, -mode tcl, or the Tcl line): floorplan your RM in a child pblock of pblock_rp_dut (create_pblock, resize_pblock inside it, set_property PARENT pblock_rp_dut, add_cells_to_pblock), save it with `write_xdc -cell u_rp_dut -exclude_timing -force FILE`, and name FILE as the design's build.rm_xdc (read_xdc -cell u_rp_dut after the next link)
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the receipt's state (out/<name>_build.json), or the last line of build_rm.log that STARTS with HM_RM_BUILD_ (`grep -E '^HM_RM_BUILD_' build_rm.log | tail -1`; the log also echoes the script, whose text holds HM_RM_BUILD_FAILED))
+=== rc=0 took=3s
+A2 vivado rc=0 end 17:31:22 load=52.32 52.32 58.01
+=== rc=0 took=348s
+
+=== 17:32:40 $ cd /tmpdir/claude-74755/kit-interactive/runs/probe_script && which Xvfb; timeout 300 nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode tcl -nojournal -log tcl.log -source s.tcl -script x.tcl -tclargs A=1 < /dev/null 2>&1 | grep -E 'PROBE|ERROR|script|Exiting'
+/usr/bin/Xvfb
+# puts "PROBE_SOURCE ran argv={$argv}"
+PROBE_SOURCE ran argv={A=1}
+# puts "PROBE_SCRIPT ran"
+PROBE_SCRIPT ran
+INFO: [Common 17-206] Exiting Vivado at Wed Sep 30 17:33:07 2026...
+=== rc=0 took=27s
+
+=== 17:33:14 $ cd /tmpdir/claude-74755/kit-interactive/runs/probe_script && timeout 300 nice -n 10 xvfb-run -a /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode gui -nojournal -log gui.log -source s.tcl -script x.tcl -tclargs A=1 < /dev/null > gui_stdout.txt 2>&1; echo vivado_rc=$?; grep -E 'PROBE|ERROR|Exiting|source|script' gui.log
+vivado_rc=0
+# Current directory  : /tmpdir/claude-74755/kit-interactive/runs/probe_script
+# Command line       : vivado -mode gui -nojournal -log gui.log -source s.tcl -script x.tcl -tclargs A=1
+# Log file           : /tmpdir/claude-74755/kit-interactive/runs/probe_script/gui.log
+source s.tcl
+# puts "PROBE_SOURCE ran argv={$argv}"
+PROBE_SOURCE ran argv={A=1}
+source x.tcl
+# puts "PROBE_SCRIPT ran"
+PROBE_SCRIPT ran
+INFO: [Common 17-206] Exiting Vivado at Wed Sep 30 17:34:53 2026...
+=== rc=0 took=100s
+
+=== 17:35:41 $ /tmpdir/claude-74755/kit-interactive/runs/a4/run_a4b.sh
+A4B start 17:35:41 load=33.79 43.80 53.21
+A4B vivado rc=0 end 17:40:32 load=17.50 31.04 45.56
+=== rc=0 took=291s
+
+=== 17:43:43 $ harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2 --jobs 4 --stop-after link
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/out/lfsr_floor_build.json
+=== rc=0 took=4s
+
+=== 17:43:53 $ /tmpdir/claude-74755/kit-interactive/runs/a3/run.sh
+A3 start 17:43:54 load=16.91 23.74 39.79
+A3 vivado rc=0 end 17:52:46 load=20.24 18.37 29.59
+=== rc=0 took=533s
+
+=== 17:53:40 $ harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --jobs 4
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_build.json
+=== rc=0 took=3s
+
+=== 17:53:43 $ harness-manager kit build /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --jobs 4
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou -tclargs JOBS=4
+  Vivado 2026.1 (path); the kit needs 2026.1
+In a Vivado that is already open (its Tcl console; a design already open stays open beside the build's, so close_project it first to save memory), type:
+  cd {/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor}; set argv {JOBS=4}; source build_rm.tcl
+  (its HM_ lines go to that session's log, not build_rm.log; the receipt, out/<name>_build.json, is the verdict either way)
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the receipt's state (out/<name>_build.json), or the last line of build_rm.log that STARTS with HM_RM_BUILD_ (`grep -E '^HM_RM_BUILD_' build_rm.log | tail -1`; the log also echoes the script, whose text holds HM_RM_BUILD_FAILED))
+=== rc=0 took=4s
+
+=== 17:53:47 $ harness-manager kit build /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --jobs 4 --json
+{"checks": [{"detail": "`vivado` on PATH is Vivado 2026.1 (/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado)", "identity": false, "name": "vivado_path", "state": "ok"}], "command": ["/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "-mode", "batch", "-source", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl", "-log", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log", "-journal", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou", "-tclargs", "JOBS=4"], "commands": {"batch": ["/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "-mode", "batch", "-source", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl", "-log", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log", "-journal", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou", "-tclargs", "JOBS=4"], "gui": ["/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "-mode", "gui", "-source", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl", "-log", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log", "-journal", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou", "-tclargs", "JOBS=4"], "tcl": ["/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "-mode", "tcl", "-source", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl", "-log", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log", "-journal", "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou", "-tclargs", "JOBS=4"]}, "dir": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor", "mode": "batch", "note": "Harness Manager does not run Vivado yet: run this command yourself", "ok": true, "ran": false, "release": "2026.1", "source_tcl": "cd {/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor}; set argv {JOBS=4}; source build_rm.tcl", "stays_open": null, "vivado": {"build": 6511674, "disabled": false, "error": "", "found": true, "how": "path", "on_path": {"build": 6511674, "error": "", "how": "path", "path": "/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "version": "2026.1"}, "others": [{"build": 0, "error": "", "how": "install root", "path": "/apps/Xilinx/Vivado/2021.1/bin/vivado", "version": "2021.1"}, {"build": 0, "error": "", "how": "install root", "path": "/apps/Xilinx/Vivado/2024.1/bin/vivado", "version": "2024.1"}, {"build": 0, "error": "", "how": "install root", "path": "/research/CAD/Xilinx/Vivado/2025.2/Vivado/bin/vivado", "version": "2025.2"}], "path": "/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado", "reason": "", "version": "2026.1", "want": ["2026.1"]}}
+=== rc=0 took=3s
+
+=== 17:54:03 $ /tmpdir/claude-74755/kit-interactive/runs/a4full/run.sh
+bash: /tmpdir/claude-74755/kit-interactive/runs/a4full/run.sh: Permission denied
+=== rc=126 took=1s
+
+=== 17:54:33 $ /tmpdir/claude-74755/kit-interactive/runs/a4full/run.sh
+A4FULL start 17:54:33 load=19.66 18.31 28.34
+
+=== 18:01:58 $ harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_wxdc.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc --jobs 4
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/out/lfsr_floor_build.json
+=== rc=0 took=16s
+A4FULL vivado rc=139 end 18:04:34 load=62.30 57.30 43.88
+=== rc=0 took=601s
+
+=== 18:05:35 $ /tmpdir/claude-74755/kit-interactive/runs/crash_repro/run.sh
+REPRO start 18:05:40 load=57.72 56.66 44.55
+REPRO vivado rc=139 end 18:14:24 load=42.34 48.46 46.49
+=== rc=0 took=529s
+
+=== 18:14:54 $ harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --jobs 4
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_build.json
+=== rc=0 took=7s
+
+=== 18:15:07 $ /tmpdir/claude-74755/kit-interactive/runs/a4full/run.sh
+A4FULL start 18:15:08 load=41.52 47.34 46.20
+
+=== 18:23:22 $ HARNESS_MANAGER_VIVADO=off harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_old --jobs 4 --stop-after link
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   vivado                       no Vivado found (Vivado discovery is off ($HARNESS_MANAGER_VIVADO=off)); this kit needs Vivado 2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_old
+next: vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_old/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_old/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_old/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_old/out/lfsr_floor_build.json
+=== rc=0 took=2s
+
+=== 18:23:24 $ HARNESS_MANAGER_VIVADO=off harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new --jobs 4 --stop-after link
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   vivado                       no Vivado found (Vivado discovery is off ($HARNESS_MANAGER_VIVADO=off)); this kit needs Vivado 2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new
+next: vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/out/lfsr_floor_build.json
+=== rc=0 took=1s
+A4FULL vivado rc=0 end 18:49:32 load=23.65 21.75 30.37
+=== rc=0 took=2065s
+
+=== 18:49:51 $ harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+the build lfsr_floor: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 25 gates
+  ok        rm_id                        the netlist drives 0x0100B8C6
+  ok        static_id                    built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)
+  ok        timing                       your RM's paths: setup WNS 18.478 ns, hold WHS 0.056 ns
+  ok        partial                      lfsr_floor_partial.bin: 1283428 B, CRC-32 0x0B6972E6 as built
+  ok        clearing                     lfsr_floor_partial_clear.bin: 71832 B, CRC-32 0x83CDC5F1 as built
+  ok        partial: bit_header_length   header declares 1283428 B, payload is 1283428 B
+  ok        partial: part                xcku115-flvb1760-1-c (want xcku115-flvb1760-1-c)
+  ok        partial: partial_flag        PARTIAL=TRUE
+  ok        partial: stream              2 sections, every packet walked to DESYNC, 209961 FDRI words, 6041 frames
+  ok        partial: idcode              0x0390D093=SLR0
+  ok        partial: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        partial: role                the commands say 'partial'
+  ok        partial: frame_box           {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}
+  ok        partial: vocabulary          commands and registers are a subset of the reference partial's
+  ok        bit_bin_pair                 lfsr_floor_partial.bin carries the payload of lfsr_floor_partial.bit
+  ok        clearing: stream             3 sections, every packet walked to DESYNC, 12669 FDRI words, 281 frames
+  ok        clearing: idcode             0x0390D093=SLR0
+  ok        clearing: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        clearing: role               the commands say 'clearing'
+  ok        clearing: frame_box          {'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}
+  ok        clearing: vocabulary         commands and registers are a subset of the reference clearing's
+  ok        clearing_fits                clearing payload 71832 B of the 1048576 B the harness holds
+  ok        clearing_pairs_partial       the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}
+  unchecked static_binding               a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it
+=== rc=0 took=1s
+
+=== 18:49:52 $ harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --static-id 0x44EE76D5 --json
+{"checks": [{"detail": "the build passed 25 gates", "identity": false, "name": "build", "state": "ok"}, {"detail": "the netlist drives 0x0100B8C6", "identity": false, "name": "rm_id", "state": "ok"}, {"detail": "built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)", "identity": false, "name": "static_id", "state": "ok"}, {"detail": "your RM's paths: setup WNS 18.478 ns, hold WHS 0.056 ns", "identity": false, "name": "timing", "state": "ok"}, {"detail": "lfsr_floor_partial.bin: 1283428 B, CRC-32 0x0B6972E6 as built", "identity": false, "name": "partial", "state": "ok"}, {"detail": "lfsr_floor_partial_clear.bin: 71832 B, CRC-32 0x83CDC5F1 as built", "identity": false, "name": "clearing", "state": "ok"}, {"detail": "built for 0x44EE76D5; --static-id is 0x44EE76D5", "identity": true, "name": "expected_static", "state": "ok"}, {"detail": "header declares 1283428 B, payload is 1283428 B", "identity": false, "name": "partial: bit_header_length", "state": "ok"}, {"detail": "xcku115-flvb1760-1-c (want xcku115-flvb1760-1-c)", "identity": false, "name": "partial: part", "state": "ok"}, {"detail": "PARTIAL=TRUE", "identity": false, "name": "partial: partial_flag", "state": "ok"}, {"detail": "2 sections, every packet walked to DESYNC, 209961 FDRI words, 6041 frames", "identity": false, "name": "partial: stream", "state": "ok"}, {"detail": "0x0390D093=SLR0", "identity": false, "name": "partial: idcode", "state": "ok"}, {"detail": "no IPROG, AXSS, WBSTAR or SLR pass-through", "identity": false, "name": "partial: device_global_writes", "state": "ok"}, {"detail": "the commands say 'partial'", "identity": false, "name": "partial: role", "state": "ok"}, {"detail": "{'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}", "identity": false, "name": "partial: frame_box", "state": "ok"}, {"detail": "commands and registers are a subset of the reference partial's", "identity": false, "name": "partial: vocabulary", "state": "ok"}, {"detail": "lfsr_floor_partial.bin carries the payload of lfsr_floor_partial.bit", "identity": false, "name": "bit_bin_pair", "state": "ok"}, {"detail": "3 sections, every packet walked to DESYNC, 12669 FDRI words, 281 frames", "identity": false, "name": "clearing: stream", "state": "ok"}, {"detail": "0x0390D093=SLR0", "identity": false, "name": "clearing: idcode", "state": "ok"}, {"detail": "no IPROG, AXSS, WBSTAR or SLR pass-through", "identity": false, "name": "clearing: device_global_writes", "state": "ok"}, {"detail": "the commands say 'clearing'", "identity": false, "name": "clearing: role", "state": "ok"}, {"detail": "{'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}", "identity": false, "name": "clearing: frame_box", "state": "ok"}, {"detail": "commands and registers are a subset of the reference clearing's", "identity": false, "name": "clearing: vocabulary", "state": "ok"}, {"detail": "clearing payload 71832 B of the 1048576 B the harness holds", "identity": false, "name": "clearing_fits", "state": "ok"}, {"detail": "the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}", "identity": false, "name": "clearing_pairs_partial", "state": "ok"}, {"detail": "a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it", "identity": false, "name": "static_binding", "state": "unchecked"}], "facts": {"pair": {"clearing": {"bytes": 71832, "cmds": ["AGHIGH", "DESYNC", "MFW", "NULL", "RCRC", "SHUTDOWN", "WCFG"], "crc32": "0x83cdc5f1", "file": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial_clear.bin", "frames": {"block_types": [0], "by_block": {"0": {"columns": [101, 193], "rows": [0, 1]}}, "columns": [101, 193], "far_distinct": 281, "rows": [0, 1]}, "header": {"date": null, "declared_len": null, "design": null, "part": null, "time": null, "tokens": {}}, "kind": "bin", "payload_bytes": 71832, "payload_sha256": "b74156f55c911a20f860531e48f5e6a10fc4473f52120c7b123ae8c27e58186a", "regs": ["CMD", "COR0", "CRC", "CTL0", "CTL1", "FAR", "FDRI", "IDCODE", "MASK", "MFWR"], "role": "clearing", "sections": [{"axss": [], "cmds": ["RCRC", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "DESYNC"], "crc_writes": 1, "end": "desync", "far_count": 294, "fdri_words": 12669, "idcodes": ["0x0390D093"], "mfwr_writes": 239, "offset": 80, "regs": {"CMD": 81, "CRC": 1, "CTL0": 1, "CTL1": 2, "FAR": 294, "FDRI": 54, "IDCODE": 1, "MASK": 3, "MFWR": 239}, "unknown": []}, {"axss": [], "cmds": ["SHUTDOWN", "RCRC", "DESYNC"], "crc_writes": 0, "end": "desync", "far_count": 0, "fdri_words": 0, "idcodes": [], "mfwr_writes": 0, "offset": 69912, "regs": {"CMD": 3, "COR0": 1}, "unknown": []}, {"axss": [], "cmds": ["RCRC", "SHUTDOWN", "AGHIGH", "DESYNC"], "crc_writes": 2, "end": "desync", "far_count": 1, "fdri_words": 0, "idcodes": ["0x0390D093"], "mfwr_writes": 0, "offset": 70664, "regs": {"CMD": 4, "CRC": 2, "CTL1": 1, "FAR": 1, "IDCODE": 1, "MASK": 1}, "unknown": []}], "sha256": "b74156f55c911a20f860531e48f5e6a10fc4473f52120c7b123ae8c27e58186a"}, "partial": {"bytes": 1283664, "cmds": ["DESYNC", "GRESTORE", "LFRM", "MFW", "NULL", "RCRC", "SHUTDOWN", "START", "WCFG"], "crc32": "0x1474fa1a", "file": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial.bit", "frames": {"block_types": [0, 1], "by_block": {"0": {"columns": [94, 200], "rows": [0, 1]}, "1": {"columns": [6, 11], "rows": [0, 1]}}, "columns": [6, 200], "far_distinct": 6041, "rows": [0, 1]}, "header": {"date": "2026/09/30", "declared_len": 1283428, "design": "shell_top", "part": "xcku115-flvb1760-1-c", "time": "18:49:11", "tokens": {"COMPRESS": "TRUE", "PARTIAL": "TRUE", "SW_CRC": "ca2f62cf", "SW_HDR_SHA256": "4908e6ccb07387b74a9cbce6c8cb1f8ae379af7122d56ba29c28db4e796b9ff4", "UserID": "0XFFFFFFFF", "Version": "2026.1"}}, "kind": "bit", "payload_bytes": 1283428, "payload_sha256": "544ed0bd81b16f46f6777c87bce52dfbbf67baeb0d0fa7e3bab909809de7cbd9", "regs": ["CMD", "COR0", "CRC", "CTL0", "CTL1", "FAR", "FDRI", "IDCODE", "MASK", "MFWR"], "role": "partial", "sections": [{"axss": [], "cmds": ["RCRC", "SHUTDOWN", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "GRESTORE", "LFRM", "START", "DESYNC"], "crc_writes": 2, "end": "desync", "far_count": 6114, "fdri_words": 203565, "idcodes": ["0x0390D093"], "mfwr_writes": 5773, "offset": 80, "regs": {"CMD": 587, "COR0": 1, "CRC": 2, "CTL0": 3, "CTL1": 2, "FAR": 6114, "FDRI": 355, "IDCODE": 1, "MASK": 5, "MFWR": 5773}, "unknown": []}, {"axss": [], "cmds": ["RCRC", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "MFW", "NULL", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "WCFG", "DESYNC"], "crc_writes": 1, "end": "desync", "far_count": 147, "fdri_words": 6396, "idcodes": ["0x0390D093"], "mfwr_writes": 115, "offset": 1246880, "regs": {"CMD": 54, "CRC": 1, "CTL0": 1, "CTL1": 2, "FAR": 147, "FDRI": 31, "IDCODE": 1, "MASK": 3, "MFWR": 115}, "unknown": []}], "sha256": "07851efb1cb98103cf2f1d0b24a53e74d9f86b82337c59300cba4f3474e273a6"}}, "receipt": {"built": "2026-09-30T17:49:30Z", "clearing_bin": "lfsr_floor_partial_clear.bin", "clearing_crc32": "0x83CDC5F1", "clearing_len": "71832", "design_whs": "0.030", "design_wns": "0.207", "gates": [{"detail": "running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it", "gate": "vivado_version", "verdict": "PASS"}, {"detail": "xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)", "gate": "part_installed", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/kit/static/static_routed_locked.dcp", "gate": "static_dcp_present", "verdict": "PASS"}, {"detail": "CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5", "gate": "static_id", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv", "gate": "source_present", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)", "gate": "ooc_xdc_present", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc", "gate": "rm_xdc_present", "verdict": "PASS"}, {"detail": "none", "gate": "no_black_boxes", "verdict": "PASS"}, {"detail": "148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)", "gate": "boundary_bits", "verdict": "PASS"}, {"detail": "the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)", "gate": "rm_id_match", "verdict": "PASS"}, {"detail": "OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)", "gate": "ooc_clocks", "verdict": "PASS"}, {"detail": "u_rp_dut in static_routed_locked.dcp", "gate": "rp_cell", "verdict": "PASS"}, {"detail": "148 partition pins after link, the boundary has 148", "gate": "rp_pins_link", "verdict": "PASS"}, {"detail": "22 clocks propagated from the static", "gate": "clocks_after_link", "verdict": "PASS"}, {"detail": "no HDPR-16/18/50, no Error", "gate": "drc_hdpr_link", "verdict": "PASS"}, {"detail": "148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)", "gate": "rp_pins_opt", "verdict": "PASS"}, {"detail": "no HDPR-16/18/50, no Error", "gate": "drc_routed", "verdict": "PASS"}, {"detail": "your RM's paths (89 registers): setup WNS 18.478 ns, hold WHS 0.056 ns", "gate": "rm_timing", "verdict": "PASS"}, {"detail": "compatible with static_routed_locked.dcp", "gate": "pr_verify", "verdict": "PASS"}, {"detail": "no debug core in the partition: no .ltx", "gate": "ltx", "verdict": "NOTE"}, {"detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial.bin", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial_clear.bin", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial.bit", "gate": "artefact", "verdict": "PASS"}, {"detail": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial_clear.bit", "gate": "artefact", "verdict": "PASS"}, {"detail": "clearing 71832 B, the harness holds 1048576 B", "gate": "clearing_fits", "verdict": "PASS"}], "kit_id": "mps3/0x44EE76D5/vivado-2026.1", "part": "xcku115-flvb1760-1-c", "partial_bin": "lfsr_floor_partial.bin", "partial_crc32": "0x0B6972E6", "partial_len": "1283428", "path": "/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_build.json", "pr_verify_ref": "static_routed_locked.dcp", "rm_id": "0x0100B8C6", "rm_id_netlist": "0x0100B8C6", "rm_name": "lfsr_floor", "rm_top": "rm_lfsr_floor", "rm_whs": "0.056", "rm_wns": "18.478", "rp_inst": "u_rp_dut", "stage": "bitstream", "state": "passed", "static_id": "0x44EE76D5", "static_usercode": "0xFB1F8C76", "timing_rpt": "lfsr_floor_timing.rpt", "vivado": "2026.1"}}, "ok": true, "passed": true, "static_id": "0x44EE76D5"}
+=== rc=0 took=1s
+
+=== 18:49:59 $ /tmpdir/claude-74755/kit-interactive/runs/place/run.sh
+PLACE start 18:49:59 load=24.79 22.20 30.24
+PLACE vivado rc=0 end 18:51:39 load=23.55 23.11 29.78
+=== rc=0 took=100s
+
+=== 18:52:17 $ harness-manager kit guide --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --build-dir /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  done   2 Tools            Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  lfsr_floor: 47 ports / 148 bits checked; rm_id 0x0100B8C6
+  NEXT   5 Build            lfsr_floor stopped after link (STOP_AFTER=link), not a failure: the 14 gates up to there passed; there is no pair to check or pack until the build runs to the end (lfsr_floor_build.json): finish the build
+  -      6 Check and add    no passed build yet
+                            waits for 5 build
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.jou -tclargs STOP_AFTER=bitstream
+=== rc=0 took=14s
+
+=== 18:52:31 $ harness-manager kit build /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2 --gui
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode gui -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.jou
+  Vivado 2026.1 (path); the kit needs 2026.1
+In a Vivado that is already open (its Tcl console; a design already open stays open beside the build's, so close_project it first to save memory), type:
+  cd {/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2}; set argv {}; source build_rm.tcl
+  (its HM_ lines go to that session's log, not build_rm.log; the receipt, out/<name>_build.json, is the verdict either way)
+  after link the design stays open (GUI, -mode tcl, or the Tcl line): floorplan your RM in a child pblock of pblock_rp_dut (create_pblock, resize_pblock inside it, set_property PARENT pblock_rp_dut, add_cells_to_pblock), save it with `hm_save_floorplan FILE` (not write_xdc -cell), and name FILE as the design's build.rm_xdc (read_xdc -cell u_rp_dut after the next link)
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the receipt's state (out/<name>_build.json), or the last line of build_rm.log that STARTS with HM_RM_BUILD_ (`grep -E '^HM_RM_BUILD_' build_rm.log | tail -1`; the log also echoes the script, whose text holds HM_RM_BUILD_FAILED))
+=== rc=0 took=3s
+
+=== 18:52:34 $ harness-manager kit guide --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor.json --build-dir /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  done   2 Tools            Vivado 2026.1 at /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  lfsr_floor: 47 ports / 148 bits checked; rm_id 0x0100B8C6
+  done   5 Build            lfsr_floor passed 25 gates (lfsr_floor_build.json; static 0x44EE76D5)
+  NEXT   6 Check and add    every check passed (20 ok, 1 unchecked)
+next: harness-manager kit pack /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_build.json --import
+=== rc=0 took=15s
+
+=== 18:52:56 $ harness-manager kit pack /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --import
+overlay lfsr_floor (0x0100B8C6) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/overlay/lfsr_floor
+imported into the store (1fb30cdb7df5): it shows in Program
+=== rc=0 took=1s
+
+=== 18:53:05 $ /tmpdir/claude-74755/kit-interactive/runs/cmp/run.sh
+cmp_old start 18:53:06 load=16.51 21.13 28.51
+
+=== 18:53:23 $ HARNESS_MANAGER_VIVADO=off harness-manager kit script --static-id 0x44EE76D5 --design /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_wxdc.json --out /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc --jobs 4
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   vivado                       no Vivado found (Vivado discovery is off ($HARNESS_MANAGER_VIVADO=off)); this kit needs Vivado 2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc
+next: vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/out/lfsr_floor_build.json
+=== rc=0 took=2s
+cmp_old vivado rc=0 end 18:57:12 load=21.47 19.72 26.05
+cmp_new start 18:57:13 load=21.47 19.72 26.05
+cmp_new vivado rc=0 end 19:01:32 load=15.09 18.95 24.41
+=== rc=0 took=507s
+
+=== 19:01:48 $ /tmpdir/claude-74755/kit-interactive/runs/wxdc/run.sh
+WXDC start 19:01:49 load=15.10 18.70 24.21
+WXDC vivado rc=1 end 19:07:27 load=22.16 17.99 21.93
+=== rc=0 took=339s
+
+=== 19:08:32 $ /tmpdir/claude-74755/kit-interactive/runs/a4/run_a4c.sh
+A4C start 19:08:32 load=12.52 16.02 20.99
+A4C vivado rc=0 end 19:12:48 load=14.32 14.67 19.17
+=== rc=0 took=256s
