@@ -102,8 +102,10 @@ def banner(page):
 
 
 def open_settings(page):
+    # FIX-PACK-4: the gear opens General first (then the last section used): go to Updates.
     page.locator('[data-action="settings"]').click()
     expect(by_id(page, "settings")).to_be_visible(timeout=T)
+    page.locator('[data-testid="settings-nav"] [data-settings-section="updates"]').click()
     return by_id(page, "update-settings")
 
 

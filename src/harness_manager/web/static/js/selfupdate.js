@@ -641,8 +641,8 @@ export function UpdatesCard() {
 }
 
 // SET-UI: openSettings("hubs") deep-links to a section; a click handler's event (or nothing)
-// opens the section last used in this tab, the Updates section the first time (where the
-// gear, its badge and the board's "Open settings" link have always led).
+// opens the section last used in this tab, General the first time (FIX-PACK-4; it opened
+// on Updates, whatever you came for). The Update tab's "Settings" deep-links to Updates.
 export function openSettings(section) {
   if (typeof section === "string" && SECTIONS.some((s) => s.id === section)) setSection(section);
   U.settingsOpen = true;

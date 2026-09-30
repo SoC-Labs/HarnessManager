@@ -22,8 +22,8 @@ import { HubFact } from "./hub.js";
 import { LeaseBanners, requestClose } from "./lease.js";
 import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
 import {
-  boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, S,
-  sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
+  boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, rereadBoard,
+  S, sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
 import { AppUpdateBanners, AppUpdateLayer, SettingsButton, startSelfUpdate } from "./selfupdate.js";   // UPDATE-UI
@@ -174,7 +174,8 @@ function BoardHeader({ bid }) {
         ${b.job ? html`<${Chip} level="accent" testid="job-chip" title=${`harness-manager-daemon job ${b.job.id}: the board's other actions wait for it`}>
           <${Spinner} />${jobLabel(b.job.kind)} running · ${Math.floor((Date.now() - b.job.at) / 1000)} s<//>` : null}
         ${row.open ? html`<button type="button" class="btn ghost sm icon-only" data-action="refresh-board"
-            aria-label="Read the board again" title="Read the board again" onClick=${() => refreshInfo(bid)}
+            aria-label="Read the board again" title="Read the board again (its info, the Card line and the SD journal)"
+            onClick=${() => rereadBoard(bid)}
             aria-busy=${b.infoLoading ? "true" : undefined}>${b.infoLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}</button>` : null}
         ${row.open ? html`<${Chip} level="accent" icon="plug-zap" testid="lock-chip"
             title=${`Open here: the board lock is ${row.holder ? holderText(row.holder) : "this daemon"}'s. The hub lease is its own line below.`}>Open<//>

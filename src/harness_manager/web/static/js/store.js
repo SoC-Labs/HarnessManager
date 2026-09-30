@@ -494,6 +494,17 @@ export async function refreshInfo(bid, { background = false } = {}) {
   changed();
 }
 
+// FIX-PACK-4: the header's "Read the board again": the board's info, and with it what the
+// workspace shows beside it that a read of the info alone never re-reads: the SD journal (the
+// interrupted-install banner) and, on a harness with a user microSD, the Card line. A click,
+// so none of it is a background read.
+export async function rereadBoard(bid) {
+  loadPending(bid);
+  await refreshInfo(bid);
+  const b = boardState(bid);
+  if (hasCardStore(b) && !b.cardLoading) loadCard(bid);
+}
+
 const refreshTimers = {};
 export function scheduleRefresh(bid, ms = 250) {
   clearTimeout(refreshTimers[bid]);

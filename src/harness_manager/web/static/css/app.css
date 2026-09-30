@@ -238,10 +238,11 @@ body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; }
 .fact-value { font-weight: 500; }
 .fact-value .mono { font-weight: 400; color: var(--text-2); }
 
+/* FIX-PACK-4: the tabs wrap onto a second row when the window is narrow (12 tabs at 1024 px):
+   a row that scrolled with a hidden scrollbar hid Update, Checks and Activity with no hint. */
 .sections {
-  display: flex; gap: 2px; margin: 0 -8px; overflow-x: auto; scrollbar-width: none;
+  display: flex; flex-wrap: wrap; gap: 0 2px; margin: 0 -8px;
 }
-.sections::-webkit-scrollbar { display: none; }
 .section-tab {
   background: none; border: 0; border-bottom: 2px solid transparent; padding: 9px 10px 10px;
   color: var(--text-2); font-weight: 500; font-size: 13.5px; cursor: pointer; white-space: nowrap;

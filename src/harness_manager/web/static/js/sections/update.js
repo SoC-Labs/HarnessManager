@@ -178,7 +178,7 @@ function AppCard() {
       sub="Harness Manager's own update is not about this board: it lives in Settings, and a banner at the top of every page offers it.">
     <div class="row">
       <span data-testid="update-app-text">${text}</span>
-      <button type="button" class="btn sm" data-action="open-settings" onClick=${openSettings}>
+      <button type="button" class="btn sm" data-action="open-settings" onClick=${() => openSettings("updates")}>
         <${Icon} name="sliders-horizontal" /> Settings</button>
     </div>
   <//>`;
