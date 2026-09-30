@@ -8,10 +8,10 @@ passed (269 PASS + 1 NOTE). `nanosoc_partial.bin` and `nanosoc_partial_clear.bin
 as the fielded `overlay_mbv/nanosoc/{nanosoc.bin, nanosoc_clear.bin}` (§7). Timing and pblock resources
 match the fielded report to the last digit (§6).
 
-What it took, and where HM fell short, is §10 (the recipe) and §11 (the gaps, ranked). Three HM
+What it took, and where HM fell short, is §10 (the recipe) and §11 (the gaps, ranked). Four HM
 changes are on `team/kit-nanosoc` (§12): the worst gap (the built-in `nanosoc` built an **empty RM under
 nanosoc's name and rm_id**, proven in Vivado) is fixed, `build.generics` exists, and `kit pack
---import` now says when Program lists another overlay instead. A second full build on the branch head,
+--import` now says when Program lists another overlay instead, and the guide sees a running build. A second full build on the branch head,
 with `build.generics` and no synth hook, is §13.
 
 - **Lane:** KIT-NANOSOC. **Branch:** `team/kit-nanosoc` (from `main` `ab311b4`). Not pushed, not merged.
@@ -79,6 +79,7 @@ Every HM command is `tools/kns.sh '<command>'`; `~` is the scratch home. The per
 | 9 | the handover copy in a **fresh** state dir: `sha256sum -c SHA256SUMS`, `kit list` (empty), `kit check … --static-id 0x44EE76D5`, `kit pack … --import`, the board-free listing | 0 | 4 s | `logs/s13_handover_fresh_state.txt`: all OK, Programmable |
 | 9 (fix) | on `8fff173`, a fresh state dir with the fielded triple in `HARNESS_MANAGER_MPS3_OVERLAY_DIRS`: `kit pack … --import` | 0 | 2 s | `logs/s12d_pack_import_shadowed_fixed.txt`: "…but Program lists …/nanosoc/manifest.json instead … byte-identical … the same bits" |
 | after | `harness-manager kit guide … --build-dir ~/builds/nanosoc` | 0 | 30 s | `logs/s14_kit_guide_after.txt`: **all six steps done**, "nanosoc passed 270 gates" |
+| after (fix) | on `2c105cf`: `kit guide … --build-dir ~/builds/g7demo` (the first 3000 lines of this build's log: stage link), then `touch -d "3 hours ago"` on it and the guide again | 0 | 31 s | `logs/s15_guide_running_build_fixed.txt`: "a build is running here: stage link …" with no command; then "… no verdict: that run died" with the command |
 
 ## 4. The design .json
 
@@ -226,7 +227,7 @@ pass, and it is Programmable (`logs/s13_…`).
 | **G4** | The `build` keys were **undocumented** for users | Only `script.py`'s docstring and API.md listed them; XDC_EXPORT's design reference had none | read `script.py` | **fixed** `a29b51e` (docs): USER_GUIDE §7 table + example; XDC_EXPORT points at it |
 | **G5** | An import with a fielded RM's name, rm_id and static is **shadowed** in Program | The catalogue keeps the first (overlay dirs, then the store) and only logs the rest; `kit pack --import` said "it shows in Program" (`logs/s12c_…`) | `program TARGET NAME --overlay-dir <the triple's parent>` | **message fixed** `8fff173`: the import names the overlay Program lists instead, says if its bits are identical, and gives the `--overlay-dir` (`logs/s12d_…`); the web result too. Resolving by recency is a design decision, not made here |
 | G6 | A non-HDL file in `build.sources` failed synthesis with a parse error | The template reads every non-`.v`/`.vhd` file as SystemVerilog | know which key takes it | **fixed** `a29b51e`: `.hex/.mem/.mif/.coe/.xci/.xcix/.xdc/.tcl/.dcp/.edf` refused at `kit script`, naming the key |
-| G7 | The guide cannot see a **running** build | At 00:32, with Vivado in link, step 5 said `NEXT … no receipt yet` and offered the Vivado command again: a second Vivado in the same dir would clobber `out/` | look at `build_rm.log`'s last `HM_STAGE` | open. Suggest: no receipt + a `build_rm.log` whose last line is fresh → "running: stage link since HH:MM" |
+| G7 | The guide cannot see a **running** build | At 00:32, with Vivado in link, step 5 said `NEXT … no receipt yet` and offered the Vivado command again: a second Vivado in the same dir would clobber `out/`; with a last run's receipt there, it showed that one | look at `build_rm.log`'s last `HM_STAGE` | **fixed** `2c105cf`: a log with a stage, no verdict, written in the last 30 min → "a build is running here: stage link …", no command, the old receipt ignored; an older one → "that run died" with the command (`logs/s15_…`, on the real log) |
 | G8 | The platform's nanosoc sources are not packaged for a user | The RTL spans 3 checkouts (`nanosoc_m0_soc` at a dirty regenerated commit, `ahb_qspi`, the platform) plus the licensed Arm IP at `/research/AAA/ip_library` | this lane's snapshot + manifest (`design/src_*`) | open (platform/SoC Labs). A user outside the lab cannot build nanosoc at all without Arm IP access; their own DUT is not affected |
 | G9 | A build dir is **not relocatable** | Design-relative paths are written absolute into `build_rm.tcl`, though its header says the dir can be moved | keep the design where it was | open, low |
 | G10 | **Receipt bloat** | 247 of 270 gates are `source_present`; the guide says "passed 270 gates"; the receipt is 49.8 KB | none needed | open, low. Suggest one `sources_present` gate ("246 files") that names the first missing file |
@@ -246,12 +247,13 @@ the rm_id checks, and every gate.
 | `e5dc902` | G1: the skeleton is RM_SOURCES only when it is a whole RM; `rm_kit` records `facts.skeleton_undriven` (one predicate shared with the skeleton renderer) | `tests/unit/test_kit_rc2.py`: built-in nanosoc → empty RM_SOURCES + the warning / `minimal` and a fully-tied design still build as their skeleton, one untied output → no built-in sentence; the fact lists used-group outputs only / never `rm_id` or an unused group's |
 | `a29b51e` | G2 `build.generics` (+ `RM_GENERICS`/`RM_GENERIC_FILES` in `build_rm.tcl`, gate `generic_file_present`, GATE_HELP); G6 HDL-only `build.sources`; G4 docs (USER_GUIDE §7, XDC_EXPORT, DUT_BUILD_GUIDE gate table, CHANGELOG) | `tests/unit/test_kit_nanosoc.py` (18): render / none; 5 malformed forms refused / absolute path in an inline design taken; 6 non-HDL suffixes refused / every HDL suffix taken; the script **run in Python's Tcl** with Vivado stubbed: one `-generic` each + the gate / none; a missing file fails before `synth_design` |
 | `8fff173` | G5: `import_overlay` returns `shadowed_by`, `shadow_same_bits`; `kit pack --import` and the web **Add to Program** result say so; API.md, CHANGELOG | 4 more in `test_kit_nanosoc.py`: shadowed by a dir with other bits / not shadowed (none, or another name); same bits reported; the CLI line and `--overlay-dir` / an unshadowed import still "shows in Program" |
+| `2c105cf` | G7: `build.running_build()`; the guide's Build step says a build is running (no command, the old receipt ignored) or that the last run died; USER_GUIDE, CHANGELOG | 4 more in `test_kit_nanosoc.py`: stage + freshness / any verdict ends the run, echoed script lines do not count; running → no second Vivado / no log → the command; a running rebuild hides the last receipt; a 3 h old log is a run that died |
 
 - `ruff check` passes on `src` and the touched tests.
 - Port-free suite: every `tests/unit/test_kit_*.py`, `test_otac_kits.py`, `test_cli_help_coverage.py`,
   `test_t5_help.py`, `test_t10_{checks,golden,model,syntax,vivado}.py`, and `tests/integration/test_kit_cli.py`
-  minus its 2 virtual-board tests: **364 passed, 5 skipped**. Also `tests/web/test_kit_ui_build_static.py`,
-  `test_t14_static.py`, `tests/unit/test_t2_overlays.py`, `test_t2_overlay_extras.py`: pass.
+  minus its 2 virtual-board tests, plus `tests/web/test_kit_ui_build_static.py`, `test_t14_static.py`,
+  `tests/unit/test_t2_overlays.py`, `test_t2_overlay_extras.py`: **441 passed, 5 skipped** on `2c105cf`.
 - The full `make test` was **not** run: the virtual board binds 10000-19999, which this lane may not bind.
   The browser tests (Playwright) were not run; the web change is 4 lines, checked by running its render
   function in node against the three cases.
