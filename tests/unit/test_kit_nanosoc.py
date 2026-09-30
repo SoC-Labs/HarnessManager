@@ -8,6 +8,11 @@
 - ``build.sources`` holds HDL only: a .hex/.xci/.xdc/.tcl/.dcp there is refused with the
   key that takes it (the template would read it as SystemVerilog).
 
+- ``kit pack --import`` says when Program lists another overlay of the same name, rm_id and
+  static instead (the catalogue keeps the first);
+- the guide sees a build that is running (a ``build_rm.log`` with no verdict) and offers no
+  second Vivado, and says when a log stopped long ago (the run died).
+
 The generated script is RUN in Python's Tcl (``tkinter.Tcl()``) with Vivado's commands
 stubbed, as ``test_kit_tcl.py`` does. Every test has its negative twin.
 """
@@ -25,6 +30,13 @@ from harness_manager.services.kit.schema import load_receipt
 from harness_manager.services.kit.service import HubSource, KitService
 from harness_manager.services.store import ContentStore
 from tests.fakes import kit_fakes as kf
+
+
+@pytest.fixture(autouse=True)
+def _no_real_vivado(monkeypatch):
+    from harness_manager.services.kit import vivado
+
+    monkeypatch.setenv(vivado.ENV, "off")          # discovery and the launch probe run nothing
 
 
 @pytest.fixture
@@ -261,3 +273,97 @@ def test_cli_pack_import_says_program_lists_the_other_one(tmp_path, monkeypatch,
     assert cli_main.main(["kit", "pack", str(receipt), "--import"]) == 0
     out = capsys.readouterr().out
     assert "it shows in Program" in out and "but Program lists" not in out
+
+
+# --- the guide sees a build that is running (G7) ------------------------------------------------
+
+import os  # noqa: E402
+
+from harness_manager.services.kit import build as kbuild  # noqa: E402
+from harness_manager.services.kit import guide as kguide  # noqa: E402
+from harness_manager.services.kit import vivado as kvivado  # noqa: E402
+
+RUNNING_LOG = """# echoed script lines are not markers:
+#     puts "HM_RM_BUILD_FAILED gate=$name"
+HM_STAGE preflight
+HM_GATE static_id PASS CRC-32 is 0x72BB0A36
+HM_STAGE synth
+HM_GATE boundary_bits PASS 148
+HM_STAGE link
+Phase 1 Placer Initialization
+"""
+
+
+def _found() -> kvivado.VivadoFound:
+    return kvivado.VivadoFound(kvivado.VivadoInstall("/tools/Xilinx/Vivado/2024.1/bin/vivado",
+                                                     "2024.1", 5076996, "path"), ())
+
+
+def _bdir(kits, tmp_path: Path) -> tuple[Path, str]:
+    p = design_file(tmp_path)
+    out = tmp_path / "b"
+    make(kits, str(p), out)
+    return out, str(p)
+
+
+def _states(g) -> dict[str, str]:
+    return {s.id: s.state for s in g.steps}
+
+
+def test_running_build_reads_the_last_stage_with_no_verdict(tmp_path):
+    assert kbuild.running_build(tmp_path) is None                       # no log
+    log = tmp_path / "build_rm.log"
+    log.write_text(RUNNING_LOG)
+    r = kbuild.running_build(tmp_path)
+    assert r is not None and r.stage == "link" and r.fresh
+    old = kbuild.running_build(tmp_path, now=log.stat().st_mtime + 2 * 3600)
+    assert old is not None and not old.fresh                            # it died
+    # twins: a verdict after the last stage is a finished run
+    for verdict in ("HM_RM_BUILD_COMPLETE rm=x", "HM_RM_BUILD_FAILED gate=rm_timing",
+                    "HM_RM_BUILD_STOPPED after=synth"):
+        log.write_text(RUNNING_LOG + verdict + "\n")
+        assert kbuild.running_build(tmp_path) is None, verdict
+
+
+def test_the_guide_says_a_build_is_running_and_offers_no_second_vivado(kits, tmp_path):
+    bdir, dfile = _bdir(kits, tmp_path)
+    (bdir / "build_rm.log").write_text(RUNNING_LOG)
+    g = kguide.guide(kits, static_id="0x72BB0A36", design=dfile, build_dir=bdir, vivado=_found())
+    s = g.steps[4]
+    assert s.state == "next" and "a build is running here: stage link" in s.detail
+    assert s.actions == [] and "do not start another Vivado" in s.reason
+    assert _states(g)["check"] == "blocked"
+    # twin: the same dir with no log offers the Vivado command, as before
+    (bdir / "build_rm.log").unlink()
+    g = kguide.guide(kits, static_id="0x72BB0A36", design=dfile, build_dir=bdir, vivado=_found())
+    assert "no receipt in" in g.steps[4].detail
+    assert g.steps[4].actions[0]["text"].startswith("/tools/Xilinx/Vivado/2024.1/bin/vivado")
+
+
+def test_a_running_rebuild_hides_the_last_runs_receipt(kits, tmp_path):
+    bdir, dfile = _bdir(kits, tmp_path)
+    kf.passed_build(bdir)                                     # the LAST run's receipt
+    g = kguide.guide(kits, static_id="0x72BB0A36", design=dfile, build_dir=bdir, vivado=_found())
+    assert _states(g)["build"] == "done"
+    (bdir / "build_rm.log").write_text(RUNNING_LOG)           # a new run, in link
+    g = kguide.guide(kits, static_id="0x72BB0A36", design=dfile, build_dir=bdir, vivado=_found())
+    assert _states(g)["build"] == "next" and "running" in g.steps[4].detail
+    assert g.to_json()["receipt"] is None and _states(g)["check"] == "blocked"
+
+
+def test_a_log_that_stopped_long_ago_is_a_run_that_died(kits, tmp_path):
+    bdir, dfile = _bdir(kits, tmp_path)
+    log = bdir / "build_rm.log"
+    log.write_text(RUNNING_LOG)
+    t = log.stat().st_mtime - 3 * 3600
+    os.utime(log, (t, t))
+    g = kguide.guide(kits, static_id="0x72BB0A36", design=dfile, build_dir=bdir, vivado=_found())
+    s = g.steps[4]
+    assert "stops at stage link" in s.detail and "that run died" in s.detail
+    assert s.actions and s.actions[0]["text"].startswith("/tools/Xilinx/Vivado/2024.1/bin/vivado")
+    # with an older passed receipt: still done, and the reason says a later run died
+    kf.passed_build(bdir)
+    r = kbuild.find_receipts(bdir)[0]
+    os.utime(r, (t - 60, t - 60))
+    g = kguide.guide(kits, static_id="0x72BB0A36", design=dfile, build_dir=bdir, vivado=_found())
+    assert _states(g)["build"] == "done" and "that later run died" in g.steps[4].reason

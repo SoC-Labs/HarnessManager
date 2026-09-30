@@ -550,6 +550,11 @@ owners.
   earlier import) wins, and `program TARGET NAME` loads that one. It names the other
   overlay, says whether its bits are identical, and gives the `--overlay-dir` to load this
   build. The web **Add to Program** result shows the same hint.
+- The guide sees a build that is running: while `build_rm.log` has a stage and no verdict
+  and was written in the last 30 minutes, the Build step says "a build is running here:
+  stage link …" and offers no second Vivado (it would overwrite `out/`), and the last run's
+  receipt is not shown as this build's. A log with no verdict that stopped long ago is
+  named as a run that died.
 - `kit check --static-id ID` on a receipt of another static refuses (exit 14) instead of
   ignoring the flag.
 - The pin model describes more than one shell (`tools/gen_mps3_pins.py --shell`, `--all`),

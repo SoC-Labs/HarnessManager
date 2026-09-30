@@ -7,7 +7,7 @@ Harness Manager works out from what it can detect (KIT-GUIDE KG-A; docs/design/D
 | 2 | tools   | the Vivado found has the kit's major.minor release, and so does the ``vivado`` on PATH (if any); that Vivado starts (``launch.py``) |
 | 3 | kit     | the kit is cached, every blob re-hashes, its DCP's CRC-32 is the static_id, and it matches the board |
 | 4 | wrapper | the design passes every XDC-kit check (T10), with its rm_id checked for clashes |
-| 5 | build   | a receipt with ``state: passed`` is in the build directory |
+| 5 | build   | a receipt with ``state: passed`` is in the build directory (while its ``build_rm.log`` has no verdict and was written in the last 30 min, the build is running: no command is offered) |
 | 6 | check   | the receipt, its files and the pair pass every check, and the overlay is in the store |
 
 States: ``done`` · ``next`` (can be done now; ``Guide.next`` is the first such step) ·
@@ -368,10 +368,23 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
         found_r = build.find_receipts(Path(build_dir))
         script = Path(build_dir) / render.SCRIPT_NAME
         run = render.vivado_command(Path(build_dir), vivado=command_vivado(found, need))
-        if not found_r:
+        going = build.running_build(Path(build_dir))
+        if going is not None and going.fresh:
+            # KIT-NANOSOC G7: a build with no verdict yet. Its receipt (or the last run's)
+            # is not this build's, and a second Vivado here would overwrite out/.
+            raw["build"] = "todo"
+            s.detail = (f"a build is running here: stage {going.stage}, {going.log.name} "
+                        f"written {_hhmm(going.mtime)}; wait for its receipt")
+            s.reason = ("do not start another Vivado in this directory: it would overwrite "
+                        "out/. The verdict is the last HM_RM_BUILD_* line of "
+                        f"{going.log.name}")
+        elif not found_r:
             raw["build"] = "todo"
             s.detail = (f"no receipt in {build_dir}/out yet" if script.is_file() else
                         f"{build_dir} holds no build_rm.tcl")
+            if going is not None:           # a log with no verdict, not written for long
+                s.detail += (f"; {going.log.name} stops at stage {going.stage} "
+                             f"({_hhmm(going.mtime)}) with no verdict: that run died")
             s.actions = ([_cmd(" ".join(run))] if script.is_file() else
                          [_cmd(f"harness-manager kit script {target} --design "
                                f"{design if isinstance(design, str) else 'my_rm.json'} "
@@ -383,6 +396,12 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
                 raw["build"] = "failed"
                 s.detail = exc.message
             else:
+                if going is not None and going.mtime > found_r[0].stat().st_mtime:
+                    # a later run died after this receipt: out/ may hold parts of it
+                    s.reason = (f"{going.log.name} is newer and stops at stage {going.stage} "
+                                f"({_hhmm(going.mtime)}) with no verdict: that later run died, "
+                                "and out/ may hold parts of it (kit check compares every "
+                                "file with this receipt)")
                 if receipt.state == "passed":
                     raw["build"] = "done"
                     s.detail = (f"{receipt.rm_name} passed {len(receipt.gates)} gates "
@@ -443,6 +462,12 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
                  design if isinstance(design, str) else (str(design.get("name")) if design else ""),
                  str(build_dir) if build_dir else "", list(steps.values()), rm_info,
                  receipt.to_json() if receipt is not None else None)
+
+
+def _hhmm(ts: float) -> str:
+    import datetime
+
+    return datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 
 
 def _resolve(steps: dict[str, Step], raw: dict[str, str]) -> None:

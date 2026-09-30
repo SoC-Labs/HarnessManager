@@ -20,6 +20,8 @@ MPS3 pack writes ``pyverify``'s overlay triple).
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,47 @@ from harness_manager.core.pack import KitCheck
 from .schema import BuildReceipt, crc32_file, hex32, load_receipt, parse_u32, same_id
 
 RECEIPT_GLOB = "*_build.json"
+LOG_NAME = "build_rm.log"
+#: A build log written within this many seconds is a build still running. Vivado writes a
+#: line every few minutes at most, even in route_design (KIT-NANOSOC: 14 min of route, a
+#: phase line every 1-5 min, at load 30); a log older than this with no verdict is a run
+#: that died (killed, out of memory, a lost session).
+RUNNING_FRESH_S = 30 * 60
+
+
+@dataclass(frozen=True)
+class RunningBuild:
+    stage: str          # the last HM_STAGE
+    log: Path
+    mtime: float
+    fresh: bool         # written within RUNNING_FRESH_S: running; else it died
+
+
+def running_build(build_dir: Path, *, now: float | None = None,
+                  fresh_s: float = RUNNING_FRESH_S) -> RunningBuild | None:
+    """A build started in ``build_dir`` that has no verdict yet (KIT-NANOSOC G7): its
+    ``build_rm.log`` has an ``HM_STAGE`` with no ``HM_RM_BUILD_*`` after it. The receipt is
+    written only at the end, so until then the directory looks unbuilt (or shows the LAST
+    run's receipt), and the guide offered the Vivado command again: a second Vivado in the
+    same directory overwrites ``out/``. None when there is no log or its run has ended."""
+    log = Path(build_dir) / LOG_NAME
+    try:
+        st = log.stat()
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    from .render import parse_markers
+
+    stage = ""
+    for mark, rest in parse_markers(text):
+        if mark == "HM_STAGE":
+            stage = rest.split()[0] if rest else "?"
+        elif mark.startswith("HM_RM_BUILD_"):
+            stage = ""
+    if not stage:
+        return None
+    now = time.time() if now is None else now
+    return RunningBuild(stage, log, st.st_mtime, now - st.st_mtime <= fresh_s)
 
 
 def find_receipts(build_dir: Path) -> list[Path]:

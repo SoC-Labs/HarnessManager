@@ -818,6 +818,9 @@ minutes with 2 threads and 4 to 8 GB of RAM.
   found`, and point `XILINXD_LICENSE_FILE` at the lab server. Vivado 2026.1 does not even
   start without a licence file (exit 42): the guide launches the kit's Vivado once and fails
   its **Tools** step with the `export` to run.
+- **A build takes a while.** While Vivado runs, the guide's Build step says "a build is
+  running here" with the stage, and offers no command: a second Vivado in the same
+  directory would overwrite `out/`. nanosoc took 50-55 minutes on a shared, loaded server.
 - **Vivado exits 0 even when a gate fails.** The receipt is the verdict. The **When it goes
   wrong** card (or `kit guide --why GATE`) has one fix per gate.
 - **rm_id:** a design with no `rm_id` gets a proposed one (design ids `0x8000` to `0xFFFF`,
