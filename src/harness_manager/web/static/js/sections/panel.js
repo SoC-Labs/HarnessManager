@@ -622,28 +622,29 @@ export function FrontPanelCard({ bid }) {
     <span class="spacer"></span>
     <${IdentifyControl} bid=${bid} testid="panel-identify" head=${true} />`;
   const p = f.body && f.body.panel;
-  let body;
+  // What shows when there is no live picture: the panel's text, or why there is none. The Live
+  // display keeps ONE place in the tree whatever the panel's state (a remount is a new socket).
+  let fallback;
   if (f.unsupported || !f.body || !p) {
     const parts = lineParts(f);
     if (parts[0].key === "quiet") {
       // FIX-PACK-1: background reads are off (or paused): never a spinner that waits for ever.
-      body = html`<${QuietNote} testid="panel-quiet" action="panel-read-now" busy=${f.loading && f.explicit}
+      fallback = html`<${QuietNote} testid="panel-quiet" action="panel-read-now" busy=${f.loading && f.explicit}
         text=${quietWords(f.quiet)} onRead=${() => readPanelNow(bid)} />`;
     } else if (parts[0].key === "loading") {
-      body = html`<${Reason} level="unk" testid="panel-unavailable" text="Reading the panel..." />`;
+      fallback = html`<${Reason} level="unk" testid="panel-unavailable" text="Reading the panel..." />`;
     } else {
-      body = html`<div class="panel-headline" data-testid="panel-headline" data-state="none">
+      fallback = html`<div class="panel-headline" data-testid="panel-headline" data-state="none">
         <${Chip} level=${parts[0].level === "err" ? "err" : "unk"} testid="panel-headline-chip">Not available<//>
         <${Reason} level=${parts[0].level === "err" ? "err" : "unk"} icon=${parts[0].icon || ""}
           testid="panel-unavailable" text=${parts[0].text} /></div>`;
     }
-    if (view === "live") body = html`<div class="ov-panel-pic"><${LiveDisplay} bid=${bid} fit=${true}>${body}<//></div>`;
   } else {
-    body = html`<div class="ov-panel-pic" data-view=${view}>${view === "live"
-        ? html`<${LiveDisplay} bid=${bid} fit=${true}><${Mirror} f=${f} /><//>`
-        : html`<${Mirror} f=${f} />`}</div>
-      <${PanelFoot} bid=${bid} f=${f} view=${view} />`;
+    fallback = html`<${Mirror} f=${f} />`;
   }
+  const body = html`<div class="ov-panel-pic" data-view=${view}>${view === "live"
+      ? html`<${LiveDisplay} bid=${bid} fit=${true}>${fallback}<//>` : fallback}</div>
+    ${p && !f.unsupported ? html`<${PanelFoot} bid=${bid} f=${f} view=${view} />` : null}`;
   return html`<section class="card ov-card ov-panel" aria-label="Front panel" data-testid="panel-card"
       data-view=${view} data-owner=${p ? p.owner || "" : ""}>
     <div class="card-head"><h2 class="card-title"><${Icon} name="monitor" />Front panel</h2>${tools}</div>

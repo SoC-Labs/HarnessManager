@@ -112,12 +112,13 @@ def test_the_board_tiles_read_now_reads_every_held_back_line(page_factory, daemo
                                                                       timeout=T)
     expect(page.locator('[data-testid="ov-kpi-temp"]')).not_to_contain_text("not read", timeout=T)
     expect(tile).to_have_count(0, timeout=T)
-    # The panel's state was read (a click), its text mirror not: the card asked for the mirror
-    # in the background, which was held back: the mirror says so too.
+    # UI v2: the Front panel is on screen, so the same click read its text mirror too; a mirror
+    # read the gate still held back says so, with its own Read now (never a spinner)
     details(page)
     note = page.locator('[data-testid="panel-mirror-quiet"]')
-    expect(note).to_contain_text("Background reads are off", timeout=T)
-    note.locator('[data-action="panel-mirror-read-now"]').click()
+    if note.count():
+        expect(note).to_contain_text("Background reads are off")
+        note.locator('[data-action="panel-mirror-read-now"]').click()
     expect(page.locator('[data-testid="panel-mirror"] [data-row="0"]')).to_have_text(
         LINUX_STATUS_ROWS[0], timeout=T)
     assert page.errors == []
