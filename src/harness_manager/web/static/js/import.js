@@ -227,9 +227,7 @@ function ImportDialog({ bid, way: startWay = "file" }) {
       <div class="strip-label bd-sect">What Harness Manager checks before it accepts</div>
       <${Groups} bid=${bid} res=${res} running=${m.busy === "import" || m.busy === "read"} />
     </div>
-    ${m.done ? html`<div class="outcome ok" role="status" data-testid="import-ok"><${Icon} name="circle-check" /><span>Imported <b>${m.done.name}</b>
-        <span class="mono">${m.done.rm_id}</span> into the overlay store${m.done.overlay_dir ? html` (packed in <span class="mono">${m.done.overlay_dir}</span>)` : ""}.
-        The Workbench lists it, tagged imported: pick it, tick Arm, then Program.</span></div>` : null}
+    ${m.done ? html`<div class="outcome ok" role="status" data-testid="import-ok"><${Icon} name="circle-check" /><span>Imported <b>${m.done.name}</b> <span class="mono">${m.done.rm_id}</span> into the overlay store${m.done.overlay_dir ? html` (packed in <span class="mono">${m.done.overlay_dir}</span>)` : ""}. The Workbench lists it for every board on ${m.done.static_id}: pick it, tick Arm, then Program.</span></div>` : null}
     ${shadow ? html`<${Reason} level="warn" testid="import-shadowed" text=${`The Workbench lists ${shadow} instead: the same name, rm_id and static, and the first one found wins. Rename your design to see yours.`} />` : null}
     ${res && !m.err && !m.done && res.passed ? html`<${Reason} level="ok" testid="import-checked" text=${`${res.name} passes: Check and import puts it in the overlay store.`} />` : null}
     ${res && !m.err && !m.done && !res.passed ? html`<${Reason} level="err" testid="import-would-refuse" text=${`${res.name} would be refused: ${(res.groups || []).filter((g) => g.state === "mismatch").map((g) => `${g.title}: ${g.detail}`).join("; ")}.`} />` : null}
