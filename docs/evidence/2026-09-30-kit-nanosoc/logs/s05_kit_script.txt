@@ -1,0 +1,6 @@
+nanosoc (rm_id 0x01000001) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   rm_id_range                  design id 0x0001 is in the platform's range; user designs take 0x8000-0xFFFF (HM proposes one)
+wrote 22 files to /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc
+next: /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.tcl -log /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.log -journal /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/out/nanosoc_build.json
+=== rc=0 took=4s

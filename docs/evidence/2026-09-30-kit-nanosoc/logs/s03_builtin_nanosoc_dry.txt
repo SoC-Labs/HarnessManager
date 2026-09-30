@@ -1,0 +1,12 @@
+nanosoc (rm_id 0x01000001) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   rm_id_range                  design id 0x0001 is in the platform's range; user designs take 0x8000-0xFFFF (HM proposes one)
+  warning   sources                      the design names no RTL (build.sources, or a wrapper): RM_SOURCES is the XDC kit's skeleton xdc/nanosoc_wrapper_skeleton.sv, which drives rm_id and ties every other output off. For your own RTL set build.sources, or pass -tclargs RM_SOURCES="a.sv b.sv"
+files (not written; add --out DIR):
+  README.txt
+  build_rm.tcl
+  xdc/nanosoc_connectivity.csv
+  xdc/nanosoc_connectivity.md
+  xdc/nanosoc_ooc.xdc
+  xdc/nanosoc_pblock.md
+  xdc/nanosoc_wrapper_skeleton.sv
+=== rc=0 took=5s

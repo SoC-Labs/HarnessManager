@@ -1,0 +1,4 @@
+/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/build_rm.tcl -log /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/build_rm.log -journal /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/build_rm.jou -tclargs JOBS=4
+  Vivado 2026.1 (path); the kit needs 2026.1
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the last HM_RM_BUILD_* line and the receipt in out/)
+=== rc=0 took=5s

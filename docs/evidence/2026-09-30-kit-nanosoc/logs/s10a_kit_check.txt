@@ -1,0 +1,26 @@
+the build nanosoc: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 270 gates
+  ok        rm_id                        the netlist drives 0x01000001
+  ok        static_id                    built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)
+  ok        partial                      nanosoc_partial.bin: 2298736 B, CRC-32 0x930EB9EA as built
+  ok        clearing                     nanosoc_partial_clear.bin: 169000 B, CRC-32 0x77CCEF0F as built
+  ok        partial: bit_header_length   header declares 2298736 B, payload is 2298736 B
+  ok        partial: part                xcku115-flvb1760-1-c (want xcku115-flvb1760-1-c)
+  ok        partial: partial_flag        PARTIAL=TRUE
+  ok        partial: stream              2 sections, every packet walked to DESYNC, 505161 FDRI words, 3564 frames
+  ok        partial: idcode              0x0390D093=SLR0
+  ok        partial: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        partial: role                the commands say 'partial'
+  ok        partial: frame_box           {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}
+  ok        partial: vocabulary          commands and registers are a subset of the reference partial's
+  ok        bit_bin_pair                 nanosoc_partial.bin carries the payload of nanosoc_partial.bit
+  ok        clearing: stream             3 sections, every packet walked to DESYNC, 38622 FDRI words, 223 frames
+  ok        clearing: idcode             0x0390D093=SLR0
+  ok        clearing: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        clearing: role               the commands say 'clearing'
+  ok        clearing: frame_box          {'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}
+  ok        clearing: vocabulary         commands and registers are a subset of the reference clearing's
+  ok        clearing_fits                clearing payload 169000 B of the 1048576 B the harness holds
+  ok        clearing_pairs_partial       the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}
+  unchecked static_binding               a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it
+=== rc=0 took=3s

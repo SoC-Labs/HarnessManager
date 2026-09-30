@@ -1,0 +1,7 @@
+30:# puts "GENERIC_PROP=[get_property generic [current_fileset]]"
+31:GENERIC_PROP=IMG=/tmpdir/claude-74755/kit-nanosoc/probe/generic/img.hex
+44:	Parameter IMG bound to: /tmpdir/claude-74755/kit-nanosoc/probe/generic/img.hex - type: string 
+45:INFO: [Synth 8-3876] $readmem data file '/tmpdir/claude-74755/kit-nanosoc/probe/generic/img.hex' is read successfully [/tmpdir/claude-74755/kit-nanosoc/probe/generic/toy.sv:3]
+198:# puts "TOY_DONE"
+199:TOY_DONE
+200:INFO: [Common 17-206] Exiting Vivado at Wed Sep 30 00:16:01 2026...

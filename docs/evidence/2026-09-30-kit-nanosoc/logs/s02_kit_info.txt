@@ -1,0 +1,11 @@
+static     0x44EE76D5
+kit        mps3/0x44EE76D5/vivado-2026.1, 38287216 B, from path:/tmpdir/claude-74755/kit-nanosoc/home/mps3_rc2_0x44EE76D5_kit.zip
+partition  u_rp_dut / pblock_rp_dut, 47 ports / 148 bits, part xcku115-flvb1760-1-c
+vivado     needs 2026.1; found 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado
+sources    cache, channel, hub (unavailable)
+  ok        vivado                       Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado
+  ok        vivado_path                  `vivado` on PATH is Vivado 2026.1 (/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado)
+  unchecked shell_id                     no board: the kit was not compared with a running static
+  ok        part                         xcku115-flvb1760-1-c
+  ok        boundary                     kit 47 ports / 148 bits, pin model 47 / 148
+=== rc=0 took=5s

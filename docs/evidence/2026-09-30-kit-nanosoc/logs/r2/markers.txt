@@ -1,0 +1,37 @@
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/xdc/nanosoc_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_GATE generic_file_present PASS /tmpdir/claude-74755/kit-nanosoc/home/designs/nanosoc/src/platform/fpga/rp/nanosoc/hello_image.hex
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x01000001, RM_ID is 0x01000001 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck jtag_tck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 23 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_STAGE impl
+HM_GATE rp_pins_opt PASS 148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)
+HM_GATE drc_routed PASS no HDPR-16/18/50, no Error
+HM_GATE rm_timing PASS your RM's paths (6365 registers): setup WNS 3.563 ns, hold WHS 0.030 ns
+HM_STAGE verify
+HM_GATE pr_verify PASS compatible with static_routed_locked.dcp
+HM_STAGE bitstream
+HM_GATE ltx NOTE no debug core in the partition: no .ltx
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/out/nanosoc_partial.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/out/nanosoc_partial_clear.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/out/nanosoc_partial.bit
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/out/nanosoc_partial_clear.bit
+HM_GATE clearing_fits PASS clearing 169000 B, the harness holds 1048576 B
+HM_RECEIPT /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/out/nanosoc_build.json
+HM_RM_BUILD_COMPLETE rm=nanosoc rm_id=0x01000001 static_id=0x44EE76D5 partial=/tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/out/nanosoc_partial.bin
+
+# the generic reaching synthesis (build_rm.log)
+	Parameter IMEM_MEM_FPGA_IMG bound to: /tmpdir/claude-74755/kit-nanosoc/home/designs/nanosoc/src/platform/fpga/rp/nanosoc/hello_image.hex - type: string 
+INFO: [Synth 8-3876] $readmem data file '/tmpdir/claude-74755/kit-nanosoc/home/designs/nanosoc/src/platform/fpga/rp/nanosoc/hello_image.hex' is read successfully [/tmpdir/claude-74755/kit-nanosoc/home/designs/nanosoc/src/nanosoc_m0_soc/src/rtl/fpga_lib/rom/sl_fpga_rom_word.v:78]
+Command: synth_design -mode out_of_context -top rp_nanosoc_wrapper -part xcku115-flvb1760-1-c -include_dirs {/tmpdir/claude-74755/kit-nanosoc/home/designs/nanosoc/src/nanosoc_m0_soc/build_soc/rtl /research/AAA/ip_library/latest/Cortex-M0/logical/cortexm0_dap/verilog /research/AAA/ip_library/latest/Cortex-M0/logical/ualdis/verilog /research/AAA/ip_library/latest/Corstone-101/logical/cmsdk_apb_dualtimers/verilog /research/AAA/ip_library/latest/Corstone-101/logical/cmsdk_apb_watchdog/verilog /research/AAA/ip_library/latest/Corstone-101/logical/models/memories /research/AAA/ip_library/PL022/PL022-BU-00000-r1p4-00rel0/ssp_pl022/verilog/rtl_source /research/AAA/ip_library/SoC-400/coresight_soc/shared/logical/cxdapswjdp/verilog /research/AAA/ip_library/SoC-400/coresight_soc/shared/logical/cxdapahbap/verilog} -verilog_define RAM_PRELOAD -generic IMEM_MEM_FPGA_IMG=/tmpdir/claude-74755/kit-nanosoc/home/designs/nanosoc/src/platform/fpga/rp/nanosoc/hello_image.hex

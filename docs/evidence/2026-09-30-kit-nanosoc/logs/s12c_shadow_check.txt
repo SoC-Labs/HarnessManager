@@ -1,0 +1,9 @@
+log INFO harness_manager_mps3.overlays: overlay nanosoc from store:06139f71f1a80650a324a2ef805ffeecf09703d5cf1819b84edfd4ce99704b0f shadowed by an earlier search path
+store records: [('nanosoc', '0x01000001')]
+
+store only: 1 entry
+  nanosoc 0x01000001 static 0x44ee76d5 origin store source store:06139f71f1a80650a324a2ef805ffeecf09703d5cf1819b84edfd4ce99704b0f partial 3b697246426c9d55
+
+overlay dir first, then the store: 1 entry
+  nanosoc 0x01000001 static 0x44ee76d5 origin dir source /tmpdir/claude-74755/kit-nanosoc/shadow/dirs/nanosoc/manifest.json partial 3b697246426c9d55
+=== rc=0 took=1s

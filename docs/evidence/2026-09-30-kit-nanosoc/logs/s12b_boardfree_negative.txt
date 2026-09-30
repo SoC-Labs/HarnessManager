@@ -1,0 +1,14 @@
+state dir /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager; simulated live shell_id 0x72BB0A36 (NO board), clr_max 262144
+catalogue: 1 overlay(s); rejects: none
+store: 1 overlay record(s): nanosoc 0x01000001 partial 3b697246426c
+
+nanosoc  rm_id 0x01000001  static 0x44ee76d5  origin store  size 2467736  ip_class unknown  -> REFUSED
+  source store:06139f71f1a80650a324a2ef805ffeecf09703d5cf1819b84edfd4ce99704b0f  partial sha256 3b697246426c9d556e30f5348064f08c5fd519dfb2947d07dde719a250b75f9d
+  mismatch   shell_id matches overlay built for shell 0x44ee76d5, the board runs 0x72bb0a36 (a shell rebuild invalidates every partial; overlay-manifest.md)
+  ok         crc and length clearing 169000 B crc 0x77ccef0f, partial 2298736 B crc 0x930eb9ea
+  ok         clearing pairs partial both payload blobs were imported for rm_id 0x01000001
+  ok         clearing fits  169000 B of the 262144 B the harness's clr_max
+  unchecked  static_usercode matches needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76)
+  MISMATCH   pyverify       Overlay.validate: static_id mismatch: manifest=0x44ee76d5 running shell=0x72bb0a36 (a shell rebuild invalidates every stored partial — overlay-manifest.md)
+  (not run)  control/transport need a live shell
+=== rc=1 took=1s

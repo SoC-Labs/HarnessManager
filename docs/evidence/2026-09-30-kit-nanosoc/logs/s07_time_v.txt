@@ -1,0 +1,24 @@
+	Command being timed: "/research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.tcl -log /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.log -journal /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.jou -tclargs JOBS=4"
+	User time (seconds): 3892.01
+	System time (seconds): 99.47
+	Percent of CPU this job got: 120%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 55:26.05
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 5046148
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 5
+	Minor (reclaiming a frame) page faults: 3284184
+	Voluntary context switches: 1315803
+	Involuntary context switches: 318773
+	Swaps: 0
+	File system inputs: 280
+	File system outputs: 1098136
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+=== rc=0 took=3327s

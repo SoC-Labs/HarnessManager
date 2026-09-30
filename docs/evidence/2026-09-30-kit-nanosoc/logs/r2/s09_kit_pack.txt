@@ -1,0 +1,3 @@
+overlay nanosoc (0x01000001) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/overlay/nanosoc
+next: harness-manager kit pack /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head --import  (or: harness-manager program TARGET nanosoc --overlay-dir /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/overlay)
+=== rc=0 took=1s
