@@ -1,10 +1,13 @@
-// The Debug section's XVC card (lane XVC-UI; docs/design/XVC_DEBUG.md 4.1, docs/API.md
-// "Fabric debug over XVC"): Vivado's view of the partition's ILAs through the harness's own
-// XVC server, behind Harness Manager's relay and (unless --byo) its own hw_server.
+// The Workbench rail's Logic analysers card (UI v2, round 3 "IlaCard"; lane XVC-UI before it;
+// docs/design/XVC_DEBUG.md 4.1, docs/API.md "Fabric debug over XVC"): Vivado's view of the
+// partition's ILAs through the harness's own XVC server, behind Harness Manager's relay and
+// (unless --byo) its own hw_server. When the loaded design has no ILAs it offers the design on
+// this shell that has them ("Program nanosoc_ila..."), which picks it in the Program strip.
 //
 // david's decisions (2026-09-24) as the card shows them:
-// - X1 scope: the sentence under the title is always there, whatever the state. XVC reaches
-//   the reconfigurable partition's debug chain, never whole-device JTAG.
+// - X1 scope: the line under the title is always there, whatever the state (round 3's short
+//   words: "ILA over XVC: the partition's debug chain only"; the full sentence on hover and
+//   under More). XVC reaches the reconfigurable partition's debug chain, never whole-device JTAG.
 // - X2: Open starts HM's hw_server; "Bring your own hw_server" (--byo) starts none.
 // - X3: a partition swap closes the session and re-attaches it: "swapping", then
 //   "re-attached on <design>", live from xvc.state events.
@@ -14,14 +17,15 @@
 // - X6: the bare-metal harness's XVC is unauthenticated: its warning shows, and Open is
 //   for the lease holder only (anyone else sees the buttons disabled, with the reason).
 
-import { panelState, runJob } from "../actions.js";
+import { gateReason, interlock, panelState, runAction, runJob } from "../actions.js";
 import { call, callBlob, heldByJob, routeMissing, toApiError } from "../api.js";
 import { clock } from "../format.js";
 import { html, useEffect } from "../lib.js";
-import { boardState, changed, onBoardEvent, onJobEnded, timed } from "../store.js";
+import { boardState, changed, onBoardEvent, onJobEnded, timed, toast } from "../store.js";
 import { holderOnly } from "../week.js";
 import { settingValue } from "../prefs.js";
-import { ActionRow, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
+import { Chip, CopyButton, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
+import { pickForProgram } from "./program.js";
 
 export const XVC_SCOPE = "XVC reaches the reconfigurable partition's debug chain (Debug Bridge, "
   + "debug hub and ILAs of the loaded design). It never gives whole-device JTAG.";
@@ -251,32 +255,34 @@ function LtxRow({ bid, which, item, reason, testid }) {
   }
   const busy = x.ltxBusy === which;
   return html`<span class="xvc-ltx" data-testid=${testid} data-available="true">
-    <span class="mono">${item.name || item.path}</span>
+    <span class="mono small" title=${item.path}>${item.name || item.path}</span>
     ${item.crc_ok === true ? html`<${Chip} level="ok" icon="check" title="matches the overlay manifest's CRC">crc<//>`
       : item.crc_ok === false ? html`<${Chip} level="err" icon="circle-x" title="does not match the overlay manifest's CRC">crc<//>` : null}
-    <button type="button" class="btn sm" data-action=${`xvc-ltx-${which}`} aria-busy=${busy ? "true" : undefined}
-      title=${`Download the ${WHICH_TEXT[which] || which} probes file for Vivado's PROBES.FILE`}
+    <button type="button" class="btn ghost sm icon-only" data-action=${`xvc-ltx-${which}`} aria-busy=${busy ? "true" : undefined}
+      aria-label=${`Download the ${WHICH_TEXT[which] || which} probes file`}
+      title=${`Download the ${WHICH_TEXT[which] || which} probes file (.ltx) for Vivado's PROBES.FILE`}
       onClick=${() => { if (!busy) downloadLtx(bid, which === "preferred" ? "auto" : which, item); }}>
-      ${busy ? html`<${Spinner} />` : html`<${Icon} name="download" />`} Download .ltx</button>
+      ${busy ? html`<${Spinner} />` : html`<${Icon} name="download" />`}</button>
   </span>`;
 }
 
 // --- the Tcl ---------------------------------------------------------------------------------------
 
-function CopyTcl({ bid, text }) {
+function CopyTcl({ bid, text, primary = false }) {
   const x = xvc(bid);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text);
       x.copied = true;
+      toast("Vivado Tcl copied: it connects Vivado and sets PROBES.FILE", { icon: "copy" });
     } catch (e) {
       x.copied = false;
     }
     changed();
     setTimeout(() => { x.copied = false; changed(); }, 1500);
   };
-  return html`<button type="button" class="btn sm" data-action="xvc-copy-tcl" disabled=${!text}
-    onClick=${copy} title="Copy the snippet for the Vivado Tcl console">
+  return html`<button type="button" class=${`btn sm ${primary ? "primary" : "ghost"}`} data-action="xvc-copy-tcl" disabled=${!text}
+    onClick=${copy} title="Copy the Tcl for Vivado's Tcl console: it connects and loads the probes (sets PROBES.FILE)">
     <${Icon} name=${x.copied ? "check" : "copy"} />${x.copied ? "Copied" : "Copy Tcl"}</button>`;
 }
 
@@ -290,6 +296,42 @@ export function viewState(bid) {
   return st.state || "unknown";
 }
 
+// The loaded design has no ILAs: the design on this shell that has them (its probes file travels
+// with it, `ltx_sha256`; nanosoc_ila first, the platform's ILA build), or null.
+export function ilaDesign(bid) {
+  const b = boardState(bid);
+  const list = (b.overlays && b.overlays.loadable) || [];
+  const loaded = String((b.info && b.info.identity && b.info.identity.rm_id) || "").toLowerCase();
+  const others = list.filter((o) => String(o.rm_id || "").toLowerCase() !== loaded);
+  return others.find((o) => o.name === "nanosoc_ila") || others.find((o) => o.ltx_sha256) || null;
+}
+
+function ProgramIla({ bid, design }) {
+  const b = boardState(bid);
+  const ila = ilaDesign(bid);
+  if (!ila) {
+    return html`<p class="reason" data-testid="xvc-no-ila"><${Icon} name="info" /><span>${design || "The loaded design"} has no ILAs,
+      and no design on this shell carries a probes file.</span></p>`;
+  }
+  const why = holderOnly(bid, "Program") || (b.job ? `waiting for the ${b.job.kind} job to finish` : "");
+  const picked = b.selectedOverlay === ila.name;
+  return html`<div class="xvc-no-ila" data-testid="xvc-no-ila">
+    <div class="small secondary"><b>${design || "The loaded design"}</b> has no ILAs. <span class="mono">${ila.name}</span>
+      ${ila.name === "nanosoc_ila" ? " is the same SoC with ILAs." : " carries a probes file."}</div>
+    <div class="row"><button type="button" class=${`btn sm ${picked || why ? "" : "primary"}`} data-action="program-ila"
+        aria-disabled=${why ? "true" : undefined} title=${why || `Pick ${ila.name} in the Program strip: then Arm, then Program`}
+        onClick=${() => { if (!why) pickForProgram(bid, ila.name); }}>
+      <${Icon} name="upload" />${picked ? "Picked: Arm, then Program" : `Program ${ila.name}...`}</button></div>
+    ${why ? html`<p class="reason held"><${Icon} name="lock" /><span>${why}</span></p>` : null}
+  </div>`;
+}
+
+const CHIP_TEXT = { down: "closed", starting: "opening", ready: "ready", attached: "attached", held: "held",
+  swapping: "swapping", failed: "failed", reading: "reading", unknown: "unknown" };
+
+// The rail's Logic analysers card (UI v2, prototype "IlaCard"; plan §1.3 W15-W16): Open / Close,
+// the URL for Vivado, the probes file, Copy Tcl (sets PROBES.FILE), bring your own hw_server; the
+// rest (the Tcl itself, the static MIG probes, the reach) folds under More.
 export function XvcCard({ bid }) {
   const x = xvc(bid);
   useEffect(() => { loadXvc(bid); }, [bid]);
@@ -299,7 +341,6 @@ export function XvcCard({ bid }) {
   const state = viewState(bid);
   const look = STATE_LOOK[state] || { level: "unk", icon: "circle-help" };
   const held = slotHeldText(st) || (state === "held" ? x.heldBy : "");
-  const lease = leaseReason(bid);
   const { open, close } = xvcSpecs(bid);
   const p = panelState(bid, "xvc");
   const warnings = st.warnings || [];
@@ -317,78 +358,108 @@ export function XvcCard({ bid }) {
   const pref = ltx.preferred ? ltx[ltx.preferred] : tclLtx;
   const design = { name: st.rm_name || ident.rm_name || "", id: st.rm_id || ident.rm_id || "" };
   const att = st.attached;
+  // No ILAs in the loaded design: the status read says so (no probes file, not unsupported).
+  const noIla = !!x.st && !x.unsupported && !st.reason && !pref && !st.open && !x.swap;
   // FIX-PACK-4: the lease rule is the gate's `holder` (actions.js), so Open is never the
   // primary button for someone who may not use it; Close stays for an open session.
   const openGuard = () => (st.reason ? `Cannot: ${st.reason}` : "")
     || (st.open ? "the session is already open" : "");
-  const closeGuard = () => (st.open ? "" : lease || "no XVC session is open");
+  const closeGuard = () => (st.open ? "" : holderOnly(bid, "XVC") || "no XVC session is open");
+  const openGate = { guard: openGuard, holder: "XVC" };
+  const closeGate = { guard: closeGuard };
   const byoLocked = !!st.open || !!p.running;
   const tclText = x.tcl ? x.tcl.tcl : "";
+  const lines = p.lines.filter((l) => l.kind !== "progress");
   const chip = html`<${Chip} level=${look.level} icon=${look.icon} testid="xvc-state"
-    title=${st.detail || ""}>${state}<//>`;
+    title=${st.detail || ""}>${noIla && state === "down" ? "no ILAs" : CHIP_TEXT[state] || state}<//>`;
+  const reasons = [["xvc_open", openGate], ["xvc_close", closeGate]].map(([k, g]) => {
+    const why = gateReason(bid, "xvc", k, g);
+    if (!why || why === "running") return null;
+    const quiet = /no XVC session is open|already open/.test(why) || (k === "xvc_close" && why === gateReason(bid, "xvc", "xvc_open", openGate));
+    if (quiet) return html`<span key=${k} class="sr-only" data-testid=${`reason-${k}`}>${why}</span>`;
+    const lease = /lease holder only/.test(why);
+    return html`<p key=${k} class=${`reason ${lease ? "held" : ""}`} data-testid=${`reason-${k}`}>
+      <${Icon} name=${lease ? "lock" : why.startsWith("Cannot:") ? "circle-slash" : "info"} /><span>${why}</span></p>`;
+  });
+  const btn = (spec, gate, variant, icon) => {
+    const why = gateReason(bid, "xvc", spec.key, gate);
+    const running = p.running === spec.key;
+    const blocked = !!why && !running;
+    const look2 = blocked && variant === "primary" ? "" : variant;
+    const onClick = () => {
+      if (running) return;
+      if (why) { interlock(bid, "xvc", spec.command, why); return; }
+      runAction(bid, "xvc", spec);
+    };
+    return html`<button type="button" class=${`btn sm ${look2}`} data-action=${spec.key}
+        aria-disabled=${blocked ? "true" : undefined} aria-busy=${running ? "true" : undefined}
+        title=${blocked ? why : undefined} onClick=${onClick}>
+      ${running ? html`<${Spinner} />` : html`<${Icon} name=${icon} />`}${running ? spec.busyLabel : spec.label}</button>`;
+  };
   return html`<section class="xvc" data-testid="xvc" data-state=${state}>
-    <${Card} title="Fabric debug (XVC)" icon="layers" testid="xvc-card" actions=${chip} sub=${XVC_SCOPE}>
-      <div class="xvc-alerts">
+    <section class="card wb-ila" data-testid="xvc-card" aria-label="Logic analysers">
+      <div class="card-head"><h2 class="card-title"><${Icon} name="scan-search" />Logic analysers</h2><span class="spacer"></span>${chip}</div>
+      <p class="card-sub" title=${XVC_SCOPE}>ILA over XVC: the partition's debug chain only</p>
+      <div class="card-body"><div class="stack tight">
         ${x.error ? html`<${Reason} level="err" testid="xvc-error" text=${`Cannot read the XVC state: ${x.error.errName}: ${x.error.message}`} />` : null}
         ${st.reason ? html`<${Reason} level="unk" icon="circle-slash" testid="xvc-reason" text=${`Not on this board: ${st.reason}`} />` : null}
-        ${unauth.map((w) => html`<${Reason} key=${w} level="warn" testid="xvc-unauth" text=${w} />`)}
+        ${unauth.map((w) => html`<p key=${w} class="reason warn xvc-unauth" data-testid="xvc-unauth" title=${w}><${Icon} name="triangle-alert" />
+          <span>${w}</span></p>`)}
         ${held ? html`<p class="reason held" data-testid="xvc-held"><${Icon} name="lock" />
           <span>Held by another client: ${held}. The harness serves one XVC client; close the other Vivado or hw_server first.</span></p>` : null}
         ${x.swap ? html`<${Reason} level="warn" icon="arrow-right-left" testid="xvc-swapping"
           text=${`Swapping... ${x.swap}.`} />` : null}
         ${x.reattached && !x.swap ? html`<${Reason} level="ok" icon="refresh-cw" testid="xvc-reattached"
-          text=${`Re-attached on ${x.reattached} after the swap: re-run the probes lines of the Tcl below (or refresh_hw_device).`} />` : null}
-      </div>
-      <div class="grid split xvc-body">
-        <div class="actions">
-          <label class=${`arm xvc-byo ${byoOf(x) ? "armed" : ""}`} data-testid="xvc-byo"
-              title=${byoLocked ? "close the session to change it" : ""}>
-            <input type="checkbox" checked=${st.open ? st.mode === "byo" : byoOf(x)} disabled=${byoLocked}
-              onChange=${(e) => { x.byo = e.target.checked; changed(); scheduleTcl(bid, 0); }} />
-            <${Icon} name="cpu" />
-            <span>Bring your own hw_server (<code>--byo</code>): Harness Manager starts none, and your
-              Vivado opens the relay itself with <code>open_hw_target -xvc_url</code>.</span>
-          </label>
-          <${ActionRow} bid=${bid} panel="xvc" spec=${open} variant="primary" icon="play" gate=${{ guard: openGuard, holder: "XVC" }} />
-          <${ActionRow} bid=${bid} panel="xvc" spec=${close} icon="square" gate=${{ guard: closeGuard }} />
-          <${ResultBlock} lines=${p.lines} panel=${p} testid="xvc-result"
-            placeholder="The relay and hw_server listen on 127.0.0.1 only. A swap closes the session and re-attaches it." />
-        </div>
+          text=${`Re-attached on ${x.reattached} after the swap: re-run the probes lines of the Tcl (or refresh_hw_device).`} />` : null}
+        ${noIla ? html`<${ProgramIla} bid=${bid} design=${design.name} />` : null}
         <dl class="kv" data-testid="xvc-facts">
-          <dt>Design</dt><dd data-testid="xvc-design">${design.name || design.id
-            ? html`${design.name || "unnamed"} ${design.id ? html`<span class="mono sub">${design.id}</span>` : null}`
-            : html`<span class="muted">-</span>`}</dd>
-          ${st.detail && !held && !x.swap && !x.reattached ? html`<dt>Status</dt><dd class="small" data-testid="xvc-detail">${st.detail}</dd>` : null}
-          <dt>Vivado</dt><dd data-testid="xvc-url">${st.open && st.url
-            ? html`<span class="copy-row"><code>${st.url}</code><${CopyButton} text=${st.url} /></span>
-              <div class="sub">${st.mode === "byo" ? "your hw_server: open_hw_target -xvc_url" : "Harness Manager's hw_server: connect_hw_server -url"}</div>`
-            : html`<span class="muted">open a session first</span>`}</dd>
-          <dt>Attached</dt><dd data-testid="xvc-attached">${att
+          ${st.open ? html`<dt>Vivado</dt><dd data-testid="xvc-url">${st.url
+            ? html`<span class="copy-row"><code title=${st.mode === "byo" ? "your hw_server: open_hw_target -xvc_url" : "Harness Manager's hw_server: connect_hw_server -url"}>${st.url}</code><${CopyButton} text=${st.url} /></span>`
+            : html`<span class="muted">starting...</span>`}</dd>` : null}
+          <dt>Probes</dt><dd><${LtxRow} bid=${bid} which="preferred" item=${pref} testid="xvc-ltx"
+            reason=${ltx.note || (x.tcl || st.open ? `no probes file for the loaded design${design.name ? ` (${design.name})` : ""}` : "reading the board...")} />
+            ${pref ? html`${" "}<span class="xvc-ltx-which" data-testid="xvc-ltx-which">${WHICH_TEXT[prefKey] || prefKey}${pref.vivado ? ` · Vivado ${pref.vivado}` : ""}</span>` : null}</dd>
+          ${st.open ? html`<dt>Attached</dt><dd data-testid="xvc-attached">${att
             ? html`<div class="line"><${Chip} level="accent" icon="plug-zap">${att.pid ? `pid ${att.pid}` : att.peer}<//>
                 ${att.pid && att.pid === st.hw_server_pid ? html`<span class="secondary small">Harness Manager's hw_server</span>` : null}</div>
               ${att.command ? html`<div class="mono sub" data-testid="xvc-attached-cmd">${att.command}</div>` : null}
               ${att.since ? html`<div class="sub">since ${clock(att.since)}${att.shifts ? ` · ${att.shifts} shifts` : ""}</div>` : null}`
-            : html`<span class="muted">${st.open ? "nobody yet" : "-"}</span>`}</dd>
-          <dt>Probes</dt><dd><${LtxRow} bid=${bid} which="preferred" item=${pref} testid="xvc-ltx"
-            reason=${ltx.note || (x.tcl || st.open ? `no probes file for the loaded design${design.name ? ` (${design.name})` : ""}` : "reading the board...")} />
-            ${pref ? html`<div class="sub" data-testid="xvc-ltx-which">${WHICH_TEXT[prefKey] || prefKey}${pref.vivado ? ` · Vivado ${pref.vivado}` : ""}</div>` : null}</dd>
-          <dt>Static (MIG)</dt><dd><${LtxRow} bid=${bid} which="static" item=${ltx.static} testid="xvc-static"
-            reason=${ltx.static_note || (linux ? "no static probes file for this static yet: import the mint's" : NO_MIG)} /></dd>
-          <dt>Reach</dt><dd class="small">${st.reach || html`<span class="muted">-</span>`}</dd>
+            : html`<span class="muted">nobody yet</span>`}</dd>` : null}
         </dl>
-      </div>
-      ${x.ltxError ? html`<${Reason} level="err" testid="xvc-ltx-error" text=${`${x.ltxError.errName}: ${x.ltxError.message}`} />` : null}
-      ${x.downloaded ? html`<${Reason} level="ok" testid="xvc-downloaded" text=${`Saved ${x.downloaded}: set it as the device's PROBES.FILE (the Tcl does).`} />` : null}
-      <div class="xvc-tcl-head mt-14">
-        <span class="field-label">Vivado Tcl</span>
-        <span class="secondary small">${x.tcl ? (x.tcl.open ? "for the open session" : "a preview: Open first, then paste it") : ""}</span>
-        <span class="grow"></span>
-        <${CopyTcl} bid=${bid} text=${tclText} />
-      </div>
-      ${x.unsupported ? html`<${Reason} level="unk" testid="xvc-tcl-error" text=${`No Tcl: ${x.unsupported}`} />`
-        : x.tclError ? html`<${Reason} level="err" testid="xvc-tcl-error" text=${`${x.tclError.errName}: ${x.tclError.message}`} />`
-        : html`<pre class="result xvc-tcl" data-testid="xvc-tcl">${tclText || (x.tcl === null ? "reading..." : "")}</pre>`}
-      ${notes.length ? html`<div class="xvc-notes mt-8">${notes.map((w) => html`<${Reason} key=${w} testid="xvc-note" text=${w} />`)}</div>` : null}
-    <//>
+        <div class="row">
+          ${st.open ? html`<${CopyTcl} bid=${bid} text=${tclText} primary=${true} />${btn(close, closeGate, "", "square")}`
+            : html`${btn(open, openGate, "primary", "play")}<${CopyTcl} bid=${bid} text=${tclText} />`}
+          <span class="small muted">A swap closes it.</span>
+        </div>
+        ${st.open ? null : html`<label class=${`check xvc-byo ${byoOf(x) ? "on" : ""}`} data-testid="xvc-byo"
+            title=${byoLocked ? "close the session to change it" : "Harness Manager starts no hw_server; your Vivado opens the relay itself (open_hw_target -xvc_url)"}>
+          <input type="checkbox" checked=${byoOf(x)} disabled=${byoLocked}
+            onChange=${(e) => { x.byo = e.target.checked; changed(); scheduleTcl(bid, 0); }} />
+          Bring your own hw_server (<code>--byo</code>)</label>`}
+        ${reasons}
+        ${lines.length ? html`<${ResultBlock} lines=${lines} panel=${p} testid="xvc-result" />` : null}
+        ${x.ltxError ? html`<${Reason} level="err" testid="xvc-ltx-error" text=${`${x.ltxError.errName}: ${x.ltxError.message}`} />` : null}
+        ${x.downloaded ? html`<${Reason} level="ok" testid="xvc-downloaded" text=${`Saved ${x.downloaded}: set it as the device's PROBES.FILE (the Tcl does).`} />` : null}
+        <details class="xvc-more" data-testid="xvc-more">
+          <summary><${Icon} name="chevron-right" cls="sm chev" />More: the Tcl, the static probes, the reach</summary>
+          <dl class="kv">
+            <dt>Design</dt><dd data-testid="xvc-design">${design.name || design.id
+              ? html`${design.name || "unnamed"} ${design.id ? html`<span class="mono sub">${design.id}</span>` : null}`
+              : html`<span class="muted">-</span>`}</dd>
+            ${st.detail && !held && !x.swap && !x.reattached ? html`<dt>Status</dt><dd class="small" data-testid="xvc-detail">${st.detail}</dd>` : null}
+            <dt>Static (MIG)</dt><dd><${LtxRow} bid=${bid} which="static" item=${ltx.static} testid="xvc-static"
+              reason=${ltx.static_note || (linux ? "no static probes file for this static yet: import the mint's" : NO_MIG)} /></dd>
+            <dt>Reach</dt><dd class="small">${st.reach || html`<span class="muted">-</span>`}</dd>
+          </dl>
+          <div class="xvc-tcl-head"><span class="field-label">Vivado Tcl</span>
+            <span class="secondary small">${x.tcl ? (x.tcl.open ? "for the open session" : "a preview: Open first, then paste it") : ""}</span></div>
+          ${x.unsupported ? html`<${Reason} level="unk" testid="xvc-tcl-error" text=${`No Tcl: ${x.unsupported}`} />`
+            : x.tclError ? html`<${Reason} level="err" testid="xvc-tcl-error" text=${`${x.tclError.errName}: ${x.tclError.message}`} />`
+            : html`<pre class="result xvc-tcl" data-testid="xvc-tcl">${tclText || (x.tcl === null ? "reading..." : "")}</pre>`}
+          ${notes.map((w) => html`<${Reason} key=${w} testid="xvc-note" text=${w} />`)}
+          <p class="small muted xvc-scope">${XVC_SCOPE}</p>
+        </details>
+      </div></div>
+    </section>
   </section>`;
 }

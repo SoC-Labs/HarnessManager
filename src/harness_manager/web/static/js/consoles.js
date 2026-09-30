@@ -3,6 +3,12 @@
 // A session lives outside the component tree, so switching sections or boards never
 // drops bytes: the terminal keeps its scrollback and is re-attached when shown again.
 // Bytes arrive as binary frames; a text frame {"state": ...} is a state change.
+//
+// UI v2 (Workbench): who may type (G1b). The daemon sends {"input": {role, writable,
+// read_only_reason}} when the socket opens read-only and whenever that changes; `input` keeps
+// the last one (null: the daemon never said, so the console row's `writable` stands). A
+// read-only session drops keystrokes here too, with the reason, so nothing is sent that the
+// daemon would drop anyway. `lines` counts the lines received (the switcher's "new" count).
 
 import { socketCloseReason, socketUrl } from "./api.js";
 import { changed, log } from "./store.js";
@@ -38,6 +44,8 @@ export class ConsoleSession {
     this.detail = "";
     this.bytesIn = 0;
     this.dropped = 0;          // bytes harness-manager-daemon dropped because this page fell behind
+    this.input = null;         // {role, writable, read_only_reason} from the daemon's input frame
+    this.lines = 0;            // newlines received since the session started (or was cleared)
     this.ws = null;
     this.opened = false;
     this.closedByUs = false;
@@ -62,6 +70,7 @@ export class ConsoleSession {
 
   connect() {
     this.closedByUs = false;
+    this.input = null;         // a new socket says again when it is read-only
     this.setState("connecting", "");
     let ws;
     try {
@@ -80,6 +89,11 @@ export class ConsoleSession {
         let f = null;
         try { f = JSON.parse(msg.data); } catch (e) { f = null; }
         if (!f) return;
+        if (f.input && typeof f.input === "object") {
+          this.input = { role: f.input.role || "", writable: f.input.writable !== false,
+            read_only_reason: f.input.read_only_reason || "" };
+          changed();
+        }
         if (f.state) this.setState(f.state, f.detail || "");
         if (f.dropped) {
           this.dropped += Number(f.dropped) || 0;
@@ -95,6 +109,12 @@ export class ConsoleSession {
       }
       const bytes = new Uint8Array(msg.data);
       this.bytesIn += bytes.length;
+      let nl = 0;
+      for (let i = 0; i < bytes.length; i += 1) if (bytes[i] === 10) nl += 1;
+      if (nl) {
+        this.lines += nl;
+        if (this.onLines) this.onLines();
+      }
       this.term.write(bytes);
     };
     ws.onopen = () => {
@@ -126,6 +146,7 @@ export class ConsoleSession {
   // Returns "" when sent, else why not (nothing was sent then).
   send(bytes) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return "the console is not connected";
+    if (this.input && !this.input.writable) return this.input.read_only_reason || "this console is read-only here";
     this.ws.send(bytes);
     return "";
   }
@@ -149,6 +170,11 @@ export class ConsoleSession {
   }
 
   clear() { this.term.clear(); }
+
+  // The switcher's "N new lines" (a console not on screen): lines since `seen` was taken.
+  unseen() { return Math.max(0, this.lines - (this.seen || 0)); }
+
+  markSeen() { this.seen = this.lines; }
 
   text() {
     const buf = this.term.buffer.active;

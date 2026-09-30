@@ -1,22 +1,57 @@
-// Debug: Detect (IDCODE only), open and close the OpenOCD session, its ports and config;
-// below it the partition's fabric debug over XVC (sections/xvc.js, lane XVC-UI).
+// The Workbench rail's Debug card (UI v2, docs/design/ui-v2/prototype-b-round3.html "DebugCard";
+// plan §1.3 W14): Open session (OpenOCD for the loaded design) -> the gdb line to copy, one per
+// core; Detect reads the TAP IDCODE only (no reset, no halt); Close session.
+//
+// DebugStatus's DEBUG-ONBOARD fields (additive; tolerated when absent, as the API says: an older
+// reply reads as `gdb_ports: [gdb_port]`, `cores: ["cpu0"]`, `where: "host"`):
+// - `gdb_ports`: each core's LOCAL gdb port (127.0.0.1), core order; `cores`: their names;
+// - `where`: "board" (OpenOCD runs on the harness; gdb reaches it through the claim's SSH
+//   forward; telnet and Tcl stay on the board) or "host" (this PC's OpenOCD, on 6921).
+//
+// Lease gating (R3): Open session and Detect go through gateReason with `holder` (actions.js).
+// The Logic analysers card (sections/xvc.js) sits under it in the rail.
 
-import { panelState, runJob } from "../actions.js";
+import { gateReason, interlock, panelState, runAction, runJob } from "../actions.js";
 import { call, unwrapDebug } from "../api.js";
+import { clock } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, loadDebug } from "../store.js";
-import { ActionRow, Card, Chip, CopyButton, Reason, ResultBlock } from "../ui.js";
-import { XvcCard } from "./xvc.js";
+import { CopyButton, Icon, ResultBlock, Spinner } from "../ui.js";
 
-const LEVEL = { up: "ok", starting: "", down: "", failed: "err" };
+const PANEL = "debug";
+const LEVEL = { up: "ok", starting: "accent", down: "", failed: "err", unknown: "unk" };
+
+// DEBUG-ONBOARD: where OpenOCD runs (the status's `where`; an older service has none: this PC).
+export const WHERE_TEXT = {
+  board: "OpenOCD runs on the board (gdb reaches it through the board's SSH)",
+  host: "OpenOCD runs on this PC (on the board's JTAG port, 6921)",
+};
+
+// Each core's [name, local gdb port]: `gdb_ports`/`cores` (DEBUG-ONBOARD), else core 0's port.
+export function gdbPorts(st) {
+  if (!st) return [];
+  const ports = (Array.isArray(st.gdb_ports) && st.gdb_ports.length) ? st.gdb_ports : (st.gdb_port ? [st.gdb_port] : []);
+  return ports.filter((p) => p).map((port, i) => [(Array.isArray(st.cores) && st.cores[i]) || `cpu${i}`, port]);
+}
+
+// The gdb line `debug up` prints (services/debug.py gdb_command): pastes into sh, cmd and PowerShell.
+export function gdbCmdFor(port) {
+  return `arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:${port}"`;
+}
 
 function statusLines(st) {
   if (!st || typeof st !== "object") return [{ kind: "out", text: String(st) }];
   const out = [{ kind: st.state === "up" ? "ok" : "out", text: `state   ${st.state}` }];
+  if (st.state === "up" || st.where === "board") {
+    out.push({ kind: "out", text: `where   ${WHERE_TEXT[st.where || "host"] || st.where}` });
+  }
   if (st.state === "up") {
-    out.push({ kind: "out", text: `gdb     127.0.0.1:${st.gdb_port}` });
-    out.push({ kind: "out", text: `telnet  127.0.0.1:${st.telnet_port}` });
-    out.push({ kind: "out", text: `tcl     127.0.0.1:${st.tcl_port}` });
+    const cores = gdbPorts(st);
+    for (const [core, port] of cores) {
+      out.push({ kind: "out", text: `gdb     127.0.0.1:${port}${cores.length > 1 ? `  ${core}` : ""}` });
+    }
+    if (st.telnet_port) out.push({ kind: "out", text: `telnet  127.0.0.1:${st.telnet_port}` });
+    if (st.tcl_port) out.push({ kind: "out", text: `tcl     127.0.0.1:${st.tcl_port}` });
   }
   if (st.config && st.config.length) out.push({ kind: "out", text: `config  ${st.config.join(" ")}` });
   if (st.pid) out.push({ kind: "out", text: `pid     ${st.pid}` });
@@ -24,7 +59,7 @@ function statusLines(st) {
   return out;
 }
 
-// The debug actions, shared by this section and the Overview's Debug tile (one panel).
+// The debug actions, shared by this card and the Overview's Debug tile (one panel).
 export function debugSpecs(bid) {
   const b = boardState(bid);
   const keep = (ok, value) => {
@@ -44,6 +79,7 @@ export function debugSpecs(bid) {
     onDone: (ok, value) => {
       b.idcode = ok ? String(value) : `${value.errName}`;
       b.idcodeOk = ok;
+      b.idcodeAt = Date.now() / 1000;
       changed();
     },
   };
@@ -65,48 +101,114 @@ export function debugLive(bid) {
   return st.state === "up" || st.state === "starting";
 }
 
-export function DebugSection({ bid }) {
+// The gate each debug action uses (FIX-PACK-4: `holder`, the lease holder only on a hub board).
+export function debugGates(bid) {
+  const live = debugLive(bid);
+  return {
+    detect: { capability: "debug_dut", holder: "Debug" },
+    up: { capability: "debug_dut", guard: () => (live ? "the session is already up" : ""), holder: "Debug" },
+    down: { guard: () => (live ? "" : "the session is down") },
+  };
+}
+
+// A rail button: disabled with the gate's reason in its title (the card shows one reason line).
+function RailButton({ bid, spec, gate, variant = "", icon, title = "" }) {
+  const p = panelState(bid, PANEL);
+  const why = gateReason(bid, PANEL, spec.key, gate);
+  const running = p.running === spec.key;
+  const blocked = !!why && !running;
+  const look = blocked && variant.includes("primary") ? variant.replace("primary", "").trim() : variant;
+  const onClick = () => {
+    if (running) return;
+    if (why) { interlock(bid, PANEL, spec.command, why); return; }
+    runAction(bid, PANEL, spec);
+  };
+  return html`<button type="button" class=${`btn sm ${look}`} data-action=${spec.key}
+      aria-disabled=${blocked ? "true" : undefined} aria-busy=${running ? "true" : undefined}
+      title=${blocked ? why : title || undefined} onClick=${onClick}>
+    ${running ? html`<${Spinner} />` : html`<${Icon} name=${icon} />`}${running ? spec.busyLabel : spec.label}</button>`;
+}
+
+// The reasons, one visible line each (the lease, a running job, a missing capability); a key
+// whose reason repeats one already shown, or only says the session's state, is there for
+// screen readers (and the tests) but not drawn twice.
+function Reasons({ bid, keys, gates }) {
+  const shown = new Set();
+  return keys.map((k) => {
+    const why = gateReason(bid, PANEL, k, gates[k]);
+    if (!why || why === "running") return null;
+    const quiet = why.startsWith("the session is") || shown.has(why);
+    shown.add(why);
+    if (quiet) return html`<span key=${k} class="sr-only" data-testid=${`reason-${k}`}>${why}</span>`;
+    const held = /lease holder only/.test(why);
+    return html`<p key=${k} class=${`reason ${held ? "held" : ""}`} data-testid=${`reason-${k}`}>
+      <${Icon} name=${held ? "lock" : why.startsWith("Cannot:") ? "circle-slash" : "info"} /><span>${why}</span></p>`;
+  });
+}
+
+export function DebugCard({ bid }) {
   const b = boardState(bid);
-  const p = panelState(bid, "debug");
+  const p = panelState(bid, PANEL);
   useEffect(() => { loadDebug(bid); }, [bid]);
   const st = b.debug || { state: "unknown" };
   const live = debugLive(bid);
   const { detect, up, down } = debugSpecs(bid);
-  const gdbCmd = st.gdb_port ? `arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:${st.gdb_port}"` : "";
-  return html`<div class="stack"><div class="grid split">
-    <${Card} title="DUT debug (OpenOCD)" icon="bug" testid="debug-card"
-        sub="Detect reads the TAP IDCODE only: no reset, no halt, no register written. Open starts OpenOCD with the config for the loaded design.">
-      <div class="actions">
-        <div class="field"><label>Session</label>
-          <${Chip} level=${LEVEL[st.state] ?? "unk"} testid="debug-state">${st.state}<//>
-          ${st.detail ? html`<span class="secondary small">${st.detail}</span>` : null}</div>
-        <${ActionRow} bid=${bid} panel="debug" spec=${detect} icon="scan-search"
-          gate=${{ capability: "debug_dut", holder: "Debug" }} />
-        <${ActionRow} bid=${bid} panel="debug" spec=${up} variant="primary" icon="play"
-          gate=${{ capability: "debug_dut", guard: () => (live ? "the session is already up" : ""), holder: "Debug" }} />
-        <${ActionRow} bid=${bid} panel="debug" spec=${down} icon="square"
-          gate=${{ guard: () => (live ? "" : "the session is down") }} />
-        <${ResultBlock} lines=${p.lines} panel=${p} testid="debug-result"
-          placeholder="gdb, telnet and tcl listen on 127.0.0.1 only." />
+  const gates = debugGates(bid);
+  const state = p.running === "up" && st.state !== "up" ? "starting" : st.state;
+  const cores = st.state === "up" ? gdbPorts(st) : [];
+  const onBoard = st.where === "board";
+  const idcode = b.idcode ? html`<span class=${`mono ${b.idcodeOk ? "" : "i-err"}`} data-testid="idcode">${b.idcode}</span>
+      ${b.idcodeOk && !live && b.idcodeAt ? html` <span class="sub">detected ${clock(b.idcodeAt).slice(0, 5)}, no halt</span>` : null}` : null;
+  const port = (k) => {
+    const v = st[`${k}_port`];
+    return live && v ? html`<span class="mono">${k} ${v}</span>`
+      : html`<span class="muted">${k} ${onBoard ? "on the board only" : "-"}</span>`;
+  };
+  const whereLine = st.where || live
+    ? html`<dt>OpenOCD</dt><dd data-testid="debug-where" data-where=${st.where || "host"} title=${WHERE_TEXT[st.where || "host"]}>
+        ${onBoard ? html`<span class="chip ok">on the board</span>` : html`<span>on this PC</span>`}</dd>` : null;
+  const chip = html`<span class=${`chip ${LEVEL[state] ?? "unk"}`} data-testid="debug-state" title=${st.detail || ""}>
+    ${state === "starting" ? html`<${Spinner} />` : state === "up" ? html`<${Icon} name="circle-check" />` : null}${state === "starting" ? "opening" : state}</span>`;
+  let body;
+  if (st.state === "up") {
+    body = html`<dl class="kv" data-testid="debug-ports">
+      ${idcode ? html`<dt>IDCODE</dt><dd>${idcode}</dd>` : null}
+      ${cores.length > 1 ? cores.map(([core, gp]) => html`<dt key=${`k${core}`}>gdb ${core}</dt>
+          <dd key=${`v${core}`} data-port=${`gdb-${core}`} data-testid=${`debug-attach-${core}`}><span class="copy-row"><code title=${gdbCmdFor(gp)}>${gdbCmdFor(gp)}</code><${CopyButton} text=${gdbCmdFor(gp)} /></span></dd>`)
+        : cores.length ? html`<dt>gdb</dt><dd data-port="gdb" data-testid="debug-attach"><span class="copy-row"><code title=${gdbCmdFor(cores[0][1])}>${gdbCmdFor(cores[0][1])}</code>
+            <${CopyButton} text=${gdbCmdFor(cores[0][1])} /></span></dd>`
+        : html`<dt>gdb</dt><dd class="muted small" data-port="gdb">${st.detail || "not forwarded here: Close and Open again"}</dd>`}
+      <dt>Ports</dt><dd class="small"><span data-port="telnet">${port("telnet")}</span> · <span data-port="tcl">${port("tcl")}</span></dd>
+      ${whereLine}
+    </dl>`;
+  } else {
+    body = html`<dl class="kv" data-testid="debug-ports">
+      ${idcode ? html`<dt>IDCODE</dt><dd>${idcode}</dd>` : null}
+      ${whereLine}
+    </dl>
+    <div class="small secondary" data-testid="debug-note">${st.detail && st.state !== "unknown" ? st.detail
+      : "Open session starts OpenOCD for the loaded design and gives you the gdb line."}</div>`;
+  }
+  const lines = p.lines.filter((l) => l.kind !== "progress");
+  return html`<section class="card wb-debug" data-testid="debug-card" aria-label="Debug">
+    <div class="card-head"><h2 class="card-title"><${Icon} name="bug" />Debug</h2><span class="spacer"></span>${chip}</div>
+    <div class="card-body"><div class="stack tight">
+      ${body}
+      <div class="row">
+        ${live ? html`<${RailButton} bid=${bid} spec=${down} gate=${gates.down} icon="square" />`
+          : html`<${RailButton} bid=${bid} spec=${up} gate=${gates.up} variant="primary" icon="play"
+              title="Start OpenOCD for the loaded design; gdb connects to it" />`}
+        <${RailButton} bid=${bid} spec=${detect} gate=${gates.detect} variant="ghost" icon="scan-search"
+          title="Reads the TAP IDCODE only: no reset, no halt" />
+        <span class="small muted">A swap closes it.</span>
       </div>
-    <//>
-    <${Card} title="Connection" icon="cable" testid="debug-ports">
-      <dl class="ports">
-        <dt>IDCODE</dt><dd>${b.idcode ? html`<${Chip} level=${b.idcodeOk ? "ok" : "err"} cls="mono" testid="idcode">${b.idcode}<//>`
-          : html`<span class="muted">not detected yet</span>`}</dd>
-        ${["gdb", "telnet", "tcl"].map((k) => {
-          const port = st[`${k}_port`];
-          return html`<dt key=${`k${k}`}>${k}</dt><dd key=${`v${k}`} data-port=${k}>${live && port
-            ? html`<span class="copy-row"><code>127.0.0.1:${port}</code><${CopyButton} text=${`127.0.0.1:${port}`} /></span>`
-            : html`<span class="muted">-</span>`}</dd>`;
-        })}
-        <dt>Attach</dt><dd>${gdbCmd ? html`<span class="copy-row"><code>${gdbCmd}</code><${CopyButton} text=${gdbCmd} /></span>`
-          : html`<span class="muted">open a session first</span>`}</dd>
-        <dt>Config</dt><dd class="mono small">${st.config && st.config.length ? st.config.join(" ") : html`<span class="muted">-</span>`}</dd>
-        <dt>Process</dt><dd class="mono small">${st.pid ? `pid ${st.pid}` : html`<span class="muted">-</span>`}</dd>
-      </dl>
-      <div class="mt-14"><${Reason} text="The session closes by itself before a partition swap, and reopens only when you ask." /></div>
-    <//>
-  </div>
-  <${XvcCard} bid=${bid} /></div>`;
+      <${Reasons} bid=${bid} keys=${["up", "down", "detect"]} gates=${gates} />
+      ${lines.length ? html`<${ResultBlock} lines=${lines} panel=${p} testid="debug-result" />` : null}
+    </div></div>
+  </section>`;
+}
+
+// 0.1.0's section, kept for any caller: the card (the rail puts Logic analysers under it).
+export function DebugSection({ bid }) {
+  return html`<${DebugCard} bid=${bid} />`;
 }
