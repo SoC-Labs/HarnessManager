@@ -267,15 +267,13 @@ function StartForm({ bid }) {
         aria-label="Start at" onInput=${(e) => set(bid, "at", e.target.value)} />` : null}
     </div>
     <${LeaseLine} bid=${bid} />
-    <div class="row mt-14">
+    <${Announcement} bid=${bid} />
+    <div class="row">
       <button type="button" class="btn primary" data-action="checks-start" data-testid="checks-start"
         aria-disabled=${why ? "true" : undefined} disabled=${!!why || !!c.busy}
         aria-busy=${c.busy === "start" ? "true" : undefined} onClick=${() => start(bid)}>
         ${c.busy === "start" ? html`<${Spinner} />` : html`<${Icon} name="play" />`}
-        ${f.when === "at" ? `Schedule for ${f.at || "?"}` : "Start"}</button>
-      <button type="button" class="btn" data-action="checks-preview" data-testid="checks-preview"
-        disabled=${!!c.busy} onClick=${() => preview(bid)}>
-        ${c.busy === "preview" ? html`<${Spinner} />` : html`<${Icon} name="send" />`} Write the announcement</button>
+        ${f.when === "at" ? `Schedule for ${f.at || "?"}` : "Start run"}</button>
     </div>
     ${why && !LEASE_SAYS.has(leaseWho(bid).state) ? html`<${Reason} icon="circle-slash" text=${why} testid="checks-start-why" />` : null}
     ${c.actionError ? html`<div class="result mt-8" data-testid="checks-error"><div><span class="rc err">${c.line}</span></div>
@@ -400,10 +398,13 @@ function Announcement({ bid }) {
   return html`<details class="checks-announce-fold" open data-testid="checks-announce-card">
     <summary><${Icon} name="chevron-right" cls="sm chev" />Announcement (written for you)
       <span class="muted small">for the 17:30 announcement</span></summary>
-    ${text ? html`<textarea class="input checks-announce" readonly rows="8" data-testid="checks-announce"
+    ${text ? html`<textarea class="input checks-announce" readonly rows="7" data-testid="checks-announce"
         aria-label="The announcement" value=${text}></textarea>`
       : html`<p class="muted small mt-8">Write the announcement to see what the run will do before you start it.</p>`}
     <div class="row mt-8">
+      ${run && !c.preview && checksRun(bid) ? null : html`<button type="button" class="btn sm" data-action="checks-preview"
+        data-testid="checks-preview" disabled=${!!c.busy} onClick=${() => preview(bid)}>
+        ${c.busy === "preview" ? html`<${Spinner} />` : html`<${Icon} name="send" />`} ${text ? "Write it again" : "Write the announcement"}</button>`}
       <button type="button" class="btn sm ghost" data-action="checks-copy" data-testid="checks-copy"
         disabled=${!text} onClick=${onCopy}><${Icon} name=${copied === "copied" ? "check" : "copy"} />
         ${copied === "copied" ? "Copied" : "Copy"}</button>
@@ -572,7 +573,7 @@ export function ChecksSection({ bid }) {
         ${last ? html`<div class="checks-last mt-14" data-testid="checks-last">
           <span class="secondary">Last run ${last.id}:</span> ${resultChip(last.result, last.state)}
           ${last.reason ? html`<span class="secondary small-text"> ${last.reason}</span>` : null}</div>` : null}
-        ${c.status ? html`<${Announcement} bid=${bid} />` : null}
+        ${run ? html`<${Announcement} bid=${bid} />` : null}
       <//>
     </div>
     <${PastRuns} bid=${bid} />
