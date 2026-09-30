@@ -340,7 +340,8 @@ export async function loadGuide(bid) {
   x.guideLoading = true;
   changed();
   try {
-    const dir = x.chosen && absPath(x.buildDir) ? x.buildDir.trim() : "";
+    // the directory being watched: one the page wrote, or was told is written ("watch it")
+    const dir = x.chosen && absPath(x.written) ? x.written.trim() : "";
     const q = { design: guideDesign(x), build_dir: dir };
     const [g, k] = await Promise.all([
       call("boardGuide", { bid }, undefined, q),
@@ -949,7 +950,7 @@ function SetupPanel({ bid, f }) {
           ]} />
           ${x.source === "path" ? html`<input class="input mono grow" aria-label="Kit source path" data-testid="kit-source-path"
             placeholder="/path/to/fielded/0x72BB0A36 (absolute, on harness-manager-daemon's host)" value=${x.sourcePath}
-            onInput=${(e) => { x.sourcePath = e.target.value; }} />` : null}</div>
+            onInput=${(e) => { x.sourcePath = e.target.value; changed(); }} />` : null}</div>
           ${x.source === "auto" && (kb.sources || []).length ? html`<ul class="source-list" data-testid="kit-sources">${kb.sources.map((s) => html`
             <li key=${s.name} data-source=${s.name} data-available=${s.available ? "true" : "false"}>
               <${Icon} name=${s.available ? "circle-check" : "circle-minus"} cls=${`sm ${s.available ? "i-ok" : "i-muted"}`} />
@@ -1162,6 +1163,9 @@ function Sources({ x }) {
 function DesignPanel({ bid, f }) {
   const { x, g, prob } = f;
   if (!g) return null;
+  if (f.steps[1].state === "blocked") return html`<${Panel} f=${f} k="design" title="Your design">
+    <p class="bd-lead">Waits for Setup: this board's static needs its kit (the static's checkpoint and the partition's facts) before anything can be built for it.</p>
+    <div class="bd-acts"><${Btn} icon="chevron-right" onClick=${() => look(bid, "setup", f.cur)}>Go to Setup<//></div><//>`;
   const locked = !!f.running;
   const edit = (fn) => { fn(); resetDesign(x); x.previewError = null; persist(bid); changed(); };
   const rm = (x.cat ? (x.cat.designs || []) : []).filter((d) => d.kit === "rm-kit");
@@ -1291,7 +1295,7 @@ function BuildPanel({ bid, f }) {
   const refused = x.scriptError && x.scriptError.data && x.scriptError.data.checks;
   const errs = html`${x.scriptError ? html`<${Reason} level="err" testid="script-error" text=${`${x.scriptError.status === 409 ? "Refused" : "Failed"}: ${errText(x.scriptError)}`} />` : null}
     ${refused ? html`<${CheckList} checks=${refused} testid="script-refused" skip=${(c) => c.state !== "mismatch"} />` : null}`;
-  if (!x.written && !running && !r) {
+  if (!x.written && !running) {
     return html`<${Panel} f=${f} k="build" title="Write the build directory">
       <p class="bd-lead">Harness Manager writes <span class="mono">build_rm.tcl</span>, the kit and the XDC kit for <b>${name}</b> into one folder. Nothing runs yet.</p>
       <div class="field bd-field"><label for=${`bd-dir-${bid}`}>Build directory</label>
@@ -1354,9 +1358,9 @@ function BuildPanel({ bid, f }) {
             : html`<span>· ${x.way === "session" ? "no receipt yet (your open Vivado writes no build_rm.log)" : "no build_rm.log yet"}</span>`}</div>`}
       <${Expect} />
       ${errs}
-      ${running ? html`<details class="bd-more"><summary>The command it runs</summary><div><${Way} bid=${bid} x=${x} /></div></details>`
-        : html`<div class="bd-acts"><span class="grow"></span><${Btn} cls="ghost sm" icon="file-code" testid="build-change-dir"
-            onClick=${() => { x.written = ""; x.run = null; persist(bid); loadGuide(bid); }}>Change the folder<//></div>`}
+      ${running ? html`<details class="bd-more"><summary>The command it runs</summary><div><${Way} bid=${bid} x=${x} /></div></details>` : null}
+      <div class="bd-acts"><span class="grow"></span><${Btn} cls="ghost sm" icon="file-code" testid="build-change-dir"
+        onClick=${() => { x.written = ""; x.run = null; persist(bid); loadGuide(bid); }}>${running ? "Watch another folder" : "Change the folder"}<//></div>
       <${Then}>when the receipt appears, Harness Manager checks it and shows the verdict in Check.<//>
     <//>`;
   }
