@@ -5,7 +5,7 @@
    and the readings row -> two columns of cards beside the Front panel, the largest element. */
 
 .ov { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 100%; }
-.section-body[data-tab="overview"] { padding-top: 14px; padding-bottom: 14px; }
+.section-body[data-tab="overview"] { padding-top: 10px; padding-bottom: 10px; }
 
 /* --- Needs attention --------------------------------------------------------------------------- */
 .ov-att { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
@@ -179,7 +179,9 @@ button.chip.ov-chip-sm { font-family: inherit; cursor: pointer; }
 .ov-panel .identify .action-main { gap: 5px; flex-wrap: nowrap; }
 .ov-panel .identify-seconds { height: 26px; }
 .ov-panel .identify .btn.sm { height: 26px; }
-.ov-panel { min-height: 0; }
+/* The panel's own size never sizes the rows (contain: size): the left cards do, and the panel
+   fills both rows; its picture then takes what it gets. */
+.ov-panel { min-height: 0; contain: size; overflow: hidden; }
 .ov-panel .card-body { min-height: 0; }
 /* The picture's box: as tall as the card's width asks (4:3, plus the Live display's own foot
    row or the text's legend), shrinking when the height left on the screen is shorter (the grid
@@ -225,6 +227,7 @@ button.chip.ov-chip-sm { font-family: inherit; cursor: pointer; }
   .ov-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .ov-grid > .ov-panel { grid-column: 1 / -1; grid-row: auto; order: -1; }
   .ov-grid { flex: none; }
+  .ov-panel { contain: none; overflow: visible; }
   .ov-panel .card-body { container-type: normal; }
   .ov-panel-pic, .ov-panel-pic[data-view="live"] { flex: none; min-height: 0; container-type: inline-size; --pw: min(100cqw, 560px); }
   .ov-att-text { white-space: normal; overflow-wrap: anywhere; }
@@ -259,3 +262,5 @@ button.chip.ov-chip-sm { font-family: inherit; cursor: pointer; }
 .ov-panel-parts .panel-missing { min-width: 0; flex: 1 1 12em; }
 .ov-panel-parts .panel-missing:not([open]) > summary { display: flex; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ov-wait.info > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hil-checks .checks-announce-fold { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+.hil-checks .checks-announce-fold > summary .muted { margin-left: 4px; }

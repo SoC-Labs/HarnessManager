@@ -1,5 +1,8 @@
 // Checks (lane HIL-GUI): the HIL runbooks, unattended, started from the app
-// (docs/HIL_AUTO.md "In the app"; the service's run manager is services/hil_runs.py).
+// (docs/HIL_AUTO.md "In the app"; the service's run manager is services/hil_runs.py). UI v2
+// (lane UI2-OVERVIEW): a hub board's tab only (route.js), restyled to round 3: one "Start a
+// run" card with the announcement folded in, "Past runs" beside it. The prototype's "Running
+// now" by another machine is not here: there is no hub run registry (plan §1.8 F5).
 //
 // - The plan is picked from the board (autoPlan: the SAME rule as checks.plans.auto_plan;
 //   tests/web/test_hil_gui_browser.py holds the two to one table), and can be overridden.
@@ -392,16 +395,21 @@ function Announcement({ bid }) {
     setCopied((await copyText(text)) ? "copied" : "select it and copy by hand");
     setTimeout(() => setCopied(""), 2000);
   };
-  return html`<${Card} title="Announcement" icon="send" testid="checks-announce-card"
-      sub="For the 17:30 announcement: start, planned end, plan, writes, what it changes and what it never does (ANNOUNCE.txt)."
-      actions=${html`<button type="button" class="btn sm" data-action="checks-copy" data-testid="checks-copy"
+  // Round 3: a fold of the Start card, open (the announcement is written for you: start,
+  // planned end, plan, writes, what it changes and what it never does; ANNOUNCE.txt).
+  return html`<details class="checks-announce-fold" open data-testid="checks-announce-card">
+    <summary><${Icon} name="chevron-right" cls="sm chev" />Announcement (written for you)
+      <span class="muted small">for the 17:30 announcement</span></summary>
+    ${text ? html`<textarea class="input checks-announce" readonly rows="8" data-testid="checks-announce"
+        aria-label="The announcement" value=${text}></textarea>`
+      : html`<p class="muted small mt-8">Write the announcement to see what the run will do before you start it.</p>`}
+    <div class="row mt-8">
+      <button type="button" class="btn sm ghost" data-action="checks-copy" data-testid="checks-copy"
         disabled=${!text} onClick=${onCopy}><${Icon} name=${copied === "copied" ? "check" : "copy"} />
-        ${copied === "copied" ? "Copied" : "Copy"}</button>`}>
-    ${text ? html`<textarea class="input checks-announce" readonly rows="12" data-testid="checks-announce"
-        aria-label="The announcement" value=${text}></textarea>
-      <p class="checks-why">${source}${copied && copied !== "copied" ? `: ${copied}` : ""}</p>`
-      : html`<p class="muted">Write the announcement to see what the run will do before you start it.</p>`}
-  <//>`;
+        ${copied === "copied" ? "Copied" : "Copy"}</button>
+      ${source ? html`<span class="checks-why">${source}${copied && copied !== "copied" ? `: ${copied}` : ""}</span>` : null}
+    </div>
+  </details>`;
 }
 
 // --- past runs and their reports ----------------------------------------------------------------------
@@ -432,17 +440,16 @@ function PastRuns({ bid }) {
   const refresh = html`<button type="button" class="btn ghost sm" onClick=${() => loadChecks(bid)}
     aria-busy=${c.loading ? "true" : undefined}>${c.loading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`} Refresh</button>`;
   return html`<${Card} title="Past runs" icon="history" actions=${refresh} bodyCls="flush" testid="checks-runs"
-      sub="Newest first. Open one for its REPORT.md and each iteration's.">
+      cls="checks-past" sub="Newest first. Open one for its REPORT.md and each iteration's.">
     ${runs.length ? html`<table class="table" data-testid="checks-runs-table">
-      <colgroup><col style="width:34%" /><col style="width:24%" /><col style="width:18%" /><col /></colgroup>
-      <thead><tr><th>Started</th><th>Plan</th><th>Result</th><th class="r">Iterations</th></tr></thead>
+      <colgroup><col style="width:40%" /><col style="width:26%" /><col /></colgroup>
+      <thead><tr><th>Run</th><th>When</th><th>Result</th></tr></thead>
       <tbody>${runs.map((r) => html`<tr key=${r.id} class="pick" aria-selected=${c.open === r.id ? "true" : "false"}
           data-run=${r.id} tabindex="0" onClick=${() => openReport(bid, r.id)}
           onKeyDown=${(e) => { if (e.key === "Enter") openReport(bid, r.id); }}>
-        <td>${(r.started_at || r.created_at || "").replace("T", " ").slice(0, 16)}<div class="sub mono">${r.id}</div></td>
-        <td class="mono">${r.plan}<div class="sub">writes ${r.writes}</div></td>
-        <td>${resultChip(r.result, r.state)}</td>
-        <td class="r">${r.summary ? r.summary.iterations.length : r.iterations || 0}</td>
+        <td><span class="mono small">${r.id}</span><div class="sub mono">${r.plan} · writes ${r.writes}</div></td>
+        <td class="small">${(r.started_at || r.created_at || "").replace("T", " ").slice(0, 16)}</td>
+        <td>${resultChip(r.result, r.state)} <span class="small muted">${r.summary ? r.summary.iterations.length : r.iterations || 0} iterations</span></td>
       </tr>`)}</tbody></table>`
       : html`<p class="muted pad-x">No runs on this board yet.</p>`}
     <${ReportView} bid=${bid} />
@@ -565,8 +572,8 @@ export function ChecksSection({ bid }) {
         ${last ? html`<div class="checks-last mt-14" data-testid="checks-last">
           <span class="secondary">Last run ${last.id}:</span> ${resultChip(last.result, last.state)}
           ${last.reason ? html`<span class="secondary small-text"> ${last.reason}</span>` : null}</div>` : null}
+        ${c.status ? html`<${Announcement} bid=${bid} />` : null}
       <//>
-      <${Announcement} bid=${bid} />
     </div>
     <${PastRuns} bid=${bid} />
   </div>`;

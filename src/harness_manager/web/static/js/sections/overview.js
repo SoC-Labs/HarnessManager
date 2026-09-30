@@ -808,7 +808,8 @@ function LeaseCard({ bid }) {
   else if ((who.state === "other" || who.state === "elsewhere") && exp) until = `until ${hhmm(exp)} · ${who.holder}`;
   else if (who.state === "free") until = "nobody holds it: Acquire is in the header";
   const w = waitingForYou(bid);
-  const firstOther = leaseQueue(bid).people.find((x) => !x.mine);
+  const people = leaseQueue(bid).people;
+  const firstOther = people.find((x) => x.mine) || people[0];
   let wait = null;
   if (w) {
     const since = epochOf(w.first.since);
@@ -818,7 +819,7 @@ function LeaseCard({ bid }) {
   } else if ((who.state === "other" || who.state === "elsewhere") && firstOther) {
     const nm = whoParts(firstOther.holder).who;
     wait = html`<div class="ov-wait info" data-testid="ov-wait" title="The hub promotes the next person the moment the lease frees">
-      <${Icon} name="info" /><span><b>${firstOther.mine ? "You wait" : `${nm} waits`}${firstOther.want_s ? ` (${wantText(firstOther.want_s)})` : ""}</b>: ${firstOther.mine ? "you get" : "gets"} it when ${whoParts(who.holder).who} releases${exp ? ` (by ${hhmm(exp)} at the latest)` : ""}.</span></div>`;
+      <${Icon} name="info" /><span><b>${firstOther.mine ? `You wait, #${firstOther.position}` : `${nm} waits`}${firstOther.want_s ? ` (${wantText(firstOther.want_s)})` : ""}</b>: ${firstOther.mine ? (firstOther.position === 1 ? "you get" : "your turn comes after the others") : "gets"}${firstOther.mine && firstOther.position !== 1 ? "" : ` it when ${whoParts(who.holder).who} releases`}${exp ? ` (the lease runs to ${hhmm(exp)})` : ""}.</span></div>`;
   }
   const stale = who.stale ? `the hub did not answer the last read; last confirmed ${hhmm(epochOf(who.stale.confirmed_at))}` : "";
   return html`<${OvCard} title="Lease" icon="lock" testid="ov-lease"
@@ -920,7 +921,7 @@ function RecentCard({ bid }) {
       go=${html`<${Go} label="Activity" action="ov-go-activity" title="Everything on this board, newest first" run=${() => openActivity(bid)} />`}>
     ${rows.length ? html`<ul class="ov-log">${rows.map((e) => html`<li key=${e.id}><button type="button" class="ov-log-row"
         data-level=${e.level} title=${`${clock(e.at)} ${e.source}: ${e.text} · open in Activity`}
-        onClick=${() => openActivity(bid, e.level === "error" || e.level === "warning" ? "err" : "all")}>
+        onClick=${() => openActivity(bid, e.level === "error" ? "err" : "all")}>
         <span class="t">${hhmm(e.at)}</span><span class=${`lv-${e.level}`}><${Icon} name=${LOG_ICONS[e.level] || "info"} /></span>
         <span class="m"><span class="src">${e.source}</span> ${e.text}</span></button></li>`)}</ul>`
       : html`<div class="small muted">Nothing on this board since this page opened.</div>`}
