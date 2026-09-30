@@ -178,6 +178,21 @@ def test_negative_twin_open_to_watch_takes_no_lease_and_open_on_overview_lands_t
     assert not page.errors, page.errors
 
 
+def test_a_service_without_open_on_leaves_the_tab_as_before(show: Showcase):
+    # G12 may be missing (an older service): no "Open a board on" row, and a board opens where
+    # the page would show it anyway (the Overview), never an error
+    page = show.page(**APP)
+    page.route(re.compile(r"/api/v1/settings\?key=general\.open_on$"),
+               lambda route: route.fulfill(status=200, json={"ok": True, "rows": []}))
+    page.reload()
+    page.wait_for_selector(".board-item", timeout=T)
+    preview(page, BOARD_LINUX)
+    by_id(page, "preview-actions").locator('[data-action="open"]').click()
+    page.wait_for_selector(f'main[data-board="{BOARD_LINUX}"] [data-testid="fact-shell"]', timeout=T)
+    expect(by_id(page, "section-overview")).to_be_visible(timeout=T)
+    assert not page.errors, page.errors
+
+
 # --- the header's "N waiting" and the queue popover ------------------------------------------------------
 
 
@@ -384,6 +399,11 @@ def test_settings_opens_on_general_with_open_a_board_on_first_and_hides_unread_r
     page.locator('[data-action="settings-close"]').click()
     page.locator('[data-action="settings"]').click()
     expect(pane).to_have_attribute("data-settings-section", "general", timeout=T)
+    # Boards > Add a board… is the one Add dialog (Settings closes: one dialog at a time)
+    page.locator('[data-testid="settings-nav"] [data-settings-section="boards"]').click()
+    page.locator('[data-action="board-add-dialog"]').click()
+    expect(by_id(page, "add-board")).to_be_visible(timeout=T)
+    expect(by_id(page, "settings")).to_have_count(0)
     assert not page.errors, page.errors
 
 

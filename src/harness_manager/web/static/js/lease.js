@@ -158,6 +158,11 @@ const L = {
 // board that is not open, and the popover when it opens (the background tier, fresh).
 
 const FULL = {};             // bid -> {data, error, at, loading}
+// The identity this page last read of a board it closed (and the baseline after "Restore
+// baseline and close"): the preview's Loaded row, newer than the probe's snapshot.
+const LAST_SEEN = {};        // bid -> {identity, at}
+
+export function lastSeen(bid) { return LAST_SEEN[bid] || null; }
 
 export function fullLease(bid) { return FULL[bid] || null; }
 
@@ -1234,8 +1239,15 @@ async function closeWith(choice) {
       return;
     }
   }
+  const before = S.board[bid] && S.board[bid].info && S.board[bid].info.identity;
   const r = await c.doClose({ release: choice === "restore" || choice === "release" });
   if (L.closing !== c) return;
+  if (!(r && r.error) && before) {
+    // what the preview shows as loaded: this page's last read, the baseline when it restored
+    const base = baselineName(S.board[bid] || {});
+    LAST_SEEN[bid] = { at: Date.now() / 1000, identity: restoring
+      ? { ...before, rm_id: "0x00000000", rm_name: base === "the baseline" ? before.rm_name : base } : { ...before } };
+  }
   if (r && r.error) {
     c.busy = "";
     c.error = r;              // the board stays open: say why, here, and let them choose again

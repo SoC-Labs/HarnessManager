@@ -5,6 +5,7 @@
 
 import { hostOf } from "../format.js";
 import { html } from "../lib.js";
+import { openModal } from "../modal.js";
 import { changed, S } from "../store.js";
 import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
 import { HubsSection } from "./hubs.js";
@@ -275,9 +276,16 @@ function BoardsSection() {
     <div class="section-intro">
       <p class="secondary">Per board: its name, how to reach it and its hub, from <code>boards.toml</code>${" "}
         (comments are kept when this page writes it). A board pack's own tables show under their heading.</p>
-      ${!SS.boardForm ? html`<button type="button" class="btn sm" data-action="board-add-open"
-        onClick=${() => { SS.boardForm = { key: "", match: "", name: "", busy: false, error: null }; changed(); }}>
-        <${Icon} name="plus" /> Add a board</button>` : null}
+      <div class="row">
+        <button type="button" class="btn sm primary" data-action="board-add-dialog"
+          title="The one Add a board dialog: from a hub, or by address"
+          onClick=${() => { import("../selfupdate.js").then((m) => { m.closeSettings(); openModal("add", { mode: "addr" }); }); }}>
+          <${Icon} name="plus" /> Add a board…</button>
+        ${!SS.boardForm ? html`<button type="button" class="btn sm ghost" data-action="board-add-open"
+          title="Write a [boards.KEY] table by hand: a key, an address, a name"
+          onClick=${() => { SS.boardForm = { key: "", match: "", name: "", busy: false, error: null }; changed(); }}>
+          New boards.toml entry</button>` : null}
+      </div>
     </div>
     ${SS.boardForm ? html`<${AddBoardForm} />` : null}
     ${!boards.length ? html`<div class="empty-note" data-testid="boards-empty"><${Icon} name="circuit-board" />

@@ -29,7 +29,7 @@ import { leaseSpecs } from "./hub.js";
 import { html, useEffect, useState } from "./lib.js";
 import {
   LeaseBadge, LeaseQueueList, leaveQueue, leftText, openRequestForm, previewWho, queueCount, queueOf,
-  queueTitle, fullLease, readLease, requestActive,
+  queueTitle, fullLease, lastSeen, readLease, requestActive,
 } from "./lease.js";
 import { registerHelp } from "./settings/help.js";
 import { LocateButton } from "./locate.js";          // LOCATE: Identify on each board card
@@ -762,7 +762,8 @@ function PreviewLease({ bid, w }) {
 export function BoardPreview({ bid }) {
   const row = S.boards[bid] || {};
   const cand = row.candidate || {};
-  const ident = cand.identity || null;
+  const seen = lastSeen(bid);                     // what this page read before it closed it
+  const ident = (seen && seen.identity) || cand.identity || null;
   const [st, setSt] = useState({ busy: "", line: "", error: null });
   const hub = hubBoard(bid);
   // The buttons wait for the first read of the lease (at most READY_MS): they depend on it, and
@@ -850,7 +851,7 @@ export function BoardPreview({ bid }) {
               <span class="mono sub">${hexId(ident.rm_id)}</span></span>
               <span class="sub">on shell ${hexId(ident.shell_id) || "?"}${ident.harness_version ? ` · harness firmware ${ident.harness_version}` : ""}</span>
               <${CheckChip} check=${ident.build_check} testid="preview-build" prefix="build " /></div>
-              <div class="sub">as the board last reported it: read again when you open it</div>`
+              <div class="sub">${seen ? `as this page last read it, at ${clock(seen.at).slice(0, 5)}` : "as the board last reported it"}: read again when you open it</div>`
             : html`<span class="muted">read when you open it</span>`}</dd>
           <dt>Found</dt><dd><div class="line">${fromConfig ? html`<${Chip} level="unk" icon="circle-help">not contacted<//>`
             : html`<${Chip} level="ok" icon="circle-check">found<//>`}

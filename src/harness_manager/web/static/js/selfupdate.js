@@ -653,6 +653,13 @@ export function openSettings(section) {
 }
 whenOpen(() => U.settingsOpen);
 
+// UI v2: a Settings row that opens another dialog (Boards > Add a board…) closes Settings first:
+// one dialog at a time.
+export function closeSettings() {
+  U.settingsOpen = false;
+  changed();
+}
+
 function SettingsModal() {
   const ref = useRef(null);
   const close = () => { U.settingsOpen = false; changed(); };

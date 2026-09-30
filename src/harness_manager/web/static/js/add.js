@@ -14,7 +14,7 @@
 import { call } from "./api.js";
 import { boardName, clock, hexId } from "./format.js";
 import { html, useEffect, useRef, useState } from "./lib.js";
-import { closeModal, ModalShell, openModal, registerModal, setModalBusy } from "./modal.js";
+import { closeModal, ModalShell, openModal, registerModal } from "./modal.js";
 import { changed, loadBoards, log, probe, S, select, timed, toast } from "./store.js";
 import { Chip, Icon, Reason, Seg, Spinner } from "./ui.js";
 import { epochOf } from "./week.js";
@@ -273,7 +273,6 @@ function AddDialog({ mode = "" }) {
     via: "", typed: false, name: "", save: false, test: null }));
   const set = (patch) => setM((x) => ({ ...x, ...patch }));
   useEffect(() => { if (!SS.loaded || !SS.hubs) loadSettings(); }, []);
-  useEffect(() => { setModalBusy(false); }, []);
   return html`<${ModalShell} title="Add a board" icon="plus" cls="mid add-dialog" testid="add-board"
       foot=${m.mode === "hub" ? html`<span class="small muted grow">Added boards are written to boards.toml</span>
         <button type="button" class="btn" data-action="add-cancel" onClick=${closeModal}>Close</button>` : null}>
