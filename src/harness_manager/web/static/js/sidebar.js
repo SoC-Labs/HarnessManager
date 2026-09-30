@@ -29,7 +29,7 @@ import { leaseSpecs } from "./hub.js";
 import { html, useEffect, useState } from "./lib.js";
 import {
   LeaseBadge, LeaseQueueList, leaveQueue, leftText, openRequestForm, previewWho, queueCount, queueOf,
-  queueTitle, readLease, requestActive,
+  queueTitle, fullLease, readLease, requestActive,
 } from "./lease.js";
 import { registerHelp } from "./settings/help.js";
 import { LocateButton } from "./locate.js";          // LOCATE: Identify on each board card
@@ -688,6 +688,7 @@ const LOCK_TITLE = "Harness Manager's own lock on this board: free unless anothe
   + "session or tool on this machine has it open. The hub lease is its own row.";
 
 const PREVIEW_EVERY_MS = 20000;
+const READY_MS = 2500;
 
 // POST /boards: open it here (this daemon's board lock), then read what the workspace shows.
 // `take`: then acquire the hub lease (the acquire job; it may queue). Resolves to the timed()
@@ -714,8 +715,10 @@ export async function openBoardHere(bid, { take = false } = {}) {
   // The session is open even when the first read failed; the workspace says why.
   if (!d.info && d.info_error) b.infoError = new ApiError(d.info_error, 200);
   openedBoard(bid);
+  // general.open_on: the tab a board opens on, unless this session already chose one for it (a
+  // deep link, a reload, the tab it was on when it was closed): that is where you were.
   const tab = openOn();
-  if (tab) navigate(bid, tab);
+  if (tab && !S.sections[bid]) navigate(bid, tab);
   if (take) {
     const spec = leaseSpecs(bid).acquire;
     runAction(bid, "lease", spec).then((res) => {
@@ -762,11 +765,18 @@ export function BoardPreview({ bid }) {
   const ident = cand.identity || null;
   const [st, setSt] = useState({ busy: "", line: "", error: null });
   const hub = hubBoard(bid);
+  // The buttons wait for the first read of the lease (at most READY_MS): they depend on it, and
+  // a button that turns into another under the pointer ("Open board" into "Open and take the
+  // lease") would take a lease nobody asked for.
+  const [ready, setReady] = useState(!hub);
   useEffect(() => {
-    if (!hub) return undefined;
-    readLease(bid);
+    if (!hub) { setReady(true); return undefined; }
+    let live = true;
+    setReady(!!(fullLease(bid) && (fullLease(bid).data || fullLease(bid).error)));
+    readLease(bid).then(() => { if (live) setReady(true); });
+    const cap = setTimeout(() => { if (live) setReady(true); }, READY_MS);
     const t = setInterval(() => { if (document.visibilityState === "visible") readLease(bid); }, PREVIEW_EVERY_MS);
-    return () => clearInterval(t);
+    return () => { live = false; clearTimeout(cap); clearInterval(t); };
   }, [bid, hub]);
   const w = hub ? previewWho(bid) : { state: "none" };
   const open = async (take) => {
@@ -785,7 +795,7 @@ export function BoardPreview({ bid }) {
   const hubHost = (hubInfo && hubInfo.host) || w.host || (conf && conf.hub) || "";
   const requesting = requestActive(bid) || !!w.request;
   const busy = st.busy;
-  const openBtn = (primary, label = "Open to watch", icon = "eye") => html`<button type="button"
+  const openBtn = (primary, label = "Open to watch", icon = "eye") => html`<button type="button" key="open"
       class=${`btn ${primary ? "primary" : "ghost"}`} data-action="open" onClick=${() => open(false)}
       aria-busy=${busy === "watch" ? "true" : undefined} disabled=${!!busy}>
     ${busy === "watch" ? html`<${Spinner} /> Opening...` : html`<${Icon} name=${icon} /> ${label}`}</button>`;
@@ -795,16 +805,16 @@ export function BoardPreview({ bid }) {
   if (!hub || w.state === "none") {
     acts = openBtn(true, "Open board", "lock-open");
   } else if (w.state === "free") {
-    acts = html`<button type="button" class="btn primary" data-action="open-take" onClick=${() => open(true)}
+    acts = html`<button type="button" key="take" class="btn primary" data-action="open-take" onClick=${() => open(true)}
         aria-busy=${busy === "take" ? "true" : undefined} disabled=${!!busy}
         title="Open the board here and take its hub lease (60 min, renewed while it is open)">
         ${busy === "take" ? html`<${Spinner} /> Opening...` : html`<${Icon} name="user" /> Open and take the lease`}</button>
       ${openBtn(false)}`;
   } else if (w.state === "other") {
     acts = requesting
-      ? html`<button type="button" class="btn" data-action="preview-cancel-request" onClick=${() => leaveQueue(bid)}>
+      ? html`<button type="button" key="cancel" class="btn" data-action="preview-cancel-request" onClick=${() => leaveQueue(bid)}>
           <${Icon} name="x" /> Cancel request</button>${openBtn(false)}`
-      : html`<button type="button" class="btn primary" data-action="preview-request" aria-haspopup="dialog"
+      : html`<button type="button" key="request" class="btn primary" data-action="preview-request" aria-haspopup="dialog"
           onClick=${(e) => openRequestForm(bid, e.currentTarget)}><${Icon} name="send" /> Request board</button>${openBtn(false)}`;
     note = requesting
       ? `You are #${(w.request && w.request.position) || "?"} in the hub's queue. ${w.holder.split("@")[0]} sees your request in their Harness Manager and on the board's front panel.`
@@ -851,7 +861,8 @@ export function BoardPreview({ bid }) {
           <dt title=${LOCK_TITLE}>This app's lock</dt><dd data-testid="preview-lock">${held ? html`<${Chip} level="warn" icon="lock" title=${LOCK_TITLE}>held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
             : html`<${Chip} icon="lock-open" title=${LOCK_TITLE}>free<//>`}</dd>
         </dl>
-        <div class="open-row" data-testid="preview-actions">${acts}</div>
+        <div class="open-row" data-testid="preview-actions">${ready ? acts
+          : html`<span class="muted" data-testid="preview-reading"><${Spinner} /> Reading the hub lease…</span>`}</div>
         <div class="preview-notes">
           ${note ? html`<${Reason} level=${noteLevel} text=${note} testid="preview-note" />` : null}
           <${Reason} text=${held ? "Open asks the daemon anyway: it refuses a live lock and takes over a stale one."

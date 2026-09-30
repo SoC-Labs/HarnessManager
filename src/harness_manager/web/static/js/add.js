@@ -211,7 +211,10 @@ function ByAddress({ m, set }) {
     const body = { hosts: [target], scan_usb: false, ...(viaOf(route) ? { via: viaOf(route) } : {}) };
     const r = await timed(`probe ${target}${route ? ` --via ${viaOf(route)}` : ""}`, () => call("probe", {}, body));
     const took = (performance.now() - t0) / 1000;
-    const cands = r.error ? [] : r.data.data.candidates || [];
+    // only the board at this address (a probe may also report what it found on the way)
+    const at = (c) => [c.board_id, ...((c.links || []).map((l) => l.address))]
+      .some((a) => hostPort(a).host === hp.host && (!hp.port || !hostPort(a).port || hostPort(a).port === hp.port));
+    const cands = r.error ? [] : (r.data.data.candidates || []).filter(at);
     set({ test: { running: false, error: r.error, cands, took, for: `${target}|${route}` } });
   };
   const tested = test && !test.running && test.for === `${target}|${route}`;

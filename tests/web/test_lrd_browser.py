@@ -40,6 +40,10 @@ def open_board(page, board_id=BOARD):
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
     page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    # UI v2: a board opens on Settings' "Open a board on" (the Workbench); these tests read the
+    # Overview's lease lines first
+    if page.locator('[data-testid="section-overview"]').count() == 0:
+        nav.tab(page, "overview")
 
 
 def section(page, key):

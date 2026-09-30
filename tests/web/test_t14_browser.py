@@ -498,15 +498,18 @@ def test_a_slow_engine_call_leaves_the_page_usable(page_factory, engine):
 
 
 def test_help_shows_the_cli_help_tabs_and_escape_closes_it(page_factory, screenshots):
+    # UI v2 (round 3, M8): Help is organised by the app's pages; the CLI's topics, its own
+    # text (GET /help/tabs), are listed whole under "Command line"
     from harness_manager.cli.helptext import tabs
 
     page = page_factory()
     page.wait_for_selector(".board-item", timeout=T)
     page.locator('[data-action="help"]').click()
-    nav = page.locator('[data-testid="help"] .modal-nav button')
+    nav = page.locator('[data-testid="help"] .modal-nav button[data-help^="cli:"]')
     expect(nav).to_have_count(len(tabs()))
     first_name, first_text = tabs()[0]
     expect(nav.first).to_have_text(first_name)
+    nav.first.click()
     assert first_text.strip().splitlines()[0] in page.locator(".modal-text").inner_text()
     page.screenshot(path=str(screenshots / "light-help.png"))
     page.keyboard.press("Escape")

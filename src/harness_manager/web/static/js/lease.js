@@ -1174,8 +1174,10 @@ export function closeOptions(bid) {
     opts.push({ k: "restore", t: "Restore baseline, release and close", dis: loaded === false ? `${base} is loaded already` : restoreWhy,
       said: loaded === false, s: loaded === false ? `${base} is loaded already.`
         : `Loads ${base}${loaded === null ? " (the design loaded now was not read)" : ` in place of ${design}`}, gives the lease back to the hub, closes ${name}. The next person finds a clean board.` });
-    opts.push({ k: "release", t: "Release and close",
-      s: `${loaded ? `Leaves ${design} loaded. ` : ""}The lease goes back to the hub now${next ? `: ${next} is next and gets it` : ""}.` });
+    const on = leaseName(who) || name;
+    const note = leaseTargetNote(who);
+    opts.push({ k: "release", t: "Release and close", testid: "close-release-what",
+      s: `${loaded ? `Leaves ${design} loaded. ` : ""}The lease on ${on}${note ? ` (target ${note})` : ""} goes back to the hub now${next ? `: ${next} is next and gets it` : ""}.` });
     opts.push({ k: "keep", t: "Close and keep the lease", testid: "close-keep-what",
       s: `It stays yours${at ? ` until ${clock(at)}` : ""}, but nothing renews it while the board is closed. Open the board again to keep renewing it.` });
   } else if (who.state === "none") {
@@ -1190,6 +1192,11 @@ export function closeOptions(bid) {
       s: who.state === "other" ? `The lease stays with ${who.holder}.${req ? " Your request stays in the queue." : ""}`
         : who.state === "elsewhere" ? `${who.holder} keeps the lease in its other session.${req ? " Your request stays in the queue." : ""}`
         : who.state === "free" ? "Nobody holds the lease." : "The hub lease is left as it is." });
+    // R3: restoring drives the board, so it is the lease holder's: offered, and refused with why
+    if (loaded !== false) {
+      opts.push({ k: "restoreclose", t: "Restore baseline and close", dis: restoreWhy,
+        s: `Loads ${base}${loaded ? ` in place of ${design}` : ""}, then closes.` });
+    }
   }
   const def = who.state === "here" ? (loaded && !opts[0].dis ? "restore" : "release") : "close";
   return { opts, def, name, loaded, design, base };
@@ -1239,6 +1246,8 @@ async function closeWith(choice) {
   changed();
 }
 
+const CLOSE_GROUP = "close-choice";     // the radios' group (a variable: t14's icon scan reads name="…")
+
 function CloseConfirm() {
   const ref = useRef(null);
   const c = L.closing;
@@ -1265,7 +1274,7 @@ function CloseConfirm() {
           <div class="choices" role="radiogroup" aria-label="What happens to the board">
           ${opts.map((o) => html`<label key=${o.k} class=${`choice ${pick === o.k ? "on" : ""} ${o.dis ? "dis" : ""}`}
               data-choice=${o.k} data-testid=${`close-choice-${o.k}`} title=${o.dis || undefined}>
-            <input type="radio" name="close-choice" value=${o.k} checked=${pick === o.k} disabled=${!!o.dis || !!busy}
+            <input type="radio" name=${CLOSE_GROUP} value=${o.k} checked=${pick === o.k} disabled=${!!o.dis || !!busy}
               onChange=${() => { c.choice = o.k; changed(); }} />
             <span><b>${o.t}</b>${o.k === def ? html`<span class="def">default</span>` : null}
               <span class="sub" data-testid=${o.testid || undefined}>${o.s}${o.dis && !o.said ? ` Not now: ${o.dis}.` : ""}</span></span></label>`)}
@@ -1276,7 +1285,7 @@ function CloseConfirm() {
       <div class="modal-foot">
         <button type="button" class="btn ghost" data-action="close_cancel" disabled=${!!busy}
           onClick=${endClosing} data-autofocus>Cancel</button>
-        <button type="button" class="btn primary" data-action="close_confirm" data-choice=${pick} disabled=${!!busy}
+        <button type="button" class="btn primary" data-action="close_confirm" data-picked=${pick} disabled=${!!busy}
           aria-busy=${busy ? "true" : undefined} onClick=${() => closeWith(pick)}>
           ${busy ? html`<${Spinner} /> ${busy.startsWith("restore") ? "Restoring..." : busy === "release" ? "Releasing..." : "Closing..."}`
             : chosen.t}</button>

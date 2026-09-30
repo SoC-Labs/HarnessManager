@@ -132,7 +132,7 @@ def test_negative_twin_without_a_card_store_the_refresh_reads_no_card(page_facto
     expect(by_id(page, "tile-card")).to_have_text("no card store on this harness")
 
 
-# --- 9: Settings opens on General, then where you left it --------------------------------------------
+# --- 9: Settings opens on General (UI v2 round 3, M7: always; a link names its section) ------------
 
 
 def gear(page: Any) -> Any:
@@ -141,14 +141,15 @@ def gear(page: Any) -> Any:
     return by_id(page, "settings-pane")
 
 
-def test_settings_opens_on_general_then_on_the_last_section_used(page_factory):
+def test_settings_opens_on_general_whatever_section_was_used_last(page_factory):
     page = page_factory(**APP)
     page.wait_for_selector(".board-item", timeout=T)
     expect(gear(page)).to_have_attribute("data-settings-section", "general", timeout=T)
     page.locator('[data-testid="settings-nav"] [data-settings-section="tools"]').click()
+    expect(by_id(page, "settings-pane")).to_have_attribute("data-settings-section", "tools", timeout=T)
     page.locator('[data-action="settings-close"]').click()
     expect(by_id(page, "settings")).to_have_count(0)
-    expect(gear(page)).to_have_attribute("data-settings-section", "tools", timeout=T)
+    expect(gear(page)).to_have_attribute("data-settings-section", "general", timeout=T)
     assert page.errors == []
 
 
@@ -320,12 +321,13 @@ def test_the_preview_shows_the_last_known_hub_lease_apart_from_this_apps_lock(pa
     open_board(page, BOARD_FIELDED)
     expect(by_id(page, "lease-chip")).to_contain_text("alice@lab-pc-07", timeout=T)
     page.locator('[data-action="close-board"]').click()
+    by_id(page, "close-confirm").locator('[data-action="close_confirm"]').click()   # Close the board
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)     # the preview again
     expect(by_id(page, "preview-lock")).to_have_text("free")
     expect(page.locator(".preview dt", has_text="This app's lock")).to_have_count(1)
     lease = by_id(page, "preview-lease")
     expect(lease).to_have_attribute("data-lease", "other", timeout=T)
-    expect(lease).to_contain_text("held by alice@lab-pc-07")
+    expect(lease).to_contain_text("Held by alice@lab-pc-07")
     expect(by_id(page, "preview-lease-at")).to_contain_text("as of ")
     assert page.locator(".preview dt", has_text="Lock").filter(has_not_text="app").count() == 0
     assert page.errors == []
