@@ -727,7 +727,10 @@ async function snapshot(c, setNote) {
 }
 
 // ``children``: today's text mirror, shown whenever there is no live picture (§7.5).
-export function LiveDisplay({ bid, children = null }) {
+// ``fit`` (UI v2 round 3, the Overview's Front panel): the picture fills the card's width
+// (nearest-neighbour, 4:3) instead of k whole device pixels, and the head folds into one foot
+// row (state, mode, freshness, Pause, Snapshot): the card's own head has the title.
+export function LiveDisplay({ bid, children = null, fit = false }) {
   const client = useMemo(() => new DisplayClient(bid), [bid]);
   const [, setTick] = useState(0);
   const [note, setNote] = useState({ busy: false, text: "" });
@@ -762,31 +765,37 @@ export function LiveDisplay({ bid, children = null }) {
     st.rtt_ms !== null && st.rtt_ms !== undefined ? `RTT ${Math.round(st.rtt_ms)} ms` : "RTT -",
   ];
   const holdsHatch = live && c.hatched.length > 0;
-  return html`<div class="ld" ref=${rootRef} data-testid="live-display" data-socket=${c.socket}
+  const slotStyle = fit ? "width:100%" : `width:${cssW}px;height:${cssH}px`;
+  const boxStyle = fit ? "width:100%;aspect-ratio:4 / 3" : `width:${cssW}px;height:${cssH}px`;
+  const canvasStyle = fit ? "width:100%;height:100%" : `width:${cssW}px;height:${cssH}px`;
+  const stateChip = html`<${Chip} level=${head.level} icon=${head.icon} testid="live-state"
+    cls=${head.icon === "loader-circle" ? "spin-icon" : ""}>${head.text}<//>`;
+  const modeTag = st.mode ? html`<span class="tag" data-testid="live-mode" title=${MODE_TITLE[st.mode] || ""}>${st.mode === "hw" ? "exact" : "software tap"}</span>` : null;
+  const retry = !live && fb && (fb.kind === "refused" || fb.kind === "failed") ? html`<button type="button" class="btn ghost sm" data-action="live-retry"
+    onClick=${() => c.retry()}><${Icon} name="refresh-cw" />Try again</button>` : null;
+  return html`<div class=${`ld${fit ? " fit" : ""}`} ref=${rootRef} data-testid="live-display" data-socket=${c.socket} data-fit=${fit ? "yes" : "no"}
       data-state=${live ? st.state || "" : fb.kind} data-live=${live ? "yes" : "no"} data-seq=${c.lastSeq ?? ""}
       data-zoom=${c.zoom} data-k=${k} data-dpr=${dpr} data-hatched=${live ? c.hatched.length : 0}
       data-grey=${grey ? "yes" : "no"} data-dim=${dim ? "yes" : "no"} data-stale=${stale ? "yes" : "no"}
       data-paused=${c.paused ? "yes" : "no"} data-refused=${c.refusal ? c.refusal.name || String(c.refusal.code) : ""}>
-    <div class="ld-head">
+    ${fit ? null : html`<div class="ld-head">
       <span class="ld-title"><${Icon} name="monitor" cls="sm" />Live display</span>
-      ${live ? html`<${Chip} level=${head.level} icon=${head.icon} testid="live-state"
-        cls=${head.icon === "loader-circle" ? "spin-icon" : ""}>${head.text}<//>` : null}
-      ${live && st.mode ? html`<span class="tag" data-testid="live-mode" title=${MODE_TITLE[st.mode] || ""}>${st.mode === "hw" ? "exact" : "software tap"}</span>` : null}
+      ${live ? stateChip : null}
+      ${live ? modeTag : null}
       <span class="spacer"></span>
       ${live ? html`<${Seg} label="Scale" value=${c.zoom} onChange=${(z) => c.setZoom(z)}
           options=${[{ value: 1, label: "1x", title: `1x: ${Math.max(1, Math.round(dpr))} device pixel(s) per panel pixel` },
             { value: 2, label: "2x", title: `2x: ${Math.max(1, Math.round(dpr * 2))} device pixels per panel pixel` }]} />`
-        : (fb.kind === "refused" || fb.kind === "failed") ? html`<button type="button" class="btn ghost sm" data-action="live-retry"
-          onClick=${() => c.retry()}><${Icon} name="refresh-cw" />Try again</button>` : null}
-    </div>
+        : retry}
+    </div>`}
     ${live ? html`
       <div class="ld-scroll">
-        <div class="ld-slot" style=${`width:${cssW}px;height:${cssH}px`}>
+        <div class="ld-slot" style=${slotStyle}>
           <div class=${`ld-frame${stale ? " ld-stale" : ""}${grey ? " ld-grey" : ""}${dim ? " ld-dim" : ""}`}
-            title=${VIEW_ONLY} data-testid="live-frame" style=${`width:${cssW}px;height:${cssH}px`}>
+            title=${VIEW_ONLY} data-testid="live-frame" style=${boxStyle}>
             <canvas class="ld-canvas" width=${W} height=${H} ref=${canvasRef} data-testid="live-canvas"
               role="img" aria-label=${`The board's panel, live, ${W} by ${H}. ${VIEW_ONLY}.`}
-              style=${`width:${cssW}px;height:${cssH}px`}></canvas>
+              style=${canvasStyle}></canvas>
             ${holdsHatch ? html`<${Hatches} tiles=${c.hatched} />` : null}
             ${grey ? html`<div class="ld-note" data-testid="live-grey"><span>${badges.find((b) => b.level === "grey").text}</span></div>` : null}
             ${badges.some((b) => b.level !== "grey") || stale ? html`<div class="ld-badges" data-testid="live-badges">
@@ -800,6 +809,7 @@ export function LiveDisplay({ bid, children = null }) {
         </div>
       </div>
       <div class="ld-foot">
+        ${fit ? stateChip : null}${fit ? modeTag : null}
         <p class="muted small ld-fresh" data-testid="live-freshness">${fresh.join(" · ")}</p>
         <span class="spacer"></span>
         <button type="button" class="btn ghost sm" data-action="live-pause" aria-pressed=${c.paused ? "true" : "false"}
@@ -810,8 +820,8 @@ export function LiveDisplay({ bid, children = null }) {
           ${note.busy ? html`<${Spinner} />` : html`<${Icon} name="download" />`}Snapshot</button>
       </div>
       ${note.text ? html`<${Reason} level="err" text=${`Snapshot: ${note.text}`} testid="live-snapshot-error" />` : null}`
-      : html`${fb.kind === "checking" ? html`<p class="reason" data-testid="live-reason"><${Spinner} /><span>${fb.text}</span></p>`
-        : html`<${Reason} level=${fb.level} icon=${fb.icon} text=${fb.text} testid="live-reason" />`}
+      : html`<div class="ld-why">${fb.kind === "checking" ? html`<p class="reason" data-testid="live-reason"><${Spinner} /><span>${fb.text}</span></p>`
+        : html`<${Reason} level=${fb.level} icon=${fb.icon} text=${fb.text} testid="live-reason" />`}${fit ? retry : null}</div>
       ${fb.detail ? html`<details class="ld-detail" data-testid="live-detail"><summary class="muted small"><${Icon} name="chevron-right" cls="sm chev" />Details</summary>
         <p class="mono small secondary">${fb.detail}</p></details>` : null}
       ${children}`}

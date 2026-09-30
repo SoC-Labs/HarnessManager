@@ -66,6 +66,14 @@ export function checksRun(bid) {
   return run && ACTIVE.has(run.state) ? run : null;
 }
 
+// The service's checks state for a board ({run, last, runs, ...}), or null until read: the
+// Overview's Lease card reads it (UI2-OVERVIEW). Reading it never touches the board.
+export function checksOf(bid) {
+  const c = cs(bid);
+  if (!c.status && !c.loading && !c.error) loadChecks(bid);
+  return c.status;
+}
+
 export async function loadChecks(bid) {
   const c = cs(bid);
   c.loading = true;

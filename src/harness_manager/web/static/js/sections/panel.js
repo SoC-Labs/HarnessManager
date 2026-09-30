@@ -1,20 +1,18 @@
-// The board's front panel (lane P3; docs/design/CLCD_ALIGNMENT.md §5; david's decisions of
-// 2026-09-24):
-// - P5: a line and Identify in the Overview's Board tile ("Panel: status page · harness
-//   owns it · touch ok"), and the Front panel card, the full mirror, in Details;
-// - P6: "held" (violet) means someone else has it: here, the DUT owns the panel;
-// - P2: a tap on the panel's lease-request banner notifies the holder (lease.js shows
-//   "tapped on the panel"); it never releases;
-// - P3: these are harness features ('panel', 'presence', 'locate'). On an image without
-//   'panel' the mirror is rebuilt from what Harness Manager read, and says so, and Identify is
-//   disabled with the reason.
-// - PANEL-TRUTH (david, 2026-09-28): every word here is about what THIS IMAGE reports, by
-//   capability and feature. The harness type is named only from its own version.impl
-//   (support.impl), never guessed from a missing feature: the Linux harness rc2_v6 lacks
-//   'panel', 'presence' and 'locate' too. The card has one headline (Live / Read / Rebuilt /
-//   Not available), the Live display first, the rebuilt text as its fallback, and only the
-//   rows the image reports, with one "Not reported by this image" line (features behind a
-//   disclosure).
+// The board's front panel (lane P3, docs/design/CLCD_ALIGNMENT.md §5; UI v2 round 3, lane
+// UI2-OVERVIEW): the Overview's hero card, the ONLY front panel in the app (the Workbench's rail
+// no longer has one, the Board tile and the Details fold are gone). Its head: Live / Text and
+// Identify (5-30 s). Live is the board's own picture (LM4, display.js, fitted to the card); Text
+// is the panel's rows as text (the mirror below). The foot: what the picture is (PANEL-TRUTH's
+// one headline), owner · page · touch, the last tap, and what this image does not report. Who is
+// connected (presence) is the Overview's "Watching" line.
+//
+// david's decisions of 2026-09-24 still hold: P6 "held" (violet) means someone else has it (the
+// DUT owns the panel); P2 a tap on the panel's lease-request banner notifies the holder (lease.js
+// shows "tapped on the panel"); it never releases; P3 these are harness features ('panel',
+// 'presence', 'locate'). On an image without 'panel' the mirror is rebuilt from what Harness
+// Manager read, and says so, and Identify is disabled with the reason. PANEL-TRUTH (2026-09-28):
+// every word is about what THIS IMAGE reports, by capability and feature; the harness type is
+// named only from its own version.impl, never guessed from a missing feature.
 //
 // Reads (docs/API.md "Front panel"): GET .../panel (the state; the daemon reuses an answer
 // up to 1 s old) and GET .../panel/frame (the 15 x 40 text grid; up to 3 s old). The
@@ -29,9 +27,8 @@ import { html, useEffect } from "../lib.js";
 import {
   bgOpts, boardState, changed, heldBack, onBoardEvent, onJobEnded, quietWords, S, timed,
 } from "../store.js";
-import { ActionRow, Card, Chip, Icon, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
+import { ActionRow, Chip, Icon, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
 import { LiveDisplay } from "../display.js";        // LM4: the Live display, over the text mirror
-import { LocateButton } from "../locate.js";         // LOCATE: the Board tile's Identify
 import { displayLive } from "../display.js";        // PANEL-TRUTH: the headline's "Live"
 import { GLYPHS, ROLE_COLOURS, ROLES } from "../panel_codes.js";   // PANEL-V017: generated
 import { settingValue } from "../prefs.js";
@@ -383,7 +380,7 @@ function identifySpec(bid, seconds) {
   };
 }
 
-export function IdentifyControl({ bid, testid = "identify" }) {
+export function IdentifyControl({ bid, testid = "identify", head = false }) {
   const f = front(bid);
   const p = panelState(bid, "identify");
   const why = identifyWhy(bid);
@@ -395,7 +392,7 @@ export function IdentifyControl({ bid, testid = "identify" }) {
   const failed = p.lines.length > 0 && !p.running && (p.lines[0].level === "err" || !!p.lines[0].notRun);
   return html`<div class="identify" data-testid=${testid} data-blinking=${blinking ? "yes" : "no"}>
     <${ActionRow} bid=${bid} panel="identify" spec=${spec} icon=${blinking ? "square" : "scan-search"}
-      compact=${true} gate=${{ guard: () => why }}>
+      compact=${true} gate=${{ guard: () => why }} showReason=${!head}>
       ${blinking ? html`<span class="identify-until" data-testid="identify-until"><${Icon} name="timer" cls="sm" />blinking until ${clock(f.until)}</span>`
         : html`<select class="select identify-seconds" aria-label="How long the panel blinks"
           data-testid="identify-seconds" disabled=${!!why}
@@ -403,37 +400,19 @@ export function IdentifyControl({ bid, testid = "identify" }) {
           ${choices.map((s) => html`<option key=${s} value=${String(s)} selected=${s === seconds}>${s} s</option>`)}
         </select>`}
     <//>
-    ${failed ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="identify-result" />` : null}
+    ${failed && !head ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="identify-result" />` : null}
   </div>`;
 }
 
-// --- the Board tile's line -----------------------------------------------------------------------
-
-function usePanelReads(bid) {
-  useEffect(() => {
-    const f = front(bid);
-    if (!f.body && !f.loading) loadPanel(bid);
-    const timer = setInterval(() => {
-      const b = boardState(bid);
-      if (document.visibilityState === "visible" && !b.job) loadPanel(bid);
-    }, POLL_MS);
-    return () => clearInterval(timer);
-  }, [bid]);
+// The Identify answer the head's control does not show (a failure, or a click the gate
+// stopped): under the picture, once.
+function IdentifyResult({ bid }) {
+  const p = panelState(bid, "identify");
+  const failed = p.lines.length > 0 && !p.running && (p.lines[0].level === "err" || !!p.lines[0].notRun);
+  return failed ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="identify-result" />` : null;
 }
 
-// Two cells of the tile's key/value grid: "Panel" and its line, with Identify under it (LOCATE:
-// the one-click 5 s button, the same as the sidebar's; Details keeps the full control).
-export function PanelTileRow({ bid }) {
-  usePanelReads(bid);
-  const f = front(bid);
-  return html`<span class="k">Panel</span>
-    <span class="v" data-testid="tile-panel">
-      <span class="panel-line" data-testid="tile-panel-line"><${Parts} parts=${lineParts(f)} />${" "}<${RebuiltTag} f=${f} testid="tile-panel-rebuilt" /></span>
-      <${LocateButton} bid=${bid} where="tile" />
-    </span>`;
-}
-
-// --- the Front panel card (Details) ---------------------------------------------------------------
+// --- the Front panel (round 3: the Overview's hero, the only one in the app) ----------------------
 
 // PANEL-V017: a cell's role CODE is String.fromCharCode(97 + i) for ROLES[i], design/tokens.json's
 // panel roles in order (net-protocol v0.17: a text ... i ok ... q banner-err ... u banner-held);
@@ -525,41 +504,17 @@ function Mirror({ f }) {
   ${unknown ? html`<p class="muted small pm-legend" data-testid="panel-mirror-legend"><span class="mono">${UNKNOWN_MARK}</span> ${NOT_REPORTED}</p>` : null}`;
 }
 
-const ROLE_WORDS = { holder: "holds the lease", owner: "has it open", watch: "watching" };
-
-// Only on an image that reports them (PANEL-TRUTH: the card leaves the row out otherwise, and
-// its "Not reported by this image" line says so).
-function Sessions({ f }) {
-  const p = f.body.panel;
-  const list = p.sessions || [];
-  if (!list.length) {
-    return html`<span class="muted" data-testid="panel-sessions-none">${p.count ? `${plural(p.count, "session", "sessions")}, not listed yet` : "no Harness Manager connected"}</span>`;
-  }
-  const now = Date.now() / 1000;
-  return html`<ul class="pm-list" data-testid="panel-sessions">${list.map((s) => html`<li key=${s.sid}
-      data-session=${s.sid} data-mine=${s.mine ? "yes" : "no"}>
-    <${Icon} name="user" cls="sm i-muted" /><span class="mono">${s.who}</span>
-    <span class="secondary">${ROLE_WORDS[s.role] || s.role}</span>
-    ${s.mine ? html`<${Chip} level="accent" testid="panel-session-mine" title="this Harness Manager">you<//>` : null}
-    <span class="muted small">${ageText(now - Number(s.age_s || 0), now)}</span>
-  </li>`)}</ul>`;
-}
+export const ROLE_WORDS = { holder: "holds the lease", owner: "has it open", watch: "watching" };
 
 const TAP_WORDS = { request: "the lease request", identify: "Identify (found it)", nav: "next page" };
 
+// The last tap on the glass, in one line (the newest first; the rest on hover).
 function Taps({ f }) {
-  if (!f.taps.length) return html`<span class="muted" data-testid="panel-taps-none">none</span>`;
-  return html`<ul class="pm-list" data-testid="panel-taps">${f.taps.slice(0, TAPS_SHOWN).map((t) => html`<li key=${t.seq}
-      data-tap=${t.seq} data-on=${t.on}>
-    <${Icon} name="user" cls="sm i-muted" /><span>tapped ${TAP_WORDS[t.on] || t.on || "the glass"}</span>
-    <span class="muted small">${t.at ? clock(t.at) : ""}</span>
-  </li>`)}</ul>`;
-}
-
-function OwnerChip({ p }) {
-  const o = ownerPart(p);
-  return html`<${Chip} level=${o.level === "busy" ? "accent" : o.level} testid="panel-owner-chip"
-    icon=${o.level === "ok" ? "circle-check" : o.level === "held" ? "lock" : o.level === "busy" ? "" : "circle-help"}>${o.text}<//>`;
+  if (!f.taps.length) return null;
+  const t = f.taps[0];
+  const all = f.taps.slice(0, TAPS_SHOWN).map((x) => `tapped ${TAP_WORDS[x.on] || x.on || "the glass"}${x.at ? ` at ${clock(x.at)}` : ""}`);
+  return html`<span class="pl" data-testid="panel-taps" data-tap=${t.seq} data-on=${t.on} title=${all.join("\n")}>
+    <span class="pl-sep"> · </span>last tap: ${TAP_WORDS[t.on] || t.on || "the glass"}${t.at ? ` ${clock(t.at).slice(0, 5)}` : ""}</span>`;
 }
 
 // PANEL-TRUTH: the card's one headline: what the card shows now, in plain words.
@@ -578,17 +533,6 @@ export function headline(f, live) {
   return { state: "read", level: "", chip: "Read", text: "" };
 }
 
-function Headline({ f, h }) {
-  const p = f.body.panel;
-  const now = Date.now() / 1000;
-  return html`<div class="panel-headline mb-12" data-testid="panel-headline" data-state=${h.state}>
-    <${Chip} level=${h.level} testid="panel-headline-chip">${h.chip}<//>
-    ${h.state === "rebuilt" ? html`<span class="secondary small" data-testid="panel-rebuilt">${h.text}</span>`
-      : h.state === "read" ? html`<span class="muted small" data-testid="panel-read-age">Read from the panel${p.observed_at ? `, ${ageText(p.observed_at, now)}` : ""}.</span>`
-        : html`<span class="muted small" data-testid="panel-live-note">${h.text}</span>`}
-  </div>`;
-}
-
 // One line for everything the image does not report; the features behind a disclosure.
 function NotReported({ f }) {
   const items = notReported(f);
@@ -597,7 +541,7 @@ function NotReported({ f }) {
   const impl = implWords(support);
   return html`<details class="panel-missing mt-8" data-testid="panel-not-reported"
       data-missing=${items.map((i) => i.key).join(" ")}>
-    <summary class="muted small"><${Icon} name="chevron-right" cls="sm chev" />Not reported by this image: ${items.map((i) => i.what).join(", ")}</summary>
+    <summary class="muted small" title=${`Not reported by this image: ${items.map((i) => i.what).join(", ")}`}><${Icon} name="chevron-right" cls="sm chev" />Not reported by this image: ${items.map((i) => i.what).join(", ")}</summary>
     <ul class="pm-list muted small" data-testid="panel-not-reported-details">
       ${items.map((i) => html`<li key=${i.key} data-missing=${i.key}>${i.what}: needs ${i.feature}</li>`)}
       <li key="impl" data-testid="panel-impl">${impl ? `the harness says it is the ${impl}` : "the harness did not say which harness it is"}${support.impl ? ` (version.impl "${support.impl}")` : ""}</li>
@@ -605,7 +549,58 @@ function NotReported({ f }) {
   </details>`;
 }
 
-export function PanelCard({ bid }) {
+// Live needs the Linux harness's lcd_mirror (LM4, harness feature 'lcd_mirror'): a board without
+// it shows the panel's text only, and the Live button says why.
+export function liveWhy(bid) {
+  const b = boardState(bid);
+  const id = (b.info && b.info.identity) || null;
+  if (!id) return "Live: the board has not been read yet";
+  if ((id.features || []).includes("lcd_mirror")) return "";
+  const what = id.harness_impl === "bare-metal" ? `bare-metal ${id.harness_version || "harness"}`
+    : `${implWords({ impl: id.harness_impl }) || "this harness image"}`;
+  return `Live needs the Linux harness's lcd_mirror: ${what} reports the panel's text only`;
+}
+
+const VIEW_KEY = "harness_manager.panel.view";
+
+function storedView() {
+  try { return window.localStorage.getItem(VIEW_KEY) || ""; } catch (e) { return ""; }
+}
+
+// "live" (the board's own picture) or "text" (the panel's rows as text): the page's choice,
+// Live by default where the board can give it.
+export function panelView(bid) {
+  if (liveWhy(bid)) return "text";
+  const v = front(bid).view || storedView();
+  return v === "text" ? "text" : "live";
+}
+
+function setView(bid, view) {
+  front(bid).view = view;
+  try { window.localStorage.setItem(VIEW_KEY, view); } catch (e) { /* this page only */ }
+  changed();
+}
+
+// The note under the picture: what it is (PANEL-TRUTH's one headline), owner · page · touch,
+// the last tap, and what this image does not report.
+function PanelFoot({ bid, f, view }) {
+  const p = f.body.panel;
+  const h = headline(f, view === "live" && displayLive(bid));
+  const now = Date.now() / 1000;
+  const note = h.state === "live" ? "the board's own picture (lcd_mirror); view only"
+    : h.state === "rebuilt" ? h.text
+      : `Read from the panel${p.observed_at ? `, ${ageText(p.observed_at, now)}` : ""}: the rows as text you can select and copy.`;
+  return html`<div class="ov-panel-foot">
+    <div class="panel-headline" data-testid="panel-headline" data-state=${h.state}>
+      <${Chip} level=${h.level} testid="panel-headline-chip">${h.chip}<//>
+      <span class="small secondary ov-ell" data-testid=${h.state === "rebuilt" ? "panel-rebuilt" : h.state === "read" ? "panel-read-age" : "panel-live-note"}
+        title=${note}>${note}</span></div>
+    <div class="ov-panel-parts"><span class="panel-line small" data-testid="panel-line"><${Parts} parts=${lineParts(f)} /><${Taps} f=${f} /></span>
+      <${NotReported} f=${f} /></div>
+  </div>`;
+}
+
+export function FrontPanelCard({ bid }) {
   const f = front(bid);
   useEffect(() => {
     const g = front(bid);
@@ -614,48 +609,52 @@ export function PanelCard({ bid }) {
     loadFrame(bid);
     const timer = setInterval(() => {
       const b = boardState(bid);
-      if (document.visibilityState === "visible" && !b.job) loadFrame(bid);
+      if (document.visibilityState === "visible" && !b.job) { loadPanel(bid); loadFrame(bid); }
     }, POLL_MS);
     return () => { g.cards -= 1; clearInterval(timer); };
   }, [bid]);
+  const why = liveWhy(bid);
+  const view = panelView(bid);
+  const idWhy = identifyWhy(bid);
+  const tools = html`<div class="seg ov-seg" role="group" aria-label="Front panel view" data-testid="panel-view" data-view=${view}>
+      <button type="button" aria-pressed=${view === "live" ? "true" : "false"} disabled=${!!why} data-action="panel-view-live"
+        title=${why || "Live: the board's own picture (lcd_mirror); view only, the harness owns the panel"}
+        onClick=${() => setView(bid, "live")}><${Icon} name="radio" />Live</button>
+      <button type="button" aria-pressed=${view === "text" ? "true" : "false"} data-action="panel-view-text"
+        title="Text: the panel's rows as text, from the harness; select and copy it"
+        onClick=${() => setView(bid, "text")}><${Icon} name="list" />Text</button></div>
+    <span class="spacer"></span>
+    <${IdentifyControl} bid=${bid} testid="panel-identify" head=${true} />`;
   const p = f.body && f.body.panel;
-  const actions = p ? html`<span class="row"><${OwnerChip} p=${p} /></span>` : null;
   let body;
   if (f.unsupported || !f.body || !p) {
     const parts = lineParts(f);
     if (parts[0].key === "quiet") {
       // FIX-PACK-1: background reads are off (or paused): never a spinner that waits for ever.
       body = html`<${QuietNote} testid="panel-quiet" action="panel-read-now" busy=${f.loading && f.explicit}
-        text=${quietWords(f.quiet)}
-        onRead=${() => readPanelNow(bid)} />`;
+        text=${quietWords(f.quiet)} onRead=${() => readPanelNow(bid)} />`;
     } else if (parts[0].key === "loading") {
       body = html`<${Reason} level="unk" testid="panel-unavailable" text="Reading the panel..." />`;
     } else {
-      // PANEL-TRUTH: one headline, "Not available", and the reason in plain words.
       body = html`<div class="panel-headline" data-testid="panel-headline" data-state="none">
         <${Chip} level=${parts[0].level === "err" ? "err" : "unk"} testid="panel-headline-chip">Not available<//>
         <${Reason} level=${parts[0].level === "err" ? "err" : "unk"} icon=${parts[0].icon || ""}
-          testid="panel-unavailable" text=${parts[0].text} />
-      </div>`;
+          testid="panel-unavailable" text=${parts[0].text} /></div>`;
     }
+    if (view === "live") body = html`<div class="ov-panel-pic"><${LiveDisplay} bid=${bid} fit=${true}>${body}<//></div>`;
   } else {
-    const touch = touchPart(p.touch);
-    const missing = new Set(notReported(f).map((i) => i.key));
-    const h = headline(f, displayLive(bid));
-    body = html`
-      <${Headline} f=${f} h=${h} />
-      <${LiveDisplay} bid=${bid}><${Mirror} f=${f} /><//>
-      <dl class="kv mt-14">
-        <dt>Owner</dt><dd data-testid="panel-owner"><${Parts} parts=${[{ key: "owner", ...ownerPart(p) }]} /></dd>
-        ${missing.has("page") ? null : html`<dt>Page</dt><dd data-testid="panel-page"><${Parts} parts=${[{ key: "page", ...pagePart(p) }]} /></dd>`}
-        ${p.banner ? html`<dt>Banner</dt><dd class="mono" data-testid="panel-banner">${p.banner}</dd>` : null}
-        ${p.card ? html`<dt>Card</dt><dd class="mono" data-testid="panel-card-slot">${p.card}</dd>` : null}
-        ${missing.has("touch") ? null : html`<dt>Touch</dt><dd data-testid="panel-touch"><${Parts} parts=${[{ key: "touch", ...touch }]} /></dd>`}
-        ${missing.has("sessions") ? null : html`<dt>Sessions</dt><dd><${Sessions} f=${f} /></dd>`}
-        ${missing.has("taps") ? null : html`<dt>Recent taps</dt><dd><${Taps} f=${f} /></dd>`}
-        <dt>Identify</dt><dd><${IdentifyControl} bid=${bid} testid="panel-identify" /></dd>
-      </dl>
-      <${NotReported} f=${f} />`;
+    body = html`<div class="ov-panel-pic" data-view=${view}>${view === "live"
+        ? html`<${LiveDisplay} bid=${bid} fit=${true}><${Mirror} f=${f} /><//>`
+        : html`<${Mirror} f=${f} />`}</div>
+      <${PanelFoot} bid=${bid} f=${f} view=${view} />`;
   }
-  return html`<${Card} title="Front panel" icon="monitor" actions=${actions} testid="panel-card">${body}<//>`;
+  return html`<section class="card ov-card ov-panel" aria-label="Front panel" data-testid="panel-card"
+      data-view=${view} data-owner=${p ? p.owner || "" : ""}>
+    <div class="card-head"><h2 class="card-title"><${Icon} name="monitor" />Front panel</h2>${tools}</div>
+    <div class="card-body">
+      ${body}
+      ${idWhy && f.body ? html`<${Reason} icon="circle-slash" testid="reason-identify" text=${idWhy} />` : null}
+      <${IdentifyResult} bid=${bid} />
+    </div>
+  </section>`;
 }
