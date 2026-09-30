@@ -501,7 +501,10 @@ set rc [catch {
     gate clocks_after_link [expr { [llength $clks] > 0 }] \
         "[llength $clks] clocks propagated from the static"
 
-    if { $P(RM_XDC) ne "" } { read_xdc -cell $rp_cell $P(RM_XDC) }
+    # The cell asked for again: the $rp_cell object from before read_checkpoint -cell is stale,
+    # and Vivado 2026.1 SEGFAULTS turning it into a name for read_xdc -cell (KIT-INTERACTIVE:
+    # 2 of 2 batch links with an RM_XDC, HASCUtils::getXDCName in hs_err_pid*.log).
+    if { $P(RM_XDC) ne "" } { read_xdc -cell [get_cells $rp] $P(RM_XDC) }
     set_property BITSTREAM.CONFIG.PERSIST NO [current_design]
 
     report_drc -checks [get_drc_checks HDPR*] -file [file join $out "${name}_drc_hdpr_link.rpt"]

@@ -268,3 +268,14 @@ def test_hm_save_floorplan_round_trips_the_scoped_name(tmp_path):
     assert "create_pblock pblock_lfsr" in text and "u_rp_dut_pblock" not in text
     assert "set_property EXCLUDE_PLACEMENT 1 [get_pblocks pblock_lfsr]" in text
     assert "CONTAIN_ROUTING" not in text                   # twin: an unset property is not written
+
+
+def test_rm_xdc_is_read_with_the_cell_asked_for_again():
+    """Vivado 2026.1 segfaulted (2 of 2, the evidence's crash/) at read_xdc -cell $rp_cell after
+    read_checkpoint -cell: the cell object from before the link is stale. The template asks
+    for the cell again; the old spelling must not come back."""
+    text = render.template_text()
+    link = text[text.index("stage link"):text.index("stage impl")]
+    assert "read_xdc -cell [get_cells $rp] $P(RM_XDC)" in link
+    assert "read_xdc -cell $rp_cell" not in text                     # twin: the crashing form
+    assert link.index("read_checkpoint -cell $rp_cell") < link.index("read_xdc -cell [get_cells $rp]")
