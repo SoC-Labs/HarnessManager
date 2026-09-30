@@ -628,9 +628,22 @@ rate, because `screen` alone sets 9600.
 Input to `uart0` and `uart1` is paced at 20 ms a byte, because the nanoSoC UART has no
 receive FIFO. A paste arrives intact, but slowly.
 
+**Reset the DUT from the console.** In `console TARGET uart0`, press **Ctrl-]** then **r**:
+the console asks `reset the DUT of <board>? r or y resets it`. Press **r** (or **y**) and the
+DUT resets while the console stays open, so you see it boot. Any other key cancels. After
+Ctrl-], any key but r exits at once; Ctrl-] alone exits after 2 s.
+
+This is the way to reset while a console is open. A console holds the board (one process
+owns a board), so `harness-manager reset TARGET` from another terminal is refused (exit 4,
+"your own `harness-manager console uart0` … holds it"). The one exception: when the
+Harness Manager service runs (the app, or `harness-manager daemon start`) **before** you open
+the console, both terminals share its session and `reset` works.
+
 **What can go wrong**
 - **Windows has no `screen`:** use the app, or `--export 0` and a raw TCP terminal.
 - **One `screen` per console.** A second one is refused.
+- **`reset` refused (exit 4) while a console is open:** the console holds the board. Reset
+  from the console (Ctrl-] then r, r), or start the service before the console (above).
 - **An unknown console name** exits 3 and lists the names.
 
 ## 6. Program a design
@@ -659,11 +672,26 @@ harness-manager restore 192.168.10.101            # back to the baseline
 
 | Option | Use |
 |---|---|
-| `--yes` | do not ask |
+| `--yes` | do not ask (scripts need it: see below) |
 | `--keep-on-card` | also keep it on the board's user microSD, so the board boots into it next time |
 | `--overlay-dir DIR` | look for overlays here first (repeatable) |
 
 A design is chosen by name (`nanosoc`) or by rm_id (`0x01000001`).
+
+**Scripts need `--yes`.** `program` asks `program nanosoc (0x01000001) into <board>? [y/N]`
+before it pushes. In a script nobody answers: an empty or closed stdin counts as no, so it
+prints `not confirmed` and exits 15, having changed nothing. A script runs
+`harness-manager program TARGET nanosoc --yes`. `restore` does not ask.
+
+**`restore` needs the greybox.** HM looks for the greybox built for the board's shell in the
+overlay directories and among the imported overlays. A kit carries no overlays, so after
+`kit import` and `kit pack --import` a home has your RM but no greybox, and `restore` exits 3.
+Give HM the folder of overlays built with the shell's mint (it holds `greybox/manifest.json`):
+- once: `harness-manager restore TARGET --overlay-dir DIR`;
+- for good: `harness-manager config set mps3.overlay_dirs DIR` (the app: Settings >
+  Harness + kits > Extra overlay directories).
+
+The message names the shell and where HM looked.
 
 **How long a push takes** depends on the harness. Measured on the lab boards:
 
@@ -699,6 +727,8 @@ section).
 | exit 6, "Written, not verified" | the board did not confirm the load | run `info`; then `restore` |
 | `busy` right after a failed push | the harness is finishing that swap, for up to 30 s | wait 30 s, then try again |
 | exit 12 with `--keep-on-card` | no card store (bare metal) or no card | program without it, or insert a card |
+| exit 15, `not confirmed` | no terminal answered the [y/N] prompt (a script) | add `--yes` |
+| `restore`: exit 3, `no baseline overlay (greybox) for shell …` | no greybox for this shell in the overlay directories or the store | `--overlay-dir DIR` or `config set mps3.overlay_dirs DIR` (above) |
 
 On the Linux harness a push always uses TCP. It gives up when a chunk waits more than 30 s
 (the harness parks the design behind the outgoing clearing); the whole push takes longer
@@ -904,11 +934,29 @@ Debug tile has **Start** and **Stop**.
 | Command | What it does |
 |---|---|
 | `debug detect TARGET` | the TAP IDCODE (exit 13: the design has no debug port) |
-| `debug up TARGET` | start OpenOCD, print the ports, hold until Ctrl-C |
+| `debug up TARGET` | start OpenOCD, print the ports and the gdb line (`attach`), hold until Ctrl-C |
 | `debug status TARGET` | state, ports, config, pid, and which OpenOCD (does it have remote_bitbang?) |
 | `debug down TARGET` | stop it |
 
-Connect gdb with `target extended-remote 127.0.0.1:<gdb port>`. Arm DS uses the same port
+**`debug up` holds its terminal.** It runs in the foreground: the server lives while it
+runs, and Ctrl-C (or `harness-manager detach TARGET`) stops it. So run gdb in a **second
+terminal**. There is no `--background`; to keep a session up without a terminal, use **Open
+session** in the app (the service owns it until **Close session**).
+
+**Connect gdb with the line `debug up` prints** (`attach`), for example:
+
+```bash
+arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:23344"
+```
+
+`set remotetimeout 60` is needed through a hub or a claimed Linux board's SSH: gdb's default
+2 s reply timeout fails the attach there ("Remote replied unexpectedly to 'vMustReplyEmpty':
+timeout"; board 2, 30 Sep). It is on the line for every board: a board that answers fast
+behaves the same, and only a dead link takes longer to report (Ctrl-C in gdb gives up
+sooner). OpenOCD may still print `keep_alive() was not invoked in the 1000 ms timelimit`
+through a hub: a warning, not a failure. The app's **Attach** row copies the same line.
+
+Arm DS uses the same port
 through its "Generic GDB" connection. The session closes by itself before a partition
 swap, and reopens only when you ask.
 
@@ -1388,6 +1436,11 @@ answers with another key is refused.
 | you claimed it another way (pyverify, a runbook) | `board claim TARGET --adopt` pins it |
 | the board was re-provisioned (a new card) | `board claim TARGET --replace-host-key` |
 | you want the ssh command line, not a shell | `board ssh TARGET --print` |
+
+`board claim` asks `[y/N]` first, with `--adopt` too. In a script nobody answers, so it
+exits 15 (`not confirmed`) and changes nothing: add `--yes`, for example
+`harness-manager board claim TARGET --adopt --key ~/.ssh/id_ed25519.pub --yes`. `--key` takes
+the **public** key (`.pub`).
 
 Nothing claims a board by itself.
 

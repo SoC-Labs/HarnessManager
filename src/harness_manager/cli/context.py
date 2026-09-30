@@ -183,9 +183,19 @@ class Ctx:
             return AlreadyError(f"{cand.board_id} is already attached by you (pid {owner.pid})",
                                 hint=f"{detach} releases it")
         what = owner.note.replace(HOLD_TAG, "").strip() or "a foreground verb"
+        stop = f"stop it with Ctrl-C there, or run {detach}"
+        if what.startswith("console ") and "--export" not in what:
+            # FIX-PACK-5: an interactive console sends Ctrl-C to the board; Ctrl-] ends it,
+            # and Ctrl-] r, r resets the DUT from inside it (one process owns a board).
+            stop = (f"end it there with Ctrl-] (Ctrl-C if it is --read-only), or run {detach}")
+            if self.verb == "reset":
+                stop = ("reset from that console instead: Ctrl-] then r, r (an interactive "
+                        "console, not --read-only); or " + stop
+                        + ". With the service running (`harness-manager daemon start` before "
+                          "the console), both terminals share its session and `reset` works")
         return HeldError(exc.message, holder=exc.holder,
                          hint=f"your own `harness-manager {what}` (pid {owner.pid}) holds it; "
-                              f"stop it with Ctrl-C there, or run {detach}")
+                              f"{stop}")
 
     def require(self, session: BoardSession, attr: str, capability: str) -> Any:
         """The session adapter ``attr``, or ``UnavailableError`` with the engine's reason."""

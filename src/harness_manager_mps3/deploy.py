@@ -158,7 +158,7 @@ from harness_manager.services.deploy import (
 
 from . import constants, ctlgate
 from .constants import FABRIC_MISMATCH_ERRS, IMPL_LINUX, PUSH_PORT
-from .overlays import CatalogueEntry, OverlayCatalogue
+from .overlays import CatalogueEntry, OverlayCatalogue, _same_u32
 from .shell import Mps3Shell, ShellLive, _ShellBusy, _TapTransport
 
 log = logging.getLogger(__name__)
@@ -380,8 +380,44 @@ class Mps3Deploy:
     def baseline(self) -> OverlayRef | None:
         """The greybox built for the RUNNING shell (live ping), if the catalogue has one."""
         live = self._live()
+        self._baseline_sid = live.shell_id or ""          # for baseline_missing (FIX-PACK-5)
         entry = self.catalogue.greybox_for(live.shell_id) if live.shell_id else None
         return entry.ref if entry is not None else None
+
+    def baseline_missing(self) -> tuple[str, str]:
+        """Why ``baseline()`` found no greybox, and what to do: (message, hint) for the restore
+        refusal (``services.deploy``). FIX-PACK-5: a clean home that imported a kit and packed
+        ``minimal`` has no greybox, and a kit never carries one (a kit zip holds the static and
+        its boundary, no overlays; ``kit pack`` refuses rm_id 0). Reads the catalogue only."""
+
+        def shown(value: object) -> str:
+            try:
+                return rmid.format_rm_id(rmid.parse_rm_id(value))
+            except (TypeError, ValueError):
+                return str(value)
+
+        sid = getattr(self, "_baseline_sid", "")
+        entries = self.catalogue.entries()
+        dirs = [str(d) for _, d in self.catalogue.search_dirs()]
+        looked = (f"none in the overlay directories ({', '.join(dirs)})" if dirs
+                  else "no overlay directories are set")
+        mine = sorted({e.ref.name for e in entries if e.origin == "store"
+                       and (not sid or _same_u32(e.ref.static_id, sid))})
+        looked += (f", and the imported overlays for it ({', '.join(mine)}) include none"
+                   if mine else ", and none is imported for it")
+        others = sorted({shown(e.ref.static_id) for e in entries
+                         if rmid.is_greybox(e.overlay.manifest.rm_id)
+                         and not (sid and _same_u32(e.ref.static_id, sid))})
+        if others:
+            looked += f"; the greybox HM has is for shell {', '.join(others)}"
+        where = f"shell {shown(sid)}" if sid else "the running shell"
+        hint = (f"give HM the folder of overlays built with {where}'s mint, the one that holds "
+                "greybox/manifest.json: once with `harness-manager restore TARGET --overlay-dir "
+                "DIR`, or for good with `harness-manager config set mps3.overlay_dirs DIR` (the "
+                "app: Settings > Harness + kits > Extra overlay directories). A kit carries no "
+                "overlays, so `kit import` adds no greybox, and `kit pack` builds RMs only "
+                "(rm_id 0 is refused)")
+        return f"no baseline overlay (greybox) for {where}: {looked}", hint
 
     def preflight(self, overlay: OverlayRef) -> Sequence[PreflightItem]:
         from harness_manager.services.deploy import mark_identity

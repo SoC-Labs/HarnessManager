@@ -14,6 +14,7 @@ import select
 import sys
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 from harness_manager.core.errors import (
@@ -33,6 +34,16 @@ from .output import TSV_COLUMNS, Result, tsv_field, tsv_line, with_data
 EXPORT_HOST = "127.0.0.1"
 READ_SLICE_S = 0.2
 ESCAPE = b"\x1d"          # Ctrl-], as in telnet and miniterm
+
+#: FIX-PACK-5: the interactive console resets the DUT itself, because while it runs it
+#: holds the board's session lock and a `reset` from another terminal is refused (one
+#: process owns a board). Ctrl-] then r arms it; r or y confirms, any other key cancels.
+#: Ctrl-] then any other key exits at once; Ctrl-] alone exits after ESCAPE_WAIT_S.
+RESET_KEY = b"r"
+CONFIRM_KEYS = (b"r", b"y")
+ESCAPE_WAIT_S = 2.0
+CONFIRM_WAIT_S = 10.0
+RESET_HELP = "Ctrl-] then r, r resets the DUT"
 
 
 # --- console ------------------------------------------------------------------------------
@@ -66,7 +77,8 @@ def cmd_console(ctx: Ctx) -> int:
         stream = broker.subscribe(session, a.name)
         try:
             if _interactive(ctx):
-                text = _terminal(ctx, stream, cand.board_id, _key_reader())
+                text = _terminal(ctx, stream, cand.board_id, _key_reader(),
+                                 reset=_dut_reset(ctx, session, cand.board_id))
             else:
                 text = _pump(ctx, stream)
         finally:
@@ -196,16 +208,39 @@ def _key_reader() -> Any:
     return _WindowsKeys() if os.name == "nt" else _PosixKeys()
 
 
-def _terminal(ctx: Ctx, stream, board_id: str, keys: Any) -> str:
+def _dut_reset(ctx: Ctx, session: Any, board_id: str) -> Callable[[], None] | None:
+    """The console's Ctrl-] r action (FIX-PACK-5): ``reset dut`` on the console's own
+    session, the same call the ``reset`` verb makes. None when the session has no reset
+    adapter: then Ctrl-] exits at once, as it always did."""
+    if getattr(session, "resets", None) is None:
+        return None
+    from .cmd_board import reset_on
+
+    return lambda: reset_on(ctx, session, board_id, "dut")
+
+
+def _say(text: str) -> None:
+    """One line from harness-manager inside the raw-mode console."""
+    _write_raw(f"\r\n[harness-manager: {text}]\r\n".encode())
+
+
+def _terminal(ctx: Ctx, stream, board_id: str, keys: Any,
+              reset: Callable[[], None] | None = None) -> str:
     """Board output to this terminal, keystrokes to the board, until Ctrl-] (or SIGTERM).
 
     The raw mode sends every key, Ctrl-C included, to the board: a MicroPython
     REPL on the DUT needs Ctrl-C and Ctrl-D. The broker paces the bytes when the
     board pack asks it to (the MPS3 DUT UARTs).
+
+    With ``reset`` (FIX-PACK-5), Ctrl-] then r arms a DUT reset and r or y confirms it;
+    the console stays open and shows the boot. Ctrl-] then any other key exits at once,
+    and Ctrl-] alone exits after ``ESCAPE_WAIT_S``. Keys read for the escape are never
+    sent to the board.
     """
     name = ctx.args.name
+    extra = f"; {RESET_HELP}" if reset is not None else ""
     ctx.note(f"console {name} of {board_id}: typing goes to the board, "
-             "Ctrl-] exits (Ctrl-C is sent to the board)")
+             f"Ctrl-] exits (Ctrl-C is sent to the board){extra}")
     collected = bytearray()
     done = threading.Event()
 
@@ -215,21 +250,71 @@ def _terminal(ctx: Ctx, stream, board_id: str, keys: Any) -> str:
         except HarnessError as exc:
             _write_raw(f"\r\n[harness-manager: {exc.message}]\r\n".encode())
 
-    def forward() -> None:
+    def next_key(rest: bytes, wait_s: float) -> tuple[bytes, bytes]:
+        """The next key and the bytes after it: from ``rest`` first, else typed within
+        ``wait_s``; (b"", b"") when none came."""
+        if rest:
+            return rest[:1], rest[1:]
+        end = time.monotonic() + wait_s
         while not done.is_set():
-            try:
-                data = keys.read(READ_SLICE_S)
-            except OSError:
-                done.set()
-                return
+            left = end - time.monotonic()
+            if left <= 0:
+                break
+            data = keys.read(min(READ_SLICE_S, left))
+            if data:
+                return data[:1], data[1:]
+        return b"", b""
+
+    def escape(rest: bytes) -> bytes | None:
+        """After Ctrl-]: None to exit, else the bytes still to send to the board."""
+        if reset is None:
+            return None
+        _say(f"r resets the DUT; any other key exits (or wait {ESCAPE_WAIT_S:g} s)")
+        key, rest = next_key(rest, ESCAPE_WAIT_S)
+        if key.lower() != RESET_KEY:
+            return None
+        _say(f"reset the DUT of {board_id}? r or y resets it; any other key cancels")
+        key, rest = next_key(rest, CONFIRM_WAIT_S)
+        if key.lower() not in CONFIRM_KEYS:
+            _say("not reset; back to the console")
+            return rest
+        try:
+            reset()
+        except HarnessError as exc:
+            _say(f"the DUT was not reset: {exc.message}"
+                 + (f"; {exc.hint}" if exc.hint else ""))
+        except Exception as exc:  # noqa: BLE001 - the console must outlive its own action
+            _say(f"the DUT was not reset: {type(exc).__name__}: {exc}")
+        else:
+            _say(f"reset the DUT of {board_id}: done")
+        return rest
+
+    def forward() -> None:
+        pending = b""
+        while not done.is_set():
+            if pending:
+                data, pending = pending, b""
+            else:
+                try:
+                    data = keys.read(READ_SLICE_S)
+                except OSError:
+                    done.set()
+                    return
             if not data:
                 continue
             if ESCAPE in data:
-                head = data.split(ESCAPE, 1)[0]
+                head, _, rest = data.partition(ESCAPE)
                 if head:
                     send(head)
-                done.set()
-                return
+                try:
+                    left = escape(rest)
+                except OSError:
+                    left = None
+                if left is None:
+                    done.set()
+                    return
+                pending = left
+                continue
             send(data)
 
     with Stopper(None) as stopper, keys:
@@ -268,6 +353,13 @@ def _export(ctx: Ctx, board_id: str, session) -> int:
 # --- debug --------------------------------------------------------------------------------
 
 
+def _gdb_command(gdb_port: int) -> str:
+    """``services.debug.gdb_command`` (imported here: the other verbs never load it)."""
+    from harness_manager.services.debug import gdb_command
+
+    return gdb_command(gdb_port, EXPORT_HOST)
+
+
 def _status_row(board_id: str, st: DebugStatus) -> list:
     return [board_id, st.state, st.gdb_port or "", st.telnet_port or "", st.tcl_port or "",
             st.pid or "", list(st.config), st.detail]
@@ -281,6 +373,8 @@ def _status_human(board_id: str, st: DebugStatus) -> list[str]:
         lines.append(f"telnet     {EXPORT_HOST}:{st.telnet_port}")
     if st.tcl_port:
         lines.append(f"tcl        {EXPORT_HOST}:{st.tcl_port}")
+    if st.gdb_port:
+        lines.append(f"attach     {_gdb_command(st.gdb_port)}")
     if st.config:
         lines.append(f"config     {' '.join(st.config)}")
     if st.pid:
@@ -315,6 +409,8 @@ def cmd_debug(ctx: Ctx) -> int:
                 f"{st.detail or 'no detail given'}",
                 hint="`harness-manager debug status TARGET` shows the last state"), status=st)
         data: dict[str, Any] = {"board_id": cand.board_id, "status": st}
+        if st.gdb_port:                                 # FIX-PACK-5: the line to paste
+            data["gdb_command"] = _gdb_command(st.gdb_port)
         human = _status_human(cand.board_id, st)
         report = getattr(svc, "openocd_report", None)
         ocd = report(session) if action == "status" and callable(report) else None
@@ -329,8 +425,9 @@ def cmd_debug(ctx: Ctx) -> int:
             # The engine stops a board's debug server when its session closes, so this
             # process IS the server's owner: hold until Ctrl-C, `detach`, or --for.
             if a.for_s is None:
-                ctx.note(f"debug server up for {cand.board_id}; Ctrl-C or "
-                         f"`harness-manager detach {a.target}` stops it")
+                ctx.note(f"debug server up for {cand.board_id}: run gdb in another terminal "
+                         f"(the attach line); this one holds the server until Ctrl-C or "
+                         f"`harness-manager detach {a.target}`")
             hold(a.for_s)
             svc.down(session)
     return ExitCode.OK

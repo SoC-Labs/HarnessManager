@@ -241,10 +241,18 @@ class DeployService:
         return result
 
     def restore_baseline(self, session: BoardSession) -> DeployResult:
-        base = self._adapter(session).baseline()
+        adapter = self._adapter(session)
+        base = adapter.baseline()
         if base is None:
-            raise AbsentError(
-                "no baseline overlay (greybox) is known for the running shell",
-                hint="add the greybox overlay built for this shell to the overlay directories")
+            message = "no baseline overlay (greybox) is known for the running shell"
+            hint = "add the greybox overlay built for this shell to the overlay directories"
+            # FIX-PACK-5: the pack's own words (where it looked, what to do), when it has them.
+            explain = getattr(adapter, "baseline_missing", None)
+            if callable(explain):
+                try:
+                    message, hint = explain()
+                except Exception:  # noqa: BLE001 - the refusal must still be the refusal
+                    log.exception("explaining the missing baseline failed")
+            raise AbsentError(message, hint=hint)
         with reset_guard.guarded(session, reset_guard.ACTION_RESTORE):   # SLOT-TIMING
             return self.deploy(session, base)

@@ -341,7 +341,8 @@ Other answers:
   and a claim now would lock their keys out.
 - a `HOST KEY CHANGED` note: see the failure table.
 
-**B2. Adopt the claim** (only after B1 said "another key"). It asks first; answer `y`.
+**B2. Adopt the claim** (only after B1 said "another key"). It asks first; answer `y`. (In a
+script nobody answers: it exits 15, `not confirmed`, and changes nothing; add `--yes`.)
 ```bash
 harness-manager board claim $B --adopt --key ~/.ssh/id_ed25519.pub | tee $EV/b2_adopt.txt
 ```
@@ -411,7 +412,8 @@ harness-manager overlays $B | tee $EV/d1_overlays.txt
 harness-manager program $B nanosoc --keep-on-card | tee $EV/d2_program_keep.txt
 ```
 It prints the preflight, then `card: …; the design will be kept on it`, then asks
-`program nanosoc (0x01000001) into <board> and keep it on the card?`. Answer `y`.
+`program nanosoc (0x01000001) into <board> and keep it on the card?`. Answer `y`. (`program`
+always asks; a script adds `--yes`, or it exits 15 `not confirmed`.)
 
 **Expect** (about 5 min). The push and swap take about 75 s: `nanosoc` took 73.2 s through
 the hub on board 2 (`docs/evidence/2026-09-28-hil/b2_dbg_program_nanosoc.txt`). Then the card
@@ -475,7 +477,17 @@ session's one claim forward (`ssh -J hub -l root board -L …:127.0.0.1:2542`, p
 6910 and 6921 for slots, the card and `debug up`), with the pinned host key. Through the
 hub the claimed board would refuse it with `xvc locked: board claimed (use ssh)`.
 
-**E1. Load the ILA design** (a swap; not kept on the card). It asks; answer `y`.
+**`debug up` and gdb over the same forward** (not a step here; for a gdb check on nanosoc):
+`debug up $B` holds its terminal until Ctrl-C (there is no `--background`), so gdb goes in a
+second terminal, with the `attach` line `debug up` prints:
+`arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:<gdb port>"`.
+Through the claim forward gdb's default 2 s timeout fails the attach (`Remote replied
+unexpectedly to 'vMustReplyEmpty': timeout`); with 60 the halt, `info registers`, resume and
+detach worked (board 2, 30 Sep). OpenOCD's `keep_alive() was not invoked in the 1000 ms
+timelimit` lines may still appear: warnings, not failures.
+
+**E1. Load the ILA design** (a swap; not kept on the card). It asks; answer `y` (a script:
+`--yes`).
 ```bash
 harness-manager program $B nanosoc_ila | tee $EV/e1_program_ila.txt
 ```
@@ -791,6 +803,13 @@ harness-manager card status $B | tee $EV/z3_card_final.txt
 **Expect:**
 - `restored <board> to the baseline (0x00000000) in N s; verified`;
 - the card's `default` line equals C2's.
+
+If `restore` exits 3 with `no baseline overlay (greybox) for shell 0x44ee76d5: …`, the
+Harness Manager that ran it (the service, when the app is open) has no overlay folder with the
+greybox: §0.1's `HARNESS_MANAGER_MPS3_OVERLAY_DIRS` was not in its environment. Give it the
+folder, then repeat Z2:
+`harness-manager config set mps3.overlay_dirs $HOME/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv`
+(read at the next listing, service or not). A kit import brings no greybox.
 
 **Z3. Close the board** in the app (or `harness-manager daemon stop`), then:
 ```bash

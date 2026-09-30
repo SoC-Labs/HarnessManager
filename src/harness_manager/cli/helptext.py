@@ -144,10 +144,14 @@ baud TARGET NAME [RATE]
 console TARGET NAME [--read-only] [--for SECONDS]
     A console (uart0, uart1, swo, ...) in this terminal, interactive: what you
     type goes to the board, Ctrl-C included (a MicroPython REPL needs it), and
-    Ctrl-] exits. --read-only only shows the output. With --read-only, --for,
-    --json or --tsv, or when stdout is not a terminal, it streams to stdout
-    until Ctrl-C or --for. --tsv prints one NAME<TAB>TEXT row per line. --json
-    needs --for and prints one object with the text collected.
+    Ctrl-] exits. Ctrl-] then r, then r (or y) to confirm, resets the DUT and
+    keeps the console open: while a console runs it holds the board, so a
+    `reset` from another terminal is refused unless the service runs (start
+    it before the console). --read-only only shows the output. With
+    --read-only, --for, --json or --tsv, or when stdout is not a terminal, it
+    streams to stdout until Ctrl-C or --for. --tsv prints one NAME<TAB>TEXT
+    row per line. --json needs --for and prints one object with the text
+    collected.
 console TARGET NAME --export PORT [--for SECONDS]
     Re-export the console on 127.0.0.1:PORT for an external terminal (PORT 0
     picks a free one). Prints the port on stdout, then holds until Ctrl-C or
@@ -157,15 +161,21 @@ console TARGET NAME --export PORT [--for SECONDS]
 DEBUG = """\
 debug up TARGET [--for SECONDS]
     Start OpenOCD for the loaded design, print the local gdb/telnet/tcl ports
-    (127.0.0.1), and keep it up until Ctrl-C, `detach`, or --for elapses. This
-    process owns the server and holds the board while it runs.
+    (127.0.0.1) and the gdb command line (attach), and keep it up until
+    Ctrl-C, `detach`, or --for elapses. This process owns the server and holds
+    the board and this terminal while it runs: run gdb in another terminal.
+    There is no --background; the app's Debug > Open session keeps one up
+    without a terminal.
 debug down TARGET          stop it
 debug status TARGET        state, ports, config, pid
 debug detect TARGET        non-intrusive: the TAP IDCODE, or exit 13 when the
                            loaded design has no debug port (greybox has none)
 
-Connect gdb with `target extended-remote 127.0.0.1:<gdb port>`; Arm DS uses the
-same port through its "Generic GDB" connection.
+Connect gdb with the attach line: arm-none-eabi-gdb -ex "set remotetimeout 60"
+-ex "target extended-remote 127.0.0.1:<gdb port>". The 60 s reply timeout is
+needed through a hub or a claimed board's SSH (gdb's 2 s default times out
+there) and harmless on a desk board. Arm DS uses the same port through its
+"Generic GDB" connection.
 
 xvc open TARGET [--byo] [--for SECONDS]
     Debug the loaded design's ILAs in Vivado over XVC. It reaches the
