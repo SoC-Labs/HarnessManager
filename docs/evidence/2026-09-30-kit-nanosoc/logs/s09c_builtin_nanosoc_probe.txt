@@ -1,0 +1,44 @@
+# builtin 'nanosoc' (no RTL), ~/builds/builtin_nanosoc, script from HM a29b51e (--stop-after link, --jobs 2)
+## 1. as the fixed head writes it (RM_SOURCES empty): build_rm_fixed.log
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/builtin_nanosoc/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE sources_given FAIL set RM_SOURCES or RM_SYNTH_HOOK (or RM_SYNTH_DCP)
+HM_RM_BUILD_FAILED gate=sources_given
+HM_RECEIPT /tmpdir/claude-74755/kit-nanosoc/home/builds/builtin_nanosoc/out/nanosoc_build.json
+
+## 2. what HM ab311b4 wrote (RM_SOURCES = the skeleton): -tclargs RM_SOURCES=xdc/nanosoc_wrapper_skeleton.sv STOP_AFTER=link, build_rm_oldskeleton.log
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/builtin_nanosoc/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-nanosoc/home/builds/builtin_nanosoc/xdc/nanosoc_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x01000001, RM_ID is 0x01000001 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck jtag_tck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 23 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_RECEIPT /tmpdir/claude-74755/kit-nanosoc/home/builds/builtin_nanosoc/out/nanosoc_build.json
+HM_RM_BUILD_STOPPED after=link
+
+## the synthesised 'nanosoc' (old behaviour): Report Cell Usage / Instance Areas
+Report Cell Usage: 
++-+-----+------+
+| |Cell |Count |
++-+-----+------+
++-+-----+------+
+
+Report Instance Areas: 
++------+---------+-------+------+
+|      |Instance |Module |Cells |
++------+---------+-------+------+
+|1     |top      |       |     0|
++------+---------+-------+------+

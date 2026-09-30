@@ -1,0 +1,64 @@
+=== 00:11:58 $ which harness-manager; harness-manager --version; harness-manager kit list; harness-manager config path
+=== rc=0 took=4s
+=== 00:12:10 $ which vivado; sha256sum mps3_rc2_0x44EE76D5_kit.zip; harness-manager kit import mps3_rc2_0x44EE76D5_kit.zip
+=== rc=0 took=4s
+=== 00:12:20 $ harness-manager kit info --static-id 0x44EE76D5
+=== rc=0 took=5s
+=== 00:12:25 $ harness-manager kit script --help
+=== rc=0 took=2s
+=== 00:12:33 $ harness-manager kit script --static-id 0x44EE76D5 --design nanosoc
+=== rc=0 took=5s
+=== 00:12:45 $ harness-manager kit script --static-id 0x44EE76D5 --design nanosoc --json
+=== rc=0 took=6s
+=== 00:15:01 $ harness-manager kit script --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json
+=== rc=0 took=5s
+=== 00:16:11 $ harness-manager kit script --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json --out ~/builds/nanosoc --jobs 4
+=== rc=0 took=4s
+=== 00:16:15 $ harness-manager kit build ~/builds/nanosoc --jobs 4; harness-manager kit build ~/builds/nanosoc --jobs 4 --json
+=== rc=0 took=8s
+=== 00:16:38 $ cd ~/builds/nanosoc && nice -n 10 /usr/bin/time -v /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.tcl -log /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.log -journal /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.jou -tclargs JOBS=4
+=== 00:32:42 $ harness-manager kit guide --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json --build-dir ~/builds/nanosoc
+=== rc=0 took=31s
+=== 00:33:20 $ harness-manager kit script --static-id 0x44EE76D5 --design nanosoc
+=== rc=0 took=4s
+=== 00:33:35 $ harness-manager kit script --static-id 0x44EE76D5 --design nanosoc --out ~/builds/builtin_nanosoc --jobs 2 --stop-after link
+=== rc=0 took=6s
+=== 00:33:49 $ cd ~/builds/builtin_nanosoc && nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source build_rm.tcl -log build_rm_fixed.log -journal build_rm_fixed.jou -tclargs JOBS=2 > /dev/null; cp out/nanosoc_build.json out/nanosoc_build_fixed.json; nice -n 10 /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source build_rm.tcl -log build_rm_oldskeleton.log -journal build_rm_oldskeleton.jou -tclargs JOBS=2 STOP_AFTER=link RM_SOURCES=xdc/nanosoc_wrapper_skeleton.sv > /dev/null; cp out/nanosoc_build.json out/nanosoc_build_oldskeleton.json
+=== 00:34:03 $ harness-manager kit script --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc_generics.json --out ~/builds/nanosoc_head --jobs 4
+=== rc=0 took=9s
+=== rc=0 took=355s
+=== rc=0 took=3327s
+=== 01:12:27 $ harness-manager kit check ~/builds/nanosoc
+=== rc=0 took=3s
+=== 01:12:30 $ harness-manager kit check ~/builds/nanosoc/out/nanosoc_build.json --static-id 0x44EE76D5 --json
+=== rc=0 took=2s
+=== 01:12:37 $ harness-manager kit pack ~/builds/nanosoc --import
+=== rc=0 took=3s
+=== 01:12:46 $ harness-manager kit build ~/builds/nanosoc_head --jobs 4
+=== rc=0 took=5s
+=== 01:12:51 $ cd ~/builds/nanosoc_head && nice -n 10 /usr/bin/time -v /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/build_rm.tcl -log /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/build_rm.log -journal /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc_head/build_rm.jou -tclargs JOBS=4
+=== 01:13:01 $ python /home/dam1n19/SoCLabs/hm-kit-nanosoc/docs/evidence/2026-09-30-kit-nanosoc/tools/overlays_boardfree.py 0x44EE76D5 1048576
+=== rc=0 took=2s
+=== 01:13:03 $ python /home/dam1n19/SoCLabs/hm-kit-nanosoc/docs/evidence/2026-09-30-kit-nanosoc/tools/overlays_boardfree.py 0x72BB0A36 262144
+=== rc=1 took=1s
+=== 01:13:11 $ harness-manager --help
+=== rc=0 took=1s
+=== 01:13:12 $ harness-manager overlays --help
+=== rc=0 took=2s
+=== 01:13:31 $ python /home/dam1n19/SoCLabs/hm-kit-nanosoc/docs/evidence/2026-09-30-kit-nanosoc/tools/shadow_check.py /tmpdir/claude-74755/kit-nanosoc/shadow/dirs
+=== rc=0 took=1s
+=== 01:19:16 $ export HARNESS_MANAGER_STATE_DIR=/tmpdir/claude-74755/kit-nanosoc/fresh/state; cd /tmpdir/claude-74755/kit-nanosoc/handover/nanosoc_0x01000001 && sha256sum -c SHA256SUMS && harness-manager kit list; harness-manager kit check /tmpdir/claude-74755/kit-nanosoc/handover/nanosoc_0x01000001/out/nanosoc_build.json --static-id 0x44EE76D5 | head -3; harness-manager kit pack /tmpdir/claude-74755/kit-nanosoc/handover/nanosoc_0x01000001/out/nanosoc_build.json --out /tmpdir/claude-74755/kit-nanosoc/fresh/overlay --import; python /home/dam1n19/SoCLabs/hm-kit-nanosoc/docs/evidence/2026-09-30-kit-nanosoc/tools/overlays_boardfree.py 0x44EE76D5 1048576 | tail -9
+=== rc=0 took=4s
+=== 01:19:28 $ git -C /home/dam1n19/SoCLabs/hm-kit-nanosoc rev-parse --short HEAD; export HARNESS_MANAGER_STATE_DIR=/tmpdir/claude-74755/kit-nanosoc/fresh2/state HARNESS_MANAGER_MPS3_OVERLAY_DIRS=/tmpdir/claude-74755/kit-nanosoc/shadow/dirs; harness-manager kit pack /tmpdir/claude-74755/kit-nanosoc/handover/nanosoc_0x01000001/out/nanosoc_build.json --out /tmpdir/claude-74755/kit-nanosoc/fresh2/overlay --import
+=== rc=0 took=2s
+=== 01:20:45 $ harness-manager kit guide --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json --build-dir ~/builds/nanosoc
+=== rc=0 took=30s
+=== 01:21:16 $ harness-manager kit guide --why generic_file_present
+=== rc=0 took=1s
+=== rc=0 took=2914s
+=== 02:01:49 $ harness-manager kit check ~/builds/nanosoc_head --static-id 0x44EE76D5
+=== rc=0 took=1s
+=== 02:01:50 $ harness-manager kit pack ~/builds/nanosoc_head --out ~/builds/nanosoc_head/overlay
+=== rc=0 took=1s
+=== 02:07:22 $ harness-manager kit guide --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json --build-dir ~/builds/g7demo; touch -d "3 hours ago" ~/builds/g7demo/build_rm.log; harness-manager kit guide --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json --build-dir ~/builds/g7demo
+=== rc=0 took=31s

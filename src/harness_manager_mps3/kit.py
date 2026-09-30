@@ -331,19 +331,53 @@ class Mps3KitAdapter:
 
     def import_overlay(self, store: Any, overlay_dir: Path) -> dict[str, Any]:
         """Into the content store (``overlays.import_overlay``: refuses a bad CRC), so it
-        shows in Program. Returns ``{sha256, name, rm_id, static_id, static_usercode}``."""
+        shows in Program. Returns ``{sha256, name, rm_id, static_id, static_usercode,
+        shadowed_by, shadow_same_bits}``: ``shadowed_by`` names the catalogue entry Program
+        lists INSTEAD when one has the same (name, rm_id, static_id) (``_shadow``)."""
         from .overlays import import_overlay, load_overlay_dir
 
         sha = import_overlay(store, overlay_dir)
         overlay, _raw = load_overlay_dir(overlay_dir)
         m = overlay.manifest
+        shadowed_by, same = _shadow(store, sha, overlay)
         return {"sha256": sha, "name": m.rm_name, "rm_id": rmid.format_rm_id(m.rm_id),
                 "static_id": rmid.format_rm_id(m.static_id),
                 "static_usercode": (rmid.format_rm_id(m.static_usercode)
-                                    if m.static_usercode is not None else "")}
+                                    if m.static_usercode is not None else ""),
+                "shadowed_by": shadowed_by, "shadow_same_bits": same}
 
 
 # --- helpers -------------------------------------------------------------------------------------
+
+
+def _shadow(store: Any, sha: str, overlay: Any) -> tuple[str, bool]:
+    """KIT-NANOSOC: the catalogue keeps the FIRST overlay of a (name, rm_id, static_id):
+    overlay dirs (``--overlay-dir``, ``mps3.overlay_dirs``) before the store, an earlier
+    store record before a later one, and only logs the rest. An import it shadows is not in
+    Program, and ``program TARGET NAME`` loads the other one (the fielded ``nanosoc`` hides
+    a rebuilt ``nanosoc``). Returns (the source Program lists, whether its partial and
+    clearing are byte-identical to the import's); ("", False) when the import is listed."""
+    from .overlays import STORE_SOURCE_PREFIX, OverlayCatalogue
+
+    m = overlay.manifest
+    try:
+        entries = OverlayCatalogue(store=store).entries()
+    except Exception:  # noqa: BLE001 - a broken catalogue must not fail the import
+        return "", False
+    for e in entries:
+        em = e.overlay.manifest
+        if (em.rm_name, em.rm_id, em.static_id) != (m.rm_name, m.rm_id, m.static_id):
+            continue
+        if e.ref.source == STORE_SOURCE_PREFIX + sha:
+            return "", False
+        try:
+            same = (sha256_file(Path(e.overlay.partial_path())) == sha256_file(
+                Path(overlay.partial_path())) and sha256_file(Path(e.overlay.clearing_path()))
+                == sha256_file(Path(overlay.clearing_path())))
+        except OSError:
+            same = False
+        return e.ref.source, same
+    return "", False
 
 _XML = {
     "checkpoint_version": re.compile(r'<Checkpoint\s+Version="(\d+)"'),

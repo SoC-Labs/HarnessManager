@@ -570,6 +570,25 @@ owners.
 - `kit script --design minimal` builds its wrapper skeleton (no `-tclargs RM_SOURCES=` needed),
   and the skeleton ties `dut_lockup` and `irq_out` off. A design can name such outputs with
   `"use": {"status": {"tie": [...]}}`.
+- A design's `build.generics` (`{NAME: value}`, or `{"path": FILE}` for a `$readmemh`
+  image) passes top-level parameters to synthesis, one `-generic` each; a path is written
+  absolute and a missing one stops the build at preflight (`generic_file_present`) instead
+  of a blank ROM. `build.sources` refuses a `.hex`, `.xci`, `.xdc`, `.tcl` or `.dcp` and
+  names the key that takes it. The `build` keys are in the user guide (§7).
+- `kit script --design nanosoc` (the built-in, which names no RTL) no longer builds its
+  skeleton: the skeleton leaves the used groups' outputs undriven, so the result would have
+  been an empty RM under nanosoc's name and rm_id. RM_SOURCES stays empty and the warning
+  names the undriven outputs; `minimal` still builds as its skeleton.
+- `kit pack --import` says when Program will not list the import: an overlay of the same
+  name, rm_id and static that comes first (an overlay dir, such as the fielded set, or an
+  earlier import) wins, and `program TARGET NAME` loads that one. It names the other
+  overlay, says whether its bits are identical, and gives the `--overlay-dir` to load this
+  build. The web **Add to Program** result shows the same hint.
+- The guide sees a build that is running: while `build_rm.log` has a stage and no verdict
+  and was written in the last 30 minutes, the Build step says "a build is running here:
+  stage link …" and offers no second Vivado (it would overwrite `out/`), and the last run's
+  receipt is not shown as this build's. A log with no verdict that stopped long ago is
+  named as a run that died.
 - `kit check --static-id ID` on a receipt of another static refuses (exit 14) instead of
   ignoring the flag.
 - The pin model describes more than one shell (`tools/gen_mps3_pins.py --shell`, `--all`),

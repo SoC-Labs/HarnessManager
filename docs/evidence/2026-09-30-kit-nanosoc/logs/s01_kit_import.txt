@@ -1,0 +1,6 @@
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado
+95768b649dc2325ac3c8d2f14a5aa3da58d4f5554a0e56fda775a8defa7e906f  mps3_rc2_0x44EE76D5_kit.zip
+cached: mps3/0x44EE76D5/vivado-2026.1 (38287216 B)
+  ok        files                        14 files match kit.json (size and sha256)
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+=== rc=0 took=4s

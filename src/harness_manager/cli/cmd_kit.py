@@ -488,9 +488,21 @@ def _pack(ctx: Ctx) -> int:
             "overlay_dir": str(d), "manifest": str(d / "manifest.json"), "imported": imported,
             "checks": [c.__dict__ for c in checks]}
     human = [f"overlay {r.rm_name} ({r.get('rm_id')}) for static {r.get('static_id')} -> {d}"]
-    human.append(f"imported into the store ({imported['sha256'][:12]}): it shows in Program"
-                 if imported else f"next: harness-manager kit pack {p} --import  (or: "
-                                  f"harness-manager program TARGET {r.rm_name} --overlay-dir {out_root})")
+    if imported and imported.get("shadowed_by"):
+        # KIT-NANOSOC: another overlay of the same name, rm_id and static is listed first
+        same = imported.get("shadow_same_bits")
+        human.append(f"imported into the store ({imported['sha256'][:12]}), but Program lists "
+                     f"{imported['shadowed_by']} instead: it has the same name, rm_id and "
+                     "static, and the first one found wins"
+                     + (" (its partial and clearing are byte-identical to this build's, so "
+                        "it loads the same bits)" if same else
+                        f". To load this build: harness-manager program TARGET {r.rm_name} "
+                        f"--overlay-dir {out_root}; to keep both, give the design another "
+                        "name or rm_id version"))
+    else:
+        human.append(f"imported into the store ({imported['sha256'][:12]}): it shows in Program"
+                     if imported else f"next: harness-manager kit pack {p} --import  (or: "
+                                      f"harness-manager program TARGET {r.rm_name} --overlay-dir {out_root})")
     rows = [[r.get("static_id"), "overlay", r.rm_name, "imported" if imported else "written",
              str(d)]] + _rows(r.get("static_id"), "check", checks)
     ctx.emit(Result("kit", data, rows=rows, human=human))

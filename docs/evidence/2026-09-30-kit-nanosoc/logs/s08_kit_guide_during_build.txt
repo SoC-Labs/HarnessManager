@@ -1,0 +1,10 @@
+Build a DUT for static 0x44EE76D5 (kit mps3/0x44EE76D5/vivado-2026.1)
+  done   1 Target           static 0x44EE76D5; partition u_rp_dut (47 ports / 148 bits), part xcku115-flvb1760-1-c
+  done   2 Tools            Vivado 2026.1 at /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado; Vivado 2026.1 starts (licence tier: ENTERPRISE); that does not prove the device licence for xcku115: synthesis still checks it; licence: unchecked (a device licence for xcku115 is needed from synthesis on: Vivado 2026.1 Core or higher (2024.1: Enterprise); the static's IP needs none; unchecked is not a pass: without it synthesis stops with [Common 17-345] A valid license was not found; point XILINXD_LICENSE_FILE at the lab's licence server)
+  done   3 Kit              mps3/0x44EE76D5/vivado-2026.1, 38287216 B; CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+  done   4 Wrapper and XDC  nanosoc: 47 ports / 148 bits checked; rm_id 0x01000001 (warning: design id 0x0001 is in the platform's range; user designs take 0x8000-0xFFFF (HM proposes one))
+  NEXT   5 Build            no receipt in /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/out yet
+  -      6 Check and add    no passed build yet
+                            waits for 5 build
+next: /research/CAD/Xilinx/Vivado//2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.tcl -log /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.log -journal /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.jou
+=== rc=0 took=31s

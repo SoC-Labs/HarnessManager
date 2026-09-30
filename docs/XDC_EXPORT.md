@@ -104,6 +104,7 @@ A design is a JSON document. The built-in designs are in `src/harness_manager_mp
 - **`wrapper`**: an ANSI (System)Verilog header, relative to the design file. Alternatively, `"ports": [{"name", "dir", "width"}]`. The port list is checked against the boundary, like the platform's `pin_check`.
 - **`pins`**: package-pin requests. The partition has no IO sites, so each one fails with the reason.
 - **`static_id`**: the static the RM is for. The default is the model's fielded shell.
+- **`rm_id`** and **`build`** (`top`, `sources`, `include_dirs`, `defines`, `generics`, `synth_hook`, `synth_dcp`, `rm_xdc`): read by `kit script`, not by the XDC export. docs/USER_GUIDE.md §7 has the table. The built-in designs carry no `build`: they describe the partition, not the RTL.
 
 ### A board design
 

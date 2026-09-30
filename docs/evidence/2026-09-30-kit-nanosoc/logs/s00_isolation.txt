@@ -1,0 +1,12 @@
+/home/dam1n19/SoCLabs/hm-kit-nanosoc/.venv/bin/harness-manager
+Harness Manager 0.1.0
+no kits cached: harness-manager kit fetch --static-id ID
+config_dir      /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager
+settings        /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager/settings.toml  (not there)
+boards          /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager/boards.toml  (not there)
+policy          /etc/harness-manager/policy.toml  (not there)
+secrets         /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager/secrets  (not there)
+secrets_index   /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager/secrets/index.json  (not there)
+legacy_updates  /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager/update/settings.json  (not there)
+new secrets go to a private file (no keyring: the Secret Service (your login keyring): no session bus in this process (an ssh or service session?); KWallet: no session bus in this process (an ssh or service session?))
+=== rc=0 took=4s

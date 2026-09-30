@@ -1,0 +1,3 @@
+overlay nanosoc (0x01000001) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/overlay/nanosoc
+imported into the store (06139f71f1a8): it shows in Program
+=== rc=0 took=3s

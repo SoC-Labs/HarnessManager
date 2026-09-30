@@ -15,12 +15,18 @@ verb reads:
 
 - ``rm_id``: the RM's 32-bit id. Without one HM proposes a user id (design id
   0x8000-0xFFFF, stable per name, david K8) and the skeleton and the script agree on it;
-- ``build``: ``{top, sources, include_dirs, defines, synth_hook, synth_dcp, rm_xdc}``,
-  paths relative to the design file. ``top`` defaults to ``rm_<name>`` (the skeleton's
+- ``build``: ``{top, sources, include_dirs, defines, generics, synth_hook, synth_dcp,
+  rm_xdc}``, paths relative to the design file. ``generics`` is ``{NAME: value}``, a value
+  being a string, a number or ``{"path": FILE}`` (a $readmemh image: written absolute and
+  checked at preflight). ``sources`` holds HDL only: a .hex, .xci, .xdc, .tcl or .dcp there
+  is refused with the key that takes it. ``top`` defaults to ``rm_<name>`` (the skeleton's
   module). With no ``sources``, the design's ``wrapper`` is the one source. With neither
   (and no synth hook or DCP), the XDC kit's own skeleton ``xdc/<name>_wrapper_skeleton.sv``
   is the one source (KIT-RC2): a design that names no RTL, such as the built-in
-  ``minimal``, builds as its skeleton, and the ``sources`` note says so.
+  ``minimal``, builds as its skeleton, and the ``sources`` note says so. Only when that
+  skeleton is a complete RM, though (KIT-NANOSOC): a design whose used groups have outputs
+  the skeleton leaves undriven (the built-in ``nanosoc``) gets an empty RM_SOURCES and a
+  ``sources`` warning that names them, never an empty RM under its name and rm_id.
 
 The printed command (``command``, README.txt) names the FULL path of the Vivado discovery
 chose when it is the kit's release (``vivado.command_vivado``): a bare ``vivado`` runs
@@ -31,6 +37,7 @@ Vivado, except ``vivado -version`` through discovery.
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -98,6 +105,71 @@ def _rel_to(design: Any, value: str) -> str:
     return render.tcl_path(Path(design.origin).parent / p)
 
 
+#: Files that are not HDL, by suffix, and the design key that takes each (KIT-NANOSOC).
+#: build_rm.tcl reads every source by suffix (.vhd/.vhdl VHDL, .v Verilog, else
+#: SystemVerilog), so one of these in build.sources would fail synthesis with a parse
+#: error that does not name the file's real role.
+NOT_HDL = {
+    ".hex": "build.generics, as {\"NAME\": {\"path\": FILE}} (a $readmemh image)",
+    ".mem": "build.generics, as {\"NAME\": {\"path\": FILE}} (a $readmemh image)",
+    ".coe": "build.synth_hook (an IP's init file goes with its read_ip)",
+    ".mif": "build.generics, as {\"NAME\": {\"path\": FILE}} (a memory init file)",
+    ".xci": "build.synth_hook (read_ip, then generate_target)",
+    ".xcix": "build.synth_hook (read_ip, then generate_target)",
+    ".xdc": "build.rm_xdc (RM-internal timing, applied -cell after link)",
+    ".tcl": "build.synth_hook (sourced inside the synth project)",
+    ".dcp": "build.synth_dcp (an out-of-context synth checkpoint of the top)",
+    ".edf": "build.synth_hook (read_edif)",
+    ".edif": "build.synth_hook (read_edif)",
+}
+_GENERIC_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _sources(design: Any, raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise UsageError(f"design {design.name}: build.sources must be a list of files")
+    for s in raw:
+        where = NOT_HDL.get(Path(str(s)).suffix.lower())
+        if where is not None:
+            raise UsageError(f"design {design.name}: build.sources names {s}, which is not HDL",
+                             hint=f"it goes in {where}")
+    return [_rel_to(design, str(s)) for s in raw]
+
+
+def _generics(design: Any, raw: Any) -> tuple[list[str], list[str]]:
+    """``build.generics``: ``{NAME: value}``, one ``-generic NAME=value`` each (KIT-NANOSOC:
+    nanosoc's IMEM image is a top-level parameter). A value is a string or a number, or
+    ``{"path": FILE}``: a file relative to the design file, written ABSOLUTE ($readmemh
+    resolves against Vivado's cwd) and checked at preflight. Returns (generics, files)."""
+    if raw is None:
+        return [], []
+    if not isinstance(raw, dict):
+        raise UsageError(f"design {design.name}: build.generics must be an object "
+                         "{\"NAME\": value}", hint='e.g. {"IMG": {"path": "fw/image.hex"}}')
+    out: list[str] = []
+    files: list[str] = []
+    for name, value in raw.items():
+        if not _GENERIC_NAME.fullmatch(str(name)):
+            raise UsageError(f"design {design.name}: generic {name!r} is not a parameter name")
+        if isinstance(value, dict):
+            if set(value) != {"path"} or not isinstance(value["path"], str) or not value["path"]:
+                raise UsageError(f"design {design.name}: generic {name}: an object value is "
+                                 '{"path": FILE}', hint="or give the value as a string")
+            val = _rel_to(design, value["path"])
+            files.append(val)
+        elif isinstance(value, bool):
+            val = "1" if value else "0"
+        elif isinstance(value, (int, float, str)):
+            val = str(value)
+        else:
+            raise UsageError(f"design {design.name}: generic {name}: {value!r} is not a "
+                             'string, a number or {"path": FILE}')
+        out.append(f"{name}={val}")
+    return out, files
+
+
 def make_script(kits: KitService, *, pack: str, static_id: str, design: str | dict[str, Any],
                 out_dir: Path | None = None, kit_dir: Path | None = None, jobs: int = 2,
                 stop_after: str = "bitstream", board: str = "", store: Any = None,
@@ -155,12 +227,33 @@ def make_script(kits: KitService, *, pack: str, static_id: str, design: str | di
     b = d.doc.get("build") or {}
     if not isinstance(b, dict):
         raise UsageError(f"design {d.name}: build must be an object")
-    sources = [_rel_to(d, s) for s in b.get("sources") or []]
+    sources = _sources(d, b.get("sources"))
+    generics, generic_files = _generics(d, b.get("generics"))
     if not sources and d.wrapper_path:
         sources = [render.tcl_path(d.wrapper_path)]
     skeleton = f"{XDC_SUBDIR}/{d.name}_wrapper_skeleton.sv"
+    undriven = list((xkit.facts.get("skeleton_undriven") or []) if xkit is not None else [])
     if not sources and not b.get("synth_hook") and not b.get("synth_dcp"):
-        if skeleton in files:
+        if skeleton in files and undriven:
+            # KIT-NANOSOC: the skeleton leaves the used groups' outputs to the design, so it is
+            # not an RM. Building it would give an overlay with the design's name and rm_id
+            # (the built-in `nanosoc`: 0x01000001, the fielded nanosoc's) and no logic, which
+            # the shell's rm_id check after a swap cannot tell apart. RM_SOURCES stays empty:
+            # the build stops at preflight (sources_given) unless -tclargs RM_SOURCES names RTL.
+            shown = ", ".join(undriven[:6]) + (f" and {len(undriven) - 6} more"
+                                               if len(undriven) > 6 else "")
+            builtin = (f" The built-in {d.name!r} describes the partition ports and timing "
+                       "only; to build it, write a design .json with build.sources (the RTL, "
+                       "in order), build.include_dirs and build.defines."
+                       if d.origin.startswith("builtin:") else "")
+            checks.append(KitCheck("sources", "warning",
+                                   f"the design names no RTL (build.sources, or a wrapper), and "
+                                   f"its skeleton {skeleton} is not an RM: it leaves "
+                                   f"{len(undriven)} outputs of the groups the design uses "
+                                   f"undriven ({shown}). RM_SOURCES is empty, so the build "
+                                   f"stops at preflight: set build.sources, or pass -tclargs "
+                                   f"RM_SOURCES=\"a.sv b.sv\".{builtin}"))
+        elif skeleton in files:
             # KIT-RC2: a design that names no RTL builds as its skeleton (minimal)
             sources = [skeleton]
             checks.append(KitCheck("sources", "warning",
@@ -187,6 +280,8 @@ def make_script(kits: KitService, *, pack: str, static_id: str, design: str | di
         "RM_INCLUDE_DIRS": render.tcl_list([_rel_to(d, s) for s in b.get("include_dirs") or []],
                                            "RM_INCLUDE_DIRS"),
         "RM_DEFINES": render.tcl_list([str(x) for x in b.get("defines") or []], "RM_DEFINES"),
+        "RM_GENERICS": render.tcl_list(generics, "RM_GENERICS"),
+        "RM_GENERIC_FILES": render.tcl_list(generic_files, "RM_GENERIC_FILES"),
         "RM_SYNTH_HOOK": _rel_to(d, b["synth_hook"]) if b.get("synth_hook") else "",
         "RM_SYNTH_DCP": _rel_to(d, b["synth_dcp"]) if b.get("synth_dcp") else "",
         "RM_OOC_XDC": ooc,

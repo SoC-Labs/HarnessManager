@@ -1,0 +1,24 @@
+#-----------------------------------------------------------
+# Vivado v2026.1 (64-bit)
+# SW Build 6511674 on Tue Jun 16 11:01:26 MDT 2026
+# IP Build 6504888 on Tue Jun 09 09:05:25 MDT 2026
+# SharedData Build 6501428 on Mon Jun 08 17:34:18 MDT 2026
+# Start of session at: Wed Sep 30 00:16:42 2026
+# Process ID         : 3201478
+# Current directory  : /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc
+# Command line       : vivado -mode batch -source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.tcl -log /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.log -journal /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.jou -tclargs JOBS=4
+# Log file           : /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.log
+# Journal file       : /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.jou
+# Running On         : srv03335
+# Platform           : RedHatEnterprise
+# Operating System   : Red Hat Enterprise Linux release 8.10 (Ootpa)
+# Processor Detail   : Intel(R) Xeon(R) Silver 4214 CPU @ 2.20GHz
+# CPU Frequency      : 2194.843 MHz
+# CPU Physical cores : 16
+# CPU Logical cores  : 16
+# Host memory        : 270433 MB
+# Swap memory        : 8589 MB
+# Total Virtual      : 279023 MB
+# Available Virtual  : 181471 MB
+#-----------------------------------------------------------
+source /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/build_rm.tcl

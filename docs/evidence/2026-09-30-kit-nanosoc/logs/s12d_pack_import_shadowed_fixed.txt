@@ -1,0 +1,4 @@
+8fff173
+overlay nanosoc (0x01000001) for static 0x44EE76D5 -> /tmpdir/claude-74755/kit-nanosoc/fresh2/overlay/nanosoc
+imported into the store (06139f71f1a8), but Program lists /tmpdir/claude-74755/kit-nanosoc/shadow/dirs/nanosoc/manifest.json instead: it has the same name, rm_id and static, and the first one found wins (its partial and clearing are byte-identical to this build's, so it loads the same bits)
+=== rc=0 took=2s

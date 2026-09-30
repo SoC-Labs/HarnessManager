@@ -39,6 +39,8 @@ DEFAULTS = {
     "PR_VERIFY_REF": "",
     "RM_INCLUDE_DIRS": "",
     "RM_DEFINES": "",
+    "RM_GENERICS": "",
+    "RM_GENERIC_FILES": "",
     "RM_SYNTH_HOOK": "",
     "RM_SYNTH_DCP": "",
     "RM_XDC": "",
@@ -46,6 +48,8 @@ DEFAULTS = {
     "OUT_DIR": "out",
 }
 STAGES = ("preflight", "synth", "link", "impl", "verify", "bitstream")
+#: Values that are Tcl lists (``tcl_list`` checked each element).
+LIST_PARAMS = ("RM_SOURCES", "RM_INCLUDE_DIRS", "RM_DEFINES", "RM_GENERICS", "RM_GENERIC_FILES")
 
 
 def template_text() -> str:
@@ -95,7 +99,7 @@ def render(values: Mapping[str, str], *, hm_version: str = "") -> str:
     if vals["STOP_AFTER"] not in STAGES:
         raise UsageError(f"STOP_AFTER must be one of {', '.join(STAGES)}")
     for k, v in vals.items():
-        if k not in ("RM_SOURCES", "RM_INCLUDE_DIRS", "RM_DEFINES"):
+        if k not in LIST_PARAMS:
             tcl_word(v, k)
     return _PLACEHOLDER.sub(lambda m: vals[m.group(1)], text)
 

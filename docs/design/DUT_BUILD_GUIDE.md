@@ -245,6 +245,7 @@ Each card says what the gate means, the likely cause, and the fix. Each cites a 
 |---|---|---|
 | `vivado_version` | another Vivado on PATH | run the version the kit names. A 2026.1 kit needs 2026.1: Vivado 2024.1 refuses it with `[Runs 36-378] The checkpoint … was created with 'Vivado v2026.1 (64-bit)', and cannot be opened in this version` (KIT-STORE spike). |
 | `static_id` | the wrong or a corrupt DCP | `kit fetch` again. Never rebuild the static (`adding-an-rm.md` §6). |
+| `generic_file_present` | a `build.generics` `{"path": ...}` file (a `$readmemh` image) is not there | fix the path. Vivado would only warn (`[Synth 8-4445]`) and build a blank memory (KIT-NANOSOC). |
 | `no_black_boxes` | a source file missing from `RM_SOURCES`, or a filelist | add it. The listed cells name the missing modules. |
 | `boundary_bits` | the wrapper's port list was edited | start again from the kit's skeleton. The XDC step names the port. |
 | `rm_id_match` / `rm_id_constant` | the localparam differs from the design's `rm_id`, or `rm_id` is driven by logic | drive `rm_id` from one constant. HM writes the manifest from the netlist value. |

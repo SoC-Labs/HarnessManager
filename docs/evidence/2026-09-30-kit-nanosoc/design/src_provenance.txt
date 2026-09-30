@@ -1,0 +1,5 @@
+# where each snapshot tree came from (read-only; copied 2026-09-30 00:12 BST)
+src/nanosoc_m0_soc  <- /home/dam1n19/SoCLabs/nanosoc_m0_soc @ 86f0a5b38b7426a40eefb64efc4c5b44fa313b0c (dirty: regenerated build_soc/, as the mint recorded: mint.json sources.nanosoc_m0_soc 86f0a5b dirty)
+src/ahb_qspi        <- /home/dam1n19/SoCLabs/ahb_qspi @ 0ab9f4200eb36a35e591476c21f79745161deaad
+src/platform        <- /home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx (every file byte-identical to git show fb1f8c7:<path>, the mint's repo sha)
+Arm IP              <- /research/AAA/ip_library (referenced in place, absolute, never copied)

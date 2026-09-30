@@ -1,0 +1,23 @@
+Command: pr_verify /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/kit/static/static_routed_locked.dcp /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/out/nanosoc_routed.dcp -file /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/out/nanosoc_pr_verify.rpt
+Wed Sep 30 01:04:44 2026
+
+INFO: [Constraints 18-1020] PR Verify Summary:
+DCP1: /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/kit/static/static_routed_locked.dcp
+  Number of reconfigurable modules compared = 1
+  Number of partition pins compared         = 102
+  Number of static tiles compared           = 43911
+  Number of static sites compared           = 7869
+  Number of static cells compared           = 97460
+  Number of static routed nodes compared    = 1336493
+  Number of static routed pips compared     = 1244073
+
+DCP2: /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/out/nanosoc_routed.dcp
+  Number of reconfigurable modules compared = 1
+  Number of partition pins compared         = 102
+  Number of static tiles compared           = 43911
+  Number of static sites compared           = 7869
+  Number of static cells compared           = 97460
+  Number of static routed nodes compared    = 1336493
+  Number of static routed pips compared     = 1244073
+INFO: [Constraints 18-13353] HDPRVerify-42: All DCPS provided to pr_verify have locked static.
+INFO: [Vivado 12-3253] PR_VERIFY: check points /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/kit/static/static_routed_locked.dcp and /tmpdir/claude-74755/kit-nanosoc/home/builds/nanosoc/out/nanosoc_routed.dcp are compatible

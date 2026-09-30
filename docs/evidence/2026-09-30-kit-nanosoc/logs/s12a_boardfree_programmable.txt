@@ -1,0 +1,14 @@
+state dir /tmpdir/claude-74755/kit-nanosoc/home/.config/harness-manager; simulated live shell_id 0x44EE76D5 (NO board), clr_max 1048576
+catalogue: 1 overlay(s); rejects: none
+store: 1 overlay record(s): nanosoc 0x01000001 partial 3b697246426c
+
+nanosoc  rm_id 0x01000001  static 0x44ee76d5  origin store  size 2467736  ip_class unknown  -> PROGRAMMABLE (board-free items)
+  source store:06139f71f1a80650a324a2ef805ffeecf09703d5cf1819b84edfd4ce99704b0f  partial sha256 3b697246426c9d556e30f5348064f08c5fd519dfb2947d07dde719a250b75f9d
+  ok         shell_id matches 0x44ee76d5
+  ok         crc and length clearing 169000 B crc 0x77ccef0f, partial 2298736 B crc 0x930eb9ea
+  ok         clearing pairs partial both payload blobs were imported for rm_id 0x01000001
+  ok         clearing fits  169000 B of the 1048576 B the harness's clr_max
+  unchecked  static_usercode matches needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76)
+  ok         pyverify       Overlay.validate(expected_static_id=0x44EE76D5) passed
+  (not run)  control/transport need a live shell
+=== rc=0 took=2s
