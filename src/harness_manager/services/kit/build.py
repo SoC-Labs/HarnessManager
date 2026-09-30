@@ -14,12 +14,19 @@ derives it from a receipt that passes ``receipt_checks``.
 - a partial, clearing or ``.ltx`` whose length or CRC-32 is not the one the build recorded
   (a file copied from another build, or half-copied).
 
+It also says what the build's timing was (``timing``, never a refusal: the ``rm_timing`` gate
+is the verdict): the RM's own worst slack, or, when no timed path lies inside the partition
+(``minimal``: every output a constant), that, with the whole design's WNS/WHS from the
+receipt or from ``<name>_timing.rpt`` beside it (FIX-PACK-3: a blank ``rm_wns`` read as "not
+measured").
+
 Board-agnostic: the overlay manifest itself is the pack's format (``KitAdapter`` of the
 MPS3 pack writes ``pyverify``'s overlay triple).
 """
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,6 +123,7 @@ def receipt_checks(r: BuildReceipt) -> list[KitCheck]:
     checks.append(KitCheck("static_id", "ok" if sid else "mismatch",
                            f"built against static {sid} (the CRC-32 of the DCP the build opened)"
                            if sid else "the receipt names no static_id"))
+    checks.append(KitCheck("timing", "ok", timing_words(r)))
     files = receipt_files(r)
     for role in ("partial", "clearing", "ltx"):
         p = files.get(role)
@@ -139,6 +147,53 @@ def receipt_checks(r: BuildReceipt) -> list[KitCheck]:
                                                 "or half-copied)" if bad else
                                                 f"{p.stat().st_size} B, CRC-32 {crc} as built")))
     return checks
+
+
+_NUM = re.compile(r"^-?\d+(\.\d+)?$")
+
+
+def design_slack_from_report(rpt: Path) -> tuple[str, str] | None:
+    """(WNS, WHS) of the whole design, in ns, from ``report_timing_summary``'s "Design Timing
+    Summary" table (columns WNS, TNS, TNS failing, TNS total, WHS, ...). ``""`` for a figure
+    Vivado gives as NA; None when the file or the table is not there."""
+    try:
+        lines = Path(rpt).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for i, line in enumerate(lines):
+        if line.strip() != "| Design Timing Summary":
+            continue
+        for j in range(i + 1, min(i + 12, len(lines))):
+            if lines[j].split()[:2] == ["WNS(ns)", "TNS(ns)"]:
+                row = next((x.split() for x in lines[j + 2:j + 4] if x.strip()), [])
+                if len(row) < 5:
+                    return None
+                return tuple(v if _NUM.match(v) else "" for v in (row[0], row[4]))  # type: ignore[return-value]
+        return None
+    return None
+
+
+def _ns(v: str) -> str:
+    return f"{v} ns" if v else "none"
+
+
+def timing_words(r: BuildReceipt) -> str:
+    """The build's timing in one line (``receipt_checks``' ``timing``; module docstring)."""
+    wns, whs = r.get("rm_wns"), r.get("rm_whs")
+    if wns or whs:
+        return f"your RM's paths: setup WNS {_ns(wns)}, hold WHS {_ns(whs)}"
+    if r.get("rm_timing_note"):
+        return r.get("rm_timing_note")
+    rpt = r.get("timing_rpt") or f"{r.rm_name}_timing.rpt"
+    dwns, dwhs = r.get("design_wns"), r.get("design_whs")
+    if not (dwns or dwhs):                  # a receipt from before FIX-PACK-3: the report
+        got = design_slack_from_report(r.path.parent / rpt)
+        if got is None:
+            return (f"no timed path inside the partition; the whole-design WNS is in {rpt}, "
+                    "which is not beside the receipt")
+        dwns, dwhs = got
+    return (f"no timed path inside the partition; whole-design WNS {_ns(dwns)}, "
+            f"WHS {_ns(dwhs)} from {rpt}")
 
 
 def load(path: Path) -> BuildReceipt:

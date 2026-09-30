@@ -1,6 +1,6 @@
 """``kit script``: one build directory for one design against one static's kit.
 
-The directory (``--out build/my_rm``)::
+The directory (``--out ~/builds/my_rm``)::
 
     build_rm.tcl                   the generated script (render.py); all paths relative to it
     README.txt                     the next three commands
@@ -329,6 +329,15 @@ def write(result: BuildScript, kits: KitService, kit: CachedKit, out_dir: Path, 
     return written
 
 
+#: How long ``build_rm.tcl`` takes (FIX-PACK-3; it said "about 20 min"). Measured on
+#: srv03335: minimal 28-56 min at load 33-50 (docs/evidence/2026-09-29-kit-night) and 30.5 min
+#: at load 4-9 (the P8 clean run); nanosoc 48-55 min (docs/evidence/2026-09-30-kit-nanosoc).
+#: USER_GUIDE.md section 7.2 and the web Build section say the same.
+_BUILD_TIME = ("about 30 min for a small RM on a quiet machine,",
+               "up to an hour when the machine is loaded; nanosoc about 50 min")
+BUILD_TIME = " ".join(_BUILD_TIME)
+
+
 def _design_arg(origin: str, name: str) -> str:
     """What ``--design`` takes to name this design again: a built-in's name, a design file's
     path, or a placeholder for an inline design (KIT-NIGHT: the README said
@@ -347,16 +356,22 @@ def _readme(r: BuildScript, kit: CachedKit, design_arg: str = "<your design .jso
         f"kit {r.kit_id}: Vivado {m.vivado.release} exactly (another major.minor is refused),",
         f"part {m.part}, partition {m.rp.inst} ({m.rp.ports} ports / {m.rp.bits} bits).",
         "",
-        "1. Build (a small RM: about 20 min on an idle machine, up to an hour on a loaded one;",
-        "   measured 56 min for minimal on RC2 at load 50 with 4 threads; 4-8 GB of RAM):",
+        f"1. Build ({_BUILD_TIME[0]}",
+        f"   {_BUILD_TIME[1]}; 4-8 GB of RAM):",
         f"     {r.vivado} -mode batch -source build_rm.tcl -log build_rm.log -journal build_rm.jou",
         (f"   ({r.vivado} is Vivado {m.vivado.release} on the machine that wrote this; elsewhere use "
          f"that release's vivado: a bare `vivado` runs whatever is first on PATH)"
          if r.vivado != "vivado" else
          f"   (`vivado` must be Vivado {m.vivado.release}: check with `vivado -version`, or run "
          f"`harness-manager kit build .` for the full path)"),
-        "   Vivado exits 0 even when a gate fails: the verdict is the last HM_RM_BUILD_* line",
-        f"   and {r.receipt}. Synth only: -tclargs STOP_AFTER=synth",
+        f"   Vivado exits 0 even when a gate fails. The verdict is {r.receipt}'s state, or",
+        "   the last line of build_rm.log that STARTS with HM_RM_BUILD_ (the log also echoes",
+        "   this script, whose text holds HM_RM_BUILD_FAILED):",
+        f"     {render.VERDICT_GREP}",
+        "   Synth only: -tclargs STOP_AFTER=synth",
+        "   Timing: the receipt's rm_wns/rm_whs are your RM's own paths. With no timed path",
+        "   inside the partition (minimal) they are empty, and rm_timing_note says so with the",
+        f"   whole-design WNS/WHS from out/{r.design}_timing.rpt (`kit check` prints it).",
         "2. Check the pair, with no board and no Vivado:",
         f"     harness-manager kit check {r.receipt}",
         "3. Add it to Program (writes the overlay manifest from the receipt):",

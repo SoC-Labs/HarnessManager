@@ -9,6 +9,35 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### Findings from a clean-account run of the guide (FIX-PACK-3)
+- **The installer's PATH advice reaches a login shell.** bash: add the line to `~/.bashrc`
+  and to the file a login shell reads (`~/.bash_profile`, `~/.bash_login` or `~/.profile`,
+  whichever exists), because ssh and `bash -l` never read `~/.bashrc`: a clean RHEL account
+  followed the old advice and got `command not found`. tcsh/csh get
+  `set path = ( $HOME/.local/bin $path )` in `~/.tcshrc` or `~/.cshrc` (the fallback,
+  `~/.profile`, is one they never read); zsh names `~/.zprofile` too. docs/INSTALL.md
+  "When harness-manager is not on PATH" lists every shell.
+- `harness-manager daemon status` on a stopped service prints `env (the service is not
+  running; its environment is shown while it runs)` instead of nothing (`--json`: `env_note`;
+  `--tsv`: `ENV_NOTE` appended).
+- docs/API.md: `GET /boards` lists the boards the service already knows (open, probed since
+  it started, in `boards.toml`) and discovers nothing, so a fresh service answers `[]`;
+  discovery is `POST /probe`. Behaviour unchanged.
+- The build verdict: `build_rm.log` echoes the script, so `HM_RM_BUILD_FAILED gate=` stands
+  in it after a real `HM_RM_BUILD_COMPLETE`. The README, `kit build`, the guide and the
+  script now say the verdict is the receipt's state, or the last line that *starts* with
+  `HM_RM_BUILD_` (`grep -E '^HM_RM_BUILD_' build_rm.log | tail -1`). HM's own reading was
+  already anchored.
+- `kit guide` and `kit fetch --out` suggest `--out ~/builds/<name>` (as the user guide), not
+  the relative `build/<name>`; on Windows, the absolute path.
+- Build times as measured: about 30 min for a small RM on a quiet machine, up to an hour when
+  the machine is loaded, nanosoc about 50 min (was "about 20 min").
+- A build with no timed path inside the partition (`minimal`) says so: the receipt gains
+  `rm_timing_note` ("no timed path inside the partition; whole-design WNS … from
+  <name>_timing.rpt"), `design_wns`, `design_whs` and `timing_rpt`, and the `rm_timing`
+  gate's detail ends with the same words. `kit check` prints a `timing` line (for an older
+  receipt it reads `<name>_timing.rpt` beside it). The gate itself is unchanged.
+
 ### Checks: the HIL runbooks, unattended, from the app (HIL-GUI)
 - A **Checks** section per board runs the lab runbooks' automatic checks overnight in the
   Harness Manager service: no `daemon stop`, no long `lease acquire --ttl`, no tmux. The

@@ -203,8 +203,8 @@ def test_a_passed_receipt_packs_into_an_overlay_the_store_accepts(tmp_path, stor
     r = load_receipt(kf.passed_build(tmp_path / "b", ltx=b"probes"))
     checks = build.receipt_checks(r)
     assert {c.name: c.state for c in checks} == {
-        "build": "ok", "rm_id": "ok", "static_id": "ok", "partial": "ok", "clearing": "ok",
-        "ltx": "ok"}
+        "build": "ok", "rm_id": "ok", "static_id": "ok", "timing": "ok", "partial": "ok",
+        "clearing": "ok", "ltx": "ok"}                             # timing: FIX-PACK-3
     a = mkit.make_kit_adapter()
     d = a.pack_receipt(r, tmp_path / "overlay")
     man = json.loads((d / "manifest.json").read_text())

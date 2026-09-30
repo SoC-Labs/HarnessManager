@@ -161,6 +161,16 @@ def script_params(text: str) -> dict[str, str]:
 
 # --- markers in a Vivado log ---------------------------------------------------------------------
 
+#: FIX-PACK-3 (P8): ``build_rm.log`` ECHOES the sourced script, so the literal text
+#: ``HM_RM_BUILD_FAILED gate=`` stands in it after a real ``HM_RM_BUILD_COMPLETE`` (the
+#: script's own ``puts`` lines, indented after a ``#``). "The last HM_RM_BUILD_* line" is
+#: then the echo. The verdict is the receipt's ``state`` (what HM reads); in the log, the
+#: last line that STARTS with ``HM_RM_BUILD_`` (``parse_markers`` is anchored the same way).
+VERDICT_GREP = "grep -E '^HM_RM_BUILD_' build_rm.log | tail -1"
+VERDICT_HOW = ("the verdict is the receipt's state (out/<name>_build.json), or the last "
+               "line of build_rm.log that STARTS with HM_RM_BUILD_ (`" + VERDICT_GREP + "`; "
+               "the log also echoes the script, whose text holds HM_RM_BUILD_FAILED)")
+
 _MARK = re.compile(r"^(HM_GATE|HM_STAGE|HM_RECEIPT|HM_RM_BUILD_COMPLETE|HM_RM_BUILD_FAILED|"
                    r"HM_RM_BUILD_STOPPED)\b(.*)$")
 
