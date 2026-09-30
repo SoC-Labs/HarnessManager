@@ -86,8 +86,11 @@ def test_the_canvas_css_is_pixelated_view_only_and_overlays_never_take_a_click()
 def test_the_front_panel_card_hosts_the_live_display_over_the_text_mirror():
     panel = PANEL_JS.read_text()
     assert 'import { LiveDisplay } from "../display.js";' in panel
-    assert "<${LiveDisplay} bid=${bid}><${Mirror} f=${f} /><//>" in panel
-    assert panel.count("<${Mirror} f=${f} />") == 1        # the text mirror only as its fallback
+    # UI v2 round 3: the Overview's Front panel, the picture fitted to the card; the text mirror
+    # is the Live display's fallback (Live) or the picture itself (Text), written once
+    assert "<${LiveDisplay} bid=${bid} fit=${true}>${fallback}<//>" in panel
+    assert panel.count("<${Mirror} f=${f} />") == 1
+    assert "fallback = html`<${Mirror} f=${f} />`;" in panel
     js = DISPLAY_JS.read_text()
-    assert "export function LiveDisplay({ bid, children = null })" in js
+    assert "export function LiveDisplay({ bid, children = null, fit = false })" in js
     assert "${children}" in js
