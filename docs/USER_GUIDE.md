@@ -80,7 +80,11 @@ Once signed releases exist, the app can also update itself ([section 10](#10-upd
 
 **What can go wrong**
 - `harness-manager: command not found`: `~/.local/bin` is not on your PATH. The installer
-  printed the line to add and the full path to use until then. On Windows, open a new
+  printed the line for your shell and the full path to use until then. bash: add it to
+  `~/.bashrc` **and** to `~/.bash_profile` (or `~/.profile`, whichever exists), because a
+  login shell (ssh, `bash -l`) never reads `~/.bashrc`. tcsh/csh:
+  `set path = ( $HOME/.local/bin $path )` in `~/.cshrc`. Every shell:
+  [INSTALL.md](INSTALL.md#when-harness-manager-is-not-on-path). On Windows, open a new
   terminal.
 - The installer stops: it says why (Python too old, no `python3-venv`, no network, a
   proxy). Running it again is always safe.

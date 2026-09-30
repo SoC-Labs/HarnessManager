@@ -226,6 +226,8 @@ def test_lifecycle_install_rerun_upgrade_uninstall(box: Box, wheelhouse: Path, t
     assert box.py("import fakeserial, fakedep; print(fakedep.V)") == "1.0"   # the pin
     assert "is not on your PATH yet" in res.stdout
     assert 'export PATH="$HOME/.local/bin:$PATH"' in res.stdout
+    assert names_a_login_file(res.stdout)                # FIX-PACK-3: not ~/.bashrc alone
+    assert "Until then, run it by its full path" in res.stdout
     assert f"  {box.hm} app --demo" in res.stdout       # Next: runs by its full path
     assert not (box.root / ".install.lock").exists()
     assert "extras=serial" in (box.root / "install.conf").read_text()
@@ -704,3 +706,151 @@ def test_install_ps1_launcher_record_extras_and_uninstall(box: Box, wheelhouse: 
     res = ps("-Uninstall", "-Force")
     assert f"removed  {box.root / 'versions'}" in res.stdout
     assert not box.hm.exists() and not box.root.exists()
+
+
+# -- FIX-PACK-3 item 1: the PATH advice, per shell ------------------------------------------------
+#
+# P8 (a clean RHEL account) followed "add export PATH=... to ~/.bashrc" and still got
+# `harness-manager: command not found` over ssh: a login shell reads ~/.bash_profile (or
+# ~/.bash_login, or ~/.profile: the first that exists) and never ~/.bashrc unless that file
+# sources it. tcsh/csh read neither ~/.bashrc nor ~/.profile. install.sh's path_advice runs
+# here on its own, with each $SHELL; the behaviour tests run the advised line in a real
+# login shell.
+
+OLD_BASH_ADVICE = ("Add this line to ~/.bashrc, then open a new terminal:\n"
+                   '    export PATH="$HOME/.local/bin:$PATH"\n')          # before FIX-PACK-3
+OLD_FALLBACK_ADVICE = ("Add this line to ~/.profile, then log in again:\n"
+                       '    export PATH="$HOME/.local/bin:$PATH"\n')
+LOGIN_FILES = ("~/.bash_profile", "~/.bash_login", "~/.profile")
+
+
+def names_a_login_file(text: str) -> bool:
+    return any(f in text for f in LOGIN_FILES)
+
+
+def path_advice(shell: str, home: Path, os_name: str = "Linux") -> str:
+    """install.sh's ``path_advice`` alone, as the installer calls it."""
+    import re
+
+    fn = re.search(r"^path_advice\(\) \{.*?^\}\n", INSTALL.read_text(), re.M | re.S)
+    assert fn, "install.sh has no path_advice function"
+    script = ("set -euo pipefail\nsay() { printf '%s\\n' \"$*\"; }\n" + fn.group(0)
+              + 'path_advice "$1" "\\$HOME/.local/bin" "$2/.local/bin" "$3" "$2"\n')
+    return subprocess.run(["bash", "-c", script, "_", shell, str(home), os_name],
+                          capture_output=True, text=True, check=True).stdout
+
+
+def test_bash_advice_names_the_login_file_as_well_as_bashrc(tmp_path: Path):
+    home = tmp_path / "h"
+    home.mkdir()
+    out = path_advice("bash", home)
+    assert "~/.bashrc" in out and "~/.bash_profile" in out     # no profile yet: bash's first
+    assert "not ~/.bashrc" in out                                # says why
+    assert 'export PATH="$HOME/.local/bin:$PATH"' in out
+    (home / ".profile").write_text("# Debian's\n")               # the one a login shell reads
+    out = path_advice("bash", home)
+    assert "~/.profile" in out and "~/.bash_profile" not in out
+    (home / ".bash_profile").write_text("# RHEL's\n")            # wins over ~/.profile
+    assert "~/.bash_profile" in path_advice("bash", home)
+    mac = path_advice("bash", tmp_path / "none", "Darwin")        # Terminal: login shells
+    assert "~/.bash_profile" in mac and "~/.bashrc" not in mac
+
+
+def test_negative_twin_the_old_bash_advice_names_no_login_file():
+    assert not names_a_login_file(OLD_BASH_ADVICE)
+
+
+def test_zsh_fish_tcsh_csh_and_the_fallback(tmp_path: Path):
+    home = tmp_path / "h"
+    home.mkdir()
+    zsh = path_advice("zsh", home)
+    assert "~/.zshrc" in zsh and "~/.zprofile" in zsh and "export PATH=" in zsh
+    assert f"fish_add_path {home}/.local/bin" in path_advice("fish", home)
+    for sh in ("tcsh", "csh"):
+        out = path_advice(sh, home)
+        assert "~/.cshrc" in out and "set path = ( $HOME/.local/bin $path )" in out, sh
+        assert "export" not in out and "~/.profile" not in out, sh
+    (home / ".tcshrc").write_text("")                             # tcsh reads it before .cshrc
+    assert "~/.tcshrc" in path_advice("tcsh", home)
+    assert "~/.cshrc" in path_advice("csh", home)                 # csh never reads ~/.tcshrc
+    for sh in ("sh", "dash", "ksh", "something-else"):
+        out = path_advice(sh, home)
+        assert "~/.profile" in out and 'export PATH="$HOME/.local/bin:$PATH"' in out, sh
+
+
+def _advised(out: str) -> tuple[str, str]:
+    """(the file, the line) of a one-file advice."""
+    import re
+
+    rc = re.search(r"~/(\.[a-z_]+)", out).group(1)
+    line = next(ln.strip() for ln in out.splitlines() if ln.startswith("    "))
+    return rc, line
+
+
+def _login_path(shell: list[str], home: Path) -> list[str]:
+    """PATH as a fresh login shell in ``home`` sees it (what ssh and `bash -lc` get)."""
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin", "USER": os.environ.get("USER", "q3")}
+    res = subprocess.run([*shell, 'echo "PATH=$PATH"'], env=env, capture_output=True,
+                         text=True, timeout=60, stdin=subprocess.DEVNULL)
+    line = [ln for ln in res.stdout.splitlines() if ln.startswith("PATH=")][-1]
+    return line[len("PATH="):].split(":")
+
+
+@pytest.mark.skipif(not LINUX, reason="the login-shell files differ on macOS (Terminal)")
+def test_following_the_bash_advice_reaches_a_login_shell(tmp_path: Path):
+    home = tmp_path / "h"
+    home.mkdir()
+    out = path_advice("bash", home)
+    line = next(ln.strip() for ln in out.splitlines() if ln.startswith("    "))
+    for rc in (".bashrc", ".bash_profile"):           # both files the advice names
+        (home / rc).write_text(line + "\n")
+    assert str(home / ".local" / "bin") in _login_path(["bash", "-lc"], home)
+
+
+@pytest.mark.skipif(not LINUX, reason="the login-shell files differ on macOS (Terminal)")
+def test_negative_twin_the_old_bash_advice_does_not_reach_a_login_shell(tmp_path: Path):
+    home = tmp_path / "h"
+    home.mkdir()
+    rc, line = _advised(OLD_BASH_ADVICE)
+    (home / rc).write_text(line + "\n")                # ~/.bashrc only: the P8 finding
+    assert str(home / ".local" / "bin") not in _login_path(["bash", "-lc"], home)
+
+
+@pytest.mark.skipif(not shutil.which("tcsh"), reason="tcsh is not installed")
+def test_following_the_tcsh_advice_reaches_tcsh(tmp_path: Path):
+    home = tmp_path / "h"
+    home.mkdir()
+    rc, line = _advised(path_advice("tcsh", home))
+    (home / rc).write_text(line + "\n")
+    assert _login_path(["tcsh", "-c"], home)[0] == str(home / ".local" / "bin")
+
+
+@pytest.mark.skipif(not shutil.which("tcsh"), reason="tcsh is not installed")
+def test_negative_twin_the_old_fallback_does_not_reach_tcsh(tmp_path: Path):
+    home = tmp_path / "h"
+    home.mkdir()
+    rc, line = _advised(OLD_FALLBACK_ADVICE)
+    (home / rc).write_text(line + "\n")                # ~/.profile: tcsh never reads it
+    assert str(home / ".local" / "bin") not in _login_path(["tcsh", "-c"], home)
+
+
+OLD_GUIDE_HINT = ("`harness-manager: command not found`: `~/.local/bin` is not on your PATH. "
+                  "The installer printed the line to add and the full path to use until then.")
+
+
+def test_the_docs_give_the_installers_advice():
+    """INSTALL.md's table, README and USER_GUIDE agree with path_advice."""
+    install = (ROOT / "docs" / "INSTALL.md").read_text()
+    sec = install.split("## When harness-manager is not on PATH", 1)[1].split("\n## ", 1)[0]
+    for want in ("~/.bashrc", "~/.bash_profile", "~/.bash_login", "~/.profile", "~/.zshrc",
+                 "~/.zprofile", "fish_add_path", "set path = ( $HOME/.local/bin $path )",
+                 "~/.tcshrc", "~/.cshrc", "full path"):
+        assert want in sec, want
+    for doc in ("README.md", "docs/USER_GUIDE.md"):
+        text = (ROOT / doc).read_text()
+        hint = text[text.index("command not found"):][:700]
+        assert names_a_login_file(hint) and "#when-harness-manager-is-not-on-path" in hint, doc
+
+
+def test_negative_twin_the_old_guide_hint_named_no_file():
+    assert not names_a_login_file(OLD_GUIDE_HINT)
