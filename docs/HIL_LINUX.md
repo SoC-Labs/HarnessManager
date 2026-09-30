@@ -602,7 +602,8 @@ replied unexpectedly`. `keep_alive() was not invoked` warnings are not failures.
 
 **OCD4. A 16 KiB RAM round trip** (terminal B; writes DUT RAM, then resets the DUT)
 ```bash
-RAM=0x20004000     # nanosoc data RAM, clear of its first 16 KiB (the boot data)
+RAM=0x18004000     # nanosoc DMEM (0x18000000, 64 KiB; host/openocd/nanosoc_ops.tcl):
+                   # clear of its first 16 KiB (data) and of the stack at its top
 head -c 16384 /dev/urandom > $EV/ocd4_ram_in.bin
 arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:$G0" \
   -ex "monitor halt" -ex "restore $EV/ocd4_ram_in.bin binary $RAM" \
@@ -610,7 +611,7 @@ arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" -ex "target extended-remo
 cmp $EV/ocd4_ram_in.bin $EV/ocd4_ram_out.bin && echo RAM-OK | tee -a $EV/ocd4_ram.txt
 harness-manager reset $B | tee -a $EV/ocd4_ram.txt
 ```
-Expect: `Restoring binary file … into memory (0x20004000 to 0x20008000)`, then `RAM-OK`, then the
+Expect: `Restoring binary file … into memory (0x18004000 to 0x18008000)`, then `RAM-OK`, then the
 reset's `done`. Note the time gdb took (seconds) in the evidence file.
 
 **OCD5. Down** (terminal C: Ctrl-C; then terminal B)
