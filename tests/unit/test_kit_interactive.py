@@ -171,8 +171,9 @@ def test_a_session_that_never_set_argv_builds_with_the_script_s_own_values(build
 
 
 def test_batch_prints_the_same_markers_as_before(build_dir):
-    """What a batch run prints (nothing open, argv from -tclargs) is the marker sequence the
-    script printed before this lane: no line added for the new checks."""
+    """What a batch run prints (argv from -tclargs) is the marker sequence the script printed
+    before this lane: the argv guard and hm_save_floorplan add no line. It passes on 1a127de's
+    template too (that is the point); Vivado's own old/new comparison is in the evidence."""
     _ok, _err, lines = session(build_dir, argv=["STOP_AFTER=preflight"])
     marks = [x.split()[0] + " " + x.split()[1] for x in lines if x.startswith("HM_")]
     assert marks == ["HM_STAGE preflight", "HM_GATE vivado_version", "HM_GATE part_installed",
