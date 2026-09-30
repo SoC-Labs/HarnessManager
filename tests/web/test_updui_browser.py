@@ -618,7 +618,8 @@ def test_the_debug_tile_shows_the_xvc_session_in_one_line(page_factory, daemon, 
     expect(line).to_contain_text("closed")
     daemon.app.state.xvc.open(BOARD_FIELDED, byo=False)       # the Debug section opened it
     expect(line).to_have_attribute("data-state", "ready", timeout=T)
-    expect(line).to_contain_text("localhost:")
+    expect(line).to_contain_text(re.compile(r"XVC :\d+"))                # UI v2: the ILAs chip
+    expect(line).to_have_attribute("title", re.compile("localhost:"))
     daemon.app.state.xvc.attach(BOARD_FIELDED)
     expect(line).to_have_attribute("data-state", "attached", timeout=T)
     expect(line).to_contain_text("attached")
@@ -630,5 +631,5 @@ def test_negative_twin_a_harness_without_xvc_says_why_on_the_tile(page_factory, 
     open_board(page, BOARD_USB)                                # v0.8 firmware: no xvc_dbgbr
     line = by_id(page, "tile-xvc")
     expect(line).to_have_attribute("data-state", "unsupported", timeout=T)
-    expect(line).to_contain_text("not on this board: needs harness firmware with 'xvc_dbgbr'")
-    assert line.locator('[data-testid="tile-xvc-state"]').count() == 0
+    expect(line).to_have_attribute("title", "not on this board: needs harness firmware with 'xvc_dbgbr'")
+    expect(line).to_have_text("none here")

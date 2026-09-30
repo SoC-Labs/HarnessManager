@@ -157,7 +157,7 @@ def test_review_update_overview_xvc_line(page_factory, daemon, engine, review, s
     daemon.app.state.xvc.open(BOARD_FIELDED, byo=False)
     daemon.app.state.xvc.attach(BOARD_FIELDED)
     expect(by_id(page, "tile-xvc")).to_have_attribute("data-state", "attached", timeout=T)
-    shoot(page, review, f"update-overview-xvc-line-{scheme}.png", by_id(page, "tile-debug"))
+    shoot(page, review, f"update-overview-xvc-line-{scheme}.png", by_id(page, "tile-consoles"))
 
 
 @SCHEMES

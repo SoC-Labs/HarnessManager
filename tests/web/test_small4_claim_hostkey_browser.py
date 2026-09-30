@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -37,6 +38,7 @@ def open_board(page):
     page.wait_for_selector(f'main[data-board="{BOARD_FIELDED}"], [data-action="open"]', timeout=T)
     if page.locator(f'main[data-board="{BOARD_FIELDED}"]').count() == 0:
         page.locator('[data-action="open"]').click()
+    nav.board_page(page, "access")                # UI v2: the Overview's Board tile is gone
     page.wait_for_selector('[data-testid="tile-claim"]', timeout=T)
 
 

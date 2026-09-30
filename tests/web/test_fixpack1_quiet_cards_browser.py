@@ -58,10 +58,10 @@ def open_board(page) -> None:
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="board-header"]', timeout=T)
     # Background reads off: the Overview's first read was held back too ("Read now" there).
-    page.wait_for_selector('[data-testid="tiles"], [data-testid="info-quiet"]', timeout=T)
+    page.wait_for_selector('[data-testid="overview"], [data-testid="info-quiet"]', timeout=T)
     if page.locator('[data-testid="info-quiet"]').count():
         page.locator('[data-testid="info-quiet"] button').click()
-    page.wait_for_selector('[data-testid="tile-panel"]', timeout=T)
+    page.wait_for_selector('[data-testid="panel-card"]', timeout=T)
 
 
 def details(page) -> None:
@@ -80,12 +80,9 @@ def test_background_reads_off_the_panel_card_says_so_and_read_now_reads_once(
     note = card.locator('[data-testid="panel-quiet"]')
     expect(note).to_contain_text("Background reads are off", timeout=T)
     assert card.locator('text="Reading the panel..."').count() == 0, "never the endless spinner"
-    # The Board tile: "not read" on each held-back line, the reason once, with Read now.
-    expect(page.locator('[data-testid="tile-panel-line"]')).to_contain_text("not read")
-    expect(page.locator('[data-testid="tile-temp"]')).to_have_text("not read")
+    # The Overview (UI v2): "not read" on each held-back reading, the reason once, with Read now.
+    expect(page.locator('[data-testid="ov-kpi-temp"]')).to_contain_text("not read")
     expect(page.locator('[data-testid="tile-board-quiet"]')).to_contain_text(
-        "Background reads are off")
-    expect(page.locator('[data-testid="telemetry-quiet"]')).to_contain_text(
         "Background reads are off")
     page.screenshot(path=str(screenshots / "light-fixpack1-panel-background-off.png"))
     # Read now: one explicit read (no X-HM-Background), and the card shows the panel.
@@ -97,9 +94,9 @@ def test_background_reads_off_the_panel_card_says_so_and_read_now_reads_once(
     expect(card.locator('[data-testid="panel-read-age"]')).to_contain_text("Read from the panel")
     assert asked and all("x-hm-background" not in h for _u, h in asked), asked
     assert card.locator('[data-testid="panel-quiet"]').count() == 0
-    # The telemetry card's own Read now reads it, explicitly, too.
-    page.locator('[data-action="telemetry-read-now"]').click()
-    expect(page.locator('[data-testid="telemetry-table"]')).to_be_visible(timeout=T)
+    # The Overview's Read now reads the rest (the telemetry), explicitly, too.
+    page.locator('[data-action="tile-read-now"]').click()
+    expect(page.locator('[data-testid="ov-kpi-temp"]')).not_to_contain_text("not read", timeout=T)
     expect(page.locator('[data-testid="tile-board-quiet"]')).to_have_count(0, timeout=T)
     assert page.errors == []
 
@@ -111,12 +108,12 @@ def test_the_board_tiles_read_now_reads_every_held_back_line(page_factory, daemo
     tile = page.locator('[data-testid="tile-board-quiet"]')
     expect(tile).to_contain_text("Background reads are off", timeout=T)
     tile.locator('[data-action="tile-read-now"]').click()
-    expect(page.locator('[data-testid="tile-panel-line"]')).to_contain_text("harness owns it",
-                                                                           timeout=T)
-    expect(page.locator('[data-testid="tile-temp"]')).not_to_have_text("not read", timeout=T)
+    expect(page.locator('[data-testid="panel-line"]')).to_contain_text("harness owns it",
+                                                                      timeout=T)
+    expect(page.locator('[data-testid="ov-kpi-temp"]')).not_to_contain_text("not read", timeout=T)
     expect(tile).to_have_count(0, timeout=T)
-    # The panel's state was read (a click), its text mirror not yet: the card opened later
-    # asks for the mirror in the background, which is held back: the mirror says so too.
+    # The panel's state was read (a click), its text mirror not: the card asked for the mirror
+    # in the background, which was held back: the mirror says so too.
     details(page)
     note = page.locator('[data-testid="panel-mirror-quiet"]')
     expect(note).to_contain_text("Background reads are off", timeout=T)
@@ -146,7 +143,7 @@ def test_twin_background_reads_on_the_cards_read_and_offer_no_read_now(page_fact
     card = page.locator('[data-testid="panel-card"]')
     expect(card.locator('[data-testid="panel-mirror"] [data-row="0"]')).to_have_text(
         LINUX_STATUS_ROWS[0], timeout=T)
-    expect(page.locator('[data-testid="tile-panel-line"]')).to_contain_text("harness owns it")
-    for testid in ("panel-quiet", "tile-board-quiet", "telemetry-quiet"):
+    expect(page.locator('[data-testid="panel-line"]')).to_contain_text("harness owns it")
+    for testid in ("panel-quiet", "tile-board-quiet"):
         assert page.locator(f'[data-testid="{testid}"]').count() == 0, testid
     assert page.errors == []

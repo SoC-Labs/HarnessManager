@@ -29,7 +29,7 @@ import {
 } from "../store.js";
 import { ActionRow, Chip, Icon, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
 import { LiveDisplay } from "../display.js";        // LM4: the Live display, over the text mirror
-import { displayLive } from "../display.js";        // PANEL-TRUTH: the headline's "Live"
+import { displayLive, liveRefusal } from "../display.js";   // PANEL-TRUTH: the headline's "Live"
 import { GLYPHS, ROLE_COLOURS, ROLES } from "../panel_codes.js";   // PANEL-V017: generated
 import { settingValue } from "../prefs.js";
 
@@ -549,16 +549,12 @@ function NotReported({ f }) {
   </details>`;
 }
 
-// Live needs the Linux harness's lcd_mirror (LM4, harness feature 'lcd_mirror'): a board without
-// it shows the panel's text only, and the Live button says why.
+// Live is the daemon's to give (LM4: harness feature 'lcd_mirror', the lease holder only): the
+// card offers it until the daemon says this board can never show it (422 UNAVAILABLE: bare
+// metal, no lcd_mirror; display.js liveRefusal), then Text only, with the daemon's own reason.
 export function liveWhy(bid) {
-  const b = boardState(bid);
-  const id = (b.info && b.info.identity) || null;
-  if (!id) return "Live: the board has not been read yet";
-  if ((id.features || []).includes("lcd_mirror")) return "";
-  const what = id.harness_impl === "bare-metal" ? `bare-metal ${id.harness_version || "harness"}`
-    : `${implWords({ impl: id.harness_impl }) || "this harness image"}`;
-  return `Live needs the Linux harness's lcd_mirror: ${what} reports the panel's text only`;
+  const r = liveRefusal(bid);
+  return r ? `Live: ${r.reason || "this board has no live display"}` : "";
 }
 
 const VIEW_KEY = "harness_manager.panel.view";

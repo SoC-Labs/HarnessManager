@@ -24,9 +24,10 @@ import {
   boardState, cardJobBusy, changed, hasCardStore, loadCard, loadOverlays, loadTelemetry, navigate,
   onBoardEvent, openActivity, quietWords, refreshInfo, S,
 } from "../store.js";
-import { Chip, Icon, MiniBar, QuietNote, Reason, Spinner } from "../ui.js";
+import { Chip, Icon, MiniBar, QuietNote, Reason, ResultBlock, Spinner } from "../ui.js";
+import { panelState } from "../actions.js";
 import {
-  consoleRows, durationText, epochOf, leaseLeft, leaseWho, loadClocks, onHubLoaded, week,
+  consoleRows, durationText, epochOf, leaseLeft, leaseWhere, leaseWho, loadClocks, onHubLoaded, week,
 } from "../week.js";
 import { checksOf } from "./checks.js";
 import { front, FrontPanelCard, readPanelNow } from "./panel.js";
@@ -647,7 +648,7 @@ function OsSlots({ bid }) {
     const run = n === os.running;
     return html`<button type="button" key=${n} class=${`chip ov-chip-sm ${run ? "ok" : s.state === "valid" ? "" : "warn"}`}
       data-slot=${n} title=${`Slot ${n}: ${s.state}${s.version ? ` · ${s.version}` : ""}${s.verified ? ` · verified by ${s.verified}` : ""} · Board › Versions`}
-      onClick=${() => navigate(bid, "board/versions")}>${run ? html`<${Icon} name="circle-check" />` : null}${n} ${s.version || s.state}${run ? " · booted" : n === os.default ? " · default" : " · fallback"}</button>`;
+      onClick=${() => navigate(bid, "board/versions")}>${run ? html`<${Icon} name="circle-check" />` : null}${n} ${s.version || s.state}${run ? " · booted" : n === os.default ? " · default" : s.state === "valid" ? " · fallback" : ""}</button>`;
   })}</dd>`;
 }
 
@@ -773,14 +774,26 @@ function ChecksLine({ bid }) {
 function leaseChip(who) {
   const left = leaseLeft(who.lease);
   const leftText = left !== null ? ` · ${durationText(left)}` : "";
+  const where = leaseWhere(who);
   switch (who.state) {
-    case "here": return { level: "accent", icon: "user", text: `Yours${leftText}`, title: "You hold the hub lease here" };
-    case "free": return { level: "plain", icon: "lock-open", text: "Free", title: "Nobody holds the hub lease" };
-    case "elsewhere": return { level: "held", icon: "lock", text: `Held by you in another session${leftText}`, title: `${who.holder}: your hub name, but not this Harness Manager` };
-    case "unknown": return { level: "unk", icon: "circle-help", text: "Lease unknown", title: who.error || "the hub did not answer" };
+    case "here": return { level: "accent", icon: "user", text: `Yours${leftText}`, title: `Your hub lease: ${where}, held by this Harness Manager` };
+    case "free": return { level: "plain", icon: "lock-open", text: "Free", title: `Free: nobody holds ${where}` };
+    case "elsewhere": return { level: "held", icon: "lock", text: `Held by you in another session${leftText}`, title: `${who.holder}: ${where}; your hub name, but not this Harness Manager` };
+    case "unknown": return { level: "unk", icon: "circle-help", text: "Lease unknown", title: `${where}: ${who.error || "the hub did not answer"}` };
     case "unread": return { level: "unk", icon: "circle-help", text: "Reading the lease…", title: "" };
-    default: return { level: "held", icon: "lock", text: `Held by ${whoParts(who.holder).who}${leftText}`, title: `${who.holder} holds the hub lease` };
+    default: return { level: "held", icon: "lock", text: `Held by ${whoParts(who.holder).who}${leftText}`, title: `${who.holder} holds ${where}` };
   }
+}
+
+// The outcome of this page's last lease action (the header's Acquire, Release, Request): one
+// box, while it is fresh (0.1.0 showed it under Needs attention).
+const LEASE_RESULT_MS = 120000;
+
+function LeaseResult({ bid }) {
+  const p = panelState(bid, "lease");
+  if (!p.lines || !p.lines.length) return null;
+  if (!p.running && p.startedAt && Date.now() - p.startedAt > LEASE_RESULT_MS) return null;
+  return html`<${ResultBlock} lines=${p.lines} panel=${p} testid="lease-result" />`;
 }
 
 function LeaseCard({ bid }) {
@@ -829,6 +842,7 @@ function LeaseCard({ bid }) {
       <${Chip} level=${c.level} icon=${c.icon} cls="ov-chip-sm" title=${c.title} testid="ov-lease-chip">${c.text}<//>
       ${until ? html`<span class="small secondary ov-ell">${until}</span>` : null}</div>
     ${wait}
+    <${LeaseResult} bid=${bid} />
     <${Queue} bid=${bid} />
     <dl class="ov-kv">
       <dt>Watching</dt><dd><${Watching} bid=${bid} /></dd>
@@ -879,7 +893,9 @@ function LiveCard({ bid }) {
   const st = x.st || {};
   const ila = st.reason ? { level: "", text: "none here", tip: `not on this board: ${st.reason}` }
     : vs === "reading" ? { level: "", text: "reading…", tip: "" }
-      : st.open ? { level: vs === "attached" ? "accent" : "ok", text: `XVC ${st.url ? `:${String(st.url).split(":").pop()}` : "open"}`, tip: `XVC open at ${st.url || "?"}` }
+      : st.open ? { level: vs === "attached" ? "accent" : "ok",
+        text: `${vs === "attached" ? "attached · " : "XVC "}${st.url ? `:${String(st.url).split(":").pop()}` : "open"}`,
+        tip: `XVC open at ${st.url || "?"}${vs === "attached" ? " · a client (Vivado) is attached" : ""}` }
         : { level: "", text: vs === "held" ? "held" : "closed", tip: `the shell's XVC server: ${vs}` };
   return html`<${OvCard} title="Consoles and debug" icon="terminal" testid="tile-consoles"
       go=${html`<${Go} label="Workbench" action="ov-go-consoles" title="The console, Reset DUT and Open session are on the Workbench" run=${() => navigate(bid, "workbench")} />`}>

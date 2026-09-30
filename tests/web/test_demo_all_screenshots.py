@@ -57,20 +57,15 @@ def shoot(page: Any, review: Any, name: str, scheme: str, *, full: bool = False)
 
 def _linux(page: Any, review: Any, scheme: str) -> None:
     open_board(page, BOARD_LINUX)
-    expect(by_id(page, "tile-card")).to_contain_text("OS A:valid* B:valid", timeout=T)
-    expect(by_id(page, "tile-claim")).to_contain_text("claimed by you")
-    expect(by_id(page, "tile-panel-line")).to_contain_text("harness owns it", timeout=T)
+    expect(by_id(page, "tile-card")).to_contain_text("kept on the card [A]", timeout=T)
+    expect(by_id(page, "ov-os-slots")).to_contain_text("booted")
+    expect(by_id(page, "panel-line")).to_contain_text("harness owns it", timeout=T)
     expect(by_id(page, "tile-xvc")).to_have_attribute("data-state", "down", timeout=T)
-    shoot(page, review, "overview-linux", scheme)
-
-    page.locator('[data-action="details"]').click()
-    expect(by_id(page, "panel-sessions")).to_contain_text("bob@lab-pc-03", timeout=T)
-    expect(by_id(page, "panel-touch")).to_be_visible()
-    by_id(page, "panel-card").scroll_into_view_if_needed()
+    expect(by_id(page, "ov-watching")).to_contain_text("bob", timeout=T)       # presence
+    expect(by_id(page, "panel-line").locator('[data-part="touch"]')).to_be_visible()
     # LM4: the Linux board's panel is the Live display (the text mirror is its fallback)
     expect(by_id(page, "live-display")).to_have_attribute("data-live", "yes", timeout=T)
-    shoot(page, review, "details-panel-linux", scheme, full=True)
-    page.locator('[data-action="details"]').click()             # closed again for the rest
+    shoot(page, review, "overview-linux", scheme)
 
     section(page, "program")
     page.locator('[data-overlay="nanosoc_upy"]').click()
@@ -91,9 +86,9 @@ def _linux(page: Any, review: Any, scheme: str) -> None:
 
 def _bare_metal(page: Any, review: Any, scheme: str) -> None:
     open_board(page, BOARD_V011)
-    expect(by_id(page, "tile-panel-rebuilt")).to_be_visible(timeout=T)
-    expect(by_id(page, "tile-locate")).to_have_attribute("aria-disabled", "true")   # LOCATE
-    expect(by_id(page, "tile-temp")).to_contain_text("41", timeout=T)
+    expect(by_id(page, "panel-headline")).to_have_attribute("data-state", "rebuilt", timeout=T)
+    expect(by_id(page, "reason-identify")).to_contain_text("harness feature 'locate'")
+    expect(by_id(page, "ov-kpi-temp")).to_contain_text("41", timeout=T)
     shoot(page, review, "overview-bare-metal", scheme)
 
     section(page, "debug")
@@ -126,7 +121,7 @@ def _bare_metal(page: Any, review: Any, scheme: str) -> None:
 def _leased(page: Any, review: Any, scheme: str) -> None:
     open_board(page, BOARD_LEASED)
     expect(by_id(page, "lease-request")).to_contain_text("alice@lab-pc-07", timeout=T)
-    expect(page.locator('[data-attention="lease"]')).to_be_visible()
+    expect(by_id(page, "ov-queue")).to_have_attribute("data-people", "2", timeout=T)
     shoot(page, review, "overview-leased", scheme)
     page.locator('[data-action="lease_force_open"]').click()
     expect(by_id(page, "force-confirm")).to_be_visible(timeout=T)

@@ -102,10 +102,10 @@ def test_review_bare_metal_rebuilt(page_factory, daemon, engine, psim, review, s
     engine._set_identity(BOARD, harness_impl="bare-metal")
     page = page_factory(scheme, **APP)
     open_board(page)
-    expect(page.locator('[data-testid="tile-panel-line"]')).to_contain_text("harness owns it",
-                                                                            timeout=T)
-    page.locator('[data-testid="tile-panel"]').screenshot(
-        path=str(review / f"panel-tile-line-bare-metal-{scheme}.png"))
+    expect(page.locator('[data-testid="panel-line"]')).to_contain_text("harness owns it",
+                                                                       timeout=T)
+    page.locator('[data-testid="panel-card"]').screenshot(
+        path=str(review / f"panel-card-bare-metal-{scheme}.png"))
     details(page)
     expect(card(page).locator('[data-testid="panel-rebuilt"]')).to_contain_text(
         "bare-metal harness image", timeout=T)

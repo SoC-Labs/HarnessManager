@@ -62,11 +62,19 @@ def open_board(page, bid=BOARD):
 
 
 def show_display(page):
-    """Details open, the Live display scrolled on screen (it opens only then)."""
-    if page.locator('[data-action="details"][aria-expanded="false"]').count():
-        page.locator('[data-action="details"]').click()
+    """The Overview's Front panel on Live (UI v2 round 3: the hero card, not a Details fold),
+    the Live display scrolled on screen (it opens only then)."""
+    page.wait_for_selector('[data-testid="panel-card"]', timeout=T)
+    live = page.locator('[data-testid="panel-card"] [data-action="panel-view-live"]')
+    if live.count() and live.get_attribute("aria-pressed") != "true" and live.is_enabled():
+        live.click()
     page.wait_for_selector('[data-testid="live-display"]', timeout=T)
     by_id(page, "live-display").scroll_into_view_if_needed()
+
+
+def hide_display(page):
+    """The Front panel on Text: the Live display unmounts (as the Details fold's collapse did)."""
+    page.locator('[data-testid="panel-card"] [data-action="panel-view-text"]').click()
 
 
 def is_live(page, timeout=T):
@@ -427,13 +435,12 @@ def test_the_socket_closes_when_the_display_is_hidden_and_the_tab_backgrounded(p
     page = page_factory("light", **APP)
     socks = display_sockets(page)
     open_board(page)
-    assert socks == []                                    # Details closed: no socket at all
     show_display(page)
     is_live(page)
     assert len(socks) == 1 and not socks[0].is_closed()
     page.wait_for_timeout(3000)                           # the twin: it stays open while visible
     assert not socks[0].is_closed() and wait_until(lambda: viewers(daemon) == 1, page=page)
-    page.locator('[data-action="details"]').click()      # hidden: Details collapsed
+    hide_display(page)                                    # hidden: the card on Text
     assert wait_until(socks[0].is_closed, page=page)
     assert wait_until(lambda: viewers(daemon) == 0, page=page)
     show_display(page)                                    # shown again: a new socket
@@ -458,7 +465,7 @@ def test_the_socket_closes_when_the_display_is_hidden_and_the_tab_backgrounded(p
 
 
 def test_negative_twin_scrolled_away_it_closes_and_on_screen_it_opens(page_factory, daemon):
-    page = page_factory("light", width=1440, height=380)
+    page = page_factory("light", width=1440, height=320)
     socks = display_sockets(page)
     open_board(page)
     show_display(page)

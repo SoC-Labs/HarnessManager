@@ -101,8 +101,8 @@ def test_the_header_refresh_rereads_the_card_line_and_the_sd_journal(page_factor
     give_card(engine, "empty")
     page = page_factory(**APP)
     open_board(page)
-    tile = by_id(page, "tile-card")
-    expect(tile).to_have_text("empty", timeout=T)
+    tile = by_id(page, "tile-card")                       # UI v2: the Design card's Boots next
+    expect(tile).to_contain_text("nothing kept on the card", timeout=T)
     expect(by_id(page, "sd-banner")).to_have_count(0)
     # the world moves: the card is taken out, and an SD install is found interrupted
     engine.set_card(BOARD_USB, None)
@@ -112,7 +112,7 @@ def test_the_header_refresh_rereads_the_card_line_and_the_sd_journal(page_factor
     page.locator('[data-action="refresh-board"]').click()
     expect(by_id(page, "sd-banner")).to_be_visible(timeout=T)
     section(page, "overview")                    # a journal found first opens the SD tab
-    expect(tile).to_have_text("none (boots as always)", timeout=T)
+    expect(tile).to_contain_text("none (boots as always)", timeout=T)
     assert len(engine.called("deploy.card_status")) > cards
     assert len(engine.called("storage.pending")) > journals
     assert page.errors == []
@@ -121,7 +121,7 @@ def test_the_header_refresh_rereads_the_card_line_and_the_sd_journal(page_factor
 def test_negative_twin_without_a_card_store_the_refresh_reads_no_card(page_factory, engine):
     page = page_factory(**APP)
     open_board(page)
-    expect(by_id(page, "tile-card")).to_have_text("no card store on this harness", timeout=T)
+    expect(by_id(page, "tile-card")).to_contain_text("no card store on this harness", timeout=T)
     infos, journals = len(engine.called("info")), len(engine.called("storage.pending"))
     cards = len(engine.called("deploy.card_status"))
     page.locator('[data-action="refresh-board"]').click()
@@ -129,7 +129,7 @@ def test_negative_twin_without_a_card_store_the_refresh_reads_no_card(page_facto
                       and len(engine.called("storage.pending")) > journals)
     time.sleep(0.5)
     assert len(engine.called("deploy.card_status")) == cards         # nothing to read
-    expect(by_id(page, "tile-card")).to_have_text("no card store on this harness")
+    expect(by_id(page, "tile-card")).to_contain_text("no card store on this harness")
 
 
 # --- 9: Settings opens on General, then where you left it --------------------------------------------
@@ -253,12 +253,10 @@ def classes(page: Any, action: str, within: str = "") -> str:
 def test_on_a_board_someone_else_leases_program_and_friends_are_off_and_not_primary(page_factory, daemon):
     page = hub_board_page(page_factory, daemon, "other")
     held = "is for the lease holder only: alice@lab-pc-07 holds this board"
-    tile = by_id(page, "tile-board")
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_have_text(f"Reset DUT {held}", timeout=T)
-    expect(tile.locator('[data-testid="reason-reboot"]')).to_have_text(f"Reboot {held}")
-    assert "danger" not in classes(page, "reboot", '[data-testid="tile-board"]')
-    expect(by_id(page, "tile-debug").locator('[data-testid="reason-up"]')).to_have_text(f"Debug {held}")
-    assert "primary" not in classes(page, "up", '[data-testid="tile-debug"]')
+    # UI v2 round 3: the Overview has no drive buttons (Reset DUT, Reboot, Debug moved to the
+    # Workbench and Board > Recover): nothing there to refuse
+    for action in ("reset_dut", "reboot", "up"):
+        assert by_id(page, "section-overview").locator(f'[data-action="{action}"]').count() == 0, action
     section(page, "program")
     expect(by_id(page, "reason-program")).to_have_text(f"Program {held}", timeout=T)
     expect(page.locator('[data-action="program"]')).to_have_attribute("aria-disabled", "true")
@@ -280,11 +278,10 @@ def test_on_a_board_someone_else_leases_program_and_friends_are_off_and_not_prim
 @HUB
 def test_negative_twin_the_lease_holder_gets_the_primary_buttons(page_factory, daemon):
     page = hub_board_page(page_factory, daemon, "mine")
-    tile = by_id(page, "tile-board")
-    expect(tile.locator('[data-action="reboot"]')).to_be_visible(timeout=T)
-    expect(tile.locator('[data-testid="reason-reboot"]')).not_to_contain_text("lease holder")
-    assert "danger" in classes(page, "reboot", '[data-testid="tile-board"]')
-    assert "primary" in classes(page, "up", '[data-testid="tile-debug"]')
+    section(page, "power")
+    expect(by_id(page, "reboot-card").locator('[data-action="reboot"]')).to_be_visible(timeout=T)
+    expect(by_id(page, "reboot-card").locator('[data-testid="reason-reboot"]')).not_to_contain_text("lease holder")
+    assert "danger" in classes(page, "reboot", '[data-testid="reboot-card"]')
     section(page, "program")
     expect(page.locator('[data-action="program"]')).to_be_visible(timeout=T)
     assert "primary" in classes(page, "program")
@@ -402,11 +399,7 @@ def panel_page(page_factory: Any, daemon: Any, engine: Any) -> Any:
     engine.set_features(BOARD_FIELDED, [*feats, *PANEL_FEATURES])
     page = page_factory(**APP)
     open_board(page, BOARD_FIELDED)
-    toggle = page.locator('[data-action="details"]')
-    toggle.wait_for(timeout=T)
-    if toggle.get_attribute("aria-expanded") != "true":
-        toggle.click()
-    page.wait_for_selector('[data-testid="panel-identify"]', timeout=T)
+    page.wait_for_selector('[data-testid="panel-identify"]', timeout=T)   # the Front panel's head
     return page.locator('[data-testid="panel-identify"] [data-testid="identify-seconds"]')
 
 

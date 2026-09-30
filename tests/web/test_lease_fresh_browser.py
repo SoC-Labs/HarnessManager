@@ -38,7 +38,7 @@ RESET = "Connection reset by peer"
 
 
 def acquire_from_attention(page: Any) -> None:
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
 
 
 # --- over the mock --------------------------------------------------------------------------------

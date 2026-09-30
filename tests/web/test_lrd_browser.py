@@ -104,7 +104,6 @@ def test_request_board_replaces_queue_for_it_and_its_form_can_be_cancelled(page_
     hub = page.locator('[data-testid="fact-hub"]')
     expect(hub.locator('[data-action="lease_request_open"]')).to_have_text("Request board")
     assert hub.locator('[data-action="lease_acquire"]').count() == 0     # no "Queue for it"
-    expect(page.locator('[data-attention="lease"]')).to_contain_text("Fix: request it")
     # the twin: Cancel (and Escape) send nothing, and focus goes back to the button
     hub.locator('[data-action="lease_request_open"]').click()
     expect(page.locator("#lease-message")).to_be_focused()
@@ -326,8 +325,10 @@ def test_a_release_answer_gives_us_the_board(page_factory, daemon):
 
 def test_leave_queue_withdraws_the_request_and_frees_the_board(page_factory, daemon, engine):
     page, bar = requester(page_factory, daemon)
-    tile = page.locator('[data-testid="tile-board"]')
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("your request is queued")
+    # UI v2: Reset DUT left the Overview (the Workbench's toolbar, Board > Recover)
+    section(page, "power")
+    tile = page.locator('[data-testid="board-page-recover"]')
+    expect(tile.locator('[data-testid="reason-reset_dut"]').first).to_contain_text("your request is queued")
     bar.locator('[data-action="lease_leave"]').click()
     expect(bar.locator('[data-testid="result-lease_leave"]')).to_contain_text(
         f"$ lease leave {ADDR}  (rc 0", timeout=T)
@@ -339,7 +340,7 @@ def test_leave_queue_withdraws_the_request_and_frees_the_board(page_factory, dae
     expect(page.locator('[data-testid="lease-queued"]')).to_have_count(0)      # no stale marker
     expect(page.locator('[data-testid="lease-requested"]')).to_have_count(0)
     # the board is free of the request job; the lease rule (FIX-PACK-4) now stops a reset
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text(
+    expect(tile.locator('[data-testid="reason-reset_dut"]').first).to_contain_text(
         f"Reset DUT is for the lease holder only: {HOLDER}", timeout=T)
     assert reqs(daemon).outgoing == {}
     assert not engine.called("resets.reset")

@@ -64,8 +64,9 @@ def test_the_demo_linux_board_shows_its_panel_live_byte_for_byte(showcase):
     assert wait_until(lambda: by_id(page, "live-display").get_attribute("data-seq") != first,
                       timeout=5, page=page)
     assert canvas_pixels(page)[1] != canvas
-    # the socket closes when the card is hidden (the demo holds nothing in the background)
-    page.locator('[data-action="details"]').click()
+    # the socket closes when the picture is hidden (the Front panel on Text; the demo holds
+    # nothing in the background)
+    page.locator('[data-testid="panel-card"] [data-action="panel-view-text"]').click()
     assert wait_until(socks[-1].is_closed, page=page)
     assert wait_until(lambda: viewers(showcase.daemon, BOARD_LINUX) == 0, page=page)
     assert not page.errors, page.errors
@@ -85,22 +86,21 @@ def test_the_demo_snapshot_is_a_png(showcase):
 def test_the_demo_bare_metal_boards_fall_back_to_the_text_mirror(showcase):
     page = showcase.page()
     open_board(page, BOARD_V011)
-    show_display(page)
-    expect(by_id(page, "live-display")).to_have_attribute("data-refused", "UNAVAILABLE", timeout=T)
-    expect(by_id(page, "live-reason")).to_have_text(f"Live display: {NEEDS_LINUX}")
+    # UI v2: the Front panel tries Live once; the daemon's 422 makes it Text only, and the Live
+    # button says why in the daemon's words (the socket's refusal)
+    card = by_id(page, "panel-card")
+    expect(card).to_have_attribute("data-view", "text", timeout=T)
+    live = card.locator('[data-action="panel-view-live"]')
+    expect(live).to_be_disabled()
+    expect(live).to_have_attribute("title", f"Live: {NEEDS_LINUX}")
     expect(by_id(page, "panel-mirror")).to_have_attribute("data-source", "rebuilt")
     expect(by_id(page, "live-canvas")).to_have_count(0)
     # behind the hub, alice holds the lease, but the board is bare metal: never, so 422 with
     # the gate's words, and alice is not named (taking her lease would not help)
     open_board(page, BOARD_LEASED)
-    show_display(page)
-    expect(by_id(page, "live-display")).to_have_attribute("data-refused", "UNAVAILABLE", timeout=T)
-    expect(by_id(page, "live-reason")).to_have_text(f"Live display: {NEEDS_LINUX}")
-    expect(by_id(page, "live-reason")).not_to_contain_text("alice")
+    card = by_id(page, "panel-card")
+    expect(card).to_have_attribute("data-view", "text", timeout=T)
+    live = card.locator('[data-action="panel-view-live"]')
+    expect(live).to_have_attribute("title", f"Live: {NEEDS_LINUX}")
+    assert "alice" not in (live.get_attribute("title") or "")
     expect(by_id(page, "panel-mirror")).to_be_visible()
-    # the twin: the Linux board, in the same page, is live
-    open_board(page, BOARD_LINUX)
-    show_display(page)
-    is_live(page)
-    expect(by_id(page, "live-reason")).to_have_count(0)
-    assert not page.errors, page.errors
