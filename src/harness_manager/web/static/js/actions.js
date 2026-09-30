@@ -16,7 +16,7 @@
 
 import { call, jobFinished, toApiError, waitJob } from "./api.js";
 import { capState, secs } from "./format.js";
-import { boardState, changed, jobLabel, log, S, setJob } from "./store.js";
+import { boardState, changed, foldJobFailure, jobLabel, log, S, setJob } from "./store.js";
 import { holderOnly } from "./week.js";
 
 export const NOTHING_RUN = "Nothing was run.";
@@ -80,7 +80,9 @@ export function interlock(bid, panel, command, why) {
     { kind: "rc", command, notRun: true },
     { kind: "warnline", text: `${why}. ${NOTHING_RUN}` },
   ];
-  log("warning", panel, `$ ${command}  (not run): ${why}. ${NOTHING_RUN}`, bid);
+  // FIX-PACK-4: a refused click is a failure of what the user asked for: Activity > Errors
+  // shows it (a refused Program left "0 of 9 entries" there).
+  log("error", panel, `$ ${command}  (refused, not run): ${why}. ${NOTHING_RUN}`, bid);
   changed();
 }
 
@@ -159,6 +161,7 @@ export async function runAction(bid, panel, spec) {
   if (spec.arm) boardState(bid).arms[spec.arm] = false;
   const summary = body.map((l) => (l.name ? `${l.name}: ${l.text}` : l.text)).join("  ");
   const rcText = head.rc === null ? "no answer" : `rc ${head.rc}`;
+  if (!ok && value && value.job) foldJobFailure(bid, value.job);   // FIX-PACK-4: one row
   log(ok ? "info" : "error", panel, `$ ${spec.command}  (${rcText}, ${secs(took)} s)  ${summary}`, bid);
   if (spec.onDone) {
     try { spec.onDone(ok, value); } catch (e) { /* a render hook never breaks the panel */ }

@@ -399,12 +399,20 @@ const OUTCOMES_KEPT = 200;
 
 export function jobFinished(id) { return jobOutcomes.has(id); }
 
+// FIX-PACK-4: a failed job's error names its job, so the Activity log folds the daemon's rows
+// for that job (job.failed, update.failed, ...) into the one row of the action that ran it.
+function jobError(id, error) {
+  const e = new ApiError(error || {}, 0);
+  e.job = id;
+  return e;
+}
+
 export function jobEvent(ev) {
   const id = ev.data && ev.data.job;
   if (!id) return;
   if (ev.topic === "job.done" || ev.topic === "job.failed") {
     const outcome = ev.topic === "job.done" ? { ok: true, value: ev.data.result }
-      : { ok: false, value: new ApiError(ev.data.error || {}, 0) };
+      : { ok: false, value: jobError(id, ev.data.error) };
     jobOutcomes.set(id, outcome);
     if (jobOutcomes.size > OUTCOMES_KEPT) jobOutcomes.delete(jobOutcomes.keys().next().value);
   }
@@ -412,7 +420,7 @@ export function jobEvent(ev) {
   if (!w) return;
   if (ev.topic === "job.progress" && w.onProgress) w.onProgress(ev.data);
   if (ev.topic === "job.done") settle(id, true, ev.data.result);
-  if (ev.topic === "job.failed") settle(id, false, new ApiError(ev.data.error || {}, 0));
+  if (ev.topic === "job.failed") settle(id, false, jobError(id, ev.data.error));
 }
 
 function settle(id, ok, value) {
@@ -437,7 +445,7 @@ export function waitJob(id, { onProgress, pollMs = 1500 } = {}) {
         const { data } = await call("job", { id });
         if (data.progress && onProgress && data.state === "running") onProgress(data.progress);
         if (data.state === "done") settle(id, true, data.result);
-        if (data.state === "failed") settle(id, false, new ApiError(data.error || {}, 0));
+        if (data.state === "failed") settle(id, false, jobError(id, data.error));
       } catch (e) {
         if (!e.transport && e.errName === "ABSENT") settle(id, false, e);
       }

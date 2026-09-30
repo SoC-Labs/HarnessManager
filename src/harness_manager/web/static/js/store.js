@@ -257,11 +257,41 @@ function deferIfHeld(bid, err) {
 
 // --- the activity log --------------------------------------------------------------------
 
-export function log(level, source, text, board = "", at = null) {
+// `job`: the job the row is about (a job.* event's, or the job the board ran when a domain
+// event came), so a failure is one row (FIX-PACK-4, foldJobFailure).
+export function log(level, source, text, board = "", at = null, job = "") {
   S.logSeq += 1;
-  S.log.push({ id: S.logSeq, at: at || Date.now() / 1000, level, source, text, board });
+  S.log.push({ id: S.logSeq, at: at || Date.now() / 1000, level, source, text, board, job: job || "" });
   if (S.log.length > LOG_MAX) S.log.splice(0, S.log.length - LOG_MAX);
   changed();
+}
+
+// FIX-PACK-4: one failed job, one Activity row. It was three: the action's own row (the
+// command, rc, NAME: message, hint), the daemon's job.failed, and the domain's failure event
+// (update.failed, deploy.failed). When this page ran the job, its action row is the one row:
+// the daemon's failure rows for that job are dropped, now and when they arrive later. For a
+// job another client ran, the domain's row (it has the reason) stands and job.failed folds
+// into it; with no domain row, job.failed is the one row, in words.
+const foldedJobs = new Set();
+
+function isFailureRow(e) { return e.level === "error" && /\.failed$/.test(e.source); }
+
+export function foldJobFailure(bid, jobId) {
+  if (!jobId) return;
+  foldedJobs.add(jobId);
+  if (foldedJobs.size > 500) foldedJobs.delete(foldedJobs.values().next().value);
+  let dropped = false;
+  for (let i = S.log.length - 1; i >= 0; i -= 1) {
+    const e = S.log[i];
+    if (e.job === jobId && e.board === bid && isFailureRow(e)) { S.log.splice(i, 1); dropped = true; }
+  }
+  if (dropped) changed();
+}
+
+function jobFailedText(d, kind) {
+  const e = d.error || {};
+  return `${kind ? `${jobLabel(kind)} ` : ""}job failed: ${e.name ? `${e.name}: ` : ""}${e.message || "no reason given"}`
+    + `${e.hint ? `  hint: ${e.hint}` : ""}`;
 }
 
 // --- the service's own environment (FIX-PACK-2) -------------------------------------------
@@ -766,9 +796,22 @@ export function handleEvent(ev) {
     return;
   }
   if (bid && ev.topic === "job.started") setJob(bid, (ev.data || {}).job, (ev.data || {}).kind);
+  // FIX-PACK-4: the job a row is about, taken before job.done/job.failed ends it
+  const running = bid && S.board[bid] && S.board[bid].job;
+  const jobId = ev.topic.startsWith("job.") ? (ev.data || {}).job || "" : (running && running.id) || "";
+  const jobKind = running && running.id === jobId ? running.kind : "";
   if (bid && (ev.topic === "job.done" || ev.topic === "job.failed")) jobEnded(bid, (ev.data || {}).job);
   if (ev.topic !== "job.progress" && ev.topic !== "checks.progress") {
-    log(eventLevel(ev), ev.topic, eventText(ev), bid, ev.at);
+    const level = eventLevel(ev);
+    const failure = level === "error" && ev.topic.endsWith(".failed");
+    if (failure && jobId && foldedJobs.has(jobId)) {
+      // this page's action row already says it
+    } else if (ev.topic === "job.failed") {
+      const told = S.log.some((e) => e.job === jobId && e.board === bid && isFailureRow(e));
+      if (!told) log(level, ev.topic, jobFailedText(ev.data || {}, jobKind), bid, ev.at, jobId);
+    } else {
+      log(level, ev.topic, eventText(ev), bid, ev.at, jobId);
+    }
   }
   if (!bid) return;
   if (ev.topic.startsWith("deploy.")) onDeployEvent(ev);

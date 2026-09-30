@@ -449,3 +449,86 @@ def test_settings_hides_the_row_nothing_reads_and_keeps_the_ones_that_work(page_
     row = page.locator('[data-testid="setting-row"][data-key="panel.identify_s"]')
     expect(row).to_be_visible(timeout=T)                                  # wired: shown
     expect(page.locator('[data-testid="setting-row"][data-key="panel.presence_who"]')).to_have_count(0)
+
+
+# --- 6: one failed job is one Activity row, and a refused click is an error -------------------------
+
+
+def errors_shown(page: Any) -> Any:
+    section(page, "activity")
+    page.locator('[data-testid="activity"]').get_by_role("button", name="Errors", exact=True).click()
+    return page.locator('[data-testid="activity-table"] tbody tr')
+
+
+def pick_led(page: Any) -> None:
+    section(page, "program")
+    page.locator('[data-overlay="led"]').click()
+    page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
+
+
+def test_a_failed_program_is_one_activity_row_with_its_reason(page_factory, engine):
+    from harness_manager.core.errors import UnreachableError
+
+    engine.failures["deploy.push"] = UnreachableError("the push socket closed mid-transfer",
+                                                      hint="check the board's Ethernet")
+    page = page_factory(**APP)
+    open_board(page)
+    pick_led(page)
+    page.locator('[data-testid="arm-program"] input').check()
+    page.locator('[data-action="program"]').click()
+    expect(by_id(page, "deploy-outcome")).to_have_attribute("data-state", "failed", timeout=T)
+    expect(by_id(page, "program-result")).to_contain_text("UNREACHABLE", timeout=T)
+    time.sleep(0.5)                                       # the daemon's own failure events land
+    rows = errors_shown(page)
+    expect(rows).to_have_count(1, timeout=T)
+    expect(rows.first).to_contain_text("$ program led")
+    expect(rows.first).to_contain_text("the push socket closed mid-transfer")
+    assert page.errors == []
+
+
+def test_negative_twin_a_job_another_client_ran_is_one_row_too(page_factory, engine, daemon):
+    import json
+    import urllib.parse
+    import urllib.request
+
+    from harness_manager.core.errors import UnreachableError
+
+    engine.failures["deploy.push"] = UnreachableError("the push socket closed mid-transfer")
+    page = page_factory(**APP)
+    open_board(page)
+    pick_led(page)                                        # the overlay list, as the CLI would read it
+    url = f"{daemon.url}/api/v1/boards/{urllib.parse.quote(BOARD_USB, safe='')}/deploy"
+    req = urllib.request.Request(url, method="POST", data=json.dumps({"overlay": "led"}).encode(),
+                                 headers={"Authorization": f"Bearer {daemon.token}",
+                                          "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:            # noqa: S310 - loopback
+        assert resp.status == 202
+    expect(by_id(page, "deploy-outcome")).to_have_attribute("data-state", "failed", timeout=T)
+    time.sleep(0.5)
+    rows = errors_shown(page)
+    expect(rows).to_have_count(1, timeout=T)                          # deploy.failed; job.failed folded
+    expect(rows.first).to_contain_text("the push socket closed mid-transfer")
+
+
+def test_a_refused_program_shows_in_activity_errors(page_factory, engine):
+    page = page_factory(**APP)
+    open_board(page)
+    pick_led(page)
+    expect(by_id(page, "reason-program")).to_contain_text("not armed", timeout=T)
+    page.locator('[data-action="program"]').click(force=True)         # the interlock answers
+    expect(by_id(page, "program-result")).to_contain_text("Nothing was run.")
+    rows = errors_shown(page)
+    expect(rows).to_have_count(1, timeout=T)
+    expect(rows.first).to_contain_text("$ program led  (refused, not run): not armed")
+    assert engine.called("deploy.deploy") == []
+
+
+def test_negative_twin_a_program_that_runs_logs_no_error(page_factory, engine):
+    page = page_factory(**APP)
+    open_board(page)
+    pick_led(page)
+    page.locator('[data-testid="arm-program"] input').check()
+    page.locator('[data-action="program"]').click()
+    expect(by_id(page, "deploy-outcome")).to_have_attribute("data-state", "done", timeout=T)
+    expect(errors_shown(page)).to_have_count(0)
+    expect(page.locator('[data-testid="activity"]')).to_contain_text("0 of")
