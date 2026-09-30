@@ -136,7 +136,7 @@ from harness_manager.services.openocd_probe import REMOTE_BITBANG
 log = logging.getLogger(__name__)
 
 __all__ = ["DebugService", "DebugPorts", "find_openocd", "openocd_report", "up_argv",
-           "detect_argv", "parse_idcodes", "classify_failure"]
+           "detect_argv", "parse_idcodes", "classify_failure", "gdb_command"]
 
 OPENOCD_ENV = "HARNESS_MANAGER_OPENOCD"
 PORT_BASE_ENV = "HARNESS_MANAGER_DEBUG_PORT_BASE"
@@ -520,6 +520,27 @@ def _release_route(session: Any) -> None:
             release()
         except Exception:  # noqa: BLE001 - ending a session must always finish
             log.exception("releasing the debug route failed")
+
+
+#: FIX-PACK-5: gdb waits this long for each reply from OpenOCD (``set remotetimeout``; gdb's
+#: default is 2 s). Through a claimed Linux board's SSH forward (2026-09-30, board 2 via the
+#: hub) the attach timed out at 2 s ("Remote replied unexpectedly to 'vMustReplyEmpty':
+#: timeout") because the gdb-attach hook halts and examines the core over remote_bitbang, and
+#: OpenOCD warned "keep_alive() was not invoked in the 1000 ms timelimit ... increase "set
+#: remotetimeout""; at 60 the halt, registers, resume and detach all worked. It is on EVERY
+#: route, direct desk boards too: it only bounds the wait for a reply, so a board that answers
+#: fast behaves the same and only a dead link is reported later (Ctrl-C in gdb gives up
+#: sooner); one command line keeps the CLI, the app's Attach row and the docs the same.
+GDB_REMOTE_TIMEOUT_S = 60
+GDB_BINARY = "arm-none-eabi-gdb"
+
+
+def gdb_command(gdb_port: int, host: str = "127.0.0.1") -> str:
+    """The gdb command line that attaches to a debug session's gdb port: what ``debug up``
+    prints (``attach``) and what the app's Debug card copies (``sections/debug.js``, which
+    builds the same string). Double quotes, so it pastes into sh, cmd and PowerShell."""
+    return (f'{GDB_BINARY} -ex "set remotetimeout {GDB_REMOTE_TIMEOUT_S}" '
+            f'-ex "target extended-remote {host}:{int(gdb_port)}"')
 
 
 class DebugService:

@@ -16,6 +16,7 @@ import time
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
+from harness_manager.services.debug import gdb_command
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -340,7 +341,8 @@ def test_debug_detect_up_and_down(page_factory, engine, screenshots):
     page.locator('[data-action="up"]').click()
     page.wait_for_selector('[data-testid="debug-state"]:has-text("up")', timeout=T)
     page.wait_for_selector('[data-port="gdb"]:has-text("127.0.0.1:3343")', timeout=T)
-    assert "target extended-remote :3343" in page.locator('[data-testid="debug-ports"]').inner_text()
+    ports = page.locator('[data-testid="debug-ports"]').inner_text()
+    assert gdb_command(3343) in ports                    # FIX-PACK-5: the CLI's own line
     expect(page.locator('[data-action="up"]')).to_have_attribute("aria-disabled", "true")
     page.screenshot(path=str(screenshots / "light-debug-up.png"))
     page.locator('[data-action="down"]').click()

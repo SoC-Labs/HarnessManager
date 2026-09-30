@@ -353,6 +353,13 @@ def _export(ctx: Ctx, board_id: str, session) -> int:
 # --- debug --------------------------------------------------------------------------------
 
 
+def _gdb_command(gdb_port: int) -> str:
+    """``services.debug.gdb_command`` (imported here: the other verbs never load it)."""
+    from harness_manager.services.debug import gdb_command
+
+    return gdb_command(gdb_port, EXPORT_HOST)
+
+
 def _status_row(board_id: str, st: DebugStatus) -> list:
     return [board_id, st.state, st.gdb_port or "", st.telnet_port or "", st.tcl_port or "",
             st.pid or "", list(st.config), st.detail]
@@ -366,6 +373,8 @@ def _status_human(board_id: str, st: DebugStatus) -> list[str]:
         lines.append(f"telnet     {EXPORT_HOST}:{st.telnet_port}")
     if st.tcl_port:
         lines.append(f"tcl        {EXPORT_HOST}:{st.tcl_port}")
+    if st.gdb_port:
+        lines.append(f"attach     {_gdb_command(st.gdb_port)}")
     if st.config:
         lines.append(f"config     {' '.join(st.config)}")
     if st.pid:
@@ -400,6 +409,8 @@ def cmd_debug(ctx: Ctx) -> int:
                 f"{st.detail or 'no detail given'}",
                 hint="`harness-manager debug status TARGET` shows the last state"), status=st)
         data: dict[str, Any] = {"board_id": cand.board_id, "status": st}
+        if st.gdb_port:                                 # FIX-PACK-5: the line to paste
+            data["gdb_command"] = _gdb_command(st.gdb_port)
         human = _status_human(cand.board_id, st)
         report = getattr(svc, "openocd_report", None)
         ocd = report(session) if action == "status" and callable(report) else None
@@ -414,8 +425,9 @@ def cmd_debug(ctx: Ctx) -> int:
             # The engine stops a board's debug server when its session closes, so this
             # process IS the server's owner: hold until Ctrl-C, `detach`, or --for.
             if a.for_s is None:
-                ctx.note(f"debug server up for {cand.board_id}; Ctrl-C or "
-                         f"`harness-manager detach {a.target}` stops it")
+                ctx.note(f"debug server up for {cand.board_id}: run gdb in another terminal "
+                         f"(the attach line); this one holds the server until Ctrl-C or "
+                         f"`harness-manager detach {a.target}`")
             hold(a.for_s)
             svc.down(session)
     return ExitCode.OK

@@ -72,7 +72,7 @@ export function DebugSection({ bid }) {
   const st = b.debug || { state: "unknown" };
   const live = debugLive(bid);
   const { detect, up, down } = debugSpecs(bid);
-  const gdbCmd = st.gdb_port ? `arm-none-eabi-gdb -ex 'target extended-remote :${st.gdb_port}'` : "";
+  const gdbCmd = st.gdb_port ? `arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:${st.gdb_port}"` : "";
   return html`<div class="stack"><div class="grid split">
     <${Card} title="DUT debug (OpenOCD)" icon="bug" testid="debug-card"
         sub="Detect reads the TAP IDCODE only: no reset, no halt, no register written. Open starts OpenOCD with the config for the loaded design.">

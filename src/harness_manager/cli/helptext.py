@@ -161,15 +161,21 @@ console TARGET NAME --export PORT [--for SECONDS]
 DEBUG = """\
 debug up TARGET [--for SECONDS]
     Start OpenOCD for the loaded design, print the local gdb/telnet/tcl ports
-    (127.0.0.1), and keep it up until Ctrl-C, `detach`, or --for elapses. This
-    process owns the server and holds the board while it runs.
+    (127.0.0.1) and the gdb command line (attach), and keep it up until
+    Ctrl-C, `detach`, or --for elapses. This process owns the server and holds
+    the board and this terminal while it runs: run gdb in another terminal.
+    There is no --background; the app's Debug > Open session keeps one up
+    without a terminal.
 debug down TARGET          stop it
 debug status TARGET        state, ports, config, pid
 debug detect TARGET        non-intrusive: the TAP IDCODE, or exit 13 when the
                            loaded design has no debug port (greybox has none)
 
-Connect gdb with `target extended-remote 127.0.0.1:<gdb port>`; Arm DS uses the
-same port through its "Generic GDB" connection.
+Connect gdb with the attach line: arm-none-eabi-gdb -ex "set remotetimeout 60"
+-ex "target extended-remote 127.0.0.1:<gdb port>". The 60 s reply timeout is
+needed through a hub or a claimed board's SSH (gdb's 2 s default times out
+there) and harmless on a desk board. Arm DS uses the same port through its
+"Generic GDB" connection.
 
 xvc open TARGET [--byo] [--for SECONDS]
     Debug the loaded design's ILAs in Vivado over XVC. It reaches the
