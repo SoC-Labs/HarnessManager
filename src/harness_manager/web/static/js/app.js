@@ -19,6 +19,7 @@ import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
 import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
+import { epochOf } from "./week.js";
 import { LeaseBanners, requestClose } from "./lease.js";
 import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
 import {
@@ -213,6 +214,34 @@ function BoardHeader({ bid }) {
 
 // --- a board that is not open here: a preview and the Open button ----------------------------
 
+// FIX-PACK-4: the preview's "Lock" was the service's own board lock, and read "free" for a board
+// alice holds on the hub. It is named for what it is, and the hub lease has its own row.
+const LOCK_TITLE = "Harness Manager's own lock on this board: free unless another Harness Manager "
+  + "session or tool on this machine has it open. The hub lease is its own row.";
+
+// The hub lease as the service last knew it (GET /boards lease_known: no hub call; it is read
+// again when the board opens). A board the service never read shows "read when you open it"
+// when boards.toml puts it behind a hub, and no row otherwise.
+function PreviewLease({ row }) {
+  const k = row.lease_known;
+  const conf = row.configured || {};
+  if (!k) {
+    if (!conf.hub && conf.via !== "hub") return null;
+    return html`<dt>Hub lease</dt><dd data-testid="preview-lease" data-lease="unread">
+      <span class="muted">not read yet: read when you open the board</span></dd>`;
+  }
+  const at = epochOf(k.confirmed_at);
+  const name = k.board || k.target || "the board";
+  const title = `What this Harness Manager last read of the lease on ${name} (${k.hub || "the hub"})`
+    + `${at === null ? "" : ` at ${clock(at)}`}; it is read again when you open the board.`;
+  const state = k.state === "free" ? "free" : k.here ? "here" : k.mine ? "elsewhere" : "other";
+  const chip = state === "free" ? html`<${Chip} icon="lock-open" title=${title}>free<//>`
+    : state === "here" ? html`<${Chip} level="ok" icon="user" title=${title}>yours<//>`
+    : html`<${Chip} level="held" icon="lock" title=${title}>held by ${k.holder || "someone else"}${state === "elsewhere" ? " (another session)" : ""}<//>`;
+  return html`<dt>Hub lease</dt><dd data-testid="preview-lease" data-lease=${state}>${chip}
+    ${at !== null ? html` <span class="muted small" data-testid="preview-lease-at">as of ${clock(at)}</span>` : null}</dd>`;
+}
+
 function BoardPreview({ bid }) {
   const row = S.boards[bid] || {};
   const cand = row.candidate || {};
@@ -261,8 +290,9 @@ function BoardPreview({ bid }) {
           <dt>Design</dt><dd>${ident ? html`${ident.rm_name || "unknown"} <span class="mono sub">${ident.rm_id}</span>` : html`<span class="muted">read when opened</span>`}</dd>
           <dt>Harness</dt><dd>${ident ? ident.harness_version || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
           <dt>Build check</dt><dd>${ident ? html`<${CheckChip} check=${ident.build_check} testid="preview-build" />` : html`<span class="muted">read when opened</span>`}</dd>
-          <dt>Lock</dt><dd>${held ? html`<${Chip} level="warn" icon="lock">held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
-            : html`<${Chip} icon="lock-open">free<//>`}</dd>
+          <dt title=${LOCK_TITLE}>This app's lock</dt><dd data-testid="preview-lock">${held ? html`<${Chip} level="warn" icon="lock" title=${LOCK_TITLE}>held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
+            : html`<${Chip} icon="lock-open" title=${LOCK_TITLE}>free<//>`}</dd>
+          <${PreviewLease} row=${row} />
         </dl>
         <div class="open-row">
           <button type="button" class="btn primary" data-action="open" onClick=${open}

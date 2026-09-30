@@ -529,6 +529,12 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         running = state.jobs.running(c.board_id)
         if running:
             row["job"] = running[0].id
+        # FIX-PACK-4: the hub lease as the service last knew it (LeaseService.last_known):
+        # the week-plan sim remembers each lease it served (l3_week_plan.lease_known).
+        sim_ = getattr(app.state, "sim", None)
+        known = sim_.lease_known(c.board_id) if sim_ is not None else None
+        if known is not None:
+            row["lease_known"] = known
         return row
 
     @app.get(f"{API}/boards")

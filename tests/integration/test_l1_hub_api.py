@@ -194,3 +194,32 @@ def test_a_probed_candidate_keeps_its_route_through_json(client, rig):
     assert opened.status_code == 200 and opened.json()["info"]["identity"]["shell_id"] == "0x3f1a560f"
     bid = opened.json()["board_id"]
     assert client.get(f"{bid_path(bid)}/tunnel", headers=H).json()["tunnel"]["state"] == "up"
+
+
+# --- FIX-PACK-4: GET /boards carries the lease as the service last knew it ---------------------------
+
+
+def test_boards_lists_a_closed_boards_last_known_lease_with_no_hub_call(client, rig):
+    bid = open_lab(client)
+    wait_job(client, client.post(f"{bid_path(bid)}/lease", json={}, headers=H).json()["job"])
+    assert client.delete(bid_path(bid), headers=H).status_code == 200
+    leases = client.app.state.daemon.leases
+    reads = leases.hub_reads
+    rows = {r["board_id"]: r for r in client.get("/api/v1/boards", headers=H).json()["boards"]}
+    assert leases.hub_reads == reads                               # nothing asked the hub
+    row = rows[bid]
+    known = row["lease_known"]
+    assert row["open"] is False and "holder" not in row           # the service's lock is free
+    assert known["state"] == "held" and known["here"] is True and known["mine"] is True
+    assert known["hub"] == HUB and known["target"] == "mps3_01_pl" and known["holder"]
+    assert known["confirmed_at"] and known["source"] in ("acquire", "show", "heartbeat")
+
+
+def test_negative_twin_a_released_lease_is_known_free_and_an_unknown_board_has_none(client, rig):
+    bid = open_lab(client)
+    wait_job(client, client.post(f"{bid_path(bid)}/lease", json={}, headers=H).json()["job"])
+    assert client.delete(f"{bid_path(bid)}/lease", headers=H).status_code == 200
+    assert client.delete(bid_path(bid), headers=H).status_code == 200
+    rows = {r["board_id"]: r for r in client.get("/api/v1/boards", headers=H).json()["boards"]}
+    assert rows[bid]["lease_known"]["state"] == "free" and rows[bid]["lease_known"]["holder"] == ""
+    assert client.app.state.daemon.leases.last_known("mps3@192.0.2.9:6900") is None

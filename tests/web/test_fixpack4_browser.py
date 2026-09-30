@@ -308,3 +308,35 @@ def test_negative_twin_a_board_with_no_hub_has_no_lease_rule(page_factory):
     expect(page.locator('[data-action="program"]')).to_be_visible(timeout=T)
     expect(by_id(page, "reason-program")).not_to_contain_text("lease", timeout=T)
     assert "primary" in classes(page, "program")
+
+
+# --- 2: the preview says whose the hub lease is, apart from this app's lock -----------------------
+
+
+@HUB
+def test_the_preview_shows_the_last_known_hub_lease_apart_from_this_apps_lock(page_factory, daemon):
+    sim(daemon).behind_hub(BOARD_FIELDED, lease="other")
+    page = page_factory(**APP)
+    open_board(page, BOARD_FIELDED)
+    expect(by_id(page, "lease-chip")).to_contain_text("alice@lab-pc-07", timeout=T)
+    page.locator('[data-action="close-board"]').click()
+    expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)     # the preview again
+    expect(by_id(page, "preview-lock")).to_have_text("free")
+    expect(page.locator(".preview dt", has_text="This app's lock")).to_have_count(1)
+    lease = by_id(page, "preview-lease")
+    expect(lease).to_have_attribute("data-lease", "other", timeout=T)
+    expect(lease).to_contain_text("held by alice@lab-pc-07")
+    expect(by_id(page, "preview-lease-at")).to_contain_text("as of ")
+    assert page.locator(".preview dt", has_text="Lock").filter(has_not_text="app").count() == 0
+    assert page.errors == []
+
+
+@HUB
+def test_negative_twin_a_board_never_read_shows_no_lease_it_does_not_know(page_factory, daemon):
+    sim(daemon).behind_hub(BOARD_FIELDED, lease="other")
+    page = page_factory(**APP)
+    rail(page, BOARD_FIELDED).click()
+    expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
+    expect(by_id(page, "preview-lock")).to_have_text("free")
+    expect(by_id(page, "preview-lease")).to_have_count(0)            # nothing read: never "free"
+    assert "held by" not in page.locator(".preview").inner_text()

@@ -1220,6 +1220,35 @@ class LeaseService:
         assert known is not None
         return self._stale_view(hub, known, misses, exc.message or type(exc).__name__)
 
+    def last_known(self, board_id: str) -> dict[str, Any] | None:
+        """FIX-PACK-4: what this service last knew of ``board_id``'s hub lease, with NO hub call
+        (the app's preview of a board that is not open: ``GET /boards`` ``lease_known``)::
+
+            {hub, target, board, state: "held" | "free", holder, expires_at, mine, here,
+             confirmed_at, source}
+
+        From the LEASE-FRESH last known state (a ``lease show``, or our own acquire, release or
+        heartbeat), for a board this service has opened (``track``) or acted on since it
+        started. None when it never read it; a lease that ended here (expired, lost) is not
+        known either. ``confirmed_at`` says how old it is: nothing here reads it again."""
+        with self._mu:
+            hits = [(key, self._known[key]) for key, bid in self._boards.items()
+                    if bid == board_id and key in self._known]
+        if not hits:
+            return None
+        (host, target), known = max(hits, key=lambda kv: kv[1].at)
+        lease = known.view.get("lease") or None
+        out: dict[str, Any] = {"hub": host, "target": target,
+                               "board": known.view.get("board") or None,
+                               "state": "held" if lease else "free", "holder": "",
+                               "expires_at": "", "mine": False, "here": False,
+                               "confirmed_at": iso_utc(known.wall), "source": known.source}
+        if lease:
+            out.update(holder=str(lease.get("holder") or ""),
+                       expires_at=str(lease.get("expires_at") or ""),
+                       mine=bool(lease.get("mine")), here=held_here(lease))
+        return out
+
     def _board_for(self, hub: Any, board_id: str = "") -> str:
         key = _hk(hub)
         with self._mu:
