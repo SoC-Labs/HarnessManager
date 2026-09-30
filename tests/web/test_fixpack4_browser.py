@@ -373,3 +373,79 @@ def test_negative_twin_before_the_list_is_read_the_header_says_firmware(page_fac
     expect(value).to_have_attribute("data-source", "firmware")
     assert "version verb" in (value.get_attribute("title") or "")
     expect(by_id(page, "fact-harness-fw")).to_have_count(0)
+
+
+# --- 4: the settings the page reads, and the one it cannot ------------------------------------------
+
+
+def put_settings(daemon: Any, values: dict[str, Any]) -> None:
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(f"{daemon.url}/api/v1/settings", method="PUT",
+                                 data=json.dumps(values).encode(),
+                                 headers={"Authorization": f"Bearer {daemon.token}",
+                                          "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:            # noqa: S310 - loopback
+        assert resp.status == 200
+
+
+def panel_page(page_factory: Any, daemon: Any, engine: Any) -> Any:
+    """BOARD_FIELDED with the Linux harness's panel verbs: the Front panel card's Identify
+    (tests/web/test_p3_panel_ui.py's PanelSim, attached to the real daemon's demo sessions)."""
+    from tests.fakes.clcd_panel_shell import PANEL_FEATURES
+    from tests.fakes.p1_mock_panel import PanelSim
+
+    if getattr(daemon.app.state, "panel", None) is None:
+        PanelSim(engine).attach(engine)
+    feats = [f for f in engine._board(BOARD_FIELDED).identity.features if f not in PANEL_FEATURES]
+    engine.set_features(BOARD_FIELDED, [*feats, *PANEL_FEATURES])
+    page = page_factory(**APP)
+    open_board(page, BOARD_FIELDED)
+    toggle = page.locator('[data-action="details"]')
+    toggle.wait_for(timeout=T)
+    if toggle.get_attribute("aria-expanded") != "true":
+        toggle.click()
+    page.wait_for_selector('[data-testid="panel-identify"]', timeout=T)
+    return page.locator('[data-testid="panel-identify"] [data-testid="identify-seconds"]')
+
+
+def test_the_front_panels_identify_starts_at_the_setting(page_factory, daemon, engine):
+    put_settings(daemon, {"panel.identify_s": 20})
+    expect(panel_page(page_factory, daemon, engine)).to_have_value("20", timeout=T)
+
+
+def test_negative_twin_with_nothing_set_identify_starts_at_5_s(page_factory, daemon, engine):
+    expect(panel_page(page_factory, daemon, engine)).to_have_value("5", timeout=T)   # LOCATE's 5 s
+
+
+def test_the_send_line_and_the_byo_box_start_at_the_settings(page_factory, daemon):
+    put_settings(daemon, {"consoles.line_ending": "lf", "debug.hw_server_mode": "byo"})
+    page = page_factory(**APP)
+    open_board(page)
+    section(page, "consoles")
+    expect(page.locator('[data-testid="send-ending"]').first).to_have_value("LF", timeout=T)
+    section(page, "debug")
+    expect(page.locator('[data-testid="xvc-byo"] input')).to_be_checked(timeout=T)
+    # a change made while the page is open (the dialog, another tab, the CLI) follows
+    put_settings(daemon, {"debug.hw_server_mode": "own"})
+    expect(page.locator('[data-testid="xvc-byo"] input')).not_to_be_checked(timeout=T)
+    assert page.errors == []
+
+
+def test_negative_twin_with_nothing_set_the_send_line_is_crlf_and_byo_off(page_factory):
+    page = page_factory(**APP)
+    open_board(page)
+    section(page, "consoles")
+    expect(page.locator('[data-testid="send-ending"]').first).to_have_value("CRLF", timeout=T)
+    section(page, "debug")
+    expect(page.locator('[data-testid="xvc-byo"] input')).not_to_be_checked(timeout=T)
+
+
+def test_settings_hides_the_row_nothing_reads_and_keeps_the_ones_that_work(page_factory):
+    page = page_factory(**APP)
+    page.wait_for_selector(".board-item", timeout=T)
+    expect(gear(page)).to_have_attribute("data-settings-section", "general", timeout=T)
+    row = page.locator('[data-testid="setting-row"][data-key="panel.identify_s"]')
+    expect(row).to_be_visible(timeout=T)                                  # wired: shown
+    expect(page.locator('[data-testid="setting-row"][data-key="panel.presence_who"]')).to_have_count(0)

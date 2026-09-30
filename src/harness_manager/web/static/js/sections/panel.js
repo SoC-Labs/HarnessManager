@@ -34,13 +34,19 @@ import { LiveDisplay } from "../display.js";        // LM4: the Live display, ov
 import { LocateButton } from "../locate.js";         // LOCATE: the Board tile's Identify
 import { displayLive } from "../display.js";        // PANEL-TRUTH: the headline's "Live"
 import { GLYPHS, ROLE_COLOURS, ROLES } from "../panel_codes.js";   // PANEL-V017: generated
+import { settingValue } from "../prefs.js";
 
 const STATE_CACHE_MS = 1000;        // the daemon reuses a GET /panel answer this long
 const FRAME_CACHE_MS = 3000;        // ... and a GET /panel/frame answer this long
 const POLL_MS = 30000;              // a slow re-read while the page shows the panel
 const RETRIES = 2;                  // stale answers re-asked after an event, at most
 export const IDENTIFY_SECONDS = [5, 10, 20, 30];
-const IDENTIFY_DEFAULT_S = 5;       // LOCATE: 5 s, as the sidebar's and the tile's button
+// FIX-PACK-4: the Front panel card's Identify time defaults to the setting panel.identify_s
+// (prefs.js; 5 s unless changed, as the sidebar's and the tile's one-click buttons).
+function identifyDefault() {
+  const s = Number(settingValue("panel.identify_s"));
+  return Number.isInteger(s) && s >= 1 && s <= 30 ? s : 5;
+}
 const TAPS_SHOWN = 5;
 export const REBUILT_TEXT = "rebuilt from what Harness Manager read, not read from the panel";
 // PANEL-TRUTH: a fact the rebuilt text does not have (core/panel.py UNKNOWN), and its legend.
@@ -69,7 +75,7 @@ export function front(bid) {
       cards: 0,              // Front panel cards on screen (they want the mirror)
       taps: [],              // [{seq, on, at}], newest first
       until: 0,              // Identify blinks until this (epoch s), 0 when it does not
-      seconds: IDENTIFY_DEFAULT_S,
+      seconds: 0,            // 0: the setting's (identifyDefault); a pick here wins
     };
   }
   return b.front;
@@ -382,7 +388,9 @@ export function IdentifyControl({ bid, testid = "identify" }) {
   const p = panelState(bid, "identify");
   const why = identifyWhy(bid);
   const blinking = f.until > Date.now() / 1000;
-  const spec = identifySpec(bid, blinking ? 0 : f.seconds);
+  const seconds = f.seconds || identifyDefault();
+  const choices = [...new Set([...IDENTIFY_SECONDS, seconds])].sort((a, b) => a - b);
+  const spec = identifySpec(bid, blinking ? 0 : seconds);
   // A failure, or a click the gate stopped ("Nothing was run."): the answer stays in view.
   const failed = p.lines.length > 0 && !p.running && (p.lines[0].level === "err" || !!p.lines[0].notRun);
   return html`<div class="identify" data-testid=${testid} data-blinking=${blinking ? "yes" : "no"}>
@@ -391,8 +399,8 @@ export function IdentifyControl({ bid, testid = "identify" }) {
       ${blinking ? html`<span class="identify-until" data-testid="identify-until"><${Icon} name="timer" cls="sm" />blinking until ${clock(f.until)}</span>`
         : html`<select class="select identify-seconds" aria-label="How long the panel blinks"
           data-testid="identify-seconds" disabled=${!!why}
-          onChange=${(e) => { f.seconds = Number(e.target.value) || IDENTIFY_DEFAULT_S; changed(); }}>
-          ${IDENTIFY_SECONDS.map((s) => html`<option key=${s} value=${String(s)} selected=${s === f.seconds}>${s} s</option>`)}
+          onChange=${(e) => { f.seconds = Number(e.target.value) || 0; changed(); }}>
+          ${choices.map((s) => html`<option key=${s} value=${String(s)} selected=${s === seconds}>${s} s</option>`)}
         </select>`}
     <//>
     ${failed ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="identify-result" />` : null}

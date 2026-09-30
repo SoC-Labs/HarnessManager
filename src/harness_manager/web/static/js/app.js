@@ -20,6 +20,7 @@ import { UpdateSection } from "./sections/update.js";
 import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
 import { epochOf } from "./week.js";
+import { loadSettingValues } from "./prefs.js";          // FIX-PACK-4: the rows the page reads
 import { LeaseBanners, requestClose } from "./lease.js";
 import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
 import {
@@ -500,3 +501,4 @@ if (!hasToken()) S.connection = "auth";
 startSidebar();
 start();
 startSelfUpdate();
+loadSettingValues();

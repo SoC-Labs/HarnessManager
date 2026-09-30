@@ -36,6 +36,11 @@ function isInstance(key) {
   return p[0] === "hubs" || p[0] === "boards";
 }
 
+// FIX-PACK-4: rows the service stores but nothing reads yet are not offered here (a setting
+// that changes nothing is a trap); `config` still lists them, and docs/USER_GUIDE.md §11 says
+// why. panel.presence_who: the panel shows user@host until the presence service reads it.
+export const NOT_READ_ROWS = new Set(["panel.presence_who"]);
+
 // The rows of a section that are not a hub's or a board's: [core rows, {pack: rows}, dev rows].
 function sectionRows(id, skip = new Set()) {
   const core = [];
@@ -43,7 +48,7 @@ function sectionRows(id, skip = new Set()) {
   const dev = [];
   for (const key of SS.order) {
     const row = SS.rows[key];
-    if (!row || isInstance(key) || skip.has(key) || sectionOfRow(row) !== id) continue;
+    if (!row || isInstance(key) || skip.has(key) || NOT_READ_ROWS.has(key) || sectionOfRow(row) !== id) continue;
     const spec = specOf(key) || {};
     if (spec.ui === false) dev.push({ ...row, readonly: true, dev: true, env: row.env || spec.env || "" });
     else if (spec.pack) (packs[spec.pack] = packs[spec.pack] || []).push(row);

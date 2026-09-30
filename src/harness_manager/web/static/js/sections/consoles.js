@@ -9,9 +9,15 @@ import { html, useEffect, useRef, useState } from "../lib.js";
 import { boardState, changed, loadConsoles, log, timed } from "../store.js";
 import { consoleRows, loadBaud, loadPty, openPty, setBaud, week } from "../week.js";
 import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
+import { settingValue } from "../prefs.js";
 
 const CONSOLE_CAPS = ["console_dut", "console_shell", "console_controller"];
 const ENDINGS = { LF: "\n", CR: "\r", CRLF: "\r\n" };
+// FIX-PACK-4: the send line's default is the setting consoles.line_ending (prefs.js).
+const ENDING_OF = { lf: "LF", cr: "CR", crlf: "CRLF" };
+export function defaultEnding() {
+  return ENDING_OF[String(settingValue("consoles.line_ending")).toLowerCase()] || "CRLF";
+}
 // QUIET-POLL: "paused" waits for the board's lease (someone else holds it): calm, not a fault.
 const STATE_LEVEL = { up: "ok", connecting: "", down: "warn", closed: "", paused: "held" };
 
@@ -120,7 +126,8 @@ function ConsolePane({ bid, name }) {
   const session = consoleSession(bid, name);
   const b = boardState(bid);
   const [line, setLine] = useState("");
-  const [ending, setEnding] = useState("CRLF");
+  const [picked, setEnding] = useState(null);         // null: the setting's (prefs.js)
+  const ending = picked || defaultEnding();
   const [result, setResult] = useState(null);
   const [exported, setExported] = useState(null);
   const [exporting, setExporting] = useState(false);
@@ -190,7 +197,8 @@ function ConsolePane({ bid, name }) {
     <form class="console-send" onSubmit=${send}>
       <input class="input mono" placeholder=${`a line for ${name}; Enter sends it`} aria-label=${`Send a line to ${name}`}
         value=${line} onInput=${(e) => setLine(e.target.value)} data-testid="send-line" />
-      <select class="select" aria-label="Line ending" value=${ending} onChange=${(e) => setEnding(e.target.value)}>
+      <select class="select" aria-label="Line ending" data-testid="send-ending" value=${ending}
+        title="What Enter sends (the default is Settings > Consoles > What Enter sends)" onChange=${(e) => setEnding(e.target.value)}>
         ${Object.keys(ENDINGS).map((k) => html`<option key=${k} value=${k}>${k}</option>`)}
       </select>
       <button type="submit" class="btn" data-action="send"><${Icon} name="send" /> Send</button>
