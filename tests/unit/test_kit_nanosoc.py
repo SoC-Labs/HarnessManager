@@ -199,3 +199,65 @@ def test_a_missing_generic_file_is_refused_before_synthesis(kits, tmp_path):
     assert sargs == []                                  # synth_design never ran
     r = load_receipt(out / "out" / "spike_rm_build.json")
     assert r.failed_gate.gate == "generic_file_present" and "nope.hex" in r.failed_gate.detail
+
+
+# --- an import that Program does not list (the catalogue keeps the first of a key) ----------------
+
+from harness_manager.services.kit.schema import load_receipt as _load  # noqa: E402
+from harness_manager_mps3 import kit as mkit  # noqa: E402
+from harness_manager_mps3.overlays import OVERLAY_DIRS_ENV  # noqa: E402
+
+
+def triple(tmp_path: Path, tag: str, partial: bytes | None = None) -> Path:
+    """An overlay dir ``<tmp>/<tag>/ov/spike_rm`` packed from a passed receipt."""
+    r = _load(kf.passed_build(tmp_path / tag / "b", partial=partial))
+    return mkit.make_kit_adapter().pack_receipt(r, tmp_path / tag / "ov")
+
+
+def test_an_import_an_overlay_dir_shadows_names_it(tmp_path, monkeypatch):
+    store = ContentStore(tmp_path / "store")
+    fielded = triple(tmp_path, "fielded", partial=kf.stream() + b"\x00" * 4)   # other bits
+    monkeypatch.setenv(OVERLAY_DIRS_ENV, str(fielded.parent))
+    got = mkit.make_kit_adapter().import_overlay(store, triple(tmp_path, "mine"))
+    assert got["shadowed_by"] == str(fielded / "manifest.json")
+    assert got["shadow_same_bits"] is False
+
+
+def test_negative_twin_no_other_overlay_the_import_is_listed(tmp_path, monkeypatch):
+    monkeypatch.delenv(OVERLAY_DIRS_ENV, raising=False)
+    store = ContentStore(tmp_path / "store")
+    got = mkit.make_kit_adapter().import_overlay(store, triple(tmp_path, "mine"))
+    assert got["shadowed_by"] == "" and got["shadow_same_bits"] is False
+    # another name in the dir does not shadow it either
+    other = _load(kf.passed_build(tmp_path / "o" / "b", name="other_rm", rm_id="0x010080F1"))
+    od = mkit.make_kit_adapter().pack_receipt(other, tmp_path / "o" / "ov")
+    monkeypatch.setenv(OVERLAY_DIRS_ENV, str(od.parent))
+    got = mkit.make_kit_adapter().import_overlay(store, triple(tmp_path, "mine2"))
+    assert got["shadowed_by"] == ""
+
+
+def test_a_shadow_with_the_same_bits_says_so(tmp_path, monkeypatch):
+    # KIT-NANOSOC's own case: the HM-built nanosoc is byte-identical to the fielded one
+    store = ContentStore(tmp_path / "store")
+    fielded = triple(tmp_path, "fielded")
+    monkeypatch.setenv(OVERLAY_DIRS_ENV, str(fielded.parent))
+    got = mkit.make_kit_adapter().import_overlay(store, triple(tmp_path, "mine"))
+    assert got["shadowed_by"].endswith("manifest.json") and got["shadow_same_bits"] is True
+
+
+def test_cli_pack_import_says_program_lists_the_other_one(tmp_path, monkeypatch, capsys):
+    from harness_manager.cli import main as cli_main
+
+    fielded = triple(tmp_path, "fielded", partial=kf.stream() + b"\x00" * 4)
+    monkeypatch.setenv(OVERLAY_DIRS_ENV, str(fielded.parent))
+    receipt = kf.passed_build(tmp_path / "mine")
+    assert cli_main.main(["kit", "pack", str(receipt), "--import"]) == 0
+    out = capsys.readouterr().out
+    assert "but Program lists" in out and str(fielded / "manifest.json") in out
+    assert "--overlay-dir" in out and "shows in Program" not in out
+    # twin: nothing shadows it
+    monkeypatch.delenv(OVERLAY_DIRS_ENV)
+    receipt = kf.passed_build(tmp_path / "mine2", name="lonely_rm", rm_id="0x010080F2")
+    assert cli_main.main(["kit", "pack", str(receipt), "--import"]) == 0
+    out = capsys.readouterr().out
+    assert "it shows in Program" in out and "but Program lists" not in out

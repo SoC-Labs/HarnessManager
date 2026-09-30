@@ -545,6 +545,11 @@ owners.
   skeleton: the skeleton leaves the used groups' outputs undriven, so the result would have
   been an empty RM under nanosoc's name and rm_id. RM_SOURCES stays empty and the warning
   names the undriven outputs; `minimal` still builds as its skeleton.
+- `kit pack --import` says when Program will not list the import: an overlay of the same
+  name, rm_id and static that comes first (an overlay dir, such as the fielded set, or an
+  earlier import) wins, and `program TARGET NAME` loads that one. It names the other
+  overlay, says whether its bits are identical, and gives the `--overlay-dir` to load this
+  build. The web **Add to Program** result shows the same hint.
 - `kit check --static-id ID` on a receipt of another static refuses (exit 14) instead of
   ignoring the flag.
 - The pin model describes more than one shell (`tools/gen_mps3_pins.py --shell`, `--all`),

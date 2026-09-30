@@ -628,8 +628,12 @@ function CheckCard({ bid, step, g, x }) {
     command: `kit pack ${path || "?"} --import`,
     run: async () => (await call("kitPack", {}, { path, import: true })).data,
     render: (d) => [
-      { kind: "ok", text: d.imported ? `${d.imported.name || "overlay"} rm_id ${d.imported.rm_id} is in Program` : "packed" },
+      { kind: "ok", text: d.imported ? `${d.imported.name || "overlay"} rm_id ${d.imported.rm_id} is in `
+        + (d.imported.shadowed_by ? "the store" : "Program") : "packed" },
       { kind: "out", text: `overlay ${d.overlay_dir}` },
+      ...(d.imported && d.imported.shadowed_by ? [{ kind: "hint", text: `Program lists ${d.imported.shadowed_by} instead: `
+        + "the same name, rm_id and static, and the first one found wins"
+        + (d.imported.shadow_same_bits ? " (byte-identical bits)" : `; load this one with --overlay-dir ${d.overlay_dir}`) }] : []),
     ],
     renderError: (e) => ((e.data && e.data.checks) || []).filter((k) => k.state === "mismatch")
       .map((k) => ({ kind: "hint", text: `${k.name}: ${k.detail}` })),
