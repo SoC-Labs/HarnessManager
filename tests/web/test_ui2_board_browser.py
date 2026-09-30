@@ -116,6 +116,18 @@ def test_twin_a_board_with_no_hub_resets_its_dut_once_armed(show):
     assert not page.errors, page.errors
 
 
+def test_back_to_greybox_swaps_the_partition_then_says_it_is_greybox(show):
+    page = board(show, BOARD_V011, "recover")                  # mps3-01 runs nanosoc
+    by_id(page, "arm-greybox").locator("input").check()
+    page.locator('[data-action="restore"]').click()
+    expect(by_id(page, "greybox-result")).to_contain_text("rc 0", timeout=T)
+    expect(page.locator('[data-testid="fact-design"]')).to_contain_text("greybox", timeout=T)
+    # its twin: once the board runs greybox the step has nothing to do, and says so
+    expect(by_id(page, "reason-restore")).to_contain_text("already greybox", timeout=T)
+    expect(page.locator('[data-action="restore"]')).to_have_attribute("aria-disabled", "true")
+    assert not page.errors, page.errors
+
+
 def test_a_step_the_service_refuses_says_so_in_words(show):
     page = board(show, BOARD_V011, "recover")
     page.route("**/api/v1/boards/*/reset", lambda r: reply(r, 409, {"ok": False, "error": {

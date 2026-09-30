@@ -11,11 +11,11 @@
 
 import { gateReason, interlock, panelState, runAction, runJob } from "../actions.js";
 import { call, toApiError } from "../api.js";
-import { elapsedSince } from "../format.js";
+import { deployBar, elapsedSince } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, jobLabel, navigate, scheduleRefresh } from "../store.js";
 import { loadPower, week } from "../week.js";
-import { ArmBox, Card, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
+import { ArmBox, Card, Icon, MiniBar, Reason, ResultBlock, Spinner } from "../ui.js";
 import {
   cardGuard, driveWhy, identityOf, isLinux, mccRoute, osKind, rangeText,
 } from "./boardfacts.js";
@@ -284,6 +284,8 @@ function StepRow({ bid, s, leaseWhy }) {
   const blocked = (!!why || !!s.no) && !running;
   const armed = !!b.arms[s.gate.arm];
   const off = !!stepWhy(bid, s) && !running;
+  // Back to greybox is a deploy: its events draw the same phase bar as the Workbench's
+  const bar = s.k === "greybox" && running ? deployBar(b.deploy) : null;
   const onClick = () => {
     if (running) return;
     if (s.no) { interlock(bid, s.panel, s.spec.command, s.no); return; }
@@ -311,7 +313,7 @@ function StepRow({ bid, s, leaseWhy }) {
       <button type="button" class="btn sm rc-go" data-action=${s.key}
         aria-disabled=${blocked ? "true" : undefined} aria-busy=${running ? "true" : undefined}
         title=${blocked ? `${s.t}: ${s.no || why}` : s.t} onClick=${onClick}>${label}</button></div>
-    ${reason || s.note || s.fix || (s.k === "power") || (s.k === "reboot" && running && b.reboot.phases.length) || (p.lines && p.lines.length)
+    ${reason || s.note || s.fix || (s.k === "power") || (s.k === "reboot" && running && b.reboot.phases.length) || (s.k === "greybox" && bar) || (p.lines && p.lines.length)
       ? html`<div class="rc-extra">
         ${reason ? html`<p class=${`reason ${quiet ? "sr-only" : reason.startsWith("Cannot") ? "unk" : s.no ? "" : "warn"}`}
             data-testid=${`reason-${s.key}`}><${Icon} name=${reason.startsWith("Cannot") ? "circle-slash" : "info"} />
@@ -323,6 +325,8 @@ function StepRow({ bid, s, leaseWhy }) {
             value=${b.powerOffS ?? OFF_S.fallback} data-testid="power-off-s"
             onInput=${(e) => { b.powerOffS = e.target.value; changed(); }} /><span class="muted small">seconds (${OFF_S.min} to ${OFF_S.max})</span></div>` : null}
         ${s.k === "reboot" && running && b.reboot.phases.length ? html`<${RebootPhases} b=${b} />` : null}
+        ${s.k === "greybox" && bar ? html`<div class="progress-box" data-testid="greybox-progress"><div class="meter-line">
+          <span>Swapping to ${bar.overlay || "greybox"} · ${bar.line}</span><span class="num">${bar.pct}</span></div><${MiniBar} bar=${bar} /></div>` : null}
         ${p.lines && p.lines.length ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid=${s.result} />` : null}
       </div>` : null}
   </li>`;
