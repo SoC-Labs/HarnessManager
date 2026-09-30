@@ -211,12 +211,20 @@ export function attentionItems(bid) {
     const otherName = other ? (other.name || other.board_id || other.target) : "";
     const field = c ? c.field.toUpperCase() : "";
     const findings = ni && (ni.findings || []).filter((f) => f.kind === "clash").map((f) => f.text);
+    // The fix belongs on the board that still carries the image default: this one, unless its
+    // own identity is set (net-protocol v0.16) and the other board is one this page lists.
+    const src = (ni && ni.reported && typeof ni.reported.source === "object" && ni.reported.source) || {};
+    const clashField = c ? c.field : "mac";
+    const ownSet = !!ni && !!src[clashField] && src[clashField] !== "default" && ni.status === "clash";
+    const otherBid = other && other.board_id && S.boards[other.board_id] ? other.board_id : "";
     out.push({ key: "identity", level: "err",
       title: `Identity clash${otherName ? ` with ${otherName}` : ""}.`,
       text: findings && findings.length ? ` ${sentence(findings.join("; "))}`
         : ` This board reports the same ${field} as ${otherName} (${c.value}).`,
-      more: "Two boards with one MAC or IP break the hub's DHCP and the front panel.",
-      fix: go("board/access", "Fix identity…") });
+      more: ownSet && otherBid ? `${otherName}'s identity was never set: the fix belongs there.`
+        : "Two boards with one MAC or IP break the hub's DHCP and the front panel.",
+      fix: ownSet && otherBid ? { label: `Go to ${otherName}`, run: () => navigate(otherBid, "overview") }
+        : go("board/access", "Fix identity…") });
   }
   if (failed) {
     out.push({ key: "read", level: "warn", title: "Last read failed:",
@@ -336,8 +344,10 @@ function IdentityStrip({ bid }) {
   const cl = clashesOf(bid);
   const macClash = cl.find((c) => c.field === "mac");
   const ipClash = cl.find((c) => c.field === "ip");
+  const src = rep.source && typeof rep.source === "object" ? rep.source : {};
   const label = rep.label || "";
-  const labelDefault = label && rep.source === "default";
+  // V7-ALIGN: the image default label (source "default"; with no source, the shipped "MPS3")
+  const labelDefault = !!label && (src.label ? src.label === "default" : label.toUpperCase() === "MPS3");
   const ip = rep.ip || hostOf(bid).replace(/:\d+$/, "");
   const mac = rep.mac || (macClash ? macClash.value : "");
   const macBad = !!macClash || (ni && ni.status === "clash" && (ni.findings || []).some((f) => f.field === "mac"));
@@ -348,7 +358,8 @@ function IdentityStrip({ bid }) {
   const osUp = has(info.os_uptime_s) ? upText(Number(info.os_uptime_s) + since) : "";
   const r = mccRoute(bid);
   const U = MCC_ROUTE[r.to] || MCC_ROUTE.unknown;
-  const idSrc = ni ? `Source: the board's identity (${rep.source || "reported"}${rep.via ? `, via ${rep.via}` : ""})` : "";
+  const srcWords = Object.entries(src).map(([k, v]) => `${k} from ${v}`).join(", ");
+  const idSrc = ni ? `Source: the board's identity${srcWords ? ` (${srcWords})` : ""}${rep.via ? `, via ${rep.via}` : ""}` : "";
   return html`<div class="ov-id" data-testid="ov-identity">
     <span class="ov-id-i" title=${ni ? `${idSrc}. The label is the front panel's row 0.` : "Source: this harness image reports no label (net-protocol v0.16 identity)"}>
       <span class="ov-id-k">Label</span>
