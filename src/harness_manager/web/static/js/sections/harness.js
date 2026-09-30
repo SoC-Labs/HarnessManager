@@ -20,6 +20,7 @@ import { html, useEffect } from "../lib.js";
 import { boardState, changed, onBoardEvent, timed } from "../store.js";
 import { ActionRow, ArmBox, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 import { leaseHere } from "../week.js";
+import { heldLines } from "./power.js";
 
 export const DOOR_TEXT = "needs Debug USB here, or a hub that can write its SD";
 export const NOT_YET = "Not yet: the A/B config SD (U8) waits for its board check. Today a local "
@@ -214,44 +215,83 @@ function Changes({ changes }) {
   return html`<ul class="changes" data-testid="changes">${(changes.summary || []).map((l) => html`<li key=${l}>${l}</li>`)}</ul>`;
 }
 
-function Row({ bid, row, h, pinBusy }) {
+function factsText(row) {
+  return [row.static_id, row.impl || "?", `fw ${(row.fw_sha || "?").slice(0, 8)}`, bytesText(row.size),
+    row.cached ? "cached" : "", row.released_at ? `released ${String(row.released_at).slice(0, 10)}` : ""].filter(Boolean).join(" · ");
+}
+
+// A netbooted Linux board (no user microSD) takes a Linux release from the hub's TFTP image:
+// Harness Manager cannot write that, so the row asks for it instead of installing.
+function asks(row, netboot) {
+  return !!netboot && row.impl === "linux" && !(row.marks || []).includes("running");
+}
+
+function Row({ bid, row, h, pinBusy, netboot, focus }) {
   const open = !!h.open[row.version];
   const block = installBlock(row);
   const pinned = (row.marks || []).includes("pinned");
+  const picked = h.pick === row.version;
+  const fold = !!focus && !picked;
+  const ask = asks(row, netboot);
   const toggle = () => { h.open[row.version] = !open; changed(); };
-  return html`<li class=${`hrow ${h.pick === row.version ? "picked" : ""}`} data-release=${row.version}
+  const facts = factsText(row);
+  const offered = (row.marks || []).includes("offered") && !(row.marks || []).includes("running");
+  return html`<li class=${`hrow ${picked ? "picked" : ""} ${fold ? "os-fold" : ""}`} data-release=${row.version}
       data-verdict=${row.verdict || "none"}>
-    <div class="hrow-main">
-      <div class="hrow-id">
-        <span class="mono hver">${row.version}</span>
-        <span class="tags">${(row.channels || []).map((c) => html`<span class="tag" key=${c}>${c}</span>`)}</span>
-        <${Marks} row=${row} />
-      </div>
-      <div class="hrow-verdict"><${VerdictChip} row=${row} /><${ViaChip} row=${row} />
-        <span class="secondary small hwhy" data-testid="why">${whyText(row)}</span></div>
-      <div class="hrow-facts secondary small">
-        <span class="mono">${row.static_id}</span>${` · ${row.impl || "?"} · fw `}<span class="mono">${(row.fw_sha || "?").slice(0, 8)}</span>${
-        ` · ${bytesText(row.size)}`}${row.cached ? html`${" · "}<span class="i-ok" title="in the download cache">cached</span>` : ""}${
-        row.released_at ? ` · released ${String(row.released_at).slice(0, 10)}` : ""}
-      </div>
-      <div class="hrow-actions">
-        <button type="button" class="btn ghost sm" data-action="changes" aria-expanded=${open ? "true" : "false"}
-          onClick=${toggle}><${Icon} name="chevron-right" cls=${`sm chev ${open ? "open" : ""}`} />What changes</button>
-        <button type="button" class="btn sm" data-action="pin" aria-disabled=${pinBusy ? "true" : undefined}
-          title=${pinned ? "Stop pinning the board to this release" : "Pin the board: nothing newer is offered"}
-          onClick=${() => { if (!pinBusy) (pinned ? unpin(bid) : pin(bid, row.version)); }}>
-          <${Icon} name=${pinned ? "lock-open" : "lock"} />${pinned ? "Unpin" : "Pin"}</button>
-        <button type="button" class="btn sm primary" data-action="install" aria-disabled=${block ? "true" : undefined}
+    <div class="hrow-top" title=${fold ? `${whyText(row)} · ${facts}` : undefined}>
+      <span class="mono hver" title=${facts}>${row.version}</span>
+      <span class="tags">${(row.channels || []).map((c) => html`<span class="tag" key=${c}>${c}</span>`)}</span>
+      <${Marks} row=${row} />
+      <span class="grow"></span>
+      <button type="button" class="btn ghost sm icon-only" data-action="pin" aria-disabled=${pinBusy ? "true" : undefined}
+        aria-label=${pinned ? `Unpin ${row.version}` : `Pin ${row.version}`}
+        title=${pinned ? "Unpin: stop pinning the board to this release" : "Pin the board to this release: nothing newer is offered"}
+        onClick=${() => { if (!pinBusy) (pinned ? unpin(bid) : pin(bid, row.version)); }}>
+        <${Icon} name=${pinned ? "lock-open" : "lock"} /></button>
+      ${picked ? null : ask ? html`<button type="button" class="btn sm" data-action="ask"
+          title=${`How ${row.version} reaches a netbooted board`} onClick=${() => { h.pick = row.version; h.pickRow = row; h.asking = true; changed(); }}>
+          <${Icon} name="send" /> Ask for it…</button>`
+        : html`<button type="button" class=${`btn sm ${offered && !block ? "primary" : ""}`} data-action="install" aria-disabled=${block ? "true" : undefined}
           title=${block || `Plan installing harness ${row.version} on this board`}
-          onClick=${() => { if (!block) pickRelease(bid, row.version); }}><${Icon} name="upload" /> Install…</button>
-      </div>
+          onClick=${() => { if (!block) { h.asking = false; pickRelease(bid, row.version); } }}><${Icon} name="upload" /> Install…</button>`}
     </div>
-    ${open ? html`<div class="hrow-more">
+    ${fold ? null : html`<div class="hrow-verdict"><${VerdictChip} row=${row} /><${ViaChip} row=${row} />
+      <span class="secondary small hwhy" data-testid="why" title=${whyText(row)}>${whyText(row)}</span></div>`}
+    ${fold || picked ? null : html`<div class="small muted os-facts">${facts}
+      ${" · "}<button type="button" class="link-btn" data-action="changes" aria-expanded=${open ? "true" : "false"}
+        onClick=${toggle}>${open ? "Hide what changes" : "What changes"}</button></div>`}
+    ${open && !fold ? html`<div class="hrow-more">
       <${Changes} changes=${row.changes} />
       ${row.notes ? html`<p class="secondary small" data-testid="notes">${row.notes}</p>` : null}
       ${(row.warnings || []).map((w) => html`<${Reason} key=${w} level="warn" text=${w} />`)}
     </div>` : null}
+    ${picked && h.asking ? html`<${AskPlan} bid=${bid} row=${row} h=${h} />` : null}
+    ${picked && !h.asking ? html`<${InstallPanel} bid=${bid} h=${h} />` : null}
   </li>`;
+}
+
+// Netboot: the steps, and a request to copy for whoever stages the hub's images.
+function AskPlan({ bid, row, h }) {
+  const b = boardState(bid);
+  const name = (b.info && b.info.candidate && b.info.candidate.name) || bid;
+  const target = ((b.week && b.week.hub && b.week.hub.lease) || {}).target || "";
+  const host = (b.week && b.week.hub && b.week.hub.host) || "the hub";
+  const msg = `Hi, could you stage harness ${row.version}${row.static_id ? ` (static ${row.static_id})` : ""} as ${target || name}'s netboot image on ${host}? `
+    + `I'll reboot ${name} through its MCC once it's there.`;
+  const [copied, setCopied] = [h.askCopied, (v) => { h.askCopied = v; changed(); }];
+  return html`<div class="os-plan" data-testid="harness-ask" data-release=${row.version}>
+    <div class="os-plan-h"><b>How ${row.version} reaches this board</b><span>netboot: the hub serves the image</span>
+      <span class="grow"></span><button type="button" class="btn ghost sm icon-only" aria-label="Close" title="Close this plan"
+        onClick=${() => { h.pick = ""; h.asking = false; changed(); }}><${Icon} name="x" /></button></div>
+    <ol class="os-ask">
+      <li><b>Whoever runs ${host}'s netboot images stages ${row.version}.</b> Harness Manager can't write the hub's images.</li>
+      <li><b>Reboot ${name} via the MCC</b> (cold): Board › Recover, step 4, with your lease.</li>
+      <li><b>The hub pushes the image to stage0</b> over TFTP; the header's Harness fact then reads ${row.version}.</li>
+    </ol>
+    <div class="row"><button type="button" class="btn sm" data-action="ask-copy" onClick=${async () => {
+        try { await navigator.clipboard.writeText(msg); setCopied(true); } catch (e) { setCopied(false); }
+      }}><${Icon} name=${copied ? "check" : "copy"} /> ${copied ? "Request copied" : "Copy the request"}</button></div>
+  </div>`;
 }
 
 // --- pin, install, rollback -------------------------------------------------------------------------
@@ -331,10 +371,38 @@ function doorGuard(h, plan) {
   return "";
 }
 
-function PlanSteps({ plan }) {
+// update.progress phases -> the plan step they belong to ("sd:writing" -> install-sd).
+const PHASE_STEP = { download: "download", verify: "verify", "store-overlays": "store-overlays",
+  backup: "backup-sd", "backup-sd": "backup-sd", sd: "install-sd", "install-sd": "install-sd",
+  restore: "install-sd", reboot: "reboot", confirm: "confirm-identity", "confirm-identity": "confirm-identity",
+  os: "write-os-slot", "write-os-slot": "write-os-slot", "confirm-os-slot": "confirm-os-slot",
+  "rollback-first": "rollback-first" };
+const CARD_STEPS = new Set(["install-sd", "write-os-slot", "backup-sd", "restore-sd"]);
+
+export function stepOfPhase(phase) {
+  const t = String(phase || "");
+  const head = t.split(":")[0];
+  return PHASE_STEP[t] || PHASE_STEP[head] || head;
+}
+
+function PlanSteps({ plan, phase = "", running = false }) {
   if (!plan || !(plan.steps || []).length) return null;
-  return html`<ol class="plan-steps" data-testid="harness-steps">${plan.steps.map((s, i) => html`<li key=${i}>
-    <span class="mono">${s.action}</span><span class="secondary">${s.detail}</span></li>`)}</ol>`;
+  const at = running ? plan.steps.findIndex((s) => s.action === stepOfPhase(phase)) : -1;
+  return html`<ol class="os-steps" data-testid="harness-steps">${plan.steps.map((s, i) => {
+    const st = at < 0 ? "" : i < at ? "done" : i === at ? "active" : "";
+    return html`<li key=${i} class=${`os-step ${st} ${CARD_STEPS.has(s.action) ? "sd" : ""}`} title=${s.detail} data-step=${s.action}>
+      <div class="bar"><i></i></div><span class="n">${i + 1} · ${s.action}</span></li>`;
+  })}</ol>`;
+}
+
+// The "don't reboot" warning while a step writes a card (the service refuses a reboot then).
+function SafetyNote({ plan }) {
+  const steps = ((plan && plan.steps) || []).map((s, i) => [s, i + 1]).filter(([s]) => CARD_STEPS.has(s.action) && s.action !== "backup-sd");
+  if (!steps.length) return null;
+  const n = steps.map(([, i]) => i).join(", ");
+  return html`<div class="outcome warn os-safe" data-testid="harness-safety"
+      title="Harness Manager and the board both refuse a reboot while the card is written; a power cut mid-write leaves it half written.">
+    <${Icon} name="triangle-alert" /><span><b>Don't reboot, restart the shell or cut the power during step ${n}.</b> Keep this app open until it ends.</span></div>`;
 }
 
 // FIX-PACK-4: "yours" is held HERE (the catalogue's board.lease.here; `mine` alone is also
@@ -361,10 +429,10 @@ function InstallPanel({ bid, h }) {
     command: `harness install ${bid} ${h.pick}${rekey ? ` --consent "${h.typed.trim()}"` : ""}`,
     run: (ctx) => runJob("harnessInstall", { bid }, { fingerprint: plan.fingerprint, version: h.pick,
       ...(rekey ? { rekey_phrase: h.typed.trim() } : {}), ...doorBody(h, plan) },
-    (x) => ctx.progress(progressText(x), String(x.phase || "").split(":")[0]), "harness_install"),
+    (x) => { h.phase = x.phase || ""; h.progress = progressText(x); h.eta = x.eta_s || null; ctx.progress(progressText(x), String(x.phase || "").split(":")[0]); }, "harness_install"),
     render: outcomeLines,
-    renderError: (e) => (e.data && e.data.outcome ? outcomeLines(e.data.outcome) : []),
-    onDone: (ok) => { h.typed = ""; h.boardTyped = ""; h.autoRevert = null; if (ok) { h.done = h.pick; refreshQuietly(bid); } changed(); },
+    renderError: (e) => [...heldLines(e), ...(e.data && e.data.outcome ? outcomeLines(e.data.outcome) : [])],
+    onDone: (ok) => { h.typed = ""; h.boardTyped = ""; h.autoRevert = null; h.phase = ""; h.progress = ""; h.eta = null; if (ok) { h.done = h.pick; refreshQuietly(bid); } changed(); },
   };
   const guard = () => {
     if (done) return "installed: this plan is spent";
@@ -375,21 +443,25 @@ function InstallPanel({ bid, h }) {
     return doorGuard(h, plan);
   };
   const viaHub = !!(plan && plan.via === "hub");
-  return html`<div class="card inset" data-testid="harness-install" data-release=${h.pick}>
-    <div class="card-head"><h3 class="card-title"><${Icon} name="upload" />Install harness ${h.pick}</h3>
-      <span class="spacer"></span>
-      <button type="button" class="btn ghost sm icon-only" aria-label="Close" data-action="install-close"
-        onClick=${() => closePick(bid)}><${Icon} name="x" /></button></div>
-    <div class="card-body actions">
+  const live = p.running === "harness_install";
+  return html`<div class="os-plan" data-testid="harness-install" data-release=${h.pick}>
+    <div class="os-plan-h"><b>${live ? `Installing ${h.pick}` : `Install harness ${h.pick}`}</b>
+      ${plan ? html`<span>${plan.mode}${plan.via === "hub" ? ", via the hub" : ""}</span>` : null}
+      <span class="grow"></span>
+      ${live ? null : html`<button type="button" class="btn ghost sm icon-only" aria-label="Close" title="Cancel: close this plan"
+        data-action="install-close" onClick=${() => closePick(bid)}><${Icon} name="x" /></button>`}</div>
+    <div class="actions">
       ${h.detailLoading ? html`<p class="muted"><${Spinner} /> Planning it for this board...</p>` : null}
       ${h.detailError ? html`<${Reason} level="err" text=${`${h.detailError.errName}: ${h.detailError.message}`} />` : null}
       ${plan ? html`<div class="row">
           <${VerdictChip} row=${row} /><${Chip} icon="layers">${plan.mode}<//>
           <span class="secondary small">from the <b>${plan.channel}</b> channel #${plan.serial}; running shell <span class="mono">${(plan.running || {}).shell_id || "?"}</span></span></div>
-        <${Changes} changes=${row.changes} />
         ${(plan.blockers || []).map((t) => html`<${Reason} key=${t} level="err" text=${t} testid="harness-blocker" />`)}
         ${(plan.warnings || []).map((t) => html`<${Reason} key=${t} level="warn" text=${t} />`)}
-        <${PlanSteps} plan=${plan} />
+        <${PlanSteps} plan=${plan} phase=${h.phase} running=${live} />
+        ${live && h.progress ? html`<div class="progress-box" data-testid="harness-live"><div class="meter-line">
+          <span><b>${stepOfPhase(h.phase)}</b> · ${h.progress}</span>${h.eta ? html`<span class="num">about ${Math.ceil(h.eta / 60)} min left</span>` : null}</div></div>` : null}
+        ${done ? null : html`<${SafetyNote} plan=${plan} />`}
         <${LeaseLine} lease=${board.lease} />
         ${done ? html`<${Reason} level="ok" testid="harness-installed"
           text=${`Installed. The list above is read again; this plan is spent (pick a release to plan the next install).`} />` : null}
@@ -402,7 +474,7 @@ function InstallPanel({ bid, h }) {
           text=${viaHub ? "Arm: I understand the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted by the MCC on the hub (paced)."
             : "Arm: I understand this writes the board's config SD (after a backup) and reboots the board."} />
         <${ActionRow} bid=${bid} panel="harness_install" spec=${install} variant="primary" icon="upload"
-          gate=${{ arm: "harness_install", guard }} />`}` : null}
+          gate=${{ arm: "harness_install", guard, holder: "Install" }} />`}` : null}
       <${ResultBlock} lines=${p.lines} panel=${p} testid="harness-result" />
     </div>
   </div>`;
@@ -439,7 +511,7 @@ function RollbackPanel({ bid, h }) {
       ...(plan.rekey ? { rekey_phrase: h.typed.trim() } : {}), ...doorBody(h, plan) },
     (x) => ctx.progress(progressText(x), String(x.phase || "").split(":")[0]), "harness_rollback"),
     render: outcomeLines,
-    renderError: (e) => (e.data && e.data.outcome ? outcomeLines(e.data.outcome) : []),
+    renderError: (e) => [...heldLines(e), ...(e.data && e.data.outcome ? outcomeLines(e.data.outcome) : [])],
     onDone: (ok) => { h.typed = ""; if (ok) { h.rollback = null; refreshQuietly(bid); if (h.historyOpen) loadHistory(bid); } changed(); },
   };
   const guard = () => {
@@ -447,13 +519,12 @@ function RollbackPanel({ bid, h }) {
     if (plan.rekey && h.typed.trim() !== plan.consent_phrase) return `a re-key: type exactly ${plan.consent_phrase}`;
     return doorGuard(h, plan);
   };
-  return html`<div class="card inset" data-testid="harness-rollback" data-release=${plan.version}>
-    <div class="card-head"><h3 class="card-title"><${Icon} name="undo-2" />Roll back to harness ${plan.version}</h3>
-      <span class="spacer"></span>
-      <button type="button" class="btn ghost sm icon-only" aria-label="Close" data-action="rollback-close"
+  return html`<div class="os-plan" data-testid="harness-rollback" data-release=${plan.version}>
+    <div class="os-plan-h"><b>Roll back to harness ${plan.version}</b><span>${plan.mode || ""}</span><span class="grow"></span>
+      <button type="button" class="btn ghost sm icon-only" aria-label="Close" title="Cancel: close this plan" data-action="rollback-close"
         onClick=${() => { h.rollback = null; changed(); }}><${Icon} name="x" /></button></div>
-    <div class="card-body actions">
-      <p class="secondary">A re-install of ${plan.version} through the same plan, fingerprint and consent as any install.</p>
+    <div class="actions">
+      <p class="secondary small">A re-install of ${plan.version} through the same plan, fingerprint and consent as any install.</p>
       ${(plan.blockers || []).map((t) => html`<${Reason} key=${t} level="err" text=${t} />`)}
       ${(plan.warnings || []).map((t) => html`<${Reason} key=${t} level="warn" text=${t} />`)}
       <${PlanSteps} plan=${plan} />
@@ -464,7 +535,7 @@ function RollbackPanel({ bid, h }) {
       <${ArmBox} bid=${bid} armKey="harness_rollback" testid="arm-harness-rollback"
         text="Arm: I understand this writes the board's config SD (after a backup) and reboots the board." />
       <${ActionRow} bid=${bid} panel="harness_install" spec=${spec} variant="primary" icon="undo-2"
-        gate=${{ arm: "harness_rollback", guard }} />
+        gate=${{ arm: "harness_rollback", guard, holder: "Roll back" }} />
       <${ResultBlock} lines=${p.lines} panel=${p} testid="harness-result" />
     </div>
   </div>`;
@@ -488,7 +559,36 @@ function History({ bid, h }) {
 
 // --- the card ------------------------------------------------------------------------------------------
 
-export function HarnessVersionsCard({ bid }) {
+// Roll back to the release the last install replaced (a re-install through the same plan):
+// the button Versions' left card shows for a board that boots from its config SD.
+export function rollbackCandidate(bid) {
+  const cat = hv(bid).catalog;
+  return ((cat && cat.rollback) || []).find((c) => c.source === "history") || ((cat && cat.rollback) || [])[0] || null;
+}
+
+export function HarnessRollbackFoot({ bid }) {
+  const h = hv(bid);
+  const back = rollbackCandidate(bid);
+  const rollbackWhy = !h.catalog ? "the release list is not read yet"
+    : !back ? "nothing to roll back to: no install is recorded and the channel has no older release"
+    : !back.installable ? `Cannot: ${back.reason}` : "";
+  return html`<button type="button" class="btn sm" data-action="harness-rollback" aria-disabled=${rollbackWhy ? "true" : undefined}
+      title=${rollbackWhy || `Re-install ${back.version}: ${back.why}`}
+      onClick=${() => { if (!rollbackWhy) askRollback(bid, "previous"); }}>
+      <${Icon} name="undo-2" /> Roll back${back && back.installable ? ` to ${back.version}` : ""}</button>
+    ${rollbackWhy ? html`<span class="secondary small os-rb-note" data-testid="rollback-why">${rollbackWhy}</span>`
+      : html`<span class="secondary small os-rb-note">${back.why}</span>`}`;
+}
+
+export function HarnessRollbackPanels({ bid }) {
+  const h = hv(bid);
+  return html`${h.rollback ? html`<${RollbackPanel} bid=${bid} h=${h} />` : null}
+    ${h.rollbackError ? html`<${Reason} level="err" testid="rollback-error" text=${`${h.rollbackError.errName}: ${h.rollbackError.message}${h.rollbackError.holder ? ` (holder: ${h.rollbackError.holder})` : ""}`} />` : null}`;
+}
+
+// Board › Versions' right card: every signed release, each with a verdict for this board. On
+// Linux a release IS its OS image. An open plan folds the other releases to one line.
+export function ReleasesCard({ bid, linux = false, netboot = false }) {
   const h = hv(bid);
   useEffect(() => { if (!h.catalog && !h.loading) loadCatalog(bid); }, [bid]);
   const p = panelState(bid, "harness");
@@ -497,7 +597,7 @@ export function HarnessVersionsCard({ bid }) {
   const board = (cat && cat.board) || {};
   const running = board.running || {};
   const rows = (cat && cat.releases) || [];
-  const back = ((cat && cat.rollback) || []).find((c) => c.source === "history") || ((cat && cat.rollback) || [])[0];
+  const focus = rows.some((r) => r.version === h.pick) ? h.pick : "";
   const refresh = {
     key: "harness_refresh", label: cat ? "Refresh" : "Refresh the list", busyLabel: "Refreshing...", budgetS: 120,
     command: `harness list ${bid}${h.all ? " --all" : ""}`,
@@ -505,51 +605,46 @@ export function HarnessVersionsCard({ bid }) {
     render: (out) => [{ kind: "ok", text: `${(out.releases || []).length} release(s) on ${(out.channels || []).map((c) => `${c.channel} #${c.serial}`).join(", ") || "no channel"}` }],
     onDone: (ok, out) => { if (ok && out && out.releases) setCatalog(bid, out); changed(); },
   };
-  const rollbackWhy = !back ? "nothing to roll back to: no install is recorded and the channel has no older release"
-    : !back.installable ? `Cannot: ${back.reason}` : "";
   const all = html`<label class="check-inline" title="Also list the beta and dev channels">
     <input type="checkbox" data-testid="harness-all" checked=${h.all} onChange=${(e) => { h.all = e.target.checked; changed(); }} />
     beta and dev</label>`;
-  return html`<${Card} title="Harness versions" icon="layers" testid="harness-card"
-      sub="Every signed release of this board's harness, with a verdict for this board. Installing one reprograms the board: the plan below says exactly what changes."
+  return html`<${Card} title=${linux ? "Harness & OS releases" : "Harness releases"} icon="rocket" cls="os-rels" testid="harness-card"
+      sub=${linux ? (netboot ? "On Linux a release IS its OS image; the hub serves it here." : "On Linux a release IS its OS image: an install writes the free OS slot.")
+        : "Every signed release, with a verdict for this board."}
       actions=${html`${all}<${ActionRow} bid=${bid} panel="harness" spec=${refresh} icon="refresh-cw" compact=${true} gate=${{}} showReason=${false} />`}>
     <div class="stack gap-12">
       ${h.unavailable ? html`<${Reason} icon="circle-slash" testid="harness-unavailable" text=${`Harness versions are unavailable here: ${h.unavailable}.`} />` : null}
       ${h.error ? html`<${Reason} level="err" testid="harness-error" text=${`${h.error.errName}: ${h.error.message}`} />` : null}
       ${p.lines && p.lines.length ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="harness-refresh-result" />` : null}
+      ${h.loading && !cat ? html`<${Reason} icon="loader-circle" text="Reading the signed release list..." />` : null}
       ${h.empty && !cat ? html`<${Reason} testid="harness-empty" text="No list yet: Refresh fetches the signed channel and plans every release for this board (nothing is installed)." />` : null}
-      ${cat ? html`<dl class="kv" data-testid="harness-running">
-          <dt>Running</dt><dd><b class="mono">${board.running_release || "unrecorded"}</b>
-            ${running.harness && running.harness !== board.running_release ? html` · <span data-testid="harness-running-fw"
-              title="What the harness firmware reports (its version verb): the header shows both">firmware reports <span class="mono">${running.harness}</span></span>` : null}
-            ${running.shell_id ? html` · static <span class="mono">${running.shell_id}</span>` : null}
-            ${running.firmware_sha ? html` · fw <span class="mono">${String(running.firmware_sha).slice(0, 8)}</span>` : null}
-            ${running.impl ? ` · ${running.impl}` : ""}
-            ${board.pinned ? html` <${Chip} level="held" icon="lock" testid="pinned-chip">pinned ${board.pinned}<//>` : null}</dd>
-          <dt>Channels</dt><dd class="small">${(cat.channels || []).map((c) => html`<span key=${c.channel} class="chan"><span class="mono">${c.channel}</span> #${c.serial}${c.current ? ` (current ${c.current})` : ""}</span>`)}
-            ${cat.at ? html`<span class="sub"> · listed ${clock(cat.at)}</span>` : null}</dd>
-        </dl>
+      ${cat ? html`<div class="small secondary" data-testid="harness-running">Running <b class="mono">${board.running_release || "unrecorded"}</b>
+          ${running.harness && running.harness !== board.running_release ? html` · <span data-testid="harness-running-fw"
+            title="What the harness firmware reports (its version verb): the header shows both">firmware reports <span class="mono">${running.harness}</span></span>` : null}
+          ${running.shell_id ? html` · static <span class="mono">${running.shell_id}</span>` : null}
+          ${board.pinned ? html` <${Chip} level="held" icon="lock" testid="pinned-chip">pinned ${board.pinned}<//>` : null}
+          ${(cat.channels || []).length ? html` · ${(cat.channels || []).map((c) => html`<span key=${c.channel} class="chan"><span class="mono">${c.channel}</span> #${c.serial}</span>`)}` : null}
+          ${cat.at ? html`<span class="muted"> · listed ${clock(cat.at)}</span>` : null}</div>
         <${LeaseLine} lease=${board.lease} />
         ${h.stale ? html`<${Reason} level="warn" testid="harness-stale" text=${`Changed since this list was built (${h.stale}): Refresh.`} />` : null}
         ${(cat.warnings || []).map((w) => html`<${Reason} key=${w} level="warn" text=${w} />`)}
-        <ul class="hrows" data-testid="harness-rows">${rows.map((row) => html`<${Row} key=${row.version} bid=${bid} row=${row} h=${h} pinBusy=${!!pp.running} />`)}</ul>
+        <ul class="hrows" data-testid="harness-rows">${rows.map((row) => html`<${Row} key=${row.version} bid=${bid} row=${row} h=${h}
+          pinBusy=${!!pp.running} netboot=${netboot} focus=${focus} />`)}</ul>
         ${pp.lines && pp.lines.length ? html`<${ResultBlock} lines=${pp.lines} panel=${pp} testid="harness-pin-result" />` : null}` : null}
-      ${h.pick ? html`<${InstallPanel} bid=${bid} h=${h} />` : null}
-      ${h.rollback ? html`<${RollbackPanel} bid=${bid} h=${h} />` : null}
+      ${h.pick && !focus && !h.asking ? html`<${InstallPanel} bid=${bid} h=${h} />` : null}
       ${cat ? html`<div class="row hv-foot">
-        <button type="button" class="btn sm" data-action="harness-history" aria-expanded=${h.historyOpen ? "true" : "false"}
+        <button type="button" class="btn ghost sm" data-action="harness-history" aria-expanded=${h.historyOpen ? "true" : "false"}
           onClick=${() => { h.historyOpen = !h.historyOpen; if (h.historyOpen) loadHistory(bid); changed(); }}>
-          <${Icon} name="history" /> History</button>
-        <button type="button" class="btn sm" data-action="harness-rollback" aria-disabled=${rollbackWhy ? "true" : undefined}
-          title=${rollbackWhy || `Re-install ${back.version}: ${back.why}`}
-          onClick=${() => { if (!rollbackWhy) askRollback(bid, "previous"); }}>
-          <${Icon} name="undo-2" /> Roll back${back && back.installable ? ` to ${back.version}` : ""}</button>
-        ${rollbackWhy ? html`<span class="secondary small" data-testid="rollback-why">${rollbackWhy}</span>`
-          : html`<span class="secondary small">${back.why}</span>`}
-      </div>` : null}
-      ${h.rollbackError ? html`<${Reason} level="err" testid="rollback-error" text=${`${h.rollbackError.errName}: ${h.rollbackError.message}${h.rollbackError.holder ? ` (holder: ${h.rollbackError.holder})` : ""}`} />` : null}
+          <${Icon} name="history" /> ${h.historyOpen ? "Hide the history" : "History"}</button></div>` : null}
       ${h.historyOpen && cat ? html`<${History} bid=${bid} h=${h} />` : null}
-      <p class="secondary small" data-testid="harness-not-yet"><${Icon} name="info" cls="sm" /> ${NOT_YET}</p>
+      ${linux ? null : html`<p class="secondary small" data-testid="harness-not-yet"><${Icon} name="info" cls="sm" /> ${NOT_YET}</p>`}
     </div>
   <//>`;
+}
+
+// The Versions status line's part the catalogue gives: a newer release offered, or "".
+export function offeredText(bid) {
+  const cat = hv(bid).catalog;
+  const r = ((cat && cat.releases) || []).find((x) => (x.marks || []).includes("offered") && !(x.marks || []).includes("running"));
+  return r ? r.version : "";
 }

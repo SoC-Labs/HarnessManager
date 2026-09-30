@@ -43,6 +43,24 @@ function SdRecoveryCard({ bid }) {
   <//>`;
 }
 
+// Back up the whole configuration SD (a zip with a sha256 manifest); this page keeps the
+// record, so an install and the card's "Last backup" name it.
+export function backupSpec(bid) {
+  const b = boardState(bid);
+  const w = week(bid);
+  return {
+    key: "sd_backup", label: "Back up the SD", busyLabel: "Backing up...", budgetS: 600,
+    command: "sd backup",
+    run: (ctx) => runJob("sdBackup", { bid }, {}, (d) => ctx.progress(`${d.phase || "backup"}: ${pct(d)}%`, d.phase),
+      "sd_backup"),
+    render: (rec) => (rec && typeof rec === "object"
+      ? [{ kind: "ok", text: `backup ${rec.path}` },
+        { kind: "out", text: `${rec.files} files from ${rec.volume_label}, sha256 ${String(rec.sha256 || "").slice(0, 16)}...` }]
+      : [{ kind: "out", text: "done" }]),
+    onDone: (ok, rec) => { if (ok && rec) { w.lastBackup = rec; b.backup = rec; changed(); } },
+  };
+}
+
 function Step({ n, title, done = false, children, testid = "" }) {
   return html`<li class=${`flow-step ${done ? "done" : ""}`} data-testid=${testid || undefined}>
     <div class="flow-n">${done ? html`<${Icon} name="check" cls="sm" />` : n}</div>
@@ -61,17 +79,7 @@ function InstallFlow({ bid }) {
   const px = panelState(bid, "sd_restore_manual");
   const backup = backupPath || (w.lastBackup && w.lastBackup.path) || "";
   const given = files.filter((f) => f.dest.trim() && f.src.trim());
-  const backupSpec = {
-    key: "sd_backup", label: "Back up the SD", busyLabel: "Backing up...", budgetS: 600,
-    command: "sd backup",
-    run: (ctx) => runJob("sdBackup", { bid }, {}, (d) => ctx.progress(`${d.phase || "backup"}: ${pct(d)}%`, d.phase),
-      "sd_backup"),
-    render: (rec) => (rec && typeof rec === "object"
-      ? [{ kind: "ok", text: `backup ${rec.path}` },
-        { kind: "out", text: `${rec.files} files from ${rec.volume_label}, sha256 ${String(rec.sha256 || "").slice(0, 16)}...` }]
-      : [{ kind: "out", text: "done" }]),
-    onDone: (ok, rec) => { if (ok && rec) { w.lastBackup = rec; b.backup = rec; changed(); } },
-  };
+  const backup0 = backupSpec(bid);
   const installSpec = {
     key: "sd_install", label: "Install onto the SD", busyLabel: "Installing...", budgetS: 900,
     command: `sd install ${given.map((f) => f.dest.trim()).join(" ") || "?"}`,
@@ -110,7 +118,7 @@ function InstallFlow({ bid }) {
     <ol class="flow">
       <${Step} n="1" title="Back up the SD" done=${!!w.lastBackup} testid="sd-step-backup">
         <p class="secondary small">A zip with a sha256 manifest of the whole card. An install needs one.</p>
-        <${ActionRow} bid=${bid} panel="sd_backup" spec=${backupSpec} icon="download"
+        <${ActionRow} bid=${bid} panel="sd_backup" spec=${backup0} icon="download"
           gate=${{ capability: "storage_backup", adapter: "storage" }} />
         <${ResultBlock} lines=${pb.lines} panel=${pb} testid="sd-backup-result" />
       <//>
@@ -156,10 +164,38 @@ function InstallFlow({ bid }) {
   <//>`;
 }
 
-export function SdSection({ bid }) {
+// Board › Versions (UI v2, lane UI2-BOARD): the interrupted-install recovery comes first.
+export function SdRecovery({ bid }) {
+  return boardState(bid).pending ? html`<${SdRecoveryCard} bid=${bid} />` : null;
+}
+
+// Board › Versions' left card on a bare-metal board: the configuration SD (the route it is
+// reached by, what it holds, this page's last backup, Back up now), the Roll back at its
+// foot, and the by-hand install flow in a fold.
+export function ConfigSdCard({ bid, route, foot = null, after = null }) {
   const b = boardState(bid);
-  return html`<div class="stack">
-    ${b.pending ? html`<${SdRecoveryCard} bid=${bid} />` : null}
-    <${InstallFlow} bid=${bid} />
-  </div>`;
+  const w = week(bid);
+  const id = (b.info && b.info.identity) || {};
+  const pb = panelState(bid, "sd_backup");
+  const bk = capState(b.info, "storage_backup");
+  const out = bk && !bk.available ? bk.reason : "";
+  const last = w.lastBackup;
+  return html`<${Card} title="Configuration SD" icon="hard-drive" cls="os-here" testid="config-sd"
+      sub="The MCC's SD card. A harness install writes it (after a backup), then reboots.">
+    <dl class="kv">
+      <dt>Route</dt><dd class="small">${route}</dd>
+      <dt>Holds</dt><dd class="small">what the board runs: harness ${id.harness_version || "?"} · shell <span class="mono">${id.shell_id || "?"}</span></dd>
+      <dt>Last backup</dt><dd class="small" data-testid="config-sd-backup">${last
+        ? html`<span class="mono">${last.path}</span>${last.files ? ` · ${last.files} files` : ""}`
+        : html`<span class="muted">none taken from this page</span>`}</dd>
+    </dl>
+    ${out ? html`<div class="mt-8"><${Reason} icon="circle-slash" testid="config-sd-reason" text=${`Configuration SD tools: ${out}.`} /></div>` : null}
+    <div class="mt-8"><${ActionRow} bid=${bid} panel="sd_backup" spec=${backupSpec(bid)} icon="download" compact=${true}
+      gate=${{ capability: "storage_backup", adapter: "storage" }} /></div>
+    ${pb.lines && pb.lines.length ? html`<${ResultBlock} lines=${pb.lines} panel=${pb} testid="config-sd-backup-result" />` : null}
+    ${foot ? html`<div class="bt-foot">${foot}</div>` : null}
+    ${after}
+    <details class="os-more" data-testid="sd-more"><summary data-action="sd-more">Install files onto the SD by hand…</summary>
+      <${InstallFlow} bid=${bid} /></details>
+  <//>`;
 }
