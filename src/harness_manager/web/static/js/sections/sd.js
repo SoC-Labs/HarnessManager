@@ -36,7 +36,7 @@ function SdRecoveryCard({ bid }) {
       <${ArmBox} bid=${bid} armKey="sd_restore" testid="arm-sd"
         text="Arm: I understand this rewrites the configuration SD from the backup taken before the install." />
       <${ActionRow} bid=${bid} panel="sd_restore" spec=${spec} variant="primary" icon="undo-2"
-        gate=${{ capability: "storage_install", adapter: "storage", arm: "sd_restore",
+        gate=${{ capability: "storage_install", adapter: "storage", arm: "sd_restore", holder: "Restore the SD",
           guard: () => (backup ? "" : "the journal names no backup; restore by hand with harness-manager sd TARGET restore ZIP") }} />
       <${ResultBlock} lines=${p.lines} panel=${p} testid="sd-result" />
     </div>
@@ -119,7 +119,7 @@ function InstallFlow({ bid }) {
       <${Step} n="1" title="Back up the SD" done=${!!w.lastBackup} testid="sd-step-backup">
         <p class="secondary small">A zip with a sha256 manifest of the whole card. An install needs one.</p>
         <${ActionRow} bid=${bid} panel="sd_backup" spec=${backup0} icon="download"
-          gate=${{ capability: "storage_backup", adapter: "storage" }} />
+          gate=${{ capability: "storage_backup", adapter: "storage", holder: "Back up the SD" }} />
         <${ResultBlock} lines=${pb.lines} panel=${pb} testid="sd-backup-result" />
       <//>
       <${Step} n="2" title="Install files" testid="sd-step-install">
@@ -143,7 +143,7 @@ function InstallFlow({ bid }) {
         <${ArmBox} bid=${bid} armKey="sd_install" testid="arm-sd-install"
           text="Arm: I understand this writes the configuration SD (journaled; the backup restores it)." />
         <${ActionRow} bid=${bid} panel="sd_install" spec=${installSpec} variant="primary" icon="upload"
-          gate=${{ capability: "storage_install", adapter: "storage", arm: "sd_install", guard: installGuard }} />
+          gate=${{ capability: "storage_install", adapter: "storage", arm: "sd_install", guard: installGuard, holder: "Install onto the SD" }} />
         <${ResultBlock} lines=${pi.lines} panel=${pi} testid="sd-install-result" />
       <//>
       <${Step} n="3" title="Reboot and witness it" testid="sd-step-reboot">
@@ -156,7 +156,7 @@ function InstallFlow({ bid }) {
         <${ArmBox} bid=${bid} armKey="sd_restore_manual"
           text="Arm: I understand this rewrites the configuration SD from the backup." />
         <${ActionRow} bid=${bid} panel="sd_restore_manual" spec=${restoreSpec} icon="undo-2"
-          gate=${{ capability: "storage_install", adapter: "storage", arm: "sd_restore_manual",
+          gate=${{ capability: "storage_install", adapter: "storage", arm: "sd_restore_manual", holder: "Restore the SD",
             guard: () => (backup ? "" : "no backup yet: take one in step 1, or give its path in step 2") }} />
         <${ResultBlock} lines=${px.lines} panel=${px} testid="sd-restore-result" />
       <//>
@@ -191,7 +191,7 @@ export function ConfigSdCard({ bid, route, routeWhy = "", foot = null, after = n
     </dl>
     ${out ? html`<div class="mt-8"><${Reason} icon="circle-slash" testid="config-sd-reason" text=${`Configuration SD tools: ${out}.`} /></div>` : null}
     <div class="mt-8"><${ActionRow} bid=${bid} panel="sd_backup" spec=${backupSpec(bid)} icon="download" compact=${true}
-      gate=${{ capability: "storage_backup", adapter: "storage" }} /></div>
+      gate=${{ capability: "storage_backup", adapter: "storage", holder: "Back up the SD" }} /></div>
     ${pb.lines && pb.lines.length ? html`<${ResultBlock} lines=${pb.lines} panel=${pb} testid="config-sd-backup-result" />` : null}
     ${foot ? html`<div class="bt-foot">${foot}</div>` : null}
     ${after}
