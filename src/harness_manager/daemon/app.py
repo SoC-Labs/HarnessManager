@@ -1108,6 +1108,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     @api.post("/boards/{bid:path}/debug/up")
     def debug_up(bid: str) -> JSONResponse:
         s = board(bid)
+        svc = d.engine.debug
+        # DEBUG-ONBOARD: the board's own OpenOCD is for the lease holder (as XVC): one view
+        # of "held here", the hub API's.
+        if getattr(svc, "leases", "absent") is None and getattr(d, "leases", None) is not None:
+            svc.leases = d.leases
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "debug session")

@@ -108,6 +108,15 @@ class ConsoleBroker(Protocol):
 
 @dataclass(frozen=True)
 class DebugStatus:
+    """A debug session's state. ``gdb_port`` is core 0's local gdb port (0: none).
+
+    DEBUG-ONBOARD (additive, appended so positional construction is unchanged):
+    ``gdb_ports`` is every core's local gdb port, in core order, and ``cores`` their names
+    (a two-core design has two); ``where`` says where OpenOCD runs: ``"host"`` (this PC,
+    today's path) or ``"board"`` (on the Linux harness, gdb reaching it over the board's
+    SSH). Left empty, ``gdb_ports`` is ``(gdb_port,)`` and a core with no name is ``cpuN``,
+    so every older caller gets the same view."""
+
     state: str                    # "down" | "starting" | "up" | "failed"
     gdb_port: int = 0
     telnet_port: int = 0
@@ -115,6 +124,21 @@ class DebugStatus:
     config: tuple[str, ...] = ()
     pid: int = 0
     detail: str = ""
+    gdb_ports: tuple[int, ...] = ()
+    cores: tuple[str, ...] = ()
+    where: str = "host"           # "host" | "board"
+
+    def __post_init__(self) -> None:
+        ports = tuple(int(p) for p in self.gdb_ports if p)
+        if not ports and self.gdb_port:
+            ports = (int(self.gdb_port),)
+        object.__setattr__(self, "gdb_ports", ports)
+        if ports and not self.gdb_port:
+            object.__setattr__(self, "gdb_port", ports[0])
+        cores = tuple(str(c) for c in self.cores)
+        if len(cores) < len(ports):
+            cores += tuple(f"cpu{i}" for i in range(len(cores), len(ports)))
+        object.__setattr__(self, "cores", cores)
 
 
 @runtime_checkable

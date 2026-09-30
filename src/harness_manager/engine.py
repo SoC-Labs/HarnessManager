@@ -504,7 +504,9 @@ class Engine:
             in_use = {name: self._services.get(name) for name in ("consoles", "debug", "xvc")}
         actions = {
             "consoles": lambda svc: svc.close_all(board_id),
-            "debug": lambda svc: svc.down(session),
+            # DEBUG-ONBOARD: ``release`` stops what the service started, never a session on
+            # the board another client started; a service without it (the demo): ``down``.
+            "debug": lambda svc: (getattr(svc, "release", None) or svc.down)(session),
             "xvc": lambda svc: svc.close(session, reason="the board was closed"),
         }
         for name, svc in in_use.items():

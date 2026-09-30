@@ -50,6 +50,7 @@ from tests.fakes.claimed_lock import (
     pin_claim,
     route_board,
 )
+from tests.fakes.do_fake_launcher import FakeLauncher
 from tests.fakes.lxslots_board import LINUX_SID, slot_board
 from tests.fakes.s0lb_image import make_s0lb
 from tests.fakes.t2_overlays import SYNTH_RM_ID, make_overlay, use_overlay_dirs
@@ -58,7 +59,8 @@ from tests.fakes.t4_rbb_jtag import FakeJtagServer
 from tests.fakes.xvc_server import FakeXvcServer
 
 NANOSOC_RM = 0x0001_0001            # design 0x0001 (nanosoc): the MPS3 debug adapter has its cfgs
-LOCKED_PORTS = {6900, 6910, 6921, 2542}
+# + DEBUG-ONBOARD: the on-board OpenOCD's gdb servers (core 0, core 1) ride the same forward
+LOCKED_PORTS = {6900, 6910, 6921, 2542, 3333, 3334}
 
 
 # --- the lab ---------------------------------------------------------------------------------------
@@ -103,6 +105,10 @@ def lab(monkeypatch, tmp_path) -> Iterator[Any]:
                           6921: jtag.port, 2542: xvc.port})
         monkeypatch.setattr(T, "DEFAULT_LAUNCHER", ssh)
         monkeypatch.setattr(T, "DEFAULT_SSH_G", ssh.ssh_g)
+        # today's image: no mps3-debug on the board (DEBUG-ONBOARD), so `debug up` keeps
+        # this PC's OpenOCD over the claim forward, which is what these tests check
+        monkeypatch.setattr(CL, "DEFAULT_RUN", FakeLauncher(installed=False, board_ip=BOARD_IP,
+                                                            hub=HUB))
         pack = Mps3Pack()                                   # the lab's real ports
         session = pack.open(pack.candidate_for_host(f"{BOARD_IP}:6900", via=f"ssh:{HUB}"))
         if session.os_slots is not None:

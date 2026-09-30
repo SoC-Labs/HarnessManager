@@ -49,21 +49,44 @@ through the session's board-SSH forward (``claim.hold_forward("debug")``: RBB_HO
 and let go by ``debug_release`` (the debug service calls it when the OpenOCD ends); a board
 claimed by another key, or with no pin here, is ``ClaimLockedError`` with the claim hint
 before anything dials. Bare metal and unclaimed boards keep the shell's endpoint.
+
+**OpenOCD on the board** (lane DEBUG-ONBOARD; ``services/debug_onboard.py`` has the contract).
+The Linux harness image runs OpenOCD itself: ``mps3-debug up|down|status --json [--rm NAME]``
+over the claim's SSH (``claim.ssh_argv`` run by ``claim.DEFAULT_RUN``: the key-only argv, the
+pinned host key, ``-J`` the hub; no other SSH path). Its gdb servers listen on the board's
+127.0.0.1:3333 (core 0) and 3334 (core 1); they ride the session's one claim forward
+(``claim.LOCKED_FORWARDS`` ``gdb0``/``gdb1``), local ends on 127.0.0.1. ``onboard()`` gives
+that route (``Mps3OnBoard``) to the debug service, which picks it by ``debug.on_board``.
 """
 
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from pyverify import rm_id as rmid
 
-from harness_manager.core.errors import NothingOnTargetError, UnavailableError
+from harness_manager.core.errors import (
+    HarnessError,
+    NothingOnTargetError,
+    RefusedError,
+    UnavailableError,
+    UnreachableError,
+)
 from harness_manager.core.pack import BoardSession
 
-from .constants import DAP_DESIGN_CONFIGS, JTAG_RBB_PORT, KNOWN_DESIGNS, OPENOCD_CFG_DIR
+from .constants import (
+    DAP_DESIGN_CONFIGS,
+    IMPL_LINUX,
+    JTAG_RBB_PORT,
+    KNOWN_DESIGNS,
+    ONBOARD_GDB_PORTS,
+    ONBOARD_LAUNCHER,
+    OPENOCD_CFG_DIR,
+)
 
 CFG_DIR_ENV = "HARNESS_MANAGER_MPS3_OPENOCD_DIR"
 MULTICORE_DESIGN = 0x0003          # constants.KNOWN_DESIGNS: nanosoc_multicore
@@ -163,6 +186,7 @@ class Mps3DebugAdapter:
         self.route = ""
         self._impl = ""
         self._forward: Any = None
+        self._onboard: Mps3OnBoard | None = None
 
     @property
     def cfg_dir(self) -> Path | None:
@@ -246,6 +270,111 @@ class Mps3DebugAdapter:
         if self.route == "board-ssh":
             return "remote_bitbang 127.0.0.1:6921 on the board, through its SSH (claimed)"
         return f"remote_bitbang {self.host}:{self.rbb_port}"
+
+    # -- DEBUG-ONBOARD --------------------------------------------------------------------
+
+    def onboard(self) -> Mps3OnBoard | None:
+        """The on-board OpenOCD route (``services.debug_onboard.OnBoardRoute``), one per
+        session; None when the session has no SSH claim adapter (no Ethernet shell)."""
+        if getattr(self._session, "claim", None) is None:
+            return None
+        if self._onboard is None:
+            self._onboard = Mps3OnBoard(self._session)
+        return self._onboard
+
+
+#: The claim forward's name for each board gdb port (``claim.LOCKED_FORWARDS``).
+ONBOARD_GDB_FORWARDS = {ONBOARD_GDB_PORTS[0]: "gdb0", ONBOARD_GDB_PORTS[1]: "gdb1"}
+
+
+class Mps3OnBoard:
+    """``services.debug_onboard.OnBoardRoute`` for the MPS3 Linux harness: ``mps3-debug`` over
+    the claim's one-shot SSH, and its gdb ports over the claim forward."""
+
+    launcher = ONBOARD_LAUNCHER
+    #: The claim forward's user while an on-board session is open (``hold_forward``).
+    user = "debug-onboard"
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+        self._held = False
+
+    def _claim(self) -> Any:
+        claim = getattr(self._session, "claim", None)
+        if claim is None:
+            raise UnavailableError("debug_dut", "this board session has no SSH to the board")
+        return claim
+
+    def plan(self) -> tuple[str, HarnessError | None]:
+        """ready: a claimed Linux board this Harness Manager can enter; none: bare metal (or
+        the board did not say); refused: not claimed here, or another key's claim."""
+        from .claim import LOCKED_HINT, ROUTE_BOARD_SSH, ROUTE_LOCKED, ClaimLockedError
+
+        claim = self._claim()
+        try:
+            impl = str(getattr(self._session.identity(), "harness_impl", "") or "")
+        except HarnessError as exc:
+            return "none", exc
+        if impl != IMPL_LINUX:
+            return "none", UnavailableError(
+                "debug_dut", f"the {impl or 'bare-metal'} harness has no on-board OpenOCD "
+                             "(that is the Linux harness's)",
+                hint="set debug.on_board to auto or false to use this PC's OpenOCD")
+        route, why = claim.lock_plan(impl=IMPL_LINUX)
+        if route == ROUTE_BOARD_SSH:
+            return "ready", None
+        what = "OpenOCD on the board runs over the board's SSH, with the claiming key"
+        if route == ROUTE_LOCKED:
+            return "refused", ClaimLockedError(f"{what}: {why}", hint=LOCKED_HINT)
+        if claim.observe().claimed is False:
+            return "refused", RefusedError(
+                f"{what}, and this board is not claimed",
+                hint="claim it first: `harness-manager board claim TARGET` (docs/USER_GUIDE.md "
+                     "12.1)")
+        return "refused", RefusedError(
+            f"{what}, and this Harness Manager holds no claim of it (no pinned host key here)",
+            hint=LOCKED_HINT)
+
+    def run(self, verb: str, *, rm: str = "", timeout: float = 30.0) -> Any:
+        """``mps3-debug VERB [--rm RM] --json`` on the board: the claim's argv (key only, the
+        pinned host key, ``-J`` the hub) as a one-shot (``claim.ONE_SHOT_OPTIONS``: batch mode,
+        no forwards, no tty), run by ``claim.DEFAULT_RUN``. ssh's own failure (255) raises."""
+        from . import claim as _claim
+
+        words = [self.launcher, verb, *(["--rm", rm] if rm else []), "--json"]
+        claim = self._claim()
+        argv = claim.ssh_argv([shlex.join(words)])
+        argv = [argv[0], *_claim.ONE_SHOT_OPTIONS, *argv[1:]]
+        res = _claim.DEFAULT_RUN(argv, timeout)
+        if res.returncode == 255:
+            why = _claim._stderr_line(res.stderr) or "ssh exited with status 255"
+            raise claim.map_ssh_failure(UnreachableError(
+                f"ssh to the board for `{' '.join(words)}` failed: {why}",
+                hint="`harness-manager board claim-status TARGET` checks the claim and the host "
+                     "key"))
+        return res
+
+    def design_name(self) -> str:
+        """The loaded design's name for ``--rm`` (``KNOWN_DESIGNS``), "" when unknown."""
+        try:
+            ident = self._session.identity()
+            return KNOWN_DESIGNS.get(rmid.design_id(ident.rm_id), "") if ident.rm_id else ""
+        except (HarnessError, ValueError, TypeError):
+            return ""
+
+    def hold(self) -> dict[int, int]:
+        """Join the claim forward; ``{board gdb port: local port}`` (127.0.0.1 only)."""
+        forward = self._claim().hold_forward(self.user)
+        self._held = True
+        return {port: forward.local_port(name) for port, name in ONBOARD_GDB_FORWARDS.items()}
+
+    def release(self) -> None:
+        if self._held:
+            self._held = False
+            self._claim().release_forward(self.user)
+
+    def describe(self) -> str:
+        return f"{self.launcher} on the board, over its SSH (claimed)"
 
 
 def make_debug_adapter(session: BoardSession) -> Mps3DebugAdapter | None:

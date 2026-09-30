@@ -175,7 +175,12 @@ Connect gdb with the attach line: arm-none-eabi-gdb -ex "set remotetimeout 60"
 -ex "target extended-remote 127.0.0.1:<gdb port>". The 60 s reply timeout is
 needed through a hub or a claimed board's SSH (gdb's 2 s default times out
 there) and harmless on a desk board. Arm DS uses the same port through its
-"Generic GDB" connection.
+"Generic GDB" connection. A two-core design prints one attach line per core.
+
+Where OpenOCD runs (the setting debug.on_board): auto runs it ON a claimed
+Linux board whose image has mps3-debug (gdb reaches it through the board's
+SSH; no local OpenOCD needed), else on this PC; true: on the board or exit
+12/15 saying why; false: this PC only. `status` says which ("where").
 
 xvc open TARGET [--byo] [--for SECONDS]
     Debug the loaded design's ILAs in Vivado over XVC. It reaches the

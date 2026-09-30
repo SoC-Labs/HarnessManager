@@ -407,6 +407,12 @@ DEBUG = (
     # `xvc open` still takes --byo (cli/cmd_xvc.py:97,109; daemon/xvc_api.py:82,107).
     Setting("debug.hw_server_mode", "enum", "own", "Debug",
             "Run Harness Manager's own hw_server, or bring your own", choices=("own", "byo")),
+    # L6 (DEBUG-ONBOARD; SETTINGS.md A.12) services/debug_onboard.py:83,302-307 (mode; read
+    # at each debug up/down/status/detect); services/debug.py openocd() (the CLI's pre-check)
+    Setting("debug.on_board", "enum", "auto", "Debug",
+            "Where OpenOCD runs: auto (on a claimed Linux board that has it, else this PC), "
+            "true (on the board, or refuse), false (this PC only)", owner="admin",
+            env="HARNESS_MANAGER_DEBUG_ON_BOARD", choices=("auto", "true", "false")),
 )
 
 CONSOLES = (

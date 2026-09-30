@@ -114,7 +114,14 @@ from harness_manager.core.errors import (
 from harness_manager.core.model import LinkKind
 
 from . import slot_words as _slot_words
-from .constants import CONTROL_PORT, IMPL_LINUX, JTAG_RBB_PORT, PUSH_PORT, XVC_PORT
+from .constants import (
+    CONTROL_PORT,
+    IMPL_LINUX,
+    JTAG_RBB_PORT,
+    ONBOARD_GDB_PORTS,
+    PUSH_PORT,
+    XVC_PORT,
+)
 
 log = logging.getLogger(__name__)
 
@@ -167,9 +174,13 @@ KEY_ONLY: tuple[str, ...] = (
 
 #: The claim-locked services the session's ONE board-SSH forward carries (CLAIMED-LOCK), each
 #: to the board's own 127.0.0.1: the slot verbs and the card store's verbs (6900), the slot
-#: push and the card commit's pair (6910), JTAG remote_bitbang (6921) and XVC (2542).
+#: push and the card commit's pair (6910), JTAG remote_bitbang (6921) and XVC (2542). And
+#: (DEBUG-ONBOARD) the on-board OpenOCD's gdb servers, core 0 and core 1 (3333, 3334): they
+#: listen on the board's loopback only, so they ride this same forward and nothing reopens.
+#: Its telnet and Tcl ports are never forwarded. Every local end binds 127.0.0.1 only.
 LOCKED_FORWARDS: dict[str, int] = {"control": CONTROL_PORT, "push": PUSH_PORT,
-                                   "rbb": JTAG_RBB_PORT, "xvc": XVC_PORT}
+                                   "rbb": JTAG_RBB_PORT, "xvc": XVC_PORT,
+                                   "gdb0": ONBOARD_GDB_PORTS[0], "gdb1": ONBOARD_GDB_PORTS[1]}
 #: ``lock_plan``'s answers: today's path, the claim forward, refused before sending.
 ROUTE_DIRECT = ""
 ROUTE_BOARD_SSH = "board-ssh"

@@ -31,7 +31,8 @@ from harness_manager.core.model import Reading
 # --- TSV columns (append-only; the help text is generated from this table) --------------
 
 READING_COLUMNS = ("BOARD_ID", "NAME", "VALUE", "UNIT", "SOURCE", "AGE_S", "REASON")
-DEBUG_COLUMNS = ("BOARD_ID", "STATE", "GDB", "TELNET", "TCL", "PID", "CONFIG", "DETAIL")
+DEBUG_COLUMNS = ("BOARD_ID", "STATE", "GDB", "TELNET", "TCL", "PID", "CONFIG", "DETAIL",
+                 "WHERE", "GDB_PORTS", "CORES")                       # +DEBUG-ONBOARD
 
 TSV_COLUMNS: dict[str, tuple[str, ...]] = {
     "daemon": ("STATE", "PID", "PORT", "URL", "STATE_DIR", "ENV_WARNING",   # +FIX-PACK-2
