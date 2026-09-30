@@ -122,6 +122,11 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
               "identity_api",              # BOARD-ID: label/IP/MAC and the fix
               "env_api",                   # FIX-PACK-2: the service's own tool variables
               "hil_api")                   # HIL-GUI: the unattended checks, from the app
+# --- ui2 api-build routes ---
+# UI2-API-BUILD (docs/planning/UI_V2_PLAN.md §2 G4): the readings history (readings_api.py).
+# G5/G6/G8 add routes to kit_api.py and card_api.py, which are loaded above.
+EXTENSIONS += ("readings_api",)
+# --- end ui2 api-build routes ---
 
 
 @dataclass

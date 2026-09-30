@@ -191,6 +191,25 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/boards/{bid}/checks/{run}/report"),
     ),
 }
+# --- ui2 api-build ---
+# UI2-API-BUILD (UI_V2_PLAN.md §2 G4 G5 G6 G8; docs/API.md "Readings kept by this service",
+# "OS slots and the card: roll back, commit, clear", "Import a design, and the build's ...").
+# kit_api's are served in the mock by the real kit_api (tests/fakes/kit_mock.py); card_api's
+# and readings_api's by tests/fakes/t14_mock_api.py's ui2 api-build block.
+EXTENSION_ROUTES["card_api"] = EXTENSION_ROUTES["card_api"] + (
+    ("POST", "/boards/{bid}/slots/rollback"),
+    ("POST", "/boards/{bid}/card/commit"),
+    ("POST", "/boards/{bid}/card/clear"),
+)
+EXTENSION_ROUTES["kit_api"] = EXTENSION_ROUTES["kit_api"] + (
+    ("POST", "/overlays/import"),
+    ("POST", "/overlays/upload"),
+    ("POST", "/kits/design/scan"),
+)
+EXTENSION_ROUTES["readings_api"] = (
+    ("GET", "/boards/{bid}/readings/history"),
+)
+# --- end ui2 api-build ---
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles
 SERIAL_CHOICES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]

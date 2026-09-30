@@ -329,6 +329,62 @@ class Mps3KitAdapter:
             raise RefusedError(f"the overlay written to {d} fails its own check: {exc}") from exc
         return d
 
+    def check_overlay(self, overlay_dir: Path, *, kit: KitManifest | None = None,
+                      kit_for: Any = None) -> tuple[list[KitCheck], dict[str, Any]]:
+        """UI2 G5: a packed overlay folder (``manifest.json`` + the pair it names, as ``kit
+        pack`` writes it) checked before an import: ``manifest`` (it parses and its pair is
+        there), ``crc`` (lengths and CRC-32 as the manifest says; an ``.ltx`` it names too),
+        and the pair's stream checks (``check_pair``, against the kit's frame box when
+        ``kit`` is given or ``kit_for(static_id)`` finds one; else ``kit`` is ``unchecked``).
+        Returns (checks, facts: ``{name, rm_id, static_id, static_usercode, partial_len,
+        clearing_len, pair, kit}``). Reads files only."""
+        from pyverify.overlay import OverlayManifestError, OverlayValidationError
+
+        from .overlays import _optional_problems, load_overlay_dir
+
+        d = Path(overlay_dir)
+        try:
+            overlay, raw = load_overlay_dir(d)
+        except (OverlayManifestError, ValueError, KeyError, TypeError) as exc:
+            return [KitCheck("manifest", "mismatch",
+                             f"{d}: not a kit-built overlay ({exc}): it needs manifest.json and "
+                             "the partial and clearing it names")], {}
+        m = overlay.manifest
+        facts: dict[str, Any] = {
+            "name": m.rm_name, "rm_id": rmid.format_rm_id(m.rm_id),
+            "static_id": rmid.format_rm_id(m.static_id),
+            "static_usercode": (rmid.format_rm_id(m.static_usercode)
+                                if m.static_usercode is not None else ""),
+            "partial_len": m.partial.len, "clearing_len": m.clearing.len}
+        pair = {"partial": overlay.partial_path(), "clearing": overlay.clearing_path()}
+        missing = [f"{role} {p.name}" for role, p in pair.items() if not p.is_file()]
+        checks = [KitCheck("manifest", "mismatch" if missing else "ok",
+                           f"manifest.json names {', '.join(missing)}, which is not there"
+                           if missing else f"manifest.json names {m.rm_name}: "
+                           f"{pair['partial'].name} and {pair['clearing'].name}")]
+        if missing:
+            return checks, facts
+        try:
+            overlay.validate()
+            bad = _optional_problems(overlay, raw)
+        except (OverlayValidationError, ValueError) as exc:
+            bad = [str(exc)]
+        checks.append(KitCheck("crc", "mismatch" if bad else "ok",
+                               "; ".join(bad) if bad else
+                               f"partial {m.partial.len} B, clearing {m.clearing.len} B: lengths "
+                               "and CRC-32 match the manifest"))
+        if bad:
+            return checks, facts
+        if kit is None and callable(kit_for):
+            kit = kit_for(facts["static_id"])
+        facts["kit"] = kit is not None
+        pair_checks, facts["pair"] = self.check_pair(pair["partial"], pair["clearing"], kit=kit)
+        checks += pair_checks
+        if kit is None:
+            checks.append(KitCheck("kit", "unchecked", f"no kit for {facts['static_id']} in "
+                                   "the cache: the frame box was not compared"))
+        return checks, facts
+
     def import_overlay(self, store: Any, overlay_dir: Path) -> dict[str, Any]:
         """Into the content store (``overlays.import_overlay``: refuses a bad CRC), so it
         shows in Program. Returns ``{sha256, name, rm_id, static_id, static_usercode,

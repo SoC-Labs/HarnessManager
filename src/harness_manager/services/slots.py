@@ -154,6 +154,11 @@ class SlotService:
         if self.lease_check is not None:
             self.lease_check(session, what)
 
+    def check_lease(self, session: Any, what: str) -> None:
+        """UI2 G6: the lease rule alone, so a front-end can refuse (409 HELD, naming the
+        holder) before it starts a job; every change checks it again itself."""
+        self._lease(session, what)
+
     def _progress(self, board_id: str, topic: str) -> Progress:
         def emit(phase: str, done: int, total: int, detail: dict[str, Any] | None = None) -> None:
             # SLOT-TIMING: a long card job adds rate_bps, eta_s and its one-line text.

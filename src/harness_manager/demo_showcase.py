@@ -1025,3 +1025,114 @@ def me() -> str:
 
 
 __all__ = ["BOARD_LEASED", "BOARD_LINUX", "BOARD_SPARE", "BOARD_V011", "DemoXvc", "adapters", "me", "script"]
+
+
+# --- ui2 api-build ---
+# UI2-API-BUILD G6 (docs/planning/UI_V2_PLAN.md §2; docs/API.md "OS slots and the card: roll
+# back, commit, clear"): the Linux showcase board's OS slots and card TAKE the changes the
+# Board > Versions page makes, in memory (no card exists to write): a rollback makes the other
+# slot the default (a verify first, a reboot into it unless asked not to), a card commit makes
+# the running overlay the power-on default, a clear removes it. A push stays refused: nothing in
+# the app writes an OS slot image (the harness install does, and the demo's is scripted).
+# The state lives on the board (``ui2_os``, ``ui2_card``), so every session sees the same.
+
+
+def _ui2_os(adapter: Any) -> dict[str, Any]:
+    board = adapter._e._board(adapter._bid)
+    st = getattr(board, "ui2_os", None)
+    if st is None:
+        st = {"running": "A", "default": "A", "verified": {"A": "boot", "B": "readback"}}
+        board.ui2_os = st
+    return st
+
+
+_ui2_os_status_scripted = DemoOsSlots.status
+
+
+def _ui2_os_status(self: DemoOsSlots) -> SlotStatus:
+    base = _ui2_os_status_scripted(self)
+    st = _ui2_os(self)
+    slots = {n: replace(i, verified=st["verified"].get(n, i.verified))
+             for n, i in base.slots.items()}
+    other = "B" if st["running"] == "A" else "A"
+    free = other if st["default"] == st["running"] else ""
+    return replace(base, running=st["running"], default=st["default"], target=free,
+                   slots=slots)
+
+
+def _ui2_os_verify(self: DemoOsSlots, slot: str | None = None, progress: Any = None) -> SlotStatus:
+    st = _ui2_os(self)
+    name = slot or ("B" if st["running"] == "A" else "A")
+    if progress is not None:
+        progress("verify", 0, 24_100_864)
+        progress("verify", 24_100_864, 24_100_864)
+    st["verified"][name] = "readback"
+    return _ui2_os_status(self)
+
+
+def _ui2_os_rollback(self: DemoOsSlots, slot: str | None = None) -> SlotStatus:
+    st = _ui2_os(self)
+    st["default"] = slot or st["running"]
+    return _ui2_os_status(self)
+
+
+def _ui2_os_reboot(self: DemoOsSlots, progress: Any = None, wait_s: float | None = None
+                   ) -> dict[str, Any]:
+    st = _ui2_os(self)
+    if progress is not None:
+        progress("reboot", 0, 0)
+    before = st["running"]
+    st["running"] = st["default"]
+    st["verified"][st["running"]] = "boot"
+    if progress is not None:
+        progress("up", 0, 0)
+    return {"rebooted": True, "from": before, "to": st["running"],
+            "up_evidence": "demo: harnessd answered after the reboot (scripted)"}
+
+
+DemoOsSlots.status = _ui2_os_status                       # type: ignore[method-assign]
+DemoOsSlots.verify = _ui2_os_verify                       # type: ignore[method-assign]
+DemoOsSlots.rollback = _ui2_os_rollback                   # type: ignore[method-assign]
+DemoOsSlots.reboot = _ui2_os_reboot                       # type: ignore[method-assign]
+
+_ui2_card_annotate_scripted = DemoCard.annotate
+
+
+def _ui2_card_annotate(self: DemoCard, status: Any) -> Any:
+    out = _ui2_card_annotate_scripted(self, status)
+    board = self._e._board(self._bid)
+    cleared = getattr(board, "ui2_card", {}).get("cleared", False)
+    if out.present and cleared:
+        return replace(out, default=None, boot="greybox",
+                       notes=("no power-on default: the greybox loads at power-on",
+                              *(n for n in out.notes if not n.startswith("power-on loads"))))
+    return out
+
+
+def _ui2_card_commit(self: DemoCard, progress: Any = None) -> dict[str, Any]:
+    board = self._e._board(self._bid)
+    if not board.card:
+        raise UnavailableError("user microSD", "no card in the USER microSD slot")
+    ident = board.identity
+    slot = "A" if board.card_slot == "B" else "B"
+    if progress is not None:
+        progress("card", 0, 412_160)
+        progress("card", 412_160, 412_160)
+    board.card_slot = slot
+    board.ui2_card = {"cleared": False}
+    return {"rm_id": ident.rm_id, "rm_name": ident.rm_name, "static_id": ident.shell_id,
+            "slot": slot, "bytes": 412_160}
+
+
+def _ui2_card_clear(self: DemoCard) -> Any:
+    board = self._e._board(self._bid)
+    if not board.card:
+        raise UnavailableError("user microSD", "no card in the USER microSD slot")
+    board.ui2_card = {"cleared": True}
+    return self.status()
+
+
+DemoCard.annotate = _ui2_card_annotate                    # type: ignore[method-assign]
+DemoCard.commit = _ui2_card_commit                        # type: ignore[method-assign]
+DemoCard.clear = _ui2_card_clear                          # type: ignore[method-assign]
+# --- end ui2 api-build ---
