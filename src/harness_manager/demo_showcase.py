@@ -1025,3 +1025,133 @@ def me() -> str:
 
 
 __all__ = ["BOARD_LEASED", "BOARD_LINUX", "BOARD_SPARE", "BOARD_V011", "DemoXvc", "adapters", "me", "script"]
+
+
+# --- ui2 api-hub -------------------------------------------------------------------------------------
+# UI v2 (lane UI2-API-HUB): what the showcase answers for G3 (a board's hub without opening it;
+# every target's lease on the hub in one read), G11 (the full queue: tiers, the background
+# queue, how long each waiter wants the board and why) and G10 (an identity clash to fix).
+# Appended as the lane rules ask: the classes above are only extended here, never edited.
+
+#: A background-tier waiter on the leased board (automation, e.g. an unattended checks run):
+#: it waits behind every interactive request (fpgahub's two tiers).
+BACKGROUND_WAITER = ("hil-runner@mapstone-dev", "hil")
+#: bob's request note (he queued after you): the message and how long he wants the board.
+BOB_NOTE = ("r-demo-0002", "bob@lab-pc-03", "a quick uart_echo check", 1800)
+#: How long your own scripted request wants the board.
+MY_WANT_S = 3600
+
+_ui2_hub_init = DemoHubState.__init__
+_ui2_hub_status = DemoHubState.status
+
+
+def _ui2_state_init(self: DemoHubState, me: str, *, target: str = HUB_TARGET,
+                    board: str = HUB_BOARD, free: bool = False) -> None:
+    from dataclasses import replace as _replace
+
+    from harness_manager.services.lease import RequestNote
+
+    _ui2_hub_init(self, me, target=target, board=board, free=free)
+    self.background = [] if free else [BACKGROUND_WAITER]
+    if free:
+        return
+    now = time.time()
+    mine = self.notes.get("r-demo-0001")
+    if mine is not None:
+        self.notes["r-demo-0001"] = _replace(mine, want_s=MY_WANT_S)
+    nid, by, message, want = BOB_NOTE
+    self.notes[nid] = RequestNote(id=nid, by=by, user=by.split("@")[0], host=by.split("@")[1],
+                                  message=message, created_at=_iso(now - 120),
+                                  deadline_at=_iso(now), want_s=want)
+
+
+class _Ui2Queued(_Queued):
+    def __init__(self, position: int, holder: str, user: str, tier: str) -> None:
+        super().__init__(position, holder, user)
+        self.tier = tier
+
+
+class _Ui2Status(_Status):
+    """``lease_status`` as fpgahub's REST answer has it: both tiers, the holder's tier."""
+
+    def __init__(self, base: _Status, background: tuple[_Queued, ...]) -> None:
+        super().__init__(base.held, base.holder, base.user, base.expires_at,
+                         tuple(_Ui2Queued(q.position, q.holder, q.user, "interactive")
+                               for q in base.queue))
+        self.background_queue = background
+        self.background_known = True
+        self.tier = "interactive" if base.held else ""
+
+
+def _ui2_status(self: DemoHubState) -> _Status:
+    base = _ui2_hub_status(self)
+    bg = tuple(_Ui2Queued(i + 1, p, u, "background")
+               for i, (p, u) in enumerate(getattr(self, "background", [])))
+    return _Ui2Status(base, bg)
+
+
+def _ui2_overview(self: DemoHubClient) -> list[dict[str, Any]]:
+    """``lease_overview`` (fpgahub ``/status``): every target on the demo hub, one read."""
+    rows = []
+    for st in getattr(self, "ui2_states", None) or (self.hub,):
+        with st.mu:
+            c, q = st.current, list(st.queue)
+        rows.append({"target": st.target,
+                     "state": "held" if c else ("queued" if q else "none"),
+                     "holder": c["holder"] if c else (q[0][0] if q else ""),
+                     "user": c["user"] if c else (q[0][1] if q else ""),
+                     "expires_at": c["expires_at"] if c else "", "queue_length": len(q),
+                     "in_use": bool(c)})
+    return rows
+
+
+def _ui2_states(engine: Any) -> tuple[DemoHubState, ...]:
+    return tuple(s for s in (getattr(engine, "_hub_state", None),
+                             getattr(engine, "_hub_spare", None)) if s is not None)
+
+
+def hub_ref(engine: Any, board_id: str) -> DemoHubRef | None:
+    """``DemoEngine.hub_for``: the hub of a showcase board that is not open (G3), else None."""
+    state = {BOARD_LEASED: getattr(engine, "_hub_state", None),
+             BOARD_SPARE: getattr(engine, "_hub_spare", None)}.get(board_id)
+    if state is None:
+        return None
+    client = DemoHubClient(state)
+    client.ui2_states = _ui2_states(engine)
+    return DemoHubRef(client)
+
+
+_ui2_adapters = adapters
+
+
+def _ui2_adapters_with_states(engine: Any, board: Any) -> dict[str, Any]:
+    out = _ui2_adapters(engine, board)
+    hub = out.get("hub")
+    if hub is not None:
+        hub.client.ui2_states = _ui2_states(engine)
+    return out
+
+
+def seed_identities(state_dir: Path) -> None:
+    """G10: the showcase's identity clash, as ``<state>/identity/seen.json`` holds what boards
+    reported: mps3-02 and mps3-03 both still carry the image's MAC 02:00:00:4d:50:53 (their
+    labels are the image default, which is "not set", never a clash). Written once: a demo
+    state dir that already has records keeps them."""
+    from harness_manager.services.board_identity import SeenIdentities
+
+    seen = SeenIdentities(Path(state_dir) / "identity")
+    if seen.all():
+        return
+    now = time.time()
+    for bid, name, target, ip in ((BOARD_LEASED, "mps3-02", HUB_TARGET, "192.168.10.106/24"),
+                                  (BOARD_SPARE, "mps3-03", SPARE_TARGET, "192.168.10.107/24")):
+        seen.update(bid, label="MPS3", hostname="mps3", ip=ip, mac="02:00:00:4d:50:53",
+                    label_source="default", target=target, address=bid.split("@", 1)[1],
+                    at=now, name=name)
+
+
+DemoHubState.__init__ = _ui2_state_init          # type: ignore[method-assign]
+DemoHubState.status = _ui2_status                # type: ignore[method-assign]
+DemoHubClient.lease_overview = _ui2_overview     # type: ignore[attr-defined]
+adapters = _ui2_adapters_with_states             # noqa: F811 - DemoSession imports it by name
+# --- end ui2 api-hub ---------------------------------------------------------------------------------

@@ -17,7 +17,12 @@ from tests.fakes.lrb_fake_hub import HOST, TARGET, iso
 from tests.fakes.lrb_rig import BID, BOB, CAROL, DAVID, World
 
 VIEW_KEYS = {"lease", "hub", "board", "queue", "request", "incoming", "taken",
-             "notes_supported", "notes_reason", "can_revoke", "revoke_reason"}
+             "notes_supported", "notes_reason", "can_revoke", "revoke_reason",
+             # UI v2 (ui2 api-hub, G11), additive
+             "background_queue", "background_known", "background_reason"}
+#: UI v2 (ui2 api-hub, G11): what each waiter adds to the frozen four.
+WAITER_KEYS = {"position", "holder", "user", "mine", "tier", "request_id", "message", "want_s",
+               "since"}
 
 
 @pytest.fixture(autouse=True)
@@ -103,22 +108,25 @@ def test_the_view_has_exactly_the_api_shape(world):
     va, vb = a.svc.view(a.hub), b.svc.view(b.hub)
     assert set(va) == VIEW_KEYS == set(vb)
     assert set(va["lease"]) == {"target", "board", "holder", "user", "expires_at", "mine", "here",
-                                "holder_kind", "holder_kind_reason"}  # D12; here: REVIEW-W5
+                                "holder_kind", "holder_kind_reason",  # D12; here: REVIEW-W5
+                                "tier"}                               # ui2 api-hub (G11)
     assert va["lease"]["board"] == "mps3_01" and va["lease"]["target"] == TARGET   # LEASE-BOARD
     assert va["lease"]["holder_kind"] == "hm"                     # this session holds it
     assert va["lease"]["here"] is True and vb["lease"]["here"] is False   # the token is a's
     assert vb["lease"]["holder_kind"] == "unknown"                # not answered: maybe a script
-    assert set(va["queue"][0]) == {"position", "holder", "user", "mine"}
+    assert set(va["queue"][0]) == WAITER_KEYS
     assert va["request"] is None and va["taken"] is None and va["hub"] == HOST
     assert va["board"] == vb["board"] == "mps3_01"                  # D4
     assert va["incoming"] == [{"id": note.id, "by": BOB, "user": "bob", "host": "lab-pc",
                                "message": "hi", "created_at": note.created_at,
                                "deadline_at": note.deadline_at, "answer": None,
-                               "tapped_at": None}]                            # PANEL-1
+                               "tapped_at": None,                             # PANEL-1
+                               "want_s": 0}]                                  # ui2 (G11)
     req = vb["request"]
     assert set(req) == {"id", "message", "created_at", "deadline_at", "position", "answer",
                         "force_available", "force_reason", "reasked", "reasked_at",
-                        "tapped_at"}                                       # PANEL-1
+                        "tapped_at",                                       # PANEL-1
+                        "want_s"}                                          # ui2 (G11)
     assert (req["reasked"], req["reasked_at"]) == (False, None)
     assert (va["notes_supported"], va["notes_reason"], va["can_revoke"], va["revoke_reason"]) == (
         True, "", True, "")                                        # SSH: all of it works
@@ -137,7 +145,10 @@ def test_the_view_has_exactly_the_api_shape(world):
                                 "notes_supported": False,
                                 "notes_reason": "this board is not behind a hub",
                                 "can_revoke": False,
-                                "revoke_reason": "this board is not behind a hub"}
+                                "revoke_reason": "this board is not behind a hub",
+                                # ui2 api-hub (G11)
+                                "background_queue": [], "background_known": False,
+                                "background_reason": "this board is not behind a hub"}
 
 
 def test_incoming_leaves_out_stale_notes_whose_requester_is_not_queued(world):

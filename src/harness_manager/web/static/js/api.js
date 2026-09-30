@@ -147,6 +147,13 @@ export const ENDPOINTS = Object.freeze({
   checksStop: ["DELETE", "/boards/{bid}/checks"],
   checksReport: ["GET", "/boards/{bid}/checks/{run}/report"],
   // --- end HIL-GUI
+  // --- ui2 api-hub ---
+  // docs/API.md "UI v2: hub leases, the Debug USB route, consoles and clashes". The lease
+  // routes above also take a board that is not open (G3), and leaseRequest takes want_s
+  // (G11); ?refresh=1 on hubLeases is the call's query argument.
+  hubLeases: ["GET", "/hubs/{name}/leases"],                  // G3: every target's lease, one read
+  identityClashes: ["GET", "/identity/clashes"],               // G10: across every board seen
+  // --- end ui2 api-hub ---
 });
 
 export const ADDITIVE = Object.freeze([]);

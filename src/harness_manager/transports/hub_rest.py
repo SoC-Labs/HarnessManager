@@ -152,6 +152,7 @@ class _QueueEntry:
     position: int
     holder: str
     user: str
+    tier: str = "interactive"          # ui2 api-hub (G11, additive)
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,9 @@ class _LeaseStatus:
     user: str
     expires_at: str
     queue: tuple = ()
+    background_queue: tuple = ()       # ui2 api-hub (G11, additive)
+    background_known: bool = False
+    tier: str = ""
 
 
 @dataclass(frozen=True)
@@ -172,6 +176,7 @@ class _RequestNote:
     message: str
     created_at: str
     deadline_at: str
+    want_s: int = 0                    # ui2 api-hub (G11, additive)
 
 
 @dataclass(frozen=True)
@@ -230,6 +235,88 @@ def _lease_cls() -> Any:
     from pyverify.lease import Lease
 
     return Lease
+
+
+# --- ui2 api-hub: the full queue (G11) and every target's lease in one read (G3) -------------------
+#
+# Shared by both transports: the REST client reads these shapes from fpgahub's JSON, the SSH
+# client (``harness_manager_mps3.hub``) from the same JSON printed by ``fpgahub … --json``.
+
+#: fpgahub's two lease tiers (``lease.LeaseTier``).
+TIERS = ("interactive", "background")
+#: ``BoardRuntimeInfo.lease_state`` (fpgahub ``status.compute_status``): ``queued`` is "nobody
+#: holds it, and someone waits": the hub is about to promote the head (``lease_holder`` then
+#: names that waiter, not a holder).
+OVERVIEW_STATES = ("held", "queued", "none")
+
+
+def queue_entries(rows: Any, tier: str) -> tuple[Any, ...]:
+    """fpgahub waiters ``[{board, holder, user, position, tier}]`` as the pack's
+    ``QueueEntry``s, head first; ``tier`` when a row does not say. A row that is not a waiter
+    raises ``UnreachableError``: a queue is never read short."""
+    entry = shape("QueueEntry")
+    out = []
+    for q in rows or []:
+        if not isinstance(q, Mapping) or not isinstance(q.get("holder"), str):
+            raise UnreachableError(f"the hub listed a waiter this client cannot read: {q!r:.120}")
+        t = q.get("tier") if q.get("tier") in TIERS else tier
+        fields = {"position": int(q.get("position") or 0), "holder": q["holder"],
+                  "user": str(q.get("user") or "")}
+        if "tier" in getattr(entry, "__dataclass_fields__", {}):
+            fields["tier"] = t
+        out.append(entry(**fields))
+    return tuple(sorted(out, key=lambda e: e.position))
+
+
+def queue_extras(status_cls: Any, background: Any, current: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The additive ``LeaseStatus`` keys (``background_queue``, ``background_known``, ``tier``)
+    a status class has; ``{}`` for a class from before them (a test's stand-in)."""
+    have = getattr(status_cls, "__dataclass_fields__", {})
+    out: dict[str, Any] = {}
+    if "background_queue" in have:
+        out["background_queue"] = queue_entries(background, "background")
+    if "background_known" in have:
+        out["background_known"] = background is not None
+    if "tier" in have:
+        tier = (current or {}).get("tier")
+        out["tier"] = tier if tier in TIERS else ("interactive" if current else "")
+    return out
+
+
+def _text(value: Any) -> str:
+    return value if isinstance(value, str) else ("" if value is None else str(value))
+
+
+def parse_overview(data: Any, what: str) -> list[dict[str, Any]]:
+    """fpgahub's ``/status`` (``fpgahub status --json`` prints the same object):
+    ``{boards: [BoardRuntimeInfo]}`` as one row per target::
+
+        {target, state: "held" | "queued" | "none", holder, user, expires_at,
+         queue_length, in_use}
+
+    ``holder`` is the head waiter when ``state`` is ``queued`` (fpgahub's own reading). A reply
+    that is not this shape, or a row with a state this client does not know, raises
+    ``UnreachableError``: an unreadable overview is never "free"."""
+    boards = data.get("boards") if isinstance(data, Mapping) else None
+    if not isinstance(boards, list):
+        raise UnreachableError(f"{what} has no 'boards' list: {str(data)[:200]!r}")
+    out = []
+    for row in boards:
+        name = row.get("name") if isinstance(row, Mapping) else None
+        if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
+            raise UnreachableError(f"{what} listed a target without a usable name: {row!r:.120}")
+        state = row.get("lease_state", "none")
+        if state not in OVERVIEW_STATES:
+            raise UnreachableError(f"{what}: target {name} has lease state {state!r}, which "
+                                   "this client does not know (not known is not free)")
+        qlen = row.get("lease_queue_length", 0)
+        if isinstance(qlen, bool) or not isinstance(qlen, int) or qlen < 0:
+            raise UnreachableError(f"{what}: target {name} has a queue length {qlen!r}")
+        out.append({"target": name, "state": state, "holder": _text(row.get("lease_holder")),
+                    "user": _text(row.get("lease_user")),
+                    "expires_at": _iso(row.get("lease_expires_at")), "queue_length": qlen,
+                    "in_use": bool(row.get("in_use"))})
+    return out
 
 
 # --- configuration -------------------------------------------------------------------------------
@@ -972,11 +1059,21 @@ class RestHubClient:
     def lease_status(self) -> Any:
         data = self._lease_body()
         cur = data.get("current") or {}
-        entry, status = shape("QueueEntry"), shape("LeaseStatus")
-        queue = tuple(entry(position=int(q.get("position", 0)), holder=q.get("holder", ""),
-                            user=q.get("user", "")) for q in data.get("queue") or [])
+        status = shape("LeaseStatus")
+        # ui2 api-hub (G11): the waiters' tier and the background queue, which fpgahub's
+        # ``GET /targets/{t}/lease`` returns and this client used to drop.
+        queue = queue_entries(data.get("queue"), "interactive")
+        more = queue_extras(status, data.get("background_queue"), cur)
         return status(held=bool(cur), holder=cur.get("holder", ""), user=cur.get("user", ""),
-                      expires_at=_iso(cur.get("expires_at")), queue=queue)
+                      expires_at=_iso(cur.get("expires_at")), queue=queue, **more)
+
+    # --- ui2 api-hub (G3): every target's lease on this hub, in one read -----------------------
+
+    def lease_overview(self) -> list[dict[str, Any]]:
+        """``GET /status``: every target the hub serves, with its lease (``parse_overview``).
+        One call per hub, whatever the target this client was made for."""
+        body = self._call("status", "GET", "/status").body
+        return parse_overview(body, f"GET {self.config.addr}/api/v1/status")
 
     def lease_revoke(self, reason: str) -> dict[str, Any]:
         """Admin force-release of the board; fpgahub promotes the head of the queue.

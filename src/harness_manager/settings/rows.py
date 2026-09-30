@@ -157,6 +157,13 @@ GENERAL = (
     Setting("general.favourite_boards", "list", [], "General",
             "The boards pinned at the top of the sidebar, by board id (a board's star)",
             advanced=True, check=_board_ids),
+    # --- ui2 api-hub ---
+    # G12 (UI v2): which tab a board opens on; the page reads it (GET /settings?section=general)
+    # when it opens a board, so a change applies to the next board opened (live).
+    Setting("general.open_on", "enum", "workbench", "General",
+            "Which tab a board opens on: the Workbench (program, consoles, debug) or the Overview",
+            choices=("workbench", "overview")),
+    # --- end ui2 api-hub ---
 )
 
 HUBS = (

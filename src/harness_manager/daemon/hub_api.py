@@ -56,6 +56,7 @@ core ``/boards/{bid:path}`` routes, whose path converter is greedy.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -76,6 +77,7 @@ from harness_manager.core.events import Event
 from harness_manager.services.lease import (
     DEFAULT_TTL_S,
     LeaseService,
+    check_want,
     lease_name,
     typed_names,
     view_confirm_error,
@@ -111,6 +113,16 @@ def _ttl(body: dict[str, Any]) -> int | None:
 
 def _now() -> float:
     return time.time()
+
+
+def _view(leases: Any, hub: Any) -> dict[str, Any]:
+    """``leases.view(hub)``, with the background queue (ui2 api-hub, G11) when the service
+    reads it (``background=True``; a stand-in service from before it takes no such key)."""
+    try:
+        takes = "background" in inspect.signature(leases.view).parameters
+    except (TypeError, ValueError):
+        takes = False
+    return leases.view(hub, background=True) if takes else leases.view(hub)
 
 
 class _BesideJobs:
@@ -276,6 +288,7 @@ def register(ctx: RouteContext) -> None:
         b = _obj(body)
         ttl = _ttl(b)
         message = clean_message(b.get("message"))
+        want = check_want(b.get("want_s"))         # ui2 api-hub (G11): how long they want it
         hub = hub_of(bid)
         view = full_view(leases.view(hub))
         # LEASE-BOARD: refusals name the physical board (mps3_01) when the view knows it.
@@ -286,8 +299,9 @@ def register(ctx: RouteContext) -> None:
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             try:
+                extra = {"want_s": want} if want else {}     # a service before G11 has none
                 return leases.request(bid, hub, message=message, ttl_s=ttl, progress=progress,
-                                      cancel=cancel)
+                                      cancel=cancel, **extra)
             except HarnessError:
                 if cancel.is_set():
                     # We stopped it (leave, DELETE /lease, close): leaving is not a failure
@@ -377,7 +391,8 @@ def register(ctx: RouteContext) -> None:
         session = ctx.board(bid)
         # The service's view is the frozen shape (it adds queue/request/incoming/taken);
         # passed through as it is, so the keys it has not added yet are simply absent.
-        return _JSON(ok(**leases.view(getattr(session, "hub", None))))
+        # ui2 api-hub (G11): with the background queue (over SSH one more read, reused 60 s)
+        return _JSON(ok(**_view(leases, getattr(session, "hub", None))))
 
     @ctx.api.post("/boards/{bid:path}/lease")
     def lease_acquire(bid: str, body: JsonBody = None) -> _JSON:

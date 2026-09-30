@@ -113,6 +113,8 @@ class LeaseRequestSim:
         self.notes_reason = ""
         self.revoke_reason = ""
         self._watch: threading.Thread | None = None
+        # --- ui2 api-hub (G11): background-tier waiters per board, [(principal, user)] ---
+        self.background: dict[str, list[tuple[str, str]]] = {}
 
     # -- helpers -----------------------------------------------------------------------------
 
@@ -234,14 +236,16 @@ class LeaseRequestSim:
     # -- knobs: the holder's and the victim's side -------------------------------------------------
 
     def incoming(self, bid: str, *, by: str = "bob@lab-pc-02",
-                 message: str = "need it for the 15:00 demo", age_s: float = 0) -> str:
+                 message: str = "need it for the 15:00 demo", age_s: float = 0,
+                 want_s: int = 0) -> str:
         """Another session asks for our lease: it queues and writes req-<id>.json."""
         now = time.time() - age_s
         user, host = _user_host(by)
         if self.notes_reason:                    # T8: every waiter, never its message
             message = ""
         note = {"id": f"r{uuid.uuid4().hex[:8]}", "by": by, "user": user, "host": host,
-                "message": message, "created_at": iso(now), "deadline_at": iso(now + self.window_s)}
+                "message": message, "created_at": iso(now), "deadline_at": iso(now + self.window_s),
+                "want_s": want_s}                                # ui2 api-hub (G11)
         with self._lock:
             self.inbox.setdefault(bid, []).append(note)
         self.publish("lease.wanted", bid, {k: note[k] for k in (
@@ -354,8 +358,42 @@ class LeaseRequestSim:
                     if a else None,
                     "force_available": available, "force_reason": why,
                     "tapped_at": self._tapped_at(bid, req["id"]),              # PANEL-1
+                    "want_s": int(req.get("want_s") or 0),       # ui2 api-hub (G11)
                 }
+            self._ui2_full_queue(bid, out, req)                  # ui2 api-hub (G11)
             return out
+
+    # --- ui2 api-hub (G11): the full queue, as the lease service now serves it ----------------------
+
+    def add_background(self, bid: str, holder: str = "hil-runner@mapstone-dev",
+                       user: str = "hil") -> None:
+        """Knob: an automation run waits in the board's background queue."""
+        with self._lock:
+            self.background.setdefault(bid, []).append((holder, user))
+
+    def _ui2_full_queue(self, bid: str, out: dict[str, Any], req: dict[str, Any] | None) -> None:
+        notes = {n["by"]: n for n in self.inbox.get(bid, [])}
+        rows = []
+        for q in out["queue"]:
+            note = notes.get(q["holder"])
+            if q["mine"] and req is not None:
+                extra = {"request_id": req["id"], "message": req["message"],
+                         "want_s": int(req.get("want_s") or 0), "since": iso(req["created"])}
+            elif note is not None:
+                extra = {"request_id": note["id"], "message": note["message"],
+                         "want_s": int(note.get("want_s") or 0), "since": note["created_at"]}
+            else:
+                extra = {"request_id": "", "message": "", "want_s": 0, "since": ""}
+            rows.append({**q, "tier": "interactive", **extra})
+        out["queue"] = rows
+        out["background_queue"] = [
+            {"position": i, "holder": p, "user": u, "mine": False, "tier": "background",
+             "request_id": "", "message": "", "want_s": 0, "since": ""}
+            for i, (p, u) in enumerate(self.background.get(bid, []), start=1)]
+        out["background_known"] = bid in self.week.hubs
+        out["background_reason"] = "" if bid in self.week.hubs else \
+            "this board is not behind a hub"
+    # --- end ui2 api-hub -----------------------------------------------------------------------------
 
     def lease_keys(self, bid: str) -> dict[str, Any]:
         """D12: what ``GET /lease`` adds to ``lease``: is a Harness Manager session known to
@@ -369,7 +407,8 @@ class LeaseRequestSim:
             kind, why = holder_kind(req.get("answer") if req else None, asked=req is not None,
                                     here=bool(lease.get("here", lease.get("mine"))),
                                     mine=bool(lease.get("mine")), notes_ok=not self.notes_reason)
-            return {"holder_kind": kind, "holder_kind_reason": why}
+            return {"holder_kind": kind, "holder_kind_reason": why,
+                    "tier": "interactive"}                        # ui2 api-hub (G11)
 
     def board_of(self, bid: str) -> str:
         hub = self.hub(bid)
@@ -413,7 +452,8 @@ class LeaseRequestSim:
                                                name="t14-lease-watch")
                 self._watch.start()
 
-    def request(self, bid: str, message: str, ttl: int, progress: Any) -> dict[str, Any]:
+    def request(self, bid: str, message: str, ttl: int, progress: Any,
+                want_s: int = 0) -> dict[str, Any]:
         hub = self.hub(bid)
         with self._lock:
             if hub["lease"] and hub["lease"]["mine"]:
@@ -422,7 +462,8 @@ class LeaseRequestSim:
             held, cancel = threading.Event(), threading.Event()
             req = {"id": f"q{uuid.uuid4().hex[:8]}", "message": message, "created": time.time(),
                    "window": self.window_s, "ttl": ttl, "answer": None, "held": held,
-                   "cancel": cancel, "force_published": False}
+                   "cancel": cancel, "force_published": False,
+                   "want_s": want_s}                             # ui2 api-hub (G11)
             self.outgoing[bid] = req
         progress("queued", self._position(bid), 0)
         self.publish("lease.state", bid, {"target": hub["target"], "state": "queued",
@@ -579,13 +620,17 @@ def register(app: FastAPI, state: Any, sim: LeaseRequestSim, ok: Any, accepted: 
         ttl = body.get("ttl_s", 3600)
         if isinstance(ttl, bool) or not isinstance(ttl, int) or not 60 <= ttl <= 86400:
             raise UsageError(f"ttl_s must be whole seconds from 60 to 86400, not {ttl!r}")
+        from harness_manager.services.lease import check_want  # ui2 api-hub (G11)
+
+        want = check_want(body.get("want_s"))
         state.session(bid)
         sim.hub(bid)
         if bid in sim.outgoing:
             raise RefusedError(f"{bid} already has a request of yours waiting",
                                hint="leave the queue first (DELETE .../lease/queue)")
         return accepted(jobs.start(bid, "lease_request",
-                                   lambda progress: sim.request(bid, message, ttl, progress)))
+                                   lambda progress: sim.request(bid, message, ttl, progress,
+                                                                want_s=want)))
 
     @app.post(f"{API}/boards/{{bid}}/lease/respond")
     def lease_respond(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:  # noqa: B008

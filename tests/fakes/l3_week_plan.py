@@ -138,6 +138,8 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
     "identity_api": (
         ("GET", "/boards/{bid}/identity"),
         ("POST", "/boards/{bid}/identity"),
+        # --- ui2 api-hub (G10): served in the mock by t14_mock_api's ui2 block ---
+        ("GET", "/identity/clashes"),
     ),
     # LINUX-SLOTS: served in the mock by tests/fakes/lxslots_mock_card.py (a card per board).
     "card_api": (
@@ -169,6 +171,8 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("DELETE", "/hubs/{name}"),
         ("POST", "/hubs/{name}/boards"),
         ("POST", "/hubs/adopt"),
+        # --- ui2 api-hub (G3): served in the mock by t14_mock_api's ui2 block ---
+        ("GET", "/hubs/{name}/leases"),
     ),
     # FIX-PACK-2: the service's own tool variables; served in the mock by
     # tests/fakes/fp2_mock_env.py (the real describe over a scripted environment).

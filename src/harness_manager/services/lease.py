@@ -118,7 +118,7 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -276,6 +276,7 @@ class RequestNote:
     message: str
     created_at: str
     deadline_at: str
+    want_s: int = 0           # ui2 api-hub (G11, additive): how long they want it (0: not said)
 
 
 @dataclass(frozen=True)
@@ -548,7 +549,33 @@ def _incoming_public(note: Any, answer: Any = None) -> dict[str, Any]:
     out["created_at"] = iso_norm(getattr(note, "created_at", ""))
     out["deadline_at"] = iso_norm(getattr(note, "deadline_at", ""))
     out["answer"] = _answer_public(answer)                    # D5
+    out["want_s"] = _want_of(note)                            # ui2 api-hub (G11, additive)
     return out
+
+
+def _want_of(note: Any) -> int:
+    """A request note's ``want_s`` (ui2 api-hub, G11): 0 when it does not say."""
+    want = getattr(note, "want_s", 0) if note is not None else 0
+    return want if isinstance(want, int) and not isinstance(want, bool) and want > 0 else 0
+
+
+#: ui2 api-hub (G11): how long a background-queue read (the SSH client's ``lease_queues``: one
+#: more hub call) is reused; the background tier changes rarely.
+BACKGROUND_TTL_S = 60.0
+#: ui2 api-hub (G3): how long a hub's overview (every target's lease, one read) is reused.
+OVERVIEW_TTL_S = 20.0
+NO_BACKGROUND = "this hub connection does not list the background queue"
+
+
+def check_want(value: Any) -> int:
+    """``want_s`` of a lease request (ui2 api-hub, G11): how long the requester wants the
+    board, whole seconds 60..86400, or 0 / None for "not said". ``UsageError`` otherwise."""
+    if value is None or value == 0:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int) or not 60 <= value <= 86400:
+        raise UsageError(f"want_s must be whole seconds from 60 to 86400 (or 0: not said), "
+                         f"not {value!r}", hint="how long you want the board, e.g. 3600")
+    return value
 
 
 # --- the token store -------------------------------------------------------------------------
@@ -721,6 +748,14 @@ def _hk(hub: Any) -> tuple[str, str]:
     return (hub.host, hub.target)
 
 
+@dataclass(frozen=True)
+class _OverviewKey:
+    """ui2 api-hub (G3): the cache key of a hub's overview: the host, any target (``*``)."""
+
+    host: str
+    target: str = "*"
+
+
 def _configured_board(hub: Any) -> str:
     """boards.toml ``hub.board`` (the MPS3 pack's ``hub.config.board``), with no hub call;
     ``""`` when the adapter has none."""
@@ -791,6 +826,8 @@ class LeaseService:
         # LEASE-FRESH: the last known state per hub, and the failed reads since it
         self._known: dict[tuple[str, str], _Known] = {}
         self._misses: dict[tuple[str, str], _Misses] = {}
+        # ui2 api-hub (G3): each target's row from the last hub overview, (monotonic, wall, row)
+        self._overviews: dict[tuple[str, str], tuple[float, float, dict[str, Any]]] = {}
 
     # -- hub reads (cached) -----------------------------------------------------------------------
 
@@ -801,8 +838,9 @@ class LeaseService:
                                                "add a hub table to boards.toml (docs/HIL_B0.md step 0.2)")
         return hub
 
-    def _cached(self, hub: Any, what: str, fn: Callable[[], Any], *, fresh: bool = False) -> Any:
-        """``fn()`` (a hub read), cached ``VIEW_TTL_S``. FIX-PACK-1 5b, single-flight:
+    def _cached(self, hub: Any, what: str, fn: Callable[[], Any], *, fresh: bool = False,
+                ttl_s: float = VIEW_TTL_S) -> Any:
+        """``fn()`` (a hub read), cached ``ttl_s`` (``VIEW_TTL_S``). FIX-PACK-1 5b, single-flight:
         callers that miss the cache while the same read is in flight share its answer (or its
         error) instead of each opening an ssh to the hub (the hub's sshd reset them under
         load). A ``fresh`` caller never joins a read begun before it asked, and a read begun
@@ -811,7 +849,7 @@ class LeaseService:
         now = self._clock()
         with self._mu:
             hit = self._cache.get(key)
-            if not fresh and hit is not None and now - hit[0] < VIEW_TTL_S:
+            if not fresh and hit is not None and now - hit[0] < ttl_s:
                 return hit[1]
             gen = self._gen.get(key[:2], 0)
             flight = self._inflight.get(key)
@@ -859,6 +897,48 @@ class LeaseService:
         if not callable(fn):
             return []
         return list(self._cached(hub, "notes", fn, fresh=fresh) or [])
+
+    # -- ui2 api-hub: the full queue (G11) ------------------------------------------------------
+
+    @staticmethod
+    def _waiter(entry: Any, ids: set[str], principal: str, notes: list[Any],
+                tier: str) -> dict[str, Any]:
+        """One waiter of ``GET /lease``'s ``queue`` / ``background_queue``: ``{position, holder,
+        user, mine, tier}`` (the frozen four plus ``tier``), and from the waiter's request note
+        when the hub carries one (SSH): ``request_id``, ``message``, ``want_s`` and ``since``
+        (the note's ``created_at``); ``""``/0 otherwise (REST: a waiter has no note)."""
+        holder = getattr(entry, "holder", "") or ""
+        t = getattr(entry, "tier", "") or tier
+        note = LeaseService._latest_of(notes, holder) if holder else None
+        return {"position": int(getattr(entry, "position", 0) or 0), "holder": holder,
+                "user": getattr(entry, "user", "") or "",
+                "mine": bool(principal) and holder in ids,
+                "tier": t if t in ("interactive", "background") else tier,
+                "request_id": getattr(note, "id", "") if note is not None else "",
+                "message": getattr(note, "message", "") if note is not None else "",
+                "want_s": _want_of(note),
+                "since": iso_norm(getattr(note, "created_at", "")) if note is not None else ""}
+
+    def _background(self, hub: Any, shown: Any, *, ask: bool) -> tuple[list[Any], bool, str]:
+        """The background tier's waiters: ``(entries, known, reason)``. From the status read
+        when it says (REST), else, when ``ask``, the client's ``lease_queues`` (SSH: one more
+        hub call, reused ``BACKGROUND_TTL_S``), else unknown with why. A read that fails is
+        unknown too: never "nobody waits"."""
+        if getattr(shown, "background_known", False):
+            return list(getattr(shown, "background_queue", ()) or ()), True, ""
+        fn = getattr(hub.client, "lease_queues", None)
+        if not callable(fn):
+            return [], False, NO_BACKGROUND
+        if not ask:
+            return [], False, "not read here (GET /boards/{bid}/lease reads it)"
+        try:
+            got = self._cached(hub, "queues", fn, ttl_s=BACKGROUND_TTL_S)
+        except HarnessError as exc:
+            log.info("the background queue of %s is unknown: %s", hub.target, exc.message)
+            return [], False, f"the hub did not list it: {exc.message}"
+        if not getattr(got, "background_known", False):
+            return [], False, NO_BACKGROUND
+        return list(getattr(got, "background_queue", ()) or ()), True, ""
 
     def _answer(self, hub: Any, request_id: str, *, fresh: bool = False) -> Any:
         fn = getattr(hub.client, "get_answer", None)
@@ -1126,7 +1206,9 @@ class LeaseService:
                                    "request": None, "incoming": [], "taken": None,
                                    "notes_supported": self._notes_supported(hub)[0],
                                    "notes_reason": self._notes_supported(hub)[1],
-                                   "can_revoke": True, "revoke_reason": ""})
+                                   "can_revoke": True, "revoke_reason": "",
+                                   "background_queue": [], "background_known": False,
+                                   "background_reason": "not read yet"})
         board = self.board_of(hub, ask=False) or base.get("board") or None
         base.update(hub=hub.host, board=board, request=None)
         if holder is None:
@@ -1135,7 +1217,8 @@ class LeaseService:
             kind, why = holder_kind(here=True, mine=True)
             base["lease"] = {"target": hub.target, "board": board, "holder": holder,
                              "expires_at": expires_at, "mine": True, "here": True, "user": "",
-                             "holder_kind": kind, "holder_kind_reason": why}
+                             "holder_kind": kind, "holder_kind_reason": why,
+                             "tier": "interactive"}      # ui2 (G11): HM's acquires are
             base["queue"] = [e for e in base.get("queue") or [] if not e.get("mine")]
         known = _Known(self._clock(), self._wall(), source, base)
         # A release with others queued hands the board to the head of the queue at once:
@@ -1234,19 +1317,125 @@ class LeaseService:
         with self._mu:
             hits = [(key, self._known[key]) for key, bid in self._boards.items()
                     if bid == board_id and key in self._known]
-        if not hits:
+            # ui2 api-hub (G3): a hub overview seeds every board it lists (source "overview")
+            seen = [(key, self._overviews[key]) for key, bid in self._boards.items()
+                    if bid == board_id and key in self._overviews]
+        newest = max(hits, key=lambda kv: kv[1].at) if hits else None
+        over = max(seen, key=lambda kv: kv[1][0]) if seen else None
+        if over is not None and (newest is None or over[1][0] > newest[1].at):
+            (host, target), (_at, _wall, row) = over
+            return {"hub": host, "target": target, "board": row.get("board"),
+                    "state": row["state"], "holder": row["holder"],
+                    "expires_at": row["expires_at"], "mine": bool(row["mine"]),
+                    "here": bool(row["here"]), "confirmed_at": row["confirmed_at"],
+                    "source": "overview", "queue_length": row["queue_length"],
+                    "waiting": bool(row["waiting"])}
+        if newest is None:
             return None
-        (host, target), known = max(hits, key=lambda kv: kv[1].at)
+        (host, target), known = newest
         lease = known.view.get("lease") or None
         out: dict[str, Any] = {"hub": host, "target": target,
                                "board": known.view.get("board") or None,
                                "state": "held" if lease else "free", "holder": "",
                                "expires_at": "", "mine": False, "here": False,
-                               "confirmed_at": iso_utc(known.wall), "source": known.source}
+                               "confirmed_at": iso_utc(known.wall), "source": known.source,
+                               # ui2 api-hub (G3, additive)
+                               "queue_length": len(known.view.get("queue") or []),
+                               "waiting": False}
         if lease:
             out.update(holder=str(lease.get("holder") or ""),
                        expires_at=str(lease.get("expires_at") or ""),
                        mine=bool(lease.get("mine")), here=held_here(lease))
+        return out
+
+    # -- ui2 api-hub: every target's lease on one hub, in one read (G3) --------------------------
+
+    def hub_overview(self, name: str, hub: Any, *,
+                     boards: Mapping[str, Sequence[str]] | None = None,
+                     refresh: bool = False) -> dict[str, Any]:
+        """``GET /hubs/{name}/leases``: every target's lease on ``hub``'s hub in ONE read
+        (``client.lease_overview()``: ``fpgahub status --json`` over SSH, ``GET /status`` over
+        REST), reused ``OVERVIEW_TTL_S`` (single-flight, as every hub read here) unless
+        ``refresh``. ``hub`` is the adapter of any board on that hub (its target does not
+        matter). ``boards``: ``{target: [board ids]}``, the boards this service lists on each
+        target: their ``lease_known`` (``GET /boards``) is seeded from the read, so a closed
+        board shows its lease with no read of its own::
+
+            {hub, host, transport, read_at, age_s, cached,
+             targets: [{target, board, boards, state: "held" | "free", holder, user,
+                        expires_at, queue_length, waiting, next, in_use, mine, here,
+                        confirmed_at, source}]}
+
+        ``waiting``: nobody holds it and someone waits (fpgahub's ``queued``: the hub is about
+        to promote ``next``). ``source`` is ``overview``, or ``acquire`` / ``release`` /
+        ``heartbeat`` / ``show`` when this service knows a newer state of that target (its own
+        action, or a board's own lease read). A hub that does not answer raises (502
+        UNREACHABLE: not known is not free); a client with no overview is UNAVAILABLE."""
+        fn = getattr(getattr(hub, "client", None), "lease_overview", None)
+        if not callable(fn):
+            raise UnavailableError(CAPABILITY, f"the hub client for {name} cannot list every "
+                                               "target's lease in one read")
+        key = _OverviewKey(hub.host)
+        before = self.hub_reads
+        rows = self._cached(key, "overview", fn, fresh=refresh, ttl_s=OVERVIEW_TTL_S)
+        with self._mu:
+            hit = self._cache.get((key.host, key.target, "overview"))
+        at = hit[0] if hit is not None else self._clock()
+        wall = self._wall() - (self._clock() - at)
+        principal = self._host_principal(hub)
+        targets = []
+        for row in rows:
+            targets.append(self._overview_row(hub, row, principal, at, wall,
+                                              list((boards or {}).get(row["target"], ()))))
+        return {"hub": name, "host": hub.host,
+                "transport": str(getattr(hub.client, "transport", "") or "ssh"),
+                "read_at": iso_utc(wall), "age_s": round(max(0.0, self._clock() - at), 1),
+                "cached": self.hub_reads == before, "targets": targets}
+
+    def _host_principal(self, hub: Any) -> str:
+        """This client's principal on ``hub``'s host: one learnt for any of its targets, else
+        asked once (``_principal``); ``""`` when the hub will not say."""
+        with self._mu:
+            known = next((p for (h, _t), p in self._principals.items() if h == hub.host and p), "")
+        return known or self._principal(hub)
+
+    def _overview_row(self, hub: Any, row: Mapping[str, Any], principal: str, at: float,
+                      wall: float, board_ids: list[str]) -> dict[str, Any]:
+        target = str(row["target"])
+        held = row.get("state") == "held"
+        holder = str(row.get("holder") or "") if held else ""
+        stored = self.store.get(hub.host, target)
+        mine_ids = {principal} | ({stored.principal, stored.holder} if stored else set())
+        mine_ids.discard("")
+        here = held and stored is not None and holder in mine_ids
+        with self._mu:
+            chassis = self._chassis.get((hub.host, target))
+        out = {"target": target, "board": chassis or None, "boards": board_ids,
+               "state": "held" if held else "free", "holder": holder,
+               "user": str(row.get("user") or "") if held else "",
+               "expires_at": str(row.get("expires_at") or "") if held else "",
+               "queue_length": int(row.get("queue_length") or 0),
+               "waiting": row.get("state") == "queued",
+               "next": str(row.get("holder") or "") if row.get("state") == "queued" else "",
+               "in_use": bool(row.get("in_use")),
+               "mine": held and bool(principal) and holder == principal or here, "here": here,
+               "confirmed_at": iso_utc(wall), "source": "overview"}
+        key = (hub.host, target)
+        with self._mu:
+            known = self._known.get(key)
+            self._overviews[key] = (at, wall, dict(out))
+            for bid in board_ids:
+                self._boards[key] = bid
+        if known is not None and known.at > at:
+            # this service knows a newer state (its own acquire/release, a board's read)
+            lease = known.view.get("lease") or None
+            out.update(state="held" if lease else "free",
+                       holder=str((lease or {}).get("holder") or ""),
+                       user=str((lease or {}).get("user") or ""),
+                       expires_at=str((lease or {}).get("expires_at") or ""),
+                       mine=bool((lease or {}).get("mine")), here=held_here(lease or {}),
+                       queue_length=len(known.view.get("queue") or []), waiting=False, next="",
+                       confirmed_at=iso_utc(known.wall), source=known.source)
         return out
 
     def _board_for(self, hub: Any, board_id: str = "") -> str:
@@ -1260,7 +1449,7 @@ class LeaseService:
     # -- the view -------------------------------------------------------------------------------
 
     def view(self, hub: Any, *, cached_only: bool = False,
-             max_age_s: float | None = None) -> dict[str, Any] | None:
+             max_age_s: float | None = None, background: bool = False) -> dict[str, Any] | None:
         """``GET /boards/{bid}/lease`` (docs/LEASE_REQUESTS.md, API)::
 
             lease:    {target, holder, user, expires_at, mine, here,
@@ -1303,7 +1492,10 @@ class LeaseService:
         empty: dict[str, Any] = {"lease": None, "hub": None, "board": None, "queue": [],
                                  "request": None, "incoming": [], "taken": None,
                                  "notes_supported": False, "notes_reason": NO_HUB_REASON,
-                                 "can_revoke": False, "revoke_reason": NO_HUB_REASON}
+                                 "can_revoke": False, "revoke_reason": NO_HUB_REASON,
+                                 # ui2 api-hub (G11, additive)
+                                 "background_queue": [], "background_known": False,
+                                 "background_reason": NO_HUB_REASON}
         if hub is None:
             return empty
         if cached_only:
@@ -1351,13 +1543,17 @@ class LeaseService:
                             "expires_at": getattr(shown, "expires_at", "")
                             or (stored.expires_at if here and stored else ""),
                             "mine": mine, "here": here,
-                            "user": getattr(shown, "user", "") or ""}
+                            "user": getattr(shown, "user", "") or "",
+                            "tier": str(getattr(shown, "tier", "") or "")}   # ui2 (G11)
         queue = list(getattr(shown, "queue", ()) or ())
-        out["queue"] = [{"position": int(getattr(e, "position", 0) or 0),
-                         "holder": getattr(e, "holder", ""), "user": getattr(e, "user", ""),
-                         "mine": bool(principal) and getattr(e, "holder", "") in ids}
-                        for e in queue]
         notes = self._safe_notes(hub)
+        # ui2 api-hub (G11): every waiter with its tier, and what its request note says (how
+        # long, the message, since when: SSH only; over REST a waiter has no note)
+        out["queue"] = [self._waiter(e, ids, principal, notes, "interactive") for e in queue]
+        waiting, bg_known, bg_why = self._background(hub, shown, ask=background)
+        out["background_queue"] = [self._waiter(e, ids, principal, notes, "background")
+                                   for e in waiting]
+        out["background_known"], out["background_reason"] = bg_known, bg_why
         if principal:
             ours = self._latest_of(notes, principal)
             if ours is not None:
@@ -1517,7 +1713,8 @@ class LeaseService:
                 "created_at": iso_norm(note.created_at), "deadline_at": iso_norm(note.deadline_at),
                 "position": position, "answer": _answer_public(answer),
                 "force_available": check.available, "force_reason": check.reason,
-                "reasked": bool(reasked_at), "reasked_at": reasked_at or None}
+                "reasked": bool(reasked_at), "reasked_at": reasked_at or None,
+                "want_s": _want_of(note)}                   # ui2 api-hub (G11, additive)
 
     def _incoming_list(self, hub: Any, notes: list[Any], principal: str, queue: list[Any], *,
                        has_queue: bool) -> list[dict[str, Any]]:
@@ -1656,7 +1853,7 @@ class LeaseService:
 
     def request(self, board_id: str, hub: Any, *, message: str = "", ttl_s: int | None = None,
                 progress: Progress | None = None, cancel: threading.Event | None = None,
-                heartbeat: bool = True) -> dict[str, Any]:
+                heartbeat: bool = True, want_s: int = 0) -> dict[str, Any]:
         """Ask the holder for the board: queue, write a request note, and wait.
 
         Returns ``{lease}`` when the hub grants it (the holder released, a force promoted
@@ -1665,6 +1862,8 @@ class LeaseService:
         ``lease.answered`` and keeps waiting; force can become available again when the keep
         runs out. Phases: ``queued``, ``notified``, ``answered``, ``force-available``,
         ``held``. ``heartbeat=False`` (the CLI) does not heartbeat the lease it gets.
+        ``want_s`` (ui2 api-hub, G11): how long we want the board, carried in the request note
+        for the holder to read (0: not said).
         """
         hub = self.require_hub(hub, board_id)
         self._board_for(hub, board_id)
@@ -1673,6 +1872,7 @@ class LeaseService:
         if isinstance(ttl_s, bool) or not isinstance(ttl_s, int) or ttl_s <= 0:
             raise UsageError(f"ttl_s must be a positive whole number of seconds, not {ttl_s!r}")
         message = self._check_message(message)
+        want_s = check_want(want_s)
         self._need(hub, "lease_status", "put_request", "list_requests", "get_answer",
                    "delete_request")
         principal = self._principal(hub, required=True)
@@ -1715,7 +1915,7 @@ class LeaseService:
                         report("queued", position, 0)
                         self._emit(board_id, hub, "queued", principal)
                         out = self._open_request(board_id, hub, holder, ttl_s, message, principal,
-                                                 cancel, heartbeat, asked)
+                                                 cancel, heartbeat, asked, want_s)
                         report("notified", 0, 0)
                     self._moved(out, position, principal, report)
                     self._poll_answer(out, report)
@@ -1786,12 +1986,12 @@ class LeaseService:
 
     def _open_request(self, board_id: str, hub: Any, holder: str, ttl_s: int, message: str,
                       principal: str, cancel: threading.Event, heartbeat: bool,
-                      asked: str) -> _Outgoing:
+                      asked: str, want_s: int = 0) -> _Outgoing:
         """Our note on the hub: the one already there (its countdown stands), else a new one.
         ``asked`` is who held the board when we queued."""
         ours = self._latest_of(list(hub.client.list_requests() or []), principal)
         if ours is None:
-            ours = self._new_note(hub, principal, message)
+            ours = self._new_note(hub, principal, message, want_s)
             hub.client.put_request(ours)
         out = _Outgoing(board_id, hub, holder, ttl_s, ours, heartbeat=heartbeat, cancel=cancel,
                         asked_holder=asked)
@@ -1800,13 +2000,17 @@ class LeaseService:
         self._forget(hub)
         return out
 
-    def _new_note(self, hub: Any, principal: str, message: str) -> Any:
+    def _new_note(self, hub: Any, principal: str, message: str, want_s: int = 0) -> Any:
         now = self._wall()
         cls = _pack_attr(hub.client, "RequestNote", RequestNote)
+        # ui2 api-hub (G11): ``want_s`` only when set and the note class has it (an older
+        # pack's twin does not)
+        extra = {"want_s": want_s} if want_s and "want_s" in getattr(
+            cls, "__dataclass_fields__", {}) else {}
         return cls(id=f"{int(now)}-{secrets.token_hex(4)}", by=principal,
                            user=_local_user(), host=socket.gethostname().split(".")[0],
                            message=message, created_at=iso_utc(now),
-                           deadline_at=iso_utc(now + REQUEST_WINDOW_S))
+                           deadline_at=iso_utc(now + REQUEST_WINDOW_S), **extra)
 
     def _moved(self, out: _Outgoing, position: int, principal: str,
                report: Progress | None = None) -> None:
@@ -1827,7 +2031,8 @@ class LeaseService:
         hub = out.hub
         with contextlib.suppress(HarnessError):
             hub.client.delete_request(out.note.id)
-        note = self._new_note(hub, principal, getattr(out.note, "message", ""))
+        note = self._new_note(hub, principal, getattr(out.note, "message", ""),
+                              _want_of(out.note))
         hub.client.put_request(note)
         log.info("%s now holds %s; the request was sent to them (deadline %s)", holder, hub.target,
                  note.deadline_at)

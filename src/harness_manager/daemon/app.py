@@ -716,6 +716,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         raise UsageError("harness-manager-daemon needs a token")
     d = Daemon(engine, token=token, state_dir=state_dir, shutdown=shutdown,
                event_limits=event_limits, console_limits=console_limits)
+    # --- ui2 api-hub (G3): every listed board's hub, found without contact (hub_boards) ---
+    from .hub_boards import BoardHubs
+
+    d.board_hubs = BoardHubs(d)
+    # --- end ui2 api-hub ---
     static = find_static_dir() if static_dir == "auto" else (
         Path(static_dir) if static_dir else None)
 
@@ -984,8 +989,37 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             known = last_known(board_id) if last_known is not None else None
             if known is not None:
                 row["lease_known"] = known
+            # --- ui2 api-hub (additive, no contact): the board's hub (G3) and its Debug USB
+            # route (G2): an open board's from its session, any other's from its links
+            row["hub"] = d.board_hubs.row(board_id, cand, conf)
+            row["mcc_route"], row["mcc_route_reason"] = ui2_route(board_id, cand, open_ids)
             rows.append(row)
         return _JSON(ok(boards=rows))
+
+    # --- ui2 api-hub ---------------------------------------------------------------------------
+
+    def ui2_route(board_id: str, cand: Any, open_ids: set[str]) -> tuple[str, str]:
+        from . import mcc_route
+
+        if board_id in open_ids:
+            try:
+                return ui2_session_route(board_id, d.engine.session(board_id))
+            except HarnessError:
+                pass
+        ident = getattr(cand, "identity", None)
+        return mcc_route.from_links(getattr(cand, "links", ()),
+                                    getattr(ident, "features", ()) if ident else ())
+
+    def ui2_session_route(board_id: str, s: Any) -> tuple[str, str]:
+        from . import mcc_route
+
+        last = getattr(d.engine, "last_identity", None)
+        ident = last(board_id) if callable(last) else None
+        if ident is None:
+            ident = getattr(s.candidate, "identity", None)
+        return mcc_route.of_session(s, ident)
+
+    # --- end ui2 api-hub ---------------------------------------------------------------------
 
     @api.post("/boards")
     def open_board(body: JsonBody = None) -> JSONResponse:
@@ -1271,10 +1305,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         # T14-4: whether each engine service works at all (None) or why not (its stub reason).
         services = {n: getattr(getattr(d.engine, n, None), "reason", None)
                     for n in ("deploy", "consoles", "debug", "telemetry")}
+        route, why = ui2_session_route(bid, s)             # ui2 api-hub (G2, additive)
         return _JSON(ok(board_id=bid, candidate=s.candidate, adapters=adapters,
                         reset_targets=list(resets.reset_targets()) if resets else [],
                         job=job.id if job else None, job_kind=job.kind if job else None,
-                        services=services))
+                        services=services, mcc_route=route, mcc_route_reason=why))
 
     @api.get("/boards/{bid:path}/telemetry")
     def telemetry(bid: str) -> JSONResponse:

@@ -1051,3 +1051,34 @@ class DemoEngine:
 
 
 __all__ = ["BOARD_FIELDED", "BOARD_HELD", "BOARD_USB", "DemoEngine"]
+
+
+# --- ui2 api-hub -------------------------------------------------------------------------------------
+# UI v2 (lane UI2-API-HUB): the demo engine's seams for G3 and G10 (demo_showcase has the data).
+# Appended as the lane rules ask: the engine above is only extended here.
+
+
+def _ui2_hub_for(self: DemoEngine, board_id: str) -> Any:
+    """``hub_for`` (the daemon's ``hub_boards``): a showcase board's hub WITHOUT opening it (its
+    lease badge, "Request without opening"), None for every other board."""
+    if not self.showcase:
+        return None
+    from harness_manager import demo_showcase as show
+
+    return show.hub_ref(self, board_id)
+
+
+_ui2_showcase = DemoEngine._showcase
+
+
+def _ui2_showcase_seeded(self: DemoEngine, app_update: str | None) -> dict[str, _Board]:
+    boards = _ui2_showcase(self, app_update)
+    from harness_manager import demo_showcase as show
+
+    show.seed_identities(self.state_dir)          # G10: the identity clash to fix
+    return boards
+
+
+DemoEngine.hub_for = _ui2_hub_for                  # type: ignore[attr-defined]
+DemoEngine._showcase = _ui2_showcase_seeded        # type: ignore[method-assign]
+# --- end ui2 api-hub ---------------------------------------------------------------------------------

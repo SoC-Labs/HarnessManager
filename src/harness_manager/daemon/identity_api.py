@@ -32,7 +32,9 @@ its verdict, changes.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from harness_manager.core.errors import RefusedError, UnavailableError, UsageError
@@ -65,9 +67,101 @@ def _opt_str(b: dict[str, Any], key: str) -> str | None:
     return value
 
 
+# --- ui2 api-hub (G10): identity clashes across boards, with no contact -------------------------
+
+#: The fields a clash is found on, in the order people fix them.
+CLASH_FIELDS = ("mac", "ip", "label")
+
+
+def _norm(field_name: str, value: Any) -> str:
+    if field_name == "mac":
+        return BI.norm_mac(value)
+    if field_name == "ip":
+        return BI.ip_addr(value)
+    return str(value or "").strip().upper()
+
+
+def clash_groups(records: Mapping[str, Mapping[str, Any]], *, now: float | None = None,
+                 max_age_s: float = BI.SEEN_MAX_AGE_S) -> list[dict[str, Any]]:
+    """``GET /identity/clashes``: every MAC, IP or label two or more boards share, from what
+    Harness Manager has seen (``<state>/identity/seen.json``: each board's last reported
+    identity, and the other hub targets its last hub read listed). No board or hub is asked.
+
+    The rules are the board identity check's own (``BI.compare``): the image-default label
+    (``MPS3``, source ``default``) is "not set", never a clash; a hub record whose MAC looks
+    like the hub's own adapter (``mac_suspect``) is not compared; the same board under two ids
+    (the same hub target, or the same address) is one board. Records older than
+    ``SEEN_MAX_AGE_S`` (14 days) are left out. Returns ``[{field, value, boards: [{board_id,
+    name, kind: "board" | "hub", target, at}]}]``, MACs first, then IPs, then labels."""
+    now = time.time() if now is None else now
+    entries: list[dict[str, Any]] = []
+    hub_seen: set[str] = set()
+    for bid, rec in sorted(records.items()):
+        if not isinstance(rec, Mapping) or now - float(rec.get("at") or 0) > max_age_s:
+            continue
+        entries.append({"board_id": bid, "name": str(rec.get("name") or ""), "kind": "board",
+                        "target": str(rec.get("target") or ""),
+                        "address": str(rec.get("address") or ""),
+                        "at": BI._iso(float(rec.get("at") or 0)), "rec": rec,
+                        "default_label": BI.label_is_default(rec.get("label"),
+                                                             rec.get("label_source"))})
+    board_targets = {e["target"] for e in entries if e["target"]}
+    for e in list(entries):
+        for o in e["rec"].get("hub_others") or []:
+            target = str((o or {}).get("target") or "") if isinstance(o, Mapping) else ""
+            if not target or target in hub_seen or target in board_targets:
+                continue                         # a board we saw ourselves speaks for itself
+            hub_seen.add(target)
+            entries.append({"board_id": "", "name": target, "kind": "hub", "target": target,
+                            "address": "", "at": e["at"], "rec": o, "default_label": False})
+    out: list[dict[str, Any]] = []
+    for f in CLASH_FIELDS:
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for e in entries:
+            if f == "label" and e["default_label"]:
+                continue
+            if f == "mac" and e["kind"] == "hub" and e["rec"].get("mac_suspect"):
+                continue
+            value = _norm(f, e["rec"].get(f))
+            if value:
+                groups.setdefault(value, []).append(e)
+        for value, members in groups.items():
+            boards = _distinct(members)
+            if len(boards) >= 2:
+                out.append({"field": f, "value": value,
+                            "boards": [{k: b[k] for k in ("board_id", "name", "kind", "target",
+                                                          "at")} for b in boards]})
+    return out
+
+
+def _distinct(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per physical board: the same hub target or the same address is one board."""
+    kept: list[dict[str, Any]] = []
+    for m in members:
+        if any((m["target"] and m["target"] == k["target"])
+               or (m["address"] and m["address"] == k["address"]) for k in kept):
+            continue
+        kept.append(m)
+    return kept
+
+
 def register(ctx: RouteContext) -> None:
     d = ctx.daemon
     api = ctx.api
+
+    # --- ui2 api-hub (G10) ---
+    @api.get("/identity/clashes")
+    def identity_clashes() -> Any:
+        """Clashes across every board seen (no contact): ``{clashes, boards_seen, checked_at}``."""
+        svc = getattr(d.engine, "board_identity", None)
+        from harness_manager.services._unavailable import is_unavailable
+
+        seen = svc.seen if svc is not None and not is_unavailable(svc) else \
+            BI.SeenIdentities(Path(d.state_dir) / "identity")
+        records = seen.all()
+        return _JSON(ok(clashes=clash_groups(records), boards_seen=len(records),
+                        checked_at=BI._iso()))
+    # --- end ui2 api-hub ---
 
     def service() -> Any:
         svc = getattr(d.engine, "board_identity", None)

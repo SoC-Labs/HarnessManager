@@ -39,6 +39,7 @@ from harness_manager.core.errors import AbsentError, HeldError, UnavailableError
 from harness_manager.core.events import Event
 from harness_manager.services import pty as _pty
 
+from . import console_access
 from .app import _JSON, JsonBody, RouteContext, _obj, ok
 
 log = logging.getLogger(__name__)
@@ -234,4 +235,6 @@ def register(ctx: RouteContext) -> None:
         else:
             rows = rows_fn(session, live=False,
                            offline_reason="not read: the request asked for names only (?rates=0)")
+        # --- ui2 api-hub (G1b, additive): who may type here (console_access) ---
+        rows = console_access.with_access(d, bid, rows)
         return _JSON(ok(board_id=bid, names=names, consoles=rows))
