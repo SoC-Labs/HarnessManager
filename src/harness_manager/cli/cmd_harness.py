@@ -213,8 +213,9 @@ def _board_lines(board: dict[str, Any] | None) -> list[str]:
         return ["board      none given: verdicts need a TARGET"]
     run = board["running"] or {}
     lease = board["lease"]
+    here = lease.get("here", lease["mine"])      # FIX-PACK-4: held here, not by principal
     lease_txt = ("not needed (no hub)" if not lease["required"] else
-                 f"held by you ({lease['holder']})" if lease["mine"] else lease["reason"])
+                 f"held by you ({lease['holder']})" if here else lease["reason"])
     last = board.get("installed") or {}
     return [f"board      {board['board_id']}: runs {board['running_release'] or 'unrecorded'} "
             f"(shell {run.get('shell_id') or '?'}, fw {run.get('firmware_sha') or '?'}, "

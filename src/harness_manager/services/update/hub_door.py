@@ -82,7 +82,8 @@ def consent_text(door: dict[str, Any], version: str) -> str:
              for q in door.get("queue") or []]
     waiting = (f"{len(queue)} queued ({', '.join(queue[:3])}{' …' if len(queue) > 3 else ''}) "
                "wait until it is done" if queue else "nobody is queued")
-    mine = " (you)" if door.get("mine") else ""
+    here = door.get("here") if door.get("here") is not None else door.get("mine")
+    mine = " (you)" if here else " (you, in another session)" if door.get("mine") else ""
     return (f"This writes harness {version} to the config SD of {target} through the hub "
             f"{door.get('hub') or '?'} and REBOOTs it: the lease is held by {holder}{mine}; "
             f"{waiting}. Type exactly: {board_phrase(door)}")
@@ -134,12 +135,15 @@ def apply(plan: Any, rel: HarnessRelease, channel: Channel, board: Any, *, via: 
                              f"writes only {', '.join(sorted(door.get('only_paths') or ()))}, "
                              "and refuses a release that changes anything else")
     lease_required = door.get("lease_required", True)
-    if lease_required and not door.get("mine"):
+    # FIX-PACK-4: held HERE (the token is this Harness Manager's), not by principal; a door
+    # description from before ``here`` reads ``mine``, as ``services.lease.held_here``.
+    held = door.get("here") if door.get("here") is not None else door.get("mine")
+    if lease_required and not held:
         plan.warnings.append(f"only the lease holder installs through the hub: "
                              f"{door.get('holder') or 'nobody'} holds {door.get('target') or 'it'}"
                              " (the install refuses anyone else)")
     plan.hub = {k: door.get(k) for k in ("door", "hub", "target", "transport", "holder", "mine",
-                                          "queue", "mcc_tty", "only_paths")}
+                                          "here", "queue", "mcc_tty", "only_paths")}
     plan.hub["backup"] = backup
     plan.hub["consent_text"] = consent_text(door, rel.version)
     plan.hub["dark_after_s"] = DARK_AFTER_S

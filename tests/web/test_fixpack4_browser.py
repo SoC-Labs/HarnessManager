@@ -8,12 +8,13 @@ a board.
 
 from __future__ import annotations
 
+import getpass
 import time
 from typing import Any
 
 import pytest
 
-from harness_manager.demo import BOARD_USB
+from harness_manager.demo import BOARD_FIELDED, BOARD_USB
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -157,3 +158,75 @@ def test_negative_twin_the_update_tabs_settings_link_still_opens_updates(page_fa
     by_id(page, "update-app").locator('[data-action="open-settings"]').click()
     expect(by_id(page, "settings-pane")).to_have_attribute("data-settings-section", "updates", timeout=T)
     expect(by_id(page, "update-settings")).to_be_visible(timeout=T)
+
+
+# --- 1: one lease rule: held HERE, never `mine` -----------------------------------------------------
+
+ME = f"{getpass.getuser()}@harness-manager"        # the mock's principal (this and other sessions)
+HUB = pytest.mark.week_plan("hub_api", sim=True)
+
+
+def sim(daemon: Any) -> Any:
+    return daemon.app.state.sim
+
+
+def xvc_page(page_factory: Any, daemon: Any, engine: Any, lease: str) -> Any:
+    from tests.web.test_xvc_card_browser import xvc_board
+
+    xvc_board(engine, BOARD_FIELDED)
+    sim(daemon).behind_hub(BOARD_FIELDED, lease=lease)
+    page = page_factory(**APP)
+    open_board(page, BOARD_FIELDED)
+    page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    section(page, "debug")
+    page.wait_for_selector('[data-testid="xvc-card"]', timeout=T)
+    return page
+
+
+@HUB
+def test_xvc_is_off_for_a_lease_your_other_session_holds(page_factory, daemon, engine):
+    page = xvc_page(page_factory, daemon, engine, "elsewhere")
+    why = f"XVC is for the lease holder only: {ME} holds this board in another session, not this Harness Manager"
+    expect(by_id(page, "reason-xvc_open")).to_have_text(why, timeout=T)
+    button = page.locator('[data-testid="xvc-card"] [data-action="xvc_open"]')
+    expect(button).to_have_attribute("aria-disabled", "true")
+    button.click(force=True)                          # an interlock: nothing is sent
+    expect(by_id(page, "xvc-result")).to_contain_text("Nothing was run.")
+    assert daemon.app.state.xvc.sessions == {}
+
+
+@HUB
+def test_negative_twin_xvc_opens_for_the_lease_held_here(page_factory, daemon, engine):
+    page = xvc_page(page_factory, daemon, engine, "mine")
+    button = page.locator('[data-testid="xvc-card"] [data-action="xvc_open"]')
+    expect(button).not_to_have_attribute("aria-disabled", "true", timeout=T)
+    expect(by_id(page, "reason-xvc_open")).to_have_count(0)
+
+
+def harness_lease_page(page_factory: Any, daemon: Any, lease: str) -> tuple[Any, Any]:
+    from tests.web.test_updui_browser import harness_page
+
+    sim(daemon).behind_hub(BOARD_USB, lease=lease)
+    return harness_page(page_factory)
+
+
+@pytest.mark.week_plan("harness_api", sim=True)
+def test_the_update_lease_line_is_not_yours_for_your_other_session(page_factory, daemon):
+    from tests.web.test_updui_browser import install_rekey
+
+    page, card = harness_lease_page(page_factory, daemon, "elsewhere")
+    line = by_id(page, "harness-lease").first
+    expect(line).to_contain_text(f"{ME} holds the lease on mps3_01_pl in another session, "
+                                 "not this Harness Manager", timeout=T)
+    expect(line).not_to_contain_text("You hold")
+    panel = install_rekey(page, card)
+    result = panel.locator('[data-testid="harness-result"]')
+    expect(result).to_contain_text("HELD", timeout=T)                    # the daemon refuses too
+    assert daemon.app.state.harness.running == {}
+
+
+@pytest.mark.week_plan("harness_api", sim=True)
+def test_negative_twin_the_update_lease_line_is_yours_when_held_here(page_factory, daemon):
+    page, _card = harness_lease_page(page_factory, daemon, "mine")
+    expect(by_id(page, "harness-lease").first).to_contain_text("You hold this board's hub lease",
+                                                               timeout=T)

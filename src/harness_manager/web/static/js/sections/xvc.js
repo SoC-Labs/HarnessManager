@@ -19,7 +19,7 @@ import { call, callBlob, heldByJob, routeMissing, toApiError } from "../api.js";
 import { clock } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, onBoardEvent, onJobEnded, timed } from "../store.js";
-import { week } from "../week.js";
+import { holderOnly } from "../week.js";
 import { ActionRow, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 
 export const XVC_SCOPE = "XVC reaches the reconfigurable partition's debug chain (Debug Bridge, "
@@ -154,15 +154,10 @@ onJobEnded((bid, kind) => {
 
 // X6: behind a hub, XVC is for the lease holder only (the daemon refuses anyone else with
 // 409 HELD naming the holder). A board with no hub has no lease: its session lock is the gate.
+// FIX-PACK-4: the one rule (week.js holderOnly): held HERE, never `mine` (another session of
+// your hub name held it and this card enabled Open).
 export function leaseReason(bid) {
-  const w = week(bid);
-  if (!w.hubLoaded && !w.hubUnsupported) return "reading the board's hub lease first";
-  const hub = w.hub;
-  if (!hub) return "";
-  const lease = hub.lease;
-  if (!lease) return "XVC is for the lease holder only, and nobody holds this board's lease: acquire it first (header)";
-  if (!lease.mine) return `XVC is for the lease holder only: ${lease.holder || "someone else"} holds this board`;
-  return "";
+  return holderOnly(bid, "XVC");
 }
 
 function statusLines(st) {

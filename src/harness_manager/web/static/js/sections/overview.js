@@ -98,7 +98,7 @@ export function attentionItems(bid) {
       // LEASE-UI: your hub name, but not this Harness Manager (every lab session shares it).
       out.push({ key: "lease", level: "warn", title: `Leased to ${lease.holder} in another session.`,
         text: `Your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner)${left !== null ? `; it ends in ${durationText(left)}` : ""}. Background checks are paused. Use the board there, or release it there first.` });
-    } else if (!lease.mine) {
+    } else if (who.state === "other") {
       const asked = requestActive(bid);
       out.push({ key: "lease", level: "err", title: `Leased to ${lease.holder || "someone else"} on ${hub.host}.`,
         text: `This client must not drive the board until the lease is yours${left !== null ? ` (theirs ends in ${durationText(left)})` : ""}. ${asked

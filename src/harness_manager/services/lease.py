@@ -2258,6 +2258,28 @@ class LeaseService:
             t.join(timeout=2.0)
 
 
+def held_here(lease: Any) -> bool:
+    """FIX-PACK-4: the ONE rule every lease gate uses (XVC, harness installs; the app's every
+    gated button): THIS Harness Manager holds the lease, it has the token (``here``). ``mine``
+    (by principal) is also true for another session of the same hub name (every lab session
+    is david@mapstone-dev), which must not drive the board from here. A lease without
+    ``here`` (a view from before REVIEW-W5, a test's stand-in) reads ``mine``, as the app's
+    ``leaseWho`` does."""
+    if not isinstance(lease, dict) or not lease:
+        return False
+    here = lease.get("here")
+    return bool(lease.get("mine")) if here is None else bool(here)
+
+
+def elsewhere_text(lease: dict[str, Any], target: str) -> str:
+    """"<holder> holds <target> in another session, not this Harness Manager" when ``lease``
+    is ``mine`` without ``here``, else "<holder> holds <target>"."""
+    who = str(lease.get("holder") or "someone else")
+    if lease.get("mine") and not held_here(lease):
+        return f"{who} holds {target} in another session, not this Harness Manager"
+    return f"{who} holds {target}"
+
+
 def not_fresh(view: Any) -> str:
     """LEASE-FRESH: why ``view`` is not a fresh hub answer (it is the last known state, carried
     over a failed read: ``stale``), in plain words; "" when it is fresh. For the gates that

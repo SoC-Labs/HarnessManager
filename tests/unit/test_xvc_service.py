@@ -635,6 +635,35 @@ def test_open_is_for_the_lease_holder_only(fake, bus, tmp_path):
         svc.shutdown()
 
 
+def test_a_lease_your_other_session_holds_does_not_open_xvc_here(fake, bus, tmp_path):
+    # FIX-PACK-4: `mine` (by principal) without `here` (the token): another session of your
+    # own hub name holds it. XVC is for THIS Harness Manager holding the lease.
+    leases = Leases({"target": "mps3_01_pl", "holder": "david@mapstone-dev", "mine": True,
+                     "here": False})
+    svc = service(bus, tmp_path, leases=leases)
+    try:
+        s = FakeSession(FakeAdapter(fake), hub=Hub())
+        with pytest.raises(HeldError) as exc:
+            svc.open(s, byo=True)
+        assert "in another session, not this Harness Manager" in exc.value.message
+        assert "session that holds the lease" in exc.value.hint
+        assert fake.stats.connections == 0
+    finally:
+        svc.shutdown()
+
+
+def test_negative_twin_the_lease_held_here_opens_xvc(fake, bus, tmp_path):
+    leases = Leases({"target": "mps3_01_pl", "holder": "david@mapstone-dev", "mine": True,
+                     "here": True})
+    svc = service(bus, tmp_path, leases=leases)
+    try:
+        s = FakeSession(FakeAdapter(fake), hub=Hub())
+        assert svc.open(s, byo=True).state == "ready"
+        svc.close(s)
+    finally:
+        svc.shutdown()
+
+
 def test_negative_twin_a_board_with_no_hub_has_no_lease_to_hold(fake, bus, tmp_path):
     leases = Leases(error=AssertionError("must not be asked"))
     svc = service(bus, tmp_path, leases=leases)
