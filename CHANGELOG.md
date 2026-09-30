@@ -9,6 +9,34 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### OpenOCD on the board (DEBUG-ONBOARD)
+- **On a claimed Linux board, OpenOCD runs on the board.** When the board's image has
+  OpenOCD and its launcher (`mps3-debug`, v7 or later), `debug up` starts OpenOCD there over
+  the claim's SSH, and gdb reaches it through the board's SSH: the gdb ports ride the one
+  forward HM already keeps for the claimed board (local ends on 127.0.0.1; the board's
+  telnet and Tcl stay on the board). No OpenOCD is needed on your PC. Every other board keeps
+  this PC's OpenOCD over remote_bitbang, unchanged. HM asks the board once per session.
+- **The setting `debug.on_board`**: `auto` (default: on the board when it can, else this PC),
+  `true` (on the board, or exit 12 / 15 saying why), `false` (this PC only). Also
+  `$HARNESS_MANAGER_DEBUG_ON_BOARD`. With `auto`, a PC without a suitable OpenOCD is no
+  longer refused before the board opens: the board may run its own.
+- **Two cores, two gdb ports.** nanosoc_multicore (on the board) gets one gdb port and one
+  `attach` line per core. `debug status` says where OpenOCD runs; `--json` adds
+  `gdb_commands` (one per core); `--tsv` appends `WHERE`, `GDB_PORTS`, `CORES`. The app's
+  Debug card shows "OpenOCD: on the board" or "on this PC", and an Attach row per core.
+- **Exit codes:** 4 when the board's JTAG is held (the message names who), when the lease is
+  not yours, or when this PC's OpenOCD is turned away because the board's own holds JTAG
+  ("use it (`debug status`), or stop it (`harness-manager debug down`)"); 12 no launcher
+  with `debug.on_board = true`; 13 no debug port; 14 no config for the design; 15 not
+  claimed here; 6 OpenOCD did not start (with the board's log tail); 8 already up.
+- **Swaps:** a program stops the board's OpenOCD first and `debug status` says "closed for
+  the swap" (also when the board's own watchdog stopped it); HM's session reopens after a
+  verified swap. `debug down` also stops an on-board session HM did not start; closing the
+  board stops only HM's own.
+- API (additive): `DebugStatus` adds `gdb_ports`, `cores`, `where`; `debug.state` adds
+  `where` (docs/API.md "OpenOCD on the board"). docs/HIL_LINUX.md step E-OCD is the silicon
+  proof (needs the launcher image).
+
 ### UI review fixes (FIX-PACK-4)
 - **One lease rule.** On a board behind a hub, "yours" is this Harness Manager holding the
   lease (`here`), everywhere: the XVC card and the Update tab's lease line used `mine`, so a
