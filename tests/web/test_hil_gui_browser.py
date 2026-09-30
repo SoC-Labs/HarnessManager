@@ -96,16 +96,29 @@ def open_checks(page: Any, bid: str) -> None:
 
 
 def test_the_plan_is_picked_from_the_board_and_can_be_overridden(show):
+    # UI v2: Checks lives on hub boards only (a run takes the hub lease); the showcase's hub
+    # boards are bare metal, so the Linux plan is the page's rule, checked against the
+    # service's table below (test_the_pages_auto_rule_is_the_services)
     page = show.page()
-    open_checks(page, BOARD_LINUX)
-    expect(by_id(page, "checks-plan").locator("option").first).to_have_text("Auto: linux", timeout=T)
-    expect(by_id(page, "checks-auto-why")).to_contain_text("an OS slot is valid")
-    by_id(page, "checks-plan").select_option("linux-netboot")
-    expect(by_id(page, "checks-auto-why")).to_contain_text("Chosen by hand. Auto would pick linux")
-    # twin: the bare-metal board
-    open_checks(page, BOARD_V011)
+    open_checks(page, BOARD_SPARE)
     expect(by_id(page, "checks-plan").locator("option").first).to_have_text("Auto: bare-metal",
                                                                              timeout=T)
+    by_id(page, "checks-plan").select_option("linux-netboot")
+    expect(by_id(page, "checks-auto-why")).to_contain_text("Chosen by hand. Auto would pick bare-metal")
+    assert not page.errors, page.errors
+
+
+def test_twin_a_board_with_no_hub_has_no_checks_tab_and_its_old_key_lands_on_the_overview(show):
+    page = show.page()
+    for bid in (BOARD_LINUX, BOARD_V011):
+        open_board(page, bid)
+        expect(page.locator('.section-tab[data-section="board"]')).to_be_visible(timeout=T)
+        expect(page.locator('.section-tab[data-section="checks"]')).to_have_count(0)
+    page.evaluate("""async (bid) => {
+        const m = await import(new URL("js/store.js", document.baseURI).href);
+        m.setSection(bid, "checks");
+    }""", BOARD_V011)
+    expect(by_id(page, "section-overview")).to_be_visible(timeout=T)
     assert not page.errors, page.errors
 
 

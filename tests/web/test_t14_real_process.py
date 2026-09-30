@@ -95,7 +95,7 @@ def test_the_daemon_process_serves_the_ui_and_opens_a_board_added_by_address(
             board_id = f"mps3@{vb.shell_endpoint}"
             page.locator(f'.board-item[data-board="{board_id}"]').click(timeout=T)
             page.locator('[data-action="open"]').click()
-            expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x3f1a560f", timeout=T)
+            expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x3F1A560F", timeout=T)
             # The fielded mint cannot read USR_ACCESS: UNCHECKED, shown as its own warning.
             expect(page.locator('[data-testid="build-chip"]')).to_have_attribute("data-level", "unk")
             expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("bare-metal")

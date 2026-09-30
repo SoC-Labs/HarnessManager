@@ -28,6 +28,7 @@ from harness_manager.core.display import (
     rgb888,
 )
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -451,7 +452,7 @@ def test_the_socket_closes_when_the_display_is_hidden_and_the_tab_backgrounded(p
     }""")
     is_live(page)
     assert len(socks) == 3
-    page.locator('[data-section="consoles"]').click()     # another section: unmounted
+    nav.tab(page, "workbench")                           # another tab: unmounted
     assert wait_until(socks[2].is_closed, page=page)
     assert wait_until(lambda: viewers(daemon) == 0, page=page)
 

@@ -29,7 +29,7 @@ export const SUBS = {
 // setSection calls, the tests): where each one lands now.
 export const OLD_KEYS = {
   overview: { tab: "overview" },
-  xdc: { tab: "build", sub: "design" },           // the RM kit; full-board XDC under More exports
+  xdc: { tab: "build", sub: "design", part: "xdc" },   // the RM kit; full-board XDC (the fold)
   build: { tab: "build" },
   program: { tab: "workbench", part: "program" },
   consoles: { tab: "workbench", part: "consoles", console: true },

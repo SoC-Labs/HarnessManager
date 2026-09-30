@@ -18,6 +18,7 @@ from harness_manager import demo_catalog as cat
 from harness_manager.demo import DemoEngine
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_V011
 from tests.fakes.t14_mock_api import real_daemon
+from tests.web import nav
 from tests.web.conftest import dump_failed_pages
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
@@ -93,18 +94,14 @@ def by_id(page: Any, name: str) -> Any:
 
 
 def open_board(page: Any, bid: str) -> None:
-    """Select ``bid`` in the rail, open it if it is not open here, wait for its header."""
-    page.locator(f'.board-item[data-board="{bid}"]').click()
-    page.wait_for_selector(f'main[data-board="{bid}"], [data-action="open"]', timeout=T)
-    if page.locator(f'main[data-board="{bid}"]').count() == 0:
-        page.locator('[data-action="open"]').click()
-    page.wait_for_selector(f'main[data-board="{bid}"] [data-testid="fact-shell"]'
-                           ':not(:has-text("unknown"))', timeout=T)
+    """Select ``bid`` in the rail, open it if it is not open here, wait for its header
+    (tests/web/nav.py, shared by the files that import this one)."""
+    nav.open_board(page, bid)
 
 
 def section(page: Any, key: str) -> None:
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 # --- each board's lines ---------------------------------------------------------------------------
@@ -176,7 +173,7 @@ def test_the_update_banner_stays_hidden_by_default(showcase):
     page.wait_for_timeout(1500)                        # the page's first GET /update/app landed
     expect(by_id(page, "app-update-banner")).to_have_count(0)
     section(page, "update")
-    expect(by_id(page, "section-update")).to_contain_text("never updates itself", timeout=T)
+    expect(nav.panel(page, "update")).to_contain_text("never updates itself", timeout=T)
 
 
 def test_negative_twin_the_demo_knob_shows_the_staged_banner(staged_showcase):

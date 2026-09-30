@@ -471,7 +471,8 @@ def test_a_reopen_class_change_offers_reopen_board_which_closes_and_opens_it(pag
     assert len(engine.called("open")) == opens + 1
     assert [a[0] for a in engine.called("close")][-1] == BOARD_USB
     page.locator('[data-action="settings-close"]').click()
-    expect(by_id(page, "lock-chip")).to_be_visible(timeout=T)            # open again, here
+    # open again, here (UI v2: the rail's card says Open; the header has no Open chip)
+    expect(page.locator(f'.board-item[data-board="{BOARD_USB}"] [data-testid="rail-open"]')).to_be_visible(timeout=T)
 
 
 def test_negative_twin_with_no_board_open_a_reopen_change_offers_no_button(page_factory, world, engine):

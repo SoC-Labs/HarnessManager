@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_SPARE
+from harness_manager.demo_showcase import BOARD_LEASED, BOARD_SPARE
 from tests.web.test_demo_all_browser import Showcase, by_id, make_showcase
 from tests.web.test_hil_gui_browser import T, checks_of, open_checks, scripted
 
@@ -60,11 +60,12 @@ def test_screenshot_start_off_under_someone_elses_lease(show, review):
     shoot(page, review, "held", "light")
 
 
-def test_screenshot_the_linux_boards_auto_plan(show, review):
+def test_screenshot_the_auto_plan(show, review):
+    # UI v2: Checks is on hub boards only; the showcase's hub boards are bare metal
     page = show.page("light")
-    open_checks(page, BOARD_LINUX)
-    expect(by_id(page, "checks-auto-why")).to_contain_text("valid", timeout=T)
-    shoot(page, review, "linux-auto", "light")
+    open_checks(page, BOARD_SPARE)
+    expect(by_id(page, "checks-auto-why")).to_contain_text("bare-metal", timeout=T)
+    shoot(page, review, "auto", "light")
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])

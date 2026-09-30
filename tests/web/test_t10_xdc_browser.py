@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from harness_manager.demo import BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 
@@ -23,7 +24,7 @@ def open_xdc(page):
     page.locator(f'.board-item[data-board="{BOARD_USB}"]').click()
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="board-header"]', timeout=T)
-    page.locator('[data-section="xdc"]').click()
+    nav.section(page, "xdc")                           # UI v2: the Build tab's XDC fold
     page.wait_for_selector('[data-testid="xdc-model"]', timeout=T)
 
 

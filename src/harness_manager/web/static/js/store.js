@@ -104,12 +104,13 @@ export function boardState(bid) {
 
 // --- UI v2 routes (route.js): the tab and sub-page of each board -----------------------------
 
-// A board behind a hub (its Checks tab, its lease badge): what GET /lease said once read,
-// else what boards.toml, the lease the service last knew, or a hub link say.
+// A board behind a hub (its Checks tab, its lease badge): for an open board what GET /lease
+// said once read (a read after it closed says nothing), else what boards.toml, the lease the
+// service last knew, or a hub link say.
 export function hubBoard(bid) {
   const row = S.boards[bid] || {};
   const w = S.board[bid] && S.board[bid].week;
-  if (w && w.hubLoaded) return !!w.hub;
+  if (row.open && w && w.hubLoaded) return !!w.hub;
   const conf = row.configured || {};
   const links = (row.candidate && row.candidate.links) || [];
   return !!(conf.hub || conf.via === "hub" || row.lease_known

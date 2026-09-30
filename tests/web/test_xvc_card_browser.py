@@ -14,6 +14,7 @@ import pytest
 
 from harness_manager.core.events import Event
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB, FIELDED_FEATURES
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -46,7 +47,7 @@ def open_board(page, bid=BOARD):
 
 
 def to_debug(page):
-    page.locator('[data-section="debug"]').click()
+    nav.section(page, "debug")                          # UI v2: the Workbench's Debug part
     page.wait_for_selector('[data-testid="xvc-card"]', timeout=T)
 
 
@@ -375,7 +376,7 @@ def test_a_swap_by_clicks_in_program_re_attaches_on_the_new_design(page_factory,
     page = debug_page(page_factory, bid=BOARD_USB)
     button(page, "xvc_open").click()
     state_is(page, "ready")
-    page.locator('[data-section="program"]').click()
+    nav.section(page, "program")
     page.locator('[data-overlay="led"]').click()
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     page.locator('[data-testid="arm-program"] input').check()

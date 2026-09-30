@@ -1301,7 +1301,9 @@ body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; }
   display: inline-grid; place-items: center; background: var(--err); color: var(--on-badge);
 }
 
-.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 18; }
+/* the drawer belongs to the workspace: the rail stays usable beside it (another board, its
+   Activity button again) */
+.scrim { position: fixed; inset: 0; left: var(--rail-w); background: var(--scrim); z-index: 18; }
 .drawer {
   position: fixed; z-index: 19; top: 0; bottom: 0; left: var(--rail-w);
   width: min(560px, calc(100vw - var(--rail-w))); background: var(--surface);

@@ -17,13 +17,16 @@ import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
 from harness_manager.services.debug import gdb_command
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
 
 pytestmark = pytest.mark.browser
 
-SECTIONS = ["overview", "program", "consoles", "debug", "power", "clocks", "xdc", "activity"]
+# UI v2: the five tabs (no Checks: no hub here), then 0.1.0's keys where they landed (nav.py)
+SECTIONS = ["overview", "workbench", "build", "board", "program", "consoles", "debug", "power",
+            "clocks", "xdc", "activity"]
 T = 10_000   # ms: the longest any single UI wait may take
 
 
@@ -32,10 +35,7 @@ def rail(page, board_id):
 
 
 def open_board(page, board_id):
-    rail(page, board_id).click()
-    page.locator('[data-action="open"]').click()
-    page.wait_for_selector('[data-testid="board-header"]', timeout=T)
-    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.open_board(page, board_id)
 
 
 def open_details(page):
@@ -48,8 +48,8 @@ def open_details(page):
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def result_text(page, testid):
@@ -134,8 +134,9 @@ def test_selecting_a_board_renders_identity_with_unchecked_as_a_warning(page_fac
         assert chip.get_attribute("data-level") == "unk", testid
         assert "Unchecked" in chip.inner_text()
     assert "not a pass" in page.locator('[data-testid="id-build-note"]').inner_text()
-    # LEASE-UI: the board lock says "Open" ("Yours" is the hub lease's word now)
-    assert "Open" in page.locator('[data-testid="lock-chip"]').inner_text()
+    # LEASE-UI: the board lock says "Open" ("Yours" is the hub lease's word now); UI v2: on
+    # the rail's card, not the header
+    assert "Open" in rail(page, BOARD_FIELDED).locator('[data-testid="rail-open"]').inner_text()
     no_missing_icons(page)
     assert page.errors == []
 
@@ -143,8 +144,12 @@ def test_selecting_a_board_renders_identity_with_unchecked_as_a_warning(page_fac
 def test_a_board_whose_build_check_passed_shows_ok_not_unchecked(page_factory):
     page = page_factory()
     open_board(page, BOARD_USB)
-    chip = page.locator('[data-testid="build-chip"]')
-    assert chip.get_attribute("data-level") == "ok" and "OK" in chip.inner_text()
+    # UI v2: a passing build check rides the Design fact's tooltip; its chip only shows when
+    # the check asks for attention (the twin above: unchecked keeps it)
+    design = page.locator('[data-testid="fact-design"]')
+    expect(design).to_have_attribute("data-check", "ok", timeout=T)
+    assert "Build check OK" in design.get_attribute("title")
+    assert page.locator('[data-testid="build-chip"]').count() == 0
 
 
 def test_telemetry_shows_unavailable_with_its_reason_never_zero(page_factory):
@@ -294,7 +299,7 @@ def test_console_output_appears_and_send_works(page_factory, engine, screenshots
     # david (L3): attach with screen, never the CLI line; that row is gone.
     # (Q1: this checked a data-testid the page no longer has anywhere, so it could not
     # fail. The removed row read "harness-manager console <address> <name>".)
-    section_text = page.locator('[data-testid="section-consoles"]').inner_text()
+    section_text = nav.panel(page, "consoles").inner_text()
     assert "rc 0" in section_text and "harness-manager console" not in section_text
     page.screenshot(path=str(screenshots / "light-consoles-live.png"))
 
@@ -382,8 +387,10 @@ def test_the_sd_recovery_panel_shows_first_when_an_install_was_interrupted(page_
     page = page_factory()
     open_board(page, BOARD_USB)
     page.wait_for_selector('[data-testid="sd-recovery"]', timeout=T)
-    assert page.locator('[data-section="sd"]').get_attribute("aria-selected") == "true"
-    first = page.locator('[data-testid="section-sd"] .card').first
+    # UI v2: 0.1.0's SD card tab is Board > Versions; the recovery is its first card
+    assert page.locator('[data-section="board"]').get_attribute("aria-selected") == "true"
+    assert page.locator('[data-board-page="versions"]').get_attribute("aria-current") == "page"
+    first = nav.panel(page, "sd").locator(".card").first
     assert first.get_attribute("data-testid") == "sd-recovery"
     assert "images.txt" in page.locator('[data-testid="sd-journal"]').inner_text()
     assert page.locator('[data-testid="sd-banner"]').is_visible()
@@ -533,7 +540,7 @@ def test_every_section_fits_1280x800_without_horizontal_scroll(page_factory, eng
     page.screenshot(path=str(screenshots / f"{scheme}-preview-held.png"))
     open_board(page, BOARD_USB)
     bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
-    assert (bg == "rgb(15, 18, 22)") == (scheme == "dark"), bg
+    assert (bg == "rgb(14, 17, 21)") == (scheme == "dark"), bg          # UI v2 round 3: #0e1115
     for key in SECTIONS:
         section(page, key)
         if key == "program":
@@ -547,6 +554,7 @@ def test_every_section_fits_1280x800_without_horizontal_scroll(page_factory, eng
         assert horizontal_overflow(page) == [], key
         no_missing_icons(page)
         page.screenshot(path=str(screenshots / f"{scheme}-{key}.png"))
+    nav.close_activity(page)                  # the drawer's backdrop covers the rail
     rail(page, BOARD_FIELDED).click()
     open_board(page, BOARD_FIELDED)
     section(page, "power")
@@ -570,7 +578,7 @@ def test_the_theme_toggle_overrides_the_system_and_is_remembered(page_factory):
     page.wait_for_selector(".board-item", timeout=T)
     page.locator('.rail .seg button:has-text("Dark")').click()
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(15, 18, 22)"
+    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(14, 17, 21)"   # round 3
     page.reload()
     page.wait_for_selector(".board-item", timeout=T)
     assert page.evaluate("document.documentElement.dataset.theme") == "dark"

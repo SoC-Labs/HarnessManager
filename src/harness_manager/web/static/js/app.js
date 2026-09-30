@@ -27,8 +27,9 @@ import { LeaseBanners, requestClose } from "./lease.js";
 import { registerTab, tabBody, tabsFor } from "./route.js";
 import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
 import {
-  boardState, changed, hubBoard, jobLabel, log, navigate, openActivity, openedBoard, openedOrClosedHere,
-  probe, refreshInfo, rereadBoard, S, sectionOf, select, start, subscribe, timed, UI_NOTE, unseenErrors,
+  boardState, changed, closeActivity, hubBoard, jobLabel, log, navigate, openActivity, openedBoard,
+  openedOrClosedHere, probe, refreshInfo, rereadBoard, S, sectionOf, select, start, subscribe, timed,
+  UI_NOTE, unseenErrors,
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
 import { AppUpdateBanners, AppUpdateLayer, SettingsButton, startSelfUpdate } from "./selfupdate.js";   // UPDATE-UI
@@ -98,8 +99,9 @@ function Rail() {
     <${BoardList} />
     <div class="rail-foot">
       <div class="foot-links">
-        <button type="button" class="btn ghost sm" data-action="activity" onClick=${() => openActivity(S.selected)}
-          aria-haspopup="dialog" title="Activity: what happened, newest first"><${Icon} name="history" />Activity
+        <button type="button" class="btn ghost sm" data-action="activity" aria-haspopup="dialog"
+          aria-expanded=${S.ui.drawer ? "true" : "false"} title="Activity: what happened, newest first"
+          onClick=${() => (S.ui.drawer ? closeActivity() : openActivity(S.selected))}><${Icon} name="history" />Activity
           ${errors ? html`<span class="foot-badge" data-testid="activity-badge"
             aria-label=${`${errors} new error${errors === 1 ? "" : "s"}`}>${errors}</span>` : null}</button>
         <${SettingsButton} />

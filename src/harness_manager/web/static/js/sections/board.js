@@ -33,10 +33,14 @@ function Recover({ bid }) {
 }
 
 function Versions({ bid }) {
+  const sd = html`<h2 class="board-page-head" id="board-sd"><${Icon} name="hard-drive" />Configuration SD card</h2>
+    <${SdSection} bid=${bid} />`;
+  // An interrupted SD install comes before anything else on this board (the banner's
+  // "Go to recovery" lands here): its recovery is the page's first card then.
   return html`<div class="stack">
+    ${boardState(bid).pending ? sd : null}
     <${UpdateSection} bid=${bid} />
-    <h2 class="board-page-head" id="board-sd"><${Icon} name="hard-drive" />Configuration SD card</h2>
-    <${SdSection} bid=${bid} />
+    ${boardState(bid).pending ? null : sd}
   </div>`;
 }
 

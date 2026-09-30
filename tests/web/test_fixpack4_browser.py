@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -36,14 +37,12 @@ def rail(page: Any, bid: str) -> Any:
 
 
 def open_board(page: Any, bid: str = BOARD_USB) -> None:
-    rail(page, bid).click()
-    page.locator('[data-action="open"]').click()
-    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.open_board(page, bid)
 
 
 def section(page: Any, key: str) -> None:
-    page.locator(f'.section-tab[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def wait_until(fn: Any, timeout: float = 5.0) -> bool:
@@ -69,23 +68,24 @@ HIDDEN_TABS = """() => {
 
 
 def test_every_tab_is_on_screen_at_1024_px(page_factory):
+    # UI v2: five tabs; this USB board has no hub, so no Checks
     page = page_factory(width=1024, height=768)
     open_board(page)
-    expect(page.locator(".section-tab")).to_have_count(12)
+    expect(page.locator(".section-tab")).to_have_count(4)
     assert page.evaluate(HIDDEN_TABS) == []
-    for key in ("update", "checks", "activity"):           # the three the review lost
-        section(page, key)
+    for key in ("overview", "workbench", "build", "board"):
+        nav.tab(page, key)
         expect(page.locator(f'.section-tab[data-section="{key}"]')).to_have_attribute("aria-selected", "true")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     assert page.errors == []
 
 
-def test_negative_twin_the_old_scrolling_row_hides_tabs_and_the_check_sees_it(page_factory):
+def test_negative_twin_a_scrolling_row_too_narrow_hides_tabs_and_the_check_sees_it(page_factory):
     page = page_factory(width=1024, height=768)
     open_board(page)
-    page.add_style_tag(content="nav.sections { flex-wrap: nowrap !important; overflow-x: auto; }")
+    page.add_style_tag(content="nav.sections { flex-wrap: nowrap !important; overflow-x: auto; width: 240px; }")
     hidden = page.evaluate(HIDDEN_TABS)
-    assert "activity" in hidden and "overview" not in hidden, hidden
+    assert "board" in hidden and "overview" not in hidden, hidden
 
 
 # --- 8: the header's refresh re-reads the Card line and the SD journal ----------------------------

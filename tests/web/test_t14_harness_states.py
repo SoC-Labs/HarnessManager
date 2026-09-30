@@ -24,6 +24,7 @@ from tests.fakes.virtual_board import (
     LINUX_HARNESSD,
     VirtualMps3,
 )
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -86,9 +87,10 @@ def refresh(page):
 def test_ila_v011_is_bare_metal_with_a_passing_build_check(stage, tmp_path, screenshots):
     with VirtualMps3(tmp_path, FIELDED_ILA_V011) as vb:
         page, _, _ = stage(vb)
-        expect(page.locator('[data-testid="build-chip"]')).to_have_attribute("data-level", "ok")
+        # UI v2: OK rides the Design fact's tooltip; the chip shows only when not OK
+        expect(page.locator('[data-testid="fact-design"]')).to_have_attribute("data-check", "ok")
         expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("bare-metal")
-        expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x72bb0a36")
+        expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x72BB0A36")   # UI v2: upper-case hex
         expect(health_chip(page)).to_have_attribute("data-level", "ok")
         # v0.11 reports `reboot`, so the shell restart lights up (the fielded board lacks it).
         assert page.locator('[data-testid="capabilities-card"] .cap[data-capability="reset_shell"]').count() == 1
@@ -184,7 +186,7 @@ def test_a_board_reboot_shows_the_controllers_evidence(stage, tmp_path, screensh
         vb.mcc._pace = 0.002                  # the fake drops characters closer than this
         vb.mcc.boot_s = 1.0
         page, _, _ = stage(vb, vb.candidate(usb=True))
-        page.locator('[data-section="power"]').click()
+        nav.section(page, "power")                  # UI v2: Board > Recover
         page.locator('[data-testid="arm-reboot"] input').check()
         page.locator('[data-action="reboot"]').click()
         expect(page.locator('[data-testid="job-chip"]')).to_contain_text("board reboot", timeout=T)
