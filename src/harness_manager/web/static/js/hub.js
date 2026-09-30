@@ -4,7 +4,7 @@
 // and the request's own bar (queue position, countdown, Leave queue, Force) sits above.
 
 import { runJob } from "./actions.js";
-import { openRequestForm, ReleaseButton, requestActive } from "./lease.js";
+import { openRequestForm, QueueChip, QueuePop, ReleaseButton, requestActive } from "./lease.js";
 import { call } from "./api.js";
 import { clock } from "./format.js";
 import { html } from "./lib.js";
@@ -118,14 +118,17 @@ export function HubFact({ bid }) {
         title=${who.stale.error ? `The last read: ${who.stale.error}` : ""}>${staleNote(who.stale)}</span>` : null}
       ${requesting ? html`<span class="muted small" data-testid="lease-requested"><${Icon} name="send" cls="sm" /> requested${req && req.position ? ` · position ${req.position}` : ""}</span>`
         : w.leaseQueued ? html`<span class="muted small" data-testid="lease-queued"><${Icon} name="clock" cls="sm" /> queued</span>` : null}
+      <${QueueChip} bid=${bid} />
       ${action}
+      <${QueuePop} bid=${bid} />
       ${acquiring ? html`<${ActionRow} bid=${bid} panel="lease_cancel" spec=${specs.cancel} variant="ghost" compact=${true}
         showReason=${false} gate=${{ whileJob: true }} />` : null}
     </span>
   </div>`;
 }
 
-// "Request board": opens the small form (lease.js) that asks the holder to give it up.
+// "Request board": opens the Request dialog (lease.js): the queue you join, a message and how
+// long you want it.
 export function RequestButton({ bid, compact = true }) {
   return html`<button type="button" class=${`btn ${compact ? "sm" : ""}`} data-action="lease_request_open"
     aria-haspopup="dialog" title="Join the queue and ask the holder to give the board up"
