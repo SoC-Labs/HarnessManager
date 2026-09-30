@@ -204,7 +204,11 @@ class ReadingsHistory:
         return kept
 
     def note_answer(self, board_id: str, answer_ms: float) -> bool:
-        return self.add(board_id, ANSWER_SERIES, answer_ms, unit="ms", source=ANSWER_SOURCE)
+        """The service's answer time, one decimal as ``GET /boards/{bid}`` says it."""
+        if isinstance(answer_ms, bool) or not isinstance(answer_ms, (int, float)):
+            return False
+        return self.add(board_id, ANSWER_SERIES, round(float(answer_ms), 1), unit="ms",
+                        source=ANSWER_SOURCE)
 
     def forget(self, board_id: str) -> None:
         with self._mu:

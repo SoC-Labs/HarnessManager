@@ -36,7 +36,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from harness_manager.core.errors import AbsentError, HarnessError, UnavailableError, UsageError
+from harness_manager.core.errors import (
+    AbsentError,
+    HarnessError,
+    RefusedError,
+    UnavailableError,
+    UsageError,
+)
 from harness_manager.services import slot_health
 from harness_manager.services.slot_health import extend_json
 from harness_manager.services.slots import (
@@ -96,11 +102,16 @@ def register(ctx: RouteContext) -> None:
                               hint="open the board again, then retry")
 
     def precheck(bid: str, s: Any, svc: SlotService, adapter: Callable[[Any], Any],
-                 what: str) -> None:
-        """Before the 202: the adapter can be used (422 with the reason) and the lease is
-        this client's (409 HELD naming the holder). Under the board gate (409 while a job runs)."""
+                 what: str, *, card: bool = False) -> None:
+        """Before the 202: the adapter can be used (422 with the reason), a card change has a
+        card to change (409 REFUSED, as the CLI's exit 15), and the lease is this client's
+        (409 HELD naming the holder). Under the board gate (409 while a job runs)."""
         with d.gates.op(bid):
             adapter(s)
+            if card and not svc.card_status(s).present:
+                raise RefusedError(f"no card in the USER microSD slot: nothing to {what}",
+                                   hint="the board boots exactly as it always has without "
+                                        "one; insert a card first")
             svc.check_lease(s, what)
 
     @api.get("/boards/{bid:path}/slots")
@@ -153,7 +164,7 @@ def register(ctx: RouteContext) -> None:
         s = ctx.board(bid)
         confirmed(_obj(body), "write the running overlay to the card as its power-on default")
         svc = service()
-        precheck(bid, s, svc, svc.card, "commit the running overlay to the card")
+        precheck(bid, s, svc, svc.card, "commit the running overlay to the card", card=True)
 
         def run(progress: Callable[..., None]) -> Any:
             still_open(bid, s, "card commit")
@@ -172,7 +183,7 @@ def register(ctx: RouteContext) -> None:
         s = ctx.board(bid)
         confirmed(_obj(body), "clear the card's power-on default")
         svc = service()
-        precheck(bid, s, svc, svc.card, "clear the card's power-on default")
+        precheck(bid, s, svc, svc.card, "clear the card's power-on default", card=True)
 
         def run(progress: Callable[..., None]) -> Any:
             still_open(bid, s, "card clear")

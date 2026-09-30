@@ -16,6 +16,7 @@
 | ``POST /kits/check`` ``{path, clearing?, static_id?, board_id?}`` | ``{passed, checks, facts}`` (200 either way: a query) |
 | ``POST /kits/pack`` ``{path, out_dir?, import?}`` | ``{overlay_dir, imported}``; 409 REFUSED with ``error.data.checks`` |
 | ``POST /overlays/import`` ``{path, board_id?, static_id?, check_only?}`` | UI2 G5: ``{kind, path, name, rm_id, static_id, passed, checks, groups, overlay_dir, imported}``; 409 INCOMPATIBLE/REFUSED with ``error.data`` = the same |
+| ``POST /overlays/upload?name=&board_id=&static_id=&check_only=`` (body: the zip) | UI2 G5: the same as ``/overlays/import``, plus ``upload: {name, bytes}``; 413 over 256 MB |
 | ``POST /kits/design/scan`` ``{path, name?, top?, static_id?, board_id?, rm_id?, out?}`` | UI2 G8 (e): ``{path, kind, name, top, tops, sources, include_dirs, defines, packages, generics, use, ports, rm_id, rm_id_proposed, left_out, warnings, design, written}`` |
 
 UI2 G8 (additive): the guide adds ``running``, ``pblock`` and ``utilisation``; ``POST /kits/check``
@@ -36,6 +37,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from fastapi import Request
 from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 
@@ -329,6 +331,54 @@ def register(ctx: RouteContext) -> None:
                 "kind": res.kind, "sha256": (res.imported or {}).get("sha256", "")}))
         return _JSON(ok(board_id=bid or None, **res.to_json()))
 
+    @api.post("/overlays/upload")
+    async def overlays_upload(request: Request, name: str = "design.zip",
+                              board_id: str | None = None, static_id: str | None = None,
+                              check_only: str | None = None) -> Any:
+        """The Import dialog's "Choose a zip": the browser sends the file's bytes (a browser
+        never reveals a path). Streamed to the kit work dir (413 above the cap), then as
+        ``/overlays/import`` (``overlay_import.import_zip``)."""
+        from starlette.concurrency import run_in_threadpool
+
+        from .app import _query_flag
+
+        only = _query_flag(check_only, "check_only")
+        sid = static_arg(static_id) if static_id else ""
+        cap = overlay_import.MAX_UPLOAD_BYTES
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > cap:
+            return too_large(int(declared), cap)
+        kits.work_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".upload-", suffix=".zip", dir=kits.work_dir)
+        size = 0
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > cap:
+                        return too_large(size, cap)
+                    fh.write(chunk)
+            if size == 0:
+                raise UsageError("the upload is empty", hint="send the zip's bytes as the body "
+                                                             "(Content-Type: application/zip)")
+
+            def work() -> Any:
+                ident = board_identity(ctx, board_id) if board_id else None
+                pack = pack_of(board_id) if board_id else "mps3"
+                return overlay_import.import_zip(kits, Path(tmp), name=name, identity=ident,
+                                                 static_id=sid, pack=pack, store=kits.store,
+                                                 check_only=only)
+
+            res = await run_in_threadpool(work)
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+        if not only:
+            d.bus.publish(Event("kit.imported", board_id or "", {
+                "name": res.name, "rm_id": res.rm_id, "static_id": res.static_id,
+                "kind": res.kind, "sha256": (res.imported or {}).get("sha256", "")}))
+        return _JSON(ok(board_id=board_id or None, upload={"name": name, "bytes": size},
+                        **res.to_json()))
+
     # -- UI2-API-BUILD G8 (e): My RTL, a folder or a .f list into a design -----------------------
 
     @api.post("/kits/design/scan")
@@ -352,6 +402,16 @@ def register(ctx: RouteContext) -> None:
         if out is not None:
             rtl_scan.write_design(found, out)
         return _JSON(ok(static_id=sid or None, **found.to_json()))
+
+
+def too_large(size: int, cap: int) -> Any:
+    """413 with the error envelope: the upload is over the cap (nothing was kept)."""
+    from .wire import error_body
+
+    return _JSON(error_body(UsageError(
+        f"the upload is {size} bytes; the cap is {cap // (1024 * 1024)} MB",
+        hint="give the folder's path instead (Import > A path on this machine)")),
+        status_code=413)
 
 
 def add_floorplan(facts: dict[str, Any], static_id: str, pack: str = "mps3") -> None:

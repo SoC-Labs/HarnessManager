@@ -53,6 +53,34 @@ NETBOOT_BLOCKER = ("the OS is the hub's TFTP image: this board has no user micro
                    "this release's OS slot image cannot be written here; ask the hub's admin "
                    "to serve this release's image, or give the board a card and install again")
 
+#: The words an OS-slot adapter's ``slots_reason`` uses for "no card" (the MPS3 pack's "no
+#: user microSD card in the slot", the demo's "no card in the USER microSD slot"): a running
+#: Linux harness with no card booted over the network.
+_NO_CARD = ("no user microsd card", "no card in the user microsd")
+
+
+def os_boot_of(running: str) -> str:
+    """Where a Linux board's OS came from, by the slot it reports running: ``card`` for A/B,
+    ``netboot`` for rescue/none (stage0 took the hub's image), ``""`` otherwise."""
+    if running in ("A", "B"):
+        return OS_BOOT_CARD
+    return OS_BOOT_NETBOOT if running in ("rescue", "none") else ""
+
+
+def netboot_of(adapter: object) -> tuple[str, str]:
+    """(``os_boot``, the adapter's ``slots_reason``) for a Linux board whose OS slots cannot be
+    used: ``netboot`` when the reason is that no card is in the slot. Never raises."""
+    reason_of = getattr(adapter, "slots_reason", None)
+    if not callable(reason_of):
+        return "", ""
+    try:
+        reason = str(reason_of() or "")
+    except Exception as exc:  # noqa: BLE001 - a reason that fails is no reason
+        reason = str(getattr(exc, "message", exc))
+    low = reason.lower()
+    return (OS_BOOT_NETBOOT if any(k in low for k in _NO_CARD) else ""), reason
+
+
 MODE_FULL = "full"            # base and/or OS, plus overlays
 MODE_OVERLAYS = "overlays"    # host store only: no SD write, no reboot
 MODE_NONE = "none"            # nothing to do

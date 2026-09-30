@@ -17,8 +17,14 @@ shell as the board (an identity check: a mismatch refuses with 14 INCOMPATIBLE),
 (the user range 0x8000-0xFFFF and a clash with the catalogue are warnings, never a refusal:
 a rebuilt platform design keeps its id), the lengths and CRC-32, and the pair (the
 clearing's frames inside the partial's, the harness's clearing arena, the frame box when the
-static's kit is cached). Any ``mismatch`` refuses and nothing is imported. A zip is v0.2.1
-(``POST /kits/pack/upload``): a path to one is refused with that hint.
+static's kit is cached). Any ``mismatch`` refuses and nothing is imported.
+
+A zip is the upload's (``import_zip``, ``POST /overlays/upload``): the browser sends the
+file's bytes (it never reveals a path); they are extracted safely (``update.bundle.
+safe_extract``: no absolute path, no ``..``, no symlink, a size and entry cap) into the kit
+work dir, the folder or receipt inside is found (at the top, one folder down, or the first
+``manifest.json``/receipt within three levels), checked and imported the same way, and the
+extraction is removed whatever happens. A path to a zip is refused (400) with that hint.
 """
 
 from __future__ import annotations
@@ -27,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from harness_manager.core.errors import AbsentError, UsageError
+from harness_manager.core.errors import AbsentError, HarnessError, UsageError
 from harness_manager.core.pack import KitCheck, kit_refusal
 
 from . import build
@@ -49,7 +55,7 @@ _RANK = {"ok": 0, "warning": 1, "unchecked": 2, "mismatch": 3}
 
 def kind_of(path: Path) -> tuple[str, Path]:
     """(kind, the folder or receipt to read). ``AbsentError`` for nothing importable there,
-    ``UsageError`` for a zip (v0.2.1)."""
+    ``UsageError`` for a path to a zip (it goes through ``import_zip``)."""
     p = Path(path)
     if p.is_dir():
         if (p / "manifest.json").is_file():
@@ -65,9 +71,9 @@ def kind_of(path: Path) -> tuple[str, Path]:
         if p.suffix.lower() == ".json":
             return KIND_RECEIPT, p
         if p.suffix.lower() == ".zip":
-            raise UsageError(f"{p.name} is a zip: import it as its folder for now",
-                             hint="unzip it and give the folder (the zip upload comes in "
-                                  "v0.2.1)")
+            raise UsageError(f"{p.name} is a zip: give its folder, or upload the zip",
+                             hint="unzip it and give the folder, or send the zip itself to "
+                                  "POST /overlays/upload (the Import dialog's Choose a zip)")
         raise UsageError(f"{p.name} is neither an overlay folder nor a build receipt",
                          hint="give manifest.json's folder, or out/<name>_build.json")
     raise AbsentError(f"no such file or folder: {p}", hint="give an absolute path on this machine")
@@ -146,14 +152,12 @@ def check_design(kits: Any, path: Path, *, identity: Any = None, static_id: str 
     kind, where = kind_of(path)
     adapter = kits.adapter_for(pack)
     if kind == KIND_OVERLAY:
-        checks, facts = adapter.check_overlay(where)
+        def kit_for(sid: str) -> Any:
+            kit = kits.get(hex32(parse_u32(sid))) if sid else None
+            return kit.manifest if kit is not None else None
+
+        checks, facts = adapter.check_overlay(where, kit_for=kit_for)
         sid = str(facts.get("static_id") or "")
-        kit = kits.get(hex32(parse_u32(sid))) if sid else None
-        if kit is not None and not any(c.state == "mismatch" for c in checks):
-            checks, facts = adapter.check_overlay(where, kit=kit.manifest)
-        elif sid and not any(c.state == "mismatch" for c in checks):
-            checks.append(KitCheck("kit", "unchecked", f"no kit for {sid} in the cache: the "
-                                                      "frame box was not compared"))
         res = ImportResult(KIND_OVERLAY, where, str(facts.get("name") or ""),
                            str(facts.get("rm_id") or ""), sid, list(checks))
     else:
@@ -195,3 +199,67 @@ def import_design(kits: Any, path: Path, *, identity: Any = None, static_id: str
         res.overlay_dir = adapter.pack_receipt(r, out_dir or base / "overlay")
     res.imported = adapter.import_overlay(store, res.overlay_dir)
     return res
+
+
+#: The largest upload taken (the plan's cap; 413 above it) and how deep a zip's design may sit.
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+_ZIP_DEPTH = 3
+
+
+def zip_root(root: Path) -> Path:
+    """Where the importable folder or receipt of an extracted zip is: ``root`` itself, its
+    one folder, else the shallowest ``manifest.json`` (then ``*_build.json``) within
+    ``_ZIP_DEPTH`` levels. ``AbsentError`` when there is none."""
+    for cand in (root, *([d for d in root.iterdir() if d.is_dir()]
+                         if len([x for x in root.iterdir() if not x.name.startswith(".")]) == 1
+                         else [])):
+        try:
+            kind_of(cand)
+            return cand
+        except (AbsentError, UsageError):
+            continue
+    for pattern in ("manifest.json", build.RECEIPT_GLOB):
+        found = sorted((p for p in root.rglob(pattern)
+                        if len(p.relative_to(root).parts) <= _ZIP_DEPTH + 1),
+                       key=lambda p: (len(p.parts), str(p)))
+        if found:
+            return found[0].parent if pattern == "manifest.json" else found[0]
+    raise AbsentError("the zip holds no manifest.json and no build receipt",
+                      hint="zip the kit-built overlay folder (manifest.json + the pair), or "
+                           "the build directory with its out/<name>_build.json")
+
+
+def import_zip(kits: Any, archive: Path, *, name: str = "", identity: Any = None,
+               static_id: str = "", pack: str = "mps3", store: Any = None,
+               check_only: bool = False) -> ImportResult:
+    """An uploaded zip, checked (and with ``check_only`` False, imported) as ``import_design``
+    does a path; the extraction is removed afterwards, always. The result's ``path`` is the
+    upload's ``name`` and its ``overlay_dir`` None (the overlay is in the store)."""
+    import shutil
+    import uuid
+
+    from harness_manager.services.update.bundle import safe_extract
+
+    work = Path(kits.work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    tmp = work / f".upload-{uuid.uuid4().hex}"
+    try:
+        safe_extract(Path(archive), tmp)
+        root = zip_root(tmp)
+        if check_only:
+            res = check_design(kits, root, identity=identity, static_id=static_id, pack=pack,
+                               store=store)
+        else:
+            try:
+                res = import_design(kits, root, identity=identity, static_id=static_id,
+                                    pack=pack, store=store)
+            except HarnessError as exc:
+                data = getattr(exc, "data", None)
+                if isinstance(data, dict):
+                    data.update(path=name or Path(archive).name, overlay_dir=None)
+                raise
+        res.path = Path(name or Path(archive).name)
+        res.overlay_dir = None
+        return res
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)

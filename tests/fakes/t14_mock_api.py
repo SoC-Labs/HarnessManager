@@ -1110,7 +1110,9 @@ def ui2_register(app: FastAPI, state: Any, sim: Any) -> None:
         if bid in sim.no_store or not card.store:
             raise UnavailableError("user microSD", "this harness has no microSD store")
         if not card.present:
-            raise UnavailableError("user microSD", "no card in the USER microSD slot")
+            raise RefusedError(f"no card in the USER microSD slot: nothing to {what}",
+                               hint="the board boots exactly as it always has without one; "
+                                    "insert a card first")
         return _accepted(state.jobs.start(bid, kind, lambda progress: change()))
 
     @app.post(f"{API}/boards/{{bid}}/card/commit", status_code=202)

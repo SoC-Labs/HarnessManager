@@ -329,14 +329,15 @@ class Mps3KitAdapter:
             raise RefusedError(f"the overlay written to {d} fails its own check: {exc}") from exc
         return d
 
-    def check_overlay(self, overlay_dir: Path, *, kit: KitManifest | None = None
-                      ) -> tuple[list[KitCheck], dict[str, Any]]:
+    def check_overlay(self, overlay_dir: Path, *, kit: KitManifest | None = None,
+                      kit_for: Any = None) -> tuple[list[KitCheck], dict[str, Any]]:
         """UI2 G5: a packed overlay folder (``manifest.json`` + the pair it names, as ``kit
         pack`` writes it) checked before an import: ``manifest`` (it parses and its pair is
         there), ``crc`` (lengths and CRC-32 as the manifest says; an ``.ltx`` it names too),
         and the pair's stream checks (``check_pair``, against the kit's frame box when
-        ``kit`` is given). Returns (checks, facts: ``{name, rm_id, static_id,
-        static_usercode, partial_len, clearing_len, pair}``). Reads files only."""
+        ``kit`` is given or ``kit_for(static_id)`` finds one; else ``kit`` is ``unchecked``).
+        Returns (checks, facts: ``{name, rm_id, static_id, static_usercode, partial_len,
+        clearing_len, pair, kit}``). Reads files only."""
         from pyverify.overlay import OverlayManifestError, OverlayValidationError
 
         from .overlays import _optional_problems, load_overlay_dir
@@ -374,8 +375,14 @@ class Mps3KitAdapter:
                                "and CRC-32 match the manifest"))
         if bad:
             return checks, facts
+        if kit is None and callable(kit_for):
+            kit = kit_for(facts["static_id"])
+        facts["kit"] = kit is not None
         pair_checks, facts["pair"] = self.check_pair(pair["partial"], pair["clearing"], kit=kit)
         checks += pair_checks
+        if kit is None:
+            checks.append(KitCheck("kit", "unchecked", f"no kit for {facts['static_id']} in "
+                                   "the cache: the frame box was not compared"))
         return checks, facts
 
     def import_overlay(self, store: Any, overlay_dir: Path) -> dict[str, Any]:

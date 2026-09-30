@@ -218,6 +218,25 @@ class Mps3Telemetry:
             return (self._sysmon_readings() + self._touch_readings()
                     + self._power_readings() + self._estimate_readings())
 
+    # -- UI2 G4: the facts beside a board read (services.history.facts_of) ------------------------
+
+    def readings_facts(self) -> dict[str, Any] | None:
+        """The last ``stats`` reply this adapter read (it reads one with the telemetry when the
+        harness reports ``sysmon``), for ``GET /boards/{bid}``'s ``uptime_s`` and ``stats``
+        (docs/API.md "Readings kept by this service"). Never asks the board: None when no
+        ``stats`` was read, or its read failed."""
+        with self._lock:
+            cache = self._shell_cache
+        if cache is None:
+            return None
+        at, _tel, st, err = cache
+        if err or not isinstance(st, dict) or st.get("ok") is False:
+            return None
+        out: dict[str, Any] = {"stats": st, "at": at, "source": "stats (6900)"}
+        if st.get("os_up_ms") is not None:          # a Linux harness that sends it
+            out["os_up_ms"] = st.get("os_up_ms")
+        return out
+
     # -- identity (features, loaded design) ------------------------------------------------------
 
     @property
