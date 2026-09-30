@@ -144,10 +144,14 @@ baud TARGET NAME [RATE]
 console TARGET NAME [--read-only] [--for SECONDS]
     A console (uart0, uart1, swo, ...) in this terminal, interactive: what you
     type goes to the board, Ctrl-C included (a MicroPython REPL needs it), and
-    Ctrl-] exits. --read-only only shows the output. With --read-only, --for,
-    --json or --tsv, or when stdout is not a terminal, it streams to stdout
-    until Ctrl-C or --for. --tsv prints one NAME<TAB>TEXT row per line. --json
-    needs --for and prints one object with the text collected.
+    Ctrl-] exits. Ctrl-] then r, then r (or y) to confirm, resets the DUT and
+    keeps the console open: while a console runs it holds the board, so a
+    `reset` from another terminal is refused unless the service runs (start
+    it before the console). --read-only only shows the output. With
+    --read-only, --for, --json or --tsv, or when stdout is not a terminal, it
+    streams to stdout until Ctrl-C or --for. --tsv prints one NAME<TAB>TEXT
+    row per line. --json needs --for and prints one object with the text
+    collected.
 console TARGET NAME --export PORT [--for SECONDS]
     Re-export the console on 127.0.0.1:PORT for an external terminal (PORT 0
     picks a free one). Prints the port on stdout, then holds until Ctrl-C or

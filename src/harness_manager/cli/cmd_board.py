@@ -20,15 +20,21 @@ from .output import Result, StderrProgress, reading_human, reading_json, reading
 # --- reset ---------------------------------------------------------------------------------
 
 
+def reset_on(ctx: Ctx, session, board_id: str, what: str) -> None:
+    """Reset ``what`` on an open session: the ``reset`` verb, and the console's Ctrl-] r
+    (FIX-PACK-5), so both refuse the same way."""
+    resets = ctx.require(session, "resets", C.RESET_DUT)
+    targets = list(resets.reset_targets())
+    if what not in targets:
+        raise UsageError(f"{board_id} cannot reset {what!r}",
+                         hint=f"reset targets on this board: {', '.join(targets) or 'none'}")
+    resets.reset(what)
+
+
 def cmd_reset(ctx: Ctx) -> int:
     what = ctx.args.what
     with ctx.board() as (cand, session):
-        resets = ctx.require(session, "resets", C.RESET_DUT)
-        targets = list(resets.reset_targets())
-        if what not in targets:
-            raise UsageError(f"{cand.board_id} cannot reset {what!r}",
-                             hint=f"reset targets on this board: {', '.join(targets) or 'none'}")
-        resets.reset(what)
+        reset_on(ctx, session, cand.board_id, what)
     ctx.emit(Result("reset", {"board_id": cand.board_id, "target": what, "result": "done"},
                     rows=[[cand.board_id, what, "done"]],
                     human=[f"reset      {what} on {cand.board_id}: done"]))
