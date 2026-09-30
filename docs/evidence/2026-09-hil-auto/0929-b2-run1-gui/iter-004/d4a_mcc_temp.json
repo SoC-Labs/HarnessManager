@@ -1,0 +1,43 @@
+{
+  "argv": [
+    "mcc",
+    "192.168.11.101:6900",
+    "temp"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 7.845,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json mcc 192.168.11.101:6900 temp",
+  "exit": 0,
+  "failures": [],
+  "hint": "nothing was sent. Another reader on tty_00 is reported as skipped (tty_00 busy), never retried; anything else: HIL failure table, R4/D4 rows",
+  "id": "D4a",
+  "reason": "",
+  "seconds": 7.845,
+  "section": "D",
+  "started": "2026-09-30T00:07:11+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "ok": true,
+    "readings": [
+      {
+        "age_s": 0.002,
+        "available": true,
+        "name": "mcc_temp",
+        "observed_at": 1790723242.1622167,
+        "reason": "the SLR0 die diode via U53 (MPS3 schematic p4); not ambient",
+        "source": "mcc-console (hub)",
+        "unit": "degC",
+        "value": 36.2
+      }
+    ]
+  },
+  "tier": "safe",
+  "title": "The MCC read on the hub (the one-reader scan D4's REBOOT needs)",
+  "verdict": "pass"
+}

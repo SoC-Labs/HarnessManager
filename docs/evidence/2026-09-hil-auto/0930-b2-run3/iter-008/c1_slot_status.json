@@ -1,0 +1,38 @@
+{
+  "argv": [
+    "slot",
+    "status",
+    "192.168.11.101:6900"
+  ],
+  "attempts": [
+    {
+      "exit": 12,
+      "seconds": 0.779,
+      "stderr_tail": "harness-manager: OS slot update is unavailable \u2014 no user microSD card in the slot (the OS slots live on it)\n"
+    }
+  ],
+  "command": "harness-manager --json slot status 192.168.11.101:6900",
+  "exit": 12,
+  "failures": [],
+  "hint": "exit 0 with slots: a card is in the slot, so this is not a card-less board (use --plan linux-netboot, or linux). Another exit-12 reason (rescue, the harness did not answer): HIL_LINUX.md's failure table, A1 rows",
+  "id": "C1",
+  "reason": "",
+  "seconds": 0.779,
+  "section": "C",
+  "started": "2026-09-30T04:51:28+01:00",
+  "stderr": "harness-manager: OS slot update is unavailable \u2014 no user microSD card in the slot (the OS slots live on it)\n",
+  "stdout_json": {
+    "error": {
+      "capability": "OS slot update",
+      "code": 12,
+      "hint": "",
+      "message": "OS slot update is unavailable: no user microSD card in the slot (the OS slots live on it)",
+      "name": "UNAVAILABLE",
+      "reason": "no user microSD card in the slot (the OS slots live on it)"
+    },
+    "ok": false
+  },
+  "tier": "read",
+  "title": "The OS slots (the card-less check)",
+  "verdict": "pass"
+}

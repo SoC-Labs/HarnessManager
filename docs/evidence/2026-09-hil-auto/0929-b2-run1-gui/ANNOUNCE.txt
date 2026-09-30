@@ -1,0 +1,15 @@
+HM HIL-AUTO on 192.168.11.101:6900 (docs/HIL_LINUX.md, plan linux-nocard)
+start        2026-09-29T22:16:26+01:00 on srv03335, in the Harness Manager service (pid 2120817, run 20260929-221626-6332)
+planned end  2026-09-30T08:30:00+01:00; no check starts after 2026-09-30T08:20:00+01:00
+runs         21 iteration(s), every 1800 s; 17 automatic checks each; writes safe
+expects      static 0x44ee76d5 (linux harness); any other identity stops it
+lease        held by this Harness Manager; the service heartbeats it until the run ends (the board stays open in the service); the runner only checks it is held here, and never acquires, requests, forces or releases one
+changes      each iteration:
+  - A6 Locate: blink the panel: none persistent: a 5 s backlight blink and an IDENTIFY banner (no claim lock; an image without 'locate' refuses)
+  - E1 Load the ILA design (a swap; not kept on the card): partition swap to nanosoc_ila (Z2 swaps back)
+  - Z2 Greybox: partition swap back to greybox
+  - D4a: one paced MCC read on the hub's tty_00 per iteration; skipped (never retried) while anything else names or holds tty_00
+never        no card or slot writes, no SD writes, no MCC REBOOT, no fpgahub share, no SSH-claim change, never --force; the runner itself never takes, forces or releases a lease
+end state    greybox (restored in a finally if the runner swapped the partition); the SSH claim as it was
+evidence     /home/dam1n19/.config/harness-manager/checks/mps3_192.168.11.101_6900/20260929-221626-linux-nocard
+stop it      the app's Checks section: Stop (DELETE /api/v1/boards/mps3@192.168.11.101:6900/checks): it finishes the check, restores greybox, writes REPORT.md

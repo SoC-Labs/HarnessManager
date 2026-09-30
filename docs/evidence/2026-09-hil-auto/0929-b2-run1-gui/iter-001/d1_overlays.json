@@ -1,0 +1,176 @@
+{
+  "argv": [
+    "overlays",
+    "192.168.11.101:6900"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 3.138,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json overlays 192.168.11.101:6900",
+  "exit": 0,
+  "failures": [],
+  "hint": "the overlays folder is gone or keyed to another static: HARNESS_MANAGER_MPS3_OVERLAY_DIRS (0.1)",
+  "id": "D1",
+  "reason": "",
+  "seconds": 3.138,
+  "section": "D",
+  "started": "2026-09-29T22:18:59+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "compatible": [
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "clcd_demo",
+        "receipt_sha256": "",
+        "rm_id": "0x00010007",
+        "size_bytes": 1393048,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/clcd_demo/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "1dcd4575138a81c819002a22b46bb9e1e6b3e295d22abfbf1eef7afe830ccdd7",
+        "name": "dbg_demo",
+        "receipt_sha256": "",
+        "rm_id": "0x01000009",
+        "size_bytes": 1494808,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/dbg_demo/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "eth_ss",
+        "receipt_sha256": "",
+        "rm_id": "0x01000002",
+        "size_bytes": 1734728,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/eth_ss/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "greybox",
+        "receipt_sha256": "",
+        "rm_id": "0x00000000",
+        "size_bytes": 1427980,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/greybox/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "led",
+        "receipt_sha256": "",
+        "rm_id": "0x0100001e",
+        "size_bytes": 1327140,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/led/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "nanosoc",
+        "receipt_sha256": "",
+        "rm_id": "0x01000001",
+        "size_bytes": 2467736,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/nanosoc/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "ba4e4bb3b4374fc03dce5a3b0c3aced0e06b470c636ac0654921578ff9667600",
+        "name": "nanosoc_ila",
+        "receipt_sha256": "",
+        "rm_id": "0x0100000a",
+        "size_bytes": 2773276,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/nanosoc_ila/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "nanosoc_multicore",
+        "receipt_sha256": "",
+        "rm_id": "0x01000003",
+        "size_bytes": 3111112,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/nanosoc_multicore/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "nanosoc_upy",
+        "receipt_sha256": "",
+        "rm_id": "0x01000005",
+        "size_bytes": 2671124,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/nanosoc_upy/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "regdemo_a",
+        "receipt_sha256": "",
+        "rm_id": "0x010000a1",
+        "size_bytes": 1314988,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/regdemo_a/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "regdemo_b",
+        "receipt_sha256": "",
+        "rm_id": "0x010000b2",
+        "size_bytes": 1314476,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/regdemo_b/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "socscope",
+        "receipt_sha256": "",
+        "rm_id": "0x01000006",
+        "size_bytes": 2420144,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/socscope/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      },
+      {
+        "ip_class": "unknown",
+        "ltx_sha256": "",
+        "name": "uart_echo",
+        "receipt_sha256": "",
+        "rm_id": "0x01000004",
+        "size_bytes": 1419556,
+        "source": "/home/dam1n19/SoCLabs/mps3-nanosoc-platform-lx/fpga/dfx/build_mint3_rc2_linux/overlay_mbv/uart_echo/manifest.json",
+        "static_id": "0x44ee76d5",
+        "static_usercode": "0xfb1f8c76"
+      }
+    ],
+    "incompatible": [],
+    "ok": true
+  },
+  "tier": "read",
+  "title": "What loads",
+  "verdict": "pass"
+}

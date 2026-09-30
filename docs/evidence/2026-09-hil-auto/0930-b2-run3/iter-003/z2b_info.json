@@ -1,0 +1,268 @@
+{
+  "argv": [
+    "info",
+    "192.168.11.101:6900"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 0.821,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json info 192.168.11.101:6900",
+  "exit": 0,
+  "failures": [],
+  "hint": "",
+  "id": "Z2b",
+  "reason": "",
+  "seconds": 0.821,
+  "section": "Z",
+  "started": "2026-09-30T02:02:43+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "candidate": {
+      "board_id": "mps3@192.168.11.101:6900",
+      "evidence": "given explicitly (through the hub)",
+      "identity": null,
+      "label": "MPS3 at 192.168.11.101:6900",
+      "links": [
+        {
+          "address": "192.168.11.101:6900",
+          "detail": "shell control channel, via hub",
+          "kind": "ethernet",
+          "via": "hub"
+        },
+        {
+          "address": "hub-mcc://mapstone-dev.ecs.soton.ac.uk/mps3_02_pl/dev/mps3_02_pl/tty_00",
+          "detail": "the MCC console /dev/mps3_02_pl/tty_00, reached ON the hub mapstone-dev.ecs.soton.ac.uk (pyverify's tools run there; never an fpgahub share)",
+          "kind": "hub",
+          "via": "hub"
+        }
+      ],
+      "name": "mps3-02",
+      "name_source": "hub",
+      "pack": "mps3"
+    },
+    "capabilities": [
+      "clock_board",
+      "clock_dut",
+      "console_controller",
+      "console_dut",
+      "console_shell",
+      "debug_dut",
+      "debug_fabric",
+      "deploy_partial",
+      "display_mirror",
+      "front_panel",
+      "health",
+      "identify",
+      "locate",
+      "mps3.display_flip",
+      "mps3.dut_egress",
+      "reboot_board",
+      "reset_dut",
+      "reset_shell",
+      "storage_backup",
+      "storage_install",
+      "telemetry_temp"
+    ],
+    "claim": {
+      "checked_at": "2026-09-30T00:59:28Z",
+      "claim_key": "SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo",
+      "claimed": {
+        "at": "2026-09-29T21:13:03Z",
+        "by": "dam1n19@srv03335",
+        "key_fp": "SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo",
+        "mine": true
+      },
+      "host_key": {
+        "match": true,
+        "pinned": "SHA256:EouvEnYkF0a/rqNd9jCf5ONGuoKCKsjT2A7WyJyvYaQ",
+        "reported": "SHA256:EouvEnYkF0a/rqNd9jCf5ONGuoKCKsjT2A7WyJyvYaQ",
+        "seen_before": null
+      },
+      "live": false,
+      "notes": [],
+      "route": "hub mapstone-dev.ecs.soton.ac.uk",
+      "source": "identify via mapstone-dev.ecs.soton.ac.uk (last check)",
+      "state": "mine",
+      "user": "root"
+    },
+    "health": {
+      "control_channel": "idle",
+      "counters": {
+        "expect": 0,
+        "got": 0,
+        "grant_fails": 0,
+        "grants_sent": 0,
+        "icap_bytes": 36349912,
+        "icap_eos_status": 1,
+        "icap_sr_last": 5,
+        "pass_max_us": 2734823,
+        "rx_drops": 0,
+        "svc_count": 13,
+        "svc_max_ix": 4,
+        "svc_max_us": 2664359,
+        "svc_overruns": 118243,
+        "svc_skipped": 0,
+        "svc_skips": 2290,
+        "svc_us_0": 764149759,
+        "svc_us_1": 2550857727,
+        "svc_us_2": 4294967295,
+        "svc_us_3": 4119061202,
+        "svc_us_4": 4294967295,
+        "svc_us_5": 724363359,
+        "svc_us_6": 18383,
+        "touch_adc_x": 33554431,
+        "touch_adc_y": 33554431,
+        "touch_regs": 1824653312,
+        "touch_verdict": 3,
+        "tx_errors": 0,
+        "tx_frames_sent": 19244,
+        "usd_boot": 2953248772
+      },
+      "notes": [],
+      "reachable": true
+    },
+    "identity": {
+      "board_type": "mps3",
+      "build_check": "ok",
+      "features": [
+        "clcd",
+        "clcd_kvm",
+        "touch",
+        "hwicap_fifo",
+        "dut_egress",
+        "jtag_server",
+        "xvc_dbgbr",
+        "stats",
+        "log",
+        "reboot",
+        "touch_cal",
+        "usd",
+        "slot",
+        "xvc_lock",
+        "lcd_mirror",
+        "identity",
+        "locate"
+      ],
+      "firmware_dirty": false,
+      "firmware_sha": "ad297bf9",
+      "harness_impl": "linux",
+      "harness_version": "1.0.0",
+      "name": "",
+      "proto": "",
+      "rm_id": "0x00000000",
+      "rm_name": "greybox",
+      "shell_id": "0x44ee76d5",
+      "unit_id": "",
+      "usercode": "",
+      "ver32": "0x01000000"
+    },
+    "net_identity": {
+      "checked_at": "2026-09-30T00:59:02Z",
+      "findings": [
+        {
+          "field": "label",
+          "kind": "unset",
+          "level": "warn",
+          "other": "",
+          "text": "identity not set (default label): label MPS3 is the image default, which every board gets"
+        },
+        {
+          "field": "mac",
+          "kind": "differs",
+          "level": "warn",
+          "other": "mps3_02_pl",
+          "text": "mac 02:00:00:4d:50:53 differs from the hub's mps3_02_pl: 02:00:00:00:02:fe"
+        }
+      ],
+      "fix": {
+        "changes": [
+          {
+            "field": "label",
+            "from": "MPS3",
+            "to": "MPS3-02"
+          },
+          {
+            "field": "mac",
+            "from": "02:00:00:4d:50:53",
+            "to": "02:00:00:00:02:fe"
+          }
+        ],
+        "clear": false,
+        "notes": [],
+        "phrase": "MPS3-02",
+        "ready": false,
+        "refusal": {
+          "hint": "re-bake stage0 for this board (S0_IP, S0_LABEL, MPS3_MAC0..5 via S0_EXTRA_DEFS; an updatemem re-bake, not a re-mint), or give it a user microSD and fix it again",
+          "message": "this board has no persistent store for an identity (a netboot, or no user microSD): its identity comes from the stage0 bake; Harness Manager never sets it",
+          "name": "REFUSED"
+        },
+        "want": {
+          "label": "MPS3-02",
+          "mac": "02:00:00:00:02:fe"
+        }
+      },
+      "hub": {
+        "board": "mps3_02",
+        "board_ip": "192.168.11.101",
+        "board_mac": "02:00:00:00:02:fe",
+        "discovered_mac": "",
+        "hostname": "mps3-02-pl",
+        "hub": "mapstone-dev.ecs.soton.ac.uk",
+        "ip": "192.168.11.101",
+        "label": "MPS3-02",
+        "mac": "02:00:00:00:02:fe",
+        "mac_suspect": "",
+        "pl_mac": "02:00:00:4d:50:53",
+        "prefix": 24,
+        "target": "mps3_02_pl"
+      },
+      "level": "warn",
+      "live": false,
+      "notes": [
+        "identity not set (default label): label MPS3 is the image default, which every board gets",
+        "mac 02:00:00:4d:50:53 differs from the hub's mps3_02_pl: 02:00:00:00:02:fe"
+      ],
+      "reported": {
+        "at": "2026-09-30T00:59:02Z",
+        "feature": true,
+        "feature_known": true,
+        "hostname": "mps3",
+        "impl": "linux",
+        "ip": "192.168.11.101/24",
+        "label": "MPS3",
+        "last_check": true,
+        "mac": "02:00:00:4d:50:53",
+        "override": null,
+        "pending": null,
+        "persist": false,
+        "source": {
+          "hostname": "label",
+          "ip": "stage0",
+          "label": "default",
+          "mac": "stage0"
+        },
+        "stage0": {
+          "ip": "192.168.11.101/24",
+          "label": null,
+          "mac": "02:00:00:4d:50:53"
+        },
+        "via": "identity"
+      },
+      "status": "unset"
+    },
+    "ok": true,
+    "unavailable": {
+      "discover_network": "not through a hub: identify is UDP 6899 on the board's own network, and UDP does not cross the hub's SSH tunnel this board is reached by; run Harness Manager on the board's network to find boards there",
+      "power_cycle": "needs a networked power plug in boards.toml (Shelly, Tasmota or NETIO)",
+      "presence": "this harness image doesn't report who is connected (harness feature 'presence')",
+      "telemetry_power": "the MPS3 has no power sensor; add a metered plug or an INA260"
+    }
+  },
+  "tier": "read",
+  "title": "The board is on greybox",
+  "verdict": "pass"
+}

@@ -1,0 +1,49 @@
+{
+  "argv": [
+    "xvc",
+    "status",
+    "192.168.11.101:6900"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 0.82,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json xvc status 192.168.11.101:6900",
+  "exit": 0,
+  "failures": [],
+  "hint": "",
+  "id": "A3",
+  "reason": "",
+  "seconds": 0.82,
+  "section": "A",
+  "started": "2026-09-30T01:58:54+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "attached": null,
+    "board_id": "mps3@192.168.11.101:6900",
+    "board_slot": "unknown",
+    "detail": "",
+    "hw_server": "",
+    "hw_server_pid": 0,
+    "hw_server_port": 0,
+    "ltx": {},
+    "mode": "",
+    "ok": true,
+    "open": false,
+    "reach": "board-ssh",
+    "reason": "",
+    "relay_port": 0,
+    "rm_id": "",
+    "rm_name": "",
+    "scope": "XVC here is scoped to the reconfigurable partition's debug chain: the harness's Debug Bridge and the debug hub and ILAs of the design loaded in the partition. It is never whole-device JTAG: it cannot configure or read back the FPGA.",
+    "state": "down",
+    "url": "",
+    "warnings": []
+  },
+  "tier": "read",
+  "title": "XVC status",
+  "verdict": "pass"
+}

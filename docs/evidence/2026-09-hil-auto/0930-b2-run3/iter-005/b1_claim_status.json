@@ -1,0 +1,53 @@
+{
+  "argv": [
+    "board",
+    "claim-status",
+    "192.168.11.101:6900"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 0.843,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json board claim-status 192.168.11.101:6900",
+  "exit": 0,
+  "failures": [],
+  "hint": "`unclaimed`: never claim; ask the Linux lead (a claim now would lock their keys out). HOST KEY CHANGED: see the failure table (B2 rows)",
+  "id": "B1",
+  "reason": "",
+  "seconds": 0.843,
+  "section": "B",
+  "started": "2026-09-30T03:08:04+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "claim": {
+      "checked_at": "2026-09-30T02:08:07Z",
+      "claim_key": "SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo",
+      "claimed": {
+        "at": "2026-09-29T21:13:03Z",
+        "by": "dam1n19@srv03335",
+        "key_fp": "SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo",
+        "mine": true
+      },
+      "host_key": {
+        "match": true,
+        "pinned": "SHA256:EouvEnYkF0a/rqNd9jCf5ONGuoKCKsjT2A7WyJyvYaQ",
+        "reported": "SHA256:EouvEnYkF0a/rqNd9jCf5ONGuoKCKsjT2A7WyJyvYaQ",
+        "seen_before": null
+      },
+      "live": true,
+      "notes": [],
+      "route": "hub mapstone-dev.ecs.soton.ac.uk",
+      "source": "identify via mapstone-dev.ecs.soton.ac.uk",
+      "state": "mine",
+      "user": "root"
+    },
+    "ok": true
+  },
+  "tier": "read",
+  "title": "Who claimed the board?",
+  "verdict": "pass"
+}

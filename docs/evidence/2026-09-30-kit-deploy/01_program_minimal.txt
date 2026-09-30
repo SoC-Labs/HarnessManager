@@ -1,0 +1,19 @@
+preflight:
+  ok        control channel free  127.0.0.1:34057 answered (it serves one client at a time)
+  ok        shell_id matches  0x44ee76d5
+  ok        crc and length  clearing 67748 B crc 0x0b0f0205, partial 1244136 B crc 0x5bab2009
+  ok        clearing pairs partial  both payload blobs were imported for rm_id 0x0100f28a
+  ok        clearing fits  67748 B of the 262144 B clearing arena
+  ok        transport  tcp: mps3-harnessd takes a plain push on 6910 (the kernel paces TCP; 'windowed' is absent by design); push inactivity limit 30 s (the send blocks while 6910 parks a partial behind the outgoing clearing)
+  unchecked static_usercode matches  needs JTAG: the running static's USERCODE is only readable over JTAG (REGISTER.USERCODE); the shell cannot report it (the manifest expects 0xfb1f8c76) (not a pass)
+deploy: started minimal 0x0100f28a
+deploy: guard 0/1 (0%)
+deploy: guard 1/1 (100%)
+deploy: swap 1/1 (100%)
+deploy: push 0/1311884 (0%)
+deploy: push 67748/1311884 (5%)
+deploy: push 1311884/1311884 (100%)
+deploy: verify 0/1 (0%)
+deploy: verify 1/1 (100%)
+deploy: done card=None overlay=minimal rm_id=0x0100f28a seconds=35.3 transport=tcp verified=True
+programmed minimal (0x0100f28a) into mps3@192.168.11.101:6900 in 35.3s via tcp; verified

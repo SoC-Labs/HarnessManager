@@ -1,0 +1,91 @@
+{
+  "argv": [
+    "board",
+    "identity",
+    "192.168.11.101:6900"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 1.863,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json board identity 192.168.11.101:6900",
+  "exit": 0,
+  "failures": [],
+  "hint": "exit 12: the pack has no identity service (update Harness Manager). A label, IP or MAC unlike the hub's (v6n reports board 1's MPS3-01, 192.168.10.101, 02:00:00:4d:50:53 on every board) is recorded, not failed",
+  "id": "A5",
+  "reason": "unset: label MPS3 (source default), hostname mps3, ip 192.168.11.101/24, mac 02:00:00:4d:50:53, via identity; image 1.0.0, features clcd,clcd_kvm,touch,hwicap_fifo,dut_egress,jtag_server,xvc_dbgbr,stats,log,reboot,touch_cal,usd,slot,xvc_lock,lcd_mirror,identity,locate",
+  "seconds": 1.863,
+  "section": "A",
+  "started": "2026-09-30T00:40:20+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "identity": {
+      "checked_at": "2026-09-29T23:40:23Z",
+      "findings": [
+        {
+          "field": "label",
+          "kind": "unset",
+          "level": "warn",
+          "other": "",
+          "text": "identity not set (default label): label MPS3 is the image default, which every board gets"
+        }
+      ],
+      "fix": {
+        "changes": [],
+        "clear": false,
+        "notes": [
+          "no hub record to match (the board has no hub, or the hub did not say)"
+        ],
+        "phrase": "MPS3",
+        "ready": false,
+        "refusal": {
+          "hint": "re-bake stage0 for this board (S0_IP, S0_LABEL, MPS3_MAC0..5 via S0_EXTRA_DEFS; an updatemem re-bake, not a re-mint), or give it a user microSD and fix it again",
+          "message": "this board has no persistent store for an identity (a netboot, or no user microSD): its identity comes from the stage0 bake; Harness Manager never sets it",
+          "name": "REFUSED"
+        },
+        "want": {}
+      },
+      "hub": null,
+      "level": "warn",
+      "live": true,
+      "notes": [
+        "identity not set (default label): label MPS3 is the image default, which every board gets",
+        "the hub record could not be read: target show on mapstone-dev.ecs.soton.ac.uk failed: target show failed: kex_exchange_identification: read: Connection reset by peer"
+      ],
+      "reported": {
+        "at": "2026-09-29T23:40:23Z",
+        "feature": true,
+        "feature_known": true,
+        "hostname": "mps3",
+        "impl": "linux",
+        "ip": "192.168.11.101/24",
+        "label": "MPS3",
+        "mac": "02:00:00:4d:50:53",
+        "override": null,
+        "pending": null,
+        "persist": false,
+        "source": {
+          "hostname": "label",
+          "ip": "stage0",
+          "label": "default",
+          "mac": "stage0"
+        },
+        "stage0": {
+          "ip": "192.168.11.101/24",
+          "label": null,
+          "mac": "02:00:00:4d:50:53"
+        },
+        "via": "identity"
+      },
+      "status": "unset"
+    },
+    "ok": true
+  },
+  "tier": "read",
+  "title": "Board identity (net-protocol v0.16)",
+  "verdict": "pass"
+}

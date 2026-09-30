@@ -1,0 +1,34 @@
+{
+  "argv": [
+    "share",
+    "list",
+    "192.168.11.101:6900"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 1.18,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json share list 192.168.11.101:6900",
+  "exit": 0,
+  "failures": [],
+  "hint": "someone else's share holds the MCC: every REBOOT refuses. Ask the Linux lead; never `share stop` (it stops every share). The hub-side `pgrep` half of 0.2 is manual",
+  "id": "0.2",
+  "reason": "",
+  "seconds": 1.18,
+  "section": "0",
+  "started": "2026-09-30T04:15:47+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "hub": "mapstone-dev.ecs.soton.ac.uk",
+    "ok": true,
+    "shares": [],
+    "target": "mps3_02_pl"
+  },
+  "tier": "read",
+  "title": "Nothing reads the MCC console: no share on tty_00",
+  "verdict": "pass"
+}

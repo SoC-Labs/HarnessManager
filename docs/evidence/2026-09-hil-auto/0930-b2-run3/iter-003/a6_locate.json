@@ -1,0 +1,35 @@
+{
+  "argv": [
+    "identify",
+    "192.168.11.101:6900",
+    "--seconds",
+    "5"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 0.637,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json identify 192.168.11.101:6900 --seconds 5",
+  "exit": 0,
+  "failures": [],
+  "hint": "exit 12 with another reason, or any other exit: a Harness Manager or harness bug (A1 says which image); exit 8 ALREADY: another Identify on this board in the last 10 s",
+  "id": "A6",
+  "reason": "blinked 5 s: IDENTIFY: <this Harness Manager's user@host> on the panel",
+  "seconds": 0.637,
+  "section": "A",
+  "started": "2026-09-30T01:59:11+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "board_id": "mps3@192.168.11.101:6900",
+    "ok": true,
+    "seconds": 5,
+    "until": 1790729960.3651154,
+    "until_ms": 4998
+  },
+  "tier": "safe",
+  "title": "Locate: blink the panel",
+  "verdict": "pass"
+}

@@ -1,0 +1,34 @@
+{
+  "argv": [
+    "version"
+  ],
+  "attempts": [
+    {
+      "exit": 0,
+      "seconds": 0.373,
+      "stderr_tail": ""
+    }
+  ],
+  "command": "harness-manager --json version",
+  "exit": 0,
+  "failures": [],
+  "hint": "",
+  "hm_commit": {
+    "dirty": false,
+    "sha": "cda3667829c544c30856f1e8a457aeeaf49ada5c"
+  },
+  "id": "0.4",
+  "reason": "",
+  "seconds": 0.373,
+  "section": "0",
+  "started": "2026-09-30T04:50:16+01:00",
+  "stderr": "",
+  "stdout_json": {
+    "engine": "harness_manager.cli.engine:require_service (from $HARNESS_MANAGER_CLI_ENGINE)",
+    "ok": true,
+    "version": "0.1.0"
+  },
+  "tier": "read",
+  "title": "The Harness Manager version",
+  "verdict": "pass"
+}
