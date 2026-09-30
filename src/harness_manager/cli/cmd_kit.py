@@ -292,8 +292,10 @@ def _fetch(ctx: Ctx) -> int:
     human = [f"kit {kit.manifest.kit_id} from {src}" + (f" -> {out}" if out else " (cached)")]
     human += _human(checks)
     if out is not None:
+        from harness_manager.services.kit.guide import builds_dir
+
         human.append(f"next: harness-manager kit script --static-id {kit.static_id} "
-                     f"--design my_rm.json --out build/my_rm --kit-dir {out}")
+                     f"--design my_rm.json --out {builds_dir('my_rm')} --kit-dir {out}")
     ctx.emit(Result("kit", data, rows=_rows(kit.static_id, "check", checks), human=human))
     return ExitCode.OK
 
@@ -439,8 +441,7 @@ def _build(ctx: Ctx) -> int:
     ctx.emit(Result("kit", data, rows=[["-", "command", inst.path, "not-run", line]],
                     human=[line, *[f"  {n}" for n in notes],
                            "(Harness Manager does not run Vivado yet: run the command "
-                           "above; the verdict is the last HM_RM_BUILD_* line and the "
-                           "receipt in out/)"]))
+                           "above; " + render.VERDICT_HOW + ")"]))
     return ExitCode.OK
 
 

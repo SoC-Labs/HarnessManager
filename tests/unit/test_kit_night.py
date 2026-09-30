@@ -188,7 +188,7 @@ def test_the_readme_names_the_design_it_was_written_for(kits, tmp_path, monkeypa
     readme = s.files["README.txt"]
     assert "--design minimal --build-dir ." in readme
     assert "<your design .json>" not in readme
-    assert "up to an hour on a loaded one" in readme              # the measured time
+    assert "up to an hour when the machine is loaded" in readme   # the measured time (FIX-PACK-3)
     # twin: a design file is named by its path
     p = _spike_design(tmp_path)
     s = script.make_script(kits, pack="mps3", static_id=kf.STATIC_ID, design=str(p))

@@ -80,7 +80,11 @@ Once signed releases exist, the app can also update itself ([section 10](#10-upd
 
 **What can go wrong**
 - `harness-manager: command not found`: `~/.local/bin` is not on your PATH. The installer
-  printed the line to add and the full path to use until then. On Windows, open a new
+  printed the line for your shell and the full path to use until then. bash: add it to
+  `~/.bashrc` **and** to `~/.bash_profile` (or `~/.profile`, whichever exists), because a
+  login shell (ssh, `bash -l`) never reads `~/.bashrc`. tcsh/csh:
+  `set path = ( $HOME/.local/bin $path )` in `~/.cshrc`. Every shell:
+  [INSTALL.md](INSTALL.md#when-harness-manager-is-not-on-path). On Windows, open a new
   terminal.
 - The installer stops: it says why (Python too old, no `python3-venv`, no network, a
   proxy). Running it again is always safe.
@@ -147,7 +151,7 @@ it, so you can use both at once. `harness-manager daemon status` shows it.
 | `harness-manager app` | the app in its own window |
 | `harness-manager ui` | the same page in a browser tab |
 | `harness-manager ui --no-browser` | print the URL only (for `ssh -L`) |
-| `harness-manager daemon status` | is the service running, and where; the tool variables it started with |
+| `harness-manager daemon status` | is the service running, and where; the tool variables it started with (shown while it runs) |
 | `harness-manager daemon stop` | stop it; the next command starts it again |
 | `harness-manager help --tabs` | the help text the app's **Help** shows |
 
@@ -792,8 +796,16 @@ skeleton leaves undriven, and the build stops at preflight until you give the RT
 | `kit check RECEIPT\|DIR\|PARTIAL [TARGET] [--static-id ID]` | check a build receipt and its pair, or a bare partial; `--static-id` must be the receipt's static, or the check refuses (exit 14) |
 | `kit pack RECEIPT\|DIR [--import]` | write the overlay; `--import` puts it in Program |
 
-**Times.** Fetching a kit takes seconds from the cache. A small RM builds in about 20
-minutes with 2 threads and 4 to 8 GB of RAM.
+**Times.** Fetching a kit takes seconds from the cache. A build takes about 30 minutes for
+a small RM on a quiet machine, up to an hour when the machine is loaded, and about 50
+minutes for nanosoc, with 4 to 8 GB of RAM. Measured on srv03335: `minimal` 28-56 min at
+load 33-50 (`docs/evidence/2026-09-29-kit-night`) and 30.5 min at load 4-9; nanosoc 48-55
+min (`docs/evidence/2026-09-30-kit-nanosoc`).
+
+**Timing.** The receipt's `rm_wns` and `rm_whs` are your RM's own paths (the `rm_timing`
+gate). With no timed path inside the partition (`minimal`: every output a constant) they
+are empty, and `rm_timing_note` says so with the whole design's WNS and WHS from
+`out/<name>_timing.rpt`; `kit check` prints the same line (`timing`).
 
 **What can go wrong**
 - **No kit:** the kit sources are the cache, the signed channel (not live yet), the hub's
@@ -820,8 +832,11 @@ minutes with 2 threads and 4 to 8 GB of RAM.
   its **Tools** step with the `export` to run.
 - **A build takes a while.** While Vivado runs, the guide's Build step says "a build is
   running here" with the stage, and offers no command: a second Vivado in the same
-  directory would overwrite `out/`. nanosoc took 50-55 minutes on a shared, loaded server.
-- **Vivado exits 0 even when a gate fails.** The receipt is the verdict. The **When it goes
+  directory would overwrite `out/`. nanosoc took 48-55 minutes on a shared, loaded server.
+- **Vivado exits 0 even when a gate fails.** The receipt's `state` is the verdict. In
+  `build_rm.log` it is the last line that *starts* with `HM_RM_BUILD_`
+  (`grep -E '^HM_RM_BUILD_' build_rm.log | tail -1`): the log also echoes the script, so
+  the text `HM_RM_BUILD_FAILED gate=` stands in it after a real `HM_RM_BUILD_COMPLETE`. The **When it goes
   wrong** card (or `kit guide --why GATE`) has one fix per gate.
 - **rm_id:** a design with no `rm_id` gets a proposed one (design ids `0x8000` to `0xFFFF`,
   the same on every machine for the same name). Add it to your design to keep it.

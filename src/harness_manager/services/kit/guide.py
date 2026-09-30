@@ -25,6 +25,7 @@ Board-agnostic: the pack answers through its ``KitAdapter``.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -95,8 +96,9 @@ GATE_HELP: dict[str, str] = {
     "artefact": "a bitstream file is missing: rerun the bitstream stage.",
     "clearing_fits": "the clearing is larger than the harness's arena: shrink the RM, or ask "
                      "for a harness with a larger clr_max.",
-    "tcl_error": "a Tcl or Vivado error outside any gate: read build_rm.log at the line "
-                 "before HM_RM_BUILD_FAILED.",
+    "tcl_error": "a Tcl or Vivado error outside any gate: read build_rm.log just above the "
+                 "line that STARTS with HM_RM_BUILD_FAILED (the log also echoes the script, "
+                 "whose text holds it).",
 }
 
 #: One card per check that can refuse after (or before) the build: ``kit check``, ``kit
@@ -214,6 +216,17 @@ class Guide:
                 "steps": [s.to_json() for s in self.steps],
                 "next": ({"step": nxt.id, "actions": nxt.actions} if nxt else None),
                 "receipt": self.receipt, "troubleshooting": troubleshooting()}
+
+
+def builds_dir(name: str, *, windows: bool | None = None) -> str:
+    """Where the guide suggests a build directory: ``~/builds/<name>``, as USER_GUIDE.md
+    section 7.2 and the runbooks use (FIX-PACK-3: it said ``build/<name>``, relative to
+    wherever the command ran). Windows shells do not expand ``~``: the absolute path."""
+    if windows is None:
+        windows = os.name == "nt"
+    if windows:
+        return str(Path.home() / "builds" / name)
+    return f"~/builds/{name}"
 
 
 def _cmd(text: str) -> dict[str, str]:
@@ -363,7 +376,7 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
         s.detail = "no build directory yet"
         s.actions = [_cmd(f"harness-manager kit script {target} --design "
                           f"{design if isinstance(design, str) else 'my_rm.json'} "
-                          f"--out build/{name}")]
+                          f"--out {builds_dir(name)}")]
     else:
         found_r = build.find_receipts(Path(build_dir))
         script = Path(build_dir) / render.SCRIPT_NAME
@@ -376,8 +389,7 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
             s.detail = (f"a build is running here: stage {going.stage}, {going.log.name} "
                         f"written {_hhmm(going.mtime)}; wait for its receipt")
             s.reason = ("do not start another Vivado in this directory: it would overwrite "
-                        "out/. The verdict is the last HM_RM_BUILD_* line of "
-                        f"{going.log.name}")
+                        "out/. When it ends, " + render.VERDICT_HOW)
         elif not found_r:
             raw["build"] = "todo"
             s.detail = (f"no receipt in {build_dir}/out yet" if script.is_file() else

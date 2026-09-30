@@ -48,7 +48,9 @@ harness-manager app --demo                              # 3. the app, with demo 
 ```
 
 If step 3 says `command not found`, your `~/.local/bin` is not on PATH yet: the installer
-printed the line to add, and the full path to run until then.
+printed the line to add for your shell, and the full path to run until then.
+[When harness-manager is not on PATH](#when-harness-manager-is-not-on-path) has each
+shell's line and file (bash needs a login-shell file as well as `~/.bashrc`).
 
 ## What the installer does
 
@@ -80,7 +82,7 @@ It builds from a temporary copy of the checkout, so your checkout gets no `build
 |---|---|---|
 | Venv | `~/.local/share/harness-manager/venv` | `%LOCALAPPDATA%\harness-manager\venv` |
 | Command | `~/.local/bin/harness-manager` | `%LOCALAPPDATA%\harness-manager\bin\harness-manager.exe` |
-| PATH | prints the line to add, for your shell, if the directory is not on it | adds the directory to your user PATH |
+| PATH | prints the line to add, for your shell, if the directory is not on it ([per shell](#when-harness-manager-is-not-on-path)) | adds the directory to your user PATH |
 | Menu entry (Linux) | `~/.local/share/applications/harness-manager.desktop`, icon in `~/.local/share/icons/hicolor/scalable/apps/` | none yet |
 | Choices a re-run keeps | `~/.local/share/harness-manager/install.conf` | the extras, in `install.json` |
 | Install record, self-update pointer | `~/.local/share/harness-manager/install.json`, `current.json` | `%LOCALAPPDATA%\harness-manager\install.json`, `current.json` |
@@ -197,6 +199,25 @@ clone over HTTPS with a GitHub token.
 | `the install did not finish` | the message above it is pip's. No network: check the proxy, or use `--offline`. A pin with no wheel for a new Python: `--latest` |
 | `run this without sudo` | run it as yourself: it installs into your home and needs no root |
 | you pressed Ctrl-C | run it again: it resumes, and the previous version keeps working until it finishes |
+
+## When harness-manager is not on PATH
+
+`harness-manager: command not found` means `~/.local/bin` is not on your PATH. The
+installer printed the line for your shell (`$SHELL`) and the full path of the command
+(`~/.local/bin/harness-manager`). Until you add the line, run it by its full path.
+
+| Your shell | Add | To |
+|---|---|---|
+| bash (Linux) | `export PATH="$HOME/.local/bin:$PATH"` | `~/.bashrc` (new terminals) **and** the file a login shell reads: the first of `~/.bash_profile`, `~/.bash_login`, `~/.profile` that exists (else `~/.bash_profile`). A login shell (ssh, `bash -l`, `bash -lc`) never reads `~/.bashrc` unless that file sources it |
+| bash (macOS) | `export PATH="$HOME/.local/bin:$PATH"` | `~/.bash_profile` (Terminal and ssh start login shells) |
+| zsh | `export PATH="$HOME/.local/bin:$PATH"` | `~/.zshrc` (new terminals) and `~/.zprofile` (login shells, ssh) |
+| fish | run once: `fish_add_path ~/.local/bin` | nothing: fish keeps it |
+| tcsh, csh | `set path = ( $HOME/.local/bin $path )` | `~/.tcshrc` if it exists (tcsh), else `~/.cshrc`. They never read `~/.profile` |
+| another (sh, dash, ksh) | `export PATH="$HOME/.local/bin:$PATH"` | `~/.profile`, then log in again |
+
+Then open a new terminal (or log in again). `command -v harness-manager` prints the path
+when it works. On Windows the installer adds the directory to your user PATH: open a new
+terminal.
 
 ## Upgrade and uninstall
 

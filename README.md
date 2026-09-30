@@ -162,9 +162,12 @@ the URL and the `ssh -L` command that forwards it. Run that on your own machine,
 open the URL there.
 
 **`harness-manager: command not found`.** `~/.local/bin` is not on your PATH. The
-installer printed the line to add to your shell's startup file, and the full path to use
-until then (`~/.local/bin/harness-manager`). On Windows, open a new terminal after the
-first install.
+installer printed the line to add for your shell, and the full path to use until then
+(`~/.local/bin/harness-manager`). With bash, add it to `~/.bashrc` and to `~/.bash_profile`
+(or `~/.profile`, whichever exists): ssh and `bash -l` start a login shell, which never
+reads `~/.bashrc`. Every shell's line and file:
+[docs/INSTALL.md](docs/INSTALL.md#when-harness-manager-is-not-on-path). On Windows, open a
+new terminal after the first install.
 
 **The installer stopped.** It says why, and what to install or change: a Python that is
 too old, no `python3-venv`, no network or a proxy, no write access. Running it again is

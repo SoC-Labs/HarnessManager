@@ -447,26 +447,37 @@ def test_opt_in_the_real_2026_1_is_found_by_its_install_dir(monkeypatch, tmp_pat
 # --- the rm_timing gate's detail (Tcl, run in Python's own interpreter) ---------------------------
 
 
-def _rm_timing(wns: str, whs: str, nregs: int) -> tuple[str, str]:
-    """The template's rm_timing block, run with rp_slack/gate/rset stubbed: (verdict, detail)."""
+def _rm_timing(wns: str, whs: str, nregs: int, *, receipt: dict | None = None
+               ) -> tuple[str, str]:
+    """The template's rm_timing block, run with rp_slack/design_slack/gate/rset stubbed (the
+    real timing_note): (verdict, detail). ``receipt`` collects what it rset."""
+    import re
+
     tkinter = pytest.importorskip("tkinter")
     text = render.template_text()
     a = text.index("    lassign [rp_slack $rp] wns whs nregs")
     b = text.index("    close_project", a)
     tcl = tkinter.Tcl()
     tcl.eval(f'proc rp_slack {{rp}} {{ return [list "{wns}" "{whs}" {nregs}] }}')
-    tcl.eval("proc rset {k v} {}")
+    tcl.eval("proc design_slack {} { return [list 0.207 0.030] }")   # FIX-PACK-3
+    tcl.eval(re.search(r"^proc timing_note .*?^\}$", text, re.M | re.S).group(0))
+    tcl.eval("proc rset {k v} { set ::R($k) $v }")
     tcl.eval("proc gate {n ok d} { set ::G [list $n [expr {$ok ? \"PASS\" : \"FAIL\"}] $d] }")
     tcl.eval("proc note {n d} { set ::G [list $n NOTE $d] }")
-    tcl.eval("set rp u_rp_dut; array set P {ALLOW_TIMING_FAIL 0}")
+    tcl.eval("set rp u_rp_dut; set name minimal; array set P {ALLOW_TIMING_FAIL 0}")
     tcl.eval(text[a:b])
+    if receipt is not None:
+        for k in tcl.eval("array names ::R").split():
+            receipt[k] = tcl.eval(f"set ::R({k})")
     _, verdict, detail = tcl.eval("set ::G").split(" ", 2)
     return verdict, detail.strip("{}")
 
 
 def test_rm_timing_says_why_a_slack_is_empty():
     v, d = _rm_timing("", "", 0)                   # minimal: every output a constant
-    assert v == "PASS" and "no registers" in d and "WNS" not in d
+    assert v == "PASS" and "no registers" in d and "setup WNS" not in d
+    assert d.endswith("no timed path inside the partition; whole-design WNS 0.207 ns, "
+                      "WHS 0.030 ns from minimal_timing.rpt")     # FIX-PACK-3
     v, d = _rm_timing("", "", 12)                  # registers, but no timed path
     assert v == "PASS" and "setup WNS none (no timed path)" in d
     # twins: real slacks print as before, and a negative one fails

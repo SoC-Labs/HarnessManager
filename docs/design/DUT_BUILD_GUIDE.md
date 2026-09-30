@@ -155,7 +155,7 @@ The script writes it after a pass, a failed gate or `STOP_AFTER`. It holds:
 - `stage`, `kit_id`, `vivado`, `part`, `rp_inst`;
 - `rm_name`, `rm_top`, `rm_id`, `rm_id_netlist`;
 - `static_id` (CRC of the opened DCP) and `static_usercode` (from the kit);
-- `rm_wns` and `rm_whs`;
+- `rm_wns` and `rm_whs` (your RM's own paths; empty when no timed path is inside the partition), `design_wns` and `design_whs` (the whole design, as `timing_rpt`'s Design Timing Summary), `timing_rpt`, and `rm_timing_note` when `rm_wns` and `rm_whs` are empty (`no timed path inside the partition; whole-design WNS … from <name>_timing.rpt`; FIX-PACK-3);
 - `pr_verify_ref`;
 - `partial_bin`, `partial_len`, `partial_crc32`, `clearing_bin`, `clearing_len`, `clearing_crc32`;
 - `ltx` and `ltx_crc32`;

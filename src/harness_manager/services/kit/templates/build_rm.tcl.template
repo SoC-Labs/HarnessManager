@@ -17,6 +17,9 @@
 # after a Tcl error, so the markers -- not the exit code -- are the verdict:
 #   HM_RM_BUILD_COMPLETE   everything passed; the receipt is written
 #   HM_RM_BUILD_FAILED     a gate failed; the line before says which
+# A marker is a line that STARTS with it: the log also echoes this script, so its
+# text stands in the log too. The verdict is the receipt's state, or
+#   grep -E '^HM_RM_BUILD_' build_rm.log | tail -1
 #
 # Run (Linux or Windows, any directory; paths below may be edited or passed as
 # -tclargs NAME=VALUE, which win over this file; a RELATIVE path is relative to the
@@ -221,6 +224,32 @@ proc rp_slack { rp_inst } {
     }
     lappend out [llength $regs]
     return $out
+}
+
+# The whole design's worst setup and hold slack (the static's headline with yours),
+# for the receipt when the partition has no timed path of its own (minimal: every
+# output a constant). The same figures as the "Design Timing Summary" of
+# <name>_timing.rpt. Never a gate, never an error: "" when Vivado gives none.
+proc design_slack {} {
+    set out {}
+    foreach kind {-setup -hold} {
+        set s ""
+        if { [catch {
+            set p [get_timing_paths -quiet $kind -max_paths 1 -nworst 1]
+            if { $p ne "" } { set s [get_property SLACK $p] }
+        }] } { set s "" }
+        lappend out $s
+    }
+    return $out
+}
+
+# The receipt's words for an empty rm_wns/rm_whs (FIX-PACK-3: blank read as "not
+# measured"): "" when your RM has a figure of its own.
+proc timing_note { wns whs dwns dwhs rpt } {
+    if { $wns ne "" || $whs ne "" } { return "" }
+    set w [expr { $dwns eq "" ? "none" : "$dwns ns" }]
+    set h [expr { $dwhs eq "" ? "none" : "$dwhs ns" }]
+    return "no timed path inside the partition; whole-design WNS $w, WHS $h from $rpt"
 }
 
 # DRC blockers in the last report_drc: HDPR-16/-18/-50 at any severity, and any
@@ -456,6 +485,12 @@ set rc [catch {
     lassign [rp_slack $rp] wns whs nregs
     rset rm_wns $wns
     rset rm_whs $whs
+    lassign [design_slack] dwns dwhs
+    rset design_wns $dwns
+    rset design_whs $dwhs
+    rset timing_rpt "${name}_timing.rpt"
+    set tnote [timing_note $wns $whs $dwns $dwhs "${name}_timing.rpt"]
+    if { $tnote ne "" } { rset rm_timing_note $tnote }
     set tok [expr { ($wns eq "" || $wns >= 0) && ($whs eq "" || $whs >= 0) }]
     # An empty slack is not a parse failure: an RM with no registers (minimal: every output
     # a constant) has no path of its own, and a register with no timed path has no slack.
@@ -464,6 +499,7 @@ set rc [catch {
     } else {
         set tdetail "your RM's paths ($nregs registers): setup WNS [expr {$wns eq "" ? "none (no timed path)" : "$wns ns"}], hold WHS [expr {$whs eq "" ? "none (no timed path)" : "$whs ns"}]"
     }
+    if { $tnote ne "" } { append tdetail "; $tnote" }
     if { $tok || $P(ALLOW_TIMING_FAIL) ne "1" } {
         gate rm_timing $tok $tdetail
     } else {

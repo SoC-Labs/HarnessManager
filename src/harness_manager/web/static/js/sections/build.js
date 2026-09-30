@@ -308,7 +308,7 @@ function DesignPicker({ bid, x }) {
       <p class="muted small">A pasted design lives only in this page: Generate script checks it. Save it as a file to have the guide track it.</p>` : null}
     <div class="field wrap"><label>Build directory</label>
       <input class="input mono grow" aria-label="Build directory" data-testid="build-dir"
-        placeholder="optional: /home/you/build/my_rm (absolute, on harness-manager-daemon's host)" value=${x.buildDir}
+        placeholder="optional: /home/you/builds/my_rm (absolute, on harness-manager-daemon's host)" value=${x.buildDir}
         onChange=${(e) => { x.buildDir = e.target.value; apply(); }} />
     </div>
   </div>`;
@@ -590,7 +590,7 @@ function BuildCard({ bid, step, g, x }) {
       <p class="sub">${Object.keys(s.files || {}).length} files${s.out_dir ? html`, written to <span class="mono">${s.out_dir}</span>` : ", not written (preview; the zip holds them with the kit)"}. The receipt will be <span class="mono">${s.receipt}</span>.</p>
       <div><div class="sub-head">Run it (Vivado ${(g.profile || {}).vivado || ""}, on the machine that holds the files)</div>
         <${Cmd} text=${cmd} testid="script-command" wrap=${true} /></div>
-      <p class="sub">A small RM takes about 20 minutes on an idle machine and up to an hour on a loaded one, with 4-8 GB of RAM. Vivado exits 0 even when a gate fails: the verdict is the receipt. Then Refresh.</p>
+      <p class="sub">A small RM takes about 30 minutes on a quiet machine and up to an hour when the machine is loaded; nanosoc about 50 minutes; 4-8 GB of RAM. Vivado exits 0 even when a gate fails: the verdict is the receipt. Then Refresh.</p>
     </div>` : null}
     <${Actions} step=${step} />
   <//>`;
@@ -649,7 +649,7 @@ function CheckCard({ bid, step, g, x }) {
   return html`<${StepCard} step=${step}>
     <div class="field wrap"><label>Receipt</label>
       <input class="input mono grow" aria-label="Build receipt" data-testid="receipt-path"
-        placeholder="/home/you/build/my_rm/out/my_rm_build.json (or the build directory)" value=${x.receiptPath}
+        placeholder="/home/you/builds/my_rm/out/my_rm_build.json (or the build directory)" value=${x.receiptPath}
         onInput=${(e) => { x.receiptPath = e.target.value; x.receiptAuto = false; changed(); }} />
     </div>
     <${ActionRow} bid=${bid} panel="kit_check" spec=${checkSpec} icon="shield-check" compact=${true} />

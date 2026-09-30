@@ -623,6 +623,39 @@ if [[ "$os" == Linux ]]; then
 fi
 
 # -- what next ---------------------------------------------------------------------------
+# How to put the command's directory on PATH, for the user's shell. A login shell (ssh,
+# `bash -l`) reads only the first of ~/.bash_profile, ~/.bash_login, ~/.profile, and not
+# ~/.bashrc, unless that file sources it (a clean RHEL account got "command not found").
+# tcsh reads ~/.tcshrc, else ~/.cshrc (csh: ~/.cshrc), every shell, and neither reads
+# ~/.profile. docs/INSTALL.md "When harness-manager is not on PATH" says the same.
+path_advice() {  # SHELL-NAME SHOWN-DIR BIN-DIR OS HOME
+    local sh="$1" dir="$2" abs="$3" os_="$4" home="$5" f login=.bash_profile rc=.cshrc
+    case "$sh" in
+        fish) say "Run this once:  fish_add_path $abs" ;;
+        zsh) say "Add this line to ~/.zshrc (new terminals) and to ~/.zprofile (login shells"
+             say "and ssh), then open a new terminal:"
+             say "    export PATH=\"$dir:\$PATH\"" ;;
+        bash)
+            for f in .bash_profile .bash_login .profile; do
+                if [[ -f "$home/$f" ]]; then login="$f"; break; fi
+            done
+            if [[ "$os_" == Darwin ]]; then
+                say "Add this line to ~/$login (Terminal and ssh start login shells, which"
+                say "read it), then open a new terminal:"
+            else
+                say "Add this line to ~/.bashrc (new terminals) and to ~/$login (login shells"
+                say "and ssh read ~/$login, not ~/.bashrc), then open a new terminal:"
+            fi
+            say "    export PATH=\"$dir:\$PATH\"" ;;
+        tcsh|csh)
+            if [[ "$sh" == tcsh && -f "$home/.tcshrc" ]]; then rc=.tcshrc; fi
+            say "Add this line to ~/$rc, then open a new terminal:"
+            say "    set path = ( $dir \$path )" ;;
+        *) say "Add this line to ~/.profile, then log in again:"
+           say "    export PATH=\"$dir:\$PATH\"" ;;
+    esac
+}
+
 say ""
 say "Harness Manager $version is installed."
 hm="harness-manager"
@@ -634,17 +667,7 @@ case ":$PATH:" in
         case "$bin_dir" in "$HOME"/*) shown_dir="\$HOME/${bin_dir#"$HOME"/}" ;; esac
         say ""
         say "$bin_dir is not on your PATH yet."
-        case "$(basename "${SHELL:-sh}")" in
-            fish) say "Run this once:  fish_add_path $bin_dir" ;;
-            zsh) say "Add this line to ~/.zshrc, then open a new terminal:"
-                 say "    export PATH=\"$shown_dir:\$PATH\"" ;;
-            bash) rc=.bashrc
-                  if [[ "$os" == Darwin ]]; then rc=.bash_profile; fi
-                  say "Add this line to ~/$rc, then open a new terminal:"
-                  say "    export PATH=\"$shown_dir:\$PATH\"" ;;
-            *) say "Add this line to ~/.profile, then log in again:"
-               say "    export PATH=\"$shown_dir:\$PATH\"" ;;
-        esac
+        path_advice "$(basename "${SHELL:-sh}")" "$shown_dir" "$bin_dir" "$os" "$HOME"
         say "Until then, run it by its full path, as below."
         ;;
 esac
