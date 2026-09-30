@@ -249,3 +249,67 @@ export function journalText(j) {
   return text;
 }
 
+
+// --- UI v2 shell -------------------------------------------------------------------------------
+
+// The board's Debug USB (the MCC's USB cable), from its links until the service says it
+// (plan gap G2: `mcc_route`): a `hub-mcc://` link is the hub's, a USB serial or storage link
+// this PC's. A board listed from boards.toml and not opened yet is not known. `self` (the
+// cable looped back into the board, mint 4) comes with G2.
+const USB_ROUTES = {
+  hub: { icon: "usb", tag: "USB · hub", fact: "to the hub" },
+  pc: { icon: "monitor", tag: "USB · PC", fact: "to this PC" },
+  self: { icon: "repeat", tag: "USB · loop", fact: "looped back into itself" },
+  none: { icon: "unplug", tag: "no USB", fact: "none (Ethernet only)" },
+  unknown: { icon: "circle-help", tag: "USB ?", fact: "not known yet" },
+};
+
+export function usbRoute(cand, row = null) {
+  const links = (cand && cand.links) || [];
+  const mcc = links.find((l) => String(l.address || "").startsWith("hub-mcc://"));
+  if (mcc) {
+    return { to: "hub", ...USB_ROUTES.hub,
+      detail: `the MCC's USB is on the hub: ${mcc.address.replace(/^hub-mcc:\/\//, "")}` };
+  }
+  const usb = links.filter((l) => l.kind === "usb_serial" || l.kind === "usb_msd");
+  if (usb.length) {
+    return { to: "pc", ...USB_ROUTES.pc,
+      detail: `the MCC's USB is on this PC: ${usb.map((l) => l.address).join(", ")}` };
+  }
+  if (row && row.source === "config" && !row.open && !links.length) {
+    return { to: "unknown", ...USB_ROUTES.unknown, detail: "read when you open the board" };
+  }
+  return { to: "none", ...USB_ROUTES.none,
+    detail: "no Debug USB link: no MCC console, configuration SD or MCC reboot from here" };
+}
+
+// The deploy's phases as the mini bars draw them (the header's Design fact, the sidebar
+// card; the Workbench's download bar reads the same boardState(bid).deploy): guard -> swap
+// -> push (a byte bar) -> verify, then card when the deploy keeps the design. null when no
+// deploy runs. Rate and time left come from the events' own times (store.js onDeployEvent).
+export const DEPLOY_PHASES = ["guard", "swap", "push", "verify"];
+const PHASE_WEIGHT = { guard: 1, swap: 1, push: 2.2, verify: 1, card: 1.6 };
+const BYTE_PHASES = new Set(["push", "card"]);
+
+export function deployBar(dep) {
+  if (!dep || dep.state !== "running") return null;
+  const phases = [...DEPLOY_PHASES, ...(dep.keep ? ["card"] : [])];
+  for (const p of dep.phases || []) if (!phases.includes(p)) phases.push(p);
+  const at = phases.indexOf(dep.phase);
+  const bytes = at >= 0 && BYTE_PHASES.has(dep.phase) && dep.total > 0;
+  const frac = bytes ? Math.min(1, dep.bytes / dep.total) : 0;
+  const segs = phases.map((k, i) => ({
+    k, w: PHASE_WEIGHT[k] || 1,
+    state: i < at ? "done" : i === at ? (bytes ? "active bytes" : "active") : "",
+    fill: i < at ? 1 : i === at ? frac : 0,
+  }));
+  const phase = at >= 0 ? dep.phase : "starting";
+  const pct = bytes ? `${Math.floor(frac * 100)}%` : "";
+  let line = `${phase}`;
+  if (bytes) {
+    line += ` · ${bytesText(dep.bytes)} of ${bytesText(dep.total)}`;
+    if (dep.rate) line += ` · ${bytesText(Math.round(dep.rate))}/s`;
+    if (dep.left !== null && dep.left !== undefined && dep.rate) line += ` · ${Math.max(1, Math.ceil(dep.left))} s left`;
+  }
+  return { segs, phase, pct, line, overlay: dep.overlay || dep.rm_id || "" };
+}

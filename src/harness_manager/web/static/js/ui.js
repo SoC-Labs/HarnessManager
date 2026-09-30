@@ -7,7 +7,8 @@ import {
 import {
   checkIcon, checkLabel, checkLevel, elapsedSince, LINK_ICONS, linkName, secs, VIA_NAMES,
 } from "./format.js";
-import { html, useState } from "./lib.js";
+import { html, useEffect, useState } from "./lib.js";
+import { S } from "./store.js";
 import { holderOnly } from "./week.js";
 
 export function Icon({ name, cls = "", label = "" }) {
@@ -187,3 +188,21 @@ export function Seg({ value, options, onChange, label }) {
   </div>`;
 }
 
+
+// --- UI v2 shell -------------------------------------------------------------------------------
+
+// A link asked to show a part of a tab (navigate(bid, "debug") -> the Workbench's debug part;
+// store.js S.ui.reveal): scroll `ref` into view once, and say so (a fold opens on it).
+export function useReveal(bid, part, ref) {
+  const r = S.ui.reveal;
+  const hit = !!(r && r.bid === bid && r.part === part);
+  const at = hit ? r.at : 0;
+  useEffect(() => {
+    if (!hit || !ref.current) return;
+    const el = ref.current;
+    requestAnimationFrame(() => {
+      if (el.isConnected && el.scrollIntoView) el.scrollIntoView({ block: "start" });
+    });
+  }, [bid, part, at]);
+  return hit;
+}

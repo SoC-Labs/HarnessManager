@@ -1,53 +1,64 @@
-// Entry point: the rail (boards), the header (the selected board), the sections.
+// Entry point: the rail (boards), the header (the selected board), the five tabs (UI v2).
+//
+// The tabs and their routes are route.js's; a tab's body is registered there (registerTab),
+// so a lane replaces its tab from its own module. The extension points a lane uses instead of
+// editing this file: navigate / openActivity / toast (store.js), registerModal / openModal
+// (modal.js), registerTab (route.js), boardState(bid).deploy (the mini bars).
 
 import { ApiError, call, hasToken, initToken } from "./api.js";
 import { closeBoardConsoles } from "./consoles.js";
 import {
   boardName, boardTitle, clock, liveTitle, healthOf, holderAge, holderText, nameSourceText,
 } from "./format.js";
-import { html, render, useEffect, useState } from "./lib.js";
-import { ActivitySection } from "./sections/activity.js";
-import { ConsolesSection } from "./sections/consoles.js";
-import { DebugSection } from "./sections/debug.js";
-import { OverviewSection } from "./sections/overview.js";
-import { ClocksSection } from "./sections/clocks.js";
+import { html, render, useEffect, useRef, useState } from "./lib.js";
+import { BoardSection } from "./sections/board.js";            // UI v2: Board's six pages
 import { BoardXdcSection } from "./sections/xdc.js";
 import { BuildSection } from "./sections/build.js";          // KIT-UI
-import { PowerSection } from "./sections/power.js";
-import { ProgramSection } from "./sections/program.js";
-import { SdSection } from "./sections/sd.js";
-import { UpdateSection } from "./sections/update.js";
+import { OverviewSection } from "./sections/overview.js";
+import { WorkbenchSection } from "./sections/workbench.js";    // UI v2: Program + Consoles + Debug
 import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
+import { ActivityDrawer } from "./drawer.js";                  // UI v2: Activity is a drawer
+import { ModalLayer, ModalShell, openModal, registerModal, ToastLayer } from "./modal.js";
 import { epochOf } from "./week.js";
 import { loadSettingValues } from "./prefs.js";          // FIX-PACK-4: the rows the page reads
 import { LeaseBanners, requestClose } from "./lease.js";
+import { registerTab, tabBody, tabsFor } from "./route.js";
 import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
 import {
-  boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, rereadBoard,
-  S, sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
+  boardState, changed, hubBoard, jobLabel, log, navigate, openActivity, openedBoard, openedOrClosedHere,
+  probe, refreshInfo, rereadBoard, S, sectionOf, select, start, subscribe, timed, UI_NOTE, unseenErrors,
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
 import { AppUpdateBanners, AppUpdateLayer, SettingsButton, startSelfUpdate } from "./selfupdate.js";   // UPDATE-UI
-import { CheckChip, Chip, Icon, LinkLine, Reason, Seg, Spinner } from "./ui.js";
+import { CheckChip, Chip, Icon, LinkLine, Reason, Seg, Spinner, useReveal } from "./ui.js";
 
-export const SECTIONS = [
-  { key: "overview", label: "Overview", icon: "gauge", render: OverviewSection },
-  // KIT-UI (david K9): the journey reads XDC -> Build -> Program, so XDC moved up from
-  // before Activity and Build sits between the two.
-  { key: "xdc", label: "XDC", icon: "file-code", render: BoardXdcSection },
-  { key: "build", label: "Build", icon: "file-cog", render: BuildSection },
-  { key: "program", label: "Program", icon: "upload", render: ProgramSection },
-  { key: "consoles", label: "Consoles", icon: "terminal", render: ConsolesSection, fill: true },
-  { key: "debug", label: "Debug", icon: "bug", render: DebugSection },
-  { key: "power", label: "Power", icon: "power", render: PowerSection },
-  { key: "clocks", label: "Clocks", icon: "clock", render: ClocksSection },
-  { key: "sd", label: "SD card", icon: "hard-drive", render: SdSection },
-  { key: "update", label: "Update", icon: "rocket", render: UpdateSection },
-  // HIL-GUI: the unattended runbooks (docs/HIL_AUTO.md "In the app")
-  { key: "checks", label: "Checks", icon: "list-checks", render: ChecksSection },
-  { key: "activity", label: "Activity", icon: "history", render: ActivitySection },
-];
+// --- the tabs' bodies: today's sections until each Phase 2 lane registers its own -----------
+
+// Build: today's six steps, with the XDC page folded under them (0.1.0's "XDC" tab: its old
+// key lands here with the fold open).
+function BuildTab({ bid }) {
+  const ref = useRef(null);
+  const revealed = useReveal(bid, "xdc", ref);
+  const [open, setOpen] = useState(revealed);
+  useEffect(() => { if (revealed) setOpen(true); }, [revealed, S.ui.reveal && S.ui.reveal.at]);
+  return html`<div class="stack">
+    <${BuildSection} bid=${bid} />
+    <section class="details" data-testid="xdc-fold" ref=${ref}>
+      <button type="button" class="details-toggle" aria-expanded=${open ? "true" : "false"}
+        data-action="xdc-fold" onClick=${() => setOpen(!open)}>
+        <${Icon} name="chevron-right" cls=${`sm chev ${open ? "open" : ""}`} />Constraints (XDC)
+        <span class="muted small">the RM kit for this shell's partition, the full-board export</span></button>
+      ${open ? html`<div class="mt-14"><${BoardXdcSection} bid=${bid} /></div>` : null}
+    </section>
+  </div>`;
+}
+
+registerTab("overview", OverviewSection, { fallback: true });
+registerTab("workbench", WorkbenchSection, { fallback: true });
+registerTab("build", BuildTab, { fallback: true });
+registerTab("board", BoardSection, { fallback: true });
+registerTab("checks", ChecksSection, { fallback: true });
 
 // --- the rail ------------------------------------------------------------------------------
 
@@ -58,6 +69,7 @@ function Rail() {
   const daemonText = conn === "ok"
     ? `harness-manager-daemon ${S.version || ""}${S.eventsUp ? "" : " · events reconnecting"}`
     : conn === "auth" ? "session expired" : conn === "down" ? "harness-manager-daemon not answering" : "connecting...";
+  const errors = unseenErrors();
   return html`<aside class="rail" aria-label="Boards">
     <div class="brand">
       <div class="brand-mark"><${Icon} name="circuit-board" /></div>
@@ -84,6 +96,15 @@ function Rail() {
     <${ScanOffer} />
     <${BoardList} />
     <div class="rail-foot">
+      <div class="foot-links">
+        <button type="button" class="btn ghost sm" data-action="activity" onClick=${() => openActivity(S.selected)}
+          aria-haspopup="dialog" title="Activity: what happened, newest first"><${Icon} name="history" />Activity
+          ${errors ? html`<span class="foot-badge" data-testid="activity-badge"
+            aria-label=${`${errors} new error${errors === 1 ? "" : "s"}`}>${errors}</span>` : null}</button>
+        <${SettingsButton} />
+        <button type="button" class="btn ghost sm" data-action="help" onClick=${openHelp}
+          title="The command-line help, tab by tab"><${Icon} name="book-open" />Help</button>
+      </div>
       <${Seg} label="Theme" value=${S.theme} onChange=${(v) => { applyTheme(v); changed(); }}
         options=${[
           { value: "system", label: "Auto", icon: "monitor", title: "Follow the system theme" },
@@ -93,9 +114,6 @@ function Rail() {
       <div class="daemon-line" data-testid="daemon-line">
         <span class=${`dot ${daemon}`}></span><span class="grow"
           title=${S.daemon ? `${S.daemon.service || "harness-manager-daemon"} ${S.daemon.version || ""}, pid ${S.daemon.pid || "?"}` : ""}>${daemonText}</span>
-        <${SettingsButton} />
-        <button type="button" class="btn ghost sm" data-action="help" onClick=${openHelp}
-          title="The command-line help, tab by tab"><${Icon} name="book-open" /> Help</button>
       </div>
     </div>
   </aside>`;
@@ -232,13 +250,16 @@ function BoardHeader({ bid }) {
       <${BackgroundFact} bid=${bid} />
     </div>
     <nav class="sections" role="tablist" aria-label="Board sections">
-      ${SECTIONS.map((s) => {
-        const badge = s.key === "sd" && b.pending ? html`<span class="badge" aria-label="needs attention">!</span>`
-          : s.key === "checks" && checksRun(bid) ? html`<span class="badge run" data-testid="checks-tab-badge"
+      ${tabsFor(hubBoard(bid)).map((t) => {
+        const badge = t.key === "board" && b.pending ? html`<span class="badge" aria-label="needs attention"
+              title="An SD install was interrupted: Board > Versions">!</span>`
+          : t.key === "workbench" && b.deploy.state === "running" ? html`<span class="badge run" data-testid="workbench-tab-badge"
+              aria-label="programming" title=${`Programming ${b.deploy.overlay || "a design"}`}><${Icon} name="loader-circle" cls="spin" /></span>`
+          : t.key === "checks" && checksRun(bid) ? html`<span class="badge run" data-testid="checks-tab-badge"
               aria-label="a checks run is active" title="A checks run is active on this board"><${Icon} name="play" /></span>` : null;
-        return html`<button type="button" role="tab" key=${s.key} class="section-tab"
-          data-section=${s.key} aria-selected=${sectionOf(bid) === s.key ? "true" : "false"}
-          onClick=${() => setSection(bid, s.key)}><${Icon} name=${s.icon} cls="sm" />${s.label}${badge}</button>`;
+        return html`<button type="button" role="tab" key=${t.key} class="section-tab"
+          data-section=${t.key} aria-selected=${sectionOf(bid) === t.key ? "true" : "false"}
+          onClick=${() => navigate(bid, t.key)}><${Icon} name=${t.icon} cls="sm" />${t.label}${badge}</button>`;
       })}
     </nav>
   </header>`;
@@ -381,7 +402,7 @@ function Banners({ bid }) {
     out.push(html`<div class="banner err" role="alert" key="sd" data-testid="sd-banner">
       <${Icon} name="hard-drive" /><div class="grow"><strong>Interrupted SD install.</strong>${" "}
       Restore the configuration SD before anything else on this board.</div>
-      <button type="button" class="btn sm danger" onClick=${() => setSection(bid, "sd")}>Go to recovery</button>
+      <button type="button" class="btn sm danger" onClick=${() => navigate(bid, "board/versions")}>Go to recovery</button>
     </div>`);
   }
   return out;
@@ -389,11 +410,10 @@ function Banners({ bid }) {
 
 // --- help: the CLI's own help text (GET /help/tabs), so the two never disagree -------------------
 
-const help = { open: false, tabs: null, current: 0, line: "", error: null };
+const help = { tabs: null, current: 0, line: "", error: null };
 
 async function openHelp() {
-  help.open = true;
-  changed();
+  openModal("help");
   if (help.tabs) return;
   const r = await timed("help --tabs", () => call("helpTabs"));
   help.line = r.line;
@@ -402,32 +422,19 @@ async function openHelp() {
   changed();
 }
 
-function HelpModal() {
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") { help.open = false; changed(); } };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-  if (!help.open) return null;
+function HelpDialog() {
   const tab = help.tabs && help.tabs[help.current];
-  const close = () => { help.open = false; changed(); };
-  return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) close(); }}>
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Help" data-testid="help">
-      <div class="modal-head"><${Icon} name="book-open" /><h2 class="card-title">Help</h2>
-        <span class="muted small">the same text as <code>harness-manager help --tabs</code></span>
-        <span class="grow"></span>
-        <button type="button" class="btn ghost sm icon-only" aria-label="Close help" onClick=${close} autofocus>
-          <${Icon} name="x" /></button></div>
-      ${help.error ? html`<div class="card-body"><${Reason} level="err" text=${`${help.line}: ${help.error.message}`} /></div>`
-        : !help.tabs ? html`<div class="card-body muted"><${Spinner} /> Reading the help...</div>`
-        : html`<div class="modal-body">
-          <nav class="modal-nav" aria-label="Help topics">${help.tabs.map((t, i) => html`<button type="button" key=${t.name}
-            aria-current=${i === help.current ? "true" : "false"} onClick=${() => { help.current = i; changed(); }}>${t.name}</button>`)}</nav>
-          <pre class="modal-text">${tab ? tab.text : ""}</pre>
-        </div>`}
-    </div>
-  </div>`;
+  return html`<${ModalShell} title="Help" icon="book-open" testid="help" bodyCls="modal-body"
+      note=${html`the same text as <code>harness-manager help --tabs</code>`}>
+    ${help.error ? html`<div class="card-body"><${Reason} level="err" text=${`${help.line}: ${help.error.message}`} /></div>`
+      : !help.tabs ? html`<div class="card-body muted"><${Spinner} /> Reading the help...</div>`
+      : html`<nav class="modal-nav" aria-label="Help topics">${help.tabs.map((t, i) => html`<button type="button" key=${t.name}
+          aria-current=${i === help.current ? "true" : "false"} onClick=${() => { help.current = i; changed(); }}>${t.name}</button>`)}</nav>
+        <pre class="modal-text">${tab ? tab.text : ""}</pre>`}
+  <//>`;
 }
+
+registerModal("help", HelpDialog);
 
 // --- the app ------------------------------------------------------------------------------------
 
@@ -460,16 +467,18 @@ function Workspace() {
     return html`<main class="workspace"><${AppUpdateBanners} /><${Banners} bid=${null} /><${LeaseBanners} bid=${null} />
       <${BoardPreview} key=${bid} bid=${bid} /></main>`;
   }
-  const section = SECTIONS.find((s) => s.key === sectionOf(bid)) || SECTIONS[0];
-  const Section = section.render;
+  const tab = sectionOf(bid);
+  const body = tabBody(tab) || tabBody("overview");
+  const Section = body.render;
+  const label = (tabsFor(true).find((t) => t.key === tab) || {}).label || tab;
   return html`<main class="workspace" data-board=${bid}>
     <${AppUpdateBanners} />
     <${Banners} bid=${bid} />
     <${LeaseBanners} bid=${bid} />
     <${ChecksBanner} bid=${bid} />
     <${BoardHeader} bid=${bid} />
-    <div class=${`section-body ${section.fill ? "fill" : ""}`} role="tabpanel"
-      data-testid=${`section-${section.key}`} aria-label=${section.label}>
+    <div class=${`section-body ${body.fill ? "fill" : ""}`} role="tabpanel"
+      data-testid=${`section-${tab}`} data-tab=${tab} aria-label=${label}>
       <${Section} bid=${bid} />
     </div>
   </main>`;
@@ -483,12 +492,14 @@ function App() {
   const named = (sel && sel.info && sel.info.candidate) || (row && row.candidate) || null;
   const title = row ? `${boardName(named, S.selected)} · Harness Manager` : "Harness Manager";
   if (document.title !== title) document.title = title;
-  return html`<div class="app"><${Rail} /><${Workspace} /><${HelpModal} /><${AppUpdateLayer} /></div>`;
+  return html`<div class="app"><${Rail} /><${Workspace} /><${ActivityDrawer} />
+    <${AppUpdateLayer} /><${ModalLayer} /><${ToastLayer} /></div>`;
 }
 
 // A read-only snapshot for the browser tests' failure reports and for the devtools console.
 window.__harness_managerState = () => JSON.parse(JSON.stringify({
   connection: S.connection, eventsUp: S.eventsUp, selected: S.selected, boards: S.boards,
+  sections: S.sections, subs: S.subs, route: window.location.hash, drawer: S.ui.drawer,
   jobs: Object.fromEntries(Object.entries(S.board).map(([bid, b]) => [bid, b.job])),
   sidebar: { order: SIDEBAR.order, favs: SIDEBAR.favs, where: SIDEBAR.where },
   log: S.log.slice(-80),
