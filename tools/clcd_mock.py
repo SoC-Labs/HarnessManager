@@ -439,7 +439,8 @@ def svg(icons: dict[str, str], name: str) -> str:
 
 
 def build(out: Path = DESIGN, *, now: float = 1_000_000.0) -> dict[str, Path]:
-    tokens, font = load_tokens(), load_font()
+    # R2: the panel's frozen tokens (design/panel/tokens.json), never the web's theme
+    tokens, font = _GT.panel_doc(load_tokens()), load_font()
     pal = panel_palette(tokens)
     written: dict[str, Path] = {}
 

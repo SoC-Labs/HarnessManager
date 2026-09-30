@@ -1,7 +1,7 @@
-"""P4 TOKENS: ``design/tokens.json`` is the one source of the web UI's colours and the front
-panel's palette; ``tools/gen_tokens.py`` generates from it, and its ``--check`` (in
-``make check``) is the drift gate. Each gate test has a negative twin: a hand edit that
-the gate must catch.
+"""P4 TOKENS: ``design/tokens.json`` is the one source of the web UI's colours, and the front
+panel's palette is frozen apart from it in ``design/panel/tokens.json`` (UI v2 risk R2);
+``tools/gen_tokens.py`` generates from them, and its ``--check`` (in ``make check``) is the
+drift gate. Each gate test has a negative twin: a hand edit that the gate must catch.
 
 Board-free and hermetic: the drift tests work on a copy of the files under ``tmp_path``.
 ``tools/gen_tokens.py`` is a script, so it is loaded by path.
@@ -36,11 +36,13 @@ G = _load()
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     """A copy of every file the generator reads or writes."""
-    for rel in (G.TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.GLYPHS_OUT, G.APP_CSS,
+    for rel in (G.TOKENS, G.PANEL_TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.GLYPHS_OUT,
                 G.INDEX_HTML):
         dst = tmp_path / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO / rel, dst)
+    for rel in G.stylesheets(REPO):
+        shutil.copyfile(REPO / rel, tmp_path / rel)
     shutil.copytree(REPO / G.JS_DIR, tmp_path / G.JS_DIR)
     return tmp_path
 
@@ -73,15 +75,51 @@ def test_a_hand_edited_colour_in_tokens_css_is_stale(tree):
                         "run: python3 tools/gen_tokens.py"]
 
 
-def test_a_colour_changed_in_tokens_json_makes_every_output_stale_until_regenerated(tree):
+def test_a_colour_changed_in_tokens_json_moves_the_web_only_never_the_panel(tree):
+    """R2: the web's theme changes in design/tokens.json; the panel's generated files (the
+    vendored clcd_palette.h, palette.json) stay byte-identical."""
+    panel = {rel: (tree / rel).read_bytes() for rel in (G.PALETTE_OUT, G.HEADER_OUT)}
     _edit(tree / G.TOKENS, '"held":           {"light": "#6b3fc4"', '"held":           {"light": "#6b3fc5"')
+    doc = json.loads((tree / G.TOKENS).read_text())
+    doc["color"]["err"]["dark"] = "#ff0000"                  # a dark value the panel uses (err)
+    (tree / G.TOKENS).write_text(json.dumps(doc, indent=2))
     stale = G.check(tree)
-    assert len(stale) == 3 and all("is stale" in p for p in stale)
-    assert sorted(G.write(tree)) == sorted([G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT])
+    assert len(stale) == 1 and stale[0].startswith(f"{G.CSS_OUT.as_posix()} is stale"), stale
+    assert G.write(tree) == [G.CSS_OUT]
     assert G.check(tree) == []
     assert "--held: #6b3fc5;" in (tree / G.CSS_OUT).read_text()
-    new_sha = G.sha256_of((tree / G.TOKENS).read_bytes())
+    assert "--err: #ff0000;" in (tree / G.CSS_OUT).read_text()
+    assert {rel: (tree / rel).read_bytes() for rel in panel} == panel
+    assert f'CLCD_TOKENS_SHA256 "{G.PANEL_SHA256}"' in (tree / G.HEADER_OUT).read_text()
+
+
+def test_twin_a_colour_changed_in_the_frozen_panel_file_moves_the_panel_and_fails_the_pin(tree):
+    _edit(tree / G.PANEL_TOKENS, '"held":           {"light": "#6b3fc4", "dark": "#b69cf5"}',
+          '"held":           {"light": "#6b3fc4", "dark": "#b69cf6"}')
+    problems = G.check(tree)
+    assert len(problems) == 3, problems
+    assert "is the front panel's frozen palette (UI v2 risk R2) and it is not the pinned one" in problems[0]
+    assert all("is stale (it does not match design/panel/tokens.json)" in p for p in problems[1:])
+    assert sorted(G.write(tree)) == sorted([G.PALETTE_OUT, G.HEADER_OUT])
+    new_sha = G.sha256_of((tree / G.PANEL_TOKENS).read_bytes())
     assert f'CLCD_TOKENS_SHA256 "{new_sha}"' in (tree / G.HEADER_OUT).read_text()
+    assert len(G.check(tree)) == 1                      # regenerated, still not the pinned one
+
+
+def test_the_panels_generated_files_come_from_the_pinned_frozen_file():
+    """R2 proof: the frozen panel file is the pinned one, and the committed panel outputs are
+    exactly what it generates (so they are what design/tokens.json at 59011d72 generated)."""
+    tokens, _raw = G.load(REPO)
+    assert tokens["panel"]["frozen"] == G.PANEL_TOKENS.as_posix()
+    panel, praw = G.load_panel(REPO)
+    assert G.sha256_of(praw) == G.PANEL_SHA256 == \
+        "59011d724e13ec07902e37ffdd3f6a480394cc0995d42649b3af320a73c4a4bb"
+    assert "roles" in panel["panel"] and "roles" not in tokens["panel"]
+    out = G.outputs(tokens, _raw, panel=(panel, praw))
+    for rel in (G.PALETTE_OUT, G.HEADER_OUT):
+        assert (REPO / rel).read_text() == out[rel]
+    # external callers (tools/clcd_mock.py) resolve the panel in the frozen file too
+    assert G.panel_palette(tokens) == G.panel_palette(panel)
 
 
 def test_a_missing_output_is_reported(tree):
@@ -94,7 +132,28 @@ def test_app_css_redefining_a_token_fails(tree):
     _edit(tree / G.APP_CSS, "  --rail-w: 272px;\n", "  --rail-w: 272px;\n  --ok: var(--warn);\n")
     problems = G.check(tree)
     assert len(problems) == 1 and "defines --ok, which design/tokens.json owns" in problems[0]
-    assert problems[0].startswith(f"{G.APP_CSS.as_posix()}:14:")
+    line = (tree / G.APP_CSS).read_text().split("\n").index("  --ok: var(--warn);") + 1
+    assert problems[0].startswith(f"{G.APP_CSS.as_posix()}:{line}:")
+
+
+def test_a_per_tab_stylesheet_is_held_to_the_same_rules(tree):
+    """UI v2: each tab's lane writes css/<tab>.css; the colour rules apply there too, and
+    index.html must load it, after tokens.css."""
+    sheet = tree / G.CSS_DIR / "wbtest.css"
+    sheet.write_text(".wb-x { color: #123456; background: var(--no-such); }\n")
+    problems = G.check(tree)
+    assert f"{G.INDEX_HTML.as_posix()}: does not load ./css/wbtest.css" in problems, problems
+    assert any(p.startswith(f"{G.CSS_DIR.as_posix()}/wbtest.css:1: colour literal #123456") for p in problems), problems
+    assert any("wbtest.css:1: --no-such is not defined" in p for p in problems), problems
+    _edit(tree / G.INDEX_HTML, '  <link rel="stylesheet" href="./css/app.css">\n',
+          '  <link rel="stylesheet" href="./css/app.css">\n  <link rel="stylesheet" href="./css/wbtest.css">\n')
+    sheet.write_text(".wb-x { color: var(--text); }\n")
+    assert G.check(tree) == []
+    # the twin: loaded before tokens.css
+    _edit(tree / G.INDEX_HTML, '  <link rel="stylesheet" href="./css/wbtest.css">\n', "")
+    _edit(tree / G.INDEX_HTML, '  <link rel="stylesheet" href="./css/tokens.css">\n',
+          '  <link rel="stylesheet" href="./css/wbtest.css">\n  <link rel="stylesheet" href="./css/tokens.css">\n')
+    assert G.check(tree) == [f"{G.INDEX_HTML.as_posix()}: loads ./css/tokens.css after ./css/wbtest.css"]
 
 
 def test_app_css_defining_its_own_layout_property_is_fine(tree):
@@ -141,8 +200,8 @@ def test_index_html_must_load_tokens_css_before_app_css(tree):
 
 
 def test_a_windows_checkout_with_crlf_line_ends_is_fresh(tree):
-    for rel in (G.TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.GLYPHS_OUT, G.APP_CSS,
-                G.INDEX_HTML):
+    for rel in (G.TOKENS, G.PANEL_TOKENS, G.CSS_OUT, G.PALETTE_OUT, G.HEADER_OUT, G.GLYPHS_OUT,
+                G.APP_CSS, G.INDEX_HTML):
         p = tree / rel
         p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
     assert G.check(tree) == []
@@ -181,12 +240,13 @@ def test_the_held_family_is_violet_in_both_themes():
     (("grammar", "ok", "color"), "no-such-token", "must name a 'color' token"),
 ])
 def test_an_invalid_tokens_file_is_refused_with_the_reason(tree, path, value, says):
-    tokens = json.loads((tree / G.TOKENS).read_text())
+    rel = G.PANEL_TOKENS if path[0] == "panel" else G.TOKENS    # R2: the roles are the panel file's
+    tokens = json.loads((tree / rel).read_text())
     node = tokens
     for key in path[:-1]:
         node = node[key]
     node[path[-1]] = value
-    (tree / G.TOKENS).write_text(json.dumps(tokens))
+    (tree / rel).write_text(json.dumps(tokens))
     problems = G.check(tree)
     assert len(problems) == 1 and says in problems[0], problems
     assert G.main(["--root", str(tree)]) == 2                  # write refuses too
@@ -201,7 +261,7 @@ def _header_words(text: str) -> dict[str, int]:
 
 
 def test_the_c_header_holds_the_panel_palette_and_the_tokens_sha256():
-    tokens, raw = G.load(REPO)
+    tokens, raw = G.load_panel(REPO)
     text = (REPO / G.HEADER_OUT).read_text()
     sha = G.sha256_of(raw)
     assert f"tokens.json sha256: {sha}" in text and f'#define CLCD_TOKENS_SHA256 "{sha}"' in text
@@ -230,12 +290,12 @@ def test_the_c_header_compiles_as_c99_and_its_table_is_the_palette(tmp_path):
                     "-I", str(REPO / G.HEADER_OUT.parent), str(src), "-o", str(exe)],
                    check=True, capture_output=True, timeout=60)
     out = subprocess.run([str(exe)], check=True, capture_output=True, text=True, timeout=30).stdout
-    pal = G.panel_palette(G.load(REPO)[0])
+    pal = G.panel_palette(G.load_panel(REPO)[0])
     assert out.split("\n")[:-1] == [f"{fg:04X} {bg:04X}" for fg, bg in pal.values()]
 
 
 def test_palette_json_resolves_every_token_per_theme_and_the_panel_roles():
-    tokens, raw = G.load(REPO)
+    tokens, raw = G.load_panel(REPO)           # R2: the frozen panel file's tokens, as they were
     doc = json.loads((REPO / G.PALETTE_OUT).read_text())
     assert doc["tokens_sha256"] == G.sha256_of(raw) and doc["schema"] == "soclabs-harness-palette/1"
     for theme in ("light", "dark"):

@@ -51,7 +51,8 @@ from harness_manager_mps3.pack import Mps3Pack
 from tests.fakes.clcd_panel_shell import LINUX_PANEL, PANEL_FEATURES, PanelVirtualMps3
 
 REPO = Path(__file__).resolve().parents[2]
-TOKENS = REPO / "design" / "tokens.json"
+#: The panel's roles live in its frozen tokens file (UI v2 risk R2), not the web's tokens.json.
+TOKENS = REPO / "design" / "panel" / "tokens.json"
 
 
 def gen():
@@ -128,7 +129,7 @@ def test_the_generated_vocabulary_is_fresh_and_the_web_ui_has_the_same():
 
 
 def test_negative_twin_reordering_the_tokens_roles_makes_the_vocabulary_stale(tmp_path):
-    for rel in ("design/tokens.json", "design/generated/clcd_palette.h",
+    for rel in ("design/tokens.json", "design/panel/tokens.json", "design/generated/clcd_palette.h",
                 "src/harness_manager/core/panel_codes.py",
                 "src/harness_manager/web/static/js/panel_codes.js"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +138,7 @@ def test_negative_twin_reordering_the_tokens_roles_makes_the_vocabulary_stale(tm
     roles = doc["panel"]["roles"]
     swapped = dict(reversed(list(roles.items())))
     doc["panel"]["roles"] = swapped
-    (tmp_path / "design/tokens.json").write_text(json.dumps(doc, indent=2))
+    (tmp_path / "design/panel/tokens.json").write_text(json.dumps(doc, indent=2))
     problems = gen().check(tmp_path)
     assert len(problems) == 2 and all("is stale" in p for p in problems), problems
     gen().write(tmp_path)
