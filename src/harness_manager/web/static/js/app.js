@@ -18,7 +18,7 @@ import { OverviewSection } from "./sections/overview.js";
 import { WorkbenchSection } from "./sections/workbench.js";    // UI v2: Program + Consoles + Debug
 import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
-import { ActivityDrawer } from "./drawer.js";                  // UI v2: Activity is a drawer
+import { ActivityDrawer, LastProblemChip } from "./drawer.js";   // UI v2: Activity is a drawer
 import { ModalLayer, ModalShell, openModal, registerModal, ToastLayer } from "./modal.js";
 import { epochOf } from "./week.js";
 import { loadSettingValues } from "./prefs.js";          // FIX-PACK-4: the rows the page reads
@@ -224,6 +224,7 @@ function BoardHeader({ bid }) {
         <div class="header-id">${bid}</div>
       </div>
       <div class="header-actions">
+        <${LastProblemChip} bid=${bid} />
         ${b.job ? html`<${Chip} level="accent" testid="job-chip" title=${`harness-manager-daemon job ${b.job.id}: the board's other actions wait for it`}>
           <${Spinner} />${jobLabel(b.job.kind)} running · ${Math.floor((Date.now() - b.job.at) / 1000)} s<//>` : null}
         ${row.open ? html`<button type="button" class="btn ghost sm icon-only" data-action="refresh-board"

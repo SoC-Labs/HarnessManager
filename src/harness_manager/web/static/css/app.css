@@ -1303,9 +1303,24 @@ body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; }
   border-bottom: 1px solid var(--border);
 }
 .drawer-head b { font-size: 15px; font-weight: 600; }
+.drawer-in { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.drawer-tools { display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--border); }
 .drawer-body { flex: 1; overflow-y: auto; min-height: 0; padding: 0 0 12px; }
-.drawer-body > .card { border: 0; box-shadow: none; border-radius: 0; }
+.drawer-empty { padding: 14px 16px; }
 .drawer-foot { border-top: 1px solid var(--border); padding: 10px 16px; font-size: 12px; color: var(--text-3); }
+.drawer-log { table-layout: fixed; }
+.drawer-log td { vertical-align: top; }
+.drawer-log td:first-child { padding-left: 16px; }
+.drawer-log td:last-child { padding-right: 16px; }
+.drawer-log .msg { color: var(--text); }
+.drawer-log .meta { display: flex; gap: 8px; align-items: center; margin-top: 3px; color: var(--text-3); font-size: 11.5px; flex-wrap: wrap; }
+.drawer-log .lvl .icon { margin-top: 2px; }
+button.link {
+  background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; font-size: inherit;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.chip-btn { cursor: pointer; font-family: inherit; }
+.chip-btn:hover { text-decoration: underline; }
 
 .toast {
   position: fixed; z-index: 30; bottom: 18px; left: 50%; transform: translateX(-50%);
