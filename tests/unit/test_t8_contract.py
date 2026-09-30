@@ -27,7 +27,9 @@ from tests.fakes import t8_hub_rest as fakes
 
 GOLDEN = json.loads((Path(fakes.__file__).with_name("t8_fpgahub_v030_golden.json")).read_text())
 SCHEMA = GOLDEN["openapi"]
-VOLATILE = {"token", "expires_at", "ts"}
+VOLATILE = {"token", "expires_at", "ts",
+            # UI2-API-HUB: GET /status's times (compared by type, as expires_at)
+            "lease_acquired_at", "lease_expires_at", "last_activity_at"}
 
 
 # --- a small validator for the OpenAPI 3.1 subset pydantic emits ---------------------------------

@@ -1438,6 +1438,12 @@ class LeaseService:
                        confirmed_at=iso_utc(known.wall), source=known.source)
         return out
 
+    def note_board(self, board_id: str, hub: Any) -> None:
+        """ui2 api-hub (G3): ``board_id`` is the board on ``hub``'s target (a board read or
+        requested without opening it), so its ``last_known`` follows this service's reads."""
+        if hub is not None and board_id:
+            self._board_for(hub, board_id)
+
     def _board_for(self, hub: Any, board_id: str = "") -> str:
         key = _hk(hub)
         with self._mu:

@@ -714,7 +714,9 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
 
     @app.get(f"{API}/boards/{{bid}}/lease")
     def lease_get(bid: str) -> dict[str, Any]:
-        state.session(bid)
+        from .t14_lease_requests import listed_board
+
+        listed_board(state, bid)                  # ui2 api-hub (G3): open or not
         hub = sim.hubs.get(bid)
         # docs/LEASE_REQUESTS.md adds queue, request, incoming and taken.
         more = sim.requests.view(bid) if sim.requests is not None else {}
@@ -792,7 +794,9 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
 
     @app.delete(f"{API}/boards/{{bid}}/lease")
     def lease_release(bid: str) -> dict[str, Any]:
-        state.session(bid)
+        from .t14_lease_requests import listed_board
+
+        listed_board(state, bid)                  # ui2 api-hub (G3): open or not
         hub = sim.hubs.get(bid)
         if hub is None:
             raise UnavailableError("lease", f"{bid} is not behind a hub: there is no lease to take")

@@ -608,6 +608,14 @@ class LeaseRequestSim:
                 "revoked": [prior], "by": me()}
 
 
+def listed_board(state: Any, bid: str) -> None:
+    """ui2 api-hub (G3, "Request without opening"): the lease routes take a board the mock
+    lists (open, or a probe's candidate); any other is 404 ABSENT, as ``state.session``."""
+    if bid in state.engine.open_boards() or state.lookup(bid) is not None:
+        return
+    state.session(bid)
+
+
 def register(app: FastAPI, state: Any, sim: LeaseRequestSim, ok: Any, accepted: Any) -> None:
     """The four frozen routes (``GET /lease`` gains ``sim.view`` in l3_week_plan)."""
     jobs = state.jobs
@@ -623,7 +631,7 @@ def register(app: FastAPI, state: Any, sim: LeaseRequestSim, ok: Any, accepted: 
         from harness_manager.services.lease import check_want  # ui2 api-hub (G11)
 
         want = check_want(body.get("want_s"))
-        state.session(bid)
+        listed_board(state, bid)                 # ui2 api-hub (G3): open or not
         sim.hub(bid)
         if bid in sim.outgoing:
             raise RefusedError(f"{bid} already has a request of yours waiting",
@@ -650,11 +658,11 @@ def register(app: FastAPI, state: Any, sim: LeaseRequestSim, ok: Any, accepted: 
 
     @app.delete(f"{API}/boards/{{bid}}/lease/queue")
     def lease_leave(bid: str) -> dict[str, Any]:
-        state.session(bid)
+        listed_board(state, bid)                 # ui2 api-hub (G3): open or not
         sim.hub(bid)
         return ok(left=sim.leave(bid))
 
     @app.delete(f"{API}/boards/{{bid}}/lease/taken")
     def lease_taken_dismiss(bid: str) -> dict[str, Any]:
-        state.session(bid)                       # D11: GET /lease then says taken: null
+        listed_board(state, bid)                 # D11 (ui2 api-hub, G3: open or not)
         return ok(dismissed=sim.dismiss_taken(bid))

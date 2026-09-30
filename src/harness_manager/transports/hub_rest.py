@@ -134,6 +134,7 @@ ROUTES: dict[str, tuple[str, str]] = {
     "share_list": ("GET", "/api/v1/targets/{name}/shares"),
     "share_start": ("POST", "/api/v1/targets/{name}/shares"),
     "events": ("GET", "/api/v1/events"),
+    "status": ("GET", "/api/v1/status"),          # ui2 api-hub (G3): lease_overview
 }
 
 _NAME_RE = re.compile(r"[A-Za-z0-9_.\-]+")

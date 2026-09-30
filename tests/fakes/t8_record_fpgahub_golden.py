@@ -120,6 +120,7 @@ PATHS = (
     "/api/v1/boards/{name}/lease/history",
     "/api/v1/boards/{name}/queue",
     "/api/v1/events",
+    "/api/v1/status",                # UI2-API-HUB (G3): every target's lease, one read
 )
 
 
@@ -322,6 +323,11 @@ def main() -> None:
              {"tty_paths": ["/dev/mps3_01_pl/tty_00"], "baud": 115200, "holder": "x"})
         call("share_start_not_holder_409", "bob", "POST", "/targets/mps3_01_pl/shares",
              {"tty_paths": ["/dev/mps3_01_pl/tty_00"], "baud": 115200})
+        # UI2-API-HUB (G3): every target's lease in one read (HM's hub overview)
+        call("status_anon", None, "GET", "/status")
+        call("queue_for_status", "bob", "POST", "/targets/mps3_01_pl/lease",
+             {"ttl_seconds": 600, "tier": "interactive"})
+        call("status", "carol", "GET", "/status")
 
     golden = {
         "fpgahub_version": __version__,
