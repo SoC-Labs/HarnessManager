@@ -313,3 +313,10 @@ export function deployBar(dep) {
   }
   return { segs, phase, pct, line, overlay: dep.overlay || dep.rm_id || "" };
 }
+
+// A hex id as the header shows it: "0x" and upper-case digits ("0x3F1A560F"); anything that
+// is not one stays as it is.
+export function hexId(v) {
+  const t = String(v || "");
+  return /^0x[0-9a-f]+$/i.test(t) ? `0x${t.slice(2).toUpperCase()}` : t;
+}

@@ -8,13 +8,14 @@
 import { ApiError, call, hasToken, initToken } from "./api.js";
 import { closeBoardConsoles } from "./consoles.js";
 import {
-  boardName, boardTitle, clock, liveTitle, healthOf, holderAge, holderText, nameSourceText,
+  boardName, boardTitle, checkLabel, clock, deployBar, hexId, liveTitle, healthOf, holderAge, holderText,
+  nameSourceText, usbRoute,
 } from "./format.js";
 import { html, render, useEffect, useRef, useState } from "./lib.js";
 import { BoardSection } from "./sections/board.js";            // UI v2: Board's six pages
 import { BoardXdcSection } from "./sections/xdc.js";
 import { BuildSection } from "./sections/build.js";          // KIT-UI
-import { OverviewSection } from "./sections/overview.js";
+import { attentionItems, OverviewSection } from "./sections/overview.js";
 import { WorkbenchSection } from "./sections/workbench.js";    // UI v2: Program + Consoles + Debug
 import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
@@ -31,7 +32,7 @@ import {
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
 import { AppUpdateBanners, AppUpdateLayer, SettingsButton, startSelfUpdate } from "./selfupdate.js";   // UPDATE-UI
-import { CheckChip, Chip, Icon, LinkLine, Reason, Seg, Spinner, useReveal } from "./ui.js";
+import { CheckChip, Chip, Icon, LinkLine, MiniBar, Reason, Seg, Spinner, useReveal } from "./ui.js";
 
 // --- the tabs' bodies: today's sections until each Phase 2 lane registers its own -----------
 
@@ -184,6 +185,47 @@ function HarnessFact({ bid, ident }) {
       ? html`<span class="secondary">${` · ${ident.harness_impl || "impl unknown"}`}</span>` : null}<//>`;
 }
 
+// UI v2: the design in the partition, and how this page knows it. While a deploy runs: its
+// phase and the mini bar (the byte count and rate on hover). After one this page watched
+// verify: "verified hh:mm". The harness's build check rides the fact's tooltip; only a check
+// that is not OK (mismatch, unchecked) keeps its chip, since it asks for attention.
+const BUILD_WORDS = {
+  ok: "Build check OK: the harness firmware matches the fabric it runs on.",
+  mismatch: "Build check MISMATCH: the harness firmware was built for different fabric.",
+  unchecked: "Build check UNCHECKED: the harness could not compare its firmware with the fabric (not a pass).",
+};
+
+function sameId(a, c) { return !!a && !!c && String(a).toLowerCase() === String(c).toLowerCase(); }
+
+function DesignFact({ bid, ident }) {
+  const b = boardState(bid);
+  const dep = b.deploy;
+  const bar = deployBar(dep);
+  const check = ident.build_check || "unchecked";
+  const title = `The design in the partition${ident.rm_id ? ` (rm_id ${ident.rm_id})` : ""}. ${BUILD_WORDS[check] || `Build check ${checkLabel(check)}.`}`;
+  const verified = !bar && dep.state === "done" && dep.verified && sameId(dep.rm_id, ident.rm_id) && dep.doneAt;
+  return html`<div class="fact design-fact" data-testid="fact-design" data-check=${check} title=${title}>
+    <span class="fact-label">Design</span>
+    <span class="fact-value">
+      ${bar ? html`<span class="pgm-fact" data-testid="design-progress" title=${`Programming ${bar.overlay}: ${bar.line}`}>
+          <${Chip} level="accent" cls="busy"><${Spinner} />${bar.overlay} · ${bar.phase}${bar.pct ? ` ${bar.pct}` : ""}<//>
+          <${MiniBar} bar=${bar} /></span>`
+        : html`<span>${ident.rm_name || "unknown"}</span>${ident.rm_id ? html` <span class="mono">${hexId(ident.rm_id)}</span>` : null}`}
+      ${verified ? html`<${Chip} level="ok" icon="circle-check" testid="design-verified"
+          title=${`Read back from the board after programming, at ${clock(dep.doneAt)}. ${BUILD_WORDS[check] || ""}`}>verified ${clock(dep.doneAt).slice(0, 5)}<//>` : null}
+      ${check !== "ok" ? html`<${CheckChip} check=${check} testid="build-chip" prefix="build " />` : null}
+    </span>
+  </div>`;
+}
+
+// UI v2: where the board's Debug USB (the MCC's cable) goes, from its links until the service
+// serves the route (plan gap G2).
+function UsbFact({ bid, cand }) {
+  const u = usbRoute(cand, S.boards[bid]);
+  return html`<div class=${`fact usb-fact ${u.to}`} data-testid="fact-usb" data-usb=${u.to} title=${`Debug USB: ${u.detail}`}>
+    <span class="fact-label">Debug USB</span><span class="fact-value"><${Icon} name=${u.icon} cls="sm" />${u.fact}</span></div>`;
+}
+
 // DELETE /boards/{bid}; `release` (LEASE-UI) releases this Harness Manager's hub lease on it
 // first (?release=true). Resolves to the timed() result; the board stays open on an error.
 async function closeBoardNow(bid, { release = false } = {}) {
@@ -215,11 +257,16 @@ function BoardHeader({ bid }) {
   const health = failed ? { level: "err", text: "Not answering", detail: b.infoError.message } : healthOf(info);
   // LEASE-UI: a board whose hub lease THIS Harness Manager holds asks first (lease.js).
   const close = (e) => requestClose(bid, e.currentTarget, (o) => closeBoardNow(bid, o));
+  const attention = attentionItems(bid);
   return html`<header class="board-header" data-testid="board-header">
     <div class="header-row1">
       <div class="header-titles">
-        <h1 class="header-title" data-testid="header-name"
-          title=${nameSourceText(cand) || undefined}>${cand.name || liveTitle(cand, ident, bid)}</h1>
+        <div class="header-title-row">
+          <h1 class="header-title" data-testid="header-name"
+            title=${nameSourceText(cand) || undefined}>${cand.name || liveTitle(cand, ident, bid)}</h1>
+          <${Chip} level=${health.level} testid="health-chip" title=${health.detail}
+            icon=${health.level === "ok" ? "activity" : health.level === "err" ? "circle-x" : "circle-help"}>${health.text}<//>
+        </div>
         ${cand.name ? html`<div class="header-sub" data-testid="header-sub">${liveTitle(cand, ident, bid)}</div>` : null}
         <div class="header-id">${bid}</div>
       </div>
@@ -231,28 +278,25 @@ function BoardHeader({ bid }) {
             aria-label="Read the board again" title="Read the board again (its info, the Card line and the SD journal)"
             onClick=${() => rereadBoard(bid)}
             aria-busy=${b.infoLoading ? "true" : undefined}>${b.infoLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}</button>` : null}
-        ${row.open ? html`<${Chip} level="accent" icon="plug-zap" testid="lock-chip"
-            title=${`Open here: the board lock is ${row.holder ? holderText(row.holder) : "this daemon"}'s. The hub lease is its own line below.`}>Open<//>
-          <button type="button" class="btn sm" data-action="close-board" onClick=${close}
-            title="Release the board's lock so other tools can use it (asks about the hub lease when it is yours)">Close board</button>`
+        ${row.open ? html`<button type="button" class="btn sm" data-action="close-board" onClick=${close}
+            title=${`Release the board's lock (${row.holder ? holderText(row.holder) : "this daemon"}'s) so other tools can use it; asks about the hub lease when it is yours`}>Close board</button>`
         : null}
       </div>
     </div>
     <div class="facts">
-      <${Fact} label="Shell" testid="fact-shell"><span class="mono">${ident.shell_id || "unknown"}</span><//>
-      <${Fact} label="Design" testid="fact-design">${ident.rm_name || "unknown"}
-        ${ident.rm_id ? html` <span class="mono">${ident.rm_id}</span>` : null}<//>
+      <${Fact} label="Shell" testid="fact-shell"><span class="mono">${hexId(ident.shell_id) || "unknown"}</span><//>
+      <${DesignFact} bid=${bid} ident=${ident} />
       <${HarnessFact} bid=${bid} ident=${ident} />
-      <${Fact} label="Build"><${CheckChip} check=${ident.build_check} testid="build-chip" /><//>
-      <${Fact} label="Health"><${Chip} level=${health.level} testid="health-chip" title=${health.detail}
-        icon=${health.level === "ok" ? "activity" : health.level === "err" ? "circle-x" : "circle-help"}>
-        ${health.text}<//><//>
+      <${UsbFact} bid=${bid} cand=${cand} />
       <${HubFact} bid=${bid} />
       <${BackgroundFact} bid=${bid} />
     </div>
     <nav class="sections" role="tablist" aria-label="Board sections">
       ${tabsFor(hubBoard(bid)).map((t) => {
-        const badge = t.key === "board" && b.pending ? html`<span class="badge" aria-label="needs attention"
+        const badge = t.key === "overview" && attention.length ? html`<span class=${`badge ${attention.some((a) => a.level === "err") ? "" : "warn"}`}
+              data-testid="overview-tab-badge" aria-label=${`${attention.length} to look at`}
+              title=${attention.map((a) => a.title).join("\n")}>${attention.length}</span>`
+          : t.key === "board" && b.pending ? html`<span class="badge" aria-label="needs attention"
               title="An SD install was interrupted: Board > Versions">!</span>`
           : t.key === "workbench" && b.deploy.state === "running" ? html`<span class="badge run" data-testid="workbench-tab-badge"
               aria-label="programming" title=${`Programming ${b.deploy.overlay || "a design"}`}><${Icon} name="loader-circle" cls="spin" /></span>`

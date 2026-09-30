@@ -1406,3 +1406,17 @@ button.link {
   font-size: 11px; color: var(--accent-text); font-family: var(--font-mono); white-space: nowrap;
   font-variant-numeric: tabular-nums; min-width: 52px;
 }
+
+/* the header (step 5): the name with its health, the facts on one row at 1440 */
+.header-title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.header-title-row .header-title { min-width: 0; }
+.header-title-row .chip { flex: none; }
+.facts { column-gap: 20px; }
+.fact-value { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.design-fact .fact-value .chip { font-weight: 500; }
+.pgm-fact { display: inline-flex; flex-direction: column; gap: 3px; min-width: 150px; }
+.pgm-fact .chip { font-variant-numeric: tabular-nums; }
+.usb-fact .fact-value .icon { color: var(--text-3); }
+.usb-fact.none .fact-value, .usb-fact.unknown .fact-value { color: var(--text-2); font-weight: 400; }
+.section-tab .badge.warn { background: var(--warn); }
+.header-actions { flex-wrap: wrap; justify-content: flex-end; }
