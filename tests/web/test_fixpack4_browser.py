@@ -340,3 +340,36 @@ def test_negative_twin_a_board_never_read_shows_no_lease_it_does_not_know(page_f
     expect(by_id(page, "preview-lock")).to_have_text("free")
     expect(by_id(page, "preview-lease")).to_have_count(0)            # nothing read: never "free"
     assert "held by" not in page.locator(".preview").inner_text()
+
+
+# --- 3: the header's Harness says which version it is ----------------------------------------------
+
+
+@pytest.mark.week_plan("harness_api", sim=True)
+def test_the_header_says_release_or_firmware_and_never_disagrees_silently(page_factory, daemon):
+    from tests.web.test_updui_browser import harness_page, install_rekey
+
+    page, card = harness_page(page_factory)
+    value = by_id(page, "fact-harness-value")
+    expect(value).to_have_attribute("data-source", "release", timeout=T)   # the list is read now
+    expect(value).to_have_text("release 1.0.0")
+    expect(by_id(page, "fact-harness-fw")).to_have_count(0)               # the firmware agrees
+    panel = install_rekey(page, card)
+    expect(panel.locator('[data-testid="harness-result"]')).to_contain_text("installed: harness 1.1.1",
+                                                                            timeout=T)
+    # the mock's board now runs release 1.1.1 while its firmware still says 1.0.0: both are said
+    expect(value).to_have_text("release 1.1.1", timeout=T)
+    expect(by_id(page, "fact-harness-fw")).to_have_text(" · firmware 1.0.0")
+    expect(by_id(page, "harness-running")).to_contain_text("1.1.1")
+    expect(by_id(page, "harness-running-fw")).to_have_text("firmware reports 1.0.0")
+    assert page.errors == []
+
+
+def test_negative_twin_before_the_list_is_read_the_header_says_firmware(page_factory):
+    page = page_factory(**APP)
+    open_board(page)
+    value = by_id(page, "fact-harness-value")
+    expect(value).to_have_text("firmware 1.0.0", timeout=T)
+    expect(value).to_have_attribute("data-source", "firmware")
+    assert "version verb" in (value.get_attribute("title") or "")
+    expect(by_id(page, "fact-harness-fw")).to_have_count(0)

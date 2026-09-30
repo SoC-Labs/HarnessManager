@@ -28,7 +28,7 @@ export function IdentityCard({ info }) {
       <dt>Shell</dt><dd class="mono" data-testid="id-shell">${id.shell_id || "unknown"}</dd>
       <dt>Design</dt>
       <dd>${id.rm_name || "unknown design"} <span class="mono sub">${id.rm_id ? `rm_id ${id.rm_id}` : ""}</span></dd>
-      <dt>Harness</dt>
+      <dt title="What the harness firmware reports (its version verb); the catalogue release is in Update > Harness versions">Harness firmware</dt>
       <dd><div class="line" data-testid="id-harness">${id.harness_version || "unknown"}
         ${id.harness_impl ? html`<span class="tag">${id.harness_impl}</span>`
           : html`<span class="sub" title="the harness predates the version verb, so it cannot say">implementation unknown</span>`}

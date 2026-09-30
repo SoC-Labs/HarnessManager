@@ -520,6 +520,8 @@ export function HarnessVersionsCard({ bid }) {
       ${h.empty && !cat ? html`<${Reason} testid="harness-empty" text="No list yet: Refresh fetches the signed channel and plans every release for this board (nothing is installed)." />` : null}
       ${cat ? html`<dl class="kv" data-testid="harness-running">
           <dt>Running</dt><dd><b class="mono">${board.running_release || "unrecorded"}</b>
+            ${running.harness && running.harness !== board.running_release ? html` · <span data-testid="harness-running-fw"
+              title="What the harness firmware reports (its version verb): the header shows both">firmware reports <span class="mono">${running.harness}</span></span>` : null}
             ${running.shell_id ? html` · static <span class="mono">${running.shell_id}</span>` : null}
             ${running.firmware_sha ? html` · fw <span class="mono">${String(running.firmware_sha).slice(0, 8)}</span>` : null}
             ${running.impl ? ` · ${running.impl}` : ""}

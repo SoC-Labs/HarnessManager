@@ -132,6 +132,39 @@ function BackgroundFact({ bid }) {
     ${w.text}<//><//>`;
 }
 
+// FIX-PACK-4: "Harness" meant two things that could disagree on one screen: the version the
+// firmware reports (the version verb, 1.0.0) and the release of the signed catalogue the board
+// runs (Update > Harness versions, 1.1.0). The header says which: the release when this page
+// knows it (the Harness versions list was read), with the firmware's number beside it when that
+// differs; otherwise "firmware 1.0.0". It never shows one number as if it were the other.
+function harnessWords(ident, release) {
+  const verb = (ident && ident.harness_version) || "";
+  if (release) {
+    return { source: "release", text: `release ${release}`, fw: verb && verb !== release ? `firmware ${verb}` : "",
+      title: verb && verb !== release
+        ? `Release ${release} of the signed harness catalogue: what Update > Harness versions matches this board to. `
+          + `Its firmware reports version ${verb}: the firmware's own number, not the release.`
+        : `Release ${release} of the signed harness catalogue (Update > Harness versions); the firmware reports ${verb || "no version"}.` };
+  }
+  if (verb) {
+    return { source: "firmware", text: `firmware ${verb}`, fw: "",
+      title: `What the harness firmware reports (its version verb). The catalogue release it belongs to shows here, `
+        + "and in Update > Harness versions, once that list is read." };
+  }
+  return { source: "unknown", text: "unknown", fw: "", title: "" };
+}
+
+function HarnessFact({ bid, ident }) {
+  const h = boardState(bid).harness;           // sections/harness.js: GET /harness/catalog, when read
+  const board = (h && h.catalog && h.catalog.board) || null;
+  const w = harnessWords(ident, board ? board.running_release : "");
+  return html`<${Fact} label="Harness" testid="fact-harness">
+    <span data-testid="fact-harness-value" data-source=${w.source} title=${w.title || undefined}>${w.text}</span>
+    ${w.fw ? html`<span class="secondary" data-testid="fact-harness-fw" title=${w.title}>${` · ${w.fw}`}</span>` : null}
+    ${ident.harness_version || ident.harness_impl
+      ? html`<span class="secondary">${` · ${ident.harness_impl || "impl unknown"}`}</span>` : null}<//>`;
+}
+
 // DELETE /boards/{bid}; `release` (LEASE-UI) releases this Harness Manager's hub lease on it
 // first (?release=true). Resolves to the timed() result; the board stays open on an error.
 async function closeBoardNow(bid, { release = false } = {}) {
@@ -189,9 +222,7 @@ function BoardHeader({ bid }) {
       <${Fact} label="Shell" testid="fact-shell"><span class="mono">${ident.shell_id || "unknown"}</span><//>
       <${Fact} label="Design" testid="fact-design">${ident.rm_name || "unknown"}
         ${ident.rm_id ? html` <span class="mono">${ident.rm_id}</span>` : null}<//>
-      <${Fact} label="Harness" testid="fact-harness">${ident.harness_version || "unknown"}
-        ${ident.harness_version || ident.harness_impl
-          ? html`<span class="secondary">${` · ${ident.harness_impl || "impl unknown"}`}</span>` : null}<//>
+      <${HarnessFact} bid=${bid} ident=${ident} />
       <${Fact} label="Build"><${CheckChip} check=${ident.build_check} testid="build-chip" /><//>
       <${Fact} label="Health"><${Chip} level=${health.level} testid="health-chip" title=${health.detail}
         icon=${health.level === "ok" ? "activity" : health.level === "err" ? "circle-x" : "circle-help"}>
@@ -288,7 +319,7 @@ function BoardPreview({ bid }) {
           <dt>Links</dt><dd>${(cand.links || []).map((l) => html`<${LinkLine} key=${l.kind + l.address} link=${l} />`)}</dd>
           <dt>Shell</dt><dd class="mono">${ident ? ident.shell_id || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
           <dt>Design</dt><dd>${ident ? html`${ident.rm_name || "unknown"} <span class="mono sub">${ident.rm_id}</span>` : html`<span class="muted">read when opened</span>`}</dd>
-          <dt>Harness</dt><dd>${ident ? ident.harness_version || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
+          <dt>Harness firmware</dt><dd>${ident ? ident.harness_version || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
           <dt>Build check</dt><dd>${ident ? html`<${CheckChip} check=${ident.build_check} testid="preview-build" />` : html`<span class="muted">read when opened</span>`}</dd>
           <dt title=${LOCK_TITLE}>This app's lock</dt><dd data-testid="preview-lock">${held ? html`<${Chip} level="warn" icon="lock" title=${LOCK_TITLE}>held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
             : html`<${Chip} icon="lock-open" title=${LOCK_TITLE}>free<//>`}</dd>
