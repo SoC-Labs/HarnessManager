@@ -6,10 +6,9 @@
 import { hostOf } from "../format.js";
 import { html } from "../lib.js";
 import { changed, S } from "../store.js";
-import { applyTheme } from "../theme.js";
-import { Chip, CopyButton, Icon, Reason, Seg, Spinner } from "../ui.js";
+import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
 import { HubsSection } from "./hubs.js";
-import { RowGroup, RowLabel } from "./rows.js";
+import { RowGroup } from "./rows.js";
 import {
   addBoard, adoptInline, detectTool, dismissRestart, joinKey, resetSetting, restartIsDemo, restartPending, saveSetting,
   sectionOfRow,
@@ -36,10 +35,14 @@ function isInstance(key) {
   return p[0] === "hubs" || p[0] === "boards";
 }
 
-// FIX-PACK-4: rows the service stores but nothing reads yet are not offered here (a setting
-// that changes nothing is a trap); `config` still lists them, and docs/USER_GUIDE.md §11 says
-// why. panel.presence_who: the panel shows user@host until the presence service reads it.
-export const NOT_READ_ROWS = new Set(["panel.presence_who"]);
+// FIX-PACK-4 + UI v2 (round 3, M7): rows the service stores but nothing reads yet are not
+// offered here (a setting that changes nothing is a trap); `config` still lists them, and
+// docs/USER_GUIDE.md §11 names them: panel.presence_who (the panel shows user@host until the
+// presence service reads it), consoles.scrollback and consoles.font_size (the console keeps
+// 5000 lines at its own size), general.window_size (the app window is 1440x900) and kits.jobs.
+// "Show developer settings" (Advanced) shows them, marked.
+export const NOT_READ_ROWS = new Set(["panel.presence_who", "consoles.scrollback", "consoles.font_size",
+  "general.window_size", "kits.jobs"]);
 
 // The rows of a section that are not a hub's or a board's: [core rows, {pack: rows}, dev rows].
 function sectionRows(id, skip = new Set()) {
@@ -48,7 +51,11 @@ function sectionRows(id, skip = new Set()) {
   const dev = [];
   for (const key of SS.order) {
     const row = SS.rows[key];
-    if (!row || isInstance(key) || skip.has(key) || NOT_READ_ROWS.has(key) || sectionOfRow(row) !== id) continue;
+    if (!row || isInstance(key) || skip.has(key) || sectionOfRow(row) !== id) continue;
+    if (NOT_READ_ROWS.has(key)) {
+      if (SS.dev) dev.push(row);                     // shown with the seams, where nothing is promised
+      continue;
+    }
     const spec = specOf(key) || {};
     if (spec.ui === false) dev.push({ ...row, readonly: true, dev: true, env: row.env || spec.env || "" });
     else if (spec.pack) (packs[spec.pack] = packs[spec.pack] || []).push(row);
@@ -98,33 +105,23 @@ function DevGroup({ rows, id }) {
 
 // promote: keys shown up front even when the schema tucks them under "more" (the Tools
 // section's four Detect rows).
+// first: keys shown at the top of the section (General's "Open a board on"); labels: the words
+// a row shows instead of its doc's first clause.
 export function GenericSection({ id, skip = new Set(), extras = {}, before = null, after = null, quiet = false,
-  promote = new Set() }) {
+  promote = new Set(), first = [], labels = {} }) {
   const rows = sectionRows(id, skip);
-  const core = rows.core.map((r) => (promote.has(r.key) && r.advanced ? { ...r, advanced: false } : r));
+  const lifted = rows.core.map((r) => (promote.has(r.key) && r.advanced ? { ...r, advanced: false } : r));
+  const core = [...first.map((k) => lifted.find((r) => r.key === k)).filter(Boolean),
+    ...lifted.filter((r) => !first.includes(r.key))];
   const { packs, dev } = rows;
   const hubs = (SS.listing && SS.listing.instances.hubs) || [];
   return html`<div class="stack gap-12">
     ${before}
-    <${RowGroup} id=${id} rows=${core} policyPath=${policyPath()} extras=${extras} hubs=${hubs} />
+    <${RowGroup} id=${id} rows=${core} policyPath=${policyPath()} extras=${extras} hubs=${hubs} labels=${labels} />
     <${PackGroups} packs=${packs} id=${id} />
     <${DevGroup} rows=${dev} id=${id} />
     ${!core.length && !Object.keys(packs).length && !before && !quiet ? html`<p class="muted">Nothing to set here.</p>` : null}
     ${after}
-  </div>`;
-}
-
-// --- General: the theme stays in this browser -----------------------------------------------------
-
-function ThemeRow() {
-  const row = SS.rows["general.theme"] || { key: "general.theme", doc: "Light, dark, or follow the system" };
-  return html`<div class="srow" data-testid="setting-row" data-key="general.theme" data-source="browser">
-    <${RowLabel} row=${row} label="Theme" />
-    <div class="srow-ctl"><${Seg} label="Theme" value=${S.theme} onChange=${(v) => { applyTheme(v); changed(); }}
-      options=${[{ value: "system", label: "Auto", icon: "monitor" }, { value: "light", label: "Light", icon: "sun" },
-        { value: "dark", label: "Dark", icon: "moon" }]} /></div>
-    <div class="srow-meta"><${Chip} cls="src plain" testid="source-chip" title="kept in this browser, read before the page draws">
-      <span data-source="browser">this browser</span><//><span class="reset-gap"></span></div>
   </div>`;
 }
 
@@ -406,8 +403,10 @@ export function SettingsSectionBody({ updatesCard = null }) {
       return html`<div class="stack gap-12">${updatesCard}
         <${GenericSection} id="updates" skip=${UPDATES_CARD_KEYS} quiet=${true} /></div>`;
     case "general":
-      return html`<${GenericSection} id="general" skip=${new Set(["general.theme"])}
-        before=${html`${top}<div class="sgroup"><${ThemeRow} /></div>`} />`;
+      return html`<${GenericSection} id="general" skip=${new Set(["general.theme"])} first=${["general.open_on"]}
+        labels=${{ "general.open_on": "Open a board on" }}
+        before=${html`${top}`} after=${html`<${Reason} testid="theme-note" icon="sun"
+          text="Theme is in the sidebar's foot (Auto / Light / Dark): it is this browser's, read before the page draws." />`} />`;
     case "tools":
       return html`<${GenericSection} id="tools" extras=${toolExtras()} promote=${new Set(Object.keys(TOOL_KEYS))}
         before=${html`<p class="secondary">Empty means
