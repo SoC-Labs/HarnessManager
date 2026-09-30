@@ -13,6 +13,7 @@
 # THE SCRIPT IS THE INSTRUCTIONS. Every step the guide shows is a stage below,
 # every check the guide shows is a gate below, and every gate prints one line
 #   HM_GATE <name> PASS|FAIL <detail>
+# (and every stage one line: HM_STAGE <stage> <epoch seconds>)
 # which `harness-manager kit check` and the web guide read back. Vivado exits 0
 # after a Tcl error, so the markers -- not the exit code -- are the verdict:
 #   HM_RM_BUILD_COMPLETE   everything passed; the receipt is written
@@ -157,7 +158,10 @@ proc note { name detail } {
     puts "HM_GATE $name NOTE $detail"
     lappend ::gates [list $name NOTE $detail]
 }
-proc stage { n } { puts "HM_STAGE $n"; set ::stage $n }
+# HM_STAGE <stage> <epoch seconds>: the seconds let a watcher show how long the stage has run.
+# Readers take the stage from the first word and the seconds, when there, from the second (a
+# log from before it has none).
+proc stage { n } { puts "HM_STAGE $n [clock seconds]"; set ::stage $n }
 proc done_after { n } {
     if { [lsearch -exact $::STAGES $n] >= $::stop_idx } {
         write_receipt stopped

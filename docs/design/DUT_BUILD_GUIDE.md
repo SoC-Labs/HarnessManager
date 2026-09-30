@@ -197,9 +197,12 @@ What sourcing into a running Vivado needs to know (A2, A3):
 - **The log.** In a running session the `HM_` lines go to that session's log (`vivado.log`
   where it started), not `DIR/build_rm.log`. The receipt is the verdict either way. The GUI and
   `-mode tcl` commands name `-log DIR/build_rm.log`, so there it is the same file as batch.
-- **Batch is unchanged.** A batch run to the link with the old template (`1a127de`) and one
-  with the new, same design and kit: the 19 `HM_` lines and the receipts are identical (paths
-  aside). A test runs the script in Python's Tcl and pins the preflight markers.
+- **Batch is unchanged but for one intended field.** A batch run to the link with the old
+  template (`1a127de`) and one with `89a0202`, same design and kit: the 19 `HM_` lines and the
+  receipts are identical (paths aside). Since then (UI2-API-BUILD's request) each stage line is
+  `HM_STAGE <stage> <epoch seconds>`, so a watcher can show how long a stage has run; every HM
+  reader takes the stage from the first word, and old logs still read. A test runs the script
+  in Python's Tcl and pins the preflight markers, the seconds included.
 
 ### 3.6 Floorplan: stop after link, nested pblocks via `rm_xdc`
 

@@ -94,8 +94,9 @@ ran alone.
 | A4 crash 2 | batch, STOP_AFTER=link, `rm_xdc` = `write_xdc -cell`'s file; 67f4261 | 18:05:40 → 18:14:24 | 8 min 44 s | 3.10 GB | 58 → 42 | **segfault**, same place |
 | **A4** | batch, full build, `rm_xdc` = the floorplan; 89a0202 (67f4261 + the fix) | 18:15:08 → 18:49:32 | **34 min 24 s** | 4.90 GB | 42 → 24 | `HM_RM_BUILD_COMPLETE`, 25 gates |
 | placement | `-mode tcl`, `open_checkpoint` of the routed DCP, `tools/place_stdin.tcl` | 18:49:59 → 18:51:39 | 1 min 40 s | | 25 | §8 |
-| batch old / new | batch, STOP_AFTER=link, `RM_XDC=` (none): the 1a127de template, then this lane's (89a0202) | 18:53:06 → 19:01:32 | 4 min 7 s / 4 min 20 s | 3.18 / 3.10 GB | 17 → 15 | the 19 `HM_` lines and the receipts are **identical** (`vivado/batch_markers_old_vs_new_template.txt`) |
+| batch old / new | batch, STOP_AFTER=link, `RM_XDC=` (none): the 1a127de template, then this lane's (89a0202) | 18:53:06 → 19:01:32 | 4 min 7 s / 4 min 20 s | 3.18 / 3.10 GB | 17 → 15 | the 19 `HM_` lines and the receipts are **identical** (`vivado/batch_markers_old_vs_new_template.txt`). Later, on request, `HM_STAGE` gained the epoch seconds (§9) |
 | V3 negative | batch, full build, `rm_xdc` = `write_xdc -cell`'s file; 89a0202 | 19:01:49 → 19:07:27 | 5 min 38 s | 3.90 GB | 15 → 22 | **FAILED** at `place_design` (DRC PLDE-1), §6 |
+| stage seconds | batch, STOP_AFTER=preflight, the template with `HM_STAGE <stage> <seconds>` | 22:06 | 20 s | | 4 | `HM_STAGE preflight 1790802386`, the rest unchanged (`logs/s22_vivado_stage_secs.txt`) |
 | A4c | `-mode tcl`, link + the journal's full-name lines read `-cell` and without | 19:08:32 → 19:12:48 | 4 min 16 s | 3.18 GB | 13 → 14 | `-cell`: empty child pblock (Vivado 12-1433); without: 118 cells |
 
 ## 4. A1: Tcl mode stays open
@@ -317,10 +318,11 @@ that pins batch's markers, which must pass on both:
 | Change | Where | Tests (`tests/unit/test_kit_interactive.py`, `tests/integration/test_kit_interactive_cli.py`) |
 |---|---|---|
 | `kit build --gui`; the Tcl line for an open Vivado; `--json` `mode`/`commands`/`source_tcl`/`stays_open` | `render.py:131-196` (`MODES`, `tclargs`, `vivado_command(mode=)`, `SOURCE_WHEN`, `stays_open`, `source_tcl`); `cmd_kit.py:142` (flag), `:410-466` (`_build`); `helptext.py:361`; the build README (`script.py:372`) | the gui/tcl commands are the batch one in another mode (twin: a bad mode); tclargs (twin: a bad stage); the line always sets argv (twin: `set argv {}`; a brace refused); the floorplan words name the static's partition; CLI: the line and the floorplan words (twin: none without link), `--gui` first (twin: batch first), JSON has every way (twin: batch, link), a script written to stop at link (twin: `--stop-after bitstream`) |
-| `argv` may be unset | `build_rm.tcl.template:113` | a session with no argv builds with the script's own values (twin: an argv still wins) |
-| `hm_save_floorplan FILE` | `build_rm.tcl.template:281-325` | writes the children scoped for `read_xdc -cell`, never the partition's pblock, and `check_xdc` takes it (twin: no child is an error that says how); a round trip keeps the name (twin: an unset property is not written) |
-| `rm_xdc` read with the cell asked for again | `build_rm.tcl.template:505-508` | the new spelling in the link stage, after `read_checkpoint -cell` (twin: the crashing form is gone) |
-| batch unchanged | (the three above) | the preflight markers, pinned (passes on both templates); in Vivado, §3's old/new comparison |
+| `argv` may be unset | `build_rm.tcl.template:114` | a session with no argv builds with the script's own values (twin: an argv still wins) |
+| `hm_save_floorplan FILE` | `build_rm.tcl.template:285-329` | writes the children scoped for `read_xdc -cell`, never the partition's pblock, and `check_xdc` takes it (twin: no child is an error that says how); a round trip keeps the name (twin: an unset property is not written) |
+| `rm_xdc` read with the cell asked for again | `build_rm.tcl.template:509-512` | the new spelling in the link stage, after `read_checkpoint -cell` (twin: the crashing form is gone) |
+| batch unchanged but for the stage seconds | (the three above) | the preflight markers, pinned; in Vivado, §3's old/new comparison |
+| `HM_STAGE <stage> <epoch seconds>` (UI2-API-BUILD's CCR) | `build_rm.tcl.template:161-164` | the pin now requires the seconds (it fails on the template without them); every reader takes the stage from the first word (twin: a log without seconds); a running build reads its stage either way (twin: a verdict ends it). HM's readers: `render.parse_markers`, `build.running_build` (`rest.split()[0]`), the guide through it; the web Build section reads the receipt's `stage`, not the log |
 | a stopped receipt is not a failure | `build.py:101-121` (`build_dir_of`, `stopped_words`, `finish_hint`); `cmd_kit.py:481-495` (`_check`); `guide.py:421-429` | the words (a NOTE is no pass) and `kit pack` still refusing it; `kit check` rc 0 with `state: stopped` (twins: pack refuses, a failed receipt still 15); another static still 14 (twin: the right one 0); the guide offers `STOP_AFTER=bitstream` (twin: a failed receipt is FAILED, no finish command) |
 
 **The gate.** `nice -n 10 make venv PYVERIFY=`, `.venv/bin/pip install -q --find-links vendor
@@ -331,7 +333,7 @@ passed, 2 skipped), `make lint` (pass), and `nice -n 10 make check PYVERIFY=` af
 It includes the virtual-board tests, which bind free loopback ports in 10000-19999. The lead asked
 for one more run at low load, to `/tmpdir/claude-74755/kit-interactive-gate.log`: its result is the next paragraph.
 
-Second run (on the commit that adds this README): result pending when this line was written; the hand-back and the next commit give it.
+Second run: on the commit that adds the HM_STAGE seconds; its result is added by the commit after it.
 
 ## 10. Files here
 

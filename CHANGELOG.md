@@ -40,6 +40,9 @@ owners.
   `stopped_after`, `passed: false`. `kit pack` still refuses it. The guide's Build step
   offers the command with `-tclargs STOP_AFTER=bitstream`, which runs a script written with
   `--stop-after link` to the end.
+- `build_rm.tcl` prints `HM_STAGE <stage> <epoch seconds>` (was `HM_STAGE <stage>`), so a
+  watcher can show how long the current stage has run. Every HM reader takes the stage from
+  the first word; a log from before still reads. The only change to batch's markers.
 - docs: USER_GUIDE 7.2 "Run it in your own Vivado" and "Floorplan"; DUT_BUILD_GUIDE §3.5-3.6.
 
 ### Findings from a clean-account run of the guide (FIX-PACK-3)
