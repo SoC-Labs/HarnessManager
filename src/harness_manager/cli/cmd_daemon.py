@@ -32,7 +32,8 @@ from harness_manager.core.errors import ExitCode, UsageError
 from .context import Ctx
 from .output import TSV_COLUMNS, Result, tsv_field
 
-DAEMON_COLUMNS = ("STATE", "PID", "PORT", "URL", "STATE_DIR", "ENV_WARNING")   # +FIX-PACK-2
+DAEMON_COLUMNS = ("STATE", "PID", "PORT", "URL", "STATE_DIR", "ENV_WARNING",   # +FIX-PACK-2
+                  "ENV_NOTE")                                              # +FIX-PACK-3
 UI_COLUMNS = ("URL", "PORT", "PID", "STARTED")
 APP_COLUMNS = ("URL", "PORT", "PID", "STARTED", "WINDOW")
 
@@ -204,6 +205,9 @@ def cmd_daemon(ctx: Ctx) -> int:
                         human=[f"{outcome:<10} harness-manager-daemon ({sdir})"]))
         return ExitCode.OK
     st = control.status(sdir)
+    note = _env_note(st)
+    if note:
+        st["env_note"] = note
     human = [f"state      {st['state']}", f"state dir  {sdir}"]
     if st.get("pid"):
         human.append(f"pid        {st['pid']}")
@@ -218,13 +222,33 @@ def cmd_daemon(ctx: Ctx) -> int:
     return ExitCode.OK
 
 
+#: FIX-PACK-3 item 2 (P8): a stopped service printed no ``env`` line at all, which read as
+#: "no variables". The environment is the running service's, so say where it went.
+ENV_NOT_RUNNING = "the service is not running; its environment is shown while it runs"
+ENV_NO_ANSWER = "the service does not answer; its environment is shown while it answers"
+
+
+def _env_note(st: dict) -> str:
+    """Why ``status`` has no environment to show: ``""`` when it has one (or the service runs
+    but is an older one with no ``/daemon/env``: nothing to say)."""
+    if st.get("env") is not None:
+        return ""
+    state = st.get("state")
+    if state in ("stopped", "stale"):
+        return ENV_NOT_RUNNING
+    if state == "unresponsive":
+        return ENV_NO_ANSWER
+    return ""
+
+
 def _env_lines(st: dict) -> list[str]:
     """FIX-PACK-2 item 6: the service's own variables (what it STARTED with, from the shell
     that started it), each setting one overrides, and the warning when a tool variable hides
-    your own setting."""
+    your own setting. FIX-PACK-3: a service that is not running says so."""
     env = st.get("env")
     if env is None:
-        return []
+        note = _env_note(st)
+        return [f"env        ({note})"] if note else []
     if not env:
         return ["env        no HARNESS_MANAGER_* or tool variables in the service's environment"]
     by_var = {o.get("var"): o for o in st.get("env_overrides") or []}
@@ -266,7 +290,7 @@ def can_open_browser() -> bool:
 
 def _row(data: dict) -> list:
     return [data.get("state"), data.get("pid"), data.get("port"), data.get("url"),
-            data.get("state_dir"), data.get("env_warning", "")]
+            data.get("state_dir"), data.get("env_warning", ""), data.get("env_note", "")]
 
 
 def cmd_ui(ctx: Ctx) -> int:

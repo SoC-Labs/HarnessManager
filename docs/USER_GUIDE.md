@@ -151,7 +151,7 @@ it, so you can use both at once. `harness-manager daemon status` shows it.
 | `harness-manager app` | the app in its own window |
 | `harness-manager ui` | the same page in a browser tab |
 | `harness-manager ui --no-browser` | print the URL only (for `ssh -L`) |
-| `harness-manager daemon status` | is the service running, and where; the tool variables it started with |
+| `harness-manager daemon status` | is the service running, and where; the tool variables it started with (shown while it runs) |
 | `harness-manager daemon stop` | stop it; the next command starts it again |
 | `harness-manager help --tabs` | the help text the app's **Help** shows |
 
