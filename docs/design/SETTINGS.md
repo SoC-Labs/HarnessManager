@@ -625,7 +625,7 @@ The columns:
 |---|---|---|---|---|---|---|---|---|---|
 | D1 | `debug.port_base` | pin the gdb/telnet/tcl block | env `HARNESS_MANAGER_DEBUG_PORT_BASE` (`services/debug.py:117,122-124,744-748`) | a hashed slot from 23300 | M | | D | A | ✓ (advanced) |
 | D2 | `debug.xvc_port_base` | pin the relay and hw_server pair | env `HARNESS_MANAGER_XVC_PORT_BASE` (`services/xvc.py:121,124-128,1215-1219`) | a hashed slot from 23600 | M | | D | A | ✓ (advanced) |
-| D3 | `debug.hw_server_mode` | HM's own hw_server, or `--byo` | `--byo` (`cli/cmd_xvc.py:97,109`; `daemon/xvc_api.py:82,107`) | own (X2) | U | | L | U | ✓ |
+| D3 | `debug.hw_server_mode` | HM's own hw_server, or `--byo` | `--byo` (`cli/cmd_xvc.py:97,109`; `daemon/xvc_api.py:82,107`); the app's XVC "Bring your own hw_server" default (`web/static/js/sections/xvc.js` `byoOf`, FIX-PACK-4) | own (X2) | U | | L | U | ✓ |
 | D4 | `mps3.rbb_port` | the board's remote_bitbang port | pack kwarg via `--pack-overrides` (`constants.py:16`; `pack.py:296`) | 6921 | P | | D | Dev | env |
 | D5 | `HARNESS_MANAGER_MPS3_XVC_PORT` | XVC port on a direct board | `harness_manager_mps3/xvc.py:58,286-288` | 2542 | B | | L | Dev | env |
 | D6 | service timeouts | XVC start/stop/acquire, OpenOCD start/detect/stop | kwargs, never exposed (`services/xvc.py:1064-1065`; `debug.py:422-424`) | 60/5/8 s; 30/30/3 s | M | | D | Dev | env (not settable) |
@@ -636,7 +636,7 @@ The columns:
 |---|---|---|---|---|---|---|---|---|---|
 | C1 | `mps3.console.pace_ms` | per-character delay into the DUT UART | `DUT_CONSOLE_PACE_S`; pack kwarg `console_pace_s` (`harness_manager_mps3/constants.py:31`; `pack.py:298`) | 20 ms | P | | R | U | ✓ |
 | C2 | `mps3.mcc.pace_ms` | MCC pace over USB and over a hub share | `MccTiming.pace_s` and `SHARE_PACE_S` (`harness_manager_mps3/mcc.py:122,139,142-147`) | 60 ms; 100 ms | P | | R | U | ✓ (advanced) |
-| C3 | `consoles.line_ending` | Enter sends CR, LF or CRLF | React state per pane (`web/static/js/sections/consoles.js:14,122,192-194`) | CRLF | U | | L | U | ✓ |
+| C3 | `consoles.line_ending` | Enter sends CR, LF or CRLF | the send line's default (`web/static/js/sections/consoles.js` `defaultEnding`, FIX-PACK-4); the select changes it per pane | CRLF | U | | L | U | ✓ |
 | C4 | `consoles.scrollback`, `font_size` | the browser terminal | xterm consts (`consoles.js:44-53`) | 5000 lines; 13 px | U | | L | U | ✓ |
 | C5 | `consoles.history_bytes` | replay for a new subscriber | `ConsoleBroker` kwarg (`services/console.py:733`) | 64 KiB | M | | D | Dev | env |
 | C6 | `HARNESS_MANAGER_PTY_DIR` | the PTY link directory | `services/pty.py:107,186-189` | `/tmp/harness-manager-$USER` | U | | D | Dev | env |
@@ -645,8 +645,8 @@ The columns:
 
 | # | Key | What | Source today | Default | Scope | Sec | Chg | Owner | Menu |
 |---|---|---|---|---|---|---|---|---|---|
-| P1 | `panel.identify_s` | identify blink default | `IDENTIFY_DEFAULT_S` in three places (`services/presence.py:89-90`; `cli/cmd_panel.py:40`; `web/static/js/sections/panel.js:29`) | 10 s (1..30) | U | | L | U | ✓ |
-| P2 | `panel.presence_who` | the name the board's panel shows for you | `default_who()` (`services/presence.py:98-108,214`); no opt-out (`docs/design/CLCD_ALIGNMENT.md:28,153`) | user@host | U | | L | A | ✓ |
+| P1 | `panel.identify_s` | identify blink default | the Front panel card's Identify (`web/static/js/sections/panel.js` `identifyDefault`, FIX-PACK-4); the sidebar and the CLI keep `IDENTIFY_DEFAULT_S` 5 s (`services/presence.py`; `cli/cmd_panel.py:40`) | 5 s (1..30; was 10, LOCATE made every Identify 5 s) | U | | L | U | ✓ |
+| P2 | `panel.presence_who` | the name the board's panel shows for you | `default_who()` (`services/presence.py:98-108,214`); no opt-out (`docs/design/CLCD_ALIGNMENT.md:28,153`). Not read yet: hidden in the Settings dialog (FIX-PACK-4) | user@host | U | | L | A | ✓ |
 | P3 | `panel.beat_s` | presence hello interval | `BEAT_S`, `FAST_BEAT_S` (`core/panel.py:48,51`) | 30 s; 10 s | M | | D | Dev | env |
 
 ### A.10 Advanced (service, state, logs)

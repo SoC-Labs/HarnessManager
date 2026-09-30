@@ -170,7 +170,8 @@ class UpdateService:
             out = {"available": False, "reason": f"the hub door could not be read: {exc}"}
         st = self.lease_state(session)
         out.update(lease_required=bool(st.get("required")), mine=bool(st.get("mine")),
-                   holder=st.get("holder", ""), lease_reason=st.get("reason", ""))
+                   here=bool(st.get("here")), holder=st.get("holder", ""),
+                   lease_reason=st.get("reason", ""))
         queue: list[dict[str, Any]] = []
         hub = getattr(session, "hub", None)
         if hub is not None and st.get("required"):

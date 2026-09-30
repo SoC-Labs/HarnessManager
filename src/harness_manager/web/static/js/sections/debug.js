@@ -81,9 +81,9 @@ export function DebugSection({ bid }) {
           <${Chip} level=${LEVEL[st.state] ?? "unk"} testid="debug-state">${st.state}<//>
           ${st.detail ? html`<span class="secondary small">${st.detail}</span>` : null}</div>
         <${ActionRow} bid=${bid} panel="debug" spec=${detect} icon="scan-search"
-          gate=${{ capability: "debug_dut" }} />
+          gate=${{ capability: "debug_dut", holder: "Debug" }} />
         <${ActionRow} bid=${bid} panel="debug" spec=${up} variant="primary" icon="play"
-          gate=${{ capability: "debug_dut", guard: () => (live ? "the session is already up" : "") }} />
+          gate=${{ capability: "debug_dut", guard: () => (live ? "the session is already up" : ""), holder: "Debug" }} />
         <${ActionRow} bid=${bid} panel="debug" spec=${down} icon="square"
           gate=${{ guard: () => (live ? "" : "the session is down") }} />
         <${ResultBlock} lines=${p.lines} panel=${p} testid="debug-result"

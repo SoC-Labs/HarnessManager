@@ -98,7 +98,7 @@ export function attentionItems(bid) {
       // LEASE-UI: your hub name, but not this Harness Manager (every lab session shares it).
       out.push({ key: "lease", level: "warn", title: `Leased to ${lease.holder} in another session.`,
         text: `Your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner)${left !== null ? `; it ends in ${durationText(left)}` : ""}. Background checks are paused. Use the board there, or release it there first.` });
-    } else if (!lease.mine) {
+    } else if (who.state === "other") {
       const asked = requestActive(bid);
       out.push({ key: "lease", level: "err", title: `Leased to ${lease.holder || "someone else"} on ${hub.host}.`,
         text: `This client must not drive the board until the lease is yours${left !== null ? ` (theirs ends in ${durationText(left)})` : ""}. ${asked
@@ -257,7 +257,7 @@ function DebugTile({ bid }) {
     <div class="mt-8">${live
       ? html`<${ActionRow} bid=${bid} panel="debug" spec=${stop} icon="square" compact=${true} gate=${{}} />`
       : html`<${ActionRow} bid=${bid} panel="debug" spec=${start} variant="primary" icon="play" compact=${true}
-          gate=${{ capability: "debug_dut" }} />`}</div>
+          gate=${{ capability: "debug_dut", holder: "Debug" }} />`}</div>
     ${p.lines && p.lines.length && p.running ? html`<p class="muted small mt-8">${p.lines[p.lines.length - 1].text || ""}</p>` : null}
   <//>`;
 }

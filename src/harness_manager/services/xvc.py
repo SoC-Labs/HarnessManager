@@ -104,7 +104,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession
 from harness_manager.services.claim import lock_error, lock_refusal
-from harness_manager.services.lease import not_fresh
+from harness_manager.services.lease import elsewhere_text, held_here, not_fresh
 
 log = logging.getLogger(__name__)
 
@@ -1262,11 +1262,13 @@ class XvcService:
             raise HeldError(f"XVC is for the lease holder only, and nobody holds {target}",
                             holder="nobody",
                             hint="take the lease first: `harness-manager lease acquire TARGET`")
-        if not lease.get("mine"):
+        if not held_here(lease):             # FIX-PACK-4: here, not mine (another session)
             who = lease.get("holder") or "someone else"
-            raise HeldError(f"XVC is for the lease holder only: {who} holds {target}",
+            raise HeldError(f"XVC is for the lease holder only: {elsewhere_text(lease, target)}",
                             holder=who,
-                            hint="ask for the board: `harness-manager lease request TARGET`")
+                            hint="run it from the session that holds the lease, or release it "
+                                 "there first" if lease.get("mine") else
+                                 "ask for the board: `harness-manager lease request TARGET`")
         return str(lease.get("holder") or "")
 
     # -- ports -------------------------------------------------------------------------------

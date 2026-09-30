@@ -19,7 +19,8 @@ import { call, callBlob, heldByJob, routeMissing, toApiError } from "../api.js";
 import { clock } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, onBoardEvent, onJobEnded, timed } from "../store.js";
-import { week } from "../week.js";
+import { holderOnly } from "../week.js";
+import { settingValue } from "../prefs.js";
 import { ActionRow, Card, Chip, CopyButton, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 
 export const XVC_SCOPE = "XVC reaches the reconfigurable partition's debug chain (Debug Bridge, "
@@ -45,7 +46,8 @@ export function xvc(bid) {
   if (!b.xvc) {
     b.xvc = {
       st: null, error: null, at: 0, unsupported: "",   // unsupported: why there is no XVC here
-      byo: false,              // the toggle; an open session's own mode wins
+      byo: null,               // the toggle (null: the setting debug.hw_server_mode, byoOf);
+                               // an open session's own mode wins
       heldBy: "",              // the last open found the board's slot taken: by whom
       swap: "",                // non-empty while a partition swap holds the session
       reattached: "",          // the design it re-attached on after the last swap
@@ -55,6 +57,12 @@ export function xvc(bid) {
     };
   }
   return b.xvc;
+}
+
+// FIX-PACK-4: "Bring your own hw_server" starts as Settings > Debug > debug.hw_server_mode
+// says (prefs.js); a tick here wins for this page.
+export function byoOf(x) {
+  return x.byo === null || x.byo === undefined ? settingValue("debug.hw_server_mode") === "byo" : !!x.byo;
 }
 
 function slotHeldText(st) {
@@ -112,7 +120,7 @@ function tclKey(bid) {
   const st = x.st || {};
   const ltx = st.ltx || {};
   const pref = ltx.preferred && ltx[ltx.preferred];
-  return [st.open ? "open" : (x.byo ? "byo" : "m1"), st.mode, st.url, st.rm_id,
+  return [st.open ? "open" : (byoOf(x) ? "byo" : "m1"), st.mode, st.url, st.rm_id,
     pref ? pref.path : ""].join("|");
 }
 
@@ -131,7 +139,7 @@ export async function loadTcl(bid) {
   x.tclGen += 1;
   const gen = x.tclGen;
   const open = !!(x.st && x.st.open);
-  const byo = open ? "" : (x.byo ? "true" : "false");
+  const byo = open ? "" : (byoOf(x) ? "true" : "false");
   const r = await timed("xvc tcl", () => call("xvcTcl", { bid, byo }));
   if (gen !== x.tclGen) return;          // a newer read is on its way
   if (r.error && heldByJob(r.error)) return;
@@ -154,15 +162,10 @@ onJobEnded((bid, kind) => {
 
 // X6: behind a hub, XVC is for the lease holder only (the daemon refuses anyone else with
 // 409 HELD naming the holder). A board with no hub has no lease: its session lock is the gate.
+// FIX-PACK-4: the one rule (week.js holderOnly): held HERE, never `mine` (another session of
+// your hub name held it and this card enabled Open).
 export function leaseReason(bid) {
-  const w = week(bid);
-  if (!w.hubLoaded && !w.hubUnsupported) return "reading the board's hub lease first";
-  const hub = w.hub;
-  if (!hub) return "";
-  const lease = hub.lease;
-  if (!lease) return "XVC is for the lease holder only, and nobody holds this board's lease: acquire it first (header)";
-  if (!lease.mine) return `XVC is for the lease holder only: ${lease.holder || "someone else"} holds this board`;
-  return "";
+  return holderOnly(bid, "XVC");
 }
 
 function statusLines(st) {
@@ -198,10 +201,10 @@ export function xvcSpecs(bid) {
   };
   const open = {
     key: "xvc_open", label: "Open", busyLabel: "Opening...", budgetS: 90,
-    command: `xvc open ${target}${x.byo ? " --byo" : ""}`,
+    command: `xvc open ${target}${byoOf(x) ? " --byo" : ""}`,
     run: (ctx) => {
       began();
-      return runJob("xvcOpen", { bid }, { byo: !!x.byo },
+      return runJob("xvcOpen", { bid }, { byo: byoOf(x) },
         (d) => ctx.progress(d.phase || "starting", d.phase), "xvc_open");
     },
     render: statusLines, onDone: keep,
@@ -290,6 +293,8 @@ export function viewState(bid) {
 export function XvcCard({ bid }) {
   const x = xvc(bid);
   useEffect(() => { loadXvc(bid); }, [bid]);
+  const byo = byoOf(x);
+  useEffect(() => { if (x.st) scheduleTcl(bid); }, [bid, byo]);     // the setting's answer came
   const st = x.st || {};
   const state = viewState(bid);
   const look = STATE_LOOK[state] || { level: "unk", icon: "circle-help" };
@@ -312,7 +317,9 @@ export function XvcCard({ bid }) {
   const pref = ltx.preferred ? ltx[ltx.preferred] : tclLtx;
   const design = { name: st.rm_name || ident.rm_name || "", id: st.rm_id || ident.rm_id || "" };
   const att = st.attached;
-  const openGuard = () => (st.reason ? `Cannot: ${st.reason}` : "") || lease
+  // FIX-PACK-4: the lease rule is the gate's `holder` (actions.js), so Open is never the
+  // primary button for someone who may not use it; Close stays for an open session.
+  const openGuard = () => (st.reason ? `Cannot: ${st.reason}` : "")
     || (st.open ? "the session is already open" : "");
   const closeGuard = () => (st.open ? "" : lease || "no XVC session is open");
   const byoLocked = !!st.open || !!p.running;
@@ -334,15 +341,15 @@ export function XvcCard({ bid }) {
       </div>
       <div class="grid split xvc-body">
         <div class="actions">
-          <label class=${`arm xvc-byo ${x.byo ? "armed" : ""}`} data-testid="xvc-byo"
+          <label class=${`arm xvc-byo ${byoOf(x) ? "armed" : ""}`} data-testid="xvc-byo"
               title=${byoLocked ? "close the session to change it" : ""}>
-            <input type="checkbox" checked=${st.open ? st.mode === "byo" : x.byo} disabled=${byoLocked}
+            <input type="checkbox" checked=${st.open ? st.mode === "byo" : byoOf(x)} disabled=${byoLocked}
               onChange=${(e) => { x.byo = e.target.checked; changed(); scheduleTcl(bid, 0); }} />
             <${Icon} name="cpu" />
             <span>Bring your own hw_server (<code>--byo</code>): Harness Manager starts none, and your
               Vivado opens the relay itself with <code>open_hw_target -xvc_url</code>.</span>
           </label>
-          <${ActionRow} bid=${bid} panel="xvc" spec=${open} variant="primary" icon="play" gate=${{ guard: openGuard }} />
+          <${ActionRow} bid=${bid} panel="xvc" spec=${open} variant="primary" icon="play" gate=${{ guard: openGuard, holder: "XVC" }} />
           <${ActionRow} bid=${bid} panel="xvc" spec=${close} icon="square" gate=${{ guard: closeGuard }} />
           <${ResultBlock} lines=${p.lines} panel=${p} testid="xvc-result"
             placeholder="The relay and hw_server listen on 127.0.0.1 only. A swap closes the session and re-attaches it." />

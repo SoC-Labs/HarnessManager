@@ -111,9 +111,14 @@ the application menu has **Harness Manager** and **Open with Demo Boards**.
   At the bottom: the theme, the service line, **Settings** (the sliders icon) and **Help**.
   [The sidebar](#the-sidebar-order-favourites-and-your-boardstoml-boards) below has the details.
 - **The header** shows the selected board: shell, design, harness, build check, health,
-  and for a hub board the tunnel and the lease.
+  and for a hub board the tunnel and the lease. **Harness** says which version it shows:
+  **release 1.1.0** (the signed catalogue's release the board runs, once **Update > Harness
+  versions** has read its list), with **firmware 1.0.0** beside it when the firmware's own
+  number differs; before that list is read, **firmware 1.0.0** (what the harness firmware
+  reports). The circular arrow reads the board again: its info, the **Card** line and the SD
+  journal (an interrupted SD install).
 - **The sections:** Overview, XDC, Build, Program, Consoles, Debug, Power, Clocks, SD card,
-  Update, Activity.
+  Update, Checks, Activity. In a narrow window the tabs wrap onto a second row.
 - **Overview** has four tiles: Design, Consoles, Debug and Board. A "Needs attention" strip
   appears only when something is wrong. **Details** (folded) holds identity, health counters,
   telemetry, capabilities and the front panel.
@@ -416,6 +421,21 @@ named as such, and background checks on the board stay paused while it holds it.
 board lock's chip says **Open** (the board is open here); the lease is its own badge. A
 board with no hub has no lease badge.
 
+**Who may drive a hub board: the lease holder, here.** On a board behind a hub, the buttons
+that drive it run only while this Harness Manager holds its lease: **Program**, **Restore
+baseline**, **Reset DUT**, **Reboot**, **Restart shell**, **Power-cycle**, the DUT clock,
+**Detect** and **Open session** (OpenOCD), and XVC **Open**. Otherwise each is off, not the
+highlighted button, and says why in one line ("Program is for the lease holder only: alice
+holds this board"; with nobody holding it, "acquire it first (header)"). A lease your hub
+name holds in another session counts as someone else's here; the service's own gates (XVC,
+harness installs) refuse it too. A board with no hub has no lease rule.
+
+**Before you open a board,** its preview has two rows: **This app's lock** (Harness Manager's
+own lock on the board: free unless another Harness Manager session or tool on this machine
+has it open) and **Hub lease**: who held it when this service last read it, with the time
+("held by alice@lab-pc-07, as of 10:42:07"). The service reads it again when you open the
+board; a board it has not read since it started says so instead.
+
 ![mps3-03 is yours: Release lease in the header and on the Board tile](review/2026-09-28/lease-yours-light.png)
 
 **Release lease** always asks first: "Release mps3_03? Others can take it; background
@@ -580,7 +600,9 @@ scripted boards only and polls them as before.
 
 **In the app:** the Overview's **Consoles** tile, or the **Consoles** section. **Open**
 shows the console in the page. **Attach with screen** gives the `screen` command to copy.
-**Export to TCP instead** makes a local port for a raw TCP terminal.
+**Export to TCP instead** makes a local port for a raw TCP terminal. The send line under
+the terminal sends a line with Enter; the select beside it picks the ending (CRLF, CR or
+LF), starting at **Settings > Consoles > What Enter sends**.
 
 ![A console with its screen command and fixed rate](review/2026-09-24/console-screen-fixed-baud-light.png)
 
@@ -925,7 +947,8 @@ cannot configure or read back the FPGA.
 **In the app:** **Debug > Fabric debug (XVC)**.
 1. Click **Open**. HM takes the board's one XVC slot, starts its own hw_server, and shows the
    **Vivado** URL (`localhost:23707`). To use your own hw_server instead, tick **Bring your
-   own hw_server** first.
+   own hw_server** first (it starts ticked when **Settings > Debug** `debug.hw_server_mode` is
+   `byo`). Behind a hub, **Open** is for this Harness Manager holding the lease.
 2. Click **Copy Tcl** and paste it into Vivado's Tcl console. It connects to that URL and
    opens the target.
 3. **Download .ltx** gives the probes file for the loaded design.
@@ -994,7 +1017,9 @@ shows:
 
 Then the Live display, with the text mirror under it when there is no live picture, the rows
 the image reports (owner, page, touch, who is connected, recent taps), Identify with a choice
-of 5 to 30 seconds, and one line **Not reported by this image: ...** for the rest. Open that
+of 5 to 30 seconds (it starts at **Settings > General > How long the Front panel's Identify
+blinks**, 5 s unless you change it; the sidebar's and the Board tile's one-click Identify
+always blink 5 s), and one line **Not reported by this image: ...** for the rest. Open that
 line for the harness features each one needs, and for the harness type as the harness itself
 reports it (`version.impl`).
 Harness Manager never guesses the type from a missing feature: a Linux image may lack
@@ -1087,6 +1112,12 @@ verdict for this board:
 **What changes** lists exactly what an install changes. **Install…** shows the plan and
 asks. **Pin** keeps the board on a release (nothing newer is offered). **History** shows
 the last installs. **Roll back** reinstalls the release the last install replaced.
+
+**Running** is the catalogue's release the board runs; when its firmware reports another
+number (the version verb, what `info` prints), it says "firmware reports 1.0.0" beside it,
+and the header shows both. Behind a hub, installs are for this Harness Manager holding the
+lease: a lease your hub name holds in another session is not enough (the lease line says so,
+and the service refuses the install).
 
 ![Harness versions: verdicts, What changes, Pin and Install](review/2026-09-25/harness-versions-light.png)
 
@@ -1230,10 +1261,15 @@ board opens) or **restart** (the service must restart).
 reads these where it uses them (lane SET-WIRE): the tools (OpenOCD, Vivado, hw_server, uv),
 the app window's browser, the update settings, source and mirrors, the GitHub token, named
 hubs, the kit hub archive, the debug and XVC port bases, the MPS3 OpenOCD configs, overlay
-folders and card timing (`mps3.slot.*`), and the service's port, address and log level. A
-few rows are stored but not read yet: the console rows (line ending, scrollback, font size),
-`panel.identify_s`, `panel.presence_who`, `kits.jobs`, `general.window_size` and
-`debug.hw_server_mode`.
+folders and card timing (`mps3.slot.*`), and the service's port, address and log level. The
+app reads three as defaults (FIX-PACK-4): `panel.identify_s` (the Front panel card's
+Identify time), `consoles.line_ending` (what a console's send line sends with Enter; the
+select beside it changes it for that console) and `debug.hw_server_mode` (the XVC card's
+**Bring your own hw_server** box; the CLI's `xvc open` still takes `--byo`). A change
+applies in an open page at once. A few rows are stored but not read yet: `consoles.scrollback`,
+`consoles.font_size`, `kits.jobs` and `general.window_size`. `panel.presence_who` (the name
+a board's panel shows for you) is not read either: the panel shows `user@host`, and the
+dialog hides the row so it does not look like it works (`config` still lists it).
 
 A variable in the service's environment still wins over your file. The common ones:
 
@@ -1245,7 +1281,8 @@ A variable in the service's environment still wins over your file. The common on
 
 **In the app:** **Settings** (the sliders icon at the bottom of the rail) is one dialog with
 sections for General, Hubs, Boards, Tools, Updates, Harness & kits, Debug, Consoles and
-Advanced. Each row says where its value comes from (default, yours, lab default, admin, the
+Advanced. It opens on General, then on the section you last used in that window; the Update
+tab's **Settings** button opens Updates. Each row says where its value comes from (default, yours, lab default, admin, the
 pack, or a variable that overrides it), saves when you change it, and has **Reset**. A row
 the policy locks is disabled and names the policy file.
 - **Hubs:** add a hub, **Test connection**, **Add this board**
@@ -1553,7 +1590,10 @@ Send SoC Labs:
   (`%USERPROFILE%\.config\harness-manager\daemon.log` on Windows);
 - what you ran, and what it printed.
 
-The app's **Activity** section lists every command it ran and its result.
+The app's **Activity** section lists every command it ran and its result. A job that
+failed is one row with its reason (the command you ran, its rc, the error and the hint);
+a job another client ran is one row too. A click the app refused (not armed, the lease is
+someone else's) is an error row: "$ program led (refused, not run): not armed ...".
 
 ---
 

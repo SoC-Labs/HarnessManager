@@ -960,6 +960,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def boards() -> JSONResponse:
         open_ids = set(d.engine.open_boards())
         rows = []
+        last_known = getattr(getattr(d, "leases", None), "last_known", None)
+        if not callable(last_known):
+            last_known = None
         # SIDEBAR-UX (daemon/configured.py): the boards boards.toml configures are listed
         # too, built from the file with no contact (source "config"), so a restart never
         # drops them from the sidebar; `configured` says how each is reached.
@@ -976,6 +979,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             if job is not None:
                 row["job"] = job.id
                 row["job_kind"] = job.kind        # T14-5
+            # FIX-PACK-4 (additive): the hub lease as the lease service last knew it, no hub
+            # call (the preview of a board that is not open; LeaseService.last_known).
+            known = last_known(board_id) if last_known is not None else None
+            if known is not None:
+                row["lease_known"] = known
             rows.append(row)
         return _JSON(ok(boards=rows))
 

@@ -402,13 +402,16 @@ DEBUG = (
             "Pin the XVC relay and hw_server ports (0: a slot per board from 23600)",
             scope="machine", owner="admin", env="HARNESS_MANAGER_XVC_PORT_BASE",
             apply="restart", advanced=True, check=_port_or_zero),
-    # D3 cli/cmd_xvc.py:97,109; daemon/xvc_api.py:82,107
+    # D3 the app's XVC card: web/static/js/sections/xvc.js:64 (byoOf, the "Bring your own
+    # hw_server" box's default; FIX-PACK-4), read by web/static/js/prefs.js. The CLI's
+    # `xvc open` still takes --byo (cli/cmd_xvc.py:97,109; daemon/xvc_api.py:82,107).
     Setting("debug.hw_server_mode", "enum", "own", "Debug",
             "Run Harness Manager's own hw_server, or bring your own", choices=("own", "byo")),
 )
 
 CONSOLES = (
-    # C3-C4 web/static/js/sections/consoles.js:14,44-53
+    # C3 web/static/js/sections/consoles.js:18 (defaultEnding: the send line's default;
+    # FIX-PACK-4), read by web/static/js/prefs.js. C4 (scrollback, font size): not read yet.
     Setting("consoles.line_ending", "enum", "crlf", "Consoles", "What Enter sends",
             choices=("crlf", "cr", "lf")),
     Setting("consoles.scrollback", "int", 5000, "Consoles", "Lines kept in a console",
@@ -422,10 +425,16 @@ CONSOLES = (
 )
 
 PANEL = (
-    # P1 services/presence.py:89-90; cli/cmd_panel.py:40; sections/panel.js:29
-    Setting("panel.identify_s", "int", 10, "General", "How long Identify blinks (s)",
+    # P1 web/static/js/sections/panel.js:46 (identifyDefault: the Front panel card's Identify
+    # time; FIX-PACK-4), read by web/static/js/prefs.js. 5 s, as the sidebar's and the Board
+    # tile's one-click Identify (LOCATE); the CLI's `panel identify` default stays its own
+    # (cli/cmd_panel.py:40; services/presence.py IDENTIFY_DEFAULT_S).
+    Setting("panel.identify_s", "int", 5, "General",
+            "How long the Front panel's Identify blinks (s; the sidebar's blinks 5 s)",
             check=_between(1, 30)),
-    # P2 services/presence.py:98-108,214
+    # P2 NOT READ (services/presence.py default_who is user@host): stored, and hidden in the
+    # Settings dialog until it is wired (FIX-PACK-4; web/static/js/settings/sections.js
+    # NOT_READ_ROWS, docs/USER_GUIDE.md §11).
     Setting("panel.presence_who", "str", "", "General",
             "The name a board's panel shows for you (empty: user@host)", owner="admin",
             check=_name),

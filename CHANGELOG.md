@@ -9,6 +9,43 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### UI review fixes (FIX-PACK-4)
+- **One lease rule.** On a board behind a hub, "yours" is this Harness Manager holding the
+  lease (`here`), everywhere: the XVC card and the Update tab's lease line used `mine`, so a
+  lease another session of your own hub name held (a soak, a runner) enabled XVC and said
+  "installs are yours". The service's gates follow the same rule: XVC open and harness
+  installs refuse a lease your hub name holds in another session, and say so. `GET
+  /harness/catalog`'s `board.lease` gains `here` (additive).
+- **Who may drive a hub board is the same on every tab.** Program, Restore baseline, Reset
+  DUT, Reboot, Restart shell, Power-cycle, the DUT clock, OpenOCD Detect/Open session and
+  XVC Open run only for the lease holder here; otherwise the button is off, no longer the
+  blue (or red) one, and says why in one line, as Checks and XVC did. Program stayed blue
+  while Needs attention said "must not drive the board".
+- **The board preview says whose the hub lease is.** "Lock: free" was the service's own board
+  lock and read "free" for a board alice held. It is now **This app's lock**, and a **Hub
+  lease** row shows the lease as the service last knew it, with its time, and no hub read
+  (`GET /boards` rows gain `lease_known`, additive).
+- **The header's Harness says which version.** "release 1.1.0" (the catalogue's release the
+  board runs, once Update > Harness versions has read its list), with "firmware 1.0.0" beside
+  it when the firmware's number differs; before that, "firmware 1.0.0", with a tooltip.
+  Update > Harness versions' Running line names the firmware's number when it differs, and
+  Details and the preview say "Harness firmware".
+- **Settings the app now reads:** `panel.identify_s` (the Front panel card's Identify time;
+  its default is now 5 s, as every other Identify), `consoles.line_ending` (the send line's
+  default ending) and `debug.hw_server_mode` (the XVC "Bring your own hw_server" default). A
+  change applies in an open page at once. `panel.presence_who` is not read yet, so the dialog
+  no longer offers it (`config` still lists it; docs/USER_GUIDE.md §11).
+- **The tabs wrap** onto a second row in a narrow window: at 1024 px, Update, Checks and
+  Activity were off-screen behind a hidden scrollbar.
+- **Activity:** a failed job is one row with its reason (it was three: the action, the
+  daemon's `job.failed`, and `update.failed` or `deploy.failed`); a job another client ran
+  is one row too. A click the app refused (not armed, not the lease holder) is logged as an
+  error, so a refused Program shows in **Errors**.
+- **The header's refresh** re-reads the Card line and the SD journal too, not only the board.
+- **Settings opens on General** (then on the section last used in that window); the Update
+  tab's Settings button still opens Updates.
+- Removed dead code: `sections/placeholders.js` and `AppVersionChip`.
+
 ### Findings from a clean-account run of the guide (FIX-PACK-3)
 - **The installer's PATH advice reaches a login shell.** bash: add the line to `~/.bashrc`
   and to the file a login shell reads (`~/.bash_profile`, `~/.bash_login` or `~/.profile`,

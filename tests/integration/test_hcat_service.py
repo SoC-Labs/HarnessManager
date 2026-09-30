@@ -341,6 +341,44 @@ def test_negative_twin_the_lease_holder_installs_and_an_overlay_only_plan_needs_
     assert cat.install(rig.session, plan, plan.approve(), verified).result == "installed"
 
 
+# FIX-PACK-4: the one lease rule. `mine` is by principal: another session of your own hub name
+# (a soak, a runner, a second Harness Manager) holds it too. Only `here` (this Harness Manager
+# has the token) may install; the catalogue's lease says which, and the app's Update line
+# reads `here`.
+ELSEWHERE = {"holder": "david@mapstone-dev", "mine": True, "here": False}
+HERE = {"holder": "david@mapstone-dev", "mine": True, "here": True}
+
+
+def test_a_lease_your_other_session_holds_does_not_install_here(rig, world):
+    cat = HarnessCatalog(rig.svc)
+    plan, verified = cat.plan(rig.session, "1.1.1", channel="stable", source=world.srv.source())
+    _behind_hub(rig, ELSEWHERE)
+    before = rig.vb.sd.snapshot()
+    st = rig.svc.lease_state(rig.session)
+    assert (st["mine"], st["here"]) == (True, False)
+    assert st["reason"] == ("david@mapstone-dev holds the lease on mps3_01_pl in another session, "
+                            "not this Harness Manager")
+    with pytest.raises(HeldError) as exc:
+        cat.install(rig.session, plan, plan.approve(), verified)
+    assert "lease holder only" in exc.value.message and "another session" in exc.value.message
+    assert "session that holds the lease" in exc.value.hint
+    assert rig.vb.sd.snapshot() == before and rig.vb.reboots == 0
+    listing = listing_for(rig, world, ("stable",))
+    assert listing.board["lease"]["here"] is False
+    assert "hub-lease" in rows(listing)["1.1.1"]["needs"]
+    assert any("another session" in w for w in listing.warnings)
+
+
+def test_negative_twin_the_lease_held_here_installs(rig, world):
+    cat = HarnessCatalog(rig.svc)
+    _behind_hub(rig, HERE)
+    listing = listing_for(rig, world, ("stable",))
+    assert listing.board["lease"]["here"] is True and listing.board["lease"]["reason"] == ""
+    assert "hub-lease" not in rows(listing)["1.1.1"]["needs"]
+    plan, verified = cat.plan(rig.session, "1.1.1", channel="stable", source=world.srv.source())
+    assert cat.install(rig.session, plan, plan.approve(), verified).result == "installed"
+
+
 def test_a_board_with_no_hub_needs_no_lease_and_nothing_asks_a_hub(rig, world, monkeypatch):
     # No hub, no lease: the gate must not build a LeaseService, call a hub or wait, on any
     # path (list, install with its reboot, the rollback's gate).
@@ -350,8 +388,8 @@ def test_a_board_with_no_hub_needs_no_lease_and_nothing_asks_a_hub(rig, world, m
         raise AssertionError("a board with no hub made the lease gate build a LeaseService")
 
     monkeypatch.setattr(lease_mod, "LeaseService", no_lease_service)
-    assert rig.svc.lease_state(rig.session) == {"required": False, "mine": False, "holder": "",
-                                                "target": "", "reason": ""}
+    assert rig.svc.lease_state(rig.session) == {"required": False, "mine": False, "here": False,
+                                                "holder": "", "target": "", "reason": ""}
     assert rig.svc.check_lease(rig.session)["required"] is False
     listing = listing_for(rig, world, ("stable",))
     assert listing.board["lease"]["required"] is False
@@ -361,7 +399,7 @@ def test_a_board_with_no_hub_needs_no_lease_and_nothing_asks_a_hub(rig, world, m
     assert cat.install(rig.session, plan, plan.approve(), verified).result == "installed"
     # the rollback's gate is the same call (executor.rollback's first step)
     assert rig.svc.installer("mps3").lease_check(rig.session, "roll the harness back") == \
-        {"required": False, "mine": False, "holder": "", "target": "", "reason": ""}
+        {"required": False, "mine": False, "here": False, "holder": "", "target": "", "reason": ""}
     assert rig.svc.leases is None                     # never built, never asked
 
 

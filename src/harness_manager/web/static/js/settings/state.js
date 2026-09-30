@@ -42,7 +42,9 @@ function writeSession(key, value) {
 }
 
 export const SS = {
-  section: readSession(SECTION_KEY, "updates"),   // the gear first opens where it always did
+  // FIX-PACK-4: the gear opens General the first time, then the section last used in this tab
+  // (the Update tab's "Settings" still deep-links to Updates).
+  section: readSession(SECTION_KEY, "general"),
   loading: false,
   loaded: false,
   error: null,             // the last read's ApiError

@@ -10,10 +10,14 @@
 // - A capability the board lacks disables the button AND shows the engine's reason.
 // - An intrusive action is armed by a tick box, which clears after each run.
 // - An interlock that stops a click says so and ends with "Nothing was run."
+// - FIX-PACK-4: an action that drives the board names itself in `holder` ("Program"): on a
+//   board behind a hub it runs for the lease holder only (week.js holderOnly, the rule the
+//   XVC card, Checks and the daemon's gates use), and its button is then not the primary.
 
 import { call, jobFinished, toApiError, waitJob } from "./api.js";
 import { capState, secs } from "./format.js";
-import { boardState, changed, jobLabel, log, S, setJob } from "./store.js";
+import { boardState, changed, foldJobFailure, jobLabel, log, S, setJob } from "./store.js";
+import { holderOnly } from "./week.js";
 
 export const NOTHING_RUN = "Nothing was run.";
 export const ARM_REASON = "not armed: tick the arm box first";
@@ -58,6 +62,10 @@ export function gateReason(bid, panel, key, opts = {}) {
     if (b.job.kind === "lease_force") return "waiting for the force release to finish";
     return `waiting for the ${jobLabel(b.job.kind)} job to finish (harness-manager-daemon holds the board)`;
   }
+  if (opts.holder) {
+    const why = holderOnly(bid, opts.holder);
+    if (why) return why;
+  }
   if (opts.guard) {
     const why = opts.guard();
     if (why) return why;
@@ -72,7 +80,9 @@ export function interlock(bid, panel, command, why) {
     { kind: "rc", command, notRun: true },
     { kind: "warnline", text: `${why}. ${NOTHING_RUN}` },
   ];
-  log("warning", panel, `$ ${command}  (not run): ${why}. ${NOTHING_RUN}`, bid);
+  // FIX-PACK-4: a refused click is a failure of what the user asked for: Activity > Errors
+  // shows it (a refused Program left "0 of 9 entries" there).
+  log("error", panel, `$ ${command}  (refused, not run): ${why}. ${NOTHING_RUN}`, bid);
   changed();
 }
 
@@ -151,6 +161,7 @@ export async function runAction(bid, panel, spec) {
   if (spec.arm) boardState(bid).arms[spec.arm] = false;
   const summary = body.map((l) => (l.name ? `${l.name}: ${l.text}` : l.text)).join("  ");
   const rcText = head.rc === null ? "no answer" : `rc ${head.rc}`;
+  if (!ok && value && value.job) foldJobFailure(bid, value.job);   // FIX-PACK-4: one row
   log(ok ? "info" : "error", panel, `$ ${spec.command}  (${rcText}, ${secs(took)} s)  ${summary}`, bid);
   if (spec.onDone) {
     try { spec.onDone(ok, value); } catch (e) { /* a render hook never breaks the panel */ }

@@ -1220,6 +1220,35 @@ class LeaseService:
         assert known is not None
         return self._stale_view(hub, known, misses, exc.message or type(exc).__name__)
 
+    def last_known(self, board_id: str) -> dict[str, Any] | None:
+        """FIX-PACK-4: what this service last knew of ``board_id``'s hub lease, with NO hub call
+        (the app's preview of a board that is not open: ``GET /boards`` ``lease_known``)::
+
+            {hub, target, board, state: "held" | "free", holder, expires_at, mine, here,
+             confirmed_at, source}
+
+        From the LEASE-FRESH last known state (a ``lease show``, or our own acquire, release or
+        heartbeat), for a board this service has opened (``track``) or acted on since it
+        started. None when it never read it; a lease that ended here (expired, lost) is not
+        known either. ``confirmed_at`` says how old it is: nothing here reads it again."""
+        with self._mu:
+            hits = [(key, self._known[key]) for key, bid in self._boards.items()
+                    if bid == board_id and key in self._known]
+        if not hits:
+            return None
+        (host, target), known = max(hits, key=lambda kv: kv[1].at)
+        lease = known.view.get("lease") or None
+        out: dict[str, Any] = {"hub": host, "target": target,
+                               "board": known.view.get("board") or None,
+                               "state": "held" if lease else "free", "holder": "",
+                               "expires_at": "", "mine": False, "here": False,
+                               "confirmed_at": iso_utc(known.wall), "source": known.source}
+        if lease:
+            out.update(holder=str(lease.get("holder") or ""),
+                       expires_at=str(lease.get("expires_at") or ""),
+                       mine=bool(lease.get("mine")), here=held_here(lease))
+        return out
+
     def _board_for(self, hub: Any, board_id: str = "") -> str:
         key = _hk(hub)
         with self._mu:
@@ -2256,6 +2285,28 @@ class LeaseService:
         t = self._thread
         if t is not None and t is not threading.current_thread():
             t.join(timeout=2.0)
+
+
+def held_here(lease: Any) -> bool:
+    """FIX-PACK-4: the ONE rule every lease gate uses (XVC, harness installs; the app's every
+    gated button): THIS Harness Manager holds the lease, it has the token (``here``). ``mine``
+    (by principal) is also true for another session of the same hub name (every lab session
+    is david@mapstone-dev), which must not drive the board from here. A lease without
+    ``here`` (a view from before REVIEW-W5, a test's stand-in) reads ``mine``, as the app's
+    ``leaseWho`` does."""
+    if not isinstance(lease, dict) or not lease:
+        return False
+    here = lease.get("here")
+    return bool(lease.get("mine")) if here is None else bool(here)
+
+
+def elsewhere_text(lease: dict[str, Any], target: str) -> str:
+    """"<holder> holds <target> in another session, not this Harness Manager" when ``lease``
+    is ``mine`` without ``here``, else "<holder> holds <target>"."""
+    who = str(lease.get("holder") or "someone else")
+    if lease.get("mine") and not held_here(lease):
+        return f"{who} holds {target} in another session, not this Harness Manager"
+    return f"{who} holds {target}"
 
 
 def not_fresh(view: Any) -> str:

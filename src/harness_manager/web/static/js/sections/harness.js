@@ -19,6 +19,7 @@ import { bytesText, clock } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, onBoardEvent, timed } from "../store.js";
 import { ActionRow, ArmBox, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
+import { leaseHere } from "../week.js";
 
 export const DOOR_TEXT = "needs Debug USB here, or a hub that can write its SD";
 export const NOT_YET = "Not yet: the A/B config SD (U8) waits for its board check. Today a local "
@@ -336,9 +337,11 @@ function PlanSteps({ plan }) {
     <span class="mono">${s.action}</span><span class="secondary">${s.detail}</span></li>`)}</ol>`;
 }
 
+// FIX-PACK-4: "yours" is held HERE (the catalogue's board.lease.here; `mine` alone is also
+// another session of your hub name, which the daemon refuses), the rule every gate uses.
 function LeaseLine({ lease }) {
   if (!lease || !lease.required) return null;
-  if (lease.mine) return html`<${Reason} level="ok" testid="harness-lease" text=${`You hold this board's hub lease${lease.target ? ` (${lease.target})` : ""}: installs are yours to run.`} />`;
+  if (leaseHere(lease)) return html`<${Reason} level="ok" testid="harness-lease" text=${`You hold this board's hub lease${lease.target ? ` (${lease.target})` : ""}: installs are yours to run.`} />`;
   return html`<${Reason} level="warn" icon="lock" testid="harness-lease"
     text=${`Installs need this board's hub lease: ${lease.reason || `${lease.holder || "someone else"} holds it`}. The daemon refuses anyone else and names the holder.`} />`;
 }
@@ -517,6 +520,8 @@ export function HarnessVersionsCard({ bid }) {
       ${h.empty && !cat ? html`<${Reason} testid="harness-empty" text="No list yet: Refresh fetches the signed channel and plans every release for this board (nothing is installed)." />` : null}
       ${cat ? html`<dl class="kv" data-testid="harness-running">
           <dt>Running</dt><dd><b class="mono">${board.running_release || "unrecorded"}</b>
+            ${running.harness && running.harness !== board.running_release ? html` · <span data-testid="harness-running-fw"
+              title="What the harness firmware reports (its version verb): the header shows both">firmware reports <span class="mono">${running.harness}</span></span>` : null}
             ${running.shell_id ? html` · static <span class="mono">${running.shell_id}</span>` : null}
             ${running.firmware_sha ? html` · fw <span class="mono">${String(running.firmware_sha).slice(0, 8)}</span>` : null}
             ${running.impl ? ` · ${running.impl}` : ""}

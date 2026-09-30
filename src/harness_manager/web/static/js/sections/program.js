@@ -213,9 +213,9 @@ function ProgramCard({ bid }) {
       <${ArmBox} bid=${bid} armKey=${ARM} testid="arm-program"
         text="Arm: I understand this reconfigures the partition and resets the DUT." />
       <${ActionRow} bid=${bid} panel="program" spec=${program} variant="primary" icon="upload"
-        gate=${{ capability: "deploy_partial", arm: ARM, guard: () => programGuard(bid) }} />
+        gate=${{ capability: "deploy_partial", arm: ARM, guard: () => programGuard(bid), holder: "Program" }} />
       <${ActionRow} bid=${bid} panel="program" spec=${restore} icon="undo-2" quietArm=${true}
-        gate=${{ capability: "deploy_partial", arm: ARM }} />
+        gate=${{ capability: "deploy_partial", arm: ARM, holder: "Restore baseline" }} />
       <${ResultBlock} lines=${p.lines} panel=${p} testid="program-result"
         placeholder="Restore baseline loads the board's safe design (the greybox on the MPS3)." />
     </div>

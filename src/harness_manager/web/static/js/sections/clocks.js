@@ -55,7 +55,7 @@ function DutClockCard({ bid }) {
         <${ArmBox} bid=${bid} armKey="clock" testid="arm-clock"
           text="Arm: I understand changing the DUT clock under a running program can upset it." />
         <${ActionRow} bid=${bid} panel="clock" spec=${spec} variant="primary" icon="clock"
-          gate=${{ capability: cap ? "clock_dut" : undefined, arm: "clock" }} />
+          gate=${{ capability: cap ? "clock_dut" : undefined, arm: "clock", holder: "Setting the DUT clock" }} />
         <${ResultBlock} lines=${p.lines} panel=${p} testid="clock-result" />` : null}
     </div>
   <//>`;

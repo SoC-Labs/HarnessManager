@@ -19,11 +19,13 @@ import { SdSection } from "./sections/sd.js";
 import { UpdateSection } from "./sections/update.js";
 import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
+import { epochOf } from "./week.js";
+import { loadSettingValues } from "./prefs.js";          // FIX-PACK-4: the rows the page reads
 import { LeaseBanners, requestClose } from "./lease.js";
 import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
 import {
-  boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, S,
-  sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
+  boardState, changed, jobLabel, log, openedBoard, openedOrClosedHere, probe, refreshInfo, rereadBoard,
+  S, sectionOf, select, setSection, start, subscribe, timed, UI_NOTE,
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
 import { AppUpdateBanners, AppUpdateLayer, SettingsButton, startSelfUpdate } from "./selfupdate.js";   // UPDATE-UI
@@ -131,6 +133,39 @@ function BackgroundFact({ bid }) {
     ${w.text}<//><//>`;
 }
 
+// FIX-PACK-4: "Harness" meant two things that could disagree on one screen: the version the
+// firmware reports (the version verb, 1.0.0) and the release of the signed catalogue the board
+// runs (Update > Harness versions, 1.1.0). The header says which: the release when this page
+// knows it (the Harness versions list was read), with the firmware's number beside it when that
+// differs; otherwise "firmware 1.0.0". It never shows one number as if it were the other.
+function harnessWords(ident, release) {
+  const verb = (ident && ident.harness_version) || "";
+  if (release) {
+    return { source: "release", text: `release ${release}`, fw: verb && verb !== release ? `firmware ${verb}` : "",
+      title: verb && verb !== release
+        ? `Release ${release} of the signed harness catalogue: what Update > Harness versions matches this board to. `
+          + `Its firmware reports version ${verb}: the firmware's own number, not the release.`
+        : `Release ${release} of the signed harness catalogue (Update > Harness versions); the firmware reports ${verb || "no version"}.` };
+  }
+  if (verb) {
+    return { source: "firmware", text: `firmware ${verb}`, fw: "",
+      title: `What the harness firmware reports (its version verb). The catalogue release it belongs to shows here, `
+        + "and in Update > Harness versions, once that list is read." };
+  }
+  return { source: "unknown", text: "unknown", fw: "", title: "" };
+}
+
+function HarnessFact({ bid, ident }) {
+  const h = boardState(bid).harness;           // sections/harness.js: GET /harness/catalog, when read
+  const board = (h && h.catalog && h.catalog.board) || null;
+  const w = harnessWords(ident, board ? board.running_release : "");
+  return html`<${Fact} label="Harness" testid="fact-harness">
+    <span data-testid="fact-harness-value" data-source=${w.source} title=${w.title || undefined}>${w.text}</span>
+    ${w.fw ? html`<span class="secondary" data-testid="fact-harness-fw" title=${w.title}>${` · ${w.fw}`}</span>` : null}
+    ${ident.harness_version || ident.harness_impl
+      ? html`<span class="secondary">${` · ${ident.harness_impl || "impl unknown"}`}</span>` : null}<//>`;
+}
+
 // DELETE /boards/{bid}; `release` (LEASE-UI) releases this Harness Manager's hub lease on it
 // first (?release=true). Resolves to the timed() result; the board stays open on an error.
 async function closeBoardNow(bid, { release = false } = {}) {
@@ -174,7 +209,8 @@ function BoardHeader({ bid }) {
         ${b.job ? html`<${Chip} level="accent" testid="job-chip" title=${`harness-manager-daemon job ${b.job.id}: the board's other actions wait for it`}>
           <${Spinner} />${jobLabel(b.job.kind)} running · ${Math.floor((Date.now() - b.job.at) / 1000)} s<//>` : null}
         ${row.open ? html`<button type="button" class="btn ghost sm icon-only" data-action="refresh-board"
-            aria-label="Read the board again" title="Read the board again" onClick=${() => refreshInfo(bid)}
+            aria-label="Read the board again" title="Read the board again (its info, the Card line and the SD journal)"
+            onClick=${() => rereadBoard(bid)}
             aria-busy=${b.infoLoading ? "true" : undefined}>${b.infoLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}</button>` : null}
         ${row.open ? html`<${Chip} level="accent" icon="plug-zap" testid="lock-chip"
             title=${`Open here: the board lock is ${row.holder ? holderText(row.holder) : "this daemon"}'s. The hub lease is its own line below.`}>Open<//>
@@ -187,9 +223,7 @@ function BoardHeader({ bid }) {
       <${Fact} label="Shell" testid="fact-shell"><span class="mono">${ident.shell_id || "unknown"}</span><//>
       <${Fact} label="Design" testid="fact-design">${ident.rm_name || "unknown"}
         ${ident.rm_id ? html` <span class="mono">${ident.rm_id}</span>` : null}<//>
-      <${Fact} label="Harness" testid="fact-harness">${ident.harness_version || "unknown"}
-        ${ident.harness_version || ident.harness_impl
-          ? html`<span class="secondary">${` · ${ident.harness_impl || "impl unknown"}`}</span>` : null}<//>
+      <${HarnessFact} bid=${bid} ident=${ident} />
       <${Fact} label="Build"><${CheckChip} check=${ident.build_check} testid="build-chip" /><//>
       <${Fact} label="Health"><${Chip} level=${health.level} testid="health-chip" title=${health.detail}
         icon=${health.level === "ok" ? "activity" : health.level === "err" ? "circle-x" : "circle-help"}>
@@ -211,6 +245,34 @@ function BoardHeader({ bid }) {
 }
 
 // --- a board that is not open here: a preview and the Open button ----------------------------
+
+// FIX-PACK-4: the preview's "Lock" was the service's own board lock, and read "free" for a board
+// alice holds on the hub. It is named for what it is, and the hub lease has its own row.
+const LOCK_TITLE = "Harness Manager's own lock on this board: free unless another Harness Manager "
+  + "session or tool on this machine has it open. The hub lease is its own row.";
+
+// The hub lease as the service last knew it (GET /boards lease_known: no hub call; it is read
+// again when the board opens). A board the service never read shows "read when you open it"
+// when boards.toml puts it behind a hub, and no row otherwise.
+function PreviewLease({ row }) {
+  const k = row.lease_known;
+  const conf = row.configured || {};
+  if (!k) {
+    if (!conf.hub && conf.via !== "hub") return null;
+    return html`<dt>Hub lease</dt><dd data-testid="preview-lease" data-lease="unread">
+      <span class="muted">not read yet: read when you open the board</span></dd>`;
+  }
+  const at = epochOf(k.confirmed_at);
+  const name = k.board || k.target || "the board";
+  const title = `What this Harness Manager last read of the lease on ${name} (${k.hub || "the hub"})`
+    + `${at === null ? "" : ` at ${clock(at)}`}; it is read again when you open the board.`;
+  const state = k.state === "free" ? "free" : k.here ? "here" : k.mine ? "elsewhere" : "other";
+  const chip = state === "free" ? html`<${Chip} icon="lock-open" title=${title}>free<//>`
+    : state === "here" ? html`<${Chip} level="ok" icon="user" title=${title}>yours<//>`
+    : html`<${Chip} level="held" icon="lock" title=${title}>held by ${k.holder || "someone else"}${state === "elsewhere" ? " (another session)" : ""}<//>`;
+  return html`<dt>Hub lease</dt><dd data-testid="preview-lease" data-lease=${state}>${chip}
+    ${at !== null ? html` <span class="muted small" data-testid="preview-lease-at">as of ${clock(at)}</span>` : null}</dd>`;
+}
 
 function BoardPreview({ bid }) {
   const row = S.boards[bid] || {};
@@ -258,10 +320,11 @@ function BoardPreview({ bid }) {
           <dt>Links</dt><dd>${(cand.links || []).map((l) => html`<${LinkLine} key=${l.kind + l.address} link=${l} />`)}</dd>
           <dt>Shell</dt><dd class="mono">${ident ? ident.shell_id || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
           <dt>Design</dt><dd>${ident ? html`${ident.rm_name || "unknown"} <span class="mono sub">${ident.rm_id}</span>` : html`<span class="muted">read when opened</span>`}</dd>
-          <dt>Harness</dt><dd>${ident ? ident.harness_version || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
+          <dt>Harness firmware</dt><dd>${ident ? ident.harness_version || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
           <dt>Build check</dt><dd>${ident ? html`<${CheckChip} check=${ident.build_check} testid="preview-build" />` : html`<span class="muted">read when opened</span>`}</dd>
-          <dt>Lock</dt><dd>${held ? html`<${Chip} level="warn" icon="lock">held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
-            : html`<${Chip} icon="lock-open">free<//>`}</dd>
+          <dt title=${LOCK_TITLE}>This app's lock</dt><dd data-testid="preview-lock">${held ? html`<${Chip} level="warn" icon="lock" title=${LOCK_TITLE}>held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
+            : html`<${Chip} icon="lock-open" title=${LOCK_TITLE}>free<//>`}</dd>
+          <${PreviewLease} row=${row} />
         </dl>
         <div class="open-row">
           <button type="button" class="btn primary" data-action="open" onClick=${open}
@@ -438,3 +501,4 @@ if (!hasToken()) S.connection = "auth";
 startSidebar();
 start();
 startSelfUpdate();
+loadSettingValues();

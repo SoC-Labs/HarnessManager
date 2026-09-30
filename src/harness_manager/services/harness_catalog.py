@@ -446,7 +446,7 @@ class HarnessCatalog:
                      "running_release": running.version if running else "",
                      "installed": self._last_summary(last), "pinned": pin["version"] if pin else "",
                      "lease": lease, "doors": self._doors(view)}
-            if lease["required"] and not lease["mine"]:
+            if lease["required"] and not lease.get("here"):     # FIX-PACK-4: here, not mine
                 warnings.append(f"installs on {board_id} need its hub lease: {lease['reason']}")
         stored = self._stored_overlays()
         stored_components = StoredComponents(self.update.state).all()
@@ -455,7 +455,7 @@ class HarnessCatalog:
             row = self._row(rel, chans, v, view=view, running=running, last=last, pin=pin,
                             offer=offer, currents=currents, stored=stored,
                             stored_components=stored_components)
-            if board is not None and board["lease"]["required"] and not board["lease"]["mine"] \
+            if board is not None and board["lease"]["required"] and not board["lease"].get("here") \
                     and row.get("touches_board"):
                 row["needs"].append("hub-lease")
             rows.append(row)

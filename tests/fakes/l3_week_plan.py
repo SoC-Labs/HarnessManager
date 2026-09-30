@@ -295,6 +295,7 @@ class WeekPlanSim:
         # not fail), "stale" (the service carries the last known state: fewer than 3 failed
         # reads in a row) or "unknown" (it escalated: 502 UNREACHABLE)
         self.lease_reads: dict[str, str] = {}
+        self.known: dict[str, dict[str, Any]] = {}      # FIX-PACK-4: GET /boards lease_known
 
     # -- helpers -------------------------------------------------------------------------
 
@@ -338,6 +339,22 @@ class WeekPlanSim:
         with self._lock:
             self.hubs[bid] = {"host": host, "target": target, "tunnel": tunnel,
                               "detail": detail, "lease": record, "restarts": 0}
+
+    def lease_known(self, bid: str) -> dict[str, Any] | None:
+        """FIX-PACK-4, ``GET /boards`` ``lease_known``: the lease as the last ``GET .../lease``
+        served it (the service's last known state), None when it never served one."""
+        with self._lock:
+            known = self.known.get(bid)
+            return dict(known) if known is not None else None
+
+    def _know(self, bid: str, hub: dict[str, Any], lease: dict[str, Any] | None) -> None:
+        with self._lock:
+            self.known[bid] = {
+                "hub": hub["host"], "target": hub["target"], "board": hub_board(hub),
+                "state": "held" if lease else "free", "holder": (lease or {}).get("holder", ""),
+                "expires_at": (lease or {}).get("expires_at", ""),
+                "mine": bool((lease or {}).get("mine")), "here": bool((lease or {}).get("here")),
+                "confirmed_at": _iso(time.time()), "source": "show"}
 
     def lease_read_fails(self, bid: str, mode: str = "stale") -> None:
         """LEASE-FRESH: the hub's sshd resets the next reads of ``bid``'s lease. ``stale``: the
@@ -709,6 +726,8 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
                                                                 "source": "show"}),
                                       "misses": 1, "error": reset}}
         lease = dict(hub["lease"]) if hub["lease"] else None
+        if not reads:
+            sim._know(bid, hub, lease)                          # FIX-PACK-4: lease_known
         if lease is not None:
             lease["board"] = hub_board(hub)                     # LEASE-BOARD: as GET /lease has it
         if lease is not None and sim.requests is not None:

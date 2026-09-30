@@ -337,7 +337,9 @@ def test_leave_queue_withdraws_the_request_and_frees_the_board(page_factory, dae
     expect(page.locator('[data-testid="fact-hub"] [data-action="lease_request_open"]')).to_be_visible(timeout=T)
     expect(page.locator('[data-testid="lease-queued"]')).to_have_count(0)      # no stale marker
     expect(page.locator('[data-testid="lease-requested"]')).to_have_count(0)
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("not armed", timeout=T)
+    # the board is free of the request job; the lease rule (FIX-PACK-4) now stops a reset
+    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text(
+        f"Reset DUT is for the lease holder only: {HOLDER}", timeout=T)
     assert reqs(daemon).outgoing == {}
     assert not engine.called("resets.reset")
 

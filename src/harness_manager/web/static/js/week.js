@@ -197,6 +197,32 @@ export function leaseWho(bid) {
   return { ...base, state: "other", holder: lease.holder || "someone else" };
 }
 
+// FIX-PACK-4: the ONE lease rule every gated button uses (XVC, Program, Restore baseline,
+// Reset DUT, Reboot, Restart shell, Power-cycle, the DUT clock, Debug; actions.js `holder`,
+// and the Update tab's lease line reads the catalogue's `here`): on a board behind a
+// hub only THIS Harness Manager holding the lease (leaseWho "here") may drive it; "" when it
+// may (or the board has no hub), else the one-line reason the button shows. `what` names the
+// action ("XVC", "Program"). Another session of your own hub name ("elsewhere") is not you
+// here: the daemon's gates say the same (services/lease.py held_here).
+export function holderOnly(bid, what) {
+  const who = leaseWho(bid);
+  switch (who.state) {
+    case "none": case "here": return "";
+    case "unread": return "reading the board's hub lease first";
+    case "unknown": return `${what} is for the lease holder only, and the hub lease could not be read (not known is not free)`;
+    case "free": return `${what} is for the lease holder only, and nobody holds this board's lease: acquire it first (header)`;
+    case "elsewhere": return `${what} is for the lease holder only: ${who.holder} holds this board in another session, not this Harness Manager`;
+    default: return `${what} is for the lease holder only: ${who.holder || "someone else"} holds this board`;
+  }
+}
+
+// FIX-PACK-4: the same rule on a lease object the daemon sent (GET /harness/catalog's
+// board.lease): `here`, or `mine` from a daemon that predates `here`.
+export function leaseHere(lease) {
+  if (!lease) return false;
+  return lease.here === undefined ? !!lease.mine : !!lease.here;
+}
+
 // LEASE-FRESH: the quiet note for a lease the service carried over a failed hub read ("" for a
 // fresh one): when the hub last confirmed it, and that the page reads it again.
 export function staleNote(stale) {
