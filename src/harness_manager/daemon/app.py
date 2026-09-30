@@ -998,6 +998,12 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
     # --- ui2 api-hub ---------------------------------------------------------------------------
 
+    def ui2_holder(bid: str, s: Any, kind: str, body: dict[str, Any]) -> None:
+        """G7: 409 HELD unless the board's hub lease is held here (drive_gate)."""
+        from .drive_gate import require_holder
+
+        require_holder(d, bid, s, kind, body)
+
     def ui2_route(board_id: str, cand: Any, open_ids: set[str]) -> tuple[str, str]:
         from . import mcc_route
 
@@ -1140,8 +1146,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         return _JSON(ok(board_id=bid, idcode=idcode))
 
     @api.post("/boards/{bid:path}/debug/up")
-    def debug_up(bid: str) -> JSONResponse:
+    def debug_up(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
+        ui2_holder(bid, s, "debug_up", _obj(body))          # ui2 api-hub (G7): 409 HELD
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "debug session")
@@ -1183,6 +1190,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         wait_s = _number(b, "wait_s") if b.get("wait_s") is not None else None
         if wait_s is not None and wait_s <= 0:
             raise UsageError("wait_s must be positive")
+        ui2_holder(bid, s, "reboot", b)                     # ui2 api-hub (G7): 409 HELD
         ctl = adapter_for_job(bid, s, "controller", C.REBOOT_BOARD)
         # SLOT-TIMING: never while the board's card job writes or reads back: the job fails
         # HELD, naming it. Checked IN the job, so the 202 still comes at once (Q1/Q2).
@@ -1202,6 +1210,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         b = _obj(body)
         line = _str(b, "line")
         arm = _bool(b, "arm", False)
+        if reset_guard.is_reboot_line(line):               # ui2 api-hub (G7): a REBOOT drives
+            ui2_holder(bid, s, "command", b)
         with d.gates.op(bid):
             ctl = require(s, "controller", C.CONSOLE_CONTROLLER)
             if reset_guard.is_reboot_line(line):      # SLOT-TIMING: a REBOOT is a reset
@@ -1366,6 +1376,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def deploy(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         keep = _bool(_obj(body), "keep_on_card", False)
+        ui2_holder(bid, s, "deploy", _obj(body))            # ui2 api-hub (G7): 409 HELD
         overlay, items, refusal = _preflight(bid, s, _obj(body).get("overlay"))
         if refusal is not None:            # refuse BEFORE deploy() is ever called
             refusal.data = {"overlay": overlay, "preflight": items}   # type: ignore[attr-defined]
@@ -1397,8 +1408,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         return accepted(d.jobs.submit("deploy", bid, run))
 
     @api.post("/boards/{bid:path}/restore")
-    def restore(bid: str) -> JSONResponse:
+    def restore(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
+        ui2_holder(bid, s, "restore", _obj(body))           # ui2 api-hub (G7): 409 HELD
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "restore")
@@ -1420,6 +1432,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def reset(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         target = _str(_obj(body), "target", "dut")
+        ui2_holder(bid, s, "reset", _obj(body))             # ui2 api-hub (G7): 409 HELD
         with d.gates.op(bid):
             resets = require(s, "resets", C.RESET_DUT)
             targets = list(resets.reset_targets())
@@ -1445,6 +1458,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         mhz = _number(b, "mhz")
         if mhz <= 0:
             raise UsageError(f"{mhz:g} MHz is not a clock frequency", hint="give a positive MHz")
+        ui2_holder(bid, s, "clocks", b)                     # ui2 api-hub (G7): 409 HELD
         with d.gates.op(bid):
             reading = require(s, "clocks", C.CLOCK_DUT).set_clock(name, mhz)
         return _JSON(ok(board_id=bid, reading=reading_json(reading)))

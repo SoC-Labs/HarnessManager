@@ -845,6 +845,9 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
     def power_cycle(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         state.session(bid)
         off_s = check_off_s(body.get("off_s", DEFAULT_OFF_S))     # 400 before any job
+        from .t14_mock_api import ui2_require_holder  # ui2 api-hub (G7)
+
+        ui2_require_holder(sim, bid, "power_cycle", body)
         jobs.gate(bid)
         p = sim.power.get(bid)
         reason = p["cycle_reason"] if p else (

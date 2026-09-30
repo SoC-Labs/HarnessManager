@@ -690,6 +690,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
         state.jobs.gate(bid)
         session = state.session(bid)
+        ui2_require_holder(sim, bid, "deploy", body)               # ui2 api-hub (G7)
         keep = body.get("keep_on_card", False)
         if not isinstance(keep, bool):
             raise UsageError(f"keep_on_card must be true or false, not {keep!r}")
@@ -711,8 +712,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                                           lambda progress: eng.deploy.deploy(session, ov)))
 
     @app.post(f"{API}/boards/{{bid}}/restore", status_code=202)
-    def restore(bid: str) -> JSONResponse:
+    def restore(bid: str,
+                body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         session = state.session(bid)
+        ui2_require_holder(sim, bid, "restore", body)              # ui2 api-hub (G7)
         return _accepted(state.jobs.start(bid, "restore",
                                           lambda progress: eng.deploy.restore_baseline(session)))
 
@@ -721,6 +724,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.post(f"{API}/boards/{{bid}}/reset")
     def reset(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
         state.jobs.gate(bid)
+        ui2_require_holder(sim, bid, "reset", body)                # ui2 api-hub (G7)
         target = str(body.get("target", ""))
         resets = state.session(bid).resets
         if resets is None:
@@ -746,6 +750,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.post(f"{API}/boards/{{bid}}/clocks")
     def set_clock(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
         state.jobs.gate(bid)
+        ui2_require_holder(sim, bid, "clocks", body)               # ui2 api-hub (G7)
         return _ok(reading=reading_json(clock_adapter(bid).set_clock(
             str(body.get("name") or "dut"), float(body["mhz"]))))
 
@@ -853,9 +858,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         return _ok(idcode=eng.debug.detect(state.session(bid)))
 
     @app.post(f"{API}/boards/{{bid}}/debug/up", status_code=202)
-    def debug_up(bid: str) -> JSONResponse:
+    def debug_up(bid: str,
+                 body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         state.jobs.gate(bid)
         session = state.session(bid)
+        ui2_require_holder(sim, bid, "debug_up", body)             # ui2 api-hub (G7)
         return _accepted(state.jobs.start(bid, "debug_up",
                                           lambda progress: eng.debug.up(session)))
 
@@ -897,6 +904,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.post(f"{API}/boards/{{bid}}/controller/reboot", status_code=202)
     def reboot(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         state.jobs.gate(bid)
+        ui2_require_holder(sim, bid, "reboot", body)               # ui2 api-hub (G7)
         adapter = state.session(bid).controller
         if adapter is None:
             raise UnavailableError(C.REBOOT_BOARD, "needs the Debug USB cable, a networked "
@@ -1049,6 +1057,39 @@ def ui2_console_rows(eng: Any, sim: Any, bid: str, rows: list[dict[str, Any]]) -
         writable, why = CA.rule(role, hub is not None, lease, "")
         out.append({**row, "role": role, "writable": writable, "read_only_reason": why})
     return out
+
+
+def ui2_require_holder(sim: Any, bid: str, kind: str, body: dict[str, Any] | None) -> None:
+    """G7: the daemon's drive gate (``daemon/drive_gate.py``) over the sim's lease: a board
+    behind a hub drives for the lease holder here only (409 HELD, ``error.data.reason: LEASE``),
+    or with ``force`` and ``consent: "RESET <bid>"``."""
+    from harness_manager.daemon.drive_gate import REASON, WHAT, escape
+
+    hub = sim.hubs.get(bid)
+    if hub is None:
+        return
+    lease = hub.get("lease")
+    here = bool(lease and lease.get("here", lease.get("mine")))
+    if here:
+        return
+    force, consent = escape(body)
+    what = WHAT.get(kind, kind)
+    holder = (lease or {}).get("holder") or "nobody"
+    reason = (f"{holder} holds the lease on {hub['target']}" if lease
+              else f"nobody holds the lease on {hub['target']}")
+    if force:
+        if consent.strip() != f"RESET {bid}":
+            raise RefusedError(f"cannot {what} without the hub lease: force needs the typed "
+                               f"phrase ({reason})", hint=f"type exactly: RESET {bid}")
+        return
+    err = HeldError(f"cannot {what}: on a board behind a hub it is for the lease holder only, "
+                    f"and {reason}", holder=holder,
+                    hint=f"take or request the lease; or force it: force true with consent "
+                         f"\"RESET {bid}\"")
+    err.data = {"reason": REASON, "lease": {  # type: ignore[attr-defined]
+        "required": True, "mine": bool((lease or {}).get("mine")), "here": False,
+        "holder": holder, "target": hub["target"]}}
+    raise err
 
 
 def ui2_register(app: FastAPI, state: Any, sim: Any, ok: Any) -> None:

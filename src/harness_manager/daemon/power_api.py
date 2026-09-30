@@ -89,6 +89,9 @@ def register(ctx: RouteContext) -> None:
         s = ctx.board(bid)
         b = _obj(body)
         off_s = check_off_s(_number(b, "off_s", DEFAULT_OFF_S))     # 400 before any job
+        from .drive_gate import require_holder  # ui2 api-hub (G7)
+
+        require_holder(d, bid, s, "power_cycle", b)                 # 409 HELD before the plug
         with d.gates.op(bid):
             power = ctx.require(s, "power", C.POWER_CYCLE)       # 422 with the pack's reason
             why = str(power.cycle_reason or "")
