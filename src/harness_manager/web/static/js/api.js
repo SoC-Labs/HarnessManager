@@ -526,3 +526,33 @@ export class EventSocket {
     if (this.ws) this.ws.close();
   }
 }
+
+// --- ui2 build --- (lane UI2-BUILD) The Import dialog's "Choose a zip": POST /overlays/upload
+// takes the zip's bytes as the body (send() JSON-encodes every body), and `name`, `board_id`,
+// `static_id`, `check_only` in the query. The answer and its failures are call()'s.
+export async function callUpload(name, params = {}, bytes = null, query = null,
+  type = "application/zip") {
+  const url = endpointUrl(name, params);
+  for (const [k, v] of Object.entries(query || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers = { Accept: "application/json", "Content-Type": type };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(url, { method: ENDPOINTS[name][0], headers, body: bytes, cache: "no-store" });
+  } catch (e) {
+    setConnection("down");
+    throw new ApiError({
+      name: "NO_ANSWER",
+      message: "harness-manager-daemon did not answer",
+      hint: "check it is running: harness-manager daemon status",
+    }, 0, true);
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
+  return { data, status: res.status };
+}
+// --- end ui2 build ---
