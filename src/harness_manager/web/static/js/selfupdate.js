@@ -20,7 +20,7 @@ import { call, toApiError, waitJob } from "./api.js";
 import { ageText, clock } from "./format.js";
 import { html, useLayoutEffect, useRef } from "./lib.js";
 import { changed, log, onBoardEvent, onEventsReconnected, timed } from "./store.js";
-import { Card, Chip, Icon, Reason, Spinner } from "./ui.js";
+import { Card, Icon, Reason, Spinner } from "./ui.js";
 // SET-UI: the dialog's sections (js/settings/*); the dialog stays this one (SETTINGS.md §7)
 import { RestartNote, SettingsNav, SettingsSectionBody } from "./settings/sections.js";
 import { loadSettings, SECTIONS, setSection, SS, whenOpen } from "./settings/state.js";
@@ -690,11 +690,4 @@ export function AppUpdateLayer() {
   return html`${U.settingsOpen ? html`<${SettingsModal} />` : null}
     ${U.confirm ? html`<${ApplyConfirm} />` : null}
     ${U.overlay ? html`<${RestartOverlay} />` : null}`;
-}
-
-// A compact status chip for the rail (Settings) and the board's Update page.
-export function AppVersionChip() {
-  const st = U.status;
-  if (!st) return null;
-  return html`<${Chip} icon="rocket" testid="app-version-chip">Harness Manager ${st.running}<//>`;
 }
