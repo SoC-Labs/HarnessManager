@@ -410,6 +410,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # routes and catalogue over a simulated update service.
     from .hcat_mock_harness import register as register_harness
     app.state.harness = register_harness(app, state, sim, _accepted)
+    # --- ui2 api-hub: GET /hubs/{name}/leases and GET /identity/clashes, simulated. Before the
+    # settings routes: those register the real hubs_api, whose route this one shadows here.
+    ui2_register(app, state, sim, _ok)
+    # --- end ui2 api-hub ---
     # SET-API's settings routes (docs/API.md "Settings"): the real routes over a real resolver
     # in a temporary directory of the mock's own (never the user's settings or keyring).
     from .settings_mock import register as register_settings
@@ -538,6 +542,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         known = sim_.lease_known(c.board_id) if sim_ is not None else None
         if known is not None:
             row["lease_known"] = known
+        row.update(ui2_board_keys(eng, sim, c, is_open))          # ui2 api-hub (G2, G3)
         return row
 
     @app.get(f"{API}/boards")
@@ -603,7 +608,8 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         return _ok(board_id=bid, candidate=s.candidate, adapters=adapters,
                    reset_targets=list(resets.reset_targets()) if resets else [],
                    job=running[0].id if running else None,
-                   job_kind=running[0].kind if running else None, services=services)
+                   job_kind=running[0].kind if running else None, services=services,
+                   **ui2_route_keys(eng, bid))                    # ui2 api-hub (G2)
 
     @app.get(f"{API}/boards/{{bid}}")
     def info(bid: str) -> dict[str, Any]:
@@ -690,6 +696,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
         state.jobs.gate(bid)
         session = state.session(bid)
+        ui2_require_holder(sim, bid, "deploy", body)               # ui2 api-hub (G7)
         keep = body.get("keep_on_card", False)
         if not isinstance(keep, bool):
             raise UsageError(f"keep_on_card must be true or false, not {keep!r}")
@@ -711,8 +718,10 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                                           lambda progress: eng.deploy.deploy(session, ov)))
 
     @app.post(f"{API}/boards/{{bid}}/restore", status_code=202)
-    def restore(bid: str) -> JSONResponse:
+    def restore(bid: str,
+                body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         session = state.session(bid)
+        ui2_require_holder(sim, bid, "restore", body)              # ui2 api-hub (G7)
         return _accepted(state.jobs.start(bid, "restore",
                                           lambda progress: eng.deploy.restore_baseline(session)))
 
@@ -721,6 +730,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.post(f"{API}/boards/{{bid}}/reset")
     def reset(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
         state.jobs.gate(bid)
+        ui2_require_holder(sim, bid, "reset", body)                # ui2 api-hub (G7)
         target = str(body.get("target", ""))
         resets = state.session(bid).resets
         if resets is None:
@@ -746,6 +756,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.post(f"{API}/boards/{{bid}}/clocks")
     def set_clock(bid: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:  # noqa: B008
         state.jobs.gate(bid)
+        ui2_require_holder(sim, bid, "clocks", body)               # ui2 api-hub (G7)
         return _ok(reading=reading_json(clock_adapter(bid).set_clock(
             str(body.get("name") or "dut"), float(body["mhz"]))))
 
@@ -754,7 +765,8 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.get(f"{API}/boards/{{bid}}/consoles")
     def consoles(bid: str) -> dict[str, Any]:
         return _ok(names=list(eng.consoles.names(state.session(bid))),
-                   consoles=sim.consoles_view(bid))
+                   consoles=ui2_console_rows(eng, sim, bid,                # ui2 api-hub (G1b)
+                                             sim.consoles_view(bid)))
 
     @app.post(f"{API}/boards/{{bid}}/consoles/{{name}}/export")
     def export(bid: str, name: str,
@@ -813,6 +825,8 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                 else:
                     await ws.send_text(item)
 
+        warned = [""]                            # ui2 api-hub (G1b): once per reason
+
         async def pump_in() -> None:
             while True:
                 msg = await ws.receive()
@@ -820,6 +834,14 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                     return
                 data = msg.get("bytes")          # text frames from a client are ignored
                 if data:
+                    ok_, why = ui2_console_writable(eng, sim, bid, name)   # ui2 api-hub (G1b)
+                    if not ok_:
+                        if warned[0] != why:
+                            warned[0] = why
+                            from harness_manager.daemon.console_access import held_error
+                            post(json.dumps({"error": error_json(
+                                held_error(bid, name, why))["error"]}))
+                        continue
                     try:
                         await loop.run_in_executor(None, stream.write, data)
                     except HarnessError as exc:
@@ -852,9 +874,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         return _ok(idcode=eng.debug.detect(state.session(bid)))
 
     @app.post(f"{API}/boards/{{bid}}/debug/up", status_code=202)
-    def debug_up(bid: str) -> JSONResponse:
+    def debug_up(bid: str,
+                 body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         state.jobs.gate(bid)
         session = state.session(bid)
+        ui2_require_holder(sim, bid, "debug_up", body)             # ui2 api-hub (G7)
         return _accepted(state.jobs.start(bid, "debug_up",
                                           lambda progress: eng.debug.up(session)))
 
@@ -896,6 +920,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     @app.post(f"{API}/boards/{{bid}}/controller/reboot", status_code=202)
     def reboot(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         state.jobs.gate(bid)
+        ui2_require_holder(sim, bid, "reboot", body)               # ui2 api-hub (G7)
         adapter = state.session(bid).controller
         if adapter is None:
             raise UnavailableError(C.REBOOT_BOARD, "needs the Debug USB cable, a networked "
@@ -1149,6 +1174,155 @@ def ui2_register(app: FastAPI, state: Any, sim: Any) -> None:
 
         return card_change(bid, body, "card_clear", "clear the card's power-on default", change)
 # --- end ui2 api-build ---
+# --- ui2 api-hub -------------------------------------------------------------------------------
+# UI v2 (lane UI2-API-HUB, docs/API.md "UI v2: hub leases, the Debug USB route, consoles and
+# clashes"): the mock's answers, from the week-plan sim's hubs (``sim.hubs``, ``behind_hub``)
+# and the identity sim, through the daemon's own pure rules (console_access, mcc_route,
+# identity_api.clash_groups), so the page codes against the same shapes.
+
+
+def ui2_board_keys(eng: Any, sim: Any, cand: Candidate, is_open: bool) -> dict[str, Any]:
+    """``GET /boards`` rows: ``hub`` (G3) and ``mcc_route``/``mcc_route_reason`` (G2)."""
+    from harness_manager.daemon import mcc_route
+
+    hub = sim.hubs.get(cand.board_id)
+    out: dict[str, Any] = {"hub": {"name": hub["host"], "host": hub["host"],
+                                   "target": hub["target"], "transport": "ssh"}
+                           if hub else None}
+    if is_open:
+        out.update(ui2_route_keys(eng, cand.board_id))
+    else:
+        ident = getattr(cand, "identity", None)
+        out["mcc_route"], out["mcc_route_reason"] = mcc_route.from_links(
+            cand.links, getattr(ident, "features", ()) if ident else ())
+    return out
+
+
+def ui2_route_keys(eng: Any, bid: str) -> dict[str, Any]:
+    """``GET /session`` and ``GET /boards/{bid}``: ``mcc_route``, ``mcc_route_reason`` (G2)."""
+    from harness_manager.daemon import mcc_route
+
+    session = eng.session(bid)
+    route, why = mcc_route.of_session(session, session.identity())
+    return {"mcc_route": route, "mcc_route_reason": why}
+
+
+def ui2_console_rows(eng: Any, sim: Any, bid: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Console rows plus ``role``, ``writable``, ``read_only_reason`` (G1b), by the daemon's
+    rule over the sim's lease (``behind_hub``: mine | elsewhere | other | none)."""
+    from harness_manager.daemon import console_access as CA
+
+    impl = str(getattr(eng.session(bid).identity(), "harness_impl", "") or "")
+    hub = sim.hubs.get(bid)
+    lease = dict(hub["lease"]) if hub and hub.get("lease") else None
+    out = []
+    for row in rows:
+        name = str(row["name"])
+        role = CA.role_of(str(row.get("alias_of") or name), name, impl)
+        writable, why = CA.rule(role, hub is not None, lease, "")
+        out.append({**row, "role": role, "writable": writable, "read_only_reason": why})
+    return out
+
+
+def ui2_require_holder(sim: Any, bid: str, kind: str, body: dict[str, Any] | None) -> None:
+    """G7: the daemon's drive gate (``daemon/drive_gate.py``) over the sim's lease: a board
+    behind a hub drives for the lease holder here only (409 HELD, ``error.data.reason: LEASE``),
+    or with ``force`` and ``consent: "RESET <bid>"``."""
+    from harness_manager.daemon.drive_gate import REASON, WHAT, escape
+
+    hub = sim.hubs.get(bid)
+    if hub is None:
+        return
+    lease = hub.get("lease")
+    here = bool(lease and lease.get("here", lease.get("mine")))
+    if here:
+        return
+    force, consent = escape(body)
+    what = WHAT.get(kind, kind)
+    holder = (lease or {}).get("holder") or "nobody"
+    reason = (f"{holder} holds the lease on {hub['target']}" if lease
+              else f"nobody holds the lease on {hub['target']}")
+    if force:
+        if consent.strip() != f"RESET {bid}":
+            raise RefusedError(f"cannot {what} without the hub lease: force needs the typed "
+                               f"phrase ({reason})", hint=f"type exactly: RESET {bid}")
+        return
+    err = HeldError(f"cannot {what}: on a board behind a hub it is for the lease holder only, "
+                    f"and {reason}", holder=holder,
+                    hint=f"take or request the lease; or force it: force true with consent "
+                         f"\"RESET {bid}\"")
+    err.data = {"reason": REASON, "lease": {  # type: ignore[attr-defined]
+        "required": True, "mine": bool((lease or {}).get("mine")), "here": False,
+        "holder": holder, "target": hub["target"]}}
+    raise err
+
+
+def ui2_console_writable(eng: Any, sim: Any, bid: str, name: str) -> tuple[bool, str]:
+    """G1b: may this client's keystrokes reach console ``name`` (the daemon's rule)."""
+    row = ui2_console_rows(eng, sim, bid, [{"name": name}])[0]
+    return bool(row["writable"]), str(row["read_only_reason"])
+
+
+def ui2_register(app: FastAPI, state: Any, sim: Any, ok: Any) -> None:
+    from harness_manager.daemon.identity_api import clash_groups
+    from harness_manager.services import board_identity as BI
+
+    @app.get(f"{API}/hubs/{{name}}/leases")
+    def hub_leases(name: str, refresh: str | None = None) -> dict[str, Any]:
+        """G3: every target on hub ``name`` (a host, as ``behind_hub`` sets it), one read."""
+        now = time.time()
+        with sim._lock:
+            boards = {bid: dict(h) for bid, h in sim.hubs.items() if h["host"] == name}
+        if not boards:
+            raise AbsentError(f"no board this service lists is behind a hub named {name!r}",
+                              hint="GET /boards: each row's hub.name")
+        at = datetime_iso(now)
+        targets: dict[str, dict[str, Any]] = {}
+        for bid, h in boards.items():
+            row = targets.setdefault(h["target"], {
+                "target": h["target"], "board": h.get("board") or h["target"].rsplit("_", 1)[0],
+                "boards": [], "state": "free", "holder": "", "user": "", "expires_at": "",
+                "queue_length": 0, "waiting": False, "next": "", "in_use": False,
+                "mine": False, "here": False, "confirmed_at": at, "source": "overview"})
+            row["boards"].append(bid)
+            lease = h.get("lease")
+            if lease:
+                row.update(state="held", holder=lease["holder"], user=lease.get("user", ""),
+                           expires_at=lease.get("expires_at", ""), in_use=True,
+                           mine=bool(lease.get("mine")), here=bool(lease.get("here")))
+            req = sim.requests.view(bid) if sim.requests is not None else {}
+            row["queue_length"] = len(req.get("queue") or [])
+        return ok(hub=name, host=name, transport="ssh", read_at=at, age_s=0.0, cached=False,
+                  targets=sorted(targets.values(), key=lambda r: r["target"]))
+
+    @app.get(f"{API}/identity/clashes")
+    def identity_clashes() -> dict[str, Any]:
+        """G10: clashes across the identity sim's boards and the boards each has seen."""
+        ident = getattr(app.state, "identity", None)
+        records: dict[str, dict[str, Any]] = {}
+        now = time.time()
+        for bid, b in (getattr(ident, "boards", None) or {}).items():
+            rep = b["reported"]
+            src = rep.get("source") if isinstance(rep.get("source"), dict) else {}
+            records[bid] = {**{f: rep.get(f, "") for f in BI.FIELDS},
+                            "label_source": src.get("label", ""),
+                            "target": (b.get("hub") or {}).get("target", ""),
+                            "address": bid.split("@", 1)[-1], "at": now, "name": ""}
+            for o in b.get("others") or []:
+                who = str(o.get("who") or "")
+                if o.get("kind") == "board" and who and who not in records:
+                    records[who] = {**{f: o.get(f, "") for f in BI.FIELDS},
+                                    "label_source": o.get("label_source", ""), "target": "",
+                                    "address": "", "at": now, "name": who}
+        return ok(clashes=clash_groups(records, now=now), boards_seen=len(records),
+                  checked_at=BI._iso(now))
+
+
+def datetime_iso(t: float) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="seconds")
+# --- end ui2 api-hub ---------------------------------------------------------------------------
 
 
 # --- running it ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
     },
     "overall": "hub_missing"
    },
-   "ts": "2026-09-24T11:45:53.100236+00:00",
+   "ts": "2026-09-30T18:25:51.577621+00:00",
    "type": "topology.board_diagnosed"
   },
   {
@@ -19,7 +19,7 @@
     },
     "overall": "hub_missing"
    },
-   "ts": "2026-09-24T11:45:53.100383+00:00",
+   "ts": "2026-09-30T18:25:51.577775+00:00",
    "type": "topology.board_diagnosed"
   },
   {
@@ -30,7 +30,7 @@
     },
     "overall": "hub_missing"
    },
-   "ts": "2026-09-24T11:45:53.100431+00:00",
+   "ts": "2026-09-30T18:25:51.577823+00:00",
    "type": "topology.board_diagnosed"
   },
   {
@@ -40,7 +40,7 @@
     "tier": "interactive",
     "user": "alice"
    },
-   "ts": "2026-09-24T11:45:53.422280+00:00",
+   "ts": "2026-09-30T18:25:51.825884+00:00",
    "type": "lease.acquired"
   },
   {
@@ -50,7 +50,7 @@
     "tier": "interactive",
     "user": "alice"
    },
-   "ts": "2026-09-24T11:45:53.438339+00:00",
+   "ts": "2026-09-30T18:25:51.845507+00:00",
    "type": "lease.acquired"
   },
   {
@@ -61,7 +61,7 @@
     "tier": "interactive",
     "user": "bob"
    },
-   "ts": "2026-09-24T11:45:53.447108+00:00",
+   "ts": "2026-09-30T18:25:51.856270+00:00",
    "type": "lease.queued"
   },
   {
@@ -72,18 +72,18 @@
     "tier": "interactive",
     "user": "bob"
    },
-   "ts": "2026-09-24T11:45:53.455535+00:00",
+   "ts": "2026-09-30T18:25:51.871828+00:00",
    "type": "lease.queued"
   },
   {
    "data": {
     "board": "mps3_01_pl",
-    "expires_at": "2026-09-24T11:55:53.467964+00:00",
+    "expires_at": "2026-09-30T18:35:51.894211+00:00",
     "holder": "alice@mapstone-dev",
     "ttl_s": null,
     "user": "alice"
    },
-   "ts": "2026-09-24T11:45:53.477460+00:00",
+   "ts": "2026-09-30T18:25:51.900960+00:00",
    "type": "lease.heartbeat"
   },
   {
@@ -94,18 +94,18 @@
     "tier": "interactive",
     "user": "alice"
    },
-   "ts": "2026-09-24T11:45:53.708615+00:00",
+   "ts": "2026-09-30T18:25:52.136797+00:00",
    "type": "lease.revoked"
   },
   {
    "data": {
     "board": "mps3_01_pl",
-    "expires_at": "2026-09-24T11:55:53.708802+00:00",
+    "expires_at": "2026-09-30T18:35:52.137106+00:00",
     "holder": "bob@mapstone-dev",
     "tier": "interactive",
     "user": "bob"
    },
-   "ts": "2026-09-24T11:45:53.708836+00:00",
+   "ts": "2026-09-30T18:25:52.137150+00:00",
    "type": "lease.promoted"
   },
   {
@@ -114,7 +114,7 @@
     "chassis": "mps3_01",
     "holder": "alice@mapstone-dev"
    },
-   "ts": "2026-09-24T11:45:53.715715+00:00",
+   "ts": "2026-09-30T18:25:52.149903+00:00",
    "type": "lease.released"
   },
   {
@@ -128,7 +128,7 @@
     "prior_user": "alice",
     "reason": "force-released by david@mapstone-dev via Harness Manager (by token:david)"
    },
-   "ts": "2026-09-24T11:45:53.715842+00:00",
+   "ts": "2026-09-30T18:25:52.150085+00:00",
    "type": "lease.admin_revoked"
   },
   {
@@ -137,7 +137,7 @@
     "board": "mps3_01_pl",
     "holder": "bob@mapstone-dev"
    },
-   "ts": "2026-09-24T11:45:53.756394+00:00",
+   "ts": "2026-09-30T18:25:52.186125+00:00",
    "type": "lease.released"
   },
   {
@@ -147,7 +147,7 @@
     "tier": "interactive",
     "user": "alice"
    },
-   "ts": "2026-09-24T11:45:53.787019+00:00",
+   "ts": "2026-09-30T18:25:52.236517+00:00",
    "type": "lease.acquired"
   },
   {
@@ -158,7 +158,7 @@
     "tier": "interactive",
     "user": "bob"
    },
-   "ts": "2026-09-24T11:45:53.821839+00:00",
+   "ts": "2026-09-30T18:25:52.252574+00:00",
    "type": "lease.queued"
   },
   {
@@ -167,8 +167,19 @@
     "board": "mps3_01_pl",
     "holder": "bob@mapstone-dev"
    },
-   "ts": "2026-09-24T11:45:53.834460+00:00",
+   "ts": "2026-09-30T18:25:52.275758+00:00",
    "type": "lease.queue.cancelled"
+  },
+  {
+   "data": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "position": 1,
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "ts": "2026-09-30T18:25:52.378139+00:00",
+   "type": "lease.queued"
   }
  ],
  "fpgahub_version": "0.3.0",
@@ -657,6 +668,198 @@
       "access"
      ],
      "title": "BoardResponse",
+     "type": "object"
+    },
+    "BoardRuntimeInfo": {
+     "description": "Per-board runtime + synthesised in-use status.\n\nThe first four fields (``name``, ``bound_busids``, ``attached_ports``,\n``remote_host``) are the original runtime-only shape from\npre-status-synthesis callers \u2014 preserved so JSON consumers that read\nonly these keys keep working. The remaining fields come from\n:func:`fpgahub.status.compute_status` and default to idle values so\ntests that construct a ``BoardRuntimeInfo`` by hand don't need to\nfill them.",
+     "properties": {
+      "attach_state": {
+       "default": "none",
+       "enum": [
+        "attached",
+        "bound",
+        "none"
+       ],
+       "title": "Attach State",
+       "type": "string"
+      },
+      "attached_ports": {
+       "items": {
+        "type": "integer"
+       },
+       "title": "Attached Ports",
+       "type": "array"
+      },
+      "bound_busids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Bound Busids",
+       "type": "array"
+      },
+      "host_dev_host": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Host Dev Host"
+      },
+      "host_proxy": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Host Proxy"
+      },
+      "host_ssh": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Host Ssh"
+      },
+      "in_use": {
+       "default": false,
+       "title": "In Use",
+       "type": "boolean"
+      },
+      "last_activity_at": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Last Activity At"
+      },
+      "last_activity_detail": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Last Activity Detail"
+      },
+      "last_activity_kind": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Last Activity Kind"
+      },
+      "lease_acquired_at": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lease Acquired At"
+      },
+      "lease_expires_at": {
+       "anyOf": [
+        {
+         "format": "date-time",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lease Expires At"
+      },
+      "lease_holder": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lease Holder"
+      },
+      "lease_queue_length": {
+       "default": 0,
+       "title": "Lease Queue Length",
+       "type": "integer"
+      },
+      "lease_state": {
+       "default": "none",
+       "enum": [
+        "held",
+        "queued",
+        "none"
+       ],
+       "title": "Lease State",
+       "type": "string"
+      },
+      "lease_user": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Lease User"
+      },
+      "name": {
+       "title": "Name",
+       "type": "string"
+      },
+      "remote_host": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Remote Host"
+      },
+      "warnings": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Warnings",
+       "type": "array"
+      }
+     },
+     "required": [
+      "name",
+      "bound_busids",
+      "attached_ports",
+      "remote_host"
+     ],
+     "title": "BoardRuntimeInfo",
      "type": "object"
     },
     "ChassisLeaseCancelRequest": {
@@ -1203,6 +1406,22 @@
      "title": "ShareStartRequest",
      "type": "object"
     },
+    "StatusResponse": {
+     "properties": {
+      "boards": {
+       "items": {
+        "$ref": "#/components/schemas/BoardRuntimeInfo"
+       },
+       "title": "Boards",
+       "type": "array"
+      }
+     },
+     "required": [
+      "boards"
+     ],
+     "title": "StatusResponse",
+     "type": "object"
+    },
     "ValidationError": {
      "properties": {
       "ctx": {
@@ -1716,6 +1935,24 @@
       }
      },
      "summary": "Health"
+    }
+   },
+   "/api/v1/status": {
+    "get": {
+     "operationId": "status__api_v1_status_get",
+     "responses": {
+      "200": {
+       "content": {
+        "application/json": {
+         "schema": {
+          "$ref": "#/components/schemas/StatusResponse"
+         }
+        }
+       },
+       "description": "Successful Response"
+      }
+     },
+     "summary": "Status "
     }
    },
    "/api/v1/targets/{name}": {
@@ -2581,14 +2818,14 @@
     "kind": "granted",
     "lease": {
      "board": "mps3_01_pl",
-     "expires_at": "2026-09-24T11:55:53.413832Z",
+     "expires_at": "2026-09-30T18:35:51.817283Z",
      "holder": "alice@mapstone-dev",
      "tier": "interactive",
      "user": "alice"
     },
     "requeue_on_revoke": false,
     "tier": "interactive",
-    "token": "FlRWbXMtwft0paels9C-vw"
+    "token": "QpjMFaAZw3y6hk1aIGIp4g"
    },
    "status": 200,
    "who": "alice"
@@ -2606,14 +2843,14 @@
     "kind": "granted",
     "lease": {
      "board": "mps3_01_pl",
-     "expires_at": "2026-09-24T11:55:53.433256Z",
+     "expires_at": "2026-09-30T18:35:51.832883Z",
      "holder": "alice@mapstone-dev",
      "tier": "interactive",
      "user": "alice"
     },
     "requeue_on_revoke": false,
     "tier": "interactive",
-    "token": "FlRWbXMtwft0paels9C-vw"
+    "token": "QpjMFaAZw3y6hk1aIGIp4g"
    },
    "status": 200,
    "who": "alice"
@@ -2670,7 +2907,7 @@
     "background_queue": [],
     "current": {
      "board": "mps3_01_pl",
-     "expires_at": "2026-09-24T11:55:53.433256Z",
+     "expires_at": "2026-09-30T18:35:51.832883Z",
      "holder": "alice@mapstone-dev",
      "tier": "interactive",
      "user": "alice"
@@ -2706,7 +2943,7 @@
       "board": "mps3_01_pl",
       "current": {
        "board": "mps3_01_pl",
-       "expires_at": "2026-09-24T11:55:53.433256Z",
+       "expires_at": "2026-09-30T18:35:51.832883Z",
        "holder": "alice@mapstone-dev",
        "tier": "interactive",
        "user": "alice"
@@ -2731,7 +2968,7 @@
   },
   {
    "body": {
-    "token": "FlRWbXMtwft0paels9C-vw"
+    "token": "QpjMFaAZw3y6hk1aIGIp4g"
    },
    "method": "POST",
    "name": "heartbeat",
@@ -2739,7 +2976,7 @@
    "path": "/targets/mps3_01_pl/lease/heartbeat",
    "response": {
     "board": "mps3_01_pl",
-    "expires_at": "2026-09-24T11:55:53.467964Z",
+    "expires_at": "2026-09-30T18:35:51.894211Z",
     "holder": "alice@mapstone-dev",
     "tier": "interactive",
     "user": "alice"
@@ -2749,7 +2986,7 @@
   },
   {
    "body": {
-    "token": "FlRWbXMtwft0paels9C-vw"
+    "token": "QpjMFaAZw3y6hk1aIGIp4g"
    },
    "method": "POST",
    "name": "heartbeat_not_holder_403",
@@ -2817,7 +3054,7 @@
     "background_queue": [],
     "current": {
      "board": "mps3_01_pl",
-     "expires_at": "2026-09-24T11:55:53.708802Z",
+     "expires_at": "2026-09-30T18:35:52.137106Z",
      "holder": "bob@mapstone-dev",
      "tier": "interactive",
      "user": "bob"
@@ -2840,21 +3077,21 @@
     "leases": [
      {
       "board": "mps3_01_pl",
-      "expires_at": "2026-09-24T11:55:53.708802Z",
+      "expires_at": "2026-09-30T18:35:52.137106Z",
       "holder": "bob@mapstone-dev",
       "tier": "interactive",
       "user": "bob"
      }
     ],
     "tier": "interactive",
-    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+    "token": "jiqiqKQExOynCYhc-cjFZw"
    },
    "status": 200,
    "who": "bob"
   },
   {
    "body": {
-    "token": "FlRWbXMtwft0paels9C-vw"
+    "token": "QpjMFaAZw3y6hk1aIGIp4g"
    },
    "method": "POST",
    "name": "heartbeat_after_revoke_403",
@@ -2885,7 +3122,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.422381+00:00",
+      "ts": "2026-09-30T18:25:51.826005+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -2897,7 +3134,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.438415+00:00",
+      "ts": "2026-09-30T18:25:51.845633+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -2909,7 +3146,7 @@
       "holder": "bob@mapstone-dev",
       "position": 1,
       "source": null,
-      "ts": "2026-09-24T11:45:53.447179+00:00",
+      "ts": "2026-09-30T18:25:51.856378+00:00",
       "ttl_s": null,
       "user": "bob"
      },
@@ -2921,7 +3158,7 @@
       "holder": "bob@mapstone-dev",
       "position": 1,
       "source": null,
-      "ts": "2026-09-24T11:45:53.455622+00:00",
+      "ts": "2026-09-30T18:25:51.871963+00:00",
       "ttl_s": null,
       "user": "bob"
      },
@@ -2929,11 +3166,11 @@
       "board": "mps3_01_pl",
       "error": null,
       "event": "lease.heartbeat",
-      "expires_at": "2026-09-24T11:55:53.467964+00:00",
+      "expires_at": "2026-09-30T18:35:51.894211+00:00",
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.477545+00:00",
+      "ts": "2026-09-30T18:25:51.901044+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -2945,7 +3182,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.708682+00:00",
+      "ts": "2026-09-30T18:25:52.136897+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -2953,11 +3190,11 @@
       "board": "mps3_01_pl",
       "error": null,
       "event": "lease.promoted",
-      "expires_at": "2026-09-24T11:55:53.708802+00:00",
+      "expires_at": "2026-09-30T18:35:52.137106+00:00",
       "holder": "bob@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.708876+00:00",
+      "ts": "2026-09-30T18:25:52.137186+00:00",
       "ttl_s": null,
       "user": "bob"
      },
@@ -2969,7 +3206,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.715787+00:00",
+      "ts": "2026-09-30T18:25:52.150015+00:00",
       "ttl_s": null,
       "user": null
      }
@@ -2997,7 +3234,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.422381+00:00",
+      "ts": "2026-09-30T18:25:51.826005+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -3009,7 +3246,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.438415+00:00",
+      "ts": "2026-09-30T18:25:51.845633+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -3021,7 +3258,7 @@
       "holder": "bob@mapstone-dev",
       "position": 1,
       "source": null,
-      "ts": "2026-09-24T11:45:53.447179+00:00",
+      "ts": "2026-09-30T18:25:51.856378+00:00",
       "ttl_s": null,
       "user": "bob"
      },
@@ -3033,7 +3270,7 @@
       "holder": "bob@mapstone-dev",
       "position": 1,
       "source": null,
-      "ts": "2026-09-24T11:45:53.455622+00:00",
+      "ts": "2026-09-30T18:25:51.871963+00:00",
       "ttl_s": null,
       "user": "bob"
      },
@@ -3041,11 +3278,11 @@
       "board": "mps3_01_pl",
       "error": null,
       "event": "lease.heartbeat",
-      "expires_at": "2026-09-24T11:55:53.467964+00:00",
+      "expires_at": "2026-09-30T18:35:51.894211+00:00",
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.477545+00:00",
+      "ts": "2026-09-30T18:25:51.901044+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -3057,7 +3294,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.708682+00:00",
+      "ts": "2026-09-30T18:25:52.136897+00:00",
       "ttl_s": null,
       "user": "alice"
      },
@@ -3065,11 +3302,11 @@
       "board": "mps3_01_pl",
       "error": null,
       "event": "lease.promoted",
-      "expires_at": "2026-09-24T11:55:53.708802+00:00",
+      "expires_at": "2026-09-30T18:35:52.137106+00:00",
       "holder": "bob@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.708876+00:00",
+      "ts": "2026-09-30T18:25:52.137186+00:00",
       "ttl_s": null,
       "user": "bob"
      },
@@ -3081,7 +3318,7 @@
       "holder": "alice@mapstone-dev",
       "position": null,
       "source": null,
-      "ts": "2026-09-24T11:45:53.715787+00:00",
+      "ts": "2026-09-30T18:25:52.150015+00:00",
       "ttl_s": null,
       "user": null
      }
@@ -3092,7 +3329,7 @@
   },
   {
    "body": {
-    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+    "token": "jiqiqKQExOynCYhc-cjFZw"
    },
    "method": "DELETE",
    "name": "release",
@@ -3106,7 +3343,7 @@
   },
   {
    "body": {
-    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+    "token": "jiqiqKQExOynCYhc-cjFZw"
    },
    "method": "DELETE",
    "name": "release_nothing",
@@ -3120,7 +3357,7 @@
   },
   {
    "body": {
-    "token": "Eqd1jk67kL-fLGOZNGjmzw"
+    "token": "jiqiqKQExOynCYhc-cjFZw"
    },
    "method": "POST",
    "name": "heartbeat_no_lease_403",
@@ -3145,14 +3382,14 @@
     "kind": "granted",
     "lease": {
      "board": "mps3_01_pl",
-     "expires_at": "2026-09-24T11:55:53.775343Z",
+     "expires_at": "2026-09-30T18:35:52.227900Z",
      "holder": "alice@mapstone-dev",
      "tier": "interactive",
      "user": "alice"
     },
     "requeue_on_revoke": false,
     "tier": "interactive",
-    "token": "O_4rn5R1gqFrUX6tXQK5_A"
+    "token": "Uqd6O2i7rdBuNYQwLSSmdQ"
    },
    "status": 200,
    "who": "alice"
@@ -3298,6 +3535,115 @@
    },
    "status": 409,
    "who": "bob"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "status_anon",
+   "params": null,
+   "path": "/status",
+   "response": {
+    "detail": "read access: present a Bearer token (fpgahub login) or sign in to the web UI"
+   },
+   "status": 401,
+   "who": null
+  },
+  {
+   "body": {
+    "tier": "interactive",
+    "ttl_seconds": 600
+   },
+   "method": "POST",
+   "name": "queue_for_status",
+   "params": null,
+   "path": "/targets/mps3_01_pl/lease",
+   "response": {
+    "board": "mps3_01_pl",
+    "holder": "bob@mapstone-dev",
+    "kind": "queued",
+    "position": 1,
+    "queue": "interactive",
+    "tier": "interactive",
+    "user": "bob"
+   },
+   "status": 200,
+   "who": "bob"
+  },
+  {
+   "body": null,
+   "method": "GET",
+   "name": "status",
+   "params": null,
+   "path": "/status",
+   "response": {
+    "boards": [
+     {
+      "attach_state": "none",
+      "attached_ports": [],
+      "bound_busids": [],
+      "host_dev_host": null,
+      "host_proxy": null,
+      "host_ssh": null,
+      "in_use": true,
+      "last_activity_at": "2026-09-30T18:25:52.378245Z",
+      "last_activity_detail": "lease.queued",
+      "last_activity_kind": "lease",
+      "lease_acquired_at": "2026-09-30T18:25:52.227906Z",
+      "lease_expires_at": "2026-09-30T18:35:52.227900Z",
+      "lease_holder": "alice@mapstone-dev",
+      "lease_queue_length": 1,
+      "lease_state": "held",
+      "lease_user": "alice",
+      "name": "mps3_01_pl",
+      "remote_host": null,
+      "warnings": []
+     },
+     {
+      "attach_state": "none",
+      "attached_ports": [],
+      "bound_busids": [],
+      "host_dev_host": null,
+      "host_proxy": null,
+      "host_ssh": null,
+      "in_use": false,
+      "last_activity_at": null,
+      "last_activity_detail": null,
+      "last_activity_kind": null,
+      "lease_acquired_at": null,
+      "lease_expires_at": null,
+      "lease_holder": null,
+      "lease_queue_length": 0,
+      "lease_state": "none",
+      "lease_user": null,
+      "name": "kr260_01_ps",
+      "remote_host": null,
+      "warnings": []
+     },
+     {
+      "attach_state": "none",
+      "attached_ports": [],
+      "bound_busids": [],
+      "host_dev_host": null,
+      "host_proxy": null,
+      "host_ssh": null,
+      "in_use": false,
+      "last_activity_at": null,
+      "last_activity_detail": null,
+      "last_activity_kind": null,
+      "lease_acquired_at": null,
+      "lease_expires_at": null,
+      "lease_holder": null,
+      "lease_queue_length": 0,
+      "lease_state": "none",
+      "lease_user": null,
+      "name": "kr260_01_pl",
+      "remote_host": null,
+      "warnings": []
+     }
+    ]
+   },
+   "status": 200,
+   "who": "carol"
   }
  ]
 }

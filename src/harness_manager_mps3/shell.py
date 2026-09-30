@@ -819,12 +819,20 @@ _BAD_TARGET_ERRS = ("bad target", "unknown reset target")
 SHELL_RESTART_TARGET = "shell"
 
 
+def can_restart(live: ShellLive) -> bool:
+    """The harness restarts itself with the ``reboot`` verb: a Linux harness (harnessd), or,
+    ui2 api-hub (G7), a bare-metal one that reports the ``reboot`` feature (the watchdog restart
+    of the shell CPU, ~3 s; no FPGA reload). This is what advertises ``reset_shell`` too."""
+    return live.impl == IMPL_LINUX or "reboot" in live.features
+
+
 def reset_targets_from(live: ShellLive) -> tuple[str, ...]:
     """The targets a harness declares: an additive ``version.reset_targets`` array
-    when it sends one, else "dut" plus any target a feature name declares. A Linux
-    harness adds "shell": its restart is the ``reboot`` verb (``ShellResets.reset``)."""
+    when it sends one, else "dut" plus any target a feature name declares. A harness that
+    restarts itself (``can_restart``: Linux, or bare metal with ``reboot``) adds "shell": its
+    restart is the ``reboot`` verb (``ShellResets.reset``)."""
     declared = live.raw_version.get("reset_targets") if live.version_ok else None
-    linux = [SHELL_RESTART_TARGET] if live.impl == IMPL_LINUX else []
+    linux = [SHELL_RESTART_TARGET] if can_restart(live) else []
     if isinstance(declared, list) and declared and all(isinstance(t, str) for t in declared):
         return tuple(dict.fromkeys([*declared, *linux]))
     targets = ["dut"]
@@ -847,6 +855,7 @@ class ShellResets:
         self._shell = shell
         self._session = session              # for SLOT-TIMING's reset guard (MCC-FIX)
         self._impl = ""                      # the engine that declared the targets
+        self._restart = False                # it restarts itself (``can_restart``, ui2 G7)
         self._declared: tuple[str, ...] | None = None
         self._accepted: list[str] = []
         self._refused: set[str] = set()
@@ -855,6 +864,7 @@ class ShellResets:
         """Forget what was read and learned (after a harness change or a reboot)."""
         self._declared = None
         self._impl = ""
+        self._restart = False
         self._accepted.clear()
         self._refused.clear()
 
@@ -864,6 +874,7 @@ class ShellResets:
                 live = self._shell.live()
                 self._declared = reset_targets_from(live)
                 self._impl = live.impl
+                self._restart = can_restart(live)
             except HarnessError:
                 return tuple(dict.fromkeys(["dut", *self._accepted]))   # "dut" is always there
         return tuple(t for t in dict.fromkeys([*self._declared, *self._accepted])
@@ -871,7 +882,7 @@ class ShellResets:
 
     def reset(self, target: str) -> None:
         known = self.reset_targets()
-        if target == SHELL_RESTART_TARGET and target in known and self._impl == IMPL_LINUX:
+        if target == SHELL_RESTART_TARGET and target in known and self._restart:
             from .mcc import guard_reset
 
             guard_reset(self._session, "ACTION_HARNESS_REBOOT")   # not mid card job (B2)

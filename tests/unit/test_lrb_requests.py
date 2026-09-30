@@ -399,7 +399,9 @@ def test_two_requesters_are_served_in_queue_order(world):
     assert out["lease"]["holder"] == CAROL
     assert world.hub.current["holder"] == CAROL and world.hub.queue == [(BOB, "bob")]
     v = b.svc.view(b.hub)
-    assert v["queue"] == [{"position": 1, "holder": BOB, "user": "bob", "mine": True}]
+    frozen = ("position", "holder", "user", "mine")       # (ui2 api-hub adds keys, G11)
+    assert [{k: q[k] for k in frozen} for q in v["queue"]] == [
+        {"position": 1, "holder": BOB, "user": "bob", "mine": True}]
     assert v["request"]["position"] == 1
 
 
