@@ -13,6 +13,7 @@ import zipfile
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -39,8 +40,8 @@ def open_board(page, board_id):
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def settle(page, ms=350):

@@ -15,6 +15,7 @@ import time
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -42,8 +43,8 @@ def open_board(page, board_id=BOARD):
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def reqs(daemon):
@@ -361,12 +362,12 @@ def test_the_holder_prompt_appears_from_a_non_overview_section(page_factory, dae
     rid = reqs(daemon).incoming(BOARD, by="bob@lab-pc-02", message="demo at 3")
     prompt = page.locator(f'[data-testid="lease-wanted"][data-request="{rid}"]')
     expect(prompt).to_be_visible(timeout=T)
-    expect(page.locator('[data-testid="section-power"]')).to_be_visible()     # still on Power
+    expect(nav.panel(page, "power")).to_be_visible()     # still on Power (Board > Recover)
     expect(prompt.locator('[data-testid="wanted-title"]')).to_have_text(f"bob@lab-pc-02 wants {NAME}: “demo at 3”")
     expect(prompt.locator('[data-testid="wanted-countdown"]')).to_contain_text(re.compile(r"[12]:[0-5]\d"))
     for m in (5, 15, 30, 60):
         expect(prompt.locator(f'[data-action="respond_keep_{m}"]')).to_have_text(f"{m} min")
-    # and from the Activity section too
+    # and with the Activity drawer open too
     section(page, "activity")
     expect(prompt).to_be_visible()
 

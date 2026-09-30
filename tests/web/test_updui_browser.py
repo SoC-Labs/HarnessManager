@@ -21,6 +21,7 @@ import pytest
 
 from harness_manager.core.events import Event
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB, FIELDED_FEATURES
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -43,15 +44,12 @@ def rail(page, bid):
 
 
 def open_board(page, bid=BOARD_USB):
-    rail(page, bid).click()
-    if page.locator('[data-action="open"]').count():
-        page.locator('[data-action="open"]').click()
-    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.open_board(page, bid)                  # tests/web/nav.py (setui imports this one)
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def by_id(page, name):

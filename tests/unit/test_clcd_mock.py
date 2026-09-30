@@ -54,7 +54,7 @@ def test_the_held_family_is_in_the_web_ui_css():
     held = ("held", "held-soft", "held-border")
     for block, theme in (("light", "light"), ("media-dark", "dark"), ("dark", "dark")):
         assert {f"--{n}": tokens["color"][n][theme] for n in held}.items() <= css[block].items()
-    assert tokens["color"]["held"] == {"light": "#6b3fc4", "dark": "#b69cf5"}
+    assert tokens["color"]["held"] == {"light": "#6b3fc4", "dark": "#bfa9f9"}     # UI v2 round 3
     # app.css uses the family (var(--held), lane P3) but defines none of it
     assert not re.search(r"--held[\w-]*\s*:", M.APP_CSS.read_text())
     assert "var(--held)" in M.APP_CSS.read_text()

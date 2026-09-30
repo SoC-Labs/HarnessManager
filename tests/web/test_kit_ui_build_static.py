@@ -29,12 +29,16 @@ def called_names(js: str) -> set[str]:
     return set(re.findall(r'\b(?:call|callBlob)\(\s*"(\w+)"', js))
 
 
-def test_the_nav_puts_build_between_xdc_and_program():
+def test_the_nav_puts_build_between_the_workbench_and_the_board():
+    # UI v2: five tabs (route.js TABS); XDC is the Build tab's fold, Program is the Workbench's
     app = (JS / "app.js").read_text()
+    route = (JS / "route.js").read_text()
     assert 'import { BuildSection } from "./sections/build.js";' in app
-    keys = re.findall(r'\{ key: "(\w+)"', app.split("export const SECTIONS", 1)[1].split("];", 1)[0])
-    i = keys.index("build")
-    assert keys[i - 1:i + 2] == ["xdc", "build", "program"], keys
+    keys = re.findall(r'\{ key: "(\w+)"', route.split("export const TABS", 1)[1].split("];", 1)[0])
+    assert keys == ["overview", "workbench", "build", "board", "checks"], keys
+    assert 'registerTab("build", BuildTab, { fallback: true });' in app
+    assert "<${BuildSection} bid=${bid} />" in app and "<${BoardXdcSection} bid=${bid} />" in app
+    assert re.search(r'xdc: \{ tab: "build", sub: "design", part: "xdc" \}', route)
     assert "export function BuildSection" in BUILD_JS.read_text()
 
 

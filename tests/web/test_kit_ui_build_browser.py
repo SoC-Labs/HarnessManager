@@ -117,9 +117,10 @@ def test_the_steps_render_with_the_guides_states_and_a_board_on_another_static_f
     expect(page.locator('[data-testid="licence"]')).to_contain_text("[Common 17-345]")
     # the page is local: the paths are on this machine
     expect(page.locator('[data-testid="build-paths-hint"]')).to_contain_text("Paths are on this machine")
-    # the journey reads XDC -> Build -> Program
+    # UI v2: five tabs (Checks only behind a hub); Build sits between the Workbench and the
+    # Board, and XDC is Build's own fold
     tabs = page.evaluate("() => [...document.querySelectorAll('.section-tab')].map((t) => t.dataset.section)")
-    assert tabs[tabs.index("build") - 1] == "xdc" and tabs[tabs.index("build") + 1] == "program"
+    assert tabs == ["overview", "workbench", "build", "board"], tabs
     assert no_overflow(page) == []
     page.locator('[data-testid="open-xdc"]').click()               # the Wrapper card links to XDC
     page.wait_for_selector('[data-testid="xdc-model"]', timeout=T)

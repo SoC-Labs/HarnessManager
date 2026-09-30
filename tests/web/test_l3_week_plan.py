@@ -18,6 +18,7 @@ import pytest
 
 from harness_manager.core.model import Health
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -39,8 +40,8 @@ def open_board(page, board_id):
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def sim_of(daemon):
@@ -91,7 +92,7 @@ def test_needs_attention_shows_only_what_is_wrong_with_its_fix(page_factory, eng
     page.locator('[data-action="refresh-board"]').click()
     expect(strip.locator('[data-attention="harness"]')).to_contain_text("another client holds")
     strip.locator('[data-attention="build"] button:has-text("Update")').click()
-    page.wait_for_selector('[data-testid="section-update"]', timeout=T)
+    nav.panel(page, "update").wait_for(timeout=T)          # UI v2: Board > Versions
 
 
 @pytest.mark.week_plan("consoles_api", sim=True)
@@ -354,7 +355,7 @@ def test_update_check_plan_rekey_consent_install_and_rollback_hint(page_factory,
     expect(result).to_contain_text("installed: harness 1.1.0 is running", timeout=T)
     expect(result).to_contain_text("usercode: UNCHECKED")           # never shown as ok
     expect(plan.locator('[data-testid="rollback-hint"]')).to_contain_text("restores the backup")
-    expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x72bb0a36", timeout=T)
+    expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x72BB0A36", timeout=T)
 
 
 @pytest.mark.week_plan("update_api", sim=True)
@@ -743,7 +744,7 @@ def test_a_boards_list_asked_before_the_open_does_not_close_the_board(page_facto
         f"() => (window.__harness_managerState().boards[{BOARD_USB!r}] || {{}}).flake_stale",
         timeout=T)
     assert page_state(page)["boards"][BOARD_USB]["open"]
-    expect(page.locator('[data-testid="fact-shell"]')).to_contain_text(re.compile(r"0x[0-9a-f]{8}"))
+    expect(page.locator('[data-testid="fact-shell"]')).to_contain_text(re.compile(r"0x[0-9A-F]{8}"))
     released.append(True)
     for later, _ in held[1:]:
         later.continue_()

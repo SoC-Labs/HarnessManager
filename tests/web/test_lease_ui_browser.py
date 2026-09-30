@@ -342,8 +342,18 @@ def test_release_and_close_releases_the_lease_then_closes(page_factory, daemon):
     assert wait_until(lambda: seen) and seen[0].endswith("?release=true")
     assert lease_record(daemon) is None                                        # released
     assert daemon.app.state.daemon.engine.open_boards() == []
-    # the rail badge went with the session: nothing is read for a closed board
-    assert rail(page).locator('[data-testid="rail-lease-row"]').count() == 0
+    # UI v2: every hub board keeps a badge; a closed one shows what the service last knew
+    # (GET /boards lease_known, no hub call), whatever that is: the real daemon remembers the
+    # release (Free); the T14 mock remembers only its last GET /lease (Yours). CCR: the mock's
+    # lease_known should follow a release as the service's does.
+    page.wait_for_timeout(500)
+    known = page.evaluate(f"() => (window.__harness_managerState().boards[{BOARD!r}] || {{}}).lease_known || null")
+    assert known, "a board this service leased is remembered"
+    row = rail(page).locator('[data-testid="rail-lease-row"]')
+    expect(row).to_have_attribute("data-source", "known", timeout=T)
+    want = "Free" if known["state"] == "free" else "Yours" if known["here"] else None
+    if want:
+        expect(row.locator('[data-testid="rail-lease-badge"]')).to_have_text(want)
     assert page.errors == []
 
 

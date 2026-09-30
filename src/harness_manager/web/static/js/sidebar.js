@@ -20,15 +20,17 @@
 
 import { call, routeMissing } from "./api.js";
 import {
-  boardName, designText, healthOf, holderText, LINK_ICONS, linkName, nameSourceText,
+  boardName, clock, deployBar, designText, healthOf, holderText, LINK_ICONS, linkName, nameSourceText,
+  usbRoute,
 } from "./format.js";
 import { html, useState } from "./lib.js";
 import { LeaseBadge } from "./lease.js";
 import { LocateButton } from "./locate.js";          // LOCATE: Identify on each board card
 import {
-  changed, log, onBoardEvent, onEventsReconnected, probe, S, select, setFirstBoard,
+  changed, hubBoard, log, onBoardEvent, onEventsReconnected, probe, S, select, setFirstBoard,
 } from "./store.js";
-import { Chip, Icon, Spinner } from "./ui.js";
+import { Chip, Icon, MiniBar, Spinner, UsbTag } from "./ui.js";
+import { epochOf, leaseWho } from "./week.js";
 
 export const ORDER_KEY = "general.board_order";
 export const FAV_KEY = "general.favourite_boards";
@@ -333,6 +335,59 @@ export function routeText(conf) {
   return "direct";
 }
 
+// UI v2: the lease on EVERY hub board. An open board shows what GET /lease said (lease.js
+// LeaseBadge, the words every badge uses); a board not open, what the service last knew
+// (GET /boards lease_known, no hub call; plan gap G3 reads each hub's leases for all), or that
+// it has not been read. "+N waiting": the hub's queue, where the page has read it.
+function knownWords(k) {
+  const name = k.board || k.target || "the board";
+  if (k.state === "free") return { state: "free", level: "", icon: "lock-open", text: "Free", title: `Free: nobody held ${name}` };
+  if (k.here) return { state: "here", level: "ok", icon: "user", text: "Yours", title: `Your hub lease on ${name}, held by this Harness Manager` };
+  if (k.mine) {
+    return { state: "elsewhere", level: "held", icon: "lock", text: `Held by ${k.holder || "your hub name"} (another session)`,
+      title: `Held under your hub name by another session or tool, not this Harness Manager` };
+  }
+  return { state: "other", level: "held", icon: "lock", text: `Held by ${k.holder || "someone else"}`, title: `Held by ${k.holder || "someone else"}` };
+}
+
+function KnownLease({ row }) {
+  const k = row.lease_known;
+  if (!k) {
+    return html`<div class="board-lease" data-testid="rail-lease-row" data-lease="unread" data-source="none">
+      <${Chip} level="unk" icon="circle-help" cls="lease-badge" testid="rail-lease-badge"
+        title="Behind a hub: its lease is read when you open the board">Lease not read<//></div>`;
+  }
+  const w = knownWords(k);
+  const at = epochOf(k.confirmed_at);
+  const title = `${w.title} (${k.hub || "the hub"}), as this Harness Manager last read it${at === null ? "" : ` at ${clock(at)}`}: `
+    + "read again when you open the board.";
+  return html`<div class="board-lease" data-testid="rail-lease-row" data-lease=${w.state} data-source="known">
+    <${Chip} level=${w.level} icon=${w.icon} cls="lease-badge" testid="rail-lease-badge" title=${title}>
+      <span class="lease-badge-text">${w.text}</span><//></div>`;
+}
+
+function RailLease({ bid, row }) {
+  const who = row.open ? leaseWho(bid).state : "unread";
+  if (who === "none") return null;                  // read: not behind a hub
+  const read = who !== "unread";
+  if (!read && !hubBoard(bid)) return null;
+  const hub = S.board[bid] && S.board[bid].week && S.board[bid].week.hub;
+  const queue = read && hub && Array.isArray(hub.queue) ? hub.queue : [];
+  return html`<div class="rail-lease">
+    ${read ? html`<${LeaseBadge} bid=${bid} />` : html`<${KnownLease} row=${row} />`}
+    ${queue.length ? html`<span class="lq-more" data-testid="rail-lease-waiting"
+      title=${`Waiting for the hub lease:\n${queue.map((q) => `#${q.position || "?"} ${q.holder || q.user || "?"}${q.mine ? " (you)" : ""}`).join("\n")}`}>
+      +${queue.length} waiting</span>` : null}
+  </div>`;
+}
+
+// The kind of harness, when the board said it (identity.harness_impl).
+function kindText(ident) {
+  const impl = ident && ident.harness_impl;
+  if (!impl) return "";
+  return impl === "linux" ? "Linux" : impl === "bare-metal" || impl === "baremetal" ? "bare-metal" : impl;
+}
+
 function BoardCard({ bid, group, index, count }) {
   const row = S.boards[bid] || {};
   const cand = row.candidate || {};
@@ -358,6 +413,8 @@ function BoardCard({ bid, group, index, count }) {
     dotTitle = `found: ${cand.evidence}`;
   }
   const kinds = [...new Set((cand.links || []).map((l) => l.kind))];
+  const kind = kindText(ident);
+  const bar = b ? deployBar(b.deploy) : null;           // the mini download bar (deploy.progress)
   const fav = P.favs.includes(bid);
   const name = boardName(named, bid);
   const cls = ["rail-card", DRAG.bid === bid ? "dragging" : "",
@@ -383,17 +440,21 @@ function BoardCard({ bid, group, index, count }) {
           : held ? html`<${Chip} level="warn" icon="lock" cls="lock-chip" title=${`held by ${holderText(row.holder)}`}>
               ${row.holder.user || "held"}<//>` : null}
       </div>
-      ${mine ? html`<${LeaseBadge} bid=${bid} />` : null}
-      <div class="board-row2">
+      <${RailLease} bid=${bid} row=${row} />
+      <div class="board-row2" title=${shell ? `The design in the partition, on shell ${shell}` : "The design in the partition"}>
+        <${Icon} name=${bar ? "loader-circle" : "layers"} cls=${bar ? "sm spin" : "sm"} />
         <span class="pack">${(cand.pack || String(bid).split("@")[0] || "").toUpperCase()}</span>
-        ${design ? html` · ${design}` : fromConfig ? html` · <span class="muted" data-testid="rail-not-open">not open</span>`
-          : html` · <span class="muted">design not read</span>`}
-        ${shell ? html` · <span class="mono">${shell}</span>` : null}
+        ${design ? html`<span class="dsg">${design}</span>` : fromConfig ? html`<span class="muted" data-testid="rail-not-open">not open</span>`
+          : html`<span class="muted">design not read</span>`}
+        ${kind ? html`<span class="knd">· ${kind}</span>` : null}
       </div>
+      ${bar ? html`<div class="pgm-rail" data-testid="rail-progress" title=${`Programming ${bar.overlay}: ${bar.line}`}>
+        <${MiniBar} bar=${bar} /><span class="pgm-rail-t">${bar.phase}${bar.pct ? ` ${bar.pct}` : ""}</span></div>` : null}
       <div class="board-row3">
         ${kinds.map((k) => html`<span key=${k} title=${linkName(k)}><${Icon} name=${LINK_ICONS[k] || "link"} cls="sm" /></span>`)}
         <span class="links-text">${conf && conf.via ? html`<span data-testid="rail-route" title=${`boards.toml ${conf.key}`}>${routeText(conf)}</span>`
           : kinds.map(linkName).join(" · ")}</span>
+        <${UsbTag} usb=${usbRoute(named, row)} testid="rail-usb" />
       </div>
     </button>
     <button type="button" class=${`rail-star ${fav ? "on" : ""}`} aria-pressed=${fav ? "true" : "false"}
