@@ -229,7 +229,7 @@ function NetbootHere({ bid }) {
 
 function routeText(bid) {
   const r = mccRoute(bid);
-  return `Debug USB · ${(USB_WORDS[r.to] || USB_WORDS.unknown).chip.toLowerCase()}${r.reason ? `: ${r.reason}` : ""}`;
+  return `${(USB_WORDS[r.to] || USB_WORDS.unknown).nav}${r.reason ? `: ${r.reason}` : ""}`;
 }
 
 export function VersionsPage({ bid }) {

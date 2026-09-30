@@ -73,7 +73,7 @@ export async function loadSlots(bid, { background = true } = {}) {
 // The slots object: GET /slots when read, else the card read's os_slots (it lacks fell_back,
 // notes and each slot's boot words), else null.
 export function slotsOf(b) {
-  if (b.slots && b.slots.available && b.slots.slots) return b.slots.slots;
+  if (b.slots) return b.slots.available && b.slots.slots ? b.slots.slots : null;   // GET /slots decides
   const os = b.card && b.card.os_slots;
   return os && os.slots ? os : null;
 }
