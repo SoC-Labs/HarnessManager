@@ -875,7 +875,15 @@ class ShellResets:
             from .mcc import guard_reset
 
             guard_reset(self._session, "ACTION_HARNESS_REBOOT")   # not mid card job (B2)
-            self._shell.restart_harness()
+            try:
+                self._shell.restart_harness()
+            except HeldError as exc:          # EBUSY: a card job that started since (53f49b4)
+                from .os_slots import card_job_refusal
+
+                busy = card_job_refusal(self._session, exc)
+                if busy is None:
+                    raise
+                raise busy from exc
             return
         if target not in known and (target not in RESET_VOCABULARY or target in self._refused):
             raise UsageError(f"reset target {target!r} is not supported by this harness",

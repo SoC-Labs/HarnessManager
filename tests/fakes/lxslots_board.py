@@ -2,20 +2,30 @@
 
 ``SlotBoard`` is ``FakeShell(profile="linux", slots=..., usd_card=...)`` (pyverify's own
 model of harnessd's ``slot`` verb, the kind-2 push, the lock, ``usd`` and the re-push
-``commit``) plus the one thing the vendored double does not model: a ``reboot`` BOOTS
-stage0's pick (the Linux lead's S9): the default slot if it is valid and healthy, else the
-other slot if it is, else rescue (``running`` "rescue"; the fake keeps answering 6900). A
-slot or image in ``unhealthy`` (slot names such as ``{"B"}``, or hdr_crcs) never comes up
-healthy, so stage0 falls back and the DEFAULT STAYS on it. What this boot had read back
-is forgotten (``staged``, the read-back, the job), and the harness reports the version
-the booted image carries (``images``: hdr_crc -> {harness_version, harness_sha}).
+``commit``) with ITS OWN model of what a ``reboot`` BOOTS: stage0's pick (the Linux lead's
+S9): the default slot if it is valid and healthy, else the other slot if it is, else rescue
+(``running`` "rescue"; the fake keeps answering 6900). A slot or image in ``unhealthy``
+(slot names such as ``{"B"}``, or hdr_crcs) never comes up healthy, so stage0 falls back and
+the DEFAULT STAYS on it. What this boot had read back is forgotten (``staged``, the
+read-back, the job), and the harness reports the version the booted image carries
+(``images``: hdr_crc -> {harness_version, harness_sha}). The vendored model's own reboot
+(pyverify from platform 3f7cea2: slot names only) is replaced by this one, not run as well.
+
+The harness the fake is (both knobs True = harnessd from platform 53f49b4 on, what the
+vendored FakeShell models since 3f7cea2; False = an older image, for the twins):
+``stamps_booted``: each confirmed healthy boot stamps its slot's record
+(harnessd_slot_stamp_booted, HM_ANSWERS S1), so a slot ``stage0_mkcard.py`` wrote can be
+verified (and rolled back to) after a reboot; ``refuses_reboot_in_job``: ``reboot`` answers
+``EBUSY`` while a card job writes or verifies (HM change 6).
 
 SLOT-TIMING's slow-job knobs (the card's speed, so a job lasts): ``write_bps`` receives a
 push at that rate, counting ``job.got`` as the bytes reach the "card" (as harnessd does);
 ``verify_s`` keeps a read-back ``verifying`` that long; ``hold_job(...)`` sets a job that is
 not this host's (another host's push, still writing) and ``end_job()`` finishes it. A restart
 while a job writes or verifies WEDGES the card (``slot status`` answers ``card io``): what B2
-saw on silicon ("uSD init error"), and the reason nothing may reset the board meanwhile.
+saw on silicon ("uSD init error"), and the reason nothing may reset the board meanwhile (a
+harness with ``refuses_reboot_in_job`` refuses its own ``reboot`` then; an MCC REBOOT or a
+power cycle it cannot refuse).
 
 The D13 store's claim lock (S6: ``usd`` actions and the re-push ``commit`` refused for a
 peer that is not the board itself on a claimed board) is ``claimed_lock.StoreLock``'s.
@@ -47,17 +57,21 @@ TRUSTED = "127.0.0.3"
 class SlotBoard(StoreLock, FakeShell):
     def __init__(self, *args: Any, images: dict[int, dict[str, str]] | None = None,
                  unhealthy: set[int] | None = None, write_bps: float | None = None,
-                 verify_s: float = 0.0, **kw: Any) -> None:
+                 verify_s: float = 0.0, stamps_booted: bool = True,
+                 refuses_reboot_in_job: bool = True, **kw: Any) -> None:
         super().__init__(*args, **kw)
         self.images = dict(images or {})
         self.unhealthy = set(unhealthy or ())
         self.boots: list[str] = []
         self.write_bps = write_bps
         self.verify_s = verify_s
+        self.stamps_booted = stamps_booted
+        self.refuses_reboot_in_job = refuses_reboot_in_job
         self.wedged = False
         self._verify_until = 0.0
         m = self.slots
         if m is not None:
+            m.reboot = lambda: None          # stage0's pick is _simulate_restart's (module doc)
             verifying, poll = m._verifying, m.poll
 
             def timed_verifying(**result: Any) -> None:
@@ -109,6 +123,16 @@ class SlotBoard(StoreLock, FakeShell):
         with self._lock:
             self.slots.push_end(slot, header, bytes(payload))
 
+    def _op_reboot(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.refuses_reboot_in_job or self.slots is None:
+            return super()._op_reboot(request)
+        with self._lock:                   # an image before harnessd 53f49b4: no card-job EBUSY
+            self.slots.busy = lambda: False
+            try:
+                return super()._op_reboot(request)
+            finally:
+                del self.slots.busy
+
     def _simulate_restart(self) -> None:
         super()._simulate_restart()
         m = self.slots
@@ -118,6 +142,8 @@ class SlotBoard(StoreLock, FakeShell):
             if m.job["state"] in ("writing", "verifying"):
                 self.wedged = True                         # B2: "uSD init error"
                 m.card = "io"
+            if self.stamps_booted and not self.wedged:
+                m._stamp_running()         # the boot that ends stamped its slot once confirmed
             want = m.deflt
             sl = m.slot.get(want, {})
             ok = self._healthy(want, sl)
@@ -129,6 +155,9 @@ class SlotBoard(StoreLock, FakeShell):
             m.vcrc = {"A": 0, "B": 0}
             m.vsid = {"A": 0, "B": 0}
             m.job = {"act": "none", "slot": None, "state": "idle", "got": 0, "len": 0, "err": ""}
+            m.confirmed = booted in ("A", "B")         # a healthy boot confirms (stage0's att)
+            if self.stamps_booted and not self.wedged:
+                m._stamp_running()                     # ... and stamps its slot's record (S1)
             ver = self.images.get(m.boot_crc)
             if ver:
                 self.harness_version = ver.get("harness_version", self.harness_version)

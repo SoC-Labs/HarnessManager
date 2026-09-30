@@ -145,10 +145,33 @@ def test_twin_a_rollback_to_a_slot_nobody_verified_is_refused_by_the_board(linux
     assert slot_ops(fake) == before
 
 
-def test_twin_a_slot_with_no_record_cannot_be_rolled_back_to_after_a_reboot(monkeypatch, image):
-    # Slot A as stage0_mkcard.py wrote it (no slot record): once B runs, A cannot be read
-    # back as "for this fabric", so the board refuses to make it the default (§5 item 6).
+def test_a_slot_mkcard_wrote_is_rolled_back_to_after_a_reboot_once_its_boot_stamped_it(
+        monkeypatch, image):
+    # Slot A as stage0_mkcard.py wrote it (no slot record), on a harness that stamps the
+    # booted slot's record once the boot is confirmed (harnessd 53f49b4, HM_ANSWERS S1; the
+    # vendored FakeShell from platform 3f7cea2): A's confirmed boot bound it to the fabric,
+    # so once B runs, A reads back as "for this fabric" and the rollback goes through.
     fake = slot_board()
+    monkeypatch.setenv(IDENTIFY_PORT_ENV, str(fake.identify_port))
+    try:
+        session = board_session(fake)
+        push(session, image)
+        session.os_slots.commit("B")
+        session.os_slots.reboot(wait_s=10)
+        assert fake.slots.slot["A"].get("sid") == LINUX_SID          # the stamp (S1)
+        back = SlotService().rollback(session, wait_s=10)
+        assert back["rebooted"] and back["status"].running == "A"
+        assert fake.boots == ["B", "A"]
+        session.close()
+    finally:
+        fake.stop()
+
+
+def test_twin_a_slot_with_no_record_cannot_be_rolled_back_to_after_a_reboot(monkeypatch, image):
+    # The same slot on an image before harnessd 53f49b4 (no booted-slot stamp): once B runs,
+    # A cannot be read back as "for this fabric", so the board refuses to make it the
+    # default (§5 item 6).
+    fake = slot_board(stamps_booted=False)
     monkeypatch.setenv(IDENTIFY_PORT_ENV, str(fake.identify_port))
     try:
         session = board_session(fake)

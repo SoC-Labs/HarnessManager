@@ -5,7 +5,8 @@
 - **Linux, netboot** (``docs/HIL_LINUX.md`` Netboot mode): pyverify's FakeShell as
   ``SlotBoard`` (profile ``linux``, both OS slot headers zeroed, the SSH claim taken by another
   key) behind the same kind of hub (``claimed_lock.HubAndBoardSsh``), its claim probe answered
-  from the board's identify port;
+  from the board's identify port; an image before the v0.16 identity/locate (v6n) unless
+  ``image="v7n"``;
 - **Linux, card-less** (Card-less mode: board 2): the same ``SlotBoard`` with no user microSD
   at all (``slots card: False``: harnessd answers ``card: false`` and no slots).
 
@@ -178,7 +179,7 @@ class LinuxLab:
 @contextmanager
 def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
               static: int = LX_STATIC, card: bool = True,
-              single_client: bool = False) -> Iterator[LinuxLab]:
+              single_client: bool = False, image: str = "v6n") -> Iterator[LinuxLab]:
     from harness_manager_mps3 import hub as hubmod
     from harness_manager_mps3 import tunnel as T
     from tests.fakes.claimed_lock import TRUSTED, HubAndBoardSsh, board_key_fp, route_board
@@ -199,6 +200,11 @@ def linux_lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *,
         slots = {"trusted_peer": TRUSTED, "running": "none", "card": False}   # board 2
     fake = slot_board(profile="linux", static_id=static, ssh_claimed=True,
                       ssh_host_key_sha256=board_key_fp(), slots=slots)
+    if image == "v6n":
+        # an image before net-protocol v0.16: the vendored linux profile is a v0.16 one (with
+        # `identity` and `locate`) since pyverify from platform 3f7cea2
+        fake.features = tuple(f for f in fake.features if f not in ("identity", "locate"))
+        fake.identity = None
     ssh = HubAndBoardSsh()
     front = None
     if single_client:
@@ -266,6 +272,21 @@ def test_the_linux_netboot_plan_passes_against_the_linux_harness_fake(lx, tmp_pa
                    for a in hm.calls)
     c1 = json.loads((tmp_path / "ev" / "c1_slot_status.json").read_text())
     assert c1["stdout_json"]["slots"]["A"]["state"] == "empty"
+
+
+def test_the_linux_netboot_plan_passes_a5_and_a6_on_a_v016_image(tmp_path, monkeypatch, capsys):
+    # the same lab on a v0.16 image (v7n; the vendored FakeShell's linux profile as it is)
+    with linux_lab(tmp_path, monkeypatch, image="v7n") as lab:
+        acquire(capsys)
+        rc, hm = hil(tmp_path / "ev", "linux-netboot", "--writes", "safe")
+        v = verdicts(tmp_path / "ev")
+        assert rc == EXIT_PASS and v["A5"] == v["A6"] == "pass", v
+        a5 = json.loads((tmp_path / "ev" / "a5_identity.json").read_text())
+        reported = a5["stdout_json"]["identity"]["reported"]
+        assert a5["exit"] == 0 and reported["feature"] is True and reported["via"] == "identity"
+        assert reported["label"] == "MPS3"
+        a6 = json.loads((tmp_path / "ev" / "a6_locate.json").read_text())
+        assert a6["exit"] == 0 and [s for s, _who in lab.fake.locates][:1] == [5]
 
 
 def test_twin_writes_none_on_linux_sends_no_write_and_swaps_nothing(lx, tmp_path, capsys):

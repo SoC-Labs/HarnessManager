@@ -1,6 +1,6 @@
 """LINUX-READY: the host side of the Linux harness's B1 v4 findings (silicon, 2026-09-25).
 
-- the vendored pyverify (platform 3bfda65): every pyverify name Harness Manager imports
+- the vendored pyverify (platform 3f7cea2; 3bfda65 when written): every pyverify name HM imports
   still exists;
 - the push rule: the Linux harness gets plain tcp with pyverify's 30 s push inactivity
   limit (``choose_push``), bare metal keeps its rule and the 2 s limit;

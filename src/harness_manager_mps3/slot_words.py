@@ -182,8 +182,9 @@ def is_claim_lock(err: str, code: str = "") -> bool:
 
 NO_RECORD_HINT = ("this slot was written outside harnessd (stage0_mkcard.py + dd, `mps3-slot "
                   "write`, or the factory), so it has no record binding it to a static and "
-                  "the board cannot verify it. Push it again from Harness Manager (or wait "
-                  "for the board fix that stamps booted slots)")
+                  "the board cannot verify it. Push it again from Harness Manager. (A harness "
+                  "from platform 53f49b4 on stamps the record once the slot boots and is "
+                  "confirmed: this slot has not, or the image predates that fix)")
 
 
 def refusal(act: str, err: str, code: str = "", st: Any = None) -> HarnessError:

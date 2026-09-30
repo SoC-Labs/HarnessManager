@@ -364,17 +364,78 @@ def test_the_harness_reboot_is_refused_during_a_card_job(linux, state, words):
     assert fake.reboots == [] and not fake.wedged
 
 
-def test_twin_idle_the_harness_reboots_and_why_the_guard_exists(linux):
+def test_twin_idle_the_harness_reboots_and_why_the_guard_exists(monkeypatch):
+    fake = _board(monkeypatch, refuses_reboot_in_job=False)      # an image before 53f49b4
+    session = board_session(fake)
+    try:
+        assert session.os_slots.reboot(wait_s=10)["up_after_s"] > 0       # idle: allowed
+        assert len(fake.reboots) == 1 and not fake.wedged
+        # What the guard prevents (B2: "uSD init error"): a reboot sent past it, mid-write,
+        # to a harness that does not refuse it itself.
+        fake.hold_job("writing")
+        session.shell.call(lambda c: c.reboot())
+        deadline = time.monotonic() + 5
+        while not fake.wedged and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert fake.wedged
+    finally:
+        session.close()
+        fake.stop()
+
+
+def test_a_harness_from_53f49b4_refuses_its_own_reboot_mid_job(linux):
+    # harnessd 53f49b4 (the vendored FakeShell since platform 3f7cea2): reboot answers EBUSY
+    # while the card job runs, so a reboot sent past HM's guard no longer wedges that card
+    # (the guard still covers older images, the MCC REBOOT and a power cycle).
+    from harness_manager.core.errors import HeldError
+
     fake, session = linux
-    assert session.os_slots.reboot(wait_s=10)["up_after_s"] > 0       # idle: allowed
-    assert len(fake.reboots) == 1 and not fake.wedged
-    # What the guard prevents (B2: "uSD init error"): a reboot sent past it, mid-write.
     fake.hold_job("writing")
-    session.shell.call(lambda c: c.reboot())
-    deadline = time.monotonic() + 5
-    while not fake.wedged and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert fake.wedged
+    with pytest.raises(HeldError) as exc:
+        session.shell.call(lambda c: c.reboot())
+    assert getattr(exc.value, "ebusy", False)
+    time.sleep(0.3)                                    # > reboot_in_ms: nothing restarts
+    assert fake.reboots == [] and not fake.wedged
+
+
+@pytest.fixture
+def raced(monkeypatch):
+    """The guard reads the card idle, then a job starts before the reboot lands (another
+    host's push): what ``check`` saw, and then the job."""
+    def race(fake, state="writing"):
+        def check(session, action, **kw):
+            fake.hold_job(state, got=12_300_000, length=MB29)
+            return None
+        monkeypatch.setattr(reset_guard, "check", check)
+    return race
+
+
+@pytest.mark.parametrize("via", ["os_slots", "reset shell"])
+def test_an_ebusy_reboot_during_a_card_job_is_refused_in_the_guards_words(linux, raced, via):
+    fake, session = linux
+    raced(fake)
+    with pytest.raises(reset_guard.CardBusyError) as exc:
+        if via == "os_slots":
+            session.os_slots.reboot(wait_s=5)
+        else:
+            session.resets.reset("shell")
+    assert exc.value.code == 4
+    assert exc.value.message.startswith("harness reboot refused: slot B is being written "
+                                        "(12.3/29 MB); a reset now can wedge the card.")
+    assert "another client" not in exc.value.message
+    assert fake.reboots == [] and not fake.wedged
+
+
+def test_twin_an_ebusy_reboot_mid_swap_is_not_called_a_card_job(linux, monkeypatch):
+    from harness_manager.core.errors import HeldError
+
+    fake, session = linux
+    monkeypatch.setattr(reset_guard, "check", lambda session, action, **kw: None)
+    fake._swap_in_flight = True                        # EBUSY with no card job
+    with pytest.raises(HeldError) as exc:
+        session.os_slots.reboot(wait_s=5)
+    assert not isinstance(exc.value, reset_guard.CardBusyError)
+    assert fake.reboots == []
 
 
 class FakeController:

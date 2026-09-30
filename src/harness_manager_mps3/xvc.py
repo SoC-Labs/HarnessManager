@@ -80,7 +80,7 @@ XVC_PORT_ENV = "HARNESS_MANAGER_MPS3_XVC_PORT"
 DBGBR_FEATURE = "xvc_dbgbr"
 JTAGBB_FEATURE = "xvc_jtagbb"
 #: The Linux harness's XVC lock (docs/design/XVC_DEBUG.md §7.1): claimed boards answer 2542
-#: from loopback peers only. A HARNESSD request for after cutover; the name is HM's proposal.
+#: from loopback peers only. Shipped in harnessd 9d59699 (bit 15; FakeShell linux, 3f7cea2).
 LOCK_FEATURE = "xvc_lock"
 REACH_HUB = "hub-tunnel"
 REACH_BOARD_SSH = "board-ssh"

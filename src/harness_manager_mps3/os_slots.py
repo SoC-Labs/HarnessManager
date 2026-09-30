@@ -73,9 +73,13 @@ rate it observes once the bytes move, else the card's rates), and ``push``/``ver
 them (``core.pack.report_progress``). A stuck job, a failed read-back, or a card that stops
 answering is an error that says the card's state; nothing is ever written twice, and
 nothing here starts a verify (``status`` only). pyverify's ``wait_job`` (180 s default) is
-never called: this adapter waits itself. ``reboot()`` refuses while the card job is writing
-or verifying (``services.reset_guard``): the board does not refuse one itself yet (B2: a
-reboot mid-job left the card in "uSD init error").
+never called: this adapter waits itself, and every pyverify call here passes its budget by
+name (never a pyverify default: tests/unit/test_pyverify_budgets.py). ``reboot()`` refuses
+while the card job is writing or verifying (``services.reset_guard``; B2: a reboot mid-job
+left the card in "uSD init error"). harnessd from platform 53f49b4 on also refuses its own
+``reboot`` then (``EBUSY``, as it does mid-swap); older images do not. A job that started
+after the guard read the card (another host's push) is refused in the guard's words
+(``card_job_refusal``), never as "another client holds the control port".
 
 Test seams: ``poll_s``/``poll_max_s``/``job_timeout_s``/``push_stall_s``/``reboot_poll_s``
 on the adapter; the push port follows the deploy adapter's
@@ -151,8 +155,10 @@ BUDGET_MARGIN = 1.5
 #: THE guard is the stall: a job whose byte count has not moved for ``mps3.slot.push_timeout_s``
 #: (900 s; pyverify's per-chunk push limit is the same number) is stuck. The whole-job cap,
 #: ``max(mps3.slot.job_timeout_s, the size's)``, 1800 s at least, is the backstop (and the
-#: only bound on a read-back the board does not count). pyverify's own defaults (180 s, 30 s)
-#: were too short on silicon; the Linux lead ran B2 with ``--timeout 1800 --push-timeout 900``.
+#: only bound on a read-back the board does not count). pyverify's ``slot push`` CLI defaults
+#: (180 s, 30 s) were too short on silicon; the Linux lead ran B2 with ``--timeout 1800
+#: --push-timeout 900``, and platform 6e6a2a9 raised them to 3600 s / 600 s. HM never takes a
+#: pyverify default: these rows are passed by name (tests/unit/test_pyverify_budgets.py).
 JOB_TIMEOUT_KEY = "mps3.slot.job_timeout_s"
 JOB_TIMEOUT_ENV = "HARNESS_MANAGER_MPS3_SLOT_JOB_TIMEOUT_S"
 JOB_TIMEOUT_S = 1800.0
@@ -911,7 +917,13 @@ class Mps3OsSlots:
         shell = self._shell()
         # SLOT-TIMING: never while the card job writes or reads back (a reset wedged it).
         reset_guard.check(self._session, reset_guard.ACTION_HARNESS_REBOOT)
-        resp = shell.call(lambda c: c.reboot())
+        try:
+            resp = shell.call(lambda c: c.reboot())
+        except HeldError as exc:
+            busy = card_job_refusal(self._session, exc)
+            if busy is None:
+                raise
+            raise busy from exc
         if not resp.ok:
             raise ActionFailedError(f"the harness refused reboot: {resp.err or '?'}",
                                     hint="it needs the watchdog ('reboot' feature)")
@@ -948,6 +960,26 @@ class Mps3OsSlots:
                     hint="check the board: `harness-manager info TARGET`")
             report("reboot", int(elapsed), int(wait_s))
             time.sleep(self.reboot_poll_s)
+
+
+def card_job_refusal(session: Any, exc: HeldError) -> HarnessError | None:
+    """The harness answered ``reboot`` with ``EBUSY`` (``exc``): harnessd from platform 53f49b4
+    on does so while a card job writes or verifies, as well as mid-swap. When the card job is
+    what refused it (read again now: one that started after the reset guard read the card,
+    say another host's push), the refusal in the guard's words (``CardBusyError``, naming the
+    job); None for anything else (a swap, another client, a job that cannot be read), which
+    the caller raises as it was."""
+    from harness_manager.services import reset_guard
+
+    if not getattr(exc, "ebusy", False) or isinstance(exc, reset_guard.CardBusyError):
+        return None
+    try:
+        st = reset_guard.busy_job(session)
+    except HarnessError:
+        return None
+    if st is None:
+        return None
+    return reset_guard.refusal(reset_guard.ACTION_HARNESS_REBOOT, st.job)
 
 
 def _sha256(data: bytes) -> str:

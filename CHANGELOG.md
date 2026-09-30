@@ -58,6 +58,20 @@ owners.
 - A board still on the image's default label `MPS3` shows "identity not set (default label)"
   and is never a clash with another board on the label alone; a shared MAC still is.
 
+### pyverify from platform master 3f7cea2 (PYVERIFY-VENDOR)
+- The vendored pyverify wheel (and the MPS3 OpenOCD configs) now come from platform master
+  3f7cea2 (was 3bfda65): the board identity and locate codec (net-protocol v0.16), the slot
+  codes, and a FakeShell that models them. Slot pushes and card commits keep Harness
+  Manager's own budgets (the `mps3.slot.*` settings); the platform's new `slot push` defaults
+  (600 s per chunk, 3600 s per job) change nothing here.
+- A harness reboot (`slot rollback`, `reset shell`, the identity fix) refused by the board
+  because a card job started after Harness Manager checked (another host's push) now says
+  so, like the check itself ("harness reboot refused: slot B is being written ..."), not
+  "another client holds the control port". Harness images from platform 53f49b4 on refuse
+  their own reboot during a card job.
+- A rollback refused with "no slot record" no longer says to wait for a board fix: images
+  from platform 53f49b4 on stamp a slot's record once it boots and is confirmed.
+
 ### Front panel: the Linux harness's presence and panel as shipped (PANEL-V017)
 - The Front panel card's text mirror reads the colour of every cell as the board sends it
   (net-protocol v0.17): one letter per role, in the order of `design/tokens.json`. It used
