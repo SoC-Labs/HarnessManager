@@ -119,18 +119,16 @@ def test_review_power(page_factory, daemon, review):
 
 
 def test_review_update(page_factory, review):
+    # UI v2 (BD16): Board > Versions is the board's side beside the signed releases; the
+    # channel checker's plan is gone (the catalogue plans each release inline).
     page = page_factory("light", **APP)
     open_board(page, BOARD_USB)
     section(page, "update")
-    page.locator('[data-action="update_check"]').click()
-    plan = page.locator('[data-testid="update-plan"]')
-    expect(plan.locator('[data-testid="rekey-chip"]')).to_be_visible(timeout=T)
-    plan.locator('[data-testid="rekey-phrase"]').fill("REKEY 0x72bb0a36")
-    plan.locator('[data-testid="arm-update"] input').check()
+    card = page.locator('[data-testid="harness-card"]')
+    expect(card).to_be_visible(timeout=T)
+    expect(page.locator('[data-testid="config-sd"]')).to_be_visible()
     settle(page)
     page.screenshot(path=str(review / "update-plan-light.png"))
-    plan.locator('[data-action="update_harness"]').click()
-    expect(plan.locator('[data-testid="rollback-hint"]')).to_be_visible(timeout=T)
     page.emulate_media(color_scheme="dark")
     settle(page)
     page.screenshot(path=str(review / "update-done-dark.png"))
@@ -153,6 +151,7 @@ def test_review_sd(page_factory, review, tmp_path):
     page = page_factory("light", **APP)
     open_board(page, BOARD_USB)
     section(page, "sd")
+    page.locator('[data-action="sd-more"]').click()          # UI v2: the by-hand install is folded
     flow = page.locator('[data-testid="sd-flow"]')
     flow.locator('[data-action="sd_backup"]').click()
     expect(flow.locator('[data-testid="sd-backup-result"]')).to_contain_text("rc 0", timeout=T)
