@@ -48,7 +48,9 @@ with `build.generics` and no synth hook, is §13.
   (started 00:49:04) wrote `daemon.log`, `leases`, `checks`, `identity`, `ssh`, `tunnel`. Every HM process
   of this lane ran from `hm-kit-nanosoc/.venv` with the private state dir.
 - The platform repo, its worktrees, the `nanosoc_m0_soc` and `ahb_qspi` checkouts and
-  `/research/AAA/ip_library` were only read. What the build needed from the first three was copied into
+  `/research/AAA/ip_library` were only read (`git log/show/cat-file` in the platform trees; one
+  `git status --short` in `nanosoc_m0_soc`, `ahb_qspi` and `nanosoc_arch_tech` to see if they were dirty,
+  which may refresh git's own index stat cache there, nothing else). What the build needed from the first three was copied into
   the scratch design dir (§4).
 
 ## 3. Commands, in order, with exit codes

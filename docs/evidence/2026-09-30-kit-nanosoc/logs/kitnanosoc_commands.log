@@ -60,3 +60,5 @@
 === rc=0 took=1s
 === 02:01:50 $ harness-manager kit pack ~/builds/nanosoc_head --out ~/builds/nanosoc_head/overlay
 === rc=0 took=1s
+=== 02:07:22 $ harness-manager kit guide --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json --build-dir ~/builds/g7demo; touch -d "3 hours ago" ~/builds/g7demo/build_rm.log; harness-manager kit guide --static-id 0x44EE76D5 --design designs/nanosoc/nanosoc.json --build-dir ~/builds/g7demo
+=== rc=0 took=31s
