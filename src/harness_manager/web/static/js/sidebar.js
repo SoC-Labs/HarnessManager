@@ -19,7 +19,7 @@
 // where it went. The star (Space or Enter) favourites a board.
 
 import { runAction } from "./actions.js";
-import { ApiError, call, routeMissing } from "./api.js";
+import { ApiError, call, heldByJob, routeMissing } from "./api.js";
 import {
   boardName, boardTitle, clock, deployBar, designText, healthOf, hexId, holderAge, holderText, LINK_ICONS,
   linkName, nameSourceText, usbRoute,
@@ -35,7 +35,7 @@ import { registerHelp } from "./settings/help.js";
 import { LocateButton } from "./locate.js";          // LOCATE: Identify on each board card
 import {
   boardState, changed, hubBoard, log, navigate, onBoardEvent, onEventsReconnected, openedBoard,
-  openedOrClosedHere, probe, S, select, setFirstBoard, timed, toast, UI_NOTE,
+  openedOrClosedHere, probe, S, select, setFirstBoard, setJob, timed, toast, UI_NOTE,
 } from "./store.js";
 import { CheckChip, Chip, Icon, MiniBar, Reason, Spinner, UsbTag } from "./ui.js";
 import { epochOf, leaseLeft, leaseWho } from "./week.js";
@@ -712,8 +712,14 @@ export async function openBoardHere(bid, { take = false } = {}) {
     b.info = d.info;
     b.infoOkAt = Date.now() / 1000;
   }
-  // The session is open even when the first read failed; the workspace says why.
-  if (!d.info && d.info_error) b.infoError = new ApiError(d.info_error, 200);
+  // The session is open even when the first read failed; the workspace says why. A job that
+  // holds the board (your lease request waiting in the queue, another client's deploy) is not
+  // a failure: the board is read when the job ends, as every held read is (store.js).
+  if (!d.info && d.info_error) {
+    const err = new ApiError(d.info_error, 200);
+    const job = heldByJob(err) && /(\S+) job (\S+)/.exec(`${err.holder} ${err.message}`);
+    if (job) { setJob(bid, job[2], job[1]); b.deferred = true; } else b.infoError = err;
+  }
   openedBoard(bid);
   // general.open_on: the tab a board opens on, unless this session already chose one for it (a
   // deep link, a reload, the tab it was on when it was closed): that is where you were.
