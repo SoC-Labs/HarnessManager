@@ -38,6 +38,36 @@ owners.
   gate's detail ends with the same words. `kit check` prints a `timing` line (for an older
   receipt it reads `<name>_timing.rpt` beside it). The gate itself is unchanged.
 
+### Walkthrough findings (FIX-PACK-5)
+From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through the hub,
+30 Sep): program nanosoc, console, debug up with a GDB halt, restore.
+- **Reset the DUT from inside the console.** In `harness-manager console TARGET uart0`,
+  Ctrl-] then r asks `reset the DUT of <board>? r or y resets it`; r or y resets it and the
+  console stays open, so the boot shows; any other key cancels (nothing is sent to the
+  board). After Ctrl-], any other key exits at once, and Ctrl-] alone exits after 2 s (a
+  board with no reset adapter keeps the old instant exit). The banner says so. Why: a
+  console holds the board's session lock for as long as it runs (one process owns a board),
+  so `reset` from a second terminal exited 4, "your own `harness-manager console uart0` …
+  holds it". 6900 was never the cause: HM opens it per call. With the service running
+  before the console, both terminals share its session and `reset` works (now tested); the
+  refusal's hint says both ways, and says Ctrl-] (not Ctrl-C) ends an interactive console.
+- **`debug up` prints the gdb line** (`attach`, and `gdb_command` in `--json`, also on
+  `debug status`): `arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target
+  extended-remote 127.0.0.1:<port>"`. Through the claim's SSH forward gdb's 2 s default
+  failed the attach; 60 worked. It is on the line for every route: it only bounds the wait
+  for a reply. The app's Debug card copies the same line (Attach). `debug up` also says to
+  run gdb in another terminal (it holds its own until Ctrl-C).
+- **`restore` with no greybox says what to do.** The message names the shell, the overlay
+  directories HM searched (or that none are set), the imported overlays for that shell, and
+  a greybox it has for another shell. The hint: `restore TARGET --overlay-dir DIR` once, or
+  `config set mps3.overlay_dirs DIR` for good, with the mint's overlay folder. A kit carries
+  no overlays (the RC2 kit zip holds the static, boundary and XDC only; `kit pack` refuses
+  rm_id 0), so `kit import` cannot register a greybox and does not try.
+- Docs: docs/USER_GUIDE.md §5 (the console's reset), §6 (`program` asks [y/N] and a script
+  needs `--yes`; `restore` needs the greybox), §8.1 (`debug up` holds its terminal, no
+  `--background`, the app's Open session instead; the gdb line and why), §12.1 (`board
+  claim`, `--adopt` too, asks: scripts add `--yes`); docs/HIL_LINUX.md B2, D2, E, E1, Z2.
+
 ### Checks: the HIL runbooks, unattended, from the app (HIL-GUI)
 - A **Checks** section per board runs the lab runbooks' automatic checks overnight in the
   Harness Manager service: no `daemon stop`, no long `lease acquire --ttl`, no tmux. The
