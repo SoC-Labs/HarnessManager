@@ -29,7 +29,11 @@ service's own view (no hub call when it is under a minute old; else one read, ca
 
 from __future__ import annotations
 
+import json
 import logging
+import threading
+import time
+from collections.abc import Callable
 from typing import Any
 
 from harness_manager.core.errors import HarnessError, HeldError
@@ -153,3 +157,81 @@ def held_error(bid: str, name: str, why: str) -> HeldError:
     """What a read-only client's keystrokes get (once per change), on the console socket."""
     return HeldError(f"console {name} of {bid}: your input was not sent ({why})",
                      hint="take the lease (or ask for it) to type here")
+
+
+class InputGate:
+    """The console WebSocket's input gate (G1b): ``allows()`` before each write.
+
+    The access is worked out when the socket opens (``start``: one lease read at most, cached
+    by the lease service), again at most every ``RECHECK_S`` while someone types, and at once
+    when the board's lease changes (``lease.state``, ``hub.event``: on a thread of its own, so
+    the publisher never waits for a hub). A read-only socket gets ``{"input": {...}}`` when it
+    opens and whenever the access changes, and ``{"error": HELD}`` once per reason when its
+    bytes are dropped. ``put`` is the socket's outbox (thread-safe)."""
+
+    RECHECK_S = 10.0
+
+    def __init__(self, d: Any, bid: str, key: str, name: str, put: Callable[[Any], None]) -> None:
+        self.d, self.bid, self.key, self.name, self._put = d, bid, key, name, put
+        self._mu = threading.Lock()
+        self._state: dict[str, Any] | None = None
+        self._at = 0.0
+        self._warned = ""
+        self._unsubs = [d.bus.subscribe(t, self._changed) for t in ("lease.state", "hub.event")]
+
+    def _compute(self) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        try:
+            acc = access(self.d, self.bid, self.key, self.name)
+        except Exception as exc:  # noqa: BLE001 - never block a console on a bug here
+            log.warning("console %s of %s: access unknown (%s); input allowed", self.name,
+                        self.bid, exc)
+            acc = {"role": "", "writable": True, "read_only_reason": ""}
+        with self._mu:
+            prev, self._state, self._at = self._state, acc, time.monotonic()
+            if acc["writable"]:
+                self._warned = ""
+        return prev, acc
+
+    def _say(self, prev: dict[str, Any] | None, acc: dict[str, Any]) -> None:
+        key = (acc["writable"], acc["read_only_reason"])
+        if (prev is None and not acc["writable"]) or \
+                (prev is not None and (prev["writable"], prev["read_only_reason"]) != key):
+            self._put(json.dumps({"input": acc}))
+
+    def start(self) -> None:
+        prev, acc = self._compute()
+        self._say(prev, acc)
+
+    def allows(self) -> bool:
+        with self._mu:
+            fresh = self._state is not None and time.monotonic() - self._at < self.RECHECK_S
+        if not fresh:
+            prev, _acc = self._compute()
+            self._say(prev, _acc)
+        with self._mu:
+            acc = dict(self._state or {"writable": True, "read_only_reason": ""})
+            warn = not acc["writable"] and self._warned != acc["read_only_reason"]
+            if warn:
+                self._warned = acc["read_only_reason"]
+        if warn:
+            from .wire import error_object
+
+            self._put(json.dumps({"error": error_object(
+                held_error(self.bid, self.name, acc["read_only_reason"]))}))
+        return bool(acc["writable"])
+
+    def _changed(self, ev: Any) -> None:
+        if ev.board_id != self.bid:
+            return
+
+        def refresh() -> None:
+            prev, acc = self._compute()
+            self._say(prev, acc)
+
+        threading.Thread(target=refresh, daemon=True,
+                         name=f"console-access-{self.name}").start()
+
+    def close(self) -> None:
+        for unsub in self._unsubs:
+            unsub()
+        self._unsubs.clear()

@@ -1560,12 +1560,22 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         max_items, max_bytes = d.console_limits
         outbox = Outbox(asyncio.get_running_loop(), max_items=max_items, max_bytes=max_bytes)
         outbox.put(json.dumps({"state": initial, "name": name, "detail": ""}))
+        # --- ui2 api-hub (G1b): who may type. A read-only client's bytes never reach the
+        # board: once per change an {"error": HELD} frame, and {"input": ...} when it opens
+        # read-only and whenever that changes (console_access).
+        from .console_access import InputGate
+
+        gate = InputGate(d, bid, key, name, outbox.put)
+        await asyncio.to_thread(gate.start)
+        # --- end ui2 api-hub ---
         bridge = ConsoleBridge(stream, outbox, d.bus, bid, key, name)
         bridge.start()
 
         async def to_board(message: dict[str, Any]) -> None:
             data = message.get("bytes")
             if data is None:            # text frames from the client are reserved
+                return
+            if not await asyncio.to_thread(gate.allows):    # ui2 api-hub (G1b)
                 return
             try:
                 await asyncio.to_thread(stream.write, data)
@@ -1576,6 +1586,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             await _serve(websocket, outbox, on_receive=to_board,
                          dropped_frame=dropped_console_frame, coalesce=True)
         finally:
+            gate.close()                                    # ui2 api-hub (G1b)
             # Off the event loop, and not awaited (see _serve): closing the stream
             # joins the pump thread.
             threading.Thread(target=bridge.close, daemon=True,

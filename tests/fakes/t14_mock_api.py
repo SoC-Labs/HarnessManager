@@ -819,6 +819,8 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                 else:
                     await ws.send_text(item)
 
+        warned = [""]                            # ui2 api-hub (G1b): once per reason
+
         async def pump_in() -> None:
             while True:
                 msg = await ws.receive()
@@ -826,6 +828,14 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                     return
                 data = msg.get("bytes")          # text frames from a client are ignored
                 if data:
+                    ok_, why = ui2_console_writable(eng, sim, bid, name)   # ui2 api-hub (G1b)
+                    if not ok_:
+                        if warned[0] != why:
+                            warned[0] = why
+                            from harness_manager.daemon.console_access import held_error
+                            post(json.dumps({"error": error_json(
+                                held_error(bid, name, why))["error"]}))
+                        continue
                     try:
                         await loop.run_in_executor(None, stream.write, data)
                     except HarnessError as exc:
@@ -1090,6 +1100,12 @@ def ui2_require_holder(sim: Any, bid: str, kind: str, body: dict[str, Any] | Non
         "required": True, "mine": bool((lease or {}).get("mine")), "here": False,
         "holder": holder, "target": hub["target"]}}
     raise err
+
+
+def ui2_console_writable(eng: Any, sim: Any, bid: str, name: str) -> tuple[bool, str]:
+    """G1b: may this client's keystrokes reach console ``name`` (the daemon's rule)."""
+    row = ui2_console_rows(eng, sim, bid, [{"name": name}])[0]
+    return bool(row["writable"]), str(row["read_only_reason"])
 
 
 def ui2_register(app: FastAPI, state: Any, sim: Any, ok: Any) -> None:
