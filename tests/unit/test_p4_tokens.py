@@ -223,12 +223,25 @@ def test_the_command_line_gate_exits_1_on_drift_and_0_when_fresh(tree):
 
 
 def test_the_held_family_is_violet_in_both_themes():
+    # UI v2 round 3's dark values (the panel keeps #b69cf5: its palette is frozen, R2)
     tokens = json.loads((REPO / G.TOKENS).read_text())
     assert {n: tokens["color"][n] for n in ("held", "held-soft", "held-border")} == {
-        "held": {"light": "#6b3fc4", "dark": "#b69cf5"},
-        "held-soft": {"light": "#f1ebfb", "dark": "#1f1830"},
-        "held-border": {"light": "#d4c3f2", "dark": "#45376a"}}
+        "held": {"light": "#6b3fc4", "dark": "#bfa9f9"},
+        "held-soft": {"light": "#f1ebfb", "dark": "#261d3d"},
+        "held-border": {"light": "#d4c3f2", "dark": "#5c4a8c"}}
     assert tokens["grammar"]["held"]["color"] == "held"
+    panel = json.loads((REPO / G.PANEL_TOKENS).read_text())
+    assert panel["color"]["held"] == {"light": "#6b3fc4", "dark": "#b69cf5"}
+
+
+def test_the_sidebar_card_tokens_are_round_3s():
+    tokens = json.loads((REPO / G.TOKENS).read_text())
+    assert {n: tokens["color"][n] for n in ("rc-bg", "rc-line", "rc-line-hover", "rc-sel-bg", "rc-sel-line")} == {
+        "rc-bg": {"light": "#f7f8fa", "dark": "#14181e"},
+        "rc-line": {"light": "#d6dae1", "dark": "#2c333e"},
+        "rc-line-hover": {"light": "#bfc6d0", "dark": "#3d4653"},
+        "rc-sel-bg": {"light": "#ffffff", "dark": "#1d232c"},
+        "rc-sel-line": {"light": "#7f98e0", "dark": "#4d63a3"}}
 
 
 @pytest.mark.parametrize(("path", "value", "says"), [
