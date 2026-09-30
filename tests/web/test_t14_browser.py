@@ -17,7 +17,7 @@ import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
 from harness_manager.services.debug import gdb_command
-from tests.web import nav
+from tests.web import nav, wb
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -54,6 +54,12 @@ def section(page, key):
 
 def result_text(page, testid):
     return page.locator(f'[data-testid="{testid}"]').inner_text()
+
+
+def program_text(page):
+    """UI v2: the Program strip's command lines fold under its outcome (a closed <details> is
+    not rendered, so its innerText is empty): read their text."""
+    return page.locator('[data-testid="program-result"]').text_content() or ""
 
 
 def no_missing_icons(page):
@@ -212,7 +218,7 @@ def test_program_mismatch_blocks_and_nothing_is_pushed(page_factory, engine):
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "program")
-    page.locator('[data-overlay="nanosoc_multicore"]').click()
+    wb.pick(page, "nanosoc_multicore")
     page.wait_for_selector('[data-testid="preflight-list"] li[data-check="mismatch"]', timeout=T)
     assert "Program is refused" in page.locator('[data-testid="preflight-summary"]').inner_text()
     page.locator('[data-testid="arm-program"] input').check()
@@ -221,7 +227,7 @@ def test_program_mismatch_blocks_and_nothing_is_pushed(page_factory, engine):
     assert button.get_attribute("aria-disabled") == "true"
     button.click(force=True)
     expect(page.locator('[data-testid="program-result"]')).to_contain_text("Nothing was run.")
-    assert "$ program nanosoc_multicore" in result_text(page, "program-result")
+    assert "$ program nanosoc_multicore" in program_text(page)
     assert engine.called("deploy.deploy") == []
     # UNCHECKED rows are shown as their own state and never block.
     assert page.locator('[data-testid="preflight-list"] li[data-check="unchecked"]').count() == 1
@@ -233,7 +239,7 @@ def test_program_ok_path_shows_progress_to_done(page_factory, engine, screenshot
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     assert page.locator('[data-testid="preflight-list"] li[data-check="mismatch"]').count() == 0
     page.locator('[data-testid="arm-program"] input').check()
@@ -251,12 +257,16 @@ def test_program_ok_path_shows_progress_to_done(page_factory, engine, screenshot
     outcome = page.locator('[data-testid="deploy-outcome"]')
     outcome.wait_for(timeout=T)
     assert outcome.get_attribute("data-state") == "done"
-    assert "verified by the board" in outcome.inner_text()
+    # UI v2: the outcome says what was done and when it was verified; the command's own lines
+    # (the "verified by the board" verdict among them) fold under it
+    assert re.search(r"Programmed led 0x0100001E .* verified \d\d:\d\d", outcome.inner_text().replace("\n", " "))
+    assert "verified by the board" in program_text(page)
     page.wait_for_function(
-        "() => document.querySelector('[data-testid=\"program-result\"]')?.innerText.includes('rc 0')",
+        "() => document.querySelector('[data-testid=\"program-result\"]')?.textContent.includes('rc 0')",
         timeout=T)
-    assert re.search(r"\$ program led\s+\(rc 0, [\d.]+ s\)", result_text(page, "program-result"))
-    assert "0x0100001e" in page.locator('[data-testid="deploy-events"]').inner_text()
+    assert re.search(r"\$ program led\s+\(rc 0, [\d.]+ s\)", program_text(page))
+    # UI v2: the phases' own times are the outcome's title (the event list is gone)
+    assert "push" in (outcome.get_attribute("title") or "")
     page.wait_for_selector('[data-testid="fact-design"]:has-text("led")', timeout=T)
     assert len(engine.called("deploy.deploy")) == 1
     expect(page.locator('[data-testid="arm-program"] input')).not_to_be_checked()
@@ -267,7 +277,7 @@ def test_program_needs_the_arm_box(page_factory, engine):
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "program")
-    page.locator('[data-overlay="greybox"]').click()
+    wb.pick(page, "greybox")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     expect(page.locator('[data-testid="reason-program"]')).to_contain_text("not armed")
     page.locator('[data-action="program"]').click(force=True)
@@ -338,21 +348,22 @@ def test_debug_detect_up_and_down(page_factory, engine, screenshots):
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "debug")
-    down = page.locator('[data-action="down"]')
-    assert down.get_attribute("aria-disabled") == "true"
-    assert "the session is down" in page.locator('[data-testid="reason-down"]').inner_text()
+    # UI v2 (round 3): Close session shows only while a session is up; its reason stays (for
+    # screen readers) and says why
+    expect(page.locator('[data-action="down"]')).to_have_count(0)
+    expect(page.locator('[data-testid="reason-down"]')).to_have_text("the session is down")
     page.locator('[data-action="detect"]').click()
     page.wait_for_selector('[data-testid="idcode"]:has-text("0x6ba00477")', timeout=T)
     page.locator('[data-action="up"]').click()
     page.wait_for_selector('[data-testid="debug-state"]:has-text("up")', timeout=T)
     page.wait_for_selector('[data-port="gdb"]:has-text("127.0.0.1:3343")', timeout=T)
-    ports = page.locator('[data-testid="debug-ports"]').inner_text()
+    ports = page.locator('[data-testid="debug-ports"]').text_content()
     assert gdb_command(3343) in ports                    # FIX-PACK-5: the CLI's own line
-    expect(page.locator('[data-action="up"]')).to_have_attribute("aria-disabled", "true")
+    expect(page.locator('[data-action="up"]')).to_have_count(0)      # round 3: Close replaces it
     page.screenshot(path=str(screenshots / "light-debug-up.png"))
     page.locator('[data-action="down"]').click()
     page.wait_for_selector('[data-testid="debug-state"]:has-text("down")', timeout=T)
-    expect(page.locator('[data-port="gdb"]')).to_have_text("-")
+    expect(page.locator('[data-port="gdb"]')).to_have_count(0)            # no gdb line while down
     assert [n for n, _ in engine.calls if n.startswith("debug.")].count("debug.up") == 1
 
 
@@ -544,7 +555,7 @@ def test_every_section_fits_1280x800_without_horizontal_scroll(page_factory, eng
     for key in SECTIONS:
         section(page, key)
         if key == "program":
-            page.locator('[data-overlay="nanosoc_multicore"]').click()
+            wb.pick(page, "nanosoc_multicore")
             page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
         if key == "consoles":
             page.wait_for_selector('[data-testid="console-state"]:has-text("up")', timeout=T)

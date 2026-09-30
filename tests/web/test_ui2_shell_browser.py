@@ -13,7 +13,7 @@ import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_SPARE, BOARD_V011
-from tests.web import nav
+from tests.web import nav, wb
 from tests.web.test_demo_all_browser import Showcase, make_showcase
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
@@ -122,7 +122,7 @@ def test_a_refused_click_raises_the_chip_and_the_drawer_shows_it_and_links_back(
     nav.open_board(page, BOARD_USB)
     expect(nav.by_id(page, "last-problem-chip")).to_have_count(0)
     nav.section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     page.locator('[data-action="program"]').click(force=True)          # not armed: refused
     chip = nav.by_id(page, "last-problem-chip")
@@ -196,7 +196,7 @@ def test_programming_shows_the_mini_bars_then_verified(page_factory, engine):
     page = page_factory(width=1440, height=900)
     nav.open_board(page, BOARD_USB)
     nav.section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     page.locator('[data-testid="arm-program"] input').check()
     page.locator('[data-action="program"]').click()
@@ -222,7 +222,7 @@ def test_a_watcher_cannot_drive_from_the_workbench_or_board_recover(show: Showca
     page = show.page()
     nav.open_board(page, BOARD_LEASED)                  # alice holds the lease
     nav.section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     for key in DRIVES["program"]:
         expect(nav.by_id(page, f"reason-{key}")).to_contain_text("for the lease holder only", timeout=T)
@@ -240,7 +240,7 @@ def test_a_watcher_cannot_drive_from_the_workbench_or_board_recover(show: Showca
     page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
     expect(nav.rail(page, BOARD_SPARE).locator('[data-testid="rail-lease-badge"]')).to_have_text("Yours", timeout=T)
     nav.section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     expect(nav.by_id(page, "reason-program")).to_contain_text("not armed", timeout=T)
     assert not page.errors, page.errors

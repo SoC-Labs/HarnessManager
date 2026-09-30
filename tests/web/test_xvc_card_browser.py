@@ -14,7 +14,7 @@ import pytest
 
 from harness_manager.core.events import Event
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB, FIELDED_FEATURES
-from tests.web import nav
+from tests.web import nav, wb
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -27,6 +27,8 @@ ADDR = "192.168.10.101:6900"
 SCOPE = ("XVC reaches the reconfigurable partition's debug chain (Debug Bridge, debug hub and "
          "ILAs of the loaded design). It never gives whole-device JTAG.")
 ILA = {"rm_id": "0x0100000A", "rm_name": "nanosoc_ila"}
+# UI v2 round 3: the Logic analysers card's line under the title (X1), the full sentence on hover
+SHORT = "ILA over XVC: the partition's debug chain only"
 
 
 # --- helpers (test_xvc_screenshots.py and test_xvc_card_real_daemon.py use them too) ------------
@@ -49,6 +51,13 @@ def open_board(page, bid=BOARD):
 def to_debug(page):
     nav.section(page, "debug")                          # UI v2: the Workbench's Debug part
     page.wait_for_selector('[data-testid="xvc-card"]', timeout=T)
+
+
+def scope_shown(page):
+    """X1: the scope line is under the title whatever the state; the full sentence on hover."""
+    sub = page.locator('[data-testid="xvc-card"] .card-sub')
+    expect(sub).to_have_text(SHORT)
+    expect(sub).to_have_attribute("title", SCOPE)
 
 
 def card(page):
@@ -97,12 +106,12 @@ def colours(page, selector, token="--held"):
 def test_open_attached_close(page_factory, daemon, engine):
     xvc_board(engine)
     page = debug_page(page_factory)
-    expect(page.locator('[data-testid="xvc-card"] .card-sub')).to_have_text(SCOPE)
+    scope_shown(page)
     state_is(page, "down")
     # the twin, before: nothing is open, so Close says why and nobody is attached
     expect(by_id(page, "reason-xvc_close")).to_have_text("no XVC session is open")
-    expect(button(page, "xvc_close")).to_have_attribute("aria-disabled", "true")
-    expect(by_id(page, "xvc-attached")).to_have_text("-")
+    expect(button(page, "xvc_close")).to_have_count(0)      # round 3: Close only while open
+    expect(by_id(page, "xvc-attached")).to_have_count(0)
     button(page, "xvc_open").click()
     state_is(page, "ready")
     st = sim(daemon).status(BOARD)
@@ -115,11 +124,11 @@ def test_open_attached_close(page_factory, daemon, engine):
     expect(by_id(page, "xvc-attached")).to_contain_text(f"pid {st.hw_server_pid}")
     expect(by_id(page, "xvc-attached")).to_contain_text("Harness Manager's hw_server")
     expect(by_id(page, "xvc-attached-cmd")).to_have_text("hw_server -q -p0 -s TCP:127.0.0.1:23601")
-    expect(page.locator('[data-testid="xvc-card"] .card-sub')).to_have_text(SCOPE)   # always
+    scope_shown(page)                                    # always
     button(page, "xvc_close").click()
     state_is(page, "down")
-    expect(by_id(page, "xvc-attached")).to_have_text("-")
-    expect(by_id(page, "xvc-url")).to_have_text("open a session first")
+    expect(by_id(page, "xvc-attached")).to_have_count(0)
+    expect(by_id(page, "xvc-url")).to_have_count(0)
     assert sim(daemon).sessions == {}
     assert page.errors == []
 
@@ -133,7 +142,7 @@ def test_negative_twin_an_image_without_the_debug_bridge_server_cannot_open(page
     expect(by_id(page, "reason-xvc_open")).to_contain_text("Cannot: 2542 on this image drives jtag_bb")
     button(page, "xvc_open").click(force=True)        # an interlock: nothing is sent
     expect(by_id(page, "xvc-result")).to_contain_text("Nothing was run.")
-    expect(page.locator('[data-testid="xvc-card"] .card-sub')).to_have_text(SCOPE)
+    scope_shown(page)
     assert sim(daemon).sessions == {}
 
 
@@ -187,7 +196,7 @@ def test_not_the_lease_holder_disables_the_buttons_with_the_reason(page_factory,
     expect(by_id(page, "reason-xvc_open")).to_have_text(why, timeout=T)
     expect(by_id(page, "reason-xvc_close")).to_have_text(why)
     expect(button(page, "xvc_open")).to_have_attribute("aria-disabled", "true")
-    expect(button(page, "xvc_close")).to_have_attribute("aria-disabled", "true")
+    expect(button(page, "xvc_close")).to_have_count(0)      # round 3: Close only while open
     button(page, "xvc_open").click(force=True)        # an interlock: nothing is sent
     expect(by_id(page, "xvc-result")).to_contain_text("Nothing was run.")
     state_is(page, "down")
@@ -377,7 +386,7 @@ def test_a_swap_by_clicks_in_program_re_attaches_on_the_new_design(page_factory,
     button(page, "xvc_open").click()
     state_is(page, "ready")
     nav.section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     page.locator('[data-testid="arm-program"] input').check()
     page.locator('[data-action="program"]').click()

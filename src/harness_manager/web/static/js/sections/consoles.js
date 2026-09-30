@@ -169,7 +169,7 @@ function BaudControl({ bid, name, onResult }) {
   const why = baudWhy(v);
   const tip = [v.reason, v.cite ? `(${v.cite})` : "", `source: ${SOURCE_TEXT[v.source] || v.source}`].filter(Boolean).join(" ");
   return html`<span class="baud-ctl" data-testid="baud" data-settable="no" title=${tip}>
-    ${v.baud ? html`<span class="num">${v.baud}</span> baud` : "rate not reported"}${why ? html`<span class="why"> · ${why}</span>` : null}</span>`;
+    ${v.baud ? html`<span class="num">${v.baud}</span> baud` : "no rate"}${why ? html`<span class="why"> · ${why}</span>` : null}</span>`;
 }
 
 // --- screen and the TCP export ------------------------------------------------------------------

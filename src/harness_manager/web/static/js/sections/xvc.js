@@ -385,7 +385,8 @@ export function XvcCard({ bid }) {
     const why = gateReason(bid, "xvc", spec.key, gate);
     const running = p.running === spec.key;
     const blocked = !!why && !running;
-    const look2 = blocked && variant === "primary" ? "" : variant;
+    const notYours = blocked && !!gate.holder && !!holderOnly(bid, gate.holder);
+    const look2 = notYours && variant === "primary" ? "" : variant;
     const onClick = () => {
       if (running) return;
       if (why) { interlock(bid, "xvc", spec.command, why); return; }
@@ -427,13 +428,13 @@ export function XvcCard({ bid }) {
             : html`<span class="muted">nobody yet</span>`}</dd>` : null}
         </dl>
         <div class="row">
-          ${st.open ? html`<${CopyTcl} bid=${bid} text=${tclText} primary=${true} />${btn(close, closeGate, "", "square")}`
+          ${st.open && p.running !== "xvc_open" ? html`<${CopyTcl} bid=${bid} text=${tclText} primary=${true} />${btn(close, closeGate, "", "square")}`
             : html`${btn(open, openGate, "primary", "play")}<${CopyTcl} bid=${bid} text=${tclText} />`}
           <span class="small muted">A swap closes it.</span>
         </div>
-        ${st.open ? null : html`<label class=${`check xvc-byo ${byoOf(x) ? "on" : ""}`} data-testid="xvc-byo"
+        ${html`<label class=${`check xvc-byo ${byoOf(x) ? "on" : ""}`} data-testid="xvc-byo"
             title=${byoLocked ? "close the session to change it" : "Harness Manager starts no hw_server; your Vivado opens the relay itself (open_hw_target -xvc_url)"}>
-          <input type="checkbox" checked=${byoOf(x)} disabled=${byoLocked}
+          <input type="checkbox" checked=${st.open ? st.mode === "byo" : byoOf(x)} disabled=${byoLocked}
             onChange=${(e) => { x.byo = e.target.checked; changed(); scheduleTcl(bid, 0); }} />
           Bring your own hw_server (<code>--byo</code>)</label>`}
         ${reasons}

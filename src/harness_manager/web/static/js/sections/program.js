@@ -22,14 +22,14 @@
 // (actions.js), so on a hub board only this Harness Manager holding the lease drives them.
 
 import { gateReason, interlock, isArmed, panelState, runAction, runJob, setArmed } from "../actions.js";
-import { bytesText, capState, hexId, kib } from "../format.js";
+import { bytesText, capState, elapsedSince, hexId, kib } from "../format.js";
 import { html, useEffect, useRef } from "../lib.js";
 import { openModal } from "../modal.js";
 import {
   boardState, changed, hasCardStore, loadCard, loadOverlays, onBoardEvent, runPreflight, S, toast,
 } from "../store.js";
 import { Icon, ResultBlock, Spinner, useReveal } from "../ui.js";
-import { leaseWho } from "../week.js";
+import { holderOnly, leaseWho } from "../week.js";
 
 const ARM = "program";
 const PANEL = "program";
@@ -433,7 +433,10 @@ function DriveButton({ bid, spec, gate, variant = "", icon, onRefused }) {
   const why = gateReason(bid, PANEL, spec.key, gate);
   const running = p.running === spec.key;
   const blocked = !!why && !running;
-  const look = blocked && variant === "primary" ? "" : variant;
+  // FIX-PACK-4: not the lease holder: never the blue button that says "click me" (any other
+  // reason, "not armed" say, keeps it: that is the next thing to do)
+  const notYours = blocked && !!holderOnly(bid, gate.holder || "Program");
+  const look = notYours && variant === "primary" ? "" : variant;
   const onClick = () => {
     if (running) return;
     if (why) {
@@ -448,7 +451,8 @@ function DriveButton({ bid, spec, gate, variant = "", icon, onRefused }) {
   return html`<button type="button" class=${`btn ${look}`} data-action=${spec.key}
       aria-disabled=${blocked ? "true" : undefined} aria-busy=${running ? "true" : undefined}
       aria-describedby=${`reason-${spec.key}-${bid}`} title=${blocked ? why : undefined} onClick=${onClick}>
-    ${running ? html`<${Spinner} />` : html`<${Icon} name=${icon} />`}${running ? spec.busyLabel : spec.label}</button>`;
+    ${running ? html`<${Spinner} />` : html`<${Icon} name=${icon} />`}${running ? spec.busyLabel : spec.label}
+    ${running ? html`<span class="elapsed">${Math.floor(elapsedSince(p.startedAt))} s</span>` : null}</button>`;
 }
 
 function ArmProgram({ bid }) {

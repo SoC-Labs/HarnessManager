@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from harness_manager.demo import BOARD_USB
-from tests.web import nav
+from tests.web import nav, wb
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -35,11 +35,12 @@ def program_section(page) -> None:
     page.wait_for_selector('[data-testid="board-header"]', timeout=T)
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
     nav.section(page, "program")                      # UI v2: the Workbench's Program part
+    wb.open_picker(page)                              # the design list is a picker now
     page.wait_for_selector('[data-overlay="led"]', timeout=T)
 
 
 def program_led(page) -> None:
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     page.locator('[data-testid="arm-program"] input').check()
     expect(page.locator('[data-action="program"]')).not_to_have_attribute("aria-disabled", "true")
@@ -48,7 +49,7 @@ def program_led(page) -> None:
     outcome.wait_for(timeout=T)
     assert outcome.get_attribute("data-state") == "done"
     page.wait_for_function(
-        "() => document.querySelector('[data-testid=\"program-result\"]')?.innerText.includes('rc 0')",
+        "() => document.querySelector('[data-testid=\"program-result\"]')?.textContent.includes('rc 0')",
         timeout=T)
 
 
@@ -71,7 +72,7 @@ def test_the_box_shows_unticked_and_ticked_it_keeps_the_design(page_factory, eng
     card.wait_for(timeout=T)
     assert card.get_attribute("data-kept") == "true"
     assert "Kept on the card (slot A)" in card.inner_text()
-    result = page.locator('[data-testid="program-result"]').inner_text()
+    result = page.locator('[data-testid="program-result"]').text_content()
     assert "Kept on the card (slot A)" in result and "--keep-on-card" in result
     assert engine.called("deploy.deploy")[-1][-1] is True
     expect(page.locator(BOX)).not_to_be_checked()          # each keep is a fresh choice
@@ -87,7 +88,7 @@ def test_negative_twin_the_box_left_unticked_keeps_nothing(page_factory, engine)
     program_led(page)
     assert engine.called("deploy.deploy")[-1][-1] is False
     assert page.locator('[data-testid="deploy-card"]').count() == 0
-    result = page.locator('[data-testid="program-result"]').inner_text()
+    result = page.locator('[data-testid="program-result"]').text_content()
     assert "Kept on the card" not in result and "--keep-on-card" not in result
 
 

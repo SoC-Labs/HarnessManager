@@ -17,6 +17,7 @@ import { clock } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, loadDebug } from "../store.js";
 import { CopyButton, Icon, ResultBlock, Spinner } from "../ui.js";
+import { holderOnly } from "../week.js";
 
 const PANEL = "debug";
 const LEVEL = { up: "ok", starting: "accent", down: "", failed: "err", unknown: "unk" };
@@ -117,7 +118,9 @@ function RailButton({ bid, spec, gate, variant = "", icon, title = "" }) {
   const why = gateReason(bid, PANEL, spec.key, gate);
   const running = p.running === spec.key;
   const blocked = !!why && !running;
-  const look = blocked && variant.includes("primary") ? variant.replace("primary", "").trim() : variant;
+  // FIX-PACK-4: primary unless the lease is what blocks it
+  const notYours = blocked && !!gate.holder && !!holderOnly(bid, gate.holder);
+  const look = notYours && variant.includes("primary") ? variant.replace("primary", "").trim() : variant;
   const onClick = () => {
     if (running) return;
     if (why) { interlock(bid, PANEL, spec.command, why); return; }
