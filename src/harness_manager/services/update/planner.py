@@ -159,7 +159,7 @@ class Plan:
         return hashlib.sha256(body.encode()).hexdigest()
 
     def approve(self, *, consent: str = "", by: str = "user", board_phrase: str = "",
-                auto_revert: bool | None = None) -> Approval:
+                auto_revert: bool | None = None, allow_mcc_update: bool = False) -> Approval:
         """The user's go-ahead. A re-key needs ``consent`` equal to ``consent_phrase``; a
         remote door (HUB-SD) needs ``board_phrase`` equal to the plan's (it names the board,
         the lease holder and the queue). ``auto_revert``: None takes the plan's default
@@ -184,7 +184,8 @@ class Plan:
                                hint="install without auto-revert, or through a door that keeps "
                                     "a backup")
         return Approval(fingerprint=self.fingerprint(), consent=consent.strip(), by=by,
-                        board_phrase=board_phrase.strip(), auto_revert=armed)
+                        board_phrase=board_phrase.strip(), auto_revert=armed,
+                        allow_mcc_update=bool(allow_mcc_update))
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -207,6 +208,20 @@ class Plan:
         }
 
 
+def mcc_version(text: str) -> str:
+    """An MCC firmware version as compared: trimmed, one leading ``v``/``V`` dropped (the
+    board reports ``v1.3.2``, a release lists ``1.3.2``), case-blind (FIX-PACK-7)."""
+    t = str(text or "").strip()
+    return (t[1:] if t[:1] in ("v", "V") else t).lower()
+
+
+def mcc_fw_tested(running: str, tested: Any) -> bool:
+    """Is the board's MCC firmware one the release lists as tested (``mcc_version`` on both
+    sides)?"""
+    want = mcc_version(running)
+    return any(mcc_version(t) == want for t in tested)
+
+
 @dataclass(frozen=True)
 class Approval:
     fingerprint: str
@@ -214,6 +229,9 @@ class Approval:
     by: str = "user"
     board_phrase: str = ""                # HUB-SD: the typed phrase of a remote door
     auto_revert: bool = False             # HUB-SD (U10): armed at approval
+    #: FIX-PACK-7 (G8): write a bundle MBBIOS line that would make the MCC update itself
+    #: (the card has no line and has the .ebf it names); refused without it (15)
+    allow_mcc_update: bool = False
 
 
 @dataclass(frozen=True)
@@ -450,7 +468,7 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
             plan.blockers.append(f"the config SD is for {', '.join(board.sd_revisions)}; harness "
                                  f"{rel.version} supports {', '.join(rel.compat.board_revs)}")
     if board.mcc_firmware and rel.compat.mcc_fw_tested and \
-            board.mcc_firmware not in rel.compat.mcc_fw_tested:
+            not mcc_fw_tested(board.mcc_firmware, rel.compat.mcc_fw_tested):
         plan.warnings.append(f"MCC firmware {board.mcc_firmware} was not tested with harness "
                              f"{rel.version} (tested: {', '.join(rel.compat.mcc_fw_tested)})")
     if not board.identity_known:

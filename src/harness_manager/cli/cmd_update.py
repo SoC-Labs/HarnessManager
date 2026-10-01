@@ -44,6 +44,7 @@ from harness_manager.core.errors import (
 from harness_manager.core.events import Event
 from harness_manager.core.pack import detail_of
 
+from .cmd_board import ALLOW_MCC_UPDATE_HELP
 from .context import SERIAL_HELP, Ctx
 from .output import TSV_COLUMNS, Result, StderrProgress, with_data
 
@@ -115,6 +116,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--consent", default="", metavar="PHRASE",
                     help='for a re-key: the exact phrase the plan prints ("REKEY 0x…")')
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    ap.add_argument("--allow-mcc-update", action="store_true",
+                    help=ALLOW_MCC_UPDATE_HELP)
 
     ap = sub.add_parser("app", help="update this app: download, stage side by side, switch",
                         parents=[fmt, src], epilog=epilog("update app"))
@@ -283,13 +286,15 @@ def _harness(ctx: Ctx) -> int:
             svc.install_harness(session, plan, plan.approve(), verified)
             raise with_data(AlreadyError(f"{cand.board_id} already runs harness {plan.version}",
                                          hint="nothing to do"), plan=plan.summary())
+        # FIX-PACK-7 (G8): only when asked
+        allow = {"allow_mcc_update": True} if getattr(a, "allow_mcc_update", False) else {}
         if plan.rekey:
             consent = a.consent or ("" if a.yes else _ask_phrase(ctx, plan.consent_phrase))
-            approval = plan.approve(consent=consent)
+            approval = plan.approve(consent=consent, **allow)
         else:
             what = ("store the overlays of" if plan.mode == "overlays" else "install")
             ctx.confirm(f"{what} harness {plan.version} on {cand.board_id}?")
-            approval = plan.approve()
+            approval = plan.approve(**allow)
         unsubscribe = _watch(ctx, cand.board_id)
         try:
             out = svc.install_harness(session, plan, approval, verified)
@@ -305,6 +310,7 @@ def _harness(ctx: Ctx) -> int:
         human.append(f"backup     {backup}")
     human += [f"stored     {s}" for s in out.stored]
     human += [f"skipped    {k}: {v}" for k, v in out.skipped.items()]
+    human += [f"note       {n}" for n in getattr(out, "notes", ())]     # FIX-PACK-7: MBBIOS
     ctx.emit(Result("update harness", data,
                     rows=[[out.board_id, out.version, out.result, backup, out.detail]],
                     human=human))

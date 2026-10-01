@@ -33,6 +33,25 @@ owners.
   the swap" (also when the board's own watchdog stopped it); HM's session reopens after a
   verified swap. `debug down` also stops an on-board session HM did not start; closing the
   board stops only HM's own.
+- **OpenOCD on the board stops before EVERY swap (FIX-PACK-7, DEBUG-DOWN-FIRST, agreed with the
+  Linux lead).** Before any `program` or `restore` (the CLI, the app's Program and Restore
+  baseline, Build's Add then Program) on a claimed Linux board this HM can enter, HM runs
+  `mps3-debug down --json` over the claim's SSH first, whoever started that OpenOCD (another
+  terminal, a restarted service, `mps3-debug up` by hand) and whatever `debug.on_board` says.
+  Down (or already down) goes on; no launcher (exit 127) or no OpenOCD in the image (exit
+  12) goes on. Anything else (the SSH did
+  not answer, another exit, an answer HM cannot read) refuses the program with exit 15
+  before anything touches the board: "`mps3-debug down` failed before the swap (…): OpenOCD
+  on the board may still drive JTAG, so nothing was programmed", hint "retry, or add --force
+  to swap anyway (on Linux v2.0.0 OpenOCD on the board may still drive JTAG during the
+  reconfiguration)". `program --force` and `restore --force` (new; the API's `force: true`;
+  the app's armed **Program anyway** / **Restore anyway**) swap with a warning instead. A
+  board whose launcher lists the `harnessd-lock` capability (Linux v2.1) warns and goes on.
+  Bare metal and unclaimed boards are unchanged.
+- **The terminal holding `debug up` follows a swap:** when the swap reopens the session it
+  prints the new gdb and `attach` lines (the ports change); when the swap was not verified it
+  prints why the session was not reopened. `debug status` on the board path no longer prints
+  this PC's `openocd … has remote_bitbang` line (it described this PC); `--json` keeps it.
 - API (additive): `DebugStatus` adds `gdb_ports`, `cores`, `where`; `debug.state` adds
   `where` (docs/API.md "OpenOCD on the board"). docs/HIL_LINUX.md step E-OCD is the silicon
   proof (needs the launcher image).
@@ -492,6 +511,20 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   loads at power-on, makes the running overlay that default, or clears it. With no card the
   board boots exactly as it always has, and every change is refused. The Board tile shows a
   Card line.
+- **MBBIOS is never changed by Harness Manager (FIX-PACK-7, platform item G8).** Every path
+  that writes the config SD (`sd install`, `harness install` / `update harness` through the
+  Debug USB, the A/B view or the hub door) keeps the target card's own `MBBIOS:` line in
+  board.txt: "MBBIOS kept: <value>". A card with no MBBIOS line (or no board.txt) gets the
+  bundle's line unchanged only when the `.ebf` it names is not on the card ("MBBIOS: <value>
+  from the bundle (the card has no <file>, so the MCC will not update)"); with that `.ebf` on
+  the card the write is refused (exit 15) before anything is written: "this card would make
+  the MCC update itself to <file>: remove <file> from the card, or add --allow-mcc-update".
+  `--allow-mcc-update` (`allow_mcc_update` in the API) writes it with a warning. A board.txt
+  with the line removed is never written. Why: a bundle naming `mbb_v141.ebf` could make a
+  third-party MCC that has that file update itself from 1.3.2 to 1.4.1, and Harness Manager is
+  proven on 1.3.2 only. The note is printed, in `--json` (`notes`) and in the progress events.
+- **No false "MCC firmware not tested" warning:** the board's `v1.3.2` now matches a release
+  tested on `1.3.2`; a really different version still warns.
 
 ### The Live display (the LCD mirror)
 - The service serves a live, pixel-exact copy of the board's 320x240 LCD to the lease
@@ -841,3 +874,8 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
 - Windows and macOS run the unit tests and the installer in CI; they have not been used
   with a real board. `install.ps1` does not yet use `constraints.txt`, the wheelhouse or
   a Start-menu entry.
+- nanosoc_multicore with OpenOCD on the board: only cpu1 can be debugged on Linux v2.0.0;
+  the board's OpenOCD refuses cpu0 (core 0 is held in reset by the boot gate; fix in v2.1).
+- nanosoc_multicore's boot ROM writes the DUT flash (one byte at 0x20000 onward, on every
+  boot): don't load it on a board whose flash holds the MicroPython image (nanosoc_upy); fix
+  in v2.1.

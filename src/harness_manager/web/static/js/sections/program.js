@@ -20,6 +20,12 @@
 //
 // Lease gating (R3): Program and Restore baseline go through gateReason with `holder`
 // (actions.js), so on a hub board only this Harness Manager holding the lease drives them.
+//
+// FIX-PACK-7 (DEBUG-DOWN-FIRST): before every swap the daemon asks OpenOCD on a claimed Linux
+// board down; when it cannot, the job is REFUSED (15) with error.data.debug_down. The strip then
+// offers "Program anyway" (or "Restore anyway"): armed like Program (tick Arm, then click), the
+// same gateReason (lease holder, preflight), and it sends `force: true`. A swap that went on
+// despite a failed down says so (deploy.warning) in the outcome.
 
 import { gateReason, interlock, isArmed, panelState, runAction, runJob, setArmed } from "../actions.js";
 import { bytesText, capState, elapsedSince, hexId, kib } from "../format.js";
@@ -95,6 +101,7 @@ onBoardEvent((ev) => {
   };
   if (ev.topic === "deploy.started") {
     timing[ev.board_id] = { startedAt: at, order: [], at: {}, bytes: {}, totals: {} };
+    if (uiOf(ev.board_id).anyway) { uiOf(ev.board_id).anyway = null; changed(); }   // swapping now
   } else if (ev.topic === "deploy.progress") {
     const ph = d.phase || "?";
     if (!t.startedAt) t.startedAt = at;
@@ -178,8 +185,15 @@ function refOf(b, name) {
 const ui = {};                       // bid -> {open, q, dismissed, flash}
 
 function uiOf(bid) {
-  if (!ui[bid]) ui[bid] = { open: false, q: "", dismissed: "", flash: 0, armPulse: 0 };
+  if (!ui[bid]) ui[bid] = { open: false, q: "", dismissed: "", flash: 0, armPulse: 0, anyway: null };
   return ui[bid];
+}
+
+// FIX-PACK-7: a deploy the daemon refused because OpenOCD on the board could not be stopped
+// first (error.data.debug_down): offer to swap anyway. kind: "program" | "restore".
+function offerAnyway(bid, kind, ok, value, overlay = "") {
+  const why = !ok && value && value.data && value.data.debug_down;
+  uiOf(bid).anyway = why ? { kind, overlay, reason: why.reason || "", launcher: why.launcher || "mps3-debug" } : null;
 }
 
 export function pickDesign(bid, name, { pulse = false } = {}) {
@@ -189,6 +203,7 @@ export function pickDesign(bid, name, { pulse = false } = {}) {
   u.open = false;
   u.q = "";
   if (pulse) { u.flash = Date.now(); u.armPulse = Date.now(); }
+  if (u.anyway && u.anyway.kind === "program" && u.anyway.overlay !== name) u.anyway = null;
   setArmed(bid, ARM, false);            // a new pick is armed afresh
   changed();
   runPreflight(bid, name);
@@ -393,17 +408,20 @@ function progress(ctx) {
 export function programSpecs(bid) {
   const b = boardState(bid);
   const name = b.selectedOverlay;
+  // force: FIX-PACK-7's "Program anyway" (the CLI's --force); only when asked
+  const deployRun = (force) => (ctx) => {
+    // keep_on_card only when asked: the default never writes the card.
+    const body = keeping(b) ? { overlay: overlaySpec(b, name), keep_on_card: true }
+      : { overlay: overlaySpec(b, name) };
+    if (force) body.force = true;
+    b.keepOnCard = false;              // each keep is a fresh choice
+    b.lastKind = "program";
+    return runJob("deploy", { bid }, body, progress(ctx), "deploy");
+  };
   const program = {
     key: "program", label: "Program", busyLabel: "Programming...", budgetS: 120,
     command: `program ${name || "?"}${keeping(b) ? " --keep-on-card" : ""}`,
-    run: (ctx) => {
-      // keep_on_card only when asked: the default never writes the card.
-      const body = keeping(b) ? { overlay: overlaySpec(b, name), keep_on_card: true }
-        : { overlay: overlaySpec(b, name) };
-      b.keepOnCard = false;              // each keep is a fresh choice
-      b.lastKind = "program";
-      return runJob("deploy", { bid }, body, progress(ctx), "deploy");
-    },
+    run: deployRun(false),
     render: renderDeploy,
     onDone: (ok, value) => {
       // harness-manager-daemon runs the preflight before it takes the job, and a refusal carries
@@ -415,15 +433,53 @@ export function programSpecs(bid) {
         b.preflightLine = `$ preflight ${name}  (from the refused deploy)`;
         changed();
       }
+      offerAnyway(bid, "program", ok, value, name);
     },
+  };
+  const restoreRun = (force) => (ctx) => {
+    b.lastKind = "restore";
+    return runJob("restore", { bid }, force ? { force: true } : undefined, progress(ctx), "restore");
   };
   const restore = {
     key: "restore", label: "Restore baseline", busyLabel: "Restoring...", budgetS: 120,
     command: "restore",
-    run: (ctx) => { b.lastKind = "restore"; return runJob("restore", { bid }, undefined, progress(ctx), "restore"); },
+    run: restoreRun(false),
     render: renderDeploy,
+    onDone: (ok, value) => offerAnyway(bid, "restore", ok, value),
   };
-  return { program, restore };
+  const programAnyway = {
+    ...program, key: "program_anyway", label: "Program anyway",
+    command: `program ${name || "?"}${keeping(b) ? " --keep-on-card" : ""} --force`,
+    run: deployRun(true),
+    onDone: (ok, value) => { program.onDone(ok, value); uiOf(bid).anyway = null; },
+  };
+  const restoreAnyway = {
+    ...restore, key: "restore_anyway", label: "Restore anyway", command: "restore --force",
+    run: restoreRun(true),
+    onDone: () => { uiOf(bid).anyway = null; },
+  };
+  return { program, restore, programAnyway, restoreAnyway };
+}
+
+// FIX-PACK-7: "Program anyway" / "Restore anyway" after a refused swap (offerAnyway): the same
+// arm and gate as the button it repeats, and why it is offered.
+function Anyway({ bid, specs, flashReason }) {
+  const offer = uiOf(bid).anyway;
+  if (!offer) return null;
+  const restore = offer.kind === "restore";
+  const spec = restore ? specs.restoreAnyway : specs.programAnyway;
+  const gate = restore ? RESTORE_GATE : { ...PROGRAM_GATE, guard: () => programGuard(bid) };
+  const verb = restore ? "Restore anyway" : "Program anyway";
+  const why = `OpenOCD on the board could not be stopped before the swap (${offer.launcher} down). `
+    + `${verb} swaps all the same: on Linux v2.0.0 OpenOCD on the board may still drive JTAG during `
+    + `the reconfiguration. Tick Arm, then ${verb}.`;
+  // A refused click says so in the outcome box (the click is newer than the refused deploy).
+  const refused = (reason) => { panelState(bid, PANEL).startedAt = Date.now(); flashReason(reason); };
+  return html`<div class="prog-row" data-testid="anyway">
+      <${DriveButton} bid=${bid} spec=${spec} variant="danger" icon="triangle-alert" gate=${gate} onRefused=${refused} />
+      <span class="sr-only" id=${`reason-${spec.key}-${bid}`}>${gateReason(bid, PANEL, spec.key, gate)}</span>
+    </div>
+    <p class="reason warn" data-testid="anyway-why"><${Icon} name="triangle-alert" /><span>${why}</span></p>`;
 }
 
 // One button: the gate decides disabled and why; a refused click is the interlock (logged to
@@ -591,7 +647,7 @@ function outcomeOf(bid) {
   const at = new Date((dep.doneAt || Date.now() / 1000) * 1000).toTimeString().slice(0, 5);
   const pushed = total ? `pushed ${bytesText(total)}${push ? ` in ${fmtSecs(push)} · ${fmtRate(total / Math.max(push, 0.001))}` : ""}` : "";
   const phaseTitle = (t ? t.order : []).map((ph) => `${ph} ${fmtSecs(phaseSecs(t, ph))}`).join(" · ");
-  return { key, state: verified ? "done" : "unverified", lvl: verified ? "ok" : "warn",
+  return { key, state: verified ? "done" : "unverified", lvl: verified ? "ok" : "warn", warning: dep.warning || "",
     icon: verified ? "circle-check" : "triangle-alert",
     text: verified ? `${verb} ${hexId(dep.rm_id)}${secs ? ` · ${fmtSecs(secs)} in all` : ""}`
       : `Written, not verified: ${dep.overlay || "the design"} ${hexId(dep.rm_id)}`,
@@ -618,6 +674,7 @@ function Outcome({ bid }) {
     <span class="pgm-out-body">
       ${oc.text ? html`<span class="pgm-out1">${oc.text}</span>` : null}
       ${oc.push ? html`<span class="pgm-out2" data-testid="deploy-pushed">${oc.push}</span>` : null}
+      ${oc.warning ? html`<span class="pgm-out2" data-testid="deploy-warning"><${Icon} name="triangle-alert" cls="sm" /> ${oc.warning}</span>` : null}
       ${oc.card ? html`<span class=${`chip ${oc.card.kept ? "ok" : "warn"} pgm-card`} data-testid="deploy-card"
           data-kept=${oc.card.kept ? "true" : "false"}><${Icon} name=${oc.card.kept ? "memory-stick" : "triangle-alert"} />
           ${cardText(oc.card)}${oc.card.kept ? ": boots next" : ""}</span>` : null}
@@ -654,7 +711,8 @@ export function ProgramStrip({ bid }) {
   }, [revealAt]);
   const cap = capState(b.info, "deploy_partial");
   const p = panelState(bid, PANEL);
-  const { program, restore } = programSpecs(bid);
+  const specs = programSpecs(bid);
+  const { program, restore } = specs;
   const flashReason = () => { u.flash = Date.now(); changed(); };
   const programWhy = gateReason(bid, PANEL, "program", { ...PROGRAM_GATE, guard: () => programGuard(bid) });
   const restoreWhy = gateReason(bid, PANEL, "restore", RESTORE_GATE);
@@ -695,6 +753,7 @@ export function ProgramStrip({ bid }) {
         </div>
         ${reason}
         <span class="sr-only" data-testid="reason-restore" id=${`reason-restore-${bid}`}>${restoreWhy === "running" ? "" : restoreWhy}</span>
+        <${Anyway} bid=${bid} specs=${specs} flashReason=${flashReason} />
         <${CardLine} bid=${bid} />
       </div>
     </div>

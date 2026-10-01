@@ -10,7 +10,10 @@ key, batch mode), then plays the launcher as the Linux lead's contract has it:
   is held by another client, 12 ``no_openocd``, 13 ``no_dap`` (greybox, led), 14 ``no_cfg``
   (an unknown NAME, or ``auto`` when its identify gets no answer), 6 ``openocd_exit`` with a
   log tail (``fail_start``);
-- ``down``: 0 and ``down`` (also when nothing ran);
+- ``down``: 0 and ``down`` (also when nothing ran); ``fail_down = (rc, message)``: that exit
+  and ``failed`` with ``openocd_exit`` (FIX-PACK-7: the down that refuses a swap);
+- ``version``: the status-shaped object, plus ``capabilities`` when set (FIX-PACK-7: v2.1's
+  ``harnessd-lock``);
 - ``status``: the state, or the watchdog's stop after a swap (``swap_stop``);
 - ``installed=False``: exit 127 (``sh: mps3-debug: not found``); ``malformed`` (True, or the
   verbs it applies to): exit 0 and text that is not its JSON.
@@ -107,6 +110,12 @@ class FakeLauncher:
         self.swap_stop = False
         #: the watchdog stopped OpenOCD for another reason (status: openocd_exit, no "swap")
         self.died: str = ""
+        #: FIX-PACK-7: ``down`` fails with (exit code, message); OpenOCD keeps running
+        self.fail_down: tuple[int, str] | None = None
+        #: FIX-PACK-7: ``version --json``'s ``capabilities`` (None: the field is absent)
+        self.capabilities: list[str] | None = None
+        #: the launcher's state when each verb arrived ([(verb, state)]): what a swap met
+        self.states: list[tuple[str, str]] = []
         self.state = "down"
         self.design = ""
         self.cores: tuple[str, ...] = ()
@@ -156,6 +165,7 @@ class FakeLauncher:
         if self.malformed is True or (self.malformed and verb in self.malformed):
             return RunResult(0, "mps3-debug: usage: mps3-debug up|down|status\n{not json", "")
         rm = words[words.index("--rm") + 1] if "--rm" in words else "auto"
+        self.states.append((verb, self.state))
         return getattr(self, f"_{verb}", self._unknown)(rm)
 
     def _reply(self, rc: int, **kw: Any) -> RunResult:
@@ -212,6 +222,9 @@ class FakeLauncher:
         return self._reply(0)
 
     def _down(self, _rm: str) -> RunResult:
+        if self.fail_down is not None:
+            rc, message = self.fail_down
+            return self._failed(rc, "openocd_exit", message)
         was = self.state
         self.state, self.cores, self.pid = "down", (), 0
         self.swap_stop, self.died = False, ""
@@ -230,6 +243,8 @@ class FakeLauncher:
         return self._reply(0)
 
     def _version(self, _rm: str) -> RunResult:
+        if self.capabilities is not None:
+            return self._reply(0, launcher="2.1.0", capabilities=list(self.capabilities))
         return self._reply(0)
 
     def _unknown(self, _rm: str) -> RunResult:

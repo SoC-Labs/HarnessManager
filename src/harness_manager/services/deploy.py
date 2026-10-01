@@ -10,6 +10,11 @@ and a check that could not be made is reported but does not block.
                            ``deploy.failed`` is published.
         keep_on_card       only when asked: the card must be able to take the design
                            (``card_status``), else ``UnavailableError`` (exit 12), nothing pushed
+        debug down first   DEBUG-DOWN-FIRST: the board's OpenOCD is asked down (a board whose
+                           pack has an on-board route that is READY: a claimed Linux board);
+                           a failed down refuses (``RefusedError``, exit 15, stage preflight)
+                           unless ``force`` or the board's harnessd lock, which publish
+                           ``deploy.warning`` {overlay, message} and go on
         deploy.started     {overlay, rm_id, preflight: [...], keep_on_card} (UNCHECKED items are
                            listed here)
         deploy.progress    {phase, bytes, total}, one per adapter progress report; plus
@@ -37,6 +42,13 @@ How a MISMATCH is refused:
 
 Which preflight items are identity items is fixed by name, below. A board pack
 must use these names so the service can tell the two apart.
+
+Debug down first (FIX-PACK-7, ``services/debug_onboard.py`` DEBUG-DOWN-FIRST). Before
+every swap, ``deploy`` and ``restore_baseline`` ask the board's OpenOCD down through the
+engine's debug service (``debug.down_first``, which also closes and later reopens a session
+of its own), else through the session's route directly. ``force=True`` (``--force``, the
+API's ``force: true``, the app's "Program anyway") turns a failed down into a warning; the
+callers pass the keyword only when asked. Board-agnostic: the pack supplies the launcher.
 
 What the engine must provide: nothing. ``DeployService(None)`` works, and
 publishes nothing. Given an engine, the service uses ``engine.bus`` (an
@@ -76,7 +88,8 @@ from harness_manager.core.pack import (
     detail_of,
     keep_refusal,
 )
-from harness_manager.services import reset_guard
+from harness_manager.services import debug_onboard, reset_guard
+from harness_manager.services._unavailable import is_unavailable
 
 log = logging.getLogger(__name__)
 
@@ -188,11 +201,23 @@ class DeployService:
         card support answers ``store=False`` with the reason; nothing is written."""
         return card_status_of(self._adapter(session))
 
+    def _down_first(self, session: BoardSession, *, force: bool) -> debug_onboard.DownFirst:
+        """DEBUG-DOWN-FIRST: the board's OpenOCD down before the swap (raises the refusal).
+        Through the engine's debug service when it has one (it closes, and later reopens, a
+        session of its own with no second down), else straight through the session's route."""
+        debug = getattr(self._engine, "debug", None) if self._engine is not None else None
+        hook = None if debug is None or is_unavailable(debug) else \
+            getattr(debug, "down_first", None)
+        if callable(hook):
+            return hook(session, force=force)
+        return debug_onboard.down_first(session, force=force)
+
     # -- actions ----------------------------------------------------------------------
 
     def deploy(self, session: BoardSession, overlay: OverlayRef, *,
-               keep_on_card: bool = False) -> DeployResult:
+               keep_on_card: bool = False, force: bool = False) -> DeployResult:
         adapter = self._adapter(session)
+        cleared = debug_onboard.DownFirst()
         try:
             # SLOT-TIMING: a swap waits for the board's card job (services.reset_guard).
             reset_guard.check(session, reset_guard.ACTION_DEPLOY)
@@ -200,6 +225,9 @@ class DeployService:
             err = refusal(items, overlay.name)
             if err is None and keep_on_card:
                 err = keep_refusal(self.card_status(session))
+            if err is None:
+                # DEBUG-DOWN-FIRST: last, so a refused preflight never stops anyone's OpenOCD
+                cleared = self._down_first(session, force=force)
         except HarnessError as exc:
             self._publish(session, "deploy.failed", reason=str(exc), overlay=overlay.name,
                           stage="preflight")
@@ -208,6 +236,10 @@ class DeployService:
             self._publish(session, "deploy.failed", reason=str(err), overlay=overlay.name,
                           stage="preflight")
             raise err
+        if cleared.warning:
+            log.warning("deploy %s: %s", overlay.name, cleared.warning)
+            self._publish(session, "deploy.warning", overlay=overlay.name,
+                          message=cleared.warning)
 
         self._publish(session, "deploy.started", overlay=overlay.name, rm_id=overlay.rm_id,
                       preflight=[_item_dict(i) for i in items], keep_on_card=keep_on_card)
@@ -248,7 +280,7 @@ class DeployService:
                       card=None if card is None else dataclasses.asdict(card))
         return result
 
-    def restore_baseline(self, session: BoardSession) -> DeployResult:
+    def restore_baseline(self, session: BoardSession, *, force: bool = False) -> DeployResult:
         adapter = self._adapter(session)
         base = adapter.baseline()
         if base is None:
@@ -263,4 +295,4 @@ class DeployService:
                     log.exception("explaining the missing baseline failed")
             raise AbsentError(message, hint=hint)
         with reset_guard.guarded(session, reset_guard.ACTION_RESTORE):   # SLOT-TIMING
-            return self.deploy(session, base)
+            return self.deploy(session, base, force=force)

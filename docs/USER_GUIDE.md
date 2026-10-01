@@ -662,6 +662,10 @@ the console, both terminals share its session and `reset` works.
 
 **Restore baseline** loads the safe design (the greybox) and confirms it.
 
+On a claimed Linux board, Program and Restore baseline first stop OpenOCD on the board (below).
+When that fails, the outcome says why and **Program anyway** (or **Restore anyway**) appears:
+tick **Arm**, then click it to swap all the same.
+
 **On the command line**
 
 ```bash
@@ -674,6 +678,7 @@ harness-manager restore 192.168.10.101            # back to the baseline
 |---|---|
 | `--yes` | do not ask (scripts need it: see below) |
 | `--keep-on-card` | also keep it on the board's user microSD, so the board boots into it next time |
+| `--force` | swap even when OpenOCD on the board cannot be stopped first (a warning instead of exit 15); `restore` takes it too |
 | `--overlay-dir DIR` | look for overlays here first (repeatable) |
 
 A design is chosen by name (`nanosoc`) or by rm_id (`0x01000001`).
@@ -728,6 +733,7 @@ section).
 | `busy` right after a failed push | the harness is finishing that swap, for up to 30 s | wait 30 s, then try again |
 | exit 12 with `--keep-on-card` | no card store (bare metal) or no card | program without it, or insert a card |
 | exit 15, `not confirmed` | no terminal answered the [y/N] prompt (a script) | add `--yes` |
+| exit 15, "`mps3-debug down` failed before the swap" | on a claimed Linux board, OpenOCD on the board could not be stopped first (its SSH did not answer, or the launcher failed); nothing was programmed | retry; or add `--force` (the app: **Program anyway**). On Linux v2.0.0 the board's OpenOCD may then still drive JTAG during the swap |
 | `restore`: exit 3, `no baseline overlay (greybox) for shell …` | no greybox for this shell in the overlay directories or the store | `--overlay-dir DIR` or `config set mps3.overlay_dirs DIR` (above) |
 
 On the Linux harness a push always uses TCP. It gives up when a chunk waits more than 30 s
@@ -1001,8 +1007,13 @@ On the board, OpenOCD's telnet and Tcl ports stay on the board: HM forwards gdb 
   config for this design. HM passes the design's name; for a design it does not know it
   passes `auto`, and the board may not know it either.
 - **Exit 6:** OpenOCD did not start on the board; the message ends with its log.
-- A program (a swap) stops the board's OpenOCD first; `debug status` then says "closed for the
-  swap", and a session HM had open reopens after a verified swap. An idle one stops by itself
+- **Every program or restore stops the board's OpenOCD first** (`mps3-debug down`, over the
+  claim's SSH), whoever started it: HM, another terminal, or `mps3-debug up` by hand, and
+  whatever `debug.on_board` says. `debug status` then says "closed for the swap", and a
+  session HM had open reopens after a verified swap. If the board cannot be asked or its
+  OpenOCD does not stop, the program is refused (exit 15) and nothing is programmed: retry,
+  or add `--force` (the app: **Program anyway**) to swap anyway; on Linux v2.0.0 the board's
+  OpenOCD may then still drive JTAG during the reconfiguration. An idle one stops by itself
   after 2 hours on the board.
 
 **This PC's OpenOCD: needs** OpenOCD 0.12 or later, built with the **remote_bitbang**
@@ -1031,12 +1042,15 @@ Debug tile has **Start** and **Stop**.
 |---|---|
 | `debug detect TARGET` | the TAP IDCODE (exit 13: the design has no debug port) |
 | `debug up TARGET` | start OpenOCD, print the ports and the gdb line (`attach`), hold until Ctrl-C |
-| `debug status TARGET` | state, ports, config, pid, and which OpenOCD (does it have remote_bitbang?) |
+| `debug status TARGET` | state, ports, config, pid, and which OpenOCD (does it have remote_bitbang?; not printed when OpenOCD runs on the board) |
 | `debug down TARGET` | stop it |
 
 **`debug up` holds its terminal.** It runs in the foreground: the server lives while it
 runs, and Ctrl-C (or `harness-manager detach TARGET`) stops it. So run gdb in a **second
-terminal**. There is no `--background`; to keep a session up without a terminal, use **Open
+terminal**. A program closes the session; after a verified swap it reopens on new ports, and
+the holding terminal prints them (`swap       reopened after the swap: the gdb ports below are
+new; attach gdb again`, then the new `gdb` and `attach` lines). After a swap that was not
+verified it prints `swap       not reopened: …`. There is no `--background`; to keep a session up without a terminal, use **Open
 session** in the app (the service owns it until **Close session**).
 
 **Connect gdb with the line `debug up` prints** (`attach`), for example:

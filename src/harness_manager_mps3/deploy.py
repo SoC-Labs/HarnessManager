@@ -196,6 +196,11 @@ USD_FEATURE = "usd"
 USD_NO_STORE_ERRS = frozenset({"no hw", "unavailable"})
 
 
+#: FIX-PACK-7: how old the preflight's ``version.impl`` may be for the on-board route's plan
+#: to reuse it (the deploy asks the board's OpenOCD down right after its preflight).
+IMPL_FRESH_S = 10.0
+
+
 def make_deploy_adapter(session: Any) -> Mps3Deploy | None:
     """The ``pack.py`` hook. None when the session has no shell (no Ethernet link)."""
     shell = getattr(session, "shell", None)
@@ -382,6 +387,18 @@ class Mps3Deploy:
         #: The last deploy's control-connection (6900) timeout: ``swap_timeout_s``, or
         #: more when it kept the design on the card (KEEP-BUDGET). Tests read it.
         self.last_control_timeout_s: float | None = None
+        #: FIX-PACK-7: the harness's ``version.impl`` the last ``version`` read (the
+        #: preflight's), and when (monotonic). ``recent_impl`` hands it to the on-board
+        #: OpenOCD route, so the deploy's down-first needs no second identity read.
+        self._impl_seen: tuple[str, float] | None = None
+
+    def recent_impl(self, max_age_s: float = IMPL_FRESH_S) -> str | None:
+        """The harness's ``version.impl`` the last preflight read, when at most
+        ``max_age_s`` old; None otherwise (or when ``version`` did not answer)."""
+        seen = self._impl_seen
+        if seen is None or time.monotonic() - seen[1] > max_age_s:
+            return None
+        return seen[0]
 
     # -- configuration ----------------------------------------------------------------
 
@@ -700,6 +717,8 @@ class Mps3Deploy:
 
     def _live(self) -> _Live:
         live: ShellLive = self._shell.live()
+        if live.version_ok:                    # FIX-PACK-7: the impl is known (recent_impl)
+            self._impl_seen = (live.impl, time.monotonic())
         clr_max = live.clr_max
         if clr_max is None and "stats" in live.features:
             clr_max = self._stats_clr_max()

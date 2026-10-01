@@ -39,6 +39,11 @@ Test and demo knobs (not part of the Engine protocol):
   ``state`` ("empty", "valid", "foreign"...), or None to take it out. "Keep on the card"
   also needs the harness to report ``usd`` (``set_features``). No classic board has either
   until a test sets them.
+- ``set_debug_down(board_id, why, lock=False)`` (FIX-PACK-7, DEBUG-DOWN-FIRST): the board's
+  ``mps3-debug down`` fails with ``why`` ("" answers down), so a deploy is refused (15) unless
+  forced, or ``lock`` (the launcher lists harnessd's lock) lets it go on with a warning. A
+  Linux board (the showcase's) is asked before every deploy; another board only once a test
+  set this. The words are the real service's (``services.debug_onboard.DownFirst``).
 
 **The showcase** (``DemoEngine(showcase=True, state_dir=...)``, what ``harness-manager app
 --demo`` and ``ui --demo`` serve): four other boards, one of each harness and a spare, so
@@ -172,6 +177,10 @@ class _Board:
     card_slot: str = "B"             # the slot the last kept design went to
     overlay_shell: str = SHELL_FIELDED   # the static the demo's overlays are keyed to
     kind: str = ""       # showcase: "linux" | "bare-metal" | "leased" | "spare" ("": classic)
+    #: FIX-PACK-7: the board's ``mps3-debug down`` fails with this ("": it answers down);
+    #: None: the board has no on-board route (a classic board until a test sets it)
+    debug_down: str | None = None
+    debug_lock: bool = False         # the launcher lists harnessd's lock (a failed down warns)
 
 
 def _eth(host: str) -> Link:
@@ -382,7 +391,8 @@ class _Storage:
         self._e._enter("storage.backup", self._bid, str(dest_dir))
         return self.load_backup(Path(dest_dir) / "demo-backup.zip")
 
-    def install(self, files, *, backup: BackupRecord, progress: Progress | None = None) -> None:
+    def install(self, files, *, backup: BackupRecord, progress: Progress | None = None,
+                **_kw: Any) -> None:
         self._e._enter("storage.install", self._bid)
         raise RefusedError("the demo engine does not write SD cards")
 
@@ -533,26 +543,49 @@ class DemoDeploy:
                           reason=f"the card in the USER microSD slot cannot take a design "
                                  f"(state {board.card!r})")
 
+    def _down_first(self, bid: str, force: bool) -> Any:
+        """DEBUG-DOWN-FIRST as the real service settles it (``debug_onboard.settle``): the
+        same refusal and warning words. None: this board has no on-board route."""
+        from harness_manager.services import debug_onboard as ob
+
+        board = self._e._board(bid)
+        why = board.debug_down if board.debug_down is not None else \
+            ("" if board.kind == "linux" else None)
+        if why is None:
+            return None
+        self._e._enter("deploy.debug_down", bid, force)
+        got = ob.DownFirst(asked=True, ok=not why, launcher="mps3-debug", why=why)
+        return ob.settle(got, force=force, lock=lambda: board.debug_lock)
+
     def deploy(self, session: BoardSession, overlay: OverlayRef, *,
-               keep_on_card: bool = False) -> DeployResult:
+               keep_on_card: bool = False, force: bool = False) -> DeployResult:
         e = self._e
         bid = session.candidate.board_id
-        e._enter("deploy.deploy", bid, overlay.name, keep_on_card)
+        e._enter("deploy.deploy", bid, overlay.name, keep_on_card)   # keep last: tests read it
         t0 = time.monotonic()
         items = self._items(session, overlay)
         bad = [i for i in items if i.check is Check.MISMATCH]
         err: HarnessError | None = None
+        cleared = None
         if bad:
             text = "; ".join(f"{i.name}: {i.detail}" for i in bad)
             err = IncompatibleError(f"{overlay.name} does not match this board ({text})",
                                     hint="use an overlay built for the running shell")
         elif keep_on_card:
             err = keep_refusal(card_status_of(self, session))
+        if err is None:
+            try:
+                cleared = self._down_first(bid, force)
+            except HarnessError as exc:
+                err = exc
         if err is not None:
             e.bus.publish(Event("deploy.failed", bid, {"reason": str(err),
                                                        "overlay": overlay.name,
                                                        "stage": "preflight"}))
             raise err
+        if cleared is not None and cleared.warning:
+            e.bus.publish(Event("deploy.warning", bid, {"overlay": overlay.name,
+                                                        "message": cleared.warning}))
         e.bus.publish(Event("deploy.started", bid, {
             "overlay": overlay.name, "rm_id": overlay.rm_id,
             "preflight": [{"name": i.name, "check": i.check.value, "detail": i.detail}
@@ -590,10 +623,10 @@ class DemoDeploy:
                                                 "why": card.why}}))
         return DeployResult(overlay.rm_id, True, seconds, "tcp+windowed", card=card)
 
-    def restore_baseline(self, session: BoardSession) -> DeployResult:
+    def restore_baseline(self, session: BoardSession, *, force: bool = False) -> DeployResult:
         self._e._enter("deploy.restore_baseline", session.candidate.board_id)
         greybox = next(o for o in self._store(session) if o.name == "greybox")
-        return self.deploy(session, greybox)
+        return self.deploy(session, greybox, force=force)
 
 
 class DemoStream:
@@ -1023,6 +1056,12 @@ class DemoEngine:
     def set_card(self, board_id: str, state: str | None) -> None:
         """Put a card in the user microSD slot (its store in ``state``), or take it out."""
         self._board(board_id).card = state
+
+    def set_debug_down(self, board_id: str, why: str | None, *, lock: bool = False) -> None:
+        """FIX-PACK-7: the board's ``mps3-debug down`` fails with ``why`` ("": answers down;
+        None: no on-board route); ``lock``: its launcher lists harnessd's lock."""
+        board = self._board(board_id)
+        board.debug_down, board.debug_lock = why, lock
 
     def set_sd_journal(self, board_id: str, journal: dict | None) -> None:
         """Leave (or clear) an interrupted SD install on a board's config SD."""

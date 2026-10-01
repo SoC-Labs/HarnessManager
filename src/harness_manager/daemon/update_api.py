@@ -258,8 +258,10 @@ def register(ctx: RouteContext) -> None:
         if plan.blockers:
             raise with_data(RefusedError(f"cannot update {bid}: {'; '.join(plan.blockers)}",
                                          hint="fix the blockers, then check again"), plan=summary)
+        allow = ({"allow_mcc_update": True}                      # FIX-PACK-7 (G8)
+                 if _bool(b, "allow_mcc_update", False) else {})
         try:
-            approval = plan.approve(consent=phrase, by="harness-manager-daemon")
+            approval = plan.approve(consent=phrase, by="harness-manager-daemon", **allow)
         except RefusedError as exc:          # a re-key without the exact typed phrase
             raise with_data(exc, plan=summary) from None
 

@@ -621,10 +621,14 @@ class _Storage(_Proxy):
         return from_json(BackupRecord, result)
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord,
-                progress: Progress | None = None) -> None:
-        self._engine.run_job(self._path("storage/install"),
-                             {"files": {dest: _absolute(src) for dest, src in files.items()},
-                              "backup_path": _absolute(backup.path)}, progress=progress)
+                progress: Progress | None = None, allow_mcc_update: bool = False) -> None:
+        body: dict[str, Any] = {"files": {dest: _absolute(src) for dest, src in files.items()},
+                                "backup_path": _absolute(backup.path)}
+        if allow_mcc_update:                   # FIX-PACK-7: only when asked
+            body["allow_mcc_update"] = True
+        result = self._engine.run_job(self._path("storage/install"), body, progress=progress)
+        notes = (result or {}).get("notes") if isinstance(result, dict) else None
+        self.install_notes = [str(n) for n in notes or []]
 
     def restore(self, backup: BackupRecord, progress: Progress | None = None) -> None:
         self._engine.run_job(self._path("storage/restore"),
@@ -916,10 +920,13 @@ class RemoteDeploy:
         return [from_json(PreflightItem, i) for i in payload.get("items", [])]
 
     def _deploy(self, board_id: str, overlay: OverlayRef,
-                progress: Progress | None = None, *, keep_on_card: bool = False) -> DeployResult:
+                progress: Progress | None = None, *, keep_on_card: bool = False,
+                force: bool = False) -> DeployResult:
         body: dict[str, Any] = {"overlay": _overlay_body(overlay)}
         if keep_on_card:                  # sent only when asked: the default writes no card
             body["keep_on_card"] = True
+        if force:                         # FIX-PACK-7: only when asked (--force)
+            body["force"] = True
         result = self._engine.run_job(f"/boards/{q(board_id)}/deploy", body, progress=progress)
         return from_json(DeployResult, result)
 
@@ -939,14 +946,15 @@ class RemoteDeploy:
         return self._preflight(_bid(session), overlay)
 
     def deploy(self, session: BoardSession, overlay: OverlayRef, *,
-               keep_on_card: bool = False) -> DeployResult:
-        return self._deploy(_bid(session), overlay, keep_on_card=keep_on_card)
+               keep_on_card: bool = False, force: bool = False) -> DeployResult:
+        return self._deploy(_bid(session), overlay, keep_on_card=keep_on_card, force=force)
 
     def card_status(self, session: BoardSession) -> CardStatus:
         return self._card_status(_bid(session))
 
-    def restore_baseline(self, session: BoardSession) -> DeployResult:
-        result = self._engine.run_job(f"/boards/{q(_bid(session))}/restore")
+    def restore_baseline(self, session: BoardSession, *, force: bool = False) -> DeployResult:
+        body = {"force": True} if force else None          # FIX-PACK-7: only when asked
+        result = self._engine.run_job(f"/boards/{q(_bid(session))}/restore", body)
         return from_json(DeployResult, result)
 
 

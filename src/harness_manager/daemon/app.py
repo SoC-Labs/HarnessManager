@@ -590,6 +590,14 @@ def _obj(body: Any) -> dict[str, Any]:
     return body
 
 
+def _lease_body(body: dict[str, Any]) -> dict[str, Any]:
+    """FIX-PACK-7: in a deploy or restore body, ``force`` alone is the swap's (swap even when
+    OpenOCD on the board cannot be stopped first), not the lease gate's escape: the gate sees
+    it only with ``consent`` (G7's ``force`` + ``consent: "RESET <bid>"``, unchanged). So
+    ``--force`` on a board someone else holds is the plain 409 HELD naming the holder."""
+    return body if "consent" in body else {k: v for k, v in body.items() if k != "force"}
+
+
 def _str(body: dict[str, Any], key: str, default: str | None = None) -> str:
     value = body.get(key, default)
     if value is None:
@@ -1290,13 +1298,16 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                 raise AbsentError(f"no file at {path}", hint="give files that exist")
             files[dest] = path
         backup_path = _abs_path(b.get("backup_path"), "backup_path")
+        # FIX-PACK-7 (G8): only when asked
+        allow = {"allow_mcc_update": True} if _bool(b, "allow_mcc_update", False) else {}
         with d.gates.op(bid):
             storage = require(s, "storage", C.STORAGE_INSTALL)
             record = backup_record(storage, backup_path)
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
-            storage.install(files, backup=record, progress=progress)
-            return {"files": sorted(files), "backup": record}
+            storage.install(files, backup=record, progress=progress, **allow)
+            notes = [str(n) for n in (getattr(storage, "install_notes", None) or [])]
+            return {"files": sorted(files), "backup": record, "notes": notes}
 
         return accepted(d.jobs.submit("sd_install", bid, run))
 
@@ -1402,7 +1413,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def deploy(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         keep = _bool(_obj(body), "keep_on_card", False)
-        ui2_holder(bid, s, "deploy", _obj(body))            # ui2 api-hub (G7): 409 HELD
+        # FIX-PACK-7: swap even when the board's OpenOCD cannot be stopped first (a warning)
+        force = {"force": True} if _bool(_obj(body), "force", False) else {}
+        ui2_holder(bid, s, "deploy", _lease_body(_obj(body)))   # ui2 api-hub (G7): 409 HELD
         overlay, items, refusal = _preflight(bid, s, _obj(body).get("overlay"))
         if refusal is not None:            # refuse BEFORE deploy() is ever called
             refusal.data = {"overlay": overlay, "preflight": items}   # type: ignore[attr-defined]
@@ -1426,9 +1439,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
-                if keep:                   # the keyword only when asked (off by default)
-                    return d.engine.deploy.deploy(s, overlay, keep_on_card=True)
-                return d.engine.deploy.deploy(s, overlay)
+                if keep:                   # the keywords only when asked (off by default)
+                    return d.engine.deploy.deploy(s, overlay, keep_on_card=True, **force)
+                return d.engine.deploy.deploy(s, overlay, **force)
             finally:
                 unsubscribe()
 
@@ -1437,7 +1450,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     @api.post("/boards/{bid:path}/restore")
     def restore(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
-        ui2_holder(bid, s, "restore", _obj(body))           # ui2 api-hub (G7): 409 HELD
+        force = {"force": True} if _bool(_obj(body), "force", False) else {}    # FIX-PACK-7
+        ui2_holder(bid, s, "restore", _lease_body(_obj(body)))  # ui2 api-hub (G7): 409 HELD
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "restore")
@@ -1450,7 +1464,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
-                return d.engine.deploy.restore_baseline(s)
+                return d.engine.deploy.restore_baseline(s, **force)
             finally:
                 unsubscribe()
 

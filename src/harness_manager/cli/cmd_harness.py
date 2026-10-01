@@ -46,6 +46,7 @@ from harness_manager.core.errors import (
 )
 
 from . import cmd_update
+from .cmd_board import ALLOW_MCC_UPDATE_HELP
 from .context import SERIAL_HELP, Ctx
 from .output import Result, with_data
 
@@ -129,6 +130,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--consent", default="", metavar="PHRASE",
                     help='for a re-key: the exact phrase the plan prints ("REKEY 0x…")')
     ap.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    ap.add_argument("--allow-mcc-update", action="store_true",
+                    help=ALLOW_MCC_UPDATE_HELP)
     _door_args(ap)
 
     ap = sub.add_parser("pin", help="pin a board to a release (none newer is offered)",
@@ -324,15 +327,17 @@ def _approve(ctx: Ctx, plan: Any, what: str) -> Any:
     an install through the hub the phrase naming the board, its lease holder and queue."""
     a = ctx.args
     door: dict[str, Any] = {}
+    if getattr(a, "allow_mcc_update", False):        # FIX-PACK-7 (G8): only when asked
+        door["allow_mcc_update"] = True
     if getattr(plan, "board_phrase", ""):
         ctx.note((plan.hub or {}).get("consent_text") or plan.board_phrase)
         bp = getattr(a, "board_phrase", "") or ("" if a.yes else _ask(ctx, plan.board_phrase))
-        door = {"board_phrase": bp,
-                "auto_revert": False if getattr(a, "no_auto_revert", False) else None}
+        door.update(board_phrase=bp,
+                    auto_revert=False if getattr(a, "no_auto_revert", False) else None)
     if plan.rekey:
         consent = a.consent or ("" if a.yes else cmd_update._ask_phrase(ctx, plan.consent_phrase))
         return plan.approve(consent=consent, **door)
-    if not door:
+    if not getattr(plan, "board_phrase", ""):
         ctx.confirm(what)
     return plan.approve(**door)
 
@@ -389,6 +394,7 @@ def _outcome(ctx: Ctx, out: Any, layout: str, row: list[Any]) -> int:
         human.append(f"backup     {backup}")
     human += [f"stored     {s}" for s in out.stored]
     human += [f"skipped    {k}: {v}" for k, v in out.skipped.items()]
+    human += [f"note       {n}" for n in getattr(out, "notes", ())]     # FIX-PACK-7: MBBIOS
     ctx.emit(Result(layout, data, rows=[row], human=human))
     return ExitCode.OK
 

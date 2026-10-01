@@ -879,6 +879,7 @@ function eventLevel(ev) {
   // design is a warning, a verified one ok, a check that could not be made info
   if (ev.topic === "design.check") return d.state === "unverified" ? "warning" : d.state === "verified" ? "ok" : "info";
   if (ev.topic.endsWith(".failed") || d.state === "failed") return "error";
+  if (ev.topic === "deploy.warning") return "warning";       // FIX-PACK-7: a forced swap
   if (ev.topic === "deploy.done") return d.verified ? "ok" : "warning";
   if (ev.topic === "board.lost" || ev.topic === "session.closed" || d.state === "down") return "warning";
   return "info";
@@ -912,11 +913,15 @@ function onDeployEvent(ev) {
   const d = ev.data || {};
   const dep = b.deploy;
   const at = Number(ev.at) || Date.now() / 1000;
-  if (ev.topic === "deploy.started") {
+  if (ev.topic === "deploy.warning") {
+    dep.nextWarning = d.message || "";     // FIX-PACK-7: published just before deploy.started
+  } else if (ev.topic === "deploy.started") {
     Object.assign(dep, { state: "running", overlay: d.overlay || d.rm_id || "", phase: "started",
       bytes: 0, total: 0, phases: [], events: [], verified: false, reason: "", stage: "",
       rm_id: d.rm_id || "", keep: !!d.keep_on_card, card: null, startedAt: at, doneAt: 0,
-      phaseAt: at, phaseBytes: 0, rate: 0, left: null, estimated: false });
+      phaseAt: at, phaseBytes: 0, rate: 0, left: null, estimated: false,
+      warning: dep.nextWarning || "" });
+    dep.nextWarning = "";
     dep.events.push(`${clock(ev.at)}  started ${dep.overlay}`);
   } else if (ev.topic === "deploy.progress") {
     if (dep.state !== "running") {

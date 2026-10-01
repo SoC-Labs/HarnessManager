@@ -71,6 +71,15 @@ def overlay_dirs(ctx: Ctx) -> Iterator[None]:
 
 SERVICE_NAME = "harness-manager-daemon"
 
+#: FIX-PACK-7 (DEBUG-DOWN-FIRST): ``program``/``restore --force``.
+FORCE_HELP = ("swap even when OpenOCD on the board cannot be stopped first (`mps3-debug down` "
+              "failed): a warning instead of the refusal (exit 15)")
+
+
+def _force(ctx: Ctx) -> dict[str, bool]:
+    """``{"force": True}`` with ``--force``, else nothing: the keyword only when asked."""
+    return {"force": True} if getattr(ctx.args, "force", False) else {}
+
 
 def _service_holds(exc: HeldError) -> bool:
     """The board's lock is the Harness Manager service's (or a service runs here)."""
@@ -226,9 +235,9 @@ def cmd_program(ctx: Ctx) -> int:
             also = " and keep it on the card"
         ctx.confirm(f"program {overlay.name} ({overlay.rm_id}) into {cand.board_id}{also}?")
         with ctx.bus_progress(cand.board_id, "deploy"):
-            # The keyword only when asked: the default never writes the card.
-            result = (deploy.deploy(session, overlay, keep_on_card=True) if keep
-                      else deploy.deploy(session, overlay))
+            # The keywords only when asked: the default never writes the card, never forces.
+            result = (deploy.deploy(session, overlay, keep_on_card=True, **_force(ctx)) if keep
+                      else deploy.deploy(session, overlay, **_force(ctx)))
     _check_verified(cand.board_id, result, overlay=overlay, preflight=items)
     human = [f"programmed {overlay.name} ({result.rm_id}) into {cand.board_id} in "
              f"{result.seconds:.1f}s via {result.transport or '?'}; verified"]
@@ -244,7 +253,7 @@ def cmd_program(ctx: Ctx) -> int:
 def cmd_restore(ctx: Ctx) -> int:
     with board_for(ctx) as (cand, session):
         with ctx.bus_progress(cand.board_id, "deploy"):
-            result = ctx.engine.deploy.restore_baseline(session)
+            result = ctx.engine.deploy.restore_baseline(session, **_force(ctx))
     _check_verified(cand.board_id, result)
     row = _result_rows(cand.board_id, "", result)
     ctx.emit(Result("restore", {"board_id": cand.board_id, "result": result},

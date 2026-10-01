@@ -71,6 +71,11 @@ class DeployService(Protocol):
         also takes ``keep_on_card=True`` (keep the design on the board's card; off by
         default) and answers ``card_status(session) -> CardStatus``; callers pass the
         keyword only when asked, so a service without it is unchanged.
+
+        FIX-PACK-7 (DEBUG-DOWN-FIRST): before ``deploy.started`` the real service asks the
+        board's OpenOCD down (a claimed Linux board with the pack's on-board route) and
+        refuses (exit 15) when it cannot; ``force=True`` (it and ``restore_baseline`` take
+        it) goes on with a ``deploy.warning`` event. Callers pass it only when asked.
         """
         ...
 

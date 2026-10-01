@@ -112,6 +112,11 @@ class FakeState:
                                                                 reason=CARD_NO_STORE))
     card_outcome: CardOutcome = field(default_factory=lambda: CardOutcome(kept=True, slot="A"))
     deploy_keeps: list[bool] = field(default_factory=list)
+    #: FIX-PACK-7: ``force`` per deploy / restore (``program|restore --force``)
+    deploy_forces: list[bool] = field(default_factory=list)
+    restore_forces: list[bool] = field(default_factory=list)
+    #: FIX-PACK-7: a ``deploy.warning`` the next deploy publishes before it starts
+    deploy_warning: str = ""
     # consoles
     console_names: list[str] = field(default_factory=lambda: ["uart0", "uart1", "swo"])
     console_chunks: list[bytes] = field(default_factory=lambda: [
@@ -217,9 +222,12 @@ class FakeStorage:
         return BackupRecord(str(path), "ab" * 32, _now(), 2, "V2M-MPS3")
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord,
-                progress: Progress | None = None) -> None:
+                progress: Progress | None = None, **kw: Any) -> None:
         self.st.hit("storage.install")
+        #: FIX-PACK-7: ``allow_mcc_update`` (only when asked), and the notes it says
+        self.install_kw = dict(kw)
         self.installed = dict(files)
+        self.install_notes = list(getattr(self, "notes_to_say", []))
         if progress:
             progress("write", len(files), len(files))
 
@@ -343,9 +351,13 @@ class FakeDeploy:
     def deploy(self, session: BoardSession, overlay: OverlayRef, **kw: Any) -> DeployResult:
         self.st.hit("deploy.deploy")
         keep = bool(kw.pop("keep_on_card", False))
+        self.st.deploy_forces.append(bool(kw.pop("force", False)))
         assert not kw, kw
         self.st.deploy_keeps.append(keep)
         bid = session.candidate.board_id
+        if self.st.deploy_warning:
+            self.bus.publish(Event("deploy.warning", bid, {"overlay": overlay.name,
+                                                           "message": self.st.deploy_warning}))
         self.bus.publish(Event("deploy.started", bid, {"rm": overlay.name}))
         for done in (0, overlay.size_bytes // 2, overlay.size_bytes):
             self.bus.publish(Event("deploy.progress", bid, {
@@ -356,8 +368,10 @@ class FakeDeploy:
         return DeployResult(overlay.rm_id, self.st.deploy_verified, 3.25, "tcp+windowed",
                             card=self.st.card_outcome if keep else None)
 
-    def restore_baseline(self, session: BoardSession) -> DeployResult:
+    def restore_baseline(self, session: BoardSession, **kw: Any) -> DeployResult:
         self.st.hit("deploy.restore_baseline")
+        self.st.restore_forces.append(bool(kw.pop("force", False)))
+        assert not kw, kw
         self.st.identity = replace(self.st.identity, rm_id="0x00000000", rm_name="greybox")
         return DeployResult("0x00000000", True, 2.5, "tcp+windowed")
 

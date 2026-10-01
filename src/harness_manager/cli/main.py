@@ -168,11 +168,13 @@ def make_parser() -> argparse.ArgumentParser:
     vp.add_argument("--keep-on-card", action="store_true",
                     help="also keep the design on the board's user microSD, so it boots into "
                          "it next time (off by default)")
+    vp.add_argument("--force", action="store_true", help=cmd_program.FORCE_HELP)
     vp.set_defaults(fn=cmd_program.cmd_program)
 
     vp = verb("restore", "load the baseline design and confirm it", layout="restore",
               parents=(fmt, usb, ovl))
     target(vp)
+    vp.add_argument("--force", action="store_true", help=cmd_program.FORCE_HELP)
     vp.set_defaults(fn=cmd_program.cmd_restore)
 
     # -- consoles and debug --------------------------------------------------------
@@ -312,6 +314,8 @@ def make_parser() -> argparse.ArgumentParser:
     sp.add_argument("--backup", required=True, metavar="ZIP",
                     help="the backup `sd backup` made of this SD")
     sp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    sp.add_argument("--allow-mcc-update", action="store_true",
+                    help=cmd_board.ALLOW_MCC_UPDATE_HELP)
     sp = ssub.add_parser("restore", help="put a backup back",
                          description="Put a backup that `sd backup` made back onto the "
                                      "configuration SD.",

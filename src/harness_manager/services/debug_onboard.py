@@ -50,6 +50,26 @@ Board-agnostic: the pack supplies the route through its debug adapter's optional
 refuses this PC's OpenOCD generically (no named "busy" line). So when this PC's OpenOCD is
 turned away (held or unreachable) on a board with the launcher, the launcher is asked; if
 its session is up, that is exit 4 with ``BUSY_HINT``.
+
+**DEBUG-DOWN-FIRST** (FIX-PACK-7, agreed with the Linux lead 2026-10-01). Before EVERY
+deploy (``DeployService.deploy``/``restore_baseline``: the CLI's ``program``/``restore``, the
+app's Program/Restore, Build's Add then Program) to a board whose pack supplies an on-board
+route whose plan is READY, ``<launcher> down --json`` runs over the claim's SSH,
+synchronously, BEFORE ``deploy.started`` (so before the guard and the swap), whoever started
+the board's OpenOCD and whatever ``debug.on_board`` says (``down_first``):
+
+- exit 0 and ``state: down`` (``already`` or not): go on. HM's own session, if any, is closed
+  for the swap and reopens after a verified swap (``services/debug.py``), with no second down;
+- exit 127 (no launcher on the board) or 12 (no OpenOCD in the image): go on, unchanged (no
+  OpenOCD on the board can be running);
+- anything else (the SSH did not answer or timed out, another exit, no ``mps3-debug/1``
+  answer): ``RefusedError`` (15) naming ``<launcher> down`` and why, hint ``DOWN_FIRST_HINT``,
+  before anything touches the board. ``force`` (``--force``, ``force: true``) goes on with a
+  warning; so does a board whose launcher lists ``LOCK_CAPABILITY`` in ``version --json``'s
+  ``capabilities`` (harnessd v2.1's lock keeps OpenOCD off JTAG during a swap): keyed on that
+  one capability, never on a version string. A board without the field has no lock.
+
+Bare metal, an unclaimed board, another key's claim and a board with no route are not asked.
 """
 
 from __future__ import annotations
@@ -69,6 +89,7 @@ from harness_manager.core.errors import (
     HeldError,
     IncompatibleError,
     NothingOnTargetError,
+    RefusedError,
     UnavailableError,
     UnreachableError,
 )
@@ -105,6 +126,14 @@ NO_LAUNCHER_HINT = ("the board's Linux image needs OpenOCD and mps3-debug (v7 or
 SWAP_DETAIL = "closed for the swap"
 SWAP_REASON = f"{SWAP_DETAIL} (OpenOCD on the board stops before a partition swap)"
 ONBOARD_DETAIL = "OpenOCD runs on the board; gdb reaches it through the board's SSH"
+
+#: DEBUG-DOWN-FIRST: harnessd v2.1's JTAG lock, as the launcher's ``version --json`` lists it
+#: in ``capabilities`` (the Linux lead, 2026-10-01). With it, a failed down warns and goes on.
+LOCK_CAPABILITY = "harnessd-lock"
+DOWN_FIRST_HINT = ("retry, or add --force to swap anyway (on Linux v2.0.0 OpenOCD on the "
+                   "board may still drive JTAG during the reconfiguration)")
+#: ``error.data`` key of the refusal: the app offers "Program anyway" on it.
+DOWN_FIRST_DATA = "debug_down"
 
 
 class OnBoardRoute(Protocol):
@@ -203,9 +232,13 @@ class LauncherReply:
         return self.design or self.rm_id or "the loaded design"
 
 
-def _reply(obj: dict[str, Any]) -> LauncherReply | None:
+def _ours(obj: dict[str, Any]) -> bool:
     schema = obj.get("schema")
-    if not isinstance(schema, str) or not (schema == SCHEMA or schema.startswith(SCHEMA + ".")):
+    return isinstance(schema, str) and (schema == SCHEMA or schema.startswith(SCHEMA + "."))
+
+
+def _reply(obj: dict[str, Any]) -> LauncherReply | None:
+    if not _ours(obj):
         return None
     state = obj.get("state")
     if not isinstance(state, str) or not state:
@@ -230,26 +263,47 @@ def _reply(obj: dict[str, Any]) -> LauncherReply | None:
         busy=busy, error=error, log_tail=tuple(str(t) for t in tail), raw=obj)
 
 
-def parse_reply(text: str | None) -> LauncherReply | None:
-    """The ``mps3-debug/1`` object in the launcher's stdout, or None when there is none (no
-    launcher, or not its answer). The whole text first (one object, maybe pretty-printed),
-    then each line from the last: a login banner or a warning line never hides it."""
+def _objects(text: str | None) -> list[dict[str, Any]]:
+    """The ``mps3-debug/1`` objects in the launcher's stdout: the whole text first (one
+    object, maybe pretty-printed), then each line from the last, so a login banner or a
+    warning line never hides one."""
     text = (text or "").strip()
     if not text:
-        return None
-    candidates = [text] + [ln.strip() for ln in reversed(text.splitlines()) if ln.strip()]
-    for chunk in candidates:
+        return []
+    out = []
+    for chunk in [text] + [ln.strip() for ln in reversed(text.splitlines()) if ln.strip()]:
         if not chunk.startswith("{"):
             continue
         try:
             obj = json.loads(chunk)
         except ValueError:
             continue
-        if isinstance(obj, dict):
-            got = _reply(obj)
-            if got is not None:
-                return got
+        if isinstance(obj, dict) and _ours(obj):
+            out.append(obj)
+    return out
+
+
+def parse_reply(text: str | None) -> LauncherReply | None:
+    """The ``mps3-debug/1`` state object in the launcher's stdout, or None when there is none
+    (no launcher, or not its answer)."""
+    for obj in _objects(text):
+        got = _reply(obj)
+        if got is not None:
+            return got
     return None
+
+
+def parse_capabilities(text: str | None) -> tuple[str, ...] | None:
+    """``version --json``'s ``capabilities`` (DEBUG-DOWN-FIRST): None when the text holds no
+    ``mps3-debug/1`` object; ``()`` when the field is absent or not a list (no capability)."""
+    objs = _objects(text)
+    if not objs:
+        return None
+    for obj in objs:
+        if "capabilities" in obj:
+            caps = obj["capabilities"]
+            return tuple(c for c in caps if isinstance(c, str)) if isinstance(caps, list) else ()
+    return ()
 
 
 def _tail(res: Any, n: int = 3) -> str:
@@ -297,6 +351,148 @@ def launcher_error(verb: str, returncode: int, reply: LauncherReply, *,
     return ActionFailedError(f"OpenOCD on the board failed to {verb}: {said}{log_words}",
                              hint=reply.hint or "`harness-manager debug status TARGET` shows "
                                                 "the board's last state")
+
+
+# --- DEBUG-DOWN-FIRST: the board's OpenOCD stops before every swap ------------------------------
+
+
+@dataclass(frozen=True)
+class DownFirst:
+    """What asking the board's OpenOCD down before a swap found (``down_first``).
+
+    ``asked``: the board had a READY route, so the launcher was asked. ``ok``: it answered
+    down (``already``: it was not running), or it is not installed (``no_launcher``, exit 127),
+    or the image has no OpenOCD (``no_openocd``, exit 12), or nothing was asked. Not ``ok``: ``why`` says what failed; the swap went on only
+    ``forced`` (``--force``) or because the board has harnessd's ``lock``."""
+
+    asked: bool = False
+    ok: bool = True
+    launcher: str = ""
+    why: str = ""
+    already: bool = False
+    no_launcher: bool = False
+    no_openocd: bool = False
+    forced: bool = False
+    lock: bool = False
+
+    @property
+    def word(self) -> str:
+        """One word for the log: "" when not asked."""
+        if not self.asked:
+            return ""
+        if not self.ok:
+            return "forced" if self.forced else "lock" if self.lock else "failed"
+        if self.no_launcher or self.no_openocd:
+            return "no launcher" if self.no_launcher else "no OpenOCD in the image"
+        return "already down" if self.already else "down"
+
+    @property
+    def warning(self) -> str:
+        """What the swap that went on despite a failed down warns (``deploy.warning``); ""
+        when the down worked (or the failure refused the swap)."""
+        if self.ok or not (self.forced or self.lock):
+            return ""
+        if self.lock:
+            return (f"`{self.launcher} down` failed ({self.why}); going on: the board's "
+                    f"harnessd lock ({LOCK_CAPABILITY}) keeps OpenOCD off JTAG during the swap")
+        return (f"swapping anyway (forced) although `{self.launcher} down` failed ({self.why}): "
+                "on Linux v2.0.0 OpenOCD on the board may still drive JTAG during the "
+                "reconfiguration")
+
+    def refusal(self) -> RefusedError:
+        """The refusal (exit 15) of a swap whose down failed: before anything touched the
+        board. ``error.data.debug_down`` lets the app offer "Program anyway"."""
+        err = RefusedError(
+            f"`{self.launcher} down` failed before the swap ({self.why}): OpenOCD on the board "
+            "may still drive JTAG, so nothing was programmed", hint=DOWN_FIRST_HINT)
+        err.data = {DOWN_FIRST_DATA: {"launcher": self.launcher,  # type: ignore[attr-defined]
+                                      "reason": self.why, "force": True}}
+        return err
+
+
+def ready_route(session: Any) -> Any:
+    """The session's on-board route when its plan is READY (a claimed Linux board this Harness
+    Manager can enter), else None: bare metal, not claimed, another key's claim, no route.
+    Never raises."""
+    rt = route_of(session)
+    if rt is None:
+        return None
+    try:
+        state, _err = rt.plan()
+    except HarnessError as exc:
+        log.info("debug on-board: no plan for the down before the swap: %s", exc)
+        return None
+    return rt if state == READY else None
+
+
+def ask_down(rt: Any) -> DownFirst:
+    """``<launcher> down --json`` on the board, read strictly (DEBUG-DOWN-FIRST): ok only for
+    exit 0 with ``state: down``, exit 127 (no launcher) or exit 12 (no OpenOCD in the image:
+    none can be running). Never raises."""
+    launcher = getattr(rt, "launcher", "") or "the launcher"
+    try:
+        res = rt.run("down", timeout=DOWN_TIMEOUT_S)
+    except HarnessError as exc:
+        return DownFirst(asked=True, ok=False, launcher=launcher,
+                         why=f"the board's SSH failed: {exc.message}")
+    except Exception as exc:  # noqa: BLE001 - whatever stops the ask refuses the swap
+        log.exception("debug on-board: `%s down` could not be run", launcher)
+        return DownFirst(asked=True, ok=False, launcher=launcher,
+                         why=f"it could not be run: {exc}")
+    rc = res.returncode
+    if rc == RC_NO_LAUNCHER:
+        return DownFirst(asked=True, ok=True, launcher=launcher, no_launcher=True)
+    if rc == RC_NO_OPENOCD:
+        return DownFirst(asked=True, ok=True, launcher=launcher, no_openocd=True)
+    reply = parse_reply(getattr(res, "stdout", ""))
+    said = ""
+    if reply is not None:
+        said = ": ".join(w for w in (reply.code, reply.message) if w)
+    if reply is None:
+        why = f"no {SCHEMA} answer, exit {rc}: {_tail(res)}"
+    elif rc != RC_OK:
+        why = f"exit {rc}" + (f", {said}" if said else "")
+    elif reply.state != "down":
+        why = f"it answered state {reply.state!r}" + (f", {said}" if said else "")
+    else:
+        return DownFirst(asked=True, ok=True, launcher=launcher, already=reply.already)
+    return DownFirst(asked=True, ok=False, launcher=launcher, why=why)
+
+
+def has_lock(rt: Any) -> bool:
+    """Does the board's launcher list ``LOCK_CAPABILITY`` (``version --json``'s
+    ``capabilities``, exit 0)? An absent field, another answer or no answer: no lock."""
+    try:
+        res = rt.run("version", timeout=STATUS_TIMEOUT_S)
+    except Exception as exc:  # noqa: BLE001 - no answer is no lock: the refusal stands
+        log.info("debug on-board: `version --json` did not answer: %s", exc)
+        return False
+    if res.returncode != RC_OK:
+        return False
+    return LOCK_CAPABILITY in (parse_capabilities(getattr(res, "stdout", "")) or ())
+
+
+def settle(got: DownFirst, *, force: bool, lock: Any) -> DownFirst:
+    """Go on, or raise the refusal (15): a failed down goes on only ``force``d, or when
+    ``lock()`` says the board has harnessd's lock."""
+    if got.ok:
+        return got
+    if force:
+        return replace(got, forced=True)
+    if lock():
+        return replace(got, lock=True)
+    raise got.refusal()
+
+
+def down_first(session: Any, *, force: bool = False) -> DownFirst:
+    """DEBUG-DOWN-FIRST for a session with no ``DebugService`` session of its own: ask the
+    board's OpenOCD down when its route is READY; raises the refusal (15)."""
+    rt = ready_route(session)
+    if rt is None:
+        return DownFirst()
+    got = settle(ask_down(rt), force=force, lock=lambda: has_lock(rt))
+    log.info("debug on-board: down before the swap: %s", got.word)
+    return got
 
 
 def mode(state_dir: Any = None) -> str:
@@ -755,11 +951,39 @@ class OnBoard:
 
     # -- swaps and closing ------------------------------------------------------------------
 
+    def down_first(self, session: Any, *, force: bool = False) -> tuple[DownFirst, Any]:
+        """DEBUG-DOWN-FIRST (``DeployService``, before ``deploy.started``): ask the board's
+        OpenOCD down whoever started it. Returns what it found, and the session of this
+        service's to reopen after a verified swap (None: none). Raises the refusal (15)
+        before anything changes: a session of ours stays open then."""
+        board_id = session.candidate.board_id
+        live = self.live(board_id)
+        rt = live.route if live is not None else ready_route(session)
+        if rt is None:
+            return DownFirst(), None
+        self._changing(rt)
+        got = settle(ask_down(rt), force=force, lock=lambda: has_lock(rt))
+        log.info("debug on-board: down before the swap: %s", got.word)
+        if live is None:
+            return got, None
+        # ours: closed for the swap (one down, asked above), reopened after a verified one
+        with self._mu:
+            if self._live.get(board_id) is live:
+                self._live.pop(board_id, None)
+            self._closed_for[board_id] = SWAP_REASON
+        live.route.release()
+        self.svc._mark_ended(board_id, pid=live.reply.pid, why="on-board OpenOCD stopped")
+        detail = SWAP_REASON if got.ok else \
+            f"{SWAP_REASON}; the board did not confirm the stop ({got.why})"
+        self.svc._publish(board_id, "down", pid=live.reply.pid, detail=detail, where="board")
+        return got, live.session
+
     def before_swap(self, board_id: str) -> Any:
-        """``deploy.started``: stop the board's OpenOCD first. Returns the session to reopen
-        (one this service had open), else None. A launcher known on this board is asked down
-        even with no session of ours (Harness Manager stops debug before every program; the
-        launcher's watchdog is the backstop); being down already, it answers down."""
+        """``deploy.started`` with no DEBUG-DOWN-FIRST before it (``down_first`` asked the
+        board already for every ``DeployService`` deploy): stop the board's OpenOCD first.
+        Returns the session to reopen (one this service had open), else None. A launcher known
+        on this board is asked down even with no session of ours (the launcher's watchdog is
+        the backstop); being down already, it answers down."""
         live = self.live(board_id)
         if live is not None:
             try:
@@ -791,6 +1015,8 @@ class OnBoard:
             log.warning("debug on-board: closing %s: %s", board_id, exc)
 
 
-__all__ = ["BUSY_HINT", "LauncherReply", "MODES", "ON_BOARD_ENV", "OnBoard", "OnBoardRoute",
-           "SCHEMA", "SETTING", "SWAP_DETAIL", "busy_words", "launcher_error", "mode",
-           "parse_reply", "route_of"]
+__all__ = ["BUSY_HINT", "DOWN_FIRST_DATA", "DOWN_FIRST_HINT", "DownFirst", "LOCK_CAPABILITY",
+           "LauncherReply", "MODES", "ON_BOARD_ENV", "OnBoard", "OnBoardRoute", "SCHEMA",
+           "SETTING", "SWAP_DETAIL", "ask_down", "busy_words", "down_first", "has_lock",
+           "launcher_error", "mode", "parse_capabilities", "parse_reply", "ready_route",
+           "route_of", "settle"]

@@ -95,7 +95,9 @@ OPEN_POINTS: dict[str, str] = {
     "jobs": "while a job runs on a board, the board's other requests are 409 HELD naming it",
     "POST /deploy": "preflight first; a refusal is 409 (14/15) with error.data.{overlay, "
                     "preflight} and no job; keep_on_card true then reads the card, and a card "
-                    "that cannot take it is 422 (12) with error.data.{overlay, card}, no job",
+                    "that cannot take it is 422 (12) with error.data.{overlay, card}, no job; "
+                    "FIX-PACK-7: the job refuses 15 (error.data.debug_down) when the board's "
+                    "OpenOCD cannot be stopped first, and force true swaps anyway (a warning)",
     "overlay": "a name, an rm_id, or the OverlayRef object",
     "console WS": "text frames {state,name,detail} / {dropped,dropped_frames} / {error}; "
                   "binary frames carry bytes both ways; {state:closed} then close 1000",
@@ -696,10 +698,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
         state.jobs.gate(bid)
         session = state.session(bid)
-        ui2_require_holder(sim, bid, "deploy", body)               # ui2 api-hub (G7)
+        ui2_require_holder(sim, bid, "deploy", _lease_body(body))  # ui2 api-hub (G7)
         keep = body.get("keep_on_card", False)
         if not isinstance(keep, bool):
             raise UsageError(f"keep_on_card must be true or false, not {keep!r}")
+        force = _force(body)                                       # FIX-PACK-7
         ov = find_overlay(session, body.get("overlay"))
         items = list(eng.deploy.preflight(session, ov))
         refusal = preflight_refusal(items, ov.name)
@@ -713,17 +716,19 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                 refused.data = {"overlay": ov, "card": card}  # type: ignore[attr-defined]
                 raise refused
             return _accepted(state.jobs.start(
-                bid, "deploy", lambda progress: eng.deploy.deploy(session, ov, keep_on_card=True)))
+                bid, "deploy", lambda progress: eng.deploy.deploy(session, ov, keep_on_card=True,
+                                                                  **force)))
         return _accepted(state.jobs.start(bid, "deploy",
-                                          lambda progress: eng.deploy.deploy(session, ov)))
+                                          lambda progress: eng.deploy.deploy(session, ov, **force)))
 
     @app.post(f"{API}/boards/{{bid}}/restore", status_code=202)
     def restore(bid: str,
                 body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         session = state.session(bid)
-        ui2_require_holder(sim, bid, "restore", body)              # ui2 api-hub (G7)
-        return _accepted(state.jobs.start(bid, "restore",
-                                          lambda progress: eng.deploy.restore_baseline(session)))
+        force = _force(body)                                       # FIX-PACK-7
+        ui2_require_holder(sim, bid, "restore", _lease_body(body))  # ui2 api-hub (G7)
+        return _accepted(state.jobs.start(
+            bid, "restore", lambda progress: eng.deploy.restore_baseline(session, **force)))
 
     # -- reset, clocks --------------------------------------------------------------------
 
@@ -1286,6 +1291,22 @@ def ui2_console_rows(eng: Any, sim: Any, bid: str, rows: list[dict[str, Any]]) -
         writable, why = CA.rule(role, hub is not None, lease, "")
         out.append({**row, "role": role, "writable": writable, "read_only_reason": why})
     return out
+
+
+def _force(body: dict[str, Any] | None) -> dict[str, bool]:
+    """FIX-PACK-7: ``force: true`` in a deploy or restore body (the daemon's rule): swap even
+    when the board's OpenOCD cannot be stopped first. The keyword only when asked."""
+    force = (body or {}).get("force", False)
+    if not isinstance(force, bool):
+        raise UsageError(f"force must be true or false, not {force!r}")
+    return {"force": True} if force else {}
+
+
+def _lease_body(body: dict[str, Any] | None) -> dict[str, Any]:
+    """FIX-PACK-7 (the daemon's rule): ``force`` alone is the swap's, not the lease escape; the
+    lease gate sees it only with ``consent``."""
+    b = body or {}
+    return b if "consent" in b else {k: v for k, v in b.items() if k != "force"}
 
 
 def ui2_require_holder(sim: Any, bid: str, kind: str, body: dict[str, Any] | None) -> None:

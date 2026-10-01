@@ -409,6 +409,91 @@ def _status_human(board_id: str, st: DebugStatus) -> list[str]:
     return lines
 
 
+# --- the terminal holding `debug up` across a swap (FIX-PACK-7) ------------------------------------
+
+#: What the terminal holding ``debug up`` prints when a swap closes the session, reopens it, or
+#: does not (the guide quotes these).
+SWAP_CLOSED_TAIL = "the new ports follow when it reopens"
+SWAP_REOPENED = "reopened after the swap: the gdb ports below are new; attach gdb again"
+SWAP_GONE_HINT = ("this terminal holds no session now: Ctrl-C ends it; `harness-manager debug up "
+                  "{target}` starts a new one")
+
+
+def _num(v: Any) -> int:
+    try:
+        return int(v) if v is not None and not isinstance(v, bool) else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _status_of_event(d: dict[str, Any]) -> DebugStatus:
+    """A ``debug.state`` event's data as the ``DebugStatus`` it reports (its ports, cores and
+    where), for the same lines ``debug up`` printed first."""
+    ports = d.get("ports") if isinstance(d.get("ports"), dict) else {}
+    return DebugStatus(
+        state=str(d.get("state") or ""), gdb_port=_num(ports.get("gdb")),
+        telnet_port=_num(ports.get("telnet")), tcl_port=_num(ports.get("tcl")),
+        config=tuple(str(c) for c in d.get("config") or ()), pid=_num(d.get("pid")),
+        detail=str(d.get("detail") or ""),
+        gdb_ports=tuple(p for p in (_num(x) for x in d.get("gdb_ports") or ()) if p),
+        cores=tuple(str(c) for c in d.get("cores") or ()), where=str(d.get("where") or "host"))
+
+
+def _closed_for_swap(detail: str) -> bool:
+    """The service's words for a session it closed before a swap: "closed for the swap (...)"
+    (OpenOCD on the board) or "closed for a partition swap (...)" (this PC's)."""
+    return detail.startswith("closed for") and "swap" in detail
+
+
+class SwapWatch:
+    """FIX-PACK-7: the terminal holding ``debug up`` follows its session across a swap. A swap
+    closes it ("closed for the swap"); after a verified swap the service reopens it on new
+    ports: print the new block (``_status_human``: per-core ``gdb`` and ``attach`` lines).
+    After a swap that was not verified, or a reopen that failed: print why it stays down.
+    Human output goes to stdout like the first block; --json/--tsv keep stdout to the one
+    result, so there it goes to stderr."""
+
+    def __init__(self, ctx: Ctx, board_id: str, target: str) -> None:
+        self.ctx, self.board_id, self.target = ctx, board_id, target
+        self.closed = False             # a swap closed the session: the next "up" reopens it
+        self._mu = threading.Lock()
+
+    def _say(self, lines: list[str]) -> None:
+        if self.ctx.fmt == "human":
+            sys.stdout.write("".join(f"{ln}\n" for ln in lines))
+            sys.stdout.flush()
+        else:
+            for ln in lines:
+                self.ctx.note(ln)
+
+    def lines(self, data: dict[str, Any]) -> list[str]:
+        """What one ``debug.state`` event of this board prints ([]: nothing)."""
+        state = str(data.get("state") or "")
+        detail = str(data.get("detail") or "")
+        if state == "down" and _closed_for_swap(detail):
+            self.closed = True
+            return [f"swap       {detail}: {SWAP_CLOSED_TAIL}"]
+        if state == "up" and self.closed:
+            self.closed = False
+            return [f"swap       {SWAP_REOPENED}",
+                    *_status_human(self.board_id, _status_of_event(data))]
+        if (state == "down" and detail.startswith("not reopened")) or \
+                (state == "failed" and self.closed):
+            self.closed = False
+            why = detail if detail.startswith("not reopened") else \
+                f"not reopened: {detail or 'no detail given'}"
+            return [f"swap       {why}", "           " + SWAP_GONE_HINT.format(target=self.target)]
+        return []
+
+    def __call__(self, ev: Any) -> None:
+        if ev.board_id != self.board_id:
+            return
+        with self._mu:
+            out = self.lines(dict(ev.data or {}))
+            if out:
+                self._say(out)
+
+
 def cmd_debug(ctx: Ctx) -> int:
     a = ctx.args
     action = a.debug_cmd
@@ -442,9 +527,12 @@ def cmd_debug(ctx: Ctx) -> int:
         ocd = report(session) if action == "status" and callable(report) else None
         if ocd:                                         # the adapter verdict (DEBUG-OCD)
             data["openocd"] = ocd
-            human.append(f"openocd    {ocd.get('detail', '')}")
-            if ocd.get("hint"):
-                human.append(f"           fix: {ocd['hint']}")
+            # FIX-PACK-7: it describes THIS PC's OpenOCD; with OpenOCD on the board the line
+            # only confused (E-OCD). --json/--tsv keep it.
+            if getattr(st, "where", "host") != "board":
+                human.append(f"openocd    {ocd.get('detail', '')}")
+                if ocd.get("hint"):
+                    human.append(f"           fix: {ocd['hint']}")
         ctx.emit(Result("debug up|down|status", data,
                         rows=[_status_row(cand.board_id, st)], human=human))
         if action == "up":
@@ -458,7 +546,20 @@ def cmd_debug(ctx: Ctx) -> int:
                 ctx.note(f"debug server up for {cand.board_id}{where}: run gdb in another "
                          f"terminal ({which}); this one holds the server until Ctrl-C or "
                          f"`harness-manager detach {a.target}`")
-            hold(a.for_s)
+            # FIX-PACK-7: a swap reopens the session on new ports: say them here
+            bus = getattr(ctx.engine, "bus", None)
+            unsubscribe = None
+            if bus is not None:
+                try:
+                    unsubscribe = bus.subscribe("debug.state",
+                                                SwapWatch(ctx, cand.board_id, a.target))
+                except HarnessError as exc:       # no events socket: the first block stands
+                    ctx.note(f"(a swap's new ports will not show here: {exc.message})")
+            try:
+                hold(a.for_s)
+            finally:
+                if unsubscribe is not None:
+                    unsubscribe()
             svc.down(session)
     return ExitCode.OK
 
