@@ -352,8 +352,16 @@ skipped.** Each failure is a timing assertion, and each passed 3/3 run alone the
 | `test_quiet_poll.py::test_hm_never_holds_the_single_client_port_longer_than_one_request` | a hold of 20.6 ms against a 20 ms bound |
 | `test_mcc_fix_hub.py::test_the_hub_reader_compiles_and_runs_under_python_36` | the last oscillator read came back None |
 
+Third run, on the tip after N2 (`5b79aa0`), to `/tmpdir/claude-74755/kit-interactive-gate3.log`
+(`logs/make_check_3_summary.txt`): 13:45 → 14:51 (65 min 47 s), load 12-34. **3 failed, 6218
+passed, 20 skipped.** `test_q2_daemon_debris` (the same `TimeoutExpired` as run 2) and two cases of
+`test_debug_6921_drain.py` (`OpenOCD could not connect to the board's JTAG server`). Run alone
+(`logs/gate3_triage.txt`): q2 3/3 pass; the reset-retried case 3/3; the held-at-once case 2/3 at
+once, then the whole file 6/6 (14 tests each). That file belongs to DEBUG-6921 (`cd9c859`) and this
+lane does not touch it or `services/debug.py`: a flaky test of another lane, reported, not fixed.
+
 So the gate is green but for load flakes: run 1 (`cdcafa9`) CHECK PASS, run 2 (`fd6b9bd`) 5 load
-flakes that pass 3/3 alone.
+flakes that pass 3/3 alone, run 3 (`5b79aa0`) 3 flakes, two of them in another lane's test.
 
 ## 11. N2: the OOC clocks no longer reach the link (Linux v2.0.0 known issue 11)
 

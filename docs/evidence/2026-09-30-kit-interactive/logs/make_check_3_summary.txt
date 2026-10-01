@@ -1,0 +1,181 @@
+gate on 5b79aa0 start 13:45:45 load=23.65 26.19 27.18
+.venv/bin/ruff check src tests tools/release tools/gen_tokens.py tools/gen_panel_codes.py tools/hil
+All checks passed!
+.venv/bin/python tools/gen_tokens.py --check
+gen_tokens: ok (design/tokens.json sha256 59011d724e13)
+.venv/bin/pytest -q
+SSH-MUX, one board, 10 simulated minutes:
+  before: 83 connections, 83 calls, per minute {'board list': 0.1, 'lease acquire': 0.1, 'lease show': 2.0, 'note list': 6.0, 'whoami': 0.1}
+  after:  1 connections, 83 calls, per minute {'board list': 0.1, 'lease acquire': 0.1, 'lease show': 2.0, 'note list': 6.0, 'whoami': 0.1}
+=================================== FAILURES ===================================
+_ test_a_reset_right_after_our_own_session_is_retried_once_and_succeeds[detect] _
+
+rig = StubRig(binary=PosixPath('/tmpdir/pytest-of-dam1n19/pytest-13297/test_a_reset_right_after_our_o0/bin/openocd'), log=Po.../stub_openocd.jsonl'), cfg_dir=PosixPath('/tmpdir/pytest-of-dam1n19/pytest-13297/test_a_reset_right_after_our_o0/cfg'))
+service = <function service.<locals>.make at 0x7f0ea5bc6ac0>, call = 'detect'
+
+    @pytest.mark.parametrize("call", ["detect", "up"])
+    def test_a_reset_right_after_our_own_session_is_retried_once_and_succeeds(rig, service, call):
+        with FakeJtagServer() as srv:
+            svc = service(cooldown=FAST)
+            session = bare(rig, srv)
+            svc.detect(session)                          # our own session: it has just ended
+            srv.refuse_next = 1                          # ...and the board is still draining it
+>           assert succeeded(go(svc, session, call))
+                             ^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_debug_6921_drain.py:128: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_debug_6921_drain.py:84: in go
+    return getattr(svc, call)(session)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/harness_manager/services/debug.py:929: in detect
+    return self._once_more_if_own_race(
+src/harness_manager/services/debug.py:681: in _once_more_if_own_race
+    return attempt()
+           ^^^^^^^^^
+src/harness_manager/services/debug.py:930: in <lambda>
+    board_id, lambda: self._detect_once(board_id, argv, target))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <harness_manager.services.debug.DebugService object at 0x7f0ea5bd9cd0>
+board_id = 'mps3@drain-test'
+argv = ['/tmpdir/pytest-of-dam1n19/pytest-13297/test_a_reset_right_after_our_o0/bin/openocd', '-s', '/tmpdir/pytest-of-dam1n19/pytest-13297/test_a_reset_right_after_our_o0/cfg', '-c', 'set RBB_HOST 127.0.0.1', '-c', ...]
+target = ''
+
+    def _detect_once(self, board_id: str, argv: list[str], target: str) -> str:
+        self._await_cooldown(board_id)
+        try:
+            res = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True,
+                                 text=True, errors="replace", timeout=self.detect_timeout,
+                                 **_popen_flags())
+        except subprocess.TimeoutExpired as exc:
+            self._mark_ended(board_id, why="detect timed out")    # killed mid-session
+            raise UnreachableError(
+                f"OpenOCD detect did not finish within {self.detect_timeout:.0f}s",
+                hint="the board's JTAG server may be wedged") from exc
+        text = (res.stdout or "") + (res.stderr or "")
+        ids = parse_idcodes(text)
+        if ids:
+            self._mark_ended(board_id, why="detect")
+            return ids[0]
+        err = classify_failure(text, res.returncode, target=target)
+        if _was_served(err):
+            self._mark_ended(board_id, why="detect failed")
+>       raise err
+E       harness_manager.core.errors.UnreachableError: OpenOCD could not connect to the board's JTAG server — is the board up and the harness loaded? (6921 on the shell)
+
+src/harness_manager/services/debug.py:953: UnreachableError
+_ test_negative_twin_a_reset_with_no_recent_session_of_ours_is_held_at_once[detect-none] _
+
+rig = StubRig(binary=PosixPath('/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_a_reset_wit0/bin/openocd'), log=Po.../stub_openocd.jsonl'), cfg_dir=PosixPath('/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_a_reset_wit0/cfg'))
+service = <function service.<locals>.make at 0x7f0ea5bc6980>, call = 'detect'
+ours = 'none'
+
+    @pytest.mark.parametrize("ours", ["none", "older than the window"])
+    @pytest.mark.parametrize("call", ["detect", "up"])
+    def test_negative_twin_a_reset_with_no_recent_session_of_ours_is_held_at_once(
+            rig, service, call, ours):
+        with FakeJtagServer() as srv:
+            svc = service(cooldown=FAST)
+            if ours != "none":                           # e.g. another HM process, a while ago
+                svc.registry_dir.mkdir(parents=True, exist_ok=True)
+                ended_file(svc).write_text(
+                    json.dumps({"ended_at": time.time() - OWN_RACE_WINDOW_S - 1}))
+            srv.refuse_next = 1
+            with pytest.raises(HeldError) as exc:
+>               go(svc, bare(rig, srv), call)
+
+tests/integration/test_debug_6921_drain.py:145: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_debug_6921_drain.py:84: in go
+    return getattr(svc, call)(session)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/harness_manager/services/debug.py:929: in detect
+    return self._once_more_if_own_race(
+src/harness_manager/services/debug.py:681: in _once_more_if_own_race
+    return attempt()
+           ^^^^^^^^^
+src/harness_manager/services/debug.py:930: in <lambda>
+    board_id, lambda: self._detect_once(board_id, argv, target))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <harness_manager.services.debug.DebugService object at 0x7f0eca118f10>
+board_id = 'mps3@drain-test'
+argv = ['/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_a_reset_wit0/bin/openocd', '-s', '/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_a_reset_wit0/cfg', '-c', 'set RBB_HOST 127.0.0.1', '-c', ...]
+target = ''
+
+    def _detect_once(self, board_id: str, argv: list[str], target: str) -> str:
+        self._await_cooldown(board_id)
+        try:
+            res = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True,
+                                 text=True, errors="replace", timeout=self.detect_timeout,
+                                 **_popen_flags())
+        except subprocess.TimeoutExpired as exc:
+            self._mark_ended(board_id, why="detect timed out")    # killed mid-session
+            raise UnreachableError(
+                f"OpenOCD detect did not finish within {self.detect_timeout:.0f}s",
+                hint="the board's JTAG server may be wedged") from exc
+        text = (res.stdout or "") + (res.stderr or "")
+        ids = parse_idcodes(text)
+        if ids:
+            self._mark_ended(board_id, why="detect")
+            return ids[0]
+        err = classify_failure(text, res.returncode, target=target)
+        if _was_served(err):
+            self._mark_ended(board_id, why="detect failed")
+>       raise err
+E       harness_manager.core.errors.UnreachableError: OpenOCD could not connect to the board's JTAG server — is the board up and the harness loaded? (6921 on the shell)
+
+src/harness_manager/services/debug.py:953: UnreachableError
+_________ test_negative_twin_without_the_fix_sighup_leaves_daemon_json _________
+
+tmp_path = PosixPath('/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_without_the5')
+
+    def test_negative_twin_without_the_fix_sighup_leaves_daemon_json(tmp_path):
+>       rc, state, marker = _run(tmp_path, "SIGHUP", fixed=False)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_q2_daemon_debris.py:184: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_q2_daemon_debris.py:155: in _run
+    proc = subprocess.run([sys.executable, str(script), str(state), str(marker), first,
+/usr/lib64/python3.11/subprocess.py:550: in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib64/python3.11/subprocess.py:1209: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib64/python3.11/subprocess.py:2116: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: -9 args: ['/home/dam1n19/SoCLabs/hm-kit-interactive/.ven...>
+endtime = 1331040.307735483, orig_timeout = 90, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['/home/dam1n19/SoCLabs/hm-kit-interactive/.venv/bin/python3.11', '/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_without_the5/daemon.py', '/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_without_the5/state', '/tmpdir/pytest-of-dam1n19/pytest-13297/test_negative_twin_without_the5/closed', 'SIGHUP', 'no']' timed out after 90 seconds
+
+/usr/lib64/python3.11/subprocess.py:1253: TimeoutExpired
+=========================== short test summary info ============================
+FAILED tests/integration/test_debug_6921_drain.py::test_a_reset_right_after_our_own_session_is_retried_once_and_succeeds[detect]
+FAILED tests/integration/test_debug_6921_drain.py::test_negative_twin_a_reset_with_no_recent_session_of_ours_is_held_at_once[detect-none]
+FAILED tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json
+3 failed, 6218 passed, 20 skipped, 1 deselected in 3937.78s (1:05:37)
+make: *** [Makefile:71: test] Error 1
+
+real	65m46.713s
+user	30m32.834s
+sys	6m28.456s
+rc=2 end 14:51:32 load=15.88 16.85 19.31
