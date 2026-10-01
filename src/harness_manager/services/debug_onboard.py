@@ -375,7 +375,7 @@ class DownFirst:
 
     @property
     def word(self) -> str:
-        """One word for the log and the events: "" when not asked."""
+        """One word for the log: "" when not asked."""
         if not self.asked:
             return ""
         if not self.ok:
@@ -384,8 +384,9 @@ class DownFirst:
 
     @property
     def warning(self) -> str:
-        """What the swap that went on despite a failed down warns (``deploy.warning``)."""
-        if self.ok:
+        """What the swap that went on despite a failed down warns (``deploy.warning``); ""
+        when the down worked (or the failure refused the swap)."""
+        if self.ok or not (self.forced or self.lock):
             return ""
         if self.lock:
             return (f"`{self.launcher} down` failed ({self.why}); going on: the board's "
