@@ -149,6 +149,36 @@ function Reasons({ bid, keys, gates }) {
   });
 }
 
+// "$ debug up  (rc 0, 0.8 s)": the head of a command's lines.
+function rcText(l) {
+  if (!l || l.kind !== "rc") return "command";
+  if (l.notRun) return `$ ${l.command}  (not run)`;
+  if (l.running) return `$ ${l.command}  (running)`;
+  const rc = l.rc === null || l.rc === undefined ? "no answer" : `rc ${l.rc}`;
+  return `$ ${l.command}  (${rc}, ${Number.isFinite(l.secs) ? l.secs.toFixed(1) : "?"} s)`;
+}
+
+// A rail card's command lines, folded under their first line so both cards fit the rail at
+// 1440x900; a failure or a refusal opens them (the reason is what to read next).
+export function CommandLines({ lines, panel, testid }) {
+  const shown = (lines || []).filter((l) => l.kind !== "progress");
+  if (!shown.length) return null;
+  const head = shown[0];
+  const bad = !!head.notRun || head.level === "err" || shown.some((l) => l.kind === "err");
+  return html`<details class=${`rail-cmd ${bad ? "bad" : ""}`} open=${bad || (panel && !!panel.running)}>
+    <summary title="The command this card ran, and what it said"><${Icon} name="chevron-right" cls="sm chev" /><span class="mono">${rcText(head)}</span></summary>
+    <${ResultBlock} lines=${shown} panel=${panel} testid=${testid} /></details>`;
+}
+
+// The gdb line as the rail shows it: the part that matters (its port, "127.0.0.1:3343") on
+// screen, the whole command (what Copy copies: gdb -ex "target extended-remote ...") for the
+// title, screen readers and the tests.
+function GdbLine({ port }) {
+  const cmd = gdbCmdFor(port);
+  return html`<span class="copy-row"><code title=${cmd}>127.0.0.1:${port}</code>
+    <span class="sr-only">${cmd}</span><${CopyButton} text=${cmd} label="Copy the gdb command" /></span>`;
+}
+
 export function DebugCard({ bid }) {
   const b = boardState(bid);
   const p = panelState(bid, PANEL);
@@ -177,9 +207,8 @@ export function DebugCard({ bid }) {
     body = html`<dl class="kv" data-testid="debug-ports">
       ${idcode ? html`<dt>IDCODE</dt><dd>${idcode}</dd>` : null}
       ${cores.length > 1 ? cores.map(([core, gp]) => html`<dt key=${`k${core}`}>gdb ${core}</dt>
-          <dd key=${`v${core}`} data-port=${`gdb-${core}`} data-testid=${`debug-attach-${core}`}><span class="copy-row"><code title=${gdbCmdFor(gp)}>${gdbCmdFor(gp)}</code><${CopyButton} text=${gdbCmdFor(gp)} /></span></dd>`)
-        : cores.length ? html`<dt>gdb</dt><dd data-port="gdb" data-testid="debug-attach"><span class="copy-row"><code title=${gdbCmdFor(cores[0][1])}>${gdbCmdFor(cores[0][1])}</code>
-            <${CopyButton} text=${gdbCmdFor(cores[0][1])} /></span></dd>`
+          <dd key=${`v${core}`} data-port=${`gdb-${core}`} data-testid=${`debug-attach-${core}`}><${GdbLine} port=${gp} /></dd>`)
+        : cores.length ? html`<dt>gdb</dt><dd data-port="gdb" data-testid="debug-attach"><${GdbLine} port=${cores[0][1]} /></dd>`
         : html`<dt>gdb</dt><dd class="muted small" data-port="gdb">${st.detail || "not forwarded here: Close and Open again"}</dd>`}
       <dt>Ports</dt><dd class="small"><span data-port="telnet">${port("telnet")}</span> · <span data-port="tcl">${port("tcl")}</span></dd>
       ${whereLine}
@@ -206,12 +235,7 @@ export function DebugCard({ bid }) {
         <span class="small muted">A swap closes it.</span>
       </div>
       <${Reasons} bid=${bid} keys=${["up", "down", "detect"]} gates=${gates} />
-      ${lines.length ? html`<${ResultBlock} lines=${lines} panel=${p} testid="debug-result" />` : null}
+      <${CommandLines} lines=${lines} panel=${p} testid="debug-result" />
     </div></div>
   </section>`;
-}
-
-// 0.1.0's section, kept for any caller: the card (the rail puts Logic analysers under it).
-export function DebugSection({ bid }) {
-  return html`<${DebugCard} bid=${bid} />`;
 }

@@ -698,6 +698,3 @@ function OutcomeWrap({ bid }) {
   if (!oc || uiOf(bid).dismissed === oc.key) return null;
   return html`<div class="strip-out"><${Outcome} bid=${bid} /></div>`;
 }
-
-// 0.1.0's name, kept for any caller: the strip is the Program section now.
-export const ProgramSection = ProgramStrip;

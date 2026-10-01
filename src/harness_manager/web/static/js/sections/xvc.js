@@ -24,7 +24,8 @@ import { html, useEffect } from "../lib.js";
 import { boardState, changed, onBoardEvent, onJobEnded, timed, toast } from "../store.js";
 import { holderOnly } from "../week.js";
 import { settingValue } from "../prefs.js";
-import { Chip, CopyButton, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
+import { Chip, CopyButton, Icon, Reason, Spinner } from "../ui.js";
+import { CommandLines } from "./debug.js";
 import { pickForProgram } from "./program.js";
 
 export const XVC_SCOPE = "XVC reaches the reconfigurable partition's debug chain (Debug Bridge, "
@@ -438,7 +439,7 @@ export function XvcCard({ bid }) {
             onChange=${(e) => { x.byo = e.target.checked; changed(); scheduleTcl(bid, 0); }} />
           Bring your own hw_server (<code>--byo</code>)</label>`}
         ${reasons}
-        ${lines.length ? html`<${ResultBlock} lines=${lines} panel=${p} testid="xvc-result" />` : null}
+        <${CommandLines} lines=${lines} panel=${p} testid="xvc-result" />
         ${x.ltxError ? html`<${Reason} level="err" testid="xvc-ltx-error" text=${`${x.ltxError.errName}: ${x.ltxError.message}`} />` : null}
         ${x.downloaded ? html`<${Reason} level="ok" testid="xvc-downloaded" text=${`Saved ${x.downloaded}: set it as the device's PROBES.FILE (the Tcl does).`} />` : null}
         <details class="xvc-more" data-testid="xvc-more">
