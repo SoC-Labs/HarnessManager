@@ -178,6 +178,13 @@ def _cycle(ctx: Ctx) -> int:
         with reset_guard.guarded(session, reset_guard.ACTION_POWER_CYCLE, force=force,
                                  consent=consent):
             evidence = dict(power.power_cycle(off_s, wait=True, progress=progress))
+        # FIX-PACK-6 item 3: the reported design against the DAP, once; never fails the cycle
+        from harness_manager.services import design_check
+
+        check = design_check.from_result(ctx.engine, session, evidence,
+                                         after=design_check.AFTER_POWER_CYCLE,
+                                         bus=getattr(ctx.engine, "bus", None))
+        evidence["design_check"] = check
     ctx.emit(Result("power cycle", {**evidence, "board_id": cand.board_id, "device": device,
                                     "phases": progress.phases},
                     rows=[[cand.board_id, device, evidence.get("off_s", off_s),
@@ -186,5 +193,6 @@ def _cycle(ctx: Ctx) -> int:
                     human=[f"cycled     {cand.board_id}: off {off_s:g} s through {device}, "
                            f"back on after {evidence.get('seconds', '?')} s",
                            "the board now boots from its SD; `harness-manager info "
-                           f"{a.target}` shows when the harness answers"]))
+                           f"{a.target}` shows when the harness answers",
+                           *design_check.human(check)]))
     return ExitCode.OK

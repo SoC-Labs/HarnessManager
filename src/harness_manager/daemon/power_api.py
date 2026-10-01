@@ -111,6 +111,11 @@ def register(ctx: RouteContext) -> None:
 
             with reset_guard.guarded(s, reset_guard.ACTION_POWER_CYCLE, force=force,
                                      consent=consent):
-                return power.power_cycle(off_s, wait=True, progress=step)
+                evidence = power.power_cycle(off_s, wait=True, progress=step)
+            # FIX-PACK-6 item 3: the reported design against the DAP, once (never fails it)
+            from harness_manager.services import design_check
+
+            return design_check.attach(evidence, design_check.after_cold_boot(
+                d.engine, s, after=design_check.AFTER_POWER_CYCLE, bus=d.bus))
 
         return ctx.accepted(d.jobs.submit("power_cycle", bid, run))

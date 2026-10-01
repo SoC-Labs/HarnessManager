@@ -875,6 +875,9 @@ const REFRESH_TOPICS = new Set([
 
 function eventLevel(ev) {
   const d = ev.data || {};
+  // FIX-PACK-6: the cold-boot design check (services/design_check.py): an unverified
+  // design is a warning, a verified one ok, a check that could not be made info
+  if (ev.topic === "design.check") return d.state === "unverified" ? "warning" : d.state === "verified" ? "ok" : "info";
   if (ev.topic.endsWith(".failed") || d.state === "failed") return "error";
   if (ev.topic === "deploy.done") return d.verified ? "ok" : "warning";
   if (ev.topic === "board.lost" || ev.topic === "session.closed" || d.state === "down") return "warning";
@@ -895,6 +898,9 @@ function valueSummary(v) {
 
 function eventText(ev) {
   const d = ev.data || {};
+  if (ev.topic === "design.check" && d.text) {
+    return `${d.state === "unverified" ? "design UNVERIFIED" : d.state === "verified" ? "design verified" : "design not cross-checked"} after ${d.after || "a cold boot"}: ${d.text}`;
+  }
   const parts = Object.entries(d)
     .filter(([k]) => k !== "preflight")
     .map(([k, v]) => `${k}=${valueSummary(v)}`);
@@ -1016,6 +1022,10 @@ export function handleEvent(ev) {
       if (b.debug.gdb_ports) b.debug.gdb_ports = [];
     }
   }
+  // FIX-PACK-6: the cold-boot design check; a deploy proves its own design (the service
+  // forgets the check then too)
+  if (ev.topic === "design.check") boardState(bid).designCheck = { ...(ev.data || {}) };
+  if (ev.topic === "deploy.done") boardState(bid).designCheck = { state: "cleared" };
   if (ev.topic === "controller.reboot") {
     const b = boardState(bid);
     const phase = (ev.data || {}).phase;

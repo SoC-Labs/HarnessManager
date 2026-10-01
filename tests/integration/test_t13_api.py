@@ -132,10 +132,12 @@ def test_probe_open_info_overlays_preflight_deploy_reset_close(client, vboard, o
     B = bid_path(bid)
     # info is BoardInfo, as `harness-manager --json info` prints it
     info = client.get(B, headers=H).json()
-    # UI2 G4 (additive): the service's readings beside BoardInfo (docs/API.md "Readings")
+    # UI2 G4 (additive): the service's readings beside BoardInfo (docs/API.md "Readings");
+    # FIX-PACK-6 (additive): the last cold-boot design check, null until a reboot makes one
     assert set(info) == {"ok", "candidate", "identity", "health", "capabilities", "unavailable",
                          "answer_ms", "uptime_s", "os_uptime_s", "readings_at",
-                         "readings_source", "stats"}
+                         "readings_source", "stats", "design_check"}
+    assert info["design_check"] is None
     assert "reboot_board" in info["unavailable"]
     # the lock is held by this process, once, and the note is the daemon's
     holder = client.get(f"{B}/lock", headers=H).json()["holder"]

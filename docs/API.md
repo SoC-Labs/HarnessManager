@@ -66,7 +66,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 | `POST /boards/{bid}/consoles/{name}/export` `{port?}` | `consoles.export_tcp` | `{host, port}` |
 | `GET /boards/{bid}/debug` · `POST .../debug/detect` · `POST .../debug/up` · `POST .../debug/down` | `debug.status`/`detect`/`up`/`down` | `DebugStatus` (GET adds `openocd: {ok, path, need, adapters, detail, hint}`: the OpenOCD this service would run and whether it has remote_bitbang) / `{idcode}` / 202 job / `DebugStatus` |
 | `GET /boards/{bid}/controller/temps` · `/osc` | `session.controller.temperatures`/`oscillators` | `{readings}` |
-| `POST /boards/{bid}/controller/reboot` `{wait_s?, force?, consent?}` | `session.controller.reboot` | 202 job; the result is the evidence. SLOT-TIMING: the job fails HELD (naming the card job) while the board's OS-slot card job is `writing` or `verifying`; `force: true` with `consent: "RESET <bid>"` resets anyway (the recovery of a job that never ends), else REFUSED |
+| `POST /boards/{bid}/controller/reboot` `{wait_s?, force?, consent?}` | `session.controller.reboot` | 202 job; the result is the evidence, plus `design_check` (FIX-PACK-6, below). SLOT-TIMING: the job fails HELD (naming the card job) while the board's OS-slot card job is `writing` or `verifying`; `force: true` with `consent: "RESET <bid>"` resets anyway (the recovery of a job that never ends), else REFUSED |
 | `POST /boards/{bid}/controller/command` `{line, arm?}` | `session.controller.command` | `{reply}` (allowlist enforced by the adapter) |
 | `GET /boards/{bid}/storage/pending` | `session.storage.pending` | `{pending: obj or null}` |
 | `POST /boards/{bid}/storage/backup` `{dest_dir?}` | `session.storage.backup` | 202 job; the result is a BackupRecord |
@@ -153,7 +153,7 @@ Events: `lease.state {target, board, state: held|queued|released|expired|lost, h
 | Method and path | Returns |
 |---|---|
 | `GET /boards/{bid}/power` | `{readings: [Reading], cycle_reason, device}`. `cycle_reason` is `""` when the board can be cycled. |
-| `POST /boards/{bid}/power/cycle` `{off_s?, force?, consent?}` | 202 job `power_cycle`; the result is the device's evidence. SLOT-TIMING: refused like `controller/reboot` while the card job runs (`force` + `consent: "RESET <bid>"`). |
+| `POST /boards/{bid}/power/cycle` `{off_s?, force?, consent?}` | 202 job `power_cycle`; the result is the device's evidence, plus `design_check` (FIX-PACK-6, "The design after a cold boot"). SLOT-TIMING: refused like `controller/reboot` while the card job runs (`force` + `consent: "RESET <bid>"`). |
 | `POST /update/check` `{board_id?, source?, channel?, version?}` | 202 job `update_check`. The result is the check: the channel, the releases, the app update, and the board's plan with `fingerprint`, `mode`, `rekey`, `blockers`, `warnings`, `steps`. Read-only. |
 | `POST /boards/{bid}/update/harness` `{fingerprint, rekey_phrase?, version?}` | 202 job `update_harness`. The plan is recomputed and must match `fingerprint`. A re-key needs `rekey_phrase == "REKEY <static_id>"`. The result is the outcome. |
 | `POST /boards/{bid}/update/rollback` | 202 job `update_rollback` |
@@ -526,6 +526,15 @@ docs/HIL_AUTO.md "In the app" is the user's side. A run is `harness_manager.chec
 - **`run`:** `{id, board_id, target, state: scheduled|starting|running|stopping|done|cancelled|refused|failed, result: PASS|FAIL|STOPPED|null, exit, reason, plan, auto, writes, repeat, interval_s, until, margin_s, start_at, created_at, started_at, ended_at, evidence, iteration, check: {id, section, title, tier, started}|null, phase: checks|waiting|end state|null, counts (this iteration), totals (the run), iterations: [{n, exit, result, counts, first_failure, stopped, ended_early}], next_at, first_failure: {id, title, iteration, verdict, reason, hint, evidence}|null, lease, stop_requested, announce, log (its last 40 lines), log_total, route: "service"}`. Counts are `{pass, fail, manual, skipped, stopped}`.
 - **Events:** `checks.state` and `checks.progress` (docs/CONTRACTS.md).
 - **QUIET-POLL:** a run is an explicit action: the viewer rules do not gate it (it runs with no page open) and it is paced by the runner's own rules (`gap_s`, `interval_s`, the back-offs). The page reads only `GET /checks`, which never touches the board.
+
+### The design after a cold boot (FIX-PACK-6, `services/design_check.py`)
+
+H1 (board 1, Linux v2.0.0): after an MCC REBOOT with nanosoc kept on the card, harnessd reported `rm_id 0x01000001` while the greybox was resident (the card's power-on load timed out), and `debug detect` found nothing on the JTAG chain. Linux fixes the cause in v2.1 (1e50499); the service no longer trusts a reported design after a cold boot without asking the fabric.
+
+- **When:** after `POST /boards/{bid}/controller/reboot` and `POST /boards/{bid}/power/cycle` (and the CLI's `mcc reboot` / `power cycle`, in-process too), on a Linux harness whose reported design has a debug port (the pack's `openocd_config()`; greybox has none). Anything else is not checked (`design_check: null`).
+- **What:** ONE IDCODE read, non-intrusive, exactly as `GET /boards/{bid}/debug/detect` (OpenOCD `init; scan_chain; shutdown`, the core deferred: nothing halts). `state`: `verified` (the DAP answers `0x6ba00477`), `unverified` (nothing answers: "the board reports nanosoc (0x01000001) but no debug port answers: greybox is probably resident (known issue, Linux v2.0.0)"; or another IDCODE), `skipped` (no OpenOCD here, the read did not finish, or after a power cycle the harness has not answered yet: a Linux cold boot is ~3 min; `text` names the follow-up).
+- **Where:** the job's result `design_check` `{state, rm_id, rm_name, idcode, expected_idcode, text, reason, after, at}` (null when not checked); the event `design.check` with the same object (the app's Activity row, a warning when unverified); and `GET /boards/{bid}` `design_check` (additive: the board's last check, null when none; forgotten at `deploy.done`, which proves its own design, and when the board is closed). The app marks the Design fact **unverified** while it holds.
+- **Never** fails the reboot or the cycle, and never changes the board.
 
 <!-- ui2 api-build: begin (lane UI2-API-BUILD; docs/planning/UI_V2_PLAN.md §2 G4, G5, G6, G8) -->
 
