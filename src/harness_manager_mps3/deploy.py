@@ -158,6 +158,7 @@ from harness_manager.services.deploy import (
 
 from . import constants, ctlgate
 from .constants import FABRIC_MISMATCH_ERRS, IMPL_LINUX, PUSH_PORT
+from .frame_progress import FrameEstimator, for_phase, nominal_push_bps
 from .overlays import CatalogueEntry, OverlayCatalogue, _same_u32
 from .shell import Mps3Shell, ShellLive, _ShellBusy, _TapTransport
 
@@ -272,16 +273,43 @@ class _ReportingPusher(BitstreamPusher):
 
     ``_send`` is the documented injection seam (pyverify/pusher.py); it is
     called once per frame, clearing then partial.
+
+    FIX-PACK-6 item 4: with an ``estimator`` (``frame_progress.FrameEstimator``), a frame in
+    flight reports estimated progress (``estimated: true``, at most every 0.5 s) until it
+    completes; ``on_frame`` then reports the real bytes. pyverify reports nothing inside a
+    frame (per-chunk reporting is the platform repo's fix), so the 2.3 MB partial sat at 6 %.
     """
 
-    def __init__(self, *, on_frame: Callable[[BitstreamKind, int], None], **kwargs: Any) -> None:
+    def __init__(self, *, on_frame: Callable[[BitstreamKind, int], None],
+                 estimator: FrameEstimator | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._on_frame = on_frame
+        self.estimator = estimator
 
     def _send(self, frame: bytes, *, kind: BitstreamKind):  # type: ignore[override]
-        result = super()._send(frame, kind=kind)
-        self._on_frame(kind, len(frame) - HEADER_SIZE)
+        size = len(frame) - HEADER_SIZE
+        est = self.estimator
+        if est is not None:
+            est.started(kind, size)
+        ok = False
+        try:
+            result = super()._send(frame, kind=kind)
+            ok = True
+        finally:
+            if est is not None:
+                est.finished(ok=ok)          # no estimate after this: the snap is next
+        self._on_frame(kind, size)
         return result
+
+
+def _card_write_bps() -> float:
+    """The card's write rate (``mps3.slot.card_write_bps``), the card phase's first guess."""
+    try:
+        from .os_slots import card_rates
+
+        return float(card_rates()[0])
+    except Exception:  # noqa: BLE001 - a guess: never fail a deploy over it
+        return 70_000.0
 
 
 class _ReportingClient:
@@ -443,7 +471,8 @@ class Mps3Deploy:
     def commit_pusher(self, *, windowed: bool, impl: str,
                       on_frame: Callable[[BitstreamKind, int], None] | None = None,
                       stall_s: float | None = None, host: str | None = None,
-                      port: int | None = None) -> BitstreamPusher:
+                      port: int | None = None,
+                      estimator: FrameEstimator | None = None) -> BitstreamPusher:
         """The pusher a card ``commit`` sends its pair with: 6910 only, windowed exactly when
         the swap's push is (a WINDOWED shell deadlocks on a plain push), the Linux stall
         limit. "Keep on the card" and ``harness-manager card commit`` (LINUX-SLOTS) share it.
@@ -456,6 +485,7 @@ class Mps3Deploy:
         if stall_s is not None:
             timeout_s = max(timeout_s, stall_s)
         return _ReportingPusher(on_frame=on_frame or (lambda kind, n: None),
+                                estimator=estimator,
                                 host=host or self._shell.host, transport="tcp",
                                 tcp_port=port or self.push_port,
                                 windowed=windowed, window=DEFAULT_ACK_WINDOW,
@@ -488,6 +518,14 @@ class Mps3Deploy:
             kept[kind] = payload_bytes
             report(PHASE_CARD, sum(kept.values()), total)
 
+        # FIX-PACK-6 item 4: estimated progress while a frame is in flight (the partial is one
+        # 2.3 MB frame): the push at its transport's rate, the card at its write rate, until
+        # this push has measured one of its own.
+        push_estimate = for_phase(report, PHASE_PUSH, total, sent,
+                                  nominal_bps=nominal_push_bps(assessment.transport))
+        card_estimate = for_phase(report, PHASE_CARD, total, kept,
+                                  nominal_bps=_card_write_bps())
+
         # CLAIMED-LOCK: keeping the design on the card is the D13 ``commit``, which a claimed
         # board takes from itself only; a board this Harness Manager claimed gets the whole
         # deploy through the session's board-SSH forward (the swap is not locked, the commit
@@ -502,17 +540,20 @@ class Mps3Deploy:
                     self._session, "deploy", f"keeping {overlay.name} on the card"))
             timeout_s = assessment.push_timeout_s
             if assessment.transport == TRANSPORT_WINDOWED:
-                pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
+                pusher = _ReportingPusher(on_frame=on_frame, estimator=push_estimate,
+                                          host=host, transport="tcp",
                                           tcp_port=push_port, windowed=True,
                                           window=DEFAULT_ACK_WINDOW, timeout_s=timeout_s)
                 src = "tcp"
             elif assessment.transport == TRANSPORT_TCP:
-                pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tcp",
+                pusher = _ReportingPusher(on_frame=on_frame, estimator=push_estimate,
+                                          host=host, transport="tcp",
                                           tcp_port=push_port, windowed=False,
                                           timeout_s=timeout_s)
                 src = "tcp"
             else:
-                pusher = _ReportingPusher(on_frame=on_frame, host=host, transport="tftp",
+                pusher = _ReportingPusher(on_frame=on_frame, estimator=push_estimate,
+                                          host=host, transport="tftp",
                                           tftp_port=self.tftp_port, timeout_s=timeout_s)
                 src = "tftp"
             self.last_pusher = pusher
@@ -533,7 +574,7 @@ class Mps3Deploy:
                 commit_pusher = self.commit_pusher(
                     windowed=assessment.transport == TRANSPORT_WINDOWED, impl=assessment.impl,
                     on_frame=on_card_frame, stall_s=budget.push_stall_s, host=host,
-                    port=push_port)
+                    port=push_port, estimator=card_estimate)
             self.last_commit_pusher = commit_pusher
             self.last_control_timeout_s = ctl_timeout_s
 

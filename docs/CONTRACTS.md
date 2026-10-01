@@ -30,7 +30,7 @@ These are the interfaces every team codes against. They are owned by the lead an
 | `board.found`, `board.lost`, `board.identity` | discovery and identity changes |
 | `board.net_identity` `{status, reported, hub}` | the board's network identity (label, IP, MAC) as HM reads it changed, or a clash/default/difference was found or cleared (BOARD-ID; `services/board_identity.py`) |
 | `session.opened`, `session.closed` | session lifecycle |
-| `deploy.started` `{..., keep_on_card}`, `deploy.progress` `{phase, bytes, total}`, `deploy.done` `{rm_id, verified, card}`, `deploy.failed` `{reason}` | partition programming (`card`: `{kept, slot, why}` when the deploy was asked to keep the design on the card, else null; its write is phase `card`) |
+| `deploy.started` `{..., keep_on_card}`, `deploy.progress` `{phase, bytes, total, estimated?}`, `deploy.done` `{rm_id, verified, card}`, `deploy.failed` `{reason}` | partition programming (`card`: `{kept, slot, why}` when the deploy was asked to keep the design on the card, else null; its write is phase `card`). FIX-PACK-6: `estimated: true` marks a report made while one frame was in flight (at most every 0.5 s; the frame's end snaps to the real bytes; never backwards) |
 | `console.line` `{name, text, partial?}`, `console.state` `{name, state: connecting\|up\|down\|paused\|closed, detail, endpoint}` (`paused`, QUIET-POLL: waiting for the board's lease, "paused: lease held by X") | consoles |
 | `debug.state` `{state: down\|starting\|up\|failed, ports, pid, detail, config}` | debug sessions |
 | `controller.reboot` `{phase: sent\|down\|up}` | board reboot |

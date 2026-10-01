@@ -250,9 +250,22 @@ class Ctx:
             yield
             return
 
+        shown: dict[str, int] = {}          # phase -> the 10 % step an estimate last showed
+
         def _on(ev: Event) -> None:
             if ev.board_id and ev.board_id != board_id:
                 return
+            d = ev.data or {}
+            if d.get("estimated"):
+                # FIX-PACK-6: estimates come every 0.5 s while a frame is in flight; a line
+                # per 10 % step is enough on a terminal (the app draws every one)
+                total = int(d.get("total") or 0)
+                step = 100 * int(d.get("bytes", d.get("done", 0)) or 0) // total // 10 \
+                    if total else -1
+                phase = str(d.get("phase", ""))
+                if shown.get(phase) == step:
+                    return
+                shown[phase] = step
             self.note(describe_event(ev))
 
         unsubscribe = bus.subscribe(f"{prefix}.*", _on)
@@ -269,8 +282,9 @@ def describe_event(ev: Event) -> str:
     if kind == "progress":
         total = d.get("total") or 0
         done = d.get("bytes", d.get("done", 0)) or 0
-        pct = f" ({100 * done // total}%)" if total else ""
-        return f"{head}: {d.get('phase', 'progress')} {done}/{total or '?'}{pct}"
+        est = "~" if d.get("estimated") else ""      # FIX-PACK-6: a frame in flight, estimated
+        pct = f" ({est}{100 * done // total}%)" if total else ""
+        return f"{head}: {d.get('phase', 'progress')} {est}{done}/{total or '?'}{pct}"
     if kind == "failed":
         return f"{head}: failed: {d.get('reason', 'no reason given')}"
     if kind == "started":

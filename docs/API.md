@@ -105,7 +105,7 @@ This is a lead-owned contract, frozen for Wave 2. Team T13 implements the server
 ## Events
 - **Endpoint:** `WS /api/v1/events?token=…&topics=board.*,deploy.*`.
 - **Each text frame:** `{"topic", "board_id", "data", "at"}`, one per `core.events.Event`, with the topics listed in docs/CONTRACTS.md.
-- **Job events:** `job.started`, `job.progress {job, phase, done, total}`, `job.done {job, result}` and `job.failed {job, error}`. SLOT-TIMING (additive): a long card job's `job.progress` (and `GET /jobs/{id}` `progress`) adds `slot`, `rate_bps`, `eta_s` and `text` ("writing slot B: 12.3 MB / 29 MB, ~6 min left").
+- **Job events:** `job.started`, `job.progress {job, phase, done, total}`, `job.done {job, result}` and `job.failed {job, error}`. SLOT-TIMING (additive): a long card job's `job.progress` (and `GET /jobs/{id}` `progress`) adds `slot`, `rate_bps`, `eta_s` and `text` ("writing slot B: 12.3 MB / 29 MB, ~6 min left"). FIX-PACK-6 (additive): `estimated: true` on a progress made while one frame was in flight (`deploy.progress` too): the push and the card report per frame (the partial is one ~2.3 MB frame), so the service estimates inside it from the push's measured rate, at most every 0.5 s, never backwards and never past the frame's end; the frame's end snaps to the real bytes. The app draws an estimate hatched, with `~`.
 - **Drops:** `events.dropped {dropped}` is sent when a slow client's bounded queue drops its oldest events.
 
 ## The Python client (T13)

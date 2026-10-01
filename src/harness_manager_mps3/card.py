@@ -258,6 +258,12 @@ class Mps3Card:
             sent[kind] = n
             report("commit", sum(sent.values()), total)
 
+        # FIX-PACK-6 item 4: estimated progress while a frame is in flight (frame_progress)
+        from .deploy import _card_write_bps
+        from .frame_progress import for_phase
+
+        estimate = for_phase(report, "commit", total, sent, nominal_bps=_card_write_bps())
+
         budget = commit_budget(total)
         from .os_slots import claim_forward
         from .shell import Mps3Shell
@@ -268,7 +274,7 @@ class Mps3Card:
             pusher = self._deploy().commit_pusher(windowed="windowed" in live.features,
                                                   impl=live.impl, on_frame=on_frame,
                                                   stall_s=budget.push_stall_s, host=host,
-                                                  port=push)
+                                                  port=push, estimator=estimate)
             self.last_pusher = pusher
             report("commit", 0, total)
             parked = Mps3Shell(host, ctl, timeout=wait_s, gate_key=_gate_key(shell))

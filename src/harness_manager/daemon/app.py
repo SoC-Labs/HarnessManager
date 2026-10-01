@@ -59,8 +59,10 @@ from harness_manager.core.pack import (
     OverlayRef,
     ProbeHints,
     card_status_of,
+    detail_of,
     keep_refusal,
     preflight_refusal,
+    report_progress,
 )
 from harness_manager.services import reset_guard
 from harness_manager.services.quiet import (
@@ -1405,9 +1407,10 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             still_open(bid, s, "deploy")
 
             def on_progress(ev: Event) -> None:
-                if ev.board_id == bid:
-                    progress(str(ev.data.get("phase", "")), int(ev.data.get("bytes", 0) or 0),
-                             int(ev.data.get("total", 0) or 0))
+                if ev.board_id == bid:          # FIX-PACK-6: with estimated, when it is one
+                    report_progress(progress, str(ev.data.get("phase", "")),
+                                    int(ev.data.get("bytes", 0) or 0),
+                                    int(ev.data.get("total", 0) or 0), detail_of(ev.data))
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
@@ -1428,9 +1431,10 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             still_open(bid, s, "restore")
 
             def on_progress(ev: Event) -> None:
-                if ev.board_id == bid:
-                    progress(str(ev.data.get("phase", "")), int(ev.data.get("bytes", 0) or 0),
-                             int(ev.data.get("total", 0) or 0))
+                if ev.board_id == bid:          # FIX-PACK-6: with estimated, when it is one
+                    report_progress(progress, str(ev.data.get("phase", "")),
+                                    int(ev.data.get("bytes", 0) or 0),
+                                    int(ev.data.get("total", 0) or 0), detail_of(ev.data))
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:

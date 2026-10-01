@@ -304,14 +304,16 @@ export function deployBar(dep) {
     fill: i < at ? 1 : i === at ? frac : 0,
   }));
   const phase = at >= 0 ? dep.phase : "starting";
-  const pct = bytes ? `${Math.floor(frac * 100)}%` : "";
+  // FIX-PACK-6: an estimate (a frame in flight) says "~"; the frame's end snaps to the bytes
+  const approx = bytes && dep.estimated ? "~" : "";
+  const pct = bytes ? `${approx}${Math.floor(frac * 100)}%` : "";
   let line = `${phase}`;
   if (bytes) {
-    line += ` · ${bytesText(dep.bytes)} of ${bytesText(dep.total)}`;
+    line += ` · ${approx}${bytesText(dep.bytes)} of ${bytesText(dep.total)}${approx ? " (estimated)" : ""}`;
     if (dep.rate) line += ` · ${bytesText(Math.round(dep.rate))}/s`;
     if (dep.left !== null && dep.left !== undefined && dep.rate) line += ` · ${Math.max(1, Math.ceil(dep.left))} s left`;
   }
-  return { segs, phase, pct, line, overlay: dep.overlay || dep.rm_id || "" };
+  return { segs, phase, pct, line, overlay: dep.overlay || dep.rm_id || "", estimated: !!approx };
 }
 
 // A hex id as the header shows it: "0x" and upper-case digits ("0x3F1A560F"); anything that

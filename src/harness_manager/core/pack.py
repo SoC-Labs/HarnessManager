@@ -265,7 +265,10 @@ CONTACT_MCC = "mcc"
 #: ("writing slot B: 12.3 MB / 29 MB, ~6 min left"). Every other progress is called as before.
 TAKES_DETAIL = "takes_detail"
 #: The keys a progress ``detail`` carries (an event relays these, and only these).
-DETAIL_KEYS = ("slot", "rate_bps", "eta_s", "text")
+#: FIX-PACK-6 (additive): ``estimated`` is true on a report made while a frame was in flight
+#: (``harness_manager_mps3.frame_progress``): the bytes are an estimate, the next real report
+#: snaps to the bytes sent.
+DETAIL_KEYS = ("slot", "rate_bps", "eta_s", "text", "estimated")
 
 
 def detail_of(data: Mapping[str, Any]) -> dict[str, Any]:

@@ -12,7 +12,9 @@ and a check that could not be made is reported but does not block.
                            (``card_status``), else ``UnavailableError`` (exit 12), nothing pushed
         deploy.started     {overlay, rm_id, preflight: [...], keep_on_card} (UNCHECKED items are
                            listed here)
-        deploy.progress    {phase, bytes, total}, one per adapter progress report
+        deploy.progress    {phase, bytes, total}, one per adapter progress report; plus
+                           ``estimated: true`` on an estimate made while a frame was in
+                           flight (FIX-PACK-6: the adapter's detail, ``core.pack.DETAIL_KEYS``)
         adapter.deploy     the board-specific push; ``verified`` must be True
         confirm            re-read ``session.identity()``; its rm_id must be the overlay's
         deploy.done        {rm_id, verified, card}, or ``deploy.failed`` {reason} at any failing
@@ -62,6 +64,7 @@ from harness_manager.core.pack import (
     CARD_NO_CARD,
     CARD_NO_STORE,
     KEEP_ON_CARD,
+    TAKES_DETAIL,
     BoardSession,
     CardOutcome,
     CardStatus,
@@ -70,6 +73,7 @@ from harness_manager.core.pack import (
     OverlayRef,
     PreflightItem,
     card_status_of,
+    detail_of,
     keep_refusal,
 )
 from harness_manager.services import reset_guard
@@ -208,8 +212,12 @@ class DeployService:
         self._publish(session, "deploy.started", overlay=overlay.name, rm_id=overlay.rm_id,
                       preflight=[_item_dict(i) for i in items], keep_on_card=keep_on_card)
 
-        def progress(phase: str, done: int, total: int) -> None:
-            self._publish(session, "deploy.progress", phase=phase, bytes=done, total=total)
+        def progress(phase: str, done: int, total: int,
+                     detail: dict[str, Any] | None = None) -> None:
+            # FIX-PACK-6: an adapter's estimate (a frame in flight) says so: estimated: true
+            self._publish(session, "deploy.progress", phase=phase, bytes=done, total=total,
+                          **detail_of(detail or {}))
+        setattr(progress, TAKES_DETAIL, True)
 
         stage = "deploy"
         try:
