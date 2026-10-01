@@ -153,15 +153,6 @@ def test_settings_opens_on_general_whatever_section_was_used_last(page_factory):
     assert page.errors == []
 
 
-def test_negative_twin_the_update_tabs_settings_link_still_opens_updates(page_factory):
-    page = page_factory(**APP)
-    open_board(page)
-    section(page, "update")
-    by_id(page, "update-app").locator('[data-action="open-settings"]').click()
-    expect(by_id(page, "settings-pane")).to_have_attribute("data-settings-section", "updates", timeout=T)
-    expect(by_id(page, "update-settings")).to_be_visible(timeout=T)
-
-
 # --- 1: one lease rule: held HERE, never `mine` -----------------------------------------------------
 
 ME = f"{getpass.getuser()}@harness-manager"        # the mock's principal (this and other sessions)
@@ -221,9 +212,10 @@ def test_the_update_lease_line_is_not_yours_for_your_other_session(page_factory,
     expect(line).to_contain_text(f"{ME} holds the lease on mps3_01_pl in another session, "
                                  "not this Harness Manager", timeout=T)
     expect(line).not_to_contain_text("You hold")
-    panel = install_rekey(page, card)
-    result = panel.locator('[data-testid="harness-result"]')
-    expect(result).to_contain_text("HELD", timeout=T)                    # the daemon refuses too
+    panel = install_rekey(page, card, force=True)            # UI v2 (R3): the page refuses first
+    expect(panel.locator('[data-testid="reason-harness_install"]')).to_contain_text(
+        "in another session, not this Harness Manager", timeout=T)
+    expect(panel.locator('[data-testid="harness-result"]')).to_contain_text("Nothing was run.")
     assert daemon.app.state.harness.running == {}
 
 

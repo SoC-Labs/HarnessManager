@@ -187,9 +187,10 @@ def test_review_harness_install_rekey(page_factory, daemon, review, scheme):
 def test_review_harness_lease_held(page_factory, daemon, review, scheme):
     sim_of(daemon).behind_hub(BOARD_USB, lease="other")
     page, card = harness_page(page_factory, scheme=scheme, height=TALL)
-    panel = install_rekey(page, card)
-    expect(panel.locator('[data-testid="harness-result"]')).to_contain_text("holder: alice@lab-pc-07",
-                                                                            timeout=T)
+    panel = install_rekey(page, card, force=True)            # UI v2 (R3): the page refuses a watcher
+    expect(panel.locator('[data-testid="reason-harness_install"]')).to_contain_text(
+        "Install is for the lease holder only: alice@lab-pc-07 holds this board", timeout=T)
+    expect(panel.locator('[data-testid="harness-result"]')).to_contain_text("Nothing was run.")
     shoot(page, review, f"harness-lease-held-{scheme}.png", panel)
 
 
@@ -201,6 +202,6 @@ def test_review_harness_rollback(page_factory, daemon, review, scheme):
     expect(row(card, "1.1.1").locator('[data-testid="marks"]')).to_contain_text("running", timeout=T)
     card.locator('[data-action="harness-history"]').click()
     expect(by_id(page, "harness-history")).to_contain_text("1.1.1", timeout=T)
-    card.locator('[data-action="harness-rollback"]').click()
+    page.locator('[data-action="harness-rollback"]').click()     # UI v2: Versions' board side
     expect(by_id(page, "harness-rollback")).to_have_attribute("data-release", "1.0.0", timeout=T)
-    shoot(page, review, f"harness-rollback-{scheme}.png", card)
+    shoot(page, review, f"harness-rollback-{scheme}.png", page.locator(".os-page"))

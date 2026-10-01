@@ -179,7 +179,9 @@ def test_the_update_banner_stays_hidden_by_default(showcase):
     page.wait_for_timeout(1500)                        # the page's first GET /update/app landed
     expect(by_id(page, "app-update-banner")).to_have_count(0)
     section(page, "update")
-    expect(nav.panel(page, "update")).to_contain_text("never updates itself", timeout=T)
+    # UI v2 (BD16): the app's own update is not on a board's page (its banner and Settings)
+    expect(by_id(page, "harness-card")).to_be_visible(timeout=T)
+    expect(by_id(page, "update-app")).to_have_count(0)
 
 
 def test_negative_twin_the_demo_knob_shows_the_staged_banner(staged_showcase):
