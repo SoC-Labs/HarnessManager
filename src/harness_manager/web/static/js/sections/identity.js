@@ -1,4 +1,4 @@
-// The Board tile's Identity row (lane BOARD-ID; docs/API.md "Board identity",
+// The board's identity, on Board > Access (lane BOARD-ID; docs/API.md "Board identity",
 // docs/design/BOARD_IDENTITY.md). What the board says it is (label, IP, MAC), a warning when
 // it clashes with another board or is not what its hub entry says, and "Fix identity": a
 // dialog listing the changes, the typed phrase (the new label), then a 202 job that sets
@@ -32,12 +32,6 @@ export async function loadIdentity(bid, { refresh = false } = {}) {
     b.netIdentityLoading = false;
     changed();
   }
-}
-
-export function identityLine(st) {
-  const r = (st && st.reported) || {};
-  const bits = [r.label || "no label", r.ip || "no IP", r.mac || "no MAC"];
-  return bits.join(" · ");
 }
 
 // The worst findings first, in one sentence each.
@@ -99,33 +93,6 @@ function FixDialog({ bid, st, onClose }) {
     ${err ? html`<div class="mt-8"><${Reason} level="err" testid="identity-fix-error"
       text=${`${err.errName}: ${err.message}${err.hint ? ` (${err.hint})` : ""}`} /></div>` : null}
   </div>`;
-}
-
-export function IdentityTileRow({ bid }) {
-  const b = boardState(bid);
-  const st = identityOf(b);
-  const [open, setOpen] = useState(false);
-  const has = !!(b.info && b.info.net_identity);
-  // One read of the board when it opens (the tile's own; info never asks the board or hub).
-  useEffect(() => {
-    if (has && !b.netIdentity && !b.netIdentityLoading && !b.netIdentityError) loadIdentity(bid);
-  }, [bid, has]);
-  if (!st) return null;
-  const level = st.level === "err" ? "err" : st.level === "warn" ? "warn" : "";
-  const problems = problemText(st);
-  const changes = (st.fix && st.fix.changes) || [];
-  return html`<span class="k">Identity</span>
-    <span class="v" data-testid="tile-identity" data-status=${st.status}>
-      <span class="mono">${identityLine(st)}</span>
-      ${!st.live && st.checked_at ? html` <span class="muted small">(last check ${st.checked_at})</span>` : null}
-      ${b.netIdentityLoading ? html` <${Spinner} />` : null}
-      ${problems ? html`<div><${Reason} level=${level} testid="tile-identity-warning" text=${problems} /></div>` : null}
-      ${changes.length && !open ? html` <button type="button" class="btn ghost sm" data-action="identity-fix"
-        onClick=${() => setOpen(true)}><${Icon} name="sliders-horizontal" /> Fix identity</button>` : null}
-      ${open ? html`<${FixDialog} bid=${bid} st=${st} onClose=${() => setOpen(false)} />` : null}
-      ${b.netIdentityError ? html`<div><${Reason} level="err" testid="tile-identity-error"
-        text=${`${b.netIdentityError.errName}: ${b.netIdentityError.message}`} /></div>` : null}
-    </span>`;
 }
 
 // --- Board › Access (UI v2, lane UI2-BOARD): the identity card and the Fix identity dialog ----------

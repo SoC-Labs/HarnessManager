@@ -13,7 +13,7 @@ import { boardName, capTitle as capTitleOf, clock } from "../format.js";
 import { html, useEffect, useLayoutEffect, useRef } from "../lib.js";
 import { boardState, changed, navigate, S, select, timed } from "../store.js";
 import { durationText, leaseLeft, leaseWho, week } from "../week.js";
-import { Card, Chip, Icon, LinkLine, Reason } from "../ui.js";
+import { Card, CheckChip, Chip, Icon, LinkLine, Reason } from "../ui.js";
 import {
   featuresOf, hasCap, identityOf, isLinux, mccRoute, osKind, USB_WORDS,
 } from "./boardfacts.js";
@@ -236,7 +236,7 @@ function About({ bid }) {
           ${id.firmware_sha ? html` · fw <span class="mono">${id.firmware_sha}</span>` : null}</dd>
         <dt>Image</dt><dd class="small">${imageText(bid)}</dd>
         ${id.usercode ? html`<dt>Usercode</dt><dd class="mono small">${id.usercode}</dd>` : null}
-        <dt>Build check</dt><dd class="small">${id.build_check || "unchecked"}</dd>
+        <dt>Build check</dt><dd class="small"><${CheckChip} check=${id.build_check} testid="about-build" /></dd>
         <dt>Features</dt><dd>${feats.length ? html`<div class="tags" data-testid="about-features">${feats.map((f) => html`<span class="tag" key=${f}>${f}</span>`)}</div>`
           : html`<span class="muted">none reported</span>`}</dd>
       </dl>
