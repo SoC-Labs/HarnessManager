@@ -71,8 +71,9 @@ def test_every_kit_route_build_js_calls_is_one_the_daemon_serves_and_api_md_list
     routes = set(KIT_ROUTES.values())
     assert routes <= daemon_routes()
     assert routes <= api_md_sections()["kit_api"]
-    # the others it calls are the job record and the XDC catalogue (the design picker)
-    assert names - kit == {"job", "boardXdc"}
+    # the others it calls are the job record, the XDC catalogue (the design picker) and the
+    # XDC export (Design's "Download the RM kit")
+    assert names - kit == {"job", "boardXdc", "boardXdcExport"}
 
 
 def test_every_route_the_import_dialog_calls_is_one_the_daemon_serves_and_api_md_lists():

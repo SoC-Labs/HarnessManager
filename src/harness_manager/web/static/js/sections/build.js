@@ -333,12 +333,11 @@ function rmIdOf(x) {
 
 // --- reads -------------------------------------------------------------------------------------
 
-export async function loadGuide(bid) {
+export async function loadGuide(bid, { quiet = false } = {}) {
   const x = st(bid);
   const seq = (x.guideSeq || 0) + 1;       // a slower, older answer never overwrites a newer one
   x.guideSeq = seq;
-  x.guideLoading = true;
-  changed();
+  if (!quiet) { x.guideLoading = true; changed(); }
   try {
     // the directory being watched: one the page wrote, or was told is written ("watch it")
     const dir = x.chosen && absPath(x.written) ? x.written.trim() : "";
@@ -605,6 +604,19 @@ async function downloadZip(bid) {
     x.zipSaved = name;
   } catch (e) { x.scriptError = toApiError(e); }
   x.scriptBusy = ""; changed();
+}
+
+// Design's "Download the RM kit": the XDC export's RM kit (wrapper skeleton, out-of-context XDC,
+// connectivity sheet, pblock facts) for the design as it stands.
+async function downloadRmKit(bid) {
+  const x = st(bid);
+  x.rmKitBusy = true; x.rmKitError = null; x.rmKitSaved = ""; changed();
+  try {
+    const name = `${designName(x) || "design"}_rm-kit.zip`;
+    saveBlob(await callBlob("boardXdcExport", { bid }, { kit: "rm-kit", design: designArg(x), format: "zip" }), name);
+    x.rmKitSaved = name;
+  } catch (e) { x.rmKitError = toApiError(e); }
+  x.rmKitBusy = false; changed();
 }
 
 async function addToWorkbench(bid) {
@@ -1225,8 +1237,12 @@ function DesignPanel({ bid, f }) {
       ${x.chosen ? html`<${Chip} level="ok" icon="circle-check">Chosen<//><span class="small muted">Changing anything here starts the build again.</span>`
         : html`<${Btn} cls="primary" icon="chevron-right" testid="bd-continue" busy=${x.previewBusy} dis=${!!prob.err || !!prob.todo || !name}
             title=${prob.todo || (prob.err ? `Refused: ${prob.err.title}` : "")} onClick=${() => chooseDesign(bid)}>Continue to Build<//>`}
-      <${Btn} icon="download" testid="bd-rm-kit" onClick=${() => revealXdc(bid)}>Download the RM kit (wrapper + XDC)<//>
+      <${Btn} icon="download" testid="bd-rm-kit" busy=${x.rmKitBusy} dis=${!!prob.err || !!prob.todo}
+        onClick=${() => downloadRmKit(bid)}>Download the RM kit (wrapper + XDC)<//>
+      <button type="button" class="link small" data-testid="bd-more-exports" onClick=${() => revealXdc(bid)}>More exports: file by file, and the full-board XDC</button>
     </div>
+    ${x.rmKitSaved ? html`<${Reason} level="ok" testid="bd-rm-kit-saved" text=${`Saved ${x.rmKitSaved}: the wrapper skeleton, the out-of-context XDC, the connectivity sheet and the pblock facts.`} />` : null}
+    ${x.rmKitError ? html`<${Reason} level="err" testid="bd-rm-kit-error" text=${`${x.rmKitError.status === 409 ? "Refused" : "Failed"}: ${errText(x.rmKitError)}`} />` : null}
     ${prob.todo && !x.chosen ? html`<${Reason} testid="design-todo" text=${prob.todo} />` : null}
     <${Then}>Build writes build_rm.tcl for ${name || "your design"}; you run Vivado yourself (30-60 min).<//>
   <//>`;
@@ -1349,6 +1365,8 @@ function BuildPanel({ bid, f }) {
         <${Reason} level="warn" text=${`Don't start a second Vivado in ${x.buildDir.trim()}: it would overwrite out/. Harness Manager offers no command while this one runs.`} />`
         : html`<div class="bd-note"><${Icon} name="info" /><span><b>Harness Manager doesn't run Vivado.</b> You run it, your way. Harness Manager watches <span class="mono">${x.written}</span> and moves on by itself when the receipt appears; you can close this page meanwhile.</span></div>
         <${Way} bid=${bid} x=${x} />
+        ${((x.script && x.script.checks) || []).filter((c) => c.state === "warning" && !["vivado", "rm_id_proposed"].includes(c.name))
+          .map((c) => html`<${Reason} key=${c.name} level="warn" testid=${`script-warn-${c.name}`} text=${`${c.name}: ${c.detail}`} />`)}
         <ol class="bd-howto">
           <li><b>Leave it running.</b> <span class="sub">A small RM takes about 30 minutes on a quiet machine and up to an hour on a loaded one; a nanosoc-sized RM about 50. 4-8 GB of RAM.</span></li>
           <li><b>Come back to Check.</b> <span class="sub">Harness Manager reads the receipt, checks it and says what's next.</span></li>
@@ -1588,7 +1606,7 @@ export function BuildSection({ bid }) {
   const watching = x.chosen && !!x.written && (!f.r || !!f.running);
   useEffect(() => {
     if (!watching) return undefined;
-    const t = setInterval(() => { if (document.visibilityState !== "hidden") loadGuide(bid); }, 10000);
+    const t = setInterval(() => { if (document.visibilityState !== "hidden") loadGuide(bid, { quiet: true }); }, 10000);
     return () => clearInterval(t);
   }, [bid, watching]);
   const top = useRef(null);

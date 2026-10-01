@@ -601,6 +601,7 @@ def test_a_static_the_pin_model_lacks_refuses_the_design_and_its_twin_does_not(p
     expect(refused).to_contain_text(f"{OLD}: the mps3 pin model has no shell")
     expect(refused).to_contain_text("pin model describes another static")
     expect(by_id(page, "bd-continue")).to_be_disabled()
+    expect(by_id(page, "bd-rm-kit")).to_be_disabled()             # no RM kit for a refused design
     card = page.locator('[data-testid="trouble"][data-card="xdc:static_id"]')
     expect(card).to_have_attribute("data-failing", "true")
     assert page.errors == []
@@ -616,6 +617,13 @@ def test_twin_the_boards_own_static_is_not_refused(page_factory, daemon, engine)
     expect(by_id(page, "design-refused")).to_have_count(0)
     expect(page.locator('[data-testid="trouble"][data-failing="true"]')).to_have_count(0)
     expect(by_id(page, "bd-continue")).to_be_enabled()
+    # Design's RM kit: the XDC export's zip for the design as it stands
+    with page.expect_download(timeout=T) as dl:
+        by_id(page, "bd-rm-kit").click()
+    assert dl.value.suggested_filename == "minimal_rm-kit.zip"
+    with zipfile.ZipFile(dl.value.path()) as zf:
+        assert any(n.endswith("minimal_ooc.xdc") for n in zf.namelist()), zf.namelist()
+    expect(by_id(page, "bd-rm-kit-saved")).to_contain_text("minimal_rm-kit.zip")
     assert page.errors == []
 
 
