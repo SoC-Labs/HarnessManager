@@ -105,7 +105,8 @@ export function cardGuard(bid) {
       + "A reset now can wedge the card; the service refuses a reboot meanwhile.";
   }
   if (cardJobBusy(b.card)) {
-    return `the user microSD is busy (${b.cardText || "a card job runs"}). A reset now can wedge the card.`;
+    const j = b.card.os_slots.job;
+    return `the user microSD is busy (${j.text || b.cardText || `${j.state} slot ${j.slot || "?"}`}). A reset now can wedge the card.`;
   }
   if (b.job && CARD_JOBS.has(b.job.kind)) {
     return `the ${b.job.kind.replace(/_/g, " ")} job is writing the board: wait for it to end`;
