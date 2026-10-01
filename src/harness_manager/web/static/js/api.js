@@ -183,6 +183,7 @@ export const EVENT_TOPICS = [
   "harness.*",                         // UPDATE-UI: harness.catalog|installing|installed|pinned
   "settings.*",                        // SET-UI: settings.changed (the dialog and the restart banner)
   "checks.*",                          // HIL-GUI: checks.state, checks.progress (the Checks section)
+  "design.*",                          // FIX-PACK-6: design.check, the cold-boot DAP cross-check
 ];
 
 const TOKEN_KEY = "harness_manager.token";
