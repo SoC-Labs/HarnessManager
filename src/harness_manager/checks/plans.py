@@ -383,8 +383,11 @@ def linux(*, mode: str = "card", static: str = LINUX_STATIC) -> Plan:
                   "d4a_mcc_temp"),
         Check("D4", "D", "REBOOT the board", MANUAL,
               why="an MCC REBOOT is never unattended (it power-cycles the board)", skip=d4_skip),
-        Check("D5", "D", "The board came back running nanosoc from the card", MANUAL,
-              why="follows D4", skip=card_skip),
+        Check("D5", "D", "The board came back running nanosoc from the card (the DAP says so)",
+              MANUAL,
+              why="follows D4; the pass is D4's `design verified` (the DAP answers 0x6ba00477), "
+                  "never the reported rm_id. Linux v2.0.0: KNOWN ISSUE 12, power-on "
+                  "failed:timeout with the greybox resident (FIX-PACK-6)", skip=card_skip),
     ))
     sE = Section("E", "XVC W5 on nanosoc_ila", (
         Check("E1", "E", "Load the ILA design (a swap; not kept on the card)", SAFE,

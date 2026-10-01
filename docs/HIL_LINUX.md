@@ -443,7 +443,11 @@ harness-manager mcc $B reboot | tee $EV/d4_mcc_reboot.txt
 ```
 1. It asks `reboot <board>? The board reloads from its SD and the running design is lost`.
    Answer `y`.
-2. **Expect** `rebooted <board> (seen: sent, down, up)`, then `MCC loaded MB/HBI0309C/Nanosoc/nanosoc.bit`.
+2. **Expect** `rebooted <board> (seen: sent, down, up)`, then `MCC loaded MB/HBI0309C/Nanosoc/nanosoc.bit`,
+   then a `design` line (FIX-PACK-6): Harness Manager no longer trusts the design the board reports
+   after a cold boot; it reads the DAP's IDCODE once (as `debug detect`, nothing halts) and says
+   `design     verified: …`, `design     UNVERIFIED: …` or `design     not cross-checked: …`
+   (no OpenOCD on this host; set `tools.openocd`). The reboot never fails over it. D5 reads it.
 3. What it does, on the hub (`ssh $H 'sg fpga -c …'`, the hub's `python3.11`): pyverify's writer
    checks nothing else reads `tty_00`, types a CR and checks for `Cmd>`, sends REBOOT at 100 ms a
    character, waits for `Rebooting`, and captures the MCC boot log to `FPGA configuration
@@ -453,20 +457,43 @@ harness-manager mcc $B reboot | tee $EV/d4_mcc_reboot.txt
    `--wait` only if the Linux lead says today's boot is slower still.
 5. It refuses while the user microSD's card job writes or reads back (SLOT-TIMING's guard).
 
-**D5. The board came back running nanosoc from the card**
+**D5. The board came back running nanosoc from the card (the DAP says so)**
 ```bash
 harness-manager card status $B | tee $EV/d5_card_after_reboot.txt
 harness-manager --json info $B | tee $EV/d5_info_after_reboot.json
+harness-manager debug detect $B | tee $EV/d5_detect_after_reboot.txt
 harness-manager board claim-status $B | tee $EV/d5_claim_after_reboot.txt
 ```
-**Expect:**
-- `power-on    loaded`. If it says `pending`, wait 30 s and repeat: a swap during the power-on load
-  is refused.
-- `identity.rm_id` `0x01000001` and `identity.shell_id` `0x44ee76d5`.
-- `claimed by you`: the claim and the host key live on the card.
+**The pass criterion is the DAP, not the reported rm_id.** H1 (board 1, Linux v2.0.0, 1 Oct,
+`docs/evidence/2026-10-01-h1/` r5-r8) saw harnessd report `rm_id 0x01000001` (nanosoc) with the
+greybox resident: `debug detect` found nothing on the JTAG chain. So the pass is D4's
+`design     verified: the board reports nanosoc (0x01000001) and its debug port answers (IDCODE
+0x6ba00477)` and `debug detect` printing `0x6ba00477`; `identity.rm_id` alone proves nothing.
 
-A power-on configures the greybox base, so nanosoc running now can only be the card's power-on
+**Expect on Linux v2.0.0: KNOWN ISSUE 12, recorded, not a pass.** With keep-on-card the power-on
+load of the ~2.5 MB pair cannot finish in its 30 s (the card reads at ~14 KB/s, ~3 min), so after
+the cold boot:
+- `card status`: `power-on   failed:timeout` (`pending` for the first ~30 s); `default` still
+  names nanosoc, store slot A|B;
+- D4's line: `design     UNVERIFIED: the board reports nanosoc (0x01000001) but no debug port
+  answers: greybox is probably resident (known issue, Linux v2.0.0)`; the app shows the Design as
+  **unverified** and an Activity warning;
+- `debug detect`: `nothing answered on the JTAG chain (all zeroes)` (exit 13);
+- `identity.rm_id` may still say `0x01000001`, `identity.shell_id` `0x44ee76d5`: ignore the rm_id
+  (harnessd v2.0.0 reports the card's default, not the fabric; Linux fixes it in 1e50499, v2.1).
+Record **KNOWN ISSUE 12 (Linux v2.0.0): power-on failed:timeout, greybox resident** and go on: the
+board runs the greybox, so §E's E1 loads nanosoc_ila as usual, and Z2 restores the baseline.
+
+**Expect on Linux v2.1 or later:**
+- `power-on   loaded`. If it says `pending`, wait 30 s and repeat: a swap during the power-on load
+  is refused.
+- D4's `design     verified: …` and `debug detect` `0x6ba00477`; `identity.rm_id` `0x01000001`.
+A power-on configures the greybox base, so a DAP answering now can only be the card's power-on
 load: **Keep on the card PASS.**
+
+Either way, **expect** `claimed by you`: the claim and the host key live on the card. D4 said
+`design     not cross-checked: no OpenOCD here …`? Then `debug detect` (above) is the check: set
+`tools.openocd` first (`harness-manager config set tools.openocd PATH`).
 
 ---
 
@@ -866,6 +893,8 @@ Then tell the HM lead the folder is complete.
 | D4/G3: "the hub has no Python 3.10+ for pyverify's MCC tools" | no `python3.11` on the hub (its `python3` is 3.6) | the hub admin installs one; fpgahub's `/opt/fpgahub/bin/python3.11` counts |
 | D4/G3: "MCC REBOOT refused: slot B is being written …" | the user microSD's card job is running (SLOT-TIMING) | wait for `slot status` to show it done; never force it during the soak |
 | D4: `REBOOT sent … but no restart observed` | the REBOOT was not acknowledged | check `info` in 2 min before anything else; never send a second one on top |
+| D4/D5: `design     UNVERIFIED: the board reports nanosoc (0x01000001) but no debug port answers …`, `card status` `power-on   failed:timeout` | Linux v2.0.0 KNOWN ISSUE 12: the keep-on-card power-on load cannot finish in 30 s (the card reads at ~14 KB/s); the greybox is resident while harnessd reports the card's default (fixed in Linux v2.1, 1e50499) | record it as KNOWN ISSUE 12, not a Harness Manager failure; carry on with §E (E1 loads nanosoc_ila over the greybox) |
+| D4/D5: `design     UNVERIFIED` on Linux v2.1 or later, or `power-on   loaded` with nothing on the chain | the reported design is not in the fabric | record `card status`, `info` and `debug detect`; send them to the Linux lead; Z2 restores the baseline |
 | D4: "went down … but did not come back" | a slow or failed Linux boot | wait 2 min, then `info`. Still dark: the Linux lead's ROLLBACK runbook. If the MCC stops answering, david power-cycles |
 | E2: "the SSH tunnel to 192.168.10.101 did not come up" (or, older, "the board-SSH forward for XVC did not come up") | the key does not log in | redo B2; check `ssh mps3-b2 true` |
 | E2 (exit 15): "XVC (2542) needs the claiming key over the board's own SSH" | no pinned claim here: nothing was sent | redo B2's `--adopt` |
