@@ -410,6 +410,9 @@ def assemble(dest: Path, *, from_dir: Path, bit: Path | None = None,
             stage_kit(Path(kit), dest, sid, out)
         text = (Path(notes).read_text(encoding="utf-8") if notes is not None
                 else default_notes(out, lb, version, test=test))
+        if "«" in text or "»" in text:
+            raise ReleaseError(f"the release notes {notes} still hold «…» placeholders",
+                               hint="fill them in first: the notes are signed into the release")
         if test:
             text = TEST_BANNER + "\n\n" + text
         (dest / "notes.md").write_text(text.strip() + "\n", encoding="utf-8")
