@@ -36,10 +36,14 @@ status says "booted (not yet confirmed)" until the harness reports ``confirmed``
 verify`` reads a whole slot back and holds the board's card for minutes (other card jobs
 get EBUSY meanwhile): it runs only when asked, never from a status read.
 
-The changes always run in this process (like ``update``): they need the board pack's own
-slot and card adapters. The two status verbs go through the Harness Manager service when one
-runs (SERIAL-6900 4a: ``GET /boards/{bid}/slots`` and ``/card``), like every other read: the
-service holds the board, so an in-process read would be refused by its lock.
+Every verb goes through the Harness Manager service when one runs: the two status verbs
+as its reads (SERIAL-6900 4a: ``GET /boards/{bid}/slots`` and ``/card``), the changes as its
+jobs (FIX-PACK-6: ``POST /boards/{bid}/slots/{push,commit,verify,rollback}`` and
+``/card/{commit,clear}``, ``client.remote.RemoteSlots``), like ``program`` and ``mcc
+reboot``: the service holds the board, so an in-process verb would be refused by its lock
+(H1 Z1: "in use — held by … harness-manager-daemon"). With no service running they run in
+this process, through the board pack's own slot and card adapters, as before. The confirm
+is asked here either way; the service checks the lease and the card again.
 
 Exit codes: 0 done; 2 usage; 3 the running overlay is not in the local store (card commit);
 4 not the lease holder, or the card is busy; 6 the board refused or a job failed; 7 the
@@ -170,6 +174,9 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
 def _service(ctx: Ctx) -> Any:
     from harness_manager.services.slots import SlotService, lease_check_for
 
+    remote = getattr(ctx.engine, "slot_service", None)
+    if remote is not None:                   # the running service's jobs (FIX-PACK-6)
+        return remote
     store = getattr(ctx.engine, "store", None)
     return SlotService(lease_check=lease_check_for(ctx.engine),
                        bus=getattr(ctx.engine, "bus", None), store=store)

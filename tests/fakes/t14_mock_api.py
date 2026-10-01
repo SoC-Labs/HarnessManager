@@ -1126,6 +1126,70 @@ def ui2_register(app: FastAPI, state: Any, sim: Any) -> None:
 
         return _accepted(state.jobs.start(bid, "slot_rollback", run))
 
+    # FIX-PACK-6: slot push/commit/verify (the CLI's, through the service). The sim moves the
+    # slot pointers only; nothing is read from the image paths.
+    def slot_change(bid: str, body: dict[str, Any], kind: str, what: str | None,
+                    change: Callable[[Any], tuple[Any, dict[str, Any]]]) -> JSONResponse:
+        import dataclasses as dc
+
+        state.session(bid)
+        if what is not None:
+            _ui2_confirmed(body, what)
+        slot = body.get("slot")
+        if slot not in (None, "A", "B"):
+            raise UsageError(f"slot must be A or B, not {slot!r}")
+        state.jobs.gate(bid)
+        if bid in sim.no_store or sim.card(bid).os_slots is None:
+            raise UnavailableError("OS slot update", NO_SLOTS)
+
+        def run(progress: Callable[[str, int, int], None]) -> Any:
+            progress(kind.split("_", 1)[1], 0, 0)
+            after, extra = change(sim.card(bid).os_slots)
+            sim.cards[bid] = dc.replace(sim.card(bid), os_slots=after)
+            return {"board_id": bid, "act": kind.split("_", 1)[1], **extra,
+                    "slots": slots_json(after)}
+
+        return _accepted(state.jobs.start(bid, kind, run))
+
+    @app.post(f"{API}/boards/{{bid}}/slots/push", status_code=202)
+    def slots_push(bid: str, body: dict[str, Any] = Body(default_factory=dict)  # noqa: B008
+                   ) -> JSONResponse:
+        def change(now: Any) -> tuple[Any, dict[str, Any]]:
+            import dataclasses as dc
+
+            if not now.target:
+                raise RefusedError("no free slot: roll back the pending commit first (rule 1)")
+            return dc.replace(now, staged=now.target), {
+                "slot": now.target, "rolled_back_first": "",
+                "image": str(body.get("image") or "linux_slot.img").rsplit("/", 1)[-1],
+                "static_id": str(body.get("static_id") or "")}
+
+        return slot_change(bid, body, "slot_push", "push an OS image to the board's card",
+                           change)
+
+    @app.post(f"{API}/boards/{{bid}}/slots/commit", status_code=202)
+    def slots_commit(bid: str, body: dict[str, Any] = Body(default_factory=dict)  # noqa: B008
+                     ) -> JSONResponse:
+        def change(now: Any) -> tuple[Any, dict[str, Any]]:
+            import dataclasses as dc
+
+            pick = now.staged or now.target
+            if not pick or (body.get("slot") and body["slot"] != pick):
+                raise RefusedError("nothing pushed to commit")
+            after = dc.replace(now, default=pick, target="", staged="")
+            return after, {"slot": pick, "note": f"slot {pick} boots at the next reboot"}
+
+        return slot_change(bid, body, "slot_commit", "commit an OS slot", change)
+
+    @app.post(f"{API}/boards/{{bid}}/slots/verify", status_code=202)
+    def slots_verify(bid: str, body: dict[str, Any] = Body(default_factory=dict)  # noqa: B008
+                     ) -> JSONResponse:
+        def change(now: Any) -> tuple[Any, dict[str, Any]]:
+            other = "B" if now.default == "A" else "A"
+            return now, {"slot": body.get("slot") or other}
+
+        return slot_change(bid, body, "slot_verify", None, change)
+
     def card_change(bid: str, body: dict[str, Any], kind: str, what: str,
                     change: Callable[[], dict[str, Any]]) -> JSONResponse:
         state.session(bid)

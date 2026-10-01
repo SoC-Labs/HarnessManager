@@ -10,7 +10,13 @@ card: roll back, commit, clear (UI2-API-BUILD G6, ``card_api.py``)":
   ``slot_rollback`` (``harness-manager slot rollback``);
 - ``POST /boards/{bid}/card/commit`` ``{confirm}`` -> 202 job ``card_commit`` (``card commit``:
   the running overlay becomes the card's power-on default);
-- ``POST /boards/{bid}/card/clear`` ``{confirm}`` -> 202 job ``card_clear`` (``card clear``).
+- ``POST /boards/{bid}/card/clear`` ``{confirm}`` -> 202 job ``card_clear`` (``card clear``);
+- FIX-PACK-6, so the CLI's other slot changes work while the app holds the board (H1 Z1):
+  ``POST /boards/{bid}/slots/push`` ``{confirm, image?, bundle?, static_id?, version?,
+  rollback_first?}`` -> 202 job ``slot_push`` (``slot push``; absolute paths on this host),
+  ``POST /boards/{bid}/slots/commit`` ``{confirm, slot?}`` -> 202 job ``slot_commit`` and
+  ``POST /boards/{bid}/slots/verify`` ``{slot?}`` -> 202 job ``slot_verify`` (a read: no
+  confirm, no lease, as the CLI).
 
 The card itself is L1-CARD's ``GET /boards/{bid}/card`` (core routes), which LINUX-SLOTS
 extends additively (the default's RM, the OS slots, the tile's ``line``). A harness
@@ -158,6 +164,85 @@ def register(ctx: RouteContext) -> None:
             return result
 
         return ctx.accepted(d.jobs.submit("slot_rollback", bid, run))
+
+    # -- FIX-PACK-6: the CLI's other slot changes, so they work while the app holds the board --
+
+    @api.post("/boards/{bid:path}/slots/push")
+    def slots_push(bid: str, body: JsonBody = None) -> Any:
+        from pathlib import Path
+
+        from harness_manager.services.slots import push_source
+
+        s = ctx.board(bid)
+        b = _obj(body)
+        confirmed(b, "push an OS image to the board's card")
+
+        def path_of(key: str) -> Path | None:
+            raw = b.get(key)
+            if raw in (None, ""):
+                return None
+            if not isinstance(raw, str) or not Path(raw).is_absolute():
+                raise UsageError(f"{key} must be an absolute path on the service's host",
+                                 hint="the CLI sends its paths made absolute")
+            return Path(raw)
+
+        source = push_source(path_of("image"), bundle=path_of("bundle"),
+                             static_id=str(b.get("static_id") or ""),
+                             version=str(b.get("version") or ""))
+        rollback_first = _bool(b, "rollback_first", False)
+        svc = service()
+        precheck(bid, s, svc, svc.slots, "push an OS image to the board's card")
+
+        def run(progress: Callable[..., None]) -> Any:
+            still_open(bid, s, "slot push")
+            progress("push", 0, 0)
+            out = svc.push(s, source, rollback_first=rollback_first, progress=progress)
+            return {"board_id": bid, "act": "push", "slot": out["slot"],
+                    "rolled_back_first": out["rolled_back_first"],
+                    "image": source.image.name, "static_id": source.static_id,
+                    "slots": slots_json(out["status"])}
+
+        return ctx.accepted(d.jobs.submit("slot_push", bid, run))
+
+    @api.post("/boards/{bid:path}/slots/commit")
+    def slots_commit(bid: str, body: JsonBody = None) -> Any:
+        s = ctx.board(bid)
+        b = _obj(body)
+        confirmed(b, "commit an OS slot")
+        slot = b.get("slot")
+        if slot not in (None, "A", "B"):
+            raise UsageError(f"slot must be A or B, not {slot!r}")
+        svc = service()
+        precheck(bid, s, svc, svc.slots, "commit an OS slot")
+
+        def run(progress: Callable[..., None]) -> Any:
+            still_open(bid, s, "slot commit")
+            progress("commit", 0, 0)
+            out = svc.commit(s, slot)
+            return {"board_id": bid, "act": "commit", "slot": out["slot"], "note": out["note"],
+                    "slots": slots_json(out["status"])}
+
+        return ctx.accepted(d.jobs.submit("slot_commit", bid, run))
+
+    @api.post("/boards/{bid:path}/slots/verify")
+    def slots_verify(bid: str, body: JsonBody = None) -> Any:
+        s = ctx.board(bid)
+        b = _obj(body)
+        slot = b.get("slot")
+        if slot not in (None, "A", "B"):
+            raise UsageError(f"slot must be A or B, not {slot!r}")
+        svc = service()
+        with d.gates.op(bid):                    # a read: open to anyone, no lease, no confirm
+            svc.slots(s)
+
+        def run(progress: Callable[..., None]) -> Any:
+            still_open(bid, s, "slot verify")
+            progress("verify", 0, 0)
+            out = svc.verify(s, slot, progress=progress)
+            return {"board_id": bid, "act": "verify", "slot": out["slot"],
+                    "slots": slots_json(out["status"])}
+
+        return ctx.accepted(d.jobs.submit("slot_verify", bid, run))
 
     @api.post("/boards/{bid:path}/card/commit")
     def card_commit(bid: str, body: JsonBody = None) -> Any:

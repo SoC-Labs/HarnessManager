@@ -92,8 +92,10 @@ export function osKind(bid) {
 
 // --- the guard: nothing resets the board while its card is written or read back -----------------
 
+// FIX-PACK-6: slot_push / slot_commit / slot_verify are the CLI's slot changes, now the
+// service's jobs too (the CLI goes through the service that holds the board).
 const CARD_JOBS = new Set(["harness_install", "harness_rollback", "slot_rollback", "sd_install", "sd_restore",
-  "update_harness", "update_rollback", "card_commit", "card_clear"]);
+  "update_harness", "update_rollback", "card_commit", "card_clear", "slot_push", "slot_commit", "slot_verify"]);
 
 // "" when a reset may go ahead, else why it must wait (SLOT-TIMING: the service refuses it too).
 export function cardGuard(bid) {

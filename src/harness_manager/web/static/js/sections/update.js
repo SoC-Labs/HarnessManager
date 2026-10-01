@@ -269,7 +269,8 @@ export function versionsStatus(bid) {
   if (install.running) {
     return [`${install.running === "harness_rollback" ? "rolling back" : "installing"} ${(h && h.pick) || ""}${h && h.progress ? ` · ${h.progress}` : ""}`.trim(), "accent", "An install is running on the board"];
   }
-  const kinds = ["harness_install", "harness_rollback", "slot_rollback", "card_commit", "card_clear", "sd_install", "sd_restore", "update_harness"];
+  const kinds = ["harness_install", "harness_rollback", "slot_rollback", "card_commit", "card_clear", "sd_install", "sd_restore", "update_harness",
+    "slot_push", "slot_commit", "slot_verify"];   // FIX-PACK-6: the CLI's slot changes, as the service's jobs
   if (b.job && kinds.includes(b.job.kind)) return [`${jobLabel(b.job.kind)}...`, "accent", `A ${jobLabel(b.job.kind)} job runs on the board`];
   const os = slotsOf(b);
   if (os && os.job && (os.job.state === "writing" || os.job.state === "verifying")) {
