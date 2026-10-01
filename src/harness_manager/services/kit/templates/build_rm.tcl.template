@@ -100,7 +100,9 @@ array set P {
 #                   ($readmemh of a missing file is only a warning, and a blank ROM)
 # RM_SYNTH_HOOK     a Tcl file sourced inside the synth project (filelists,
 #                   read_ip, create_ip for an RM debug hub, set_property ...)
-# RM_SYNTH_DCP      skip synthesis: an out-of-context synth checkpoint of RM_TOP
+# RM_SYNTH_DCP      skip synthesis: an out-of-context synth checkpoint of RM_TOP, written
+#                   BEFORE any create_clock was read (a clock in it overwrites the static's
+#                   clock of the same name at the link: known issue 11)
 # RM_OOC_XDC        the XDC kit's <name>_ooc.xdc ("harness-manager xdc rm-kit")
 # RM_XDC            optional RM-internal timing exceptions and floorplan (child pblocks:
 #                   hm_save_floorplan below), read_xdc -cell RP_INST after the link
@@ -449,12 +451,19 @@ set rc [catch {
         # -generic is REPEATED, one per generic: Vivado takes no list
         foreach g $P(RM_GENERICS) { lappend sargs -generic $g }
         synth_design {*}$sargs
+        # The RM checkpoint BEFORE the OOC XDC (N2, Linux v2.0.0 known issue 11). A checkpoint
+        # carries the constraints read into it, and at the link the OOC `create_clock -name
+        # dut_clk` overwrote the static's clock of the same name on OSCCLK1 ([Constraints
+        # 18-619]): the shell's clk_wiz clocks lost their source and check_timing counted 27,984
+        # unclocked pins for minimal on RC2. Written first, the checkpoint holds the netlist
+        # only, and the link times the RM with the static's own clocks (no_clock 0;
+        # docs/evidence/2026-09-30-kit-interactive §11).
+        write_checkpoint -force $synth_dcp
         # read AFTER synth_design: it names ports and synthesised pins
-        # (_template/ooc_synth.tcl:69-80)
+        # (_template/ooc_synth.tcl:69-80). Here it serves the OOC reports and gates below only.
         read_xdc $P(RM_OOC_XDC)
         report_utilization    -file [file join $out "${name}_synth_util.rpt"]
         report_timing_summary -file [file join $out "${name}_synth_timing.rpt"]
-        write_checkpoint -force $synth_dcp
     } else {
         open_checkpoint $P(RM_SYNTH_DCP)
         file copy -force $P(RM_SYNTH_DCP) $synth_dcp

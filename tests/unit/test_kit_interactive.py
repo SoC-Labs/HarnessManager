@@ -318,3 +318,60 @@ def test_a_running_build_reads_its_stage_with_or_without_the_seconds(tmp_path):
     d.mkdir()
     (d / "build_rm.log").write_text("HM_STAGE impl 1790000300\nHM_RM_BUILD_COMPLETE rm=x\n")
     assert build.running_build(d) is None
+
+
+# --- N2: the OOC create_clocks never reach the link (Linux v2.0.0 known issue 11) ---------------
+
+SYNTH_STUBS = """
+proc version {args} {
+    if {[lsearch -exact $args -short] >= 0} { return 2024.1 }
+    return "Vivado v2024.1 (64-bit)\\nSW Build 5076996 on Wed May 22 2024"
+}
+proc get_parts {args} { return [lindex $args end] }
+proc set_param {args} { }
+set ::ORDER {}
+proc create_project {args} { lappend ::ORDER create_project }
+proc read_verilog {args} { lappend ::ORDER read_verilog }
+proc read_vhdl {args} { lappend ::ORDER read_vhdl }
+proc synth_design {args} { lappend ::ORDER synth_design }
+proc read_xdc {args} { lappend ::ORDER read_xdc }
+proc report_utilization {args} { lappend ::ORDER report_utilization }
+proc report_timing_summary {args} { lappend ::ORDER report_timing_summary }
+proc write_checkpoint {args} { lappend ::ORDER write_checkpoint }
+proc get_cells {args} { return {} }
+proc get_ports {args} { return {} }
+proc get_clocks {args} { return {} }
+proc close_project {args} { lappend ::ORDER close_project }
+"""
+
+
+def synth_order(build_dir: Path) -> list[str]:
+    """The Vivado commands the synth stage runs, in order (Python's Tcl, Vivado stubbed; the
+    stubbed netlist then fails boundary_bits, which is fine here)."""
+    tcl = tkinter.Tcl()
+    tcl.eval(SYNTH_STUBS)
+    tcl.eval(CAPTURE)
+    tcl.call("set", "::argv", ("STOP_AFTER=synth",))
+    tcl.eval(f"cd {{{build_dir.as_posix()}}}")
+    try:
+        tcl.eval("source build_rm.tcl")
+    except tkinter.TclError:
+        pass
+    return list(tcl.splitlist(tcl.eval("set ::ORDER")))
+
+
+def test_the_rm_checkpoint_is_written_before_the_ooc_xdc_is_read(build_dir):
+    """N2: a checkpoint carries the constraints read into it, and at the link the OOC
+    `create_clock -name dut_clk` overwrote the static's clock of the same name (no_clock
+    27,984 for minimal on RC2; 0 with this order, docs/evidence/2026-09-30-kit-interactive)."""
+    order = synth_order(build_dir)
+    assert order[:4] == ["create_project", "read_verilog", "synth_design", "write_checkpoint"]
+    assert order.index("write_checkpoint") < order.index("read_xdc")
+    assert order.index("read_xdc") < order.index("report_timing_summary")   # OOC reports keep it
+    # twin: the old order (checkpoint last) is what this guards against
+    text = render.template_text()
+    synth = text[text.index("synth_design {*}$sargs"):text.index("} else {", text.index("synth_design {*}$sargs"))]
+    assert synth.index("write_checkpoint -force $synth_dcp") < synth.index("read_xdc $P(RM_OOC_XDC)")
+    old = synth.replace("        write_checkpoint -force $synth_dcp\n", "") + \
+        "        write_checkpoint -force $synth_dcp\n"
+    assert old.index("write_checkpoint") > old.index("read_xdc")             # the bug's shape
