@@ -546,3 +546,26 @@ def parse_tabs(text: str) -> dict[str, str]:
         elif current is not None:
             current.append(line)
     return {name: "\n".join(body).strip("\n") for name, body in sections.items()}
+
+
+# --- sd-flash ---
+# `flash devices|write` (cli/cmd_flash.py): SD cards in this PC's card reader, the other way
+# to write the board's cards. In the Board controller tab, beside `sd`.
+CONTROLLER += """
+
+SD cards in THIS computer's card reader, instead of over the Debug USB. Off by
+default: harness-manager config set bringup.sd_flash on. Only card readers are
+listed: never the system disk, never the board's own MCC drive.
+flash devices [--all]      the cards, each with its id, what it can take and
+                           the phrase a write needs; --all also says why every
+                           other disk is not offered
+flash write DEVICE_ID SOURCE --kind files|card [--confirm PHRASE] [--yes]
+    Asks for the typed phrase "WRITE <model> <size>" (--yes never asks: give
+    --confirm). files: a harness bundle onto the configuration SD taken out of
+    the board, a backup first (--backup ZIP, or a new one in --backup-dir DIR),
+    never an .ebf, the card's MBBIOS line kept (--allow-mcc-update for the one
+    case that is refused). card: a whole-card image (stage0_mkcard.py card
+    --card-img) onto the Linux user microSD; linux_slot.img alone is refused.
+    Read back before it says written. Without the rights to write the device
+    it prints the sudo commands to run, and exits 12."""
+# --- end sd-flash ---

@@ -1060,7 +1060,9 @@ class CardWriter:
         for disk in self.disks():
             why = exclusion(disk, cap)
             if why:
-                excluded.append(Excluded(disk.name, disk.path, disk.display_model, disk.size, why))
+                excluded.append(Excluded(disk.name, disk.path,
+                                         _clean(disk.model) or _clean(disk.vendor), disk.size,
+                                         why))
                 continue
             devices.append(self._card(disk))
         return Listing(tuple(devices), tuple(excluded))
@@ -1130,7 +1132,30 @@ class CardWriter:
                 backup_path: Path | str | None = None,
                 backup_dir: Path | str | None = None,
                 allow_mcc_update: bool = False) -> WritePlan:
-        """Every check a write needs before it starts; ``WritePlan`` or the refusal."""
+        """Every check a write needs before it starts, then the typed phrase; ``WritePlan``
+        or the refusal (``plan`` + ``check_confirm``)."""
+        plan = self.plan(device_id, kind, source, backup_path=backup_path,
+                         backup_dir=backup_dir, allow_mcc_update=allow_mcc_update)
+        self.check_confirm(plan, confirm)
+        return plan
+
+    @staticmethod
+    def check_confirm(plan: WritePlan, confirm: Any) -> None:
+        """The typed phrase must be exactly the device's ``WRITE <model> <size>``."""
+        want = plan.confirm
+        if not isinstance(confirm, str) or confirm.strip() != want:
+            err = RefusedError(f"not confirmed: type exactly {want!r} to write "
+                               f"{plan.device.disk.path}",
+                               hint="the phrase names the card's model and size as listed; "
+                                    "nothing was written")
+            err.data = {"confirm": want, "device_id": plan.device.id}  # type: ignore[attr-defined]
+            raise err
+
+    def plan(self, device_id: str, kind: str, source: Path | str, *,
+             backup_path: Path | str | None = None, backup_dir: Path | str | None = None,
+             allow_mcc_update: bool = False) -> WritePlan:
+        """Every check a write needs except the typed phrase (the CLI asks for it after
+        showing this): ``WritePlan`` or the refusal."""
         self.require()
         if kind not in KINDS:
             raise UsageError(f"kind must be files or card, not {kind!r}")
@@ -1142,14 +1167,7 @@ class CardWriter:
         if why:
             raise RefusedError(f"cannot write {kind} to {card.disk.path}: {why}",
                                hint="pick another card, or the other kind")
-        want = card.confirm
-        if not isinstance(confirm, str) or confirm.strip() != want:
-            err = RefusedError(f"not confirmed: type exactly {want!r} to write {card.disk.path}",
-                               hint="the phrase names the card's model and size as listed; "
-                                    "nothing was written")
-            err.data = {"confirm": want, "device_id": card.id}  # type: ignore[attr-defined]
-            raise err
-        plan = WritePlan(device=card, kind=kind, source=source, confirm=want)
+        plan = WritePlan(device=card, kind=kind, source=source, confirm=card.confirm)
         if kind == "card":
             image = inspect_card(source)
             if image.size > card.disk.size:
