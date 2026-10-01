@@ -218,6 +218,16 @@ def test_the_setting_resolves_from_its_variable(monkeypatch: pytest.MonkeyPatch)
     assert cw.is_enabled() is True and cw.size_cap() == 64_000_000_000
 
 
+def test_a_failing_lister_is_a_reason_not_an_error(tmp_path: Path):
+    def broken() -> list:
+        raise UnavailableError(cw.CAPABILITY, "lsblk failed: no such file")
+
+    w = cw.CardWriter(state_dir=tmp_path, platform="linux", enabled=lambda: True, lister=broken)
+    doc = w.devices_json()
+    assert doc["enabled"] is True and doc["devices"] == []
+    assert doc["reason"] == "lsblk failed: no such file"
+
+
 def test_windows_is_not_supported_yet(tmp_path: Path):
     w = cw.CardWriter(state_dir=tmp_path, platform="win32", enabled=lambda: True,
                       lister=lambda: [])

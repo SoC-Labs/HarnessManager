@@ -1100,7 +1100,10 @@ class CardWriter:
         err = self.refusal()
         if err is not None:
             return {**base, "reason": err.reason}
-        listing = self.listing()
+        try:
+            listing = self.listing()
+        except UnavailableError as exc:            # lsblk/diskutil missing or failing: say so
+            return {**base, "enabled": True, "reason": exc.reason, "cap_bytes": self._cap()}
         return {**base, "enabled": True, "cap_bytes": self._cap(),
                 "devices": [c.to_json() for c in listing.devices],
                 "excluded": [e.to_json() for e in listing.excluded]}
