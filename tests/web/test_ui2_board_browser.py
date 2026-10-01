@@ -63,7 +63,7 @@ def test_the_side_list_says_each_pages_status_and_a_clash_opens_access(show):
     expect(page.locator('[data-board-page="access"]')).to_have_attribute("aria-current", "page", timeout=T)
     expect(by_id(page, "board-status-access")).to_contain_text("MAC clash with mps3-03")
     expect(page.locator('[data-board-page="access"] [data-dot="err"]')).to_be_visible()
-    expect(by_id(page, "board-status-connections")).to_have_text("USB to the hub")
+    expect(by_id(page, "board-status-connections")).to_have_text("Debug USB: to the hub")   # UI2-POLISH
     expect(by_id(page, "board-status-recover")).to_have_text("watch only: no lease")
     expect(page.locator('[data-board-page="recover"] [data-dot="held"]')).to_be_visible()
     assert not page.errors, page.errors
@@ -74,7 +74,7 @@ def test_twin_a_board_with_nothing_to_look_at_opens_recover(show):
     expect(page.locator('[data-board-page="recover"]')).to_have_attribute("aria-current", "page", timeout=T)
     expect(by_id(page, "board-page-recover")).to_be_visible()
     expect(by_id(page, "board-status-recover")).to_have_text("steps 1-4 of 5 here")
-    expect(by_id(page, "board-status-connections")).to_have_text("USB to this PC")
+    expect(by_id(page, "board-status-connections")).to_have_text("Debug USB: to this PC")
     assert page.locator('.bt-nav [data-dot="err"]').count() == 0
     # a deep link wins over "what needs a look": the address bar names the page
     nav.board_page(page, "about")
@@ -248,7 +248,7 @@ def test_connections_draws_where_the_debug_usb_goes(show):
     fig = by_id(page, "cx-diagram")
     expect(fig).to_have_attribute("data-usb", "hub", timeout=T)
     expect(fig).to_have_attribute("data-hub", "yes")
-    expect(by_id(page, "cx-usb")).to_contain_text("To the hub")
+    expect(by_id(page, "cx-usb")).to_contain_text("to the hub")
     expect(by_id(page, "cx-usb").locator(".cx-give:not(.no)")).to_contain_text(["MCC console"])
     expect(by_id(page, "cx-ethernet")).to_contain_text("through the hub's ssh tunnel")
     expect(by_id(page, "cx-tunnel")).to_contain_text("ssh tunnel up")
@@ -261,7 +261,7 @@ def test_twin_an_ethernet_only_board_has_no_debug_usb_and_says_the_fix(show):
     expect(fig).to_have_attribute("data-usb", "none", timeout=T)
     expect(fig).to_have_attribute("data-hub", "no")
     usb = by_id(page, "cx-usb")
-    expect(usb).to_contain_text("Not connected")
+    expect(usb).to_contain_text("none (Ethernet only)")
     expect(usb).to_contain_text("Fix: Connect J8")
     assert usb.locator(".cx-give:not(.no)").count() == 0
     expect(by_id(page, "cx-ssh")).to_contain_text("Claimed by you")

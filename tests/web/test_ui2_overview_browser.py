@@ -152,7 +152,7 @@ def test_twin_a_board_with_no_debug_usb_and_one_on_this_pc(show: Showcase):
     page = show.page()
     overview(page, BOARD_LINUX)
     expect(by_id(page, "ov-usb")).to_have_attribute("data-usb", "none", timeout=T)
-    expect(by_id(page, "ov-usb")).to_have_text("not plugged in")
+    expect(by_id(page, "ov-usb")).to_have_text("none (Ethernet only)")       # UI2-POLISH: one vocabulary
     overview(page, BOARD_V011)
     expect(by_id(page, "ov-usb")).to_have_attribute("data-usb", "pc", timeout=T)
     expect(by_id(page, "ov-usb")).to_have_text("to this PC")

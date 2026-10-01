@@ -191,3 +191,49 @@ def test_twin_the_old_placeholder_static_is_still_refused_at_design(showcase, tm
     expect(refused).to_contain_text(f"{OLD_PLACEHOLDER}: the mps3 pin model has no shell")
     expect(by_id(page, "bd-continue")).to_be_disabled()
     assert page.errors == []
+
+
+# --- UI2-POLISH item 4: the Debug USB route in one vocabulary (header, Overview, Board) ----------------
+
+ROUTE_WORDS = {"hub": "to the hub", "pc": "to this PC", "self": "looped back into itself",
+               "none": "none (Ethernet only)", "unknown": "not known"}
+
+
+def _route_words(page: Any, bid: str) -> dict[str, str]:
+    nav.open_board(page, bid)
+    nav.tab(page, "overview")
+    chip = by_id(page, "ov-usb")
+    expect(chip).not_to_have_attribute("data-usb", "", timeout=T)
+    out = {"to": chip.get_attribute("data-usb"), "overview": chip.inner_text().strip()}
+    head = by_id(page, "fact-usb")
+    expect(head).to_have_attribute("data-usb", out["to"], timeout=T)
+    out["header"] = head.locator(".fact-value").inner_text().strip()
+    nav.tab(page, "board")
+    nav.board_page(page, "connections")
+    out["board"] = by_id(page, "board-status-connections").inner_text().strip()
+    out["connections"] = by_id(page, "cx-usb").locator(".cx-line .chip").inner_text().strip()
+    return out
+
+
+@pytest.mark.parametrize(("bid", "to"), [("mps3@192.168.10.106:6900", "hub"), (BOARD_LINUX, "none"),
+                                         ("mps3@192.168.10.105:6900", "pc")])
+def test_the_debug_usb_route_reads_the_same_in_the_header_overview_and_board(showcase, bid, to):  # noqa: F811
+    page = showcase.page(**APP)
+    got = _route_words(page, bid)
+    words = ROUTE_WORDS[to]
+    assert got["to"] == to, got
+    assert got["overview"] == words and got["header"] == words, got
+    assert got["board"] == f"Debug USB: {words}", got
+    assert got["connections"] == words, got
+    assert page.errors == []
+
+
+def test_twin_the_old_words_are_gone_everywhere(showcase):  # noqa: F811
+    page = showcase.page(**APP)
+    got = _route_words(page, BOARD_LINUX)
+    text = " | ".join(v for k, v in got.items() if k != "to")      # the route words, not the reasons
+    for old in ("not plugged in", "no Debug USB", "Not connected", "not known yet"):
+        assert old not in text, (old, text)
+    rail = nav.rail(page, BOARD_LINUX).locator('[data-testid="rail-usb"]')
+    expect(rail).to_have_text("no USB")                                   # the short tag stays
+    assert (rail.get_attribute("title") or "").startswith("Debug USB: none (Ethernet only): ")

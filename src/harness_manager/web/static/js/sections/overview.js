@@ -17,7 +17,7 @@
 
 import { call, routeMissing } from "../api.js";
 import { existingSession } from "../consoles.js";
-import { bytesText, clock, deployBar, healthOf, hexId, hostOf, usbRoute } from "../format.js";
+import { bytesText, clock, deployBar, healthOf, hexId, hostOf } from "../format.js";
 import { html, useEffect, useState } from "../lib.js";
 import { openReleaseConfirm } from "../lease.js";
 import {
@@ -32,6 +32,7 @@ import {
 import { checksOf } from "./checks.js";
 import { front, FrontPanelCard, readPanelNow } from "./panel.js";
 import { loadXvc, viewState, xvc } from "./xvc.js";
+import { mccRoute, USB_WORDS } from "./boardfacts.js";   // UI2-POLISH: one Debug USB vocabulary
 
 // --- small helpers ---------------------------------------------------------------------------------
 
@@ -307,26 +308,13 @@ function Attention({ bid }) {
 
 // --- the identity strip -------------------------------------------------------------------------------
 
-const MCC_ROUTE = {
-  hub: { level: "ok", icon: "usb", text: "to the hub" },
-  pc: { level: "ok", icon: "monitor", text: "to this PC" },
-  self: { level: "accent", icon: "repeat", text: "looped back to itself" },
-  none: { level: "unk", icon: "unplug", text: "not plugged in" },
-  unknown: { level: "unk", icon: "circle-help", text: "not known yet" },
-};
+// UI2-POLISH: the words are boardfacts.js DEBUG_USB (the header and the Board tab say the same).
+const ROUTE_LEVEL = { hub: "ok", pc: "ok", self: "accent", none: "unk", unknown: "unk" };
+const MCC_ROUTE = Object.fromEntries(Object.entries(USB_WORDS).map(([to, w]) => [to,
+  { level: ROUTE_LEVEL[to], icon: w.icon, text: w.chip }]));
 
-// G2: the Debug USB route the service says (the session's, else the GET /boards row's); from
-// the links (format.js usbRoute) only when the service does not say.
-export function mccRoute(bid) {
-  const b = boardState(bid);
-  const row = S.boards[bid] || {};
-  const s = b.session || {};
-  const route = s.mcc_route || row.mcc_route;
-  if (route) return { to: route, reason: s.mcc_route_reason || row.mcc_route_reason || "", source: "service" };
-  const cand = (b.info && b.info.candidate) || row.candidate || {};
-  const u = usbRoute(cand, row);
-  return { to: u.to, reason: u.detail, source: "links" };
-}
+// G2: the Debug USB route is boardfacts.js mccRoute (the service's, else the links), the one the
+// header and the Board tab read too.
 
 function harnessWords(b) {
   const id = (b.info && b.info.identity) || {};
