@@ -62,20 +62,21 @@ def wait_until(fn, timeout=5.0):
 
 @pytest.mark.week_plan("consoles_api")
 @pytest.mark.parametrize("scheme", ["light", "dark"])
-def test_overview_is_four_tiles_that_fit_the_app_window_without_the_identity_card(page_factory, scheme):
+def test_overview_fits_the_app_window_without_the_identity_card(page_factory, scheme):
+    # UI v2 round 3: one screen (Needs attention, the identity strip and readings, the cards
+    # beside the Front panel); the Identity card is Board > About's, not a fold here
     page = page_factory(scheme, **APP)
     open_board(page, BOARD_USB)
-    page.wait_for_selector('[data-testid="tiles"]', timeout=T)
-    for tile in ("tile-design", "tile-consoles", "tile-debug", "tile-board"):
-        box = page.locator(f'[data-testid="{tile}"]').bounding_box()
-        assert box and box["y"] + box["height"] <= APP["height"], (tile, box)   # no scrolling
+    page.wait_for_selector('[data-testid="overview"]', timeout=T)
+    for card in ("tile-design", "tile-consoles", "panel-card", "ov-readings"):
+        box = page.locator(f'[data-testid="{card}"]').bounding_box()
+        assert box and box["y"] + box["height"] <= APP["height"] + 1, (card, box)   # no scrolling
     assert page.locator('[data-testid="identity-card"]').count() == 0          # no duplication
+    assert page.locator('[data-action="details"]').count() == 0                # no fold
     expect(page.locator('[data-testid="tile-design-name"]')).to_have_text("nanosoc")
-    expect(page.locator('[data-testid="tile-temp"]')).to_contain_text("38.5")
-    expect(page.locator('[data-testid="tile-clock"]')).to_contain_text("50 MHz")
+    expect(page.locator('[data-testid="ov-kpi-temp"]')).to_contain_text("38.5", timeout=T)
+    expect(page.locator('[data-testid="ov-kpi-clock"]')).to_contain_text("50")
     assert page.locator('[data-testid="attention"]').count() == 0              # all is well
-    page.locator('[data-action="details"]').click()
-    expect(page.locator('[data-testid="identity-card"]')).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 
@@ -83,58 +84,35 @@ def test_overview_is_four_tiles_that_fit_the_app_window_without_the_identity_car
 def test_needs_attention_shows_only_what_is_wrong_with_its_fix(page_factory, engine):
     page = page_factory(**APP)
     open_board(page, BOARD_FIELDED)
-    strip = page.locator('[data-testid="attention"]')
-    expect(strip.locator('[data-attention="build"]')).to_contain_text("Build check unchecked")
-    assert strip.locator("li").count() == 1                                      # only that
-    # The harness goes busy: one more line, with the note the engine gave.
+    # round 3: an unchecked build is the header's Design chip, not a row here; a busy harness is
+    # the Health reading's (another client), not a problem to fix
+    expect(page.locator('[data-testid="build-chip"]')).to_contain_text("Unchecked", timeout=T)
     engine._board(BOARD_FIELDED).health = Health(
         reachable=True, control_channel="busy", notes=("another client holds the control channel",))
     page.locator('[data-action="refresh-board"]').click()
-    expect(strip.locator('[data-attention="harness"]')).to_contain_text("another client holds")
-    strip.locator('[data-attention="build"] button:has-text("Update")').click()
-    nav.panel(page, "update").wait_for(timeout=T)          # UI v2: Board > Versions
+    expect(page.locator('[data-testid="ov-kpi-health"]')).to_contain_text("Busy", timeout=T)
+    assert page.locator('[data-testid="attention"]').count() == 0
+    # the harness wedges: one row, with the note the engine gave and its one fix
+    engine._board(BOARD_FIELDED).health = Health(
+        reachable=True, control_channel="wedged", notes=("the control channel stopped answering",))
+    page.locator('[data-action="refresh-board"]').click()
+    strip = page.locator('[data-testid="attention"]')
+    expect(strip.locator('[data-attention="harness"]')).to_contain_text("The harness is wedged", timeout=T)
+    assert strip.locator("li").count() == 1                                      # only that
+    strip.locator('[data-action="attention-harness"]').click()
+    nav.panel(page, "power").wait_for(timeout=T)            # UI v2: Board > Recover
 
 
 @pytest.mark.week_plan("consoles_api", sim=True)
-def test_the_consoles_tile_attaches_screen_and_opens_a_console(page_factory, daemon):
+def test_the_consoles_card_opens_a_console_on_the_workbench(page_factory, daemon):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
-    tile = page.locator('[data-testid="tile-consoles"]')
-    row = tile.locator('li[data-console="uart0"]')
-    expect(row).to_contain_text("76800")
-    row.locator('[data-action="attach-uart0"]').click()
-    expect(row.locator("code")).to_contain_text("screen …/mps3_192.168.10.102_6900/uart0")
-    assert row.locator("code").get_attribute("title").startswith("screen /tmp/harness-manager-")
-    sim_of(daemon).attach_screen(BOARD_USB, "uart0", 1)
-    expect(row).to_contain_text("1 attached")
-    # the twin: a console nobody attached shows the button, not a path
-    assert tile.locator('li[data-console="uart1"] code').count() == 0
-    row.locator('[data-action="open-uart0"]').click()
-    page.wait_for_selector('[data-testid="console-uart0"]', timeout=T)
-
-
-@pytest.mark.week_plan()
-def test_the_board_tile_reboot_is_armed_and_says_why_it_cannot(page_factory, engine):
-    page = page_factory(**APP)
-    open_board(page, BOARD_FIELDED)                     # Ethernet only: no board controller
-    tile = page.locator('[data-testid="tile-board"]')
-    expect(tile.locator('[data-testid="reason-reboot"]')).to_contain_text("Cannot: needs the Debug USB cable")
-    tile.locator('[data-action="reboot"]').click(force=True)
-    expect(tile.locator('[data-testid="tile-board-result"]')).to_contain_text("Nothing was run.")
-    assert engine.called("controller.reboot") == []
-
-
-@pytest.mark.week_plan()
-def test_the_board_tile_resets_the_dut_once_armed(page_factory, engine):
-    page = page_factory(**APP)
-    open_board(page, BOARD_USB)
-    tile = page.locator('[data-testid="tile-board"]')
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("not armed")
-    tile.locator('label.arm-inline input').first.check()
-    tile.locator('[data-action="reset_dut"]').click()
-    expect(tile.locator('[data-testid="tile-board-result"]')).to_contain_text("rc 0")
-    assert engine.called("resets.reset") == [(BOARD_USB, "dut")]
-    expect(tile.locator('label.arm-inline input').first).not_to_be_checked()   # disarmed after
+    card = page.locator('[data-testid="tile-consoles"]')
+    row = card.locator('li[data-console="uart0"]')
+    expect(row).to_contain_text("not open in this page", timeout=T)            # the twin first
+    row.locator(".ov-con-name").click()
+    page.wait_for_selector('[data-testid="console-uart0"]', timeout=T)       # that console, picked
+    expect(page.locator('[data-testid="section-workbench"]')).to_be_visible()
 
 
 # --- consoles: baud and screen ------------------------------------------------------------------
@@ -526,10 +504,10 @@ def test_a_board_behind_a_hub_shows_its_tunnel_and_lease_and_releases_it(page_fa
     page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
     page.locator('[data-testid="release-confirm"] [data-action="release_confirm"]').click()
     expect(page.locator('[data-testid="lease-chip"]')).to_have_text("no lease", timeout=T)
-    expect(page.locator('[data-attention="lease"]')).to_contain_text("Not leased on mapstone-dev")
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    expect(page.locator('[data-testid="tile-lease"]')).to_have_attribute("data-lease", "free")   # the Lease card
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours", timeout=T)
-    expect(page.locator('[data-attention="lease"]')).to_have_count(0)
+    expect(page.locator('[data-testid="tile-lease"]')).to_have_attribute("data-lease", "here")
 
 
 @pytest.mark.week_plan("hub_api", sim=True)
@@ -541,7 +519,7 @@ def test_someone_elses_lease_and_a_dead_tunnel_need_attention(page_factory, daem
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("leased to alice@lab-pc-07")
     expect(page.locator('[data-testid="tunnel-chip"]')).to_have_attribute("data-level", "err")
     expect(page.locator('[data-attention="tunnel"]')).to_contain_text("ssh mapstone-dev")
-    expect(page.locator('[data-attention="lease"]')).to_contain_text("Leased to alice@lab-pc-07")
+    expect(page.locator('[data-testid="tile-lease"]')).to_have_attribute("data-lease", "other")   # the Lease card
 
 
 def queue_for_it(page):
@@ -561,8 +539,9 @@ def test_a_queued_lease_holds_the_board_and_can_be_cancelled(page_factory, daemo
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
     queue_for_it(page)
-    # While it queues the board is held: a DUT reset waits and says why.
-    tile = page.locator('[data-testid="tile-board"]')
+    # While it queues the board is held: a DUT reset waits and says why (Board > Recover).
+    section(page, "power")
+    tile = page.locator('[data-testid="board-page-recover"]')
     expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("waiting for the hub lease")
     page.locator(LEAVE_QUEUE).click()
     expect(page.locator('[data-testid="lease-requested"]')).to_have_count(0, timeout=T)
@@ -609,8 +588,9 @@ def test_a_boards_list_asked_before_a_job_started_does_not_end_it(page_factory, 
         page.wait_for_timeout(50)
     assert stale, "the page did not ask for the boards list after the board opened"
     queue_for_it(page)
-    tile = page.locator('[data-testid="tile-board"]')
-    reason = tile.locator('[data-testid="reason-reset_dut"]')
+    section(page, "power")
+    tile = page.locator('[data-testid="board-page-recover"]')
+    reason = tile.locator('[data-testid="reason-reset_dut"]').first
     expect(reason).to_contain_text("waiting for the hub lease", timeout=T)
     route, response = stale[0]
     body = response.json()
@@ -663,7 +643,8 @@ def test_negative_twin_a_newer_list_ends_a_job_whose_end_the_page_missed(page_fa
     open_board(page, BOARD_USB)
     assert sockets, "the events socket did not go through the relay"
     queue_for_it(page)
-    reason = page.locator('[data-testid="tile-board"] [data-testid="reason-reset_dut"]')
+    section(page, "power")
+    reason = page.locator('[data-testid="board-page-recover"] [data-testid="reason-reset_dut"]').first
     expect(reason).to_contain_text("waiting for the hub lease", timeout=T)
     missed["on"] = True
     page.locator(LEAVE_QUEUE).click()
@@ -875,5 +856,5 @@ def test_negative_twin_a_page_that_opens_with_no_boards_scans_by_itself(page_fac
 def test_a_board_not_behind_a_hub_shows_no_hub(page_factory):
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
-    page.wait_for_selector('[data-testid="tiles"]', timeout=T)
+    page.wait_for_selector('[data-testid="overview"]', timeout=T)
     assert page.locator('[data-testid="fact-hub"]').count() == 0

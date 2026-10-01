@@ -38,13 +38,12 @@ def open_board(page, board_id):
     nav.open_board(page, board_id)
 
 
-def open_details(page):
-    """The Overview's Details (identity, counters, telemetry, capabilities) start collapsed."""
-    toggle = page.locator('[data-action="details"]')
-    toggle.wait_for(timeout=T)
-    if toggle.get_attribute("aria-expanded") != "true":
-        toggle.click()
-    page.wait_for_selector('[data-testid="identity-card"]', timeout=T)
+def open_details(page, sub="about"):
+    """0.1.0's Overview "Details" (identity, counters, telemetry, capabilities): UI v2 round 3
+    moved them to Board > About (identity, capabilities) and Readings (telemetry, health)."""
+    nav.board_page(page, sub)
+    page.wait_for_selector('[data-testid="identity-card"]' if sub == "about" else '[data-testid="telemetry-card"]',
+                           timeout=T)
 
 
 def section(page, key):
@@ -155,7 +154,7 @@ def test_a_board_whose_build_check_passed_shows_ok_not_unchecked(page_factory):
 def test_telemetry_shows_unavailable_with_its_reason_never_zero(page_factory):
     page = page_factory()
     open_board(page, BOARD_FIELDED)
-    open_details(page)
+    open_details(page, "readings")
     row = page.locator('[data-telemetry] [data-reading="mcc_temp"]')
     row.wait_for(timeout=T)
     assert row.get_attribute("data-available") == "no"

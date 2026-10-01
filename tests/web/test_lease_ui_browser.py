@@ -125,8 +125,9 @@ def test_negative_twin_the_same_principal_in_another_session_is_held_not_yours(p
     assert rail(page).get_by_text("Yours", exact=True).count() == 0
     expect(by_id(page, "lease-chip")).to_have_text(f"leased to {ME} (another session)")
     expect(by_id(page, "lease-chip")).to_have_attribute("data-level", "held")
-    expect(page.locator('[data-attention="lease"]')).to_contain_text(f"Leased to {ME} in another session.")
+    # UI v2: the Overview's Lease card says it (no attention row: the header has the control)
     expect(by_id(page, "tile-lease")).to_have_attribute("data-lease", "elsewhere")
+    expect(by_id(page, "ov-lease-chip")).to_contain_text("Held by you in another session")
     assert page.errors == []
 
 
@@ -149,7 +150,7 @@ def test_a_lease_nobody_holds_is_free_in_the_rail(page_factory, daemon):
     expect(row).to_have_attribute("data-lease", "free", timeout=T)
     expect(row.locator('[data-testid="rail-lease-badge"]')).to_have_text("Free")
     # Acquire: the same badge turns to Yours
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
     expect(row.locator('[data-testid="rail-lease-badge"]')).to_have_text("Yours", timeout=T)
 
 
@@ -196,8 +197,6 @@ def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_facto
     expect(header).to_have_text("Release lease")
     expect(header).to_have_class(re.compile(r"\brelease\b"))
     expect(header).not_to_have_class(re.compile(r"\bghost\b"))           # a real button
-    tile = by_id(page, "tile-lease")
-    expect(tile.locator('[data-action="lease_release_open"]')).to_be_visible()
     # Cancel (and Escape) release nothing, and focus goes back
     header.click()
     dialog = by_id(page, "release-confirm")
@@ -217,8 +216,8 @@ def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_facto
     page.keyboard.press("Escape")
     expect(dialog).to_have_count(0)
     assert lease_record(daemon) is not None                      # nothing was released
-    # Release, from the Board tile this time
-    tile.locator('[data-action="lease_release_open"]').click()
+    # Release (UI v2: the header's; the Overview's Lease card offers it when someone waits)
+    header.click()
     dialog.locator('[data-action="release_confirm"]').click()
     expect(by_id(page, "lease-chip")).to_have_text("no lease", timeout=T)
     expect(rail(page).locator('[data-testid="rail-lease-badge"]')).to_have_text("Free")
@@ -267,8 +266,7 @@ def test_lease_text_names_the_board_with_the_target_as_a_detail(page_factory, da
     expect(by_id(page, "lease-chip")).to_have_attribute("title", re.compile(re.escape(where)))
     expect(rail(page).locator('[data-testid="rail-lease-badge"]')).to_have_attribute(
         "title", re.compile(re.escape(where)))
-    expect(by_id(page, "tile-lease").locator('[data-testid="tile-lease-badge"]')).to_have_attribute(
-        "title", re.compile(re.escape(where)))
+    expect(by_id(page, "ov-lease-chip")).to_have_attribute("title", re.compile(re.escape(where)))
     page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
     dialog = by_id(page, "release-confirm")
     expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {HUB_BOARD}?")
@@ -438,7 +436,7 @@ def test_the_demo_shows_free_yours_and_held_by_alice(showcase):
     demo_open(page, BOARD_SPARE)
     spare = rail(page, BOARD_SPARE).locator('[data-testid="rail-lease-row"]')
     expect(spare.locator('[data-testid="rail-lease-badge"]')).to_have_text("Free", timeout=T)
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
     expect(spare.locator('[data-testid="rail-lease-badge"]')).to_have_text("Yours", timeout=T)
     expect(held.locator('[data-testid="rail-lease-badge"]')).to_have_text(f"Held by {ALICE}")
     # the real daemon's close?release=true gives it back

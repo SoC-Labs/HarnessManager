@@ -50,18 +50,18 @@ def test_review_panel_linux_overview_and_details(page_factory, daemon, engine, r
     panel.watcher(BOARD, "bob@srv03340")
     page = page_factory(scheme, **APP)
     open_board(page)
-    expect(page.locator('[data-testid="tile-panel-line"]')).to_have_text(
+    expect(page.locator('[data-testid="panel-line"]')).to_have_text(
         "status page · harness owns it · touch unknown", timeout=T)
     panel.set_touch(BOARD, True)
-    expect(page.locator('[data-testid="tile-panel-line"]')).to_contain_text("touch ok", timeout=T)
-    page.locator('[data-testid="tile-locate"]').click()                   # LOCATE: 5 s, one click
-    expect(page.locator('[data-testid="tile-locate-line"]')).to_contain_text(
-        re.compile(r"blinking, \d s left"), timeout=T)
+    expect(page.locator('[data-testid="panel-line"]')).to_contain_text("touch ok", timeout=T)
+    page.locator('[data-testid="panel-identify"] [data-action="identify"]').click()   # the card's head
+    expect(page.locator('[data-testid="identify-until"]')).to_contain_text(
+        re.compile(r"blinking until \d\d:\d\d:\d\d"), timeout=T)
     page.wait_for_timeout(300)
     page.screenshot(path=str(review / f"panel-overview-linux-{scheme}.png"))
     details(page)
     panel.tap(BOARD, "identify")
-    expect(page.locator('[data-testid="panel-taps"] li')).to_have_count(1, timeout=T)
+    expect(page.locator('[data-testid="panel-taps"]')).to_have_count(1, timeout=T)
     scroll_to(page, "panel-card")
     page.screenshot(path=str(review / f"panel-details-linux-{scheme}.png"))
 
@@ -75,7 +75,7 @@ def test_review_panel_dut_held_and_touch_lost(page_factory, daemon, engine, revi
     details(page)
     panel.set_touch(BOARD, False, bus_lost=3, recoveries=1)
     panel.set_owner(BOARD, "dut")
-    expect(page.locator('[data-testid="panel-owner-chip"]')).to_have_attribute("data-level", "held", timeout=T)
+    expect(page.locator('[data-testid="panel-line"] [data-part="owner"]')).to_have_attribute("data-level", "held", timeout=T)
     expect(page.locator('[data-part="touch"]').first).to_contain_text("touch unavailable", timeout=T)
     scroll_to(page, "panel-card")
     page.screenshot(path=str(review / f"panel-details-dut-held-{scheme}.png"))
@@ -85,7 +85,7 @@ def test_review_panel_dut_held_and_touch_lost(page_factory, daemon, engine, revi
 def test_review_panel_bare_metal_rebuilt(page_factory, review, scheme):
     page = page_factory(scheme, **APP)
     open_board(page)
-    expect(page.locator('[data-testid="tile-locate-line"]')).to_contain_text(
+    expect(page.locator('[data-testid="reason-identify"]')).to_contain_text(
         "harness feature 'locate'", timeout=T)
     page.screenshot(path=str(review / f"panel-overview-bare-metal-{scheme}.png"))
     details(page)

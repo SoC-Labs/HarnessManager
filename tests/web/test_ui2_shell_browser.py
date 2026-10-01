@@ -237,7 +237,7 @@ def test_a_watcher_cannot_drive_from_the_workbench_or_board_recover(show: Showca
                nav.panel(page, "power").locator(".reason").all_inner_texts())
     # the twin: the free board, once its lease is ours, drives
     nav.open_board(page, BOARD_SPARE)
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
     expect(nav.rail(page, BOARD_SPARE).locator('[data-testid="rail-lease-badge"]')).to_have_text("Yours", timeout=T)
     nav.section(page, "program")
     page.locator('[data-overlay="led"]').click()

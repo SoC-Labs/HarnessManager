@@ -50,16 +50,11 @@ def settle(page, ms=350):
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_review_overview_demo(page_factory, daemon, engine, review, scheme):
-    sim = daemon.app.state.sim
     page = page_factory(scheme, **APP)
     open_board(page, BOARD_USB)
-    page.wait_for_selector('[data-testid="tiles"]', timeout=T)
-    page.locator('[data-action="attach-uart0"]').click()
-    page.wait_for_selector('li[data-console="uart0"] code', timeout=T)
-    sim.attach_screen(BOARD_USB, "uart0", 1)
-    page.locator('[data-testid="tile-debug"] [data-action="up"]').click()
-    expect(page.locator('[data-testid="tile-debug-state"]')).to_have_text("up", timeout=T)
-    expect(page.locator('li[data-console="uart0"]')).to_contain_text("1 attached")
+    page.wait_for_selector('[data-testid="overview"]', timeout=T)
+    expect(page.locator('[data-testid="tile-debug"]')).to_be_visible(timeout=T)   # UI v2: a state line
+    expect(page.locator('[data-testid="panel-card"]')).to_be_visible()
     settle(page)
     page.screenshot(path=str(review / f"overview-demo-{scheme}.png"))
 
@@ -68,8 +63,8 @@ def test_review_overview_demo(page_factory, daemon, engine, review, scheme):
 def test_review_overview_ethernet_only(page_factory, review, scheme):
     page = page_factory(scheme, **APP)
     open_board(page, BOARD_FIELDED)
-    expect(page.locator('[data-attention="build"]')).to_be_visible(timeout=T)
-    expect(page.locator('[data-testid="tile-temp"]')).to_contain_text("unavailable")
+    expect(page.locator('[data-testid="build-chip"]')).to_be_visible(timeout=T)   # UI v2: the header's
+    expect(page.locator('[data-testid="ov-kpi-temp"]')).to_contain_text("unavailable")
     settle(page)
     page.screenshot(path=str(review / f"overview-ethernet-only-{scheme}.png"))
 

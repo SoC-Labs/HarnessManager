@@ -85,12 +85,11 @@ def test_a_linux_image_without_panel_features_is_never_called_bare_metal(page_fa
         "who is connected: needs harness feature 'presence'")
     expect(c.locator('[data-testid="panel-impl"]')).to_have_text(
         'the harness says it is the Linux harness (version.impl "linux")')
-    expect(c.locator('[data-testid="panel-identify"] [data-testid="reason-identify"]')).to_have_text(
-        f"Cannot: {NEEDS_LOCATE}")
+    expect(c.locator('[data-testid="reason-identify"]')).to_have_text(f"Cannot: {NEEDS_LOCATE}")
     # only the rows it reports: no "not reported" rows, no Page, no Sessions
     for gone in ("panel-page", "panel-sessions-none", "panel-taps-none", "panel-touch"):
         assert c.locator(f'[data-testid="{gone}"]').count() == 0, gone
-    expect(c.locator('[data-testid="panel-owner"]')).to_have_text("harness owns it")
+    expect(c.locator('[data-testid="panel-line"] [data-part="owner"]')).to_have_text("harness owns it")
     text = c.inner_text()
     assert not any(w in text for w in BARE), text
     assert "Linux harness)" not in text                 # no "(Linux harness)" as a missing thing
@@ -158,9 +157,9 @@ def test_twin_a_linux_image_with_the_panel_features_reports_every_row(page_facto
     c = card(page)
     expect(c.locator('[data-testid="panel-headline"]')).to_have_attribute("data-state", "read",
                                                                            timeout=T)
-    expect(c.locator('[data-testid="panel-page"]')).to_have_text("status page")
-    expect(c.locator('[data-testid="panel-touch"]')).to_have_text("touch ok", timeout=T)
-    expect(c.locator('[data-testid="panel-sessions"]')).to_be_visible()
+    expect(c.locator('[data-testid="panel-line"] [data-part="page"]')).to_have_text("status page")
+    expect(c.locator('[data-testid="panel-line"] [data-part="touch"]')).to_have_text("touch ok", timeout=T)
+    expect(page.locator('[data-testid="ov-watching"]')).to_have_attribute("data-source", "presence")
     assert c.locator('[data-testid="panel-not-reported"]').count() == 0
     assert c.locator('[data-testid="panel-mirror-legend"]').count() == 0
 
@@ -238,7 +237,7 @@ def test_demo_a_linux_board_without_panel_features_is_live_and_says_what_it_lack
                                                                            timeout=T)
     expect(c.locator('[data-testid="panel-not-reported"]')).to_contain_text(
         "Not reported by this image: page, who is connected, recent taps")
-    expect(c.locator('[data-testid="panel-touch"]')).to_have_text("touch ok")
+    expect(c.locator('[data-testid="panel-line"] [data-part="touch"]')).to_have_text("touch ok")
     assert not any(w in c.inner_text() for w in BARE), c.inner_text()
     assert not page.errors, page.errors
 
@@ -246,11 +245,12 @@ def test_demo_a_linux_board_without_panel_features_is_live_and_says_what_it_lack
 def test_twin_demo_the_bare_metal_board_is_rebuilt_and_named_from_its_impl(showcase):
     page = showcase.page()
     open_showcase_board(page, BOARD_V011)
-    show_display(page)
     c = card(page)
     expect(c.locator('[data-testid="panel-headline"]')).to_have_attribute("data-state", "rebuilt",
                                                                            timeout=T)
     expect(c.locator('[data-testid="panel-rebuilt"]')).to_contain_text(
         "this bare-metal harness image does not send its panel's text")
-    expect(by_id(page, "live-display")).to_have_attribute("data-refused", "UNAVAILABLE", timeout=T)
+    # UI v2: the daemon's 422 (UNAVAILABLE) makes the Front panel Text only, and says why
+    expect(c).to_have_attribute("data-view", "text", timeout=T)
+    expect(c.locator('[data-action="panel-view-live"]')).to_be_disabled()
     assert not page.errors, page.errors

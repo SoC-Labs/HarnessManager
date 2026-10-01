@@ -54,8 +54,8 @@ def stage(browser, tmp_path, monkeypatch, screenshots):
         page.locator(f'.board-item[data-board="{cand.board_id}"]').click()
         page.locator('[data-action="open"]').click()
         page.wait_for_selector('[data-testid="board-header"]', timeout=T)
-        page.locator('[data-action="details"]').click()        # the Details start collapsed
-        page.wait_for_selector('[data-testid="health-card"]', timeout=T)
+        nav.board_page(page, "about")          # UI v2: 0.1.0's Details are Board > About / Readings
+        page.wait_for_selector('[data-testid="identity-card"]', timeout=T)
         return page, engine, cand.board_id
 
     yield make
@@ -144,6 +144,7 @@ def test_busy_shows_a_warning_and_who_holds_the_channel(stage, tmp_path, screens
         refresh(page)
         expect(health_chip(page)).to_have_attribute("data-level", "warn")
         expect(health_chip(page)).to_contain_text("Busy")
+        nav.board_page(page, "readings")                          # the Health card
         expect(page.locator('[data-testid="health-note"]').first).to_contain_text("another client")
         shoot(page, screenshots, "busy")
         vb.set_busy(False)
@@ -212,6 +213,7 @@ def test_a_rescue_board_is_found_opened_and_explained(stage, tmp_path, screensho
         expect(health_chip(page)).to_contain_text("Rescue")
         # harness_impl is "" in rescue: shown as unknown, never as an error.
         expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("unknown")
+        nav.board_page(page, "readings")                          # the Health card
         notes = page.locator('[data-testid="health-note"]')
         expect(notes.first).to_contain_text("RESCUE")
         expect(notes.nth(1)).to_contain_text("slot A and B failed CRC")
