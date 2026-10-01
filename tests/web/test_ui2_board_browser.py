@@ -207,7 +207,7 @@ def test_a_netbooted_linux_board_says_so_and_asks_for_a_linux_release(show):
     catalog = {"ok": True, "catalog": "mps3-harness", "board_id": BOARD_LINUX, "channels": [], "offer": "2.0.1",
                "rollback": [], "warnings": [], "at": 0, "board": {"running_release": "2.0.0", "running": {}},
                "releases": [{"version": "2.0.1", "channels": ["stable"], "channel": "stable", "impl": "linux",
-                             "static_id": "0x4c1a0003", "marks": ["offered"], "verdict": "fits", "why": "same shell",
+                             "static_id": "0x44ee76d5", "marks": ["offered"], "verdict": "fits", "why": "same shell",
                              "size": 29_000_000, "released_at": "2026-09-30"}]}
     page = show.page(**APP)
     page.route("**/api/v1/harness/catalog?*", lambda r: reply(r, 200, catalog))
@@ -228,7 +228,7 @@ def test_twin_a_card_board_installs_the_same_release_instead_of_asking(show):
     catalog = {"ok": True, "catalog": "mps3-harness", "board_id": BOARD_LINUX, "channels": [], "offer": "2.0.1",
                "rollback": [], "warnings": [], "at": 0, "board": {"running_release": "2.0.0", "running": {}},
                "releases": [{"version": "2.0.1", "channels": ["stable"], "channel": "stable", "impl": "linux",
-                             "static_id": "0x4c1a0003", "marks": ["offered"], "verdict": "fits", "why": "same shell",
+                             "static_id": "0x44ee76d5", "marks": ["offered"], "verdict": "fits", "why": "same shell",
                              "size": 29_000_000, "released_at": "2026-09-30"}]}
     page = show.page(**APP)
     page.route("**/api/v1/harness/catalog?*", lambda r: reply(r, 200, catalog))
@@ -319,7 +319,7 @@ def test_about_lists_the_features_and_what_is_not_here_with_why(show):
     expect(by_id(page, "about-features")).to_contain_text("lcd_mirror", timeout=T)
     expect(by_id(page, "about-missing").locator('li[data-capability="reboot_board"]')).to_contain_text(
         "needs the Debug USB cable")
-    expect(by_id(page, "about-shell")).to_have_text("0x4c1a0003")
+    expect(by_id(page, "about-shell")).to_have_text("0x44ee76d5")   # the rc2 static (UI2-POLISH)
 
 
 def test_twin_the_board_with_a_debug_usb_can_reboot(show):

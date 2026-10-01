@@ -26,6 +26,7 @@ from typing import Any
 
 from harness_manager.core import display_wire as w
 from harness_manager.core.display import DisplayUnavailable
+from harness_manager.demo_catalog import S_LNX
 
 #: The panel font (``firmware/clcd/font8x16.h`` via ``docs/design/clcd/source/font8x16.json``,
 #: sha256 83dff3df...): 95 glyphs (0x20-0x7E) x 16 scanlines, bit 7 the leftmost pixel.
@@ -61,7 +62,8 @@ COLS, ROWS = 40, 15
 #: The uptime the page starts at (the text mirror's ``UP  : 001:04:12:48``), in seconds.
 UPTIME0_S = 1 * 86400 + 4 * 3600 + 12 * 60 + 48
 SPINNER = "|/-\\"
-STATIC_ID = "0x4c1a0003"
+#: The Linux showcase board's static (the rc2 static 0x44EE76D5).
+STATIC_ID = S_LNX.lower()
 
 
 def font() -> list[bytes]:
