@@ -251,8 +251,9 @@ the terminal. Nothing generates, prints or stores a real key.
   secret half after the run;
 - it marks the release TEST in four places: a top-level `test` in `channel.json`, the
   signature's trusted comment, the release notes, and `TEST-BUILD.txt` in `OUT`;
-- no client trusts it, because a TEST key is never in `PINNED_KEYS`
-  (`tests/unit/test_release_pipe.py` fails if one is pinned);
+- no client trusts it: `trust.pinned()`, `trust.load_trust()` and `trust.apply_keys_json()`
+  each refuse it with "a TEST key (7E57C0DE…) is never trusted", so it can be neither
+  pinned nor rotated in;
 - `--publish` and the publish script refuse it;
 - tests hand it to the client only through the test seam: the CLI's engine factory
   building `UpdateService(trust=…)`.

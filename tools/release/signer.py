@@ -25,9 +25,10 @@ outside the system temp dir.
 throwaway pair whose key id starts ``7E57C0DE`` ("TEST CODE"), so a TEST key is
 recognisable wherever its id shows up: in ``channel.json`` (``signing_key_id``), in the
 ``.minisig`` and in the client's messages. ``--publish`` and the publish script refuse any
-such key, and ``tests/unit/test_release_pipe.py`` fails if one is ever pinned in
-``trust.PINNED_KEYS``. A real minisign key has a random id: one starting with the marker is
-a 1-in-4-billion accident, refused all the same.
+such key, and so does the client: ``trust.pinned()``, ``trust.load_trust()`` and
+``trust.apply_keys_json()`` all say "a TEST key (7E57C0DE…) is never trusted" (CCR-2). A
+real minisign key has a random id: one starting with the marker is a 1-in-4-billion
+accident, refused all the same.
 """
 
 from __future__ import annotations
@@ -42,12 +43,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from harness_manager.services.update import minisign
+from harness_manager.services.update import minisign, trust
 
 from .common import EXIT_USAGE, ReleaseError, Runner, in_temp_dir, run
 
-#: The key-id prefix (``PublicKey.id_hex``) of every key ``keygen_test`` makes.
-TEST_KEY_PREFIX = "7E57C0DE"
+#: The key-id prefix (``PublicKey.id_hex``) of every key ``keygen_test`` makes: the client's
+#: own (``trust.TEST_KEY_PREFIX``), which refuses such a key at every trust entry point.
+TEST_KEY_PREFIX = trust.TEST_KEY_PREFIX
 
 ENV_SIGNER = "HM_RELEASE_SIGNER"
 ENV_SECRET = "HM_RELEASE_SECRET_KEY"

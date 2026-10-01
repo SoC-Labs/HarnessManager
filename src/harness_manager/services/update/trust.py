@@ -18,6 +18,14 @@ the saved copy only ever removes trust, never adds it.
 ``PINNED_KEYS`` is EMPTY until the release keys exist (key custody is david's
 open question 5). With no pinned key, every channel is refused: that is the
 safe default, not a bug. The release process fills it (docs: hand-back §6).
+
+**A TEST key is never trusted** (CCR-2, lane RELEASE-PIPE). The release tool's
+``harness-release --test-key`` signs dry runs and tests with a throwaway key whose id
+starts ``7E57C0DE``. ``pinned()`` refuses one (so ``PINNED_KEYS`` cannot hold one),
+``load_trust()`` refuses one among the keys it is given, and ``apply_keys_json()``
+refuses a rotation that names one. Tests hand such a key to a client only through an
+explicit ``TrustStore(pinned=...)`` (the ``UpdateService(trust=...)`` seam), never through
+these entry points.
 """
 
 from __future__ import annotations
@@ -50,6 +58,22 @@ DEFAULT_CHANNELS: dict[str, tuple[str, ...]] = {
 
 KEYS_SCHEMA = "harness-manager-keys"
 
+#: The key-id prefix (``PublicKey.id_hex``) of every TEST key (``tools/release`` keygen_test).
+TEST_KEY_PREFIX = "7E57C0DE"
+TEST_KEY_REFUSAL = "a TEST key (7E57C0DE…) is never trusted"
+
+
+def is_test_key_id(key_id_hex: str) -> bool:
+    return key_id_hex.upper().startswith(TEST_KEY_PREFIX)
+
+
+def _refuse_test_key(key_id_hex: str, where: str) -> None:
+    if is_test_key_id(key_id_hex):
+        raise RefusedError(f"{TEST_KEY_REFUSAL}: key {key_id_hex.upper()} {where}",
+                           hint="TEST keys sign dry runs and tests only "
+                                "(`tools.release harness-release --test-key`); sign a real "
+                                "release with the release key (docs/KEYS.md)")
+
 
 class UntrustedKeyError(RefusedError):
     """Signed by a key this app does not know (a rotation via ``keys.json`` may fix it)."""
@@ -75,7 +99,9 @@ def pinned(public_key_b64: str, role: str, *, channels: Iterable[str] | None = N
     if role not in ROLES:
         raise ValueError(f"unknown key role {role!r}")
     chans = tuple(channels) if channels is not None else DEFAULT_CHANNELS[role]
-    return TrustedKey(minisign.PublicKey.from_base64(public_key_b64), role, chans, note)
+    key = minisign.PublicKey.from_base64(public_key_b64)
+    _refuse_test_key(key.id_hex, "cannot be pinned")
+    return TrustedKey(key, role, chans, note)
 
 
 #: The app's pinned keys. EMPTY until the release keys are generated (see module doc).
@@ -171,8 +197,9 @@ class TrustStore:
             if entry["role"] == ROLE_ROOT:
                 raise RefusedError("keys.json may not add a root key",
                                    hint="roots are pinned in the app only")
-            tk = TrustedKey(minisign.PublicKey.from_base64(entry["public_key"]), entry["role"],
-                            tuple(entry["channels"]), entry.get("note", ""))
+            pk = minisign.PublicKey.from_base64(entry["public_key"])
+            _refuse_test_key(pk.id_hex, "cannot be added by keys.json")
+            tk = TrustedKey(pk, entry["role"], tuple(entry["channels"]), entry.get("note", ""))
             rotated[tk.id_hex] = tk
         self.rotated = rotated
         self.revoked = frozenset(k.upper() for k in doc["revoked"])
@@ -225,8 +252,12 @@ def parse_keys_json(data: bytes) -> dict[str, Any]:
 
 
 def load_trust(state: UpdateState, pinned_keys: tuple[TrustedKey, ...] | None = None) -> TrustStore:
-    """The pinned keys plus the saved rotation, re-verified. A bad saved copy is ignored."""
-    store = TrustStore(pinned=PINNED_KEYS if pinned_keys is None else pinned_keys)
+    """The pinned keys plus the saved rotation, re-verified. A bad saved copy is ignored.
+    A TEST key among the pinned keys is refused (``RefusedError``): never silently trusted."""
+    keys = PINNED_KEYS if pinned_keys is None else pinned_keys
+    for k in keys:
+        _refuse_test_key(k.id_hex, f"cannot be a pinned {k.role} key")
+    store = TrustStore(pinned=keys)
     data_path, sig_path = state.keys_json, state.keys_json.with_name("keys.json.minisig")
     if data_path.is_file() and sig_path.is_file():
         try:
