@@ -1075,8 +1075,7 @@ function Constraints({ bid, f, locked, edit }) {
     <span class="bd-ff-who">${who}</span></span><span class="bd-ff-s">${sub}</span></div>`;
   let body;
   if (x.src === "example") {
-    body = html`<div class="small secondary">None: ${x.ex} is a built-in, and a built-in carries no rm_xdc. Your own design can:
-      <button type="button" class="link" disabled=${locked} onClick=${() => edit(() => { x.src = "rtl"; })}>My RTL</button> or a pasted .json.</div>`;
+    body = html`<div class="small secondary">None: ${x.ex} is a built-in, and a built-in carries no rm_xdc. Your own design can:${" "}<button type="button" class="link" disabled=${locked} onClick=${() => edit(() => { x.src = "rtl"; })}>My RTL</button> or a pasted .json.</div>`;
   } else if (x.src === "rtl") {
     body = html`<div class="bd-xpath"><input class="input sm mono grow" aria-label="rm_xdc path" data-testid="bd-rm-xdc"
         placeholder="optional: /home/you/rtl/my_soc/my_soc_rm.xdc" value=${x.rmXdc} disabled=${locked}
@@ -1322,8 +1321,7 @@ function BuildPanel({ bid, f }) {
         <select id=${`bd-jobs-${bid}`} class="select" value=${x.jobs} onChange=${(e) => { x.jobs = e.target.value; persist(bid); changed(); }}>
           ${["2", "4", "8"].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}</select>
         <span class="small muted">4-8 GB of RAM either way</span></div>
-      ${!x.buildDir.trim() && suggestDir(x) ? html`<div class="small muted">Under your home:
-        <button type="button" class="link small mono" data-testid="build-dir-suggest"
+      ${!x.buildDir.trim() && suggestDir(x) ? html`<div class="small muted">Under your home:${" "}<button type="button" class="link small mono" data-testid="build-dir-suggest"
           onClick=${() => { x.buildDir = suggestDir(x); persist(bid); changed(); }}>${suggestDir(x)}</button></div>` : null}
       <${PathsHint} />
       ${x.buildDir.trim() && !dirOk ? html`<${Reason} level="warn" testid="build-dir-hint" text="Give the build directory as an absolute path (harness-manager-daemon's working directory is not yours)." />` : null}
