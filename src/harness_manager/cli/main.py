@@ -314,6 +314,8 @@ def make_parser() -> argparse.ArgumentParser:
     sp.add_argument("--backup", required=True, metavar="ZIP",
                     help="the backup `sd backup` made of this SD")
     sp.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    sp.add_argument("--allow-mcc-update", action="store_true",
+                    help=cmd_board.ALLOW_MCC_UPDATE_HELP)
     sp = ssub.add_parser("restore", help="put a backup back",
                          description="Put a backup that `sd backup` made back onto the "
                                      "configuration SD.",

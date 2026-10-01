@@ -123,13 +123,22 @@ def apply(plan: Any, rel: HarnessRelease, channel: Channel, board: Any, *, via: 
         backup = {"version": running.version, "component": old_sd.name,
                   "sha256": old_sd.asset.sha256}
     only = {_norm(p) for p in door.get("only_paths") or ()}
+    # FIX-PACK-7: paths the door itself compares after the download (the pack keeps the
+    # card's own lines there: the MPS3's board.txt MBBIOS); a difference is not a blocker yet
+    deferred = {_norm(p) for p in door.get("deferred_paths") or ()}
     delta = signed_delta(new_sd, old_sd)
-    if delta is not None and only and any(_norm(p) not in only for p in delta):
-        extra = [p for p in delta if _norm(p) not in only]
+    if delta is not None and only and any(_norm(p) not in only | deferred for p in delta):
+        extra = [p for p in delta if _norm(p) not in only | deferred]
         plan.blockers.append(
             f"harness {rel.version} changes more of the config SD than the hub can write "
             f"({', '.join(extra[:4])}{' …' if len(extra) > 4 else ''}): it needs the MPS3 "
             "Debug USB here")
+    elif delta is not None and only and any(_norm(p) in deferred for p in delta):
+        later = [p for p in delta if _norm(p) in deferred]
+        plan.warnings.append(
+            f"{', '.join(later)} differs from the running release's: the hub door compares it "
+            "after the download, keeping the card's own MBBIOS line; any other change there "
+            "is refused then")
     elif delta is None and only:
         plan.warnings.append("the config-SD delta is checked after the download: the hub door "
                              f"writes only {', '.join(sorted(door.get('only_paths') or ()))}, "

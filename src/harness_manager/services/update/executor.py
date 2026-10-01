@@ -116,6 +116,8 @@ class UpdateOutcome:
     stored: list[str] = field(default_factory=list)
     skipped: dict[str, str] = field(default_factory=dict)
     os_slot: dict[str, Any] | None = None
+    #: FIX-PACK-7: what the config SD's write said beside its files ("MBBIOS kept: …")
+    notes: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -129,7 +131,7 @@ class UpdateOutcome:
                        for c in self.checks],
             "identity_after": self.identity_after, "evidence": self.evidence,
             "backup": self.backup, "restore_hint": self.restore_hint, "stored": self.stored,
-            "skipped": self.skipped, "os_slot": self.os_slot,
+            "skipped": self.skipped, "os_slot": self.os_slot, "notes": list(self.notes),
         }
 
 
@@ -260,6 +262,20 @@ def _record_fields(plan: Plan) -> dict[str, Any]:
             "static_id": rel.identity.static_id if rel else "", "doors": doors_of(plan)}
 
 
+def _write_failed(journal: Journal, storage: Any, via: str, backup: BackupRecord,
+                  exc: HarnessError) -> ActionFailedError:
+    """A config SD write that failed. HUB-SD: a door that says nothing is in flight wrote
+    nothing it would restore (a refusal, a failed upload): the journal stays droppable. A
+    door write the hub has not finished keeps "interrupted", and the door's own hint (never
+    "roll back now": that is a second write mid-write)."""
+    settled = bool(via) and _door_settled(storage)
+    journal.write(phase="backed-up" if settled else "interrupted", error=str(exc))
+    return ActionFailedError(
+        f"writing the config SD failed: {exc.message}",
+        hint=(exc.hint if via and exc.hint else
+              f"restore the backup: `harness-manager update rollback TARGET` ({backup.path})"))
+
+
 def _door_settled(storage: Any) -> bool:
     """A door with nothing in flight (``pending()`` None); False when it cannot say."""
     try:
@@ -345,6 +361,8 @@ class HarnessInstaller:
         # SLOT-TIMING: a reboot waits for the board's card job (None: 1.5 x its ETA)
         self.card_wait_s = card_wait_s
         self.card_poll_s = card_poll_s
+        # FIX-PACK-7: what each board's config SD write said ("MBBIOS kept: …"), for _finish
+        self._notes: dict[str, list[str]] = {}
 
     # -- events --
 
@@ -674,22 +692,22 @@ class HarnessInstaller:
             backup_d = {"path": backup.path, "sha256": backup.sha256}
             journal.write(phase="backed-up", backup=backup_d)
             journal.write(phase="writing")
+            # FIX-PACK-7 (G8): the keyword only when asked (a door without it is unchanged)
+            allow = ({"allow_mcc_update": True}
+                     if approval is not None and approval.allow_mcc_update else {})
             try:
                 storage.install(prepared.sd_files, backup=backup,
-                                progress=self._progress(board_id, "sd:"))
+                                progress=self._progress(board_id, "sd:"), **allow)
+            except RefusedError as exc:
+                if not (getattr(exc, "data", None) or {}).get("mcc_update"):
+                    raise _write_failed(journal, storage, via, backup, exc) from exc
+                # the door refused before writing a byte (MBBIOS, G8): nothing to restore
+                journal.write(phase="backed-up", error=str(exc))
+                raise
             except HarnessError as exc:
-                # HUB-SD: a door that says nothing is in flight wrote nothing it would restore
-                # (a refusal, a failed upload): the journal stays droppable. A door write the
-                # hub has not finished keeps "interrupted", and the door's own hint (never
-                # "roll back now": that is a second write mid-write).
-                settled = bool(via) and _door_settled(storage)
-                journal.write(phase="backed-up" if settled else "interrupted", error=str(exc))
-                raise ActionFailedError(
-                    f"writing the config SD failed: {exc.message}",
-                    hint=(exc.hint if via and exc.hint else
-                          f"restore the backup: `harness-manager update rollback TARGET` "
-                          f"({backup.path})")) from exc
+                raise _write_failed(journal, storage, via, backup, exc) from exc
             journal.write(phase="written")
+            self._notes[board_id] = list(getattr(storage, "install_notes", None) or [])
 
         # -- reboot, witnessed --
         journal.write(phase="rebooting")
@@ -869,7 +887,8 @@ class HarnessInstaller:
         out = UpdateOutcome(board_id, rel.version, result, detail, checks=checks or [],
                             identity_after=identity_after or {}, evidence=evidence or {},
                             backup=backup, restore_hint=restore_hint, stored=stored or [],
-                            skipped=skipped or {}, os_slot=os_info)
+                            skipped=skipped or {}, os_slot=os_info,
+                            notes=self._notes.pop(board_id, []))
         prior = self.records.get(board_id) or {}
         self.records.put(board_id, {
             "version": rel.version, "result": result, "static_id": rel.identity.static_id,

@@ -181,6 +181,17 @@ def bundle_files(bundle: Path) -> dict[str, Path]:
     return files
 
 
+#: FIX-PACK-7 (G8): `sd install`, `harness install`, `update harness`.
+ALLOW_MCC_UPDATE_HELP = ("write the bundle's MBBIOS line even when the card has none and has "
+                         "the .ebf it names (the MCC then updates itself to it at its next "
+                         "boot); refused without this")
+
+
+def install_notes(storage: object) -> list[str]:
+    """What the config SD's last install said beside its files ("MBBIOS kept: …")."""
+    return [str(n) for n in (getattr(storage, "install_notes", None) or [])]
+
+
 def cmd_sd(ctx: Ctx) -> int:
     a = ctx.args
     action = a.sd_cmd
@@ -206,11 +217,14 @@ def cmd_sd(ctx: Ctx) -> int:
             rec = backup_record(storage, Path(a.backup))
             ctx.confirm(f"write {len(files)} files to the SD of {cand.board_id}? "
                         f"(backup {rec.path})")
-            storage.install(files, backup=rec, progress=progress)
+            allow = {"allow_mcc_update": True} if getattr(a, "allow_mcc_update", False) else {}
+            storage.install(files, backup=rec, progress=progress, **allow)
+            notes = install_notes(storage)              # FIX-PACK-7: "MBBIOS kept: …"
             ctx.emit(Result("sd install", {"board_id": cand.board_id, "files": sorted(files),
-                                           "backup": rec},
+                                           "backup": rec, "notes": notes},
                             rows=[[cand.board_id, len(files), rec.sha256]],
                             human=[f"written    {len(files)} files to the SD of {cand.board_id}",
+                                   *notes,
                                    "not running yet: reboot (`harness-manager mcc TARGET reboot`), "
                                    "then check `harness-manager info TARGET`"]))
             return ExitCode.OK

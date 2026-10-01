@@ -32,6 +32,10 @@ Facts and incidents this module encodes (safety rails are code, not docs):
   board.txt names; the MCC boot log reports it missing) would silently reflash
   the MCC. ``install`` refuses an ``.ebf`` destination or source; ``restore``
   never writes or deletes one.
+- **Never change MBBIOS** (FIX-PACK-7, G8). ``install`` writes the card's own
+  ``MBBIOS:`` line into the bundle's board.txt (``mbbios.keep_mbbios``, read from
+  the mandatory backup), and refuses a bundle line that would make the MCC update
+  itself (``allow_mcc_update`` overrides). The note is in ``install_notes``.
 - **Never delete stock files.** ``install`` only writes. ``restore`` returns
   the SD to the backup: it rewrites files that differ and removes only files
   that were not on the SD when the backup was taken.
@@ -60,6 +64,7 @@ import re
 import shutil
 import socket
 import sys
+import tempfile
 import threading
 import time
 import zipfile
@@ -79,7 +84,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.model import LinkKind
-from harness_manager.core.pack import BackupRecord, Progress
+from harness_manager.core.pack import BackupRecord, Progress, report_progress
 
 from .constants import MSD_VOLUME_LABEL
 
@@ -384,6 +389,27 @@ _ACTIVE: set[str] = set()
 _ACTIVE_LOCK = threading.Lock()
 
 
+# --- the card in a backup (FIX-PACK-7, MBBIOS) ------------------------------------------
+
+
+def card_of_backup(storage: Any, backup: BackupRecord) -> tuple[bytes | None, list[str]]:
+    """The card's ``MB/HBI0309C/board.txt`` (None: none) and every file on it, from a
+    verified backup (``storage.verify_backup``): the card as it was read before writing."""
+    from .mbbios import BOARD_TXT
+
+    manifest = storage.verify_backup(backup)
+    files = [str(e["path"]) for e in manifest.get("files", [])]
+    hit = next((f for f in files if f.replace("\\", "/").lower() == BOARD_TXT.lower()), None)
+    if hit is None:
+        return None, files
+    try:
+        with zipfile.ZipFile(backup.path) as zf:
+            return zf.read(VOLUME_PREFIX + hit), files
+    except _ARCHIVE_ERRORS as exc:
+        raise RefusedError(f"backup {backup.path} is unreadable: {exc}",
+                           hint="take a fresh backup") from exc
+
+
 # --- the adapter ----------------------------------------------------------------------
 
 
@@ -397,6 +423,8 @@ class Mps3Storage:
         self.label = label
         self.last_install: InstallReport | None = None
         self.last_restore: RestoreReport | None = None
+        #: FIX-PACK-7: what the last install said beside its files ("MBBIOS kept: …")
+        self.install_notes: list[str] = []
 
     # -- locate --
 
@@ -698,17 +726,34 @@ class Mps3Storage:
     # -- install --
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord | None,
-                progress: Progress | None = None) -> None:
+                progress: Progress | None = None, allow_mcc_update: bool = False) -> None:
         """Write ``files`` (SD-relative path -> local file), journaled, then read back.
 
         Refused without a verified backup of the SD as it is now. Never writes
-        ``.ebf`` or MCC command files, never deletes, never retries.
+        ``.ebf`` or MCC command files, never deletes, never retries. The bundle's
+        board.txt carries the card's MBBIOS line (``mbbios.keep_mbbios``, from the
+        backup); a line that would make the MCC update itself is refused (15) unless
+        ``allow_mcc_update``.
         """
-        emit: Progress = progress or (lambda phase, done, total: None)
+        from .mbbios import keep_mbbios
+
+        self.install_notes = []
         if backup is None:
             raise RefusedError("writing the configuration SD needs a verified backup of it first",
                                hint="run backup() (`harness-manager sd TARGET backup DIR`) "
                                     "and pass its record")
+        board_txt, card_files = card_of_backup(self, backup)
+        with tempfile.TemporaryDirectory(prefix="hm-mbbios-") as tmp:
+            files, kept = keep_mbbios(files, card_board_txt=board_txt, card_files=card_files,
+                                      workdir=Path(tmp), allow_mcc_update=allow_mcc_update)
+            if kept is not None and kept.note:
+                self.install_notes.append(kept.note)
+                report_progress(progress, "mbbios", 1, 1, {"text": kept.note})
+            self._install(files, backup=backup, progress=progress)
+
+    def _install(self, files: Mapping[str, Path], *, backup: BackupRecord,
+                 progress: Progress | None = None) -> None:
+        emit: Progress = progress or (lambda phase, done, total: None)
         root = Path(self.locate())
         self._refuse_if_pending(root, "install")
         plan = self._plan(root, files)

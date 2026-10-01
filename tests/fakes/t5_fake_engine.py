@@ -222,9 +222,12 @@ class FakeStorage:
         return BackupRecord(str(path), "ab" * 32, _now(), 2, "V2M-MPS3")
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord,
-                progress: Progress | None = None) -> None:
+                progress: Progress | None = None, **kw: Any) -> None:
         self.st.hit("storage.install")
+        #: FIX-PACK-7: ``allow_mcc_update`` (only when asked), and the notes it says
+        self.install_kw = dict(kw)
         self.installed = dict(files)
+        self.install_notes = list(getattr(self, "notes_to_say", []))
         if progress:
             progress("write", len(files), len(files))
 

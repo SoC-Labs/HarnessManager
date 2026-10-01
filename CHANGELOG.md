@@ -477,6 +477,20 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   loads at power-on, makes the running overlay that default, or clears it. With no card the
   board boots exactly as it always has, and every change is refused. The Board tile shows a
   Card line.
+- **MBBIOS is never changed by Harness Manager (FIX-PACK-7, platform item G8).** Every path
+  that writes the config SD (`sd install`, `harness install` / `update harness` through the
+  Debug USB, the A/B view or the hub door) keeps the target card's own `MBBIOS:` line in
+  board.txt: "MBBIOS kept: <value>". A card with no MBBIOS line (or no board.txt) gets the
+  bundle's line unchanged only when the `.ebf` it names is not on the card ("MBBIOS: <value>
+  from the bundle (the card has no <file>, so the MCC will not update)"); with that `.ebf` on
+  the card the write is refused (exit 15) before anything is written: "this card would make
+  the MCC update itself to <file>: remove <file> from the card, or add --allow-mcc-update".
+  `--allow-mcc-update` (`allow_mcc_update` in the API) writes it with a warning. A board.txt
+  with the line removed is never written. Why: a bundle naming `mbb_v141.ebf` could make a
+  third-party MCC that has that file update itself from 1.3.2 to 1.4.1, and Harness Manager is
+  proven on 1.3.2 only. The note is printed, in `--json` (`notes`) and in the progress events.
+- **No false "MCC firmware not tested" warning:** the board's `v1.3.2` now matches a release
+  tested on `1.3.2`; a really different version still warns.
 
 ### The Live display (the LCD mirror)
 - The service serves a live, pixel-exact copy of the board's 320x240 LCD to the lease

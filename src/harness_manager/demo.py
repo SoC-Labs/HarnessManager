@@ -391,7 +391,8 @@ class _Storage:
         self._e._enter("storage.backup", self._bid, str(dest_dir))
         return self.load_backup(Path(dest_dir) / "demo-backup.zip")
 
-    def install(self, files, *, backup: BackupRecord, progress: Progress | None = None) -> None:
+    def install(self, files, *, backup: BackupRecord, progress: Progress | None = None,
+                **_kw: Any) -> None:
         self._e._enter("storage.install", self._bid)
         raise RefusedError("the demo engine does not write SD cards")
 

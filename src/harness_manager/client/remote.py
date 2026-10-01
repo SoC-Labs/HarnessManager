@@ -616,10 +616,14 @@ class _Storage(_Proxy):
         return from_json(BackupRecord, result)
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord,
-                progress: Progress | None = None) -> None:
-        self._engine.run_job(self._path("storage/install"),
-                             {"files": {dest: _absolute(src) for dest, src in files.items()},
-                              "backup_path": _absolute(backup.path)}, progress=progress)
+                progress: Progress | None = None, allow_mcc_update: bool = False) -> None:
+        body: dict[str, Any] = {"files": {dest: _absolute(src) for dest, src in files.items()},
+                                "backup_path": _absolute(backup.path)}
+        if allow_mcc_update:                   # FIX-PACK-7: only when asked
+            body["allow_mcc_update"] = True
+        result = self._engine.run_job(self._path("storage/install"), body, progress=progress)
+        notes = (result or {}).get("notes") if isinstance(result, dict) else None
+        self.install_notes = [str(n) for n in notes or []]
 
     def restore(self, backup: BackupRecord, progress: Progress | None = None) -> None:
         self._engine.run_job(self._path("storage/restore"),

@@ -1289,13 +1289,16 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
                 raise AbsentError(f"no file at {path}", hint="give files that exist")
             files[dest] = path
         backup_path = _abs_path(b.get("backup_path"), "backup_path")
+        # FIX-PACK-7 (G8): only when asked
+        allow = {"allow_mcc_update": True} if _bool(b, "allow_mcc_update", False) else {}
         with d.gates.op(bid):
             storage = require(s, "storage", C.STORAGE_INSTALL)
             record = backup_record(storage, backup_path)
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
-            storage.install(files, backup=record, progress=progress)
-            return {"files": sorted(files), "backup": record}
+            storage.install(files, backup=record, progress=progress, **allow)
+            notes = [str(n) for n in (getattr(storage, "install_notes", None) or [])]
+            return {"files": sorted(files), "backup": record, "notes": notes}
 
         return accepted(d.jobs.submit("sd_install", bid, run))
 

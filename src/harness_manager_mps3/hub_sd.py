@@ -76,7 +76,7 @@ from harness_manager.core.errors import (
     UnreachableError,
     UsageError,
 )
-from harness_manager.core.pack import BackupRecord, Progress
+from harness_manager.core.pack import BackupRecord, Progress, report_progress
 from harness_manager.core.proc import no_window
 
 from .sd import BACKUP_FORMAT, MANIFEST_NAME, VOLUME_PREFIX, file_sha256, pid_alive
@@ -736,6 +736,10 @@ class HubSdDoor:
     via = VIA_HUB
     door = DOOR
     only_paths = (NANOSOC_BIT,)
+    #: FIX-PACK-7 (G8): a path whose signed sha may differ from the running release's and
+    #: still go through: ``install`` compares it after the download, with the card's MBBIOS
+    #: line kept (``mbbios.keep_mbbios``); any other difference is refused there.
+    deferred_paths = ("MB/HBI0309C/board.txt",)
     #: The executor gives this door the running release's SD part (its backup source).
     wants_previous_base = True
 
@@ -758,6 +762,8 @@ class HubSdDoor:
         self.lease_check: Callable[[str], Any] | None = None
         self.previous: dict[str, Any] | None = None        # {version, files: {rel: Path}}
         self.last: dict[str, Any] = {}                     # the last write's evidence
+        #: FIX-PACK-7: what the last install said beside its files ("MBBIOS kept: …")
+        self.install_notes: list[str] = []
         self._describe: tuple[float, dict[str, Any]] | None = None
 
     # -- wiring (the executor) --
@@ -812,7 +818,8 @@ class HubSdDoor:
         out: dict[str, Any] = {"available": False, "reason": "", "door": DOOR, "hub": self.host,
                                "target": self.target, "transport": "", "sd_method": False,
                                "mcc_route": "hub-tool", "mcc_tty": self.mcc_tty or "",
-                               "only_paths": list(self.only_paths)}
+                               "only_paths": list(self.only_paths),
+                               "deferred_paths": list(self.deferred_paths)}
         try:
             be = self._backend()
             out["transport"] = be.transport
@@ -887,8 +894,16 @@ class HubSdDoor:
         return rec
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord | None,
-                progress: Progress | None = None) -> None:
-        """Write the release's ``nanosoc.bit`` through the hub (module doc, steps 1-7)."""
+                progress: Progress | None = None, allow_mcc_update: bool = False) -> None:
+        """Write the release's ``nanosoc.bit`` through the hub (module doc, steps 1-7).
+
+        FIX-PACK-7: the delta is measured after ``mbbios.keep_mbbios`` with the running
+        release's tree as the card (the hub door cannot read the card, and never writes
+        board.txt): a release whose board.txt differs only by MBBIOS keeps the card's line
+        and goes through; the card's board.txt is not touched."""
+        from .mbbios import BOARD_TXT, keep_mbbios
+
+        self.install_notes = []
         if backup is None:
             raise RefusedError("writing the config SD needs a verified backup of it first")
         new_bit = next((Path(p) for rel, p in files.items() if _norm(rel) == _norm(NANOSOC_BIT)),
@@ -900,6 +915,18 @@ class HubSdDoor:
         if not old:
             raise RefusedError("the hub door needs the running release's SD tree to prove the "
                                "delta is nanosoc.bit only, and none was prepared")
+        card = next((Path(p) for rel, p in old.items() if _norm(rel) == _norm(BOARD_TXT)), None)
+        with tempfile.TemporaryDirectory(prefix="hm-mbbios-") as tmp:
+            files, kept = keep_mbbios(files, card_board_txt=card.read_bytes() if card else None,
+                                      card_files=list(old), workdir=Path(tmp),
+                                      allow_mcc_update=allow_mcc_update)
+            self._install(files, old, new_bit, backup=backup, progress=progress)
+        if kept is not None and kept.note:
+            self.install_notes.append(kept.note)
+            report_progress(progress, "mbbios", 1, 1, {"text": kept.note})
+
+    def _install(self, files: Mapping[str, Path], old: Mapping[str, Any], new_bit: Path, *,
+                 backup: BackupRecord, progress: Progress | None) -> None:
         delta = [r for r in sd_delta(files, old) if _norm(r) != _norm(NANOSOC_BIT)]
         if delta:
             raise RefusedError(

@@ -6,7 +6,7 @@
 | ``POST /harness/catalog/refresh`` ``{board_id?, channel?, all?, source?}`` | 202 job ``harness_refresh``: fetch + verify the channels, one plan per release; ``harness.catalog`` |
 | ``GET /harness/releases/{version}?board_id=`` | one release from the cached catalogue; with ``board_id`` its plan and ``fingerprint`` (reads the board's identity) |
 | ``POST /harness/releases/{version}/fetch`` ``{channel?, source?, kit?}`` | 202 job ``harness_fetch`` (engine-wide): download + verify into the cache |
-| ``POST /boards/{bid}/harness/install`` ``{fingerprint, version?, rekey_phrase?, channel?, source?, overlays_only?, via?, board_phrase?, auto_revert?}`` | 202 job ``harness_install`` |
+| ``POST /boards/{bid}/harness/install`` ``{fingerprint, version?, rekey_phrase?, channel?, source?, overlays_only?, via?, board_phrase?, auto_revert?, allow_mcc_update?}`` | 202 job ``harness_install`` |
 | ``PUT /boards/{bid}/harness/pin`` ``{version}`` · ``DELETE /boards/{bid}/harness/pin`` | the board's pin; ``harness.pinned`` |
 | ``GET /boards/{bid}/harness/history?limit=`` | ``{board_id, history, pinned, rollback}`` |
 | ``POST /boards/{bid}/harness/rollback`` ``{to?, fingerprint?, rekey_phrase?, channel?, source?}`` or ``{backup_path, wait_s?}`` | 202 job ``harness_rollback`` |
@@ -176,7 +176,7 @@ def register(ctx: RouteContext) -> None:
 
     def approve_or_refuse(bid: str, s: Any, cat: Any, plan: Any, fingerprint: str | None,
                           phrase: str, board_phrase: str = "",
-                          auto_revert: bool | None = None) -> Any:
+                          auto_revert: bool | None = None, allow_mcc_update: bool = False) -> Any:
         """The daemon's consent rules, before any job (see the module doc)."""
         summary = plan_json(plan)
         cat.check_lease(s, plan)                     # 409 HELD, naming the holder
@@ -193,7 +193,8 @@ def register(ctx: RouteContext) -> None:
                                          hint="nothing to do"), plan=summary)
         try:
             return plan.approve(consent=phrase, by="harness-manager-daemon",
-                                board_phrase=board_phrase, auto_revert=auto_revert)
+                                board_phrase=board_phrase, auto_revert=auto_revert,
+                                **({"allow_mcc_update": True} if allow_mcc_update else {}))
         except RefusedError as exc:             # a re-key without the exact typed phrase
             raise with_data(exc, plan=summary) from None
 
@@ -313,7 +314,8 @@ def register(ctx: RouteContext) -> None:
             plan, verified = cat.plan(s, version, channel=channel, source=source,
                                       overlays_only=overlays_only, verified=verified, via=via)
             approval = approve_or_refuse(bid, s, cat, plan, fingerprint, phrase, board_phrase,
-                                         auto_revert)
+                                         auto_revert,
+                                         _bool(b, "allow_mcc_update", False))   # FIX-PACK-7
         return install_job("harness_install", bid, s, cat, plan, approval, verified)
 
     @api.put("/boards/{bid:path}/harness/pin")

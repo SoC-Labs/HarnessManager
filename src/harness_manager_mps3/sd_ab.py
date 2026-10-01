@@ -40,9 +40,9 @@ from pathlib import Path
 from typing import Any
 
 from harness_manager.core.errors import ActionFailedError, RefusedError
-from harness_manager.core.pack import BackupRecord, Progress
+from harness_manager.core.pack import BackupRecord, Progress, report_progress
 
-from .sd import JOURNAL_NAME, Mps3Storage, _copy_stream, _resolve_ci, file_sha256
+from .sd import JOURNAL_NAME, Mps3Storage, _copy_stream, _resolve_ci, _walk, file_sha256
 
 VIA_AB = "ab"
 AB_FORMAT = "harness-manager-sd-ab/1"
@@ -131,6 +131,8 @@ class AbStorage:
     def __init__(self, storage: Mps3Storage) -> None:
         self.storage = storage
         self.last_install: AbInstallReport | None = None
+        #: FIX-PACK-7: what the last install said beside its files ("MBBIOS kept: …")
+        self.install_notes: list[str] = []
 
     # -- the plain parts --
 
@@ -211,12 +213,33 @@ class AbStorage:
     # -- install: the inactive image, then the pointer --
 
     def install(self, files: Mapping[str, Path], *, backup: BackupRecord | None,
-                progress: Progress | None = None) -> None:
-        emit: Progress = progress or (lambda phase, done, total: None)
+                progress: Progress | None = None, allow_mcc_update: bool = False) -> None:
+        """FIX-PACK-7: the bundle's board.txt is compared with the card's after
+        ``mbbios.keep_mbbios`` (the card's MBBIOS line, read from the card itself: this
+        backup is the pointer only), so a board.txt that differs only by MBBIOS no longer
+        blocks the A/B install; board.txt is never written here."""
+        import tempfile
+
+        from .mbbios import BOARD_TXT, keep_mbbios
+
+        self.install_notes = []
         if backup is None:
             raise RefusedError("writing the configuration SD needs a verified backup of it first")
-        doc = self.read_backup(backup)
         root = Path(self.locate())
+        card = _resolve_ci(root, BOARD_TXT.split("/"))
+        with tempfile.TemporaryDirectory(prefix="hm-mbbios-") as tmp:
+            files, kept = keep_mbbios(files, card_board_txt=card.read_bytes() if card.is_file()
+                                      else None, card_files=_walk(root)[0], workdir=Path(tmp),
+                                      allow_mcc_update=allow_mcc_update)
+            self._install(files, backup=backup, progress=progress, root=root)
+        if kept is not None and kept.note:
+            self.install_notes.append(kept.note)
+            report_progress(progress, "mbbios", 1, 1, {"text": kept.note})
+
+    def _install(self, files: Mapping[str, Path], *, backup: BackupRecord,
+                 progress: Progress | None, root: Path) -> None:
+        emit: Progress = progress or (lambda phase, done, total: None)
+        doc = self.read_backup(backup)
         self.storage._refuse_if_pending(root, "install")
         ptr = read_pointer(root)
         if ptr.note_text != doc["note_text"] or ptr.note_rel != doc["note_rel"]:
