@@ -9,10 +9,11 @@ import { call, hasToken, initToken } from "./api.js";
 import { closeBoardConsoles } from "./consoles.js";
 import {
   boardName, checkLabel, clock, deployBar, hexId, liveTitle, healthOf, holderText,
-  nameSourceText, usbRoute,
+  nameSourceText,
 } from "./format.js";
 import { html, render, useEffect, useRef, useState } from "./lib.js";
 import { BoardSection } from "./sections/board.js";            // UI v2: Board's six pages
+import { mccRoute, USB_WORDS } from "./sections/boardfacts.js";   // UI2-POLISH: one Debug USB vocabulary
 import { BoardXdcSection } from "./sections/xdc.js";
 import { BuildSection } from "./sections/build.js";          // KIT-UI
 import { attentionItems, OverviewSection } from "./sections/overview.js";
@@ -221,10 +222,13 @@ function DesignFact({ bid, ident }) {
 
 // UI v2: where the board's Debug USB (the MCC's cable) goes, from its links until the service
 // serves the route (plan gap G2).
-function UsbFact({ bid, cand }) {
-  const u = usbRoute(cand, S.boards[bid]);
-  return html`<div class=${`fact usb-fact ${u.to}`} data-testid="fact-usb" data-usb=${u.to} title=${`Debug USB: ${u.detail}`}>
-    <span class="fact-label">Debug USB</span><span class="fact-value"><${Icon} name=${u.icon} cls="sm" />${u.fact}</span></div>`;
+// UI2-POLISH: the route the Overview and the Board tab say (boardfacts.js mccRoute: the service's
+// G2 route, else the links), in their words (DEBUG_USB).
+function UsbFact({ bid }) {
+  const r = mccRoute(bid);
+  const w = USB_WORDS[r.to] || USB_WORDS.unknown;
+  return html`<div class=${`fact usb-fact ${r.to}`} data-testid="fact-usb" data-usb=${r.to} title=${`Debug USB: ${r.reason || w.chip}`}>
+    <span class="fact-label">Debug USB</span><span class="fact-value"><${Icon} name=${w.icon} cls="sm" />${w.chip}</span></div>`;
 }
 
 // DELETE /boards/{bid}; `release` (LEASE-UI) releases this Harness Manager's hub lease on it

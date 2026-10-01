@@ -28,13 +28,25 @@ export function capWhy(b, name) {
 
 // --- the Debug USB (G2) -----------------------------------------------------------------------
 
-export const USB_WORDS = {
-  hub: { nav: "USB to the hub", chip: "To the hub", icon: "usb" },
-  pc: { nav: "USB to this PC", chip: "To this PC", icon: "usb" },
-  self: { nav: "USB looped back", chip: "Looped back into itself", icon: "repeat" },
-  none: { nav: "no Debug USB", chip: "Not connected", icon: "unplug" },
-  unknown: { nav: "Debug USB not known", chip: "Not known yet", icon: "circle-help" },
+// UI2-POLISH: where the Debug USB goes, in ONE vocabulary (round 3), for every place that says
+// it: the header's Debug USB fact (app.js), the Overview's identity strip, the Board tab (its side
+// list, Connections, Versions' config SD) and the rail tag's tooltip (ui.js UsbTag). The rail's
+// short tags ("USB · hub") stay format.js's.
+export const DEBUG_USB = {
+  hub: "to the hub",
+  pc: "to this PC",
+  self: "looped back into itself",
+  none: "none (Ethernet only)",
+  unknown: "not known",
 };
+
+export function debugUsbWords(to) { return DEBUG_USB[to] || DEBUG_USB.unknown; }
+
+const USB_ICONS = { hub: "usb", pc: "monitor", self: "repeat", none: "unplug", unknown: "circle-help" };
+
+// nav: the Board side list's status line; chip: the words where "Debug USB" labels them already.
+export const USB_WORDS = Object.fromEntries(Object.entries(DEBUG_USB).map(([to, words]) => [to,
+  { nav: `Debug USB: ${words}`, chip: words, icon: USB_ICONS[to] }]));
 
 // {to: hub|pc|self|none|unknown, reason}: the open board's session says it (G2); before that
 // read, the GET /boards row's; with neither (an older service), the links say it.

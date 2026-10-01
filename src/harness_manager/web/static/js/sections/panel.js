@@ -453,12 +453,18 @@ const GLYPH_PATHS = Object.fromEntries(Object.entries(GLYPHS).map(([code, g]) =>
 // How a run looks. The today theme (and a rebuilt frame, and a harness that did not say): every
 // role but the banners is plain text, the banners today's white on red (pm-inv). The aligned
 // theme: the role's own colours, as the glass shows them.
+// UI2-POLISH (david 10-01): the mirror is the glass, so it is the glass's colours in BOTH page
+// themes: black, with the palette's text colour (GLASS); light mode no longer inverts it. Today's
+// banner red is the palette's too (banner-err), not the theme's --err.
+const GLASS = `background: ${ROLE_COLOURS.text[1]}; color: ${ROLE_COLOURS.text[0]}`;
+const TODAY_BANNER = `color: ${ROLE_COLOURS["banner-err"][0]}; background: ${ROLE_COLOURS["banner-err"][1]}`;
+
 function runProps(run, aligned) {
   if (aligned) {
     const [fg, bg] = ROLE_COLOURS[run.role] || ROLE_COLOURS.text;
     return { style: `color: ${fg}; background: ${bg}` };
   }
-  return { cls: run.role.startsWith("banner-") ? "pm-inv" : undefined };
+  return run.role.startsWith("banner-") ? { cls: "pm-inv", style: TODAY_BANNER } : {};
 }
 
 function Run({ run, aligned }) {
@@ -493,7 +499,7 @@ function Mirror({ f }) {
   const unknown = rebuilt && rows.some((row) => String(row).includes(UNKNOWN_MARK));
   return html`<div class=${`panel-mirror ${rebuilt ? "rebuilt" : ""} ${aligned ? "aligned" : ""}`} data-testid="panel-mirror"
       data-source=${fr.source || ""} data-theme=${fr.theme || ""} role="group"
-      style=${aligned ? `background: ${ROLE_COLOURS.text[1]}` : undefined}
+      style=${GLASS}
       aria-label=${`The front panel's text, ${rows.length} rows${rebuilt ? `, ${REBUILT_TEXT}` : ""}`}>
     ${rows.map((row, r) => {
       const text = String(row).padEnd(40).slice(0, 40);

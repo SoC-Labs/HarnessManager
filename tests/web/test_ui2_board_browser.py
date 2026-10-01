@@ -63,7 +63,7 @@ def test_the_side_list_says_each_pages_status_and_a_clash_opens_access(show):
     expect(page.locator('[data-board-page="access"]')).to_have_attribute("aria-current", "page", timeout=T)
     expect(by_id(page, "board-status-access")).to_contain_text("MAC clash with mps3-03")
     expect(page.locator('[data-board-page="access"] [data-dot="err"]')).to_be_visible()
-    expect(by_id(page, "board-status-connections")).to_have_text("USB to the hub")
+    expect(by_id(page, "board-status-connections")).to_have_text("Debug USB: to the hub")   # UI2-POLISH
     expect(by_id(page, "board-status-recover")).to_have_text("watch only: no lease")
     expect(page.locator('[data-board-page="recover"] [data-dot="held"]')).to_be_visible()
     assert not page.errors, page.errors
@@ -74,7 +74,7 @@ def test_twin_a_board_with_nothing_to_look_at_opens_recover(show):
     expect(page.locator('[data-board-page="recover"]')).to_have_attribute("aria-current", "page", timeout=T)
     expect(by_id(page, "board-page-recover")).to_be_visible()
     expect(by_id(page, "board-status-recover")).to_have_text("steps 1-4 of 5 here")
-    expect(by_id(page, "board-status-connections")).to_have_text("USB to this PC")
+    expect(by_id(page, "board-status-connections")).to_have_text("Debug USB: to this PC")
     assert page.locator('.bt-nav [data-dot="err"]').count() == 0
     # a deep link wins over "what needs a look": the address bar names the page
     nav.board_page(page, "about")
@@ -207,7 +207,7 @@ def test_a_netbooted_linux_board_says_so_and_asks_for_a_linux_release(show):
     catalog = {"ok": True, "catalog": "mps3-harness", "board_id": BOARD_LINUX, "channels": [], "offer": "2.0.1",
                "rollback": [], "warnings": [], "at": 0, "board": {"running_release": "2.0.0", "running": {}},
                "releases": [{"version": "2.0.1", "channels": ["stable"], "channel": "stable", "impl": "linux",
-                             "static_id": "0x4c1a0003", "marks": ["offered"], "verdict": "fits", "why": "same shell",
+                             "static_id": "0x44ee76d5", "marks": ["offered"], "verdict": "fits", "why": "same shell",
                              "size": 29_000_000, "released_at": "2026-09-30"}]}
     page = show.page(**APP)
     page.route("**/api/v1/harness/catalog?*", lambda r: reply(r, 200, catalog))
@@ -228,7 +228,7 @@ def test_twin_a_card_board_installs_the_same_release_instead_of_asking(show):
     catalog = {"ok": True, "catalog": "mps3-harness", "board_id": BOARD_LINUX, "channels": [], "offer": "2.0.1",
                "rollback": [], "warnings": [], "at": 0, "board": {"running_release": "2.0.0", "running": {}},
                "releases": [{"version": "2.0.1", "channels": ["stable"], "channel": "stable", "impl": "linux",
-                             "static_id": "0x4c1a0003", "marks": ["offered"], "verdict": "fits", "why": "same shell",
+                             "static_id": "0x44ee76d5", "marks": ["offered"], "verdict": "fits", "why": "same shell",
                              "size": 29_000_000, "released_at": "2026-09-30"}]}
     page = show.page(**APP)
     page.route("**/api/v1/harness/catalog?*", lambda r: reply(r, 200, catalog))
@@ -248,7 +248,7 @@ def test_connections_draws_where_the_debug_usb_goes(show):
     fig = by_id(page, "cx-diagram")
     expect(fig).to_have_attribute("data-usb", "hub", timeout=T)
     expect(fig).to_have_attribute("data-hub", "yes")
-    expect(by_id(page, "cx-usb")).to_contain_text("To the hub")
+    expect(by_id(page, "cx-usb")).to_contain_text("to the hub")
     expect(by_id(page, "cx-usb").locator(".cx-give:not(.no)")).to_contain_text(["MCC console"])
     expect(by_id(page, "cx-ethernet")).to_contain_text("through the hub's ssh tunnel")
     expect(by_id(page, "cx-tunnel")).to_contain_text("ssh tunnel up")
@@ -261,7 +261,7 @@ def test_twin_an_ethernet_only_board_has_no_debug_usb_and_says_the_fix(show):
     expect(fig).to_have_attribute("data-usb", "none", timeout=T)
     expect(fig).to_have_attribute("data-hub", "no")
     usb = by_id(page, "cx-usb")
-    expect(usb).to_contain_text("Not connected")
+    expect(usb).to_contain_text("none (Ethernet only)")
     expect(usb).to_contain_text("Fix: Connect J8")
     assert usb.locator(".cx-give:not(.no)").count() == 0
     expect(by_id(page, "cx-ssh")).to_contain_text("Claimed by you")
@@ -319,7 +319,7 @@ def test_about_lists_the_features_and_what_is_not_here_with_why(show):
     expect(by_id(page, "about-features")).to_contain_text("lcd_mirror", timeout=T)
     expect(by_id(page, "about-missing").locator('li[data-capability="reboot_board"]')).to_contain_text(
         "needs the Debug USB cable")
-    expect(by_id(page, "about-shell")).to_have_text("0x4c1a0003")
+    expect(by_id(page, "about-shell")).to_have_text("0x44ee76d5")   # the rc2 static (UI2-POLISH)
 
 
 def test_twin_the_board_with_a_debug_usb_can_reboot(show):

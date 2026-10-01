@@ -27,12 +27,18 @@
 //   the raw error (ssh's words) is behind "Details", never the headline. displayLive(bid)
 //   tells the Front panel card's headline whether the picture is on screen; a client
 //   re-renders the page (store.changed) only when that flips.
+// - UI2-POLISH (david 10-01, "it inverts the colour in light mode"): the glass is black in
+//   both themes. A pixel no tile has drawn yet is the glass's black, OPAQUE (GLASS_RGB565 through
+//   the LUT), never transparent over the page; and the frame behind the canvas (what a grey or
+//   dimmed picture shows through) is the panel palette's black (panel_codes.js ROLE_COLOURS), not
+//   the theme's --term-bg. Only the frame's outline and the overlays follow the theme.
 
 import { callBytes, socketCloseReason, socketUrl } from "./api.js";
 import { boardName } from "./format.js";
 import { html, useEffect, useMemo, useRef, useState } from "./lib.js";
 import { changed, onBoardEvent, S } from "./store.js";
 import { Chip, Icon, Reason, Seg, Spinner } from "./ui.js";
+import { ROLE_COLOURS } from "./panel_codes.js";
 
 // --- the wire (core/display_wire.py; LCD_MIRROR.md §6.1) -----------------------------------------
 
@@ -128,6 +134,11 @@ export function parseUpdate(data) {
     valid: u8.subarray(b + 21, b + 21 + VALID_BYTES), regs, mode, ntiles, recs, u8, bytes: n,
   };
 }
+
+// The glass with nothing drawn on it: RGB565 0x0000, black, as the panel shows it (and the
+// palette's background, ROLE_COLOURS.text[1]).
+export const GLASS_RGB565 = 0x0000;
+export const GLASS_CSS = ROLE_COLOURS.text[1];
 
 export function isValid(valid, t) { return ((valid[t >> 3] >> (t & 7)) & 1) === 1; }
 
@@ -266,7 +277,7 @@ export class DisplayClient {
   constructor(bid) {
     this.bid = bid;
     this.lut = rgbaLut();
-    this.px = new Uint32Array(W * H);
+    this.px = new Uint32Array(W * H).fill(this.lut[GLASS_RGB565]);   // the bare glass, opaque
     this.image = null;                   // ImageData over px
     this.canvas = null;
     this.ctx = null;
@@ -462,7 +473,7 @@ export class DisplayClient {
         holder: last.holder || "", code: ev.code };
       this.presented = false;
       this.have.fill(0);
-      this.px.fill(0);                     // nothing of the old picture is kept
+      this.px.fill(this.lut[GLASS_RGB565]);   // nothing of the old picture is kept: bare glass
       noteRefusal(this.bid, this.refusal);
     } else {
       this.failure = ev.code === 1000 ? (this.status && this.status.reason) || "the daemon closed the Live display"
@@ -824,7 +835,7 @@ export function LiveDisplay({ bid, children = null, fit = false }) {
       <div class="ld-scroll">
         <div class="ld-slot" style=${slotStyle}>
           <div class=${`ld-frame${stale ? " ld-stale" : ""}${grey ? " ld-grey" : ""}${dim ? " ld-dim" : ""}`}
-            title=${VIEW_ONLY} data-testid="live-frame" style=${boxStyle}>
+            title=${VIEW_ONLY} data-testid="live-frame" style=${`${boxStyle};background:${GLASS_CSS}`}>
             <canvas class="ld-canvas" width=${W} height=${H} ref=${canvasRef} data-testid="live-canvas"
               role="img" aria-label=${`The board's panel, live, ${W} by ${H}. ${VIEW_ONLY}.`}
               style=${canvasStyle}></canvas>

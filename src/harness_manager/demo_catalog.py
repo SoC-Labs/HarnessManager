@@ -8,8 +8,9 @@ state dir (``<state>/demo/`` for ``--demo``; a temporary directory for a bare
 - **a signed harness catalogue** (``demo-fixtures/www``): ``stable`` lists 1.0.0 (the old
   static 0x3F1A560F), 1.1.0 (the ILA static 0x72BB0A36, what the bare-metal demo board
   runs) and 1.1.1 (a firmware re-bake on the same static); ``beta`` (and ``dev``, the same)
-  adds 2.0.0, the Linux harness on 0x4C1A0003 (what the Linux demo board runs). The same four mints as the
-  HARNESS-CAT fixtures (``tests/fakes/hcat_catalog.py``), published in the same shapes and
+  adds 2.0.0, the Linux harness on 0x44EE76D5 (the fielded rc2 static, what the Linux demo board
+  runs). The HARNESS-CAT fixtures' mints (``tests/fakes/hcat_catalog.py``, where the Linux one is
+  still a placeholder static), published in the same shapes and
   validated with the app's own parser before signing. The key is a THROWAWAY minisign key
   made in memory at every start; the demo's update service trusts only it. On the bare-metal
   board the list shows every verdict: 1.1.0 and 1.1.1 fit, 1.0.0 is a re-key and 2.0.0
@@ -18,7 +19,9 @@ state dir (``<state>/demo/`` for ``--demo``; a temporary directory for a bare
 - **a DUT build kit** for 0x72BB0A36: the fixture kit of ``tests/fakes/kit_fixture`` (a
   FAKE DCP whose CRC-32 is the static id, the stamp, the measured partition frames), made
   here byte for byte and imported into the demo's kit cache, so the Build section's steps
-  have states; the Linux static 0x4C1A0003 gets one of the same shape (Vivado 2026.1). The
+  have states; the Linux static 0x44EE76D5 gets one of the same shape (Vivado 2026.1, the
+  kit ``mps3/0x44EE76D5/vivado-2026.1``), so Build works on the Linux board too: the pin model
+  describes 0x44EE76D5 (its pblock, the XDC export, the utilisation meter). The
   releases carry them as ``rm-kit`` components too, so ``kit fetch`` works offline.
 - **an app update, off by default.** ``HARNESS_MANAGER_DEMO_UPDATE=staged`` marks a newer
   Harness Manager as staged, so the "Restart to update" banner shows. Applying it is always
@@ -55,7 +58,9 @@ UPDATE_STAGED = "staged"
 #: The demo mints' statics (the HARNESS-CAT fixtures' values).
 S_OLD, U_OLD = "0x3F1A560F", "0xD46FCDCB"          # fielded until 09-24
 S_ILA, U_ILA = "0x72BB0A36", "0xC8551081"          # fielded 09-24: the bare-metal demo board
-S_LNX, U_LNX = "0x4C1A0003", "0x3C0FFEE3"          # mint 3 (a placeholder): the Linux board
+# The Linux board: the REAL rc2 static and its USR_ACCESS (the pin model's shell 0x44EE76D5),
+# so the demo's Build (Setup, Design's XDC, Check's pblock) answers what a real Linux board gets.
+S_LNX, U_LNX = "0x44EE76D5", "0xFB1F8C76"          # mint 3, rc2: the Linux board
 
 V08 = ("clcd", "clcd_kvm", "touch", "hwicap_fifo", "windowed")
 V011 = V08 + ("dut_egress", "jtag_server", "xvc_dbgbr", "stats", "log", "reboot", "touch_cal")
@@ -66,7 +71,7 @@ NOTES = {
     "1.0.0": "The fielded static until 09-24.",
     "1.1.0": "RM ILAs over XVC; the ILA static 0x72BB0A36.",
     "1.1.1": "Firmware re-bake: the console flush fix.",
-    "2.0.0": "The MicroBlaze V Linux harness (mint 3).",
+    "2.0.0": "The MicroBlaze V Linux harness (mint 3, the rc2 static 0x44EE76D5).",
 }
 STABLE = ("1.0.0", "1.1.0", "1.1.1")
 BETA = STABLE + ("2.0.0",)
@@ -100,6 +105,8 @@ def _iso(t: float) -> str:
 # --- the DUT build kit (tests/fakes/kit_fakes.py's fixture, made here) ----------------------------
 
 KIT_USERCODE = U_ILA
+#: ``vivado -version``'s "SW Build" of 2026.1 (docs/evidence/2026-09-30-kit-nanosoc), the Linux kit's.
+VIVADO_2026_1_BUILD = 6511674
 #: rp.frames of 0x72BB0A36, measured on its fielded dbg_demo pair (kit_fakes.FRAMES_72BB0A36).
 FRAMES_72BB0A36: dict[str, Any] = {
     "idcode": "0x0390D093",
@@ -147,11 +154,12 @@ def dcp_xml(*, release: str = "2024.1", build: int = 5076996, cpver: int = 22,
             f'\t<HDBlackboxInfo Name="{rp_inst} HD.RECONFIGURABLE"/>\n</Checkpoint>\n')
 
 
-def fake_dcp(static_id: str, *, release: str = "2024.1") -> bytes:
+def fake_dcp(static_id: str, *, release: str = "2024.1", build: int = 5076996) -> bytes:
     """A zip whose CRC-32 is ``static_id``. NOT a checkpoint: Vivado would refuse it."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
-        zf.writestr(zipfile.ZipInfo("dcp.xml", (2026, 9, 24, 0, 0, 0)), dcp_xml(release=release))
+        zf.writestr(zipfile.ZipInfo("dcp.xml", (2026, 9, 24, 0, 0, 0)),
+                    dcp_xml(release=release, build=build))
         zf.writestr(zipfile.ZipInfo("README.txt", (2026, 9, 24, 0, 0, 0)),
                     "FAKE: a Harness Manager test fixture, not a Vivado checkpoint.\n")
         zf.comment = b"\0\0\0\0"
@@ -166,7 +174,7 @@ def kit_stamp(static_id: str, usercode: str) -> dict[str, Any]:
 
 
 def build_kit(dest: Path, static_id: str = S_ILA, *, usercode: str = KIT_USERCODE,
-              release: str = "2024.1", impl: str = "bare-metal",
+              release: str = "2024.1", build: int = 5076996, impl: str = "bare-metal",
               frames: dict[str, Any] | None = FRAMES_72BB0A36) -> Path:
     """A kit directory (``kit.json`` + ``static/``), the shape of ``tests/fakes/kit_fixture``."""
     from harness_manager.services.kit.schema import DEFAULT_LICENCE_NOTE, sha256_file
@@ -174,7 +182,8 @@ def build_kit(dest: Path, static_id: str = S_ILA, *, usercode: str = KIT_USERCOD
     dest = Path(dest)
     (dest / "static").mkdir(parents=True, exist_ok=True)
     (dest / "static" / "static_routed_locked.dcp").write_bytes(fake_dcp(static_id,
-                                                                        release=release))
+                                                                        release=release,
+                                                                        build=build))
     (dest / "static" / "static_stamp.json").write_text(
         json.dumps(kit_stamp(static_id, usercode), indent=2) + "\n", encoding="utf-8")
 
@@ -194,7 +203,7 @@ def build_kit(dest: Path, static_id: str = S_ILA, *, usercode: str = KIT_USERCOD
         "schema": "hm-rm-kit", "schema_version": 1,
         "board_type": "mps3", "part": "xcku115-flvb1760-1-c",
         "static_id": static_id, "static_usercode": usercode, "harness_impl": impl,
-        "vivado": {"release": release, "build": 5076996, "checkpoint_version": 22},
+        "vivado": {"release": release, "build": build, "checkpoint_version": 22},
         "rp": rp, "pr_verify_ref": "static/static_routed_locked.dcp",
         "access": "public", "ip_class": "open", "licence_note": DEFAULT_LICENCE_NOTE,
         "files": [entry("static/static_routed_locked.dcp", "locked_static", static_id),
@@ -330,7 +339,8 @@ class DemoCatalog:
         self.serial = max(int(self.now), self._last_serial() + 1)   # up at every start
         self.kit_dir = build_kit(self.root / "kit" / S_ILA, S_ILA)
         self.linux_kit_dir = build_kit(self.root / "kit" / S_LNX, S_LNX, usercode=U_LNX,
-                                       release="2026.1", impl="linux", frames=None)
+                                       release="2026.1", build=VIVADO_2026_1_BUILD,
+                                       impl="linux", frames=None)
         self._publish()
 
     def _last_serial(self) -> int:

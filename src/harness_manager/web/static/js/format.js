@@ -256,12 +256,14 @@ export function journalText(j) {
 // (plan gap G2: `mcc_route`): a `hub-mcc://` link is the hub's, a USB serial or storage link
 // this PC's. A board listed from boards.toml and not opened yet is not known. `self` (the
 // cable looped back into the board, mint 4) comes with G2.
+// The words for each route are sections/boardfacts.js DEBUG_USB (one vocabulary); here only the
+// rail's short tags and icons.
 const USB_ROUTES = {
-  hub: { icon: "usb", tag: "USB · hub", fact: "to the hub" },
-  pc: { icon: "monitor", tag: "USB · PC", fact: "to this PC" },
-  self: { icon: "repeat", tag: "USB · loop", fact: "looped back into itself" },
-  none: { icon: "unplug", tag: "no USB", fact: "none (Ethernet only)" },
-  unknown: { icon: "circle-help", tag: "USB ?", fact: "not known yet" },
+  hub: { icon: "usb", tag: "USB · hub" },
+  pc: { icon: "monitor", tag: "USB · PC" },
+  self: { icon: "repeat", tag: "USB · loop" },
+  none: { icon: "unplug", tag: "no USB" },
+  unknown: { icon: "circle-help", tag: "USB ?" },
 };
 
 export function usbRoute(cand, row = null) {

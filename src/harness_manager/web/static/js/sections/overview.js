@@ -17,7 +17,7 @@
 
 import { call, routeMissing } from "../api.js";
 import { existingSession } from "../consoles.js";
-import { bytesText, clock, deployBar, healthOf, hexId, hostOf, usbRoute } from "../format.js";
+import { bytesText, clock, deployBar, healthOf, hexId, hostOf } from "../format.js";
 import { html, useEffect, useState } from "../lib.js";
 import { openReleaseConfirm } from "../lease.js";
 import {
@@ -32,6 +32,7 @@ import {
 import { checksOf } from "./checks.js";
 import { front, FrontPanelCard, readPanelNow } from "./panel.js";
 import { loadXvc, viewState, xvc } from "./xvc.js";
+import { mccRoute, USB_WORDS } from "./boardfacts.js";   // UI2-POLISH: one Debug USB vocabulary
 
 // --- small helpers ---------------------------------------------------------------------------------
 
@@ -307,26 +308,13 @@ function Attention({ bid }) {
 
 // --- the identity strip -------------------------------------------------------------------------------
 
-const MCC_ROUTE = {
-  hub: { level: "ok", icon: "usb", text: "to the hub" },
-  pc: { level: "ok", icon: "monitor", text: "to this PC" },
-  self: { level: "accent", icon: "repeat", text: "looped back to itself" },
-  none: { level: "unk", icon: "unplug", text: "not plugged in" },
-  unknown: { level: "unk", icon: "circle-help", text: "not known yet" },
-};
+// UI2-POLISH: the words are boardfacts.js DEBUG_USB (the header and the Board tab say the same).
+const ROUTE_LEVEL = { hub: "ok", pc: "ok", self: "accent", none: "unk", unknown: "unk" };
+const MCC_ROUTE = Object.fromEntries(Object.entries(USB_WORDS).map(([to, w]) => [to,
+  { level: ROUTE_LEVEL[to], icon: w.icon, text: w.chip }]));
 
-// G2: the Debug USB route the service says (the session's, else the GET /boards row's); from
-// the links (format.js usbRoute) only when the service does not say.
-export function mccRoute(bid) {
-  const b = boardState(bid);
-  const row = S.boards[bid] || {};
-  const s = b.session || {};
-  const route = s.mcc_route || row.mcc_route;
-  if (route) return { to: route, reason: s.mcc_route_reason || row.mcc_route_reason || "", source: "service" };
-  const cand = (b.info && b.info.candidate) || row.candidate || {};
-  const u = usbRoute(cand, row);
-  return { to: u.to, reason: u.detail, source: "links" };
-}
+// G2: the Debug USB route is boardfacts.js mccRoute (the service's, else the links), the one the
+// header and the Board tab read too.
 
 function harnessWords(b) {
   const id = (b.info && b.info.identity) || {};
@@ -460,6 +448,9 @@ function clockReading(bid) {
   return { r: null, why: "", src: "GET /clocks" };
 }
 
+// A counter for a tooltip: its value, or "not reported" (never "?").
+function notRep(v) { return v !== null && v !== undefined ? `= ${v}` : "not reported"; }
+
 function counterOf(info, ...names) {
   const c = (info.health && info.health.counters) || {};
   const s = info.stats || {};
@@ -519,27 +510,32 @@ function Readings({ bid }) {
       extra=${pts.length ? html`<${Spark} points=${pts} hover=${hover} onHover=${setHover} />` : null}
       src=${`${t.name} from ${t.source || "telemetry"}${t.observed_at ? ` at ${hhmm(t.observed_at)}` : ""}; the trend is this service's history (GET /readings/history). Warn at 50 °C, act at 60 °C.`} />`);
   }
-  // 3. DUT clock
+  // 3. DUT clock. UI2-POLISH (david, first real-board look): a rate the shell fixes (the Linux
+  // harness: the pin model's dut_clk, harness_manager_mps3/clock.py) is a plain fact, "fixed by the
+  // shell", never a warning; a Linux board with no rate known shows no tile (the row reflows); a
+  // bare-metal one, whose shell sets but cannot read it back, says "not reported" in grey.
+  const hw = harnessWords(b);
   const ck = clockReading(bid);
   if (ck.r && has(ck.r.value)) {
-    cells.push(html`<${Kpi} label="DUT clock" value=${Number(ck.r.value)} unit=${ck.r.unit || "MHz"} testid="ov-kpi-clock"
-      sub=${[`${ck.r.reason || "reported"} · ${ck.r.source || ""}`]} stale=${stale} src=${ck.src} />`);
-  } else {
+    const fixed = /fixed by the shell/.test(ck.r.reason || "");
+    cells.push(html`<${Kpi} label="DUT clock" lvl=${fixed ? "plain" : "ok"} value=${Number(ck.r.value)} unit=${ck.r.unit || "MHz"} testid="ov-kpi-clock"
+      sub=${[fixed ? "fixed by the shell" : [ck.r.reason || "reported", ck.r.source].filter(Boolean).join(" · ")]} stale=${stale} src=${ck.src} />`);
+  } else if (hw.impl !== "Linux") {
     const why = (ck.r && ck.r.reason) || ck.why || "no clock adapter reports it";
-    cells.push(html`<${Kpi} label="DUT clock" lvl="unk" unk value="unavailable" sub=${[why]} src=${ck.src} testid="ov-kpi-clock" />`);
+    cells.push(html`<${Kpi} label="DUT clock" lvl="unk" unk value="not reported" sub=${[why]} src=${ck.src} testid="ov-kpi-clock" />`);
   }
   // 4. Harness loop (bare metal's superloop; Linux has none)
   const maxUs = counterOf(info, "svc_max_us");
-  const hw = harnessWords(b);
   const answer = has(info.answer_ms) ? `answers in ${Number(info.answer_ms) < 1000 ? `${info.answer_ms} ms` : `${(info.answer_ms / 1000).toFixed(1)} s`}` : "";
   if (maxUs !== null) {
     const ix = counterOf(info, "svc_max_ix");
     const over = counterOf(info, "svc_overruns");
     const skips = counterOf(info, "svc_skips");
     const bad = maxUs > 2e6;
+    const tally = [over !== null ? `${over} overruns` : "", skips !== null ? `${skips} skips` : ""].filter(Boolean).join(" · ");
     cells.push(html`<${Kpi} label="Harness loop" lvl=${bad ? "warn" : "ok"} value=${(maxUs / 1e6).toFixed(2)} unit="s worst" stale=${stale} testid="ov-kpi-loop"
-      sub=${[bad ? `service ${ix ?? "?"}: over the 2 s read timeout` : `${over ?? "?"} overruns · ${skips ?? "?"} skips`]}
-      src=${`the harness's diag: svc_max_us (the worst single service), svc_max_ix = ${ix ?? "?"}, svc_overruns ${over ?? "?"}, svc_skips ${skips ?? "?"}. Above 2 s the control port misses Harness Manager's 2 s read timeout.${answer ? ` Harness Manager's last read: ${answer}.` : ""}`} />`);
+      sub=${[bad ? `${ix !== null ? `service ${ix}` : "a service"}: over the 2 s read timeout` : tally || "overruns, skips: not reported"]}
+      src=${`the harness's diag: svc_max_us (the worst single service), svc_max_ix ${notRep(ix)}, svc_overruns ${notRep(over)}, svc_skips ${notRep(skips)}. Above 2 s the control port misses Harness Manager's 2 s read timeout.${answer ? ` Harness Manager's last read: ${answer}.` : ""}`} />`);
   } else {
     cells.push(html`<${Kpi} label="Harness loop" lvl="unk" unk value="not reported" testid="ov-kpi-loop"
       sub=${[hw.impl === "Linux" ? `harnessd has no superloop${answer ? ` · ${answer}` : ""}` : answer || "no svc_* counters from this harness"]}
@@ -554,7 +550,10 @@ function Readings({ bid }) {
   const errs = counterOf(info, "txerr", "tx_errors");
   const crc = counterOf(info, "crc_errors");
   const bits = [];
-  if (rx !== null || tx !== null) bits.push(`rx ${rx !== null ? num(rx) : "?"} · tx ${tx !== null ? num(tx) : "?"}`);
+  // UI2-POLISH: no "?": a counter the harness does not send is left out, and said so.
+  const frames = [rx !== null ? `rx ${num(rx)}` : "", tx !== null ? `tx ${num(tx)}` : ""].filter(Boolean).join(" · ");
+  const missing = rx === null && tx !== null ? "rx" : tx === null && rx !== null ? "tx" : "";
+  if (frames) bits.push(missing ? `${frames} · ${missing} not reported` : frames);
   const badBits = [drops !== null ? `drops ${num(drops)}` : "", errs !== null ? `tx errors ${num(errs)}` : "", crc !== null ? `CRC errors ${num(crc)}` : ""].filter(Boolean).join(" · ");
   const netBad = (drops || 0) + (errs || 0) + (crc || 0) > 0;
   if (has(s.link)) {
@@ -563,8 +562,11 @@ function Readings({ bid }) {
       sub=${netBad ? [badBits, bits[0]] : [bits[0] || badBits || "no frame counters"]}
       src=${`the harness's stats (link, spd, fdx${drops !== null ? ", rxdrop" : ""}${errs !== null ? ", txerr" : ""}) and its counters, ${hw.impl === "Linux" ? "since the last boot" : "since the shell started"}`} />`);
   } else if (bits.length || badBits) {
-    cells.push(html`<${Kpi} label="Network" lvl=${netBad ? "warn" : "plain"} value=${rx !== null ? num(rx) : "?"} unit="rx" stale=${stale} testid="ov-kpi-net"
-      sub=${[badBits || bits[0]]} src="the harness's counters (it sends no link state)" />`);
+    const main = rx !== null ? [num(rx), "rx"] : tx !== null ? [num(tx), "tx"] : null;
+    cells.push(main ? html`<${Kpi} label="Network" lvl=${netBad ? "warn" : "plain"} value=${main[0]} unit=${main[1]} stale=${stale} testid="ov-kpi-net"
+      sub=${[badBits || (missing ? `${missing}: not reported` : bits[0])]} src=${`the harness's counters (it sends no link state)${missing ? `; this harness doesn't report ${missing} counts` : ""}`} />`
+      : html`<${Kpi} label="Network" lvl=${netBad ? "warn" : "unk"} unk value="not reported" stale=${stale} testid="ov-kpi-net"
+      sub=${[badBits || "this harness doesn't report rx/tx counts"]} src="the harness's error counters only (no link state, no rx/tx counts)" />`);
   } else {
     cells.push(html`<${Kpi} label="Network" lvl="unk" unk value="not reported" sub=${["no link state or frame counters"]}
       src="the harness sent no stats (link, spd) and no frame counters" testid="ov-kpi-net" />`);
@@ -576,14 +578,21 @@ function Readings({ bid }) {
   const running = dep.state === "running";
   if (swaps !== null || icap !== null || running) {
     const last = dep.state === "done" && dep.doneAt ? `last: ${Math.round(dep.seconds || 0)} s at ${hhmm(dep.doneAt)}` : "";
-    cells.push(html`<${Kpi} label="Partition swaps" lvl=${running ? "accent" : "plain"} value=${swaps !== null ? swaps : "?"} unit=${running ? "+1 running" : ""} stale=${stale} testid="ov-kpi-swaps"
-      sub=${[running ? `swapping to ${dep.overlay || "a design"}…` : last || (icap !== null ? `ICAP ${bytesText(icap)} written` : "since the shell started")]}
-      src=${`the harness's stats: swaps${icap !== null ? ` and ICAP bytes (${bytesText(icap)})` : ""} since the shell started; the last swap from this page's Activity`} />`);
+    // UI2-POLISH: no "?": with no swap count, the ICAP bytes written are the number.
+    const [value, unit] = swaps !== null ? [swaps, running ? "+1 running" : ""]
+      : icap !== null ? [bytesText(icap), running ? "ICAP · +1 running" : "ICAP written"]
+        : ["swapping", ""];
+    const sub = running ? `swapping to ${dep.overlay || "a design"}…`
+      : swaps === null ? "swap count: not reported"
+        : last || (icap !== null ? `ICAP ${bytesText(icap)} written` : "since the shell started");
+    cells.push(html`<${Kpi} label="Partition swaps" lvl=${running ? "accent" : "plain"} value=${value} unit=${unit} stale=${stale} testid="ov-kpi-swaps"
+      sub=${[sub]}
+      src=${`the harness's stats: ${swaps !== null ? "swaps" : "this harness doesn't report a swap count"}${icap !== null ? `, ICAP bytes (${bytesText(icap)})` : ""} since the shell started; the last swap from this page's Activity`} />`);
   } else {
     cells.push(html`<${Kpi} label="Partition swaps" lvl="unk" unk value="not reported" sub=${["no swap counter from this harness"]}
       src="the harness sent no stats.swap_n and no swaps counter" testid="ov-kpi-swaps" />`);
   }
-  return html`<div class="ov-kpis" data-testid="ov-readings">${cells}</div>`;
+  return html`<div class="ov-kpis" data-testid="ov-readings" data-n=${cells.length}>${cells}</div>`;
 }
 
 function Summary({ bid }) {

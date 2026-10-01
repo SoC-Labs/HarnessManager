@@ -65,7 +65,14 @@ button.chip.ov-chip-sm { font-family: inherit; cursor: pointer; }
 .ov-kpi-v { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 18px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
 .ov-kpi-v small { font-size: 11.5px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
 .ov-kpi.stale .ov-kpi-v > span:first-child { color: var(--text-2); }
-.ov-unav { font-size: 13.5px; font-weight: 500; color: var(--unk); }
+/* UI2-POLISH (david): a reading the harness does not report is neutral grey, never a warning tint */
+.ov-unav { font-size: 13.5px; font-weight: 500; color: var(--text-3); }
+.ov-kpi .dot.ov-dot-unk { border-color: var(--border-strong); }
+/* a tile with nothing to show is left out (a Linux board's DUT clock with no rate): the row reflows */
+@media (min-width: 1301px) {
+  .ov-kpis[data-n="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .ov-kpis[data-n="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 .ov-kpi-s { font-size: 11.5px; color: var(--text-3); line-height: 1.35; }
 .ov-kpi-s > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ov-kpi.warn .ov-kpi-s > span:first-child { color: var(--warn); }

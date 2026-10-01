@@ -6,7 +6,8 @@ the lanes' test fakes and built on the product's own types and helpers, so a sha
 drift from the real one (``XvcStatus``/``vivado_tcl``, ``PanelState``/``rebuilt_frame``,
 ``SlotStatus``, ``CardStatus``, the lease service's notes):
 
-- ``BOARD_LINUX`` (mps3-lx): the Linux harness (``impl: linux``) on 0x4C1A0003 with
+- ``BOARD_LINUX`` (mps3-lx): the Linux harness (``impl: linux``) on 0x44EE76D5 (the fielded
+  rc2 static the pin model describes, so its Build tab works end to end) with
   ``usd``, ``presence``, ``panel``, ``locate`` and ``xvc_lock``. A card in the user microSD
   slot (the overlay store's slots A/B, nanosoc on A) with the OS slots A/B on it; its SSH
   claimed by you; the front panel read from the glass (sessions, touch health, a tap);
@@ -113,7 +114,7 @@ SWAP_ROWS_LX = (
     "-" * 40,
     "DUT : nanosoc              v1.0         ",
     "SWAP: LOADED VERIFIED     #007  last OK ",
-    "SID : 0x4C1A0003  USD : nanosoc [A]     ",
+    "SID : 0x44EE76D5  USD : nanosoc [A]     ",
     "NET : 192.168.10.104  UP 100/FD         ",
     "UP  : 001:04:12:48                      ",
     "DUT : RST-REL  CLK-ALIVE   MMCM-LOCK    ",
@@ -153,7 +154,7 @@ def script() -> dict[str, Any]:
             "mps3", BOARD_LINUX,
             (_eth("192.168.10.104"),
              Link(LinkKind.SSH, "root@192.168.10.104", "dropbear, key-only (claimed)")),
-            label="MPS3 Linux harness · nanosoc on 0x4c1a0003",
+            label=f"MPS3 Linux harness · nanosoc on {cat.S_LNX.lower()}",
             evidence="answered identify (UDP 6899) and ping", name="mps3-lx",
             name_source="harness"),
         identity=BoardIdentity(board_type="mps3", shell_id=cat.S_LNX.lower(),

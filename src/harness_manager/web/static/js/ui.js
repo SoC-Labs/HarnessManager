@@ -1,6 +1,7 @@
 // Shared components: icons, chips, cards, reasons, result boxes, action buttons, arm boxes.
 
 import { ICONS } from "../vendor/lucide/icons.js";
+import { debugUsbWords } from "./sections/boardfacts.js";   // UI2-POLISH: one Debug USB vocabulary
 import {
   gateReason, interlock, isArmed, overdueText, panelState, runAction, setArmed,
 } from "./actions.js";
@@ -217,6 +218,6 @@ export function MiniBar({ bar, testid = "" }) {
 
 // The Debug USB tag of a sidebar card (format.js usbRoute): USB · hub / USB · PC / no USB.
 export function UsbTag({ usb, testid = "" }) {
-  return html`<span class=${`usb-tag ${usb.to}`} title=${`Debug USB: ${usb.fact}: ${usb.detail}`}
+  return html`<span class=${`usb-tag ${usb.to}`} title=${`Debug USB: ${debugUsbWords(usb.to)}: ${usb.detail}`}
     data-testid=${testid || undefined} data-usb=${usb.to}><${Icon} name=${usb.icon} cls="sm" />${usb.tag}</span>`;
 }
