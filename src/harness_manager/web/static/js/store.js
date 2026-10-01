@@ -1000,8 +1000,13 @@ export function handleEvent(ev) {
     if (d.pid !== undefined) b.debug.pid = d.pid;
     if (d.detail !== undefined) b.debug.detail = d.detail;
     if (d.config !== undefined) b.debug.config = d.config;
+    // UI v2 (CCR WORKBENCH-2): DEBUG-ONBOARD's additive fields, as the status read gives them
+    if (d.where !== undefined) b.debug.where = d.where;
+    if (Array.isArray(d.gdb_ports)) b.debug.gdb_ports = d.gdb_ports;
+    if (Array.isArray(d.cores)) b.debug.cores = d.cores;
     if (d.state !== "up" && d.state !== "starting") {
       b.debug.gdb_port = 0; b.debug.telnet_port = 0; b.debug.tcl_port = 0;
+      if (b.debug.gdb_ports) b.debug.gdb_ports = [];
     }
   }
   if (ev.topic === "controller.reboot") {
