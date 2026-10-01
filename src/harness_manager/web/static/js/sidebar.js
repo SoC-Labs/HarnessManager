@@ -18,19 +18,27 @@
 // **Keyboard:** Alt+Up / Alt+Down on a focused card moves it, and a screen reader hears
 // where it went. The star (Space or Enter) favourites a board.
 
-import { call, routeMissing } from "./api.js";
+import { runAction } from "./actions.js";
+import { ApiError, call, heldByJob, routeMissing } from "./api.js";
 import {
-  boardName, clock, deployBar, designText, healthOf, holderText, LINK_ICONS, linkName, nameSourceText,
-  usbRoute,
+  boardName, boardTitle, clock, deployBar, designText, healthOf, hexId, holderAge, holderText, LINK_ICONS,
+  linkName, nameSourceText, usbRoute,
 } from "./format.js";
-import { html, useState } from "./lib.js";
-import { LeaseBadge } from "./lease.js";
+import { AddDialogOpener } from "./add.js";
+import { leaseSpecs } from "./hub.js";
+import { html, useEffect, useState } from "./lib.js";
+import {
+  LeaseBadge, LeaseQueueList, leaveQueue, leftText, openRequestForm, previewWho, queueCount, queueOf,
+  queueTitle, fullLease, lastSeen, readLease, requestActive,
+} from "./lease.js";
+import { registerHelp } from "./settings/help.js";
 import { LocateButton } from "./locate.js";          // LOCATE: Identify on each board card
 import {
-  changed, hubBoard, log, onBoardEvent, onEventsReconnected, probe, S, select, setFirstBoard,
+  boardState, changed, hubBoard, log, navigate, onBoardEvent, onEventsReconnected, openedBoard,
+  openedOrClosedHere, probe, S, select, setFirstBoard, setJob, timed, toast, UI_NOTE,
 } from "./store.js";
-import { Chip, Icon, MiniBar, Spinner, UsbTag } from "./ui.js";
-import { epochOf, leaseWho } from "./week.js";
+import { CheckChip, Chip, Icon, MiniBar, Reason, Spinner, UsbTag } from "./ui.js";
+import { epochOf, leaseLeft, leaseWho } from "./week.js";
 
 export const ORDER_KEY = "general.board_order";
 export const FAV_KEY = "general.favourite_boards";
@@ -142,8 +150,95 @@ onBoardEvent((ev) => {
 });
 onEventsReconnected(() => loadPrefs());
 
-// The order is read before the page selects its first board (the top favourite).
-export function startSidebar() { setFirstBoard(() => railDisplay()[0], loadPrefs()); }
+// The order is read before the page selects its first board (the top favourite). UI v2: the
+// "Open a board on" setting, the hubs' leases for the rail (G3), and Help by page (lease.js
+// registerHelp: after app.js's own registration, which it replaces).
+export function startSidebar() {
+  setFirstBoard(() => railDisplay()[0], loadPrefs());
+  loadOpenOn();
+  startHubReads();
+  registerHelp();
+}
+
+// --- UI v2: "Open a board on" (general.open_on, G12) -------------------------------------------------
+//
+// workbench (the default) or overview: the tab a board lands on when it is opened here. A service
+// without the row (before G12) leaves the tab the page would show anyway.
+
+export const OPEN_ON_KEY = "general.open_on";
+const OPEN_ON = { value: null };
+
+async function loadOpenOn() {
+  try {
+    const { data } = await call("settings", {}, undefined, { key: OPEN_ON_KEY });
+    const row = ((data && data.rows) || []).find((r) => r && r.key === OPEN_ON_KEY);
+    OPEN_ON.value = row && (row.value === "workbench" || row.value === "overview") ? row.value : null;
+  } catch (e) { OPEN_ON.value = null; }
+}
+
+export function openOn() { return OPEN_ON.value; }
+
+onBoardEvent((ev) => {
+  if (ev.topic === "settings.changed" && ((ev.data && ev.data.keys) || []).includes(OPEN_ON_KEY)) loadOpenOn();
+});
+
+// --- UI v2: every hub board's lease in the rail, one read per hub (G3) ------------------------------
+//
+// GET /hubs/{name}/leases: every target a hub serves, in ONE hub read (reused 20 s by the
+// service), for the hubs the listed boards name (GET /boards `hub.name`). It also refreshes
+// what the service knows (lease_known) for every board it lists. Read at start, when a new hub
+// appears, and every 45 s while the page is visible; never per board.
+
+const HUBL = {};            // hub name -> {data, error, at, loading}
+const HUB_EVERY_S = 45;
+
+export function hubLeases(name) { return HUBL[name] || null; }
+
+function hubNames() {
+  const out = new Set();
+  for (const bid of S.order) {
+    const h = S.boards[bid] && S.boards[bid].hub;
+    if (h && h.name) out.add(h.name);
+  }
+  return [...out];
+}
+
+export async function readHub(name, refresh = false) {
+  const slot = HUBL[name] || (HUBL[name] = { data: null, error: null, at: 0, loading: false });
+  if (slot.loading) return;
+  slot.loading = true;
+  const r = await timed(`hub leases ${name}`, () => call("hubLeases", { name }, undefined, refresh ? { refresh: "1" } : null));
+  slot.loading = false;
+  slot.at = Date.now() / 1000;
+  if (r.error) {
+    slot.error = routeMissing(r.error) ? null : r.error;
+    if (routeMissing(r.error)) slot.unsupported = true;
+  } else {
+    slot.data = r.data.data;
+    slot.error = null;
+  }
+  changed();
+}
+
+function startHubReads() {
+  setInterval(() => {
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const now = Date.now() / 1000;
+    for (const name of hubNames()) {
+      const slot = HUBL[name];
+      if (slot && (slot.unsupported || slot.loading)) continue;
+      if (!slot || now - slot.at > HUB_EVERY_S) readHub(name);
+    }
+  }, 3000);
+}
+
+// This board's target row in its hub's read, or null.
+function hubTarget(bid) {
+  const row = S.boards[bid] || {};
+  const slot = row.hub && HUBL[row.hub.name];
+  const targets = (slot && slot.data && slot.data.targets) || [];
+  return targets.find((t) => (t.boards || []).includes(bid)) || null;
+}
 
 // --- the order ------------------------------------------------------------------------------
 
@@ -154,16 +249,51 @@ export function railOrder() {
     .sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.id);
 }
 
+// UI v2 (round 3, S13): the boards that are not favourites group by where they are: one group
+// per hub (GET /boards `hub.name`, G3; else the hub boards.toml names), then "This network".
+// Favourites stay pinned in their own group at the top (SIDEBAR-UX).
+export function hubGroupOf(bid) {
+  const row = S.boards[bid] || {};
+  const conf = row.configured || {};
+  return (row.hub && row.hub.name) || conf.hub || (conf.via === "hub" ? "hub" : "");
+}
+
 export function railGroups() {
   const all = railOrder();
   const favs = new Set(P.favs);
-  return { all, favs: all.filter((id) => favs.has(id)), rest: all.filter((id) => !favs.has(id)) };
+  const rest = all.filter((id) => !favs.has(id));
+  const byHub = new Map();
+  const net = [];
+  for (const id of rest) {
+    const h = hubGroupOf(id);
+    if (!h) net.push(id);
+    else (byHub.get(h) || byHub.set(h, []).get(h)).push(id);
+  }
+  return { all, favs: all.filter((id) => favs.has(id)), rest,
+    hubs: [...byHub].map(([name, ids]) => ({ id: `hub:${name}`, name, ids })), net };
+}
+
+// The rail's groups, top to bottom: {id, label, title, ids}. "rest" is This network.
+export function railSections() {
+  const g = railGroups();
+  const out = [];
+  if (g.favs.length) out.push({ id: "fav", label: "Favourites", ids: g.favs });
+  for (const h of g.hubs) out.push({ id: h.id, label: h.name.split(".")[0], title: `Behind the hub ${h.name}`, hub: h.name, ids: h.ids });
+  out.push({ id: "rest", label: "This network", title: "On this network (no hub)", ids: g.net });
+  return out;
+}
+
+function sectionOfBoard(bid) {
+  return railSections().find((x) => x.ids.includes(bid)) || { id: "rest", label: "This network", ids: [] };
+}
+
+function inWords(sec) {
+  return sec.id === "fav" ? " in Favourites" : sec.hub ? ` in ${sec.label}` : railSections().length > 1 ? " in This network" : "";
 }
 
 // The boards as the rail shows them, top to bottom (the first is selected at start).
 export function railDisplay() {
-  const g = railGroups();
-  return [...g.favs, ...g.rest];
+  return railSections().flatMap((x) => x.ids);
 }
 
 export function isFavourite(bid) { return P.favs.includes(bid); }
@@ -186,8 +316,8 @@ function nameOf(bid) {
 // Move a board to `to` (an index in its own group). Returns false when nothing moved.
 export function moveBoard(bid, to, { announce = true } = {}) {
   const g = railGroups();
-  const fav = P.favs.includes(bid);
-  const group = fav ? g.favs : g.rest;
+  const sec = sectionOfBoard(bid);
+  const group = sec.ids;
   const from = group.indexOf(bid);
   if (from < 0) return false;
   const dest = Math.max(0, Math.min(group.length - 1, to));
@@ -201,7 +331,7 @@ export function moveBoard(bid, to, { announce = true } = {}) {
   const all = g.all.map((id) => (members.has(id) ? moved[k++] : id));
   persistOrder(all);
   if (announce) {
-    say(`${nameOf(bid)} moved to position ${dest + 1} of ${group.length}${fav ? " in Favourites" : ""}`);
+    say(`${nameOf(bid)} moved to position ${dest + 1} of ${group.length}${inWords(sec)}`);
   }
   scheduleSave();
   changed();
@@ -234,11 +364,10 @@ function refocus(bid) {
 function onCardKey(e, bid) {
   if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
   e.preventDefault();
-  const g = railGroups();
-  const group = P.favs.includes(bid) ? g.favs : g.rest;
-  const from = group.indexOf(bid);
+  const sec = sectionOfBoard(bid);
+  const from = sec.ids.indexOf(bid);
   if (moveBoard(bid, from + (e.key === "ArrowUp" ? -1 : 1))) refocus(bid);
-  else say(`${nameOf(bid)} is already ${e.key === "ArrowUp" ? "first" : "last"}${P.favs.includes(bid) ? " in Favourites" : ""}`);
+  else say(`${nameOf(bid)} is already ${e.key === "ArrowUp" ? "first" : "last"}${inWords(sec)}`);
 }
 
 // --- dragging (pointer events: a mouse, a finger, a pen) --------------------------------------
@@ -248,7 +377,7 @@ let pointer = null;         // {id, x0, y0, bid, group}
 let swallowClick = false;   // the click that ends a drag opens nothing
 
 function cardsOf(group, except) {
-  return [...document.querySelectorAll(`.rail-card[data-group="${group}"]`)]
+  return [...document.querySelectorAll(".rail-card")].filter((el) => el.dataset.group === group)
     .filter((el) => el.dataset.board !== except);
 }
 
@@ -256,8 +385,7 @@ function onPointerDown(e, bid, fromGrip) {
   if (e.button !== 0 || pointer) return;
   // A finger on the card scrolls the list; a finger on the grip drags.
   if (!fromGrip && e.pointerType !== "mouse") return;
-  pointer = { id: e.pointerId, x0: e.clientX, y0: e.clientY, bid,
-    group: P.favs.includes(bid) ? "fav" : "rest" };
+  pointer = { id: e.pointerId, x0: e.clientX, y0: e.clientY, bid, group: sectionOfBoard(bid).id };
   if (fromGrip) e.preventDefault();
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
@@ -279,8 +407,7 @@ function onPointerMove(e) {
     const r = el.getBoundingClientRect();
     if (e.clientY > r.top + r.height / 2) at += 1;
   }
-  const g = railGroups();
-  const group = pointer.group === "fav" ? g.favs : g.rest;
+  const group = (railSections().find((x) => x.id === pointer.group) || { ids: [] }).ids;
   const from = group.indexOf(pointer.bid);
   DRAG.at = at;
   if (at === from || !others.length) {
@@ -336,9 +463,10 @@ export function routeText(conf) {
 }
 
 // UI v2: the lease on EVERY hub board. An open board shows what GET /lease said (lease.js
-// LeaseBadge, the words every badge uses); a board not open, what the service last knew
-// (GET /boards lease_known, no hub call; plan gap G3 reads each hub's leases for all), or that
-// it has not been read. "+N waiting": the hub's queue, where the page has read it.
+// LeaseBadge, the words every badge uses); a board not open, the freshest of: this page's own
+// GET /lease of it (the preview), its hub's read (G3, one per hub), or what the service last knew
+// (GET /boards lease_known, no hub call); else that it has not been read. "+N waiting": the
+// hub's queue, where the page has read it.
 function knownWords(k) {
   const name = k.board || k.target || "the board";
   if (k.state === "free") return { state: "free", level: "", icon: "lock-open", text: "Free", title: `Free: nobody held ${name}` };
@@ -350,20 +478,48 @@ function knownWords(k) {
   return { state: "other", level: "held", icon: "lock", text: `Held by ${k.holder || "someone else"}`, title: `Held by ${k.holder || "someone else"}` };
 }
 
-function KnownLease({ row }) {
+// The lease of a board that is not open, as the rail and the preview show it: {k (knownWords'
+// input), at, source, waiting, requested, position} or null when nothing was read.
+export function closedLease(bid) {
+  const row = S.boards[bid] || {};
+  const w = previewWho(bid);
+  const t = hubTarget(bid);
+  const tRead = t ? (HUBL[row.hub.name] || {}).at || 0 : 0;       // this page's clock, as w.at
+  const tAt = t ? epochOf(t.confirmed_at) || tRead : 0;
+  const q = queueOf(bid);
+  if (w.source === "read" && (!t || (w.at || 0) >= tRead)) {
+    const L = w.lease || {};
+    return { k: { state: w.state === "free" ? "free" : "held", holder: w.holder, here: w.state === "here",
+      mine: w.state === "here" || w.state === "elsewhere", board: w.board, target: w.target, hub: w.host },
+    at: w.at, source: "read", waiting: queueCount(q), requested: !!w.request, position: w.position, expires: L.expires_at };
+  }
+  if (t) {
+    return { k: { state: t.state, holder: t.holder, here: !!t.here, mine: !!t.mine, board: t.board || "", target: t.target,
+      hub: row.hub.name }, at: tAt, source: "hub", waiting: t.queue_length || 0, requested: false, position: null,
+    expires: t.expires_at };
+  }
   const k = row.lease_known;
-  if (!k) {
+  if (k) {
+    return { k, at: epochOf(k.confirmed_at), source: "known", waiting: k.queue_length || 0, requested: false,
+      position: null, expires: k.expires_at };
+  }
+  return null;
+}
+
+function KnownLease({ bid }) {
+  const c = closedLease(bid);
+  if (!c) {
     return html`<div class="board-lease" data-testid="rail-lease-row" data-lease="unread" data-source="none">
       <${Chip} level="unk" icon="circle-help" cls="lease-badge" testid="rail-lease-badge"
         title="Behind a hub: its lease is read when you open the board">Lease not read<//></div>`;
   }
-  const w = knownWords(k);
-  const at = epochOf(k.confirmed_at);
-  const title = `${w.title} (${k.hub || "the hub"}), as this Harness Manager last read it${at === null ? "" : ` at ${clock(at)}`}: `
-    + "read again when you open the board.";
-  return html`<div class="board-lease" data-testid="rail-lease-row" data-lease=${w.state} data-source="known">
+  const w = knownWords(c.k);
+  const title = `${w.title} (${c.k.hub || "the hub"}), as this Harness Manager last read it${c.at ? ` at ${clock(c.at)}` : ""}${c.source === "hub" ? " (the hub's read of every board)" : ""}.`;
+  return html`<div class="board-lease" data-testid="rail-lease-row" data-lease=${w.state} data-source=${c.source === "known" ? "known" : c.source}>
     <${Chip} level=${w.level} icon=${w.icon} cls="lease-badge" testid="rail-lease-badge" title=${title}>
-      <span class="lease-badge-text">${w.text}</span><//></div>`;
+      <span class="lease-badge-text">${w.text}</span><//>
+    ${c.requested ? html`<${Chip} level="accent" icon="send" cls="lease-badge" testid="rail-lease-queued"
+      title="Your request is in the hub's queue">Requested${c.position ? ` · #${c.position}` : ""}<//>` : null}</div>`;
 }
 
 function RailLease({ bid, row }) {
@@ -371,13 +527,14 @@ function RailLease({ bid, row }) {
   if (who === "none") return null;                  // read: not behind a hub
   const read = who !== "unread";
   if (!read && !hubBoard(bid)) return null;
-  const hub = S.board[bid] && S.board[bid].week && S.board[bid].week.hub;
-  const queue = read && hub && Array.isArray(hub.queue) ? hub.queue : [];
+  const q = queueOf(bid);
+  const c = !read ? closedLease(bid) : null;
+  const n = read ? queueCount(q) : c ? (c.source === "read" ? queueCount(q) : c.waiting) : 0;
+  const title = q && n === queueCount(q) ? queueTitle(q) : `${n} waiting for the hub lease (the hub's count)`;
   return html`<div class="rail-lease">
-    ${read ? html`<${LeaseBadge} bid=${bid} />` : html`<${KnownLease} row=${row} />`}
-    ${queue.length ? html`<span class="lq-more" data-testid="rail-lease-waiting"
-      title=${`Waiting for the hub lease:\n${queue.map((q) => `#${q.position || "?"} ${q.holder || q.user || "?"}${q.mine ? " (you)" : ""}`).join("\n")}`}>
-      +${queue.length} waiting</span>` : null}
+    ${read ? html`<${LeaseBadge} bid=${bid} />` : html`<${KnownLease} bid=${bid} />`}
+    ${n ? html`<span class="lq-more" data-testid="rail-lease-waiting" title=${`Waiting for the hub lease:\n${title}`}>
+      +${n} waiting</span>` : null}
   </div>`;
 }
 
@@ -472,12 +629,13 @@ function Group({ id, label, ids }) {
 }
 
 export function BoardList() {
-  const g = railGroups();
+  const secs = railSections();
+  const many = secs.length > 1;
   return html`<div class="board-list">
-    ${g.favs.length ? html`<div class="rail-group-title" id="rail-fav-title"><${Icon} name="star" cls="sm" />Favourites</div>
-      <${Group} id="fav" label="Favourite boards" ids=${g.favs} />
-      ${g.rest.length ? html`<div class="rail-group-title">Other boards</div>` : null}` : null}
-    <${Group} id="rest" label=${g.favs.length ? "Other boards" : "Boards"} ids=${g.rest} />
+    ${secs.map((sec) => html`${sec.id === "fav" ? html`<div class="rail-group-title" id="rail-fav-title" key="t-fav"><${Icon} name="star" cls="sm" />Favourites</div>`
+        : many && sec.ids.length ? html`<div class="rail-group-title" key=${`t-${sec.id}`} data-testid=${`rail-group-title-${sec.hub ? "hub" : "net"}`}
+            title=${sec.title}><${Icon} name=${sec.hub ? "server" : "ethernet-port"} cls="sm" />${sec.label}</div>` : null}
+      <${Group} key=${sec.id} id=${sec.id} label=${sec.id === "fav" ? "Favourite boards" : many ? sec.label : "Boards"} ids=${sec.ids} />`)}
     <p id="rail-move-help" class="sr-only">Alt+Up or Alt+Down moves this board in the list.</p>
     <div class="sr-only" role="status" aria-live="polite" data-testid="rail-announce">${P.announce}</div>
   </div>`;
@@ -541,37 +699,223 @@ export function viaOf(text) {
   return `ssh:${t}`;
 }
 
-function viaDefault(conf) {
-  const via = (conf && conf.via) || "";
-  return via === "hub" || via.startsWith("ssh:") ? via : "";
+// The rail's + (app.js) renders this: UI v2 has ONE Add a board dialog (add.js), which opens
+// on By address from here (the button says "Add a board by address"), with From a hub a click
+// away. The rail's own inline form is gone.
+export function AddByAddress({ onDone }) {
+  return html`<${AddDialogOpener} onDone=${onDone} mode="addr" />`;
 }
 
-// A board by address, optionally through a hub (L1: POST /probe {via}). An address that a
-// boards.toml entry names takes that entry's route unless another is typed (SIDEBAR-UX).
-export function AddByAddress({ onDone }) {
-  const [value, setValue] = useState("");
-  const [hub, setHub] = useState("");
-  const [typed, setTyped] = useState(false);       // the user typed a route: it wins
-  const match = configFor(value);
-  const route = typed ? hub : viaDefault(match && match.conf);
-  const submit = (e) => {
-    e.preventDefault();
-    const host = value.trim();
-    if (!host) return;
-    probe([host], viaOf(route));
-    setValue("");
-    setHub("");
-    setTyped(false);
-    onDone();
+// --- UI v2: the preview of a board that is not open (round 3, plan S20-S22) ----------------------
+//
+// What the page knows without opening it: the hub lease and its queue (GET /boards/{bid}/lease,
+// G3: a board that is not open is read too), the design it last reported, how it is reached;
+// and the ways in. A board with no hub: Open board. A hub board nobody holds: Open and take the
+// lease, or Open to watch. One someone else holds: Request board (G3: without opening it: the
+// holder is asked, nothing is locked), or Cancel request; and Open to watch. `data-action="open"`
+// is always the plain open (the tests' and the CLI's), which takes no lease.
+
+// FIX-PACK-4: the preview's "Lock" was the service's own board lock, and read "free" for a board
+// alice holds on the hub. It is named for what it is, and the hub lease has its own row.
+const LOCK_TITLE = "Harness Manager's own lock on this board: free unless another Harness Manager "
+  + "session or tool on this machine has it open. The hub lease is its own row.";
+
+const PREVIEW_EVERY_MS = 20000;
+const READY_MS = 2500;
+
+// POST /boards: open it here (this daemon's board lock), then read what the workspace shows.
+// `take`: then acquire the hub lease (the acquire job; it may queue). Resolves to the timed()
+// result of the open; the board stays closed on an error.
+export async function openBoardHere(bid, { take = false } = {}) {
+  const row = S.boards[bid] || {};
+  const cand = row.candidate || {};
+  const r = await timed(`open ${bid}`, () => call("openBoard", {}, { candidate: cand, note: UI_NOTE }));
+  const already = r.error && r.error.errName === "ALREADY";   // open in this daemon: use it
+  log(r.error && !already ? "error" : "info", "session",
+    r.error ? `${r.line}  ${r.error.errName}: ${r.error.message}` : r.line, bid);
+  if (r.error && !already) {
+    if (r.error.holder) S.boards[bid] = { ...S.boards[bid], holder: { user: r.error.holder } };
+    changed();
+    return r;
+  }
+  openedOrClosedHere(bid, true);
+  const b = boardState(bid);
+  const d = r.data ? r.data.data : {};
+  if (d.info) {
+    b.info = d.info;
+    b.infoOkAt = Date.now() / 1000;
+  }
+  // The session is open even when the first read failed; the workspace says why. A job that
+  // holds the board (your lease request waiting in the queue, another client's deploy) is not
+  // a failure: the board is read when the job ends, as every held read is (store.js).
+  if (!d.info && d.info_error) {
+    const err = new ApiError(d.info_error, 200);
+    const job = heldByJob(err) && /(\S+) job (\S+)/.exec(`${err.holder} ${err.message}`);
+    if (job) { setJob(bid, job[2], job[1]); b.deferred = true; } else b.infoError = err;
+  }
+  openedBoard(bid);
+  // general.open_on: the tab a board opens on, unless this session already chose one for it (a
+  // deep link, a reload, the tab it was on when it was closed): that is where you were.
+  const tab = openOn();
+  if (tab && !S.sections[bid]) navigate(bid, tab);
+  if (take) {
+    const spec = leaseSpecs(bid).acquire;
+    runAction(bid, "lease", spec).then((res) => {
+      if (res && res.ok) toast(`${boardName(cand, bid)}: the hub lease is yours`, { icon: "user" });
+      else if (res) toast(`${boardName(cand, bid)} is open to watch: the lease was not taken (Activity says why)`, { icon: "triangle-alert", level: "err" });
+    });
+  }
+  changed();
+  return r;
+}
+
+function previewChip(w, left) {
+  if (w.state === "here") return { level: "accent", icon: "user", text: `Yours${left !== null ? ` · ${leftText(left)}` : ""}` };
+  if (w.state === "free") return { level: "", icon: "lock-open", text: "Free" };
+  if (w.state === "elsewhere") return { level: "held", icon: "lock", text: `Held by ${w.holder} (another session)` };
+  if (w.state === "other") return { level: "held", icon: "lock", text: `Held by ${w.holder}${left !== null ? ` · ${leftText(left)}` : ""}` };
+  if (w.state === "unknown") return { level: "unk", icon: "circle-help", text: "Lease unknown" };
+  return { level: "unk", icon: "circle-help", text: "Not read yet" };
+}
+
+function PreviewLease({ bid, w }) {
+  const q = queueOf(bid);
+  const c = closedLease(bid);
+  const n = q ? queueCount(q) : c ? c.waiting : 0;
+  const left = leaseLeft(w.lease);
+  const chip = previewChip(w, left);
+  const at = w.at || (c && c.at) || null;
+  const title = w.state === "unread" ? "Read from the hub in a moment (no board is contacted)"
+    : `${chip.text}: what this Harness Manager last read of the lease on ${w.board || w.target || "the board"} (${w.host || "the hub"})${at ? ` at ${clock(at)}` : ""}${w.error ? `; the last read failed: ${w.error}` : ""}.`;
+  const req = w.request;
+  return html`<dt>Hub lease</dt><dd data-testid="preview-lease" data-lease=${w.state} data-source=${w.source || "none"}>
+    <div class="line"><${Chip} level=${chip.level} icon=${chip.icon} testid="preview-lease-chip" title=${title}>${chip.text}<//>
+      ${req ? html`<${Chip} level="accent" icon="send" testid="preview-requested"
+        title=${`Your request is in the hub's queue${req.position ? `: #${req.position} of the people waiting` : ""}${req.want_s ? `, for ${leftText(req.want_s)}` : ""}`}>Requested${req.position ? ` · #${req.position}` : ""}<//>` : null}
+      <span class="sub" data-testid="preview-waiting">${n ? `${n} waiting` : w.state === "unread" || w.state === "unknown" ? "" : "nobody waiting"}</span>
+      ${at ? html`<span class="muted small" data-testid="preview-lease-at">as of ${clock(at)}</span>` : null}</div>
+    ${w.error && w.source !== "read" ? html`<div class="sub">the last read failed: ${w.error}</div>` : null}
+    ${q && n ? html`<div class="lq-preview"><${LeaseQueueList} q=${q} testid="preview-queue" /></div>` : null}</dd>`;
+}
+
+export function BoardPreview({ bid }) {
+  const row = S.boards[bid] || {};
+  const cand = row.candidate || {};
+  const seen = lastSeen(bid);                     // what this page read before it closed it
+  const ident = (seen && seen.identity) || cand.identity || null;
+  const [st, setSt] = useState({ busy: "", line: "", error: null });
+  const hub = hubBoard(bid);
+  // The buttons wait for the first read of the lease (at most READY_MS): they depend on it, and
+  // a button that turns into another under the pointer ("Open board" into "Open and take the
+  // lease") would take a lease nobody asked for.
+  const [ready, setReady] = useState(!hub);
+  useEffect(() => {
+    if (!hub) { setReady(true); return undefined; }
+    let live = true;
+    setReady(!!(fullLease(bid) && (fullLease(bid).data || fullLease(bid).error)));
+    readLease(bid).then(() => { if (live) setReady(true); });
+    const cap = setTimeout(() => { if (live) setReady(true); }, READY_MS);
+    const t = setInterval(() => { if (document.visibilityState === "visible") readLease(bid); }, PREVIEW_EVERY_MS);
+    return () => { live = false; clearTimeout(cap); clearInterval(t); };
+  }, [bid, hub]);
+  const w = hub ? previewWho(bid) : { state: "none" };
+  const open = async (take) => {
+    setSt({ busy: take ? "take" : "watch", line: "", error: null });
+    const r = await openBoardHere(bid, { take });
+    const failed = r.error && r.error.errName !== "ALREADY";
+    setSt({ busy: "", line: r.line, error: failed ? r.error : null });
   };
-  return html`<form class="rail-add" onSubmit=${submit}>
-    <input class="input mono" placeholder="192.168.10.101[:6900]" aria-label="Board address"
-      value=${value} onInput=${(e) => setValue(e.target.value)} autofocus />
-    <button type="submit" class="btn sm">Add</button>
-    <input class="input mono via" placeholder="through a hub: hub, or an ssh host (optional)"
-      aria-label="Through a hub: hub, or an ssh host" data-testid="add-via" value=${route}
-      onInput=${(e) => { setHub(e.target.value); setTyped(true); }} />
-    ${match ? html`<div class="rail-add-note" data-testid="add-route" role="note">
-      <${Icon} name="info" cls="sm" /><span>boards.toml <b>${match.conf.key}</b>: ${routeText(match.conf)}${match.conf.target ? ` (${match.conf.target})` : ""}${typed && route && route !== viaDefault(match.conf) ? "; the route typed here is used instead" : ""}</span></div>` : null}
-  </form>`;
+  const name = boardName(cand, bid);
+  const held = row.holder;
+  const fromConfig = row.source === "config";       // SIDEBAR-UX: listed from boards.toml
+  const conf = row.configured || null;
+  const kind = ident && ident.harness_impl ? (ident.harness_impl === "linux" ? "Linux" : "bare-metal") : "";
+  const hubInfo = row.hub || null;
+  const target = (hubInfo && hubInfo.target) || (conf && conf.target) || w.target || "";
+  const hubHost = (hubInfo && hubInfo.host) || w.host || (conf && conf.hub) || "";
+  const requesting = requestActive(bid) || !!w.request;
+  const busy = st.busy;
+  const openBtn = (primary, label = "Open to watch", icon = "eye") => html`<button type="button" key="open"
+      class=${`btn ${primary ? "primary" : "ghost"}`} data-action="open" onClick=${() => open(false)}
+      aria-busy=${busy === "watch" ? "true" : undefined} disabled=${!!busy}>
+    ${busy === "watch" ? html`<${Spinner} /> Opening...` : html`<${Icon} name=${icon} /> ${label}`}</button>`;
+  let acts;
+  let note = "";
+  let noteLevel = "";
+  if (!hub || w.state === "none") {
+    acts = openBtn(true, "Open board", "lock-open");
+  } else if (w.state === "free") {
+    acts = html`<button type="button" key="take" class="btn primary" data-action="open-take" onClick=${() => open(true)}
+        aria-busy=${busy === "take" ? "true" : undefined} disabled=${!!busy}
+        title="Open the board here and take its hub lease (60 min, renewed while it is open)">
+        ${busy === "take" ? html`<${Spinner} /> Opening...` : html`<${Icon} name="user" /> Open and take the lease`}</button>
+      ${openBtn(false)}`;
+  } else if (w.state === "other") {
+    acts = requesting
+      ? html`<button type="button" key="cancel" class="btn" data-action="preview-cancel-request" onClick=${() => leaveQueue(bid)}>
+          <${Icon} name="x" /> Cancel request</button>${openBtn(false)}`
+      : html`<button type="button" key="request" class="btn primary" data-action="preview-request" aria-haspopup="dialog"
+          onClick=${(e) => openRequestForm(bid, e.currentTarget)}><${Icon} name="send" /> Request board</button>${openBtn(false)}`;
+    note = requesting
+      ? `You are #${(w.request && w.request.position) || "?"} in the hub's queue. ${w.holder.split("@")[0]} sees your request in their Harness Manager and on the board's front panel.`
+      : `Requesting does not open or lock the board. ${w.holder.split("@")[0]} sees it in their Harness Manager and on the front panel.`;
+    noteLevel = "held";
+  } else if (w.state === "elsewhere") {
+    acts = openBtn(true);
+    note = `${w.holder} holds the lease in another session (a soak or a runner), not this Harness Manager. Watching shows its consoles and front panel; Program, Reset DUT and debug stay off here.`;
+    noteLevel = "held";
+  } else if (w.state === "here") {
+    acts = openBtn(true, "Open board", "lock-open");
+    note = "The hub lease is yours already (kept when the board was closed): open the board to keep renewing it.";
+  } else {
+    acts = openBtn(true, "Open board", "lock-open");
+    note = w.state === "unknown" ? `The hub lease could not be read (${w.error}): not known is not free.` : "";
+  }
+  const links = cand.links || [];
+  const eth = links.filter((l) => l.kind === "ethernet").map((l) => l.address);
+  // how Harness Manager reaches the harness: the MCC's own link (hub-mcc://) is the Debug USB's
+  const reach = links.filter((l) => !String(l.address || "").startsWith("hub-mcc://"));
+  return html`<div class="section-body"><div class="preview stack">
+    <section class="card preview-card" aria-label="Board" data-testid="preview" data-lease=${w.state}>
+      <div class="card-head"><h2 class="card-title" data-testid="preview-name"><${Icon} name=${hub ? "server" : "ethernet-port"} />${cand.name
+        ? `${cand.name} · ${cand.label || boardTitle(cand, bid)}` : cand.label || boardTitle(cand, bid)}</h2>
+        <span class="spacer"></span><${LocateButton} bid=${bid} where="preview" /></div>
+      <p class="card-sub">${S.packs[cand.pack] || cand.pack || "Board"}${kind ? ` · ${kind} harness` : ""}${hub && target
+        ? html` · hub target <span class="mono">${target}</span>${hubHost ? ` on ${hubHost}` : ""}` : eth.length ? html` · <span class="mono">${eth[0]}</span> on this network` : ""}${fromConfig
+        ? " · in boards.toml: not contacted until you open it" : ""}</p>
+      <div class="card-body">
+        <dl class="kv">
+          ${hub ? html`<${PreviewLease} bid=${bid} w=${w} />` : null}
+          <dt>Loaded</dt><dd data-testid="preview-loaded">${ident ? html`<div class="line"><span>${ident.rm_name || "unknown"}${" "}
+              <span class="mono sub">${hexId(ident.rm_id)}</span></span>
+              <span class="sub">on shell ${hexId(ident.shell_id) || "?"}${ident.harness_version ? ` · harness firmware ${ident.harness_version}` : ""}</span>
+              <${CheckChip} check=${ident.build_check} testid="preview-build" prefix="build " /></div>
+              <div class="sub">${seen ? `as this page last read it, at ${clock(seen.at).slice(0, 5)}` : "as the board last reported it"}: read again when you open it</div>`
+            : html`<span class="muted">read when you open it</span>`}</dd>
+          <dt>Found</dt><dd><div class="line">${fromConfig ? html`<${Chip} level="unk" icon="circle-help">not contacted<//>`
+            : html`<${Chip} level="ok" icon="circle-check">found<//>`}
+            ${cand.evidence ? html`<span class="sub">${cand.evidence}</span>` : null}</div></dd>
+          <dt>Reached by</dt><dd>${reach.map((l) => html`<div key=${l.kind + l.address} class="mono small" data-link=${l.kind}>${linkName(l.kind)} ${l.address}${l.via ? ` · ${l.via === "hub" ? "through the hub's ssh tunnel" : `via ${l.via}`}` : hub && l.kind === "ethernet" && row.hub ? " · through the hub's ssh tunnel" : ""}</div>`)}
+            ${conf ? html`<div data-testid="preview-route" class="small">boards.toml <b>${conf.key}</b>: ${routeText(conf)}${conf.target ? html` <span class="mono sub">${conf.target}</span>` : null}</div>` : null}
+            ${!reach.length && !conf ? html`<span class="muted">no link known</span>` : null}</dd>
+          <dt title=${LOCK_TITLE}>This app's lock</dt><dd data-testid="preview-lock">${held ? html`<${Chip} level="warn" icon="lock" title=${LOCK_TITLE}>held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
+            : html`<${Chip} icon="lock-open" title=${LOCK_TITLE}>free<//>`}</dd>
+        </dl>
+        <div class="open-row" data-testid="preview-actions">${ready ? acts
+          : html`<span class="muted" data-testid="preview-reading"><${Spinner} /> Reading the hub lease…</span>`}</div>
+        <div class="preview-notes">
+          ${note ? html`<${Reason} level=${noteLevel} text=${note} testid="preview-note" />` : null}
+          <${Reason} text=${held ? "Open asks the daemon anyway: it refuses a live lock and takes over a stale one."
+            : hub ? "Opening takes this app's lock on the board, so the CLI and this page share one session. The hub lease is separate: it decides who may program and reset."
+            : `Opening takes the board's lock for this daemon, so the CLI and this page share one session. ${name} stays yours until you close it.`} />
+        </div>
+        ${st.line ? html`<div class="result" data-testid="open-result">
+          <div><span class=${`rc ${st.error ? "err" : "ok"}`}>${st.line}</span></div>
+          ${st.error ? html`<div><span class="errname">${st.error.errName}</span>  ${st.error.message}</div>
+            ${st.error.hint ? html`<div class="hint">hint: ${st.error.hint}</div>` : null}
+            <div class="hint">The board was not opened.</div>` : null}
+        </div>` : null}
+      </div>
+    </section>
+  </div></div>`;
 }

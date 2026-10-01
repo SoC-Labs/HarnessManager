@@ -641,10 +641,10 @@ export function UpdatesCard() {
 }
 
 // SET-UI: openSettings("hubs") deep-links to a section; a click handler's event (or nothing)
-// opens the section last used in this tab, General the first time (FIX-PACK-4; it opened
-// on Updates, whatever you came for). The Update tab's "Settings" deep-links to Updates.
+// opens General (UI v2 round 3, M7: always, not the section last used). The Update tab's
+// "Settings" deep-links to Updates.
 export function openSettings(section) {
-  if (typeof section === "string" && SECTIONS.some((s) => s.id === section)) setSection(section);
+  setSection(typeof section === "string" && SECTIONS.some((s) => s.id === section) ? section : "general");
   U.settingsOpen = true;
   U.settingsError = null;
   changed();
@@ -652,6 +652,13 @@ export function openSettings(section) {
   loadSettings();
 }
 whenOpen(() => U.settingsOpen);
+
+// UI v2: a Settings row that opens another dialog (Boards > Add a board…) closes Settings first:
+// one dialog at a time.
+export function closeSettings() {
+  U.settingsOpen = false;
+  changed();
+}
 
 function SettingsModal() {
   const ref = useRef(null);
@@ -681,8 +688,8 @@ function SettingsModal() {
 export function SettingsButton() {
   const o = offer();
   const title = o ? `Settings: Harness Manager ${o.version} is ${o.kind === "staged" ? "ready" : "available"}` : "Settings: hubs, boards, tools, updates";
-  return html`<button type="button" class="btn ghost sm icon-only settings-btn" data-action="settings" onClick=${openSettings}
-    aria-label="Settings" title=${title}><${Icon} name="sliders-horizontal" />${o ? html`<span class="badge-dot" data-testid="settings-badge"></span>` : null}</button>`;
+  return html`<button type="button" class="btn ghost sm settings-btn" data-action="settings" onClick=${() => openSettings()}
+    aria-label="Settings" title=${title}><${Icon} name="sliders-horizontal" />Settings${o ? html`<span class="badge-dot" data-testid="settings-badge"></span>` : null}</button>`;
 }
 
 // The dialogs and the overlay, rendered once at the top of the app.

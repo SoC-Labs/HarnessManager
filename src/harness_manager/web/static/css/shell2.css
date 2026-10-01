@@ -1,0 +1,127 @@
+/* UI v2 Phase 2, lane SHELL-2: the preview of a board that is not open, the header's "N waiting"
+   chip and its queue popover, the Close / Request / Add / Settings / Help dialogs
+   (docs/design/ui-v2/prototype-b-round3.html). After app.css: it refines it. Tokens only. */
+
+/* --- the hub's lease queue: the header chip + popover, the preview and Request lists --------- */
+.hub-fact { position: relative; }
+.lq-chip { height: 22px; padding: 0 8px; cursor: pointer; font: inherit; font-size: 12px; }
+.lq-chip .icon { width: 13px; height: 13px; }
+.lq-chip[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--accent-border); }
+.lq-pop {
+  position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; width: 370px; max-width: calc(100vw - 32px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-pop);
+  padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; font-weight: 400; color: var(--text);
+  white-space: normal; text-align: left;
+}
+.lq-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.lq-head b { font-weight: 600; }
+.lq-head .muted { font-size: 11.5px; }
+.lq-head .btn { margin-left: auto; }
+.lq-holder {
+  display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2);
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.lq-holder .icon { width: 14px; height: 14px; color: var(--text-3); }
+.lq-list { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lq-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.lq-row {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 6px; align-items: start;
+  padding: 4px 6px; border-radius: 6px; font-size: 12.5px;
+}
+.lq-row.you { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-border); }
+.lq-pos { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--text-2); padding-top: 1px; }
+.lq-body { display: flex; flex-direction: column; min-width: 0; }
+.lq-who { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.lq-who b { font-weight: 500; overflow-wrap: anywhere; }
+.lq-meta { font-size: 11.5px; color: var(--text-3); }
+.lq-msg { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lq-none { font-size: 12px; color: var(--text-3); padding: 2px 6px; }
+.lq-bg-head {
+  display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--text-3); padding: 4px 6px 0;
+}
+.lq-bg-head .icon { width: 13px; height: 13px; }
+.lq-rows.bg .lq-pos { color: var(--text-3); }
+.lq-foot { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.lq-foot-t { flex: 1; min-width: 0; font-size: 12px; color: var(--text-2); }
+.lq-preview { margin-top: 6px; max-width: 460px; border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+.lq-inmodal { display: flex; flex-direction: column; gap: 4px; }
+.lq-inmodal .lq-list { border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+@media (max-width: 760px) { .lq-pop { right: auto; left: 0; } }
+
+/* --- dialogs: sizes, choices, progress ------------------------------------------------------- */
+.modal.mid { width: min(700px, 100%); }
+.modal.wide { width: min(980px, 100%); }
+.modal-pad { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+.modal-pad > p { margin: 0; line-height: 1.5; }
+.modal-foot .grow { flex: 1; }
+.choices { display: flex; flex-direction: column; gap: 8px; }
+.choice {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface-2);
+}
+.choice input { margin: 3px 0 0; accent-color: var(--accent); }
+.choice.on { border-color: var(--accent-border); background: var(--accent-soft); }
+.choice.dis { opacity: .6; cursor: not-allowed; }
+.choice b { font-weight: 600; font-size: 13.5px; }
+.choice .sub { display: block; color: var(--text-2); font-size: 12.5px; margin-top: 2px; line-height: 1.45; }
+.choice .def {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent-text); margin-left: 6px;
+}
+.progress-box {
+  display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border: 1px solid var(--accent-border);
+  border-radius: 8px; background: var(--accent-soft);
+}
+.progress-box .meter-line { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--text-2); gap: 10px; }
+.progress-box .pgm-bar.mini { width: 100%; }
+
+/* --- the preview of a board that is not open (round 3) ---------------------------------------- */
+.preview-card .card-head .board-label {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0 5px;
+}
+.preview-card .kv dd .line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.preview-card .kv dd .sub, .preview-card .sub { color: var(--text-2); font-size: 12.5px; font-weight: 400; }
+.preview-card .open-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.preview-card .preview-notes { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.preview-card .result { margin-top: 12px; }
+
+/* --- Add a board ----------------------------------------------------------------------------- */
+.add-dialog .field > label:first-child { min-width: 72px; color: var(--text-2); }
+.add-dialog .field .grow { flex: 1; min-width: 0; }
+.add-dialog .table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: auto; max-height: 260px; }
+.add-dialog .table { margin: 0; width: 100%; }
+.add-dialog .rail-add-note { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; color: var(--text-2); }
+.add-dialog .seg { align-self: flex-start; }
+
+/* --- Settings and Help: the pane's head, the General note ---------------------------------------- */
+.help-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 0; flex: 1; }
+.help-pane { padding: 16px 18px; overflow-y: auto; min-height: 0; }
+.help-pane h3 { font-size: 16px; margin: 0 0 8px; }
+.help-pane p { max-width: 64ch; line-height: 1.55; }
+.help-pane .modal-text { padding: 0; white-space: pre-wrap; }
+.help-nav .nav-group {
+  font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3);
+  padding: 10px 10px 4px;
+}
+.modal.help { height: min(560px, calc(100vh - 48px)); }
+@media (max-width: 760px) {
+  .help-body { grid-template-columns: minmax(0, 1fr); }
+  .help-nav { border-right: 0; border-bottom: 1px solid var(--border); max-height: 160px; }
+}
+.linkish {
+  background: none; border: 0; padding: 0; color: var(--accent-text); cursor: pointer; font: inherit;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.modal-foot.inline { padding: 12px 0 0; margin-top: 2px; border-top: 1px solid var(--border); }
+.help-nav button { display: block; }
+/* the rail's foot: Settings says its name, as Activity and Help do (round 3) */
+.foot-links .settings-btn { width: auto; flex: 1 1 auto; }
+/* the Add dialog's By address form keeps the rail form's class (the tests' handle): undo its
+   one-line flex layout inside the dialog */
+.add-dialog .rail-add { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 12px; padding: 0; margin: 0; border: 0; background: none; }
+.add-dialog .rail-add input { flex: 1 1 auto; }
+.add-dialog .rail-add input.via { flex-basis: auto; font-size: 13px; height: auto; }
+.add-dialog .rail-add .check-inline { align-self: flex-start; }
+.add-dialog .rail-add .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

@@ -63,7 +63,7 @@ def shoot(page, review, name):
 def test_review_settings_general_under_a_policy(page_factory, world, review, scheme):  # noqa: F811
     world(policy=POLICY, settings='[general]\nwindow_size = "1600x1000"\n',
           env={"HARNESS_MANAGER_APP_BROWSER": "chromium"})
-    page = open_settings(page_factory, "general", scheme)
+    page = open_settings(page_factory, "general", scheme, dev=True)     # window_size: nothing reads it
     expect(by_id(page, "settings-policy-note")).to_be_visible(timeout=T)
     expect(source(row(page, "general.window_size"))).to_have_attribute("data-source", "user")
     expect(source(row(page, "general.app_browser"))).to_have_attribute("data-source", "env")

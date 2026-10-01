@@ -75,10 +75,15 @@ def world(daemon, tmp_path):
     return make
 
 
-def open_settings(page_factory, section: str, scheme: str = "light"):
+def open_settings(page_factory, section: str, scheme: str = "light", *, dev: bool = False):
     page = page_factory(scheme, **APP)
     page.locator('[data-action="settings"]').click()
     expect(by_id(page, "settings")).to_be_visible(timeout=T)
+    if dev:
+        # UI v2 (round 3, M7): a row nothing reads yet (consoles.scrollback, general.window_size,
+        # consoles.font_size) shows only with Show developer settings (Advanced)
+        page.locator('[data-testid="settings-nav"] [data-settings-section="advanced"]').click()
+        page.locator('[data-action="show-dev"]').check()
     page.locator(f'[data-testid="settings-nav"] [data-settings-section="{section}"]').click()
     expect(by_id(page, "settings-pane")).to_have_attribute("data-settings-section", section, timeout=T)
     return page
@@ -107,7 +112,7 @@ def user_file(sctx: Any, name: str = "settings.toml") -> dict[str, Any]:
 @pytest.mark.mock_too
 def test_editing_a_row_saves_it_as_yours_and_reset_returns_the_default(page_factory, world):
     sctx = world()
-    page = open_settings(page_factory, "consoles")
+    page = open_settings(page_factory, "consoles", dev=True)
     r = row(page, "consoles.scrollback")
     expect(source(r)).to_have_attribute("data-source", "default", timeout=T)
     r.locator('[data-testid="setting-input"]').fill("8000")
@@ -125,7 +130,7 @@ def test_editing_a_row_saves_it_as_yours_and_reset_returns_the_default(page_fact
 @pytest.mark.mock_too
 def test_negative_twin_a_value_the_service_refuses_is_shown_and_nothing_is_written(page_factory, world):
     sctx = world()
-    page = open_settings(page_factory, "general")
+    page = open_settings(page_factory, "general", dev=True)
     r = row(page, "general.window_size")
     r.locator('[data-testid="setting-input"]').fill("huge")
     r.locator('[data-testid="setting-input"]').press("Enter")
@@ -396,7 +401,7 @@ def test_a_restart_class_change_shows_the_restart_banner(page_factory, world):
 
 def test_negative_twin_a_live_change_shows_no_restart_banner(page_factory, world):
     world()
-    page = open_settings(page_factory, "consoles")
+    page = open_settings(page_factory, "consoles", dev=True)
     r = row(page, "consoles.font_size")
     r.locator('[data-testid="setting-input"]').fill("15")
     r.locator('[data-testid="setting-input"]').press("Enter")

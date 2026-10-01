@@ -18,15 +18,16 @@ import {
   S, timed, UI_NOTE,
 } from "../store.js";
 
+// UI v2 (round 3, M7): the order the prototype lists them in.
 export const SECTIONS = [
   { id: "general", label: "General", icon: "sliders-horizontal" },
-  { id: "hubs", label: "Hubs", icon: "server" },
   { id: "boards", label: "Boards", icon: "circuit-board" },
-  { id: "tools", label: "Tools", icon: "cpu" },
+  { id: "hubs", label: "Hubs", icon: "server" },
+  { id: "tools", label: "Tools", icon: "wrench" },
+  { id: "consoles", label: "Consoles", icon: "terminal" },
+  { id: "debug", label: "Debug", icon: "bug" },
   { id: "updates", label: "Updates", icon: "rocket" },
   { id: "harness-kits", label: "Harness & kits", icon: "layers" },
-  { id: "debug", label: "Debug", icon: "bug" },
-  { id: "consoles", label: "Consoles", icon: "terminal" },
   { id: "advanced", label: "Advanced", icon: "file-cog" },
 ];
 export const ADMIN_TEXT = "set by your administrator";
@@ -42,8 +43,8 @@ function writeSession(key, value) {
 }
 
 export const SS = {
-  // FIX-PACK-4: the gear opens General the first time, then the section last used in this tab
-  // (the Update tab's "Settings" still deep-links to Updates).
+  // UI v2 (round 3, M7): Settings opens on General (openSettings); a link names its section
+  // ("updates"). The section last used is still kept, for a reload while the dialog is open.
   section: readSession(SECTION_KEY, "general"),
   loading: false,
   loaded: false,
