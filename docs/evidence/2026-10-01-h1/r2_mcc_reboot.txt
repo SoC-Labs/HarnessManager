@@ -1,0 +1,6 @@
+reboot: waiting for the request in flight
+reboot: sent 1/3 (33%)
+reboot: down 2/3 (66%)
+reboot: up 3/3 (100%)
+rebooted   mps3@192.168.10.101:6900 (seen: waiting for the request in flight, sent, down, up)
+MCC loaded MB/HBI0309C/Nanosoc/nanosoc.bit

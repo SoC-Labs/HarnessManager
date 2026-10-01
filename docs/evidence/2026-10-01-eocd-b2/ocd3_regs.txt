@@ -1,0 +1,30 @@
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0xfffffffe in ?? ()
+keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (1036 ms). Workaround: increase "set remotetimeout" in GDB
+keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (1469 ms). Workaround: increase "set remotetimeout" in GDB
+r0             0x0                 0
+r1             0x92032504          -1845287676
+r2             0x40006000          1073766400
+r3             0x30b72             199538
+r4             0x0                 0
+r5             0x4001f000          1073868800
+r6             0x1                 1
+r7             0xedb88320          -306674912
+r8             0xffffffff          -1
+r9             0xffffffff          -1
+r10            0x17fffc00          402652160
+r11            0x0                 0
+r12            0xffffffff          -1
+sp             0x210121e0          0x210121e0
+lr             0xfffffff9          -7
+pc             0xfffffffe          0xfffffffe
+xPSR           0x60000003          1610612739
+msp            0x210121e0          0x210121e0
+psp            0xfffffffc          0xfffffffc
+primask        0x0                 0
+basepri        0x0                 0
+faultmask      0x0                 0
+control        0x0                 0
+[Inferior 1 (Remote target) detached]
+gdb 49 s

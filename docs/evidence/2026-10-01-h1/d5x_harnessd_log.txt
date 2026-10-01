@@ -1,0 +1,9 @@
+ 00:06:35 up 6 min,  load average: 2.07, 1.56, 0.74
+Jan  1 00:00:18 mps3-harness kern.warn kernel: [   18.303645] spi_usd: loading out-of-tree module taints kernel.
+Jan  1 00:00:18 mps3-harness kern.info kernel: [   18.374724] spi-usd 44a40000.spi: user microSD controller, aclk 100000000 Hz, SCK 763..25000000 Hz, card present
+/persist:
+dropbear
+etc-mps3
+lost+found
+mps3
+ssh

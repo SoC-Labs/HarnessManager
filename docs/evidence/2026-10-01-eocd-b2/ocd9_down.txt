@@ -1,0 +1,4 @@
+debug      mps3@192.168.11.101:6900: down
+where      the board: OpenOCD runs there; gdb reaches it through the board's SSH
+detail     OpenOCD on the board is not running
+openocd    /home/dam1n19/opt/xpack-openocd/xpack-openocd-0.12.0-7/bin/openocd: has remote_bitbang (40 adapters)

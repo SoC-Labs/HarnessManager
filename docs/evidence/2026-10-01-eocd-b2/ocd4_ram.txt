@@ -1,0 +1,15 @@
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0xfffffffe in ?? ()
+Restoring binary file /home/dam1n19/SoCLabs/harness-manager/docs/evidence/2026-10-01-eocd-b2/ocd4_ram_in.bin into memory (0x18000000 to 0x18000400)
+Restoring binary file /home/dam1n19/SoCLabs/harness-manager/docs/evidence/2026-10-01-eocd-b2/ocd4_ram_saved.bin into memory (0x18000000 to 0x18000400)
+[nanosoc.cpu0] clearing lockup after double fault
+[nanosoc.cpu0] halted due to debug-request, current mode: Handler HardFault
+xPSR: 0x60000003 pc: 0xfffffffe msp: 0x210121e0
+Polling target nanosoc.cpu0 failed, trying to reexamine
+[nanosoc.cpu0] Cortex-M0 r0p0 processor detected
+[nanosoc.cpu0] target has 4 breakpoints, 2 watchpoints
+[Inferior 1 (Remote target) detached]
+gdb 213 s for N=1024 (read+write+read+write)
+RAM-OK
+reset      dut on mps3@192.168.11.101:6900: done

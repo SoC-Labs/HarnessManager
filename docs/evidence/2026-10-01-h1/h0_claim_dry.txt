@@ -1,0 +1,2 @@
+adopt the SSH claim of mps3@192.168.10.101:6900? Harness Manager logs in with your key, checks the board's host key against its identify and pins it in boards.toml [y/N] 
+harness-manager: not confirmed — re-run with --yes to skip the prompt

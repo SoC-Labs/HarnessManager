@@ -1,0 +1,1 @@
+harness-manager: the loaded design (greybox) has no debug port — load nanosoc, nanosoc_upy or nanosoc_iice first

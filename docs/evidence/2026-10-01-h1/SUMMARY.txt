@@ -1,0 +1,10 @@
+H1 on board 1 · Thu 01 Oct 10:37 · Harness Manager 0.1.0
+board 192.168.10.101 · hub mapstone-dev.ecs.soton.ac.uk · evidence /home/dam1n19/SoCLabs/harness-manager/docs/evidence/2026-10-01-h1
+------------------------------------------------------------------------
+L0  the lease
+    lease: held (taken in the app)
+------------------------------------------------------------------------
+A1  what the board reports
+    $ /home/dam1n19/SoCLabs/harness-manager/.venv/bin/harness-manager --json info 192.168.10.101
+    exit 4 · 0 s · a1_info.json
+    FAILED

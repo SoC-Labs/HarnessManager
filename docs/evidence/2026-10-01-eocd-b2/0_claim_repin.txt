@@ -1,0 +1,7 @@
+identify: is the board claimed, and what is its host key?
+host key: connecting over SSH to capture it
+pinned SHA256:DPgz3qD1Nn5/acJSiJHYNu5tFZLxKSV+Uw9dTHh/QLY in boards.toml boards.lab2.ssh.host_key
+claim      mps3@192.168.11.101:6900: claimed by you (SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo, dam1n19@srv03335, 2026-10-01T15:29:19Z)
+host key   SHA256:DPgz3qD1Nn5/acJSiJHYNu5tFZLxKSV+Uw9dTHh/QLY pinned (boards.toml boards.lab2.ssh.host_key)
+claim key  SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo (the board's first claimed key)
+route      hub mapstone-dev.ecs.soton.ac.uk  user root

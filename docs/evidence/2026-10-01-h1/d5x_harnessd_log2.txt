@@ -1,0 +1,18 @@
+lrwxrwxrwx    1 root     root             6 Sep 28  2026 /var/log -> ../tmp
+
+/run:
+total 32
+drwxr-xr-x    5 root     root           260 Jan  1 00:00 .
+drwxr-xr-x   15 root     root           440 Jan  1 00:00 ..
+-rw-r--r--    1 root     root             4 Jan  1 00:00 crond.pid
+-rw-------    1 root     root             4 Jan  1 00:00 dropbear.pid
+-rw-r--r--    1 root     root             6 Jan  1 00:00 ifstate
+-rw-r--r--    1 root     root             3 Jan  1 00:00 klogd.pid
+drwxr-xr-x    3 root     root            60 Jan  1 00:00 lock
+drwxr-xr-x    3 root     root           140 Jan  1 00:01 mps3
+-rw-r--r--    1 root     root            37 Jan  1 00:00 mps3-harnessd.boot
+drwxr-xr-x    2 root     root            40 Jan  1 00:00 network
+-rw-r--r--    1 root     root             3 Jan  1 00:00 syslogd.pid
+-rw-r--r--    1 root     root             4 Jan  1 00:01 udhcpc.eth0.pid
+-rw-r--r--    1 root     root           384 Jan  1 00:00 utmp
+  197 root     /usr/sbin/mps3-harnessd

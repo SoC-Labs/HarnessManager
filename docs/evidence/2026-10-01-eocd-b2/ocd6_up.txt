@@ -1,0 +1,9 @@
+started 16:40:08
+debug      mps3@192.168.11.101:6900: up
+where      the board: OpenOCD runs there; gdb reaches it through the board's SSH
+gdb        127.0.0.1:51961
+attach     arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:51961"
+config     nanosoc_mps3_jtag.cfg nanosoc_ops.tcl
+pid        762
+detail     OpenOCD runs on the board; gdb reaches it through the board's SSH (pid 762)
+debug server up for mps3@192.168.11.101:6900 (OpenOCD runs on the board; this holds its gdb forward): run gdb in another terminal (the attach line); this one holds the server until Ctrl-C or `harness-manager detach 192.168.11.101`

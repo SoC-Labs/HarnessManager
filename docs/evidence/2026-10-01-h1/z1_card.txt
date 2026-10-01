@@ -1,0 +1,9 @@
+done       no power-on default: the greybox loads at the next power-on
+card       mps3@192.168.10.101:6900: empty, 15193 MB  (CLCD: empty)
+default    none: the greybox loads at power-on
+power-on   failed:timeout
+os slots   mps3@192.168.10.101:6900: running A, default A, a push goes to B
+  A        valid hdr_crc 0x5ceaed1b 29447688 B, booted, confirmed healthy  [running, default]
+  B        valid hdr_crc 0x5ceaed1b 29447688 B, not verified this boot  [target]
+job        idle
+note       the board's SSH is claimed: slot push, commit and rollback are taken only from the board itself (Harness Manager goes through its SSH)

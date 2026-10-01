@@ -1,0 +1,2 @@
+harness-manager: mps3@192.168.10.101:6900 is busy: reboot job 40d498785661 is running — wait for it to finish (GET /api/v1/jobs/40d498785661; progress arrives on the events WebSocket)
+{"error": {"code": 4, "data": {"board_id": "mps3@192.168.10.101:6900", "job": "40d498785661", "kind": "reboot"}, "hint": "wait for it to finish (GET /api/v1/jobs/40d498785661; progress arrives on the events WebSocket)", "holder": "harness-manager-daemon reboot job 40d498785661", "message": "mps3@192.168.10.101:6900 is busy: reboot job 40d498785661 is running", "name": "HELD"}, "ok": false}

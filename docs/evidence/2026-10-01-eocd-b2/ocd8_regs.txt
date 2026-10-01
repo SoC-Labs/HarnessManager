@@ -1,0 +1,13 @@
+== 44487
+Remote connection closed
+"monitor" command not supported by this target.
+The program has no registers now.
+The program is not being run.
+== 47353
+warning: No executable has been specified and target does not support
+determining executable automatically.  Try using the "file" command.
+0x08000528 in ?? ()
+pc             0x8000528           0x8000528
+sp             0x18003bc0          0x18003bc0
+[Inferior 1 (Remote target) detached]
+gdb 47 s

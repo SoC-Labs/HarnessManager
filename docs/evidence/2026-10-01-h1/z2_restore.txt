@@ -1,0 +1,11 @@
+deploy: started greybox 0x00000000
+deploy: guard 0/1 (0%)
+deploy: guard 1/1 (100%)
+deploy: swap 1/1 (100%)
+deploy: push 0/1427980 (0%)
+deploy: push 68828/1427980 (4%)
+deploy: push 1427980/1427980 (100%)
+deploy: verify 0/1 (0%)
+deploy: verify 1/1 (100%)
+deploy: done card=None overlay=greybox rm_id=0x00000000 seconds=41.2 transport=tcp verified=True
+restored   mps3@192.168.10.101:6900 to the baseline (0x00000000) in 41.2s; verified

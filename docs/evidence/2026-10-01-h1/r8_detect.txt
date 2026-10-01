@@ -1,0 +1,1 @@
+harness-manager: nothing answered on the JTAG chain (all zeroes) — the loaded design may have no debug port

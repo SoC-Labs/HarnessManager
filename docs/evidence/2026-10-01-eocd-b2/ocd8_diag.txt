@@ -1,0 +1,15 @@
+tcp        0      0 127.0.0.1:6666          0.0.0.0:*               LISTEN      
+tcp        0      0 127.0.0.1:4444          0.0.0.0:*               LISTEN      
+tcp        0      0 127.0.0.1:3334          0.0.0.0:*               LISTEN      
+tcp        0      0 127.0.0.1:3333          0.0.0.0:*               LISTEN      
+---
+/run/mps3-debug:
+total 8
+drwx------    2 root     root           120 Jan  1 00:30 .
+drwxr-xr-x    6 root     root           300 Jan  1 00:17 ..
+-rw-------    1 root     root             0 Jan  1 00:17 lock
+-rw-------    1 root     root          3061 Jan  1 00:32 openocd.log
+-rw-------    1 root     root             0 Jan  1 00:17 session.lock
+-rw-------    1 root     root           241 Jan  1 00:30 state
+---
+  775 openocd  /usr/bin/openocd -s /usr/share/mps3/openocd -c set RBB_HOST 127.0.0.1 -c set RBB_PORT 6921 -c set TRANSPORT_MODE rbb -f nanosoc_mps3_multicore_jtag.cfg -f nanosoc_ops.tcl -c nanosoc.cpu0 configure -event gdb-attach nanosoc_halt_examine -c nanosoc.cpu1 configure -event gdb-attach nanosoc_halt_examine1 -c gdb_port 3333; telnet_port 4444; tcl_port 6666; bindto 127.0.0.1

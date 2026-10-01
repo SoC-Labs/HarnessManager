@@ -1,0 +1,12 @@
+== R7 +0s 11:05:27
+default    none: the greybox loads at power-on
+power-on   pending
+reported rm_id 0x01000001
+== R7 +60s 11:06:35
+default    nanosoc 0x01000001 for static 0x44ee76d5, store slot B
+power-on   failed:timeout
+reported rm_id 0x01000001
+== R7 +120s 11:08:37
+default    nanosoc 0x01000001 for static 0x44ee76d5, store slot B
+power-on   failed:timeout
+reported rm_id 0x01000001

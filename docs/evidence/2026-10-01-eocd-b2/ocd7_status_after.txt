@@ -1,0 +1,10 @@
+debug      mps3@192.168.11.101:6900: up
+where      the board: OpenOCD runs there; gdb reaches it through the board's SSH
+gdb        127.0.0.1:44487  cpu0
+gdb        127.0.0.1:47353  cpu1
+attach     arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:44487"
+attach     arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:47353"
+config     nanosoc_mps3_multicore_jtag.cfg nanosoc_ops.tcl
+pid        775
+detail     OpenOCD runs on the board; gdb reaches it through the board's SSH (pid 775)
+openocd    /home/dam1n19/opt/xpack-openocd/xpack-openocd-0.12.0-7/bin/openocd: has remote_bitbang (40 adapters)

@@ -1,0 +1,2 @@
+f328ad7 Merge team/ui2-polish (UI v2 polish): the showcase Linux board runs static 0x44EE76D5 (Build end to end in the demo), the Front panel black in both themes, the console a real terminal, one Debug USB vocabulary (boardfacts.js DEBUG_USB), a Linux board's fixed 50 MHz DUT clock, no "?" in the readings
+0.1.0

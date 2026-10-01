@@ -1,0 +1,8 @@
+card       mps3@192.168.10.101:6900: empty, 15193 MB  (CLCD: empty)
+default    none: the greybox loads at power-on
+power-on   failed:timeout
+os slots   mps3@192.168.10.101:6900: running A, default A, a push goes to B
+  A        valid hdr_crc 0x5ceaed1b 0 B, booted (not yet confirmed)  [running, default]
+  B        valid hdr_crc 0x5ceaed1b 0 B, not verified this boot  [target]
+job        idle
+note       this harness does not report whether harnessd confirmed the boot, so `verified: boot` means only that stage0 booted this image

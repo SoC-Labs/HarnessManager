@@ -1,0 +1,6 @@
+debug      mps3@192.168.11.101:6900: down
+where      the board: OpenOCD runs there; gdb reaches it through the board's SSH
+detail     OpenOCD on the board is not running
+openocd    /home/dam1n19/opt/xpack-openocd/xpack-openocd-0.12.0-7/bin/openocd: has remote_bitbang (40 adapters)
+{"schema":"mps3-debug/1","state":"down","already":false,"rm_id":"0x01000001","design":"nanosoc","cfg":[],"pid":null,"started_at":null,"bind":"127.0.0.1","openocd":{"version":"0.12.0+mps3 (soclabs-openocd 39eba58, ahb_qspi c97deb22, hostio4 057d317c; remote_bitbang)","adapter":"remote_bitbang"},"tap":null,"cores":[],"telnet_port":4444,"tcl_port":6666,"reason":"closed","busy":null,"error":null,"log_tail":[]}
+claim      mps3@192.168.11.101:6900: claimed by you (SHA256:rNA4D6xWgb9vWqWmQCjHl5PjF9ewMsCX+Pwu+yBjJuo, dam1n19@srv03335, 2026-10-01T15:29:19Z)

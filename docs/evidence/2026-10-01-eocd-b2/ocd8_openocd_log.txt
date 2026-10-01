@@ -1,0 +1,48 @@
+Open On-Chip Debugger 0.12.0
+Licensed under GNU GPL v2
+For bug reports, read
+	http://openocd.org/doc/doxygen/bugs.html
+127.0.0.1
+6921
+rbb
+Info : only one transport option; autoselect 'jtag'
+Warn : Transport "jtag" was already selected
+nanosoc_mps3_multicore_jtag.cfg: TRANSPORT_MODE=rbb TAPID=0x6ba00477 (2 APs, UNPROVEN on silicon)
+nanosoc_reset_halt
+Info : Listening on port 6666 for tcl connections
+Info : Listening on port 4444 for telnet connections
+Warn : An adapter speed is not selected in the init scripts. OpenOCD will try to run the adapter at the low speed (100 kHz)
+Warn : To remove this warnings and achieve reasonable communication speed with the target, set "adapter speed" or "jtag_rclk" in the init scripts.
+Info : Initializing remote_bitbang driver
+Info : Connecting to 127.0.0.1:6921
+Info : remote_bitbang driver initialized
+Info : This adapter doesn't support configurable speed
+Info : JTAG tap: nanosoc.cpu tap/device found: 0x6ba00477 (mfg: 0x23b (ARM Ltd), part: 0xba00, ver: 0x6)
+Info : starting gdb server for nanosoc.cpu0 on 3333
+Info : Listening on port 3333 for gdb connections
+Info : starting gdb server for nanosoc.cpu1 on 3334
+Info : Listening on port 3334 for gdb connections
+Info : accepting 'gdb' connection on tcp/3333
+Error: [nanosoc.cpu0] Cortex-M PARTNO 0x0 is unrecognized
+Error executing event gdb-attach on target nanosoc.cpu0:
+nanosoc_mps3_multicore_jtag.cfg:63: Error: 
+Traceback (most recent call last):
+  File "nanosoc_mps3_multicore_jtag.cfg", line 66, in nanosoc_halt_examine
+    nanosoc_halt_examine_ap 0 nanosoc.cpu0
+  File "nanosoc_mps3_multicore_jtag.cfg", line 63, in nanosoc_halt_examine_ap
+    {nanosoc.cpu0 arp_examine}
+Info : New GDB Connection: 1, Target nanosoc.cpu0, state: examine deferred
+Error: Target nanosoc.cpu0 not examined yet, refuse gdb connection 1!
+Error: attempted 'gdb' connection rejected
+Info : accepting 'gdb' connection on tcp/3334
+Info : [nanosoc.cpu1] Cortex-M0+ r0p1 processor detected
+Info : [nanosoc.cpu1] target has 4 breakpoints, 2 watchpoints
+Info : New GDB Connection: 1, Target nanosoc.cpu1, state: halted
+Warn : keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (1856 ms). Workaround: increase "set remotetimeout" in GDB
+undefined debug reason 8 - target needs reset
+Warn : keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (17645 ms). Workaround: increase "set remotetimeout" in GDB
+Warn : keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (1137 ms). Workaround: increase "set remotetimeout" in GDB
+Warn : keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (1195 ms). Workaround: increase "set remotetimeout" in GDB
+Warn : keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (1205 ms). Workaround: increase "set remotetimeout" in GDB
+Warn : keep_alive() was not invoked in the 1000 ms timelimit. GDB alive packet not sent! (1505 ms). Workaround: increase "set remotetimeout" in GDB
+Info : dropped 'gdb' connection

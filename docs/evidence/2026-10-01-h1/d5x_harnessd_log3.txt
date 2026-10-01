@@ -1,0 +1,32 @@
+4186d9e8-df00-4945-ae49-0a81346ef408
+-rw-r--r--    1 root     root            64 Jan  1 00:01 /run/mps3/boot-health
+-rw-r--r--    1 root     root           438 Jan  1 00:00 /run/mps3/identity
+-rw-r--r--    1 root     root           109 Jan  1 00:01 /run/mps3/net.state
+-rw-r--r--    1 root     root            43 Jan  1 00:00 /run/mps3/persist.state
+
+/run/mps3:
+total 16
+drwxr-xr-x    3 root     root           140 Jan  1 00:01 .
+drwxr-xr-x    5 root     root           260 Jan  1 00:00 ..
+-rw-r--r--    1 root     root            64 Jan  1 00:01 boot-health
+-rw-r--r--    1 root     root           438 Jan  1 00:00 identity
+-rw-r--r--    1 root     root           109 Jan  1 00:01 net.state
+-rw-r--r--    1 root     root            43 Jan  1 00:00 persist.state
+drwxr-xr-x    2 root     root            60 Jan  1 00:00 ssh
+
+/run/mps3/ssh:
+total 4
+drwxr-xr-x    2 root     root            60 Jan  1 00:00 .
+drwxr-xr-x    3 root     root           140 Jan  1 00:01 ..
+-rw-r--r--    1 root     root            51 Jan  1 00:00 host_key_sha256
+
+/tmp:
+total 24
+drwxrwxrwt    3 root     root            80 Jan  1 00:00 .
+drwxr-xr-x   15 root     root           440 Jan  1 00:00 ..
+-rw-r--r--    1 root     root         23785 Jan  1 00:07 messages
+drwxr-xr-x    2 root     root            60 Jan  1 00:00 pstore.prev
+Jan  1 00:00:18 mps3-harness kern.warn kernel: [   18.303645] spi_usd: loading out-of-tree module taints kernel.
+Jan  1 00:00:18 mps3-harness kern.info kernel: [   18.374724] spi-usd 44a40000.spi: user microSD controller, aclk 100000000 Hz, SCK 763..25000000 Hz, card present
+Jan  1 00:00:45 mps3-harness daemon.info : starting pid 197, tty '': '/usr/sbin/mps3-harnessd'
+Jan  1 00:00:48 mps3-harness daemon.notice wdkick: harnessd up at 47.9 s, stopping (14 kick(s))
