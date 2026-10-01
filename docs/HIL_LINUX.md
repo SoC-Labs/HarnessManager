@@ -23,6 +23,9 @@
 > | T+65 | §Z close-out: card default back, greybox, lease, tell people, evidence | 5 | **user microSD** |
 >
 > Out of time? Skip §G, then F6. Never skip §Z.
+>
+> **§E-OCD** (OpenOCD on the board, ~20 min) is not in the timed run: it needs the launcher
+> image (OpenOCD + `mps3-debug`, v7 or later). Run it after §E once the board has that image.
 
 ## Netboot mode (card unusable): read this first
 
@@ -542,6 +545,135 @@ harness-manager xvc close $B | tee $EV/e6_xvc_close.txt
 pgrep -af hw_server || echo NO-HW-SERVER
 ```
 **Expect:** `down`, then `NO-HW-SERVER`. If terminal C still holds, it ends too.
+
+---
+
+## E-OCD. OpenOCD on the board (~20 min; NEEDS THE LAUNCHER IMAGE; not run yet)
+
+> **Needs the launcher image:** the Linux image with OpenOCD and `mps3-debug` (v7 or later;
+> the Linux lead, Thu 1 Oct evening or Fri 2 Oct 09:00). Until the board runs it, skip this
+> section: the timed run above does not include it. **Also needs** §B's adopt (the board
+> claimed from this Harness Manager), the lease (§0.3) and the service restarted on this
+> code (§0.4). **Writes:** DUT RAM only (OCD4), then a DUT reset; one swap (OCD8) and back.
+> The steps use no hub or board command outside Harness Manager except `board ssh` reads.
+
+What it proves (DEBUG-ONBOARD): `debug up` runs OpenOCD ON the board through `mps3-debug`
+over the claim's SSH, gdb reaches it through the session's one claim forward (`gdb0` 3333,
+`gdb1` 3334, local ends on 127.0.0.1 only; the board's telnet and Tcl stay on the board),
+and a swap closes it first ("closed for the swap") and reopens it. Once for `nanosoc`, then
+for `nanosoc_multicore` (two cores, two gdb ports).
+
+**OCD0. The launcher answers** (terminal B)
+```bash
+harness-manager board ssh $B -c 'mps3-debug version --json; mps3-debug status --json' | tee $EV/ocd0_launcher.txt
+harness-manager config get debug.on_board | tee -a $EV/ocd0_launcher.txt
+harness-manager program $B nanosoc --yes | tee $EV/ocd0_program_nanosoc.txt
+```
+Expect: two JSON objects with `"schema":"mps3-debug/1"`, the second `"state":"down"`;
+`debug.on_board` is `auto`; `programmed nanosoc … verified`.
+
+**OCD1. Up** (terminal C: it holds until Ctrl-C)
+```bash
+source ~/SoCLabs/harness-manager/docs/evidence/2026-09-hil-linux/env.sh
+harness-manager debug up $B | tee $EV/ocd1_up.txt
+```
+Expect: `up`; `where      the board: OpenOCD runs there; gdb reaches it through the board's
+SSH`; one `gdb 127.0.0.1:<port>` line and one `attach` line; no `telnet` or `tcl` line. No
+OpenOCD process on this PC: in terminal B, `pgrep -a openocd || echo NO-LOCAL-OPENOCD`.
+
+**OCD2. IDCODE, status, and what is forwarded** (terminal B)
+```bash
+harness-manager debug status $B | tee $EV/ocd2_status.txt
+harness-manager debug detect $B | tee $EV/ocd2_idcode.txt
+harness-manager board ssh $B -c 'mps3-debug status --json' | tee $EV/ocd2_board_status.txt
+G0=$(harness-manager --json debug status $B | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"]["gdb_ports"][0])'); echo G0=$G0
+ss -ltn | grep -E ':(4444|6666)\b' || echo NO-TELNET-TCL-HERE
+```
+Expect: status `up`, `where … the board`; `idcode     0x6ba00477`; the board says `"state":"up"`,
+`"design":"nanosoc"`, `"tap":{"idcode":"0x6ba00477"}`; a port for G0; `NO-TELNET-TCL-HERE`.
+
+**OCD3. Halt and a register dump** (terminal B)
+```bash
+arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:$G0" \
+  -ex "monitor halt" -ex "info registers" -ex "detach" 2>&1 | tee $EV/ocd3_regs.txt
+```
+Expect: `r0` … `r12`, `sp`, `lr`, `pc`, `xpsr` with values; no `timeout` and no `Remote
+replied unexpectedly`. `keep_alive() was not invoked` warnings are not failures.
+
+**OCD4. An 8 KiB RAM round trip** (terminal B; saves DUT RAM, writes a pattern, reads it back, puts the
+saved contents back, resumes, then resets the DUT so the board is left sane)
+```bash
+RAM=0x18000000     # the bottom of DMEM. nanosoc's DMEM is 16 KiB (0x18000000-0x18003FFF,
+                   # rp_nanosoc_wrapper.sv:107, DMEM_RAM_ADDR_W = 14); nanosoc_upy's is 64 KiB.
+                   # Don't size from host/openocd/nanosoc_ops.tcl:25 ("64KB": right for upy only).
+N=8192
+head -c $N /dev/urandom > $EV/ocd4_ram_in.bin
+arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:$G0" \
+  -ex "monitor halt" \
+  -ex "dump binary memory $EV/ocd4_ram_saved.bin $RAM $((RAM + N))" \
+  -ex "restore $EV/ocd4_ram_in.bin binary $RAM" \
+  -ex "dump binary memory $EV/ocd4_ram_out.bin $RAM $((RAM + N))" \
+  -ex "restore $EV/ocd4_ram_saved.bin binary $RAM" \
+  -ex "monitor resume" -ex "detach" 2>&1 | tee $EV/ocd4_ram.txt
+cmp $EV/ocd4_ram_in.bin $EV/ocd4_ram_out.bin && echo RAM-OK | tee -a $EV/ocd4_ram.txt
+harness-manager reset $B | tee -a $EV/ocd4_ram.txt      # hello restarts / MicroPython reboots from flash
+```
+Expect: two `Restoring binary file … into memory (0x18000000 to 0x18002000)` lines (the pattern, then
+the saved contents), `RAM-OK`, then the reset's `done`. On nanosoc_upy the interpreter's heap and stack
+live in DMEM: the save/restore plus the DUT reset leave it clean. Note how long gdb took (seconds) in the
+evidence file.
+
+**OCD5. Down** (terminal C: Ctrl-C; then terminal B)
+```bash
+harness-manager debug status $B | tee $EV/ocd5_down.txt
+harness-manager board ssh $B -c 'mps3-debug status --json' | tee -a $EV/ocd5_down.txt
+```
+Expect: terminal C ends; `down`, `where … the board`, "OpenOCD on the board is not running";
+the board says `"state":"down"`. `harness-manager board claim-status $B` still shows the claim.
+
+**OCD6. The twin: this PC's OpenOCD while the board's holds JTAG** (optional, 2 min)
+Terminal C: `harness-manager debug up $B` again. Terminal B:
+```bash
+harness-manager config set debug.on_board false
+harness-manager debug detect $B; echo "exit $?" | tee $EV/ocd6_twin.txt
+harness-manager config set debug.on_board auto
+```
+Expect: exit 4 with "OpenOCD is running on the board (on-board session): use it (`debug
+status`), or stop it (`harness-manager debug down`)". Leave terminal C holding for OCD7.
+
+**OCD7. Swap while open** (terminal B, with terminal C still holding `debug up`)
+```bash
+harness-manager program $B nanosoc_multicore --yes | tee $EV/ocd7_swap.txt
+harness-manager debug status $B | tee $EV/ocd7_status_after.txt
+```
+Expect: the program `verified`; during it the board's OpenOCD stopped first (the app's
+Activity, or `debug status` in the window: `down`, "closed for the swap"); after it the
+session is up again for `nanosoc_multicore`: two `gdb 127.0.0.1:<port>  cpu0|cpu1` lines and
+two `attach` lines. The board: `mps3-debug status --json` shows `"design":"nanosoc_multicore"`
+and two cores (3333, 3334).
+
+**OCD8. nanosoc_multicore: both cores** (the image's 2-AP cfg is UNPROVEN on silicon: a failure here is "cfg unproven", for the Linux lead, not an HM bug; record it and go on to OCD9) (terminal B; then the RAM round trip on core 0)
+```bash
+read G0 G1 < <(harness-manager --json debug status $B | python3 -c 'import json,sys; print(*json.load(sys.stdin)["status"]["gdb_ports"])'); echo G0=$G0 G1=$G1
+harness-manager debug detect $B | tee $EV/ocd8_idcode.txt
+for G in $G0 $G1; do arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" \
+  -ex "target extended-remote 127.0.0.1:$G" -ex "monitor halt" -ex "info registers pc sp" \
+  -ex "detach"; done 2>&1 | tee $EV/ocd8_regs.txt
+```
+Expect: `0x6ba00477`; each core's `pc` and `sp`, two blocks, no timeout. Then repeat OCD4 with
+G0 (evidence `ocd8_ram*`): `RAM-OK`.
+
+**OCD9. Down and back** (terminal C: Ctrl-C; then terminal B)
+```bash
+harness-manager debug status $B | tee $EV/ocd9_down.txt
+harness-manager program $B nanosoc --yes | tee -a $EV/ocd9_down.txt
+```
+Expect: `down` (`where … the board`); `programmed nanosoc … verified`. §Z puts the greybox back.
+
+If a step fails: note the exit code and the message (exit 12: no launcher on the board, the
+image is older than v7; 13: no debug port; 14: the launcher has no config for the design; 4:
+held, the message names who; 6: OpenOCD did not start, the message ends with its log), then
+`harness-manager board ssh $B -c 'mps3-debug status --json'` into the evidence folder.
 
 ---
 

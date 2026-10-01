@@ -199,7 +199,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
         # T2 (read at each use: SET-WIRE dropped the import-time copy, SETTINGS.md §12.9)
         _row("mps3.openocd_cfg_dir", "path", "", "Tools",
              "OpenOCD's MPS3 target configs (empty: the platform checkout beside Harness "
-             "Manager, else the packaged copy)", at="openocd.py:115",
+             "Manager, else the packaged copy)", at="openocd.py:138",
              scope="machine", owner="admin", env="HARNESS_MANAGER_MPS3_OPENOCD_DIR",
              advanced=True),
         # K7 (the core's --overlay-dir puts directories first: cli/cmd_program.py:23-25)
@@ -317,15 +317,15 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
              at="telemetry.py:407", scope="board"),
         # A.12 L1-L3 (LINUX-CLAIM): the Linux harness's SSH, claimed with your key
         _row("boards.*.ssh.user", "str", "", "Boards",
-             "The Linux harness's SSH login (empty: root)", at="claim.py:372",
+             "The Linux harness's SSH login (empty: root)", at="claim.py:383",
              scope="board", apply="reopen", check=_word("user name")),
         _row("boards.*.ssh.key", "path", "", "Boards",
              "The private key Harness Manager's ssh uses for this board (empty: your ssh "
              "default); a claim sends its .pub. The key itself is never read",
-             at="claim.py:940", scope="board", apply="reopen"),
+             at="claim.py:951", scope="board", apply="reopen"),
         _row("boards.*.ssh.host_key", "str", "", "Boards",
              "The board's pinned SSH host key, written by `board claim` (a changed key is "
-             "refused; clear it only for a re-provisioned board)", at="claim.py:374",
+             "refused; clear it only for a re-provisioned board)", at="claim.py:385",
              scope="board", apply="reopen", check=_host_key),
     )
 

@@ -360,21 +360,46 @@ def _gdb_command(gdb_port: int) -> str:
     return gdb_command(gdb_port, EXPORT_HOST)
 
 
+def _gdb_ports(st: DebugStatus) -> list[tuple[str, int]]:
+    """``(core, local gdb port)`` for each core (DEBUG-ONBOARD: a two-core design has two).
+    A status from an older service has only ``gdb_port``: that is core 0."""
+    ports = list(getattr(st, "gdb_ports", ()) or ([st.gdb_port] if st.gdb_port else []))
+    cores = list(getattr(st, "cores", ()) or ())
+    return [(cores[i] if i < len(cores) else f"cpu{i}", int(p)) for i, p in enumerate(ports)]
+
+
+def _gdb_commands(st: DebugStatus) -> list[dict[str, Any]]:
+    """The JSON's ``gdb_commands``: one ``{core, gdb_port, command}`` per core."""
+    return [{"core": core, "gdb_port": port, "command": _gdb_command(port)}
+            for core, port in _gdb_ports(st)]
+
+
+#: DEBUG-ONBOARD: where OpenOCD runs, in words (the app's Connection card says the same).
+WHERE_WORDS = {"board": "the board: OpenOCD runs there; gdb reaches it through the board's SSH",
+               "host": "this PC: OpenOCD runs here, on the board's JTAG port (6921)"}
+
+
 def _status_row(board_id: str, st: DebugStatus) -> list:
     return [board_id, st.state, st.gdb_port or "", st.telnet_port or "", st.tcl_port or "",
-            st.pid or "", list(st.config), st.detail]
+            st.pid or "", list(st.config), st.detail,
+            getattr(st, "where", "host"), [p for _c, p in _gdb_ports(st)],   # +DEBUG-ONBOARD
+            [c for c, _p in _gdb_ports(st)]]
 
 
 def _status_human(board_id: str, st: DebugStatus) -> list[str]:
     lines = [f"debug      {board_id}: {st.state}"]
-    if st.gdb_port:
-        lines.append(f"gdb        {EXPORT_HOST}:{st.gdb_port}")
+    where = getattr(st, "where", "host")
+    if where == "board" or st.state in ("up", "starting"):
+        lines.append(f"where      {WHERE_WORDS.get(where, where)}")
+    cores = _gdb_ports(st)
+    for core, port in cores:                    # one per core; a lone core stays unnamed
+        lines.append(f"gdb        {EXPORT_HOST}:{port}" + (f"  {core}" if len(cores) > 1 else ""))
     if st.telnet_port:
         lines.append(f"telnet     {EXPORT_HOST}:{st.telnet_port}")
     if st.tcl_port:
         lines.append(f"tcl        {EXPORT_HOST}:{st.tcl_port}")
-    if st.gdb_port:
-        lines.append(f"attach     {_gdb_command(st.gdb_port)}")
+    for _core, port in cores:                   # the line to paste, per core (FIX-PACK-5)
+        lines.append(f"attach     {_gdb_command(port)}")
     if st.config:
         lines.append(f"config     {' '.join(st.config)}")
     if st.pid:
@@ -411,6 +436,7 @@ def cmd_debug(ctx: Ctx) -> int:
         data: dict[str, Any] = {"board_id": cand.board_id, "status": st}
         if st.gdb_port:                                 # FIX-PACK-5: the line to paste
             data["gdb_command"] = _gdb_command(st.gdb_port)
+            data["gdb_commands"] = _gdb_commands(st)    # DEBUG-ONBOARD: one per core
         human = _status_human(cand.board_id, st)
         report = getattr(svc, "openocd_report", None)
         ocd = report(session) if action == "status" and callable(report) else None
@@ -425,8 +451,12 @@ def cmd_debug(ctx: Ctx) -> int:
             # The engine stops a board's debug server when its session closes, so this
             # process IS the server's owner: hold until Ctrl-C, `detach`, or --for.
             if a.for_s is None:
-                ctx.note(f"debug server up for {cand.board_id}: run gdb in another terminal "
-                         f"(the attach line); this one holds the server until Ctrl-C or "
+                which = ("one gdb per core, each with its attach line"
+                         if len(_gdb_ports(st)) > 1 else "the attach line")
+                where = (" (OpenOCD runs on the board; this holds its gdb forward)"
+                         if getattr(st, "where", "host") == "board" else "")
+                ctx.note(f"debug server up for {cand.board_id}{where}: run gdb in another "
+                         f"terminal ({which}); this one holds the server until Ctrl-C or "
                          f"`harness-manager detach {a.target}`")
             hold(a.for_s)
             svc.down(session)

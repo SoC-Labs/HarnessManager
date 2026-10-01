@@ -685,7 +685,7 @@ The columns:
 | L3 | `boards.*.ssh.host_key` | pinned host key (from identify `ssh.host_key_sha256`) | `docs/TEAM_PLAN.md:383`; `lx:docs/planning/linux_lanes/IMAGE_CONTRACT.md:121-133` | TOFU at claim | B | | R | ✓ (show; "forget") |
 | L4 | `boards.*.ssh.claim_key` | public key a claim writes | `B1_RUNBOOK_LINUX.md:194-211` | `~/.ssh/id_ed25519.pub` | U | | L | ✓ |
 | L5 | `boards.*.ssh.jump` | ProxyJump via the hub (derived today) | `harness_manager_mps3/xvc.py:151-160`; `docs/design/XVC_DEBUG.md:350` | from the hub | B | | R | ✓ (override) |
-| L6 | `debug.on_board` | `debug up` via on-board OpenOCD over an SSH forward | `lx:docs/planning/linux_lanes/GDB_SERVER_PROPOSAL.md:3,35,51-53` | on when the harness has `gdb_server` | B | | R | ✓ |
+| L6 | `debug.on_board` | `debug up` via on-board OpenOCD over an SSH forward. **Declared (DEBUG-ONBOARD, 2026-10-01)** in `settings/rows.py` DEBUG as `auto`/`true`/`false`, env `HARNESS_MANAGER_DEBUG_ON_BOARD`, app-wide (not per board), read at each use (`services/debug_onboard.py` `mode`) | `lx:docs/planning/linux_lanes/GDB_SERVER_PROPOSAL.md:3,35,51-53` | auto: on the board when it is a claimed Linux board whose image has `mps3-debug` | U | | L | ✓ |
 | L7 | `boards.*.install_door` | usb, hub or ethernet | `docs/design/HARNESS_DISTRIBUTION.md:437` | auto | B | | L | ✓ |
 | L8 | `install.auto_revert` | revert a remote install that leaves the board dark (D6a) | `HARNESS_DISTRIBUTION.md:404,438,534-536` | on for remote doors | U | | L | ✓ (lockable) |
 | L9 | `deploy.persist` | keep a deployed overlay on the card (D13) | `plat:docs/planning/HANDOVER_USD_OVERLAY_STORE.md:90,198-201` | persist (pyverify D1=B) | U/B | | L | ✓ |

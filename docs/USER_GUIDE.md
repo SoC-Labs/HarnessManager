@@ -909,8 +909,56 @@ another key they are refused before anything connects (exit 15; `board claim TAR
 
 ### 8.1 The DUT CPU: OpenOCD and gdb
 
-**Needs:** OpenOCD 0.12 or later, built with the **remote_bitbang** adapter, on your PATH
-or in `tools.openocd`. The MPS3 target configs ship with Harness Manager.
+**Where OpenOCD runs.** Two places, and HM picks one for you:
+
+- **On the board** (a Linux harness you claimed, 12.1, whose image has OpenOCD and
+  `mps3-debug`, v7 or later). The board runs OpenOCD itself; gdb reaches it through the
+  board's SSH, over the same forward HM already keeps for the claimed board. You need **no
+  OpenOCD on your PC**, only gdb.
+- **On this PC** (every other board: bare metal, an unclaimed board, an older image). HM runs
+  OpenOCD here, on the board's JTAG port (6921). This needs OpenOCD with remote_bitbang (below).
+
+`debug status` says which (`where`), and so does the app's Connection card ("OpenOCD: on the
+board" or "on this PC"). The setting **`debug.on_board`** (Settings → Debug, or `harness-manager
+config set debug.on_board VALUE`) chooses:
+
+| Value | What HM does |
+|---|---|
+| `auto` (default) | on the board when it is a claimed Linux board with `mps3-debug`; else on this PC |
+| `true` | on the board, or it refuses and says why: exit 12 (no `mps3-debug` on the board, or bare metal), exit 15 (not claimed here, or claimed by another key) |
+| `false` | on this PC only |
+
+HM asks the board once per session whether it has `mps3-debug` (`mps3-debug status --json`
+over its SSH).
+
+**A two-core design** (nanosoc_multicore) runs on the board only: HM prints one gdb port and
+one `attach` line per core (cpu0, cpu1). Attach one gdb per core, each in its own terminal:
+
+```text
+gdb        127.0.0.1:40211  cpu0
+gdb        127.0.0.1:40212  cpu1
+attach     arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:40211"
+attach     arm-none-eabi-gdb -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:40212"
+```
+
+On the board, OpenOCD's telnet and Tcl ports stay on the board: HM forwards gdb only.
+
+**On-board: what can go wrong**
+- **Exit 4, "OpenOCD is running on the board (on-board session)":** you asked for this PC's
+  OpenOCD while the board's own holds JTAG. Use it (`debug status`), or stop it
+  (`harness-manager debug down TARGET`).
+- **Exit 4, held by another client:** the message names who holds the board's JTAG.
+- **Exit 4, the lease:** behind a hub, the board's OpenOCD is for the lease holder (as XVC).
+- **Exit 13:** the loaded design has no debug port. **Exit 14:** the board's OpenOCD has no
+  config for this design. HM passes the design's name; for a design it does not know it
+  passes `auto`, and the board may not know it either.
+- **Exit 6:** OpenOCD did not start on the board; the message ends with its log.
+- A program (a swap) stops the board's OpenOCD first; `debug status` then says "closed for the
+  swap", and a session HM had open reopens after a verified swap. An idle one stops by itself
+  after 2 hours on the board.
+
+**This PC's OpenOCD: needs** OpenOCD 0.12 or later, built with the **remote_bitbang**
+adapter, on your PATH or in `tools.openocd`. The MPS3 target configs ship with Harness Manager.
 
 Most builds have remote_bitbang, but not all: the SoC Labs build has only jlink, buspirate
 and hostio4. Check yours (it loads no config and touches no hardware):
@@ -958,7 +1006,7 @@ through a hub: a warning, not a failure. The app's **Attach** row copies the sam
 
 Arm DS uses the same port
 through its "Generic GDB" connection. The session closes by itself before a partition
-swap, and reopens only when you ask.
+swap, and reopens after a verified one.
 
 **Back-to-back sessions.** The board's JTAG server takes one client, and needs a moment
 to finish the last session before it takes the next. So HM waits until 2 seconds after

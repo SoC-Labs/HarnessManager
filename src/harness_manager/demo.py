@@ -128,6 +128,11 @@ DAP_DESIGNS = {0x0001: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),
                0x0005: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),
                0x0008: ("nanosoc_iice_chain.cfg", "nanosoc_ops.tcl")}
 DAP_IDCODE = "0x6ba00477"
+#: DEBUG-ONBOARD: the Linux harness runs OpenOCD itself (``mps3-debug``), with a config for
+#: the two-core design too (one gdb port per core); the demo's Linux board shows that path.
+ONBOARD_DAP_DESIGNS = {**DAP_DESIGNS,
+                       0x0003: ("interface/mps3_jtagbb.cfg", "target/nanosoc_multicore.cfg")}
+ONBOARD_CORES = {0x0003: ("cpu0", "cpu1")}
 
 
 def _design(rm_id: str) -> int:
@@ -728,26 +733,39 @@ class DemoDebug:
         board = e._board(bid)
         if board.debug.state == "up":
             raise AlreadyError("the OpenOCD session is already up", hint="close it first")
-        cfg = DAP_DESIGNS.get(_design(board.identity.rm_id))
+        on_board = board.kind == "linux"             # DEBUG-ONBOARD: the board runs OpenOCD
+        design = _design(board.identity.rm_id)
+        cfg = (ONBOARD_DAP_DESIGNS if on_board else DAP_DESIGNS).get(design)
         if cfg is None:
             raise NothingOnTargetError(
                 f"the loaded design ({board.identity.rm_name or board.identity.rm_id}) "
                 "has no debug port", hint="load nanosoc, nanosoc_upy or nanosoc_iice first")
-        self._set(bid, DebugStatus(state="starting", config=cfg))
+        where = "board" if on_board else "host"
+        self._set(bid, DebugStatus(state="starting", config=cfg, where=where))
         e._sleep(0.3)
         base = board.port_base
-        status = DebugStatus(state="up", gdb_port=base, telnet_port=base + 1111,
-                             tcl_port=base + 3333, config=cfg, pid=40000 + base,
-                             detail="remote_bitbang to 6921")
+        if on_board:
+            # the claim forward's local ends of the board's 3333/3334 (made up: nothing listens)
+            cores = ONBOARD_CORES.get(design, ("cpu0",))
+            status = DebugStatus(state="up", config=cfg, pid=812, gdb_ports=tuple(
+                base + 7 * i for i in range(len(cores))), cores=cores, where="board",
+                detail="OpenOCD runs on the board; gdb reaches it through the board's SSH "
+                       "(pid 812)")
+        else:
+            status = DebugStatus(state="up", gdb_port=base, telnet_port=base + 1111,
+                                 tcl_port=base + 3333, config=cfg, pid=40000 + base,
+                                 detail="remote_bitbang to 6921")
         self._set(bid, status)
         return status
 
     def down(self, session: BoardSession) -> DebugStatus:
         bid = session.candidate.board_id
         self._e._enter("debug.down", bid)
-        was = self._e._board(bid).debug.state
+        board = self._e._board(bid)
+        was = board.debug.state
         self._e._sleep(0.1)
-        status = DebugStatus(state="down", detail="closed" if was != "down" else "was not running")
+        status = DebugStatus(state="down", detail="closed" if was != "down" else "was not running",
+                             where="board" if board.kind == "linux" else "host")
         self._set(bid, status)
         return status
 
@@ -757,15 +775,22 @@ class DemoDebug:
 
     def _set(self, board_id: str, status: DebugStatus) -> None:
         self._e._board(board_id).debug = status
-        ports = ({"gdb": status.gdb_port, "telnet": status.telnet_port, "tcl": status.tcl_port}
+        ports = ({k: v for k, v in (("gdb", status.gdb_port), ("telnet", status.telnet_port),
+                                    ("tcl", status.tcl_port)) if v}
                  if status.state == "up" else {})
-        self._e.bus.publish(Event("debug.state", board_id, {"state": status.state,
-                                                             "ports": ports}))
+        self._e.bus.publish(Event("debug.state", board_id, {
+            "state": status.state, "ports": ports, "where": status.where,
+            "gdb_ports": list(status.gdb_ports), "cores": list(status.cores)}))
 
     def _auto_close(self, board_id: str) -> None:
         # T4's rule: the OpenOCD session closes before a swap.
-        if self._e._board(board_id).debug.state != "down":
-            self._set(board_id, DebugStatus(state="down", detail="closed for a partition swap"))
+        board = self._e._board(board_id)
+        if board.debug.state != "down":
+            on_board = board.kind == "linux"         # DEBUG-ONBOARD: the same words as the service
+            self._set(board_id, DebugStatus(
+                state="down", where="board" if on_board else "host",
+                detail="closed for the swap (OpenOCD on the board stops before a partition swap)"
+                if on_board else "closed for a partition swap"))
 
 
 class DemoTelemetry:

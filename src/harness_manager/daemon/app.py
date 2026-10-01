@@ -1160,6 +1160,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def debug_up(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         ui2_holder(bid, s, "debug_up", _obj(body))          # ui2 api-hub (G7): 409 HELD
+        svc = d.engine.debug
+        # DEBUG-ONBOARD: the board's own OpenOCD is for the lease holder (as XVC): one view
+        # of "held here", the hub API's.
+        if getattr(svc, "leases", "absent") is None and getattr(d, "leases", None) is not None:
+            svc.leases = d.leases
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "debug session")

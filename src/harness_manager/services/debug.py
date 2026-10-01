@@ -85,6 +85,10 @@ Traps handled
 - **A swap invalidates the DAP.** ``deploy.started`` closes the session
   (synchronously, before the swap proceeds); ``deploy.done`` with
   ``verified: true`` reopens it on the same ports, in a worker thread.
+- **OpenOCD on the board** (DEBUG-ONBOARD, ``services/debug_onboard.py``): on a claimed
+  Linux board with the launcher (``mps3-debug``), ``up``/``down``/``status``/``detect`` run
+  OpenOCD ON the board over the claim's SSH and forward its gdb ports (the setting
+  ``debug.on_board``: auto, true, false). Everything above is this PC's OpenOCD, unchanged.
 - **Orphans** (the HAPS lesson: an OpenOCD held a probe for an hour after its
   owner was gone, HAPS-work openocd/README.md "Orphaned sessions"). A session
   belongs to the process that started it (the engine's lifetime: the engine
@@ -131,6 +135,8 @@ from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession, DebugAdapter
 from harness_manager.core.services import DebugStatus
 from harness_manager.services import openocd_probe
+from harness_manager.services.debug_onboard import OnBoard
+from harness_manager.services.debug_onboard import mode as on_board_mode
 from harness_manager.services.openocd_probe import REMOTE_BITBANG
 
 log = logging.getLogger(__name__)
@@ -554,7 +560,8 @@ class DebugService:
 
     def __init__(self, engine: Any = None, *, port_base: int | None = None,
                  start_timeout: float = 30.0, detect_timeout: float = 30.0,
-                 stop_timeout: float = 3.0, cooldown: float = JTAG_COOLDOWN_S) -> None:
+                 stop_timeout: float = 3.0, cooldown: float = JTAG_COOLDOWN_S,
+                 leases: Any = None) -> None:
         self.engine = None if isinstance(engine, EventBus) else engine
         self.bus = _bus_of(engine)
         self.port_base = port_base
@@ -562,7 +569,13 @@ class DebugService:
         self.detect_timeout = detect_timeout
         self.stop_timeout = stop_timeout
         self.cooldown = cooldown
-        self._resume: dict[str, tuple[BoardSession | None, DebugPorts]] = {}
+        #: DEBUG-ONBOARD: the lease view for the board's own OpenOCD (the daemon gives its
+        #: hub service's, as for XVC); None: one on the state dir, made on first use.
+        self.leases = leases
+        #: DEBUG-ONBOARD: OpenOCD on the board (``services/debug_onboard.py``).
+        self.onboard = OnBoard(self)
+        # ports None: an on-board session (its route is chosen again on the reopen)
+        self._resume: dict[str, tuple[BoardSession | None, DebugPorts | None]] = {}
         self._locks: dict[str, threading.RLock] = {}
         self._guard = threading.Lock()
         self._reserved: set[int] = set()
@@ -715,13 +728,25 @@ class DebugService:
 
     # -- events --------------------------------------------------------------------------
 
-    def _publish(self, board_id: str, state: str, *, ports: DebugPorts | None = None,
-                 pid: int = 0, detail: str = "", config: Sequence[str] = ()) -> None:
+    def _publish(self, board_id: str, state: str, *,
+                 ports: DebugPorts | dict[str, int] | None = None, pid: int = 0,
+                 detail: str = "", config: Sequence[str] = (), **extra: Any) -> None:
+        """``debug.state``. ``extra`` (DEBUG-ONBOARD, additive): ``where``, ``gdb_ports``,
+        ``cores``; ``where`` is ``host`` unless said."""
         if self.bus is None:
             return
+        shown = ports.as_dict() if isinstance(ports, DebugPorts) else dict(ports or {})
         self.bus.publish(Event("debug.state", board_id, {
-            "state": state, "ports": ports.as_dict() if ports else {}, "pid": pid,
-            "detail": detail, "config": list(config)}))
+            "state": state, "ports": shown, "pid": pid, "detail": detail,
+            "config": list(config), "where": "host", **extra}))
+
+    def lease_service(self) -> Any:
+        """The lease view the board's own OpenOCD checks (``OnBoard.check_lease``)."""
+        if self.leases is None:
+            from harness_manager.services.lease import LeaseService
+
+            self.leases = LeaseService(self.state_dir, self.bus)
+        return self.leases
 
     # -- registry inspection and orphan reaping ------------------------------------------------
 
@@ -834,6 +859,10 @@ class DebugService:
         with self._board_lock(board_id):
             rec, verdict, detail = self._inspect(board_id)
             if rec is None:
+                # DEBUG-ONBOARD: the board's own OpenOCD, unless this PC's just failed here
+                board = self.onboard.status(session) if verdict != "exited" else None
+                if board is not None:
+                    return board
                 state = "failed" if verdict == "exited" else "down"
                 return DebugStatus(state=state, detail=detail)
             if verdict == "ours":
@@ -846,8 +875,17 @@ class DebugService:
     def openocd(self) -> str:
         """The OpenOCD ``up`` and ``detect`` would run (``find_openocd``), else
         ``UnavailableError`` (12). Only the adapter probe runs: no board, no tunnel, so the CLI
-        asks this before it opens the board."""
-        return find_openocd(self.state_dir)
+        asks this before it opens the board.
+
+        DEBUG-ONBOARD: with ``debug.on_board`` auto or true the board may run its own
+        OpenOCD, which this PC's cannot know before the board opens: "" instead of a refusal
+        (``up`` still refuses, after the board opens, when it takes this PC's path)."""
+        if on_board_mode(self.state_dir) == "false":
+            return find_openocd(self.state_dir)
+        try:
+            return find_openocd(self.state_dir)
+        except UnavailableError:
+            return ""
 
     def openocd_report(self, session: BoardSession | None = None) -> dict[str, Any]:
         """``openocd_report`` with this service's settings: the verdict ``debug status``
@@ -873,6 +911,13 @@ class DebugService:
                 raise HeldError(f"the debug session for {board_id} is held",
                                 holder=self._holder(rec),
                                 hint=f"held by {self._holder(rec)}; 'down --force' takes it")
+            try:                                                 # DEBUG-ONBOARD
+                onboard = self.onboard.route(session)
+                if onboard is not None:
+                    return self.onboard.up(session, onboard)
+            except HarnessError as exc:
+                self._publish(board_id, "failed", detail=str(exc), where="board")
+                raise
             try:
                 adapter = self._adapter(session)
                 binary = find_openocd(self.state_dir)
@@ -882,9 +927,13 @@ class DebugService:
                 return self._once_more_if_own_race(board_id, lambda: self._start(
                     board_id, session, binary, adapter, cfgs, post, target, _prefer))
             except HarnessError as exc:
+                # DEBUG-ONBOARD: turned away because the board's own OpenOCD holds JTAG?
+                board = self.onboard.held_by_board(session, exc)
                 # "failed" carries the reason to the GUI (and after a swap, to anyone).
-                self._publish(board_id, "failed", detail=str(exc))
+                self._publish(board_id, "failed", detail=str(board or exc))
                 _release_route(session)
+                if board is not None:
+                    raise board from exc
                 raise
 
     def down(self, session: BoardSession, *, force: bool = False,
@@ -895,7 +944,25 @@ class DebugService:
         """
         board_id = session.candidate.board_id
         with self._board_lock(board_id):
-            return self._down_locked(board_id, force=force, reason=reason)
+            host = self._down_locked(board_id, force=force, reason=reason)
+            # DEBUG-ONBOARD: and the board's own OpenOCD (a user's `down` reaches one this
+            # service did not start, too).
+            board = self.onboard.down(session, reason=reason, explicit=True)
+        return host if host.pid or board is None else board
+
+    def release(self, session: BoardSession) -> DebugStatus:
+        """The board is closing (``Engine.close``): stop what THIS service started on it, as
+        ``down`` does, but never a session on the board that another client started."""
+        board_id = session.candidate.board_id
+        with self._board_lock(board_id):
+            try:
+                board = self.onboard.down(session, reason="the board was closed",
+                                          explicit=False)
+            except HarnessError as exc:
+                log.warning("stopping the on-board OpenOCD of %s: %s", board_id, exc)
+                board = None
+            host = self._down_locked(board_id, force=False, reason="")
+        return host if host.pid or board is None else board
 
     def _down_locked(self, board_id: str, *, force: bool, reason: str) -> DebugStatus:
         rec, verdict, detail = self._inspect(board_id)
@@ -927,9 +994,13 @@ class DebugService:
         otherwise it runs OpenOCD once: init, scan_chain, shutdown.
         """
         board_id = session.candidate.board_id
-        adapter = self._adapter(session)
         with self._board_lock(board_id):
             rec, verdict, _ = self._inspect(board_id)
+            if rec is None:                                      # DEBUG-ONBOARD
+                idcode = self.onboard.idcode(session)
+                if idcode is not None:
+                    return idcode
+            adapter = self._adapter(session)
             if rec is not None and verdict in ("ours", "held"):
                 tcl = int((rec.get("ports") or {}).get("tcl", 0))
                 try:
@@ -949,6 +1020,11 @@ class DebugService:
                 target = getattr(adapter, "describe", lambda: "")()
                 return self._once_more_if_own_race(
                     board_id, lambda: self._detect_once(board_id, argv, target))
+            except HarnessError as exc:
+                board = self.onboard.held_by_board(session, exc)   # DEBUG-ONBOARD
+                if board is not None:
+                    raise board from exc
+                raise
             finally:
                 _release_route(session)           # a one-shot OpenOCD: done with the route
 
@@ -1122,6 +1198,12 @@ class DebugService:
     def _on_deploy_started(self, event: Event) -> None:
         board_id = event.board_id
         with self._board_lock(board_id):
+            # DEBUG-ONBOARD: the board's own OpenOCD stops first ("closed for the swap"),
+            # and a session of ours reopens after a verified swap, as below.
+            board_session = self.onboard.before_swap(board_id)
+            if board_session is not None:
+                self._resume[board_id] = (board_session, None)
+                return
             live = self._live_get(board_id)
             if live is None or live.proc.poll() is not None:
                 return
@@ -1176,6 +1258,9 @@ class DebugService:
 
     def close(self) -> None:
         """Stop every OpenOCD this service started and stop listening for events."""
+        for board_id in self.onboard.boards():                 # DEBUG-ONBOARD
+            with self._board_lock(board_id):
+                self.onboard.close_board(board_id, "engine closed")
         for board_id in self._live_boards():
             with self._board_lock(board_id):
                 try:

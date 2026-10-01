@@ -15,6 +15,12 @@ DEFAULT_SHELL_HOST = "192.168.10.101"   # firmware/common/net_proto.h:35-38 (com
 JTAG_RBB_PORT = 6921                    # firmware jtag_server; OpenOCD remote_bitbang
 XVC_PORT = 2542                         # firmware xvc_server (Debug Bridge target by default)
 PUSH_PORT = 6910                        # raw/windowed bitstream push
+#: DEBUG-ONBOARD: the Linux harness's on-board OpenOCD (``mps3-debug``, contract
+#: ``mps3-debug/1``, confirmed by the Linux lead 2026-10-01) binds its gdb servers to the
+#: board's 127.0.0.1 on these FIXED ports, core 0 then core 1. Its telnet (4444) and Tcl (6666)
+#: ports are never forwarded off the board.
+ONBOARD_GDB_PORTS = (3333, 3334)
+ONBOARD_LAUNCHER = "mps3-debug"
 #: The Linux harness's LCD mirror (mps3-lcdmirror, net-protocol v0.15): 127.0.0.1 ONLY on the
 #: board, so it is reached through an SSH forward (``display.py``). ``version.lcd_mirror.port``
 #: overrides it when the board says.

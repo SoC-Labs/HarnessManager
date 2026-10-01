@@ -55,6 +55,19 @@ def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_board_ssh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never run a real one-shot ssh to a board (``claim.DEFAULT_RUN``: the claim's host-key
+    capture, DEBUG-ONBOARD's ``mps3-debug`` over the claim's SSH). A test that wants one
+    replaces it with a fake (``lc_fake_board_ssh``, ``do_fake_launcher``)."""
+    from harness_manager_mps3 import claim
+
+    def refuse(argv, timeout):  # noqa: ANN001, ARG001
+        raise AssertionError(f"a test ran a real ssh to a board: {' '.join(map(str, argv))[:200]}")
+
+    monkeypatch.setattr(claim, "DEFAULT_RUN", refuse)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_usb(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never let a test enumerate the test machine's real serial ports or volumes."""
     from harness_manager_mps3 import usb
