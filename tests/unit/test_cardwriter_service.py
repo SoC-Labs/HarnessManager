@@ -473,10 +473,12 @@ def test_real_access_refuses_a_regular_file_as_a_device(tmp_path: Path):
     f = tmp_path / "pretend-sdz"
     f.write_bytes(b"\0" * 4096)
     access = cw.RealAccess(platform="linux")
-    with pytest.raises(RefusedError, match="is not a block device"):
+    with pytest.raises(RefusedError, match="is not under /dev"):
         access.check_device(str(f))
+    with pytest.raises(RefusedError, match="is not a block device"):
+        access.check_device("/dev/null")                 # a character device, not a disk
     with pytest.raises(AbsentError):
-        access.check_device(str(tmp_path / "gone"))
+        access.check_device("/dev/hm-cardwriter-test-no-such-device")
 
 
 def test_twin_only_the_seam_takes_a_file(tmp_path: Path):

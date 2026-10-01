@@ -585,12 +585,17 @@ class RealAccess:
         self.platform = platform or sys.platform
 
     def check_device(self, path: str) -> None:
+        """A device node under /dev: a block device (and on macOS the raw /dev/rdiskN)."""
+        if not str(path).startswith("/dev/"):
+            raise RefusedError(f"{path} is not under /dev: refusing to write it",
+                               hint="only a listed card reader's device is ever written")
         try:
             st = os.stat(path)
         except FileNotFoundError as exc:
             raise AbsentError(f"{path} is gone (the card reader was unplugged?)",
                               hint="list the devices again") from exc
-        if not (stat.S_ISBLK(st.st_mode) or stat.S_ISCHR(st.st_mode)):
+        raw_ok = self.platform == "darwin" and stat.S_ISCHR(st.st_mode)
+        if not (stat.S_ISBLK(st.st_mode) or raw_ok):
             raise RefusedError(f"{path} is not a block device: refusing to write it",
                                hint="only a listed card reader's device is ever written")
 
