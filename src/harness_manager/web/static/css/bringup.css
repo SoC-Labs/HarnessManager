@@ -1,0 +1,46 @@
+/* The bring-up wizard and the Add dialog's Over USB (lane BRINGUP-USB; js/bringup.js).
+   Colours are the tokens (tokens.css), so light and dark follow the page. */
+
+.modal.bringup { width: min(980px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; }
+.modal.bringup .modal-pad { min-height: 0; }
+.bu-flow .flow-body { min-width: 0; }
+.bu-step[data-state="todo"] .flow-title { color: var(--text); }
+.bu-step .seg { flex-wrap: wrap; }
+.bu-step .seg button { white-space: normal; text-align: left; }
+.gap-8 { gap: 8px; }
+
+/* the source */
+.bu-check { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface-2); }
+.bu-check[data-refused="yes"] { border-color: var(--err-border); }
+.bu-files { list-style: none; margin: 6px 0 0; padding: 0; max-height: 132px; overflow-y: auto; }
+.bu-files li { padding: 1px 0; overflow-wrap: anywhere; }
+.bu-examples { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; }
+.bu-rels { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bu-plan ul { margin: 0 0 6px; padding-left: 18px; }
+
+/* the write */
+.bu-warn { margin-top: 0; }
+.bu-replace { margin-top: 0; }
+.bu-reader .select { min-width: 0; }
+
+/* the OS step */
+.bu-os-opts { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bu-os-opts li[data-disabled="yes"] .check-inline { color: var(--text-3); }
+.bu-why { margin: 2px 0 0 24px; font-size: 12.5px; color: var(--text-3); }
+
+/* Over USB, in the Add dialog */
+.bu-usb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.bu-usb { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface);
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.bu-usb-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bu-usb-head .mono { overflow-wrap: anywhere; }
+.bu-usb .kv { grid-template-columns: 76px minmax(0, 1fr); }
+.bu-usb-foot { justify-content: flex-end; }
+.bu-empty .bu-checks { margin: 0; padding-left: 18px; color: var(--text-2); }
+.bu-empty .bu-checks li { margin: 2px 0; }
+
+@media (max-width: 640px) {
+  .bu-usb .kv { grid-template-columns: minmax(0, 1fr); }
+  .modal.bringup .field { flex-wrap: wrap; }
+}

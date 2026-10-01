@@ -8,8 +8,12 @@
 //   By address   an address (and a route: a hub, or an ssh host), Test (POST /probe: it reads the
 //                harness and the shell, and lists nothing), then Add (the same probe, into the
 //                rail). "Save to boards.toml" writes [boards.KEY] too (off unless ticked).
+//   Over USB     (lane BRINGUP-USB, bringup.js) a new board plugged into this PC: Scan lists its
+//                Debug USB (the MCC port, the V2M-MPS3 drive, what the MCC says, a harness on
+//                Ethernet), and "Add and bring up" opens it USB-only and starts the bring-up.
 //
-// openModal("add", {mode: "hub" | "addr"}). Nothing here takes a lease or opens a board.
+// openModal("add", {mode: "hub" | "addr" | "usb"}). Nothing here takes a lease; only Over USB's
+// "Add and bring up" opens a board (the one the user picked).
 
 import { call } from "./api.js";
 import { boardName, clock, hexId } from "./format.js";
@@ -21,6 +25,7 @@ import { epochOf } from "./week.js";
 import { addBoard, addBoardFromHub, loadSettings, SS, testHub } from "./settings/state.js";
 import { TestSteps } from "./settings/hubs.js";
 import { configFor, routeText, viaOf } from "./sidebar.js";
+import { OverUsb } from "./bringup.js";            // BRINGUP-USB: the third way
 
 // --- the stylesheet ----------------------------------------------------------------------------
 // css/shell2.css is this lane's. index.html links it once CCR SHELL2-1 lands (the integrator's
@@ -275,10 +280,13 @@ function AddDialog({ mode = "" }) {
   useEffect(() => { if (!SS.loaded || !SS.hubs) loadSettings(); }, []);
   return html`<${ModalShell} title="Add a board" icon="plus" cls="mid add-dialog" testid="add-board"
       foot=${m.mode === "hub" ? html`<span class="small muted grow">Added boards are written to boards.toml</span>
+        <button type="button" class="btn" data-action="add-cancel" onClick=${closeModal}>Close</button>`
+        : m.mode === "usb" ? html`<span class="small muted grow">Opened over its Debug USB only: no hub, no lease</span>
         <button type="button" class="btn" data-action="add-cancel" onClick=${closeModal}>Close</button>` : null}>
     <${Seg} label="How to add it" value=${m.mode} onChange=${(v) => set({ mode: v })}
-      options=${[{ value: "hub", label: "From a hub", icon: "server" }, { value: "addr", label: "By address", icon: "ethernet-port" }]} />
-    ${m.mode === "hub" ? html`<${FromHub} m=${m} set=${set} />` : html`<${ByAddress} m=${m} set=${set} />`}
+      options=${[{ value: "hub", label: "From a hub", icon: "server" }, { value: "addr", label: "By address", icon: "ethernet-port" },
+        { value: "usb", label: "Over USB (a new board plugged into this PC)", icon: "usb" }]} />
+    ${m.mode === "hub" ? html`<${FromHub} m=${m} set=${set} />` : m.mode === "usb" ? html`<${OverUsb} />` : html`<${ByAddress} m=${m} set=${set} />`}
   <//>`;
 }
 

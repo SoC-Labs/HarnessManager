@@ -5,7 +5,7 @@
 | ``GET /bringup`` | the wizard's switches: the default address, ``bringup.sd_flash``, the network OS door (not yet), the signing keys, whether this service has the card-reader routes |
 | ``POST /bringup/scan`` ``{host?, ask_mcc?, timeout_s?}`` | the MPS3 Debug USBs this PC sees (the pack's USB probe), each with its MCC port, its V2M-MPS3 drive and what it holds, what the MCC answers (``ask_mcc``), and whether a harness answers at ``host`` |
 | ``POST /bringup/bundle`` ``{path}`` | check a bundle folder or zip: the files, the base ``.bit`` (size, sha256, part, USERID); 409 REFUSED with ``error.data.check`` for an ``.ebf``, an MCC command file, a file outside the config-SD tree, no bitstream |
-| ``POST /boards/{bid}/bringup/install`` ``{bundle, backup_path}`` | 202 job ``sd_install``: the bundle checked again, then written to the board's config SD by its storage adapter (the backup is mandatory; never an ``.ebf``) |
+| ``POST /boards/{bid}/bringup/install`` ``{bundle, backup_path}`` | 202 job ``sd_install``: the bundle checked again, then written to the board's config SD by its storage adapter (the backup is mandatory; never an ``.ebf``); a release bundle's ``overlays/open`` then joins ``mps3.overlay_dirs`` (Program and Restore find them) |
 | ``POST /boards/{bid}/bringup/witness`` ``{host?, wait_s?, poll_s?}`` | 202 job ``bringup_witness``: wait for the harness to answer at ``host`` after the reboot; ``state`` ``running`` or ``rescue``; a timeout fails the job with ``error.data.timeout`` |
 
 Composed, not new executors: the backup, the reboot and the restore are the existing
@@ -20,7 +20,7 @@ from typing import Any
 
 from harness_manager.cli.output import with_data
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import HeldError, RefusedError, UsageError
+from harness_manager.core.errors import HarnessError, HeldError, RefusedError, UsageError
 from harness_manager.services import bringup
 
 from .app import _JSON, JsonBody, RouteContext, _abs_path, _bool, _number, _obj, ok
@@ -125,7 +125,29 @@ def register(ctx: RouteContext) -> None:
         def run(progress: Callable[[str, int, int], None]) -> Any:
             storage.install(files, backup=record, progress=progress)
             return {"files": sorted(files), "backup": record, "bundle": chk.path,
-                    "base_bit": chk.base_bit, "impl": chk.impl}
+                    "base_bit": chk.base_bit, "impl": chk.impl, "overlays": overlays()}
+
+        def overlays() -> dict[str, Any] | None:
+            """The bundle's overlays/open joins mps3.overlay_dirs, so Program and Restore find
+            them. Never fails the job: the SD is written by now."""
+            if not chk.overlays:
+                return None
+            from harness_manager.core.events import Event
+            from harness_manager.settings import ops
+
+            from .settings_api import settings_context
+
+            try:
+                kept = bringup.keep_overlays(chk, d.state_dir / "bringup" / "overlays")
+                if kept is None:
+                    return None
+                got = bringup.add_overlay_dir(settings_context(d), kept)
+            except (HarnessError, OSError) as exc:
+                return {"added": False, "error": str(exc), **chk.overlays}
+            result = got.pop("result", None)
+            if result is not None:
+                d.bus.publish(Event("settings.changed", "", ops.changed_event(result)))
+            return {**got, "count": chk.overlays["count"], "names": chk.overlays["names"]}
 
         return ctx.accepted(d.jobs.submit(INSTALL_JOB, bid, run))
 

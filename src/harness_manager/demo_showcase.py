@@ -1281,8 +1281,11 @@ adapters = _ui2_adapters_with_states             # noqa: F811 - DemoSession impo
 #   the Linux harness (no bootable OS slot on its user microSD yet). `engine.bringup_dark =
 #   True` keeps it dark (the witness times out: the restore offer).
 # - Bundles to bring it up with, in <state>/demo-fixtures/bringup/: a bare-metal config-SD
-#   folder, the Linux release bundle as a zip (sd/, linux_bundle.json, linux_slot.img), and a
-#   folder with an .ebf in it (refused). `GET /bringup` lists them as `examples`.
+#   release bundle folder (sd/, mint.json, overlays/open: they join mps3.overlay_dirs after
+#   the write), the Linux release bundle as a zip (sd/, linux_bundle.json, linux_slot.img: a
+#   SLOT image, never offered as the card image), a folder with an .ebf in it (refused), and
+#   a whole-card image for the Linux OS step (an MBR at LBA 0, as stage0_mkcard.py card
+#   --card-img makes one; nothing in it boots). `GET /bringup` lists them as `examples`.
 #
 # The writes are in memory: the demo's storage "writes" the USB board's SD (progress, then a
 # record of the files), and its backup is a real zip in the folder asked for, so the storage
@@ -1328,9 +1331,19 @@ def seed_bringup(fixtures: Path) -> dict[str, Any]:
     drive = root / "V2M-MPS3"
     if not (drive / "config.txt").is_file():
         _bringup_tree(drive, "0x00000000", stock=True)
-    bm = root / "harness-1.1.0-sd"
-    if not (bm / "config.txt").is_file():
-        _bringup_tree(bm, cat.U_ILA)
+    bm = root / "mps3-harness-1.1.0"
+    if not (bm / "sd" / "config.txt").is_file():
+        _bringup_tree(bm / "sd", cat.U_ILA)
+        (bm / "mint.json").write_text(_json.dumps(
+            {"schema": "mps3-mint-record", "version": "1.1.0", "static_id": cat.S_ILA,
+             "static_usercode": cat.U_ILA, "note": "a demo bundle"}, indent=1) + "\n")
+        ovl = bm / "overlays" / "open" / "synth"
+        ovl.mkdir(parents=True, exist_ok=True)
+        (ovl / "manifest.json").write_text(_json.dumps(
+            {"name": "synth", "rm_id": "0x010000f0", "static_id": cat.S_ILA,
+             "note": "a demo overlay: the demo never programs a board from it"}, indent=1) + "\n")
+        (ovl / "synth.bin").write_bytes(b"\0" * 256)
+        (ovl / "synth_clear.bin").write_bytes(b"\0" * 128)
     lx_zip = root / "mps3-harness-2.0.0-linux.zip"
     if not lx_zip.is_file():
         stage = root / ".stage-linux"
@@ -1346,12 +1359,18 @@ def seed_bringup(fixtures: Path) -> dict[str, Any]:
         import shutil as _shutil
 
         _shutil.rmtree(stage, ignore_errors=True)
+    card = root / "mps3-linux-2.0.0-card.img"
+    if not card.is_file():
+        mbr = bytearray(512)
+        mbr[510:512] = b"\x55\xaa"
+        card.write_bytes(bytes(mbr) + b"\0" * (1024 * 1024 - 512))
     bad = root / "bundle-with-ebf"
     if not (bad / "config.txt").is_file():
         _bringup_tree(bad, cat.U_ILA)
         (bad / "MB" / "HBI0309C" / "mbb_v141.ebf").write_bytes(b"a copied MB BIOS")
-    return {"drive": str(drive), "examples": [
-        {"path": str(bm), "what": "bare-metal harness 1.1.0: a config-SD folder"},
+    return {"drive": str(drive), "card_image": str(card), "examples": [
+        {"path": str(bm), "what": "bare-metal harness 1.1.0: a release bundle folder (sd/, "
+                                  "overlays/open)"},
         {"path": str(lx_zip), "what": "Linux harness 2.0.0: a release bundle zip (sd/, "
                                       "linux_slot.img)"},
         {"path": str(bad), "what": "a folder with an .ebf in it: refused"},
@@ -1456,10 +1475,15 @@ def _bringup_wrap() -> None:
             seeded = seed_bringup(Path(self.state_dir) / "demo-fixtures")
             self._boards.update(_bringup_boards(seeded["drive"]))
             self.__dict__["_bringup_examples"] = seeded["examples"]
+            self.__dict__["_bringup_card_image"] = seeded["card_image"]
 
     def examples(self: Any) -> list[dict[str, str]]:
         ensure(self)
         return list(self.__dict__.get("_bringup_examples", []))
+
+    def card_image(self: Any) -> str:
+        ensure(self)
+        return str(self.__dict__.get("_bringup_card_image", ""))
 
     def board(self: Any, board_id: str) -> Any:
         ensure(self)
@@ -1542,6 +1566,7 @@ def _bringup_wrap() -> None:
         return adapters0(engine, board)
 
     engine_cls.bringup_examples = property(examples)       # type: ignore[attr-defined]
+    engine_cls.bringup_card_image = property(card_image)   # type: ignore[attr-defined]
     engine_cls.bringup_dark = False                        # type: ignore[attr-defined]
     engine_cls._board = board                              # type: ignore[method-assign]
     engine_cls.candidate_for = candidate_for               # type: ignore[method-assign]

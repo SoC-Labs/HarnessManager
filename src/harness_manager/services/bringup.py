@@ -66,6 +66,11 @@ SD_FLASH_ON = frozenset({"on", "true", "1", "yes"})
 SD_FLASH_OFF_REASON = (f"off: turn on {SD_FLASH_SETTING} in Settings (or set "
                        f"{SD_FLASH_ENV}=on) to write a card in this PC's card reader")
 RESCUE_NETWORK_REASON = "comes with Linux v2.1 (HARNESS-DIST L3)"
+RESCUE_NETWORK_NOTE = "stage0 rescue boots an image from RAM; it does not write the card"
+#: The Linux OS step writes a WHOLE-CARD image (SD-FLASH kind ``card``): the MBR at LBA 0, the
+#: boot-select at LBA 1-2, the slots at LBA 67584 and 198656. A slot image (linux_slot.img,
+#: S0LB at its start) written at byte 0 gives a card that never boots.
+CARD_IMAGE_HINT = "a whole-card image (.img built with stage0_mkcard.py card --card-img)"
 USB_WRITE_WARNING = ("A USB write can take 5 minutes: do not unplug, power off or start a "
                      "second write.")
 NONE_FOUND = "No MPS3 Debug USB found on this PC."
@@ -403,6 +408,7 @@ class BundleCheck:
     base_bit: dict[str, Any] | None = None
     board: dict[str, Any] = field(default_factory=dict)
     os_image: dict[str, Any] | None = None
+    overlays: dict[str, Any] | None = None      # BUNDLE/overlays/open: {path, count, names}
     problems: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     ignored: list[str] = field(default_factory=list)
@@ -417,7 +423,7 @@ class BundleCheck:
                 "sd_root": self.sd_root, "impl": self.impl, "version": self.version,
                 "files": self.files, "count": len(self.files), "total_bytes": self.total_bytes,
                 "base_bit": self.base_bit, "board": self.board, "os_image": self.os_image,
-                "problems": self.problems, "warnings": self.warnings, "ignored": self.ignored,
+                "overlays": self.overlays, "problems": self.problems, "warnings": self.warnings, "ignored": self.ignored,
                 "refused": self.refused, "linux": self.impl == "linux"}
 
 
@@ -498,9 +504,15 @@ def check_bundle(path: str | Path, work: Path) -> BundleCheck:
         chk.impl, chk.version = _manifest_impl(root)
         img = root / "linux_slot.img"
         if img.is_file():
+            # an OS SLOT image (S0LB at its start): pushed into slot A/B over Ethernet, never
+            # written to a card at byte 0 (that card never boots); not the whole-card image
             chk.os_image = {"path": str(img), "size": img.stat().st_size,
-                            "sha256": file_sha256(img)}
+                            "sha256": file_sha256(img), "kind": "slot"}
             chk.impl = chk.impl or "linux"
+        chk.overlays = overlay_set(root / "overlays" / "open")
+        if (root / "overlays" / "aaa").is_dir():
+            chk.warnings.append("overlays/aaa (Arm Academic Access RMs) is left out: it is "
+                                "private; Program finds it once you add its folder yourself")
         for p in sorted(root.rglob("*")):
             if p.is_file() and p.suffix.lower() == ".ebf" and sd not in p.parents:
                 chk.problems.append(f"{p.relative_to(root).as_posix()}: an .ebf (board-"
@@ -590,6 +602,61 @@ def _bit_facts(rel: str, path: Path, chk: BundleCheck) -> dict[str, Any]:
     return out
 
 
+def overlay_set(path: Path) -> dict[str, Any] | None:
+    """A bundle's ``overlays/open``: the overlay dirs under it (each with a manifest.json)."""
+    if not path.is_dir():
+        return None
+    names = sorted(p.name for p in path.iterdir() if (p / "manifest.json").is_file())
+    if (path / "manifest.json").is_file():
+        names = [path.name]
+    if not names:
+        return None
+    return {"path": str(path), "count": len(names), "names": names}
+
+
+OVERLAY_DIRS_SETTING = "mps3.overlay_dirs"
+
+
+def keep_overlays(chk: BundleCheck, keep_root: Path) -> Path | None:
+    """Where the bundle's open overlays will be found from now on: the bundle's own folder,
+    or (a zip, unpacked in the service's work area that is cleared) a copy under
+    ``keep_root``. None when the bundle has none."""
+    if not chk.overlays:
+        return None
+    src = Path(chk.overlays["path"])
+    if chk.kind != "zip":
+        return src
+    digest = hashlib.sha256(chk.path.encode()).hexdigest()[:12]
+    dest = keep_root / f"{Path(chk.path).stem[:40]}-{digest}"
+    if not dest.is_dir():
+        tmp = dest.with_name(dest.name + ".tmp")
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.copytree(src, tmp)
+        tmp.rename(dest)
+    return dest
+
+
+def add_overlay_dir(settings: Any, path: Path) -> dict[str, Any]:
+    """Append ``path`` to ``mps3.overlay_dirs`` (the user's settings.toml, ``apply: live``), so
+    Program and Restore find the bundle's overlays. Kept when already there. ``shadowed``:
+    ``$HARNESS_MANAGER_MPS3_OVERLAY_DIRS`` in the service's environment hides the setting."""
+    from harness_manager.settings import ops
+
+    resolver = settings.resolver()
+    user = resolver.layer.values.get(OVERLAY_DIRS_SETTING)      # the user's own list, if any
+    current = [str(x) for x in user] if isinstance(user, (list, tuple)) else []
+    out: dict[str, Any] = {"setting": OVERLAY_DIRS_SETTING, "path": str(path), "added": False}
+    if str(path) not in current:
+        result = ops.set_values(settings, {OVERLAY_DIRS_SETTING: [*current, str(path)]})
+        out["added"] = True
+        out["result"] = result
+    got = settings.resolver().resolve(OVERLAY_DIRS_SETTING)
+    out["dirs"] = [str(x) for x in got.value or []]
+    out["shadowed"] = got.source == "env" and str(path) not in out["dirs"]
+    out["where"] = got.where or got.source
+    return out
+
+
 # --- the witness ---------------------------------------------------------------------------------
 
 
@@ -669,9 +736,13 @@ def signing(engine: Any) -> dict[str, Any]:
 def status(engine: Any, state_dir: Any = None) -> dict[str, Any]:
     """What the wizard shows before it starts: the address, the switches, the examples."""
     examples = getattr(engine, "bringup_examples", None)
+    card = getattr(engine, "bringup_card_image", "")
     return {"default_host": DEFAULT_HOST, "pc_hint": PC_ADDRESS_HINT,
             "usb_write_warning": USB_WRITE_WARNING, "sd_flash": sd_flash(state_dir),
-            "rescue_network": {"available": False, "reason": RESCUE_NETWORK_REASON},
+            "rescue_network": {"available": False, "reason": RESCUE_NETWORK_REASON,
+                               "note": RESCUE_NETWORK_NOTE},
+            "card_image": {"hint": CARD_IMAGE_HINT, "example": card if isinstance(card, str)
+                           else ""},
             "signing": signing(engine), "witness_s": {"bare-metal": DEFAULT_WITNESS_S,
                                                       "linux": LINUX_WITNESS_S},
             "examples": list(examples() if callable(examples) else examples or [])}

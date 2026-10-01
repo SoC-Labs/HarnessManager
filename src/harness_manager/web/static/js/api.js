@@ -557,3 +557,53 @@ export async function callUpload(name, params = {}, bytes = null, query = null,
   return { data, status: res.status };
 }
 // --- end ui2 build ---
+// --- bringup-usb ---
+// BRINGUP-USB: the bring-up routes (docs/API.md "Bring-up over the Debug USB", bringup_api.py)
+// and the card-reader routes of lane SD-FLASH it calls (cardwriter_api.py; a 404 means that
+// lane is not in this build). Helpers only: ENDPOINTS is the integrator's table (CCR BRINGUP-1
+// folds these names into it); tests/web/test_bringup_static.py checks each against API.md and
+// the daemon's routes, as test_t14_static does for ENDPOINTS.
+export const BRINGUP_ENDPOINTS = Object.freeze({
+  bringupStatus: ["GET", "/bringup"],
+  bringupScan: ["POST", "/bringup/scan"],
+  bringupBundle: ["POST", "/bringup/bundle"],
+  bringupInstall: ["POST", "/boards/{bid}/bringup/install"],
+  bringupWitness: ["POST", "/boards/{bid}/bringup/witness"],
+  cardwriterDevices: ["GET", "/cardwriter/devices"],       // SD-FLASH
+  cardwriterWrite: ["POST", "/cardwriter/write"],          // SD-FLASH
+});
+
+// call() for a BRINGUP_ENDPOINTS name: the same token, errors and connection state.
+export async function bringupCall(name, params = {}, body = undefined) {
+  const [method, template] = BRINGUP_ENDPOINTS[name];
+  const url = new URL(fillPath(template, params).replace(/^\//, ""), apiBase());
+  const headers = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const init = { method, headers, cache: "no-store" };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  let res;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    setConnection("down");
+    throw new ApiError({
+      name: "NO_ANSWER",
+      message: "harness-manager-daemon did not answer",
+      hint: "check it is running: harness-manager daemon status",
+    }, 0, true);
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
+  return { data, status: res.status };
+}
+
+// A route this daemon does not serve (a lane not in this build): the catch-all's 404.
+export function bringupMissing(err) {
+  return !!err && err.status === 404 && (/no such endpoint/.test(err.message) || err.errName === "HTTP_404");
+}
+// --- end bringup-usb ---
