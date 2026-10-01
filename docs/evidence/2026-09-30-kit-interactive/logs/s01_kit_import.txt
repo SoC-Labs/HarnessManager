@@ -1,0 +1,4 @@
+cached: mps3/0x44EE76D5/vivado-2026.1 (38287216 B)
+  ok        files                        14 files match kit.json (size and sha256)
+  ok        static_id                    CRC-32 of static_routed_locked.dcp is 0x44EE76D5 = the kit's static_id
+=== rc=0 took=5s

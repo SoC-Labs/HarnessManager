@@ -1,0 +1,12 @@
+vivado_rc=0
+HM_STAGE preflight 1790802386
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_GATE rm_xdc_present PASS /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs/out/lfsr_floor_build.json
+HM_RM_BUILD_STOPPED after=preflight
+=== rc=0 took=20s

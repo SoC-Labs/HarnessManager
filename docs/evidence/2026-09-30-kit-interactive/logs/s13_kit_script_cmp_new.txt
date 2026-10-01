@@ -1,0 +1,6 @@
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+  warning   vivado                       no Vivado found (Vivado discovery is off ($HARNESS_MANAGER_VIVADO=off)); this kit needs Vivado 2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new
+next: vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_cmp_new/out/lfsr_floor_build.json
+=== rc=0 took=1s

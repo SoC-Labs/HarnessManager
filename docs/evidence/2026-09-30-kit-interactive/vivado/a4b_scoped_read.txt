@@ -1,0 +1,55 @@
+# A4b: vivado -mode tcl, a4b_stdin.tcl over stdin: link (STOP_AFTER=link), then read each floorplan file as the
+# build reads RM_XDC (read_xdc -cell u_rp_dut) and print the pblocks, where two RM flops landed, and the HDPR DRC.
+# V4/V4c ran AFTER V3's cleanup, which had taken u_rp_dut out of pblock_rp_dut (cells=0): their HDPR-1 errors are
+# that leftover, not V4's (see README). HDPR-1 lines are counted, not listed.
+A4B start 17:35:41 load=33.79 43.80 53.21
+A4B vivado rc=0 end 17:40:32 load=17.50 31.04 45.56
+=== rc=0 took=291s
+V0 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON EXCL=1 CONTAIN=1 cells=1
+V0 lfsr_q_reg[0] in pblock_rp_dut; count_q_reg[5] in pblock_rp_dut; rp HD.RECONFIGURABLE=1
+V0 hdpr_violations=0
+V1 ==== read v1_scoped_min.xdc -cell u_rp_dut
+V1 read rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a4/v1_scoped_min.xdc}
+V1 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON EXCL=1 CONTAIN=1 cells=133
+V1 pblock u_rp_dut_pblock_lfsr PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 SNAP=NESTED EXCL=0 CONTAIN=0 cells=118
+V1 lfsr_q_reg[0] in u_rp_dut_pblock_lfsr; count_q_reg[5] in u_rp_dut_pblock_lfsr; rp HD.RECONFIGURABLE=1
+V1 hdpr_violations=0
+cleanup: pblocks now pblock_rp_dut
+V2 ==== read v2_scoped_parent.xdc -cell u_rp_dut
+V2 read rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a4/v2_scoped_parent.xdc}
+V2 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON EXCL=1 CONTAIN=1 cells=133
+V2 pblock u_rp_dut_pblock_lfsr PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 SNAP=NESTED EXCL=0 CONTAIN=0 cells=118
+V2 lfsr_q_reg[0] in u_rp_dut_pblock_lfsr; count_q_reg[5] in u_rp_dut_pblock_lfsr; rp HD.RECONFIGURABLE=1
+V2 hdpr_violations=0
+cleanup: pblocks now pblock_rp_dut
+V3 ==== read fp_cell_excl.xdc -cell u_rp_dut
+INFO: [Constraints 18-12550] The child Pblock u_rp_dut_pblock_rp_dut is resized to contain within the parent pblock pblock_rp_dut, as the child pblock u_rp_dut_pblock_rp_dut has the property SNAPPING_MODE = NESTED [/tmpdir/claude-74755/kit-interactive/runs/a4/fp_cell_excl.xdc:67]
+INFO: [Constraints 18-12550] The child Pblock u_rp_dut_pblock_rp_dut is resized to contain within the parent pblock pblock_rp_dut, as the child pblock u_rp_dut_pblock_rp_dut has the property SNAPPING_MODE = NESTED [/tmpdir/claude-74755/kit-interactive/runs/a4/fp_cell_excl.xdc:67]
+V3 read rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a4/fp_cell_excl.xdc}
+V3 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON EXCL=1 CONTAIN=1 cells=0
+V3 pblock u_rp_dut_pblock_lfsr PARENT=u_rp_dut_pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 SNAP=NESTED EXCL=0 CONTAIN=0 cells=196
+V3 pblock u_rp_dut_pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON EXCL=1 CONTAIN=1 cells=55
+V3 lfsr_q_reg[0] in u_rp_dut_pblock_lfsr; count_q_reg[5] in u_rp_dut_pblock_lfsr; rp HD.RECONFIGURABLE=1
+V3 drc HDPR-141#1 Warning
+V3 drc HDPR-141#2 Warning
+V3 drc HDPR-141#3 Warning
+V3 hdpr_violations=3
+cleanup: pblocks now pblock_rp_dut
+V4 ==== read v4_global_journal.xdc (no -cell)
+V4 read rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a4/v4_global_journal.xdc}
+V4 pblock pblock_lfsr PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 SNAP=NESTED EXCL=0 CONTAIN=0 cells=118
+V4 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON EXCL=1 CONTAIN=1 cells=0
+V4 lfsr_q_reg[0] in pblock_lfsr; count_q_reg[5] in pblock_lfsr; rp HD.RECONFIGURABLE=1
+V4 hdpr_violations=78
+cleanup: pblocks now pblock_rp_dut
+V4c ==== read v4_global_journal.xdc -cell u_rp_dut
+V4c read rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a4/v4_global_journal.xdc}
+V4c pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON EXCL=1 CONTAIN=1 cells=0
+V4c pblock u_rp_dut_pblock_lfsr PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 SNAP=NESTED EXCL=0 CONTAIN=0 cells=118
+V4c lfsr_q_reg[0] in u_rp_dut_pblock_lfsr; count_q_reg[5] in u_rp_dut_pblock_lfsr; rp HD.RECONFIGURABLE=1
+V4c hdpr_violations=78
+cleanup: pblocks now pblock_rp_dut
+A4B end 17:40:31
+(V4 and V4c: 78 x 'drc HDPR-1#n Error' each)
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 4:50.67
+	Maximum resident set size (kbytes): 3103208

@@ -1,0 +1,25 @@
+# A4c: vivado -mode tcl, a4c_stdin.tcl: link, then the journal's form of the floorplan (full names u_rp_dut/..., design/j_journal_fullnames.xdc)
+# read as the build reads rm_xdc (J1: read_xdc -cell u_rp_dut) and without -cell (J2).
+A4C start 19:08:32 load=12.52 16.02 20.99
+A4C vivado rc=0 end 19:12:48 load=14.32 14.67 19.17
+=== rc=0 took=256s
+A4C start 19:08:45
+A4C link rc=0
+J1 ==== read j_journal_fullnames.xdc -cell u_rp_dut
+CRITICAL WARNING: [Vivado 12-1433] Expecting a non-empty list of cells to be added to the pblock.  Please verify the correctness of the <cells> argument. [/tmpdir/claude-74755/kit-interactive/runs/a4/j_journal_fullnames.xdc:6]
+J1 read rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a4/j_journal_fullnames.xdc}
+J1 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 cells=1
+J1 pblock u_rp_dut_pblock_1 PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 cells=0
+J1 lfsr_q_reg[0] in {pblock_rp_dut}
+J1 hdpr violations=0
+J1 cleanup: pblocks pblock_rp_dut pblock_rp_dut cells=1
+J2 ==== read j_journal_fullnames.xdc (no -cell)
+J2 read rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a4/j_journal_fullnames.xdc}
+J2 pblock pblock_1 PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 cells=118
+J2 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 cells=133
+J2 lfsr_q_reg[0] in {pblock_1}
+J2 hdpr violations=0
+J2 cleanup: pblocks pblock_rp_dut pblock_rp_dut cells=1
+A4C end 19:12:47
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 4:16.18
+	Maximum resident set size (kbytes): 3182032

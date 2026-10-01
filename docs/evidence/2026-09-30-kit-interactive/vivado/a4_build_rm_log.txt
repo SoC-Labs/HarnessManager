@@ -1,0 +1,62 @@
+# A4: the full build, batch, rm_xdc = design/lfsr_floor_floorplan.xdc (template 67f4261 + the read_xdc fix).
+# build_rm.log: the markers, the rm_xdc parse, and each implementation step's time. The log also echoes the script (lines starting #): dropped.
+A4FULL start 18:15:08 load=41.52 47.34 46.20
+A4FULL vivado rc=0 end 18:49:32 load=23.65 21.75 30.37
+=== rc=0 took=2065s
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_GATE rm_xdc_present PASS /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc
+HM_STAGE synth
+synth_design: Time (s): cpu = 00:00:40 ; elapsed = 00:01:04 . Memory (MB): peak = 3239.707 ; gain = 1479.699 ; free physical = 31883 ; free virtual = 155968
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+open_checkpoint: Time (s): cpu = 00:00:42 ; elapsed = 00:01:16 . Memory (MB): peak = 3806.863 ; gain = 0.035 ; free physical = 32054 ; free virtual = 156626
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+read_checkpoint: Time (s): cpu = 00:01:59 ; elapsed = 00:02:23 . Memory (MB): peak = 3806.863 ; gain = 0.000 ; free physical = 32063 ; free virtual = 157846
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+Parsing XDC File [/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc] for cell 'u_rp_dut'
+Finished Parsing XDC File [/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc] for cell 'u_rp_dut'
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_STAGE impl
+CRITICAL WARNING: [Timing 38-285] Generated clock u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/Q with source pin u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/C does not have a vali
+opt_design: Time (s): cpu = 00:01:32 ; elapsed = 00:01:10 . Memory (MB): peak = 4534.391 ; gain = 727.527 ; free physical = 31279 ; free virtual = 157678
+HM_GATE rp_pins_opt PASS 148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)
+CRITICAL WARNING: [Timing 38-285] Generated clock u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/Q with source pin u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/C does not have a vali
+CRITICAL WARNING: [Timing 38-285] Generated clock u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/Q with source pin u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/C does not have a vali
+CRITICAL WARNING: [Timing 38-285] Generated clock u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/Q with source pin u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/C does not have a vali
+place_design: Time (s): cpu = 00:11:43 ; elapsed = 00:09:02 . Memory (MB): peak = 5129.395 ; gain = 595.004 ; free physical = 22520 ; free virtual = 157080
+CRITICAL WARNING: [Timing 38-285] Generated clock u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/Q with source pin u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/C does not have a vali
+phys_opt_design: Time (s): cpu = 00:01:06 ; elapsed = 00:00:33 . Memory (MB): peak = 5129.395 ; gain = 0.000 ; free physical = 22248 ; free virtual = 156828
+route_design: Time (s): cpu = 00:14:21 ; elapsed = 00:10:26 . Memory (MB): peak = 5421.926 ; gain = 292.531 ; free physical = 20150 ; free virtual = 156031
+CRITICAL WARNING: [Timing 38-285] Generated clock u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/Q with source pin u_shell/shell_bd_i/debug_bridge_0/inst/axi_jtag/inst/u_jtag_proc/tck_i_reg/C does not have a vali
+HM_GATE drc_routed PASS no HDPR-16/18/50, no Error
+HM_GATE rm_timing PASS your RM's paths (89 registers): setup WNS 18.478 ns, hold WHS 0.056 ns
+HM_STAGE verify
+INFO: [Vivado 12-3253] PR_VERIFY: check points /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/kit/static/static_routed_locked.dcp and /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_routed.dcp are com
+pr_verify: Time (s): cpu = 00:02:49 ; elapsed = 00:02:24 . Memory (MB): peak = 5457.707 ; gain = 35.781 ; free physical = 24020 ; free virtual = 159075
+HM_GATE pr_verify PASS compatible with static_routed_locked.dcp
+HM_STAGE bitstream
+open_checkpoint: Time (s): cpu = 00:00:42 ; elapsed = 00:00:46 . Memory (MB): peak = 5457.742 ; gain = 0.035 ; free physical = 23257 ; free virtual = 158295
+write_bitstream: Time (s): cpu = 00:01:36 ; elapsed = 00:01:33 . Memory (MB): peak = 5465.711 ; gain = 7.969 ; free physical = 21458 ; free virtual = 156525
+HM_GATE ltx NOTE no debug core in the partition: no .ltx
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial_clear.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial.bit
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial_clear.bit
+HM_GATE clearing_fits PASS clearing 71832 B, the harness holds 1048576 B
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_build.json
+HM_RM_BUILD_COMPLETE rm=lfsr_floor rm_id=0x0100B8C6 static_id=0x44EE76D5 partial=/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/out/lfsr_floor_partial.bin
+INFO: [Common 17-206] Exiting Vivado at Wed Sep 30 18:49:30 2026...
+(and 14 x CRITICAL WARNING [Constraints 18-512/18-513] from HM's OOC XDC for the tied-off groups: KIT-NIGHT F3; 20 in all with the 6 static Timing 38-285 above)
+	Percent of CPU this job got: 121%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 34:23.54
+	Maximum resident set size (kbytes): 4900240

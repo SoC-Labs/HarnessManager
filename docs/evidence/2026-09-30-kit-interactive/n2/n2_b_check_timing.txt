@@ -1,0 +1,12 @@
+check_timing report
+
+Table of Contents
+-----------------
+1. checking no_clock (0)
+2. checking constant_clock (0)
+3. checking pulse_width_clock (0)
+4. checking unconstrained_internal_endpoints (423)
+5. checking no_input_delay (32)
+6. checking no_output_delay (41)
+7. checking multiple_clock (0)
+8. checking generated_clocks (0)

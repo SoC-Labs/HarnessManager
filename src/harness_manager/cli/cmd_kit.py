@@ -12,8 +12,10 @@ Verbs::
                                                     the six steps, each with its state, and what to do next
     kit script [TARGET | --static-id ID] --design D --out DIR [--jobs N] [--stop-after STAGE]
                                                     build_rm.tcl + the kit + the XDC kit + README
-    kit build  DIR [--stop-after STAGE] [--jobs N]  prints the Vivado command, with the full path of
-                                                    the kit's release (HM does not run it yet)
+    kit build  DIR [--stop-after STAGE] [--jobs N] [--gui]
+                                                    prints the Vivado command, with the full path of
+                                                    the kit's release (HM does not run it yet), and
+                                                    the Tcl line for a Vivado that is already open
     kit check  RECEIPT|BUILD_DIR|PARTIAL [--clearing C] [--static-id ID] [TARGET]
                                                     the receipt, its files and the pair, board-free
     kit pack   RECEIPT|BUILD_DIR [--out DIR] [--import]   the overlay triple (+ into Program)
@@ -137,6 +139,10 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                     help="stop after this stage (default: what `kit script` wrote)")
     ap.add_argument("--jobs", type=int, default=None, metavar="N",
                     help="Vivado threads (default: what `kit script` wrote)")
+    ap.add_argument("--gui", action="store_true",
+                    help="the command for the Vivado GUI (-mode gui): it runs the script and "
+                         "stays open, so with --stop-after link the linked design is there "
+                         "to floorplan")
     ap = sub.add_parser("check", help="a build receipt and its pair, or a bare partial, board-free",
                         parents=[fmt], epilog=ep("kit"))
     ap.add_argument("path", metavar="RECEIPT|BUILD_DIR|PARTIAL",
@@ -428,20 +434,35 @@ def _build(ctx: Ctx) -> int:
                                     "`harness-manager config test tools vivado` shows what is "
                                     "found")
         raise with_data(err, vivado=found.to_json(), release=rel)
-    cmd = render.vivado_command(d.resolve(), stop_after=ctx.args.stop_after, jobs=ctx.args.jobs,
-                                vivado=inst.path)
+    a = ctx.args
+    mode = "gui" if getattr(a, "gui", False) else "batch"
+    how = {"stop_after": a.stop_after, "jobs": a.jobs, "vivado": inst.path}
+    commands = {m: render.vivado_command(d.resolve(), mode=m, **how) for m in render.MODES}
+    cmd = commands[mode]
+    source = render.source_tcl(d.resolve(), stop_after=a.stop_after, jobs=a.jobs)
     line = " ".join(cmd)
     pc = vivado.check_path(found, rel)
     notes = [f"Vivado {inst.version} ({inst.how}); the kit needs {rel}"]
     if pc is not None and pc.state == "warning":
         notes.append(pc.detail)
-    data = {"dir": str(d), "command": cmd, "ran": False, "vivado": found.to_json(),
-            "release": rel, "checks": [c.__dict__ for c in ([pc] if pc else [])],
+    stays = (render.stays_open(params.get("RP_INST", "") or "u_rp_dut",
+                               params.get("RP_PBLOCK", "") or "pblock_rp_dut")
+             if (a.stop_after or params.get("STOP_AFTER")) == "link" else "")
+    data = {"dir": str(d), "command": cmd, "mode": mode, "commands": commands,
+            "source_tcl": source, "stays_open": stays or None, "ran": False,
+            "vivado": found.to_json(), "release": rel,
+            "checks": [c.__dict__ for c in ([pc] if pc else [])],
             "note": "Harness Manager does not run Vivado yet: run this command yourself"}
-    ctx.emit(Result("kit", data, rows=[["-", "command", inst.path, "not-run", line]],
-                    human=[line, *[f"  {n}" for n in notes],
-                           "(Harness Manager does not run Vivado yet: run the command "
-                           "above; " + render.VERDICT_HOW + ")"]))
+    human = [line, *[f"  {n}" for n in notes]]
+    human += [f"In a Vivado that is already open ({render.SOURCE_WHEN}), type:", f"  {source}",
+              f"  ({render.SOURCE_LOG})"]
+    if stays:
+        human.append(f"  {stays}")
+    human.append("(Harness Manager does not run Vivado yet: run the command above; "
+                 + render.VERDICT_HOW + ")")
+    rows = [["-", "command", inst.path, "not-run", line],
+            ["-", "source_tcl", "vivado", "not-run", source]]
+    ctx.emit(Result("kit", data, rows=rows, human=human))
     return ExitCode.OK
 
 
@@ -457,6 +478,20 @@ def _check(ctx: Ctx) -> int:
                                             pack=ctx.pack)
     what = f"the build {r.rm_name}" if r is not None else f"the partial {p.name}"
     sid = sid or "-"
+    if r is not None and r.state == "stopped":
+        # KIT-INTERACTIVE: a STOP_AFTER run is not a failure (before: exit 15, "failed 1
+        # check"). Every other check still refuses (a --static-id that is not the receipt's).
+        rest = [c for c in checks if c.name != "build"]
+        _refuse(rest, what)
+        words = build.stopped_words(r)
+        ctx.emit(Result("kit", {"static_id": sid, "passed": False, "state": "stopped",
+                                "stopped_after": r.stage, "next": build.finish_hint(r),
+                                "checks": [c.__dict__ for c in rest], "facts": facts},
+                        rows=[[sid, "check", "build", "stopped", words]]
+                        + _rows(sid, "check", rest),
+                        human=[f"{what}: {words}", *_human(rest),
+                               f"next: {build.finish_hint(r)}"]))
+        return ExitCode.OK
     _refuse(checks, what)
     ctx.emit(Result("kit", {"static_id": sid, "passed": True,
                             "checks": [c.__dict__ for c in checks], "facts": facts},

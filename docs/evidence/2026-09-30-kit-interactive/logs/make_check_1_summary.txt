@@ -1,0 +1,23 @@
+.venv/bin/ruff check src tests tools/release tools/gen_tokens.py tools/gen_panel_codes.py tools/hil
+All checks passed!
+.venv/bin/python tools/gen_tokens.py --check
+gen_tokens: ok (design/tokens.json sha256 59011d724e13)
+.venv/bin/pytest -q
+............................s........................................... [ 10%]
+...............s.....................s.................................. [ 17%]
+...ssss................................................................. [ 24%]
+.....................................................................sss [ 28%]
+SSH-MUX, one board, 10 simulated minutes:
+  before: 83 connections, 83 calls, per minute {'board list': 0.1, 'lease acquire': 0.1, 'lease show': 2.0, 'note list': 6.0, 'whoami': 0.1}
+  after:  1 connections, 83 calls, per minute {'board list': 0.1, 'lease acquire': 0.1, 'lease show': 2.0, 'note list': 6.0, 'whoami': 0.1}
+..............................................s......................... [ 38%]
+..............................s......................................... [ 39%]
+.............................................................sssss...... [ 41%]
+.........................................sss............................ [ 71%]
+6218 passed, 20 skipped, 1 deselected in 4222.96s (1:10:22)
+CHECK PASS
+
+real	70m31.372s
+user	29m48.499s
+sys	6m15.998s
+rc=0

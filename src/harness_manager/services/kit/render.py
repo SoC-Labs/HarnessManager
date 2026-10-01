@@ -126,20 +126,70 @@ def profile_values(profile: BuildProfile, *, board: str = "") -> dict[str, str]:
     }
 
 
-def vivado_command(script_dir: Path, *, stop_after: str = "", jobs: int | None = None,
-                   vivado: str = "vivado") -> list[str]:
-    """The command ``kit build`` runs (or prints): a batch run of the script, logged beside it."""
-    d = Path(script_dir)
-    argv = [vivado, "-mode", "batch", "-source", tcl_path(d / SCRIPT_NAME),
-            "-log", tcl_path(d / "build_rm.log"), "-journal", tcl_path(d / "build_rm.jou")]
+#: The ways to run the script (KIT-INTERACTIVE, proven on Vivado 2026.1 in
+#: docs/evidence/2026-09-30-kit-interactive): ``batch`` runs it and exits; ``gui`` and ``tcl``
+#: run it and stay open, so a ``STOP_AFTER=link`` leaves the linked design open to floorplan.
+MODES = ("batch", "gui", "tcl")
+
+
+def tclargs(*, stop_after: str = "", jobs: int | None = None) -> list[str]:
+    """The ``NAME=VALUE`` words for ``-tclargs`` (or ``set argv``): only what was asked for,
+    so the script's own values stand for the rest."""
     extra = []
     if stop_after:
+        if stop_after not in STAGES:
+            raise UsageError(f"STOP_AFTER must be one of {', '.join(STAGES)}")
         extra.append(f"STOP_AFTER={stop_after}")
     if jobs:
         extra.append(f"JOBS={int(jobs)}")
+    return extra
+
+
+def vivado_command(script_dir: Path, *, stop_after: str = "", jobs: int | None = None,
+                   vivado: str = "vivado", mode: str = "batch") -> list[str]:
+    """The command ``kit build`` prints: a run of the script, logged beside it. ``mode``
+    ``batch`` (the default) exits at the end; ``gui`` and ``tcl`` stay open after it."""
+    if mode not in MODES:
+        raise UsageError(f"mode must be one of {', '.join(MODES)}")
+    d = Path(script_dir)
+    argv = [vivado, "-mode", mode, "-source", tcl_path(d / SCRIPT_NAME),
+            "-log", tcl_path(d / "build_rm.log"), "-journal", tcl_path(d / "build_rm.jou")]
+    extra = tclargs(stop_after=stop_after, jobs=jobs)
     if extra:
         argv += ["-tclargs", *extra]
     return argv
+
+
+#: Where ``source_tcl``'s line runs. A design already open there stays open: Vivado 2026.1
+#: opens the build's own projects beside it (in -mode tcl and in the GUI; KIT-INTERACTIVE A2/A3),
+#: each linked static holding about 3 GB more.
+SOURCE_WHEN = ("its Tcl console; a design already open stays open beside the build's, so "
+               "close_project it first to save memory")
+SOURCE_LOG = ("its HM_ lines go to that session's log, not build_rm.log; the receipt, "
+              "out/<name>_build.json, is the verdict either way")
+
+
+def stays_open(rp_inst: str, rp_pblock: str) -> str:
+    """What to do with the linked design that ``STOP_AFTER=link`` leaves open in the GUI, in
+    ``-mode tcl`` or in a session that sourced the script: the floorplan loop, as proven in
+    docs/evidence/2026-09-30-kit-interactive. ``hm_save_floorplan`` is a proc the script
+    defines; ``write_xdc -cell`` is NOT the way (it writes the partition's own pblock too,
+    which read back ``-cell`` takes the RM's cells out of it)."""
+    return (f"after link the design stays open (GUI, -mode tcl, or the Tcl line): floorplan "
+            f"your RM in a child pblock of {rp_pblock} (create_pblock, resize_pblock inside it, "
+            f"set_property PARENT {rp_pblock}, add_cells_to_pblock), save it with "
+            f"`hm_save_floorplan FILE` (not write_xdc -cell), and name FILE as the design's "
+            f"build.rm_xdc (read_xdc -cell {rp_inst} after the next link)")
+
+
+def source_tcl(script_dir: Path, *, stop_after: str = "", jobs: int | None = None) -> str:
+    """One Tcl line for a Vivado that is ALREADY running (its Tcl console, or ``vivado -mode
+    tcl``): ``cd {DIR}; set argv {...}; source build_rm.tcl``. ``set argv`` is always there,
+    ``{}`` too: a session keeps its ``argv`` (from ``-tclargs``, or the last ``set argv``), and
+    the script reads it, so a line without it would run with whatever the last one set."""
+    d = tcl_word(tcl_path(Path(script_dir)), "the build directory")
+    words = " ".join(tclargs(stop_after=stop_after, jobs=jobs))
+    return f"cd {{{d}}}; set argv {{{words}}}; source {SCRIPT_NAME}"
 
 
 #: UI2 G8 (d), "Run it your way": the three ways to run the same script, and what HM can see
@@ -156,7 +206,8 @@ RUN_WATCH = {
 
 
 def shell_line(argv: list[str]) -> str:
-    """``argv`` as one line to paste into this host's shell (quoted where needed)."""
+    """``argv`` as one line to paste into this host's shell (quoted where needed): the line
+    ``kit build`` prints and the Build tab shows."""
     import os
     import shlex
     import subprocess
@@ -164,37 +215,27 @@ def shell_line(argv: list[str]) -> str:
     return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
-def _tcl_word(value: str) -> str:
-    """One Tcl word: braced when it holds whitespace (``tcl_word`` refuses braces)."""
-    value = tcl_word(value, "argument")
-    return f"{{{value}}}" if (not value or any(c.isspace() for c in value)) else value
-
-
 def run_commands(script_dir: Path, *, vivado: str = "vivado", stop_after: str = "",
-                 jobs: int | None = None) -> dict[str, Any]:
+                 jobs: int | None = None, rp_inst: str = "u_rp_dut",
+                 rp_pblock: str = "pblock_rp_dut") -> dict[str, Any]:
     """The Build section's "Run it your way" (docs/API.md "Import a design, and the build's
-    ..."): the batch run (``vivado_command``), the same script in the Vivado GUI, and the
-    lines to paste into a Vivado you already have open. ``stop_after`` (``link`` to floorplan:
-    the linked design stays open for nested pblocks) and ``jobs`` go in as ``-tclargs``, or
-    as ``argv`` in an open session. ``tcl_word`` refuses a brace or a newline in any value."""
+    ..."): ONE source with ``kit build`` (KIT-INTERACTIVE): the batch run and the GUI run are
+    ``vivado_command`` (``mode`` batch / gui), the line for a Vivado you already have open is
+    ``source_tcl``, and after ``STOP_AFTER=link`` the floorplan loop is ``stays_open``. So the
+    CLI and the page print the same lines. ``tcl_word`` refuses a brace or a newline."""
     if stop_after and stop_after not in STAGES:
         raise UsageError(f"stop_after must be one of {', '.join(STAGES)}")
     d = Path(script_dir)
-    batch = vivado_command(d, stop_after=stop_after, jobs=jobs, vivado=vivado)
-    gui = [vivado, "-mode", "gui", *batch[3:]]
-    args = [a for a in (f"STOP_AFTER={stop_after}" if stop_after else "",
-                        f"JOBS={int(jobs)}" if jobs else "") if a]
-    session = [f"cd {_tcl_word(tcl_path(d))}",
-               f"set argv [list {' '.join(_tcl_word(a) for a in args)}]".replace(
-                   "[list ]", "{}"),
-               f"set argc {len(args)}",
-               "source build_rm.tcl"]
+    batch = vivado_command(d, stop_after=stop_after, jobs=jobs, vivado=vivado, mode="batch")
+    gui = vivado_command(d, stop_after=stop_after, jobs=jobs, vivado=vivado, mode="gui")
+    source = source_tcl(d, stop_after=stop_after, jobs=jobs)
     return {
         "stop_after": stop_after or "bitstream",
         "batch": {"argv": batch, "text": shell_line(batch), "watch": RUN_WATCH["batch"]},
         "gui": {"argv": gui, "text": shell_line(gui), "watch": RUN_WATCH["gui"]},
-        "session": {"lines": session, "text": "; ".join(session),
-                    "watch": RUN_WATCH["session"]},
+        "session": {"lines": source.split("; "), "text": source, "watch": RUN_WATCH["session"],
+                    "when": SOURCE_WHEN},
+        "stays_open": stays_open(rp_inst, rp_pblock) if stop_after == "link" else None,
         "log": tcl_path(d / "build_rm.log"),
     }
 

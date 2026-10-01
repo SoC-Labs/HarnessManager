@@ -828,8 +828,8 @@ path is relative to the design file, or absolute:
 | `defines` | `` `define `` names (`NAME` or `NAME=VALUE`) |
 | `generics` | top-level parameters, `{NAME: value}`: a string, a number, or `{"path": FILE}` for a `$readmemh` image. A path is written absolute (Vivado's working directory is not yours) and a missing file stops the build at preflight (Vivado itself only warns, and builds a blank memory) |
 | `synth_hook` | a Tcl file sourced inside the synthesis project, after `sources`: a filelist of your own, `read_ip` for Xilinx IP, `set_property` |
-| `synth_dcp` | skip synthesis: an out-of-context synth checkpoint of `top` |
-| `rm_xdc` | RM-internal timing exceptions, applied to the partition after the link |
+| `synth_dcp` | skip synthesis: an out-of-context synth checkpoint of `top`, written before any `create_clock` is read into it (a clock in it overwrites the static's clock of the same name at the link) |
+| `rm_xdc` | RM-internal timing exceptions and floorplan (child pblocks from `hm_save_floorplan`), read with `read_xdc -cell` after the link |
 
 A design with no `sources`, no `synth_hook` and no `synth_dcp` builds as its skeleton only
 when that skeleton is a whole RM (`minimal`). Otherwise `kit script` names the outputs the
@@ -844,9 +844,57 @@ skeleton leaves undriven, and the build stops at preflight until you give the RT
 | `kit verify DIR\|ZIP [TARGET]` | check a kit directory or a kit zip (nothing is cached), and it against a board |
 | `kit guide [TARGET] [--design D] [--build-dir DIR] [--why GATE]` | the steps and their state; `--why` explains one gate |
 | `kit script [TARGET] --design D --out DIR` | write `build_rm.tcl`, the kit and the XDC kit |
-| `kit build DIR` | print the Vivado command, with the full path of a Vivado of the kit's release (HM does not run Vivado yet); exit 12 when there is none |
-| `kit check RECEIPT\|DIR\|PARTIAL [TARGET] [--static-id ID]` | check a build receipt and its pair, or a bare partial; `--static-id` must be the receipt's static, or the check refuses (exit 14) |
+| `kit build DIR [--stop-after STAGE] [--gui]` | print the Vivado command, with the full path of a Vivado of the kit's release (HM does not run Vivado yet), and the Tcl line for a Vivado that is already open; `--gui`: the GUI command; exit 12 when there is none |
+| `kit check RECEIPT\|DIR\|PARTIAL [TARGET] [--static-id ID]` | check a build receipt and its pair, or a bare partial; `--static-id` must be the receipt's static, or the check refuses (exit 14). A `STOP_AFTER` receipt reads "stopped after <stage>" (exit 0) |
 | `kit pack RECEIPT\|DIR [--import]` | write the overlay; `--import` puts it in Program |
+
+**Run it in your own Vivado.** Harness Manager does not run Vivado; you do. Besides batch,
+three ways leave Vivado open after the script. All four run the same `build_rm.tcl`, with the
+same gates and the same receipt:
+
+| Way | How | After the script |
+|---|---|---|
+| Batch | the command `kit build DIR` prints first | Vivado exits |
+| GUI | `kit build DIR --gui` prints `vivado -mode gui -source …` | the GUI stays open |
+| Tcl shell | the batch command with `-mode tcl` | the `Vivado%` prompt stays open |
+| A Vivado already open | its Tcl console: `cd {DIR}; set argv {STOP_AFTER=link}; source build_rm.tcl` (`kit build` prints this line) | the prompt stays open |
+
+- `--stop-after preflight|synth|link|impl|verify` ends the build there. The receipt then says
+  `stopped`: `kit check` reads it as "stopped after link", not a failure, and `kit guide` offers
+  the command that runs the build to the end.
+- In a Vivado already open, always `set argv` before `source`: the session keeps the last one,
+  and the script reads it. A design already open there stays open beside the build's (about 3
+  GB each): `close_project` it first.
+- In that session the `HM_` lines go to its own log, not `build_rm.log`; the receipt
+  (`out/<name>_build.json`) is the verdict either way.
+
+**Floorplan: stop after link, nested pblocks via `rm_xdc`.** The partition's pblock
+(`pblock_rp_dut`) is the static's and cannot move or grow, but your RM can have pblocks of its
+own inside it:
+
+1. `harness-manager kit build ~/builds/my_rm --gui --stop-after link`, and run the command.
+   It stops with the linked design open.
+2. Draw a pblock inside `pblock_rp_dut` and make it its child, in the GUI or its Tcl console:
+   ```tcl
+   create_pblock pblock_mine
+   resize_pblock [get_pblocks pblock_mine] -add {SLICE_X80Y90:SLICE_X87Y104}
+   set_property PARENT pblock_rp_dut [get_pblocks pblock_mine]
+   add_cells_to_pblock [get_pblocks pblock_mine] [get_cells -hierarchical -filter {NAME =~ u_rp_dut/* && IS_PRIMITIVE && REF_NAME != GND && REF_NAME != VCC && NAME !~ *HD_PR_Connection* && NAME !~ *HD_Inserted*}]
+   ```
+3. Save it next to your design `.json`: `hm_save_floorplan ~/designs/my_rm_floorplan.xdc`
+   (the script defines it). Do not use `write_xdc -cell u_rp_dut`: it also writes the
+   partition's own pblock, which the next build reads as a second pblock over the same area
+   that takes your cells out of `pblock_rp_dut` (placement then fails). Nor paste the lines
+   the journal echoes: their full `u_rp_dut/…` cell names match nothing when the build reads
+   the file, and the pblock stays empty.
+4. Add `"rm_xdc": "my_rm_floorplan.xdc"` to the design's `build` object (a path relative to
+   the design file), run `kit script` again, and build. The next link reads it into
+   `pblock_rp_dut` as `u_rp_dut_pblock_mine`.
+
+Limits: the child pblocks must lie inside the partition's ranges (on RC2
+`SLICE_X48Y0:SLICE_X95Y119`, with its BRAM and DSP columns); the partition has no pads; and
+your RM may hold no clock buffer, MMCM or BSCAN (use the shell's clocks and BSCAN legs).
+Proven on Vivado 2026.1 with the RC2 kit: `docs/evidence/2026-09-30-kit-interactive`.
 
 **Times.** Fetching a kit takes seconds from the cache. A build takes about 30 minutes for
 a small RM on a quiet machine, up to an hour when the machine is loaded, and about 50

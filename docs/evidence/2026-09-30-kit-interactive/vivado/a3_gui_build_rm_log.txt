@@ -1,0 +1,69 @@
+# A3: xvfb-run -a vivado -mode gui -source build_rm.tcl -log build_rm.log -journal build_rm.jou -script a3_after.tcl -tclargs STOP_AFTER=link
+# (new template). build_rm.log, markers and the after-script lines only (the log also echoes the script: those lines start with #).
+A3 start 17:43:54 load=16.91 23.74 39.79
+A3 vivado rc=0 end 17:52:46 load=20.24 18.37 29.59
+=== rc=0 took=533s
+# Vivado v2026.1 (64-bit)
+# SW Build 6511674 on Tue Jun 16 11:01:26 MDT 2026
+# Command line       : vivado -mode gui -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.jou -script /tmpdir/claude-74755/kit-interactive/runs/a3/a3_after.tcl -tclargs STOP_AFTER=link
+# Log file           : /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/build_rm.log
+start_gui
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/out/lfsr_floor_build.json
+HM_RM_BUILD_STOPPED after=link
+A3 after-script start 17:48:54 mode=gui
+A3 projects={project_static_routed_locked} current_project={project_static_routed_locked} current_design={checkpoint_static_routed_locked} pblocks={pblock_rp_dut}
+A3 rp_cell=u_rp_dut HD.RECONFIGURABLE=1 REF_NAME=rm_lfsr_floor stage=link
+A3 pblock_lfsr PARENT=pblock_rp_dut cells=118
+hm_save_floorplan: 1 pblock(s) inside pblock_rp_dut -> /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc (give it as RM_XDC)
+A3 hm_save_floorplan rc=0 {/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc}
+A3 after delete: pblocks={pblock_rp_dut} pblock_rp_dut cells=1
+A3 read_xdc -cell rc=0 {/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_floorplan.xdc}
+A3 pblock pblock_rp_dut PARENT=ROOT GRID=RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SLICE_X48Y0:SLICE_X95Y119 DSP48E2_X9Y0:DSP48E2_X17Y47 SNAP=ON cells=133
+A3 pblock u_rp_dut_pblock_lfsr PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 SNAP=NESTED cells=118
+A3 lfsr_q_reg[0] in u_rp_dut_pblock_lfsr
+A3 hdpr violations=0
+hm_save_floorplan: 1 pblock(s) inside pblock_rp_dut -> /tmpdir/claude-74755/kit-interactive/runs/a3/floorplan_roundtrip.xdc (give it as RM_XDC)
+A3 round-trip save rc=0 {/tmpdir/claude-74755/kit-interactive/runs/a3/floorplan_roundtrip.xdc}
+A3 re-source: design open, argv unset
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_a2/out/lfsr_floor_build.json
+HM_RM_BUILD_STOPPED after=link
+A3 re-source rc=0 err={} took=215s stage=link
+A3 projects={project_static_routed_locked project_static_routed_locked_2} current_project={project_static_routed_locked_2} current_design={checkpoint_static_routed_locked} pblocks={pblock_rp_dut}
+A3 after-script end 17:52:39
+INFO: [Common 17-206] Exiting Vivado at Wed Sep 30 17:52:44 2026...
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 8:52.56
+	Maximum resident set size (kbytes): 6287184

@@ -1,0 +1,7 @@
+/research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor/build_rm.jou -tclargs JOBS=4
+  Vivado 2026.1 (path); the kit needs 2026.1
+In a Vivado that is already open (its Tcl console; a design already open stays open beside the build's, so close_project it first to save memory), type:
+  cd {/tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor}; set argv {JOBS=4}; source build_rm.tcl
+  (its HM_ lines go to that session's log, not build_rm.log; the receipt, out/<name>_build.json, is the verdict either way)
+(Harness Manager does not run Vivado yet: run the command above; the verdict is the receipt's state (out/<name>_build.json), or the last line of build_rm.log that STARTS with HM_RM_BUILD_ (`grep -E '^HM_RM_BUILD_' build_rm.log | tail -1`; the log also echoes the script, whose text holds HM_RM_BUILD_FAILED))
+=== rc=0 took=4s

@@ -1,0 +1,5 @@
+lfsr_floor (rm_id 0x0100B8C6) for static 0x44EE76D5, kit mps3/0x44EE76D5/vivado-2026.1
+wrote 22 files to /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs
+next: /research/CAD/Xilinx/Vivado/2026.1/Vivado/bin/vivado -mode batch -source /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs/build_rm.tcl -log /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs/build_rm.log -journal /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs/build_rm.jou
+then: harness-manager kit check /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_stage_secs/out/lfsr_floor_build.json
+=== rc=0 took=3s

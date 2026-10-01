@@ -1,0 +1,16 @@
+# gate 3 (5b79aa0) failures, each run alone 3 times, 14:51:55 Thu 1 Oct, load 13.42 16.22 19.05
+1 tests/integration/test_debug_6921_drain.py::test_a_reset_right_after_our_own_session_is_retried_once_and_succeeds :: 2 passed in 7.05s
+2 tests/integration/test_debug_6921_drain.py::test_a_reset_right_after_our_own_session_is_retried_once_and_succeeds :: 2 passed in 2.32s
+3 tests/integration/test_debug_6921_drain.py::test_a_reset_right_after_our_own_session_is_retried_once_and_succeeds :: 2 passed in 2.34s
+1 tests/integration/test_debug_6921_drain.py::test_negative_twin_a_reset_with_no_recent_session_of_ours_is_held_at_once :: 1 failed, 3 passed in 1.59s
+2 tests/integration/test_debug_6921_drain.py::test_negative_twin_a_reset_with_no_recent_session_of_ours_is_held_at_once :: 4 passed in 1.30s
+3 tests/integration/test_debug_6921_drain.py::test_negative_twin_a_reset_with_no_recent_session_of_ours_is_held_at_once :: 4 passed in 1.38s
+1 tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json :: 1 passed in 1.75s
+2 tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json :: 1 passed in 1.58s
+3 tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json :: 1 passed in 1.49s
+14 passed in 14.84s
+14 passed in 14.96s
+14 passed in 15.07s
+14 passed in 14.89s
+14 passed in 15.27s
+14 passed in 15.15s

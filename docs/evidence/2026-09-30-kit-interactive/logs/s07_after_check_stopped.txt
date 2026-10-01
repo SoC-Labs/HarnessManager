@@ -1,0 +1,3 @@
+the build lfsr_floor: stopped after link (STOP_AFTER=link), not a failure: the 14 gates up to there passed; there is no pair to check or pack until the build runs to the end
+next: harness-manager kit build /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_floor --stop-after bitstream
+=== rc=0 took=1s

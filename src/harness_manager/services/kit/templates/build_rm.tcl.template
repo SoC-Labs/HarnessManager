@@ -13,6 +13,7 @@
 # THE SCRIPT IS THE INSTRUCTIONS. Every step the guide shows is a stage below,
 # every check the guide shows is a gate below, and every gate prints one line
 #   HM_GATE <name> PASS|FAIL <detail>
+# (and every stage one line: HM_STAGE <stage> <epoch seconds>)
 # which `harness-manager kit check` and the web guide read back. Vivado exits 0
 # after a Tcl error, so the markers -- not the exit code -- are the verdict:
 #   HM_RM_BUILD_COMPLETE   everything passed; the receipt is written
@@ -26,6 +27,10 @@
 # directory this script is in, so the whole build directory can be moved as it is):
 #   vivado -mode batch -source build_rm.tcl -log build_rm.log -journal build_rm.jou
 #   vivado -mode batch -source build_rm.tcl -tclargs RM_SOURCES="a.sv b.sv" JOBS=4
+# Or in your own Vivado, which stays open after it (-mode gui or -mode tcl, the same arguments),
+# or one that is already open (its Tcl console):
+#   cd <this directory>; set argv {STOP_AFTER=link}; source build_rm.tcl
+# STOP_AFTER=link leaves the linked design open to floorplan: see hm_save_floorplan below.
 #
 # Derived from the platform's own RM flow, which is proven on silicon:
 #   mps3-nanosoc-platform fpga/dfx/build_dfx.tcl (feat/rm-ila-mint @ e5436302)
@@ -95,16 +100,25 @@ array set P {
 #                   ($readmemh of a missing file is only a warning, and a blank ROM)
 # RM_SYNTH_HOOK     a Tcl file sourced inside the synth project (filelists,
 #                   read_ip, create_ip for an RM debug hub, set_property ...)
-# RM_SYNTH_DCP      skip synthesis: an out-of-context synth checkpoint of RM_TOP
+# RM_SYNTH_DCP      skip synthesis: an out-of-context synth checkpoint of RM_TOP, written
+#                   BEFORE any create_clock was read (a clock in it overwrites the static's
+#                   clock of the same name at the link: known issue 11)
 # RM_OOC_XDC        the XDC kit's <name>_ooc.xdc ("harness-manager xdc rm-kit")
-# RM_XDC            optional RM-internal timing exceptions, applied -cell RP_INST
+# RM_XDC            optional RM-internal timing exceptions and floorplan (child pblocks:
+#                   hm_save_floorplan below), read_xdc -cell RP_INST after the link
 # STOP_AFTER        preflight | synth | link | impl | verify | bitstream (= all)
 # ALLOW_TIMING_FAIL 1 = report negative slack in your RM but still write bits
 
-foreach arg $argv {
-    if { [regexp {^([A-Z_]+)=(.*)$} $arg -> k v] } {
-        if { ![info exists P($k)] } { error "build_rm.tcl: unknown parameter '$k' in -tclargs" }
-        set P($k) $v
+# -tclargs NAME=VALUE win over the values above. In a Vivado that is already open (the GUI's
+# Tcl console, vivado -mode tcl), `set argv {NAME=VALUE ...}` before `source build_rm.tcl`
+# does the same: Vivado starts every session with argv {} and keeps the last one set, so set
+# it every time. With no argv at all (unset), the values above stand.
+if { [info exists ::argv] } {
+    foreach arg $::argv {
+        if { [regexp {^([A-Z_]+)=(.*)$} $arg -> k v] } {
+            if { ![info exists P($k)] } { error "build_rm.tcl: unknown parameter '$k' in -tclargs" }
+            set P($k) $v
+        }
     }
 }
 
@@ -146,7 +160,10 @@ proc note { name detail } {
     puts "HM_GATE $name NOTE $detail"
     lappend ::gates [list $name NOTE $detail]
 }
-proc stage { n } { puts "HM_STAGE $n"; set ::stage $n }
+# HM_STAGE <stage> <epoch seconds>: the seconds let a watcher show how long the stage has run.
+# Readers take the stage from the first word and the seconds, when there, from the second (a
+# log from before it has none).
+proc stage { n } { puts "HM_STAGE $n [clock seconds]"; set ::stage $n }
 proc done_after { n } {
     if { [lsearch -exact $::STAGES $n] >= $::stop_idx } {
         write_receipt stopped
@@ -265,6 +282,52 @@ proc drc_blockers {} {
         }
     }
     return [lsort -unique $bad]
+}
+
+# The floorplan loop (KIT-INTERACTIVE). STOP_AFTER=link leaves the linked design open in the
+# GUI, in -mode tcl, or in a Vivado that sourced this script. Draw your pblocks INSIDE the
+# partition's (children of RP_PBLOCK: create_pblock; resize_pblock within its range;
+# set_property PARENT <RP_PBLOCK>; add_cells_to_pblock), then type
+#     hm_save_floorplan FILE
+# and give FILE as RM_XDC (the design's build.rm_xdc): the next build reads it with
+# read_xdc -cell RP_INST after the link, and each pblock comes back as <RP_INST>_<name>, a
+# child of RP_PBLOCK. Not `write_xdc -cell`: it also writes the partition's own pblock, which,
+# read back -cell, becomes a second top-level pblock over the same area and takes your
+# RM's cells out of RP_PBLOCK (docs/evidence/2026-09-30-kit-interactive). The partition's
+# pblock itself is the static's: it cannot move or grow.
+proc hm_save_floorplan { file } {
+    global P
+    set rp $P(RP_INST)
+    set kids [lsort [get_pblocks -quiet -filter "PARENT == $P(RP_PBLOCK)"]]
+    if { [llength $kids] == 0 } {
+        error "hm_save_floorplan: no pblock inside $P(RP_PBLOCK); make yours its child: set_property PARENT $P(RP_PBLOCK) \[get_pblocks NAME\]"
+    }
+    set fh [open $file w]
+    puts $fh "# The floorplan of $P(RM_NAME) inside $P(RP_PBLOCK) (static $P(STATIC_ID)), written by"
+    puts $fh "# hm_save_floorplan in build_rm.tcl. It is RM_XDC: read_xdc -cell $rp after the link"
+    puts $fh "# makes each pblock ${rp}_<name>, a child of $P(RP_PBLOCK). Names are relative to $rp."
+    set pre "[string map {/ _} $rp]_"
+    foreach pb $kids {
+        # read -cell prefixes the name with <RP_INST>_; strip it, so a second round trip keeps it
+        set n [expr { [string first $pre $pb] == 0 ? [string range $pb [string length $pre] end] : $pb }]
+        set cells {}
+        foreach c [get_cells -quiet -of_objects $pb] {
+            if { [string first "$rp/" $c] == 0 } { set c [string range $c [string length "$rp/"] end] }
+            lappend cells "{$c}"
+        }
+        puts $fh "create_pblock $n"
+        puts $fh "resize_pblock \[get_pblocks $n\] -add {[get_property GRID_RANGES $pb]}"
+        foreach prop {EXCLUDE_PLACEMENT CONTAIN_ROUTING} {
+            if { [get_property $prop $pb] } { puts $fh "set_property $prop 1 \[get_pblocks $n\]" }
+        }
+        if { [llength $cells] } {
+            puts $fh "add_cells_to_pblock \[get_pblocks $n\] \[get_cells \[list \\"
+            puts $fh "    [join $cells " \\\n    "]\]\]"
+        }
+    }
+    close $fh
+    puts "hm_save_floorplan: [llength $kids] pblock(s) inside $P(RP_PBLOCK) -> $file (give it as RM_XDC)"
+    return $file
 }
 
 set ::receipt [dict create]
@@ -388,12 +451,19 @@ set rc [catch {
         # -generic is REPEATED, one per generic: Vivado takes no list
         foreach g $P(RM_GENERICS) { lappend sargs -generic $g }
         synth_design {*}$sargs
+        # The RM checkpoint BEFORE the OOC XDC (N2, Linux v2.0.0 known issue 11). A checkpoint
+        # carries the constraints read into it, and at the link the OOC `create_clock -name
+        # dut_clk` overwrote the static's clock of the same name on OSCCLK1 ([Constraints
+        # 18-619]): the shell's clk_wiz clocks lost their source and check_timing counted 27,984
+        # unclocked pins for minimal on RC2. Written first, the checkpoint holds the netlist
+        # only, and the link times the RM with the static's own clocks (no_clock 0;
+        # docs/evidence/2026-09-30-kit-interactive §11).
+        write_checkpoint -force $synth_dcp
         # read AFTER synth_design: it names ports and synthesised pins
-        # (_template/ooc_synth.tcl:69-80)
+        # (_template/ooc_synth.tcl:69-80). Here it serves the OOC reports and gates below only.
         read_xdc $P(RM_OOC_XDC)
         report_utilization    -file [file join $out "${name}_synth_util.rpt"]
         report_timing_summary -file [file join $out "${name}_synth_timing.rpt"]
-        write_checkpoint -force $synth_dcp
     } else {
         open_checkpoint $P(RM_SYNTH_DCP)
         file copy -force $P(RM_SYNTH_DCP) $synth_dcp
@@ -445,7 +515,10 @@ set rc [catch {
     gate clocks_after_link [expr { [llength $clks] > 0 }] \
         "[llength $clks] clocks propagated from the static"
 
-    if { $P(RM_XDC) ne "" } { read_xdc -cell $rp_cell $P(RM_XDC) }
+    # The cell asked for again: the $rp_cell object from before read_checkpoint -cell is stale,
+    # and Vivado 2026.1 SEGFAULTS turning it into a name for read_xdc -cell (KIT-INTERACTIVE:
+    # 2 of 2 batch links with an RM_XDC, HASCUtils::getXDCName in hs_err_pid*.log).
+    if { $P(RM_XDC) ne "" } { read_xdc -cell [get_cells $rp] $P(RM_XDC) }
     set_property BITSTREAM.CONFIG.PERSIST NO [current_design]
 
     report_drc -checks [get_drc_checks HDPR*] -file [file join $out "${name}_drc_hdpr_link.rpt"]

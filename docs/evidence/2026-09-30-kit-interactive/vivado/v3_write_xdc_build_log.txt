@@ -1,0 +1,38 @@
+# The negative: the same RM, rm_xdc = write_xdc -cell u_rp_dut -exclude_timing's output (design/write_xdc_cell_exclude_timing.xdc),
+# batch, full build, template 89a0202 (the crash fixed). build_rm.log: markers, the rm_xdc parse, errors.
+WXDC start 19:01:49 load=15.10 18.70 24.21
+WXDC vivado rc=1 end 19:07:27 load=22.16 17.99 21.93
+=== rc=0 took=339s
+HM_STAGE preflight
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/design/rtl/rm_lfsr_floor.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/xdc/lfsr_floor_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_GATE rm_xdc_present PASS /tmpdir/claude-74755/kit-interactive/design/lfsr_floor_write_xdc_cell.xdc
+HM_STAGE synth
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100B8C6, RM_ID is 0x0100B8C6 (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+WARNING: [Vivado 12-12435] Any Tcl variable pointing to design objects become invalid when read_checkpoint is executed subsequently after open_checkpoint. The content of those variables need to be rebuilt after read_checkpoint. Otherwise this could result in unwanted behavior due to referencing objects that do not exist anymore.
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 22 clocks propagated from the static
+Parsing XDC File [/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_write_xdc_cell.xdc] for cell 'u_rp_dut'
+INFO: [Constraints 18-12550] The child Pblock u_rp_dut_pblock_rp_dut is resized to contain within the parent pblock pblock_rp_dut, as the child pblock u_rp_dut_pblock_rp_dut has the property SNAPPING_MODE = NESTED [/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_write_xdc_cell.xdc:67]
+INFO: [Constraints 18-12550] The child Pblock u_rp_dut_pblock_rp_dut is resized to contain within the parent pblock pblock_rp_dut, as the child pblock u_rp_dut_pblock_rp_dut has the property SNAPPING_MODE = NESTED [/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_write_xdc_cell.xdc:67]
+Finished Parsing XDC File [/tmpdir/claude-74755/kit-interactive/design/lfsr_floor_write_xdc_cell.xdc] for cell 'u_rp_dut'
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_STAGE impl
+HM_GATE rp_pins_opt PASS 148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)
+ERROR: [DRC PLDE-1] Design Exceptions: ERROR: u_rp_dut/GND_HD_Inserted_Inst_dbg_bscan_tdo constrained such that no valid location exists on the device
+ERROR: [Vivado_Tcl 4-23] Error(s) found during DRC. Placer not run.
+HM_GATE tcl_error FAIL stage=impl: ERROR: [Common 17-39] 'place_design' failed due to earlier errors. 
+HM_RM_BUILD_FAILED gate=tcl_error
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/lfsr_wxdc/out/lfsr_floor_build.json
+ERROR: [Common 17-39] 'place_design' failed due to earlier errors.
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 5:37.41
+	Maximum resident set size (kbytes): 3900064

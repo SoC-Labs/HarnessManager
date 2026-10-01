@@ -1,0 +1,13 @@
+# The placement report: vivado -mode tcl on out/lfsr_floor_routed.dcp, tools/place_stdin.tcl
+PLACE start 18:49:59 load=24.79 22.20 30.24
+PLACE vivado rc=0 end 18:51:39 load=23.55 23.11 29.78
+=== rc=0 took=100s
+PLACE pblocks=pblock_rp_dut u_rp_dut_pblock_lfsr
+PLACE pblock pblock_rp_dut PARENT=ROOT GRID=DSP48E2_X9Y0:DSP48E2_X17Y47 SLICE_X48Y0:SLICE_X95Y119 RAMB36_X6Y0:RAMB36_X11Y23 RAMB18_X6Y0:RAMB18_X11Y47 SNAPPING_MODE=ON cells=168
+PLACE pblock u_rp_dut_pblock_lfsr PARENT=pblock_rp_dut GRID=SLICE_X80Y90:SLICE_X87Y104 SNAPPING_MODE=NESTED cells=118
+PLACE assigned=118 inside SLICE_X80Y90:SLICE_X87Y104=118 outside=0 
+PLACE slices used by the child's cells: SLICE_X80Y104 SLICE_X81Y102 SLICE_X81Y103 SLICE_X81Y104 SLICE_X82Y100 SLICE_X82Y102 SLICE_X82Y103 SLICE_X82Y104 SLICE_X83Y100 SLICE_X83Y102 SLICE_X83Y103 SLICE_X83Y104 SLICE_X83Y99 SLICE_X84Y100 SLICE_X84Y102 SLICE_X84Y103 SLICE_X84Y104 SLICE_X84Y99 SLICE_X85Y104
+PLACE RM registers=89 inside the child's range=89
+PLACE done
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:39.58
+	Maximum resident set size (kbytes): 2986416

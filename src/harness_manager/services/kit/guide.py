@@ -430,9 +430,14 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
                     s.detail = (f"{receipt.rm_name} passed {len(receipt.gates)} gates "
                                 f"({found_r[0].name}; static {receipt.get('static_id')})")
                 elif receipt.state == "stopped":
+                    # KIT-INTERACTIVE: not a failure. The command runs it to the end even when
+                    # the script itself was written to stop (kit script --stop-after link).
                     raw["build"] = "todo"
-                    s.detail = f"stopped after {receipt.stage} (STOP_AFTER): finish the build"
-                    s.actions = [_cmd(" ".join(run))]
+                    s.detail = (f"{receipt.rm_name} {build.stopped_words(receipt)} "
+                                f"({found_r[0].name}): finish the build")
+                    s.actions = [_cmd(" ".join(render.vivado_command(
+                        Path(build_dir), stop_after="bitstream",
+                        vivado=command_vivado(found, need))))]
                 else:
                     raw["build"] = "failed"
                     g = receipt.failed_gate

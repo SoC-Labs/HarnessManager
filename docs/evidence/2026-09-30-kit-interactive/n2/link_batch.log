@@ -1,0 +1,12 @@
+load ok 00:19:58 20.75 29.12 44.34
+N2 n2_base start 00:19:59 load=20.75 29.12 44.34
+N2 n2_base vivado rc=0 end 00:24:29 load=29.94 29.34 40.57
+N2 n2_b start 00:24:29 load=29.94 29.34 40.57
+N2 n2_b vivado rc=0 end 00:28:35 load=26.60 28.86 37.86
+N2 n2_a start 00:28:35 load=26.60 28.86 37.86
+N2 n2_a vivado rc=0 end 00:32:42 load=25.83 25.91 34.40
+N2 n2_lfsr_base start 00:32:42 load=25.83 25.91 34.40
+N2 n2_lfsr_base vivado rc=0 end 00:37:43 load=10.41 16.64 28.14
+N2 n2_lfsr_b start 00:37:43 load=10.41 16.64 28.14
+N2 n2_lfsr_b vivado rc=0 end 00:42:47 load=15.37 16.57 24.93
+N2 batch done 00:42:47
