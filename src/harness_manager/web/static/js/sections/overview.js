@@ -86,10 +86,10 @@ function whoParts(holder) {
   return { who: who || "someone", host: host || "" };
 }
 
-// --- the background queue: week.js keeps queue, not background_queue (CCR UI2-OV-1) -------------
+// --- the background queue: week.js keeps background_queue (CCR UI2-OV-1 = SHELL2-2) ---------------
 
-// Read on every week read of the lease (GET /lease is cached 10 s by the service, so this is
-// no extra hub contact); week.js's own copy wins once it keeps one.
+// Read on a week read of the lease that came without one (a daemon without G11: GET /lease is
+// cached 10 s by the service, so this is no extra hub contact); week.js's own copy wins.
 async function loadBackground(bid) {
   const b = boardState(bid);
   if (b.ovBgLoading) return;
@@ -110,14 +110,14 @@ async function loadBackground(bid) {
 onHubLoaded((bid, hub) => {
   if (!hub) return;
   const w = hub || {};
-  if (Array.isArray(w.background)) return;          // week.js keeps it (after the CCR)
+  if (Array.isArray(w.background_queue)) return;    // week.js keeps it (CCR SHELL2-2)
   if (S.boards[bid] && S.boards[bid].open) loadBackground(bid);
 });
 
 function backgroundOf(bid) {
   const hub = week(bid).hub;
-  if (hub && Array.isArray(hub.background)) {
-    return { queue: hub.background, known: hub.backgroundKnown !== false, reason: hub.backgroundReason || "" };
+  if (hub && Array.isArray(hub.background_queue)) {
+    return { queue: hub.background_queue, known: hub.background_known !== false, reason: hub.background_reason || "" };
   }
   const b = boardState(bid);
   return b.ovBg && b.ovBg.present ? b.ovBg : null;
