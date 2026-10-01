@@ -1659,3 +1659,10 @@ def _fields(obj: Any) -> dict[str, Any]:
     from harness_manager.cli.output import jsonable
 
     return dict(jsonable(obj))               # jsonable's field rules (``omit_none``), once
+
+
+# --- bringup-usb ---
+# BRINGUP-USB: bring a new board up over its Debug USB, from the app (bringup_api.py; docs/API.md
+# "Bring-up over the Debug USB"). Read when create_app runs, so appending here is enough.
+EXTENSIONS += ("bringup_api",)
+# --- end bringup-usb ---
