@@ -418,6 +418,11 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # in a temporary directory of the mock's own (never the user's settings or keyring).
     from .settings_mock import register as register_settings
     app.state.settings = register_settings(app, state, _accepted)
+    # --- sd-flash: the card-writer routes (docs/API.md "SD cards in this PC's card reader"):
+    # the REAL routes over --demo's simulated readers, the setting from the settings above.
+    from .cardwriter_mock import register as register_cardwriter
+    register_cardwriter(app, state, _accepted, app.state.settings)
+    # --- end sd-flash ---
     # LINUX-SLOTS' card routes (docs/API.md "User microSD and OS slots"), simulated.
     from .lxslots_mock_card import CardSim
     from .lxslots_mock_card import register as register_card

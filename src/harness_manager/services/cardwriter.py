@@ -10,22 +10,14 @@ two things onto the card in one of them:
   make_storage_adapter``, the module convention ``pack.py`` uses), so its rules hold here
   too: a verified backup of the card as it is NOW first (taken by the job, or given), never
   an ``.ebf`` (it reflashes the MCC), never an MCC command file, journaled, read back.
-- ``image``: a raw image onto the whole device (the Linux harness's user microSD). Checked
-  first with ``services.update.s0lb``:
-
-  * a **slot image** (``linux_slot.img``: stage0's S0LB boot table from byte 0) is NOT
-    written at byte 0: stage0 reads the card's MBR, and an S0LB header there is "no MBR",
-    so the board would come up in rescue. It is composed into the card layout stage0 boots
-    from (``STAGE0_CONTRACT.md`` §6, ``stage0_mkcard.py card``: the MBR with p1/p2 type
-    0x7F slots A/B at LBA 67584/198656, p3 0x83 /persist from LBA 329728 to the end of the
-    card, p4 0xDA D13 store at LBA 2048; the boot-select sector at LBA 1 and 2, default A,
-    seq 1; the image in both slots). The first 1 MiB of p3 and the whole p4 are zeroed, as
-    on a freshly made card: Linux boots with a volatile /persist until ``mps3-persist
-    format --erase``, and D13 sees an unformatted store. 162 MiB are written;
-  * a **card image** (an MBR with the stage0 layout, and a bootable slot: what
-    ``stage0_mkcard.py card --card-img`` makes) is written as it is;
-  * anything else is refused, unless ``any_image`` (``--any-image``): then it is written
-    raw from byte 0. A broken boot table (a bad CRC) is "anything else".
+- ``card``: a WHOLE-CARD image onto the whole device (the Linux harness's user microSD), as
+  ``stage0_mkcard.py card --card-img`` builds it (STAGE0_CONTRACT.md §6: the MBR at LBA 0,
+  the boot-select sectors at LBA 1-2, slot A at LBA 67584 and B at 198656, /persist p3, the
+  D13 store p4). Checked first, the way stage0 reads a card (``services.update.s0lb`` for
+  the slots): the MBR signature 0x55AA at bytes 510-511, then entries 1/2 (type 0x7F) and at
+  least one slot whose S0LB boot table passes every CRC; never larger than the device.
+  ``linux_slot.img`` (S0LB at byte 0) is ONE OS slot and is refused with how to build a card
+  image: written at byte 0 it is "no MBR" to stage0, and the board sits in rescue.
 
 Safety rails (code, not docs):
 
@@ -36,7 +28,7 @@ Safety rails (code, not docs):
   controller presents: vendor/model ARM, V2M, MPS, MBED, DAPLINK; that is the Debug USB
   door, never raw-written) and its DAPLink drive (``MBED*``); anything above the size cap
   (``bringup.sd_flash_max``, 256 GB); an empty reader. A card whose volume is labelled
-  ``V2M-MPS3`` in a real card reader is listed for ``files`` only: a raw image would erase
+  ``V2M-MPS3`` in a real card reader is listed for ``files`` only: a card image would erase
   the board's configuration.
 - **A device id is a fingerprint** (name, path, model, vendor, serial, size, transport, the
   volumes' uuid/label/fs): a card swapped since the listing has another id, so the write
@@ -81,7 +73,6 @@ import subprocess
 import sys
 import threading
 import time
-import zlib
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -112,7 +103,7 @@ DISABLED_REASON = "SD flashing is turned off (Settings → Bring-up, bringup.sd_
 WINDOWS_REASON = ("writing SD cards in this PC's card reader is not supported on Windows yet "
                   "(Linux and macOS only): write the configuration SD over the board's Debug "
                   "USB instead")
-KINDS = ("files", "image")
+KINDS = ("files", "card")
 PHASES = ("backup", "unmount", "write", "verify")
 
 
@@ -709,41 +700,14 @@ def _refuse_run(argv: Sequence[str]) -> tuple[int, bytes, bytes]:
     raise AssertionError(f"the test seam ran a real command: {' '.join(argv)}")
 
 
-# --- images: the stage0 card layout (STAGE0_CONTRACT.md §6; stage0_mkcard.py) ---------------------
+# --- card images: stage0's user microSD (STAGE0_CONTRACT.md §6; stage0_mkcard.py) ----------------
 
 BLOCK = 512
-LBA_STORE, N_STORE = 2048, 65536
-LBA_A, LBA_B, N_SLOT = 67584, 198656, 131072
-LBA_PERSIST = 329728
-TYPE_SLOT, TYPE_PERSIST, TYPE_STORE = 0x7F, 0x83, 0xDA
-BOOTSEL_MAGIC, BOOTSEL_VERSION = 0x43423053, 1
-DISK_SIG = 0x53304C42
+TYPE_SLOT = 0x7F                 # MBR entries 1 and 2: stage0's slots A and B
+LBA_A, LBA_B = 67584, 198656     # where stage0_mkcard puts them (stage0 reads the entries)
 MIB = 1 << 20
-#: A composed card: everything up to /persist, and /persist's first MiB zeroed.
-CARD_LAYOUT_BYTES = LBA_PERSIST * BLOCK + MIB
-#: The smallest /persist stage0_mkcard accepts (2048 blocks).
-MIN_PERSIST_BYTES = MIB
-
-
-def mbr(persist_blocks: int) -> bytes:
-    """The stage0 card's MBR: entry order p1 A, p2 B, p3 persist, p4 store (stage0_mkcard)."""
-    sec = bytearray(BLOCK)
-    struct.pack_into("<I", sec, 440, DISK_SIG)
-    parts = [(TYPE_SLOT, LBA_A, N_SLOT), (TYPE_SLOT, LBA_B, N_SLOT),
-             (TYPE_PERSIST, LBA_PERSIST, persist_blocks), (TYPE_STORE, LBA_STORE, N_STORE)]
-    for i, (typ, lba, n) in enumerate(parts):
-        sec[446 + 16 * i:462 + 16 * i] = struct.pack("<B3sB3sII", 0, b"\xfe\xff\xff", typ,
-                                                     b"\xfe\xff\xff", lba, n)
-    sec[510], sec[511] = 0x55, 0xAA
-    return bytes(sec)
-
-
-def bootsel(default: str = "A", seq: int = 1) -> bytes:
-    sec = bytearray(BLOCK)
-    struct.pack_into("<IIII", sec, 0, BOOTSEL_MAGIC, BOOTSEL_VERSION, seq,
-                     1 if default.upper() == "A" else 2)
-    struct.pack_into("<I", sec, 0x1FC, zlib.crc32(bytes(sec[:0x1FC])) & 0xFFFFFFFF)
-    return bytes(sec)
+SLOT_IMAGE_REFUSAL = ("that is a single OS slot (linux_slot.img), not a whole-card image: "
+                      "build one with stage0_mkcard.py card --card-img")
 
 
 def _slot_entries(sector: bytes) -> list[tuple[int, int, int]]:
@@ -769,109 +733,63 @@ def _read_slot(f: Any, lba: int, nblocks: int) -> bytes:
 
 
 @dataclass(frozen=True)
-class ImagePlan:
-    """What an ``image`` write will put on the card."""
+class CardImage:
+    """A whole-card image that passed ``inspect_card``."""
 
-    kind: str                  # "slot" (composed into the card layout) | "card" | "raw"
     source: str
-    source_bytes: int
-    hdr_crc: str = ""          # a slot image's (or the card's bootable slot's) hdr_crc
-    notes: tuple[str, ...] = ()
-
-    def write_bytes(self) -> int:
-        return CARD_LAYOUT_BYTES if self.kind == "slot" else self.source_bytes
-
-    def min_device_bytes(self) -> int:
-        return CARD_LAYOUT_BYTES + MIN_PERSIST_BYTES if self.kind == "slot" else self.source_bytes
+    size: int
+    slots: tuple[str, ...]           # the bootable ones: "A", "B"
+    hdr_crc: str                     # the first bootable slot's (the board's ``hdr_crc``)
+    notes: tuple[str, ...] = ()      # a slot that is not bootable, and why
 
     def describe(self) -> str:
-        if self.kind == "slot":
-            return (f"a Linux slot image (hdr_crc {self.hdr_crc}), composed into stage0's card "
-                    f"layout: both slots, default A")
-        if self.kind == "card":
-            return f"a stage0 card image (bootable slot hdr_crc {self.hdr_crc})"
-        return "a raw image (not checked: --any-image)"
+        return (f"a stage0 card image: slot{'s' if len(self.slots) > 1 else ''} "
+                f"{' and '.join(self.slots)} bootable (hdr_crc {self.hdr_crc})")
 
 
-def inspect_image(path: Path, *, any_image: bool = False) -> ImagePlan:
-    """Check ``path`` as an image for the user microSD. ``RefusedError`` says why not."""
+def inspect_card(path: Path | str) -> CardImage:
+    """Check ``path`` as a whole-card image the way stage0 reads a card: the MBR (0x55AA),
+    entries 1/2 type 0x7F, and a slot whose S0LB boot table passes. ``RefusedError`` says why
+    not; a single OS slot (S0LB at byte 0) is refused with how to build a card image."""
     path = Path(path)
     if not path.is_file():
-        raise AbsentError(f"no image file at {path}", hint="give the linux_slot.img path")
+        raise AbsentError(f"no card image at {path}",
+                          hint="give the card image stage0_mkcard.py card --card-img wrote")
     size = path.stat().st_size
-    if size == 0:
-        raise RefusedError(f"{path} is empty", hint="nothing was written")
     with path.open("rb") as f:
         head = f.read(BLOCK)
-        why = ""
         if len(head) >= 4 and struct.unpack_from("<I", head, 0)[0] == s0lb.MAGIC:
-            if size > s0lb.IMAGE_MAX:
-                why = f"{size} B is over stage0's 64 MiB slot"
-            else:
-                f.seek(0)
-                try:
-                    table = s0lb.parse(f.read())
-                except s0lb.S0lbError as exc:
-                    why = f"its S0LB boot table is unusable: {exc}"
-                else:
-                    if table.problems:
-                        why = f"its S0LB boot table fails: {'; '.join(table.problems)}"
-                    else:
-                        return ImagePlan("slot", str(path), size,
-                                         hdr_crc=f"0x{table.header_crc32:08x}")
-        elif len(head) == BLOCK and head[510:512] == b"\x55\xaa":
-            entries = _slot_entries(head)
-            slots = [(lba, n) for typ, lba, n in entries[:2] if typ == TYPE_SLOT and lba and n]
-            good = ""
-            problems = []
-            for lba, n in slots:
-                try:
-                    table = s0lb.parse(_read_slot(f, lba, n))
-                except s0lb.S0lbError as exc:
-                    problems.append(f"slot at LBA {lba}: {exc}")
-                    continue
-                if table.problems:
-                    problems.append(f"slot at LBA {lba}: {'; '.join(table.problems)}")
-                elif not good:
-                    good = f"0x{table.header_crc32:08x}"
-            if good:
-                return ImagePlan("card", str(path), size, hdr_crc=good,
-                                 notes=tuple(problems))
-            why = ("an MBR without a bootable stage0 slot"
-                   + (f" ({'; '.join(problems)})" if problems else
-                      " (no type-0x7F slot partition)"))
-        else:
-            why = "neither a Linux slot image (S0LB) nor a stage0 card image (MBR + slots)"
-    if any_image:
-        return ImagePlan("raw", str(path), size, notes=(f"not checked: {why}",))
-    raise RefusedError(f"{path} is not a harness image: {why}",
-                       hint="give linux_slot.img (or a stage0_mkcard.py card image); "
-                            "--any-image writes any file raw")
-
-
-def compose_card(slot_image: Path, device_bytes: int, out: Path) -> str:
-    """Write the stage0 card layout for ``slot_image`` into ``out`` (sparse); its sha256."""
-    img = Path(slot_image).read_bytes()
-    persist = device_bytes // BLOCK - LBA_PERSIST
-    if persist * BLOCK < MIN_PERSIST_BYTES:
-        raise RefusedError(f"a {human_size(device_bytes)} card leaves no room for /persist",
-                           hint=f"use a card of at least {human_size(CARD_LAYOUT_BYTES + MIB)}")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_name(out.name + ".part")
-    with tmp.open("wb") as f:
-        f.truncate(CARD_LAYOUT_BYTES)
-        f.seek(0)
-        f.write(mbr(min(persist, 0xFFFFFFFF)))
-        sel = bootsel("A", 1)
-        f.write(sel)
-        f.write(sel)
-        for lba in (LBA_A, LBA_B):
-            f.seek(lba * BLOCK)
-            f.write(img)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, out)
-    return file_sha256(out)
+            raise RefusedError(f"{path.name}: {SLOT_IMAGE_REFUSAL}",
+                               hint="nothing was written: a slot image at byte 0 is \"no MBR\" "
+                                    "to stage0, and the board would sit in rescue")
+        if len(head) < BLOCK or head[510:512] != b"\x55\xaa":
+            raise RefusedError(f"{path.name} is not a whole-card image: no MBR (0x55AA at bytes "
+                               f"510-511)",
+                               hint="build one with stage0_mkcard.py card --card-img")
+        good: list[str] = []
+        crc = ""
+        notes: list[str] = []
+        for (typ, lba, n), name in zip(_slot_entries(head)[:2], ("A", "B"), strict=True):
+            if typ != TYPE_SLOT or not lba or not n:
+                notes.append(f"slot {name}: MBR entry {'1' if name == 'A' else '2'} is not a "
+                             f"type-0x7F slot")
+                continue
+            try:
+                table = s0lb.parse(_read_slot(f, lba, n))
+            except s0lb.S0lbError as exc:
+                notes.append(f"slot {name} at LBA {lba}: {exc}")
+                continue
+            if table.problems:
+                notes.append(f"slot {name} at LBA {lba}: {'; '.join(table.problems)}")
+                continue
+            good.append(name)
+            crc = crc or f"0x{table.header_crc32:08x}"
+    if not good:
+        raise RefusedError(f"{path.name} has an MBR but no bootable stage0 slot "
+                           f"({'; '.join(notes)})",
+                           hint="the board would sit in rescue; build the card image with "
+                                "stage0_mkcard.py card --card-img")
+    return CardImage(str(path), size, tuple(good), crc, tuple(notes))
 
 
 def file_sha256(path: Path, limit: int | None = None) -> str:
@@ -913,6 +831,134 @@ def privileged_commands(disk: Disk, image: str, nbytes: int, sha256: str) -> dic
             "bytes": nbytes, "sha256": sha256}
 
 
+# --- the MCC firmware selection in board.txt (MBBIOS) --------------------------------------------
+#
+# HM never changes which MCC firmware a configuration card selects. An ``MBBIOS:`` line names
+# the .ebf the MCC flashes itself with when that file is on the card (a copied mbb_v141.ebf
+# silently reflashes the MCC). The rule, for each board.txt a ``files`` write carries:
+#
+# - the card's board.txt HAS an MBBIOS line: it is kept (it replaces the bundle's; it is
+#   added when the bundle's board.txt has none);
+# - the card has none (or no board.txt): the bundle's line is written unchanged when the .ebf
+#   it names is NOT on the card (the MCC finds nothing to flash); when it IS on the card the
+#   write is refused, unless ``allow_mcc_update`` (``--allow-mcc-update``);
+# - a board.txt is never written with an MBBIOS line removed.
+#
+# TODO(integration): use FIX-PACK-7's shared MBBIOS function (the sd writer path, rc2) here and
+# delete this local copy; the rule is the same.
+
+MBBIOS_LINE = re.compile(r"^[ \t]*MBBIOS[ \t]*:[ \t]*([^;\r\n]*)", re.IGNORECASE)
+MCCS_HEADER = re.compile(r"^[ \t]*\[MCCS\]", re.IGNORECASE)
+MCC_UPDATE_REFUSAL = ("this card would make the MCC update itself to {file}: remove {file} "
+                      "from the card, or add --allow-mcc-update")
+
+
+@dataclass(frozen=True)
+class MbbiosDecision:
+    file: str                  # the board.txt's SD path ("MB/HBI0309C/board.txt")
+    action: str                # "kept" | "bundle" | "mcc-update" | "none"
+    value: str                 # the MBBIOS value written ("" for none)
+    note: str                  # what the CLI prints ("MBBIOS kept: mbb_v141.ebf")
+
+    def to_json(self) -> dict[str, str]:
+        return {"file": self.file, "action": self.action, "value": self.value, "note": self.note}
+
+
+def _lines(text: str) -> list[str]:
+    return text.splitlines(keepends=True)
+
+
+def _ending(line: str) -> str:
+    return line[len(line.rstrip("\r\n")):] or "\n"
+
+
+def mbbios_merge(bundle_text: str, card_text: str | None, ebf_on_card: Callable[[str], bool],
+                 *, allow_mcc_update: bool = False, file: str = "board.txt"
+                 ) -> tuple[str, MbbiosDecision]:
+    """The board.txt to write, and what happened to its MBBIOS line (the rule above). Texts are
+    latin-1 strings (byte for byte). ``RefusedError`` when the card would update its MCC."""
+    bundle = _lines(bundle_text)
+    card_lines = [ln for ln in _lines(card_text or "") if MBBIOS_LINE.match(ln)]
+    at = [i for i, ln in enumerate(bundle) if MBBIOS_LINE.match(ln)]
+    if card_lines:
+        value = MBBIOS_LINE.match(card_lines[0]).group(1).strip()   # type: ignore[union-attr]
+        if at:
+            end = _ending(bundle[at[0]])
+            keep = [ln.rstrip("\r\n") + end for ln in card_lines]
+            out = [ln for i, ln in enumerate(bundle) if i not in at[1:]]
+            first = at[0]
+            out[first:first + 1] = keep
+        else:
+            end = _ending(bundle[0]) if bundle else "\n"
+            keep = [ln.rstrip("\r\n") + end for ln in card_lines]
+            hdr = next((i for i, ln in enumerate(bundle) if MCCS_HEADER.match(ln)), None)
+            out = list(bundle)
+            if out and not out[-1].endswith(("\n", "\r")):
+                out[-1] += end
+            if hdr is None:
+                out += [f"[MCCS]{end}", *keep]
+            else:
+                out[hdr + 1:hdr + 1] = keep
+        return "".join(out), MbbiosDecision(file, "kept", value, f"MBBIOS kept: {value}")
+    if not at:
+        return bundle_text, MbbiosDecision(file, "none", "",
+                                           "MBBIOS: none (neither the card nor the bundle "
+                                           "names one)")
+    value = MBBIOS_LINE.match(bundle[at[0]]).group(1).strip()        # type: ignore[union-attr]
+    if value and ebf_on_card(value):
+        if not allow_mcc_update:
+            raise RefusedError(MCC_UPDATE_REFUSAL.format(file=value),
+                               hint=f"nothing was written: the card has no MBBIOS line of its "
+                                    f"own and {value} is on it, so the MCC would flash it at "
+                                    f"the next boot")
+        return bundle_text, MbbiosDecision(
+            file, "mcc-update", value,
+            f"MBBIOS: {value} from the bundle (--allow-mcc-update: the MCC updates itself to "
+            f"{value} at its next boot)")
+    return bundle_text, MbbiosDecision(
+        file, "bundle", value,
+        f"MBBIOS: {value} from the bundle (the card had none, and {value} is not on the card: "
+        f"the MCC does not update itself)")
+
+
+def _resolve_ci(root: Path, rel: str) -> Path | None:
+    """``rel`` under ``root`` the way FAT matches names (any case); None when it is not there."""
+    cur = root
+    for part in rel.replace("\\", "/").split("/"):
+        try:
+            match = next((e for e in cur.iterdir() if e.name.lower() == part.lower()), None)
+        except OSError:
+            return None
+        if match is None:
+            return None
+        cur = match
+    return cur
+
+
+def mbbios_plan(files: Mapping[str, Path], root: str, *, allow_mcc_update: bool = False
+                ) -> list[tuple[str, str, MbbiosDecision]]:
+    """For each board.txt in ``files``: ``(sd path, the text to write, the decision)``, reading
+    the card at ``root`` as it is now. ``RefusedError`` for an MCC self-update."""
+    out = []
+    for rel, src in sorted(files.items()):
+        if rel.replace("\\", "/").rsplit("/", 1)[-1].lower() != "board.txt":
+            continue
+        on_card = _resolve_ci(Path(root), rel)
+        card_text = on_card.read_bytes().decode("latin-1") if on_card and on_card.is_file() \
+            else None
+        where = rel.replace("\\", "/").rsplit("/", 1)[0] if "/" in rel.replace("\\", "/") else ""
+
+        def ebf_on_card(name: str, where: str = where) -> bool:
+            target = f"{where}/{name}" if where else name
+            found = _resolve_ci(Path(root), target.replace("\\", "/"))
+            return bool(found and found.is_file())
+
+        text, decision = mbbios_merge(Path(src).read_bytes().decode("latin-1"), card_text,
+                                      ebf_on_card, allow_mcc_update=allow_mcc_update, file=rel)
+        out.append((rel, text, decision))
+    return out
+
+
 # --- the writer ----------------------------------------------------------------------------------
 
 CHUNK = 4 * MIB
@@ -929,25 +975,29 @@ class WritePlan:
     kind: str
     source: Path
     confirm: str
-    image: ImagePlan | None = None
+    card: CardImage | None = None
     files: dict[str, Path] = field(default_factory=dict)
     backup_path: Path | None = None
     backup_dir: Path | None = None
+    allow_mcc_update: bool = False
+    mbbios: list[MbbiosDecision] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
         out: dict[str, Any] = {"device_id": self.device.id, "path": self.device.disk.path,
                                "kind": self.kind, "source": str(self.source)}
-        if self.image is not None:
-            out["image"] = {"kind": self.image.kind, "bytes": self.image.write_bytes(),
-                            "hdr_crc": self.image.hdr_crc, "describe": self.image.describe(),
-                            "notes": list(self.image.notes)}
+        if self.card is not None:
+            out["card"] = {"bytes": self.card.size, "slots": list(self.card.slots),
+                           "hdr_crc": self.card.hdr_crc, "describe": self.card.describe(),
+                           "notes": list(self.card.notes)}
         if self.files:
             out["files"] = sorted(self.files)
+        if self.mbbios:
+            out["mbbios"] = [d.to_json() for d in self.mbbios]
         return out
 
 
 class CardWriter:
-    """Lists this PC's card readers and writes a card (``files`` or ``image``).
+    """Lists this PC's card readers and writes a card (``files`` or ``card``).
 
     Every OS touch is injectable: ``lister`` (-> ``[Disk]``), ``access`` (the device seam),
     ``storage_for`` (root -> the pack's configuration-SD writer), ``platform``, ``enabled``
@@ -1033,10 +1083,10 @@ class CardWriter:
             root = mounted[0].mountpoints[0]
             kinds["files"] = files_check(self.storage_for, root)
         if MCC_LABEL in [lb.upper() for lb in disk.labels]:
-            kinds["image"] = (f"this card is an MPS3 configuration SD ({MCC_LABEL}): an image "
-                              f"would erase the board's configuration")
+            kinds["card"] = (f"this card is an MPS3 configuration SD ({MCC_LABEL}): a card image "
+                             f"would erase the board's configuration")
         else:
-            kinds["image"] = ""
+            kinds["card"] = ""
         needs = not self.access.can_write(disk.io_path)
         return CardDevice(disk=disk, kinds=kinds, needs_privilege=needs, files_root=root)
 
@@ -1077,12 +1127,13 @@ class CardWriter:
     # -- before the job ---------------------------------------------------------------------
 
     def prepare(self, device_id: str, kind: str, source: Path | str, confirm: str, *,
-                any_image: bool = False, backup_path: Path | str | None = None,
-                backup_dir: Path | str | None = None) -> WritePlan:
+                backup_path: Path | str | None = None,
+                backup_dir: Path | str | None = None,
+                allow_mcc_update: bool = False) -> WritePlan:
         """Every check a write needs before it starts; ``WritePlan`` or the refusal."""
         self.require()
         if kind not in KINDS:
-            raise UsageError(f"kind must be files or image, not {kind!r}")
+            raise UsageError(f"kind must be files or card, not {kind!r}")
         if not isinstance(device_id, str) or not device_id:
             raise UsageError("device_id must name a listed device")
         source = Path(source)
@@ -1099,14 +1150,13 @@ class CardWriter:
             err.data = {"confirm": want, "device_id": card.id}  # type: ignore[attr-defined]
             raise err
         plan = WritePlan(device=card, kind=kind, source=source, confirm=want)
-        if kind == "image":
-            image = inspect_image(source, any_image=any_image)
-            if image.min_device_bytes() > card.disk.size:
+        if kind == "card":
+            image = inspect_card(source)
+            if image.size > card.disk.size:
                 raise RefusedError(
-                    f"the image needs {human_size(image.min_device_bytes())}; "
-                    f"{card.disk.path} holds {human_size(card.disk.size)}",
-                    hint="use a bigger card; nothing was written")
-            plan.image = image
+                    f"the card image is {human_size(image.size)}; {card.disk.path} holds "
+                    f"{human_size(card.disk.size)}", hint="use a bigger card; nothing was written")
+            plan.card = image
             return plan
         plan.files = self._bundle(source)
         if backup_path is None and backup_dir is None:
@@ -1123,6 +1173,9 @@ class CardWriter:
                 and not plan.backup_dir.is_dir():
             raise UsageError(f"{plan.backup_dir} exists and is not a directory",
                              hint="give a directory for the backup archive")
+        plan.allow_mcc_update = bool(allow_mcc_update)
+        plan.mbbios = [d for _, _, d in mbbios_plan(plan.files, card.files_root,
+                                                     allow_mcc_update=plan.allow_mcc_update)]
         return plan
 
     @staticmethod
@@ -1148,7 +1201,7 @@ class CardWriter:
                                    hint="list the devices again")
             if plan.kind == "files":
                 return self._run_files(plan, card, emit)
-            return self._run_image(plan, card, emit)
+            return self._run_card(plan, card, emit)
 
     def _emitter(self, plan: WritePlan, progress: Progress | None) -> Progress:
         last = {"phase": "", "at": 0.0}
@@ -1223,12 +1276,27 @@ class CardWriter:
             plan.backup_dir.mkdir(parents=True, exist_ok=True)
             record = storage.backup(plan.backup_dir, progress=relay)
             took = True
-        storage.install(plan.files, backup=record, progress=relay)
-        digest = hashlib.sha256("\n".join(
-            f"{rel}  {file_sha256(src)}" for rel, src in sorted(plan.files.items())).encode()
-        ).hexdigest()
+        # The card as it is now decides each board.txt's MBBIOS line (refused: nothing written).
+        merged = mbbios_plan(plan.files, card.files_root, allow_mcc_update=plan.allow_mcc_update)
+        plan.mbbios = [d for _, _, d in merged]
+        files = dict(plan.files)
+        base = self.state_dir if self.state_dir is not None else _default_state_dir()
+        staged = base / "cardwriter" / "staged" / f"{os.getpid()}-{time.monotonic_ns()}"
+        try:
+            for rel, text, _ in merged:
+                dest = staged.joinpath(*rel.replace("\\", "/").split("/"))
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(text.encode("latin-1"))
+                files[rel] = dest
+            storage.install(files, backup=record, progress=relay)
+            digest = hashlib.sha256("\n".join(
+                f"{rel}  {file_sha256(src)}" for rel, src in sorted(files.items())).encode()
+            ).hexdigest()
+        finally:
+            shutil.rmtree(staged, ignore_errors=True)
         result = {"outcome": "written", "verified": True, "sha256": digest,
-                  "files": sorted(plan.files), "root": card.files_root, "backup": {
+                  "files": sorted(files), "root": card.files_root,
+                  "mbbios": [d.to_json() for d in plan.mbbios], "backup": {
                       "path": record.path, "sha256": record.sha256, "files": record.files,
                       "taken": took},
                   "note": "written and read back; the board runs it after it boots from this "
@@ -1238,21 +1306,11 @@ class CardWriter:
 
     # -- image ------------------------------------------------------------------------------
 
-    def _image_file(self, plan: WritePlan, card: CardDevice) -> tuple[Path, int, str]:
-        """The file whose bytes go to the device, how many, and their sha256."""
-        image = plan.image
-        assert image is not None
-        if image.kind != "slot":
-            return Path(image.source), image.source_bytes, file_sha256(Path(image.source))
-        base = self.state_dir if self.state_dir is not None else _default_state_dir()
-        tag = file_sha256(Path(image.source))[:12]
-        out = base / "cardwriter" / f"card-{tag}-{card.disk.size}.img"
-        sha = compose_card(Path(image.source), card.disk.size, out)
-        return out, CARD_LAYOUT_BYTES, sha
-
-    def _run_image(self, plan: WritePlan, card: CardDevice, emit: Progress) -> dict[str, Any]:
+    def _run_card(self, plan: WritePlan, card: CardDevice, emit: Progress) -> dict[str, Any]:
         disk = card.disk
-        src, nbytes, sha = self._image_file(plan, card)
+        assert plan.card is not None
+        again = inspect_card(plan.card.source)              # the file may have changed since
+        src, nbytes, sha = Path(again.source), again.size, file_sha256(Path(again.source))
         if nbytes > disk.size:
             raise RefusedError(f"{human_size(nbytes)} does not fit on {disk.path} "
                                f"({human_size(disk.size)})", hint="use a bigger card")
@@ -1282,9 +1340,8 @@ class CardWriter:
                 hint="the card or the reader is failing: try another card, then write again")
         result = {"outcome": "written", "verified": True, "sha256": sha, "bytes": written,
                   "written_from": str(src),
-                  "note": ("written and read back; put the card in the board's USER microSD "
-                           "slot and power it on" if plan.image and plan.image.kind != "raw"
-                           else "written and read back")}
+                  "note": "written and read back; put the card in the board's USER microSD "
+                          "slot and power it on"}
         self._done(plan, verified=True, sha256=sha, outcome="written")
         return {**plan.summary(), **result}
 

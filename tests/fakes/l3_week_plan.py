@@ -1279,3 +1279,12 @@ class SimClocks:
                           for r in board.readings]
         return self.clocks()[0]
 
+# --- sd-flash ---
+# SD-FLASH (docs/API.md "SD cards in this PC's card reader", ``cardwriter_api.py``): served in
+# the mock by tests/fakes/cardwriter_mock.py (the REAL routes over --demo's simulated readers;
+# the setting from the mock's own settings dir).
+EXTENSION_ROUTES["cardwriter_api"] = (
+    ("GET", "/cardwriter/devices"),
+    ("POST", "/cardwriter/write"),
+)
+# --- end sd-flash ---

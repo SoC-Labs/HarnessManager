@@ -7,10 +7,7 @@ real device. Nothing here touches a block device.
 
 from __future__ import annotations
 
-import os
-import struct
 import threading
-import zlib
 from pathlib import Path
 
 import pytest
@@ -27,8 +24,11 @@ from harness_manager.services import cardwriter as cw
 from harness_manager.services.update import s0lb
 from tests.fakes.cardwriter_fakes import (
     BLANK_SIZE,
+    BUNDLE_BOARD,
+    CARD_BOARD,
     CARD_SIZE,
     MCC,
+    NO_LINE_BOARD,
     Rig,
     diskutil_info,
     diskutil_list,
@@ -89,7 +89,7 @@ def test_the_boards_mcc_drive_is_excluded_but_its_card_in_a_reader_is_listed_for
     card = listing.find(rig.card("sdb").id)
     assert card is not None and MCC in card.disk.labels
     assert card.kinds["files"] == ""
-    assert "would erase the board's configuration" in card.kinds["image"]
+    assert "would erase the board's configuration" in card.kinds["card"]
 
 
 def test_twin_a_disk_with_an_arm_vendor_but_no_mcc_label_is_still_not_a_card(rig: Rig):
@@ -188,7 +188,7 @@ def test_a_listed_card_carries_the_contract_fields(rig: Rig):
     assert doc["confirm"] == "WRITE SD/MMC 31.9 GB"
     assert doc["mounted"] == [str(rig.root)] and doc["removable"] is True
     blank = rig.card("sdc").to_json()
-    assert blank["kinds"]["image"]["ok"] and not blank["kinds"]["files"]["ok"]
+    assert blank["kinds"]["card"]["ok"] and not blank["kinds"]["files"]["ok"]
     assert "not mounted" in blank["kinds"]["files"]["why_not"]
 
 
@@ -202,7 +202,7 @@ def test_setting_off_lists_nothing_runs_nothing_and_refuses_a_write(rig: Rig):
     assert doc["reason"] == "SD flashing is turned off (Settings → Bring-up, bringup.sd_flash)"
     assert rig.listed == 0
     with pytest.raises(UnavailableError, match="turned off"):
-        rig.writer.prepare("sdc-x", "image", rig.image(), "WRITE x")
+        rig.writer.prepare("sdc-x", "card", rig.card_image(), "WRITE x")
 
 
 def test_twin_setting_on_lists(rig: Rig):
@@ -232,32 +232,32 @@ def test_windows_is_not_supported_yet(tmp_path: Path):
 def test_a_wrong_phrase_is_refused_and_names_the_right_one(rig: Rig):
     card = rig.card("sdc")
     with pytest.raises(RefusedError, match="type exactly 'WRITE MicroSD/M2 15.9 GB'") as err:
-        rig.writer.prepare(card.id, "image", rig.image(), "WRITE MicroSD/M2 16 GB")
+        rig.writer.prepare(card.id, "card", rig.card_image(), "WRITE MicroSD/M2 16 GB")
     assert err.value.data["confirm"] == "WRITE MicroSD/M2 15.9 GB"
 
 
 def test_twin_the_right_phrase_passes(rig: Rig):
     card = rig.card("sdc")
-    plan = rig.writer.prepare(card.id, "image", rig.image(), "WRITE MicroSD/M2 15.9 GB")
-    assert plan.image is not None and plan.image.kind == "slot"
+    plan = rig.writer.prepare(card.id, "card", rig.card_image(), "WRITE MicroSD/M2 15.9 GB")
+    assert plan.card is not None and plan.card.slots == ("A", "B")
 
 
 def test_a_card_swapped_between_listing_and_write_is_refused(rig: Rig):
     card = rig.card("sdc")
     rig.node("sdc")["size"] = BLANK_SIZE * 2                       # another card
     with pytest.raises(RefusedError, match="changed since it was listed"):
-        rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+        rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
     rig.node("sdc")["size"] = BLANK_SIZE
     rig.node("sdc")["model"] = "Other Reader"
     with pytest.raises(RefusedError, match="changed since it was listed"):
-        rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+        rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
 
 
 def test_a_same_size_card_swapped_is_refused_by_its_volumes(rig: Rig):
     card = rig.card("sdc")
     rig.node("sdc")["children"][0]["uuid"] = "9999-9999"
     with pytest.raises(RefusedError, match="changed since it was listed"):
-        rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+        rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
 
 
 def test_twin_an_unchanged_card_and_a_new_mount_keep_their_id(rig: Rig):
@@ -268,7 +268,7 @@ def test_twin_an_unchanged_card_and_a_new_mount_keep_their_id(rig: Rig):
 
 def test_a_card_swapped_inside_the_job_is_refused_before_any_byte(rig: Rig):
     card = rig.card("sdc")
-    plan = rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+    plan = rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
     rig.node("sdc")["serial"] = "OTHER"
     before = rig.devices["/dev/sdc"].read_bytes()
     with pytest.raises(RefusedError, match="changed"):
@@ -280,127 +280,98 @@ def test_an_unplugged_reader_is_absent(rig: Rig):
     card = rig.card("sdc")
     rig.doc["blockdevices"] = [n for n in rig.doc["blockdevices"] if n["name"] != "sdc"]
     with pytest.raises(AbsentError):
-        rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+        rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
 
 
-# --- images ------------------------------------------------------------------------------------
+# --- card images -------------------------------------------------------------------------------
 
 
-def test_not_an_s0lb_image_is_refused(rig: Rig):
+def test_a_single_os_slot_image_is_refused_with_how_to_build_a_card(rig: Rig):
     card = rig.card("sdc")
-    junk = rig.image(b"\x7fELF" + b"\0" * 4092, "vmlinux")
-    with pytest.raises(RefusedError, match="not a harness image") as err:
-        rig.writer.prepare(card.id, "image", junk, card.confirm)
-    assert "--any-image" in err.value.hint
+    with pytest.raises(RefusedError) as err:
+        rig.writer.prepare(card.id, "card", rig.slot(), card.confirm)
+    assert err.value.message == (
+        "linux_slot.img: that is a single OS slot (linux_slot.img), not a whole-card image: "
+        "build one with stage0_mkcard.py card --card-img")
+    assert "rescue" in err.value.hint
 
 
-def test_twin_any_image_writes_it_raw_from_byte_0(rig: Rig):
+def test_twin_a_card_image_with_an_mbr_is_accepted_written_and_read_back(rig: Rig):
     card = rig.card("sdc")
-    data = b"\x7fELF" + os.urandom(8188)
-    plan = rig.writer.prepare(card.id, "image", rig.image(data, "vmlinux"), card.confirm,
-                              any_image=True)
-    assert plan.image.kind == "raw"
+    src = rig.card_image()
+    plan = rig.writer.prepare(card.id, "card", src, card.confirm)
     out = rig.writer.run(plan)
     assert out["outcome"] == "written" and out["verified"] is True
-    assert rig.devices["/dev/sdc"].read_bytes()[:len(data)] == data
+    assert out["bytes"] == src.stat().st_size and out["sha256"] == cw.file_sha256(src)
+    assert rig.devices["/dev/sdc"].read_bytes()[:src.stat().st_size] == src.read_bytes()
+    assert out["card"]["slots"] == ["A", "B"]
 
 
-def test_a_corrupt_boot_table_is_refused_too(rig: Rig):
+def test_a_file_without_an_mbr_is_refused(rig: Rig):
+    card = rig.card("sdc")
+    junk = rig.slot(b"\x7fELF" + b"\0" * 4092, "vmlinux")
+    with pytest.raises(RefusedError, match=r"vmlinux is not a whole-card image: no MBR \(0x55AA"):
+        rig.writer.prepare(card.id, "card", junk, card.confirm)
+
+
+def test_twin_stage0_mkcards_own_card_layout_is_accepted(rig: Rig):
+    src = rig.card_image("canon.img", canonical=True)          # 512 MiB, sparse
+    image = cw.inspect_card(src)
+    assert image.slots == ("A", "B") and image.size == 512 * cw.MIB
+    assert image.hdr_crc == f"0x{s0lb.parse(slot_image()).header_crc32:08x}"
+
+
+def test_an_mbr_without_a_bootable_slot_is_refused(rig: Rig):
     bad = bytearray(slot_image())
-    bad[-1] ^= 0xFF                                   # the region's CRC now fails
+    bad[-1] ^= 0xFF                                     # the region's CRC now fails
     card = rig.card("sdc")
-    with pytest.raises(RefusedError, match="region 0 fails its CRC"):
-        rig.writer.prepare(card.id, "image", rig.image(bytes(bad)), card.confirm)
+    with pytest.raises(RefusedError, match="no bootable stage0 slot.*region 0 fails its CRC"):
+        rig.writer.prepare(card.id, "card", rig.card_image(slot=bytes(bad)), card.confirm)
+    foreign = rig.tmp / "rpi.img"                       # an MBR, but a FAT partition, no slots
+    from tests.fakes.cardwriter_fakes import mbr
+    foreign.write_bytes(mbr([(0x0C, 8192, 100000)]) + b"\0" * 4096)
+    with pytest.raises(RefusedError, match="not a type-0x7F slot"):
+        rig.writer.prepare(card.id, "card", foreign, card.confirm)
 
 
-def test_an_image_too_big_for_the_card_is_refused(rig: Rig):
-    rig.node("sdc")["size"] = 100 * cw.MIB                # a 100 MB card < the 163 MiB layout
+def test_twin_one_bootable_slot_is_enough(rig: Rig):
+    image = cw.inspect_card(rig.card_image(slot_b=False))
+    assert image.slots == ("A",) and "slot B" in image.notes[0]
+
+
+def test_a_card_image_too_big_for_the_card_is_refused(rig: Rig):
+    src = rig.card_image()
+    rig.node("sdc")["size"] = src.stat().st_size - 1
     card = rig.card("sdc")
-    with pytest.raises(RefusedError, match="the image needs 170.9 MB"):
-        rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+    with pytest.raises(RefusedError, match="the card image is .* holds"):
+        rig.writer.prepare(card.id, "card", src, card.confirm)
 
 
-def test_twin_a_raw_image_that_fits_is_planned_and_one_byte_more_is_not(rig: Rig):
-    rig.node("sdc")["size"] = 8192
+def test_twin_a_card_image_exactly_the_cards_size_fits(rig: Rig):
+    src = rig.card_image()
+    rig.node("sdc")["size"] = src.stat().st_size
     card = rig.card("sdc")
-    ok = rig.image(b"x" * 8192, "fits.bin")
-    assert rig.writer.prepare(card.id, "image", ok, card.confirm, any_image=True).image
-    big = rig.image(b"x" * 8193, "big.bin")
-    with pytest.raises(RefusedError, match="the image needs"):
-        rig.writer.prepare(card.id, "image", big, card.confirm, any_image=True)
+    assert rig.writer.prepare(card.id, "card", src, card.confirm).card is not None
 
 
-def test_the_mcc_config_card_never_takes_an_image(rig: Rig):
+def test_the_mcc_config_card_never_takes_a_card_image(rig: Rig):
     card = rig.card("sdb")
     with pytest.raises(RefusedError, match="would erase the board's configuration"):
-        rig.writer.prepare(card.id, "image", rig.image(), card.confirm, any_image=True)
-
-
-def test_a_slot_image_is_composed_into_stage0s_card_layout_and_read_back(rig: Rig):
-    card = rig.card("sdc")
-    img = slot_image()
-    plan = rig.writer.prepare(card.id, "image", rig.image(img), card.confirm)
-    out = rig.writer.run(plan)
-    assert out["outcome"] == "written" and out["verified"] is True
-    assert out["bytes"] == cw.CARD_LAYOUT_BYTES == 169_869_312
-    dev = rig.devices["/dev/sdc"].read_bytes()
-    assert dev[510:512] == b"\x55\xaa"
-    entries = [(dev[446 + 16 * i + 4], *struct.unpack_from("<II", dev, 446 + 16 * i + 8))
-               for i in range(4)]
-    persist = BLANK_SIZE // 512 - cw.LBA_PERSIST
-    assert entries == [(0x7F, 67584, 131072), (0x7F, 198656, 131072),
-                       (0x83, 329728, persist), (0xDA, 2048, 65536)]
-    for lba in (1, 2):                                  # the boot-select sector, twice
-        sec = dev[lba * 512:(lba + 1) * 512]
-        assert struct.unpack_from("<IIII", sec) == (0x43423053, 1, 1, 1)
-        assert struct.unpack_from("<I", sec, 0x1FC)[0] == zlib.crc32(sec[:0x1FC]) & 0xFFFFFFFF
-    for lba in (67584, 198656):                         # the image in both slots
-        assert dev[lba * 512:lba * 512 + len(img)] == img
-    p4, p3 = 2048 * 512, 329728 * 512
-    assert dev[p4:p4 + 65536 * 512].count(0) == 65536 * 512        # the store is blank
-    assert dev[p3:p3 + cw.MIB].count(0) == cw.MIB                  # /persist's start is blank
-    # the card as the writer's own check reads it: a card image, slot A's header CRC
-    composed = rig.tmp / "card.img"
-    composed.write_bytes(dev[:cw.CARD_LAYOUT_BYTES])
-    again = cw.inspect_image(composed)
-    assert again.kind == "card" and again.hdr_crc == f"0x{s0lb.parse(img).header_crc32:08x}"
-
-
-def test_twin_a_card_image_is_written_as_it_is(rig: Rig, tmp_path: Path):
-    card = rig.card("sdc")
-    src = tmp_path / "card-src.img"
-    cw.compose_card(rig.image(), 512 * cw.MIB, src)
-    plan = rig.writer.prepare(card.id, "image", src, card.confirm)
-    assert plan.image.kind == "card"
-    out = rig.writer.run(plan)
-    assert out["verified"] and out["bytes"] == src.stat().st_size
-    assert rig.devices["/dev/sdc"].read_bytes()[:src.stat().st_size] == src.read_bytes()
-
-
-def test_a_card_image_with_no_bootable_slot_is_refused(rig: Rig, tmp_path: Path):
-    src = tmp_path / "card.img"
-    cw.compose_card(rig.image(), 512 * cw.MIB, src)
-    with src.open("r+b") as f:                         # break slot A and slot B
-        for lba in (cw.LBA_A, cw.LBA_B):
-            f.seek(lba * 512)
-            f.write(b"\0" * 16)
-    card = rig.card("sdc")
-    with pytest.raises(RefusedError, match="without a bootable stage0 slot"):
-        rig.writer.prepare(card.id, "image", src, card.confirm)
+        rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
 
 
 def test_a_corrupted_read_back_fails_the_verify(tmp_path: Path):
     def flip(path: Path) -> None:
         with path.open("r+b") as f:
-            f.seek(cw.LBA_A * 512 + 100)
+            f.seek(8 * 512 + 100)
             b = f.read(1)
-            f.seek(cw.LBA_A * 512 + 100)
+            f.seek(8 * 512 + 100)
             f.write(bytes([b[0] ^ 0xFF]))
 
     rig = Rig(tmp_path)
     rig.access.after_write = flip
     card = rig.card("sdc")
-    plan = rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+    plan = rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
     with pytest.raises(ActionFailedError, match="read-back mismatch on /dev/sdc"):
         rig.writer.run(plan)
     done = rig.topics("cardwriter.done")
@@ -409,20 +380,20 @@ def test_a_corrupted_read_back_fails_the_verify(tmp_path: Path):
 
 def test_twin_an_intact_read_back_verifies_and_says_so(rig: Rig):
     card = rig.card("sdc")
-    plan = rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
-    out = rig.writer.run(plan)
+    src = rig.card_image()
+    out = rig.writer.run(rig.writer.prepare(card.id, "card", src, card.confirm))
     done = rig.topics("cardwriter.done")[-1]
     assert done["verified"] is True and done["sha256"] == out["sha256"]
     phases = [d["phase"] for d in rig.topics("cardwriter.progress")]
     assert phases[0] == "unmount" and "write" in phases and phases[-1] == "verify"
     last = rig.topics("cardwriter.progress")[-1]
-    assert last["bytes"] == last["total"] == cw.CARD_LAYOUT_BYTES
+    assert last["bytes"] == last["total"] == src.stat().st_size
 
 
 def test_a_mounted_card_is_unmounted_before_the_write(rig: Rig):
     rig.node("sdc")["children"][0]["mountpoints"] = ["/media/u/NO NAME"]
     card = rig.card("sdc")
-    rig.writer.run(rig.writer.prepare(card.id, "image", rig.image(), card.confirm))
+    rig.writer.run(rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm))
     assert rig.access.unmounted == ["/dev/sdc"]
 
 
@@ -430,11 +401,20 @@ def test_twin_a_card_still_mounted_after_the_unmount_is_refused(rig: Rig):
     rig.node("sdc")["children"][0]["mountpoints"] = ["/media/u/NO NAME"]
     rig.access.on_unmount = None                         # the unmount does nothing
     card = rig.card("sdc")
-    plan = rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+    plan = rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
     before = rig.devices["/dev/sdc"].read_bytes()
     with pytest.raises(RefusedError, match="still mounted"):
         rig.writer.run(plan)
     assert rig.devices["/dev/sdc"].read_bytes() == before
+
+
+def test_a_card_image_changed_after_the_check_is_checked_again(rig: Rig):
+    card = rig.card("sdc")
+    src = rig.card_image()
+    plan = rig.writer.prepare(card.id, "card", src, card.confirm)
+    src.write_bytes(slot_image())                        # replaced by a slot image meanwhile
+    with pytest.raises(RefusedError, match="single OS slot"):
+        rig.writer.run(plan)
 
 
 # --- privileges --------------------------------------------------------------------------------
@@ -446,15 +426,15 @@ def test_needs_privilege_ends_the_job_with_the_exact_commands(tmp_path: Path):
     card = rig.card("sdc")
     assert card.needs_privilege is True and card.to_json()["needs_privilege"] is True
     before = rig.devices["/dev/sdc"].read_bytes()
-    out = rig.writer.run(rig.writer.prepare(card.id, "image", rig.image(), card.confirm))
+    src = rig.card_image()
+    out = rig.writer.run(rig.writer.prepare(card.id, "card", src, card.confirm))
     assert out["outcome"] == "needs_privilege" and out["verified"] is False
-    img = out["image"]
-    assert Path(img).stat().st_size == cw.CARD_LAYOUT_BYTES        # the composed card, kept
+    n = src.stat().st_size
     assert out["privileged_command"] == (
-        f"sudo umount /dev/sdc1 && sudo dd if={img} of=/dev/sdc bs=4M conv=fsync "
+        f"sudo umount /dev/sdc1 && sudo dd if={src} of=/dev/sdc bs=4M conv=fsync "
         f"status=progress")
-    assert out["verify_command"] == f"sudo cmp -n 169869312 {img} /dev/sdc && echo verified"
-    assert cw.file_sha256(Path(img)) == out["sha256"]
+    assert out["verify_command"] == f"sudo cmp -n {n} {src} /dev/sdc && echo verified"
+    assert out["sha256"] == cw.file_sha256(src) and out["image"] == str(src)
     assert rig.devices["/dev/sdc"].read_bytes() == before and rig.access.unmounted == []
     done = rig.topics("cardwriter.done")[-1]
     assert done["outcome"] == "needs_privilege" and done["privileged_command"]
@@ -462,7 +442,7 @@ def test_needs_privilege_ends_the_job_with_the_exact_commands(tmp_path: Path):
 
 def test_twin_a_writable_device_needs_no_command(rig: Rig):
     card = rig.card("sdc")
-    out = rig.writer.run(rig.writer.prepare(card.id, "image", rig.image(), card.confirm))
+    out = rig.writer.run(rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm))
     assert out["outcome"] == "written" and "privileged_command" not in out
 
 
@@ -500,7 +480,7 @@ def test_twin_only_the_seam_takes_a_file(tmp_path: Path):
 
 def test_one_write_per_device(rig: Rig):
     card = rig.card("sdc")
-    plan = rig.writer.prepare(card.id, "image", rig.image(), card.confirm)
+    plan = rig.writer.prepare(card.id, "card", rig.card_image(), card.confirm)
     started, release = threading.Event(), threading.Event()
 
     def slow(path: Path) -> None:
@@ -586,15 +566,112 @@ def test_twin_files_need_a_mounted_config_volume(rig: Rig):
 def test_bad_arguments_are_usage_errors(rig: Rig):
     card = rig.card("sdc")
     with pytest.raises(UsageError):
-        rig.writer.prepare(card.id, "bits", rig.image(), card.confirm)
+        rig.writer.prepare(card.id, "image", rig.card_image(), card.confirm)  # renamed: card
     with pytest.raises(UsageError):
-        rig.writer.prepare("", "image", rig.image(), card.confirm)
+        rig.writer.prepare("", "card", rig.card_image(), card.confirm)
+
+
+# --- files: the card's MCC firmware selection (MBBIOS) is never changed ---------------------------
+
+def written_board(rig: Rig) -> bytes:
+    return (rig.root / "MB" / "HBI0309C" / "board.txt").read_bytes()
+
+
+def files_write(rig: Rig, bundle: Path, **kw):
+    card = rig.card("sdb")
+    plan = rig.writer.prepare(card.id, "files", bundle, card.confirm,
+                              backup_dir=rig.tmp / "backups", **kw)
+    return plan, rig.writer.run(plan)
+
+
+def test_mbbios_the_cards_line_is_kept_and_the_bundles_never_written(rig: Rig):
+    rig.card_board_txt(CARD_BOARD)
+    plan, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
+    got = written_board(rig)
+    assert b"MBBIOS: mbb_v141.ebf           ;MB BIOS image \xe2\x80\x94 stock\r\n" in got
+    assert b"mbb_v999" not in got
+    assert b"APPFILE: Nanosoc\\nanosoc.txt\r\n" in got and b"TITLE: nanoSoC" in got
+    assert out["mbbios"] == [{"file": "MB/HBI0309C/board.txt", "action": "kept",
+                              "value": "mbb_v141.ebf", "note": "MBBIOS kept: mbb_v141.ebf"}]
+    assert plan.mbbios[0].note == "MBBIOS kept: mbb_v141.ebf"
+
+
+def test_mbbios_the_cards_line_is_kept_when_the_bundle_has_none(rig: Rig):
+    rig.card_board_txt(CARD_BOARD)
+    _, out = files_write(rig, rig.bundle(board_txt=NO_LINE_BOARD))
+    got = written_board(rig)
+    assert got.startswith(b"BOARD: HBI0309C\r\n[MCCS]\r\nMBBIOS: mbb_v141.ebf ")
+    assert out["mbbios"][0]["action"] == "kept"
+
+
+def test_mbbios_no_line_on_the_card_and_its_ebf_absent_writes_the_bundles_line_unchanged(rig):
+    rig.card_board_txt(NO_LINE_BOARD)
+    _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
+    assert written_board(rig) == BUNDLE_BOARD                     # never removed
+    d = out["mbbios"][0]
+    assert d["action"] == "bundle" and d["value"] == "mbb_v999.ebf"
+    assert "is not on the card: the MCC does not update itself" in d["note"]
+
+
+def test_mbbios_no_board_txt_on_the_card_counts_as_no_line(rig: Rig):
+    rig.card_board_txt(None)
+    _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
+    assert written_board(rig) == BUNDLE_BOARD and out["mbbios"][0]["action"] == "bundle"
+
+
+def test_mbbios_no_line_and_the_named_ebf_on_the_card_is_refused(rig: Rig):
+    rig.card_board_txt(NO_LINE_BOARD, ebf="MBB_V999.EBF")           # FAT: any case
+    card = rig.card("sdb")
+    with pytest.raises(RefusedError) as err:
+        rig.writer.prepare(card.id, "files", rig.bundle(board_txt=BUNDLE_BOARD), card.confirm,
+                           backup_dir=rig.tmp / "backups")
+    assert err.value.message == ("this card would make the MCC update itself to mbb_v999.ebf: "
+                                 "remove mbb_v999.ebf from the card, or add --allow-mcc-update")
+    assert written_board(rig) == NO_LINE_BOARD and not (rig.tmp / "backups").exists()
+
+
+def test_twin_allow_mcc_update_writes_the_bundles_line_and_says_so(rig: Rig):
+    rig.card_board_txt(NO_LINE_BOARD, ebf="mbb_v999.ebf")
+    _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD), allow_mcc_update=True)
+    assert written_board(rig) == BUNDLE_BOARD
+    d = out["mbbios"][0]
+    assert d["action"] == "mcc-update" and "--allow-mcc-update" in d["note"]
+
+
+def test_mbbios_is_decided_again_inside_the_job(rig: Rig):
+    rig.card_board_txt(NO_LINE_BOARD)
+    card = rig.card("sdb")
+    plan = rig.writer.prepare(card.id, "files", rig.bundle(board_txt=BUNDLE_BOARD), card.confirm,
+                              backup_dir=rig.tmp / "backups")
+    (rig.root / "MB" / "HBI0309C" / "mbb_v999.ebf").write_bytes(b"fw")   # copied on meanwhile
+    with pytest.raises(RefusedError, match="update itself to mbb_v999.ebf"):
+        rig.writer.run(plan)
+    assert written_board(rig) == NO_LINE_BOARD
+
+
+def test_mbbios_merge_keeps_every_other_byte_and_line_ending():
+    text, d = cw.mbbios_merge(BUNDLE_BOARD.decode("latin-1"), CARD_BOARD.decode("latin-1"),
+                              lambda name: False)
+    want = BUNDLE_BOARD.replace(b"MBBIOS: mbb_v999.ebf ;the bundle's",
+                                b"MBBIOS: mbb_v141.ebf           ;MB BIOS image \xe2\x80\x94 stock")
+    assert text.encode("latin-1") == want and d.action == "kept"
+    two = BUNDLE_BOARD.replace(b"[APPLICATION", b"MBBIOS: other.ebf\r\n[APPLICATION")
+    text, _ = cw.mbbios_merge(two.decode("latin-1"), CARD_BOARD.decode("latin-1"),
+                              lambda name: False)
+    assert text.count("MBBIOS") == 1 and "other.ebf" not in text
+
+
+def test_twin_mbbios_merge_with_no_line_anywhere_changes_nothing():
+    text, d = cw.mbbios_merge(NO_LINE_BOARD.decode("latin-1"), None, lambda name: True)
+    assert text.encode("latin-1") == NO_LINE_BOARD and d.action == "none"
 
 
 # --- --demo ------------------------------------------------------------------------------------
 
 
 def test_the_demo_lists_simulated_readers_and_writes_only_temp_files(tmp_path: Path):
+    from tests.fakes.cardwriter_fakes import card_image
+
     w = cw.demo_writer(tmp_path, publish=lambda t, d: None)
     w._enabled = lambda: True
     doc = w.devices_json()
@@ -602,8 +679,7 @@ def test_the_demo_lists_simulated_readers_and_writes_only_temp_files(tmp_path: P
     assert [d["path"] for d in doc["devices"]] == ["/dev/sdb", "/dev/sdc"]
     assert {e["path"] for e in doc["excluded"]} == {"/dev/nvme0n1", "/dev/sdd"}
     blank = next(d for d in doc["devices"] if d["path"] == "/dev/sdc")
-    img = tmp_path / "linux_slot.img"
-    img.write_bytes(slot_image())
-    out = w.run(w.prepare(blank["id"], "image", img, blank["confirm"]))
-    assert out["verified"] and (tmp_path / "cardwriter-demo" / "sdc.img").stat().st_size >= \
-        cw.CARD_LAYOUT_BYTES
+    src = card_image(tmp_path / "card.img")
+    out = w.run(w.prepare(blank["id"], "card", src, blank["confirm"]))
+    assert out["verified"]
+    assert (tmp_path / "cardwriter-demo" / "sdc.img").read_bytes()[:512] == src.read_bytes()[:512]

@@ -174,6 +174,74 @@ def slot_image(payload: bytes = b"linux" * 4000, *, dst: int = 0x80000000) -> by
     return hdr.pack(0x424C3053, 2, 1, dst, 0, 0x80001000, 0, crc) + entry + payload
 
 
+# --- whole-card images (stage0_mkcard.py card --card-img) ---------------------------------------
+
+BLOCK = 512
+LBA_A, LBA_B, N_SLOT = 67584, 198656, 131072
+LBA_STORE, N_STORE, LBA_PERSIST = 2048, 65536, 329728
+
+
+def mbr(entries: list[tuple[int, int, int]]) -> bytes:
+    """An MBR with ``(type, start LBA, blocks)`` entries in order (stage0_mkcard's CHS form)."""
+    sec = bytearray(BLOCK)
+    struct.pack_into("<I", sec, 440, 0x53304C42)
+    for i, (typ, lba, n) in enumerate(entries):
+        sec[446 + 16 * i:462 + 16 * i] = struct.pack("<B3sB3sII", 0, b"\xfe\xff\xff", typ,
+                                                     b"\xfe\xff\xff", lba, n)
+    sec[510], sec[511] = 0x55, 0xAA
+    return bytes(sec)
+
+
+def bootsel(default: int = 1, seq: int = 1) -> bytes:
+    sec = bytearray(BLOCK)
+    struct.pack_into("<IIII", sec, 0, 0x43423053, 1, seq, default)
+    struct.pack_into("<I", sec, 0x1FC, zlib.crc32(bytes(sec[:0x1FC])) & 0xFFFFFFFF)
+    return bytes(sec)
+
+
+def card_image(path: Path, slot: bytes | None = None, *, canonical: bool = False,
+               card_bytes: int = 512 * 1024 * 1024, slot_b: bool = True) -> Path:
+    """A whole-card image. ``canonical``: stage0_mkcard.py's layout and size (sparse;
+    byte-identical to ``card --slot-a IMG --card-img F --card-mib 512``). Otherwise a
+    COMPACT card stage0 reads the same way (slots A/B at LBA 8 and 120): small, fast tests."""
+    img = slot if slot is not None else slot_image()
+    if canonical:
+        total = card_bytes // BLOCK
+        entries = [(0x7F, LBA_A, N_SLOT), (0x7F, LBA_B, N_SLOT),
+                   (0x83, LBA_PERSIST, total - LBA_PERSIST), (0xDA, LBA_STORE, N_STORE)]
+        a, b, size = LBA_A, LBA_B, card_bytes
+    else:
+        n = -(-len(img) // BLOCK) + 8
+        a, b = 8, 8 + n
+        entries = [(0x7F, a, n), (0x7F, b, n) if slot_b else (0, 0, 0)]
+        size = (b + n) * BLOCK
+    with path.open("wb") as f:
+        f.truncate(size)
+        f.seek(0)
+        f.write(mbr(entries))
+        f.write(bootsel())
+        f.write(bootsel())
+        f.seek(a * BLOCK)
+        f.write(img)
+        if slot_b:
+            f.seek(b * BLOCK)
+            f.write(img)
+    return path
+
+
+# board.txt as the card has it, as a bundle carries it, and one with no MBBIOS line (CRLF,
+# and an em dash: byte for byte).
+CARD_BOARD = (b"BOARD: HBI0309C\r\nTITLE: stock\r\n\r\n[MCCS]\r\n"
+              b"MBBIOS: mbb_v141.ebf           ;MB BIOS image \xe2\x80\x94 stock\r\n\r\n"
+              b"[APPLICATION NOTE]\r\nAPPFILE: AN547\\an547.txt\r\n")
+BUNDLE_BOARD = (b"BOARD: HBI0309C\r\nTITLE: nanoSoC\r\n\r\n[MCCS]\r\n"
+                b"MBBIOS: mbb_v999.ebf ;the bundle's\r\n\r\n"
+                b"[APPLICATION NOTE]\r\nAPPFILE: Nanosoc\\nanosoc.txt\r\n")
+NO_LINE_BOARD = (b"BOARD: HBI0309C\r\n[MCCS]\r\n\r\n[APPLICATION NOTE]\r\n"
+                 b"APPFILE: Nanosoc\\nanosoc.txt\r\n")
+
+
+
 # --- the rig: a CardWriter over fixtures and temp files ----------------------------------------
 
 
@@ -225,19 +293,35 @@ class Rig:
     def card(self, name: str) -> cw.CardDevice:
         return next(c for c in self.writer.listing().devices if c.disk.name == name)
 
-    def bundle(self, *, ebf: bool = False) -> Path:
-        b = self.tmp / ("bundle-ebf" if ebf else "bundle")
+    def bundle(self, *, ebf: bool = False, board_txt: bytes | None = None,
+               name: str = "") -> Path:
+        b = self.tmp / (name or ("bundle-ebf" if ebf else "bundle"))
         (b / "MB" / "HBI0309C").mkdir(parents=True)
         (b / "MB" / "HBI0309C" / "images.txt").write_text("new harness\n", encoding="utf-8")
         (b / "MB" / "HBI0309C" / "shell.bit").write_bytes(b"\x00\x09bit" * 100)
         if ebf:
             (b / "MB" / "mbb_v141.ebf").write_bytes(b"bios")
+        if board_txt is not None:
+            (b / "MB" / "HBI0309C" / "board.txt").write_bytes(board_txt)
         return b
 
-    def image(self, data: bytes | None = None, name: str = "linux_slot.img") -> Path:
+    def card_board_txt(self, data: bytes | None, *, ebf: str = "") -> None:
+        """The card's own MB/HBI0309C/board.txt (None: none) and an .ebf beside it."""
+        p = self.root / "MB" / "HBI0309C" / "board.txt"
+        if data is None:
+            p.unlink(missing_ok=True)
+        else:
+            p.write_bytes(data)
+        if ebf:
+            (self.root / "MB" / "HBI0309C" / ebf).write_bytes(b"MCC firmware")
+
+    def slot(self, data: bytes | None = None, name: str = "linux_slot.img") -> Path:
         p = self.tmp / name
         p.write_bytes(slot_image() if data is None else data)
         return p
+
+    def card_image(self, name: str = "card.img", **kw: Any) -> Path:
+        return card_image(self.tmp / name, **kw)
 
     def topics(self, topic: str) -> list[dict]:
         return [d for t, d in self.events if t == topic]
