@@ -400,7 +400,7 @@ Thu 1 Oct, **30 min 24 s**, peak RSS 4.91 GB, load 23 → 17 (synth 0:49, open_c
 read_checkpoint -cell 1:46, opt 0:59, place 7:24, phys_opt 0:27, route 10:46, pr_verify 2:23,
 write_bitstream 1:41).
 
-| | minimal before (the guide lead's clean run, old template) | minimal after (`d574894`) |
+| | minimal before (old template: timing from the guide lead's clean run, CRITICAL WARNINGs from KIT-NIGHT's run) | minimal after (`d574894`) |
 |---|---|---|
 | check_timing no_clock | 27,984 | **0** |
 | unconstrained_internal_endpoints | 87,115 | **423** |
