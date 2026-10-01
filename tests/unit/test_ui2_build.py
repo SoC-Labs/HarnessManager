@@ -139,12 +139,16 @@ def test_run_commands_batch_gui_and_an_open_session(tmp_path):
     assert out["gui"]["argv"][1:3] == ["-mode", "gui"]
     assert out["gui"]["argv"][-2:] == ["-tclargs", "STOP_AFTER=link"]
     assert f"'{d}/build_rm.tcl'" in out["gui"]["text"]             # quoted for the shell
-    assert out["session"]["lines"] == [f"cd {{{d}}}", "set argv [list STOP_AFTER=link]",
-                                       "set argc 1", "source build_rm.tcl"]
+    # KIT-INTERACTIVE's line for an open Vivado (render.source_tcl, proven on 2026.1): one
+    # source with `kit build` (tests/integration/test_kit_interactive_cli.py checks the CLI)
+    assert out["session"]["text"] == render.source_tcl(d, stop_after="link")
+    assert out["session"]["lines"] == [f"cd {{{d}}}", "set argv {STOP_AFTER=link}",
+                                       "source build_rm.tcl"]
+    assert "hm_save_floorplan FILE" in out["stays_open"]
     assert "receipt only" in out["session"]["watch"] and out["log"] == f"{d}/build_rm.log"
     plain = render.run_commands(tmp_path)
     assert plain["stop_after"] == "bitstream" and "-tclargs" not in plain["batch"]["argv"]
-    assert plain["session"]["lines"][1:3] == ["set argv {}", "set argc 0"]
+    assert plain["session"]["lines"][1] == "set argv {}" and plain["stays_open"] is None
 
 
 def test_twins_run_commands_refuse_a_bad_stage_or_a_brace():

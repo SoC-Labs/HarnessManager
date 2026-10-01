@@ -322,7 +322,7 @@ def test_writing_the_build_directory_gives_the_three_ways_to_run_it(page_factory
     way.locator('button:has-text("Vivado GUI")').click()
     expect(cmd).to_contain_text("vivado -mode gui -source")
     way.locator('button:has-text("Your open Vivado")').click()
-    expect(cmd).to_have_text(f"cd {bdir}; set argv {{}}; set argc 0; source build_rm.tcl")
+    expect(cmd).to_have_text(f"cd {{{bdir}}}; set argv {{}}; source build_rm.tcl")   # kit build's line
     expect(way).to_contain_text("sees only the verdict")
     # Stop after link: the directory is written again, and every way carries STOP_AFTER=link
     by_id(page, "bd-stop-after").check()

@@ -110,7 +110,7 @@ def test_the_script_answers_every_way_to_run_it(board, tmp_path):
     assert run["gui"]["argv"][1:3] == ["-mode", "gui"] and "STOP_AFTER=link" in run["gui"]["argv"]
     assert run["batch"]["argv"][1:3] == ["-mode", "batch"]
     assert run["session"]["lines"][-1] == "source build_rm.tcl"
-    assert run["session"]["lines"][0] == f"cd {out.resolve()}"
+    assert run["session"]["lines"][0] == f"cd {{{out.resolve()}}}"           # kit build's line
     default = c.post("/api/v1/guide/script", json={"static_id": SID, "design": "minimal"},
                      headers=H).json()["run"]
     assert default["stop_after"] == "bitstream" and "-tclargs" not in default["gui"]["argv"]

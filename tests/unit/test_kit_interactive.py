@@ -313,6 +313,8 @@ def test_a_running_build_reads_its_stage_with_or_without_the_seconds(tmp_path):
         (d / "build_rm.log").write_text(f"HM_STAGE preflight 1\n{line}\n")
         going = build.running_build(d, now=time.time())
         assert going is not None and going.stage == "impl" and going.fresh
+        # G8's RunningBuild: the seconds are the stage's start; a log from before has none
+        assert going.stage_started_at == (1790000300.0 if i == 0 else None)
     # twin: a verdict after the stage means the run ended
     d = tmp_path / "done"
     d.mkdir()
@@ -375,3 +377,24 @@ def test_the_rm_checkpoint_is_written_before_the_ooc_xdc_is_read(build_dir):
     old = synth.replace("        write_checkpoint -force $synth_dcp\n", "") + \
         "        write_checkpoint -force $synth_dcp\n"
     assert old.index("write_checkpoint") > old.index("read_xdc")             # the bug's shape
+
+
+def test_the_templates_live_seconds_are_what_the_watcher_reads(build_dir, tmp_path):
+    """Integration (KIT-INTERACTIVE x UI2-API-BUILD G8): the HM_STAGE line the template itself
+    prints parses into RunningBuild's ``stage_started_at`` (its clock seconds), so the Build
+    tab's "stage for N min" is live. The script's verdict is cut off: a run still going."""
+    import time
+
+    t0 = int(time.time())
+    _ok, _err, lines = session(build_dir, argv=["STOP_AFTER=preflight"])
+    log = [x for x in lines if x.startswith("HM_") and not x.startswith("HM_RM_BUILD_")]
+    d = tmp_path / "going"
+    d.mkdir()
+    (d / "build_rm.log").write_text("\n".join(log) + "\n")
+    going = build.running_build(d, now=time.time())
+    assert going is not None and going.stage == "preflight"
+    assert going.stage_started_at is not None and t0 - 5 <= going.stage_started_at <= time.time() + 5
+    assert going.to_json(time.time())["stage_elapsed_s"] is not None
+    # twin: with its verdict the run has ended, so nothing is running
+    (d / "build_rm.log").write_text("\n".join(x for x in lines if x.startswith("HM_")) + "\n")
+    assert build.running_build(d) is None

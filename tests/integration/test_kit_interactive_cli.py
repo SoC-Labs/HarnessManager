@@ -111,6 +111,43 @@ def test_kit_build_json_has_every_way(bdir, capsys):
     assert "hm_save_floorplan FILE" in d["stays_open"] and "read_xdc -cell u_rp_dut" in d["stays_open"]
 
 
+def _same_lines(d: Path, capsys, stop: str) -> None:
+    """``kit build`` prints exactly the lines the Build tab's "Run it your way" shows
+    (``render.run_commands``, the page's ``run`` from the daemon): batch, GUI, the open-session
+    line and, after link, the floorplan loop. ONE source: ``vivado_command`` / ``source_tcl``."""
+    from harness_manager.services.kit import render
+
+    web = render.run_commands(d.resolve(), vivado=exe(), stop_after=stop)
+    extra = ["--stop-after", stop] if stop else []
+    rc, out, _ = run(capsys, "kit", "build", str(d), *extra)
+    assert rc == 0
+    assert out.splitlines()[0] == web["batch"]["text"]
+    assert f"  {web['session']['text']}" in out.splitlines()
+    rc, out, _ = run(capsys, "kit", "build", str(d), "--gui", *extra)
+    assert rc == 0
+    assert out.splitlines()[0] == web["gui"]["text"]
+    rc, out, _ = run(capsys, "kit", "build", str(d), "--gui", *extra, "--json")
+    j = json.loads(out)
+    assert j["commands"]["batch"] == web["batch"]["argv"] and j["commands"]["gui"] == web["gui"]["argv"]
+    assert j["source_tcl"] == web["session"]["text"] and j["stays_open"] == web["stays_open"]
+
+
+def test_kit_build_and_the_build_tabs_run_it_your_way_print_the_same_lines(bdir, capsys):
+    _same_lines(bdir, capsys, "link")
+    _same_lines(bdir, capsys, "")
+
+
+def test_twin_a_build_directory_with_a_space_is_quoted_the_same_way(tmp_path, capsys):
+    assert run(capsys, "kit", "import", str(kf.FIXTURE))[0] == 0
+    d = tmp_path / "my builds" / "spike_rm"
+    rc, _, err = run(capsys, "kit", "script", "--static-id", "0x72BB0A36", "--design",
+                     str(design(tmp_path)), "--out", str(d))
+    assert rc == 0, err
+    _same_lines(d, capsys, "link")
+    rc, out, _ = run(capsys, "kit", "build", str(d))
+    assert f"'{d.resolve().as_posix()}/build_rm.tcl'" in out.splitlines()[0]   # one shell word
+
+
 def test_a_script_written_to_stop_after_link_names_the_floorplan(tmp_path, capsys):
     assert run(capsys, "kit", "import", str(kf.FIXTURE))[0] == 0
     d = tmp_path / "b"

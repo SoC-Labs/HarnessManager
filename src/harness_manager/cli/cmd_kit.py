@@ -440,7 +440,7 @@ def _build(ctx: Ctx) -> int:
     commands = {m: render.vivado_command(d.resolve(), mode=m, **how) for m in render.MODES}
     cmd = commands[mode]
     source = render.source_tcl(d.resolve(), stop_after=a.stop_after, jobs=a.jobs)
-    line = " ".join(cmd)
+    line = render.shell_line(cmd)                   # the Build tab shows the same line (run_commands)
     pc = vivado.check_path(found, rel)
     notes = [f"Vivado {inst.version} ({inst.how}); the kit needs {rel}"]
     if pc is not None and pc.state == "warning":
