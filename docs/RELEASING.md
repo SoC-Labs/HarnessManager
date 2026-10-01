@@ -286,6 +286,7 @@ listed) took 10 s:
 | `mps3-harness-2.0.0-rc1-overlays-open.zip` (8 RMs) | 1.0 MiB |
 | `mps3-kit-0x44EE76D5.zip` (private) | 36.0 MiB |
 | `mps3-harness-2.0.0-rc1-linux_legal_info.tar` (GPL) | 198.3 MiB |
+| `mps3-harness-2.0.0-rc1-linux_bundle.json` (the manifest, with the re-bake recorded) | 8.0 KiB |
 | total | 265.6 MiB |
 
 The 5 Arm-IP RMs it left out are about 12.8 MB unzipped.

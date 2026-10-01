@@ -178,8 +178,8 @@ def check(root: Path, repo: str, *, catalog: str = "mps3-harness", channel: str 
 
     # 4. every asset where the channel says, and nothing else beside them
     named: dict[Path, dict[str, Any]] = {}
-    for item in [*entry.get("components", []),
-                 *([entry["legal_info"]] if isinstance(entry.get("legal_info"), dict) else [])]:
+    beside = [entry[k] for k in ("legal_info", "linux_bundle") if isinstance(entry.get(k), dict)]
+    for item in [*entry.get("components", []), *beside]:
         rel = PurePosixPath(cfile.parent.relative_to(root).as_posix()) / item["url"]
         parts: list[str] = []
         for part in rel.parts:

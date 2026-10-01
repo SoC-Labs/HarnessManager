@@ -82,7 +82,10 @@ def test_a_linux_release_from_platform_artifacts_with_a_test_key(tmp_path, lx):
     assert set(left) == {"nanosoc", "eth_ss", "mps3_shell_static_id.c"}
     assert left["nanosoc"].startswith("Arm IP")
     assert {a["name"] for a in report["assets"]} == {
-        Path(c["url"]).name for c in comps.values()} | {rel["legal_info"]["name"]}
+        Path(c["url"]).name for c in comps.values()} | {rel["legal_info"]["name"],
+                                                        rel["linux_bundle"]["name"]}
+    published = Layout(out).asset_path(rel["tag"], rel["linux_bundle"]["name"])
+    assert json.loads(published.read_text())["static_id"] == S_LNX   # the manifest, beside
     assert all(len(a["sha256"]) == 64 and a["size"] > 0 for a in report["assets"])
     assert "assets:" in text and "TEST BUILD: never published" in text
 
@@ -268,7 +271,8 @@ def test_publish_check_dry_run_warns_and_writes_the_plan_inputs(tmp_path, built)
     env = pc.write(tmp_path / "plan").read_text()
     assert "TEST=1" in env and "PINNED=0" in env and f"TAG={CAT}-v{V}" in env
     assets = (tmp_path / "plan" / "assets.txt").read_text().split()
-    assert len(assets) == 4 and all(Path(a).is_file() for a in assets)   # 3 components + legal
+    assert len(assets) == 5 and all(Path(a).is_file() for a in assets)
+    # 3 components + the legal-info + linux_bundle.json beside them
     assert any("every one where the channel says" in c for c in pc.checks)
 
 
