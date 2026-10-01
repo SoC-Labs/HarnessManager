@@ -17,7 +17,7 @@ import pytest
 
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_SPARE
 from tests.web.test_demo_all_browser import Showcase, by_id, make_showcase
-from tests.web.test_hil_gui_browser import T, checks_of, open_checks, scripted
+from tests.web.test_hil_gui_browser import T, checks_of, open_checks, pin_until, scripted
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -74,6 +74,7 @@ def test_screenshot_a_run_in_progress_then_its_report(show, review, scheme):
     hm.delay = 0.35
     page = show.page(scheme)
     open_checks(page, BOARD_SPARE)
+    pin_until(page)                              # never inside the 08:30 default's margin
     by_id(page, "checks-take-lease").locator("input").check()
     by_id(page, "checks-start").click()
     page.wait_for_function("() => /Iteration [2-9]/.test((document.querySelector("

@@ -23,6 +23,7 @@ import re
 import threading
 import time
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -158,7 +159,16 @@ def test_twin_a_free_lease_starts_once_take_the_lease_is_ticked(show):
 # --- a run: progress, stop, the report ------------------------------------------------------------------
 
 
+def pin_until(page: Any) -> None:
+    """Run until 12 h from now, not the form's 08:30: a run started 08:20-08:30 (inside the
+    10-min margin) would end at once, before its first iteration."""
+    until = (datetime.now() + timedelta(hours=12)).strftime("%H:%M")
+    by_id(page, "checks-until").fill(until)
+    expect(by_id(page, "checks-until")).to_have_value(until)
+
+
 def start_run(page: Any, *, writes: str = "safe") -> None:
+    pin_until(page)
     by_id(page, "checks-take-lease").locator("input").check()
     by_id(page, f"checks-writes-{writes}").click()
     by_id(page, "checks-start").click()
