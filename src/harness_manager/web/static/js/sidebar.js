@@ -249,16 +249,51 @@ export function railOrder() {
     .sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.id);
 }
 
+// UI v2 (round 3, S13): the boards that are not favourites group by where they are: one group
+// per hub (GET /boards `hub.name`, G3; else the hub boards.toml names), then "This network".
+// Favourites stay pinned in their own group at the top (SIDEBAR-UX).
+export function hubGroupOf(bid) {
+  const row = S.boards[bid] || {};
+  const conf = row.configured || {};
+  return (row.hub && row.hub.name) || conf.hub || (conf.via === "hub" ? "hub" : "");
+}
+
 export function railGroups() {
   const all = railOrder();
   const favs = new Set(P.favs);
-  return { all, favs: all.filter((id) => favs.has(id)), rest: all.filter((id) => !favs.has(id)) };
+  const rest = all.filter((id) => !favs.has(id));
+  const byHub = new Map();
+  const net = [];
+  for (const id of rest) {
+    const h = hubGroupOf(id);
+    if (!h) net.push(id);
+    else (byHub.get(h) || byHub.set(h, []).get(h)).push(id);
+  }
+  return { all, favs: all.filter((id) => favs.has(id)), rest,
+    hubs: [...byHub].map(([name, ids]) => ({ id: `hub:${name}`, name, ids })), net };
+}
+
+// The rail's groups, top to bottom: {id, label, title, ids}. "rest" is This network.
+export function railSections() {
+  const g = railGroups();
+  const out = [];
+  if (g.favs.length) out.push({ id: "fav", label: "Favourites", ids: g.favs });
+  for (const h of g.hubs) out.push({ id: h.id, label: h.name.split(".")[0], title: `Behind the hub ${h.name}`, hub: h.name, ids: h.ids });
+  out.push({ id: "rest", label: "This network", title: "On this network (no hub)", ids: g.net });
+  return out;
+}
+
+function sectionOfBoard(bid) {
+  return railSections().find((x) => x.ids.includes(bid)) || { id: "rest", label: "This network", ids: [] };
+}
+
+function inWords(sec) {
+  return sec.id === "fav" ? " in Favourites" : sec.hub ? ` in ${sec.label}` : railSections().length > 1 ? " in This network" : "";
 }
 
 // The boards as the rail shows them, top to bottom (the first is selected at start).
 export function railDisplay() {
-  const g = railGroups();
-  return [...g.favs, ...g.rest];
+  return railSections().flatMap((x) => x.ids);
 }
 
 export function isFavourite(bid) { return P.favs.includes(bid); }
@@ -281,8 +316,8 @@ function nameOf(bid) {
 // Move a board to `to` (an index in its own group). Returns false when nothing moved.
 export function moveBoard(bid, to, { announce = true } = {}) {
   const g = railGroups();
-  const fav = P.favs.includes(bid);
-  const group = fav ? g.favs : g.rest;
+  const sec = sectionOfBoard(bid);
+  const group = sec.ids;
   const from = group.indexOf(bid);
   if (from < 0) return false;
   const dest = Math.max(0, Math.min(group.length - 1, to));
@@ -296,7 +331,7 @@ export function moveBoard(bid, to, { announce = true } = {}) {
   const all = g.all.map((id) => (members.has(id) ? moved[k++] : id));
   persistOrder(all);
   if (announce) {
-    say(`${nameOf(bid)} moved to position ${dest + 1} of ${group.length}${fav ? " in Favourites" : ""}`);
+    say(`${nameOf(bid)} moved to position ${dest + 1} of ${group.length}${inWords(sec)}`);
   }
   scheduleSave();
   changed();
@@ -329,11 +364,10 @@ function refocus(bid) {
 function onCardKey(e, bid) {
   if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
   e.preventDefault();
-  const g = railGroups();
-  const group = P.favs.includes(bid) ? g.favs : g.rest;
-  const from = group.indexOf(bid);
+  const sec = sectionOfBoard(bid);
+  const from = sec.ids.indexOf(bid);
   if (moveBoard(bid, from + (e.key === "ArrowUp" ? -1 : 1))) refocus(bid);
-  else say(`${nameOf(bid)} is already ${e.key === "ArrowUp" ? "first" : "last"}${P.favs.includes(bid) ? " in Favourites" : ""}`);
+  else say(`${nameOf(bid)} is already ${e.key === "ArrowUp" ? "first" : "last"}${inWords(sec)}`);
 }
 
 // --- dragging (pointer events: a mouse, a finger, a pen) --------------------------------------
@@ -343,7 +377,7 @@ let pointer = null;         // {id, x0, y0, bid, group}
 let swallowClick = false;   // the click that ends a drag opens nothing
 
 function cardsOf(group, except) {
-  return [...document.querySelectorAll(`.rail-card[data-group="${group}"]`)]
+  return [...document.querySelectorAll(".rail-card")].filter((el) => el.dataset.group === group)
     .filter((el) => el.dataset.board !== except);
 }
 
@@ -351,8 +385,7 @@ function onPointerDown(e, bid, fromGrip) {
   if (e.button !== 0 || pointer) return;
   // A finger on the card scrolls the list; a finger on the grip drags.
   if (!fromGrip && e.pointerType !== "mouse") return;
-  pointer = { id: e.pointerId, x0: e.clientX, y0: e.clientY, bid,
-    group: P.favs.includes(bid) ? "fav" : "rest" };
+  pointer = { id: e.pointerId, x0: e.clientX, y0: e.clientY, bid, group: sectionOfBoard(bid).id };
   if (fromGrip) e.preventDefault();
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
@@ -374,8 +407,7 @@ function onPointerMove(e) {
     const r = el.getBoundingClientRect();
     if (e.clientY > r.top + r.height / 2) at += 1;
   }
-  const g = railGroups();
-  const group = pointer.group === "fav" ? g.favs : g.rest;
+  const group = (railSections().find((x) => x.id === pointer.group) || { ids: [] }).ids;
   const from = group.indexOf(pointer.bid);
   DRAG.at = at;
   if (at === from || !others.length) {
@@ -597,12 +629,13 @@ function Group({ id, label, ids }) {
 }
 
 export function BoardList() {
-  const g = railGroups();
+  const secs = railSections();
+  const many = secs.length > 1;
   return html`<div class="board-list">
-    ${g.favs.length ? html`<div class="rail-group-title" id="rail-fav-title"><${Icon} name="star" cls="sm" />Favourites</div>
-      <${Group} id="fav" label="Favourite boards" ids=${g.favs} />
-      ${g.rest.length ? html`<div class="rail-group-title">Other boards</div>` : null}` : null}
-    <${Group} id="rest" label=${g.favs.length ? "Other boards" : "Boards"} ids=${g.rest} />
+    ${secs.map((sec) => html`${sec.id === "fav" ? html`<div class="rail-group-title" id="rail-fav-title" key="t-fav"><${Icon} name="star" cls="sm" />Favourites</div>`
+        : many && sec.ids.length ? html`<div class="rail-group-title" key=${`t-${sec.id}`} data-testid=${`rail-group-title-${sec.hub ? "hub" : "net"}`}
+            title=${sec.title}><${Icon} name=${sec.hub ? "server" : "ethernet-port"} cls="sm" />${sec.label}</div>` : null}
+      <${Group} key=${sec.id} id=${sec.id} label=${sec.id === "fav" ? "Favourite boards" : many ? sec.label : "Boards"} ids=${sec.ids} />`)}
     <p id="rail-move-help" class="sr-only">Alt+Up or Alt+Down moves this board in the list.</p>
     <div class="sr-only" role="status" aria-live="polite" data-testid="rail-announce">${P.announce}</div>
   </div>`;

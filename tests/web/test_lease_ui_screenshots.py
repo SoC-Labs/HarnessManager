@@ -84,7 +84,8 @@ def test_lease_review_screenshots_demo(showcase, review, scheme):
     page.locator('[data-action="release_cancel"]').click()
 
     close_board(page)
-    expect(by_id(page, "close-title")).to_have_text("Also release the lease on mps3_03?")
+    expect(by_id(page, "close-title")).to_have_text("Close mps3-03")          # round 3, M1
+    expect(by_id(page, "close-confirm")).to_have_attribute("data-default", "restore")
     shoot(page, review, "close-confirm", scheme)
     page.locator('[data-action="close_cancel"]').click()
 
