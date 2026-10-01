@@ -504,17 +504,21 @@ function DownloadBar({ bid }) {
   const cur = at >= 0 ? dep.phase : "";
   const bytes = at >= 0 && BYTE_PHASES.has(cur) && dep.total > 0;
   const frac = bytes ? Math.min(1, dep.bytes / dep.total) : 0;
+  // FIX-PACK-6: an estimate (a frame in flight) is drawn hatched, its numbers with "~"
+  const est = bytes && !!dep.estimated;
+  const approx = est ? "~" : "";
   // What push sends: the push events' total, else the overlay's size (clearing + partial).
   const ref = refOf(b, dep.overlay);
   const total = (t && t.totals.push) || (cur === "push" ? dep.total : 0) || (ref && ref.size_bytes) || 0;
   let line;
   if (cur === "push" && dep.rate) {
-    line = `push · ${bytesText(dep.bytes)} of ${bytesText(dep.total)} · ${fmtRate(dep.rate)}`
-      + `${dep.left !== null && dep.left !== undefined ? ` · ${Math.max(1, Math.ceil(dep.left))} s left` : ""}`;
+    line = `push · ${approx}${bytesText(dep.bytes)} of ${bytesText(dep.total)} · ${approx}${fmtRate(dep.rate)}`
+      + `${dep.left !== null && dep.left !== undefined ? ` · ${approx}${Math.max(1, Math.ceil(dep.left))} s left` : ""}`
+      + `${est ? " (estimated)" : ""}`;
   } else if (cur === "push") {
     line = `push · starting · ${bytesText(dep.total)} to send (clearing + partial)`;
   } else if (cur === "card") {
-    line = `card · ${bytesText(dep.bytes)} of ${bytesText(dep.total)} · ${SAYS.card}`;
+    line = `card · ${approx}${bytesText(dep.bytes)} of ${bytesText(dep.total)} · ${SAYS.card}${est ? " (estimated)" : ""}`;
   } else if (cur) {
     const pushed = at > phases.indexOf("push") && total;
     line = `${cur} · ${SAYS[cur] || cur}${pushed ? ` · ${bytesText(total)} pushed` : ""}`;
@@ -525,16 +529,19 @@ function DownloadBar({ bid }) {
   const el = since ? Math.max(0, Date.now() / 1000 - since) : 0;
   const what = b.lastKind === "restore" || dep.overlay === "greybox" ? "Restoring the baseline" : `Programming ${dep.overlay || "the design"}`;
   return html`<div class="progress-box pgm" role="status" data-testid="deploy-progress" data-phase=${cur || "starting"}
-      title=${`${what} on ${bid}: the phases are the deploy service's own (deploy.progress); bytes, rate and time left from its events' times`}>
+      data-estimated=${est ? "1" : null}
+      title=${`${what} on ${bid}: the phases are the deploy service's own (deploy.progress); bytes, rate and time left from its events' times`
+        + `${est ? "; ~ and the hatched fill: an estimate while one frame is in flight (the push reports per frame), snapped to the real bytes when it completes" : ""}`}>
     <div class="pgm-steps">${phases.map((ph, i) => {
       const st = i < at ? "done" : i === at ? "active" : "";
       const fill = i < at ? 1 : i === at && bytes ? frac : 0;
       const secsTaken = phaseSecs(t, ph);
-      const note = i < at ? fmtSecs(secsTaken) : i === at ? (bytes ? `${Math.floor(frac * 100)}%` : "")
+      const note = i < at ? fmtSecs(secsTaken) : i === at ? (bytes ? `${approx}${Math.floor(frac * 100)}%` : "")
         : ph === "push" && total ? bytesText(total) : "";
       return html`<div key=${ph} class=${`pgm-step ${st} ${BYTE_PHASES.has(ph) ? "bytes" : ""}`} style=${{ flexGrow: WEIGHT[ph] || 1 }} data-step=${ph}>
         <div class="pgm-lbl"><${Icon} name=${i < at ? "circle-check" : i === at ? "loader-circle" : "circle-dashed"} /><b>${ph}</b><span>${note}</span></div>
-        <div class="pgm-track"><i style=${{ width: `${Math.round(fill * 1000) / 10}%` }}></i></div></div>`;
+        <div class="pgm-track"><i class=${i === at && est ? "est" : ""} data-estimated=${i === at && est ? "1" : null}
+          style=${{ width: `${Math.round(fill * 1000) / 10}%` }}></i></div></div>`;
     })}</div>
     <div class="pgm-line"><span class="pgm-now" data-testid="deploy-phase">${line}</span>
       <span class="num" title=${`${what}: since the deploy started (its first event)`}>${Math.floor(el)} s</span></div>

@@ -204,6 +204,10 @@ EXTENSION_ROUTES["card_api"] = EXTENSION_ROUTES["card_api"] + (
     ("POST", "/boards/{bid}/slots/rollback"),
     ("POST", "/boards/{bid}/card/commit"),
     ("POST", "/boards/{bid}/card/clear"),
+    # FIX-PACK-6: the CLI's other slot changes, as the service's jobs
+    ("POST", "/boards/{bid}/slots/push"),
+    ("POST", "/boards/{bid}/slots/commit"),
+    ("POST", "/boards/{bid}/slots/verify"),
 )
 EXTENSION_ROUTES["kit_api"] = EXTENSION_ROUTES["kit_api"] + (
     ("POST", "/overlays/import"),

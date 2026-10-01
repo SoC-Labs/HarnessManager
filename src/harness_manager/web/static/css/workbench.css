@@ -170,6 +170,8 @@
 .pgm-track { position: relative; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .pgm-track > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; transition: width .12s linear; }
 .pgm-step.done .pgm-track > i { background: var(--ok); width: 100% !important; }
+/* FIX-PACK-6: an estimated fill (a frame in flight): hatched, snapped solid at the frame's end */
+.pgm-track > i.est { background: repeating-linear-gradient(135deg, var(--accent) 0 4px, transparent 4px 7px); }
 .pgm-step.active:not(.bytes) .pgm-track > i { width: 38% !important; transition: none; animation: pgm-busy 1.2s ease-in-out infinite; }
 .pgm-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 12.5px; color: var(--text-2); min-width: 0; }
 .pgm-now {

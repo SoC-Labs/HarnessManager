@@ -16,6 +16,9 @@ Step 3 is skipped, and the verb runs on the in-process engine, when:
   process holding the board's lock; ``daemon``/``ui`` manage the daemon itself. Their
   read-only sub-verbs in ``SERVICE_READS`` (``slot status``, ``card status``) still go
   through the service: it holds the board, so an in-process read is refused by its lock;
+  so do the changes in ``SERVICE_CHANGES`` (FIX-PACK-6: ``card commit|clear``, ``slot
+  push|commit|verify|rollback``), as the service's jobs (``client.remote.RemoteSlots``).
+  With no service running they run in this process, as before;
 - the verb was given ``--overlay-dir``: that sets the overlay search path in
   this process's environment, which the daemon cannot see.
 
@@ -53,8 +56,10 @@ IN_PROCESS_VERBS: dict[str, str] = {
     "daemon": "manages harness-manager-daemon itself",
     "update": "writes the SD and reboots in this process; a daemon holding the board refuses it by name",
     "ui": "manages harness-manager-daemon itself",
-    "slot": "writes the board's OS slots through the pack's own adapter in this process",
-    "card": "writes the board's user microSD through the pack's own adapter in this process",
+    "slot": "writes the board's OS slots through the pack's own adapter in this process "
+            "when no service runs (SERVICE_READS, SERVICE_CHANGES go through one that does)",
+    "card": "writes the board's user microSD through the pack's own adapter in this process "
+            "when no service runs (SERVICE_READS, SERVICE_CHANGES go through one that does)",
     "app": "manages harness-manager-daemon itself",
 }
 
@@ -63,6 +68,15 @@ IN_PROCESS_VERBS: dict[str, str] = {
 SERVICE_READS: dict[str, tuple[str, frozenset[str]]] = {
     "slot": ("slot_cmd", frozenset({"status"})),
     "card": ("card_cmd", frozenset({"status"})),
+}
+
+#: FIX-PACK-6 item 1: the changes of those verbs go through a running service too, as its jobs
+#: (card_api.py): H1 Z1's ``card clear`` was refused by the service's board lock ("in use —
+#: held by … harness-manager-daemon"), while ``program``, ``restore`` and ``mcc reboot`` went
+#: through it. Without a service they run in this process, as before.
+SERVICE_CHANGES: dict[str, tuple[str, frozenset[str]]] = {
+    "slot": ("slot_cmd", frozenset({"push", "commit", "verify", "rollback"})),
+    "card": ("card_cmd", frozenset({"commit", "clear"})),
 }
 
 EngineFactory = Callable[[argparse.Namespace | None], Any]
@@ -107,8 +121,13 @@ def wants_daemon(args: argparse.Namespace | None) -> bool:
 
 
 def _service_read(cmd: str, args: argparse.Namespace) -> bool:
-    dest, subs = SERVICE_READS.get(cmd, ("", frozenset()))
-    return bool(dest) and getattr(args, dest, None) in subs
+    """A sub-verb of an in-process verb that goes through a running service anyway: a read
+    (``SERVICE_READS``) or a change the service runs as a job (``SERVICE_CHANGES``)."""
+    for table in (SERVICE_READS, SERVICE_CHANGES):
+        dest, subs = table.get(cmd, ("", frozenset()))
+        if dest and getattr(args, dest, None) in subs:
+            return True
+    return False
 
 
 def daemon_engine(args: argparse.Namespace | None = None) -> Any | None:

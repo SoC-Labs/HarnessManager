@@ -59,10 +59,12 @@ from harness_manager.core.pack import (
     OverlayRef,
     ProbeHints,
     card_status_of,
+    detail_of,
     keep_refusal,
     preflight_refusal,
+    report_progress,
 )
-from harness_manager.services import reset_guard
+from harness_manager.services import design_check, reset_guard
 from harness_manager.services.quiet import (
     VIEWER_HEADER,
     BackgroundGate,
@@ -411,6 +413,8 @@ class Daemon:
                                     enabled=not getattr(engine, "fake_boards", False))
         self._unquiet = [self.bus.subscribe("session.opened", self._quiet_opened),
                          self.bus.subscribe("session.closed", self._quiet_closed)]
+        # FIX-PACK-6 item 3: the last cold-boot design check per board (GET /boards/{bid})
+        self.design_checks = design_check.DesignChecks(self.bus)
         # QUIET-POLL follow-up 1: the console broker never re-dials a board whose lease is
         # someone else's, and refuses a new explicit console there (services/console.py).
         broker = getattr(engine, "consoles", None) if self.quiet.enabled else None
@@ -540,6 +544,7 @@ class Daemon:
         self._unlog()
         for unsub in self._unquiet:
             unsub()
+        self.design_checks.close()
         self.hub.close()
         self.jobs.shutdown(wait=False)
 
@@ -1216,7 +1221,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         def run(progress: Callable[[str, int, int], None]) -> Any:
             with reset_guard.guarded(s, reset_guard.ACTION_MCC_REBOOT, force=force,
                                      consent=consent):
-                return ctl.reboot(progress=progress, wait_s=wait_s)
+                evidence = ctl.reboot(progress=progress, wait_s=wait_s)
+            # FIX-PACK-6 item 3: a cold boot's reported design is checked against the DAP
+            # (one IDCODE read; never fails the reboot): services/design_check.py
+            return design_check.attach(evidence, design_check.after_cold_boot(
+                d.engine, s, after=design_check.AFTER_MCC_REBOOT, bus=d.bus))
 
         return accepted(d.jobs.submit("reboot", bid, run))
 
@@ -1410,9 +1419,10 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             still_open(bid, s, "deploy")
 
             def on_progress(ev: Event) -> None:
-                if ev.board_id == bid:
-                    progress(str(ev.data.get("phase", "")), int(ev.data.get("bytes", 0) or 0),
-                             int(ev.data.get("total", 0) or 0))
+                if ev.board_id == bid:          # FIX-PACK-6: with estimated, when it is one
+                    report_progress(progress, str(ev.data.get("phase", "")),
+                                    int(ev.data.get("bytes", 0) or 0),
+                                    int(ev.data.get("total", 0) or 0), detail_of(ev.data))
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
@@ -1433,9 +1443,10 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             still_open(bid, s, "restore")
 
             def on_progress(ev: Event) -> None:
-                if ev.board_id == bid:
-                    progress(str(ev.data.get("phase", "")), int(ev.data.get("bytes", 0) or 0),
-                             int(ev.data.get("total", 0) or 0))
+                if ev.board_id == bid:          # FIX-PACK-6: with estimated, when it is one
+                    report_progress(progress, str(ev.data.get("phase", "")),
+                                    int(ev.data.get("bytes", 0) or 0),
+                                    int(ev.data.get("total", 0) or 0), detail_of(ev.data))
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
@@ -1504,8 +1515,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         # QUIET-POLL: an explicit read while the lease is someone else's names the holder (a
         # health note, so the shape stays BoardInfo's; GET .../background has the rest).
         # UI2 G4 (readings_api): answer_ms, the uptimes and stats (docs/API.md "Readings").
+        # FIX-PACK-6 item 3 (additive): the last cold-boot design check, only when there is one
+        check = d.design_checks.last(bid)
         return _JSON(ok(**_fields(d.with_lease_note(bid, board_info)),
-                        **info_extra(d, bid, board_info, answer_ms)))
+                        **info_extra(d, bid, board_info, answer_ms),
+                        **({"design_check": check} if check is not None else {})))
 
     @api.delete("/boards/{bid:path}")
     def close(bid: str, release: str | None = None) -> JSONResponse:

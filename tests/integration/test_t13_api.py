@@ -132,7 +132,8 @@ def test_probe_open_info_overlays_preflight_deploy_reset_close(client, vboard, o
     B = bid_path(bid)
     # info is BoardInfo, as `harness-manager --json info` prints it
     info = client.get(B, headers=H).json()
-    # UI2 G4 (additive): the service's readings beside BoardInfo (docs/API.md "Readings")
+    # UI2 G4 (additive): the service's readings beside BoardInfo (docs/API.md "Readings");
+    # FIX-PACK-6's design_check is added only after a cold boot made one
     assert set(info) == {"ok", "candidate", "identity", "health", "capabilities", "unavailable",
                          "answer_ms", "uptime_s", "os_uptime_s", "readings_at",
                          "readings_source", "stats"}

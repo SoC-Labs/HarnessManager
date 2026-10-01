@@ -875,6 +875,9 @@ const REFRESH_TOPICS = new Set([
 
 function eventLevel(ev) {
   const d = ev.data || {};
+  // FIX-PACK-6: the cold-boot design check (services/design_check.py): an unverified
+  // design is a warning, a verified one ok, a check that could not be made info
+  if (ev.topic === "design.check") return d.state === "unverified" ? "warning" : d.state === "verified" ? "ok" : "info";
   if (ev.topic.endsWith(".failed") || d.state === "failed") return "error";
   if (ev.topic === "deploy.done") return d.verified ? "ok" : "warning";
   if (ev.topic === "board.lost" || ev.topic === "session.closed" || d.state === "down") return "warning";
@@ -895,6 +898,9 @@ function valueSummary(v) {
 
 function eventText(ev) {
   const d = ev.data || {};
+  if (ev.topic === "design.check" && d.text) {
+    return `${d.state === "unverified" ? "design UNVERIFIED" : d.state === "verified" ? "design verified" : "design not cross-checked"} after ${d.after || "a cold boot"}: ${d.text}`;
+  }
   const parts = Object.entries(d)
     .filter(([k]) => k !== "preflight")
     .map(([k, v]) => `${k}=${valueSummary(v)}`);
@@ -910,7 +916,7 @@ function onDeployEvent(ev) {
     Object.assign(dep, { state: "running", overlay: d.overlay || d.rm_id || "", phase: "started",
       bytes: 0, total: 0, phases: [], events: [], verified: false, reason: "", stage: "",
       rm_id: d.rm_id || "", keep: !!d.keep_on_card, card: null, startedAt: at, doneAt: 0,
-      phaseAt: at, phaseBytes: 0, rate: 0, left: null });
+      phaseAt: at, phaseBytes: 0, rate: 0, left: null, estimated: false });
     dep.events.push(`${clock(ev.at)}  started ${dep.overlay}`);
   } else if (ev.topic === "deploy.progress") {
     if (dep.state !== "running") {
@@ -918,26 +924,33 @@ function onDeployEvent(ev) {
     }
     const phase = d.phase || "?";
     const bytes = Number(d.bytes || 0);
-    if (phase !== dep.phase) {
-      Object.assign(dep, { phaseAt: at, phaseBytes: bytes, rate: 0, left: null });
-    } else if (at > dep.phaseAt && bytes > dep.phaseBytes) {
-      dep.rate = (bytes - dep.phaseBytes) / (at - dep.phaseAt);
-      dep.left = dep.rate > 0 ? Math.max(0, (Number(d.total || 0) - bytes) / dep.rate) : null;
+    // FIX-PACK-6: `estimated` marks a report made while a frame was in flight (the service
+    // estimates it from the push's rate); the frame's end snaps to the real bytes. An
+    // estimate never moves the bar back.
+    const estimated = !!d.estimated;
+    if (!(estimated && phase === dep.phase && bytes <= dep.bytes)) {
+      if (phase !== dep.phase) {
+        Object.assign(dep, { phaseAt: at, phaseBytes: bytes, rate: 0, left: null });
+      } else if (at > dep.phaseAt && bytes > dep.phaseBytes) {
+        dep.rate = (bytes - dep.phaseBytes) / (at - dep.phaseAt);
+        dep.left = dep.rate > 0 ? Math.max(0, (Number(d.total || 0) - bytes) / dep.rate) : null;
+      }
+      dep.phase = phase;
+      dep.bytes = bytes;
+      dep.total = Number(d.total || 0);
+      dep.estimated = estimated;
+      if (!dep.phases.includes(dep.phase)) dep.phases.push(dep.phase);
+      if (!estimated) dep.events.push(`${clock(ev.at)}  ${dep.phase} ${dep.bytes}/${dep.total}`);
     }
-    dep.phase = phase;
-    dep.bytes = bytes;
-    dep.total = Number(d.total || 0);
-    if (!dep.phases.includes(dep.phase)) dep.phases.push(dep.phase);
-    dep.events.push(`${clock(ev.at)}  ${dep.phase} ${dep.bytes}/${dep.total}`);
   } else if (ev.topic === "deploy.done") {
-    Object.assign(dep, { state: "done", phase: "done", verified: !!d.verified,
+    Object.assign(dep, { state: "done", phase: "done", verified: !!d.verified, estimated: false,
       rm_id: d.rm_id || "", seconds: Number(d.seconds || 0), transport: d.transport || "",
       card: d.card || null, doneAt: at, rate: 0, left: null });
     if (dep.total) dep.bytes = dep.total;
     dep.events.push(`${clock(ev.at)}  done rm_id ${d.rm_id} verified=${d.verified ? "yes" : "no"}`);
   } else if (ev.topic === "deploy.failed") {
     Object.assign(dep, { state: "failed", reason: d.reason || "no reason given",
-      stage: d.stage || "", doneAt: at, rate: 0, left: null });
+      stage: d.stage || "", doneAt: at, rate: 0, left: null, estimated: false });
     if (d.overlay) dep.overlay = d.overlay;
     dep.events.push(`${clock(ev.at)}  failed: ${dep.reason}`);
   }
@@ -1009,6 +1022,10 @@ export function handleEvent(ev) {
       if (b.debug.gdb_ports) b.debug.gdb_ports = [];
     }
   }
+  // FIX-PACK-6: the cold-boot design check; a deploy proves its own design (the service
+  // forgets the check then too)
+  if (ev.topic === "design.check") boardState(bid).designCheck = { ...(ev.data || {}) };
+  if (ev.topic === "deploy.done") boardState(bid).designCheck = { state: "cleared" };
   if (ev.topic === "controller.reboot") {
     const b = boardState(bid);
     const phase = (ev.data || {}).phase;

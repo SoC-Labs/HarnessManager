@@ -66,6 +66,9 @@ class PushSource:
     sha256: str = ""
     version: str = ""
     frames: dict[str, Any] | None = None      # linux_bundle.json slot_image.s0lb
+    #: the linux_bundle.json it was resolved from, or None (FIX-PACK-6: a push through the
+    #: service sends it, so the service checks the image against the bundle again)
+    bundle: Path | None = None
 
 
 def push_source(image: Path | None, *, bundle: Path | None = None, static_id: str = "",
@@ -132,7 +135,8 @@ def push_source(image: Path | None, *, bundle: Path | None = None, static_id: st
                                + "; ".join(diff), hint="nothing was pushed")
     ver = version or str(doc.get("harness") or ((eth.get("components") or {}).get("harness"))
                          or "")
-    return PushSource(image=Path(image), static_id=sid, sha256=sha, version=ver, frames=frames)
+    return PushSource(image=Path(image), static_id=sid, sha256=sha, version=ver, frames=frames,
+                      bundle=path if doc else None)
 
 
 class SlotService:

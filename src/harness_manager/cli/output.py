@@ -317,11 +317,12 @@ class StderrProgress:
             return
         self._last = key
         self._last_at = now
+        est = "~" if (detail or {}).get("estimated") else ""   # FIX-PACK-6: an estimate
         if text:
             rate = (detail or {}).get("rate_bps") or 0
             text = f"{self.label}: {text}" + (f" ({rate / 1000:.0f} KB/s)" if rate else "")
         elif total:
-            text = f"{self.label}: {phase} {done}/{total} ({100 * done // total}%)"
+            text = f"{self.label}: {phase} {est}{done}/{total} ({est}{100 * done // total}%)"
         elif done:
             text = f"{self.label}: {phase} {done}"
         else:

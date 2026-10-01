@@ -119,15 +119,24 @@ def cmd_mcc(ctx: Ctx) -> int:
         with reset_guard.guarded(session, reset_guard.ACTION_MCC_REBOOT, force=force,
                                  consent=consent):
             evidence = ctl.reboot(progress=progress, wait_s=a.wait)
+        # FIX-PACK-6 item 3: never trust the reported design after a cold boot: one IDCODE
+        # read (the service's job made it; in-process, here). It never fails the reboot.
+        from harness_manager.services import design_check
+
+        check = design_check.from_result(ctx.engine, session, evidence,
+                                         after=design_check.AFTER_MCC_REBOOT,
+                                         bus=getattr(ctx.engine, "bus", None))
     ev = evidence if isinstance(evidence, dict) else {}
+    ev.pop("design_check", None)
     fpga_file = str(ev.get("fpga_file") or "")
     human = [f"rebooted   {cand.board_id} (seen: {', '.join(progress.phases) or '-'})"]
     if fpga_file:
         human.append(f"MCC loaded {fpga_file}")
+    human += design_check.human(check)
     ctx.emit(Result("mcc reboot", {"board_id": cand.board_id, "result": "rebooted",
                                    "phases": progress.phases, "fpga_file": fpga_file,
                                    "mcc_firmware": str(ev.get("mcc_firmware") or ""),
-                                   "evidence": ev},
+                                   "evidence": ev, "design_check": check},
                     rows=[[cand.board_id, "rebooted", progress.phases, fpga_file]],
                     human=human))
     return ExitCode.OK

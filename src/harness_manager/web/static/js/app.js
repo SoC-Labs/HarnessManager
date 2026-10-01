@@ -206,6 +206,10 @@ function DesignFact({ bid, ident }) {
   const check = ident.build_check || "unchecked";
   const title = `The design in the partition${ident.rm_id ? ` (rm_id ${ident.rm_id})` : ""}. ${BUILD_WORDS[check] || `Build check ${checkLabel(check)}.`}`;
   const verified = !bar && dep.state === "done" && dep.verified && sameId(dep.rm_id, ident.rm_id) && dep.doneAt;
+  // FIX-PACK-6: after a cold boot the service checks the reported design against the DAP
+  // (the design.check event, or GET /boards/{bid}'s design_check); a deploy clears it
+  const dc = b.designCheck || (b.info && b.info.design_check) || null;
+  const unverified = !bar && !verified && dc && dc.state === "unverified" && sameId(dc.rm_id, ident.rm_id);
   return html`<div class="fact design-fact" data-testid="fact-design" data-check=${check} title=${title}>
     <span class="fact-label">Design</span>
     <span class="fact-value">
@@ -215,6 +219,8 @@ function DesignFact({ bid, ident }) {
         : html`<span>${ident.rm_name || "unknown"}</span>${ident.rm_id ? html` <span class="mono">${hexId(ident.rm_id)}</span>` : null}`}
       ${verified ? html`<${Chip} level="ok" icon="circle-check" testid="design-verified"
           title=${`Read back from the board after programming, at ${clock(dep.doneAt)}. ${BUILD_WORDS[check] || ""}`}>verified ${clock(dep.doneAt).slice(0, 5)}<//>` : null}
+      ${unverified ? html`<${Chip} level="warn" icon="triangle-alert" testid="design-unverified"
+          title=${`${dc.text || "The board reports this design but no debug port answers."} Checked after ${dc.after || "a cold boot"}${dc.at ? ` at ${clock(dc.at)}` : ""}. Nothing was changed on the board; Program the design again, or Restore the baseline.`}>unverified<//>` : null}
       ${check !== "ok" ? html`<${CheckChip} check=${check} testid="build-chip" prefix="build " />` : null}
     </span>
   </div>`;

@@ -87,7 +87,8 @@ def test_cli_claims_an_unclaimed_board_and_info_shows_it(linux, capsys, monkeypa
     assert "StrictHostKeyChecking=yes" in argv and argv[-2:] == ["root", "127.0.0.1"]
     rc, out, _ = cli(capsys, monkeypatch, "board", "ssh", target(shell), "--print", "-c",
                      "ls -l /persist")
-    assert rc == ExitCode.OK and out.rstrip().endswith("root 127.0.0.1 ls -l /persist")
+    # FIX-PACK-6: -c is ONE remote command, as `ssh host 'CMD'` sends it (quoted in the line)
+    assert rc == ExitCode.OK and out.rstrip().endswith("root 127.0.0.1 'ls -l /persist'")
 
 
 def test_negative_twin_cli_claim_unconfirmed_sends_nothing(linux, capsys, monkeypatch):

@@ -72,6 +72,8 @@ from harness_manager.core.pack import (
     PreflightItem,
     ProbeHints,
     Progress,
+    detail_of,
+    report_progress,
 )
 from harness_manager.core.panel import PanelFrame, PanelState, PanelSupport
 from harness_manager.core.services import DebugStatus, EngineConfig
@@ -231,6 +233,7 @@ class RemoteEngine:
         self.debug = RemoteDebug(self)
         self.xvc = RemoteXvc(self)             # lane XVC-CORE: fabric debug over XVC
         self.board_claim = RemoteClaim(self)   # lane LINUX-CLAIM: the Linux harness's SSH claim
+        self.slot_service = RemoteSlots(self)  # FIX-PACK-6: slot/card changes as service jobs
         self.board_identity = RemoteIdentity(self)   # lane BOARD-ID: label/IP/MAC and the fix
         self.telemetry = RemoteTelemetry(self)
         from .display import RemoteDisplay
@@ -326,8 +329,10 @@ class RemoteEngine:
                     phase = str(ev.data.get("phase", ""))
                     if not delivered or delivered[-1] != phase:
                         delivered.append(phase)
-                    progress(phase, int(ev.data.get("done", 0) or 0),
-                             int(ev.data.get("total", 0) or 0))
+                    # with its detail (SLOT-TIMING's text, FIX-PACK-6's estimated) when the
+                    # callable takes it, as the in-process service calls it
+                    report_progress(progress, phase, int(ev.data.get("done", 0) or 0),
+                                    int(ev.data.get("total", 0) or 0), detail_of(ev.data))
                 elif ev.topic in ("job.done", "job.failed"):
                     finished = True
             seen = len(events)
@@ -1177,6 +1182,116 @@ class RemoteXvc:
             refresh: bool = False) -> dict[str, Any]:
         payload = self._engine._http.get(self._path(session, f"/ltx?which={q(which)}&format=json"))
         return {k: v for k, v in payload.items() if k not in ("ok", "board_id")}
+
+
+class RemoteSlots:
+    """``services.slots.SlotService`` over the API (FIX-PACK-6 item 1): the CLI's ``slot`` and
+    ``card`` changes go through the service that holds the board, as ``program``, ``restore``
+    and ``mcc reboot`` do. H1 Z1: ``card clear`` ran in-process and the service's board lock
+    refused it ("in use — held by … harness-manager-daemon").
+
+    The reads (``slots``, ``card``, ``status``, ``card_status``) are the session's proxies
+    (``_OsSlots``/``_Card``); each change is the daemon's job (card_api.py), which checks the
+    lease and the card itself, so ``confirm: true`` is sent only after the CLI asked. The
+    results have the in-process service's shapes."""
+
+    def __init__(self, engine: RemoteEngine) -> None:
+        from harness_manager.services.slots import SlotService
+
+        self._engine = engine
+        self._reads = SlotService()
+
+    def _path(self, session: BoardSession, leaf: str) -> str:
+        return f"/boards/{q(_bid(session))}/{leaf}"
+
+    @staticmethod
+    def _status(doc: Any) -> Any:
+        from harness_manager.services.slots import slot_status_from_json
+
+        return slot_status_from_json(doc or {})
+
+    @staticmethod
+    def _changed(session: BoardSession) -> None:
+        """After a change, the proxies' kept answer (``_Reads.VIEW_S``) is stale."""
+        for name in ("os_slots", "card"):
+            proxy = getattr(session, name, None)
+            if isinstance(proxy, _Reads):
+                proxy._view = None
+
+    def _job(self, session: BoardSession, leaf: str, body: dict[str, Any],
+             progress: Progress | None = None) -> dict[str, Any]:
+        try:
+            out = self._engine.run_job(self._path(session, leaf), body, progress=progress)
+        finally:
+            self._changed(session)
+        return out if isinstance(out, dict) else {}
+
+    # -- reads (the session's proxies) ----------------------------------------------------------
+
+    def slots(self, session: BoardSession) -> Any:
+        return self._reads.slots(session)
+
+    def card(self, session: BoardSession) -> Any:
+        return self._reads.card(session)
+
+    def status(self, session: BoardSession) -> Any:
+        return self._reads.status(session)
+
+    def card_status(self, session: BoardSession) -> CardStatus:
+        return self._reads.card_status(session)
+
+    # -- the changes (daemon jobs) ----------------------------------------------------------------
+
+    def push(self, session: BoardSession, source: Any, *, rollback_first: bool = False,
+             progress: Progress | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {"confirm": True, "image": _absolute(source.image),
+                                "static_id": source.static_id, "version": source.version,
+                                "rollback_first": bool(rollback_first)}
+        bundle = getattr(source, "bundle", None)
+        if bundle:
+            body["bundle"] = _absolute(bundle)
+        out = self._job(session, "slots/push", body, progress)
+        return {"act": "push", "slot": out.get("slot", ""),
+                "rolled_back_first": out.get("rolled_back_first", ""),
+                "status": self._status(out.get("slots"))}
+
+    def commit(self, session: BoardSession, slot: str | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {"confirm": True}
+        if slot:
+            body["slot"] = slot
+        out = self._job(session, "slots/commit", body)
+        return {"act": "commit", "slot": out.get("slot", ""), "note": out.get("note", ""),
+                "status": self._status(out.get("slots"))}
+
+    def verify(self, session: BoardSession, slot: str | None = None,
+               progress: Progress | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {"slot": slot} if slot else {}
+        out = self._job(session, "slots/verify", body, progress)
+        return {"act": "verify", "slot": out.get("slot", ""),
+                "status": self._status(out.get("slots"))}
+
+    def rollback(self, session: BoardSession, *, reboot: bool = True, wait_s: float = 180.0,
+                 progress: Progress | None = None) -> dict[str, Any]:
+        out = self._job(session, "slots/rollback",
+                        {"confirm": True, "reboot": bool(reboot), "wait_s": wait_s}, progress)
+        result: dict[str, Any] = {"act": "rollback", "slot": out.get("slot", ""),
+                                  "rebooted": bool(out.get("rebooted")),
+                                  "note": out.get("note", ""),
+                                  "status": self._status(out.get("slots"))}
+        if "evidence" in out:
+            result["evidence"] = out["evidence"]
+        return result
+
+    def card_commit(self, session: BoardSession,
+                    progress: Progress | None = None) -> dict[str, Any]:
+        out = self._job(session, "card/commit", {"confirm": True}, progress)
+        return dict(out.get("committed") or {})
+
+    def card_clear(self, session: BoardSession) -> CardStatus:
+        from harness_manager.services.slots import card_status_from_json
+
+        out = self._job(session, "card/clear", {"confirm": True})
+        return card_status_from_json(out.get("card") or {"store": False})
 
 
 class RemoteClaim:

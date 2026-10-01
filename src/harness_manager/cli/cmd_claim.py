@@ -104,8 +104,9 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     sp.add_argument("--print", dest="print_only", action="store_true",
                     help="print the ssh command line, do not run it")
     sp.add_argument("-c", "--command", default="", metavar="CMD",
-                    help="run this on the board instead of a shell "
-                         "(board ssh TARGET -c 'ls -l /persist')")
+                    help="run this on the board instead of a shell, as ONE command line for "
+                         "the board's shell, the way `ssh host 'CMD'` sends it (board ssh "
+                         "TARGET -c 'uptime; logread | grep harnessd')")
     from . import cmd_identity  # BOARD-ID: label/IP/MAC and the fix
 
     cmd_identity.add_parser(sub, [fmt, board])
@@ -237,12 +238,32 @@ def _claim_status(ctx: Ctx) -> int:
     return ExitCode.OK
 
 
+def remote_command(command: str) -> list[str]:
+    """``-c CMD`` as ssh's command: ONE argument, the whole line, as ``ssh host 'CMD'`` sends
+    it (FIX-PACK-6, H1). ssh joins its command arguments with spaces and the board's shell
+    parses the result, so a line split into words here lost its quoting there:
+    ``-c "logread | grep -E 'a|b'"`` reached the board as ``logread | grep -E a|b``. One
+    argument reaches the board's shell exactly as typed, on POSIX and on Windows (where
+    ``subprocess`` quotes it back into one argument of ssh.exe's command line)."""
+    return [command] if command else []
+
+
+def command_line(argv: list[str]) -> str:
+    """``argv`` as one line for this host's shell (``cmd.exe`` rules on Windows)."""
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+
+
+def run_ssh(argv: list[str]) -> int:
+    """Run ssh in the foreground (a seam: tests record the argv instead)."""
+    return subprocess.call(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+
+
 def _ssh(ctx: Ctx) -> int:
     a = ctx.args
-    command = shlex.split(a.command) if a.command else []
+    command = remote_command(a.command)
     with ctx.board(note="board ssh") as (cand, session):
         argv = _service(ctx).ssh_argv(session, command, tty=not command and not a.print_only)
-        text = shlex.join(argv)
+        text = command_line(argv)
         if a.print_only:
             ctx.emit(Result("board ssh", {"board_id": cand.board_id, "argv": argv},
                             rows=[[cand.board_id, text]], human=[text]))
@@ -251,5 +272,5 @@ def _ssh(ctx: Ctx) -> int:
             raise UsageError("board ssh runs an interactive ssh; --json/--tsv go with --print")
         ctx.note(f"ssh: {text}")
         # The board stays open (its hub tunnel and lock) for as long as ssh runs.
-        rc = subprocess.call(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+        rc = run_ssh(argv)
     return ExitCode.OK if rc == 0 else ExitCode.ACTION_FAILED

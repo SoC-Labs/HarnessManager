@@ -659,15 +659,18 @@ def test_the_remote_slot_proxy_reads_once_and_leaves_the_reset_guard_to_the_serv
         assert st.running == "A" and not hasattr(session.os_slots, "push")
 
 
-def test_card_changes_still_run_in_process():
+def test_card_and_slot_changes_go_through_a_running_service_too():
+    # FIX-PACK-6 item 1 (H1 Z1): the changes are the service's jobs when one runs, as program
+    # and mcc reboot are; without one they run in this process (the engine factory decides).
     from harness_manager.cli.engine import wants_daemon
 
     ns = SimpleNamespace
     assert wants_daemon(ns(cmd="card", card_cmd="status"))
     assert wants_daemon(ns(cmd="slot", slot_cmd="status"))
-    assert not wants_daemon(ns(cmd="card", card_cmd="commit"))
-    assert not wants_daemon(ns(cmd="slot", slot_cmd="push"))
+    assert wants_daemon(ns(cmd="card", card_cmd="commit"))
+    assert wants_daemon(ns(cmd="slot", slot_cmd="push"))
     assert not wants_daemon(ns(cmd="update"))
+    assert not wants_daemon(ns(cmd="attach"))
 
 
 # --- 8. item 4b: --overlay-dir while the service holds the board ------------------------------------
