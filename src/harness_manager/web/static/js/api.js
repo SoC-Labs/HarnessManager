@@ -528,36 +528,8 @@ export class EventSocket {
   }
 }
 
-// --- ui2 build --- (lane UI2-BUILD) The Import dialog's "Choose a zip": POST /overlays/upload
-// takes the zip's bytes as the body (send() JSON-encodes every body), and `name`, `board_id`,
-// `static_id`, `check_only` in the query. The answer and its failures are call()'s.
-export async function callUpload(name, params = {}, bytes = null, query = null,
-  type = "application/zip") {
-  const url = endpointUrl(name, params);
-  for (const [k, v] of Object.entries(query || {})) {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-  }
-  const headers = { Accept: "application/json", "Content-Type": type };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  let res;
-  try {
-    res = await fetch(url, { method: ENDPOINTS[name][0], headers, body: bytes, cache: "no-store" });
-  } catch (e) {
-    setConnection("down");
-    throw new ApiError({
-      name: "NO_ANSWER",
-      message: "harness-manager-daemon did not answer",
-      hint: "check it is running: harness-manager daemon status",
-    }, 0, true);
-  }
-  let data = null;
-  try { data = await res.json(); } catch (e) { data = null; }
-  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
-  setConnection("ok");
-  return { data, status: res.status };
-}
-// --- end ui2 build ---
 // --- bringup-usb ---
+// (Above UI2-BUILD's block: test_kit_ui_build_static keeps that one last in the file.)
 // BRINGUP-USB: the bring-up routes (docs/API.md "Bring-up over the Debug USB", bringup_api.py)
 // and the card-reader routes of lane SD-FLASH it calls (cardwriter_api.py; a 404 means that
 // lane is not in this build). Helpers only: ENDPOINTS is the integrator's table (CCR BRINGUP-1
@@ -607,3 +579,32 @@ export function bringupMissing(err) {
   return !!err && err.status === 404 && (/no such endpoint/.test(err.message) || err.errName === "HTTP_404");
 }
 // --- end bringup-usb ---
+// --- ui2 build --- (lane UI2-BUILD) The Import dialog's "Choose a zip": POST /overlays/upload
+// takes the zip's bytes as the body (send() JSON-encodes every body), and `name`, `board_id`,
+// `static_id`, `check_only` in the query. The answer and its failures are call()'s.
+export async function callUpload(name, params = {}, bytes = null, query = null,
+  type = "application/zip") {
+  const url = endpointUrl(name, params);
+  for (const [k, v] of Object.entries(query || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers = { Accept: "application/json", "Content-Type": type };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(url, { method: ENDPOINTS[name][0], headers, body: bytes, cache: "no-store" });
+  } catch (e) {
+    setConnection("down");
+    throw new ApiError({
+      name: "NO_ANSWER",
+      message: "harness-manager-daemon did not answer",
+      hint: "check it is running: harness-manager daemon status",
+    }, 0, true);
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
+  return { data, status: res.status };
+}
+// --- end ui2 build ---
