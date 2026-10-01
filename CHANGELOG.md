@@ -841,3 +841,34 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
 - Windows and macOS run the unit tests and the installer in CI; they have not been used
   with a real board. `install.ps1` does not yet use `constraints.txt`, the wheelhouse or
   a Start-menu entry.
+
+<!-- --- bringup-usb --- -->
+### Bring up a new board from this PC, over its Debug USB (BRINGUP-USB)
+- **Add a board > Over USB (a new board plugged into this PC).** Scan lists every MPS3 Debug
+  USB this PC sees: its MCC serial port and what the MCC answers, its `V2M-MPS3` drive and
+  what that holds (the board revision, the `.bit` its `board.txt` loads), and whether a
+  harness already answers on Ethernet at 192.168.10.101. "Add and bring up" opens it over
+  USB only (no hub, no lease) and starts the bring-up. Nothing found says what to check (the
+  cable, the power, the drive mounted); a drive without its serial port, or a port without
+  its drive, says what you lose.
+- **The bring-up** (a dialog; closing it keeps every step, and Board > Versions' "Bring up…"
+  reopens it): 1 the source: a bundle folder or zip on this PC, checked before anything is
+  written (the base `.bit` with its size, sha256, part and USERID; refused for an `.ebf`, an
+  MCC command file, a file outside `config.txt` and `MB/`, or no bitstream), or a signed
+  release (refused, in the trust store's words, until SoC Labs publishes its keys); 2 the
+  backup (mandatory); 3 the write: over the Debug USB (default; "A USB write can take 5
+  minutes: do not unplug, power off or start a second write."), or the SD card in this PC's
+  card reader (`bringup.sd_flash`; disabled with the reason while it is off or the card-reader
+  writer is not in this build); 4 the MCC reboot, then a wait for the harness at its
+  address, with Restore the backup offered if nothing answers; 5 for a Linux harness that
+  comes up in stage0 RESCUE: the user microSD, written in this PC's card reader with a
+  whole-card image, or skipped (over the network from rescue comes with Linux v2.1); 6 open
+  it on Ethernet and go to Board > Access (claim, identity). Every write is armed, needs the
+  backup, and runs one at a time.
+- **A release bundle's open overlays** (`overlays/open`) join `mps3.overlay_dirs` once its
+  configuration SD is written, so Program and Restore find them.
+- **API:** `GET /bringup`, `POST /bringup/scan`, `POST /bringup/bundle`,
+  `POST /boards/{bid}/bringup/install`, `POST /boards/{bid}/bringup/witness` (docs/API.md
+  "Bring-up over the Debug USB"). The demo (`app --demo`) has a new board on the Debug USB to
+  bring up, with its bundles.
+<!-- --- end bringup-usb --- -->
