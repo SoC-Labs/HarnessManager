@@ -85,6 +85,11 @@ Traps handled
 - **A swap invalidates the DAP.** ``deploy.started`` closes the session
   (synchronously, before the swap proceeds); ``deploy.done`` with
   ``verified: true`` reopens it on the same ports, in a worker thread.
+- **DEBUG-DOWN-FIRST** (FIX-PACK-7): ``DeployService`` calls ``down_first`` before it
+  publishes ``deploy.started``: the board's OpenOCD is asked down whoever started it, and a
+  failed down refuses the deploy (``services/debug_onboard.py``). An on-board session of
+  this service's is closed there ("closed for the swap") and reopened after a verified
+  swap, as before; ``deploy.started`` then asks the board nothing more (one down).
 - **OpenOCD on the board** (DEBUG-ONBOARD, ``services/debug_onboard.py``): on a claimed
   Linux board with the launcher (``mps3-debug``), ``up``/``down``/``status``/``detect`` run
   OpenOCD ON the board over the claim's SSH and forward its gdb ports (the setting
@@ -135,7 +140,7 @@ from harness_manager.core.events import Event, EventBus
 from harness_manager.core.pack import BoardSession, DebugAdapter
 from harness_manager.core.services import DebugStatus
 from harness_manager.services import openocd_probe
-from harness_manager.services.debug_onboard import OnBoard
+from harness_manager.services.debug_onboard import DownFirst, OnBoard
 from harness_manager.services.debug_onboard import mode as on_board_mode
 from harness_manager.services.openocd_probe import REMOTE_BITBANG
 
@@ -576,6 +581,9 @@ class DebugService:
         self.onboard = OnBoard(self)
         # ports None: an on-board session (its route is chosen again on the reopen)
         self._resume: dict[str, tuple[BoardSession | None, DebugPorts | None]] = {}
+        # DEBUG-DOWN-FIRST: boards whose OpenOCD down_first asked down for the deploy about to
+        # start, with the on-board session of ours it closed (None: none) for deploy.started
+        self._cleared: dict[str, BoardSession | None] = {}
         self._locks: dict[str, threading.RLock] = {}
         self._guard = threading.Lock()
         self._reserved: set[int] = set()
@@ -1195,15 +1203,35 @@ class DebugService:
 
     # -- swap awareness ---------------------------------------------------------------------
 
+    def down_first(self, session: BoardSession, *, force: bool = False) -> DownFirst:
+        """DEBUG-DOWN-FIRST: ``DeployService`` asks this before ``deploy.started``. The board's
+        OpenOCD (a claimed Linux board's, through the pack's on-board route) is asked down
+        whoever started it; a failed down raises the refusal (15) unless ``force`` or the
+        board's harnessd lock (``debug_onboard.LOCK_CAPABILITY``) lets it go on with a
+        warning. A board with no READY route is not asked (``DownFirst().asked`` False)."""
+        board_id = session.candidate.board_id
+        with self._board_lock(board_id):
+            got, ours = self.onboard.down_first(session, force=force)
+            if got.asked:
+                self._cleared[board_id] = ours
+        return got
+
     def _on_deploy_started(self, event: Event) -> None:
         board_id = event.board_id
         with self._board_lock(board_id):
-            # DEBUG-ONBOARD: the board's own OpenOCD stops first ("closed for the swap"),
-            # and a session of ours reopens after a verified swap, as below.
-            board_session = self.onboard.before_swap(board_id)
-            if board_session is not None:
-                self._resume[board_id] = (board_session, None)
-                return
+            if board_id in self._cleared:
+                # DEBUG-DOWN-FIRST asked the board already (one down): only the reopen is left
+                ours = self._cleared.pop(board_id)
+                if ours is not None:
+                    self._resume[board_id] = (ours, None)
+                    return
+            else:
+                # DEBUG-ONBOARD: the board's own OpenOCD stops first ("closed for the swap"),
+                # and a session of ours reopens after a verified swap, as below.
+                board_session = self.onboard.before_swap(board_id)
+                if board_session is not None:
+                    self._resume[board_id] = (board_session, None)
+                    return
             live = self._live_get(board_id)
             if live is None or live.proc.poll() is not None:
                 return
@@ -1215,11 +1243,13 @@ class DebugService:
         board_id = event.board_id
         with self._board_lock(board_id):
             pending = self._resume.pop(board_id, None)
+            self._cleared.pop(board_id, None)
         if pending is None:
             return
+        where = {"where": "board"} if pending[1] is None else {}     # an on-board session
         if not event.data.get("verified"):
             self._publish(board_id, "down",
-                          detail="not reopened: the swap was not verified by the board")
+                          detail="not reopened: the swap was not verified by the board", **where)
             return
         session, ports = pending
         if session is None and self.engine is not None:
@@ -1228,7 +1258,8 @@ class DebugService:
             except HarnessError:
                 session = None
         if session is None:
-            self._publish(board_id, "down", detail="not reopened: the board session is gone")
+            self._publish(board_id, "down", detail="not reopened: the board session is gone",
+                          **where)
             return
         worker = threading.Thread(target=self._reopen, args=(session, ports), daemon=True,
                                   name=f"debug-reopen-{board_id}")
@@ -1247,12 +1278,17 @@ class DebugService:
         # was closed, so there is nothing pending and nothing to say.
         with self._board_lock(event.board_id):
             pending = self._resume.pop(event.board_id, None)
+            closed = self._cleared.pop(event.board_id, None)    # DEBUG-DOWN-FIRST, no start
+        if pending is None and closed is not None:
+            pending = (closed, None)
         if pending is not None:
             stage = event.data.get("stage") or "an unknown stage"
             reason = event.data.get("reason", "")
+            where = {"where": "board"} if pending[1] is None else {}
             self._publish(event.board_id, "down",
                           detail=f"not reopened: the swap failed at {stage}"
-                                 f"{f' ({reason})' if reason else ''}; check what is loaded")
+                                 f"{f' ({reason})' if reason else ''}; check what is loaded",
+                          **where)
 
     # -- shutdown ---------------------------------------------------------------------------
 
