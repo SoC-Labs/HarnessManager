@@ -590,6 +590,7 @@ function WriteStep({ bid, w, ready }) {
     <${Seg} label="Write method" value=${w.method} onChange=${(v) => { w.method = v; if (v === "reader" && !G.reader) loadReader(); changed(); }}
       options=${[{ value: "usb", label: "Over the Debug USB (the V2M-MPS3 drive)", icon: "usb" },
         { value: "reader", label: "SD card in this PC's card reader", icon: "memory-stick", title: reader.ok ? "" : reader.why }]} />
+    ${usb && !reader.ok ? html`<p class="small muted mt-8" data-testid="bu-reader-off-note"><${Icon} name="circle-slash" cls="sm" /> SD card in this PC's card reader: ${reader.why}.</p>` : null}
     ${usb ? html`<div class="stack gap-8 mt-8">
       <div class="outcome warn bu-warn" data-testid="bu-usb-warning"><${Icon} name="triangle-alert" /><span><b>${st.usb_write_warning || USB_WARNING}</b></span></div>
       <${ArmBox} bid=${bid} armKey="bu_write" testid="arm-bu-write"

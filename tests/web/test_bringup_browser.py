@@ -279,6 +279,7 @@ def test_twin_after_the_backup_the_usb_write_runs_with_the_slow_write_warning(de
 def test_the_card_reader_is_disabled_with_the_reason_while_the_switch_is_off(demo):
     page = demo.page()
     add_and_open(page)
+    expect(by(page, "bu-reader-off-note")).to_contain_text("bringup.sd_flash", timeout=T)
     page.get_by_role("button", name="SD card in this PC's card reader").click()
     expect(by(page, "bu-reader-disabled")).to_contain_text("bringup.sd_flash", timeout=T)
     expect(by(page, "bu-reader-disabled")).to_contain_text("HARNESS_MANAGER_BRINGUP_SD_FLASH=on")
@@ -422,6 +423,7 @@ def test_the_reader_door_writes_the_files_then_asks_for_the_card_back_no_mcc_reb
     add_and_open(page)
     check(page, demo.example(0))
     back_up(page)
+    expect(by(page, "bu-reader-off-note")).to_have_count(0)       # the twin: the door is open
     page.get_by_role("button", name="SD card in this PC's card reader").click()
     expect(by(page, "bu-reader-disabled")).to_have_count(0, timeout=T)
     phrase = f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}"
