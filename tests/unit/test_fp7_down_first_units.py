@@ -133,6 +133,19 @@ def test_no_launcher_127_goes_on_unchanged(seen):
     assert OB.ask_down(route).no_launcher and "deploy.warning" not in topics(seen.events)
 
 
+def test_no_openocd_in_the_image_12_goes_on(seen):
+    """Exit 12 (no OpenOCD in the image): none can be running on the board, so like 127."""
+    route = Route(down=(12, {"state": "failed", "error": {"code": "no_openocd",
+                                                          "message": "openocd is not in this "
+                                                                     "image"}}))
+    board, result = deploy(seen, route)
+    assert result.verified and board.deploy.deployed == ["nanosoc"]
+    assert route.calls == ["down"]                        # no lock asked: nothing failed
+    got = OB.ask_down(route)
+    assert got.ok and got.no_openocd and got.word == "no OpenOCD in the image"
+    assert "deploy.warning" not in topics(seen.events)
+
+
 def test_twin_another_exit_refuses_15(seen):
     route = Route(down=(6, {"state": "failed", "error": {"code": "openocd_exit",
                                                          "message": "kill failed"}}))
@@ -285,3 +298,64 @@ def test_twin_an_unavailable_debug_service_falls_back_to_the_route(seen):
     route = Route()
     DeployService(engine).deploy(Board(route), NANOSOC)
     assert route.calls == ["down"]
+
+
+# --- the MPS3 route reuses the impl the deploy's preflight just read ------------------------------
+
+
+class _Claim:
+    def __init__(self) -> None:
+        self.asked: list[str | None] = []
+
+    def lock_plan(self, *, impl=None, claimed=None):
+        from harness_manager_mps3.claim import ROUTE_BOARD_SSH
+
+        self.asked.append(impl)
+        return ROUTE_BOARD_SSH, ""
+
+
+def _mps3_session(recent: Any) -> SimpleNamespace:
+    reads: list[int] = []
+
+    def identity():
+        reads.append(1)
+        return SimpleNamespace(harness_impl="linux")
+
+    return SimpleNamespace(claim=_Claim(), deploy=SimpleNamespace(recent_impl=recent),
+                           identity=identity, reads=reads)
+
+
+def test_the_mps3_plan_reuses_the_impl_the_preflight_read():
+    from harness_manager_mps3.openocd import Mps3OnBoard
+
+    session = _mps3_session(lambda: "linux")
+    assert Mps3OnBoard(session).plan() == ("ready", None)
+    assert session.reads == [] and session.claim.asked == ["linux"]
+
+
+def test_twin_with_no_recent_impl_the_plan_reads_the_identity():
+    from harness_manager_mps3.openocd import Mps3OnBoard
+
+    for recent in (lambda: None, None, lambda: 1 / 0):       # stale; no adapter hook; broken
+        session = _mps3_session(recent)
+        assert Mps3OnBoard(session).plan() == ("ready", None)
+        assert session.reads == [1]
+
+
+def test_the_deploy_adapter_remembers_the_impl_its_version_read_for_a_while(monkeypatch):
+    from harness_manager_mps3 import deploy as D
+
+    def live(ok: bool, impl: str) -> SimpleNamespace:
+        return SimpleNamespace(shell_id="0x44ee76d5", rm_id="0x01000001", version_ok=ok,
+                               features=(), impl=impl, clr_max=262144)
+
+    shell = SimpleNamespace(live=lambda: live(True, "linux"))
+    adapter = D.Mps3Deploy(shell)
+    assert adapter.recent_impl() is None                      # nothing read yet
+    adapter._live()
+    assert adapter.recent_impl() == "linux"
+    assert adapter.recent_impl(max_age_s=-1) is None          # too old: read it again
+    # twin: a version that did not answer leaves the impl unknown (the plan reads identity)
+    quiet = D.Mps3Deploy(SimpleNamespace(live=lambda: live(False, "")))
+    quiet._live()
+    assert quiet.recent_impl() is None

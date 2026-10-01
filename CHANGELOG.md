@@ -38,7 +38,8 @@ owners.
   baseline, Build's Add then Program) on a claimed Linux board this HM can enter, HM runs
   `mps3-debug down --json` over the claim's SSH first, whoever started that OpenOCD (another
   terminal, a restarted service, `mps3-debug up` by hand) and whatever `debug.on_board` says.
-  Down (or already down) goes on; no launcher (exit 127) goes on. Anything else (the SSH did
+  Down (or already down) goes on; no launcher (exit 127) or no OpenOCD in the image (exit
+  12) goes on. Anything else (the SSH did
   not answer, another exit, an answer HM cannot read) refuses the program with exit 15
   before anything touches the board: "`mps3-debug down` failed before the swap (…): OpenOCD
   on the board may still drive JTAG, so nothing was programmed", hint "retry, or add --force

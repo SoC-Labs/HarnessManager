@@ -60,7 +60,8 @@ the board's OpenOCD and whatever ``debug.on_board`` says (``down_first``):
 
 - exit 0 and ``state: down`` (``already`` or not): go on. HM's own session, if any, is closed
   for the swap and reopens after a verified swap (``services/debug.py``), with no second down;
-- exit 127 (no launcher on the board): go on, unchanged;
+- exit 127 (no launcher on the board) or 12 (no OpenOCD in the image): go on, unchanged (no
+  OpenOCD on the board can be running);
 - anything else (the SSH did not answer or timed out, another exit, no ``mps3-debug/1``
   answer): ``RefusedError`` (15) naming ``<launcher> down`` and why, hint ``DOWN_FIRST_HINT``,
   before anything touches the board. ``force`` (``--force``, ``force: true``) goes on with a
@@ -361,7 +362,7 @@ class DownFirst:
 
     ``asked``: the board had a READY route, so the launcher was asked. ``ok``: it answered
     down (``already``: it was not running), or it is not installed (``no_launcher``, exit 127),
-    or nothing was asked. Not ``ok``: ``why`` says what failed; the swap went on only
+    or the image has no OpenOCD (``no_openocd``, exit 12), or nothing was asked. Not ``ok``: ``why`` says what failed; the swap went on only
     ``forced`` (``--force``) or because the board has harnessd's ``lock``."""
 
     asked: bool = False
@@ -370,6 +371,7 @@ class DownFirst:
     why: str = ""
     already: bool = False
     no_launcher: bool = False
+    no_openocd: bool = False
     forced: bool = False
     lock: bool = False
 
@@ -380,7 +382,9 @@ class DownFirst:
             return ""
         if not self.ok:
             return "forced" if self.forced else "lock" if self.lock else "failed"
-        return "no launcher" if self.no_launcher else "already down" if self.already else "down"
+        if self.no_launcher or self.no_openocd:
+            return "no launcher" if self.no_launcher else "no OpenOCD in the image"
+        return "already down" if self.already else "down"
 
     @property
     def warning(self) -> str:
@@ -423,7 +427,8 @@ def ready_route(session: Any) -> Any:
 
 def ask_down(rt: Any) -> DownFirst:
     """``<launcher> down --json`` on the board, read strictly (DEBUG-DOWN-FIRST): ok only for
-    exit 0 with ``state: down``, or exit 127 (no launcher). Never raises."""
+    exit 0 with ``state: down``, exit 127 (no launcher) or exit 12 (no OpenOCD in the image:
+    none can be running). Never raises."""
     launcher = getattr(rt, "launcher", "") or "the launcher"
     try:
         res = rt.run("down", timeout=DOWN_TIMEOUT_S)
@@ -437,6 +442,8 @@ def ask_down(rt: Any) -> DownFirst:
     rc = res.returncode
     if rc == RC_NO_LAUNCHER:
         return DownFirst(asked=True, ok=True, launcher=launcher, no_launcher=True)
+    if rc == RC_NO_OPENOCD:
+        return DownFirst(asked=True, ok=True, launcher=launcher, no_openocd=True)
     reply = parse_reply(getattr(res, "stdout", ""))
     said = ""
     if reply is not None:

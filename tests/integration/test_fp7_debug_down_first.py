@@ -30,10 +30,12 @@ from harness_manager.services.debug import DebugService
 from harness_manager.services.deploy import ITEM_FILES, DeployService
 from tests.integration import test_debug_onboard as _onboard
 from tests.integration import test_demo_showcase as _showcase
+from tests.integration import test_t2_deploy_virtual as _virtual
 
 # the fixtures: DEBUG-ONBOARD's lab (the real pack, claimed, the launcher behind the claim's
 # ssh), its DebugService and bus; the showcase demo over the real daemon app (``api``)
 lab, debug, bus, stub = _onboard.lab, _onboard.debug, _onboard.bus, _onboard.stub
+overlay_root = _virtual.overlay_root
 api = _showcase.showcase
 on_board = _onboard.on_board
 
@@ -148,6 +150,25 @@ def test_no_launcher_127_goes_on(lab, debug, bus):
     assert deploys(bus, debug).deploy(board, UPY).verified
     assert rig.launcher.words() == ["down"]
     assert "deploy.warning" not in [e.topic for e in events]
+
+
+def test_no_openocd_in_the_image_12_goes_on(lab, debug, bus):
+    rig = lab()
+    rig.launcher.fail_down = (12, "openocd is not in this image")
+    board = Swapping(rig)
+    events = heard(bus, "deploy.*")
+    assert deploys(bus, debug).deploy(board, UPY).verified
+    assert rig.launcher.words() == ["down"]                    # nothing failed: no lock asked
+    assert "deploy.warning" not in [e.topic for e in events]
+
+
+def test_twin_exit_6_still_refuses_15(lab, debug, bus):
+    rig = lab()
+    rig.launcher.fail_down = (6, "openocd did not stop")
+    board = Swapping(rig)
+    with pytest.raises(RefusedError, match="exit 6, openocd_exit: openocd did not stop"):
+        deploys(bus, debug).deploy(board, UPY)
+    assert board.deploy.met == []
 
 
 def test_twin_a_malformed_down_refuses_15(lab, debug, bus):
@@ -387,3 +408,45 @@ def test_twin_api_force_with_a_wrong_consent_is_still_g7s_typed_phrase_refusal(a
     err = api.get(f"{api.b(BOARD_LEASED)}/restore", method="POST", status=409,
                   json={"force": True, "consent": "yes"})["error"]
     assert err["name"] == "REFUSED" and f"RESET {BOARD_LEASED}" in err["hint"]
+
+
+# --- one identity read: the down-first reuses the preflight's (the real MPS3 deploy adapter) ----------
+
+
+def _identity_reads_before_the_start(session, bus: EventBus) -> list[int]:
+    """How many identity reads the session had made when ``deploy.started`` was published."""
+    reads = {"n": 0}
+    at_start: list[int] = []
+    real = session.identity
+
+    def counted():
+        reads["n"] += 1
+        return real()
+
+    session.identity = counted
+    bus.subscribe("deploy.started", lambda _e: at_start.append(reads["n"]))
+    return at_start
+
+
+def test_the_down_first_reads_no_second_identity(vboard, monkeypatch, overlay_root):
+    from tests.integration.test_t2_deploy_virtual import open_session, ref_named
+
+    session = open_session(vboard, monkeypatch)
+    bus = EventBus()
+    at_start = _identity_reads_before_the_start(session, bus)
+    svc = deploys(bus)
+    assert svc.deploy(session, ref_named(svc.overlays(session), "synth")).verified
+    assert at_start == [0]                    # the plan reused the preflight's version.impl
+
+
+def test_twin_without_the_preflights_impl_the_plan_reads_the_identity(vboard, monkeypatch,
+                                                                       overlay_root):
+    from tests.integration.test_t2_deploy_virtual import open_session, ref_named
+
+    session = open_session(vboard, monkeypatch)
+    monkeypatch.setattr(session.deploy, "recent_impl", lambda *a, **k: None)
+    bus = EventBus()
+    at_start = _identity_reads_before_the_start(session, bus)
+    svc = deploys(bus)
+    assert svc.deploy(session, ref_named(svc.overlays(session), "synth")).verified
+    assert at_start == [1]

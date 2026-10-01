@@ -311,10 +311,12 @@ class Mps3OnBoard:
         from .claim import LOCKED_HINT, ROUTE_BOARD_SSH, ROUTE_LOCKED, ClaimLockedError
 
         claim = self._claim()
-        try:
-            impl = str(getattr(self._session.identity(), "harness_impl", "") or "")
-        except HarnessError as exc:
-            return "none", exc
+        impl = self._recent_impl()
+        if impl is None:
+            try:
+                impl = str(getattr(self._session.identity(), "harness_impl", "") or "")
+            except HarnessError as exc:
+                return "none", exc
         if impl != IMPL_LINUX:
             return "none", UnavailableError(
                 "debug_dut", f"the {impl or 'bare-metal'} harness has no on-board OpenOCD "
@@ -334,6 +336,19 @@ class Mps3OnBoard:
         return "refused", RefusedError(
             f"{what}, and this Harness Manager holds no claim of it (no pinned host key here)",
             hint=LOCKED_HINT)
+
+    def _recent_impl(self) -> str | None:
+        """FIX-PACK-7: the harness's impl the session's deploy preflight read moments ago
+        (``Mps3Deploy.recent_impl``), so the down before a swap needs no second identity
+        read; None: read the identity."""
+        recent = getattr(getattr(self._session, "deploy", None), "recent_impl", None)
+        if not callable(recent):
+            return None
+        try:
+            got = recent()
+        except Exception:  # noqa: BLE001 - a hint only: the identity is read instead
+            return None
+        return got if isinstance(got, str) else None
 
     def run(self, verb: str, *, rm: str = "", timeout: float = 30.0) -> Any:
         """``mps3-debug VERB [--rm RM] --json`` on the board: the claim's argv (key only, the
