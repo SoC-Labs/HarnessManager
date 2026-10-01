@@ -412,7 +412,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     app.state.harness = register_harness(app, state, sim, _accepted)
     # --- ui2 api-hub: GET /hubs/{name}/leases and GET /identity/clashes, simulated. Before the
     # settings routes: those register the real hubs_api, whose route this one shadows here.
-    ui2_register(app, state, sim, _ok)
+    ui2_hub_register(app, state, sim, _ok)
     # --- end ui2 api-hub ---
     # SET-API's settings routes (docs/API.md "Settings"): the real routes over a real resolver
     # in a temporary directory of the mock's own (never the user's settings or keyring).
@@ -1263,7 +1263,7 @@ def ui2_console_writable(eng: Any, sim: Any, bid: str, name: str) -> tuple[bool,
     return bool(row["writable"]), str(row["read_only_reason"])
 
 
-def ui2_register(app: FastAPI, state: Any, sim: Any, ok: Any) -> None:
+def ui2_hub_register(app: FastAPI, state: Any, sim: Any, ok: Any) -> None:
     from harness_manager.daemon.identity_api import clash_groups
     from harness_manager.services import board_identity as BI
 
