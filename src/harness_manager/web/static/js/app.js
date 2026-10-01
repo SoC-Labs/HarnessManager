@@ -5,10 +5,10 @@
 // editing this file: navigate / openActivity / toast (store.js), registerModal / openModal
 // (modal.js), registerTab (route.js), boardState(bid).deploy (the mini bars).
 
-import { ApiError, call, hasToken, initToken } from "./api.js";
+import { call, hasToken, initToken } from "./api.js";
 import { closeBoardConsoles } from "./consoles.js";
 import {
-  boardName, boardTitle, checkLabel, clock, deployBar, hexId, liveTitle, healthOf, holderAge, holderText,
+  boardName, checkLabel, clock, deployBar, hexId, liveTitle, healthOf, holderText,
   nameSourceText, usbRoute,
 } from "./format.js";
 import { html, render, useEffect, useRef, useState } from "./lib.js";
@@ -20,20 +20,19 @@ import { WorkbenchSection } from "./sections/workbench.js";    // UI v2: Program
 import { ChecksBanner, ChecksSection, checksRun } from "./sections/checks.js";   // HIL-GUI
 import { HubFact } from "./hub.js";
 import { ActivityDrawer, LastProblemChip } from "./drawer.js";   // UI v2: Activity is a drawer
-import { ModalLayer, ModalShell, openModal, registerModal, ToastLayer } from "./modal.js";
-import { epochOf } from "./week.js";
+import { ModalLayer, openModal, ToastLayer } from "./modal.js";
 import { loadSettingValues } from "./prefs.js";          // FIX-PACK-4: the rows the page reads
 import { LeaseBanners, requestClose } from "./lease.js";
 import { registerTab, tabBody, tabsFor } from "./route.js";
-import { AddByAddress, BoardList, P as SIDEBAR, routeText, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX
+import { AddByAddress, BoardList, BoardPreview, P as SIDEBAR, ScanOffer, startSidebar } from "./sidebar.js";   // SIDEBAR-UX; UI v2 SHELL-2: the preview
 import {
-  boardState, changed, closeActivity, hubBoard, jobLabel, log, navigate, openActivity, openedBoard,
+  boardState, changed, closeActivity, hubBoard, jobLabel, log, navigate, openActivity,
   openedOrClosedHere, probe, refreshInfo, rereadBoard, S, sectionOf, select, start, subscribe, timed,
-  UI_NOTE, unseenErrors,
+  unseenErrors,
 } from "./store.js";
 import { applyTheme, initTheme } from "./theme.js";
 import { AppUpdateBanners, AppUpdateLayer, SettingsButton, startSelfUpdate } from "./selfupdate.js";   // UPDATE-UI
-import { CheckChip, Chip, Icon, LinkLine, MiniBar, Reason, Seg, Spinner, useReveal } from "./ui.js";
+import { CheckChip, Chip, Icon, MiniBar, Seg, Spinner, useReveal } from "./ui.js";
 
 // --- the tabs' bodies: today's sections until each Phase 2 lane registers its own -----------
 
@@ -105,8 +104,8 @@ function Rail() {
           ${errors ? html`<span class="foot-badge" data-testid="activity-badge"
             aria-label=${`${errors} new error${errors === 1 ? "" : "s"}`}>${errors}</span>` : null}</button>
         <${SettingsButton} />
-        <button type="button" class="btn ghost sm" data-action="help" onClick=${openHelp}
-          title="The command-line help, tab by tab"><${Icon} name="book-open" />Help</button>
+        <button type="button" class="btn ghost sm" data-action="help" onClick=${() => openModal("help")}
+          title="Help, by the app's pages (and the command line's topics)"><${Icon} name="book-open" />Help</button>
       </div>
       <${Seg} label="Theme" value=${S.theme} onChange=${(v) => { applyTheme(v); changed(); }}
         options=${[
@@ -312,106 +311,7 @@ function BoardHeader({ bid }) {
   </header>`;
 }
 
-// --- a board that is not open here: a preview and the Open button ----------------------------
-
-// FIX-PACK-4: the preview's "Lock" was the service's own board lock, and read "free" for a board
-// alice holds on the hub. It is named for what it is, and the hub lease has its own row.
-const LOCK_TITLE = "Harness Manager's own lock on this board: free unless another Harness Manager "
-  + "session or tool on this machine has it open. The hub lease is its own row.";
-
-// The hub lease as the service last knew it (GET /boards lease_known: no hub call; it is read
-// again when the board opens). A board the service never read shows "read when you open it"
-// when boards.toml puts it behind a hub, and no row otherwise.
-function PreviewLease({ row }) {
-  const k = row.lease_known;
-  const conf = row.configured || {};
-  if (!k) {
-    if (!conf.hub && conf.via !== "hub") return null;
-    return html`<dt>Hub lease</dt><dd data-testid="preview-lease" data-lease="unread">
-      <span class="muted">not read yet: read when you open the board</span></dd>`;
-  }
-  const at = epochOf(k.confirmed_at);
-  const name = k.board || k.target || "the board";
-  const title = `What this Harness Manager last read of the lease on ${name} (${k.hub || "the hub"})`
-    + `${at === null ? "" : ` at ${clock(at)}`}; it is read again when you open the board.`;
-  const state = k.state === "free" ? "free" : k.here ? "here" : k.mine ? "elsewhere" : "other";
-  const chip = state === "free" ? html`<${Chip} icon="lock-open" title=${title}>free<//>`
-    : state === "here" ? html`<${Chip} level="ok" icon="user" title=${title}>yours<//>`
-    : html`<${Chip} level="held" icon="lock" title=${title}>held by ${k.holder || "someone else"}${state === "elsewhere" ? " (another session)" : ""}<//>`;
-  return html`<dt>Hub lease</dt><dd data-testid="preview-lease" data-lease=${state}>${chip}
-    ${at !== null ? html` <span class="muted small" data-testid="preview-lease-at">as of ${clock(at)}</span>` : null}</dd>`;
-}
-
-function BoardPreview({ bid }) {
-  const row = S.boards[bid] || {};
-  const cand = row.candidate || {};
-  const ident = cand.identity || null;
-  const [state, setState] = useState({ busy: false, line: "", error: null, t0: 0 });
-  const open = async () => {
-    setState({ busy: true, line: "", error: null, t0: Date.now() });
-    const r = await timed(`open ${bid}`, () => call("openBoard", {}, { candidate: cand, note: UI_NOTE }));
-    const already = r.error && r.error.errName === "ALREADY";   // open in this daemon: use it
-    log(r.error && !already ? "error" : "info", "session",
-      r.error ? `${r.line}  ${r.error.errName}: ${r.error.message}` : r.line, bid);
-    if (r.error && !already) {
-      if (r.error.holder) S.boards[bid] = { ...S.boards[bid], holder: { user: r.error.holder } };
-      setState({ busy: false, line: r.line, error: r.error, t0: 0 });
-      changed();
-      return;
-    }
-    openedOrClosedHere(bid, true);
-    const b = boardState(bid);
-    const d = r.data ? r.data.data : {};
-    if (d.info) {
-      b.info = d.info;
-      b.infoOkAt = Date.now() / 1000;
-    }
-    // The session is open even when the first read failed; the workspace says why.
-    if (!d.info && d.info_error) b.infoError = new ApiError(d.info_error, 200);
-    openedBoard(bid);
-    setState({ busy: false, line: r.line, error: null, t0: 0 });
-    changed();
-  };
-  const packTitle = S.packs[cand.pack] || cand.pack || "";
-  const held = row.holder;
-  const fromConfig = row.source === "config";       // SIDEBAR-UX: listed from boards.toml
-  return html`<div class="section-body"><div class="preview stack">
-    <section class="card" aria-label="Board">
-      <div class="card-head"><h2 class="card-title" data-testid="preview-name"><${Icon} name="server" />${cand.name
-        ? `${cand.name} · ${cand.label || boardTitle(cand, bid)}` : cand.label || boardTitle(cand, bid)}</h2></div>
-      <p class="card-sub">${packTitle}${fromConfig ? " · in boards.toml: not contacted until you open it"
-        : cand.evidence ? ` · found: ${cand.evidence}` : ""}</p>
-      <div class="card-body">
-        <dl class="kv">
-          <dt>Board id</dt><dd class="mono">${bid}</dd>
-          ${row.configured ? html`<dt>Route</dt><dd data-testid="preview-route">boards.toml <b>${row.configured.key}</b>: ${routeText(row.configured)}${row.configured.target ? html` <span class="mono sub">${row.configured.target}</span>` : null}</dd>` : null}
-          <dt>Links</dt><dd>${(cand.links || []).map((l) => html`<${LinkLine} key=${l.kind + l.address} link=${l} />`)}</dd>
-          <dt>Shell</dt><dd class="mono">${ident ? ident.shell_id || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
-          <dt>Design</dt><dd>${ident ? html`${ident.rm_name || "unknown"} <span class="mono sub">${ident.rm_id}</span>` : html`<span class="muted">read when opened</span>`}</dd>
-          <dt>Harness firmware</dt><dd>${ident ? ident.harness_version || "unknown" : html`<span class="muted">read when opened</span>`}</dd>
-          <dt>Build check</dt><dd>${ident ? html`<${CheckChip} check=${ident.build_check} testid="preview-build" />` : html`<span class="muted">read when opened</span>`}</dd>
-          <dt title=${LOCK_TITLE}>This app's lock</dt><dd data-testid="preview-lock">${held ? html`<${Chip} level="warn" icon="lock" title=${LOCK_TITLE}>held by ${holderText(held)}${held.since ? `, ${holderAge(held)}` : ""}<//>`
-            : html`<${Chip} icon="lock-open" title=${LOCK_TITLE}>free<//>`}</dd>
-          <${PreviewLease} row=${row} />
-        </dl>
-        <div class="open-row">
-          <button type="button" class="btn primary" data-action="open" onClick=${open}
-            aria-busy=${state.busy ? "true" : undefined}>
-            ${state.busy ? html`<${Spinner} /> Opening...` : html`<${Icon} name="lock" /> Open board`}</button>
-          <${Reason} text=${held
-            ? "Open asks the daemon anyway: it refuses a live lock and takes over a stale one."
-            : `Opening takes the board's lock for this daemon, so the CLI and this page share one session. ${boardName(cand, bid)} stays yours until you close it.`} />
-        </div>
-        ${state.line ? html`<div class="result mt-14" data-testid="open-result">
-          <div><span class=${`rc ${state.error ? "err" : "ok"}`}>${state.line}</span></div>
-          ${state.error ? html`<div><span class="errname">${state.error.errName}</span>  ${state.error.message}</div>
-            ${state.error.hint ? html`<div class="hint">hint: ${state.error.hint}</div>` : null}
-            <div class="hint">The board was not opened.</div>` : null}
-        </div>` : null}
-      </div>
-    </section>
-  </div></div>`;
-}
+// --- a board that is not open here: sidebar.js BoardPreview (UI v2 SHELL-2) ------------------------
 
 // --- banners ------------------------------------------------------------------------------------
 
@@ -454,34 +354,6 @@ function Banners({ bid }) {
   }
   return out;
 }
-
-// --- help: the CLI's own help text (GET /help/tabs), so the two never disagree -------------------
-
-const help = { tabs: null, current: 0, line: "", error: null };
-
-async function openHelp() {
-  openModal("help");
-  if (help.tabs) return;
-  const r = await timed("help --tabs", () => call("helpTabs"));
-  help.line = r.line;
-  help.error = r.error;
-  if (!r.error) help.tabs = r.data.data.tabs || [];
-  changed();
-}
-
-function HelpDialog() {
-  const tab = help.tabs && help.tabs[help.current];
-  return html`<${ModalShell} title="Help" icon="book-open" testid="help" bodyCls="modal-body"
-      note=${html`the same text as <code>harness-manager help --tabs</code>`}>
-    ${help.error ? html`<div class="card-body"><${Reason} level="err" text=${`${help.line}: ${help.error.message}`} /></div>`
-      : !help.tabs ? html`<div class="card-body muted"><${Spinner} /> Reading the help...</div>`
-      : html`<nav class="modal-nav" aria-label="Help topics">${help.tabs.map((t, i) => html`<button type="button" key=${t.name}
-          aria-current=${i === help.current ? "true" : "false"} onClick=${() => { help.current = i; changed(); }}>${t.name}</button>`)}</nav>
-        <pre class="modal-text">${tab ? tab.text : ""}</pre>`}
-  <//>`;
-}
-
-registerModal("help", HelpDialog);
 
 // --- the app ------------------------------------------------------------------------------------
 

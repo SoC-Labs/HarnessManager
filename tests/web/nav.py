@@ -44,17 +44,47 @@ def rail(page: Any, bid: str) -> Any:
     return page.locator(f'.board-item[data-board="{bid}"]')
 
 
-def open_board(page: Any, bid: str) -> None:
+def open_board(page: Any, bid: str, *, land: str = "overview") -> None:
     """Select ``bid`` in the rail, open it if it is not open here, wait until its header has
     read the board (the Shell fact). An open Activity drawer is closed first (it covers the
-    workspace, where Open is)."""
+    workspace, where Open is). A board opened here lands on the tab Settings' "Open a board
+    on" names (general.open_on: the Workbench by default); ``land`` then goes to that tab (the
+    Overview, where most tests read first; "" stays where the setting put it)."""
     close_activity(page)
     rail(page, bid).click()
     page.wait_for_selector(f'main[data-board="{bid}"], [data-action="open"]', timeout=T)
+    opened = False
     if page.locator(f'main[data-board="{bid}"]').count() == 0:
         page.locator('[data-action="open"]').click()
+        opened = True
     page.wait_for_selector(f'main[data-board="{bid}"] [data-testid="fact-shell"]'
                            ':not(:has-text("unknown"))', timeout=T)
+    if opened and land:
+        _from_open_on(page, land)
+
+
+def land(page: Any, key: str = "overview") -> None:
+    """After an Open: go to tab ``key`` when the board opened on the Workbench (UI v2 SHELL-2:
+    a board opens on Settings' "Open a board on", the Workbench by default; a test that reads
+    another tab first lands on it). A tab the app itself went to (an interrupted SD install
+    goes to Board > Versions) is left alone."""
+    page.wait_for_selector('[data-testid="board-header"]', timeout=T)
+    _from_open_on(page, key)
+
+
+def _from_open_on(page: Any, key: str) -> None:
+    # In the page, in one step: a tab the app chose meanwhile (an interrupted SD install's Board >
+    # Versions) is never clicked away by a check made on a frame drawn before it.
+    page.wait_for_selector('[role="tabpanel"][data-tab]', timeout=T)
+    went = page.evaluate("""async ([key]) => {
+        const m = await import(new URL("js/store.js", document.baseURI).href);
+        const bid = m.S.selected;
+        if (!bid || key === "workbench" || m.sectionOf(bid) !== "workbench") return false;
+        m.navigate(bid, key);
+        return true;
+    }""", [key])
+    if went:
+        page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
 
 
 def tab(page: Any, key: str) -> None:
