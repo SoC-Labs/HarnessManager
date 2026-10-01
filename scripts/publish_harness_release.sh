@@ -67,7 +67,55 @@ gh_step() {
   printf -v q '%q ' "$@"
   echo "  ${q% }"
   if [ "$MODE" = publish ]; then
-    "$@"
+    "$@" || die "that gh step failed (exit $?). The channel goes up last, so clients still \
+see the previous one. Fix the cause and re-run: assets already uploaded are kept and skipped."
+  fi
+}
+
+# Does release <tag> exist in <repo>? 0 yes, 1 no (gh says "not found"). Any other gh
+# failure stops the script: a login or network error must never pass for "not there yet".
+release_exists() {   # <gh> <tag> <repo>
+  local err=""
+  if err="$("$1" release view "$2" --repo "$3" --json tagName 2>&1 >/dev/null)"; then
+    return 0
+  fi
+  case "$(printf '%s' "$err" | tr '[:upper:]' '[:lower:]')" in
+    *"not found"*|*"could not find"*) return 1;;
+  esac
+  die "gh release view $2 --repo $3 failed: $err"
+}
+
+# One per-version release: created with its assets. On a re-run (it exists already), only
+# the assets it lacks are uploaded, and one already there with another size stops the
+# script (a published asset is never rewritten; clients would refuse it by sha256 anyway).
+upload_release() {   # <gh> <repo> <tag> <title> <notes file> <asset>...
+  local gh="$1" repo="$2" tag="$3" title="$4" notes="$5"
+  shift 5
+  if [ "$MODE" = publish ] && release_exists "$gh" "$tag" "$repo"; then
+    local have f name size got
+    local missing=()
+    have="$("$gh" release view "$tag" --repo "$repo" --json assets \
+            --jq '.assets[] | "\(.name)\t\(.size)"')" || die "cannot list the assets of $tag"
+    for f in "$@"; do
+      name="$(basename "$f")"
+      size="$(wc -c < "$f" | tr -d ' ')"
+      got="$(printf '%s\n' "$have" | awk -F '\t' -v n="$name" '$1 == n { print $2 }')"
+      if [ -z "$got" ]; then
+        missing+=("$f")
+      elif [ "$got" != "$size" ]; then
+        die "$tag in $repo already holds $name with $got bytes, ours has $size: a published \
+asset is never rewritten (bump the version)"
+      else
+        echo "  (already uploaded: $name)"
+      fi
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+      gh_step "$gh" release upload "$tag" --repo "$repo" "${missing[@]}"
+    fi
+  else
+    [ "$MODE" = publish ] || echo "  # (a re-run, when $tag exists: only the assets it lacks)"
+    gh_step "$gh" release create "$tag" --repo "$repo" --title "$title" \
+      --notes-file "$notes" --prerelease "$@"
   fi
 }
 
@@ -135,7 +183,7 @@ main() {
   echo
   echo "== 2. the live channel =="
   if [ "$MODE" = publish ]; then
-    if "$gh" release view "$CHANNEL_TAG" --repo "$REPO" --json tagName >/dev/null 2>&1; then
+    if release_exists "$gh" "$CHANNEL_TAG" "$REPO"; then
       "$gh" release download "$CHANNEL_TAG" --repo "$REPO" --pattern channel.json \
         --dir "$WORK/live" --clobber || die "cannot read the live channel; nothing was uploaded"
       (cd "$CHECKOUT" && "$py" -m tools.release publish-check "${check[@]}" \
@@ -166,14 +214,11 @@ main() {
     [ "$TEST" = 1 ] && echo "  (a TEST release: --publish refuses it at step 1)"
     [ "$PINNED" = 1 ] || echo "  (key $KEY_ID is not pinned: --publish refuses it at step 1)"
   fi
-  gh_step "$gh" release create "$TAG" --repo "$REPO" --title "$TITLE" \
-    --notes-file "$NOTES_FILE" --prerelease "${assets[@]}"
+  upload_release "$gh" "$REPO" "$TAG" "$TITLE" "$NOTES_FILE" "${assets[@]}"
   if [ "${#aaa_assets[@]}" -gt 0 ]; then
-    gh_step "$gh" release create "$TAG" --repo "$AAA_REPO" --title "$TITLE (Arm IP)" \
-      --notes-file "$NOTES_FILE" --prerelease "${aaa_assets[@]}"
+    upload_release "$gh" "$AAA_REPO" "$TAG" "$TITLE (Arm IP)" "$NOTES_FILE" "${aaa_assets[@]}"
   fi
-  if [ "$MODE" = publish ] && "$gh" release view "$CHANNEL_TAG" --repo "$REPO" \
-      --json tagName >/dev/null 2>&1; then
+  if [ "$MODE" = publish ] && release_exists "$gh" "$CHANNEL_TAG" "$REPO"; then
     echo "  (the rolling release $CHANNEL_TAG exists)"
   else
     [ "$MODE" = publish ] || echo "  # only when $CHANNEL_TAG does not exist yet:"

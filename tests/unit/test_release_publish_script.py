@@ -131,6 +131,70 @@ def test_the_typed_confirmation_takes_only_the_exact_phrase():
     assert confirm("") == 1                                    # no answer is a no
 
 
+FAKE_GH = """#!/bin/sh
+# a stand-in for gh: answers from $GH_STATE, logs every call; never reaches GitHub
+echo "$*" >> "$GH_LOG"
+case "$1 $2" in
+  "release view")
+    if [ "$GH_STATE" = auth ]; then echo "HTTP 401: Bad credentials" >&2; exit 1; fi
+    if [ "$GH_STATE" = absent ]; then echo "release not found" >&2; exit 1; fi
+    case "$*" in *"--json assets"*) printf 'a.zip\\t3\\nb.img\\t%s\\n' "$GH_B_SIZE";; esac
+    exit 0;;
+  "release upload") [ "$GH_STATE" = failupload ] && exit 1; exit 0;;
+esac
+exit 0
+"""
+
+
+def _fn(tmp_path: Path, state: str, body: str, b_size: str = "") -> subprocess.CompletedProcess:
+    """Source the script (its functions only) with MODE=publish and the fake gh."""
+    gh = tmp_path / "fake-gh"
+    gh.write_text(FAKE_GH)
+    gh.chmod(0o755)
+    for name, data in (("a.zip", b"abc"), ("b.img", b"12345")):
+        (tmp_path / name).write_bytes(data)
+    env = {**os.environ, "GH_STATE": state, "GH_LOG": str(tmp_path / "calls.log"),
+           "GH_B_SIZE": b_size}
+    return subprocess.run(["bash", "-c", f'. "{SCRIPT}"; MODE=publish; {body}'], env=env,
+                          cwd=tmp_path, capture_output=True, text=True, timeout=30)
+
+
+def calls(tmp_path: Path) -> list[str]:
+    log = tmp_path / "calls.log"
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def test_release_exists_tells_not_found_from_a_gh_failure(tmp_path):
+    gh = f"{tmp_path}/fake-gh"
+    assert _fn(tmp_path, "present", f"release_exists {gh} t o/r").returncode == 0
+    assert _fn(tmp_path, "absent", f"release_exists {gh} t o/r").returncode == 1
+    res = _fn(tmp_path, "auth", f"release_exists {gh} t o/r")         # never "not there yet"
+    assert res.returncode == 2 and "Bad credentials" in res.stderr
+
+
+def test_a_re_run_uploads_only_the_missing_assets(tmp_path):
+    res = _fn(tmp_path, "partial", f"upload_release {tmp_path}/fake-gh o/r t T n.md a.zip b.img",
+              b_size="")
+    assert res.returncode == 0, res.stderr
+    assert "already uploaded: a.zip" in res.stdout
+    uploads = [c for c in calls(tmp_path) if c.startswith("release upload")]
+    assert uploads == ["release upload t --repo o/r b.img"]
+    assert not [c for c in calls(tmp_path) if c.startswith("release create")]
+
+
+def test_twin_an_asset_already_there_with_other_bytes_stops_the_upload(tmp_path):
+    res = _fn(tmp_path, "partial", f"upload_release {tmp_path}/fake-gh o/r t T n.md a.zip b.img",
+              b_size="999")
+    assert res.returncode == 2 and "never rewritten" in res.stderr
+    assert not [c for c in calls(tmp_path) if c.startswith("release upload")]
+
+
+def test_twin_a_failed_gh_step_stops_with_what_to_do(tmp_path):
+    res = _fn(tmp_path, "failupload",
+              f"gh_step {tmp_path}/fake-gh release upload t --repo o/r a.zip; echo AFTER")
+    assert res.returncode == 2 and "re-run" in res.stderr and "AFTER" not in res.stdout
+
+
 def test_twin_a_tree_built_for_another_repo_is_refused(tmp_path, fake_gh):
     out = build(tmp_path, "--test-key")
     res = script(fake_gh, "--repo", "Someone/Else", str(out))
