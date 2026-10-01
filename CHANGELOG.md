@@ -9,6 +9,40 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### H1 findings (FIX-PACK-6)
+From H1 on board 1 (MPS3 Linux v7, Thu 1 Oct, `docs/evidence/2026-10-01-h1/`) and the first look
+at UI v2 on real boards.
+- **`card` and `slot` changes work while the app has the board open.** `card clear` and `card
+  commit` ran in the command's own process, so the service's board lock refused them ("… is in
+  use — held by … harness-manager-daemon: harness-manager-ui", H1 Z1). With the service running,
+  `card commit|clear` and `slot push|commit|verify|rollback` now go through it as its jobs, as
+  `program`, `restore` and `mcc reboot` do; without one they run in-process as before. The
+  command still asks first. New routes `POST /boards/{bid}/slots/{push,commit,verify}`
+  (docs/API.md).
+- **`board ssh TARGET -c CMD` sends CMD as one command**, as `ssh host 'CMD'` does, on Linux and
+  Windows: a pipe, `;` or quotes inside it reach the board's shell intact. It was split into words
+  (`'uptime;' '(logread' … '|' …`) and lost its quoting.
+- **After a cold boot the reported design is checked against the DAP.** On Linux v2.0.0 harnessd
+  reported nanosoc (`0x01000001`) after an MCC REBOOT while the greybox was resident (H1 r5-r8;
+  fixed in Linux v2.1). After `mcc reboot` and `power cycle` on a Linux board whose reported
+  design has a debug port, Harness Manager reads one IDCODE (as `debug detect`; nothing halts)
+  and says `design verified` (0x6ba00477), `design UNVERIFIED: … greybox is probably resident
+  (known issue, Linux v2.0.0)`, or `not cross-checked` with the reason (no OpenOCD here; after a
+  power cycle the harness may not be up yet). It is in the result, `--json` (`design_check`), an
+  Activity row, and the app marks the Design **unverified**; `GET /boards/{bid}` carries it
+  until a deploy proves its design. It never fails the reboot and never changes the board.
+- **The progress bar moves during a frame.** Push and card progress sat at 6 % for the whole
+  2.3 MB partial, then jumped to 100 %: the push reports per frame. While a frame is in flight
+  Harness Manager now estimates from the push's measured rate (at most every 0.5 s, never
+  backwards, never past the frame's end) and snaps to the real bytes when the frame completes.
+  Estimates are marked: `estimated: true` in `deploy.progress` and `job.progress`, `~` in the
+  command's lines, a hatched fill with `~` in the app. Per-chunk reporting inside pyverify's
+  pusher is the real fix (platform repo).
+- **HIL D5 (docs/HIL_LINUX.md) for Linux v2.0.0:** after a cold boot with keep-on-card, expect
+  `power-on failed:timeout` with the greybox resident (Linux KNOWN ISSUE 12: the power-on load
+  cannot finish in 30 s at the card's ~14 KB/s; fixed in v2.1). The pass criterion is now the DAP
+  cross-check (`design verified`, `debug detect` 0x6ba00477), not the reported rm_id.
+
 ### UI review fixes (FIX-PACK-4)
 - **One lease rule.** On a board behind a hub, "yours" is this Harness Manager holding the
   lease (`here`), everywhere: the XVC card and the Update tab's lease line used `mine`, so a
