@@ -652,7 +652,7 @@ session is up again for `nanosoc_multicore`: two `gdb 127.0.0.1:<port>  cpu0|cpu
 two `attach` lines. The board: `mps3-debug status --json` shows `"design":"nanosoc_multicore"`
 and two cores (3333, 3334).
 
-**OCD8. nanosoc_multicore: both cores** (terminal B; then the RAM round trip on core 0)
+**OCD8. nanosoc_multicore: both cores** (the image's 2-AP cfg is UNPROVEN on silicon: a failure here is "cfg unproven", for the Linux lead, not an HM bug; record it and go on to OCD9) (terminal B; then the RAM round trip on core 0)
 ```bash
 read G0 G1 < <(harness-manager --json debug status $B | python3 -c 'import json,sys; print(*json.load(sys.stdin)["status"]["gdb_ports"])'); echo G0=$G0 G1=$G1
 harness-manager debug detect $B | tee $EV/ocd8_idcode.txt
