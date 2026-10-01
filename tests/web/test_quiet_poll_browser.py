@@ -54,6 +54,12 @@ def test_the_page_views_the_board_it_shows_and_marks_its_own_reads(page_factory,
     until(lambda: gate.viewers(BOARD_USB) == 1)
     assert any(h.get("x-hm-background") == "1" for h in until(lambda: info_reads(requests))), \
         "the read after the open is one nobody clicked"
+    # the open's own background reads land first (UI v2's Overview reads more at open: the
+    # lease queue, the clashes, the trend), so the window below holds the click's read only
+    settled = -1
+    while settled != len(info_reads(requests)):
+        settled = len(info_reads(requests))
+        page.wait_for_timeout(1000)
     requests.clear()
     page.locator('[data-action="refresh-board"]').click()          # twin: a click
     clicked = until(lambda: info_reads(requests))
