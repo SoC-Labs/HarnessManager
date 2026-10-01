@@ -314,15 +314,17 @@ def test_console_output_appears_and_send_works(page_factory, engine, screenshots
     page.screenshot(path=str(screenshots / "light-consoles-live.png"))
 
 
-def test_an_empty_send_is_refused_and_nothing_is_written(page_factory, engine):
+def test_an_empty_send_sends_just_the_line_ending(page_factory, engine):
+    # UI2-POLISH (david 10-01): an empty line is a bare Enter, as in screen (it was refused).
+    # The twins (a read-only console sends nothing) are in test_ui2_polish_console_browser.py.
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "consoles")
     page.wait_for_selector('[data-testid="console-state"]:has-text("up")', timeout=T)
-    before = list(engine.consoles.writes)
+    before = len(engine.consoles.writes)
     page.locator('[data-action="send"]').click()
-    expect(page.locator('[data-testid="console-result"]')).to_contain_text("Nothing was run.")
-    assert engine.consoles.writes == before
+    expect(page.locator('[data-testid="console-result"]')).to_contain_text("rc 0")
+    assert wait_until(lambda: engine.consoles.writes[before:] == [(BOARD_USB, "uart0", b"\r\n")])
 
 
 def test_consoles_switch_tabs_and_keep_their_output(page_factory, engine):

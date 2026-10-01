@@ -20,6 +20,13 @@
 //
 // Reset DUT goes through gateReason with `holder` (R3): on a hub board only this Harness Manager
 // holding the lease resets the DUT. It switches to the DUT console, which shows the boot banner.
+//
+// UI2-POLISH (david 10-01): the terminal is the keyboard, as in `screen` (JS/consoles.js): a
+// click, or picking the console in the switcher, focuses it (a ring, and the line under it says
+// typing goes to the board); Enter sends the ending picked below. The Keys menu sends what a
+// browser keeps for itself (Ctrl-W/T/N, so "Ctrl-..." takes any letter) and the usual controls.
+// The send line stays as a line mode: line + ending, an empty line the ending alone, with ^X and
+// \xNN expanded (expandLine). A read-only console takes nothing, and shows no cursor.
 
 import { gateReason, interlock, isArmed, panelState, runAction, setArmed } from "../actions.js";
 import { call } from "../api.js";
@@ -33,6 +40,71 @@ import { settingValue } from "../prefs.js";
 
 const CONSOLE_CAPS = ["console_dut", "console_shell", "console_controller"];
 const ENDINGS = { LF: "\n", CR: "\r", CRLF: "\r\n" };
+const encoder = new TextEncoder();
+
+// --- the send line's escapes, and the Keys menu ----------------------------------------------------
+
+// ^X is Ctrl-X for X one of A-Z @ [ \ ] ^ _ (upper case: a^b stays as typed), \xNN the byte NN,
+// \^ a caret and \\ a backslash; anything else goes as typed (UTF-8). Returns the bytes.
+const CTRL_CHARS = /^[A-Z@[\\\]^_]$/;
+export const ESCAPE_RULE = "^C ^] \\x1d: control bytes (\\^ a caret)";
+export function expandLine(text) {
+  const out = [];
+  let lit = "";
+  const flush = () => { if (lit) { out.push(...encoder.encode(lit)); lit = ""; } };
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const nx = text[i + 1];
+    if (ch === "^" && nx !== undefined && CTRL_CHARS.test(nx)) {
+      flush(); out.push(nx.charCodeAt(0) & 0x1f); i += 1;
+    } else if (ch === "\\" && nx === "x" && /^[0-9a-fA-F]{2}$/.test(text.slice(i + 2, i + 4))) {
+      flush(); out.push(parseInt(text.slice(i + 2, i + 4), 16)); i += 3;
+    } else if (ch === "\\" && (nx === "^" || nx === "\\")) {
+      lit += nx; i += 1;
+    } else {
+      lit += ch;
+    }
+  }
+  flush();
+  return Uint8Array.from(out);
+}
+
+function joinBytes(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+// The bytes as a C-ish string for the result line ("\x1d\r\n").
+function shown(bytes) {
+  let t = "";
+  for (const v of bytes) {
+    if (v === 13) t += "\\r";
+    else if (v === 10) t += "\\n";
+    else if (v === 9) t += "\\t";
+    else if (v < 32 || v === 127 || v > 126) t += `\\x${v.toString(16).padStart(2, "0")}`;
+    else t += String.fromCharCode(v);
+  }
+  return t;
+}
+
+// What the Keys menu sends: the controls a terminal would, and the ones a browser keeps.
+const KEYS = [
+  { key: "ctrl-c", label: "Ctrl-C", bytes: [3], title: "interrupt (0x03)" },
+  { key: "ctrl-d", label: "Ctrl-D", bytes: [4], title: "end of input (0x04)" },
+  { key: "ctrl-]", label: "Ctrl-]", bytes: [0x1d], title: "0x1d (telnet's escape, MicroPython's raw REPL)" },
+  { key: "ctrl-z", label: "Ctrl-Z", bytes: [0x1a], title: "suspend (0x1a)" },
+  { key: "esc", label: "Esc", bytes: [0x1b], title: "escape (0x1b)" },
+  { key: "tab", label: "Tab", bytes: [9], title: "tab (0x09)" },
+  { key: "enter", label: "Enter alone", bytes: null, title: "just the line ending" },
+];
+
+// Ctrl-<letter>: the letter (or @ [ \ ] ^ _) to its control byte, else null.
+export function ctrlByte(ch) {
+  const c = String(ch || "").toUpperCase();
+  return c.length === 1 && CTRL_CHARS.test(c) ? c.charCodeAt(0) & 0x1f : null;
+}
 // FIX-PACK-4: the send line's default is the setting consoles.line_ending (prefs.js).
 const ENDING_OF = { lf: "LF", cr: "CR", crlf: "CRLF" };
 export function defaultEnding() {
@@ -102,7 +174,7 @@ function countChanged() {
 
 // --- the terminal -----------------------------------------------------------------------------
 
-function Terminal({ session, label }) {
+function Terminal({ session, label, writable }) {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
@@ -114,7 +186,81 @@ function Terminal({ session, label }) {
       session.detach();
     };
   }, [session]);
-  return html`<div class="term-wrap" ref=${ref} data-testid="terminal" role="log" aria-label=${label}></div>`;
+  // A click anywhere on the console (its padding too) gives it the keyboard.
+  return html`<div class="term-wrap" ref=${ref} data-testid="terminal" role="log" aria-label=${label}
+    data-writable=${writable ? "yes" : "no"} onMouseUp=${() => session.focus()}></div>`;
+}
+
+// The line under the terminal: whether typing goes to the board, and what Enter sends.
+function TermHint({ writable, ending }) {
+  if (!writable) return null;
+  return html`<div class="term-hint" data-testid="term-hint">
+    <${Icon} name="keyboard" /><span class="on">Typing goes to the board · Enter sends ${ending} · Keys has Ctrl-W, Ctrl-T, Ctrl-N</span>
+    <span class="off">Click the console to type: keys go to the board, as in screen</span></div>`;
+}
+
+// The Keys menu: one click, one key to the board.
+function KeysMenu({ session, c, ending, acc, onResult }) {
+  const [open, setOpen] = useState(false);
+  const [letter, setLetter] = useState("");
+  const wrap = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey, true); };
+  }, [open]);
+  const sendKey = (label, bytes) => {
+    const command = `console ${c.name} key ${label}`;
+    if (!acc.writable) {
+      onResult({ level: "warn", text: `$ ${command}  (not run)\nCannot send: ${acc.reason}. Nothing was run.` });
+      setOpen(false);
+      return;
+    }
+    const why = session.send(bytes);
+    if (why) {
+      onResult({ level: "warn", text: `$ ${command}  (not run)\nCannot send: ${why}. Nothing was run.` });
+      log("warning", "console", `${command}: ${why}. Nothing was run.`, c.bid);
+    } else {
+      onResult({ level: "ok", text: `$ ${command}  (rc 0, 0.0 s)  sent "${shown(bytes)}"` });
+    }
+    setOpen(false);
+    session.focus();
+  };
+  const ctrl = ctrlByte(letter);
+  const sendCtrl = (e) => {
+    e.preventDefault();
+    if (ctrl === null) return;
+    sendKey(`Ctrl-${letter.toUpperCase()}`, Uint8Array.of(ctrl));
+    setLetter("");
+  };
+  const toggle = () => {
+    if (!acc.writable) {
+      onResult({ level: "warn", text: `$ console ${c.name} key  (not run)\nCannot send: ${acc.reason}. Nothing was run.` });
+      return;
+    }
+    setOpen(!open);
+  };
+  return html`<span class="cs-keys" ref=${wrap}>
+    <button type="button" class="btn ghost sm" data-action="keys" aria-haspopup="menu" aria-expanded=${open ? "true" : "false"}
+      aria-disabled=${acc.writable ? undefined : "true"} onClick=${toggle}
+      title=${acc.writable ? "Send a key the browser keeps for itself (Ctrl-W, Ctrl-T, Ctrl-N...) or a control key" : acc.reason}>
+      <${Icon} name="keyboard" />Keys<${Icon} name="chevron-down" cls="sm" /></button>
+    ${open ? html`<div class="cs-keys-pop" role="menu" data-testid="keys-menu" aria-label=${`Keys for ${c.name}`}>
+      ${KEYS.map((k) => html`<button type="button" role="menuitem" class="btn ghost sm" key=${k.key} data-key=${k.key} title=${k.title}
+        onClick=${() => sendKey(k.label, k.bytes ? Uint8Array.from(k.bytes) : encoder.encode(ENDINGS[ending]))}>
+        ${k.label}${k.key === "enter" ? html`<span class="muted"> (${ending})</span>` : null}</button>`)}
+      <form class="cs-keys-ctrl" onSubmit=${sendCtrl}>
+        <label class="muted small" for=${`keys-letter-${c.name}`}>Ctrl-</label>
+        <input id=${`keys-letter-${c.name}`} class="input mono sm" data-testid="keys-ctrl-letter" maxlength="1" size="2"
+          aria-label="Ctrl and this letter" placeholder="W" value=${letter} onInput=${(e) => setLetter(e.target.value.slice(-1))} />
+        <button type="submit" role="menuitem" class="btn sm" data-key="ctrl-letter" disabled=${ctrl === null}
+          title=${ctrl === null ? "a letter, or @ [ \\ ] ^ _" : `0x${ctrl.toString(16).padStart(2, "0")}`}>Send</button>
+      </form>
+    </div>` : null}
+  </span>`;
 }
 
 // A dim line into the page's own copy of the terminal (never sent to the board): a marker for
@@ -322,6 +468,16 @@ function ConsoleCard({ bid, list, c }) {
   }
   const acc = access(bid, c);
   const st = session.state;
+  // The terminal is the keyboard: what Enter sends, and whether it takes keys at all.
+  session.setEnding(ENDINGS[ending]);
+  session.setWritable(acc.writable);
+  // Picked in the switcher: the keyboard goes to it (once laid out).
+  useEffect(() => {
+    if (b.consoleFocus !== c.name) return undefined;
+    b.consoleFocus = null;
+    const id = requestAnimationFrame(() => session.focus());
+    return () => cancelAnimationFrame(id);
+  }, [c.name]);
   // Many consoles: the ones not on screen go by their short names, so Reset DUT keeps its row.
   const compact = list.length > 3;
   const w = week(bid);
@@ -333,6 +489,8 @@ function ConsoleCard({ bid, list, c }) {
   const resetFail = resetP.lines.length && !resetP.running && resetP.lines[0].kind === "rc"
     && (resetP.lines[0].notRun || resetP.lines[0].level === "err")
     ? resetP.lines.slice(1).map((l) => (l.name ? `${l.name}: ${l.text}` : l.text)).join("  ") : "";
+  // Line mode: the line (its ^X and \xNN expanded) and the ending; an empty line is the ending
+  // alone, as a bare Enter in screen is.
   const send = (e) => {
     e.preventDefault();
     const command = `console ${c.name} send ${JSON.stringify(line)}`;
@@ -340,17 +498,14 @@ function ConsoleCard({ bid, list, c }) {
       setResult({ level: "warn", text: `$ ${command}  (not run)\nCannot send: ${acc.reason}. Nothing was run.` });
       return;
     }
-    if (!line) {
-      setResult({ level: "warn", text: `$ ${command}  (not run)\nNothing to send: the line is empty. Nothing was run.` });
-      return;
-    }
-    const why = session.send(new TextEncoder().encode(line + ENDINGS[ending]));
+    const bytes = joinBytes(expandLine(line), encoder.encode(ENDINGS[ending]));
+    const why = session.send(bytes);
     if (why) {
       setResult({ level: "warn", text: `$ ${command}  (not run)\nCannot send: ${why}. Nothing was run.` });
       log("warning", "console", `${command}: ${why}. Nothing was run.`, bid);
       return;
     }
-    setResult({ level: "ok", text: `$ ${command}  (rc 0, 0.0 s)` });
+    setResult({ level: "ok", text: `$ ${command}  (rc 0, 0.0 s)  sent "${shown(bytes)}"` });
     setLine("");
   };
   const save = () => {
@@ -398,7 +553,7 @@ function ConsoleCard({ bid, list, c }) {
           return html`<button type="button" role="tab" key=${x.name} class="cs-btn" data-console-tab=${x.name}
               aria-selected=${x.name === c.name ? "true" : "false"}
               title=${`${x.label} (${x.name}${x.aka.length ? `, also ${x.aka.join(", ")}` : ""})${xs ? `: ${xs}` : ": not opened yet"}${xa.writable ? "" : `, read-only: ${xa.reason}`}`}
-              onClick=${() => { b.consoleSelected = x.name; changed(); }}>
+              onClick=${() => { b.consoleSelected = x.name; b.consoleFocus = x.name; changed(); if (x.name === c.name) session.focus(); }}>
             <span class=${`dot ${xs ? STATE_DOT[xs] || "idle" : "off"}`}></span>${compact && x.name !== c.name
               ? html`<span>${x.short}</span>` : html`<span class="cs-long">${x.label}</span><span class="cs-short">${x.short}</span>`}
             ${xa.writable ? null : html`<${Icon} name="eye" />`}
@@ -418,6 +573,7 @@ function ConsoleCard({ bid, list, c }) {
         ${" · "}<${BaudControl} bid=${bid} name=${c.name} onResult=${setResult} />
         ${session.dropped ? html`${" "}<span class="i-warn" data-testid="console-dropped">${session.dropped} bytes dropped: the page fell behind</span>` : null}</span>
       <span class="cs-tools">
+        <${KeysMenu} session=${session} c=${{ ...c, bid }} ending=${ending} acc=${acc} onResult=${setResult} />
         ${st === "down" || st === "closed" ? html`<button type="button" class="btn ghost sm" data-action="reconnect"
           onClick=${() => session.connect()} title="Connect this console again"><${Icon} name="refresh-cw" />Reconnect</button>` : null}
         <button type="button" class="btn ghost icon-only sm" data-action="attach-screen" aria-pressed=${attach ? "true" : "false"}
@@ -431,14 +587,16 @@ function ConsoleCard({ bid, list, c }) {
     </div>
     ${note || resetNote ? html`<div class="console-note">${note}${resetNote}</div>` : null}
     ${attach ? html`<${AttachRow} bid=${bid} name=${c.name} onResult=${setResult} />` : null}
-    <${Terminal} key=${c.name} session=${session} label=${c.label} />
+    <${Terminal} key=${c.name} session=${session} label=${c.label} writable=${acc.writable} />
+    <${TermHint} writable=${acc.writable} ending=${ending} />
     <form class="console-send" onSubmit=${send}>
       <input class="input mono" data-testid="send-line" aria-label=${`Send a line to ${c.name}`} disabled=${!acc.writable}
         placeholder=${!acc.writable ? `read-only: ${acc.reason.replace(/^read-only:\s*/i, "")}`
-          : harness ? `a command for the root shell on ${bid.split("@").pop()}; Enter sends it` : `a line for ${c.name}; Enter sends it`}
+          : `${harness ? `a command for the root shell on ${bid.split("@").pop()}` : `a line for ${c.name}`} (+ ${ending}) · ${ESCAPE_RULE}`}
+        title=${acc.writable ? `Line mode: Enter sends the line and ${ending}. ^X is Ctrl-X (A-Z @ [ \\ ] ^ _), \\xNN the byte NN, \\^ a caret, \\\\ a backslash.` : acc.reason}
         value=${acc.writable ? line : ""} onInput=${(e) => setLine(e.target.value)} />
       <select class="select" aria-label="Line ending" data-testid="send-ending" value=${ending} disabled=${!acc.writable}
-        title="What Enter sends (the default is Settings > Consoles > What Enter sends)" onChange=${(e) => setEnding(e.target.value)}>
+        title="What Enter sends, in the console and on this line (the default is Settings > Consoles > What Enter sends)" onChange=${(e) => setEnding(e.target.value)}>
         ${Object.keys(ENDINGS).map((k) => html`<option key=${k} value=${k}>${k}</option>`)}
       </select>
       <button type="submit" class="btn" data-action="send" aria-disabled=${acc.writable ? undefined : "true"}

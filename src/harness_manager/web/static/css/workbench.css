@@ -249,6 +249,35 @@
 .wb .attach-row .copy-row { flex: 1; min-width: 220px; }
 .wb .attach-row .screen-row { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; flex-wrap: wrap; }
 .wb .term-wrap { flex: 1; min-height: 120px; position: relative; background: var(--term-bg); }
+/* UI2-POLISH: the terminal is the keyboard (JS/consoles.js). A ring while it has the focus, and
+   the line under it says where typing goes; a read-only console takes no focus and shows neither. */
+.term-wrap[data-writable="yes"] { cursor: text; }
+.term-wrap[data-writable="yes"]:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+.term-hint {
+  display: flex; align-items: center; gap: 6px; padding: 3px 12px; font-size: 11.5px; line-height: 16px;
+  color: var(--text-3); background: var(--surface-2); border-top: 1px solid var(--border); min-width: 0;
+}
+.term-hint .icon { width: 13px; height: 13px; flex: none; }
+.term-hint > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.term-hint .on { display: none; }
+.console-card:has(.term-wrap:focus-within) .term-hint { color: var(--accent-text); background: var(--accent-soft); }
+.console-card:has(.term-wrap:focus-within) .term-hint .on { display: inline; }
+.console-card:has(.term-wrap:focus-within) .term-hint .off { display: none; }
+.cs-keys { position: relative; display: inline-flex; }
+.cs-keys .btn .icon.sm { width: 12px; height: 12px; margin-left: -2px; }
+.cs-keys-pop {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px; width: 236px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+}
+.cs-keys-pop > .btn { justify-content: flex-start; font-family: var(--font-mono); font-size: 12px; }
+.cs-keys-pop > .btn .muted { font-family: var(--font-sans); font-size: 11px; }
+.cs-keys-ctrl {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 6px 4px 2px; margin-top: 2px;
+  border-top: 1px solid var(--border);
+}
+.cs-keys-ctrl .input { width: 44px; height: 26px; text-align: center; text-transform: uppercase; }
+.cs-keys-ctrl .btn { margin-left: auto; }
 .wb .console-send { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); }
 .wb .console-send .input { flex: 1; }
 .wb .console-send .input:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; }

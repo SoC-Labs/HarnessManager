@@ -9,6 +9,17 @@
 // the last one (null: the daemon never said, so the console row's `writable` stands). A
 // read-only session drops keystrokes here too, with the reason, so nothing is sent that the
 // daemon would drop anyway. `lines` counts the lines received (the switcher's "new" count).
+//
+// UI2-POLISH (david 10-01: "the console inputs don't accept ctrl-], new lines by themselves
+// natively like screen or the python app, and show the cursor"): the terminal IS the keyboard,
+// as in `screen`. Every key xterm gives is sent raw (Ctrl-C/D/]/Z, Esc, arrows, Tab, Backspace),
+// Enter (and every CR in a paste) sends the line ending the card picked (`ending`), a paste
+// goes in one message (the daemon paces a slow UART, never the page). The keys the page itself
+// would act on (Esc closes the Activity drawer) stop at the terminal; Ctrl-V / Ctrl-Shift-V paste
+// and Ctrl-Shift-C copies, as a terminal emulator does (the card's Keys menu sends Ctrl-V and the
+// keys a browser keeps for itself: Ctrl-W, Ctrl-T, Ctrl-N). The cursor blinks (a block in
+// --term-cursor; an outline when the terminal is not focused) and is hidden on a read-only
+// console, which takes no keys at all (`setWritable`).
 
 import { socketCloseReason, socketUrl } from "./api.js";
 import { changed, log } from "./store.js";
@@ -18,6 +29,7 @@ import { Terminal } from "../vendor/xterm/xterm.module.js";
 
 const sessions = new Map();
 const encoder = new TextEncoder();
+const CR = /\r/g;
 
 function termTheme() {
   return {
@@ -51,7 +63,9 @@ export class ConsoleSession {
     this.closedByUs = false;
     this.term = new Terminal({
       convertEol: true,
-      cursorBlink: false,
+      cursorBlink: true,
+      cursorStyle: "block",
+      cursorInactiveStyle: "outline",
       fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace',
       fontSize: 13,
       lineHeight: 1.2,
@@ -64,9 +78,52 @@ export class ConsoleSession {
     this.host = document.createElement("div");
     this.host.className = "term-host";
     this.host.dataset.console = name;
-    this.term.onData((text) => this.send(encoder.encode(text)));
+    this.host.dataset.writable = "yes";
+    this.ending = "\r\n";       // what Enter sends: the card's CR / LF / CRLF
+    this.writable = true;        // false: read-only here (no keys, no cursor)
+    this.lastRefusal = "";       // why the last keystroke was not sent ("" when it was)
+    this.term.onData((text) => this.type(text));
+    this.term.attachCustomKeyEventHandler((ev) => this.keyFilter(ev));
     this.connect();
   }
+
+  // What the keyboard gives (a key, or a paste): Enter, and each CR of a paste, is the ending.
+  type(text) {
+    if (!this.writable) return;
+    const why = this.send(encoder.encode(text.replace(CR, this.ending)));
+    if (why !== this.lastRefusal) {
+      this.lastRefusal = why;
+      if (why) log("warning", "console", `${this.name}: a key was not sent: ${why}`, this.bid);
+    }
+  }
+
+  // xterm's keydown/keyup filter: true lets xterm turn the key into bytes for the board.
+  keyFilter(ev) {
+    if (!this.writable) return false;
+    const k = (ev.key || "").toLowerCase();
+    if (ev.ctrlKey && !ev.altKey && !ev.metaKey && ((ev.shiftKey && (k === "c" || k === "v")) || (!ev.shiftKey && k === "v"))) {
+      return false;               // copy / paste stay the browser's: the paste comes back as data
+    }
+    if (ev.type === "keydown") ev.stopPropagation();    // a key for the board is not the page's
+    return true;
+  }
+
+  // Read-only (G1b, or the lease): no keys, no cursor, never focused. Writable: a blinking
+  // block when focused, an outline when not.
+  setWritable(on) {
+    const w = !!on;
+    if (w === this.writable) return;
+    this.writable = w;
+    this.term.options.disableStdin = !w;
+    this.term.options.cursorBlink = w;
+    this.term.options.cursorInactiveStyle = w ? "outline" : "none";
+    if (!w && this.opened) this.term.blur();
+    this.host.dataset.writable = w ? "yes" : "no";
+  }
+
+  setEnding(ending) { if (ending) this.ending = ending; }
+
+  focus() { if (this.writable && this.opened) this.term.focus(); }
 
   connect() {
     this.closedByUs = false;
@@ -156,6 +213,8 @@ export class ConsoleSession {
     if (!this.opened) {
       this.term.open(this.host);
       this.opened = true;
+      // A read-only console is never the keyboard's: a click on it does not take the focus.
+      if (this.term.textarea) this.term.textarea.addEventListener("focus", () => { if (!this.writable) this.term.blur(); });
     }
     this.refit();
   }
