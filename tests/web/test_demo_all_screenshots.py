@@ -8,6 +8,7 @@ photographs first, so a picture never shows a broken or half-loaded page.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -101,8 +102,9 @@ def _bare_metal(page: Any, review: Any, scheme: str) -> None:
     shoot(page, review, "debug-xvc-warning-bare-metal", scheme, full=True)
 
     section(page, "build")
-    expect(by_id(page, "step-kit")).to_have_attribute("data-state", "done", timeout=T)
-    expect(by_id(page, "step-target")).to_have_attribute("data-state", "done")
+    # UI v2 Build (lane UI2-BUILD): target and kit done = Setup done, or warning for Vivado only
+    expect(by_id(page, "bd-node-setup")).to_have_attribute("data-state", re.compile(r"^(done|warn)$"), timeout=T)
+    expect(by_id(page, "bd-panel")).to_have_attribute("data-step", "design")
     shoot(page, review, "build", scheme, full=True)
 
     section(page, "update")
