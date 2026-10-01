@@ -69,7 +69,7 @@ export async function loadStatus() {
 export async function loadReader() {
   const sw = G.status && G.status.sd_flash;
   if (sw && !sw.enabled) {
-    G.reader = { enabled: false, reason: `SD card in this PC's card reader is ${sw.reason}`, devices: [] };
+    G.reader = { enabled: false, reason: sw.reason, devices: [] };
     changed();
     return;
   }
