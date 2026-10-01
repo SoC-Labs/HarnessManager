@@ -10,8 +10,7 @@
   grid-template-rows: auto minmax(0, 1fr); gap: 14px; flex: 1; min-height: 0; position: relative;
 }
 .wb.folded { grid-template-columns: minmax(0, 1fr) 46px; }
-/* A short window (banners above, 768 px tall) scrolls the tab rather than crush the console. */
-.section-body.fill[data-tab="workbench"] { overflow-y: auto; }
+/* (the tab's container scrolls a short window: css/app.css, CCR WORKBENCH-5) */
 .wb { min-height: 540px; }
 .wb .wb-strip-part { grid-column: 1 / -1; min-width: 0; }
 .wb .wb-part { scroll-margin-top: 12px; }

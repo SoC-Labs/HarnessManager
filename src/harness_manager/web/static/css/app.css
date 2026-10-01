@@ -270,6 +270,9 @@ body.rail-dragging, body.rail-dragging * { cursor: grabbing !important; }
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 22px 28px 32px;
 }
 .section-body.fill { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 20px; }
+/* UI v2: a short window (banners above, 768 px tall) scrolls the Workbench rather than crush its
+   console (CCR WORKBENCH-5) */
+.section-body.fill[data-tab="workbench"] { overflow-y: auto; }
 
 /* --- grid and cards -------------------------------------------------------------------- */
 
@@ -1346,36 +1349,6 @@ button.link {
 .modal-foot {
   display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px;
   border-top: 1px solid var(--border); flex-wrap: wrap;
-}
-
-/* the Workbench stub: today's Program, Consoles and Debug, stacked; the console keeps a
-   terminal's height inside the scrolling page */
-.wb-part { scroll-margin-top: 12px; }
-.wb-consoles { display: flex; flex-direction: column; height: min(560px, 70vh); min-height: 320px; }
-
-/* the Board stub: its six pages in a side list */
-.board-pages { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 20px; align-items: start; }
-.board-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
-.board-nav button {
-  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0;
-  background: transparent; padding: 7px 10px; border-radius: 6px; cursor: pointer;
-  color: var(--text-2); font-size: 13px;
-}
-.board-nav button:hover { background: var(--hover); color: var(--text); }
-.board-nav button .icon { color: var(--text-3); }
-.board-nav button[aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); }
-.board-nav button[aria-current="page"] .icon { color: var(--accent-text); }
-.board-nav .badge {
-  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px;
-  display: inline-grid; place-items: center; background: var(--err); color: var(--on-badge);
-}
-.board-page { min-width: 0; }
-.board-page-head { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.board-page-head .icon { color: var(--text-3); }
-@media (max-width: 1180px) {
-  .board-pages { grid-template-columns: minmax(0, 1fr); }
-  .board-nav { flex-direction: row; flex-wrap: wrap; position: static; }
-  .board-nav button { width: auto; }
 }
 
 /* the sidebar card (step 4): the lease row with "+N waiting", the mini download bar, the
