@@ -1590,6 +1590,12 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         await asyncio.to_thread(gate.start)
         # --- end ui2 api-hub ---
         bridge = ConsoleBridge(stream, outbox, d.bus, bid, key, name)
+        # The bridge hears console.state from here on; a change between the `initial` read and
+        # now (a fresh upstream going up while the socket was accepted) was heard by nobody,
+        # and the page stayed "connecting" with the console up. Say the state again if it moved.
+        now = state_of(bid, key) if callable(state_of) else initial
+        if now != initial:
+            outbox.put(json.dumps({"state": now, "name": name, "detail": ""}))
         bridge.start()
 
         async def to_board(message: dict[str, Any]) -> None:
