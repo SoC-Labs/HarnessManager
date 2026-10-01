@@ -474,3 +474,40 @@ def test_negative_twin_another_boards_events_are_not_recent_here(page_factory):
     expect(by_id(page, "wb-recent")).to_contain_text("refused, not run", timeout=T)
     workbench(page, BOARD_USB)
     expect(by_id(page, "wb-recent")).not_to_contain_text("refused, not run")
+
+
+# --- landing from Build or the Import dialog (CCR-2 from the BUILD lane) -----------------------------
+
+
+def land_picked(page, bid, name):
+    """What import.js pickOnWorkbench does: the design in `selectedOverlay`, the list dropped,
+    then the Workbench, a fresh list and the design's preflight."""
+    page.evaluate("""async ([bid, name]) => {
+      const s = await import('./js/store.js');
+      const b = s.boardState(bid);
+      b.selectedOverlay = name; b.overlays = null;
+      s.navigate(bid, 'workbench');
+      s.loadOverlays(bid);
+      s.runPreflight(bid, name);
+    }""", [bid, name])
+
+
+def test_a_design_added_in_build_lands_picked_with_its_preflight(page_factory, engine):
+    page = page_factory(**APP)
+    nav.open_board(page, BOARD_USB)                       # on the Overview
+    land_picked(page, BOARD_USB, "led")
+    by_id(page, "section-workbench").wait_for(timeout=T)
+    expect(by_id(page, "selected-overlay")).to_have_text("led", timeout=T)
+    expect(by_id(page, "design-picker")).to_contain_text("0x0100001E")      # the list came back
+    expect(by_id(page, "preflight-summary")).to_contain_text("no mismatch", timeout=T)
+    expect(by_id(page, "reason-program")).to_contain_text("not armed")
+    assert engine.called("deploy.deploy") == []          # picked, never programmed
+
+
+def test_negative_twin_a_plain_visit_picks_nothing(page_factory):
+    page = page_factory(**APP)
+    nav.open_board(page, BOARD_USB)
+    nav.tab(page, "workbench")
+    expect(by_id(page, "design-picker")).to_contain_text("Pick a design", timeout=T)
+    expect(by_id(page, "selected-overlay")).to_have_count(0)
+    expect(by_id(page, "preflight-summary")).to_have_count(0)

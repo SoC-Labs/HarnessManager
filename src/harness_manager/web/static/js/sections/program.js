@@ -629,9 +629,12 @@ export function ProgramStrip({ bid }) {
   const b = boardState(bid);
   const u = uiOf(bid);
   const ref = useRef(null);
+  // The list is read again whenever it was dropped: Build's Add and the Import dialog land here
+  // with `overlays = null` and the design in `selectedOverlay` (import.js pickOnWorkbench).
+  const listed = !!b.overlays;
   useEffect(() => {
     if (!b.overlays && !b.overlaysLoading) loadOverlays(bid);
-  }, [bid]);
+  }, [bid, listed]);
   const store = hasCardStore(b);
   useEffect(() => {
     if (store && !b.card && !b.cardLoading) loadCard(bid);
