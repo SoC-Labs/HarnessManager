@@ -213,6 +213,7 @@ def test_a_rescue_board_is_found_opened_and_explained(stage, tmp_path, screensho
         expect(health_chip(page)).to_contain_text("Rescue")
         # harness_impl is "" in rescue: shown as unknown, never as an error.
         expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("unknown")
+        nav.board_page(page, "readings")                          # the Health card
         notes = page.locator('[data-testid="health-note"]')
         expect(notes.first).to_contain_text("RESCUE")
         expect(notes.nth(1)).to_contain_text("slot A and B failed CRC")

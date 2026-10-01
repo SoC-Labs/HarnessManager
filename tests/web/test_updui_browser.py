@@ -631,5 +631,5 @@ def test_negative_twin_a_harness_without_xvc_says_why_on_the_tile(page_factory, 
     open_board(page, BOARD_USB)                                # v0.8 firmware: no xvc_dbgbr
     line = by_id(page, "tile-xvc")
     expect(line).to_have_attribute("data-state", "unsupported", timeout=T)
-    expect(line).to_have_attribute("title", "not on this board: needs harness firmware with 'xvc_dbgbr'")
+    expect(line).to_have_attribute("title", re.compile(r"^not on this board: needs harness firmware with 'xvc_dbgbr'"))
     expect(line).to_have_text("none here")

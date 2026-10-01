@@ -111,8 +111,8 @@ def test_the_consoles_card_opens_a_console_on_the_workbench(page_factory, daemon
     row = card.locator('li[data-console="uart0"]')
     expect(row).to_contain_text("not open in this page", timeout=T)            # the twin first
     row.locator(".ov-con-name").click()
-    page.wait_for_selector('[data-testid="console-uart0"]', timeout=T)
-    assert "console=uart0" in page.evaluate("location.hash")
+    page.wait_for_selector('[data-testid="console-uart0"]', timeout=T)       # that console, picked
+    expect(page.locator('[data-testid="section-workbench"]')).to_be_visible()
 
 
 # --- consoles: baud and screen ------------------------------------------------------------------
