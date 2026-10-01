@@ -40,8 +40,8 @@ from harness_manager.core.errors import RefusedError
 MB_DIR = "MB/HBI0309C"
 BOARD_TXT = f"{MB_DIR}/board.txt"
 #: The key, case-blind as the MCC's own parser; the value is the first word after the colon.
-_LINE = re.compile(r"^[ \t]*MBBIOS[ \t]*:[ \t]*([^\s;]+)[^\r\n]*$", re.I | re.M)
-_SECTION = re.compile(r"^[ \t]*\[([^\]]+)\][^\r\n]*$", re.M)
+_LINE = re.compile(r"^[ \t]*MBBIOS[ \t]*:[ \t]*([^\s;]+)[^\r\n]*", re.I | re.M)
+_SECTION = re.compile(r"^[ \t]*\[([^\]\r\n]+)\][^\r\n]*", re.M)
 ALLOW_FLAG = "--allow-mcc-update"
 #: The refusal's ``error.data`` key (the app and the API read it).
 DATA_KEY = "mcc_update"

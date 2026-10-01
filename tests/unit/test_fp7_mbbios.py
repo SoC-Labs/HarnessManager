@@ -227,3 +227,29 @@ def test_the_boards_v132_is_the_releases_132():
 def test_twin_a_really_different_version_still_differs():
     assert not mcc_fw_tested("v1.4.1", ("1.3.2",)) and not mcc_fw_tested("1.3.20", ("1.3.2",))
     assert mcc_version("vv1.3.2") != mcc_version("1.3.2")      # one leading v only
+
+
+# --- integ fix7: board.txt with DOS line endings (a stock card's) ----------------------------
+
+def test_a_crlf_cards_line_is_read_and_kept():
+    from harness_manager_mps3 import mbbios as m
+    assert m.mbbios_line("[MCCS]\r\nMBBIOS: mbb_v132.ebf ;c\r\n") == (
+        "MBBIOS: mbb_v132.ebf ;c", "mbb_v132.ebf")
+    card = b"[MCCS]\r\nMBBIOS: mbb_v132.ebf ;card\r\n"
+    for bundle in (b"[MCCS]\nMBBIOS: mbb_v141.ebf ;ours\n",
+                   b"[MCCS]\r\nMBBIOS: mbb_v141.ebf ;ours\r\n"):
+        d = m.decide(bundle, card_board_txt=card, card_files=["MB/HBI0309C/mbb_v141.ebf"])
+        assert d.action == m.KEPT and d.value == "mbb_v132.ebf"
+        assert b"mbb_v141" not in d.content and b"MBBIOS: mbb_v132.ebf ;card" in d.content
+        nl = b"\r\n" if b"\r\n" in bundle else b"\n"
+        assert d.content.endswith(nl) and b"\r\r" not in d.content
+
+
+def test_twin_a_crlf_card_with_no_line_still_follows_the_no_line_rule():
+    from harness_manager_mps3 import mbbios as m
+    card = b"[MCCS]\r\nUSER_SWITCH: 0\r\n"
+    bundle = b"[MCCS]\r\nMBBIOS: mbb_v141.ebf\r\n"
+    d = m.decide(bundle, card_board_txt=card, card_files=[])
+    assert d.action == m.FROM_BUNDLE and d.content == bundle
+    with pytest.raises(RefusedError, match="update itself to MBB_V141.EBF|update itself to mbb_v141.ebf"):
+        m.decide(bundle, card_board_txt=card, card_files=["MB/HBI0309C/MBB_V141.EBF"])
