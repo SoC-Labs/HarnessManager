@@ -253,3 +253,21 @@ def test_twin_a_crlf_card_with_no_line_still_follows_the_no_line_rule():
     assert d.action == m.FROM_BUNDLE and d.content == bundle
     with pytest.raises(RefusedError, match="update itself to MBB_V141.EBF|update itself to mbb_v141.ebf"):
         m.decide(bundle, card_board_txt=card, card_files=["MB/HBI0309C/MBB_V141.EBF"])
+
+
+def test_a_bundle_with_two_mbbios_lines_never_brings_the_second():
+    from harness_manager_mps3 import mbbios as m
+    bundle = b"[MCCS]\r\nMBBIOS: mbb_v141.ebf\r\nX: 1\r\nmbbios: mbb_v999.ebf ;dup\r\n"
+    d = m.decide(bundle, card_board_txt=b"[MCCS]\nMBBIOS: mbb_v132.ebf\n", card_files=[])
+    assert d.action == m.KEPT and d.content.count(b"MBBIOS") + d.content.count(b"mbbios") == 1
+    assert b"mbb_v132.ebf" in d.content and b"v141" not in d.content and b"v999" not in d.content
+    assert d.content == b"[MCCS]\r\nMBBIOS: mbb_v132.ebf\r\nX: 1\r\n"
+
+
+def test_twin_no_card_line_the_first_bundle_line_rules_and_the_second_goes():
+    from harness_manager_mps3 import mbbios as m
+    bundle = b"[MCCS]\nMBBIOS: mbb_v141.ebf\nMBBIOS: mbb_v999.ebf\n"
+    d = m.decide(bundle, card_board_txt=None, card_files=["MB/HBI0309C/mbb_v999.ebf"])
+    assert d.action == m.FROM_BUNDLE and d.content == b"[MCCS]\nMBBIOS: mbb_v141.ebf\n"
+    with pytest.raises(RefusedError, match="mbb_v141.ebf"):
+        m.decide(bundle, card_board_txt=None, card_files=["MB/HBI0309C/mbb_v141.ebf"])

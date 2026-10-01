@@ -96,12 +96,24 @@ def _insert(bundle: str, line: str) -> str:
     return bundle + ("" if not bundle or bundle.endswith(("\n", "\r")) else nl) + line + nl
 
 
+def _one_line(text: str) -> str:
+    """``text`` with only its FIRST MBBIOS line: any later one goes, with its line ending, so
+    a bundle that names two never brings a second to the card."""
+    first = _LINE.search(text)
+    if first is None:
+        return text
+    head, tail = text[:first.end()], text[first.end():]
+    return head + re.sub(r"^[ \t]*MBBIOS[ \t]*:[^\r\n]*(?:\r\n|\n|\r)?", "", tail,
+                         flags=re.I | re.M)
+
+
 def decide(bundle_board_txt: bytes, *, card_board_txt: bytes | None,
            card_files: Iterable[str], allow_mcc_update: bool = False) -> MbbiosDecision:
     """The board.txt to write for ``bundle_board_txt`` on a card whose board.txt is
     ``card_board_txt`` (None: none) and whose files are ``card_files`` (SD-relative paths).
     Raises the refusal (15) for a card that would make the MCC update itself."""
-    bundle = bundle_board_txt.decode("latin-1")
+    bundle = _one_line(bundle_board_txt.decode("latin-1"))
+    bundle_board_txt = bundle.encode("latin-1")
     card = card_board_txt.decode("latin-1") if card_board_txt is not None else ""
     ours = mbbios_line(bundle)
     theirs = mbbios_line(card) if card_board_txt is not None else None
