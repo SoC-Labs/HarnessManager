@@ -168,11 +168,13 @@ def make_parser() -> argparse.ArgumentParser:
     vp.add_argument("--keep-on-card", action="store_true",
                     help="also keep the design on the board's user microSD, so it boots into "
                          "it next time (off by default)")
+    vp.add_argument("--force", action="store_true", help=cmd_program.FORCE_HELP)
     vp.set_defaults(fn=cmd_program.cmd_program)
 
     vp = verb("restore", "load the baseline design and confirm it", layout="restore",
               parents=(fmt, usb, ovl))
     target(vp)
+    vp.add_argument("--force", action="store_true", help=cmd_program.FORCE_HELP)
     vp.set_defaults(fn=cmd_program.cmd_restore)
 
     # -- consoles and debug --------------------------------------------------------

@@ -1393,6 +1393,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def deploy(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         keep = _bool(_obj(body), "keep_on_card", False)
+        # FIX-PACK-7: swap even when the board's OpenOCD cannot be stopped first (a warning)
+        force = {"force": True} if _bool(_obj(body), "force", False) else {}
         ui2_holder(bid, s, "deploy", _obj(body))            # ui2 api-hub (G7): 409 HELD
         overlay, items, refusal = _preflight(bid, s, _obj(body).get("overlay"))
         if refusal is not None:            # refuse BEFORE deploy() is ever called
@@ -1416,9 +1418,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
-                if keep:                   # the keyword only when asked (off by default)
-                    return d.engine.deploy.deploy(s, overlay, keep_on_card=True)
-                return d.engine.deploy.deploy(s, overlay)
+                if keep:                   # the keywords only when asked (off by default)
+                    return d.engine.deploy.deploy(s, overlay, keep_on_card=True, **force)
+                return d.engine.deploy.deploy(s, overlay, **force)
             finally:
                 unsubscribe()
 
@@ -1427,6 +1429,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     @api.post("/boards/{bid:path}/restore")
     def restore(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
+        force = {"force": True} if _bool(_obj(body), "force", False) else {}    # FIX-PACK-7
         ui2_holder(bid, s, "restore", _obj(body))           # ui2 api-hub (G7): 409 HELD
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
@@ -1439,7 +1442,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
             unsubscribe = d.bus.subscribe("deploy.progress", on_progress)
             try:
-                return d.engine.deploy.restore_baseline(s)
+                return d.engine.deploy.restore_baseline(s, **force)
             finally:
                 unsubscribe()
 

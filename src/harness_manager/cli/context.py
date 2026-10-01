@@ -273,6 +273,8 @@ def describe_event(ev: Event) -> str:
         return f"{head}: {d.get('phase', 'progress')} {done}/{total or '?'}{pct}"
     if kind == "failed":
         return f"{head}: failed: {d.get('reason', 'no reason given')}"
+    if kind == "warning":                       # FIX-PACK-7: deploy.warning {message}
+        return f"{head}: warning: {d.get('message', 'no message given')}"
     if kind == "started":
         what = d.get("overlay") or d.get("rm") or ""
         return f"{head}: started {what} {d.get('rm_id', '')}".rstrip()
