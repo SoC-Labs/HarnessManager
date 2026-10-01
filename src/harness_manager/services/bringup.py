@@ -716,21 +716,28 @@ def sd_flash(state_dir: Any = None, env: dict[str, str] | None = None) -> dict[s
 
 def signing(engine: Any) -> dict[str, Any]:
     """Whether a signed release can be verified here (docs/KEYS.md): the update service's
-    trusted keys. None pinned means every real channel is refused, by design."""
+    trusted keys. None pinned means every real channel is refused, by design; ``reason`` is
+    then the trust store's own refusal, word for word (what Read the list will answer)."""
     svc = getattr(engine, "update", None)
     if svc is None:
-        return {"keys": 0, "refused": True,
+        return {"keys": 0, "refused": True, "name": "UNAVAILABLE", "hint": "",
                 "reason": "this build has no harness catalogue (no update service)"}
     trust = getattr(svc, "trust", None)
     try:
         keys = len(trust.all_keys()) if trust is not None else 0
     except Exception:  # noqa: BLE001 - a trust store that cannot list keys trusts none
         keys = 0
-    refused = keys == 0
-    return {"keys": keys, "refused": refused,
-            "reason": ("releases are refused until SoC Labs publishes its signing keys "
-                       "(docs/KEYS.md): this build pins none, so no channel verifies. Use a "
-                       "bundle folder or zip meanwhile") if refused else ""}
+    if keys:
+        return {"keys": keys, "refused": False, "name": "", "hint": "", "reason": ""}
+    reason, hint = "cannot verify channel.json: this build has no pinned update-signing keys", ""
+    try:
+        if trust is not None:
+            trust.verify_for_channel(b"", b"", "stable")
+    except RefusedError as exc:                  # the store's own words (trust.py)
+        reason, hint = exc.message, exc.hint or ""
+    except Exception:  # noqa: BLE001 - any other failure: keep the documented words
+        pass
+    return {"keys": 0, "refused": True, "name": "REFUSED", "reason": reason, "hint": hint}
 
 
 def status(engine: Any, state_dir: Any = None) -> dict[str, Any]:

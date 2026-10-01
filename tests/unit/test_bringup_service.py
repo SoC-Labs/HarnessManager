@@ -394,16 +394,22 @@ class Upd:
         self.trust = Trust(n)
 
 
-def test_releases_are_refused_while_no_signing_key_is_pinned():
+def test_releases_are_refused_while_no_signing_key_is_pinned_in_the_stores_own_words():
+    from harness_manager.services.update.trust import TrustStore
+
     for eng in (object(), type("E", (), {"update": Upd(0)})()):
         got = bringup.signing(eng)
         assert got["refused"] is True and got["keys"] == 0
-    assert "docs/KEYS.md" in bringup.signing(type("E", (), {"update": Upd(0)})())["reason"]
+    real = type("U", (), {"trust": TrustStore(pinned=())})()
+    got = bringup.signing(type("E", (), {"update": real})())
+    assert got["name"] == "REFUSED"
+    assert got["reason"] == "cannot verify channel.json: this build has no pinned update-signing keys"
+    assert "install updates by hand" in got["hint"]
 
 
 def test_twin_a_pinned_key_lets_releases_through():
     got = bringup.signing(type("E", (), {"update": Upd(1)})())
-    assert got == {"keys": 1, "refused": False, "reason": ""}
+    assert got == {"keys": 1, "refused": False, "name": "", "hint": "", "reason": ""}
 
 
 def test_status_carries_the_switches_the_network_door_and_the_card_image_hint():

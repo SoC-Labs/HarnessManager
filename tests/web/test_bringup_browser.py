@@ -214,7 +214,7 @@ def test_twin_an_ebf_bundle_is_refused_and_nothing_can_be_written(demo):
     expect(by(page, "bundle-problem")).to_contain_text(".ebf (board-controller firmware) is "
                                                        "never written")
     expect(by(page, "bundle-refused")).to_contain_text("Nothing was written.")
-    expect(by(page, "reason-bu_write")).to_contain_text("choose and check the source first")
+    expect(by(page, "reason-bu_write")).to_contain_text("the bundle is refused (step 1)")
     assert not page.errors, page.errors
 
 
@@ -226,9 +226,11 @@ def test_releases_are_refused_plainly_while_no_signing_key_exists(demo):
     page = demo.page()
     add_and_open(page)
     page.get_by_role("button", name="A signed harness release").click()
-    expect(by(page, "release-refused")).to_contain_text("Releases are refused until signing "
-                                                        "keys exist", timeout=T)
-    expect(by(page, "release-refused")).to_contain_text("docs/KEYS.md")
+    refused = by(page, "release-refused")
+    expect(refused).to_contain_text("Releases are refused here until signing keys exist", timeout=T)
+    expect(refused).to_contain_text("docs/KEYS.md")
+    expect(refused).to_contain_text("REFUSED: cannot verify channel.json: this build has no "
+                                    "pinned update-signing keys")
     page.locator('[data-action="release-read"]').click()
     expect(by(page, "release-error")).to_contain_text("REFUSED", timeout=T)
     expect(by(page, "release-rows")).to_have_count(0)                # never a fake success
@@ -390,4 +392,209 @@ def test_the_wizard_reopens_where_it_was_from_board_versions(demo):
     page.evaluate(f"import('./js/store.js').then(m => m.navigate({BOARD_NEW_USB!r}, 'board/versions'))")
     page.locator('[data-testid="config-sd-bringup"] [data-action="bringup-open"]').click()
     expect(by(page, "bundle-check")).to_be_visible(timeout=T)        # kept
+    assert not page.errors, page.errors
+
+
+# --- the card reader (SD-FLASH's routes, faked to the contract) --------------------------------
+
+
+def reader_on(demo: Demo, monkeypatch, **kw: Any) -> Any:
+    from tests.fakes.bringup_cardwriter import FakeCardwriter
+
+    monkeypatch.setenv(bringup.SD_FLASH_ENV, "on")
+    return FakeCardwriter(**kw).attach(demo.daemon.app)
+
+
+def pick_card(page: Any, kind: str, phrase: str) -> None:
+    from tests.fakes.bringup_cardwriter import DEVICE
+
+    page.locator(f'[data-testid="reader-device-{kind}"]').select_option(DEVICE["id"])
+    page.locator(f'[data-testid="reader-confirm-{kind}"]').fill(phrase)
+
+
+def test_the_reader_door_writes_the_files_then_asks_for_the_card_back_no_mcc_reboot(demo,
+                                                                                     monkeypatch):
+    from tests.fakes.bringup_cardwriter import DEVICE
+
+    fake = reader_on(demo, monkeypatch)
+    page = demo.page()
+    add_and_open(page)
+    check(page, demo.example(0))
+    back_up(page)
+    page.get_by_role("button", name="SD card in this PC's card reader").click()
+    expect(by(page, "bu-reader-disabled")).to_have_count(0, timeout=T)
+    phrase = f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}"
+    pick_card(page, "files", "WRITE something else")
+    expect(by(page, "reason-bu_reader")).to_contain_text(f"type {phrase} to confirm")
+    pick_card(page, "files", phrase)
+    page.locator('[data-testid="arm-bu-reader"] input').check()
+    page.locator('[data-action="bu_reader"]').click()
+    expect(by(page, "bu-reader-result")).to_contain_text("files written and verified", timeout=T)
+    (w,) = fake.writes
+    assert w["kind"] == "files" and w["confirm"] == phrase and w["source"].endswith("/sd")
+    expect(by(page, "bu-put-back")).to_contain_text("put the card back in the board's "
+                                                    "configuration SD slot and power the board on")
+    expect(by(page, "bu-step-reboot").locator('[data-action="reboot"]')).to_have_count(0)
+    expect(by(page, "reason-bu_witness")).to_contain_text("put the card back")
+    demo.engine.bringup_dark = False
+    from harness_manager.demo_showcase import _bringup_come_up
+
+    _bringup_come_up(demo.engine, {"impl": "bare-metal"})          # the card is back, the board on
+    by(page, "bu-replaced").check()
+    page.locator('[data-action="bu_witness"]').click()
+    expect(by(page, "bu-witness-result")).to_contain_text("a harness answers", timeout=T)
+    assert demo.engine.called("storage.install") == [] and demo.engine.called("controller.reboot") == []
+    assert not page.errors, page.errors
+
+
+def test_twin_a_reader_without_privilege_shows_the_command_and_never_escalates(demo, monkeypatch):
+    from tests.fakes.bringup_cardwriter import DEVICE
+
+    reader_on(demo, monkeypatch, privilege=True)
+    page = demo.page()
+    add_and_open(page)
+    check(page, demo.example(0))
+    back_up(page)
+    page.get_by_role("button", name="SD card in this PC's card reader").click()
+    pick_card(page, "files", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
+    page.locator('[data-testid="arm-bu-reader"] input').check()
+    page.locator('[data-action="bu_reader"]').click()
+    res = by(page, "bu-reader-result")
+    expect(res).to_contain_text("Harness Manager never escalates", timeout=T)
+    expect(res).to_contain_text("sudo dd if=")
+    expect(by(page, "bu-step-write")).to_have_attribute("data-state", "todo")   # not written
+    assert not page.errors, page.errors
+
+
+def test_the_os_step_writes_a_whole_card_image_as_kind_card(demo, monkeypatch):
+    from tests.fakes.bringup_cardwriter import DEVICE
+
+    fake = reader_on(demo, monkeypatch)
+    page = demo.page()
+    bring_up(page, demo.example(1))
+    os_step = by(page, "bu-step-os")
+    expect(os_step).to_be_visible(timeout=T)
+    os_step.locator('[data-option="reader"] input').check()
+    card = demo.engine.bringup_card_image
+    by(page, "bu-card-image").fill(card)
+    pick_card(page, "card", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
+    page.locator('[data-testid="arm-bu-os"] input').check()
+    page.locator('[data-action="bu_os"]').click()
+    expect(by(page, "bu-os-result")).to_contain_text("whole-card image written and verified",
+                                                     timeout=T)
+    (w,) = fake.writes
+    assert w["kind"] == "card" and w["source"] == card
+    expect(by(page, "bu-os-back")).to_contain_text("power-cycle the board")
+    assert not page.errors, page.errors
+
+
+def test_twin_the_os_step_refuses_a_slot_image_as_the_card(demo, monkeypatch):
+    from tests.fakes.bringup_cardwriter import DEVICE
+
+    fake = reader_on(demo, monkeypatch)
+    page = demo.page()
+    bring_up(page, demo.example(1))
+    os_step = by(page, "bu-step-os")
+    expect(os_step).to_be_visible(timeout=T)
+    os_step.locator('[data-option="reader"] input').check()
+    by(page, "bu-card-image").fill("/home/me/mps3-harness-2.0.0/linux_slot.img")
+    expect(by(page, "bu-card-why")).to_contain_text("SLOT image")
+    pick_card(page, "card", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
+    page.locator('[data-testid="arm-bu-os"] input').check()
+    expect(by(page, "reason-bu_os")).to_contain_text("SLOT image")
+    page.locator('[data-action="bu_os"]').click(force=True)
+    expect(by(page, "bu-os-result")).to_contain_text("Nothing was run.")
+    assert fake.writes == []
+    assert not page.errors, page.errors
+
+
+# --- a signed release over the Debug USB (the demo's catalogue trusts its throwaway key) --------
+
+
+def pick(page: Any, version: str) -> None:
+    page.get_by_role("button", name="A signed harness release").click()
+    page.locator('[data-action="release-read"]').click()
+    row = by(page, "release-rows").locator("li", has_text=version).first
+    expect(row).to_be_visible(timeout=T)
+    row.locator("input").check()
+    expect(by(page, "release-plan")).to_be_visible(timeout=T)
+
+
+def written_not_running(demo: Demo, monkeypatch) -> None:
+    """RELEASE-PIPE's proven outcome of a USB-only install of a bare-metal release: the SD is
+    written and the board rebooted, and nothing can confirm the harness without Ethernet, so
+    the install ends written-not-running (exit 6) BY DESIGN. The demo catalogue's parts are
+    placeholders its own checks refuse, so the outcome is the executor's, scripted here."""
+    from harness_manager.demo_showcase import _bringup_come_up
+    from harness_manager.services import harness_catalog
+    from harness_manager.services.update.executor import RESULT_WRITTEN, UpdateOutcome
+
+    def install(self, session, plan, approval, verified, *, by="user"):
+        _bringup_come_up(demo.engine, {"impl": "bare-metal"})     # it comes up on Ethernet
+        return UpdateOutcome(session.candidate.board_id, plan.version, RESULT_WRITTEN,
+                             "written, not running: after the reboot the board does not report "
+                             f"harness {plan.version} (shell_id: nothing to compare)",
+                             evidence={"summary": "REBOOT witnessed (MCC banner)"},
+                             backup={"path": "/tmp/bk.zip", "sha256": "0" * 64},
+                             restore_hint="harness rollback TARGET --backup /tmp/bk.zip")
+
+    monkeypatch.setattr(harness_catalog.HarnessCatalog, "install", install)
+
+
+def test_a_bare_metal_release_over_usb_is_written_then_witnessed_never_a_failure(demo,
+                                                                                 monkeypatch):
+    written_not_running(demo, monkeypatch)
+    page = demo.page()
+    add_and_open(page)
+    pick(page, "1.1.0")
+    phrase = by(page, "release-phrase")
+    expect(phrase).to_be_visible()           # the static is unknown over USB: a typed re-key
+    expect(by(page, "reason-bu_write")).to_contain_text("to confirm the re-key")
+    phrase.fill(by(page, "release-plan").locator("label code").inner_text())
+    back_up(page)
+    write_usb(page)
+    res = by(page, "bu-write-result")
+    expect(res).to_contain_text("written to the configuration SD, and the board rebooted")
+    expect(res).to_contain_text("step 4 waits for it on Ethernet")
+    expect(res.locator(".rc.ok")).to_be_visible()                   # rc 0, never a failure
+    expect(by(page, "bu-release-rebooted")).to_be_visible()
+    page.locator('[data-action="bu_witness"]').click()
+    expect(by(page, "bu-witness-result")).to_contain_text("a harness answers", timeout=T)
+    assert not page.errors, page.errors
+
+
+def test_twin_a_linux_release_over_usb_shows_the_planners_refusal(demo):
+    page = demo.page()
+    add_and_open(page)
+    page.get_by_role("button", name="A signed harness release").click()
+    by(page, "release-all").check()                       # 2.0.0, the Linux harness, is beta
+    page.locator('[data-action="release-read"]').click()
+    rows = by(page, "release-rows")
+    linux = rows.locator("li", has_text="linux")
+    expect(linux.first).to_be_visible(timeout=T)
+    linux.first.locator("input").check()
+    expect(by(page, "release-blocker").first).to_contain_text("The planner refuses this release "
+                                                              "here:", timeout=T)
+    expect(by(page, "release-linux-usb")).to_contain_text("whole-card image in step 5")
+    expect(by(page, "reason-bu_write")).to_contain_text("the planner refuses this release here")
+    assert not page.errors, page.errors
+
+
+def test_twin_written_not_running_on_a_board_with_ethernet_stays_a_failure(demo, monkeypatch):
+    from harness_manager.demo_showcase import BOARD_V011
+    from tests.web import nav
+
+    written_not_running(demo, monkeypatch)
+    page = demo.page()
+    nav.open_board(page, BOARD_V011)
+    page.evaluate(f"import('./js/bringup.js').then(m => m.openBringup({BOARD_V011!r}))")
+    expect(by(page, "bringup")).to_be_visible(timeout=T)
+    pick(page, "1.1.1")
+    back_up(page)
+    page.locator('[data-testid="arm-bu-write"] input').check()
+    page.locator('[data-action="bu_write"]').click()
+    res = by(page, "bu-write-result")
+    expect(res).to_contain_text("ACTION_FAILED", timeout=T)
+    expect(res).to_contain_text("written, not running")
+    expect(by(page, "bu-step-write")).to_have_attribute("data-state", "todo")
     assert not page.errors, page.errors

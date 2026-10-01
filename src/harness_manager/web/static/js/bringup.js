@@ -135,6 +135,17 @@ function backupOf(bid) {
   return (wk.lastBackup && wk.lastBackup.path) || "";
 }
 
+// One write at a time per board: the service's board gate covers the Debug USB jobs; a card in
+// this PC's reader is not the board's job, so the wizard holds its own writes back too.
+const WRITES = { bu_write: "the write", bu_reader: "the card write", bu_os: "the card write",
+  bu_restore: "the restore", sd_backup: "the backup", reboot: "the reboot" };
+export function otherWrite(bid, self) {
+  for (const [panel, what] of Object.entries(WRITES)) {
+    if (panel !== self && panelState(bid, panel).running) return `waiting for ${what} to finish (one write at a time)`;
+  }
+  return "";
+}
+
 // A job of a BRINGUP_ENDPOINTS route: the board is busy at once, then its result.
 async function bringupJob(name, bid, body, onProgress, kind) {
   const { data } = await bringupCall(name, { bid }, body);
@@ -349,7 +360,8 @@ async function readReleases(bid) {
   changed();
   const src = w.relSource.trim();
   try {
-    const { data } = await call("harnessRefresh", {}, { board_id: bid, ...(src ? { source: src } : {}) });
+    const { data } = await call("harnessRefresh", {}, { board_id: bid, ...(src ? { source: src } : {}),
+      ...(w.relAll ? { all: true } : {}) });
     setJob(bid, data.job, "harness_refresh");
     w.rel = await waitJob(data.job, {});
   } catch (e) {
@@ -381,14 +393,17 @@ function ReleaseSource({ bid, w }) {
   const rows = (w.rel && w.rel.releases) || [];
   const plan = w.plan && w.plan.plan;
   return html`<div class="stack gap-12">
-    ${sign && sign.refused ? html`<${Reason} level="warn" testid="release-refused" icon="shield-check" text=${`Releases are refused until signing keys exist: ${sign.reason}.`} />` : null}
+    ${sign && sign.refused ? html`<${Reason} level="warn" testid="release-refused" icon="shield-check"
+      text=${`Releases are refused here until signing keys exist (docs/KEYS.md): ${sign.name ? `${sign.name}: ` : ""}${sign.reason}${sign.hint ? ` (${sign.hint})` : ""}`} />` : null}
     <div class="field"><label for=${`bu-src-${bid}`}>Source</label>
       <input id=${`bu-src-${bid}`} class="input mono grow" data-testid="release-source"
         placeholder="the catalogue (default), github:OWNER/REPO, a URL or a mirror folder" value=${w.relSource}
         onInput=${(e) => { w.relSource = e.target.value; changed(); }} />
       <button type="button" class="btn sm" data-action="release-read" disabled=${w.relLoading}
         aria-busy=${w.relLoading ? "true" : undefined} onClick=${() => readReleases(bid)}>
-        ${w.relLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`} Read the list</button></div>
+        ${w.relLoading ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`} Read the list</button>
+      <label class="check-inline" title="Also list the beta and dev channels"><input type="checkbox" data-testid="release-all"
+        checked=${!!w.relAll} onChange=${(e) => { w.relAll = e.target.checked; changed(); }} />beta and dev</label></div>
     ${w.relError ? html`<${Reason} level="err" testid="release-error" text=${`${w.relError.errName}: ${w.relError.message}${w.relError.hint ? ` (${w.relError.hint})` : ""}`} />` : null}
     ${w.rel && !rows.length ? html`<${Reason} level="warn" text="The channel lists no harness release." />` : null}
     ${rows.length ? html`<ul class="bu-rels" data-testid="release-rows">${rows.map((r) => html`<li key=${r.version}>
@@ -398,12 +413,22 @@ function ReleaseSource({ bid, w }) {
     ${w.planError ? html`<${Reason} level="err" text=${`${w.planError.errName}: ${w.planError.message}`} />` : null}
     ${plan ? html`<div class="bu-plan" data-testid="release-plan">
       <ul class="small">${(plan.steps || []).map((s, i) => html`<li key=${i}>${s.detail || s.what || s.step || JSON.stringify(s)}</li>`)}</ul>
-      ${(plan.blockers || []).map((b) => html`<${Reason} key=${b} level="err" text=${b} />`)}
+      ${(plan.blockers || []).map((b) => html`<${Reason} key=${b} level="err" testid="release-blocker" text=${`The planner refuses this release here: ${b}`} />`)}
+      ${(plan.blockers || []).length && linux(w) ? html`<${Reason} testid="release-linux-usb"
+        text="A Linux release cannot be installed over the Debug USB today: its OS image needs the running harness (HARNESS-DIST L3). Write its configuration SD from its bundle (a folder or zip), then the user microSD with a whole-card image in step 5." />` : null}
       ${plan.consent_phrase ? html`<div class="field"><label>Type <code>${plan.consent_phrase}</code></label>
         <input class="input mono grow" data-testid="release-phrase" value=${w.typed}
           onInput=${(e) => { w.typed = e.target.value; changed(); }} /></div>` : null}
     </div>` : null}
   </div>`;
+}
+
+function sourceWhy(w) {
+  if (w.source === "bundle") return w.check && w.check.refused ? "the bundle is refused (step 1)" : "choose and check the source first (step 1)";
+  const plan = w.plan && w.plan.plan;
+  if (plan && (plan.blockers || []).length) return `the planner refuses this release here: ${plan.blockers[0]}`;
+  if (plan && plan.consent_phrase && w.typed.trim() !== plan.consent_phrase) return `type ${plan.consent_phrase} in step 1 to confirm the re-key`;
+  return "choose and check the source first (step 1)";
 }
 
 function sourceReady(w) {
@@ -431,7 +456,7 @@ function BackupStep({ bid, w, ready }) {
     <p class="small secondary">Mandatory: a zip of the whole card with a sha256 manifest, kept in this service's state. It is your way back.</p>
     <${ActionRow} bid=${bid} panel="sd_backup" spec=${spec} icon="download"
       gate=${{ capability: "storage_backup", adapter: "storage", holder: "Back up the SD",
-        guard: () => (ready ? "" : "choose and check the source first (step 1)") }} />
+        guard: () => otherWrite(bid, "sd_backup") || (ready ? "" : sourceWhy(w)) }} />
     ${path ? html`<p class="small" data-testid="bu-backup-path">Backup <span class="mono">${path}</span></p>` : null}
     <${ResultBlock} lines=${p.lines} panel=${p} testid="bu-backup-result" />
   <//>`;
@@ -497,7 +522,9 @@ function WriteStep({ bid, w, ready }) {
   const pu = panelState(bid, "bu_write");
   const pr = panelState(bid, "bu_reader");
   const guard = () => {
-    if (!ready) return "choose and check the source first (step 1)";
+    const busy = otherWrite(bid, usb ? "bu_write" : "bu_reader");
+    if (busy) return busy;
+    if (!ready) return sourceWhy(w);
     if (!backup) return "back up the SD first (step 2)";
     return "";
   };
@@ -505,23 +532,30 @@ function WriteStep({ bid, w, ready }) {
   const usbSpec = release ? {
     key: "bu_write", label: "Install over the Debug USB", busyLabel: "Installing...", budgetS: 900,
     command: `harness install ${bid} ${w.pick} --door usb`,
-    run: (ctx) => {
+    run: async (ctx) => {
       const plan = (w.plan && w.plan.plan) || {};
-      return call("harnessInstall", { bid }, {
+      const { data } = await call("harnessInstall", { bid }, {
         fingerprint: plan.fingerprint, version: w.pick, via: "usb",
         ...(w.relSource.trim() ? { source: w.relSource.trim() } : {}),
         ...(plan.consent_phrase ? { rekey_phrase: w.typed.trim() } : {}),
-      }).then(({ data }) => { setJob(bid, data.job, "harness_install"); return waitJob(data.job, { onProgress: (d) => ctx.progress(`${d.phase || "install"}: ${pct(d)}%`, d.phase) }); });
+      });
+      setJob(bid, data.job, "harness_install");
+      try {
+        return await waitJob(data.job, { onProgress: (d) => ctx.progress(`${d.phase || "install"}: ${pct(d)}%`, d.phase) });
+      } catch (e) {
+        // RELEASE-PIPE: over the Debug USB alone nothing can confirm the harness, so a written
+        // and rebooted board ends written-not-running BY DESIGN: written; now witness (step 4).
+        const out = e && e.data && e.data.outcome;
+        if (out && out.result === "written-not-running" && usbOnly(bid)) return { ...out, usb_only: true };
+        throw e;
+      }
     },
-    render: (out) => [{ kind: "ok", text: (out && out.detail) || "installed" }],
-    renderError: (e) => {
-      const out = e && e.data && e.data.outcome;
-      return out && out.result === "written-not-running"
-        ? [{ kind: "hint", text: "Over the Debug USB alone the install cannot see the harness: step 4 waits for it on Ethernet." }] : [];
-    },
-    onDone: (ok, val) => {
-      const out = ok ? val : val && val.data && val.data.outcome;
-      if (ok || (out && out.result === "written-not-running")) {
+    render: (out) => (out && out.usb_only
+      ? [{ kind: "ok", text: `harness ${w.pick} written to the configuration SD, and the board rebooted` },
+        { kind: "out", text: "Over the Debug USB alone nothing can confirm the harness: step 4 waits for it on Ethernet." }]
+      : [{ kind: "ok", text: (out && out.detail) || "installed" }]),
+    onDone: (ok, out) => {
+      if (ok) {
         w.written = { how: "release", at: Date.now(), version: w.pick };
         w.rebooted = (out && out.evidence) || { summary: "rebooted by the install" };
         w.witness = null; w.witnessError = null;
@@ -633,7 +667,7 @@ function RebootStep({ bid, w }) {
       <p class="small secondary">The board loads the new configuration only after the MCC reloads it from the SD.</p>
       <${ArmBox} bid=${bid} armKey="reboot" text=${ARM_TEXT.reboot} />
       <${ActionRow} bid=${bid} panel="reboot" spec=${spec} variant="danger" icon="power"
-        gate=${{ ...REBOOT_GATE, guard: () => (w.written ? "" : "write the SD first (step 3)") }} />
+        gate=${{ ...REBOOT_GATE, guard: () => otherWrite(bid, "reboot") || (w.written ? "" : "write the SD first (step 3)") }} />
       <${ResultBlock} lines=${pr.lines} panel=${pr} testid="bu-reboot-result" />
     </div>`}
     <div class="stack gap-8 mt-8 bu-witness">
@@ -649,7 +683,7 @@ function RebootStep({ bid, w }) {
         <${ArmBox} bid=${bid} armKey="bu_restore" testid="arm-bu-restore" text="Arm: I understand this rewrites the configuration SD from the backup taken in step 2." />
         <${ActionRow} bid=${bid} panel="bu_restore" spec=${restoreSpec(bid)} icon="undo-2"
           gate=${{ capability: "storage_install", adapter: "storage", arm: "bu_restore", holder: "Restore the SD",
-            guard: () => (backupOf(bid) ? "" : "no backup to restore: take one in step 2") }} />
+            guard: () => otherWrite(bid, "bu_restore") || (backupOf(bid) ? "" : "no backup to restore: take one in step 2") }} />
         <${ResultBlock} lines=${px.lines} panel=${px} testid="bu-restore-result" />
       </div>` : null}
     </div>
@@ -713,7 +747,7 @@ function OsStep({ bid, w }) {
       <${DevicePicker} w=${w} field="osDevice" typedField="osTyped" kind="card" />
       <${ArmBox} bid=${bid} armKey="bu_os" testid="arm-bu-os" text="Arm: I understand this writes the whole card in this PC's reader with the image (everything on it is replaced)." />
       <${ActionRow} bid=${bid} panel="bu_os" spec=${spec} variant="primary" icon="memory-stick"
-        gate=${{ arm: "bu_os", guard: () => imageWhy || (!dev ? "choose the card" : w.osTyped.trim() !== confirmFor(dev) ? `type ${confirmFor(dev)} to confirm` : "") }} />
+        gate=${{ arm: "bu_os", guard: () => otherWrite(bid, "bu_os") || imageWhy || (!dev ? "choose the card" : w.osTyped.trim() !== confirmFor(dev) ? `type ${confirmFor(dev)} to confirm` : "") }} />
       <${ResultBlock} lines=${po.lines} panel=${po} testid="bu-os-result" />
       ${w.osDone ? html`<p class="small" data-testid="bu-os-back">Put the card in the board's user microSD slot, power-cycle the board, then witness it again (step 4).</p>` : null}
     </div>` : null}

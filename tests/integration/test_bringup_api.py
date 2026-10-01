@@ -222,6 +222,8 @@ def test_twin_the_witness_times_out_on_a_dark_address(client, board, monkeypatch
 def test_the_status_says_releases_are_refused_and_the_reader_is_off(client):
     c, _ = client
     st = c.get("/api/v1/bringup", headers=H).json()
-    assert st["signing"]["refused"] is True and "docs/KEYS.md" in st["signing"]["reason"]
+    assert st["signing"]["refused"] is True and st["signing"]["name"] == "REFUSED"
+    assert st["signing"]["reason"] == ("cannot verify channel.json: this build has no pinned "
+                                       "update-signing keys")
     assert st["sd_flash"]["enabled"] is False and st["sd_flash"]["routes"] is False
     assert st["rescue_network"]["available"] is False
