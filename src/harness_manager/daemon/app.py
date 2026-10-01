@@ -915,7 +915,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
         return Ctx(argparse.Namespace(), d.engine, "json").require(session, attr, capability)
 
-    from .readings_api import info_extra, note_telemetry     # UI2 G4 (CCR UI2-G4-1)
+    from .readings_api import info_extra, note_telemetry  # UI2 G4 (CCR UI2-G4-1)
 
     # -- extension routers (week plan lanes) ------------------------------------------------
     # Each lane adds routes in its own module ``harness_manager.daemon.<name>`` with
