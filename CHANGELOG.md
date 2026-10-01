@@ -33,6 +33,24 @@ owners.
   the swap" (also when the board's own watchdog stopped it); HM's session reopens after a
   verified swap. `debug down` also stops an on-board session HM did not start; closing the
   board stops only HM's own.
+- **OpenOCD on the board stops before EVERY swap (FIX-PACK-7, DEBUG-DOWN-FIRST, agreed with the
+  Linux lead).** Before any `program` or `restore` (the CLI, the app's Program and Restore
+  baseline, Build's Add then Program) on a claimed Linux board this HM can enter, HM runs
+  `mps3-debug down --json` over the claim's SSH first, whoever started that OpenOCD (another
+  terminal, a restarted service, `mps3-debug up` by hand) and whatever `debug.on_board` says.
+  Down (or already down) goes on; no launcher (exit 127) goes on. Anything else (the SSH did
+  not answer, another exit, an answer HM cannot read) refuses the program with exit 15
+  before anything touches the board: "`mps3-debug down` failed before the swap (…): OpenOCD
+  on the board may still drive JTAG, so nothing was programmed", hint "retry, or add --force
+  to swap anyway (on Linux v2.0.0 OpenOCD on the board may still drive JTAG during the
+  reconfiguration)". `program --force` and `restore --force` (new; the API's `force: true`;
+  the app's armed **Program anyway** / **Restore anyway**) swap with a warning instead. A
+  board whose launcher lists the `harnessd-lock` capability (Linux v2.1) warns and goes on.
+  Bare metal and unclaimed boards are unchanged.
+- **The terminal holding `debug up` follows a swap:** when the swap reopens the session it
+  prints the new gdb and `attach` lines (the ports change); when the swap was not verified it
+  prints why the session was not reopened. `debug status` on the board path no longer prints
+  this PC's `openocd … has remote_bitbang` line (it described this PC); `--json` keeps it.
 - API (additive): `DebugStatus` adds `gdb_ports`, `cores`, `where`; `debug.state` adds
   `where` (docs/API.md "OpenOCD on the board"). docs/HIL_LINUX.md step E-OCD is the silicon
   proof (needs the launcher image).
@@ -807,3 +825,8 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
 - Windows and macOS run the unit tests and the installer in CI; they have not been used
   with a real board. `install.ps1` does not yet use `constraints.txt`, the wheelhouse or
   a Start-menu entry.
+- nanosoc_multicore with OpenOCD on the board: only cpu1 can be debugged on Linux v2.0.0;
+  the board's OpenOCD refuses cpu0 (core 0 is held in reset by the boot gate; fix in v2.1).
+- nanosoc_multicore's boot ROM writes the DUT flash (one byte at 0x20000 onward, on every
+  boot): don't load it on a board whose flash holds the MicroPython image (nanosoc_upy); fix
+  in v2.1.
