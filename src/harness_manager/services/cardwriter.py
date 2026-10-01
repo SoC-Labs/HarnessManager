@@ -10,8 +10,9 @@ two things onto the card in one of them:
   make_storage_adapter``, the module convention ``pack.py`` uses), so its rules hold here
   too: a verified backup of the card as it is NOW first (taken by the job, or given), never
   an ``.ebf`` (it reflashes the MCC), never an MCC command file, journaled, read back. And
-  the card's MCC firmware selection is never changed (``mbbios_merge``: the card's
-  ``MBBIOS:`` line in board.txt is kept; see "the MCC firmware selection" below).
+  the card's MCC firmware selection is never changed (the card's ``MBBIOS:`` line in
+  board.txt is kept: the pack's rule through the pack hook, see "the MCC firmware selection"
+  below).
 - ``card``: a WHOLE-CARD image onto the whole device (the Linux harness's user microSD), as
   ``stage0_mkcard.py card --card-img`` builds it (STAGE0_CONTRACT.md §6: the MBR at LBA 0,
   the boot-select sectors at LBA 1-2, slot A at LBA 67584 and B at 198656, /persist p3, the
@@ -73,6 +74,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -840,92 +842,142 @@ def privileged_commands(disk: Disk, image: str, nbytes: int, sha256: str) -> dic
 
 # --- the MCC firmware selection in board.txt (MBBIOS) --------------------------------------------
 #
-# HM never changes which MCC firmware a configuration card selects. An ``MBBIOS:`` line names
-# the .ebf the MCC flashes itself with when that file is on the card (a copied mbb_v141.ebf
-# silently reflashes the MCC). The rule, for each board.txt a ``files`` write carries:
+# HM never changes which MCC firmware a configuration card selects. ``MB/HBI0309C/board.txt``'s
+# ``MBBIOS:`` line names the .ebf the MCC flashes ITSELF with when that file is on the card.
+# For a ``files`` write that carries a board.txt:
 #
-# - the card's board.txt HAS an MBBIOS line: it is kept (it replaces the bundle's; it is
-#   added when the bundle's board.txt has none);
+# - the card's board.txt HAS an MBBIOS line: it is kept, verbatim (it replaces the bundle's,
+#   or goes in after ``[MCCS]`` when the bundle's board.txt has none): "MBBIOS kept: <value>";
 # - the card has none (or no board.txt): the bundle's line is written unchanged when the .ebf
-#   it names is NOT on the card (the MCC finds nothing to flash); when it IS on the card the
-#   write is refused, unless ``allow_mcc_update`` (``--allow-mcc-update``);
+#   it names is NOT on the card (anywhere, any case); when it IS, the write is refused (15),
+#   unless ``allow_mcc_update`` (``--allow-mcc-update``);
 # - a board.txt is never written with an MBBIOS line removed.
 #
-# TODO(integration): use FIX-PACK-7's shared MBBIOS function (the sd writer path, rc2) here and
-# delete this local copy; the rule is the same.
+# THE PACK HOOK. The rule is the board pack's, found by the same module convention as its
+# configuration-SD writer (``<pack package>.sd:make_storage_adapter``):
+# ``<pack package>.mbbios:keep_mbbios(files, *, card_board_txt, card_files, workdir,
+# allow_mcc_update=False) -> (files, decision | None)`` (``pack_mbbios``), and a storage adapter
+# whose ``install`` takes ``allow_mcc_update`` applies it itself (its notes in
+# ``install_notes``). TODO(integration): FIX-PACK-7 ships both,
+# ``harness_manager_mps3.mbbios.keep_mbbios`` and ``Mps3Storage.install(...,
+# allow_mcc_update=)``; once merged the hook finds them and the LOCAL COPY below (``decide``,
+# ``keep_mbbios``: FIX-PACK-7's rule and words, ported) is dead: delete it.
 
-MBBIOS_LINE = re.compile(r"^[ \t]*MBBIOS[ \t]*:[ \t]*([^;\r\n]*)", re.IGNORECASE)
-MCCS_HEADER = re.compile(r"^[ \t]*\[MCCS\]", re.IGNORECASE)
-MCC_UPDATE_REFUSAL = ("this card would make the MCC update itself to {file}: remove {file} "
-                      "from the card, or add --allow-mcc-update")
+BOARD_TXT = "MB/HBI0309C/board.txt"
+ALLOW_FLAG = "--allow-mcc-update"
+MBBIOS_DATA_KEY = "mcc_update"
+# No trailing ``$``: under re.M it does not match before a CR, so a CRLF board.txt (Arm's own
+# files are DOS text) would read as having no MBBIOS line. FIX-PACK-7's copy (d1c8edc) has the
+# ``$``: fix it there before the swap (test_mbbios_reads_crlf_and_lf_alike is the twin).
+_MBBIOS_LINE = re.compile(r"^[ \t]*MBBIOS[ \t]*:[ \t]*([^\s;]+)[^\r\n]*", re.I | re.M)
+_SECTION = re.compile(r"^[ \t]*\[([^\]\r\n]+)\][^\r\n]*", re.M)
+KeepMbbios = Callable[..., "tuple[dict[str, Path], Any]"]
 
 
 @dataclass(frozen=True)
 class MbbiosDecision:
-    file: str                  # the board.txt's SD path ("MB/HBI0309C/board.txt")
-    action: str                # "kept" | "bundle" | "mcc-update" | "none"
-    value: str                 # the MBBIOS value written ("" for none)
-    note: str                  # what the CLI prints ("MBBIOS kept: mbb_v141.ebf")
+    """What the rule did to a board.txt: ``action`` (``kept``, ``bundle``, ``allowed``,
+    ``none``), the value written, the words to show, the board.txt to write."""
 
-    def to_json(self) -> dict[str, str]:
-        return {"file": self.file, "action": self.action, "value": self.value, "note": self.note}
-
-
-def _lines(text: str) -> list[str]:
-    return text.splitlines(keepends=True)
+    action: str
+    value: str
+    note: str
+    content: bytes = b""
 
 
-def _ending(line: str) -> str:
-    return line[len(line.rstrip("\r\n")):] or "\n"
+def _mbbios_line(text: str) -> tuple[str, str] | None:
+    m = _MBBIOS_LINE.search(text)
+    return (m.group(0), m.group(1)) if m else None
 
 
-def mbbios_merge(bundle_text: str, card_text: str | None, ebf_on_card: Callable[[str], bool],
-                 *, allow_mcc_update: bool = False, file: str = "board.txt"
-                 ) -> tuple[str, MbbiosDecision]:
-    """The board.txt to write, and what happened to its MBBIOS line (the rule above). Texts are
-    latin-1 strings (byte for byte). ``RefusedError`` when the card would update its MCC."""
-    bundle = _lines(bundle_text)
-    card_lines = [ln for ln in _lines(card_text or "") if MBBIOS_LINE.match(ln)]
-    at = [i for i, ln in enumerate(bundle) if MBBIOS_LINE.match(ln)]
-    if card_lines:
-        value = MBBIOS_LINE.match(card_lines[0]).group(1).strip()   # type: ignore[union-attr]
-        if at:
-            end = _ending(bundle[at[0]])
-            keep = [ln.rstrip("\r\n") + end for ln in card_lines]
-            out = [ln for i, ln in enumerate(bundle) if i not in at[1:]]
-            first = at[0]
-            out[first:first + 1] = keep
-        else:
-            end = _ending(bundle[0]) if bundle else "\n"
-            keep = [ln.rstrip("\r\n") + end for ln in card_lines]
-            hdr = next((i for i, ln in enumerate(bundle) if MCCS_HEADER.match(ln)), None)
-            out = list(bundle)
-            if out and not out[-1].endswith(("\n", "\r")):
-                out[-1] += end
-            if hdr is None:
-                out += [f"[MCCS]{end}", *keep]
-            else:
-                out[hdr + 1:hdr + 1] = keep
-        return "".join(out), MbbiosDecision(file, "kept", value, f"MBBIOS kept: {value}")
-    if not at:
-        return bundle_text, MbbiosDecision(file, "none", "",
-                                           "MBBIOS: none (neither the card nor the bundle "
-                                           "names one)")
-    value = MBBIOS_LINE.match(bundle[at[0]]).group(1).strip()        # type: ignore[union-attr]
-    if value and ebf_on_card(value):
-        if not allow_mcc_update:
-            raise RefusedError(MCC_UPDATE_REFUSAL.format(file=value),
-                               hint=f"nothing was written: the card has no MBBIOS line of its "
-                                    f"own and {value} is on it, so the MCC would flash it at "
-                                    f"the next boot")
-        return bundle_text, MbbiosDecision(
-            file, "mcc-update", value,
-            f"MBBIOS: {value} from the bundle (--allow-mcc-update: the MCC updates itself to "
-            f"{value} at its next boot)")
-    return bundle_text, MbbiosDecision(
-        file, "bundle", value,
-        f"MBBIOS: {value} from the bundle (the card had none, and {value} is not on the card: "
-        f"the MCC does not update itself)")
+def _norm(rel: str) -> str:
+    return rel.replace("\\", "/").strip("/").lower()
+
+
+def _ebf_name(value: str) -> str:
+    return value.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _insert_line(bundle: str, line: str) -> str:
+    nl = "\r\n" if "\r\n" in bundle else "\n"
+    for m in _SECTION.finditer(bundle):
+        if m.group(1).strip().upper() == "MCCS":
+            return bundle[:m.end()] + nl + line + bundle[m.end():]
+    first = _SECTION.search(bundle)
+    if first is not None:
+        return bundle[:first.start()] + line + nl + bundle[first.start():]
+    return bundle + ("" if not bundle or bundle.endswith(("\n", "\r")) else nl) + line + nl
+
+
+def decide(bundle_board_txt: bytes, *, card_board_txt: bytes | None,
+           card_files: Sequence[str], allow_mcc_update: bool = False) -> MbbiosDecision:
+    """LOCAL COPY of FIX-PACK-7's ``harness_manager_mps3.mbbios.decide`` (the rule above)."""
+    bundle = bundle_board_txt.decode("latin-1")
+    card = card_board_txt.decode("latin-1") if card_board_txt is not None else ""
+    ours = _mbbios_line(bundle)
+    theirs = _mbbios_line(card) if card_board_txt is not None else None
+    if theirs is not None:
+        line, value = theirs
+        text = bundle.replace(ours[0], line, 1) if ours is not None else _insert_line(bundle, line)
+        return MbbiosDecision("kept", value, f"MBBIOS kept: {value}", text.encode("latin-1"))
+    if ours is None:
+        return MbbiosDecision("none", "", "", bundle_board_txt)
+    value = ours[1]
+    ebf = _ebf_name(value)
+    if not any(_norm(f).rsplit("/", 1)[-1] == ebf.lower() for f in card_files):
+        return MbbiosDecision("bundle", value,
+                              f"MBBIOS: {value} from the bundle (the card has no {ebf}, so the "
+                              "MCC will not update)", bundle_board_txt)
+    if not allow_mcc_update:
+        err = RefusedError(
+            f"this card would make the MCC update itself to {ebf}: remove {ebf} from the card, "
+            f"or add {ALLOW_FLAG}",
+            hint=f"the card's board.txt has no MBBIOS line, the bundle's names {value}, and "
+                 f"{ebf} is on the card: the MCC would flash it at its next boot (Harness "
+                 "Manager is proven on MCC 1.3.2 only); nothing was written")
+        err.data = {MBBIOS_DATA_KEY: {"file": ebf, "value": value}}  # type: ignore[attr-defined]
+        raise err
+    return MbbiosDecision("allowed", value,
+                          f"MBBIOS: {value} from the bundle, allowed by {ALLOW_FLAG}: the card "
+                          f"has {ebf}, so the MCC may update itself to it at its next boot",
+                          bundle_board_txt)
+
+
+def keep_mbbios(files: Mapping[str, Path], *, card_board_txt: bytes | None,
+                card_files: Sequence[str], workdir: Path,
+                allow_mcc_update: bool = False) -> tuple[dict[str, Path], MbbiosDecision | None]:
+    """LOCAL COPY of FIX-PACK-7's ``harness_manager_mps3.mbbios.keep_mbbios``: ``files`` with
+    the board.txt swapped for ``decide``'s (written into ``workdir``, which must outlive the
+    write), and the decision (None: no board.txt). Raises the refusal (15)."""
+    out = dict(files)
+    key = next((k for k in files if _norm(k) == _norm(BOARD_TXT)), None)
+    if key is None:
+        return out, None
+    got = decide(Path(files[key]).read_bytes(), card_board_txt=card_board_txt,
+                 card_files=card_files, allow_mcc_update=allow_mcc_update)
+    if got.content != Path(files[key]).read_bytes():
+        dest = Path(tempfile.mkdtemp(prefix="mbbios-", dir=workdir)) / "board.txt"
+        dest.write_bytes(got.content)
+        out[key] = dest
+    return out, got
+
+
+def pack_mbbios() -> KeepMbbios | None:
+    """THE PACK HOOK: the first installed pack's ``<package>.mbbios:keep_mbbios`` (FIX-PACK-7:
+    ``harness_manager_mps3.mbbios.keep_mbbios``); None when no pack has one (the local copy
+    above applies)."""
+    from harness_manager.core.registry import load_packs
+
+    for pack in load_packs().values():
+        package = type(pack).__module__.rsplit(".", 1)[0]
+        try:
+            mod = importlib.import_module(f"{package}.mbbios")
+        except ImportError:
+            continue
+        keep = getattr(mod, "keep_mbbios", None)
+        if callable(keep):
+            return keep
+    return None
 
 
 def _resolve_ci(root: Path, rel: str) -> Path | None:
@@ -942,28 +994,19 @@ def _resolve_ci(root: Path, rel: str) -> Path | None:
     return cur
 
 
-def mbbios_plan(files: Mapping[str, Path], root: str, *, allow_mcc_update: bool = False
-                ) -> list[tuple[str, str, MbbiosDecision]]:
-    """For each board.txt in ``files``: ``(sd path, the text to write, the decision)``, reading
-    the card at ``root`` as it is now. ``RefusedError`` for an MCC self-update."""
-    out = []
-    for rel, src in sorted(files.items()):
-        if rel.replace("\\", "/").rsplit("/", 1)[-1].lower() != "board.txt":
-            continue
-        on_card = _resolve_ci(Path(root), rel)
-        card_text = on_card.read_bytes().decode("latin-1") if on_card and on_card.is_file() \
-            else None
-        where = rel.replace("\\", "/").rsplit("/", 1)[0] if "/" in rel.replace("\\", "/") else ""
+def card_state(root: str) -> tuple[bytes | None, list[str]]:
+    """The card's board.txt (None: none) and every file on it (SD-relative), read now."""
+    board = _resolve_ci(Path(root), BOARD_TXT)
+    text = board.read_bytes() if board is not None and board.is_file() else None
+    files = sorted(p.relative_to(root).as_posix() for p in Path(root).rglob("*") if p.is_file())
+    return text, files
 
-        def ebf_on_card(name: str, where: str = where) -> bool:
-            target = f"{where}/{name}" if where else name
-            found = _resolve_ci(Path(root), target.replace("\\", "/"))
-            return bool(found and found.is_file())
 
-        text, decision = mbbios_merge(Path(src).read_bytes().decode("latin-1"), card_text,
-                                      ebf_on_card, allow_mcc_update=allow_mcc_update, file=rel)
-        out.append((rel, text, decision))
-    return out
+def decision_json(decision: Any) -> dict[str, str]:
+    """A decision (ours or the pack's) as the result shows it."""
+    return {"file": BOARD_TXT, "action": str(getattr(decision, "action", "")),
+            "value": str(getattr(decision, "value", "")),
+            "note": str(getattr(decision, "note", ""))}
 
 
 # --- the writer ----------------------------------------------------------------------------------
@@ -987,7 +1030,7 @@ class WritePlan:
     backup_path: Path | None = None
     backup_dir: Path | None = None
     allow_mcc_update: bool = False
-    mbbios: list[MbbiosDecision] = field(default_factory=list)
+    mbbios: list[dict[str, str]] = field(default_factory=list)   # decision_json each
 
     def summary(self) -> dict[str, Any]:
         out: dict[str, Any] = {"device_id": self.device.id, "path": self.device.disk.path,
@@ -999,7 +1042,7 @@ class WritePlan:
         if self.files:
             out["files"] = sorted(self.files)
         if self.mbbios:
-            out["mbbios"] = [d.to_json() for d in self.mbbios]
+            out["mbbios"] = list(self.mbbios)
         return out
 
 
@@ -1015,6 +1058,7 @@ class CardWriter:
                  lister: Callable[[], list[Disk]] | None = None,
                  access: RealAccess | None = None,
                  storage_for: Callable[[str], Any] = pack_storage,
+                 mbbios_for: Callable[[], KeepMbbios | None] = pack_mbbios,
                  platform: str | None = None,
                  enabled: Callable[[], bool] | None = None,
                  cap: Callable[[], int] | None = None,
@@ -1023,6 +1067,7 @@ class CardWriter:
         self.platform = platform or sys.platform
         self.access = access or RealAccess(platform=self.platform)
         self.storage_for = storage_for
+        self.mbbios_for = mbbios_for
         self._lister = lister
         self._enabled = enabled or (lambda: is_enabled(self.state_dir))
         self._cap = cap or (lambda: size_cap(self.state_dir))
@@ -1202,8 +1247,9 @@ class CardWriter:
             raise UsageError(f"{plan.backup_dir} exists and is not a directory",
                              hint="give a directory for the backup archive")
         plan.allow_mcc_update = bool(allow_mcc_update)
-        plan.mbbios = [d for _, _, d in mbbios_plan(plan.files, card.files_root,
-                                                     allow_mcc_update=plan.allow_mcc_update)]
+        with tempfile.TemporaryDirectory(prefix="hm-mbbios-check-") as tmp:   # refused: 409 now
+            _, plan.mbbios = self._mbbios(plan.files, card.files_root, plan.allow_mcc_update,
+                                          Path(tmp))
         return plan
 
     @staticmethod
@@ -1289,6 +1335,16 @@ class CardWriter:
 
     # -- files ------------------------------------------------------------------------------
 
+    def _mbbios(self, files: Mapping[str, Path], root: str, allow: bool,
+                workdir: Path) -> tuple[dict[str, Path], list[dict[str, str]]]:
+        """The board pack's MBBIOS rule (``pack_mbbios``, else the local copy) on ``files``
+        against the card at ``root`` as it is now: the files to write and the decision."""
+        keep = self.mbbios_for() or keep_mbbios
+        card_board, card_files = card_state(root)
+        out, decision = keep(files, card_board_txt=card_board, card_files=card_files,
+                             workdir=workdir, allow_mcc_update=allow)
+        return dict(out), ([] if decision is None else [decision_json(decision)])
+
     def _run_files(self, plan: WritePlan, card: CardDevice, emit: Progress) -> dict[str, Any]:
         storage = self.storage_for(card.files_root)
         storage.locate()                                  # the pack's own checks, again
@@ -1304,27 +1360,29 @@ class CardWriter:
             plan.backup_dir.mkdir(parents=True, exist_ok=True)
             record = storage.backup(plan.backup_dir, progress=relay)
             took = True
-        # The card as it is now decides each board.txt's MBBIOS line (refused: nothing written).
-        merged = mbbios_plan(plan.files, card.files_root, allow_mcc_update=plan.allow_mcc_update)
-        plan.mbbios = [d for _, _, d in merged]
-        files = dict(plan.files)
+        # The card as it is now decides board.txt's MBBIOS line (refused: nothing written).
         base = self.state_dir if self.state_dir is not None else _default_state_dir()
         staged = base / "cardwriter" / "staged" / f"{os.getpid()}-{time.monotonic_ns()}"
+        staged.mkdir(parents=True, exist_ok=True)
         try:
-            for rel, text, _ in merged:
-                dest = staged.joinpath(*rel.replace("\\", "/").split("/"))
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(text.encode("latin-1"))
-                files[rel] = dest
-            storage.install(files, backup=record, progress=relay)
-            digest = hashlib.sha256("\n".join(
-                f"{rel}  {file_sha256(src)}" for rel, src in sorted(files.items())).encode()
-            ).hexdigest()
+            files, plan.mbbios = self._mbbios(plan.files, card.files_root, plan.allow_mcc_update,
+                                              staged)
+            if _takes(storage.install, "allow_mcc_update"):
+                # The pack's writer applies the same rule itself (FIX-PACK-7): give it the
+                # bundle as it is, and the override.
+                storage.install(plan.files, backup=record, progress=relay,
+                                allow_mcc_update=plan.allow_mcc_update)
+            else:
+                storage.install(files, backup=record, progress=relay)
         finally:
             shutil.rmtree(staged, ignore_errors=True)
+        written = {rel: _resolve_ci(Path(card.files_root), rel) for rel in sorted(files)}
+        digest = hashlib.sha256("\n".join(
+            f"{rel}  {file_sha256(p) if p else '-'}" for rel, p in written.items()).encode()
+        ).hexdigest()
         result = {"outcome": "written", "verified": True, "sha256": digest,
                   "files": sorted(files), "root": card.files_root,
-                  "mbbios": [d.to_json() for d in plan.mbbios], "backup": {
+                  "mbbios": list(plan.mbbios), "backup": {
                       "path": record.path, "sha256": record.sha256, "files": record.files,
                       "taken": took},
                   "note": "written and read back; the board runs it after it boots from this "
@@ -1444,6 +1502,17 @@ class CardWriter:
 
 _LOCAL: set[str] = set()
 _LOCAL_MU = threading.Lock()
+
+
+def _takes(fn: Callable[..., Any], name: str) -> bool:
+    """Does ``fn`` take the keyword ``name`` (a storage adapter's ``install(allow_mcc_update=)``)?"""
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is p.VAR_KEYWORD for p in params.values())
 
 
 def _default_state_dir() -> Path:

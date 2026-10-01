@@ -142,7 +142,7 @@ def test_twin_files_that_would_update_the_mcc_need_allow_mcc_update(rig, capsys)
     assert rc == ExitCode.REFUSED and "or add --allow-mcc-update" in err
     rc, out, err = run(capsys, "flash", "write", card.id, str(bundle), "--kind", "files",
                        "--confirm", card.confirm, "--allow-mcc-update")
-    assert rc == 0 and "--allow-mcc-update: the MCC updates itself" in out
+    assert rc == 0 and "allowed by --allow-mcc-update: the card has mbb_v999.ebf" in out
 
 
 def test_backup_options_are_for_files_only(rig, capsys):

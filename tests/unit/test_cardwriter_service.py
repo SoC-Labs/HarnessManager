@@ -605,7 +605,7 @@ def test_mbbios_the_cards_line_is_kept_and_the_bundles_never_written(rig: Rig):
     assert b"APPFILE: Nanosoc\\nanosoc.txt\r\n" in got and b"TITLE: nanoSoC" in got
     assert out["mbbios"] == [{"file": "MB/HBI0309C/board.txt", "action": "kept",
                               "value": "mbb_v141.ebf", "note": "MBBIOS kept: mbb_v141.ebf"}]
-    assert plan.mbbios[0].note == "MBBIOS kept: mbb_v141.ebf"
+    assert plan.mbbios[0]["note"] == "MBBIOS kept: mbb_v141.ebf"
 
 
 def test_mbbios_the_cards_line_is_kept_when_the_bundle_has_none(rig: Rig):
@@ -622,7 +622,8 @@ def test_mbbios_no_line_on_the_card_and_its_ebf_absent_writes_the_bundles_line_u
     assert written_board(rig) == BUNDLE_BOARD                     # never removed
     d = out["mbbios"][0]
     assert d["action"] == "bundle" and d["value"] == "mbb_v999.ebf"
-    assert "is not on the card: the MCC does not update itself" in d["note"]
+    assert d["note"] == ("MBBIOS: mbb_v999.ebf from the bundle (the card has no mbb_v999.ebf, so "
+                         "the MCC will not update)")
 
 
 def test_mbbios_no_board_txt_on_the_card_counts_as_no_line(rig: Rig):
@@ -647,7 +648,9 @@ def test_twin_allow_mcc_update_writes_the_bundles_line_and_says_so(rig: Rig):
     _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD), allow_mcc_update=True)
     assert written_board(rig) == BUNDLE_BOARD
     d = out["mbbios"][0]
-    assert d["action"] == "mcc-update" and "--allow-mcc-update" in d["note"]
+    assert d["action"] == "allowed" and d["note"] == (
+        "MBBIOS: mbb_v999.ebf from the bundle, allowed by --allow-mcc-update: the card has "
+        "mbb_v999.ebf, so the MCC may update itself to it at its next boot")
 
 
 def test_mbbios_is_decided_again_inside_the_job(rig: Rig):
@@ -661,21 +664,88 @@ def test_mbbios_is_decided_again_inside_the_job(rig: Rig):
     assert written_board(rig) == NO_LINE_BOARD
 
 
-def test_mbbios_merge_keeps_every_other_byte_and_line_ending():
-    text, d = cw.mbbios_merge(BUNDLE_BOARD.decode("latin-1"), CARD_BOARD.decode("latin-1"),
-                              lambda name: False)
+def test_mbbios_decide_keeps_every_other_byte_and_line_ending():
+    d = cw.decide(BUNDLE_BOARD, card_board_txt=CARD_BOARD, card_files=[])
     want = BUNDLE_BOARD.replace(b"MBBIOS: mbb_v999.ebf ;the bundle's",
                                 b"MBBIOS: mbb_v141.ebf           ;MB BIOS image \xe2\x80\x94 stock")
-    assert text.encode("latin-1") == want and d.action == "kept"
-    two = BUNDLE_BOARD.replace(b"[APPLICATION", b"MBBIOS: other.ebf\r\n[APPLICATION")
-    text, _ = cw.mbbios_merge(two.decode("latin-1"), CARD_BOARD.decode("latin-1"),
-                              lambda name: False)
-    assert text.count("MBBIOS") == 1 and "other.ebf" not in text
+    assert d.content == want and d.action == "kept" and d.value == "mbb_v141.ebf"
 
 
-def test_twin_mbbios_merge_with_no_line_anywhere_changes_nothing():
-    text, d = cw.mbbios_merge(NO_LINE_BOARD.decode("latin-1"), None, lambda name: True)
-    assert text.encode("latin-1") == NO_LINE_BOARD and d.action == "none"
+def test_twin_mbbios_with_no_line_anywhere_changes_nothing():
+    d = cw.decide(NO_LINE_BOARD, card_board_txt=None, card_files=["MB/HBI0309C/mbb_v141.ebf"])
+    assert d.content == NO_LINE_BOARD and d.action == "none" and d.note == ""
+
+
+@pytest.mark.parametrize("nl", [b"\n", b"\r\n"])
+def test_mbbios_reads_crlf_and_lf_alike(nl: bytes):
+    card = nl.join([b"BOARD: X", b"[MCCS]", b"MBBIOS: mbb_v141.ebf ;stock", b""])
+    bundle = nl.join([b"BOARD: Y", b"[MCCS]", b"", b"[APP]", b"A: b", b""])
+    d = cw.decide(bundle, card_board_txt=card, card_files=[])
+    assert d.action == "kept"
+    assert d.content == nl.join([b"BOARD: Y", b"[MCCS]", b"MBBIOS: mbb_v141.ebf ;stock", b"",
+                                 b"[APP]", b"A: b", b""])
+
+
+def test_twin_an_ebf_anywhere_on_the_card_counts_any_case():
+    with pytest.raises(RefusedError) as err:
+        cw.decide(BUNDLE_BOARD, card_board_txt=NO_LINE_BOARD, card_files=["SOFTWARE/MBB_V999.EBF"])
+    assert err.value.data == {"mcc_update": {"file": "mbb_v999.ebf", "value": "mbb_v999.ebf"}}
+    assert cw.decide(BUNDLE_BOARD, card_board_txt=NO_LINE_BOARD,
+                     card_files=["MB/other.ebf"]).action == "bundle"
+
+
+# --- the pack hook (FIX-PACK-7's harness_manager_mps3.mbbios.keep_mbbios at integration) --------
+
+
+def test_the_packs_keep_mbbios_is_used_when_a_pack_has_one(rig: Rig):
+    calls = []
+
+    def keep(files, *, card_board_txt, card_files, workdir, allow_mcc_update=False):
+        calls.append((card_board_txt, sorted(card_files), allow_mcc_update))
+        out = dict(files)
+        swapped = Path(workdir) / "board.txt"
+        swapped.write_bytes(b"BOARD: from the pack\n")
+        out["MB/HBI0309C/board.txt"] = swapped
+        from types import SimpleNamespace
+        return out, SimpleNamespace(action="kept", value="pack.ebf", note="MBBIOS kept: pack.ebf")
+
+    rig.card_board_txt(CARD_BOARD)
+    rig.writer.mbbios_for = lambda: keep
+    _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
+    assert out["mbbios"][0]["note"] == "MBBIOS kept: pack.ebf"
+    assert written_board(rig) == b"BOARD: from the pack\n"
+    assert len(calls) == 2 and calls[0][0] == CARD_BOARD                # plan, then the job
+    assert "MB/HBI0309C/images.txt" in calls[0][1]
+
+
+def test_twin_no_pack_hook_means_the_local_copy(rig: Rig):
+    assert cw.pack_mbbios() is None or callable(cw.pack_mbbios())
+    rig.writer.mbbios_for = lambda: None
+    rig.card_board_txt(CARD_BOARD)
+    _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
+    assert out["mbbios"][0]["note"] == "MBBIOS kept: mbb_v141.ebf"
+
+
+def test_a_storage_that_applies_the_rule_itself_gets_the_bundle_and_the_flag(rig: Rig):
+    seen = {}
+    real = rig.storage_for
+
+    class Applies:                                       # Mps3Storage after FIX-PACK-7
+        def __init__(self, root):
+            self.inner = real(root)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def install(self, files, *, backup, progress=None, allow_mcc_update=False):
+            seen["board"] = Path(files["MB/HBI0309C/board.txt"]).read_bytes()
+            seen["allow"] = allow_mcc_update
+            return self.inner.install(files, backup=backup, progress=progress)
+
+    rig.writer.storage_for = Applies
+    rig.card_board_txt(NO_LINE_BOARD, ebf="mbb_v999.ebf")
+    files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD), allow_mcc_update=True)
+    assert seen == {"board": BUNDLE_BOARD, "allow": True}
 
 
 # --- --demo ------------------------------------------------------------------------------------

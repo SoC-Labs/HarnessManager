@@ -254,7 +254,7 @@ def test_twin_files_that_would_update_the_mcc_are_409_unless_allowed(api):
     assert r.status_code == 409 and "--allow-mcc-update" in r.json()["error"]["message"]
     r = write(client, **body, allow_mcc_update=True)
     job = wait_job(client, r.json()["job"])
-    assert job["state"] == "done" and job["result"]["mbbios"][0]["action"] == "mcc-update"
+    assert job["state"] == "done" and job["result"]["mbbios"][0]["action"] == "allowed"
 
 
 @pytest.mark.usefixtures("on")

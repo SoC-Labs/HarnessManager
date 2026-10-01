@@ -179,7 +179,8 @@ def _write(ctx: Ctx) -> int:
         ctx.note(f"writes   {len(plan.files)} files from {source} onto {plan.device.files_root}")
         ctx.note("backup   " + (str(backup_path) if backup_path else f"a new one in {backup_dir}"))
         for d in plan.mbbios:
-            ctx.note(d.note)
+            if d["note"]:
+                ctx.note(d["note"])
     if a.confirm is not None:
         typed = a.confirm
     elif a.yes:
@@ -204,8 +205,7 @@ def _write(ctx: Ctx) -> int:
             "verify_expect", "image", "bytes", "sha256")})
     human = [f"written  {disk.path}: {out['outcome']}, read back and verified "
              f"(sha256 {out['sha256'][:16]}…)"]
-    for d in out.get("mbbios", []):
-        human.append(d["note"])
+    human += [d["note"] for d in out.get("mbbios", []) if d["note"]]
     if out.get("backup"):
         human.append(f"backup   {out['backup']['path']}")
     human.append(out.get("note", ""))
