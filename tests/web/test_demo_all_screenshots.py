@@ -16,6 +16,7 @@ import pytest
 
 from harness_manager import demo_catalog as cat
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_V011
+from tests.web import wb
 from tests.web.test_demo_all_browser import (
     Showcase,
     T,
@@ -69,7 +70,7 @@ def _linux(page: Any, review: Any, scheme: str) -> None:
     shoot(page, review, "overview-linux", scheme)
 
     section(page, "program")
-    page.locator('[data-overlay="nanosoc_upy"]').click()
+    wb.pick(page, "nanosoc_upy")
     expect(by_id(page, "preflight-summary")).to_be_visible(timeout=T)
     by_id(page, "keep-on-card").check()
     expect(by_id(page, "keep-on-card")).to_be_checked()

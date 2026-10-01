@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
-from tests.web import nav
+from tests.web import nav, wb
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -449,7 +449,7 @@ def errors_shown(page: Any) -> Any:
 
 def pick_led(page: Any) -> None:
     section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
 
 
