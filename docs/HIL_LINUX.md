@@ -600,19 +600,28 @@ arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" -ex "target extended-remo
 Expect: `r0` … `r12`, `sp`, `lr`, `pc`, `xpsr` with values; no `timeout` and no `Remote
 replied unexpectedly`. `keep_alive() was not invoked` warnings are not failures.
 
-**OCD4. A 16 KiB RAM round trip** (terminal B; writes DUT RAM, then resets the DUT)
+**OCD4. An 8 KiB RAM round trip** (terminal B; saves DUT RAM, writes a pattern, reads it back, puts the
+saved contents back, resumes, then resets the DUT so the board is left sane)
 ```bash
-RAM=0x18004000     # nanosoc DMEM (0x18000000, 64 KiB; host/openocd/nanosoc_ops.tcl):
-                   # clear of its first 16 KiB (data) and of the stack at its top
-head -c 16384 /dev/urandom > $EV/ocd4_ram_in.bin
+RAM=0x18000000     # the bottom of DMEM. nanosoc's DMEM is 16 KiB (0x18000000-0x18003FFF,
+                   # rp_nanosoc_wrapper.sv:107, DMEM_RAM_ADDR_W = 14); nanosoc_upy's is 64 KiB.
+                   # Don't size from host/openocd/nanosoc_ops.tcl:25 ("64KB": right for upy only).
+N=8192
+head -c $N /dev/urandom > $EV/ocd4_ram_in.bin
 arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:$G0" \
-  -ex "monitor halt" -ex "restore $EV/ocd4_ram_in.bin binary $RAM" \
-  -ex "dump binary memory $EV/ocd4_ram_out.bin $RAM $((RAM + 16384))" -ex "detach" 2>&1 | tee $EV/ocd4_ram.txt
+  -ex "monitor halt" \
+  -ex "dump binary memory $EV/ocd4_ram_saved.bin $RAM $((RAM + N))" \
+  -ex "restore $EV/ocd4_ram_in.bin binary $RAM" \
+  -ex "dump binary memory $EV/ocd4_ram_out.bin $RAM $((RAM + N))" \
+  -ex "restore $EV/ocd4_ram_saved.bin binary $RAM" \
+  -ex "monitor resume" -ex "detach" 2>&1 | tee $EV/ocd4_ram.txt
 cmp $EV/ocd4_ram_in.bin $EV/ocd4_ram_out.bin && echo RAM-OK | tee -a $EV/ocd4_ram.txt
-harness-manager reset $B | tee -a $EV/ocd4_ram.txt
+harness-manager reset $B | tee -a $EV/ocd4_ram.txt      # hello restarts / MicroPython reboots from flash
 ```
-Expect: `Restoring binary file … into memory (0x18004000 to 0x18008000)`, then `RAM-OK`, then the
-reset's `done`. Note the time gdb took (seconds) in the evidence file.
+Expect: two `Restoring binary file … into memory (0x18000000 to 0x18002000)` lines (the pattern, then
+the saved contents), `RAM-OK`, then the reset's `done`. On nanosoc_upy the interpreter's heap and stack
+live in DMEM: the save/restore plus the DUT reset leave it clean. Note how long gdb took (seconds) in the
+evidence file.
 
 **OCD5. Down** (terminal C: Ctrl-C; then terminal B)
 ```bash
