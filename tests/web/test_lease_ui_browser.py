@@ -24,6 +24,7 @@ import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_SPARE, BOARD_V011
+from tests.web import nav
 from tests.web.test_demo_all_browser import Showcase, make_showcase
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
@@ -61,6 +62,10 @@ def open_board(page: Any, bid: str = BOARD, *, hub: bool = True) -> None:
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
     if hub:
         page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    # UI v2: a board opens on Settings' "Open a board on" (the Workbench); the lease tile is on
+    # the Overview
+    if page.locator('[data-testid="section-overview"]').count() == 0:
+        nav.tab(page, "overview")
 
 
 def hub_page(page_factory: Any, daemon: Any, lease: str, *, scheme: str = "light") -> Any:
@@ -120,8 +125,9 @@ def test_negative_twin_the_same_principal_in_another_session_is_held_not_yours(p
     assert rail(page).get_by_text("Yours", exact=True).count() == 0
     expect(by_id(page, "lease-chip")).to_have_text(f"leased to {ME} (another session)")
     expect(by_id(page, "lease-chip")).to_have_attribute("data-level", "held")
-    expect(page.locator('[data-attention="lease"]')).to_contain_text(f"Leased to {ME} in another session.")
+    # UI v2: the Overview's Lease card says it (no attention row: the header has the control)
     expect(by_id(page, "tile-lease")).to_have_attribute("data-lease", "elsewhere")
+    expect(by_id(page, "ov-lease-chip")).to_contain_text("Held by you in another session")
     assert page.errors == []
 
 
@@ -144,7 +150,7 @@ def test_a_lease_nobody_holds_is_free_in_the_rail(page_factory, daemon):
     expect(row).to_have_attribute("data-lease", "free", timeout=T)
     expect(row.locator('[data-testid="rail-lease-badge"]')).to_have_text("Free")
     # Acquire: the same badge turns to Yours
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
     expect(row.locator('[data-testid="rail-lease-badge"]')).to_have_text("Yours", timeout=T)
 
 
@@ -191,8 +197,6 @@ def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_facto
     expect(header).to_have_text("Release lease")
     expect(header).to_have_class(re.compile(r"\brelease\b"))
     expect(header).not_to_have_class(re.compile(r"\bghost\b"))           # a real button
-    tile = by_id(page, "tile-lease")
-    expect(tile.locator('[data-action="lease_release_open"]')).to_be_visible()
     # Cancel (and Escape) release nothing, and focus goes back
     header.click()
     dialog = by_id(page, "release-confirm")
@@ -212,8 +216,8 @@ def test_release_is_prominent_where_the_lease_is_yours_and_asks_first(page_facto
     page.keyboard.press("Escape")
     expect(dialog).to_have_count(0)
     assert lease_record(daemon) is not None                      # nothing was released
-    # Release, from the Board tile this time
-    tile.locator('[data-action="lease_release_open"]').click()
+    # Release (UI v2: the header's; the Overview's Lease card offers it when someone waits)
+    header.click()
     dialog.locator('[data-action="release_confirm"]').click()
     expect(by_id(page, "lease-chip")).to_have_text("no lease", timeout=T)
     expect(rail(page).locator('[data-testid="rail-lease-badge"]')).to_have_text("Free")
@@ -262,8 +266,7 @@ def test_lease_text_names_the_board_with_the_target_as_a_detail(page_factory, da
     expect(by_id(page, "lease-chip")).to_have_attribute("title", re.compile(re.escape(where)))
     expect(rail(page).locator('[data-testid="rail-lease-badge"]')).to_have_attribute(
         "title", re.compile(re.escape(where)))
-    expect(by_id(page, "tile-lease").locator('[data-testid="tile-lease-badge"]')).to_have_attribute(
-        "title", re.compile(re.escape(where)))
+    expect(by_id(page, "ov-lease-chip")).to_have_attribute("title", re.compile(re.escape(where)))
     page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
     dialog = by_id(page, "release-confirm")
     expect(dialog.locator('[data-testid="release-title"]')).to_have_text(f"Release {HUB_BOARD}?")
@@ -290,17 +293,26 @@ def test_negative_twin_a_target_with_no_board_of_its_own_reads_as_before(page_fa
     dialog.locator('[data-action="release_cancel"]').click()
     close_board(page)
     close = by_id(page, "close-confirm")
-    expect(close.locator('[data-testid="close-title"]')).to_have_text(
-        f"Also release the lease on {TARGET}?")
-    assert close.locator('[data-testid="close-target"]').count() == 0
+    what = close.locator('[data-testid="close-release-what"]')
+    expect(what).to_contain_text(f"The lease on {TARGET} goes back to the hub now")
+    assert "(target" not in what.inner_text()
     assert page.errors == []
 
 
-# --- Close board asks about the lease ------------------------------------------------------------------
+# --- Close board asks what should happen to the board (UI v2 round 3, M1) ------------------------------
 
 
 def close_board(page: Any) -> None:
     page.locator('[data-testid="board-header"] [data-action="close-board"]').click()
+
+
+def close_with(page: Any, choice: str) -> None:
+    """Close board, pick ``choice`` (restore, release, keep, close, restoreclose), confirm."""
+    close_board(page)
+    dialog = by_id(page, "close-confirm")
+    dialog.locator(f'[data-choice="{choice}"]').click()
+    expect(dialog.locator(f'[data-choice="{choice}"] input')).to_be_checked()
+    dialog.locator('[data-action="close_confirm"]').click()
 
 
 @HUB
@@ -310,14 +322,15 @@ def test_close_asks_about_a_lease_you_hold_and_cancel_leaves_the_board_open(page
     close_board(page)
     dialog = by_id(page, "close-confirm")
     expect(dialog).to_be_visible()
-    expect(dialog.locator('[data-testid="close-title"]')).to_have_text(
-        f"Also release the lease on {HUB_BOARD}?")
-    expect(dialog.locator('[data-testid="close-target"]')).to_have_text(f"(target {TARGET})")
+    expect(dialog.locator('[data-testid="close-title"]')).to_have_text(re.compile(r"^Close "))
+    expect(dialog.locator('[data-testid="close-release-what"]')).to_contain_text(
+        f"The lease on {HUB_BOARD} (target {TARGET}) goes back to the hub now")
     expect(dialog.locator('[data-testid="close-keep-what"]')).to_contain_text(
-        re.compile(r"it stays yours until \d\d:\d\d:\d\d, but nothing renews it while the board is closed"))
-    for action, text in (("close_release", "Release and close"), ("close_keep", "Keep the lease"),
-                         ("close_cancel", "Cancel")):
-        expect(dialog.locator(f'[data-action="{action}"]')).to_have_text(text)
+        re.compile(r"It stays yours until \d\d:\d\d:\d\d, but nothing renews it while the board is closed"))
+    for choice, text in (("restore", "Restore baseline, release and close"), ("release", "Release and close"),
+                         ("keep", "Close and keep the lease")):
+        expect(dialog.locator(f'[data-choice="{choice}"] b')).to_have_text(text)
+    expect(dialog.locator('[data-action="close_cancel"]')).to_have_text("Cancel")
     expect(dialog.locator('[data-action="close_cancel"]')).to_be_focused()
     dialog.locator('[data-action="close_cancel"]').click()
     expect(dialog).to_have_count(0)
@@ -335,24 +348,28 @@ def test_close_asks_about_a_lease_you_hold_and_cancel_leaves_the_board_open(page
 def test_release_and_close_releases_the_lease_then_closes(page_factory, daemon):
     page = hub_page(page_factory, daemon, "mine")
     seen = closes(page)
-    close_board(page)
-    by_id(page, "close-confirm").locator('[data-action="close_release"]').click()
+    close_with(page, "release")
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)     # the preview
     expect(by_id(page, "close-confirm")).to_have_count(0)
     assert wait_until(lambda: seen) and seen[0].endswith("?release=true")
     assert lease_record(daemon) is None                                        # released
     assert daemon.app.state.daemon.engine.open_boards() == []
-    # the rail badge went with the session: nothing is read for a closed board
-    assert rail(page).locator('[data-testid="rail-lease-row"]').count() == 0
-    assert page.errors == []
+    # UI v2: every hub board keeps a badge; a closed one shows the freshest the page has: its
+    # preview's own read of the lease (G3), else what the service last knew (lease_known)
+    page.wait_for_timeout(500)
+    row = rail(page).locator('[data-testid="rail-lease-row"]')
+    expect(row).to_have_attribute("data-source", re.compile(r"^(read|known|hub)$"), timeout=T)
+    expect(row.locator('[data-testid="rail-lease-badge"]')).to_have_text("Free", timeout=T)
+    # a console socket of the closed board may still be retrying its last reconnect (the
+    # Workbench, where the board opened, had it open): that 404 is the socket's, not the close's
+    assert [e for e in page.errors if "WebSocket connection" not in e] == [], page.errors
 
 
 @HUB
 def test_negative_twin_keep_the_lease_closes_and_the_lease_stays(page_factory, daemon):
     page = hub_page(page_factory, daemon, "mine")
     seen = closes(page)
-    close_board(page)
-    by_id(page, "close-confirm").locator('[data-action="close_keep"]').click()
+    close_with(page, "keep")
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
     assert wait_until(lambda: seen) and "release" not in seen[0]
     held = lease_record(daemon)
@@ -364,14 +381,17 @@ def test_negative_twin_keep_the_lease_closes_and_the_lease_stays(page_factory, d
 
 @HUB
 @pytest.mark.parametrize("lease", ["none", "other", "elsewhere"])
-def test_negative_twin_a_board_whose_lease_is_not_held_here_closes_without_asking(
+def test_negative_twin_a_board_whose_lease_is_not_held_here_closes_and_leaves_the_lease(
         page_factory, daemon, lease):
     page = hub_page(page_factory, daemon, lease)
     seen = closes(page)
     before = lease_record(daemon)
     close_board(page)
+    dialog = by_id(page, "close-confirm")
+    expect(dialog).to_have_attribute("data-default", "close")
+    assert dialog.locator('[data-choice="release"], [data-choice="keep"]').count() == 0
+    dialog.locator('[data-action="close_confirm"]').click()
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
-    assert by_id(page, "close-confirm").count() == 0
     assert wait_until(lambda: seen) and "release" not in seen[0]
     assert lease_record(daemon) == before                                      # untouched
 
@@ -383,14 +403,14 @@ def test_a_release_that_fails_keeps_the_board_open_and_says_why(page_factory, da
         status=503, json={"ok": False, "error": {
             "code": 7, "name": "UNREACHABLE", "message": "the hub mapstone-dev did not answer",
             "hint": "check `ssh mapstone-dev`"}}))
-    close_board(page)
+    close_with(page, "release")
     dialog = by_id(page, "close-confirm")
-    dialog.locator('[data-action="close_release"]').click()
     expect(dialog.locator('[data-testid="close-error"]')).to_contain_text(
         "UNREACHABLE: the hub mapstone-dev did not answer. The board is still open.", timeout=T)
     expect(by_id(page, "board-header")).to_be_visible()
-    expect(dialog.locator('[data-action="close_keep"]')).to_be_enabled()      # choose again
-    dialog.locator('[data-action="close_keep"]').click()
+    expect(dialog.locator('[data-action="close_confirm"]')).to_be_enabled()   # choose again
+    dialog.locator('[data-choice="keep"]').click()
+    dialog.locator('[data-action="close_confirm"]').click()
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
     assert lease_record(daemon) is not None
 
@@ -404,12 +424,7 @@ def showcase(browser, tmp_path, monkeypatch, request) -> Iterator[Showcase]:
 
 
 def demo_open(page: Any, bid: str) -> None:
-    rail(page, bid).click()
-    page.wait_for_selector(f'main[data-board="{bid}"], [data-action="open"]', timeout=15_000)
-    if page.locator(f'main[data-board="{bid}"]').count() == 0:
-        page.locator('[data-action="open"]').click()
-    page.wait_for_selector(f'main[data-board="{bid}"] [data-testid="fact-shell"]'
-                           ':not(:has-text("unknown"))', timeout=15_000)
+    nav.open_board(page, bid)            # lands on the Overview (its lease line) when it opens
 
 
 def test_the_demo_shows_free_yours_and_held_by_alice(showcase):
@@ -421,12 +436,11 @@ def test_the_demo_shows_free_yours_and_held_by_alice(showcase):
     demo_open(page, BOARD_SPARE)
     spare = rail(page, BOARD_SPARE).locator('[data-testid="rail-lease-row"]')
     expect(spare.locator('[data-testid="rail-lease-badge"]')).to_have_text("Free", timeout=T)
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
     expect(spare.locator('[data-testid="rail-lease-badge"]')).to_have_text("Yours", timeout=T)
     expect(held.locator('[data-testid="rail-lease-badge"]')).to_have_text(f"Held by {ALICE}")
     # the real daemon's close?release=true gives it back
-    close_board(page)
-    by_id(page, "close-confirm").locator('[data-action="close_release"]').click()
+    close_with(page, "release")
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
     demo_open(page, BOARD_SPARE)
     expect(spare.locator('[data-testid="rail-lease-badge"]')).to_have_text("Free", timeout=T)

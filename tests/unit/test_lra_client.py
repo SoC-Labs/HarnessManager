@@ -316,10 +316,15 @@ def test_the_frozen_interface_is_all_there():
                  "put_request", "list_requests", "delete_request", "put_answer", "get_answer",
                  "lease_show", "lease_acquire", "lease_heartbeat", "lease_release", "lease_cancel"):
         assert callable(getattr(hubmod.HubClient, name)), name
-    assert list(hubmod.QueueEntry.__dataclass_fields__) == ["position", "holder", "user"]
-    assert list(hubmod.LeaseStatus.__dataclass_fields__) == ["held", "holder", "user", "expires_at", "queue"]
+    # The frozen fields first, in order; UI v2 (ui2 api-hub, G11) appended defaulted ones only.
+    assert list(hubmod.QueueEntry.__dataclass_fields__) == ["position", "holder", "user", "tier"]
+    assert list(hubmod.LeaseStatus.__dataclass_fields__) == [
+        "held", "holder", "user", "expires_at", "queue",
+        "background_queue", "background_known", "tier"]
     assert list(hubmod.RequestNote.__dataclass_fields__) == [
-        "id", "by", "user", "host", "message", "created_at", "deadline_at"]
+        "id", "by", "user", "host", "message", "created_at", "deadline_at", "want_s"]
+    assert hubmod.QueueEntry(1, "a@h", "a") == hubmod.QueueEntry(1, "a@h", "a", "interactive")
+    assert hubmod.RequestNote("r", "b", "u", "h", "", "t", "t").want_s == 0
     assert list(hubmod.AnswerNote.__dataclass_fields__) == ["id", "answer", "minutes", "message", "at"]
     assert issubclass(UnavailableError, HarnessError)
 

@@ -14,6 +14,7 @@ import pytest
 
 from harness_manager.core.pack import CardStatus, SlotInfo, SlotJob, SlotStatus
 from harness_manager.demo import BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -45,7 +46,8 @@ def with_os_slots(engine, job: list[SlotJob]) -> None:
 def open_board(page) -> None:
     page.locator(f'.board-item[data-board="{BOARD_USB}"]').click()
     page.locator('[data-action="open"]').click()
-    page.wait_for_selector('[data-testid="tile-board"]', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
+    page.wait_for_selector(CARD, timeout=T)             # UI v2: the Design card's Boots next
 
 
 def test_the_card_line_says_the_running_job_then_the_slots_again(page_factory, engine):
@@ -57,7 +59,8 @@ def test_the_card_line_says_the_running_job_then_the_slots_again(page_factory, e
     expect(line).to_have_text("writing slot B: 12.3 MB / 29 MB, ~38 min left", timeout=T)
     assert "wedge the card" in (line.get_attribute("title") or "")
     job[0] = SlotJob(act="push", slot="B", state="ok", got=29_000_000, length=29_000_000)
-    expect(line).to_have_text("valid · OS A:valid* B:empty", timeout=T)   # it re-reads (5 s)
+    expect(line).to_contain_text("nothing kept on the card", timeout=T)   # it re-reads (5 s)
+    expect(page.locator('[data-testid="ov-os-slots"] [data-slot="B"]')).to_have_text("B empty")
     assert page.errors == []
 
 
@@ -65,5 +68,7 @@ def test_twin_an_idle_card_shows_its_slots(page_factory, engine):
     with_os_slots(engine, [SlotJob()])
     page = page_factory()
     open_board(page)
-    expect(page.locator(CARD)).to_have_text("valid · OS A:valid* B:empty", timeout=T)
+    expect(page.locator(CARD)).to_contain_text("nothing kept on the card", timeout=T)
+    expect(page.locator('[data-testid="ov-os-slots"] [data-slot="A"]')).to_contain_text("booted")
+    expect(page.locator('[data-testid="ov-os-slots"] [data-slot="B"]')).to_have_text("B empty")
     assert page.errors == []

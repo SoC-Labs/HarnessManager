@@ -18,6 +18,7 @@ from harness_manager import demo_catalog as cat
 from harness_manager.demo import DemoEngine
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_V011
 from tests.fakes.t14_mock_api import real_daemon
+from tests.web import nav
 from tests.web.conftest import dump_failed_pages
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
@@ -93,18 +94,14 @@ def by_id(page: Any, name: str) -> Any:
 
 
 def open_board(page: Any, bid: str) -> None:
-    """Select ``bid`` in the rail, open it if it is not open here, wait for its header."""
-    page.locator(f'.board-item[data-board="{bid}"]').click()
-    page.wait_for_selector(f'main[data-board="{bid}"], [data-action="open"]', timeout=T)
-    if page.locator(f'main[data-board="{bid}"]').count() == 0:
-        page.locator('[data-action="open"]').click()
-    page.wait_for_selector(f'main[data-board="{bid}"] [data-testid="fact-shell"]'
-                           ':not(:has-text("unknown"))', timeout=T)
+    """Select ``bid`` in the rail, open it if it is not open here, wait for its header
+    (tests/web/nav.py, shared by the files that import this one)."""
+    nav.open_board(page, bid)
 
 
 def section(page: Any, key: str) -> None:
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 # --- each board's lines ---------------------------------------------------------------------------
@@ -113,13 +110,15 @@ def section(page: Any, key: str) -> None:
 def test_the_linux_board_shows_card_claim_panel_identify_and_xvc(showcase):
     page = showcase.page()
     open_board(page, BOARD_LINUX)
-    expect(by_id(page, "tile-card")).to_have_text(
-        "valid · default nanosoc [A] · OS A:valid* B:valid", timeout=T)
-    expect(by_id(page, "tile-claim")).to_have_attribute("data-claim", "mine")
-    expect(by_id(page, "tile-claim")).to_contain_text("claimed by you")
-    expect(by_id(page, "tile-panel-line")).to_contain_text("harness owns it", timeout=T)
-    expect(by_id(page, "tile-panel-rebuilt")).to_have_count(0)
-    expect(by_id(page, "tile-locate")).to_have_attribute("data-state", "idle")     # LOCATE
+    # UI v2 round 3: the Overview's Design card (Boots next, the OS slots), the Front panel, and
+    # its Consoles and debug card; the SSH claim is on Board > Access (not claimed: attention)
+    expect(by_id(page, "tile-card")).to_contain_text("nanosoc", timeout=T)
+    expect(by_id(page, "tile-card")).to_contain_text("kept on the card [A]")
+    expect(by_id(page, "ov-os-slots").locator('[data-slot="A"]')).to_contain_text("booted")
+    expect(page.locator('[data-attention="claim"]')).to_have_count(0)           # claimed by you
+    expect(by_id(page, "panel-line")).to_contain_text("harness owns it", timeout=T)
+    expect(by_id(page, "panel-card")).not_to_have_attribute("data-view", "text")
+    expect(by_id(page, "panel-identify").locator('[data-action="identify"]')).to_be_visible()
     expect(by_id(page, "tile-xvc")).to_have_attribute("data-state", "down", timeout=T)
     section(page, "program")
     expect(by_id(page, "keep-on-card")).to_be_enabled(timeout=T)
@@ -132,11 +131,11 @@ def test_the_linux_board_shows_card_claim_panel_identify_and_xvc(showcase):
 def test_negative_twin_the_bare_metal_board_shows_the_rebuilt_panel_and_no_card(showcase):
     page = showcase.page()
     open_board(page, BOARD_V011)
-    expect(by_id(page, "tile-card")).to_have_text("no card store on this harness", timeout=T)
-    expect(by_id(page, "tile-claim")).to_have_count(0)                  # no SSH on bare metal
-    expect(by_id(page, "tile-panel-rebuilt")).to_be_visible(timeout=T)
-    expect(by_id(page, "tile-locate")).to_have_attribute("aria-disabled", "true")   # LOCATE
-    expect(by_id(page, "tile-locate-line")).to_contain_text("harness feature 'locate'")
+    expect(by_id(page, "tile-card")).to_contain_text("no card store on this harness", timeout=T)
+    expect(page.locator('[data-attention="claim"]')).to_have_count(0)   # no SSH on bare metal
+    expect(by_id(page, "panel-headline")).to_have_attribute("data-state", "rebuilt", timeout=T)
+    expect(by_id(page, "panel-identify").locator('[data-action="identify"]')).to_have_attribute("aria-disabled", "true")
+    expect(by_id(page, "reason-identify")).to_contain_text("harness feature 'locate'")
     section(page, "program")
     expect(by_id(page, "keep-card")).to_have_count(0)
     section(page, "debug")
@@ -149,12 +148,15 @@ def test_the_leased_board_offers_the_queue_and_force_release(showcase):
     open_board(page, BOARD_LEASED)
     expect(by_id(page, "lease-request")).to_contain_text("held by alice@lab-pc-07", timeout=T)
     expect(by_id(page, "req-position")).to_contain_text("position 1")
-    expect(page.locator('[data-attention="lease"]')).to_contain_text("Leased to alice")
+    # UI v2: the Overview's Lease card (not an attention row): held by alice, and the queue
+    lease = by_id(page, "ov-lease").locator('[data-testid="tile-lease"]')
+    expect(lease).to_have_attribute("data-lease", "other", timeout=T)
+    expect(by_id(page, "ov-lease-chip")).to_contain_text("Held by alice")
     page.locator('[data-action="lease_force_open"]').click()
     expect(by_id(page, "force-confirm")).to_be_visible(timeout=T)
     by_id(page, "force-board-name").fill("mps3-02")
     page.locator('[data-action="force_confirm"]').click()
-    expect(page.locator('[data-attention="lease"]')).to_have_count(0, timeout=T)
+    expect(lease).not_to_have_attribute("data-lease", "other", timeout=T)
     assert not page.errors, page.errors
 
 
@@ -162,7 +164,8 @@ def test_negative_twin_the_desk_boards_have_no_hub_or_lease(showcase):
     page = showcase.page()
     for bid in (BOARD_LINUX, BOARD_V011):
         open_board(page, bid)
-        expect(page.locator('[data-attention="lease"]')).to_have_count(0)
+        expect(by_id(page, "ov-access")).to_contain_text("No hub lease", timeout=T)
+        expect(by_id(page, "ov-lease")).to_have_count(0)
         expect(by_id(page, "lease-request")).to_have_count(0)
     assert not page.errors, page.errors
 
@@ -176,7 +179,9 @@ def test_the_update_banner_stays_hidden_by_default(showcase):
     page.wait_for_timeout(1500)                        # the page's first GET /update/app landed
     expect(by_id(page, "app-update-banner")).to_have_count(0)
     section(page, "update")
-    expect(by_id(page, "section-update")).to_contain_text("never updates itself", timeout=T)
+    # UI v2 (BD16): the app's own update is not on a board's page (its banner and Settings)
+    expect(by_id(page, "harness-card")).to_be_visible(timeout=T)
+    expect(by_id(page, "update-app")).to_have_count(0)
 
 
 def test_negative_twin_the_demo_knob_shows_the_staged_banner(staged_showcase):

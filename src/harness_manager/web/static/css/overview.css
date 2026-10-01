@@ -1,0 +1,279 @@
+/* The overview tab (UI v2 Phase 2, lane UI2-OVERVIEW owns this file) and the Checks tab's
+   restyle. Colours come from the tokens only (tools/gen_tokens.py --check holds every
+   css/*.css to it). Round 3 (docs/design/ui-v2/prototype-b-round3.html, B2/B3-OVERVIEW): one
+   screen at 1440 x 900 with no scroll: Needs attention (severity stripes) -> the identity strip
+   and the readings row -> two columns of cards beside the Front panel, the largest element. */
+
+.ov { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 100%; }
+.section-body[data-tab="overview"] { padding-top: 10px; padding-bottom: 10px; }
+
+/* --- Needs attention --------------------------------------------------------------------------- */
+.ov-att { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.ov-att-head {
+  display: flex; align-items: center; gap: 7px; padding: 4px 14px; font-size: 11px; font-weight: 600;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--text-2);
+}
+.ov-att-head .icon { width: 13px; height: 13px; color: var(--warn); }
+.ov-att.err .ov-att-head .icon { color: var(--err); }
+.ov-att-n {
+  min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; display: inline-grid; place-items: center;
+  font-size: 10.5px; letter-spacing: 0; background: var(--warn); color: var(--on-err);
+}
+.ov-att.err .ov-att-n { background: var(--err); }
+.ov-att ul { list-style: none; margin: 0; padding: 0; }
+.ov-att-row {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 4px 10px 4px 16px;
+  border-top: 1px solid var(--border); font-size: 13px; line-height: 1.4; background: var(--warn-soft); box-shadow: inset 4px 0 0 var(--warn);
+}
+.ov-att-row.err { background: var(--err-soft); box-shadow: inset 4px 0 0 var(--err); }
+.ov-att-row.unk { background: var(--unk-soft); box-shadow: inset 4px 0 0 var(--unk); }
+.ov-att-row > .icon { width: 16px; height: 16px; color: var(--warn); }
+.ov-att-row.err > .icon { color: var(--err); }
+.ov-att-row.unk > .icon { color: var(--unk); }
+.ov-att-text { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-att-text strong { color: var(--text); font-weight: 600; }
+.ov-att-more { display: none; }
+.ov-att-row > .btn { flex: none; height: 26px; }
+
+/* --- the identity strip and the readings row ----------------------------------------------------- */
+.ov-sum { overflow: hidden; }
+.ov-id {
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 6px 16px; padding: 4px 8px 4px 14px;
+  border-bottom: 1px solid var(--border); background: var(--surface-2); font-size: 12.5px; min-width: 0;
+}
+.ov-id-i { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.ov-id-k { color: var(--text-3); font-size: 11.5px; }
+.ov-id-i.ov-shrink { flex: 0 1 auto; }
+.ov-ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-id-i .mono { color: var(--text); font-size: 12px; }
+.ov-id-i .ov-id-bad { color: var(--err); display: inline-flex; align-items: center; gap: 4px; }
+.ov-id-note { font-size: 11.5px; color: var(--warn); }
+.ov-id .board-label {
+  font-family: var(--font-mono); font-size: 11.5px; padding: 0 5px; border: 1px solid var(--border-strong);
+  border-radius: 4px; color: var(--text-2);
+}
+.ov-id .grow { flex: 1; }
+.chip.ov-chip-sm { height: 20px; font-size: 11.5px; padding: 0 8px; }
+.chip.ov-chip-sm .icon { width: 12px; height: 12px; }
+button.chip.ov-chip-sm { font-family: inherit; cursor: pointer; }
+.ov-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.ov-kpi { position: relative; padding: 5px 12px 6px 14px; border-left: 1px solid var(--border); min-width: 0; cursor: default; }
+.ov-kpi:first-child { border-left: 0; }
+.ov-kpi.warn { background: var(--warn-soft); box-shadow: inset 0 3px 0 var(--warn); }
+.ov-kpi.err { background: var(--err-soft); box-shadow: inset 0 3px 0 var(--err); }
+.ov-kpi-l { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+.ov-kpi-v { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 18px; font-weight: 600; line-height: 1.2; white-space: nowrap; }
+.ov-kpi-v small { font-size: 11.5px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
+.ov-kpi.stale .ov-kpi-v > span:first-child { color: var(--text-2); }
+.ov-unav { font-size: 13.5px; font-weight: 500; color: var(--unk); }
+.ov-kpi-s { font-size: 11.5px; color: var(--text-3); line-height: 1.35; }
+.ov-kpi-s > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-kpi.warn .ov-kpi-s > span:first-child { color: var(--warn); }
+.dot.ov-dot-unk { background: transparent; border: 1.5px dashed var(--unk-border); }
+.ov-spark { width: 64px; height: 22px; margin-left: auto; flex: none; overflow: visible; cursor: crosshair; }
+.ov-spark .ln { fill: none; stroke: var(--text-3); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.ov-spark .xh { stroke: var(--border-strong); stroke-width: 1; }
+.ov-spark .pt { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; }
+
+/* --- the cards --------------------------------------------------------------------------------------- */
+/* The grid takes the height left on the screen; its two rows stretch into it, and the Front
+   panel (both rows) sizes its picture to what it gets (a size container), so the page does not
+   scroll at 1440 x 900 whatever the attention list holds (within reason). */
+.ov-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) clamp(400px, 44%, 580px);
+  grid-auto-rows: minmax(min-content, auto); gap: 7px; align-items: stretch; flex: 1 1 auto; min-height: 0;
+}
+.ov-grid > .ov-panel { grid-column: 3; grid-row: 1 / span 2; }
+.ov-card { display: flex; flex-direction: column; min-width: 0; }
+.ov-card .card-head { padding: 6px 8px 0 12px; min-height: 30px; flex-wrap: nowrap; gap: 8px; }
+.ov-card .card-title { font-size: 13px; white-space: nowrap; }
+.ov-card .card-title .icon { width: 15px; height: 15px; }
+.ov-card .card-body { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 5px 12px 9px; min-width: 0; }
+.ov-go {
+  display: inline-flex; align-items: center; gap: 1px; height: 22px; padding: 0 4px 0 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--accent-text); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; flex: none;
+  font-family: inherit;
+}
+.ov-go:hover { background: var(--accent-soft); }
+.ov-go .icon { width: 14px; height: 14px; }
+.ov-kv { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 5px 8px; margin: 0; font-size: 12.5px; align-items: center; }
+.ov-kv dt { color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
+.ov-kv dd { margin: 0; min-width: 0; display: flex; align-items: center; gap: 3px 6px; flex-wrap: wrap; overflow-wrap: anywhere; }
+.ov-kv .sub { color: var(--text-3); font-size: 11.5px; }
+.ov-kv dd > .sub.ov-ell { flex: 1 1 0; }
+.ov-design { display: flex; align-items: baseline; gap: 2px 8px; flex-wrap: wrap; }
+.ov-name { font-size: 17px; font-weight: 600; line-height: 1.25; font-family: var(--font-mono); letter-spacing: -0.01em; }
+.ov-design .tags { align-self: center; display: inline-flex; gap: 4px; }
+.ov-prog { display: flex; flex-direction: column; gap: 5px; }
+.ov-prog .reason { margin: 0; }
+.ov-prog .pgm-bar.mini { width: 100%; }
+.ov-lease-top { display: flex; align-items: center; gap: 3px 8px; flex-wrap: nowrap; min-width: 0; }
+.ov-watch { min-width: 0; color: var(--text-2); }
+.ov-watch b { font-weight: 500; color: var(--text); }
+.ov-wait {
+  display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px; border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.4;
+  background: var(--warn-soft); border: 1px solid var(--warn-border); color: var(--text-2);
+}
+.ov-wait > .icon { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--warn); }
+.ov-wait b { color: var(--text); font-weight: 600; }
+.ov-wait .link { font-size: 12.5px; font-weight: 500; margin-left: 2px; }
+.ov-wait.info { background: var(--surface-2); border-color: var(--border); }
+.ov-wait.info > .icon { color: var(--text-3); }
+.ov-wait.info b { font-weight: 500; }
+.ov-q { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ov-q-h { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-3); min-width: 0; white-space: nowrap; }
+.ov-q-h .icon { width: 12px; height: 12px; }
+.ov-q-n { color: var(--text-2); }
+.ov-q-n::before { content: "·"; margin-right: 6px; color: var(--text-3); }
+.ov-q-note { margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+.ov-q ul { list-style: none; margin: 0 0 3px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ov-q-row {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px; align-items: center; min-width: 0;
+  padding: 1px 6px; border-radius: 5px; background: var(--surface-2); font-size: 12.5px; cursor: default;
+}
+.ov-q-row.you { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.ov-q-row.you .ov-q-who b { color: var(--accent-text); }
+.ov-q-pos { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); }
+.ov-q-who { display: flex; align-items: center; gap: 1px 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.ov-q-who b { font-weight: 500; }
+.ov-q-who .muted { overflow: hidden; text-overflow: ellipsis; margin-left: -6px; }
+.ov-q-who .tag { font-family: var(--font-sans); font-size: 10.5px; line-height: 15px; }
+.ov-q-meta { font-size: 11.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ov-cons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.ov-cons li { display: grid; grid-template-columns: 8px auto minmax(0, 1fr); gap: 7px; align-items: center; font-size: 12.5px; min-width: 0; }
+.ov-con-name {
+  border: 0; background: transparent; padding: 0; font: inherit; font-weight: 500; color: var(--text); cursor: pointer;
+  white-space: nowrap;
+}
+.ov-con-name:hover { color: var(--accent-text); }
+.ov-last {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--term-fg); background: var(--term-bg); min-width: 0;
+  border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ov-last.sys { color: var(--text-3); }
+.ov-log { list-style: none; margin: -2px -8px 0; padding: 0; display: flex; flex-direction: column; }
+.ov-log-row {
+  display: grid; grid-template-columns: 38px 16px minmax(0, 1fr); gap: 6px; align-items: center; width: 100%; padding: 3px 8px;
+  border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; font-size: 12.5px; color: var(--text);
+  font-family: inherit;
+}
+.ov-log-row:hover { background: var(--hover); }
+.ov-log-row .t { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); }
+.ov-log-row .m { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-log-row .m .src { color: var(--text-3); font-family: var(--font-mono); font-size: 11.5px; }
+.ov-log-row .icon { width: 14px; height: 14px; }
+.ov-log .lv-ok { color: var(--ok); display: inline-flex; }
+.ov-log .lv-error { color: var(--err); display: inline-flex; }
+.ov-log .lv-warning { color: var(--warn); display: inline-flex; }
+.ov-log .lv-info { color: var(--text-3); display: inline-flex; }
+
+/* --- the Front panel, the hero --------------------------------------------------------------------- */
+.ov-panel .card-head { flex-wrap: wrap; row-gap: 4px; }
+.ov-panel .card-body { gap: 6px; padding-top: 7px; }
+.ov-seg { display: inline-flex; }
+.ov-seg button { height: 24px; padding: 0 8px; font-size: 12px; gap: 5px; display: inline-flex; align-items: center; }
+.ov-seg .icon { width: 13px; height: 13px; }
+.ov-seg button:disabled { opacity: .5; cursor: not-allowed; }
+.ov-panel .identify { margin: 0; }
+.ov-panel .identify .action-row.compact { gap: 0; }
+.ov-panel .identify .action-main { gap: 5px; flex-wrap: nowrap; }
+.ov-panel .identify-seconds { height: 26px; }
+.ov-panel .identify .btn.sm { height: 26px; }
+/* The panel's own size never sizes the rows (contain: size): the left cards do, and the panel
+   fills both rows; its picture then takes what it gets. */
+.ov-panel { min-height: 0; contain: size; overflow: hidden; }
+.ov-panel .card-body { min-height: 0; }
+/* The picture's box: as tall as the card's width asks (4:3, plus the Live display's own foot
+   row or the text's legend), shrinking when the height left on the screen is shorter (the grid
+   stretches into the screen). --pw is then the picture's width: the card's, or less. */
+.ov-panel .card-body { container-type: inline-size; }
+.ov-panel-pic {
+  flex: 0 1 calc(100cqw * 0.75 + 20px); min-height: 180px; min-width: 0; container-type: size;
+  display: flex; flex-direction: column; align-items: center; --pw: min(100cqw, (100cqh - 20px) * 4 / 3);
+}
+.ov-panel-pic[data-view="live"] { flex-basis: calc(100cqw * 0.75 + 34px); --pw: min(100cqw, (100cqh - 34px) * 4 / 3); }
+.ov-panel-pic .ld.fit { width: var(--pw); max-width: 100%; }
+/* Text: the panel's 40 x 15 grid in the same 4:3 box as the picture */
+.ov-panel-pic .panel-mirror {
+  width: var(--pw); height: calc(var(--pw) * 0.75); max-width: 100%; box-sizing: border-box; overflow: hidden;
+  font-size: calc((var(--pw) - 22px) / 24.2); line-height: calc((var(--pw) * 0.75 - 18px) / 15); padding: 8px 10px;
+}
+.ov-panel-pic .pm-row { min-height: 0; height: calc((var(--pw) * 0.75 - 18px) / 15); overflow: hidden; }
+.ov-panel-pic .pm-glyph { height: 100%; }
+.ov-panel-pic .pm-legend { margin: 2px 0 0; align-self: stretch; }
+.ld.fit { gap: 4px; }
+.ld.fit .ld-scroll { overflow-x: auto; overflow-y: hidden; padding: 1px; }
+.ld.fit .ld-foot .seg button { height: 22px; padding: 0 7px; font-size: 11.5px; }
+.ld.fit .ld-foot .btn.icon-only { width: 26px; padding: 0; justify-content: center; }
+.ld.fit .ld-foot { gap: 6px; flex-wrap: nowrap; min-width: 0; }
+.ld.fit .ld-foot .chip { height: 20px; font-size: 11.5px; flex: none; }
+.ld.fit .ld-fresh { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 11.5px; }
+.ld.fit .ld-foot .btn.sm { height: 24px; padding: 0 7px; flex: none; }
+.ld-why { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ld-why .reason { flex: 1; margin: 0; }
+.ov-panel-foot { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ov-panel-foot .panel-headline { flex-wrap: nowrap; align-items: center; gap: 6px; line-height: 1.3; }
+.ov-panel-foot .panel-headline .chip { height: 20px; font-size: 11.5px; }
+.ov-panel-foot .panel-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
+.ov-panel-foot .panel-missing > summary { font-size: 11.5px; }
+.ov-panel .reason { margin: 0; font-size: 12px; }
+
+/* --- narrower screens ------------------------------------------------------------------------------ */
+@media (max-width: 1300px) {
+  .ov-id { flex-wrap: wrap; }
+  .ov-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ov-kpi:nth-child(3n+1) { border-left: 0; }
+  .ov-kpi:nth-child(n+4) { border-top: 1px solid var(--border); }
+}
+@media (max-width: 1180px) {
+  .ov-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ov-grid > .ov-panel { grid-column: 1 / -1; grid-row: auto; order: -1; }
+  .ov-grid { flex: none; }
+  .ov-panel { contain: none; overflow: visible; }
+  .ov-panel .card-body { container-type: normal; }
+  .ov-panel-pic, .ov-panel-pic[data-view="live"] { flex: none; min-height: 0; container-type: inline-size; --pw: min(100cqw, 560px); }
+  .ov-att-text { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (max-width: 760px) {
+  .ov-grid { grid-template-columns: minmax(0, 1fr); }
+  .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ov-kpi:nth-child(3n+1) { border-left: 1px solid var(--border); }
+  .ov-kpi:nth-child(2n+1) { border-left: 0; }
+  .ov-kpi:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .ov-att-row { grid-template-columns: 16px minmax(0, 1fr); }
+  .ov-att-row > .btn { grid-column: 2; justify-self: start; }
+  .ov-id { gap: 6px 14px; }
+  .ov-id-i { white-space: normal; flex-wrap: wrap; }
+}
+
+/* --- Checks (hub boards only), restyled ----------------------------------------------------------- */
+.hil-checks { align-items: start; }
+.hil-checks .checks-form { display: flex; flex-direction: column; gap: 10px; }
+.hil-checks .checks-run { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--accent-border);
+  background: var(--accent-soft); border-radius: 8px; }
+.hil-checks .checks-announce-fold > summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); list-style: none;
+  display: inline-flex; align-items: center; gap: 6px; }
+.hil-checks .checks-announce-fold > summary::-webkit-details-marker { display: none; }
+.hil-checks .checks-announce-fold[open] > summary .chev { transform: rotate(90deg); }
+.hil-checks .checks-announce { width: 100%; margin-top: 6px; font-family: var(--font-mono); font-size: 11.5px; }
+.hil-checks .checks-past .table td { vertical-align: middle; }
+.hil-checks .checks-past .chip { height: 19px; }
+.ld.fit .ld-foot .tag { white-space: nowrap; flex: none; }
+.ov-panel-parts { display: flex; align-items: baseline; gap: 4px 10px; min-width: 0; flex-wrap: wrap; }
+.ov-panel-parts .panel-line { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-panel-parts .panel-missing { min-width: 0; flex: 1 1 12em; }
+.ov-panel-parts .panel-missing:not([open]) > summary { display: flex; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ov-wait.info > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hil-checks .checks-announce-fold { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+.hil-checks .checks-announce-fold > summary .muted { margin-left: 4px; }
+.ov-card .result { max-height: 64px; font-size: 11.5px; margin: 0; }
+/* 1x / 2x: k whole device pixels per panel pixel (LM4 §7.4), so the picture is 320 or 640 CSS px
+   wide whatever the screen; at 2x the Front panel's column widens to hold it (a wide screen; on
+   a narrow one the picture scrolls inside the card). */
+.ov-panel-pic .ld.fit[data-zoom="1"], .ov-panel-pic .ld.fit[data-zoom="2"] { width: auto; max-width: 100%; }
+.ov-grid:has(.ld.fit[data-zoom="2"]) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 668px; }
+/* ... and at 1x / 2x the card takes the picture's own height (the rows grow; the page may scroll) */
+.ov-panel:has(.ld.fit[data-zoom="1"]), .ov-panel:has(.ld.fit[data-zoom="2"]) { contain: none; overflow: visible; }
+.ov-panel-pic:has(.ld.fit[data-zoom="1"]), .ov-panel-pic:has(.ld.fit[data-zoom="2"]) {
+  flex: none; min-height: 0; container-type: inline-size;
+}

@@ -58,7 +58,8 @@ def _tool(name: str, root: Path):
 def vocabulary(root: Path = ROOT) -> dict:
     """``{sha, roles: [(name, fg, bg)], glyphs: [(code, name, rows, stand_in)]}``."""
     gt = _tool("gen_tokens", ROOT)                 # the generator's code; the data is root's
-    tokens, raw = gt.load(root)
+    # R2: the panel's frozen tokens (design/panel/tokens.json), never the web's theme
+    tokens, raw = gt.load_panel(root)
     roles = [(name, r["fg_shown"], r["bg_shown"]) for name, r in gt.panel_roles(tokens).items()]
     grammar = tokens.get("grammar") or {}
     ascii_of = {spec.get("glyph"): str(spec.get("ascii") or "") for spec in grammar.values()}

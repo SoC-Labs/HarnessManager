@@ -1051,3 +1051,106 @@ class DemoEngine:
 
 
 __all__ = ["BOARD_FIELDED", "BOARD_HELD", "BOARD_USB", "DemoEngine"]
+
+
+# --- ui2 api-build ---
+# UI2-API-BUILD G4 (docs/planning/UI_V2_PLAN.md §2; docs/API.md "Readings kept by this service"):
+# the demo's side of the Overview's readings. ``DemoSession.readings_facts`` is the session seam
+# ``services.history.facts_of`` asks (the harness's uptime, the Linux OS's, and a ``stats`` reply
+# in the wire's key shape); ``DemoEngine.readings_seed`` gives the service's history ring the
+# last 30 minutes of each temperature a board reads (one point a minute, drifting to today's
+# value), so the trend has something to draw the moment a board opens. Scripted and
+# deterministic per board; nothing here is a measurement.
+
+_UI2_T0 = time.time()
+#: Seconds each scripted board's harness has been up when the demo starts (the prototype's
+#: OV_SEED figures); a board not named here uses its board id's hash.
+_UI2_UP_S = {BOARD_FIELDED: 9360.0, BOARD_USB: 18120.0, BOARD_HELD: 101520.0,
+             "mps3@192.168.10.104:6900": 101520.0, "mps3@192.168.10.105:6900": 267060.0,
+             "mps3@192.168.10.106:6900": 9360.0, "mps3@192.168.10.107:6900": 18120.0}
+_UI2_ICAP_PER_SWAP = 412_160
+
+
+def _ui2_seed(board_id: str) -> int:
+    import zlib
+
+    return zlib.crc32(board_id.encode("utf-8"))
+
+
+def _ui2_readings_facts(self: DemoSession) -> dict[str, Any]:
+    """The demo board's uptime and ``stats`` (the seam ``services.history.facts_of`` reads)."""
+    board = self._e._board(self.candidate.board_id)
+    now = time.time()
+    up_s = _UI2_UP_S.get(board.candidate.board_id,
+                         float(1800 + _ui2_seed(board.candidate.board_id) % 86400))
+    up_s += now - _UI2_T0
+    swaps = int(board.health.counters.get("swaps", 0))
+    linux = board.identity.harness_impl == "linux" or board.kind == "linux"
+    stats: dict[str, Any] = {"up_ms": int(up_s * 1000), "swap_n": swaps, "swap": "idle",
+                             "swap_ok": True, "icap": swaps * _UI2_ICAP_PER_SWAP,
+                             "rxdrop": 0, "txerr": 0, "link": True, "spd": 100, "fdx": True,
+                             "clk_alive": True, "lock": True, "rm_ok": True}
+    if not linux:        # the bare-metal superloop's service telemetry (diag's svc_*)
+        stats.update(svc_max_us=182_400, svc_max_ix=3, svc_overruns=0, svc_skips=0)
+    out: dict[str, Any] = {"stats": stats, "at": now, "source": "demo"}
+    if linux:
+        out["os_up_ms"] = int((up_s + 42.0) * 1000)   # the OS booted just before harnessd
+    return out
+
+
+def _ui2_readings_seed(self: DemoEngine, board_id: str) -> list[dict[str, Any]]:
+    """30 minutes of each temperature the board reads, one point a minute, ending at today's
+    value (the history ring's seed; ``services.history.ReadingsHistory``)."""
+    try:
+        board = self._board(board_id)
+    except HarnessError:
+        return []
+    now = time.time()
+    rnd = _ui2_seed(board_id)
+    out = []
+    for r in board.readings:
+        if r.value is None or r.unit != "degC":
+            continue
+        drift = ((rnd % 13) - 4) / 10.0                  # -0.4 .. +0.8 degC over the half hour
+        points, wob = [], 0.0
+        for i in range(30):
+            rnd = (rnd * 1664525 + 1013904223) & 0xFFFFFFFF
+            wob = wob * 0.6 + ((rnd / 2**32) - 0.5) * 0.4
+            value = r.value - drift * (1 - i / 29) + (wob if i < 29 else 0.0)
+            points.append([now - (30 - i) * 60.0, round(value, 1)])
+        out.append({"name": r.name, "unit": r.unit, "source": r.source, "points": points})
+    return out
+
+
+DemoSession.readings_facts = _ui2_readings_facts          # type: ignore[attr-defined]
+DemoEngine.readings_seed = _ui2_readings_seed             # type: ignore[attr-defined]
+# --- end ui2 api-build ---
+# --- ui2 api-hub -------------------------------------------------------------------------------------
+# UI v2 (lane UI2-API-HUB): the demo engine's seams for G3 and G10 (demo_showcase has the data).
+# Appended as the lane rules ask: the engine above is only extended here.
+
+
+def _ui2_hub_for(self: DemoEngine, board_id: str) -> Any:
+    """``hub_for`` (the daemon's ``hub_boards``): a showcase board's hub WITHOUT opening it (its
+    lease badge, "Request without opening"), None for every other board."""
+    if not self.showcase:
+        return None
+    from harness_manager import demo_showcase as show
+
+    return show.hub_ref(self, board_id)
+
+
+_ui2_showcase = DemoEngine._showcase
+
+
+def _ui2_showcase_seeded(self: DemoEngine, app_update: str | None) -> dict[str, _Board]:
+    boards = _ui2_showcase(self, app_update)
+    from harness_manager import demo_showcase as show
+
+    show.seed_identities(self.state_dir)          # G10: the identity clash to fix
+    return boards
+
+
+DemoEngine.hub_for = _ui2_hub_for                  # type: ignore[attr-defined]
+DemoEngine._showcase = _ui2_showcase_seeded        # type: ignore[method-assign]
+# --- end ui2 api-hub ---------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import {
   call, EventSocket, heldByJob, jobEvent, onConnection, quietOf, toApiError, unwrapDebug, unwrapInfo,
 } from "./api.js";
 import { clock, secs, setCapabilityTitles } from "./format.js";
+import { parseHash, resolveRoute, routeHash, SUBS, TAB_KEYS } from "./route.js";
 import { onBackgroundState, refreshState, setViewing, VIEWER_ID, viewing } from "./viewer.js";
 
 export const UI_NOTE = "harness-manager-ui";
@@ -22,7 +23,12 @@ export const S = {
   order: [],                 // board ids in rail order
   scan: { running: false, line: "", level: "", offer: [] },   // offer: boards.toml boards (SIDEBAR-UX)
   selected: null,
-  sections: {},              // board_id -> section key
+  sections: {},              // board_id -> tab key (route.js TABS; old keys are migrated)
+  subs: {},                  // board_id -> {tab: sub-page} (Board's page, Build's step)
+  // UI v2 shell: the Activity drawer ({scope: "board"|"all", level: "all"|"err"}), the toast
+  // ({text, icon, level, id}), the part of a tab a link asked to show ({bid, part, at}), and
+  // what the drawer last showed (the last-error chip and the rail's badge count after it).
+  ui: { drawer: null, toast: null, reveal: null, seenLog: 0 },
   theme: "system",
   board: {},                 // board_id -> per-board data (see boardState)
   panels: {},                // "board_id:panel" -> action panel state (see actions.js)
@@ -65,9 +71,13 @@ export function boardState(bid) {
       overlays: null, overlaysError: null, overlaysLine: "", overlaysLoading: false,
       selectedOverlay: null, preflight: null, preflightFor: null, preflightError: null,
       preflightLine: "", preflightLoading: false, preflightGen: 0,
+      // The deploy as its events tell it; the mini bars (format.js deployBar) and the
+      // Workbench's download bar read it. startedAt/doneAt/phaseAt: the events' own times
+      // (epoch s); rate (bytes/s) and left (s) for the byte phases, from those times.
       deploy: { state: "idle", overlay: "", phase: "", bytes: 0, total: 0, phases: [],
         events: [], verified: false, rm_id: "", seconds: 0, transport: "", reason: "",
-        stage: "", keep: false, card: null },
+        stage: "", keep: false, card: null, startedAt: 0, doneAt: 0, phaseAt: 0, phaseBytes: 0,
+        rate: 0, left: null },
       // Keep on the card: GET /boards/{bid}/card (read only when the harness reports "usd"),
       // and the Program section's tick box (unticked by default, cleared after each deploy).
       card: null, cardError: null, cardLoading: false, keepOnCard: false, cardFollow: 0,
@@ -92,22 +102,134 @@ export function boardState(bid) {
   return S.board[bid];
 }
 
-export function sectionOf(bid) { return S.sections[bid] || "overview"; }
+// --- UI v2 routes (route.js): the tab and sub-page of each board -----------------------------
 
-export function setSection(bid, section) {
-  S.sections[bid] = section;
-  try { window.sessionStorage.setItem("harness_manager.sections", JSON.stringify(S.sections)); }
-  catch (e) { /* not remembered */ }
+// A board behind a hub (its Checks tab, its lease badge): for an open board what GET /lease
+// said once read (a read after it closed says nothing), else what boards.toml, the lease the
+// service last knew, or a hub link say.
+export function hubBoard(bid) {
+  const row = S.boards[bid] || {};
+  const w = S.board[bid] && S.board[bid].week;
+  if (row.open && w && w.hubLoaded) return !!w.hub;
+  const conf = row.configured || {};
+  const links = (row.candidate && row.candidate.links) || [];
+  return !!(conf.hub || conf.via === "hub" || row.lease_known
+    || links.some((l) => l.kind === "hub" || l.via === "hub"));
+}
+
+// The tab the board shows: the one it was left on, but never Checks on a board with no hub.
+export function sectionOf(bid) {
+  const tab = TAB_KEYS.includes(S.sections[bid]) ? S.sections[bid] : "overview";
+  return tab === "checks" && !hubBoard(bid) ? "overview" : tab;
+}
+
+// The sub-page a tab shows on this board ("" for a tab without any).
+export function subOf(bid, tab = sectionOf(bid)) {
+  const subs = SUBS[tab];
+  if (!subs) return "";
+  const want = (S.subs[bid] || {})[tab];
+  return subs.includes(want) ? want : subs[0];
+}
+
+function persistRoutes() {
+  try {
+    window.sessionStorage.setItem("harness_manager.sections", JSON.stringify(S.sections));
+    window.sessionStorage.setItem("harness_manager.subs", JSON.stringify(S.subs));
+  } catch (e) { /* not remembered */ }
+}
+
+// The address bar follows the selected board's tab (history.replaceState: no history entry),
+// so a reload, or the link copied from it, lands there.
+export function writeRoute() {
+  const bid = S.selected;
+  if (!bid || typeof window === "undefined" || !window.history) return;
+  const tab = sectionOf(bid);
+  // the sub-page only when one was chosen: Build has no steps to land on until its lane's
+  // stepper, and a bare tab opens on its first page anyway
+  const chosen = (S.subs[bid] || {})[tab];
+  const hash = routeHash(bid, { tab, sub: SUBS[tab] && SUBS[tab].includes(chosen) ? chosen : "" });
+  if (window.location.hash === hash) return;
+  try {
+    window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search + hash);
+  } catch (e) { /* a sandboxed page: the route stays in memory */ }
+}
+
+// Go to a board's tab: `route` is a tab key ("board"), a route ("board/versions",
+// "workbench?console=uart0", "overview?activity=err") or an old 0.1.0 key ("sd", "program":
+// route.js OLD_KEYS). Selects the board when it is not the selected one. The extension point
+// every lane uses to send the user somewhere (UI v2 Phase 2: no lane edits app.js).
+export function navigate(bid, route) {
+  if (!bid) return;
+  const r = resolveRoute(route);
+  S.sections[bid] = r.tab;
+  if (r.sub) S.subs[bid] = { ...(S.subs[bid] || {}), [r.tab]: r.sub };
+  if (r.console) boardState(bid).consoleSelected = r.console;
+  S.ui.reveal = r.part ? { bid, part: r.part, at: Date.now() } : null;
+  persistRoutes();
+  if (S.selected !== bid) select(bid);
+  if (r.activity) openActivity(bid, r.activity === "err" ? "err" : "all");
+  writeRoute();
   changed();
 }
+
+// 0.1.0's name for it, kept: the old keys map through route.js (a lane replaces its calls).
+export function setSection(bid, section) { navigate(bid, section); }
 
 export function select(bid) {
   S.selected = bid;
   try { window.sessionStorage.setItem("harness_manager.selected", bid || ""); } catch (e) { /* ok */ }
+  writeRoute();
   changed();
   const row = S.boards[bid];
   syncViewing();
   if (row && row.open) openedBoard(bid);
+}
+
+// --- the Activity drawer, the header's last-error chip, toasts ------------------------------
+
+// Open the Activity drawer: `bid` scopes it to that board (null: every board), `level` "err"
+// shows only errors and warnings.
+export function openActivity(bid = S.selected, level = "all") {
+  S.ui.drawer = { scope: bid ? "board" : "all", level: level === "err" ? "err" : "all" };
+  S.ui.seenLog = S.logSeq;                 // what is on screen now is seen
+  changed();
+}
+
+export function closeActivity() {
+  S.ui.drawer = null;
+  S.ui.seenLog = S.logSeq;
+  changed();
+}
+
+// The newest error or warning for a board that the drawer has not shown yet (the header's
+// chip), or null.
+export function lastProblem(bid) {
+  for (let i = S.log.length - 1; i >= 0; i -= 1) {
+    const e = S.log[i];
+    if (e.id <= S.ui.seenLog) return null;
+    if (e.board === bid && (e.level === "error" || e.level === "warning")) return e;
+  }
+  return null;
+}
+
+// Errors on any board the drawer has not shown yet (the rail's Activity badge).
+export function unseenErrors() {
+  let n = 0;
+  for (let i = S.log.length - 1; i >= 0 && S.log[i].id > S.ui.seenLog; i -= 1) {
+    if (S.log[i].level === "error") n += 1;
+  }
+  return n;
+}
+
+// A short note at the bottom of the page ("Copied", "Lease yours for 60 min"); it goes by
+// itself. `level` "err" for a failure worth a glance (the Activity row has the detail).
+export function toast(text, { icon = "circle-check", level = "", ms = 3200 } = {}) {
+  const id = (S.ui.toast ? S.ui.toast.id : 0) + 1;
+  S.ui.toast = { text: String(text || ""), icon, level, id };
+  changed();
+  setTimeout(() => {
+    if (S.ui.toast && S.ui.toast.id === id) { S.ui.toast = null; changed(); }
+  }, ms);
 }
 
 // --- QUIET-POLL: background reads ------------------------------------------------------------
@@ -158,14 +280,49 @@ export function quietWords(q) {
   return q.text || "Background reads are paused";
 }
 
+// The tabs this tab of the browser was on (sessionStorage), 0.1.0's keys migrated ("sd" ->
+// board/versions, "program" -> workbench: route.js OLD_KEYS), then the route in the address
+// bar, which wins. The board to select: the route's, else the one selected last.
 export function restoreSelection() {
+  let saved = null;
   try {
     const sections = JSON.parse(window.sessionStorage.getItem("harness_manager.sections") || "{}");
-    if (sections && typeof sections === "object") S.sections = sections;
-    return window.sessionStorage.getItem("harness_manager.selected") || null;
-  } catch (e) {
-    return null;
+    const subs = JSON.parse(window.sessionStorage.getItem("harness_manager.subs") || "{}");
+    if (subs && typeof subs === "object") S.subs = subs;
+    if (sections && typeof sections === "object") {
+      for (const [bid, key] of Object.entries(sections)) {
+        const r = resolveRoute(key);           // a 0.1.0 key becomes its tab (+ sub-page)
+        S.sections[bid] = r.tab;
+        if (r.sub && !(S.subs[bid] || {})[r.tab]) S.subs[bid] = { ...(S.subs[bid] || {}), [r.tab]: r.sub };
+      }
+    }
+    saved = window.sessionStorage.getItem("harness_manager.selected") || null;
+  } catch (e) { /* nothing remembered */ }
+  const here = parseHash(typeof window !== "undefined" ? window.location.hash : "");
+  if (here) {
+    applyRoute(here.bid, here.route);
+    saved = here.bid;
   }
+  persistRoutes();
+  return saved;
+}
+
+// A route from the address bar (at start, or pasted later): its tab, sub-page and console,
+// and the drawer when it asks for it. Selecting the board is the caller's.
+function applyRoute(bid, r) {
+  S.sections[bid] = r.tab;
+  if (r.sub) S.subs[bid] = { ...(S.subs[bid] || {}), [r.tab]: r.sub };
+  if (r.console) boardState(bid).consoleSelected = r.console;
+  if (r.activity) S.ui.drawer = { scope: "board", level: r.activity === "err" ? "err" : "all" };
+}
+
+function onHashChange() {
+  const here = parseHash(window.location.hash);
+  if (!here) return;
+  applyRoute(here.bid, here.route);
+  persistRoutes();
+  if (S.boards[here.bid] && S.selected !== here.bid) select(here.bid);
+  else changed();
 }
 
 // --- jobs: while one runs, harness-manager-daemon refuses every other request on that board ------------
@@ -686,8 +843,12 @@ export async function loadPending(bid) {
   b.pending = pending;
   if (first) {
     b.pendingSeen = true;
-    S.sections[bid] = "sd";             // recovery before anything else
-    log("error", "storage", "Interrupted SD install: restore it first (Reset & Power)", bid);
+    // recovery before anything else: Board > Versions holds the Configuration SD (0.1.0's "sd")
+    S.sections[bid] = "board";
+    S.subs[bid] = { ...(S.subs[bid] || {}), board: "versions" };
+    persistRoutes();
+    if (S.selected === bid) writeRoute();
+    log("error", "storage", "Interrupted SD install: restore it first (Board > Versions)", bid);
   }
   changed();
 }
@@ -744,27 +905,39 @@ function onDeployEvent(ev) {
   const b = boardState(ev.board_id);
   const d = ev.data || {};
   const dep = b.deploy;
+  const at = Number(ev.at) || Date.now() / 1000;
   if (ev.topic === "deploy.started") {
     Object.assign(dep, { state: "running", overlay: d.overlay || d.rm_id || "", phase: "started",
       bytes: 0, total: 0, phases: [], events: [], verified: false, reason: "", stage: "",
-      rm_id: d.rm_id || "", keep: !!d.keep_on_card, card: null });
+      rm_id: d.rm_id || "", keep: !!d.keep_on_card, card: null, startedAt: at, doneAt: 0,
+      phaseAt: at, phaseBytes: 0, rate: 0, left: null });
     dep.events.push(`${clock(ev.at)}  started ${dep.overlay}`);
   } else if (ev.topic === "deploy.progress") {
-    if (dep.state !== "running") Object.assign(dep, { state: "running", phases: [], events: [] });
-    dep.phase = d.phase || "?";
-    dep.bytes = Number(d.bytes || 0);
+    if (dep.state !== "running") {
+      Object.assign(dep, { state: "running", phases: [], events: [], startedAt: at, doneAt: 0 });
+    }
+    const phase = d.phase || "?";
+    const bytes = Number(d.bytes || 0);
+    if (phase !== dep.phase) {
+      Object.assign(dep, { phaseAt: at, phaseBytes: bytes, rate: 0, left: null });
+    } else if (at > dep.phaseAt && bytes > dep.phaseBytes) {
+      dep.rate = (bytes - dep.phaseBytes) / (at - dep.phaseAt);
+      dep.left = dep.rate > 0 ? Math.max(0, (Number(d.total || 0) - bytes) / dep.rate) : null;
+    }
+    dep.phase = phase;
+    dep.bytes = bytes;
     dep.total = Number(d.total || 0);
     if (!dep.phases.includes(dep.phase)) dep.phases.push(dep.phase);
     dep.events.push(`${clock(ev.at)}  ${dep.phase} ${dep.bytes}/${dep.total}`);
   } else if (ev.topic === "deploy.done") {
     Object.assign(dep, { state: "done", phase: "done", verified: !!d.verified,
       rm_id: d.rm_id || "", seconds: Number(d.seconds || 0), transport: d.transport || "",
-      card: d.card || null });
+      card: d.card || null, doneAt: at, rate: 0, left: null });
     if (dep.total) dep.bytes = dep.total;
     dep.events.push(`${clock(ev.at)}  done rm_id ${d.rm_id} verified=${d.verified ? "yes" : "no"}`);
   } else if (ev.topic === "deploy.failed") {
     Object.assign(dep, { state: "failed", reason: d.reason || "no reason given",
-      stage: d.stage || "" });
+      stage: d.stage || "", doneAt: at, rate: 0, left: null });
     if (d.overlay) dep.overlay = d.overlay;
     dep.events.push(`${clock(ev.at)}  failed: ${dep.reason}`);
   }
@@ -827,8 +1000,13 @@ export function handleEvent(ev) {
     if (d.pid !== undefined) b.debug.pid = d.pid;
     if (d.detail !== undefined) b.debug.detail = d.detail;
     if (d.config !== undefined) b.debug.config = d.config;
+    // UI v2 (CCR WORKBENCH-2): DEBUG-ONBOARD's additive fields, as the status read gives them
+    if (d.where !== undefined) b.debug.where = d.where;
+    if (Array.isArray(d.gdb_ports)) b.debug.gdb_ports = d.gdb_ports;
+    if (Array.isArray(d.cores)) b.debug.cores = d.cores;
     if (d.state !== "up" && d.state !== "starting") {
       b.debug.gdb_port = 0; b.debug.telnet_port = 0; b.debug.tcl_port = 0;
+      if (b.debug.gdb_ports) b.debug.gdb_ports = [];
     }
   }
   if (ev.topic === "controller.reboot") {
@@ -865,6 +1043,7 @@ export async function start() {
     changed();
   });
   const saved = restoreSelection();
+  window.addEventListener("hashchange", onHashChange);
   socket = new EventSocket(handleEvent, (up) => {
     const was = S.eventsUp;
     S.eventsUp = up;

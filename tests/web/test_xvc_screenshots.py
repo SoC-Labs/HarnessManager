@@ -40,7 +40,7 @@ def review(screenshots):
 def shoot(page, review, name, *, whole=False):
     page.wait_for_timeout(400)
     assert not page.errors, page.errors
-    expect(page.locator('[data-testid="xvc-card"] .card-sub')).to_have_text(SCOPE)
+    expect(page.locator('[data-testid="xvc-card"] .card-sub')).to_have_attribute("title", SCOPE)
     if whole:
         page.screenshot(path=str(review / name), full_page=True)
     else:

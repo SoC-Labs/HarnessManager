@@ -44,6 +44,43 @@ from .schema import (
 )
 from .version import at_least, compare_safe, same_version
 
+#: UI2 G6: where a Linux board's OS boots from (``BoardView.os_boot``, ``Plan.os_boot``).
+OS_BOOT_CARD = "card"
+OS_BOOT_NETBOOT = "netboot"
+#: UI2 G6: the blocker of an OS slot image on a netbooted board (Board > Versions says it).
+NETBOOT_BLOCKER = ("the OS is the hub's TFTP image: this board has no user microSD holding an "
+                   "OS slot, so stage0 boots the image the hub serves at every cold boot, and "
+                   "this release's OS slot image cannot be written here; ask the hub's admin "
+                   "to serve this release's image, or give the board a card and install again")
+
+#: The words an OS-slot adapter's ``slots_reason`` uses for "no card" (the MPS3 pack's "no
+#: user microSD card in the slot", the demo's "no card in the USER microSD slot"): a running
+#: Linux harness with no card booted over the network.
+_NO_CARD = ("no user microsd card", "no card in the user microsd")
+
+
+def os_boot_of(running: str) -> str:
+    """Where a Linux board's OS came from, by the slot it reports running: ``card`` for A/B,
+    ``netboot`` for rescue/none (stage0 took the hub's image), ``""`` otherwise."""
+    if running in ("A", "B"):
+        return OS_BOOT_CARD
+    return OS_BOOT_NETBOOT if running in ("rescue", "none") else ""
+
+
+def netboot_of(adapter: object) -> tuple[str, str]:
+    """(``os_boot``, the adapter's ``slots_reason``) for a Linux board whose OS slots cannot be
+    used: ``netboot`` when the reason is that no card is in the slot. Never raises."""
+    reason_of = getattr(adapter, "slots_reason", None)
+    if not callable(reason_of):
+        return "", ""
+    try:
+        reason = str(reason_of() or "")
+    except Exception as exc:  # noqa: BLE001 - a reason that fails is no reason
+        reason = str(getattr(exc, "message", exc))
+    low = reason.lower()
+    return (OS_BOOT_NETBOOT if any(k in low for k in _NO_CARD) else ""), reason
+
+
 MODE_FULL = "full"            # base and/or OS, plus overlays
 MODE_OVERLAYS = "overlays"    # host store only: no SD write, no reboot
 MODE_NONE = "none"            # nothing to do
@@ -97,6 +134,10 @@ class Plan:
     #: LINUX-ANSWERS (S5): the default slot stage0 fell back FROM (it did not come up
     #: healthy; the default stays on it until a rollback). "" = no fallback.
     os_fell_back: str = ""
+    #: UI2 G6 (additive): where the board's OS boots from: "card" (its user microSD's OS
+    #: slots), "netboot" (no card holds one: stage0 boots the image the hub serves over TFTP
+    #: at every cold boot), "" (not known: bare metal, or the board did not say).
+    os_boot: str = ""
 
     @property
     def version(self) -> str:
@@ -161,6 +202,7 @@ class Plan:
             "auto_revert": self.auto_revert,
             "needs_door": list(self.needs_door),
             "os_fell_back": self.os_fell_back or None,
+            "os_boot": self.os_boot,
             "fingerprint": self.fingerprint(),
         }
 
@@ -198,6 +240,10 @@ class BoardView:
     # HUB-SD: the pack's hub SD door (``hub_door``), with the lease holder/mine/queue;
     # {} when the board is not behind a hub.
     hub_sd: dict[str, Any] = field(default_factory=dict)
+    # UI2 G6: where the OS boots from ("card", "netboot", "": ``Plan.os_boot``), and why the
+    # board offers no OS slot door when it offers none (its adapter's ``slots_reason``).
+    os_boot: str = ""
+    os_slots_reason: str = ""
 
 
 def _same_u32(a: str, b: str) -> bool:
@@ -506,9 +552,16 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     if plan.base and not board.has_controller and plan.via != hub_door.VIA_HUB:
         plan.blockers.append("the new base runs only after a board REBOOT: it needs the Debug USB "
                              "MCC console")
+    plan.os_boot = board.os_boot
     if plan.os_slot and not board.has_os_slots:
-        plan.blockers.append("this release carries an OS slot image, but this harness offers no "
-                             "OS slot update (a Linux harness with the slot verbs is needed)")
+        if board.os_boot == OS_BOOT_NETBOOT:
+            plan.blockers.append(NETBOOT_BLOCKER)
+        else:
+            plan.blockers.append("this release carries an OS slot image, but this harness "
+                                 "offers no OS slot update (a Linux harness with the slot "
+                                 "verbs is needed)"
+                                 + (f": {board.os_slots_reason}" if board.os_slots_reason
+                                    else ""))
     if plan.os_slot and os_comp is not None and board.identity_known and ident.shell_id:
         # LINUX-SLOTS: the Ethernet door carries an OS image only for the RUNNING static
         # (the board refuses a push provisioned for any other fabric). A Linux release on

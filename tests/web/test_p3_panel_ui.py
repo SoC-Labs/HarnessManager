@@ -1,6 +1,7 @@
 """Lane P3 in the browser: the MPS3 front panel in the web UI (docs/design/CLCD_ALIGNMENT.md §5).
 
-david's decisions: P5 a line + Identify in the Board tile, the mirror in Details; P6 "held"
+david's decisions: P5 a line + Identify in the Board tile, the mirror in Details (UI v2 round 3:
+both are the Overview's Front panel card: its foot line, Identify in its head); P6 "held"
 (violet) is someone else having it (the DUT owning the panel); P2 a tap on the panel's
 lease-request banner notifies the holder and never releases; P3 these are Linux-harness
 features, and bare metal (v0.11) shows a mirror labelled as rebuilt, with Identify disabled
@@ -23,6 +24,7 @@ from harness_manager.demo import BOARD_FIELDED
 from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from tests.fakes.clcd_panel_shell import LINUX_STATUS_ROWS, PANEL_FEATURES
 from tests.fakes.p1_mock_panel import PanelSim
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -67,7 +69,8 @@ def open_board(page, bid=BOARD):
     page.locator(f'.board-item[data-board="{bid}"]').click()
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
-    page.wait_for_selector('[data-testid="tile-panel"]', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
+    page.wait_for_selector('[data-testid="panel-card"]', timeout=T)
 
 
 def details(page):
@@ -102,7 +105,7 @@ def wait_until(fn, timeout=5.0):
 
 
 def line(page):
-    return page.locator('[data-testid="tile-panel-line"]')
+    return page.locator('[data-testid="panel-line"]')
 
 
 # --- Identify ------------------------------------------------------------------------------------
@@ -114,7 +117,7 @@ def test_identify_on_linux_blinks_for_the_chosen_seconds_and_stops(page_factory,
     page = page_factory(**APP)
     open_board(page)
     expect(line(page)).to_have_text("status page · harness owns it · touch unknown", timeout=T)
-    # LOCATE: the tile has the one-click 5 s button; the chosen-seconds control is in Details.
+    # the chosen-seconds control is in the Front panel's head (UI v2: the rail keeps the 5 s one)
     details(page)
     tile = page.locator('[data-testid="panel-identify"]')
     select = tile.locator('[data-testid="identify-seconds"]')
@@ -139,39 +142,31 @@ def test_identify_on_linux_blinks_for_the_chosen_seconds_and_stops(page_factory,
 def test_negative_twin_identify_on_bare_metal_is_disabled_with_the_reason(page_factory, daemon, engine, psim):
     page = page_factory(**APP)
     open_board(page)                                            # v0.11: no "locate"
-    # LOCATE: the tile's one-click button, disabled with the reason as its tooltip
-    tile_button = page.locator('[data-testid="tile-locate"]')
-    expect(tile_button).to_have_attribute("aria-disabled", "true", timeout=T)
-    expect(tile_button).to_have_attribute("title", f"Cannot: {LOCATE_WHY}")
-    expect(page.locator('[data-testid="tile-locate-line"]')).to_have_text(f"Cannot: {LOCATE_WHY}")
-    tile_button.click(force=True)                # aria-disabled: nothing is sent
     # the line says it is rebuilt (PANEL-TRUTH: a page the image does not report is left out);
-    # the Details card too, with Identify disabled there as well
-    expect(line(page)).to_contain_text("harness owns it · touch unknown")
+    # the Front panel card, with Identify disabled in its head
+    expect(line(page)).to_contain_text("harness owns it · touch unknown", timeout=T)
     assert "page" not in line(page).inner_text()
-    expect(page.locator('[data-testid="tile-panel-rebuilt"]')).to_have_text("rebuilt")
+    expect(page.locator('[data-testid="panel-headline"]')).to_have_attribute("data-state", "rebuilt")
     details(page)
     tile = page.locator('[data-testid="panel-identify"]')
     button = tile.locator('[data-action="identify"]')
     expect(button).to_have_attribute("aria-disabled", "true", timeout=T)
     expect(button).to_have_attribute("title", f"Cannot: {LOCATE_WHY}")
-    expect(tile.locator('[data-testid="reason-identify"]')).to_have_text(f"Cannot: {LOCATE_WHY}")
+    card = page.locator('[data-testid="panel-card"]')
+    expect(card.locator('[data-testid="reason-identify"]')).to_have_text(f"Cannot: {LOCATE_WHY}")
     expect(tile.locator('[data-testid="identify-seconds"]')).to_be_disabled()
-    button.scroll_into_view_if_needed()          # the Details card may be below the fold
     button.click(force=True)                     # aria-disabled: an interlock, nothing is sent
-    expect(tile.locator('[data-testid="identify-result"]')).to_contain_text("Nothing was run.",
+    expect(card.locator('[data-testid="identify-result"]')).to_contain_text("Nothing was run.",
                                                                             timeout=T)
-    expect(tile.locator('[data-testid="identify-result"]')).to_contain_text(
+    expect(card.locator('[data-testid="identify-result"]')).to_contain_text(
         "$ identify 192.168.10.101:6900 --seconds 5  (not run)")
     assert psim.boards[BOARD]["locate_until"] == 0.0 and psim.locates == []
     assert tile.locator('[data-testid="identify-until"]').count() == 0
-    card = page.locator('[data-testid="panel-card"]')
     expect(card.locator('[data-testid="panel-headline"]')).to_have_attribute("data-state", "rebuilt")
     expect(card.locator('[data-testid="panel-rebuilt"]')).to_contain_text(
         "Rebuilt from what Harness Manager read, not read from the panel")
     expect(card.locator('[data-testid="panel-mirror"]')).to_have_attribute("data-source", "rebuilt")
-    expect(card.locator('[data-testid="panel-identify"] [data-testid="reason-identify"]')).to_have_text(
-        f"Cannot: {LOCATE_WHY}")
+    expect(card.locator('[data-testid="reason-identify"]')).to_have_text(f"Cannot: {LOCATE_WHY}")
     # PANEL-TRUTH: the rows it does not report are one line, not rows of "not reported"
     expect(card.locator('[data-testid="panel-not-reported"]')).to_contain_text(
         "Not reported by this image: page, touch health, who is connected, recent taps")
@@ -192,16 +187,15 @@ def test_the_mirror_updates_on_a_panel_state_event(page_factory, daemon, engine,
     expect(mirror.locator('[data-row="0"]')).to_have_text(LINUX_STATUS_ROWS[0])
     assert page.locator('[data-testid="panel-rebuilt"]').count() == 0     # read, not rebuilt
     expect(page.locator('[data-testid="panel-read-age"]')).to_contain_text("Read from the panel")
-    # the sessions, with this Harness Manager's marked
-    mine = page.locator('[data-testid="panel-sessions"] li[data-mine="yes"]')
-    expect(mine).to_have_count(1)
-    expect(mine.locator('[data-testid="panel-session-mine"]')).to_have_text("you")
+    # the sessions (UI v2: the Overview's "Watching" line), with this Harness Manager's as "you"
+    watching = page.locator('[data-testid="ov-watching"]')
+    expect(watching).to_have_attribute("data-source", "presence", timeout=T)
+    expect(watching).to_contain_text("you")
     # the board raises a banner: panel.state, and the mirror follows (no reload, no click)
     rows = list(LINUX_STATUS_ROWS)
     rows[11] = "         NETWORK LINK DOWN".ljust(40)
     psim.set_rows(BOARD, tuple(rows), banner="NETWORK LINK DOWN")
     expect(mirror.locator('[data-row="11"]')).to_have_text(rows[11], timeout=T)
-    expect(page.locator('[data-testid="panel-banner"]')).to_have_text("NETWORK LINK DOWN")
     assert page.errors == []
 
 
@@ -217,7 +211,7 @@ def test_negative_twin_without_a_panel_state_event_the_mirror_stays(page_factory
     psim.board(BOARD)["rows"] = tuple("CHANGED WITHOUT AN EVENT".ljust(40) for _ in range(15))
     page.wait_for_timeout(4000)                                 # past the 3 s frame reuse
     expect(mirror.locator('[data-row="0"]')).to_have_text(LINUX_STATUS_ROWS[0])
-    assert page.locator('[data-testid="panel-banner"]').count() == 0
+    assert page.locator('[data-row="11"]:has-text("NETWORK LINK DOWN")').count() == 0
 
 
 # --- held: the DUT owns the panel ---------------------------------------------------------------------
@@ -230,14 +224,11 @@ def test_a_dut_owned_panel_shows_the_held_colour(page_factory, daemon, engine, p
     open_board(page)
     details(page)
     psim.set_owner(BOARD, "dut")
-    owner = '[data-testid="tile-panel-line"] [data-part="owner"]'
+    owner = '[data-testid="panel-line"] [data-part="owner"]'
     expect(page.locator(owner)).to_have_text("DUT owns it", timeout=T)
     expect(page.locator(owner)).to_have_attribute("data-level", "held")
     assert colour_of(page, owner) == token(page, "--held")
-    chip = page.locator('[data-testid="panel-owner-chip"]')
-    expect(chip).to_have_attribute("data-level", "held")
-    expect(chip).to_have_text("DUT owns it")
-    assert colour_of(page, '[data-testid="panel-owner-chip"]') == token(page, "--held")
+    expect(page.locator('[data-testid="panel-card"]')).to_have_attribute("data-owner", "dut")
     # and in dark: the dark theme's held
     page.locator('.seg button[title="Dark"]').click()
     page.wait_for_timeout(200)
@@ -250,7 +241,7 @@ def test_negative_twin_a_harness_owned_panel_is_ok_not_held(page_factory, daemon
     linux(engine)
     page = page_factory(**APP)
     open_board(page)
-    owner = '[data-testid="tile-panel-line"] [data-part="owner"]'
+    owner = '[data-testid="panel-line"] [data-part="owner"]'
     expect(page.locator(owner)).to_have_text("harness owns it", timeout=T)
     expect(page.locator(owner)).to_have_attribute("data-level", "ok")
     assert colour_of(page, owner) == token(page, "--ok")
@@ -272,11 +263,10 @@ def test_touch_unavailable_is_shown_with_its_counts(page_factory, daemon, engine
     open_board(page)
     details(page)
     psim.set_touch(BOARD, False, bus_lost=3, recoveries=1)
-    touch = '[data-testid="tile-panel-line"] [data-part="touch"]'
+    touch = '[data-testid="panel-line"] [data-part="touch"]'
     expect(page.locator(touch)).to_have_text("touch unavailable (bus lost 3×, 1 recovery)", timeout=T)
     expect(page.locator(touch)).to_have_attribute("data-level", "err")
     assert colour_of(page, touch) == token(page, "--err")
-    expect(page.locator('[data-testid="panel-touch"]')).to_have_text("touch unavailable (bus lost 3×, 1 recovery)")
     psim.set_touch(BOARD, False, bus_lost=5, recoveries=2)
     expect(page.locator(touch)).to_have_text("touch unavailable (bus lost 5×, 2 recoveries)", timeout=T)
 
@@ -286,7 +276,7 @@ def test_negative_twin_touch_ok_or_unreported_is_not_unavailable(page_factory, d
     linux(engine)
     page = page_factory(**APP)
     open_board(page)
-    touch = '[data-testid="tile-panel-line"] [data-part="touch"]'
+    touch = '[data-testid="panel-line"] [data-part="touch"]'
     expect(page.locator(touch)).to_have_text("touch unknown", timeout=T)       # not reported
     expect(page.locator(touch)).to_have_attribute("data-level", "unk")
     psim.set_touch(BOARD, True)
@@ -319,8 +309,8 @@ def test_a_request_tap_shows_tapped_on_the_panel_to_the_holder_and_never_release
     tapped = prompt.locator('[data-testid="wanted-tapped"]')
     expect(tapped).to_contain_text(re.compile(r"Tapped on the panel at \d\d:\d\d:\d\d"), timeout=T)
     expect(tapped).to_contain_text("Nothing was released")
-    expect(page.locator('[data-testid="panel-taps"] li[data-on="request"]')).to_contain_text(
-        "tapped the lease request")
+    expect(page.locator('[data-testid="panel-taps"][data-on="request"]')).to_contain_text(
+        "last tap: the lease request")
     # it never releases: the lease is still ours, the request still waits for our answer
     page.wait_for_timeout(500)
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours")
@@ -338,14 +328,14 @@ def test_negative_twin_a_tap_elsewhere_or_with_no_request_marks_nothing(page_fac
     panel = daemon.app.state.panel
     details(page)
     panel.tap(BOARD, "request")                                # no open request: a stale banner
-    expect(page.locator('[data-testid="panel-taps"] li[data-on="request"]')).to_have_count(1, timeout=T)
+    expect(page.locator('[data-testid="panel-taps"][data-on="request"]')).to_have_count(1, timeout=T)
     assert reqs.taps.get(BOARD, {}) == {}
     rid = reqs.incoming(BOARD, by="bob@lab-pc-02", message="demo at 3")
     prompt = page.locator(f'[data-testid="lease-wanted"][data-request="{rid}"]')
     expect(prompt).to_be_visible(timeout=T)
     panel.tap(BOARD, "nav")                                    # a page turn is not a request tap
-    expect(page.locator('[data-testid="panel-taps"] li[data-on="nav"]')).to_contain_text("tapped next page",
-                                                                                         timeout=T)
+    expect(page.locator('[data-testid="panel-taps"][data-on="nav"]')).to_contain_text("last tap: next page",
+                                                                                      timeout=T)
     page.wait_for_timeout(1500)
     assert prompt.locator('[data-testid="wanted-tapped"]').count() == 0
     expect(page.locator('[data-testid="lease-chip"]')).to_contain_text("lease yours")

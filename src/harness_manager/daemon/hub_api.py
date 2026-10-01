@@ -56,6 +56,7 @@ core ``/boards/{bid:path}`` routes, whose path converter is greedy.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -71,11 +72,12 @@ from harness_manager.cli.cmd_hub import (
     request_id,
     request_refusal,
 )
-from harness_manager.core.errors import HarnessError, UsageError
+from harness_manager.core.errors import AbsentError, HarnessError, UsageError
 from harness_manager.core.events import Event
 from harness_manager.services.lease import (
     DEFAULT_TTL_S,
     LeaseService,
+    check_want,
     lease_name,
     typed_names,
     view_confirm_error,
@@ -111,6 +113,16 @@ def _ttl(body: dict[str, Any]) -> int | None:
 
 def _now() -> float:
     return time.time()
+
+
+def _view(leases: Any, hub: Any) -> dict[str, Any]:
+    """``leases.view(hub)``, with the background queue (ui2 api-hub, G11) when the service
+    reads it (``background=True``; a stand-in service from before it takes no such key)."""
+    try:
+        takes = "background" in inspect.signature(leases.view).parameters
+    except (TypeError, ValueError):
+        takes = False
+    return leases.view(hub, background=True) if takes else leases.view(hub)
 
 
 class _BesideJobs:
@@ -246,9 +258,26 @@ def register(ctx: RouteContext) -> None:
 
     d.close = close
 
-    def hub_of(bid: str) -> Any:
-        session = ctx.board(bid)
-        return leases.require_hub(getattr(session, "hub", None), bid)
+    def hub_of(bid: str, *, closed_ok: bool = False) -> Any:
+        return leases.require_hub(board_hub(bid, closed_ok=closed_ok), bid)
+
+    def board_hub(bid: str, *, closed_ok: bool = False) -> Any:
+        """The board's hub adapter (None: no hub). ``closed_ok`` (ui2 api-hub, G3: "Request
+        without opening"): a board this service lists but has not open gets its hub from the
+        board pack, with no contact (``hub_boards``); an unlisted one is 404 as before."""
+        try:
+            return getattr(ctx.board(bid), "hub", None)
+        except AbsentError:
+            hubs = getattr(d, "board_hubs", None)
+            if not closed_ok or hubs is None or hubs.candidate(bid) is None:
+                raise
+        hub = hubs.adapter(bid)
+        if hub is not None:
+            leases.note_board(bid, hub)       # its lease_known follows what is read here
+        return hub
+
+    def is_open(bid: str) -> bool:
+        return bid in d.engine.open_boards()
 
     def names_of(bid: str) -> tuple[str, ...]:
         """What the UI calls the board (N1 name first), then its address (D12's typed name)."""
@@ -276,7 +305,9 @@ def register(ctx: RouteContext) -> None:
         b = _obj(body)
         ttl = _ttl(b)
         message = clean_message(b.get("message"))
-        hub = hub_of(bid)
+        want = check_want(b.get("want_s"))         # ui2 api-hub (G11): how long they want it
+        hub = hub_of(bid, closed_ok=True)          # ui2 api-hub (G3): without opening it
+        opened = is_open(bid)
         view = full_view(leases.view(hub))
         # LEASE-BOARD: refusals name the physical board (mps3_01) when the view knows it.
         refusal = request_refusal(view, lease_name(view.get("board"), hub.target))
@@ -286,8 +317,11 @@ def register(ctx: RouteContext) -> None:
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             try:
+                extra: dict[str, Any] = {"want_s": want} if want else {}   # (pre-G11 services)
+                if not opened:
+                    extra["heartbeat"] = False     # G3: a closed board's lease lives its TTL
                 return leases.request(bid, hub, message=message, ttl_s=ttl, progress=progress,
-                                      cancel=cancel)
+                                      cancel=cancel, **extra)
             except HarnessError:
                 if cancel.is_set():
                     # We stopped it (leave, DELETE /lease, close): leaving is not a failure
@@ -359,7 +393,7 @@ def register(ctx: RouteContext) -> None:
 
     @ctx.api.delete("/boards/{bid:path}/lease/queue")
     def lease_leave(bid: str) -> _JSON:
-        hub = hub_of(bid)
+        hub = hub_of(bid, closed_ok=True)                  # ui2 api-hub (G3)
         # leave() first, so it finds our queue entry (and says so); then stop the request
         # job, whose own cleanup removes anything it re-queued in between.
         out = leases.leave(bid, hub) or {}
@@ -370,14 +404,16 @@ def register(ctx: RouteContext) -> None:
     @ctx.api.delete("/boards/{bid:path}/lease/taken")
     def lease_dismiss_taken(bid: str) -> _JSON:
         """D11: the victim closed the "force-released by ..." banner. Local; no gate."""
-        return _JSON(ok(dismissed=bool(leases.dismiss_taken(hub_of(bid)))))
+        return _JSON(ok(dismissed=bool(leases.dismiss_taken(
+            hub_of(bid, closed_ok=True)))))                # ui2 api-hub (G3)
 
     @ctx.api.get("/boards/{bid:path}/lease")
     def lease_view(bid: str) -> _JSON:
-        session = ctx.board(bid)
+        hub = board_hub(bid, closed_ok=True)               # ui2 api-hub (G3): open or not
         # The service's view is the frozen shape (it adds queue/request/incoming/taken);
         # passed through as it is, so the keys it has not added yet are simply absent.
-        return _JSON(ok(**leases.view(getattr(session, "hub", None))))
+        # ui2 api-hub (G11): with the background queue (over SSH one more read, reused 60 s)
+        return _JSON(ok(**_view(leases, hub)))
 
     @ctx.api.post("/boards/{bid:path}/lease")
     def lease_acquire(bid: str, body: JsonBody = None) -> _JSON:
@@ -391,15 +427,15 @@ def register(ctx: RouteContext) -> None:
 
     @ctx.api.delete("/boards/{bid:path}/lease")
     def lease_release(bid: str) -> _JSON:
-        session = ctx.board(bid)
+        hub = board_hub(bid, closed_ok=True)               # ui2 api-hub (G3): open or not
         with mu:
             queued = bid in requesting
         if queued:
             # A queued request: DELETE /lease cancels it as it cancels a queued acquire.
-            hub = leases.require_hub(getattr(session, "hub", None), bid)
+            hub = leases.require_hub(hub, bid)
             out = leases.leave(bid, hub) or {}
             stop_request(bid)
             return _JSON(ok(cancelled=True, left=True,
                             **{k: v for k, v in out.items() if k not in ("ok", "left")}))
-        out = leases.release(getattr(session, "hub", None), board_id=bid)
+        out = leases.release(hub, board_id=bid)
         return _JSON(ok(**{k: v for k, v in out.items() if k != "ok"}))

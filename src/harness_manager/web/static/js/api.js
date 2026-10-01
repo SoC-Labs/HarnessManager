@@ -90,6 +90,20 @@ export const ENDPOINTS = Object.freeze({
   kitCheck: ["POST", "/kits/check"],
   kitPack: ["POST", "/kits/pack"],
   // --- end KIT-UI ---
+  // --- ui2 api-build --- UI v2's readings, OS slots and card, import and build (docs/API.md
+  // "Readings kept by this service", "OS slots and the card: roll back, commit, clear",
+  // "Import a design, and the build's progress, floorplan and utilisation"). The history's
+  // ?name=&since=&limit= is the call's query argument; guide's ?static_id=&design=&build_dir=.
+  readingsHistory: ["GET", "/boards/{bid}/readings/history"],
+  slots: ["GET", "/boards/{bid}/slots"],
+  slotRollback: ["POST", "/boards/{bid}/slots/rollback"],
+  cardCommit: ["POST", "/boards/{bid}/card/commit"],
+  cardClear: ["POST", "/boards/{bid}/card/clear"],
+  overlayImport: ["POST", "/overlays/import"],
+  overlayUpload: ["POST", "/overlays/upload"],    // body: the zip's bytes (a raw-body call)
+  designScan: ["POST", "/kits/design/scan"],
+  guide: ["GET", "/guide"],
+  // --- end ui2 api-build ---
   // --- XVC-UI: the Debug section's XVC card (docs/API.md "Fabric debug over XVC", xvc_api.py).
   // The query is part of the template (callBlob takes no query argument): pass byo "" (the
   // open session's mode), "true" or "false"; which "auto" (the full-design file when the
@@ -147,6 +161,13 @@ export const ENDPOINTS = Object.freeze({
   checksStop: ["DELETE", "/boards/{bid}/checks"],
   checksReport: ["GET", "/boards/{bid}/checks/{run}/report"],
   // --- end HIL-GUI
+  // --- ui2 api-hub ---
+  // docs/API.md "UI v2: hub leases, the Debug USB route, consoles and clashes". The lease
+  // routes above also take a board that is not open (G3), and leaseRequest takes want_s
+  // (G11); ?refresh=1 on hubLeases is the call's query argument.
+  hubLeases: ["GET", "/hubs/{name}/leases"],                  // G3: every target's lease, one read
+  identityClashes: ["GET", "/identity/clashes"],               // G10: across every board seen
+  // --- end ui2 api-hub ---
 });
 
 export const ADDITIVE = Object.freeze([]);
@@ -505,3 +526,33 @@ export class EventSocket {
     if (this.ws) this.ws.close();
   }
 }
+
+// --- ui2 build --- (lane UI2-BUILD) The Import dialog's "Choose a zip": POST /overlays/upload
+// takes the zip's bytes as the body (send() JSON-encodes every body), and `name`, `board_id`,
+// `static_id`, `check_only` in the query. The answer and its failures are call()'s.
+export async function callUpload(name, params = {}, bytes = null, query = null,
+  type = "application/zip") {
+  const url = endpointUrl(name, params);
+  for (const [k, v] of Object.entries(query || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers = { Accept: "application/json", "Content-Type": type };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(url, { method: ENDPOINTS[name][0], headers, body: bytes, cache: "no-store" });
+  } catch (e) {
+    setConnection("down");
+    throw new ApiError({
+      name: "NO_ANSWER",
+      message: "harness-manager-daemon did not answer",
+      hint: "check it is running: harness-manager daemon status",
+    }, 0, true);
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
+  return { data, status: res.status };
+}
+// --- end ui2 build ---

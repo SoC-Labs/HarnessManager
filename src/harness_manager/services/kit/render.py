@@ -22,6 +22,7 @@ import re
 from collections.abc import Iterable, Mapping
 from importlib.resources import files
 from pathlib import Path, PurePath
+from typing import Any
 
 from harness_manager.core.errors import UsageError
 from harness_manager.core.pack import BuildProfile
@@ -139,6 +140,63 @@ def vivado_command(script_dir: Path, *, stop_after: str = "", jobs: int | None =
     if extra:
         argv += ["-tclargs", *extra]
     return argv
+
+
+#: UI2 G8 (d), "Run it your way": the three ways to run the same script, and what HM can see
+#: of each. Batch and the GUI write build_rm.log beside the script (HM follows the stages);
+#: a Vivado you already have open writes its own log, so HM sees only the receipt.
+RUN_MODES = ("batch", "gui", "session")
+RUN_WATCH = {
+    "batch": "build_rm.log (every stage) and the receipt",
+    "gui": "build_rm.log (every stage) and the receipt; the linked design stays open in the GUI "
+           "when STOP_AFTER=link",
+    "session": "the receipt only: your Vivado writes its own log (vivado.log where it started), "
+               "so Harness Manager cannot follow the stages",
+}
+
+
+def shell_line(argv: list[str]) -> str:
+    """``argv`` as one line to paste into this host's shell (quoted where needed)."""
+    import os
+    import shlex
+    import subprocess
+
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+
+
+def _tcl_word(value: str) -> str:
+    """One Tcl word: braced when it holds whitespace (``tcl_word`` refuses braces)."""
+    value = tcl_word(value, "argument")
+    return f"{{{value}}}" if (not value or any(c.isspace() for c in value)) else value
+
+
+def run_commands(script_dir: Path, *, vivado: str = "vivado", stop_after: str = "",
+                 jobs: int | None = None) -> dict[str, Any]:
+    """The Build section's "Run it your way" (docs/API.md "Import a design, and the build's
+    ..."): the batch run (``vivado_command``), the same script in the Vivado GUI, and the
+    lines to paste into a Vivado you already have open. ``stop_after`` (``link`` to floorplan:
+    the linked design stays open for nested pblocks) and ``jobs`` go in as ``-tclargs``, or
+    as ``argv`` in an open session. ``tcl_word`` refuses a brace or a newline in any value."""
+    if stop_after and stop_after not in STAGES:
+        raise UsageError(f"stop_after must be one of {', '.join(STAGES)}")
+    d = Path(script_dir)
+    batch = vivado_command(d, stop_after=stop_after, jobs=jobs, vivado=vivado)
+    gui = [vivado, "-mode", "gui", *batch[3:]]
+    args = [a for a in (f"STOP_AFTER={stop_after}" if stop_after else "",
+                        f"JOBS={int(jobs)}" if jobs else "") if a]
+    session = [f"cd {_tcl_word(tcl_path(d))}",
+               f"set argv [list {' '.join(_tcl_word(a) for a in args)}]".replace(
+                   "[list ]", "{}"),
+               f"set argc {len(args)}",
+               "source build_rm.tcl"]
+    return {
+        "stop_after": stop_after or "bitstream",
+        "batch": {"argv": batch, "text": shell_line(batch), "watch": RUN_WATCH["batch"]},
+        "gui": {"argv": gui, "text": shell_line(gui), "watch": RUN_WATCH["gui"]},
+        "session": {"lines": session, "text": "; ".join(session),
+                    "watch": RUN_WATCH["session"]},
+        "log": tcl_path(d / "build_rm.log"),
+    }
 
 
 _PARAM_BLOCK = re.compile(r"^array set P \{\n(.*?)^\}", re.M | re.S)

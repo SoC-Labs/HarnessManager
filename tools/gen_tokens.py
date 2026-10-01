@@ -1,15 +1,21 @@
 """Harness Manager's design tokens: one JSON file, three generated outputs (decision P4).
 
 ``design/tokens.json`` is the only place a colour, font or radius of the web UI is
-written down. This script generates, from it:
+written down. The front panel's palette is FROZEN apart from it (UI v2 risk R2):
+``design/panel/tokens.json`` is a byte-for-byte copy of ``design/tokens.json`` as it was
+when the web and the panel last shared it (sha256 ``PANEL_SHA256``), so a change to the web's
+theme never moves the header the Linux harness vendors. This script generates:
 
-- ``src/harness_manager/web/static/css/tokens.css``: the custom properties the web UI's
-  ``app.css`` uses (light, dark by ``prefers-color-scheme``, dark by ``data-theme``);
-- ``design/generated/palette.json``: every token resolved per theme, the status grammar,
-  and the front panel's colour roles as RGB565;
-- ``design/generated/clcd_palette.h``: the panel roles as RGB565 words for the Linux
-  harness's panel renderer (decision P3: the panel palette changes there only). Its header
-  carries the ``tokens.json`` sha256; the platform vendors it unchanged.
+- ``src/harness_manager/web/static/css/tokens.css`` (from ``design/tokens.json``): the custom
+  properties the web UI's stylesheets use (light, dark by ``prefers-color-scheme``, dark by
+  ``data-theme``);
+- ``design/generated/palette.json`` (from the frozen panel file): every token resolved per
+  theme as the panel file has them, the status grammar, and the front panel's colour roles
+  as RGB565;
+- ``design/generated/clcd_palette.h`` (from the frozen panel file): the panel roles as RGB565
+  words for the Linux harness's panel renderer (decision P3: the panel palette changes
+  there only). Its header carries the panel file's sha256; the platform vendors it
+  unchanged. ``tools/gen_panel_codes.py`` reads the same frozen file.
 - ``design/generated/clcd_glyphs.h`` (FIX-PACK-2 item 8): the panel's extension glyphs
   0x80-0x86 as 8x16 bitmaps, from ``CLCD_GLYPHS`` below, the ONE glyph table
   (``tools/clcd_mock.py`` renders with it). The Linux harness vendors it with
@@ -19,8 +25,10 @@ written down. This script generates, from it:
   the commit that adds it, and every later commit would otherwise make it stale).
 
 ``--check`` is the drift gate (``make check``): it fails when an output is stale or
-missing, or when ``app.css`` has colours of its own: a token it redefines, a colour
-literal, or a ``var(--name)`` (also in the UI's JavaScript) that no stylesheet defines.
+missing, when the frozen panel file is not the pinned one (``PANEL_SHA256``), or when a
+stylesheet of the UI (``app.css`` and the per-tab ``css/<tab>.css``) has colours of its
+own: a token it redefines, a colour literal, or a ``var(--name)`` (also in the UI's
+JavaScript) that no stylesheet defines.
 
 Usage::
 
@@ -44,11 +52,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 TOKENS = Path("design/tokens.json")
+#: The front panel's frozen token file (R2): what palette.json, clcd_palette.h and
+#: tools/gen_panel_codes.py's panel_codes are generated from.
+PANEL_TOKENS = Path("design/panel/tokens.json")
+#: Its pinned sha256 (the one the vendored clcd_palette.h carries). Change the panel's
+#: palette only on purpose (decision P3): edit PANEL_TOKENS, regenerate, set this to the new
+#: sha256, and hand the new clcd_palette.h to the Linux harness.
+PANEL_SHA256 = "59011d724e13ec07902e37ffdd3f6a480394cc0995d42649b3af320a73c4a4bb"
 CSS_OUT = Path("src/harness_manager/web/static/css/tokens.css")
 PALETTE_OUT = Path("design/generated/palette.json")
 HEADER_OUT = Path("design/generated/clcd_palette.h")
 GLYPHS_OUT = Path("design/generated/clcd_glyphs.h")
 APP_CSS = Path("src/harness_manager/web/static/css/app.css")
+CSS_DIR = APP_CSS.parent
+#: Stylesheets the colour rules do not apply to: the generated tokens themselves.
+CSS_EXEMPT = {CSS_OUT.name}
 INDEX_HTML = Path("src/harness_manager/web/static/index.html")
 JS_DIR = Path("src/harness_manager/web/static/js")
 
@@ -119,6 +137,11 @@ def validate(tokens: object) -> list[str]:
         if not isinstance(spec, dict) or spec.get("color") not in colors:
             problems.append(f"grammar.{state}: its colour must name a 'color' token")
     panel = tokens.get("panel")
+    if isinstance(panel, dict) and "roles" not in panel and "frozen" in panel:
+        # the web's tokens: the panel's palette is in the frozen file it names (R2)
+        if not isinstance(panel["frozen"], str) or not panel["frozen"].endswith(".json"):
+            problems.append("panel.frozen must name the panel's frozen tokens file (a .json path)")
+        return problems
     if not isinstance(panel, dict) or not isinstance(panel.get("roles"), dict) or not panel["roles"]:
         return [*problems, "'panel.roles' must be a non-empty object"]
     if panel.get("theme") not in THEMES:
@@ -140,21 +163,54 @@ def validate(tokens: object) -> list[str]:
     return problems
 
 
-def load(root: Path = ROOT) -> tuple[dict, bytes]:
-    """The tokens document and its raw bytes. Raises ValueError when it is unusable."""
-    raw = (root / TOKENS).read_bytes()
+def _read(root: Path, rel: Path) -> tuple[dict, bytes]:
+    raw = (root / rel).read_bytes()
     try:
         tokens = json.loads(text_of(raw))
     except ValueError as exc:
-        raise ValueError(f"{TOKENS}: not JSON: {exc}") from None
+        raise ValueError(f"{rel.as_posix()}: not JSON: {exc}") from None
     problems = validate(tokens)
     if problems:
-        raise ValueError("\n".join(f"{TOKENS}: {p}" for p in problems))
+        raise ValueError("\n".join(f"{rel.as_posix()}: {p}" for p in problems))
     return tokens, raw
 
 
+def load(root: Path = ROOT) -> tuple[dict, bytes]:
+    """The web's tokens document and its raw bytes. Raises ValueError when it is unusable."""
+    return _read(root, TOKENS)
+
+
+def frozen_path(tokens: dict) -> Path | None:
+    """The frozen panel file a tokens document names (R2), or None when it carries the
+    panel's roles itself."""
+    panel = tokens.get("panel") or {}
+    return None if "roles" in panel else Path(panel["frozen"])
+
+
+def load_panel(root: Path = ROOT) -> tuple[dict, bytes]:
+    """The document the front panel's outputs come from (palette.json, clcd_palette.h,
+    tools/gen_panel_codes.py's panel_codes) and its raw bytes: the frozen panel file that
+    ``design/tokens.json`` names. Raises ValueError when it is unusable."""
+    tokens, raw = load(root)
+    rel = frozen_path(tokens)
+    if rel is None:
+        return tokens, raw
+    panel, praw = _read(root, rel)
+    if frozen_path(panel) is not None:
+        raise ValueError(f"{rel.as_posix()}: the frozen panel file must carry panel.roles itself")
+    return panel, praw
+
+
+def panel_doc(tokens: dict) -> dict:
+    """The document a tokens document's panel palette resolves in: itself, or the frozen
+    panel file it names (read from this checkout)."""
+    rel = frozen_path(tokens)
+    return tokens if rel is None else _read(ROOT, rel)[0]
+
+
 def load_tokens(path: Path | None = None) -> dict:
-    """Just the document (``tools/clcd_mock.py``)."""
+    """Just the web's document (``tools/clcd_mock.py``; its panel palette through
+    ``panel_palette``/``panel_doc``)."""
     root = ROOT if path is None else Path(path).resolve().parents[1]
     return load(root)[0]
 
@@ -200,7 +256,9 @@ def resolve(tokens: dict, ref: str, theme: str = "dark") -> str:
 
 
 def panel_palette(tokens: dict) -> dict[str, tuple[int, int]]:
-    """role -> (fg565, bg565), in the panel's theme."""
+    """role -> (fg565, bg565), in the panel's theme (from the frozen panel file when
+    ``tokens`` is the web's document)."""
+    tokens = panel_doc(tokens)
     theme = tokens["panel"]["theme"]
     return {role: (rgb565(resolve(tokens, spec["fg"], theme)), rgb565(resolve(tokens, spec["bg"], theme)))
             for role, spec in tokens["panel"]["roles"].items()}
@@ -269,6 +327,7 @@ def _word(v: int) -> str:
 
 def panel_roles(tokens: dict) -> dict[str, dict[str, str]]:
     """Each panel role: the token colours, the RGB565 words, and what the glass shows."""
+    tokens = panel_doc(tokens)
     theme = tokens["panel"]["theme"]
     out: dict[str, dict[str, str]] = {}
     for role, spec in tokens["panel"]["roles"].items():
@@ -466,18 +525,23 @@ def _compared(text: str) -> str:
 # --- generate and check ----------------------------------------------------------------------
 
 
-def outputs(tokens: dict, raw: bytes, commit: str = "") -> dict[Path, str]:
-    sha = sha256_of(raw)
-    return {CSS_OUT: render_css(tokens, sha), PALETTE_OUT: render_palette(tokens, sha),
-            HEADER_OUT: render_header(tokens, sha), GLYPHS_OUT: render_glyphs(commit)}
+def outputs(tokens: dict, raw: bytes, commit: str = "", panel: tuple[dict, bytes] | None = None
+            ) -> dict[Path, str]:
+    """Each output's text: tokens.css from the web's tokens; palette.json and clcd_palette.h
+    from the panel's (``panel``: the frozen file's document and bytes; default the web's own)."""
+    ptokens, praw = panel if panel is not None else (tokens, raw)
+    psha = sha256_of(praw)
+    return {CSS_OUT: render_css(tokens, sha256_of(raw)), PALETTE_OUT: render_palette(ptokens, psha),
+            HEADER_OUT: render_header(ptokens, psha), GLYPHS_OUT: render_glyphs(commit)}
 
 
 def write(root: Path = ROOT) -> list[Path]:
     """Write every output that differs from what is on disk (the source-commit line alone is
     no difference); the paths written."""
     tokens, raw = load(root)
+    panel = load_panel(root)
     written = []
-    for rel, text in outputs(tokens, raw, source_commit(root)).items():
+    for rel, text in outputs(tokens, raw, source_commit(root), panel).items():
         path = root / rel
         if path.is_file() and _compared(text_of(path.read_bytes())) == _compared(text):
             continue
@@ -511,8 +575,9 @@ _NAMED = re.compile(r"(?<![\w-])(white|black|red|green|blue|gray|grey|silver|mar
 
 
 def app_css_problems(css: str, tokens: dict, where: str = APP_CSS.as_posix()) -> list[str]:
-    """``app.css`` must take every colour from the tokens: it redefines none of them and
-    writes no colour of its own (a hex, rgb()/hsl()/..., or a named colour)."""
+    """A stylesheet of the UI (``app.css``, a per-tab ``css/<tab>.css``) must take every colour
+    from the tokens: it redefines none of them and writes no colour of its own (a hex,
+    rgb()/hsl()/..., or a named colour)."""
     text = _strip_comments(css)
     owned = token_properties(tokens)
     problems = []
@@ -536,13 +601,22 @@ def app_css_problems(css: str, tokens: dict, where: str = APP_CSS.as_posix()) ->
     return problems
 
 
+def stylesheets(root: Path) -> list[Path]:
+    """The UI's own stylesheets the colour rules apply to: ``css/*.css`` (``app.css`` and the
+    per-tab ``css/<tab>.css`` the UI v2 lanes write), without the generated ``tokens.css``."""
+    d = root / CSS_DIR
+    return sorted(p.relative_to(root) for p in d.glob("*.css") if p.name not in CSS_EXEMPT) \
+        if d.is_dir() else []
+
+
 def reference_problems(root: Path, tokens: dict) -> list[str]:
-    """Every ``var(--name)`` in app.css and the UI's JavaScript, and every ``token("--name")``
-    (the terminal's colours), names a property some stylesheet defines."""
-    css = _strip_comments(text_of((root / APP_CSS).read_bytes()))
-    defined = token_properties(tokens) | {m.group(1) for m in _DEFINE.finditer(css)}
+    """Every ``var(--name)`` in the UI's stylesheets and JavaScript, and every
+    ``token("--name")`` (the terminal's colours), names a property some stylesheet defines."""
+    sheets = [(rel, _strip_comments(text_of((root / rel).read_bytes()))) for rel in stylesheets(root)]
+    defined = token_properties(tokens) | {m.group(1) for _rel, css in sheets
+                                          for m in _DEFINE.finditer(css)}
     problems = []
-    sources = [(APP_CSS, css)]
+    sources = list(sheets)
     js_dir = root / JS_DIR
     if js_dir.is_dir():
         sources += [(p.relative_to(root), text_of(p.read_bytes())) for p in sorted(js_dir.rglob("*.js"))]
@@ -556,32 +630,50 @@ def reference_problems(root: Path, tokens: dict) -> list[str]:
 
 
 def index_problems(root: Path) -> list[str]:
+    """index.html loads tokens.css before each of the UI's stylesheets that use it, and loads
+    every one of them (a per-tab stylesheet nobody links styles nothing)."""
     html = text_of((root / INDEX_HTML).read_bytes())
-    tokens_at, app_at = html.find('href="./css/tokens.css"'), html.find('href="./css/app.css"')
+    tokens_at = html.find('href="./css/tokens.css"')
     if tokens_at < 0:
         return [f"{INDEX_HTML.as_posix()}: does not load ./css/tokens.css"]
-    if app_at >= 0 and tokens_at > app_at:
-        return [f"{INDEX_HTML.as_posix()}: loads ./css/tokens.css after ./css/app.css"]
-    return []
+    problems = []
+    for rel in stylesheets(root):
+        at = html.find(f'href="./css/{rel.name}"')
+        if at < 0:
+            problems.append(f"{INDEX_HTML.as_posix()}: does not load ./css/{rel.name}")
+        elif rel.name != "fonts.css" and tokens_at > at:
+            problems.append(f"{INDEX_HTML.as_posix()}: loads ./css/tokens.css after ./css/{rel.name}")
+    return problems
 
 
 def check(root: Path = ROOT) -> list[str]:
     """Everything that drifted from ``design/tokens.json`` (empty when nothing did)."""
     try:
         tokens, raw = load(root)
+        panel = load_panel(root)
     except (OSError, ValueError) as exc:
         return [str(exc)]
+    ptext = (frozen_path(tokens) or TOKENS).as_posix()
     problems = []
-    for rel, text in outputs(tokens, raw).items():
+    psha = sha256_of(panel[1])
+    if psha != PANEL_SHA256:
+        # R2: the vendored clcd_palette.h (and palette.json, panel_codes) follow this file
+        problems.append(f"{ptext} is the front panel's frozen palette (UI v2 risk R2) and it is "
+                        f"not the pinned one (sha256 {psha[:12]}, pinned {PANEL_SHA256[:12]}): the "
+                        "Linux harness vendors the clcd_palette.h made from it. Change it only on "
+                        "purpose (decision P3): regenerate, set PANEL_SHA256 in tools/gen_tokens.py "
+                        "to its new sha256, and hand the new clcd_palette.h to the Linux harness")
+    for rel, text in outputs(tokens, raw, panel=panel).items():
         path = root / rel
         if not path.is_file():
             problems.append(f"{rel.as_posix()} is missing: {REGENERATE}")
         elif _compared(text_of(path.read_bytes())) != _compared(text):
             source = ("tools/gen_tokens.py CLCD_GLYPHS" if rel == GLYPHS_OUT
-                      else TOKENS.as_posix())
+                      else TOKENS.as_posix() if rel == CSS_OUT else ptext)
             problems.append(f"{rel.as_posix()} is stale (it does not match {source}): "
                             f"{REGENERATE}")
-    problems += app_css_problems(text_of((root / APP_CSS).read_bytes()), tokens)
+    for rel in stylesheets(root):
+        problems += app_css_problems(text_of((root / rel).read_bytes()), tokens, rel.as_posix())
     problems += reference_problems(root, tokens)
     problems += index_problems(root)
     return problems
@@ -590,7 +682,8 @@ def check(root: Path = ROOT) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true",
-                    help="write nothing; exit 1 if an output is stale or app.css has its own colours")
+                    help="write nothing; exit 1 if an output is stale, the panel file is not the "
+                         "pinned one, or a stylesheet has its own colours")
     ap.add_argument("--root", type=Path, default=ROOT, help="the checkout (default: this one)")
     a = ap.parse_args(argv)
     root = a.root.resolve()
@@ -602,7 +695,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"gen_tokens: FAIL ({len(problems)} problem{'s' if len(problems) != 1 else ''})",
                   file=sys.stderr)
             return 1
-        print(f"gen_tokens: ok ({TOKENS.as_posix()} sha256 {sha256_of((root / TOKENS).read_bytes())[:12]})")
+        print(f"gen_tokens: ok ({TOKENS.as_posix()} sha256 {sha256_of((root / TOKENS).read_bytes())[:12]}; "
+              f"panel palette frozen at {PANEL_SHA256[:12]})")
         return 0
     try:
         written = write(root)

@@ -69,14 +69,15 @@ def test_the_line_sets_the_timeout_before_it_connects():
 
 def test_the_apps_attach_row_builds_the_same_line():
     js = DEBUG_JS.read_text(encoding="utf-8")
-    m = re.search(r"const gdbCmd = st\.gdb_port \? `([^`]*)`", js)
-    assert m, "sections/debug.js no longer builds gdbCmd from st.gdb_port"
-    assert m.group(1).replace("${st.gdb_port}", "3343") == gdb_command(3343)
+    # UI v2 (WORKBENCH): one gdb line per core, built by gdbCmdFor(port).
+    m = re.search(r"export function gdbCmdFor\(port\) \{\s*return `([^`]*)`", js)
+    assert m, "sections/debug.js no longer builds the gdb line in gdbCmdFor(port)"
+    assert m.group(1).replace("${port}", "3343") == gdb_command(3343)
 
 
 def test_negative_twin_the_js_check_catches_a_drift():
-    drifted = "arm-none-eabi-gdb -ex 'target extended-remote :${st.gdb_port}'"
-    assert drifted.replace("${st.gdb_port}", "3343") != gdb_command(3343)
+    drifted = "arm-none-eabi-gdb -ex 'target extended-remote :${port}'"
+    assert drifted.replace("${port}", "3343") != gdb_command(3343)
 
 
 # -- the CLI, scripted engine --------------------------------------------------------------------

@@ -24,6 +24,7 @@ from tests.fakes.virtual_board import (
     LINUX_HARNESSD,
     VirtualMps3,
 )
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -53,8 +54,9 @@ def stage(browser, tmp_path, monkeypatch, screenshots):
         page.locator(f'.board-item[data-board="{cand.board_id}"]').click()
         page.locator('[data-action="open"]').click()
         page.wait_for_selector('[data-testid="board-header"]', timeout=T)
-        page.locator('[data-action="details"]').click()        # the Details start collapsed
-        page.wait_for_selector('[data-testid="health-card"]', timeout=T)
+        nav.land(page, "board")                # UI v2: a board opens on the Workbench
+        nav.board_page(page, "about")          # UI v2: 0.1.0's Details are Board > About / Readings
+        page.wait_for_selector('[data-testid="identity-card"]', timeout=T)
         return page, engine, cand.board_id
 
     yield make
@@ -86,9 +88,10 @@ def refresh(page):
 def test_ila_v011_is_bare_metal_with_a_passing_build_check(stage, tmp_path, screenshots):
     with VirtualMps3(tmp_path, FIELDED_ILA_V011) as vb:
         page, _, _ = stage(vb)
-        expect(page.locator('[data-testid="build-chip"]')).to_have_attribute("data-level", "ok")
+        # UI v2: OK rides the Design fact's tooltip; the chip shows only when not OK
+        expect(page.locator('[data-testid="fact-design"]')).to_have_attribute("data-check", "ok")
         expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("bare-metal")
-        expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x72bb0a36")
+        expect(page.locator('[data-testid="fact-shell"]')).to_contain_text("0x72BB0A36")   # UI v2: upper-case hex
         expect(health_chip(page)).to_have_attribute("data-level", "ok")
         # v0.11 reports `reboot`, so the shell restart lights up (the fielded board lacks it).
         assert page.locator('[data-testid="capabilities-card"] .cap[data-capability="reset_shell"]').count() == 1
@@ -107,7 +110,7 @@ def test_linux_harness_shows_linux_its_ssh_link_and_the_shell_console(stage, tmp
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
         page, _, _ = stage(vb, vb.candidate(ssh=True))
         expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("linux")
-        expect(page.locator('[data-testid="id-harness"]')).to_contain_text("linux")
+        expect(page.locator('[data-testid="about-harness"]')).to_contain_text("linux")   # Board > About
         assert page.locator('[data-testid="identity-card"] [data-link="ssh"]').count() == 1
         assert page.locator('.cap[data-capability="console_shell"]').count() == 1
         shoot(page, screenshots, "linux")
@@ -142,6 +145,7 @@ def test_busy_shows_a_warning_and_who_holds_the_channel(stage, tmp_path, screens
         refresh(page)
         expect(health_chip(page)).to_have_attribute("data-level", "warn")
         expect(health_chip(page)).to_contain_text("Busy")
+        nav.board_page(page, "readings")                          # the Health card
         expect(page.locator('[data-testid="health-note"]').first).to_contain_text("another client")
         shoot(page, screenshots, "busy")
         vb.set_busy(False)
@@ -184,7 +188,7 @@ def test_a_board_reboot_shows_the_controllers_evidence(stage, tmp_path, screensh
         vb.mcc._pace = 0.002                  # the fake drops characters closer than this
         vb.mcc.boot_s = 1.0
         page, _, _ = stage(vb, vb.candidate(usb=True))
-        page.locator('[data-section="power"]').click()
+        nav.section(page, "power")                  # UI v2: Board > Recover
         page.locator('[data-testid="arm-reboot"] input').check()
         page.locator('[data-action="reboot"]').click()
         expect(page.locator('[data-testid="job-chip"]')).to_contain_text("board reboot", timeout=T)
@@ -210,6 +214,7 @@ def test_a_rescue_board_is_found_opened_and_explained(stage, tmp_path, screensho
         expect(health_chip(page)).to_contain_text("Rescue")
         # harness_impl is "" in rescue: shown as unknown, never as an error.
         expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("unknown")
+        nav.board_page(page, "readings")                          # the Health card
         notes = page.locator('[data-testid="health-note"]')
         expect(notes.first).to_contain_text("RESCUE")
         expect(notes.nth(1)).to_contain_text("slot A and B failed CRC")

@@ -72,10 +72,10 @@ def test_lease_review_screenshots_demo(showcase, review, scheme):
 
     # yours: Acquire on mps3-03; the header's Release, the Board tile's line, the rail
     demo_open(page, BOARD_SPARE)
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()
     expect(spare).to_have_text("Yours", timeout=T)
     expect(by_id(page, "lease-chip")).to_contain_text("lease yours")
-    expect(by_id(page, "tile-lease").locator('[data-action="lease_release_open"]')).to_be_visible()
+    expect(by_id(page, "tile-lease")).to_have_attribute("data-lease", "here")
     shoot(page, review, "yours", scheme)
 
     page.locator('[data-testid="fact-hub"] [data-action="lease_release_open"]').click()
@@ -84,7 +84,8 @@ def test_lease_review_screenshots_demo(showcase, review, scheme):
     page.locator('[data-action="release_cancel"]').click()
 
     close_board(page)
-    expect(by_id(page, "close-title")).to_have_text("Also release the lease on mps3_03?")
+    expect(by_id(page, "close-title")).to_have_text("Close mps3-03")          # round 3, M1
+    expect(by_id(page, "close-confirm")).to_have_attribute("data-default", "restore")
     shoot(page, review, "close-confirm", scheme)
     page.locator('[data-action="close_cancel"]').click()
 
@@ -97,5 +98,5 @@ def test_lease_review_screenshot_another_session(page_factory, daemon, review, s
     open_board(page)
     expect(rail(page).locator('[data-testid="rail-lease-badge"]')).to_have_text(
         f"Held by {ME} (another session)", timeout=T)
-    expect(page.locator('[data-attention="lease"]')).to_contain_text("in another session")
+    expect(by_id(page, "ov-lease-chip")).to_contain_text("in another session")
     shoot(page, review, "another-session", scheme)

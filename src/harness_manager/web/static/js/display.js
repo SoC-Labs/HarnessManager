@@ -220,13 +220,40 @@ const WINDOW_MS = 2000;                  // fps and kB/s are over the last 2 s
 const REFUSED_CODES = new Set([4002, 4003, 4004, 4012]);
 const VIEW_ONLY = "View only: clicks on the picture do nothing to the board";
 
+// The picture's scale: 1 or 2 whole device pixels per panel pixel, or (UI v2, the Front panel
+// card) "fit": the card's width, nearest-neighbour. null: nothing chosen yet (the card's default).
 function storedZoom() {
-  try { return window.localStorage.getItem(ZOOM_KEY) === "2" ? 2 : 1; } catch (e) { return 1; }
+  try {
+    const v = window.localStorage.getItem(ZOOM_KEY);
+    return v === "2" ? 2 : v === "1" ? 1 : v === "fit" ? "fit" : null;
+  } catch (e) { return null; }
 }
 
 // --- one Live display's client: the socket, the backing store, the draws ------------------------
 
 const LIVE = new Set();                  // mounted clients (event retries, the debug hook)
+
+// UI v2 (lane UI2-OVERVIEW): the daemon's last refusal of each board's Live display, kept after
+// the display unmounts, so the Front panel knows a board that can never show one (UNAVAILABLE,
+// 422: bare metal, no lcd_mirror) and offers Text only, with the daemon's own reason. A refusal
+// for the lease (HELD) is not kept here: it lifts when the lease is yours. A new identity or
+// session forgets it (the board may run another image now).
+const REFUSED = new Map();               // bid -> {name, reason, code}
+
+export function liveRefusal(bid) { return REFUSED.get(bid) || null; }
+
+function noteRefusal(bid, r) {
+  const permanent = r && (r.name === "UNAVAILABLE" || r.code === 4012);
+  const had = REFUSED.has(bid);
+  if (permanent) REFUSED.set(bid, { name: "UNAVAILABLE", reason: r.reason || "", code: r.code || 4012 });
+  else REFUSED.delete(bid);
+  if (permanent || had) changed();
+}
+
+onBoardEvent((ev) => {
+  const t = ev.topic || "";
+  if ((t === "board.identity" || t.startsWith("session.")) && REFUSED.delete(ev.board_id)) changed();
+});
 
 // A board's lease, session, identity or display changed: a refused view asks again.
 onBoardEvent((ev) => {
@@ -436,6 +463,7 @@ export class DisplayClient {
       this.presented = false;
       this.have.fill(0);
       this.px.fill(0);                     // nothing of the old picture is kept
+      noteRefusal(this.bid, this.refusal);
     } else {
       this.failure = ev.code === 1000 ? (this.status && this.status.reason) || "the daemon closed the Live display"
         : why.text;
@@ -514,6 +542,7 @@ export class DisplayClient {
     this.updateHatch();
     const first = !this.presented;
     this.presented = true;
+    if (first && REFUSED.has(this.bid)) noteRefusal(this.bid, null);
     if (first) this.notify();              // the canvas mounts; attach() draws and acks
     this.scheduleDraw();
   }
@@ -579,7 +608,7 @@ export class DisplayClient {
   // -- controls -------------------------------------------------------------------------------
 
   setZoom(z) {
-    this.zoom = z === 2 ? 2 : 1;
+    this.zoom = z === 2 ? 2 : z === "fit" ? "fit" : 1;
     try { window.localStorage.setItem(ZOOM_KEY, String(this.zoom)); } catch (e) { /* not kept */ }
     this.notify();
   }
@@ -710,7 +739,7 @@ function fileName(bid) {
 async function snapshot(c, setNote) {
   setNote({ busy: true, text: "" });
   try {
-    const blob = await callBytes("displayPng", { bid: c.bid }, { scale: String(c.zoom), hatch: "1" }, "image/png");
+    const blob = await callBytes("displayPng", { bid: c.bid }, { scale: String(c.zoom === 2 ? 2 : 1), hatch: "1" }, "image/png");
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -727,7 +756,10 @@ async function snapshot(c, setNote) {
 }
 
 // ``children``: today's text mirror, shown whenever there is no live picture (§7.5).
-export function LiveDisplay({ bid, children = null }) {
+// ``fit`` (UI v2 round 3, the Overview's Front panel): the picture fills the card's width
+// (nearest-neighbour, 4:3) instead of k whole device pixels, and the head folds into one foot
+// row (state, mode, freshness, Pause, Snapshot): the card's own head has the title.
+export function LiveDisplay({ bid, children = null, fit = false }) {
   const client = useMemo(() => new DisplayClient(bid), [bid]);
   const [, setTick] = useState(0);
   const [note, setNote] = useState({ busy: false, text: "" });
@@ -742,7 +774,9 @@ export function LiveDisplay({ bid, children = null }) {
   }, [client]);
   const c = client;
   const live = c.presented && !c.refusal;
-  const { k, dpr, cssW, cssH } = scaleFor(c.zoom);
+  const zoom = c.zoom === null || c.zoom === undefined ? (fit ? "fit" : 1) : (!fit && c.zoom === "fit" ? 1 : c.zoom);
+  const fitNow = fit && zoom === "fit";
+  const { k, dpr, cssW, cssH } = scaleFor(fitNow ? 1 : zoom);
   const st = c.status || {};
   const badges = Array.isArray(st.badges) ? st.badges : [];
   const grey = live && badges.some((b) => b.level === "grey");
@@ -762,31 +796,38 @@ export function LiveDisplay({ bid, children = null }) {
     st.rtt_ms !== null && st.rtt_ms !== undefined ? `RTT ${Math.round(st.rtt_ms)} ms` : "RTT -",
   ];
   const holdsHatch = live && c.hatched.length > 0;
-  return html`<div class="ld" ref=${rootRef} data-testid="live-display" data-socket=${c.socket}
+  const slotStyle = fitNow ? "width:100%" : `width:${cssW}px;height:${cssH}px`;
+  const boxStyle = fitNow ? "width:100%;aspect-ratio:4 / 3" : `width:${cssW}px;height:${cssH}px`;
+  const canvasStyle = fitNow ? "width:100%;height:100%" : `width:${cssW}px;height:${cssH}px`;
+  const scaleSeg = html`<${Seg} label="Scale" value=${zoom} onChange=${(z) => c.setZoom(z)}
+    options=${[...(fit ? [{ value: "fit", label: "Fit", title: "Fit: the card's width (nearest-neighbour)" }] : []),
+      { value: 1, label: "1x", title: `1x: ${Math.max(1, Math.round(dpr))} device pixel(s) per panel pixel` },
+      { value: 2, label: "2x", title: `2x: ${Math.max(1, Math.round(dpr * 2))} device pixels per panel pixel` }]} />`;
+  const stateChip = html`<${Chip} level=${head.level} icon=${head.icon} testid="live-state"
+    cls=${head.icon === "loader-circle" ? "spin-icon" : ""}>${head.text}<//>`;
+  const modeTag = st.mode ? html`<span class="tag" data-testid="live-mode" title=${MODE_TITLE[st.mode] || ""}>${st.mode === "hw" ? "exact" : "software tap"}</span>` : null;
+  const retry = !live && fb && (fb.kind === "refused" || fb.kind === "failed") ? html`<button type="button" class="btn ghost sm" data-action="live-retry"
+    onClick=${() => c.retry()}><${Icon} name="refresh-cw" />Try again</button>` : null;
+  return html`<div class=${`ld${fit ? " fit" : ""}`} ref=${rootRef} data-testid="live-display" data-socket=${c.socket} data-fit=${fit ? "yes" : "no"}
       data-state=${live ? st.state || "" : fb.kind} data-live=${live ? "yes" : "no"} data-seq=${c.lastSeq ?? ""}
-      data-zoom=${c.zoom} data-k=${k} data-dpr=${dpr} data-hatched=${live ? c.hatched.length : 0}
+      data-zoom=${zoom} data-k=${k} data-dpr=${dpr} data-hatched=${live ? c.hatched.length : 0}
       data-grey=${grey ? "yes" : "no"} data-dim=${dim ? "yes" : "no"} data-stale=${stale ? "yes" : "no"}
       data-paused=${c.paused ? "yes" : "no"} data-refused=${c.refusal ? c.refusal.name || String(c.refusal.code) : ""}>
-    <div class="ld-head">
+    ${fit ? null : html`<div class="ld-head">
       <span class="ld-title"><${Icon} name="monitor" cls="sm" />Live display</span>
-      ${live ? html`<${Chip} level=${head.level} icon=${head.icon} testid="live-state"
-        cls=${head.icon === "loader-circle" ? "spin-icon" : ""}>${head.text}<//>` : null}
-      ${live && st.mode ? html`<span class="tag" data-testid="live-mode" title=${MODE_TITLE[st.mode] || ""}>${st.mode === "hw" ? "exact" : "software tap"}</span>` : null}
+      ${live ? stateChip : null}
+      ${live ? modeTag : null}
       <span class="spacer"></span>
-      ${live ? html`<${Seg} label="Scale" value=${c.zoom} onChange=${(z) => c.setZoom(z)}
-          options=${[{ value: 1, label: "1x", title: `1x: ${Math.max(1, Math.round(dpr))} device pixel(s) per panel pixel` },
-            { value: 2, label: "2x", title: `2x: ${Math.max(1, Math.round(dpr * 2))} device pixels per panel pixel` }]} />`
-        : (fb.kind === "refused" || fb.kind === "failed") ? html`<button type="button" class="btn ghost sm" data-action="live-retry"
-          onClick=${() => c.retry()}><${Icon} name="refresh-cw" />Try again</button>` : null}
-    </div>
+      ${live ? scaleSeg : retry}
+    </div>`}
     ${live ? html`
       <div class="ld-scroll">
-        <div class="ld-slot" style=${`width:${cssW}px;height:${cssH}px`}>
+        <div class="ld-slot" style=${slotStyle}>
           <div class=${`ld-frame${stale ? " ld-stale" : ""}${grey ? " ld-grey" : ""}${dim ? " ld-dim" : ""}`}
-            title=${VIEW_ONLY} data-testid="live-frame" style=${`width:${cssW}px;height:${cssH}px`}>
+            title=${VIEW_ONLY} data-testid="live-frame" style=${boxStyle}>
             <canvas class="ld-canvas" width=${W} height=${H} ref=${canvasRef} data-testid="live-canvas"
               role="img" aria-label=${`The board's panel, live, ${W} by ${H}. ${VIEW_ONLY}.`}
-              style=${`width:${cssW}px;height:${cssH}px`}></canvas>
+              style=${canvasStyle}></canvas>
             ${holdsHatch ? html`<${Hatches} tiles=${c.hatched} />` : null}
             ${grey ? html`<div class="ld-note" data-testid="live-grey"><span>${badges.find((b) => b.level === "grey").text}</span></div>` : null}
             ${badges.some((b) => b.level !== "grey") || stale ? html`<div class="ld-badges" data-testid="live-badges">
@@ -800,18 +841,22 @@ export function LiveDisplay({ bid, children = null }) {
         </div>
       </div>
       <div class="ld-foot">
-        <p class="muted small ld-fresh" data-testid="live-freshness">${fresh.join(" · ")}</p>
+        ${fit ? stateChip : null}${fit ? modeTag : null}
+        <p class="muted small ld-fresh" data-testid="live-freshness" title=${fresh.join(" · ")}>${fresh.join(" · ")}</p>
         <span class="spacer"></span>
-        <button type="button" class="btn ghost sm" data-action="live-pause" aria-pressed=${c.paused ? "true" : "false"}
+        ${fit ? scaleSeg : null}
+        <button type="button" class=${`btn ghost sm${fit ? " icon-only" : ""}`} data-action="live-pause" aria-pressed=${c.paused ? "true" : "false"}
+          aria-label=${c.paused ? "Resume" : "Pause"}
           title=${c.paused ? "Resume the live picture" : "Pause: the board stops sending (rate 0); the picture stays"}
-          onClick=${() => c.setPaused(!c.paused)}><${Icon} name=${c.paused ? "play" : "circle-pause"} />${c.paused ? "Resume" : "Pause"}</button>
-        <button type="button" class="btn ghost sm" data-action="live-snapshot" aria-busy=${note.busy ? "true" : undefined}
+          onClick=${() => c.setPaused(!c.paused)}><${Icon} name=${c.paused ? "play" : "circle-pause"} />${fit ? null : c.paused ? "Resume" : "Pause"}</button>
+        <button type="button" class=${`btn ghost sm${fit ? " icon-only" : ""}`} data-action="live-snapshot" aria-busy=${note.busy ? "true" : undefined}
+          aria-label="Snapshot"
           title="Save the board's picture now as a PNG (at this scale)" onClick=${() => snapshot(c, setNote)}>
-          ${note.busy ? html`<${Spinner} />` : html`<${Icon} name="download" />`}Snapshot</button>
+          ${note.busy ? html`<${Spinner} />` : html`<${Icon} name="download" />`}${fit ? null : "Snapshot"}</button>
       </div>
       ${note.text ? html`<${Reason} level="err" text=${`Snapshot: ${note.text}`} testid="live-snapshot-error" />` : null}`
-      : html`${fb.kind === "checking" ? html`<p class="reason" data-testid="live-reason"><${Spinner} /><span>${fb.text}</span></p>`
-        : html`<${Reason} level=${fb.level} icon=${fb.icon} text=${fb.text} testid="live-reason" />`}
+      : html`<div class="ld-why">${fb.kind === "checking" ? html`<p class="reason" data-testid="live-reason"><${Spinner} /><span>${fb.text}</span></p>`
+        : html`<${Reason} level=${fb.level} icon=${fb.icon} text=${fb.text} testid="live-reason" />`}${fit ? retry : null}</div>
       ${fb.detail ? html`<details class="ld-detail" data-testid="live-detail"><summary class="muted small"><${Icon} name="chevron-right" cls="sm chev" />Details</summary>
         <p class="mono small secondary">${fb.detail}</p></details>` : null}
       ${children}`}

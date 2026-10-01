@@ -1025,3 +1025,242 @@ def me() -> str:
 
 
 __all__ = ["BOARD_LEASED", "BOARD_LINUX", "BOARD_SPARE", "BOARD_V011", "DemoXvc", "adapters", "me", "script"]
+
+
+# --- ui2 api-build ---
+# UI2-API-BUILD G6 (docs/planning/UI_V2_PLAN.md §2; docs/API.md "OS slots and the card: roll
+# back, commit, clear"): the Linux showcase board's OS slots and card TAKE the changes the
+# Board > Versions page makes, in memory (no card exists to write): a rollback makes the other
+# slot the default (a verify first, a reboot into it unless asked not to), a card commit makes
+# the running overlay the power-on default, a clear removes it. A push stays refused: nothing in
+# the app writes an OS slot image (the harness install does, and the demo's is scripted).
+# The state lives on the board (``ui2_os``, ``ui2_card``), so every session sees the same.
+
+
+def _ui2_os(adapter: Any) -> dict[str, Any]:
+    board = adapter._e._board(adapter._bid)
+    st = getattr(board, "ui2_os", None)
+    if st is None:
+        st = {"running": "A", "default": "A", "verified": {"A": "boot", "B": "readback"}}
+        board.ui2_os = st
+    return st
+
+
+_ui2_os_status_scripted = DemoOsSlots.status
+
+
+def _ui2_os_status(self: DemoOsSlots) -> SlotStatus:
+    base = _ui2_os_status_scripted(self)
+    st = _ui2_os(self)
+    slots = {n: replace(i, verified=st["verified"].get(n, i.verified))
+             for n, i in base.slots.items()}
+    other = "B" if st["running"] == "A" else "A"
+    free = other if st["default"] == st["running"] else ""
+    return replace(base, running=st["running"], default=st["default"], target=free,
+                   slots=slots)
+
+
+def _ui2_os_verify(self: DemoOsSlots, slot: str | None = None, progress: Any = None) -> SlotStatus:
+    st = _ui2_os(self)
+    name = slot or ("B" if st["running"] == "A" else "A")
+    if progress is not None:
+        progress("verify", 0, 24_100_864)
+        progress("verify", 24_100_864, 24_100_864)
+    st["verified"][name] = "readback"
+    return _ui2_os_status(self)
+
+
+def _ui2_os_rollback(self: DemoOsSlots, slot: str | None = None) -> SlotStatus:
+    st = _ui2_os(self)
+    st["default"] = slot or st["running"]
+    return _ui2_os_status(self)
+
+
+def _ui2_os_reboot(self: DemoOsSlots, progress: Any = None, wait_s: float | None = None
+                   ) -> dict[str, Any]:
+    st = _ui2_os(self)
+    if progress is not None:
+        progress("reboot", 0, 0)
+    before = st["running"]
+    st["running"] = st["default"]
+    st["verified"][st["running"]] = "boot"
+    if progress is not None:
+        progress("up", 0, 0)
+    return {"rebooted": True, "from": before, "to": st["running"],
+            "up_evidence": "demo: harnessd answered after the reboot (scripted)"}
+
+
+DemoOsSlots.status = _ui2_os_status                       # type: ignore[method-assign]
+DemoOsSlots.verify = _ui2_os_verify                       # type: ignore[method-assign]
+DemoOsSlots.rollback = _ui2_os_rollback                   # type: ignore[method-assign]
+DemoOsSlots.reboot = _ui2_os_reboot                       # type: ignore[method-assign]
+
+_ui2_card_annotate_scripted = DemoCard.annotate
+
+
+def _ui2_card_annotate(self: DemoCard, status: Any) -> Any:
+    out = _ui2_card_annotate_scripted(self, status)
+    board = self._e._board(self._bid)
+    cleared = getattr(board, "ui2_card", {}).get("cleared", False)
+    if out.present and cleared:
+        return replace(out, default=None, boot="greybox",
+                       notes=("no power-on default: the greybox loads at power-on",
+                              *(n for n in out.notes if not n.startswith("power-on loads"))))
+    return out
+
+
+def _ui2_card_commit(self: DemoCard, progress: Any = None) -> dict[str, Any]:
+    board = self._e._board(self._bid)
+    if not board.card:
+        raise UnavailableError("user microSD", "no card in the USER microSD slot")
+    ident = board.identity
+    slot = "A" if board.card_slot == "B" else "B"
+    if progress is not None:
+        progress("card", 0, 412_160)
+        progress("card", 412_160, 412_160)
+    board.card_slot = slot
+    board.ui2_card = {"cleared": False}
+    return {"rm_id": ident.rm_id, "rm_name": ident.rm_name, "static_id": ident.shell_id,
+            "slot": slot, "bytes": 412_160}
+
+
+def _ui2_card_clear(self: DemoCard) -> Any:
+    board = self._e._board(self._bid)
+    if not board.card:
+        raise UnavailableError("user microSD", "no card in the USER microSD slot")
+    board.ui2_card = {"cleared": True}
+    return self.status()
+
+
+DemoCard.annotate = _ui2_card_annotate                    # type: ignore[method-assign]
+DemoCard.commit = _ui2_card_commit                        # type: ignore[method-assign]
+DemoCard.clear = _ui2_card_clear                          # type: ignore[method-assign]
+# --- end ui2 api-build ---
+# --- ui2 api-hub -------------------------------------------------------------------------------------
+# UI v2 (lane UI2-API-HUB): what the showcase answers for G3 (a board's hub without opening it;
+# every target's lease on the hub in one read), G11 (the full queue: tiers, the background
+# queue, how long each waiter wants the board and why) and G10 (an identity clash to fix).
+# Appended as the lane rules ask: the classes above are only extended here, never edited.
+
+#: A background-tier waiter on the leased board (automation, e.g. an unattended checks run):
+#: it waits behind every interactive request (fpgahub's two tiers).
+BACKGROUND_WAITER = ("hil-runner@mapstone-dev", "hil")
+#: bob's request note (he queued after you): the message and how long he wants the board.
+BOB_NOTE = ("r-demo-0002", "bob@lab-pc-03", "a quick uart_echo check", 1800)
+#: How long your own scripted request wants the board.
+MY_WANT_S = 3600
+
+_ui2_hub_init = DemoHubState.__init__
+_ui2_hub_status = DemoHubState.status
+
+
+def _ui2_state_init(self: DemoHubState, me: str, *, target: str = HUB_TARGET,
+                    board: str = HUB_BOARD, free: bool = False) -> None:
+    from dataclasses import replace as _replace
+
+    from harness_manager.services.lease import RequestNote
+
+    _ui2_hub_init(self, me, target=target, board=board, free=free)
+    self.background = [] if free else [BACKGROUND_WAITER]
+    if free:
+        return
+    now = time.time()
+    mine = self.notes.get("r-demo-0001")
+    if mine is not None:
+        self.notes["r-demo-0001"] = _replace(mine, want_s=MY_WANT_S)
+    nid, by, message, want = BOB_NOTE
+    self.notes[nid] = RequestNote(id=nid, by=by, user=by.split("@")[0], host=by.split("@")[1],
+                                  message=message, created_at=_iso(now - 120),
+                                  deadline_at=_iso(now), want_s=want)
+
+
+class _Ui2Queued(_Queued):
+    def __init__(self, position: int, holder: str, user: str, tier: str) -> None:
+        super().__init__(position, holder, user)
+        self.tier = tier
+
+
+class _Ui2Status(_Status):
+    """``lease_status`` as fpgahub's REST answer has it: both tiers, the holder's tier."""
+
+    def __init__(self, base: _Status, background: tuple[_Queued, ...]) -> None:
+        super().__init__(base.held, base.holder, base.user, base.expires_at,
+                         tuple(_Ui2Queued(q.position, q.holder, q.user, "interactive")
+                               for q in base.queue))
+        self.background_queue = background
+        self.background_known = True
+        self.tier = "interactive" if base.held else ""
+
+
+def _ui2_status(self: DemoHubState) -> _Status:
+    base = _ui2_hub_status(self)
+    bg = tuple(_Ui2Queued(i + 1, p, u, "background")
+               for i, (p, u) in enumerate(getattr(self, "background", [])))
+    return _Ui2Status(base, bg)
+
+
+def _ui2_overview(self: DemoHubClient) -> list[dict[str, Any]]:
+    """``lease_overview`` (fpgahub ``/status``): every target on the demo hub, one read."""
+    rows = []
+    for st in getattr(self, "ui2_states", None) or (self.hub,):
+        with st.mu:
+            c, q = st.current, list(st.queue)
+        rows.append({"target": st.target,
+                     "state": "held" if c else ("queued" if q else "none"),
+                     "holder": c["holder"] if c else (q[0][0] if q else ""),
+                     "user": c["user"] if c else (q[0][1] if q else ""),
+                     "expires_at": c["expires_at"] if c else "", "queue_length": len(q),
+                     "in_use": bool(c)})
+    return rows
+
+
+def _ui2_states(engine: Any) -> tuple[DemoHubState, ...]:
+    return tuple(s for s in (getattr(engine, "_hub_state", None),
+                             getattr(engine, "_hub_spare", None)) if s is not None)
+
+
+def hub_ref(engine: Any, board_id: str) -> DemoHubRef | None:
+    """``DemoEngine.hub_for``: the hub of a showcase board that is not open (G3), else None."""
+    state = {BOARD_LEASED: getattr(engine, "_hub_state", None),
+             BOARD_SPARE: getattr(engine, "_hub_spare", None)}.get(board_id)
+    if state is None:
+        return None
+    client = DemoHubClient(state)
+    client.ui2_states = _ui2_states(engine)
+    return DemoHubRef(client)
+
+
+_ui2_adapters = adapters
+
+
+def _ui2_adapters_with_states(engine: Any, board: Any) -> dict[str, Any]:
+    out = _ui2_adapters(engine, board)
+    hub = out.get("hub")
+    if hub is not None:
+        hub.client.ui2_states = _ui2_states(engine)
+    return out
+
+
+def seed_identities(state_dir: Path) -> None:
+    """G10: the showcase's identity clash, as ``<state>/identity/seen.json`` holds what boards
+    reported: mps3-02 and mps3-03 both still carry the image's MAC 02:00:00:4d:50:53 (their
+    labels are the image default, which is "not set", never a clash). Written once: a demo
+    state dir that already has records keeps them."""
+    from harness_manager.services.board_identity import SeenIdentities
+
+    seen = SeenIdentities(Path(state_dir) / "identity")
+    if seen.all():
+        return
+    now = time.time()
+    for bid, name, target, ip in ((BOARD_LEASED, "mps3-02", HUB_TARGET, "192.168.10.106/24"),
+                                  (BOARD_SPARE, "mps3-03", SPARE_TARGET, "192.168.10.107/24")):
+        seen.update(bid, label="MPS3", hostname="mps3", ip=ip, mac="02:00:00:4d:50:53",
+                    label_source="default", target=target, address=bid.split("@", 1)[1],
+                    at=now, name=name)
+
+
+DemoHubState.__init__ = _ui2_state_init          # type: ignore[method-assign]
+DemoHubState.status = _ui2_status                # type: ignore[method-assign]
+DemoHubClient.lease_overview = _ui2_overview     # type: ignore[attr-defined]
+adapters = _ui2_adapters_with_states             # noqa: F811 - DemoSession imports it by name
+# --- end ui2 api-hub ---------------------------------------------------------------------------------

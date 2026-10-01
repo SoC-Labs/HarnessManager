@@ -116,7 +116,7 @@ def test_real_daemon_open_attach_swap_close(served, page_on, fake):
     server, bid = served()
     page = page_on(server, bid)
     svc = server.engine.xvc
-    expect(page.locator('[data-testid="xvc-card"] .card-sub')).to_have_text(SCOPE)
+    expect(page.locator('[data-testid="xvc-card"] .card-sub')).to_have_attribute("title", SCOPE)
     state_is(page, "down")
     expect(by_id(page, "xvc-unauth")).to_contain_text("unauthenticated")      # bare metal (X6)
     expect(by_id(page, "xvc-ltx")).to_contain_text("nanosoc_ila.ltx", timeout=T)

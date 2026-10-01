@@ -1,0 +1,14 @@
+LEASE-LOCAL findings (30 Sep 2026), saved by the lead from the lane's hand-back.
+ANSWER: no image stores a lease on the board. Leases exist only on the hub (fpgahub /var/lib/fpgahub/leases.json);
+fpgahub only READS the board. Hub-less: HM's only exclusion is its local lock file
+~/.config/harness-manager/locks/mps3@<addr>.lock (O_EXCL; stale only same-host dead pid; keyed by the ADDRESS STRING,
+so IP vs hostname = two locks; on NFS home a crashed other-host lock never goes stale).
+Board side: 6900 single-client but HM opens/asks/closes (two PCs just take turns); SSH claim (/persist/ssh/authorized_keys,
+tmpfs without a card) is the only authenticated control and covers slot/kind-2/usd/commit/XVC/JTAG/identity_set/panel page,
+NOT swap/reset/reboot/set_clk/kind-1/consoles; no TTL. Presence hello (v0.17, post-MVP) = RAM, 4 sessions, 90 s TTL,
+display only; hub-less HM always sends role owner. LCD lease badge = relayed from HM's hub view only. Bare metal: nothing.
+Options: (a) board-side lease verb (3-5 d + image), (b) advisory via presence + typed confirm before writes (HM-only ~1 d,
+needs v2.1 presence image), (c) require a hub, (d) LAN peer discovery (reject).
+RECOMMEND (b); MVP: docs paragraph only; (a) as the upgrade if collisions are reported, verbs claim-locked.
+Evidence table in the lane hand-back (HM services/lease.py:176,798-802,1273-1279; core/session.py:1-13,166-215;
+LX HM_ANSWERS_2026-09-26.md:151; FH daemon.py:55; mps3_lease.sh:9-20; net-protocol.md:1621-1660; v21 net-protocol.md:1418-1472).

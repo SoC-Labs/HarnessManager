@@ -142,6 +142,10 @@ export async function loadHub(bid) {
       // LEASE-UI: a lease read that failed is not a free lease (REVIEW-W5 2: not known is not free)
       leaseError: lr.error ? `${lr.error.errName}: ${lr.error.message}` : "",
       queue: Array.isArray(d.queue) ? d.queue : [], request: d.request || null,
+      // UI v2 (G11): automation waits apart, behind every person (lease.js queueOf, the
+      // header's "N waiting"); absent from a daemon without it
+      background_queue: Array.isArray(d.background_queue) ? d.background_queue : undefined,
+      background_known: d.background_known, background_reason: d.background_reason || "",
       incoming: Array.isArray(d.incoming) ? d.incoming : [], taken: d.taken || null,
       board: d.board || "",                          // D4: the physical board (mps3_01)
       // T8 hub mode over REST: no request messages or Keep; force only with an admin token.

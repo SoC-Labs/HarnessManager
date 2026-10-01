@@ -34,7 +34,7 @@ from .download import Downloader, token_from_env
 from .executor import HarnessInstaller, UpdateOutcome, default_os_slots
 from .lease_gate import lease_state, require_lease
 from .os_slots import OsSlotAdapter
-from .planner import Approval, BoardView, Plan, make_plan
+from .planner import Approval, BoardView, Plan, make_plan, netboot_of, os_boot_of
 from .policy import Policy, load_policy
 from .schema import harness_catalog
 from .state import Pins, StoredComponents, UpdateState
@@ -237,6 +237,7 @@ class UpdateService:
             except (HarnessError, OSError):
                 revs = ()
         os_sha = os_crc = os_pending = fell = fell_crc = running = ""
+        os_boot = slots_reason = ""
         if slots is not None:
             try:
                 st = slots.status()
@@ -246,8 +247,12 @@ class UpdateService:
                 fell, running = slot_health.fell_back(st), st.running
                 bad = st.slots.get(fell) if fell else None
                 fell_crc = bad.hdr_crc if bad is not None else ""
+                os_boot = os_boot_of(st.running)               # UI2 G6
             except HarnessError:
                 os_sha = ""
+        elif ident is not None and ident.harness_impl == "linux":
+            # UI2 G6: why a Linux board offers no OS slot door; with no card, it netbooted
+            os_boot, slots_reason = netboot_of(getattr(session, "os_slots", None))
         witness = getattr(controller, "last_reboot", None)
         boot = getattr(witness, "boot", None)
         return BoardView(board_id=cand.board_id, pack=cand.pack, identity=ident,
@@ -257,7 +262,8 @@ class UpdateService:
                          os_fell_back=fell, os_running=running, os_fell_back_crc=fell_crc,
                          sd_revisions=revs,
                          mcc_firmware=getattr(boot, "firmware", "") or "",
-                         hub_sd=self.hub_door_view(session))
+                         hub_sd=self.hub_door_view(session),
+                         os_boot=os_boot, os_slots_reason=slots_reason)
 
     def plan_harness(self, session: Any, *, verified: VerifiedChannel | None = None,
                      channel: str | None = None, source: str | None = None,

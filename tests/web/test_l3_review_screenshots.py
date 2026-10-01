@@ -13,6 +13,7 @@ import zipfile
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -36,11 +37,12 @@ def open_board(page, board_id):
     page.locator(f'.board-item[data-board="{board_id}"]').click()
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def settle(page, ms=350):
@@ -49,16 +51,11 @@ def settle(page, ms=350):
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_review_overview_demo(page_factory, daemon, engine, review, scheme):
-    sim = daemon.app.state.sim
     page = page_factory(scheme, **APP)
     open_board(page, BOARD_USB)
-    page.wait_for_selector('[data-testid="tiles"]', timeout=T)
-    page.locator('[data-action="attach-uart0"]').click()
-    page.wait_for_selector('li[data-console="uart0"] code', timeout=T)
-    sim.attach_screen(BOARD_USB, "uart0", 1)
-    page.locator('[data-testid="tile-debug"] [data-action="up"]').click()
-    expect(page.locator('[data-testid="tile-debug-state"]')).to_have_text("up", timeout=T)
-    expect(page.locator('li[data-console="uart0"]')).to_contain_text("1 attached")
+    page.wait_for_selector('[data-testid="overview"]', timeout=T)
+    expect(page.locator('[data-testid="tile-debug"]')).to_be_visible(timeout=T)   # UI v2: a state line
+    expect(page.locator('[data-testid="panel-card"]')).to_be_visible()
     settle(page)
     page.screenshot(path=str(review / f"overview-demo-{scheme}.png"))
 
@@ -67,8 +64,8 @@ def test_review_overview_demo(page_factory, daemon, engine, review, scheme):
 def test_review_overview_ethernet_only(page_factory, review, scheme):
     page = page_factory(scheme, **APP)
     open_board(page, BOARD_FIELDED)
-    expect(page.locator('[data-attention="build"]')).to_be_visible(timeout=T)
-    expect(page.locator('[data-testid="tile-temp"]')).to_contain_text("unavailable")
+    expect(page.locator('[data-testid="build-chip"]')).to_be_visible(timeout=T)   # UI v2: the header's
+    expect(page.locator('[data-testid="ov-kpi-temp"]')).to_contain_text("unavailable")
     settle(page)
     page.screenshot(path=str(review / f"overview-ethernet-only-{scheme}.png"))
 
@@ -118,18 +115,16 @@ def test_review_power(page_factory, daemon, review):
 
 
 def test_review_update(page_factory, review):
+    # UI v2 (BD16): Board > Versions is the board's side beside the signed releases; the
+    # channel checker's plan is gone (the catalogue plans each release inline).
     page = page_factory("light", **APP)
     open_board(page, BOARD_USB)
     section(page, "update")
-    page.locator('[data-action="update_check"]').click()
-    plan = page.locator('[data-testid="update-plan"]')
-    expect(plan.locator('[data-testid="rekey-chip"]')).to_be_visible(timeout=T)
-    plan.locator('[data-testid="rekey-phrase"]').fill("REKEY 0x72bb0a36")
-    plan.locator('[data-testid="arm-update"] input').check()
+    card = page.locator('[data-testid="harness-card"]')
+    expect(card).to_be_visible(timeout=T)
+    expect(page.locator('[data-testid="config-sd"]')).to_be_visible()
     settle(page)
     page.screenshot(path=str(review / "update-plan-light.png"))
-    plan.locator('[data-action="update_harness"]').click()
-    expect(plan.locator('[data-testid="rollback-hint"]')).to_be_visible(timeout=T)
     page.emulate_media(color_scheme="dark")
     settle(page)
     page.screenshot(path=str(review / "update-done-dark.png"))
@@ -152,6 +147,7 @@ def test_review_sd(page_factory, review, tmp_path):
     page = page_factory("light", **APP)
     open_board(page, BOARD_USB)
     section(page, "sd")
+    page.locator('[data-action="sd-more"]').click()          # UI v2: the by-hand install is folded
     flow = page.locator('[data-testid="sd-flow"]')
     flow.locator('[data-action="sd_backup"]').click()
     expect(flow.locator('[data-testid="sd-backup-result"]')).to_contain_text("rc 0", timeout=T)

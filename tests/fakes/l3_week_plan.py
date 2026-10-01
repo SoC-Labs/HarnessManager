@@ -138,6 +138,8 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
     "identity_api": (
         ("GET", "/boards/{bid}/identity"),
         ("POST", "/boards/{bid}/identity"),
+        # --- ui2 api-hub (G10): served in the mock by t14_mock_api's ui2 block ---
+        ("GET", "/identity/clashes"),
     ),
     # LINUX-SLOTS: served in the mock by tests/fakes/lxslots_mock_card.py (a card per board).
     "card_api": (
@@ -169,6 +171,8 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("DELETE", "/hubs/{name}"),
         ("POST", "/hubs/{name}/boards"),
         ("POST", "/hubs/adopt"),
+        # --- ui2 api-hub (G3): served in the mock by t14_mock_api's ui2 block ---
+        ("GET", "/hubs/{name}/leases"),
     ),
     # FIX-PACK-2: the service's own tool variables; served in the mock by
     # tests/fakes/fp2_mock_env.py (the real describe over a scripted environment).
@@ -191,6 +195,25 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("GET", "/boards/{bid}/checks/{run}/report"),
     ),
 }
+# --- ui2 api-build ---
+# UI2-API-BUILD (UI_V2_PLAN.md §2 G4 G5 G6 G8; docs/API.md "Readings kept by this service",
+# "OS slots and the card: roll back, commit, clear", "Import a design, and the build's ...").
+# kit_api's are served in the mock by the real kit_api (tests/fakes/kit_mock.py); card_api's
+# and readings_api's by tests/fakes/t14_mock_api.py's ui2 api-build block.
+EXTENSION_ROUTES["card_api"] = EXTENSION_ROUTES["card_api"] + (
+    ("POST", "/boards/{bid}/slots/rollback"),
+    ("POST", "/boards/{bid}/card/commit"),
+    ("POST", "/boards/{bid}/card/clear"),
+)
+EXTENSION_ROUTES["kit_api"] = EXTENSION_ROUTES["kit_api"] + (
+    ("POST", "/overlays/import"),
+    ("POST", "/overlays/upload"),
+    ("POST", "/kits/design/scan"),
+)
+EXTENSION_ROUTES["readings_api"] = (
+    ("GET", "/boards/{bid}/readings/history"),
+)
+# --- end ui2 api-build ---
 
 SERIAL_CONSOLES = ("mcc", "shell")          # DemoEngine's Debug-USB consoles
 SERIAL_CHOICES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
@@ -710,7 +733,9 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
 
     @app.get(f"{API}/boards/{{bid}}/lease")
     def lease_get(bid: str) -> dict[str, Any]:
-        state.session(bid)
+        from .t14_lease_requests import listed_board
+
+        listed_board(state, bid)                  # ui2 api-hub (G3): open or not
         hub = sim.hubs.get(bid)
         # docs/LEASE_REQUESTS.md adds queue, request, incoming and taken.
         more = sim.requests.view(bid) if sim.requests is not None else {}
@@ -788,7 +813,9 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
 
     @app.delete(f"{API}/boards/{{bid}}/lease")
     def lease_release(bid: str) -> dict[str, Any]:
-        state.session(bid)
+        from .t14_lease_requests import listed_board
+
+        listed_board(state, bid)                  # ui2 api-hub (G3): open or not
         hub = sim.hubs.get(bid)
         if hub is None:
             raise UnavailableError("lease", f"{bid} is not behind a hub: there is no lease to take")
@@ -841,6 +868,9 @@ def register(app: FastAPI, state: Any, sim: WeekPlanSim, ok: Any, accepted: Any)
     def power_cycle(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         state.session(bid)
         off_s = check_off_s(body.get("off_s", DEFAULT_OFF_S))     # 400 before any job
+        from .t14_mock_api import ui2_require_holder  # ui2 api-hub (G7)
+
+        ui2_require_holder(sim, bid, "power_cycle", body)
         jobs.gate(bid)
         p = sim.power.get(bid)
         reason = p["cycle_reason"] if p else (

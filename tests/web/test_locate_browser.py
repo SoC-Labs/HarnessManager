@@ -19,6 +19,7 @@ from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
 from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from tests.fakes.clcd_panel_shell import PANEL_FEATURES
 from tests.fakes.p1_mock_panel import PanelSim
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -196,46 +197,43 @@ def test_negative_twin_the_click_is_the_only_request(page_factory, daemon, engin
     assert psim.calls == [("locate", BOARD)]
 
 
-# --- the Board tile, and the holder's note ---------------------------------------------------------
+# --- the Front panel's Identify (UI v2 round 3: the Board tile's button is gone), one state ---------
 
 
 def open_board(page, bid=BOARD):
     page.locator(f'.board-item[data-board="{bid}"]').click()
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
-    page.wait_for_selector('[data-testid="tile-locate"]', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
+    page.wait_for_selector('[data-testid="panel-identify"]', timeout=T)
 
 
 @pytest.mark.mock_too
-def test_the_board_tile_button_counts_down_and_stop_sends_seconds_0(page_factory, daemon,
-                                                                    engine, psim):
+def test_the_front_panels_identify_blinks_the_rail_too_and_stop_sends_seconds_0(page_factory, daemon,
+                                                                                engine, psim):
     linux(engine)
     page = page_factory(**APP)
     open_board(page)
-    page.locator('[data-testid="tile-locate"]').click()
-    expect(page.locator('[data-testid="tile-locate-line"]')).to_contain_text(
-        re.compile(r"blinking, \d s left"), timeout=T)
-    expect(rail(page)).to_have_attribute("data-state", "blinking")      # one state, both places
-    page.locator('[data-testid="tile-locate-stop"]').click()
-    expect(page.locator('[data-testid="tile-locate-count"]')).to_have_count(0, timeout=T)
+    ident = page.locator('[data-testid="panel-identify"]')
+    ident.locator('[data-action="identify"]').click()
+    expect(ident.locator('[data-testid="identify-until"]')).to_contain_text(
+        re.compile(r"blinking until \d\d:\d\d:\d\d"), timeout=T)
+    expect(rail(page)).to_have_attribute("data-state", "blinking", timeout=T)   # one state, both places
+    ident.locator('[data-action="identify_stop"]').click()
+    expect(ident.locator('[data-testid="identify-until"]')).to_have_count(0, timeout=T)
     assert wait_until(lambda: [s for _b, s, _w in psim.locates] == [5, 0])
-    expect(page.locator('[data-testid="tile-locate-stop"]')).to_have_count(0)
 
 
 @pytest.mark.mock_too
-def test_negative_twin_no_stop_while_idle_and_a_second_press_does_not_stop(page_factory, daemon,
-                                                                           engine, psim):
+def test_negative_twin_no_stop_while_idle(page_factory, daemon, engine, psim):
     linux(engine)
     page = page_factory(**APP)
     open_board(page)
-    expect(page.locator('[data-testid="tile-locate-stop"]')).to_have_count(0)
-    page.locator('[data-testid="tile-locate"]').click()
-    expect(page.locator('[data-testid="tile-locate"]')).to_have_attribute("data-state", "blinking",
-                                                                          timeout=T)
-    page.locator('[data-testid="tile-locate"]').click(force=True)   # ignored, not a stop
+    ident = page.locator('[data-testid="panel-identify"]')
+    expect(ident.locator('[data-action="identify"]')).to_be_visible(timeout=T)
+    expect(ident.locator('[data-action="identify_stop"]')).to_have_count(0)
     page.wait_for_timeout(500)
-    assert [s for _b, s, _w in psim.locates] == [5]
-    expect(page.locator('[data-testid="tile-locate"]')).to_have_attribute("data-state", "blinking")
+    assert psim.locates == []
 
 
 @pytest.mark.mock_too

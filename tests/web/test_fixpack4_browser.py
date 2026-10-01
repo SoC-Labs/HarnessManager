@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav, wb
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -36,14 +37,12 @@ def rail(page: Any, bid: str) -> Any:
 
 
 def open_board(page: Any, bid: str = BOARD_USB) -> None:
-    rail(page, bid).click()
-    page.locator('[data-action="open"]').click()
-    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.open_board(page, bid)
 
 
 def section(page: Any, key: str) -> None:
-    page.locator(f'.section-tab[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def wait_until(fn: Any, timeout: float = 5.0) -> bool:
@@ -69,23 +68,24 @@ HIDDEN_TABS = """() => {
 
 
 def test_every_tab_is_on_screen_at_1024_px(page_factory):
+    # UI v2: five tabs; this USB board has no hub, so no Checks
     page = page_factory(width=1024, height=768)
     open_board(page)
-    expect(page.locator(".section-tab")).to_have_count(12)
+    expect(page.locator(".section-tab")).to_have_count(4)
     assert page.evaluate(HIDDEN_TABS) == []
-    for key in ("update", "checks", "activity"):           # the three the review lost
-        section(page, key)
+    for key in ("overview", "workbench", "build", "board"):
+        nav.tab(page, key)
         expect(page.locator(f'.section-tab[data-section="{key}"]')).to_have_attribute("aria-selected", "true")
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     assert page.errors == []
 
 
-def test_negative_twin_the_old_scrolling_row_hides_tabs_and_the_check_sees_it(page_factory):
+def test_negative_twin_a_scrolling_row_too_narrow_hides_tabs_and_the_check_sees_it(page_factory):
     page = page_factory(width=1024, height=768)
     open_board(page)
-    page.add_style_tag(content="nav.sections { flex-wrap: nowrap !important; overflow-x: auto; }")
+    page.add_style_tag(content="nav.sections { flex-wrap: nowrap !important; overflow-x: auto; width: 240px; }")
     hidden = page.evaluate(HIDDEN_TABS)
-    assert "activity" in hidden and "overview" not in hidden, hidden
+    assert "board" in hidden and "overview" not in hidden, hidden
 
 
 # --- 8: the header's refresh re-reads the Card line and the SD journal ----------------------------
@@ -101,8 +101,8 @@ def test_the_header_refresh_rereads_the_card_line_and_the_sd_journal(page_factor
     give_card(engine, "empty")
     page = page_factory(**APP)
     open_board(page)
-    tile = by_id(page, "tile-card")
-    expect(tile).to_have_text("empty", timeout=T)
+    tile = by_id(page, "tile-card")                       # UI v2: the Design card's Boots next
+    expect(tile).to_contain_text("nothing kept on the card", timeout=T)
     expect(by_id(page, "sd-banner")).to_have_count(0)
     # the world moves: the card is taken out, and an SD install is found interrupted
     engine.set_card(BOARD_USB, None)
@@ -112,7 +112,7 @@ def test_the_header_refresh_rereads_the_card_line_and_the_sd_journal(page_factor
     page.locator('[data-action="refresh-board"]').click()
     expect(by_id(page, "sd-banner")).to_be_visible(timeout=T)
     section(page, "overview")                    # a journal found first opens the SD tab
-    expect(tile).to_have_text("none (boots as always)", timeout=T)
+    expect(tile).to_contain_text("none (boots as always)", timeout=T)
     assert len(engine.called("deploy.card_status")) > cards
     assert len(engine.called("storage.pending")) > journals
     assert page.errors == []
@@ -121,7 +121,7 @@ def test_the_header_refresh_rereads_the_card_line_and_the_sd_journal(page_factor
 def test_negative_twin_without_a_card_store_the_refresh_reads_no_card(page_factory, engine):
     page = page_factory(**APP)
     open_board(page)
-    expect(by_id(page, "tile-card")).to_have_text("no card store on this harness", timeout=T)
+    expect(by_id(page, "tile-card")).to_contain_text("no card store on this harness", timeout=T)
     infos, journals = len(engine.called("info")), len(engine.called("storage.pending"))
     cards = len(engine.called("deploy.card_status"))
     page.locator('[data-action="refresh-board"]').click()
@@ -129,10 +129,10 @@ def test_negative_twin_without_a_card_store_the_refresh_reads_no_card(page_facto
                       and len(engine.called("storage.pending")) > journals)
     time.sleep(0.5)
     assert len(engine.called("deploy.card_status")) == cards         # nothing to read
-    expect(by_id(page, "tile-card")).to_have_text("no card store on this harness")
+    expect(by_id(page, "tile-card")).to_contain_text("no card store on this harness")
 
 
-# --- 9: Settings opens on General, then where you left it --------------------------------------------
+# --- 9: Settings opens on General (UI v2 round 3, M7: always; a link names its section) ------------
 
 
 def gear(page: Any) -> Any:
@@ -141,24 +141,16 @@ def gear(page: Any) -> Any:
     return by_id(page, "settings-pane")
 
 
-def test_settings_opens_on_general_then_on_the_last_section_used(page_factory):
+def test_settings_opens_on_general_whatever_section_was_used_last(page_factory):
     page = page_factory(**APP)
     page.wait_for_selector(".board-item", timeout=T)
     expect(gear(page)).to_have_attribute("data-settings-section", "general", timeout=T)
     page.locator('[data-testid="settings-nav"] [data-settings-section="tools"]').click()
+    expect(by_id(page, "settings-pane")).to_have_attribute("data-settings-section", "tools", timeout=T)
     page.locator('[data-action="settings-close"]').click()
     expect(by_id(page, "settings")).to_have_count(0)
-    expect(gear(page)).to_have_attribute("data-settings-section", "tools", timeout=T)
+    expect(gear(page)).to_have_attribute("data-settings-section", "general", timeout=T)
     assert page.errors == []
-
-
-def test_negative_twin_the_update_tabs_settings_link_still_opens_updates(page_factory):
-    page = page_factory(**APP)
-    open_board(page)
-    section(page, "update")
-    by_id(page, "update-app").locator('[data-action="open-settings"]').click()
-    expect(by_id(page, "settings-pane")).to_have_attribute("data-settings-section", "updates", timeout=T)
-    expect(by_id(page, "update-settings")).to_be_visible(timeout=T)
 
 
 # --- 1: one lease rule: held HERE, never `mine` -----------------------------------------------------
@@ -220,9 +212,10 @@ def test_the_update_lease_line_is_not_yours_for_your_other_session(page_factory,
     expect(line).to_contain_text(f"{ME} holds the lease on mps3_01_pl in another session, "
                                  "not this Harness Manager", timeout=T)
     expect(line).not_to_contain_text("You hold")
-    panel = install_rekey(page, card)
-    result = panel.locator('[data-testid="harness-result"]')
-    expect(result).to_contain_text("HELD", timeout=T)                    # the daemon refuses too
+    panel = install_rekey(page, card, force=True)            # UI v2 (R3): the page refuses first
+    expect(panel.locator('[data-testid="reason-harness_install"]')).to_contain_text(
+        "in another session, not this Harness Manager", timeout=T)
+    expect(panel.locator('[data-testid="harness-result"]')).to_contain_text("Nothing was run.")
     assert daemon.app.state.harness.running == {}
 
 
@@ -253,12 +246,10 @@ def classes(page: Any, action: str, within: str = "") -> str:
 def test_on_a_board_someone_else_leases_program_and_friends_are_off_and_not_primary(page_factory, daemon):
     page = hub_board_page(page_factory, daemon, "other")
     held = "is for the lease holder only: alice@lab-pc-07 holds this board"
-    tile = by_id(page, "tile-board")
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_have_text(f"Reset DUT {held}", timeout=T)
-    expect(tile.locator('[data-testid="reason-reboot"]')).to_have_text(f"Reboot {held}")
-    assert "danger" not in classes(page, "reboot", '[data-testid="tile-board"]')
-    expect(by_id(page, "tile-debug").locator('[data-testid="reason-up"]')).to_have_text(f"Debug {held}")
-    assert "primary" not in classes(page, "up", '[data-testid="tile-debug"]')
+    # UI v2 round 3: the Overview has no drive buttons (Reset DUT, Reboot, Debug moved to the
+    # Workbench and Board > Recover): nothing there to refuse
+    for action in ("reset_dut", "reboot", "up"):
+        assert by_id(page, "section-overview").locator(f'[data-action="{action}"]').count() == 0, action
     section(page, "program")
     expect(by_id(page, "reason-program")).to_have_text(f"Program {held}", timeout=T)
     expect(page.locator('[data-action="program"]')).to_have_attribute("aria-disabled", "true")
@@ -280,11 +271,14 @@ def test_on_a_board_someone_else_leases_program_and_friends_are_off_and_not_prim
 @HUB
 def test_negative_twin_the_lease_holder_gets_the_primary_buttons(page_factory, daemon):
     page = hub_board_page(page_factory, daemon, "mine")
-    tile = by_id(page, "tile-board")
-    expect(tile.locator('[data-action="reboot"]')).to_be_visible(timeout=T)
-    expect(tile.locator('[data-testid="reason-reboot"]')).not_to_contain_text("lease holder")
-    assert "danger" in classes(page, "reboot", '[data-testid="tile-board"]')
-    assert "primary" in classes(page, "up", '[data-testid="tile-debug"]')
+    section(page, "power")
+    card = by_id(page, "reboot-card")
+    expect(card.locator('[data-action="reboot"]')).to_be_visible(timeout=T)
+    expect(card.locator('[data-testid="reason-reboot"]')).not_to_contain_text("lease holder")
+    # UI v2 (BOARD, round 3): the Recover ladder's buttons share one style; the holder's Reboot
+    # goes live once armed (the watcher's stays off, armed or not: the twin above)
+    card.locator('[data-testid="arm-reboot"] input').check()
+    expect(card.locator('[data-action="reboot"]')).not_to_have_attribute("aria-disabled", "true")
     section(page, "program")
     expect(page.locator('[data-action="program"]')).to_be_visible(timeout=T)
     assert "primary" in classes(page, "program")
@@ -320,12 +314,13 @@ def test_the_preview_shows_the_last_known_hub_lease_apart_from_this_apps_lock(pa
     open_board(page, BOARD_FIELDED)
     expect(by_id(page, "lease-chip")).to_contain_text("alice@lab-pc-07", timeout=T)
     page.locator('[data-action="close-board"]').click()
+    by_id(page, "close-confirm").locator('[data-action="close_confirm"]').click()   # Close the board
     expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)     # the preview again
     expect(by_id(page, "preview-lock")).to_have_text("free")
     expect(page.locator(".preview dt", has_text="This app's lock")).to_have_count(1)
     lease = by_id(page, "preview-lease")
     expect(lease).to_have_attribute("data-lease", "other", timeout=T)
-    expect(lease).to_contain_text("held by alice@lab-pc-07")
+    expect(lease).to_contain_text("Held by alice@lab-pc-07")
     expect(by_id(page, "preview-lease-at")).to_contain_text("as of ")
     assert page.locator(".preview dt", has_text="Lock").filter(has_not_text="app").count() == 0
     assert page.errors == []
@@ -402,11 +397,7 @@ def panel_page(page_factory: Any, daemon: Any, engine: Any) -> Any:
     engine.set_features(BOARD_FIELDED, [*feats, *PANEL_FEATURES])
     page = page_factory(**APP)
     open_board(page, BOARD_FIELDED)
-    toggle = page.locator('[data-action="details"]')
-    toggle.wait_for(timeout=T)
-    if toggle.get_attribute("aria-expanded") != "true":
-        toggle.click()
-    page.wait_for_selector('[data-testid="panel-identify"]', timeout=T)
+    page.wait_for_selector('[data-testid="panel-identify"]', timeout=T)   # the Front panel's head
     return page.locator('[data-testid="panel-identify"] [data-testid="identify-seconds"]')
 
 
@@ -462,7 +453,7 @@ def errors_shown(page: Any) -> Any:
 
 def pick_led(page: Any) -> None:
     section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
 
 

@@ -139,6 +139,11 @@ function choiceLabel(c) {
   return c === "" ? "(none)" : String(c);
 }
 
+// UI v2: an enum whose values are page names reads as the page (Workbench, not workbench).
+const CHOICE_LABELS = {
+  "general.open_on": { workbench: "Workbench", overview: "Overview" },
+};
+
 export function Control({ row, disabled, onSave, hubs = [] }) {
   const spec = specOf(row.key) || {};
   const [, hint] = docParts(row.doc);
@@ -149,7 +154,8 @@ export function Control({ row, disabled, onSave, hubs = [] }) {
   }
   if (type === "enum") {
     const choices = row.choices || spec.choices || [];
-    const opts = choices.map((c) => ({ value: c, label: choiceLabel(c) }));
+    const named = CHOICE_LABELS[row.key] || {};
+    const opts = choices.map((c) => ({ value: c, label: named[c] || choiceLabel(c) }));
     return choices.length <= 4 && choices.every((c) => String(c).length <= 10)
       ? html`<${SegControl} row=${row} options=${opts} disabled=${disabled} onSave=${onSave} />`
       : html`<${SelectControl} row=${row} options=${opts} disabled=${disabled} onSave=${onSave} />`;

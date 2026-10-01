@@ -122,6 +122,11 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
               "identity_api",              # BOARD-ID: label/IP/MAC and the fix
               "env_api",                   # FIX-PACK-2: the service's own tool variables
               "hil_api")                   # HIL-GUI: the unattended checks, from the app
+# --- ui2 api-build routes ---
+# UI2-API-BUILD (docs/planning/UI_V2_PLAN.md §2 G4): the readings history (readings_api.py).
+# G5/G6/G8 add routes to kit_api.py and card_api.py, which are loaded above.
+EXTENSIONS += ("readings_api",)
+# --- end ui2 api-build routes ---
 
 
 @dataclass
@@ -716,6 +721,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         raise UsageError("harness-manager-daemon needs a token")
     d = Daemon(engine, token=token, state_dir=state_dir, shutdown=shutdown,
                event_limits=event_limits, console_limits=console_limits)
+    # --- ui2 api-hub (G3): every listed board's hub, found without contact (hub_boards) ---
+    from .hub_boards import BoardHubs
+
+    d.board_hubs = BoardHubs(d)
+    # --- end ui2 api-hub ---
     static = find_static_dir() if static_dir == "auto" else (
         Path(static_dir) if static_dir else None)
 
@@ -905,6 +915,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
 
         return Ctx(argparse.Namespace(), d.engine, "json").require(session, attr, capability)
 
+    from .readings_api import info_extra, note_telemetry  # UI2 G4 (CCR UI2-G4-1)
+
     # -- extension routers (week plan lanes) ------------------------------------------------
     # Each lane adds routes in its own module ``harness_manager.daemon.<name>`` with
     # ``register(ctx: RouteContext)``. They load HERE, before this file's
@@ -984,8 +996,43 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             known = last_known(board_id) if last_known is not None else None
             if known is not None:
                 row["lease_known"] = known
+            # --- ui2 api-hub (additive, no contact): the board's hub (G3) and its Debug USB
+            # route (G2): an open board's from its session, any other's from its links
+            row["hub"] = d.board_hubs.row(board_id, cand, conf)
+            row["mcc_route"], row["mcc_route_reason"] = ui2_route(board_id, cand, open_ids)
             rows.append(row)
         return _JSON(ok(boards=rows))
+
+    # --- ui2 api-hub ---------------------------------------------------------------------------
+
+    def ui2_holder(bid: str, s: Any, kind: str, body: dict[str, Any]) -> None:
+        """G7: 409 HELD unless the board's hub lease is held here (drive_gate)."""
+        from .drive_gate import require_holder
+
+        require_holder(d, bid, s, kind, body)
+
+    def ui2_route(board_id: str, cand: Any, open_ids: set[str]) -> tuple[str, str]:
+        from . import mcc_route
+
+        if board_id in open_ids:
+            try:
+                return ui2_session_route(board_id, d.engine.session(board_id))
+            except HarnessError:
+                pass
+        ident = getattr(cand, "identity", None)
+        return mcc_route.from_links(getattr(cand, "links", ()),
+                                    getattr(ident, "features", ()) if ident else ())
+
+    def ui2_session_route(board_id: str, s: Any) -> tuple[str, str]:
+        from . import mcc_route
+
+        last = getattr(d.engine, "last_identity", None)
+        ident = last(board_id) if callable(last) else None
+        if ident is None:
+            ident = getattr(s.candidate, "identity", None)
+        return mcc_route.of_session(s, ident)
+
+    # --- end ui2 api-hub ---------------------------------------------------------------------
 
     @api.post("/boards")
     def open_board(body: JsonBody = None) -> JSONResponse:
@@ -1023,7 +1070,11 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         out: dict[str, Any] = {"board_id": cand.board_id}
         try:
             with d.gates.op(cand.board_id):
-                out["info"] = d.engine.info(cand.board_id)
+                t0 = time.monotonic()
+                got = d.engine.info(cand.board_id)
+                answer_ms = (time.monotonic() - t0) * 1000.0
+            # UI2 G4 (readings_api): answer_ms, the uptimes and stats beside the first read
+            out["info"] = {**_fields(got), **info_extra(d, cand.board_id, got, answer_ms)}
         except HarnessError as exc:
             # The session is open (the lock is held); the board did not answer yet.
             out["info"] = None
@@ -1106,8 +1157,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         return _JSON(ok(board_id=bid, idcode=idcode))
 
     @api.post("/boards/{bid:path}/debug/up")
-    def debug_up(bid: str) -> JSONResponse:
+    def debug_up(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
+        ui2_holder(bid, s, "debug_up", _obj(body))          # ui2 api-hub (G7): 409 HELD
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "debug session")
@@ -1149,6 +1201,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         wait_s = _number(b, "wait_s") if b.get("wait_s") is not None else None
         if wait_s is not None and wait_s <= 0:
             raise UsageError("wait_s must be positive")
+        ui2_holder(bid, s, "reboot", b)                     # ui2 api-hub (G7): 409 HELD
         ctl = adapter_for_job(bid, s, "controller", C.REBOOT_BOARD)
         # SLOT-TIMING: never while the board's card job writes or reads back: the job fails
         # HELD, naming it. Checked IN the job, so the 202 still comes at once (Q1/Q2).
@@ -1168,6 +1221,8 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         b = _obj(body)
         line = _str(b, "line")
         arm = _bool(b, "arm", False)
+        if reset_guard.is_reboot_line(line):               # ui2 api-hub (G7): a REBOOT drives
+            ui2_holder(bid, s, "command", b)
         with d.gates.op(bid):
             ctl = require(s, "controller", C.CONSOLE_CONTROLLER)
             if reset_guard.is_reboot_line(line):      # SLOT-TIMING: a REBOOT is a reset
@@ -1271,16 +1326,18 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         # T14-4: whether each engine service works at all (None) or why not (its stub reason).
         services = {n: getattr(getattr(d.engine, n, None), "reason", None)
                     for n in ("deploy", "consoles", "debug", "telemetry")}
+        route, why = ui2_session_route(bid, s)             # ui2 api-hub (G2, additive)
         return _JSON(ok(board_id=bid, candidate=s.candidate, adapters=adapters,
                         reset_targets=list(resets.reset_targets()) if resets else [],
                         job=job.id if job else None, job_kind=job.kind if job else None,
-                        services=services))
+                        services=services, mcc_route=route, mcc_route_reason=why))
 
     @api.get("/boards/{bid:path}/telemetry")
     def telemetry(bid: str) -> JSONResponse:
         s = board(bid)
         with d.gates.op(bid):
             readings = list(d.engine.telemetry.readings(s))
+        note_telemetry(d, bid, readings)            # UI2 G4 (readings_api): the history
         now = time.time()
         return _JSON(ok(board_id=bid, readings=[reading_json(r, now) for r in readings]))
 
@@ -1331,6 +1388,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def deploy(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         keep = _bool(_obj(body), "keep_on_card", False)
+        ui2_holder(bid, s, "deploy", _obj(body))            # ui2 api-hub (G7): 409 HELD
         overlay, items, refusal = _preflight(bid, s, _obj(body).get("overlay"))
         if refusal is not None:            # refuse BEFORE deploy() is ever called
             refusal.data = {"overlay": overlay, "preflight": items}   # type: ignore[attr-defined]
@@ -1362,8 +1420,9 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         return accepted(d.jobs.submit("deploy", bid, run))
 
     @api.post("/boards/{bid:path}/restore")
-    def restore(bid: str) -> JSONResponse:
+    def restore(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
+        ui2_holder(bid, s, "restore", _obj(body))           # ui2 api-hub (G7): 409 HELD
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "restore")
@@ -1385,6 +1444,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def reset(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         target = _str(_obj(body), "target", "dut")
+        ui2_holder(bid, s, "reset", _obj(body))             # ui2 api-hub (G7): 409 HELD
         with d.gates.op(bid):
             resets = require(s, "resets", C.RESET_DUT)
             targets = list(resets.reset_targets())
@@ -1410,6 +1470,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         mhz = _number(b, "mhz")
         if mhz <= 0:
             raise UsageError(f"{mhz:g} MHz is not a clock frequency", hint="give a positive MHz")
+        ui2_holder(bid, s, "clocks", b)                     # ui2 api-hub (G7): 409 HELD
         with d.gates.op(bid):
             reading = require(s, "clocks", C.CLOCK_DUT).set_clock(name, mhz)
         return _JSON(ok(board_id=bid, reading=reading_json(reading)))
@@ -1432,10 +1493,14 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def info(bid: str) -> JSONResponse:
         board(bid)
         with d.gates.op(bid):
+            t0 = time.monotonic()
             board_info = d.engine.info(bid)
+            answer_ms = (time.monotonic() - t0) * 1000.0
         # QUIET-POLL: an explicit read while the lease is someone else's names the holder (a
         # health note, so the shape stays BoardInfo's; GET .../background has the rest).
-        return _JSON(ok(**_fields(d.with_lease_note(bid, board_info))))
+        # UI2 G4 (readings_api): answer_ms, the uptimes and stats (docs/API.md "Readings").
+        return _JSON(ok(**_fields(d.with_lease_note(bid, board_info)),
+                        **info_extra(d, bid, board_info, answer_ms)))
 
     @api.delete("/boards/{bid:path}")
     def close(bid: str, release: str | None = None) -> JSONResponse:
@@ -1511,12 +1576,22 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         max_items, max_bytes = d.console_limits
         outbox = Outbox(asyncio.get_running_loop(), max_items=max_items, max_bytes=max_bytes)
         outbox.put(json.dumps({"state": initial, "name": name, "detail": ""}))
+        # --- ui2 api-hub (G1b): who may type. A read-only client's bytes never reach the
+        # board: once per change an {"error": HELD} frame, and {"input": ...} when it opens
+        # read-only and whenever that changes (console_access).
+        from .console_access import InputGate
+
+        gate = InputGate(d, bid, key, name, outbox.put)
+        await asyncio.to_thread(gate.start)
+        # --- end ui2 api-hub ---
         bridge = ConsoleBridge(stream, outbox, d.bus, bid, key, name)
         bridge.start()
 
         async def to_board(message: dict[str, Any]) -> None:
             data = message.get("bytes")
             if data is None:            # text frames from the client are reserved
+                return
+            if not await asyncio.to_thread(gate.allows):    # ui2 api-hub (G1b)
                 return
             try:
                 await asyncio.to_thread(stream.write, data)
@@ -1527,6 +1602,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
             await _serve(websocket, outbox, on_receive=to_board,
                          dropped_frame=dropped_console_frame, coalesce=True)
         finally:
+            gate.close()                                    # ui2 api-hub (G1b)
             # Off the event loop, and not awaited (see _serve): closing the stream
             # joins the pump thread.
             threading.Thread(target=bridge.close, daemon=True,

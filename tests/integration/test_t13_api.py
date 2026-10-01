@@ -132,7 +132,10 @@ def test_probe_open_info_overlays_preflight_deploy_reset_close(client, vboard, o
     B = bid_path(bid)
     # info is BoardInfo, as `harness-manager --json info` prints it
     info = client.get(B, headers=H).json()
-    assert set(info) == {"ok", "candidate", "identity", "health", "capabilities", "unavailable"}
+    # UI2 G4 (additive): the service's readings beside BoardInfo (docs/API.md "Readings")
+    assert set(info) == {"ok", "candidate", "identity", "health", "capabilities", "unavailable",
+                         "answer_ms", "uptime_s", "os_uptime_s", "readings_at",
+                         "readings_source", "stats"}
     assert "reboot_board" in info["unavailable"]
     # the lock is held by this process, once, and the note is the daemon's
     holder = client.get(f"{B}/lock", headers=H).json()["holder"]

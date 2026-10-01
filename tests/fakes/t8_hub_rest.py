@@ -127,6 +127,7 @@ class _Lease:
     expires_at: datetime
     ttl: int
     tier: str = "interactive"
+    acquired_at: datetime = field(default_factory=lambda: _now())   # UI2-API-HUB (/status)
 
     def info(self) -> dict[str, Any]:
         return {"board": self.target, "holder": self.holder, "user": self.user,
@@ -352,6 +353,35 @@ class FakeFpgahub:
             "lease_holder": lease.holder if lease else None,
             "lease_queue_length": len(queue),
         }
+
+    def status(self) -> dict[str, Any]:
+        """UI2-API-HUB (G3): ``GET /status`` (fpgahub ``status.compute_status`` per target, in
+        config order): the lease, the queue length, and "in use" from the lease and its latest
+        journalled event (activity window 300 s); nothing is ever attached here."""
+        self._expire_stale()
+        now = _now()
+        rows = []
+        for name, (board, _role, _spec) in self.targets.items():
+            lease = self.leases.get(name)
+            queue = self.queues.get(board) or []
+            last = next((r for r in reversed(self.journal) if r.get("board") == name), None)
+            at = datetime.fromisoformat(last["ts"]) if last else None
+            state = "held" if lease else ("queued" if queue else "none")
+            head = queue[0] if queue and not lease else None
+            recent = at is not None and (now - at).total_seconds() <= 300
+            rows.append({
+                "name": name, "bound_busids": [], "attached_ports": [], "remote_host": None,
+                "in_use": state == "held" and recent, "lease_state": state,
+                "lease_holder": lease.holder if lease else (head.holder if head else None),
+                "lease_user": lease.user if lease else (head.user if head else None),
+                "lease_acquired_at": _pyd(lease.acquired_at) if lease else None,
+                "lease_expires_at": _pyd(lease.expires_at) if lease else None,
+                "lease_queue_length": len(queue), "attach_state": "none",
+                "last_activity_at": _pyd(at) if at else None,
+                "last_activity_kind": "lease" if last else None,
+                "last_activity_detail": last["event"] if last else None,
+                "host_ssh": None, "host_proxy": None, "host_dev_host": None, "warnings": []})
+        return {"boards": rows}
 
     def lease_get(self, name: str) -> dict[str, Any]:
         self._require_target(name)
@@ -579,6 +609,7 @@ _ROUTES: list[tuple[str, re.Pattern[str], str, str]] = [
     ("POST", re.compile(r"/api/v1/boards/(?P<n>[^/]+)/lease/revoke"), "revoke", "admin"),
     ("GET", re.compile(r"/api/v1/boards/(?P<n>[^/]+)/lease/history"), "board_history", "read"),
     ("DELETE", re.compile(r"/api/v1/boards/(?P<n>[^/]+)/queue"), "cancel_board", "write"),
+    ("GET", re.compile(r"/api/v1/status"), "status", "read"),     # UI2-API-HUB (G3)
 ]
 
 #: (method, OpenAPI template) of every route the fake serves: the contract test checks them.
@@ -665,6 +696,8 @@ class _Handler(BaseHTTPRequestHandler):
             with fake._cond:
                 if handler == "whoami":
                     out = fake.whoami(p)
+                elif handler == "status":
+                    out = fake.status()
                 elif handler == "groups":
                     out = fake.groups()
                 elif handler == "target":

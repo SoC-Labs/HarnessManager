@@ -15,6 +15,7 @@ from urllib.parse import quote
 import pytest
 
 from harness_manager.demo import BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 
@@ -29,6 +30,7 @@ def open_board(page) -> None:
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="board-header"]', timeout=T)
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
 
 
 def until(predicate, timeout: float = 10.0):
@@ -54,11 +56,18 @@ def test_the_page_views_the_board_it_shows_and_marks_its_own_reads(page_factory,
     until(lambda: gate.viewers(BOARD_USB) == 1)
     assert any(h.get("x-hm-background") == "1" for h in until(lambda: info_reads(requests))), \
         "the read after the open is one nobody clicked"
+    # the open's own background reads land first (UI v2's Overview reads more at open: the
+    # lease queue, the clashes, the trend), so the window below holds the click's read only
+    settled = -1
+    while settled != len(info_reads(requests)):
+        settled = len(info_reads(requests))
+        page.wait_for_timeout(1000)
     requests.clear()
     page.locator('[data-action="refresh-board"]').click()          # twin: a click
     clicked = until(lambda: info_reads(requests))
     assert all("x-hm-background" not in h for h in clicked)
     page.locator('button:has-text("Close board")').click()           # closing stops the view
+    page.locator('[data-testid="close-confirm"] [data-action="close_confirm"]').click()   # UI v2: it asks
     until(lambda: gate.viewers(BOARD_USB) == 0)
     assert page.errors == []
 

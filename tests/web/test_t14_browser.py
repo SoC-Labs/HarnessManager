@@ -17,13 +17,16 @@ import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
 from harness_manager.services.debug import gdb_command
+from tests.web import nav, wb
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
 
 pytestmark = pytest.mark.browser
 
-SECTIONS = ["overview", "program", "consoles", "debug", "power", "clocks", "xdc", "activity"]
+# UI v2: the five tabs (no Checks: no hub here), then 0.1.0's keys where they landed (nav.py)
+SECTIONS = ["overview", "workbench", "build", "board", "program", "consoles", "debug", "power",
+            "clocks", "xdc", "activity"]
 T = 10_000   # ms: the longest any single UI wait may take
 
 
@@ -32,28 +35,30 @@ def rail(page, board_id):
 
 
 def open_board(page, board_id):
-    rail(page, board_id).click()
-    page.locator('[data-action="open"]').click()
-    page.wait_for_selector('[data-testid="board-header"]', timeout=T)
-    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.open_board(page, board_id)
 
 
-def open_details(page):
-    """The Overview's Details (identity, counters, telemetry, capabilities) start collapsed."""
-    toggle = page.locator('[data-action="details"]')
-    toggle.wait_for(timeout=T)
-    if toggle.get_attribute("aria-expanded") != "true":
-        toggle.click()
-    page.wait_for_selector('[data-testid="identity-card"]', timeout=T)
+def open_details(page, sub="about"):
+    """0.1.0's Overview "Details" (identity, counters, telemetry, capabilities): UI v2 round 3
+    moved them to Board > About (identity, capabilities) and Readings (telemetry, health)."""
+    nav.board_page(page, sub)
+    page.wait_for_selector('[data-testid="identity-card"]' if sub == "about" else '[data-testid="telemetry-card"]',
+                           timeout=T)
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def result_text(page, testid):
     return page.locator(f'[data-testid="{testid}"]').inner_text()
+
+
+def program_text(page):
+    """UI v2: the Program strip's command lines fold under its outcome (a closed <details> is
+    not rendered, so its innerText is empty): read their text."""
+    return page.locator('[data-testid="program-result"]').text_content() or ""
 
 
 def no_missing_icons(page):
@@ -128,14 +133,16 @@ def test_selecting_a_board_renders_identity_with_unchecked_as_a_warning(page_fac
     assert preview.get_attribute("data-level") == "unk" and "Unchecked" in preview.inner_text()
     open_board(page, BOARD_FIELDED)
     open_details(page)
-    assert page.locator('[data-testid="id-shell"]').inner_text() == "0x3f1a560f"
-    for testid in ("build-chip", "id-build"):
+    # UI v2 (BOARD): Board > About's identity rows; the header's build chip says "not a pass"
+    expect(page.locator('[data-testid="about-shell"]')).to_have_text("0x3f1a560f", timeout=T)
+    for testid in ("build-chip", "about-build"):
         chip = page.locator(f'[data-testid="{testid}"]')
         assert chip.get_attribute("data-level") == "unk", testid
         assert "Unchecked" in chip.inner_text()
-    assert "not a pass" in page.locator('[data-testid="id-build-note"]').inner_text()
-    # LEASE-UI: the board lock says "Open" ("Yours" is the hub lease's word now)
-    assert "Open" in page.locator('[data-testid="lock-chip"]').inner_text()
+        assert "NOT a pass" in (chip.get_attribute("title") or ""), testid
+    # LEASE-UI: the board lock says "Open" ("Yours" is the hub lease's word now); UI v2: on
+    # the rail's card, not the header
+    assert "Open" in rail(page, BOARD_FIELDED).locator('[data-testid="rail-open"]').inner_text()
     no_missing_icons(page)
     assert page.errors == []
 
@@ -143,14 +150,18 @@ def test_selecting_a_board_renders_identity_with_unchecked_as_a_warning(page_fac
 def test_a_board_whose_build_check_passed_shows_ok_not_unchecked(page_factory):
     page = page_factory()
     open_board(page, BOARD_USB)
-    chip = page.locator('[data-testid="build-chip"]')
-    assert chip.get_attribute("data-level") == "ok" and "OK" in chip.inner_text()
+    # UI v2: a passing build check rides the Design fact's tooltip; its chip only shows when
+    # the check asks for attention (the twin above: unchecked keeps it)
+    design = page.locator('[data-testid="fact-design"]')
+    expect(design).to_have_attribute("data-check", "ok", timeout=T)
+    assert "Build check OK" in design.get_attribute("title")
+    assert page.locator('[data-testid="build-chip"]').count() == 0
 
 
 def test_telemetry_shows_unavailable_with_its_reason_never_zero(page_factory):
     page = page_factory()
     open_board(page, BOARD_FIELDED)
-    open_details(page)
+    open_details(page, "readings")
     row = page.locator('[data-telemetry] [data-reading="mcc_temp"]')
     row.wait_for(timeout=T)
     assert row.get_attribute("data-available") == "no"
@@ -207,7 +218,7 @@ def test_program_mismatch_blocks_and_nothing_is_pushed(page_factory, engine):
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "program")
-    page.locator('[data-overlay="nanosoc_multicore"]').click()
+    wb.pick(page, "nanosoc_multicore")
     page.wait_for_selector('[data-testid="preflight-list"] li[data-check="mismatch"]', timeout=T)
     assert "Program is refused" in page.locator('[data-testid="preflight-summary"]').inner_text()
     page.locator('[data-testid="arm-program"] input').check()
@@ -216,7 +227,7 @@ def test_program_mismatch_blocks_and_nothing_is_pushed(page_factory, engine):
     assert button.get_attribute("aria-disabled") == "true"
     button.click(force=True)
     expect(page.locator('[data-testid="program-result"]')).to_contain_text("Nothing was run.")
-    assert "$ program nanosoc_multicore" in result_text(page, "program-result")
+    assert "$ program nanosoc_multicore" in program_text(page)
     assert engine.called("deploy.deploy") == []
     # UNCHECKED rows are shown as their own state and never block.
     assert page.locator('[data-testid="preflight-list"] li[data-check="unchecked"]').count() == 1
@@ -228,7 +239,7 @@ def test_program_ok_path_shows_progress_to_done(page_factory, engine, screenshot
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "program")
-    page.locator('[data-overlay="led"]').click()
+    wb.pick(page, "led")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     assert page.locator('[data-testid="preflight-list"] li[data-check="mismatch"]').count() == 0
     page.locator('[data-testid="arm-program"] input').check()
@@ -246,12 +257,16 @@ def test_program_ok_path_shows_progress_to_done(page_factory, engine, screenshot
     outcome = page.locator('[data-testid="deploy-outcome"]')
     outcome.wait_for(timeout=T)
     assert outcome.get_attribute("data-state") == "done"
-    assert "verified by the board" in outcome.inner_text()
+    # UI v2: the outcome says what was done and when it was verified; the command's own lines
+    # (the "verified by the board" verdict among them) fold under it
+    assert re.search(r"Programmed led 0x0100001E .* verified \d\d:\d\d", outcome.inner_text().replace("\n", " "))
+    assert "verified by the board" in program_text(page)
     page.wait_for_function(
-        "() => document.querySelector('[data-testid=\"program-result\"]')?.innerText.includes('rc 0')",
+        "() => document.querySelector('[data-testid=\"program-result\"]')?.textContent.includes('rc 0')",
         timeout=T)
-    assert re.search(r"\$ program led\s+\(rc 0, [\d.]+ s\)", result_text(page, "program-result"))
-    assert "0x0100001e" in page.locator('[data-testid="deploy-events"]').inner_text()
+    assert re.search(r"\$ program led\s+\(rc 0, [\d.]+ s\)", program_text(page))
+    # UI v2: the phases' own times are the outcome's title (the event list is gone)
+    assert "push" in (outcome.get_attribute("title") or "")
     page.wait_for_selector('[data-testid="fact-design"]:has-text("led")', timeout=T)
     assert len(engine.called("deploy.deploy")) == 1
     expect(page.locator('[data-testid="arm-program"] input')).not_to_be_checked()
@@ -262,7 +277,7 @@ def test_program_needs_the_arm_box(page_factory, engine):
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "program")
-    page.locator('[data-overlay="greybox"]').click()
+    wb.pick(page, "greybox")
     page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
     expect(page.locator('[data-testid="reason-program"]')).to_contain_text("not armed")
     page.locator('[data-action="program"]').click(force=True)
@@ -294,7 +309,7 @@ def test_console_output_appears_and_send_works(page_factory, engine, screenshots
     # david (L3): attach with screen, never the CLI line; that row is gone.
     # (Q1: this checked a data-testid the page no longer has anywhere, so it could not
     # fail. The removed row read "harness-manager console <address> <name>".)
-    section_text = page.locator('[data-testid="section-consoles"]').inner_text()
+    section_text = nav.panel(page, "consoles").inner_text()
     assert "rc 0" in section_text and "harness-manager console" not in section_text
     page.screenshot(path=str(screenshots / "light-consoles-live.png"))
 
@@ -333,21 +348,22 @@ def test_debug_detect_up_and_down(page_factory, engine, screenshots):
     page = page_factory()
     open_board(page, BOARD_USB)
     section(page, "debug")
-    down = page.locator('[data-action="down"]')
-    assert down.get_attribute("aria-disabled") == "true"
-    assert "the session is down" in page.locator('[data-testid="reason-down"]').inner_text()
+    # UI v2 (round 3): Close session shows only while a session is up; its reason stays (for
+    # screen readers) and says why
+    expect(page.locator('[data-action="down"]')).to_have_count(0)
+    expect(page.locator('[data-testid="reason-down"]')).to_have_text("the session is down")
     page.locator('[data-action="detect"]').click()
     page.wait_for_selector('[data-testid="idcode"]:has-text("0x6ba00477")', timeout=T)
     page.locator('[data-action="up"]').click()
     page.wait_for_selector('[data-testid="debug-state"]:has-text("up")', timeout=T)
     page.wait_for_selector('[data-port="gdb"]:has-text("127.0.0.1:3343")', timeout=T)
-    ports = page.locator('[data-testid="debug-ports"]').inner_text()
+    ports = page.locator('[data-testid="debug-ports"]').text_content()
     assert gdb_command(3343) in ports                    # FIX-PACK-5: the CLI's own line
-    expect(page.locator('[data-action="up"]')).to_have_attribute("aria-disabled", "true")
+    expect(page.locator('[data-action="up"]')).to_have_count(0)      # round 3: Close replaces it
     page.screenshot(path=str(screenshots / "light-debug-up.png"))
     page.locator('[data-action="down"]').click()
     page.wait_for_selector('[data-testid="debug-state"]:has-text("down")', timeout=T)
-    expect(page.locator('[data-port="gdb"]')).to_have_text("-")
+    expect(page.locator('[data-port="gdb"]')).to_have_count(0)            # no gdb line while down
     assert [n for n, _ in engine.calls if n.startswith("debug.")].count("debug.up") == 1
 
 
@@ -382,8 +398,10 @@ def test_the_sd_recovery_panel_shows_first_when_an_install_was_interrupted(page_
     page = page_factory()
     open_board(page, BOARD_USB)
     page.wait_for_selector('[data-testid="sd-recovery"]', timeout=T)
-    assert page.locator('[data-section="sd"]').get_attribute("aria-selected") == "true"
-    first = page.locator('[data-testid="section-sd"] .card').first
+    # UI v2: 0.1.0's SD card tab is Board > Versions; the recovery is its first card
+    assert page.locator('[data-section="board"]').get_attribute("aria-selected") == "true"
+    assert page.locator('[data-board-page="versions"]').get_attribute("aria-current") == "page"
+    first = nav.panel(page, "sd").locator(".card").first
     assert first.get_attribute("data-testid") == "sd-recovery"
     assert "images.txt" in page.locator('[data-testid="sd-journal"]').inner_text()
     assert page.locator('[data-testid="sd-banner"]').is_visible()
@@ -491,15 +509,18 @@ def test_a_slow_engine_call_leaves_the_page_usable(page_factory, engine):
 
 
 def test_help_shows_the_cli_help_tabs_and_escape_closes_it(page_factory, screenshots):
+    # UI v2 (round 3, M8): Help is organised by the app's pages; the CLI's topics, its own
+    # text (GET /help/tabs), are listed whole under "Command line"
     from harness_manager.cli.helptext import tabs
 
     page = page_factory()
     page.wait_for_selector(".board-item", timeout=T)
     page.locator('[data-action="help"]').click()
-    nav = page.locator('[data-testid="help"] .modal-nav button')
+    nav = page.locator('[data-testid="help"] .modal-nav button[data-help^="cli:"]')
     expect(nav).to_have_count(len(tabs()))
     first_name, first_text = tabs()[0]
     expect(nav.first).to_have_text(first_name)
+    nav.first.click()
     assert first_text.strip().splitlines()[0] in page.locator(".modal-text").inner_text()
     page.screenshot(path=str(screenshots / "light-help.png"))
     page.keyboard.press("Escape")
@@ -533,11 +554,11 @@ def test_every_section_fits_1280x800_without_horizontal_scroll(page_factory, eng
     page.screenshot(path=str(screenshots / f"{scheme}-preview-held.png"))
     open_board(page, BOARD_USB)
     bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
-    assert (bg == "rgb(15, 18, 22)") == (scheme == "dark"), bg
+    assert (bg == "rgb(14, 17, 21)") == (scheme == "dark"), bg          # UI v2 round 3: #0e1115
     for key in SECTIONS:
         section(page, key)
         if key == "program":
-            page.locator('[data-overlay="nanosoc_multicore"]').click()
+            wb.pick(page, "nanosoc_multicore")
             page.wait_for_selector('[data-testid="preflight-summary"]', timeout=T)
         if key == "consoles":
             page.wait_for_selector('[data-testid="console-state"]:has-text("up")', timeout=T)
@@ -547,6 +568,7 @@ def test_every_section_fits_1280x800_without_horizontal_scroll(page_factory, eng
         assert horizontal_overflow(page) == [], key
         no_missing_icons(page)
         page.screenshot(path=str(screenshots / f"{scheme}-{key}.png"))
+    nav.close_activity(page)                  # the drawer's backdrop covers the rail
     rail(page, BOARD_FIELDED).click()
     open_board(page, BOARD_FIELDED)
     section(page, "power")
@@ -570,7 +592,7 @@ def test_the_theme_toggle_overrides_the_system_and_is_remembered(page_factory):
     page.wait_for_selector(".board-item", timeout=T)
     page.locator('.rail .seg button:has-text("Dark")').click()
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(15, 18, 22)"
+    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(14, 17, 21)"   # round 3
     page.reload()
     page.wait_for_selector(".board-item", timeout=T)
     assert page.evaluate("document.documentElement.dataset.theme") == "dark"

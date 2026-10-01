@@ -15,6 +15,7 @@ import time
 import pytest
 
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -39,11 +40,15 @@ def open_board(page, board_id=BOARD):
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
     page.wait_for_selector('[data-testid="lease-chip"]', timeout=T)
+    # UI v2: a board opens on Settings' "Open a board on" (the Workbench); these tests read the
+    # Overview's lease lines first
+    if page.locator('[data-testid="section-overview"]').count() == 0:
+        nav.tab(page, "overview")
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def reqs(daemon):
@@ -103,7 +108,6 @@ def test_request_board_replaces_queue_for_it_and_its_form_can_be_cancelled(page_
     hub = page.locator('[data-testid="fact-hub"]')
     expect(hub.locator('[data-action="lease_request_open"]')).to_have_text("Request board")
     assert hub.locator('[data-action="lease_acquire"]').count() == 0     # no "Queue for it"
-    expect(page.locator('[data-attention="lease"]')).to_contain_text("Fix: request it")
     # the twin: Cancel (and Escape) send nothing, and focus goes back to the button
     hub.locator('[data-action="lease_request_open"]').click()
     expect(page.locator("#lease-message")).to_be_focused()
@@ -325,8 +329,10 @@ def test_a_release_answer_gives_us_the_board(page_factory, daemon):
 
 def test_leave_queue_withdraws_the_request_and_frees_the_board(page_factory, daemon, engine):
     page, bar = requester(page_factory, daemon)
-    tile = page.locator('[data-testid="tile-board"]')
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text("your request is queued")
+    # UI v2: Reset DUT left the Overview (the Workbench's toolbar, Board > Recover)
+    section(page, "power")
+    tile = page.locator('[data-testid="board-page-recover"]')
+    expect(tile.locator('[data-testid="reason-reset_dut"]').first).to_contain_text("your request is queued")
     bar.locator('[data-action="lease_leave"]').click()
     expect(bar.locator('[data-testid="result-lease_leave"]')).to_contain_text(
         f"$ lease leave {ADDR}  (rc 0", timeout=T)
@@ -338,7 +344,7 @@ def test_leave_queue_withdraws_the_request_and_frees_the_board(page_factory, dae
     expect(page.locator('[data-testid="lease-queued"]')).to_have_count(0)      # no stale marker
     expect(page.locator('[data-testid="lease-requested"]')).to_have_count(0)
     # the board is free of the request job; the lease rule (FIX-PACK-4) now stops a reset
-    expect(tile.locator('[data-testid="reason-reset_dut"]')).to_contain_text(
+    expect(tile.locator('[data-testid="reason-reset_dut"]').first).to_contain_text(
         f"Reset DUT is for the lease holder only: {HOLDER}", timeout=T)
     assert reqs(daemon).outgoing == {}
     assert not engine.called("resets.reset")
@@ -361,12 +367,12 @@ def test_the_holder_prompt_appears_from_a_non_overview_section(page_factory, dae
     rid = reqs(daemon).incoming(BOARD, by="bob@lab-pc-02", message="demo at 3")
     prompt = page.locator(f'[data-testid="lease-wanted"][data-request="{rid}"]')
     expect(prompt).to_be_visible(timeout=T)
-    expect(page.locator('[data-testid="section-power"]')).to_be_visible()     # still on Power
+    expect(nav.panel(page, "power")).to_be_visible()     # still on Power (Board > Recover)
     expect(prompt.locator('[data-testid="wanted-title"]')).to_have_text(f"bob@lab-pc-02 wants {NAME}: “demo at 3”")
     expect(prompt.locator('[data-testid="wanted-countdown"]')).to_contain_text(re.compile(r"[12]:[0-5]\d"))
     for m in (5, 15, 30, 60):
         expect(prompt.locator(f'[data-action="respond_keep_{m}"]')).to_have_text(f"{m} min")
-    # and from the Activity section too
+    # and with the Activity drawer open too
     section(page, "activity")
     expect(prompt).to_be_visible()
 

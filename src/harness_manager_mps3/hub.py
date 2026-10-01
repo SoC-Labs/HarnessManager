@@ -481,7 +481,8 @@ _DROPPED = re.compile(r"connection reset by peer|closed by remote host|broken pi
 #: Hub commands that only read (``fpgahub`` verb words), safe to run twice.
 _READ_ONLY_FPGAHUB = (("lease", "show"), ("whoami",), ("board", "list"),
                       ("board", "lease", "show"), ("target", "show"),
-                      ("target", "lease-history"), ("share", "list"))
+                      ("target", "lease-history"), ("share", "list"),
+                      ("status",))                     # ui2 api-hub (G3): the hub overview
 #: The note script's read ops (``NOTE_SCRIPT``: ``list`` prunes notes past their age, which
 #: is the same whether it runs once or twice).
 _READ_ONLY_NOTE_OPS = ("list", "get")
@@ -1055,6 +1056,8 @@ HISTORY_MAX = 500                    # fpgahub's tail buffer (lease_journal.DEFA
 REASON_MAX = 512
 ANSWERS = ("release", "keep")
 MAX_KEEP_MINUTES = 24 * 60
+#: ui2 api-hub (G11): the longest "how long I want it" a request note carries (a day)
+WANT_MAX_S = 24 * 3600
 ADMIN_REVOKED = "lease.admin_revoked"
 #: How far apart fpgahub's ``lease.revoked`` and our revoke note may be and still be one revoke.
 REVOKE_MATCH_S = 300.0
@@ -1161,6 +1164,10 @@ class QueueEntry:
     position: int
     holder: str        # principal, "david@mapstone-dev"
     user: str
+    # --- ui2 api-hub (G11, additive) ---
+    #: fpgahub's lease tier: "interactive" (people; ``lease show`` lists only these) or
+    #: "background" (automation, which waits behind every interactive request).
+    tier: str = "interactive"
 
 
 @dataclass(frozen=True)
@@ -1172,6 +1179,14 @@ class LeaseStatus:
     user: str = ""
     expires_at: str = ""
     queue: tuple[QueueEntry, ...] = ()
+    # --- ui2 api-hub (G11, additive) ---
+    #: the background tier's waiters, head first (fpgahub ``background_queue``), and whether
+    #: this read could see them at all (``lease show`` over SSH lists the interactive queue
+    #: only: ``background_known`` False, and ``LeaseService`` reads them separately).
+    background_queue: tuple[QueueEntry, ...] = ()
+    background_known: bool = False
+    #: the holder's tier ("" when this read does not say)
+    tier: str = ""
 
     @property
     def head(self) -> QueueEntry | None:
@@ -1190,6 +1205,10 @@ class RequestNote:
     message: str
     created_at: str
     deadline_at: str
+    # --- ui2 api-hub (G11, additive): how long the requester wants the board, in seconds (0:
+    # not said). Written only when set, and optional when read, so notes stay readable both
+    # ways between Harness Manager versions (a reader ignores keys it does not know).
+    want_s: int = 0
 
 
 @dataclass(frozen=True)
@@ -1425,7 +1444,15 @@ def encode_request(note: RequestNote) -> str:
     _note_text(note.message, "the request's message", multiline=True)
     _note_time(note.created_at, "created_at")
     _note_time(note.deadline_at, "deadline_at")
-    return _encode_note(asdict(note))
+    body = asdict(note)
+    # ui2 api-hub (G11): ``want_s`` only when set, so a note without it is byte-identical to
+    # the frozen format; 0..86400 whole seconds.
+    want = body.pop("want_s", 0)
+    if isinstance(want, bool) or not isinstance(want, int) or not 0 <= want <= WANT_MAX_S:
+        raise UsageError(f"want_s must be whole seconds 0..{WANT_MAX_S}, not {want!r:.40}")
+    if want:
+        body["want_s"] = want
+    return _encode_note(body)
 
 
 def _check_answer(answer: Any, minutes: Any) -> None:
@@ -1450,7 +1477,9 @@ def decode_request(data: Any, name: str) -> RequestNote | None:
     try:
         if not isinstance(data, dict):
             raise UsageError("not a JSON object")
-        note = RequestNote(**{k: data[k] for k in RequestNote.__dataclass_fields__})
+        # ui2 api-hub (G11): ``want_s`` is optional (older notes have none)
+        note = RequestNote(**{k: data[k] if k != "want_s" else data.get(k, 0)
+                              for k in RequestNote.__dataclass_fields__})
         if name != f"req-{note.id}.json":
             raise UsageError(f"its id {note.id!r} does not match the file name")
         encode_request(note)
@@ -1760,6 +1789,42 @@ class HubClient:
         """``fpgahub lease show TARGET``: the holder and the interactive queue (one ssh call)."""
         return parse_lease_show(self._hub_out(["fpgahub", "lease", "show", self.target],
                                               "lease show"))
+
+    # --- ui2 api-hub ------------------------------------------------------------------------
+
+    def lease_overview(self) -> list[dict[str, Any]]:
+        """G3: every target's lease on this hub in ONE ssh call, ``fpgahub status --json`` (the
+        hub's ``/status``): rows as ``hub_rest.parse_overview`` gives them. The target this
+        client was made for does not matter."""
+        from harness_manager.transports import hub_rest
+
+        text = self._hub_out(["fpgahub", "status", "--json"], "status")
+        return hub_rest.parse_overview(_json_from(text, "fpgahub status --json"),
+                                       "fpgahub status --json")
+
+    def lease_queues(self) -> LeaseStatus:
+        """G11: the board's whole queue, both tiers, with the holder's tier: ``fpgahub board
+        lease show BOARD --json`` (``lease show TARGET`` prints the interactive queue only, and
+        no tier). fpgahub keeps one queue per physical board, so it is the target's too. A
+        ``LeaseStatus`` with ``background_known`` True."""
+        from harness_manager.transports import hub_rest
+
+        board = self.board_id()
+        text = self._hub_out(["fpgahub", "board", "lease", "show", board, "--json"],
+                             "board lease show")
+        data = _json_from(text, "fpgahub board lease show --json")
+        members = parse_board_lease(text)
+        if self.target not in members:
+            raise UnreachableError(f"fpgahub's board {board} has no member {self.target}",
+                                   hint="set hub.board in boards.toml to the board that owns it")
+        cur = members[self.target]
+        return LeaseStatus(held=cur is not None, holder=str((cur or {}).get("holder") or ""),
+                           user=str((cur or {}).get("user") or ""),
+                           expires_at=str((cur or {}).get("expires_at") or ""),
+                           queue=hub_rest.queue_entries(data.get("queue"), "interactive"),
+                           **hub_rest.queue_extras(LeaseStatus, data.get("background_queue")
+                                                   if "background_queue" in data else None, cur))
+    # --- end ui2 api-hub ------------------------------------------------------------------
 
     def board_id(self) -> str:
         """The physical board that owns the target: ``hub.board`` in boards.toml, else the

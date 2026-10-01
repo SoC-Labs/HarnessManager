@@ -18,7 +18,7 @@ import tomllib
 
 from harness_manager.demo_showcase import BOARD_LEASED, BOARD_LINUX, BOARD_SPARE, BOARD_V011
 from tests.web.test_demo_all_browser import Showcase, T, by_id, make_showcase
-from tests.web.test_sidebar_browser import card, drag, rail_ids
+from tests.web.test_sidebar_browser import card, drag
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -62,7 +62,11 @@ def test_the_demo_keeps_its_order_and_favourites_in_its_own_settings(showcase):
     expect(page.locator(".rail-card")).to_have_count(4, timeout=T)
     page.locator(f'.rail-card[data-board="{BOARD_SPARE}"] [data-testid="rail-star"]').click()
     expect(page.locator('[data-testid="rail-group-fav"] .rail-card')).to_have_count(1, timeout=T)
-    rest = rail_ids(page)[1:]
+    # UI v2 (S13): the boards that are not favourites group by hub, then This network; a drag
+    # moves a board inside its own group
+    rest = page.eval_on_selector_all('[data-testid="rail-group-rest"] .rail-card',
+                                     "els => els.map(e => e.dataset.board)")
+    assert len(rest) == 2, rest
     drag(page, rest[-1], rest[0])
     expect(page.locator('[data-testid="rail-group-rest"] .rail-card').first).to_have_attribute(
         "data-board", rest[-1], timeout=T)
@@ -74,11 +78,11 @@ def test_the_demo_keeps_its_order_and_favourites_in_its_own_settings(showcase):
     want = [rest[-1], *rest[:-1]]
     for _ in range(50):
         data = tomllib.loads(own.read_text())
-        if [b for b in data["general"].get("board_order", []) if b != BOARD_SPARE] == want:
+        if [b for b in data["general"].get("board_order", []) if b in rest] == want:
             break
         page.wait_for_timeout(100)
     assert data["general"]["favourite_boards"] == [BOARD_SPARE]
-    assert [b for b in data["general"]["board_order"] if b != BOARD_SPARE] == want
+    assert [b for b in data["general"]["board_order"] if b in rest] == want
     assert set(data["general"]["board_order"]) == {BOARD_LINUX, BOARD_V011, BOARD_LEASED, BOARD_SPARE}
     # twin: the test's own "user" config dir (what ~/.config is outside a --demo service)
     # holds no sidebar settings
@@ -103,8 +107,11 @@ def test_review_the_sidebar(showcase, review, scheme):
     for bid in (BOARD_LINUX, BOARD_V011):
         page.locator(f'.rail-card[data-board="{bid}"] [data-testid="rail-star"]').click()
     expect(page.locator('[data-testid="rail-group-fav"] .rail-card')).to_have_count(2, timeout=T)
-    rest = page.eval_on_selector_all('[data-testid="rail-group-rest"] .rail-card',
-                                     "els => els.map(e => e.dataset.board)")
+    # UI v2 (S13): the hub boards are a group of their own; the drag is inside it
+    group = page.locator(f'.rail-card[data-board="{BOARD_LEASED}"]').get_attribute("data-group")
+    rest = page.eval_on_selector_all(".rail-card", f"els => els.filter(e => e.dataset.group === {group!r})"
+                                     ".map(e => e.dataset.board)")
+    assert len(rest) >= 2, rest
     src = card(page, rest[-1]).bounding_box()
     dst = card(page, rest[0]).bounding_box()
     page.mouse.move(src["x"] + 40, src["y"] + src["height"] / 2)
@@ -113,8 +120,9 @@ def test_review_the_sidebar(showcase, review, scheme):
     expect(page.locator(f'.rail-card.drop-before[data-board="{rest[0]}"]')).to_have_count(1, timeout=T)
     shoot(page, review, "drag", scheme)
     page.mouse.up()
-    expect(page.locator('[data-testid="rail-group-rest"] .rail-card').first).to_have_attribute(
-        "data-board", rest[-1], timeout=T)
+    page.wait_for_function("([g, b]) => [...document.querySelectorAll('.rail-card')]"
+                           ".filter((e) => e.dataset.group === g)[0].dataset.board === b",
+                           arg=[group, rest[-1]], timeout=T)
     page.mouse.move(700, 400)
     card(page, LAB).hover()
     shoot(page, review, "favourites", scheme)

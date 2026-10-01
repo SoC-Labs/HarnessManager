@@ -187,8 +187,10 @@ def test_api_bare_metal_claim_is_422_and_info_is_unchanged(tmp_path):
                        headers=H)
             B = bid_path(r.json()["board_id"])
             info = c.get(B, headers=H).json()
+            # UI v2 G4 (UI2-API-BUILD, CCR UI2-G4-1) adds the readings keys to every board read
             assert set(info) == {"ok", "candidate", "identity", "health", "capabilities",
-                                 "unavailable"}
+                                 "unavailable", "answer_ms", "uptime_s", "os_uptime_s",
+                                 "readings_at", "readings_source", "stats"}
             r = c.post(f"{B}/claim", json={"confirm": True}, headers=H)
             assert r.status_code == 422 and r.json()["error"]["name"] == "UNAVAILABLE"
             assert c.get(f"{B}/claim", headers=H).json()["claim"] is None

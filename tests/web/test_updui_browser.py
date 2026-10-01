@@ -21,6 +21,7 @@ import pytest
 
 from harness_manager.core.events import Event
 from harness_manager.demo import BOARD_FIELDED, BOARD_USB, FIELDED_FEATURES
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -43,15 +44,12 @@ def rail(page, bid):
 
 
 def open_board(page, bid=BOARD_USB):
-    rail(page, bid).click()
-    if page.locator('[data-action="open"]').count():
-        page.locator('[data-action="open"]').click()
-    page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.open_board(page, bid)                  # tests/web/nav.py (setui imports this one)
 
 
 def section(page, key):
-    page.locator(f'[data-section="{key}"]').click()
-    page.wait_for_selector(f'[data-testid="section-{key}"]', timeout=T)
+    """0.1.0's tab ``key`` where UI v2 put it (tests/web/nav.py)."""
+    nav.section(page, key)
 
 
 def by_id(page, name):
@@ -460,22 +458,6 @@ def test_negative_twin_without_a_policy_every_setting_is_the_users(page_factory,
 # --- the board's Update page: the app card points to Settings --------------------------------------
 
 
-@pytest.mark.week_plan("update_api", sim=True)
-def test_the_boards_update_page_points_the_app_update_to_settings(page_factory, daemon):
-    sim_of(daemon).staged = [NEW]
-    page = page_factory(**APP)
-    open_board(page)
-    section(page, "update")
-    card = by_id(page, "update-app")
-    expect(card).to_contain_text(f"{NEW} is ready: restart to update", timeout=T)
-    card.locator('[data-action="open-settings"]').click()
-    expect(by_id(page, "update-settings")).to_be_visible(timeout=T)
-    assert card.locator('[data-action="update_app"]').count() == 0   # no in-page switch any more
-
-
-# --- harness versions ------------------------------------------------------------------------------------
-
-
 @pytest.mark.week_plan("harness_api", sim=True)
 def test_the_harness_list_gives_each_release_a_verdict_with_its_reason(page_factory, daemon):
     harness_sim(daemon).withdrawn = {"1.1.0"}
@@ -538,13 +520,15 @@ def test_negative_twin_the_exact_phrase_installs_and_the_running_mark_moves(page
 
 @pytest.mark.week_plan("harness_api", sim=True)
 def test_an_install_without_the_hub_lease_is_refused_naming_the_holder(page_factory, daemon):
+    # UI v2 (R3): Install is a drive button: the page refuses it for a watcher, naming the
+    # holder, and nothing reaches the service (which would say 409 HELD too).
     sim_of(daemon).behind_hub(BOARD_USB, lease="other")
     page, card = harness_page(page_factory)
     expect(by_id(page, "harness-lease").first).to_contain_text("alice@lab-pc-07")
-    panel = install_rekey(page, card)
-    result = panel.locator('[data-testid="harness-result"]')
-    expect(result).to_contain_text("HELD", timeout=T)
-    expect(result).to_contain_text("holder: alice@lab-pc-07")
+    panel = install_rekey(page, card, force=True)
+    expect(panel.locator('[data-testid="reason-harness_install"]')).to_contain_text(
+        "Install is for the lease holder only: alice@lab-pc-07 holds this board", timeout=T)
+    expect(panel.locator('[data-testid="harness-result"]')).to_contain_text("Nothing was run.")
     assert harness_sim(daemon).running == {}
 
 
@@ -577,7 +561,7 @@ def test_pin_moves_the_offer_and_unpin_puts_it_back(page_factory, daemon):
 def test_negative_twin_with_no_install_there_is_no_history_and_nothing_to_roll_back_to(
         page_factory, daemon):
     page, card = harness_page(page_factory)
-    back = card.locator('[data-action="harness-rollback"]')
+    back = page.locator('[data-action="harness-rollback"]')      # UI v2: the board's side of Versions
     expect(back).to_have_attribute("aria-disabled", "true")
     expect(by_id(page, "rollback-why")).to_contain_text("nothing to roll back to")
     back.click(force=True)
@@ -594,7 +578,7 @@ def test_history_then_rollback_to_the_previous_release(page_factory, daemon):
     card.locator('[data-action="harness-history"]').click()
     expect(by_id(page, "harness-history").locator('tr[data-version="1.1.1"]')).to_contain_text(
         "1.0.0", timeout=T)
-    back = card.locator('[data-action="harness-rollback"]')
+    back = page.locator('[data-action="harness-rollback"]')      # UI v2: the board's side of Versions
     expect(back).to_contain_text("Roll back to 1.0.0", timeout=T)
     back.click()
     panel = by_id(page, "harness-rollback")
@@ -620,7 +604,8 @@ def test_the_debug_tile_shows_the_xvc_session_in_one_line(page_factory, daemon, 
     expect(line).to_contain_text("closed")
     daemon.app.state.xvc.open(BOARD_FIELDED, byo=False)       # the Debug section opened it
     expect(line).to_have_attribute("data-state", "ready", timeout=T)
-    expect(line).to_contain_text("localhost:")
+    expect(line).to_contain_text(re.compile(r"XVC :\d+"))                # UI v2: the ILAs chip
+    expect(line).to_have_attribute("title", re.compile("localhost:"))
     daemon.app.state.xvc.attach(BOARD_FIELDED)
     expect(line).to_have_attribute("data-state", "attached", timeout=T)
     expect(line).to_contain_text("attached")
@@ -632,5 +617,5 @@ def test_negative_twin_a_harness_without_xvc_says_why_on_the_tile(page_factory, 
     open_board(page, BOARD_USB)                                # v0.8 firmware: no xvc_dbgbr
     line = by_id(page, "tile-xvc")
     expect(line).to_have_attribute("data-state", "unsupported", timeout=T)
-    expect(line).to_contain_text("not on this board: needs harness firmware with 'xvc_dbgbr'")
-    assert line.locator('[data-testid="tile-xvc-state"]').count() == 0
+    expect(line).to_have_attribute("title", re.compile(r"^not on this board: needs harness firmware with 'xvc_dbgbr'"))
+    expect(line).to_have_text("none here")

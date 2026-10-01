@@ -25,7 +25,7 @@ from typing import Any
 
 from fastapi import Query
 
-from harness_manager.core.errors import HarnessError, UsageError
+from harness_manager.core.errors import AbsentError, HarnessError, UnavailableError, UsageError
 from harness_manager.core.events import Event
 from harness_manager.settings import hubs, hubtest, ops
 from harness_manager.settings.schema import join_key
@@ -99,6 +99,29 @@ def register(ctx: RouteContext) -> None:
     @api.get("/hubs")
     def get_hubs() -> Any:
         return _JSON(ok(**hubs_view(sctx.resolver())))
+
+    # --- ui2 api-hub (G3): every target's lease on one hub, in one read -----------------------
+
+    @api.get("/hubs/{name}/leases")
+    def hub_leases(name: str, refresh: str = Query("")) -> Any:
+        """The lease of every target on hub ``name`` (a hub's name, or its host, as ``GET
+        /boards`` rows' ``hub.name`` gives it), in ONE hub read shared by every board on it
+        (``LeaseService.hub_overview``, reused 20 s; ``refresh=1`` reads again). Seeds each
+        listed board's ``lease_known``. Never touches a board."""
+        leases, hubs = getattr(d, "leases", None), getattr(d, "board_hubs", None)
+        if leases is None or hubs is None:
+            raise UnavailableError("lease", "this service has no lease service")
+        from .hub_boards import boards_of
+
+        adapter, by_target = boards_of(d, name)
+        if adapter is None:
+            raise AbsentError(f"no board this service lists is behind a hub named {name!r}",
+                              hint="GET /boards: each row's hub.name; add a board with "
+                                   "POST /hubs/{name}/boards")
+        out = leases.hub_overview(name, adapter, boards=by_target,
+                                  refresh=refresh.strip().lower() in _TRUE)
+        return _JSON(ok(**out))
+    # --- end ui2 api-hub ---
 
     @api.post("/hubs/adopt")
     def adopt(body: JsonBody = None) -> Any:
