@@ -109,8 +109,11 @@ def test_the_consoles_card_opens_a_console_on_the_workbench(page_factory, daemon
     page = page_factory(**APP)
     open_board(page, BOARD_USB)
     card = page.locator('[data-testid="tile-consoles"]')
+    # UI v2 SHELL-2: the board opened on the Workbench, whose console card opened uart0: the row
+    # reads that session (its last line), not "not open in this page"
     row = card.locator('li[data-console="uart0"]')
-    expect(row).to_contain_text("not open in this page", timeout=T)            # the twin first
+    expect(row).to_have_attribute("title", re.compile(r"last line: "), timeout=T)
+    expect(row).not_to_contain_text("not open in this page", timeout=T)
     row.locator(".ov-con-name").click()
     page.wait_for_selector('[data-testid="console-uart0"]', timeout=T)       # that console, picked
     expect(page.locator('[data-testid="section-workbench"]')).to_be_visible()

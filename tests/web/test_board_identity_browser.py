@@ -28,7 +28,20 @@ def open_board(page):
         page.locator('[data-action="open"]').click()
     nav.land(page, "board")                       # UI v2: a board opens on the Workbench
     nav.board_page(page, "access")                # UI v2: the Overview's Board tile is gone
-    page.wait_for_selector('[data-testid="tile-identity"]', timeout=T)
+    page.wait_for_selector(f'{CARD} [data-status]', timeout=T)
+
+
+# UI v2 (BOARD): the identity is Board > Access's card (label, IP, MAC as rows); Fix identity…
+# opens the same dialog in a modal
+CARD = '[data-testid="access-identity"]'
+ROW = f'{CARD} [data-status]'
+WARN = '[data-testid="access-identity-warning"]'
+FIX = '[data-action="access-identity-fix"]'
+
+
+def expect_identity(row, label, ip, mac):
+    for text in (label, ip, mac):
+        expect(row).to_contain_text(text, timeout=T)
 
 
 def test_a_clash_warns_on_the_tile_and_the_dialog_fixes_it_with_the_typed_phrase(page_factory,
@@ -37,14 +50,14 @@ def test_a_clash_warns_on_the_tile_and_the_dialog_fixes_it_with_the_typed_phrase
     sim.board2_as_board1(BOARD_FIELDED)
     page = page_factory()
     open_board(page)
-    row = page.locator('[data-testid="tile-identity"]')
+    row = page.locator(ROW)
     expect(row).to_have_attribute("data-status", "clash", timeout=T)
-    expect(row).to_contain_text("MPS3-01 · 192.168.10.101/24 · 02:00:00:4d:50:53")
-    warn = page.locator('[data-testid="tile-identity-warning"]')
+    expect_identity(row, "MPS3-01", "192.168.10.101/24", "02:00:00:4d:50:53")
+    warn = page.locator(WARN)
     expect(warn).to_contain_text("Identity clash:")
     expect(warn).to_contain_text("the same MAC as mps3-01")
     assert "err" in warn.get_attribute("class")
-    page.locator('[data-action="identity-fix"]').click()
+    page.locator(FIX).click()
     dialog = page.locator('[data-testid="identity-dialog"]')
     expect(dialog).to_contain_text("mps3_02_pl")
     changes = page.locator('[data-testid="identity-changes"] li')
@@ -63,8 +76,9 @@ def test_a_clash_warns_on_the_tile_and_the_dialog_fixes_it_with_the_typed_phrase
     expect(confirm).to_be_enabled()
     confirm.click()
     expect(row).to_have_attribute("data-status", "ok", timeout=T)
-    expect(page.locator('[data-testid="tile-identity-warning"]')).to_have_count(0)
-    expect(page.locator('[data-action="identity-fix"]')).to_have_count(0)
+    expect(page.locator(WARN)).to_have_count(0)
+    expect(page.locator(FIX)).to_have_count(0)
+    expect(page.locator('[data-testid="identity-dialog"]')).to_have_count(0)      # the modal closed
     assert sim.posts == [{"confirm": "MPS3-02", "from_hub": True}]
     assert not page.errors, page.errors
 
@@ -73,11 +87,11 @@ def test_twin_a_board_matching_its_hub_entry_has_no_warning_and_no_button(page_f
     daemon.app.state.identity.matching(BOARD_FIELDED)
     page = page_factory()
     open_board(page)
-    row = page.locator('[data-testid="tile-identity"]')
+    row = page.locator(ROW)
     expect(row).to_have_attribute("data-status", "ok", timeout=T)
-    expect(row).to_contain_text("MPS3-02 · 192.168.11.101/24 · 02:00:00:00:02:fe")
-    expect(page.locator('[data-testid="tile-identity-warning"]')).to_have_count(0)
-    expect(page.locator('[data-action="identity-fix"]')).to_have_count(0)
+    expect_identity(row, "MPS3-02", "192.168.11.101/24", "02:00:00:00:02:fe")
+    expect(page.locator(WARN)).to_have_count(0)
+    expect(page.locator(FIX)).to_have_count(0)
     assert not page.errors, page.errors
 
 
@@ -89,7 +103,7 @@ def test_twin_a_netbooted_board_shows_the_refusal_and_nothing_to_press(page_fact
         "hint": "re-bake stage0 for this board"})
     page = page_factory()
     open_board(page)
-    page.locator('[data-action="identity-fix"]').click()
+    page.locator(FIX).click()
     ref = page.locator('[data-testid="identity-refusal"]')
     expect(ref).to_contain_text("stage0 bake", timeout=T)
     expect(ref).to_contain_text("re-bake stage0")
@@ -108,9 +122,9 @@ def test_v7_board2s_default_label_says_identity_not_set_not_a_clash(page_factory
     daemon.app.state.identity.board2_tonight(BOARD_FIELDED, board1_mac="02:00:00:00:01:fe")
     page = page_factory()
     open_board(page)
-    row = page.locator('[data-testid="tile-identity"]')
+    row = page.locator(ROW)
     expect(row).to_have_attribute("data-status", "unset", timeout=T)
-    warn = page.locator('[data-testid="tile-identity-warning"]')
+    warn = page.locator(WARN)
     expect(warn).to_contain_text("Identity not set (default label, MAC)")
     assert "identity not set: identity not set" not in warn.inner_text().lower()
     assert "clash" not in warn.inner_text().lower()
@@ -121,9 +135,9 @@ def test_v7_twin_board2_sharing_board1s_old_mac_is_a_mac_clash_only(page_factory
     daemon.app.state.identity.board2_tonight(BOARD_FIELDED)          # board 1: the same old MAC
     page = page_factory()
     open_board(page)
-    row = page.locator('[data-testid="tile-identity"]')
+    row = page.locator(ROW)
     expect(row).to_have_attribute("data-status", "clash", timeout=T)
-    warn = page.locator('[data-testid="tile-identity-warning"]')
+    warn = page.locator(WARN)
     expect(warn).to_contain_text("Identity clash: this board reports the same MAC as mps3-01")
     assert "same label" not in warn.inner_text()
     assert not page.errors, page.errors

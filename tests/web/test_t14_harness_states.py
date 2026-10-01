@@ -110,7 +110,7 @@ def test_linux_harness_shows_linux_its_ssh_link_and_the_shell_console(stage, tmp
     with VirtualMps3(tmp_path, LINUX_HARNESSD) as vb:
         page, _, _ = stage(vb, vb.candidate(ssh=True))
         expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("linux")
-        expect(page.locator('[data-testid="id-harness"]')).to_contain_text("linux")
+        expect(page.locator('[data-testid="about-harness"]')).to_contain_text("linux")   # Board > About
         assert page.locator('[data-testid="identity-card"] [data-link="ssh"]').count() == 1
         assert page.locator('.cap[data-capability="console_shell"]').count() == 1
         shoot(page, screenshots, "linux")

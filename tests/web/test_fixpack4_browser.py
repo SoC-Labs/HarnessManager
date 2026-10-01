@@ -272,9 +272,13 @@ def test_on_a_board_someone_else_leases_program_and_friends_are_off_and_not_prim
 def test_negative_twin_the_lease_holder_gets_the_primary_buttons(page_factory, daemon):
     page = hub_board_page(page_factory, daemon, "mine")
     section(page, "power")
-    expect(by_id(page, "reboot-card").locator('[data-action="reboot"]')).to_be_visible(timeout=T)
-    expect(by_id(page, "reboot-card").locator('[data-testid="reason-reboot"]')).not_to_contain_text("lease holder")
-    assert "danger" in classes(page, "reboot", '[data-testid="reboot-card"]')
+    card = by_id(page, "reboot-card")
+    expect(card.locator('[data-action="reboot"]')).to_be_visible(timeout=T)
+    expect(card.locator('[data-testid="reason-reboot"]')).not_to_contain_text("lease holder")
+    # UI v2 (BOARD, round 3): the Recover ladder's buttons share one style; the holder's Reboot
+    # goes live once armed (the watcher's stays off, armed or not: the twin above)
+    card.locator('[data-testid="arm-reboot"] input').check()
+    expect(card.locator('[data-action="reboot"]')).not_to_have_attribute("aria-disabled", "true")
     section(page, "program")
     expect(page.locator('[data-action="program"]')).to_be_visible(timeout=T)
     assert "primary" in classes(page, "program")

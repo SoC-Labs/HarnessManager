@@ -288,7 +288,7 @@ def test_a_watcher_cannot_drive_anything_on_the_workbench(showcase):  # noqa: F8
 def test_negative_twin_the_lease_holder_drives_the_workbench(showcase):  # noqa: F811
     page = showcase.page(**APP)
     nav.open_board(page, BOARD_SPARE)
-    page.locator('[data-attention="lease"] [data-action="lease_acquire"]').click()
+    page.locator('[data-testid="fact-hub"] [data-action="lease_acquire"]').click()   # round 3: the header
     expect(nav.rail(page, BOARD_SPARE).locator('[data-testid="rail-lease-badge"]')).to_have_text("Yours", timeout=T)
     nav.tab(page, "workbench")
     wb.pick(page, "led", wait=True)

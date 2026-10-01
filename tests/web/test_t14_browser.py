@@ -133,12 +133,13 @@ def test_selecting_a_board_renders_identity_with_unchecked_as_a_warning(page_fac
     assert preview.get_attribute("data-level") == "unk" and "Unchecked" in preview.inner_text()
     open_board(page, BOARD_FIELDED)
     open_details(page)
-    assert page.locator('[data-testid="id-shell"]').inner_text() == "0x3f1a560f"
-    for testid in ("build-chip", "id-build"):
+    # UI v2 (BOARD): Board > About's identity rows; the header's build chip says "not a pass"
+    expect(page.locator('[data-testid="about-shell"]')).to_have_text("0x3f1a560f", timeout=T)
+    for testid in ("build-chip", "about-build"):
         chip = page.locator(f'[data-testid="{testid}"]')
         assert chip.get_attribute("data-level") == "unk", testid
         assert "Unchecked" in chip.inner_text()
-    assert "not a pass" in page.locator('[data-testid="id-build-note"]').inner_text()
+        assert "NOT a pass" in (chip.get_attribute("title") or ""), testid
     # LEASE-UI: the board lock says "Open" ("Yours" is the hub lease's word now); UI v2: on
     # the rail's card, not the header
     assert "Open" in rail(page, BOARD_FIELDED).locator('[data-testid="rail-open"]').inner_text()

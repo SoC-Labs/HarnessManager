@@ -40,20 +40,20 @@ def open_board(page):
         page.locator('[data-action="open"]').click()
     nav.land(page, "board")                       # UI v2: a board opens on the Workbench
     nav.board_page(page, "access")                # UI v2: the Overview's Board tile is gone
-    page.wait_for_selector('[data-testid="tile-claim"]', timeout=T)
+    page.wait_for_selector('[data-testid="access-claim"]', timeout=T)    # UI v2: Board > Access's card
 
 
 def test_a_key_changed_back_to_one_seen_before_is_a_plain_warning(page_factory, daemon):
     changed_key(daemon, seen_before="2026-09-24T09:30:00Z")
     page = page_factory()
     open_board(page)
-    line = page.locator('[data-testid="tile-claim-hostkey"]')
+    line = page.locator('[data-testid="claim-hostkey"]')
     expect(line).to_contain_text("Host key changed back to one seen on 2026-09-24", timeout=T)
     expect(line).to_contain_text("/persist (the user microSD) mounting or not")
     expect(line).to_contain_text("board claim --adopt, if you trust it")
     expect(line).to_contain_text(CARD)
     assert "warn" in line.get_attribute("class") and "err" not in line.get_attribute("class")
-    expect(page.locator('[data-action="claim"]')).to_have_count(0)     # nothing accepts it
+    expect(page.locator('[data-action="access-claim"]')).to_have_count(0)     # nothing accepts it
     assert not page.errors, page.errors
 
 
@@ -61,10 +61,10 @@ def test_negative_twin_a_key_never_seen_keeps_the_loud_error(page_factory, daemo
     changed_key(daemon, seen_before=None)
     page = page_factory()
     open_board(page)
-    line = page.locator('[data-testid="tile-claim-hostkey"]')
+    line = page.locator('[data-testid="claim-hostkey"]')
     expect(line).to_have_text(f"Host key changed: pinned {PINNED}, the board reports {CARD}. "
                               "SSH is refused.", timeout=T)
     assert "err" in line.get_attribute("class")
     expect(line).not_to_contain_text("changed back")
-    expect(page.locator('[data-action="claim"]')).to_have_count(0)
+    expect(page.locator('[data-action="access-claim"]')).to_have_count(0)
     assert not page.errors, page.errors
