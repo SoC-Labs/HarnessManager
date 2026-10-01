@@ -154,6 +154,28 @@ def test_twin_a_real_release_is_never_built_on_a_test_channel(tmp_path, lx):
     assert [r["version"] for r in channel(out)["harness"]["releases"]] == [V]
 
 
+def test_the_sd_tree_keeps_the_templates_bytes_crlf_included(tmp_path, lx):
+    """assemble_sd.sh copies with cp and sed: byte for byte. (Checked by hand against the
+    platform's script on the RC2 templates, 1 Oct: identical.)"""
+    from tools.release.assemble import stamp_sd_tree
+
+    board = (lx.templates / "board.txt").read_bytes().replace(b"\n", b"\r\n")
+    (lx.templates / "board.txt").write_bytes(board)
+    files = stamp_sd_tree(lx.templates, lx.bit, tmp_path / "sd", revs=("A", "C"))
+    for rev in ("A", "C"):
+        got = (tmp_path / "sd" / "MB" / f"HBI0309{rev}" / "board.txt").read_bytes()
+        assert got == board.replace(b"@BOARD@", f"HBI0309{rev}".encode())
+    assert "MB/HBI0309A/Nanosoc/nanosoc.bit" in files and len(files) == 9
+
+
+def test_twin_a_template_naming_a_path_as_f0file_is_refused(tmp_path, lx):
+    from tools.release.assemble import stamp_sd_tree
+
+    (lx.templates / "nanosoc.txt").write_text("F0FILE: ..\\..\\config.txt\n")
+    with pytest.raises(ReleaseError, match="F0FILE"):
+        stamp_sd_tree(lx.templates, lx.bit, tmp_path / "sd")
+
+
 # --- the stage0 re-bake, the overlays, the notes --------------------------------------------------
 
 

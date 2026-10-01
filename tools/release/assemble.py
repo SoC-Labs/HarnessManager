@@ -134,9 +134,10 @@ def stamp_sd_tree(templates: Path, bit: Path, dest: Path, *, revs: tuple[str, ..
     for name in TEMPLATES:
         _need_file(templates / name, f"the SD template {name}",
                    hint="point --sd-templates at the platform's fpga/mps3_sd/templates")
-    board_tpl = (templates / "board.txt").read_text(encoding="utf-8")
+    board_tpl = (templates / "board.txt").read_bytes()     # bytes: keep CRLF/LF as they are
     note_tpl = (templates / "nanosoc.txt").read_bytes()
-    appfile = _cfg_value(board_tpl, "APPFILE", DEFAULT_APPFILE).replace("\\", "/")
+    appfile = _cfg_value(board_tpl.decode("utf-8", "replace"), "APPFILE",
+                         DEFAULT_APPFILE).replace("\\", "/")
     app_dir, _, note_name = appfile.rpartition("/")
     f0 = _cfg_value(note_tpl.decode("utf-8", "replace"), "F0FILE", DEFAULT_F0FILE)
     if "/" in f0 or "\\" in f0 or not f0.lower().endswith(".bit"):
@@ -146,8 +147,7 @@ def stamp_sd_tree(templates: Path, bit: Path, dest: Path, *, revs: tuple[str, ..
     for rev in revs:
         mb = dest / "MB" / f"HBI0309{rev}"
         mb.mkdir(parents=True, exist_ok=True)
-        (mb / "board.txt").write_text(board_tpl.replace("@BOARD@", f"HBI0309{rev}"),
-                                      encoding="utf-8")
+        (mb / "board.txt").write_bytes(board_tpl.replace(b"@BOARD@", f"HBI0309{rev}".encode()))
         out[f"MB/HBI0309{rev}/board.txt"] = (mb / "board.txt").stat().st_size
         app = mb / app_dir if app_dir else mb
         rel_app = f"MB/HBI0309{rev}/{app_dir + '/' if app_dir else ''}"
