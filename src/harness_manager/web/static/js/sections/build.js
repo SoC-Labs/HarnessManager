@@ -1107,7 +1107,7 @@ function Constraints({ bid, f, locked, edit }) {
         <div class="bd-may">
           <div class="bd-may-c ok"><div class="bd-may-t"><${Icon} name="check" />May</div><ul>
             <li title="set_false_path, set_max_delay, set_min_delay, set_multicycle_path, set_clock_groups, create_generated_clock, set_case_analysis, set_disable_timing, set_bus_skew, set_max_skew, group_path">timing inside the RM: false and multicycle paths, max delay, clock groups</li>
-            <li>placement inside the partition: <span class="mono">create_pblock</span>, <span class="mono">resize_pblock</span>, <span class="mono">add_cells_to_pblock</span> (nested pblocks: untested)</li>
+            <li>placement inside the partition: <span class="mono">create_pblock</span>, <span class="mono">resize_pblock</span>, <span class="mono">add_cells_to_pblock</span>: nested pblocks, children of <span class="mono">${pbName}</span> (proven on Vivado 2026.1)</li>
             <li>cell properties: <span class="mono">set_property</span> ASYNC_REG, DONT_TOUCH…</li></ul></div>
           <div class="bd-may-c no"><div class="bd-may-t"><${Icon} name="x" />May not</div><ul>
             <li>pins or pads (PACKAGE_PIN, IOSTANDARD): the RM sees only the ${(g.profile || {}).boundary_ports || 47}-port / ${(g.profile || {}).boundary_bits || 148}-bit boundary</li>
@@ -1116,7 +1116,7 @@ function Constraints({ bid, f, locked, edit }) {
         </div>
         <div class="bd-cf-draw"><${Icon} name="layers" /><span>Rather draw a nested pblock?${" "}<button type="button" class="link" data-testid="bd-to-floorplan" disabled=${locked || x.src === "example"}
             onClick=${() => { x.way = x.way === "session" ? "session" : "gui"; x.stopAfter = true; persist(bid);
-              toast("Build: Vivado GUI, stop after link: the linked design stays open to floorplan", { icon: "layers" }); changed(); }}>Stop after link to floorplan</button>${" "}in Vivado, then write it to your rm_xdc. <span class="muted">Being proven now: one test build.</span></span></div>
+              toast("Build: Vivado GUI, stop after link: the linked design stays open to floorplan", { icon: "layers" }); changed(); }}>Stop after link to floorplan</button>${" "}in Vivado, then save it with <span class="mono">hm_save_floorplan FILE</span> and give FILE as your rm_xdc.</span></div>
       </div>
       <${Pblock} g=${g} />
     </div>
@@ -1267,7 +1267,7 @@ function Way({ bid, x }) {
   return html`<div class="bd-way" data-testid="bd-way" data-way=${way}>
     <div class="bd-way-top"><span class="bd-way-l">Run it your way</span>
       <${Seg} label="How to run Vivado" value=${way} options=${WAYS} onChange=${(v) => { x.way = v; persist(bid); changed(); }} />
-      ${way !== "batch" || x.stopAfter ? html`<${Chip} level="warn" cls="bd-mini" title="build_rm.tcl reads KEY=value from argv over the defaults Harness Manager wrote, and resolves paths against its own folder, so it can be sourced. A test build proves the GUI, your open Vivado and the stop-after-link loop">being proven now: one test build<//>` : null}</div>
+</div>
     ${text ? html`<${Cmd} text=${text} testid="script-command" />`
       : html`<${Reason} level="unk" testid="bd-way-missing" text="This harness-manager-daemon gives no command for this way: update Harness Manager, or use Batch." />`}
     <div class="bd-way-note">${note}${it && it.watch ? html` <span class="muted">Watches: ${it.watch}.</span>` : null}</div>
@@ -1339,12 +1339,12 @@ function BuildPanel({ bid, f }) {
   }
   if (r && r.state === "stopped" && !running) return html`<${Panel} f=${f} k="build" title=${`Stopped after link: floorplan ${r.rm_name || name} in Vivado`}>
     <div class="bd-verdict" data-testid="bd-verdict">HM_RM_BUILD_STOPPED after=${r.stage} · receipt state stopped</div>
-    <p class="bd-lead">The static with ${r.rm_name || name} linked in is open in ${x.way === "session" ? "your Vivado" : "the Vivado GUI"} (STOP_AFTER=link returns before close_project). <${Chip} level="warn" cls="bd-mini">being proven now: one test build<//></p>
+    <p class="bd-lead">The static with ${r.rm_name || name} linked in is open in ${x.way === "session" ? "your Vivado" : "the Vivado GUI"} (STOP_AFTER=link returns before close_project).</p>
     <ol class="bd-howto">
-      <li><b>Draw the pblock inside ${(g.pblock && g.pblock.name) || "pblock_rp_dut"}</b> in the Device view, and assign your cells to it. <span class="sub">It must sit inside ${(g.pblock && g.pblock.slice_range) || "the partition"}; your cells, not the static's.</span></li>
-      <li><b>Put it in your rm_xdc</b>: copy the create_pblock / resize_pblock / add_cells_to_pblock lines the Tcl console echoes, or write them to a file:
-        <${Cmd} text=${`write_xdc -cell u_rp_dut -exclude_timing -force ${x.buildDir.trim()}/floorplan.xdc`} />
-        <span class="sub">rm_xdc is read with -cell u_rp_dut, so cell names start inside the RM: drop a u_rp_dut/ prefix.</span></li>
+      <li><b>Draw a child pblock inside ${(g.pblock && g.pblock.name) || "pblock_rp_dut"}</b> in the Device view (create_pblock, resize_pblock within it, <span class="mono">set_property PARENT ${(g.pblock && g.pblock.name) || "pblock_rp_dut"}</span>), and assign your cells to it. <span class="sub">It must sit inside ${(g.pblock && g.pblock.slice_range) || "the partition"}; your cells, not the static's. The partition's own pblock cannot move or grow.</span></li>
+      <li><b>Save it as your rm_xdc</b>: in the Tcl console, type
+        <${Cmd} text=${`hm_save_floorplan ${x.buildDir.trim() || "<build dir>"}/floorplan.xdc`} testid="bd-save-floorplan" />
+        <span class="sub">then give that file as the design's rm_xdc (Design step). build_rm.tcl defines hm_save_floorplan; not write_xdc -cell, which also writes the partition's own pblock and takes your cells out of it, nor the journal's u_rp_dut/… lines, which match nothing under read_xdc -cell.</span></li>
       <li><b>Build again, all stages.</b> <span class="sub">Untick "Stop after link" below: Check then reports the utilisation of the partition.</span></li>
     </ol>
     <${Way} bid=${bid} x=${x} />
