@@ -82,6 +82,7 @@ def by(page: Any, testid: str) -> Any:
 def over_usb(page: Any) -> None:
     page.evaluate("import('./js/modal.js').then(m => m.openModal('add', {mode: 'usb'}))")
     expect(by(page, "add-over-usb")).to_be_visible(timeout=T)
+    page.locator('[data-action="usb-scan"]').click()
     page.wait_for_function("() => !document.querySelector('[data-action=\"usb-scan\"]')"
                            ".getAttribute('aria-busy')", timeout=T)
 
@@ -597,4 +598,16 @@ def test_twin_written_not_running_on_a_board_with_ethernet_stays_a_failure(demo,
     expect(res).to_contain_text("ACTION_FAILED", timeout=T)
     expect(res).to_contain_text("written, not running")
     expect(by(page, "bu-step-write")).to_have_attribute("data-state", "todo")
+    assert not page.errors, page.errors
+
+
+def test_nothing_is_scanned_until_scan_is_clicked(demo):
+    page = demo.page()
+    page.evaluate("import('./js/modal.js').then(m => m.openModal('add', {mode: 'usb'}))")
+    expect(by(page, "add-over-usb")).to_be_visible(timeout=T)
+    expect(by(page, "usb-board")).to_have_count(0)
+    assert demo.engine.called("controller.command") == []        # no MCC was typed at
+    page.locator('[data-action="usb-scan"]').click()
+    expect(by(page, "usb-board")).to_have_count(1, timeout=T)
+    assert len(demo.engine.called("controller.command")) == 1     # one "?" at its prompt
     assert not page.errors, page.errors

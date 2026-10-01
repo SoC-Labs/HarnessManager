@@ -227,3 +227,40 @@ def test_the_status_says_releases_are_refused_and_the_reader_is_off(client):
                                        "update-signing keys")
     assert st["sd_flash"]["enabled"] is False and st["sd_flash"]["routes"] is False
     assert st["rescue_network"]["available"] is False
+
+
+# --- the hub lease: a board behind a hub keeps its gate; a USB-only board has none --------------
+
+
+def test_a_board_behind_a_hub_needs_its_lease_to_write_and_a_usb_only_board_none(tmp_path):
+    from harness_manager.demo import DemoEngine
+    from harness_manager.demo_showcase import BOARD_LEASED, BOARD_NEW_USB
+
+    eng = DemoEngine(speed=0.05, showcase=True, state_dir=tmp_path / "demo")
+    bundle = str(sd_tree(tmp_path / "good"))
+    try:
+        with TestClient(create_app(eng, token=TOKEN, static_dir=None,
+                                   state_dir=tmp_path / "demo")) as c:
+            cands = {x["board_id"]: x for x in c.post("/api/v1/probe", json={},
+                                                       headers=H).json()["candidates"]}
+            assert c.post("/api/v1/boards", json={"candidate": cands[BOARD_LEASED]},
+                          headers=H).status_code == 200
+            r = c.post(f"{bid_path(BOARD_LEASED)}/bringup/install",
+                       json={"bundle": bundle, "backup_path": str(tmp_path / "b.zip")}, headers=H)
+            assert r.status_code == 409 and r.json()["error"]["name"] == "HELD", r.text
+            assert "write the configuration SD" in r.json()["error"]["message"]
+            assert eng.called("storage.install") == []
+            # the twin: the new board on USB only has no lease to ask for
+            (row,) = c.post("/api/v1/bringup/scan", json={}, headers=H).json()["boards"]
+            assert row["board_id"] == BOARD_NEW_USB
+            assert c.post("/api/v1/boards", json={"candidate": row["candidate"]},
+                          headers=H).status_code == 200
+            job = c.post(f"{bid_path(BOARD_NEW_USB)}/storage/backup", json={},
+                         headers=H).json()["job"]
+            backup = wait(c, job)["result"]["path"]
+            r = c.post(f"{bid_path(BOARD_NEW_USB)}/bringup/install",
+                       json={"bundle": bundle, "backup_path": backup}, headers=H)
+            assert r.status_code == 202, r.text
+            assert wait(c, r.json()["job"])["state"] == "done"
+    finally:
+        eng.close_all()

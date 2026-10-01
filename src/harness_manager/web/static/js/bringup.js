@@ -252,8 +252,8 @@ function UsbRow({ row }) {
   </li>`;
 }
 
+// Nothing is scanned until Scan is clicked: a scan types one "?" at each MCC it finds.
 export function OverUsb() {
-  useEffect(() => { if (!U.scan && !U.running) scanUsb(); }, []);
   const s = U.scan;
   const rows = (s && s.boards) || [];
   return html`<div class="stack bu-over-usb" data-testid="add-over-usb">
@@ -262,7 +262,7 @@ export function OverUsb() {
       <button type="button" class="btn sm" data-action="usb-scan" disabled=${U.running}
         aria-busy=${U.running ? "true" : undefined} onClick=${scanUsb}>
         ${U.running ? html`<${Spinner} />` : html`<${Icon} name="scan-search" />`} Scan</button>
-      <span class="small muted">${U.running ? "Listing the Debug USBs and asking each MCC…" : "Lists the Debug USBs, asks each MCC for its prompt, and looks for a harness at 192.168.10.101."}</span>
+      <span class="small muted" data-testid="usb-scan-note">${U.running ? "Listing the Debug USBs and asking each MCC…" : "Lists the Debug USBs, asks each MCC for its prompt, and looks for a harness at 192.168.10.101."}</span>
     </div>
     ${U.error ? html`<${Reason} level="err" testid="usb-error" text=${`${U.error.errName}: ${U.error.message}${U.error.hint ? ` (${U.error.hint})` : ""}`} />` : null}
     ${s && !rows.length ? html`<div class="bu-empty" data-testid="usb-none">

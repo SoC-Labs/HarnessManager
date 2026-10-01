@@ -116,7 +116,7 @@ def register(ctx: RouteContext) -> None:
         if chk.refused:
             raise with_data(RefusedError(f"refusing {chk.path}: {chk.problems[0]}",
                                          hint="nothing was written"), check=chk.as_dict())
-        require_holder(d, bid, s, "sd_install", b)        # a board behind a hub: the lease
+        require_holder(d, bid, s, "write the configuration SD", b)   # behind a hub: the lease
         files = {dest: _abs_path(src, "file") for dest, src in chk.install_files.items()}
         with d.gates.op(bid):
             storage = ctx.require(s, "storage", C.STORAGE_INSTALL)
