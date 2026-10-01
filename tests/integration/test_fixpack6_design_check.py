@@ -285,7 +285,7 @@ def test_the_reboot_job_carries_the_check_the_event_and_the_board_read(rig, jtag
                        headers=H)
             assert r.status_code == 200, r.text
             bid = r.json()["board_id"]
-            assert c.get(bid_path(bid), headers=H).json()["design_check"] is None
+            assert c.get(bid_path(bid), headers=H).json().get("design_check") is None
             eng.session(bid).controller = Rebooter()
             r = c.post(bid_path(bid) + "/controller/reboot", json={}, headers=H)
             assert r.status_code == 202, r.text
@@ -300,7 +300,7 @@ def test_the_reboot_job_carries_the_check_the_event_and_the_board_read(rig, jtag
             # Twin: a deploy proves its own design, and the service forgets the check
             eng.bus.publish(Event("deploy.done", bid, {"verified": True,
                                                        "rm_id": "0x01000001"}))
-            assert c.get(bid_path(bid), headers=H).json()["design_check"] is None
+            assert c.get(bid_path(bid), headers=H).json().get("design_check") is None
             # Twin: the DAP answers -> verified, and the board read says so
             monkeypatch.delenv("STUB_OPENOCD_IDCODE")
             r = c.post(bid_path(bid) + "/controller/reboot", json={}, headers=H)
