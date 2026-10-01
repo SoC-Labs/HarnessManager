@@ -128,5 +128,21 @@ release-harness: venv
 release-promote: venv
 	$(RELEASE) promote --catalog $(CATALOG) --version $(VERSION) $(RELEASE_COMMON)
 
+# --- RELEASE-PIPE --- a harness release from the PLATFORM's artifacts (docs/RELEASING.md,
+# "Publishing a harness release"): assembled, signed and verified into OUT (default
+# dist/release). It never publishes: scripts/publish_harness_release.sh does (dry run first).
+#   make harness-release VERSION=2.0.0 FROM=<mint prod dir> KEY=<release.key> | TEST_KEY=1
+#        [BIT=<.bit> STAGE0_BAKE=<bake.json>] [SD_TEMPLATES=<dir> | SD=<tree>] [OVERLAYS=<dir>]
+#        [INCLUDE_AAA=1] [KIT=<zip>] [REPO=OWNER/REPO] [OUT=<dir>] [CHANNEL=beta]
+.PHONY: harness-release
+harness-release: venv
+	$(RELEASE) harness-release --version $(VERSION) --from $(FROM) --channel $(CHANNEL) \
+		$(if $(SD),--sd $(SD),--sd-templates $(or $(SD_TEMPLATES),$(PLATFORM)/fpga/mps3_sd/templates)) \
+		$(if $(BIT),--bit $(BIT)) $(if $(STAGE0_BAKE),--stage0-bake $(STAGE0_BAKE)) \
+		$(if $(OVERLAYS),--overlays $(OVERLAYS)) $(if $(INCLUDE_AAA),--include-aaa) \
+		$(if $(KIT),--kit $(KIT)) $(if $(KEY),--key $(KEY)) $(if $(TEST_KEY),--test-key) \
+		$(if $(REPO),--repo $(REPO)) $(if $(OUT),--out $(OUT)) \
+		$(if $(MIRROR),--mirror $(MIRROR)) $(RELEASE_ARGS)
+
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache build dist src/*.egg-info
