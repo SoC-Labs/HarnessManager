@@ -9,7 +9,9 @@ two things onto the card in one of them:
   writer is the board pack's own configuration-SD writer (``<pack package>.sd:
   make_storage_adapter``, the module convention ``pack.py`` uses), so its rules hold here
   too: a verified backup of the card as it is NOW first (taken by the job, or given), never
-  an ``.ebf`` (it reflashes the MCC), never an MCC command file, journaled, read back.
+  an ``.ebf`` (it reflashes the MCC), never an MCC command file, journaled, read back. And
+  the card's MCC firmware selection is never changed (``mbbios_merge``: the card's
+  ``MBBIOS:`` line in board.txt is kept; see "the MCC firmware selection" below).
 - ``card``: a WHOLE-CARD image onto the whole device (the Linux harness's user microSD), as
   ``stage0_mkcard.py card --card-img`` builds it (STAGE0_CONTRACT.md §6: the MBR at LBA 0,
   the boot-select sectors at LBA 1-2, slot A at LBA 67584 and B at 198656, /persist p3, the
