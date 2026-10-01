@@ -698,7 +698,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
         state.jobs.gate(bid)
         session = state.session(bid)
-        ui2_require_holder(sim, bid, "deploy", body)               # ui2 api-hub (G7)
+        ui2_require_holder(sim, bid, "deploy", _lease_body(body))  # ui2 api-hub (G7)
         keep = body.get("keep_on_card", False)
         if not isinstance(keep, bool):
             raise UsageError(f"keep_on_card must be true or false, not {keep!r}")
@@ -726,7 +726,7 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
                 body: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:  # noqa: B008
         session = state.session(bid)
         force = _force(body)                                       # FIX-PACK-7
-        ui2_require_holder(sim, bid, "restore", body)              # ui2 api-hub (G7)
+        ui2_require_holder(sim, bid, "restore", _lease_body(body))  # ui2 api-hub (G7)
         return _accepted(state.jobs.start(
             bid, "restore", lambda progress: eng.deploy.restore_baseline(session, **force)))
 
@@ -1236,6 +1236,13 @@ def _force(body: dict[str, Any] | None) -> dict[str, bool]:
     if not isinstance(force, bool):
         raise UsageError(f"force must be true or false, not {force!r}")
     return {"force": True} if force else {}
+
+
+def _lease_body(body: dict[str, Any] | None) -> dict[str, Any]:
+    """FIX-PACK-7 (the daemon's rule): ``force`` alone is the swap's, not the lease escape; the
+    lease gate sees it only with ``consent``."""
+    b = body or {}
+    return b if "consent" in b else {k: v for k, v in b.items() if k != "force"}
 
 
 def ui2_require_holder(sim: Any, bid: str, kind: str, body: dict[str, Any] | None) -> None:

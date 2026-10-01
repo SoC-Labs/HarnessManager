@@ -363,3 +363,27 @@ def test_twin_api_a_board_whose_down_works_needs_no_force_and_a_bad_force_is_400
     bad = api.get(f"{api.b(BOARD_LINUX)}/deploy", method="POST", status=400,
                   json={"overlay": "nanosoc_upy", "force": "yes"})
     assert bad["error"]["name"] == "USAGE" and "force must be true or false" in bad["error"]["message"]
+
+
+def test_api_force_alone_on_a_board_someone_else_holds_is_the_plain_held(api):
+    """``force`` is the swap's; the lease gate (G7) sees it only with ``consent``: without one,
+    a board alice holds answers 409 HELD naming her, as without ``force``, and nothing runs."""
+    from harness_manager.demo_showcase import BOARD_LEASED
+
+    api.open(BOARD_LEASED)
+    for route, body in (("deploy", {"overlay": "nanosoc_upy", "force": True}),
+                        ("restore", {"force": True})):
+        err = api.get(f"{api.b(BOARD_LEASED)}/{route}", method="POST", status=409,
+                      json=body)["error"]
+        assert err["name"] == "HELD" and err["holder"] == "alice@lab-pc-07", route
+        assert err["data"]["reason"] == "LEASE"
+    assert api.engine.called("deploy.deploy") == []
+
+
+def test_twin_api_force_with_a_wrong_consent_is_still_g7s_typed_phrase_refusal(api):
+    from harness_manager.demo_showcase import BOARD_LEASED
+
+    api.open(BOARD_LEASED)
+    err = api.get(f"{api.b(BOARD_LEASED)}/restore", method="POST", status=409,
+                  json={"force": True, "consent": "yes"})["error"]
+    assert err["name"] == "REFUSED" and f"RESET {BOARD_LEASED}" in err["hint"]

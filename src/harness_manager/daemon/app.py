@@ -585,6 +585,14 @@ def _obj(body: Any) -> dict[str, Any]:
     return body
 
 
+def _lease_body(body: dict[str, Any]) -> dict[str, Any]:
+    """FIX-PACK-7: in a deploy or restore body, ``force`` alone is the swap's (swap even when
+    OpenOCD on the board cannot be stopped first), not the lease gate's escape: the gate sees
+    it only with ``consent`` (G7's ``force`` + ``consent: "RESET <bid>"``, unchanged). So
+    ``--force`` on a board someone else holds is the plain 409 HELD naming the holder."""
+    return body if "consent" in body else {k: v for k, v in body.items() if k != "force"}
+
+
 def _str(body: dict[str, Any], key: str, default: str | None = None) -> str:
     value = body.get(key, default)
     if value is None:
@@ -1395,7 +1403,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         keep = _bool(_obj(body), "keep_on_card", False)
         # FIX-PACK-7: swap even when the board's OpenOCD cannot be stopped first (a warning)
         force = {"force": True} if _bool(_obj(body), "force", False) else {}
-        ui2_holder(bid, s, "deploy", _obj(body))            # ui2 api-hub (G7): 409 HELD
+        ui2_holder(bid, s, "deploy", _lease_body(_obj(body)))   # ui2 api-hub (G7): 409 HELD
         overlay, items, refusal = _preflight(bid, s, _obj(body).get("overlay"))
         if refusal is not None:            # refuse BEFORE deploy() is ever called
             refusal.data = {"overlay": overlay, "preflight": items}   # type: ignore[attr-defined]
@@ -1430,7 +1438,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
     def restore(bid: str, body: JsonBody = None) -> JSONResponse:
         s = board(bid)
         force = {"force": True} if _bool(_obj(body), "force", False) else {}    # FIX-PACK-7
-        ui2_holder(bid, s, "restore", _obj(body))           # ui2 api-hub (G7): 409 HELD
+        ui2_holder(bid, s, "restore", _lease_body(_obj(body)))  # ui2 api-hub (G7): 409 HELD
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             still_open(bid, s, "restore")
