@@ -22,6 +22,10 @@ Three findings matter more than the passes:
 3. **Any `build.rm_xdc` crashed Vivado 2026.1** (segfault, exit 139) right after the link, 2 of 2:
    the template read it with a cell object taken before `read_checkpoint -cell`. No build had set
    `rm_xdc` before. Fixed (§7).
+4. **(Added 1 Oct, N2.) The static<->RM boundary was not timed in any external-RM build** (Linux
+   v2.0.0 known issue 11): the OOC `create_clock -name dut_clk` rode in the RM checkpoint and at the
+   link overwrote the static's OSCCLK1 clock of the same name. Writing the RM checkpoint before the
+   OOC XDC fixes it: no_clock 27,984 → 0 for minimal, every gate green, the pair byte-identical (§11).
 
 ### The command the UI should print (the lead's `write_xdc` question)
 
@@ -333,7 +337,88 @@ passed, 2 skipped), `make lint` (pass), and `nice -n 10 make check PYVERIFY=` af
 It includes the virtual-board tests, which bind free loopback ports in 10000-19999. The lead asked
 for one more run at low load, to `/tmpdir/claude-74755/kit-interactive-gate.log`: its result is the next paragraph.
 
-Second run: on the commit that adds the HM_STAGE seconds; its result is added by the commit after it.
+Second run, to `/tmpdir/claude-74755/kit-interactive-gate.log` (`logs/make_check_2_summary.txt`), on
+`fd6b9bd` (the HM_STAGE seconds): the first attempt was killed at 17 % by the agent harness's 30-min
+limit on background commands (not by a test), so it ran again detached, 22:38 → 00:25 (106 min), at
+load 30-104 while three other lanes ran their own `make check`. **5 failed, 6215 passed, 20
+skipped.** Each failure is a timing assertion, and each passed 3/3 run alone the next day
+(`logs/gate2_triage.txt`). None touches the kit code:
+
+| Test | Its assertion under load |
+|---|---|
+| `test_lm5_display_cli.py::test_ctrl_bracket_ends_the_view_as_in_console[\x1d]` | 1 frame rendered before Ctrl-], 2 expected |
+| `test_locate_api.py::test_no_background_contact_ever_sends_a_locate` | "the beat ran": no hello in the window |
+| `test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json` | `subprocess.TimeoutExpired` starting the daemon |
+| `test_quiet_poll.py::test_hm_never_holds_the_single_client_port_longer_than_one_request` | a hold of 20.6 ms against a 20 ms bound |
+| `test_mcc_fix_hub.py::test_the_hub_reader_compiles_and_runs_under_python_36` | the last oscillator read came back None |
+
+So the gate is green but for load flakes: run 1 (`cdcafa9`) CHECK PASS, run 2 (`fd6b9bd`) 5 load
+flakes that pass 3/3 alone.
+
+## 11. N2: the OOC clocks no longer reach the link (Linux v2.0.0 known issue 11)
+
+**The bug** (the Linux lead's TRIAL_BUILD T1, HM's N1): the synth stage read the OOC XDC and THEN
+wrote the RM checkpoint, so the checkpoint carried `create_clock -name dut_clk [get_ports dut_clk]`.
+At the link it came back and, because the static's primary clock on OSCCLK1 is also named
+`dut_clk` (`fpga/shell/constraints/mps3_harness.xdc:44`), it overwrote it:
+
+```
+WARNING: [Constraints 18-619] A clock with name 'dut_clk' already exists, overwriting the previous clock with the same name. [.../minimal_ooc.xdc:17]
+```
+
+OSCCLK1 lost its clock, and with it clk_wiz_shell and clk_wiz_dut: check_timing counted 27,984
+register/latch pins with no clock, and the summary still said "All user specified timing
+constraints are met".
+
+**The change** (`d574894`, `build_rm.tcl.template` synth stage): `write_checkpoint -force
+$synth_dcp` straight after `synth_design`, then `read_xdc $P(RM_OOC_XDC)` for the OOC reports and
+gates only. The candidate the lead asked to prove first (the nanoSoC Quickstart team's); candidate
+a, `read_xdc -mode out_of_context`, gave the same numbers at the link and is not used.
+
+**Before/after at the link** (Vivado 2026.1, RC2 kit, `-mode tcl`, STOP_AFTER=link, then
+`tools/n2_probe.tcl`: `report_timing_summary -check_timing_verbose`, `check_timing`,
+`get_timing_paths -through` the RP pins; `n2/`). Batch 00:19:59 → 00:42:47, each run 4-5 min, load 10-30:
+
+| | minimal before | minimal after (b) | minimal (a) | lfsr_floor before | lfsr_floor after (b) |
+|---|---|---|---|---|---|
+| check_timing no_clock | **27,984** (27,446 OSCCLK1 + 538 debug_bridge tck_i_reg/Q) | **0** | 0 | 27,984 | **0** |
+| unconstrained_internal_endpoints | 87,346 | **423** (the constant-clock class) | 423 | 87,379 | 423 |
+| clocks after link (`clocks_after_link` gate) | 22: `dut_clk` on `u_rp_dut/dut_clk`, `dbg_bscan_tck`/`drck` on RP pins; no clk_wiz clocks | 23: `dut_clk` on **OSCCLK1**, `clk_out1_shell_bd_clk_wiz_dut_0`, `clk_out1/2_shell_bd_clk_wiz_shell_0` | 23 | 22 | 23 |
+| `[Constraints 18-619]` at link | 1 | **0** | 0 | 1 | 0 |
+| CRITICAL WARNINGs in build_rm.log | 19 (7 × 18-512, 7 × 18-513 from the OOC XDC re-read at link, 4 × Timing 38-285, 1 × Common 17-69) | **1** (Common 17-69: minimal's unloaded dut_clk, at OOC) | 1 | 18 | **0** |
+| boundary paths through the RP pins (10 worst) | 0 (minimal has none) | 0 | 0 | 10, **no launch clock, no slack** (unconstrained) | 10, **timed**: `dut_clkrst_0/.../dut_sync_q_reg[2]/C -> u_rp_dut/gpio_i_q_reg[0]/R`, clk_out1_shell_bd_clk_wiz_dut_0 → itself, **slack 18.670 ns** |
+| gates | all PASS | all PASS | all PASS | all PASS | all PASS |
+
+The `HM_` lines are the same in number and order; the one detail that changes is
+`clocks_after_link`'s count, 22 → 23 (the static's clocks survive), besides the intended HM_STAGE
+seconds. A test pins the new order (`test_the_rm_checkpoint_is_written_before_the_ooc_xdc_is_read`,
+fails on `fd6b9bd`).
+
+**The full build with the change** (`minimal`, batch, all stages): **PASS** (`n2/n2_minimal_full_build_log.txt`, receipt
+`n2/n2_minimal_full_build.json`, report head `n2/n2_minimal_full_timing_head.rpt`). Batch, 13:11:12 → 13:41:36 on
+Thu 1 Oct, **30 min 24 s**, peak RSS 4.91 GB, load 23 → 17 (synth 0:49, open_checkpoint 0:54,
+read_checkpoint -cell 1:46, opt 0:59, place 7:24, phys_opt 0:27, route 10:46, pr_verify 2:23,
+write_bitstream 1:41).
+
+| | minimal before (the guide lead's clean run, old template) | minimal after (`d574894`) |
+|---|---|---|
+| check_timing no_clock | 27,984 | **0** |
+| unconstrained_internal_endpoints | 87,115 | **423** |
+| Design Timing Summary: WNS / TNS / WHS / THS / WPWS | 0.207 / 0.000 / 0.030 / 0.000 / 0.124 | 0.207 / 0.000 / 0.030 / 0.000 / 0.124 |
+| setup endpoints timed (TNS Total Endpoints) | 68,599 | **157,500** |
+| hold endpoints timed (THS Total Endpoints) | 67,238 | **156,711** |
+| pulse-width endpoints | 28,168 | 56,160 |
+| CRITICAL WARNINGs | 21 (KIT-NIGHT F3: 15 from the OOC XDC at link, 6 Timing 38-285) | **1** (Common 17-69, minimal's unloaded `dut_clk` at OOC) |
+| gates | 24: 23 PASS + NOTE ltx | **24: 23 PASS + NOTE ltx**, the same sequence as KIT-NIGHT's r2 build; only `clocks_after_link` says 23 (was 22) |
+| `kit check --static-id 0x44EE76D5` | passed | **passed** (`logs/s26_kit_check_n2_full.txt`) |
+| the pair | `minimal_partial.bin` `86e27c2e…4e81`, clear `810683ab…5ce4` (KIT-NIGHT) | **byte-identical**: the fix changes what is timed, not what is built |
+
+So the timed endpoints more than double, the boundary is analysed, and the slack does not move:
+the static was signed off fully timed at the mint, and minimal adds no path of its own.
+
+Not covered: a checkpoint the user brings (`RM_SYNTH_DCP`) still carries whatever constraints were in
+it when it was written; the template's comment and the docs say to write it before any
+`create_clock`.
 
 ## 10. Files here
 
@@ -344,6 +429,8 @@ Second run: on the commit that adds the HM_STAGE seconds; its result is added by
   `j_journal_fullnames.xdc`.
 - `vivado/`: trimmed logs of A1, A2, A3, A4b, A4c; A4's receipt, reports (`a4_lfsr_floor_*`), trimmed `build_rm.log`, generated `build_rm.tcl` and README, and the placement report and lists (`a4_placement_report.txt`, `a4_place_*`); the V3 negative's log, receipt and HDPR report (`v3_write_xdc_*`); the old-vs-new batch markers (`batch_markers_old_vs_new_template.txt`); A1's and A3's stopped receipts.
 - `crash/`: the two `hs_err_pid*.log` and the two runs' markers.
+- `n2/`: §11: the five link probes (before, after, candidate a; minimal and lfsr_floor), their
+  check_timing sections and boundary reports, and the full N2 build of minimal.
 - `logs/`: every HM command's output (`s00`…), by step.
 - `tools/`: `ki.sh` (the isolation wrapper), each run's `run_*.sh`, and the Tcl each run fed
   Vivado (`a1_stdin.tcl`, `a2_stdin.tcl`, `a3_after.tcl`, `a4b_stdin.tcl`, `a4c_stdin.tcl`,

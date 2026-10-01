@@ -261,6 +261,26 @@ partition's ranges only, and HM's XDC checker (`services/xdc/syntax.py`) is not 
 `rm_xdc` (it would accept every file above, the two that fail too: it checks syntax, not
 what `-cell` scoping does).
 
+### 3.7 The OOC clocks stay out of the link (N2, Linux v2.0.0 known issue 11)
+
+A checkpoint carries the constraints read into it. The synth stage used to read the OOC XDC and
+then write the RM checkpoint, so at the link the OOC `create_clock -name dut_clk [get_ports
+dut_clk]` came back and, the static's OSCCLK1 clock being named `dut_clk` too
+(`mps3_harness.xdc:44`), overwrote it (`[Constraints 18-619]`). The shell's clk_wiz clocks lost
+their source: check_timing no_clock 27,984 and 87,346 unconstrained endpoints for `minimal` on
+RC2, with "All user specified timing constraints are met" in the summary. The static itself was
+signed off fully timed at the mint; what went untimed was the static<->RM boundary and the clock
+latency into the RP.
+
+Since `d574894` the stage writes the checkpoint straight after `synth_design` and reads the OOC
+XDC after it, for the OOC reports and gates only. At the link: no_clock 0, 423 unconstrained
+(the constant-clock class), 23 clocks with `dut_clk` back on OSCCLK1, the boundary paths timed
+against `clk_out1_shell_bd_clk_wiz_dut_0`, every gate passing
+(`docs/evidence/2026-09-30-kit-interactive` §11). `read_xdc -mode out_of_context` gave the same
+numbers; the reorder is the one taken (it needs no Vivado mode semantics). A `build.synth_dcp`
+the user brings must be written before any `create_clock`. N1 (`kit check` warns on
+no_clock > 0) stays useful for builds from before the fix.
+
 ## 4. Validation before deploy, without Vivado (spike (b))
 
 `tools/spike_kit_guide/partial_check.py` reads a `.bit` or `.bin`. Its packet walker always skips a packet's payload by its count, so frame data is never read as headers (the failure mode `tools/bit_identity.py` warns about). A stream it cannot walk to DESYNC is reported as unparsed, never as clean.

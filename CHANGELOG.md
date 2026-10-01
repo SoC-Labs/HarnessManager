@@ -9,6 +9,19 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### The partition boundary is timed (N2: Linux v2.0.0 known issue 11 fixed, for v0.1.1)
+- `build_rm.tcl` writes the RM checkpoint straight after `synth_design`, before it reads the OOC
+  XDC. Before, the checkpoint carried the OOC `create_clock -name dut_clk`, which at the link
+  overwrote the static's clock of the same name on OSCCLK1 (`[Constraints 18-619]`): the shell's
+  clk_wiz clocks lost their source and the static<->RM boundary was not timed (check_timing
+  no_clock 27,984 for `minimal` on RC2, while the summary said every constraint was met).
+- Measured on Vivado 2026.1 with the RC2 kit: no_clock 27,984 -> 0, unconstrained endpoints
+  87,346 -> 423, the boundary paths timed against `clk_out1_shell_bd_clk_wiz_dut_0`, 18 fewer
+  CRITICAL WARNINGs; every gate passes (docs/evidence/2026-09-30-kit-interactive §11). The
+  `clocks_after_link` gate now counts 23 clocks (was 22). Rebuild an RM to get it.
+- A synth checkpoint you bring (`build.synth_dcp`) must be written before any `create_clock`
+  is read into it.
+
 ### Run the build in your own Vivado (KIT-INTERACTIVE)
 - **`kit build DIR --gui`** prints the GUI command (`vivado -mode gui -source …/build_rm.tcl
   -log …/build_rm.log …`): the GUI stays open after the script, so `--stop-after link` leaves

@@ -1,0 +1,16 @@
+# the 5 failures of gate run 2, each run alone 3 times (13:06 and again 13:10:51, Thu 1 Oct; load 23.79 28.99 27.18), on d574894
+1 tests/integration/test_lm5_display_cli.py::test_ctrl_bracket_ends_the_view_as_in_console :: 2 passed in 3.13s
+2 tests/integration/test_lm5_display_cli.py::test_ctrl_bracket_ends_the_view_as_in_console :: 2 passed in 2.92s
+3 tests/integration/test_lm5_display_cli.py::test_ctrl_bracket_ends_the_view_as_in_console :: 2 passed in 3.05s
+1 tests/integration/test_locate_api.py::test_no_background_contact_ever_sends_a_locate :: 1 passed in 3.68s
+2 tests/integration/test_locate_api.py::test_no_background_contact_ever_sends_a_locate :: 1 passed in 3.56s
+3 tests/integration/test_locate_api.py::test_no_background_contact_ever_sends_a_locate :: 1 passed in 3.57s
+1 tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json :: 1 passed in 1.62s
+2 tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json :: 1 passed in 1.62s
+3 tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json :: 1 passed in 1.56s
+1 tests/integration/test_quiet_poll.py::test_hm_never_holds_the_single_client_port_longer_than_one_request :: 1 passed in 4.36s
+2 tests/integration/test_quiet_poll.py::test_hm_never_holds_the_single_client_port_longer_than_one_request :: 1 passed in 4.33s
+3 tests/integration/test_quiet_poll.py::test_hm_never_holds_the_single_client_port_longer_than_one_request :: 1 passed in 4.59s
+1 tests/unit/test_mcc_fix_hub.py::test_the_hub_reader_compiles_and_runs_under_python_36 :: 1 passed in 19.50s
+2 tests/unit/test_mcc_fix_hub.py::test_the_hub_reader_compiles_and_runs_under_python_36 :: 1 passed in 19.82s
+3 tests/unit/test_mcc_fix_hub.py::test_the_hub_reader_compiles_and_runs_under_python_36 :: 1 passed in 20.31s

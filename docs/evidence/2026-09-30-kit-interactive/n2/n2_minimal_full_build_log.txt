@@ -1,0 +1,54 @@
+# N2 full build of minimal, batch, template d574894 (checkpoint before the OOC XDC). build_rm.log: markers, CRITICAL WARNINGs, step times.
+load ok 13:11:11 22.94 28.47 27.04
+N2FULL start 13:11:12 load=22.94 28.47 27.04
+N2FULL vivado rc=0 end 13:41:36 load=17.42 24.47 26.88
+N2FULL done 13:41:36
+HM_STAGE preflight 1790856688
+HM_GATE vivado_version PASS running Vivado 2026.1; the kit's static was written by 2026.1, and a checkpoint opens only in the major.minor release that wrote it
+HM_GATE part_installed PASS xcku115-flvb1760-1-c (install the device family with Vivado; licensing is checked at synth)
+HM_GATE static_dcp_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/kit/static/static_routed_locked.dcp
+HM_GATE static_id PASS CRC-32 of static_routed_locked.dcp is 0x44EE76D5, the kit is for 0x44EE76D5
+HM_GATE source_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/xdc/minimal_wrapper_skeleton.sv
+HM_GATE ooc_xdc_present PASS /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/xdc/minimal_ooc.xdc (harness-manager xdc rm-kit writes it)
+HM_STAGE synth 1790856689
+CRITICAL WARNING: [Common 17-69] Command failed: Port dut_clk is not connected to any net, cannot set HD.CLK_SRC. [/tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/xdc/minimal_ooc.xdc:23]
+HM_GATE no_black_boxes PASS none
+HM_GATE boundary_bits PASS 148 port bits, the partition has 148 (compare your wrapper with the kit's skeleton)
+HM_GATE rm_id_match PASS the netlist drives rm_id 0x0100F28A, RM_ID is 0x0100F28A (the shell compares them after every swap)
+HM_GATE ooc_clocks PASS OOC clocks: dut_clk dbg_bscan_tck dbg_bscan_drck (none = nothing was timed; read the kit's OOC XDC)
+HM_STAGE link 1790856762
+HM_GATE rp_cell PASS u_rp_dut in static_routed_locked.dcp
+HM_GATE rp_pins_link PASS 148 partition pins after link, the boundary has 148
+HM_GATE clocks_after_link PASS 23 clocks propagated from the static
+HM_GATE drc_hdpr_link PASS no HDPR-16/18/50, no Error
+HM_STAGE impl 1790856927
+HM_GATE rp_pins_opt PASS 148 partition pins after opt_design (a static-side debug core punches hub ports into the RP)
+HM_GATE drc_routed PASS no HDPR-16/18/50, no Error
+HM_GATE rm_timing PASS your RM has no registers (every output a constant, as minimal's): no path of its own to time; no timed path inside the partition; whole-design WNS 0.207 ns, WHS 0.030 ns from minimal_timing.rpt
+HM_STAGE verify 1790858198
+INFO: [Vivado 12-3253] PR_VERIFY: check points /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/kit/static/static_routed_locked.dcp and /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_routed.dcp are compatible
+HM_GATE pr_verify PASS compatible with static_routed_locked.dcp
+HM_STAGE bitstream 1790858341
+HM_GATE ltx NOTE no debug core in the partition: no .ltx
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_partial.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_partial_clear.bin
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_partial.bit
+HM_GATE artefact PASS /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_partial_clear.bit
+HM_GATE clearing_fits PASS clearing 67748 B, the harness holds 1048576 B
+HM_RECEIPT /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_build.json
+HM_RM_BUILD_COMPLETE rm=minimal rm_id=0x0100F28A static_id=0x44EE76D5 partial=/tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_partial.bin
+synth_design 00:00:49
+open_checkpoint 00:00:54
+read_checkpoint 00:01:46
+opt_design 00:00:59
+place_design 00:07:24
+phys_opt_design 00:00:27
+route_design 00:10:46
+pr_verify 00:02:23
+open_checkpoint 00:00:49
+write_bitstream 00:01:41
+the [Constraints 18-619] lines in build_rm.log: 0 (one '#' echo of the template's comment is not a warning)
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 30:24.10
+	Maximum resident set size (kbytes): 4910160
+86e27c2e9bc064d297473db43c92b5681bc21c026e7475dadf08f7cb134e4f81  /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_partial.bin
+810683ab4addbd96ec77602199b6261da6ed0fd3a4df401a8c938e7440bf5ce4  /tmpdir/claude-74755/kit-interactive/home/builds/n2_minimal_full/out/minimal_partial_clear.bin

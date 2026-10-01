@@ -1,0 +1,173 @@
+gate on fd6b9bd start 22:38:40 load=65.96 61.51 46.73 (run 2: run 1 was killed at 17% by the agent harness 30-min background limit, not by a test)
+.venv/bin/ruff check src tests tools/release tools/gen_tokens.py tools/gen_panel_codes.py tools/hil
+All checks passed!
+.venv/bin/python tools/gen_tokens.py --check
+gen_tokens: ok (design/tokens.json sha256 59011d724e13)
+.venv/bin/pytest -q
+SSH-MUX, one board, 10 simulated minutes:
+  before: 83 connections, 83 calls, per minute {'board list': 0.1, 'lease acquire': 0.1, 'lease show': 2.0, 'note list': 6.0, 'whoami': 0.1}
+  after:  1 connections, 83 calls, per minute {'board list': 0.1, 'lease acquire': 0.1, 'lease show': 2.0, 'note list': 6.0, 'whoami': 0.1}
+=================================== FAILURES ===================================
+_____________ test_ctrl_bracket_ends_the_view_as_in_console[\x1d] ______________
+
+key = b'\x1d'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc76f455610>
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc793357610>
+
+    @pytest.mark.parametrize("key", [b"\x1d", b"q\x03"])
+    def test_ctrl_bracket_ends_the_view_as_in_console(key, monkeypatch, capsys):
+        monkeypatch.delenv("COLORTERM", raising=False)
+        with still_board() as board, reach("in-process", board, monkeypatch):
+            keys = FakeKeys(key, 0.6)
+            monkeypatch.setattr(CD, "_stdin_tty", lambda: True)
+            monkeypatch.setattr(CD, "_stdout_tty", lambda: True)
+            monkeypatch.setattr(CD, "_key_reader", lambda: keys)
+            t0 = time.monotonic()
+            # --for 8 is only the safety net: the key must end it long before
+            rc, out, err = cli(capsys, "display", TARGET, "show", "--rate", "5", "--for", "8")
+            took = time.monotonic() - t0
+            assert rc == 0 and "Ctrl-] exits" in err
+            assert keys.entered and keys.exited and 0.5 <= took < 5
+>           assert out.count("\r\n") >= 2                                # raw mode: CR LF
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError: assert 1 >= 2
+E            +  where 1 = <built-in method count of str object at 0x7fc7a6c3c150>('\r\n')
+E            +    where <built-in method count of str object at 0x7fc7a6c3c150> = '23:03:40  fake@lcd-01  live  mode hw  owner harness  exact  badges -  seq 1  0.5 fps\r\n'.count
+
+tests/integration/test_lm5_display_cli.py:563: AssertionError
+________________ test_no_background_contact_ever_sends_a_locate ________________
+
+tmp_path = PosixPath('/tmpdir/pytest-of-dam1n19/pytest-12848/test_no_background_contact_eve0')
+
+    def test_no_background_contact_ever_sends_a_locate(tmp_path):
+        """The presence beat runs (a page views the board; a harness with R1/R2, so there IS a
+        beat) and the panel is read in the background: no locate."""
+        with rig(tmp_path, LINUX_PANEL, beat=True) as (r, client):
+            bid = r.open(client)
+            deadline = time.monotonic() + 15
+            while not r.vb.shell.hellos and time.monotonic() < deadline:
+                time.sleep(0.05)
+            client.get(f"{bid_path(bid)}/panel", headers={**H, "X-HM-Background": "1"})
+            time.sleep(1.5)
+>           assert r.vb.shell.hellos, "the beat ran"
+E           AssertionError: the beat ran
+E           assert []
+E            +  where [] = <tests.fakes.clcd_panel_shell.PanelFakeShell object at 0x7fc7a05b2890>.hellos
+E            +    where <tests.fakes.clcd_panel_shell.PanelFakeShell object at 0x7fc7a05b2890> = <tests.fakes.clcd_panel_shell.PanelVirtualMps3 object at 0x7fc76d41c9d0>.shell
+E            +      where <tests.fakes.clcd_panel_shell.PanelVirtualMps3 object at 0x7fc76d41c9d0> = <tests.integration.test_p1_panel_api.Rig object at 0x7fc76ec2ea90>.vb
+
+tests/integration/test_locate_api.py:171: AssertionError
+_________ test_negative_twin_without_the_fix_sighup_leaves_daemon_json _________
+
+tmp_path = PosixPath('/tmpdir/pytest-of-dam1n19/pytest-12848/test_negative_twin_without_the5')
+
+    def test_negative_twin_without_the_fix_sighup_leaves_daemon_json(tmp_path):
+>       rc, state, marker = _run(tmp_path, "SIGHUP", fixed=False)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_q2_daemon_debris.py:184: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_q2_daemon_debris.py:155: in _run
+    proc = subprocess.run([sys.executable, str(script), str(state), str(marker), first,
+/usr/lib64/python3.11/subprocess.py:550: in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib64/python3.11/subprocess.py:1209: in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib64/python3.11/subprocess.py:2116: in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Popen: returncode: -9 args: ['/home/dam1n19/SoCLabs/hm-kit-interactive/.ven...>
+endtime = 1277625.133773955, orig_timeout = 90, stdout_seq = [], stderr_seq = []
+skip_check_and_raise = False
+
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+>           raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+E           subprocess.TimeoutExpired: Command '['/home/dam1n19/SoCLabs/hm-kit-interactive/.venv/bin/python3.11', '/tmpdir/pytest-of-dam1n19/pytest-12848/test_negative_twin_without_the5/daemon.py', '/tmpdir/pytest-of-dam1n19/pytest-12848/test_negative_twin_without_the5/state', '/tmpdir/pytest-of-dam1n19/pytest-12848/test_negative_twin_without_the5/closed', 'SIGHUP', 'no']' timed out after 90 seconds
+
+/usr/lib64/python3.11/subprocess.py:1253: TimeoutExpired
+______ test_hm_never_holds_the_single_client_port_longer_than_one_request ______
+
+q = <test_quiet_poll.Rig object at 0x7fc790624950>
+
+    def test_hm_never_holds_the_single_client_port_longer_than_one_request(q):
+        """A soak calls the control port in a loop while Harness Manager polls. The fake turns a
+        second client away (RST). Every HM connection carries one call (at most ping + version)
+        and closes as soon as it is answered, so the soak is only ever turned away while HM is
+        mid-request, never by a connection HM parked."""
+        q.view()
+        q.d.quiet.backoff = (0.05, 0.1)
+        stop = threading.Event()
+        soak = {"ok": 0, "refused": 0}
+    
+        def soak_loop() -> None:
+            while not stop.is_set():
+                soak["ok" if soak_call(q.front.port) else "refused"] += 1
+                time.sleep(0.02)
+    
+        t0 = time.monotonic()
+        worker = threading.Thread(target=soak_loop, daemon=True)
+        worker.start()
+        try:
+            while time.monotonic() - t0 < 2.5:
+                q.round()
+                time.sleep(0.02)
+        finally:
+            stop.set()
+            worker.join(timeout=5)
+        conns = q.front.hm_conns(t0)
+        assert conns and soak["ok"] > 20
+        for c in conns:
+            assert len(c.requests) <= 2, [op for _i, _o, op in c.requests]
+        # Parked time as this fake measures it includes its own threads' wake-up under load:
+        # the typical connection is closed within milliseconds, none lingers.
+        parked = sorted(c.parked_s for c in conns)
+>       assert parked[len(parked) // 2] < 0.02 and parked[-1] < 0.5, parked[-5:]
+E       AssertionError: [0.042341666761785746, 0.055769018828868866, 0.0646074831020087, 0.07951947394758463, 0.11728922510519624]
+E       assert (0.02062443201430142 < 0.02)
+
+tests/integration/test_quiet_poll.py:498: AssertionError
+____________ test_the_hub_reader_compiles_and_runs_under_python_36 _____________
+
+    @pytest.mark.skipif(PY36 is None, reason="no Python 3.6 on this machine (the lab hub's python3)")
+    def test_the_hub_reader_compiles_and_runs_under_python_36():
+        got = subprocess.run([PY36, "-c", "import sys; compile(sys.stdin.read(), 'reader', 'exec')"],
+                             input=HUB_MCC_READ_PY, capture_output=True, text=True, check=False)
+        assert got.returncode == 0, got.stderr
+        mcc = FakeMcc()
+        with PtyMcc(mcc) as pty:
+            tool = HubTool(pty=pty, python=PY36)
+            ctl = hub_controller(tool)
+            (temp,) = ctl.temperatures()
+            assert temp.available and temp.value == 35.5, temp.reason
+            oscs = ctl.oscillators()
+>           assert [o.value for o in oscs] == [25.0, 50.0, 50.0, 50.0, 24.576, 23.75]
+E           assert [25.0, 50.0, ... 24.576, None] == [25.0, 50.0, ...24.576, 23.75]
+E             
+E             At index 5 diff: None != 23.75
+E             Use -v to get more diff
+
+/home/dam1n19/SoCLabs/hm-kit-interactive/tests/unit/test_mcc_fix_hub.py:569: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/test_lm5_display_cli.py::test_ctrl_bracket_ends_the_view_as_in_console[\x1d]
+FAILED tests/integration/test_locate_api.py::test_no_background_contact_ever_sends_a_locate
+FAILED tests/integration/test_q2_daemon_debris.py::test_negative_twin_without_the_fix_sighup_leaves_daemon_json
+FAILED tests/integration/test_quiet_poll.py::test_hm_never_holds_the_single_client_port_longer_than_one_request
+FAILED tests/unit/test_mcc_fix_hub.py::test_the_hub_reader_compiles_and_runs_under_python_36
+5 failed, 6215 passed, 20 skipped, 1 deselected in 6379.04s (1:46:19)
+make: *** [Makefile:71: test] Error 1
+
+real	106m29.916s
+user	26m59.702s
+sys	5m22.390s
+rc=2 end 00:25:10 load=30.35 29.53 40.16

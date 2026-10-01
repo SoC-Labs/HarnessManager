@@ -776,7 +776,7 @@ path is relative to the design file, or absolute:
 | `defines` | `` `define `` names (`NAME` or `NAME=VALUE`) |
 | `generics` | top-level parameters, `{NAME: value}`: a string, a number, or `{"path": FILE}` for a `$readmemh` image. A path is written absolute (Vivado's working directory is not yours) and a missing file stops the build at preflight (Vivado itself only warns, and builds a blank memory) |
 | `synth_hook` | a Tcl file sourced inside the synthesis project, after `sources`: a filelist of your own, `read_ip` for Xilinx IP, `set_property` |
-| `synth_dcp` | skip synthesis: an out-of-context synth checkpoint of `top` |
+| `synth_dcp` | skip synthesis: an out-of-context synth checkpoint of `top`, written before any `create_clock` is read into it (a clock in it overwrites the static's clock of the same name at the link) |
 | `rm_xdc` | RM-internal timing exceptions and floorplan (child pblocks from `hm_save_floorplan`), read with `read_xdc -cell` after the link |
 
 A design with no `sources`, no `synth_hook` and no `synth_dcp` builds as its skeleton only

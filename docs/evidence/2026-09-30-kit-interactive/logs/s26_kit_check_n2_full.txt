@@ -1,0 +1,28 @@
+the build minimal: passed (unchecked is not a pass: see the list)
+  ok        build                        the build passed 24 gates
+  ok        rm_id                        the netlist drives 0x0100F28A
+  ok        static_id                    built against static 0x44EE76D5 (the CRC-32 of the DCP the build opened)
+  ok        timing                       no timed path inside the partition; whole-design WNS 0.207 ns, WHS 0.030 ns from minimal_timing.rpt
+  ok        partial                      minimal_partial.bin: 1244136 B, CRC-32 0x5BAB2009 as built
+  ok        clearing                     minimal_partial_clear.bin: 67748 B, CRC-32 0x0B0F0205 as built
+  ok        expected_static              built for 0x44EE76D5; --static-id is 0x44EE76D5
+  ok        partial: bit_header_length   header declares 1244136 B, payload is 1244136 B
+  ok        partial: part                xcku115-flvb1760-1-c (want xcku115-flvb1760-1-c)
+  ok        partial: partial_flag        PARTIAL=TRUE
+  ok        partial: stream              2 sections, every packet walked to DESYNC, 196800 FDRI words, 6239 frames
+  ok        partial: idcode              0x0390D093=SLR0
+  ok        partial: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        partial: role                the commands say 'partial'
+  ok        partial: frame_box           {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}} inside the partition's {'0': {'columns': [94, 200], 'rows': [0, 1]}, '1': {'columns': [6, 11], 'rows': [0, 1]}}
+  ok        partial: vocabulary          commands and registers are a subset of the reference partial's
+  ok        bit_bin_pair                 minimal_partial.bin carries the payload of minimal_partial.bit
+  ok        clearing: stream             3 sections, every packet walked to DESYNC, 11562 FDRI words, 286 frames
+  ok        clearing: idcode             0x0390D093=SLR0
+  ok        clearing: device_global_writes no IPROG, AXSS, WBSTAR or SLR pass-through
+  ok        clearing: role               the commands say 'clearing'
+  ok        clearing: frame_box          {'0': {'rows': [0, 1], 'columns': [101, 193]}} inside the partition's {'0': {'columns': [101, 193], 'rows': [0, 1]}}
+  ok        clearing: vocabulary         commands and registers are a subset of the reference clearing's
+  ok        clearing_fits                clearing payload 67748 B of the 1048576 B the harness holds
+  ok        clearing_pairs_partial       the clearing's frames {'0': {'rows': [0, 1], 'columns': [101, 193]}} lie inside the partial's {'0': {'rows': [0, 1], 'columns': [94, 200]}, '1': {'rows': [0, 1], 'columns': [6, 11]}}
+  unchecked static_binding               a partial carries no static identity: every -cell write says UserID=0XFFFFFFFF and the frame box is the same on every static of this partition; the build receipt (static_id = CRC-32 of the DCP the build opened) and pr_verify bind it
+=== rc=0 took=2s
