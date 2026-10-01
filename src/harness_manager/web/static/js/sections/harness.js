@@ -243,12 +243,12 @@ function Row({ bid, row, h, pinBusy, netboot, focus }) {
       <span class="tags">${(row.channels || []).map((c) => html`<span class="tag" key=${c}>${c}</span>`)}</span>
       <${Marks} row=${row} />
       <span class="grow"></span>
-      <button type="button" class="btn ghost sm icon-only" data-action="pin" aria-disabled=${pinBusy ? "true" : undefined}
+      ${fold ? null : html`<button type="button" class="btn ghost sm icon-only" data-action="pin" aria-disabled=${pinBusy ? "true" : undefined}
         aria-label=${pinned ? `Unpin ${row.version}` : `Pin ${row.version}`}
         title=${pinned ? "Unpin: stop pinning the board to this release" : "Pin the board to this release: nothing newer is offered"}
         onClick=${() => { if (!pinBusy) (pinned ? unpin(bid) : pin(bid, row.version)); }}>
-        <${Icon} name=${pinned ? "lock-open" : "lock"} /></button>
-      ${picked ? null : ask ? html`<button type="button" class="btn sm" data-action="ask"
+        <${Icon} name=${pinned ? "lock-open" : "lock"} /></button>`}
+      ${picked || fold ? null : ask ? html`<button type="button" class="btn sm" data-action="ask"
           title=${`How ${row.version} reaches a netbooted board`} onClick=${() => { h.pick = row.version; h.pickRow = row; h.asking = true; changed(); }}>
           <${Icon} name="send" /> Ask for it…</button>`
         : html`<button type="button" class=${`btn sm ${offered && !block ? "primary" : ""}`} data-action="install" aria-disabled=${block ? "true" : undefined}
@@ -454,7 +454,6 @@ function InstallPanel({ bid, h }) {
       ${h.detailLoading ? html`<p class="muted"><${Spinner} /> Planning it for this board...</p>` : null}
       ${h.detailError ? html`<${Reason} level="err" text=${`${h.detailError.errName}: ${h.detailError.message}`} />` : null}
       ${plan ? html`<div class="row">
-          <${VerdictChip} row=${row} /><${Chip} icon="layers">${plan.mode}<//>
           <span class="secondary small">from the <b>${plan.channel}</b> channel #${plan.serial}; running shell <span class="mono">${(plan.running || {}).shell_id || "?"}</span></span></div>
         ${(plan.blockers || []).map((t) => html`<${Reason} key=${t} level="err" text=${t} testid="harness-blocker" />`)}
         ${(plan.warnings || []).map((t) => html`<${Reason} key=${t} level="warn" text=${t} />`)}
@@ -470,11 +469,11 @@ function InstallPanel({ bid, h }) {
             value=${h.typed} onInput=${(e) => { h.typed = e.target.value; changed(); }} data-testid="harness-rekey" /></div>
           <p class="secondary small">A re-key changes the static: every overlay and DUT RM keyed to ${(plan.running || {}).shell_id || "the running static"} stops loading.</p>` : null}
         <${DoorConsent} bid=${bid} h=${h} plan=${plan} id="hv-bp" />
-        <${ArmBox} bid=${bid} armKey="harness_install" testid="arm-harness"
-          text=${viaHub ? "Arm: I understand the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted by the MCC on the hub (paced)."
-            : "Arm: I understand this writes the board's config SD (after a backup) and reboots the board."} />
-        <${ActionRow} bid=${bid} panel="harness_install" spec=${install} variant="primary" icon="upload"
-          gate=${{ arm: "harness_install", guard, holder: "Install" }} />`}` : null}
+        <${ActionRow} bid=${bid} panel="harness_install" spec=${install} variant="primary" icon="upload" compact=${true} quietArm=${true}
+          gate=${{ arm: "harness_install", guard, holder: "Install" }}>
+          <${ArmBox} bid=${bid} armKey="harness_install" testid="arm-harness" compact=${true}
+            text=${viaHub ? "Arm: I understand the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted by the MCC on the hub (paced)."
+              : "Arm: I understand this writes the board's config SD (after a backup) and reboots the board."} /><//>`}` : null}
       <${ResultBlock} lines=${p.lines} panel=${p} testid="harness-result" />
     </div>
   </div>`;
@@ -532,10 +531,10 @@ function RollbackPanel({ bid, h }) {
         <input class="input mono grow" id=${`hv-rb-${bid}`} placeholder=${`type ${plan.consent_phrase}`} autocomplete="off" spellcheck="false"
           value=${h.typed} onInput=${(e) => { h.typed = e.target.value; changed(); }} data-testid="rollback-rekey" /></div>` : null}
       <${DoorConsent} bid=${bid} h=${h} plan=${plan} id="hv-rbp" />
-      <${ArmBox} bid=${bid} armKey="harness_rollback" testid="arm-harness-rollback"
-        text="Arm: I understand this writes the board's config SD (after a backup) and reboots the board." />
-      <${ActionRow} bid=${bid} panel="harness_install" spec=${spec} variant="primary" icon="undo-2"
-        gate=${{ arm: "harness_rollback", guard, holder: "Roll back" }} />
+      <${ActionRow} bid=${bid} panel="harness_install" spec=${spec} variant="primary" icon="undo-2" compact=${true} quietArm=${true}
+        gate=${{ arm: "harness_rollback", guard, holder: "Roll back" }}>
+        <${ArmBox} bid=${bid} armKey="harness_rollback" testid="arm-harness-rollback" compact=${true}
+          text="Arm: I understand this writes the board's config SD (after a backup) and reboots the board." /><//>
       <${ResultBlock} lines=${p.lines} panel=${p} testid="harness-result" />
     </div>
   </div>`;

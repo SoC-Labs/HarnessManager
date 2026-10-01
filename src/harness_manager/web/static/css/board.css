@@ -210,7 +210,8 @@
 .os-plan-h .chip { height: 20px; font-size: 11.5px; }
 .os-plan .reason { margin: 0; }
 .os-plan .card-body, .os-plan .actions { padding: 0; }
-.os-steps { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; list-style: none; margin: 0; padding: 0; }
+.os-steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px 6px; list-style: none; margin: 0; padding: 0; }
+.os-plan .action-row .action-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .os-step { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-3); min-width: 0; }
 .os-step .bar { height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .os-step .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
@@ -253,6 +254,5 @@
 }
 @media (max-width: 560px) {
   .os-slots { grid-template-columns: minmax(0, 1fr); }
-  .os-steps { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cx-row { grid-template-columns: minmax(0, 1fr); }
 }
