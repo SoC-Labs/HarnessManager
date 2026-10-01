@@ -50,11 +50,9 @@ def settle(page, ms=350):
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_review_overview_demo(page_factory, daemon, engine, review, scheme):
-    sim = daemon.app.state.sim
     page = page_factory(scheme, **APP)
     open_board(page, BOARD_USB)
     page.wait_for_selector('[data-testid="overview"]', timeout=T)
-    sim.attach_screen(BOARD_USB, "uart0", 1)
     expect(page.locator('[data-testid="tile-debug"]')).to_be_visible(timeout=T)   # UI v2: a state line
     expect(page.locator('[data-testid="panel-card"]')).to_be_visible()
     settle(page)

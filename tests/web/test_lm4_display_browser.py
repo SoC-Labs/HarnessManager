@@ -230,7 +230,10 @@ def test_hatching_is_exactly_on_the_tiles_that_are_not_valid(page_factory, daemo
     expect(root).to_have_attribute("data-hatched", str(300 - len(painted)), timeout=T)
     tiles = {int(x) for x in page.eval_on_selector_all(".ld-hatch", "els => els.map(e => e.dataset.tile)")}
     assert tiles == set(range(300)) - painted
-    # a hatch sits on its tile: tile 21 (row 1, column 1) is 16 CSS px in at 1x
+    # a hatch sits on its tile: tile 21 (row 1, column 1) is 16 CSS px in at 1x (UI v2: the Front
+    # panel fits the picture to the card by default; 1x is one click)
+    page.locator('[data-testid="live-display"] .seg button:has-text("1x")').click()
+    expect(root).to_have_attribute("data-zoom", "1")
     box = page.locator('.ld-hatch[data-tile="21"]').bounding_box()
     frame = by_id(page, "live-frame").bounding_box()
     assert (round(box["x"] - frame["x"]), round(box["y"] - frame["y"])) == (16, 16)
@@ -336,7 +339,26 @@ def text_mirror_shown(page):
     expect(by_id(page, "panel-mirror")).to_be_visible(timeout=T)
     expect(by_id(page, "live-canvas")).to_have_count(0)
     expect(by_id(page, "panel-card")).to_be_visible()
-    expect(page.locator('[data-testid="panel-owner"]')).to_be_visible()
+    expect(page.locator('[data-testid="panel-line"] [data-part="owner"]')).to_be_visible()
+
+
+def text_only_with(page, why):
+    """UI v2: a 422 (UNAVAILABLE: this board can never show it) makes the Front panel Text
+    only; the Live button is off and says why in the daemon's words."""
+    card = by_id(page, "panel-card")
+    expect(card).to_have_attribute("data-view", "text", timeout=T)
+    live = card.locator('[data-action="panel-view-live"]')
+    expect(live).to_be_disabled()
+    expect(live).to_have_attribute("title", re.compile(re.escape(why)))
+    text_mirror_shown(page)
+    return live
+
+
+def board_changed(daemon):
+    """A new identity (another image): the page forgets the board's 422 and offers Live again."""
+    from harness_manager.core.events import Event
+
+    daemon.engine.bus.publish(Event("board.identity", BOARD, {}))
 
 
 def test_a_409_shows_the_text_mirror_and_names_the_holder(page_factory, daemon):
@@ -365,18 +387,16 @@ def test_a_board_that_can_never_show_it_is_422_even_behind_someone_elses_lease(p
     why = "needs the Linux harness with lcd_mirror (this board runs the bare-metal harness)"
     daemon.app.state.sim.behind_hub(BOARD, lease="other", holder=HOLDER)
     sim(daemon).gate(BOARD, why)
-    page = live_page(page_factory)
-    root = by_id(page, "live-display")
-    expect(root).to_have_attribute("data-refused", "UNAVAILABLE", timeout=T)
-    text_mirror_shown(page)
-    reason = by_id(page, "live-reason")
-    expect(reason).to_have_text(f"Live display: {why}")
-    expect(reason).not_to_contain_text(HOLDER)               # no "(the lease is held by ...)"
-    assert "held" not in reason.get_attribute("class")
-    # the twin: the gate lifted, the same lease is 409 naming the holder
+    page = page_factory(**APP)
+    open_board(page)
+    live = text_only_with(page, why)
+    assert HOLDER not in (live.get_attribute("title") or "")  # no "(the lease is held by ...)"
+    # the twin: the gate lifted (the board changed), the same lease is 409 naming the holder
     sim(daemon).allow(BOARD)
-    page.locator('[data-action="live-retry"]').click()
+    board_changed(daemon)
+    root = by_id(page, "live-display")
     expect(root).to_have_attribute("data-refused", "HELD", timeout=T)
+    reason = by_id(page, "live-reason")
     expect(reason).to_contain_text(f"the live display is for the lease holder only: {HOLDER} holds")
     assert "held" in reason.get_attribute("class")
     assert not page.errors, page.errors
@@ -407,21 +427,19 @@ def test_a_refused_view_asks_again_when_it_comes_back_on_screen_and_not_before(p
 
 def test_a_422_shows_the_text_mirror_and_the_reason(page_factory, daemon):
     sim(daemon).no_display(BOARD)                         # a pack with no live display for it
-    page = live_page(page_factory)
-    root = by_id(page, "live-display")
-    expect(root).to_have_attribute("data-refused", "UNAVAILABLE", timeout=T)
-    text_mirror_shown(page)
-    expect(by_id(page, "live-reason")).to_contain_text("has no live display for this board")
+    page = page_factory(**APP)
+    open_board(page)
+    text_only_with(page, "has no live display for this board")
     # the adapter says why not (the bare-metal harness): its reason, word for word
     why = "needs the Linux harness with lcd_mirror (this board runs the bare-metal harness)"
     sim(daemon).allow(BOARD)
     sim(daemon).refuse(BOARD, why)
-    page.locator('[data-action="live-retry"]').click()
-    expect(by_id(page, "live-reason")).to_have_text(f"Live display: {why}", timeout=T)
-    text_mirror_shown(page)
-    # the twin: allowed, Try again brings the picture
+    board_changed(daemon)                                 # asked again: refused again
+    live = text_only_with(page, why)
+    expect(live).to_have_attribute("title", f"Live: {why}")
+    # the twin: allowed, the board changes again and Live brings the picture
     sim(daemon).allow(BOARD)
-    page.locator('[data-action="live-retry"]').click()
+    board_changed(daemon)
     is_live(page)
     expect(by_id(page, "live-reason")).to_have_count(0)
     expect(by_id(page, "panel-mirror")).to_have_count(0)
