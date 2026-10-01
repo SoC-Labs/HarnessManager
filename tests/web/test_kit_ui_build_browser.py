@@ -443,6 +443,43 @@ def test_a_failed_build_names_its_one_gate_and_its_fix_and_a_passed_one_opens_no
 
 
 @pytest.mark.mock_too
+def test_a_build_stopped_after_link_gives_the_proven_floorplan_loop(page_factory, daemon, engine, tmp_path):
+    """KIT-INTERACTIVE A1-A4: the GUI, your open Vivado, stop-after-link and nested pblocks are
+    proven, so the page says nothing is "being proven", and the floorplan is saved with
+    hm_save_floorplan (a child pblock of the partition's), not write_xdc -cell."""
+    fielded(engine)
+    import_kit(daemon)
+    bdir = tmp_path / "stopped"
+    kf.passed_build(bdir, state="stopped", stage="link", gates=[
+        {"gate": "static_id", "verdict": "PASS", "detail": f"CRC-32 is {SID}"},
+        {"gate": "drc_hdpr_link", "verdict": "PASS", "detail": "no HDPR-16/18/50"}])
+    page = page_factory("light")
+    open_build(page)
+    choose_design(page)
+    watch(page, bdir)
+    expect(by_id(page, "bd-verdict")).to_contain_text("HM_RM_BUILD_STOPPED after=link", timeout=T)
+    save = by_id(page, "bd-save-floorplan")
+    expect(save).to_contain_text(f"hm_save_floorplan {bdir}/floorplan.xdc")
+    expect(page.locator(".bd-howto")).to_contain_text("set_property PARENT")
+    body = by_id(page, "section-build")
+    expect(body).not_to_contain_text("write_xdc -cell u_rp_dut -exclude_timing")
+    expect(body).not_to_contain_text("being proven")
+    # twin: a failed build has no floorplan loop to offer
+    bad = tmp_path / "failed"
+    kf.passed_build(bad, state="failed", stage="impl", gates=[
+        {"gate": "rm_timing", "verdict": "FAIL", "detail": "setup WNS -0.412 ns"}])
+    assert page.errors == []
+    page = page_factory("light")
+    open_build(page)
+    choose_design(page)
+    watch(page, bad)
+    expect_node(page, "check", "failed")
+    expect(by_id(page, "bd-verdict")).to_have_count(0)
+    expect(by_id(page, "bd-save-floorplan")).to_have_count(0)
+    assert page.errors == []
+
+
+@pytest.mark.mock_too
 def test_a_build_for_another_shell_is_refused_exit_14_and_its_twin_passes(page_factory, daemon, engine, tmp_path):
     fielded(engine)
     import_kit(daemon)
