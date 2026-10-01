@@ -1426,7 +1426,11 @@ harness-manager board claim 192.168.10.101 --key ~/.ssh/id_ed25519.pub   # asks 
 harness-manager board claim-status 192.168.10.101
 harness-manager board ssh 192.168.10.101                    # root on the board, through the hub
 harness-manager board ssh 192.168.10.101 -c 'ls -l /persist'
+harness-manager board ssh 192.168.10.101 -c 'uptime; logread | grep -E "harnessd|stage0"'
 ```
+
+`-c` takes the whole line as **one** command for the board's shell, exactly as `ssh host 'CMD'`
+sends it: pipes, `;` and quotes inside it reach the board intact (on Windows too).
 
 The claim pins the board's SSH host key in `boards.toml` (`ssh.host_key`). A board that
 answers with another key is refused.

@@ -326,7 +326,8 @@ board claim TARGET [--key PUB] [--adopt] [--yes]
     claimed with your key.
 board claim-status TARGET  is it claimed, and by this Harness Manager's key?
 board ssh TARGET [-c CMD] [--print]
-                           ssh in as root, with the pinned host key
+                           ssh in as root, with the pinned host key; -c runs CMD
+                           as one line in the board's shell, as ssh host 'CMD'
 board identity TARGET      the board's label, IP and MAC against its hub entry
                            and the other boards: differences and clashes
 board identity TARGET --from-hub | --label L [--ip A/N] [--mac M] | --clear
