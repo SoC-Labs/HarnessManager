@@ -346,7 +346,12 @@ def test_debug_open_session_gives_the_gdb_line_and_where_openocd_runs(page_facto
     page = page_factory(**APP)
     workbench(page, BOARD_USB)
     card = by_id(page, "debug-card")
-    expect(card.locator('[data-testid="debug-where"]')).to_have_count(0)   # not said: not shown
+    expect(by_id(page, "debug-state")).to_have_text("down", timeout=T)
+    where = card.locator('[data-testid="debug-where"]')
+    # not said: not shown (the mock's older reply); DEBUG-ONBOARD's service says where it would
+    # run even while down (this PC, for a bare-metal board)
+    if where.count():
+        expect(where).to_have_attribute("data-where", "host")
     page.locator('[data-action="up"]').click()
     expect(by_id(page, "debug-state")).to_have_text("up", timeout=T)
     expect(by_id(page, "debug-attach")).to_contain_text(gdb_command(3343))

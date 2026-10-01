@@ -675,7 +675,8 @@ def test_the_apps_debug_card_says_where_and_builds_each_cores_line():
     assert "OpenOCD runs on the board" in js and "OpenOCD runs on this PC" in js
     line = js.split("export function gdbCmdFor(port) {", 1)[1].split("`", 2)[1]
     assert line.replace("${port}", "40002") == gdb_command(40002)
-    assert "Attach ${core}" in js and 'data-testid="debug-where"' in js
+    # UI v2 (WORKBENCH's Debug card): one row per core, "gdb <core>", each its own attach id
+    assert "data-testid=${`debug-attach-${core}`}" in js and 'data-testid="debug-where"' in js
 
 
 def test_twin_the_card_check_catches_a_drift():

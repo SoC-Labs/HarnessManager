@@ -49,7 +49,7 @@ def test_the_linux_board_runs_openocd_on_the_board_with_an_attach_row_per_core(
     assert len(ports) == 2
     for core, port in zip(("cpu0", "cpu1"), ports, strict=True):
         expect(by_id(page, f"debug-attach-{core}")).to_contain_text(gdb_command(port))
-    expect(page.locator('[data-port="telnet"]')).to_have_text("on the board only")
+    expect(page.locator('[data-port="telnet"]')).to_contain_text("on the board only")   # "telnet …"
     assert not page.errors, page.errors
 
 
@@ -67,5 +67,6 @@ def test_negative_twin_the_bare_metal_board_runs_it_on_this_pc_with_one_attach_r
     expect(page.locator('[data-testid^="debug-attach-"]')).to_have_count(0)
     port = showcase.engine._board(BOARD_V011).debug.gdb_port
     expect(by_id(page, "debug-ports")).to_contain_text(gdb_command(port))
-    expect(page.locator('[data-port="telnet"]')).to_contain_text("127.0.0.1:")
+    telnet = showcase.engine._board(BOARD_V011).debug.telnet_port         # UI v2: "telnet <port>"
+    expect(page.locator('[data-port="telnet"]')).to_contain_text(f"telnet {telnet}")
     assert not page.errors, page.errors
