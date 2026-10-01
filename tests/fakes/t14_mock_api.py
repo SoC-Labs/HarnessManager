@@ -1512,5 +1512,20 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+
+# --- bringup-usb ---
+# BRINGUP-USB: the bring-up routes (docs/API.md "Bring-up over the Debug USB", bringup_api.py)
+# on every mock app this module builds (tests/fakes/bringup_mock.py). MockDaemon calls
+# create_app by name, so wrapping it here is enough; the UI mount stays last.
+_create_app_before_bringup = create_app
+
+
+def create_app(engine: Any | None = None, *, token: str = "t14-token",  # noqa: F811
+               serve_ui: bool = True) -> FastAPI:
+    from .bringup_mock import attach
+
+    return attach(_create_app_before_bringup(engine, token=token, serve_ui=serve_ui), _ok)
+# --- end bringup-usb ---
+
 if __name__ == "__main__":
     raise SystemExit(main())
