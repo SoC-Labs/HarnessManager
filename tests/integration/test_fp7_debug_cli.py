@@ -64,16 +64,28 @@ REOPENED = state("up", ports={"gdb": 44487}, pid=775, where="board",
                  gdb_ports=[44487, 47353], cores=["cpu0", "cpu1"])
 
 
-def hold_with(cli, capsys, events: list[Event], *argv: str) -> str:
-    """``debug up`` holding for a moment while ``events`` arrive on the engine's bus."""
+def feeder(bus: Any, events: list[Event]) -> threading.Thread:
+    """Publish ``events`` once the holding ``debug up`` listens (never before: a loaded
+    machine can take longer than any fixed delay to get there)."""
     def feed() -> None:
-        time.sleep(0.4)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            with bus._lock:
+                if bus._subs.get("debug.state"):
+                    break
+            time.sleep(0.02)
         for ev in events:
-            cli.bus.publish(ev)
+            bus.publish(ev)
 
     t = threading.Thread(target=feed, daemon=True)
     t.start()
-    rc, out, _err = run_cli(capsys, *argv, "debug", "up", "127.0.0.1", "--for", "1.5")
+    return t
+
+
+def hold_with(cli, capsys, events: list[Event], *argv: str) -> str:
+    """``debug up`` holding for a moment while ``events`` arrive on the engine's bus."""
+    t = feeder(cli.bus, events)
+    rc, out, _err = run_cli(capsys, *argv, "debug", "up", "127.0.0.1", "--for", "3")
     t.join(5)
     assert rc == 0
     return out
@@ -124,14 +136,8 @@ def test_twin_events_of_another_board_or_without_a_swap_print_nothing(cli, capsy
 
 
 def test_json_keeps_stdout_to_the_one_result_and_says_the_swap_on_stderr(cli, capsys):
-    def feed() -> None:
-        time.sleep(0.4)
-        for ev in (CLOSED, REOPENED):
-            cli.bus.publish(ev)
-
-    t = threading.Thread(target=feed, daemon=True)
-    t.start()
-    rc, out, err = run_cli(capsys, "--json", "debug", "up", "127.0.0.1", "--for", "1.5")
+    t = feeder(cli.bus, [CLOSED, REOPENED])
+    rc, out, err = run_cli(capsys, "--json", "debug", "up", "127.0.0.1", "--for", "3")
     t.join(5)
     assert rc == 0
     json.loads(out)                                   # still exactly one JSON object
