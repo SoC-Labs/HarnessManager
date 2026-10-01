@@ -14,6 +14,7 @@ import pytest
 
 from harness_manager.core.pack import CardStatus, SlotInfo, SlotJob, SlotStatus
 from harness_manager.demo import BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -45,6 +46,7 @@ def with_os_slots(engine, job: list[SlotJob]) -> None:
 def open_board(page) -> None:
     page.locator(f'.board-item[data-board="{BOARD_USB}"]').click()
     page.locator('[data-action="open"]').click()
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
     page.wait_for_selector(CARD, timeout=T)             # UI v2: the Design card's Boots next
 
 

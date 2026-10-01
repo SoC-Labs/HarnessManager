@@ -37,6 +37,7 @@ def open_board(page, board_id):
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="board-header"]', timeout=T)
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
 
 
 def section(page, key):

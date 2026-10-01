@@ -15,6 +15,7 @@ from urllib.parse import quote
 import pytest
 
 from harness_manager.demo import BOARD_USB
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 
@@ -29,6 +30,7 @@ def open_board(page) -> None:
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="board-header"]', timeout=T)
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
 
 
 def until(predicate, timeout: float = 10.0):
@@ -65,6 +67,7 @@ def test_the_page_views_the_board_it_shows_and_marks_its_own_reads(page_factory,
     clicked = until(lambda: info_reads(requests))
     assert all("x-hm-background" not in h for h in clicked)
     page.locator('button:has-text("Close board")').click()           # closing stops the view
+    page.locator('[data-testid="close-confirm"] [data-action="close_confirm"]').click()   # UI v2: it asks
     until(lambda: gate.viewers(BOARD_USB) == 0)
     assert page.errors == []
 

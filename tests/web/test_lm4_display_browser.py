@@ -55,10 +55,13 @@ def by_id(page, testid):
 def open_board(page, bid=BOARD):
     page.locator(f'.board-item[data-board="{bid}"]').click()
     page.wait_for_selector(f'main[data-board="{bid}"], [data-action="open"]', timeout=T)
-    if page.locator(f'main[data-board="{bid}"]').count() == 0:
+    opened = page.locator(f'main[data-board="{bid}"]').count() == 0
+    if opened:
         page.locator('[data-action="open"]').click()
     page.wait_for_selector(f'main[data-board="{bid}"] [data-testid="fact-shell"]'
                            ':not(:has-text("unknown"))', timeout=T)
+    if opened:
+        nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
 
 
 def show_display(page):

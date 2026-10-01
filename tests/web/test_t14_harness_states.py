@@ -54,6 +54,7 @@ def stage(browser, tmp_path, monkeypatch, screenshots):
         page.locator(f'.board-item[data-board="{cand.board_id}"]').click()
         page.locator('[data-action="open"]').click()
         page.wait_for_selector('[data-testid="board-header"]', timeout=T)
+        nav.land(page, "board")                # UI v2: a board opens on the Workbench
         nav.board_page(page, "about")          # UI v2: 0.1.0's Details are Board > About / Readings
         page.wait_for_selector('[data-testid="identity-card"]', timeout=T)
         return page, engine, cand.board_id

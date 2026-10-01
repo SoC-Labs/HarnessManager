@@ -20,6 +20,7 @@ import pytest
 from harness_manager.demo import BOARD_FIELDED
 from tests.fakes.clcd_panel_shell import LINUX_STATUS_ROWS, PANEL_FEATURES
 from tests.fakes.p1_mock_panel import PanelSim
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -57,6 +58,7 @@ def open_board(page) -> None:
     page.locator(f'.board-item[data-board="{BOARD}"]').click()
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="board-header"]', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
     # Background reads off: the Overview's first read was held back too ("Read now" there).
     page.wait_for_selector('[data-testid="overview"], [data-testid="info-quiet"]', timeout=T)
     if page.locator('[data-testid="info-quiet"]').count():

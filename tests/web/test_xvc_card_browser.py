@@ -46,6 +46,7 @@ def open_board(page, bid=BOARD):
     if page.locator('[data-action="open"]').count():
         page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
 
 
 def to_debug(page):

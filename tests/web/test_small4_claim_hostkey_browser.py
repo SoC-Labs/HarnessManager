@@ -38,6 +38,7 @@ def open_board(page):
     page.wait_for_selector(f'main[data-board="{BOARD_FIELDED}"], [data-action="open"]', timeout=T)
     if page.locator(f'main[data-board="{BOARD_FIELDED}"]').count() == 0:
         page.locator('[data-action="open"]').click()
+    nav.land(page, "board")                       # UI v2: a board opens on the Workbench
     nav.board_page(page, "access")                # UI v2: the Overview's Board tile is gone
     page.wait_for_selector('[data-testid="tile-claim"]', timeout=T)
 

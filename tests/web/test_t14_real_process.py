@@ -101,6 +101,7 @@ def test_the_daemon_process_serves_the_ui_and_opens_a_board_added_by_address(
             expect(page.locator('[data-testid="fact-harness"]')).to_contain_text("bare-metal")
             page.screenshot(path=str(screenshots / "process-overview-light.png"))
             page.locator('.board-header button:has-text("Close board")').click()
+            page.locator('[data-testid="close-confirm"] [data-action="close_confirm"]').click()  # UI v2: it asks
             expect(page.locator('[data-action="open"]')).to_be_visible(timeout=T)
             assert errors == []
         finally:

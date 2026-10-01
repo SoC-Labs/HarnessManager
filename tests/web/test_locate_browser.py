@@ -19,6 +19,7 @@ from harness_manager.demo import BOARD_FIELDED, BOARD_HELD, BOARD_USB
 from harness_manager_mps3.capabilities import NEEDS_LOCATE
 from tests.fakes.clcd_panel_shell import PANEL_FEATURES
 from tests.fakes.p1_mock_panel import PanelSim
+from tests.web import nav
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -203,6 +204,7 @@ def open_board(page, bid=BOARD):
     page.locator(f'.board-item[data-board="{bid}"]').click()
     page.locator('[data-action="open"]').click()
     page.wait_for_selector('[data-testid="fact-shell"]:not(:has-text("unknown"))', timeout=T)
+    nav.land(page)                       # UI v2: a board opens on the Workbench; these read the Overview
     page.wait_for_selector('[data-testid="panel-identify"]', timeout=T)
 
 
