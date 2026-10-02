@@ -952,3 +952,32 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   "Bring-up over the Debug USB"). The demo (`app --demo`) has a new board on the Debug USB to
   bring up, with its bundles.
 <!-- --- end bringup-usb --- -->
+<!-- --- bringup-2 --- -->
+### Bring-up: unsigned bundles, the card reader on the command line, a proposed identity (BRINGUP-2, for v0.1.1)
+- **An unsigned bundle is allowed, red and typed.** A bundle folder or zip (the wizard's
+  source, `harness-manager bringup --bundle`) shows "Unsigned: Harness Manager cannot check
+  where this came from; only install a bundle you built or got from SoC Labs directly.", its
+  sha256 and how it is made (a zip's own `sha256sum`; a folder's manifest, one `sha256sum`
+  line per file sorted by path, which `cd FOLDER && find . -type f -printf '%P\0' | LC_ALL=C
+  sort -z | xargs -0 sha256sum | sha256sum` prints too), and nothing is written until
+  `INSTALL UNSIGNED <first 8 hex>` is typed. `--yes` never implies it; `--confirm-unsigned
+  PHRASE` for scripts; the service refuses without it (`confirm_unsigned`), and refuses a
+  bundle changed since its phrase was shown. A folder with a symbolic link is refused.
+  Signed releases and the catalogue's trust are unchanged.
+- **`bringup --card-reader DEVICE_ID`** writes the configuration SD in this PC's card reader,
+  as the wizard does: a backup of the card, the typed `WRITE <model> <size>` (`--confirm`),
+  the board pack's MBBIOS rule, a read-back, then no MCC reboot ("put the card back in the
+  board's configuration SD slot and power the board on"). The wizard's card-reader door now
+  goes through `POST /bringup/card-reader` (the bundle's checks and the unsigned phrase
+  first), and asks for the writer's own phrase (`WRITE SD/MMC 31.9 GB`).
+- **A proposed identity.** Once the harness answers, the wizard's last step (and the CLI's
+  summary) proposes the board's label (`MPS3-` and the last 4 of the MCC's USB serial
+  number), its IP (192.168.10.101; two boards on one network need different IPs) and a
+  locally administered MAC derived from that serial (documented; uniqueness of MCC serials is
+  not yet verified), all editable, and hands them to the existing identity writer on Board >
+  Access (`board identity`, net-protocol v0.16 `identity_set`, with its typed phrase). A
+  bare-metal harness, or an image before identity_set, is told so and nothing is sent.
+  `GET /boards/{bid}/bringup/proposal`.
+- **The card writer has no MBBIOS rule of its own:** the board pack's
+  (`harness_manager_mps3.mbbios`) is the only one; a pack without one writes files as given.
+<!-- --- end bringup-2 --- -->

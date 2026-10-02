@@ -835,3 +835,21 @@ def test_twin_a_harness_that_reports_no_identity_at_all_predates_it_too(demo):
     expect(page.locator('[data-action="bu-id-set"]')).to_have_count(0)
     assert posts == []
     assert not page.errors, page.errors
+
+
+def test_over_usb_is_shown_by_default_in_the_add_dialog_no_setting_hides_it(demo):
+    """david 2 Oct (decision 5): v0.1.1 ships "Over USB" un-hidden."""
+    from harness_manager.settings import rows
+
+    page = demo.page()
+    page.evaluate("import('./js/modal.js').then(m => m.openModal('add'))")
+    usb = page.get_by_role("button", name="Over USB (a new board plugged into this PC)")
+    expect(usb).to_be_visible(timeout=T)
+    expect(usb).to_be_enabled()
+    usb.click()
+    expect(by(page, "add-over-usb")).to_be_visible(timeout=T)
+    # the twin: no settings row turns the door off (bringup.sd_flash is the card reader's only)
+    names = {r.key for r in rows.CORE_ROWS}
+    assert {n for n in names if n.startswith("bringup.")} == {"bringup.sd_flash",
+                                                               "bringup.sd_flash_max"}
+    assert not page.errors, page.errors
