@@ -1,0 +1,34 @@
+/* "Name this board" (lane IDENTITY; js/sections/identity.js). Colours are the tokens
+   (tokens.css), so light and dark follow the page. */
+
+.modal.name-board { width: min(720px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; }
+.modal.name-board .modal-pad { min-height: 0; overflow-y: auto; }
+.nb .seg { flex-wrap: wrap; }
+
+.nb-row { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 6px 12px; align-items: start; }
+.nb-row > label { color: var(--text-2); font-size: 13px; padding-top: 7px; }
+.nb-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.nb-inline { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.nb-inline .mono { overflow-wrap: anywhere; }
+.nb-why { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.nb-col > .nb-why[data-testid$="-why"] { color: var(--err); }
+.nb-count { font-family: var(--font-mono); font-size: 12px; color: var(--text-3); min-width: 40px; text-align: right; }
+.nb-count.over { color: var(--err); font-weight: 600; }
+
+/* the board's address after the change: where nobody misses it */
+.nb-ip { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--accent-border);
+  border-radius: var(--radius); background: var(--accent-soft); }
+.nb-ip-label { font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.nb-ip-value { font-size: 26px; font-weight: 600; color: var(--accent-text); line-height: 1.2; overflow-wrap: anywhere; }
+
+.nb-hub { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.nb-hub p { margin: 0; }
+.nb-changes { margin: 0; padding-left: 18px; }
+.nb .field { flex-wrap: wrap; }
+.nb .field label { overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  .nb-row { grid-template-columns: minmax(0, 1fr); }
+  .nb-row > label { padding-top: 0; }
+  .nb-ip-value { font-size: 22px; }
+}

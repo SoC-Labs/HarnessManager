@@ -32,7 +32,7 @@ def open_board(page):
 
 
 # UI v2 (BOARD): the identity is Board > Access's card (label, IP, MAC as rows); Fix identity…
-# opens the same dialog in a modal
+# opens the same dialog in a modal (lane IDENTITY: "Name this board", on its hub-entry mode)
 CARD = '[data-testid="access-identity"]'
 ROW = f'{CARD} [data-status]'
 WARN = '[data-testid="access-identity-warning"]'
@@ -75,10 +75,13 @@ def test_a_clash_warns_on_the_tile_and_the_dialog_fixes_it_with_the_typed_phrase
     page.locator('[data-testid="identity-phrase"]').fill("MPS3-02")
     expect(confirm).to_be_enabled()
     confirm.click()
+    # lane IDENTITY: one dialog; it says what was set, then Close
+    expect(page.locator('[data-testid="nb-done"]')).to_contain_text("label MPS3-02", timeout=T)
+    page.locator('[data-action="nb-close"]').click()
+    expect(page.locator('[data-testid="identity-dialog"]')).to_have_count(0)      # the modal closed
     expect(row).to_have_attribute("data-status", "ok", timeout=T)
     expect(page.locator(WARN)).to_have_count(0)
     expect(page.locator(FIX)).to_have_count(0)
-    expect(page.locator('[data-testid="identity-dialog"]')).to_have_count(0)      # the modal closed
     assert sim.posts == [{"confirm": "MPS3-02", "from_hub": True}]
     assert not page.errors, page.errors
 
@@ -109,7 +112,7 @@ def test_twin_a_netbooted_board_shows_the_refusal_and_nothing_to_press(page_fact
     expect(ref).to_contain_text("re-bake stage0")
     expect(page.locator('[data-action="identity-fix-confirm"]')).to_have_count(0)
     expect(page.locator('[data-testid="identity-phrase"]')).to_have_count(0)
-    page.locator('[data-action="identity-fix-cancel"]').click()
+    page.locator('[data-action="nb-close"]').click()
     expect(page.locator('[data-testid="identity-dialog"]')).to_have_count(0)
     assert sim.posts == []
     assert not page.errors, page.errors

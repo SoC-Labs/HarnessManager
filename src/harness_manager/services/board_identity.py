@@ -971,6 +971,7 @@ class IdentityService:
         out["rules"] = {"name_max": IA.NAME_MAX, "name": IA.NAME_RULE,
                         "mac": "unicast, not all zeros"
                                + "".join(f", not {p}:*" for p in policy.reserved_mac_prefixes),
+                        "mac_reserved": list(policy.reserved_mac_prefixes),
                         "ip": "IPv4, a host address of a /24"}
         hub_out = None
         if hub_name:

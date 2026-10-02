@@ -582,6 +582,43 @@ export function bringupMissing(err) {
   return !!err && err.status === 404 && (/no such endpoint/.test(err.message) || err.errName === "HTTP_404");
 }
 // --- end bringup-usb ---
+// --- identity ---
+// Lane IDENTITY (HM v0.1.1): "Name this board" reads GET /boards/{bid}/identity/proposal
+// (docs/API.md "Board identity", identity_api.py). Helpers only: ENDPOINTS is the integrator's
+// table (CCR IDENTITY-1 folds this name into it); tests/web/test_identity_static.py checks it
+// against API.md and the daemon's routes, as test_t14_static does for ENDPOINTS.
+export const IDENTITY_ENDPOINTS = Object.freeze({
+  identityProposal: ["GET", "/boards/{bid}/identity/proposal"],
+});
+
+// GET an IDENTITY_ENDPOINTS route with a query (empty values left out): call()'s token, errors
+// and connection state.
+export async function identityCall(name, params = {}, query = null) {
+  const [method, template] = IDENTITY_ENDPOINTS[name];
+  const url = new URL(fillPath(template, params).replace(/^\//, ""), apiBase());
+  for (const [k, v] of Object.entries(query || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(url, { method, headers, cache: "no-store" });
+  } catch (e) {
+    setConnection("down");
+    throw new ApiError({
+      name: "NO_ANSWER",
+      message: "harness-manager-daemon did not answer",
+      hint: "check it is running: harness-manager daemon status",
+    }, 0, true);
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
+  return { data, status: res.status };
+}
+// --- end identity ---
 // --- ui2 build --- (lane UI2-BUILD) The Import dialog's "Choose a zip": POST /overlays/upload
 // takes the zip's bytes as the body (send() JSON-encodes every body), and `name`, `board_id`,
 // `static_id`, `check_only` in the query. The answer and its failures are call()'s.

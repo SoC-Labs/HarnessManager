@@ -722,26 +722,27 @@ def test_nothing_is_scanned_until_scan_is_clicked(demo):
 
 
 def test_next_proposes_a_name_from_the_mcc_usb_serial_a_random_mac_and_a_pool_ip(demo):
+    """Lane IDENTITY (david 2 Oct): the name from the serial, a RANDOM MAC (never the
+    serial's), the pool's next free IP; "Open it on Ethernet and name it…" opens the ONE "Name
+    this board" dialog on the Ethernet board, pre-filled with them."""
     page = demo.page()
     bring_up(page, demo.example(0))
     expect(by(page, "bu-witness-result")).to_contain_text("a harness answers", timeout=T)
     expect(by(page, "bu-id-serial")).to_have_text("DEMO20")
-    expect(by(page, "bu-id-label")).to_have_value("MPS3-MO20")
-    expect(by(page, "bu-id-ip")).to_have_value("192.168.10.110/24")       # lane IDENTITY: the pool
-    mac = by(page, "bu-id-mac").input_value()
+    expect(by(page, "bu-id-label")).to_have_text("MPS3-MO20")
+    expect(by(page, "bu-id-ip")).to_have_text("192.168.10.110")         # the pool's first
+    mac = by(page, "bu-id-mac").inner_text()
     assert mac.startswith("02:") and not mac.startswith("02:00:00:")       # random, not derived
-    expect(by(page, "bu-identity")).to_contain_text("every board gets its own IP")
-    by(page, "bu-id-label").fill("LAB-07")                             # editable
+    expect(by(page, "bu-id-same-net")).to_have_text(
+        "This PC must be on the same /24 (e.g. 192.168.10.1/24).")
     page.locator('[data-action="bu-next"]').click()
-    modal = by(page, "bu-identity-modal")
+    modal = by(page, "name-board-modal")
     expect(modal).to_be_visible(timeout=T)
     expect(page.locator(f'main[data-board="{BOARD_NEW_ETH}"]')).to_be_visible(timeout=T)
-    expect(modal.locator('[data-field="label"]')).to_contain_text("LAB-07")
-    expect(modal.locator('[data-field="mac"]')).to_contain_text(mac)
     # the twin: the demo's new board runs the bare-metal harness, which has no identity store
-    expect(by(page, "bu-id-refusal")).to_contain_text(
-        "This board cannot take an identity: the bare-metal harness has no identity store")
-    expect(page.locator('[data-action="bu-id-set"]')).to_have_count(0)
+    expect(by(page, "identity-refusal")).to_contain_text(
+        "This board cannot take a name: the bare-metal harness has no identity store")
+    expect(page.locator('[data-action="identity-fix-confirm"]')).to_have_count(0)
     assert not page.errors, page.errors
 
 
@@ -770,51 +771,22 @@ def serve_identity(page: Any, status: dict | None, posts: list[dict]) -> None:
         route.fulfill(status=200, content_type="application/json",
                       body=_json.dumps({"ok": True, "board_id": "x", "identity": status}))
 
-    def job(route: Any) -> None:
-        body = posts[-1] if posts else {}
-        route.fulfill(status=200, content_type="application/json", body=_json.dumps({
-            "ok": True, "id": "bu2-identity-job", "kind": "identity", "state": "done",
-            "result": {"action": "set", "verified": True, "notes": [], "changes": [
-                {"field": k, "from": "", "to": body[k]} for k in ("label", "ip", "mac")
-                if k in body]}}))
-
     page.route(IDENTITY_URL, identity)
-    page.route("**/api/v1/jobs/bu2-identity-job*", job)
 
 
-def open_identity(page: Any, want: dict, impl: str = "linux") -> Any:
+def open_identity(page: Any, prefill: dict, impl: str = "linux") -> Any:
     from harness_manager.demo_showcase import BOARD_V011
     from tests.web import nav
 
     nav.open_board(page, BOARD_V011)
-    page.evaluate("a => import('./js/modal.js').then(m => m.openModal('bu-identity', a))",
-                  {"bid": BOARD_V011, "want": want, "impl": impl, "serial": "DEMO20"})
-    modal = by(page, "bu-identity-modal")
+    page.evaluate("a => import('./js/modal.js').then(m => m.openModal('name-board', a))",
+                  {"bid": BOARD_V011, "prefill": prefill, "impl": impl})
+    modal = by(page, "name-board-modal")
     expect(modal).to_be_visible(timeout=T)
     return modal
 
 
-WANT = {"label": "MPS3-MO20", "ip": "192.168.10.102/24", "mac": "02:13:8c:d4:4d:9c"}
-
-
-def test_the_identity_dialog_hands_the_values_to_the_identity_writer_with_its_phrase(demo):
-    posts: list[dict] = []
-    page = demo.page()
-    serve_identity(page, linux_identity(), posts)
-    modal = open_identity(page, WANT)
-    changes = by(page, "bu-id-changes")
-    expect(changes).to_contain_text("MPS3 → MPS3-MO20", timeout=T)
-    expect(changes).to_contain_text("192.168.10.101/24 → 192.168.10.102/24")
-    expect(changes).to_contain_text("02:00:00:4d:50:53 → 02:13:8c:d4:4d:9c")
-    expect(by(page, "bu-id-phrase-want")).to_have_text("MPS3-MO20")       # the writer's phrase
-    by(page, "bu-id-phrase").fill("MPS3-MO2")
-    expect(page.locator('[data-action="bu-id-set"]')).to_be_disabled()   # the twin: not typed
-    by(page, "bu-id-phrase").fill("MPS3-MO20")
-    page.locator('[data-action="bu-id-set"]').click()
-    expect(by(page, "bu-id-done")).to_contain_text("label MPS3-MO20", timeout=T)
-    assert posts == [{"confirm": "MPS3-MO20", **WANT}]                  # POST /boards/{bid}/identity
-    expect(modal).to_be_visible()
-    assert not page.errors, page.errors
+PREFILL = {"label": "MPS3-MO20", "ip": "192.168.10.110/24", "mac": "02:13:8c:d4:4d:9c"}
 
 
 def test_twin_a_harness_that_predates_identity_set_is_told_so_and_nothing_is_sent(demo):
@@ -825,11 +797,11 @@ def test_twin_a_harness_that_predates_identity_set_is_told_so_and_nothing_is_sen
         "message": "pending the Linux lead's interface: this harness image has no identity verbs "
                    "(net-protocol v0.16 `identity`/`identity_set`, images rc2_v7 and later)"},
         reported={"feature": False}), posts)
-    open_identity(page, WANT)
-    expect(by(page, "bu-id-refusal")).to_contain_text(
+    open_identity(page, PREFILL)
+    expect(by(page, "identity-refusal")).to_contain_text(
         "This board's harness predates identity_set: pending the Linux lead's interface",
         timeout=T)
-    expect(page.locator('[data-action="bu-id-set"]')).to_have_count(0)
+    expect(page.locator('[data-action="identity-fix-confirm"]')).to_have_count(0)
     assert posts == []
     assert not page.errors, page.errors
 
@@ -838,10 +810,10 @@ def test_twin_a_harness_that_reports_no_identity_at_all_predates_it_too(demo):
     posts: list[dict] = []
     page = demo.page()
     serve_identity(page, None, posts)
-    open_identity(page, WANT)
-    expect(by(page, "bu-id-refusal")).to_contain_text(
+    open_identity(page, PREFILL)
+    expect(by(page, "identity-refusal")).to_contain_text(
         "does not report its identity: it predates net-protocol v0.16 (identity_set)", timeout=T)
-    expect(page.locator('[data-action="bu-id-set"]')).to_have_count(0)
+    expect(page.locator('[data-action="identity-fix-confirm"]')).to_have_count(0)
     assert posts == []
     assert not page.errors, page.errors
 
