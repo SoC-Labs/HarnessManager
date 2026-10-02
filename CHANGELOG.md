@@ -50,6 +50,15 @@ owners.
   writes MB/HBI0309C only, and this release also carries MB/HBI0309B: nothing was written"
   (hint: turn `updates.sd_ab` off and install again).
 
+### `clock` on a Linux board says the DUT clock is fixed (FIX-PACK-9, rc2)
+- `harness-manager clock <ip>` on a Linux board said "dut  unavailable: the shell cannot read
+  the DUT clock back; set it to know it": the CLI's board is only an address, so the MPS3 pack
+  read it as bare metal. It now asks the board (the shell's `version`), once, and says what the
+  app's tile says, in human, `--json` and `--tsv`: `dut  50 MHz  [pin-model]  (fixed by the
+  shell: the Linux harness cannot change it)`. The reading (`GET /boards/{bid}/clocks` too) has
+  source `pin-model` (was "the pin model, shell <id>") and that reason (was "fixed by the
+  shell"; the tile still shows "fixed by the shell"). A bare-metal board is unchanged.
+
 ### Boundary not timed: kept as a guard (FIX-PACK-8, rc2; N1 after N2)
 - N2 (below) fixed the cause of Linux v2.0.0 known issue 11 in `build_rm.tcl`. A build from an
   older `build_rm.tcl`, or one from a synth checkpoint you bring (`build.synth_dcp`) that already
