@@ -995,5 +995,10 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   the board's OpenOCD refuses cpu0 (core 0 is held in reset by the boot gate; fix in v2.1).
 - nanosoc_multicore's boot ROM writes the DUT flash (one byte at 0x20000 onward, on every
   boot): don't load it on a board whose flash holds the MicroPython image (nanosoc_upy); fix
-  in v2.1. Harness Manager warns and asks for MULTICORE, typed, before every program of it
+  in v2.1.
+- MPS3 Rev B boards: a v2.0.0 config SD carries MB/HBI0309B and MB/HBI0309C, and Rev B
+  "boots, untested" (only Rev C is tested). A Rev B board behind fpgahub cannot be installed
+  through the hub door (the hub writes MB/HBI0309C's nanosoc.bit only): install it over its
+  Debug USB. The A/B config-SD view (`updates.sd_ab`, off by default) is Rev C only and refuses
+  a B+C release. Harness Manager warns and asks for MULTICORE, typed, before every program of it
   (FIX-PACK-8).
