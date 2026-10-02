@@ -207,8 +207,9 @@ def decide(bundle_board_txt: bytes, *, card_board_txt: bytes | None,
             hint=f"the card's {path or 'board.txt'} has no MBBIOS line, the bundle's names "
                  f"{value}, and {ebf} is on the card: the MCC would flash it at its next boot "
                  "(Harness Manager is proven on MCC 1.3.2 only); nothing was written")
+        # FIX-PACK-9: ``board_txt`` names the revision's file when the caller gave one
         err.data = {DATA_KEY: {"file": ebf, "value": value,  # type: ignore[attr-defined]
-                               "board_txt": path}}
+                               **({"board_txt": path} if path else {})}}
         raise err
     return MbbiosDecision(ALLOWED, value,
                           f"MBBIOS: {who}{value} from the bundle, allowed by {ALLOW_FLAG}: the "
