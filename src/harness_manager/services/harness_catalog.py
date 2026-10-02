@@ -70,6 +70,7 @@ from .update.planner import (
     identity_rank,
     make_plan,
     pinned_release,
+    revision_check,
 )
 from .update.schema import (
     KIND_OS_SLOT,
@@ -218,10 +219,9 @@ def verdict_of(plan: Plan, rel: HarnessRelease, board: BoardView, *, app_version
     if rel.compat.min_app and not at_least(app_version, rel.compat.min_app):
         bad.append(f"needs harness-manager >= {rel.compat.min_app} (this is {app_version})")
         needs.append("newer-app")
-    if board.sd_revisions and rel.compat.board_revs and not (
-            {r.upper() for r in rel.compat.board_revs} & {r.upper() for r in board.sd_revisions}):
-        bad.append(f"supports {', '.join(rel.compat.board_revs)}; the config SD is for "
-                   f"{', '.join(board.sd_revisions)}")
+    rev_blocker, _ = revision_check(rel, board)     # FIX-PACK-9: the board's revision
+    if rev_blocker:
+        bad.append(rev_blocker)
     door: list[str] = []
     if plan.base and plan.via == "hub":
         needs.append("hub-door")              # HUB-SD: installable through the hub
