@@ -13,7 +13,9 @@ from harness_manager.core.errors import (
     ActionFailedError,
     AlreadyError,
     ExitCode,
+    HarnessError,
     HeldError,
+    UnreachableError,
 )
 from harness_manager.core.pack import ProbeHints
 from harness_manager.core.session import LockOwner
@@ -58,10 +60,13 @@ def cmd_probe(ctx: Ctx) -> int:
         found = [c for c in found if c.pack == a.pack]
     if not found:
         where = ", ".join(list(hints.hosts) + list(hints.serial_ports) + list(hints.volumes))
-        raise with_data(AbsentError(
+        err = with_data(AbsentError(
             f"no board answered{f' at {where}' if where else ''}",
             hint="check power and cabling, or pass --host ADDR / --serial URL / --volume PATH"),
             candidates=[])
+        if scan or hints.hosts:              # a board on Ethernet was looked for
+            network_check(ctx, err, [h for h in hints.hosts] or [DEFAULT_BOARD_HOST])
+        raise err
     rows, human = [], []
     for c in found:
         links = [f"{lk.kind.value}={lk.address}" for lk in c.links]
@@ -75,9 +80,55 @@ def cmd_probe(ctx: Ctx) -> int:
 # --- info --------------------------------------------------------------------------------
 
 
+#: Where a new board answers (the image default; the Windows network check's address when
+#: ``probe`` was given no host).
+DEFAULT_BOARD_HOST = "192.168.10.101"
+
+
+def _host_of(spec: str) -> str:
+    """``a.b.c.d[:port]`` -> ``a.b.c.d``; "" for anything else (a name, a URL, a hub)."""
+    host = spec.strip().rsplit("@", 1)[-1]
+    host = host.split(":", 1)[0] if host.count(":") <= 1 else ""
+    parts = host.split(".")
+    return host if len(parts) == 4 and all(p.isdigit() for p in parts) else ""
+
+
+def network_check(ctx: Ctx, err: HarnessError, specs: list[str]) -> None:
+    """Lane WINDOWS: on Windows, a board that did not answer on Ethernet gets this PC's
+    network checked (an address on the board's /24, a Public profile, a firewall block) and
+    the exact Administrator PowerShell printed; the check rides on the error's data
+    (``network``). Off Windows, or for a hub board or a name, nothing."""
+    from harness_manager.services import netcheck
+
+    hosts = [h for h in (_host_of(s) for s in specs) if h]
+    if not hosts:
+        return
+    found = netcheck.check(hosts[0])
+    if found is None:
+        return
+    for line in netcheck.lines(found):
+        ctx.note(line)
+    with_data(err, network=found)
+
+
+def _ethernet_hosts(ctx: Ctx) -> list[str]:
+    """The target's own Ethernet address (never one reached through a hub or a tunnel)."""
+    from harness_manager.core.model import LinkKind
+
+    try:
+        cand = ctx.candidate()
+    except HarnessError:
+        return [str(getattr(ctx.args, "target", "") or "")]
+    return [lk.address for lk in cand.links if lk.kind == LinkKind.ETHERNET and not lk.via]
+
+
 def cmd_info(ctx: Ctx) -> int:
-    with ctx.board() as (cand, _session):
-        info = ctx.engine.info(cand.board_id)
+    try:
+        with ctx.board() as (cand, _session):
+            info = ctx.engine.info(cand.board_id)
+    except (UnreachableError, AbsentError) as exc:
+        network_check(ctx, exc, _ethernet_hosts(ctx))
+        raise
     ident = info.identity
     cand = info.candidate
     row = [cand.board_id, ident.board_type, ident.shell_id, ident.rm_id,

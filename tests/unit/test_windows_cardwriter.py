@@ -193,8 +193,10 @@ def test_windows_disks_asks_powershell_read_only(monkeypatch):
     assert len(disks) == 9 and disks[1].labels == ("V2M-MPS3",)
     (argv,) = seen
     assert argv[1:6] == ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                         "-Command"]
-    script = argv[6]
+                         "-EncodedCommand"]
+    from harness_manager.core import winps
+
+    script = winps.script_of(argv)
     for verb in ("Get-Disk", "Get-Partition", "Get-Volume", "Win32_DiskDrive", "ConvertTo-Json"):
         assert verb in script
     for never in ("Set-", "Clear-", "Remove-", "Format-", "New-", "diskpart", "Initialize-"):

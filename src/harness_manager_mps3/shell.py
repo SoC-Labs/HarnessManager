@@ -380,11 +380,25 @@ def icmp_echo(host: str, timeout: float = 1.0) -> bool:
         args = [ping, "-c", "1", "-t", secs, host]
     else:
         args = [ping, "-c", "1", "-W", secs, host]
+    from harness_manager.core.proc import no_window
+
     try:
-        return subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              timeout=timeout + 2.0, check=False).returncode == 0
+        res = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=timeout + 2.0, check=False, **no_window())
     except (OSError, subprocess.SubprocessError):
         return False
+    return echo_answered(res.returncode, res.stdout or b"")
+
+
+def echo_answered(returncode: int, stdout: bytes, platform: str | None = None) -> bool:
+    """Did ``ping`` get an echo REPLY? Windows' ping exits 0 for "Reply from <this PC>:
+    Destination host unreachable" too (lane WINDOWS), so there a reply line must carry
+    ``TTL=`` (every Windows language prints it)."""
+    if returncode != 0:
+        return False
+    if (platform or sys.platform).startswith("win"):
+        return b"TTL=" in stdout.upper()
+    return True
 
 
 def tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:

@@ -213,7 +213,26 @@ function EthLine({ eth }) {
   const level = eth.state === "running" ? "ok" : eth.state === "rescue" ? "warn" : "";
   return html`<span class="line"><${Chip} level=${level} icon=${eth.state === "none" ? "circle-dashed" : "ethernet-port"}
       testid="usb-eth">${eth.state === "running" ? "harness answers" : eth.state === "rescue" ? "stage0 rescue" : "nothing answers"}<//></span>
-    <div class="sub">${eth.text}</div>`;
+    <div class="sub">${eth.text}</div>
+    <${NetCheck} found=${eth.network} testid="usb-netcheck" />`;
+}
+
+// --- lane WINDOWS: this PC's network check (services/netcheck.py), Windows only ---
+// Each problem: what is wrong, then the exact Administrator PowerShell with a Copy button.
+// Harness Manager never runs these itself.
+export function NetCheck({ found, testid = "netcheck" }) {
+  if (!found || !found.problems || !found.problems.length) return null;
+  const cmd = (c, i, what) => html`<div key=${`${what}${i}`}><code class="mono bu-priv-cmd">${c}</code> <${CopyButton} text=${c} label="Copy" /></div>`;
+  return html`<div class="bu-netcheck stack gap-8" data-testid=${testid}>
+    <p class="small"><${Icon} name="triangle-alert" cls="sm" /> <b>This Windows PC's network</b> (the board at <span class="mono">${found.host}</span>):</p>
+    <ol>${found.problems.map((p, i) => html`<li key=${i} data-code=${p.code}>
+      <b>${p.title}.</b> ${p.text}
+      ${p.admin && p.admin.length ? html`<div class="small muted">As Administrator (${found.admin_how}):</div>${p.admin.map((c, j) => cmd(c, j, "a"))}` : null}
+      ${p.alternative && p.alternative.length ? html`<div class="small muted">Or instead:</div>${p.alternative.map((c, j) => cmd(c, j, "b"))}` : null}
+      ${p.gui ? html`<div class="small muted">${p.gui}</div>` : null}
+    </li>`)}</ol>
+    <p class="small muted">Harness Manager never runs these itself. Then scan or wait again.</p>
+  </div>`;
 }
 
 async function addAndBringUp(row) {
@@ -780,6 +799,7 @@ function RebootStep({ bid, w }) {
       <${ResultBlock} lines=${pw.lines} panel=${pw} testid="bu-witness-result" />
       ${timeout ? html`<div class="stack gap-8" data-testid="bu-timeout">
         <${Reason} level="err" text=${`Nothing answered at ${w.witnessError.data.host || host} within ${Math.round(w.witnessError.data.waited_s || 0)} s. Check the cable and this PC's address, wait again, or restore the backup.`} />
+        <${NetCheck} found=${w.witnessError.data.network} testid="bu-netcheck" />
         <${ArmBox} bid=${bid} armKey="bu_restore" testid="arm-bu-restore" text="Arm: I understand this rewrites the configuration SD from the backup taken in step 2." />
         <${ActionRow} bid=${bid} panel="bu_restore" spec=${restoreSpec(bid)} icon="undo-2"
           gate=${{ capability: "storage_install", adapter: "storage", arm: "bu_restore", holder: "Restore the SD",

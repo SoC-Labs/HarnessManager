@@ -8,9 +8,10 @@ and nothing asks for Administrator (HM never escalates: what needs it is printed
 user to run).
 
 - ``powershell_argv(script)``: ``powershell.exe -NoProfile -NonInteractive
-  -ExecutionPolicy Bypass -Command <script>``; the script's output is UTF-8 (a volume
-  label with an accent survives) and one JSON document (``ConvertTo-Json -Depth 5
-  -Compress``).
+  -ExecutionPolicy Bypass -EncodedCommand <base64 of the UTF-16LE script>`` (no quoting
+  rules between Python's command line and PowerShell's can bend the script); the script's
+  output is UTF-8 (a volume label with an accent survives) and one JSON document
+  (``ConvertTo-Json -Depth 5 -Compress``). ``script_of(argv)`` decodes it back (tests).
 - ``run_json(script)``: run it (``core.proc.no_window``: no console window flashes from the
   app), parse the JSON; ``UnavailableError`` when PowerShell is missing, fails or answers
   something that is not JSON.
@@ -24,6 +25,7 @@ The runner is injectable (``run=``): tests answer with recorded JSON, never Powe
 
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import subprocess
@@ -53,8 +55,14 @@ def powershell_exe() -> str:
 
 
 def powershell_argv(script: str, exe: str = "") -> list[str]:
+    encoded = base64.b64encode((PREAMBLE + script).encode("utf-16-le")).decode("ascii")
     return [exe or powershell_exe(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
-            "Bypass", "-Command", PREAMBLE + script]
+            "Bypass", "-EncodedCommand", encoded]
+
+
+def script_of(argv: Sequence[str]) -> str:
+    """The script a ``powershell_argv`` carries (what a test checks)."""
+    return base64.b64decode(argv[argv.index("-EncodedCommand") + 1]).decode("utf-16-le")
 
 
 def _run(argv: Sequence[str], timeout: float = TIMEOUT_S) -> tuple[int, bytes, bytes]:

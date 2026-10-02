@@ -517,8 +517,10 @@ class DiscoverWitness:
     image lists an ``identify`` feature, so the feature is never the gate."""
 
     def __init__(self, probe: Callable[..., Any] | None = None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 netcheck: Callable[..., Any] | None = None) -> None:
         self._probe = probe
+        self._netcheck = netcheck          # lane WINDOWS: services.netcheck.check (a seam)
         self._clock = clock
         self._mu = threading.Lock()
         self._last: tuple[str, str, float] | None = None     # (host, reason, at)
@@ -545,6 +547,21 @@ class DiscoverWitness:
             self._last = (host, why, now)
         return why
 
+    def _windows(self, host: str) -> str:
+        """Lane WINDOWS: TCP to the board works (this witness runs on an open session) and
+        identify does not: on Windows, what this PC's network check says to do."""
+        from harness_manager.services import netcheck
+
+        try:
+            found = (self._netcheck or netcheck.check)(host, identify_ok=False, tcp_ok=True)
+        except Exception:  # noqa: BLE001 - a check must never break info
+            return ""
+        if not found or not found.get("problems"):
+            return ""
+        p = found["problems"][0]
+        fix = f" As Administrator: {' ; '.join(p['admin'])}" if p.get("admin") else ""
+        return f". On this Windows PC: {p['title']}: {p['text']}{fix}"
+
     def _ask(self, host: str) -> str:
         ask = self._probe or identify
         self.probes += 1
@@ -553,7 +570,8 @@ class DiscoverWitness:
         except (UnreachableError, UsageError) as exc:
             return (f"the board did not answer identify from here ({exc.message}); a harness "
                     "that serves it (Linux v0.11 or later, bare metal FOLD A-v0.12 or later) "
-                    "answers on the board's own network unless something drops UDP 6899")
+                    "answers on the board's own network unless something drops UDP 6899"
+                    + self._windows(host))
         if not getattr(reply, "ok", False):
             raw = getattr(reply, "raw", None) or {}
             return f"the board answered identify with a refusal: {raw.get('err') or raw}"
