@@ -11,7 +11,8 @@ checks what the files ARE, not just what they hash to:
   (``config.txt`` and ``MB/``); every ``.bit`` must be a real Xilinx bitstream
   for the channel's ``part`` (``xcku115``) whose header USERID equals the
   release's ``usercode``; the ``MB/HBI0309<rev>/`` tree must be a revision the
-  release supports;
+  release supports, and every revision it declares has its ``board.txt`` there
+  (FIX-PACK-9: platform v2.0.0 carries B and C);
 - **overlays** (target ``host-store``): every manifest is keyed to the release's
   ``static_id`` and ``usercode`` and passes its own length + CRC-32 check (the
   pack's validator: pyverify for the MPS3). A foreign-implementation partial
@@ -306,9 +307,19 @@ def check_sd_component(comp: Component, files: dict[str, Path], release: Harness
     revs = sorted({r.split("/")[1] for r in files if r.lower().startswith("mb/") and r.count("/") >= 2})
     if release.compat.board_revs:
         wrong = [r for r in revs if r.upper() not in {b.upper() for b in release.compat.board_revs}]
-        items.append(_item(f"{comp.name}: board revision", not wrong,
-                           f"tree {', '.join(wrong)} is not in {list(release.compat.board_revs)}"
-                           if wrong else f"{', '.join(revs) or 'no MB/ tree'}"))
+        # FIX-PACK-9: every revision the release declares has its board.txt in the tree (the
+        # MCC reads only its own revision's folder: a declared one missing leaves that board
+        # unprogrammed)
+        boards = {r.split("/")[1].upper() for r in files
+                  if r.lower().startswith("mb/") and r.count("/") == 2
+                  and r.lower().endswith("/board.txt")}
+        missing = [b for b in release.compat.board_revs if revs and b.upper() not in boards]
+        problems = ([f"tree {', '.join(wrong)} is not in {list(release.compat.board_revs)}"]
+                    if wrong else []) + \
+                   ([f"declares {', '.join(missing)} but has no "
+                     f"{', '.join(f'MB/{b}/board.txt' for b in missing)}"] if missing else [])
+        items.append(_item(f"{comp.name}: board revision", not problems,
+                           "; ".join(problems) or f"{', '.join(revs) or 'no MB/ tree'}"))
     bits = [r for r in files if r.lower().endswith(".bit")]
     if not bits:
         items.append(_item(f"{comp.name}: bitstream", False, "the SD part carries no .bit"))

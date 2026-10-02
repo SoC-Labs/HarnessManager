@@ -43,19 +43,20 @@ from harness_manager.services.update.os_slots import (
 from tests.fakes.t7_bundles import FIELDED_STATIC, read_fake_identity
 
 
-def _sd_bit(root: Path) -> Path | None:
-    """The .bit the MCC would load: board.txt APPFILE -> app note F0FILE (FAT, case-blind)."""
-    board = root / "MB" / "HBI0309C" / "board.txt"
+def _sd_bit(root: Path, rev: str = "HBI0309C") -> Path | None:
+    """The .bit the MCC would load: board.txt APPFILE -> app note F0FILE (FAT, case-blind).
+    ``rev`` (FIX-PACK-9): the revision folder the board's MCC reads (a Rev B board: HBI0309B)."""
+    board = root / "MB" / rev / "board.txt"
     try:
         app = re.search(r"APPFILE:\s*(\S+)", board.read_text()).group(1)   # type: ignore[union-attr]
-        note = root / "MB" / "HBI0309C" / Path(*app.replace("\\", "/").split("/"))
+        note = root / "MB" / rev / Path(*app.replace("\\", "/").split("/"))
         f0 = re.search(r"F0FILE:\s*(\S+)", note.read_text()).group(1)      # type: ignore[union-attr]
         return note.parent / f0
     except (OSError, AttributeError):
         return None
 
 
-def bind_identity_to_sd(vb: Any, *, stale: bool = False) -> dict[str, Any]:
+def bind_identity_to_sd(vb: Any, *, stale: bool = False, rev: str = "HBI0309C") -> dict[str, Any]:
     """Make ``vb``'s shell report the identity of the bitstream on its SD after each boot.
 
     Returns a dict the test can inspect/modify: ``booted`` (identities seen at
@@ -78,7 +79,7 @@ def bind_identity_to_sd(vb: Any, *, stale: bool = False) -> dict[str, Any]:
     def _boot() -> None:
         ident = None
         if not info["stale"]:
-            bit = _sd_bit(vb.sd.root)
+            bit = _sd_bit(vb.sd.root, rev)
             if bit is not None and bit.is_file():
                 ident = read_fake_identity(bit.read_bytes())
         if ident is not None:
