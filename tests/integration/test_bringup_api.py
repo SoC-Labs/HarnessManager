@@ -22,9 +22,11 @@ with warnings.catch_warnings():
     from fastapi.testclient import TestClient
 
 from harness_manager.daemon.app import create_app
+from harness_manager.services import bringup
 from harness_manager_mps3 import mcc as mccmod
 from harness_manager_mps3 import usb as usbmod
 from harness_manager_mps3.sd import VolumeInfo
+from tests.fakes.cardwriter_fakes import guard  # noqa: F401 - the fixture
 from tests.fakes.t3_clock import FakeClock
 from tests.fakes.t3_usb import FakePortInfo
 from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
@@ -32,6 +34,11 @@ from tests.fakes.virtual_board import VirtualMps3
 from tests.unit.test_bringup_service import release_bundle, sd_tree
 
 H = headers()
+
+
+def phrase(bundle: Path | str, tmp_path: Path) -> str:
+    """The typed INSTALL UNSIGNED <sha8> of a bundle, as POST /bringup/bundle shows it."""
+    return bringup.check_bundle(str(bundle), tmp_path / "phrase-work").unsigned_phrase
 
 
 def ports_of(vb: VirtualMps3) -> list[FakePortInfo]:
@@ -169,7 +176,17 @@ def test_the_first_install_backs_up_writes_reboots_and_witnesses(client, board, 
     job = c.post(f"{B}/storage/backup", json={"dest_dir": str(tmp_path / "bk")},
                  headers=H).json()["job"]
     backup = wait(c, job)["result"]["path"]
+    # no INSTALL UNSIGNED <sha8>: refused, nothing written (the twin of the write below)
     r = c.post(f"{B}/bringup/install", json={"bundle": str(bundle), "backup_path": backup},
+               headers=H)
+    assert r.status_code == 409 and r.json()["error"]["name"] == "REFUSED"
+    err = r.json()["error"]
+    assert err["message"] == (f"not confirmed: this bundle is unsigned; type exactly "
+                              f"{phrase(bundle, tmp_path)!r} to install it")
+    assert err["data"]["unsigned"]["phrase"] == phrase(bundle, tmp_path)
+    assert (board.sd.root / "MB/HBI0309C/Nanosoc/nanosoc.bit").read_bytes() == b"\0" * 64
+    r = c.post(f"{B}/bringup/install", json={"bundle": str(bundle), "backup_path": backup,
+                                             "confirm_unsigned": phrase(bundle, tmp_path)},
                headers=H)
     assert r.status_code == 202, r.text
     done = wait(c, r.json()["job"])
@@ -201,9 +218,35 @@ def test_twin_a_refused_bundle_writes_nothing_even_with_a_backup(client, board, 
     bad = sd_tree(tmp_path / "bad")
     (bad / "MB" / "HBI0309C" / "Nanosoc" / "nanosoc.bit").unlink()
     before = board.sd.snapshot()
-    r = c.post(f"{B}/bringup/install", json={"bundle": str(bad), "backup_path": backup},
+    r = c.post(f"{B}/bringup/install", json={"bundle": str(bad), "backup_path": backup,
+                                             "confirm_unsigned": phrase(bad, tmp_path)},
                headers=H)
     assert r.status_code == 409 and r.json()["error"]["data"]["check"]["problems"]
+    assert board.sd.snapshot() == before
+
+
+def test_twin_a_wrong_sha8_or_a_bundle_changed_since_its_check_writes_nothing(
+        client, board, tmp_path, monkeypatch):
+    c, _ = client
+    bid = open_usb(c, board, monkeypatch)
+    B = bid_path(bid)
+    job = c.post(f"{B}/storage/backup", json={"dest_dir": str(tmp_path / "bk")},
+                 headers=H).json()["job"]
+    backup = wait(c, job)["result"]["path"]
+    bundle = sd_tree(tmp_path / "good")
+    shown = c.post("/api/v1/bringup/bundle", json={"path": str(bundle)},
+                   headers=H).json()["check"]["unsigned"]
+    assert shown["phrase"] == phrase(bundle, tmp_path) and shown["of"] == "manifest"
+    before = board.sd.snapshot()
+    wrong = "INSTALL UNSIGNED " + ("0" * 8 if shown["sha256"][:8] != "0" * 8 else "1" * 8)
+    r = c.post(f"{B}/bringup/install", json={"bundle": str(bundle), "backup_path": backup,
+                                             "confirm_unsigned": wrong}, headers=H)
+    assert r.status_code == 409 and "does not name this bundle" in r.json()["error"]["message"]
+    (bundle / "config.txt").write_text("TITLE: changed after the check\n")
+    r = c.post(f"{B}/bringup/install", json={"bundle": str(bundle), "backup_path": backup,
+                                             "confirm_unsigned": shown["phrase"]}, headers=H)
+    assert r.status_code == 409 and "does not name this bundle" in r.json()["error"]["message"]
+    assert r.json()["error"]["data"]["unsigned"]["phrase"] != shown["phrase"]
     assert board.sd.snapshot() == before
 
 
@@ -247,7 +290,8 @@ def test_a_board_behind_a_hub_needs_its_lease_to_write_and_a_usb_only_board_none
             assert c.post("/api/v1/boards", json={"candidate": cands[BOARD_LEASED]},
                           headers=H).status_code == 200
             r = c.post(f"{bid_path(BOARD_LEASED)}/bringup/install",
-                       json={"bundle": bundle, "backup_path": str(tmp_path / "b.zip")}, headers=H)
+                       json={"bundle": bundle, "backup_path": str(tmp_path / "b.zip"),
+                             "confirm_unsigned": phrase(bundle, tmp_path)}, headers=H)
             assert r.status_code == 409 and r.json()["error"]["name"] == "HELD", r.text
             assert "write the configuration SD" in r.json()["error"]["message"]
             assert eng.called("storage.install") == []
@@ -260,8 +304,87 @@ def test_a_board_behind_a_hub_needs_its_lease_to_write_and_a_usb_only_board_none
                          headers=H).json()["job"]
             backup = wait(c, job)["result"]["path"]
             r = c.post(f"{bid_path(BOARD_NEW_USB)}/bringup/install",
-                       json={"bundle": bundle, "backup_path": backup}, headers=H)
+                       json={"bundle": bundle, "backup_path": backup,
+                             "confirm_unsigned": phrase(bundle, tmp_path)}, headers=H)
             assert r.status_code == 202, r.text
             assert wait(c, r.json()["job"])["state"] == "done"
     finally:
         eng.close_all()
+
+
+# --- POST /bringup/card-reader: the card-reader door for a bundle (the rig's card writer) --------
+
+
+@pytest.fixture
+def reader(tmp_path: Path, monkeypatch, guard) -> Iterator[tuple]:  # noqa: F811 - the fixture
+    from harness_manager.core.services import EngineConfig
+    from harness_manager.engine import Engine
+    from harness_manager.services import cardwriter as cw
+    from tests.fakes.cardwriter_fakes import Rig
+    from tests.fakes.t13_daemon import state_dir
+
+    rig = Rig(tmp_path / "rig")
+
+    def factory(*, state_dir=None, publish=None, **kw):  # noqa: ANN001, ANN003
+        rig.writer.publish = publish
+        rig.writer.state_dir = Path(state_dir)
+        rig.writer._enabled = lambda: cw.is_enabled(state_dir)        # the real setting
+        return rig.writer
+
+    monkeypatch.setattr(cw, "CardWriter", factory)
+    eng = Engine(EngineConfig(state_dir=state_dir()))
+    with TestClient(create_app(eng, token=TOKEN, static_dir=None,
+                               state_dir=tmp_path / "svc")) as c:
+        yield rig, c
+    eng.close_all()
+
+
+def card_write(c: TestClient, rig: Any, bundle: Path, tmp_path: Path, **over: Any) -> Any:
+    body = {"bundle": str(bundle), "device_id": rig.card("sdb").id,
+            "confirm": "WRITE SD/MMC 31.9 GB", "confirm_unsigned": phrase(bundle, tmp_path),
+            "backup_dir": str(tmp_path / "bk"), **over}
+    return c.post("/api/v1/bringup/card-reader", json={k: v for k, v in body.items()
+                                                       if v is not None}, headers=H)
+
+
+def test_the_card_reader_door_writes_a_bundle_with_both_phrases(reader, tmp_path, monkeypatch):
+    rig, c = reader
+    monkeypatch.setenv("HARNESS_MANAGER_BRINGUP_SD_FLASH", "on")
+    bundle = release_bundle(tmp_path / "rel", linux=False)
+    r = card_write(c, rig, bundle, tmp_path)
+    assert r.status_code == 202, r.text
+    done = wait(c, r.json()["job"])
+    assert done["state"] == "done" and done["kind"] == "cardwriter_write", done
+    res = done["result"]
+    assert res["kind"] == "files" and res["verified"] is True and res["source"].endswith("/sd")
+    assert (rig.root / "MB/HBI0309C/Nanosoc/nanosoc.bit").read_bytes() == \
+        (bundle / "sd/MB/HBI0309C/Nanosoc/nanosoc.bit").read_bytes()
+    assert Path(res["backup"]["path"]).parent == tmp_path / "bk"
+
+
+def test_twin_the_card_reader_door_refuses_without_either_phrase(reader, tmp_path, monkeypatch):
+    rig, c = reader
+    monkeypatch.setenv("HARNESS_MANAGER_BRINGUP_SD_FLASH", "on")
+    bundle = sd_tree(tmp_path / "good")
+    before = sorted(p.relative_to(rig.root).as_posix() for p in rig.root.rglob("*"))
+    r = card_write(c, rig, bundle, tmp_path, confirm_unsigned=None)
+    assert r.status_code == 409 and "this bundle is unsigned" in r.json()["error"]["message"]
+    r = card_write(c, rig, bundle, tmp_path, confirm_unsigned="INSTALL UNSIGNED 0000000g")
+    assert r.status_code == 409 and "does not name this bundle" in r.json()["error"]["message"]
+    r = card_write(c, rig, bundle, tmp_path, confirm="WRITE SD/MMC 31914983424")
+    assert r.status_code == 409 and "type exactly 'WRITE SD/MMC 31.9 GB'" in \
+        r.json()["error"]["message"]
+    ebf = sd_tree(tmp_path / "ebf")
+    (ebf / "MB" / "HBI0309C" / "mbb_v141.ebf").write_bytes(b"MB BIOS")
+    r = card_write(c, rig, ebf, tmp_path, confirm_unsigned="INSTALL UNSIGNED 00000000")
+    assert r.status_code == 409 and r.json()["error"]["data"]["check"]["refused"] is True
+    assert sorted(p.relative_to(rig.root).as_posix() for p in rig.root.rglob("*")) == before
+    assert not (tmp_path / "bk").exists()
+
+
+def test_twin_the_card_reader_door_is_unavailable_while_sd_flash_is_off(reader, tmp_path):
+    rig, c = reader
+    rig.enabled = True                                          # the rig would; the setting not
+    r = card_write(c, rig, sd_tree(tmp_path / "good"), tmp_path, device_id="sdb-x")
+    assert r.status_code == 422 and r.json()["error"]["name"] == "UNAVAILABLE"
+    assert "bringup.sd_flash" in r.json()["error"]["message"]

@@ -2,9 +2,12 @@
 --source S)``: the app's bring-up wizard on the command line (lane BRINGUP-USB), the same plan.
 
 1. the source: a bundle folder or zip, checked (``services.bringup.check_bundle``: refused
-   for an ``.ebf``, an MCC command file, anything outside the config-SD tree, no bitstream),
-   or a signed release (the harness catalogue's plan, ``--door usb``; refused while no
-   signing key exists, as ``harness install`` is);
+   for an ``.ebf``, an MCC command file, anything outside the config-SD tree, no bitstream).
+   A bundle is UNSIGNED: the banner, its sha256 (the zip's, or its folder manifest's), and
+   the typed ``INSTALL UNSIGNED <first 8 hex>`` before anything is written
+   (``--confirm-unsigned``; asked at the prompt; ``--yes`` never implies it). Or a signed
+   release (the harness catalogue's plan, ``--door usb``; refused while no signing key
+   exists, as ``harness install`` is);
 2. the backup of the configuration SD (mandatory; ``--backup-dir``);
 3. the write: the storage install over the Debug USB (asks first), or ``--card-reader
    DEVICE_ID``: the card writer's ``files`` kind (``services/cardwriter.py``, as the wizard's
@@ -58,10 +61,11 @@ bringup - --serial PORT --volume PATH (--bundle DIR|ZIP | --version V [--source 
   (asks first; never an .ebf), reboot through the MCC (asks first), then wait for the
   harness at --host (192.168.10.101) for --wait seconds. A Linux harness with no bootable
   OS slot answers in stage0 RESCUE: write its user microSD with a whole-card image.
-  --card-reader DEVICE_ID writes the configuration SD in this PC's card reader instead
-  (bringup.sd_flash on; `flash devices` lists the ids): typed WRITE <model> <size>
-  (--confirm), no MCC reboot: put the card back and power the board on. --yes answers the
-  questions; never a re-key, never a typed phrase.
+  A bundle is unsigned: type INSTALL UNSIGNED <first 8 hex of its sha256> (or give it
+  with --confirm-unsigned). --card-reader DEVICE_ID writes the configuration SD in this
+  PC's card reader instead (bringup.sd_flash on; `flash devices` lists the ids): typed
+  WRITE <model> <size> (--confirm), no MCC reboot: put the card back and power the board
+  on. --yes answers the questions; never a re-key, never a typed phrase.
 """
 
 
@@ -92,6 +96,10 @@ def register(subparsers: Any, *, parents: tuple[argparse.ArgumentParser, ...] = 
                     help="write the configuration SD in this PC's card reader instead of over "
                          "the Debug USB (the id `harness-manager flash devices` prints; the "
                          "card is out of the board; no --serial or --volume)")
+    ap.add_argument("--confirm-unsigned", default=None, metavar="PHRASE",
+                    help='--bundle: the typed phrase for an unsigned bundle, exactly "INSTALL '
+                         'UNSIGNED <first 8 hex of its sha256>" as the check prints it; --yes '
+                         "never implies it")
     ap.add_argument("--confirm", default=None, metavar="PHRASE",
                     help='--card-reader: the typed phrase, exactly "WRITE <model> <size>" as '
                          "`flash devices` shows it; --yes never implies it")
@@ -141,6 +149,9 @@ def cmd_bringup(ctx: Any) -> int:
     elif a.confirm is not None:
         raise UsageError("--confirm is the card reader's typed phrase: it needs --card-reader",
                          hint="over the Debug USB, --yes answers the questions")
+    if a.version and a.confirm_unsigned is not None:
+        raise UsageError("--confirm-unsigned is for a bundle folder or zip: a signed release "
+                         "needs no such phrase", hint="leave out --confirm-unsigned")
     if a.wait is not None and a.wait <= 0:
         raise UsageError(f"--wait {a.wait:g} is not a wait", hint="give seconds, more than 0")
     state = Path(getattr(ctx.engine, "state_dir", None) or Path.home() / ".config" /
@@ -153,6 +164,7 @@ def cmd_bringup(ctx: Any) -> int:
             raise with_data(RefusedError(f"refusing {chk.path}: {'; '.join(chk.problems)}",
                                          hint="fix the bundle; nothing was written"),
                             check=chk.as_dict())
+        _unsigned(ctx, chk)
     if writer is not None:
         assert chk is not None
         return _card_reader(ctx, writer, chk, state)
@@ -164,6 +176,7 @@ def cmd_bringup(ctx: Any) -> int:
         ctl = ctx.require(session, "controller", C.REBOOT_BOARD)
         if chk is not None:
             steps.append([bid, "source", "checked", _checked(chk)])
+            steps.append([bid, "unsigned", "confirmed", _confirmed(chk)])
             data["check"] = chk.as_dict()
         dest = Path(a.backup_dir).expanduser() if a.backup_dir else state / "backups"
         dest.mkdir(parents=True, exist_ok=True)
@@ -215,6 +228,47 @@ def _checked(chk: Any) -> str:
             f"({bit.get('size', '?')} B, sha256 {bit.get('sha256', '?')[:16]}…)")
 
 
+def _confirmed(chk: Any) -> str:
+    of = "the zip" if chk.sha256_of == "zip" else f"its manifest, {chk.manifest_files} files"
+    return f"{chk.unsigned_phrase} typed; sha256 {chk.sha256} ({of})"
+
+
+def _unsigned(ctx: Any, chk: Any) -> None:
+    """The red banner, the bundle's sha256 and how it is made, then the typed phrase:
+    ``--confirm-unsigned``, else asked; ``--yes`` never types it. Before anything is opened,
+    backed up or written."""
+    a = ctx.args
+    info = chk.unsigned() or {}
+    ctx.note(bringup.UNSIGNED_BANNER)
+    if chk.sha256_of == "zip":
+        ctx.note(f"sha256   {chk.sha256}  (the zip: {bringup.ZIP_RECIPE})")
+    else:
+        ctx.note(f"sha256   {chk.sha256}  (its manifest of {chk.manifest_files} files: "
+                 f"{bringup.MANIFEST_RECIPE})")
+    if a.confirm_unsigned is not None:
+        typed = a.confirm_unsigned
+    elif a.yes:
+        raise with_data(RefusedError(f"not confirmed: --yes never types the phrase; give it with "
+                                     f"--confirm-unsigned {chk.unsigned_phrase!r}",
+                                     hint=f"{bringup.UNSIGNED_BANNER} Nothing was written"),
+                        unsigned=info)
+    else:
+        typed = _ask(ctx, "To install this unsigned bundle, type exactly", chk.unsigned_phrase)
+    bringup.require_unsigned(chk, typed)
+
+
+def _ask(ctx: Any, what: str, phrase: str) -> str:
+    import sys
+
+    stream = ctx.err or sys.stderr
+    stream.write(f"{what}: {phrase}\n> ")
+    stream.flush()
+    try:
+        return sys.stdin.readline().strip()
+    except (OSError, ValueError):
+        return ""
+
+
 def _overlay_step(ctx: Any, chk: Any, state: Path, bid: str, steps: list[list[Any]]) -> None:
     ovl = _overlays(ctx, chk, state)
     if ovl is not None:
@@ -253,7 +307,6 @@ def _card_reader(ctx: Any, w: Any, chk: Any, state: Path) -> int:
     witness waits for it."""
     from harness_manager.services import cardwriter as cw
 
-    from . import cmd_flash
     from .output import StderrProgress
 
     a = ctx.args
@@ -264,7 +317,8 @@ def _card_reader(ctx: Any, w: Any, chk: Any, state: Path) -> int:
     dest = Path(a.backup_dir).expanduser() if a.backup_dir else state / "backups"
     plan = w.plan(a.card_reader, "files", Path(chk.sd_root), backup_dir=dest)
     disk = plan.device.disk
-    steps: list[list[Any]] = [[bid, "source", "checked", _checked(chk)]]
+    steps: list[list[Any]] = [[bid, "source", "checked", _checked(chk)],
+                              [bid, "unsigned", "confirmed", _confirmed(chk)]]
     data: dict[str, Any] = {"check": chk.as_dict(), "card_reader": plan.summary()}
     ctx.note(f"device   {disk.path}  {disk.display_model}  {cw.human_size(disk.size)}  "
              f"({disk.transport})")
@@ -281,7 +335,7 @@ def _card_reader(ctx: Any, w: Any, chk: Any, state: Path) -> int:
                                      f"--confirm {plan.confirm!r}", hint="nothing was written"),
                         confirm=plan.confirm, device_id=plan.device.id)
     else:
-        typed = cmd_flash._ask(ctx, plan.confirm)
+        typed = _ask(ctx, "To write it, type exactly", plan.confirm)
     w.check_confirm(plan, typed)
     out = w.run(plan, progress=StderrProgress("bringup card reader", ctx.err))
     if out.get("outcome") != "written":

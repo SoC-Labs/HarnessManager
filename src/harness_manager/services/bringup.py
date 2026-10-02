@@ -17,7 +17,10 @@ wizard needs around them:
 - ``check_bundle``: a bundle folder or zip on this PC, validated before anything is written:
   the config-SD tree (``config.txt`` and ``MB/``; or a release bundle's ``sd/``), the base
   ``.bit`` named with its size, sha256, part and USERID, and refused with the reason for an
-  ``.ebf``, an MCC command file, anything outside the config-SD tree, or no bitstream;
+  ``.ebf``, an MCC command file, anything outside the config-SD tree, or no bitstream. A
+  bundle is UNSIGNED (david 2 Oct, D3a): its sha256 (``bundle_sha256``: the zip's, or the
+  folder manifest's) names it, and every write of it needs the typed ``INSTALL UNSIGNED
+  <first 8 hex>`` (``require_unsigned``; ``--yes`` never implies it);
 - ``witness``: after the REBOOT, wait for the harness to answer at its address (the pack's
   probe of that one host: 6900 ping, else UDP identify, which also finds stage0 RESCUE);
 - ``status``: the switches the wizard shows (``bringup.sd_flash``, the network OS door, the
@@ -33,6 +36,7 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -91,6 +95,16 @@ OS_JUNK_DIRS = frozenset({"__macosx", ".spotlight-v100", ".trashes", ".fseventsd
                           "system volume information"})
 MPS3_PART = "xcku115"
 MAX_TEXT = 64 * 1024               # a board/app file bigger than this is not one
+
+# An unsigned bundle (a folder or zip on this PC; david 2 Oct, D3a): allowed, with this banner and
+# a typed phrase naming its sha256. Signed releases (the catalogue, a mirror) never need it.
+UNSIGNED_WORDS = "INSTALL UNSIGNED"
+UNSIGNED_BANNER = ("Unsigned: Harness Manager cannot check where this came from; only install a "
+                   "bundle you built or got from SoC Labs directly.")
+#: How the sha256 is made, so anyone can check it on their own machine (GNU coreutils).
+ZIP_RECIPE = "sha256sum BUNDLE.zip"
+MANIFEST_RECIPE = ("cd FOLDER && find . -type f -printf '%P\\0' | LC_ALL=C sort -z | "
+                   "xargs -0 sha256sum | sha256sum")
 
 ProgressFn = Callable[[str, int, int], None]
 
@@ -389,6 +403,73 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def unsigned_phrase(sha256: str) -> str:
+    """The typed phrase for an unsigned bundle: ``INSTALL UNSIGNED <first 8 hex of sha256>``."""
+    return f"{UNSIGNED_WORDS} {sha256[:8].lower()}"
+
+
+def _sum_line(sha256: str, rel: bytes) -> bytes:
+    """One line as GNU ``sha256sum`` prints it: ``<hex>  <name>``; a name with a backslash or
+    a newline is escaped and the line starts with a backslash (coreutils 8.x)."""
+    if b"\\" in rel or b"\n" in rel:
+        return b"\\" + sha256.encode() + b"  " + \
+            rel.replace(b"\\", b"\\\\").replace(b"\n", b"\\n") + b"\n"
+    return sha256.encode() + b"  " + rel + b"\n"
+
+
+def folder_manifest(root: Path) -> tuple[bytes, dict[str, str], list[str]]:
+    """An unsigned bundle FOLDER's manifest: one ``sha256sum`` line ``<sha256>  <path>`` per
+    regular file under ``root`` (found without following a symbolic link, as ``find -type
+    f``; the path relative to ``root``, ``/``-separated), sorted by the path's bytes
+    (``LC_ALL=C sort``). Its sha256 is the bundle's (``MANIFEST_RECIPE`` prints the same).
+    Returns (the manifest, each file's sha256 by its path, the symbolic links found: a
+    bundle carries only regular files, so a caller refuses them)."""
+    entries: list[tuple[bytes, str, Path]] = []
+    links: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        here = Path(dirpath)
+        for name in [*dirnames, *filenames]:
+            path = here / name
+            rel = path.relative_to(root).as_posix()
+            try:
+                mode = os.lstat(path).st_mode
+            except OSError:
+                continue
+            if stat.S_ISLNK(mode):
+                links.append(rel)
+            elif stat.S_ISREG(mode):
+                entries.append((os.fsencode(rel), rel, path))
+    entries.sort(key=lambda e: e[0])
+    sums = {rel: file_sha256(path) for _raw, rel, path in entries}
+    manifest = b"".join(_sum_line(sums[rel], raw) for raw, rel, _p in entries)
+    return manifest, sums, sorted(links)
+
+
+def require_unsigned(chk: BundleCheck, typed: Any) -> None:
+    """The typed ``INSTALL UNSIGNED <sha8>`` for THIS bundle, as it is now (checked again just
+    before a write, so a bundle changed since it was shown is refused): else REFUSED (15),
+    ``error.data.unsigned`` the phrase and the sha256. Never implied by ``--yes``."""
+    from harness_manager.cli.output import with_data
+
+    want = chk.unsigned_phrase
+    if not want:
+        raise RefusedError(f"{chk.path} has no sha256 to confirm", hint="check the bundle again")
+    got = " ".join(typed.split()) if isinstance(typed, str) else ""
+    if got == want or (got[:-8] == want[:-8] and got[-8:].lower() == want[-8:]):
+        return                                   # the hex in either case, any spacing
+    if got.upper().startswith(UNSIGNED_WORDS):
+        msg = (f"not confirmed: {got!r} does not name this bundle: its sha256 starts "
+               f"{chk.sha256[:8]}; type exactly {want!r}")
+    else:
+        msg = f"not confirmed: this bundle is unsigned; type exactly {want!r} to install it"
+    raise with_data(RefusedError(msg, hint="Harness Manager cannot check where an unsigned bundle "
+                                           "came from: only install one you built or got from "
+                                           "SoC Labs directly. The phrase names the first 8 hex "
+                                           "of its sha256 (error.data.unsigned); nothing was "
+                                           "written"),
+                    unsigned=chk.unsigned())
+
+
 def _junk(rel: str) -> bool:
     parts = rel.lower().split("/")
     return parts[-1] in OS_JUNK or any(p in OS_JUNK_DIRS for p in parts[:-1]) or \
@@ -413,10 +494,26 @@ class BundleCheck:
     warnings: list[str] = field(default_factory=list)
     ignored: list[str] = field(default_factory=list)
     install_files: dict[str, str] = field(default_factory=dict)
+    sha256: str = ""                          # the bundle's: the zip's, or its manifest's
+    sha256_of: str = ""                       # zip | manifest
+    manifest_files: int = 0                   # a folder: the files its manifest lists
 
     @property
     def refused(self) -> bool:
         return bool(self.problems)
+
+    @property
+    def unsigned_phrase(self) -> str:
+        return unsigned_phrase(self.sha256) if self.sha256 else ""
+
+    def unsigned(self) -> dict[str, Any] | None:
+        """What the app and the CLI show for the typed phrase; None before a sha256."""
+        if not self.sha256:
+            return None
+        return {"phrase": self.unsigned_phrase, "sha256": self.sha256, "of": self.sha256_of,
+                "files": self.manifest_files if self.sha256_of == "manifest" else None,
+                "how": ZIP_RECIPE if self.sha256_of == "zip" else MANIFEST_RECIPE,
+                "banner": UNSIGNED_BANNER}
 
     def as_dict(self) -> dict[str, Any]:
         return {"path": self.path, "kind": self.kind, "layout": self.layout,
@@ -424,15 +521,17 @@ class BundleCheck:
                 "files": self.files, "count": len(self.files), "total_bytes": self.total_bytes,
                 "base_bit": self.base_bit, "board": self.board, "os_image": self.os_image,
                 "overlays": self.overlays, "problems": self.problems, "warnings": self.warnings, "ignored": self.ignored,
-                "refused": self.refused, "linux": self.impl == "linux"}
+                "refused": self.refused, "linux": self.impl == "linux", "sha256": self.sha256,
+                "unsigned": self.unsigned()}
 
 
-def _unpack(path: Path, work: Path) -> Path:
+def _unpack(path: Path, work: Path, sha256: str) -> Path:
     """A zip's contents under ``work`` (safe: no absolute paths, ``..``, symlinks or
-    oversize; ``bundle.safe_extract``), reused when the same zip was checked before."""
+    oversize; ``bundle.safe_extract``), reused when the same zip (``sha256``) was checked
+    before."""
     from harness_manager.services.update.bundle import safe_extract
 
-    digest = file_sha256(path)[:16]
+    digest = sha256[:16]
     dest = work / f"{path.stem[:40]}-{digest}"
     if (dest / ".complete").is_file():
         return dest
@@ -491,13 +590,24 @@ def check_bundle(path: str | Path, work: Path) -> BundleCheck:
             raise UsageError(f"{given.name} is neither a folder nor a .zip",
                              hint="give the bundle's folder, or its .zip")
         chk.kind = "zip"
+        chk.sha256, chk.sha256_of = file_sha256(given), "zip"
         try:
-            root = _single_top(_unpack(given, work))
+            root = _single_top(_unpack(given, work, chk.sha256))
         except RefusedError as exc:
             chk.problems.append(exc.message)
             return chk
+        sums: dict[str, str] = {}
     else:
         root = given
+        manifest, rel_sums, links = folder_manifest(given)
+        chk.sha256, chk.sha256_of = hashlib.sha256(manifest).hexdigest(), "manifest"
+        chk.manifest_files = len(rel_sums)
+        sums = {str(given / rel): h for rel, h in rel_sums.items()}
+        if links:
+            more = f" and {len(links) - 5} more" if len(links) > 5 else ""
+            chk.problems.append(f"{', '.join(links[:5])}{more}: a symbolic link; a bundle "
+                                "carries only regular files (its sha256 covers the files, not "
+                                "what a link points to)")
     if (root / "sd").is_dir():
         chk.layout = "release-bundle"
         sd = root / "sd"
@@ -507,7 +617,7 @@ def check_bundle(path: str | Path, work: Path) -> BundleCheck:
             # an OS SLOT image (S0LB at its start): pushed into slot A/B over Ethernet, never
             # written to a card at byte 0 (that card never boots); not the whole-card image
             chk.os_image = {"path": str(img), "size": img.stat().st_size,
-                            "sha256": file_sha256(img), "kind": "slot"}
+                            "sha256": sums.get(str(img)) or file_sha256(img), "kind": "slot"}
             chk.impl = chk.impl or "linux"
         chk.overlays = overlay_set(root / "overlays" / "open")
         if (root / "overlays" / "aaa").is_dir():
@@ -574,7 +684,7 @@ def check_bundle(path: str | Path, work: Path) -> BundleCheck:
                 chk.warnings.append(f"{len(bits)} .bit files and no board file names one: "
                                     f"{', '.join(bits)}")
         if base is not None:
-            chk.base_bit = _bit_facts(base, files[base], chk)
+            chk.base_bit = _bit_facts(base, files[base], chk, sums.get(str(files[base])))
     revs = chk.board.get("revisions") or []
     if revs and not any(r.upper().startswith("HBI0309") for r in revs):
         chk.warnings.append(f"MB/{', MB/'.join(revs)}: not an MPS3 (HBI0309) tree")
@@ -583,11 +693,12 @@ def check_bundle(path: str | Path, work: Path) -> BundleCheck:
     return chk
 
 
-def _bit_facts(rel: str, path: Path, chk: BundleCheck) -> dict[str, Any]:
+def _bit_facts(rel: str, path: Path, chk: BundleCheck, sha256: str | None = None
+               ) -> dict[str, Any]:
     from harness_manager.services.update.bitheader import BitHeaderError, read_bit_header
 
     out: dict[str, Any] = {"path": rel, "size": path.stat().st_size,
-                           "sha256": file_sha256(path)}
+                           "sha256": sha256 or file_sha256(path)}
     try:
         hdr = read_bit_header(path)
     except (BitHeaderError, OSError) as exc:
@@ -745,7 +856,10 @@ def status(engine: Any, state_dir: Any = None) -> dict[str, Any]:
     examples = getattr(engine, "bringup_examples", None)
     card = getattr(engine, "bringup_card_image", "")
     return {"default_host": DEFAULT_HOST, "pc_hint": PC_ADDRESS_HINT,
-            "usb_write_warning": USB_WRITE_WARNING, "sd_flash": sd_flash(state_dir),
+            "usb_write_warning": USB_WRITE_WARNING, "unsigned": {
+                "banner": UNSIGNED_BANNER, "words": UNSIGNED_WORDS, "zip": ZIP_RECIPE,
+                "manifest": MANIFEST_RECIPE},
+            "sd_flash": sd_flash(state_dir),
             "rescue_network": {"available": False, "reason": RESCUE_NETWORK_REASON,
                                "note": RESCUE_NETWORK_NOTE},
             "card_image": {"hint": CARD_IMAGE_HINT, "example": card if isinstance(card, str)

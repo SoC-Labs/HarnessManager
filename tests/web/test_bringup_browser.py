@@ -65,6 +65,7 @@ def demo(browser, tmp_path, monkeypatch, request) -> Iterator[Demo]:
     try:
         with real_daemon(engine, token=TOKEN, state_dir=sdir) as d:
             show = Demo(browser, d, engine)
+            show.state_dir = sdir
             try:
                 yield show
             finally:
@@ -94,10 +95,14 @@ def add_and_open(page: Any) -> None:
     expect(by(page, "bringup")).to_be_visible(timeout=T)
 
 
-def check(page: Any, path: str) -> None:
+def check(page: Any, path: str, *, sign: bool = True) -> None:
+    """Check the bundle; ``sign``: then type its INSTALL UNSIGNED <sha8> (a refused bundle has
+    no phrase to type)."""
     by(page, "bundle-path").fill(path)
     page.locator('[data-action="bundle-check"]').click()
     expect(by(page, "bundle-check")).to_be_visible(timeout=T)
+    if sign and by(page, "bundle-check").get_attribute("data-refused") == "no":
+        by(page, "bundle-unsigned-phrase").fill(by(page, "bundle-unsigned-want").inner_text())
 
 
 def back_up(page: Any) -> None:
@@ -207,11 +212,59 @@ def test_a_bundle_shows_its_base_bit_and_what_it_will_write(demo):
     assert not page.errors, page.errors
 
 
+def test_a_bundle_is_unsigned_red_banner_its_sha256_and_the_typed_phrase(demo):
+    page = demo.page()
+    add_and_open(page)
+    banner = by(page, "bu-unsigned-banner")
+    expect(banner).to_have_text("Unsigned: Harness Manager cannot check where this came from; "
+                                "only install a bundle you built or got from SoC Labs directly.")
+    expect(banner).to_have_class("outcome err bu-unsigned")
+    check(page, demo.example(0), sign=False)
+    sha = bringup.check_bundle(demo.example(0), demo.state_dir / "t-work").sha256
+    expect(by(page, "bundle-sha")).to_contain_text(sha)
+    expect(by(page, "bundle-sha")).to_contain_text("of the folder's manifest")
+    expect(by(page, "bundle-sha")).to_contain_text("LC_ALL=C sort -z")
+    expect(by(page, "bundle-unsigned-want")).to_have_text(f"INSTALL UNSIGNED {sha[:8]}")
+    expect(by(page, "bu-step-source")).to_have_attribute("data-state", "todo")
+    expect(by(page, "reason-sd_backup")).to_contain_text(
+        f"type INSTALL UNSIGNED {sha[:8]} in step 1 to install this unsigned bundle")
+    by(page, "bundle-unsigned-phrase").fill(f"INSTALL UNSIGNED {sha[:8].upper()}")
+    expect(by(page, "bu-step-source")).to_have_attribute("data-state", "done")
+    assert not page.errors, page.errors
+
+
+def test_twin_a_wrong_sha8_keeps_every_write_closed(demo):
+    page = demo.page()
+    add_and_open(page)
+    check(page, demo.example(1), sign=False)                     # the Linux zip
+    expect(by(page, "bundle-sha")).to_contain_text("of the zip file itself")
+    want = by(page, "bundle-unsigned-want").inner_text()
+    wrong = want[:-8] + ("0" * 8 if not want.endswith("0" * 8) else "1" * 8)
+    by(page, "bundle-unsigned-phrase").fill(wrong)
+    expect(by(page, "bu-step-source")).to_have_attribute("data-state", "todo")
+    page.locator('[data-action="sd_backup"]').click(force=True)     # the interlock answers
+    expect(by(page, "bu-backup-result")).to_contain_text("Nothing was run.")
+    page.locator('[data-testid="arm-bu-write"] input').check()
+    expect(by(page, "reason-bu_write")).to_contain_text(f"type {want} in step 1")
+    assert demo.engine.called("storage.install") == []
+    assert not page.errors, page.errors
+
+
+def test_twin_a_signed_release_shows_no_unsigned_banner(demo):
+    page = demo.page()
+    add_and_open(page)
+    page.get_by_role("button", name="A signed harness release").click()
+    expect(by(page, "bu-unsigned-banner")).to_have_count(0)
+    expect(by(page, "bundle-unsigned-phrase")).to_have_count(0)
+    assert not page.errors, page.errors
+
+
 def test_twin_an_ebf_bundle_is_refused_and_nothing_can_be_written(demo):
     page = demo.page()
     add_and_open(page)
     check(page, demo.example(2))
     expect(by(page, "bundle-check")).to_have_attribute("data-refused", "yes")
+    expect(by(page, "bundle-unsigned-phrase")).to_have_count(0)   # nothing to confirm
     expect(by(page, "bundle-problem")).to_contain_text(".ebf (board-controller firmware) is "
                                                        "never written")
     expect(by(page, "bundle-refused")).to_contain_text("Nothing was written.")
@@ -416,11 +469,16 @@ def pick_card(page: Any, kind: str, phrase: str) -> None:
     page.locator(f'[data-testid="reader-confirm-{kind}"]').fill(phrase)
 
 
+def demo_reader(demo: Demo, monkeypatch) -> Any:
+    """bringup.sd_flash on, with --demo's simulated card readers (cardwriter.demo_writer: temp
+    files and a V2M-MPS3 folder in the demo's state dir; never a device)."""
+    monkeypatch.setenv(bringup.SD_FLASH_ENV, "on")
+    return demo.state_dir / "cardwriter-demo" / "V2M-MPS3"
+
+
 def test_the_reader_door_writes_the_files_then_asks_for_the_card_back_no_mcc_reboot(demo,
                                                                                      monkeypatch):
-    from tests.fakes.bringup_cardwriter import DEVICE
-
-    fake = reader_on(demo, monkeypatch)
+    card = demo_reader(demo, monkeypatch)
     page = demo.page()
     add_and_open(page)
     check(page, demo.example(0))
@@ -428,15 +486,19 @@ def test_the_reader_door_writes_the_files_then_asks_for_the_card_back_no_mcc_reb
     expect(by(page, "bu-reader-off-note")).to_have_count(0)       # the twin: the door is open
     page.get_by_role("button", name="SD card in this PC's card reader").click()
     expect(by(page, "bu-reader-disabled")).to_have_count(0, timeout=T)
-    phrase = f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}"
-    pick_card(page, "files", "WRITE something else")
+    picker = page.locator('[data-testid="reader-device-files"]')
+    expect(picker.locator("option", has_text="/dev/sdb")).to_be_enabled()
+    expect(picker.locator("option", has_text="/dev/sdc")).to_be_disabled()   # not mounted
+    expect(picker.locator("option", has_text="/dev/sdc")).to_contain_text("is not mounted")
+    picker.select_option(label=picker.locator("option", has_text="/dev/sdb").inner_text())
+    phrase = "WRITE SD/MMC 31.9 GB"                       # the writer's own, as it lists it
+    page.locator('[data-testid="reader-confirm-files"]').fill("WRITE SD/MMC 31914983424")
     expect(by(page, "reason-bu_reader")).to_contain_text(f"type {phrase} to confirm")
-    pick_card(page, "files", phrase)
+    page.locator('[data-testid="reader-confirm-files"]').fill(phrase)
     page.locator('[data-testid="arm-bu-reader"] input').check()
     page.locator('[data-action="bu_reader"]').click()
     expect(by(page, "bu-reader-result")).to_contain_text("files written and verified", timeout=T)
-    (w,) = fake.writes
-    assert w["kind"] == "files" and w["confirm"] == phrase and w["source"].endswith("/sd")
+    assert (card / "MB" / "HBI0309C" / "Nanosoc" / "nanosoc.bit").is_file()
     expect(by(page, "bu-put-back")).to_contain_text("put the card back in the board's "
                                                     "configuration SD slot and power the board on")
     expect(by(page, "bu-step-reboot").locator('[data-action="reboot"]')).to_have_count(0)
@@ -452,22 +514,47 @@ def test_the_reader_door_writes_the_files_then_asks_for_the_card_back_no_mcc_reb
     assert not page.errors, page.errors
 
 
-def test_twin_a_reader_without_privilege_shows_the_command_and_never_escalates(demo, monkeypatch):
+def test_twin_the_reader_door_with_the_unsigned_phrase_untyped_writes_nothing(demo, monkeypatch):
+    card = demo_reader(demo, monkeypatch)
+    page = demo.page()
+    add_and_open(page)
+    check(page, demo.example(0), sign=False)
+    page.get_by_role("button", name="SD card in this PC's card reader").click()
+    picker = page.locator('[data-testid="reader-device-files"]')
+    expect(picker).to_be_visible(timeout=T)
+    picker.select_option(label=picker.locator("option", has_text="/dev/sdb").inner_text())
+    page.locator('[data-testid="reader-confirm-files"]').fill("WRITE SD/MMC 31.9 GB")
+    page.locator('[data-testid="arm-bu-reader"] input').check()
+    expect(by(page, "reason-bu_reader")).to_contain_text("INSTALL UNSIGNED")
+    page.locator('[data-action="bu_reader"]').click(force=True)      # the interlock answers
+    expect(by(page, "bu-reader-result")).to_contain_text("Nothing was run.")
+    assert not (card / "MB" / "HBI0309C" / "Nanosoc").exists()
+    # and the service itself refuses a write without the phrase (never only the page)
+    r = page.evaluate("""p => import('./js/api.js').then(m => m.bringupCall('bringupCardReader', {},
+        {bundle: p, device_id: 'x', confirm: 'x'}).then(() => 'ok', e => e.errName + ': ' + e.message))""",
+                      demo.example(0))
+    assert r.startswith("REFUSED: not confirmed: this bundle is unsigned"), r
+    assert not page.errors, page.errors
+
+
+def test_the_os_step_shows_a_reader_without_privilege_the_command_and_never_escalates(
+        demo, monkeypatch):
     from tests.fakes.bringup_cardwriter import DEVICE
 
     reader_on(demo, monkeypatch, privilege=True)
     page = demo.page()
-    add_and_open(page)
-    check(page, demo.example(0))
-    back_up(page)
-    page.get_by_role("button", name="SD card in this PC's card reader").click()
-    pick_card(page, "files", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
-    page.locator('[data-testid="arm-bu-reader"] input').check()
-    page.locator('[data-action="bu_reader"]').click()
-    res = by(page, "bu-reader-result")
+    bring_up(page, demo.example(1))
+    os_step = by(page, "bu-step-os")
+    expect(os_step).to_be_visible(timeout=T)
+    os_step.locator('[data-option="reader"] input').check()
+    by(page, "bu-card-image").fill(demo.engine.bringup_card_image)
+    pick_card(page, "card", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
+    page.locator('[data-testid="arm-bu-os"] input').check()
+    page.locator('[data-action="bu_os"]').click()
+    res = by(page, "bu-os-result")
     expect(res).to_contain_text("Harness Manager never escalates", timeout=T)
     expect(res).to_contain_text("sudo dd if=")
-    expect(by(page, "bu-step-write")).to_have_attribute("data-state", "todo")   # not written
+    expect(os_step).to_have_attribute("data-state", "todo")              # not written
     assert not page.errors, page.errors
 
 

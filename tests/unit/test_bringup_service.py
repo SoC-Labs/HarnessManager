@@ -5,6 +5,7 @@ negative twin. Nothing here opens a port, mounts a volume or writes a device."""
 from __future__ import annotations
 
 import json
+import sys
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -167,6 +168,92 @@ def test_twin_an_ebf_given_as_the_bundle_and_bad_paths(tmp_path):
 
 
 # --- the drive ----------------------------------------------------------------------------------
+
+
+# --- an unsigned bundle: its sha256 and the typed INSTALL UNSIGNED <sha8> (david 2 Oct, D3a) ---
+
+
+def _hex(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def test_a_folders_sha256_is_its_manifest_one_sha256sum_line_per_file_in_byte_order(tmp_path):
+    root = tmp_path / "b"
+    (root / "sd" / "MB").mkdir(parents=True)
+    (root / "sd" / "config.txt").write_bytes(b"cfg")
+    (root / "sd" / "MB" / "x.txt").write_bytes(b"x")
+    (root / "B.txt").write_bytes(b"upper")              # "B" (0x42) sorts before "a" (0x61)
+    (root / "a.txt").write_bytes(b"lower")
+    (root / "odd\\name").write_bytes(b"odd")           # escaped as sha256sum escapes it
+    manifest, sums, links = bringup.folder_manifest(root)
+    assert manifest == b"".join([
+        _hex(b"upper").encode() + b"  B.txt\n",
+        _hex(b"lower").encode() + b"  a.txt\n",
+        b"\\" + _hex(b"odd").encode() + b"  odd\\\\name\n",
+        _hex(b"x").encode() + b"  sd/MB/x.txt\n",           # "M" (0x4D) before "c" (0x63)
+        _hex(b"cfg").encode() + b"  sd/config.txt\n"])
+    assert sums["sd/config.txt"] == _hex(b"cfg") and links == []
+    chk = bringup.check_bundle(root, tmp_path / "work")
+    assert chk.sha256 == _hex(manifest) and chk.sha256_of == "manifest"
+    assert chk.manifest_files == 5
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the recipe is GNU find/sort/sha256sum")
+def test_the_manifest_recipe_prints_the_same_sha256(tmp_path):
+    import subprocess
+
+    root = release_bundle(tmp_path / "rel")
+    (root / "notes with space.txt").write_text("n")
+    recipe = bringup.MANIFEST_RECIPE.replace("cd FOLDER", f"cd '{root}'")
+    out = subprocess.run(["bash", "-c", recipe], capture_output=True, text=True, check=True)
+    assert out.stdout.split()[0] == bringup.check_bundle(root, tmp_path / "w").sha256
+
+
+def test_twin_any_change_to_any_file_changes_the_folders_sha256(tmp_path):
+    root = release_bundle(tmp_path / "rel")
+    first = bringup.check_bundle(root, tmp_path / "w").sha256
+    (root / "overlays" / "open" / "synth" / "manifest.json").write_text('{"x": 1}')
+    second = bringup.check_bundle(root, tmp_path / "w").sha256
+    assert first != second
+    (root / "overlays" / "open" / "synth" / "manifest.json").write_text("{}")
+    assert bringup.check_bundle(root, tmp_path / "w").sha256 == first     # deterministic
+
+
+def test_a_zips_sha256_is_the_zip_files_own(tmp_path):
+    z = zip_dir(release_bundle(tmp_path / "rel"), tmp_path / "rel.zip")
+    chk = bringup.check_bundle(z, tmp_path / "w")
+    assert chk.sha256 == _hex(z.read_bytes()) and chk.sha256_of == "zip"
+    u = chk.as_dict()["unsigned"]
+    assert u["phrase"] == f"INSTALL UNSIGNED {chk.sha256[:8]}" and u["how"] == bringup.ZIP_RECIPE
+    assert u["banner"] == ("Unsigned: Harness Manager cannot check where this came from; only "
+                           "install a bundle you built or got from SoC Labs directly.")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_twin_a_symbolic_link_anywhere_in_a_folder_is_refused(tmp_path):
+    root = release_bundle(tmp_path / "rel")
+    (root / "overlays" / "open" / "linked").symlink_to(tmp_path)
+    chk = bringup.check_bundle(root, tmp_path / "w")
+    assert chk.refused and any("overlays/open/linked: a symbolic link; a bundle carries only "
+                               "regular files" in p for p in chk.problems)
+    (root / "overlays" / "open" / "linked").unlink()
+    assert not bringup.check_bundle(root, tmp_path / "w").refused
+
+
+def test_require_unsigned_takes_the_phrase_and_refuses_anything_else(tmp_path):
+    from harness_manager.core.errors import RefusedError
+
+    chk = bringup.check_bundle(sd_tree(tmp_path / "t"), tmp_path / "w")
+    want = chk.unsigned_phrase
+    bringup.require_unsigned(chk, want)
+    bringup.require_unsigned(chk, f"  INSTALL UNSIGNED   {want[-8:].upper()} ")
+    for typed in (None, "", "yes", want[:-1], "INSTALL UNSIGNED", "install unsigned "
+                  + want[-8:], f"INSTALL UNSIGNED {'0' * 8 if want[-8:] != '0' * 8 else '1' * 8}"):
+        with pytest.raises(RefusedError) as e:
+            bringup.require_unsigned(chk, typed)
+        assert e.value.data["unsigned"]["phrase"] == want, typed
+        assert "nothing was written" in e.value.hint
 
 
 def test_the_drive_says_what_it_loads(tmp_path):

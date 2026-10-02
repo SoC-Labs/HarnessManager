@@ -5,7 +5,8 @@
 | ``GET /bringup`` | the wizard's switches: the default address, ``bringup.sd_flash``, the network OS door (not yet), the signing keys, whether this service has the card-reader routes |
 | ``POST /bringup/scan`` ``{host?, ask_mcc?, timeout_s?}`` | the MPS3 Debug USBs this PC sees (the pack's USB probe), each with its MCC port, its V2M-MPS3 drive and what it holds, what the MCC answers (``ask_mcc``), and whether a harness answers at ``host`` |
 | ``POST /bringup/bundle`` ``{path}`` | check a bundle folder or zip: the files, the base ``.bit`` (size, sha256, part, USERID); 409 REFUSED with ``error.data.check`` for an ``.ebf``, an MCC command file, a file outside the config-SD tree, no bitstream |
-| ``POST /boards/{bid}/bringup/install`` ``{bundle, backup_path}`` | 202 job ``sd_install``: the bundle checked again, then written to the board's config SD by its storage adapter (the backup is mandatory; never an ``.ebf``); a release bundle's ``overlays/open`` then joins ``mps3.overlay_dirs`` (Program and Restore find them) |
+| ``POST /boards/{bid}/bringup/install`` ``{bundle, backup_path, confirm_unsigned}`` | 202 job ``sd_install``: the bundle checked again and its typed ``INSTALL UNSIGNED <sha8>`` (409 REFUSED without it, ``error.data.unsigned``), then written to the board's config SD by its storage adapter (the backup is mandatory; never an ``.ebf``); a release bundle's ``overlays/open`` then joins ``mps3.overlay_dirs`` (Program and Restore find them) |
+| ``POST /bringup/card-reader`` ``{bundle, device_id, confirm, confirm_unsigned, backup_path?, backup_dir?}`` | 202 job ``cardwriter_write``: the same bundle check and typed phrase, then the card writer's ``files`` kind (SD-FLASH's: the card in this PC's reader backed up, its typed ``WRITE <model> <size>``, the pack's MBBIOS rule, read back); no MCC reboot |
 | ``POST /boards/{bid}/bringup/witness`` ``{host?, wait_s?, poll_s?}`` | 202 job ``bringup_witness``: wait for the harness to answer at ``host`` after the reboot; ``state`` ``running`` or ``rescue``; a timeout fails the job with ``error.data.timeout`` |
 
 Composed, not new executors: the backup, the reboot and the restore are the existing
@@ -20,14 +21,22 @@ from typing import Any
 
 from harness_manager.cli.output import with_data
 from harness_manager.core import capabilities as C
-from harness_manager.core.errors import HarnessError, HeldError, RefusedError, UsageError
+from harness_manager.core.errors import (
+    HarnessError,
+    HeldError,
+    RefusedError,
+    UnavailableError,
+    UsageError,
+)
 from harness_manager.services import bringup
 
-from .app import _JSON, JsonBody, RouteContext, _abs_path, _bool, _number, _obj, ok
+from .app import _JSON, JsonBody, RouteContext, _abs_path, _bool, _number, _obj, _str, ok
 
 WITNESS_JOB = "bringup_witness"
 INSTALL_JOB = "sd_install"           # the storage install's own kind: the UI knows it
 CARDWRITER_ROUTE = "/cardwriter/devices"
+CARDWRITER_JOB = "cardwriter_write"   # SD-FLASH's job kind and engine-wide gate (cardwriter_api)
+CARDWRITER_ENGINE = ""
 
 
 def _host(b: dict[str, Any]) -> str:
@@ -43,6 +52,15 @@ def register(ctx: RouteContext) -> None:
 
     def work_dir() -> Any:
         return d.state_dir / "bringup" / "bundles"
+
+    def checked(bundle: str, b: dict[str, Any]) -> bringup.BundleCheck:
+        """The bundle checked again, as it is now, and its typed INSTALL UNSIGNED <sha8>."""
+        chk = bringup.check_bundle(bundle, work_dir())
+        if chk.refused:
+            raise with_data(RefusedError(f"refusing {chk.path}: {chk.problems[0]}",
+                                         hint="nothing was written"), check=chk.as_dict())
+        bringup.require_unsigned(chk, b.get("confirm_unsigned"))
+        return chk
 
     def cardwriter_served() -> bool:
         return any(getattr(r, "path", "").endswith(CARDWRITER_ROUTE) for r in api.routes)
@@ -112,10 +130,7 @@ def register(ctx: RouteContext) -> None:
                                hint="take one (POST .../storage/backup), then pass its "
                                     "backup_path; nothing was written")
         backup_path = _abs_path(b.get("backup_path"), "backup_path")
-        chk = bringup.check_bundle(bundle, work_dir())
-        if chk.refused:
-            raise with_data(RefusedError(f"refusing {chk.path}: {chk.problems[0]}",
-                                         hint="nothing was written"), check=chk.as_dict())
+        chk = checked(bundle, b)
         require_holder(d, bid, s, "write the configuration SD", b)   # behind a hub: the lease
         files = {dest: _abs_path(src, "file") for dest, src in chk.install_files.items()}
         with d.gates.op(bid):
@@ -150,6 +165,44 @@ def register(ctx: RouteContext) -> None:
             return {**got, "count": chk.overlays["count"], "names": chk.overlays["names"]}
 
         return ctx.accepted(d.jobs.submit(INSTALL_JOB, bid, run))
+
+    @api.post("/bringup/card-reader")
+    def bringup_card_reader(body: JsonBody = None) -> Any:
+        """The wizard's card-reader door for a bundle: the bring-up checks (the bundle, its
+        typed INSTALL UNSIGNED <sha8>), then SD-FLASH's writer and job, unchanged."""
+        from pathlib import Path
+
+        b = _obj(body)
+        bundle = b.get("bundle")
+        if not isinstance(bundle, str) or not bundle:
+            raise UsageError("the request needs 'bundle': the folder or .zip checked by "
+                             "POST /bringup/bundle")
+        writer_for = getattr(d, "card_writer", None)
+        if writer_for is None:
+            raise UnavailableError("card reader", "this build has no card-reader writer: use "
+                                                  "the Debug USB")
+        w = writer_for()
+        w.require()                                  # 422: bringup.sd_flash off, or this OS
+        confirm = b.get("confirm", "")
+        if not isinstance(confirm, str):
+            raise UsageError("confirm must be the typed phrase (WRITE <model> <size>)")
+        chk = checked(bundle, b)
+        backup_path = _abs_path(b["backup_path"], "backup_path") if b.get("backup_path") else None
+        backup_dir = _abs_path(b["backup_dir"], "backup_dir") if b.get("backup_dir") else None
+        if backup_path is None and backup_dir is None:
+            backup_dir = Path(d.state_dir) / "backups"
+        other = d.gates.busy(CARDWRITER_ENGINE)
+        if other is not None:
+            err = HeldError(f"{other.describe()} is running in the service",
+                            holder=f"harness-manager-daemon {other.describe()}",
+                            hint=f"wait for it to finish (GET /api/v1/jobs/{other.id})")
+            err.data = {"job": other.id, "kind": other.kind,  # type: ignore[attr-defined]
+                        "board_id": CARDWRITER_ENGINE}
+            raise err
+        plan = w.prepare(_str(b, "device_id"), "files", Path(chk.sd_root), confirm,
+                         backup_path=backup_path, backup_dir=backup_dir)
+        return ctx.accepted(d.jobs.submit(CARDWRITER_JOB, CARDWRITER_ENGINE,
+                                          lambda progress: w.run(plan, progress)))
 
     @api.post("/boards/{bid:path}/bringup/witness")
     def bringup_witness(bid: str, body: JsonBody = None) -> Any:

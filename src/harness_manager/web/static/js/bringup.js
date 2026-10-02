@@ -45,6 +45,9 @@ export const DEFAULT_HOST = "192.168.10.101";
 export const USB_WARNING = "A USB write can take 5 minutes: do not unplug, power off or start a second write.";
 export const NETWORK_OS_REASON = "comes with Linux v2.1 (HARNESS-DIST L3)";
 export const READER_MISSING = "this build has no card-reader writer: use the Debug USB";
+// david 2 Oct (D3a): a bundle folder or zip is unsigned: this banner, its sha256, and the typed
+// INSTALL UNSIGNED <first 8 hex> before any write (the service refuses without it).
+export const UNSIGNED_BANNER = "Unsigned: Harness Manager cannot check where this came from; only install a bundle you built or got from SoC Labs directly.";
 const pct = (d) => (d && d.total ? Math.floor((d.done * 100) / d.total) : 0);
 const short = (sha) => (sha ? `${String(sha).slice(0, 16)}…` : "?");
 
@@ -94,7 +97,7 @@ export function bs(bid) {
   const b = boardState(bid);
   if (!b.bringup) {
     b.bringup = {
-      source: "bundle", path: "", check: null, checkError: null, checking: false,
+      source: "bundle", path: "", check: null, checkError: null, checking: false, unsignedTyped: "",
       relSource: "", rel: null, relError: null, relLoading: false, pick: "", plan: null, planError: null,
       typed: "", method: "usb", device: "", typedDevice: "",
       written: null,          // {how: "usb" | "reader" | "release", at, ...}
@@ -297,6 +300,7 @@ async function checkBundle(bid) {
   w.checking = true;
   w.check = null;
   w.checkError = null;
+  w.unsignedTyped = "";
   changed();
   const r = await timed(`bringup bundle ${path}`, () => bringupCall("bringupBundle", {}, { path }));
   w.checking = false;
@@ -321,6 +325,8 @@ function BundleFacts({ chk }) {
         : html`<span class="muted">none</span>`}</dd>
       <dt>Writes</dt><dd data-testid="bundle-files">${chk.count} file${chk.count === 1 ? "" : "s"}, ${bytesText(chk.total_bytes)}, onto the V2M-MPS3 drive
         <ul class="bu-files mono small">${(chk.files || []).map((f) => html`<li key=${f.path}>${f.path} <span class="muted">${bytesText(f.size)}</span></li>`)}</ul></dd>
+      ${chk.sha256 ? html`<dt>sha256</dt><dd data-testid="bundle-sha"><span class="mono bu-sha">${chk.sha256}</span>
+        <div class="sub">${shaHow(chk)}</div></dd>` : null}
       ${chk.os_image ? html`<dt>Slot image</dt><dd><span class="mono">linux_slot.img</span><div class="sub">${bytesText(chk.os_image.size)} · an OS slot image (slot A/B, over Ethernet once Linux runs): never written to a card, and not the whole-card image step 5 asks for</div></dd>` : null}
       ${chk.overlays ? html`<dt>Overlays</dt><dd data-testid="bundle-overlays">${chk.overlays.count} open overlay${chk.overlays.count === 1 ? "" : "s"} (${chk.overlays.names.join(", ")})<div class="sub">after the write, <span class="mono">${chk.overlays.path}</span> joins mps3.overlay_dirs, so Program and Restore find them</div></dd>` : null}
     </dl>
@@ -331,9 +337,43 @@ function BundleFacts({ chk }) {
   </div>`;
 }
 
+// How the bundle's sha256 is made, so it can be checked on another machine.
+function shaHow(chk) {
+  const u = chk.unsigned || {};
+  if (u.of === "zip") return html`of the zip file itself (<span class="mono">${u.how || "sha256sum BUNDLE.zip"}</span>)`;
+  return html`of the folder's manifest: one line <span class="mono">&lt;sha256&gt;  &lt;path&gt;</span> for each of its ${u.files} files, sorted by path (<span class="mono">${u.how || ""}</span>)`;
+}
+
+function UnsignedBanner() {
+  const text = (G.status && G.status.unsigned && G.status.unsigned.banner) || UNSIGNED_BANNER;
+  const [head, ...rest] = text.split(": ");
+  return html`<div class="outcome err bu-unsigned" data-testid="bu-unsigned-banner" role="alert"><${Icon} name="triangle-alert" />
+    <span><b>${head}:</b> ${rest.join(": ")}</span></div>`;
+}
+
+export function unsignedPhrase(w) {
+  return (w.check && !w.check.refused && w.check.unsigned && w.check.unsigned.phrase) || "";
+}
+
+// The typed phrase as the service compares it: any spacing, the hex in either case.
+export function unsignedTyped(w) {
+  const want = unsignedPhrase(w);
+  const got = String(w.unsignedTyped || "").trim().split(/\s+/).join(" ");
+  return !!want && (got === want || (got.slice(0, -8) === want.slice(0, -8) && got.slice(-8).toLowerCase() === want.slice(-8)));
+}
+
+function UnsignedPhrase({ bid, w }) {
+  const want = unsignedPhrase(w);
+  if (!want) return null;
+  return html`<div class="field bu-unsigned-field"><label for=${`bu-unsigned-${bid}`}>Type <code data-testid="bundle-unsigned-want">${want}</code></label>
+    <input id=${`bu-unsigned-${bid}`} class="input mono grow" data-testid="bundle-unsigned-phrase" autocomplete="off" spellcheck="false"
+      value=${w.unsignedTyped} onInput=${(e) => { w.unsignedTyped = e.target.value; changed(); }} /></div>`;
+}
+
 function BundleSource({ bid, w }) {
   const examples = (G.status && G.status.examples) || [];
   return html`<div class="stack gap-12">
+    <${UnsignedBanner} />
     <div class="field"><label for=${`bu-path-${bid}`}>Folder or zip</label>
       <input id=${`bu-path-${bid}`} class="input mono grow" data-testid="bundle-path"
         placeholder="/home/me/mps3-harness-1.1.0  or  …/mps3-harness-1.1.0.zip" value=${w.path}
@@ -348,6 +388,7 @@ function BundleSource({ bid, w }) {
         onClick=${() => { w.path = x.path; changed(); checkBundle(bid); }}>${x.what}</button>`)}</div>` : null}
     ${w.checkError && !w.check ? html`<${Reason} level="err" testid="bundle-error" text=${`${w.checkError.errName}: ${w.checkError.message}${w.checkError.hint ? ` (${w.checkError.hint})` : ""}`} />` : null}
     ${w.check ? html`<${BundleFacts} chk=${w.check} />` : null}
+    <${UnsignedPhrase} bid=${bid} w=${w} />
   </div>`;
 }
 
@@ -424,7 +465,11 @@ function ReleaseSource({ bid, w }) {
 }
 
 function sourceWhy(w) {
-  if (w.source === "bundle") return w.check && w.check.refused ? "the bundle is refused (step 1)" : "choose and check the source first (step 1)";
+  if (w.source === "bundle") {
+    if (w.check && w.check.refused) return "the bundle is refused (step 1)";
+    if (unsignedPhrase(w) && !unsignedTyped(w)) return `type ${unsignedPhrase(w)} in step 1 to install this unsigned bundle`;
+    return "choose and check the source first (step 1)";
+  }
   const plan = w.plan && w.plan.plan;
   if (plan && (plan.blockers || []).length) return `the planner refuses this release here: ${plan.blockers[0]}`;
   if (plan && plan.consent_phrase && w.typed.trim() !== plan.consent_phrase) return `type ${plan.consent_phrase} in step 1 to confirm the re-key`;
@@ -432,7 +477,7 @@ function sourceWhy(w) {
 }
 
 function sourceReady(w) {
-  if (w.source === "bundle") return !!(w.check && !w.check.refused);
+  if (w.source === "bundle") return !!(w.check && !w.check.refused && unsignedTyped(w));
   const plan = w.plan && w.plan.plan;
   return !!(plan && !(plan.blockers || []).length && (!plan.consent_phrase || w.typed.trim() === plan.consent_phrase));
 }
@@ -473,7 +518,16 @@ function readerChoice(w, kind) {
   return { ok: true, why: "" };
 }
 
-function confirmFor(dev) { return dev ? `WRITE ${dev.model} ${dev.size_bytes}` : ""; }
+// The card writer's own phrase, as it lists it (WRITE SD/MMC 31.9 GB); the contract's form when
+// a writer does not say.
+function confirmFor(dev) { return dev ? (dev.confirm || `WRITE ${dev.model} ${dev.size_bytes}`) : ""; }
+
+// Why a listed card cannot take this kind of write ("" when it can): the writer's own words.
+function cannotTake(d, kind) {
+  const k = d.kinds && d.kinds[kind];
+  if (k && !k.ok) return k.why_not || "not this kind";
+  return d.writable === false ? (d.why_not || "not writable") : "";
+}
 
 function DevicePicker({ w, field, typedField, kind }) {
   const r = G.reader || { devices: [] };
@@ -483,7 +537,7 @@ function DevicePicker({ w, field, typedField, kind }) {
       <select class="select grow" data-testid=${`reader-device-${kind}`} value=${w[field]}
         onChange=${(e) => { w[field] = e.target.value; w[typedField] = ""; changed(); }}>
         <option value="">Choose the card…</option>
-        ${r.devices.map((d) => html`<option key=${d.id} value=${d.id} disabled=${d.writable === false}>${d.model} · ${bytesText(d.size_bytes)} · ${d.path}${d.writable === false ? ` (${d.why_not || "not writable"})` : ""}</option>`)}
+        ${r.devices.map((d) => { const no = cannotTake(d, kind); return html`<option key=${d.id} value=${d.id} disabled=${!!no}>${d.model} · ${bytesText(d.size_bytes)} · ${d.path}${no ? ` (${no})` : ""}</option>`; })}
       </select>
       <button type="button" class="btn ghost sm" onClick=${loadReader} title="Read the card readers again"><${Icon} name="refresh-cw" /></button></div>
     ${dev ? html`<div class="field"><label>Type <code>${confirmFor(dev)}</code></label>
@@ -493,7 +547,13 @@ function DevicePicker({ w, field, typedField, kind }) {
 }
 
 async function readerWrite(bid, ctx, kind, deviceId, source, confirm) {
-  const { data } = await bringupCall("cardwriterWrite", {}, { device_id: deviceId, kind, source, confirm });
+  return readerJob(ctx, "cardwriterWrite", { device_id: deviceId, kind, source, confirm });
+}
+
+// A card-reader write (SD-FLASH's job, cardwriter_write) through a route: the bring-up's own for
+// a bundle (its checks and the unsigned phrase first), the card writer's for a whole-card image.
+async function readerJob(ctx, name, body) {
+  const { data } = await bringupCall(name, {}, body);
   if (!data.job) return data;
   return waitJob(data.job, { onProgress: (d) => ctx.progress(`${d.phase || "write"}: ${pct(d)}%`, d.phase) });
 }
@@ -565,7 +625,7 @@ function WriteStep({ bid, w, ready }) {
   } : {
     key: "bu_write", label: "Write over the Debug USB", busyLabel: "Writing...", budgetS: 600,
     command: `sd - install ${w.check ? w.check.path : "?"} --backup ${backup || "?"}`,
-    run: (ctx) => bringupJob("bringupInstall", bid, { bundle: w.check.path, backup_path: backup },
+    run: (ctx) => bringupJob("bringupInstall", bid, { bundle: w.check.path, backup_path: backup, confirm_unsigned: w.unsignedTyped.trim() },
       (d) => ctx.progress(`${d.phase || "install"}: ${pct(d)}%`, d.phase), "sd_install"),
     render: (res) => [{ kind: "ok", text: `wrote ${(res.files || []).length} file(s) to the configuration SD and read them back; the board runs them after a reboot` },
       ...overlayLines(res && res.overlays)],
@@ -577,8 +637,9 @@ function WriteStep({ bid, w, ready }) {
   const dev = (G.reader && G.reader.devices || []).find((d) => d.id === w.device) || null;
   const readerSpec = {
     key: "bu_reader", label: "Write the card in this PC's reader", busyLabel: "Writing...", budgetS: 600,
-    command: `cardwriter write ${w.device || "?"} --kind files ${w.check ? w.check.sd_root : "?"}`,
-    run: (ctx) => readerWrite(bid, ctx, "files", w.device, w.check.sd_root, w.typedDevice.trim()),
+    command: `bringup - --bundle ${w.check ? w.check.path : "?"} --card-reader ${w.device || "?"}`,
+    run: (ctx) => readerJob(ctx, "bringupCardReader", { bundle: w.check.path, device_id: w.device,
+      confirm: w.typedDevice.trim(), confirm_unsigned: w.unsignedTyped.trim() }),
     render: (res) => readerLines(res, "the configuration SD files"),
     onDone: (ok, res) => {
       if (ok && !(res && res.needs_privilege)) { w.written = { how: "reader", at: Date.now() }; w.replaced = false; w.witness = null; w.witnessError = null; }

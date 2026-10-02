@@ -61,6 +61,10 @@ def register(app: FastAPI, state: Any, ok: Any) -> None:
         state.session(bid)
         raise UnavailableError("bring-up install", WHY)
 
+    @app.post(f"{API}/bringup/card-reader")
+    def card_reader(body: JsonBody = None) -> dict[str, Any]:
+        raise UnavailableError("card reader", WHY)
+
     @app.post(f"{API}/boards/{{bid:path}}/bringup/witness")
     def witness(bid: str, body: JsonBody = None) -> dict[str, Any]:
         state.session(bid)

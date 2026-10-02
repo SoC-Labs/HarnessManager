@@ -65,6 +65,8 @@ def register(ctx: RouteContext) -> None:
                     state["writer"] = cw.CardWriter(state_dir=d.state_dir, publish=publish)
             return state["writer"]
 
+    d.card_writer = writer          # the bring-up's card-reader door writes with the same one
+
     @api.get("/cardwriter/devices")
     def devices() -> _JSON:
         return _JSON(ok(**writer().devices_json()))

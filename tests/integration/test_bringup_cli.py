@@ -18,6 +18,7 @@ from harness_manager.cli import cmd_bringup, cmd_flash
 from harness_manager.cli.context import Ctx
 from harness_manager.cli.main import _fmt_parent, _usb_parent
 from harness_manager.core.errors import RefusedError, UnavailableError, UsageError
+from harness_manager.services import bringup
 from harness_manager_mps3 import mcc as mccmod
 from tests.fakes.cardwriter_fakes import (
     CARD_BOARD,
@@ -47,6 +48,15 @@ def board(tmp_path: Path, monkeypatch) -> Iterator[VirtualMps3]:
         yield vb
 
 
+def phrase(bundle: Path, tmp_path: Path) -> str:
+    """The typed INSTALL UNSIGNED <sha8> for a bundle folder or zip, as the check shows it."""
+    return bringup.check_bundle(bundle, tmp_path / "phrase-work").unsigned_phrase
+
+
+def signed(bundle: Path, tmp_path: Path) -> tuple[str, ...]:
+    return ("--bundle", str(bundle), "--confirm-unsigned", phrase(bundle, tmp_path))
+
+
 def run(board: VirtualMps3, tmp_path: Path, capsys, *extra: str) -> tuple[int, dict]:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd")
@@ -65,12 +75,15 @@ def run(board: VirtualMps3, tmp_path: Path, capsys, *extra: str) -> tuple[int, d
 def test_bringup_backs_up_writes_reboots_and_witnesses_a_bundle(board, tmp_path, capsys):
     bundle = release_bundle(tmp_path / "rel", linux=False)
     ebf = board.sd.ebf.read_bytes()
-    rc, out = run(board, tmp_path, capsys, "--bundle", str(bundle), "--wait", "30")
+    rc, out = run(board, tmp_path, capsys, *signed(bundle, tmp_path), "--wait", "30")
     assert rc == 0
     steps = [(s["step"], s["result"]) for s in out["steps"]]
-    assert steps == [("source", "checked"), ("backup", "taken"), ("write", "written"),
-                     ("overlays", "added"), ("reboot", "witnessed"), ("witness", "running"),
-                     ("next", "access")]
+    assert steps == [("source", "checked"), ("unsigned", "confirmed"), ("backup", "taken"),
+                     ("write", "written"), ("overlays", "added"), ("reboot", "witnessed"),
+                     ("witness", "running"), ("next", "access")]
+    sha = out["check"]["sha256"]
+    assert out["steps"][1]["detail"] == (f"INSTALL UNSIGNED {sha[:8]} typed; sha256 {sha} (its "
+                                         f"manifest, {out['check']['unsigned']['files']} files)")
     assert (board.sd.root / "MB/HBI0309C/Nanosoc/nanosoc.bit").read_bytes() == \
         (bundle / "sd/MB/HBI0309C/Nanosoc/nanosoc.bit").read_bytes()
     assert board.sd.ebf.read_bytes() == ebf and board.reboots == 1
@@ -131,11 +144,12 @@ PHRASE = "WRITE SD/MMC 31.9 GB"
 def test_card_reader_writes_the_card_backs_it_up_and_witnesses_with_no_mcc_reboot(
         board, rig, tmp_path, capsys):
     bundle = release_bundle(tmp_path / "rel", linux=False)
-    rc, out = run_reader(board, rig, tmp_path, capsys, "--bundle", str(bundle),
+    rc, out = run_reader(board, rig, tmp_path, capsys, *signed(bundle, tmp_path),
                          "--confirm", PHRASE)
     assert rc == 0
     steps = [(s["step"], s["result"]) for s in out["steps"]]
-    assert steps == [("source", "checked"), ("backup", "taken"), ("write", "written"),
+    assert steps == [("source", "checked"), ("unsigned", "confirmed"), ("backup", "taken"),
+                     ("write", "written"),
                      ("mbbios", "bundle"), ("overlays", "added"), ("reboot", "by-hand"),
                      ("witness", "running"), ("next", "access")]
     by = {s["step"]: s["detail"] for s in out["steps"]}
@@ -152,7 +166,7 @@ def test_card_reader_writes_the_card_backs_it_up_and_witnesses_with_no_mcc_reboo
 def test_twin_a_wrong_phrase_writes_nothing(board, rig, tmp_path, capsys):
     before = sorted(p.relative_to(rig.root).as_posix() for p in rig.root.rglob("*"))
     with pytest.raises(RefusedError) as e:
-        run_reader(board, rig, tmp_path, capsys, "--bundle", str(sd_tree(tmp_path / "good")),
+        run_reader(board, rig, tmp_path, capsys, *signed(sd_tree(tmp_path / "good"), tmp_path),
                    "--confirm", "WRITE SD/MMC 32 GB")
     assert "type exactly 'WRITE SD/MMC 31.9 GB'" in e.value.message
     assert sorted(p.relative_to(rig.root).as_posix() for p in rig.root.rglob("*")) == before
@@ -161,7 +175,7 @@ def test_twin_a_wrong_phrase_writes_nothing(board, rig, tmp_path, capsys):
 
 def test_twin_yes_never_types_the_phrase(board, rig, tmp_path, capsys):
     with pytest.raises(RefusedError) as e:
-        run_reader(board, rig, tmp_path, capsys, "--bundle", str(sd_tree(tmp_path / "good")))
+        run_reader(board, rig, tmp_path, capsys, *signed(sd_tree(tmp_path / "good"), tmp_path))
     assert "--yes never types the phrase" in e.value.message
     assert e.value.data["confirm"] == PHRASE
     assert (rig.root / "MB" / "HBI0309C" / "images.txt").read_text() == "old\n"
@@ -169,8 +183,8 @@ def test_twin_yes_never_types_the_phrase(board, rig, tmp_path, capsys):
 
 def test_card_reader_keeps_the_cards_mbbios_line(board, rig, tmp_path, capsys):
     rig.card_board_txt(CARD_BOARD)
-    rc, out = run_reader(board, rig, tmp_path, capsys, "--bundle",
-                         str(sd_tree(tmp_path / "good")), "--confirm", PHRASE)
+    rc, out = run_reader(board, rig, tmp_path, capsys, *signed(sd_tree(tmp_path / "good"),
+                                                               tmp_path), "--confirm", PHRASE)
     assert rc == 0
     mb = [s for s in out["steps"] if s["step"] == "mbbios"]
     assert mb == [{"step": "mbbios", "result": "kept", "detail": "MBBIOS kept: mbb_v141.ebf"}]
@@ -182,7 +196,7 @@ def test_twin_a_card_that_would_update_the_mcc_is_refused_before_the_phrase(
         board, rig, tmp_path, capsys):
     rig.card_board_txt(NO_LINE_BOARD, ebf="mbb_v141.ebf")
     with pytest.raises(RefusedError) as e:
-        run_reader(board, rig, tmp_path, capsys, "--bundle", str(sd_tree(tmp_path / "good")),
+        run_reader(board, rig, tmp_path, capsys, *signed(sd_tree(tmp_path / "good"), tmp_path),
                    "--confirm", PHRASE)
     assert "would make the MCC update itself to mbb_v141.ebf" in e.value.message
     assert (rig.root / "MB" / "HBI0309C" / "board.txt").read_bytes() == NO_LINE_BOARD
@@ -191,10 +205,10 @@ def test_twin_a_card_that_would_update_the_mcc_is_refused_before_the_phrase(
 
 def test_card_reader_asks_for_the_phrase_and_whether_the_card_is_back(
         board, rig, tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{PHRASE}\nn\n"))
+    bundle = sd_tree(tmp_path / "good")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"{phrase(bundle, tmp_path)}\n{PHRASE}\nn\n"))
     with pytest.raises(RefusedError) as e:
-        run_reader(board, rig, tmp_path, capsys, "--bundle", str(sd_tree(tmp_path / "good")),
-                   yes=False)
+        run_reader(board, rig, tmp_path, capsys, "--bundle", str(bundle), yes=False)
     assert e.value.message == "the card is written; nothing waited for the harness"
     assert f"harness-manager probe --host {board.shell_endpoint} --no-scan" in e.value.hint
     assert [s[1] for s in e.value.data["steps"]][-1] == "reboot"
@@ -216,6 +230,97 @@ def test_twin_a_board_that_stays_dark_names_the_backup_to_restore(board, tmp_pat
 
     board.mcc.on_boot = lambda: None                   # the FPGA loads, the harness never answers
     with pytest.raises(ActionFailedError) as e:
-        run(board, tmp_path, capsys, "--bundle", str(sd_tree(tmp_path / "good")), "--wait", "1")
+        run(board, tmp_path, capsys, *signed(sd_tree(tmp_path / "good"), tmp_path), "--wait", "1")
     assert e.value.data["timeout"] is True and "restore" in e.value.hint
     assert str(tmp_path / "bk") in e.value.hint
+
+
+# --- an unsigned bundle: the banner, the sha256, the typed INSTALL UNSIGNED <sha8> --------------
+
+
+def test_a_bundle_needs_install_unsigned_and_its_sha8_typed_before_anything(board, tmp_path,
+                                                                            capsys):
+    bundle = sd_tree(tmp_path / "good")
+    want = phrase(bundle, tmp_path)
+    assert want.startswith("INSTALL UNSIGNED ") and len(want.split()[-1]) == 8
+    rc, out = run(board, tmp_path, capsys, "--bundle", str(bundle), "--confirm-unsigned",
+                  f" INSTALL  UNSIGNED {want.split()[-1].upper()} ")      # spacing, hex case
+    assert rc == 0 and board.reboots == 1
+
+
+def test_twin_a_wrong_sha8_is_refused_and_nothing_is_backed_up_or_written(board, tmp_path,
+                                                                         capsys):
+    bundle = sd_tree(tmp_path / "good")
+    before = board.sd.snapshot()
+    right = phrase(bundle, tmp_path)
+    wrong = "INSTALL UNSIGNED " + ("0" * 8 if not right.endswith("0" * 8) else "1" * 8)
+    with pytest.raises(RefusedError) as e:
+        run(board, tmp_path, capsys, "--bundle", str(bundle), "--confirm-unsigned", wrong)
+    assert e.value.message == (f"not confirmed: {wrong!r} does not name this bundle: its sha256 "
+                               f"starts {right.split()[-1]}; type exactly {right!r}")
+    assert e.value.data["unsigned"]["phrase"] == right
+    assert e.value.data["unsigned"]["of"] == "manifest"
+    assert board.sd.snapshot() == before and board.reboots == 0
+    assert not (tmp_path / "bk").exists()                      # not even a backup
+
+
+def test_twin_yes_never_implies_the_unsigned_phrase(board, tmp_path, capsys):
+    bundle = sd_tree(tmp_path / "good")
+    with pytest.raises(RefusedError) as e:
+        run(board, tmp_path, capsys, "--bundle", str(bundle))
+    assert "--yes never types the phrase" in e.value.message
+    assert f"--confirm-unsigned {phrase(bundle, tmp_path)!r}" in e.value.message
+    assert e.value.data["unsigned"]["banner"] == (
+        "Unsigned: Harness Manager cannot check where this came from; only install a bundle you "
+        "built or got from SoC Labs directly.")
+    assert board.reboots == 0
+
+
+def test_a_bundle_changed_since_its_phrase_was_shown_is_refused(board, tmp_path, capsys):
+    bundle = sd_tree(tmp_path / "good")
+    old = phrase(bundle, tmp_path)
+    (bundle / "MB" / "HBI0309C" / "Nanosoc" / "nanosoc.txt").write_text(
+        "[FPGAS]\nF0FILE: nanosoc.bit ;changed\n")
+    assert phrase(bundle, tmp_path) != old
+    with pytest.raises(RefusedError, match="does not name this bundle"):
+        run(board, tmp_path, capsys, "--bundle", str(bundle), "--confirm-unsigned", old)
+    assert board.reboots == 0
+
+
+def test_a_zip_is_named_by_the_zips_own_sha256(board, tmp_path, capsys):
+    import hashlib
+
+    from tests.unit.test_bringup_service import zip_dir
+
+    z = zip_dir(release_bundle(tmp_path / "rel", linux=False), tmp_path / "rel.zip")
+    sha = hashlib.sha256(z.read_bytes()).hexdigest()
+    rc, out = run(board, tmp_path, capsys, "--bundle", str(z), "--confirm-unsigned",
+                  f"INSTALL UNSIGNED {sha[:8]}", "--wait", "30")
+    assert rc == 0 and out["check"]["unsigned"]["of"] == "zip"
+    assert out["check"]["sha256"] == sha
+
+
+def test_the_unsigned_phrase_is_asked_at_the_prompt(board, tmp_path, capsys, monkeypatch):
+    bundle = sd_tree(tmp_path / "good")
+    monkeypatch.setattr(sys, "stdin", io.StringIO("INSTALL UNSIGNED nope\n"))
+    p = argparse.ArgumentParser()
+    sub = p.add_subparsers(dest="cmd")
+    cmd_bringup.register(sub, parents=(_fmt_parent(), _usb_parent()))
+    args = p.parse_args(["bringup", "-", "--serial", board.mcc_url, "--volume",
+                         str(board.sd.root), "--bundle", str(bundle)])
+    eng = engine_for(board)
+    try:
+        with pytest.raises(RefusedError, match="does not name this bundle"):
+            args.fn(Ctx(args, eng, "json"))
+    finally:
+        eng.close_all()
+    err = capsys.readouterr().err
+    assert "Unsigned: Harness Manager cannot check where this came from" in err
+    assert f"To install this unsigned bundle, type exactly: {phrase(bundle, tmp_path)}" in err
+    assert board.reboots == 0
+
+
+def test_twin_a_signed_release_takes_no_unsigned_phrase(board, tmp_path, capsys):
+    with pytest.raises(UsageError, match="--confirm-unsigned is for a bundle folder or zip"):
+        run(board, tmp_path, capsys, "--version", "1.1.0", "--confirm-unsigned",
+            "INSTALL UNSIGNED 00000000")
