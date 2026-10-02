@@ -59,6 +59,13 @@ owners.
   source `pin-model` (was "the pin model, shell <id>") and that reason (was "fixed by the
   shell"; the tile still shows "fixed by the shell"). A bare-metal board is unchanged.
 
+### The sidebar shows the board's own name from identify (FIX-PACK-9, rc2)
+- The platform's rc2 identify sends the board's name as `label` ("MPS3-02"; net-proto v0.16,
+  lane IDENT), and Harness Manager read only the proposed `name` key, so the sidebar showed the
+  address. It now reads `label` first and falls back to `name` (each must be a clean name; a bad
+  label falls back), and none in stage0 rescue. Precedence is unchanged: a boards.toml `name`
+  still wins, then the board's own name, then the hub's.
+
 ### Boundary not timed: kept as a guard (FIX-PACK-8, rc2; N1 after N2)
 - N2 (below) fixed the cause of Linux v2.0.0 known issue 11 in `build_rm.tcl`. A build from an
   older `build_rm.tcl`, or one from a synth checkpoint you bring (`build.synth_dcp`) that already
