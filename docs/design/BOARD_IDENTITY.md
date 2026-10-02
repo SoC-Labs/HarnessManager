@@ -169,3 +169,38 @@ verb; the MAC the hub has wrong is never proposed.
 Not wired yet: nothing reads `identify.label` beyond the cheap read (v0.16 adds it); the SSH
 setter is selectable (`Mps3NetIdentity(setter=SshCommandSetter())`) but never the default.
 
+
+## 9. Name this board (lane IDENTITY, HM v0.1.1, 2026-10-02)
+
+david's decisions of 2 Oct (relayed by the Linux lead) supersede BRINGUP-2's MAC from the MCC
+serial: a name of 1-16 of A-Z, 0-9 and - (HM upper-cases; the aligned panel shows 16), boards
+named both ways (staff cards, and on the spot in HM), the identity following card and board
+later (a card sector in v2.1, MCCIF IDENT in mint 4: not here), and **a unique IP per board
+with a RANDOM MAC**.
+
+| Piece | Where |
+|---|---|
+| The rules (name, MAC, IP), `random_mac`, `allocate_ip`, the notes, `move_board_table`: board-agnostic, and the seams a later card-sector writer reuses | `services/identity_assign.py` |
+| The pack's policy (`IdentityPolicy`): byte 0 0x02, reserved 02:00:00:*, the pool `mps3.identity.ip_pool` 192.168.10.110-199, never 192.168.10.101, `answering` = identify, the rescue note, the hub records known wrong | `harness_manager_mps3/net_identity.py` `identity_policy()`, `Mps3Pack.identity_policy()` |
+| The registry: every MAC and IP assigned or seen, per board, first/last date (`history`) | `SeenIdentities.record/taken/move` (`<state>/identity/seen.json`) |
+| The proposal, the guards (hub: `hub_fixed` names the hub; subnet: `other_subnet`), the move | `IdentityService.propose/guards/precheck/fix` |
+| A board that moves: the reboot verb without the old-address witness, identify at the new IP, the pinned host key, the records moved (boards.toml, claims.json, known_hosts) | `Mps3NetIdentity.relocate/host_key/adopt_move`, `ClaimRecords.move` |
+| CLI | `board identity TARGET --label N --mac random|MAC --ip auto|A.B.C.D [--hub-fixed HUB] [--other-subnet]` |
+| API | `GET /boards/{bid}/identity/proposal`; POST `hub_fixed`, `other_subnet`, result `moved`, `address` |
+| Web | ONE dialog, `name-board` (`sections/identity.js`, `css/identity.css`): from Board > Access (Name this board…, Fix identity… = its hub-entry mode) and from the bring-up wizard (pre-filled) |
+
+**A move.** The board drops its old address at the restart (S41mps3net: DHCP first, then the
+new static IP as a permanent secondary, skipped if `arping -D` finds it taken; the old .101 is
+not kept). When the session reaches the board at the address that changes (its identity IP or
+its DHCP lease; never through a hub or a tunnel, whose address does not change), the job reads
+the pinned host key, sends the warm reboot verb, and asks identify at the new IP (every 3 s, up
+to 240 s). The board's host key lives in /persist, so it is the same after the restart; another
+key is another board (refused, nothing adopted). Found, the board's records move from
+`mps3@old:6900` to `mps3@new:6900`: boards.toml (a table keyed by the old id is renamed; one
+found by `match` gets the new address), the claim record, the known_hosts file written under
+the new id's alias, the registry. The session at the old address is closed by the app when it
+opens the new one (**Open it at …**).
+
+**Not here:** the card identity sector (v2.1), MCCIF IDENT and the SYSCON writer (mint 4), the
+DNA MAC. `identify.label` as HM's display name (the platform sends `label`, HM reads `name`)
+is a separate change.

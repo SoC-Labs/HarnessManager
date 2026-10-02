@@ -344,3 +344,24 @@ def test_twin_the_proposal_behind_a_hub_keeps_and_names_the_hub(lab):
     assert p["errors"]["ip"].startswith("--ip auto picks from this PC's own network")
     assert svc.propose(session)["defaults"] == {"mac": "keep", "ip": "keep"}
     json.dumps(p)                                                         # the API's answer
+
+
+# --- the Linux lead's refusal order: no_persist (a card written on a PC) -------------------------
+
+
+def test_a_card_written_on_a_pc_is_refused_with_the_format_hint_never_formatted(lab):
+    fake, session, svc = lab(persist=False)
+    with pytest.raises(RefusedError) as exc:
+        svc.fix(session, confirm="LAB-07", want={"label": "LAB-07", "mac": "random"})
+    assert "a card written on a PC whose /persist partition is still blank" in exc.value.message
+    assert "`harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'`" \
+        in exc.value.hint
+    assert "--replace-host-key" in exc.value.hint and "never formats it for you" in exc.value.hint
+    assert nothing_sent(fake)
+
+
+def test_twin_the_boards_own_no_persist_reply_carries_the_same_hint():
+    err = NI.set_error({"ok": False, "err": "identity: no persistent /persist (use the card)",
+                        "code": "no_persist"})
+    assert isinstance(err, RefusedError) and "mps3-persist format --erase" in err.hint
+    assert "[harness: identity: no persistent /persist (use the card)]" in err.message

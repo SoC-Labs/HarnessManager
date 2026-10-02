@@ -990,3 +990,44 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   shows the banner and its sha256, and asks for the phrase. The write checks the sha256 again
   just before the first byte.
 <!-- --- end bringup-2 --- -->
+<!-- --- identity --- -->
+### Name this board: a name, a random MAC and an IP of its own (IDENTITY, for v0.1.1)
+- **One dialog, "Name this board"** (Board > Access, and the bring-up wizard's last step,
+  filled in): a name of 1-16 characters of A-Z, 0-9 and - (upper-cased as you type; the
+  aligned panel shows 16, so 17-19 are refused although the board takes them), with a counter;
+  the MAC **Random** (Regenerate) / Keep / Custom; the IP **Auto** / Keep / Custom; the new IP
+  in large type with "this PC must be on the same /24 (e.g. 192.168.10.1/24)"; that stage0
+  rescue still answers on 192.168.10.101 with the default MAC until mint 4; the typed name to
+  confirm. It replaces "Fix identity" (now its "Match its hub entry" mode) and the wizard's
+  "Set this board's identity".
+- **`board identity --mac random`**: `os.urandom(6)` with byte 0 = 0x02 (locally administered,
+  unicast), never 02:00:00:* (the image's range), re-rolled on any MAC in the registry.
+  **`--ip auto`**: the next address of the pool `mps3.identity.ip_pool` (192.168.10.110-199;
+  a setting) that is not 192.168.10.101, not in the registry and not answering identify; an
+  exhausted pool is refused with the numbers. Your own `--mac`/`--ip` must be unicast and not
+  02:00:00:*, an IPv4 address of a /24. The CLI prints `NEW IP     a.b.c.d` and the same-/24
+  line before it asks and after.
+- **The registry:** `<state>/identity/seen.json` now keeps every MAC and IP this Harness
+  Manager assigned or saw, per board id, with the first and last date.
+- **Guards before anything is sent:** a board behind a hub changes its MAC or IP only with the
+  hub named (`--hub-fixed HUB`, `hub_fixed`; the dialog asks you to type it): its dnsmasq knows
+  the board by MAC, so fix the record first (mps3_01_pl's is known to be wrong today); `--ip
+  auto` is refused there. A new IP outside this PC's /24 needs `--other-subnet`
+  (`other_subnet`). A new MAC on the same IP carries the ARP note (`sudo arp -d <ip>`, which
+  Harness Manager never runs).
+- **A board whose address changes is followed** (the Linux lead, 2 Oct): its pinned SSH host
+  key is read first, the warm reboot is not witnessed at the old address, the board is found
+  at the new IP by identify and accepted only with that key (another key: "a different board
+  answers at ...", never adopted; none: "board not seen on <ip> after 4 min: it may be on DHCP
+  or the address was taken (DAD); check the panel, which shows the IP on row 5"). Its
+  boards.toml table (with the pin), claim record, known_hosts and registry record move to the
+  new board id; the result's `moved`, and the dialog's **Open it at <IP>**.
+- **The bring-up proposal** is the name from the MCC's USB serial, a random MAC and the pool's
+  next free IP (the MAC derived from the serial is gone).
+- **A card written on a PC** (a blank /persist, `no_persist`): the refusal's hint names
+  `harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'` and the
+  claim again; Harness Manager never formats it.
+- **API:** `GET /boards/{bid}/identity/proposal`; `POST /boards/{bid}/identity` takes `mac:
+  "random"`, `ip: "auto"`, `hub_fixed`, `other_subnet` and answers `moved` and `address`
+  (docs/API.md "Board identity"). The demo's Linux board has a net identity.
+<!-- --- end identity --- -->
