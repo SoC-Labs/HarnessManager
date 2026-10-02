@@ -497,3 +497,20 @@ CORE_ROWS: tuple[Setting, ...] = (GENERAL + HUBS + BOARDS + INLINE_HUB + TOOLS +
 #: ``--demo`` only; it is not a setting and never shows in Settings).
 NOT_SETTINGS_ENV = frozenset({"HARNESS_MANAGER_SYSMON", "HARNESS_MANAGER_SYSMON_ERR",
                               "HARNESS_MANAGER_DEMO_UPDATE"})
+
+# --- sd-flash ---
+# Lane SD-FLASH (bring-up wave, 2 Oct): write SD cards in THIS PC's card reader, the
+# alternative to the board's Debug USB. Both read at each use (live) by
+# services/cardwriter.py:is_enabled() and size_cap() (the API's GET /cardwriter/devices and
+# POST /cardwriter/write, the CLI's `flash devices|write`).
+SD_FLASH = (
+    Setting("bringup.sd_flash", "enum", "off", "Bring-up",
+            "Write SD cards in this PC's card reader (off: only the board's Debug USB writes "
+            "its SD)", owner="admin", env="HARNESS_MANAGER_BRINGUP_SD_FLASH",
+            choices=("off", "on")),
+    Setting("bringup.sd_flash_max", "size", 256_000_000_000, "Bring-up",
+            "The largest disk SD flashing lists (a bigger one is not an SD card)",
+            owner="admin", env="HARNESS_MANAGER_BRINGUP_SD_FLASH_MAX", advanced=True),
+)
+CORE_ROWS = CORE_ROWS + SD_FLASH
+# --- end sd-flash ---

@@ -21,6 +21,7 @@ import { boardState, changed, onBoardEvent, timed } from "../store.js";
 import { ActionRow, ArmBox, Card, Chip, Icon, Reason, ResultBlock, Spinner } from "../ui.js";
 import { leaseHere } from "../week.js";
 import { heldLines } from "./power.js";
+import { BringupButton, usbOnly } from "../bringup.js";       // BRINGUP-USB
 
 export const DOOR_TEXT = "needs Debug USB here, or a hub that can write its SD";
 export const NOT_YET = "Not yet: the A/B config SD (U8) waits for its board check. Today a local "
@@ -613,6 +614,9 @@ export function ReleasesCard({ bid, linux = false, netboot = false }) {
       actions=${html`${all}<${ActionRow} bid=${bid} panel="harness" spec=${refresh} icon="refresh-cw" compact=${true} gate=${{}} showReason=${false} />`}>
     <div class="stack gap-12">
       ${h.unavailable ? html`<${Reason} icon="circle-slash" testid="harness-unavailable" text=${`Harness versions are unavailable here: ${h.unavailable}.`} />` : null}
+      ${usbOnly(bid) ? html`<div class="row" data-testid="harness-bringup"><${Reason} icon="usb"
+        text="Over the Debug USB only, no harness answers yet: the bring-up writes a release or a bundle, reboots the board and waits for its harness." />
+        <${BringupButton} bid=${bid} /></div>` : null}
       ${h.error ? html`<${Reason} level="err" testid="harness-error" text=${`${h.error.errName}: ${h.error.message}`} />` : null}
       ${p.lines && p.lines.length ? html`<${ResultBlock} lines=${p.lines} panel=${p} testid="harness-refresh-result" />` : null}
       ${h.loading && !cat ? html`<${Reason} icon="loader-circle" text="Reading the signed release list..." />` : null}

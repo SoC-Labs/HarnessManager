@@ -551,3 +551,38 @@ def parse_tabs(text: str) -> dict[str, str]:
         elif current is not None:
             current.append(line)
     return {name: "\n".join(body).strip("\n") for name, body in sections.items()}
+
+
+# --- sd-flash ---
+# `flash devices|write` (cli/cmd_flash.py): SD cards in this PC's card reader, the other way
+# to write the board's cards. In the Board controller tab, beside `sd`.
+CONTROLLER += """
+
+SD cards in THIS computer's card reader, instead of over the Debug USB. Off by
+default: harness-manager config set bringup.sd_flash on. Only card readers are
+listed: never the system disk, never the board's own MCC drive.
+flash devices [--all]      the cards, each with its id, what it can take and
+                           the phrase a write needs; --all also says why every
+                           other disk is not offered
+flash write DEVICE_ID SOURCE --kind files|card [--confirm PHRASE]
+            [--confirm-unsigned PHRASE] [--yes]
+    What it writes is unsigned: asks for "INSTALL UNSIGNED <first 8 hex of its
+    sha256>", then "WRITE <model> <size>" (--yes never asks: give
+    --confirm-unsigned and --confirm). files: a harness bundle folder or .zip
+    onto the configuration SD taken out of
+    the board, a backup first (--backup ZIP, or a new one in --backup-dir DIR),
+    never an .ebf, the card's MBBIOS line kept (--allow-mcc-update for the one
+    case that is refused). card: a whole-card image (stage0_mkcard.py card
+    --card-img) onto the Linux user microSD; linux_slot.img alone is refused.
+    Read back before it says written. Without the rights to write the device
+    it prints the sudo commands to run, and exits 12."""
+# --- end sd-flash ---
+
+
+# --- bringup-usb ---
+# `bringup -` (cli/cmd_bringup.py): a NEW board over its Debug USB, as the app's Add > Over USB.
+# In the Board controller tab, beside `sd` and `flash`.
+from .cmd_bringup import HELP_TAB as _BRINGUP_TAB  # noqa: E402
+
+CONTROLLER += "\n\n" + _BRINGUP_TAB.rstrip("\n")
+# --- end bringup-usb ---

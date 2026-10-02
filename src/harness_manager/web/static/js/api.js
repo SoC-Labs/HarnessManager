@@ -528,6 +528,97 @@ export class EventSocket {
   }
 }
 
+// --- bringup-usb ---
+// (Above UI2-BUILD's block: test_kit_ui_build_static keeps that one last in the file.)
+// BRINGUP-USB: the bring-up routes (docs/API.md "Bring-up over the Debug USB", bringup_api.py)
+// and the card-reader routes of lane SD-FLASH it calls (cardwriter_api.py; a 404 means that
+// lane is not in this build). Helpers only: ENDPOINTS is the integrator's table (CCR BRINGUP-1
+// folds these names into it); tests/web/test_bringup_static.py checks each against API.md and
+// the daemon's routes, as test_t14_static does for ENDPOINTS.
+export const BRINGUP_ENDPOINTS = Object.freeze({
+  bringupStatus: ["GET", "/bringup"],
+  bringupScan: ["POST", "/bringup/scan"],
+  bringupBundle: ["POST", "/bringup/bundle"],
+  bringupInstall: ["POST", "/boards/{bid}/bringup/install"],
+  bringupWitness: ["POST", "/boards/{bid}/bringup/witness"],
+  bringupCardReader: ["POST", "/bringup/card-reader"],     // bringup-2: the bundle, in the reader
+  bringupProposal: ["GET", "/boards/{bid}/bringup/proposal"],  // bringup-2: the proposed identity
+  cardwriterDevices: ["GET", "/cardwriter/devices"],       // SD-FLASH
+  cardwriterWrite: ["POST", "/cardwriter/write"],          // SD-FLASH
+  cardwriterCheck: ["POST", "/cardwriter/check"],          // SD-FLASH: the unsigned phrase first
+});
+
+// call() for a BRINGUP_ENDPOINTS name: the same token, errors and connection state.
+export async function bringupCall(name, params = {}, body = undefined) {
+  const [method, template] = BRINGUP_ENDPOINTS[name];
+  const url = new URL(fillPath(template, params).replace(/^\//, ""), apiBase());
+  const headers = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const init = { method, headers, cache: "no-store" };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  let res;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    setConnection("down");
+    throw new ApiError({
+      name: "NO_ANSWER",
+      message: "harness-manager-daemon did not answer",
+      hint: "check it is running: harness-manager daemon status",
+    }, 0, true);
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
+  return { data, status: res.status };
+}
+
+// A route this daemon does not serve (a lane not in this build): the catch-all's 404.
+export function bringupMissing(err) {
+  return !!err && err.status === 404 && (/no such endpoint/.test(err.message) || err.errName === "HTTP_404");
+}
+// --- end bringup-usb ---
+// --- identity ---
+// Lane IDENTITY (HM v0.1.1): "Name this board" reads GET /boards/{bid}/identity/proposal
+// (docs/API.md "Board identity", identity_api.py). Helpers only: ENDPOINTS is the integrator's
+// table (CCR IDENTITY-1 folds this name into it); tests/web/test_identity_static.py checks it
+// against API.md and the daemon's routes, as test_t14_static does for ENDPOINTS.
+export const IDENTITY_ENDPOINTS = Object.freeze({
+  identityProposal: ["GET", "/boards/{bid}/identity/proposal"],
+});
+
+// GET an IDENTITY_ENDPOINTS route with a query (empty values left out): call()'s token, errors
+// and connection state.
+export async function identityCall(name, params = {}, query = null) {
+  const [method, template] = IDENTITY_ENDPOINTS[name];
+  const url = new URL(fillPath(template, params).replace(/^\//, ""), apiBase());
+  for (const [k, v] of Object.entries(query || {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(url, { method, headers, cache: "no-store" });
+  } catch (e) {
+    setConnection("down");
+    throw new ApiError({
+      name: "NO_ANSWER",
+      message: "harness-manager-daemon did not answer",
+      hint: "check it is running: harness-manager daemon status",
+    }, 0, true);
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (res.status === 401 || !res.ok || !data || data.ok === false) throw failure(res, data);
+  setConnection("ok");
+  return { data, status: res.status };
+}
+// --- end identity ---
 // --- ui2 build --- (lane UI2-BUILD) The Import dialog's "Choose a zip": POST /overlays/upload
 // takes the zip's bytes as the body (send() JSON-encodes every body), and `name`, `board_id`,
 // `static_id`, `check_only` in the query. The answer and its failures are call()'s.

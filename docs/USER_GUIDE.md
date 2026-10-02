@@ -220,6 +220,19 @@ board** gives it back.
 **First install (once, about 15 minutes).** A new board needs the SoC Labs harness on its
 configuration SD. Do these steps in order. Step 2, the backup, is your way back.
 
+**In the app:** click **+** in the rail, then **Over USB (a new board plugged into this PC)**,
+**Scan**, and **Add and bring up**. The **Bring up this board** dialog walks the same steps
+as the commands below: the source (a bundle folder or zip, or a signed release once signing
+keys exist), the backup, the write, the reboot through the MCC, and waiting for the harness
+on Ethernet. Its **Write the configuration SD** step can also write the card in this PC's own
+card reader instead of over the Debug USB (off by default: Settings → Bring-up,
+`bringup.sd_flash`; on the command line, `harness-manager flash devices|write`). For a Linux
+harness on a blank user microSD, it writes a whole-card image in the card reader. The same
+plan runs from the command line as `harness-manager bringup - --serial PORT --volume PATH
+--bundle DIR`.
+
+**On the command line:**
+
 1. **Connect and look.** Plug in the Debug USB and Ethernet, and power the board on. The
    configuration SD appears as a drive named `V2M-MPS3`.
 
@@ -1642,6 +1655,55 @@ default and reboots into it (up to 180 s; `--no-reboot` waits for the next reboo
 - **The DUT does nothing after a reboot or a harness restart:** the partition stays in reset
   until the first swap. Program a design once.
 
+### 12.4 Name the board: its own name, MAC and IP
+
+Every board starts with the generic image's identity: **MPS3** on the panel, 192.168.10.101
+and the MAC 02:00:00:4d:50:53. Two such boards on one network clash. Name each board once it
+is claimed (12.1): a name, a random MAC and an IP of its own.
+
+**In the app:** Board > Access, the Identity card, **Name this board…** (the bring-up
+wizard's last step opens the same dialog, filled in).
+
+1. Type a name: 1-16 characters of A-Z, 0-9 and - (lower case is upper-cased; the panel
+   shows 16). The counter turns red past 16.
+2. MAC: **Random** (the default for a board on the image's MAC; **Regenerate** for
+   another), **Keep**, or **Custom** (unicast, not 02:00:00:*, the image's own range).
+3. IP: **Auto** (the next free address of `mps3.identity.ip_pool`, 192.168.10.110-199 by
+   default), **Keep**, or **Custom** (an address of a /24).
+4. Read the IP in the box: the board answers there after the restart. **This PC must be on
+   the same /24** (e.g. 192.168.10.1/24).
+5. Type the name to confirm, then **Set and restart**.
+
+**On the command line**
+
+```bash
+harness-manager board identity 192.168.10.101 --label lab-07 --mac random --ip auto
+harness-manager board identity 192.168.10.101 --label LAB-07 --mac 02:5e:3a:91:c0:17 --ip 192.168.10.117
+```
+
+It prints the new IP on its own line (`NEW IP     192.168.10.117`) with the same-/24 rule,
+asks for the name, sets it over your claim, restarts the harness (warm: the FPGA is not
+reloaded) and reads it back.
+
+**When the board's address changes.** The board drops its old address at the restart. When
+this PC reached it at that address, Harness Manager looks for it at the new one (up to
+4 min) and accepts it only with the SSH host key pinned for it; its claim, its
+`boards.toml` settings and its pinned key move to the new address. In the app, **Open it
+at …** opens it there. Another board answering at the new address is never adopted. If nothing answers there (the address was taken, or it is on DHCP), Harness Manager asks the whole network and opens the board where it answers with its own key, and says so.
+
+| Situation | What happens |
+|---|---|
+| a board behind a hub | its MAC or IP changes only once you name the hub (`--hub-fixed HUB`; in the app, type the hub's name): the hub's DHCP (dnsmasq) knows the board by MAC, so fix its record first. `mps3_01_pl`'s hub record is known to be wrong today. `--ip auto` is refused: the hub gives the address |
+| a new IP outside this PC's /24 | refused unless `--other-subnet` (in the app, tick the box) |
+| a new MAC on the same IP | this PC may keep the old MAC in its ARP cache (macOS up to ~20 min): `sudo arp -d <ip>` (Harness Manager never runs sudo). Pair a new MAC with a new IP (`--ip auto`) |
+| no free address in the pool | refused: widen `mps3.identity.ip_pool` (`harness-manager config set mps3.identity.ip_pool 192.168.10.110-249`) or give `--ip` |
+| a card written on a PC (its /persist is blank) | refused (no persistent store): `harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'`, claim the board again, then name it. Harness Manager never formats a card by itself |
+| not seen at the new IP after 4 min | it may be on DHCP, or the address was taken (DAD): the panel's row 5 shows its IP |
+| stage0 rescue | still answers on 192.168.10.101 with the default MAC until mint 4, whatever the board's name |
+
+Harness Manager keeps every MAC and IP it gave or saw, per board and with the date, in
+`<state dir>/identity/seen.json`; **Random** and **Auto** never hand one of them out again.
+
 ## 13. Checks: the HIL runbooks, unattended
 
 **Needs:** a board, a hub (the checks hold its lease).
@@ -1805,6 +1867,7 @@ with `--serial` and `--volume`. Every verb takes `--json` and `--tsv`.
 | `board claim\|claim-status\|ssh` | the Linux harness's SSH claim | 12.1 |
 | `card status\|commit\|clear` | the user microSD | 12.2 |
 | `slot status\|push\|commit\|rollback\|verify` | OS slots A and B | 12.3 |
+| `board identity TARGET [--label --mac random --ip auto]` | name the board: its own name, MAC and IP | 12.4 |
 | `mcc temp\|osc\|reboot\|cmd`, `sd backup\|install\|restore` | the board controller and its configuration SD | 3.1, 14 |
 | `power show\|cycle` | the power meter and a cold power cycle | 3.1 |
 | `lab TARGET link\|display\|macgen\|dutrx` | lab tools on the shell | none |

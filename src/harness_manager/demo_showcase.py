@@ -1265,3 +1265,493 @@ DemoHubState.status = _ui2_status                # type: ignore[method-assign]
 DemoHubClient.lease_overview = _ui2_overview     # type: ignore[attr-defined]
 adapters = _ui2_adapters_with_states             # noqa: F811 - DemoSession imports it by name
 # --- end ui2 api-hub ---------------------------------------------------------------------------------
+# --- bringup-usb demo ---
+# BRINGUP-USB: a NEW board on the Debug USB, so the bring-up wizard (js/bringup.js) runs end to
+# end in `app --demo`. Appended as the lane rules ask: the engine and the classes above are only
+# extended here.
+#
+# - BOARD_NEW_USB (mps3@usb:/dev/ttyUSB20): an MPS3 fresh from the box, Debug USB only: its MCC
+#   console (FT4232H if00) and lanes, and its V2M-MPS3 drive (a folder in the demo's state dir,
+#   with Arm's stock AN536 tree and the stock MB BIOS .ebf). It is listed ONLY by the bring-up's
+#   USB scan (ProbeHints scan_usb, no network, no hosts), so `POST /probe {}` still answers the
+#   showcase's four boards.
+# - BOARD_NEW_ETH (mps3@192.168.10.101:6900): the same board on Ethernet once the harness runs:
+#   dark (nothing answers) until a write to the USB board's SD and its MCC REBOOT; then it
+#   answers as the bare-metal harness 1.1.0, or as stage0 RESCUE when the bundle written was
+#   the Linux harness (no bootable OS slot on its user microSD yet). `engine.bringup_dark =
+#   True` keeps it dark (the witness times out: the restore offer).
+# - Bundles to bring it up with, in <state>/demo-fixtures/bringup/: a bare-metal config-SD
+#   release bundle folder (sd/, mint.json, overlays/open: they join mps3.overlay_dirs after
+#   the write), the Linux release bundle as a zip (sd/, linux_bundle.json, linux_slot.img: a
+#   SLOT image, never offered as the card image), a folder with an .ebf in it (refused), and
+#   a whole-card image for the Linux OS step (an MBR at LBA 0, as stage0_mkcard.py card
+#   --card-img makes one; nothing in it boots). `GET /bringup` lists them as `examples`.
+#
+# The writes are in memory: the demo's storage "writes" the USB board's SD (progress, then a
+# record of the files), and its backup is a real zip in the folder asked for, so the storage
+# routes' backup check passes. Nothing outside the demo's state dir is touched.
+
+BOARD_NEW_USB = "mps3@usb:/dev/ttyUSB20"
+NEW_HOST = "192.168.10.101"
+BOARD_NEW_ETH = f"mps3@{NEW_HOST}:{CONTROL_PORT}"
+KIND_NEW_USB = "usb-new"
+KIND_NEW_ETH = "usb-new-eth"
+NEW_RESCUE_DETAIL = "stage0 rescue: TFTP and identify only, no control channel"
+
+
+def _bringup_bit(usercode: str) -> bytes:
+    from harness_manager.services.update.bitheader import build_bit
+
+    return build_bit("shell_top", "xcku115-flvb2104-2-e", b"\xff" * 2048 + b"\0" * 2048,
+                     userid=usercode)
+
+
+def _bringup_tree(root: Path, usercode: str, *, stock: bool = False) -> None:
+    """A config-SD tree: SoC Labs' nanoSoC application note, or Arm's stock AN536 (``stock``)."""
+    mb = root / "MB" / "HBI0309C"
+    app, bit = ("AN536", "an536.bit") if stock else ("Nanosoc", "nanosoc.bit")
+    (mb / app).mkdir(parents=True, exist_ok=True)
+    (root / "config.txt").write_text("TITLE: V2M-MPS3 config\nUSB_REMOTE: TRUE\nUARTMODE: 0\n"
+                                     "AUTORUN: TRUE\n")
+    (mb / "board.txt").write_text(f"BOARD: HBI0309C\n[MCCS]\nMBBIOS: mbb_v141.ebf\n"
+                                  f"[APPLICATION NOTE]\nAPPFILE: {app}\\{app.lower()}.txt\n")
+    (mb / app / f"{app.lower()}.txt").write_text(f"BOARD: HBI0309\n[FPGAS]\nTOTALFPGAS: 1\n"
+                                                 f"F0FILE: {bit}\nF0MODE: FPGA\n"
+                                                 "[OSCCLKS]\nOSC0: 25.0\nOSC1: 50.0\n")
+    (mb / app / bit).write_bytes(_bringup_bit(usercode))
+    if stock:
+        (mb / "mbb_v141.ebf").write_bytes(b"MB BIOS v1.4.1 (stock Arm MCC firmware; never written)")
+
+
+def seed_bringup(fixtures: Path) -> dict[str, Any]:
+    """The demo's V2M-MPS3 drive and its bundles (made once; a demo you used keeps its drive)."""
+    import json as _json
+
+    root = Path(fixtures) / "bringup"
+    drive = root / "V2M-MPS3"
+    if not (drive / "config.txt").is_file():
+        _bringup_tree(drive, "0x00000000", stock=True)
+    bm = root / "mps3-harness-1.1.0"
+    if not (bm / "sd" / "config.txt").is_file():
+        _bringup_tree(bm / "sd", cat.U_ILA)
+        (bm / "mint.json").write_text(_json.dumps(
+            {"schema": "mps3-mint-record", "version": "1.1.0", "static_id": cat.S_ILA,
+             "static_usercode": cat.U_ILA, "note": "a demo bundle"}, indent=1) + "\n")
+        ovl = bm / "overlays" / "open" / "synth"
+        ovl.mkdir(parents=True, exist_ok=True)
+        (ovl / "manifest.json").write_text(_json.dumps(
+            {"name": "synth", "rm_id": "0x010000f0", "static_id": cat.S_ILA,
+             "note": "a demo overlay: the demo never programs a board from it"}, indent=1) + "\n")
+        (ovl / "synth.bin").write_bytes(b"\0" * 256)
+        (ovl / "synth_clear.bin").write_bytes(b"\0" * 128)
+    lx_zip = root / "mps3-harness-2.0.0-linux.zip"
+    if not lx_zip.is_file():
+        stage = root / ".stage-linux"
+        _bringup_tree(stage / "sd", cat.U_LNX)
+        files = {f"mps3-harness-2.0.0/sd/{p.relative_to(stage / 'sd').as_posix()}": p.read_bytes()
+                 for p in sorted((stage / "sd").rglob("*")) if p.is_file()}
+        files["mps3-harness-2.0.0/linux_bundle.json"] = _json.dumps(
+            {"schema": "mps3-linux-bundle", "schema_version": "1", "version": "2.0.0",
+             "static_id": cat.S_LNX, "note": "a demo bundle: nothing here boots"},
+            indent=1).encode()
+        files["mps3-harness-2.0.0/linux_slot.img"] = b"S0LB" + b"\0" * 8188
+        lx_zip.write_bytes(cat.deterministic_zip(files))
+        import shutil as _shutil
+
+        _shutil.rmtree(stage, ignore_errors=True)
+    card = root / "mps3-linux-2.0.0-card.img"
+    _demo_card_image(card)
+    bad = root / "bundle-with-ebf"
+    if not (bad / "config.txt").is_file():
+        _bringup_tree(bad, cat.U_ILA)
+        (bad / "MB" / "HBI0309C" / "mbb_v141.ebf").write_bytes(b"a copied MB BIOS")
+    return {"drive": str(drive), "card_image": str(card), "examples": [
+        {"path": str(bm), "what": "bare-metal harness 1.1.0: a release bundle folder (sd/, "
+                                  "overlays/open)"},
+        {"path": str(lx_zip), "what": "Linux harness 2.0.0: a release bundle zip (sd/, "
+                                      "linux_slot.img)"},
+        {"path": str(bad), "what": "a folder with an .ebf in it: refused"},
+    ]}
+
+
+def _demo_card_image(path: Path) -> None:
+    """A small whole-card image the card writer's checks pass (bringup-2: the OS step checks
+    it before its unsigned phrase): an MBR with slots A/B (type 0x7F), the two boot-select
+    sectors, and a valid S0LB boot table in each slot; nothing in it boots. An older demo
+    dir's placeholder (an MBR and nothing else) is rebuilt."""
+    import struct
+    import zlib
+
+    from harness_manager.core.errors import HarnessError
+    from harness_manager.services import cardwriter
+
+    if path.is_file():
+        try:
+            cardwriter.inspect_card(path)
+            return
+        except HarnessError:
+            pass
+    payload = b"a demo slot: nothing here boots\n" * 64
+    dst = 0x80000000
+    hdr = struct.Struct("<8I")
+    entry = struct.pack("<4I", hdr.size + 16, dst, len(payload), zlib.crc32(payload) & 0xFFFFFFFF)
+    head = hdr.pack(0x424C3053, 2, 1, dst, 0, 0x80001000, 0, 0)
+    slot = hdr.pack(0x424C3053, 2, 1, dst, 0, 0x80001000, 0,
+                    zlib.crc32(head + entry) & 0xFFFFFFFF) + entry + payload
+    n = -(-len(slot) // 512) + 8
+    a, b = 8, 8 + n
+    mbr = bytearray(512)
+    struct.pack_into("<I", mbr, 440, 0x53304C42)
+    for i, (typ, lba, cnt) in enumerate(((0x7F, a, n), (0x7F, b, n))):
+        mbr[446 + 16 * i:462 + 16 * i] = struct.pack("<B3sB3sII", 0, b"\xfe\xff\xff", typ,
+                                                     b"\xfe\xff\xff", lba, cnt)
+    mbr[510], mbr[511] = 0x55, 0xAA
+    sel = bytearray(512)
+    struct.pack_into("<IIII", sel, 0, 0x43423053, 1, 1, 1)
+    struct.pack_into("<I", sel, 0x1FC, zlib.crc32(bytes(sel[:0x1FC])) & 0xFFFFFFFF)
+    with path.open("wb") as f:
+        f.truncate((b + n) * 512)
+        f.write(bytes(mbr) + bytes(sel) + bytes(sel))
+        for lba in (a, b):
+            f.seek(lba * 512)
+            f.write(slot)
+
+
+def _bringup_boards(drive: str) -> dict[str, Any]:
+    from .demo import DemoCandidate, _Board
+
+    serial = "DEMO20"
+    usb_links = tuple(
+        Link(LinkKind.USB_SERIAL, f"/dev/ttyUSB{20 + n}", f"FT4232H {serial} if0{n}: {what}")
+        for n, what in ((0, "MCC console"), (1, "FPGA UART lane 0 or 1 (MCC UARTMODE mux)"),
+                        (2, "FPGA UART lane 2 (hard-wired; the shell console)"),
+                        (3, "FPGA UART lane 3 (hard-wired)"))
+    ) + (Link(LinkKind.USB_MSD, drive, "V2M-MPS3 volume on /dev/sdz1"),)
+    new_usb = _Board(
+        candidate=DemoCandidate(
+            "mps3", BOARD_NEW_USB, usb_links, label="MPS3 on Debug USB (MCC console, config SD)",
+            evidence=(f"FT4232H 0403:6011 serial {serial} at USB 1-4 (interface numbers from the "
+                      f"USB location); config SD {drive}: the only FT4232H and the only "
+                      "V2M-MPS3 volume")),
+        identity=BoardIdentity(board_type="mps3"),
+        health=Health(reachable=False, control_channel="offline",
+                      notes=("no Ethernet link to the shell",)),
+        consoles=(), readings=[Reading("mcc_temp", 31.5, "degC", source="mcc-console")],
+        kind=KIND_NEW_USB)
+    new_eth = _Board(
+        candidate=DemoCandidate("mps3", BOARD_NEW_ETH, (_eth(NEW_HOST),),
+                                label="MPS3 at 192.168.10.101", evidence="answered ping"),
+        identity=BoardIdentity(board_type="mps3"),
+        health=Health(reachable=False, control_channel="offline"),
+        reachable=False, kind=KIND_NEW_ETH, overlay_shell=cat.S_ILA.lower())
+    return {b.candidate.board_id: b for b in (new_usb, new_eth)}
+
+
+def _bringup_come_up(engine: Any, written: dict[str, Any]) -> None:
+    """After the MCC REBOOT of the new board: its Ethernet twin answers as what was written."""
+    from .demo import DemoCandidate
+
+    board = engine._board(BOARD_NEW_ETH)
+    if getattr(engine, "bringup_dark", False) or not written:
+        board.reachable = False
+        return
+    if written.get("impl") == "linux":
+        ident = BoardIdentity(board_type="mps3")
+        cand = DemoCandidate("mps3", BOARD_NEW_ETH,
+                             (Link(LinkKind.ETHERNET, f"{NEW_HOST}:{CONTROL_PORT}",
+                                   NEW_RESCUE_DETAIL),),
+                             label=f"MPS3 in RESCUE at {NEW_HOST}",
+                             evidence="answered identify on UDP 6899 in RESCUE mode: stage0 is "
+                                      "in RESCUE (reason: no bootable OS slot on the microSD)",
+                             identity=ident)
+        board.health = Health(reachable=True, control_channel="rescue",
+                              notes=("stage0 RESCUE: no bootable OS slot on the user microSD",))
+    else:
+        ident = BoardIdentity(board_type="mps3", shell_id=cat.S_ILA.lower(), rm_id="0x00000000",
+                              rm_name="greybox", harness_version="1.0.0",
+                              firmware_sha=cat.FW_ILA, features=V011_DEMO_FEATURES,
+                              build_check=Check.OK, harness_impl="bare-metal", proto="0.11",
+                              usercode=cat.U_ILA.lower(), ver32="0x01000000")
+        cand = DemoCandidate("mps3", BOARD_NEW_ETH, (_eth(NEW_HOST),),
+                             label="MPS3 greybox on shell 0x72bb0a36", evidence="answered ping",
+                             identity=ident)
+        board.health = Health(reachable=True, control_channel="idle", counters={})
+    board.identity, board.candidate, board.reachable = ident, cand, True
+
+
+def _bringup_impl(files: Any) -> str:
+    """Which harness a written tree is: its .bit's USERID (the Linux static's, or not)."""
+    from harness_manager.services.update.bitheader import BitHeaderError, read_bit_header
+
+    for dest, src in dict(files).items():
+        if str(dest).lower().endswith(".bit"):
+            try:
+                uid = read_bit_header(Path(src)).userid
+            except (BitHeaderError, OSError):
+                continue
+            return "linux" if uid.lower() == cat.U_LNX.lower() else "bare-metal"
+    return ""
+
+
+def _bringup_wrap() -> None:
+    from harness_manager.core.pack import BackupRecord
+
+    from . import demo as _demo
+
+    engine_cls = _demo.DemoEngine
+    probe0, board0, candidate_for0 = engine_cls.probe, engine_cls._board, engine_cls.candidate_for
+    backup0, install0 = _demo._Storage.backup, _demo._Storage.install
+    reboot0 = _demo._Controller.reboot
+    adapters0 = globals()["adapters"]
+
+    def ensure(self: Any) -> None:
+        """The new board and its bundles, made at the engine's first use: this module is
+        imported while the FIRST showcase engine is built, after its boards were listed."""
+        if not getattr(self, "showcase", False) or "_bringup_examples" in self.__dict__:
+            return
+        with self._lock:
+            if "_bringup_examples" in self.__dict__:
+                return
+            seeded = seed_bringup(Path(self.state_dir) / "demo-fixtures")
+            self._boards.update(_bringup_boards(seeded["drive"]))
+            self.__dict__["_bringup_examples"] = seeded["examples"]
+            self.__dict__["_bringup_card_image"] = seeded["card_image"]
+
+    def examples(self: Any) -> list[dict[str, str]]:
+        ensure(self)
+        return list(self.__dict__.get("_bringup_examples", []))
+
+    def card_image(self: Any) -> str:
+        ensure(self)
+        return str(self.__dict__.get("_bringup_card_image", ""))
+
+    def board(self: Any, board_id: str) -> Any:
+        ensure(self)
+        return board0(self, board_id)
+
+    def candidate_for(self: Any, target: str, pack: str = "mps3") -> Candidate:
+        ensure(self)
+        return candidate_for0(self, target, pack)
+
+    def probe(self: Any, hints: Any = None) -> list[Candidate]:
+        ensure(self)
+        found = probe0(self, hints)
+        if not getattr(self, "showcase", False):
+            return found
+        usb_only = (hints is not None and hints.scan_usb and not hints.scan_network
+                    and not hints.hosts)
+        kinds = {c.board_id: self._board(c.board_id).kind for c in found}
+        if usb_only:            # the bring-up's USB scan: the Debug USB of the new board only
+            return [c for c in found if kinds[c.board_id] == KIND_NEW_USB]
+        return [c for c in found if kinds[c.board_id] != KIND_NEW_USB]
+
+    def backup(self: Any, dest_dir: Path, progress: Any = None) -> BackupRecord:
+        if self._e._board(self._bid).kind != KIND_NEW_USB:
+            return backup0(self, dest_dir, progress)
+        import hashlib as _hashlib
+
+        self._e._enter("storage.backup", self._bid, str(dest_dir))
+        drive = Path(self.locate_new())
+        files = {p.relative_to(drive).as_posix(): p.read_bytes()
+                 for p in sorted(drive.rglob("*")) if p.is_file()}
+        total = sum(len(v) for v in files.values())
+        for step in range(1, 5):
+            self._e._sleep(0.15)
+            if progress is not None:
+                progress("backup", total * step // 4, total)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = Path(dest_dir) / f"V2M-MPS3-{stamp}.zip"
+        path.write_bytes(cat.deterministic_zip({f"volume/{k}": v for k, v in files.items()}))
+        return BackupRecord(path=str(path), sha256=_hashlib.sha256(path.read_bytes()).hexdigest(),
+                            created_at=time.time(), files=len(files), volume_label="V2M-MPS3")
+
+    def locate_new(self: Any) -> str:
+        board = self._e._board(self._bid)
+        return next(lk.address for lk in board.candidate.links if lk.kind == LinkKind.USB_MSD)
+
+    def install(self: Any, files: Any, *, backup: BackupRecord, progress: Any = None) -> None:
+        board = self._e._board(self._bid)
+        if board.kind != KIND_NEW_USB:
+            return install0(self, files, backup=backup, progress=progress)
+        self._e._enter("storage.install", self._bid)
+        if any(str(k).lower().endswith(".ebf") for k in files):
+            raise RefusedError("refusing to write board-controller firmware (.ebf)")
+        total = sum(Path(p).stat().st_size for p in dict(files).values()) or 1
+        for phase in ("install", "verify"):
+            for step in range(1, 7):
+                self._e._sleep(0.2)
+                if progress is not None:
+                    progress(phase, total * step // 6, total)
+        board.bringup = {"files": sorted(dict(files)), "impl": _bringup_impl(files),
+                         "at": time.time()}
+        return None
+
+    def reboot(self: Any, progress: Any = None, wait_s: float | None = None) -> dict:
+        board = self._e._board(self._bid)
+        if board.kind != KIND_NEW_USB:
+            return reboot0(self, progress, wait_s)
+        ev = reboot0(self, progress, wait_s)
+        written = getattr(board, "bringup", None) or {}
+        _bringup_come_up(self._e, written)
+        ev["fpga_file"] = ("MB/HBI0309C/Nanosoc/nanosoc.bit" if written
+                           else "MB/HBI0309C/AN536/an536.bit")
+        ev["board_file"] = ("MB/HBI0309C/Nanosoc/nanosoc.txt" if written
+                            else "MB/HBI0309C/AN536/an536.txt")
+        ev["mcc_firmware"], ev["board"] = "v1.3.2", "rev C, var A"
+        return ev
+
+    def adapters_new(engine: Any, board: Any) -> dict[str, Any]:
+        if board.kind == KIND_NEW_USB:
+            return {}                   # USB only: no harness, so no panel, XVC or display
+        return adapters0(engine, board)
+
+    engine_cls.bringup_examples = property(examples)       # type: ignore[attr-defined]
+    engine_cls.bringup_card_image = property(card_image)   # type: ignore[attr-defined]
+    engine_cls.bringup_dark = False                        # type: ignore[attr-defined]
+    engine_cls._board = board                              # type: ignore[method-assign]
+    engine_cls.candidate_for = candidate_for               # type: ignore[method-assign]
+    engine_cls.probe = probe                               # type: ignore[method-assign]
+    _demo._Storage.backup = backup                         # type: ignore[method-assign]
+    _demo._Storage.locate_new = locate_new                 # type: ignore[attr-defined]
+    _demo._Storage.install = install                       # type: ignore[method-assign]
+    _demo._Controller.reboot = reboot                      # type: ignore[method-assign]
+    globals()["adapters"] = adapters_new
+
+
+_bringup_wrap()
+# --- end bringup-usb demo ---
+# --- identity demo ---
+# Lane IDENTITY (HM v0.1.1, david 2 Oct): "Name this board" runs end to end in `app --demo` on
+# the showcase's Linux board (BOARD_LINUX). Appended as the lane rules ask: the engine and the
+# classes above are only extended here.
+#
+# - DemoEngine.board_identity: the real IdentityService (board_identity.py) on the demo's state
+#   dir, so the registry (seen.json), the proposal, the guards and the typed phrase are the
+#   product's own; DemoEngine.info carries net_identity like the real engine's.
+# - DemoNetIdentity: the board's side (the session's net_identity adapter): it reports the
+#   generic image's name with its stage0 bake's MAC 02:00:00:00:01:04 (its own: no clash with
+#   the showcase's other boards) and address 192.168.10.104,
+#   takes identity_set (pending) and applies it at the warm reboot, in memory. Its session
+#   address is not the board's own IP (the demo has no network), so the board never moves.
+# - DemoEngine.identity_policy: the MPS3 rules (random MACs 02:..., never 02:00:00:*; the pool
+#   192.168.10.110-199; never .101) with "answering" from the showcase's own addresses: the
+#   demo sends nothing.
+
+
+class DemoNetIdentity:
+    """``session.net_identity`` for a showcase Linux board (net-protocol v0.16, in memory)."""
+
+    def __init__(self, engine: Any, board_id: str) -> None:
+        self._e, self._bid = engine, board_id
+
+    def _state(self) -> dict[str, Any]:
+        store = self._e.__dict__.setdefault("_demo_identity", {})
+        if self._bid not in store:
+            ip = self._bid.split("@", 1)[-1].rsplit(":", 1)[0]
+            store[self._bid] = {
+                "label": "MPS3", "hostname": "mps3", "ip": f"{ip}/24",
+                "mac": "02:00:00:00:01:04",
+                "source": {"label": "default", "hostname": "label", "ip": "stage0",
+                           "mac": "stage0"},
+                "stage0": {"label": None, "ip": f"{ip}/24", "mac": "02:00:00:00:01:04"},
+                "override": None,
+                "pending": None, "persist": True, "via": "identity", "feature": True,
+                "feature_known": True, "impl": "linux"}
+        return store[self._bid]
+
+    def read(self, *, refresh: bool = False, cheap: bool = False) -> dict[str, Any]:
+        return {**self._state(), "at": _iso(time.time())}
+
+    def hub_record(self, *, refresh: bool = False, cheap: bool = False) -> None:
+        return None
+
+    def hub_others(self, *, refresh: bool = False) -> list[dict[str, Any]]:
+        return []
+
+    def fix_reason(self, reported: Any) -> tuple[str, str, str]:
+        return "", "", ""
+
+    def address(self) -> str:
+        return "demo-loopback:6900"                  # never the board's own IP: no move
+
+    def policy(self) -> Any:
+        return self._e.identity_policy("mps3")
+
+    def set_identity(self, want: Any) -> dict[str, Any]:
+        st = self._state()
+        st["pending"] = {**(st.get("pending") or {}), **dict(want)}
+        self._e._sleep(0.3)
+        return {"persisted": True, "pending": dict(want), "applies": "reboot",
+                "route": "board-ssh", "setter": "demo"}
+
+    def warm_reboot(self, progress: Any, wait_s: float) -> dict[str, Any]:
+        st = self._state()
+        for done in (0, 10, 20, 30, 41):
+            if progress is not None:
+                progress("reboot", done, 41)
+            self._e._sleep(0.2)
+        pending = st.pop("pending", None) or {}
+        st["pending"] = None
+        for k, v in pending.items():
+            st[k] = v
+            st["source"][k] = "override"
+            if k == "label" and "hostname" not in pending:
+                st["hostname"] = str(v).lower()
+        st["override"] = {**(st.get("override") or {}), **pending}
+        return {"summary": "reboot witnessed: up again after 41.0 s (demo)",
+                "down_after_s": 2.0, "up_after_s": 41.0}
+
+
+def _identity_wrap() -> None:
+    from harness_manager import demo as _demo
+
+    engine_cls = _demo.DemoEngine
+    adapters_id = adapters
+    info0 = engine_cls.info
+
+    def identity_policy(self: Any, pack: str = "mps3") -> Any:
+        from harness_manager.services.identity_assign import IdentityPolicy
+        from harness_manager_mps3 import net_identity as ni
+
+        busy = {b.split("@", 1)[-1].rsplit(":", 1)[0] for b in self._boards}
+        return IdentityPolicy(
+            pack="mps3", mac_first_byte=ni.MAC_FIRST_BYTE,
+            reserved_mac_prefixes=ni.RESERVED_MAC_PREFIXES, reserved_mac_why=ni.RESERVED_MAC_WHY,
+            ip_pool=ni.DEFAULT_IP_POOL, ip_pool_setting=ni.IP_POOL_KEY,
+            reserved_ips=ni.RESERVED_IPS, reserved_ip_why=ni.RESERVED_IP_WHY,
+            rescue_note=ni.RESCUE_NOTE, known_bad_hub_records=dict(ni.KNOWN_BAD_HUB_RECORDS),
+            answering=lambda ip: ip in busy)
+
+    def board_identity(self: Any) -> Any:
+        svc = self.__dict__.get("_board_identity")
+        if svc is None:
+            from harness_manager.services.board_identity import IdentityService
+
+            svc = self.__dict__["_board_identity"] = IdentityService(self)
+        return svc
+
+    def info(self: Any, board_id: str) -> Any:
+        out = info0(self, board_id)
+        session = self.session(board_id)
+        if getattr(session, "net_identity", None) is None:
+            return out
+        try:
+            st = self.board_identity.status(session, cheap=True)
+        except Exception:  # noqa: BLE001 - the identity never fails a read
+            return out
+        return replace(out, net_identity=st)
+
+    def adapters_id_wrap(engine: Any, board: Any) -> dict[str, Any]:
+        out = adapters_id(engine, board)
+        if board.kind == "linux":
+            out["net_identity"] = DemoNetIdentity(engine, board.candidate.board_id)
+        return out
+
+    engine_cls.identity_policy = identity_policy            # type: ignore[attr-defined]
+    engine_cls.board_identity = property(board_identity)    # type: ignore[attr-defined]
+    engine_cls.info = info                                   # type: ignore[method-assign]
+    globals()["adapters"] = adapters_id_wrap
+
+
+_identity_wrap()
+# --- end identity demo ---

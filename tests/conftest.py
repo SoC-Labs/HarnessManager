@@ -75,6 +75,16 @@ def _no_real_usb(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(usb, "DEFAULT_ENV", usb.UsbEnv(lambda: [], lambda: []))
 
 
+@pytest.fixture(autouse=True)
+def _no_real_pool_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lane IDENTITY: `--ip auto` asks identify whether a pool address answers; a test never
+    sends that datagram to a real address (192.168.10.110...). Nothing answers, unless a test
+    says otherwise (``net_identity.DEFAULT_ANSWERING``)."""
+    from harness_manager_mps3 import net_identity
+
+    monkeypatch.setattr(net_identity, "DEFAULT_ANSWERING", lambda ip: False)
+
+
 @pytest.fixture
 def vboard(tmp_path: Path) -> Iterator[VirtualMps3]:
     with VirtualMps3(tmp_path) as vb:

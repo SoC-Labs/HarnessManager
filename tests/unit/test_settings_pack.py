@@ -100,9 +100,10 @@ def test_a_pack_declares_no_settings_unless_it_says_so():
 
 def test_negative_twin_the_mps3_pack_says_so():
     rows = pack_rows(Mps3Pack())
-    assert len(rows) == 38 and {s.pack for s in rows} == {"mps3"}    # +4: SLOT-TIMING
+    # +4: SLOT-TIMING; +1: IDENTITY's mps3.identity.ip_pool
+    assert len(rows) == 39 and {s.pack for s in rows} == {"mps3"}
     schema, layer = with_packs(core_schema(), [Mps3Pack()])
-    assert len(schema.rows) == len(core_schema().rows) + 38
+    assert len(schema.rows) == len(core_schema().rows) + 39
     assert layer["mps3.console.pace_ms"] == 20
 
 
@@ -482,7 +483,7 @@ def test_every_mps3_variable_is_a_pack_row_and_every_row_variable_is_read():
     missing, ghosts = _coverage(mps3_rows())
     assert not missing, f"not declared in harness_manager_mps3/settings.py: {missing}"
     assert not ghosts, f"pack rows name variables nothing reads: {ghosts}"
-    assert len(_pack_env_names()) == 12                            # +4: SLOT-TIMING
+    assert len(_pack_env_names()) == 13          # +4: SLOT-TIMING; +1: IDENTITY (IP_POOL)
     core = {s.env for s in core_schema().rows}
     assert not {n for n in core if n.startswith(PACK_ENV)}         # none is the core's
 

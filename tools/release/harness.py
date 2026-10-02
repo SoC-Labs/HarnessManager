@@ -507,6 +507,11 @@ def ingest(bundle: Path, version: str, *, catalog: str = "mps3-harness", layout:
     if lb and legal.is_file():
         a = put(f"{base}-linux_legal_info.tar", legal.read_bytes())
         entry["legal_info"] = a            # published beside the release, never installed
+    if lb:
+        # RELEASE-PIPE: the Linux bundle's own manifest (FLOW_CONTRACT §0.1) travels beside
+        # the release too, for the platform's tools; informational, never installed.
+        entry["linux_bundle"] = put(f"{base}-linux_bundle.json",
+                                    (bundle / "linux_bundle.json").read_bytes())
     board = {"pack": pack, "part": part.split("-")[0] if part else "", "revisions": revs}
     return HarnessBuild(version=version, tag=tag, impl=ident.impl, entry=entry, board=board,
                         findings=findings, warnings=warnings, assets=assets,

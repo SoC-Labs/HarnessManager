@@ -28,6 +28,7 @@ export const SECTIONS = [
   { id: "debug", label: "Debug", icon: "bug" },
   { id: "updates", label: "Updates", icon: "rocket" },
   { id: "harness-kits", label: "Harness & kits", icon: "layers" },
+  { id: "bring-up", label: "Bring-up", icon: "hard-drive" },
   { id: "advanced", label: "Advanced", icon: "file-cog" },
 ];
 export const ADMIN_TEXT = "set by your administrator";

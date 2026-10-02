@@ -9,6 +9,7 @@ import { boardState, changed, loadPending } from "../store.js";
 import { week } from "../week.js";
 import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./power.js";
 import { ActionRow, ArmBox, Card, Icon, Reason, ResultBlock } from "../ui.js";
+import { BringupButton, usbOnly } from "../bringup.js";       // BRINGUP-USB
 
 const pct = (d) => (d.total ? Math.floor((d.done * 100) / d.total) : 0);
 
@@ -164,6 +165,13 @@ function InstallFlow({ bid }) {
   <//>`;
 }
 
+// BRINGUP-USB: the bring-up wizard (bringup.js) for a board whose configuration SD this PC
+// reaches over the Debug USB, or one reached over USB only.
+function bringupOffered(bid) {
+  const inst = capState(boardState(bid).info, "storage_install");
+  return usbOnly(bid) || !!(inst && inst.available);
+}
+
 // Board › Versions (UI v2, lane UI2-BOARD): the interrupted-install recovery comes first.
 export function SdRecovery({ bid }) {
   return boardState(bid).pending ? html`<${SdRecoveryCard} bid=${bid} />` : null;
@@ -192,6 +200,9 @@ export function ConfigSdCard({ bid, route, routeWhy = "", foot = null, after = n
     ${out ? html`<div class="mt-8"><${Reason} icon="circle-slash" testid="config-sd-reason" text=${`Configuration SD tools: ${out}.`} /></div>` : null}
     <div class="mt-8"><${ActionRow} bid=${bid} panel="sd_backup" spec=${backupSpec(bid)} icon="download" compact=${true}
       gate=${{ capability: "storage_backup", adapter: "storage", holder: "Back up the SD" }} /></div>
+    ${bringupOffered(bid) ? html`<div class="mt-8 row" data-testid="config-sd-bringup">
+      ${usbOnly(bid) ? html`<span class="small secondary grow">Reached over its Debug USB only: bring it up from this PC.</span>` : null}
+      <${BringupButton} bid=${bid} /></div>` : null}
     ${pb.lines && pb.lines.length ? html`<${ResultBlock} lines=${pb.lines} panel=${pb} testid="config-sd-backup-result" />` : null}
     ${foot ? html`<div class="bt-foot">${foot}</div>` : null}
     ${after}

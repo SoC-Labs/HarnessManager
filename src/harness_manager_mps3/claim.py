@@ -360,6 +360,20 @@ class ClaimRecords:
             _atomic_write(self.path, json.dumps(data, indent=1, sort_keys=True) + "\n")
             return rec
 
+    def move(self, old_id: str, new_id: str) -> bool:
+        """The board's claim record under its new board id (lane IDENTITY: its address
+        changed, its keys did not). False when there was none."""
+        with self._mu:
+            data = self._read()
+            rec = data.pop(old_id, None)
+            if not isinstance(rec, dict) or old_id == new_id:
+                return False
+            rec["moved_from"] = old_id
+            data[new_id] = rec
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(self.path, json.dumps(data, indent=1, sort_keys=True) + "\n")
+            return True
+
 
 # --- boards.toml: boards.<b>.ssh ------------------------------------------------------------------
 

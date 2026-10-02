@@ -12,7 +12,9 @@ Layout (Vivado ``write_bitstream``; read the same way by ``fpga/dfx/tools/bit_id
 
 The USERID in the header is what ``BITSTREAM.CONFIG.USERID`` stamped: the
 ``static_usercode`` every overlay built against this static must carry. An
-unstamped bitstream says ``UserID=0XFFFFFFFF``.
+unstamped bitstream says ``UserID=0XFFFFFFFF``. Vivado 2024.1 writes the value with a
+``0X`` prefix; Vivado 2026.1 (mint 3, RC2) writes it bare: ``UserID=FB1F8C76``. Both read
+the same (the platform's ``fpga/dfx/tools/ltx_sidecar.py`` takes both too).
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from pathlib import Path
 
 MAGIC = bytes.fromhex("0ff00ff00ff00ff000")
 UNSTAMPED_USERID = "0xffffffff"
-_USERID_RE = re.compile(r"UserID=0[xX]([0-9A-Fa-f]{1,8})")
+_USERID_RE = re.compile(r"UserID=(?:0[xX])?([0-9A-Fa-f]{1,8})")
 
 
 class BitHeaderError(ValueError):

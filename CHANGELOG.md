@@ -1002,3 +1002,155 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   Debug USB. The A/B config-SD view (`updates.sd_ab`, off by default) is Rev C only and refuses
   a B+C release. Harness Manager warns and asks for MULTICORE, typed, before every program of it
   (FIX-PACK-8).
+
+<!-- --- RELEASE-PIPE --- -->
+### Publishing harness releases (RELEASE-PIPE)
+- **`make harness-release`** builds a harness release straight from the platform's
+  artifacts: the mint's prod dir, the config-SD templates with the stage0 `.bit`, the
+  overlays and (optionally) the RM kit. It signs the channel with a key passed by path
+  (`KEY=FILE`) and reads the result back with HM's own client. It never publishes. The
+  Arm-IP RMs are left out unless `INCLUDE_AAA=1`, and even then they go only to the
+  private AAA repo. `TEST_KEY=1` makes a TEST build for dry runs: a throwaway key
+  (`7E57C0DE…`) that no client trusts.
+- **`scripts/publish_harness_release.sh --repo OWNER/REPO DIR`** uploads a built release
+  with `gh`. It is a dry run by default and prints every command. A real upload needs
+  `--publish`, a pinned key, a live channel it follows, and the typed phrase
+  `PUBLISH <catalog> <version> TO <repo>`. Then `harness list --source github:OWNER/REPO`
+  shows it.
+- **Fix:** a `.bit` built with Vivado 2026.1 (`UserID=FB1F8C76`, no `0x`) now reads as
+  stamped. Before this, the catalogue refused every RC2 config SD as unstamped.
+
+<!-- --- sd-flash --- -->
+### SD cards in this PC's card reader (SD-FLASH)
+- **Write the board's cards in your own card reader, as the other way from the Debug USB.**
+  Off by default: `harness-manager config set bringup.sd_flash on` (Settings → Bring-up).
+  `harness-manager flash devices` lists only card readers' cards (a USB or SD/MMC reader,
+  removable, at most 256 GB: `bringup.sd_flash_max`), each with the phrase a write needs;
+  `--all` says why every other disk is not offered (the system disk, a fixed disk, loop and
+  zram, the board's own MCC and DAPLink drives). The app's Bring-up uses the same service
+  (`GET /api/v1/cardwriter/devices`, `POST /api/v1/cardwriter/write`).
+- **`flash write DEVICE_ID SOURCE --kind files|card`** asks for the typed phrase
+  `WRITE <model> <size>` exactly as listed, and refuses a card swapped since the listing.
+  `files`: a harness bundle onto the configuration SD taken out of the board, with the same
+  rules as `sd install` (a backup first, never an `.ebf`, read back), and the card's MCC
+  firmware selection kept: its `MBBIOS:` line stays ("MBBIOS kept: mbb_v141.ebf"); a bundle
+  that would make the MCC update itself is refused unless `--allow-mcc-update`. `card`: a
+  whole-card image for the Linux harness's user microSD (`stage0_mkcard.py card --card-img`),
+  checked the way stage0 reads a card; `linux_slot.img` on its own is refused (one OS slot is
+  not a card: written at byte 0 the board would sit in rescue). Every write is read back and
+  compared.
+- **Harness Manager never asks for root.** When your user may not write the device, the write
+  stops before the first byte and prints the exact commands (`sudo dd … conv=fsync`, then
+  `sudo cmp -n …` to check it); the CLI exits 12. Windows: not supported yet.
+<!-- --- end sd-flash --- -->
+
+
+<!-- --- bringup-usb --- -->
+### Bring up a new board from this PC, over its Debug USB (BRINGUP-USB)
+- **Add a board > Over USB (a new board plugged into this PC).** Scan lists every MPS3 Debug
+  USB this PC sees: its MCC serial port and what the MCC answers, its `V2M-MPS3` drive and
+  what that holds (the board revision, the `.bit` its `board.txt` loads), and whether a
+  harness already answers on Ethernet at 192.168.10.101. "Add and bring up" opens it over
+  USB only (no hub, no lease) and starts the bring-up. Nothing found says what to check (the
+  cable, the power, the drive mounted); a drive without its serial port, or a port without
+  its drive, says what you lose.
+- **The bring-up** (a dialog; closing it keeps every step, and Board > Versions' "Bring up…"
+  reopens it): 1 the source: a bundle folder or zip on this PC, checked before anything is
+  written (the base `.bit` with its size, sha256, part and USERID; refused for an `.ebf`, an
+  MCC command file, a file outside `config.txt` and `MB/`, or no bitstream), or a signed
+  release (refused, in the trust store's words, until SoC Labs publishes its keys); 2 the
+  backup (mandatory); 3 the write: over the Debug USB (default; "A USB write can take 5
+  minutes: do not unplug, power off or start a second write."), or the SD card in this PC's
+  card reader (`bringup.sd_flash`; disabled with the reason while it is off or the card-reader
+  writer is not in this build); 4 the MCC reboot, then a wait for the harness at its
+  address, with Restore the backup offered if nothing answers; 5 for a Linux harness that
+  comes up in stage0 RESCUE: the user microSD, written in this PC's card reader with a
+  whole-card image, or skipped (over the network from rescue comes with Linux v2.1); 6 open
+  it on Ethernet and go to Board > Access (claim, identity). Every write is armed, needs the
+  backup, and runs one at a time.
+- **A release bundle's open overlays** (`overlays/open`) join `mps3.overlay_dirs` once its
+  configuration SD is written, so Program and Restore find them.
+- **API:** `GET /bringup`, `POST /bringup/scan`, `POST /bringup/bundle`,
+  `POST /boards/{bid}/bringup/install`, `POST /boards/{bid}/bringup/witness` (docs/API.md
+  "Bring-up over the Debug USB"). The demo (`app --demo`) has a new board on the Debug USB to
+  bring up, with its bundles.
+<!-- --- end bringup-usb --- -->
+<!-- --- bringup-2 --- -->
+### Bring-up: unsigned bundles, the card reader on the command line, a proposed identity (BRINGUP-2, for v0.1.1)
+- **An unsigned bundle is allowed, red and typed.** A bundle folder or zip (the wizard's
+  source, `harness-manager bringup --bundle`) shows "Unsigned: Harness Manager cannot check
+  where this came from; only install a bundle you built or got from SoC Labs directly.", its
+  sha256 and how it is made (a zip's own `sha256sum`; a folder's manifest, one `sha256sum`
+  line per file sorted by path, which `cd FOLDER && find . -type f -printf '%P\0' | LC_ALL=C
+  sort -z | xargs -0 sha256sum | sha256sum` prints too), and nothing is written until
+  `INSTALL UNSIGNED <first 8 hex>` is typed. `--yes` never implies it; `--confirm-unsigned
+  PHRASE` for scripts; the service refuses without it (`confirm_unsigned`), and refuses a
+  bundle changed since its phrase was shown. A folder with a symbolic link is refused.
+  Signed releases and the catalogue's trust are unchanged.
+- **`bringup --card-reader DEVICE_ID`** writes the configuration SD in this PC's card reader,
+  as the wizard does: a backup of the card, the typed `WRITE <model> <size>` (`--confirm`),
+  the board pack's MBBIOS rule, a read-back, then no MCC reboot ("put the card back in the
+  board's configuration SD slot and power the board on"). The wizard's card-reader door now
+  goes through `POST /bringup/card-reader` (the bundle's checks and the unsigned phrase
+  first), and asks for the writer's own phrase (`WRITE SD/MMC 31.9 GB`).
+- **A proposed identity.** Once the harness answers, the wizard's last step (and the CLI's
+  summary) proposes the board's label (`MPS3-` and the last 4 of the MCC's USB serial
+  number), its IP (192.168.10.101; two boards on one network need different IPs) and a
+  locally administered MAC derived from that serial (documented; uniqueness of MCC serials is
+  not yet verified), all editable, and hands them to the existing identity writer on Board >
+  Access (`board identity`, net-protocol v0.16 `identity_set`, with its typed phrase). A
+  bare-metal harness, or an image before identity_set, is told so and nothing is sent.
+  `GET /boards/{bid}/bringup/proposal`.
+- **The card writer has no MBBIOS rule of its own:** the board pack's
+  (`harness_manager_mps3.mbbios`) is the only one; a pack without one writes files as given.
+- **Every unsigned harness write needs `INSTALL UNSIGNED <sha8>`** (david 2 Oct: "same rule"),
+  wizard or CLI, configuration SD or whole card: `harness-manager flash write --kind files`
+  (a bundle folder, a release bundle, or now a .zip) and `--kind card` (a whole-card image:
+  its file's own sha256) ask for it as well as `WRITE <model> <size>`;
+  `--confirm-unsigned PHRASE` for scripts, `--yes` never implies it. `POST /cardwriter/write`
+  takes `confirm_unsigned` and refuses without it; the new `POST /cardwriter/check` says the
+  phrase before a device is chosen. The wizard's Linux OS step checks the whole-card image,
+  shows the banner and its sha256, and asks for the phrase. The write checks the sha256 again
+  just before the first byte.
+<!-- --- end bringup-2 --- -->
+<!-- --- identity --- -->
+### Name this board: a name, a random MAC and an IP of its own (IDENTITY, for v0.1.1)
+- **One dialog, "Name this board"** (Board > Access, and the bring-up wizard's last step,
+  filled in): a name of 1-16 characters of A-Z, 0-9 and - (upper-cased as you type; the
+  aligned panel shows 16, so 17-19 are refused although the board takes them), with a counter;
+  the MAC **Random** (Regenerate) / Keep / Custom; the IP **Auto** / Keep / Custom; the new IP
+  in large type with "this PC must be on the same /24 (e.g. 192.168.10.1/24)"; that stage0
+  rescue still answers on 192.168.10.101 with the default MAC until mint 4; the typed name to
+  confirm. It replaces "Fix identity" (now its "Match its hub entry" mode) and the wizard's
+  "Set this board's identity".
+- **`board identity --mac random`**: `os.urandom(6)` with byte 0 = 0x02 (locally administered,
+  unicast), never 02:00:00:* (the image's range), re-rolled on any MAC in the registry.
+  **`--ip auto`**: the next address of the pool `mps3.identity.ip_pool` (192.168.10.110-199;
+  a setting) that is not 192.168.10.101, not in the registry and not answering identify; an
+  exhausted pool is refused with the numbers. Your own `--mac`/`--ip` must be unicast and not
+  02:00:00:*, an IPv4 address of a /24. The CLI prints `NEW IP     a.b.c.d` and the same-/24
+  line before it asks and after.
+- **The registry:** `<state>/identity/seen.json` now keeps every MAC and IP this Harness
+  Manager assigned or saw, per board id, with the first and last date.
+- **Guards before anything is sent:** a board behind a hub changes its MAC or IP only with the
+  hub named (`--hub-fixed HUB`, `hub_fixed`; the dialog asks you to type it): its dnsmasq knows
+  the board by MAC, so fix the record first (mps3_01_pl's is known to be wrong today); `--ip
+  auto` is refused there. A new IP outside this PC's /24 needs `--other-subnet`
+  (`other_subnet`). A new MAC on the same IP carries the ARP note (`sudo arp -d <ip>`, which
+  Harness Manager never runs).
+- **A board whose address changes is followed** (the Linux lead, 2 Oct): its pinned SSH host
+  key is read first, the warm reboot is not witnessed at the old address, the board is found
+  at the new IP by identify and accepted only with that key (another key: "a different board
+  answers at ...", never adopted; not there after 60 s: an identify broadcast adopts the board where it answers with its own key, with a note; none: "board not seen on <ip> after 4 min: it may be on DHCP
+  or the address was taken (DAD); check the panel, which shows the IP on row 5"). Its
+  boards.toml table (with the pin), claim record, known_hosts and registry record move to the
+  new board id; the result's `moved`, and the dialog's **Open it at <IP>**.
+- **The bring-up proposal** is the name from the MCC's USB serial, a random MAC and the pool's
+  next free IP (the MAC derived from the serial is gone).
+- **A card written on a PC** (a blank /persist, `no_persist`): the refusal's hint names
+  `harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'` and the
+  claim again; Harness Manager never formats it.
+- **API:** `GET /boards/{bid}/identity/proposal`; `POST /boards/{bid}/identity` takes `mac:
+  "random"`, `ip: "auto"`, `hub_fixed`, `other_subnet` and answers `moved` and `address`
+  (docs/API.md "Board identity"). The demo's Linux board has a net identity.
+<!-- --- end identity --- -->

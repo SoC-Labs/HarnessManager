@@ -90,7 +90,7 @@ def test_twin_a_board_whose_identity_is_set_reads_ok(capsys, board):
 def test_set_with_the_typed_phrase_reboots_warm_and_verifies(capsys, board):
     fake, target = board()
     rc, out, err = run(capsys, "board", "identity", target, "--label", "MPS3-02", "--ip",
-                       "192.168.11.101", "--mac", "02:00:00:00:02:fe", "--wait", "20",
+                       "192.168.11.101", "--mac", "02:5e:00:00:02:fe", "--wait", "20",
                        stdin="MPS3-02\n")
     assert rc == 0, err
     assert "To go ahead, type exactly: MPS3-02" in err
@@ -123,9 +123,9 @@ def test_twin_bad_values_are_usage_errors_and_nothing_is_sent(capsys, board):
     fake, target = board()
     rc, _, err = run(capsys, "board", "identity", target, "--mac", "01:00:5e:00:00:01",
                      "--consent", "MPS3")
-    assert rc == 2 and "not a unicast" in err
+    assert rc == 2 and "multicast" in err
     rc, _, err = run(capsys, "board", "identity", target, "--label", "X" * 24)
-    assert rc == 2 and "does not fit the LCD row" in err
+    assert rc == 2 and "at most 16" in err
     rc, _, err = run(capsys, "board", "identity", target, "--clear", "--label", "A")
     assert rc == 2 and "--clear goes alone" in err
     assert fake.identity_sets == []
@@ -155,29 +155,31 @@ def test_twin_a_board_that_does_not_answer_identify_has_no_identity_in_info(caps
 # --- V7-ALIGN: the shipped contract (net-protocol v0.16, platform 18622e5) ----------------------
 
 
-def test_v7_the_label_check_is_the_boards_19_of_a_z_0_9(capsys, board):
+def test_identity_a_name_is_16_of_a_z_0_9_and_dash(capsys, board):
+    """Lane IDENTITY (david 2 Oct): 1-16 after upper-casing (the aligned panel shows 16; the
+    board takes 19); the rule is in the message."""
     fake, target = board()
-    rc, _, err = run(capsys, "board", "identity", target, "--label", "X" * 20)
-    assert rc == 2 and "1-19 of A-Z" in err
-    rc, _, err = run(capsys, "board", "identity", target, "--label", "mps3-02")
-    assert rc == 2 and "does not fit the LCD row" in err
+    rc, _, err = run(capsys, "board", "identity", target, "--label", "X" * 17)
+    assert rc == 2 and "17 characters (at most 16" in err and "1-16 characters of A-Z" in err
+    rc, _, err = run(capsys, "board", "identity", target, "--label", "lab 07")
+    assert rc == 2 and "a space" in err and "only A-Z, 0-9 and -" in err
     assert fake.identity_sets == []
 
 
-def test_v7_twin_a_19_character_label_is_taken(capsys, board):
+def test_identity_twin_a_16_character_lower_case_name_is_taken_upper_cased(capsys, board):
     fake, target = board()
-    label = "BENCH-0123456789-XY"
-    assert len(label) == 19
-    rc, out, err = run(capsys, "board", "identity", target, "--label", label, "--consent", label,
-                       "--wait", "20")
+    label = "bench-0123456789"
+    assert len(label) == 16
+    rc, out, err = run(capsys, "board", "identity", target, "--label", label, "--consent",
+                       label.upper(), "--wait", "20")
     assert rc == 0, err
-    assert fake.identity_sets[0][1] == {"label": label}
+    assert fake.identity_sets[0][1] == {"label": label.upper()}
 
 
 def test_v7_a_bad_value_on_a_netbooted_board_is_refused_for_the_card(capsys, board):
     """The board's order: ``no_persist`` before ``invalid``."""
     fake, target = board(persist=False)
-    rc, _, err = run(capsys, "board", "identity", target, "--label", "lower-case")
+    rc, _, err = run(capsys, "board", "identity", target, "--label", "lower case")
     assert rc == 15 and "stage0 bake" in err
     assert fake.identity_sets == []
 

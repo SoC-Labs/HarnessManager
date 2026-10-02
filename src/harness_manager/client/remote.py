@@ -209,6 +209,11 @@ class RemotePack:
     def probe(self, hints: ProbeHints) -> list[Candidate]:
         raise UsageError("the daemon probes: use engine.probe()")
 
+    def identity_policy(self) -> Any:
+        """Lane IDENTITY: the installed pack's rules for naming a board (None without it)."""
+        hook = getattr(self._local, "identity_policy", None)
+        return hook() if callable(hook) else None
+
     def open(self, candidate: Candidate) -> BoardSession:
         raise UsageError("the daemon opens boards: use engine.open()")
 
@@ -1370,15 +1375,46 @@ class RemoteIdentity:
         leaf = "?refresh=true" if refresh else ""
         return self._engine._http.get(self._path(session) + leaf).get("identity")
 
+    @staticmethod
+    def _body(want: Any, from_hub: bool, clear: bool, hub_fixed: str,
+              other_subnet: bool) -> dict[str, Any]:
+        """The POST body; a field the CLI drops (``""``) goes as ``unset``."""
+        w = dict(want or {})
+        unset = [k for k, v in w.items() if v == ""]
+        body: dict[str, Any] = {"from_hub": bool(from_hub), "clear": bool(clear),
+                                **{k: v for k, v in w.items() if v != ""}}
+        if unset:
+            body["unset"] = unset
+        if hub_fixed:
+            body["hub_fixed"] = hub_fixed
+        if other_subnet:
+            body["other_subnet"] = True
+        return body
+
+    def preflight(self, session: BoardSession, *, want: Any = None, from_hub: bool = False,
+                  clear: bool = False, hub_fixed: str = "",
+                  other_subnet: bool = False) -> Any:
+        """Lane IDENTITY: the job's checks and choices, nothing sent (``dry_run``)."""
+        body = {**self._body(want, from_hub, clear, hub_fixed, other_subnet), "dry_run": True}
+        return self._engine._http.post(self._path(session), body).get("preflight") or {}
+
+    def propose(self, session: BoardSession, **query: Any) -> Any:
+        """Lane IDENTITY: GET .../identity/proposal."""
+        from urllib.parse import urlencode
+
+        qs = urlencode({k: v for k, v in query.items() if v not in (None, "")})
+        return self._engine._http.get(self._path(session) + "/proposal"
+                                      + (f"?{qs}" if qs else "")).get("proposal")
+
     def fix(self, session: BoardSession, *, confirm: str, want: Any = None,
             from_hub: bool = False, clear: bool = False, wait_s: float | None = None,
-            progress: Any = None) -> Any:
+            progress: Any = None, hub_fixed: str = "", other_subnet: bool = False) -> Any:
         def phase(text: str, _done: int, _total: int) -> None:
             if progress is not None:
                 progress(text)
 
-        body: dict[str, Any] = {"confirm": confirm, "from_hub": bool(from_hub),
-                                "clear": bool(clear), **dict(want or {})}
+        body: dict[str, Any] = {"confirm": confirm,
+                                **self._body(want, from_hub, clear, hub_fixed, other_subnet)}
         if wait_s is not None:
             body["wait_s"] = wait_s
         out = self._engine.run_job(self._path(session), body, progress=phase)

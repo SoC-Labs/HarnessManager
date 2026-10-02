@@ -190,7 +190,7 @@ def mps3_rows(*, console_pace_s: float = _c.DUT_CONSOLE_PACE_S,
                         tftp_port or TFTP_PORT, DEFAULT_TIMING.pace_s, SHARE_PACE_S),
             *_board_rows(DEFAULT_TARGET, DEFAULT_SHARE_BAUD, REACH_CHOICES,
                          DEFAULT_HW_SERVER, DEFAULT_DEVICE, SYSMON_MIN_INTERVAL_S),
-            *_slot_rows())
+            *_slot_rows(), *_identity_rows())
 
 
 def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: int,
@@ -353,4 +353,19 @@ def _slot_rows() -> tuple[Setting, ...]:
              "How long an OS-slot push or its card job may go without moving a byte before "
              "it is stuck, in seconds", at="os_slots.py:244", scope="pack",
              env=_os.STALL_ENV, check=_positive),
+    )
+
+
+def _identity_rows() -> tuple[Setting, ...]:
+    """Lane IDENTITY (david 2 Oct): the addresses `board identity --ip auto` and the "Name this
+    board" dialog give boards (a unique IP per board)."""
+    from harness_manager.services.identity_assign import pool_problem
+
+    from . import net_identity as _ni
+
+    return (
+        _row(_ni.IP_POOL_KEY, "str", _ni.DEFAULT_IP_POOL, "Boards",
+             "The addresses Harness Manager gives boards it names (a.b.c.X-Y, one /24; "
+             f"{_ni.RESERVED_IPS[0]} is never given: the image's and stage0 rescue's)",
+             at="net_identity.py:142", env=_ni.IP_POOL_ENV, check=pool_problem),
     )

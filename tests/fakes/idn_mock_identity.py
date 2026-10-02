@@ -142,4 +142,69 @@ def register(app: FastAPI, state: Any, ok: Any, accepted: Any) -> IdentitySim:
 
         return accepted(state.jobs.start(bid, "identity", run))
 
+    # --- lane IDENTITY: "Name this board" (docs/API.md "Board identity"), from the service's
+    # own propose() over the sim's board (no network: nothing in the pool answers) ---
+    @app.get(f"{API}/boards/{{bid:path}}/identity/proposal")
+    def identity_proposal(bid: str, label: str | None = None, mac: str | None = None,
+                          ip: str | None = None) -> dict[str, Any]:
+        state.session(bid)
+        if sim.get(bid) is None:
+            raise UnavailableError(BI.CAPABILITY, BI.NO_ADAPTER)
+        return ok(board_id=bid, proposal=sim.propose(bid, label=label, mac=mac, ip=ip))
+
     return sim
+
+
+class _SimAdapter:
+    """The sim's board as a ``session.net_identity`` adapter, for the service's propose()."""
+
+    def __init__(self, sim: IdentitySim, bid: str) -> None:
+        self._sim, self._bid = sim, bid
+
+    def read(self, *, refresh: bool = False, cheap: bool = False) -> dict[str, Any]:
+        return copy.deepcopy(self._sim.boards[self._bid]["reported"])
+
+    def hub_record(self, *, refresh: bool = False, cheap: bool = False) -> Any:
+        return self._sim.boards[self._bid]["hub"]
+
+    def hub_others(self, *, refresh: bool = False) -> list[dict[str, Any]]:
+        return []
+
+    def fix_reason(self, reported: Any) -> tuple[str, str, str]:
+        ref = self._sim.boards[self._bid]["refusal"]
+        return (ref["name"], ref["message"], ref.get("hint") or "") if ref else ("", "", "")
+
+    def address(self) -> str:
+        return "mock:6900"
+
+    @staticmethod
+    def policy() -> Any:
+        from harness_manager.services.identity_assign import IdentityPolicy
+
+        return IdentityPolicy(pack="mps3", reserved_mac_prefixes=("02:00:00",),
+                              ip_pool="192.168.10.110-199", ip_pool_setting="mps3.identity.ip_pool",
+                              reserved_ips=("192.168.10.101",),
+                              rescue_note="until mint 4, stage0 rescue still answers on "
+                                          "192.168.10.101 with the image's default MAC",
+                              known_bad_hub_records={"mps3_01_pl": "its board_mac is the hub's "
+                                                                   "own USB adapter"})
+
+
+def _propose(self: IdentitySim, bid: str, **kw: Any) -> dict[str, Any]:
+    import tempfile
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    hub = self.boards[bid]["hub"]
+    session = SimpleNamespace(candidate=SimpleNamespace(board_id=bid, name="", pack="mps3"),
+                              net_identity=_SimAdapter(self, bid),
+                              hub=SimpleNamespace(host="hub.mock", target=hub["target"])
+                              if hub else None)
+    if not hasattr(self, "_seen_dir"):
+        self._seen_dir = tempfile.mkdtemp(prefix="idn-mock-seen-")
+    svc = BI.IdentityService(None, seen=BI.SeenIdentities(Path(self._seen_dir)))
+    return svc.propose(session, **kw)
+
+
+IdentitySim.propose = _propose          # type: ignore[attr-defined]
+# --- end lane IDENTITY ---

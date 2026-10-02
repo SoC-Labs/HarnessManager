@@ -138,6 +138,7 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
     "identity_api": (
         ("GET", "/boards/{bid}/identity"),
         ("POST", "/boards/{bid}/identity"),
+        ("GET", "/boards/{bid}/identity/proposal"),      # lane IDENTITY: "Name this board"
         # --- ui2 api-hub (G10): served in the mock by t14_mock_api's ui2 block ---
         ("GET", "/identity/clashes"),
     ),
@@ -1279,3 +1280,28 @@ class SimClocks:
                           for r in board.readings]
         return self.clocks()[0]
 
+# --- sd-flash ---
+# SD-FLASH (docs/API.md "SD cards in this PC's card reader", ``cardwriter_api.py``): served in
+# the mock by tests/fakes/cardwriter_mock.py (the REAL routes over --demo's simulated readers;
+# the setting from the mock's own settings dir).
+EXTENSION_ROUTES["cardwriter_api"] = (
+    ("GET", "/cardwriter/devices"),
+    ("POST", "/cardwriter/write"),
+    ("POST", "/cardwriter/check"),                    # bringup-2: the unsigned phrase first
+)
+# --- end sd-flash ---
+
+
+# --- bringup-usb ---
+# BRINGUP-USB (docs/API.md "Bring-up over the Debug USB", bringup_api.py): served in the mock by
+# tests/fakes/bringup_mock.py (the switches, the scan and the bundle check; no write).
+EXTENSION_ROUTES["bringup_api"] = (
+    ("GET", "/bringup"),
+    ("POST", "/bringup/scan"),
+    ("POST", "/bringup/bundle"),
+    ("POST", "/boards/{bid}/bringup/install"),
+    ("POST", "/boards/{bid}/bringup/witness"),
+    ("POST", "/bringup/card-reader"),                 # bringup-2: the card-reader door
+    ("GET", "/boards/{bid}/bringup/proposal"),        # bringup-2: the proposed identity
+)
+# --- end bringup-usb ---
