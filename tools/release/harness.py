@@ -289,9 +289,15 @@ def _scan_aaa(label: str, files: dict[str, Path]) -> list[Finding]:
                     if hits else f"{label}: no Arm IP library paths")]
 
 
+#: A release's ``compat.min_app`` unless ``--min-app`` says otherwise: 1.0.0, the first Harness
+#: Manager with FIX-PACK-9's per-revision MBBIOS rule, which a B+C config SD needs (an older
+#: one keeps only MB/HBI0309C's line and refuses or mis-keeps MB/HBI0309B's).
+MIN_APP = "1.0.0"
+
+
 def ingest(bundle: Path, version: str, *, catalog: str = "mps3-harness", layout: Layout,
            access: str = "github-token", allow_dirty: str = "", channel: str = "beta",
-           min_app: str = "0.1.0", mcc_fw_tested: tuple[str, ...] = ("1.3.2",),
+           min_app: str = MIN_APP, mcc_fw_tested: tuple[str, ...] = ("1.3.2",),
            pack: str = "mps3") -> HarnessBuild:
     """Validate ``bundle`` and build its entry. Raises on a refusal; writes nothing (the
     assets are in ``HarnessBuild.pending`` until ``write()``)."""

@@ -50,6 +50,7 @@ from tests.fakes.test_release_platform import (
 )
 from tools.release import signer as signer_mod
 from tools.release.cli import main as release_main
+from tools.release.harness import MIN_APP
 
 REPO = "SoC-Labs/HarnessManager"
 SRC = f"github:{REPO}"
@@ -77,6 +78,9 @@ class World:
     def __init__(self, tmp: Path, monkeypatch, gh: FakeGitHub) -> None:
         self.tmp, self.gh = tmp, gh
         self.trust: TrustStore | None = None              # None: the client's default trust
+        # integ v1.1: a release's compat.min_app is 1.0.0 by default (the per-revision MBBIOS
+        # rule a B+C config SD needs), so the client here is a 1.0.0 one.
+        self.app_version = MIN_APP
         self.rig = BoardRig(tmp, SimpleNamespace(trust=lambda: TrustStore()), monkeypatch)
         self.monkeypatch = monkeypatch
         self.previous = set_engine_factory(self.factory)
@@ -88,7 +92,8 @@ class World:
         dl = Downloader(UpdateState.under(rig.state_dir).cache, token=self.gh.token,
                         github_api=self.gh.api, mirrors=())
         kw = {"trust": self.trust} if self.trust is not None else {}
-        eng._services["update"] = UpdateService(eng, downloader=dl, app_version="0.1.0", **kw)
+        eng._services["update"] = UpdateService(eng, downloader=dl, app_version=self.app_version,
+                                                **kw)
         return eng
 
     def run(self, capsys, *argv: str) -> tuple[int, dict, str]:
@@ -189,6 +194,35 @@ def test_twin_with_ethernet_too_the_same_install_is_confirmed(world, bare, capsy
                              *world.both_links()[1:], "--door", "usb", "--yes", *src())
     assert rc == ExitCode.OK, err
     assert obj["result"] == "installed" and obj["version"] == BM
+
+
+# --- integ v1.1: a release needs Harness Manager 1.0.0 by default (--min-app) ------------------
+
+
+def test_a_release_needs_1_0_0_by_default_so_an_older_client_is_blocked(world, bare, capsys):
+    assert MIN_APP == "1.0.0"
+    world.app_version = "0.9.0"
+    rc, obj, err = world.run(capsys, "harness", "show", BM, *world.both_links(), *src())
+    assert rc == ExitCode.OK, err
+    assert (f"harness {BM} needs harness-manager >= 1.0.0 (this is 0.9.0); run `harness-manager "
+            "update app` first") in obj["plan"]["blockers"], obj["plan"]
+
+
+def test_twin_a_1_0_0_client_is_not_blocked_by_min_app(world, bare, capsys):
+    rc, obj, err = world.run(capsys, "harness", "show", BM, *world.both_links(), *src())
+    assert rc == ExitCode.OK, err
+    assert not [b for b in obj["plan"]["blockers"] if "needs harness-manager" in b], obj["plan"]
+
+
+def test_twin_min_app_given_is_written_as_given(tmp_path, world, capsys):
+    p = bare_metal_platform(tmp_path / "bm-old")
+    out = build(tmp_path, p, BM, "--min-app", "0.9.0")
+    world.gh.publish_tree(out)
+    world.trust = trust_of(out)
+    world.app_version = "0.9.0"
+    rc, obj, err = world.run(capsys, "harness", "show", BM, *world.both_links(), *src())
+    assert rc == ExitCode.OK, err
+    assert not [b for b in obj["plan"]["blockers"] if "needs harness-manager" in b], obj["plan"]
 
 
 # --- FIX-PACK-9: a B+C release (the default, david 2 Oct) onto a C card and onto a B card ------

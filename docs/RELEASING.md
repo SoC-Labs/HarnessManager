@@ -233,6 +233,10 @@ bundle with the generic bake (request R1).
      `REVS` refuses trees that differ beyond each board.txt's revision token and its `;`
      comments. A ready `--sd` tree is taken as it is: it must serve exactly the `--board-rev`
      given, and without one, a tree that is not B+C is a WARNING;
+   - declares `compat.min_app` **1.0.0** unless `--min-app` says otherwise: a B+C config SD
+     needs Harness Manager 1.0.0's per-revision MBBIOS rule (an older one keeps only
+     `MB/HBI0309C`'s line), so an older client's plan is blocked ("harness <v> needs
+     harness-manager >= 1.0.0 (this is <its>); run `harness-manager update app` first");
    - copies the Linux parts;
    - splits the overlays by `AAA_RMS`;
    - takes the kit with its `kit.json`.

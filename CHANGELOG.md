@@ -1165,4 +1165,8 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   none, a tree that is not B+C is a WARNING ("the --sd tree serves HBI0309C, not HBI0309B and
   HBI0309C: a board of another revision stays unprogrammed (platform v2.0.0 ships B and C)").
   The v2.0.0-rc1 dry run: the SD part is 4.3 MiB (was 2.2 MiB), 267.7 MiB in all.
+- **A harness release needs Harness Manager 1.0.0 by default** (integ v1.1): `--min-app`
+  (`make harness-release`, `harness`) defaults to 1.0.0, the first with the per-revision MBBIOS
+  rule a B+C config SD needs (was 0.1.0); an older client's plan is blocked "harness <v> needs
+  harness-manager >= 1.0.0 (this is <its>); run `harness-manager update app` first".
 <!-- --- end fix-pack-9 (release tool) --- -->

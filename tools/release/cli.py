@@ -49,7 +49,7 @@ from .common import (
     run,
     sha256_file,
 )
-from .harness import ingest
+from .harness import MIN_APP, ingest
 from .publish import (
     Step,
     channel_steps,
@@ -593,7 +593,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--aaa-repo", default=Layout.aaa_repo, help="the private repo for Arm IP")
     p.add_argument("--access", default="github-token", choices=("github-token", "public"),
                    help="access of the OPEN assets (Arm IP is always github-token)")
-    p.add_argument("--min-app", default="0.1.0")
+    p.add_argument("--min-app", default=MIN_APP,
+                   help=f"the oldest Harness Manager that may install it (default {MIN_APP}: a B+C config SD needs its per-revision MBBIOS rule)")
     p.add_argument("--allow-dirty", metavar="REASON",
                    help="beta/dev only: release a dirty image, with the reason signed in")
     p.add_argument("--check-only", action="store_true",
@@ -652,7 +653,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--aaa-repo", default=Layout.aaa_repo, help="the private repo for Arm IP")
     p.add_argument("--access", default="github-token", choices=("github-token", "public"),
                    help="access of the OPEN assets (Arm IP and the kit are always private)")
-    p.add_argument("--min-app", default="0.1.0")
+    p.add_argument("--min-app", default=MIN_APP,
+                   help=f"the oldest Harness Manager that may install it (default {MIN_APP}: a B+C config SD needs its per-revision MBBIOS rule)")
     p.add_argument("--allow-dirty", metavar="REASON",
                    help="beta/dev only: release a dirty image, with the reason signed in")
     p.add_argument("--check-only", action="store_true",
