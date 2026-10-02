@@ -60,9 +60,10 @@ def bind_identity_to_sd(vb: Any, *, stale: bool = False, rev: str = "HBI0309C") 
     """Make ``vb``'s shell report the identity of the bitstream on its SD after each boot.
 
     Returns a dict the test can inspect/modify: ``booted`` (identities seen at
-    each boot) and ``stale`` (set True at any time to freeze the identity).
+    each boot), ``stale`` (set True at any time to freeze the identity) and ``rev``
+    (FIX-PACK-9: the revision folder the board's MCC reads, ``HBI0309C`` by default).
     """
-    info: dict[str, Any] = {"booted": [], "stale": stale, "errors": []}
+    info: dict[str, Any] = {"booted": [], "stale": stale, "errors": [], "rev": rev}
     original = vb.mcc.on_boot
 
     def on_boot() -> None:
@@ -79,7 +80,7 @@ def bind_identity_to_sd(vb: Any, *, stale: bool = False, rev: str = "HBI0309C") 
     def _boot() -> None:
         ident = None
         if not info["stale"]:
-            bit = _sd_bit(vb.sd.root, rev)
+            bit = _sd_bit(vb.sd.root, info["rev"])
             if bit is not None and bit.is_file():
                 ident = read_fake_identity(bit.read_bytes())
         if ident is not None:
