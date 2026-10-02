@@ -31,6 +31,15 @@ from tests.fakes.lxslots_board import TRUSTED, BoardSsh
 from tests.fakes.t13_daemon import TOKEN, bid_path, headers, state_dir
 from tests.integration.test_identity_name import AT_ITS_IP, at_new_address
 
+
+@pytest.fixture(autouse=True)
+def _pool_from_its_first_address(monkeypatch):
+    """These tests read the pool from its first address: ``--ip auto``'s start from the
+    random MAC (``pool_start``) is tested in tests/unit/test_identity_assign.py."""
+    from harness_manager.services import identity_assign as _IA
+
+    monkeypatch.setattr(_IA, "pool_start", lambda addrs, mac=None: 0)
+
 AS_DEFAULT = {"label": "MPS3", "ip": "192.168.10.101/24", "mac": BOARD1_MAC,
               "source": {"label": "default", "ip": "default", "mac": "default"}}
 
