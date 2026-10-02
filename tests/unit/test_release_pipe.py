@@ -64,17 +64,24 @@ def test_a_linux_release_from_platform_artifacts_with_a_test_key(tmp_path, lx):
     assert rc == 0, text
     rel = entry(out)
     comps = {c["name"]: c for c in rel["components"]}
-    assert set(comps) == {"sd-HBI0309C", "os-slot", "overlays-open"}      # no Arm IP, no kit
+    assert set(comps) == {"sd-HBI0309BC", "os-slot", "overlays-open"}     # no Arm IP, no kit
     assert rel["identity"]["static_id"] == S_LNX and rel["identity"]["usercode"] == U_LNX
     assert rel["legal_info"]["name"].endswith("linux_legal_info.tar")
+    # FIX-PACK-9: both revisions by default (david, 2 Oct), declared in compat and board
+    assert rel["compat"]["board_revs"] == ["HBI0309B", "HBI0309C"]
+    assert channel(out)["board"]["revisions"] == ["HBI0309B", "HBI0309C"]
     # the SD tree is the templates, stamped as assemble_sd.sh does, with the stage0 .bit
-    sd = Layout(out).asset_path(rel["tag"], Path(comps["sd-HBI0309C"]["url"]).name)
+    sd = Layout(out).asset_path(rel["tag"], Path(comps["sd-HBI0309BC"]["url"]).name)
     with zipfile.ZipFile(sd) as zf:
         files = {n: zf.read(n) for n in zf.namelist()}
-    assert set(files) == {"config.txt", "MB/HBI0309C/board.txt", "MB/HBI0309C/Nanosoc/nanosoc.txt",
-                          "MB/HBI0309C/Nanosoc/images.txt", "MB/HBI0309C/Nanosoc/nanosoc.bit"}
-    assert files["MB/HBI0309C/Nanosoc/nanosoc.bit"] == lx.bit.read_bytes()
-    assert files["MB/HBI0309C/board.txt"].startswith(b"BOARD: HBI0309C\n")
+    tree = {"board.txt", "Nanosoc/nanosoc.txt", "Nanosoc/images.txt", "Nanosoc/nanosoc.bit"}
+    assert set(files) == {"config.txt", *(f"MB/HBI0309{r}/{f}" for r in "BC" for f in tree)}
+    assert set(comps["sd-HBI0309BC"]["files"]) == set(files)          # both listed, signed
+    for r in "BC":
+        assert files[f"MB/HBI0309{r}/Nanosoc/nanosoc.bit"] == lx.bit.read_bytes()
+        assert files[f"MB/HBI0309{r}/board.txt"].startswith(f"BOARD: HBI0309{r}\n".encode())
+    assert files["MB/HBI0309B/board.txt"].replace(b"HBI0309B", b"HBI0309C") == \
+        files["MB/HBI0309C/board.txt"]
     assert files["config.txt"] == (lx.templates / "config.txt").read_bytes()
     # the Arm-IP RMs and the stray file are named as left out
     report = json.loads((out / "plans" / f"{CAT}-beta" / "report.json").read_text())
@@ -259,7 +266,7 @@ def test_a_bare_metal_release_from_a_mint_record(tmp_path):
     assert rc == 0, text
     rel = entry(out)
     assert rel["identity"]["impl"] == "bare-metal" and rel["identity"]["fw_sha"] == "0e12a0b0"
-    assert {c["name"] for c in rel["components"]} == {"sd-HBI0309C", "overlays-open"}
+    assert {c["name"] for c in rel["components"]} == {"sd-HBI0309BC", "overlays-open"}
 
 
 def test_twin_a_dirty_mint_is_refused(tmp_path):

@@ -1154,3 +1154,15 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   "random"`, `ip: "auto"`, `hub_fixed`, `other_subnet` and answers `moved` and `address`
   (docs/API.md "Board identity"). The demo's Linux board has a net identity.
 <!-- --- end identity --- -->
+<!-- --- fix-pack-9 (release tool) --- -->
+- **`make harness-release` emits the config SD for Rev B and Rev C** (FIX-PACK-9, david 2 Oct;
+  the client side is "MPS3 board revisions B and C" above). Both `MB/HBI0309B` and
+  `MB/HBI0309C` are stamped from the templates exactly as the platform's `assemble_sd.sh` does,
+  listed in the SD part (`sd-HBI0309BC`), and declared in `compat.board_revs` and
+  `board.revisions`. `BOARD_REVS=HBI0309C` (`--board-rev C`) still makes a C-only release. The
+  new finding `REVS` refuses revision trees that differ beyond each board.txt's revision token
+  and comments. A ready `--sd` tree must serve the `--board-rev` given (refused otherwise); with
+  none, a tree that is not B+C is a WARNING ("the --sd tree serves HBI0309C, not HBI0309B and
+  HBI0309C: a board of another revision stays unprogrammed (platform v2.0.0 ships B and C)").
+  The v2.0.0-rc1 dry run: the SD part is 4.3 MiB (was 2.2 MiB), 267.7 MiB in all.
+<!-- --- end fix-pack-9 (release tool) --- -->

@@ -135,7 +135,7 @@ def src(*extra: str) -> list[str]:
 
 
 def sd_zip_name(version: str) -> str:
-    return f"mps3-harness-{version}-sd-HBI0309C.zip"
+    return f"mps3-harness-{version}-sd-HBI0309BC.zip"
 
 
 # --- the catalogue through GitHub -------------------------------------------------------------
@@ -148,13 +148,13 @@ def test_list_show_and_fetch_a_test_release_through_the_github_api(world, bare, 
     assert obj["channels"][0]["signed_by"].startswith(signer_mod.TEST_KEY_PREFIX)
     rc, obj, err = world.run(capsys, "harness", "show", BM, *src())
     assert rc == ExitCode.OK, err
-    assert {c["name"] for c in obj["component_list"]} == {"sd-HBI0309C", "overlays-open"}
+    assert {c["name"] for c in obj["component_list"]} == {"sd-HBI0309BC", "overlays-open"}
     assert obj["notes"].startswith("TEST BUILD")                    # the signed notes say so
     assert obj["identity"]["static_id"].lower() == S_ILA.lower() and obj["identity"]["fw_sha"] == "0e12a0b0"
     rc, obj, err = world.run(capsys, "harness", "fetch", BM, *src())
     assert rc == ExitCode.OK, err
     assert {c["name"]: c["result"] for c in obj["components"]} == {
-        "sd-HBI0309C": "fetched", "overlays-open": "fetched"}
+        "sd-HBI0309BC": "fetched", "overlays-open": "fetched"}
     api = [r for r in world.gh.requests if r["path"].startswith("/repos/")]
     assert api and all(r["auth_ok"] for r in api)                   # the token went to the API
     assert not any(h["auth"] for h in world.gh.storage_hits)        # ... never to storage
@@ -189,6 +189,84 @@ def test_twin_with_ethernet_too_the_same_install_is_confirmed(world, bare, capsy
                              *world.both_links()[1:], "--door", "usb", "--yes", *src())
     assert rc == ExitCode.OK, err
     assert obj["result"] == "installed" and obj["version"] == BM
+
+
+# --- FIX-PACK-9: a B+C release (the default, david 2 Oct) onto a C card and onto a B card ------
+
+B_NOTE = ("MBBIOS: HBI0309C mbb_v141.ebf from the bundle (the card has no mbb_v141.ebf, so the "
+          "MCC will not update); MBBIOS kept: HBI0309B mbb_v132.ebf")
+C_NOTE = ("MBBIOS kept: HBI0309C mbb_v132.ebf; MBBIOS: HBI0309B mbb_v141.ebf from the bundle "
+          "(the card has no mbb_v141.ebf, so the MCC will not update)")
+CARD_LINE = "MBBIOS: mbb_v132.ebf  ;the card's own\n"
+
+
+def make_rev_b(world) -> None:
+    """The rig's board becomes a Rev B: its card serves MB/HBI0309B only (with its own MBBIOS
+    line), LOG.TXT says so, and its MCC reads that folder and prints rev B."""
+    from tests.fakes.fake_mcc import BOOT_BANNER
+
+    vb = world.rig.vb
+    root = vb.sd.root
+    (root / "MB" / "HBI0309C").rename(root / "MB" / "HBI0309B")
+    board = root / "MB" / "HBI0309B" / "board.txt"
+    board.write_text("BOARD: HBI0309B\n[MCCS]\n" + CARD_LINE + board.read_text())
+    (root / "LOG.TXT").write_text("MotherBoard Revision B Variant A\r\n")
+    vb.mcc.boot_banner = tuple(x.replace("rev C", "rev B").replace("HBI0309C", "HBI0309B")
+                               for x in BOOT_BANNER)
+    world.rig.bound["rev"] = "HBI0309B"
+
+
+def test_a_bc_release_installs_onto_a_c_card_with_both_folders(world, bare, capsys):
+    vb, p = world.rig.vb, bare.platform
+    board = vb.sd.root / "MB" / "HBI0309C" / "board.txt"
+    board.write_text("BOARD: HBI0309C\n[MCCS]\n" + CARD_LINE + board.read_text())
+    rc, obj, err = world.run(capsys, "harness", "install", *world.both_links()[:1], BM,
+                             *world.both_links()[1:], "--door", "usb", "--yes", *src())
+    assert rc == ExitCode.OK, err
+    assert obj["result"] == "installed" and obj["notes"] == [C_NOTE]
+    root = vb.sd.root
+    for rev in "BC":
+        assert (root / f"MB/HBI0309{rev}/Nanosoc/nanosoc.bit").read_bytes() == p.bit.read_bytes()
+    assert CARD_LINE in (root / "MB/HBI0309C/board.txt").read_text()     # the card's, kept
+    b_txt = (root / "MB/HBI0309B/board.txt").read_text()
+    assert b_txt.startswith("BOARD: HBI0309B\n") and "MBBIOS: mbb_v141.ebf" in b_txt
+    assert world.rig.bound["booted"][-1]["sha"] == "0e12a0b0"          # read MB/HBI0309C
+
+
+def test_twin_the_same_release_installs_onto_a_rev_b_card(world, bare, capsys):
+    make_rev_b(world)
+    vb, p = world.rig.vb, bare.platform
+    rc, obj, err = world.run(capsys, "harness", "show", BM, *world.both_links(), *src())
+    assert rc == ExitCode.OK, err
+    assert any(x.startswith("Rev B: boots, untested. This board is HBI0309B (LOG.TXT on its "
+                            "config SD)") for x in obj["plan"]["warnings"]), obj
+    rc, obj, err = world.run(capsys, "harness", "install", *world.both_links()[:1], BM,
+                             *world.both_links()[1:], "--door", "usb", "--yes", *src())
+    assert rc == ExitCode.OK, err
+    assert obj["result"] == "installed" and obj["notes"] == [B_NOTE]
+    root = vb.sd.root
+    assert CARD_LINE in (root / "MB/HBI0309B/board.txt").read_text()     # the card's, kept
+    assert (root / "MB/HBI0309C/board.txt").read_text().startswith("BOARD: HBI0309C\n")
+    for rev in "BC":
+        assert (root / f"MB/HBI0309{rev}/Nanosoc/nanosoc.bit").read_bytes() == p.bit.read_bytes()
+    assert world.rig.bound["booted"][-1]["sha"] == "0e12a0b0"          # read MB/HBI0309B
+
+
+def test_twin_a_c_only_release_onto_the_rev_b_card_is_refused_and_writes_nothing(
+        tmp_path, world, capsys):
+    p = bare_metal_platform(tmp_path / "bm-c")
+    out = build(tmp_path, p, BM, "--board-rev", "C")
+    world.gh.publish_tree(out)
+    world.trust = trust_of(out)
+    make_rev_b(world)
+    before = world.rig.vb.sd.snapshot()
+    rc, obj, err = world.run(capsys, "harness", "install", *world.both_links()[:1], BM,
+                             *world.both_links()[1:], "--door", "usb", "--yes", *src())
+    assert rc == ExitCode.REFUSED, err
+    assert ("this board is HBI0309B (LOG.TXT on its config SD), and harness 1.2.0-rc1 carries "
+            "MB/HBI0309C only: the MCC reads only MB/HBI0309B/, so the board would stay "
+            "unprogrammed") in obj["error"]["message"]
+    assert world.rig.vb.sd.snapshot() == before and world.rig.bound["booted"] == []
 
 
 def test_twin_a_tampered_asset_is_refused_and_the_card_is_untouched(world, bare, capsys):
@@ -245,12 +323,12 @@ def test_a_linux_release_lists_fetches_and_says_what_a_usb_only_install_lacks(tm
     rc, obj, err = world.run(capsys, "harness", "show", LX, *src())
     assert rc == ExitCode.OK, err
     assert obj["identity"]["static_id"].lower() == S_LNX.lower() and obj["identity"]["impl"] == "linux"
-    assert {c["name"] for c in obj["component_list"]} == {"sd-HBI0309C", "os-slot",
+    assert {c["name"] for c in obj["component_list"]} == {"sd-HBI0309BC", "os-slot",
                                                           "overlays-open"}
     rc, obj, err = world.run(capsys, "harness", "fetch", LX, *src())
     assert rc == ExitCode.OK, err
     assert {c["name"] for c in obj["components"] if c["result"] == "fetched"} == {
-        "sd-HBI0309C", "os-slot", "overlays-open"}
+        "sd-HBI0309BC", "os-slot", "overlays-open"}
     before = world.rig.vb.sd.snapshot()
     rc, obj, err = world.run(capsys, "harness", "install", "-", LX, *world.usb_only()[1:],
                              "--door", "usb", "--consent", f"REKEY {S_LNX.lower()}", "--yes",

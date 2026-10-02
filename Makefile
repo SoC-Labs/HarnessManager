@@ -134,6 +134,7 @@ release-promote: venv
 #   make harness-release VERSION=2.0.0 FROM=<mint prod dir> KEY=<release.key> | TEST_KEY=1
 #        [BIT=<.bit> STAGE0_BAKE=<bake.json>] [SD_TEMPLATES=<dir> | SD=<tree>] [OVERLAYS=<dir>]
 #        [INCLUDE_AAA=1] [KIT=<zip>] [REPO=OWNER/REPO] [OUT=<dir>] [CHANNEL=beta]
+#        [BOARD_REVS=HBI0309B,HBI0309C]  (FIX-PACK-9: the default; the SD serves both revisions)
 .PHONY: harness-release
 harness-release: venv
 	$(RELEASE) harness-release --version $(VERSION) --from $(FROM) --channel $(CHANNEL) \
@@ -142,7 +143,8 @@ harness-release: venv
 		$(if $(OVERLAYS),--overlays $(OVERLAYS)) $(if $(INCLUDE_AAA),--include-aaa) \
 		$(if $(KIT),--kit $(KIT)) $(if $(KEY),--key $(KEY)) $(if $(TEST_KEY),--test-key) \
 		$(if $(REPO),--repo $(REPO)) $(if $(OUT),--out $(OUT)) \
-		$(if $(MIRROR),--mirror $(MIRROR)) $(RELEASE_ARGS)
+		$(if $(MIRROR),--mirror $(MIRROR)) $(if $(BOARD_REVS),--board-rev $(BOARD_REVS)) \
+		$(RELEASE_ARGS)
 
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache build dist src/*.egg-info

@@ -45,6 +45,7 @@ The overlay manifests are read with the board pack's own reader (pyverify throug
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,63 @@ class Finding:
     code: str               # EBF, DIRTY, UNSTAMPED, USERID, AAA_OPEN, NOT_FIELDABLE, STATIC, …
     ok: bool
     detail: str
+
+
+def sd_component_rev(revs: list[str]) -> str:
+    """The SD part's name suffix: ``HBI0309C`` for one revision, ``HBI0309BC`` for the
+    platform's B and C (FIX-PACK-9), ``multi`` for any other mix."""
+    if len(revs) == 1:
+        return revs[0]
+    if revs and all(r.upper().startswith("HBI0309") and len(r) == 8 for r in revs):
+        return "HBI0309" + "".join(r[-1].upper() for r in revs)
+    return "multi"
+
+
+def _board_txt_core(text: bytes, rev: str) -> list[str]:
+    """board.txt as the MCC reads it, for comparing revisions: ``;`` comments and trailing
+    blanks dropped, this revision's own token (``HBI0309B``) made neutral, empty lines gone.
+    assemble_sd.sh stamps ``@BOARD@`` with sed .../g, so a COMMENT naming the token differs
+    between revisions too (the Linux lead, 2 Oct): it never counts."""
+    out = []
+    for line in text.decode("latin-1").replace("\r\n", "\n").split("\n"):
+        line = line.split(";", 1)[0].rstrip()
+        if line:
+            out.append(re.sub(re.escape(rev), "HBI0309?", line, flags=re.I))
+    return out
+
+
+def rev_trees_finding(sd: dict[str, Path], revs: list[str]) -> Finding:
+    """FIX-PACK-9: the revision folders of a multi-revision config SD are the same tree: the
+    same files, byte for byte, except each board.txt, which may differ only in its revision
+    token and its comments (``_board_txt_core``). The first revision in ``revs`` (sorted, so
+    ``HBI0309B``) is compared with each other one."""
+    def tree(rev: str) -> dict[str, tuple[str, Path]]:
+        """``{name inside the folder, FAT case-blind: (its spelling, file)}``."""
+        pre = f"mb/{rev.lower()}/"
+        return {r[len(pre):].lower(): (r[len(pre):], p) for r, p in sd.items()
+                if r.lower().startswith(pre)}
+
+    ref_rev, problems = revs[0], []
+    ref = tree(ref_rev)
+    for rev in revs[1:]:
+        other = tree(rev)
+        if set(other) != set(ref):
+            diff = sorted(set(other) ^ set(ref))
+            problems.append(f"MB/{rev} and MB/{ref_rev} hold different files "
+                            f"({', '.join(diff[:3])}{' …' if len(diff) > 3 else ''})")
+            continue
+        for key in sorted(ref):
+            (name, pa), (oname, pb) = ref[key], other[key]
+            a, b = pa.read_bytes(), pb.read_bytes()
+            if key == "board.txt":
+                if _board_txt_core(a, ref_rev) != _board_txt_core(b, rev):
+                    problems.append(f"MB/{rev}/{oname} differs from MB/{ref_rev}/{name} "
+                                    "beyond its BOARD: revision and comments")
+            elif a != b:
+                problems.append(f"MB/{rev}/{oname} differs from MB/{ref_rev}/{name}")
+    return Finding("REVS", not problems, "; ".join(problems) or
+                   f"{', '.join(f'MB/{r}' for r in revs)}: the same tree apart from each "
+                   "board.txt's BOARD: revision (and comments)")
 
 
 @dataclass
@@ -319,6 +377,8 @@ def ingest(bundle: Path, version: str, *, catalog: str = "mps3-harness", layout:
             findings.append(Finding("STATIC", ok, f"mcc_sd flashable_bit {want.get('name')} "
                                     + ("is the SD .bit" if ok else "is NOT the .bit in sd/")))
     revs = sorted({r.split("/")[1] for r in sd if r.lower().startswith("mb/") and r.count("/") >= 2})
+    if len(revs) > 1:
+        findings.append(rev_trees_finding(sd, revs))
 
     # overlays: open vs AAA, keyed to this static
     handler = PackOverlayHandler(pack)
@@ -434,7 +494,7 @@ def ingest(bundle: Path, version: str, *, catalog: str = "mps3-harness", layout:
         return a
 
     sd_bytes = {r: p.read_bytes() for r, p in sd.items()}
-    rev = (revs[0] if len(revs) == 1 else "multi")
+    rev = sd_component_rev(revs)
     comps.append({**put(f"{base}-sd-{rev}.zip", deterministic_zip(sd_bytes)),
                   "name": f"sd-{rev}", "target": "mcc-sd", "kind": "sd", "door": DOOR_MCC_SD,
                   "files": {r: sha256_bytes(b) for r, b in sd_bytes.items()}})

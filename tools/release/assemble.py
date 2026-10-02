@@ -49,6 +49,11 @@ from .common import ReleaseError, sha256_file
 from .harness import AAA_RMS, _hex, _val
 
 REVS = ("A", "B", "C")
+#: FIX-PACK-9 (david, 2 Oct): platform v2.0.0 ships the config SD for Rev B AND Rev C (Rev C
+#: supported, Rev B "boots, untested"; no Rev A), as Arm's own bundles carry every revision:
+#: the MCC reads only MB/HBI0309<its revision>/, so a C-only card leaves a Rev B board
+#: unprogrammed ("File not found \\MB\\HBI0309B\\board.txt").
+DEFAULT_REVS = "B,C"
 TEMPLATES = ("config.txt", "board.txt", "nanosoc.txt")
 DEFAULT_APPFILE = "Nanosoc\\nanosoc.txt"
 DEFAULT_F0FILE = "nanosoc.bit"
@@ -114,8 +119,9 @@ def _cfg_value(text: str, key: str, default: str) -> str:
 # --- the config-SD tree ------------------------------------------------------------------
 
 
-def revisions(spec: str) -> tuple[str, ...]:
-    spec = (spec or "C").strip().upper()
+def revisions(spec: str | None) -> tuple[str, ...]:
+    """``"B,C"``, ``"HBI0309B,HBI0309C"``, ``"ALL"`` -> ``("B", "C")``; empty: ``DEFAULT_REVS``."""
+    spec = (spec or DEFAULT_REVS).strip().upper()
     if spec == "ALL":
         return REVS
     revs = tuple(r.strip().removeprefix("HBI0309") for r in spec.split(",") if r.strip())
@@ -156,6 +162,21 @@ def stamp_sd_tree(templates: Path, bit: Path, dest: Path, *, revs: tuple[str, ..
             out[rel_app + "images.txt"] = _copy(templates / "images.txt", app / "images.txt")
         out[rel_app + f0] = _copy(bit, app / f0)
     return out
+
+
+def tree_revisions(sd_files: dict[str, Any]) -> tuple[str, ...]:
+    """The revisions (``"B"``, ``"C"``) whose ``MB/HBI0309<rev>/board.txt`` a tree carries."""
+    out = set()
+    for rel in sd_files:
+        parts = rel.replace("\\", "/").split("/")
+        if len(parts) == 3 and parts[0].upper() == "MB" and parts[2].lower() == "board.txt" \
+                and parts[1].upper().startswith("HBI0309") and len(parts[1]) == 8:
+            out.add(parts[1][-1].upper())
+    return tuple(sorted(out))
+
+
+def _revs_text(revs: tuple[str, ...]) -> str:
+    return " and ".join(f"HBI0309{r}" for r in revs)
 
 
 def copy_sd_tree(src: Path, dest: Path) -> dict[str, int]:
@@ -316,7 +337,7 @@ def stage_kit(kit_zip: Path, dest: Path, static_id: str, out: Assembled) -> None
 
 def assemble(dest: Path, *, from_dir: Path, bit: Path | None = None,
              stage0_bake: Path | None = None, sd_templates: Path | None = None,
-             sd_tree: Path | None = None, board_revs: str = "C", images_txt: bool = True,
+             sd_tree: Path | None = None, board_revs: str | None = None, images_txt: bool = True,
              overlays: Path | None = None, include_aaa: bool = False,
              kit: Path | None = None, firmware_json: Path | None = None,
              notes: Path | None = None, version: str = "", test: bool = False) -> Assembled:
@@ -385,6 +406,21 @@ def assemble(dest: Path, *, from_dir: Path, bit: Path | None = None,
         if sd_tree is not None:
             out.sd_files = copy_sd_tree(Path(sd_tree), sd_dest)
             out.sources["sd tree"] = str(sd_tree)
+            # FIX-PACK-9: a ready tree is taken as it is; its revisions are checked
+            have = tree_revisions(out.sd_files)
+            if board_revs:                                   # asked for: it must be exactly so
+                want = revisions(board_revs)
+                if have != want:
+                    raise ReleaseError(
+                        f"the --sd tree serves {_revs_text(have) or 'no MB/HBI0309* folder'}, "
+                        f"not the {_revs_text(want)} --board-rev asks for",
+                        hint="re-run the platform's assemble_sd.sh for those revisions, or "
+                             "give --sd-templates")
+            elif have != revisions(DEFAULT_REVS):
+                out.warnings.append(
+                    f"the --sd tree serves {_revs_text(have) or 'no MB/HBI0309* folder'}, not "
+                    f"{_revs_text(revisions(DEFAULT_REVS))}: a board of another revision stays "
+                    "unprogrammed (platform v2.0.0 ships B and C)")
         else:
             out.sd_files = stamp_sd_tree(Path(sd_templates), bit, sd_dest,  # type: ignore[arg-type]
                                          revs=revisions(board_revs), images_txt=images_txt)

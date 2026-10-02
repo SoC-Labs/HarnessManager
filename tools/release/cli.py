@@ -619,8 +619,11 @@ def parser() -> argparse.ArgumentParser:
     sd.add_argument("--stage0-bake", metavar="JSON",
                     help="the mps3-stage0-bake record of a stage0 re-bake of --bit (same "
                          "static, same UserID): e.g. the public generic bake")
-    sd.add_argument("--board-rev", default="C", metavar="A|B|C|ALL",
-                    help="the HBI0309 revision(s) the SD tree serves (default C)")
+    sd.add_argument("--board-rev", default=None, metavar="B,C|A|B|C|ALL",
+                    help="the HBI0309 revision(s) the SD tree serves, comma-separated "
+                         "(HBI0309B,HBI0309C works too). Default: B,C, stamped from the "
+                         "templates as assemble_sd.sh does; with --sd, the tree must serve "
+                         "exactly these")
     sd.add_argument("--no-images-txt", action="store_true",
                     help="leave images.txt (TOTALIMAGES: 0) out of the SD tree")
     p.add_argument("--overlays", metavar="DIR",
