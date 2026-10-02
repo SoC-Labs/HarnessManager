@@ -225,7 +225,8 @@ def test_the_status_says_releases_are_refused_and_the_reader_is_off(client):
     assert st["signing"]["refused"] is True and st["signing"]["name"] == "REFUSED"
     assert st["signing"]["reason"] == ("cannot verify channel.json: this build has no pinned "
                                        "update-signing keys")
-    assert st["sd_flash"]["enabled"] is False and st["sd_flash"]["routes"] is False
+    assert st["sd_flash"]["enabled"] is False
+    assert st["sd_flash"]["routes"] is True        # integ: SD-FLASH's writer is merged
     assert st["rescue_network"]["available"] is False
 
 

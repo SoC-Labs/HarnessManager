@@ -44,7 +44,7 @@ import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
 export const DEFAULT_HOST = "192.168.10.101";
 export const USB_WARNING = "A USB write can take 5 minutes: do not unplug, power off or start a second write.";
 export const NETWORK_OS_REASON = "comes with Linux v2.1 (HARNESS-DIST L3)";
-export const READER_MISSING = "this build has no card-reader writer yet (lane SD-FLASH): use the Debug USB";
+export const READER_MISSING = "this build has no card-reader writer: use the Debug USB";
 const pct = (d) => (d && d.total ? Math.floor((d.done * 100) / d.total) : 0);
 const short = (sha) => (sha ? `${String(sha).slice(0, 16)}…` : "?");
 

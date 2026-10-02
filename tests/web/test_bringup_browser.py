@@ -289,10 +289,12 @@ def test_the_card_reader_is_disabled_with_the_reason_while_the_switch_is_off(dem
 def test_twin_switch_on_but_no_cardwriter_routes_is_a_placeholder_not_an_error(demo, monkeypatch):
     monkeypatch.setenv(bringup.SD_FLASH_ENV, "on")
     page = demo.page()
+    # integ: SD-FLASH's routes are merged; a build without them answers 404
+    page.route("**/api/v1/cardwriter/**", lambda r: r.fulfill(
+        status=404, content_type="application/json", body='{"error":"not found"}'))
     add_and_open(page)
     page.get_by_role("button", name="SD card in this PC's card reader").click()
-    expect(by(page, "bu-reader-disabled")).to_contain_text("no card-reader writer yet (lane "
-                                                           "SD-FLASH)", timeout=T)
+    expect(by(page, "bu-reader-disabled")).to_contain_text("no card-reader writer", timeout=T)
     expect(page.locator('[data-testid="reader-device-files"]')).to_have_count(0)
     assert not page.errors, page.errors
 

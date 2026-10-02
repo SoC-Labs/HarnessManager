@@ -88,7 +88,7 @@ def test_twin_the_card_reader_door_says_why_it_cannot_be_used(board, tmp_path, c
     monkeypatch.setenv("HARNESS_MANAGER_BRINGUP_SD_FLASH", "on")
     with pytest.raises(UnavailableError) as e:
         run(board, tmp_path, capsys, "--bundle", str(bundle), "--card-reader", "usb-x")
-    assert "lane SD-FLASH" in e.value.reason and board.reboots == 0
+    assert "flash write DEVICE_ID BUNDLE --kind files" in e.value.reason and board.reboots == 0
 
 
 def test_twin_a_board_that_stays_dark_names_the_backup_to_restore(board, tmp_path, capsys):

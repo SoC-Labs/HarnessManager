@@ -49,7 +49,7 @@ bringup - --serial PORT --volume PATH (--bundle DIR|ZIP | --version V [--source 
   harness at --host (192.168.10.101) for --wait seconds. A Linux harness with no bootable
   OS slot answers in stage0 RESCUE: write its user microSD with a whole-card image.
   --card-reader DEVICE_ID writes the configuration SD in this PC's card reader instead
-  (lane SD-FLASH; bringup.sd_flash on). --yes answers the questions; never a re-key.
+  (bringup.sd_flash on). --yes answers the questions; never a re-key.
 """
 
 
@@ -78,7 +78,7 @@ def register(subparsers: Any, *, parents: tuple[argparse.ArgumentParser, ...] = 
                     help="where the backup zip goes (default: the state dir's backups/)")
     ap.add_argument("--card-reader", metavar="DEVICE_ID", default=None,
                     help="write the configuration SD in this PC's card reader instead of over "
-                         "the Debug USB (lane SD-FLASH)")
+                         "the Debug USB")
     ap.add_argument("--host", default=bringup.DEFAULT_HOST,
                     help="where the harness answers after the reboot (default 192.168.10.101)")
     ap.add_argument("--wait", type=float, default=None, metavar="S",
@@ -93,9 +93,10 @@ def _card_reader(ctx: Any) -> None:
     sw = bringup.sd_flash(getattr(ctx.engine, "state_dir", None))
     if not sw["enabled"]:
         raise UnavailableError("card reader", f"SD card in this PC's card reader is {sw['reason']}")
-    raise UnavailableError("card reader", "this build has no card-reader writer yet (lane "
-                                          "SD-FLASH): write over the Debug USB (leave out "
-                                          "--card-reader)")
+    raise UnavailableError("card reader", "`bringup --card-reader` is not wired to the card "
+                                          "reader yet: write the card with `harness-manager "
+                                          "flash write DEVICE_ID BUNDLE --kind files`, or write "
+                                          "over the Debug USB (leave out --card-reader)")
 
 
 def _steps_out(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any]) -> int:
