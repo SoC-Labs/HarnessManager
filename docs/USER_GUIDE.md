@@ -33,6 +33,7 @@ Contents:
 12. [The Linux harness](#12-the-linux-harness)
 13. [Checks: the HIL runbooks, unattended](#13-checks-the-hil-runbooks-unattended)
 14. [Troubleshooting](#14-troubleshooting)
+15. [Windows](#15-windows)
 
 Appendices: [A. Command reference](#a-command-reference),
 [B. Where things are](#b-where-things-are), [C. More documents](#c-more-documents).
@@ -276,7 +277,8 @@ plan runs from the command line as `harness-manager bringup - --serial PORT --vo
    ```
 
 5. **Check it over Ethernet.** Give this PC's Ethernet port an address on the board's
-   network (`192.168.10.1`, netmask `255.255.255.0`), then:
+   network (`192.168.10.1`, netmask `255.255.255.0`; on Windows, [15.3](#153-the-boards-network-a-fixed-address)
+   and the firewall step [15.4](#154-the-firewall-a-public-network-drops-the-boards-replies)), then:
 
    ```bash
    harness-manager info 192.168.10.101
@@ -1824,6 +1826,172 @@ The app's **Activity** section lists every command it ran and its result. A job 
 failed is one row with its reason (the command you ran, its rc, the error and the hint);
 a job another client ran is one row too. A click the app refused (not armed, the lease is
 someone else's) is an error row: "$ program led (refused, not run): not armed ...".
+
+---
+
+## 15. Windows
+
+**When:** you bring up or use a board from a Windows 10 or 11 laptop (the demonstration
+lab's laptops are Windows and Linux). Everything in this guide works on Windows; this
+section is what is different there. Harness Manager never asks for Administrator: where a
+step needs it, Harness Manager prints the exact line and you run it yourself.
+
+**Administrator PowerShell**, wherever this section says so: Start, type `PowerShell`,
+right-click **Windows PowerShell**, **Run as administrator**, **Yes**. Paste one line at a
+time.
+
+### 15.1 Install
+
+From PowerShell (no Administrator):
+
+```powershell
+git clone git@github.com:SoC-Labs/HarnessManager.git
+powershell -ExecutionPolicy Bypass -File HarnessManager\scripts\install.ps1 -WithSerial
+```
+
+Open a new terminal afterwards, or use the Start menu: **Harness Manager**. With no
+network, install from a wheelhouse made for Windows on another machine
+(`scripts/make_wheelhouse.sh --platform win_amd64 --python-version 3.12 --with-serial DIR`,
+[INSTALL.md](INSTALL.md#a-wheelhouse-for-another-kind-of-laptop-windows-macos)):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\wh-win\install.ps1 -Offline D:\wh-win -WithSerial
+```
+
+### 15.2 Drivers: the Debug USB
+
+Plug the board's **DEBUG USB** socket into the laptop and power the board on. Windows shows
+two things:
+
+- the **V2M-MPS3** drive (the configuration SD) with a drive letter, in File Explorer, This PC;
+- four serial ports: Device Manager, **Ports (COM & LPT)**, **USB Serial Port (COMn)**.
+  The board's FT4232H chip needs the FTDI driver: Windows Update installs it the first time.
+  If the ports are missing, or listed under **Other devices**, install the FTDI **VCP
+  driver** from ftdichip.com, then unplug and replug the Debug USB.
+
+`harness-manager probe` and the app's **Over USB** scan find the MCC's COM port and the
+drive letter themselves. With the drive and no COM port they say:
+
+> no FT4232H serial ports (COM) were found: in Device Manager, Ports (COM & LPT) should
+> list four 'USB Serial Port (COMn)' for the board. If they are missing, or under Other
+> devices, install the FTDI VCP driver (Windows Update offers it; else ftdichip.com, VCP
+> Drivers), then unplug and replug the Debug USB
+
+In commands, the board over USB is `harness-manager sd - --volume E: ...` and
+`harness-manager mcc - --serial COM7 reboot` (your letter and port number).
+
+### 15.3 The board's network: a fixed address
+
+The board answers at 192.168.10.101 on a cable straight to the laptop (a USB Ethernet
+adapter is fine). The laptop's adapter needs a fixed address on that network, for example
+192.168.10.1 with netmask 255.255.255.0 and no gateway (your Wi-Fi keeps the internet).
+In Administrator PowerShell (`Ethernet 2` is your adapter's name; `Get-NetAdapter` lists
+them):
+
+```powershell
+Set-NetIPInterface -InterfaceAlias "Ethernet 2" -Dhcp Disabled
+New-NetIPAddress -InterfaceAlias "Ethernet 2" -IPAddress 192.168.10.1 -PrefixLength 24
+```
+
+Or in Settings: Network & internet, Ethernet (the board's adapter), IP assignment, Edit,
+Manual, IPv4 on: IP address 192.168.10.1, Subnet mask 255.255.255.0, Gateway empty, Save.
+
+Harness Manager checks this for you on Windows. When nothing answers (`probe`, `info`, the
+wizard's scan and its **Wait for the harness** step) it reads the laptop's adapters and
+says, for example:
+
+> **No address on the board's network.** This PC has no address on 192.168.10.0/24, the
+> board's network (192.168.10.101). Give the Ethernet adapter cabled to the board a fixed
+> address there, e.g. 192.168.10.1 (netmask 255.255.255.0, no gateway). The adapter is
+> 'Ethernet 2' (Realtek USB GbE Family Controller): it is up with only a 169.254.x.x
+> address (no DHCP on a direct cable).
+
+with the two lines above, for your adapter, each with a **Copy** button in the app.
+
+### 15.4 The firewall: a Public network drops the board's replies
+
+Windows calls the board's network (no gateway: an "Unidentified network") **Public**, and
+Windows Firewall then drops what the board sends unasked: the UDP identify replies. TCP
+still works, so `info` and the consoles work, but finding boards on the network, a board in
+stage0 RESCUE, and a board that moved to its new IP are not seen. Make the network Private
+(Administrator PowerShell, your adapter's name):
+
+```powershell
+Set-NetConnectionProfile -InterfaceAlias "Ethernet 2" -NetworkCategory Private
+```
+
+or allow UDP from the board's network:
+
+```powershell
+New-NetFirewallRule -DisplayName "Harness Manager board UDP" -Direction Inbound -Protocol UDP -RemoteAddress 192.168.10.0/24 -Action Allow
+```
+
+Harness Manager sees the Public profile, and identify going unanswered while TCP works, and
+says so with these lines (in `probe` and `info`, the wizard, and `info`'s
+`cannot discover` line). If Windows once asked **"Windows Defender Firewall has blocked some
+features of this app"** for Python and you pressed **Cancel**, it made a Block rule that
+wins over any allow; Harness Manager finds it and prints the line that turns it off
+(`Disable-NetFirewallRule -Name '...'`).
+
+### 15.5 Writing SD cards in the laptop's card reader
+
+**Needs:** `bringup.sd_flash` on (Settings → Bring-up).
+
+- **The configuration SD's files** (the card out of the board, in the laptop's reader):
+  written to its drive letter, with no Administrator. The same rules as over USB: a backup
+  first, never an `.ebf`, the card's MCC firmware line kept, `INSTALL UNSIGNED <sha8>` for
+  an unsigned bundle. A card whose volume has no drive letter: give it one in Disk
+  Management (Start, type `diskmgmt.msc`; right-click the volume, Change Drive Letter and
+  Paths, Add).
+- **A whole-card image** (the Linux harness's user microSD): writing a whole disk needs
+  Administrator, and Harness Manager never writes a whole disk on Windows. **Write** gives
+  you the steps instead, for the card you chose, each with a **Copy** button:
+  1. check that disk N is still that card (its size; never the system disk);
+  2. `diskpart clean` (the card's partitions go);
+  3. write the image, every sector but the first, then the first (Windows mounts nothing
+     half-written);
+  4. `Update-Disk -Number N`;
+  then a check that reads the card back and prints its sha256, which must equal the
+  image's. **Or** write it with **Raspberry Pi Imager** (raspberrypi.com/software; it asks
+  for Administrator itself and verifies what it wrote): Choose OS, **Use custom**, the
+  image; Choose Storage, your card; Next; No to OS customisation; Yes. Check the image
+  first: `Get-FileHash -Algorithm SHA256 <image>` shows the sha256 the app shows.
+
+The card list never offers the laptop's own disk, an external hard disk, or the board's
+own `V2M-MPS3` drive over the Debug USB.
+
+### 15.6 SSH, the Linux harness and the debugger
+
+The Linux harness's claim, `board ssh` and the debug forward (OpenOCD runs on the board)
+use Windows' own OpenSSH client, `C:\Windows\System32\OpenSSH\ssh.exe`, installed by
+default on Windows 10 1809+ and 11 (else Settings, System, Optional features, **OpenSSH
+Client**). Harness Manager runs it by its full path, with its own `known_hosts` file
+(never `%USERPROFILE%\.ssh\known_hosts`), `IdentitiesOnly`, and no ControlMaster (OpenSSH
+for Windows has none); a hub is reached with ProxyJump (`-J`). Your key is
+`%USERPROFILE%\.ssh\id_ed25519` unless `boards.<board>.ssh.key` says otherwise. Point your
+gdb (`arm-none-eabi-gdb.exe`) at the `127.0.0.1` port the debug panel shows.
+
+### 15.7 Consoles
+
+Over the Debug USB the consoles are COM ports (the shell console is the third, interface
+02); over Ethernet they are the board's TCP streams (6900, 6930/6931). `harness-manager
+console` works in Windows Terminal and PowerShell (Ctrl-] then `q` leaves). No PTY on
+Windows: to attach another terminal, export the console as raw TCP and point PuTTY
+(**Raw**) at it.
+
+### 15.8 The demonstration lab's seat sheet
+
+Each seat names its board and gives it its own address (seat N, board `WS-0N`):
+
+```powershell
+harness-manager board identity 192.168.10.101 --label WS-0N --ip 192.168.10.(110+N) --mac random
+```
+
+For seat 3: `--label WS-03 --ip 192.168.10.113`. The board restarts at its new address, in
+the same /24, so the laptop's 192.168.10.1 still reaches it. `--ip auto` picks for you:
+the first address it tries comes from the random MAC, 192.168.10.(110 + the MAC's last
+byte mod 90), so six boards seldom try the same one; addresses already given or answering
+are skipped.
 
 ---
 

@@ -227,7 +227,7 @@ export function NetCheck({ found, testid = "netcheck" }) {
     <p class="small"><${Icon} name="triangle-alert" cls="sm" /> <b>This Windows PC's network</b> (the board at <span class="mono">${found.host}</span>):</p>
     <ol>${found.problems.map((p, i) => html`<li key=${i} data-code=${p.code}>
       <b>${p.title}.</b> ${p.text}
-      ${p.admin && p.admin.length ? html`<div class="small muted">As Administrator (${found.admin_how}):</div>${p.admin.map((c, j) => cmd(c, j, "a"))}` : null}
+      ${p.admin && p.admin.length ? html`<div class="small muted">In PowerShell as Administrator (${found.admin_how}):</div>${p.admin.map((c, j) => cmd(c, j, "a"))}` : null}
       ${p.alternative && p.alternative.length ? html`<div class="small muted">Or instead:</div>${p.alternative.map((c, j) => cmd(c, j, "b"))}` : null}
       ${p.gui ? html`<div class="small muted">${p.gui}</div>` : null}
     </li>`)}</ol>

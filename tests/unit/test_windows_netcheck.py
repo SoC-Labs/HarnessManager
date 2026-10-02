@@ -50,6 +50,7 @@ def test_twin_two_169_254_adapters_are_not_guessed():
     assert "Which adapter is cabled to the board? Up now:" in p["text"]
     assert "'Ethernet 2'" in p["text"] and "'Ethernet 3'" in p["text"]
     assert "'Ethernet' (" not in p["text"]                      # disconnected: not offered
+    assert "Wi-Fi" not in p["text"]                             # a radio is never the cable
 
 
 def test_a_public_board_network_says_make_it_private_or_allow_the_udp():
@@ -129,7 +130,8 @@ def test_the_cli_lines_give_each_problem_then_its_admin_powershell():
     out = NC.lines(found)
     assert out[0] == "this PC's network (192.168.10.101, Windows):"
     assert out[1].startswith("  The board's network is Public: Windows treats 'Ethernet 2'")
-    assert out[2].startswith("    as Administrator (open PowerShell as Administrator")
+    assert out[2] == ("    in PowerShell as Administrator (Start, type PowerShell, right-click "
+                      "Windows PowerShell, Run as administrator, Yes; paste each line):")
     assert out[3] == ('      Set-NetConnectionProfile -InterfaceAlias "Ethernet 2" '
                       "-NetworkCategory Private")
     assert out[4:6] == ["    or instead:", f"      {RULE}"]

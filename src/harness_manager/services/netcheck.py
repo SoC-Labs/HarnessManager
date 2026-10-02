@@ -31,6 +31,7 @@ what to do in their own words). ``run`` is the PowerShell seam (tests answer wit
 from __future__ import annotations
 
 import ipaddress
+import re
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -41,8 +42,11 @@ from harness_manager.core.errors import HarnessError
 
 CAPABILITY = "network"
 #: How a Windows user opens the shell the fixes need (HM never opens it for them).
-ADMIN_HOW = ("open PowerShell as Administrator (Start, type PowerShell, right-click Windows "
-             "PowerShell, Run as administrator, Yes) and paste the line")
+ADMIN_HOW = ("Start, type PowerShell, right-click Windows PowerShell, Run as administrator, "
+             "Yes; paste each line")
+#: Adapters never offered as "the one cabled to the board" (radios, virtual switches, VPNs).
+NOT_A_CABLE = re.compile(r"wi-?fi|wireless|wlan|802\.11|bluetooth|vethernet|hyper-v|virtual|"
+                         r"vpn|tap-windows|wintun|wireguard|loopback", re.IGNORECASE)
 RULE_NAME = "Harness Manager board UDP"
 #: MSFT_NetConnectionProfile.NetworkCategory as a number (Windows PowerShell 5.1's CIM).
 CATEGORIES = {0: "Public", 1: "Private", 2: "DomainAuthenticated"}
@@ -180,7 +184,8 @@ def diagnose(host: str, adapters: Sequence[Adapter], blocks: Sequence[dict[str, 
     problems: list[dict[str, Any]] = out["problems"]
     mine = [a for a in adapters if a.in_network(net)]
     if not mine:
-        up = [a for a in adapters if a.status.lower() == "up"]
+        up = [a for a in adapters if a.status.lower() == "up"
+              and not NOT_A_CABLE.search(f"{a.alias} {a.description}")]
         guess = [a for a in up if a.apipa_only]
         alias = guess[0].alias if len(guess) == 1 else "<the Ethernet adapter cabled to the board>"
         pc = pc_address(str(board))
@@ -247,7 +252,7 @@ def check(host: str, *, platform: str | None = None, run: winps.Runner | None = 
         doc = winps.run_json(network_ps(exes if exes is not None else _exes()),
                              what="read the network adapters", capability=CAPABILITY, run=run)
     except HarnessError as exc:
-        why = getattr(exc, "reason", "") or exc.message
+        why = (getattr(exc, "reason", "") or exc.message).rstrip(". ")
         return {"platform": "win32", "host": host, "network": "", "adapter": "",
                 "category": "", "ok": False, "notes": [], "admin_how": ADMIN_HOW,
                 "problems": [_problem("unknown", "This PC's network could not be read",
@@ -267,7 +272,7 @@ def lines(found: dict[str, Any] | None) -> list[str]:
     for p in found["problems"]:
         out.append(f"  {p['title']}: {p['text']}")
         if p.get("admin"):
-            out.append(f"    as Administrator ({ADMIN_HOW}):")
+            out.append(f"    in PowerShell as Administrator ({ADMIN_HOW}):")
             out += [f"      {c}" for c in p["admin"]]
         if p.get("alternative"):
             out.append("    or instead:")
