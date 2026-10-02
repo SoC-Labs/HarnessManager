@@ -42,6 +42,9 @@ from .signer import Signer
 
 CATALOG_APP = "hm-app"
 CATALOG_MPS3 = "mps3-harness"
+TEST_NOTE = ("TEST: signed with a throwaway TEST key (id 7E57C0DE...) by "
+             "`tools.release harness-release --test-key`. No Harness Manager build trusts it "
+             "and the publish script refuses it.")
 SECTION = {CATALOG_APP: "app"}          # every other catalogue is a harness catalogue
 
 
@@ -113,6 +116,10 @@ class ChannelDoc:
     base_serial: int = 0                   # 0 = a new channel
     base_sha256: str = ""
     notes: list[str] = field(default_factory=list)   # what changed, for the report
+    #: RELEASE-PIPE: signed with a TEST key (``harness-release --test-key``). The document
+    #: says so (top-level ``test``, kept by every parser as an unknown field) and so does
+    #: the signature's trusted comment; the publish script refuses it.
+    test: bool = False
 
     # -- construction --
 
@@ -285,6 +292,12 @@ class ChannelDoc:
         self.doc["expires_at"] = iso(now + expires_days * 86400)
         self.doc["signing_key_id"] = signer.public.id_hex
         self.doc["catalog"] = self.catalog
+        if self.test:
+            self.doc["test"] = {"key_id": signer.public.id_hex, "note": TEST_NOTE}
+        elif "test" in self.doc:
+            raise ReleaseError("the base channel is a TEST channel (signed with a TEST key): a "
+                               "real release is never built on it",
+                               hint="start from the live channel, or from none")
         data = (json.dumps(self.doc, indent=1, sort_keys=True) + "\n").encode("utf-8")
         try:
             parsed = parse_channel(json.loads(data))
@@ -299,7 +312,8 @@ class ChannelDoc:
         tmp = path.with_name(".channel.json.tmp")
         tmp.write_bytes(data)
         comment = (f"timestamp:{int(time.time() if now is None else now)}\tfile:channel.json\t"
-                   f"catalog:{self.catalog}\tchannel:{self.channel}\tserial:{parsed.serial}")
+                   f"catalog:{self.catalog}\tchannel:{self.channel}\tserial:{parsed.serial}"
+                   + ("\ttest:1 (TEST key: no client trusts it)" if self.test else ""))
         sig = signer.sign(tmp, comment)
         tmp.replace(path)
         path.with_name("channel.json.minisig").write_text(sig, encoding="utf-8")

@@ -879,3 +879,20 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
 - nanosoc_multicore's boot ROM writes the DUT flash (one byte at 0x20000 onward, on every
   boot): don't load it on a board whose flash holds the MicroPython image (nanosoc_upy); fix
   in v2.1.
+
+<!-- --- RELEASE-PIPE --- -->
+### Publishing harness releases (RELEASE-PIPE)
+- **`make harness-release`** builds a harness release straight from the platform's
+  artifacts: the mint's prod dir, the config-SD templates with the stage0 `.bit`, the
+  overlays and (optionally) the RM kit. It signs the channel with a key passed by path
+  (`KEY=FILE`) and reads the result back with HM's own client. It never publishes. The
+  Arm-IP RMs are left out unless `INCLUDE_AAA=1`, and even then they go only to the
+  private AAA repo. `TEST_KEY=1` makes a TEST build for dry runs: a throwaway key
+  (`7E57C0DE…`) that no client trusts.
+- **`scripts/publish_harness_release.sh --repo OWNER/REPO DIR`** uploads a built release
+  with `gh`. It is a dry run by default and prints every command. A real upload needs
+  `--publish`, a pinned key, a live channel it follows, and the typed phrase
+  `PUBLISH <catalog> <version> TO <repo>`. Then `harness list --source github:OWNER/REPO`
+  shows it.
+- **Fix:** a `.bit` built with Vivado 2026.1 (`UserID=FB1F8C76`, no `0x`) now reads as
+  stamped. Before this, the catalogue refused every RC2 config SD as unstamped.

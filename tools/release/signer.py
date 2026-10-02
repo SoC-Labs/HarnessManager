@@ -20,6 +20,15 @@ Key files come from arguments or the environment::
 
 Nothing here generates or stores a real key. ``keygen_throwaway`` refuses any directory
 outside the system temp dir.
+
+**TEST keys** (``harness-release --test-key``, lane RELEASE-PIPE): ``keygen_test`` makes a
+throwaway pair whose key id starts ``7E57C0DE`` ("TEST CODE"), so a TEST key is
+recognisable wherever its id shows up: in ``channel.json`` (``signing_key_id``), in the
+``.minisig`` and in the client's messages. ``--publish`` and the publish script refuse any
+such key, and so does the client: ``trust.pinned()``, ``trust.load_trust()`` and
+``trust.apply_keys_json()`` all say "a TEST key (7E57C0DE…) is never trusted" (CCR-2). A
+real minisign key has a random id: one starting with the marker is a 1-in-4-billion
+accident, refused all the same.
 """
 
 from __future__ import annotations
@@ -34,9 +43,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from harness_manager.services.update import minisign
+from harness_manager.services.update import minisign, trust
 
 from .common import EXIT_USAGE, ReleaseError, Runner, in_temp_dir, run
+
+#: The key-id prefix (``PublicKey.id_hex``) of every key ``keygen_test`` makes: the client's
+#: own (``trust.TEST_KEY_PREFIX``), which refuses such a key at every trust entry point.
+TEST_KEY_PREFIX = trust.TEST_KEY_PREFIX
 
 ENV_SIGNER = "HM_RELEASE_SIGNER"
 ENV_SECRET = "HM_RELEASE_SECRET_KEY"
@@ -122,6 +135,45 @@ def keygen_throwaway(directory: Path, name: str = "release") -> tuple[Path, Path
         fh.write(secret_key_text(key))
     pk.write_text(key.public.to_text(), encoding="utf-8")
     return sk, pk
+
+
+def is_test_key(public: minisign.PublicKey | str) -> bool:
+    """A key ``keygen_test`` made (or a key id that looks like one): never a release key."""
+    kid = public if isinstance(public, str) else public.id_hex
+    return kid.upper().startswith(TEST_KEY_PREFIX)
+
+
+def keygen_test(directory: Path | None = None, name: str = "TEST-release") -> tuple[Path, Path]:
+    """A THROWAWAY TEST key pair (id ``7E57C0DE…``) in a fresh temp dir. The release it signs
+    is marked TEST; ``--publish`` and the publish script refuse it; no client trusts it."""
+    import tempfile
+
+    directory = Path(directory) if directory is not None else \
+        Path(tempfile.mkdtemp(prefix="hm-test-key-"))
+    if not in_temp_dir(directory):
+        raise ReleaseError(
+            f"refusing to write a TEST key to {directory}: it lives under the temp dir only",
+            hint="real keys come from david's key ceremony (docs/KEYS.md), never from this tool")
+    directory.mkdir(parents=True, exist_ok=True)
+    kid = (bytes.fromhex(TEST_KEY_PREFIX) + os.urandom(minisign.KEY_ID_BYTES - 4))[::-1]
+    key = minisign.SecretKey.generate(key_id=kid)
+    if not is_test_key(key.public):                       # the id is stored little-endian
+        raise ReleaseError("internal: the TEST key id lost its marker")
+    sk, pk = directory / f"{name}.key", directory / f"{name}.pub"
+    fd = os.open(sk, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(secret_key_text(key).replace("THROWAWAY", "TEST (throwaway)"))
+    pk.write_text(key.public.to_text().replace("minisign public key",
+                                               "TEST minisign public key"), encoding="utf-8")
+    return sk, pk
+
+
+def public_key_path_for(secret_key: Path) -> Path:
+    """minisign's naming: ``release.key`` <-> ``release.pub``; else ``<file>.pub``."""
+    secret_key = Path(secret_key)
+    if secret_key.suffix == ".key":
+        return secret_key.with_suffix(".pub")
+    return secret_key.with_name(secret_key.name + ".pub")
 
 
 # --- signers -----------------------------------------------------------------------------

@@ -2,6 +2,10 @@
 
     app       an app release: preconditions, wheel, hashed lock, pyverify dep, signed channel
     harness   a harness release from a mint's bundle dir (the H13 front-end)
+    harness-release  the same from the PLATFORM's artifacts (assemble.py makes the bundle
+              dir): signed with --key FILE, or --test-key for a TEST build. Never publishes:
+              scripts/publish_harness_release.sh uploads the built tree (RELEASE-PIPE)
+    publish-check    may a built harness release go to OWNER/REPO? (the publish script)
     promote   copy a release from one channel to another (beta -> stable) and re-sign
     withdraw  mark a release withdrawn (never deleted) and re-sign
     verify    run the smoke on a release tree (HM's own channel client + checks)
@@ -17,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import tempfile
 from collections.abc import Callable
@@ -42,6 +47,7 @@ from .common import (
     ReleaseError,
     Runner,
     run,
+    sha256_file,
 )
 from .harness import ingest
 from .publish import (
@@ -53,7 +59,14 @@ from .publish import (
     version_steps,
     write_plan,
 )
-from .signer import from_options, keygen_throwaway, read_public_key
+from .signer import (
+    from_options,
+    is_test_key,
+    keygen_test,
+    keygen_throwaway,
+    public_key_path_for,
+    read_public_key,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHANNELS_NEW = ("beta", "dev")          # a new release goes here; stable only by promote
@@ -108,6 +121,13 @@ def _base_path(ctx: Ctx, layout: Layout, catalog: str, channel: str, tmp: Path) 
 
 def _publish_rails(ctx: Ctx, signer, channel: str) -> None:
     a = ctx.args
+    if is_test_key(signer.public):
+        if ctx.publish:
+            raise ReleaseError(f"key {signer.public.id_hex} is a TEST key: a TEST release is "
+                               "never published", hint="sign with the release key (--key FILE)")
+        if not getattr(a, "test_key", False):
+            raise ReleaseError(f"key {signer.public.id_hex} is a TEST key: it signs only "
+                               "`harness-release --test-key` builds")
     role = pinned_role(signer.public)
     if not role:
         msg = (f"key {signer.public.id_hex} is not pinned in this tree's trust.PINNED_KEYS "
@@ -256,9 +276,16 @@ def cmd_harness(ctx: Ctx) -> int:
     with tempfile.TemporaryDirectory(prefix="otar-run-") as tmp:
         base = _base_path(ctx, layout, a.catalog, a.channel, Path(tmp))
         doc = ChannelDoc.load_or_new(base, a.catalog, a.channel, trust_keys, board=hb.board)
+        doc.test = bool(getattr(a, "test_key", False))
         doc.add(hb.entry)
         hb.write()
         _sign_and_verify(ctx, doc, layout, signer, trust_keys, hb.version)
+        ctx.report["assets"] = [{"name": p.name, "path": str(p), "sha256": sha256_file(p),
+                                 "size": p.stat().st_size, "repo": repo}
+                                for repo, paths in ((layout.repo, hb.assets),
+                                                    (layout.aaa_repo, hb.aaa_assets))
+                                for p in paths]
+        ctx.report["test"] = doc.test
         ctx.report.update({"version": hb.version, "tag": hb.tag,
                            "findings": [f.__dict__ for f in hb.findings]})
         notes = hb.entry.get("notes", "") or f"{a.catalog} {hb.version}"
@@ -271,8 +298,158 @@ def cmd_harness(ctx: Ctx) -> int:
                                    title=f"{a.catalog} {hb.version} (Arm IP)", notes=notes,
                                    prerelease=True, gh=a.gh)
         steps += channel_steps(layout, a.catalog, a.channel, gh=a.gh)
-        return _finish(ctx, layout, steps, f"harness {hb.version} -> {a.channel}", a.catalog,
-                       a.channel, [*hb.assets, *hb.aaa_assets])
+        header = f"harness {hb.version} -> {a.channel}" + (
+            " -- TEST BUILD (TEST key): never published" if doc.test else "")
+        return _finish(ctx, layout, steps, header, a.catalog, a.channel,
+                       [*hb.assets, *hb.aaa_assets])
+
+
+# --- harness-release: platform artifacts -> a signed harness release (lane RELEASE-PIPE) --
+
+
+def _release_key(ctx: Ctx) -> Path | None:
+    """``--key FILE`` / ``--test-key`` -> the signer options. Returns the TEST key's temp dir
+    (the caller deletes it after the run: the TEST secret key never outlives it)."""
+    a = ctx.args
+    if a.test_key:
+        if a.secret_key or a.public_key:
+            raise ReleaseError("--test-key makes its own key: drop --secret-key/--public-key",
+                               code=EXIT_USAGE)
+        sk, pk = keygen_test()
+        a.signer, a.secret_key, a.public_key = "python", str(sk), str(pk)
+        return sk.parent
+    if a.key:
+        if a.secret_key:
+            raise ReleaseError("give --key or --secret-key, not both", code=EXIT_USAGE)
+        a.secret_key = a.key
+        a.public_key = a.public_key or str(public_key_path_for(Path(a.key)))
+        if not Path(a.public_key).is_file():
+            raise ReleaseError(f"no public key at {a.public_key} (beside {a.key})",
+                               hint="pass --public-key FILE: the key id goes inside the "
+                                    "signed channel", code=EXIT_USAGE)
+        if is_test_key(read_public_key(Path(a.public_key))):
+            raise ReleaseError(f"{a.public_key} is a TEST key: use --test-key for a TEST build",
+                               code=EXIT_USAGE)
+    return None
+
+
+def _size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    x = float(n)
+    for unit in ("KiB", "MiB", "GiB"):
+        x /= 1024
+        if x < 1024 or unit == "GiB":
+            break
+    return f"{x:.1f} {unit}"
+
+
+def cmd_harness_release(ctx: Ctx) -> int:
+    from .assemble import assemble
+
+    a = ctx.args
+    if ctx.publish:
+        raise ReleaseError("harness-release builds, signs and verifies a release; it never "
+                           "publishes one",
+                           hint="upload the built tree with scripts/publish_harness_release.sh "
+                                "(dry run by default)", code=EXIT_USAGE)
+    if a.channel not in CHANNELS_NEW:
+        raise ReleaseError(f"a new release goes to {' or '.join(CHANNELS_NEW)}, not {a.channel!r}",
+                           hint="publish to beta, then `promote --to stable`", code=EXIT_USAGE)
+    if not a.check_only and not (a.key or a.test_key or a.secret_key or
+                                 os.environ.get("HM_RELEASE_SECRET_KEY")):
+        raise ReleaseError("no signing key: pass --key FILE (the release key, by path), or "
+                           "--test-key for a TEST build (dry runs and tests only)",
+                           hint="docs/KEYS.md; nothing is generated, printed or committed for "
+                                "a real key", code=EXIT_USAGE)
+    key_dir = None if a.check_only else _release_key(ctx)
+    out = _out(a)
+    out.mkdir(parents=True, exist_ok=True)
+    if a.keep_bundle:
+        staging = out / "bundles" / f"{a.catalog}-{a.version}"
+        work = None
+    else:
+        work = Path(tempfile.mkdtemp(prefix=".bundle-", dir=out))
+        staging = work / "bundle"
+    try:
+        asm = assemble(
+            staging, from_dir=Path(a.source_dir), bit=_opt_path(a.bit),
+            stage0_bake=_opt_path(a.stage0_bake), sd_templates=_opt_path(a.sd_templates),
+            sd_tree=_opt_path(a.sd), board_revs=a.board_rev, images_txt=not a.no_images_txt,
+            overlays=_opt_path(a.overlays), include_aaa=a.include_aaa, kit=_opt_path(a.kit),
+            firmware_json=_opt_path(a.firmware_json), notes=_opt_path(a.notes),
+            version=a.version, test=a.test_key)
+        for w in asm.warnings:
+            ctx.warn(w)
+        for name, why in sorted(asm.left_out.items()):
+            ctx.say(f"  left out {name}: {why}")
+        ctx.say(f"assembled a {asm.impl} bundle for static {asm.static_id} (UserID "
+                f"{asm.usercode}): {len(asm.sd_files)} config-SD files, overlays "
+                f"{len(asm.overlays_open)} open + {len(asm.overlays_aaa)} Arm IP"
+                + (", the RM kit" if "kit" in asm.sizes else ""))
+        ctx.report["assembled"] = {
+            "impl": asm.impl, "static_id": asm.static_id, "usercode": asm.usercode,
+            "sd_files": asm.sd_files, "overlays_open": asm.overlays_open,
+            "overlays_aaa": asm.overlays_aaa, "left_out": asm.left_out, "sizes": asm.sizes,
+            "sources": asm.sources, "rebake": asm.rebake}
+        a.bundle = str(staging)
+        if a.live_base and not a.base and not a.check_only:
+            with tempfile.TemporaryDirectory(prefix="hm-live-") as tmp:
+                live = fetch_live_channel(_layout(a), a.catalog, a.channel, Path(tmp) / "live",
+                                          gh=a.gh, runner=ctx.runner)
+                if live is not None:
+                    keep = out / "plans" / f"{a.catalog}-{a.channel}" / "live-base"
+                    keep.mkdir(parents=True, exist_ok=True)
+                    for f in live.parent.glob("channel.json*"):
+                        shutil.copyfile(f, keep / f.name)
+                    a.base = str(keep)
+                    ctx.say(f"base: the live channel, read with gh (read-only) -> {keep}")
+        rc = cmd_harness(ctx)
+        if rc == EXIT_OK and not a.check_only:
+            if key_dir is not None:
+                shutil.copyfile(Path(a.public_key), out / "TEST-KEY.pub")
+                (out / "TEST-BUILD.txt").write_text(
+                    "This tree was signed with a throwaway TEST key (TEST-KEY.pub, id "
+                    f"{read_public_key(Path(a.public_key)).id_hex}). No Harness Manager build "
+                    "trusts it, and scripts/publish_harness_release.sh refuses it. Tests and "
+                    "dry runs only.\n", encoding="utf-8")
+            ctx.say("assets:")
+            for item in ctx.report.get("assets", []):
+                ctx.say(f"  {item['name']:<48} {_size(item['size']):>10}  "
+                        f"{item['sha256'][:16]}  {item['repo']}")
+            total = sum(i["size"] for i in ctx.report.get("assets", []))
+            ctx.say(f"  total {_size(total)}" + ("  (TEST BUILD: never published)"
+                                                 if key_dir is not None else ""))
+        return rc
+    finally:
+        if key_dir is not None:
+            shutil.rmtree(key_dir, ignore_errors=True)
+        if work is not None:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def _opt_path(v: str | None) -> Path | None:
+    return Path(v).expanduser() if v else None
+
+
+def cmd_publish_check(ctx: Ctx) -> int:
+    from .publish_check import check
+
+    a = ctx.args
+    pc = check(Path(a.root), a.repo, catalog=a.catalog, channel=a.channel, aaa_repo=a.aaa_repo,
+               for_publish=a.for_publish, public_key=_opt_path(a.public_key),
+               live=_opt_path(a.live), version=a.version or "")
+    for c in pc.checks:
+        ctx.say(f"  ok {c}")
+    for w in pc.warnings:
+        ctx.warn(w)
+    if a.env_out:
+        ctx.say(f"plan inputs: {pc.write(Path(a.env_out))}")
+    ctx.say(f"{'TEST ' if pc.test else ''}release {pc.catalog} {pc.version} (tag {pc.tag}), "
+            f"{pc.channel} serial {pc.serial}, key {pc.key_id} "
+            f"({'pinned' if pc.pinned else 'NOT pinned'}): {len(pc.assets)} + "
+            f"{len(pc.aaa_assets)} assets, {len(pc.channel_files)} channel files")
+    return EXIT_OK
 
 
 def cmd_promote(ctx: Ctx) -> int:
@@ -422,6 +599,79 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--check-only", action="store_true",
                    help="validate and print the catalogue entry; write nothing")
     p.set_defaults(func=cmd_harness)
+
+    p = sub.add_parser(
+        "harness-release",
+        help="assemble a harness release from platform artifacts, sign and verify it "
+             "(make harness-release; never publishes)")
+    _common(p)
+    p.add_argument("--version", required=True, help="the harness release version, e.g. 2.0.0")
+    p.add_argument("--from", dest="source_dir", required=True, metavar="DIR",
+                   help="the mint's prod dir: linux_bundle.json (Linux) or mint.json, the "
+                        "flashable .bit, linux_slot.img, linux_legal_info.tar")
+    sd = p.add_argument_group("the config SD (one of --sd-templates or --sd)")
+    sd.add_argument("--sd-templates", metavar="DIR",
+                    help="the platform's fpga/mps3_sd/templates: config.txt, board.txt, "
+                         "nanosoc.txt, images.txt")
+    sd.add_argument("--sd", metavar="DIR", help="a ready config-SD tree, taken as it is")
+    sd.add_argument("--bit", metavar="FILE",
+                    help="the stage0 base .bit (default: linux_bundle.json's flashable_bit)")
+    sd.add_argument("--stage0-bake", metavar="JSON",
+                    help="the mps3-stage0-bake record of a stage0 re-bake of --bit (same "
+                         "static, same UserID): e.g. the public generic bake")
+    sd.add_argument("--board-rev", default="C", metavar="A|B|C|ALL",
+                    help="the HBI0309 revision(s) the SD tree serves (default C)")
+    sd.add_argument("--no-images-txt", action="store_true",
+                    help="leave images.txt (TOTALIMAGES: 0) out of the SD tree")
+    p.add_argument("--overlays", metavar="DIR",
+                   help="overlay triples <rm>/manifest.json (fpga/dfx/.../overlay_mbv)")
+    p.add_argument("--include-aaa", action="store_true",
+                   help="ALSO publish the Arm-IP RMs (to the private --aaa-repo). Default: "
+                        "they are left out")
+    p.add_argument("--kit", metavar="ZIP", help="the RM kit zip (published private)")
+    p.add_argument("--firmware-json", metavar="FILE", help="firmware.json (bare metal)")
+    p.add_argument("--notes", metavar="FILE", help="release notes (default: generated)")
+    p.add_argument("--keep-bundle", action="store_true",
+                   help="keep the assembled bundle dir in OUT/bundles/")
+    p.add_argument("--live-base", action="store_true",
+                   help="build on the LIVE channel (read with `gh release download`, "
+                        "read-only), so the serial follows it")
+    k = p.add_argument_group("the signing key (by path; nothing is generated for a real key)")
+    k.add_argument("--key", metavar="FILE",
+                   help="the minisign secret key; its public half is FILE with .key -> .pub "
+                        "(or --public-key)")
+    k.add_argument("--test-key", action="store_true",
+                   help="a throwaway TEST key in a temp dir (id 7E57C0DE...): the release is "
+                        "marked TEST, refused by every client and by the publish script")
+    p.add_argument("--catalog", default=CATALOG_MPS3)
+    p.add_argument("--channel", default="beta")
+    p.add_argument("--pack", default="mps3")
+    p.add_argument("--aaa-repo", default=Layout.aaa_repo, help="the private repo for Arm IP")
+    p.add_argument("--access", default="github-token", choices=("github-token", "public"),
+                   help="access of the OPEN assets (Arm IP and the kit are always private)")
+    p.add_argument("--min-app", default="0.1.0")
+    p.add_argument("--allow-dirty", metavar="REASON",
+                   help="beta/dev only: release a dirty image, with the reason signed in")
+    p.add_argument("--check-only", action="store_true",
+                   help="assemble and validate; print the catalogue entry; sign nothing")
+    p.set_defaults(func=cmd_harness_release)
+
+    p = sub.add_parser("publish-check",
+                       help="may a built harness release go to OWNER/REPO? (the publish "
+                            "script runs it)")
+    p.add_argument("--root", required=True, metavar="DIR", help="the built release tree")
+    p.add_argument("--repo", required=True, metavar="OWNER/REPO")
+    p.add_argument("--aaa-repo", default=Layout.aaa_repo, metavar="OWNER/REPO")
+    p.add_argument("--catalog", default=CATALOG_MPS3)
+    p.add_argument("--channel", default="beta")
+    p.add_argument("--version", help="default: the channel's current release")
+    p.add_argument("--public-key", metavar="FILE",
+                   help="verify with this key when it is not pinned (dry runs)")
+    p.add_argument("--live", metavar="FILE", help="the live channel.json, to compare serials")
+    p.add_argument("--for-publish", action="store_true",
+                   help="refuse (not warn) a TEST or unpinned key")
+    p.add_argument("--env-out", metavar="DIR", help="write publish.env + file lists here")
+    p.set_defaults(func=cmd_publish_check)
 
     p = sub.add_parser("promote", help="beta -> stable (re-sign; no re-upload)")
     _common(p)
