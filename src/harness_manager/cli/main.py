@@ -409,6 +409,14 @@ def make_parser() -> argparse.ArgumentParser:
     from . import cmd_display
     cmd_display.register(sub)
     verbs["display"] = sub.choices["display"]
+
+    # --- sd-flash: `flash devices|write`, SD cards in this PC's card reader (cmd_flash.py;
+    # services/cardwriter.py). In-process: no board, no engine.
+    from . import cmd_flash
+    cmd_flash.register(sub)
+    verbs["flash"] = sub.choices["flash"]
+    NO_ENGINE.add("flash")
+    # --- end sd-flash ---
     return p
 
 

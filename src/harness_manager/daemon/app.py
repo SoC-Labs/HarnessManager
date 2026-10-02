@@ -1673,3 +1673,10 @@ def _fields(obj: Any) -> dict[str, Any]:
     from harness_manager.cli.output import jsonable
 
     return dict(jsonable(obj))               # jsonable's field rules (``omit_none``), once
+
+
+# --- sd-flash ---
+# Lane SD-FLASH (bring-up wave): SD cards in this PC's card reader (cardwriter_api.py;
+# docs/API.md "SD cards in this PC's card reader"). Read by create_app at each call.
+EXTENSIONS += ("cardwriter_api",)
+# --- end sd-flash ---

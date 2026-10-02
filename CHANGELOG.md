@@ -896,3 +896,27 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   shows it.
 - **Fix:** a `.bit` built with Vivado 2026.1 (`UserID=FB1F8C76`, no `0x`) now reads as
   stamped. Before this, the catalogue refused every RC2 config SD as unstamped.
+
+<!-- --- sd-flash --- -->
+### SD cards in this PC's card reader (SD-FLASH)
+- **Write the board's cards in your own card reader, as the other way from the Debug USB.**
+  Off by default: `harness-manager config set bringup.sd_flash on` (Settings → Bring-up).
+  `harness-manager flash devices` lists only card readers' cards (a USB or SD/MMC reader,
+  removable, at most 256 GB: `bringup.sd_flash_max`), each with the phrase a write needs;
+  `--all` says why every other disk is not offered (the system disk, a fixed disk, loop and
+  zram, the board's own MCC and DAPLink drives). The app's Bring-up uses the same service
+  (`GET /api/v1/cardwriter/devices`, `POST /api/v1/cardwriter/write`).
+- **`flash write DEVICE_ID SOURCE --kind files|card`** asks for the typed phrase
+  `WRITE <model> <size>` exactly as listed, and refuses a card swapped since the listing.
+  `files`: a harness bundle onto the configuration SD taken out of the board, with the same
+  rules as `sd install` (a backup first, never an `.ebf`, read back), and the card's MCC
+  firmware selection kept: its `MBBIOS:` line stays ("MBBIOS kept: mbb_v141.ebf"); a bundle
+  that would make the MCC update itself is refused unless `--allow-mcc-update`. `card`: a
+  whole-card image for the Linux harness's user microSD (`stage0_mkcard.py card --card-img`),
+  checked the way stage0 reads a card; `linux_slot.img` on its own is refused (one OS slot is
+  not a card: written at byte 0 the board would sit in rescue). Every write is read back and
+  compared.
+- **Harness Manager never asks for root.** When your user may not write the device, the write
+  stops before the first byte and prints the exact commands (`sudo dd … conv=fsync`, then
+  `sudo cmp -n …` to check it); the CLI exits 12. Windows: not supported yet.
+<!-- --- end sd-flash --- -->
