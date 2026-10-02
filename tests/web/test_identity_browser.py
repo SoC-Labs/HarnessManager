@@ -413,3 +413,45 @@ def test_twin_a_board_that_did_not_move_offers_nothing_to_open(demo):
     expect(by(page, "nb-done")).to_be_visible(timeout=T)
     expect(by(page, "nb-moved")).to_have_count(0)
     assert not page.errors, page.errors
+
+
+def moved_result(to: str, host: str) -> dict:
+    return {"action": "set", "verified": True, "notes": [], "board_id": to,
+            "changes": [{"field": "label", "from": "MPS3", "to": "LAB-10"}],
+            "address": {"ip": host, "pc_example": "192.168.10.1/24",
+                        "same_net": "this PC must be on the same /24 (e.g. 192.168.10.1/24)"},
+            "moved": {"from": BOARD_V011, "to": to, "host": host, "address": f"{host}:6900",
+                      "old_host": "192.168.10.105", "records": []}}
+
+
+def set_and_open(page: Any) -> None:
+    by(page, "nb-name").fill("LAB-10")
+    by(page, "identity-phrase").fill("LAB-10")
+    act(page, "identity-fix-confirm").click()
+    expect(by(page, "nb-moved")).to_be_visible(timeout=T)
+    act(page, "nb-open-moved").click()
+
+
+def test_open_it_there_opens_the_board_at_its_new_address_and_closes_the_old(demo):
+    page = demo.page()
+    # the demo's Linux board stands in for "the board at its new address"
+    open_stubbed(page, result=moved_result(BOARD_LINUX, "192.168.10.104"))
+    set_and_open(page)
+    expect(page.locator(f'main[data-board="{BOARD_LINUX}"]')).to_be_visible(timeout=T)
+    expect(by(page, "board-page-access")).to_be_visible(timeout=T)
+    assert BOARD_LINUX in demo.engine.open_boards()
+    for _ in range(50):                                        # the old session is closed
+        if BOARD_V011 not in demo.engine.open_boards():
+            break
+        page.wait_for_timeout(100)
+    assert BOARD_V011 not in demo.engine.open_boards()
+    assert not page.errors, page.errors
+
+
+def test_twin_nothing_at_the_new_address_says_so_and_keeps_the_old_session(demo):
+    page = demo.page()
+    open_stubbed(page, result=moved_result("mps3@192.168.10.199:6900", "192.168.10.199"))
+    set_and_open(page)
+    expect(by(page, "toast")).to_contain_text("Not open at 192.168.10.199 yet: add it By address",
+                                              timeout=T)
+    assert BOARD_V011 in demo.engine.open_boards()

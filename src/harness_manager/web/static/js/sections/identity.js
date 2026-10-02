@@ -102,8 +102,21 @@ function Changes({ changes }) {
 }
 
 // After a board moved to its new address: find it there, open it, and close the old session.
+async function closeOld(oldBid) {
+  try {
+    await call("closeBoard", { bid: oldBid });
+    openedOrClosedHere(oldBid, false);
+    closeBoardConsoles(oldBid);
+    delete S.board[oldBid];
+  } catch (e) { /* the old session stays listed: closing it is the user's */ }
+  changed();
+}
+
 async function openMoved(oldBid, moved) {
   closeModal();
+  // a board keyed by its unit (not its address) keeps its id: its session at the old address
+  // goes first, then it is opened again at the new one
+  if (oldBid && moved.to === oldBid) await closeOld(oldBid);
   await probe([moved.host]);
   const id = S.boards[moved.to] ? moved.to
     : Object.keys(S.boards).find((k) => k.includes(`@${moved.host}:`)) || moved.to;
@@ -113,15 +126,7 @@ async function openMoved(oldBid, moved) {
     return;
   }
   navigate(id, "board/access");
-  if (oldBid && oldBid !== id) {
-    try {
-      await call("closeBoard", { bid: oldBid });
-      openedOrClosedHere(oldBid, false);
-      closeBoardConsoles(oldBid);
-      delete S.board[oldBid];
-    } catch (e) { /* the old session stays listed: closing it is the user's */ }
-    changed();
-  }
+  if (oldBid && oldBid !== id) await closeOld(oldBid);
 }
 
 function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
