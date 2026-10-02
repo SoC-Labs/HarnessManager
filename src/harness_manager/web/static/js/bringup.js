@@ -942,7 +942,7 @@ function Proposal({ bid, w }) {
     <dl class="kv">
       <dt>Name</dt><dd class="mono" data-testid="bu-id-label">${p.label || html`<span class="muted" style="font-family:var(--font-sans)">give it one in the dialog</span>`}</dd>
       <dt>MAC</dt><dd><span class="mono" data-testid="bu-id-mac">${p.mac}</span> <span class="sub">random, locally administered</span></dd>
-      <dt>IP</dt><dd>${p.ip ? html`<span class="mono" data-testid="bu-id-ip">${ipOnly(p.ip)}</span> <span class="sub">the next free address of ${p.pool}</span>`
+      <dt>IP</dt><dd>${p.ip ? html`<span class="mono" data-testid="bu-id-ip">${ipOnly(p.ip)}</span> <span class="sub">a free address of ${p.pool}, searched from the MAC</span>`
         : html`<span class="small" data-testid="bu-id-ip-error">${p.ip_error}</span>`}</dd>
     </dl>
     ${p.ip ? html`<p class="small" data-testid="bu-id-same-net">${p.same_net.charAt(0).toUpperCase()}${p.same_net.slice(1)}.</p>` : null}

@@ -759,7 +759,7 @@ def witness(engine: Any, host: str = DEFAULT_HOST, *, wait_s: float = DEFAULT_WI
 # --- the identity a new board is given (a proposal; the identity writer sets it) ------------------
 
 #: Lane IDENTITY (david 2 Oct): every board gets a unique IP and a random MAC.
-IP_NOTE = ("every board gets its own IP: the next free address of the pool (the image default "
+IP_NOTE = ("every board gets its own IP: a free address of the pool, searched from its MAC (the image default "
            "192.168.10.101 is never given)")
 NO_SERIAL = ("the MCC's USB serial number is not known (the Debug USB did not report one): give "
              "the board a name yourself")
@@ -831,7 +831,7 @@ def propose_identity(serial: str, *, policy: Any = None, taken_macs: Any = (),
     or reserved here): ``{serial, label, hostname, mac, mac_how, ip, ip_how, ip_error,
     same_net, notes}``. The name is ``MPS3-`` and the serial's last 4 letters or digits
     (upper case: the panel takes A-Z, 0-9 and -); the MAC is random (byte 0 the pack's,
-    never a reserved range or a MAC in the registry); the IP is the next free address of the
+    never a reserved range or a MAC in the registry); the IP is the first free address of the
     pack's pool (``ip_error`` says why there is none)."""
     from harness_manager.core.errors import HarnessError
     from harness_manager.services import identity_assign as IA
@@ -848,7 +848,7 @@ def propose_identity(serial: str, *, policy: Any = None, taken_macs: Any = (),
     mac = IA.random_mac(policy, taken_macs, **({"urandom": urandom} if urandom else {}))
     ip, ip_error = "", ""
     try:
-        ip = IA.allocate_ip(policy, taken_ips)
+        ip = IA.allocate_ip(policy, taken_ips, mac=mac)        # starts at mac[5] mod pool
     except HarnessError as exc:
         ip_error = exc.message + (f" ({exc.hint})" if exc.hint else "")
     return {"serial": serial.strip(), "label": label, "hostname": label.lower(), "mac": mac,

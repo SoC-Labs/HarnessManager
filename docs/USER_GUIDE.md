@@ -1656,8 +1656,9 @@ wizard's last step opens the same dialog, filled in).
    shows 16). The counter turns red past 16.
 2. MAC: **Random** (the default for a board on the image's MAC; **Regenerate** for
    another), **Keep**, or **Custom** (unicast, not 02:00:00:*, the image's own range).
-3. IP: **Auto** (the next free address of `mps3.identity.ip_pool`, 192.168.10.110-199 by
-   default), **Keep**, or **Custom** (an address of a /24).
+3. IP: **Auto** (a free address of `mps3.identity.ip_pool`, 192.168.10.110-199 by
+   default, searched from the board's MAC: the first one tried is 192.168.10.(110 + the
+   MAC's last byte mod 90), so boards with random MACs spread over the pool), **Keep**, or **Custom** (an address of a /24).
 4. Read the IP in the box: the board answers there after the restart. **This PC must be on
    the same /24** (e.g. 192.168.10.1/24).
 5. Type the name to confirm, then **Set and restart**.

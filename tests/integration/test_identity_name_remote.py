@@ -65,13 +65,14 @@ def test_remote_preflight_chooses_random_and_auto_and_sends_nothing(served):
     fake, remote, session, _ = served
     pre = remote.board_identity.preflight(session, want={"label": "lab-07", "mac": "random",
                                                          "ip": "auto"})
-    assert pre["want"]["ip"] == "192.168.10.110/24" and pre["want"]["mac"].startswith("02:")
-    assert pre["plan"]["phrase"] == "LAB-07" and pre["address"]["ip"] == "192.168.10.110"
+    ip = f"192.168.10.{110 + int(pre['want']['mac'][-2:], 16) % 90}"   # from the random MAC
+    assert pre["want"]["ip"] == f"{ip}/24" and pre["want"]["mac"].startswith("02:")
+    assert pre["plan"]["phrase"] == "LAB-07" and pre["address"]["ip"] == ip
     assert fake.identity_sets == [] and fake.reboots == []
     out = remote.board_identity.fix(session, confirm="LAB-07", want=pre["want"], wait_s=20)
     assert out["verified"] is True
     (_peer, body), = fake.identity_sets
-    assert body["ip"] == "192.168.10.110/24" and body["label"] == "LAB-07"
+    assert body["ip"] == f"{ip}/24" and body["label"] == "LAB-07"
 
 
 def test_twin_remote_preflight_refuses_what_the_job_would(served, monkeypatch):
@@ -111,9 +112,10 @@ def test_the_cli_through_the_service_names_the_board(served, capsys):
     finally:
         set_engine_factory(previous)
     assert rc == 0, err
-    assert "NEW IP     192.168.10.110" in err and "NEW IP     192.168.10.110" in out
     (_peer, body), = fake.identity_sets
-    assert body["label"] == "LAB-08" and body["ip"] == "192.168.10.110/24"
+    ip = f"192.168.10.{110 + int(body['mac'][-2:], 16) % 90}"          # from the random MAC
+    assert f"NEW IP     {ip}" in err and f"NEW IP     {ip}" in out
+    assert body["label"] == "LAB-08" and body["ip"] == f"{ip}/24"
 
 
 def test_twin_the_cli_through_the_service_refuses_before_the_question(served, capsys):
@@ -125,4 +127,37 @@ def test_twin_the_cli_through_the_service_refuses_before_the_question(served, ca
     finally:
         set_engine_factory(previous)
     assert rc == 2 and "a space" in err and "type exactly" not in err
+    assert fake.identity_sets == []
+
+
+@pytest.mark.parametrize("seat", [1, 6])
+def test_the_lab_seat_sheet_command_sets_its_seat(served, capsys, seat):
+    # david 2 Oct, the demonstration lab's seat sheet: board identity --label WS-0N
+    # --ip 192.168.10.(110+N) --mac random
+    fake, remote, session, target = served
+    remote.close(session.candidate.board_id)
+    previous = set_engine_factory(lambda _args: remote)
+    try:
+        rc, out, err = run(capsys, "board", "identity", target, "--label", f"ws-0{seat}",
+                           "--ip", f"192.168.10.{110 + seat}", "--mac", "random", "--wait", "20",
+                           stdin=f"WS-0{seat}\n")
+    finally:
+        set_engine_factory(previous)
+    assert rc == 0, err
+    (_peer, body), = fake.identity_sets
+    assert body["label"] == f"WS-0{seat}" and body["ip"] == f"192.168.10.{110 + seat}/24"
+    assert body["mac"].startswith("02") and not body["mac"].startswith("020000")   # wire: 12 hex
+
+
+def test_twin_a_mistyped_seat_ip_is_refused_before_the_question(served, capsys):
+    fake, remote, session, target = served
+    remote.close(session.candidate.board_id)
+    previous = set_engine_factory(lambda _args: remote)
+    try:
+        rc, _, err = run(capsys, "board", "identity", target, "--label", "ws-01",
+                         "--ip", "192.168.10.256", "--mac", "random", "--wait", "20",
+                         stdin="WS-01\n")
+    finally:
+        set_engine_factory(previous)
+    assert rc == 2 and "192.168.10.256" in err
     assert fake.identity_sets == []
