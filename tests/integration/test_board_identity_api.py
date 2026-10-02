@@ -27,7 +27,8 @@ from tests.fakes.t13_daemon import TOKEN, bid_path, headers, state_dir
 
 AS_DEFAULT = {"label": "MPS3", "ip": "192.168.10.101/24", "mac": BOARD1_MAC,
               "source": {"label": "default", "ip": "default", "mac": "default"}}
-WANT = {"label": "MPS3-02", "ip": "192.168.11.101/24", "mac": "02:00:00:00:02:fe"}
+# lane IDENTITY: a person's own MAC is never in the image's range 02:00:00:*
+WANT = {"label": "MPS3-02", "ip": "192.168.11.101/24", "mac": "02:5e:00:00:02:fe"}
 
 
 @pytest.fixture
@@ -129,7 +130,7 @@ def test_v7_a_bad_value_on_a_netbooted_board_is_409_for_the_card_not_400(api):
     """The board's order: ``locked``, ``no_persist``, THEN ``invalid``."""
     fake, client, bid = api
     client.get(bid_path(bid) + "/identity", headers=headers())
-    r = client.post(bid_path(bid) + "/identity", json={"confirm": "x", "label": "lower-case"},
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "x", "label": "lower case"},
                     headers=headers())
     assert r.status_code == 409, r.text
     assert "stage0 bake" in r.json()["error"]["message"]
@@ -139,9 +140,9 @@ def test_v7_a_bad_value_on_a_netbooted_board_is_409_for_the_card_not_400(api):
 def test_v7_twin_a_bad_value_on_a_board_that_can_take_it_is_400(api):
     fake, client, bid = api
     client.get(bid_path(bid) + "/identity", headers=headers())
-    r = client.post(bid_path(bid) + "/identity", json={"confirm": "x", "label": "lower-case"},
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "x", "label": "lower case"},
                     headers=headers())
-    assert r.status_code == 400 and "A-Z" in r.json()["error"]["hint"]
+    assert r.status_code == 400 and "A-Z" in r.json()["error"]["message"]
     assert fake.identity_sets == []
 
 

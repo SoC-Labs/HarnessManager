@@ -343,7 +343,7 @@ def test_v7_a_bad_value_on_a_netbooted_board_is_refused_for_the_card_not_the_val
     change at all, is refused for the card (REFUSED), not for the label (USAGE)."""
     fake, session, svc = lab(persist=False)
     with pytest.raises(RefusedError, match="stage0 bake"):
-        svc.fix(session, confirm="x", want={"label": "lower-case"})
+        svc.fix(session, confirm="x", want={"label": "lower case"})
     assert nothing_sent(fake)
     assert fake.handle_control({"op": "identity_set", "label": "lower-case"}, peer=TRUSTED) == {
         "ok": False, "err": "identity: no persistent /persist (use the card)",
@@ -355,7 +355,7 @@ def test_v7_twin_a_bad_value_on_a_board_that_can_take_it_is_a_usage_error(lab):
 
     fake, session, svc = lab()
     with pytest.raises(UsageError, match="A-Z"):
-        svc.fix(session, confirm="x", want={"label": "lower-case"})
+        svc.fix(session, confirm="x", want={"label": "lower case"})   # IDENTITY: a space
     assert nothing_sent(fake)
     reply = fake.handle_control({"op": "identity_set", "label": "lower-case"}, peer=TRUSTED)
     assert reply == {"ok": False, "err": "invalid label: not [A-Z0-9-]", "code": "invalid"}

@@ -392,6 +392,12 @@ class Mps3Pack(BoardPack):
         return rows(console_pace_s=self._console_pace_s, rbb_port=self._rbb_port,
                     push_port=self._push_port, tftp_port=self._tftp_port) if rows else ()
 
+    def identity_policy(self) -> Any:
+        """Lane IDENTITY: the MAC and IP rules for naming an MPS3 board (random MACs 02:...,
+        never 02:00:00:*; the pool mps3.identity.ip_pool; never 192.168.10.101)."""
+        policy = _hook("net_identity", "identity_policy")
+        return policy() if policy else None
+
     def candidate_for_host(self, spec: str, via: str = "") -> Candidate:
         """``via`` ("ssh:HOST") reaches the shell through an SSH tunnel (L1); boards.toml
         ``via`` does the same when it is not given."""

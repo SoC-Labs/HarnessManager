@@ -66,8 +66,8 @@ bringup - --serial PORT --volume PATH (--bundle DIR|ZIP | --version V [--source 
   PC's card reader instead (bringup.sd_flash on; `flash devices` lists the ids): typed
   WRITE <model> <size> (--confirm), no MCC reboot: put the card back and power the board
   on. --yes answers the questions; never a re-key, never a typed phrase. Once it runs, it
-  PROPOSES the board's identity (a label and a MAC from the MCC's USB serial number, the
-  IP) and prints the `board identity` command that sets it.
+  PROPOSES the board's identity (a name from the MCC's USB serial number, a random MAC and
+  the next free IP of the pool) and prints the `board identity` command that sets it.
 """
 
 
@@ -303,29 +303,35 @@ def _witness(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any], l
 
 def _identity(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any],
               seen: dict[str, Any], cand: Any) -> None:
-    """The identity PROPOSED for the new board (a label and a MAC from the MCC's USB serial
-    number, the IP), and the `board identity` command that sets it: the existing writer, with
-    its typed phrase. Nothing is set here."""
-    import ipaddress
+    """The identity PROPOSED for the new board (a name from the MCC's USB serial number, a
+    random MAC, the pool's next free IP: lane IDENTITY), and the `board identity` command
+    that sets it: the existing writer, with its typed phrase. Nothing is set here."""
+    from harness_manager.services import identity_assign as IA
 
     a = ctx.args
     host = str(a.host).strip()
-    try:
-        ip = str(ipaddress.IPv4Address(host))
-    except ValueError:
-        ip = bringup.DEFAULT_HOST
-    proposal = bringup.propose_identity(bringup.mcc_serial(cand), ip=ip)
+    policy, macs, ips = bringup.identity_inputs(ctx.engine)
+    proposal = bringup.propose_identity(bringup.mcc_serial(cand), policy=policy,
+                                        taken_macs=macs, taken_ips=ips)
     command = bringup.identity_command(host, proposal)
     data["identity"] = {"proposal": proposal, "command": command}
-    what = ", ".join(f"{k} {proposal[k]}" for k in ("label", "ip", "mac") if proposal[k])
-    src = (f"from the MCC's USB serial {proposal['serial']} ({proposal['uniqueness']})"
-           if proposal["serial"] else bringup.NO_SERIAL)
-    steps.append([bid, "identity", "proposed", f"{what}: {src}; {bringup.IP_NOTE}"])
+    what = ", ".join(f"{k} {str(proposal[k]).split('/', 1)[0]}"
+                     for k in ("label", "ip", "mac") if proposal[k])
+    src = (f"the name from the MCC's USB serial {proposal['serial']}, a random MAC, "
+           f"the next free IP of {proposal['pool'] or 'the pool'}" if proposal["serial"]
+           else f"{bringup.NO_SERIAL}; a random MAC, the next free IP of "
+                f"{proposal['pool'] or 'the pool'}")
+    steps.append([bid, "identity", "proposed", f"{what}: {src}"])
     impl = str(seen.get("impl") or "")
     if impl and impl != "linux":
         steps.append([bid, "identity", "not-settable", bringup.NO_IDENTITY_STORE])
         steps.append([bid, "next", "access", f"harness-manager board info {host}"])
         return
+    if proposal["ip"]:
+        steps.append([bid, "identity", "new-ip",
+                      f"{str(proposal['ip']).split('/', 1)[0]}: {IA.same_net_note(proposal['ip'])}"])
+    elif proposal["ip_error"]:
+        steps.append([bid, "identity", "no-ip", proposal["ip_error"]])
     steps.append([bid, "next", "access", f"harness-manager claim {host} (Linux), then {command} "
                                          f"({bringup.IDENTITY_SET_NOTE})"])
 

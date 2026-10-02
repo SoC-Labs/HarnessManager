@@ -943,10 +943,9 @@ function Proposal({ bid, w }) {
   return html`<div class="stack gap-8 bu-identity" data-testid="bu-identity">
     <p class="small secondary">Proposed for this board${p.serial ? html` from its MCC's USB serial number <span class="mono" data-testid="bu-id-serial">${p.serial}</span>` : null}; change any of them. Nothing is set until you confirm on Board > Access.</p>
     ${!p.serial ? html`<${Reason} level="warn" testid="bu-id-no-serial" text=${p.notes[0]} />` : null}
-    <${IdField} w=${w} k="label" label="Label" testid="bu-id-label" sub="On the LCD and the board's host name: A-Z, 0-9 and -, up to 19." />
-    <${IdField} w=${w} k="ip" label="IP" testid="bu-id-ip" sub=${p.ip_note} />
-    <${IdField} w=${w} k="mac" label="MAC" testid="bu-id-mac"
-      sub=${p.serial ? html`<span data-testid="bu-id-derivation">${p.derivation}.</span> <b data-testid="bu-id-uniqueness">${p.uniqueness[0].toUpperCase()}${p.uniqueness.slice(1)}.</b>` : ""} />
+    <${IdField} w=${w} k="label" label="Label" testid="bu-id-label" sub="On the LCD and the board's host name: A-Z, 0-9 and -, up to 16." />
+    <${IdField} w=${w} k="ip" label="IP" testid="bu-id-ip" sub=${p.ip_error || p.ip_note} />
+    <${IdField} w=${w} k="mac" label="MAC" testid="bu-id-mac" sub="Random (locally administered)." />
   </div>`;
 }
 

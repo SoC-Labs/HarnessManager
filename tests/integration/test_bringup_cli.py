@@ -361,25 +361,26 @@ def test_a_running_linux_harness_gets_a_proposed_identity_and_the_writers_comman
     rc, out = run(linux_board, tmp_path, capsys, *signed(bundle, tmp_path), "--wait", "60")
     assert rc == 0
     prop = out["identity"]["proposal"]
-    mac = bringup.derive_mac("FT9VIRT1")
+    mac = prop["mac"]                         # lane IDENTITY: random, never the serial's
     assert prop["serial"] == "FT9VIRT1" and prop["label"] == "MPS3-IRT1"
-    assert prop["mac"] == mac and mac.startswith("02:") and prop["ip"] == "192.168.10.101/24"
+    assert mac.startswith("02:") and not mac.startswith("02:00:00:")
+    assert prop["ip"] == "192.168.10.110/24" and prop["ip_how"] == "auto"
     by = {(s["step"], s["result"]): s["detail"] for s in out["steps"]}
-    assert by[("identity", "proposed")].startswith(
-        f"label MPS3-IRT1, ip 192.168.10.101/24, mac {mac}: from the MCC's USB serial FT9VIRT1 "
-        "(uniqueness of MCC serials is not yet verified); two boards on one network need "
-        "different IPs")
+    assert by[("identity", "proposed")] == (
+        f"label MPS3-IRT1, ip 192.168.10.110, mac {mac}: the name from the MCC's USB serial "
+        "FT9VIRT1, a random MAC, the next free IP of 192.168.10.110-199")
+    assert by[("identity", "new-ip")] == ("192.168.10.110: this PC must be on the same /24 "
+                                          "(e.g. 192.168.10.1/24)")
     host = linux_board.shell_endpoint
     assert by[("next", "access")] == (
         f"harness-manager claim {host} (Linux), then harness-manager board identity {host} "
-        f"--label MPS3-IRT1 --ip 192.168.10.101/24 --mac {mac} --consent MPS3-IRT1 (an image "
+        f"--label MPS3-IRT1 --ip 192.168.10.110 --mac {mac} --consent MPS3-IRT1 (an image "
         "before net-protocol v0.16 has no identity_set: `board identity` says so and changes "
         "nothing)")
     assert ("identity", "not-settable") not in by
 
 
-def test_twin_no_serial_known_proposes_no_label_or_mac(linux_board, tmp_path, capsys,
-                                                      monkeypatch):
+def test_twin_no_serial_known_proposes_no_name(linux_board, tmp_path, capsys, monkeypatch):
     from harness_manager_mps3 import usb as usbmod
 
     monkeypatch.setattr(usbmod, "DEFAULT_ENV", usbmod.UsbEnv(lambda: [], lambda: []))
@@ -387,7 +388,7 @@ def test_twin_no_serial_known_proposes_no_label_or_mac(linux_board, tmp_path, ca
                   "--wait", "60")
     assert rc == 0
     prop = out["identity"]["proposal"]
-    assert prop["label"] == "" and prop["mac"] == "" and prop["serial"] == ""
+    assert prop["label"] == "" and prop["serial"] == "" and prop["mac"].startswith("02:")
     by = {(s["step"], s["result"]): s["detail"] for s in out["steps"]}
     assert "the MCC's USB serial number is not known" in by[("identity", "proposed")]
-    assert "--mac" not in by[("next", "access")] and "--consent" not in by[("next", "access")]
+    assert "--label" not in by[("next", "access")] and "--consent" not in by[("next", "access")]

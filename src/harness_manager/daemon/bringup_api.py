@@ -7,7 +7,7 @@
 | ``POST /bringup/bundle`` ``{path}`` | check a bundle folder or zip: the files, the base ``.bit`` (size, sha256, part, USERID); 409 REFUSED with ``error.data.check`` for an ``.ebf``, an MCC command file, a file outside the config-SD tree, no bitstream |
 | ``POST /boards/{bid}/bringup/install`` ``{bundle, backup_path, confirm_unsigned}`` | 202 job ``sd_install``: the bundle checked again and its typed ``INSTALL UNSIGNED <sha8>`` (409 REFUSED without it, ``error.data.unsigned``), then written to the board's config SD by its storage adapter (the backup is mandatory; never an ``.ebf``); a release bundle's ``overlays/open`` then joins ``mps3.overlay_dirs`` (Program and Restore find them) |
 | ``POST /bringup/card-reader`` ``{bundle, device_id, confirm, confirm_unsigned, backup_path?, backup_dir?}`` | 202 job ``cardwriter_write``: the same bundle check and typed phrase, then the card writer's ``files`` kind (SD-FLASH's: the card in this PC's reader backed up, its typed ``WRITE <model> <size>``, the pack's MBBIOS rule, read back); no MCC reboot |
-| ``GET /boards/{bid}/bringup/proposal?ip=`` | the identity PROPOSED for the new board (david 2 Oct, D4a): ``{proposal: {serial, label, hostname, ip, mac, derivation, uniqueness, ip_note, notes}, command}``: the label and a locally administered MAC from the MCC's USB serial number, the IP (default 192.168.10.101). Nothing is set: the existing identity writer (``POST /boards/{bid}/identity``, ``board identity``) sets it, with its typed phrase |
+| ``GET /boards/{bid}/bringup/proposal?ip=`` | the identity PROPOSED for the new board (david 2 Oct, D4a; lane IDENTITY): ``{proposal: {serial, label, hostname, mac, mac_how, ip, ip_how, ip_error, same_net, pool, ip_note, notes}, command}``: a name from the MCC's USB serial number (``MPS3-`` + its last 4), a RANDOM MAC and the next free IP of the pack's pool (``ip``: where the board answers now, the command's target; default 192.168.10.101). Nothing is set or reserved: the "Name this board" dialog (``POST /boards/{bid}/identity``, ``board identity``) sets it, with its typed phrase |
 | ``POST /boards/{bid}/bringup/witness`` ``{host?, wait_s?, poll_s?}`` | 202 job ``bringup_witness``: wait for the harness to answer at ``host`` after the reboot; ``state`` ``running`` or ``rescue``; a timeout fails the job with ``error.data.timeout`` |
 
 Composed, not new executors: the backup, the reboot and the restore are the existing
@@ -210,12 +210,15 @@ def register(ctx: RouteContext) -> None:
 
     @api.get("/boards/{bid:path}/bringup/proposal")
     def bringup_identity(bid: str, ip: str | None = None) -> Any:
-        """The proposal for the board on this Debug USB (its MCC's USB serial number)."""
+        """The proposal for the board on this Debug USB: a name from its MCC's USB serial
+        number, a random MAC and the pool's next free IP (lane IDENTITY). ``ip``: where the
+        board answers now (the command's target; default 192.168.10.101)."""
         s = ctx.board(bid)
-        want = (ip or "").strip() or bringup.DEFAULT_HOST
+        host = ((ip or "").strip() or bringup.DEFAULT_HOST).split("/", 1)[0]
         serial = bringup.mcc_serial(getattr(s, "candidate", None))
-        proposal = bringup.propose_identity(serial, ip=want)
-        host = want.split("/", 1)[0]
+        policy, macs, ips = bringup.identity_inputs(d.engine)
+        proposal = bringup.propose_identity(serial, policy=policy, taken_macs=macs,
+                                            taken_ips=ips)
         return _JSON(ok(board_id=bid, proposal=proposal,
                         command=bringup.identity_command(host, proposal)))
 

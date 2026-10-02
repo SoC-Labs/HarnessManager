@@ -78,10 +78,90 @@ READ_TTL_S = 30.0
 IDENTIFY_TIMEOUT_S = 0.5
 PENDING_WHY = ("pending the Linux lead's interface: this harness image has no identity verbs "
                "(net-protocol v0.16 `identity`/`identity_set`, images rc2_v7 and later)")
-NETBOOT_WHY = ("this board has no persistent store for an identity (a netboot, or no user "
-               "microSD): its identity comes from the stage0 bake")
-NETBOOT_HINT = ("re-bake stage0 for this board (S0_IP, S0_LABEL, MPS3_MAC0..5 via S0_EXTRA_DEFS; "
-                "an updatemem re-bake, not a re-mint), or give it a user microSD and fix it again")
+NETBOOT_WHY = ("this board has no persistent store for an identity (a netboot, no user "
+               "microSD, or a card written on a PC whose /persist partition is still blank): "
+               "its identity comes from the stage0 bake")
+#: The Linux lead (2 Oct): a card written on a PC has a blank p3, so /persist is tmpfs and
+#: identity_set answers no_persist until `mps3-persist format --erase` and a reboot. Said, never
+#: done: Harness Manager does not format a card by itself.
+PERSIST_FORMAT = "mps3-persist format --erase && mps3-reboot"
+NETBOOT_HINT = ("a card written on a PC: format its /persist over your claim, `harness-manager "
+                f"board ssh TARGET -c '{PERSIST_FORMAT}'` (it erases the card's partition 3; "
+                "the claim and the SSH host key were in the blank store, so expect to claim the "
+                "board again: `harness-manager board claim TARGET --replace-host-key`), then set "
+                "the identity again; Harness Manager never formats it for you. A netboot: "
+                "re-bake stage0 for this board (S0_IP, S0_LABEL, MPS3_MAC0..5 via "
+                "S0_EXTRA_DEFS; an updatemem re-bake, not a re-mint)")
+
+# --- lane IDENTITY: the MPS3 pack's identity policy (david 2 Oct) ----------------------------------
+
+#: Every random MAC starts 02 (locally administered, unicast); 02:00:00:* is the image's own
+#: range (the default 02:00:00:4d:50:53 and the stage0 bakes' 02:00:00:00:0x:xx), never handed
+#: out and never accepted from a person.
+MAC_FIRST_BYTE = 0x02
+RESERVED_MAC_PREFIXES = ("02:00:00",)
+RESERVED_MAC_WHY = "the MPS3 image's own range: its default MAC and the stage0 bakes"
+#: The pool `--ip auto` takes from (the setting mps3.identity.ip_pool).
+IP_POOL_KEY = "mps3.identity.ip_pool"
+IP_POOL_ENV = "HARNESS_MANAGER_MPS3_IP_POOL"
+DEFAULT_IP_POOL = "192.168.10.110-199"
+#: Never handed out: the generic image's address, which stage0 rescue answers on too.
+RESERVED_IPS = (BI.DEFAULT_IP,)
+RESERVED_IP_WHY = "the generic image's address and stage0 rescue's"
+RESCUE_NOTE = ("until mint 4, stage0 rescue still answers on 192.168.10.101 with the image's "
+               "default MAC 02:00:00:4d:50:53, whatever this board is named: look for a board "
+               "in rescue there")
+#: Hub records known to be wrong today (the hub's board_mac is its own USB adapter).
+KNOWN_BAD_HUB_RECORDS = {
+    "mps3_01_pl": "its board_mac 00:e0:4c:46:dc:f8 is the hub's own USB adapter, not the board",
+}
+#: How long one "does anything answer at this address?" identify waits (the pool's check).
+ANSWER_TIMEOUT_S = 0.3
+
+
+def answering(ip: str) -> bool:
+    """Something answers identify (UDP 6899) at ``ip`` now: a harness, or stage0 rescue."""
+    from . import identify as _identify
+
+    try:
+        _identify.identify(ip, timeout=ANSWER_TIMEOUT_S, retries=0)
+    except (UnreachableError, UsageError):
+        return False
+    return True
+
+
+#: The pool's check (a test seam: tests never send a datagram to a real address).
+DEFAULT_ANSWERING: Callable[[str], bool] = answering
+
+
+def ip_pool() -> str:
+    """mps3.identity.ip_pool (its variable, else the setting, else the default)."""
+    from .settings import value
+
+    try:
+        got = value(IP_POOL_KEY)          # IP_POOL_ENV first: the resolver's env layer
+    except HarnessError as exc:
+        log.warning("%s unread (%s): using %s", IP_POOL_KEY, exc, DEFAULT_IP_POOL)
+        return DEFAULT_IP_POOL
+    return str(got or DEFAULT_IP_POOL)
+
+
+def identity_policy() -> Any:
+    """The MPS3 pack's ``IdentityPolicy`` (``Mps3Pack.identity_policy``)."""
+    from harness_manager.services.identity_assign import IdentityPolicy
+
+    return IdentityPolicy(
+        pack="mps3", mac_first_byte=MAC_FIRST_BYTE, reserved_mac_prefixes=RESERVED_MAC_PREFIXES,
+        reserved_mac_why=RESERVED_MAC_WHY, ip_pool=ip_pool(), ip_pool_setting=IP_POOL_KEY,
+        reserved_ips=RESERVED_IPS, reserved_ip_why=RESERVED_IP_WHY, rescue_note=RESCUE_NOTE,
+        known_bad_hub_records=dict(KNOWN_BAD_HUB_RECORDS),
+        answering=lambda ip: DEFAULT_ANSWERING(ip))
+
+#: A board whose address changed: the words when it is not found at the new one (the Linux
+#: lead, 2 Oct, (d)).
+MOVE_TIMEOUT = ("board not seen on {ip} after {minutes} min: it may be on DHCP or the address "
+                "was taken (DAD); check the panel, which shows the IP on row 5")
+
 
 
 def _iso(t: float) -> str:
@@ -515,6 +595,143 @@ class Mps3NetIdentity:
         if resets is not None and callable(getattr(resets, "refresh", None)):
             resets.refresh()
         return dict(witness or {})
+
+    # -- lane IDENTITY: the pack's policy, and a board whose address changes ----------------------
+
+    #: How often the new address is asked while the board restarts (tests: less).
+    move_poll_s = 3.0
+
+    @staticmethod
+    def policy() -> Any:
+        return identity_policy()
+
+    def host_key(self) -> str:
+        """The SSH host key fingerprint pinned for this board (boards.toml ``ssh.host_key``),
+        ``""`` when none is: what the board must show at its new address."""
+        from .claim import pin_fingerprint, ssh_config
+
+        try:
+            pin = ssh_config(self._session.candidate)["host_key"]
+        except HarnessError:
+            return ""
+        return pin_fingerprint(pin) if pin else ""
+
+    def relocate(self, ip: str, host_key: str, *, wait_s: float,
+                 progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """The harness's own ``reboot`` verb (the reset guard first; never an MCC REBOOT), NOT
+        witnessed at the old address (the board drops it), then identify at ``ip`` until a
+        board answers there. Accepted only with ``host_key`` (the board's pinned key; /persist
+        keeps it): another key is another board, never adopted. Returns ``{board_id, address,
+        reported, reboot, identify}``."""
+        from harness_manager.core.errors import HeldError
+        from harness_manager.services import reset_guard
+
+        from . import identify as _identify
+        from .os_slots import card_job_refusal
+
+        say = progress or (lambda _t: None)
+        reset_guard.check(self._session, reset_guard.ACTION_HARNESS_REBOOT)
+        shell = self._shell()
+        try:
+            resp = shell.call(lambda c: c.reboot())
+        except HeldError as exc:
+            busy = card_job_refusal(self._session, exc)
+            if busy is None:
+                raise
+            raise busy from exc
+        if not resp.ok:
+            raise ActionFailedError(f"the harness refused reboot: {resp.err or '?'}; the new "
+                                    "identity waits for the next restart",
+                                    hint="it needs the watchdog ('reboot' feature)")
+        with self._mu:
+            self._read = self._quick = None
+            self._quick_at = -READ_TTL_S
+            self._live = None
+        sent = time.monotonic()
+        ask = self._identify or _identify.identify
+        while True:
+            elapsed = time.monotonic() - sent
+            try:
+                reply = ask(ip, timeout=1.0, retries=0)
+            except (UnreachableError, UsageError):
+                reply = None
+            if reply is not None and getattr(reply, "is_rescue", False):
+                reply = None                     # stage0 rescue: not the harness yet
+            if reply is not None:
+                ssh = reply.ssh if hasattr(reply, "ssh") else {}
+                seen = str(ssh.get("host_key_sha256") or "")
+                if not seen:
+                    raise RefusedError(
+                        f"a board answers at {ip} but publishes no SSH host key, so Harness "
+                        "Manager cannot tell it is this board; it was not adopted",
+                        hint=f"check the panel (row 5 shows its IP); `harness-manager board "
+                             f"identity {ip}` reads it")
+                if seen != host_key:
+                    raise RefusedError(
+                        f"a different board answers at {ip}: its SSH host key is {seen}, this "
+                        f"board's is {host_key}. It was not adopted. This board took the new "
+                        "identity at its restart but keeps the address only if it was free "
+                        "(DAD), so it may be on DHCP; check its panel (row 5 shows its IP)",
+                        hint="give this board another address once you find it")
+                raw = reply.raw if hasattr(reply, "raw") else dict(reply)
+                impl = reply.impl if hasattr(reply, "impl") else IMPL_LINUX
+                reported = parse_identity(raw, impl=impl, via="identify")
+                address = reply.control_endpoint if hasattr(reply, "control_endpoint") \
+                    else f"{ip}:6900"
+                board_id = reply.board_id if hasattr(reply, "board_id") else f"mps3@{address}"
+                return {"board_id": board_id, "address": address, "reported": reported,
+                        "identify": raw,
+                        "reboot": {"up_after_s": round(elapsed, 3),
+                                   "down_evidence": f"the reboot verb answered (in_ms="
+                                                    f"{getattr(resp, 'in_ms', 0)})",
+                                   "up_evidence": f"identify at {ip}: host key {seen}",
+                                   "summary": f"restarted; found at {ip} after {elapsed:.0f} s "
+                                              "(the same SSH host key)"}}
+            if elapsed >= wait_s:
+                minutes = max(1, round(wait_s / 60))
+                raise ActionFailedError(
+                    "the identity was set and the board restarted, but "
+                    + MOVE_TIMEOUT.format(ip=ip, minutes=minutes),
+                    hint=f"once it answers: `harness-manager board identity {ip}`")
+            say(f"waiting for the board at {ip} ({elapsed:.0f}/{wait_s:.0f} s)")
+            time.sleep(self.move_poll_s)
+
+    def adopt_move(self, old_id: str, new_id: str, *, old_host: str,
+                   new_host: str) -> list[str]:
+        """This Harness Manager's records of the board under its new board id: its boards.toml
+        table (the pinned SSH host key goes with it), its claim record, and the pinned
+        known_hosts entry written again under the new id's alias. The board's own keys did not
+        change (/persist keeps them), so the claim is carried over, not repeated."""
+        from harness_manager.services.identity_assign import move_board_table
+
+        from .claim import (
+            ClaimRecords,
+            _atomic_write,
+            _state_dir,
+            host_key_alias,
+            known_hosts_path,
+            parse_key_line,
+            ssh_config,
+        )
+
+        done: list[str] = []
+        try:
+            pin = ssh_config(self._session.candidate)["host_key"]
+        except HarnessError:
+            pin = ""
+        what = move_board_table(old_id, new_id, old_host, new_host, state_dir=_state_dir())
+        if what:
+            done.append(what)
+        if ClaimRecords().move(old_id, new_id):
+            done.append(f"claims.json: the claim of {old_id} is now {new_id}'s")
+        old_kh = known_hosts_path(old_id)
+        if old_kh.exists():
+            old_kh.unlink()
+        if pin and not pin.startswith("SHA256:"):
+            ktype, blob = parse_key_line(pin)
+            _atomic_write(known_hosts_path(new_id), f"{host_key_alias(new_id)} {ktype} {blob}\n")
+            done.append(f"known_hosts: the pinned key, filed under {new_id}")
+        return done
 
 
 def make_identity_adapter(session: Any) -> Mps3NetIdentity | None:

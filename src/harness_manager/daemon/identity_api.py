@@ -6,7 +6,8 @@ docs/API.md "Board identity" (bearer auth and the error envelope as everywhere):
 | Method and path | Returns |
 |---|---|
 | ``GET /boards/{bid}/identity?refresh=`` | ``{board_id, identity}``: ``BoardInfo.net_identity`` read now (the board: one control-port read, or identify; the hub record once per session). ``refresh=true`` asks the hub again, and for its other targets |
-| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, unset?, clear?, wait_s?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes}`` |
+| ``GET /boards/{bid}/identity/proposal?label=&mac=&ip=`` | lane IDENTITY: ``{board_id, proposal}``, what "Name this board" shows: the name upper-cased and checked (1-16 of A-Z, 0-9, -), ``mac`` (``random`` (default for an image-default MAC), ``keep`` or a value), ``ip`` (``auto`` from the pack's pool, ``keep`` or a value), the changes, the phrase, the same-/24 line, the hub guard and the notes. Nothing is set or reserved |
+| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, unset?, clear?, wait_s?, hub_fixed?, other_subnet?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes, moved, address}`` |
 
 Rules:
 
@@ -179,6 +180,17 @@ def register(ctx: RouteContext) -> None:
         st = service().status(s, refresh=_flag(refresh, "refresh"))
         return _JSON(ok(board_id=bid, identity=st))
 
+    # --- lane IDENTITY: "Name this board" (david 2 Oct) ---
+    @api.get("/boards/{bid:path}/identity/proposal")
+    def identity_proposal(bid: str, label: str | None = None, mac: str | None = None,
+                          ip: str | None = None) -> Any:
+        """What the dialog shows: the name checked, a random MAC, an IP from the pool, the
+        rules and the guards. Nothing is set, written or reserved."""
+        s = ctx.board(bid)
+        return _JSON(ok(board_id=bid, proposal=service().propose(s, label=label, mac=mac,
+                                                                 ip=ip)))
+    # --- end lane IDENTITY ---
+
     @api.post("/boards/{bid:path}/identity")
     def identity_fix(bid: str, body: JsonBody = None) -> Any:
         s = ctx.board(bid)
@@ -194,21 +206,27 @@ def register(ctx: RouteContext) -> None:
             want[k] = BI.DROP                               # the wire's "": drop that key
         from_hub = _bool(b, "from_hub", False)
         clear = _bool(b, "clear", False)
+        hub_fixed = _opt_str(b, "hub_fixed") or ""          # lane IDENTITY: names the hub
+        other_subnet = _bool(b, "other_subnet", False)      # lane IDENTITY: leave this /24
         if clear and (want or from_hub):
             raise UsageError("clear goes alone", hint="clear first, then set what you want")
         if not (want or from_hub or clear):
             raise UsageError("nothing to change", hint="send from_hub, or label/ip/mac/hostname, "
                                                       "or clear")
-        invalid: UsageError | None = None
-        try:
-            BI.validate_want(want)                          # 400 before the job ...
-        except UsageError as exc:
-            invalid = exc                                   # ... after the board's refusals
         wait = b.get("wait_s")
         if wait is not None and (isinstance(wait, bool) or not isinstance(wait, (int, float))
                                  or wait <= 0):
             raise UsageError("wait_s must be a positive number of seconds")
         svc = service()
+        invalid: UsageError | None = None
+        try:
+            # lane IDENTITY: mac "random" and ip "auto" are chosen in the job; a value of the
+            # person's own meets the pack's rules too (not the image's MAC range, a /24)
+            BI.validate_want({k: v for k, v in want.items()
+                              if str(v).strip().lower() not in ("random", "auto")})
+            svc.check_values(s, want)                       # 400 before the job ...
+        except UsageError as exc:
+            invalid = exc                                   # ... after the board's refusals
         with d.gates.op(bid):                               # 409 HELD while a job runs
             st = svc.status(s, cheap=True)
             if st is None:
@@ -218,11 +236,15 @@ def register(ctx: RouteContext) -> None:
                 raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "")
             if invalid is not None:                         # the board's order: invalid last
                 raise invalid
+            if not clear:                                   # the hub and subnet guards: 409
+                svc.precheck(s, st, want, from_hub=from_hub, hub_fixed=hub_fixed,
+                             other_subnet=other_subnet)
             svc.check_lease(s)                              # 409 HELD naming the holder
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             return svc.fix(s, confirm=confirm, want=want or None, from_hub=from_hub,
                            clear=clear, wait_s=float(wait) if wait is not None else None,
-                           progress=lambda text: progress(text, 0, 0))
+                           progress=lambda text: progress(text, 0, 0), hub_fixed=hub_fixed,
+                           other_subnet=other_subnet)
 
         return ctx.accepted(d.jobs.submit("identity", bid, run))

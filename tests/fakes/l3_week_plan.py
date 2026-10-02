@@ -138,6 +138,7 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
     "identity_api": (
         ("GET", "/boards/{bid}/identity"),
         ("POST", "/boards/{bid}/identity"),
+        ("GET", "/boards/{bid}/identity/proposal"),      # lane IDENTITY: "Name this board"
         # --- ui2 api-hub (G10): served in the mock by t14_mock_api's ui2 block ---
         ("GET", "/identity/clashes"),
     ),

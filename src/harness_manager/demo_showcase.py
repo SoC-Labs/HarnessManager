@@ -1620,3 +1620,136 @@ def _bringup_wrap() -> None:
 
 _bringup_wrap()
 # --- end bringup-usb demo ---
+# --- identity demo ---
+# Lane IDENTITY (HM v0.1.1, david 2 Oct): "Name this board" runs end to end in `app --demo` on
+# the showcase's Linux board (BOARD_LINUX). Appended as the lane rules ask: the engine and the
+# classes above are only extended here.
+#
+# - DemoEngine.board_identity: the real IdentityService (board_identity.py) on the demo's state
+#   dir, so the registry (seen.json), the proposal, the guards and the typed phrase are the
+#   product's own; DemoEngine.info carries net_identity like the real engine's.
+# - DemoNetIdentity: the board's side (the session's net_identity adapter): it reports the
+#   generic image's name and MAC (02:00:00:4d:50:53) with its stage0 address 192.168.10.104,
+#   takes identity_set (pending) and applies it at the warm reboot, in memory. Its session
+#   address is not the board's own IP (the demo has no network), so the board never moves.
+# - DemoEngine.identity_policy: the MPS3 rules (random MACs 02:..., never 02:00:00:*; the pool
+#   192.168.10.110-199; never .101) with "answering" from the showcase's own addresses: the
+#   demo sends nothing.
+
+
+class DemoNetIdentity:
+    """``session.net_identity`` for a showcase Linux board (net-protocol v0.16, in memory)."""
+
+    def __init__(self, engine: Any, board_id: str) -> None:
+        self._e, self._bid = engine, board_id
+
+    def _state(self) -> dict[str, Any]:
+        store = self._e.__dict__.setdefault("_demo_identity", {})
+        if self._bid not in store:
+            ip = self._bid.split("@", 1)[-1].rsplit(":", 1)[0]
+            store[self._bid] = {
+                "label": "MPS3", "hostname": "mps3", "ip": f"{ip}/24",
+                "mac": "02:00:00:4d:50:53",
+                "source": {"label": "default", "hostname": "label", "ip": "stage0",
+                           "mac": "default"},
+                "stage0": {"label": None, "ip": f"{ip}/24", "mac": None}, "override": None,
+                "pending": None, "persist": True, "via": "identity", "feature": True,
+                "feature_known": True, "impl": "linux"}
+        return store[self._bid]
+
+    def read(self, *, refresh: bool = False, cheap: bool = False) -> dict[str, Any]:
+        return {**self._state(), "at": _iso(time.time())}
+
+    def hub_record(self, *, refresh: bool = False, cheap: bool = False) -> None:
+        return None
+
+    def hub_others(self, *, refresh: bool = False) -> list[dict[str, Any]]:
+        return []
+
+    def fix_reason(self, reported: Any) -> tuple[str, str, str]:
+        return "", "", ""
+
+    def address(self) -> str:
+        return "demo-loopback:6900"                  # never the board's own IP: no move
+
+    def policy(self) -> Any:
+        return self._e.identity_policy("mps3")
+
+    def set_identity(self, want: Any) -> dict[str, Any]:
+        st = self._state()
+        st["pending"] = {**(st.get("pending") or {}), **dict(want)}
+        self._e._sleep(0.3)
+        return {"persisted": True, "pending": dict(want), "applies": "reboot",
+                "route": "board-ssh", "setter": "demo"}
+
+    def warm_reboot(self, progress: Any, wait_s: float) -> dict[str, Any]:
+        st = self._state()
+        for done in (0, 10, 20, 30, 41):
+            if progress is not None:
+                progress("reboot", done, 41)
+            self._e._sleep(0.2)
+        pending = st.pop("pending", None) or {}
+        st["pending"] = None
+        for k, v in pending.items():
+            st[k] = v
+            st["source"][k] = "override"
+            if k == "label" and "hostname" not in pending:
+                st["hostname"] = str(v).lower()
+        st["override"] = {**(st.get("override") or {}), **pending}
+        return {"summary": "reboot witnessed: up again after 41.0 s (demo)",
+                "down_after_s": 2.0, "up_after_s": 41.0}
+
+
+def _identity_wrap() -> None:
+    from harness_manager import demo as _demo
+
+    engine_cls = _demo.DemoEngine
+    adapters_id = adapters
+    info0 = engine_cls.info
+
+    def identity_policy(self: Any, pack: str = "mps3") -> Any:
+        from harness_manager.services.identity_assign import IdentityPolicy
+        from harness_manager_mps3 import net_identity as ni
+
+        busy = {b.split("@", 1)[-1].rsplit(":", 1)[0] for b in self._boards}
+        return IdentityPolicy(
+            pack="mps3", mac_first_byte=ni.MAC_FIRST_BYTE,
+            reserved_mac_prefixes=ni.RESERVED_MAC_PREFIXES, reserved_mac_why=ni.RESERVED_MAC_WHY,
+            ip_pool=ni.DEFAULT_IP_POOL, ip_pool_setting=ni.IP_POOL_KEY,
+            reserved_ips=ni.RESERVED_IPS, reserved_ip_why=ni.RESERVED_IP_WHY,
+            rescue_note=ni.RESCUE_NOTE, known_bad_hub_records=dict(ni.KNOWN_BAD_HUB_RECORDS),
+            answering=lambda ip: ip in busy)
+
+    def board_identity(self: Any) -> Any:
+        svc = self.__dict__.get("_board_identity")
+        if svc is None:
+            from harness_manager.services.board_identity import IdentityService
+
+            svc = self.__dict__["_board_identity"] = IdentityService(self)
+        return svc
+
+    def info(self: Any, board_id: str) -> Any:
+        out = info0(self, board_id)
+        session = self.session(board_id)
+        if getattr(session, "net_identity", None) is None:
+            return out
+        try:
+            st = self.board_identity.status(session, cheap=True)
+        except Exception:  # noqa: BLE001 - the identity never fails a read
+            return out
+        return replace(out, net_identity=st)
+
+    def adapters_id_wrap(engine: Any, board: Any) -> dict[str, Any]:
+        out = adapters_id(engine, board)
+        if board.kind == "linux":
+            out["net_identity"] = DemoNetIdentity(engine, board.candidate.board_id)
+        return out
+
+    engine_cls.identity_policy = identity_policy            # type: ignore[attr-defined]
+    engine_cls.board_identity = property(board_identity)    # type: ignore[attr-defined]
+    engine_cls.info = info                                   # type: ignore[method-assign]
+    globals()["adapters"] = adapters_id_wrap
+
+
+_identity_wrap()
+# --- end identity demo ---

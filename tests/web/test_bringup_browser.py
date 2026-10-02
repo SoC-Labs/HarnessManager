@@ -721,27 +721,23 @@ def test_nothing_is_scanned_until_scan_is_clicked(demo):
 # --- the proposed identity (david 2 Oct, D4a), handed to the identity writer --------------------
 
 
-def test_next_proposes_a_label_ip_and_mac_from_the_mcc_usb_serial(demo):
+def test_next_proposes_a_name_from_the_mcc_usb_serial_a_random_mac_and_a_pool_ip(demo):
     page = demo.page()
     bring_up(page, demo.example(0))
     expect(by(page, "bu-witness-result")).to_contain_text("a harness answers", timeout=T)
     expect(by(page, "bu-id-serial")).to_have_text("DEMO20")
     expect(by(page, "bu-id-label")).to_have_value("MPS3-MO20")
-    expect(by(page, "bu-id-ip")).to_have_value("192.168.10.101/24")
-    expect(by(page, "bu-id-mac")).to_have_value(bringup.derive_mac("DEMO20"))
-    expect(by(page, "bu-identity")).to_contain_text(
-        "two boards on one network need different IPs")
-    expect(by(page, "bu-id-derivation")).to_contain_text(
-        'sha256("harness-manager mps3 mac v1:" + the MCC\'s USB serial number, upper case)')
-    expect(by(page, "bu-id-uniqueness")).to_have_text(
-        "Uniqueness of MCC serials is not yet verified.")
+    expect(by(page, "bu-id-ip")).to_have_value("192.168.10.110/24")       # lane IDENTITY: the pool
+    mac = by(page, "bu-id-mac").input_value()
+    assert mac.startswith("02:") and not mac.startswith("02:00:00:")       # random, not derived
+    expect(by(page, "bu-identity")).to_contain_text("every board gets its own IP")
     by(page, "bu-id-label").fill("LAB-07")                             # editable
     page.locator('[data-action="bu-next"]').click()
     modal = by(page, "bu-identity-modal")
     expect(modal).to_be_visible(timeout=T)
     expect(page.locator(f'main[data-board="{BOARD_NEW_ETH}"]')).to_be_visible(timeout=T)
     expect(modal.locator('[data-field="label"]')).to_contain_text("LAB-07")
-    expect(modal.locator('[data-field="mac"]')).to_contain_text(bringup.derive_mac("DEMO20"))
+    expect(modal.locator('[data-field="mac"]')).to_contain_text(mac)
     # the twin: the demo's new board runs the bare-metal harness, which has no identity store
     expect(by(page, "bu-id-refusal")).to_contain_text(
         "This board cannot take an identity: the bare-metal harness has no identity store")

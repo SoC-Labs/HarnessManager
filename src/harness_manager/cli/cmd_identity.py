@@ -6,10 +6,21 @@ Verbs::
     harness-manager board identity TARGET                  what the board reports, the hub's
                                                             record, the differences and clashes
     harness-manager board identity TARGET --from-hub       make the board match its hub entry
-    harness-manager board identity TARGET --label L [--ip A/N] [--mac M] [--hostname H]
+    harness-manager board identity TARGET --label L [--ip A|auto] [--mac M|random] [--hostname H]
     harness-manager board identity TARGET --clear          back to the stage0 bake
     harness-manager board identity TARGET --unset hostname drop one field of the board's own
                                                             setting (net-protocol v0.16 "")
+
+Lane IDENTITY (david 2 Oct): a name is 1-16 of A-Z, 0-9 and - (upper-cased); ``--mac random``
+gives a random locally administered MAC (02:..., never the image's 02:00:00:*, never one in
+this Harness Manager's registry ``<state>/identity/seen.json``); ``--ip auto`` the next free
+address of the pack's pool (MPS3: ``mps3.identity.ip_pool``, 192.168.10.110-199; never
+192.168.10.101, nothing in the registry, nothing answering identify). A value of your own
+must be unicast and outside 02:00:00:* (MAC), an IPv4 address of a /24 (IP). The new IP is
+printed with the same-/24 rule; one outside this PC's /24 needs ``--other-subnet``. A board
+behind a hub changes its MAC or IP only with ``--hub-fixed HUB`` (the hub's dnsmasq knows it
+by MAC: fix its record first). A board reached at the address that changes is found again at
+the new one by its SSH host key, and its records follow it to its new board id.
 
 A change needs the typed phrase (the new label, else ``IDENTITY <board_id>``; ``--consent``
 gives it; ``--yes`` never does), the lease (behind a hub), the board claimed by this Harness
@@ -17,8 +28,10 @@ Manager, and no card job running. It is set, the harness restarts WARM (its ``re
 never an MCC REBOOT), and the identity is read back. A netbooted board (no user microSD) and
 bare metal are refused with the reason.
 
-Exit codes: 0 read or done; 4 the lease, or a card job; 6 set but not verified; 12 bare metal,
-or an image without the identity verbs; 15 refused (the phrase, the claim, a netboot).
+Exit codes: 0 read or done; 2 a value that is not allowed; 4 the lease, or a card job; 6 set
+but not verified (or not found at its new address); 12 bare metal, or an image without the
+identity verbs; 15 refused (the phrase, the claim, a netboot, the hub or subnet guard, no free
+address in the pool, another board at the new address).
 
 ``cmd_claim.register`` adds it to the ``board`` group.
 """
@@ -31,6 +44,7 @@ from typing import Any
 
 from harness_manager.core.errors import ExitCode, RefusedError, UnavailableError, UsageError
 from harness_manager.services import board_identity as BI
+from harness_manager.services import identity_assign as IA
 
 from .context import Ctx
 from .output import Result
@@ -53,13 +67,14 @@ def add_parser(sub: Any, parents: list[argparse.ArgumentParser]) -> argparse.Arg
     g.add_argument("--from-hub", action="store_true",
                    help="make the board match its hub entry (label from the hub's board, IP, "
                         "and MAC unless the hub's looks like its own adapter)")
-    g.add_argument("--label", default=None, metavar="LABEL",
-                   help=f"the LCD label, e.g. MPS3-02 (1-{BI.LABEL_MAX} of A-Z, 0-9 and -; a "
-                        f"stage0 bake holds at most {BI.LABEL_BAKE_MAX})")
-    g.add_argument("--ip", default=None, metavar="A.B.C.D[/N]",
-                   help="the board's address, e.g. 192.168.11.101/24 (/24 when no prefix)")
-    g.add_argument("--mac", default=None, metavar="MAC",
-                   help="the board's MAC, unicast and non-zero, e.g. 02:00:00:00:02:fe")
+    g.add_argument("--label", default=None, metavar="NAME",
+                   help=f"the board's name on its panel, e.g. LAB-07: {IA.NAME_RULE}")
+    g.add_argument("--ip", default=None, metavar="A.B.C.D|auto",
+                   help="the board's address in a /24, e.g. 192.168.10.117; auto: the next "
+                        "free address of the pool (MPS3: mps3.identity.ip_pool)")
+    g.add_argument("--mac", default=None, metavar="MAC|random",
+                   help="the board's MAC, unicast and not 02:00:00:* (the image's range); "
+                        "random: a random locally administered one (02:...)")
     g.add_argument("--hostname", default=None, metavar="NAME",
                    help="the board's host name (by default it follows the label)")
     g.add_argument("--unset", action="append", default=None, choices=BI.FIELDS, metavar="FIELD",
@@ -72,7 +87,15 @@ def add_parser(sub: Any, parents: list[argparse.ArgumentParser]) -> argparse.Arg
                     help="the typed phrase, given here instead of at the prompt (the new "
                          "label, or IDENTITY <board_id>); --yes never implies it")
     ap.add_argument("--wait", type=float, default=None, metavar="S",
-                    help="how long to wait for the harness to restart (default 180 s)")
+                    help="how long to wait for the harness to restart (default 180 s; 240 s "
+                         "when its address changes)")
+    ap.add_argument("--hub-fixed", default="", metavar="HUB",
+                    help="a board behind a hub: name the hub to confirm its record (fpgahub, "
+                         "dnsmasq: it knows the board by MAC) was fixed first; needed to change "
+                         "the board's MAC or IP")
+    ap.add_argument("--other-subnet", action="store_true",
+                    help="the new IP is outside this PC's /24: set it anyway (this PC cannot "
+                         "reach the board there until it has an address in that /24)")
     return ap
 
 
@@ -166,8 +189,19 @@ def row(board_id: str, st: dict[str, Any] | None, action: str = "") -> list[Any]
             ";".join(f["kind"] for f in st.get("findings") or ()), action]
 
 
+def address_lines(ip: str) -> list[str]:
+    """The new IP, where nobody misses it, and the same-/24 rule."""
+    addr = BI.ip_addr(ip)
+    if not addr:
+        return []
+    return [f"NEW IP     {addr}", f"           {IA.same_net_note(addr)}"]
+
+
 def _phrase(ctx: Ctx, phrase: str, question: str) -> str:
     given = str(getattr(ctx.args, "consent", "") or "")
+    if given:                                    # scripted: still say where the board goes
+        for line in question.splitlines()[1:-1]:
+            ctx.note(line.strip())
     if not given:
         stream = ctx.err or sys.stderr
         stream.write(f"{question}\nTo go ahead, type exactly: {phrase}\n> ")
@@ -197,12 +231,20 @@ def cmd_identity(ctx: Ctx) -> int:
             return ExitCode.OK
         if st is None:
             raise UnavailableError(BI.CAPABILITY, BI.NO_ADAPTER)
+        ref = (st.get("fix") or {}).get("refusal")
         try:
-            plan = BI.plan_fix(cand.board_id, st.get("reported"), st.get("hub"), want=want,
-                               from_hub=a.from_hub, clear=a.clear)
+            want = svc.check_values(session, want)
+            picks = {k: want[k] for k in ("mac", "ip")
+                     if str(want.get(k) or "").lower() in (IA.MAC_RANDOM, IA.IP_AUTO)}
+            if picks:
+                if ref:                       # the board's order: its refusal before a choice
+                    raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "")
+                got = svc.choose(session, st, **picks)
+                want.update({k: got[k] for k in picks})
+            plan = BI.plan_fix(cand.board_id, st.get("reported"), st.get("hub"),
+                               want=want or None, from_hub=a.from_hub, clear=a.clear)
         except UsageError:
             # V7-ALIGN: the board's order: locked, then no_persist, then invalid
-            ref = (st.get("fix") or {}).get("refusal")
             if ref:
                 raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "") from None
             raise
@@ -214,22 +256,34 @@ def cmd_identity(ctx: Ctx) -> int:
                                    "result     the board already matches: nothing to change",
                                    *(f"note       {n}" for n in plan["notes"])]))
             return ExitCode.OK
-        ref = (st.get("fix") or {}).get("refusal")
         if ref:                                   # before the question: a refusal after it is rude
             raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "")
+        notes = [] if a.clear else svc.guards(session, st, plan, from_hub=a.from_hub,
+                                              hub_fixed=a.hub_fixed,
+                                              other_subnet=a.other_subnet)
         what = ", ".join(_chg(c) for c in plan["changes"])
-        consent = _phrase(ctx, plan["phrase"],
-                          f"change the identity of {cand.board_id}: {what}? The harness then "
-                          "restarts (its reboot verb, warm: the FPGA is not reloaded) and the "
-                          "identity is read back.")
+        new_ip = "" if a.clear else str(plan["want"].get("ip") or "")
+        ask = [f"change the identity of {cand.board_id}: {what}?",
+               *address_lines(new_ip), *(f"note: {n}" for n in notes),
+               "The harness then restarts (its reboot verb, warm: the FPGA is not reloaded) and "
+               "the identity is read back."]
+        consent = _phrase(ctx, plan["phrase"], "\n".join(ask))
         out = svc.fix(session, confirm=consent, want=want or None, from_hub=a.from_hub,
-                      clear=a.clear, wait_s=a.wait, progress=ctx.note)
+                      clear=a.clear, wait_s=a.wait,
+                      progress=ctx.note, hub_fixed=a.hub_fixed, other_subnet=a.other_subnet)
     after = out.get("identity")
-    ctx.emit(Result("board identity", {"board_id": cand.board_id, **out},
-                    rows=[row(cand.board_id, after, out.get("action", ""))],
-                    human=[f"changed    {what}",
-                           f"reboot     {(out.get('reboot') or {}).get('summary') or 'done'}",
-                           f"verified   {'yes' if out.get('verified') else 'NO'}",
-                           *human(cand.board_id, after)[1:],
+    moved = out.get("moved") or {}
+    lines = [f"changed    {what}",
+             f"reboot     {(out.get('reboot') or {}).get('summary') or 'done'}",
+             f"verified   {'yes' if out.get('verified') else 'NO'}",
+             *address_lines((out.get("address") or {}).get("ip") or "")]
+    if moved:
+        lines += [f"moved      {moved.get('from')} -> {moved.get('to')} (found by its SSH host key)",
+                  *(f"           {r}" for r in moved.get("records") or ()),
+                  f"next       harness-manager board info {moved.get('host')}"]
+    board_id = str(out.get("board_id") or cand.board_id)
+    ctx.emit(Result("board identity", {**out, "board_id": board_id},
+                    rows=[row(board_id, after, out.get("action", ""))],
+                    human=[*lines, *human(board_id, after)[1:],
                            *(f"note       {n}" for n in out.get("notes") or ())]))
     return ExitCode.OK

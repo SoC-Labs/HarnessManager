@@ -393,20 +393,26 @@ def test_twin_the_card_reader_door_is_unavailable_while_sd_flash_is_off(reader, 
 # --- GET .../bringup/proposal: the identity proposed for the new board ---------------------------
 
 
-def test_the_proposed_identity_comes_from_the_mcc_usb_serial(client, board, monkeypatch):
+def test_the_proposed_identity_names_the_board_from_its_serial_with_a_random_mac_and_ip(
+        client, board, monkeypatch):
+    """Lane IDENTITY (david 2 Oct): the name from the MCC's USB serial, a RANDOM MAC (never the
+    serial's) and the pool's next free IP; the command sets exactly what was shown."""
     c, _ = client
     bid = open_usb(c, board, monkeypatch)
     r = c.get(f"{bid_path(bid)}/bringup/proposal", headers=H)
     assert r.status_code == 200, r.text
     p = r.json()["proposal"]
     assert p["serial"] == "FTVIRT" and p["label"] == "MPS3-VIRT"
-    assert p["mac"] == bringup.derive_mac("FTVIRT") and p["ip"] == "192.168.10.101/24"
-    assert p["uniqueness"] == "uniqueness of MCC serials is not yet verified"
+    assert p["mac"].startswith("02:") and not p["mac"].startswith("02:00:00:")
+    assert p["mac_how"] == "random" and p["ip"] == "192.168.10.110/24" and p["ip_how"] == "auto"
+    assert p["pool"] == "192.168.10.110-199" and "derivation" not in p
     assert r.json()["command"] == (f"harness-manager board identity 192.168.10.101 --label "
-                                   f"MPS3-VIRT --ip 192.168.10.101/24 --mac {p['mac']} "
+                                   f"MPS3-VIRT --ip 192.168.10.110 --mac {p['mac']} "
                                    "--consent MPS3-VIRT")
-    r = c.get(f"{bid_path(bid)}/bringup/proposal", params={"ip": "192.168.10.102"}, headers=H)
-    assert r.json()["proposal"]["ip"] == "192.168.10.102/24"
+    again = c.get(f"{bid_path(bid)}/bringup/proposal", params={"ip": "192.168.10.102"},
+                  headers=H).json()
+    assert again["proposal"]["mac"] != p["mac"]                 # random, every time
+    assert again["command"].startswith("harness-manager board identity 192.168.10.102 ")
 
 
 def test_twin_a_board_not_open_here_gets_no_proposal(client, board, monkeypatch):

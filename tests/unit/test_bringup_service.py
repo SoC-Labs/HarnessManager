@@ -589,60 +589,76 @@ def test_twin_no_serial_anywhere_is_empty_never_a_guess():
                               list_ports=lambda: other) == ""
 
 
-def test_the_mac_is_locally_administered_unicast_and_the_same_every_time():
-    import hashlib
+# --- lane IDENTITY (david 2 Oct): a random MAC and the pool's next free IP, not the serial's ---
 
+
+def _mps3_policy(**kw):
+    from harness_manager.services.identity_assign import IdentityPolicy
+
+    return IdentityPolicy(pack="mps3", reserved_mac_prefixes=("02:00:00",),
+                          ip_pool="192.168.10.110-199", reserved_ips=("192.168.10.101",), **kw)
+
+
+def _bytes(*rolls: bytes):
+    it = iter(rolls)
+    return lambda n: next(it)
+
+
+def test_the_mac_is_random_locally_administered_and_unicast():
     from harness_manager.services import board_identity as BI
 
-    mac = bringup.derive_mac("FT6ABC12")
-    want = "02:" + ":".join(f"{b:02x}" for b in hashlib.sha256(
-        b"harness-manager mps3 mac v1:FT6ABC12").digest()[:5])
-    assert mac == want == bringup.derive_mac(" ft6abc12 ")       # upper case, trimmed
-    assert BI.mac_is_local(mac) and BI.mac_is_unicast_nonzero(mac)
-    assert bringup.derive_mac("FT6ABC13") != mac
-    assert bringup.derive_mac("") == ""
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(),
+                                 urandom=_bytes(bytes.fromhex("ff5e3a91c017")))
+    assert p["mac"] == "02:5e:3a:91:c0:17" and p["mac_how"] == "random"     # byte 0 forced
+    assert BI.mac_is_local(p["mac"]) and BI.mac_is_unicast_nonzero(p["mac"])
+    # two proposals for the same serial differ: nothing is derived from it any more
+    a = bringup.propose_identity("FT6ABC12", policy=_mps3_policy())["mac"]
+    b = bringup.propose_identity("FT6ABC12", policy=_mps3_policy())["mac"]
+    assert a != b and a.startswith("02:") and not a.startswith("02:00:00:")
 
 
-def test_twin_the_image_default_mac_is_never_proposed(monkeypatch):
-    import hashlib
-
-    real = hashlib.sha256
-
-    class Fixed:
-        def __init__(self, data: bytes = b"") -> None:
-            self.data = data
-
-        def digest(self) -> bytes:
-            return bytes.fromhex("00004d5053") + real(self.data).digest()[5:]
-
-    monkeypatch.setattr(hashlib, "sha256", Fixed)
-    mac = bringup.derive_mac("ANY")
-    assert mac != "02:00:00:4d:50:53" and mac.startswith("02:")
+def test_twin_the_image_range_and_a_mac_in_the_registry_are_rolled_again():
+    rolls = _bytes(bytes.fromhex("0200004d5053"), bytes.fromhex("02000012abcd"),
+                   bytes.fromhex("021111111111"), bytes.fromhex("022222222222"))
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(),
+                                 taken_macs={"02:11:11:11:11:11": ["mps3@other"]}, urandom=rolls)
+    assert p["mac"] == "02:22:22:22:22:22"           # 02:00:00:* twice, then the registry's
 
 
-def test_the_proposal_label_ip_and_notes_fit_the_identity_writer():
+def test_the_proposal_name_ip_and_notes_fit_the_identity_writer():
     from harness_manager.services import board_identity as BI
 
-    p = bringup.propose_identity("FT6ABC12")
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(rescue_note="rescue: .101"))
     assert p["label"] == "MPS3-BC12" and p["hostname"] == "mps3-bc12"
-    assert p["ip"] == "192.168.10.101/24" and p["mac"] == bringup.derive_mac("FT6ABC12")
+    assert p["ip"] == "192.168.10.110/24" and p["ip_how"] == "auto" and p["ip_error"] == ""
+    assert p["same_net"] == "this PC must be on the same /24 (e.g. 192.168.10.1/24)"
     assert BI.validate_want({k: p[k] for k in ("label", "ip", "mac")}) == {
-        "label": "MPS3-BC12", "ip": "192.168.10.101/24", "mac": p["mac"]}
+        "label": "MPS3-BC12", "ip": "192.168.10.110/24", "mac": p["mac"]}
     assert p["notes"] == [
-        "two boards on one network need different IPs: give each board its own (the image "
-        "default is 192.168.10.101)",
-        f"MAC: {bringup.MAC_DERIVATION}; uniqueness of MCC serials is not yet verified"]
-    assert bringup.propose_identity("ab-1", ip="192.168.11.7")["label"] == "MPS3-AB1"
-    assert bringup.propose_identity("x", ip="10.0.0.5/16")["ip"] == "10.0.0.5/16"
+        "every board gets its own IP: the next free address of the pool (the image default "
+        "192.168.10.101 is never given)", "rescue: .101"]
+    assert bringup.propose_identity("ab-1", policy=_mps3_policy())["label"] == "MPS3-AB1"
+    assert bringup.propose_identity("x", policy=_mps3_policy(),
+                                    taken_ips={"192.168.10.110": ["b"]})["ip"] == \
+        "192.168.10.111/24"                          # the registry's address is skipped
     assert bringup.identity_command("192.168.10.101", p) == (
         f"harness-manager board identity 192.168.10.101 --label MPS3-BC12 --ip "
-        f"192.168.10.101/24 --mac {p['mac']} --consent MPS3-BC12")
+        f"192.168.10.110 --mac {p['mac']} --consent MPS3-BC12")
 
 
-def test_twin_no_serial_proposes_only_the_ip_and_says_why():
-    p = bringup.propose_identity("")
-    assert p["label"] == p["mac"] == p["hostname"] == ""
+def test_twin_no_serial_proposes_no_name_and_says_why():
+    p = bringup.propose_identity("", policy=_mps3_policy())
+    assert p["label"] == p["hostname"] == "" and p["mac"].startswith("02:")
     assert p["notes"][0] == ("the MCC's USB serial number is not known (the Debug USB did not "
-                             "report one): give the label and the MAC yourself")
-    assert bringup.identity_command("h", p) == "harness-manager board identity h --ip " \
-        "192.168.10.101/24"
+                             "report one): give the board a name yourself")
+    assert bringup.identity_command("h", p) == (f"harness-manager board identity h --ip "
+                                                f"192.168.10.110 --mac {p['mac']}")
+
+
+def test_twin_an_exhausted_pool_proposes_no_ip_and_says_why():
+    full = {f"192.168.10.{n}": ["b"] for n in range(110, 200)}
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(), taken_ips=full)
+    assert p["ip"] == "" and p["ip_how"] == ""
+    assert p["ip_error"].startswith("no free address in the pool 192.168.10.110-199: all 90 "
+                                    "are taken (90 given to or seen on boards here")
+    assert "--ip" not in bringup.identity_command("h", p)

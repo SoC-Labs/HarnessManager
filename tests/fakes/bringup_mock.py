@@ -64,11 +64,17 @@ def register(app: FastAPI, state: Any, ok: Any) -> None:
     @app.get(f"{API}/boards/{{bid:path}}/bringup/proposal")
     def identity(bid: str, ip: str | None = None) -> dict[str, Any]:
         s = state.session(bid)
-        want = (ip or "").strip() or bringup.DEFAULT_HOST
+        host = ((ip or "").strip() or bringup.DEFAULT_HOST).split("/", 1)[0]
+        from harness_manager.services import identity_assign as IA
+
+        # lane IDENTITY: the MPS3 rules, the pool never asked (no datagram leaves a test)
+        policy = IA.IdentityPolicy(pack="mps3", reserved_mac_prefixes=("02:00:00",),
+                                   ip_pool="192.168.10.110-199",
+                                   reserved_ips=("192.168.10.101",))
         proposal = bringup.propose_identity(
-            bringup.mcc_serial(getattr(s, "candidate", None), list_ports=list), ip=want)
+            bringup.mcc_serial(getattr(s, "candidate", None), list_ports=list), policy=policy)
         return ok(board_id=bid, proposal=proposal,
-                  command=bringup.identity_command(want.split("/", 1)[0], proposal))
+                  command=bringup.identity_command(host, proposal))
 
     @app.post(f"{API}/bringup/card-reader")
     def card_reader(body: JsonBody = None) -> dict[str, Any]:

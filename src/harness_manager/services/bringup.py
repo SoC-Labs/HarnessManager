@@ -26,10 +26,12 @@ wizard needs around them:
 - ``status``: the switches the wizard shows (``bringup.sd_flash``, the network OS door, the
   signing keys) and the default address;
 - ``propose_identity``: what the new board should be called (david 2 Oct, D4a: a generic image,
-  then the wizard names the board): a label from the MCC's USB serial number, the IP, and a
-  locally administered MAC derived from that serial. Only a PROPOSAL: the existing identity
-  writer (``board identity`` / net-protocol v0.16 ``identity_set``) sets it, with its typed
-  phrase.
+  then the wizard names the board): a name from the MCC's USB serial number (``MPS3-`` and its
+  last 4), and (lane IDENTITY, david 2 Oct: a unique IP per board, a RANDOM MAC; this replaces
+  the MAC derived from the serial) a random MAC and the next free IP of the pack's pool
+  (``services/identity_assign.py``). Only a PROPOSAL: the "Name this board" dialog and the
+  identity writer (``board identity`` / net-protocol v0.16 ``identity_set``) set it, with its
+  typed phrase.
 
 Nothing here writes a device, mounts a volume or downloads anything.
 """
@@ -756,15 +758,11 @@ def witness(engine: Any, host: str = DEFAULT_HOST, *, wait_s: float = DEFAULT_WI
 
 # --- the identity a new board is given (a proposal; the identity writer sets it) ------------------
 
-#: The salt of the MAC derivation. Changing it changes every proposed MAC: never do.
-MAC_SALT = "harness-manager mps3 mac v1:"
-MAC_DERIVATION = ("02, then the first 5 bytes of sha256(\"harness-manager mps3 mac v1:\" + the "
-                  "MCC's USB serial number, upper case): a locally administered unicast MAC")
-MAC_UNIQUENESS = "uniqueness of MCC serials is not yet verified"
-IP_NOTE = ("two boards on one network need different IPs: give each board its own (the image "
-           "default is 192.168.10.101)")
+#: Lane IDENTITY (david 2 Oct): every board gets a unique IP and a random MAC.
+IP_NOTE = ("every board gets its own IP: the next free address of the pool (the image default "
+           "192.168.10.101 is never given)")
 NO_SERIAL = ("the MCC's USB serial number is not known (the Debug USB did not report one): give "
-             "the label and the MAC yourself")
+             "the board a name yourself")
 #: The bare-metal harness: nothing to set (harness_manager_mps3.net_identity's words).
 NO_IDENTITY_STORE = ("the bare-metal harness has no identity store: its label, IP and MAC are "
                      "compiled into the firmware; the proposal is for the Linux harness "
@@ -810,46 +808,63 @@ def mcc_serial(cand: Candidate | None, *,
     return ""
 
 
-def derive_mac(serial: str) -> str:
-    """A locally administered unicast MAC from the MCC's USB serial number (``MAC_DERIVATION``):
-    the same serial gives the same MAC on every PC, every time. Never the image default."""
-    from harness_manager.services.board_identity import DEFAULT_MAC
+def identity_inputs(engine: Any) -> tuple[Any, dict[str, list[str]], dict[str, list[str]]]:
+    """The pack's identity policy and this Harness Manager's registry (every MAC and IP it
+    assigned or saw: ``<state>/identity/seen.json``), for a proposal."""
+    from harness_manager.services import identity_assign as IA
+    from harness_manager.services.board_identity import SeenIdentities
 
-    key = serial.strip().upper()
-    if not key:
-        return ""
-    digest = hashlib.sha256((MAC_SALT + key).encode("utf-8")).digest()
-    mac = "02:" + ":".join(f"{b:02x}" for b in digest[:5])
-    if mac == DEFAULT_MAC:                       # 1 in 2^40: the next five bytes
-        mac = "02:" + ":".join(f"{b:02x}" for b in digest[5:10])
-    return mac
+    svc = getattr(engine, "board_identity", None)
+    seen = getattr(svc, "seen", None)
+    if not isinstance(seen, SeenIdentities):
+        state = getattr(engine, "state_dir", None)
+        seen = SeenIdentities(Path(state) / "identity") if state else None
+    macs = seen.taken("mac") if seen is not None else {}
+    ips = seen.taken("ip") if seen is not None else {}
+    return IA.policy_for(engine), macs, ips
 
 
-def propose_identity(serial: str, *, ip: str = DEFAULT_HOST) -> dict[str, Any]:
-    """What the wizard and the CLI propose for a new board (editable; nothing is set here):
-    ``{serial, label, hostname, ip, mac, derivation, notes}``. The label is ``MPS3-`` and the
-    serial's last 4 letters or digits (the LCD row takes A-Z, 0-9 and -); the hostname follows
-    it in lower case; the IP is the image default unless given."""
+def propose_identity(serial: str, *, policy: Any = None, taken_macs: Any = (),
+                     taken_ips: Any = (), urandom: Callable[[int], bytes] | None = None,
+                     ) -> dict[str, Any]:
+    """What the wizard and the CLI propose for a new board (editable; nothing is set, written
+    or reserved here): ``{serial, label, hostname, mac, mac_how, ip, ip_how, ip_error,
+    same_net, notes}``. The name is ``MPS3-`` and the serial's last 4 letters or digits
+    (upper case: the panel takes A-Z, 0-9 and -); the MAC is random (byte 0 the pack's,
+    never a reserved range or a MAC in the registry); the IP is the next free address of the
+    pack's pool (``ip_error`` says why there is none)."""
+    from harness_manager.core.errors import HarnessError
+    from harness_manager.services import identity_assign as IA
+
+    policy = policy or IA.GENERIC_POLICY
     key = re.sub(r"[^A-Z0-9]", "", serial.strip().upper())
     tail = key[-4:]
-    label = f"MPS3-{tail}" if tail else ""
-    addr = ip if "/" in ip else f"{ip}/24"
+    label = IA.normalize_name(f"MPS3-{tail}") if tail else ""
     notes = [IP_NOTE]
-    if key:
-        notes.append(f"MAC: {MAC_DERIVATION}; {MAC_UNIQUENESS}")
-    else:
+    if not key:
         notes.insert(0, NO_SERIAL)
-    return {"serial": serial.strip(), "label": label, "hostname": label.lower(), "ip": addr,
-            "mac": derive_mac(serial) if key else "", "derivation": MAC_DERIVATION,
-            "uniqueness": MAC_UNIQUENESS, "ip_note": IP_NOTE, "notes": notes}
+    if policy.rescue_note:
+        notes.append(policy.rescue_note)
+    mac = IA.random_mac(policy, taken_macs, **({"urandom": urandom} if urandom else {}))
+    ip, ip_error = "", ""
+    try:
+        ip = IA.allocate_ip(policy, taken_ips)
+    except HarnessError as exc:
+        ip_error = exc.message + (f" ({exc.hint})" if exc.hint else "")
+    return {"serial": serial.strip(), "label": label, "hostname": label.lower(), "mac": mac,
+            "mac_how": IA.MAC_RANDOM, "ip": ip, "ip_how": IA.IP_AUTO if ip else "",
+            "ip_error": ip_error, "same_net": IA.same_net_note(ip), "pool": policy.ip_pool,
+            "ip_note": IP_NOTE, "notes": notes}
 
 
 def identity_command(host: str, proposal: dict[str, Any]) -> str:
-    """The ``board identity`` command that sets the proposal (its typed phrase is the label)."""
+    """The ``board identity`` command that sets the proposal (its typed phrase is the label):
+    the proposal's own MAC and IP, so what was shown is what is set."""
     parts = ["harness-manager board identity", host]
     for key in ("label", "ip", "mac"):
-        if proposal.get(key):
-            parts.append(f"--{key} {proposal[key]}")
+        value = proposal.get(key)
+        if value:
+            parts.append(f"--{key} {str(value).split('/', 1)[0] if key == 'ip' else value}")
     if proposal.get("label"):
         parts.append(f"--consent {proposal['label']}")
     return " ".join(parts)

@@ -77,9 +77,12 @@ def test_the_plan_from_the_hub_and_its_phrase():
 
 @pytest.mark.parametrize("field,value,words", [
     ("mac", "01:00:5e:00:00:01", "unicast"), ("mac", "00:00:00:00:00:00", "unicast"),
-    ("label", "X" * 24, "LCD row"), ("ip", "300.1.1.1", "IPv4"), ("hostname", "Bad_Name", "host"),
+    ("label", "X" * 24, "at most 16"), ("ip", "300.1.1.1", "IPv4"),
+    ("hostname", "Bad_Name", "host"),
+    # lane IDENTITY (david 2 Oct): 1-16 of A-Z, 0-9 and - after upper-casing
+    ("label", "X" * 17, "17 characters"), ("label", "MPS3 02", "a space"),
+    ("label", "mps3_02", "'_'"),
     # V7-ALIGN: the shipped rules (identity_core.c)
-    ("label", "X" * 20, "1-19"), ("label", "mps3-02", "A-Z"), ("label", "MPS3 02", "LCD row"),
     ("hostname", "-a", "RFC 1123"), ("hostname", "a." + "b" * 62, "63"),
     ("ip", "10.0.0.0/8", "network address"), ("ip", "1.2.3.4/31", "prefix"),
     ("ip", "192.168.11.255", "broadcast"), ("ip", "127.0.0.2", "usable"),
@@ -115,8 +118,10 @@ def test_the_same_board_under_another_id_is_not_another_board(tmp_path):
 
 
 def test_v7_twin_the_shipped_rules_take_what_the_board_takes():
-    assert BI.LABEL_MAX == 19 and BI.LABEL_BAKE_MAX == 8
-    assert BI.validate_want({"label": "X" * 19})["label"] == "X" * 19
+    assert BI.LABEL_MAX == 19 and BI.LABEL_BAKE_MAX == 8       # the board's own limits
+    # lane IDENTITY: Harness Manager caps names at 16 (the aligned panel) and upper-cases
+    assert BI.validate_want({"label": "X" * 16})["label"] == "X" * 16
+    assert BI.validate_want({"label": " mps3-02 "})["label"] == "MPS3-02"
     assert BI.validate_want({"hostname": "a.b-c"}) == {"hostname": "a.b-c"}      # dots, as RFC 1123
     assert BI.validate_want({"hostname": "Mps3-02"}) == {"hostname": "Mps3-02"}  # any case
     assert BI.validate_want({"ip": "10.0.0.1"}) == {"ip": "10.0.0.1/24"}
