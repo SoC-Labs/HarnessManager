@@ -65,7 +65,7 @@ def rig(tmp_path: Path, monkeypatch):
     eng._services["update"] = svc
     with FakeChannelServer(tmp_path / "www") as srv:
         builder = ChannelBuilder(srv.root, KEYS)
-        builder.add_app("0.2.0", AssetFile("harness_manager-0.2.0-py3-none-any.whl", b"PK-w"))
+        builder.add_app("1.1.0", AssetFile("harness_manager-1.1.0-py3-none-any.whl", b"PK-w"))
         builder.publish(serial=1)
         monkeypatch.setenv("HARNESS_MANAGER_UPDATE_SOURCE", srv.source())
         yield {"eng": eng, "svc": svc, "app": app, "root": root, "srv": srv, "sd": sd}
@@ -101,9 +101,9 @@ def test_update_app_apply_stages_through_the_daemon_and_reports_the_restart(rig,
         rc, out, err = run(capsys, monkeypatch, "--json", "update", "app", "--apply", "--yes")
     assert rc == ExitCode.OK, err
     body = json.loads(out)
-    assert (body["version"], body["result"], body["apply"]["to"]) == ("0.2.0", "applied", "0.2.0")
-    assert rig["app"].state()["versions"]["0.2.0"]["state"] == "staged"       # staged by it
-    assert "update: applying 0.2.0" in err
+    assert (body["version"], body["result"], body["apply"]["to"]) == ("1.1.0", "applied", "1.1.0")
+    assert rig["app"].state()["versions"]["1.1.0"]["state"] == "staged"       # staged by it
+    assert "update: applying 1.1.0" in err
 
 
 def test_negative_twin_a_rolled_back_apply_fails_with_the_reason(rig, capsys, monkeypatch):
@@ -128,19 +128,19 @@ def test_update_status_reads_the_files_with_no_daemon(rig, capsys, monkeypatch, 
 
     previous = set_engine_factory(lambda _args: rig["eng"])
     try:
-        rig["app"].stage(*_release(tmp_path, "0.3.0"))
-        rig["app"].mark_bad("0.2.1", "exited 2 s after it answered", phase="stable")
+        rig["app"].stage(*_release(tmp_path, "1.2.0"))
+        rig["app"].mark_bad("1.1.1", "exited 2 s after it answered", phase="stable")
         su.write_json(su.last_apply_path(rig["sd"]), {"id": "x", "from": __version__,
-                                                      "to": "0.2.1", "result": "rolled-back",
+                                                      "to": "1.1.1", "result": "rolled-back",
                                                       "reason": "exited", "at": 1.0})
         rc, out, err = run(capsys, monkeypatch, "--json", "update", "status")
         assert rc == 0, err
         body = json.loads(out)
-        assert body["staged"] == ["0.3.0"] and "0.2.1" in body["bad"]
+        assert body["staged"] == ["1.2.0"] and "1.1.1" in body["bad"]
         assert body["effective"]["auto"] == "stage" and body["daemon"]["state"] == "stopped"
         assert body["last_apply"]["result"] == "rolled-back"
         rc, out, _ = run(capsys, monkeypatch, "update", "status")
-        assert "bad        0.2.1: exited 2 s after it answered" in out
+        assert "bad        1.1.1: exited 2 s after it answered" in out
         assert "last apply" in out and "rolled-back" in out
         rc, out, _ = run(capsys, monkeypatch, "--tsv", "update", "status")
         assert len(out.rstrip("\n").split("\t")) == len(TSV_COLUMNS["update status"])
@@ -159,7 +159,7 @@ def test_negative_twin_apply_with_no_daemon_stages_and_switches_here(rig, capsys
     assert rc == ExitCode.OK, err
     assert "nothing to restart" in err
     body = json.loads(out)
-    assert body["switched"] is True and rig["app"].state()["current"] == "0.2.0"
+    assert body["switched"] is True and rig["app"].state()["current"] == "1.1.0"
 
 
 def _release(tmp_path: Path, version: str):

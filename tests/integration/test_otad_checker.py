@@ -79,40 +79,40 @@ def topics(r: dict, topic: str) -> list[dict]:
 
 def test_the_checker_stages_the_offer_and_publishes_it_once(rig):
     r = rig
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     rec = r["checker"].tick()
-    assert rec["available"] == "0.2.0" and rec["staged"] is True and rec["catalog"] == "hm-app"
-    assert r["app"].state()["versions"]["0.2.0"]["state"] == "staged"
+    assert rec["available"] == "1.1.0" and rec["staged"] is True and rec["catalog"] == "hm-app"
+    assert r["app"].state()["versions"]["1.1.0"]["state"] == "staged"
     assert r["app"].state()["current"] == ""                         # it never switches
     avail = topics(r, "update.available")
-    assert [(a["app"], a["staged"], a["source"]) for a in avail] == [("0.2.0", True, "checker")]
-    assert [s["version"] for s in topics(r, "update.app.staged")] == ["0.2.0"]   # OTA-C's
+    assert [(a["app"], a["staged"], a["source"]) for a in avail] == [("1.1.0", True, "checker")]
+    assert [s["version"] for s in topics(r, "update.app.staged")] == ["1.1.0"]   # OTA-C's
     last = json.loads(su.last_check_path(r["sd"]).read_text())
-    assert last["available"] == "0.2.0" and last["announced"] == ["0.2.0", True]
+    assert last["available"] == "1.1.0" and last["announced"] == ["1.1.0", True]
     # negative twin: the next check sees the same offer: no new event, nothing rebuilt
     calls = len(r["uv"].calls)
     r["checker"].tick()
     assert len(topics(r, "update.available")) == 1 and len(r["uv"].calls) == calls
     # a newer release is announced again
-    publish_app(r, "0.3.0", serial=2)
+    publish_app(r, "1.2.0", serial=2)
     r["checker"].tick()
-    assert [a["app"] for a in topics(r, "update.available")] == ["0.2.0", "0.3.0"]
+    assert [a["app"] for a in topics(r, "update.available")] == ["1.1.0", "1.2.0"]
 
 
 def test_notify_publishes_without_staging(rig):
     r = rig
     su.save_settings(r["sd"], auto="notify")
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     rec = r["checker"].tick()
-    assert rec["available"] == "0.2.0" and rec["staged"] is False and rec["mode"] == "notify"
-    assert [(a["app"], a["staged"]) for a in topics(r, "update.available")] == [("0.2.0", False)]
-    assert r["uv"].calls == [] and "0.2.0" not in r["app"].state()["versions"]
+    assert rec["available"] == "1.1.0" and rec["staged"] is False and rec["mode"] == "notify"
+    assert [(a["app"], a["staged"]) for a in topics(r, "update.available")] == [("1.1.0", False)]
+    assert r["uv"].calls == [] and "1.1.0" not in r["app"].state()["versions"]
 
 
 @pytest.mark.parametrize("how", ["policy", "settings", "developer install"])
 def test_off_means_silence_no_fetch_no_event_no_record(rig, how):
     r = rig
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     if how == "policy":
         r["svc"].policy = Policy(path="/etc/harness-manager/policy.toml", self_update="off")
     elif how == "settings":
@@ -129,7 +129,7 @@ def test_off_means_silence_no_fetch_no_event_no_record(rig, how):
 
 def test_negative_twin_with_self_update_on_the_same_channel_is_fetched(rig):
     r = rig
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     before = len(r["srv"].requests)
     r["checker"].tick()
     assert len(r["srv"].requests) > before and topics(r, "update.available")
@@ -137,14 +137,14 @@ def test_negative_twin_with_self_update_on_the_same_channel_is_fetched(rig):
 
 def test_a_bad_version_is_never_offered_by_the_checker(rig):
     r = rig
-    publish_app(r, "0.2.0", serial=1)
-    r["app"].mark_bad("0.2.0", "the daemon exited while starting", phase="start")
+    publish_app(r, "1.1.0", serial=1)
+    r["app"].mark_bad("1.1.0", "the daemon exited while starting", phase="start")
     rec = r["checker"].tick()
-    assert rec["available"] == "" and rec["skipped_bad"]["version"] == "0.2.0"
+    assert rec["available"] == "" and rec["skipped_bad"]["version"] == "1.1.0"
     assert topics(r, "update.available") == [] and r["uv"].calls == []
     # the twin: a newer release is offered and staged as usual
-    publish_app(r, "0.2.1", serial=2)
-    assert r["checker"].tick()["available"] == "0.2.1"
+    publish_app(r, "1.1.1", serial=2)
+    assert r["checker"].tick()["available"] == "1.1.1"
 
 
 def test_offline_is_quiet_and_backs_off_then_recovers(rig, tmp_path, monkeypatch):
@@ -160,7 +160,7 @@ def test_offline_is_quiet_and_backs_off_then_recovers(rig, tmp_path, monkeypatch
     assert json.loads(su.last_check_path(r["sd"]).read_text())["error_kind"] == "offline"
     # the twin: the source is back, the offer is published, the interval is the policy's
     monkeypatch.setenv("HARNESS_MANAGER_UPDATE_SOURCE", r["srv"].source())
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     rec = ck.tick()
     assert rec["error"] == "" and topics(r, "update.available")
     assert ck.delay_after(rec) == pytest.approx(6 * 3600) and ck.backoff_s == 0
@@ -168,7 +168,7 @@ def test_offline_is_quiet_and_backs_off_then_recovers(rig, tmp_path, monkeypatch
 
 def test_a_refused_channel_is_loud_and_recorded_as_refused(rig, caplog):
     r = rig
-    publish_app(r, "0.2.0", serial=2)
+    publish_app(r, "1.1.0", serial=2)
     r["checker"].tick()
     r["builder"].publish(serial=1)                                     # a rollback of the serial
     rec = r["checker"].tick()
@@ -199,7 +199,7 @@ def test_staging_as_a_job_is_deferred_while_the_service_is_busy(rig):
         raise HeldError("update_app job 1 is running in the service")
 
     r["checker"].submit = busy
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     rec = r["checker"].tick()
     assert rec["staged"] is False and "running" in rec["stage_deferred"]
     assert r["checker"].delay_after(rec) == 600.0                     # retried in 10 minutes
@@ -218,12 +218,12 @@ def test_staging_as_a_job_is_deferred_while_the_service_is_busy(rig):
     assert rec["stage_job"] == "j1" and done.wait(20)
     assert submitted == ["update_stage"]
     assert [(a["app"], a["staged"]) for a in topics(r, "update.available")] == \
-        [("0.2.0", False), ("0.2.0", True)]
+        [("1.1.0", False), ("1.1.0", True)]
 
 
 def test_the_timer_runs_the_first_check_and_stops(rig):
     r = rig
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     r["checker"].start()
     deadline = time.monotonic() + 10
     # The event is published inside the tick; next_in_s is set after it returns: wait for both.
@@ -241,22 +241,22 @@ def test_the_timer_runs_the_first_check_and_stops(rig):
 def test_a_found_update_records_its_notes_or_a_one_line_summary(rig):
     r = rig
     notes = "Faster consoles.\nThe touch bus no longer wedges."
-    publish_app(r, "0.2.0", serial=1, notes=notes)
+    publish_app(r, "1.1.0", serial=1, notes=notes)
     rec = r["checker"].tick()
-    assert rec["available"] == "0.2.0" and rec["notes"] == notes
+    assert rec["available"] == "1.1.0" and rec["notes"] == notes
     assert json.loads(su.last_check_path(r["sd"]).read_text())["notes"] == notes
     assert topics(r, "update.available")[0]["notes"] == notes          # the event is unchanged
     # a release without notes: one line that says what was found
-    publish_app(r, "0.3.0", serial=2)
+    publish_app(r, "1.2.0", serial=2)
     rec = r["checker"].tick()
-    assert rec["notes"] == "harness-manager 0.3.0 is available on the stable channel (serial 2)"
+    assert rec["notes"] == "harness-manager 1.2.0 is available on the stable channel (serial 2)"
     assert "\n" not in rec["notes"]
 
 
 def test_negative_twin_no_update_found_records_no_notes(rig):
     r = rig
-    publish_app(r, "0.2.0", serial=1, notes="not for you")
-    r["app"].mark_bad("0.2.0", "the daemon exited while starting", phase="start")
+    publish_app(r, "1.1.0", serial=1, notes="not for you")
+    r["app"].mark_bad("1.1.0", "the daemon exited while starting", phase="start")
     rec = r["checker"].tick()
     assert rec["available"] == "" and "notes" not in rec
     assert "notes" not in json.loads(su.last_check_path(r["sd"]).read_text())
@@ -283,7 +283,7 @@ def test_next_check_is_the_timers_schedule_and_none_without_one(rig):
 
 def test_after_a_check_next_check_is_one_interval_on(rig):
     r = rig
-    publish_app(r, "0.2.0", serial=1)
+    publish_app(r, "1.1.0", serial=1)
     r["checker"].start()
     deadline = time.monotonic() + 10
     while r["checker"].next_in_s is None and time.monotonic() < deadline:

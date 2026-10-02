@@ -3,7 +3,7 @@
 
 The daemon app runs under FastAPI's TestClient over the real Engine and a virtual MPS3 (a
 console with a real PTY). The update service's app updater points at an install root in
-``tmp_path`` with the installer's venv registered and 0.2.0 staged. The apply step's three
+``tmp_path`` with the installer's venv registered and 1.1.0 staged. The apply step's three
 outside effects are replaced by recorders: the new version's ``--self-test``, the detached
 helper, and the daemon's own shutdown. Every check has a negative twin.
 """
@@ -51,7 +51,7 @@ from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers, state_d
 pytestmark = pytest.mark.skipif(not ptymod.supported(), reason="PTYs need a POSIX system")
 
 H = headers()
-NEW = "0.2.0"
+NEW = "1.1.0"
 
 
 @pytest.fixture(autouse=True)
@@ -62,13 +62,13 @@ def _wiring(tmp_path: Path, monkeypatch) -> None:
 
 
 def install_root(tmp_path: Path) -> Path:
-    """The installer's venv (current ``""``) and 0.2.0 staged beside it."""
+    """The installer's venv (current ``""``) and 1.1.0 staged beside it."""
     root = tmp_path / "root"
     (root / "venv" / "bin").mkdir(parents=True)
     (root / "venv" / "bin" / "python").write_text("installer python")
     _launch.register(root, root / "venv", __version__, extras=[], windows=False)
     (root / "versions" / NEW / "bin").mkdir(parents=True)
-    (root / "versions" / NEW / "bin" / "python").write_text("0.2.0 python")
+    (root / "versions" / NEW / "bin" / "python").write_text("1.1.0 python")
     ptr = json.loads((root / "current.json").read_text())
     ptr["versions"] = {NEW: {"state": "staged", "at": 0.0}}
     (root / "current.json").write_text(json.dumps(ptr))
@@ -163,7 +163,7 @@ def test_apply_refuses_what_it_cannot_do_and_changes_nothing(world, case, status
     w = world
     body: dict[str, Any] = {"version": NEW}
     if case == "not staged":
-        body["version"] = "0.9.0"
+        body["version"] = "1.9.0"
     elif case == "marked bad":
         w["svc"].app().mark_bad(NEW, "it failed its health check", phase="health")
     elif case == "another process holds a board":
@@ -384,15 +384,15 @@ def test_stage_only_stages_and_never_switches_even_with_a_board_open(world):
     open_board(w)
     with FakeChannelServer(w["root"].parent / "www") as srv:
         builder = ChannelBuilder(srv.root, KEYS)
-        builder.add_app("0.3.0", AssetFile("harness_manager-0.3.0-py3-none-any.whl", b"PK-w"))
+        builder.add_app("1.2.0", AssetFile("harness_manager-1.2.0-py3-none-any.whl", b"PK-w"))
         builder.publish(serial=1)
         r = w["client"].post("/api/v1/update/app", headers=H,
                              json={"source": srv.source(), "stage_only": True})
         state = wait_job(w["client"], r.json()["job"])
     assert state["state"] == "done", state
-    assert (state["result"]["version"], state["result"]["staged"]) == ("0.3.0", True)
+    assert (state["result"]["version"], state["result"]["staged"]) == ("1.2.0", True)
     ptr = w["svc"].app().state()
-    assert ptr["current"] == "" and ptr["versions"]["0.3.0"]["state"] == "staged"
+    assert ptr["current"] == "" and ptr["versions"]["1.2.0"]["state"] == "staged"
 
 
 # --- the resumed daemon's side ----------------------------------------------------------------
