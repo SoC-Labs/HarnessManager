@@ -749,3 +749,27 @@ A NEW board, plugged into this PC by its Debug USB, brought up to a running harn
 - **`signing`** is the update service's trusted keys: none pinned (docs/KEYS.md) means every real channel is refused, and the app says so before Read the list; nothing here weakens that.
 - **The demo** (`app --demo`): a new board on the Debug USB (`mps3@usb:/dev/ttyUSB20`, listed only by this scan), its V2M-MPS3 drive (Arm's stock AN536 tree), and `mps3@192.168.10.101:6900`, dark until a write and an MCC reboot of the USB board, then the bare-metal harness, or stage0 RESCUE for the Linux bundle; `examples` lists the bundles (a bare-metal release folder with `overlays/open`, the Linux release zip, a folder with an `.ebf`) and `card_image.example` a whole-card image.
 <!-- --- end bringup-usb --- -->
+
+<!-- --- windows --- -->
+## Windows (lane WINDOWS, additive)
+
+- **This PC's network check** (`services/netcheck.py`, Windows only; absent elsewhere):
+  `network: {platform: "win32", host, network ("192.168.10.0/24"), adapter, category
+  ("Public"|"Private"|"DomainAuthenticated"|""), ok, admin_how, notes, problems: [{code,
+  title, text, admin: [cmd], alternative?: [cmd], gui?, adapter?}]}`; `code` is `no_address`,
+  `public_profile`, `udp_blocked`, `python_blocked` or `unknown`. Each `admin` line is
+  Administrator PowerShell for the user to paste: HM never runs it. It rides on:
+  `GET /bringup/scan`'s `ethernet.network` when nothing answers; the `bringup_witness` job's
+  timeout error data (`data.network`, beside `timeout`, `host`, `waited_s`); the CLI's `probe`
+  and `info` errors (`--json`: `error.data.network`).
+- **`GET /bringup/status`** adds `platform` (`sys.platform` of the service: `win32`, `linux`,
+  `darwin`).
+- **The card writer on Windows** (`GET /cardwriter/devices` `platform: "win32"`,
+  `supported: true`): each device's `path` is `\\.\PhysicalDriveN`, its `files_root` a drive
+  letter (`E:\`), `needs_privilege` always true (a raw disk needs Administrator; HM never
+  writes one on Windows). A `card` write ends `outcome: "needs_privilege"` with, beside
+  `privileged_command` (the steps joined by newlines), `privileged_steps`, `verify_command`,
+  `verify_expect`: `privileged_shell: "powershell_admin"`, `privileged_how`, `verify_how`,
+  `disk_number`, and `imager: {name, url, steps, check_command, check_expect}` (Raspberry Pi
+  Imager). A `files` write is unchanged.
+<!-- --- end windows --- -->
