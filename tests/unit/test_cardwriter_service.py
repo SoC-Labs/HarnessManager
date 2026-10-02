@@ -228,12 +228,12 @@ def test_a_failing_lister_is_a_reason_not_an_error(tmp_path: Path):
     assert doc["reason"] == "lsblk failed: no such file"
 
 
-def test_windows_is_not_supported_yet(tmp_path: Path):
+def test_windows_is_supported_now(tmp_path: Path):
+    # lane WINDOWS: Get-Disk lists the cards (tests/unit/test_windows_cardwriter.py)
     w = cw.CardWriter(state_dir=tmp_path, platform="win32", enabled=lambda: True,
                       lister=lambda: [])
     doc = w.devices_json()
-    assert doc["enabled"] is False and doc["supported"] is False
-    assert "not supported on Windows yet" in doc["reason"]
+    assert doc["enabled"] is True and doc["supported"] is True and doc["devices"] == []
 
 
 # --- the typed phrase and the device's identity -----------------------------------------------

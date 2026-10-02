@@ -60,7 +60,20 @@ Safety rails (code, not docs):
 - **Off by default.** ``bringup.sd_flash`` (``$HARNESS_MANAGER_BRINGUP_SD_FLASH``) ``off``:
   nothing is listed (not even ``lsblk`` runs) and a write is refused.
 
-Windows: listed as not supported yet (``Get-Disk`` is the later path).
+Windows (lane WINDOWS, HM v1.1.0): the disks come from PowerShell (``Get-Disk``,
+``Get-Partition``/``Get-Volume``, ``Win32_DiskDrive``: ``windows_disks``), read only. The
+same rails, in Windows' words: only BusType USB/SD/MMC with removable media; never the
+system or boot disk (``IsSystem``/``IsBoot``, or a volume on ``%SystemDrive%``); never the
+MPS3's MCC drive (``V2M-MPS3`` on an ARM/V2M device) or DAPLink. ``files`` writes the
+card-reader volume's drive letter (``E:``) through the pack's writer, no Administrator
+needed. ``card`` (a raw whole-card image onto ``PhysicalDriveN``) needs Administrator,
+and HM NEVER writes a raw disk on Windows, even when it runs elevated: the job ends
+``needs_privilege`` with copy-pasteable Admin PowerShell steps (check the disk number is the
+card, ``diskpart clean``, write every sector but the first, then the first, so Windows mounts
+nothing mid-write) and the standard imager (Raspberry Pi Imager, "Use custom"), the image's
+sha256 to check first, and an Admin PowerShell read-back that prints the sha256
+(``privileged_commands``). Only proven on a real Windows laptop: the checklist in the lane's
+hand-back.
 """
 
 from __future__ import annotations
@@ -86,6 +99,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from harness_manager.core import winps
 from harness_manager.core.errors import (
     AbsentError,
     ActionFailedError,
@@ -109,9 +123,12 @@ MAX_ENV = "HARNESS_MANAGER_BRINGUP_SD_FLASH_MAX"
 DEFAULT_MAX = 256_000_000_000
 CAPABILITY = "sd_flash"
 DISABLED_REASON = "SD flashing is turned off (Settings → Bring-up, bringup.sd_flash)"
-WINDOWS_REASON = ("writing SD cards in this PC's card reader is not supported on Windows yet "
-                  "(Linux and macOS only): write the configuration SD over the board's Debug "
-                  "USB instead")
+#: Kept for callers of the old name: Windows is supported now (lane WINDOWS); only a platform
+#: with no lister (not Linux, macOS or Windows) is refused.
+WINDOWS_REASON = UNSUPPORTED_REASON = (
+    "writing SD cards in this PC's card reader is not supported on this operating system "
+    "(Linux, macOS and Windows only): write the configuration SD over the board's Debug USB "
+    "instead")
 KINDS = ("files", "card")
 PHASES = ("backup", "unmount", "write", "verify")
 
@@ -188,6 +205,8 @@ class Disk:
     raw_path: str = ""               # macOS: /dev/rdiskN, the path writes and reads use
     volumes: tuple[Volume, ...] = ()
     platform: str = "linux"
+    system: bool = False             # Windows: Get-Disk IsSystem/IsBoot (holds Windows)
+    number: int = -1                 # Windows: the disk number (Get-Disk -Number N)
 
     @property
     def mountpoints(self) -> tuple[str, ...]:
@@ -299,9 +318,13 @@ Runner = Callable[[Sequence[str]], "tuple[int, bytes, bytes]"]
 
 
 def run_command(argv: Sequence[str], timeout: float = 15.0) -> tuple[int, bytes, bytes]:
-    """Run a read-only listing command (lsblk, diskutil list/info). Never a shell."""
+    """Run a read-only listing command (lsblk, diskutil list/info, PowerShell Get-Disk).
+    Never a shell; no console window on Windows."""
+    from harness_manager.core.proc import no_window
+
     try:
-        cp = subprocess.run(list(argv), capture_output=True, timeout=timeout, check=False)
+        cp = subprocess.run(list(argv), capture_output=True, timeout=timeout, check=False,
+                            stdin=subprocess.DEVNULL, **no_window())
     except FileNotFoundError:
         return 127, b"", f"{argv[0]}: not found".encode()
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -470,6 +493,105 @@ def mac_disks(run: Runner | None = None) -> list[Disk]:
     return parse_diskutil(out, info)
 
 
+# --- Windows: PowerShell (read only) -------------------------------------------------------------
+
+#: One read-only PowerShell question: every disk, its partitions with their volumes, and
+#: Win32_DiskDrive's media type (Get-Disk has no "removable"). Strings are forced where a
+#: CIM enum would arrive as a number on one host and a name on another.
+WINDOWS_DISKS_PS = (
+    "$disks = @(Get-Disk | ForEach-Object { [pscustomobject]@{ Number = [int]$_.Number; "
+    "FriendlyName = [string]$_.FriendlyName; Model = [string]$_.Model; "
+    "Manufacturer = [string]$_.Manufacturer; SerialNumber = [string]$_.SerialNumber; "
+    "Size = [uint64]$_.Size; BusType = [string]$_.BusType; IsSystem = [bool]$_.IsSystem; "
+    "IsBoot = [bool]$_.IsBoot; IsOffline = [bool]$_.IsOffline; "
+    "PartitionStyle = [string]$_.PartitionStyle } }); "
+    "$parts = @(Get-Partition -ErrorAction SilentlyContinue | ForEach-Object { $v = $null; "
+    "try { $v = Get-Volume -Partition $_ -ErrorAction Stop } catch { }; "
+    "[pscustomobject]@{ Disk = [int]$_.DiskNumber; Number = [int]$_.PartitionNumber; "
+    "Letter = [string]$_.DriveLetter; Size = [uint64]$_.Size; "
+    "Label = $(if ($v) { [string]$v.FileSystemLabel } else { '' }); "
+    "Fs = $(if ($v) { [string]$v.FileSystem } else { '' }); "
+    "Id = $(if ($v) { [string]$v.UniqueId } else { '' }) } }); "
+    "$drives = @(Get-CimInstance Win32_DiskDrive -ErrorAction SilentlyContinue | "
+    "ForEach-Object { [pscustomobject]@{ Index = [int]$_.Index; "
+    "MediaType = [string]$_.MediaType; InterfaceType = [string]$_.InterfaceType; "
+    "PNPDeviceID = [string]$_.PNPDeviceID } }); "
+    "[pscustomobject]@{ disks = $disks; parts = $parts; drives = $drives; "
+    "system = [string]$env:SystemDrive } | ConvertTo-Json -Depth 5 -Compress")
+
+#: MSFT_Disk.BusType (a number from Windows PowerShell 5.1's CIM, a name elsewhere).
+WIN_BUS_TYPES = {0: "Unknown", 1: "SCSI", 2: "ATAPI", 3: "ATA", 4: "1394", 5: "SSA",
+                 6: "Fibre Channel", 7: "USB", 8: "RAID", 9: "iSCSI", 10: "SAS", 11: "SATA",
+                 12: "SD", 13: "MMC", 14: "Virtual", 15: "File Backed Virtual",
+                 16: "Storage Spaces", 17: "NVMe"}
+WIN_PARTITION_STYLES = {0: "RAW", 1: "MBR", 2: "GPT"}
+_WIN_FS = {"fat32": "vfat", "fat": "vfat", "fat16": "vfat", "fat12": "vfat", "exfat": "exfat",
+           "ntfs": "ntfs", "refs": "refs"}
+
+
+def windows_disk_path(number: int) -> str:
+    return f"\\\\.\\PhysicalDrive{number}"
+
+
+def parse_windows_disks(doc: Any) -> list[Disk]:
+    """``WINDOWS_DISKS_PS``'s answer -> whole disks with their volumes (``platform`` win32)."""
+    doc = doc if isinstance(doc, dict) else {}
+    system_drive = winps.text(doc.get("system")).rstrip("\\").upper()       # "C:"
+    parts: dict[int, list[dict[str, Any]]] = {}
+    for p in winps.as_list(doc.get("parts")):
+        if isinstance(p, dict):
+            parts.setdefault(_int(p.get("Disk")), []).append(p)
+    drives = {_int(d.get("Index")): d for d in winps.as_list(doc.get("drives"))
+              if isinstance(d, dict)}
+    disks: list[Disk] = []
+    for d in winps.as_list(doc.get("disks")):
+        if not isinstance(d, dict):
+            continue
+        n = _int(d.get("Number"))
+        drive = drives.get(n, {})
+        pnp = winps.text(drive.get("PNPDeviceID"))
+        m = re.search(r"VEN_([^&\\]*)&PROD_([^&\\]*)", pnp, re.IGNORECASE)
+        pnp_vendor, pnp_model = ((m.group(1).replace("_", " ").strip(),
+                                  m.group(2).replace("_", " ").strip()) if m else ("", ""))
+        bus = winps.enum_name(d.get("BusType"), WIN_BUS_TYPES)
+        tran = {"USB": "usb", "SD": "sd", "MMC": "mmc"}.get(bus, bus.lower())
+        media = winps.text(drive.get("MediaType")).lower()
+        vols: list[Volume] = []
+        letters: list[str] = []
+        for p in sorted(parts.get(n, []), key=lambda q: _int(q.get("Number"))):
+            pn = _int(p.get("Number"))
+            letter = re.sub(r"[^A-Za-z]", "", winps.text(p.get("Letter")))[:1].upper()
+            root = f"{letter}:\\" if letter else ""
+            if letter:
+                letters.append(f"{letter}:")
+            fs = winps.text(p.get("Fs"))
+            vols.append(Volume(
+                name=f"PhysicalDrive{n}p{pn}", path=root or f"\\\\.\\PhysicalDrive{n}\\Partition{pn}",
+                size=_int(p.get("Size")), fstype=_WIN_FS.get(fs.lower(), fs.lower()),
+                label=winps.text(p.get("Label")), uuid=winps.text(p.get("Id")),
+                mountpoints=(root,) if root else ()))
+        system = bool(d.get("IsSystem")) or bool(d.get("IsBoot")) or \
+            bool(system_drive and system_drive in letters)
+        disks.append(Disk(
+            name=f"PhysicalDrive{n}", path=windows_disk_path(n), size=_int(d.get("Size")),
+            dtype="disk" if bus not in ("File Backed Virtual", "Virtual") else "loop",
+            model=winps.text(d.get("FriendlyName")) or winps.text(d.get("Model")) or pnp_model,
+            vendor=winps.text(d.get("Manufacturer")) or pnp_vendor,
+            serial=winps.text(d.get("SerialNumber")), transport=tran,
+            removable="removable" in media, hotplug=False,
+            mmc_type="SD" if bus == "SD" else "", volumes=tuple(vols), platform="win32",
+            system=system, number=n))
+    return disks
+
+
+def windows_disks(run: Runner | None = None) -> list[Disk]:
+    """This PC's disks through PowerShell (read only); ``run`` is the test seam."""
+    run = run or (lambda argv: run_command(argv, 45.0))   # looked up per call: the tests' guard
+    doc = winps.run_json(WINDOWS_DISKS_PS, what="list the disks (Get-Disk)",
+                         capability=CAPABILITY, run=run)
+    return parse_windows_disks(doc)
+
+
 # --- which disks are card readers ----------------------------------------------------------------
 
 FAT_TYPES = ("vfat", "msdos", "fat", "fat16", "fat32")
@@ -502,6 +624,8 @@ def exclusion(disk: Disk, cap: int) -> str:
             disk.dtype, f"not a whole disk ({disk.dtype or 'unknown type'})")
     if disk.name.startswith("zram"):
         return "zram (compressed RAM), not a card reader"
+    if disk.system:
+        return "holds Windows (this PC's system or boot disk)"
     if re.fullmatch(r"mmcblk\d+(boot\d+|rpmb)", disk.name):
         return "an eMMC boot or RPMB area, not a card"
     system = sorted({s for s in (system_mount(m) for m in disk.mountpoints) if s})
@@ -519,7 +643,8 @@ def exclusion(disk: Disk, cap: int) -> str:
     if not (disk.removable or disk.hotplug or disk.mmc_type.upper() == "SD"):
         return "not removable (a fixed disk)"
     labels = [lb.upper() for lb in disk.labels]
-    who = " ".join((disk.vendor, disk.model))
+    # "V2M_MPS3" (a Windows PNP id spells it with _) must still match the word V2M/MPS3
+    who = " ".join((disk.vendor, disk.model)).replace("_", " ")
     if any(lb.startswith(DAPLINK_LABELS) for lb in labels):
         return "the board's CMSIS-DAP (DAPLink) drive, not a card"
     if MCC_LABEL in labels and MCC_DEVICE.search(who):
@@ -594,7 +719,11 @@ class RealAccess:
         self.platform = platform or sys.platform
 
     def check_device(self, path: str) -> None:
-        """A device node under /dev: a block device (and on macOS the raw /dev/rdiskN)."""
+        """A device node under /dev: a block device (and on macOS the raw /dev/rdiskN). On
+        Windows nothing is ever opened raw (``needs_privilege``)."""
+        if winps.is_windows(self.platform):
+            raise RefusedError(f"Harness Manager never writes a raw disk on Windows ({path})",
+                               hint="run the Administrator steps the write printed")
         if not str(path).startswith("/dev/"):
             raise RefusedError(f"{path} is not under /dev: refusing to write it",
                                hint="only a listed card reader's device is ever written")
@@ -609,6 +738,8 @@ class RealAccess:
                                hint="only a listed card reader's device is ever written")
 
     def can_write(self, path: str) -> bool:
+        if winps.is_windows(self.platform):
+            return False              # a raw disk needs Administrator: HM never escalates
         return os.access(path, os.W_OK)
 
     def open_write(self, path: str) -> int:
@@ -823,9 +954,99 @@ def file_sha256(path: Path, limit: int | None = None) -> str:
 # --- the commands a user runs when HM may not write the device -------------------------------------
 
 
+#: How a Windows user opens the shell the steps need (HM never opens it for them).
+WIN_ADMIN_HOW = ("open PowerShell as Administrator (Start, type PowerShell, right-click "
+                 "Windows PowerShell, Run as administrator, Yes), then paste each step in turn")
+#: A raw-disk handle for Windows PowerShell 5.1 (.NET Framework's FileStream refuses a
+#: \\.\ path; a handle from CreateFile is allowed).
+WIN_RAW_TYPE = ("Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;"
+                "using Microsoft.Win32.SafeHandles;public static class HmRawDisk{"
+                "[DllImport(\"kernel32.dll\",SetLastError=true,CharSet=CharSet.Unicode)]"
+                "public static extern SafeFileHandle CreateFile(string n,uint a,uint s,IntPtr p,"
+                "uint c,uint f,IntPtr t);}'")
+RASPBERRY_PI_IMAGER = "https://www.raspberrypi.com/software/"
+
+
+def _ps(text: str) -> str:
+    """A PowerShell single-quoted string (a ' inside is doubled)."""
+    return "'" + str(text).replace("'", "''") + "'"
+
+
+def windows_privileged_commands(disk: Disk, image: str, nbytes: int,
+                                sha256: str) -> dict[str, Any]:
+    """Windows: the Admin PowerShell steps (and the standard imager) for a whole-card image.
+
+    1. check that disk N is still the card HM listed (its size; never the system or boot
+       disk), else stop;
+    2. ``diskpart clean``: the card's partitions go, so Windows holds none of its volumes;
+    3. write every sector but the first, then the first (the MBR): Windows sees no
+       partition table, so mounts nothing, until the last write;
+    4. ``Update-Disk``: Windows reads the new partition table.
+
+    The read-back (``verify_command``) prints the sha256 of the card's first ``nbytes``.
+    """
+    n = disk.number if disk.number >= 0 else int(re.sub(r"\D", "", disk.name) or -1)
+    dev = _ps(f"\\\\.\\PhysicalDrive{n}")
+    img = _ps(image)
+    want = f"{disk.display_model} {human_size(disk.size)}"
+    clean = f"$env:TEMP\\hm-clean-disk{n}.txt"
+    steps = [
+        f"$d = Get-Disk -Number {n}; if ($d.Size -ne {disk.size} -or $d.IsSystem -or "
+        f"$d.IsBoot) {{ throw {_ps(f'Disk {n} is not the card Harness Manager listed ({want}): stop')} }}; "
+        f"$d | Format-Table Number, FriendlyName, BusType, Size",
+        f"Set-Content -Path \"{clean}\" -Value 'select disk {n}', 'clean'; "
+        f"diskpart /s \"{clean}\"",
+        WIN_RAW_TYPE,
+        f"$h = [HmRawDisk]::CreateFile({dev}, 3221225472, 3, [IntPtr]::Zero, 3, 0, "
+        f"[IntPtr]::Zero); if ($h.IsInvalid) {{ throw 'cannot open disk {n}: is this "
+        f"PowerShell running as Administrator?' }}; "
+        f"$dst = New-Object IO.FileStream($h, [IO.FileAccess]::ReadWrite); "
+        f"$src = [IO.File]::OpenRead({img}); $buf = New-Object byte[] 4194304; "
+        f"[void]$src.Seek(512, 'Begin'); [void]$dst.Seek(512, 'Begin'); "
+        f"while (($k = $src.Read($buf, 0, $buf.Length)) -gt 0) {{ if ($k % 512) {{ "
+        f"[Array]::Clear($buf, $k, 512 - $k % 512); $k += 512 - $k % 512 }}; "
+        f"$dst.Write($buf, 0, $k) }}; [void]$src.Seek(0, 'Begin'); "
+        f"[void]$src.Read($buf, 0, 512); [void]$dst.Seek(0, 'Begin'); "
+        f"$dst.Write($buf, 0, 512); $dst.Flush(); $dst.Close(); $src.Close(); 'written'",
+        f"Update-Disk -Number {n}",
+    ]
+    verify = (
+        f"{WIN_RAW_TYPE}; $h = [HmRawDisk]::CreateFile({dev}, 2147483648, 3, [IntPtr]::Zero, "
+        f"3, 0, [IntPtr]::Zero); $f = New-Object IO.FileStream($h, [IO.FileAccess]::Read); "
+        f"$sha = [Security.Cryptography.SHA256]::Create(); $buf = New-Object byte[] 4194304; "
+        f"$left = [long]{nbytes}; while ($left -gt 0) {{ "
+        f"$want = [int][Math]::Min([long]$buf.Length, $left); "
+        f"$ask = [int]([Math]::Ceiling($want / 512) * 512); $got = $f.Read($buf, 0, $ask); "
+        f"if ($got -le 0) {{ break }}; $use = [int][Math]::Min($got, $want); "
+        f"[void]$sha.TransformBlock($buf, 0, $use, $null, 0); $left -= $use }}; "
+        f"[void]$sha.TransformFinalBlock($buf, 0, 0); $f.Close(); "
+        f"-join ($sha.Hash | ForEach-Object {{ $_.ToString('x2') }})")
+    imager = {
+        "name": "Raspberry Pi Imager", "url": RASPBERRY_PI_IMAGER,
+        "check_command": f"Get-FileHash -Algorithm SHA256 {img}",
+        "check_expect": f"its Hash is {sha256.upper()}",
+        "steps": [
+            f"check the image first (any PowerShell): Get-FileHash -Algorithm SHA256 {img} "
+            f"shows Hash {sha256.upper()}",
+            "open Raspberry Pi Imager (it asks for Administrator itself: Yes)",
+            f"Choose OS: Use custom, then {image}",
+            f"Choose Storage: {want} (nothing else)",
+            "Next; No to OS customisation; Yes to erase the card. It writes, then verifies "
+            "what it wrote",
+        ],
+    }
+    return {"privileged_command": "\n".join(steps), "privileged_steps": steps,
+            "privileged_shell": "powershell_admin", "privileged_how": WIN_ADMIN_HOW,
+            "verify_command": verify, "verify_expect": f"prints {sha256}",
+            "verify_how": "in the same Administrator PowerShell", "imager": imager,
+            "disk_number": n, "image": image, "bytes": nbytes, "sha256": sha256}
+
+
 def privileged_commands(disk: Disk, image: str, nbytes: int, sha256: str) -> dict[str, Any]:
     """The exact commands for a device HM cannot open: write, then verify."""
     q = shlex.quote
+    if winps.is_windows(disk.platform):
+        return windows_privileged_commands(disk, image, nbytes, sha256)
     if disk.platform == "darwin":
         raw = disk.raw_path or disk.path.replace("/dev/disk", "/dev/rdisk")
         steps = [f"diskutil unmountDisk {q(disk.path)}", f"sudo dd if={q(image)} of={q(raw)} bs=4m",
@@ -984,7 +1205,7 @@ class CardWriter:
     @property
     def supported(self) -> bool:
         return self.platform.startswith("linux") or self.platform == "darwin" \
-            or self.access.simulated
+            or winps.is_windows(self.platform) or self.access.simulated
 
     def refusal(self) -> UnavailableError | None:
         """Why nothing can be listed or written now (the setting, the platform); else None."""
@@ -993,7 +1214,7 @@ class CardWriter:
                                     hint="turn it on: harness-manager config set "
                                          "bringup.sd_flash on")
         if not self.supported:
-            return UnavailableError(CAPABILITY, WINDOWS_REASON)
+            return UnavailableError(CAPABILITY, UNSUPPORTED_REASON)
         return None
 
     def require(self) -> None:
@@ -1008,6 +1229,8 @@ class CardWriter:
             return self._lister()
         if self.platform == "darwin":
             return mac_disks()
+        if winps.is_windows(self.platform):
+            return windows_disks()
         return linux_disks()
 
     def listing(self) -> Listing:
@@ -1032,6 +1255,10 @@ class CardWriter:
         root = ""
         if not fats:
             kinds["files"] = "no FAT volume on it (a configuration SD is FAT)"
+        elif not mounted and winps.is_windows(disk.platform):
+            kinds["files"] = ("its FAT volume has no drive letter: give it one in Disk "
+                              "Management (Start, type diskmgmt.msc; right-click the volume, "
+                              "Change Drive Letter and Paths, Add)")
         elif not mounted:
             kinds["files"] = (f"its FAT volume ({fats[0].path}) is not mounted: open it in your "
                               f"file manager, or `udisksctl mount -b {fats[0].path}`")
@@ -1301,8 +1528,10 @@ class CardWriter:
             lock_dir = base / "cardwriter" / "locks"
             try:
                 import fcntl
-            except ImportError:            # Windows: not supported anyway (one process)
+            except ImportError:            # Windows: msvcrt's byte-range lock instead
                 fcntl = None  # type: ignore[assignment]
+            if fcntl is None and os.name == "nt":
+                fh = _win_lock(lock_dir, key, disk.path)
             if fcntl is not None:
                 lock_dir.mkdir(parents=True, exist_ok=True)
                 fh = open(lock_dir / f"{key}.lock", "a+")   # noqa: SIM115 - held for the write
@@ -1500,6 +1729,23 @@ class CardWriter:
 
 _LOCAL: set[str] = set()
 _LOCAL_MU = threading.Lock()
+
+
+def _win_lock(lock_dir: Path, key: str, path: str) -> Any:  # pragma: no cover - Windows
+    """Windows: one write per device across processes (the app and the CLI), a non-blocking
+    ``msvcrt.locking`` on the lock file's first byte; released when the file closes."""
+    import msvcrt  # type: ignore[import-not-found]
+
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_dir / f"{key}.lock", "a+b")   # noqa: SIM115 - held for the write
+    try:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError as exc:
+        fh.close()
+        raise HeldError(f"another Harness Manager is writing {path}",
+                        hint="wait for it to finish; never write a card twice at once") from exc
+    return fh
 
 
 def _takes(fn: Callable[..., Any], name: str) -> bool:
