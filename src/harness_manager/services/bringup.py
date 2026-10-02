@@ -91,6 +91,29 @@ NONE_FOUND_HINTS = (
     f"the {VOLUME_LABEL} drive: it must be mounted (Linux: open it in the file manager, or "
     "udisksctl mount -b /dev/sdX1; macOS and Windows mount it themselves)",
 )
+#: Windows (lane WINDOWS): where a Windows user looks.
+WINDOWS_NONE_FOUND_HINTS = (
+    "the Debug USB cable: the board's DEBUG USB socket to this PC",
+    "the board's power: switch it on and wait about 10 s for the MCC to start",
+    f"the {VOLUME_LABEL} drive: Windows gives it a drive letter itself (File Explorer, This "
+    "PC); if it is not there, try another USB port or cable",
+    "the serial ports: Device Manager, Ports (COM & LPT) lists four 'USB Serial Port (COMn)' "
+    "for the board; if they are missing or under Other devices, install the FTDI VCP driver "
+    "(Windows Update, or ftdichip.com), then replug the Debug USB",
+)
+WINDOWS_NO_MCC = (
+    "no MCC serial port with it: the board cannot be rebooted from here (power it off and on "
+    "by hand after the write). In Device Manager, Ports (COM & LPT) should list four 'USB "
+    "Serial Port (COMn)' for the board; if not, install the FTDI VCP driver (Windows Update, "
+    "or ftdichip.com), then replug the Debug USB and Scan again")
+
+
+def _windows(platform: str | None = None) -> bool:
+    import sys
+
+    return (platform or sys.platform).startswith("win")
+
+
 DEFAULT_WITNESS_S = 180.0          # bare metal answers in ~30 s; a cold FPGA load is ~20 s
 LINUX_WITNESS_S = 300.0            # the pack's Linux reboot budget (planner.LINUX_REBOOT_WAIT_S)
 
@@ -243,12 +266,14 @@ class ScanBoard:
                 "evidence": self.candidate.evidence}
 
 
-def _problems(links: dict[str, Any]) -> list[str]:
+def _problems(links: dict[str, Any], platform: str | None = None) -> list[str]:
     out = []
     if links["volume"] is None:
         out.append(f"no {VOLUME_LABEL} drive with it: the configuration SD cannot be backed up "
                    "or written over USB. Check the drive is mounted, then Scan again")
-    if links["mcc"] is None:
+    if links["mcc"] is None and _windows(platform):
+        out.append(WINDOWS_NO_MCC)
+    elif links["mcc"] is None:
         out.append("no MCC serial port with it: the board cannot be rebooted from here (power "
                    "it off and on by hand after the write). Check the Debug USB cable, and on "
                    "Windows the FTDI driver")
@@ -393,7 +418,8 @@ def scan(engine: Any, *, host: str = DEFAULT_HOST, ask: bool = False,
     out: dict[str, Any] = {"boards": [b.as_dict() for b in boards], "ethernet": eth,
                            "host": host, "notes": notes, "candidates": usb}
     if not boards:
-        out["empty"] = {"text": NONE_FOUND, "check": list(NONE_FOUND_HINTS)}
+        out["empty"] = {"text": NONE_FOUND, "check": list(
+            WINDOWS_NONE_FOUND_HINTS if _windows() else NONE_FOUND_HINTS)}
     return out
 
 

@@ -189,10 +189,25 @@ def _default_list_ports() -> list[Any]:
     return direct.comports()
 
 
+def _platform() -> str:
+    import sys
+
+    return sys.platform
+
+
 @dataclass
 class UsbEnv:
     list_ports: Callable[[], list[Any]] = _default_list_ports
     list_volumes: Callable[[], list[sdmod.VolumeInfo]] = sdmod.list_volumes
+    platform: Callable[[], str] = _platform
+
+
+#: Windows, a V2M-MPS3 drive and no FT4232H COM port: the FTDI driver is the usual cause.
+WINDOWS_NO_PORTS = (
+    "no FT4232H serial ports (COM) were found: in Device Manager, Ports (COM & LPT) should "
+    "list four 'USB Serial Port (COMn)' for the board. If they are missing, or under Other "
+    "devices, install the FTDI VCP driver (Windows Update offers it; else ftdichip.com, VCP "
+    "Drivers), then unplug and replug the Debug USB")
 
 
 DEFAULT_ENV: UsbEnv | None = None   # tests may swap this; read on every probe
@@ -251,7 +266,8 @@ def _scanned(env: UsbEnv) -> list[_UsbBoard]:
         ports = env.list_ports()
     except HarnessError as exc:            # pyserial missing: still look for the SD
         ports = []
-        notes.append(f"serial ports not scanned ({exc.message})")
+        notes.append(f"serial ports not scanned ({exc.message}"
+                     f"{f'; {exc.hint}' if exc.hint else ''})")
     try:
         volumes = env.list_volumes()
     except OSError as exc:
@@ -293,6 +309,9 @@ def _scanned(env: UsbEnv) -> list[_UsbBoard]:
             boards.append(_UsbBoard(volume=_volume_link(vol),
                                     evidence=[f"{MSD_VOLUME_LABEL} volume at {vol.root}; its FT4232H "
                                               "could not be told apart"]))
+    if sds and not fts and env.platform().startswith("win") \
+            and not any(n.startswith("serial ports not scanned") for n in notes):
+        notes.append(WINDOWS_NO_PORTS)
     for b in boards:
         b.evidence.extend(notes)
     return boards
