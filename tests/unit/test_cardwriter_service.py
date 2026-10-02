@@ -664,15 +664,25 @@ def test_mbbios_is_decided_again_inside_the_job(rig: Rig):
     assert written_board(rig) == NO_LINE_BOARD
 
 
+# The rule itself is the pack's (harness_manager_mps3.mbbios, the one the hook resolves to):
+# these pin the bytes it gives the card writer; tests/unit/test_fp7_mbbios.py has the rest.
+
+
+def pack_decide():
+    from harness_manager_mps3 import mbbios
+    return mbbios.decide
+
+
 def test_mbbios_decide_keeps_every_other_byte_and_line_ending():
-    d = cw.decide(BUNDLE_BOARD, card_board_txt=CARD_BOARD, card_files=[])
+    d = pack_decide()(BUNDLE_BOARD, card_board_txt=CARD_BOARD, card_files=[])
     want = BUNDLE_BOARD.replace(b"MBBIOS: mbb_v999.ebf ;the bundle's",
                                 b"MBBIOS: mbb_v141.ebf           ;MB BIOS image \xe2\x80\x94 stock")
     assert d.content == want and d.action == "kept" and d.value == "mbb_v141.ebf"
 
 
 def test_twin_mbbios_with_no_line_anywhere_changes_nothing():
-    d = cw.decide(NO_LINE_BOARD, card_board_txt=None, card_files=["MB/HBI0309C/mbb_v141.ebf"])
+    d = pack_decide()(NO_LINE_BOARD, card_board_txt=None,
+                      card_files=["MB/HBI0309C/mbb_v141.ebf"])
     assert d.content == NO_LINE_BOARD and d.action == "none" and d.note == ""
 
 
@@ -680,21 +690,28 @@ def test_twin_mbbios_with_no_line_anywhere_changes_nothing():
 def test_mbbios_reads_crlf_and_lf_alike(nl: bytes):
     card = nl.join([b"BOARD: X", b"[MCCS]", b"MBBIOS: mbb_v141.ebf ;stock", b""])
     bundle = nl.join([b"BOARD: Y", b"[MCCS]", b"", b"[APP]", b"A: b", b""])
-    d = cw.decide(bundle, card_board_txt=card, card_files=[])
+    d = pack_decide()(bundle, card_board_txt=card, card_files=[])
     assert d.action == "kept"
     assert d.content == nl.join([b"BOARD: Y", b"[MCCS]", b"MBBIOS: mbb_v141.ebf ;stock", b"",
                                  b"[APP]", b"A: b", b""])
 
 
 def test_twin_an_ebf_anywhere_on_the_card_counts_any_case():
+    decide = pack_decide()
     with pytest.raises(RefusedError) as err:
-        cw.decide(BUNDLE_BOARD, card_board_txt=NO_LINE_BOARD, card_files=["SOFTWARE/MBB_V999.EBF"])
+        decide(BUNDLE_BOARD, card_board_txt=NO_LINE_BOARD, card_files=["SOFTWARE/MBB_V999.EBF"])
     assert err.value.data == {"mcc_update": {"file": "mbb_v999.ebf", "value": "mbb_v999.ebf"}}
-    assert cw.decide(BUNDLE_BOARD, card_board_txt=NO_LINE_BOARD,
-                     card_files=["MB/other.ebf"]).action == "bundle"
+    assert decide(BUNDLE_BOARD, card_board_txt=NO_LINE_BOARD,
+                  card_files=["MB/other.ebf"]).action == "bundle"
 
 
-# --- the pack hook (FIX-PACK-7's harness_manager_mps3.mbbios.keep_mbbios at integration) --------
+def test_the_card_writer_has_no_mbbios_rule_of_its_own():
+    """The local copy is gone: the rule lives in the pack (one rule, one set of words)."""
+    for name in ("decide", "keep_mbbios", "MbbiosDecision", "ALLOW_FLAG", "MBBIOS_DATA_KEY"):
+        assert not hasattr(cw, name), name
+
+
+# --- the pack hook (harness_manager_mps3.mbbios.keep_mbbios) ------------------------------------
 
 
 def test_the_packs_keep_mbbios_is_used_when_a_pack_has_one(rig: Rig):
@@ -733,12 +750,41 @@ def test_the_packs_keep_mbbios_is_used_when_a_pack_has_one(rig: Rig):
     assert "MB/HBI0309C/images.txt" in calls[0][1]
 
 
-def test_twin_no_pack_hook_means_the_local_copy(rig: Rig):
-    assert cw.pack_mbbios() is None or callable(cw.pack_mbbios())
-    rig.writer.mbbios_for = lambda: None
+class PlainStorage:
+    """A pack's storage that does not apply the MBBIOS rule itself (no ``allow_mcc_update``):
+    it records the board.txt the card writer hands it, then writes it."""
+
+    def __init__(self, inner, seen: dict):
+        self.inner = inner
+        self.seen = seen
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def install(self, files, *, backup, progress=None):
+        self.seen["board"] = Path(files["MB/HBI0309C/board.txt"]).read_bytes()
+        return self.inner.install(files, backup=backup, progress=progress)
+
+
+def test_twin_a_pack_without_an_mbbios_rule_writes_the_files_as_given(rig: Rig):
+    seen: dict = {}
+    real = rig.storage_for
+    rig.writer.storage_for = lambda root: PlainStorage(real(root), seen)
+    rig.writer.mbbios_for = lambda: None                 # the pack has no mbbios module
     rig.card_board_txt(CARD_BOARD)
+    plan, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
+    assert out["mbbios"] == [] and plan.mbbios == []    # no rule: no decision, no note
+    assert seen["board"] == BUNDLE_BOARD                 # handed over byte for byte
+
+
+def test_with_the_packs_rule_the_storage_is_handed_the_cards_line(rig: Rig):
+    seen: dict = {}
+    real = rig.storage_for
+    rig.writer.storage_for = lambda root: PlainStorage(real(root), seen)
+    rig.card_board_txt(CARD_BOARD)                       # mbbios_for: the real pack hook
     _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
     assert out["mbbios"][0]["note"] == "MBBIOS kept: mbb_v141.ebf"
+    assert b"MBBIOS: mbb_v141.ebf " in seen["board"] and b"mbb_v999" not in seen["board"]
 
 
 def test_a_storage_that_applies_the_rule_itself_gets_the_bundle_and_the_flag(rig: Rig):
@@ -784,8 +830,8 @@ def test_the_demo_lists_simulated_readers_and_writes_only_temp_files(tmp_path: P
 
 
 def test_integration_the_mps3_pack_supplies_the_mbbios_rule():
-    """integ/bringup: the pack hook finds FIX-PACK-7's rule (with the CRLF and second-line
-    fixes), so the local copy is only a fallback for a pack without one."""
+    """The pack hook finds the MPS3 pack's rule (with the CRLF and second-line fixes): the
+    card writer has none of its own."""
     from harness_manager.services import cardwriter
     from harness_manager_mps3 import mbbios
     assert cardwriter.pack_mbbios() is mbbios.keep_mbbios
