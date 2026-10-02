@@ -813,11 +813,11 @@ function ImageCheck({ bid, w }) {
   return html`<div class="stack gap-8">
     <${UnsignedBanner} />
     ${w.osCheckError ? html`<${Reason} level="err" testid="bu-card-check-error" text=${`${w.osCheckError.errName}: ${w.osCheckError.message}${w.osCheckError.hint ? ` (${w.osCheckError.hint})` : ""}`} />` : null}
-    ${c ? html`<dl class="kv bu-check" data-testid="bu-card-check">
+    ${c ? html`<div class="bu-check" data-testid="bu-card-check"><dl class="kv">
       <dt>Image</dt><dd><span class="mono">${c.source}</span><div class="sub">${(c.card && c.card.describe) || ""}</div></dd>
       <dt>sha256</dt><dd data-testid="bu-card-sha"><span class="mono bu-sha">${u.sha256}</span>
         <div class="sub">of the image file itself (<span class="mono">${u.how || "sha256sum CARD.img"}</span>)</div></dd>
-    </dl>
+    </dl></div>
     <div class="field bu-unsigned-field"><label for=${`bu-os-unsigned-${bid}`}>Type <code data-testid="bu-os-unsigned-want">${u.phrase}</code></label>
       <input id=${`bu-os-unsigned-${bid}`} class="input mono grow" data-testid="bu-os-unsigned-phrase" autocomplete="off" spellcheck="false"
         value=${w.osUnsigned} onInput=${(e) => { w.osUnsigned = e.target.value; changed(); }} /></div>` : null}
