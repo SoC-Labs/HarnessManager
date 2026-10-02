@@ -388,3 +388,30 @@ def test_twin_the_card_reader_door_is_unavailable_while_sd_flash_is_off(reader, 
     r = card_write(c, rig, sd_tree(tmp_path / "good"), tmp_path, device_id="sdb-x")
     assert r.status_code == 422 and r.json()["error"]["name"] == "UNAVAILABLE"
     assert "bringup.sd_flash" in r.json()["error"]["message"]
+
+
+# --- GET .../bringup/proposal: the identity proposed for the new board ---------------------------
+
+
+def test_the_proposed_identity_comes_from_the_mcc_usb_serial(client, board, monkeypatch):
+    c, _ = client
+    bid = open_usb(c, board, monkeypatch)
+    r = c.get(f"{bid_path(bid)}/bringup/proposal", headers=H)
+    assert r.status_code == 200, r.text
+    p = r.json()["proposal"]
+    assert p["serial"] == "FTVIRT" and p["label"] == "MPS3-VIRT"
+    assert p["mac"] == bringup.derive_mac("FTVIRT") and p["ip"] == "192.168.10.101/24"
+    assert p["uniqueness"] == "uniqueness of MCC serials is not yet verified"
+    assert r.json()["command"] == (f"harness-manager board identity 192.168.10.101 --label "
+                                   f"MPS3-VIRT --ip 192.168.10.101/24 --mac {p['mac']} "
+                                   "--consent MPS3-VIRT")
+    r = c.get(f"{bid_path(bid)}/bringup/proposal", params={"ip": "192.168.10.102"}, headers=H)
+    assert r.json()["proposal"]["ip"] == "192.168.10.102/24"
+
+
+def test_twin_a_board_not_open_here_gets_no_proposal(client, board, monkeypatch):
+    c, _ = client
+    plug(monkeypatch, board)
+    (row,) = scan(c, board)["boards"]
+    r = c.get(f"{bid_path(row['board_id'])}/bringup/proposal", headers=H)
+    assert r.status_code in (404, 409) and "proposal" not in r.json()

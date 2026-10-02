@@ -542,6 +542,7 @@ export const BRINGUP_ENDPOINTS = Object.freeze({
   bringupInstall: ["POST", "/boards/{bid}/bringup/install"],
   bringupWitness: ["POST", "/boards/{bid}/bringup/witness"],
   bringupCardReader: ["POST", "/bringup/card-reader"],     // bringup-2: the bundle, in the reader
+  bringupProposal: ["GET", "/boards/{bid}/bringup/proposal"],  // bringup-2: the proposed identity
   cardwriterDevices: ["GET", "/cardwriter/devices"],       // SD-FLASH
   cardwriterWrite: ["POST", "/cardwriter/write"],          // SD-FLASH
 });

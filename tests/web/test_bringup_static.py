@@ -35,7 +35,7 @@ def problems(called: dict[str, tuple[str, str]], documented: set, served: set) -
 
 def test_every_bringup_route_the_page_calls_is_documented_and_served():
     called = bringup_endpoints(API_JS.read_text(encoding="utf-8"))
-    assert len(called) == 8
+    assert len(called) == 9
     assert problems(called, api_md_sections()["bringup_api"], daemon_routes()) == []
     assert {ep for ep in called.values() if ep in CARDWRITER} == CARDWRITER
 

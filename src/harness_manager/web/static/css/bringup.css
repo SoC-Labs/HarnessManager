@@ -26,6 +26,11 @@
 .bu-replace { margin-top: 0; }
 .bu-reader .select { min-width: 0; }
 
+/* the proposed identity (step 6) and its dialog on Board > Access */
+.bu-identity { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.bu-id-field label { min-width: 52px; }
+.bu-id-sub { margin: -4px 0 0; overflow-wrap: anywhere; }
+
 /* the OS step */
 .bu-os-opts { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .bu-os-opts li[data-disabled="yes"] .check-inline { color: var(--text-3); }

@@ -24,7 +24,12 @@ wizard needs around them:
 - ``witness``: after the REBOOT, wait for the harness to answer at its address (the pack's
   probe of that one host: 6900 ping, else UDP identify, which also finds stage0 RESCUE);
 - ``status``: the switches the wizard shows (``bringup.sd_flash``, the network OS door, the
-  signing keys) and the default address.
+  signing keys) and the default address;
+- ``propose_identity``: what the new board should be called (david 2 Oct, D4a: a generic image,
+  then the wizard names the board): a label from the MCC's USB serial number, the IP, and a
+  locally administered MAC derived from that serial. Only a PROPOSAL: the existing identity
+  writer (``board identity`` / net-protocol v0.16 ``identity_set``) sets it, with its typed
+  phrase.
 
 Nothing here writes a device, mounts a volume or downloads anything.
 """
@@ -799,6 +804,107 @@ def witness(engine: Any, host: str = DEFAULT_HOST, *, wait_s: float = DEFAULT_WI
                 timeout=True, host=host, waited_s=round(took, 1), tries=tries)
         emit("waiting", int(took), int(wait_s))
         sleep(min(poll_s, max(wait_s - took, 0.1)))
+
+
+# --- the identity a new board is given (a proposal; the identity writer sets it) ------------------
+
+#: The salt of the MAC derivation. Changing it changes every proposed MAC: never do.
+MAC_SALT = "harness-manager mps3 mac v1:"
+MAC_DERIVATION = ("02, then the first 5 bytes of sha256(\"harness-manager mps3 mac v1:\" + the "
+                  "MCC's USB serial number, upper case): a locally administered unicast MAC")
+MAC_UNIQUENESS = "uniqueness of MCC serials is not yet verified"
+IP_NOTE = ("two boards on one network need different IPs: give each board its own (the image "
+           "default is 192.168.10.101)")
+NO_SERIAL = ("the MCC's USB serial number is not known (the Debug USB did not report one): give "
+             "the label and the MAC yourself")
+#: The bare-metal harness: nothing to set (harness_manager_mps3.net_identity's words).
+NO_IDENTITY_STORE = ("the bare-metal harness has no identity store: its label, IP and MAC are "
+                     "compiled into the firmware; the proposal is for the Linux harness "
+                     "(net-protocol v0.16 identity_set)")
+#: A Linux image before net-protocol v0.16 has no identity_set: the writer says so.
+IDENTITY_SET_NOTE = ("an image before net-protocol v0.16 has no identity_set: `board identity` "
+                     "says so and changes nothing")
+_FT_SERIAL = re.compile(r"\bFT4232H\s+(\S+)\s+if00\b")
+
+
+def mcc_serial(cand: Candidate | None, *,
+               list_ports: Callable[[], list[Any]] | None = None) -> str:
+    """The MCC's USB serial number: the Debug USB's FT4232H serial (its MCC console,
+    interface 00), as the pack's USB probe recorded it on the link, else as this PC lists the
+    MCC port (``list_ports``: the pack's port listing, for a port given by hand). ``""`` when
+    nothing says."""
+    if cand is None:
+        return ""
+    for lk in cand.links:
+        m = _FT_SERIAL.search(lk.detail or "")
+        if m and m.group(1) != "?":
+            return m.group(1)
+    m = re.search(r"\bFT4232H [0-9a-f]{4}:[0-9a-f]{4} serial (\S+)", cand.evidence or "")
+    if m and m.group(1) != "?":
+        return m.group(1)
+    mcc = next((lk for lk in cand.links if lk.kind == LinkKind.USB_SERIAL
+                and not _is_lane(lk.detail)), None)
+    if mcc is None:
+        return ""
+    try:
+        from harness_manager_mps3 import usb as usbmod
+    except ImportError:
+        return ""
+    try:
+        ports = (list_ports or usbmod.DEFAULT_ENV.list_ports)()
+        boards = usbmod.group_ft4232(ports)      # the pack's own grouping (and Windows' A-D)
+    except (HarnessError, OSError):
+        return ""
+    want = _serial_device(mcc.address)
+    for ft in boards:
+        if ft.interfaces.get(usbmod.MCC_INTERFACE) == want and ft.serial:
+            return ft.serial
+    return ""
+
+
+def derive_mac(serial: str) -> str:
+    """A locally administered unicast MAC from the MCC's USB serial number (``MAC_DERIVATION``):
+    the same serial gives the same MAC on every PC, every time. Never the image default."""
+    from harness_manager.services.board_identity import DEFAULT_MAC
+
+    key = serial.strip().upper()
+    if not key:
+        return ""
+    digest = hashlib.sha256((MAC_SALT + key).encode("utf-8")).digest()
+    mac = "02:" + ":".join(f"{b:02x}" for b in digest[:5])
+    if mac == DEFAULT_MAC:                       # 1 in 2^40: the next five bytes
+        mac = "02:" + ":".join(f"{b:02x}" for b in digest[5:10])
+    return mac
+
+
+def propose_identity(serial: str, *, ip: str = DEFAULT_HOST) -> dict[str, Any]:
+    """What the wizard and the CLI propose for a new board (editable; nothing is set here):
+    ``{serial, label, hostname, ip, mac, derivation, notes}``. The label is ``MPS3-`` and the
+    serial's last 4 letters or digits (the LCD row takes A-Z, 0-9 and -); the hostname follows
+    it in lower case; the IP is the image default unless given."""
+    key = re.sub(r"[^A-Z0-9]", "", serial.strip().upper())
+    tail = key[-4:]
+    label = f"MPS3-{tail}" if tail else ""
+    addr = ip if "/" in ip else f"{ip}/24"
+    notes = [IP_NOTE]
+    if key:
+        notes.append(f"MAC: {MAC_DERIVATION}; {MAC_UNIQUENESS}")
+    else:
+        notes.insert(0, NO_SERIAL)
+    return {"serial": serial.strip(), "label": label, "hostname": label.lower(), "ip": addr,
+            "mac": derive_mac(serial) if key else "", "derivation": MAC_DERIVATION,
+            "uniqueness": MAC_UNIQUENESS, "ip_note": IP_NOTE, "notes": notes}
+
+
+def identity_command(host: str, proposal: dict[str, Any]) -> str:
+    """The ``board identity`` command that sets the proposal (its typed phrase is the label)."""
+    parts = ["harness-manager board identity", host]
+    for key in ("label", "ip", "mac"):
+        if proposal.get(key):
+            parts.append(f"--{key} {proposal[key]}")
+    if proposal.get("label"):
+        parts.append(f"--consent {proposal['label']}")
+    return " ".join(parts)
 
 
 # --- the switches ---------------------------------------------------------------------------------

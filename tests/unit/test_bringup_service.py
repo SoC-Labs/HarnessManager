@@ -546,3 +546,103 @@ def test_held_error_is_not_swallowed_by_ask_mcc_import_check():
     # ask_mcc maps every HarnessError to a state; a HELD from the gate is one of them
     eng = Engine([usb_cand()], ctl=Ctl(error=HeldError("busy", holder="job x")))
     assert bringup.ask_mcc(eng, usb_cand())["state"] == "error"
+
+
+# --- the proposed identity (david 2 Oct, D4a) ------------------------------------------------------
+
+
+def _usb_cand(detail: str = "FT4232H FT6ABC12 if00: MCC console", evidence: str = "",
+              address: str = "serial:///dev/ttyUSB7") -> Candidate:
+    return Candidate(pack="mps3", board_id="mps3@usb:/dev/ttyUSB7", evidence=evidence,
+                     links=(Link(LinkKind.USB_SERIAL, address, detail),))
+
+
+def test_the_mcc_serial_is_the_debug_usbs_ft4232h_serial_from_the_probe():
+    assert bringup.mcc_serial(_usb_cand()) == "FT6ABC12"
+    assert bringup.mcc_serial(_usb_cand(detail="MCC console (given explicitly)",
+                                        evidence="FT4232H 0403:6011 serial FTEVID9 at USB 1-4"),
+                              list_ports=lambda: []) == "FTEVID9"
+
+
+def test_a_port_given_by_hand_is_looked_up_in_this_pcs_port_list_windows_letters_too():
+    from tests.fakes.t3_usb import FakePortInfo
+
+    given = _usb_cand(detail="MCC console (given explicitly)", address="COM7")
+    win = [FakePortInfo(device=f"COM{7 + n}", vid=0x0403, pid=0x6011,
+                        serial_number=f"FTWIN42{'ABCD'[n]}", location="") for n in range(4)]
+    assert bringup.mcc_serial(given, list_ports=lambda: win) == "FTWIN42"
+    linux = [FakePortInfo(device=f"/dev/ttyUSB{7 + n}", vid=0x0403, pid=0x6011,
+                          serial_number="FTLNX1", location=f"1-4.2:1.{n}") for n in range(4)]
+    assert bringup.mcc_serial(_usb_cand(detail="MCC console (given explicitly)"),
+                              list_ports=lambda: linux) == "FTLNX1"
+
+
+def test_twin_no_serial_anywhere_is_empty_never_a_guess():
+    assert bringup.mcc_serial(None) == ""
+    assert bringup.mcc_serial(_usb_cand(detail="FT4232H ? if00: MCC console"),
+                              list_ports=lambda: []) == ""
+    from tests.fakes.t3_usb import FakePortInfo
+
+    other = [FakePortInfo(device="/dev/ttyUSB0", vid=0x0403, pid=0x6011, serial_number="OTHER",
+                          location="1-1:1.0")]                     # another board's MCC
+    assert bringup.mcc_serial(_usb_cand(detail="MCC console (given explicitly)"),
+                              list_ports=lambda: other) == ""
+
+
+def test_the_mac_is_locally_administered_unicast_and_the_same_every_time():
+    import hashlib
+
+    from harness_manager.services import board_identity as BI
+
+    mac = bringup.derive_mac("FT6ABC12")
+    want = "02:" + ":".join(f"{b:02x}" for b in hashlib.sha256(
+        b"harness-manager mps3 mac v1:FT6ABC12").digest()[:5])
+    assert mac == want == bringup.derive_mac(" ft6abc12 ")       # upper case, trimmed
+    assert BI.mac_is_local(mac) and BI.mac_is_unicast_nonzero(mac)
+    assert bringup.derive_mac("FT6ABC13") != mac
+    assert bringup.derive_mac("") == ""
+
+
+def test_twin_the_image_default_mac_is_never_proposed(monkeypatch):
+    import hashlib
+
+    real = hashlib.sha256
+
+    class Fixed:
+        def __init__(self, data: bytes = b"") -> None:
+            self.data = data
+
+        def digest(self) -> bytes:
+            return bytes.fromhex("00004d5053") + real(self.data).digest()[5:]
+
+    monkeypatch.setattr(hashlib, "sha256", Fixed)
+    mac = bringup.derive_mac("ANY")
+    assert mac != "02:00:00:4d:50:53" and mac.startswith("02:")
+
+
+def test_the_proposal_label_ip_and_notes_fit_the_identity_writer():
+    from harness_manager.services import board_identity as BI
+
+    p = bringup.propose_identity("FT6ABC12")
+    assert p["label"] == "MPS3-BC12" and p["hostname"] == "mps3-bc12"
+    assert p["ip"] == "192.168.10.101/24" and p["mac"] == bringup.derive_mac("FT6ABC12")
+    assert BI.validate_want({k: p[k] for k in ("label", "ip", "mac")}) == {
+        "label": "MPS3-BC12", "ip": "192.168.10.101/24", "mac": p["mac"]}
+    assert p["notes"] == [
+        "two boards on one network need different IPs: give each board its own (the image "
+        "default is 192.168.10.101)",
+        f"MAC: {bringup.MAC_DERIVATION}; uniqueness of MCC serials is not yet verified"]
+    assert bringup.propose_identity("ab-1", ip="192.168.11.7")["label"] == "MPS3-AB1"
+    assert bringup.propose_identity("x", ip="10.0.0.5/16")["ip"] == "10.0.0.5/16"
+    assert bringup.identity_command("192.168.10.101", p) == (
+        f"harness-manager board identity 192.168.10.101 --label MPS3-BC12 --ip "
+        f"192.168.10.101/24 --mac {p['mac']} --consent MPS3-BC12")
+
+
+def test_twin_no_serial_proposes_only_the_ip_and_says_why():
+    p = bringup.propose_identity("")
+    assert p["label"] == p["mac"] == p["hostname"] == ""
+    assert p["notes"][0] == ("the MCC's USB serial number is not known (the Debug USB did not "
+                             "report one): give the label and the MAC yourself")
+    assert bringup.identity_command("h", p) == "harness-manager board identity h --ip " \
+        "192.168.10.101/24"

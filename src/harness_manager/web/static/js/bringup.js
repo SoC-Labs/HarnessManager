@@ -20,14 +20,15 @@
 // setting is off or the routes are not in this build). Every write is armed, needs the backup
 // first, and runs one at a time per board (the service's board gate).
 
-import { panelState, runAction } from "./actions.js";
+import { panelState, runAction, runJob } from "./actions.js";
 import { bringupCall, bringupMissing, call, toApiError, waitJob } from "./api.js";
 import { boardName, bytesText, capState } from "./format.js";
 import { html, useEffect, useState } from "./lib.js";
 import { closeModal, ModalShell, openModal, registerModal } from "./modal.js";
-import { boardState, changed, loadBoards, log, navigate, probe, S, select, setJob, timed, toast } from "./store.js";
+import { boardState, changed, loadBoards, log, navigate, probe, refreshInfo, S, select, setJob, timed, toast } from "./store.js";
 import { ActionRow, ArmBox, Chip, Icon, Reason, ResultBlock, Seg, Spinner } from "./ui.js";
-import { week } from "./week.js";
+import { holderOnly, week } from "./week.js";
+import { identityOf, loadIdentity } from "./sections/identity.js";
 import { openBoardHere } from "./sidebar.js";
 import { backupSpec, SdRecovery } from "./sections/sd.js";
 import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
@@ -106,6 +107,8 @@ export function bs(bid) {
       witness: null, witnessError: null, host: "",
       os: "", osImage: "", osDevice: "", osTyped: "", osDone: null,
       next: null,
+      proposal: null, proposalError: null, proposalLoading: false,   // the proposed identity
+      id: null,               // {label, ip, mac}: the proposal as edited here
     };
   }
   return b.bringup;
@@ -816,17 +819,81 @@ function OsStep({ bid, w }) {
   <//>`;
 }
 
-// --- 6. next: the Access page ------------------------------------------------------------------------
+// --- 6. next: name it (the proposed identity), then the Access page ----------------------------------
+//
+// david 2 Oct (D4a): one generic image for every board; the wizard PROPOSES its label, IP and MAC
+// (the label and a locally administered MAC from the MCC's USB serial number), editable, and
+// hands them to the existing identity writer (POST /boards/{bid}/identity, `board identity`:
+// its typed phrase, lease and claim checks, warm reboot and read-back) on the board's Ethernet
+// session. Nothing here writes an identity of its own.
+
+export const NO_IDENTITY_STORE = "the bare-metal harness has no identity store: its label, IP and MAC are compiled into the firmware; the proposal is for the Linux harness (net-protocol v0.16 identity_set)";
+
+async function loadProposal(bid) {
+  const w = bs(bid);
+  if (w.proposalLoading) return;
+  w.proposalLoading = true;
+  changed();
+  const r = await timed(`bringup proposal ${bid}`, () => bringupCall("bringupProposal", { bid }));
+  w.proposalLoading = false;
+  if (r.error) {
+    w.proposalError = r.error;
+  } else {
+    w.proposal = r.data.data.proposal;
+    w.proposalError = null;
+    if (!w.id) w.id = { label: w.proposal.label || "", ip: w.proposal.ip || "", mac: w.proposal.mac || "" };
+  }
+  changed();
+}
+
+// The values to hand over: only those given (an empty field is "not given").
+export function wantOf(id) {
+  const out = {};
+  for (const k of ["label", "ip", "mac"]) {
+    const v = String((id && id[k]) || "").trim();
+    if (v) out[k] = k === "label" ? v.toUpperCase() : v;
+  }
+  return out;
+}
 
 async function openOnEthernet(bid, w) {
   const target = (w.witness && w.witness.board_id) || "";
   const host = hostOf(w);
+  const want = wantOf(w.id);
+  const impl = (w.witness && w.witness.impl) || "";
   closeModal();
   await probe([host]);
   const id = target && S.boards[target] ? target : Object.keys(S.boards).find((k) => k.includes(`@${host}:`)) || target;
   if (!id) { toast(`Nothing to open at ${host}: add it By address`, { icon: "triangle-alert", level: "err" }); return; }
   const r = await openBoardHere(id);
-  if (!r || !r.error || r.error.errName === "ALREADY") navigate(id, "board/access");
+  if (!r || !r.error || r.error.errName === "ALREADY") {
+    navigate(id, "board/access");
+    openModal("bu-identity", { bid: id, want, impl, serial: (w.proposal && w.proposal.serial) || "" });
+  }
+}
+
+function IdField({ w, k, label, testid, sub }) {
+  return html`<div class="field bu-id-field"><label for=${`bu-id-${k}`}>${label}</label>
+    <input id=${`bu-id-${k}`} class="input mono grow" data-testid=${testid} autocomplete="off" spellcheck="false"
+      value=${(w.id && w.id[k]) || ""} onInput=${(e) => { w.id = { ...(w.id || {}), [k]: e.target.value }; changed(); }} /></div>
+    ${sub ? html`<p class="small muted bu-id-sub">${sub}</p>` : null}`;
+}
+
+function Proposal({ bid, w }) {
+  useEffect(() => { if (!w.proposal && !w.proposalLoading && !w.proposalError) loadProposal(bid); }, [bid]);
+  const p = w.proposal;
+  if (w.proposalError) {
+    return html`<${Reason} level="warn" testid="bu-id-error" text=${`The proposal could not be read (${w.proposalError.errName}: ${w.proposalError.message}): give the label, IP and MAC on Board > Access.`} />`;
+  }
+  if (!p) return html`<${Reason} icon="loader-circle" text="Reading the MCC's USB serial number…" />`;
+  return html`<div class="stack gap-8 bu-identity" data-testid="bu-identity">
+    <p class="small secondary">Proposed for this board${p.serial ? html` from its MCC's USB serial number <span class="mono" data-testid="bu-id-serial">${p.serial}</span>` : null}; change any of them. Nothing is set until you confirm on Board > Access.</p>
+    ${!p.serial ? html`<${Reason} level="warn" testid="bu-id-no-serial" text=${p.notes[0]} />` : null}
+    <${IdField} w=${w} k="label" label="Label" testid="bu-id-label" sub="On the LCD and the board's host name: A-Z, 0-9 and -, up to 19." />
+    <${IdField} w=${w} k="ip" label="IP" testid="bu-id-ip" sub=${p.ip_note} />
+    <${IdField} w=${w} k="mac" label="MAC" testid="bu-id-mac"
+      sub=${p.serial ? html`<span data-testid="bu-id-derivation">${p.derivation}.</span> <b data-testid="bu-id-uniqueness">${p.uniqueness[0].toUpperCase()}${p.uniqueness.slice(1)}.</b>` : ""} />
+  </div>`;
 }
 
 function NextStep({ bid, w }) {
@@ -834,14 +901,100 @@ function NextStep({ bid, w }) {
   const rescue = !!(w.witness && w.witness.state === "rescue");
   const why = ok ? "" : rescue ? "the board is in stage0 RESCUE: do step 5, power-cycle it, then wait for the harness again (step 4)"
     : "once the harness answers (step 4)";
-  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title="Next: claim it and set its identity" state="" testid="bu-step-next">
-    <p class="small secondary">On Board > Access: claim its SSH (Linux), and give the board its own label, IP and MAC (every new board starts as MPS3, 192.168.10.101).</p>
-    <div class="row"><button type="button" class="btn primary sm" data-action="bu-next" disabled=${!ok}
+  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title="Next: name it, claim it, set its identity" state="" testid="bu-step-next">
+    <p class="small secondary">Every new board starts as MPS3, 192.168.10.101 (the generic image). On Board > Access: claim its SSH (Linux), then give the board its own label, IP and MAC with the values below.</p>
+    <${Proposal} bid=${bid} w=${w} />
+    <div class="row mt-8"><button type="button" class="btn primary sm" data-action="bu-next" disabled=${!ok}
       title=${why} onClick=${() => openOnEthernet(bid, w)}>
-      <${Icon} name="ethernet-port" /> Open it on Ethernet and go to Access</button>
+      <${Icon} name="ethernet-port" /> Open it on Ethernet and set its identity…</button>
       ${!ok ? html`<span class="small muted" data-testid="bu-next-why">${why}</span>` : null}</div>
   <//>`;
 }
+
+// --- the identity dialog, on Board > Access: the proposal into the existing identity writer -----------
+
+function sameField(k, a, b) {
+  const x = String(a || "").trim();
+  const y = String(b || "").trim();
+  if (k === "mac") return x.toLowerCase().replace(/[-.]/g, ":") === y.toLowerCase().replace(/[-.]/g, ":");
+  if (k === "ip") return x.split("/")[0] === y.split("/")[0] && (!x.includes("/") || !y.includes("/") || x === y);
+  return x === y;
+}
+
+// "" when the board can take it; else why not, in the board's own words (and "predates").
+export function identityRefusal(st, impl) {
+  if (impl && impl !== "linux") return `This board cannot take an identity: ${NO_IDENTITY_STORE}.`;
+  if (!st) return "This board's harness does not report its identity: it predates net-protocol v0.16 (identity_set), so Harness Manager cannot set it. Update its harness, then set it on Board > Access.";
+  const ref = st.fix && st.fix.refusal;
+  if (!ref) return "";
+  const r = st.reported || {};
+  if (r.impl && r.impl !== "linux") return `This board cannot take an identity: ${ref.message}.`;
+  if (/no identity verbs/.test(ref.message || "")) return `This board's harness predates identity_set: ${ref.message}.`;
+  return `Not now: ${ref.message}${ref.hint ? ` (${ref.hint})` : ""}.`;
+}
+
+function BringupIdentity({ bid, want = {}, impl = "", serial = "", close }) {
+  const b = boardState(bid);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [done, setDone] = useState(null);
+  const [read, setRead] = useState(false);
+  const asks = !impl || impl === "linux";             // bare metal: nothing to ask, its refusal is known
+  useEffect(() => {
+    if (asks) Promise.resolve(loadIdentity(bid, { refresh: true })).then(() => setRead(true));
+  }, [bid]);
+  const st = identityOf(b);
+  const loading = asks && (!!b.netIdentityLoading || !read);
+  const r = (st && st.reported) || {};
+  const changes = ["label", "ip", "mac"].filter((k) => want[k] && !sameField(k, r[k], want[k]))
+    .map((k) => ({ field: k, from: r[k] || "", to: want[k] }));
+  const phrase = want.label || r.label || `IDENTITY ${bid}`;
+  const refusal = b.netIdentityError && !st ? "" : identityRefusal(st, impl);
+  const leaseWhy = holderOnly(bid, "Set the identity");
+  const apply = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const out = await runJob("netIdentityFix", { bid }, { confirm: typed.trim(), ...want }, null, "identity");
+      setDone(out || {});
+      toast(`Identity set${want.label ? `: ${want.label}` : ""}`, { icon: "tag" });
+      loadIdentity(bid);
+      refreshInfo(bid);
+    } catch (e) {
+      setErr(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<${ModalShell} title="Set this board's identity" icon="tag" testid="bu-identity-modal" note=${serial ? `proposed from the MCC's USB serial number ${serial}` : "proposed by the bring-up"}
+      foot=${html`<span class="grow"></span><button type="button" class="btn" data-action="bu-id-close" onClick=${close}>${done ? "Close" : "Cancel"}</button>`}>
+    <div class="stack gap-8">
+      <p class="small secondary">The bring-up's values, into this board's identity (the same as <span class="mono">harness-manager board identity</span>): set, a warm restart of the harness (its reboot verb, never an MCC REBOOT), then a read-back.</p>
+      <dl class="kv" data-testid="bu-id-want">
+        ${["label", "ip", "mac"].map((k) => html`<dt key=${`${k}t`}>${k === "ip" ? "IP" : k === "mac" ? "MAC" : "Label"}</dt>
+          <dd key=${k} class="mono" data-field=${k}>${want[k] || html`<span class="muted" style="font-family:var(--font-sans)">not given</span>`}${r[k] ? html` <span class="sub">now ${r[k]}</span>` : null}</dd>`)}
+      </dl>
+      ${loading ? html`<${Reason} icon="loader-circle" text="Reading what the board says it is…" />` : null}
+      ${b.netIdentityError && !st ? html`<${Reason} level="err" testid="bu-id-read-error" text=${`Harness Manager cannot read this board's identity: ${b.netIdentityError.errName}: ${b.netIdentityError.message}`} />` : null}
+      ${!loading && refusal ? html`<${Reason} level="warn" testid="bu-id-refusal" text=${refusal} />` : null}
+      ${!loading && !refusal && st && !changes.length && !done ? html`<${Reason} level="ok" testid="bu-id-same" text="The board already has this identity: nothing to set." />` : null}
+      ${!loading && !refusal && st && changes.length && !done ? html`<div class="stack gap-8">
+        <ul class="small" data-testid="bu-id-changes">${changes.map((c) => html`<li key=${c.field} data-field=${c.field}><span class="mono">${c.field}</span> <span class="mono">${c.from || "-"}</span> → <b class="mono">${c.to}</b></li>`)}</ul>
+        ${leaseWhy ? html`<${Reason} level="held" icon="lock" testid="bu-id-lease" text=${leaseWhy} />` : null}
+        <div class="field"><label for=${`bu-id-phrase-${bid}`}>Type <code data-testid="bu-id-phrase-want">${phrase}</code> to confirm</label>
+          <input id=${`bu-id-phrase-${bid}`} class="input mono grow" data-testid="bu-id-phrase" autocomplete="off" value=${typed}
+            onInput=${(e) => setTyped(e.target.value)} /></div>
+        <div class="row"><button type="button" class="btn primary sm" data-action="bu-id-set"
+          disabled=${busy || typed.trim() !== phrase || !!leaseWhy} onClick=${apply}>
+          ${busy ? html`<${Spinner} />` : html`<${Icon} name="tag" />`} Set and restart</button></div>
+      </div>` : null}
+      ${done ? html`<${Reason} level="ok" testid="bu-id-done" text=${`Set${done.verified === false ? "" : " and read back"}: ${(done.changes || changes).map((c) => `${c.field} ${c.to}`).join(", ")}.${(done.notes || []).length ? ` ${done.notes.join(" ")}` : ""}`} />` : null}
+      ${err ? html`<${Reason} level="err" testid="bu-id-set-error" text=${`${err.errName}: ${err.message}${err.hint ? ` (${err.hint})` : ""}`} />` : null}
+    </div>
+  <//>`;
+}
+
+registerModal("bu-identity", BringupIdentity);
 
 // --- the dialog ---------------------------------------------------------------------------------------
 

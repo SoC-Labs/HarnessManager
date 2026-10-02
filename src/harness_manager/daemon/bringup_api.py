@@ -7,6 +7,7 @@
 | ``POST /bringup/bundle`` ``{path}`` | check a bundle folder or zip: the files, the base ``.bit`` (size, sha256, part, USERID); 409 REFUSED with ``error.data.check`` for an ``.ebf``, an MCC command file, a file outside the config-SD tree, no bitstream |
 | ``POST /boards/{bid}/bringup/install`` ``{bundle, backup_path, confirm_unsigned}`` | 202 job ``sd_install``: the bundle checked again and its typed ``INSTALL UNSIGNED <sha8>`` (409 REFUSED without it, ``error.data.unsigned``), then written to the board's config SD by its storage adapter (the backup is mandatory; never an ``.ebf``); a release bundle's ``overlays/open`` then joins ``mps3.overlay_dirs`` (Program and Restore find them) |
 | ``POST /bringup/card-reader`` ``{bundle, device_id, confirm, confirm_unsigned, backup_path?, backup_dir?}`` | 202 job ``cardwriter_write``: the same bundle check and typed phrase, then the card writer's ``files`` kind (SD-FLASH's: the card in this PC's reader backed up, its typed ``WRITE <model> <size>``, the pack's MBBIOS rule, read back); no MCC reboot |
+| ``GET /boards/{bid}/bringup/proposal?ip=`` | the identity PROPOSED for the new board (david 2 Oct, D4a): ``{proposal: {serial, label, hostname, ip, mac, derivation, uniqueness, ip_note, notes}, command}``: the label and a locally administered MAC from the MCC's USB serial number, the IP (default 192.168.10.101). Nothing is set: the existing identity writer (``POST /boards/{bid}/identity``, ``board identity``) sets it, with its typed phrase |
 | ``POST /boards/{bid}/bringup/witness`` ``{host?, wait_s?, poll_s?}`` | 202 job ``bringup_witness``: wait for the harness to answer at ``host`` after the reboot; ``state`` ``running`` or ``rescue``; a timeout fails the job with ``error.data.timeout`` |
 
 Composed, not new executors: the backup, the reboot and the restore are the existing
@@ -203,6 +204,17 @@ def register(ctx: RouteContext) -> None:
                          backup_path=backup_path, backup_dir=backup_dir)
         return ctx.accepted(d.jobs.submit(CARDWRITER_JOB, CARDWRITER_ENGINE,
                                           lambda progress: w.run(plan, progress)))
+
+    @api.get("/boards/{bid:path}/bringup/proposal")
+    def bringup_identity(bid: str, ip: str | None = None) -> Any:
+        """The proposal for the board on this Debug USB (its MCC's USB serial number)."""
+        s = ctx.board(bid)
+        want = (ip or "").strip() or bringup.DEFAULT_HOST
+        serial = bringup.mcc_serial(getattr(s, "candidate", None))
+        proposal = bringup.propose_identity(serial, ip=want)
+        host = want.split("/", 1)[0]
+        return _JSON(ok(board_id=bid, proposal=proposal,
+                        command=bringup.identity_command(host, proposal)))
 
     @api.post("/boards/{bid:path}/bringup/witness")
     def bringup_witness(bid: str, body: JsonBody = None) -> Any:

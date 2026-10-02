@@ -65,7 +65,9 @@ bringup - --serial PORT --volume PATH (--bundle DIR|ZIP | --version V [--source 
   with --confirm-unsigned). --card-reader DEVICE_ID writes the configuration SD in this
   PC's card reader instead (bringup.sd_flash on; `flash devices` lists the ids): typed
   WRITE <model> <size> (--confirm), no MCC reboot: put the card back and power the board
-  on. --yes answers the questions; never a re-key, never a typed phrase.
+  on. --yes answers the questions; never a re-key, never a typed phrase. Once it runs, it
+  PROPOSES the board's identity (a label and a MAC from the MCC's USB serial number, the
+  IP) and prints the `board identity` command that sets it.
 """
 
 
@@ -219,7 +221,7 @@ def cmd_bringup(ctx: Any) -> int:
                 raise with_data(ActionFailedError(out.detail, hint=out.restore_hint or
                                                   "check the board"), outcome=out.as_dict())
             steps.append([bid, "install", out.result, out.detail])
-    return _witness(ctx, bid, steps, data, linux, restore)
+    return _witness(ctx, bid, steps, data, linux, restore, cand)
 
 
 def _checked(chk: Any) -> str:
@@ -277,7 +279,7 @@ def _overlay_step(ctx: Any, chk: Any, state: Path, bid: str, steps: list[list[An
 
 
 def _witness(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any], linux: bool,
-             restore: str) -> int:
+             restore: str, cand: Any = None) -> int:
     """Wait for the harness at ``--host``; a dark board names the backup to restore."""
     a = ctx.args
     wait = a.wait or (bringup.LINUX_WITNESS_S if linux else bringup.DEFAULT_WITNESS_S)
@@ -295,9 +297,37 @@ def _witness(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any], l
                                            "prepared; over the network from rescue "
                                            f"{bringup.RESCUE_NETWORK_REASON}"])
     else:
-        steps.append([bid, "next", "access", f"harness-manager claim {a.host} (Linux), then "
-                                             f"harness-manager board identity {a.host}"])
+        _identity(ctx, bid, steps, data, seen, cand)
     return _steps_out(ctx, bid, steps, data)
+
+
+def _identity(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any],
+              seen: dict[str, Any], cand: Any) -> None:
+    """The identity PROPOSED for the new board (a label and a MAC from the MCC's USB serial
+    number, the IP), and the `board identity` command that sets it: the existing writer, with
+    its typed phrase. Nothing is set here."""
+    import ipaddress
+
+    a = ctx.args
+    host = str(a.host).strip()
+    try:
+        ip = str(ipaddress.IPv4Address(host))
+    except ValueError:
+        ip = bringup.DEFAULT_HOST
+    proposal = bringup.propose_identity(bringup.mcc_serial(cand), ip=ip)
+    command = bringup.identity_command(host, proposal)
+    data["identity"] = {"proposal": proposal, "command": command}
+    what = ", ".join(f"{k} {proposal[k]}" for k in ("label", "ip", "mac") if proposal[k])
+    src = (f"from the MCC's USB serial {proposal['serial']} ({proposal['uniqueness']})"
+           if proposal["serial"] else bringup.NO_SERIAL)
+    steps.append([bid, "identity", "proposed", f"{what}: {src}; {bringup.IP_NOTE}"])
+    impl = str(seen.get("impl") or "")
+    if impl and impl != "linux":
+        steps.append([bid, "identity", "not-settable", bringup.NO_IDENTITY_STORE])
+        steps.append([bid, "next", "access", f"harness-manager board info {host}"])
+        return
+    steps.append([bid, "next", "access", f"harness-manager claim {host} (Linux), then {command} "
+                                         f"({bringup.IDENTITY_SET_NOTE})"])
 
 
 def _card_reader(ctx: Any, w: Any, chk: Any, state: Path) -> int:
@@ -311,9 +341,9 @@ def _card_reader(ctx: Any, w: Any, chk: Any, state: Path) -> int:
 
     a = ctx.args
     bid = "-"
-    if getattr(a, "serial", None) or getattr(a, "volume", None):
-        ctx.note("--card-reader writes the card in this PC's reader: --serial and --volume are "
-                 "not used (no MCC reboot)")
+    if getattr(a, "volume", None):
+        ctx.note("--card-reader writes the card in this PC's reader: --volume is not used")
+    cand = _given_mcc(getattr(a, "serial", None))
     dest = Path(a.backup_dir).expanduser() if a.backup_dir else state / "backups"
     plan = w.plan(a.card_reader, "files", Path(chk.sd_root), backup_dir=dest)
     disk = plan.device.disk
@@ -365,7 +395,19 @@ def _card_reader(ctx: Any, w: Any, chk: Any, state: Path) -> int:
             "the card is written; nothing waited for the harness",
             hint=f"{PUT_BACK}, then look for it: harness-manager probe --host {a.host} --no-scan"),
             steps=steps, **{k: v for k, v in data.items() if k != "check"}) from exc
-    return _witness(ctx, bid, steps, data, chk.impl == "linux", restore)
+    return _witness(ctx, bid, steps, data, chk.impl == "linux", restore, cand)
+
+
+def _given_mcc(serial: Any) -> Any:
+    """``--serial`` with ``--card-reader``: never opened (no MCC reboot); only to read the MCC's
+    USB serial number from this PC's port list, for the proposed identity."""
+    ports = serial if isinstance(serial, list) else ([serial] if serial else [])
+    if not ports:
+        return None
+    from harness_manager.core.model import Candidate, Link, LinkKind
+
+    return Candidate(pack="mps3", board_id="-", links=(
+        Link(LinkKind.USB_SERIAL, ports[0], "MCC console (given explicitly)"),))
 
 
 def _overlays(ctx: Any, chk: Any, state: Path) -> dict[str, Any] | None:

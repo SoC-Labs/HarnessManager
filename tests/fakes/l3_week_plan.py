@@ -1300,5 +1300,6 @@ EXTENSION_ROUTES["bringup_api"] = (
     ("POST", "/boards/{bid}/bringup/install"),
     ("POST", "/boards/{bid}/bringup/witness"),
     ("POST", "/bringup/card-reader"),                 # bringup-2: the card-reader door
+    ("GET", "/boards/{bid}/bringup/proposal"),        # bringup-2: the proposed identity
 )
 # --- end bringup-usb ---

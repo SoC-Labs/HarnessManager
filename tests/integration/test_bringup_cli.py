@@ -80,7 +80,8 @@ def test_bringup_backs_up_writes_reboots_and_witnesses_a_bundle(board, tmp_path,
     steps = [(s["step"], s["result"]) for s in out["steps"]]
     assert steps == [("source", "checked"), ("unsigned", "confirmed"), ("backup", "taken"),
                      ("write", "written"), ("overlays", "added"), ("reboot", "witnessed"),
-                     ("witness", "running"), ("next", "access")]
+                     ("witness", "running"), ("identity", "proposed"),
+                     ("identity", "not-settable"), ("next", "access")]
     sha = out["check"]["sha256"]
     assert out["steps"][1]["detail"] == (f"INSTALL UNSIGNED {sha[:8]} typed; sha256 {sha} (its "
                                          f"manifest, {out['check']['unsigned']['files']} files)")
@@ -151,7 +152,8 @@ def test_card_reader_writes_the_card_backs_it_up_and_witnesses_with_no_mcc_reboo
     assert steps == [("source", "checked"), ("unsigned", "confirmed"), ("backup", "taken"),
                      ("write", "written"),
                      ("mbbios", "bundle"), ("overlays", "added"), ("reboot", "by-hand"),
-                     ("witness", "running"), ("next", "access")]
+                     ("witness", "running"), ("identity", "proposed"),
+                     ("identity", "not-settable"), ("next", "access")]
     by = {s["step"]: s["detail"] for s in out["steps"]}
     assert by["reboot"] == ("no MCC reboot with the card reader: put the card back in the "
                             "board's configuration SD slot and power the board on")
@@ -324,3 +326,68 @@ def test_twin_a_signed_release_takes_no_unsigned_phrase(board, tmp_path, capsys)
     with pytest.raises(UsageError, match="--confirm-unsigned is for a bundle folder or zip"):
         run(board, tmp_path, capsys, "--version", "1.1.0", "--confirm-unsigned",
             "INSTALL UNSIGNED 00000000")
+
+
+# --- the identity it proposes (david 2 Oct, D4a): from the MCC's USB serial number --------------
+
+
+@pytest.fixture
+def linux_board(tmp_path: Path, monkeypatch) -> Iterator[VirtualMps3]:
+    from harness_manager_mps3 import usb as usbmod
+    from tests.fakes.t3_usb import FakePortInfo
+    from tests.fakes.virtual_board import LINUX_HARNESSD
+
+    clock = FakeClock()
+    monkeypatch.setattr(mccmod, "DEFAULT_CLOCK", clock)
+    monkeypatch.setattr(mccmod, "DEFAULT_SLEEP", clock.sleep)
+    monkeypatch.delenv("HARNESS_MANAGER_MPS3_OVERLAY_DIRS", raising=False)
+    with VirtualMps3(tmp_path / "usb", LINUX_HARNESSD, usb=True) as vb:
+        vb.mcc.clock = clock
+        vb.mcc.down_s, vb.mcc.boot_s, vb.mcc.autoboot_window_s = 1.0, 25.0, 3.0
+        counted = vb.mcc.on_reboot
+        vb.mcc.on_reboot = lambda: (counted(), vb.shell.stop())
+        vb.mcc.on_boot = vb.shell.start
+        ports = [FakePortInfo(device=d, vid=0x0403, pid=0x6011, serial_number="FT9VIRT1",
+                              location=f"1-4.2:1.{n}")
+                 for n, d in enumerate([vb.mcc_url, "fake://l1", "fake://l2", "fake://l3"])]
+        monkeypatch.setattr(usbmod, "DEFAULT_ENV",
+                            usbmod.UsbEnv(lambda: list(ports), lambda: []))   # this PC's ports
+        yield vb
+
+
+def test_a_running_linux_harness_gets_a_proposed_identity_and_the_writers_command(
+        linux_board, tmp_path, capsys):
+    bundle = sd_tree(tmp_path / "good")
+    rc, out = run(linux_board, tmp_path, capsys, *signed(bundle, tmp_path), "--wait", "60")
+    assert rc == 0
+    prop = out["identity"]["proposal"]
+    mac = bringup.derive_mac("FT9VIRT1")
+    assert prop["serial"] == "FT9VIRT1" and prop["label"] == "MPS3-IRT1"
+    assert prop["mac"] == mac and mac.startswith("02:") and prop["ip"] == "192.168.10.101/24"
+    by = {(s["step"], s["result"]): s["detail"] for s in out["steps"]}
+    assert by[("identity", "proposed")].startswith(
+        f"label MPS3-IRT1, ip 192.168.10.101/24, mac {mac}: from the MCC's USB serial FT9VIRT1 "
+        "(uniqueness of MCC serials is not yet verified); two boards on one network need "
+        "different IPs")
+    host = linux_board.shell_endpoint
+    assert by[("next", "access")] == (
+        f"harness-manager claim {host} (Linux), then harness-manager board identity {host} "
+        f"--label MPS3-IRT1 --ip 192.168.10.101/24 --mac {mac} --consent MPS3-IRT1 (an image "
+        "before net-protocol v0.16 has no identity_set: `board identity` says so and changes "
+        "nothing)")
+    assert ("identity", "not-settable") not in by
+
+
+def test_twin_no_serial_known_proposes_no_label_or_mac(linux_board, tmp_path, capsys,
+                                                      monkeypatch):
+    from harness_manager_mps3 import usb as usbmod
+
+    monkeypatch.setattr(usbmod, "DEFAULT_ENV", usbmod.UsbEnv(lambda: [], lambda: []))
+    rc, out = run(linux_board, tmp_path, capsys, *signed(sd_tree(tmp_path / "good"), tmp_path),
+                  "--wait", "60")
+    assert rc == 0
+    prop = out["identity"]["proposal"]
+    assert prop["label"] == "" and prop["mac"] == "" and prop["serial"] == ""
+    by = {(s["step"], s["result"]): s["detail"] for s in out["steps"]}
+    assert "the MCC's USB serial number is not known" in by[("identity", "proposed")]
+    assert "--mac" not in by[("next", "access")] and "--consent" not in by[("next", "access")]

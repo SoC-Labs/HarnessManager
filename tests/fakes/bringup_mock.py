@@ -61,6 +61,15 @@ def register(app: FastAPI, state: Any, ok: Any) -> None:
         state.session(bid)
         raise UnavailableError("bring-up install", WHY)
 
+    @app.get(f"{API}/boards/{{bid:path}}/bringup/proposal")
+    def identity(bid: str, ip: str | None = None) -> dict[str, Any]:
+        s = state.session(bid)
+        want = (ip or "").strip() or bringup.DEFAULT_HOST
+        proposal = bringup.propose_identity(
+            bringup.mcc_serial(getattr(s, "candidate", None), list_ports=list), ip=want)
+        return ok(board_id=bid, proposal=proposal,
+                  command=bringup.identity_command(want.split("/", 1)[0], proposal))
+
     @app.post(f"{API}/bringup/card-reader")
     def card_reader(body: JsonBody = None) -> dict[str, Any]:
         raise UnavailableError("card reader", WHY)
