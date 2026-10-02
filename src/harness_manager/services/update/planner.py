@@ -32,6 +32,7 @@ from . import hub_door
 from .schema import (
     KIND_OS_SLOT,
     KIND_OVERLAYS,
+    KIND_SD,
     STATUS_WITHDRAWN,
     TARGET_HOST_STORE,
     TARGET_MCC_SD,
@@ -254,6 +255,11 @@ class BoardView:
     os_running: str = ""
     os_fell_back_crc: str = ""
     sd_revisions: tuple[str, ...] = ()    # MB/HBI0309<rev> dirs seen on the config SD
+    # FIX-PACK-9: the revision the board's MCC reads (``HBI0309C``; "" unknown) and how it
+    # is known ("LOG.TXT on its config SD", "the MCC boot log", "the config SD's only
+    # revision folder"): the pack's ``storage.board_revision``
+    board_rev: str = ""
+    board_rev_from: str = ""
     mcc_firmware: str = ""
     # HUB-SD: the pack's hub SD door (``hub_door``), with the lease holder/mine/queue;
     # {} when the board is not behind a hub.
@@ -262,6 +268,54 @@ class BoardView:
     # board offers no OS slot door when it offers none (its adapter's ``slots_reason``).
     os_boot: str = ""
     os_slots_reason: str = ""
+
+
+#: FIX-PACK-9 (david, 2 Oct): the board revisions a release may serve but nobody has run it
+#: on, and what the planner warns ("Rev B: boots, untested"; Rev C is the supported one).
+UNTESTED_REVS = {"HBI0309B": "Rev B: boots, untested"}
+
+
+def _sd_has_rev(comp: Component | None, rev: str) -> bool | None:
+    """Does the config-SD part's signed file list carry ``MB/<rev>/board.txt``? None when it
+    lists no files (the bundle check measures it after the download)."""
+    if comp is None or not comp.files:
+        return None
+    want = f"mb/{rev.lower()}/board.txt"
+    return any(k.replace("\\", "/").strip("/").lower() == want for k in comp.files)
+
+
+def revision_check(rel: HarnessRelease, board: BoardView) -> tuple[str, str]:
+    """``(blocker, warning)`` ("" each: none) for the board's revision against the release.
+
+    The MCC reads only ``MB/<its revision>/``: a release whose config SD lacks that folder
+    leaves the board unprogrammed ("File not found \\MB\\HBI0309B\\board.txt"). With the
+    revision known (``board.board_rev``) it must be one of ``compat.board_revs`` and in the
+    SD part's file list (when it has one); unknown, the config SD's revision folders must
+    meet ``compat.board_revs`` (the rule before FIX-PACK-9). A known untested revision
+    (``UNTESTED_REVS``) is a warning."""
+    revs = list(rel.compat.board_revs)
+    supported = {r.upper() for r in revs}
+    rev = board.board_rev.upper()
+    who = f"this board is {rev}" + (f" ({board.board_rev_from})" if board.board_rev_from else "")
+    blocker = ""
+    if rev and supported:
+        if rev not in supported:
+            blocker = (f"{who}, and harness {rel.version} carries "
+                       f"{', '.join(f'MB/{r}' for r in revs)} only: the MCC reads only "
+                       f"MB/{rev}/, so the board would stay unprogrammed")
+        elif _sd_has_rev(next((c for c in rel.by_target(TARGET_MCC_SD) if c.kind == KIND_SD),
+                              None), rev) is False:
+            blocker = (f"{who}, and harness {rel.version}'s config SD has no MB/{rev}/board.txt: "
+                       f"the MCC reads only MB/{rev}/, so the board would stay unprogrammed")
+    elif board.sd_revisions and supported and \
+            not supported & {r.upper() for r in board.sd_revisions}:
+        blocker = (f"the config SD is for {', '.join(board.sd_revisions)}; harness "
+                   f"{rel.version} supports {', '.join(revs)}")
+    warning = ""
+    if not blocker and rev in UNTESTED_REVS:
+        warning = (f"{UNTESTED_REVS[rev]}. {who[0].upper()}{who[1:]}; harness {rel.version} is "
+                   "supported on Rev C")
+    return blocker, warning
 
 
 def _same_u32(a: str, b: str) -> bool:
@@ -462,11 +516,11 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     if rel.compat.min_app and not at_least(app_version, rel.compat.min_app):
         plan.blockers.append(f"harness {rel.version} needs harness-manager >= {rel.compat.min_app} "
                              f"(this is {app_version}); run `harness-manager update app` first")
-    if board.sd_revisions and rel.compat.board_revs:
-        supported = {r.upper() for r in rel.compat.board_revs}
-        if not supported & {r.upper() for r in board.sd_revisions}:
-            plan.blockers.append(f"the config SD is for {', '.join(board.sd_revisions)}; harness "
-                                 f"{rel.version} supports {', '.join(rel.compat.board_revs)}")
+    rev_blocker, rev_warning = revision_check(rel, board)        # FIX-PACK-9
+    if rev_blocker:
+        plan.blockers.append(rev_blocker)
+    if rev_warning:
+        plan.warnings.append(rev_warning)
     if board.mcc_firmware and rel.compat.mcc_fw_tested and \
             not mcc_fw_tested(board.mcc_firmware, rel.compat.mcc_fw_tested):
         plan.warnings.append(f"MCC firmware {board.mcc_firmware} was not tested with harness "
@@ -560,6 +614,13 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
 
     hub_door.apply(plan, rel, channel, board, via=via, running=running,
                    have_token=have_token)
+    if plan.base and board.has_storage and not board.sd_revisions and \
+            plan.via != hub_door.VIA_HUB and rel.compat.board_revs:
+        # FIX-PACK-9 (the Linux lead): a card with no revision folder is written anyway
+        plan.warnings.append(
+            "the config SD has no revision folder (MB/HBI*): is it this board's configuration "
+            f"SD? harness {rel.version} writes "
+            f"{', '.join(f'MB/{r}' for r in rel.compat.board_revs)}")
     if plan.via == hub_door.VIA_HUB and plan.base and not board.has_controller:
         plan.blockers.append("the new base runs only after a board REBOOT: it needs the MCC "
                              "reached on the hub (an SSH login to the hub; a REST-only hub "

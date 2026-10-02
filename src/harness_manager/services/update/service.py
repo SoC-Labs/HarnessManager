@@ -229,6 +229,9 @@ class UpdateService:
         controller = getattr(session, "controller", None)
         slots = self.os_slots_for(session)
         revs: tuple[str, ...] = ()
+        witness = getattr(controller, "last_reboot", None)
+        boot = getattr(witness, "boot", None)
+        rev = rev_from = ""
         if storage is not None:
             try:
                 mb = Path(storage.locate()) / "MB"
@@ -236,6 +239,14 @@ class UpdateService:
                                     if p.is_dir() and p.name.upper().startswith("HBI")))
             except (HarnessError, OSError):
                 revs = ()
+            # FIX-PACK-9: the revision the MCC reads (the pack's probe: its boot log, the
+            # card's LOG.TXT, a card with one revision folder); unknown is no answer
+            probe = getattr(storage, "board_revision", None)
+            if callable(probe):
+                try:
+                    rev, rev_from = probe(boot_board=str(getattr(boot, "board", "") or ""))
+                except (HarnessError, OSError):
+                    rev = rev_from = ""
         os_sha = os_crc = os_pending = fell = fell_crc = running = ""
         os_boot = slots_reason = ""
         if slots is not None:
@@ -253,14 +264,12 @@ class UpdateService:
         elif ident is not None and ident.harness_impl == "linux":
             # UI2 G6: why a Linux board offers no OS slot door; with no card, it netbooted
             os_boot, slots_reason = netboot_of(getattr(session, "os_slots", None))
-        witness = getattr(controller, "last_reboot", None)
-        boot = getattr(witness, "boot", None)
         return BoardView(board_id=cand.board_id, pack=cand.pack, identity=ident,
                          identity_known=known, has_storage=storage is not None,
                          has_controller=controller is not None, has_os_slots=slots is not None,
                          os_active_sha=os_sha, os_active_crc=os_crc, os_pending=os_pending,
                          os_fell_back=fell, os_running=running, os_fell_back_crc=fell_crc,
-                         sd_revisions=revs,
+                         sd_revisions=revs, board_rev=rev, board_rev_from=rev_from,
                          mcc_firmware=getattr(boot, "firmware", "") or "",
                          hub_sd=self.hub_door_view(session),
                          os_boot=os_boot, os_slots_reason=slots_reason)
