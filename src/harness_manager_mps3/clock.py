@@ -15,6 +15,13 @@ the shell (its ``dut_clk`` boundary clock; harnessd has no clock verb). ``clocks
 rate from the pin model (``pins/mps3_board_pins.json``, the shell's ``boundary_clocks``) with the
 reason "fixed by the shell", and unavailable with the reason when the model has no such shell;
 ``set_clock`` is refused there.
+
+FIX-PACK-9 (CLI): ``harness-manager clock <ip>`` opens a candidate the CLI made from the
+address, with no identity, so a Linux board read as bare metal ("the shell cannot read the DUT
+clock back"). The adapter now asks the session for the identity (the shell's ``version``) when
+the candidate carries none, once per adapter, and the reading says the whole fact: 50 MHz,
+source ``pin-model``, "fixed by the shell: the Linux harness cannot change it" (the app's tile
+still shows "fixed by the shell").
 """
 
 from __future__ import annotations
@@ -23,11 +30,19 @@ from collections.abc import Sequence
 
 from pyverify.client import DEFAULT_CLK_PRESETS
 
-from harness_manager.core.errors import ActionFailedError, UnavailableError, UsageError
+from harness_manager.core.errors import (
+    ActionFailedError,
+    HarnessError,
+    UnavailableError,
+    UsageError,
+)
 from harness_manager.core.model import Reading
 
 PRESET_MHZ = {25.0: "25mhz", 50.0: "50mhz", 100.0: "100mhz"}
 FIXED = "fixed by the shell"
+#: The reading's reason on a Linux board (the CLI's line: "dut  50 MHz  [pin-model]  (…)").
+FIXED_WHY = f"{FIXED}: the Linux harness cannot change it"
+PIN_MODEL = "pin-model"
 
 
 def fixed_dut_mhz(static_id: str) -> float | None:
@@ -60,17 +75,37 @@ class Mps3Clocks:
     def __init__(self, session) -> None:
         self._session = session
         self._last_set: Reading | None = None
+        self._asked: tuple[object | None] | None = None   # FIX-PACK-9: the session's answer
+
+    def _linux(self) -> object | None:
+        """The board's identity when it runs the Linux harness, else None: the candidate's
+        when it has one (the daemon probed it), else the session's, asked once (the CLI's
+        candidate is only an address)."""
+        cand = getattr(getattr(self._session, "candidate", None), "identity", None)
+        if getattr(cand, "harness_impl", ""):
+            return _linux_identity(self._session)
+        if self._asked is None:
+            ask = getattr(self._session, "identity", None)
+            ident = None
+            if callable(ask):
+                try:
+                    ident = ask()
+                except HarnessError:
+                    ident = None
+            self._asked = (ident,)
+        ident = self._asked[0]
+        return ident if getattr(ident, "harness_impl", "") == "linux" else None
 
     def clocks(self) -> Sequence[Reading]:
-        linux = _linux_identity(self._session)
+        linux = self._linux()
         if linux is not None:
             sid = str(getattr(linux, "shell_id", "") or "")
             mhz = fixed_dut_mhz(sid)
             if mhz is None:
                 return (Reading.unavailable(
                     "dut", "MHz", f"{FIXED}; the pin model has no rate for shell {sid or '(not reported)'}",
-                    source="the pin model"),)
-            return (Reading("dut", mhz, "MHz", f"the pin model, shell {sid}", reason=FIXED),)
+                    source=PIN_MODEL),)
+            return (Reading("dut", mhz, "MHz", PIN_MODEL, reason=FIXED_WHY),)
         if self._last_set is not None:
             return (self._last_set,)
         return (Reading.unavailable(
@@ -80,7 +115,7 @@ class Mps3Clocks:
     def set_clock(self, name: str, mhz: float) -> Reading:
         if name != "dut":
             raise UsageError(f"clock {name!r} is not settable from the shell", hint="clocks: dut")
-        if _linux_identity(self._session) is not None:
+        if self._linux() is not None:
             raise UnavailableError("set_clock", f"the Linux harness's DUT clock is {FIXED}: it cannot be set",
                                    hint="the rate is the shell's dut_clk (GET /boards/{bid}/clocks)")
         preset = PRESET_MHZ.get(float(mhz))

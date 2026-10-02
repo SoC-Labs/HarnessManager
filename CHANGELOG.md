@@ -9,6 +9,63 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### MPS3 board revisions B and C (FIX-PACK-9, rc2)
+- **A config-SD bundle for both revisions installs onto either.** Platform v2.0.0 ships
+  `MB/HBI0309B` and `MB/HBI0309C`, identical apart from the `BOARD:` line (Rev C supported, Rev
+  B "boots, untested"; david, 2 Oct). The MCC reads only the folder of the revision it detects,
+  so a card is written with both folders, as Arm's own bundles are. A folder the bundle does
+  not carry (an Arm `HBI0309A` tree) is never touched, and stays in the backup.
+- **MBBIOS is kept in every revision's folder.** The FIX-PACK-7 rule now runs on each
+  `MB/HBI0309<rev>/board.txt` against the card's board.txt of the SAME revision: the card's
+  line is kept; a revision folder the card lacks gets the bundle's line unchanged, unless the
+  `.ebf` it names is anywhere on the card (refused, 15: "this card would make the MCC update
+  itself to mbb_v141.ebf through MB/HBI0309B/board.txt: remove mbb_v141.ebf from the card, or
+  add --allow-mcc-update"; `error.data.mcc_update.board_txt` names the file). The note names
+  each revision: "MBBIOS kept: HBI0309C mbb_v132.ebf; MBBIOS: HBI0309B mbb_v141.ebf from the
+  bundle (the card has no mbb_v141.ebf, so the MCC will not update)". A C-only bundle says what
+  it said before ("MBBIOS kept: mbb_v132.ebf").
+- **A card with neither folder is written, with a warning:** "WARNING: this card had no
+  HBI0309B or HBI0309C folder: is it an MPS3 configuration SD? both were written" (a note
+  beside the MBBIOS one). The plan says it first: "the config SD has no revision folder
+  (MB/HBI*): is it this board's configuration SD? harness 2.0.0 writes MB/HBI0309B,
+  MB/HBI0309C".
+- **The plan checks the board's revision.** Harness Manager reads it from the MCC's boot log
+  (after a REBOOT it witnessed: "Configuring motherboard (rev C, var A)"), else the card's
+  `LOG.TXT` ("MotherBoard Revision C Variant A"), else a card with only one `MB/HBI0309*`
+  folder; a card with several says nothing (until FIX-PACK-9 the folders were all it read). A
+  release that does not carry the board's revision is blocked: "this board is HBI0309B (LOG.TXT
+  on its config SD), and harness 1.2.0 carries MB/HBI0309C only: the MCC reads only
+  MB/HBI0309B/, so the board would stay unprogrammed". On a Rev B board a B+C release plans
+  with the warning "Rev B: boots, untested. This board is HBI0309B (LOG.TXT on its config SD);
+  harness 2.0.0 is supported on Rev C". The release list's verdict says the same.
+- The bundle check refuses a release that declares a revision (`compat.board_revs`) whose
+  `MB/<rev>/board.txt` is not in its SD tree.
+- **The hub door** writes HBI0309C's `nanosoc.bit` only (fpgahub's one file), so it leaves a
+  release's `MB/HBI0309B` folder on the card as it is: the plan warns "the hub door leaves
+  MB/HBI0309B on the card as it is: it writes MB/HBI0309C/Nanosoc/nanosoc.bit only (the board
+  behind the hub reads that folder)" and the install notes "MB/HBI0309B not written: the hub
+  writes MB/HBI0309C/Nanosoc/nanosoc.bit only, and this board reads MB/HBI0309C".
+- **The A/B view (`updates.sd_ab`, off by default) flips HBI0309C's pointer only**, so it
+  refuses a B+C release before reading or writing: "the A/B install (setting updates.sd_ab)
+  writes MB/HBI0309C only, and this release also carries MB/HBI0309B: nothing was written"
+  (hint: turn `updates.sd_ab` off and install again).
+
+### `clock` on a Linux board says the DUT clock is fixed (FIX-PACK-9, rc2)
+- `harness-manager clock <ip>` on a Linux board said "dut  unavailable: the shell cannot read
+  the DUT clock back; set it to know it": the CLI's board is only an address, so the MPS3 pack
+  read it as bare metal. It now asks the board (the shell's `version`), once, and says what the
+  app's tile says, in human, `--json` and `--tsv`: `dut  50 MHz  [pin-model]  (fixed by the
+  shell: the Linux harness cannot change it)`. The reading (`GET /boards/{bid}/clocks` too) has
+  source `pin-model` (was "the pin model, shell <id>") and that reason (was "fixed by the
+  shell"; the tile still shows "fixed by the shell"). A bare-metal board is unchanged.
+
+### The sidebar shows the board's own name from identify (FIX-PACK-9, rc2)
+- The platform's rc2 identify sends the board's name as `label` ("MPS3-02"; net-proto v0.16,
+  lane IDENT), and Harness Manager read only the proposed `name` key, so the sidebar showed the
+  address. It now reads `label` first and falls back to `name` (each must be a clean name; a bad
+  label falls back), and none in stage0 rescue. Precedence is unchanged: a boards.toml `name`
+  still wins, then the board's own name, then the hub's.
+
 ### Boundary not timed: kept as a guard (FIX-PACK-8, rc2; N1 after N2)
 - N2 (below) fixed the cause of Linux v2.0.0 known issue 11 in `build_rm.tcl`. A build from an
   older `build_rm.tcl`, or one from a synth checkpoint you bring (`build.synth_dcp`) that already

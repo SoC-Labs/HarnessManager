@@ -194,10 +194,15 @@ class IdentifyReply:
 
     @property
     def name(self) -> str:
-        """The board's own name (the proposed ``name`` key, N1); ``""`` in rescue or absent."""
+        """The board's own name; ``""`` in rescue or absent. FIX-PACK-9: the platform's rc2
+        identify sends it as ``label`` (net-proto v0.16, lane IDENT: 1..19 of [A-Z0-9-],
+        "MPS3-02"; firmware/identify/identify.c), so ``label`` is read first and the proposed
+        N1 ``name`` key is the fallback, each through ``clean_name`` (a bad label falls back)."""
         from harness_manager.naming import clean_name
 
-        return "" if self.is_rescue else clean_name(self.raw.get("name"))
+        if self.is_rescue:
+            return ""
+        return clean_name(self.raw.get("label")) or clean_name(self.raw.get("name"))
 
     @property
     def shell_id(self) -> str:

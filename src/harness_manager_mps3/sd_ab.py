@@ -217,24 +217,33 @@ class AbStorage:
         """FIX-PACK-7: the bundle's board.txt is compared with the card's after
         ``mbbios.keep_mbbios`` (the card's MBBIOS line, read from the card itself: this
         backup is the pointer only), so a board.txt that differs only by MBBIOS no longer
-        blocks the A/B install; board.txt is never written here."""
+        blocks the A/B install; board.txt is never written here. FIX-PACK-9: the A/B view is
+        ``MB/HBI0309C``'s pointer, so a release that carries another revision's folder too
+        (platform v2.0.0: B and C) is refused before anything is read or written."""
         import tempfile
 
-        from .mbbios import BOARD_TXT, keep_mbbios
+        from .mbbios import card_boards_of, keep_mbbios, notes_of, rev_dirs
 
         self.install_notes = []
         if backup is None:
             raise RefusedError("writing the configuration SD needs a verified backup of it first")
+        other = sorted(rev_dirs(files) - {MB_DIR.split("/")[1]})
+        if other:
+            # FIX-PACK-9: the pointer this view flips is MB/HBI0309C's; a release that also
+            # carries another revision's folder would leave that folder behind.
+            raise RefusedError(
+                f"the A/B install (setting updates.sd_ab) writes {MB_DIR} only, and this release "
+                f"also carries {', '.join(f'MB/{r}' for r in other)}: nothing was written",
+                hint="install it in place: turn updates.sd_ab off and install again")
         root = Path(self.locate())
-        card = _resolve_ci(root, BOARD_TXT.split("/"))
         with tempfile.TemporaryDirectory(prefix="hm-mbbios-") as tmp:
-            files, kept = keep_mbbios(files, card_board_txt=card.read_bytes() if card.is_file()
-                                      else None, card_files=_walk(root)[0], workdir=Path(tmp),
+            files, kept = keep_mbbios(files, card_boards=card_boards_of(root),
+                                      card_files=_walk(root)[0], workdir=Path(tmp),
                                       allow_mcc_update=allow_mcc_update)
             self._install(files, backup=backup, progress=progress, root=root)
-        if kept is not None and kept.note:
-            self.install_notes.append(kept.note)
-            report_progress(progress, "mbbios", 1, 1, {"text": kept.note})
+        for note in notes_of(kept):
+            self.install_notes.append(note)
+            report_progress(progress, "mbbios", 1, 1, {"text": note})
 
     def _install(self, files: Mapping[str, Path], *, backup: BackupRecord,
                  progress: Progress | None, root: Path) -> None:
