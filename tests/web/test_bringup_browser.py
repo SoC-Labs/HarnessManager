@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -463,6 +464,16 @@ def reader_on(demo: Demo, monkeypatch, **kw: Any) -> Any:
     return FakeCardwriter(**kw).attach(demo.daemon.app)
 
 
+def check_image(page: Any, path: str, *, sign: bool = True) -> None:
+    """The OS step: the whole-card image, Check (POST /cardwriter/check), then its INSTALL
+    UNSIGNED <sha8>."""
+    by(page, "bu-card-image").fill(path)
+    page.locator('[data-action="bu-card-check"]').click()
+    expect(by(page, "bu-card-check")).to_be_visible(timeout=T)
+    if sign:
+        by(page, "bu-os-unsigned-phrase").fill(by(page, "bu-os-unsigned-want").inner_text())
+
+
 def pick_card(page: Any, kind: str, phrase: str) -> None:
     from tests.fakes.bringup_cardwriter import DEVICE
 
@@ -548,7 +559,7 @@ def test_the_os_step_shows_a_reader_without_privilege_the_command_and_never_esca
     os_step = by(page, "bu-step-os")
     expect(os_step).to_be_visible(timeout=T)
     os_step.locator('[data-option="reader"] input').check()
-    by(page, "bu-card-image").fill(demo.engine.bringup_card_image)
+    check_image(page, demo.engine.bringup_card_image)
     pick_card(page, "card", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
     page.locator('[data-testid="arm-bu-os"] input').check()
     page.locator('[data-action="bu_os"]').click()
@@ -569,7 +580,8 @@ def test_the_os_step_writes_a_whole_card_image_as_kind_card(demo, monkeypatch):
     expect(os_step).to_be_visible(timeout=T)
     os_step.locator('[data-option="reader"] input').check()
     card = demo.engine.bringup_card_image
-    by(page, "bu-card-image").fill(card)
+    check_image(page, card)
+    expect(by(page, "bu-card-sha")).to_contain_text(cw_sha(card))
     pick_card(page, "card", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
     page.locator('[data-testid="arm-bu-os"] input').check()
     page.locator('[data-action="bu_os"]').click()
@@ -577,6 +589,7 @@ def test_the_os_step_writes_a_whole_card_image_as_kind_card(demo, monkeypatch):
                                                      timeout=T)
     (w,) = fake.writes
     assert w["kind"] == "card" and w["source"] == card
+    assert w["confirm_unsigned"] == f"INSTALL UNSIGNED {cw_sha(card)[:8]}"
     expect(by(page, "bu-os-back")).to_contain_text("power-cycle the board")
     assert not page.errors, page.errors
 
@@ -852,4 +865,46 @@ def test_over_usb_is_shown_by_default_in_the_add_dialog_no_setting_hides_it(demo
     names = {r.key for r in rows.CORE_ROWS}
     assert {n for n in names if n.startswith("bringup.")} == {"bringup.sd_flash",
                                                                "bringup.sd_flash_max"}
+    assert not page.errors, page.errors
+
+
+
+def cw_sha(path: str) -> str:
+    from harness_manager.services import unsigned
+
+    return unsigned.file_sha256(Path(path))
+
+
+def test_twin_the_os_step_needs_the_images_unsigned_phrase_and_a_wrong_sha8_writes_nothing(
+        demo, monkeypatch):
+    from tests.fakes.bringup_cardwriter import DEVICE
+
+    fake = reader_on(demo, monkeypatch)
+    page = demo.page()
+    bring_up(page, demo.example(1))
+    os_step = by(page, "bu-step-os")
+    expect(os_step).to_be_visible(timeout=T)
+    os_step.locator('[data-option="reader"] input').check()
+    card = demo.engine.bringup_card_image
+    check_image(page, card, sign=False)
+    expect(os_step.locator('[data-testid="bu-unsigned-banner"]')).to_contain_text(
+        "Unsigned: Harness Manager cannot check where this came from")
+    want = f"INSTALL UNSIGNED {cw_sha(card)[:8]}"
+    expect(by(page, "bu-os-unsigned-want")).to_have_text(want)
+    expect(by(page, "bu-card-sha")).to_contain_text("sha256sum CARD.img")
+    wrong = want[:-8] + ("0" * 8 if not want.endswith("0" * 8) else "1" * 8)
+    by(page, "bu-os-unsigned-phrase").fill(wrong)
+    pick_card(page, "card", f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}")
+    page.locator('[data-testid="arm-bu-os"] input').check()
+    expect(by(page, "reason-bu_os")).to_contain_text(f"type {want} to install this unsigned "
+                                                     "card image")
+    page.locator('[data-action="bu_os"]').click(force=True)        # the interlock answers
+    expect(by(page, "bu-os-result")).to_contain_text("Nothing was run.")
+    assert fake.writes == []
+    # and the service refuses a write without it (never only the page)
+    r = page.evaluate("""a => import('./js/api.js').then(m => m.bringupCall('cardwriterWrite', {},
+        {device_id: a[1], kind: 'card', source: a[0], confirm: a[2]}).then(() => 'ok',
+        e => e.errName + ': ' + e.message))""",
+                      [card, DEVICE["id"], f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}"])
+    assert r.startswith("REFUSED: not confirmed: this card image is unsigned"), r
     assert not page.errors, page.errors

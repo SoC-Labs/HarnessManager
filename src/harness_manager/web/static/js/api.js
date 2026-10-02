@@ -545,6 +545,7 @@ export const BRINGUP_ENDPOINTS = Object.freeze({
   bringupProposal: ["GET", "/boards/{bid}/bringup/proposal"],  // bringup-2: the proposed identity
   cardwriterDevices: ["GET", "/cardwriter/devices"],       // SD-FLASH
   cardwriterWrite: ["POST", "/cardwriter/write"],          // SD-FLASH
+  cardwriterCheck: ["POST", "/cardwriter/check"],          // SD-FLASH: the unsigned phrase first
 });
 
 // call() for a BRINGUP_ENDPOINTS name: the same token, errors and connection state.

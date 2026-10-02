@@ -559,9 +559,12 @@ listed: never the system disk, never the board's own MCC drive.
 flash devices [--all]      the cards, each with its id, what it can take and
                            the phrase a write needs; --all also says why every
                            other disk is not offered
-flash write DEVICE_ID SOURCE --kind files|card [--confirm PHRASE] [--yes]
-    Asks for the typed phrase "WRITE <model> <size>" (--yes never asks: give
-    --confirm). files: a harness bundle onto the configuration SD taken out of
+flash write DEVICE_ID SOURCE --kind files|card [--confirm PHRASE]
+            [--confirm-unsigned PHRASE] [--yes]
+    What it writes is unsigned: asks for "INSTALL UNSIGNED <first 8 hex of its
+    sha256>", then "WRITE <model> <size>" (--yes never asks: give
+    --confirm-unsigned and --confirm). files: a harness bundle folder or .zip
+    onto the configuration SD taken out of
     the board, a backup first (--backup ZIP, or a new one in --backup-dir DIR),
     never an .ebf, the card's MBBIOS line kept (--allow-mcc-update for the one
     case that is refused). card: a whole-card image (stage0_mkcard.py card

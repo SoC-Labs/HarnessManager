@@ -37,7 +37,11 @@ Safety rails (code, not docs):
   volumes' uuid/label/fs): a card swapped since the listing has another id, so the write
   is refused ("the device changed"). The device is listed again at write time, and again
   after the unmount, before the first byte.
-- **The typed phrase** is ``WRITE <model> <size>`` exactly as listed (``confirm``).
+- **The typed phrases.** ``WRITE <model> <size>`` exactly as listed (``confirm``), AND, since
+  what is written is unsigned (a bundle folder or zip, a whole-card image), ``INSTALL UNSIGNED
+  <first 8 hex of its sha256>`` (``services/unsigned.py``: a zip's or an image's own sha256, a
+  folder's manifest). ``run`` refuses a plan without it, and the sha256 is checked again just
+  before the first byte (a source changed since its phrase was typed is refused).
 - **HM never escalates.** If the device cannot be opened for writing, the job ends
   ``needs_privilege`` with the exact commands (``privileged_command``, ``verify_command``):
   Linux ``sudo dd if=IMG of=/dev/sdX bs=4M conv=fsync status=progress`` then ``sudo cmp -n
@@ -93,6 +97,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.pack import BackupRecord, Progress
 
+from . import unsigned as _unsigned
 from .update import s0lb
 
 # --- settings ------------------------------------------------------------------------------
@@ -929,6 +934,7 @@ class WritePlan:
     backup_dir: Path | None = None
     allow_mcc_update: bool = False
     mbbios: list[dict[str, str]] = field(default_factory=list)   # decision_json each
+    unsigned: _unsigned.Unsigned | None = None   # the INSTALL UNSIGNED <sha8> it was typed for
 
     def summary(self) -> dict[str, Any]:
         out: dict[str, Any] = {"device_id": self.device.id, "path": self.device.disk.path,
@@ -941,6 +947,8 @@ class WritePlan:
             out["files"] = sorted(self.files)
         if self.mbbios:
             out["mbbios"] = list(self.mbbios)
+        if self.unsigned is not None:
+            out["unsigned"] = self.unsigned.as_dict()
         return out
 
 
@@ -1084,13 +1092,58 @@ class CardWriter:
     def prepare(self, device_id: str, kind: str, source: Path | str, confirm: str, *,
                 backup_path: Path | str | None = None,
                 backup_dir: Path | str | None = None,
-                allow_mcc_update: bool = False) -> WritePlan:
-        """Every check a write needs before it starts, then the typed phrase; ``WritePlan``
-        or the refusal (``plan`` + ``check_confirm``)."""
+                allow_mcc_update: bool = False, confirm_unsigned: Any = None,
+                unsigned: _unsigned.Unsigned | None = None) -> WritePlan:
+        """Every check a write needs before it starts, then the typed phrases; ``WritePlan``
+        or the refusal (``plan``, then ``check_unsigned``, then ``check_confirm``).
+        ``unsigned``: a caller that already took the phrase for what it names (the bring-up's
+        card-reader route, for the bundle it checked) passes it instead of
+        ``confirm_unsigned``."""
         plan = self.plan(device_id, kind, source, backup_path=backup_path,
                          backup_dir=backup_dir, allow_mcc_update=allow_mcc_update)
+        if unsigned is not None:
+            plan.unsigned = unsigned
+        else:
+            self.check_unsigned(plan, confirm_unsigned)
         self.check_confirm(plan, confirm)
         return plan
+
+    @staticmethod
+    def unsigned_of(source: Path | str) -> _unsigned.Unsigned:
+        """What ``INSTALL UNSIGNED <sha8>`` names for ``source`` (a folder with a symbolic link
+        is refused: its sha256 would not cover what the link points to)."""
+        info = _unsigned.of_path(source)
+        err = _unsigned.links_refusal(info)
+        if err is not None:
+            raise err
+        return info
+
+    def check_unsigned(self, plan: WritePlan, typed: Any) -> None:
+        """The typed ``INSTALL UNSIGNED <sha8>`` for the plan's source as it is now; the plan
+        remembers it (``run`` checks the sha256 again before the first byte)."""
+        info = self.unsigned_of(plan.source)
+        _unsigned.require(info, typed)
+        plan.unsigned = info
+
+    def check(self, kind: str, source: Path | str) -> dict[str, Any]:
+        """``POST /cardwriter/check``: what a write of ``source`` as ``kind`` would write and
+        the unsigned phrase it needs, before any device is chosen. Refused as the write would
+        be (a slot image as a card, an .ebf in a bundle, a symbolic link)."""
+        self.require()
+        if kind not in KINDS:
+            raise UsageError(f"kind must be files or card, not {kind!r}")
+        src = Path(source)
+        out: dict[str, Any] = {"kind": kind, "source": str(src)}
+        if kind == "card":
+            image = inspect_card(src)
+            out["card"] = {"bytes": image.size, "slots": list(image.slots),
+                           "describe": image.describe(), "notes": list(image.notes)}
+        else:
+            files = self._bundle(src)
+            out["files"] = sorted(files)
+            out["count"] = len(files)
+        out["unsigned"] = self.unsigned_of(src).as_dict()
+        return out
 
     @staticmethod
     def check_confirm(plan: WritePlan, confirm: Any) -> None:
@@ -1150,21 +1203,55 @@ class CardWriter:
                                           Path(tmp))
         return plan
 
-    @staticmethod
-    def _bundle(source: Path) -> dict[str, Path]:
+    def _bundle(self, source: Path) -> dict[str, Path]:
+        """The configuration-SD files of a bundle folder or ``.zip`` (unpacked safely under the
+        state dir, ``bundle.safe_extract``); a release bundle's ``sd/`` when it has one."""
         from harness_manager.cli.cmd_board import bundle_files
 
-        files = bundle_files(source)           # AbsentError / RefusedError (.ebf) as `sd install`
+        root = source
+        if source.is_file() and source.suffix.lower() == ".zip":
+            root = self._unzip(source)
+        if (root / "sd").is_dir() and not (root / "config.txt").exists():
+            root = root / "sd"                  # a release bundle: its config-SD tree
+        files = bundle_files(root)             # AbsentError / RefusedError (.ebf) as `sd install`
         ebf = sorted(k for k in files if k.lower().endswith(".ebf"))
         if ebf:                                 # belt and braces: never an .ebf
             raise RefusedError(f"{source} contains board-controller firmware ({', '.join(ebf)})",
                                hint=".ebf files are never written to the SD; remove them")
         return files
 
+    def _unzip(self, source: Path) -> Path:
+        """A zip's contents under ``<state>/cardwriter/bundles`` (kept for the job; the newest
+        8), its one top folder when it holds nothing else. The "complete" marker sits beside
+        the folder, never in it (every file in it is written to the card)."""
+        from harness_manager.services.update.bundle import safe_extract
+
+        base = (self.state_dir if self.state_dir is not None else _default_state_dir()) / \
+            "cardwriter" / "bundles"
+        dest = base / f"{source.stem[:40]}-{_unsigned.file_sha256(source)[:16]}"
+        done = base / f"{dest.name}.complete"
+        if not done.is_file():
+            base.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(dest, ignore_errors=True)
+            safe_extract(source, dest)
+            done.write_text("ok\n", encoding="ascii")
+            olds = sorted((d for d in base.iterdir() if d.is_dir() and d != dest),
+                          key=lambda d: d.stat().st_mtime)
+            for old in olds[:-7]:
+                shutil.rmtree(old, ignore_errors=True)
+                (base / f"{old.name}.complete").unlink(missing_ok=True)
+        tops = [d for d in dest.iterdir() if d.name != "__MACOSX"]
+        if len(tops) == 1 and tops[0].is_dir() and tops[0].name.lower() not in ("mb", "sd"):
+            return tops[0]
+        return dest
+
     # -- the job ----------------------------------------------------------------------------
 
     def run(self, plan: WritePlan, progress: Progress | None = None) -> dict[str, Any]:
-        """Write ``plan`` (on a job's thread). The device is listed again first."""
+        """Write ``plan`` (on a job's thread). The device is listed again first. Never a plan
+        whose unsigned phrase was not typed; the sha256 it named is checked again."""
+        if plan.unsigned is None:
+            _unsigned.require(self.unsigned_of(plan.source), None)      # refused: never typed
         emit = self._emitter(plan, progress)
         with self._device_lock(plan.device.disk):
             card = self.find(plan.device.id)            # still the card the user confirmed
@@ -1172,6 +1259,7 @@ class CardWriter:
                 raise RefusedError(f"{card.disk.path} changed since it was confirmed",
                                    hint="list the devices again")
             if plan.kind == "files":
+                _unsigned.still_same(plan.unsigned)     # a card image's: in _run_card, once
                 return self._run_files(plan, card, emit)
             return self._run_card(plan, card, emit)
 
@@ -1298,6 +1386,15 @@ class CardWriter:
         assert plan.card is not None
         again = inspect_card(plan.card.source)              # the file may have changed since
         src, nbytes, sha = Path(again.source), again.size, file_sha256(Path(again.source))
+        assert plan.unsigned is not None
+        if plan.unsigned.of == "file" and Path(plan.unsigned.path) == src:
+            if sha != plan.unsigned.sha256:                 # the image its phrase named, still
+                raise RefusedError(
+                    f"{src} changed since its phrase was typed: its sha256 now starts "
+                    f"{sha[:8]}, not {plan.unsigned.sha256[:8]}",
+                    hint="check it again and type its new phrase; nothing was written")
+        else:
+            _unsigned.still_same(plan.unsigned)
         if nbytes > disk.size:
             raise RefusedError(f"{human_size(nbytes)} does not fit on {disk.path} "
                                f"({human_size(disk.size)})", hint="use a bigger card")

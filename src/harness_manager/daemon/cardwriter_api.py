@@ -4,7 +4,8 @@ cards in this PC's card reader").
 | Route | Does |
 |---|---|
 | ``GET /cardwriter/devices`` | ``{enabled, reason?, supported, platform, simulated, cap_bytes?, devices, excluded}`` |
-| ``POST /cardwriter/write`` ``{device_id, kind, source, confirm, backup_path?, backup_dir?, allow_mcc_update?}`` | 202 job ``cardwriter_write`` |
+| ``POST /cardwriter/check`` ``{kind, source}`` | ``{kind, source, unsigned: {phrase, sha256, of, files, how, banner, path}, card? or files and count}``: what a write would write, and the unsigned phrase it needs |
+| ``POST /cardwriter/write`` ``{device_id, kind, source, confirm, confirm_unsigned, backup_path?, backup_dir?, allow_mcc_update?}`` | 202 job ``cardwriter_write`` |
 
 The service is ``services.cardwriter`` (the CLI's ``flash`` verb runs the same code
 in-process). The rules:
@@ -19,6 +20,11 @@ in-process). The rules:
   ``linux_slot.img`` alone is refused) that fits; ``kind: "files"``: a bundle with no ``.ebf``
   that keeps the card's MCC firmware selection (``MBBIOS``; ``allow_mcc_update`` is the
   explicit override for the one case HM refuses).
+- **Unsigned (david 2 Oct, "same rule"):** what is written is unsigned, so ``confirm_unsigned``
+  must be ``INSTALL UNSIGNED <first 8 hex of its sha256>`` (``services/unsigned.py``: a zip's
+  or an image's own sha256, a folder's manifest); 409 REFUSED without it, after the source
+  and device checks and before the ``WRITE`` phrase, ``error.data.unsigned`` the phrase. The
+  job checks the sha256 again before the first byte.
 - **A ``files`` write backs the card up first**: into ``backup_dir`` (default: this
   service's ``backups/``), or from ``backup_path`` (a backup of this card, verified).
 - **The job** (``cardwriter_write``, engine-wide like a harness fetch: one at a time) lists
@@ -71,6 +77,11 @@ def register(ctx: RouteContext) -> None:
     def devices() -> _JSON:
         return _JSON(ok(**writer().devices_json()))
 
+    @api.post("/cardwriter/check")
+    def check(body: JsonBody = None) -> _JSON:
+        b = _obj(body)
+        return _JSON(ok(**writer().check(_str(b, "kind"), _abs_path(b.get("source"), "source"))))
+
     @api.post("/cardwriter/write")
     def write(body: JsonBody = None) -> _JSON:
         b = _obj(body)
@@ -96,6 +107,7 @@ def register(ctx: RouteContext) -> None:
             raise err
         plan = w.prepare(_str(b, "device_id"), kind, source, confirm, backup_path=backup_path,
                          backup_dir=backup_dir,
-                         allow_mcc_update=_bool(b, "allow_mcc_update", False))
+                         allow_mcc_update=_bool(b, "allow_mcc_update", False),
+                         confirm_unsigned=b.get("confirm_unsigned"))
         return ctx.accepted(d.jobs.submit(JOB_KIND, ENGINE,
                                           lambda progress: w.run(plan, progress)))

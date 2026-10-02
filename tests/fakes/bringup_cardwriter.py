@@ -2,7 +2,8 @@
 
 ``GET /api/v1/cardwriter/devices`` -> ``{enabled, reason?, devices: [{id, path, model,
 size_bytes, removable, mounted, fs, writable, why_not?}]}``; ``POST /api/v1/cardwriter/write``
-``{device_id, kind: "files"|"card", source, confirm: "WRITE <model> <size>"}`` -> 202 job
+``{device_id, kind: "files"|"card", source, confirm: "WRITE <model> <size>",
+confirm_unsigned: "INSTALL UNSIGNED <sha8>"}`` (the real unsigned rule) -> 202 job
 ``cardwriter_write`` (progress unmount/write/verify; result ``{verified, sha256}``, or
 ``{needs_privilege, privileged_command, verify}``); a refusal is 409/422 with the reason.
 
@@ -50,6 +51,10 @@ class FakeCardwriter:
             dev = next((x for x in self.devices if x["id"] == b.get("device_id")), None)
             if dev is None:
                 raise RefusedError(f"no card reader {b.get('device_id')!r} is listed")
+            from harness_manager.services import unsigned
+
+            info = unsigned.of_path(str(b.get("source") or ""))    # the real rule (bringup-2)
+            unsigned.require(info, b.get("confirm_unsigned"))
             want = f"WRITE {dev['model']} {dev['size_bytes']}"
             if b.get("confirm") != want:
                 raise RefusedError(f"the confirm phrase is not {want!r}", hint="nothing was written")

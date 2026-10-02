@@ -2,13 +2,16 @@
 
     harness-manager flash devices [--all]
     harness-manager flash write DEVICE_ID SOURCE --kind files|card [--confirm PHRASE]
+                                [--confirm-unsigned PHRASE]
                                 [--backup ZIP | --backup-dir DIR] [--allow-mcc-update] [--yes]
 
 Runs in this process (no board, no service): the same code as the app's
 ``/cardwriter`` routes, under the same setting (``bringup.sd_flash``, off by default) and
-the same one-write-per-device lock. Every check runs before the question; then the typed
-phrase ``WRITE <model> <size>`` (``--confirm`` gives it to a script; ``--yes`` never asks,
-so the phrase must come with ``--confirm``). Without the rights to write the device it prints
+the same one-write-per-device lock. Every check runs before the questions; then the typed
+phrases: what is written is unsigned (a bundle folder or zip, a whole-card image), so first
+``INSTALL UNSIGNED <first 8 hex of its sha256>`` (``--confirm-unsigned``; the banner and the
+sha256 and how it is made are printed), then ``WRITE <model> <size>`` (``--confirm``).
+``--yes`` never asks, so both must then come with their flags. Without the rights to write the device it prints
 the sudo commands and exits 12 (Harness Manager never asks for root).
 """
 
@@ -68,22 +71,28 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--all", action="store_true",
                     help="also list the disks that are not offered, each with why")
     ap = sub.add_parser("write", help="write one card (asks for its typed phrase)",
-                        description="Write one card. files: a harness bundle directory onto the "
-                                    "configuration SD's mounted FAT volume (a backup first, never "
-                                    "an .ebf, the card's MBBIOS line kept). card: a whole-card "
-                                    "image (stage0_mkcard.py card --card-img) onto the whole "
-                                    "device; linux_slot.img alone is refused. Read back and "
-                                    "compared before it says written.",
+                        description="Write one card. files: a harness bundle folder or .zip "
+                                    "onto the configuration SD's mounted FAT volume (a backup "
+                                    "first, never an .ebf, the card's MBBIOS line kept). card: a "
+                                    "whole-card image (stage0_mkcard.py card --card-img) onto the "
+                                    "whole device; linux_slot.img alone is refused. Both are "
+                                    "unsigned: type INSTALL UNSIGNED <first 8 hex of its sha256> "
+                                    "as well as WRITE <model> <size>. Read back and compared "
+                                    "before it says written.",
                         parents=[fmt], epilog=f"--tsv columns: {' '.join(WRITE_COLUMNS)}")
     ap.add_argument("device_id", metavar="DEVICE_ID",
                     help="the id `harness-manager flash devices` printed")
     ap.add_argument("source", metavar="SOURCE",
-                    help="files: the bundle directory; card: the whole-card image file")
+                    help="files: the bundle folder or .zip; card: the whole-card image file")
     ap.add_argument("--kind", required=True, choices=cw.KINDS,
                     help="files (the configuration SD) or card (a whole-card image)")
     ap.add_argument("--confirm", default=None, metavar="PHRASE",
                     help='the typed phrase, given here instead of at the prompt: exactly '
                          '"WRITE <model> <size>" as `flash devices` shows it')
+    ap.add_argument("--confirm-unsigned", default=None, metavar="PHRASE",
+                    help='the unsigned phrase, given here instead of at the prompt: exactly '
+                         '"INSTALL UNSIGNED <first 8 hex of its sha256>" as the write prints it; '
+                         "--yes never implies it")
     ap.add_argument("--backup", default=None, metavar="ZIP",
                     help="files: a backup of this card as it is now (`sd backup` made it); "
                          "without it a new backup is taken first")
@@ -94,7 +103,8 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                     help="files: write the bundle's MBBIOS line even though the .ebf it names "
                          "is on the card (the MCC then updates itself at its next boot)")
     ap.add_argument("--yes", action="store_true",
-                    help="never ask (a script): the phrase must then come with --confirm")
+                    help="never ask (a script): the phrases must then come with --confirm and "
+                         "--confirm-unsigned")
     vp.set_defaults(fn=cmd_flash)
     return vp
 
@@ -144,14 +154,36 @@ def _can(d: dict[str, Any], kind: str) -> str:
     return "yes" if d["kinds"][kind]["ok"] else "no"
 
 
-def _ask(ctx: Ctx, phrase: str) -> str:
+def _ask(ctx: Ctx, phrase: str, what: str = "To write it, type exactly") -> str:
     stream = ctx.err or sys.stderr
-    stream.write(f"To write it, type exactly: {phrase}\n> ")
+    stream.write(f"{what}: {phrase}\n> ")
     stream.flush()
     try:
         return sys.stdin.readline().strip()
     except (OSError, ValueError):
         return ""
+
+
+def _unsigned(ctx: Ctx, w: cw.CardWriter, plan: cw.WritePlan) -> None:
+    """The red banner, the sha256 and how it is made, then INSTALL UNSIGNED <sha8>:
+    ``--confirm-unsigned``, else asked; ``--yes`` never types it."""
+    from harness_manager.services import unsigned
+
+    a = ctx.args
+    info = w.unsigned_of(plan.source)
+    ctx.note(unsigned.BANNER)
+    of = {"zip": "the zip", "file": "the image"}.get(info.of, f"its manifest of {info.files} files")
+    ctx.note(f"sha256   {info.sha256}  ({of}: {info.how})")
+    if a.confirm_unsigned is not None:
+        typed = a.confirm_unsigned
+    elif a.yes:
+        raise with_data(RefusedError(f"not confirmed: --yes never types the phrase; give it with "
+                                     f"--confirm-unsigned {info.phrase!r}",
+                                     hint=f"{unsigned.BANNER} Nothing was written"),
+                        unsigned=info.as_dict())
+    else:
+        typed = _ask(ctx, info.phrase, f"To install this unsigned {info.noun}, type exactly")
+    w.check_unsigned(plan, typed)
 
 
 def _write(ctx: Ctx) -> int:
@@ -181,6 +213,7 @@ def _write(ctx: Ctx) -> int:
         for d in plan.mbbios:
             if d["note"]:
                 ctx.note(d["note"])
+    _unsigned(ctx, w, plan)
     if a.confirm is not None:
         typed = a.confirm
     elif a.yes:

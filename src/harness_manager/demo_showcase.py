@@ -1360,10 +1360,7 @@ def seed_bringup(fixtures: Path) -> dict[str, Any]:
 
         _shutil.rmtree(stage, ignore_errors=True)
     card = root / "mps3-linux-2.0.0-card.img"
-    if not card.is_file():
-        mbr = bytearray(512)
-        mbr[510:512] = b"\x55\xaa"
-        card.write_bytes(bytes(mbr) + b"\0" * (1024 * 1024 - 512))
+    _demo_card_image(card)
     bad = root / "bundle-with-ebf"
     if not (bad / "config.txt").is_file():
         _bringup_tree(bad, cat.U_ILA)
@@ -1375,6 +1372,49 @@ def seed_bringup(fixtures: Path) -> dict[str, Any]:
                                       "linux_slot.img)"},
         {"path": str(bad), "what": "a folder with an .ebf in it: refused"},
     ]}
+
+
+def _demo_card_image(path: Path) -> None:
+    """A small whole-card image the card writer's checks pass (bringup-2: the OS step checks
+    it before its unsigned phrase): an MBR with slots A/B (type 0x7F), the two boot-select
+    sectors, and a valid S0LB boot table in each slot; nothing in it boots. An older demo
+    dir's placeholder (an MBR and nothing else) is rebuilt."""
+    import struct
+    import zlib
+
+    from harness_manager.core.errors import HarnessError
+    from harness_manager.services import cardwriter
+
+    if path.is_file():
+        try:
+            cardwriter.inspect_card(path)
+            return
+        except HarnessError:
+            pass
+    payload = b"a demo slot: nothing here boots\n" * 64
+    dst = 0x80000000
+    hdr = struct.Struct("<8I")
+    entry = struct.pack("<4I", hdr.size + 16, dst, len(payload), zlib.crc32(payload) & 0xFFFFFFFF)
+    head = hdr.pack(0x424C3053, 2, 1, dst, 0, 0x80001000, 0, 0)
+    slot = hdr.pack(0x424C3053, 2, 1, dst, 0, 0x80001000, 0,
+                    zlib.crc32(head + entry) & 0xFFFFFFFF) + entry + payload
+    n = -(-len(slot) // 512) + 8
+    a, b = 8, 8 + n
+    mbr = bytearray(512)
+    struct.pack_into("<I", mbr, 440, 0x53304C42)
+    for i, (typ, lba, cnt) in enumerate(((0x7F, a, n), (0x7F, b, n))):
+        mbr[446 + 16 * i:462 + 16 * i] = struct.pack("<B3sB3sII", 0, b"\xfe\xff\xff", typ,
+                                                     b"\xfe\xff\xff", lba, cnt)
+    mbr[510], mbr[511] = 0x55, 0xAA
+    sel = bytearray(512)
+    struct.pack_into("<IIII", sel, 0, 0x43423053, 1, 1, 1)
+    struct.pack_into("<I", sel, 0x1FC, zlib.crc32(bytes(sel[:0x1FC])) & 0xFFFFFFFF)
+    with path.open("wb") as f:
+        f.truncate((b + n) * 512)
+        f.write(bytes(mbr) + bytes(sel) + bytes(sel))
+        for lba in (a, b):
+            f.seek(lba * 512)
+            f.write(slot)
 
 
 def _bringup_boards(drive: str) -> dict[str, Any]:

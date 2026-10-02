@@ -54,9 +54,15 @@ def test_twin_on_through_settings_the_mock_lists_simulated_cards_and_writes_one(
     blank = by["/dev/sdc"]
     assert blank["confirm"] == "WRITE MicroSD/M2 15.9 GB"
     src = card_image(tmp_path / "card.img")
+    body = {"device_id": blank["id"], "kind": "card", "source": str(src),
+            "confirm": blank["confirm"]}
+    r = client.post("/api/v1/cardwriter/write", json=body, headers=AUTH)       # no unsigned phrase
+    assert r.status_code == 409 and "this card image is unsigned" in r.json()["error"]["message"]
+    r = client.post("/api/v1/cardwriter/check", json={"kind": "card", "source": str(src)},
+                    headers=AUTH)
+    assert r.status_code == 200, r.text
     r = client.post("/api/v1/cardwriter/write", json={
-        "device_id": blank["id"], "kind": "card", "source": str(src),
-        "confirm": blank["confirm"]}, headers=AUTH)
+        **body, "confirm_unsigned": r.json()["unsigned"]["phrase"]}, headers=AUTH)
     assert r.status_code == 202, r.text
     job_id = r.json()["job"]
     deadline = time.monotonic() + 20

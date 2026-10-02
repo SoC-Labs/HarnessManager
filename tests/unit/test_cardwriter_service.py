@@ -824,7 +824,8 @@ def test_the_demo_lists_simulated_readers_and_writes_only_temp_files(tmp_path: P
     assert {e["path"] for e in doc["excluded"]} == {"/dev/nvme0n1", "/dev/sdd"}
     blank = next(d for d in doc["devices"] if d["path"] == "/dev/sdc")
     src = card_image(tmp_path / "card.img")
-    out = w.run(w.prepare(blank["id"], "card", src, blank["confirm"]))
+    out = w.run(w.prepare(blank["id"], "card", src, blank["confirm"],
+                          confirm_unsigned=cw.CardWriter.unsigned_of(src).phrase))
     assert out["verified"]
     assert (tmp_path / "cardwriter-demo" / "sdc.img").read_bytes()[:512] == src.read_bytes()[:512]
 
@@ -835,3 +836,103 @@ def test_integration_the_mps3_pack_supplies_the_mbbios_rule():
     from harness_manager.services import cardwriter
     from harness_manager_mps3 import mbbios
     assert cardwriter.pack_mbbios() is mbbios.keep_mbbios
+
+
+# --- the unsigned phrase: every unsigned write (david 2 Oct, "same rule") -------------------------
+
+
+def test_a_card_image_needs_its_install_unsigned_phrase_before_the_write_phrase(rig: Rig):
+    rig.writer.auto_unsigned = False
+    card = rig.card("sdc")
+    src = rig.card_image()
+    sha = cw.file_sha256(src)
+    with pytest.raises(RefusedError) as e:
+        rig.writer.prepare(card.id, "card", src, "WRITE wrong too")
+    assert e.value.message == (f"not confirmed: this card image is unsigned; type exactly "
+                               f"'INSTALL UNSIGNED {sha[:8]}' to install it")
+    assert e.value.data["unsigned"]["of"] == "file" and e.value.data["unsigned"]["sha256"] == sha
+    plan = rig.writer.prepare(card.id, "card", src, card.confirm,
+                              confirm_unsigned=f" install unsigned {sha[:8]} ".upper())
+    assert plan.unsigned is not None and plan.summary()["unsigned"]["phrase"] == \
+        f"INSTALL UNSIGNED {sha[:8]}"
+    assert rig.writer.run(plan)["verified"] is True
+
+
+def test_twin_a_wrong_sha8_is_refused_and_nothing_is_written(rig: Rig):
+    card = rig.card("sdc")
+    src = rig.card_image()
+    right = cw.CardWriter.unsigned_of(src).phrase
+    wrong = right[:-8] + ("0" * 8 if not right.endswith("0" * 8) else "1" * 8)
+    with pytest.raises(RefusedError, match="does not name this card image"):
+        rig.writer.prepare(card.id, "card", src, card.confirm, confirm_unsigned=wrong)
+    assert rig.devices["/dev/sdc"].read_bytes() == b"\xee" * 4096
+
+
+def test_run_never_writes_a_plan_whose_phrase_was_not_typed(rig: Rig):
+    card = rig.card("sdc")
+    plan = rig.writer.plan(card.id, "card", rig.card_image())        # plan(): no phrases yet
+    rig.writer.check_confirm(plan, card.confirm)
+    with pytest.raises(RefusedError, match="this card image is unsigned"):
+        rig.writer.run(plan)
+    assert rig.devices["/dev/sdc"].read_bytes() == b"\xee" * 4096
+
+
+def test_a_card_image_changed_after_its_phrase_is_refused_before_the_first_byte(rig: Rig):
+    card = rig.card("sdc")
+    src = rig.card_image()
+    plan = rig.writer.prepare(card.id, "card", src, card.confirm)
+    data = bytearray(src.read_bytes())
+    data[-1] ^= 0xFF                                       # still a valid card, another sha256
+    src.write_bytes(bytes(data))
+    with pytest.raises(RefusedError, match="changed since its phrase was typed"):
+        rig.writer.run(plan)
+    assert rig.devices["/dev/sdc"].read_bytes() == b"\xee" * 4096
+
+
+def test_a_bundle_changed_after_its_phrase_is_refused_too(rig: Rig):
+    card = rig.card("sdb")
+    bundle = rig.bundle()
+    plan = rig.writer.prepare(card.id, "files", bundle, card.confirm,
+                              backup_dir=rig.tmp / "backups")
+    (bundle / "MB" / "HBI0309C" / "images.txt").write_text("changed\n", encoding="utf-8")
+    with pytest.raises(RefusedError, match="changed since its phrase was typed"):
+        rig.writer.run(plan)
+    assert (rig.root / "MB" / "HBI0309C" / "images.txt").read_text() == "old\n"
+
+
+def test_a_bundle_zip_is_unpacked_and_named_by_the_zips_own_sha256(rig: Rig):
+    from tests.unit.test_bringup_service import zip_dir
+
+    card = rig.card("sdb")
+    z = zip_dir(rig.bundle(), rig.tmp / "bundle.zip", top="mps3-harness/")
+    assert cw.CardWriter.unsigned_of(z).sha256 == cw.file_sha256(z)
+    plan = rig.writer.prepare(card.id, "files", z, card.confirm, backup_dir=rig.tmp / "bk")
+    assert sorted(plan.files) == ["MB/HBI0309C/images.txt", "MB/HBI0309C/shell.bit"]
+    rig.writer.run(plan)
+    assert (rig.root / "MB" / "HBI0309C" / "images.txt").read_text() == "new harness\n"
+    assert not list(rig.root.rglob("*.complete"))           # the unzip marker never on the card
+
+
+def test_twin_a_release_bundle_folder_writes_its_sd_tree(rig: Rig):
+    card = rig.card("sdb")
+    rel = rig.tmp / "rel"
+    rig.bundle(name="rel/sd")
+    (rel / "mint.json").write_text("{}")
+    plan = rig.writer.prepare(card.id, "files", rel, card.confirm, backup_dir=rig.tmp / "bk")
+    assert sorted(plan.files) == ["MB/HBI0309C/images.txt", "MB/HBI0309C/shell.bit"]
+    assert plan.unsigned is not None and plan.unsigned.of == "manifest" and \
+        plan.unsigned.files == 3                            # the whole folder, mint.json too
+
+
+def test_check_names_the_phrase_and_twin_a_symlinked_folder_is_refused(rig: Rig):
+    src = rig.card_image()
+    doc = rig.writer.check("card", src)
+    assert doc["unsigned"]["phrase"] == cw.CardWriter.unsigned_of(src).phrase
+    assert doc["card"]["bytes"] == src.stat().st_size
+    bundle = rig.bundle()
+    assert rig.writer.check("files", bundle)["count"] == 2
+    (bundle / "linked").symlink_to(rig.tmp)
+    with pytest.raises(RefusedError, match="linked: a symbolic link"):
+        rig.writer.check("files", bundle)
+    with pytest.raises(RefusedError, match="single OS slot"):
+        rig.writer.check("card", rig.slot())

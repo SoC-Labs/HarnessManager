@@ -245,6 +245,37 @@ NO_LINE_BOARD = (b"BOARD: HBI0309C\r\n[MCCS]\r\n\r\n[APPLICATION NOTE]\r\n"
 # --- the rig: a CardWriter over fixtures and temp files ----------------------------------------
 
 
+_AUTO = object()
+
+
+class RigWriter(cw.CardWriter):
+    """The rig's ``CardWriter``. Its ``prepare`` called WITHOUT ``confirm_unsigned`` types the
+    right ``INSTALL UNSIGNED <sha8>`` itself, so the tests of OTHER behaviours (discovery, the
+    device checks, MBBIOS, the write and read-back) stay about those. Every test of the phrase
+    passes it explicitly (``None`` or a wrong one is refused as in the product), or sets
+    ``auto_unsigned = False``; the doors (the API route, ``flash write``) always pass it."""
+
+    auto_unsigned = True
+
+    def prepare(self, *args, confirm_unsigned=_AUTO, **kw):  # noqa: ANN001, ANN002, ANN003
+        if confirm_unsigned is _AUTO:
+            confirm_unsigned = None
+            if self.auto_unsigned and kw.get("unsigned") is None:
+                src = args[2] if len(args) > 2 else kw.get("source")
+                try:
+                    confirm_unsigned = self.unsigned_of(src).phrase
+                except Exception:  # noqa: BLE001 - a bad source: plan() says why, first
+                    confirm_unsigned = None
+        return super().prepare(*args, confirm_unsigned=confirm_unsigned, **kw)
+
+
+def phrase(source: Path) -> str:
+    """The typed INSTALL UNSIGNED <sha8> for a bundle folder, zip or card image."""
+    from harness_manager.services import unsigned
+
+    return unsigned.of_path(source).phrase      # not cw.CardWriter: tests monkeypatch it
+
+
 class Rig:
     """A ``CardWriter`` whose lsblk answer is ``self.doc`` (mutable: swap a card by editing
     it), whose devices are temp files (``FileAccess``), and whose config card is a temp dir
@@ -267,7 +298,7 @@ class Rig:
         for f in self.devices.values():
             f.write_bytes(b"\xee" * 4096)
         self.access = cw.FileAccess(self.devices, writable=writable, on_unmount=self.unmounted)
-        self.writer = cw.CardWriter(
+        self.writer = RigWriter(
             state_dir=tmp / "state", lister=self.lister, access=self.access,
             storage_for=self.storage_for, platform="linux", enabled=lambda: self.enabled,
             cap=lambda: self.cap, publish=lambda t, d: self.events.append((t, d)))

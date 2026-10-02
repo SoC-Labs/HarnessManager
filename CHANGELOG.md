@@ -980,4 +980,13 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   `GET /boards/{bid}/bringup/proposal`.
 - **The card writer has no MBBIOS rule of its own:** the board pack's
   (`harness_manager_mps3.mbbios`) is the only one; a pack without one writes files as given.
+- **Every unsigned harness write needs `INSTALL UNSIGNED <sha8>`** (david 2 Oct: "same rule"),
+  wizard or CLI, configuration SD or whole card: `harness-manager flash write --kind files`
+  (a bundle folder, a release bundle, or now a .zip) and `--kind card` (a whole-card image:
+  its file's own sha256) ask for it as well as `WRITE <model> <size>`;
+  `--confirm-unsigned PHRASE` for scripts, `--yes` never implies it. `POST /cardwriter/write`
+  takes `confirm_unsigned` and refuses without it; the new `POST /cardwriter/check` says the
+  phrase before a device is chosen. The wizard's Linux OS step checks the whole-card image,
+  shows the banner and its sha256, and asks for the phrase. The write checks the sha256 again
+  just before the first byte.
 <!-- --- end bringup-2 --- -->

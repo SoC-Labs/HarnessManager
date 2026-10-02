@@ -203,7 +203,8 @@ def register(ctx: RouteContext) -> None:
                         "board_id": CARDWRITER_ENGINE}
             raise err
         plan = w.prepare(_str(b, "device_id"), "files", Path(chk.sd_root), confirm,
-                         backup_path=backup_path, backup_dir=backup_dir)
+                         backup_path=backup_path, backup_dir=backup_dir,
+                         unsigned=chk.unsigned_info())       # the bundle's, typed above
         return ctx.accepted(d.jobs.submit(CARDWRITER_JOB, CARDWRITER_ENGINE,
                                           lambda progress: w.run(plan, progress)))
 

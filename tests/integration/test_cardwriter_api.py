@@ -29,6 +29,7 @@ from tests.fakes.cardwriter_fakes import (
     NO_LINE_BOARD,
     Rig,
     guard,  # noqa: F401 - the fixture
+    phrase,
 )
 from tests.fakes.t13_daemon import TOKEN, headers, state_dir
 
@@ -82,7 +83,19 @@ def device(client: TestClient, name: str) -> dict:
     return next(d for d in devices(client)["devices"] if d["path"] == f"/dev/{name}")
 
 
-def write(client: TestClient, **body) -> object:  # noqa: ANN003
+_AUTO = object()
+
+
+def write(client: TestClient, *, unsigned: object = _AUTO, **body) -> object:  # noqa: ANN003
+    """POST /cardwriter/write. ``unsigned``: the INSTALL UNSIGNED phrase (by default the right
+    one for ``source``, so the tests of other behaviours stay about them; None: not sent)."""
+    if unsigned is _AUTO:
+        try:
+            body["confirm_unsigned"] = phrase(Path(str(body.get("source"))))
+        except Exception:  # noqa: BLE001 - a bad source: the route says why
+            pass
+    elif unsigned is not None:
+        body["confirm_unsigned"] = unsigned
     return client.post("/api/v1/cardwriter/write", json=body, headers=headers())
 
 
@@ -264,3 +277,69 @@ def test_an_ebf_in_the_bundle_is_409(api):
     r = write(client, device_id=dev["id"], kind="files", source=str(rig.bundle(ebf=True)),
               confirm=dev["confirm"])
     assert r.status_code == 409 and ".ebf" in r.json()["error"]["hint"]
+
+
+# --- the unsigned phrase (david 2 Oct: every unsigned write, the same rule) -----------------------
+
+
+@pytest.mark.usefixtures("on")
+def test_a_card_image_needs_install_unsigned_and_its_sha8(api):
+    rig, client, events = api
+    dev = device(client, "sdc")
+    src = rig.card_image()
+    sha = cw.file_sha256(src)
+    r = write(client, unsigned=None, device_id=dev["id"], kind="card", source=str(src),
+              confirm=dev["confirm"])
+    assert r.status_code == 409
+    err = r.json()["error"]
+    assert err["message"] == (f"not confirmed: this card image is unsigned; type exactly "
+                              f"'INSTALL UNSIGNED {sha[:8]}' to install it")
+    assert err["data"]["unsigned"]["of"] == "file" and err["data"]["unsigned"]["sha256"] == sha
+    wrong = "INSTALL UNSIGNED " + ("0" * 8 if sha[:8] != "0" * 8 else "1" * 8)
+    r = write(client, unsigned=wrong, device_id=dev["id"], kind="card", source=str(src),
+              confirm=dev["confirm"])
+    assert r.status_code == 409 and "does not name this card image" in \
+        r.json()["error"]["message"]
+    assert not [e for e in events if e.topic.startswith(("job.", "cardwriter."))]
+    assert rig.devices["/dev/sdc"].read_bytes() == b"\xee" * 4096          # untouched
+    r = write(client, unsigned=f"INSTALL UNSIGNED {sha[:8].upper()}", device_id=dev["id"],
+              kind="card", source=str(src), confirm=dev["confirm"])
+    assert r.status_code == 202 and wait_job(client, r.json()["job"])["state"] == "done"
+
+
+@pytest.mark.usefixtures("on")
+def test_twin_a_bundle_folder_or_zip_needs_it_too(api, tmp_path):
+    from tests.unit.test_bringup_service import zip_dir
+
+    rig, client, _ = api
+    dev = device(client, "sdb")
+    bundle = rig.bundle()
+    r = write(client, unsigned=None, device_id=dev["id"], kind="files", source=str(bundle),
+              confirm=dev["confirm"])
+    assert r.status_code == 409 and "this bundle is unsigned" in r.json()["error"]["message"]
+    assert r.json()["error"]["data"]["unsigned"]["of"] == "manifest"
+    z = zip_dir(bundle, tmp_path / "bundle.zip")
+    r = write(client, unsigned=None, device_id=dev["id"], kind="files", source=str(z),
+              confirm=dev["confirm"])
+    assert r.status_code == 409
+    assert r.json()["error"]["data"]["unsigned"]["sha256"] == cw.file_sha256(z)
+    assert (rig.root / "MB" / "HBI0309C" / "images.txt").read_text() == "old\n"
+    r = write(client, device_id=dev["id"], kind="files", source=str(z), confirm=dev["confirm"])
+    assert r.status_code == 202, r.text
+    assert wait_job(client, r.json()["job"])["state"] == "done"
+    assert (rig.root / "MB" / "HBI0309C" / "images.txt").read_text() == "new harness\n"
+
+
+@pytest.mark.usefixtures("on")
+def test_check_says_the_phrase_before_any_device_and_refuses_a_slot_image(api):
+    rig, client, _ = api
+    src = rig.card_image()
+    r = client.post("/api/v1/cardwriter/check", json={"kind": "card", "source": str(src)},
+                    headers=headers())
+    assert r.status_code == 200, r.text
+    doc = r.json()
+    assert doc["unsigned"]["phrase"] == f"INSTALL UNSIGNED {cw.file_sha256(src)[:8]}"
+    assert doc["unsigned"]["how"] == "sha256sum CARD.img" and doc["card"]["bytes"] > 0
+    r = client.post("/api/v1/cardwriter/check", json={"kind": "card", "source": str(rig.slot())},
+                    headers=headers())
+    assert r.status_code == 409 and "single OS slot" in r.json()["error"]["message"]

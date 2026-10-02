@@ -346,6 +346,7 @@ def _card_reader(ctx: Any, w: Any, chk: Any, state: Path) -> int:
     cand = _given_mcc(getattr(a, "serial", None))
     dest = Path(a.backup_dir).expanduser() if a.backup_dir else state / "backups"
     plan = w.plan(a.card_reader, "files", Path(chk.sd_root), backup_dir=dest)
+    plan.unsigned = chk.unsigned_info()          # the bundle's INSTALL UNSIGNED, typed above
     disk = plan.device.disk
     steps: list[list[Any]] = [[bid, "source", "checked", _checked(chk)],
                               [bid, "unsigned", "confirmed", _confirmed(chk)]]

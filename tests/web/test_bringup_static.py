@@ -13,7 +13,8 @@ API_JS = STATIC / "js" / "api.js"
 BRINGUP_JS = STATIC / "js" / "bringup.js"
 _ENTRY = re.compile(r'^\s*(\w+):\s*\[\s*"([A-Z]+)"\s*,\s*"([^"]+)"\s*\]', re.M)
 #: lane SD-FLASH's routes (the contract in the BRING-UP brief); served by cardwriter_api.py
-CARDWRITER = {("GET", "/cardwriter/devices"), ("POST", "/cardwriter/write")}
+CARDWRITER = {("GET", "/cardwriter/devices"), ("POST", "/cardwriter/write"),
+              ("POST", "/cardwriter/check")}
 
 
 def bringup_endpoints(js: str) -> dict[str, tuple[str, str]]:
@@ -35,7 +36,7 @@ def problems(called: dict[str, tuple[str, str]], documented: set, served: set) -
 
 def test_every_bringup_route_the_page_calls_is_documented_and_served():
     called = bringup_endpoints(API_JS.read_text(encoding="utf-8"))
-    assert len(called) == 9
+    assert len(called) == 10
     assert problems(called, api_md_sections()["bringup_api"], daemon_routes()) == []
     assert {ep for ep in called.values() if ep in CARDWRITER} == CARDWRITER
 

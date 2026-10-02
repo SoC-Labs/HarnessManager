@@ -41,7 +41,6 @@ import hashlib
 import os
 import re
 import shutil
-import stat
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -58,6 +57,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.model import Candidate, LinkKind
 from harness_manager.core.pack import ProbeHints
+from harness_manager.services import unsigned as _unsigned
 
 #: Where a new board's harness answers: the image's default address (the Linux harness keeps
 #: it as a permanent secondary under DHCP, and stage0 RESCUE answers there).
@@ -102,14 +102,12 @@ MPS3_PART = "xcku115"
 MAX_TEXT = 64 * 1024               # a board/app file bigger than this is not one
 
 # An unsigned bundle (a folder or zip on this PC; david 2 Oct, D3a): allowed, with this banner and
-# a typed phrase naming its sha256. Signed releases (the catalogue, a mirror) never need it.
-UNSIGNED_WORDS = "INSTALL UNSIGNED"
-UNSIGNED_BANNER = ("Unsigned: Harness Manager cannot check where this came from; only install a "
-                   "bundle you built or got from SoC Labs directly.")
-#: How the sha256 is made, so anyone can check it on their own machine (GNU coreutils).
-ZIP_RECIPE = "sha256sum BUNDLE.zip"
-MANIFEST_RECIPE = ("cd FOLDER && find . -type f -printf '%P\\0' | LC_ALL=C sort -z | "
-                   "xargs -0 sha256sum | sha256sum")
+# a typed phrase naming its sha256 (services/unsigned.py: the one rule for every unsigned write).
+# Signed releases (the catalogue, a mirror) never need it.
+UNSIGNED_WORDS = _unsigned.WORDS
+UNSIGNED_BANNER = _unsigned.BANNER
+ZIP_RECIPE = _unsigned.ZIP_RECIPE
+MANIFEST_RECIPE = _unsigned.MANIFEST_RECIPE
 
 ProgressFn = Callable[[str, int, int], None]
 
@@ -408,71 +406,18 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def unsigned_phrase(sha256: str) -> str:
-    """The typed phrase for an unsigned bundle: ``INSTALL UNSIGNED <first 8 hex of sha256>``."""
-    return f"{UNSIGNED_WORDS} {sha256[:8].lower()}"
-
-
-def _sum_line(sha256: str, rel: bytes) -> bytes:
-    """One line as GNU ``sha256sum`` prints it: ``<hex>  <name>``; a name with a backslash or
-    a newline is escaped and the line starts with a backslash (coreutils 8.x)."""
-    if b"\\" in rel or b"\n" in rel:
-        return b"\\" + sha256.encode() + b"  " + \
-            rel.replace(b"\\", b"\\\\").replace(b"\n", b"\\n") + b"\n"
-    return sha256.encode() + b"  " + rel + b"\n"
-
-
-def folder_manifest(root: Path) -> tuple[bytes, dict[str, str], list[str]]:
-    """An unsigned bundle FOLDER's manifest: one ``sha256sum`` line ``<sha256>  <path>`` per
-    regular file under ``root`` (found without following a symbolic link, as ``find -type
-    f``; the path relative to ``root``, ``/``-separated), sorted by the path's bytes
-    (``LC_ALL=C sort``). Its sha256 is the bundle's (``MANIFEST_RECIPE`` prints the same).
-    Returns (the manifest, each file's sha256 by its path, the symbolic links found: a
-    bundle carries only regular files, so a caller refuses them)."""
-    entries: list[tuple[bytes, str, Path]] = []
-    links: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        here = Path(dirpath)
-        for name in [*dirnames, *filenames]:
-            path = here / name
-            rel = path.relative_to(root).as_posix()
-            try:
-                mode = os.lstat(path).st_mode
-            except OSError:
-                continue
-            if stat.S_ISLNK(mode):
-                links.append(rel)
-            elif stat.S_ISREG(mode):
-                entries.append((os.fsencode(rel), rel, path))
-    entries.sort(key=lambda e: e[0])
-    sums = {rel: file_sha256(path) for _raw, rel, path in entries}
-    manifest = b"".join(_sum_line(sums[rel], raw) for raw, rel, _p in entries)
-    return manifest, sums, sorted(links)
+unsigned_phrase = _unsigned.phrase
+folder_manifest = _unsigned.folder_manifest
 
 
 def require_unsigned(chk: BundleCheck, typed: Any) -> None:
     """The typed ``INSTALL UNSIGNED <sha8>`` for THIS bundle, as it is now (checked again just
     before a write, so a bundle changed since it was shown is refused): else REFUSED (15),
     ``error.data.unsigned`` the phrase and the sha256. Never implied by ``--yes``."""
-    from harness_manager.cli.output import with_data
-
-    want = chk.unsigned_phrase
-    if not want:
+    info = chk.unsigned_info()
+    if info is None:
         raise RefusedError(f"{chk.path} has no sha256 to confirm", hint="check the bundle again")
-    got = " ".join(typed.split()) if isinstance(typed, str) else ""
-    if got == want or (got[:-8] == want[:-8] and got[-8:].lower() == want[-8:]):
-        return                                   # the hex in either case, any spacing
-    if got.upper().startswith(UNSIGNED_WORDS):
-        msg = (f"not confirmed: {got!r} does not name this bundle: its sha256 starts "
-               f"{chk.sha256[:8]}; type exactly {want!r}")
-    else:
-        msg = f"not confirmed: this bundle is unsigned; type exactly {want!r} to install it"
-    raise with_data(RefusedError(msg, hint="Harness Manager cannot check where an unsigned bundle "
-                                           "came from: only install one you built or got from "
-                                           "SoC Labs directly. The phrase names the first 8 hex "
-                                           "of its sha256 (error.data.unsigned); nothing was "
-                                           "written"),
-                    unsigned=chk.unsigned())
+    _unsigned.require(info, typed)
 
 
 def _junk(rel: str) -> bool:
@@ -511,14 +456,17 @@ class BundleCheck:
     def unsigned_phrase(self) -> str:
         return unsigned_phrase(self.sha256) if self.sha256 else ""
 
-    def unsigned(self) -> dict[str, Any] | None:
-        """What the app and the CLI show for the typed phrase; None before a sha256."""
+    def unsigned_info(self) -> _unsigned.Unsigned | None:
+        """What the typed phrase names (services/unsigned.py); None before a sha256."""
         if not self.sha256:
             return None
-        return {"phrase": self.unsigned_phrase, "sha256": self.sha256, "of": self.sha256_of,
-                "files": self.manifest_files if self.sha256_of == "manifest" else None,
-                "how": ZIP_RECIPE if self.sha256_of == "zip" else MANIFEST_RECIPE,
-                "banner": UNSIGNED_BANNER}
+        return _unsigned.Unsigned(self.path, self.sha256, self.sha256_of,
+                                  self.manifest_files if self.sha256_of == "manifest" else None)
+
+    def unsigned(self) -> dict[str, Any] | None:
+        """What the app and the CLI show for the typed phrase; None before a sha256."""
+        info = self.unsigned_info()
+        return info.as_dict() if info is not None else None
 
     def as_dict(self) -> dict[str, Any]:
         return {"path": self.path, "kind": self.kind, "layout": self.layout,

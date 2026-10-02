@@ -1286,6 +1286,7 @@ class SimClocks:
 EXTENSION_ROUTES["cardwriter_api"] = (
     ("GET", "/cardwriter/devices"),
     ("POST", "/cardwriter/write"),
+    ("POST", "/cardwriter/check"),                    # bringup-2: the unsigned phrase first
 )
 # --- end sd-flash ---
 

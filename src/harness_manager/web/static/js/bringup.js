@@ -106,6 +106,7 @@ export function bs(bid) {
       replaced: false,        // the reader door: "the card is back in, the board is on"
       witness: null, witnessError: null, host: "",
       os: "", osImage: "", osDevice: "", osTyped: "", osDone: null,
+      osCheck: null, osCheckError: null, osChecking: false, osUnsigned: "",   // the image's phrase
       next: null,
       proposal: null, proposalError: null, proposalLoading: false,   // the proposed identity
       id: null,               // {label, ip, mac}: the proposal as edited here
@@ -358,11 +359,15 @@ export function unsignedPhrase(w) {
   return (w.check && !w.check.refused && w.check.unsigned && w.check.unsigned.phrase) || "";
 }
 
-// The typed phrase as the service compares it: any spacing, the hex in either case.
-export function unsignedTyped(w) {
-  const want = unsignedPhrase(w);
-  const got = String(w.unsignedTyped || "").trim().split(/\s+/).join(" ");
+// The typed phrase as the service compares it (services/unsigned.py matches): any spacing, the
+// hex in either case.
+export function phraseMatches(want, typed) {
+  const got = String(typed || "").trim().split(/\s+/).join(" ");
   return !!want && (got === want || (got.slice(0, -8) === want.slice(0, -8) && got.slice(-8).toLowerCase() === want.slice(-8)));
+}
+
+export function unsignedTyped(w) {
+  return phraseMatches(unsignedPhrase(w), w.unsignedTyped);
 }
 
 function UnsignedPhrase({ bid, w }) {
@@ -549,8 +554,8 @@ function DevicePicker({ w, field, typedField, kind }) {
   </div>`;
 }
 
-async function readerWrite(bid, ctx, kind, deviceId, source, confirm) {
-  return readerJob(ctx, "cardwriterWrite", { device_id: deviceId, kind, source, confirm });
+async function readerWrite(bid, ctx, kind, deviceId, source, confirm, confirmUnsigned) {
+  return readerJob(ctx, "cardwriterWrite", { device_id: deviceId, kind, source, confirm, confirm_unsigned: confirmUnsigned });
 }
 
 // A card-reader write (SD-FLASH's job, cardwriter_write) through a route: the bring-up's own for
@@ -775,6 +780,50 @@ export function cardImageWhy(path) {
   return "";
 }
 
+// The whole-card image: what POST /cardwriter/check says (its sha256 and the unsigned phrase).
+async function checkImage(bid) {
+  const w = bs(bid);
+  const source = (w.osImage || "").trim();
+  if (!source || cardImageWhy(source)) return;
+  w.osChecking = true;
+  w.osCheck = null;
+  w.osCheckError = null;
+  w.osUnsigned = "";
+  changed();
+  const r = await timed(`cardwriter check card ${source}`, () => bringupCall("cardwriterCheck", {}, { kind: "card", source }));
+  w.osChecking = false;
+  if (r.error) w.osCheckError = r.error;
+  else if ((w.osImage || "").trim() === source) w.osCheck = r.data.data;
+  changed();
+}
+
+function osPhrase(w) {
+  return (w.osCheck && w.osCheck.unsigned && w.osCheck.unsigned.phrase) || "";
+}
+
+function osWhy(w) {
+  if (!w.osCheck) return w.osChecking ? "checking the image…" : "check the image first";
+  if (!phraseMatches(osPhrase(w), w.osUnsigned)) return `type ${osPhrase(w)} to install this unsigned card image`;
+  return "";
+}
+
+function ImageCheck({ bid, w }) {
+  const c = w.osCheck;
+  const u = (c && c.unsigned) || {};
+  return html`<div class="stack gap-8">
+    <${UnsignedBanner} />
+    ${w.osCheckError ? html`<${Reason} level="err" testid="bu-card-check-error" text=${`${w.osCheckError.errName}: ${w.osCheckError.message}${w.osCheckError.hint ? ` (${w.osCheckError.hint})` : ""}`} />` : null}
+    ${c ? html`<dl class="kv bu-check" data-testid="bu-card-check">
+      <dt>Image</dt><dd><span class="mono">${c.source}</span><div class="sub">${(c.card && c.card.describe) || ""}</div></dd>
+      <dt>sha256</dt><dd data-testid="bu-card-sha"><span class="mono bu-sha">${u.sha256}</span>
+        <div class="sub">of the image file itself (<span class="mono">${u.how || "sha256sum CARD.img"}</span>)</div></dd>
+    </dl>
+    <div class="field bu-unsigned-field"><label for=${`bu-os-unsigned-${bid}`}>Type <code data-testid="bu-os-unsigned-want">${u.phrase}</code></label>
+      <input id=${`bu-os-unsigned-${bid}`} class="input mono grow" data-testid="bu-os-unsigned-phrase" autocomplete="off" spellcheck="false"
+        value=${w.osUnsigned} onInput=${(e) => { w.osUnsigned = e.target.value; changed(); }} /></div>` : null}
+  </div>`;
+}
+
 function OsStep({ bid, w }) {
   const st = G.status || {};
   const choice = readerChoice(w, "card");
@@ -784,8 +833,8 @@ function OsStep({ bid, w }) {
   const imageWhy = cardImageWhy(w.osImage);
   const spec = {
     key: "bu_os", label: "Write the user microSD", busyLabel: "Writing...", budgetS: 1800,
-    command: `cardwriter write ${w.osDevice || "?"} --kind card ${w.osImage || "?"}`,
-    run: (ctx) => readerWrite(bid, ctx, "card", w.osDevice, w.osImage.trim(), w.osTyped.trim()),
+    command: `flash write ${w.osDevice || "?"} ${w.osImage || "?"} --kind card`,
+    run: (ctx) => readerWrite(bid, ctx, "card", w.osDevice, w.osImage.trim(), w.osTyped.trim(), w.osUnsigned.trim()),
     render: (res) => readerLines(res, "the whole-card image"),
     onDone: (ok, res) => { if (ok && !(res && res.needs_privilege)) w.osDone = { how: "reader", at: Date.now() }; changed(); },
   };
@@ -806,13 +855,18 @@ function OsStep({ bid, w }) {
     ${w.os === "reader" && choice.ok ? html`<div class="stack gap-8">
       <div class="field"><label for=${`bu-card-${bid}`}>Whole-card image</label>
         <input id=${`bu-card-${bid}`} class="input mono grow" data-testid="bu-card-image" placeholder=${CARD_HINT}
-          value=${w.osImage || ""} onInput=${(e) => { w.osImage = e.target.value; changed(); }} /></div>
-      <p class="small muted">${CARD_HINT[0].toUpperCase()}${CARD_HINT.slice(1)}: the MBR, the boot-select and both slots. Never a bundle's linux_slot.img.${example ? html` <button type="button" class="link-btn" onClick=${() => { w.osImage = example; changed(); }}>Use the demo's card image</button>` : null}</p>
+          value=${w.osImage || ""} onInput=${(e) => { w.osImage = e.target.value; w.osCheck = null; w.osCheckError = null; w.osUnsigned = ""; changed(); }}
+          onKeyDown=${(e) => { if (e.key === "Enter") checkImage(bid); }} />
+        <button type="button" class="btn sm" data-action="bu-card-check" disabled=${!!imageWhy || w.osChecking}
+          aria-busy=${w.osChecking ? "true" : undefined} onClick=${() => checkImage(bid)}>
+          ${w.osChecking ? html`<${Spinner} />` : html`<${Icon} name="list-checks" />`} Check</button></div>
+      <p class="small muted">${CARD_HINT[0].toUpperCase()}${CARD_HINT.slice(1)}: the MBR, the boot-select and both slots. Never a bundle's linux_slot.img.${example ? html` <button type="button" class="link-btn" onClick=${() => { w.osImage = example; w.osCheck = null; w.osUnsigned = ""; changed(); checkImage(bid); }}>Use the demo's card image</button>` : null}</p>
       ${w.osImage && imageWhy ? html`<${Reason} level="err" testid="bu-card-why" text=${imageWhy} />` : null}
+      ${w.osImage && !imageWhy ? html`<${ImageCheck} bid=${bid} w=${w} />` : null}
       <${DevicePicker} w=${w} field="osDevice" typedField="osTyped" kind="card" />
       <${ArmBox} bid=${bid} armKey="bu_os" testid="arm-bu-os" text="Arm: I understand this writes the whole card in this PC's reader with the image (everything on it is replaced)." />
       <${ActionRow} bid=${bid} panel="bu_os" spec=${spec} variant="primary" icon="memory-stick"
-        gate=${{ arm: "bu_os", guard: () => otherWrite(bid, "bu_os") || imageWhy || (!dev ? "choose the card" : w.osTyped.trim() !== confirmFor(dev) ? `type ${confirmFor(dev)} to confirm` : "") }} />
+        gate=${{ arm: "bu_os", guard: () => otherWrite(bid, "bu_os") || imageWhy || osWhy(w) || (!dev ? "choose the card" : w.osTyped.trim() !== confirmFor(dev) ? `type ${confirmFor(dev)} to confirm` : "") }} />
       <${ResultBlock} lines=${po.lines} panel=${po} testid="bu-os-result" />
       ${w.osDone ? html`<p class="small" data-testid="bu-os-back">Put the card in the board's user microSD slot, power-cycle the board, then witness it again (step 4).</p>` : null}
     </div>` : null}
