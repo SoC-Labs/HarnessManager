@@ -18,14 +18,7 @@ import { holderOnly } from "../week.js";
 import { Card, Icon, Reason, Seg, Spinner } from "../ui.js";
 import { closeModal, ModalShell, openModal, registerModal } from "../modal.js";
 
-// --- the stylesheet: this lane's, linked once (index.html is the integrator's: CCR IDENTITY-2) ---
-(function linkSheet() {
-  if (typeof document === "undefined" || document.querySelector('link[href$="css/identity.css"]')) return;
-  const l = document.createElement("link");
-  l.rel = "stylesheet";
-  l.href = "./css/identity.css";
-  document.head.appendChild(l);
-}());
+// The stylesheet, css/identity.css, is linked by index.html (v1.1, CCR IDENTITY-2).
 
 export function identityOf(b) {
   return (b && b.netIdentity) || (b && b.info && b.info.net_identity) || null;
