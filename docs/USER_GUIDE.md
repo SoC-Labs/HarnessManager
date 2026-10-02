@@ -1677,7 +1677,7 @@ reloaded) and reads it back.
 this PC reached it at that address, Harness Manager looks for it at the new one (up to
 4 min) and accepts it only with the SSH host key pinned for it; its claim, its
 `boards.toml` settings and its pinned key move to the new address. In the app, **Open it
-at …** opens it there. Another board answering at the new address is never adopted.
+at …** opens it there. Another board answering at the new address is never adopted. If nothing answers there (the address was taken, or it is on DHCP), Harness Manager asks the whole network and opens the board where it answers with its own key, and says so.
 
 | Situation | What happens |
 |---|---|

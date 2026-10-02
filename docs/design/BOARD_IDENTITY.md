@@ -195,7 +195,7 @@ not kept). When the session reaches the board at the address that changes (its i
 its DHCP lease; never through a hub or a tunnel, whose address does not change), the job reads
 the pinned host key, sends the warm reboot verb, and asks identify at the new IP (every 3 s, up
 to 240 s). The board's host key lives in /persist, so it is the same after the restart; another
-key is another board (refused, nothing adopted). Found, the board's records move from
+key is another board (refused, nothing adopted). From 60 s on (every 20 s) an identify broadcast looks for the board elsewhere (DAD refused the address, a DHCP lease): only an answer with its pinned key, not from its old address and restarted since the reboot, is adopted, at the address it answered from. Found, the board's records move from
 `mps3@old:6900` to `mps3@new:6900`: boards.toml (a table keyed by the old id is renamed; one
 found by `match` gets the new address), the claim record, the known_hosts file written under
 the new id's alias, the registry. The session at the old address is closed by the app when it

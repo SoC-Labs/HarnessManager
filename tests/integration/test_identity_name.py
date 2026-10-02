@@ -357,6 +357,7 @@ def test_a_card_written_on_a_pc_is_refused_with_the_format_hint_never_formatted(
     assert "`harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'`" \
         in exc.value.hint
     assert "--replace-host-key" in exc.value.hint and "never formats it for you" in exc.value.hint
+    assert "comes back UNCLAIMED with a NEW SSH host key, so claim it again" in exc.value.hint
     assert nothing_sent(fake)
 
 
@@ -365,3 +366,84 @@ def test_twin_the_boards_own_no_persist_reply_carries_the_same_hint():
                         "code": "no_persist"})
     assert isinstance(err, RefusedError) and "mps3-persist format --erase" in err.hint
     assert "[harness: identity: no persistent /persist (use the card)]" in err.message
+
+
+# --- the broadcast fallback (the Linux lead, 2 Oct): DAD refused the new address --------------
+
+
+def by_broadcast(fake, monkeypatch, *, at: str, host_key: str | None = None) -> list:
+    """identify.discover, as the network answers it: once the board restarted, it answers
+    from ``at`` (its DHCP lease: the new static address was refused), with its own host key
+    unless told otherwise."""
+    asked: list[int] = []
+
+    def discover(targets=None, *, timeout=2.0, nonce=None):
+        asked.append(1)
+        if not str(fake.running["ip"]).startswith("192.168.10.110"):
+            return []                                   # not restarted with it yet
+        raw = {**fake.identify_reply("0" * 16), "ip": at, "dhcp": True}
+        if host_key is not None:
+            raw["ssh"] = {**raw.get("ssh", {}), "host_key_sha256": host_key}
+        return [IdentifyReply(raw=raw, source=(at, 6899))]
+
+    monkeypatch.setattr(IDF, "discover", discover)
+    return asked
+
+
+def test_a_board_that_did_not_take_its_new_ip_is_found_by_broadcast_with_its_key(lab,
+                                                                                monkeypatch):
+    from harness_manager_mps3.claim import ClaimRecords
+
+    fake, session, svc = lab(running=AT_ITS_IP)
+    ad = session.net_identity
+    ad.move_poll_s, ad.broadcast_after_s, ad.broadcast_every_s = 0.01, 0.0, 0.0
+    at_new_address(fake, monkeypatch, never=True)                 # nothing at .110 (DAD)
+    asked = by_broadcast(fake, monkeypatch, at="192.168.10.57")
+    out = svc.fix(session, confirm="LAB-07", want={"label": "LAB-07", "ip": "auto"}, wait_s=20)
+    new = f"mps3@192.168.10.57:{fake.control_port}"
+    assert asked and out["verified"] is True and out["board_id"] == new
+    assert out["moved"]["host"] == "192.168.10.57" and out["moved"]["elsewhere"] is True
+    assert out["address"]["ip"] == "192.168.10.57"
+    assert any(n.startswith("the board did not take 192.168.10.110 (the address may have been "
+                            "taken: DAD, or it is on DHCP): it was found at 192.168.10.57")
+               for n in out["notes"])
+    assert ClaimRecords().get(new)["host_key_fp"] == board_key_fp()
+
+
+def test_twin_a_broadcast_answer_with_another_key_is_never_adopted(lab, monkeypatch):
+    from harness_manager_mps3.claim import ClaimRecords
+
+    fake, session, svc = lab(running=AT_ITS_IP)
+    old = session.candidate.board_id
+    ad = session.net_identity
+    ad.move_poll_s, ad.broadcast_after_s, ad.broadcast_every_s = 0.01, 0.0, 0.0
+    at_new_address(fake, monkeypatch, never=True)
+    asked = by_broadcast(fake, monkeypatch, at="192.168.10.57", host_key="SHA256:" + "C" * 43)
+    with pytest.raises(ActionFailedError, match="board not seen on 192.168.10.110"):
+        svc.fix(session, confirm="LAB-07", want={"label": "LAB-07", "ip": "auto"}, wait_s=0.3)
+    assert asked
+    assert ClaimRecords().get(old)["host_key_fp"] == board_key_fp()          # nothing moved
+    assert ClaimRecords().get(f"mps3@192.168.10.57:{fake.control_port}") == {}
+
+
+def test_twin_a_broadcast_answer_before_the_restart_is_not_the_moved_board(lab):
+    """The board itself, still at its old address (or not restarted): never adopted."""
+    from harness_manager_mps3.identify import IdentifyReply as R
+
+    key = board_key_fp()
+    stale = R(raw={"ok": True, "op": "identify", "ssh": {"host_key_sha256": key},
+                   "up_ms": 900_000}, source=("192.168.10.57", 6899))
+    old = R(raw={"ok": True, "op": "identify", "ssh": {"host_key_sha256": key}, "up_ms": 10},
+            source=("127.0.0.1", 6899))
+    fresh = R(raw={"ok": True, "op": "identify", "ssh": {"host_key_sha256": key}, "up_ms": 10},
+              source=("192.168.10.57", 6899))
+    import harness_manager_mps3.identify as idf
+
+    real = idf.discover
+    try:
+        idf.discover = lambda *a, **k: [stale, old]
+        assert NI.Mps3NetIdentity._by_broadcast(key, old_host="127.0.0.1", since_s=30) is None
+        idf.discover = lambda *a, **k: [stale, old, fresh]
+        assert NI.Mps3NetIdentity._by_broadcast(key, old_host="127.0.0.1", since_s=30) is fresh
+    finally:
+        idf.discover = real

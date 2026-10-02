@@ -1218,10 +1218,14 @@ class IdentityService:
                             progress=say)
         new_id = str(found.get("board_id") or "")
         after_reported = found.get("reported") or {}
+        elsewhere = str(found.get("elsewhere") or "")      # found by a broadcast, not at addr
+        if found.get("note"):
+            notes.append(str(found["note"]))
         say(f"found at {found.get('address') or addr} with host key {host_key}")
         records: list[str] = []
         if new_id and new_id != bid:
-            records = list(ad.adopt_move(bid, new_id, old_host=old_host, new_host=addr) or [])
+            records = list(ad.adopt_move(bid, new_id, old_host=old_host,
+                                         new_host=elsewhere or addr) or [])
             self.seen.move(bid, new_id)
             records.append(f"seen.json: {bid} -> {new_id}")
             for line in records:
@@ -1234,7 +1238,8 @@ class IdentityService:
                          address=str(found.get("address") or ""), at=time.time())
         self.seen.record(key, mac=rec.get("mac"), ip=rec.get("ip"))
         checked = {**plan, "want": {f: v for f, v in plan["want"].items()
-                                    if f in after_reported and after_reported.get(f) != ""}}
+                                    if f in after_reported and after_reported.get(f) != ""
+                                    and not (f == "ip" and elsewhere)}}
         verified, mismatched = _verified(checked, after_reported, clear=False)
         if mismatched:
             notes.append("at its new address the board reports "
@@ -1246,10 +1251,12 @@ class IdentityService:
                     "hub": None, "findings": findings, "fix": None,
                     "notes": [f["text"] for f in findings], "checked_at": _iso(), "live": True}
         moved = {"from": bid, "to": key, "address": str(found.get("address") or ""),
-                 "host": addr, "old_host": old_host, "records": records}
+                 "host": elsewhere or addr, "old_host": old_host, "records": records,
+                 "elsewhere": bool(elsewhere)}
         out = {"board_id": key, "action": "set", "changes": plan["changes"], "set": set_reply,
                "reboot": found.get("reboot") or {}, "verified": verified, "identity": identity,
-               "notes": notes, "moved": moved, "address": self._address_out(new_ip)}
+               "notes": notes, "moved": moved,
+               "address": self._address_out(elsewhere or new_ip)}
         if not verified:
             raise ActionFailedError(
                 f"the board moved to {addr}, but it does not report the new identity: "

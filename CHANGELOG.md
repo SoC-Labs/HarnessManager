@@ -1018,7 +1018,7 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
 - **A board whose address changes is followed** (the Linux lead, 2 Oct): its pinned SSH host
   key is read first, the warm reboot is not witnessed at the old address, the board is found
   at the new IP by identify and accepted only with that key (another key: "a different board
-  answers at ...", never adopted; none: "board not seen on <ip> after 4 min: it may be on DHCP
+  answers at ...", never adopted; not there after 60 s: an identify broadcast adopts the board where it answers with its own key, with a note; none: "board not seen on <ip> after 4 min: it may be on DHCP
   or the address was taken (DAD); check the panel, which shows the IP on row 5"). Its
   boards.toml table (with the pin), claim record, known_hosts and registry record move to the
   new board id; the result's `moved`, and the dialog's **Open it at <IP>**.

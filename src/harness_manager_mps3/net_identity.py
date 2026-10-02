@@ -85,13 +85,14 @@ NETBOOT_WHY = ("this board has no persistent store for an identity (a netboot, n
 #: identity_set answers no_persist until `mps3-persist format --erase` and a reboot. Said, never
 #: done: Harness Manager does not format a card by itself.
 PERSIST_FORMAT = "mps3-persist format --erase && mps3-reboot"
-NETBOOT_HINT = ("a card written on a PC: format its /persist over your claim, `harness-manager "
-                f"board ssh TARGET -c '{PERSIST_FORMAT}'` (it erases the card's partition 3; "
-                "the claim and the SSH host key were in the blank store, so expect to claim the "
-                "board again: `harness-manager board claim TARGET --replace-host-key`), then set "
-                "the identity again; Harness Manager never formats it for you. A netboot: "
-                "re-bake stage0 for this board (S0_IP, S0_LABEL, MPS3_MAC0..5 via "
-                "S0_EXTRA_DEFS; an updatemem re-bake, not a re-mint)")
+NETBOOT_HINT = ("a card written on a PC (the Linux lead, 2 Oct): with the board claimed (its claim "
+                "is in the blank, in-memory /persist), `harness-manager board ssh TARGET -c "
+                f"'{PERSIST_FORMAT}'` formats the card's partition 3 and restarts it; the board "
+                "comes back UNCLAIMED with a NEW SSH host key, so claim it again: `harness-manager "
+                "board claim TARGET --replace-host-key`; then set the identity again. Harness "
+                "Manager never formats it for you. A netboot: re-bake stage0 for this board "
+                "(S0_IP, S0_LABEL, MPS3_MAC0..5 via S0_EXTRA_DEFS; an updatemem re-bake, not a "
+                "re-mint)")
 
 # --- lane IDENTITY: the MPS3 pack's identity policy (david 2 Oct) ----------------------------------
 
@@ -600,6 +601,11 @@ class Mps3NetIdentity:
 
     #: How often the new address is asked while the board restarts (tests: less).
     move_poll_s = 3.0
+    #: The Linux lead (2 Oct): when the new address does not answer (DAD refused it, the board
+    #: is on DHCP), an identify BROADCAST from this long after the reboot, then this often;
+    #: only an answer with the board's own host key is adopted, wherever it is.
+    broadcast_after_s = 60.0
+    broadcast_every_s = 20.0
 
     @staticmethod
     def policy() -> Any:
@@ -649,6 +655,8 @@ class Mps3NetIdentity:
             self._live = None
         sent = time.monotonic()
         ask = self._identify or _identify.identify
+        last_broadcast = -1e9
+        elsewhere = ""
         while True:
             elapsed = time.monotonic() - sent
             try:
@@ -657,6 +665,14 @@ class Mps3NetIdentity:
                 reply = None
             if reply is not None and getattr(reply, "is_rescue", False):
                 reply = None                     # stage0 rescue: not the harness yet
+            if reply is None and elapsed >= self.broadcast_after_s \
+                    and elapsed - last_broadcast >= self.broadcast_every_s:
+                last_broadcast = elapsed
+                say(f"nothing at {ip} yet: asking the network (identify broadcast) for the "
+                    f"board's host key {host_key}")
+                reply = self._by_broadcast(host_key, old_host=shell.host, since_s=elapsed)
+                if reply is not None:
+                    elsewhere = str(getattr(reply, "address", "") or "")
             if reply is not None:
                 ssh = reply.ssh if hasattr(reply, "ssh") else {}
                 seen = str(ssh.get("host_key_sha256") or "")
@@ -679,8 +695,14 @@ class Mps3NetIdentity:
                 address = reply.control_endpoint if hasattr(reply, "control_endpoint") \
                     else f"{ip}:6900"
                 board_id = reply.board_id if hasattr(reply, "board_id") else f"mps3@{address}"
+                note = ""
+                if elsewhere and elsewhere != ip:
+                    note = (f"the board did not take {ip} (the address may have been taken: "
+                            f"DAD, or it is on DHCP): it was found at {elsewhere} by an identify "
+                            "broadcast with its own SSH host key, and is opened there; give it "
+                            "another address once you know why")
                 return {"board_id": board_id, "address": address, "reported": reported,
-                        "identify": raw,
+                        "identify": raw, "elsewhere": elsewhere if note else "", "note": note,
                         "reboot": {"up_after_s": round(elapsed, 3),
                                    "down_evidence": f"the reboot verb answered (in_ms="
                                                     f"{getattr(resp, 'in_ms', 0)})",
@@ -695,6 +717,30 @@ class Mps3NetIdentity:
                     hint=f"once it answers: `harness-manager board identity {ip}`")
             say(f"waiting for the board at {ip} ({elapsed:.0f}/{wait_s:.0f} s)")
             time.sleep(self.move_poll_s)
+
+    @staticmethod
+    def _by_broadcast(host_key: str, *, old_host: str = "", since_s: float = 0.0) -> Any:
+        """The one identify answer on the network with ``host_key`` (never another board's)
+        that is the board AFTER its restart: not at its old address, and its harness up for
+        less time than since the reboot was sent; else None. ``identify.discover`` is looked
+        up when called (a test seam)."""
+        from . import identify as _identify
+
+        try:
+            replies = _identify.discover()
+        except (HarnessError, OSError):
+            return None
+        for r in replies:
+            ssh = r.ssh if hasattr(r, "ssh") else {}
+            if getattr(r, "is_rescue", False) or ssh.get("host_key_sha256") != host_key:
+                continue
+            if old_host and getattr(r, "address", "") == old_host:
+                continue                         # still the old harness, before its restart
+            up = getattr(r, "up_ms", None)
+            if up is not None and up > (since_s + 2.0) * 1000.0:
+                continue                         # not restarted since the reboot was sent
+            return r
+        return None
 
     def adopt_move(self, old_id: str, new_id: str, *, old_host: str,
                    new_host: str) -> list[str]:
