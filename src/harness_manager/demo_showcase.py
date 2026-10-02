@@ -1629,7 +1629,8 @@ _bringup_wrap()
 #   dir, so the registry (seen.json), the proposal, the guards and the typed phrase are the
 #   product's own; DemoEngine.info carries net_identity like the real engine's.
 # - DemoNetIdentity: the board's side (the session's net_identity adapter): it reports the
-#   generic image's name and MAC (02:00:00:4d:50:53) with its stage0 address 192.168.10.104,
+#   generic image's name with its stage0 bake's MAC 02:00:00:00:01:04 (its own: no clash with
+#   the showcase's other boards) and address 192.168.10.104,
 #   takes identity_set (pending) and applies it at the warm reboot, in memory. Its session
 #   address is not the board's own IP (the demo has no network), so the board never moves.
 # - DemoEngine.identity_policy: the MPS3 rules (random MACs 02:..., never 02:00:00:*; the pool
@@ -1649,10 +1650,11 @@ class DemoNetIdentity:
             ip = self._bid.split("@", 1)[-1].rsplit(":", 1)[0]
             store[self._bid] = {
                 "label": "MPS3", "hostname": "mps3", "ip": f"{ip}/24",
-                "mac": "02:00:00:4d:50:53",
+                "mac": "02:00:00:00:01:04",
                 "source": {"label": "default", "hostname": "label", "ip": "stage0",
-                           "mac": "default"},
-                "stage0": {"label": None, "ip": f"{ip}/24", "mac": None}, "override": None,
+                           "mac": "stage0"},
+                "stage0": {"label": None, "ip": f"{ip}/24", "mac": "02:00:00:00:01:04"},
+                "override": None,
                 "pending": None, "persist": True, "via": "identity", "feature": True,
                 "feature_known": True, "impl": "linux"}
         return store[self._bid]
