@@ -55,11 +55,13 @@ from harness_manager.core.errors import (
 from harness_manager.core.events import Event, EventBus
 from harness_manager.core.model import Candidate, Link, LinkKind
 from harness_manager.core.pack import (
+    ALLOW_DUT_FLASH_WRITE,
     BoardSession,
     OverlayRef,
     ProbeHints,
     card_status_of,
     detail_of,
+    dut_flash_refusal,
     keep_refusal,
     preflight_refusal,
     report_progress,
@@ -1415,11 +1417,18 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         keep = _bool(_obj(body), "keep_on_card", False)
         # FIX-PACK-7: swap even when the board's OpenOCD cannot be stopped first (a warning)
         force = {"force": True} if _bool(_obj(body), "force", False) else {}
+        # FIX-PACK-8: a design whose boot code writes the DUT's flash needs it (the typed word)
+        allow = _bool(_obj(body), ALLOW_DUT_FLASH_WRITE, False)
         ui2_holder(bid, s, "deploy", _lease_body(_obj(body)))   # ui2 api-hub (G7): 409 HELD
         overlay, items, refusal = _preflight(bid, s, _obj(body).get("overlay"))
         if refusal is not None:            # refuse BEFORE deploy() is ever called
             refusal.data = {"overlay": overlay, "preflight": items}   # type: ignore[attr-defined]
             raise refusal
+        refused = dut_flash_refusal(overlay, allow)     # 409 REFUSED, data.dut_flash_write
+        if refused is not None:
+            raise refused
+        if allow:                          # the keyword only when asked
+            force = {**force, ALLOW_DUT_FLASH_WRITE: True}
         if keep:                           # Keep on the card: the card must take it, first
             with d.gates.op(bid):
                 status = card_status_of(d.engine.deploy, s)

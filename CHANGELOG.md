@@ -9,6 +9,66 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### Boundary not timed: kept as a guard (FIX-PACK-8, rc2; N1 after N2)
+- N2 (below) fixed the cause of Linux v2.0.0 known issue 11 in `build_rm.tcl`. A build from an
+  older `build_rm.tcl`, or one from a synth checkpoint you bring (`build.synth_dcp`) that already
+  carries a `create_clock`, still links with the static<->RM boundary untimed while Vivado's
+  summary says every constraint is met. Harness Manager now reads check_timing from the build's
+  `<name>_timing.rpt` and, when it counts more than 0 register/latch pins with no clock or more
+  than 1,000 unconstrained endpoints (not counting those on a constant clock), says so as a
+  WARNING, never a refusal: "boundary not timed (known issue 11): Vivado's check_timing in
+  minimal_timing.rpt found 27,984 register/latch pins with no clock (27,446 on OSCCLK1; 538 on
+  u_shell/…/tck_i_reg/Q) and 86,692 unconstrained endpoints (Harness Manager warns above 0 and
+  1,000), so the static<->RM partition boundary was not timing-analysed, even where the summary
+  says every constraint is met. Your RM's own paths were still timed." with "fix: rebuild with a
+  build_rm.tcl written by this Harness Manager (`harness-manager kit script ... --out DIR`): it
+  writes the RM checkpoint before it reads the OOC XDC, so the OOC create_clock no longer
+  replaces the static's clocks at the link. A synth checkpoint you bring (build.synth_dcp) must
+  be written before any create_clock is read into it."
+- Why those limits: issue 11 measured 27,984 unclocked pins and 86,692 unconstrained endpoints on
+  `minimal`; with N2 both are 0. The 423 endpoints "due to constant clock" are in every build of
+  the static, N2's too (a clock tied off in the static): they are not timing paths and never
+  count. 1,000 keeps a few unconstrained endpoints of an RM's own from being called issue 11.
+- Where: `kit check` (a `WARNING:` line and its `fix:` under the verdict; the check
+  `boundary_timing`, `ok` or `warning`; `--json` `facts.boundary`), `kit pack`'s checks, `POST
+  /kits/check`, the guide (`boundary`; the Check step's reason) and the Build tab's Check step
+  ("done, with a warning": the warning and its fix above the checks, Timing marked; Add stays
+  open). `kit build DIR` warns when DIR's `build_rm.tcl` reads the OOC XDC before it writes the
+  checkpoint (an older Harness Manager wrote it: write it again with `kit script`), and when the
+  last build there was not timed. docs/API.md.
+- The OOC XDC kit's header no longer claims "the static's propagated clocks supersede every
+  create_clock here": it says to read the file only after the RM checkpoint is written, and why.
+
+### nanosoc_multicore asks before it writes the DUT's flash (FIX-PACK-8, rc2)
+- **Programming nanosoc_multicore needs a typed word.** Its CPU1 boot ROM writes one 0x00 byte
+  at DUT flash 0x20000 onward on every boot, until the v2.1 ROM fix (Linux v2.0.0 known issue
+  15), which damages a MicroPython image there. Harness Manager cannot see what the DUT's flash
+  holds, so it warns before EVERY program of the design (rm_id `0x01000003`, by name or design
+  id): "nanosoc_multicore's boot code writes the DUT's QSPI flash (one byte at 0x20000 onward)
+  on every boot, until Linux v2.1: it damages a MicroPython image there (nanosoc_upy). Type
+  MULTICORE to program it anyway."
+- **CLI:** `program TARGET nanosoc_multicore` prints the warning and asks for MULTICORE, typed
+  (it answers the y/N question too). `--yes` never implies it: at a terminal the word is still
+  asked for, and a run with no terminal refuses (exit 15, "… — nothing was programmed: run it
+  in a terminal and type the word, or pass --allow-dut-flash-write (--yes never implies it)").
+  The new `--allow-dut-flash-write` gives it for a script and prints "WARNING: <why>
+  Programming it anyway (--allow-dut-flash-write).". A word typed wrong refuses (15, "not
+  confirmed: nanosoc_multicore was not programmed (its boot code writes the DUT's flash)").
+  `overlays` marks the design "writes the DUT's flash".
+- **API:** `POST /boards/{bid}/deploy` needs `allow_dut_flash_write: true` for such a design;
+  without it 409 REFUSED (15) before any job, with the warning as the message and
+  `error.data.dut_flash_write: {design, why, word}`. The OverlayRef gains `writes_dut_flash`
+  (`{why, word}` or `null`, additive). docs/API.md.
+- **App:** the Workbench's Program strip shows the warning above Program, with a field to type
+  MULTICORE in; Program (and Program anyway) stays off until it matches ("type MULTICORE to
+  program nanosoc_multicore: its boot code writes the DUT's flash"), behind the lease holder
+  rule and Arm as before. The picker tags the design "writes DUT flash", and the preflight adds
+  a "writes the DUT's flash" chip. Each program is a fresh choice: the field empties on a new
+  pick and once Program runs.
+- Board-agnostic: the pack declares it (`WRITES_DUT_FLASH` in the MPS3 pack's design table;
+  `core.pack.DutFlashWrite`), and core shows any pack's declaration. No HIL-AUTO plan programs
+  nanosoc_multicore; docs/HIL_LINUX.md OCD8 (manual) passes `--allow-dut-flash-write`.
+
 ### OpenOCD on the board (DEBUG-ONBOARD)
 - **On a claimed Linux board, OpenOCD runs on the board.** When the board's image has
   OpenOCD and its launcher (`mps3-debug`, v7 or later), `debug up` starts OpenOCD there over
@@ -878,4 +938,5 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   the board's OpenOCD refuses cpu0 (core 0 is held in reset by the boot gate; fix in v2.1).
 - nanosoc_multicore's boot ROM writes the DUT flash (one byte at 0x20000 onward, on every
   boot): don't load it on a board whose flash holds the MicroPython image (nanosoc_upy); fix
-  in v2.1.
+  in v2.1. Harness Manager warns and asks for MULTICORE, typed, before every program of it
+  (FIX-PACK-8).

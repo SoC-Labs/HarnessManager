@@ -172,7 +172,7 @@ def script() -> dict[str, Any]:
                                 "metered plug or an INA260"),
         ],
         port_base=3363, card="valid", card_slot="A", overlay_shell=cat.S_LNX.lower(),
-        kind="linux")
+        kind="linux", multicore_here=True)      # FIX-PACK-8: its DUT-flash warning shows here
     v011 = _Board(
         candidate=Candidate(
             "mps3", BOARD_V011,

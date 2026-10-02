@@ -921,12 +921,14 @@ class RemoteDeploy:
 
     def _deploy(self, board_id: str, overlay: OverlayRef,
                 progress: Progress | None = None, *, keep_on_card: bool = False,
-                force: bool = False) -> DeployResult:
+                force: bool = False, allow_dut_flash_write: bool = False) -> DeployResult:
         body: dict[str, Any] = {"overlay": _overlay_body(overlay)}
         if keep_on_card:                  # sent only when asked: the default writes no card
             body["keep_on_card"] = True
         if force:                         # FIX-PACK-7: only when asked (--force)
             body["force"] = True
+        if allow_dut_flash_write:         # FIX-PACK-8: only when given (the typed word, the flag)
+            body["allow_dut_flash_write"] = True
         result = self._engine.run_job(f"/boards/{q(board_id)}/deploy", body, progress=progress)
         return from_json(DeployResult, result)
 
@@ -946,8 +948,10 @@ class RemoteDeploy:
         return self._preflight(_bid(session), overlay)
 
     def deploy(self, session: BoardSession, overlay: OverlayRef, *,
-               keep_on_card: bool = False, force: bool = False) -> DeployResult:
-        return self._deploy(_bid(session), overlay, keep_on_card=keep_on_card, force=force)
+               keep_on_card: bool = False, force: bool = False,
+               allow_dut_flash_write: bool = False) -> DeployResult:
+        return self._deploy(_bid(session), overlay, keep_on_card=keep_on_card, force=force,
+                            allow_dut_flash_write=allow_dut_flash_write)
 
     def card_status(self, session: BoardSession) -> CardStatus:
         return self._card_status(_bid(session))

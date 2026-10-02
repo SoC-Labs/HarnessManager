@@ -702,14 +702,18 @@ status --json` shows `"design":"nanosoc_upy"` and one core (3333).
 0x20000 onward, on every boot. **cpu1 only** on Linux v2.0.0: the board's OpenOCD refuses cpu0,
 held in reset by the boot gate; fix in v2.1) (terminal B, with terminal C still holding)
 ```bash
-harness-manager program $B nanosoc_multicore --yes | tee $EV/ocd8_program.txt
+harness-manager program $B nanosoc_multicore --yes --allow-dut-flash-write | tee $EV/ocd8_program.txt
 read G0 G1 < <(harness-manager --json debug status $B | python3 -c 'import json,sys; print(*json.load(sys.stdin)["status"]["gdb_ports"])'); echo G0=$G0 G1=$G1
 harness-manager debug detect $B | tee $EV/ocd8_idcode.txt
 arm-none-eabi-gdb -q -batch -ex "set remotetimeout 60" -ex "target extended-remote 127.0.0.1:$G1" \
   -ex "monitor halt" -ex "info registers pc sp" -ex "detach" 2>&1 | tee $EV/ocd8_regs.txt
 ```
-Expect: the program `verified`; terminal C prints the reopened block with two `gdb` lines (cpu0,
-cpu1); `0x6ba00477`; cpu1's `pc` and `sp`, no timeout. cpu0 is not tried on v2.0.0 (E-OCD 1 Oct:
+`--allow-dut-flash-write` (FIX-PACK-8): Harness Manager refuses to program nanosoc_multicore
+without it in a script (exit 15, "nanosoc_multicore's boot code writes the DUT's QSPI flash (one
+byte at 0x20000 onward) on every boot, until Linux v2.1: … Type MULTICORE to program it
+anyway."); `--yes` never implies it, and at a terminal it asks for MULTICORE, typed.
+Expect: a `WARNING:` line naming that write, then the program `verified`; terminal C prints the
+reopened block with two `gdb` lines (cpu0, cpu1); `0x6ba00477`; cpu1's `pc` and `sp`, no timeout. cpu0 is not tried on v2.0.0 (E-OCD 1 Oct:
 `Cortex-M PARTNO 0x0 is unrecognized` on AP 0), and there is no RAM round trip here.
 
 **OCD9. Down and back** (terminal C: Ctrl-C; then terminal B)

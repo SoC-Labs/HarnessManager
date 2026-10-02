@@ -429,10 +429,12 @@ export function flow(bid) {
   const fi = failInfo(x);
   if (!r || running || r.state === "stopped") { s.check = "blocked"; sub.check = "the receipt"; }
   else if (fi) { s.check = "failed"; sub.check = fi.gate; }
+  // FIX-PACK-8 (N1 guard): passed, but check_timing says the boundary was not timed
+  else if (g && g.boundary && !g.boundary.timed) { s.check = "warn"; sub.check = "boundary not timed"; }
   else { s.check = "done"; sub.check = "passed"; }
   // Add
   const imported = !!(checkStep && checkStep.state === "done") || !!(x.packed && r && x.packed.path === r.path);
-  if (s.check !== "done") { s.add = "blocked"; sub.add = "to the Workbench"; }
+  if (s.check !== "done" && s.check !== "warn") { s.add = "blocked"; sub.add = "to the Workbench"; }
   else if (imported) { s.add = "done"; sub.add = "on the Workbench"; }
   else { s.add = "current"; sub.add = "to the Workbench"; }
   const steps = STEPS.map((v, i) => ({ ...v, n: i + 1, state: s[v.k], sub: sub[v.k] }));
@@ -1397,7 +1399,7 @@ function BuildPanel({ bid, f }) {
 const GROUPS = [
   { id: "identity", l: "Identity", stage: 2, checks: (n) => ["static_id", "rm_id", "board_static", "rm_id_clash"].includes(n),
     gates: ["static_id", "static_dcp_present", "rm_id_match", "boundary_bits", "rp_pins_link"] },
-  { id: "timing", l: "Timing", stage: 3, checks: (n) => n === "timing", gates: ["rm_timing", "ooc_clocks", "drc_routed"] },
+  { id: "timing", l: "Timing", stage: 3, checks: (n) => n === "timing" || n === "boundary_timing", gates: ["rm_timing", "ooc_clocks", "drc_routed"] },
   { id: "pr_verify", l: "pr_verify", stage: 4, checks: (n) => n === "pr_verify", gates: ["pr_verify"] },
   { id: "files", l: "Files", stage: 5, checks: (n) => /^(partial|clearing|bit_bin_pair|static_binding|ltx|pair|build)\b/.test(n),
     gates: ["ltx_written", "clearing_fits"] },
@@ -1426,12 +1428,15 @@ export function checkGroups(receipt, checks) {
       d = `${pc.join("; ") || `${rows.length} checks`}${rows.length > pc.length ? `; ${rows.length - pc.length} more checks of the pair` : ""}`;
     }
     if (unk) d += `; ${unk} unchecked (not a pass, does not block)`;
+    // FIX-PACK-8 (N1 guard): a warning never fails the group; it says so instead
+    const warn = rows.find((c) => c.state === "warning");
+    if (warn) return { ...gr, st: "warn", d: warn.detail };
     return { ...gr, st: "ok", d };
   });
 }
 
 function Group({ gr }) {
-  const ic = { ok: "circle-check", err: "circle-x", skip: "circle-dashed" }[gr.st];
+  const ic = { ok: "circle-check", err: "circle-x", skip: "circle-dashed", warn: "triangle-alert" }[gr.st];
   return html`<div class=${`bd-group ${gr.st}`} data-group=${gr.id} data-state=${gr.st}><div class="bd-group-h"><${Icon} name=${ic} /><span>${gr.l}</span>
     ${gr.exit ? html`<${Chip} level="err" cls="bd-mini">${gr.exit}<//>` : null}</div><div class="bd-group-d">${gr.d}</div></div>`;
 }
@@ -1472,6 +1477,9 @@ function CheckPanel({ bid, f }) {
           <${Btn} cls="ghost sm" icon="copy" onClick=${() => copyText(`harness-manager kit guide --why ${fi.gate}`, "Command copied")}>kit guide --why ${fi.gate}<//></div>
       </div>`
       : html`<div class="outcome ok" data-testid="check-passed"><${Icon} name="circle-check" /><span><b>Passed:</b> ${r.rm_name} <span class="mono">${r.rm_id}</span> for <span class="mono">${r.static_id}</span> · ${passedN} checks ok${unk.length ? `, ${unk.length} unchecked` : ""}</span></div>`}
+    ${!fi && g.boundary && !g.boundary.timed ? html`<div class="bd-warn" role="note" data-testid="check-boundary">
+        <${Reason} level="warn" text=${`Warning: ${g.boundary.words}`} />
+        <div class="small" data-testid="check-boundary-fix"><b>Fix:</b> ${g.boundary.fix}</div></div>` : null}
     <div class="bd-sect">Stages</div>
     <${Stages} at=${ok ? 6 : Math.max(0, STAGES.indexOf(r.stage))} failed=${!ok} testid="check-stages" />
     <div class="bd-sect">Checks</div>

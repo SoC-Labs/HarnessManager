@@ -38,7 +38,13 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from harness_manager.core.errors import AbsentError, ExitCode, UnavailableError, UsageError
+from harness_manager.core.errors import (
+    AbsentError,
+    ExitCode,
+    HarnessError,
+    UnavailableError,
+    UsageError,
+)
 from harness_manager.core.model import BoardIdentity
 from harness_manager.core.pack import KitCheck, kit_refusal
 
@@ -453,7 +459,26 @@ def _build(ctx: Ctx) -> int:
             "vivado": found.to_json(), "release": rel,
             "checks": [c.__dict__ for c in ([pc] if pc else [])],
             "note": "Harness Manager does not run Vivado yet: run this command yourself"}
+    # N1 guard (FIX-PACK-8): a script from before N2 builds an untimed boundary, and so did
+    # the last build here when its report says so
+    from harness_manager.services.kit import build
+
+    script_first = build.script_reads_ooc_xdc_first(
+        script.read_text(encoding="utf-8", errors="replace"))
+    last = None
+    found_r = build.find_receipts(d)
+    if found_r:
+        with suppress(HarnessError, OSError, ValueError):   # an unreadable receipt: say nothing
+            last = build.load_receipt(found_r[0])
+    bt = build.boundary_of(last) if last is not None else None
+    data["boundary"] = {"script_reads_ooc_xdc_first": script_first,
+                        "last_build": bt.to_json() if bt is not None else None,
+                        "last_receipt": str(last.path) if last is not None else None}
     human = [line, *[f"  {n}" for n in notes]]
+    if script_first:
+        human.append(f"WARNING: {build.SCRIPT_OOC_FIRST}")
+    if bt is not None:
+        human += _boundary_lines(bt.to_json(), last=f"the last build here, {last.path.name}")
     human += [f"In a Vivado that is already open ({render.SOURCE_WHEN}), type:", f"  {source}",
               f"  ({render.SOURCE_LOG})"]
     if stays:
@@ -497,8 +522,18 @@ def _check(ctx: Ctx) -> int:
                             "checks": [c.__dict__ for c in checks], "facts": facts},
                     rows=_rows(sid, "check", checks),
                     human=[f"{what}: passed (unchecked is not a pass: see the list)",
+                           *_boundary_lines(facts.get("boundary")),
                            *_human(checks)]))
     return ExitCode.OK
+
+
+def _boundary_lines(boundary: dict[str, Any] | None, *, last: str = "") -> list[str]:
+    """N1 guard (FIX-PACK-8): the WARNING and its fix when the build's static<->RM boundary
+    was not timed (``build.BoundaryTiming``); nothing when it was, or with no report."""
+    if not boundary or boundary.get("timed", True):
+        return []
+    return [f"WARNING{f' ({last})' if last else ''}: {boundary['words']}",
+            f"  fix: {boundary['fix']}"]
 
 
 def _pack(ctx: Ctx) -> int:
