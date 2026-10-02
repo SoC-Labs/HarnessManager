@@ -111,7 +111,7 @@ def test_the_os_step_on_windows_gives_the_admin_steps_with_copy_buttons(demo, mo
     expect(steps.locator('li[data-step="1"]')).to_contain_text("$d = Get-Disk -Number 2")
     expect(steps.locator('li[data-step="2"]')).to_contain_text("diskpart /s")
     expect(steps.locator('li[data-step="4"]')).to_contain_text(f"OpenRead('{card}')")
-    expect(steps.locator('li[data-step="5"]')).to_have_text("Update-Disk -Number 2")
+    expect(steps.locator('li[data-step="5"]')).to_contain_text("5.Update-Disk -Number 2")
     expect(steps.locator("button[aria-label^='Copy step']")).to_have_count(5)
     expect(by(page, "bu-os-verify")).to_contain_text("[Security.Cryptography.SHA256]::Create()")
     expect(by(page, "bu-os-imager")).to_contain_text("Or with Raspberry Pi Imager")

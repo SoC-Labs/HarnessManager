@@ -614,9 +614,9 @@ function PrivilegedSteps({ res }) {
   if (!res || !res.needs_privilege || !res.privileged_how) return null;
   const im = res.imager || null;
   return html`<div class="bu-priv stack gap-8" data-testid="bu-os-privileged">
-    <p class="small"><b>Write it yourself, in PowerShell as Administrator</b> (${res.privileged_how}):</p>
+    <p class="small"><b>Write it yourself</b>: ${res.privileged_how}:</p>
     <ol class="bu-priv-steps">${(res.privileged_steps || []).map((s, i) => html`<li key=${i} data-step=${i + 1}>
-      <code class="mono bu-priv-cmd">${s}</code> <${CopyButton} text=${s} label=${`Copy step ${i + 1}`} /></li>`)}</ol>
+      <span class="bu-priv-n">${i + 1}.</span><code class="mono bu-priv-cmd">${s}</code> <${CopyButton} text=${s} label=${`Copy step ${i + 1}`} /></li>`)}</ol>
     <p class="small">Then check it (${res.verify_how || "in the same PowerShell"}): it ${res.verify_expect}.</p>
     <div class="bu-priv-verify"><code class="mono bu-priv-cmd" data-testid="bu-os-verify">${res.verify_command}</code> <${CopyButton} text=${res.verify_command} label="Copy the check" /></div>
     ${im ? html`<p class="small" data-testid="bu-os-imager"><b>Or with ${im.name}</b> (<span class="mono">${im.url}</span>):</p>

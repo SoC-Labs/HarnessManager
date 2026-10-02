@@ -76,7 +76,7 @@ wheelhouse_cross: pip could not download a win_amd64 wheel for Python 3.11 of: <
   Administrator, and Harness Manager never asks for it). Nothing was written." and "Open
   PowerShell as Administrator (Start, type PowerShell, right-click Windows PowerShell, Run as
   administrator, Yes), then paste each step in turn: the steps are below." Then the block:
-  **Write it yourself, in PowerShell as Administrator** (...): the five numbered steps, each
+  **Write it yourself**: open PowerShell as Administrator (...), then paste each step in turn: the five numbered steps, each
   with **Copy**; "Then check it (in the same Administrator PowerShell): it prints <sha256>."
   with the check and **Copy the check**; **Or with Raspberry Pi Imager**
   (https://www.raspberrypi.com/software/): the five imager lines.
@@ -187,7 +187,7 @@ Or with Raspberry Pi Imager (https://www.raspberrypi.com/software/):
 - unsupported OS: `writing SD cards in this PC's card reader is not supported on this operating system (Linux, macOS and Windows only): write the configuration SD over the board's Debug USB instead`
 - wizard (OS step, Windows reader): `On Windows, Write gives you the steps instead of writing: Administrator PowerShell, or Raspberry Pi Imager. Harness Manager never asks for Administrator.`
 - wizard (needs_privilege on Windows): `Harness Manager never writes a whole card on Windows (it needs Administrator, and Harness Manager never asks for it). Nothing was written.` then `Open PowerShell as Administrator (Start, type PowerShell, right-click Windows PowerShell, Run as administrator, Yes), then paste each step in turn: the steps are below.`
-- wizard steps block: `Write it yourself, in PowerShell as Administrator (<how>):` / `Then check it (in the same Administrator PowerShell): it prints <sha256>.` / `Or with Raspberry Pi Imager (https://www.raspberrypi.com/software/):`
+- wizard steps block: `Write it yourself: open PowerShell as Administrator (Start, type PowerShell, right-click Windows PowerShell, Run as administrator, Yes), then paste each step in turn:` / `Then check it (in the same Administrator PowerShell): it prints <sha256>.` / `Or with Raspberry Pi Imager (https://www.raspberrypi.com/software/):`
 
 ## Debug USB (probe, wizard scan)
 
