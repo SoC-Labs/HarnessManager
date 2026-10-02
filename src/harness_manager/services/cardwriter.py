@@ -857,9 +857,13 @@ def privileged_commands(disk: Disk, image: str, nbytes: int, sha256: str) -> dic
 # THE PACK HOOK, found by the same module convention as the pack's configuration-SD writer
 # (``<pack package>.sd:make_storage_adapter``): ``<pack package>.mbbios:keep_mbbios(files, *,
 # card_board_txt, card_files, workdir, allow_mcc_update=False) -> (files, decision | None)``
-# (``pack_mbbios``). A storage adapter whose ``install`` takes ``allow_mcc_update`` applies the
-# rule itself (the MPS3's ``Mps3Storage``; its notes in ``install_notes``). A pack WITHOUT an
-# ``mbbios`` module has no rule: its files are written as given.
+# (``pack_mbbios``). When the same module has ``card_boards_of(root)`` (the MPS3's, FIX-PACK-9:
+# every ``MB/HBI*/board.txt`` on the card), the rule is called with ``card_boards=`` instead of
+# ``card_board_txt=``, so each revision folder's line is kept against the card's own; the result
+# shows one decision per revision and each warning (``decisions_json``). A storage adapter whose
+# ``install`` takes ``allow_mcc_update`` applies the rule itself (the MPS3's ``Mps3Storage``; its
+# notes in ``install_notes``). A pack WITHOUT an ``mbbios`` module has no rule: its files are
+# written as given.
 
 BOARD_TXT = "MB/HBI0309C/board.txt"
 KeepMbbios = Callable[..., "tuple[dict[str, Path], Any]"]
@@ -907,9 +911,23 @@ def card_state(root: str) -> tuple[bytes | None, list[str]]:
 
 def decision_json(decision: Any) -> dict[str, str]:
     """A decision (ours or the pack's) as the result shows it."""
-    return {"file": BOARD_TXT, "action": str(getattr(decision, "action", "")),
+    return {"file": str(getattr(decision, "path", "") or BOARD_TXT),
+            "action": str(getattr(decision, "action", "")),
             "value": str(getattr(decision, "value", "")),
             "note": str(getattr(decision, "note", ""))}
+
+
+def decisions_json(decision: Any) -> list[dict[str, str]]:
+    """The pack's decision as ``result.mbbios`` lists it: one entry per revision folder (a
+    combined FIX-PACK-9 decision's ``per_rev()``; a decision that is not combined is one), then
+    one ``action: "warning"`` entry per warning ("WARNING: this card had no HBI0309B or
+    HBI0309C folder: …")."""
+    per_rev = getattr(decision, "per_rev", None)
+    each = list(per_rev()) if callable(per_rev) else [decision]
+    out = [decision_json(d) for d in each]
+    out += [{"file": "", "action": "warning", "value": "", "note": f"WARNING: {w}"}
+            for w in getattr(decision, "warnings", ()) or ()]
+    return out
 
 
 # --- the writer ----------------------------------------------------------------------------------
@@ -1330,9 +1348,15 @@ class CardWriter:
         if keep is None:
             return dict(files), []
         card_board, card_files = card_state(root)
-        out, decision = keep(files, card_board_txt=card_board, card_files=card_files,
-                             workdir=workdir, allow_mcc_update=allow)
-        return dict(out), ([] if decision is None else [decision_json(decision)])
+        boards_of = getattr(sys.modules.get(getattr(keep, "__module__", "") or ""),
+                            "card_boards_of", None)
+        if callable(boards_of):           # FIX-PACK-9: every revision's board.txt on the card
+            out, decision = keep(files, card_boards=boards_of(root), card_files=card_files,
+                                 workdir=workdir, allow_mcc_update=allow)
+        else:
+            out, decision = keep(files, card_board_txt=card_board, card_files=card_files,
+                                 workdir=workdir, allow_mcc_update=allow)
+        return dict(out), ([] if decision is None else decisions_json(decision))
 
     def _run_files(self, plan: WritePlan, card: CardDevice, emit: Progress) -> dict[str, Any]:
         storage = self.storage_for(card.files_root)

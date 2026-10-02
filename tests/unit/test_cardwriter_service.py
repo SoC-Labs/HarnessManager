@@ -7,6 +7,7 @@ real device. Nothing here touches a block device.
 
 from __future__ import annotations
 
+import shutil
 import threading
 from pathlib import Path
 
@@ -808,6 +809,75 @@ def test_a_storage_that_applies_the_rule_itself_gets_the_bundle_and_the_flag(rig
     rig.card_board_txt(NO_LINE_BOARD, ebf="mbb_v999.ebf")
     files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD), allow_mcc_update=True)
     assert seen == {"board": BUNDLE_BOARD, "allow": True}
+
+
+# --- integ v1.1: the card writer runs FIX-PACK-9's per-revision rule (card_boards) -------------
+
+
+B_CARD_BOARD = CARD_BOARD.replace(b"HBI0309C", b"HBI0309B").replace(b"mbb_v141", b"mbb_v132")
+
+
+def bc_bundle(rig: Rig) -> Path:
+    """A platform v2.0.0 config-SD bundle: MB/HBI0309B and MB/HBI0309C, same but BOARD:."""
+    b = rig.bundle(board_txt=BUNDLE_BOARD, name="bundle-bc")
+    (b / "MB" / "HBI0309B").mkdir()
+    for f in ("images.txt", "shell.bit"):
+        (b / "MB" / "HBI0309B" / f).write_bytes((b / "MB" / "HBI0309C" / f).read_bytes())
+    (b / "MB" / "HBI0309B" / "board.txt").write_bytes(BUNDLE_BOARD.replace(b"HBI0309C",
+                                                                           b"HBI0309B"))
+    return b
+
+
+def test_integ_v11_a_bc_bundle_keeps_each_revisions_line_and_lists_each(rig: Rig):
+    rig.card_board_txt(CARD_BOARD)
+    (rig.root / "MB" / "HBI0309B").mkdir()
+    (rig.root / "MB" / "HBI0309B" / "board.txt").write_bytes(B_CARD_BOARD)
+    plan, out = files_write(rig, bc_bundle(rig))
+    assert out["mbbios"] == [
+        {"file": "MB/HBI0309C/board.txt", "action": "kept", "value": "mbb_v141.ebf",
+         "note": "MBBIOS kept: HBI0309C mbb_v141.ebf"},
+        {"file": "MB/HBI0309B/board.txt", "action": "kept", "value": "mbb_v132.ebf",
+         "note": "MBBIOS kept: HBI0309B mbb_v132.ebf"}]
+    assert plan.mbbios == out["mbbios"]
+    b_written = (rig.root / "MB" / "HBI0309B" / "board.txt").read_bytes()
+    assert b"MBBIOS: mbb_v132.ebf " in b_written and b"mbb_v999" not in b_written
+    assert b"MBBIOS: mbb_v141.ebf " in written_board(rig)
+
+
+def test_twin_integ_v11_a_rule_without_card_boards_of_refuses_an_unread_revision(rig: Rig):
+    """The pre-FIX-PACK-9 call (card_board_txt only) cannot read MB/HBI0309B/board.txt, so the
+    rule refuses rather than guess: why the card writer passes card_boards."""
+    from harness_manager_mps3 import mbbios
+
+    def old_keep(files, **kw):                  # this module has no card_boards_of
+        return mbbios.keep_mbbios(files, **kw)
+
+    rig.writer.mbbios_for = lambda: old_keep
+    rig.card_board_txt(CARD_BOARD)
+    (rig.root / "MB" / "HBI0309B").mkdir()
+    (rig.root / "MB" / "HBI0309B" / "board.txt").write_bytes(B_CARD_BOARD)
+    with pytest.raises(RefusedError, match="MB/HBI0309B/board.txt was not read"):
+        files_write(rig, bc_bundle(rig))
+
+
+def test_integ_v11_a_card_with_no_b_or_c_folder_shows_the_warning(rig: Rig):
+    shutil.rmtree(rig.root / "MB" / "HBI0309C")
+    (rig.root / "MB" / "HBI0309A").mkdir()
+    (rig.root / "MB" / "HBI0309A" / "board.txt").write_bytes(CARD_BOARD)
+    plan, out = files_write(rig, bc_bundle(rig))
+    assert [d["action"] for d in out["mbbios"]] == ["bundle", "bundle", "warning"]
+    assert out["mbbios"][-1] == {
+        "file": "", "action": "warning", "value": "",
+        "note": "WARNING: this card had no HBI0309B or HBI0309C folder: is it an MPS3 "
+                "configuration SD? both were written"}
+    assert (rig.root / "MB" / "HBI0309A" / "board.txt").read_bytes() == CARD_BOARD
+
+
+def test_twin_integ_v11_a_c_card_shows_no_warning(rig: Rig):
+    rig.card_board_txt(CARD_BOARD)
+    _, out = files_write(rig, bc_bundle(rig))
+    assert [d["action"] for d in out["mbbios"]] == ["kept", "bundle"]
+    assert out["mbbios"][1]["note"].startswith("MBBIOS: HBI0309B mbb_v999.ebf from the bundle")
 
 
 # --- --demo ------------------------------------------------------------------------------------
