@@ -7,7 +7,7 @@ docs/API.md "Board identity" (bearer auth and the error envelope as everywhere):
 |---|---|
 | ``GET /boards/{bid}/identity?refresh=`` | ``{board_id, identity}``: ``BoardInfo.net_identity`` read now (the board: one control-port read, or identify; the hub record once per session). ``refresh=true`` asks the hub again, and for its other targets |
 | ``GET /boards/{bid}/identity/proposal?label=&mac=&ip=`` | lane IDENTITY: ``{board_id, proposal}``, what "Name this board" shows: the name upper-cased and checked (1-16 of A-Z, 0-9, -), ``mac`` (``random`` (default for an image-default MAC), ``keep`` or a value), ``ip`` (``auto`` from the pack's pool, ``keep`` or a value), the changes, the phrase, the same-/24 line, the hub guard and the notes. Nothing is set or reserved |
-| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, unset?, clear?, wait_s?, hub_fixed?, other_subnet?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes, moved, address}`` |
+| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, unset?, clear?, wait_s?, hub_fixed?, other_subnet?, dry_run?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes, moved, address}``. ``dry_run: true`` (no ``confirm``): 200 ``{board_id, preflight: {want, plan, notes, identity, address}}``, the same checks and choices, nothing sent |
 
 Rules:
 
@@ -196,7 +196,8 @@ def register(ctx: RouteContext) -> None:
         s = ctx.board(bid)
         b = _obj(body)
         confirm = b.get("confirm")
-        if not isinstance(confirm, str) or not confirm.strip():
+        dry_run = _bool(b, "dry_run", False)                # lane IDENTITY: the CLI's question
+        if not dry_run and (not isinstance(confirm, str) or not confirm.strip()):
             raise RefusedError("changing a board's identity needs the typed phrase: nothing was "
                                "changed", hint='send {"confirm": "<identity.fix.phrase>"}')
         want = {k: v for k in BI.FIELDS if (v := _opt_str(b, k)) is not None}
@@ -240,6 +241,10 @@ def register(ctx: RouteContext) -> None:
                 svc.precheck(s, st, want, from_hub=from_hub, hub_fixed=hub_fixed,
                              other_subnet=other_subnet)
             svc.check_lease(s)                              # 409 HELD naming the holder
+            if dry_run:                                     # nothing sent: what would be set
+                return _JSON(ok(board_id=bid, preflight=svc.preflight(
+                    s, want=want or None, from_hub=from_hub, clear=clear, hub_fixed=hub_fixed,
+                    other_subnet=other_subnet)))
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             return svc.fix(s, confirm=confirm, want=want or None, from_hub=from_hub,

@@ -1039,6 +1039,48 @@ class IdentityService:
 
     # -- the fix --------------------------------------------------------------------------------
 
+    def preflight(self, session: Any, *, want: Mapping[str, Any] | None = None,
+                  from_hub: bool = False, clear: bool = False, hub_fixed: str = "",
+                  other_subnet: bool = False) -> dict[str, Any]:
+        """Everything ``fix`` checks before it asks for the phrase, nothing sent or reserved:
+        the board read again, the values (the board's order: its refusal, then a bad value),
+        ``random``/``auto`` chosen, the plan, the hub and subnet guards. ``{want, plan, notes,
+        identity, address}``; ``want`` has the chosen values, for ``fix`` (lane IDENTITY: what
+        the CLI shows is what is set, also through the service: ``POST .../identity``
+        ``dry_run``)."""
+        from harness_manager.services import identity_assign as IA
+
+        bid = _bid(session)
+        self.adapter(session)
+        before = self.status(session, refresh=True) or {}
+        reported = before.get("reported")
+        try:
+            want = self.check_values(session, dict(want or {}))
+        except UsageError:
+            self.refusal_first(session, reported)
+            raise
+        picks = {k: want[k] for k in ("mac", "ip")
+                 if str(want.get(k) or "").strip().lower() in (IA.MAC_RANDOM, IA.IP_AUTO)}
+        if picks:
+            self.refusal_first(session, reported)
+            got = self.choose(session, before, **picks)
+            want.update({k: got[k] for k in picks})
+        try:
+            plan = plan_fix(bid, reported, before.get("hub"), want=want or None,
+                            from_hub=from_hub, clear=clear)
+        except UsageError:
+            self.refusal_first(session, reported)
+            raise
+        notes: list[str] = []
+        if plan["changes"] and (clear or plan["want"]):
+            self.check_ready(session, reported)
+            if not clear:
+                notes = self.guards(session, before, plan, from_hub=from_hub,
+                                    hub_fixed=hub_fixed, other_subnet=other_subnet)
+        new_ip = "" if clear else str(plan["want"].get("ip") or "")
+        return {"want": want, "plan": plan, "notes": notes, "identity": before,
+                "address": self._address_out(new_ip)}
+
     def fix(self, session: Any, *, confirm: str, want: Mapping[str, Any] | None = None,
             from_hub: bool = False, clear: bool = False, wait_s: float | None = None,
             progress: Callable[[str], None] | None = None, hub_fixed: str = "",

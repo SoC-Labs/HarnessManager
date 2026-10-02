@@ -231,23 +231,14 @@ def cmd_identity(ctx: Ctx) -> int:
             return ExitCode.OK
         if st is None:
             raise UnavailableError(BI.CAPABILITY, BI.NO_ADAPTER)
-        ref = (st.get("fix") or {}).get("refusal")
-        try:
-            want = svc.check_values(session, want)
-            picks = {k: want[k] for k in ("mac", "ip")
-                     if str(want.get(k) or "").lower() in (IA.MAC_RANDOM, IA.IP_AUTO)}
-            if picks:
-                if ref:                       # the board's order: its refusal before a choice
-                    raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "")
-                got = svc.choose(session, st, **picks)
-                want.update({k: got[k] for k in picks})
-            plan = BI.plan_fix(cand.board_id, st.get("reported"), st.get("hub"),
-                               want=want or None, from_hub=a.from_hub, clear=a.clear)
-        except UsageError:
-            # V7-ALIGN: the board's order: locked, then no_persist, then invalid
-            if ref:
-                raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "") from None
-            raise
+        # lane IDENTITY: the job's own checks and choices first (random/auto made concrete,
+        # the hub and subnet guards), in-process or through the service (dry_run): what the
+        # question shows is what is set
+        pre = svc.preflight(session, want=want or None, from_hub=a.from_hub, clear=a.clear,
+                            hub_fixed=a.hub_fixed, other_subnet=a.other_subnet)
+        want, plan = dict(pre.get("want") or {}), pre["plan"]
+        st = pre.get("identity") or st
+        notes = list(pre.get("notes") or ())
         if not plan["changes"] or (not a.clear and not plan["want"]):
             ctx.emit(Result("board identity", {"board_id": cand.board_id, "identity": st,
                                                "action": "none", "notes": plan["notes"]},
@@ -256,11 +247,6 @@ def cmd_identity(ctx: Ctx) -> int:
                                    "result     the board already matches: nothing to change",
                                    *(f"note       {n}" for n in plan["notes"])]))
             return ExitCode.OK
-        if ref:                                   # before the question: a refusal after it is rude
-            raise BI.refusal_error(ref["name"], ref["message"], ref.get("hint") or "")
-        notes = [] if a.clear else svc.guards(session, st, plan, from_hub=a.from_hub,
-                                              hub_fixed=a.hub_fixed,
-                                              other_subnet=a.other_subnet)
         what = ", ".join(_chg(c) for c in plan["changes"])
         new_ip = "" if a.clear else str(plan["want"].get("ip") or "")
         ask = [f"change the identity of {cand.board_id}: {what}?",
