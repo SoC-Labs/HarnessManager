@@ -325,8 +325,12 @@ def _render_ooc(model: PinModel, design: Design, sid: str, signals: list[Any],
     pblock = {k: v["value"] for k, v in model.shell(sid).get("pblock", {}).items()}
     out = _banner(model, f"{design.name}_ooc.xdc -- out-of-context timing for an RM of static {sid}",
                   design, [
-                      "OOC ONLY: read with read_xdc after synth_design in your OOC run. At the DFX",
-                      "link the static's propagated clocks supersede every create_clock here.",
+                      "OOC ONLY: read with read_xdc after synth_design in your OOC run, and only",
+                      "after the RM checkpoint is written: a checkpoint keeps the create_clock",
+                      "lines read into it, and at the DFX link one whose name the static also",
+                      "uses (dut_clk: the static's OSCCLK1 clock) overwrites the static's clock",
+                      "and leaves the static<->RM boundary untimed (Linux v2.0.0 known issue 11;",
+                      "kit check warns). build_rm.tcl writes its checkpoint first.",
                       "No Tcl control flow (read_xdc rejects it); -quiet on every port query so a",
                       "tied-off port that synthesis removed is not an error.",
                   ])

@@ -14,6 +14,10 @@ derives it from a receipt that passes ``receipt_checks``.
 - a partial, clearing or ``.ltx`` whose length or CRC-32 is not the one the build recorded
   (a file copied from another build, or half-copied).
 
+It warns (``boundary_timing``, never a refusal; N1 kept as a guard after N2, FIX-PACK-8) when
+the build's ``check_timing`` says the static<->RM boundary was not timed: "boundary not timed
+(known issue 11)" (``boundary_of``, the limits below).
+
 It also says what the build's timing was (``timing``, never a refusal: the ``rm_timing`` gate
 is the verdict): the RM's own worst slack, or, when no timed path lies inside the partition
 (``minimal``: every output a constant), that, with the whole design's WNS/WHS from the
@@ -26,6 +30,7 @@ MPS3 pack writes ``pyverify``'s overlay triple).
 
 from __future__ import annotations
 
+import functools
 import re
 import time
 from dataclasses import dataclass
@@ -222,6 +227,9 @@ def receipt_checks(r: BuildReceipt) -> list[KitCheck]:
                            f"built against static {sid} (the CRC-32 of the DCP the build opened)"
                            if sid else "the receipt names no static_id"))
     checks.append(KitCheck("timing", "ok", timing_words(r)))
+    bt = boundary_of(r)                      # N1 guard: a warning, never a refusal
+    if bt is not None:
+        checks.append(bt.check())
     files = receipt_files(r)
     unsafe = unsafe_file_fields(r)
     for role in ("partial", "clearing", "ltx"):
@@ -275,6 +283,163 @@ def design_slack_from_report(rpt: Path) -> tuple[str, str] | None:
                 return tuple(v if _NUM.match(v) else "" for v in (row[0], row[4]))  # type: ignore[return-value]
         return None
     return None
+
+
+# --- N1: was the static<->RM boundary timed? (a guard after N2; FIX-PACK-8) ----------------------
+#
+# Linux v2.0.0 known issue 11 (the Linux lead's TRIAL_BUILD T1, HM's N1): a build_rm.tcl that
+# read the OOC XDC before it wrote the RM checkpoint carried the OOC ``create_clock -name dut_clk``
+# into the checkpoint; at the link it overwrote the static's clock of the same name on OSCCLK1
+# ([Constraints 18-619]), the shell's clk_wiz clocks lost their source, and the boundary was not
+# timed while the summary still said "All user specified timing constraints are met". N2 fixed
+# the template (the checkpoint first). The guard stays for a build from an older build_rm.tcl and
+# for a synth checkpoint the user brings (``build.synth_dcp``), which N2 cannot clean.
+#
+# The limits, from the RC2 kit's builds on Vivado 2026.1 (docs/evidence/2026-09-30-kit-interactive
+# section 11; HM warns ABOVE them):
+# - register/latch pins with no clock: issue 11 gives 27,984 (27,446 on OSCCLK1, 538 on the debug
+#   bridge's tck); N2's builds give 0 (minimal, lfsr_floor). The static was signed off with
+#   every register clocked, so any unclocked pin after the link is a path nobody timed: 0.
+# - unconstrained internal endpoints, NOT counting those Vivado puts down to a constant clock:
+#   issue 11 gives 86,692; N2 gives 0. The 423 "due to constant clock" are in every build of
+#   the static, N2's too (a clock tied off in the static, the SWCLK-style residue): they are not
+#   timing paths and never count. 1,000 sits far from both, so a few unconstrained endpoints of
+#   an RM's own (an input it never constrained) are not called known issue 11.
+BOUNDARY_MAX_NO_CLOCK = 0
+BOUNDARY_MAX_UNCONSTRAINED = 1000
+BOUNDARY_NOT_TIMED = "boundary not timed (known issue 11)"
+BOUNDARY_FIX = ("rebuild with a build_rm.tcl written by this Harness Manager (`harness-manager "
+                "kit script ... --out DIR`): it writes the RM checkpoint before it reads the OOC "
+                "XDC, so the OOC create_clock no longer replaces the static's clocks at the link. "
+                "A synth checkpoint you bring (build.synth_dcp) must be written before any "
+                "create_clock is read into it.")
+
+#: ``report_timing_summary``'s check_timing: a section starts "1. checking no_clock (27984)"
+#: (its table of contents lists the same lines first: the section is the last one).
+_CHECK_HEAD = re.compile(r"^\s*\d+\.\s+checking (\w+) \((\d+)\)\s*$")
+_NO_CLOCK_ROOT = re.compile(r"^\s*There (?:are|is) (\d+) register/latch pins? with no clock "
+                            r"driven by root clock pin: (.+?)(?: \((?:HIGH|MEDIUM|LOW)\))?\s*$")
+_UNCONSTRAINED = re.compile(r"^\s*There (?:are|is) (\d+) pins? that (?:are|is) not constrained "
+                            r"for maximum delay( due to constant clock)?")
+
+
+def check_timing_sections(rpt: Path) -> dict[str, tuple[int, list[str]]] | None:
+    """check_timing's sections of a ``report_timing_summary`` file: {check: (count, lines)}.
+    None when the file is not there or has no check_timing (``-no_check_timing``)."""
+    try:
+        lines = Path(rpt).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    out: dict[str, tuple[int, list[str]]] = {}
+    cur: list[str] | None = None
+    for line in lines:
+        m = _CHECK_HEAD.match(line)
+        if m is not None:
+            cur = []
+            out[m.group(1)] = (int(m.group(2)), cur)     # the last header wins: the section
+        elif cur is not None:
+            cur.append(line)
+    return out if "no_clock" in out else None
+
+
+@dataclass(frozen=True)
+class BoundaryTiming:
+    """What check_timing says about the static<->RM boundary of one build."""
+
+    report: str                       # the report's file name, beside the receipt
+    no_clock: int                     # register/latch pins with no clock
+    no_clock_roots: tuple[tuple[int, str], ...] = ()   # (pins, root clock pin)
+    unconstrained: int = 0            # unconstrained internal endpoints, not on a constant clock
+    constant_clock: int = 0           # those on a constant clock (not timing paths)
+
+    @property
+    def timed(self) -> bool:
+        return (self.no_clock <= BOUNDARY_MAX_NO_CLOCK
+                and self.unconstrained <= BOUNDARY_MAX_UNCONSTRAINED)
+
+    def words(self) -> str:
+        """The check's detail: what was found, and (not timed) the warning's words."""
+        roots = "; ".join(f"{n:,} on {root}" for n, root in self.no_clock_roots)
+        found = (f"Vivado's check_timing in {self.report} found {self.no_clock:,} register/latch "
+                 f"pins with no clock{f' ({roots})' if roots else ''} and "
+                 f"{self.unconstrained:,} unconstrained endpoints")
+        if self.timed:
+            const = (f" ({self.constant_clock:,} more on a constant clock: not timing paths)"
+                     if self.constant_clock else "")
+            return f"the static<->RM boundary was timed: {found}{const}"
+        return (f"{BOUNDARY_NOT_TIMED}: {found} (Harness Manager warns above "
+                f"{BOUNDARY_MAX_NO_CLOCK} and {BOUNDARY_MAX_UNCONSTRAINED:,}), so the "
+                "static<->RM partition boundary was not timing-analysed, even where the summary "
+                "says every constraint is met. Your RM's own paths were still timed.")
+
+    def check(self) -> KitCheck:
+        return KitCheck("boundary_timing", "ok" if self.timed else "warning", self.words())
+
+    def to_json(self) -> dict[str, Any]:
+        return {"timed": self.timed, "report": self.report, "no_clock": self.no_clock,
+                "no_clock_roots": [{"pins": n, "root": root} for n, root in self.no_clock_roots],
+                "unconstrained": self.unconstrained, "constant_clock": self.constant_clock,
+                "limits": {"no_clock": BOUNDARY_MAX_NO_CLOCK,
+                           "unconstrained": BOUNDARY_MAX_UNCONSTRAINED},
+                "words": self.words(), "fix": "" if self.timed else BOUNDARY_FIX}
+
+
+def boundary_from_report(rpt: Path) -> BoundaryTiming | None:
+    """``BoundaryTiming`` from a ``report_timing_summary`` file; None without check_timing.
+    A report is read once per (path, size, mtime): the guide asks for it on every poll."""
+    try:
+        st = Path(rpt).stat()
+    except OSError:
+        return None
+    return _boundary_cached(str(rpt), st.st_size, st.st_mtime_ns)
+
+
+@functools.lru_cache(maxsize=32)
+def _boundary_cached(rpt: str, _size: int, _mtime_ns: int) -> BoundaryTiming | None:
+    sections = check_timing_sections(Path(rpt))
+    if sections is None:
+        return None
+    n, lines = sections["no_clock"]
+    roots = tuple((int(m.group(1)), m.group(2)) for m in map(_NO_CLOCK_ROOT.match, lines) if m)
+    total, ulines = sections.get("unconstrained_internal_endpoints", (0, []))
+    plain = const = None
+    for m in map(_UNCONSTRAINED.match, ulines):
+        if m is not None and m.group(2):
+            const = int(m.group(1))
+        elif m is not None:
+            plain = int(m.group(1))
+    const = const or 0
+    return BoundaryTiming(Path(rpt).name, n, roots,
+                          plain if plain is not None else max(0, total - const), const)
+
+
+def boundary_of(r: BuildReceipt) -> BoundaryTiming | None:
+    """The boundary's timing of a PASSED build, from the timing report beside its receipt;
+    None for any other build, or when the report (or its check_timing) is not there."""
+    if r.state != "passed":
+        return None
+    name = r.get("timing_rpt") or f"{r.rm_name}_timing.rpt"
+    if not plain_name(name):
+        return None
+    return boundary_from_report(r.path.parent / name)
+
+
+def script_reads_ooc_xdc_first(text: str) -> bool | None:
+    """A ``build_rm.tcl`` that reads the OOC XDC before it writes the RM checkpoint (written
+    before N2): its builds carry the OOC clocks to the link (known issue 11). None when the
+    script has neither line (not one Harness Manager wrote)."""
+    read = text.find("read_xdc $P(RM_OOC_XDC)")
+    write = text.find("write_checkpoint -force $synth_dcp")
+    if read < 0 or write < 0:
+        return None
+    return read < write
+
+
+SCRIPT_OOC_FIRST = (f"{BOUNDARY_NOT_TIMED}: this build_rm.tcl reads the OOC XDC before it writes "
+                    "the RM checkpoint (an older Harness Manager wrote it), so a build "
+                    "from it carries the OOC create_clock to the link and the static<->RM "
+                    "boundary is not timed: write it again with this Harness Manager "
+                    "(`harness-manager kit script ... --out DIR`), then build")
 
 
 def _ns(v: str) -> str:
@@ -337,6 +502,8 @@ def check_any(kits: Any, path: Path, *, clearing: Path | None = None, static_id:
         r = load(p)
         checks = receipt_checks(r)
         facts: dict[str, Any] = {"receipt": r.to_json()}
+        bt = boundary_of(r)                  # N1 guard (FIX-PACK-8): null without a report
+        facts["boundary"] = bt.to_json() if bt is not None else None
         sid = r.get("static_id")
         if static_id:
             try:

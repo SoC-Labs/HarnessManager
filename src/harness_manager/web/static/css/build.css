@@ -132,6 +132,11 @@
 .bd-group.ok { border-color: var(--ok-border); background: var(--ok-soft); }
 .bd-group.err { border-color: var(--err-border); background: var(--err-soft); }
 .bd-group.skip { border-style: dashed; background: transparent; }
+.bd-group.warn { border-color: var(--warn-border); background: var(--warn-soft); }
+.bd-group.warn .bd-group-h .icon { color: var(--warn); }
+/* FIX-PACK-8 (N1 guard): the check passed, but the boundary was not timed */
+.bd-warn { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px; border: 1px solid var(--warn-border); border-radius: 8px; background: var(--warn-soft); }
+.bd-warn .reason { margin: 0; }
 .bd-group-h { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
 .bd-group-h .icon { width: 15px; height: 15px; }
 .bd-group.ok .bd-group-h .icon { color: var(--ok); }

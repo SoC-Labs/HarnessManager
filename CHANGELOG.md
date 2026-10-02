@@ -9,6 +9,36 @@ API (docs/API.md says what changed).
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
 
+### Boundary not timed: kept as a guard (FIX-PACK-8, rc2; N1 after N2)
+- N2 (below) fixed the cause of Linux v2.0.0 known issue 11 in `build_rm.tcl`. A build from an
+  older `build_rm.tcl`, or one from a synth checkpoint you bring (`build.synth_dcp`) that already
+  carries a `create_clock`, still links with the static<->RM boundary untimed while Vivado's
+  summary says every constraint is met. Harness Manager now reads check_timing from the build's
+  `<name>_timing.rpt` and, when it counts more than 0 register/latch pins with no clock or more
+  than 1,000 unconstrained endpoints (not counting those on a constant clock), says so as a
+  WARNING, never a refusal: "boundary not timed (known issue 11): Vivado's check_timing in
+  minimal_timing.rpt found 27,984 register/latch pins with no clock (27,446 on OSCCLK1; 538 on
+  u_shell/…/tck_i_reg/Q) and 86,692 unconstrained endpoints (Harness Manager warns above 0 and
+  1,000), so the static<->RM partition boundary was not timing-analysed, even where the summary
+  says every constraint is met. Your RM's own paths were still timed." with "fix: rebuild with a
+  build_rm.tcl written by this Harness Manager (`harness-manager kit script ... --out DIR`): it
+  writes the RM checkpoint before it reads the OOC XDC, so the OOC create_clock no longer
+  replaces the static's clocks at the link. A synth checkpoint you bring (build.synth_dcp) must
+  be written before any create_clock is read into it."
+- Why those limits: issue 11 measured 27,984 unclocked pins and 86,692 unconstrained endpoints on
+  `minimal`; with N2 both are 0. The 423 endpoints "due to constant clock" are in every build of
+  the static, N2's too (a clock tied off in the static): they are not timing paths and never
+  count. 1,000 keeps a few unconstrained endpoints of an RM's own from being called issue 11.
+- Where: `kit check` (a `WARNING:` line and its `fix:` under the verdict; the check
+  `boundary_timing`, `ok` or `warning`; `--json` `facts.boundary`), `kit pack`'s checks, `POST
+  /kits/check`, the guide (`boundary`; the Check step's reason) and the Build tab's Check step
+  ("done, with a warning": the warning and its fix above the checks, Timing marked; Add stays
+  open). `kit build DIR` warns when DIR's `build_rm.tcl` reads the OOC XDC before it writes the
+  checkpoint (an older Harness Manager wrote it: write it again with `kit script`), and when the
+  last build there was not timed. docs/API.md.
+- The OOC XDC kit's header no longer claims "the static's propagated clocks supersede every
+  create_clock here": it says to read the file only after the RM checkpoint is written, and why.
+
 ### nanosoc_multicore asks before it writes the DUT's flash (FIX-PACK-8, rc2)
 - **Programming nanosoc_multicore needs a typed word.** Its CPU1 boot ROM writes one 0x00 byte
   at DUT flash 0x20000 onward on every boot, until the v2.1 ROM fix (Linux v2.0.0 known issue

@@ -211,6 +211,10 @@ class Guide:
     running: dict[str, Any] | None = None
     pblock: dict[str, Any] | None = None
     utilisation: dict[str, Any] | None = None
+    #: FIX-PACK-8 (additive): the passed build's static<->RM boundary as check_timing saw it
+    #: (``build.BoundaryTiming.to_json``: timed, no_clock, unconstrained, words, fix...), or None
+    #: (no passed build, or no timing report beside its receipt).
+    boundary: dict[str, Any] | None = None
 
     @property
     def next(self) -> Step | None:
@@ -225,7 +229,7 @@ class Guide:
                 "next": ({"step": nxt.id, "actions": nxt.actions} if nxt else None),
                 "receipt": self.receipt, "troubleshooting": troubleshooting(),
                 "running": self.running, "pblock": self.pblock,
-                "utilisation": self.utilisation}
+                "utilisation": self.utilisation, "boundary": self.boundary}
 
 
 def builds_dir(name: str, *, windows: bool | None = None) -> str:
@@ -482,6 +486,10 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
             s.detail = (f"every check passed ({sum(x.state == 'ok' for x in checks)} ok, "
                         f"{sum(x.state == 'unchecked' for x in checks)} unchecked)")
             s.actions = [_cmd(f"harness-manager kit pack {rel} --import")]
+        # N1 guard (FIX-PACK-8): a warning, never a failure: the step still passes
+        bt = build.boundary_of(receipt)
+        if bt is not None and not bt.timed and not bad:
+            s.reason = f"warning: {bt.words()} Fix: {build.BOUNDARY_FIX}"
 
     _resolve(steps, raw)
     vj = {**found.to_json(), "launch": started.to_json() if started is not None else None}
@@ -495,7 +503,13 @@ def guide(kits: KitService, *, pack: str = "mps3", static_id: str | None = None,
                  str(build_dir) if build_dir else "", list(steps.values()), rm_info,
                  receipt.to_json() if receipt is not None else None,
                  running=going.to_json() if going is not None else None,
-                 pblock=pblock, utilisation=util)
+                 pblock=pblock, utilisation=util, boundary=_boundary(receipt))
+
+
+def _boundary(receipt: Any) -> dict[str, Any] | None:
+    """``Guide.boundary``: the passed build's boundary timing (N1 guard), or None."""
+    bt = build.boundary_of(receipt) if receipt is not None else None
+    return bt.to_json() if bt is not None else None
 
 
 def _hhmm(ts: float) -> str:
