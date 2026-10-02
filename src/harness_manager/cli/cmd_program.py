@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -14,13 +15,17 @@ from harness_manager.core.errors import (
     ExitCode,
     HarnessError,
     HeldError,
+    RefusedError,
 )
 from harness_manager.core.model import Check
 from harness_manager.core.pack import (
+    ALLOW_DUT_FLASH_WRITE,
     DeployResult,
     OverlayRef,
     PreflightItem,
     card_status_of,
+    dut_flash_refusal,
+    dut_flash_text,
     keep_refusal,
 )
 
@@ -81,6 +86,60 @@ def _force(ctx: Ctx) -> dict[str, bool]:
     return {"force": True} if getattr(ctx.args, "force", False) else {}
 
 
+#: FIX-PACK-8: ``program --allow-dut-flash-write``.
+DUT_FLASH_HELP = ("program a design whose boot code writes the DUT's flash (its board pack "
+                  "declares it; `overlays` marks it) without typing its word: for scripts. "
+                  "--yes never implies it; without it a run with no terminal refuses (exit 15)")
+#: What a run with no terminal says when it refuses (the hint of the refusal).
+DUT_FLASH_SCRIPT_HINT = ("nothing was programmed: run it in a terminal and type the word, or "
+                         "pass --allow-dut-flash-write (--yes never implies it)")
+
+
+def _interactive() -> bool:
+    """Whether a person can answer the prompt: stdin is a terminal."""
+    try:
+        return bool(sys.stdin and sys.stdin.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def dut_flash_consent(ctx: Ctx, overlay: OverlayRef) -> tuple[dict[str, bool], bool]:
+    """FIX-PACK-8: the consent to program a design whose boot code writes the DUT's flash
+    (``overlay.writes_dut_flash``, the pack's declaration). Returns (the deploy keyword, typed):
+    ``({}, False)`` for any other design; ``({allow_dut_flash_write: True}, False)`` with
+    ``--allow-dut-flash-write`` (the warning is still printed); else the word, typed at a
+    terminal (``typed`` True: it stands for the y/N question too). ``--yes`` never implies it:
+    a run with no terminal, or a word not typed exactly, refuses (``RefusedError``, exit 15)
+    before anything is programmed."""
+    w = overlay.writes_dut_flash
+    if w is None:
+        return {}, False
+    if getattr(ctx.args, "allow_dut_flash_write", False):
+        ctx.note(f"WARNING: {w.why} Programming it anyway (--allow-dut-flash-write).")
+        return {ALLOW_DUT_FLASH_WRITE: True}, False
+    if not _interactive():
+        refused = dut_flash_refusal(overlay, False, hint=DUT_FLASH_SCRIPT_HINT)
+        if refused is not None:            # always: the design declares the write
+            raise refused
+    stream = ctx.err or sys.stderr
+    stream.write(f"WARNING: {dut_flash_text(overlay)}\n> ")
+    stream.flush()
+    try:
+        given = sys.stdin.readline()
+    except (OSError, ValueError):
+        given = ""
+    if not given.endswith("\n"):
+        stream.write("\n")
+        stream.flush()
+    if given.strip() != w.word:
+        raise with_data(RefusedError(
+            f"not confirmed: {overlay.name} was not programmed (its boot code writes the DUT's "
+            "flash)", hint=f"type exactly: {w.word} (or pass --allow-dut-flash-write; --yes "
+                           "never implies it)"), overlay=overlay,
+            dut_flash_write={"design": overlay.name, "why": w.why, "word": w.word})
+    return {ALLOW_DUT_FLASH_WRITE: True}, True
+
+
 def _service_holds(exc: HeldError) -> bool:
     """The board's lock is the Harness Manager service's (or a service runs here)."""
     if SERVICE_NAME in f"{exc.holder} {exc.hint} {exc.message}":
@@ -125,6 +184,8 @@ def cmd_overlays(ctx: Ctx) -> int:
                      o.ip_class, ""])
         carries = [role for role, sha in (("ltx", o.ltx_sha256), ("receipt", o.receipt_sha256))
                    if sha]
+        if o.writes_dut_flash is not None:      # FIX-PACK-8: program asks for the typed word
+            carries.append("writes the DUT's flash")
         human.append(f"ok         {o.name:<20} {o.rm_id}  ({', '.join([o.ip_class, *carries])})")
     for name, why in sorted(refused.items()):
         rows.append([cand.board_id, name, "incompatible", "", "", "", "", why])
@@ -233,11 +294,16 @@ def cmd_program(ctx: Ctx) -> int:
             ctx.note(f"card: {card.text or card.state or 'present'}; the design will be "
                      "kept on it")
             also = " and keep it on the card"
-        ctx.confirm(f"program {overlay.name} ({overlay.rm_id}) into {cand.board_id}{also}?")
+        # FIX-PACK-8: a design whose boot code writes the DUT's flash: the word, typed (it
+        # answers the question too), or --allow-dut-flash-write; --yes never implies it
+        allow, typed = dut_flash_consent(ctx, overlay)
+        if not typed:
+            ctx.confirm(f"program {overlay.name} ({overlay.rm_id}) into {cand.board_id}{also}?")
+        kw = {**_force(ctx), **allow}
         with ctx.bus_progress(cand.board_id, "deploy"):
             # The keywords only when asked: the default never writes the card, never forces.
-            result = (deploy.deploy(session, overlay, keep_on_card=True, **_force(ctx)) if keep
-                      else deploy.deploy(session, overlay, **_force(ctx)))
+            result = (deploy.deploy(session, overlay, keep_on_card=True, **kw) if keep
+                      else deploy.deploy(session, overlay, **kw))
     _check_verified(cand.board_id, result, overlay=overlay, preflight=items)
     human = [f"programmed {overlay.name} ({result.rm_id}) into {cand.board_id} in "
              f"{result.seconds:.1f}s via {result.transport or '?'}; verified"]

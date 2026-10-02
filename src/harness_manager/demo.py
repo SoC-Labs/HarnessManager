@@ -106,11 +106,13 @@ from harness_manager.core.pack import (
     CardOutcome,
     CardStatus,
     DeployResult,
+    DutFlashWrite,
     OverlayRef,
     PreflightItem,
     ProbeHints,
     Progress,
     card_status_of,
+    dut_flash_refusal,
     keep_refusal,
 )
 from harness_manager.core.services import DebugStatus
@@ -181,6 +183,9 @@ class _Board:
     #: None: the board has no on-board route (a classic board until a test sets it)
     debug_down: str | None = None
     debug_lock: bool = False         # the launcher lists harnessd's lock (a failed down warns)
+    #: FIX-PACK-8: nanosoc_multicore is keyed to this board's shell (it loads here: Program
+    #: shows its DUT-flash warning and asks for the typed word); otherwise to another shell
+    multicore_here: bool = False
 
 
 def _eth(host: str) -> Link:
@@ -263,19 +268,31 @@ def _script() -> dict[str, _Board]:
     return {b.candidate.board_id: b for b in boards}
 
 
-def _overlays(static: str = SHELL_FIELDED) -> list[OverlayRef]:
-    """The overlay store: every design keyed to ``static`` but one, keyed to an old static."""
+def _writes_dut_flash(design: int) -> DutFlashWrite | None:
+    """FIX-PACK-8: the MPS3 pack's declaration (``harness_manager_mps3.constants``), so the
+    demo's warning is the product's."""
+    from harness_manager_mps3.constants import WRITES_DUT_FLASH
+
+    got = WRITES_DUT_FLASH.get(design)
+    return None if got is None else DutFlashWrite(why=got[0], word=got[1])
+
+
+def _overlays(static: str = SHELL_FIELDED, *, multicore_here: bool = False) -> list[OverlayRef]:
+    """The overlay store: every design keyed to ``static`` but one, nanosoc_multicore, keyed
+    to an old static (to ``static`` too with ``multicore_here``)."""
     old = SHELL_OLD if static == SHELL_FIELDED else SHELL_FIELDED
 
     def ov(name: str, design: int, shell: str = static, size: int = 412_160) -> OverlayRef:
         rm = "0x00000000" if design == 0 else f"0x0100{design:04x}"
         return OverlayRef(name=name, rm_id=rm, static_id=shell, static_usercode="0x5f3a9c11",
                           source=f"fielded/{name}/manifest.json", size_bytes=size,
-                          ip_class="open" if name in ("greybox", "led") else "arm-aaa")
+                          ip_class="open" if name in ("greybox", "led") else "arm-aaa",
+                          writes_dut_flash=_writes_dut_flash(design))
 
     return [ov("greybox", 0x0000, size=86_016), ov("nanosoc", 0x0001), ov("nanosoc_upy", 0x0005),
             ov("nanosoc_iice", 0x0008, size=498_304), ov("led", 0x001E, size=102_400),
-            ov("nanosoc_multicore", 0x0003, shell=old, size=640_512)]
+            ov("nanosoc_multicore", 0x0003, shell=static if multicore_here else old,
+               size=640_512)]
 
 
 # --- the pack ---------------------------------------------------------------------------
@@ -487,7 +504,10 @@ class DemoDeploy:
         self._e = engine
 
     def _store(self, session: BoardSession) -> list[OverlayRef]:
-        return _overlays(self._e._board(session.candidate.board_id).overlay_shell)
+        board = self._e._board(session.candidate.board_id)
+        if board.multicore_here:            # the keyword only when set (tests wrap _overlays)
+            return _overlays(board.overlay_shell, multicore_here=True)
+        return _overlays(board.overlay_shell)
 
     def overlays(self, session: BoardSession) -> Sequence[OverlayRef]:
         self._e._enter("deploy.overlays", session.candidate.board_id)
@@ -558,9 +578,12 @@ class DemoDeploy:
         return ob.settle(got, force=force, lock=lambda: board.debug_lock)
 
     def deploy(self, session: BoardSession, overlay: OverlayRef, *,
-               keep_on_card: bool = False, force: bool = False) -> DeployResult:
+               keep_on_card: bool = False, force: bool = False,
+               allow_dut_flash_write: bool = False) -> DeployResult:
         e = self._e
         bid = session.candidate.board_id
+        if allow_dut_flash_write:           # FIX-PACK-8: the consent, as given
+            e._enter("deploy.allow_dut_flash_write", bid, overlay.name)
         e._enter("deploy.deploy", bid, overlay.name, keep_on_card)   # keep last: tests read it
         t0 = time.monotonic()
         items = self._items(session, overlay)
@@ -571,6 +594,8 @@ class DemoDeploy:
             text = "; ".join(f"{i.name}: {i.detail}" for i in bad)
             err = IncompatibleError(f"{overlay.name} does not match this board ({text})",
                                     hint="use an overlay built for the running shell")
+        elif (refused := dut_flash_refusal(overlay, allow_dut_flash_write)) is not None:
+            err = refused                   # FIX-PACK-8: the deploy service's own rule
         elif keep_on_card:
             err = keep_refusal(card_status_of(self, session))
         if err is None:

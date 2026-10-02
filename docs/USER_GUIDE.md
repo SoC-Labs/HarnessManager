@@ -679,6 +679,7 @@ harness-manager restore 192.168.10.101            # back to the baseline
 | `--yes` | do not ask (scripts need it: see below) |
 | `--keep-on-card` | also keep it on the board's user microSD, so the board boots into it next time |
 | `--force` | swap even when OpenOCD on the board cannot be stopped first (a warning instead of exit 15); `restore` takes it too |
+| `--allow-dut-flash-write` | program a design whose boot code writes the DUT's flash (nanosoc_multicore) without typing its word: for scripts |
 | `--overlay-dir DIR` | look for overlays here first (repeatable) |
 
 A design is chosen by name (`nanosoc`) or by rm_id (`0x01000001`).
@@ -687,6 +688,17 @@ A design is chosen by name (`nanosoc`) or by rm_id (`0x01000001`).
 before it pushes. In a script nobody answers: an empty or closed stdin counts as no, so it
 prints `not confirmed` and exits 15, having changed nothing. A script runs
 `harness-manager program TARGET nanosoc --yes`. `restore` does not ask.
+
+**nanosoc_multicore asks for MULTICORE, typed.** Until Linux v2.1 its boot code writes the
+DUT's QSPI flash on every boot, one byte at 0x20000 onward, which damages a MicroPython image
+there (nanosoc_upy). HM cannot see what the DUT's flash holds, so before every program of it
+HM prints: "nanosoc_multicore's boot code writes the DUT's QSPI flash (one byte at 0x20000
+onward) on every boot, until Linux v2.1: it damages a MicroPython image there (nanosoc_upy).
+Type MULTICORE to program it anyway." Type `MULTICORE` to go on; anything else exits 15.
+`--yes` never implies it: a script adds `--allow-dut-flash-write`, and a script without it
+exits 15 having changed nothing. In the app, the Program strip shows the same warning and a
+field: Program stays off until MULTICORE is typed there. `overlays` marks the design "writes
+the DUT's flash".
 
 **`restore` needs the greybox.** HM looks for the greybox built for the board's shell in the
 overlay directories and among the imported overlays. A kit carries no overlays, so after

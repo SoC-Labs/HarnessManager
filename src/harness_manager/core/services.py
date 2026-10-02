@@ -76,6 +76,11 @@ class DeployService(Protocol):
         board's OpenOCD down (a claimed Linux board with the pack's on-board route) and
         refuses (exit 15) when it cannot; ``force=True`` (it and ``restore_baseline`` take
         it) goes on with a ``deploy.warning`` event. Callers pass it only when asked.
+
+        FIX-PACK-8: an overlay whose pack declares ``writes_dut_flash`` (its boot code writes
+        the DUT's flash) is refused (exit 15, ``data.dut_flash_write``) unless
+        ``allow_dut_flash_write=True``; callers pass the keyword only when the user gave it
+        (the typed word, ``--allow-dut-flash-write``, the API body's key).
         """
         ...
 

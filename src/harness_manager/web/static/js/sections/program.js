@@ -26,6 +26,14 @@
 // offers "Program anyway" (or "Restore anyway"): armed like Program (tick Arm, then click), the
 // same gateReason (lease holder, preflight), and it sends `force: true`. A swap that went on
 // despite a failed down says so (deploy.warning) in the outcome.
+//
+// FIX-PACK-8 (david: "warn + typed OK"): a design whose board pack declares that its boot code
+// writes the DUT's flash (the OverlayRef's `writes_dut_flash`: {why, word}; on the MPS3,
+// nanosoc_multicore until Linux v2.1) shows the pack's warning above Program on EVERY program,
+// with a text field: Program (and Program anyway) stays off until the word is typed exactly
+// (programGuard, so still behind the lease holder rule and Arm), then sends
+// `allow_dut_flash_write: true`. Each program is a fresh choice: the field empties on a new pick
+// and once Program runs. Core knows no design names: the words are the pack's.
 
 import { gateReason, interlock, isArmed, panelState, runAction, runJob, setArmed } from "../actions.js";
 import { bytesText, capState, elapsedSince, hexId, kib } from "../format.js";
@@ -159,6 +167,8 @@ export function designTags(b, ov, { full = true } = {}) {
   if (ov.receipt_sha256) tags.push({ k: "kit", text: "kit-built", title: "Built with the DUT kit: its build receipt travels with it" });
   if (String(ov.source || "").startsWith("store:")) tags.push({ k: "imp", text: "imported", title: "Imported into this Harness Manager's content store" });
   if (full && /^0x0+$/i.test(String(ov.rm_id || ""))) tags.push({ k: "base", text: "baseline", title: "The board's safe design (Restore baseline loads it)" });
+  // FIX-PACK-8: the pack says its boot code writes the DUT's flash (Program asks for a typed word)
+  if (dutFlashOf(ov)) tags.push({ k: "dutflash", text: "writes DUT flash", title: dutFlashOf(ov).why });
   return tags;
 }
 
@@ -185,8 +195,25 @@ function refOf(b, name) {
 const ui = {};                       // bid -> {open, q, dismissed, flash}
 
 function uiOf(bid) {
-  if (!ui[bid]) ui[bid] = { open: false, q: "", dismissed: "", flash: 0, armPulse: 0, anyway: null };
+  if (!ui[bid]) ui[bid] = { open: false, q: "", dismissed: "", flash: 0, armPulse: 0, anyway: null, word: "" };
   return ui[bid];
+}
+
+// FIX-PACK-8: the pack's declaration for a design whose boot code writes the DUT's flash
+// ({why, word}), or null.
+export function dutFlashOf(ov) {
+  const w = ov && ov.writes_dut_flash;
+  return w && w.word ? w : null;
+}
+
+// The warning, in the deploy service's words (core.pack.dut_flash_text).
+export function dutFlashText(w) {
+  return `${w.why} Type ${w.word} to program it anyway.`;
+}
+
+// The word was typed exactly (the CLI's rule: surrounding spaces do not count).
+function wordTyped(bid, w) {
+  return !!w && String(uiOf(bid).word || "").trim() === w.word;
 }
 
 // FIX-PACK-7: a deploy the daemon refused because OpenOCD on the board could not be stopped
@@ -202,6 +229,7 @@ export function pickDesign(bid, name, { pulse = false } = {}) {
   b.selectedOverlay = name;
   u.open = false;
   u.q = "";
+  u.word = "";                          // FIX-PACK-8: a new pick types the word afresh
   if (pulse) { u.flash = Date.now(); u.armPulse = Date.now(); }
   if (u.anyway && u.anyway.kind === "program" && u.anyway.overlay !== name) u.anyway = null;
   setArmed(bid, ARM, false);            // a new pick is armed afresh
@@ -336,6 +364,10 @@ function Preflight({ bid }) {
   if (ref && sameRm(ref.rm_id, loadedId(b))) extra.push({ k: "loaded", lvl: "warn", icon: "info", text: "loaded now: Program reloads it" });
   if (ref && ref.ltx_sha256) extra.push({ k: "ila", lvl: "info", icon: "scan-search", text: "ILAs" });
   if (ref && ref.receipt_sha256) extra.push({ k: "kit", lvl: "info", icon: "file-cog", text: "kit-built" });
+  if (dutFlashOf(ref)) {
+    extra.push({ k: "dutflash", lvl: "warn", icon: "triangle-alert", title: dutFlashOf(ref).why,
+      text: "writes the DUT's flash" });
+  }
   const impl = b.info && b.info.identity && b.info.identity.harness_impl;
   if (ref && ref.size_bytes && impl === "bare-metal") {
     extra.push({ k: "push", lvl: "info", icon: "upload", title: "An estimate from the bare-metal push rate measured on silicon; the bar shows the real rate",
@@ -383,6 +415,10 @@ function programGuard(bid) {
   }
   const bad = b.preflight.items.filter((i) => i.check === "mismatch").map((i) => i.name);
   if (bad.length) return `preflight MISMATCH (${bad.join(", ")}): Program is refused`;
+  const w = dutFlashOf(refOf(b, b.selectedOverlay));
+  if (w && !wordTyped(bid, w)) {
+    return `type ${w.word} to program ${b.selectedOverlay}: its boot code writes the DUT's flash`;
+  }
   return "";
 }
 
@@ -408,19 +444,25 @@ function progress(ctx) {
 export function programSpecs(bid) {
   const b = boardState(bid);
   const name = b.selectedOverlay;
+  // FIX-PACK-8: the typed word gives the consent (the CLI's --allow-dut-flash-write)
+  const dut = dutFlashOf(refOf(b, name));
+  const allow = !!dut && wordTyped(bid, dut);
+  const flags = `${keeping(b) ? " --keep-on-card" : ""}${allow ? " --allow-dut-flash-write" : ""}`;
   // force: FIX-PACK-7's "Program anyway" (the CLI's --force); only when asked
   const deployRun = (force) => (ctx) => {
     // keep_on_card only when asked: the default never writes the card.
     const body = keeping(b) ? { overlay: overlaySpec(b, name), keep_on_card: true }
       : { overlay: overlaySpec(b, name) };
     if (force) body.force = true;
+    if (allow) body.allow_dut_flash_write = true;
     b.keepOnCard = false;              // each keep is a fresh choice
+    uiOf(bid).word = "";               // and so is the typed word (FIX-PACK-8)
     b.lastKind = "program";
     return runJob("deploy", { bid }, body, progress(ctx), "deploy");
   };
   const program = {
     key: "program", label: "Program", busyLabel: "Programming...", budgetS: 120,
-    command: `program ${name || "?"}${keeping(b) ? " --keep-on-card" : ""}`,
+    command: `program ${name || "?"}${flags}`,
     run: deployRun(false),
     render: renderDeploy,
     onDone: (ok, value) => {
@@ -449,7 +491,7 @@ export function programSpecs(bid) {
   };
   const programAnyway = {
     ...program, key: "program_anyway", label: "Program anyway",
-    command: `program ${name || "?"}${keeping(b) ? " --keep-on-card" : ""} --force`,
+    command: `program ${name || "?"}${flags} --force`,
     run: deployRun(true),
     onDone: (ok, value) => { program.onDone(ok, value); uiOf(bid).anyway = null; },
   };
@@ -523,6 +565,27 @@ function ArmProgram({ bid }) {
     <input type="checkbox" checked=${on} disabled=${dis} aria-label="Arm: I understand this reconfigures the partition and resets the DUT"
       onChange=${(e) => setArmed(bid, ARM, e.target.checked)} />
     <${Icon} name=${on ? "lock-open" : "lock"} />Arm</label>`;
+}
+
+// FIX-PACK-8: the pack's warning for a design whose boot code writes the DUT's flash, and the
+// field the word is typed into (Program stays off until it matches: programGuard).
+function DutFlash({ bid }) {
+  const b = boardState(bid);
+  const name = b.selectedOverlay;
+  const w = dutFlashOf(refOf(b, name));
+  if (!w) return null;
+  const u = uiOf(bid);
+  const p = panelState(bid, PANEL);
+  const ok = wordTyped(bid, w);
+  const id = `dut-flash-word-${bid}`;
+  return html`<div class="dut-flash" data-testid="dut-flash">
+    <p class="reason warn" data-testid="dut-flash-warning"><${Icon} name="triangle-alert" /><span>${dutFlashText(w)}</span></p>
+    <div class="field rekey"><label for=${id}>${ok ? html`<${Icon} name="lock-open" cls="sm" />` : html`<${Icon} name="lock" cls="sm" />`}Type ${w.word}</label>
+      <input class="input sm mono grow" id=${id} data-testid="dut-flash-word" placeholder=${`type ${w.word}`}
+        autocomplete="off" spellcheck="false" value=${u.word || ""} disabled=${!!p.running || !!b.job}
+        aria-label=${`Type ${w.word} to program ${name} anyway`}
+        onInput=${(e) => { u.word = e.target.value; changed(); }} /></div>
+  </div>`;
 }
 
 function CardLine({ bid }) {
@@ -745,6 +808,7 @@ export function ProgramStrip({ bid }) {
       </div>
       <div class="strip-col">
         <div class="strip-label">Program the partition</div>
+        <${DutFlash} bid=${bid} />
         <div class="prog-row">
           <${ArmProgram} bid=${bid} />
           <${DriveButton} bid=${bid} spec=${program} variant="primary" icon="upload"

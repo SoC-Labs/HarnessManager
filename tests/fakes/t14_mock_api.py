@@ -97,7 +97,10 @@ OPEN_POINTS: dict[str, str] = {
                     "preflight} and no job; keep_on_card true then reads the card, and a card "
                     "that cannot take it is 422 (12) with error.data.{overlay, card}, no job; "
                     "FIX-PACK-7: the job refuses 15 (error.data.debug_down) when the board's "
-                    "OpenOCD cannot be stopped first, and force true swaps anyway (a warning)",
+                    "OpenOCD cannot be stopped first, and force true swaps anyway (a warning); "
+                    "FIX-PACK-8: an overlay whose writes_dut_flash is set is 409 REFUSED (15) "
+                    "with error.data.{overlay, dut_flash_write: {design, why, word}} and no job "
+                    "unless allow_dut_flash_write is true",
     "overlay": "a name, an rm_id, or the OverlayRef object",
     "console WS": "text frames {state,name,detail} / {dropped,dropped_frames} / {error}; "
                   "binary frames carry bytes both ways; {state:closed} then close 1000",
@@ -694,7 +697,12 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
 
     @app.post(f"{API}/boards/{{bid}}/deploy", status_code=202)
     def deploy(bid: str, body: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
-        from harness_manager.core.pack import card_status_of, keep_refusal, preflight_refusal
+        from harness_manager.core.pack import (
+            card_status_of,
+            dut_flash_refusal,
+            keep_refusal,
+            preflight_refusal,
+        )
 
         state.jobs.gate(bid)
         session = state.session(bid)
@@ -703,12 +711,20 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
         if not isinstance(keep, bool):
             raise UsageError(f"keep_on_card must be true or false, not {keep!r}")
         force = _force(body)                                       # FIX-PACK-7
+        allow = body.get("allow_dut_flash_write", False)          # FIX-PACK-8
+        if not isinstance(allow, bool):
+            raise UsageError(f"allow_dut_flash_write must be true or false, not {allow!r}")
         ov = find_overlay(session, body.get("overlay"))
         items = list(eng.deploy.preflight(session, ov))
         refusal = preflight_refusal(items, ov.name)
         if refusal is not None:            # refused BEFORE any job: nothing is pushed
             refusal.data = {"overlay": ov, "preflight": items}  # type: ignore[attr-defined]
             raise refusal
+        refusal = dut_flash_refusal(ov, allow)       # FIX-PACK-8: the daemon's rule
+        if refusal is not None:
+            raise refusal
+        if allow:
+            force = {**force, "allow_dut_flash_write": True}
         if keep:                           # Keep on the card: the card must take it, first
             card = card_status_of(eng.deploy, session)
             refused = keep_refusal(card)

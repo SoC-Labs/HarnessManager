@@ -204,7 +204,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              advanced=True),
         # K7 (the core's --overlay-dir puts directories first: cli/cmd_program.py:23-25)
         _row("mps3.overlay_dirs", "list", [], "Harness + kits",
-             "Extra overlay directories, searched first", at="overlays.py:317",
+             "Extra overlay directories, searched first", at="overlays.py:334",
              env="HARNESS_MANAGER_MPS3_OVERLAY_DIRS", env_split="pathsep"),
         # C1: the pack's kwarg console_pace_s (pack.py:375), paced consoles constants.py:31
         _row("mps3.console.pace_ms", "int", round(console_pace_s * 1000), "Consoles",

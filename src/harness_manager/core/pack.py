@@ -50,6 +50,21 @@ class ProbeHints:
 
 
 @dataclass(frozen=True)
+class DutFlashWrite:
+    """A design whose own boot code writes the DUT's flash (FIX-PACK-8, david: "warn + typed
+    OK"). The board pack declares it per design (``OverlayRef.writes_dut_flash``); core shows
+    the pack's words before EVERY program of that design and asks for ``word``, typed: Harness
+    Manager cannot see what the DUT's flash holds, so it cannot tell when the write is harmless.
+
+    ``why``: the pack's sentence (what is written, until when, what it damages);
+    ``word``: what the user types to program it anyway ("MULTICORE").
+    """
+
+    why: str
+    word: str
+
+
+@dataclass(frozen=True)
 class OverlayRef:
     """One loadable partition design (an overlay), as the deploy adapter knows it."""
 
@@ -63,6 +78,47 @@ class OverlayRef:
     # Optional files that travel with the pair (additive; "" = the overlay has none):
     ltx_sha256: str = ""      # the ILA probes file (<rm>.ltx), by its sha256
     receipt_sha256: str = ""  # the build receipt (<rm>_build.json), by its sha256
+    # FIX-PACK-8 (additive): the pack's declaration that this design's boot code writes the
+    # DUT's flash (None: it does not, or the pack does not know). Programming it needs consent.
+    writes_dut_flash: DutFlashWrite | None = None
+
+
+#: FIX-PACK-8: the consent a program of a ``writes_dut_flash`` design needs: the deploy
+#: service's keyword, the API body's key (``POST /boards/{bid}/deploy``) and, with dashes, the
+#: CLI's flag (``--allow-dut-flash-write``). ``--yes`` never implies it.
+ALLOW_DUT_FLASH_WRITE = "allow_dut_flash_write"
+DUT_FLASH_HINT = ("nothing was programmed: type the word at the prompt, or pass "
+                  "--allow-dut-flash-write (the API: allow_dut_flash_write: true); --yes never "
+                  "implies it")
+
+
+def dut_flash_text(overlay: OverlayRef) -> str:
+    """The warning before programming a design that writes the DUT's flash: the pack's
+    ``why`` and what to type. "" for a design that declares nothing."""
+    w = overlay.writes_dut_flash
+    if w is None:
+        return ""
+    return f"{w.why} Type {w.word} to program it anyway."
+
+
+def dut_flash_data(overlay: OverlayRef) -> dict[str, str] | None:
+    """``error.data.dut_flash_write``: ``{design, why, word}``; None when nothing is declared."""
+    w = overlay.writes_dut_flash
+    return None if w is None else {"design": overlay.name, "why": w.why, "word": w.word}
+
+
+def dut_flash_refusal(overlay: OverlayRef, allowed: bool, *, hint: str = DUT_FLASH_HINT):
+    """The error that refuses programming a design that writes the DUT's flash without the
+    consent (``RefusedError``, exit 15, API 409 REFUSED, ``data.dut_flash_write``), or None
+    (nothing declared, or ``allowed``). The CLI, the API and the deploy service share it."""
+    from .errors import RefusedError
+
+    data = dut_flash_data(overlay)
+    if data is None or allowed:
+        return None
+    err = RefusedError(dut_flash_text(overlay), hint=hint)
+    err.data = {"overlay": overlay, "dut_flash_write": data}  # type: ignore[attr-defined]
+    return err
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,10 @@ and a check that could not be made is reported but does not block.
     deploy(session, overlay):
         preflight          any MISMATCH -> refuse. Nothing is pushed, and only
                            ``deploy.failed`` is published.
+        dut flash          FIX-PACK-8: a design whose pack declares ``writes_dut_flash``
+                           (``core.pack.DutFlashWrite``: its boot code writes the DUT's flash)
+                           is refused (``RefusedError``, exit 15, stage preflight,
+                           ``data.dut_flash_write``) unless ``allow_dut_flash_write``
         keep_on_card       only when asked: the card must be able to take the design
                            (``card_status``), else ``UnavailableError`` (exit 12), nothing pushed
         debug down first   DEBUG-DOWN-FIRST: the board's OpenOCD is asked down (a board whose
@@ -86,6 +90,7 @@ from harness_manager.core.pack import (
     PreflightItem,
     card_status_of,
     detail_of,
+    dut_flash_refusal,
     keep_refusal,
 )
 from harness_manager.services import debug_onboard, reset_guard
@@ -215,7 +220,8 @@ class DeployService:
     # -- actions ----------------------------------------------------------------------
 
     def deploy(self, session: BoardSession, overlay: OverlayRef, *,
-               keep_on_card: bool = False, force: bool = False) -> DeployResult:
+               keep_on_card: bool = False, force: bool = False,
+               allow_dut_flash_write: bool = False) -> DeployResult:
         adapter = self._adapter(session)
         cleared = debug_onboard.DownFirst()
         try:
@@ -223,6 +229,9 @@ class DeployService:
             reset_guard.check(session, reset_guard.ACTION_DEPLOY)
             items = list(adapter.preflight(overlay))
             err = refusal(items, overlay.name)
+            if err is None:
+                # FIX-PACK-8: a design whose boot code writes the DUT's flash needs the consent
+                err = dut_flash_refusal(overlay, allow_dut_flash_write)
             if err is None and keep_on_card:
                 err = keep_refusal(self.card_status(session))
             if err is None:

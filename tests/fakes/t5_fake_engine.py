@@ -114,6 +114,8 @@ class FakeState:
     deploy_keeps: list[bool] = field(default_factory=list)
     #: FIX-PACK-7: ``force`` per deploy / restore (``program|restore --force``)
     deploy_forces: list[bool] = field(default_factory=list)
+    #: FIX-PACK-8: ``allow_dut_flash_write`` per deploy (the typed word, the flag)
+    deploy_dut_flash: list[bool] = field(default_factory=list)
     restore_forces: list[bool] = field(default_factory=list)
     #: FIX-PACK-7: a ``deploy.warning`` the next deploy publishes before it starts
     deploy_warning: str = ""
@@ -352,6 +354,7 @@ class FakeDeploy:
         self.st.hit("deploy.deploy")
         keep = bool(kw.pop("keep_on_card", False))
         self.st.deploy_forces.append(bool(kw.pop("force", False)))
+        self.st.deploy_dut_flash.append(bool(kw.pop("allow_dut_flash_write", False)))
         assert not kw, kw
         self.st.deploy_keeps.append(keep)
         bid = session.candidate.board_id

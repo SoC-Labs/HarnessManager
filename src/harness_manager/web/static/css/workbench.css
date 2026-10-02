@@ -40,6 +40,10 @@
 @keyframes wb-stripflash { 30% { box-shadow: 0 0 0 3px var(--accent-border); } }
 .prog-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .prog-row .btn { min-width: 0; }
+/* FIX-PACK-8: a design whose boot code writes the DUT's flash: the warning, then the typed word */
+.dut-flash { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.dut-flash .reason { margin: 0; }
+.dut-flash .field label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 
 /* the picker: as wide as its field; Import beside it and at its foot */
 .combo-row { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
@@ -105,6 +109,7 @@
 .wb .tag.kit { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-border); }
 .wb .tag.imp { color: var(--held); background: var(--held-soft); border-color: var(--held-border); }
 .wb .tag.other { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-border); }
+.wb .tag.dutflash { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-border); }
 
 /* the inline preflight */
 .pf { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--text-2); list-style: none; margin: 0; padding: 0; }

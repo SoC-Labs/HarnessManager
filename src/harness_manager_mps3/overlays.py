@@ -62,9 +62,9 @@ from pyverify.overlay import (
 
 from harness_manager.core.errors import AbsentError, HarnessError, RefusedError
 from harness_manager.core.model import Check
-from harness_manager.core.pack import OverlayRef
+from harness_manager.core.pack import DutFlashWrite, OverlayRef
 
-from .constants import KNOWN_DESIGNS
+from .constants import KNOWN_DESIGNS, WRITES_DUT_FLASH
 
 log = logging.getLogger(__name__)
 
@@ -173,6 +173,22 @@ def load_overlay_dir(directory: Path) -> tuple[Overlay, dict[str, Any]]:
     return Overlay(directory=directory, manifest=manifest), raw
 
 
+def writes_dut_flash(name: str, rm_id: object) -> DutFlashWrite | None:
+    """FIX-PACK-8: the pack's declaration for a design whose boot code writes the DUT's flash
+    (``constants.WRITES_DUT_FLASH``), by its design id (``rm_id & 0xFFFF``) or by its name
+    (``KNOWN_DESIGNS``); None for every other design."""
+    try:
+        design = rmid.design_id(int(rm_id, 0) if isinstance(rm_id, str) else rm_id)
+    except (TypeError, ValueError):
+        design = None
+    if design not in WRITES_DUT_FLASH:
+        design = next((d for d in WRITES_DUT_FLASH if KNOWN_DESIGNS.get(d) == name), None)
+    if design is None:
+        return None
+    why, word = WRITES_DUT_FLASH[design]
+    return DutFlashWrite(why=why, word=word)
+
+
 def _ref(overlay: Overlay, raw: Mapping[str, Any], source: str,
          optional: Mapping[str, str] | None = None) -> OverlayRef:
     """``optional``: role -> sha256 of the optional files (``ltx``, ``receipt``) it carries."""
@@ -189,6 +205,7 @@ def _ref(overlay: Overlay, raw: Mapping[str, Any], source: str,
         ip_class=ip_class if isinstance(ip_class, str) and ip_class else DEFAULT_IP_CLASS,
         ltx_sha256=optional.get(ROLE_LTX, ""),
         receipt_sha256=optional.get(ROLE_RECEIPT, ""),
+        writes_dut_flash=writes_dut_flash(m.rm_name, m.rm_id),
     )
 
 
