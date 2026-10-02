@@ -12,7 +12,8 @@ this module decides whether a plan goes through it and says what that means:
 - **blockers**: the door unavailable (no ``sd`` method, the hub down, no MCC on it); the
   running release unknown (the door's backup is that release's ``.bit`` from the signed
   cache: fpgahub cannot back up the SD); the running release's SD part private and no
-  token; a signed SD file list that differs outside ``only_paths``;
+  token; a signed SD file list that differs outside ``only_paths`` (and the door's
+  ``left_prefixes``: folders it leaves as they are, said as a warning: FIX-PACK-9);
 - **consent**: a typed phrase that names the board, the lease holder and the queue
   (``board_phrase``), besides the re-key phrase when there is one;
 - **auto-revert** (U10): armed by default for this remote door (D6a), off when the user
@@ -126,7 +127,19 @@ def apply(plan: Any, rel: HarnessRelease, channel: Channel, board: Any, *, via: 
     # FIX-PACK-7: paths the door itself compares after the download (the pack keeps the
     # card's own lines there: the MPS3's board.txt MBBIOS); a difference is not a blocker yet
     deferred = {_norm(p) for p in door.get("deferred_paths") or ()}
+    # FIX-PACK-9: folders the door leaves as they are (the MPS3's other board revisions: the
+    # hub writes one revision's file); their difference is said, never a blocker
+    left = tuple(_norm(p) + "/" for p in door.get("left_prefixes") or ())
     delta = signed_delta(new_sd, old_sd)
+    if delta is not None and left:
+        skipped = sorted({"/".join(p.replace("\\", "/").split("/")[:2]) for p in delta
+                          if _norm(p).startswith(left)})
+        delta = [p for p in delta if not _norm(p).startswith(left)]
+        if skipped:
+            plan.warnings.append(
+                f"the hub door leaves {', '.join(skipped[:4])}{' …' if len(skipped) > 4 else ''} "
+                f"on the card as it is: it writes {', '.join(sorted(door.get('only_paths') or ()))}"
+                " only (the board behind the hub reads that folder)")
     if delta is not None and only and any(_norm(p) not in only | deferred for p in delta):
         extra = [p for p in delta if _norm(p) not in only | deferred]
         plan.blockers.append(

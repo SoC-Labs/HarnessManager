@@ -740,6 +740,11 @@ class HubSdDoor:
     #: still go through: ``install`` compares it after the download, with the card's MBBIOS
     #: line kept (``mbbios.keep_mbbios``); any other difference is refused there.
     deferred_paths = ("MB/HBI0309C/board.txt",)
+    #: FIX-PACK-9: SD folders this door leaves as they are. fpgahub writes HBI0309C's
+    #: nanosoc.bit, so the board behind it reads MB/HBI0309C (a Rev C board); another
+    #: revision's folder in a release (platform v2.0.0 carries B and C) is not written
+    #: through the hub, and its difference is no blocker (said as a warning and a note).
+    left_prefixes = ("MB/HBI0309A/", "MB/HBI0309B/")
     #: The executor gives this door the running release's SD part (its backup source).
     wants_previous_base = True
 
@@ -811,7 +816,7 @@ class HubSdDoor:
 
     def describe(self) -> dict[str, Any]:
         """``{available, reason, door, hub, target, transport, sd_method, mcc_route, mcc_tty,
-        only_paths}`` for ``BoardView.hub_sd`` (cached ``DESCRIBE_TTL_S``; never raises)."""
+        only_paths, deferred_paths, left_prefixes}`` for ``BoardView.hub_sd`` (cached ``DESCRIBE_TTL_S``; never raises)."""
         now = self.clock()
         if self._describe is not None and now - self._describe[0] < DESCRIBE_TTL_S:
             return dict(self._describe[1])
@@ -819,7 +824,8 @@ class HubSdDoor:
                                "target": self.target, "transport": "", "sd_method": False,
                                "mcc_route": "hub-tool", "mcc_tty": self.mcc_tty or "",
                                "only_paths": list(self.only_paths),
-                               "deferred_paths": list(self.deferred_paths)}
+                               "deferred_paths": list(self.deferred_paths),
+                               "left_prefixes": list(self.left_prefixes)}
         try:
             be = self._backend()
             out["transport"] = be.transport
@@ -900,8 +906,9 @@ class HubSdDoor:
         FIX-PACK-7: the delta is measured after ``mbbios.keep_mbbios`` with the running
         release's tree as the card (the hub door cannot read the card, and never writes
         board.txt): a release whose board.txt differs only by MBBIOS keeps the card's line
-        and goes through; the card's board.txt is not touched."""
-        from .mbbios import BOARD_TXT, keep_mbbios
+        and goes through; the card's board.txt is not touched. FIX-PACK-9: another
+        revision's folder (``left_prefixes``) is left out on both sides, and said."""
+        from .mbbios import board_rev, keep_mbbios, notes_of
 
         self.install_notes = []
         if backup is None:
@@ -915,15 +922,27 @@ class HubSdDoor:
         if not old:
             raise RefusedError("the hub door needs the running release's SD tree to prove the "
                                "delta is nanosoc.bit only, and none was prepared")
-        card = next((Path(p) for rel, p in old.items() if _norm(rel) == _norm(BOARD_TXT)), None)
+        left = sorted({rel.replace("\\", "/").split("/")[1].upper()
+                       for rel in [*files, *old] if self._left(rel)})
+        files = {rel: p for rel, p in files.items() if not self._left(rel)}
+        old = {rel: p for rel, p in old.items() if not self._left(rel)}
+        boards = {rel: Path(p).read_bytes() for rel, p in old.items()
+                  if board_rev(rel) and isinstance(p, Path | str) and Path(p).is_file()}
         with tempfile.TemporaryDirectory(prefix="hm-mbbios-") as tmp:
-            files, kept = keep_mbbios(files, card_board_txt=card.read_bytes() if card else None,
-                                      card_files=list(old), workdir=Path(tmp),
-                                      allow_mcc_update=allow_mcc_update)
+            files, kept = keep_mbbios(files, card_boards=boards, card_files=list(old),
+                                      workdir=Path(tmp), allow_mcc_update=allow_mcc_update)
             self._install(files, old, new_bit, backup=backup, progress=progress)
-        if kept is not None and kept.note:
-            self.install_notes.append(kept.note)
-            report_progress(progress, "mbbios", 1, 1, {"text": kept.note})
+        notes = notes_of(kept)
+        if left:
+            notes.append(f"{', '.join(f'MB/{r}' for r in left)} not written: the hub writes "
+                         f"{NANOSOC_BIT} only, and this board reads MB/HBI0309C")
+        for note in notes:
+            self.install_notes.append(note)
+            report_progress(progress, "mbbios", 1, 1, {"text": note})
+
+    def _left(self, rel: str) -> bool:
+        """Is ``rel`` in a folder this door leaves as it is (``left_prefixes``)?"""
+        return any(_norm(rel).startswith(_norm(p) + "/") for p in self.left_prefixes)
 
     def _install(self, files: Mapping[str, Path], old: Mapping[str, Any], new_bit: Path, *,
                  backup: BackupRecord, progress: Progress | None) -> None:
