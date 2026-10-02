@@ -36,6 +36,11 @@ Facts and incidents this module encodes (safety rails are code, not docs):
   ``MBBIOS:`` line into the bundle's board.txt (``mbbios.keep_mbbios``, read from
   the mandatory backup), and refuses a bundle line that would make the MCC update
   itself (``allow_mcc_update`` overrides). The note is in ``install_notes``.
+  FIX-PACK-9: in EVERY revision folder the bundle carries (``MB/HBI0309B`` and
+  ``MB/HBI0309C`` for platform v2.0.0), each against the card's board.txt of the
+  same revision; other revision folders on the card (an Arm ``HBI0309A`` tree) are
+  never written, and stay in the backup. A card with neither a B nor a C folder is
+  written with a warning in ``install_notes``.
 - **Never delete stock files.** ``install`` only writes. ``restore`` returns
   the SD to the backup: it rewrites files that differ and removes only files
   that were not on the SD when the backup was taken.
@@ -392,22 +397,78 @@ _ACTIVE_LOCK = threading.Lock()
 # --- the card in a backup (FIX-PACK-7, MBBIOS) ------------------------------------------
 
 
-def card_of_backup(storage: Any, backup: BackupRecord) -> tuple[bytes | None, list[str]]:
-    """The card's ``MB/HBI0309C/board.txt`` (None: none) and every file on it, from a
-    verified backup (``storage.verify_backup``): the card as it was read before writing."""
-    from .mbbios import BOARD_TXT
+def boards_of_backup(storage: Any, backup: BackupRecord) -> tuple[dict[str, bytes], list[str]]:
+    """FIX-PACK-9: every ``MB/HBI*/board.txt`` on the card (SD path -> bytes; one per
+    revision folder) and every file on it, from a verified backup
+    (``storage.verify_backup``): the card as it was read before writing."""
+    from .mbbios import board_rev
 
     manifest = storage.verify_backup(backup)
     files = [str(e["path"]) for e in manifest.get("files", [])]
-    hit = next((f for f in files if f.replace("\\", "/").lower() == BOARD_TXT.lower()), None)
-    if hit is None:
-        return None, files
+    hits = [f for f in files if board_rev(f)]
     try:
         with zipfile.ZipFile(backup.path) as zf:
-            return zf.read(VOLUME_PREFIX + hit), files
+            return {f: zf.read(VOLUME_PREFIX + f) for f in hits}, files
     except _ARCHIVE_ERRORS as exc:
         raise RefusedError(f"backup {backup.path} is unreadable: {exc}",
                            hint="take a fresh backup") from exc
+
+
+def card_of_backup(storage: Any, backup: BackupRecord) -> tuple[bytes | None, list[str]]:
+    """The card's ``MB/HBI0309C/board.txt`` (None: none) and every file on it, from a
+    verified backup (the pre-FIX-PACK-9 view; ``boards_of_backup`` has every revision)."""
+    from .mbbios import BOARD_TXT, board_rev
+
+    boards, files = boards_of_backup(storage, backup)
+    want = board_rev(BOARD_TXT)
+    return next((v for k, v in boards.items() if board_rev(k) == want), None), files
+
+
+# --- the board's revision (FIX-PACK-9) --------------------------------------------------
+
+#: What the MCC says it found: its console's "Configuring motherboard (rev C, var A)..."
+#: (the boot witness) and the card's LOG.TXT "MotherBoard Revision C Variant A" (board 1).
+_REV_LINE = re.compile(r"mother\s*board\s*(?:\(\s*)?rev(?:ision)?\.?\s*:?\s*([A-Z])\b", re.I)
+#: Where the MCC leaves its log on the card (case-blind); the newest mention wins.
+MCC_LOGS = ("LOG.TXT",)
+_LOG_TAIL = 256 * 1024
+
+
+def revision_of_log(text: str) -> str:
+    """``HBI0309C`` from the LAST motherboard-revision line of an MCC log; "" none."""
+    hits = _REV_LINE.findall(text or "")
+    return f"HBI0309{hits[-1].upper()}" if hits else ""
+
+
+def board_revision_of(root: Path, *, boot_board: str = "") -> tuple[str, str]:
+    """``(revision, how it is known)`` for the board whose config SD is at ``root``; ("", "")
+    unknown. In order: the MCC boot witness's ``board`` ("rev C, var A"), the card's
+    ``LOG.TXT``, a card with exactly one ``MB/HBI0309*`` folder (it serves that revision only).
+    A card with several folders (Arm's stock A/B/C, or platform v2.0.0's B and C) says
+    nothing about the board."""
+    if boot_board and (rev := revision_of_log(f"motherboard ({boot_board})")):
+        return rev, f"the MCC boot log: rev {rev[-1]}"
+    for name in MCC_LOGS:
+        log = _resolve_ci(root, name.split("/"))
+        try:
+            if log.is_file():
+                with open(log, "rb") as fh:
+                    size = fh.seek(0, os.SEEK_END)
+                    fh.seek(max(0, size - _LOG_TAIL))
+                    rev = revision_of_log(fh.read().decode("latin-1"))
+                if rev:
+                    return rev, f"{log.name} on its config SD"
+        except OSError:
+            continue
+    mb = _resolve_ci(root, ["MB"])
+    try:
+        dirs = sorted(e.name for e in mb.iterdir()
+                      if e.is_dir() and e.name.upper().startswith("HBI0309"))
+    except OSError:
+        dirs = []
+    if len(dirs) == 1:
+        return dirs[0].upper(), "the config SD's only revision folder"
+    return "", ""
 
 
 # --- the adapter ----------------------------------------------------------------------
@@ -427,6 +488,11 @@ class Mps3Storage:
         self.install_notes: list[str] = []
 
     # -- locate --
+
+    def board_revision(self, *, boot_board: str = "") -> tuple[str, str]:
+        """FIX-PACK-9: ``(revision, how it is known)`` (``board_revision_of``) for the
+        planner's ``BoardView.board_rev``; ("", "") unknown. Reads only."""
+        return board_revision_of(Path(self.locate()), boot_board=boot_board)
 
     def locate(self) -> str:
         """The config SD's mount point / drive root. Refuses the DAPLink drive."""
@@ -735,20 +801,20 @@ class Mps3Storage:
         backup); a line that would make the MCC update itself is refused (15) unless
         ``allow_mcc_update``.
         """
-        from .mbbios import keep_mbbios
+        from .mbbios import keep_mbbios, notes_of
 
         self.install_notes = []
         if backup is None:
             raise RefusedError("writing the configuration SD needs a verified backup of it first",
                                hint="run backup() (`harness-manager sd TARGET backup DIR`) "
                                     "and pass its record")
-        board_txt, card_files = card_of_backup(self, backup)
+        boards, card_files = boards_of_backup(self, backup)
         with tempfile.TemporaryDirectory(prefix="hm-mbbios-") as tmp:
-            files, kept = keep_mbbios(files, card_board_txt=board_txt, card_files=card_files,
+            files, kept = keep_mbbios(files, card_boards=boards, card_files=card_files,
                                       workdir=Path(tmp), allow_mcc_update=allow_mcc_update)
-            if kept is not None and kept.note:
-                self.install_notes.append(kept.note)
-                report_progress(progress, "mbbios", 1, 1, {"text": kept.note})
+            for note in notes_of(kept):
+                self.install_notes.append(note)
+                report_progress(progress, "mbbios", 1, 1, {"text": note})
             self._install(files, backup=backup, progress=progress)
 
     def _install(self, files: Mapping[str, Path], *, backup: BackupRecord,
