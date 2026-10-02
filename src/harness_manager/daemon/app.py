@@ -1680,3 +1680,9 @@ def _fields(obj: Any) -> dict[str, Any]:
 # docs/API.md "SD cards in this PC's card reader"). Read by create_app at each call.
 EXTENSIONS += ("cardwriter_api",)
 # --- end sd-flash ---
+
+# --- bringup-usb ---
+# BRINGUP-USB: bring a new board up over its Debug USB, from the app (bringup_api.py; docs/API.md
+# "Bring-up over the Debug USB"). Read when create_app runs, so appending here is enough.
+EXTENSIONS += ("bringup_api",)
+# --- end bringup-usb ---

@@ -1288,3 +1288,16 @@ EXTENSION_ROUTES["cardwriter_api"] = (
     ("POST", "/cardwriter/write"),
 )
 # --- end sd-flash ---
+
+
+# --- bringup-usb ---
+# BRINGUP-USB (docs/API.md "Bring-up over the Debug USB", bringup_api.py): served in the mock by
+# tests/fakes/bringup_mock.py (the switches, the scan and the bundle check; no write).
+EXTENSION_ROUTES["bringup_api"] = (
+    ("GET", "/bringup"),
+    ("POST", "/bringup/scan"),
+    ("POST", "/bringup/bundle"),
+    ("POST", "/boards/{bid}/bringup/install"),
+    ("POST", "/boards/{bid}/bringup/witness"),
+)
+# --- end bringup-usb ---
