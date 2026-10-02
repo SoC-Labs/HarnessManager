@@ -12,7 +12,9 @@
 
 Composed, not new executors: the backup, the reboot and the restore are the existing
 ``storage/backup``, ``controller/reboot`` and ``storage/restore`` jobs; a signed release
-installs through ``harness/install``; the card reader is SD-FLASH's ``/cardwriter`` routes.
+installs through ``harness/install``; the card reader is SD-FLASH's writer and job (a
+bundle through ``/bringup/card-reader``, for its checks and the unsigned phrase; a whole-card
+image through ``/cardwriter/write``); the identity is set by ``POST /boards/{bid}/identity``.
 """
 
 from __future__ import annotations

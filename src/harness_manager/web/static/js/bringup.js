@@ -344,7 +344,7 @@ function BundleFacts({ chk }) {
 function shaHow(chk) {
   const u = chk.unsigned || {};
   if (u.of === "zip") return html`of the zip file itself (<span class="mono">${u.how || "sha256sum BUNDLE.zip"}</span>)`;
-  return html`of the folder's manifest: one line <span class="mono">&lt;sha256&gt;  &lt;path&gt;</span> for each of its ${u.files} files, sorted by path (<span class="mono">${u.how || ""}</span>)`;
+  return html`of the folder's manifest: one line <span class="mono">${"<sha256>  <path>"}</span> for each of its ${u.files} files, sorted by path (<span class="mono">${u.how || ""}</span>)`;
 }
 
 function UnsignedBanner() {
@@ -540,7 +540,7 @@ function DevicePicker({ w, field, typedField, kind }) {
       <select class="select grow" data-testid=${`reader-device-${kind}`} value=${w[field]}
         onChange=${(e) => { w[field] = e.target.value; w[typedField] = ""; changed(); }}>
         <option value="">Choose the card…</option>
-        ${r.devices.map((d) => { const no = cannotTake(d, kind); return html`<option key=${d.id} value=${d.id} disabled=${!!no}>${d.model} · ${bytesText(d.size_bytes)} · ${d.path}${no ? ` (${no})` : ""}</option>`; })}
+        ${r.devices.map((d) => { const no = cannotTake(d, kind); return html`<option key=${d.id} value=${d.id} disabled=${!!no}>${d.model} · ${d.size || bytesText(d.size_bytes)} · ${d.path}${no ? ` (${no})` : ""}</option>`; })}
       </select>
       <button type="button" class="btn ghost sm" onClick=${loadReader} title="Read the card readers again"><${Icon} name="refresh-cw" /></button></div>
     ${dev ? html`<div class="field"><label>Type <code>${confirmFor(dev)}</code></label>
