@@ -1170,3 +1170,14 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   rule a B+C config SD needs (was 0.1.0); an older client's plan is blocked "harness <v> needs
   harness-manager >= 1.0.0 (this is <its>); run `harness-manager update app` first".
 <!-- --- end fix-pack-9 (release tool) --- -->
+<!-- --- integ v1.1 --- -->
+- **The card reader keeps each revision's MBBIOS line** (FIX-PACK-9 on SD-FLASH's writer): a
+  B+C bundle written in this PC's card reader (`flash write --kind files`, `bringup
+  --card-reader`, the wizard) is decided per `MB/HBI0309<rev>/board.txt` against the card's own
+  (it was refused as "not read" when the card had `MB/HBI0309B/board.txt`). `result.mbbios`
+  lists each revision ("MBBIOS kept: HBI0309C mbb_v141.ebf", "MBBIOS kept: HBI0309B
+  mbb_v132.ebf") and the "WARNING: this card had no HBI0309B or HBI0309C folder: …" line.
+- **A board still called "MPS3" shows its hub or boards.toml name.** The image's default label
+  "MPS3" (any case, exactly that) is no name: such a board is named by boards.toml, then the
+  hub, then the hub target ("mps3-01"), else its address. "MPS3-02" is a name, as before.
+<!-- --- end integ v1.1 --- -->

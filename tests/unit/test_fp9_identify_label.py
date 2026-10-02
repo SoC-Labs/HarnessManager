@@ -52,3 +52,41 @@ def test_twin_boards_toml_name_still_wins_over_the_label():
     assert (named.name, named.name_source) == ("lab-board-a", naming.CONFIG)
     bare = Candidate(pack="mps3", board_id="mps3@10.0.0.5:6900", links=())
     assert naming.display_name(naming.with_identity(bare, reply().identity())) == "10.0.0.5:6900"
+
+
+# --- integ v1.1: the image-default label "MPS3" is no name -----------------------------------
+
+
+def hub_named(cand: Candidate) -> Candidate:
+    """The candidate as name_candidate leaves it once the hub target names the slot."""
+    return naming.offer(cand, "mps3-01", naming.HUB_TARGET)
+
+
+@pytest.mark.parametrize("label", ["MPS3", "mps3", "Mps3", " MPS3 "])
+def test_the_image_default_label_is_unnamed_so_the_hub_target_names_the_board(label):
+    cand = reply(label=label).candidate()
+    named = hub_named(naming.with_identity(cand, cand.identity))
+    assert (named.name, named.name_source) == ("mps3-01", naming.HUB_TARGET)
+    assert naming.is_unnamed_label(label)
+    bare = naming.with_identity(cand, cand.identity)
+    assert naming.display_name(bare) == "10.0.0.5:6900"          # no hub: the address
+
+
+@pytest.mark.parametrize("label", ["MPS3-02", "MPS3X", "MPS", "mps3-lab"])
+def test_twin_a_real_name_still_outranks_the_hub(label):
+    cand = reply(label=label).candidate()
+    named = hub_named(naming.with_identity(cand, cand.identity))
+    assert (named.name, named.name_source) == (label, naming.HARNESS)
+    assert not naming.is_unnamed_label(label)
+
+
+def test_twin_boards_toml_may_name_a_board_mps3():
+    cand = reply(label="MPS3").candidate()
+    named = naming.offer(cand, "MPS3", naming.CONFIG)
+    assert (named.name, named.name_source) == ("MPS3", naming.CONFIG)
+
+
+def test_the_unnamed_label_is_the_identity_services_default():
+    from harness_manager.services.board_identity import DEFAULT_LABEL
+
+    assert naming.UNNAMED_LABELS == {DEFAULT_LABEL.casefold()}

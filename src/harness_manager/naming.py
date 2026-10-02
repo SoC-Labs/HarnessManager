@@ -12,7 +12,9 @@ Resolution order (``SOURCES``; the first source that gives a name wins):
    name the user sets on purpose, so nothing overrides it.
 2. ``harness``: the name the board reports for itself (``BoardIdentity.name``;
    the proposed ``name`` key of ``version`` and identify, stored on the board).
-   It travels with the board from hub to hub.
+   It travels with the board from hub to hub. The image's default label, "MPS3"
+   (``UNNAMED_LABELS``, any case, exactly that), is no name: every unnamed board
+   sends it, so a generic board shows its hub or boards.toml name, not "MPS3".
 3. ``hub``: the fpgahub board that owns the board's lease target, as the hub
    reports it (``fpgahub board list --json``: ``mps3_01`` owns ``mps3_01_pl``)
    or as boards.toml ``hub.board`` states it. It names the hub's SLOT: a board
@@ -53,6 +55,17 @@ SOURCE_TEXT: dict[str, str] = {
 
 MAX_NAME_LEN = 64
 
+#: v1.1: a harness name that means "not named yet": the label the MPS3 Linux image ships with
+#: (``services.board_identity.DEFAULT_LABEL``), compared case-blind and whole. A board that
+#: sends it is UNNAMED here; "MPS3-02" or "MPS3X" are names. Only the ``harness`` source:
+#: a boards.toml ``name = "MPS3"`` is the user's own choice and stands.
+UNNAMED_LABELS: frozenset[str] = frozenset({"mps3"})
+
+
+def is_unnamed_label(name: object) -> bool:
+    """True for the image's default label ("MPS3", any case, after trimming)."""
+    return clean_name(name).casefold() in UNNAMED_LABELS
+
 
 def clean_name(value: object) -> str:
     """A usable display name, or ``""``.
@@ -90,6 +103,8 @@ def offer(candidate: Candidate, name: object, source: str) -> Candidate:
     clean = clean_name(name)
     if not clean or source not in SOURCES:
         return candidate
+    if source == HARNESS and is_unnamed_label(clean):
+        return candidate                 # the image default: the board has no name of its own
     current = candidate.name_source if candidate.name else ""
     if current and rank(source) > rank(current):
         return candidate
