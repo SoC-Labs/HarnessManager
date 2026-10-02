@@ -7,19 +7,26 @@ from __future__ import annotations
 
 import re
 
-from tests.fakes.t14_api_contract import STATIC, api_md_sections, daemon_routes, normalise
+from tests.fakes.t14_api_contract import (
+    STATIC,
+    api_md_sections,
+    daemon_routes,
+    parse_ui_endpoints,
+)
 
 API_JS = STATIC / "js" / "api.js"
 BRINGUP_JS = STATIC / "js" / "bringup.js"
-_ENTRY = re.compile(r'^\s*(\w+):\s*\[\s*"([A-Z]+)"\s*,\s*"([^"]+)"\s*\]', re.M)
 #: lane SD-FLASH's routes (the contract in the BRING-UP brief); served by cardwriter_api.py
 CARDWRITER = {("GET", "/cardwriter/devices"), ("POST", "/cardwriter/write"),
               ("POST", "/cardwriter/check")}
 
 
 def bringup_endpoints(js: str) -> dict[str, tuple[str, str]]:
-    block = js.split("export const BRINGUP_ENDPOINTS", 1)[1].split("});", 1)[0]
-    return {n: (m, normalise(p)) for n, m, p in _ENTRY.findall(block)}
+    """BRINGUP_ENDPOINTS's names (v1.1: a list), each resolved through ENDPOINTS; a name
+    ENDPOINTS lacks resolves to ("?", "?"), which nothing documents or serves."""
+    block = js.split("export const BRINGUP_ENDPOINTS", 1)[1].split("]);", 1)[0]
+    table = parse_ui_endpoints(js)
+    return {n: table.get(n, ("?", "?")) for n in re.findall(r'"(\w+)"', block)}
 
 
 def problems(called: dict[str, tuple[str, str]], documented: set, served: set) -> list[str]:
@@ -42,8 +49,9 @@ def test_every_bringup_route_the_page_calls_is_documented_and_served():
 
 
 def test_twin_a_route_nobody_documents_or_serves_is_caught():
-    js = ('export const BRINGUP_ENDPOINTS = Object.freeze({\n'
-          '  sneaky: ["POST", "/bringup/format"],\n});')
+    js = ('export const ENDPOINTS = Object.freeze({\n'
+          '  sneaky: ["POST", "/bringup/format"],\n});\n'
+          'export const BRINGUP_ENDPOINTS = Object.freeze(["sneaky"]);')
     got = problems(bringup_endpoints(js), api_md_sections()["bringup_api"], daemon_routes())
     assert len(got) == 2 and all("sneaky" in g for g in got)
 

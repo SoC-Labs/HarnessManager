@@ -8,16 +8,22 @@ from __future__ import annotations
 
 import re
 
-from tests.fakes.t14_api_contract import STATIC, api_md_sections, daemon_routes, normalise
+from tests.fakes.t14_api_contract import (
+    STATIC,
+    api_md_sections,
+    daemon_routes,
+    parse_ui_endpoints,
+)
 
 API_JS = STATIC / "js" / "api.js"
 IDENTITY_JS = STATIC / "js" / "sections" / "identity.js"
-_ENTRY = re.compile(r'^\s*(\w+):\s*\[\s*"([A-Z]+)"\s*,\s*"([^"]+)"\s*\]', re.M)
 
 
 def identity_endpoints(js: str) -> dict[str, tuple[str, str]]:
-    block = js.split("export const IDENTITY_ENDPOINTS", 1)[1].split("});", 1)[0]
-    return {n: (m, normalise(p)) for n, m, p in _ENTRY.findall(block)}
+    """IDENTITY_ENDPOINTS's names (v1.1: a list), each resolved through ENDPOINTS."""
+    block = js.split("export const IDENTITY_ENDPOINTS", 1)[1].split("]);", 1)[0]
+    table = parse_ui_endpoints(js)
+    return {n: table.get(n, ("?", "?")) for n in re.findall(r'"(\w+)"', block)}
 
 
 def problems(called: dict[str, tuple[str, str]], documented: set, served: set) -> list[str]:
@@ -37,8 +43,9 @@ def test_every_identity_route_the_page_calls_is_documented_and_served():
 
 
 def test_twin_a_route_nobody_documents_or_serves_is_caught():
-    js = ('export const IDENTITY_ENDPOINTS = Object.freeze({\n'
-          '  sneaky: ["POST", "/boards/{bid}/identity/force"],\n});')
+    js = ('export const ENDPOINTS = Object.freeze({\n'
+          '  sneaky: ["POST", "/boards/{bid}/identity/force"],\n});\n'
+          'export const IDENTITY_ENDPOINTS = Object.freeze(["sneaky"]);')
     got = problems(identity_endpoints(js), api_md_sections()["identity_api"], daemon_routes())
     assert len(got) == 2 and all("sneaky" in g for g in got)
 
@@ -66,10 +73,23 @@ def test_twin_a_second_identity_dialog_would_be_caught(tmp_path):
     assert "bu-identity" in dialogs(tmp_path)
 
 
-def test_the_dialogs_stylesheet_ships_and_is_linked_the_lanes_way():
-    js = IDENTITY_JS.read_text(encoding="utf-8")
-    assert 'l.href = "./css/identity.css"' in js
+def sheets(html: str) -> list[str]:
+    return re.findall(r'<link rel="stylesheet" href="\./(css/[\w.-]+)">', html)
+
+
+def test_the_dialogs_stylesheet_ships_and_index_html_links_it_after_bringup_css():
+    """v1.1 (CCR IDENTITY-2): index.html links it, next to bringup.css; the lane's own
+    injection is gone, so it is linked once."""
+    linked = sheets((STATIC / "index.html").read_text(encoding="utf-8"))
+    assert linked.index("css/identity.css") == linked.index("css/bringup.css") + 1
     assert (STATIC / "css" / "identity.css").is_file()
+    assert "css/identity.css" not in IDENTITY_JS.read_text(encoding="utf-8").replace(
+        "// The stylesheet, css/identity.css, is linked by index.html", "")
+
+
+def test_twin_a_page_without_the_link_is_caught():
+    html = '<link rel="stylesheet" href="./css/bringup.css">\n'
+    assert "css/identity.css" not in sheets(html) and sheets(html) == ["css/bringup.css"]
 
 
 def test_the_name_rule_is_the_services():
