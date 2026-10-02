@@ -231,6 +231,26 @@ harness on a blank user microSD, it writes a whole-card image in the card reader
 plan runs from the command line as `harness-manager bringup - --serial PORT --volume PATH
 --bundle DIR`.
 
+**An unsigned bundle asks for a typed phrase.** A bundle folder or zip is unsigned (no signing
+keys exist yet), so every write of one first shows its banner and sha256 and asks you to type
+`INSTALL UNSIGNED <first 8 hex of its sha256>`. On the command line give it with
+`--confirm-unsigned 'INSTALL UNSIGNED 1a2b3c4d'` (`--yes` never types it):
+
+```bash
+harness-manager bringup - --serial /dev/ttyUSB0 --volume /media/$USER/V2M-MPS3 \
+    --bundle ~/harness-bundle --confirm-unsigned 'INSTALL UNSIGNED 1a2b3c4d'
+```
+
+With the card in this PC's card reader instead (`bringup.sd_flash` on; `harness-manager flash
+devices` lists each reader's id and its `WRITE <model> <size>` phrase), add `--card-reader
+DEVICE_ID --confirm "WRITE …"`. To write the card alone, without the bring-up:
+`harness-manager flash write DEVICE_ID ~/harness-bundle --kind files --backup-dir
+~/mps3-backups --confirm-unsigned 'INSTALL UNSIGNED 1a2b3c4d' --confirm "WRITE …"`.
+
+**Then name the board.** Once it is up, set the board's name/IP/MAC in **Board > Access →
+Name this board** (the wizard's last step opens it for you; [section
+12.4](#124-name-the-board-its-own-name-mac-and-ip)).
+
 **On the command line:**
 
 1. **Connect and look.** Plug in the Debug USB and Ethernet, and power the board on. The
