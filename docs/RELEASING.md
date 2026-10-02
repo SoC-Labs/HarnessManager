@@ -222,8 +222,17 @@ bundle with the generic bake (request R1).
 
 1. **Assembles** the bundle directory (`tools/release/assemble.py`):
    - stamps the config-SD tree from the templates, as `assemble_sd.sh` does: `config.txt`;
-     `MB/HBI0309C/board.txt`; `Nanosoc/nanosoc.txt`, `images.txt` and the `.bit` under the
-     name `F0FILE` gives;
+     for each board revision, `MB/HBI0309<rev>/board.txt` (every `@BOARD@` token stamped,
+     comments included, as its `sed .../g` does); `Nanosoc/nanosoc.txt`, `images.txt` and the
+     `.bit` under the name `F0FILE` gives;
+   - **both revisions, B and C, by default** (FIX-PACK-9, david 2 Oct: Rev C supported, Rev B
+     "boots, untested", no Rev A). The MCC reads only `MB/HBI0309<its revision>/`, so a C-only
+     card leaves a Rev B board unprogrammed. `BOARD_REVS=HBI0309C` (`--board-rev C`) makes a
+     C-only release. The SD part is then `sd-HBI0309BC`; it lists every file of both trees, and
+     `compat.board_revs` and `board.revisions` are `["HBI0309B", "HBI0309C"]`. The finding
+     `REVS` refuses trees that differ beyond each board.txt's revision token and its `;`
+     comments. A ready `--sd` tree is taken as it is: it must serve exactly the `--board-rev`
+     given, and without one, a tree that is not B+C is a WARNING;
    - copies the Linux parts;
    - splits the overlays by `AAA_RMS`;
    - takes the kit with its `kit.json`.
@@ -277,7 +286,14 @@ Then it uploads in this order:
 
 The repo needs at least one commit: `gh release create` tags its default branch.
 
-**The v2.0.0-rc1 dry run** (1 Oct, `TEST_KEY=1`, the inputs above, AAA and the kit as
+**The v2.0.0-rc1 dry run with B and C** (2 Oct, FIX-PACK-9, `TEST_KEY=1
+BOARD_REVS=HBI0309B,HBI0309C`, the inputs below, into `/tmpdir/claude-74755/release-pipe-dryrun-bc/`)
+took 9 s. The SD part is `mps3-harness-2.0.0-rc1-sd-HBI0309BC.zip`, **4.3 MiB** (9 files: the
+13.9 MB `.bit` twice, 2.2 MiB each compressed; a card carries 13.9 MB more than a C-only one).
+Everything else is as below; the total is **267.7 MiB**. B's and C's board.txt differ in line
+1 (`BOARD:`) and, until the platform rewords its template comment (CCR-3), in line 4.
+
+**The v2.0.0-rc1 dry run** (1 Oct, C only, `TEST_KEY=1`, the inputs above, AAA and the kit as
 listed) took 10 s:
 
 | Asset | Size |
