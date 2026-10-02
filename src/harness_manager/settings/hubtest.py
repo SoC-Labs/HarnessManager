@@ -328,7 +328,9 @@ def ssh_argv(host: str, group: str | None, remote_argv: Sequence[str], *, jump: 
     extra = ["-o", f"ConnectTimeout={connect_timeout_s}"] + (["-J", jump] if jump else [])
     if markers:
         remote = _markers(group) + remote
-    return ["ssh", *opts, *extra, host, remote]
+    from harness_manager.core.sshcmd import ssh_program
+
+    return [ssh_program(), *opts, *extra, host, remote]     # ssh.exe's full path on Windows
 
 
 def local_argv(group: str | None, remote_argv: Sequence[str], *, markers: bool = False) -> list[str]:
