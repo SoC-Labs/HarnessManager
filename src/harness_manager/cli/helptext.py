@@ -569,3 +569,12 @@ flash write DEVICE_ID SOURCE --kind files|card [--confirm PHRASE] [--yes]
     Read back before it says written. Without the rights to write the device
     it prints the sudo commands to run, and exits 12."""
 # --- end sd-flash ---
+
+
+# --- bringup-usb ---
+# `bringup -` (cli/cmd_bringup.py): a NEW board over its Debug USB, as the app's Add > Over USB.
+# In the Board controller tab, beside `sd` and `flash`.
+from .cmd_bringup import HELP_TAB as _BRINGUP_TAB  # noqa: E402
+
+CONTROLLER += "\n\n" + _BRINGUP_TAB.rstrip("\n")
+# --- end bringup-usb ---

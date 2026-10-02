@@ -220,6 +220,19 @@ board** gives it back.
 **First install (once, about 15 minutes).** A new board needs the SoC Labs harness on its
 configuration SD. Do these steps in order. Step 2, the backup, is your way back.
 
+**In the app:** click **+** in the rail, then **Over USB (a new board plugged into this PC)**,
+**Scan**, and **Add and bring up**. The **Bring up this board** dialog walks the same steps
+as the commands below: the source (a bundle folder or zip, or a signed release once signing
+keys exist), the backup, the write, the reboot through the MCC, and waiting for the harness
+on Ethernet. Its **Write the configuration SD** step can also write the card in this PC's own
+card reader instead of over the Debug USB (off by default: Settings → Bring-up,
+`bringup.sd_flash`; on the command line, `harness-manager flash devices|write`). For a Linux
+harness on a blank user microSD, it writes a whole-card image in the card reader. The same
+plan runs from the command line as `harness-manager bringup - --serial PORT --volume PATH
+--bundle DIR`.
+
+**On the command line:**
+
 1. **Connect and look.** Plug in the Debug USB and Ethernet, and power the board on. The
    configuration SD appears as a drive named `V2M-MPS3`.
 

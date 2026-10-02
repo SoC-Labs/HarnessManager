@@ -417,6 +417,12 @@ def make_parser() -> argparse.ArgumentParser:
     verbs["flash"] = sub.choices["flash"]
     NO_ENGINE.add("flash")
     # --- end sd-flash ---
+
+    # --- bringup-usb: `bringup -`, a NEW board over its Debug USB (cmd_bringup.py) ---------
+    from . import cmd_bringup
+    cmd_bringup.register(sub, parents=(fmt, usb))
+    verbs["bringup"] = sub.choices["bringup"]
+    # --- end bringup-usb ---
     return p
 
 
