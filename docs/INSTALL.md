@@ -118,7 +118,7 @@ Examples:
 
 ```bash
 scripts/install.sh --with-serial                                  # this checkout
-scripts/install.sh --from git@github.com:SoC-Labs/HarnessManager.git --ref v0.1.0
+scripts/install.sh --from git@github.com:SoC-Labs/HarnessManager.git --ref v1.0.0
 scripts/install.sh --from dist/harness_manager-0.1.0-py3-none-any.whl
 make install-local INSTALL_ARGS=--with-app                        # the same, from make
 ```

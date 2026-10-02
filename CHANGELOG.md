@@ -4,7 +4,7 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
-## 0.1.0 (unreleased)
+## 1.0.0 (unreleased)
 
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
@@ -244,7 +244,7 @@ at UI v2 on real boards.
   tab's Settings button still opens Updates.
 - Removed dead code: `sections/placeholders.js` and `AppVersionChip`.
 
-### The partition boundary is timed (N2: Linux v2.0.0 known issue 11 fixed, for v0.1.1)
+### The partition boundary is timed (N2: Linux v2.0.0 known issue 11 fixed)
 - `build_rm.tcl` writes the RM checkpoint straight after `synth_design`, before it reads the OOC
   XDC. Before, the checkpoint carried the OOC `create_clock -name dut_clk`, which at the link
   overwrote the static's clock of the same name on OSCCLK1 (`[Constraints 18-619]`): the shell's
