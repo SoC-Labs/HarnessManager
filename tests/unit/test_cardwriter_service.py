@@ -709,11 +709,26 @@ def test_the_packs_keep_mbbios_is_used_when_a_pack_has_one(rig: Rig):
         from types import SimpleNamespace
         return out, SimpleNamespace(action="kept", value="pack.ebf", note="MBBIOS kept: pack.ebf")
 
+    real = rig.storage_for
+
+    class Plain:                    # a storage that does not apply the rule itself: the hook does
+        def __init__(self, root):
+            self.inner = real(root)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def install(self, files, *, backup, progress=None):
+            return self.inner.install(files, backup=backup, progress=progress)
+
+    rig.writer.storage_for = Plain
     rig.card_board_txt(CARD_BOARD)
     rig.writer.mbbios_for = lambda: keep
     _, out = files_write(rig, rig.bundle(board_txt=BUNDLE_BOARD))
     assert out["mbbios"][0]["note"] == "MBBIOS kept: pack.ebf"
-    assert written_board(rig) == b"BOARD: from the pack\n"
+    # integ/bringup: the MPS3 storage re-applies FIX-PACK-7's rule underneath (the card's line
+    # goes in), so the hook's board.txt leads and nothing of the bundle's own line survives.
+    assert written_board(rig).startswith(b"BOARD: from the pack")
     assert len(calls) == 2 and calls[0][0] == CARD_BOARD                # plan, then the job
     assert "MB/HBI0309C/images.txt" in calls[0][1]
 
@@ -740,7 +755,8 @@ def test_a_storage_that_applies_the_rule_itself_gets_the_bundle_and_the_flag(rig
         def install(self, files, *, backup, progress=None, allow_mcc_update=False):
             seen["board"] = Path(files["MB/HBI0309C/board.txt"]).read_bytes()
             seen["allow"] = allow_mcc_update
-            return self.inner.install(files, backup=backup, progress=progress)
+            return self.inner.install(files, backup=backup, progress=progress,
+                                      allow_mcc_update=allow_mcc_update)
 
     rig.writer.storage_for = Applies
     rig.card_board_txt(NO_LINE_BOARD, ebf="mbb_v999.ebf")
@@ -765,3 +781,11 @@ def test_the_demo_lists_simulated_readers_and_writes_only_temp_files(tmp_path: P
     out = w.run(w.prepare(blank["id"], "card", src, blank["confirm"]))
     assert out["verified"]
     assert (tmp_path / "cardwriter-demo" / "sdc.img").read_bytes()[:512] == src.read_bytes()[:512]
+
+
+def test_integration_the_mps3_pack_supplies_the_mbbios_rule():
+    """integ/bringup: the pack hook finds FIX-PACK-7's rule (with the CRLF and second-line
+    fixes), so the local copy is only a fallback for a pack without one."""
+    from harness_manager.services import cardwriter
+    from harness_manager_mps3 import mbbios
+    assert cardwriter.pack_mbbios() is mbbios.keep_mbbios
