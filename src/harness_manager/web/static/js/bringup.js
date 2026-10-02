@@ -86,7 +86,7 @@ export async function loadReader() {
       reason: bringupMissing(r.error) ? READER_MISSING : `${r.error.errName}: ${r.error.message}` };
   } else {
     const d = r.data.data || {};
-    G.reader = { enabled: d.enabled !== false, reason: d.reason || "", devices: d.devices || [] };
+    G.reader = { enabled: d.enabled !== false, reason: d.reason || "", devices: d.devices || [], platform: d.platform || "" };
     if (G.reader.enabled && !G.reader.devices.length) G.reader.reason = "no card reader with a card in it: put the card in this PC's reader, then Read again";
   }
   changed();
