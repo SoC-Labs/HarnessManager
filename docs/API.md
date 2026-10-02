@@ -759,10 +759,10 @@ A NEW board, plugged into this PC by its Debug USB, brought up to a running harn
   title, text, admin: [cmd], alternative?: [cmd], gui?, adapter?}]}`; `code` is `no_address`,
   `public_profile`, `udp_blocked`, `python_blocked` or `unknown`. Each `admin` line is
   Administrator PowerShell for the user to paste: HM never runs it. It rides on:
-  `GET /bringup/scan`'s `ethernet.network` when nothing answers; the `bringup_witness` job's
+  `POST /bringup/scan`'s `ethernet.network` when nothing answers; the `bringup_witness` job's
   timeout error data (`data.network`, beside `timeout`, `host`, `waited_s`); the CLI's `probe`
   and `info` errors (`--json`: `error.data.network`).
-- **`GET /bringup/status`** adds `platform` (`sys.platform` of the service: `win32`, `linux`,
+- **`GET /bringup`** (the status) adds `platform` (`sys.platform` of the service: `win32`, `linux`,
   `darwin`).
 - **The card writer on Windows** (`GET /cardwriter/devices` `platform: "win32"`,
   `supported: true`): each device's `path` is `\\.\PhysicalDriveN`, its `files_root` a drive
