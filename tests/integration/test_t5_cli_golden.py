@@ -329,12 +329,15 @@ def test_every_verb_has_a_success_and_a_failure_case():
     # board claim/ssh (LINUX-CLAIM) need a Linux FakeShell: pinned in test_linux_claim_cli.py.
     # slot and card (LINUX-SLOTS) need a FakeShell with slots and a card: test_lxslots_cli.py.
     # display (LM5) needs a fake lcd_mirror and its pack hook: pinned in test_lm5_display_cli.py.
+    # flash (SD-FLASH) needs fake lsblk/diskutil and the device seam: test_cardwriter_cli.py.
+    # bringup (BRINGUP-USB) needs a virtual Debug USB: pinned in test_bringup_cli.py.
     pinned_elsewhere = {"daemon", "ui", "app", "pty", "baud", "lease", "lease requests",
                         "lease respond", "lease leave", "lease dismiss", "share", "xdc",
                         "xdc info", "panel show", "panel mirror", "identify", "kit",
                         "kit list", "kit guide", "xvc", "xvc tcl", "xvc ltx", "hub",
                         "hub test", "hub targets", "hub change", "slot", "card",
-                        "display snapshot", "display status", "display show"} | {
+                        "display snapshot", "display status", "display show",
+                        "flash devices", "flash write", "bringup"} | {
         k for k in TSV_COLUMNS if k.startswith(("update ", "power ", "harness ", "config ",
                                                  "board "))}
     assert {c.layout for c in CASES if c.layout} == set(TSV_COLUMNS) - pinned_elsewhere
