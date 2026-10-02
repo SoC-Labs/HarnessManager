@@ -102,6 +102,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from harness_manager.core import sshcmd
 from harness_manager.core.errors import (
     ActionFailedError,
     AlreadyError,
@@ -112,6 +113,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.model import LinkKind
+from harness_manager.core.proc import no_window
 
 from . import slot_words as _slot_words
 from .constants import (
@@ -556,11 +558,12 @@ def run_ssh(argv: Sequence[str], timeout: float) -> RunResult:
     """Run one ssh command; stdin is closed (BatchMode: nothing may prompt)."""
     try:
         proc = subprocess.run(list(argv), stdin=subprocess.DEVNULL, capture_output=True,
-                              text=True, timeout=timeout)
+                              text=True, timeout=timeout, **no_window())
     except subprocess.TimeoutExpired as exc:
         raise UnreachableError(f"ssh did not finish within {timeout:.0f}s") from exc
     except OSError as exc:
-        raise UnreachableError(f"cannot run {argv[0]}: {exc}", hint="install the OpenSSH client") from exc
+        raise UnreachableError(f"cannot run {argv[0]}: {exc}",
+                               hint=sshcmd.install_hint()) from exc
     return RunResult(proc.returncode, proc.stdout or "", proc.stderr or "")
 
 
@@ -1084,7 +1087,8 @@ class Mps3Claim:
         kh = self._write_known_hosts(pin)
         return [*self._base_options(),
                 "-o", f"HostKeyAlias={host_key_alias(self.board_id)}",
-                "-o", f"UserKnownHostsFile={kh}", "-o", "GlobalKnownHostsFile=/dev/null",
+                "-o", f"UserKnownHostsFile={sshcmd.option_path(kh)}",
+                "-o", "GlobalKnownHostsFile=/dev/null",
                 "-o", "StrictHostKeyChecking=yes", "-o", "CheckHostIP=no",
                 "-o", "UpdateHostKeys=no"]
 
@@ -1114,7 +1118,7 @@ class Mps3Claim:
         host = self.board_host()
         if not host:
             raise UsageError(f"{self.board_id} has no board address for SSH")
-        argv = ["ssh", "-o", "ControlPath=none", "-o", "ControlMaster=no",
+        argv = [sshcmd.ssh_program(), "-o", "ControlPath=none", "-o", "ControlMaster=no",
                 "-o", "ConnectTimeout=15", *self.pinned_options()]
         if tty:
             argv.append("-t")
@@ -1131,8 +1135,9 @@ class Mps3Claim:
         alias = host_key_alias(self.board_id)
         with tempfile.TemporaryDirectory(prefix="hm-hostkey-", dir=ssh_dir()) as scratch:
             kh = Path(scratch) / "known_hosts"
-            argv = ["ssh", *ONE_SHOT_OPTIONS, *self._base_options(identity_file),
-                    "-o", f"HostKeyAlias={alias}", "-o", f"UserKnownHostsFile={kh}",
+            argv = [sshcmd.ssh_program(), *ONE_SHOT_OPTIONS, *self._base_options(identity_file),
+                    "-o", f"HostKeyAlias={alias}",
+                    "-o", f"UserKnownHostsFile={sshcmd.option_path(kh)}",
                     "-o", "GlobalKnownHostsFile=/dev/null",
                     "-o", "StrictHostKeyChecking=accept-new", "-o", "CheckHostIP=no",
                     "-o", "UpdateHostKeys=no"]

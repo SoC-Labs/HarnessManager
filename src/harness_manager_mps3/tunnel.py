@@ -71,8 +71,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
+from harness_manager.core import sshcmd
 from harness_manager.core.errors import HarnessError, UnreachableError, UsageError
 from harness_manager.core.model import Candidate, Link, LinkKind
+from harness_manager.core.proc import no_window
 from harness_manager.transports import tcp_serial as _tcp_serial  # noqa: F401 - registers tcp://
 
 from .constants import CONSOLE_PORTS, CONTROL_PORT, JTAG_RBB_PORT, PUSH_PORT, XVC_PORT
@@ -80,6 +82,8 @@ from .constants import CONSOLE_PORTS, CONTROL_PORT, JTAG_RBB_PORT, PUSH_PORT, XV
 log = logging.getLogger(__name__)
 
 VIA_SSH = "ssh"
+#: OpenSSH's system-wide client config on this OS (Windows: %ProgramData%\\ssh\\ssh_config).
+SYSTEM_CONFIG = sshcmd.system_config()
 #: T8: through the hub by routing when it can (lease gate + route), else its SSH tunnel.
 VIA_HUB = "hub"
 #: The marker in a link's ``detail`` that names the hub (``via ssh:HOST``).
@@ -246,7 +250,8 @@ _FORWARD_LINE = re.compile(r"^\s*(LocalForward|RemoteForward|DynamicForward|Clea
 def run_ssh_g(argv: Sequence[str]) -> str:
     """``ssh … -G HOST``: print the effective config. It evaluates the config and never connects."""
     try:
-        proc = subprocess.run(list(argv), capture_output=True, text=True, timeout=15)
+        proc = subprocess.run(list(argv), capture_output=True, text=True, timeout=15,
+                              stdin=subprocess.DEVNULL, **no_window())
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise UnreachableError(f"cannot run {argv[0]} -G: {exc}",
                                hint="is OpenSSH installed and on PATH?") from exc
@@ -280,7 +285,7 @@ def filtered_config_text(text: str, *, system_config: Path | None) -> str:
     if system_config is not None and system_config.is_file():
         # -F skips the system-wide config; include it LAST so the user's settings win
         # (ssh takes the first value it reads for most options).
-        lines += ["", "Host *", f"    Include {system_config}"]
+        lines += ["", "Host *", f"    Include {sshcmd.option_path(system_config)}"]
     return "\n".join(lines) + "\n"
 
 
@@ -293,7 +298,7 @@ def tunnel_config_dir() -> Path:
 def ssh_base_argv(host: str, *, ssh: str = "ssh",
                   ssh_g: Callable[[Sequence[str]], str] | None = None,
                   user_config: Path | None = None,
-                  system_config: Path | None = Path("/etc/ssh/ssh_config"),
+                  system_config: Path | None = SYSTEM_CONFIG,
                   config_dir: Path | None = None) -> list[str]:
     """``[ssh]`` or ``[ssh, "-F", <filtered copy>]`` (module docstring, "The user's LocalForward lines")."""
     ssh_g = ssh_g or DEFAULT_SSH_G
@@ -347,7 +352,8 @@ class _PopenProcess:
 
     def __init__(self, argv: Sequence[str]) -> None:
         self._proc = subprocess.Popen(list(argv), stdin=subprocess.DEVNULL,
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                      **no_window())     # no console window from the app
         self.pid = self._proc.pid
         self.stderr_tail = ""
         #: ``(monotonic time, line)`` for each "channel N: open failed: ..." ssh logged.
@@ -390,7 +396,7 @@ class _PopenProcess:
 def popen_launcher(argv: Sequence[str]) -> TunnelProcess:
     if shutil.which(argv[0]) is None and not Path(argv[0]).is_file():
         raise UnreachableError(f"{argv[0]} is not installed or not on PATH",
-                               hint="install the OpenSSH client")
+                               hint=sshcmd.install_hint())
     return _PopenProcess(argv)
 
 
@@ -544,7 +550,7 @@ class SshTunnel:
     """One supervised ``ssh -N`` carrying a set of forwards to one host."""
 
     def __init__(self, host: str, forwards: Sequence[Forward], *,
-                 launcher: Launcher | None = None, ssh: str = "ssh",
+                 launcher: Launcher | None = None, ssh: str = "",
                  ssh_g: Callable[[Sequence[str]], str] | None = None,
                  ready_timeout_s: float = READY_TIMEOUT_S, restart: bool = True,
                  backoff_s: Sequence[float] = BACKOFF_S,
@@ -552,7 +558,7 @@ class SshTunnel:
                  rand: Callable[[], float] = random.random,
                  on_state: Callable[[dict[str, Any]], None] | None = None,
                  label: str = "", user_config: Path | None = None,
-                 system_config: Path | None = Path("/etc/ssh/ssh_config"),
+                 system_config: Path | None = SYSTEM_CONFIG,
                  jump: str = "", user: str = "", options: Sequence[str] = ()) -> None:
         if not host:
             raise UsageError("an SSH tunnel needs a host")
@@ -571,7 +577,7 @@ class SshTunnel:
         self.options = tuple(options)
         self.label = label or f"ssh:{host}"
         self._launcher = launcher or DEFAULT_LAUNCHER
-        self._ssh = ssh
+        self._ssh = ssh or sshcmd.ssh_program()       # ssh.exe's full path on Windows
         self._ssh_g = ssh_g or DEFAULT_SSH_G
         self._user_config = user_config            # None: ~/.ssh/config
         self._system_config = system_config
