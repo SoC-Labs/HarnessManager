@@ -274,7 +274,7 @@ def test_the_mps3_pack_gives_its_policy_and_a_pack_without_one_the_generic():
     p = IA.policy_for(Engine())
     assert p.reserved_mac_prefixes == ("02:00:00",) and p.ip_pool == "192.168.10.110-199"
     assert p.reserved_ips == ("192.168.10.101",) and p.ip_pool_setting == "mps3.identity.ip_pool"
-    assert "mps3_01_pl" in p.known_bad_hub_records and "stage0 rescue" in p.rescue_note
+    assert "mps3_01_pl" in p.known_bad_hub_records and "recovery mode" in p.rescue_note
     assert p.answering("192.168.10.110") is False                          # the test seam
     assert IA.policy_for(object()) is IA.GENERIC_POLICY
 
