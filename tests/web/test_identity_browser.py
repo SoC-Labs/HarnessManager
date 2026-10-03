@@ -455,3 +455,20 @@ def test_twin_nothing_at_the_new_address_says_so_and_keeps_the_old_session(demo)
     expect(by(page, "toast")).to_contain_text("Not open at 192.168.10.199 yet: add it By address",
                                               timeout=T)
     assert BOARD_V011 in demo.engine.open_boards()
+
+
+def test_t2_the_intro_names_the_lease_only_for_a_board_behind_a_hub(demo):
+    page = demo.page()
+    open_stubbed(page, hub=True)
+    expect(by(page, "nb-intro")).to_contain_text("It needs your claim and your lease,", timeout=T)
+    assert not page.errors, page.errors
+
+
+def test_t2_twin_a_desk_board_gets_no_lease_wording(demo):
+    page = demo.page()
+    open_stubbed(page)
+    expect(by(page, "nb-intro")).to_contain_text("It needs your claim, and waits for no card job.",
+                                                 timeout=T)
+    assert "lease" not in by(page, "nb-intro").inner_text()
+    assert "mint" not in by(page, "name-board-modal").inner_text()
+    assert not page.errors, page.errors

@@ -245,7 +245,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
   return html`<${ModalShell} title="Name this board" icon="tag" cls="name-board" testid="name-board-modal"
       note=${(S.boards[bid] && S.boards[bid].candidate && S.boards[bid].candidate.name) || bid} foot=${foot}>
     <div class="stack gap-8 nb" data-testid="identity-dialog" data-mode=${mode}>
-      <p class="small secondary">Give this board its own name, MAC and IP. They are set on the board; then the harness restarts (its reboot verb, warm: the FPGA is not reloaded, never an MCC REBOOT) and the identity is read back. It needs your claim${((p && p.hub) || hubRec) ? " and your lease" : ""}, and waits for no card job.</p>
+      <p class="small secondary" data-testid="nb-intro">Give this board its own name, MAC and IP. They are set on the board; then the harness restarts (its reboot verb, warm: the FPGA is not reloaded, never an MCC REBOOT) and the identity is read back. It needs your claim${((p && p.hub) || hubRec) ? " and your lease" : ""}, and waits for no card job.</p>
       ${loading ? html`<${Reason} icon="loader-circle" text="Reading what the board says it is…" />` : null}
       ${b.netIdentityError && !st ? html`<${Reason} level="err" testid="nb-read-error" text=${`Harness Manager cannot read this board's identity: ${b.netIdentityError.errName}: ${b.netIdentityError.message}`} />` : null}
       ${!loading && refusal ? html`<${Reason} level="warn" testid="identity-refusal" text=${refusal} />` : null}

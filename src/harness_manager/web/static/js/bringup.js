@@ -92,6 +92,40 @@ export async function loadReader() {
   changed();
 }
 
+// --- the switch, inline: "Turn on card-reader writing" ---------------------------------------------
+// bringup.sd_flash is off by default (kept). Where the card-reader door is shut because the setting
+// is off, one click sets it on (the same PUT /settings the Settings dialog sends). Not offered when
+// the variable HARNESS_MANAGER_BRINGUP_SD_FLASH holds it off (a click here would change nothing).
+export const READER_SWITCH_TITLE = "Turn on card-reader writing";
+export const READER_SWITCH_NOTE = "Lets Harness Manager write SD cards in this PC's card reader; it lists only removable cards.";
+const SW = { busy: false, error: "" };
+
+function switchOffHere() {
+  const sw = G.status && G.status.sd_flash;
+  return !!sw && !sw.enabled && !String(sw.where || "").startsWith("$");
+}
+
+async function turnOnReader() {
+  SW.busy = true; SW.error = "";
+  changed();
+  const r = await timed("config set bringup.sd_flash on", () => call("settingsSet", {}, { "bringup.sd_flash": "on" }));
+  SW.busy = false;
+  if (r.error) SW.error = `${r.error.errName}: ${r.error.message}`;
+  changed();
+  if (!r.error) { G.reader = null; await loadStatus(); }
+}
+
+function ReaderSwitch({ where }) {
+  if (!switchOffHere()) return null;
+  return html`<div class="stack gap-8 mt-8" data-testid=${`bu-reader-enable-${where}`}>
+    <div class="row gap-8"><button type="button" class="btn sm" data-action=${`bu-reader-enable-${where}`}
+      disabled=${SW.busy} aria-busy=${SW.busy ? "true" : undefined} onClick=${turnOnReader}>
+      ${SW.busy ? html`<${Spinner} />` : html`<${Icon} name="memory-stick" />`} ${READER_SWITCH_TITLE}</button>
+      <span class="small secondary">${READER_SWITCH_NOTE}</span></div>
+    ${SW.error ? html`<${Reason} level="err" testid=${`bu-reader-enable-error-${where}`} text=${SW.error} />` : null}
+  </div>`;
+}
+
 // --- per-board state ---------------------------------------------------------------------------------
 
 export function bs(bid) {
@@ -660,6 +694,7 @@ function WriteStep({ bid, w, ready }) {
       options=${[{ value: "usb", label: "Over the Debug USB (the V2M-MPS3 drive)", icon: "usb" },
         { value: "reader", label: "SD card in this PC's card reader", icon: "memory-stick", title: reader.ok ? "" : reader.why }]} />
     ${usb && !reader.ok ? html`<p class="small muted mt-8" data-testid="bu-reader-off-note"><${Icon} name="circle-slash" cls="sm" /> SD card in this PC's card reader: ${reader.why}.</p>` : null}
+    ${usb && !reader.ok ? html`<${ReaderSwitch} where="write" />` : null}
     ${usb ? html`<div class="stack gap-8 mt-8">
       <div class="outcome warn bu-warn" data-testid="bu-usb-warning"><${Icon} name="triangle-alert" /><span><b>${st.usb_write_warning || USB_WARNING}</b></span></div>
       <${ArmBox} bid=${bid} armKey="bu_write" testid="arm-bu-write"
@@ -670,6 +705,7 @@ function WriteStep({ bid, w, ready }) {
       <${ResultBlock} lines=${pu.lines} panel=${pu} testid="bu-write-result" />
     </div>` : html`<div class="stack gap-8 mt-8">
       ${!reader.ok ? html`<${Reason} icon="circle-slash" testid="bu-reader-disabled" text=${`SD card in this PC's card reader: ${reader.why}.`} />` : null}
+      ${!reader.ok ? html`<${ReaderSwitch} where="write" />` : null}
       <p class="small secondary">Take the configuration SD out of the board (power it off first) and put it in this PC's card reader. Only a card reader the service lists is offered; never this PC's own disk, never the board's V2M-MPS3 drive.</p>
       ${reader.ok ? html`<${DevicePicker} w=${w} field="device" typedField="typedDevice" kind="files" />` : null}
       <${ArmBox} bid=${bid} armKey="bu_reader" testid="arm-bu-reader"
@@ -851,6 +887,7 @@ function OsStep({ bid, w }) {
       <label class="check-inline"><input type="radio" name=${`bu-os-${bid}`} disabled=${!!o.why} checked=${w.os === o.value}
         onChange=${() => { w.os = o.value; if (o.value === "skip") w.osDone = { how: "skip", at: Date.now() }; changed(); }} />${o.label}</label>
       ${o.why ? html`<div class="sub bu-why" data-testid=${`bu-os-why-${o.value}`}>Disabled: ${o.why}${o.note ? html`<br /><span class="muted">${o.note}</span>` : null}</div>` : null}
+      ${o.value === "reader" && o.why ? html`<${ReaderSwitch} where="os" />` : null}
     </li>`)}</ul>
     ${w.os === "reader" && choice.ok ? html`<div class="stack gap-8">
       <div class="field"><label for=${`bu-card-${bid}`}>Whole-card image</label>
