@@ -16,6 +16,7 @@
 | ``POST /kits/check`` ``{path, clearing?, static_id?, board_id?}`` | ``{passed, checks, facts}`` (200 either way: a query) |
 | ``POST /kits/pack`` ``{path, out_dir?, import?}`` | ``{overlay_dir, imported}``; 409 REFUSED with ``error.data.checks`` |
 | ``POST /overlays/import`` ``{path, board_id?, static_id?, check_only?}`` | UI2 G5: ``{kind, path, name, rm_id, static_id, passed, checks, groups, overlay_dir, imported}``; 409 INCOMPATIBLE/REFUSED with ``error.data`` = the same |
+| ``POST /overlays/import-folder`` ``{path, board_id?, static_id?, check_only?}`` | QUICKWINS G3: every design under a folder: ``{path, check_only, results: [{name, path, state: imported or skipped or refused or ready, reason, rm_id, static_id}], counts}``; 404 ABSENT when it holds none |
 | ``POST /overlays/upload?name=&board_id=&static_id=&check_only=`` (body: the zip) | UI2 G5: the same as ``/overlays/import``, plus ``upload: {name, bytes}``; 413 over 256 MB |
 | ``POST /kits/design/scan`` ``{path, name?, top?, static_id?, board_id?, rm_id?, out?}`` | UI2 G8 (e): ``{path, kind, name, top, tops, sources, include_dirs, defines, packages, generics, use, ports, rm_id, rm_id_proposed, left_out, warnings, design, written}`` |
 
@@ -330,6 +331,28 @@ def register(ctx: RouteContext) -> None:
                 "name": res.name, "rm_id": res.rm_id, "static_id": res.static_id,
                 "kind": res.kind, "sha256": (res.imported or {}).get("sha256", "")}))
         return _JSON(ok(board_id=bid or None, **res.to_json()))
+
+    @api.post("/overlays/import-folder")
+    def overlays_import_folder(body: JsonBody = None) -> Any:
+        """QUICKWINS G3: every design under a folder (a release's ``overlays/``), each imported,
+        skipped (another static) or refused with its reason. One bad design never stops the rest."""
+        b = _obj(body)
+        path = _abs_path(b.get("path"), "path")
+        check_only = b.get("check_only", False)
+        if not isinstance(check_only, bool):
+            raise UsageError("check_only must be true or false")
+        sid = static_arg(b["static_id"]) if b.get("static_id") else ""
+        bid = str(b["board_id"]) if b.get("board_id") else ""
+        ident = board_identity(ctx, bid) if bid else None
+        pack = pack_of(bid) if bid else "mps3"
+        out = overlay_import.import_folder(kits, path, identity=ident, static_id=sid, pack=pack,
+                                           store=kits.store, check_only=check_only)
+        for r in out["results"]:
+            if r["state"] == overlay_import.STATE_IMPORTED:
+                d.bus.publish(Event("kit.imported", bid, {
+                    "name": r["name"], "rm_id": r["rm_id"], "static_id": r["static_id"],
+                    "kind": "overlay", "sha256": (r.get("imported") or {}).get("sha256", "")}))
+        return _JSON(ok(board_id=bid or None, **out))
 
     @api.post("/overlays/upload")
     async def overlays_upload(request: Request, name: str = "design.zip",

@@ -6,15 +6,16 @@ from __future__ import annotations
 
 import pytest
 
-
 from harness_manager.demo_showcase import BOARD_LINUX, BOARD_V011
 from tests.web import nav
-from tests.web.test_bringup_browser import T, by, demo, over_usb  # noqa: F401  (the fixture)
+from tests.web import test_bringup_browser as _bb
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
 
 pytestmark = pytest.mark.browser
+T, by, over_usb = _bb.T, _bb.by, _bb.over_usb
+demo = _bb.demo                      # the fixture
 
 
 def overview(page, bid):

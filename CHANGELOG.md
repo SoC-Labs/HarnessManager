@@ -1181,3 +1181,18 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   "MPS3" (any case, exactly that) is no name: such a board is named by boards.toml, then the
   hub, then the hub target ("mps3-01"), else its address. "MPS3-02" is a name, as before.
 <!-- --- end integ v1.1 --- -->
+<!-- --- quickwins --- -->
+- **The installer puts the command on PATH** (QUICKWINS G5): when `~/.local/bin` is not on PATH it
+  appends ONE marked block to your shell's startup files (bash: `~/.bashrc` and the login file;
+  zsh: `~/.zshrc` and `~/.zprofile`), never twice, prints what it did, and `--uninstall` removes
+  it; `--no-path` skips it. macOS prints how to keep it in the Dock (no `.app`).
+- **Board facts** (G2): revision, MCC firmware (from LOG.TXT) and user microSD in `info`, the
+  board API, chips on the Overview ("Rev C", "MCC v1.3.2", "microSD: yes"; "untested" for
+  anything but Rev C and MCC v1.3.2) and the bring-up scan rows. Checked, never changed.
+- **Import a folder of designs** (G3): the Import dialog's "A folder of designs" and Settings →
+  Harness & kits → Designs import a release's `overlays/` in one click, listing each as
+  imported, skipped (another static) or refused with the reason (`POST /overlays/import-folder`).
+- **No internal names in the app's words** (T1), recovery-mode wording and lease text only for hub
+  boards in Name this board (T2), and "Turn on card-reader writing" inline in the bring-up
+  wizard (T3; the setting stays off by default).
+<!-- --- end quickwins --- -->
