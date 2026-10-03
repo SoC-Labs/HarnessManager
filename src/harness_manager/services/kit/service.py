@@ -177,8 +177,8 @@ class ChannelSource:
 
     @property
     def reason(self) -> str:
-        return "" if self.resolve else ("the signed channel's rm-kit component arrives with "
-                                         "lane OTA-C; use --source hub or a path meanwhile")
+        return "" if self.resolve else ("the signed channel's rm-kit component is not published yet; "
+                                         "use --source hub or a path")
 
     def describe(self) -> dict[str, Any]:
         return {"name": self.name, "available": not self.reason, "reason": self.reason}
