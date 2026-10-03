@@ -67,7 +67,7 @@ DESIGN_CLK_HZ = 50_000_000
 HARNESS_CHOICES = (9600, 19200, 38400, 57600, 76800, 115200, 230400, 460800, 921600)
 
 NO_CODEC = ("the harness reports 'uart_baud' but the installed pyverify has no uart_baud() "
-            "(the lane L6 codec); update pyverify")
+            "(an older harness codec); update pyverify")
 HUB_SHARE = "a hub share: the share sets the rate (change it on the hub, not here)"
 
 

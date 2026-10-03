@@ -394,7 +394,7 @@ def test_linux_comes_up_in_rescue_and_the_os_step_offers_the_whole_card_image(de
     expect(by(page, "bu-witness-result")).to_contain_text("stage0 RESCUE answers", timeout=T)
     os_step = by(page, "bu-step-os")
     expect(os_step).to_be_visible()
-    expect(by(page, "bu-os-why-network")).to_contain_text("comes with Linux v2.1 (HARNESS-DIST L3)")
+    expect(by(page, "bu-os-why-network")).to_contain_text("comes with Linux v2.1")
     expect(by(page, "bu-os-why-network")).to_contain_text("it does not write the card")
     expect(os_step.locator('[data-option="network"] input')).to_be_disabled()
     expect(by(page, "bu-os-why-reader")).to_contain_text("bringup.sd_flash")    # the switch is off

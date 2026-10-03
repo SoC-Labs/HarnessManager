@@ -503,7 +503,7 @@ def test_status_carries_the_switches_the_network_door_and_the_card_image_hint():
     st = bringup.status(object())
     assert st["default_host"] == "192.168.10.101"
     assert st["rescue_network"] == {"available": False,
-                                    "reason": "comes with Linux v2.1 (HARNESS-DIST L3)",
+                                    "reason": "comes with Linux v2.1",
                                     "note": bringup.RESCUE_NETWORK_NOTE}
     assert "stage0_mkcard.py card --card-img" in st["card_image"]["hint"]
     assert st["usb_write_warning"].startswith("A USB write can take 5 minutes")

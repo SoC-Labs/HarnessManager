@@ -76,7 +76,7 @@ SD_FLASH_ENV = "HARNESS_MANAGER_BRINGUP_SD_FLASH"
 SD_FLASH_ON = frozenset({"on", "true", "1", "yes"})
 SD_FLASH_OFF_REASON = (f"off: turn on {SD_FLASH_SETTING} in Settings (or set "
                        f"{SD_FLASH_ENV}=on) to write a card in this PC's card reader")
-RESCUE_NETWORK_REASON = "comes with Linux v2.1 (HARNESS-DIST L3)"
+RESCUE_NETWORK_REASON = "comes with Linux v2.1"
 RESCUE_NETWORK_NOTE = "stage0 rescue boots an image from RAM; it does not write the card"
 #: The Linux OS step writes a WHOLE-CARD image (SD-FLASH kind ``card``): the MBR at LBA 0, the
 #: boot-select at LBA 1-2, the slots at LBA 67584 and 198656. A slot image (linux_slot.img,

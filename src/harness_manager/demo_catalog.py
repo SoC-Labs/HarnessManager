@@ -71,7 +71,7 @@ NOTES = {
     "1.0.0": "The fielded static until 09-24.",
     "1.1.0": "RM ILAs over XVC; the ILA static 0x72BB0A36.",
     "1.1.1": "Firmware re-bake: the console flush fix.",
-    "2.0.0": "The MicroBlaze V Linux harness (mint 3, the rc2 static 0x44EE76D5).",
+    "2.0.0": "The MicroBlaze V Linux harness (the rc2 static 0x44EE76D5).",
 }
 STABLE = ("1.0.0", "1.1.0", "1.1.1")
 BETA = STABLE + ("2.0.0",)
@@ -540,7 +540,7 @@ def seed_history(state_dir: Path, bare_metal: str, linux: str) -> None:
             {"version": "2.0.0", "result": "installed", "kind": "install",
              "from_version": "1.1.0", "static_id": S_LNX, "fw_sha": FW_LNX,
              "doors": ["debug-usb"], "rekey": True,
-             "detail": "the Linux harness (mint 3), from the beta channel",
+             "detail": "the Linux harness, from the beta channel",
              "recorded_at": now - 1 * day}],
     }
     installed = read_json(state.installed, {}) or {}

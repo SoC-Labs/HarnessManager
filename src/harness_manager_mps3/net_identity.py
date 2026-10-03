@@ -109,9 +109,9 @@ DEFAULT_IP_POOL = "192.168.10.110-199"
 #: Never handed out: the generic image's address, which stage0 rescue answers on too.
 RESERVED_IPS = (BI.DEFAULT_IP,)
 RESERVED_IP_WHY = "the generic image's address and stage0 rescue's"
-RESCUE_NOTE = ("until mint 4, stage0 rescue still answers on 192.168.10.101 with the image's "
-               "default MAC 02:00:00:4d:50:53, whatever this board is named: look for a board "
-               "in rescue there")
+RESCUE_NOTE = ("in recovery mode the board still answers on 192.168.10.101 with its default "
+               "MAC 02:00:00:4d:50:53, whatever this board is named: look for a board "
+               "in recovery mode there")
 #: Hub records known to be wrong today (the hub's board_mac is its own USB adapter).
 KNOWN_BAD_HUB_RECORDS = {
     "mps3_01_pl": "its board_mac 00:e0:4c:46:dc:f8 is the hub's own USB adapter, not the board",

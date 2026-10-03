@@ -44,7 +44,7 @@ import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
 
 export const DEFAULT_HOST = "192.168.10.101";
 export const USB_WARNING = "A USB write can take 5 minutes: do not unplug, power off or start a second write.";
-export const NETWORK_OS_REASON = "comes with Linux v2.1 (HARNESS-DIST L3)";
+export const NETWORK_OS_REASON = "comes with Linux v2.1";
 export const READER_MISSING = "this build has no card-reader writer: use the Debug USB";
 // david 2 Oct (D3a): a bundle folder or zip is unsigned: this banner, its sha256, and the typed
 // INSTALL UNSIGNED <first 8 hex> before any write (the service refuses without it).
@@ -464,7 +464,7 @@ function ReleaseSource({ bid, w }) {
       <ul class="small">${(plan.steps || []).map((s, i) => html`<li key=${i}>${s.detail || s.what || s.step || JSON.stringify(s)}</li>`)}</ul>
       ${(plan.blockers || []).map((b) => html`<${Reason} key=${b} level="err" testid="release-blocker" text=${`The planner refuses this release here: ${b}`} />`)}
       ${(plan.blockers || []).length && linux(w) ? html`<${Reason} testid="release-linux-usb"
-        text="A Linux release cannot be installed over the Debug USB today: its OS image needs the running harness (HARNESS-DIST L3). Write its configuration SD from its bundle (a folder or zip), then the user microSD with a whole-card image in step 5." />` : null}
+        text="A Linux release cannot be installed over the Debug USB today: its OS image needs the running harness. Write its configuration SD from its bundle (a folder or zip), then the user microSD with a whole-card image in step 5." />` : null}
       ${plan.consent_phrase ? html`<div class="field"><label>Type <code>${plan.consent_phrase}</code></label>
         <input class="input mono grow" data-testid="release-phrase" value=${w.typed}
           onInput=${(e) => { w.typed = e.target.value; changed(); }} /></div>` : null}

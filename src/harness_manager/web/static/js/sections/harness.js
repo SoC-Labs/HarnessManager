@@ -24,7 +24,7 @@ import { heldLines } from "./power.js";
 import { BringupButton, usbOnly } from "../bringup.js";       // BRINGUP-USB
 
 export const DOOR_TEXT = "needs Debug USB here, or a hub that can write its SD";
-export const NOT_YET = "Not yet: the A/B config SD (U8) waits for its board check. Today a local "
+export const NOT_YET = "Not yet: the A/B config SD waits for its board check. Today a local "
   + "install rewrites the config SD in place, with a backup first; an install via the hub writes "
   + "nanosoc.bit only, keeps the previous one, and reverts a board that stays dark.";
 // HUB-SD: what each phase of an install via the hub is doing (update.progress phases).

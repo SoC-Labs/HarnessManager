@@ -116,7 +116,7 @@ def test_name_this_board_from_access_names_it_with_a_random_mac_and_a_pool_ip(de
     expect(by(page, "nb-ip-note")).to_have_text(
         "This PC must be on the same /24 (e.g. 192.168.10.1/24).")
     expect(by(page, "nb-rescue")).to_contain_text(
-        "Until mint 4, stage0 rescue still answers on 192.168.10.101 with the image's default "
+        "In recovery mode the board still answers on 192.168.10.101 with its default "
         "MAC 02:00:00:4d:50:53")
     changes = by(page, "identity-changes")
     expect(changes.locator('li[data-field="label"]')).to_contain_text("MPS3 → LAB-07")
@@ -260,7 +260,7 @@ def proposal(q: dict, *, hub: bool = False, local: str = "") -> dict:
                         "moving": False},
             "pool": {"range": "192.168.10.110-199", "setting": "mps3.identity.ip_pool"},
             "rules": {"name_max": 16}, "notes": [],
-            "rescue_note": "until mint 4, stage0 rescue still answers on 192.168.10.101",
+            "rescue_note": "in recovery mode the board still answers on 192.168.10.101",
             "hub": {"name": "mapstone-dev", "target": "mps3_02_pl", "record": HUB,
                     "known_bad": {"mps3_01_pl": "its board_mac 00:e0:4c:46:dc:f8 is the hub's "
                                                 "own USB adapter, not the board"},

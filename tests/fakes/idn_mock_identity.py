@@ -184,8 +184,8 @@ class _SimAdapter:
         return IdentityPolicy(pack="mps3", reserved_mac_prefixes=("02:00:00",),
                               ip_pool="192.168.10.110-199", ip_pool_setting="mps3.identity.ip_pool",
                               reserved_ips=("192.168.10.101",),
-                              rescue_note="until mint 4, stage0 rescue still answers on "
-                                          "192.168.10.101 with the image's default MAC",
+                              rescue_note="in recovery mode the board still answers on "
+                                          "192.168.10.101 with its default MAC",
                               known_bad_hub_records={"mps3_01_pl": "its board_mac is the hub's "
                                                                    "own USB adapter"})
 
