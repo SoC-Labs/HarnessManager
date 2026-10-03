@@ -222,6 +222,21 @@ def drive_facts(path: str) -> dict[str, Any]:
     return facts
 
 
+def drive_board_facts(path: str) -> dict[str, Any] | None:
+    """The board's revision and the MCC's firmware, from the V2M-MPS3 drive's LOG.TXT (and its
+    one MB/HBI0309* folder); None when neither is there. Reads only; never raises."""
+    try:
+        from harness_manager.services import board_facts
+        from harness_manager_mps3.sd import board_revision_of, mcc_firmware_of
+
+        root = Path(path)
+        rev, rev_from = board_revision_of(root)
+        fw, fw_from = mcc_firmware_of(root)
+        return board_facts.build(rev, rev_from, fw, fw_from)
+    except Exception:  # noqa: BLE001 - a fact that cannot be read is unknown
+        return None
+
+
 @dataclass
 class ScanBoard:
     candidate: Candidate
@@ -229,6 +244,7 @@ class ScanBoard:
     open_here: bool = False
     holder: str = ""
     drive: dict[str, Any] | None = None
+    facts: dict[str, Any] | None = None     # QUICKWINS G2: revision, MCC firmware (read only)
     mcc_answer: dict[str, Any] = field(default_factory=lambda: {"state": "not-asked", "text": ""})
     ethernet: dict[str, Any] | None = None
     problems: list[str] = field(default_factory=list)
@@ -238,7 +254,7 @@ class ScanBoard:
 
         return {"board_id": self.candidate.board_id, "candidate": jsonable(self.candidate),
                 **self.links, "open": self.open_here, "holder": self.holder,
-                "drive": self.drive, "mcc_answer": self.mcc_answer,
+                "drive": self.drive, "facts": self.facts, "mcc_answer": self.mcc_answer,
                 "ethernet": self.ethernet, "problems": list(self.problems),
                 "evidence": self.candidate.evidence}
 
@@ -376,6 +392,7 @@ def scan(engine: Any, *, host: str = DEFAULT_HOST, ask: bool = False,
             b.holder = owner.describe() if hasattr(owner, "describe") else str(owner)
         if links["volume"] is not None:
             b.drive = drive_facts(links["volume"]["path"])
+            b.facts = drive_board_facts(links["volume"]["path"])
         b.problems = _problems(links)
         if ask and links["mcc"] is not None:
             b.mcc_answer = ask_mcc(engine, cand, gate=gate)

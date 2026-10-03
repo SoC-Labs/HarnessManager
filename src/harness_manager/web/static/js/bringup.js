@@ -28,6 +28,7 @@ import { closeModal, ModalShell, openModal, registerModal } from "./modal.js";
 import { boardState, changed, loadBoards, log, navigate, probe, S, select, setJob, timed, toast } from "./store.js";
 import { ActionRow, ArmBox, Chip, Icon, Reason, ResultBlock, Seg, Spinner } from "./ui.js";
 import { week } from "./week.js";
+import { factChips } from "./sections/boardfacts.js";
 import { NO_IDENTITY_STORE } from "./sections/identity.js";
 import { openBoardHere } from "./sidebar.js";
 import { backupSpec, SdRecovery } from "./sections/sd.js";
@@ -281,6 +282,7 @@ function UsbRow({ row }) {
       <dt>MCC</dt><dd data-testid="usb-mcc"><${MccLine} row=${row} /></dd>
       <dt>Drive</dt><dd data-testid="usb-drive"><${DriveLine} row=${row} /></dd>
       <dt>Ethernet</dt><dd><${EthLine} eth=${row.ethernet} /></dd>
+      ${factChips(row.facts).length ? html`<dt>Board</dt><dd data-testid="usb-facts">${factChips(row.facts).map((c) => html`<${Chip} key=${c.key} level=${c.level} title=${c.title} testid=${`usb-fact-${c.key}`}>${c.text}<//> `)}</dd>` : null}
     </dl>
     ${(row.problems || []).map((p) => html`<${Reason} key=${p} level="warn" testid="usb-problem" text=${p} />`)}
     <div class="row bu-usb-foot">

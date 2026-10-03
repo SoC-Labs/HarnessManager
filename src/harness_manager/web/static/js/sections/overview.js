@@ -32,7 +32,7 @@ import {
 import { checksOf } from "./checks.js";
 import { front, FrontPanelCard, readPanelNow } from "./panel.js";
 import { loadXvc, viewState, xvc } from "./xvc.js";
-import { mccRoute, USB_WORDS } from "./boardfacts.js";   // UI2-POLISH: one Debug USB vocabulary
+import { factChips, mccRoute, USB_WORDS } from "./boardfacts.js";   // UI2-POLISH: one Debug USB vocabulary
 
 // --- small helpers ---------------------------------------------------------------------------------
 
@@ -364,6 +364,7 @@ function IdentityStrip({ bid }) {
     <span class="ov-id-i" data-testid="ov-uptime" title=${up ? `Source: ${info.readings_source || "the harness"} at ${hhmm(at)} (the harness has run this long${osUp ? `; the OS: ${osUp}` : ""}), plus the time since`
         : "The harness's uptime is read with its stats; this read had none"}>
       <span class="ov-id-k">Up</span>${up ? html`<span class="num">${up}</span>` : html`<span class="muted">not reported</span>`}</span>
+    ${factChips(info.facts).length ? html`<span class="ov-id-i" data-testid="ov-facts">${factChips(info.facts).map((c) => html`<${Chip} key=${c.key} level=${c.level} cls="ov-chip-sm" title=${c.title} testid=${`ov-fact-${c.key}`}>${c.text}<//>`)}</span>` : null}
     <span class="ov-id-i"><span class="ov-id-k">Debug USB</span>
       <button type="button" class=${`chip ov-chip-sm ${U.level}`} data-testid="ov-usb" data-usb=${r.to}
         title=${`${r.reason || U.text} · Board › Connections`} onClick=${() => navigate(bid, "board/connections")}>

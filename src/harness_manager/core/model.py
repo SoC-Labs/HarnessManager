@@ -133,3 +133,7 @@ class BoardInfo:
     # services.board_identity). None where there is no Ethernet harness to ask, and then the
     # key is left OUT of the JSON (``omit_none``).
     net_identity: dict[str, Any] | None = field(default=None, metadata={"omit_none": True})
+    # QUICKWINS G2: what the board is, read-only: {revision, revision_from, revision_tested,
+    # mcc_fw, mcc_fw_from, mcc_fw_tested, user_sd} (services.board_facts; "" / None = not
+    # known). None when no seam knows anything; then the key is left OUT of the JSON.
+    facts: dict[str, Any] | None = field(default=None, metadata={"omit_none": True})

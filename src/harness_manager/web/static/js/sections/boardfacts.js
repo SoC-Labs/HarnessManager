@@ -158,3 +158,18 @@ export function uptimeText(s) {
   if (h < 48) return `${h} h ${m % 60} min`;
   return `${Math.floor(h / 24)} d ${h % 24} h`;
 }
+
+// --- quickwins G2: revision, MCC firmware, user microSD (services/board_facts.py says the same) ---
+// facts = {revision: "C", revision_tested, mcc_fw: "v1.3.2", mcc_fw_tested, user_sd: true|false|null}.
+// Anything other than MCC v1.3.2 / Rev C is "untested". Checked, never changed: no MCC update is offered.
+export function factChips(facts) {
+  const f = facts || {};
+  const out = [];
+  if (f.revision) out.push({ key: "rev", level: f.revision_tested ? "ok" : "warn", text: `Rev ${f.revision}${f.revision_tested ? "" : ": untested"}`,
+    title: `Board revision ${f.revision}${f.revision_from ? ` (from ${f.revision_from})` : ""}. ${f.revision_tested ? "Tested." : "Only Rev C is tested."}` });
+  if (f.mcc_fw) out.push({ key: "mcc", level: f.mcc_fw_tested ? "ok" : "warn", text: `MCC ${f.mcc_fw}${f.mcc_fw_tested ? "" : ": untested"}`,
+    title: `MCC firmware ${f.mcc_fw}${f.mcc_fw_from ? ` (from ${f.mcc_fw_from})` : ""}. ${f.mcc_fw_tested ? "Tested." : "Only v1.3.2 is tested. Harness Manager checks it and never updates it."}` });
+  if (f.user_sd === true || f.user_sd === false) out.push({ key: "sd", level: f.user_sd ? "ok" : "warn", text: `microSD: ${f.user_sd ? "yes" : "no"}`,
+    title: f.user_sd ? "The Linux harness sees a card in the user microSD slot." : "The Linux harness sees no card in the user microSD slot." });
+  return out;
+}
