@@ -592,6 +592,7 @@ The Import dialog (UI_V2_PLAN.md M6) and the Build section's Design, Build and C
 | Method and path | Returns |
 |---|---|
 | `POST /overlays/import` `{path, board_id?, static_id?, check_only?}` | `{board_id, kind, path, name, rm_id, static_id, passed, checks, groups, overlay_dir, imported}`; 409 INCOMPATIBLE or REFUSED with `error.data` = the same object and nothing imported |
+| `POST /overlays/import-folder` `{path, board_id?, static_id?, check_only?}` | QUICKWINS G3: every design under a folder: `{board_id, path, check_only, results, counts}`; see Quick wins |
 | `POST /overlays/upload?name=&board_id=&static_id=&check_only=` (body: the zip's bytes) | the same as `POST /overlays/import`, plus `upload: {name, bytes}`; 413 over 256 MB |
 | `POST /kits/design/scan` `{path, name?, top?, rm_id?, static_id?, board_id?, out?}` | `{static_id, path, kind, name, top, tops, sources, include_dirs, defines, packages, generics, use, ports, rm_id, rm_id_proposed, left_out, warnings, design, written}` |
 

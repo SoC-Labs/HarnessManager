@@ -26,7 +26,8 @@ KIT_ROUTES = {
     "kitZip": ("GET", "/kits/{}/zip"), "guideScript": ("POST", "/guide/script"),
     "kitPack": ("POST", "/kits/pack"), "designScan": ("POST", "/kits/design/scan"),
 }
-IMPORT_ROUTES = {"overlayImport": ("POST", "/overlays/import"), "overlayUpload": ("POST", "/overlays/upload")}
+IMPORT_ROUTES = {"overlayImport": ("POST", "/overlays/import"), "overlayUpload": ("POST", "/overlays/upload"),
+                 "overlayImportFolder": ("POST", "/overlays/import-folder")}
 
 
 def called_names(js: str) -> set[str]:

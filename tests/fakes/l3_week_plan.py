@@ -212,6 +212,7 @@ EXTENSION_ROUTES["card_api"] = EXTENSION_ROUTES["card_api"] + (
 )
 EXTENSION_ROUTES["kit_api"] = EXTENSION_ROUTES["kit_api"] + (
     ("POST", "/overlays/import"),
+    ("POST", "/overlays/import-folder"),
     ("POST", "/overlays/upload"),
     ("POST", "/kits/design/scan"),
 )

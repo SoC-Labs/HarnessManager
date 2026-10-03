@@ -83,7 +83,7 @@ const WAYS = [
 ];
 
 // The words of one row of "A folder of designs" (the guide quotes them).
-export const FOLDER_STATE = { imported: "imported", skipped: "skipped: built for another static", refused: "refused", ready: "ready to import" };
+export const FOLDER_STATE = { imported: "imported", skipped: "skipped: built for another static", refused: "refused", ready: "ready" };
 export function folderRowText(r) {
   const head = r.state === "skipped" ? "skipped" : FOLDER_STATE[r.state] || r.state;
   return r.state === "skipped" || r.state === "refused" ? `${head}: ${r.reason}` : `${head}${r.reason ? ` (${r.reason})` : ""}`;
