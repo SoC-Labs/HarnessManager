@@ -28,6 +28,9 @@
 #                   in constraints.txt (it rebuilds the venv).
 #   --no-desktop    do not add Harness Manager to the application menu (Linux).
 #   --desktop       add it again after an earlier --no-desktop.
+#   --no-path       do not edit your shell startup files when the command's directory
+#                   is not on PATH (the default adds ONE marked block to them).
+#   --path          add it again after an earlier --no-path.
 #   --force         replace an existing harness-manager command that this
 #                   script did not write.
 #   --uninstall     stop the service, remove the venv, the self-updated versions,
@@ -73,7 +76,7 @@ desktop_file="$apps_dir/harness-manager.desktop"
 icon_file="$data_home/icons/hicolor/scalable/apps/harness-manager.svg"
 os="$(uname -s)"
 
-src="" ref="" python="" use_uv=1 force=0 uninstall=0 offline="" latest=0 desktop=""
+src="" ref="" python="" use_uv=1 force=0 uninstall=0 offline="" latest=0 desktop="" editpath=""
 extras=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -91,6 +94,8 @@ while [[ $# -gt 0 ]]; do
         --latest) latest=1; shift ;;
         --no-desktop) desktop=0; shift ;;
         --desktop) desktop=1; shift ;;
+        --no-path) editpath=0; shift ;;
+        --path) editpath=1; shift ;;
         --force) force=1; shift ;;
         --uninstall) uninstall=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -150,10 +155,12 @@ if [[ -f "$record" ]]; then
         case "$key" in
             extras) extras="$value $extras" ;;
             desktop) [[ -n "$desktop" ]] || desktop="$value" ;;
+            path) [[ -n "$editpath" ]] || editpath="$value" ;;
         esac
     done <"$record"
 fi
 [[ -n "$desktop" ]] || desktop=1
+[[ -n "$editpath" ]] || editpath=1
 # Deduplicated and in a fixed order: the set of extras, kept across re-runs.
 wanted=""
 for e in app ina260 serial; do
@@ -218,6 +225,66 @@ remove_desktop_entry() {
     fi
 }
 
+PATH_BEGIN="# >>> harness-manager PATH (written by scripts/install.sh) >>>"
+PATH_END="# <<< harness-manager PATH <<<"
+
+# The startup files to edit for a shell: new terminals, then login shells (ssh, `bash -l`).
+# bash's login file is the first that exists of ~/.bash_profile, ~/.bash_login, ~/.profile
+# (a new ~/.bash_profile would hide an existing ~/.profile), else ~/.bash_profile.
+# macOS Terminal starts login shells: bash gets the login file only. fish, tcsh and csh
+# are not edited (path_advice tells them what to do).
+path_files() {  # SHELL-NAME OS HOME
+    local sh="$1" os_="$2" home="$3" f login=.bash_profile
+    case "$sh" in
+        zsh) echo .zshrc; echo .zprofile ;;
+        bash)
+            for f in .bash_profile .bash_login .profile; do
+                if [[ -f "$home/$f" ]]; then login="$f"; break; fi
+            done
+            if [[ "$os_" != Darwin ]]; then echo .bashrc; fi
+            echo "$login" ;;
+    esac
+}
+
+# Remove our marked block from file $1 (no-op when it has none).
+strip_path_block() {
+    local f="$1" tmp
+    [[ -f "$f" ]] && grep -qF "$PATH_BEGIN" "$f" 2>/dev/null || return 0
+    tmp="$f.hm-tmp"
+    awk -v b="$PATH_BEGIN" -v e="$PATH_END" '
+        $0 == b { skip = 1; next }
+        skip && $0 == e { skip = 0; next }
+        !skip { print }' "$f" >"$tmp" && cat "$tmp" >"$f"
+    rm -f "$tmp"
+}
+
+# Append the one marked block to file $1, once: a re-install finds it and adds nothing.
+# $2 is the PATH line. Prints what it did.
+add_path_block() {
+    local f="$1" line="$2"
+    if [[ -f "$f" ]] && grep -qxF "$line" "$f" && grep -qF "$PATH_BEGIN" "$f"; then
+        say "path     $f already has the Harness Manager PATH block"
+        return 0
+    fi
+    strip_path_block "$f"   # an older block, for another directory
+    if ! { if [[ -s "$f" && -n "$(tail -c 1 "$f")" ]]; then printf '\n' >>"$f"; fi
+           printf '%s\n%s\n%s\n' "$PATH_BEGIN" "$line" "$PATH_END" >>"$f"; } 2>/dev/null; then
+        note "could not write $f"
+        return 1
+    fi
+    say "path     added the PATH block to $f"
+}
+
+remove_path_blocks() {
+    local f
+    for f in .bashrc .bash_profile .bash_login .profile .zshrc .zprofile; do
+        if [[ -f "$HOME/$f" ]] && grep -qF "$PATH_BEGIN" "$HOME/$f" 2>/dev/null; then
+            strip_path_block "$HOME/$f"
+            say "removed  the PATH block from $HOME/$f"
+        fi
+    done
+}
+
 if [[ $uninstall -eq 1 ]]; then
     stop_daemons
     if [[ -e "$launcher" || -L "$launcher" ]]; then
@@ -225,6 +292,7 @@ if [[ $uninstall -eq 1 ]]; then
         else note "left $launcher alone: this script did not write it"; fi
     fi
     remove_desktop_entry
+    remove_path_blocks
     if [[ -d "$venv" ]]; then rm -rf "$venv"; say "removed  $venv"; fi
     # The self-updated versions are venvs, not settings: they go too, from the install
     # root and from where an older install kept them.
@@ -525,8 +593,8 @@ else
     fi
 fi
 version="$("$venv/bin/harness-manager" version)" || die "the installed harness-manager does not run"
-printf '# Written by scripts/install.sh: the choices a re-run keeps.\nextras=%s\ndesktop=%s\n' \
-    "$extras" "$desktop" >"$record"
+printf '# Written by scripts/install.sh: the choices a re-run keeps.\nextras=%s\ndesktop=%s\npath=%s\n' \
+    "$extras" "$desktop" "$editpath" >"$record"
 
 # -- uv in the venv: the app's self-update builds each new version with it ------------------
 if [[ ! -x "$venv/bin/uv" ]]; then
@@ -667,7 +735,26 @@ case ":$PATH:" in
         case "$bin_dir" in "$HOME"/*) shown_dir="\$HOME/${bin_dir#"$HOME"/}" ;; esac
         say ""
         say "$bin_dir is not on your PATH yet."
-        path_advice "$(basename "${SHELL:-sh}")" "$shown_dir" "$bin_dir" "$os" "$HOME"
+        sh_name="$(basename "${SHELL:-sh}")"
+        pfiles="$(path_files "$sh_name" "$os" "$HOME")"
+        pline="export PATH=\"$shown_dir:\$PATH\""
+        case "$bin_dir" in *[\"\`\\]*|*$'\n'*) pfiles="" ;; esac   # not quotable in a shell file
+        if [[ "$editpath" == 1 && -n "$pfiles" ]]; then
+            say "Adding it, in one marked block, to your shell startup files (--no-path skips this):"
+            added=0
+            while IFS= read -r pf; do
+                if add_path_block "$HOME/$pf" "$pline"; then added=1; fi
+            done <<<"$pfiles"
+            if [[ $added -eq 1 ]]; then
+                say "    $pline"
+                say "New terminals have it; this one does not. Open a new terminal, or run that line."
+            else
+                path_advice "$sh_name" "$shown_dir" "$bin_dir" "$os" "$HOME"
+            fi
+        else
+            if [[ "$editpath" != 1 ]]; then say "(--no-path: your shell files are left alone.)"; fi
+            path_advice "$sh_name" "$shown_dir" "$bin_dir" "$os" "$HOME"
+        fi
         say "Until then, run it by its full path, as below."
         ;;
 esac
@@ -693,4 +780,9 @@ if [[ "$os" == Linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
     say "                      (no display here: it prints the URL and the ssh -L command)"
 fi
 say "  $hm info 192.168.10.101    a real board on your network"
+if [[ "$os" == Darwin ]]; then
+    say ""
+    say "Dock: run \`$hm app\`, right-click the app's Dock icon, Options, Keep in Dock."
+    say "(There is no .app bundle.)"
+fi
 say "Guide: $checkout/docs/USER_GUIDE.md"

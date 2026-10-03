@@ -208,6 +208,7 @@ def test_help_lists_every_option():
     out = subprocess.run(["bash", str(INSTALL), "--help"], capture_output=True, text=True,
                          check=True).stdout
     for opt in ("--offline DIR", "--latest", "--no-desktop", "--desktop", "--with-serial",
+                "--no-path", "--path",
                 "--uninstall", "HTTPS_PROXY"):
         assert opt in out, opt
 
@@ -226,7 +227,9 @@ def test_lifecycle_install_rerun_upgrade_uninstall(box: Box, wheelhouse: Path, t
     assert box.py("import fakeserial, fakedep; print(fakedep.V)") == "1.0"   # the pin
     assert "is not on your PATH yet" in res.stdout
     assert 'export PATH="$HOME/.local/bin:$PATH"' in res.stdout
-    assert names_a_login_file(res.stdout)                # FIX-PACK-3: not ~/.bashrc alone
+    # G5: the installer edits the files itself; FIX-PACK-3's rule (a login file, not
+    # ~/.bashrc alone) now applies to the files it writes.
+    assert "/.bashrc" in res.stdout and "/.bash_profile" in res.stdout
     assert "Until then, run it by its full path" in res.stdout
     assert f"  {box.hm} app --demo" in res.stdout       # Next: runs by its full path
     assert not (box.root / ".install.lock").exists()
@@ -854,3 +857,74 @@ def test_the_docs_give_the_installers_advice():
 
 def test_negative_twin_the_old_guide_hint_named_no_file():
     assert not names_a_login_file(OLD_GUIDE_HINT)
+
+
+# -- G5: the installer puts the command on PATH itself -------------------------------------------
+
+BEGIN = "# >>> harness-manager PATH (written by scripts/install.sh) >>>"
+LINE = 'export PATH="$HOME/.local/bin:$PATH"'
+
+
+def test_g5_path_block_is_added_once_and_reaches_a_login_shell(box: Box, wheelhouse: Path):
+    (box.home / ".bashrc").write_text("# mine\nalias a=b")          # no trailing newline
+    res = box.run(*offline(wheelhouse))
+    assert "added the PATH block to" in res.stdout and "--no-path" in res.stdout
+    for f in (".bashrc", ".bash_profile"):
+        text = (box.home / f).read_text()
+        assert text.count(BEGIN) == 1 and text.count(LINE) == 1, f
+    assert (box.home / ".bashrc").read_text().startswith("# mine\nalias a=b\n")
+    box.run(*offline(wheelhouse))                                   # re-install: no duplicate
+    box.run(*offline(wheelhouse))
+    for f in (".bashrc", ".bash_profile"):
+        assert (box.home / f).read_text().count(BEGIN) == 1, f
+    if LINUX:
+        assert str(box.bin) in _login_path(["bash", "-lc"], box.home)
+    # Uninstall takes the block out and keeps the user's own lines.
+    box.run("--uninstall")
+    assert BEGIN not in (box.home / ".bashrc").read_text()
+    assert "alias a=b" in (box.home / ".bashrc").read_text()
+
+
+def test_g5_negative_twin_no_path_and_on_path_edit_nothing(box: Box, wheelhouse: Path):
+    res = box.run(*offline(wheelhouse, "--no-path"))
+    assert "--no-path: your shell files are left alone" in res.stdout
+    assert not (box.home / ".bashrc").exists() and not (box.home / ".bash_profile").exists()
+    assert "extras=" in (box.root / "install.conf").read_text()
+    assert "path=0" in (box.root / "install.conf").read_text()
+    box.run(*offline(wheelhouse))                                   # remembered
+    assert not (box.home / ".bashrc").exists()
+    box.run(*offline(wheelhouse, "--path"))                         # asked again
+    assert BEGIN in (box.home / ".bashrc").read_text()
+    box.run("--uninstall")
+
+
+def test_g5_on_path_install_edits_no_file(box: Box, wheelhouse: Path):
+    box.run(*offline(wheelhouse), env=box.env(on_path=True))
+    assert not (box.home / ".bashrc").exists() and not (box.home / ".bash_profile").exists()
+
+
+def test_g5_login_file_choice_zsh_and_unquotable_shells(box: Box, wheelhouse: Path):
+    (box.home / ".profile").write_text("# debian\n")      # bash reads this, not a new .bash_profile
+    box.run(*offline(wheelhouse))
+    assert BEGIN in (box.home / ".profile").read_text()
+    assert not (box.home / ".bash_profile").exists()
+    box.run("--uninstall")
+    box.run(*offline(wheelhouse), env=box.env(SHELL="/bin/zsh"))
+    assert BEGIN in (box.home / ".zshrc").read_text() and BEGIN in (box.home / ".zprofile").read_text()
+    box.run("--uninstall")
+    res = box.run(*offline(wheelhouse), env=box.env(SHELL="/usr/bin/fish"))   # advice only
+    assert "fish_add_path" in res.stdout and BEGIN not in (box.home / ".zshrc").read_text()
+
+
+def test_g5_a_changed_bin_dir_replaces_the_old_block(box: Box, wheelhouse: Path):
+    box.run(*offline(wheelhouse))
+    other = box.home / "tools" / "bin"
+    box.run(*offline(wheelhouse), env=box.env(HARNESS_MANAGER_BIN_DIR=str(other)))
+    text = (box.home / ".bashrc").read_text()
+    assert text.count(BEGIN) == 1 and "$HOME/tools/bin" in text and ".local/bin" not in text
+
+
+def test_g5_macos_dock_text_only_on_darwin(box: Box, wheelhouse: Path):
+    res = box.run(*offline(wheelhouse))
+    assert ("Keep in Dock" in res.stdout) == (not LINUX)
+    assert "--no-desktop" in (INSTALL.read_text())
