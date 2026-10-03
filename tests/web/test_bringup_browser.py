@@ -730,8 +730,9 @@ def test_next_proposes_a_name_from_the_mcc_usb_serial_a_random_mac_and_a_pool_ip
     expect(by(page, "bu-witness-result")).to_contain_text("a harness answers", timeout=T)
     expect(by(page, "bu-id-serial")).to_have_text("DEMO20")
     expect(by(page, "bu-id-label")).to_have_text("MPS3-MO20")
-    expect(by(page, "bu-id-ip")).to_have_text("192.168.10.110")         # the pool's first
     mac = by(page, "bu-id-mac").inner_text()
+    # the pool's start is the random MAC's last byte mod the pool (110 + mac[5] mod 90)
+    expect(by(page, "bu-id-ip")).to_have_text(f"192.168.10.{110 + int(mac[-2:], 16) % 90}")
     assert mac.startswith("02:") and not mac.startswith("02:00:00:")       # random, not derived
     expect(by(page, "bu-id-same-net")).to_have_text(
         "This PC must be on the same /24 (e.g. 192.168.10.1/24).")
