@@ -298,9 +298,15 @@ class HarnessdSetter:
             return shell.call_raw(lambda c, _tap: request(c, msg))
 
 
+def _run_one_shot(argv: Any, timeout: float) -> Any:
+    from harness_manager.core.proc import no_window
+
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False,
+                          stdin=subprocess.DEVNULL, **no_window())
+
+
 #: ``(argv, timeout) -> CompletedProcess``: a one-shot ssh (a test seam).
-DEFAULT_RUN: Callable[..., Any] = lambda argv, timeout: subprocess.run(  # noqa: E731
-    argv, capture_output=True, text=True, timeout=timeout, check=False)
+DEFAULT_RUN: Callable[..., Any] = _run_one_shot
 
 
 class SshCommandSetter:

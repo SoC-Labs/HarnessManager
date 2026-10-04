@@ -235,7 +235,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
   const macOpts = [{ value: "random", label: "Random", title: "A random locally administered MAC (02:...)" },
     { value: "keep", label: "Keep", title: "The MAC the board has now" },
     { value: "custom", label: "Custom", title: "Your own: unicast, not 02:00:00:*" }];
-  const ipOpts = [{ value: "auto", label: "Auto", title: `The next free address of the pool${p && p.pool && p.pool.range ? ` (${p.pool.range})` : ""}` },
+  const ipOpts = [{ value: "auto", label: "Auto", title: `A free address of the pool, searched from the MAC${p && p.pool && p.pool.range ? ` (${p.pool.range})` : ""}` },
     { value: "keep", label: "Keep", title: "The IP the board has now" },
     { value: "custom", label: "Custom", title: "Your own: an IPv4 address of a /24" }];
   const cur = (p && p.current) || (st && st.reported) || {};
@@ -284,7 +284,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
             <div class="nb-col">
               <div data-testid="nb-ip-mode"><${Seg} label="IP" value=${ipMode} options=${ipOpts}
                 onChange=${(v) => { setIpMode(v); ask({ ipMode: v }); }} /></div>
-              ${ipMode === "auto" && p && p.pool && p.pool.range ? html`<p class="small muted nb-why">The next free address of ${p.pool.range}: not one given to another board here, and not one that answers now.</p>` : null}
+              ${ipMode === "auto" && p && p.pool && p.pool.range ? html`<p class="small muted nb-why">A free address of ${p.pool.range}, searched from the MAC (its last byte picks the first one tried): not one given to another board here, and not one that answers now.</p>` : null}
               ${ipMode === "custom" ? html`<input class="input mono" data-testid="nb-ip-custom" autocomplete="off" spellcheck="false"
                 placeholder="192.168.10.117" value=${ipCustom}
                 onInput=${(e) => { setIpCustom(e.target.value); askSoon({ ipCustom: e.target.value }); }} />` : null}

@@ -27,6 +27,15 @@ from tests.fakes.claimed_lock import board_key_fp, pin_claim
 from tests.fakes.idn_board import BOARD1_MAC, FakeHub, FakeLeases, SpyController, identity_board
 from tests.fakes.lxslots_board import TRUSTED, BoardSsh, board_session
 
+
+@pytest.fixture(autouse=True)
+def _pool_from_its_first_address(monkeypatch):
+    """These tests read the pool from its first address: ``--ip auto``'s start from the
+    random MAC (``pool_start``) is tested in tests/unit/test_identity_assign.py."""
+    from harness_manager.services import identity_assign as _IA
+
+    monkeypatch.setattr(_IA, "pool_start", lambda addrs, mac=None: 0)
+
 AS_DEFAULT = {"label": "MPS3", "ip": "192.168.10.101/24", "mac": BOARD1_MAC,
               "source": {"label": "default", "ip": "default", "mac": "default"}}
 #: A board this session reaches AT its identity IP (the fake answers on 127.0.0.1, so its

@@ -91,6 +91,29 @@ NONE_FOUND_HINTS = (
     f"the {VOLUME_LABEL} drive: it must be mounted (Linux: open it in the file manager, or "
     "udisksctl mount -b /dev/sdX1; macOS and Windows mount it themselves)",
 )
+#: Windows (lane WINDOWS): where a Windows user looks.
+WINDOWS_NONE_FOUND_HINTS = (
+    "the Debug USB cable: the board's DEBUG USB socket to this PC",
+    "the board's power: switch it on and wait about 10 s for the MCC to start",
+    f"the {VOLUME_LABEL} drive: Windows gives it a drive letter itself (File Explorer, This "
+    "PC); if it is not there, try another USB port or cable",
+    "the serial ports: Device Manager, Ports (COM & LPT) lists four 'USB Serial Port (COMn)' "
+    "for the board; if they are missing or under Other devices, install the FTDI VCP driver "
+    "(Windows Update, or ftdichip.com), then replug the Debug USB",
+)
+WINDOWS_NO_MCC = (
+    "no MCC serial port with it: the board cannot be rebooted from here (power it off and on "
+    "by hand after the write). In Device Manager, Ports (COM & LPT) should list four 'USB "
+    "Serial Port (COMn)' for the board; if not, install the FTDI VCP driver (Windows Update, "
+    "or ftdichip.com), then replug the Debug USB and Scan again")
+
+
+def _windows(platform: str | None = None) -> bool:
+    import sys
+
+    return (platform or sys.platform).startswith("win")
+
+
 DEFAULT_WITNESS_S = 180.0          # bare metal answers in ~30 s; a cold FPGA load is ~20 s
 LINUX_WITNESS_S = 300.0            # the pack's Linux reboot budget (planner.LINUX_REBOOT_WAIT_S)
 
@@ -243,12 +266,14 @@ class ScanBoard:
                 "evidence": self.candidate.evidence}
 
 
-def _problems(links: dict[str, Any]) -> list[str]:
+def _problems(links: dict[str, Any], platform: str | None = None) -> list[str]:
     out = []
     if links["volume"] is None:
         out.append(f"no {VOLUME_LABEL} drive with it: the configuration SD cannot be backed up "
                    "or written over USB. Check the drive is mounted, then Scan again")
-    if links["mcc"] is None:
+    if links["mcc"] is None and _windows(platform):
+        out.append(WINDOWS_NO_MCC)
+    elif links["mcc"] is None:
         out.append("no MCC serial port with it: the board cannot be rebooted from here (power "
                    "it off and on by hand after the write). Check the Debug USB cable, and on "
                    "Windows the FTDI driver")
@@ -326,9 +351,20 @@ def _at(address: str, host: str) -> bool:
     return (text.rsplit(":", 1)[0] if text.count(":") == 1 else text) == want
 
 
-def ethernet(engine: Any, host: str = DEFAULT_HOST, *, timeout_s: float = 1.5) -> dict[str, Any]:
+def network_check(host: str) -> dict[str, Any] | None:
+    """Lane WINDOWS: this PC's network check for a board at ``host`` (Windows only: an
+    address on the board's /24, a Public profile, a firewall block; None elsewhere)."""
+    from harness_manager.services import netcheck
+
+    return netcheck.check(host)
+
+
+def ethernet(engine: Any, host: str = DEFAULT_HOST, *, timeout_s: float = 1.5,
+             check_network: bool = False) -> dict[str, Any]:
     """Whether a harness answers at ``host``: the pack's probe of that one address (6900
-    ping, then UDP identify, which also finds stage0 RESCUE). Never broadcasts."""
+    ping, then UDP identify, which also finds stage0 RESCUE). Never broadcasts.
+    ``check_network``: when nothing answers, add this PC's network check (``network``,
+    Windows only)."""
     from harness_manager.cli.output import jsonable
 
     hints = ProbeHints(hosts=(host,), scan_usb=False, scan_network=True, timeout_s=timeout_s)
@@ -356,7 +392,12 @@ def ethernet(engine: Any, host: str = DEFAULT_HOST, *, timeout_s: float = 1.5) -
                        "identify only)" if rescue else
                        f"a harness answers at {host}" + (f": {what}" if what else ""))
         return out
-    return {"state": "none", "host": host, "text": f"nothing answers at {host}"}
+    out = {"state": "none", "host": host, "text": f"nothing answers at {host}"}
+    if check_network:
+        found = network_check(host)
+        if found is not None:
+            out["network"] = found
+    return out
 
 
 def scan(engine: Any, *, host: str = DEFAULT_HOST, ask: bool = False,
@@ -380,7 +421,7 @@ def scan(engine: Any, *, host: str = DEFAULT_HOST, ask: bool = False,
         if ask and links["mcc"] is not None:
             b.mcc_answer = ask_mcc(engine, cand, gate=gate)
         boards.append(b)
-    eth = ethernet(engine, host, timeout_s=timeout_s)
+    eth = ethernet(engine, host, timeout_s=timeout_s, check_network=True)
     notes: list[str] = []
     if len(boards) == 1:
         boards[0].ethernet = eth
@@ -393,7 +434,8 @@ def scan(engine: Any, *, host: str = DEFAULT_HOST, ask: bool = False,
     out: dict[str, Any] = {"boards": [b.as_dict() for b in boards], "ethernet": eth,
                            "host": host, "notes": notes, "candidates": usb}
     if not boards:
-        out["empty"] = {"text": NONE_FOUND, "check": list(NONE_FOUND_HINTS)}
+        out["empty"] = {"text": NONE_FOUND, "check": list(
+            WINDOWS_NONE_FOUND_HINTS if _windows() else NONE_FOUND_HINTS)}
     return out
 
 
@@ -747,11 +789,15 @@ def witness(engine: Any, host: str = DEFAULT_HOST, *, wait_s: float = DEFAULT_WI
             emit(ans["state"], int(took), int(wait_s))
             return {**ans, "took_s": round(took, 1), "tries": tries}
         if took >= wait_s:
-            raise with_data(ActionFailedError(
+            err = with_data(ActionFailedError(
                 f"nothing answered at {host} within {wait_s:.0f} s of the reboot",
                 hint=f"{PC_ADDRESS_HINT}. If the board stays dark, restore the backup "
                      "(the SD goes back to what it held)"),
                 timeout=True, host=host, waited_s=round(took, 1), tries=tries)
+            found = network_check(host)          # Windows: the address, the profile, a block
+            if found is not None:
+                with_data(err, network=found)
+            raise err
         emit("waiting", int(took), int(wait_s))
         sleep(min(poll_s, max(wait_s - took, 0.1)))
 
@@ -759,7 +805,7 @@ def witness(engine: Any, host: str = DEFAULT_HOST, *, wait_s: float = DEFAULT_WI
 # --- the identity a new board is given (a proposal; the identity writer sets it) ------------------
 
 #: Lane IDENTITY (david 2 Oct): every board gets a unique IP and a random MAC.
-IP_NOTE = ("every board gets its own IP: the next free address of the pool (the image default "
+IP_NOTE = ("every board gets its own IP: a free address of the pool, searched from its MAC (the image default "
            "192.168.10.101 is never given)")
 NO_SERIAL = ("the MCC's USB serial number is not known (the Debug USB did not report one): give "
              "the board a name yourself")
@@ -831,7 +877,7 @@ def propose_identity(serial: str, *, policy: Any = None, taken_macs: Any = (),
     or reserved here): ``{serial, label, hostname, mac, mac_how, ip, ip_how, ip_error,
     same_net, notes}``. The name is ``MPS3-`` and the serial's last 4 letters or digits
     (upper case: the panel takes A-Z, 0-9 and -); the MAC is random (byte 0 the pack's,
-    never a reserved range or a MAC in the registry); the IP is the next free address of the
+    never a reserved range or a MAC in the registry); the IP is the first free address of the
     pack's pool (``ip_error`` says why there is none)."""
     from harness_manager.core.errors import HarnessError
     from harness_manager.services import identity_assign as IA
@@ -848,7 +894,7 @@ def propose_identity(serial: str, *, policy: Any = None, taken_macs: Any = (),
     mac = IA.random_mac(policy, taken_macs, **({"urandom": urandom} if urandom else {}))
     ip, ip_error = "", ""
     try:
-        ip = IA.allocate_ip(policy, taken_ips)
+        ip = IA.allocate_ip(policy, taken_ips, mac=mac)        # starts at mac[5] mod pool
     except HarnessError as exc:
         ip_error = exc.message + (f" ({exc.hint})" if exc.hint else "")
     return {"serial": serial.strip(), "label": label, "hostname": label.lower(), "mac": mac,
@@ -924,7 +970,9 @@ def status(engine: Any, state_dir: Any = None) -> dict[str, Any]:
     """What the wizard shows before it starts: the address, the switches, the examples."""
     examples = getattr(engine, "bringup_examples", None)
     card = getattr(engine, "bringup_card_image", "")
-    return {"default_host": DEFAULT_HOST, "pc_hint": PC_ADDRESS_HINT,
+    import sys
+
+    return {"default_host": DEFAULT_HOST, "pc_hint": PC_ADDRESS_HINT, "platform": sys.platform,
             "usb_write_warning": USB_WRITE_WARNING, "unsigned": {
                 "banner": UNSIGNED_BANNER, "words": UNSIGNED_WORDS, "zip": ZIP_RECIPE,
                 "manifest": MANIFEST_RECIPE},

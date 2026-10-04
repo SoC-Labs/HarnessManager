@@ -1181,3 +1181,40 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   "MPS3" (any case, exactly that) is no name: such a board is named by boards.toml, then the
   hub, then the hub target ("mps3-01"), else its address. "MPS3-02" is a name, as before.
 <!-- --- end integ v1.1 --- -->
+<!-- --- windows --- -->
+### Windows laptops: install, the Debug USB, the network, the card reader, SSH (WINDOWS, for v1.1.0)
+- **Install with no network:** `install.ps1 -Offline DIR` installs only from a wheelhouse
+  (pip `--no-index`, uv `--offline`), with the tested pins (`constraints.txt`; `-Latest` for
+  the newest), and adds **Harness Manager** to the Start menu (`-NoStartMenu` leaves it out;
+  `-Uninstall` removes it). `make_wheelhouse.sh --platform win_amd64|macos_arm64|macos_x86_64
+  --python-version X.Y` makes that wheelhouse from Linux: the laptop's own wheels, each
+  dependency judged by the laptop's markers (`scripts/wheelhouse_cross.py`), plus
+  `install.ps1` and `install.sh`.
+- **The Debug USB on Windows:** `probe` and the wizard's Over-USB scan find the MCC's COM port
+  (FTDI VCP channel letters or usbser locations) and the `V2M-MPS3` drive letter; with the
+  drive and no COM port they name Device Manager and the FTDI VCP driver. Mapped network
+  drives are never asked for a label. `--volume E:` means the drive's root.
+- **This PC's network, checked (Windows):** when nothing answers (`probe`, `info`, the
+  wizard's scan and its witness) or identify is silent while TCP works (`info`'s `cannot
+  discover`), HM reads the adapters (read only) and prints the exact Administrator
+  PowerShell: a fixed address on the board's /24 (`Set-NetIPInterface ... -Dhcp Disabled`,
+  `New-NetIPAddress ...`), a Public network made Private (`Set-NetConnectionProfile ...
+  -NetworkCategory Private`) or the board's UDP allowed (`New-NetFirewallRule -DisplayName
+  "Harness Manager board UDP" ...`), a cancelled Security Alert's Block rule for Python
+  turned off. HM never runs them. `--json` carries it as `error.data.network`.
+- **The card reader on Windows:** `flash devices` lists card readers through PowerShell
+  (never the system disk, an external hard disk or the board's own MCC drive); `files` writes
+  the card's drive letter with no Administrator. A whole-card image is never written by HM on
+  Windows: the job ends `needs_privilege` with Administrator PowerShell steps (and Raspberry
+  Pi Imager), a read-back that prints the sha256, and the wizard shows them with Copy buttons.
+- **SSH on Windows:** ssh.exe by its full path; known_hosts and config paths in a form ssh
+  cannot split (forward slashes; quoted when a path has a space, on every OS);
+  `%ProgramData%\ssh\ssh_config`; no console window for HM's ssh, PowerShell and ping.
+  Windows `ping` counts only a reply with `TTL=`.
+- **`--ip auto` starts from the MAC:** the first address tried is the pool's
+  `mac[5] mod size` (MPS3: 192.168.10.(110 + mac[5] mod 90)), then the usual skips, wrapping
+  round; the wizard's proposal starts from its random MAC. The lab's seat sheet is
+  `board identity TARGET --label WS-0N --ip 192.168.10.(110+N) --mac random`.
+- **Docs:** USER_GUIDE section 15, Windows; INSTALL.md "Windows", "The Start menu" and "A
+  wheelhouse for another kind of laptop".
+<!-- --- end windows --- -->

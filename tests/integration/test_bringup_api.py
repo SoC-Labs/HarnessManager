@@ -33,6 +33,15 @@ from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers
 from tests.fakes.virtual_board import VirtualMps3
 from tests.unit.test_bringup_service import release_bundle, sd_tree
 
+
+@pytest.fixture(autouse=True)
+def _pool_from_its_first_address(monkeypatch):
+    """These tests read the pool from its first address: ``--ip auto``'s start from the
+    random MAC (``pool_start``) is tested in tests/unit/test_identity_assign.py."""
+    from harness_manager.services import identity_assign as _IA
+
+    monkeypatch.setattr(_IA, "pool_start", lambda addrs, mac=None: 0)
+
 H = headers()
 
 

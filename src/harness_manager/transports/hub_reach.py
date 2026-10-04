@@ -124,10 +124,15 @@ def ping(ip: str, timeout_s: float = 1.0) -> bool:
         argv = ["ping", "-c", "1", "-t", str(max(1, int(timeout_s))), ip]
     else:
         argv = ["ping", "-n", "-c", "1", "-W", str(max(1, int(timeout_s))), ip]
+    from harness_manager.core.proc import no_window
+
     try:
-        return subprocess.run(argv, capture_output=True, timeout=timeout_s + 3).returncode == 0
+        res = subprocess.run(argv, capture_output=True, timeout=timeout_s + 3, **no_window())
     except (OSError, subprocess.TimeoutExpired):
         return False
+    if system == "Windows":       # exit 0 for "Destination host unreachable" too (lane WINDOWS)
+        return res.returncode == 0 and b"TTL=" in (res.stdout or b"").upper()
+    return res.returncode == 0
 
 
 # --- the plan ----------------------------------------------------------------------------------------

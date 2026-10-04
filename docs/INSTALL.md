@@ -108,9 +108,9 @@ says how.
 | `--with-serial` | `-WithSerial` | the `serial` extra: pyserial, for the Debug USB serial ports and USB discovery |
 | `--python PY` | `-Python PY` | the Python to build the venv with |
 | `--no-uv` | `-NoUv` | use venv and pip even when uv is on PATH |
-| `--offline DIR` | | install only from a wheelhouse DIR; never contact the package index |
-| `--latest` | | the newest dependency versions instead of the pins (rebuilds the venv) |
-| `--no-desktop` / `--desktop` | | skip the Linux menu entry (remembered), or bring it back |
+| `--offline DIR` | `-Offline DIR` | install only from a wheelhouse DIR; never contact the package index |
+| `--latest` | `-Latest` | the newest dependency versions instead of the pins (rebuilds the venv) |
+| `--no-desktop` / `--desktop` | `-NoStartMenu` | skip the Linux menu entry (remembered), or bring it back; on Windows, leave out (or remove) the Start menu entry |
 | `--force` | `-Force` | replace a `harness-manager` command the installer did not write |
 | `--uninstall` | `-Uninstall` | stop the service, remove the venv, the self-updated versions, the command and the menu entry |
 
@@ -146,6 +146,39 @@ app groups under the menu icon in the dock or taskbar.
   that. `--desktop` brings it back. `--uninstall` removes it. An entry the installer did
   not write is never replaced or removed.
 
+## The Start menu (Windows)
+
+On Windows the installer adds **Harness Manager** to your Start menu
+(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Harness Manager.lnk`, this user only, no
+Administrator). It runs `harness-manager app`; its console starts minimised and the app opens
+its own window. `-NoStartMenu` leaves it out (and removes one an earlier run added);
+`-Uninstall` removes it.
+
+## Windows
+
+What a Windows 10 or 11 laptop needs, besides the installer:
+
+| What | Why | How |
+|---|---|---|
+| Python 3.10 or newer | the venv | python.org (tick **Add python.exe to PATH**), or `winget install Python.Python.3.12`, or uv |
+| git | to clone (not for `-Offline` from a wheelhouse) | git-scm.com, or `winget install Git.Git` |
+| The FTDI driver | the board's four Debug USB serial ports (COM) | Windows Update installs it when the board is first plugged in; else ftdichip.com, **VCP Drivers**. Device Manager, **Ports (COM & LPT)** then lists four **USB Serial Port (COMn)** |
+| The OpenSSH client | a Linux harness (claim, board SSH, the debug forward) | installed by default on Windows 10 1809+ and 11; else Settings, System, Optional features, **OpenSSH Client** |
+| `-WithSerial` | the COM ports from Harness Manager | the installer option |
+
+Run the installer from PowerShell (no Administrator):
+
+```powershell
+git clone git@github.com:SoC-Labs/HarnessManager.git
+powershell -ExecutionPolicy Bypass -File HarnessManager\scripts\install.ps1 -WithSerial
+```
+
+`-ExecutionPolicy Bypass` applies to this one script only; your policy is unchanged.
+After it, open a **new** terminal (the installer added its directory to your user PATH),
+or use the Start menu entry. The board's network (a fixed address on 192.168.10.0/24, the
+Public-network firewall step) and the card writer's Administrator path are in the
+[User Guide, Windows](USER_GUIDE.md#15-windows).
+
 ## Pinned dependencies
 
 `constraints.txt` pins every dependency, and each user extra, to the versions the
@@ -174,6 +207,34 @@ scripts/install.sh --offline /path/to/wheelhouse --with-serial
 `--offline` never contacts the package index (pip `--no-index`, uv `--offline`). CI
 proves it in a container with no network at all.
 
+### A wheelhouse for another kind of laptop (Windows, macOS)
+
+From a Linux machine with network, for laptops of another kind (the demonstration lab's
+Windows laptops), name the laptop's platform and its Python version:
+
+```bash
+scripts/make_wheelhouse.sh --platform win_amd64 --python-version 3.12 --with-serial wh-win
+scripts/make_wheelhouse.sh --platform macos_arm64 --python-version 3.12 --with-serial wh-mac
+```
+
+`--platform` is `win_amd64`, `macos_arm64` or `macos_x86_64`. It downloads the laptop's own
+wheels (`pip download --platform ... --python-version ... --only-binary=:all:`, pinned by
+`constraints.txt`); Harness Manager and pyverify are pure Python, the same wheel
+everywhere. pip would judge each dependency's environment marker by the machine it runs
+on, so `scripts/wheelhouse_cross.py` walks the dependencies itself, judged as on the
+laptop: a Windows wheelhouse gets `pywin32-ctypes` and `pythonnet`, a macOS one `pyobjc`.
+`--hm-wheel FILE` uses a built wheel (`make dist`); `--index-url URL` a mirror.
+
+The wheelhouse carries `install.ps1` and `install.sh`. Copy it to the laptop (a USB stick
+is fine), then, with that Python installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\wh-win\install.ps1 -Offline D:\wh-win
+```
+
+`--python-version` must be the laptop's: a wheelhouse for 3.12 does not install on 3.13
+(`pydantic-core`, `cffi` are built per Python version). The install says so if it is not.
+
 ## Behind a proxy
 
 pip and uv use the standard proxy variables. Set them before you run the installer:
@@ -197,6 +258,8 @@ clone over HTTPS with a GitHub token.
 | `cannot write to DIR` | fix the directory's owner, or move the install: `HARNESS_MANAGER_HOME`, `HARNESS_MANAGER_BIN_DIR` |
 | `another Harness Manager install (pid N) is running` | wait for it. If none runs (a reboot), remove the `.install.lock` it names |
 | `the install did not finish` | the message above it is pip's. No network: check the proxy, or use `--offline`. A pin with no wheel for a new Python: `--latest` |
+| `-Offline: DIR lacks a wheel this needs` (Windows) | the wheelhouse is for another Python version: make it again with this laptop's (`py --version`): `make_wheelhouse.sh --platform win_amd64 --python-version X.Y` |
+| `install.ps1 cannot be loaded because running scripts is disabled` | run it as shown, with `powershell -ExecutionPolicy Bypass -File ...` |
 | `run this without sudo` | run it as yourself: it installs into your home and needs no root |
 | you pressed Ctrl-C | run it again: it resumes, and the previous version keeps working until it finishes |
 

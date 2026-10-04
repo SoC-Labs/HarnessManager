@@ -172,6 +172,12 @@ def linux_volumes(
             for dev, label in labels.items()]
 
 
+#: GetDriveTypeW: what is never asked for a label (a mapped network drive can block for
+#: tens of seconds when its server is away; a letter with no root is not a volume).
+DRIVE_NO_ROOT_DIR, DRIVE_REMOTE = 1, 4
+SKIPPED_DRIVE_TYPES = frozenset({DRIVE_NO_ROOT_DIR, DRIVE_REMOTE})
+
+
 class _Win32Volumes:
     """Drive letters and volume labels through kernel32 (ctypes; Windows only)."""
 
@@ -184,6 +190,9 @@ class _Win32Volumes:
     def drive_roots(self) -> list[str]:
         mask = self._k32.GetLogicalDrives()
         return [f"{chr(65 + i)}:\\" for i in range(26) if mask & (1 << i)]
+
+    def drive_type(self, root: str) -> int:
+        return int(self._k32.GetDriveTypeW(self._ct.c_wchar_p(root)))
 
     def label(self, root: str) -> str | None:
         ct = self._ct
@@ -199,14 +208,24 @@ class _Win32Volumes:
 
 
 def windows_volumes(api: Any = None) -> list[VolumeInfo]:
-    """Every drive letter with a readable volume label. ``api`` is injectable for tests."""
+    """Every local drive letter with a readable volume label (network drives are never asked:
+    one whose server is away blocks). ``api`` is injectable for tests."""
     api = api if api is not None else _Win32Volumes()
+    kind = getattr(api, "drive_type", None)
     out = []
     for root in api.drive_roots():
+        if kind is not None and kind(root) in SKIPPED_DRIVE_TYPES:
+            continue
         label = api.label(root)
         if label is not None:
             out.append(VolumeInfo(label=label, root=root, device=root[:2]))
     return out
+
+
+def drive_root(addr: str) -> str:
+    """A bare Windows drive letter is that drive's ROOT: ``E:`` -> ``E:\\`` (``E:`` alone means
+    the current folder on E:). Anything else is unchanged."""
+    return f"{addr[0].upper()}:\\" if re.fullmatch(r"[A-Za-z]:", addr or "") else addr
 
 
 def mac_volumes(volumes_dir: Path = Path("/Volumes")) -> list[VolumeInfo]:
@@ -501,7 +520,7 @@ class Mps3Storage:
         return str(root)
 
     def _find_root(self) -> Path:
-        addr = self.address.strip()
+        addr = drive_root(self.address.strip())
         if addr.startswith("file://"):
             addr = unquote(urlparse(addr).path)
             if re.match(r"^/[A-Za-z]:", addr):          # file:///E:/ -> E:/

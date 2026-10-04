@@ -21,6 +21,15 @@ from tests.fakes.t14_mock_api import real_daemon
 from tests.web import nav
 from tests.web.conftest import dump_failed_pages
 
+
+@pytest.fixture(autouse=True)
+def _pool_from_its_first_address(monkeypatch):
+    """These tests read the pool from its first address: ``--ip auto``'s start from the
+    random MAC (``pool_start``) is tested in tests/unit/test_identity_assign.py."""
+    from harness_manager.services import identity_assign as _IA
+
+    monkeypatch.setattr(_IA, "pool_start", lambda addrs, mac=None: 0)
+
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
 

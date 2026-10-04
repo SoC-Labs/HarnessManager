@@ -120,6 +120,34 @@ def test_auto_takes_the_first_free_address_of_the_pool():
     assert IA.allocate_ip(MPS3, [], answering=lambda ip: False) == "192.168.10.110/24"
 
 
+def test_auto_starts_at_the_macs_last_byte_mod_the_pool():
+    # david 2 Oct, the lab's seat sheet: the first try is 192.168.10.(110 + mac[5] mod 90)
+    assert IA.pool_start(IA.parse_pool("192.168.10.110-199"), "02:5e:3a:91:c0:17") == 23
+    assert IA.allocate_ip(MPS3, [], answering=lambda ip: False,
+                          mac="02:5e:3a:91:c0:17") == "192.168.10.133/24"
+    assert IA.allocate_ip(MPS3, [], answering=lambda ip: False,
+                          mac="02:5e:3a:91:c0:b4") == "192.168.10.110/24"     # 180 mod 90 = 0
+    assert IA.allocate_ip(MPS3, [], answering=lambda ip: False,
+                          mac="02-5E-3A-91-C0-FF") == "192.168.10.185/24"     # 255 mod 90 = 75
+
+
+def test_twin_the_mac_start_still_skips_and_wraps_and_no_mac_starts_at_the_first():
+    policy = IA.IdentityPolicy(ip_pool="192.168.10.100-105", reserved_ips=("192.168.10.101",))
+    asked: list[str] = []
+
+    def answering(ip: str) -> bool:
+        asked.append(ip)
+        return ip == "192.168.10.105"
+
+    # 0x04 mod 6 = 4: .104 is in the registry, .105 answers, wrap: .100 is free
+    got = IA.allocate_ip(policy, ["192.168.10.104"], answering=answering,
+                         mac="02:11:22:33:44:04")
+    assert got == "192.168.10.100/24" and asked == ["192.168.10.105", "192.168.10.100"]
+    assert IA.pool_start(IA.parse_pool("192.168.10.100-105"), None) == 0
+    assert IA.pool_start(IA.parse_pool("192.168.10.100-105"), "not a mac") == 0
+    assert IA.allocate_ip(policy, [], answering=lambda ip: False) == "192.168.10.100/24"
+
+
 def test_twin_auto_skips_the_reserved_address_the_registry_and_what_answers():
     policy = IA.IdentityPolicy(ip_pool="192.168.10.100-105", reserved_ips=("192.168.10.101",))
     asked: list[str] = []
@@ -170,8 +198,11 @@ def test_resolve_random_auto_keep_and_values():
     cur = {"mac": "02:00:00:4d:50:53", "ip": "192.168.10.101/24"}
     got = IA.resolve(MPS3, mac="random", ip="auto", current=cur, answering=lambda ip: False,
                      urandom=rolls("025e3a91c017"))
-    assert got == {"mac": "02:5e:3a:91:c0:17", "mac_how": "random", "ip": "192.168.10.110/24",
-                   "ip_how": "auto"}
+    assert got == {"mac": "02:5e:3a:91:c0:17", "mac_how": "random", "ip": "192.168.10.133/24",
+                   "ip_how": "auto"}                      # 110 + 0x17 (23): from the new MAC
+    # ip auto with the MAC kept: the board's own MAC picks the start (0x53 = 83 -> .193)
+    assert IA.resolve(MPS3, ip="auto", current=cur, answering=lambda ip: False)["ip"] == \
+        "192.168.10.193/24"
     assert IA.resolve(MPS3, mac="keep", ip="keep", current=cur) == {
         "mac": "02:00:00:4d:50:53", "mac_how": "keep", "ip": "192.168.10.101/24",
         "ip_how": "keep"}

@@ -226,16 +226,17 @@ def _write(ctx: Ctx) -> int:
     w.check_confirm(plan, typed)
     out = w.run(plan, progress=StderrProgress(f"flash {a.kind}", ctx.err))
     if out["outcome"] == "needs_privilege":
-        ctx.note(f"Harness Manager may not write {disk.io_path} (it never asks for root). "
-                 f"Run this yourself:")
-        ctx.note(f"    {out['privileged_command']}")
-        ctx.note("then check it:")
-        ctx.note(f"    {out['verify_command']}     ({out['verify_expect']})")
+        for line in privileged_text(out, disk.io_path):
+            ctx.note(line)
+        hint = (f"run: {out['privileged_command']}" if not out.get("privileged_how") else
+                "run the Administrator PowerShell steps above, or write it with "
+                f"{out.get('imager', {}).get('name', 'an imager')}")
         err = UnavailableError(cw.CAPABILITY, f"this user may not write {disk.io_path}",
-                               hint=f"run: {out['privileged_command']}")
+                               hint=hint)
         raise with_data(err, **{k: out[k] for k in (
             "outcome", "privileged_command", "privileged_steps", "verify_command",
-            "verify_expect", "image", "bytes", "sha256")})
+            "verify_expect", "image", "bytes", "sha256", "privileged_shell",
+            "privileged_how", "verify_how", "imager", "disk_number") if k in out})
     human = [f"written  {disk.path}: {out['outcome']}, read back and verified "
              f"(sha256 {out['sha256'][:16]}…)"]
     human += [d["note"] for d in out.get("mbbios", []) if d["note"]]
@@ -247,3 +248,22 @@ def _write(ctx: Ctx) -> int:
                            out["sha256"], ""]],
                     human=[h for h in human if h]))
     return ExitCode.OK
+
+
+def privileged_text(out: dict, path: str) -> list[str]:
+    """What the CLI prints when the write needs privileges HM never takes: each step, then
+    how to verify (Windows: the Administrator PowerShell steps and the imager)."""
+    if not out.get("privileged_how"):
+        return [f"Harness Manager may not write {path} (it never asks for root). Run this "
+                f"yourself:", f"    {out['privileged_command']}", "then check it:",
+                f"    {out['verify_command']}     ({out['verify_expect']})"]
+    lines = [f"Harness Manager never writes a whole disk on Windows ({path}): "
+             f"{out['privileged_how']}:"]
+    lines += [f"  {i}. {step}" for i, step in enumerate(out["privileged_steps"], 1)]
+    lines += [f"then check it ({out.get('verify_how') or 'the same PowerShell'}; it "
+              f"{out['verify_expect']}):", f"    {out['verify_command']}"]
+    imager = out.get("imager") or {}
+    if imager:
+        lines.append(f"Or with {imager['name']} ({imager['url']}):")
+        lines += [f"  - {step}" for step in imager.get("steps", [])]
+    return lines

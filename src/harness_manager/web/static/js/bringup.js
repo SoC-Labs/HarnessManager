@@ -26,7 +26,7 @@ import { boardName, bytesText, capState } from "./format.js";
 import { html, useEffect } from "./lib.js";
 import { closeModal, ModalShell, openModal, registerModal } from "./modal.js";
 import { boardState, changed, loadBoards, log, navigate, probe, S, select, setJob, timed, toast } from "./store.js";
-import { ActionRow, ArmBox, Chip, Icon, Reason, ResultBlock, Seg, Spinner } from "./ui.js";
+import { ActionRow, ArmBox, Chip, CopyButton, Icon, Reason, ResultBlock, Seg, Spinner } from "./ui.js";
 import { week } from "./week.js";
 import { NO_IDENTITY_STORE } from "./sections/identity.js";
 import { openBoardHere } from "./sidebar.js";
@@ -86,7 +86,7 @@ export async function loadReader() {
       reason: bringupMissing(r.error) ? READER_MISSING : `${r.error.errName}: ${r.error.message}` };
   } else {
     const d = r.data.data || {};
-    G.reader = { enabled: d.enabled !== false, reason: d.reason || "", devices: d.devices || [] };
+    G.reader = { enabled: d.enabled !== false, reason: d.reason || "", devices: d.devices || [], platform: d.platform || "" };
     if (G.reader.enabled && !G.reader.devices.length) G.reader.reason = "no card reader with a card in it: put the card in this PC's reader, then Read again";
   }
   changed();
@@ -213,7 +213,26 @@ function EthLine({ eth }) {
   const level = eth.state === "running" ? "ok" : eth.state === "rescue" ? "warn" : "";
   return html`<span class="line"><${Chip} level=${level} icon=${eth.state === "none" ? "circle-dashed" : "ethernet-port"}
       testid="usb-eth">${eth.state === "running" ? "harness answers" : eth.state === "rescue" ? "stage0 rescue" : "nothing answers"}<//></span>
-    <div class="sub">${eth.text}</div>`;
+    <div class="sub">${eth.text}</div>
+    <${NetCheck} found=${eth.network} testid="usb-netcheck" />`;
+}
+
+// --- lane WINDOWS: this PC's network check (services/netcheck.py), Windows only ---
+// Each problem: what is wrong, then the exact Administrator PowerShell with a Copy button.
+// Harness Manager never runs these itself.
+export function NetCheck({ found, testid = "netcheck" }) {
+  if (!found || !found.problems || !found.problems.length) return null;
+  const cmd = (c, i, what) => html`<div key=${`${what}${i}`}><code class="mono bu-priv-cmd">${c}</code> <${CopyButton} text=${c} label="Copy" /></div>`;
+  return html`<div class="bu-netcheck stack gap-8" data-testid=${testid}>
+    <p class="small"><${Icon} name="triangle-alert" cls="sm" /> <b>This Windows PC's network</b> (the board at <span class="mono">${found.host}</span>):</p>
+    <ol>${found.problems.map((p, i) => html`<li key=${i} data-code=${p.code}>
+      <b>${p.title}.</b> ${p.text}
+      ${p.admin && p.admin.length ? html`<div class="small muted">In PowerShell as Administrator (${found.admin_how}):</div>${p.admin.map((c, j) => cmd(c, j, "a"))}` : null}
+      ${p.alternative && p.alternative.length ? html`<div class="small muted">Or instead:</div>${p.alternative.map((c, j) => cmd(c, j, "b"))}` : null}
+      ${p.gui ? html`<div class="small muted">${p.gui}</div>` : null}
+    </li>`)}</ol>
+    <p class="small muted">Harness Manager never runs these itself. Then scan or wait again.</p>
+  </div>`;
 }
 
 async function addAndBringUp(row) {
@@ -567,12 +586,42 @@ async function readerJob(ctx, name, body) {
 }
 
 function readerLines(res, what) {
+  if (res && res.needs_privilege && res.privileged_how) {
+    // lane WINDOWS: Harness Manager never writes a whole disk on Windows; the steps (with copy
+    // buttons) are in the block below the result (PrivilegedSteps).
+    return [{ kind: "warnline", text: WIN_NEVER_RAW },
+      { kind: "hint", text: `${res.privileged_how[0].toUpperCase()}${res.privileged_how.slice(1)}: the steps are below.` }];
+  }
   if (res && res.needs_privilege) {
     return [{ kind: "warnline", text: "This PC's user cannot write the card: run the command below yourself (Harness Manager never escalates)." },
       { kind: "out", text: res.privileged_command || "" },
-      ...(res.verify ? [{ kind: "hint", text: `then verify: ${res.verify}` }] : [])];
+      ...(res.verify_command ? [{ kind: "hint", text: `then verify: ${res.verify_command} (${res.verify_expect || ""})` }] : [])];
   }
   return [{ kind: "ok", text: `${what} written${res && res.verified ? " and verified" : ""}${res && res.sha256 ? ` (sha256 ${short(res.sha256)})` : ""}` }];
+}
+
+// --- lane WINDOWS: the Administrator steps for a whole-card image on Windows ---
+const WIN_NEVER_RAW = "Harness Manager never writes a whole card on Windows (it needs Administrator, and Harness Manager never asks for it). Nothing was written.";
+export const WIN_READER_NOTE = "On Windows, Write gives you the steps instead of writing: Administrator PowerShell, or Raspberry Pi Imager. Harness Manager never asks for Administrator.";
+
+function isWindowsReader() {
+  const r = G.reader || {};
+  return typeof r.platform === "string" && r.platform.startsWith("win");
+}
+
+// What a needs_privilege result on Windows says to do, each step with a Copy button.
+function PrivilegedSteps({ res }) {
+  if (!res || !res.needs_privilege || !res.privileged_how) return null;
+  const im = res.imager || null;
+  return html`<div class="bu-priv stack gap-8" data-testid="bu-os-privileged">
+    <p class="small"><b>Write it yourself</b>: ${res.privileged_how}:</p>
+    <ol class="bu-priv-steps">${(res.privileged_steps || []).map((s, i) => html`<li key=${i} data-step=${i + 1}>
+      <span class="bu-priv-n">${i + 1}.</span><code class="mono bu-priv-cmd">${s}</code> <${CopyButton} text=${s} label=${`Copy step ${i + 1}`} /></li>`)}</ol>
+    <p class="small">Then check it (${res.verify_how || "in the same PowerShell"}): it ${res.verify_expect}.</p>
+    <div class="bu-priv-verify"><code class="mono bu-priv-cmd" data-testid="bu-os-verify">${res.verify_command}</code> <${CopyButton} text=${res.verify_command} label="Copy the check" /></div>
+    ${im ? html`<p class="small" data-testid="bu-os-imager"><b>Or with ${im.name}</b> (<span class="mono">${im.url}</span>):</p>
+      <ul class="bu-priv-imager">${(im.steps || []).map((s, i) => html`<li key=${i}>${s}</li>`)}</ul>` : null}
+  </div>`;
 }
 
 function overlayLines(o) {
@@ -750,6 +799,7 @@ function RebootStep({ bid, w }) {
       <${ResultBlock} lines=${pw.lines} panel=${pw} testid="bu-witness-result" />
       ${timeout ? html`<div class="stack gap-8" data-testid="bu-timeout">
         <${Reason} level="err" text=${`Nothing answered at ${w.witnessError.data.host || host} within ${Math.round(w.witnessError.data.waited_s || 0)} s. Check the cable and this PC's address, wait again, or restore the backup.`} />
+        <${NetCheck} found=${w.witnessError.data.network} testid="bu-netcheck" />
         <${ArmBox} bid=${bid} armKey="bu_restore" testid="arm-bu-restore" text="Arm: I understand this rewrites the configuration SD from the backup taken in step 2." />
         <${ActionRow} bid=${bid} panel="bu_restore" spec=${restoreSpec(bid)} icon="undo-2"
           gate=${{ capability: "storage_install", adapter: "storage", arm: "bu_restore", holder: "Restore the SD",
@@ -836,7 +886,7 @@ function OsStep({ bid, w }) {
     command: `flash write ${w.osDevice || "?"} ${w.osImage || "?"} --kind card`,
     run: (ctx) => readerWrite(bid, ctx, "card", w.osDevice, w.osImage.trim(), w.osTyped.trim(), w.osUnsigned.trim()),
     render: (res) => readerLines(res, "the whole-card image"),
-    onDone: (ok, res) => { if (ok && !(res && res.needs_privilege)) w.osDone = { how: "reader", at: Date.now() }; changed(); },
+    onDone: (ok, res) => { w.osPrivileged = ok && res && res.needs_privilege ? res : null; if (ok && !(res && res.needs_privilege)) w.osDone = { how: "reader", at: Date.now() }; changed(); },
   };
   const rescue = w.witness && w.witness.state === "rescue";
   const opts = [
@@ -864,10 +914,12 @@ function OsStep({ bid, w }) {
       ${w.osImage && imageWhy ? html`<${Reason} level="err" testid="bu-card-why" text=${imageWhy} />` : null}
       ${w.osImage && !imageWhy ? html`<${ImageCheck} bid=${bid} w=${w} />` : null}
       <${DevicePicker} w=${w} field="osDevice" typedField="osTyped" kind="card" />
+      ${isWindowsReader() ? html`<p class="small muted" data-testid="bu-os-windows-note">${WIN_READER_NOTE}</p>` : null}
       <${ArmBox} bid=${bid} armKey="bu_os" testid="arm-bu-os" text="Arm: I understand this writes the whole card in this PC's reader with the image (everything on it is replaced)." />
       <${ActionRow} bid=${bid} panel="bu_os" spec=${spec} variant="primary" icon="memory-stick"
         gate=${{ arm: "bu_os", guard: () => otherWrite(bid, "bu_os") || imageWhy || osWhy(w) || (!dev ? "choose the card" : w.osTyped.trim() !== confirmFor(dev) ? `type ${confirmFor(dev)} to confirm` : "") }} />
       <${ResultBlock} lines=${po.lines} panel=${po} testid="bu-os-result" />
+      <${PrivilegedSteps} res=${w.osPrivileged} />
       ${w.osDone ? html`<p class="small" data-testid="bu-os-back">Put the card in the board's user microSD slot, power-cycle the board, then witness it again (step 4).</p>` : null}
     </div>` : null}
   <//>`;
@@ -942,7 +994,7 @@ function Proposal({ bid, w }) {
     <dl class="kv">
       <dt>Name</dt><dd class="mono" data-testid="bu-id-label">${p.label || html`<span class="muted" style="font-family:var(--font-sans)">give it one in the dialog</span>`}</dd>
       <dt>MAC</dt><dd><span class="mono" data-testid="bu-id-mac">${p.mac}</span> <span class="sub">random, locally administered</span></dd>
-      <dt>IP</dt><dd>${p.ip ? html`<span class="mono" data-testid="bu-id-ip">${ipOnly(p.ip)}</span> <span class="sub">the next free address of ${p.pool}</span>`
+      <dt>IP</dt><dd>${p.ip ? html`<span class="mono" data-testid="bu-id-ip">${ipOnly(p.ip)}</span> <span class="sub">a free address of ${p.pool}, searched from the MAC</span>`
         : html`<span class="small" data-testid="bu-id-ip-error">${p.ip_error}</span>`}</dd>
     </dl>
     ${p.ip ? html`<p class="small" data-testid="bu-id-same-net">${p.same_net.charAt(0).toUpperCase()}${p.same_net.slice(1)}.</p>` : null}

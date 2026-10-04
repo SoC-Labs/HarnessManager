@@ -24,7 +24,9 @@ What is the core's:
 - ``random_mac``: ``os.urandom(6)`` with byte 0 the pack's (MPS3 0x02: locally administered,
   unicast), re-rolled on a reserved range or a MAC in the registry;
 - ``allocate_ip``: the first address of the pool that is not reserved, not in the registry and
-  not answering now; a clear refusal when none is left;
+  not answering now, searching from ``pool_start`` (the board's MAC: ``mac[5] mod`` the pool's
+  size, so the lab's random MACs spread over the pool) and wrapping round; a clear refusal
+  when none is left;
 - **the registry** (``board_identity.SeenIdentities``, ``<state>/identity/seen.json``): every
   MAC and IP this Harness Manager assigned or saw, per board id, with the date;
 - the notes every front end shows: the same-/24 rule, stage0 rescue's address, the MAC-only
@@ -260,16 +262,30 @@ def pool_problem(text: Any) -> str:
     return ""
 
 
+def pool_start(addrs: list[str], mac: Any = None) -> int:
+    """Where ``--ip auto`` starts in the pool (david 2 Oct, the lab's seat sheet): the index
+    ``mac[5] mod len(pool)``, so boards with random MACs spread over the pool instead of all
+    trying the first address (MPS3: 192.168.10.(110 + mac[5] mod 90)). 0 with no MAC."""
+    m = _norm_mac(mac)
+    if not m or not addrs:
+        return 0
+    return int(m.rsplit(":", 1)[1], 16) % len(addrs)
+
+
 def allocate_ip(policy: IdentityPolicy, taken: Iterable[str] = (), *,
                 answering: Callable[[str], bool] | None = None,
-                pool: str | None = None) -> str:
+                pool: str | None = None, mac: Any = None) -> str:
     """The first address of the pool that is not reserved, not in ``taken`` (the registry)
-    and not answering now, as ``a.b.c.d/24``. ``RefusedError`` when none is left."""
+    and not answering now, as ``a.b.c.d/24``. ``RefusedError`` when none is left. With
+    ``mac`` (the MAC the board will have) the search starts at ``pool_start`` and wraps
+    round to the pool's start; without one it starts at the pool's first address."""
     text = policy.ip_pool if pool is None else pool
     if not text:
         raise RefusedError("this board pack has no address pool, so Harness Manager cannot "
                            "pick an IP: nothing was changed", hint="give one: --ip A.B.C.D")
     addrs = parse_pool(text)
+    first = pool_start(addrs, mac)
+    addrs = addrs[first:] + addrs[:first]
     used = {ip_only(x) for x in taken if ip_only(x)}
     reserved = {ip_only(x) for x in policy.reserved_ips if ip_only(x)}
     ask = answering if answering is not None else policy.answering
@@ -373,7 +389,11 @@ def resolve(policy: IdentityPolicy, *, mac: Any = None, ip: Any = None,
         out.update(mac=check_mac(m, policy), mac_how="custom")
     i = str(ip).strip().lower() if ip is not None else ""
     if i == IP_AUTO:
-        out.update(ip=allocate_ip(policy, taken_ips, answering=answering), ip_how=IP_AUTO)
+        # the first candidate comes from the MAC the board will have (the new one, else its
+        # own): random MACs spread the lab's boards over the pool
+        start_mac = out["mac"] or _norm_mac(cur.get("mac")) or None
+        out.update(ip=allocate_ip(policy, taken_ips, answering=answering, mac=start_mac),
+                   ip_how=IP_AUTO)
     elif i == KEEP:
         out.update(ip=(f"{ip_only(cur.get('ip'))}/24" if ip_only(cur.get("ip")) else None),
                    ip_how=KEEP)

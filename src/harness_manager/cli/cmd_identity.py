@@ -13,8 +13,9 @@ Verbs::
 
 Lane IDENTITY (david 2 Oct): a name is 1-16 of A-Z, 0-9 and - (upper-cased); ``--mac random``
 gives a random locally administered MAC (02:..., never the image's 02:00:00:*, never one in
-this Harness Manager's registry ``<state>/identity/seen.json``); ``--ip auto`` the next free
-address of the pack's pool (MPS3: ``mps3.identity.ip_pool``, 192.168.10.110-199; never
+this Harness Manager's registry ``<state>/identity/seen.json``); ``--ip auto`` a free
+address of the pack's pool, searched from the board's MAC (its last byte mod the pool's size
+picks the first one tried; MPS3: ``mps3.identity.ip_pool``, 192.168.10.110-199; never
 192.168.10.101, nothing in the registry, nothing answering identify). A value of your own
 must be unicast and outside 02:00:00:* (MAC), an IPv4 address of a /24 (IP). The new IP is
 printed with the same-/24 rule; one outside this PC's /24 needs ``--other-subnet``. A board
@@ -70,8 +71,9 @@ def add_parser(sub: Any, parents: list[argparse.ArgumentParser]) -> argparse.Arg
     g.add_argument("--label", default=None, metavar="NAME",
                    help=f"the board's name on its panel, e.g. LAB-07: {IA.NAME_RULE}")
     g.add_argument("--ip", default=None, metavar="A.B.C.D|auto",
-                   help="the board's address in a /24, e.g. 192.168.10.117; auto: the next "
-                        "free address of the pool (MPS3: mps3.identity.ip_pool)")
+                   help="the board's address in a /24, e.g. 192.168.10.117; auto: a free "
+                        "address of the pool, searched from the board's MAC (MPS3: "
+                        "mps3.identity.ip_pool, first try 192.168.10.(110 + mac[5] mod 90))")
     g.add_argument("--mac", default=None, metavar="MAC|random",
                    help="the board's MAC, unicast and not 02:00:00:* (the image's range); "
                         "random: a random locally administered one (02:...)")

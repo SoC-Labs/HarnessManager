@@ -16,6 +16,14 @@ a self-updated version is newer.
 It runs in Windows PowerShell 5.1 and in PowerShell 7. It uses uv when uv is on
 PATH, else a Python 3.10 or newer (the py launcher, python or python3).
 
+It installs the tested dependency versions (constraints.txt, made by
+scripts/lock_deps.sh) unless -Latest is given, and adds Harness Manager to the
+Start menu (-NoStartMenu leaves it out).
+
+With no network (the demonstration lab), make a wheelhouse on a machine with
+network (scripts/make_wheelhouse.sh --platform win_amd64 --python-version 3.12
+DIR), copy DIR across, then run DIR\install.ps1 -Offline DIR.
+
 Environment: HARNESS_MANAGER_HOME (install root) and HARNESS_MANAGER_BIN_DIR
 (where the command goes) override the defaults.
 
@@ -39,15 +47,30 @@ The Python to build the venv with (3.10 or newer).
 .PARAMETER NoUv
 Use venv and pip even when uv is on PATH.
 
+.PARAMETER Offline
+Install only from DIR, a wheelhouse made by scripts/make_wheelhouse.sh; never
+contact the package index. With no -From, the Harness Manager wheel in DIR.
+
+.PARAMETER Latest
+The newest dependency versions, not the tested ones pinned in constraints.txt
+(it rebuilds the venv).
+
+.PARAMETER NoStartMenu
+Do not add Harness Manager to the Start menu (it removes an entry an earlier run
+added).
+
 .PARAMETER Force
 Replace an existing harness-manager command in a custom HARNESS_MANAGER_BIN_DIR.
 
 .PARAMETER Uninstall
-Stop the service, remove the venv, the self-updated versions and the command.
-Your settings and backups in %USERPROFILE%\.config\harness-manager stay.
+Stop the service, remove the venv, the self-updated versions, the command and the
+Start menu entry. Your settings and backups in %USERPROFILE%\.config\harness-manager stay.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -WithSerial
+
+.EXAMPLE
+powershell -ExecutionPolicy Bypass -File D:\wheelhouse\install.ps1 -Offline D:\wheelhouse -WithSerial
 #>
 [CmdletBinding()]
 param(
@@ -57,6 +80,9 @@ param(
     [switch]$WithSerial,
     [string]$Python = "",
     [switch]$NoUv,
+    [string]$Offline = "",
+    [switch]$Latest,
+    [switch]$NoStartMenu,
     [switch]$Force,
     [switch]$Uninstall
 )
@@ -104,6 +130,13 @@ $VenvHm = Join-Path $VenvScripts "harness-manager$Exe"
 # The launcher: it runs the version the self-update selected, else this venv's.
 $VenvLaunch = Join-Path $VenvScripts "harness-manager-launch$Exe"
 $VenvUv = Join-Path $VenvScripts "uv$Exe"
+# The Start menu entry: this user's Programs folder (no Administrator).
+$StartMenuDir = ''
+if ($env:APPDATA) {
+    $StartMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+}
+$StartMenuLink = ''
+if ($StartMenuDir) { $StartMenuLink = Join-Path $StartMenuDir 'Harness Manager.lnk' }
 
 function Say([string]$Text) { Write-Host $Text }
 function Note([string]$Text) { Write-Host "install.ps1: $Text" -ForegroundColor Yellow }
@@ -137,6 +170,23 @@ function Invoke-Native {
     } finally {
         $ErrorActionPreference = $old
     }
+}
+
+# The install did not finish: say what to try, for an offline install and an online one.
+function Fail-Install([string]$Why) {
+    Write-Host "install.ps1: error: the install did not finish ($Why; the tool's message is above)." -ForegroundColor Red
+    if ($Offline) {
+        Write-Host "  -Offline: $Offline lacks a wheel this needs. Make the wheelhouse for this"
+        Write-Host "  laptop's Python: scripts/make_wheelhouse.sh --platform win_amd64 --python-version X.Y DIR"
+        Write-Host "  (X.Y: what 'py --version' or 'python --version' prints here)."
+    } else {
+        Write-Host "  If it could not reach the package index (PyPI):"
+        Write-Host "  - check the network; behind a proxy: `$env:HTTPS_PROXY = 'http://PROXY:PORT'"
+        Write-Host "  - with no network: make a wheelhouse elsewhere, then -Offline DIR (docs\INSTALL.md)"
+        if ($constraintArgs.Count -gt 0) { Write-Host "  If a pinned version has no wheel for this Python, try -Latest." }
+    }
+    Write-Host "  Running this again is safe: it resumes."
+    exit 1
 }
 
 function Test-Python([string]$Exe, [string[]]$Pre = @()) {
@@ -194,6 +244,32 @@ function Get-UserPath {
     return $p
 }
 
+# The Start menu entry runs "harness-manager app" (the window; the service starts with it).
+function Set-StartMenuEntry([string]$Target) {
+    if (-not $OnWindows -or -not $StartMenuLink) { return }
+    try {
+        New-Item -ItemType Directory -Force -Path $StartMenuDir | Out-Null
+        $shell = New-Object -ComObject WScript.Shell
+        $lnk = $shell.CreateShortcut($StartMenuLink)
+        $lnk.TargetPath = $Target
+        $lnk.Arguments = 'app'
+        $lnk.WorkingDirectory = $HOME
+        $lnk.WindowStyle = 7         # the console starts minimised; the app opens its own window
+        $lnk.Description = 'SoC Labs Harness Manager: bring up and use MPS3 boards'
+        $lnk.Save()
+        Say "menu     $StartMenuLink"
+    } catch {
+        Note "could not add Harness Manager to the Start menu ($($_.Exception.Message)); run 'harness-manager app' instead"
+    }
+}
+
+function Remove-StartMenuEntry {
+    if ($StartMenuLink -and (Test-Path $StartMenuLink)) {
+        Remove-Item -Force $StartMenuLink
+        Say "removed  $StartMenuLink"
+    }
+}
+
 function Test-OnPath([string]$PathList, [string]$Dir) {
     $want = $Dir.TrimEnd('\', '/')
     foreach ($item in ($PathList -split ';')) {
@@ -204,6 +280,7 @@ function Test-OnPath([string]$PathList, [string]$Dir) {
 
 if ($Uninstall) {
     Stop-HarnessService
+    Remove-StartMenuEntry
     if (Test-Path $Command) {
         if ($BinDir -eq $DefaultBin -or $Force) {
             Remove-Item -Force $Command
@@ -251,10 +328,25 @@ $Work = Join-Path ([System.IO.Path]::GetTempPath()) ("harness-manager-install-" 
 New-Item -ItemType Directory -Path $Work | Out-Null
 try {
     $links = @()
+    $constraintsDir = ''
+    if ($Offline) {
+        if (-not (Test-Path $Offline -PathType Container)) {
+            Fail ("-Offline $Offline is not a directory (make one on a machine with network: " +
+                  "scripts/make_wheelhouse.sh --platform win_amd64 --python-version 3.12 DIR)")
+        }
+        $Offline = (Resolve-Path $Offline).Path
+        $links += $Offline
+        if (-not $From) {
+            $hmWheels = @(Get-ChildItem -Path $Offline -Filter 'harness_manager-*.whl' -ErrorAction SilentlyContinue |
+                          Sort-Object Name)
+            if ($hmWheels.Count -gt 0) { $From = $hmWheels[-1].FullName }
+        }
+    }
     if (-not $From) { $From = $Checkout }
     $isGit = ($From -match '^(https?|ssh|git|file)://') -or ($From -match '^[^@/\\]+@[^:]+:') -or
              (($From -match '\.git$') -and -not (Test-Path $From -PathType Container))
     if ($isGit) {
+        if ($Offline) { Fail "-Offline cannot clone $From; give a checkout or a wheel" }
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "git is needed to install from $From" }
         $what = $From
         if ($Ref) { $what = "$From@$Ref" }
@@ -265,6 +357,7 @@ try {
         $r = Invoke-Native 'git' ($cloneArgs + @($From, $pkg))
         if ($r.Code -ne 0) { Fail "could not clone $From (for the private repo, check your GitHub SSH key)" }
         $links += (Join-Path $pkg 'vendor')
+        $constraintsDir = $pkg
     } elseif (Test-Path $From -PathType Container) {
         $what = (Resolve-Path $From).Path
         $pyproject = Join-Path $what 'pyproject.toml'
@@ -278,11 +371,16 @@ try {
         Get-ChildItem -Force $what | Where-Object { $skip -notcontains $_.Name } |
             ForEach-Object { Copy-Item -Recurse -Force $_.FullName $pkg }
         $links += (Join-Path $pkg 'vendor')
+        $constraintsDir = $pkg
     } elseif ((Test-Path $From -PathType Leaf) -and ($From -like '*.whl')) {
         $pkg = (Resolve-Path $From).Path
         $what = $pkg
         $links += (Split-Path -Parent $pkg)
         $links += (Join-Path $Checkout 'vendor')
+        # A release directory (make dist) or a wheelhouse carries its constraints.txt next
+        # to the wheel.
+        $constraintsDir = Split-Path -Parent $pkg
+        if (-not (Test-Path (Join-Path $constraintsDir 'constraints.txt'))) { $constraintsDir = $Checkout }
     } else {
         Fail "-From $From is not a checkout, a wheel file or a git URL"
     }
@@ -315,12 +413,32 @@ try {
     if ($extras.Count -gt 0) { $spec = "$pkg[" + ($extras -join ',') + "]" }
     $findLinks = @()
     foreach ($dir in $links) { $findLinks += @('--find-links', $dir) }
+    # The tested dependency versions (constraints.txt, made by scripts/lock_deps.sh).
+    $constraintArgs = @()
+    if (-not $Latest) {
+        $candidates = @()
+        if ($Offline) { $candidates += (Join-Path $Offline 'constraints.txt') }
+        if ($constraintsDir) { $candidates += (Join-Path $constraintsDir 'constraints.txt') }
+        foreach ($c in $candidates) {
+            if (Test-Path $c -PathType Leaf) { $constraintArgs = @('--constraint', $c); break }
+        }
+    }
+    $indexArgs = @()
+    if ($Offline) { $indexArgs = @('--no-index') }
+    $uvFlags = @()
+    if ($Offline) { $uvFlags = @('--offline') }
 
     # -- the venv -----------------------------------------------------------------------
     $uv = $null
     if (-not $NoUv) {
         $cmd = Get-Command uv -ErrorAction SilentlyContinue
         if ($cmd) { $uv = $cmd.Path }
+    }
+    if ($Latest -and (Test-Path $Venv)) {
+        # An upgrade in place keeps each dependency that still satisfies: rebuild instead.
+        Stop-HarnessService
+        Say "latest   rebuilding $Venv with the newest dependency versions"
+        Remove-Item -Recurse -Force $Venv
     }
     if ((Test-Path $VenvPy) -and (Test-Python $VenvPy)) {
         Stop-HarnessService
@@ -334,7 +452,7 @@ try {
             # With no local Python >= 3.10, uv downloads one.
             $want = '3.12'
             if ($base) { $want = $base }
-            $r = Invoke-Native $uv @('venv', '--quiet', '--python', $want, $Venv)
+            $r = Invoke-Native $uv (@('venv', '--quiet') + $uvFlags + @('--python', $want, $Venv))
             if ($r.Code -ne 0) { Fail "uv could not make a venv with Python >= $MinPy" }
         } else {
             if (-not $base) {
@@ -353,25 +471,31 @@ try {
     $shown = $what
     if ($extras.Count -gt 0) { $shown = "$what [" + ($extras -join ' ') + "]" }
     Say "install  $shown"
+    if ($constraintArgs.Count -gt 0) {
+        Say "pins     the tested dependency versions (constraints.txt; -Latest for the newest)"
+    }
+    if ($Offline) { Say "offline  only from $Offline (no package index)" }
     if ($uv) {
-        $pipBase = @('pip', 'install', '--quiet', '--python', $VenvPy)
+        $pipBase = @('pip', 'install', '--quiet') + $uvFlags + @('--python', $VenvPy)
         # pyverify keeps its version number across commits: always reinstall the vendored one.
         $r = Invoke-Native $uv ($pipBase + @('--reinstall-package', 'mps3-pyverify', '--no-deps', $pyverifyWheel))
         if ($r.Code -ne 0) { Fail "could not install $pyverifyWheel" }
         # --upgrade-package, not --upgrade: an upgrade of everything could swap the vendored
         # pyverify for a same-named package from the index.
-        $r = Invoke-Native $uv ($pipBase + @('--upgrade-package', 'harness-manager', '--reinstall-package', 'harness-manager') + $findLinks + @($spec))
-        if ($r.Code -ne 0) { Fail "could not install Harness Manager (uv exited $($r.Code))" }
+        $r = Invoke-Native $uv ($pipBase + $indexArgs + @('--upgrade-package', 'harness-manager', '--reinstall-package', 'harness-manager') + $findLinks + $constraintArgs + @($spec))
+        if ($r.Code -ne 0) { Fail-Install "uv exited $($r.Code)" }
     } else {
         $pipBase = @('-m', 'pip', '--disable-pip-version-check', 'install', '--quiet')
         $r = Invoke-Native $VenvPy @('-m', 'pip', '--version') -Capture
         if ($r.Code -ne 0) { Invoke-Native $VenvPy @('-m', 'ensurepip', '--upgrade') -Capture | Out-Null }
-        $r = Invoke-Native $VenvPy ($pipBase + @('--upgrade', 'pip'))
-        if ($r.Code -ne 0) { Note "could not upgrade pip; carrying on" }
+        if (-not $Offline) {
+            $r = Invoke-Native $VenvPy ($pipBase + @('--upgrade', 'pip'))
+            if ($r.Code -ne 0) { Note "could not upgrade pip; carrying on" }
+        }
         $r = Invoke-Native $VenvPy ($pipBase + @('--force-reinstall', '--no-deps', $pyverifyWheel))
         if ($r.Code -ne 0) { Fail "could not install $pyverifyWheel" }
-        $r = Invoke-Native $VenvPy ($pipBase + @('--upgrade') + $findLinks + @($spec))
-        if ($r.Code -ne 0) { Fail "could not install Harness Manager (pip exited $($r.Code))" }
+        $r = Invoke-Native $VenvPy ($pipBase + @('--upgrade') + $indexArgs + $findLinks + $constraintArgs + @($spec))
+        if ($r.Code -ne 0) { Fail-Install "pip exited $($r.Code)" }
         if ($pkg -like '*.whl') {
             # pip leaves a wheel of the same version alone; the file may still be newer.
             $r = Invoke-Native $VenvPy ($pipBase + @('--force-reinstall', '--no-deps', $pkg))
@@ -385,9 +509,9 @@ try {
     # -- uv in the venv: the app's self-update builds each new version with it ----------
     if (-not (Test-Path $VenvUv)) {
         if ($uv) {
-            $r = Invoke-Native $uv ($pipBase + $findLinks + @('uv>=0.4')) -Capture
+            $r = Invoke-Native $uv ($pipBase + $indexArgs + $findLinks + @('uv>=0.4')) -Capture
         } else {
-            $r = Invoke-Native $VenvPy ($pipBase + $findLinks + @('uv>=0.4')) -Capture
+            $r = Invoke-Native $VenvPy ($pipBase + $indexArgs + $findLinks + @('uv>=0.4')) -Capture
         }
     }
     $recordUv = ''
@@ -433,6 +557,7 @@ try {
     } catch {
         Fail "could not write $Command ($($_.Exception.Message)). Close any running harness-manager, then run this again."
     }
+    if ($NoStartMenu) { Remove-StartMenuEntry } else { Set-StartMenuEntry $Command }
     if ($OnWindows) {
         $userPath = Get-UserPath
         if (-not (Test-OnPath $userPath $BinDir)) {
@@ -449,6 +574,7 @@ try {
     Say "Harness Manager $version is installed."
     Say ""
     Say "Next:"
+    Say "  harness-manager app             the app (also in the Start menu: Harness Manager)"
     Say "  harness-manager app --demo      the app with demo boards, no hardware needed"
     Say "  harness-manager ui --demo       the same in a browser tab"
     Say "  harness-manager info 192.168.10.101    a real board on your network"

@@ -628,26 +628,46 @@ def test_twin_the_image_range_and_a_mac_in_the_registry_are_rolled_again():
 def test_the_proposal_name_ip_and_notes_fit_the_identity_writer():
     from harness_manager.services import board_identity as BI
 
-    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(rescue_note="rescue: .101"))
+    # the MAC's last byte 0x00: the pool's first address (110 + 0 mod 90)
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(rescue_note="rescue: .101"),
+                                 urandom=_bytes(bytes.fromhex("025e3a91c000")))
     assert p["label"] == "MPS3-BC12" and p["hostname"] == "mps3-bc12"
     assert p["ip"] == "192.168.10.110/24" and p["ip_how"] == "auto" and p["ip_error"] == ""
     assert p["same_net"] == "this PC must be on the same /24 (e.g. 192.168.10.1/24)"
     assert BI.validate_want({k: p[k] for k in ("label", "ip", "mac")}) == {
         "label": "MPS3-BC12", "ip": "192.168.10.110/24", "mac": p["mac"]}
     assert p["notes"] == [
-        "every board gets its own IP: the next free address of the pool (the image default "
-        "192.168.10.101 is never given)", "rescue: .101"]
+        "every board gets its own IP: a free address of the pool, searched from its MAC (the "
+        "image default 192.168.10.101 is never given)", "rescue: .101"]
     assert bringup.propose_identity("ab-1", policy=_mps3_policy())["label"] == "MPS3-AB1"
     assert bringup.propose_identity("x", policy=_mps3_policy(),
-                                    taken_ips={"192.168.10.110": ["b"]})["ip"] == \
-        "192.168.10.111/24"                          # the registry's address is skipped
+                                    taken_ips={"192.168.10.110": ["b"]},
+                                    urandom=_bytes(bytes.fromhex("025e3a91c05a")))["ip"] == \
+        "192.168.10.111/24"                          # 0x5a = 90 -> .110, taken: skipped
     assert bringup.identity_command("192.168.10.101", p) == (
         f"harness-manager board identity 192.168.10.101 --label MPS3-BC12 --ip "
         f"192.168.10.110 --mac {p['mac']} --consent MPS3-BC12")
 
 
+def test_the_proposal_ip_starts_from_the_random_mac():
+    # the lab's seat sheet (david 2 Oct): 192.168.10.(110 + mac[5] mod 90), then the skips
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(),
+                                 urandom=_bytes(bytes.fromhex("025e3a91c017")))
+    assert p["mac"].endswith(":17") and p["ip"] == "192.168.10.133/24"     # 110 + 23
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(),
+                                 urandom=_bytes(bytes.fromhex("025e3a91c0ff")))
+    assert p["ip"] == "192.168.10.185/24"                                  # 110 + 255 mod 90
+
+
+def test_twin_the_mac_start_skips_the_registry_and_wraps_round_the_pool():
+    taken = {"192.168.10.199": ["a"]}
+    p = bringup.propose_identity("FT6ABC12", policy=_mps3_policy(), taken_ips=taken,
+                                 urandom=_bytes(bytes.fromhex("025e3a91c059")))   # 89 -> .199
+    assert p["ip"] == "192.168.10.110/24"                  # .199 taken: wraps to the start
+
+
 def test_twin_no_serial_proposes_no_name_and_says_why():
-    p = bringup.propose_identity("", policy=_mps3_policy())
+    p = bringup.propose_identity("", policy=_mps3_policy(), urandom=_bytes(bytes.fromhex("025e3a91c000")))
     assert p["label"] == p["hostname"] == "" and p["mac"].startswith("02:")
     assert p["notes"][0] == ("the MCC's USB serial number is not known (the Debug USB did not "
                              "report one): give the board a name yourself")

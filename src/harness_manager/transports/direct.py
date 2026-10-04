@@ -46,7 +46,9 @@ SERIAL_SCHEME = "serial"
 READ_TIMEOUT_S = 0.1
 WRITE_TIMEOUT_S = 2.0
 
-_INSTALL_HINT = "install pyserial: pip install 'harness-manager[serial]'"
+_INSTALL_HINT = ("install pyserial: re-run the installer with the serial extra (Windows: "
+                 "install.ps1 -WithSerial; Linux and macOS: install.sh --with-serial), or "
+                 "pip install 'harness-manager[serial]'")
 
 
 def _import_serial() -> Any:

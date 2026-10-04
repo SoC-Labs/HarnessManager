@@ -260,7 +260,9 @@ class SshUploader:
         opts = ["-o", "ControlPath=none", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
         if self.jump:
             opts += ["-J", self.jump]
-        return ["ssh", *opts, self.host, remote]
+        from harness_manager.core.sshcmd import ssh_program
+
+        return [ssh_program(), *opts, self.host, remote]     # ssh.exe's full path on Windows
 
     def __call__(self, local: Path, remote_rel: str) -> None:
         with open(local, "rb") as fh:
