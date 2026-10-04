@@ -17,7 +17,7 @@ import { boardState, changed, jobLabel, navigate, scheduleRefresh } from "../sto
 import { loadPower, week } from "../week.js";
 import { ArmBox, Card, Icon, MiniBar, Reason, ResultBlock, Spinner } from "../ui.js";
 import {
-  cardGuard, driveWhy, identityOf, isLinux, mccRoute, osKind, rangeText,
+  cardGuard, driveWhy, identityOf, isLinux, loadSlots, mccRoute, osKind, rangeText,
 } from "./boardfacts.js";
 
 // The engine picks the reboot wait by harness implementation (bare-metal ~120 s, Linux
@@ -225,10 +225,11 @@ export function recoverSteps(bid) {
     { k: "restart", key: "reset_shell", panel: "reset_shell", sev: 3, t: "Restart the shell", bt: "Restart", icon: "refresh-cw",
       testid: "reset-shell", result: "reset-shell-result", arm: "arm-reset-shell",
       sh: lx ? "Restarts the board's Linux; the FPGA is not reloaded." : "Warm firmware restart; consoles reconnect.",
-      time: lx ? "~3-4 min" : "~3 s",
-      d: lx ? "Restarts the board's Linux: the board's watchdog resets it and it boots again (about 3-4 minutes); the FPGA is not reloaded. Consoles and debug drop, then reconnect by themselves. The design stays loaded but held in reset until you program once."
+      time: lx ? "~3 min" : "~3 s",
+      d: lx ? `Restarts the board's Linux: the board's watchdog resets it and it boots again (about 3 minutes); the FPGA is not reloaded. ${net ? "This board netboots, so it waits in stage0 rescue until its image is pushed again; it does not come back by itself. " : ""}Consoles and debug drop${net ? "" : ", then reconnect by themselves"}. The design stays loaded but held in reset until you program once.`
         : "Restarts the harness firmware (warm; the FPGA is not reloaded). Consoles and debug drop, then reconnect; the design stays loaded.",
-      keep: K(["lost"], ["back", lx ? "drop for ~3-4 min, then reconnect" : "drop for ~3 s, then reconnect"],
+      keep: K(["lost"],
+        lx ? (net ? ["lost", "drop and stay down until the image is pushed again"] : ["back", "drop for ~3 min, then reconnect"]) : ["back", "drop for ~3 s, then reconnect"],
         lx ? ["held", "loaded, but held in reset until you program once"] : ["kept"], ["kept"], ["kept"]),
       spec: shellSpec(bid),
       gate: { capability: "reset_shell", adapter: "resets", arm: "reset_shell", holder: "Restart shell", guard: shellGuard } },
@@ -336,6 +337,8 @@ export function RecoverPage({ bid }) {
   const b = boardState(bid);
   const w = week(bid);
   useEffect(() => { if (!w.power && !w.powerError) loadPower(bid); }, [bid]);
+  // What the board boots from decides what Restart and Reboot say (a netboot board waits in rescue)
+  useEffect(() => { if (isLinux(b) && !b.slots && !b.slotsLoading) loadSlots(bid); }, [bid, isLinux(b)]);
   const steps = recoverSteps(bid);
   const shown = steps.filter((s) => !s.hidden);
   const leaseWhy = driveWhy(bid, "Recovery");
