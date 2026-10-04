@@ -366,6 +366,8 @@ class Mps3NetIdentity:
         self._read_at = 0.0
         self._quick: dict[str, Any] | None = None
         self._quick_at = -READ_TTL_S
+        self._facts: dict[str, Any] | None = None
+        self._facts_at = -READ_TTL_S
         self._hub_rec: dict[str, Any] | None = None
         self._live: Any = None
         #: How the last change reached the board, and the setter that made it (tests).
@@ -445,6 +447,34 @@ class Mps3NetIdentity:
         raw = reply.raw if hasattr(reply, "raw") else dict(reply)
         return parse_identity(raw, impl=impl or (reply.impl if hasattr(reply, "impl") else ""),
                               via="identify")
+
+    def readings_facts(self) -> dict[str, Any] | None:
+        """The harness's uptime from UDP 6899 identify (``up_ms``, and the Linux OS's
+        ``os_up_ms``), for a board whose telemetry reads no ``stats``. No control-port
+        connection: one datagram on the board's own network, cached ``READ_TTL_S`` (a silent
+        board too), never through a hub. None when identify does not answer or has no uptime."""
+        now = time.monotonic()
+        with self._mu:
+            cached, cached_at = self._facts, self._facts_at
+        if now - cached_at < READ_TTL_S:
+            return cached
+        out: dict[str, Any] | None = None
+        if not self._tunnelled() and self._shell() is not None:
+            from . import identify as _identify
+
+            ask = self._identify or _identify.identify
+            try:
+                reply = ask(self._shell().host, timeout=IDENTIFY_TIMEOUT_S, retries=0)
+                raw = reply.raw if hasattr(reply, "raw") else dict(reply)
+            except (UnreachableError, UsageError):
+                raw = {}
+            if isinstance(raw, Mapping) and isinstance(raw.get("up_ms"), (int, float)):
+                out = {"up_ms": raw["up_ms"], "at": time.time(), "source": "identify (UDP 6899)"}
+                if raw.get("os_up_ms") is not None:
+                    out["os_up_ms"] = raw["os_up_ms"]
+        with self._mu:
+            self._facts, self._facts_at = out, now
+        return out
 
     def _from_stats(self, *, impl: str) -> dict[str, Any] | None:
         try:

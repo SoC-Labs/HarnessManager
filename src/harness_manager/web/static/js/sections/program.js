@@ -280,11 +280,13 @@ function DesignPicker({ bid }) {
   const toggle = () => {
     u.open = !u.open;
     u.q = "";
-    if (u.open && !b.overlays && !b.overlaysLoading) loadOverlays(bid);
+    // Opening reads the list when there is none, or when the last read failed (a good old list
+    // stays on show meanwhile).
+    if (u.open && (!b.overlays || b.overlaysError) && !b.overlaysLoading) loadOverlays(bid);
     changed();
   };
   const placeholder = b.overlaysLoading && !b.overlays ? "Reading the designs..."
-    : b.overlaysError ? "The design list could not be read"
+    : b.overlaysError && !b.overlays ? "The design list could not be read"
     : `Pick a design (${loadable} load on this shell)`;
   const opt = (r) => {
     const sel = b.selectedOverlay === r.name;
@@ -314,6 +316,10 @@ function DesignPicker({ bid }) {
         <input class="input sm" placeholder="Filter by name or rm_id" value=${u.q} aria-label="Filter the designs"
           data-testid="design-filter" ref=${(el) => { if (el && !el.dataset.f) { el.dataset.f = "1"; el.focus(); } }}
           onInput=${(e) => { u.q = e.target.value; changed(); }} />
+        ${b.overlays && b.overlaysError ? html`<div class="small muted combo-stale" data-testid="design-list-stale">
+          The last read failed: ${b.overlaysError.errName}: ${b.overlaysError.message}.
+          <button type="button" class="link" data-action="design-reread" disabled=${b.overlaysLoading}
+            onClick=${() => loadOverlays(bid)}>Read again</button></div>` : null}
         <div class="combo-list">
           ${ok.map(opt)}
           ${other.length ? html`<div class="combo-sep" title="The preflight refuses a design keyed to another shell">Keyed to another shell</div>` : null}

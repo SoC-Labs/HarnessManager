@@ -69,6 +69,7 @@
 }
 .combo-pop .input { width: 100%; margin-bottom: 6px; height: 28px; font-size: 12.5px; }
 .combo-list { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 6px; }
+.combo-stale { padding: 4px 10px 6px; }
 .combo-sep {
   font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3);
   padding: 8px 8px 4px; border-top: 1px solid var(--border); margin-top: 4px;

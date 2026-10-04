@@ -362,8 +362,8 @@ function IdentityStrip({ bid }) {
       <span class="ov-id-k">Harness</span>
       <span class="ov-ell" data-testid="ov-harness">${hw.impl ? `${hw.impl} ` : ""}${hw.release || hw.version || "unknown"}${hw.proto ? html` <span class="secondary">· protocol ${hw.proto}</span>` : null}</span></span>
     <span class="ov-id-i" data-testid="ov-uptime" title=${up ? `Source: ${info.readings_source || "the harness"} at ${hhmm(at)} (the harness has run this long${osUp ? `; the OS: ${osUp}` : ""}), plus the time since`
-        : "The harness's uptime is read with its stats; this read had none"}>
-      <span class="ov-id-k">Up</span>${up ? html`<span class="num">${up}</span>` : html`<span class="muted">not reported</span>`}</span>
+        : "The harness reports its uptime in its stats and identify replies. This read had neither: the board did not answer one, or it is behind a hub tunnel, which cannot carry the identify reply."}>
+      <span class="ov-id-k">Up</span>${up ? html`<span class="num">${up}</span>` : html`<span class="muted">not read</span>`}</span>
     <span class="ov-id-i"><span class="ov-id-k">Debug USB</span>
       <button type="button" class=${`chip ov-chip-sm ${U.level}`} data-testid="ov-usb" data-usb=${r.to}
         title=${`${r.reason || U.text} · Board › Connections`} onClick=${() => navigate(bid, "board/connections")}>
@@ -896,6 +896,7 @@ function LiveCard({ bid }) {
   for (const r of rows) {
     const m = meta[r.name] || {};
     const role = m.role || (r.name === "shell" ? "shell" : /^uart|^swo/.test(r.name) ? "dut" : "");
+    if (m.connected === false) continue;       // the pack says nothing drives it: not a live console
     if ((role === "dut" && r.name === "uart0") || role === "shell") main.push({ ...r, role, m });
     else also.push({ ...r, role, m });
   }

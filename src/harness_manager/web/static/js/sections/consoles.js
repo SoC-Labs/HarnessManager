@@ -142,7 +142,9 @@ export function consoleList(bid) {
     if (role === "linux-root") { label = "Harness console"; short = "Harness"; icon = "terminal"; }
     if (role === "shell") { label = "Shell console"; short = "Shell"; icon = "server"; }
     if (role === "mcc") { label = "MCC console"; short = "MCC"; icon = "server"; }
-    return { name, role, label, short, icon, meta, aka };
+    // The pack says nothing drives this console (a field on its row), so the page marks it apart.
+    const off = meta && meta.connected === false ? (meta.connected_reason || "not connected") : "";
+    return { name, role, label, short, icon, meta, aka, off };
   });
   const order = (r) => ROLE_ORDER[r.role] ?? 5;
   return out.sort((x, y) => order(x) - order(y));
@@ -278,6 +280,13 @@ onBoardEvent((ev) => {
   for (const c of consoleList(ev.board_id)) {
     if (c.role === "dut") mark(ev.board_id, c.name, `partition swap: ${d.overlay || d.rm_id || "a design"}`);
   }
+});
+
+// The rate line says what the loaded design does with the console, so a swap (or a restore)
+// that changes the design makes what was read stale: read each known console's rate again.
+onBoardEvent((ev) => {
+  if (!ev.board_id || !(ev.topic === "deploy.done" || ev.topic === "board.identity")) return;
+  for (const name of Object.keys(week(ev.board_id).baud)) loadBaud(ev.board_id, name);
 });
 
 // --- the rate --------------------------------------------------------------------------------
@@ -552,9 +561,9 @@ function ConsoleCard({ bid, list, c }) {
           const n = x.name === c.name || !s ? 0 : s.unseen();
           return html`<button type="button" role="tab" key=${x.name} class="cs-btn" data-console-tab=${x.name}
               aria-selected=${x.name === c.name ? "true" : "false"}
-              title=${`${x.label} (${x.name}${x.aka.length ? `, also ${x.aka.join(", ")}` : ""})${xs ? `: ${xs}` : ": not opened yet"}${xa.writable ? "" : `, read-only: ${xa.reason}`}`}
+              title=${x.off ? x.off : `${x.label} (${x.name}${x.aka.length ? `, also ${x.aka.join(", ")}` : ""})${xs ? `: ${xs}` : ": not opened yet"}${xa.writable ? "" : `, read-only: ${xa.reason}`}`}
               onClick=${() => { b.consoleSelected = x.name; b.consoleFocus = x.name; changed(); if (x.name === c.name) session.focus(); }}>
-            <span class=${`dot ${xs ? STATE_DOT[xs] || "idle" : "off"}`}></span>${compact && x.name !== c.name
+            <span class=${`dot ${x.off ? "off" : xs ? STATE_DOT[xs] || "idle" : "off"}`} data-connected=${x.off ? "no" : "yes"}></span>${compact && x.name !== c.name
               ? html`<span>${x.short}</span>` : html`<span class="cs-long">${x.label}</span><span class="cs-short">${x.short}</span>`}
             ${xa.writable ? null : html`<${Icon} name="eye" />`}
             ${n ? html`<span class="cs-new" title=${`${n} new line${n > 1 ? "s" : ""}`}>${n > 99 ? "99+" : n}</span>` : null}</button>`;
@@ -567,6 +576,7 @@ function ConsoleCard({ bid, list, c }) {
       <span class="cs-now" title=${`${c.label}: ${c.name}`}><${Icon} name=${c.icon} />${c.label}</span>
       <span class=${`chip ${STATE_LEVEL[st] ?? "unk"}`} data-testid="console-state" data-level=${STATE_LEVEL[st] ?? "unk"}
         title=${session.detail || ""}>${st}</span>
+      ${c.off ? html`<span class="chip plain" data-testid="console-not-connected" title=${c.off}><${Icon} name="unplug" />not connected</span>` : null}
       ${accessChip}
       <span class="small muted csub" data-testid="console-detail">
         <span class="mono">${c.name}</span>${route ? ` · ${route}` : ""}${harness ? " · root shell" : ""}

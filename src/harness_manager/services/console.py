@@ -1029,7 +1029,8 @@ class ConsoleBroker:
     def consoles(self, session: BoardSession, *, live: bool = True,
                  offline_reason: str = "") -> list[dict[str, Any]]:
         """One row per name in ``names``: ``{name, kind, baud, settable, source, reason,
-        pty, state}`` (``alias_of`` on an alias)."""
+        pty, state}`` (``alias_of`` on an alias; ``connected: false`` and ``connected_reason`` on a
+        console the pack says nothing drives)."""
         board_id = session.candidate.board_id
         rows = []
         for name in self.names(session):
@@ -1040,6 +1041,9 @@ class ConsoleBroker:
                 "name": name, "kind": rate["kind"], "baud": rate["baud"],
                 "settable": rate["settable"], "source": rate["source"], "reason": rate["reason"],
                 "pty": port["path"] if port else None, "state": self.state(board_id, key)}
+            if rate.get("connected") is False:      # the pack says nothing drives it (uart1)
+                row["connected"] = False
+                row["connected_reason"] = str(rate.get("connected_reason") or rate["reason"] or "")
             if key != name:
                 row["alias_of"] = key
             rows.append(row)

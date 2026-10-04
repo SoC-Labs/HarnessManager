@@ -161,3 +161,53 @@ def test_query_args_and_their_twins():
                          (None, "ten")):
         with pytest.raises(UsageError):
             query_args(None, since, limit)
+
+
+# --- the uptime when the harness reports no sysmon: identify's up_ms (header "Up") ----------------
+
+
+class _Shell:
+    host = "192.168.11.101"
+
+
+class _Reply:
+    def __init__(self, raw):
+        self.raw = raw
+
+
+def _identity(raw, *, tunnelled=False, calls=None):
+    from harness_manager_mps3.net_identity import Mps3NetIdentity
+
+    def ask(host, timeout, retries):
+        if calls is not None:
+            calls.append(host)
+        return _Reply(raw)
+
+    adapter = Mps3NetIdentity(object(), identify=ask)
+    adapter._shell = lambda: _Shell()                  # type: ignore[method-assign]
+    adapter._tunnelled = lambda: tunnelled             # type: ignore[method-assign]
+    return adapter
+
+
+def test_a_board_with_no_stats_read_still_gets_its_uptime_from_identify():
+    calls: list[str] = []
+    ident = _identity({"ok": True, "up_ms": 90_000, "os_up_ms": 120_000}, calls=calls)
+    facts = facts_of(_WithIdentity(ident))
+    assert (facts.uptime_s, facts.os_uptime_s) == (90.0, 120.0)
+    assert facts.source == "identify (UDP 6899)" and facts.at
+    facts_of(_WithIdentity(ident))
+    assert calls == ["192.168.11.101"]                 # cached: one datagram, not one per read
+
+
+def test_twins_stats_win_and_a_tunnel_or_a_silent_board_has_no_uptime():
+    ident = _identity({"ok": True, "up_ms": 90_000})
+    both = _WithIdentity(ident, telemetry=Seam({"stats": {"up_ms": 3000}, "source": "stats (6900)"}))
+    assert facts_of(both).uptime_s == 3.0 and facts_of(both).source == "stats (6900)"
+    assert facts_of(_WithIdentity(_identity({"ok": True, "up_ms": 5}, tunnelled=True))).uptime_s is None
+    assert facts_of(_WithIdentity(_identity({"ok": True}))).uptime_s is None     # no up_ms sent
+
+
+class _WithIdentity:
+    def __init__(self, ident, telemetry=None):
+        self.net_identity = ident
+        self.telemetry = telemetry

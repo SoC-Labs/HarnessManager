@@ -93,6 +93,17 @@ def test_uart1_and_swo_come_from_the_shell_not_the_design():
     assert (swo["baud"], swo["source"]) == (2_000_000, "harness") and "divisor 24" in swo["reason"]
 
 
+def test_uart1_says_it_is_not_connected_and_uart0_does_not():
+    row = uart.design_row("uart1", "0x01000001")
+    assert row["connected"] is False and row["connected_reason"] == "DUT uart1: not connected in this shell"
+    # twins: the other streams carry no such field, and the harness's own reply keeps it on uart1
+    for stream in ("uart0", "swo"):
+        assert "connected" not in uart.design_row(stream, "0x01000001")
+    reply = {"ok": True, "baud": 76800, "mode": "fixed", "settable": False}
+    assert uart.harness_row("uart1", reply, row)["connected"] is False
+    assert "connected" not in uart.harness_row("uart0", reply, uart.design_row("uart0", "0x01000001"))
+
+
 def test_harness_row_reads_the_frozen_reply_shape():
     base = uart.design_row("uart0", "0x01000001")
     row = uart.harness_row("uart0", {"ok": True, "stream": "uart0", "baud": 115200, "mode": "set",

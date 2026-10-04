@@ -115,6 +115,8 @@ DESIGN_UART: dict[int, DesignUart] = {
 #: uart1: the shell's UARTBR U1 has no partition pins in v0.1; the BD ties its DUT side off.
 UART1_WHY = ("nothing drives uart1: the shell ties its DUT side off until a design widens the "
              "partition contract (fpga/shell/ip/uart_bridge/README.md:72-75)")
+#: What the console row says (``connected: false``) so the page can mark the console apart.
+UART1_NOT_CONNECTED = "DUT uart1: not connected in this shell"
 #: swo: the harness firmware's NRZ deserialiser divisor 24 = a 25-cycle bit period.
 SWO_DIVISOR = 24
 SWO_BAUD = DESIGN_CLK_HZ // (SWO_DIVISOR + 1)          # 2 000 000 at the 50 MHz dut_clk
@@ -154,7 +156,8 @@ def _row(kind: str, baud: int | None, source: str, *, settable: bool = False, re
 def design_row(stream: str, rm_id: Any) -> dict[str, Any]:
     """The rate the loaded design fixes on ``stream`` (no harness verb involved)."""
     if stream == "uart1":
-        return _row("ethernet", None, "design", reason=UART1_WHY)
+        return _row("ethernet", None, "design", reason=UART1_WHY, connected=False,
+                    connected_reason=UART1_NOT_CONNECTED)
     if stream == "swo":
         return _row("ethernet", SWO_BAUD, "harness",
                     reason=f"the harness firmware fixes the SWO deserialiser at {SWO_BAUD} baud "
@@ -191,7 +194,7 @@ def harness_row(stream: str, reply: Mapping[str, Any], fallback: dict[str, Any])
     out = _row("ethernet", baud if baud is not None else fallback.get("baud"), "harness",
                settable=settable, reason=reason, choices=HARNESS_CHOICES if settable else (),
                mode=mode)
-    for key in ("design", "cite"):
+    for key in ("design", "cite", "connected", "connected_reason"):
         if key in fallback:
             out[key] = fallback[key]
     return out

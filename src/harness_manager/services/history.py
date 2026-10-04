@@ -98,15 +98,20 @@ class BoardFacts:
 
 
 def facts_of(session: Any) -> BoardFacts:
-    """The session's facts from its optional seams; empty (every field None) when it has none.
-    A seam that fails is no facts, never a failed read."""
-    for owner in (session, getattr(session, "telemetry", None)):
+    """The session's facts from its optional seams, in order: the session's own, its telemetry
+    adapter's (a ``stats`` read), its identity adapter's (identify's uptime). The first that
+    knows something wins; empty (every field None) when none does. A seam that fails is no
+    facts, never a failed read."""
+    for owner in (session, getattr(session, "telemetry", None), getattr(session, "net_identity", None)):
         seam = getattr(owner, "readings_facts", None)
-        if callable(seam):
-            try:
-                return BoardFacts.from_raw(seam())
-            except Exception:  # noqa: BLE001 - an optional seam never fails the board read
-                return BoardFacts()
+        if not callable(seam):
+            continue
+        try:
+            facts = BoardFacts.from_raw(seam())
+        except Exception:  # noqa: BLE001 - an optional seam never fails the board read
+            return BoardFacts()
+        if facts.uptime_s is not None or facts.os_uptime_s is not None or facts.stats is not None:
+            return facts
     return BoardFacts()
 
 
