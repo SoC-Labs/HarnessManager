@@ -7,6 +7,7 @@ demo engines.
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -155,3 +156,56 @@ def test_twin_a_card_board_comes_back_by_itself_after_the_restart(show):
     expect(card.locator(".rc-d")).to_have_attribute("title", re.compile("reconnect by themselves"), timeout=T)
     assert "stage0 rescue" not in card.locator(".rc-d").get_attribute("title")
     assert card.locator('.kp[data-keep="back"]').count() == 1
+
+
+# --- 2. the console's route text follows the loaded design --------------------------------------------
+
+BAUD_UART0 = re.compile(r"/boards/[^/]+/consoles/uart0/baud")
+
+
+def _baud_row(**kw):
+    row = {"ok": True, "name": "uart0", "kind": "ethernet", "baud": None, "source": "design", "settable": False, "choices": [],
+           "reason": ""}
+    row.update(kw)
+    return row
+
+
+def _serve_baud(page, state):
+    page.route(BAUD_UART0, lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(state["row"])))
+
+
+def _console_page(page_factory, state):
+    page = page_factory(**APP)
+    _serve_baud(page, state)
+    nav.open_board(page, BOARD_USB)
+    nav.section(page, "consoles")
+    return page
+
+
+@pytest.mark.week_plan("consoles_api", sim=True)
+def test_the_console_rate_line_follows_the_design_after_a_swap(page_factory, daemon):
+    state = {"row": _baud_row(reason="uart_echo echoes bytes on the AXI-Stream itself: no serial line")}
+    page = _console_page(page_factory, state)
+    baud = page.locator('[data-testid="console-uart0"] [data-testid="baud"]')
+    expect(baud).to_contain_text("no rate", timeout=T)
+    expect(baud).to_contain_text("uart_echo echoes bytes")
+    state["row"] = _baud_row(baud=76800, reason="nanosoc fixes uart0 at 76800 baud when it is built")
+    daemon.app.state.sim.publish("deploy.done", BOARD_USB, {"verified": True, "overlay": "nanosoc"})
+    expect(baud).to_contain_text("76800", timeout=T)
+    assert "uart_echo echoes bytes" not in baud.inner_text()
+    state["row"] = _baud_row(reason="no design is loaded (greybox): nothing drives uart0")
+    daemon.app.state.sim.publish("board.identity", BOARD_USB, {})        # and back to the baseline
+    expect(baud).to_contain_text("nothing drives uart0", timeout=T)
+
+
+@pytest.mark.week_plan("consoles_api", sim=True)
+def test_twin_other_events_do_not_re_read_the_rate(page_factory, daemon):
+    state = {"row": _baud_row(reason="first")}
+    page = _console_page(page_factory, state)
+    baud = page.locator('[data-testid="console-uart0"] [data-testid="baud"]')
+    expect(baud).to_contain_text("first", timeout=T)
+    state["row"] = _baud_row(reason="second")
+    daemon.app.state.sim.publish("lease.state", BOARD_USB, {"state": "released", "holder": ""})
+    page.wait_for_timeout(600)
+    expect(baud).to_contain_text("first")

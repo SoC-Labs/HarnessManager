@@ -280,6 +280,13 @@ onBoardEvent((ev) => {
   }
 });
 
+// The rate line says what the loaded design does with the console, so a swap (or a restore)
+// that changes the design makes what was read stale: read each known console's rate again.
+onBoardEvent((ev) => {
+  if (!ev.board_id || !(ev.topic === "deploy.done" || ev.topic === "board.identity")) return;
+  for (const name of Object.keys(week(ev.board_id).baud)) loadBaud(ev.board_id, name);
+});
+
 // --- the rate --------------------------------------------------------------------------------
 
 const SOURCE_TEXT = { serial: "the host serial port", design: "the loaded design", harness: "the harness", unknown: "unknown" };
