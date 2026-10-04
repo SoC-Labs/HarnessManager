@@ -896,6 +896,7 @@ function LiveCard({ bid }) {
   for (const r of rows) {
     const m = meta[r.name] || {};
     const role = m.role || (r.name === "shell" ? "shell" : /^uart|^swo/.test(r.name) ? "dut" : "");
+    if (m.connected === false) continue;       // the pack says nothing drives it: not a live console
     if ((role === "dut" && r.name === "uart0") || role === "shell") main.push({ ...r, role, m });
     else also.push({ ...r, role, m });
   }

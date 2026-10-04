@@ -183,7 +183,7 @@ Events: the `update.*` topics from docs/CONTRACTS.md are forwarded as they are.
   - the pty and baud replies carry `name`;
   - `DELETE .../pty` returns `closed`;
   - `GET baud` adds `kind`, `mode`, `design` and `cite`;
-  - console rows add `source`, `reason`, `state` and `alias_of`;
+  - console rows add `source`, `reason`, `state` and `alias_of`, and `connected: false` with `connected_reason` on a console nothing drives (the MPS3 shell's DUT uart1);
   - `GET /consoles?rates=0` skips the rate lookup.
 - **Holds and gates:** `POST baud` is 409 HELD while a job runs. `GET baud` and `GET /consoles` are never HELD: they return the last report, or `baud: null` with the reason. The PTY routes take no gate, like the console WebSocket.
 - **`clients`** counts open file descriptions, found through inotify on the PTY device. One terminal per PTY: screen opens it exclusively, and the daemon clears the exclusive flag when screen leaves, so a re-attach works.

@@ -209,3 +209,55 @@ def test_twin_other_events_do_not_re_read_the_rate(page_factory, daemon):
     daemon.app.state.sim.publish("lease.state", BOARD_USB, {"state": "released", "holder": ""})
     page.wait_for_timeout(600)
     expect(baud).to_contain_text("first")
+
+
+# --- 3. a console nothing drives says so ---------------------------------------------------------------
+
+CONSOLES = re.compile(r"/boards/[^/]+/consoles(\?.*)?$")
+NOT_CONNECTED = "DUT uart1: not connected in this shell"
+
+
+def _consoles_with(page, unconnected: bool):
+    def handle(route):
+        res = route.fetch()
+        body = res.json()
+        for row in body.get("consoles") or []:
+            if unconnected and row.get("name") == "uart1":
+                row["connected"] = False
+                row["connected_reason"] = NOT_CONNECTED
+        route.fulfill(response=res, json=body)
+    page.route(CONSOLES, handle)
+
+
+@pytest.mark.week_plan("consoles_api", sim=True)
+def test_a_console_the_pack_says_is_not_connected_is_marked_apart(page_factory):
+    page = page_factory(**APP)
+    _consoles_with(page, True)
+    nav.open_board(page, BOARD_USB)
+    nav.section(page, "consoles")
+    tab = page.locator('[data-console-tab="uart1"]')
+    expect(tab.locator(".dot")).to_have_attribute("data-connected", "no", timeout=T)
+    expect(tab).to_have_attribute("title", NOT_CONNECTED)
+    tab.click()
+    expect(by_id(page, "console-not-connected")).to_have_attribute("title", NOT_CONNECTED, timeout=T)
+    assert page.locator('[data-console-tab="uart0"] .dot').get_attribute("data-connected") == "yes"
+    # it is still listed, and the Overview's Also chips do not count it as a live console
+    nav.tab(page, "overview")
+    expect(by_id(page, "tile-consoles")).to_be_visible(timeout=T)
+    expect(by_id(page, "ov-also").locator('[data-console="swo"]')).to_be_visible(timeout=T)
+    assert by_id(page, "ov-also").locator('[data-console="uart1"]').count() == 0
+
+
+@pytest.mark.week_plan("consoles_api", sim=True)
+def test_twin_without_the_field_uart1_is_a_normal_console(page_factory):
+    page = page_factory(**APP)
+    _consoles_with(page, False)
+    nav.open_board(page, BOARD_USB)
+    nav.section(page, "consoles")
+    tab = page.locator('[data-console-tab="uart1"]')
+    expect(tab.locator(".dot")).to_have_attribute("data-connected", "yes", timeout=T)
+    tab.click()
+    expect(page.locator('[data-testid="console-uart1"]')).to_be_visible(timeout=T)
+    assert by_id(page, "console-not-connected").count() == 0
+    nav.tab(page, "overview")
+    expect(by_id(page, "ov-also").locator('[data-console="uart1"]')).to_be_visible(timeout=T)

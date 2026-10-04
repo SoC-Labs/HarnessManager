@@ -358,6 +358,20 @@ def test_the_console_rows_carry_kind_rate_and_pty(broker, session):
     assert all(r["kind"] == "serial" and r["baud"] == 115200 for r in rows.values())
 
 
+def test_a_console_the_pack_says_nothing_drives_is_marked_not_connected(broker):
+    s = BareSession(BOARD, consoles={"uart0": "tcp://127.0.0.1:9", "uart1": "tcp://127.0.0.1:10"})
+    s.consoles.console_baud_info = lambda: {
+        "uart0": {"kind": "ethernet", "baud": 76800, "source": "design", "settable": False,
+                  "reason": "fixed", "choices": []},
+        "uart1": {"kind": "ethernet", "baud": None, "source": "design", "settable": False,
+                  "reason": "nothing drives uart1", "choices": [], "connected": False,
+                  "connected_reason": "DUT uart1: not connected in this shell"}}
+    rows = {r["name"]: r for r in broker.consoles(s)}
+    assert rows["uart1"]["connected"] is False
+    assert rows["uart1"]["connected_reason"] == "DUT uart1: not connected in this shell"
+    assert "connected" not in rows["uart0"] and "connected_reason" not in rows["uart0"]
+
+
 def test_closing_the_board_closes_its_ptys_and_forgets_its_rates(broker, session, log):
     broker.set_baud(session, "fpga_uart0", 57600)
     info = broker.pty(session, "fpga_uart0")
