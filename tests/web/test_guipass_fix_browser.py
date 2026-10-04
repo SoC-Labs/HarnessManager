@@ -261,3 +261,33 @@ def test_twin_without_the_field_uart1_is_a_normal_console(page_factory):
     assert by_id(page, "console-not-connected").count() == 0
     nav.tab(page, "overview")
     expect(by_id(page, "ov-also").locator('[data-console="uart1"]')).to_be_visible(timeout=T)
+
+
+# --- 4. the header's uptime -------------------------------------------------------------------------------
+
+
+def test_the_header_says_not_read_when_no_uptime_came_with_the_board_read(show):
+    page = show.page(**APP)
+
+    def strip(route):
+        res = route.fetch()
+        body = res.json()
+        for key in ("uptime_s", "os_uptime_s", "readings_at", "readings_source", "stats"):
+            body.pop(key, None)
+        route.fulfill(response=res, json=body)
+    page.route(re.compile(r"/api/v1/boards/[^/?]+$"), strip)
+    nav.open_board(page, BOARD_LINUX)
+    nav.tab(page, "overview")
+    up = by_id(page, "ov-uptime")
+    expect(up).to_contain_text("not read", timeout=T)
+    assert "not reported" not in up.inner_text()
+    assert "stats and identify" in up.get_attribute("title")
+
+
+def test_twin_the_header_shows_the_uptime_the_board_read_carries(show):
+    page = show.page(**APP)
+    nav.open_board(page, BOARD_LINUX)
+    nav.tab(page, "overview")
+    up = by_id(page, "ov-uptime")
+    expect(up).to_contain_text("1 d", timeout=T)
+    assert "not read" not in up.inner_text()
