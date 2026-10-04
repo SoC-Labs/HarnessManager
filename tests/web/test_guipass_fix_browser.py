@@ -12,7 +12,9 @@ import re
 import pytest
 
 from harness_manager.demo import BOARD_USB
+from harness_manager.demo_showcase import BOARD_LINUX, BOARD_V011
 from tests.web import nav, wb
+from tests.web.test_demo_all_browser import make_showcase
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright is not installed")
 expect = sync_api.expect
@@ -99,3 +101,38 @@ def test_negative_twin_with_no_list_the_picker_still_says_it_could_not_read(page
     wb.open_picker(page)
     expect(by_id(page, "design-list")).to_contain_text("UNREACHABLE: the board did not answer")
     expect(by_id(page, "design-list-stale")).to_have_count(0)
+
+
+@pytest.fixture
+def show(browser, tmp_path, monkeypatch, request):
+    yield from make_showcase(browser, tmp_path, monkeypatch, request)
+
+
+def recover(show, bid):
+    page = show.page(**APP)
+    nav.open_board(page, bid)
+    nav.tab(page, "board")
+    nav.board_page(page, "recover")
+    return page
+
+
+# --- 5. the Recover page's step times and words, for a Linux harness ---------------------------------
+
+
+def test_recover_says_what_restart_the_shell_really_does_on_linux(show):
+    page = recover(show, BOARD_LINUX)
+    card = by_id(page, "reset-shell")
+    expect(card).to_contain_text("~3-4 min", timeout=T)
+    expect(card).to_contain_text("Restarts the board's Linux; the FPGA is not reloaded.")
+    assert "~20 s" not in card.inner_text() and "harnessd" not in card.inner_text()
+    assert "~40 s" in by_id(page, "rung-greybox").inner_text()
+    assert "~10 s" not in by_id(page, "rung-greybox").inner_text()
+    assert not page.errors, page.errors
+
+
+def test_negative_twin_bare_metal_keeps_its_three_second_restart(show):
+    page = recover(show, BOARD_V011)
+    card = by_id(page, "reset-shell")
+    expect(card).to_contain_text("~3 s", timeout=T)
+    expect(card).to_contain_text("Warm firmware restart")
+    assert "3-4 min" not in card.inner_text()
