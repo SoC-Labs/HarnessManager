@@ -48,8 +48,11 @@ Budget about 50 minutes and 5 GB of RAM.
 
 ## What is in it
 
-- `rm_id` `0x01008BC3`: HM's stable proposal for the name `nanosoc`. It differs from the fielded
-  nanosoc's id (`0x01000001`), so your overlay never shadows the fielded one.
+- `rm_id` `0x01000001`: it is a constant in `rp_nanosoc_wrapper.sv`, and the build's `rm_id_match`
+  gate refuses a design whose `rm_id` differs (tried with `0x01008BC3`: `HM_RM_BUILD_FAILED
+  gate=rm_id_match`). So the overlay you build has the fielded nanosoc's id. `kit script` warns
+  `rm_id_range` (the id is in the platform's range): expected. Program it with `--overlay-dir` if the
+  store already holds the fielded nanosoc, or it is shadowed.
 - `build.sources`: 246 files in compile order (packages first). `build.defines`: `RAM_PRELOAD`.
 - `build.generics.IMEM_MEM_FPGA_IMG`: the IMEM image, `platform/fpga/rp/nanosoc/hello_image.hex`.
   The wrapper's own default is an absolute path on one machine, so the generic is required.

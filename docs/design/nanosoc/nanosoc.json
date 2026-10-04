@@ -2,7 +2,7 @@
  "kind": "rm",
  "name": "nanosoc",
  "title": "single-core nanoSoC (Cortex-M0) RM for the MPS3 DFX partition (generic design file; roots are folders next to this file)",
- "rm_id": "0x01008BC3",
+ "rm_id": "0x01000001",
  "use": {
   "clkrst": {},
   "jtag": {},
