@@ -273,7 +273,7 @@ def test_the_hub_prefers_a_packed_kit_dir(tmp_path):
 def test_fetch_with_no_source_says_what_it_tried(kits):
     with pytest.raises(AbsentError) as e:
         kits.fetch("0x72BB0A36")
-    assert "cache: not cached" in e.value.hint and "OTA-C" in e.value.hint
+    assert "cache: not cached" in e.value.hint and "OTA-C" not in e.value.hint and "a later release" in e.value.hint
     assert "HARNESS_MANAGER_KIT_HUB_DIR" in e.value.hint
 
 

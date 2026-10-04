@@ -100,6 +100,7 @@ export const ENDPOINTS = Object.freeze({
   cardCommit: ["POST", "/boards/{bid}/card/commit"],
   cardClear: ["POST", "/boards/{bid}/card/clear"],
   overlayImport: ["POST", "/overlays/import"],
+  overlayImportFolder: ["POST", "/overlays/import-folder"],
   overlayUpload: ["POST", "/overlays/upload"],    // body: the zip's bytes (a raw-body call)
   designScan: ["POST", "/kits/design/scan"],
   guide: ["GET", "/guide"],

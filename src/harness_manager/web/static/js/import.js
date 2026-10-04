@@ -79,7 +79,15 @@ const WAYS = [
   { k: "file", icon: "folder-input", t: "A zip", d: "A packed overlay folder, or a build's out/ with its receipt, as a .zip" },
   { k: "build", icon: "file-cog", t: "From Build", d: "Designs checked in the Build tab, not added yet" },
   { k: "path", icon: "hard-drive", t: "A path on this machine", d: "Where it is; Harness Manager reads it in place" },
+  { k: "folder", icon: "layers", t: "A folder of designs", d: "A release's overlays/ folder: every design in it, one click" },
 ];
+
+// The words of one row of "A folder of designs" (the guide quotes them).
+export const FOLDER_STATE = { imported: "imported", skipped: "skipped: built for another static", refused: "refused", ready: "ready" };
+export function folderRowText(r) {
+  const head = r.state === "skipped" ? "skipped" : FOLDER_STATE[r.state] || r.state;
+  return r.state === "skipped" || r.state === "refused" ? `${head}: ${r.reason}` : `${head}${r.reason ? ` (${r.reason})` : ""}`;
+}
 
 function exitOf(e) {
   if (!e) return "";
@@ -92,8 +100,8 @@ function ImportDialog({ bid, way: startWay = "file" }) {
   const [, setN] = useState(0);
   const redraw = () => setN((n) => n + 1);
   const [m] = useState(() => ({ way: startWay, file: null, path: "", pick: null, over: false,
-    busy: "", res: null, err: null, done: null, note: "" }));
-  const reset = () => { m.res = null; m.err = null; m.done = null; m.note = ""; };
+    busy: "", res: null, err: null, done: null, note: "", fpath: "", folder: null }));
+  const reset = () => { m.res = null; m.err = null; m.done = null; m.note = ""; m.folder = null; };
   const info = boardState(bid).info || {};
   const board = boardName(info.candidate || (S.boards[bid] || {}).candidate || null, bid);
   const here = boardStatic(bid);
@@ -111,7 +119,29 @@ function ImportDialog({ bid, way: startWay = "file" }) {
     redraw();
   };
 
+  const runFolder = async (checkOnly) => {
+    reset();
+    m.busy = checkOnly ? "read" : "import";
+    setModalBusy(true);
+    redraw();
+    try {
+      const path = m.fpath.trim();
+      if (!path) throw new Error("give the folder's path first");
+      const body = { path, board_id: bid };
+      if (checkOnly) body.check_only = true;
+      m.folder = (await call("overlayImportFolder", {}, body)).data;
+      if (!checkOnly && (m.folder.counts.imported || 0) > 0) loadOverlays(bid);
+    } catch (e) {
+      m.err = toApiError(e);
+    }
+    m.busy = "";
+    setModalBusy(false);
+    redraw();
+    changed();
+  };
+
   const run = async (checkOnly = false) => {
+    if (m.way === "folder") return runFolder(checkOnly);
     reset();
     m.busy = checkOnly ? "read" : "import";
     setModalBusy(true);
@@ -187,6 +217,14 @@ function ImportDialog({ bid, way: startWay = "file" }) {
       })}</ul>
       <div class="small muted">A design lands here when the Build tab's Check passes. Its Add does the same as Import here.</div>`
       : html`<${Reason} testid="import-built-none" text="Nothing checked in the Build tab and not added yet. Build a design there, or give a build directory's path (A path on this machine)." />`;
+  } else if (m.way === "folder") {
+    src = html`<div class="field" style="flex-wrap:wrap"><label for="imp-fpath">Folder</label>
+        <input id="imp-fpath" class="input mono grow" data-testid="import-folder-path" placeholder="/home/you/mps3-harness-1.1.0/overlays"
+          value=${m.fpath} disabled=${!!m.busy} onInput=${(e) => { m.fpath = e.target.value; reset(); redraw(); }}
+          onKeyDown=${(e) => { if (e.key === "Enter" && m.fpath.trim()) run(true); }} />
+        <button type="button" class="btn sm" data-testid="import-folder-read" disabled=${!!m.busy || !m.fpath.trim()} onClick=${() => run(true)}>
+          ${m.busy === "read" ? html`<${Spinner} />` : html`<${Icon} name="scan-search" />`}Read it</button></div>
+      <div class="small muted">A folder holding one sub-folder per design (a release's <code>overlays/</code>): an absolute path on harness-manager-daemon's host. Each design is checked and imported on its own; one that does not fit never stops the others.</div>`;
   } else {
     src = html`<div class="field" style="flex-wrap:wrap"><label for="imp-path">Path</label>
         <input id="imp-path" class="input mono grow" data-testid="import-path" placeholder="/home/you/builds/blinky_rm/out/blinky_rm_build.json"
@@ -207,7 +245,8 @@ function ImportDialog({ bid, way: startWay = "file" }) {
     : m.way === "file" && m.file ? html`<div class="imp-picked" data-testid="import-picked"><${Icon} name="binary" /><b>${m.file.name}</b>
       <span class="secondary">zip · ${bytesText(m.file.size)}</span></div>` : null;
   const shadow = m.done && m.done.imported && m.done.imported.shadowed_by;
-  const ready = m.way === "file" ? !!m.file : m.way === "build" ? !!m.pick : !!m.path.trim();
+  const ready = m.way === "file" ? !!m.file : m.way === "build" ? !!m.pick : m.way === "folder" ? !!m.fpath.trim() : !!m.path.trim();
+  const fol = m.folder;
   const foot = m.done
     ? html`<span class="small muted grow">In the overlay store: the Workbench lists it for every board on ${m.done.static_id}</span>
         <button type="button" class="btn primary" data-testid="import-done" onClick=${() => { closeModal(); pickOnWorkbench(bid, m.done.name); }}>
@@ -222,11 +261,20 @@ function ImportDialog({ bid, way: startWay = "file" }) {
         onClick=${() => { m.way = w.k; reset(); redraw(); }}><b><${Icon} name=${w.icon} />${w.t}${w.k === "build" && built.length ? ` · ${built.length}` : ""}</b><span>${w.d}</span></button>`)}</div>
     ${m.done ? null : src}
     ${m.note ? html`<${Reason} level="warn" testid="import-note" text=${m.note} />` : null}
-    ${cand}
-    <div>
+    ${m.way === "folder" ? null : cand}
+    ${m.way === "folder" ? null : html`<div>
       <div class="strip-label bd-sect">What Harness Manager checks before it accepts</div>
       <${Groups} bid=${bid} res=${res} running=${m.busy === "import" || m.busy === "read"} />
-    </div>
+    </div>`}
+    ${fol ? html`<div data-testid="import-folder-results">
+      <div class="strip-label bd-sect">${fol.check_only ? "Read, nothing imported yet" : "Result"}: ${fol.results.length} design${fol.results.length === 1 ? "" : "s"} in <span class="mono">${fol.path}</span></div>
+      <ul class="imp-list" data-testid="import-folder-list">${fol.results.map((r) => html`<li key=${r.path} data-name=${r.name} data-state=${r.state}>
+        <div><div class="nm">${r.name}<span class="muted mono small">${r.rm_id}</span>
+          <${Chip} level=${r.state === "imported" || r.state === "ready" ? "ok" : r.state === "skipped" ? "warn" : "err"} cls="bd-mini" testid="import-folder-state">${r.state === "skipped" ? "skipped" : r.state}<//></div>
+          <div class="sub" data-testid="import-folder-text">${folderRowText(r)}</div></div></li>`)}</ul>
+      ${!fol.check_only && fol.counts.imported ? html`<div class="outcome ok" role="status" data-testid="import-folder-ok"><${Icon} name="circle-check" /><span>${fol.counts.imported} imported into the overlay store${fol.counts.skipped ? `, ${fol.counts.skipped} skipped (another static)` : ""}${fol.counts.refused ? `, ${fol.counts.refused} refused` : ""}. The Workbench lists them.</span></div>` : null}
+      ${!fol.check_only && !fol.counts.imported ? html`<${Reason} level="warn" testid="import-folder-none" text=${`Nothing was imported${fol.counts.skipped ? `: ${fol.counts.skipped} built for another static` : ""}${fol.counts.refused ? `${fol.counts.skipped ? "," : ":"} ${fol.counts.refused} refused` : ""}.`} />` : null}
+    </div>` : null}
     ${m.done ? html`<div class="outcome ok" role="status" data-testid="import-ok"><${Icon} name="circle-check" /><span>Imported <b>${m.done.name}</b> <span class="mono">${m.done.rm_id}</span> into the overlay store${m.done.overlay_dir ? html` (packed in <span class="mono">${m.done.overlay_dir}</span>)` : ""}. The Workbench lists it for every board on ${m.done.static_id}: pick it, tick Arm, then Program.</span></div>` : null}
     ${shadow ? html`<${Reason} level="warn" testid="import-shadowed" text=${`The Workbench lists ${shadow} instead: the same name, rm_id and static, and the first one found wins. Rename your design to see yours.`} />` : null}
     ${res && !m.err && !m.done && res.passed ? html`<${Reason} level="ok" testid="import-checked" text=${`${res.name} passes: Check and import puts it in the overlay store.`} />` : null}

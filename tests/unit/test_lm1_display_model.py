@@ -230,7 +230,7 @@ def test_badges_table() -> None:
 def test_badge_texts_are_the_designs() -> None:
     b = D.badges(w.StatusFlags(OK | w.S_TEXT_ONLY), w.OWNER_DUT, "sw", D.PanelRegs())
     assert b[0].to_json() == {"key": "blind", "level": "grey", "text": D.BLIND_TEXT}
-    assert "mint 4" in b[0].text
+    assert "later harness update" in b[0].text
     b = D.badges(w.StatusFlags(OK), 0, "hw", D.PanelRegs(r16=0x60, r36=0x08, scroll=True))
     assert b[0].text == "not mirrored exactly (R16=0x60, R36=0x08, scroll/partial set)"
 

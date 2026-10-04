@@ -201,6 +201,95 @@ def import_design(kits: Any, path: Path, *, identity: Any = None, static_id: str
     return res
 
 
+# --- a folder of designs: a release's overlays/ (QUICKWINS G3) -------------------------------------
+
+#: How deep a design may sit under the folder (overlays/open/<name> is two) and how many are read.
+FOLDER_DEPTH = 3
+FOLDER_MAX = 200
+STATE_IMPORTED, STATE_SKIPPED, STATE_REFUSED = "imported", "skipped", "refused"
+_SHELL = ("board_static", "expected_static")
+
+
+def find_designs(root: Path) -> list[Path]:
+    """The overlay folders (a ``manifest.json`` beside them) at or under ``root``, in name
+    order. A design's own folder is not searched; hidden folders and symlinks are skipped."""
+    root = Path(root)
+    if (root / "manifest.json").is_file():
+        return [root]
+    found: list[Path] = []
+
+    def walk(d: Path, depth: int) -> None:
+        try:
+            kids = sorted(e for e in d.iterdir() if e.is_dir() and not e.is_symlink()
+                          and not e.name.startswith("."))
+        except OSError:
+            return
+        for kid in kids:
+            if len(found) >= FOLDER_MAX:
+                return
+            if (kid / "manifest.json").is_file():
+                found.append(kid)
+            elif depth < FOLDER_DEPTH:
+                walk(kid, depth + 1)
+
+    walk(root, 1)
+    return found
+
+
+def import_folder(kits: Any, folder: Path, *, identity: Any = None, static_id: str = "",
+                  pack: str = "mps3", store: Any = None, check_only: bool = False
+                  ) -> dict[str, Any]:
+    """Every design under ``folder``, one by one, as ``import_design`` takes it. Each row is
+    ``imported`` (in the store), ``skipped`` (built for another static than the board's: not
+    this board's design, nothing wrong with it) or ``refused`` (with the reason). One bad design
+    never stops the others. ``check_only``: the same verdicts, nothing written (``imported`` then
+    says ``would import``: state ``ready``)."""
+    root = Path(folder)
+    if not root.is_dir():
+        raise AbsentError(f"no such folder: {root}", hint="give an absolute path to a folder "
+                          "of designs on this machine, e.g. a release's overlays/ folder")
+    designs = find_designs(root)
+    if not designs:
+        raise AbsentError(f"{root} holds no design (no folder with a manifest.json under it)",
+                          hint="give a release's overlays/ folder, or a folder with one "
+                               "sub-folder per design")
+    rows: list[dict[str, Any]] = []
+    for d in designs:
+        row: dict[str, Any] = {"name": d.name, "path": str(d), "state": STATE_REFUSED,
+                               "reason": "", "rm_id": "", "static_id": ""}
+        try:
+            res = check_design(kits, d, identity=identity, static_id=static_id, pack=pack,
+                               store=store)
+            row.update(name=res.name or d.name, rm_id=res.rm_id, static_id=res.static_id)
+            other = [c for c in res.checks if c.state == "mismatch" and c.name in _SHELL]
+            bad = [c for c in res.checks if c.state == "mismatch" and c.name not in _SHELL]
+            if other and not bad:
+                row.update(state=STATE_SKIPPED,
+                           reason=f"built for another static ({res.static_id or 'none'}), "
+                                  "not this board's")
+            elif other or bad:
+                c = (bad or other)[0]
+                row["reason"] = f"{c.name}: {c.detail}"
+            elif check_only:
+                row.update(state="ready", reason="")
+            else:
+                done = import_design(kits, d, identity=identity, static_id=static_id,
+                                     pack=pack, store=store)
+                row.update(state=STATE_IMPORTED, imported=done.imported)
+                shadow = (done.imported or {}).get("shadowed_by")
+                if shadow:
+                    row["reason"] = f"the Workbench lists {shadow} instead (same name and ids)"
+        except HarnessError as exc:
+            row["reason"] = exc.message
+        except Exception as exc:  # noqa: BLE001 - one unreadable design is a refusal, not a crash
+            row["reason"] = f"could not be read: {exc}"
+        rows.append(row)
+    counts = {k: sum(1 for r in rows if r["state"] == k)
+              for k in (STATE_IMPORTED, STATE_SKIPPED, STATE_REFUSED, "ready")}
+    return {"path": str(root), "check_only": check_only, "results": rows,
+            "counts": {k: v for k, v in counts.items() if v or k != "ready"}}
+
+
 #: The largest upload taken (the plan's cap; 413 above it) and how deep a zip's design may sit.
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 _ZIP_DEPTH = 3

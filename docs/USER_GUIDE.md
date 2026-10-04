@@ -69,6 +69,7 @@ It takes about 20 seconds (about 5 with uv). Nothing needs root or Administrator
 | `--with-app` / `-WithApp` | you want a native window on Windows or macOS (Linux uses a Chrome or Chromium app window) |
 | `--offline DIR` | the PC has no network: install from a wheelhouse |
 | `--no-desktop` | you want no application-menu entry (Linux) |
+| `--no-path` | you do not want the installer to edit your shell startup files |
 | `--uninstall` / `-Uninstall` | you want it gone; your settings and SD backups stay |
 
 Check it: `harness-manager version` prints `0.1.0`.
@@ -76,15 +77,20 @@ Check it: `harness-manager version` prints `0.1.0`.
 **Linux only:** to use the Debug USB, your user needs the serial ports:
 `sudo usermod -aG dialout $USER`, then log out and back in.
 
+**Start it without a terminal:** on Linux the installer adds Harness Manager to the
+application menu (it runs `harness-manager app`). On macOS there is no `.app`: run
+`harness-manager app`, right-click its Dock icon, Options, Keep in Dock.
+
 **Upgrade:** `git pull`, then run the installer again. It keeps your settings and options.
 Once signed releases exist, the app can also update itself ([section 10](#10-updates-the-harness-and-the-app)).
 
 **What can go wrong**
-- `harness-manager: command not found`: `~/.local/bin` is not on your PATH. The installer
-  printed the line for your shell and the full path to use until then. bash: add it to
-  `~/.bashrc` **and** to `~/.bash_profile` (or `~/.profile`, whichever exists), because a
-  login shell (ssh, `bash -l`) never reads `~/.bashrc`. tcsh/csh:
-  `set path = ( $HOME/.local/bin $path )` in `~/.cshrc`. Every shell:
+- `harness-manager: command not found`: open a new terminal. When `~/.local/bin` was not on
+  your PATH, the installer added it to your shell's startup files (bash: `~/.bashrc` and the
+  login file; zsh: `~/.zshrc` and `~/.zprofile`; one marked block, never twice) and printed
+  which; only a terminal opened afterwards has it. Until then run
+  `~/.local/bin/harness-manager`. With `--no-path`, or with fish, tcsh or csh, it printed the
+  line to add instead (tcsh/csh: `set path = ( $HOME/.local/bin $path )` in `~/.cshrc`). Every shell:
   [INSTALL.md](INSTALL.md#when-harness-manager-is-not-on-path). On Windows, open a new
   terminal.
 - The installer stops: it says why (Python too old, no `python3-venv`, no network, a
@@ -1722,7 +1728,7 @@ at …** opens it there. Another board answering at the new address is never ado
 | no free address in the pool | refused: widen `mps3.identity.ip_pool` (`harness-manager config set mps3.identity.ip_pool 192.168.10.110-249`) or give `--ip` |
 | a card written on a PC (its /persist is blank) | refused (no persistent store): `harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'`, claim the board again, then name it. Harness Manager never formats a card by itself |
 | not seen at the new IP after 4 min | it may be on DHCP, or the address was taken (DAD): the panel's row 5 shows its IP |
-| stage0 rescue | still answers on 192.168.10.101 with the default MAC until mint 4, whatever the board's name |
+| stage0 rescue | in recovery mode still answers on 192.168.10.101 with its default MAC, whatever the board's name |
 
 Harness Manager keeps every MAC and IP it gave or saw, per board and with the date, in
 `<state dir>/identity/seen.json`; **Random** and **Auto** never hand one of them out again.

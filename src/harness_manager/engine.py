@@ -48,6 +48,7 @@ from harness_manager.core.services import EngineConfig
 from harness_manager.core.session import LockOwner, SessionLock
 
 from . import naming
+from .services import board_facts
 from .services._unavailable import UnavailableService, is_unavailable
 from .services.store import ContentStore
 from .services.telemetry import TelemetryService
@@ -390,7 +391,8 @@ class Engine:
                 "features": list(identity.features),
                 "name": candidate.name, "name_source": candidate.name_source}))
         return BoardInfo(candidate, identity, health, available, unavailable, claim=claim,
-                         net_identity=net_identity)
+                         net_identity=net_identity,
+                         facts=board_facts.facts_of_session(entry.session, identity))
 
     @staticmethod
     def _session_reasons(entry: _Open, available: frozenset[str], unavailable: dict[str, str],

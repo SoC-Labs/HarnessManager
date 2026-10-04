@@ -28,6 +28,7 @@ import { closeModal, ModalShell, openModal, registerModal } from "./modal.js";
 import { boardState, changed, loadBoards, log, navigate, probe, S, select, setJob, timed, toast } from "./store.js";
 import { ActionRow, ArmBox, Chip, CopyButton, Icon, Reason, ResultBlock, Seg, Spinner } from "./ui.js";
 import { week } from "./week.js";
+import { factChips } from "./sections/boardfacts.js";
 import { NO_IDENTITY_STORE } from "./sections/identity.js";
 import { openBoardHere } from "./sidebar.js";
 import { backupSpec, SdRecovery } from "./sections/sd.js";
@@ -44,7 +45,7 @@ import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
 
 export const DEFAULT_HOST = "192.168.10.101";
 export const USB_WARNING = "A USB write can take 5 minutes: do not unplug, power off or start a second write.";
-export const NETWORK_OS_REASON = "comes with Linux v2.1 (HARNESS-DIST L3)";
+export const NETWORK_OS_REASON = "comes with Linux v2.1";
 export const READER_MISSING = "this build has no card-reader writer: use the Debug USB";
 // david 2 Oct (D3a): a bundle folder or zip is unsigned: this banner, its sha256, and the typed
 // INSTALL UNSIGNED <first 8 hex> before any write (the service refuses without it).
@@ -90,6 +91,40 @@ export async function loadReader() {
     if (G.reader.enabled && !G.reader.devices.length) G.reader.reason = "no card reader with a card in it: put the card in this PC's reader, then Read again";
   }
   changed();
+}
+
+// --- the switch, inline: "Turn on card-reader writing" ---------------------------------------------
+// bringup.sd_flash is off by default (kept). Where the card-reader door is shut because the setting
+// is off, one click sets it on (the same PUT /settings the Settings dialog sends). Not offered when
+// the variable HARNESS_MANAGER_BRINGUP_SD_FLASH holds it off (a click here would change nothing).
+export const READER_SWITCH_TITLE = "Turn on card-reader writing";
+export const READER_SWITCH_NOTE = "Lets Harness Manager write SD cards in this PC's card reader; it lists only removable cards.";
+const SW = { busy: false, error: "" };
+
+function switchOffHere() {
+  const sw = G.status && G.status.sd_flash;
+  return !!sw && !sw.enabled && !String(sw.where || "").startsWith("$");
+}
+
+async function turnOnReader() {
+  SW.busy = true; SW.error = "";
+  changed();
+  const r = await timed("config set bringup.sd_flash on", () => call("settingsSet", {}, { "bringup.sd_flash": "on" }));
+  SW.busy = false;
+  if (r.error) SW.error = `${r.error.errName}: ${r.error.message}`;
+  changed();
+  if (!r.error) { G.reader = null; await loadStatus(); }
+}
+
+function ReaderSwitch({ where }) {
+  if (!switchOffHere()) return null;
+  return html`<div class="stack gap-8 mt-8" data-testid=${`bu-reader-enable-${where}`}>
+    <div class="row gap-8"><button type="button" class="btn sm" data-action=${`bu-reader-enable-${where}`}
+      disabled=${SW.busy} aria-busy=${SW.busy ? "true" : undefined} onClick=${turnOnReader}>
+      ${SW.busy ? html`<${Spinner} />` : html`<${Icon} name="memory-stick" />`} ${READER_SWITCH_TITLE}</button>
+      <span class="small secondary">${READER_SWITCH_NOTE}</span></div>
+    ${SW.error ? html`<${Reason} level="err" testid=${`bu-reader-enable-error-${where}`} text=${SW.error} />` : null}
+  </div>`;
 }
 
 // --- per-board state ---------------------------------------------------------------------------------
@@ -266,6 +301,7 @@ function UsbRow({ row }) {
       <dt>MCC</dt><dd data-testid="usb-mcc"><${MccLine} row=${row} /></dd>
       <dt>Drive</dt><dd data-testid="usb-drive"><${DriveLine} row=${row} /></dd>
       <dt>Ethernet</dt><dd><${EthLine} eth=${row.ethernet} /></dd>
+      ${factChips(row.facts).length ? html`<dt>Board</dt><dd data-testid="usb-facts">${factChips(row.facts).map((c) => html`<${Chip} key=${c.key} level=${c.level} title=${c.title} testid=${`usb-fact-${c.key}`}>${c.text}<//> `)}</dd>` : null}
     </dl>
     ${(row.problems || []).map((p) => html`<${Reason} key=${p} level="warn" testid="usb-problem" text=${p} />`)}
     <div class="row bu-usb-foot">
@@ -483,7 +519,7 @@ function ReleaseSource({ bid, w }) {
       <ul class="small">${(plan.steps || []).map((s, i) => html`<li key=${i}>${s.detail || s.what || s.step || JSON.stringify(s)}</li>`)}</ul>
       ${(plan.blockers || []).map((b) => html`<${Reason} key=${b} level="err" testid="release-blocker" text=${`The planner refuses this release here: ${b}`} />`)}
       ${(plan.blockers || []).length && linux(w) ? html`<${Reason} testid="release-linux-usb"
-        text="A Linux release cannot be installed over the Debug USB today: its OS image needs the running harness (HARNESS-DIST L3). Write its configuration SD from its bundle (a folder or zip), then the user microSD with a whole-card image in step 5." />` : null}
+        text="A Linux release cannot be installed over the Debug USB today: its OS image needs the running harness. Write its configuration SD from its bundle (a folder or zip), then the user microSD with a whole-card image in step 5." />` : null}
       ${plan.consent_phrase ? html`<div class="field"><label>Type <code>${plan.consent_phrase}</code></label>
         <input class="input mono grow" data-testid="release-phrase" value=${w.typed}
           onInput=${(e) => { w.typed = e.target.value; changed(); }} /></div>` : null}
@@ -709,6 +745,7 @@ function WriteStep({ bid, w, ready }) {
       options=${[{ value: "usb", label: "Over the Debug USB (the V2M-MPS3 drive)", icon: "usb" },
         { value: "reader", label: "SD card in this PC's card reader", icon: "memory-stick", title: reader.ok ? "" : reader.why }]} />
     ${usb && !reader.ok ? html`<p class="small muted mt-8" data-testid="bu-reader-off-note"><${Icon} name="circle-slash" cls="sm" /> SD card in this PC's card reader: ${reader.why}.</p>` : null}
+    ${usb && !reader.ok ? html`<${ReaderSwitch} where="write" />` : null}
     ${usb ? html`<div class="stack gap-8 mt-8">
       <div class="outcome warn bu-warn" data-testid="bu-usb-warning"><${Icon} name="triangle-alert" /><span><b>${st.usb_write_warning || USB_WARNING}</b></span></div>
       <${ArmBox} bid=${bid} armKey="bu_write" testid="arm-bu-write"
@@ -719,6 +756,7 @@ function WriteStep({ bid, w, ready }) {
       <${ResultBlock} lines=${pu.lines} panel=${pu} testid="bu-write-result" />
     </div>` : html`<div class="stack gap-8 mt-8">
       ${!reader.ok ? html`<${Reason} icon="circle-slash" testid="bu-reader-disabled" text=${`SD card in this PC's card reader: ${reader.why}.`} />` : null}
+      ${!reader.ok ? html`<${ReaderSwitch} where="write" />` : null}
       <p class="small secondary">Take the configuration SD out of the board (power it off first) and put it in this PC's card reader. Only a card reader the service lists is offered; never this PC's own disk, never the board's V2M-MPS3 drive.</p>
       ${reader.ok ? html`<${DevicePicker} w=${w} field="device" typedField="typedDevice" kind="files" />` : null}
       <${ArmBox} bid=${bid} armKey="bu_reader" testid="arm-bu-reader"
@@ -901,6 +939,7 @@ function OsStep({ bid, w }) {
       <label class="check-inline"><input type="radio" name=${`bu-os-${bid}`} disabled=${!!o.why} checked=${w.os === o.value}
         onChange=${() => { w.os = o.value; if (o.value === "skip") w.osDone = { how: "skip", at: Date.now() }; changed(); }} />${o.label}</label>
       ${o.why ? html`<div class="sub bu-why" data-testid=${`bu-os-why-${o.value}`}>Disabled: ${o.why}${o.note ? html`<br /><span class="muted">${o.note}</span>` : null}</div>` : null}
+      ${o.value === "reader" && o.why ? html`<${ReaderSwitch} where="os" />` : null}
     </li>`)}</ul>
     ${w.os === "reader" && choice.ok ? html`<div class="stack gap-8">
       <div class="field"><label for=${`bu-card-${bid}`}>Whole-card image</label>

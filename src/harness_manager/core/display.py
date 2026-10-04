@@ -123,7 +123,7 @@ class DisplayUnavailable(UnavailableError):
 
 # --- badges (§7.4) ---------------------------------------------------------------------------
 
-BLIND_TEXT = "DUT owns the panel: this harness image cannot see it (live view needs mint 4)"
+BLIND_TEXT = "DUT owns the panel: this harness image cannot see it (live view needs a later harness update)"
 HELD_TEXT = "DUT owns the panel"
 VIOL_TEXT = "bus timing violations: the glass may differ"
 APPROX_TEXT = "18-bit colour shown as 16-bit"

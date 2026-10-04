@@ -459,6 +459,42 @@ def revision_of_log(text: str) -> str:
     return f"HBI0309{hits[-1].upper()}" if hits else ""
 
 
+#: The MCC's firmware banner line in LOG.TXT: "ARM V2M-MPS3 Firmware v1.3.2". The file is CRLF
+#: and rewritten at each boot; the LAST such line wins.
+_FW_LINE = re.compile(r"^[ \t]*ARM[ \t]+V2M-MPS3[ \t]+Firmware[ \t]+(v?\d[\w.\-]*)[ \t]*\r?$",
+                      re.I | re.M)
+
+
+def firmware_of_log(text: str) -> str:
+    """``v1.3.2`` from the LAST "ARM V2M-MPS3 Firmware vX.Y.Z" line of an MCC log; "" none
+    (a number with no ``v`` gets one)."""
+    hits = _FW_LINE.findall(text or "")
+    if not hits:
+        return ""
+    fw = hits[-1]
+    return fw if fw[:1] in "vV" else f"v{fw}"
+
+
+def mcc_firmware_of(root: Path, *, boot_fw: str = "") -> tuple[str, str]:
+    """``(firmware, how it is known)`` of the MCC for the config SD at ``root``: the MCC boot
+    witness's ``firmware`` first, else the card's ``LOG.TXT``; ("", "") unknown. Reads only."""
+    if boot_fw:
+        return (boot_fw if boot_fw[:1] in "vV" else f"v{boot_fw}"), "the MCC boot log"
+    for name in MCC_LOGS:
+        log = _resolve_ci(root, name.split("/"))
+        try:
+            if log.is_file():
+                with open(log, "rb") as fh:
+                    size = fh.seek(0, os.SEEK_END)
+                    fh.seek(max(0, size - _LOG_TAIL))
+                    fw = firmware_of_log(fh.read().decode("latin-1"))
+                if fw:
+                    return fw, f"{log.name} on its config SD"
+        except OSError:
+            continue
+    return "", ""
+
+
 def board_revision_of(root: Path, *, boot_board: str = "") -> tuple[str, str]:
     """``(revision, how it is known)`` for the board whose config SD is at ``root``; ("", "")
     unknown. In order: the MCC boot witness's ``board`` ("rev C, var A"), the card's
@@ -512,6 +548,10 @@ class Mps3Storage:
         """FIX-PACK-9: ``(revision, how it is known)`` (``board_revision_of``) for the
         planner's ``BoardView.board_rev``; ("", "") unknown. Reads only."""
         return board_revision_of(Path(self.locate()), boot_board=boot_board)
+
+    def mcc_firmware(self, *, boot_fw: str = "") -> tuple[str, str]:
+        """``(MCC firmware, how it is known)`` (``mcc_firmware_of``); ("", "") unknown."""
+        return mcc_firmware_of(Path(self.locate()), boot_fw=boot_fw)
 
     def locate(self) -> str:
         """The config SD's mount point / drive root. Refuses the DAPLink drive."""

@@ -525,7 +525,7 @@ class Mps3OsSlots:
         except HarnessError as exc:
             if type(exc).__name__ == "ShellRescueError":
                 return ("the board is in stage0 RESCUE (no bootable slot): provisioning a slot "
-                        "from rescue is not built yet (HARNESS-DIST L3)")
+                        "from rescue is not built yet")
             return f"the harness did not answer: {exc.message}"
         if not live.version_ok:
             return "the harness does not answer 'version': it predates the slot verbs"
@@ -563,7 +563,11 @@ class Mps3OsSlots:
         raw = self._ask("status")
         if not raw.get("ok"):
             raise _reply_refusal("status", raw)
-        return self._annotate(self._measured(parse_status(raw)))
+        st = self._annotate(self._measured(parse_status(raw)))
+        self.last_card = bool(st.card)       # board facts: the user microSD, as last read
+        return st
+
+    last_card: bool | None = None
 
     def _measured(self, st: SlotStatus) -> SlotStatus:
         """``st`` with this process's estimate of its card job (``JobMeter``)."""

@@ -125,7 +125,7 @@ def test_name_this_board_from_access_names_it_with_a_random_mac_and_a_pool_ip(de
     expect(by(page, "nb-ip-note")).to_have_text(
         "This PC must be on the same /24 (e.g. 192.168.10.1/24).")
     expect(by(page, "nb-rescue")).to_contain_text(
-        "Until mint 4, stage0 rescue still answers on 192.168.10.101 with the image's default "
+        "In recovery mode the board still answers on 192.168.10.101 with its default "
         "MAC 02:00:00:4d:50:53")
     changes = by(page, "identity-changes")
     expect(changes.locator('li[data-field="label"]')).to_contain_text("MPS3 → LAB-07")
@@ -269,7 +269,7 @@ def proposal(q: dict, *, hub: bool = False, local: str = "") -> dict:
                         "moving": False},
             "pool": {"range": "192.168.10.110-199", "setting": "mps3.identity.ip_pool"},
             "rules": {"name_max": 16}, "notes": [],
-            "rescue_note": "until mint 4, stage0 rescue still answers on 192.168.10.101",
+            "rescue_note": "in recovery mode the board still answers on 192.168.10.101",
             "hub": {"name": "mapstone-dev", "target": "mps3_02_pl", "record": HUB,
                     "known_bad": {"mps3_01_pl": "its board_mac 00:e0:4c:46:dc:f8 is the hub's "
                                                 "own USB adapter, not the board"},
@@ -464,3 +464,20 @@ def test_twin_nothing_at_the_new_address_says_so_and_keeps_the_old_session(demo)
     expect(by(page, "toast")).to_contain_text("Not open at 192.168.10.199 yet: add it By address",
                                               timeout=T)
     assert BOARD_V011 in demo.engine.open_boards()
+
+
+def test_t2_the_intro_names_the_lease_only_for_a_board_behind_a_hub(demo):
+    page = demo.page()
+    open_stubbed(page, hub=True)
+    expect(by(page, "nb-intro")).to_contain_text("It needs your claim and your lease,", timeout=T)
+    assert not page.errors, page.errors
+
+
+def test_t2_twin_a_desk_board_gets_no_lease_wording(demo):
+    page = demo.page()
+    open_stubbed(page)
+    expect(by(page, "nb-intro")).to_contain_text("It needs your claim, and waits for no card job.",
+                                                 timeout=T)
+    assert "lease" not in by(page, "nb-intro").inner_text()
+    assert "mint" not in by(page, "name-board-modal").inner_text()
+    assert not page.errors, page.errors

@@ -388,6 +388,27 @@ export function RestartNote({ testid = "settings-restart", cls = "" }) {
   </div>`;
 }
 
+// --- Harness & kits: Designs (QUICKWINS G3) --------------------------------------------------------
+
+export const DESIGNS_TITLE = "Designs";
+export const DESIGNS_TEXT = "Import every design of a harness release in one go: pick the release's overlays folder, and each valid design goes into this machine's overlay store.";
+
+function DesignsCard() {
+  const bid = S.selected;
+  const open = !!bid && !!(S.boards[bid] || {}).open;
+  const go = () => import("../selfupdate.js").then((m) => {
+    m.closeSettings();
+    openModal("import", { bid, way: "folder" });
+  });
+  return html`<div class="sgroup" data-testid="settings-designs">
+    <div class="sgroup-head"><h3>${DESIGNS_TITLE}</h3></div>
+    <p class="secondary">${DESIGNS_TEXT}</p>
+    <div class="row gap-8"><button type="button" class="btn sm" data-action="settings-import-designs" disabled=${!open} onClick=${go}>
+      <${Icon} name="layers" />Import a folder of designs…</button>
+      ${open ? null : html`<span class="small muted" data-testid="settings-designs-why">Open a board first: its shell decides which designs fit.</span>`}</div>
+  </div>`;
+}
+
 // --- one section --------------------------------------------------------------------------------------
 
 export function SettingsSectionBody({ updatesCard = null }) {
@@ -424,6 +445,8 @@ export function SettingsSectionBody({ updatesCard = null }) {
         run.</p>`} />`;
     case "advanced":
       return html`<${GenericSection} id="advanced" extras=${stateDirExtras()} after=${html`<${FilesCard} /><${ServiceEnvCard} />`} />`;
+    case "harness-kits":
+      return html`<${GenericSection} id=${id} before=${html`<${DesignsCard} />`} />`;
     default:
       return html`<${GenericSection} id=${id} />`;
   }

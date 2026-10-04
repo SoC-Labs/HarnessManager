@@ -599,7 +599,7 @@ def board_kit(model: PinModel, design: Design) -> Kit:
                 findings.append(Finding("bank_voltage", bit,
                                         f"bank {pp['bank']}'s VCCO is not in the model "
                                         f"({bank.get('vcco_reason', 'unknown')}), so {std} cannot be checked",
-                                        hint="confirm the bank voltage on the schematic; harness Lane C "
+                                        hint="confirm the bank voltage on the schematic; a later pin database "
                                              "adds it to the pin database"))
                 bank_use.setdefault(pp["bank"], []).append((bit, std, v))
             elif abs(v - float(bank["vcco"])) > 1e-6:

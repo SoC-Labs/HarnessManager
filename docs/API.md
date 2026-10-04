@@ -592,6 +592,7 @@ The Import dialog (UI_V2_PLAN.md M6) and the Build section's Design, Build and C
 | Method and path | Returns |
 |---|---|
 | `POST /overlays/import` `{path, board_id?, static_id?, check_only?}` | `{board_id, kind, path, name, rm_id, static_id, passed, checks, groups, overlay_dir, imported}`; 409 INCOMPATIBLE or REFUSED with `error.data` = the same object and nothing imported |
+| `POST /overlays/import-folder` `{path, board_id?, static_id?, check_only?}` | QUICKWINS G3: every design under a folder: `{board_id, path, check_only, results, counts}`; see Quick wins |
 | `POST /overlays/upload?name=&board_id=&static_id=&check_only=` (body: the zip's bytes) | the same as `POST /overlays/import`, plus `upload: {name, bytes}`; 413 over 256 MB |
 | `POST /kits/design/scan` `{path, name?, top?, rm_id?, static_id?, board_id?, out?}` | `{static_id, path, kind, name, top, tops, sources, include_dirs, defines, packages, generics, use, ports, rm_id, rm_id_proposed, left_out, warnings, design, written}` |
 
@@ -776,3 +777,9 @@ A NEW board, plugged into this PC by its Debug USB, brought up to a running harn
   `disk_number`, and `imager: {name, url, steps, check_command, check_expect}` (Raspberry Pi
   Imager). A `files` write is unchanged.
 <!-- --- end windows --- -->
+<!-- --- quickwins --- -->
+## Quick wins (HM 1.1)
+
+- **Board facts** (G2). `GET /boards/{bid}` (and `POST /boards`) gain an additive `facts`, left out when nothing is known: `{revision: "C", revision_from, revision_tested: bool|null, mcc_fw: "v1.3.2", mcc_fw_from, mcc_fw_tested: bool|null, user_sd: true|false|null}`. `revision` is the MCC boot witness, else LOG.TXT "MotherBoard Revision C Variant A", else a card with one `MB/HBI0309*` folder. `mcc_fw` is the boot witness, else the LAST "ARM V2M-MPS3 Firmware v1.3.2" line of LOG.TXT (CRLF, rewritten each boot). `user_sd` is the Linux harness's card status as last read (null: not known, or no Linux). Tested = Rev C and MCC v1.3.2 only; anything else is flagged "untested". Read only: Harness Manager never offers an MCC update. `harness-manager info` prints a `facts` line and `--json` carries `facts`. The bring-up scan rows (`POST /bringup/scan`) carry `facts` too (`revision`, `mcc_fw`, from the V2M-MPS3 drive).
+- **A folder of designs** (G3). `POST /overlays/import-folder {path, board_id?, static_id?, check_only?}` imports every design under a folder (a release's `overlays/`; a folder holding a `manifest.json` is a design, searched 3 levels deep): `{path, check_only, results: [{name, path, state, reason, rm_id, static_id}], counts}`. `state` is `imported`, `skipped` (built for another static than the board's; `reason` names it), `refused` (`reason` is the first failed check) or `ready` (`check_only`). One design never stops the rest. 404 ABSENT when the folder holds no design.
+<!-- --- end quickwins --- -->

@@ -394,7 +394,7 @@ def test_linux_comes_up_in_rescue_and_the_os_step_offers_the_whole_card_image(de
     expect(by(page, "bu-witness-result")).to_contain_text("stage0 RESCUE answers", timeout=T)
     os_step = by(page, "bu-step-os")
     expect(os_step).to_be_visible()
-    expect(by(page, "bu-os-why-network")).to_contain_text("comes with Linux v2.1 (HARNESS-DIST L3)")
+    expect(by(page, "bu-os-why-network")).to_contain_text("comes with Linux v2.1")
     expect(by(page, "bu-os-why-network")).to_contain_text("it does not write the card")
     expect(os_step.locator('[data-option="network"] input')).to_be_disabled()
     expect(by(page, "bu-os-why-reader")).to_contain_text("bringup.sd_flash")    # the switch is off
@@ -876,4 +876,35 @@ def test_twin_the_os_step_needs_the_images_unsigned_phrase_and_a_wrong_sha8_writ
         e => e.errName + ': ' + e.message))""",
                       [card, DEVICE["id"], f"WRITE {DEVICE['model']} {DEVICE['size_bytes']}"])
     assert r.startswith("REFUSED: not confirmed: this card image is unsigned"), r
+    assert not page.errors, page.errors
+
+
+# --- T3: "Turn on card-reader writing", inline where the door is shut --------------------------
+
+
+def test_t3_the_inline_switch_turns_card_reader_writing_on_in_one_click(demo):
+    page = demo.page()
+    add_and_open(page)
+    btn = page.locator('[data-action="bu-reader-enable-write"]')
+    expect(btn).to_have_text("Turn on card-reader writing", timeout=T)
+    expect(by(page, "bu-reader-enable-write")).to_contain_text(
+        "Lets Harness Manager write SD cards in this PC's card reader; it lists only removable cards.")
+    assert bringup.sd_flash(demo.state_dir)["value"] == "off"          # the default stays off
+    btn.click()
+    expect(by(page, "bu-reader-off-note")).to_have_count(0, timeout=T)
+    expect(btn).to_have_count(0)
+    assert bringup.sd_flash(demo.state_dir)["value"] == "on"
+    page.get_by_role("button", name="SD card in this PC's card reader").click()
+    expect(by(page, "bu-reader-disabled")).to_have_count(0, timeout=T)
+    assert not page.errors, page.errors
+
+
+def test_t3_twin_no_switch_when_the_variable_holds_it_off_and_nothing_on_without_a_click(
+        demo, monkeypatch):
+    monkeypatch.setenv(bringup.SD_FLASH_ENV, "off")
+    page = demo.page()
+    add_and_open(page)
+    expect(by(page, "bu-reader-off-note")).to_be_visible(timeout=T)
+    expect(page.locator('[data-action="bu-reader-enable-write"]')).to_have_count(0)
+    assert bringup.sd_flash(demo.state_dir)["value"] == "off"
     assert not page.errors, page.errors

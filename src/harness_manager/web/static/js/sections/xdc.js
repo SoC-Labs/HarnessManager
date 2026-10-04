@@ -69,7 +69,7 @@ function ModelCard({ cat, board }) {
   return html`<${Card} title="Pin model" icon="file-code" testid="xdc-model"
       sub=${`${(m.board || {}).title || ""}, ${(m.board || {}).part || ""}`}>
     <dl class="kv">
-      <dt>Model</dt><dd><div class="line">${s.derived ? html`<${Chip} level="warn" testid="xdc-derived">derived<//>` : html`<${Chip} level="ok">Lane C<//>`}
+      <dt>Model</dt><dd><div class="line">${s.derived ? html`<${Chip} level="warn" testid="xdc-derived">derived<//>` : html`<${Chip} level="ok">pin database<//>`}
         <span>${s.label || ""}</span></div>
         <div class="sub mono">${s.generator || ""} from ${s.platform_ref || "?"} @ ${(s.platform_commit || "").slice(0, 10)}</div></dd>
       <dt>Shell</dt><dd><div class="line"><span class="mono">${m.default_shell}</span>${shell.fielded ? html`<${Chip} level="ok">fielded<//>` : null}</div>

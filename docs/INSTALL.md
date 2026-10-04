@@ -47,10 +47,12 @@ HarnessManager/scripts/install.sh                       # 2. install (~20 s; ~5 
 harness-manager app --demo                              # 3. the app, with demo boards
 ```
 
-If step 3 says `command not found`, your `~/.local/bin` is not on PATH yet: the installer
-printed the line to add for your shell, and the full path to run until then.
-[When harness-manager is not on PATH](#when-harness-manager-is-not-on-path) has each
-shell's line and file (bash needs a login-shell file as well as `~/.bashrc`).
+If `~/.local/bin` is not on PATH, the installer adds it for you (one marked block in your shell
+startup files; `--no-path` skips that), and says which files it changed. Step 3 works in a
+**new terminal**; in the one you installed from, run `~/.local/bin/harness-manager` or the line
+the installer printed. If step 3 still says `command not found`, see
+[When harness-manager is not on PATH](#when-harness-manager-is-not-on-path) (each shell's line
+and file; bash needs a login-shell file as well as `~/.bashrc`).
 
 ## What the installer does
 
@@ -82,7 +84,7 @@ It builds from a temporary copy of the checkout, so your checkout gets no `build
 |---|---|---|
 | Venv | `~/.local/share/harness-manager/venv` | `%LOCALAPPDATA%\harness-manager\venv` |
 | Command | `~/.local/bin/harness-manager` | `%LOCALAPPDATA%\harness-manager\bin\harness-manager.exe` |
-| PATH | prints the line to add, for your shell, if the directory is not on it ([per shell](#when-harness-manager-is-not-on-path)) | adds the directory to your user PATH |
+| PATH | if the directory is not on it, appends ONE marked block (`# >>> harness-manager PATH ... >>>`) to your shell's startup files ([which files](#when-harness-manager-is-not-on-path)), never twice, and prints what it did; `--no-path` skips it. fish, tcsh and csh get the line to add instead | adds the directory to your user PATH |
 | Menu entry (Linux) | `~/.local/share/applications/harness-manager.desktop`, icon in `~/.local/share/icons/hicolor/scalable/apps/` | none yet |
 | Choices a re-run keeps | `~/.local/share/harness-manager/install.conf` | the extras, in `install.json` |
 | Install record, self-update pointer | `~/.local/share/harness-manager/install.json`, `current.json` | `%LOCALAPPDATA%\harness-manager\install.json`, `current.json` |
@@ -111,6 +113,7 @@ says how.
 | `--offline DIR` | `-Offline DIR` | install only from a wheelhouse DIR; never contact the package index |
 | `--latest` | `-Latest` | the newest dependency versions instead of the pins (rebuilds the venv) |
 | `--no-desktop` / `--desktop` | `-NoStartMenu` | skip the Linux menu entry (remembered), or bring it back; on Windows, leave out (or remove) the Start menu entry |
+| `--no-path` / `--path` | | do not edit your shell startup files (remembered), or do it again |
 | `--force` | `-Force` | replace a `harness-manager` command the installer did not write |
 | `--uninstall` | `-Uninstall` | stop the service, remove the venv, the self-updated versions, the command and the menu entry |
 
@@ -142,6 +145,10 @@ app groups under the menu icon in the dock or taskbar.
   `HARNESS_MANAGER_APP_KEEP_DBUS=1` in your session keeps the bus.
 - **No Chrome or Chromium:** the menu entry opens a browser tab instead. The installer
   says so when it finds none.
+- The entry runs `harness-manager app`: Harness Manager is then in the application menu
+  (and in the search of GNOME, KDE and the like) with no terminal.
+- **macOS:** there is no `.app` bundle. Run `harness-manager app`, right-click its Dock
+  icon, Options, Keep in Dock (the installer prints this).
 - `--no-desktop` skips it (and removes one an earlier run wrote); later runs remember
   that. `--desktop` brings it back. `--uninstall` removes it. An entry the installer did
   not write is never replaced or removed.
@@ -265,11 +272,17 @@ clone over HTTPS with a GitHub token.
 
 ## When harness-manager is not on PATH
 
-`harness-manager: command not found` means `~/.local/bin` is not on your PATH. The
-installer printed the line for your shell (`$SHELL`) and the full path of the command
-(`~/.local/bin/harness-manager`). Until you add the line, run it by its full path.
+The installer adds `~/.local/bin` (or `$HARNESS_MANAGER_BIN_DIR`) to your PATH itself when it
+is not there: one block between the markers `# >>> harness-manager PATH (written by
+scripts/install.sh) >>>` and `# <<< harness-manager PATH <<<`, in the files below for your
+shell, appended once (a re-install finds it and adds nothing; a changed directory replaces
+it; `--uninstall` removes it and keeps your own lines). It prints each file it changed.
+`--no-path` leaves your files alone and prints the line instead.
+`harness-manager: command not found` after that means the terminal is older than the
+install (open a new one), or your shell is not one it edits. The full path always works:
+`~/.local/bin/harness-manager`.
 
-| Your shell | Add | To |
+| Your shell | The block holds | In (the installer edits these for bash and zsh) |
 |---|---|---|
 | bash (Linux) | `export PATH="$HOME/.local/bin:$PATH"` | `~/.bashrc` (new terminals) **and** the file a login shell reads: the first of `~/.bash_profile`, `~/.bash_login`, `~/.profile` that exists (else `~/.bash_profile`). A login shell (ssh, `bash -l`, `bash -lc`) never reads `~/.bashrc` unless that file sources it |
 | bash (macOS) | `export PATH="$HOME/.local/bin:$PATH"` | `~/.bash_profile` (Terminal and ssh start login shells) |

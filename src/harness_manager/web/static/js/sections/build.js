@@ -170,7 +170,7 @@ function explain(err) {
   const e = toApiError(err);
   if ((e.status === 404 && /\/(guide|kit)\b/.test(e.message || "")) || routeMissing(e)) {
     return new ApiError({ name: "UNAVAILABLE", message: "this harness-manager-daemon has no build-kit routes yet",
-      hint: "update Harness Manager (the build kit arrived with lane KIT-CORE)" }, 404);
+      hint: "update Harness Manager: this version has no build kit support" }, 404);
   }
   return e;
 }

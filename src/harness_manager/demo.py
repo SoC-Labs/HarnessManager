@@ -1004,6 +1004,25 @@ class DemoEngine:
                               hint="open it first (engine.open(candidate))")
         return sess
 
+    def set_facts(self, board_id: str, **facts: object) -> None:
+        """QUICKWINS G2 (tests and the demo): override what ``info`` says the board is
+        (``revision``, ``mcc_fw``, ``user_sd``; see ``services.board_facts.build``)."""
+        self._facts_override[board_id] = dict(facts)
+
+    def board_facts(self, board_id: str, board: Any) -> dict[str, Any] | None:
+        from harness_manager.services import board_facts as bf
+
+        over = self._facts_override.get(board_id)
+        if over is not None:
+            return bf.build(**over)
+        linux = getattr(board.identity, "harness_impl", "") == "linux"
+        return bf.build("HBI0309C", "the MCC boot log", "v1.3.2", "the MCC boot log",
+                        True if linux else None)
+
+    @property
+    def _facts_override(self) -> dict[str, Any]:
+        return self.__dict__.setdefault("_facts_override_d", {})
+
     def info(self, board_id: str) -> BoardInfo:
         """Like the real engine: only for a board open in this engine."""
         self._enter("info", board_id)
@@ -1013,7 +1032,8 @@ class DemoEngine:
         available, unavailable = negotiate(_specs(), kinds, board.identity.features)
         claim = getattr(self.session(board_id), "claim", None)      # LINUX-CLAIM (showcase)
         return BoardInfo(board.candidate, board.identity, board.health, available, unavailable,
-                         claim=claim.claim_status(board.identity) if claim is not None else None)
+                         claim=claim.claim_status(board.identity) if claim is not None else None,
+                         facts=self.board_facts(board_id, board))
 
     def close(self, board_id: str) -> None:
         self._enter("close", board_id)

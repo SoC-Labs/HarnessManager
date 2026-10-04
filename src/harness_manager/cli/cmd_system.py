@@ -155,6 +155,12 @@ def cmd_info(ctx: Ctx) -> int:
         from .cmd_identity import info_line
 
         human.append(f"identity   {info_line(net)}")
+    facts = getattr(info, "facts", None)
+    if facts:                                # QUICKWINS G2: revision, MCC firmware, user microSD
+        from harness_manager.services import board_facts as bf
+
+        parts = [bf.revision_chip(facts), bf.mcc_chip(facts), bf.sd_chip(facts)]
+        human.append(f"facts      {'   '.join(x for x in parts if x)}")
     human.append(f"can        {', '.join(sorted(info.capabilities))}")
     human += [f"cannot     {cap}: {why}" for cap, why in sorted(info.unavailable.items())]
     # The JSON object IS the BoardInfo (candidate/identity/health/capabilities/unavailable,
@@ -165,6 +171,8 @@ def cmd_info(ctx: Ctx) -> int:
         data["claim"] = claim
     if net is not None:
         data["net_identity"] = net
+    if facts:
+        data["facts"] = facts
     ctx.emit(Result("info", data, rows=[row], human=human))
     return ExitCode.OK
 

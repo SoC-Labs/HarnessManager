@@ -1331,6 +1331,10 @@ def seed_bringup(fixtures: Path) -> dict[str, Any]:
     drive = root / "V2M-MPS3"
     if not (drive / "config.txt").is_file():
         _bringup_tree(drive, "0x00000000", stock=True)
+    if not (drive / "LOG.TXT").is_file():     # the MCC's log: CRLF, the firmware line, the revision
+        (drive / "LOG.TXT").write_bytes(
+            b"ARM V2M-MPS3 Firmware v1.3.2\r\nBuild Date: Apr 20 2018\r\n"
+            b"MotherBoard Revision C Variant A\r\nConfiguring motherboard (rev C, var A)...\r\n")
     bm = root / "mps3-harness-1.1.0"
     if not (bm / "sd" / "config.txt").is_file():
         _bringup_tree(bm / "sd", cat.U_ILA)

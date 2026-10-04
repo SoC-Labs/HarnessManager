@@ -268,7 +268,7 @@ def keep_mbbios(files: Mapping[str, Path], *, card_board_txt: bytes | None = Non
             raise RefusedError(
                 f"the card's {board_txt(rev)} was not read, so its MBBIOS line cannot be kept: "
                 "nothing was written",
-                hint="this writer passes only MB/HBI0309C/board.txt (it predates FIX-PACK-9): "
+                hint="this writer passes only MB/HBI0309C/board.txt (it does not read the board revision): "
                      "write the card over the MPS3 Debug USB instead")
         src = Path(files[key]).read_bytes()
         got = decide(src, card_board_txt=card.get(rev), card_files=card_files,
