@@ -313,7 +313,7 @@ def test_the_channel_seam_downloads_through_the_downloader(tmp_path):
 
 def test_the_channel_seam_is_unavailable_until_ota_c(kits):
     ch = kits.sources()[1]
-    assert ch["name"] == "channel" and not ch["available"] and "OTA-C" in ch["reason"]
+    assert ch["name"] == "channel" and not ch["available"] and "OTA-C" not in ch["reason"] and "a later release" in ch["reason"]
 
 
 # --- K3: the MPS3 adapter against the live static ----------------------------------------------------

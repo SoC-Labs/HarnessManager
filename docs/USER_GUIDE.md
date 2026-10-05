@@ -86,8 +86,8 @@ Once signed releases exist, the app can also update itself ([section 10](#10-upd
 
 **What can go wrong**
 - `harness-manager: command not found`: open a new terminal. When `~/.local/bin` was not on
-  your PATH, the installer added it to your shell's startup files (bash: `~/.bashrc` and the
-  login file; zsh: `~/.zshrc` and `~/.zprofile`; one marked block, never twice) and printed
+  your PATH, the installer added it to your shell's startup files (bash: `~/.bashrc` and the login file,
+  `~/.bash_profile`, `~/.bash_login` or `~/.profile`; zsh: `~/.zshrc` and `~/.zprofile`; one marked block, never twice) and printed
   which; only a terminal opened afterwards has it. Until then run
   `~/.local/bin/harness-manager`. With `--no-path`, or with fish, tcsh or csh, it printed the
   line to add instead (tcsh/csh: `set path = ( $HOME/.local/bin $path )` in `~/.cshrc`). Every shell:

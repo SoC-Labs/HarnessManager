@@ -100,7 +100,7 @@ def test_random_and_auto_are_chosen_set_and_recorded_as_assigned(lab):
     assert hist["ip"]["192.168.10.110"]["how"] == "assigned"
     mac = ":".join(body["mac"][i:i + 2] for i in range(0, 12, 2))
     assert hist["mac"][mac]["how"] == "assigned"
-    assert any("stage0 rescue still answers on 192.168.10.101" in n for n in out["notes"])
+    assert any("in recovery mode the board still answers on 192.168.10.101" in n for n in out["notes"])
 
 
 def test_twin_auto_skips_what_answers_and_what_the_registry_holds(lab, monkeypatch):
@@ -326,7 +326,7 @@ def test_the_proposal_for_a_board_on_the_image_default(lab):
     assert p["hub"] is None and p["pool"] == {"range": "192.168.10.110-199",
                                               "setting": "mps3.identity.ip_pool"}
     assert p["rules"]["name_max"] == 16 and "not 02:00:00:*" in p["rules"]["mac"]
-    assert any("stage0 rescue" in n for n in p["notes"])
+    assert any("in recovery mode" in n for n in p["notes"])
     assert svc.propose(session, mac="random")["mac"] != p["mac"]          # regenerate
     assert svc.seen.taken("ip").get("192.168.10.110") is None             # nothing reserved
     assert nothing_sent(fake)
