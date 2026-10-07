@@ -166,7 +166,7 @@ def linux_platform(root: Path, *, static_id: str = S_LNX, usercode: str = U_LNX,
                                "bytes": len(img), "s0lb": linux_bundle_s0lb(img)},
                 "provisioned": {"static_id": static_id, "sidecar": "version"},
                 "components": {"harness": "1.0.0", "image_kind": image_kind, "dirty": "0",
-                               "sha": fw_sha, "harnessd_sha256": fw_sha + "0" * 56,
+                               "sha": fw_sha, "harnessd_sha256": "ab" * 32,   # differs from sha, as on silicon
                                "stage0_sha256": stage0_elf, "kernel": "6.18.7",
                                "ver32": "0x01000000"},
                 "legal_info": {"name": "linux_legal_info.tar", "sha256": sha(legal),

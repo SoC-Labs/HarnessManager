@@ -240,8 +240,11 @@ def _identity_linux(bundle: Path, lb: dict[str, Any], fw: dict[str, Any],
         dirty.append("Linux image built from a dirty tree")
     # The harness semver: the bundle's own ``harness`` (Linux request L1), else firmware.json,
     # else the image's version record (IMAGE_CONTRACT §6 ``harness``).
+    # The firmware sha is what the board REPORTS (identify/version ``firmware_sha``): the image's
+    # source commit, the bundle's ``sha`` (0923ed88 for v2.0.0). Not harnessd's binary hash:
+    # matching on that left every board running the release "unrecorded" (7 Oct, board 1).
     fw = {"version": str(comps.get("harness", "") or ""),
-          "sha": str(comps.get("harnessd_sha256", ""))[:8], **fw}
+          "sha": str(comps.get("sha") or comps.get("harnessd_sha256", ""))[:8], **fw}
     if lb.get("harness"):                       # L1: the bundle's own semver wins
         fw["version"] = str(lb["harness"])
     return _Ident("linux", _hex(lb.get("static_id")), _hex(lb.get("static_usercode")),

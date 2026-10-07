@@ -66,6 +66,9 @@ def test_a_linux_release_from_platform_artifacts_with_a_test_key(tmp_path, lx):
     comps = {c["name"]: c for c in rel["components"]}
     assert set(comps) == {"sd-HBI0309BC", "os-slot", "overlays-open"}     # no Arm IP, no kit
     assert rel["identity"]["static_id"] == S_LNX and rel["identity"]["usercode"] == U_LNX
+    # the identity HM matches a board by is the sha the board reports (the image's commit),
+    # never harnessd's binary hash (7 Oct: board 1 showed "unrecorded" on v2.0.0)
+    assert rel["identity"]["fw_sha"] == lx.fw_sha and rel["identity"]["fw_sha"] != "abababab"
     assert rel["legal_info"]["name"].endswith("linux_legal_info.tar")
     # FIX-PACK-9: both revisions by default (david, 2 Oct), declared in compat and board
     assert rel["compat"]["board_revs"] == ["HBI0309B", "HBI0309C"]
