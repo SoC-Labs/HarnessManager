@@ -40,9 +40,9 @@ rotates over the air: a new root ships in a new app build.
 
 | Key | Key id | Made | Backups |
 |---|---|---|---|
-| root | _pending U2_ | | |
-| harness-release | _pending U2_ | | |
-| app-ci | _pending U2_ | | |
+| root | `5763E43D3D0C3CF1` | 2026-10-07 | two encrypted USB sticks (david) |
+| harness-release | `5A879A873F6B72BC` | 2026-10-07 | release maintainer's machine only |
+| app-ci | not made (no CI signing yet) | | |
 
 ## How the release tool uses a key
 

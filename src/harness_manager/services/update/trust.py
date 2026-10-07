@@ -104,9 +104,14 @@ def pinned(public_key_b64: str, role: str, *, channels: Iterable[str] | None = N
     return TrustedKey(key, role, chans, note)
 
 
-#: The app's pinned keys. EMPTY until the release keys are generated (see module doc).
+#: The app's pinned keys (the 2026 key ceremony, 7 Oct 2026).
 #: Add entries as ``pinned("RWQ...", ROLE_RELEASE, note="harness-release 2026")``.
-PINNED_KEYS: tuple[TrustedKey, ...] = ()
+PINNED_KEYS: tuple[TrustedKey, ...] = (
+    pinned("RWTxPAw9PeRjV1AyVKs0hdSlgIhC71KtkiFpjLhcQC2dLhvAv1Aa4WBS", ROLE_ROOT,
+           note="root 2026 (5763E43D3D0C3CF1, key ceremony 7 Oct 2026)"),
+    pinned("RWS8cms/h5qHWlcDSLqT2HFLpLMuaR321AKvEC/OWeuOnFPb8RSS8qMe", ROLE_RELEASE,
+           note="harness-release 2026 (5A879A873F6B72BC, key ceremony 7 Oct 2026)"),
+)
 
 
 @dataclass

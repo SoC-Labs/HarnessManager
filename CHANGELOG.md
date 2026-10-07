@@ -4,7 +4,7 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
-## 1.0.0 (unreleased)
+## 1.0.0 (2026-10-07)
 
 The first release for people outside the build team: SoC Labs staff and external MPS3
 owners.
