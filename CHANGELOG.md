@@ -4,6 +4,13 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
+## 1.0.2 (2026-10-07)
+
+- **The running OS slot no longer reads "Empty".** The v2.0.0 image carries no version
+  record, and Versions drew any slot without one as "Empty: no image, nothing boots from it",
+  even the slot the board runs. A valid image now shows its real state (Running · default,
+  Fallback, …), named "image" when it has no version.
+
 ## 1.0.1 (2026-10-07)
 
 - **A board running harness v2.0.0 is recognised.** v2.0.0 was published with a firmware

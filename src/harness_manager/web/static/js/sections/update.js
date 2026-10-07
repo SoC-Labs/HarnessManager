@@ -43,7 +43,7 @@ function SlotTile({ id, os }) {
     line = job.text || (job.state === "writing" ? `${mb(job.got)} of ${mb(len)}; the old image is gone until this ends` : "the board checks every region's CRC");
     cls = "busy";
     meter = p;
-  } else if (!s.state || s.state === "empty" || !s.version) {
+  } else if (!s.state || s.state === "empty") {      // a valid image need not carry a version record (v2.0.0)
     chip = ["warn", "triangle-alert", s.err ? "Empty: torn write" : "Empty"];
     line = s.err || "no image: nothing boots from it";
     cls = "torn";
@@ -70,7 +70,7 @@ function SlotTile({ id, os }) {
   }
   return html`<div class=${`os-slot ${cls}`} data-testid=${`slot-${id}`} data-state=${s.state || "empty"}
       data-running=${run ? "yes" : "no"} data-default=${dft ? "yes" : "no"}>
-    <div class="os-slot-h"><span class="os-letter">Slot ${id}</span><span class="os-rel">${s.version || "empty"}</span>
+    <div class="os-slot-h"><span class="os-letter">Slot ${id}</span><span class="os-rel">${s.version || (s.state && s.state !== "empty" ? "image" : "empty")}</span>
       ${s.sid ? html`<span class="mono small muted">${s.sid}</span>` : null}</div>
     <${Chip} level=${chip[0]} icon=${chip[1]}>${chip[2]}<//>
     ${meter !== null ? html`<div class="meter"><div style=${{ width: `${meter}%` }}></div></div>` : null}
