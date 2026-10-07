@@ -30,11 +30,23 @@ def rotated_entry(role: str = "harness-release", channels=("stable", "beta", "de
             "channels": list(channels)}
 
 
-def test_this_build_pins_no_keys_so_every_channel_is_refused():
-    # The release keys do not exist yet: the safe default refuses everything.
-    assert PINNED_KEYS == ()
-    with pytest.raises(RefusedError, match="no pinned update-signing keys"):
+def test_this_build_pins_the_2026_root_and_release_keys():
+    # The key ceremony of 7 Oct 2026: one root key (rotation only) and one release key.
+    assert {(k.id_hex.upper(), k.role) for k in PINNED_KEYS} == {
+        ("5763E43D3D0C3CF1", "root"), ("5A879A873F6B72BC", "harness-release")}
+    root = next(k for k in PINNED_KEYS if k.role == "root")
+    assert not any(root.may_sign(c) for c in ("stable", "beta", "dev"))
+
+
+def test_negative_twin_the_pinned_build_still_refuses_a_test_key():
+    # The release tool's TEST key (and any other) is not trusted by the shipped pins.
+    with pytest.raises(RefusedError, match="does not trust"):
         TrustStore().verify_for_channel(b"x", minisign.sign(b"x", KEYS.release), "stable")
+
+
+def test_an_empty_pin_set_refuses_every_channel():
+    with pytest.raises(RefusedError, match="no pinned update-signing keys"):
+        TrustStore(pinned=()).verify_for_channel(b"x", minisign.sign(b"x", KEYS.release), "stable")
 
 
 def test_release_key_signs_stable():

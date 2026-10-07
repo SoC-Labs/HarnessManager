@@ -273,7 +273,7 @@ def test_the_hub_prefers_a_packed_kit_dir(tmp_path):
 def test_fetch_with_no_source_says_what_it_tried(kits):
     with pytest.raises(AbsentError) as e:
         kits.fetch("0x72BB0A36")
-    assert "cache: not cached" in e.value.hint and "OTA-C" in e.value.hint
+    assert "cache: not cached" in e.value.hint and "OTA-C" not in e.value.hint and "not published yet" in e.value.hint
     assert "HARNESS_MANAGER_KIT_HUB_DIR" in e.value.hint
 
 
@@ -313,7 +313,7 @@ def test_the_channel_seam_downloads_through_the_downloader(tmp_path):
 
 def test_the_channel_seam_is_unavailable_until_ota_c(kits):
     ch = kits.sources()[1]
-    assert ch["name"] == "channel" and not ch["available"] and "OTA-C" in ch["reason"]
+    assert ch["name"] == "channel" and not ch["available"] and "OTA-C" not in ch["reason"] and "not published yet" in ch["reason"]
 
 
 # --- K3: the MPS3 adapter against the live static ----------------------------------------------------
