@@ -71,6 +71,7 @@ from .update.planner import (
     make_plan,
     pinned_release,
     revision_check,
+    running_by_os_image,
 )
 from .update.schema import (
     KIND_OS_SLOT,
@@ -393,14 +394,16 @@ class HarnessCatalog:
 
     @staticmethod
     def running_release(releases: Iterable[HarnessRelease],
-                        ident: BoardIdentity | None) -> HarnessRelease | None:
+                        ident: BoardIdentity | None,
+                        view: BoardView | None = None) -> HarnessRelease | None:
         """``planner.match_release`` over releases from several channels."""
         if ident is None or not ident.shell_id:
             return None
+        releases = list(releases)
         ranked = [(rank, rel) for rel in releases
                   if (rank := identity_rank(rel.identity, ident)) is not None]
         if not ranked:
-            return None
+            return running_by_os_image(releases, ident, view)
         best = max(r for r, _ in ranked)
         top = [rel for r, rel in ranked if r == best]
         return top[0] if len(top) == 1 else None
@@ -439,7 +442,7 @@ class HarnessCatalog:
         last = self.records.get(board_id) if board_id else None
         if session is not None:
             view, lease = self.board_state(session)
-            running = self.running_release([r for r, _, _ in merged], view.identity) \
+            running = self.running_release([r for r, _, _ in merged], view.identity, view) \
                 if view.identity_known else None
             board = {"board_id": board_id, "pack": pack, "identity_known": view.identity_known,
                      "running": self._running_summary(view.identity),
