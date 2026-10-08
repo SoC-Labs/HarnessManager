@@ -880,6 +880,7 @@ function eventLevel(ev) {
   if (ev.topic === "design.check") return d.state === "unverified" ? "warning" : d.state === "verified" ? "ok" : "info";
   if (ev.topic.endsWith(".failed") || d.state === "failed") return "error";
   if (ev.topic === "deploy.warning") return "warning";       // FIX-PACK-7: a forced swap
+  if (ev.topic === "board.hostkey") return "warning";        // HOSTKEY: a host key was re-pinned
   if (ev.topic === "deploy.done") return d.verified ? "ok" : "warning";
   if (ev.topic === "board.lost" || ev.topic === "session.closed" || d.state === "down") return "warning";
   return "info";
@@ -902,6 +903,7 @@ function eventText(ev) {
   if (ev.topic === "design.check" && d.text) {
     return `${d.state === "unverified" ? "design UNVERIFIED" : d.state === "verified" ? "design verified" : "design not cross-checked"} after ${d.after || "a cold boot"}: ${d.text}`;
   }
+  if (ev.topic === "board.hostkey" && d.text) return d.text;
   const parts = Object.entries(d)
     .filter(([k]) => k !== "preflight")
     .map(([k, v]) => `${k}=${valueSummary(v)}`);

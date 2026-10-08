@@ -3,6 +3,7 @@
 Verbs::
 
     harness-manager board claim        TARGET [--key PUB] [--adopt] [--replace-host-key] [--yes]
+    harness-manager board repin        TARGET [--fingerprint SHA256:...] [--yes]
     harness-manager board claim-status TARGET        ask the board now (through the hub too)
     harness-manager board ssh          TARGET [--print] [-c CMD]
     harness-manager board identity     TARGET [--from-hub | --label/--ip/--mac | --clear]
@@ -45,6 +46,7 @@ CLAIM_TSV: dict[str, tuple[str, ...]] = {
     "board claim": ("BOARD_ID", "STATE", "BY", "KEY_FP", "AT", "HOST_KEY", "PINNED", "ROUTE",
                     "ACTION"),
     "board ssh": ("BOARD_ID", "ARGV"),
+    "board repin": ("BOARD_ID", "STATE", "OLD", "NEW", "PINNED_AT", "ACTION"),
 }
 TARGET_HELP = "shell address host[:port] (the board's harness)"
 CAPABILITY = "ssh_claim"
@@ -94,6 +96,20 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
                     help="the board was re-provisioned: accept a host key that differs from "
                          "the pinned one (still checked against the board's identify)")
     ap.add_argument("--yes", action="store_true", help="do not ask")
+    rp = sub.add_parser(
+        "repin", help="the board's SSH host key changed: show the old and the new one and, "
+                      "when you say so, pin exactly the new one (asks first; needs the lease)",
+        description="Re-pin a board whose SSH host key is not the pinned one. Shows the pinned "
+                    "fingerprint and the day it was pinned, and the key the board shows now "
+                    "(with its boot id and uptime), asks, then pins exactly that key, and only "
+                    "if the key the board presents over SSH is the same. Nothing is ever "
+                    "re-pinned by itself (except for a board you marked netboot_new_key).",
+        parents=[fmt, board], epilog=f"--tsv columns: {' '.join(CLAIM_TSV['board repin'])}")
+    rp.add_argument("--fingerprint", default=None, metavar="SHA256:...",
+                    help="the new key you approve (as `board claim-status` shows it); needed "
+                         "with --yes, which skips the question")
+    rp.add_argument("--yes", action="store_true",
+                    help="do not ask (needs --fingerprint: the exact key to pin)")
     sub.add_parser("claim-status", help="is the board claimed, and by this Harness Manager's "
                                         "key? (asks the board now, through the hub if needed)",
                    parents=[fmt, board], epilog=f"--tsv columns: {cols}")
@@ -127,7 +143,7 @@ def _service(ctx: Ctx) -> Any:
 def cmd_board(ctx: Ctx) -> int:
     from .cmd_identity import cmd_identity
 
-    return {"claim": _claim, "claim-status": _claim_status, "ssh": _ssh,
+    return {"claim": _claim, "claim-status": _claim_status, "ssh": _ssh, "repin": _repin,
             "identity": cmd_identity}[ctx.args.board_cmd](ctx)
 
 
@@ -231,6 +247,56 @@ def _claim(ctx: Ctx) -> int:
     return ExitCode.OK
 
 
+def repin_question(st: dict[str, Any], board_id: str) -> str:
+    """What the re-pin asks: both fingerprints, when the old one was pinned, the board's boot."""
+    hk = st.get("host_key") or {}
+    boot = hk.get("boot_id")
+    up = hk.get("up_s")
+    return (f"re-pin {board_id}'s SSH host key? Pinned now: {hk.get('pinned')} (pinned "
+            f"{str(hk.get('pinned_at') or 'on an unknown day')[:19].replace('T', ' ')}). The "
+            f"board shows: {hk.get('reported')}"
+            + (f" (boot {boot}" + (f", up {int(up)} s" if isinstance(up, (int, float)) else "")
+               + ")" if boot else "")
+            + ". Only say yes if you expect a new key (a new card or image, or a netboot) and "
+              f"{hk.get('reported')} is the key on the board's console")
+
+
+def _repin(ctx: Ctx) -> int:
+    a = ctx.args
+    with ctx.board(note="board repin") as (cand, session):
+        svc = _service(ctx)
+        for name in ("check_claimable", "check_lease"):
+            check = getattr(svc, name, None)
+            if callable(check):
+                check(session)
+        if a.yes and not a.fingerprint:
+            raise UsageError("--yes needs --fingerprint: a re-pin pins the exact key you name",
+                             hint="read it with `harness-manager board claim-status TARGET`")
+        before = svc.refresh(session) or {}
+        hk = before.get("host_key") or {}
+        if not hk.get("pinned"):
+            raise UsageError(f"{cand.board_id}'s SSH host key is not pinned yet",
+                             hint="`harness-manager board claim TARGET` (or --adopt) pins it")
+        if hk.get("match") is not False and not a.fingerprint:
+            raise UsageError(f"{cand.board_id}'s host key has not changed: the pinned "
+                             f"{hk.get('pinned')} is what the board shows",
+                             hint="nothing to re-pin")
+        new = a.fingerprint or hk.get("reported")
+        if not new:
+            raise UsageError("the board did not say which key it has now (identify gave none)",
+                             hint="read it on the board's console and pass --fingerprint")
+        if not a.fingerprint:
+            ctx.confirm(repin_question(before, cand.board_id))
+        st = svc.repin(session, confirm=True, fingerprint=new, progress=ctx.note)
+    ctx.emit(Result("board repin", {"board_id": cand.board_id, "claim": st},
+                    rows=[[cand.board_id, (st or {}).get("state") or "", hk.get("pinned") or "",
+                           new, ((st or {}).get("host_key") or {}).get("pinned_at") or "",
+                           (st or {}).get("action") or ""]],
+                    human=[f"repinned  {cand.board_id}: {hk.get('pinned')} -> {new}"]
+                    + claim_human(cand.board_id, st)[1:]))
+    return ExitCode.OK
+
+
 def _claim_status(ctx: Ctx) -> int:
     with ctx.board(note="board claim-status") as (cand, session):
         st = _service(ctx).refresh(session)
@@ -258,6 +324,19 @@ def run_ssh(argv: list[str]) -> int:
     return subprocess.call(argv, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
 
 
+def _host_key_refusal(ctx: Ctx, session: Any) -> str:
+    """After ssh exited 255: the one host-key refusal (words and fix) when the board's key is
+    not the pinned one now, else "" (ssh failed for another reason; its own stderr said it)."""
+    try:
+        st = _service(ctx).refresh(session) or {}
+    except Exception:  # noqa: BLE001 - an explanation, never a second failure
+        return ""
+    refusal = (st.get("host_key") or {}).get("refusal") or {}
+    if (st.get("host_key") or {}).get("match") is not False or not refusal.get("message"):
+        return ""
+    return f"{refusal['message']}. {refusal.get('hint') or ''}".strip()
+
+
 def _ssh(ctx: Ctx) -> int:
     a = ctx.args
     command = remote_command(a.command)
@@ -273,4 +352,8 @@ def _ssh(ctx: Ctx) -> int:
         ctx.note(f"ssh: {text}")
         # The board stays open (its hub tunnel and lock) for as long as ssh runs.
         rc = run_ssh(argv)
+        if rc == 255:                       # ssh's own failure: say plainly if it was the host key
+            why = _host_key_refusal(ctx, session)
+            if why:
+                ctx.note(why)
     return ExitCode.OK if rc == 0 else ExitCode.ACTION_FAILED

@@ -327,6 +327,14 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
              "The board's pinned SSH host key, written by `board claim` (a changed key is "
              "refused; clear it only for a re-provisioned board)", at="claim.py:385",
              scope="board", apply="reopen", check=_host_key),
+        _row("boards.*.ssh.netboot_new_key", "bool", False, "Boards",
+             "This board netboots with no /persist, so it makes a new SSH host key on every "
+             "boot. On: after a reboot Harness Manager pins the new key by itself, but only "
+             "when the board reports a new boot id AND the key ssh shows equals the key it "
+             "reports; every such change is logged as a warning and shown in Activity. Off "
+             "(the default, and right for a board that boots from its card): a changed key is "
+             "always refused until you re-pin it yourself",
+             at="claim.py:ssh_config", scope="board", apply="reopen"),
     )
 
 

@@ -83,6 +83,27 @@ def register(app: FastAPI, state: Any, ok: Any, accepted: Any) -> ClaimSim:
 
         return accepted(state.jobs.start(bid, "claim", run))
 
+    @app.post(f"{API}/boards/{{bid:path}}/repin", status_code=202)
+    def repin(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> Any:  # noqa: B008
+        state.session(bid)
+        b = body or {}
+        sim.posts.append({"repin": dict(b)})
+        if b.get("confirm") is not True or not b.get("fingerprint"):
+            raise RefusedError("a re-pin needs a confirmation and the exact fingerprint")
+        cur = sim.get(bid)
+        if cur is None:
+            raise UnavailableError("ssh_claim", "no SSH to claim (bare metal)")
+
+        def run(progress: Any) -> dict[str, Any]:
+            new = sim._status("mine", "repinned")
+            new["host_key"] = {"reported": b["fingerprint"], "pinned": b["fingerprint"],
+                               "match": True, "seen_before": None}
+            with sim._mu:
+                sim.claims[bid] = {k: v for k, v in new.items() if k != "action"}
+            return {"board_id": bid, "claim": new}
+
+        return accepted(state.jobs.start(bid, "repin", run))
+
     @app.get(f"{API}/boards/{{bid:path}}/ssh")
     def ssh_argv(bid: str, command: str | None = None) -> dict[str, Any]:
         state.session(bid)

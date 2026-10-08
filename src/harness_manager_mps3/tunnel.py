@@ -559,7 +559,8 @@ class SshTunnel:
                  on_state: Callable[[dict[str, Any]], None] | None = None,
                  label: str = "", user_config: Path | None = None,
                  system_config: Path | None = SYSTEM_CONFIG,
-                 jump: str = "", user: str = "", options: Sequence[str] = ()) -> None:
+                 jump: str = "", user: str = "", options: Sequence[str] = (),
+                 failure_words: Callable[[str], str] | None = None) -> None:
         if not host:
             raise UsageError("an SSH tunnel needs a host")
         if not forwards:
@@ -575,6 +576,9 @@ class SshTunnel:
         #: LINUX-CLAIM: extra ssh options after SSH_OPTIONS (the pinned host key, the claimed
         #: key: ``claim.Mps3Claim.pinned_options``). Empty: the argv is unchanged.
         self.options = tuple(options)
+        #: HOSTKEY: raw ssh failure text -> the words to show instead ("" keeps the raw text),
+        #: so a refused host key is the one clear refusal in the state detail and the log
+        self._failure_words = failure_words
         self.label = label or f"ssh:{host}"
         self._launcher = launcher or DEFAULT_LAUNCHER
         self._ssh = ssh or sshcmd.ssh_program()       # ssh.exe's full path on Windows
@@ -638,6 +642,11 @@ class SshTunnel:
         self._watchers.append(callback)
 
     def _set(self, state: str, detail: str) -> None:
+        if self._failure_words is not None and detail:
+            try:
+                detail = self._failure_words(detail) or detail
+            except Exception:  # noqa: BLE001 - wording must never stop the tunnel
+                log.exception("tunnel failure wording failed")
         with self._mu:
             changed = (state, detail) != (self.state, self.detail)
             self.state, self.detail = state, detail

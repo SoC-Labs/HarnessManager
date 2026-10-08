@@ -94,6 +94,22 @@ class ClaimService:
         self.engine = None if isinstance(engine, EventBus) else engine
         self.bus = _bus_of(engine)
         self.leases = leases
+        if self.bus is not None:
+            self._install_sink()
+
+    def _install_sink(self) -> None:
+        """Host-key events of the board adapters (an automatic netboot re-pin, a re-pin) go on
+        this bus, so Activity shows them. One bus per daemon: the last service wins."""
+        bus = self.bus
+
+        def sink(topic: str, board_id: str, data: dict[str, Any]) -> None:
+            bus.publish(Event(topic, board_id, dict(data)))
+
+        try:
+            from harness_manager_mps3 import claim as mps3_claim
+        except ImportError:                       # a build without the MPS3 pack
+            return
+        mps3_claim.EVENT_SINK = sink
 
     @property
     def state_dir(self) -> Path:
@@ -189,6 +205,26 @@ class ClaimService:
         self.check_lease(session)
         out = claim.claim(key=key, adopt=adopt, replace_host_key=replace_host_key,
                           progress=progress)
+        self._publish(session, out)
+        return out
+
+    def repin(self, session: Any, *, confirm: bool, fingerprint: str,
+              progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """Re-pin the board's SSH host key to ``fingerprint``: the key the user approved after
+        seeing the old and the new one. Never automatic: ``confirm`` must be True, and the
+        adapter pins exactly that fingerprint or nothing."""
+        claim = self.check_claimable(session)
+        if not confirm:
+            raise RefusedError("a re-pin needs a confirmation: Harness Manager will trust the "
+                               "new SSH host key for this board",
+                               hint="CLI: answer the prompt or pass --fingerprint with --yes; "
+                                    "API: {\"confirm\": true, \"fingerprint\": \"SHA256:...\"}")
+        if not (fingerprint or "").strip():
+            raise RefusedError("a re-pin names the exact fingerprint you approved",
+                               hint="send {\"fingerprint\": \"SHA256:...\"}, the key shown as "
+                                    "the board's new one")
+        self.check_lease(session, what="re-pinning")
+        out = claim.repin(fingerprint, progress=progress)
         self._publish(session, out)
         return out
 

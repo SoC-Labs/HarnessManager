@@ -505,7 +505,8 @@ def test_a_host_key_changed_back_to_one_pinned_before_is_said_plainly(rig_factor
     got = rig.adapter.display_reason()
     assert got.startswith("host key changed back to one seen on 2026-09-24"), got
     assert "/persist (the user microSD) mounting or not" in got
-    assert "`harness-manager board claim TARGET --adopt` if you trust it" in got
+    assert (f"re-pin it with `harness-manager board repin TARGET --fingerprint {card_fp}` "
+            "if you trust it") in got                           # HOSTKEY: the one fix
     with pytest.raises(DisplayUnavailable) as exc:             # never opened: no auto-accept
         rig.adapter.display_connect()
     assert exc.value.reason == got and rig.ssh.launches == []

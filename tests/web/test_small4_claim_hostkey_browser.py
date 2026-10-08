@@ -68,3 +68,42 @@ def test_negative_twin_a_key_never_seen_keeps_the_loud_error(page_factory, daemo
     expect(line).not_to_contain_text("changed back")
     expect(page.locator('[data-action="access-claim"]')).to_have_count(0)
     assert not page.errors, page.errors
+
+
+# --- HOSTKEY: the explicit re-pin (old and new key, an Arm box, exactly the key shown) ------------------------
+
+
+def changed_with_details(daemon, new=CARD):
+    changed_key(daemon, seen_before=None)
+    sim = daemon.app.state.claim
+    with sim._mu:
+        hk = sim.claims[BOARD_FIELDED]["host_key"]
+        hk.update(reported=new, pinned_at="2026-10-02T09:00:00Z", boot_id="boot-B", up_s=95.0)
+        hk["refusal"] = {"message": f"THE BOARD'S SSH HOST KEY CHANGED: pinned {PINNED}, the "
+                                    f"board now reports {new} (pinned on 2026-10-02). SSH to "
+                                    "this board is refused", "hint": "re-pin"}
+
+
+def test_the_access_card_shows_both_keys_and_repins_exactly_the_key_shown(page_factory, daemon):
+    changed_with_details(daemon)
+    page = page_factory()
+    open_board(page)
+    expect(page.locator('[data-testid="hostkey-old"]')).to_contain_text(PINNED, timeout=T)
+    expect(page.locator('[data-testid="hostkey-old"]')).to_contain_text("pinned 2026-10-02")
+    expect(page.locator('[data-testid="hostkey-new"]')).to_have_text(CARD)
+    expect(page.locator('[data-testid="hostkey-boot"]')).to_contain_text("boot-B")
+    page.locator('[data-action="access-repin"]').click()
+    confirm = page.locator('[data-action="access-repin-confirm"]')
+    assert confirm.is_disabled()                          # behind the Arm box
+    page.locator('[data-testid="arm-repin"]').click()
+    expect(confirm).to_be_enabled()
+    confirm.click()
+    sim = daemon.app.state.claim
+    for _ in range(100):
+        if any("repin" in p for p in sim.posts):
+            break
+        page.wait_for_timeout(50)
+    posted = next(p["repin"] for p in sim.posts if "repin" in p)
+    assert posted == {"confirm": True, "fingerprint": CARD}      # exactly the key on screen
+    assert not page.errors, page.errors
+

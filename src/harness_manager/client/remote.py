@@ -1349,6 +1349,17 @@ class RemoteClaim:
         out = self._engine.run_job(self._path(session), body, progress=phase)
         return (out or {}).get("claim") if isinstance(out, dict) else out
 
+    def repin(self, session: BoardSession, *, confirm: bool, fingerprint: str,
+              progress: Any = None) -> Any:
+        def phase(text: str, _done: int, _total: int) -> None:
+            if progress is not None:
+                progress(text)
+
+        body = {"confirm": bool(confirm), "fingerprint": str(fingerprint)}
+        out = self._engine.run_job(f"/boards/{q(_bid(session))}/repin", body,
+                                   progress=phase)
+        return (out or {}).get("claim") if isinstance(out, dict) else out
+
     def ssh_argv(self, session: BoardSession, command: Any = (), *, tty: bool = False) -> list[str]:
         import shlex
 

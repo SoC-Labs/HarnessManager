@@ -7,6 +7,7 @@ docs/API.md "SSH claim (Linux harness)" (bearer auth and the error envelope as e
 |---|---|
 | ``GET /boards/{bid}/claim?refresh=`` | ``{board_id, claim}``: ``claim`` is ``BoardInfo.claim`` (null on bare metal). ``refresh=true`` asks the board now, through the hub when there is one |
 | ``POST /boards/{bid}/claim`` ``{confirm: true, key?, adopt?, replace_host_key?}`` | 202 job ``claim``; the result is ``{board_id, claim}`` with ``claim.action`` ``claimed`` or ``adopted`` |
+| ``POST /boards/{bid}/repin`` ``{confirm: true, fingerprint}`` | 202 job ``repin``; pins exactly ``fingerprint`` (the new key the user was shown) when identify and ssh both show it; the result is ``{board_id, claim}`` with ``claim.action`` ``repinned``. The lease holder only |
 | ``GET /boards/{bid}/ssh?command=`` | ``{board_id, argv}``: the pinned ``ssh [-J HUB] -l root BOARD`` (nothing is run) |
 
 Rules:
@@ -86,6 +87,30 @@ def register(ctx: RouteContext) -> None:
             return {"board_id": bid, "claim": st}
 
         return ctx.accepted(d.jobs.submit("claim", bid, run))
+
+    @api.post("/boards/{bid:path}/repin")
+    def repin(bid: str, body: JsonBody = None) -> Any:
+        s = ctx.board(bid)
+        b = _obj(body)
+        if not _bool(b, "confirm", False):
+            raise RefusedError("a re-pin needs a confirmation: Harness Manager will trust the "
+                               "new SSH host key for this board",
+                               hint="send {\"confirm\": true, \"fingerprint\": \"SHA256:...\"}")
+        fingerprint = _opt_str(b, "fingerprint")
+        if not fingerprint:
+            raise RefusedError("a re-pin names the exact fingerprint you approved",
+                               hint="send {\"fingerprint\": \"SHA256:...\"}")
+        svc = service()
+        with d.gates.op(bid):
+            svc.check_claimable(s)
+            svc.check_lease(s, what="re-pinning")
+
+        def run(progress: Callable[[str, int, int], None]) -> Any:
+            st = svc.repin(s, confirm=True, fingerprint=fingerprint,
+                           progress=lambda text: progress(text, 0, 0))
+            return {"board_id": bid, "claim": st}
+
+        return ctx.accepted(d.jobs.submit("repin", bid, run))
 
     @api.get("/boards/{bid:path}/ssh")
     def ssh_argv(bid: str, command: str | None = None) -> Any:

@@ -46,6 +46,19 @@ What Harness Manager adds here:
   be re-pinned by ``board claim [--adopt]`` without ``--replace-host-key``. A key only
   observed is never added, so any other key keeps the loud warning. Nothing is ever accepted
   automatically: SSH stays refused until you re-pin.
+- **One refusal, one way out** (lane HOSTKEY). Every SSH path (``board ssh``, the on-board
+  debug launcher, the LCD mirror, XVC, the slot and card verbs) refuses a changed host key with
+  the SAME words (``host_key_words``): the pinned fingerprint and the day it was pinned, the key
+  the board shows now (from identify, with its boot id and uptime), and the one fix, an explicit
+  re-pin (``Mps3Claim.repin``: ``board repin TARGET --fingerprint FP``, or Board > Access >
+  Re-pin). identify is UDP and unauthenticated, so it can SUGGEST a change and is never the
+  authority for a re-pin: a re-pin pins exactly the fingerprint the user approved, and only when
+  both identify and the key the board presents over SSH equal it.
+  The one exception is a per-board opt-in, ``boards.<b>.ssh.netboot_new_key`` (default OFF),
+  for a board that netboots with no /persist and makes a new host key on every boot: then (and
+  only then) a new key is accepted when identify shows a NEW boot id since the last pin AND the
+  key ssh presents equals identify's. It is logged as a warning every time and published as
+  ``board.hostkey`` (Activity).
 - **The lock's refusal** (``refusal_error``): ``slot locked: board claimed (use ssh)`` becomes
   ``ClaimLockedError``; the fabric identity lock (``identity lock: <reason>``, a different
   lock: the card image and the FPGA's static disagree, claimed or not) becomes an
@@ -200,6 +213,10 @@ SEEN_HOST_KEYS_MAX = 4
 PERSIST_NOTE = ("on the Linux harness this is usually /persist (the user microSD) mounting "
                 "or not")
 
+#: Where a host-key event goes (``(topic, board_id, data)``): the claim service installs a bus
+#: publisher, so an automatic netboot re-pin shows in Activity. None: logged only.
+EVENT_SINK: Callable[[str, str, dict[str, Any]], None] | None = None
+
 _KEY_TYPES = ("ssh-", "ecdsa-", "sk-")
 _B64 = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 _FP = re.compile(r"^SHA256:[A-Za-z0-9+/]{20,64}$")
@@ -314,7 +331,7 @@ def known_hosts_path(board_id: str) -> Path:
 
 
 def _atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(text)
@@ -379,7 +396,9 @@ class ClaimRecords:
 
 # --- boards.toml: boards.<b>.ssh ------------------------------------------------------------------
 
-SSH_KEYS = ("user", "key", "host_key")
+SSH_KEYS = ("user", "key", "host_key", "netboot_new_key")
+#: the one boolean among them (the config dict stays str -> str: "yes" or "")
+SSH_BOOL_KEYS = ("netboot_new_key",)
 
 
 def board_key(candidate: Any) -> str:
@@ -410,6 +429,11 @@ def ssh_config(candidate: Any) -> dict[str, str]:
     out = {k: "" for k in SSH_KEYS}
     for k in SSH_KEYS:
         v = raw.get(k, "")
+        if k in SSH_BOOL_KEYS:
+            if not isinstance(v, (bool, str)) or (isinstance(v, str) and v.strip()):
+                raise UsageError(f"{where}.{k} must be true or false")
+            out[k] = "yes" if v is True else ""
+            continue
         if not isinstance(v, str):
             raise UsageError(f"{where}.{k} must be a string")
         out[k] = v.strip()
@@ -579,8 +603,11 @@ def _stderr_line(text: str) -> str:
 
 def _host_key_failed(text: str) -> bool:
     low = text.lower()
-    return ("host key verification failed" in low or "remote host identification has changed" in low
-            or "no ed25519 host key is known" in low or "host key for" in low and "has changed" in low)
+    return (HK_CHANGED.lower() in low or HK_BACK in low
+            or "host key verification failed" in low
+            or "remote host identification has changed" in low
+            or "no ed25519 host key is known" in low
+            or "host key for" in low and "has changed" in low)
 
 
 # --- the adapter ----------------------------------------------------------------------------------
@@ -597,6 +624,10 @@ class Observation:
     error: str = ""
     #: ``ssh.key_sha256``: the claim's FIRST key (C1, additive; "" = not published)
     key_fp: str = ""
+    #: identify's ``boot_id`` (a new one on every boot of the board; "" = not published) and
+    #: the harness's uptime in seconds (``up_ms``; None = not published)
+    boot_id: str = ""
+    up_s: float | None = None
 
 
 def _iso(t: float) -> str:
@@ -631,13 +662,68 @@ def with_seen_host_key(seen: Sequence[Mapping[str, str]], fp: str,
 
 
 def changed_back_words(reported: str, pinned: str, seen_at: str, *,
-                       unclaimed: bool = False) -> str:
+                       unclaimed: bool = False, fix: str = "") -> str:
     """The plain words for a host key that changed BACK to one pinned before (never the
     loud "HOST KEY CHANGED": that is for a key never seen)."""
-    how = ("re-claim with `harness-manager board claim TARGET`" if unclaimed else
-           "re-pin with `harness-manager board claim TARGET --adopt`")
+    how = fix or ("re-claim with `harness-manager board claim TARGET`" if unclaimed else
+                  "re-pin with `harness-manager board claim TARGET --adopt`")
     return (f"host key changed back to one seen on {seen_at[:10] or 'an earlier day'} "
             f"({reported}; pinned now: {pinned}); {PERSIST_NOTE}; {how} if you trust it")
+
+
+#: The two openings of the one refusal (``host_key_words``); ``_host_key_failed`` knows them, so
+#: a tunnel's reworded detail is still recognised as the host-key refusal.
+HK_CHANGED = "THE BOARD'S SSH HOST KEY CHANGED"
+HK_BACK = "host key changed back"
+
+
+def _ago(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    s = int(max(0, seconds))
+    if s < 90:
+        return f"{s} s"
+    if s < 5400:
+        return f"{s // 60} min"
+    if s < 172800:
+        return f"{s / 3600:.1f} h"
+    return f"{s // 86400} days"
+
+
+def host_key_words(*, pinned: str, new: str = "", pinned_at: str = "", seen_at: str = "",
+                   boot_id: str = "", up_s: float | None = None, unclaimed: bool = False,
+                   netboot_note: str = "") -> tuple[str, str]:
+    """``(message, hint)``: THE refusal every SSH path gives when the board's host key is not
+    the pinned one. The message names the pinned fingerprint and when it was pinned, the key
+    the board shows now (``new``: identify's, "" when it could not be read) with its boot id
+    and uptime; the hint is the one fix, an explicit re-pin of exactly that key."""
+    fix = f"re-pin it with `harness-manager board repin TARGET --fingerprint {new}`" if new else ""
+    if new and seen_at:
+        lead = changed_back_words(new, pinned, seen_at, unclaimed=unclaimed, fix=fix)
+    elif new:
+        lead = f"{HK_CHANGED}: pinned {pinned}, the board now reports {new}"
+    else:
+        lead = (f"{HK_CHANGED}: ssh did not accept the pinned key {pinned}, and the board's "
+                "identify did not say which key it has now")
+    when = f"pinned on {pinned_at[:10]}" if pinned_at else "the day it was pinned is not on record"
+    boot = ""
+    if boot_id:
+        boot = f"; the board's boot {boot_id}" + (f", up {_ago(up_s)}" if up_s is not None else "")
+    elif up_s is not None:
+        boot = f"; the board has been up {_ago(up_s)}"
+    message = f"{lead} ({when}{boot}). SSH to this board is refused"
+    if netboot_note:
+        message += f"; {netboot_note}"
+    if new:
+        hint = (f"Nothing is accepted automatically. Check {new} against the board (its console "
+                f"or CLCD) if you expect a new key (a new card or image, or a netboot); then "
+                f"re-pin exactly it: `harness-manager board repin TARGET --fingerprint {new}` "
+                "(Board > Access > Re-pin in the app)")
+    else:
+        hint = ("Nothing is accepted automatically. `harness-manager board repin TARGET` shows "
+                "the key the board offers now and asks before pinning it (Board > Access > "
+                "Re-pin in the app)")
+    return message, hint
 
 
 def _me() -> str:
@@ -661,6 +747,9 @@ class Mps3Claim:
         self._fwd: Any = None
         self._fwd_users: dict[str, int] = {}
         self._closed = False
+        self._pin_mu = threading.Lock()
+        #: why the last netboot auto-accept was not taken (only said while the setting is on)
+        self._netboot_why = ""
         #: forwards opened over the session's life (tests, status)
         self.forwards_opened = 0
 
@@ -758,7 +847,10 @@ class Mps3Claim:
                 return Observation(claimed if isinstance(claimed, bool) else None,
                                    str(seen.get("host_key") or ""),
                                    f"{seen.get('source') or 'identify via ' + hub} (last check)",
-                                   float(seen["at"]), key_fp=str(seen.get("key_fp") or ""))
+                                   float(seen["at"]), key_fp=str(seen.get("key_fp") or ""),
+                                   boot_id=str(seen.get("boot_id") or ""),
+                                   up_s=seen.get("up_s") if isinstance(seen.get("up_s"),
+                                                                        (int, float)) else None)
             return Observation(None, "", f"identify via {hub}", now,
                                "not checked through the hub yet (identify is UDP: it does not "
                                "ride the SSH tunnel); `harness-manager board claim-status` asks "
@@ -784,7 +876,13 @@ class Mps3Claim:
         # C1 (additive): the fingerprint of the claim's first key, when the image publishes it
         first = ssh.get("key_sha256") if isinstance(ssh.get("key_sha256"), str) else ""
         err = "" if ssh else "the board's identify has no ssh block (bare metal, or an older image)"
-        return Observation(claimed, key, source, at, err, first)
+        boot = raw.get("boot_id") if isinstance(raw.get("boot_id"), str) else ""
+        if not boot and isinstance(ssh.get("boot_id"), str):
+            boot = ssh["boot_id"]
+        up = raw.get("up_ms")
+        up_s = float(up) / 1000.0 if isinstance(up, (int, float)) and not isinstance(up, bool) \
+            else None
+        return Observation(claimed, key, source, at, err, first, boot, up_s)
 
     def _remember(self, obs: Observation) -> None:
         if obs.claimed is None:
@@ -792,8 +890,8 @@ class Mps3Claim:
         seen = self._records.get(self.board_id).get("observed") or {}
         if not obs.source.endswith("(last check)") and isinstance(seen, dict) and \
                 (seen.get("claimed"), seen.get("host_key"), seen.get("source"),
-                 seen.get("key_fp") or "") == \
-                (obs.claimed, obs.host_key, obs.source, obs.key_fp) and \
+                 seen.get("key_fp") or "", seen.get("boot_id") or "") == \
+                (obs.claimed, obs.host_key, obs.source, obs.key_fp, obs.boot_id) and \
                 obs.at - float(seen.get("at") or 0) < 600:
             return                           # nothing new: no write on every LAN info
         extra: dict[str, Any] = {}
@@ -809,7 +907,9 @@ class Mps3Claim:
         with contextlib.suppress(OSError):
             self._records.update(self.board_id, observed={
                 "claimed": obs.claimed, "host_key": obs.host_key, "source": obs.source,
-                "at": obs.at, **({"key_fp": obs.key_fp} if obs.key_fp else {})}, **extra)
+                "at": obs.at, **({"key_fp": obs.key_fp} if obs.key_fp else {}),
+                **({"boot_id": obs.boot_id} if obs.boot_id else {}),
+                **({"up_s": obs.up_s} if obs.up_s is not None else {})}, **extra)
 
     def seen_before(self, fp: str) -> str:
         """When ``fp`` was last this board's pinned host key (ISO), else "": a key this
@@ -885,6 +985,11 @@ class Mps3Claim:
         elif state == STATE_OTHER:
             claimed = {"by": "another key", "key_fp": obs.key_fp or None, "at": None,
                        "mine": False}
+        msg = hnt = ""
+        if match is False:
+            msg, hnt = host_key_words(pinned=pinned, new=reported, pinned_at=self.pinned_at(pinned),
+                                      seen_at=seen_at, boot_id=obs.boot_id, up_s=obs.up_s,
+                                      unclaimed=obs.claimed is False)
         hub, _ = self.route()
         return {
             "state": state,
@@ -892,7 +997,15 @@ class Mps3Claim:
             # seen_before (additive, SMALL-4): the reported key changed BACK to one this Harness
             # Manager pinned before: when it last was (ISO); null for a key never seen
             "host_key": {"reported": reported or None, "pinned": pinned or None, "match": match,
-                         "seen_before": seen_at or None},
+                         "seen_before": seen_at or None,
+                         # HOSTKEY (additive): when it was pinned, the board's boot id and
+                         # uptime (identify), and the netboot opt-in (default off)
+                         "pinned_at": self.pinned_at(pinned) or None,
+                         "boot_id": obs.boot_id or None, "up_s": obs.up_s,
+                         "netboot_new_key": bool(cfg["netboot_new_key"]),
+                         # the one refusal's words, for the app and `board ssh` (match false)
+                         "refusal": ({"message": msg, "hint": hnt} if match is False
+                                     else None)},
             # C1 (additive): identify's ssh.key_sha256, the claim's first key; None = not published
             "claim_key": obs.key_fp or None,
             "route": f"hub {hub}" if hub else "lan",
@@ -902,6 +1015,176 @@ class Mps3Claim:
             "live": obs.claimed is not None and "(last check)" not in obs.source,
             "notes": notes,
         }
+
+    # -- the host-key refusal (HOSTKEY) -----------------------------------------------------
+
+    def netboot_enabled(self) -> bool:
+        """boards.<b>.ssh.netboot_new_key: this board netboots with no /persist and makes a new
+        host key on every boot (default OFF; the one case a new key may be accepted by itself)."""
+        try:
+            return bool(self.config()["netboot_new_key"])
+        except UsageError:
+            return False
+
+    def pinned_at(self, pinned: str) -> str:
+        """When ``pinned`` was pinned (ISO) as this Harness Manager recorded it, else ""."""
+        if not pinned:
+            return ""
+        rec = self._records.get(self.board_id)
+        if rec.get("host_key_fp") != pinned:
+            return ""
+        return str(rec.get("pinned_at") or rec.get("at") or "")
+
+    def host_key_error(self, obs: Observation | None = None, *,
+                       refused: str = "") -> HostKeyChangedError:
+        """THE refusal: every SSH path raises this one (``host_key_words``). ``obs``: what
+        identify shows now (the last one when omitted); ``refused``: a closing clause."""
+        pin = ""
+        with contextlib.suppress(UsageError):
+            pin = self.config()["host_key"]
+        pinned = pin_fingerprint(pin) if pin else ""
+        if obs is None:
+            try:
+                obs = self.observe()
+            except HarnessError:
+                obs = None
+        new = obs.host_key if obs is not None and obs.host_key != pinned else ""
+        seen_at = self.seen_before(new) if new else ""
+        note = ""
+        if self._netboot_why and self.netboot_enabled():
+            note = f"the netboot setting is on, but {self._netboot_why}"
+        message, hint = host_key_words(
+            pinned=pinned, new=new, pinned_at=self.pinned_at(pinned), seen_at=seen_at,
+            boot_id=obs.boot_id if obs is not None else "",
+            up_s=obs.up_s if obs is not None else None,
+            unclaimed=obs is not None and obs.claimed is False, netboot_note=note)
+        return HostKeyChangedError((message + f". {refused}") if refused else message, hint=hint)
+
+    def _commit_pin(self, line: str, obs: Observation, *, how: str, rec_extra: Mapping[str, Any]
+                    | None = None) -> str:
+        """Pin ``line`` (the key ssh presented, its fingerprint equal to ``obs.host_key``):
+        boards.toml, the known_hosts file and the record (when, how, the board's boot id). The
+        previous pin stays in the keys seen before. Returns the boards.toml table."""
+        table = write_ssh_settings(self.candidate, {"host_key": line})
+        self._write_known_hosts(line)
+        at = _iso(time.time())
+        rec = self._records.get(self.board_id)
+        seen = with_seen_host_key(seen_host_keys(rec), obs.host_key, at)
+        self._records.update(self.board_id, host_key_fp=obs.host_key, how=how, pinned_at=at,
+                             pin_boot_id=obs.boot_id or None, host_keys_seen=seen,
+                             **dict(rec_extra or {}))
+        with self._mu:
+            self._lan = None                       # re-read: the match is true now
+        return table
+
+    def _emit(self, topic: str, data: dict[str, Any]) -> None:
+        sink = EVENT_SINK
+        if sink is not None:
+            with contextlib.suppress(Exception):
+                sink(topic, self.board_id, data)
+
+    def _netboot_accept(self, obs: Observation, pinned: str) -> bool:
+        """The opt-in exception (``netboot_new_key`` ON). True when the new key was pinned:
+        identify shows a NEW boot id since the last pin, and the key ssh presents equals
+        identify's. Otherwise False, with the reason kept for the refusal's words. Every
+        acceptance is a warning in the log and a ``board.hostkey`` event (Activity)."""
+        with self._pin_mu:
+            self._netboot_why = ""
+            try:
+                cur = self.config()["host_key"]
+            except UsageError:
+                return False
+            if cur and pin_fingerprint(cur) == obs.host_key:
+                return True                       # another caller pinned it a moment ago
+            rec = self._records.get(self.board_id)
+            last = str(rec.get("pin_boot_id") or "")
+            if obs.claimed is not True:
+                self._netboot_why = "the board is not claimed, so there is no login to check the key with"
+            elif not obs.boot_id:
+                self._netboot_why = "the board's identify publishes no boot id"
+            elif not last:
+                self._netboot_why = ("no boot id was recorded when the key was pinned, so a new "
+                                     "boot cannot be shown (re-pin once by hand)")
+            elif obs.boot_id == last:
+                self._netboot_why = ("the board has not rebooted since the key was pinned (same "
+                                     f"boot id {last})")
+            if self._netboot_why:
+                log.info("netboot host key of %s not accepted: %s", self.board_id,
+                         self._netboot_why)
+                return False
+            try:
+                line = self._capture_host_key(obs.host_key, fresh=False,
+                                              identity_file=self.config()["key"])
+            except HarnessError as exc:
+                self._netboot_why = f"the key ssh presents was not checked ({exc.message})"
+                log.warning("netboot host key of %s not accepted: %s", self.board_id,
+                            self._netboot_why)
+                return False
+            old = pin_fingerprint(cur) if cur else ""
+            self._commit_pin(line, obs, how="netboot-auto")
+            text = (f"{self.board_id}: new SSH host key {obs.host_key} accepted by itself "
+                    f"(netboot setting on; boot {last} -> {obs.boot_id}); it replaces {old}")
+            log.warning("%s", text)
+            self._emit("board.hostkey", {"action": "netboot-accepted", "old": old,
+                                         "new": obs.host_key, "boot_id": obs.boot_id,
+                                         "previous_boot_id": last, "text": text})
+            return True
+
+    def repin(self, fingerprint: str, *,
+              progress: Callable[[str], None] | None = None) -> dict[str, Any]:
+        """Re-pin the board's host key to ``fingerprint``, the key the USER approved (shown
+        beside the old one). Pins exactly it, and only when identify AND the key the board
+        presents over SSH both equal it; anything else is refused and nothing is pinned.
+        The caller (``services.claim.ClaimService.repin``) has checked the lease and the
+        confirmation."""
+        say = progress or (lambda _t: None)
+        want = (fingerprint or "").strip()
+        if not _FP.match(want):
+            raise UsageError(f"not a key fingerprint: {want[:60]!r}",
+                             hint="SHA256:... exactly as `board claim-status` shows it")
+        if self._impl() != IMPL_LINUX:
+            raise UnavailableError(CAPABILITY, "this harness has no SSH to pin")
+        say("identify: what key does the board show now?")
+        obs = self.observe(refresh=True, hub_ok=True)
+        if obs.claimed is None:
+            raise UnreachableError(f"cannot read the board's state: {obs.error or 'no answer'}",
+                                   hint="identify (UDP 6899) must answer: from the hub, or on "
+                                        "the board's LAN")
+        cfg = self.config()
+        pinned = pin_fingerprint(cfg["host_key"]) if cfg["host_key"] else ""
+        if not pinned:
+            raise UsageError(f"{self.board_id}'s SSH host key is not pinned yet",
+                             hint="`harness-manager board claim TARGET` (or --adopt) pins it")
+        if want == pinned:
+            raise AlreadyError(f"{want} is already the pinned key; nothing to do")
+        if obs.claimed is False:
+            raise UsageError(f"{self.board_id} is unclaimed now: there is no login to check the "
+                             "key with", hint="`harness-manager board claim TARGET --replace-host-key`")
+        if obs.host_key != want:
+            raise HostKeyChangedError(
+                f"the board's key is not the one you approved: you approved {want}, the board "
+                f"shows {obs.host_key or 'no key'} now. Nothing was pinned",
+                hint="the board changed again (a reboot?): read `harness-manager board "
+                     "claim-status TARGET` and approve the new fingerprint, or check what is "
+                     "answering for the board")
+        say("host key: connecting over SSH to check the key it presents")
+        with self._pin_mu:
+            line = self._capture_host_key(want, fresh=False, identity_file=cfg["key"])
+            table = self._commit_pin(line, obs, how="repin")
+        text = (f"{self.board_id}: SSH host key re-pinned by you: {pinned} -> {want} "
+                f"(board boot {obs.boot_id or 'unknown'})")
+        log.warning("%s", text)
+        self._emit("board.hostkey", {"action": "repinned", "old": pinned, "new": want,
+                                     "boot_id": obs.boot_id, "text": text})
+        say(f"pinned {want} in boards.toml boards.{table}.ssh.host_key")
+        now = Observation(True, want, obs.source, time.time(), key_fp=obs.key_fp,
+                          boot_id=obs.boot_id, up_s=obs.up_s)
+        with self._mu:
+            self._lan = now
+        self._remember(now)
+        status = self.compose(now)
+        status.update(action="repinned", table=table)
+        return status
 
     # -- the claim --------------------------------------------------------------------------
 
@@ -952,17 +1235,11 @@ class Mps3Claim:
         # microSD's /persist); a key never seen needs --replace-host-key. Never automatic.
         back_ok = bool(seen_at) and (adopt or not obs.claimed)
         if pinned and pinned != obs.host_key and not replace_host_key and not back_ok:
-            if seen_at:
-                raise HostKeyChangedError(
-                    changed_back_words(obs.host_key, pinned, seen_at,
-                                       unclaimed=obs.claimed is False)
-                    + ". Nothing was claimed or pinned",
-                    hint="`harness-manager board claim TARGET --adopt` re-pins it")
-            raise HostKeyChangedError(
-                f"THE BOARD'S SSH HOST KEY CHANGED: pinned {pinned}, the board now reports "
-                f"{obs.host_key}. Nothing was claimed or pinned",
-                hint="if the board was re-provisioned (a new card or image), claim it again "
-                     "with --replace-host-key; otherwise something else answers for it")
+            err = self.host_key_error(obs, refused="Nothing was claimed or pinned")
+            if not seen_at:
+                err.hint = (err.hint + "; if the board was re-provisioned (a new card or "
+                            "image), claim it again with --replace-host-key")
+            raise err
         if back_ok and pinned != obs.host_key:
             say(f"host key: {obs.host_key} is one this Harness Manager pinned before "
                 f"(seen {seen_at[:10]}); re-pinning it as you asked")
@@ -1003,6 +1280,7 @@ class Mps3Claim:
         seen = with_seen_host_key(seen_host_keys(rec), obs.host_key, at)   # the old pin stays
         self._records.update(self.board_id, by=_me(), key_fp=key_fp or None, at=at,
                              host_key_fp=obs.host_key, how="adopt" if adopt else "claim",
+                             pinned_at=at, pin_boot_id=obs.boot_id or None,
                              host_keys_seen=seen)
         say(f"pinned {obs.host_key} in boards.toml boards.{table}.ssh.host_key")
         now = Observation(True, obs.host_key, obs.source, time.time(),
@@ -1092,29 +1370,24 @@ class Mps3Claim:
                 "-o", "StrictHostKeyChecking=yes", "-o", "CheckHostIP=no",
                 "-o", "UpdateHostKeys=no"]
 
-    def check_host_key(self) -> None:
-        """Refuse loudly when identify (as last seen) shows a key other than the pinned one."""
+    def check_host_key(self, *, fresh: bool = False) -> None:
+        """Refuse (the one refusal, ``host_key_error``) when identify shows a key other than
+        the pinned one. ``fresh``: ask the board now, through the hub too (an interactive ssh
+        does); with the netboot setting on it always does, because a new boot id is the proof."""
         pin = self.config()["host_key"]
         if not pin:
             return
         pinned = pin_fingerprint(pin)
-        obs = self.observe()
-        seen_at = self.seen_before(obs.host_key) if obs.host_key != pinned else ""
-        if obs.host_key and obs.host_key != pinned and seen_at:
-            raise HostKeyChangedError(
-                changed_back_words(obs.host_key, pinned, seen_at,
-                                   unclaimed=obs.claimed is False) + ". Refusing to connect",
-                hint="nothing is accepted automatically: re-pin it only if you trust it")
+        netboot = self.netboot_enabled()
+        obs = self.observe(refresh=True, hub_ok=True) if (fresh or netboot) else self.observe()
         if obs.host_key and obs.host_key != pinned:
-            raise HostKeyChangedError(
-                f"THE BOARD'S SSH HOST KEY CHANGED: pinned {pinned}, the board reports "
-                f"{obs.host_key}. Refusing to connect",
-                hint="if the board was re-provisioned (a new card or image), re-claim it: "
-                     "`harness-manager board claim TARGET --replace-host-key`")
+            if netboot and self._netboot_accept(obs, pinned):
+                return
+            raise self.host_key_error(obs, refused="Refusing to connect")
 
     def ssh_argv(self, command: Sequence[str] = (), *, tty: bool = False) -> list[str]:
         """``ssh [-J HUB] -l USER BOARD [CMD]`` with the pinned key; nothing is run."""
-        self.check_host_key()
+        self.check_host_key(fresh=True)
         host = self.board_host()
         if not host:
             raise UsageError(f"{self.board_id} has no board address for SSH")
@@ -1207,6 +1480,7 @@ class Mps3Claim:
         fws = [_tunnel.Forward(name, "127.0.0.1", port) for name, port in forwards.items()]
         tunnel = _tunnel.SshTunnel(host, fws, jump=self.proxy_jump(), user=self.user(),
                                    options=self.pinned_options(), restart=restart,
+                                   failure_words=self.tunnel_words,
                                    label=label or f"{self.board_id} board-ssh {','.join(forwards)}")
         try:
             tunnel.start()
@@ -1215,15 +1489,23 @@ class Mps3Claim:
         return tunnel
 
     def map_ssh_failure(self, exc: UnreachableError) -> HarnessError:
-        """ssh's own host-key refusal, as the loud error; anything else unchanged."""
-        if _host_key_failed(exc.message):
-            pinned = pin_fingerprint(self.config()["host_key"])
-            return HostKeyChangedError(
-                f"THE BOARD'S SSH HOST KEY IS NOT THE PINNED ONE ({pinned}): ssh refused to "
-                f"connect ({exc.message})",
-                hint="if the board was re-provisioned, re-claim it: `harness-manager board "
-                     "claim TARGET --replace-host-key`")
-        return exc
+        """ssh's own host-key refusal, as the one refusal (``host_key_error``: identify's view
+        of the new key when it is known); anything else unchanged."""
+        if isinstance(exc, HostKeyChangedError) or not _host_key_failed(exc.message):
+            return exc
+        obs: Observation | None = None
+        with contextlib.suppress(HarnessError):
+            obs = self.observe(refresh=True, hub_ok=True) if self.netboot_enabled() \
+                else self.observe()
+        return self.host_key_error(obs)
+
+    def tunnel_words(self, detail: str) -> str:
+        """A tunnel's raw ssh failure text as the one refusal (for its state detail); "" when
+        it is not a host-key refusal."""
+        if not _host_key_failed(detail):
+            return ""
+        err = self.host_key_error()
+        return f"{err.message}. {err.hint}"
 
     # -- the claim lock's reach (CLAIMED-LOCK) ----------------------------------------------
 
