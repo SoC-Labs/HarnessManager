@@ -117,6 +117,14 @@ def _windows(platform: str | None = None) -> bool:
 
 DEFAULT_WITNESS_S = 180.0          # bare metal answers in ~30 s; a cold FPGA load is ~20 s
 LINUX_WITNESS_S = 300.0            # the pack's Linux reboot budget (planner.LINUX_REBOOT_WAIT_S)
+LINUX_BOOT_NOTE = ("A Linux board takes 3 to 4 minutes to come up after the reboot, so this "
+                   "waits up to 5 minutes")
+
+
+def witness_wait_s(linux: bool) -> float:
+    """How long to wait for the harness after the reboot: the Linux budget when the bundle (or
+    the release) is a Linux one, else the bare-metal one."""
+    return LINUX_WITNESS_S if linux else DEFAULT_WITNESS_S
 
 # The config-SD tree's rules (services/update/bundle.py check_sd_component, the same words).
 MCC_COMMAND_FILES = frozenset({"reboot.txt", "reset.txt", "shutdown.txt"})   # TRM 100765 §3.2
@@ -1074,6 +1082,7 @@ def status(engine: Any, state_dir: Any = None) -> dict[str, Any]:
                            else ""},
             "signing": signing(engine), "witness_s": {"bare-metal": DEFAULT_WITNESS_S,
                                                       "linux": LINUX_WITNESS_S},
+            "linux_boot_note": LINUX_BOOT_NOTE,
             "examples": list(examples() if callable(examples) else examples or [])}
 
 

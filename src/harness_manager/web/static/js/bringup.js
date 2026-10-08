@@ -44,6 +44,7 @@ import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
 }());
 
 export const DEFAULT_HOST = "192.168.10.101";
+const LINUX_BOOT_NOTE = "A Linux board takes 3 to 4 minutes to come up after the reboot, so this waits up to 5 minutes";
 export const USB_WARNING = "A USB write can take 5 minutes: do not unplug, power off or start a second write.";
 export const NETWORK_OS_REASON = "comes with Linux v2.1";
 export const READER_MISSING = "this build has no card-reader writer: use the Debug USB";
@@ -831,6 +832,7 @@ function RebootStep({ bid, w }) {
       <div class="field"><label for=${`bu-host-${bid}`}>It answers at</label>
         <input id=${`bu-host-${bid}`} class="input mono" data-testid="bu-host" value=${w.host} placeholder=${(st.default_host || DEFAULT_HOST)}
           onInput=${(e) => { w.host = e.target.value; changed(); }} /></div>
+      ${linux(w) ? html`<p class="small muted" data-testid="bu-linux-wait"><${Icon} name="clock" cls="sm" /> ${st.linux_boot_note || LINUX_BOOT_NOTE}.</p>` : null}
       <p class="small muted" data-testid="bu-pc-hint"><${Icon} name="ethernet-port" cls="sm" /> ${st.pc_hint || "this PC needs an Ethernet port on the board's network (192.168.10.0/24)"}.</p>
       <${ActionRow} bid=${bid} panel="bu_witness" spec=${witnessSpec(bid, w)} icon="ethernet-port"
         gate=${{ guard: () => (canWitness ? "" : reader ? "put the card back and power the board on first" : "reboot the board first") }} />

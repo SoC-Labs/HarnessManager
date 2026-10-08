@@ -271,6 +271,24 @@ def test_twin_the_witness_times_out_on_a_dark_address(client, board, monkeypatch
     assert "restore the backup" in out["error"]["hint"]
 
 
+def test_the_witness_default_wait_is_the_linux_one_when_the_bundle_is_linux(client, board,
+                                                                           monkeypatch):
+    c, _ = client
+    bid = open_usb(c, board, monkeypatch)
+    board.shell.stop()
+    monkeypatch.setattr(bringup, "DEFAULT_WITNESS_S", 0.6)
+    monkeypatch.setattr(bringup, "LINUX_WITNESS_S", 2.4)
+    waited = {}
+    for linux in (False, True):
+        job = c.post(f"{bid_path(bid)}/bringup/witness",
+                     json={"host": board.shell_endpoint, "linux": linux, "poll_s": 0.2},
+                     headers=H).json()["job"]
+        out = wait(c, job)
+        assert out["state"] == "failed" and out["error"]["data"]["timeout"] is True
+        waited[linux] = out["error"]["data"]["waited_s"]
+    assert waited[False] < 1.5 < 2.3 <= waited[True]
+
+
 def test_the_status_says_releases_are_refused_and_the_reader_is_off(client):
     c, _ = client
     st = c.get("/api/v1/bringup", headers=H).json()

@@ -955,3 +955,29 @@ def test_wf_the_old_sd_and_overlays_open_layout_is_still_accepted(demo, tmp_path
     expect(by(page, "bundle-check")).to_have_attribute("data-refused", "no")
     expect(by(page, "bundle-overlays")).to_contain_text("1 open overlay (synth)")
     assert not page.errors, page.errors
+
+
+def test_wf_a_linux_bundle_waits_the_linux_time_and_says_so(demo, tmp_path):
+    page = demo.page()
+    add_and_open(page)
+    check(page, str(v2_bundle_on_disk(tmp_path)))
+    back_up(page)
+    write_usb(page)
+    expect(by(page, "bu-linux-wait")).to_contain_text("3 to 4 minutes")
+    reboot_and_witness(page)
+    expect(by(page, "bu-witness-result")).to_contain_text("--wait 300", timeout=T)
+    assert not page.errors, page.errors
+
+
+def test_wf_twin_a_bare_metal_folder_waits_the_short_time_and_says_nothing_of_linux(demo, tmp_path):
+    from tests.unit.test_bringup_service import sd_tree
+
+    page = demo.page()
+    add_and_open(page)
+    check(page, str(sd_tree(tmp_path / "card")))
+    back_up(page)
+    write_usb(page)
+    expect(by(page, "bu-linux-wait")).to_have_count(0)
+    reboot_and_witness(page)
+    expect(by(page, "bu-witness-result")).to_contain_text("--wait 180", timeout=T)
+    assert not page.errors, page.errors

@@ -8,7 +8,7 @@
 | ``POST /boards/{bid}/bringup/install`` ``{bundle, backup_path, confirm_unsigned}`` | 202 job ``sd_install``: the bundle checked again and its typed ``INSTALL UNSIGNED <sha8>`` (409 REFUSED without it, ``error.data.unsigned``), then written to the board's config SD by its storage adapter (the backup is mandatory; never an ``.ebf``); a release bundle's overlays (v2.0: ``overlays/``; older: ``overlays/open``; checked for ``ip_class`` and shell keying) then join ``mps3.overlay_dirs`` (Program and Restore find them) |
 | ``POST /bringup/card-reader`` ``{bundle, device_id, confirm, confirm_unsigned, backup_path?, backup_dir?}`` | 202 job ``cardwriter_write``: the same bundle check and typed phrase, then the card writer's ``files`` kind (SD-FLASH's: the card in this PC's reader backed up, its typed ``WRITE <model> <size>``, the pack's MBBIOS rule, read back); no MCC reboot |
 | ``GET /boards/{bid}/bringup/proposal?ip=`` | the identity PROPOSED for the new board (david 2 Oct, D4a; lane IDENTITY): ``{proposal: {serial, label, hostname, mac, mac_how, ip, ip_how, ip_error, same_net, pool, ip_note, notes}, command}``: a name from the MCC's USB serial number (``MPS3-`` + its last 4), a RANDOM MAC and the next free IP of the pack's pool (``ip``: where the board answers now, the command's target; default 192.168.10.101). Nothing is set or reserved: the "Name this board" dialog (``POST /boards/{bid}/identity``, ``board identity``) sets it, with its typed phrase |
-| ``POST /boards/{bid}/bringup/witness`` ``{host?, wait_s?, poll_s?}`` | 202 job ``bringup_witness``: wait for the harness to answer at ``host`` after the reboot; ``state`` ``running`` or ``rescue``; a timeout fails the job with ``error.data.timeout`` |
+| ``POST /boards/{bid}/bringup/witness`` ``{host?, wait_s?, linux?, poll_s?}`` | 202 job ``bringup_witness``: wait for the harness to answer at ``host`` after the reboot (``wait_s``; default 180 s, or 300 s with ``linux: true``: a Linux board takes 3 to 4 minutes); ``state`` ``running`` or ``rescue``; a timeout fails the job with ``error.data.timeout`` |
 
 Composed, not new executors: the backup, the reboot and the restore are the existing
 ``storage/backup``, ``controller/reboot`` and ``storage/restore`` jobs; a signed release
@@ -227,7 +227,7 @@ def register(ctx: RouteContext) -> None:
         ctx.board(bid)
         b = _obj(body)
         host = _host(b)
-        wait_s = _number(b, "wait_s", bringup.DEFAULT_WITNESS_S)
+        wait_s = _number(b, "wait_s", bringup.witness_wait_s(_bool(b, "linux", False)))
         poll_s = _number(b, "poll_s", 3.0)
         if wait_s <= 0 or poll_s <= 0:
             raise UsageError("wait_s and poll_s must be positive")

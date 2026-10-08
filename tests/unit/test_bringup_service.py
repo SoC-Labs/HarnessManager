@@ -767,3 +767,20 @@ def test_twin_a_clean_bundle_has_no_overlay_warnings_and_joins_in_place(tmp_path
 def test_a_v2_bundle_without_overlays_has_none(tmp_path):
     chk = bringup.check_bundle(v2_bundle(tmp_path / "b", overlays={}), tmp_path / "w")
     assert not chk.refused and chk.overlays is None
+
+
+# --- WIZARD-FIT: the witness waits the Linux time for a Linux bundle --------------------------------
+
+
+def test_the_witness_wait_is_the_linux_budget_for_a_linux_bundle_else_bare_metal(tmp_path):
+    from harness_manager.services.update.planner import LINUX_REBOOT_WAIT_S
+
+    assert bringup.witness_wait_s(True) == bringup.LINUX_WITNESS_S == LINUX_REBOOT_WAIT_S
+    assert bringup.witness_wait_s(False) == bringup.DEFAULT_WITNESS_S
+    assert bringup.LINUX_WITNESS_S > 240 > bringup.DEFAULT_WITNESS_S - 1     # 3-4 min fits
+    linux = bringup.check_bundle(v2_bundle(tmp_path / "b"), tmp_path / "w")
+    bare = bringup.check_bundle(sd_tree(tmp_path / "card"), tmp_path / "w")
+    assert bringup.witness_wait_s(linux.impl == "linux") == 300.0
+    assert bringup.witness_wait_s(bare.impl == "linux") == 180.0
+    assert bringup.status(None)["witness_s"] == {"bare-metal": 180.0, "linux": 300.0}
+    assert "3 to 4 minutes" in bringup.status(None)["linux_boot_note"]

@@ -282,7 +282,9 @@ def _witness(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any], l
              restore: str, cand: Any = None) -> int:
     """Wait for the harness at ``--host``; a dark board names the backup to restore."""
     a = ctx.args
-    wait = a.wait or (bringup.LINUX_WITNESS_S if linux else bringup.DEFAULT_WITNESS_S)
+    wait = a.wait or bringup.witness_wait_s(linux)
+    if linux and not a.wait:
+        ctx.note(bringup.LINUX_BOOT_NOTE)
     ctx.note(f"waiting up to {wait:.0f} s for the harness at {a.host} ({bringup.PC_ADDRESS_HINT})")
     try:
         seen = bringup.witness(ctx.engine, a.host, wait_s=wait)
