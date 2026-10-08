@@ -177,7 +177,7 @@ function CardHere({ bid }) {
   const planOpen = !!b.slotPlan;
   const card = b.card || {};
   const running = (v[run] || {}).version || identityOf(b).harness_version || "?";
-  return html`<${Card} title="User microSD" icon="memory-stick" cls="os-here" testid="os-here"
+  return html`<${Card} title="User microSD (the OS slots)" icon="memory-stick" cls="os-here" testid="os-here"
       sub="Two OS slots: one runs, the other is the fallback.">
     <div class="os-card-line">${card.card_mb ? `${(card.card_mb / 1024).toFixed(0)} GB card · ` : ""}slots A and B · the overlay store${b.slotsLoading ? html` · <${Spinner} /> reading` : ""}</div>
     ${b.slotsError ? html`<${Reason} level="err" text=${`${b.slotsError.errName}: ${b.slotsError.message}`} />` : null}
@@ -239,6 +239,12 @@ export function VersionsPage({ bid }) {
   useEffect(() => { if (lx && !b.slotsLoading) loadSlots(bid); }, [bid, lx]);
   const kind = osKind(bid);
   let here;
+  // A Linux board has two cards: the user microSD (OS slots) and the MCC's configuration SD.
+  const lxConfigSd = html`<${ConfigSdCard} bid=${bid} route=${routeText(bid)} routeWhy=${mccRoute(bid).reason}
+    title="Configuration SD (the MCC's card)"
+    sub="Not the OS slots: this card holds the board's base (bitstream, firmware, config). Writing it needs a backup first, then a reboot (a Linux board takes minutes to come back)."
+    foot=${html`<span class="grow"></span><button type="button" class="link-btn" onClick=${() => openActivity(bid)}>History in Activity</button>`} />`;
+  const lxBoth = kind === "card" || kind === "netboot";
   if (kind === "card") here = html`<${CardHere} bid=${bid} />`;
   else if (kind === "netboot") here = html`<${NetbootHere} bid=${bid} />`;
   else if (kind === "bm") {
@@ -256,7 +262,10 @@ export function VersionsPage({ bid }) {
       <${SdRecovery} bid=${bid} />
       ${here}
     </div>
-    <${ReleasesCard} bid=${bid} linux=${lx} netboot=${kind === "netboot"} />
+    ${lxBoth ? html`<div class="stack" data-testid="os-right">
+      <${ReleasesCard} bid=${bid} linux=${lx} netboot=${kind === "netboot"} />
+      ${lxConfigSd}
+    </div>` : html`<${ReleasesCard} bid=${bid} linux=${lx} netboot=${kind === "netboot"} />`}
   </div>`;
 }
 
