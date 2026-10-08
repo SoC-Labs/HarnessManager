@@ -202,6 +202,47 @@ def test_twin_a_bare_metal_board_shows_its_configuration_sd(show):
     assert by_id(page, "slot-A").count() == 0 and by_id(page, "os-netboot").count() == 0
 
 
+def _config_sd_steps(page: Any) -> None:
+    sd = by_id(page, "config-sd")
+    expect(sd).to_contain_text("Configuration SD (the MCC's card)", timeout=T)
+    expect(sd.locator('[data-action="sd_backup"]').first).to_be_visible()
+    sd.locator('[data-action="sd-more"]').click()
+    flow = by_id(page, "sd-flow")
+    for step in ("sd-step-backup", "sd-step-install", "sd-step-reboot", "sd-step-restore"):
+        expect(flow.locator(f'[data-testid="{step}"]')).to_be_visible()
+    expect(flow).to_contain_text("Back up the SD")
+    expect(flow).to_contain_text("Reboot and witness it")
+    # the write is armed: the install button is not live until its box is ticked
+    install = by_id(page, "sd-step-install").locator('[data-action="sd_install"]')
+    expect(install).to_be_disabled()
+
+
+def test_a_linux_card_board_shows_the_configuration_sd_apart_from_the_user_microsd(show):
+    page = board(show, BOARD_LINUX, "versions")
+    expect(by_id(page, "os-here")).to_contain_text("User microSD (the OS slots)", timeout=T)
+    expect(by_id(page, "slot-A")).to_be_visible()
+    _config_sd_steps(page)
+    assert by_id(page, "os-here").count() == 1 and by_id(page, "config-sd").count() == 1
+    assert not page.errors, page.errors
+
+
+def test_a_netbooted_linux_board_also_shows_the_configuration_sd(show):
+    show.engine._board(BOARD_LINUX).card = False
+    page = board(show, BOARD_LINUX, "versions")
+    expect(by_id(page, "os-netboot")).to_contain_text("no OS slots", timeout=T)
+    _config_sd_steps(page)
+    assert by_id(page, "slot-A").count() == 0
+    assert not page.errors, page.errors
+
+
+def test_twin_the_bare_metal_page_keeps_its_one_configuration_sd_card(show):
+    page = board(show, BOARD_V011, "versions")
+    sd = by_id(page, "config-sd")
+    expect(sd).to_contain_text("Configuration SD", timeout=T)
+    assert "the MCC's card" not in sd.inner_text()
+    assert by_id(page, "config-sd").count() == 1 and by_id(page, "slot-A").count() == 0
+
+
 def test_a_netbooted_linux_board_says_so_and_asks_for_a_linux_release(show):
     show.engine._board(BOARD_LINUX).card = False               # no user microSD: the hub's image
     catalog = {"ok": True, "catalog": "mps3-harness", "board_id": BOARD_LINUX, "channels": [], "offer": "2.0.1",

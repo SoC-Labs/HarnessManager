@@ -180,7 +180,8 @@ export function SdRecovery({ bid }) {
 // Board › Versions' left card on a bare-metal board: the configuration SD (the route it is
 // reached by, what it holds, this page's last backup, Back up now), the Roll back at its
 // foot, and the by-hand install flow in a fold.
-export function ConfigSdCard({ bid, route, routeWhy = "", foot = null, after = null, note = null }) {
+export function ConfigSdCard({ bid, route, routeWhy = "", foot = null, after = null, note = null,
+  title = "Configuration SD", sub = "The MCC's SD card. A harness install writes it (after a backup), then reboots." }) {
   const b = boardState(bid);
   const w = week(bid);
   const id = (b.info && b.info.identity) || {};
@@ -188,8 +189,8 @@ export function ConfigSdCard({ bid, route, routeWhy = "", foot = null, after = n
   const bk = capState(b.info, "storage_backup");
   const out = bk && !bk.available ? bk.reason : "";
   const last = w.lastBackup;
-  return html`<${Card} title="Configuration SD" icon="hard-drive" cls="os-here" testid="config-sd"
-      sub="The MCC's SD card. A harness install writes it (after a backup), then reboots.">
+  return html`<${Card} title=${title} icon="hard-drive" cls="os-here" testid="config-sd"
+      sub=${sub}>
     <dl class="kv">
       <dt>Route</dt><dd class="small" title=${routeWhy}>${route}</dd>
       <dt>Holds</dt><dd class="small">harness ${id.harness_version || "?"} · shell <span class="mono">${id.shell_id || "?"}</span></dd>
