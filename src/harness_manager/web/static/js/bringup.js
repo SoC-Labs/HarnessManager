@@ -378,7 +378,7 @@ function BundleFacts({ chk }) {
   return html`<div class="bu-check" data-testid="bundle-check" data-refused=${chk.refused ? "yes" : "no"}>
     <dl class="kv">
       <dt>Bundle</dt><dd><span class="mono">${chk.path}</span>
-        <div class="sub">${chk.kind === "zip" ? "a zip, unpacked by the service" : "a folder"} · ${chk.layout === "release-bundle" ? "a release bundle (its sd/)" : "a config-SD tree"}${chk.impl ? ` · ${chk.impl === "linux" ? "Linux" : "bare-metal"} harness${chk.version ? ` ${chk.version}` : ""}` : ""}</div></dd>
+        <div class="sub">${chk.kind === "zip" ? "a zip, unpacked by the service" : "a folder"} · ${chk.layout === "release-bundle" ? "a release bundle (its config-sd/ or sd/)" : "a config-SD tree"}${chk.impl ? ` · ${chk.impl === "linux" ? "Linux" : "bare-metal"} harness${chk.version ? ` ${chk.version}` : ""}` : ""}</div></dd>
       <dt>Base .bit</dt><dd data-testid="bundle-bit">${bit ? html`<span class="mono">${bit.path}</span>
         <div class="sub">${bytesText(bit.size)} · sha256 <span class="mono" title=${bit.sha256}>${short(bit.sha256)}</span>${bit.part ? ` · ${bit.part}` : ""}${bit.userid ? ` · USERID ${bit.userid}` : ""}</div>`
         : html`<span class="muted">none</span>`}</dd>
@@ -387,7 +387,7 @@ function BundleFacts({ chk }) {
       ${chk.sha256 ? html`<dt>sha256</dt><dd data-testid="bundle-sha"><span class="mono bu-sha">${chk.sha256}</span>
         <div class="sub">${shaHow(chk)}</div></dd>` : null}
       ${chk.os_image ? html`<dt>Slot image</dt><dd><span class="mono">linux_slot.img</span><div class="sub">${bytesText(chk.os_image.size)} · an OS slot image (slot A/B, over Ethernet once Linux runs): never written to a card, and not the whole-card image step 5 asks for</div></dd>` : null}
-      ${chk.overlays ? html`<dt>Overlays</dt><dd data-testid="bundle-overlays">${chk.overlays.count} open overlay${chk.overlays.count === 1 ? "" : "s"} (${chk.overlays.names.join(", ")})<div class="sub">after the write, <span class="mono">${chk.overlays.path}</span> joins mps3.overlay_dirs, so Program and Restore find them</div></dd>` : null}
+      ${chk.overlays ? html`<dt>Overlays</dt><dd data-testid="bundle-overlays">${chk.overlays.count} open overlay${chk.overlays.count === 1 ? "" : "s"} (${chk.overlays.names.join(", ")})${(chk.overlays.excluded || []).length ? `; left out, not open: ${chk.overlays.excluded.join(", ")}` : ""}<div class="sub">after the write, <span class="mono">${chk.overlays.path}</span> joins mps3.overlay_dirs, so Program and Restore find them</div></dd>` : null}
     </dl>
     ${(chk.problems || []).map((p) => html`<${Reason} key=${p} level="err" testid="bundle-problem" text=${p} />`)}
     ${(chk.warnings || []).map((p) => html`<${Reason} key=${p} level="warn" text=${p} />`)}
@@ -445,7 +445,7 @@ function BundleSource({ bid, w }) {
       <button type="button" class="btn sm" data-action="bundle-check" disabled=${!w.path.trim() || w.checking}
         aria-busy=${w.checking ? "true" : undefined} onClick=${() => checkBundle(bid)}>
         ${w.checking ? html`<${Spinner} />` : html`<${Icon} name="list-checks" />`} Check</button></div>
-    <p class="small muted">A path on the machine running harness-manager-daemon: the config-SD tree (config.txt and MB/), a release bundle (its sd/), or a zip of either. Never an .ebf.</p>
+    <p class="small muted">A path on the machine running harness-manager-daemon: the config-SD tree (config.txt and MB/), a release bundle (the folder with config-sd/, overlays/ and linux_bundle.json), or a zip of either. Never an .ebf.</p>
     ${examples.length ? html`<div class="bu-examples small" data-testid="bundle-examples"><span class="muted">In this demo:</span>
       ${examples.map((x) => html`<button type="button" key=${x.path} class="link-btn" title=${x.path}
         onClick=${() => { w.path = x.path; changed(); checkBundle(bid); }}>${x.what}</button>`)}</div>` : null}

@@ -908,3 +908,50 @@ def test_t3_twin_no_switch_when_the_variable_holds_it_off_and_nothing_on_without
     expect(page.locator('[data-action="bu-reader-enable-write"]')).to_have_count(0)
     assert bringup.sd_flash(demo.state_dir)["value"] == "off"
     assert not page.errors, page.errors
+
+
+# --- WIZARD-FIT: the v2.0 bundle layout, the Linux witness wait ----------------------------------------------
+
+
+def v2_bundle_on_disk(tmp: Path) -> Path:
+    """A small fake of the published v2.0 bundle: config-sd/ + overlays/ + linux_bundle.json."""
+    from tests.unit.test_bringup_service import v2_bundle
+
+    return v2_bundle(tmp / "mps3-bundle")
+
+
+def test_wf_the_v2_bundle_root_is_checked_with_its_overlays(demo, tmp_path):
+    root = v2_bundle_on_disk(tmp_path)
+    page = demo.page()
+    add_and_open(page)
+    check(page, str(root))
+    expect(by(page, "bundle-check")).to_have_attribute("data-refused", "no")
+    expect(by(page, "bundle-check")).to_contain_text("a release bundle (its config-sd/ or sd/)")
+    expect(by(page, "bundle-check")).to_contain_text("Linux harness")
+    expect(by(page, "bundle-overlays")).to_contain_text("2 open overlays (led, uart_echo)")
+    expect(by(page, "bundle-files")).to_contain_text("4 files")
+    back_up(page)
+    write_usb(page)
+    assert not page.errors, page.errors
+
+
+def test_wf_twin_a_bare_sd_folder_has_no_overlays(demo, tmp_path):
+    from tests.unit.test_bringup_service import sd_tree
+
+    page = demo.page()
+    add_and_open(page)
+    check(page, str(sd_tree(tmp_path / "card")))
+    expect(by(page, "bundle-check")).to_have_attribute("data-refused", "no")
+    expect(by(page, "bundle-overlays")).to_have_count(0)
+    assert not page.errors, page.errors
+
+
+def test_wf_the_old_sd_and_overlays_open_layout_is_still_accepted(demo, tmp_path):
+    from tests.unit.test_bringup_service import release_bundle
+
+    page = demo.page()
+    add_and_open(page)
+    check(page, str(release_bundle(tmp_path / "old")))
+    expect(by(page, "bundle-check")).to_have_attribute("data-refused", "no")
+    expect(by(page, "bundle-overlays")).to_contain_text("1 open overlay (synth)")
+    assert not page.errors, page.errors

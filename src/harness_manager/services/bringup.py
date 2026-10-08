@@ -15,7 +15,8 @@ wizard needs around them:
   which never types during a boot), and whether a harness answers on Ethernet at the
   address a new board comes up on;
 - ``check_bundle``: a bundle folder or zip on this PC, validated before anything is written:
-  the config-SD tree (``config.txt`` and ``MB/``; or a release bundle's ``sd/``), the base
+  the config-SD tree (``config.txt`` and ``MB/``; or a release bundle's ``config-sd/`` (v2.0:
+  the bundle ROOT with ``overlays/`` and ``linux_bundle.json``) or older ``sd/``), the base
   ``.bit`` named with its size, sha256, part and USERID, and refused with the reason for an
   ``.ebf``, an MCC command file, anything outside the config-SD tree, or no bitstream. A
   bundle is UNSIGNED (david 2 Oct, D3a): its sha256 (``bundle_sha256``: the zip's, or the
@@ -562,7 +563,7 @@ def _single_top(root: Path) -> Path:
                    and p.name.lower() not in OS_JUNK_DIRS]
     except OSError:
         return root
-    if len(entries) == 1 and entries[0].is_dir() and entries[0].name.lower() not in ("mb", "sd"):
+    if len(entries) == 1 and entries[0].is_dir() and entries[0].name.lower() not in ("mb", "sd", "config-sd"):
         return entries[0]
     return root
 
@@ -622,22 +623,29 @@ def check_bundle(path: str | Path, work: Path) -> BundleCheck:
             chk.problems.append(f"{', '.join(links[:5])}{more}: a symbolic link; a bundle "
                                 "carries only regular files (its sha256 covers the files, not "
                                 "what a link points to)")
-    if (root / "sd").is_dir():
+    sd_name = next((n for n in ("sd", "config-sd") if (root / n).is_dir()), "")
+    outer = root.parent if (not sd_name and root.name.lower() in ("sd", "config-sd")
+                            and _is_bundle_root(root.parent)) else None
+    if sd_name or outer is not None:
+        # A release bundle: v2.0's config-sd/ (+ overlays/ + linux_bundle.json at its root),
+        # the older sd/ (+ overlays/open/), or the bare SD folder of either, which then looks
+        # for its bundle one folder up.
         chk.layout = "release-bundle"
-        sd = root / "sd"
-        chk.impl, chk.version = _manifest_impl(root)
-        img = root / "linux_slot.img"
+        sd = root / sd_name if sd_name else root
+        top = root if sd_name else outer
+        chk.impl, chk.version = _manifest_impl(top)
+        img = top / "linux_slot.img"
         if img.is_file():
             # an OS SLOT image (S0LB at its start): pushed into slot A/B over Ethernet, never
             # written to a card at byte 0 (that card never boots); not the whole-card image
             chk.os_image = {"path": str(img), "size": img.stat().st_size,
                             "sha256": sums.get(str(img)) or file_sha256(img), "kind": "slot"}
             chk.impl = chk.impl or "linux"
-        chk.overlays = overlay_set(root / "overlays" / "open")
-        if (root / "overlays" / "aaa").is_dir():
+        _bundle_overlays(chk, top)
+        if (top / "overlays" / "aaa").is_dir():
             chk.warnings.append("overlays/aaa (Arm Academic Access RMs) is left out: it is "
                                 "private; Program finds it once you add its folder yourself")
-        for p in sorted(root.rglob("*")):
+        for p in (sorted(top.rglob("*")) if outer is None else ()):
             if p.is_file() and p.suffix.lower() == ".ebf" and sd not in p.parents:
                 chk.problems.append(f"{p.relative_to(root).as_posix()}: an .ebf (board-"
                                     "controller firmware) is never written; remove it")
@@ -646,7 +654,7 @@ def check_bundle(path: str | Path, work: Path) -> BundleCheck:
         sd = root
     else:
         chk.problems.append(f"{root} holds no config-SD tree: expected config.txt and MB/ "
-                            "(or a release bundle's sd/ with them)")
+                            "(or a release bundle's config-sd/ or sd/ with them)")
         return chk
     chk.sd_root = str(sd)
     files: dict[str, Path] = {}
@@ -727,16 +735,76 @@ def _bit_facts(rel: str, path: Path, chk: BundleCheck, sha256: str | None = None
     return out
 
 
-def overlay_set(path: Path) -> dict[str, Any] | None:
-    """A bundle's ``overlays/open``: the overlay dirs under it (each with a manifest.json)."""
+def _is_bundle_root(path: Path) -> bool:
+    """A folder that holds a release bundle's ``linux_bundle.json`` / ``mint.json``."""
+    return any((path / n).is_file() for n in ("linux_bundle.json", "mint.json"))
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    import json
+
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _u32(value: Any) -> int | None:
+    try:
+        return int(str(value), 0) & 0xFFFFFFFF
+    except (TypeError, ValueError):
+        return None
+
+
+def _bundle_overlays(chk: BundleCheck, top: Path) -> None:
+    """The bundle's overlays: ``overlays/open/`` (the older layout) when it is there, else
+    ``overlays/`` itself (v2.0: one folder per design). Each is checked the way Program
+    checks one: its ``ip_class`` (anything but ``open`` is left out) and its static / usercode
+    keying against the bundle's shell (``linux_bundle.json`` / ``mint.json``)."""
+    base = top / "overlays"
+    path = base / "open" if (base / "open").is_dir() else base
+    shell: dict[str, Any] = {}
+    for name in ("linux_bundle.json", "mint.json"):
+        if (top / name).is_file():
+            shell = _read_json(top / name)
+            break
+    chk.overlays = overlay_set(path, shell=shell, warnings=chk.warnings)
+
+
+def overlay_set(path: Path, *, shell: dict[str, Any] | None = None,
+                warnings: list[str] | None = None) -> dict[str, Any] | None:
+    """A bundle's overlay dirs under ``path`` (each with a manifest.json), or ``path`` itself
+    when it is one. ``excluded``: dirs whose manifest says an ``ip_class`` other than
+    ``open`` (not joined). Keying against ``shell`` is a warning, never a refusal: the same
+    check Program makes before it swaps."""
     if not path.is_dir():
         return None
-    names = sorted(p.name for p in path.iterdir() if (p / "manifest.json").is_file())
-    if (path / "manifest.json").is_file():
-        names = [path.name]
+    dirs = [path] if (path / "manifest.json").is_file() else \
+        sorted(p for p in path.iterdir() if (p / "manifest.json").is_file())
+    names: list[str] = []
+    excluded: list[str] = []
+    for d in dirs:
+        man = _read_json(d / "manifest.json")
+        klass = man.get("ip_class")
+        if isinstance(klass, str) and klass and klass != "open":
+            excluded.append(d.name)
+            if warnings is not None:
+                warnings.append(f"overlay {d.name} is ip_class {klass}, not open: left out")
+            continue
+        names.append(d.name)
+        if shell and warnings is not None:
+            for key in ("static_id", "static_usercode"):
+                want, got = _u32(shell.get(key)), _u32(man.get(key))
+                if want is not None and got is not None and want != got:
+                    warnings.append(f"overlay {d.name} is keyed to {key} {man.get(key)}, the "
+                                    f"bundle's shell is {shell.get(key)}: Program will refuse it")
     if not names:
         return None
-    return {"path": str(path), "count": len(names), "names": names}
+    out: dict[str, Any] = {"path": str(path), "count": len(names), "names": names}
+    if excluded:
+        out["excluded"] = excluded
+    return out
 
 
 OVERLAY_DIRS_SETTING = "mps3.overlay_dirs"
@@ -749,14 +817,20 @@ def keep_overlays(chk: BundleCheck, keep_root: Path) -> Path | None:
     if not chk.overlays:
         return None
     src = Path(chk.overlays["path"])
-    if chk.kind != "zip":
+    filtered = bool(chk.overlays.get("excluded"))
+    if chk.kind != "zip" and not filtered:
         return src
     digest = hashlib.sha256(chk.path.encode()).hexdigest()[:12]
     dest = keep_root / f"{Path(chk.path).stem[:40]}-{digest}"
     if not dest.is_dir():
         tmp = dest.with_name(dest.name + ".tmp")
         shutil.rmtree(tmp, ignore_errors=True)
-        shutil.copytree(src, tmp)
+        if filtered:       # only the open ones: the rest never join the catalogue
+            tmp.mkdir(parents=True)
+            for name in chk.overlays["names"]:
+                shutil.copytree(src / name, tmp / name)
+        else:
+            shutil.copytree(src, tmp)
         tmp.rename(dest)
     return dest
 
