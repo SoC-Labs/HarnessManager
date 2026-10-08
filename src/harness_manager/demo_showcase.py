@@ -404,7 +404,8 @@ class DemoClaim:
                 "checked_at": _iso(time.time()), "live": True, "notes": []}
 
     def claim(self, *, key: str | None = None, adopt: bool = False,
-              replace_host_key: bool = False, progress: Any = None) -> dict[str, Any]:
+              replace_host_key: bool = False, expect_host_key: str | None = None,
+              progress: Any = None) -> dict[str, Any]:
         if self.state != "unclaimed" and not adopt:
             raise AlreadyError(f"{self._bid} is already claimed"
                                + (" by your key" if self.state == "mine" else ""),
@@ -1459,7 +1460,18 @@ def _bringup_come_up(engine: Any, written: dict[str, Any]) -> None:
     if getattr(engine, "bringup_dark", False) or not written:
         board.reachable = False
         return
-    if written.get("impl") == "linux":
+    if written.get("impl") == "linux" and getattr(engine, "bringup_linux_up", False):
+        # `engine.bringup_linux_up = True`: the Linux harness itself answers (not RESCUE), unclaimed
+        ident = BoardIdentity(board_type="mps3", shell_id=cat.S_LNX.lower(), rm_id="0x01000001",
+                              rm_name="nanosoc", harness_version="1.0.0", firmware_sha=cat.FW_LNX,
+                              features=LINUX_DEMO_FEATURES, build_check=Check.OK,
+                              harness_impl="linux", proto="0.14", usercode=cat.U_LNX.lower(),
+                              ver32="0x01000000")
+        cand = DemoCandidate("mps3", BOARD_NEW_ETH, (_eth(NEW_HOST),),
+                             label="MPS3 Linux harness", evidence="answered identify and ping",
+                             identity=ident)
+        board.health = Health(reachable=True, control_channel="idle", counters={})
+    elif written.get("impl") == "linux":
         ident = BoardIdentity(board_type="mps3")
         cand = DemoCandidate("mps3", BOARD_NEW_ETH,
                              (Link(LinkKind.ETHERNET, f"{NEW_HOST}:{CONTROL_PORT}",
@@ -1611,11 +1623,15 @@ def _bringup_wrap() -> None:
     def adapters_new(engine: Any, board: Any) -> dict[str, Any]:
         if board.kind == KIND_NEW_USB:
             return {}                   # USB only: no harness, so no panel, XVC or display
-        return adapters0(engine, board)
+        out = adapters0(engine, board)
+        if board.kind == KIND_NEW_ETH and getattr(engine, "bringup_linux_up", False):
+            out["claim"] = DemoClaim(engine, board.candidate.board_id, "unclaimed")
+        return out
 
     engine_cls.bringup_examples = property(examples)       # type: ignore[attr-defined]
     engine_cls.bringup_card_image = property(card_image)   # type: ignore[attr-defined]
     engine_cls.bringup_dark = False                        # type: ignore[attr-defined]
+    engine_cls.bringup_linux_up = False                    # type: ignore[attr-defined]
     engine_cls._board = board                              # type: ignore[method-assign]
     engine_cls.candidate_for = candidate_for               # type: ignore[method-assign]
     engine_cls.probe = probe                               # type: ignore[method-assign]

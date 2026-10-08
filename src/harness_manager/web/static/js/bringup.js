@@ -31,6 +31,7 @@ import { week } from "./week.js";
 import { factChips } from "./sections/boardfacts.js";
 import { NO_IDENTITY_STORE } from "./sections/identity.js";
 import { openBoardHere } from "./sidebar.js";
+import { setNamePrefill } from "./name_prefill.js";
 import { backupSpec, SdRecovery } from "./sections/sd.js";
 import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
 
@@ -1026,7 +1027,11 @@ async function openOnEthernet(bid, w) {
   const r = await openBoardHere(id);
   if (!r || !r.error || r.error.errName === "ALREADY") {
     navigate(id, "board/access");
-    openModal("name-board", { bid: id, prefill, impl });
+    // A Linux harness is claimed first (naming is done over the claim's SSH): Board > Access
+    // leads with the claim card, and the proposal waits for the dialog the claim leads to. A
+    // harness with no claim (bare metal) goes straight to the dialog, which says what it can do.
+    if (impl === "linux") setNamePrefill(id, { prefill, impl });
+    else openModal("name-board", { bid: id, prefill, impl });
   }
 }
 
@@ -1057,12 +1062,15 @@ function NextStep({ bid, w }) {
   const rescue = !!(w.witness && w.witness.state === "rescue");
   const why = ok ? "" : rescue ? "the board is in stage0 RESCUE: do step 5, power-cycle it, then wait for the harness again (step 4)"
     : "once the harness answers (step 4)";
-  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title="Next: name it, claim it" state="" testid="bu-step-next">
-    <p class="small secondary">Every new board starts as MPS3, 192.168.10.101 (the generic image). On Board > Access: claim its SSH (Linux), then name it: the dialog sets its name, a random MAC and its own IP.</p>
+  const linuxUp = ok && w.witness.impl === "linux";
+  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title=${linuxUp ? "Next: claim it, then name it" : "Next: name it"} state="" testid="bu-step-next">
+    <p class="small secondary" data-testid="bu-next-text">${linuxUp
+      ? "Every new board starts as MPS3, 192.168.10.101 (the generic image). First claim its SSH on Board > Access (the name is set over that claim); once it is claimed, name it: the dialog sets its name, a random MAC and its own IP."
+      : "Every new board starts as MPS3, 192.168.10.101 (the generic image). On Board > Access, name it: the dialog sets its name, a random MAC and its own IP."}</p>
     <${Proposal} bid=${bid} w=${w} />
     <div class="row mt-8"><button type="button" class="btn primary sm" data-action="bu-next" disabled=${!ok}
       title=${why} onClick=${() => openOnEthernet(bid, w)}>
-      <${Icon} name="ethernet-port" /> Open it on Ethernet and name it…</button>
+      <${Icon} name="ethernet-port" /> ${linuxUp ? "Open it on Ethernet and claim it…" : "Open it on Ethernet and name it…"}</button>
       ${!ok ? html`<span class="small muted" data-testid="bu-next-why">${why}</span>` : null}</div>
   <//>`;
 }

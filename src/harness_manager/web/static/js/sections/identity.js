@@ -15,6 +15,8 @@ import { html, useEffect, useRef, useState } from "../lib.js";
 import { boardState, changed, navigate, openedOrClosedHere, probe, refreshInfo, S, toast } from "../store.js";
 import { openBoardHere } from "../sidebar.js";
 import { holderOnly } from "../week.js";
+import { claimOf } from "./claim.js";
+import { clearNamePrefill, namePrefillArgs } from "../name_prefill.js";
 import { Card, Icon, Reason, Seg, Spinner } from "../ui.js";
 import { closeModal, ModalShell, openModal, registerModal } from "../modal.js";
 
@@ -191,6 +193,11 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
   }, [bid]);
 
   const st = identityOf(b);
+  // Naming is set over the board's SSH, which needs the claim: an unclaimed board (or one
+  // claimed by another key) is told so plainly, with the Claim step one click away.
+  const claim = asks ? claimOf(b) : null;
+  const needsClaim = !!claim && (claim.state === "unclaimed" || claim.state === "other");
+  const goClaim = () => { close(); navigate(bid, "board/access"); };
   const loading = asks && (!!b.netIdentityLoading || !read);
   const refusal = b.netIdentityError && !st ? "" : identityRefusal(st, impl);
   const leaseWhy = holderOnly(bid, "Naming the board");
@@ -246,6 +253,11 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
       note=${(S.boards[bid] && S.boards[bid].candidate && S.boards[bid].candidate.name) || bid} foot=${foot}>
     <div class="stack gap-8 nb" data-testid="identity-dialog" data-mode=${mode}>
       <p class="small secondary" data-testid="nb-intro">Give this board its own name, MAC and IP. They are set on the board; then the harness restarts (its reboot verb, warm: the FPGA is not reloaded, never an MCC REBOOT) and the identity is read back. It needs your claim${((p && p.hub) || hubRec) ? " and your lease" : ""}, and waits for no card job.</p>
+      ${needsClaim ? html`<div class="stack gap-8" data-testid="nb-needs-claim">
+        <${Reason} level="warn" text=${claim.state === "unclaimed"
+          ? "This board is not claimed yet, and naming needs the claim: the name is set over the board's SSH. Claim it first (Board > Access > SSH claim), then name it."
+          : "This board is claimed by another key, and naming needs your claim: the name is set over the board's SSH with your key. Adopt or claim it first (Board > Access > SSH claim), then name it."} />
+        <div><button type="button" class="btn primary sm" data-action="nb-go-claim" onClick=${goClaim}><${Icon} name="lock" /> Go to the Claim step</button></div></div>` : null}
       ${loading ? html`<${Reason} icon="loader-circle" text="Reading what the board says it is…" />` : null}
       ${b.netIdentityError && !st ? html`<${Reason} level="err" testid="nb-read-error" text=${`Harness Manager cannot read this board's identity: ${b.netIdentityError.errName}: ${b.netIdentityError.message}`} />` : null}
       ${!loading && refusal ? html`<${Reason} level="warn" testid="identity-refusal" text=${refusal} />` : null}
@@ -317,7 +329,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
           <input id=${`nb-phrase-${bid}`} class="input mono grow" data-testid="identity-phrase" autocomplete="off" value=${typed}
             onInput=${(e) => setTyped(e.target.value)} /></div>
         <div class="row"><button type="button" class="btn primary sm" data-action="identity-fix-confirm"
-          disabled=${busy || blocked || typed.trim() !== phrase || !!leaseWhy} onClick=${apply}>
+          disabled=${busy || blocked || typed.trim() !== phrase || !!leaseWhy || needsClaim} onClick=${apply}>
           ${busy ? html`<${Spinner} />` : html`<${Icon} name="tag" />`} Set and restart</button>
           ${busy ? html`<span class="small muted">Setting, restarting the harness (warm), reading it back…</span>` : null}</div>` : null}
       </div>` : null}
@@ -390,7 +402,7 @@ export function IdentityCard({ bid, clashes = [], goTo = null }) {
         ${changes.length ? html`<button type="button" class="btn sm primary" data-action="access-identity-fix"
           onClick=${() => openModal("name-board", { bid, hub: true })}><${Icon} name="server" /> Fix identity…</button>` : null}
         <button type="button" class=${`btn sm ${changes.length ? "" : "primary"}`} data-action="access-identity-name"
-          onClick=${() => openModal("name-board", { bid })}><${Icon} name="tag" /> Name this board…</button></div>` : null}
+          onClick=${() => { const args = namePrefillArgs(bid); clearNamePrefill(bid); openModal("name-board", { bid, ...args }); }}><${Icon} name="tag" /> Name this board…</button></div>` : null}
       ${b.netIdentityError ? html`<${Reason} level="err" text=${`${b.netIdentityError.errName}: ${b.netIdentityError.message}`} />` : null}
       ${!has && b.info && !bare ? html`<p class="small muted">This harness image does not report its identity (net-protocol v0.16 adds it).</p>` : null}
     </div><//>`;

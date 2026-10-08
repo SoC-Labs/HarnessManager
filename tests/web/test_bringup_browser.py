@@ -1009,3 +1009,46 @@ def test_wf_twin_a_write_that_reports_nothing_still_says_no_ebf_is_written(demo)
                                 "change.", timeout=T)
     expect(res).not_to_contain_text("MBBIOS kept")
     assert not page.errors, page.errors
+
+
+# --- WIZARD-FIT: claim it, then name it ---------------------------------------------------------------------------
+
+
+def test_wf_a_linux_board_is_claimed_first_then_named(demo):
+    demo.engine.bringup_linux_up = True
+    page = demo.page()
+    bring_up(page, demo.example(1))
+    expect(by(page, "bu-witness-result")).to_contain_text("a harness answers", timeout=T)
+    nxt = by(page, "bu-step-next")
+    expect(nxt).to_contain_text("Next: claim it, then name it")
+    expect(by(page, "bu-next-text")).to_contain_text("First claim its SSH on Board > Access")
+    button = page.locator('[data-action="bu-next"]')
+    expect(button).to_contain_text("Open it on Ethernet and claim it…")
+    button.click()
+    # it opens Board > Access on the claim, NOT the naming dialog
+    expect(page.locator(f'main[data-board="{BOARD_NEW_ETH}"]')).to_be_visible(timeout=T)
+    expect(by(page, "access-claim")).to_be_visible(timeout=T)
+    expect(by(page, "name-board-modal")).to_have_count(0)
+    # "Name this board" on the unclaimed board says it needs the claim and offers the Claim step
+    page.evaluate("a => import('./js/modal.js').then(m => m.openModal('name-board', a))",
+                  {"bid": BOARD_NEW_ETH})
+    need = by(page, "nb-needs-claim")
+    expect(need).to_contain_text("This board is not claimed yet, and naming needs the claim", timeout=T)
+    expect(need).to_contain_text("Claim it first (Board > Access > SSH claim), then name it.")
+    expect(page.locator('[data-action="identity-fix-confirm"]')).to_have_count(0)
+    page.locator('[data-action="nb-go-claim"]').click()
+    expect(by(page, "name-board-modal")).to_have_count(0)
+    # claim it; the wizard's proposal is then one click away in the naming dialog
+    page.locator('[data-action="access-claim"]').click()
+    page.locator('[data-action="access-claim-confirm"]').click()
+    after = by(page, "claim-then-name")
+    expect(after).to_contain_text("Claimed. Next, name this board", timeout=T)
+    kept = page.evaluate("b => import('./js/name_prefill.js').then(m => m.namePrefillArgs(b))",
+                         BOARD_NEW_ETH)
+    assert kept["impl"] == "linux" and kept["prefill"]["label"] == "MPS3-MO20", kept   # the proposal waited
+    page.locator('[data-action="access-name-after-claim"]').click()
+    expect(by(page, "name-board-modal")).to_be_visible(timeout=T)
+    expect(by(page, "nb-needs-claim")).to_have_count(0)           # twin: claimed, nothing to say
+    assert page.evaluate("b => import('./js/name_prefill.js').then(m => m.hasNamePrefill(b))",
+                         BOARD_NEW_ETH) is False                  # used once
+    assert not page.errors, page.errors

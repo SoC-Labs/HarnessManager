@@ -8,6 +8,8 @@ import { toApiError } from "../api.js";
 import { html, useState } from "../lib.js";
 import { boardState, refreshInfo } from "../store.js";
 import { ArmBox, Card, Chip, Icon, Reason, Spinner } from "../ui.js";
+import { openModal } from "../modal.js";
+import { clearNamePrefill, hasNamePrefill, namePrefillArgs } from "../name_prefill.js";
 
 // --- Board › Access (UI v2, lane UI2-BOARD): the SSH claim as its own card -----------------------
 
@@ -109,6 +111,11 @@ export function ClaimCard({ bid }) {
           ${why ? html`<span class="small muted" data-testid="reason-access-repin">${why}</span>` : null}</div>` : null}
       </div>` : null}
       ${c.state === "unclaimed" ? html`<${Reason} level="warn" text="Not claimed: anyone with the image's default key can log in." />` : null}
+      ${c.state === "mine" && hasNamePrefill(bid) ? html`<div class="bt-foot" data-testid="claim-then-name">
+        <${Reason} level="ok" text="Claimed. Next, name this board: the wizard's proposal is ready." />
+        <button type="button" class="btn sm primary" data-action="access-name-after-claim"
+          onClick=${() => { const args = namePrefillArgs(bid); clearNamePrefill(bid); openModal("name-board", { bid, ...args }); }}>
+          <${Icon} name="tag" /> Name this board…</button></div>` : null}
       ${(c.notes || []).map((n) => html`<${Reason} key=${n} text=${n} />`)}
       ${c.state === "unclaimed" ? html`<div class="bt-foot">
         ${armed ? html`<${Reason} text="Your SSH key gets root on this board; the board then refuses every other key's claim and takes slot changes only over that key's SSH." />
