@@ -218,3 +218,71 @@ def test_twin_a_tampered_dep_on_github_refuses_the_stage(gh, tmp_path):
     with pytest.raises(RefusedError, match="fails its sha256 check"):
         stage_app(svc, channel="beta", source=SRC, catalog="hm-app")
     assert uv.calls == []                                       # nothing was built
+
+
+# --- GUIDE-BUGS: `update check|app --channel beta` read the hm-app catalogue --------------------
+
+def _publish_beta(gh):
+    app = app_doc()
+    app["channel"] = "beta"
+    publish(gh, app, tag="channel-hm-app-beta")
+    harness = app_doc()          # a stated catalogue is enough to tell the two apart
+    harness.update(catalog="mps3-harness", channel="beta")
+    data = json.dumps(harness).encode()
+    gh.add(REPO, "channel-mps3-harness-beta", "channel.json", data)
+    gh.add(REPO, "channel-mps3-harness-beta", "channel.json.minisig",
+           minisign.sign(data, KEYS.release).encode())
+
+
+def test_the_app_update_commands_ask_for_the_hm_app_catalogue(monkeypatch):
+    """The 404 of 1.0.2: the CLI asked for no catalogue, so the tag was `channel-beta`;
+    the published release is `channel-hm-app-beta`."""
+    from harness_manager.cli import cmd_update
+
+    asked = []
+
+    class Svc:
+        def check(self, **kw):
+            asked.append(("check", kw.get("catalog")))
+            raise SystemExit(0)
+
+        def fetch_channel(self, channel=None, source=None, *, catalog=None):
+            asked.append(("app", catalog))
+            raise SystemExit(0)
+
+    monkeypatch.setattr(cmd_update, "service", lambda ctx: Svc())
+
+    class Ctx:
+        class args:                                              # noqa: N801
+            target, channel, source = None, "beta", SRC
+            apply = stage_only = False
+            want_version = None
+
+    for fn in (cmd_update._check, cmd_update._app):
+        with pytest.raises(SystemExit):
+            fn(Ctx())
+    assert asked == [("check", "hm-app"), ("app", "hm-app")]
+
+
+def test_beta_resolves_for_the_app_catalogue_and_the_harness_catalogue(gh, tmp_path):
+    _publish_beta(gh)
+    c = client(tmp_path, gh)
+    app = c.fetch("beta", SRC, catalog="hm-app")
+    assert app.url.endswith("/channel-hm-app-beta/channel.json") and app.catalog == "hm-app"
+    harness = c.fetch("beta", SRC, catalog="mps3-harness")      # twin: still resolves
+    assert harness.url.endswith("/channel-mps3-harness-beta/channel.json")
+    # twin: with no catalogue the tag is `channel-beta`, which nobody publishes
+    with pytest.raises(UnreachableError, match="channel-beta"):
+        client(tmp_path / "x", gh).fetch("beta", SRC)
+
+
+@pytest.mark.skipif(not os.environ.get("HM_LIVE_PUBLIC"), reason="reads the real public repo")
+def test_live_the_public_app_channel_beta_resolves():
+    """Read-only against SoC-Labs/HarnessManager (public, no token). Set HM_LIVE_PUBLIC=1."""
+    import urllib.request
+
+    from harness_manager.services.update.channel import channel_url
+
+    url = channel_url("github:SoC-Labs/HarnessManager", "beta", "hm-app")
+    assert url.endswith("/channel-hm-app-beta/channel.json")
+    assert urllib.request.urlopen(url, timeout=30).status == 200

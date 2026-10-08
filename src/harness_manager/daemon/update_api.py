@@ -77,6 +77,7 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event
 from harness_manager.core.pack import detail_of, report_progress
+from harness_manager.services.update.schema import CATALOG_APP
 
 from .app import _JSON, JsonBody, RouteContext, _abs_path, _bool, _number, _obj, _str, ok
 
@@ -333,12 +334,10 @@ def register(ctx: RouteContext) -> None:
                 # the click path (OTA-C ``stage_app``, auto=False): the hm-app catalogue by
                 # default; it never switches (the apply does, with a restart)
                 from harness_manager.services.update.appstage import stage_app
-                from harness_manager.services.update.schema import CATALOG_APP
-
                 return stage_app(svc, channel=channel, source=source, version=version,
                                  catalog=catalog or CATALOG_APP, auto=False, progress=progress)
             return svc.update_app(channel=channel, source=source, version=version,
-                                  catalog=catalog)
+                                  catalog=catalog or CATALOG_APP)
 
         return submit_engine_wide("update_app", run)
 

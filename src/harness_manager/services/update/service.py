@@ -313,7 +313,11 @@ class UpdateService:
     # -- check (read-only) --
 
     def check(self, *, channel: str | None = None, source: str | None = None,
-              session: Any = None, catalog: str | None = None) -> dict[str, Any]:
+              session: Any = None, catalog: str | None = None,
+              plan_catalog: str | None = None) -> dict[str, Any]:
+        """``catalog``: which catalogue's channel to read (the app's is ``hm-app``);
+        ``plan_catalog``: with a board, the harness catalogue its plan reads (when the
+        channel read is not that one)."""
         verified = self.fetch_channel(channel, source, catalog=catalog)
         ch = verified.channel
         report: dict[str, Any] = {
@@ -346,7 +350,11 @@ class UpdateService:
             report["warnings"] += [f"policy {self.policy.path}: {p}" for p in self.policy.problems]
         board_id = ""
         if session is not None:
-            plan, _ = self.plan_harness(session, verified=verified)
+            if plan_catalog and plan_catalog != verified.catalog:
+                plan, _ = self.plan_harness(session, channel=channel, source=source,
+                                            catalog=plan_catalog)
+            else:
+                plan, _ = self.plan_harness(session, verified=verified)
             report["plan"] = plan.summary()
             board_id = session.candidate.board_id
         available = bool(report["app_update"]) or bool(

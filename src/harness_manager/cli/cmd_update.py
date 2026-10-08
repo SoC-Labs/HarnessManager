@@ -47,6 +47,7 @@ from harness_manager.core.pack import detail_of
 from .cmd_board import ALLOW_MCC_UPDATE_HELP
 from .context import SERIAL_HELP, Ctx
 from .output import TSV_COLUMNS, Result, StderrProgress, with_data
+from harness_manager.services.update.schema import CATALOG_APP, harness_catalog
 
 #: TSV layouts for the update verbs (append-only). Registered into the shared table at
 #: ``register()`` time until the lead folds them into ``output.TSV_COLUMNS`` (CCR T7-4).
@@ -241,14 +242,18 @@ def cmd_update(ctx: Ctx) -> int:
 def _check(ctx: Ctx) -> int:
     a = ctx.args
     svc = service(ctx)
+    # The app's channel is the ``hm-app`` catalogue (its own rolling release,
+    # ``channel-hm-app-<channel>``); a board's harness plan reads its harness catalogue.
     if a.target is None:
-        report = svc.check(channel=a.channel, source=a.source)
+        report = svc.check(channel=a.channel, source=a.source, catalog=CATALOG_APP)
     else:
-        with ctx.board(note="update check") as (_cand, session):
-            report = svc.check(channel=a.channel, source=a.source, session=session)
+        with ctx.board(note="update check") as (cand, session):
+            hcat = harness_catalog(cand.pack)
+            report = svc.check(channel=a.channel, source=a.source, session=session,
+                               catalog=CATALOG_APP, plan_catalog=hcat)
             if a.want_version:
                 plan, _ = svc.plan_harness(session, channel=a.channel, source=a.source,
-                                           version=a.want_version)
+                                           version=a.want_version, catalog=hcat)
                 report["plan"] = plan.summary()
     plan = report.get("plan") or {}
     run = plan.get("running") or {}
@@ -273,7 +278,8 @@ def _harness(ctx: Ctx) -> int:
     svc = service(ctx)
     with ctx.board(note="update harness") as (cand, session):
         plan, verified = svc.plan_harness(session, channel=a.channel, source=a.source,
-                                          version=a.want_version, overlays_only=a.overlays_only)
+                                          version=a.want_version, overlays_only=a.overlays_only,
+                                          catalog=harness_catalog(cand.pack))
         for line in _plan_lines(plan.summary()):
             ctx.note(line)
         if plan.blockers:
@@ -330,7 +336,7 @@ def _app(ctx: Ctx) -> int:
             return _apply(ctx, svc, info)
         ctx.note("update: no harness-manager-daemon runs here, so there is nothing to restart: "
                  "staging and switching")
-    verified = svc.fetch_channel(a.channel, a.source)
+    verified = svc.fetch_channel(a.channel, a.source, catalog=CATALOG_APP)
     rel = verified.channel.app_release(a.want_version)
     if rel is None:
         raise RefusedError(f"the {verified.channel.channel!r} channel has no app release "
