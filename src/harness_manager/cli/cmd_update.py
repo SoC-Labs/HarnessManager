@@ -43,11 +43,11 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.events import Event
 from harness_manager.core.pack import detail_of
+from harness_manager.services.update.schema import CATALOG_APP, harness_catalog
 
 from .cmd_board import ALLOW_MCC_UPDATE_HELP
 from .context import SERIAL_HELP, Ctx
 from .output import TSV_COLUMNS, Result, StderrProgress, with_data
-from harness_manager.services.update.schema import CATALOG_APP, harness_catalog
 
 #: TSV layouts for the update verbs (append-only). Registered into the shared table at
 #: ``register()`` time until the lead folds them into ``output.TSV_COLUMNS`` (CCR T7-4).

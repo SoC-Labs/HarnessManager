@@ -325,6 +325,13 @@ def _same_u32(a: str, b: str) -> bool:
         return a.lower() == b.lower()
 
 
+def same_sd_part(a: HarnessRelease, b: HarnessRelease) -> bool:
+    """Do two releases carry byte-identical configuration SD parts (by signed sha256)?"""
+    sa = sorted(c.asset.sha256 for c in a.by_target(TARGET_MCC_SD))
+    sb = sorted(c.asset.sha256 for c in b.by_target(TARGET_MCC_SD))
+    return bool(sa) and sa == sb
+
+
 def os_image_running(comp: Component, board: BoardView) -> bool:
     """Does the board already run this OS image? By the sha256 this host recorded pushing
     under the running slot, or by the image's declared S0LB table CRC (the board's
@@ -556,6 +563,12 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     base_needed = base_differs(rel, ident) if board.identity_known else True
     if running is not None and running.version == rel.version and not rekey:
         base_needed = False             # it runs this very release (matched by its OS image)
+    elif base_needed and running is not None and not rekey and same_sd_part(rel, running):
+        # An OS-only patch (v2.0.0 -> v2.0.1): the configuration SD part is byte-identical,
+        # so it is not rewritten. A board whose card carries its own bake keeps it.
+        base_needed = False
+        plan.warnings.append(f"the configuration SD part of {rel.version} is the same as the "
+                             f"running {running.version}'s: it is not written")
     downgrade, newer = False, ident.harness_version
     if board.identity_known and _same_u32(rel.identity.static_id, ident.shell_id or "0x0"):
         if running is not None:

@@ -331,3 +331,45 @@ def test_negative_twin_another_image_in_the_slot_leaves_the_board_unrecorded(tmp
     # and the image alone never names a release built for another static
     assert match_release(ch, view(NEW_STATIC, crc=header_crc(IMAGE)).identity,
                          view(NEW_STATIC, crc=header_crc(IMAGE))) is None
+
+
+# --- 8 Oct: an OS-only patch (v2.0.0 -> v2.0.1) never rewrites an identical config SD -------------
+
+
+def _patch_channel(tmp_path, sd_new: bytes):
+    """2.0.0 and 2.0.1 on one channel: different OS images, SD parts as given."""
+    b = ChannelBuilder(tmp_path / "mirror", KEYS)
+    old_img = IMAGE
+    new_img = make_s0lb(b"\x6b" * 4096, b"\xb6" * 1024)
+    for ver, img, sd in (("2.0.0", old_img, b"SD-SAME"), ("2.0.1", new_img, sd_new)):
+        rel = Release(ver, impl="linux", with_sd=False, with_overlays=False)
+        comps = [b.component("sd-HBI0309BC", "mcc-sd", AssetFile(f"sd-{ver}.zip", sd), kind="sd"),
+                 b.component("os-slot", "user-usd", AssetFile(f"slot-{ver}.img", img),
+                             kind="os-slot", door="ethernet",
+                             provisioned={"static_id": FIELDED_STATIC},
+                             s0lb=linux_bundle_s0lb(img),
+                             crc32=f"0x{zlib.crc32(img) & 0xFFFFFFFF:08X}", bytes=len(img))]
+        ident = rel.identity()
+        ident["fw_sha"] = "6a34f6c8" if ver == "2.0.0" else "61d78b03"
+        b.add_harness(ver, ident, comps)
+    ch = parse_channel(b.document(channel="stable", serial=1, key=KEYS.release))
+    board = view(FIELDED_STATIC, crc=header_crc(old_img))       # runs 2.0.0's image
+    board = dataclasses.replace(board, identity=dataclasses.replace(
+        board.identity, firmware_sha="0923ed88"))               # as v2.0.0 boards report it
+    return ch, board
+
+
+def test_an_os_only_patch_writes_the_slot_and_not_an_identical_config_sd(tmp_path):
+    ch, board = _patch_channel(tmp_path, b"SD-SAME")
+    plan = make_plan(ch, board, version="2.0.1", app_version="1.1.0")
+    assert plan.running_release == "2.0.0"
+    assert plan.os_slot and not plan.base
+    assert "sd-HBI0309BC" not in plan.components
+    assert any("configuration SD part" in w and "not written" in w for w in plan.warnings)
+
+
+def test_negative_twin_a_changed_config_sd_is_still_written(tmp_path):
+    ch, board = _patch_channel(tmp_path, b"SD-CHANGED")
+    plan = make_plan(ch, board, version="2.0.1", app_version="1.1.0")
+    assert plan.os_slot and plan.base
+    assert "sd-HBI0309BC" in plan.components
