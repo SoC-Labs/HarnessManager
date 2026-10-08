@@ -100,10 +100,10 @@ def test_a_pack_declares_no_settings_unless_it_says_so():
 
 def test_negative_twin_the_mps3_pack_says_so():
     rows = pack_rows(Mps3Pack())
-    # +4: SLOT-TIMING; +1: IDENTITY's mps3.identity.ip_pool
-    assert len(rows) == 39 and {s.pack for s in rows} == {"mps3"}
+    # +4: SLOT-TIMING; +1: IDENTITY's mps3.identity.ip_pool; +1: HOSTKEY netboot_new_key
+    assert len(rows) == 40 and {s.pack for s in rows} == {"mps3"}
     schema, layer = with_packs(core_schema(), [Mps3Pack()])
-    assert len(schema.rows) == len(core_schema().rows) + 39
+    assert len(schema.rows) == len(core_schema().rows) + 40
     assert layer["mps3.console.pace_ms"] == 20
 
 

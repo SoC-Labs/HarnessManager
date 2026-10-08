@@ -334,7 +334,7 @@ def _board_rows(target: str, baud: int, reach: tuple[str, ...], hw_server: str, 
              "reports; every such change is logged as a warning and shown in Activity. Off "
              "(the default, and right for a board that boots from its card): a changed key is "
              "always refused until you re-pin it yourself",
-             at="claim.py:ssh_config", scope="board", apply="reopen"),
+             at="claim.py:1021", scope="board", apply="reopen"),
     )
 
 
