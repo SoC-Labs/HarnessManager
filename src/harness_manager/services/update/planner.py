@@ -416,20 +416,39 @@ def identity_rank(want: HarnessIdentity, ident: BoardIdentity) -> int | None:
     return (2 if sha else 0) + (1 if v32 else 0) + (1 if harness else 0)
 
 
-def match_release(channel: Channel, ident: BoardIdentity) -> HarnessRelease | None:
+def match_release(channel: Channel, ident: BoardIdentity,
+                  board: BoardView | None = None) -> HarnessRelease | None:
     """The channel release this board runs, by its wire identity (``identity_rank``).
 
     The most specific fit wins. When two releases fit equally well (the same firmware
     in two releases, or a board that reports too little to tell them apart) the answer
-    is None, "unrecorded": naming one of them would be a guess.
+    is None, "unrecorded": naming one of them would be a guess. With no identity fit, a
+    Linux board is matched by the OS image its running slot holds (``running_by_os_image``).
     """
     ranked = [(rank, rel) for rel in channel.harness
               if (rank := identity_rank(rel.identity, ident)) is not None]
     if not ranked:
-        return None
+        return running_by_os_image(channel.harness, ident, board)
     best = max(rank for rank, _ in ranked)
     top = [rel for rank, rel in ranked if rank == best]
     return top[0] if len(top) == 1 else None
+
+
+def running_by_os_image(releases: Iterable[HarnessRelease], ident: BoardIdentity | None,
+                        board: BoardView | None) -> HarnessRelease | None:
+    """The one release whose OS image the board's running slot holds (by the sha256 this
+    host pushed, or the S0LB table CRC the board reports), on the board's own static.
+    v2.0.0 was published with a firmware sha the board does not report (harnessd's hash,
+    not the image commit), so its identity never fits; the image itself does. None when
+    no release, or more than one, carries that image."""
+    if board is None or ident is None or not ident.shell_id or \
+            not (board.os_active_crc or board.os_active_sha):
+        return None
+    hits = [rel for rel in releases
+            if _same_u32(rel.identity.static_id, ident.shell_id)
+            and (os := next((c for c in rel.components if c.kind == KIND_OS_SLOT), None))
+            is not None and os_image_running(os, board)]
+    return hits[0] if len({r.version for r in hits}) == 1 else None
 
 
 def base_differs(rel: HarnessRelease, ident: BoardIdentity) -> bool:
@@ -500,7 +519,7 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
     plan.warnings.extend(channel_warnings)
     if pin_note and rel is not None:
         plan.warnings.append(pin_note)
-    running = match_release(channel, ident) if board.identity_known else None
+    running = match_release(channel, ident, board) if board.identity_known else None
     plan.running_release = running.version if running else ""
     if running is not None and running.status == STATUS_WITHDRAWN:
         plan.warnings.append(f"the board runs harness {running.version}, which the publisher "
@@ -535,6 +554,8 @@ def make_plan(channel: Channel, board: BoardView, *, app_version: str,
         plan.warnings.append(f"the channel does not mark harness {rel.version} as a re-key, but "
                              "its static_id differs from the board's: treating it as one")
     base_needed = base_differs(rel, ident) if board.identity_known else True
+    if running is not None and running.version == rel.version and not rekey:
+        base_needed = False             # it runs this very release (matched by its OS image)
     downgrade, newer = False, ident.harness_version
     if board.identity_known and _same_u32(rel.identity.static_id, ident.shell_id or "0x0"):
         if running is not None:

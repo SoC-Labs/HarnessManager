@@ -37,3 +37,22 @@ def get_pack(name: str) -> BoardPack:
         known = ", ".join(sorted(packs)) or "none installed"
         raise AbsentError(f"no board pack named {name!r}", hint=f"installed packs: {known}")
     return packs[name]
+
+
+def preflight() -> None:
+    """Fail at service start, with one clear message, when a pack's dependencies are wrong.
+
+    A pack package may carry a ``selfcheck`` module with ``check()`` (raising a
+    ``HarnessError``). Today: ``harness_manager_mps3.selfcheck`` (the loaded pyverify).
+    """
+    import importlib
+    import importlib.util
+
+    seen: set[str] = set()
+    for ep in entry_points(group=GROUP):
+        top = ep.value.split(":")[0].split(".")[0]
+        if top in seen:
+            continue
+        seen.add(top)
+        if importlib.util.find_spec(f"{top}.selfcheck") is not None:
+            importlib.import_module(f"{top}.selfcheck").check()

@@ -196,7 +196,7 @@ it; the next command starts it again.
 ## For developers
 
 ```bash
-make venv     # .venv with harness-manager and pyverify, editable
+make venv     # .venv: harness-manager editable, pyverify from the vendored wheel (as shipped)
 make check    # lint and the whole test suite, against a virtual MPS3
 make dist     # sdist and wheel in dist/, with the pyverify wheel
 ```

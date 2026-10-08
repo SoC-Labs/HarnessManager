@@ -355,3 +355,55 @@ def test_twin_below_1180_px_the_list_becomes_tiles_and_nothing_overflows_sideway
         nav.board_page(page, sub)
         page.wait_for_timeout(300)
         assert overflow(page)[1] <= 0, sub
+
+
+def _each_slot(doc: Any):
+    """Every OS slot record in a /slots or /card reply, wherever it sits."""
+    if isinstance(doc, dict):
+        sl = doc.get("slots")
+        if isinstance(sl, dict) and set(sl) >= {"A", "B"} and all(isinstance(v, dict) for v in sl.values()):
+            yield sl
+        for v in doc.values():
+            yield from _each_slot(v)
+    elif isinstance(doc, list):
+        for v in doc:
+            yield from _each_slot(v)
+
+
+def _route_slots(page: Any, edit: Any) -> None:
+    def handler(route: Any) -> None:
+        body = route.fetch().json()
+        for sl in _each_slot(body):
+            edit(sl)
+        reply(route, 200, body)
+    page.route("**/api/v1/boards/*/slots", handler)
+    page.route("**/api/v1/boards/*/card", handler)
+
+
+def _versions(show: Any, edit: Any) -> Any:
+    page = show.page(**APP)
+    _route_slots(page, edit)
+    nav.open_board(page, BOARD_LINUX)
+    nav.tab(page, "board")
+    nav.board_page(page, "versions")
+    return page
+
+
+def test_a_valid_slot_without_a_version_record_is_not_drawn_empty(show):
+    # v2.0.0's image has no version record: the running slot must not read "Empty" (7 Oct, board 1)
+    def no_versions(sl: dict) -> None:
+        for v in sl.values():
+            v["version"] = ""
+    page = _versions(show, no_versions)
+    a = by_id(page, "slot-A")
+    expect(a).to_contain_text("Running · default", timeout=T)
+    assert "Empty" not in a.inner_text() and "nothing boots" not in a.inner_text()
+    expect(by_id(page, "slot-B")).to_contain_text("Fallback")
+
+
+def test_twin_an_empty_slot_still_reads_empty(show):
+    def b_empty(sl: dict) -> None:
+        sl["B"].update(state="empty", version="", sid="")
+    page = _versions(show, b_empty)
+    expect(by_id(page, "slot-B")).to_contain_text("Empty", timeout=T)
+    expect(by_id(page, "slot-B")).to_contain_text("nothing boots from it")

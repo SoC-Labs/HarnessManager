@@ -302,3 +302,32 @@ def test_twin_the_release_tool_refuses_an_image_whose_frames_are_not_the_bundles
     rc, text = harness(tmp_path / "dist", bundle, release_key, "2.0.0")
     assert rc == 14 and "entry_pc is 0x80000000, the bundle declares 0x80200000" in text
     assert not any((tmp_path / "dist").rglob("*.img"))
+
+
+# --- 7 Oct: a board whose identity fits no release is matched by the image it runs ------------------
+
+
+def test_a_board_running_the_releases_os_image_is_that_release_with_nothing_to_do(tmp_path):
+    # v2.0.0 was signed with a firmware sha the board does not report: the identity fits
+    # nothing, but the running slot's S0LB CRC is the release's own image.
+    from harness_manager.services.update.planner import match_release
+
+    ch, rel = parsed(tmp_path)
+    board = view(FIELDED_STATIC, crc=header_crc(IMAGE))
+    assert match_release(ch, board.identity, board).version == rel.version
+    plan = make_plan(ch, board, app_version="0.1.0")
+    assert plan.running_release == rel.version
+    assert not plan.os_slot and not plan.base and not plan.blockers
+
+
+def test_negative_twin_another_image_in_the_slot_leaves_the_board_unrecorded(tmp_path):
+    from harness_manager.services.update.planner import match_release
+
+    ch, rel = parsed(tmp_path)
+    other = make_s0lb(b"\x11" * 4096, b"\x22" * 1024)
+    board = view(FIELDED_STATIC, crc=header_crc(other))
+    assert match_release(ch, board.identity, board) is None
+    assert make_plan(ch, board, app_version="0.1.0").running_release == ""
+    # and the image alone never names a release built for another static
+    assert match_release(ch, view(NEW_STATIC, crc=header_crc(IMAGE)).identity,
+                         view(NEW_STATIC, crc=header_crc(IMAGE))) is None
