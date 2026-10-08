@@ -26,7 +26,7 @@ Sources, tried in this order by ``fetch`` (``source=`` pins one):
    download goes through ``update.download.Downloader`` (resume, sha256, size, token only
    to GitHub hosts), then through ``import_``;
 3. ``hub``: the hub's mint archive, read as a PATH (``$HARNESS_MANAGER_KIT_HUB_DIR``,
-   e.g. ``/home/david/mints`` on the hub itself or over a mount): ``<root>/<sid>/kit/``
+   a folder on the hub itself or over a mount): ``<root>/<sid>/kit/``
    (a packed kit, F1) else ``<root>/<sid>/`` (the loose files). No ssh here: fetching
    over ssh is KIT-STORE K8;
 4. a path given as the source (``--source DIR|ZIP``).
@@ -207,7 +207,7 @@ class HubSource:
     def reason(self) -> str:
         if self.root is None:
             return (f"no hub archive path: set ${HUB_DIR_ENV} (or kits.hub_dir in the "
-                    "settings) to the mint archive (e.g. /home/david/mints on the hub, or "
+                    "settings) to the folder that holds the mint archive on your hub (or "
                     "its mount)")
         if not self.root.is_dir():
             return f"{self.root} is not a directory"
