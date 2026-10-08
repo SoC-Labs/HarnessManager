@@ -12,7 +12,7 @@ Do not edit anything here by hand. Rebuild it with `scripts/vendor_pyverify.sh` 
 |---|---|
 | Wheel | `mps3_pyverify-0.1.0-py3-none-any.whl` |
 | sha256 | `4b12ce07a76c41d75bae3879b256d87a7ae2d7c438bcdf4addb019529cbc2dd8` |
-| Built from | `git@github.com:SoC-Labs/MPS3-NanoSoC-Verification-Platform.git` |
+| Built from | `git@github.com:SoC-Labs/MPS3-NanoSoC-Verification-Platform-dev.git` |
 | Platform commit | `3f7cea28f3c591d14d2fcffece6c863924a893bf` (2026-09-29T22:24:00+01:00) |
 | Commit subject | Merge pull request #9 from SoC-Labs/feat/linux-harness |
 | Last pyverify change at or before it | `e7dd3c792e4b7b5b0223a43ac181c2386b6aee11` |
