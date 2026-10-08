@@ -71,7 +71,7 @@ def probe(venv: str | Path) -> dict:
     if not py.exists():
         py = Path(venv) / "Scripts" / "python.exe"
     if not py.exists():
-        raise Refused(f"{venv} has no python. Fix: make venv")
+        raise Refused(f"{venv} has no python. Fix: make clean venv")
     proc = subprocess.run([str(py), "-I", "-c", _PROBE], capture_output=True, text=True,
                           timeout=60, check=False)
     if proc.returncode != 0:
@@ -115,7 +115,8 @@ def check_pyverify(venv: str | Path, wheel: str | Path, info: dict | None = None
     """(b) The venv's pyverify is the vendored wheel's content, installed (not editable)."""
     info = info or probe(venv)
     where = info.get("pyverify")
-    fix = f"make venv   (installs {Path(wheel).name}); a dev pyverify needs ALLOW_DEV_PYVERIFY=1"
+    fix = (f"make clean venv   (installs {Path(wheel).name}); a deliberate dev pyverify needs "
+           "ALLOW_DEV_PYVERIFY=1")
     if where is None:
         raise Refused(f"the venv {venv} has no pyverify. Fix: {fix}")
     pkg = Path(where).resolve().parent

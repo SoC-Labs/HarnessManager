@@ -424,7 +424,7 @@ Guards (`tools/venv_guard.py`, run by `make venv` and everything that uses it):
 |---|---|---|
 | `VENV=` outside this checkout | `pip install -e .` would re-point that venv at this source | use this checkout's own `.venv` |
 | harness_manager not loading from this checkout's `src`, or two `__editable__.harness_manager-*.pth` | another checkout or worktree installed into the venv | `make clean venv` |
-| `make release` with a pyverify that is not the vendored wheel | the release would be tested against code it does not ship | `make venv` |
+| `make release` with a pyverify that is not the vendored wheel | the release would be tested against code it does not ship | `make clean venv` |
 
 At run time the service also checks that its pyverify has every module the MPS3 pack
 imports, and names the pyverify path and the fix if not.

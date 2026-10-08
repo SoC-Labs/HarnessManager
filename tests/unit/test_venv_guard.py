@@ -222,7 +222,7 @@ def test_selfcheck_names_the_pyverify_and_the_fix_when_slot_is_missing(tmp_path,
     with pytest.raises(HarnessError) as ei:
         selfcheck.check(_pack(tmp_path, IMPORTS))
     assert "pyverify.slot" in ei.value.message and str(pkg) in ei.value.message
-    assert "make venv" in ei.value.hint
+    assert "make clean venv" in ei.value.hint
     assert "internal error" not in str(ei.value)
 
 

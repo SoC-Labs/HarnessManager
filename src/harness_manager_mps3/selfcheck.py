@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness_manager.core.errors import HarnessError
 
-FIX = ("run `make venv` in the harness-manager checkout (it installs the vendored pyverify "
+FIX = ("run `make clean venv` in the harness-manager checkout (it installs the vendored pyverify "
        "wheel), or reinstall: pip install --force-reinstall vendor/mps3_pyverify-*.whl")
 
 
