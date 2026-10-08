@@ -876,9 +876,9 @@ class Mps3Claim:
         # C1 (additive): the fingerprint of the claim's first key, when the image publishes it
         first = ssh.get("key_sha256") if isinstance(ssh.get("key_sha256"), str) else ""
         err = "" if ssh else "the board's identify has no ssh block (bare metal, or an older image)"
+        # identify's top-level ``boot_id`` (the kernel's boot UUID; Linux harness v2.0.1 on).
+        # v2.0.0 has none: the netboot opt-in then never accepts a key by itself.
         boot = raw.get("boot_id") if isinstance(raw.get("boot_id"), str) else ""
-        if not boot and isinstance(ssh.get("boot_id"), str):
-            boot = ssh["boot_id"]
         up = raw.get("up_ms")
         up_s = float(up) / 1000.0 if isinstance(up, (int, float)) and not isinstance(up, bool) \
             else None
