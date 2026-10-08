@@ -124,6 +124,24 @@ class Design:
         return {"name": self.name, "kind": self.kind, "title": self.title, "origin": self.origin}
 
 
+def _check_rm_id(doc: dict[str, Any]) -> None:
+    """``rm_id``, when given, is one 32-bit number written ``0x0100XXXX`` (hex digits)."""
+    raw = doc.get("rm_id")
+    if raw in (None, ""):
+        return
+    try:
+        if isinstance(raw, bool):
+            raise ValueError(raw)
+        val = raw if isinstance(raw, int) else int(str(raw).strip(), 0)
+    except ValueError:
+        raise UsageError(f"design field \"rm_id\" is {raw!r}, not a number",
+                         hint="write it as 8 hex digits, like 0x01000001 (0x0100XXXX), "
+                              "or leave the field out") from None
+    if not 0 <= val <= 0xFFFFFFFF:
+        raise UsageError(f"design field \"rm_id\" is {raw!r}, outside 32 bits",
+                         hint="write it as 8 hex digits, like 0x01000001 (0x0100XXXX)")
+
+
 def from_doc(doc: Any, *, origin: str = "", base_dir: Path | None = None) -> Design:
     if not isinstance(doc, dict):
         raise UsageError("a design must be a JSON object")
@@ -134,6 +152,7 @@ def from_doc(doc: Any, *, origin: str = "", base_dir: Path | None = None) -> Des
     if not name or not name.replace("_", "").replace("-", "").isalnum():
         raise UsageError(f"design name must be a plain identifier, not {name!r}")
     d = Design(kind, name, str(doc.get("title", "")), doc, origin)
+    _check_rm_id(doc)
     wrapper = doc.get("wrapper")
     if wrapper:
         if kind != "rm":
@@ -147,7 +166,11 @@ def from_doc(doc: Any, *, origin: str = "", base_dir: Path | None = None) -> Des
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
-            raise AbsentError(f"cannot read the wrapper {path}: {exc.strerror}") from exc
+            raise AbsentError(
+                f"cannot read the wrapper {path}: {exc.strerror}",
+                hint="\"wrapper\" names YOUR RM's source file (it must exist). To get a "
+                     "starting file, run rm-kit once without the \"wrapper\" field: it writes "
+                     "a wrapper skeleton you can copy and edit") from exc
         try:
             d.wrapper_ports = parse_ansi_ports(text, doc.get("module"),
                                                params=doc.get("params") or {"NGPIO": 16})
