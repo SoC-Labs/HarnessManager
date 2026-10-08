@@ -411,9 +411,23 @@ timestamps to the commit time, so the same commit gives the same sha256. It rewr
 Harness Manager starts using a pyverify change, and commit the wheel and the README
 together.
 
-`make venv` still installs pyverify editable from `../mps3-nanosoc-platform` when that
-checkout is there, so you can change both at once. Without it, or with
-`make venv PYVERIFY=`, it installs the vendored wheel.
+`make venv` installs pyverify from the vendored wheel, the one the app ships with. To
+change pyverify and Harness Manager together, ask for the platform checkout explicitly:
+`make venv DEV_PYVERIFY=1` (uses `../mps3-nanosoc-platform/host/pyverify`) or
+`make venv PYVERIFY=<dir>`. That checkout is whatever branch it is on, so keep it for
+development: `make release` refuses a venv whose pyverify is not the vendored wheel
+(`ALLOW_DEV_PYVERIFY=1` overrides, for a dry run). Go back with `make clean venv`.
+
+Guards (`tools/venv_guard.py`, run by `make venv` and everything that uses it):
+
+| Refused | Why | Fix |
+|---|---|---|
+| `VENV=` outside this checkout | `pip install -e .` would re-point that venv at this source | use this checkout's own `.venv` |
+| harness_manager not loading from this checkout's `src`, or two `__editable__.harness_manager-*.pth` | another checkout or worktree installed into the venv | `make clean venv` |
+| `make release` with a pyverify that is not the vendored wheel | the release would be tested against code it does not ship | `make venv` |
+
+At run time the service also checks that its pyverify has every module the MPS3 pack
+imports, and names the pyverify path and the fix if not.
 
 ## CI
 

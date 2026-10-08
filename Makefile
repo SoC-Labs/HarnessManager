@@ -1,5 +1,11 @@
 # SoC Labs Harness Manager: developer entry points.
-#   make venv    create .venv (Python 3.11) and install harness-manager + pyverify (editable)
+#   make venv    create .venv (Python 3.11): harness-manager editable, pyverify from the
+#                VENDORED WHEEL (what the app ships with). A development pyverify only when
+#                asked: make venv DEV_PYVERIFY=1 (../mps3-nanosoc-platform/host/pyverify) or
+#                make venv PYVERIFY=<dir>; then `make release` refuses unless ALLOW_DEV_PYVERIFY=1.
+#                Every target that needs the venv runs tools/venv_guard.py first: it refuses a
+#                VENV outside this checkout, a harness_manager that does not load from this
+#                checkout's src (or two editable links), and (release) a non-vendored pyverify.
 #   make check   lint + tokens-check + unit + integration (the gate every team runs before
 #                handing work back)
 #   make tokens  regenerate tokens.css, design/generated/* from design/tokens.json
@@ -29,10 +35,16 @@ PY        ?= python3.11
 VENV      ?= .venv
 PLATFORM  ?= ../mps3-nanosoc-platform
 PLATFORM_REF ?= HEAD
-# pyverify comes from the platform checkout next to this one, editable, when it is there
-# (you co-develop both). Without it, from the vendored wheel. `make venv PYVERIFY=` forces
-# the wheel.
-PYVERIFY  ?= $(if $(wildcard $(PLATFORM)/host/pyverify/pyproject.toml),$(PLATFORM)/host/pyverify,)
+# pyverify comes from the VENDORED WHEEL by default, because that is what the app ships with.
+# The sibling platform checkout is a dev tree on whatever branch other work left it on; linking
+# it silently broke the app twice (Oct 2026). Editable from it only on request:
+#   make venv DEV_PYVERIFY=1                     $(PLATFORM)/host/pyverify
+#   make venv PYVERIFY=../x/host/pyverify        any other directory
+# Going back: `make clean venv`, or `pip install --force-reinstall vendor/mps3_pyverify-*.whl`.
+DEV_PYVERIFY ?=
+PYVERIFY  ?= $(if $(DEV_PYVERIFY),$(PLATFORM)/host/pyverify,)
+ALLOW_DEV_PYVERIFY ?=
+GUARD      = $(PY) tools/venv_guard.py
 PYVERIFY_WHEEL = $(firstword $(wildcard vendor/mps3_pyverify-*.whl))
 INSTALL_ARGS ?=
 WHEELHOUSE_ARGS ?=
@@ -45,12 +57,17 @@ RELEASE    = $(BIN)/python -m tools.release
 RELEASE_COMMON = $(if $(MIRROR),--mirror $(MIRROR)) $(if $(PUBLISH),--publish) $(RELEASE_ARGS)
 
 .PHONY: venv check lint test hil hil-auto web-deps clean dist install-local smoke-install vendor-pyverify \
-	wheelhouse lock release release-harness release-promote tokens tokens-check
+	wheelhouse lock release-guard release release-harness release-promote tokens tokens-check
 
+# The guard runs on every `make venv` and everything that depends on it (check, release, ...),
+# not only when the venv is rebuilt: a venv another checkout re-pointed must not pass quietly.
 venv: $(BIN)/harness-manager
+	@$(GUARD) harness --venv $(VENV) --checkout $(CURDIR)
 
 # __init__.py holds the version (pyproject reads it): a bump refreshes the editable metadata.
+# This rule runs `pip install -e .`, so the venv must belong to this checkout.
 $(BIN)/harness-manager: pyproject.toml src/harness_manager/__init__.py
+	@$(GUARD) path --venv $(VENV) --checkout $(CURDIR)
 	$(PY) -m venv $(VENV)
 	$(BIN)/pip install -q --upgrade pip
 	$(if $(PYVERIFY),$(BIN)/pip install -q -e $(PYVERIFY),$(BIN)/pip install -q $(PYVERIFY_WHEEL))
@@ -60,6 +77,7 @@ $(BIN)/harness-manager: pyproject.toml src/harness_manager/__init__.py
 # Web UI browser tests (tests/web): Playwright driving the system Chrome/Chromium.
 # Without it those tests skip with the reason.
 web-deps: venv
+	@$(GUARD) path --venv $(VENV) --checkout $(CURDIR)
 	$(BIN)/pip install -q --find-links vendor -e '.[webtest]'
 
 lint: venv
@@ -118,7 +136,11 @@ lock:
 vendor-pyverify:
 	PYTHON=$(if $(wildcard $(BIN)/python),$(BIN)/python,python3) scripts/vendor_pyverify.sh $(PLATFORM) $(PLATFORM_REF)
 
-release: venv
+# The release is tested and built against the pyverify it ships: refuse a development one.
+release-guard: venv
+	@$(GUARD) pyverify --venv $(VENV) --wheel $(PYVERIFY_WHEEL) $(if $(ALLOW_DEV_PYVERIFY),--allow-dev)
+
+release: release-guard
 	$(RELEASE) app $(if $(VERSION),--version $(VERSION)) --channel $(CHANNEL) $(RELEASE_COMMON)
 
 release-harness: venv

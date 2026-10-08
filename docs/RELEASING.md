@@ -52,6 +52,8 @@ The design is `docs/design/HM_SELF_UPDATE.md` §4 (app) and
 | 5 | Publish to beta: `make release PUBLISH=1 RELEASE_ARGS="--smoke install"`. minisign asks for the passphrase | 2 min |
 | 6 | Optional hub mirror: add `MIRROR=/path/to/mirror`, then copy that directory to the hub | 1 min |
 
+`make release` first checks the venv (`tools/venv_guard.py`): it must load this checkout's source once, and its pyverify must be the vendored wheel. If it says REFUSED, run `make clean venv`; `ALLOW_DEV_PYVERIFY=1` allows a dry run on a development pyverify.
+
 After a soak on beta, promote it (step 7). A stable release is never published directly:
 `--channel stable` is refused.
 

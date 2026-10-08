@@ -407,6 +407,10 @@ def run_daemon(state_dir: Path, *, port: int | None = None, listen: str | None =
     # FIX-PACK-2 item 6: the environment this service started with (the starter's, whole:
     # control._spawn), before anything else reads it; shown by GET /daemon/env
     env_at_start = service_env.capture()
+    # A wrong pyverify in this venv: say so now, once, rather than as an "internal error"
+    # on the first board that needs it.
+    from harness_manager.core.registry import preflight
+    preflight()
     state_dir = Path(state_dir)
     if resume is not None:
         port, listen = int(resume["port"]), str(resume.get("listen") or listen or "") or None
