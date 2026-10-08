@@ -634,7 +634,8 @@ function readerLines(res, what) {
       { kind: "out", text: res.privileged_command || "" },
       ...(res.verify_command ? [{ kind: "hint", text: `then verify: ${res.verify_command} (${res.verify_expect || ""})` }] : [])];
   }
-  return [{ kind: "ok", text: `${what} written${res && res.verified ? " and verified" : ""}${res && res.sha256 ? ` (sha256 ${short(res.sha256)})` : ""}` }];
+  return [{ kind: "ok", text: `${what} written${res && res.verified ? " and verified" : ""}${res && res.sha256 ? ` (sha256 ${short(res.sha256)})` : ""}` },
+    ...(what === "the configuration SD files" ? mbbiosLines((res && res.mbbios || []).map((d) => d.note).filter(Boolean)) : [])];
 }
 
 // --- lane WINDOWS: the Administrator steps for a whole-card image on Windows ---
@@ -659,6 +660,14 @@ function PrivilegedSteps({ res }) {
     ${im ? html`<p class="small" data-testid="bu-os-imager"><b>Or with ${im.name}</b> (<span class="mono">${im.url}</span>):</p>
       <ul class="bu-priv-imager">${(im.steps || []).map((s, i) => html`<li key=${i}>${s}</li>`)}</ul>` : null}
   </div>`;
+}
+
+// What the write said about the MCC's BIOS line ("MBBIOS kept: mbb_v132.ebf"): a safety fact, so
+// it is always on screen, with a plain line when the write reported none.
+export const MBBIOS_NONE = "MBBIOS: no .ebf is ever written; this write reported no MBBIOS change.";
+function mbbiosLines(notes) {
+  const got = (notes || []).map((n) => String(n && n.note !== undefined ? n.note : n)).filter(Boolean);
+  return (got.length ? got : [MBBIOS_NONE]).map((text) => ({ kind: "out", text, testid: "bu-mbbios" }));
 }
 
 function overlayLines(o) {
@@ -722,6 +731,7 @@ function WriteStep({ bid, w, ready }) {
     run: (ctx) => bringupJob("bringupInstall", bid, { bundle: w.check.path, backup_path: backup, confirm_unsigned: w.unsignedTyped.trim() },
       (d) => ctx.progress(`${d.phase || "install"}: ${pct(d)}%`, d.phase), "sd_install"),
     render: (res) => [{ kind: "ok", text: `wrote ${(res.files || []).length} file(s) to the configuration SD and read them back; the board runs them after a reboot` },
+      ...mbbiosLines(res && res.notes),
       ...overlayLines(res && res.overlays)],
     onDone: (ok) => {
       if (ok) { w.written = { how: "usb", at: Date.now() }; w.rebooted = null; w.witness = null; w.witnessError = null; }

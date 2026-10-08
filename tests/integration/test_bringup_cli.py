@@ -88,9 +88,10 @@ def test_bringup_backs_up_writes_reboots_and_witnesses_a_bundle(board, tmp_path,
     assert rc == 0
     steps = [(s["step"], s["result"]) for s in out["steps"]]
     assert steps == [("source", "checked"), ("unsigned", "confirmed"), ("backup", "taken"),
-                     ("write", "written"), ("overlays", "added"), ("reboot", "witnessed"),
-                     ("witness", "running"), ("identity", "proposed"),
+                     ("write", "written"), ("mbbios", "noted"), ("overlays", "added"),
+                     ("reboot", "witnessed"), ("witness", "running"), ("identity", "proposed"),
                      ("identity", "not-settable"), ("next", "access")]
+    assert out["steps"][4]["detail"].startswith("MBBIOS")       # WIZARD-FIT: the safety fact
     sha = out["check"]["sha256"]
     assert out["steps"][1]["detail"] == (f"INSTALL UNSIGNED {sha[:8]} typed; sha256 {sha} (its "
                                          f"manifest, {out['check']['unsigned']['files']} files)")

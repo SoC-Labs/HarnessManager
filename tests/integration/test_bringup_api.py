@@ -203,6 +203,8 @@ def test_the_first_install_backs_up_writes_reboots_and_witnesses(client, board, 
     written = (board.sd.root / "MB/HBI0309C/Nanosoc/nanosoc.bit").read_bytes()
     assert written == (bundle / "sd/MB/HBI0309C/Nanosoc/nanosoc.bit").read_bytes()
     assert board.sd.ebf.read_bytes() == ebf_before                 # never an .ebf
+    notes = done["result"]["notes"]                                # WIZARD-FIT: "MBBIOS kept: …"
+    assert notes and all(n.startswith("MBBIOS") for n in notes), notes
     ovl = done["result"]["overlays"]
     assert ovl["added"] is True and ovl["path"] == str(bundle / "overlays" / "open")
     toml = (tmp_path / "svc" / "settings.toml").read_text()

@@ -199,6 +199,8 @@ def cmd_bringup(ctx: Any) -> int:
                     exc.message, hint=f"restore the backup: {restore}"), steps=steps) from exc
             steps.append([bid, "write", "written", f"{len(files)} files over the Debug USB, read "
                                                    "back"])
+            for note in getattr(storage, "install_notes", None) or []:
+                steps.append([bid, "mbbios", "noted", str(note)])      # "MBBIOS kept: …"
             _overlay_step(ctx, chk, state, bid, steps)
             ctx.confirm(f"reboot {bid} through the MCC? It reloads from the SD")
             from harness_manager.services import reset_guard

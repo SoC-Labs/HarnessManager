@@ -981,3 +981,31 @@ def test_wf_twin_a_bare_metal_folder_waits_the_short_time_and_says_nothing_of_li
     reboot_and_witness(page)
     expect(by(page, "bu-witness-result")).to_contain_text("--wait 180", timeout=T)
     assert not page.errors, page.errors
+
+
+# --- WIZARD-FIT: the write result says what happened to MBBIOS -------------------------------------------------
+
+
+def test_wf_the_write_result_shows_the_mbbios_line(demo):
+    page = demo.page()
+    add_and_open(page)
+    check(page, demo.example(0))
+    back_up(page)
+    write_usb(page)
+    res = by(page, "bu-write-result")
+    expect(res).to_contain_text("MBBIOS kept: mbb_v132.ebf", timeout=T)
+    assert not page.errors, page.errors
+
+
+def test_wf_twin_a_write_that_reports_nothing_still_says_no_ebf_is_written(demo):
+    demo.engine.bringup_mbbios_note = ""
+    page = demo.page()
+    add_and_open(page)
+    check(page, demo.example(0))
+    back_up(page)
+    write_usb(page)
+    res = by(page, "bu-write-result")
+    expect(res).to_contain_text("MBBIOS: no .ebf is ever written; this write reported no MBBIOS "
+                                "change.", timeout=T)
+    expect(res).not_to_contain_text("MBBIOS kept")
+    assert not page.errors, page.errors

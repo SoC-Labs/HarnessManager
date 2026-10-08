@@ -1588,6 +1588,10 @@ def _bringup_wrap() -> None:
                     progress(phase, total * step // 6, total)
         board.bringup = {"files": sorted(dict(files)), "impl": _bringup_impl(files),
                          "at": time.time()}
+        # what the real adapter says beside its files (FIX-PACK-7); `engine.bringup_mbbios_note`
+        # = "" is the twin of a write that reports nothing
+        note = getattr(self._e, "bringup_mbbios_note", "MBBIOS kept: mbb_v132.ebf")
+        self.install_notes = [note] if note else []
         return None
 
     def reboot(self: Any, progress: Any = None, wait_s: float | None = None) -> dict:
