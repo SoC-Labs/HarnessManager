@@ -1337,13 +1337,15 @@ class RemoteClaim:
 
     def claim(self, session: BoardSession, *, confirm: bool, key: str | None = None,
               adopt: bool = False, replace_host_key: bool = False,
-              progress: Any = None) -> Any:
+              expect_host_key: str | None = None, progress: Any = None) -> Any:
         def phase(text: str, _done: int, _total: int) -> None:
             if progress is not None:
                 progress(text)
 
         body = {"confirm": bool(confirm), "adopt": bool(adopt),
                 "replace_host_key": bool(replace_host_key)}
+        if expect_host_key:
+            body["expect_host_key"] = str(expect_host_key)
         if key:
             body["key"] = str(Path(key).expanduser().resolve())
         out = self._engine.run_job(self._path(session), body, progress=phase)

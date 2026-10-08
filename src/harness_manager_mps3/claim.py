@@ -1205,7 +1205,7 @@ class Mps3Claim:
                 "Linux harness)")
 
     def claim(self, *, key: str | None = None, adopt: bool = False,
-              replace_host_key: bool = False,
+              replace_host_key: bool = False, expect_host_key: str | None = None,
               progress: Callable[[str], None] | None = None) -> dict[str, Any]:
         """The TOFU claim (or ``adopt``: pin a board already claimed with your key). The caller
         (``services.claim.ClaimService``) has checked the lease and the confirmation."""
@@ -1227,6 +1227,14 @@ class Mps3Claim:
             raise RefusedError("the board publishes no SSH host key fingerprint, so its key "
                                "cannot be checked before it is pinned; nothing was claimed",
                                hint="the image's identify must carry ssh.host_key_sha256")
+        want = (expect_host_key or "").strip()
+        if want and obs.host_key != want:
+            # WIZARD-FIT: "Replace the pinned key" pins exactly the key the user was shown
+            raise HostKeyChangedError(
+                f"the board's key is not the one you approved: you approved {want}, the board "
+                f"shows {obs.host_key or 'no key'} now. Nothing was claimed or pinned",
+                hint="the board changed again (a reboot?): read the key it shows now and "
+                     "approve that one")
         cfg = self.config()
         pinned = pin_fingerprint(cfg["host_key"]) if cfg["host_key"] else ""
         rec = self._records.get(self.board_id)

@@ -192,7 +192,7 @@ class ClaimService:
     # -- the claim ----------------------------------------------------------------------------
 
     def claim(self, session: Any, *, confirm: bool, key: str | None = None, adopt: bool = False,
-              replace_host_key: bool = False,
+              replace_host_key: bool = False, expect_host_key: str | None = None,
               progress: Callable[[str], None] | None = None) -> dict[str, Any]:
         """TOFU-claim the board's SSH with your key and pin its host key (``adopt``: pin a
         claim you made elsewhere). Never automatic: ``confirm`` must be True."""
@@ -203,8 +203,9 @@ class ClaimService:
                                hint="CLI: answer the prompt or pass --yes; API: "
                                     "{\"confirm\": true}")
         self.check_lease(session)
+        extra = {"expect_host_key": expect_host_key} if expect_host_key else {}
         out = claim.claim(key=key, adopt=adopt, replace_host_key=replace_host_key,
-                          progress=progress)
+                          progress=progress, **extra)
         self._publish(session, out)
         return out
 
