@@ -125,7 +125,8 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
               "quiet_api",                 # QUIET-POLL: viewers and the background gate
               "identity_api",              # BOARD-ID: label/IP/MAC and the fix
               "env_api",                   # FIX-PACK-2: the service's own tool variables
-              "hil_api")                   # HIL-GUI: the unattended checks, from the app
+              "hil_api",                   # HIL-GUI: the unattended checks, from the app
+              "idle_api")                  # IDLE-LEASE: an unused board's lease goes back
 # --- ui2 api-build routes ---
 # UI2-API-BUILD (docs/planning/UI_V2_PLAN.md §2 G4): the readings history (readings_api.py).
 # G5/G6/G8 add routes to kit_api.py and card_api.py, which are loaded above.
@@ -450,11 +451,15 @@ class Daemon:
         view = leases.view(hub, cached_only=True, max_age_s=LEASE_VIEW_MAX_AGE_S)
         return rule(view if view is not None else leases.view(hub))
 
-    def release_lease_here(self, board_id: str) -> dict[str, Any] | None:
+    def release_lease_here(self, board_id: str, *, only_ours: bool = False) -> dict[str, Any] | None:
         """LEASE-UI: release the board's hub lease when THIS Harness Manager holds it (its
         token is in the store), for ``DELETE /boards/{bid}?release=true``. None when there is
         no hub, no lease service or no lease held here (another session's lease is theirs to
-        release); a hub that refuses or cannot be reached raises, and the board stays open."""
+        release); a hub that refuses or cannot be reached raises, and the board stays open.
+
+        ``only_ours`` (IDLE-LEASE): only a lease this service took itself
+        (``LeaseService.acquired_here``), never one a ``harness-manager lease acquire`` in a
+        terminal put in the shared store."""
         leases = getattr(self, "leases", None)
         if leases is None:
             return None
@@ -464,8 +469,30 @@ class Daemon:
             return None
         if hub is None or leases.store.get(hub.host, hub.target) is None:
             return None
+        if only_ours and not leases.acquired_here(hub):
+            return None
         out = leases.release(hub, board_id=board_id)
         return out.get("released")
+
+    def close_board(self, board_id: str, *, release: bool,
+                    only_ours: bool = False) -> dict[str, Any]:
+        """``DELETE /boards/{bid}[?release=true]``: what the user's Close does, and the idle
+        release's close (IDLE-LEASE) too. A checks run's guard or a running job refuses it
+        (HELD) before anything happens; with ``release`` the lease held here goes first, and a
+        release that fails leaves the board open. ``released``: the lease given back or None."""
+        for guard in self.close_guards:        # HIL-GUI: a checks run keeps its board open
+            guard(board_id)
+        job = self.gates.busy(board_id)
+        if job is not None:
+            raise busy_error(board_id, job)
+        was_open = board_id in self.engine.open_boards()
+        extra: dict[str, Any] = {}
+        if release:
+            extra["released"] = (self.release_lease_here(board_id, only_ours=only_ours)
+                                 if was_open else None)
+        with self.gates.op(board_id):
+            self.engine.close(board_id)
+        return {"board_id": board_id, "closed": was_open, **extra}
 
     def _console_lease_holder(self, board_id: str) -> str:
         # Consoles are explicit (and their re-dial rides an explicit open): the principal
@@ -850,6 +877,12 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         with ``quiet`` (why) and ``background`` (the gate's state), and the board is not
         touched. A viewing page's own read says so too (``X-HM-Viewer``). Actions (anything
         but GET) and reads without the header are never gated."""
+        idle = getattr(d, "idle", None)
+        if idle is not None:
+            # IDLE-LEASE: a request on a board is use of it, except the page's own reads (the
+            # page counts as a viewer instead, while it shows the board) and background reads.
+            idle.request(request.path_params.get("bid"), request.method, request.url.path,
+                         request.headers)
         if request.method not in ("GET", "HEAD") or not request_is_background(request.headers):
             return
         bid = request.path_params.get("bid")
@@ -1550,18 +1583,7 @@ def create_app(engine: Any, *, token: str, state_dir: Path | None = None,
         # holds on the board first; a failed release leaves the board open. ``released`` is
         # the lease given back, or null when none was held here.
         want = _query_flag(release, "release")
-        for guard in d.close_guards:           # HIL-GUI: a checks run keeps its board open
-            guard(bid)
-        job = d.gates.busy(bid)
-        if job is not None:
-            raise busy_error(bid, job)
-        was_open = bid in d.engine.open_boards()
-        extra: dict[str, Any] = {}
-        if want:
-            extra["released"] = d.release_lease_here(bid) if was_open else None
-        with d.gates.op(bid):
-            d.engine.close(bid)
-        return _JSON(ok(board_id=bid, closed=was_open, **extra))
+        return _JSON(ok(**d.close_board(bid, release=want)))
 
     @api.api_route("/{rest:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
     def unknown(rest: str, request: Request) -> JSONResponse:

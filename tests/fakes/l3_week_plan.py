@@ -1293,6 +1293,16 @@ EXTENSION_ROUTES["cardwriter_api"] = (
 # --- end sd-flash ---
 
 
+# --- idle-lease ---
+# IDLE-LEASE (docs/API.md "Idle lease release", idle_api.py): served in the mock by
+# tests/fakes/t14_mock_api.py's idle_register.
+EXTENSION_ROUTES["idle_api"] = (
+    ("POST", "/boards/{bid}/lease/keep"),
+    ("GET", "/boards/{bid}/lease/idle"),
+)
+# --- end idle-lease ---
+
+
 # --- bringup-usb ---
 # BRINGUP-USB (docs/API.md "Bring-up over the Debug USB", bringup_api.py): served in the mock by
 # tests/fakes/bringup_mock.py (the switches, the scan and the bundle check; no write).

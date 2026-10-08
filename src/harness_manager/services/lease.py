@@ -605,6 +605,12 @@ class StoredLease:
                 "mine": mine}
 
 
+def _token_hash(token: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
 class LeaseStore:
     """One JSON file per hub target, mode 0600: the token releases the board, so it is a secret."""
 
@@ -630,6 +636,33 @@ class LeaseStore:
     def drop(self, hub: str, target: str) -> None:
         with contextlib.suppress(FileNotFoundError):
             self._path(hub, target).unlink()
+        self.drop_origin(hub, target)
+
+    # -- who took the lease (IDLE-LEASE) ---------------------------------------------------------
+    #
+    # A sidecar, not a key in the lease file: an older Harness Manager reads that file with
+    # ``StoredLease(**data)``. The token's hash ties the note to one grant, so a later grant
+    # by someone else sharing this store (the CLI) is never mistaken for ours.
+
+    def _origin_path(self, hub: str, target: str) -> Path:
+        return self.root / "origin" / self._path(hub, target).name
+
+    def get_origin(self, hub: str, target: str, token: str) -> str:
+        """Who took the lease whose token is ``token`` ("service"), or "" when unknown."""
+        try:
+            data = json.loads(self._origin_path(hub, target).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        if not isinstance(data, dict) or data.get("token_sha256") != _token_hash(token):
+            return ""
+        return str(data.get("by", ""))
+
+    def put_origin(self, hub: str, target: str, token: str, by: str) -> None:
+        self._write(self._origin_path(hub, target), {"by": by, "token_sha256": _token_hash(token)})
+
+    def drop_origin(self, hub: str, target: str) -> None:
+        with contextlib.suppress(FileNotFoundError):
+            self._origin_path(hub, target).unlink()
 
     # -- the last forced release of our lease (kept until dismissed) ----------------------------
 
@@ -784,8 +817,13 @@ class LeaseService:
                  heartbeat_s: float | None = None,
                  wall_clock: Callable[[], float] = time.time,
                  sleep: Callable[[float], None] | None = None,
-                 request_poll_s: float = REQUEST_POLL_S) -> None:
+                 request_poll_s: float = REQUEST_POLL_S, origin: str = "") -> None:
         self.store = LeaseStore(Path(state_dir) / "leases")
+        # IDLE-LEASE: who this service is when it takes a lease ("service": the Harness
+        # Manager service; "": anything else, such as the CLI). Each grant records it beside
+        # the token (``acquired_here``), so the service's idle release never gives back a
+        # lease someone else took into the shared store.
+        self.origin = origin
         self.bus = bus
         self._clock = clock
         self._wall = wall_clock
@@ -1822,7 +1860,23 @@ class LeaseService:
                              ttl_s=ttl_s, expires_at=expires_at, acquired_at=self._wall(),
                              principal=self._principal(hub))
         self.store.put(record)
+        if self.origin:
+            self.store.put_origin(hub.host, hub.target, record.token, self.origin)
+        else:
+            self.store.drop_origin(hub.host, hub.target)     # not ours: forget any older note
         return record
+
+    def acquired_here(self, hub: Any) -> bool:
+        """True when the lease stored for this hub target was taken by this kind of process
+        (``origin``) under its current token: the Harness Manager service's own acquire,
+        request or force, not a ``harness-manager lease acquire`` in a terminal that shares
+        the store. False with no origin, no stored lease, or a token taken since."""
+        if hub is None or not self.origin:
+            return False
+        stored = self.store.get(hub.host, hub.target)
+        if stored is None:
+            return False
+        return self.store.get_origin(hub.host, hub.target, stored.token) == self.origin
 
     def cancel_acquire(self, board_id: str) -> bool:
         """Stop a queued acquire or request for this board (its job then removes the queue

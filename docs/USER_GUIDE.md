@@ -574,6 +574,26 @@ forced release shows again.
 
 [LEASE_REQUESTS.md](LEASE_REQUESTS.md) has the full rules.
 
+### A board left open gives its lease back
+
+While a hub board is open in Harness Manager, the service keeps its lease alive, even
+after you close the app window. So that a forgotten board does not block everyone else,
+HM gives the lease back when **nothing has used the board for 30 minutes**:
+
+- **Use** is a window showing the board, a click or a CLI command on it, an attached
+  console, a debug or XVC session, the Live display, or a job (programming, a slot write,
+  an SD install). While any of these runs or is attached, the clock stays at zero: a write
+  is never interrupted.
+- **Two minutes before**, a banner says "mps3-02's lease is released in 2 min: nothing has
+  used it for 28 min. Use the board to keep it." Click **Keep it**, or just use the board.
+- **Then** HM does what **Close board** with "release" does: it gives the lease back and
+  closes the board. The Activity log says so. Open the board again to take it again.
+- A lease you took yourself with `harness-manager lease acquire` in a terminal is yours to
+  give back: HM closes the board but does not release it, and it runs out at its expiry.
+
+Change the time in Settings: General ("Give a hub board's lease back after"), or
+`harness-manager config set lease.idle_release_min 60`. `0` turns it off.
+
 ### HM on a shared board: what it does in the background
 
 A lab board's control port (the MPS3's 6900) serves **one client at a time**. While any

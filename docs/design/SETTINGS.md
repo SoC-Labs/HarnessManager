@@ -524,6 +524,7 @@ The columns:
 | G5 | `general.open_browser` | whether `ui` opens a browser | env `BROWSER`/`DISPLAY`/`WAYLAND_DISPLAY` (`cli/cmd_daemon.py:189-193`) | auto | U | | L | Dev | env |
 | G6 | `general.board_order` | the sidebar's order of the boards, by board id (SIDEBAR-UX) | the web UI (`web/static/js/sidebar.js` loadPrefs/savePrefs over `GET`/`PUT /settings`) | [] | U | | L | U | ✓ (advanced; drag or Alt+Up/Down sets it) |
 | G7 | `general.favourite_boards` | the boards pinned at the top of the sidebar, by board id (SIDEBAR-UX) | the web UI (`web/static/js/sidebar.js`) | [] | U | | L | U | ✓ (advanced; a board's star sets it) |
+| G8 | `lease.idle_release_min` | give an open hub board's lease back after this many minutes with nothing using it; 0: never (IDLE-LEASE, HM 1.1) | `daemon/idle_api.py` (`IdleLeases.limit_s`, read every 15 s round) | 30 | U | | L | U | ✓ (Settings: General; 0..1440) |
 
 ### A.2 Hubs (`[hubs.<name>]`)
 

@@ -443,6 +443,9 @@ def create_app(engine: Any | None = None, *, token: str = "t14-token",
     # QUIET-POLL's viewer routes (docs/API.md "Background reads"): the demo's gate.
     from .qp_mock_quiet import register as register_quiet
     app.state.quiet = register_quiet(app, state, _ok)
+    # IDLE-LEASE (docs/API.md "Idle lease release", idle_api.py): the demo's boards are
+    # scripted and never idle; "Keep it" answers as the real route does.
+    idle_register(app, state)
     # FIX-PACK-2: the service's own tool variables (docs/API.md), scripted.
     from .fp2_mock_env import register as register_env
     register_env(app, _ok)
@@ -1087,6 +1090,23 @@ def _ui2_confirmed(body: dict[str, Any], what: str) -> None:
     if body.get("confirm") is not True:
         raise UsageError(f"to {what}, send confirm: true",
                          hint="the page asks first; the CLI asks, or takes --yes")
+
+
+def idle_register(app: FastAPI, state: Any) -> None:
+    """IDLE-LEASE's two routes over the demo (nothing is ever released there)."""
+
+    def idle_state(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, limit_min=30, watched=False, own=False, idle_s=0.0,
+                   warning=False, release_at=None)
+
+    @app.post(f"{API}/boards/{{bid}}/lease/keep")
+    def lease_keep(bid: str) -> dict[str, Any]:
+        return idle_state(bid)
+
+    @app.get(f"{API}/boards/{{bid}}/lease/idle")
+    def lease_idle(bid: str) -> dict[str, Any]:
+        return idle_state(bid)
 
 
 def ui2_register(app: FastAPI, state: Any, sim: Any) -> None:

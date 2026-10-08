@@ -883,6 +883,18 @@ class ConsoleBroker:
                 (board_id, self.aliases.get(name, "")))
         return up.state if up is not None else "closed"
 
+    def attached(self, board_id: str) -> int:
+        """How many readers hold one of this board's consoles open now: subscribers (a web
+        console, a PTY, a TCP forward's clients) and TCP exports. Local; never the board.
+        IDLE-LEASE: an attached console keeps the board's lease from the idle release."""
+        with self._lock:
+            ups = [up for k, up in self._ups.items() if k[0] == board_id]
+        n = 0
+        for up in ups:
+            with up._lock:
+                n += len(up._subs) + len(up._exports)
+        return n
+
     def close_all(self, board_id: str) -> None:
         """Close every console, PTY, subscriber and export of one board. Safe when none is open.
 

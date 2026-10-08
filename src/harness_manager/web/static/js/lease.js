@@ -29,7 +29,7 @@ import { call, routeMissing } from "./api.js";
 import { boardName, clock, deployBar, hostOf } from "./format.js";
 import { leaseSpecs } from "./hub.js";
 import { html, useLayoutEffect, useRef, useState } from "./lib.js";
-import { changed, log, onBoardEvent, S, timed } from "./store.js";
+import { changed, log, onBoardEvent, S, timed, toast } from "./store.js";
 import {
   durationText, epochOf, leaseLeft, leaseName, leaseTargetNote, leaseWhere, leaseWho, loadHub,
   onHubLoaded, scheduleHub, staleNote, week,
@@ -142,6 +142,8 @@ const L = {
   answerDismissed: new Set(),
   zeroSeen: new Set(),       // request ids whose countdown this page saw reach zero
   seenReq: {},               // bid -> {id, deadline_at}: the request as last read
+  idle: {},                  // IDLE-LEASE: bid -> the lease.idle warning shown (text, release_at)
+  keeping: new Set(),        // boards whose "Keep it" is in flight
   reasked: {},               // bid -> {holder, deadline_at}: D9, a new holder was asked
   release: null,             // {bid, trigger}: LEASE-UI, the Release confirm
   closing: null,             // {bid, trigger, doClose, busy, error, choice}: UI v2, the Close dialog
@@ -872,6 +874,33 @@ async function dismissTaken(bid, t) {
   }
 }
 
+// IDLE-LEASE (daemon/idle_api.py): nothing has used an open board for a while, so its lease
+// is about to go back. "Keep it" (or any use of the board) withdraws the warning.
+function keepIdle(bid) {
+  if (L.keeping.has(bid)) return;
+  L.keeping.add(bid);
+  changed();
+  call("leaseKeep", { bid })
+    .then(() => { delete L.idle[bid]; })
+    .catch((e) => log("warning", "lease", `Keep it did not reach the service: ${e.message || e}`, bid))
+    .finally(() => { L.keeping.delete(bid); changed(); });
+}
+
+function IdleBanner({ bid }) {
+  const w = L.idle[bid];
+  if (!w) return null;
+  const left = secondsTo(w.release_at);
+  const busy = L.keeping.has(bid);
+  return html`<div class="banner warn" role="alert" data-testid="lease-idle" data-board=${bid}>
+    <${Icon} name="timer" />
+    <div class="grow"><strong data-testid="lease-idle-text">${w.text}</strong>
+      ${left !== null && left > 0 ? html`<div class="secondary small mt-8">
+        <span class="lease-clock" data-testid="lease-idle-countdown" data-left=${Math.ceil(left)}><${Icon} name="timer" cls="sm" />${mmss(left)}</span></div>` : null}</div>
+    <button type="button" class="btn sm primary" data-action="lease_idle_keep" disabled=${busy}
+      aria-busy=${busy ? "true" : undefined} onClick=${() => keepIdle(bid)}>${busy ? html`<${Spinner} /> Keeping` : "Keep it"}</button>
+  </div>`;
+}
+
 function TakenBanner({ bid }) {
   const hub = hubOf(bid);
   const t = hub && hub.taken;
@@ -1319,6 +1348,7 @@ export function LeaseBanners({ bid }) {
   const others = boards.filter((id) => id !== bid);
   const order = bid && hubOf(bid) ? [bid, ...others] : others;
   return html`
+    ${Object.keys(L.idle).map((id) => html`<${IdleBanner} key=${`i-${id}`} bid=${id} />`)}
     ${order.map((id) => html`<${TakenBanner} key=${`t-${id}`} bid=${id} />`)}
     ${order.map((id) => html`<${HolderPrompts} key=${`h-${id}`} bid=${id} />`)}
     ${bid && hubOf(bid) ? html`<${RequestBar} bid=${bid} />` : null}
@@ -1339,6 +1369,17 @@ onBoardEvent((ev) => {
     // Show the prompt now; the read that follows fills in created_at.
     const have = (w.hub.incoming || []).some((n) => n.id === d.id);
     if (!have) w.hub = { ...w.hub, incoming: [...(w.hub.incoming || []), { ...d }] };
+  }
+  if (ev.topic === "lease.idle") {
+    // IDLE-LEASE: {state: warning|kept|released|closed|failed, text, release_at}
+    if (d.state === "warning") L.idle[bid] = { text: d.text || "", release_at: d.release_at || null };
+    else delete L.idle[bid];
+    if (d.state === "released" || d.state === "closed" || d.state === "failed") {
+      log("warning", "lease", d.text || `${bid}: idle release (${d.state})`, bid);
+      toast(d.text || "", { icon: "timer", level: d.state === "failed" ? "err" : "", ms: 8000 });
+    }
+    changed();
+    return;
   }
   if (ev.topic === "lease.left") w.leaseQueued = false;
   if (ev.topic === "lease.tapped" && w.hub && d.id) {
@@ -1405,12 +1446,12 @@ setInterval(() => {
     }
     if (ticks % 10 === 0 && document.visibilityState === "visible") loadHub(bid);
   }
-  if (any) changed();
+  if (any || Object.keys(L.idle).length) changed();     // IDLE-LEASE: its countdown too
 }, 1000);
 
 // For tests and the devtools console.
 window.__harness_managerLease = () => JSON.parse(JSON.stringify({
   form: L.form && { bid: L.form.bid }, confirm: L.confirm && { bid: L.confirm.bid },
   release: L.release && { bid: L.release.bid }, closing: L.closing && { bid: L.closing.bid },
-  answers: L.answers, dismissedTaken: L.dismissedTaken,
+  answers: L.answers, dismissedTaken: L.dismissedTaken, idle: L.idle,
 }));

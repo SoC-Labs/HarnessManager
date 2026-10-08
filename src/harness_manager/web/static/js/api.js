@@ -65,6 +65,7 @@ export const ENDPOINTS = Object.freeze({
   // Lease requests, force release, leaving the queue (docs/LEASE_REQUESTS.md, frozen; LR-C).
   leaseRequest: ["POST", "/boards/{bid}/lease/request"],
   leaseRespond: ["POST", "/boards/{bid}/lease/respond"],
+  leaseKeep: ["POST", "/boards/{bid}/lease/keep"],          // IDLE-LEASE: "Keep it"
   leaseForce: ["POST", "/boards/{bid}/lease/force"],
   leaseLeave: ["DELETE", "/boards/{bid}/lease/queue"],
   leaseTakenDismiss: ["DELETE", "/boards/{bid}/lease/taken"],      // D11
@@ -312,7 +313,9 @@ async function send(name, params, body, accept, query = null, opts = {}) {
   for (const [k, v] of Object.entries(query || {})) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
-  const headers = { Accept: accept };
+  // IDLE-LEASE: the page's own reads are not use of a board (it polls the lease and the tunnel
+  // of every open board); while it shows a board it is that board's viewer instead.
+  const headers = { Accept: accept, "X-HM-Client": "page" };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (opts.background) headers["X-HM-Background"] = "1";
   if (opts.viewer) headers["X-HM-Viewer"] = opts.viewer;

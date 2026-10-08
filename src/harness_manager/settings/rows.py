@@ -164,6 +164,12 @@ GENERAL = (
             "Which tab a board opens on: the Workbench (program, consoles, debug) or the Overview",
             choices=("workbench", "overview")),
     # --- end ui2 api-hub ---
+    # IDLE-LEASE daemon/idle_api.py (IdleLeases.limit_s, read every round: live)
+    Setting("lease.idle_release_min", "int", 30, "General",
+            "Give a hub board's lease back after this many minutes with nothing using it "
+            "(no window showing it, no console, debug session or job); 0: never. You get a "
+            "2-minute warning with Keep it first",
+            check=_between(0, 1440, " minutes")),
 )
 
 HUBS = (

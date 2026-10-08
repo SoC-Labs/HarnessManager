@@ -166,7 +166,7 @@ class _BesideJobs:
 
 def register(ctx: RouteContext) -> None:
     d = ctx.daemon
-    leases = LeaseService(d.state_dir, d.bus)
+    leases = LeaseService(d.state_dir, d.bus, origin="service")   # IDLE-LEASE: grants say so
     d.leases = leases                     # other lanes and tests read it here
     beside = _BesideJobs(d)
     streams: dict[str, Any] = {}          # board id -> hub_events.HubEventStream (T8)

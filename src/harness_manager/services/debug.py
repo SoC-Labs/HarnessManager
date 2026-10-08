@@ -651,6 +651,15 @@ class DebugService:
         with _PROCESS_LIVE_LOCK:
             return _PROCESS_LIVE.pop(self._live_key(board_id), None)
 
+    def running_here(self, board_id: str) -> bool:
+        """True while a debug session this service started serves the board: this PC's
+        OpenOCD, or the board's own (DEBUG-ONBOARD). Local state only, never the board.
+        IDLE-LEASE: an open debug session keeps the board's lease from the idle release."""
+        if self._live_get(board_id) is not None:
+            return True
+        onboard = getattr(self, "onboard", None)
+        return onboard is not None and onboard.live(board_id) is not None
+
     def _live_boards(self) -> list[str]:
         prefix = str(self.registry_dir.resolve())
         with _PROCESS_LIVE_LOCK:
