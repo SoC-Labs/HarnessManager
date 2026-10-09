@@ -1744,6 +1744,8 @@ at …** opens it there. Another board answering at the new address is never ado
 |---|---|
 | a board behind a hub | its MAC or IP changes only once you name the hub (`--hub-fixed HUB`; in the app, type the hub's name): the hub's DHCP (dnsmasq) knows the board by MAC, so fix its record first. `mps3_01_pl`'s hub record is known to be wrong today. `--ip auto` is refused: the hub gives the address |
 | a new IP outside this PC's /24 | refused unless `--other-subnet` (in the app, tick the box) |
+| a board outside the address pool's network (e.g. on 192.168.11.0/24, pool 192.168.10.110-199) | its current IP is kept and the dialog says so; `--ip auto` is refused. An address in another /24 is refused unless `--allow-other-subnet` (in the app, tick "The board's network will reach this address: set it anyway"): the board may be unreachable after its next restart |
+| the board still has the image's default MAC (02:00:00:*) | it cannot be kept: the dialog hides Keep and says a new random MAC is required |
 | a new MAC on the same IP | this PC may keep the old MAC in its ARP cache (macOS up to ~20 min): `sudo arp -d <ip>` (Harness Manager never runs sudo). Pair a new MAC with a new IP (`--ip auto`) |
 | no free address in the pool | refused: widen `mps3.identity.ip_pool` (`harness-manager config set mps3.identity.ip_pool 192.168.10.110-249`) or give `--ip` |
 | a card written on a PC (its /persist is blank) | refused (no persistent store): `harness-manager board ssh TARGET -c 'mps3-persist format --erase && mps3-reboot'`, claim the board again, then name it. Harness Manager never formats a card by itself |

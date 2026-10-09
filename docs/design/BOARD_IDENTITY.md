@@ -183,10 +183,10 @@ with a RANDOM MAC**.
 | The rules (name, MAC, IP), `random_mac`, `allocate_ip`, the notes, `move_board_table`: board-agnostic, and the seams a later card-sector writer reuses | `services/identity_assign.py` |
 | The pack's policy (`IdentityPolicy`): byte 0 0x02, reserved 02:00:00:*, the pool `mps3.identity.ip_pool` 192.168.10.110-199, never 192.168.10.101, `answering` = identify, the rescue note, the hub records known wrong | `harness_manager_mps3/net_identity.py` `identity_policy()`, `Mps3Pack.identity_policy()` |
 | The registry: every MAC and IP assigned or seen, per board, first/last date (`history`) | `SeenIdentities.record/taken/move` (`<state>/identity/seen.json`) |
-| The proposal, the guards (hub: `hub_fixed` names the hub; subnet: `other_subnet`), the move | `IdentityService.propose/guards/precheck/fix` |
+| The proposal, the guards (hub: `hub_fixed` names the hub; subnet: `other_subnet`; a board outside the pool's /24 keeps its IP and needs `confirm_subnet` for another /24; the proposal carries `subnet` and `mac_keep`), the move | `IdentityService.propose/guards/precheck/fix` |
 | A board that moves: the reboot verb without the old-address witness, identify at the new IP, the pinned host key, the records moved (boards.toml, claims.json, known_hosts) | `Mps3NetIdentity.relocate/host_key/adopt_move`, `ClaimRecords.move` |
-| CLI | `board identity TARGET --label N --mac random|MAC --ip auto|A.B.C.D [--hub-fixed HUB] [--other-subnet]` |
-| API | `GET /boards/{bid}/identity/proposal`; POST `hub_fixed`, `other_subnet`, result `moved`, `address` |
+| CLI | `board identity TARGET --label N --mac random|MAC --ip auto|A.B.C.D [--hub-fixed HUB] [--other-subnet] [--allow-other-subnet]` |
+| API | `GET /boards/{bid}/identity/proposal`; POST `hub_fixed`, `other_subnet`, `confirm_subnet`, result `moved`, `address` |
 | Web | ONE dialog, `name-board` (`sections/identity.js`, `css/identity.css`): from Board > Access (Name this board…, Fix identity… = its hub-entry mode) and from the bring-up wizard (pre-filled) |
 
 **A move.** The board drops its old address at the restart (S41mps3net: DHCP first, then the
