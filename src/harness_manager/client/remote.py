@@ -1390,7 +1390,7 @@ class RemoteIdentity:
 
     @staticmethod
     def _body(want: Any, from_hub: bool, clear: bool, hub_fixed: str,
-              other_subnet: bool) -> dict[str, Any]:
+              other_subnet: bool, confirm_subnet: bool = False) -> dict[str, Any]:
         """The POST body; a field the CLI drops (``""``) goes as ``unset``."""
         w = dict(want or {})
         unset = [k for k, v in w.items() if v == ""]
@@ -1402,13 +1402,16 @@ class RemoteIdentity:
             body["hub_fixed"] = hub_fixed
         if other_subnet:
             body["other_subnet"] = True
+        if confirm_subnet:
+            body["confirm_subnet"] = True
         return body
 
     def preflight(self, session: BoardSession, *, want: Any = None, from_hub: bool = False,
                   clear: bool = False, hub_fixed: str = "",
-                  other_subnet: bool = False) -> Any:
+                  other_subnet: bool = False, confirm_subnet: bool = False) -> Any:
         """Lane IDENTITY: the job's checks and choices, nothing sent (``dry_run``)."""
-        body = {**self._body(want, from_hub, clear, hub_fixed, other_subnet), "dry_run": True}
+        body = {**self._body(want, from_hub, clear, hub_fixed, other_subnet, confirm_subnet),
+                "dry_run": True}
         return self._engine._http.post(self._path(session), body).get("preflight") or {}
 
     def propose(self, session: BoardSession, **query: Any) -> Any:
@@ -1421,13 +1424,15 @@ class RemoteIdentity:
 
     def fix(self, session: BoardSession, *, confirm: str, want: Any = None,
             from_hub: bool = False, clear: bool = False, wait_s: float | None = None,
-            progress: Any = None, hub_fixed: str = "", other_subnet: bool = False) -> Any:
+            progress: Any = None, hub_fixed: str = "", other_subnet: bool = False,
+            confirm_subnet: bool = False) -> Any:
         def phase(text: str, _done: int, _total: int) -> None:
             if progress is not None:
                 progress(text)
 
         body: dict[str, Any] = {"confirm": confirm,
-                                **self._body(want, from_hub, clear, hub_fixed, other_subnet)}
+                                **self._body(want, from_hub, clear, hub_fixed, other_subnet,
+                                             confirm_subnet)}
         if wait_s is not None:
             body["wait_s"] = wait_s
         out = self._engine.run_job(self._path(session), body, progress=phase)

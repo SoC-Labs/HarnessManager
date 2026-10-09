@@ -358,6 +358,44 @@ def other_subnet_text(new_ip: Any, check: Mapping[str, Any]) -> str:
             f"it has an address in {network_of(addr)} (e.g. {pc_example(addr)})")
 
 
+def pool_network(policy: IdentityPolicy) -> str:
+    """The /24 of the policy's address pool (``192.168.10.0/24``), ``""`` with no pool or one
+    that does not parse."""
+    if not policy.ip_pool:
+        return ""
+    try:
+        addrs = parse_pool(policy.ip_pool)
+    except UsageError:
+        return ""
+    return network_of(addrs[0])
+
+
+def outside_pool(policy: IdentityPolicy, board_ip: Any) -> bool:
+    """The board's own address is in a /24 other than the pool's (a board behind the hub on
+    192.168.11.0/24, pool 192.168.10.110-199). False when either is not known."""
+    pool = pool_network(policy)
+    addr = ip_only(board_ip)
+    if not addr or ipaddress.IPv4Address(addr).is_loopback:
+        return False                    # a loopback address is how a board is reached, not a network
+    board = network_of(addr)
+    return bool(pool and board and pool != board)
+
+
+def outside_pool_text(policy: IdentityPolicy, board_ip: Any) -> str:
+    """The dialog's warning for a board outside the pool's network."""
+    addr = ip_only(board_ip)
+    return (f"This board is on {network_of(addr)}, outside the address pool ({policy.ip_pool}): "
+            f"its current address {addr} is kept. Choose another address only if the board's "
+            "network will reach it.")
+
+
+def confirm_subnet_text(policy: IdentityPolicy, board_ip: Any, new_ip: Any) -> str:
+    """The refusal for an address in another /24 than a board that is outside the pool."""
+    return (f"this board is on {network_of(board_ip)}, outside the address pool "
+            f"({policy.ip_pool}), and {ip_only(new_ip)} is in {network_of(new_ip)}: the board "
+            "may be unreachable after its next restart")
+
+
 def arp_note(ip: Any) -> str:
     """The MAC-only trap: no gratuitous ARP after the change, so a PC keeps the old MAC for
     the same address (macOS up to ~20 min)."""

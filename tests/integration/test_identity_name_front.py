@@ -187,6 +187,49 @@ def test_twin_another_board_at_the_new_address_fails_the_job_unadopted(api, monk
     assert "a different board answers at 192.168.10.110" in job["error"]["message"]
 
 
+OFF_POOL = {"label": "MPS3", "ip": "192.168.11.101/24", "mac": "025e00000102",
+            "source": {"label": "default", "ip": "stage0", "mac": "override"}}
+
+
+def test_post_an_ip_in_another_network_for_a_board_outside_the_pool_needs_confirm_subnet(api):
+    fake, client, bid, _ = api(running=OFF_POOL)
+    body = {"confirm": "MPS3", "ip": "192.168.10.120", "wait_s": 20}
+    r = client.post(bid_path(bid) + "/identity", json=body, headers=headers())
+    assert r.status_code == 409, r.text
+    assert "outside the address pool (192.168.10.110-199)" in r.json()["error"]["message"]
+    assert fake.identity_sets == []
+    r = client.post(bid_path(bid) + "/identity", json={**body, "confirm_subnet": True},
+                    headers=headers())
+    assert r.status_code == 202, r.text
+    assert wait_job(client, r.json()["job"])["state"] == "done"
+    assert fake.identity_sets[0][1]["ip"] == "192.168.10.120/24"
+
+
+def test_twin_post_a_board_on_the_pools_network_needs_no_confirm_subnet(api):
+    fake, client, bid, _ = api()
+    r = client.post(bid_path(bid) + "/identity", json={"confirm": "MPS3", "ip": "192.168.10.120",
+                                                       "wait_s": 20}, headers=headers())
+    assert r.status_code == 202, r.text
+
+
+def test_the_proposal_route_keeps_the_ip_of_a_board_outside_the_pool_and_warns(api):
+    fake, client, bid, _ = api(running=OFF_POOL)
+    client.get(bid_path(bid) + "/identity", headers=headers())
+    p = client.get(bid_path(bid) + "/identity/proposal", params={"ip": "auto"},
+                   headers=headers()).json()["proposal"]
+    assert p["ip"] == "192.168.11.101/24" and p["subnet"]["kept"] is True
+    assert p["subnet"]["warning"].startswith("This board is on 192.168.11.0/24, outside the "
+                                              "address pool (192.168.10.110-199)")
+
+
+def test_twin_the_proposal_route_for_a_board_on_the_pool_has_no_warning(api):
+    fake, client, bid, _ = api()
+    client.get(bid_path(bid) + "/identity", headers=headers())
+    p = client.get(bid_path(bid) + "/identity/proposal", params={"ip": "auto"},
+                   headers=headers()).json()["proposal"]
+    assert p["subnet"]["warning"] == "" and p["ip"] == "192.168.10.110/24"
+
+
 # --- the CLI -------------------------------------------------------------------------------------
 
 
@@ -257,10 +300,30 @@ def test_twin_cli_a_reserved_mac_and_a_non_24_ip_are_usage_errors(capsys, board)
     assert fake.identity_sets == []
 
 
+def test_cli_an_ip_in_another_network_for_a_board_outside_the_pool_needs_the_flag(capsys, board):
+    fake, target = board(running=OFF_POOL)
+    rc, _, err = run(capsys, "board", "identity", target, "--ip", "192.168.10.120",
+                     "--consent", "MPS3", "--wait", "20")
+    assert rc == 15 and "this board is on 192.168.11.0/24, outside the address pool " \
+        "(192.168.10.110-199), and 192.168.10.120 is in 192.168.10.0/24" in err
+    assert "--allow-other-subnet" in err and fake.identity_sets == []
+    rc, _, err = run(capsys, "board", "identity", target, "--ip", "192.168.10.120",
+                     "--allow-other-subnet", "--consent", "MPS3", "--wait", "20")
+    assert rc == 0, err
+    assert fake.identity_sets[0][1]["ip"] == "192.168.10.120/24"
+
+
+def test_twin_cli_a_board_on_the_pools_network_needs_no_flag(capsys, board):
+    fake, target = board()
+    rc, _, err = run(capsys, "board", "identity", target, "--ip", "192.168.10.120",
+                     "--consent", "MPS3", "--wait", "20")
+    assert rc == 0, err
+
+
 def test_cli_the_hub_guard_and_its_flag_are_in_the_help(capsys):
     rc, out, _ = run(capsys, "board", "identity", "--help")
     assert rc == 0
     out = " ".join(out.split())                                         # argparse wraps
-    for words in ("--hub-fixed HUB", "--other-subnet", "MAC|random", "A.B.C.D|auto",
+    for words in ("--hub-fixed HUB", "--other-subnet", "--allow-other-subnet", "MAC|random", "A.B.C.D|auto",
                   "1-16 characters of A-Z, 0-9 and -"):
         assert words in out, words

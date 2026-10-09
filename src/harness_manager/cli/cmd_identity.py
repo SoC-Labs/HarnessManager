@@ -98,6 +98,10 @@ def add_parser(sub: Any, parents: list[argparse.ArgumentParser]) -> argparse.Arg
     ap.add_argument("--other-subnet", action="store_true",
                     help="the new IP is outside this PC's /24: set it anyway (this PC cannot "
                          "reach the board there until it has an address in that /24)")
+    ap.add_argument("--allow-other-subnet", action="store_true",
+                    help="the board is outside the address pool's network and the new IP is in "
+                         "another one: set it anyway (the board is unreachable after its next "
+                         "restart unless its network reaches the new address)")
     return ap
 
 
@@ -237,7 +241,8 @@ def cmd_identity(ctx: Ctx) -> int:
         # the hub and subnet guards), in-process or through the service (dry_run): what the
         # question shows is what is set
         pre = svc.preflight(session, want=want or None, from_hub=a.from_hub, clear=a.clear,
-                            hub_fixed=a.hub_fixed, other_subnet=a.other_subnet)
+                            hub_fixed=a.hub_fixed, other_subnet=a.other_subnet,
+                            confirm_subnet=a.allow_other_subnet)
         want, plan = dict(pre.get("want") or {}), pre["plan"]
         st = pre.get("identity") or st
         notes = list(pre.get("notes") or ())
@@ -258,7 +263,8 @@ def cmd_identity(ctx: Ctx) -> int:
         consent = _phrase(ctx, plan["phrase"], "\n".join(ask))
         out = svc.fix(session, confirm=consent, want=want or None, from_hub=a.from_hub,
                       clear=a.clear, wait_s=a.wait,
-                      progress=ctx.note, hub_fixed=a.hub_fixed, other_subnet=a.other_subnet)
+                      progress=ctx.note, hub_fixed=a.hub_fixed, other_subnet=a.other_subnet,
+                            confirm_subnet=a.allow_other_subnet)
     after = out.get("identity")
     moved = out.get("moved") or {}
     lines = [f"changed    {what}",

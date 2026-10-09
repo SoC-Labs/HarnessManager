@@ -355,6 +355,81 @@ def test_twin_the_proposal_behind_a_hub_keeps_and_names_the_hub(lab):
     json.dumps(p)                                                         # the API's answer
 
 
+# --- a board outside the pool's network (name-subnet) ---------------------------------------------
+
+OFF_POOL = {"label": "MPS3", "ip": "192.168.11.101/24", "mac": "025e00000102",
+            "source": {"label": "default", "ip": "stage0", "mac": "override"}}
+WARNING = ("This board is on 192.168.11.0/24, outside the address pool (192.168.10.110-199): "
+           "its current address 192.168.11.101 is kept. Choose another address only if the "
+           "board's network will reach it.")
+
+
+def test_the_proposal_for_a_board_outside_the_pool_keeps_its_ip_and_warns(lab):
+    fake, session, svc = lab(running=OFF_POOL)
+    svc.status(session, refresh=True)
+    p = svc.propose(session, label="lab-02", ip="auto")
+    assert p["ip"] == "192.168.11.101/24" and p["ip_how"] == "keep"
+    assert p["subnet"]["warning"] == WARNING and p["subnet"]["kept"] is True
+    assert p["subnet"]["confirm_needed"] is False
+    assert {c["field"] for c in p["changes"]} == {"label"}              # no IP change offered
+    q = svc.propose(session, ip="192.168.10.120")                       # a pool address: confirm
+    assert q["subnet"]["confirm_needed"] is True and q["subnet"]["warning"] == WARNING
+    assert svc.propose(session, ip="192.168.11.150")["subnet"]["confirm_needed"] is False
+    assert nothing_sent(fake)
+
+
+def test_twin_the_proposal_for_a_board_on_the_pools_network_offers_a_pool_ip(lab):
+    fake, session, svc = lab()
+    svc.status(session, refresh=True)
+    p = svc.propose(session, label="lab-07", ip="auto")
+    assert p["ip"] == "192.168.10.110/24" and p["ip_how"] == "auto"
+    assert p["subnet"] == {"outside_pool": False, "board_network": "192.168.10.0/24",
+                           "pool_network": "192.168.10.0/24", "kept": False, "warning": "",
+                           "confirm_needed": False, "confirm_text": ""}
+
+
+def test_an_ip_in_another_network_for_a_board_outside_the_pool_is_refused_without_confirm(lab):
+    fake, session, svc = lab(running=OFF_POOL)
+    with pytest.raises(RefusedError) as exc:
+        svc.fix(session, confirm="MPS3", want={"ip": "192.168.10.120"})
+    assert exc.value.message == (
+        "this board is on 192.168.11.0/24, outside the address pool (192.168.10.110-199), and "
+        "192.168.10.120 is in 192.168.10.0/24: the board may be unreachable after its next "
+        "restart; nothing was changed")
+    assert "--allow-other-subnet" in exc.value.hint and "confirm_subnet" in exc.value.hint
+    with pytest.raises(RefusedError):                                   # auto = a pool address
+        svc.fix(session, confirm="MPS3", want={"ip": "auto"})
+    assert nothing_sent(fake)
+
+
+def test_twin_confirm_subnet_lets_it_through_and_a_same_network_ip_needs_none(lab):
+    fake, session, svc = lab(running=OFF_POOL)
+    svc.fix(session, confirm="MPS3", want={"ip": "192.168.11.150"}, wait_s=20)
+    assert sent(fake)["ip"] == "192.168.11.150/24"                      # its own /24: no confirm
+    fake, session, svc = lab(running=OFF_POOL)
+    svc.fix(session, confirm="MPS3", want={"ip": "192.168.10.120"}, confirm_subnet=True,
+            wait_s=20)
+    assert sent(fake)["ip"] == "192.168.10.120/24"
+
+
+def test_the_proposal_says_why_a_new_mac_is_required_for_the_images_range(lab):
+    fake, session, svc = lab()
+    svc.status(session, refresh=True)
+    p = svc.propose(session, mac="keep")
+    assert p["mac_keep"] == {"allowed": False, "why": (
+        "the current MAC 02:00:00:4d:50:53 is the image's default range, which every board "
+        "starts with: a new random MAC is required")}
+    assert p["mac_how"] == "random" and not p["mac"].startswith("02:00:00")
+
+
+def test_twin_a_mac_outside_the_images_range_may_be_kept(lab):
+    fake, session, svc = lab(running=OFF_POOL)
+    svc.status(session, refresh=True)
+    p = svc.propose(session, mac="keep")
+    assert p["mac_keep"] == {"allowed": True, "why": ""} and p["mac_how"] == "keep"
+    assert p["mac"] == "02:5e:00:00:01:02"
+
+
 # --- the Linux lead's refusal order: no_persist (a card written on a PC) -------------------------
 
 

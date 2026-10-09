@@ -142,6 +142,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
   const [typed, setTyped] = useState("");
   const [hubTyped, setHubTyped] = useState("");
   const [otherSubnet, setOtherSubnet] = useState(false);
+  const [confirmSubnet, setConfirmSubnet] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [done, setDone] = useState(null);
@@ -173,6 +174,8 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
       setP(got); setPErr(null);
       if (!mm) setMacMode(got.mac_how === "keep" ? "keep" : "random");
       if (!im) setIpMode(got.ip_how === "keep" ? "keep" : "auto");
+      // a board outside the pool's network: Auto gave its own address back, so it shows as Keep
+      if (got.subnet && got.subnet.kept && im === "auto") setIpMode("keep");
       if ((!mm && got.mac_how !== "keep") || (mm === "random" && (o.regen || !v.macRandom))) setMacRandom(got.mac || "");
       if ((!im && got.ip_how !== "keep") || (im === "auto" && !v.ipAuto)) setIpAuto(got.ip || "");
       // a board named already keeps its name in the field; the image's own name is no name
@@ -209,11 +212,16 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
   const guard = !!(p && p.hub && p.hub.guard);
   const hubName = (p && p.hub && p.hub.name) || "";
   const outside = !!(p && p.address && p.address.subnet && p.address.subnet.same === false);
+  const sub = (p && p.subnet) || null;                 // the board against the address pool's network
+  const needConfirmSubnet = !!(sub && sub.confirm_needed);
+  const macKeep = (p && p.mac_keep) || null;           // keep the current MAC: allowed, or why not
+  const noKeepMac = !!(macKeep && macKeep.allowed === false);
   const changes = mode === "hub" ? (fix.changes || []) : ((p && p.changes) || []);
   const phrase = mode === "hub" ? fix.phrase : (p ? p.phrase : "");
   const blocked = mode === "hub" ? !changes.length
     : (!!why || !p || asking || !changes.length || !!errors.mac || !!errors.ip
-      || (guard && hubTyped.trim() !== hubName) || (outside && !otherSubnet));
+      || (guard && hubTyped.trim() !== hubName) || (outside && !otherSubnet)
+      || (needConfirmSubnet && !confirmSubnet));
 
   const apply = async () => {
     setBusy(true); setErr(null);
@@ -226,6 +234,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
       if (p && p.ip && ipMode !== "keep" && addr(p.ip) !== addr(cur.ip)) body.ip = p.ip;
       if (guard) body.hub_fixed = hubTyped.trim();
       if (outside) body.other_subnet = true;
+      if (needConfirmSubnet) body.confirm_subnet = true;
     }
     try {
       const out = await runJob("netIdentityFix", { bid }, body, null, "identity");
@@ -240,7 +249,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
   };
 
   const macOpts = [{ value: "random", label: "Random", title: "A random locally administered MAC (02:...)" },
-    { value: "keep", label: "Keep", title: "The MAC the board has now" },
+    ...(noKeepMac ? [] : [{ value: "keep", label: "Keep", title: "The MAC the board has now" }]),
     { value: "custom", label: "Custom", title: "Your own: unicast, not 02:00:00:*" }];
   const ipOpts = [{ value: "auto", label: "Auto", title: `A free address of the pool, searched from the MAC${p && p.pool && p.pool.range ? ` (${p.pool.range})` : ""}` },
     { value: "keep", label: "Keep", title: "The IP the board has now" },
@@ -290,6 +299,7 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
               ${macMode === "custom" ? html`<input class="input mono" data-testid="nb-mac-custom" autocomplete="off" spellcheck="false"
                 placeholder="02:xx:xx:xx:xx:xx" value=${macCustom}
                 onInput=${(e) => { setMacCustom(e.target.value); askSoon({ macCustom: e.target.value }); }} />` : null}
+              ${noKeepMac && macKeep.why ? html`<p class="small muted nb-why" data-testid="nb-mac-keep-why">${macKeep.why[0].toUpperCase()}${macKeep.why.slice(1)}.</p>` : null}
               ${errors.mac ? html`<p class="small nb-why" data-testid="nb-mac-why">${errors.mac}</p>` : null}
             </div></div>
           <div class="nb-row"><label>IP</label>
@@ -307,6 +317,10 @@ function NameBoard({ bid, prefill = null, hub = false, impl = "", close }) {
             <span class="nb-ip-value mono" data-testid="nb-ip-value">${ipNow}</span>
             <span class="small" data-testid="nb-ip-note">${p.address.same_net.charAt(0).toUpperCase()}${p.address.same_net.slice(1)}.</span>
           </div>` : null}
+          ${sub && sub.warning ? html`<div class="stack gap-8" data-testid="nb-pool-subnet">
+            <${Reason} level="warn" text=${sub.warning} />
+            ${needConfirmSubnet ? html`<label class="check-inline small"><input type="checkbox" data-testid="nb-confirm-subnet" checked=${confirmSubnet}
+              onChange=${(e) => setConfirmSubnet(e.target.checked)} /> ${sub.confirm_text}</label>` : null}</div>` : null}
           ${outside ? html`<div class="stack gap-8" data-testid="nb-subnet">
             <${Reason} level="warn" text=${`${ipNow} is not on this PC's network (this PC is ${p.address.subnet.local} in ${p.address.subnet.network}): after the restart this PC cannot reach the board until it has an address in that /24 (e.g. ${p.address.pc_example}).`} />
             <label class="check-inline small"><input type="checkbox" data-testid="nb-other-subnet" checked=${otherSubnet}

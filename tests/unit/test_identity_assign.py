@@ -315,3 +315,28 @@ def test_twin_the_pool_is_a_setting(monkeypatch):
 
     monkeypatch.setenv(ni.IP_POOL_ENV, "10.1.2.20-29")
     assert ni.identity_policy().ip_pool == "10.1.2.20-29"
+
+
+# --- the board against the pool's network (name-subnet) ------------------------------------------
+
+
+def _pool_policy():
+    return IA.IdentityPolicy(ip_pool="192.168.10.110-199")
+
+
+def test_outside_pool_compares_the_boards_network_with_the_pools():
+    pol = _pool_policy()
+    assert IA.pool_network(pol) == "192.168.10.0/24"
+    assert IA.outside_pool(pol, "192.168.11.101/24") is True
+    assert IA.outside_pool_text(pol, "192.168.11.101/24") == (
+        "This board is on 192.168.11.0/24, outside the address pool (192.168.10.110-199): its "
+        "current address 192.168.11.101 is kept. Choose another address only if the board's "
+        "network will reach it.")
+
+
+def test_twin_outside_pool_is_false_on_the_pool_with_no_pool_and_for_loopback():
+    assert IA.outside_pool(_pool_policy(), "192.168.10.104") is False
+    assert IA.outside_pool(IA.IdentityPolicy(), "192.168.11.101") is False
+    assert IA.outside_pool(IA.IdentityPolicy(ip_pool="nonsense"), "192.168.11.101") is False
+    assert IA.outside_pool(_pool_policy(), "127.0.0.1/24") is False
+    assert IA.outside_pool(_pool_policy(), "") is False

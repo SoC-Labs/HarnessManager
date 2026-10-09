@@ -816,7 +816,7 @@ class IdentityService:
 
     def precheck(self, session: Any, st: Mapping[str, Any] | None, want: Mapping[str, Any], *,
                  from_hub: bool = False, hub_fixed: str = "",
-                 other_subnet: bool = False) -> list[str]:
+                 other_subnet: bool = False, confirm_subnet: bool = False) -> list[str]:
         """The API's refusals before its job (nothing is chosen, set or sent): the values
         (400), and the hub and subnet guards (409). ``random``/``auto`` count as a change; an
         auto IP's own subnet check waits for the job, which picks it."""
@@ -834,7 +834,7 @@ class IdentityService:
         if "mac" in picks:
             plan = {**plan, "want": {**plan["want"], "mac": "02:ff:ff:ff:ff:fe"}}  # "changes"
         return self.guards(session, st, plan, from_hub=from_hub, hub_fixed=hub_fixed,
-                           other_subnet=other_subnet)
+                           other_subnet=other_subnet, confirm_subnet=confirm_subnet)
 
     def _moving(self, session: Any, reported: Mapping[str, Any] | None, new_ip: Any) -> str:
         """The address this session reaches the board at, when that is the address about to
@@ -851,7 +851,7 @@ class IdentityService:
 
     def guards(self, session: Any, st: Mapping[str, Any] | None, plan: Mapping[str, Any], *,
                from_hub: bool = False, hub_fixed: str = "", other_subnet: bool = False,
-               ) -> list[str]:
+               confirm_subnet: bool = False) -> list[str]:
         """The refusals a name change meets BEFORE anything is sent (``RefusedError``), and the
         notes it carries. The hub guard: a board behind a hub is given its address by the hub's
         DHCP (dnsmasq), keyed on its MAC, so its MAC (or IP) changes only once the person names
@@ -868,6 +868,14 @@ class IdentityService:
         notes: list[str] = []
         new_mac = want.get("mac") if want.get("mac") not in (None, DROP) else ""
         new_ip = want.get("ip") if want.get("ip") not in (None, DROP) else ""
+        cur_ip = ip_addr(reported.get("ip"))
+        if (new_ip and cur_ip and IA.outside_pool(policy, cur_ip)
+                and IA.network_of(new_ip) != IA.network_of(cur_ip) and not confirm_subnet):
+            raise RefusedError(
+                IA.confirm_subnet_text(policy, cur_ip, new_ip) + "; nothing was changed",
+                hint=f"keep the board's address, or give one in {IA.network_of(cur_ip)}, or "
+                     "confirm that the board's network will reach the new one: "
+                     "--allow-other-subnet (API: confirm_subnet: true)")
         if hub_name:
             target = str((hub or {}).get("target") or getattr(getattr(session, "hub", None),
                                                              "target", "") or "its hub target")
@@ -936,6 +944,22 @@ class IdentityService:
             default_ip = IA.KEEP
         mac = default_mac if mac in (None, "") else mac
         ip = default_ip if ip in (None, "") else ip
+        # a board outside the pool's /24: a pool address would lose it, so its own is kept
+        off_pool = bool(cur_ip) and IA.outside_pool(policy, cur_ip)
+        usable_ip = bool(cur_ip) and not IA.ip_problem(cur_ip)[0]
+        kept_for_subnet = off_pool and usable_ip and str(ip).strip().lower() == IA.IP_AUTO \
+            and not hub_name
+        if kept_for_subnet:
+            ip = IA.KEEP
+        # keep the current MAC only when the MPS3 rules would allow it (not the image's range)
+        mac_reserved = IA.mac_problem(cur_mac, policy) if cur_mac else ""
+        keep_allowed = bool(cur_mac) and (not mac_reserved or bool(hub_name))
+        mac_why = ""
+        if cur_mac and not keep_allowed:
+            mac_why = (f"the current MAC {cur_mac} is the image's default range, which every "
+                       "board starts with: a new random MAC is required")
+            if str(mac).strip().lower() == IA.KEEP:
+                mac = IA.MAC_RANDOM
         out: dict[str, Any] = {"board_id": bid, "current": {f: reported.get(f, "") for f in FIELDS},
                                "defaults": {"mac": default_mac, "ip": default_ip}}
         name = IA.normalize_name(label if label not in (None, "") else reported.get("label"))
@@ -952,6 +976,16 @@ class IdentityService:
                 continue
             chosen[key], chosen[f"{key}_how"] = got[key], got[f"{key}_how"]
         out.update(chosen, errors=errors)
+        out["mac_keep"] = {"allowed": keep_allowed, "why": mac_why}
+        new_cmp = chosen["ip"] or ""
+        out["subnet"] = {
+            "outside_pool": off_pool, "board_network": IA.network_of(cur_ip) if cur_ip else "",
+            "pool_network": IA.pool_network(policy), "kept": kept_for_subnet,
+            "warning": IA.outside_pool_text(policy, cur_ip) if off_pool else "",
+            "confirm_needed": bool(off_pool and new_cmp
+                                   and IA.network_of(new_cmp) != IA.network_of(cur_ip)),
+            "confirm_text": ("The board's network will reach this address: set it anyway"
+                             if off_pool else "")}
         new_ip = chosen["ip"] or (f"{cur_ip}/24" if cur_ip else "")
         want = {k: v for k, v in (("label", name if not out["label_problem"] else None),
                                   ("mac", chosen["mac"]), ("ip", chosen["ip"])) if v}
@@ -1041,7 +1075,7 @@ class IdentityService:
 
     def preflight(self, session: Any, *, want: Mapping[str, Any] | None = None,
                   from_hub: bool = False, clear: bool = False, hub_fixed: str = "",
-                  other_subnet: bool = False) -> dict[str, Any]:
+                  other_subnet: bool = False, confirm_subnet: bool = False) -> dict[str, Any]:
         """Everything ``fix`` checks before it asks for the phrase, nothing sent or reserved:
         the board read again, the values (the board's order: its refusal, then a bad value),
         ``random``/``auto`` chosen, the plan, the hub and subnet guards. ``{want, plan, notes,
@@ -1076,7 +1110,8 @@ class IdentityService:
             self.check_ready(session, reported)
             if not clear:
                 notes = self.guards(session, before, plan, from_hub=from_hub,
-                                    hub_fixed=hub_fixed, other_subnet=other_subnet)
+                                    hub_fixed=hub_fixed, other_subnet=other_subnet,
+                                    confirm_subnet=confirm_subnet)
         new_ip = "" if clear else str(plan["want"].get("ip") or "")
         return {"want": want, "plan": plan, "notes": notes, "identity": before,
                 "address": self._address_out(new_ip)}
@@ -1084,7 +1119,7 @@ class IdentityService:
     def fix(self, session: Any, *, confirm: str, want: Mapping[str, Any] | None = None,
             from_hub: bool = False, clear: bool = False, wait_s: float | None = None,
             progress: Callable[[str], None] | None = None, hub_fixed: str = "",
-            other_subnet: bool = False) -> dict[str, Any]:
+            other_subnet: bool = False, confirm_subnet: bool = False) -> dict[str, Any]:
         """Set the board's identity (``from_hub``: its hub record; ``want``: the fields given,
         ``mac: "random"`` and ``ip: "auto"`` chosen here; ``clear``: drop the override), reboot
         it WARM and verify. ``confirm`` is the typed phrase (``plan.phrase``); ``hub_fixed``
@@ -1130,7 +1165,8 @@ class IdentityService:
         self.check_ready(session, reported)
         guard_notes = [] if clear else self.guards(session, before, plan, from_hub=from_hub,
                                                    hub_fixed=hub_fixed,
-                                                   other_subnet=other_subnet)
+                                                   other_subnet=other_subnet,
+                                                   confirm_subnet=confirm_subnet)
         self.check_lease(session)
         self.check_reset(session)
         if str(confirm or "").strip() != plan["phrase"]:

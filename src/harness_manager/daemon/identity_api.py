@@ -7,7 +7,7 @@ docs/API.md "Board identity" (bearer auth and the error envelope as everywhere):
 |---|---|
 | ``GET /boards/{bid}/identity?refresh=`` | ``{board_id, identity}``: ``BoardInfo.net_identity`` read now (the board: one control-port read, or identify; the hub record once per session). ``refresh=true`` asks the hub again, and for its other targets |
 | ``GET /boards/{bid}/identity/proposal?label=&mac=&ip=`` | lane IDENTITY: ``{board_id, proposal}``, what "Name this board" shows: the name upper-cased and checked (1-16 of A-Z, 0-9, -), ``mac`` (``random`` (default for an image-default MAC), ``keep`` or a value), ``ip`` (``auto`` from the pack's pool, ``keep`` or a value), the changes, the phrase, the same-/24 line, the hub guard and the notes. Nothing is set or reserved |
-| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, unset?, clear?, wait_s?, hub_fixed?, other_subnet?, dry_run?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes, moved, address}``. ``dry_run: true`` (no ``confirm``): 200 ``{board_id, preflight: {want, plan, notes, identity, address}}``, the same checks and choices, nothing sent |
+| ``POST /boards/{bid}/identity`` ``{confirm, from_hub?, label?, ip?, mac?, hostname?, unset?, clear?, wait_s?, hub_fixed?, other_subnet?, confirm_subnet?, dry_run?}`` | 202 job ``identity``; the result is ``{board_id, action, changes, set, reboot, verified, identity, notes, moved, address}``. ``dry_run: true`` (no ``confirm``): 200 ``{board_id, preflight: {want, plan, notes, identity, address}}``, the same checks and choices, nothing sent |
 
 Rules:
 
@@ -209,6 +209,7 @@ def register(ctx: RouteContext) -> None:
         clear = _bool(b, "clear", False)
         hub_fixed = _opt_str(b, "hub_fixed") or ""          # lane IDENTITY: names the hub
         other_subnet = _bool(b, "other_subnet", False)      # lane IDENTITY: leave this /24
+        confirm_subnet = _bool(b, "confirm_subnet", False)  # a board outside the pool's /24
         if clear and (want or from_hub):
             raise UsageError("clear goes alone", hint="clear first, then set what you want")
         if not (want or from_hub or clear):
@@ -239,17 +240,17 @@ def register(ctx: RouteContext) -> None:
                 raise invalid
             if not clear:                                   # the hub and subnet guards: 409
                 svc.precheck(s, st, want, from_hub=from_hub, hub_fixed=hub_fixed,
-                             other_subnet=other_subnet)
+                             other_subnet=other_subnet, confirm_subnet=confirm_subnet)
             svc.check_lease(s)                              # 409 HELD naming the holder
             if dry_run:                                     # nothing sent: what would be set
                 return _JSON(ok(board_id=bid, preflight=svc.preflight(
                     s, want=want or None, from_hub=from_hub, clear=clear, hub_fixed=hub_fixed,
-                    other_subnet=other_subnet)))
+                    other_subnet=other_subnet, confirm_subnet=confirm_subnet)))
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             return svc.fix(s, confirm=confirm, want=want or None, from_hub=from_hub,
                            clear=clear, wait_s=float(wait) if wait is not None else None,
                            progress=lambda text: progress(text, 0, 0), hub_fixed=hub_fixed,
-                           other_subnet=other_subnet)
+                           other_subnet=other_subnet, confirm_subnet=confirm_subnet)
 
         return ctx.accepted(d.jobs.submit("identity", bid, run))

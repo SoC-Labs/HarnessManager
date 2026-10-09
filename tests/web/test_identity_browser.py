@@ -241,7 +241,8 @@ def status(hub: dict | None = None) -> dict:
             "notes": [], "live": True, "checked_at": "now"}
 
 
-def proposal(q: dict, *, hub: bool = False, local: str = "") -> dict:
+def proposal(q: dict, *, hub: bool = False, local: str = "", off_pool: bool = False,
+             mac_reserved: bool = False) -> dict:
     # the service's defaults for this board (not the image default, or behind a hub): keep
     mac_q, ip_q = q.get("mac") or "keep", q.get("ip") or "keep"
     mac = "02:5e:00:00:00:42" if mac_q == "random" else (REPORTED["mac"] if mac_q == "keep"
@@ -254,6 +255,10 @@ def proposal(q: dict, *, hub: bool = False, local: str = "") -> dict:
                            {"field": "mac", "from": REPORTED["mac"], "to": mac},
                            {"field": "ip", "from": REPORTED["ip"], "to": ip})
                if c["to"] and c["to"] != c["from"]]
+    kept = off_pool and ip_q == "auto"            # the service keeps a board's own address
+    if kept:
+        ip, how["auto"] = REPORTED["ip"], "keep"
+        changes = [c for c in changes if c["field"] != "ip"]
     addr = ip.split("/")[0]
     net = ".".join(addr.split(".")[:3])
     lnet = ".".join(local.split(".")[:3]) if local else ""
@@ -274,10 +279,23 @@ def proposal(q: dict, *, hub: bool = False, local: str = "") -> dict:
                     "known_bad": {"mps3_01_pl": "its board_mac 00:e0:4c:46:dc:f8 is the hub's "
                                                 "own USB adapter, not the board"},
                     "guard": any(c["field"] in ("mac", "ip") for c in changes)} if hub else None,
-            "refusal": None}
+            "refusal": None,
+            **({"subnet": {
+                "outside_pool": True, "board_network": "192.168.11.0/24",
+                "pool_network": "192.168.10.0/24", "kept": kept,
+                "warning": "This board is on 192.168.11.0/24, outside the address pool "
+                           "(192.168.10.110-199): its current address 192.168.11.101 is kept. "
+                           "Choose another address only if the board's network will reach it.",
+                "confirm_needed": net != "192.168.11",
+                "confirm_text": "The board's network will reach this address: set it anyway"}}
+               if off_pool else {}),
+            "mac_keep": ({"allowed": False, "why": "the current MAC 02:00:00:00:02:fe is the "
+                          "image's default range, which every board starts with: a new random "
+                          "MAC is required"} if mac_reserved else {"allowed": True, "why": ""})}
 
 
-def serve(page: Any, *, hub: bool = False, local: str = "", result: dict | None = None) -> list:
+def serve(page: Any, *, hub: bool = False, local: str = "", result: dict | None = None,
+          off_pool: bool = False, mac_reserved: bool = False) -> list:
     from urllib.parse import parse_qsl, urlsplit
 
     posts: list[dict] = []
@@ -294,7 +312,8 @@ def serve(page: Any, *, hub: bool = False, local: str = "", result: dict | None 
     def propose(route: Any) -> None:
         q = dict(parse_qsl(urlsplit(route.request.url).query))
         route.fulfill(status=200, content_type="application/json", body=json.dumps(
-            {"ok": True, "board_id": "x", "proposal": proposal(q, hub=hub, local=local)}))
+            {"ok": True, "board_id": "x", "proposal": proposal(q, hub=hub, local=local, off_pool=off_pool,
+                                      mac_reserved=mac_reserved)}))
 
     def job(route: Any) -> None:
         route.fulfill(status=200, content_type="application/json", body=json.dumps({
@@ -481,3 +500,82 @@ def test_t2_twin_a_desk_board_gets_no_lease_wording(demo):
     assert "lease" not in by(page, "nb-intro").inner_text()
     assert "mint" not in by(page, "name-board-modal").inner_text()
     assert not page.errors, page.errors
+
+
+def test_a_board_outside_the_pool_keeps_its_ip_and_warns(demo):
+    page = demo.page()
+    posts = open_stubbed(page, off_pool=True)
+    by(page, "nb-name").fill("LAB-02")
+    expect(by(page, "nb-pool-subnet")).to_contain_text(
+        "This board is on 192.168.11.0/24, outside the address pool (192.168.10.110-199): its "
+        "current address 192.168.11.101 is kept. Choose another address only if the board's "
+        "network will reach it.", timeout=T)
+    seg(page, "nb-ip-mode", "Auto").click()                      # the pool is not offered
+    expect(by(page, "nb-ip-value")).to_have_text("192.168.11.101", timeout=T)
+    expect(seg(page, "nb-ip-mode", "Keep")).to_have_attribute("aria-pressed", "true")
+    expect(by(page, "nb-confirm-subnet")).to_have_count(0)       # keeping needs no box
+    by(page, "identity-phrase").fill("LAB-02")
+    act(page, "identity-fix-confirm").click()
+    expect(by(page, "nb-done")).to_be_visible(timeout=T)
+    assert "ip" not in posts[0] and "confirm_subnet" not in posts[0], posts
+    assert not page.errors, page.errors
+
+
+def test_twin_a_board_on_the_pools_network_has_no_subnet_warning(demo):
+    page = demo.page()
+    open_stubbed(page)
+    by(page, "nb-name").fill("LAB-02")
+    expect(by(page, "nb-ip-value")).to_be_visible(timeout=T)
+    expect(by(page, "nb-pool-subnet")).to_have_count(0)
+    expect(by(page, "nb-confirm-subnet")).to_have_count(0)
+
+
+def test_another_network_for_a_board_outside_the_pool_needs_the_box_ticked(demo):
+    page = demo.page()
+    posts = open_stubbed(page, off_pool=True)
+    by(page, "nb-name").fill("LAB-02")
+    seg(page, "nb-ip-mode", "Custom").click()
+    by(page, "nb-ip-custom").fill("192.168.10.120")
+    box = by(page, "nb-confirm-subnet")
+    expect(box).to_be_visible(timeout=T)
+    expect(by(page, "nb-pool-subnet")).to_contain_text("The board's network will reach this address: set it anyway")
+    by(page, "identity-phrase").fill("LAB-02")
+    confirm = act(page, "identity-fix-confirm")
+    expect(confirm).to_be_disabled()
+    box.check()
+    expect(confirm).to_be_enabled()
+    confirm.click()
+    expect(by(page, "nb-done")).to_be_visible(timeout=T)
+    assert posts[0]["confirm_subnet"] is True and posts[0]["ip"] == "192.168.10.120/24"
+    assert not page.errors, page.errors
+
+
+def test_twin_an_address_in_the_boards_own_network_needs_no_box(demo):
+    page = demo.page()
+    open_stubbed(page, off_pool=True)
+    by(page, "nb-name").fill("LAB-02")
+    seg(page, "nb-ip-mode", "Custom").click()
+    by(page, "nb-ip-custom").fill("192.168.11.150")
+    expect(by(page, "nb-ip-value")).to_have_text("192.168.11.150", timeout=T)
+    expect(by(page, "nb-confirm-subnet")).to_have_count(0)
+    by(page, "identity-phrase").fill("LAB-02")
+    expect(act(page, "identity-fix-confirm")).to_be_enabled()
+
+
+def test_the_images_default_mac_cannot_be_kept_and_the_dialog_says_why(demo):
+    page = demo.page()
+    open_stubbed(page, mac_reserved=True)
+    by(page, "nb-name").fill("LAB-02")
+    expect(by(page, "nb-mac-keep-why")).to_have_text(
+        "The current MAC 02:00:00:00:02:fe is the image's default range, which every board "
+        "starts with: a new random MAC is required.", timeout=T)
+    expect(by(page, "nb-mac-mode").get_by_role("button", name="Keep", exact=True)).to_have_count(0)
+    expect(by(page, "nb-mac-mode").get_by_role("button", name="Random", exact=True)).to_be_visible()
+
+
+def test_twin_a_mac_outside_the_images_range_offers_keep(demo):
+    page = demo.page()
+    open_stubbed(page)
+    by(page, "nb-name").fill("LAB-02")
+    expect(seg(page, "nb-mac-mode", "Keep")).to_be_visible(timeout=T)
+    expect(by(page, "nb-mac-keep-why")).to_have_count(0)
