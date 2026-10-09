@@ -8,6 +8,8 @@ import { toApiError } from "../api.js";
 import { html, useState } from "../lib.js";
 import { boardState, refreshInfo } from "../store.js";
 import { ArmBox, Card, Chip, Icon, Reason, Spinner } from "../ui.js";
+import { openModal } from "../modal.js";
+import { clearNamePrefill, hasNamePrefill, namePrefillArgs } from "../name_prefill.js";
 
 // --- Board › Access (UI v2, lane UI2-BOARD): the SSH claim as its own card -----------------------
 
@@ -30,6 +32,9 @@ export function ClaimCard({ bid }) {
   const [err, setErr] = useState(null);
   // The fingerprint on screen when "Re-pin…" was pressed: that exact key is what gets pinned.
   const [approved, setApproved] = useState("");
+  // Replace the pinned key (a board claimed before and re-imaged): the fingerprint on screen
+  // when it was pressed; the claim pins exactly it or nothing.
+  const [replacing, setReplacing] = useState("");
   if (!c) return null;
   const who = c.claimed || {};
   const changedKey = c.host_key && c.host_key.match === false;
@@ -40,6 +45,11 @@ export function ClaimCard({ bid }) {
   const repinOk = isArmed(bid, "repin") && !moved;
   // The key the board shows must be known to be re-pinned: the button pins exactly that one.
   const canRepin = changedKey && !!hk.reported && c.state !== "unclaimed";
+  // An UNCLAIMED board whose key differs from the one pinned before was re-imaged: the claim is
+  // refused until the old pin is replaced on purpose.
+  const canReplace = changedKey && !!hk.pinned && !!hk.reported && c.state === "unclaimed";
+  const replaceMoved = !!replacing && replacing !== hk.reported;
+  const replaceOk = isArmed(bid, "replace") && !replaceMoved;
   // R3: a claim needs this board's lease on a hub board (the service says 409 HELD too).
   const why = gateReason(bid, "claim", "claim", { holder: "SSH claim" });
   const claim = async () => {
@@ -62,6 +72,20 @@ export function ClaimCard({ bid }) {
     try {
       await runJob("repin", { bid }, { confirm: true, fingerprint: approved }, null, "repin");
       setApproved(""); setArmed(bid, "repin", false);
+      refreshInfo(bid);
+    } catch (e) {
+      setErr(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Same as `board claim --replace-host-key`, with the shown fingerprint named: never automatic.
+  const replace = async () => {
+    if (why) { interlock(bid, "claim", "board claim --replace-host-key", why); setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); return; }
+    setBusy(true); setErr(null);
+    try {
+      await runJob("claim", { bid }, { confirm: true, replace_host_key: true, expect_host_key: replacing }, null, "claim");
+      setReplacing(""); setArmed(bid, "replace", false);
       refreshInfo(bid);
     } catch (e) {
       setErr(toApiError(e));
@@ -93,6 +117,20 @@ export function ClaimCard({ bid }) {
           <dt>Key the board shows now</dt><dd class="mono small" data-testid="hostkey-new">${hk.reported || "not published"}</dd>
           ${hk.boot_id ? html`<dt>Board boot</dt><dd class="mono small" data-testid="hostkey-boot">${hk.boot_id}${hk.up_s !== null && hk.up_s !== undefined ? ` · up ${Math.round(hk.up_s)} s` : ""}</dd>` : null}
         </dl>
+        ${canReplace ? html`<div class="bt-foot" data-testid="claim-replace-box">
+          ${replacing ? html`${replaceMoved ? html`<${Reason} level="err" testid="replace-moved"
+                text=${`The board's key changed again: you approved ${replacing}, it shows ${hk.reported || "no key"} now. Cancel and read the new one.`} />` : null}
+              <${Reason} text="This board was claimed here before and shows a different key now (a new card or image). Only replace the pinned key if you expect that and the new key above is the one on the board's console. Harness Manager then pins exactly that key and claims the board with your key." />
+              <${ArmBox} bid=${bid} armKey="replace" testid="arm-replace"
+                text="Arm: I checked the new key above is the one on the board, and I want to replace the pinned key." />
+              <button type="button" class="btn sm primary" data-action="access-replace-confirm" disabled=${busy || !replaceOk} onClick=${replace}
+                aria-disabled=${why ? "true" : undefined}>${busy ? html`<${Spinner} />` : null} Replace the pinned key and claim</button>
+              <button type="button" class="btn ghost sm" disabled=${busy} onClick=${() => { setReplacing(""); setArmed(bid, "replace", false); }}>Cancel</button>`
+            : html`<button type="button" class="btn sm" data-action="access-replace" aria-disabled=${why ? "true" : undefined}
+                title=${why || "Pin the key the board shows now, in place of the old one, and claim"}
+                onClick=${() => { if (why) { setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); interlock(bid, "claim", "board claim --replace-host-key", why); return; } setReplacing(hk.reported); }}>
+                <${Icon} name="lock" /> Replace the pinned key…</button>`}
+          ${why ? html`<span class="small muted">${why}</span>` : null}</div>` : null}
         ${canRepin ? html`<div class="bt-foot">
           ${repinArmed ? html`${moved ? html`<${Reason} level="err" testid="repin-moved"
                 text=${`The board's key changed again: you approved ${approved}, it shows ${hk.reported || "no key"} now. Cancel and read the new one.`} />` : null}
@@ -109,8 +147,13 @@ export function ClaimCard({ bid }) {
           ${why ? html`<span class="small muted" data-testid="reason-access-repin">${why}</span>` : null}</div>` : null}
       </div>` : null}
       ${c.state === "unclaimed" ? html`<${Reason} level="warn" text="Not claimed: anyone with the image's default key can log in." />` : null}
+      ${c.state === "mine" && hasNamePrefill(bid) ? html`<div class="bt-foot" data-testid="claim-then-name">
+        <${Reason} level="ok" text="Claimed. Next, name this board: the wizard's proposal is ready." />
+        <button type="button" class="btn sm primary" data-action="access-name-after-claim"
+          onClick=${() => { const args = namePrefillArgs(bid); clearNamePrefill(bid); openModal("name-board", { bid, ...args }); }}>
+          <${Icon} name="tag" /> Name this board…</button></div>` : null}
       ${(c.notes || []).map((n) => html`<${Reason} key=${n} text=${n} />`)}
-      ${c.state === "unclaimed" ? html`<div class="bt-foot">
+      ${c.state === "unclaimed" && !(changedKey && !seenBefore) ? html`<div class="bt-foot">
         ${armed ? html`<${Reason} text="Your SSH key gets root on this board; the board then refuses every other key's claim and takes slot changes only over that key's SSH." />
             <button type="button" class="btn sm primary" data-action="access-claim-confirm" disabled=${busy} onClick=${claim}
               aria-disabled=${why ? "true" : undefined}>${busy ? html`<${Spinner} />` : null} Claim with my key</button>

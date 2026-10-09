@@ -199,6 +199,8 @@ def cmd_bringup(ctx: Any) -> int:
                     exc.message, hint=f"restore the backup: {restore}"), steps=steps) from exc
             steps.append([bid, "write", "written", f"{len(files)} files over the Debug USB, read "
                                                    "back"])
+            for note in getattr(storage, "install_notes", None) or []:
+                steps.append([bid, "mbbios", "noted", str(note)])      # "MBBIOS kept: …"
             _overlay_step(ctx, chk, state, bid, steps)
             ctx.confirm(f"reboot {bid} through the MCC? It reloads from the SD")
             from harness_manager.services import reset_guard
@@ -282,7 +284,9 @@ def _witness(ctx: Any, bid: str, steps: list[list[Any]], data: dict[str, Any], l
              restore: str, cand: Any = None) -> int:
     """Wait for the harness at ``--host``; a dark board names the backup to restore."""
     a = ctx.args
-    wait = a.wait or (bringup.LINUX_WITNESS_S if linux else bringup.DEFAULT_WITNESS_S)
+    wait = a.wait or bringup.witness_wait_s(linux)
+    if linux and not a.wait:
+        ctx.note(bringup.LINUX_BOOT_NOTE)
     ctx.note(f"waiting up to {wait:.0f} s for the harness at {a.host} ({bringup.PC_ADDRESS_HINT})")
     try:
         seen = bringup.witness(ctx.engine, a.host, wait_s=wait)

@@ -107,3 +107,61 @@ def test_the_access_card_shows_both_keys_and_repins_exactly_the_key_shown(page_f
     assert posted == {"confirm": True, "fingerprint": CARD}      # exactly the key on screen
     assert not page.errors, page.errors
 
+
+
+# --- WIZARD-FIT: "Replace the pinned key" on an UNCLAIMED board whose key differs from the one pinned ------------
+
+
+def reimaged_unclaimed(daemon, new=CARD):
+    changed_with_details(daemon, new)
+    sim = daemon.app.state.claim
+    with sim._mu:
+        sim.claims[BOARD_FIELDED]["state"] = "unclaimed"
+        sim.claims[BOARD_FIELDED]["claimed"] = None
+
+
+def test_replace_the_pinned_key_shows_both_keys_and_posts_exactly_the_key_shown(page_factory, daemon):
+    reimaged_unclaimed(daemon)
+    page = page_factory()
+    open_board(page)
+    expect(page.locator('[data-testid="hostkey-old"]')).to_contain_text(PINNED, timeout=T)
+    expect(page.locator('[data-testid="hostkey-new"]')).to_have_text(CARD)
+    expect(page.locator('[data-action="access-claim"]')).to_have_count(0)     # a plain claim is refused
+    expect(page.locator('[data-action="access-repin"]')).to_have_count(0)     # re-pin is for a claimed board
+    page.locator('[data-action="access-replace"]').click()
+    confirm = page.locator('[data-action="access-replace-confirm"]')
+    expect(confirm).to_have_text("Replace the pinned key and claim")
+    assert confirm.is_disabled()                                  # behind the Arm box
+    page.locator('[data-testid="arm-replace"]').click()
+    expect(confirm).to_be_enabled()
+    confirm.click()
+    sim = daemon.app.state.claim
+    for _ in range(100):
+        if any(p.get("replace_host_key") for p in sim.posts):
+            break
+        page.wait_for_timeout(50)
+    posted = next(p for p in sim.posts if p.get("replace_host_key"))
+    assert posted == {"confirm": True, "replace_host_key": True, "expect_host_key": CARD}
+    assert not page.errors, page.errors
+
+
+def test_twin_replace_is_never_automatic_and_cancel_posts_nothing(page_factory, daemon):
+    reimaged_unclaimed(daemon)
+    page = page_factory()
+    open_board(page)
+    sim = daemon.app.state.claim
+    page.locator('[data-action="access-replace"]').click()
+    page.wait_for_timeout(300)
+    assert not sim.posts                                          # pressing "…" posts nothing
+    page.get_by_role("button", name="Cancel").click()
+    expect(page.locator('[data-action="access-replace"]')).to_be_visible()
+    assert not sim.posts
+    assert not page.errors, page.errors
+
+
+def test_twin_a_claimed_board_with_a_changed_key_offers_repin_not_replace(page_factory, daemon):
+    changed_with_details(daemon)
+    page = page_factory()
+    open_board(page)
+    expect(page.locator('[data-action="access-repin"]')).to_be_visible(timeout=T)
+    expect(page.locator('[data-action="access-replace"]')).to_have_count(0)

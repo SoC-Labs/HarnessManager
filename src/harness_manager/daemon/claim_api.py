@@ -6,7 +6,7 @@ docs/API.md "SSH claim (Linux harness)" (bearer auth and the error envelope as e
 | Method and path | Returns |
 |---|---|
 | ``GET /boards/{bid}/claim?refresh=`` | ``{board_id, claim}``: ``claim`` is ``BoardInfo.claim`` (null on bare metal). ``refresh=true`` asks the board now, through the hub when there is one |
-| ``POST /boards/{bid}/claim`` ``{confirm: true, key?, adopt?, replace_host_key?}`` | 202 job ``claim``; the result is ``{board_id, claim}`` with ``claim.action`` ``claimed`` or ``adopted`` |
+| ``POST /boards/{bid}/claim`` ``{confirm: true, key?, adopt?, replace_host_key?, expect_host_key?}`` (``expect_host_key``: with ``replace_host_key``, the exact fingerprint shown to the user; the claim pins it or nothing) | 202 job ``claim``; the result is ``{board_id, claim}`` with ``claim.action`` ``claimed`` or ``adopted`` |
 | ``POST /boards/{bid}/repin`` ``{confirm: true, fingerprint}`` | 202 job ``repin``; pins exactly ``fingerprint`` (the new key the user was shown) when identify and ssh both show it; the result is ``{board_id, claim}`` with ``claim.action`` ``repinned``. The lease holder only |
 | ``GET /boards/{bid}/ssh?command=`` | ``{board_id, argv}``: the pinned ``ssh [-J HUB] -l root BOARD`` (nothing is run) |
 
@@ -76,6 +76,10 @@ def register(ctx: RouteContext) -> None:
         key = _opt_str(b, "key")
         adopt = _bool(b, "adopt", False)
         replace = _bool(b, "replace_host_key", False)
+        expect = _opt_str(b, "expect_host_key")
+        if expect and not replace:
+            raise RefusedError("expect_host_key goes with replace_host_key: it names the exact "
+                               "key the replacement pins")
         svc = service()
         with d.gates.op(bid):                               # 409 HELD while a job runs
             svc.check_claimable(s)                          # 422 on a board with no claim
@@ -83,7 +87,7 @@ def register(ctx: RouteContext) -> None:
 
         def run(progress: Callable[[str, int, int], None]) -> Any:
             st = svc.claim(s, confirm=True, key=key, adopt=adopt, replace_host_key=replace,
-                           progress=lambda text: progress(text, 0, 0))
+                           expect_host_key=expect, progress=lambda text: progress(text, 0, 0))
             return {"board_id": bid, "claim": st}
 
         return ctx.accepted(d.jobs.submit("claim", bid, run))

@@ -682,3 +682,105 @@ def test_twin_an_exhausted_pool_proposes_no_ip_and_says_why():
     assert p["ip_error"].startswith("no free address in the pool 192.168.10.110-199: all 90 "
                                     "are taken (90 given to or seen on boards here")
     assert "--ip" not in bringup.identity_command("h", p)
+
+
+# --- WIZARD-FIT: the v2.0 release bundle layout (config-sd/ + overlays/ + linux_bundle.json) -------
+
+
+def v2_bundle(root: Path, *, overlays: dict[str, dict] | None = None, aaa: bool = False) -> Path:
+    sd_tree(root / "config-sd")
+    (root / "linux_bundle.json").write_text(json.dumps({"static_id": "0x44EE76D5",
+                                                        "static_usercode": "0xFB1F8C76"}))
+    (root / "linux_slot.img").write_bytes(b"S0LB" + b"\0" * 1020)
+    keyed = {"static_id": "0x44EE76D5", "static_usercode": "0xFB1F8C76", "ip_class": "open"}
+    for name, man in (overlays if overlays is not None else {"led": keyed, "uart_echo": keyed}).items():
+        o = root / "overlays" / name
+        o.mkdir(parents=True)
+        (o / "manifest.json").write_text(json.dumps(man))
+    if aaa:
+        (root / "overlays" / "aaa").mkdir()
+    return root
+
+
+def test_the_v2_bundle_root_is_accepted_linux_with_its_overlays(tmp_path):
+    chk = bringup.check_bundle(v2_bundle(tmp_path / "b"), tmp_path / "w")
+    assert not chk.refused and chk.layout == "release-bundle"
+    assert chk.sd_root == str(tmp_path / "b" / "config-sd")
+    assert chk.impl == "linux" and chk.os_image["kind"] == "slot"
+    assert chk.overlays["names"] == ["led", "uart_echo"]
+    assert chk.overlays["path"] == str(tmp_path / "b" / "overlays")
+    assert chk.warnings == [] and "config.txt" in chk.install_files
+
+
+def test_the_v2_bundle_as_a_zip_with_a_top_folder(tmp_path):
+    z = zip_dir(v2_bundle(tmp_path / "b"), tmp_path / "b.zip", top="mps3-bundle/")
+    chk = bringup.check_bundle(z, tmp_path / "w")
+    assert not chk.refused and chk.impl == "linux" and chk.overlays["count"] == 2
+
+
+def test_the_old_sd_and_overlays_open_layout_still_works(tmp_path):
+    chk = bringup.check_bundle(release_bundle(tmp_path / "old"), tmp_path / "w")
+    assert not chk.refused and chk.sd_root == str(tmp_path / "old" / "sd")
+    assert chk.overlays["path"] == str(tmp_path / "old" / "overlays" / "open")
+
+
+def test_a_bare_sd_folder_is_accepted_and_has_no_overlays_nor_linux(tmp_path):
+    chk = bringup.check_bundle(sd_tree(tmp_path / "card"), tmp_path / "w")
+    assert not chk.refused and chk.layout == "sd-tree" and chk.overlays is None and chk.impl == ""
+
+
+def test_the_config_sd_folder_of_a_v2_bundle_finds_its_bundle_one_folder_up(tmp_path):
+    root = v2_bundle(tmp_path / "b")
+    chk = bringup.check_bundle(root / "config-sd", tmp_path / "w")
+    assert not chk.refused and chk.impl == "linux" and chk.overlays["count"] == 2
+
+
+def test_twin_a_folder_that_is_neither_is_refused_naming_both_layouts(tmp_path):
+    (tmp_path / "x").mkdir()
+    (tmp_path / "x" / "readme.txt").write_text("hi")
+    chk = bringup.check_bundle(tmp_path / "x", tmp_path / "w")
+    assert chk.refused and "config-sd/ or sd/" in chk.problems[0]
+
+
+def test_overlays_are_checked_ip_class_and_keying(tmp_path):
+    keyed = {"static_id": "0x44EE76D5", "static_usercode": "0xFB1F8C76", "ip_class": "open"}
+    chk = bringup.check_bundle(v2_bundle(tmp_path / "b", overlays={
+        "led": keyed,
+        "wrong": {**keyed, "static_id": "0x11111111"},
+        "secret": {**keyed, "ip_class": "aaa"}}, aaa=True), tmp_path / "w")
+    assert not chk.refused
+    assert chk.overlays["names"] == ["led", "wrong"] and chk.overlays["excluded"] == ["secret"]
+    assert any("secret is ip_class aaa" in w for w in chk.warnings)
+    assert any("wrong is keyed to static_id 0x11111111" in w and "0x44EE76D5" in w
+               for w in chk.warnings)
+    assert any("overlays/aaa" in w for w in chk.warnings)
+    kept = bringup.keep_overlays(chk, tmp_path / "keep")        # only the open ones join
+    assert sorted(p.name for p in kept.iterdir()) == ["led", "wrong"]
+
+
+def test_twin_a_clean_bundle_has_no_overlay_warnings_and_joins_in_place(tmp_path):
+    chk = bringup.check_bundle(v2_bundle(tmp_path / "b"), tmp_path / "w")
+    assert chk.warnings == [] and "excluded" not in chk.overlays
+    assert bringup.keep_overlays(chk, tmp_path / "keep") == tmp_path / "b" / "overlays"
+
+
+def test_a_v2_bundle_without_overlays_has_none(tmp_path):
+    chk = bringup.check_bundle(v2_bundle(tmp_path / "b", overlays={}), tmp_path / "w")
+    assert not chk.refused and chk.overlays is None
+
+
+# --- WIZARD-FIT: the witness waits the Linux time for a Linux bundle --------------------------------
+
+
+def test_the_witness_wait_is_the_linux_budget_for_a_linux_bundle_else_bare_metal(tmp_path):
+    from harness_manager.services.update.planner import LINUX_REBOOT_WAIT_S
+
+    assert bringup.witness_wait_s(True) == bringup.LINUX_WITNESS_S == LINUX_REBOOT_WAIT_S
+    assert bringup.witness_wait_s(False) == bringup.DEFAULT_WITNESS_S
+    assert bringup.LINUX_WITNESS_S > 240 > bringup.DEFAULT_WITNESS_S - 1     # 3-4 min fits
+    linux = bringup.check_bundle(v2_bundle(tmp_path / "b"), tmp_path / "w")
+    bare = bringup.check_bundle(sd_tree(tmp_path / "card"), tmp_path / "w")
+    assert bringup.witness_wait_s(linux.impl == "linux") == 300.0
+    assert bringup.witness_wait_s(bare.impl == "linux") == 180.0
+    assert bringup.status(None)["witness_s"] == {"bare-metal": 180.0, "linux": 300.0}
+    assert "3 to 4 minutes" in bringup.status(None)["linux_boot_note"]

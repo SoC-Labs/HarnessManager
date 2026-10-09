@@ -397,3 +397,35 @@ def test_the_live_display_reason_is_the_one_refusal(rig_factory_lm2: Any) -> Non
     assert other in got and f"board repin TARGET --fingerprint {other}" not in got   # message only
     assert "SSH to this board is refused" in got
     assert rig_factory_lm2().adapter.display_reason() == ""             # twin: key matches
+
+
+# --- WIZARD-FIT: "Replace the pinned key" = claim --replace-host-key, pinning exactly the key shown ------------
+
+
+def reprovisioned(rig: Any) -> None:
+    rig.shell.ssh_claimed, rig.shell.authorized_keys = False, None        # a new card
+    reimage(rig)
+
+
+def test_replace_pins_exactly_the_key_that_was_shown(rig_factory):
+    rig = claimed_rig(rig_factory)
+    reprovisioned(rig)
+    st = claim_it(rig, replace_host_key=True, expect_host_key=FP_NEW)
+    assert st["state"] == "mine" and st["host_key"]["pinned"] == FP_NEW
+
+
+def test_twin_replace_refuses_when_the_board_shows_another_key_than_the_shown_one(rig_factory):
+    rig = claimed_rig(rig_factory)
+    reprovisioned(rig)
+    with pytest.raises(CL.HostKeyChangedError, match="you approved " + FP_THIRD):
+        claim_it(rig, replace_host_key=True, expect_host_key=FP_THIRD)
+    assert rig.shell.authorized_keys is None                  # nothing sent
+    assert rig.claim.claim_status()["host_key"]["pinned"] == FP_OLD
+
+
+def test_twin_without_replace_a_changed_key_is_still_refused(rig_factory):
+    rig = claimed_rig(rig_factory)
+    reprovisioned(rig)
+    with pytest.raises(CL.HostKeyChangedError):
+        claim_it(rig, expect_host_key=FP_NEW)
+    assert rig.shell.authorized_keys is None

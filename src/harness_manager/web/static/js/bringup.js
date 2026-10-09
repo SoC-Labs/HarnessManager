@@ -31,6 +31,7 @@ import { week } from "./week.js";
 import { factChips } from "./sections/boardfacts.js";
 import { NO_IDENTITY_STORE } from "./sections/identity.js";
 import { openBoardHere } from "./sidebar.js";
+import { setNamePrefill } from "./name_prefill.js";
 import { backupSpec, SdRecovery } from "./sections/sd.js";
 import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
 
@@ -44,6 +45,7 @@ import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./sections/power.js";
 }());
 
 export const DEFAULT_HOST = "192.168.10.101";
+const LINUX_BOOT_NOTE = "A Linux board takes 3 to 4 minutes to come up after the reboot, so this waits up to 5 minutes";
 export const USB_WARNING = "A USB write can take 5 minutes: do not unplug, power off or start a second write.";
 export const NETWORK_OS_REASON = "comes with Linux v2.1";
 export const READER_MISSING = "this build has no card-reader writer: use the Debug USB";
@@ -378,7 +380,7 @@ function BundleFacts({ chk }) {
   return html`<div class="bu-check" data-testid="bundle-check" data-refused=${chk.refused ? "yes" : "no"}>
     <dl class="kv">
       <dt>Bundle</dt><dd><span class="mono">${chk.path}</span>
-        <div class="sub">${chk.kind === "zip" ? "a zip, unpacked by the service" : "a folder"} · ${chk.layout === "release-bundle" ? "a release bundle (its sd/)" : "a config-SD tree"}${chk.impl ? ` · ${chk.impl === "linux" ? "Linux" : "bare-metal"} harness${chk.version ? ` ${chk.version}` : ""}` : ""}</div></dd>
+        <div class="sub">${chk.kind === "zip" ? "a zip, unpacked by the service" : "a folder"} · ${chk.layout === "release-bundle" ? "a release bundle (its config-sd/ or sd/)" : "a config-SD tree"}${chk.impl ? ` · ${chk.impl === "linux" ? "Linux" : "bare-metal"} harness${chk.version ? ` ${chk.version}` : ""}` : ""}</div></dd>
       <dt>Base .bit</dt><dd data-testid="bundle-bit">${bit ? html`<span class="mono">${bit.path}</span>
         <div class="sub">${bytesText(bit.size)} · sha256 <span class="mono" title=${bit.sha256}>${short(bit.sha256)}</span>${bit.part ? ` · ${bit.part}` : ""}${bit.userid ? ` · USERID ${bit.userid}` : ""}</div>`
         : html`<span class="muted">none</span>`}</dd>
@@ -387,7 +389,7 @@ function BundleFacts({ chk }) {
       ${chk.sha256 ? html`<dt>sha256</dt><dd data-testid="bundle-sha"><span class="mono bu-sha">${chk.sha256}</span>
         <div class="sub">${shaHow(chk)}</div></dd>` : null}
       ${chk.os_image ? html`<dt>Slot image</dt><dd><span class="mono">linux_slot.img</span><div class="sub">${bytesText(chk.os_image.size)} · an OS slot image (slot A/B, over Ethernet once Linux runs): never written to a card, and not the whole-card image step 5 asks for</div></dd>` : null}
-      ${chk.overlays ? html`<dt>Overlays</dt><dd data-testid="bundle-overlays">${chk.overlays.count} open overlay${chk.overlays.count === 1 ? "" : "s"} (${chk.overlays.names.join(", ")})<div class="sub">after the write, <span class="mono">${chk.overlays.path}</span> joins mps3.overlay_dirs, so Program and Restore find them</div></dd>` : null}
+      ${chk.overlays ? html`<dt>Overlays</dt><dd data-testid="bundle-overlays">${chk.overlays.count} open overlay${chk.overlays.count === 1 ? "" : "s"} (${chk.overlays.names.join(", ")})${(chk.overlays.excluded || []).length ? `; left out, not open: ${chk.overlays.excluded.join(", ")}` : ""}<div class="sub">after the write, <span class="mono">${chk.overlays.path}</span> joins mps3.overlay_dirs, so Program and Restore find them</div></dd>` : null}
     </dl>
     ${(chk.problems || []).map((p) => html`<${Reason} key=${p} level="err" testid="bundle-problem" text=${p} />`)}
     ${(chk.warnings || []).map((p) => html`<${Reason} key=${p} level="warn" text=${p} />`)}
@@ -445,7 +447,7 @@ function BundleSource({ bid, w }) {
       <button type="button" class="btn sm" data-action="bundle-check" disabled=${!w.path.trim() || w.checking}
         aria-busy=${w.checking ? "true" : undefined} onClick=${() => checkBundle(bid)}>
         ${w.checking ? html`<${Spinner} />` : html`<${Icon} name="list-checks" />`} Check</button></div>
-    <p class="small muted">A path on the machine running harness-manager-daemon: the config-SD tree (config.txt and MB/), a release bundle (its sd/), or a zip of either. Never an .ebf.</p>
+    <p class="small muted">A path on the machine running harness-manager-daemon: the config-SD tree (config.txt and MB/), a release bundle (the folder with config-sd/, overlays/ and linux_bundle.json), or a zip of either. Never an .ebf.</p>
     ${examples.length ? html`<div class="bu-examples small" data-testid="bundle-examples"><span class="muted">In this demo:</span>
       ${examples.map((x) => html`<button type="button" key=${x.path} class="link-btn" title=${x.path}
         onClick=${() => { w.path = x.path; changed(); checkBundle(bid); }}>${x.what}</button>`)}</div>` : null}
@@ -633,7 +635,8 @@ function readerLines(res, what) {
       { kind: "out", text: res.privileged_command || "" },
       ...(res.verify_command ? [{ kind: "hint", text: `then verify: ${res.verify_command} (${res.verify_expect || ""})` }] : [])];
   }
-  return [{ kind: "ok", text: `${what} written${res && res.verified ? " and verified" : ""}${res && res.sha256 ? ` (sha256 ${short(res.sha256)})` : ""}` }];
+  return [{ kind: "ok", text: `${what} written${res && res.verified ? " and verified" : ""}${res && res.sha256 ? ` (sha256 ${short(res.sha256)})` : ""}` },
+    ...(what === "the configuration SD files" ? mbbiosLines((res && res.mbbios || []).map((d) => d.note).filter(Boolean)) : [])];
 }
 
 // --- lane WINDOWS: the Administrator steps for a whole-card image on Windows ---
@@ -658,6 +661,14 @@ function PrivilegedSteps({ res }) {
     ${im ? html`<p class="small" data-testid="bu-os-imager"><b>Or with ${im.name}</b> (<span class="mono">${im.url}</span>):</p>
       <ul class="bu-priv-imager">${(im.steps || []).map((s, i) => html`<li key=${i}>${s}</li>`)}</ul>` : null}
   </div>`;
+}
+
+// What the write said about the MCC's BIOS line ("MBBIOS kept: mbb_v132.ebf"): a safety fact, so
+// it is always on screen, with a plain line when the write reported none.
+export const MBBIOS_NONE = "MBBIOS: no .ebf is ever written; this write reported no MBBIOS change.";
+function mbbiosLines(notes) {
+  const got = (notes || []).map((n) => String(n && n.note !== undefined ? n.note : n)).filter(Boolean);
+  return (got.length ? got : [MBBIOS_NONE]).map((text) => ({ kind: "out", text, testid: "bu-mbbios" }));
 }
 
 function overlayLines(o) {
@@ -721,6 +732,7 @@ function WriteStep({ bid, w, ready }) {
     run: (ctx) => bringupJob("bringupInstall", bid, { bundle: w.check.path, backup_path: backup, confirm_unsigned: w.unsignedTyped.trim() },
       (d) => ctx.progress(`${d.phase || "install"}: ${pct(d)}%`, d.phase), "sd_install"),
     render: (res) => [{ kind: "ok", text: `wrote ${(res.files || []).length} file(s) to the configuration SD and read them back; the board runs them after a reboot` },
+      ...mbbiosLines(res && res.notes),
       ...overlayLines(res && res.overlays)],
     onDone: (ok) => {
       if (ok) { w.written = { how: "usb", at: Date.now() }; w.rebooted = null; w.witness = null; w.witnessError = null; }
@@ -831,6 +843,7 @@ function RebootStep({ bid, w }) {
       <div class="field"><label for=${`bu-host-${bid}`}>It answers at</label>
         <input id=${`bu-host-${bid}`} class="input mono" data-testid="bu-host" value=${w.host} placeholder=${(st.default_host || DEFAULT_HOST)}
           onInput=${(e) => { w.host = e.target.value; changed(); }} /></div>
+      ${linux(w) ? html`<p class="small muted" data-testid="bu-linux-wait"><${Icon} name="clock" cls="sm" /> ${st.linux_boot_note || LINUX_BOOT_NOTE}.</p>` : null}
       <p class="small muted" data-testid="bu-pc-hint"><${Icon} name="ethernet-port" cls="sm" /> ${st.pc_hint || "this PC needs an Ethernet port on the board's network (192.168.10.0/24)"}.</p>
       <${ActionRow} bid=${bid} panel="bu_witness" spec=${witnessSpec(bid, w)} icon="ethernet-port"
         gate=${{ guard: () => (canWitness ? "" : reader ? "put the card back and power the board on first" : "reboot the board first") }} />
@@ -1014,7 +1027,11 @@ async function openOnEthernet(bid, w) {
   const r = await openBoardHere(id);
   if (!r || !r.error || r.error.errName === "ALREADY") {
     navigate(id, "board/access");
-    openModal("name-board", { bid: id, prefill, impl });
+    // A Linux harness is claimed first (naming is done over the claim's SSH): Board > Access
+    // leads with the claim card, and the proposal waits for the dialog the claim leads to. A
+    // harness with no claim (bare metal) goes straight to the dialog, which says what it can do.
+    if (impl === "linux") setNamePrefill(id, { prefill, impl });
+    else openModal("name-board", { bid: id, prefill, impl });
   }
 }
 
@@ -1045,12 +1062,15 @@ function NextStep({ bid, w }) {
   const rescue = !!(w.witness && w.witness.state === "rescue");
   const why = ok ? "" : rescue ? "the board is in stage0 RESCUE: do step 5, power-cycle it, then wait for the harness again (step 4)"
     : "once the harness answers (step 4)";
-  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title="Next: name it, claim it" state="" testid="bu-step-next">
-    <p class="small secondary">Every new board starts as MPS3, 192.168.10.101 (the generic image). On Board > Access: claim its SSH (Linux), then name it: the dialog sets its name, a random MAC and its own IP.</p>
+  const linuxUp = ok && w.witness.impl === "linux";
+  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title=${linuxUp ? "Next: claim it, then name it" : "Next: name it"} state="" testid="bu-step-next">
+    <p class="small secondary" data-testid="bu-next-text">${linuxUp
+      ? "Every new board starts as MPS3, 192.168.10.101 (the generic image). First claim its SSH on Board > Access (the name is set over that claim); once it is claimed, name it: the dialog sets its name, a random MAC and its own IP."
+      : "Every new board starts as MPS3, 192.168.10.101 (the generic image). On Board > Access, name it: the dialog sets its name, a random MAC and its own IP."}</p>
     <${Proposal} bid=${bid} w=${w} />
     <div class="row mt-8"><button type="button" class="btn primary sm" data-action="bu-next" disabled=${!ok}
       title=${why} onClick=${() => openOnEthernet(bid, w)}>
-      <${Icon} name="ethernet-port" /> Open it on Ethernet and name it…</button>
+      <${Icon} name="ethernet-port" /> ${linuxUp ? "Open it on Ethernet and claim it…" : "Open it on Ethernet and name it…"}</button>
       ${!ok ? html`<span class="small muted" data-testid="bu-next-why">${why}</span>` : null}</div>
   <//>`;
 }
