@@ -171,3 +171,21 @@ def test_make_debug_adapter_needs_the_shell():
         shell = None
 
     assert mps3ocd.make_debug_adapter(NoShell()) is None
+
+
+def test_nanosoc_motor_debugs_like_nanosoc():
+    """The workshop's motor overlay (rm_id 0x0100000C) is the nanosoc SoC: same DAP config,
+    same halt-examine attach hook (the board's designs.conf carries the same row)."""
+    from harness_manager_mps3.openocd import design_debug
+
+    motor, plain = design_debug(0x000C), design_debug(0x0001)
+    assert motor.name == "nanosoc_motor"
+    assert motor.configs == plain.configs and motor.gdb_attach == plain.gdb_attach
+
+
+def test_negative_twin_an_unknown_design_still_has_no_debug_port():
+    from harness_manager.core.errors import NothingOnTargetError
+    from harness_manager_mps3.openocd import design_debug
+
+    with pytest.raises(NothingOnTargetError):
+        design_debug(0x000D)

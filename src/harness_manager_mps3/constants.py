@@ -106,6 +106,7 @@ KNOWN_DESIGNS = {
     0x0003: "nanosoc_multicore",
     0x0005: "nanosoc_upy",
     0x0008: "nanosoc_iice",
+    0x000C: "nanosoc_motor",
     0x001E: "led",
 }
 
@@ -129,6 +130,7 @@ DAP_DESIGN_CONFIGS = {
     0x0001: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),
     0x0005: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),
     0x0008: ("nanosoc_iice_chain.cfg", "nanosoc_ops.tcl"),
+    0x000C: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),     # nanosoc_motor: the nanosoc DAP
 }
 
 # Where the OpenOCD target-half configs live when the setting mps3.openocd_cfg_dir (its
