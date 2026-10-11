@@ -75,7 +75,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
         TSV_COLUMNS.setdefault(layout, cols)
     fmt, board = _fmt(), _board()
     vp = subparsers.add_parser(
-        "board", help="the board's SSH and identity: claim, claim-status, ssh, identity "
+        "board", help="the board's SSH and identity: claim, repin, claim-status, ssh, identity "
                       "(label, IP and MAC against its hub entry, and the fix)",
         description="The Linux harness's SSH claim (TOFU) and its SSH reach, and the board's "
                     "identity. A claim gives your key root on the board, pins its host key, "
