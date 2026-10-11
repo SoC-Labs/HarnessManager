@@ -106,7 +106,9 @@ def test_the_page_draws_its_rows_in_the_font_and_ticks():
 
 
 def test_the_stream_speaks_the_wire_hello_key_rate_ping_ack():
-    s = DemoLcdStream(panel())
+    # the panel's own clock: on a loaded box a second boundary inside the reads added a change
+    # UPDATE after the key frame, so ups[-1] was not the key's last part
+    s = DemoLcdStream(panel(Clock()))
     r = w.MessageReader()
     msgs = read_all(s, r)
     assert len(msgs) == 1 and isinstance(msgs[0], w.DisplayInfo)          # HELLO first
