@@ -291,15 +291,30 @@ def test_the_witness_default_wait_is_the_linux_one_when_the_bundle_is_linux(clie
     assert waited[False] < 1.5 < 2.3 <= waited[True]
 
 
-def test_the_status_says_releases_are_refused_and_the_reader_is_off(client):
+def test_the_status_says_releases_verify_with_the_pinned_keys_and_the_reader_is_off(client):
+    """HM 1.0.0 pinned the 2026 root and release keys (trust.PINNED_KEYS): a signed release
+    can be verified, so the status does not say REFUSED."""
+    from harness_manager.services.update.trust import PINNED_KEYS
+
     c, _ = client
+    st = c.get("/api/v1/bringup", headers=H).json()
+    assert st["signing"]["refused"] is False and st["signing"]["name"] == ""
+    assert st["signing"]["keys"] == len(PINNED_KEYS) > 0
+    assert st["sd_flash"]["enabled"] is False
+    assert st["sd_flash"]["routes"] is True        # integ: SD-FLASH's writer is merged
+    assert st["rescue_network"]["available"] is False
+
+
+def test_negative_twin_with_no_trusted_key_the_status_says_releases_are_refused(client,
+                                                                                 monkeypatch):
+    from harness_manager.services.update.trust import TrustStore
+
+    c, eng = client
+    monkeypatch.setattr(eng.update, "trust", TrustStore(pinned=()))
     st = c.get("/api/v1/bringup", headers=H).json()
     assert st["signing"]["refused"] is True and st["signing"]["name"] == "REFUSED"
     assert st["signing"]["reason"] == ("cannot verify channel.json: this build has no pinned "
                                        "update-signing keys")
-    assert st["sd_flash"]["enabled"] is False
-    assert st["sd_flash"]["routes"] is True        # integ: SD-FLASH's writer is merged
-    assert st["rescue_network"]["available"] is False
 
 
 # --- the hub lease: a board behind a hub keeps its gate; a USB-only board has none --------------
