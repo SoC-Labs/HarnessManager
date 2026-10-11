@@ -29,14 +29,14 @@ from . import github
 from .app import AppUpdater
 from .appstage import app_dirs, offer_app, prepare_app_release, refuse_if_bad
 from .bundle import OverlayHandler, PackOverlayHandler
-from .channel import ChannelClient, VerifiedChannel
+from .channel import CatalogMismatchError, ChannelClient, VerifiedChannel, serves_one_document
 from .download import Downloader, token_from_env
 from .executor import HarnessInstaller, UpdateOutcome, default_os_slots
 from .lease_gate import lease_state, require_lease
 from .os_slots import OsSlotAdapter
 from .planner import Approval, BoardView, Plan, make_plan, netboot_of, os_boot_of
 from .policy import Policy, load_policy
-from .schema import harness_catalog
+from .schema import CATALOG_APP, harness_catalog
 from .state import Pins, StoredComponents, UpdateState
 from .trust import TrustStore, load_trust
 from .version import compare
@@ -213,8 +213,19 @@ class UpdateService:
     def fetch_channel(self, channel: str | None = None, source: str | None = None, *,
                       catalog: str | None = None) -> VerifiedChannel:
         """``catalog`` (OTA-C): ``hm-app`` or a harness catalogue; picks a ``github:``
-        source's rolling release, and the signed document must belong to it."""
-        return self.channels.fetch(self.policy.channel_for(channel), source, catalog=catalog)
+        source's rolling release, and the signed document must belong to it.
+
+        The app's catalogue from a source that serves one document whatever catalogue is
+        asked (a channel URL or file, e.g. T7's combined app + harness channel) is that
+        document, read as the catalogue it belongs to: there is no other one to pick. Its
+        signature, channel name, serial and app releases are checked as for any channel."""
+        name = self.policy.channel_for(channel)
+        try:
+            return self.channels.fetch(name, source, catalog=catalog)
+        except CatalogMismatchError:
+            if catalog != CATALOG_APP or not serves_one_document(source, name or ""):
+                raise
+            return self.channels.fetch(name, source)
 
     # -- board --
 

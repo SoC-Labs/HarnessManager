@@ -117,6 +117,22 @@ def default_channel() -> str:
     return os.environ.get(CHANNEL_ENV, "").strip() or DEFAULT_CHANNEL
 
 
+class CatalogMismatchError(RefusedError):
+    """The signed channel belongs to another catalogue than the one asked for."""
+
+
+def serves_one_document(source: str | None, channel: str) -> bool:
+    """Whether ``source`` gives the same ``channel.json`` whichever catalogue is asked for
+    (a channel URL or file: T7's combined app + harness channel, one catalogue's channel):
+    there is then no other document to pick, unlike a ``github:`` source, a ``{catalog}``
+    template or a mirror with one release per catalogue."""
+    try:
+        return channel_url(source, channel, "hm-app") == channel_url(source, channel,
+                                                                      "mps3-harness")
+    except HarnessError:
+        return False
+
+
 @dataclass(frozen=True)
 class VerifiedChannel:
     channel: Channel
@@ -195,7 +211,7 @@ class ChannelClient:
                 f"{key.id_hex} signed it", hint="the channel is misconfigured; refusing it")
         cat = parsed.catalog_id
         if catalog and cat != catalog:
-            raise RefusedError(
+            raise CatalogMismatchError(
                 f"asked for the {catalog!r} catalogue but the signed file belongs to {cat!r}",
                 hint="a channel of another catalogue is being served here; refusing it")
         # 4. anti-rollback, per (catalogue, channel)

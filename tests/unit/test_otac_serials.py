@@ -154,3 +154,40 @@ def test_a_migrated_floor_still_refuses_a_rollback_through_the_client(tmp_path):
     doc = json.loads(c.state.serials.read_text())
     assert doc["format"] == 2 and doc["catalogs"]["mps3-harness"]["stable"]["serial"] == 6
     assert doc["migrated"]["from_format"] == 1                       # rewritten on accept
+
+
+# --- the app's catalogue from a source that serves one document ------------------------------
+
+
+def _service(tmp_path):
+    from harness_manager.services.update import UpdateService
+    from harness_manager.services.update.policy import Policy
+
+    state_dir = tmp_path / "client"
+    return UpdateService(state_dir=state_dir, trust=KEYS.trust(), app_version="0.1.0",
+                         downloader=Downloader(state_dir / "update" / "cache", mirrors=()),
+                         policy=Policy())
+
+
+def test_the_app_channel_of_a_one_document_source_is_that_document(tmp_path):
+    """`update check` / `update app` ask for hm-app; a --source that is one channel.json (T7's
+    combined channel, a harness catalogue) has no other document to give, so it is read as
+    the catalogue it belongs to."""
+    src = publish(tmp_path / "m", serial=1)
+    got = _service(tmp_path).fetch_channel("stable", src, catalog="hm-app")
+    assert (got.catalog, got.channel.serial) == ("mps3-harness", 1)
+
+
+def test_twin_a_source_that_names_catalogues_still_refuses_another_catalogue(tmp_path):
+    publish(tmp_path / "m", serial=1, catalog="mps3-harness")
+    (tmp_path / "cat").mkdir()
+    (tmp_path / "cat" / "hm-app").symlink_to(tmp_path / "m" / "channel" / "stable")
+    src = str(tmp_path / "cat" / "{catalog}" / "channel.json")       # hm-app serves a harness file
+    with pytest.raises(RefusedError, match="asked for the 'hm-app' catalogue"):
+        _service(tmp_path).fetch_channel("stable", src, catalog="hm-app")
+
+
+def test_twin_a_harness_catalogue_is_never_read_from_another_one(tmp_path):
+    src = publish(tmp_path / "m", serial=1, catalog="mps3-harness")
+    with pytest.raises(RefusedError, match="asked for the 'kr260-harness' catalogue"):
+        _service(tmp_path).fetch_channel("stable", src, catalog="kr260-harness")
