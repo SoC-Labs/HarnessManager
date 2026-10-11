@@ -1,4 +1,19 @@
-# host/openocd — debug front-end configs (SWD 6920 / XVC 2542)
+# host/openocd — debug front-end configs (JTAG 6921 / XVC 2542; SWD 6920 retired)
+
+> **The live DUT-debug path is JTAG**, via `nanosoc_mps3_jtag.cfg` on TCP
+> **6921** (the shell's `jtag_server`, OpenOCD `remote_bitbang` → SoC-400
+> SWJ-DP, TAP `0x6ba00477`). The SWD `swd_server` on 6920 has been retired
+> since the JTAG-bridge shell `0xCD74B6AE` and is not in the default image; the
+> SWD sections below are kept for reference. Overrides go **before** `-f` (the
+> cfg only sets defaults `if ![info exists …]`, so a later `-c "set …"` is
+> silently ignored):
+>
+> ```sh
+> openocd -c "set TRANSPORT_MODE rbb" -c "set RBB_HOST <board-ip>" \
+>         -f host/openocd/nanosoc_mps3_jtag.cfg \
+>         -f host/openocd/nanosoc_ops.tcl \
+>         -c init -c nanosoc_halt_pc -c resume -c shutdown
+> ```
 
 The shell exposes **two independent debug transports** over the one
 Ethernet port (docs/contracts/net-protocol.md v0.2 port map;

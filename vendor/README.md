@@ -11,13 +11,13 @@ Do not edit anything here by hand. Rebuild it with `scripts/vendor_pyverify.sh` 
 | Field | Value |
 |---|---|
 | Wheel | `mps3_pyverify-0.1.0-py3-none-any.whl` |
-| sha256 | `4b12ce07a76c41d75bae3879b256d87a7ae2d7c438bcdf4addb019529cbc2dd8` |
+| sha256 | `6937ea39abff5624c0aa3bb138a8aa99238de7e8e98e5e10fbd72969ad360c1a` |
 | Built from | `git@github.com:SoC-Labs/MPS3-NanoSoC-Verification-Platform-dev.git` |
-| Platform commit | `3f7cea28f3c591d14d2fcffece6c863924a893bf` (2026-09-29T22:24:00+01:00) |
-| Commit subject | Merge pull request #9 from SoC-Labs/feat/linux-harness |
-| Last pyverify change at or before it | `e7dd3c792e4b7b5b0223a43ac181c2386b6aee11` |
+| Platform commit | `61d78b03b887beb2acf3eaa12f12ee286f9b52b7` (2026-10-08T14:52:27+01:00) |
+| Commit subject | VERSION 2.0.1: the image reports harness "2.0.1" |
+| Last pyverify change at or before it | `8bceab659fe7e0600022421bf6e29eebce394729` |
 | Source | `git archive <commit> host/pyverify` (committed files only) |
-| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1790717040 |
+| Built with | `pip wheel --no-deps`, pip 26.2.1, Python 3.11.13, SOURCE_DATE_EPOCH=1791467547 |
 
 Check it: `sha256sum vendor/mps3_pyverify-0.1.0-py3-none-any.whl` must print the sha256 above.
 `tests/unit/test_l5_release.py` checks this in `make check`.
@@ -25,15 +25,16 @@ Check it: `sha256sum vendor/mps3_pyverify-0.1.0-py3-none-any.whl` must print the
 ## The MPS3 OpenOCD configs (openocd/)
 
 `openocd/` (shipped in the wheel as `src/harness_manager_mps3/openocd_cfg/`) is `host/openocd` from the same platform commit (last changed at
-`e7dd3c792e4b7b5b0223a43ac181c2386b6aee11`). The MPS3 pack's debug service needs these target configs. From a
+`426fc91cb964ee3864c13e17fc17be1a6b82e6e7`). The MPS3 pack's debug service needs these target configs. From a
 checkout next to the platform repo it finds them there; anywhere else it uses the packaged copy.
 `HARNESS_MANAGER_MPS3_OPENOCD_DIR` still overrides both.
 
 | File | sha256 |
 |---|---|
-| `openocd/README.md` | `dd8a2238f03c1f936b2e0420a4d6907b004029969417a4850210e8a15694ec83` |
+| `openocd/README.md` | `4ba7e4ecd9dc6a11b629cf62057af767be6cae540b75304b680e978c18983dc4` |
 | `openocd/nanosoc_iice_chain.cfg` | `5932ad1f8adf046f1aa668ef1af825cf00e24c4e60cf70baa494ef52aa2d688f` |
 | `openocd/nanosoc_mps3_jtag.cfg` | `c90b14130d96457b77f478b08271325575f78b88fcf12e2f0e1ddaa264477ad2` |
+| `openocd/nanosoc_mps3_multicore_jtag.cfg` | `9c987d432d7f2d16f5e0a4b1c9f0b097932cb4f5f6364e4060148284632ec5b3` |
 | `openocd/nanosoc_ops.tcl` | `37e8fae8d2c3c0ac024c178d9f7e7080a43c80cdd397a26c308866787cb2fb74` |
 | `openocd/swd_cortex_m.cfg` | `a212d56a3c390e937212113634e1b67ed3e9ed9ae3a353e46e1b758d915f09c0` |
 | `openocd/swd_remote_bitbang.cfg` | `cb84665c01a493a573bf52f308c187e2a67449ae8ffee3bcdf891446b8341ce1` |
