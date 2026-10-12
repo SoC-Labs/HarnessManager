@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .common import ReleaseError, sha256_file
+from .common import EXIT_USAGE, ReleaseError, sha256_file
 from .harness import AAA_RMS, _hex, _val
 
 REVS = ("A", "B", "C")
@@ -446,9 +446,7 @@ def assemble(dest: Path, *, from_dir: Path, bit: Path | None = None,
             stage_kit(Path(kit), dest, sid, out)
         text = (Path(notes).read_text(encoding="utf-8") if notes is not None
                 else default_notes(out, lb, version, test=test))
-        if "«" in text or "»" in text:
-            raise ReleaseError(f"the release notes {notes} still hold «…» placeholders",
-                               hint="fill them in first: the notes are signed into the release")
+        _refuse_placeholders(text, notes)
         if test:
             text = TEST_BANNER + "\n\n" + text
         (dest / "notes.md").write_text(text.strip() + "\n", encoding="utf-8")
@@ -456,6 +454,26 @@ def assemble(dest: Path, *, from_dir: Path, bit: Path | None = None,
         shutil.rmtree(dest, ignore_errors=True)
         raise
     return out
+
+
+def _refuse_placeholders(text: str, where: Any) -> None:
+    if "«" in text or "»" in text:
+        raise ReleaseError(f"the release notes {where} still hold «…» placeholders",
+                           hint="fill them in first: the notes are signed into the release")
+
+
+def check_notes_file(path: str | Path) -> str:
+    """Read a notes file for ``promote --notes`` with harness-release's checks: it must exist,
+    be non-empty and hold no «…» placeholders. Returns the stripped text (as bundle notes.md
+    become the entry's ``notes``)."""
+    p = Path(path)
+    if not p.is_file():
+        raise ReleaseError(f"the release notes {p} do not exist", code=EXIT_USAGE)
+    text = p.read_text(encoding="utf-8")
+    _refuse_placeholders(text, p)
+    if not text.strip():
+        raise ReleaseError(f"the release notes {p} are empty")
+    return text.strip()
 
 
 TEST_BANNER = ("TEST BUILD: signed with a throwaway TEST key (id 7E57C0DE...). No Harness "

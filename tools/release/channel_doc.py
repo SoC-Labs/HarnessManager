@@ -227,9 +227,13 @@ class ChannelDoc:
         self._set([*self.releases(), entry], version if make_current else self.current)
         self.notes.append(f"added {version}" + (" (current)" if make_current else ""))
 
-    def promote_from(self, source: ChannelDoc, version: str) -> None:
+    def promote_from(self, source: ChannelDoc, version: str, *,
+                     notes: str | None = None, notes_from: str = "") -> None:
         """Copy ``version``'s entry from ``source`` (e.g. beta) into this channel (e.g. stable),
-        unchanged, and make it current. The assets are not touched: no re-upload."""
+        unchanged, and make it current. The assets are not touched: no re-upload.
+
+        ``notes`` (already checked) REPLACES the entry's ``notes`` in THIS channel's copy only;
+        every other field is byte-identical and the source channel is never touched."""
         entry = source.release(version)
         if entry is None:
             raise ReleaseError(f"{source.catalog} {version} is not on the {source.channel!r} "
@@ -240,6 +244,8 @@ class ChannelDoc:
         if waiver and self.channel == "stable":
             raise ReleaseError(f"{version} was published from a dirty image ({waiver}); a dirty "
                                "release never reaches stable", hint="re-mint from a clean tree")
+        if notes is not None:
+            entry = {**copy.deepcopy(entry), "notes": notes}
         mine = self.release(version)
         if mine is not None:
             if _comparable(mine) != _comparable(entry):
@@ -255,6 +261,9 @@ class ChannelDoc:
                 _derive_rekey(e, self.releases())
             self._set([*self.releases(), e], version)
         self.notes.append(f"promoted {version} from {source.channel} (current)")
+        if notes is not None:
+            self.notes.append(f"notes of {version} REPLACED on {self.channel} from "
+                              f"{notes_from or '(given)'} (the {source.channel} entry is unchanged)")
 
     def withdraw(self, version: str, reason: str, *, new_current: str = "") -> None:
         entry = self.release(version)
