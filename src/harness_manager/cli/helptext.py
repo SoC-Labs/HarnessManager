@@ -119,7 +119,7 @@ program TARGET RM [--yes] [--keep-on-card] [--allow-dut-flash-write] [--overlay-
     (and in which slot) or why not; a card write that fails does not fail the
     program (the new design is running; the card keeps the one it had).
     A design whose boot code writes the DUT's flash (the board pack says which:
-    on the MPS3, nanosoc_multicore until Linux v2.1) is warned about on EVERY
+    on the MPS3, nanosoc_multicore) is warned about on EVERY
     program, and asks for a word, typed (MULTICORE); --yes never implies it.
     --allow-dut-flash-write gives it for a script; without it a run with no
     terminal refuses (exit 15) and writes nothing.

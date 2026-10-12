@@ -25,7 +25,7 @@ pytestmark = pytest.mark.browser
 T = 15_000
 APP = {"width": 1440, "height": 1000}
 TEXT = ("nanosoc_multicore's boot code writes the DUT's QSPI flash (one byte at 0x20000 onward) "
-        "on every boot, until Linux v2.1: it damages a MicroPython image there (nanosoc_upy). "
+        "on every boot: it damages a MicroPython image there (nanosoc_upy). "
         "Type MULTICORE to program it anyway.")
 NEEDS_WORD = ("type MULTICORE to program nanosoc_multicore: its boot code writes the DUT's flash")
 HELD = "Program is for the lease holder only: alice@lab-pc-07 holds this board"

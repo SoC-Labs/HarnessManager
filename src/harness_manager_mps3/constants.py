@@ -114,11 +114,11 @@ KNOWN_DESIGNS = {
 # Harness Manager warns before EVERY program of one and asks for the word, typed; --yes never
 # implies it). {design id (rm_id & 0xFFFF): (why, word)}; a manifest naming the design matches
 # too (overlays.writes_dut_flash). nanosoc_multicore: CPU1's boot ROM writes one 0x00 byte at
-# DUT flash 0x20000 onward on every boot, until the v2.1 ROM fix (Linux v2.0.0 release notes,
+# DUT flash 0x20000 onward on every boot (still in v2.1; Linux v2.0.0 release notes,
 # known issue 15; docs/HIL_LINUX.md OCD8).
 WRITES_DUT_FLASH = {
     0x0003: ("nanosoc_multicore's boot code writes the DUT's QSPI flash (one byte at 0x20000 "
-             "onward) on every boot, until Linux v2.1: it damages a MicroPython image there "
+             "onward) on every boot: it damages a MicroPython image there "
              "(nanosoc_upy).", "MULTICORE"),
 }
 
