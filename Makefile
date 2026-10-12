@@ -29,7 +29,8 @@
 # The key source: HM_RELEASE_SECRET_KEY + HM_RELEASE_PUBLIC_KEY (minisign CLI), or RELEASE_ARGS.
 #   make release [VERSION=] [CHANNEL=beta] [MIRROR=DIR] [PUBLISH=1]     the app (wheel, lock, dep)
 #   make release-harness BUNDLE=DIR VERSION=1.2.0 [CHANNEL=beta]       a harness bundle (H13)
-#   make release-promote VERSION=0.2.0 [CATALOG=hm-app]                beta -> stable, re-signed
+#   make release-promote VERSION=0.2.0 [CATALOG=hm-app] [NOTES=FILE]   beta -> stable, re-signed
+#                                                (NOTES=FILE replaces the notes on stable only)
 
 PY        ?= python3.11
 VENV      ?= .venv
@@ -148,7 +149,7 @@ release-harness: venv
 		$(RELEASE_COMMON)
 
 release-promote: venv
-	$(RELEASE) promote --catalog $(CATALOG) --version $(VERSION) $(RELEASE_COMMON)
+	$(RELEASE) promote --catalog $(CATALOG) --version $(VERSION) $(if $(NOTES),--notes $(NOTES)) $(RELEASE_COMMON)
 
 # --- RELEASE-PIPE --- a harness release from the PLATFORM's artifacts (docs/RELEASING.md,
 # "Publishing a harness release"): assembled, signed and verified into OUT (default

@@ -118,6 +118,15 @@ directory you already have.
 4. Publish to beta: add `PUBLISH=1`.
 5. After a soak: `make release-promote CATALOG=mps3-harness VERSION=1.2.0 PUBLISH=1`.
 
+**Replacing the notes at promotion.** A published version is never rewritten, so a notes-only
+fix does not need a version bump: `promote` copies the beta entry unchanged, but with
+`--notes FILE` (Makefile: `NOTES=FILE`) the promoted STABLE entry carries the text of FILE as its
+`notes` instead. Nothing else changes (components, sha256s, identity, compat), the beta entry is
+not touched, and the stable entry is signed as usual. FILE gets the same checks as
+`harness-release --notes`: it must exist, be non-empty and hold no `«…»` placeholders. The run
+records "notes REPLACED on stable from FILE" in its report and publish plan.
+`make release-promote CATALOG=mps3-harness VERSION=2.1.0 NOTES=path/to/notes.md PUBLISH=1`
+
 **The harness front-end refuses, and writes nothing, when:**
 
 | Refusal | Code | Why |

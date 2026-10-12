@@ -378,3 +378,69 @@ def test_mirror_layout_is_readable_by_the_client(tmp_path, repo, keys):
     verified = svc.fetch_channel("beta", str(mch))
     wheel = svc.downloader.fetch(verified.channel.app_release().wheel, base_url=verified.url)
     assert sha256_file(wheel) == wheel_sha
+
+
+# --- promote --notes ---------------------------------------------------------------------------
+
+
+def _beta_and_promote(tmp_path, repo, keys, *extra):
+    out = tmp_path / "dist"
+    assert run_main(app_args(out, repo, keys["sk"]))[0] == 0
+    layout = Layout(out)
+    beta_bytes = layout.channel_file(APP, "beta").read_bytes()
+    rc, lines = run_main(["promote", "--out", str(out), "--version", "0.2.0", "--signer",
+                          "python", "--secret-key", str(keys["sk2"]),
+                          "--trust-key", str(keys["pk"]), *extra])
+    return layout, beta_bytes, rc, "\n".join(lines)
+
+
+def _rel(path):
+    return json.loads(path.read_bytes())["app"]["releases"][0]
+
+
+def test_promote_with_notes_replaces_them_on_stable_only(tmp_path, repo, keys):
+    nf = tmp_path / "public_notes.md"
+    nf.write_text("Public notes for stable.\n\n- one\n", encoding="utf-8")
+    layout, beta_bytes, rc, text = _beta_and_promote(tmp_path, repo, keys, "--notes", str(nf))
+    assert rc == 0, text
+    assert "REPLACED" in text and str(nf) in text
+    beta, stable = layout.channel_file(APP, "beta"), layout.channel_file(APP, "stable")
+    assert beta.read_bytes() == beta_bytes                              # beta untouched
+    b, s = _rel(beta), _rel(stable)
+    assert s["notes"] == "Public notes for stable.\n\n- one" and s["notes"] != b["notes"]
+    rest = lambda e: {k: v for k, v in e.items() if k not in ("notes", "status")}
+    assert rest(s) == rest(b)                                           # all else identical
+    sig = minisign.parse_signature(stable.with_name("channel.json.minisig").read_bytes())
+    minisign.verify(stable.read_bytes(), sig, _pub(keys["pk2"]))        # signed as usual
+    assert client(tmp_path, keys["pk2"]).check(channel="stable", source=str(stable))[
+        "app_update"] == "0.2.0"
+
+
+def test_twin_promote_without_notes_copies_them_as_today(tmp_path, repo, keys):
+    layout, beta_bytes, rc, text = _beta_and_promote(tmp_path, repo, keys)
+    assert rc == 0, text
+    assert "REPLACED" not in text
+    b, s = _rel(layout.channel_file(APP, "beta")), _rel(layout.channel_file(APP, "stable"))
+    assert s["notes"] == b["notes"] and s["notes"]
+
+
+def test_promote_notes_with_placeholders_are_refused_and_write_nothing(tmp_path, repo, keys):
+    nf = tmp_path / "draft.md"
+    nf.write_text("Fixes «what changed» and more\n", encoding="utf-8")
+    layout, beta_bytes, rc, text = _beta_and_promote(tmp_path, repo, keys, "--notes", str(nf))
+    assert rc != 0 and "placeholders" in text
+    assert not layout.channel_file(APP, "stable").exists()
+    assert layout.channel_file(APP, "beta").read_bytes() == beta_bytes
+
+
+def test_twin_promote_notes_file_missing_is_refused(tmp_path, repo, keys):
+    layout, _b, rc, text = _beta_and_promote(tmp_path, repo, keys, "--notes",
+                                             str(tmp_path / "nope.md"))
+    assert rc != 0 and "do not exist" in text and not layout.channel_file(APP, "stable").exists()
+
+
+def test_twin_promote_notes_file_empty_is_refused(tmp_path, repo, keys):
+    empty = tmp_path / "empty.md"
+    empty.write_text("  \n", encoding="utf-8")
+    layout, _b, rc, text = _beta_and_promote(tmp_path, repo, keys, "--notes", str(empty))
+    assert rc != 0 and "empty" in text and not layout.channel_file(APP, "stable").exists()

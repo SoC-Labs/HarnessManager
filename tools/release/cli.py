@@ -453,9 +453,11 @@ def cmd_publish_check(ctx: Ctx) -> int:
 
 
 def cmd_promote(ctx: Ctx) -> int:
+    from .assemble import check_notes_file
     a = ctx.args
     if a.source == a.to:
         raise ReleaseError("--from and --to are the same channel", code=EXIT_USAGE)
+    new_notes = check_notes_file(a.notes) if a.notes else None     # before any signing/network
     signer = _signer(a, ctx.runner)
     _publish_rails(ctx, signer, a.to)
     layout = _layout(a)
@@ -472,9 +474,12 @@ def cmd_promote(ctx: Ctx) -> int:
         base = _base_path(ctx, layout, a.catalog, a.to, Path(tmp))
         board = src.doc.get("board")
         doc = ChannelDoc.load_or_new(base, a.catalog, a.to, trust_keys, board=board)
-        doc.promote_from(src, a.version)
+        doc.promote_from(src, a.version, notes=new_notes, notes_from=str(a.notes or ""))
         _sign_and_verify(ctx, doc, layout, signer, trust_keys, a.version)
         ctx.report.update({"version": a.version, "from": a.source})
+        if new_notes is not None:
+            ctx.report.update({"notes_replaced_from": str(a.notes), "changes": doc.notes})
+            ctx.say(f"notes REPLACED on {a.to} from {a.notes} ({a.source} entry untouched)")
         steps = channel_steps(layout, a.catalog, a.to, gh=a.gh)
         return _finish(ctx, layout, steps, f"promote {a.catalog} {a.version} {a.source} -> {a.to}",
                        a.catalog, a.to, [])
@@ -684,6 +689,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--version", required=True)
     p.add_argument("--from", dest="source", default="beta")
     p.add_argument("--to", default="stable")
+    p.add_argument("--notes", metavar="FILE",
+                   help="REPLACE the promoted entry's notes (target channel only; the source "
+                        "channel is never rewritten). Default: copied unchanged")
     p.set_defaults(func=cmd_promote)
 
     p = sub.add_parser("withdraw", help="withdraw a release (never deleted)")
