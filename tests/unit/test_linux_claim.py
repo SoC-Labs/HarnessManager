@@ -747,3 +747,130 @@ def test_negative_twin_an_adopt_refused_by_the_board_keeps_the_key_hint(rig_fact
 
 def test_the_keys_sync_retry_is_still_6_5_s():
     assert sum(CL.KEYS_SYNC_RETRIES_S) == 6.5
+
+
+# --- 7. a hub board: the app asks the hub itself (lane HUB-CLAIM) ---------------------------------
+#
+# Board > Access asks ``GET /claim?hub=true`` on load (``ClaimService.check_hub``): identify run
+# ON the hub over ssh, never the lease and never a board port, reused for a minute. ``info``
+# then shows that answer as the last check, so the card offers the claim as on the LAN.
+
+
+def _hub_down(monkeypatch, calls: list[str]) -> None:
+    def factory(host: str, group: str | None, jump: str = "") -> Any:
+        def run(argv: list[str], timeout: float | None = None) -> Any:
+            calls.append(host)
+            raise OSError("ssh: connect to host mapstone-dev port 22: No route to host")
+        return run
+
+    monkeypatch.setattr(hubmod, "DEFAULT_RUNNER_FACTORY", factory)
+
+
+def test_a_hub_board_never_checked_is_asked_through_the_hub_and_shows_unclaimed(rig_factory):
+    rig = rig_factory(via=f"ssh:{HUB}")
+    before = rig.claim.claim_status()
+    assert before["state"] == "unknown" and rig.hub_calls == []
+    assert any("Check through the hub" in n for n in before["notes"])
+    st = ClaimService().check_hub(rig.session)
+    assert st["state"] == "unclaimed" and st["live"] is True and st["route"] == f"hub {HUB}"
+    assert [argv[4] for _h, _j, argv in rig.hub_calls] == ["identify"]
+    assert rig.shell.authorized_keys is None and not rig.shell.ssh_claimed  # nothing claimed
+    info = rig.claim.claim_status()                         # what the card reads next
+    assert info["state"] == "unclaimed" and "(last check)" in info["source"]
+    assert len(rig.hub_calls) == 1
+
+
+def test_negative_twin_a_second_load_reuses_the_answer_and_a_refresh_asks_again(rig_factory):
+    rig = rig_factory(via=f"ssh:{HUB}")
+    svc = ClaimService()
+    svc.check_hub(rig.session)
+    svc.check_hub(rig.session)
+    assert len(rig.hub_calls) == 1                          # cached: one ssh per minute
+    rig.shell.ssh_claimed = True                            # claimed elsewhere meanwhile
+    st = svc.refresh(rig.session)
+    assert len(rig.hub_calls) == 2 and st["state"] == "other"
+
+
+def test_a_hub_board_claimed_by_you_shows_mine_after_the_hub_check(rig_factory):
+    rig = rig_factory(via=f"ssh:{HUB}")
+    rig.session.hub = object()
+    ClaimService(None, leases=Leases()).claim(rig.session, confirm=True, key=str(rig.public))
+    # the app restarted: a new adapter, nothing in memory; the record says the pin is ours
+    rig.session.claim = CL.Mps3Claim(rig.session)
+    calls = len(rig.hub_calls)
+    st = ClaimService().check_hub(rig.session)
+    assert len(rig.hub_calls) == calls + 1
+    assert st["state"] == "mine" and st["live"] is True and st["claimed"]["mine"] is True
+    assert st["host_key"]["match"] is True
+
+
+def test_negative_twin_a_hub_board_claimed_by_another_key_says_so(rig_factory):
+    rig = rig_factory(via=f"ssh:{HUB}", claimed=True)
+    st = ClaimService().check_hub(rig.session)
+    assert st["state"] == "other" and st["claimed"]["mine"] is False
+    assert any("--adopt" in n for n in st["notes"])
+
+
+def test_a_hub_that_cannot_be_asked_says_why_and_is_not_asked_again_at_once(rig_factory,
+                                                                             monkeypatch):
+    rig = rig_factory(via=f"ssh:{HUB}")
+    calls: list[str] = []
+    _hub_down(monkeypatch, calls)
+    st = ClaimService().check_hub(rig.session)
+    assert st["state"] == "unknown" and st["live"] is False
+    assert any(n.startswith("not checked now: cannot run ssh to the hub") for n in st["notes"])
+    info = rig.claim.claim_status()                         # info keeps saying why
+    assert any("No route to host" in n for n in info["notes"])
+    ClaimService().check_hub(rig.session)
+    assert calls == [HUB]                                   # a failure is reused for 30 s
+    ClaimService().refresh(rig.session)                     # Check through the hub: asks now
+    assert calls == [HUB, HUB]
+
+
+def test_negative_twin_a_hub_down_after_a_good_check_keeps_the_last_check_and_says_so(
+        rig_factory, monkeypatch):
+    rig = rig_factory(via=f"ssh:{HUB}")
+    ClaimService().check_hub(rig.session)
+    rig.session.claim = CL.Mps3Claim(rig.session)           # restarted: the record remains
+    _hub_down(monkeypatch, [])
+    st = ClaimService().check_hub(rig.session)
+    assert st["state"] == "unclaimed" and "(last check)" in st["source"]
+    assert any("the hub could not be asked" in n and "No route to host" in n
+               for n in st["notes"])
+
+
+def test_a_lan_board_is_never_sent_to_a_hub(rig_factory):
+    rig = rig_factory()
+    st = ClaimService().check_hub(rig.session)
+    assert st["state"] == "unclaimed" and st["route"] == "lan" and rig.hub_calls == []
+    assert st == {**rig.claim.claim_status(), "checked_at": st["checked_at"]}
+
+
+def test_the_hub_identify_feeds_the_identity_card_of_a_hub_board(rig_factory):
+    from harness_manager_mps3.net_identity import Mps3NetIdentity
+
+    rig = rig_factory(via=f"ssh:{HUB}")
+    ni = Mps3NetIdentity(rig.session)
+    assert ni.read(cheap=True) is None                      # never asked: nothing to show
+    ClaimService().check_hub(rig.session)
+    got = ni.read(cheap=True)
+    raw = rig.claim.hub_identify()[0]
+    assert got is not None and got["via"] == "identify" and not got.get("last_check")
+    assert got["mac"] and got["mac"] == ni_mac(raw["mac"])
+    assert got["label"] == raw["label"] == "MPS3"            # v0.16 identify carries it
+    assert len(rig.hub_calls) == 1                          # the card read asked nothing
+
+
+def test_negative_twin_a_lan_board_never_reads_a_hub_answer(rig_factory):
+    from harness_manager_mps3.net_identity import Mps3NetIdentity
+
+    rig = rig_factory()
+    ClaimService().check_hub(rig.session)
+    assert rig.claim.hub_identify() is None
+    assert Mps3NetIdentity(rig.session)._from_hub_identify(impl="") is None
+
+
+def ni_mac(mac: str) -> str:
+    from harness_manager.services import board_identity as BI
+
+    return BI.norm_mac(mac)

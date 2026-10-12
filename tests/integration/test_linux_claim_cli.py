@@ -180,6 +180,37 @@ def test_negative_twin_api_claim_confirmed_is_a_job_and_info_carries_it(client, 
     assert argv[-1] == "uptime" and "StrictHostKeyChecking=yes" in argv
 
 
+def test_api_hub_check_of_a_lan_board_is_its_plain_status(client, linux, monkeypatch):
+    """HUB-CLAIM: the Access card asks ``?hub=true`` on load; a LAN board has no hub, so it
+    is identify on the LAN as before, and nothing is claimed."""
+    from harness_manager_mps3 import hub as hubmod
+
+    c, B = client
+    shell, _ssh, _public = linux
+    monkeypatch.setattr(hubmod, "DEFAULT_RUNNER_FACTORY",
+                        lambda *a, **k: pytest.fail("a LAN board was sent to a hub"))
+    st = c.get(f"{B}/claim?hub=true", headers=H).json()["claim"]
+    assert st["state"] == "unclaimed" and st["route"] == "lan" and st["live"] is True
+    assert c.get(f"{B}/claim", headers=H).json()["claim"]["state"] == "unclaimed"
+    assert shell.authorized_keys is None
+
+
+def test_negative_twin_api_hub_true_is_the_hub_check_and_refresh_still_asks_now(client,
+                                                                              monkeypatch):
+    from harness_manager.services.claim import ClaimService
+
+    c, B = client
+    seen: list[str] = []
+    monkeypatch.setattr(ClaimService, "check_hub",
+                        lambda self, s: seen.append("hub") or {"state": "unclaimed"})
+    monkeypatch.setattr(ClaimService, "refresh",
+                        lambda self, s: seen.append("refresh") or {"state": "mine"})
+    assert c.get(f"{B}/claim?hub=true", headers=H).json()["claim"] == {"state": "unclaimed"}
+    assert c.get(f"{B}/claim?refresh=true", headers=H).json()["claim"] == {"state": "mine"}
+    c.get(f"{B}/claim", headers=H)
+    assert seen == ["hub", "refresh"]
+
+
 def test_api_bare_metal_claim_is_422_and_info_is_unchanged(tmp_path):
     with VirtualMps3(tmp_path / "vb", FIELDED_3F1A560F) as vb:
         eng = engine_for(vb)

@@ -96,6 +96,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import getpass
 import hashlib
 import inspect
@@ -162,6 +163,14 @@ STATE_UNKNOWN = "unknown"
 LAN_TTL_S = 30.0
 IDENTIFY_TIMEOUT_S = 1.0
 HUB_TIMEOUT_S = 30.0
+#: How long a hub identify answer is reused by a check that is not a refresh (the app's
+#: Access card asks on every load), and a failed ask.
+HUB_TTL_S = 60.0
+HUB_FAIL_TTL_S = 30.0
+#: A hub board never asked through the hub (``info`` never makes that round trip itself).
+HUB_NOT_YET = ("not checked through the hub yet (identify is UDP: it does not ride the SSH "
+               "tunnel); Check through the hub (Board > Access) or `harness-manager board "
+               "claim-status TARGET` asks the hub")
 SSH_TIMEOUT_S = 30.0
 #: After a fresh claim harnessd runs mps3-keys-sync (<= 2 s) BEFORE its final TFTP ACK, and
 #: dropbear re-reads authorized_keys on every login, so the key normally works at once (the
@@ -742,6 +751,10 @@ class Mps3Claim:
         self._records = records or ClaimRecords()
         self._mu = threading.Lock()
         self._lan: Observation | None = None
+        #: the last hub ask (identify run on the hub), and the last reply it relayed
+        self._hub_obs: Observation | None = None
+        self._hub_raw: tuple[dict[str, Any], float] | None = None
+        self._hub_mu = threading.Lock()
         # CLAIMED-LOCK: the session's one board-SSH forward, and who holds it
         self._fwd_mu = threading.RLock()
         self._fwd: Any = None
@@ -818,7 +831,10 @@ class Mps3Claim:
 
     def observe(self, *, refresh: bool = False, hub_ok: bool = False) -> Observation:
         """identify's ``ssh`` block. On the LAN: asked (cached ``LAN_TTL_S``). Through a hub:
-        asked on the hub only when ``hub_ok``; otherwise the last check on record."""
+        asked on the hub only when ``hub_ok`` (a ``refresh`` always asks and says what it
+        found; otherwise an answer from the last ``HUB_TTL_S`` is reused, and a failed ask
+        falls back to the last check on record, saying why); without ``hub_ok`` the last
+        check on record (with a hub failure of the last ``HUB_FAIL_TTL_S``, when there was one)."""
         from . import identify as _identify
 
         hub, jump = self.route()
@@ -840,33 +856,92 @@ class Mps3Claim:
                 self._lan = obs
             self._remember(obs)
             return obs
-        if not hub_ok:
-            seen = self._records.get(self.board_id).get("observed") or {}
-            if isinstance(seen, dict) and seen.get("at"):
-                claimed = seen.get("claimed")
-                return Observation(claimed if isinstance(claimed, bool) else None,
-                                   str(seen.get("host_key") or ""),
-                                   f"{seen.get('source') or 'identify via ' + hub} (last check)",
-                                   float(seen["at"]), key_fp=str(seen.get("key_fp") or ""),
-                                   boot_id=str(seen.get("boot_id") or ""),
-                                   up_s=seen.get("up_s") if isinstance(seen.get("up_s"),
-                                                                        (int, float)) else None)
-            return Observation(None, "", f"identify via {hub}", now,
-                               "not checked through the hub yet (identify is UDP: it does not "
-                               "ride the SSH tunnel); `harness-manager board claim-status` asks "
-                               "the hub")
+        if hub_ok:
+            obs = self._ask_hub(hub, jump, refresh=refresh)
+            if refresh or obs.claimed is not None:
+                return obs                   # a refresh (and every claim) says what it found
+            failed: Observation | None = obs
+        else:
+            failed = self._hub_failed(now)
+        last = self._last_check()
+        if last is not None:
+            if failed is not None:
+                return dataclasses.replace(
+                    last, error=f"the hub could not be asked at {_iso(failed.at)[11:16]} "
+                                f"UTC, so this is the last check: {failed.error}")
+            return last
+        if failed is not None:
+            return failed
+        return Observation(None, "", f"identify via {hub}", now, HUB_NOT_YET)
+
+    def _last_check(self) -> Observation | None:
+        """The last identify answer on record for this board (``claims.json``), else None."""
+        seen = self._records.get(self.board_id).get("observed") or {}
+        if not (isinstance(seen, dict) and seen.get("at")):
+            return None
+        hub, _ = self.route()
+        claimed = seen.get("claimed")
+        up = seen.get("up_s")
+        return Observation(claimed if isinstance(claimed, bool) else None,
+                           str(seen.get("host_key") or ""),
+                           f"{seen.get('source') or 'identify via ' + hub} (last check)",
+                           float(seen["at"]), key_fp=str(seen.get("key_fp") or ""),
+                           boot_id=str(seen.get("boot_id") or ""),
+                           up_s=up if isinstance(up, (int, float)) else None)
+
+    def _hub_failed(self, now: float) -> Observation | None:
+        """The last hub ask, when it failed less than ``HUB_FAIL_TTL_S`` ago."""
+        with self._mu:
+            cached = self._hub_obs
+        if cached is not None and cached.claimed is None and now - cached.at < HUB_FAIL_TTL_S:
+            return cached
+        return None
+
+    def _ask_hub(self, hub: str, jump: str, *, refresh: bool) -> Observation:
+        """identify run ON the hub (UDP cannot ride the SSH tunnel): one ssh to the hub, no
+        lease, no board port. Reused ``HUB_TTL_S`` (a failure ``HUB_FAIL_TTL_S``) unless
+        ``refresh``; the reply's label/IP/MAC stay for the identity card (``hub_identify``)."""
+        with self._hub_mu:                   # one ask at a time: a second caller reuses it
+            return self._ask_hub_locked(hub, jump, refresh=refresh)
+
+    def _ask_hub_locked(self, hub: str, jump: str, *, refresh: bool) -> Observation:
+        from . import identify as _identify
+
+        now = time.time()
+        if not refresh:
+            with self._mu:
+                cached = self._hub_obs
+            if cached is not None and now - cached.at < (
+                    HUB_TTL_S if cached.claimed is not None else HUB_FAIL_TTL_S):
+                return cached
         port = _identify.identify_port()
         host = self.board_host()
+        raw: dict[str, Any] | None = None
         try:
             out = _hub_call(hub, jump, hub_argv("identify", host, port, 2.0), HUB_TIMEOUT_S)
         except UnreachableError as exc:
-            return Observation(None, "", f"identify via {hub}", now, exc.message)
-        if not out.get("ok"):
-            return Observation(None, "", f"identify via {hub}", now,
-                               f"the hub asked, the board did not answer identify: {out.get('err')}")
-        obs = self._from_raw(out.get("reply") or {}, f"identify via {hub}", now)
-        self._remember(obs)
+            obs = Observation(None, "", f"identify via {hub}", now, exc.message)
+        else:
+            if not out.get("ok"):
+                obs = Observation(None, "", f"identify via {hub}", now,
+                                  f"the hub asked, the board did not answer identify: "
+                                  f"{out.get('err')}")
+            else:
+                reply = out.get("reply")
+                raw = dict(reply) if isinstance(reply, Mapping) else {}
+                obs = self._from_raw(raw, f"identify via {hub}", now)
+                self._remember(obs)
+        with self._mu:
+            self._hub_obs = obs
+            if raw is not None:
+                self._hub_raw = (raw, now)
         return obs
+
+    def hub_identify(self) -> tuple[dict[str, Any], float] | None:
+        """The last identify reply the hub relayed for this board, and when (epoch s); None
+        when the hub was never asked in this session. Never asks."""
+        with self._mu:
+            return self._hub_raw
 
     @staticmethod
     def _from_raw(raw: Mapping[str, Any], source: str, at: float) -> Observation:
@@ -956,6 +1031,8 @@ class Mps3Claim:
             state = STATE_MINE
         else:
             state = STATE_OTHER
+        if obs.claimed is not None and obs.error:
+            notes.append(obs.error)          # a last check shown because the hub did not answer
         if match is False and seen_at:
             notes.append(changed_back_words(reported, pinned, seen_at,
                                             unclaimed=obs.claimed is False)

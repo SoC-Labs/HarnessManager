@@ -15,7 +15,7 @@ import { html, useEffect, useRef, useState } from "../lib.js";
 import { boardState, changed, navigate, openedOrClosedHere, probe, refreshInfo, S, toast } from "../store.js";
 import { openBoardHere } from "../sidebar.js";
 import { holderOnly } from "../week.js";
-import { claimOf } from "./claim.js";
+import { claimOf, hubRouted } from "./claim.js";
 import { clearNamePrefill, namePrefillArgs } from "../name_prefill.js";
 import { Card, Icon, Reason, Seg, Spinner } from "../ui.js";
 import { closeModal, ModalShell, openModal, registerModal } from "../modal.js";
@@ -418,6 +418,8 @@ export function IdentityCard({ bid, clashes = [], goTo = null }) {
         <button type="button" class=${`btn sm ${changes.length ? "" : "primary"}`} data-action="access-identity-name"
           onClick=${() => { const args = namePrefillArgs(bid); clearNamePrefill(bid); openModal("name-board", { bid, ...args }); }}><${Icon} name="tag" /> Name this board…</button></div>` : null}
       ${b.netIdentityError ? html`<${Reason} level="err" text=${`${b.netIdentityError.errName}: ${b.netIdentityError.message}`} />` : null}
-      ${!has && b.info && !bare ? html`<p class="small muted">This harness image does not report its identity (net-protocol v0.16 adds it).</p>` : null}
+      ${!has && b.info && !bare ? html`<p class="small muted" data-testid="access-identity-none">${hubRouted(claimOf(b))
+        ? "Not read yet. This board is behind a hub, where its identify is read through the hub: the SSH claim card does that when it loads (Check through the hub)."
+        : "This harness image does not report its identity (net-protocol v0.16 adds it)."}</p>` : null}
     </div><//>`;
 }

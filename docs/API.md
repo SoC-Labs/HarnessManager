@@ -340,7 +340,7 @@ The Linux harness ships **unclaimed**: key-only SSH with no key. The first `auth
 
 | Method and path | Returns |
 |---|---|
-| `GET /boards/{bid}/claim?refresh=` | `{board_id, claim}`: `claim` is `BoardInfo.claim` (null on bare metal). `refresh=true` asks the board now, through the hub when there is one |
+| `GET /boards/{bid}/claim?refresh=&hub=` | `{board_id, claim}`: `claim` is `BoardInfo.claim` (null on bare metal). `refresh=true` asks the board now, through the hub when there is one. `hub=true` (the app's Access card, on load): on a board behind a hub, asks the hub (identify run there over ssh; no lease, no board port), reusing an answer of the last minute |
 | `POST /boards/{bid}/claim` `{confirm: true, key?, adopt?, replace_host_key?}` | 202 job `claim`; the result is `{board_id, claim}` with `claim.action` `claimed` or `adopted` |
 | `POST /boards/{bid}/repin` `{confirm: true, fingerprint}` | 202 job `repin` (lease holder only): pins exactly `fingerprint`, the new key the user was shown, and only when identify AND the key the board presents over SSH both equal it; else 409/422 and nothing is pinned. The result is `{board_id, claim}` with `claim.action` `repinned` |
 | `GET /boards/{bid}/ssh?command=` | `{board_id, argv}`: the pinned `ssh [-J HUB] -l root BOARD [command]` command line. Nothing is run |

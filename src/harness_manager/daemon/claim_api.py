@@ -5,7 +5,7 @@ docs/API.md "SSH claim (Linux harness)" (bearer auth and the error envelope as e
 
 | Method and path | Returns |
 |---|---|
-| ``GET /boards/{bid}/claim?refresh=`` | ``{board_id, claim}``: ``claim`` is ``BoardInfo.claim`` (null on bare metal). ``refresh=true`` asks the board now, through the hub when there is one |
+| ``GET /boards/{bid}/claim?refresh=&hub=`` | ``{board_id, claim}``: ``claim`` is ``BoardInfo.claim`` (null on bare metal). ``refresh=true`` asks the board now, through the hub when there is one. ``hub=true`` (the app's Access card, on load): on a hub board, asks the hub, reusing an answer of the last minute |
 | ``POST /boards/{bid}/claim`` ``{confirm: true, key?, adopt?, replace_host_key?, expect_host_key?}`` (``expect_host_key``: with ``replace_host_key``, the exact fingerprint shown to the user; the claim pins it or nothing) | 202 job ``claim``; the result is ``{board_id, claim}`` with ``claim.action`` ``claimed`` or ``adopted`` |
 | ``POST /boards/{bid}/repin`` ``{confirm: true, fingerprint}`` | 202 job ``repin``; pins exactly ``fingerprint`` (the new key the user was shown) when identify and ssh both show it; the result is ``{board_id, claim}`` with ``claim.action`` ``repinned``. The lease holder only |
 | ``GET /boards/{bid}/ssh?command=`` | ``{board_id, argv}``: the pinned ``ssh [-J HUB] -l root BOARD`` (nothing is run) |
@@ -17,7 +17,8 @@ Rules:
 - **The lease holder only**, on a board behind a hub (hub_api's lease service, shared): 409
   HELD naming the holder, before the job starts.
 - ``POST`` is a board job (409 HELD while another job runs). ``GET`` never takes the board's
-  control port: identify is UDP, and the hub round trip happens only with ``refresh``.
+  control port: identify is UDP, and the hub round trip happens only with ``refresh`` or
+  ``hub`` (an ssh to the hub that runs identify there: never the lease, never tty_00).
 
 Events: ``board.claim`` ``{state, claimed, host_key, route, action?}``.
 """
@@ -59,10 +60,11 @@ def register(ctx: RouteContext) -> None:
         return svc
 
     @api.get("/boards/{bid:path}/claim")
-    def claim_status(bid: str, refresh: str | None = None) -> Any:
+    def claim_status(bid: str, refresh: str | None = None, hub: str | None = None) -> Any:
         s = ctx.board(bid)
         svc = service()
-        st = svc.refresh(s) if _flag(refresh, "refresh") else svc.status(s)
+        st = svc.refresh(s) if _flag(refresh, "refresh") else \
+            svc.check_hub(s) if _flag(hub, "hub") else svc.status(s)
         return _JSON(ok(board_id=bid, claim=st))
 
     @api.post("/boards/{bid:path}/claim")

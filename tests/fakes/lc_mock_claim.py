@@ -5,6 +5,12 @@ The mock's boards are ``DemoEngine`` bare-metal boards, so none has a claim unti
 says so: ``ClaimSim.linux(bid, state="unclaimed")`` makes the board a Linux harness whose
 ``info`` carries ``claim``. ``POST /claim`` is a 202 job, refused without ``confirm`` (409
 REFUSED) and on a board with no claim (422), exactly as the real routes are.
+
+A board behind a hub (HUB-CLAIM): ``ClaimSim.behind_hub(bid, answer)`` starts it "unknown"
+(info never asks the hub); ``GET /claim?hub=true`` (the Access card, on load) and
+``?refresh=true`` (Check through the hub) are the hub's answer: ``answer`` is the claim state the
+hub's identify finds, or ``"down"`` (ssh to the hub fails). ``hub_asks`` records each ask;
+``on_hub_answer`` (a test's callable) runs after a good answer (the identity it carried).
 """
 
 from __future__ import annotations
@@ -19,6 +25,10 @@ from harness_manager.core.errors import AlreadyError, RefusedError, UnavailableE
 API = "/api/v1"
 HOST_KEY = "SHA256:mockmockmockmockmockmockmockmockmockmockmoc"
 KEY_FP = "SHA256:yourkeyyourkeyyourkeyyourkeyyourkeyyourkey"
+HUB = "mapstone-dev.ecs.soton.ac.uk"
+HUB_NOT_YET = ("not checked through the hub yet (identify is UDP: it does not ride the SSH "
+               "tunnel); Check through the hub (Board > Access) or `harness-manager board "
+               "claim-status TARGET` asks the hub")
 
 
 class ClaimSim:
@@ -26,6 +36,35 @@ class ClaimSim:
         self._mu = threading.Lock()
         self.claims: dict[str, dict[str, Any]] = {}
         self.posts: list[dict[str, Any]] = []
+        self.hub_answers: dict[str, str] = {}
+        self.hub_asks: list[tuple[str, str]] = []
+        self.on_hub_answer: Any = None
+
+    def behind_hub(self, bid: str, answer: str = "unclaimed") -> None:
+        with self._mu:
+            self.hub_answers[bid] = answer
+            self.claims[bid] = {**self._status("unknown"), "route": f"hub {HUB}",
+                                "source": f"identify via {HUB}", "live": False,
+                                "host_key": {"reported": None, "pinned": None, "match": None,
+                                             "seen_before": None},
+                                "notes": [f"not checked now: {HUB_NOT_YET}"]}
+
+    def ask_hub(self, bid: str, how: str) -> None:
+        with self._mu:
+            answer = self.hub_answers.get(bid)
+            if answer is None:
+                return
+            self.hub_asks.append((bid, how))
+            if answer == "down":
+                self.claims[bid] = {**self.claims[bid], "state": "unknown", "notes": [
+                    f"not checked now: cannot run ssh to the hub {HUB}: ssh: connect to host "
+                    f"{HUB} port 22: No route to host"]}
+                return
+            st = self._status(answer)
+            self.claims[bid] = {**st, "route": f"hub {HUB}", "live": False,
+                                "source": f"identify via {HUB} (last check)"}
+        if self.on_hub_answer is not None:
+            self.on_hub_answer()
 
     def linux(self, bid: str, state: str = "unclaimed") -> None:
         with self._mu:
@@ -58,8 +97,11 @@ def register(app: FastAPI, state: Any, ok: Any, accepted: Any) -> ClaimSim:
     sim = ClaimSim()
 
     @app.get(f"{API}/boards/{{bid:path}}/claim")
-    def claim_status(bid: str, refresh: str | None = None) -> dict[str, Any]:
+    def claim_status(bid: str, refresh: str | None = None,
+                     hub: str | None = None) -> dict[str, Any]:
         state.session(bid)
+        if refresh == "true" or hub == "true":
+            sim.ask_hub(bid, "refresh" if refresh == "true" else "hub")
         return ok(board_id=bid, claim=sim.get(bid))
 
     @app.post(f"{API}/boards/{{bid:path}}/claim", status_code=202)

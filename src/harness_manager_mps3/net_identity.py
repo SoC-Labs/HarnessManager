@@ -24,8 +24,9 @@ images rc2_v7/v7n; V7-ALIGN checked every point below against that commit):
   and ``label`` from v0.16 (after ``ssh``, before ``ports``). Its ``ip`` is the resolved static
   address, EXCEPT while a DHCP lease is held (``dhcp: true``): then it is the lease, which is
   not the board's identity (HM keeps it as ``lease`` and leaves ``ip`` empty). An image
-  without ``identity`` is read from identify on the LAN and from ``stats.mac`` through a hub
-  (UDP does not cross the tunnel);
+  without ``identity`` is read from identify on the LAN and, through a hub (UDP does not
+  cross the tunnel), from the identify the hub ran for the claim check (``Mps3Claim.
+  hub_identify``: Board > Access asks it on load), else ``stats.mac``;
 - **the default hostname** is the label in lower case (``mps3-01`` after board 1's bake;
   ``mps3`` without one); it was ``mps3-harness``. HM files the board's SSH key by board id
   (``claim.host_key_alias``), never by host name, so nothing here depends on it.
@@ -417,7 +418,9 @@ class Mps3NetIdentity:
             if now - quick_at < READ_TTL_S:
                 return quick                    # the last answer, or the last silence
             if self._tunnelled():
-                return None                     # through a hub: never a call from info
+                # through a hub: never a call from info; identify the hub ran for the claim
+                # check (Board > Access asks it on load) says the label/IP/MAC
+                return self._from_hub_identify(impl="")
             out = self._from_identify(impl="")
             if out is not None:
                 out["feature_known"] = False
@@ -433,7 +436,8 @@ class Mps3NetIdentity:
                 raise set_error(reply, "identity")
             out = parse_identity(reply, impl=live.impl)
         else:
-            out = None if self._tunnelled() else self._from_identify(impl=live.impl)
+            out = self._from_hub_identify(impl=live.impl) if self._tunnelled() \
+                else self._from_identify(impl=live.impl)
             if out is None:                     # through a hub, or no identify: stats.mac
                 out = self._from_stats(impl=live.impl or "bare-metal")
         if out is not None:
@@ -453,6 +457,24 @@ class Mps3NetIdentity:
         raw = reply.raw if hasattr(reply, "raw") else dict(reply)
         return parse_identity(raw, impl=impl or (reply.impl if hasattr(reply, "impl") else ""),
                               via="identify")
+
+    def _from_hub_identify(self, *, impl: str) -> dict[str, Any] | None:
+        """The identify reply the hub last relayed for this board (``Mps3Claim._ask_hub``),
+        marked ``last_check`` when older than ``READ_TTL_S``; None when the hub was never
+        asked this session. Never asks."""
+        claim = getattr(self._session, "claim", None)
+        got = claim.hub_identify() if callable(getattr(claim, "hub_identify", None)) else None
+        if not got:
+            return None
+        raw, at = got
+        if not any(raw.get(k) for k in ("label", "ip", "mac")):
+            return None
+        out = parse_identity(raw, impl=impl or str(raw.get("impl") or ""), via="identify",
+                             at=at)
+        out["feature_known"] = False
+        if time.time() - at >= READ_TTL_S:
+            out["last_check"] = True
+        return out
 
     def readings_facts(self) -> dict[str, Any] | None:
         """The harness's uptime from UDP 6899 identify (``up_ms``, and the Linux OS's

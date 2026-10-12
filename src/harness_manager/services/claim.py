@@ -10,7 +10,9 @@ the ``ssh -J HUB root@BOARD`` reach). This service adds the rules every front en
   XVC's): claiming someone else's leased board would lock them out of its slots. A board with
   no hub has no lease; the session lock is the gate.
 - ``status`` is what ``info`` shows (``BoardInfo.claim``); ``refresh=True`` asks the board now,
-  through the hub when there is one (``info`` never does that round trip).
+  through the hub when there is one (``info`` never does that round trip). ``check_hub`` is
+  the app's automatic check of a hub board: the hub is asked, an answer of the last minute
+  reused.
 - A change publishes ``board.claim`` ``{board_id, state, ...}`` on the bus.
 
 **The claim lock's one-line refusal** (CLAIMED-LOCK; net-protocol "The lock", HM_ANSWERS C3):
@@ -137,12 +139,22 @@ class ClaimService:
 
     # -- reading ------------------------------------------------------------------------------
 
-    def status(self, session: Any, *, refresh: bool = False) -> dict[str, Any] | None:
-        """The claim as ``info`` shows it; None where there is nothing to claim (bare metal)."""
+    def status(self, session: Any, *, refresh: bool = False,
+               ask_hub: bool = False) -> dict[str, Any] | None:
+        """The claim as ``info`` shows it; None where there is nothing to claim (bare metal).
+        ``ask_hub``: on a board behind a hub, ask the hub (identify run there, over ssh; no
+        lease, no board port), reusing an answer of the last minute; ``refresh`` always asks."""
         claim = getattr(session, "claim", None)
         if claim is None:
             return None
-        return claim.claim_status(refresh=refresh, hub_ok=refresh)
+        return claim.claim_status(refresh=refresh, hub_ok=refresh or ask_hub)
+
+    def check_hub(self, session: Any) -> dict[str, Any] | None:
+        """``status(ask_hub=True)``, published: what the app's Access card asks when it loads."""
+        out = self.status(session, ask_hub=True)
+        if out is not None:
+            self._publish(session, out)
+        return out
 
     # -- the lease ----------------------------------------------------------------------------
 

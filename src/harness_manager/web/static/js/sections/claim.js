@@ -4,8 +4,8 @@
 // root on the board, and the board refuses every later one.
 
 import { gateReason, interlock, isArmed, runJob, setArmed } from "../actions.js";
-import { toApiError } from "../api.js";
-import { html, useState } from "../lib.js";
+import { call, toApiError } from "../api.js";
+import { html, useEffect, useState } from "../lib.js";
 import { boardState, refreshInfo } from "../store.js";
 import { ArmBox, Card, Chip, Icon, Reason, Spinner } from "../ui.js";
 import { openModal } from "../modal.js";
@@ -23,6 +23,15 @@ function sshAddress(b) {
   return l ? l.address : "";
 }
 
+// A board behind a hub: identify (UDP) does not cross the SSH tunnel, so info only knows the last
+// check. The card asks the hub itself when it loads (GET claim?hub=true: identify run on the hub
+// over ssh; never the lease, never a board port; the service reuses an answer of the last
+// minute), at most once per HUB_AUTO_MS per board, and "Check through the hub" asks now.
+const HUB_AUTO_MS = 5 * 60 * 1000;
+const hubAsked = new Map();
+
+export function hubRouted(c) { return !!c && String(c.route || "").startsWith("hub "); }
+
 // Only a Linux harness has a claim (info.claim is absent on bare metal): nothing shows then.
 export function ClaimCard({ bid }) {
   const b = boardState(bid);
@@ -35,6 +44,26 @@ export function ClaimCard({ bid }) {
   // Replace the pinned key (a board claimed before and re-imaged): the fingerprint on screen
   // when it was pressed; the claim pins exactly it or nothing.
   const [replacing, setReplacing] = useState("");
+  const [checking, setChecking] = useState(false);
+  const viaHub = hubRouted(c);
+  // now: the button (always asks); else the automatic check on load (the service's cache)
+  const checkHub = async (now) => {
+    hubAsked.set(bid, Date.now());
+    setChecking(true); setErr(null);
+    try {
+      await call("claimStatus", { bid }, undefined, now ? { refresh: "true" } : { hub: "true" });
+    } catch (e) {
+      setErr(toApiError(e));
+    } finally {
+      setChecking(false);
+      refreshInfo(bid);
+    }
+  };
+  useEffect(() => {
+    if (!viaHub || c.live || checking) return;
+    if (Date.now() - (hubAsked.get(bid) || 0) < HUB_AUTO_MS) return;
+    checkHub(false);
+  }, [bid, viaHub, c && c.live, b.infoGen]);
   if (!c) return null;
   const who = c.claimed || {};
   const changedKey = c.host_key && c.host_key.match === false;
@@ -102,7 +131,8 @@ export function ClaimCard({ bid }) {
           : c.state === "other" ? html`<${Chip} level="held" icon="lock">Claimed by another key<//>`
           : c.state === "unclaimed" ? html`<${Chip} level="warn" icon="lock-open">Not claimed<//>`
           : html`<${Chip} level="unk" icon="circle-help">Unknown<//>`}
-          ${!c.live && c.checked_at ? html` <span class="muted small">last check ${c.checked_at}</span>` : null}</dd>
+          ${!c.live && c.checked_at && !(viaHub && c.state === "unknown") ? html` <span class="muted small">last check ${c.checked_at}</span>` : null}
+          ${checking ? html` <span class="muted small" data-testid="claim-hub-checking"><${Spinner} /> asking the hub…</span>` : null}</dd>
         ${who.key_fp ? html`<dt>Key</dt><dd class="mono small">${who.key_fp}</dd>` : null}
         ${who.by ? html`<dt>Claimed by</dt><dd class="small">${who.by}${who.at ? ` · ${String(who.at).slice(0, 16).replace("T", " ")}` : ""}</dd>` : null}
         ${ssh ? html`<dt>Log in</dt><dd class="mono small">${ssh}</dd>` : null}
@@ -163,6 +193,11 @@ export function ClaimCard({ bid }) {
               onClick=${() => { if (why) { setErr({ errName: "REFUSED", message: `${why}. Nothing was run.` }); interlock(bid, "claim", "board claim", why); return; } setClaimArmed(true); }}>
               <${Icon} name="lock" /> Claim with my key…</button>`}
         ${why ? html`<span class="small muted" data-testid="reason-access-claim">${why}</span>` : null}</div>` : null}
+      ${viaHub && !c.live ? html`<div class="bt-foot" data-testid="claim-hub-check">
+        ${c.state === "unknown" && !checking ? html`<${Reason} text="The claim could not be read through the hub. The board's identify does not cross the SSH tunnel, so Harness Manager asks the hub to run it." />` : null}
+        <button type="button" class="btn sm" data-action="access-claim-hub-check" disabled=${checking}
+          title="Ask the hub now whether the board is claimed (no lease needed; nothing changes on the board)"
+          onClick=${() => checkHub(true)}>${checking ? html`<${Spinner} />` : html`<${Icon} name="server" />`} Check through the hub</button></div>` : null}
       ${err ? html`<${Reason} level="err" testid="access-claim-error"
         text=${`${err.errName}: ${err.message}${err.hint ? ` (${err.hint})` : ""}${err.holder ? ` (holder: ${err.holder})` : ""}`} />` : null}
     </div><//>`;
