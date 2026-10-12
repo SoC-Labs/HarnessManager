@@ -473,8 +473,7 @@ function InstallPanel({ bid, h }) {
         <${ActionRow} bid=${bid} panel="harness_install" spec=${install} variant="primary" icon="upload" compact=${true} quietArm=${true}
           gate=${{ arm: "harness_install", guard, holder: "Install" }}>
           <${ArmBox} bid=${bid} armKey="harness_install" testid="arm-harness" compact=${true}
-            text=${viaHub ? "Arm: I understand the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted by the MCC on the hub (paced)."
-              : "Arm: I understand this writes the board's config SD (after a backup) and reboots the board."} /><//>`}` : null}
+            text=${installArmText(plan, viaHub)} /><//>`}` : null}
       <${ResultBlock} lines=${p.lines} panel=${p} testid="harness-result" />
     </div>
   </div>`;
@@ -650,4 +649,19 @@ export function offeredText(bid) {
   const cat = hv(bid).catalog;
   const r = ((cat && cat.releases) || []).find((x) => (x.marks || []).includes("offered") && !(x.marks || []).includes("running"));
   return r ? r.version : "";
+}
+
+// What the Install arm box says: what THIS plan writes (the config SD, an OS slot, both, or only
+// this PC's design store), never a fixed sentence.
+export function installArmText(plan, viaHub) {
+  const sd = !!(plan && plan.base);
+  const os = !!(plan && plan.os_slot);
+  const sdText = viaHub
+    ? "the hub writes this board's config SD (the previous nanosoc.bit is kept) and the board is rebooted by the MCC on the hub (paced)"
+    : "this writes the board's config SD (after a backup) and reboots the board";
+  const osText = "this writes the board's free OS slot, makes it the default and reboots into it (the running slot stays as the fallback)";
+  if (sd && os) return `Arm: I understand ${sdText}; then ${osText}.`;
+  if (sd) return `Arm: I understand ${sdText}.`;
+  if (os) return `Arm: I understand ${osText}. The config SD is not written.`;
+  return "Arm: I understand this adds the release's designs to this PC's store; the board is not touched.";
 }
