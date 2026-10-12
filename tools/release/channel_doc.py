@@ -228,12 +228,17 @@ class ChannelDoc:
         self.notes.append(f"added {version}" + (" (current)" if make_current else ""))
 
     def promote_from(self, source: ChannelDoc, version: str, *,
-                     notes: str | None = None, notes_from: str = "") -> None:
+                     notes: str | None = None, notes_from: str = "",
+                     legal: tuple[str, str, int] | None = None) -> None:
         """Copy ``version``'s entry from ``source`` (e.g. beta) into this channel (e.g. stable),
         unchanged, and make it current. The assets are not touched: no re-upload.
 
         ``notes`` (already checked) REPLACES the entry's ``notes`` in THIS channel's copy only;
-        every other field is byte-identical and the source channel is never touched."""
+        every other field is byte-identical and the source channel is never touched.
+
+        ``legal`` = (file name, sha256, size) of a replacement legal-info tar: the target copy's
+        ``legal_info`` keeps its name/url/access and takes the new sha256 + size. The file name
+        must match the entry's legal_info name (equal, or the entry's ``<base>-<file name>``)."""
         entry = source.release(version)
         if entry is None:
             raise ReleaseError(f"{source.catalog} {version} is not on the {source.channel!r} "
@@ -246,6 +251,17 @@ class ChannelDoc:
                                "release never reaches stable", hint="re-mint from a clean tree")
         if notes is not None:
             entry = {**copy.deepcopy(entry), "notes": notes}
+        if legal is not None:
+            fname, sha, size = legal
+            li = entry.get("legal_info")
+            if not isinstance(li, dict):
+                raise ReleaseError(f"{version} has no legal_info to replace",
+                                   hint="--legal-info only applies to a release that carries one")
+            have = str(li.get("name", ""))
+            if have != fname and not have.endswith("-" + fname):
+                raise ReleaseError(f"--legal-info {fname} does not match the entry's legal_info "
+                                   f"name {have!r}", hint="give the file the entry names")
+            entry = {**copy.deepcopy(entry), "legal_info": {**li, "sha256": sha, "size": size}}
         mine = self.release(version)
         if mine is not None:
             if _comparable(mine) != _comparable(entry):
@@ -264,6 +280,10 @@ class ChannelDoc:
         if notes is not None:
             self.notes.append(f"notes of {version} REPLACED on {self.channel} from "
                               f"{notes_from or '(given)'} (the {source.channel} entry is unchanged)")
+        if legal is not None:
+            self.notes.append(f"legal_info of {version} REPLACED on {self.channel}: {legal[0]} "
+                              f"sha256 {legal[1]} size {legal[2]} (the {source.channel} entry "
+                              "is unchanged)")
 
     def withdraw(self, version: str, reason: str, *, new_current: str = "") -> None:
         entry = self.release(version)
