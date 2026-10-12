@@ -33,7 +33,7 @@ from tests.integration import test_demo_showcase as _showcase
 api = _showcase.showcase
 
 WHY = ("nanosoc_multicore's boot code writes the DUT's QSPI flash (one byte at 0x20000 onward) "
-       "on every boot, until Linux v2.1: it damages a MicroPython image there (nanosoc_upy).")
+       "on every boot: it damages a MicroPython image there (nanosoc_upy).")
 TEXT = WHY + " Type MULTICORE to program it anyway."
 MULTICORE = OverlayRef("nanosoc_multicore", "0x01000003", SHELL_ID, size_bytes=4096,
                        ip_class="arm-aaa", writes_dut_flash=DutFlashWrite(WHY, "MULTICORE"))

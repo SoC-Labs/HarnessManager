@@ -30,7 +30,7 @@ from harness_manager_mps3.overlays import writes_dut_flash
 from tests.unit.test_t2_deploy_service import NANOSOC, FakeSession, ScriptedAdapter, with_item
 
 WHY = ("nanosoc_multicore's boot code writes the DUT's QSPI flash (one byte at 0x20000 onward) "
-       "on every boot, until Linux v2.1: it damages a MicroPython image there (nanosoc_upy).")
+       "on every boot: it damages a MicroPython image there (nanosoc_upy).")
 TEXT = WHY + " Type MULTICORE to program it anyway."
 MULTICORE = OverlayRef(name="nanosoc_multicore", rm_id="0x01000003", static_id="0x3f1a560f",
                        source="m", writes_dut_flash=DutFlashWrite(WHY, "MULTICORE"))
