@@ -458,6 +458,12 @@ def cmd_promote(ctx: Ctx) -> int:
     if a.source == a.to:
         raise ReleaseError("--from and --to are the same channel", code=EXIT_USAGE)
     new_notes = check_notes_file(a.notes) if a.notes else None     # before any signing/network
+    legal = None
+    if a.legal_info:
+        lp = Path(a.legal_info)
+        if not lp.is_file():
+            raise ReleaseError(f"--legal-info {lp} does not exist", code=EXIT_USAGE)
+        legal = (lp.name, sha256_file(lp), lp.stat().st_size)
     signer = _signer(a, ctx.runner)
     _publish_rails(ctx, signer, a.to)
     layout = _layout(a)
@@ -474,12 +480,17 @@ def cmd_promote(ctx: Ctx) -> int:
         base = _base_path(ctx, layout, a.catalog, a.to, Path(tmp))
         board = src.doc.get("board")
         doc = ChannelDoc.load_or_new(base, a.catalog, a.to, trust_keys, board=board)
-        doc.promote_from(src, a.version, notes=new_notes, notes_from=str(a.notes or ""))
+        doc.promote_from(src, a.version, notes=new_notes, notes_from=str(a.notes or ""),
+                         legal=legal)
         _sign_and_verify(ctx, doc, layout, signer, trust_keys, a.version)
         ctx.report.update({"version": a.version, "from": a.source})
         if new_notes is not None:
             ctx.report.update({"notes_replaced_from": str(a.notes), "changes": doc.notes})
             ctx.say(f"notes REPLACED on {a.to} from {a.notes} ({a.source} entry untouched)")
+        if legal is not None:
+            ctx.report.update({"legal_info_replaced_from": str(a.legal_info),
+                               "legal_info_sha256": legal[1], "changes": doc.notes})
+            ctx.say(f"legal_info REPLACED on {a.to} from {a.legal_info} sha256 {legal[1]}")
         steps = channel_steps(layout, a.catalog, a.to, gh=a.gh)
         return _finish(ctx, layout, steps, f"promote {a.catalog} {a.version} {a.source} -> {a.to}",
                        a.catalog, a.to, [])
@@ -692,6 +703,10 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--notes", metavar="FILE",
                    help="REPLACE the promoted entry's notes (target channel only; the source "
                         "channel is never rewritten). Default: copied unchanged")
+    p.add_argument("--legal-info", metavar="FILE",
+                   help="REPLACE the promoted entry's legal_info sha256 + size with this file's "
+                        "(target channel only; the file name must match the entry's). The asset "
+                        "itself must already be replaced on the release")
     p.set_defaults(func=cmd_promote)
 
     p = sub.add_parser("withdraw", help="withdraw a release (never deleted)")

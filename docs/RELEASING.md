@@ -125,6 +125,12 @@ fix does not need a version bump: `promote` copies the beta entry unchanged, but
 not touched, and the stable entry is signed as usual. FILE gets the same checks as
 `harness-release --notes`: it must exist, be non-empty and hold no `«…»` placeholders. The run
 records "notes REPLACED on stable from FILE" in its report and publish plan.
+
+**Replacing the legal-info tar at promotion.** If the published legal-info asset was replaced on
+the GitHub release (same name), `--legal-info FILE` (Makefile: `LEGAL=FILE`) gives the promoted
+stable entry the new `sha256` and `size` in `legal_info` (name, url unchanged; FILE's name must be
+the entry's legal_info name, e.g. `linux_legal_info.tar` for `...-linux_legal_info.tar`). Beta is
+not touched. The `linux_bundle` entry is a separate manifest asset and is copied unchanged.
 `make release-promote CATALOG=mps3-harness VERSION=2.1.0 NOTES=path/to/notes.md PUBLISH=1`
 
 **The harness front-end refuses, and writes nothing, when:**

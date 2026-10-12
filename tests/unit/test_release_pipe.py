@@ -370,3 +370,68 @@ def test_the_cli_runs_publish_check(tmp_path, built):
     assert rc == 0 and "TEST release" in text and (tmp_path / "plan" / "publish.env").is_file()
     rc, text = run(["publish-check", "--root", str(built), "--repo", REPO, "--for-publish"])
     assert rc == 15 and "never published" in text
+
+
+# --- promote --legal-info ----------------------------------------------------------------------
+
+
+def _promote_setup(tmp_path, lx):
+    sk, pk = signer_mod.keygen_throwaway(tmp_path / "keys", "release")
+    sk2, pk2 = signer_mod.keygen_throwaway(tmp_path / "keys2", "stable")
+    out = tmp_path / "out"
+    rc, text = run(release_args(lx, out, V, "--key", str(sk), "--signer", "python"))
+    assert rc == 0, text
+    beta = Layout(out).channel_file(CAT, "beta")
+    return out, beta, beta.read_bytes(), sk2, pk, pk2
+
+
+def _promote(out, sk2, pk, *extra):
+    return run(["promote", "--out", str(out), "--catalog", CAT, "--version", V, "--signer",
+                "python", "--secret-key", str(sk2), "--trust-key", str(pk), *extra])
+
+
+def _stable(out):
+    return json.loads(Layout(out).channel_file(CAT, "stable").read_bytes())["harness"][
+        "releases"][0]
+
+
+def test_promote_legal_info_replaces_sha_and_size_on_stable_only(tmp_path, lx):
+    import hashlib
+    out, beta, beta_bytes, sk2, pk, pk2 = _promote_setup(tmp_path, lx)
+    new = tmp_path / "scrubbed" / "linux_legal_info.tar"
+    new.parent.mkdir()
+    new.write_bytes(b"scrubbed legal info\n" * 7)
+    notes = tmp_path / "n.md"
+    notes.write_text("public notes\n")
+    rc, text = _promote(out, sk2, pk, "--legal-info", str(new), "--notes", str(notes))
+    assert rc == 0, text
+    assert "legal_info REPLACED" in text
+    assert beta.read_bytes() == beta_bytes                                # beta untouched
+    b, s = entry(out), _stable(out)
+    sha = hashlib.sha256(new.read_bytes()).hexdigest()
+    assert s["legal_info"]["sha256"] == sha and s["legal_info"]["size"] == new.stat().st_size
+    assert s["legal_info"]["sha256"] != b["legal_info"]["sha256"]
+    for k in ("name", "url"):
+        assert s["legal_info"][k] == b["legal_info"][k]
+    rest = lambda e: {k: v for k, v in e.items() if k not in ("legal_info", "notes", "status")}
+    assert rest(s) == rest(b) and s["linux_bundle"] == b["linux_bundle"]
+    assert s["notes"] == "public notes"
+
+
+def test_twin_promote_without_legal_info_copies_the_entry(tmp_path, lx):
+    out, beta, beta_bytes, sk2, pk, pk2 = _promote_setup(tmp_path, lx)
+    rc, text = _promote(out, sk2, pk)
+    assert rc == 0, text
+    assert _stable(out)["legal_info"] == entry(out)["legal_info"]
+
+
+def test_twin_promote_legal_info_with_another_name_is_refused(tmp_path, lx):
+    out, beta, beta_bytes, sk2, pk, pk2 = _promote_setup(tmp_path, lx)
+    wrong = tmp_path / "other.tar"
+    wrong.write_bytes(b"x")
+    rc, text = _promote(out, sk2, pk, "--legal-info", str(wrong))
+    assert rc != 0 and "does not match" in text
+    assert not Layout(out).channel_file(CAT, "stable").exists()
+    assert beta.read_bytes() == beta_bytes
+    rc, text = _promote(out, sk2, pk, "--legal-info", str(tmp_path / "nope" / "linux_legal_info.tar"))
+    assert rc != 0 and "does not exist" in text
