@@ -43,6 +43,7 @@ class Showcase:
         ctx = self.browser.new_context(viewport={"width": width, "height": height},
                                        color_scheme=scheme, reduced_motion="reduce")
         self.contexts.append(ctx)
+        ctx.add_init_script("try { if (localStorage.getItem('harness_manager.theme') === null) localStorage.setItem('harness_manager.theme', 'system'); } catch (e) {}")  # the app defaults to light; these pick the look by OS scheme
         page = ctx.new_page()
         page.errors = []
         page.on("pageerror", lambda e: page.errors.append(str(e)))

@@ -1,4 +1,4 @@
-// Light, dark, or follow the system. The choice is a per-browser convenience only.
+// Light (the default), dark, or follow the system. The choice is a per-browser convenience only.
 
 import { S } from "./store.js";
 
@@ -26,8 +26,7 @@ export function applyTheme(choice) {
     document.documentElement.removeAttribute("data-theme");
   }
   try {
-    if (choice === "system") window.localStorage.removeItem(KEY);
-    else window.localStorage.setItem(KEY, choice);
+    window.localStorage.setItem(KEY, choice);   // "system" is stored too: light is the default
   } catch (e) { /* not remembered */ }
   notify();
 }

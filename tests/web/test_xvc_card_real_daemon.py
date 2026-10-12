@@ -92,6 +92,7 @@ def page_on(browser, request):
     def make(server, bid, scheme="light"):
         ctx = browser.new_context(viewport=APP, color_scheme=scheme, reduced_motion="reduce")
         contexts.append(ctx)
+        ctx.add_init_script("try { if (localStorage.getItem('harness_manager.theme') === null) localStorage.setItem('harness_manager.theme', 'system'); } catch (e) {}")  # the app defaults to light; these pick the look by OS scheme
         page = ctx.new_page()
         page.errors = []
         page.on("pageerror", lambda e: page.errors.append(str(e)))

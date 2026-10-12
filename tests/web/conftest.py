@@ -140,10 +140,16 @@ def page_factory(browser, daemon, request):
     contexts, pages = [], []
 
     def make(scheme: str = "light", *, url: str | None = None, width: int = 1280,
-             height: int = 800):
+             height: int = 800, theme: str | None = "system"):
+        # The app now defaults to light; most tests pick the look through the OS scheme, so
+        # they store "system" (Auto) first.  theme=None is a fresh profile (nothing stored).
         ctx = browser.new_context(viewport={"width": width, "height": height},
                                   color_scheme=scheme, reduced_motion="reduce")
         contexts.append(ctx)
+        if theme is not None:
+            ctx.add_init_script(
+                f"try {{ if (localStorage.getItem('harness_manager.theme') === null) "
+                f"localStorage.setItem('harness_manager.theme', {theme!r}); }} catch (e) {{}}")
         page = ctx.new_page()
         page.errors = []
         page.on("pageerror", lambda e: page.errors.append(str(e)))

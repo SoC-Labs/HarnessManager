@@ -29,7 +29,7 @@ export const S = {
   // ({text, icon, level, id}), the part of a tab a link asked to show ({bid, part, at}), and
   // what the drawer last showed (the last-error chip and the rail's badge count after it).
   ui: { drawer: null, toast: null, reveal: null, seenLog: 0 },
-  theme: "system",
+  theme: "light",
   board: {},                 // board_id -> per-board data (see boardState)
   panels: {},                // "board_id:panel" -> action panel state (see actions.js)
   log: [],

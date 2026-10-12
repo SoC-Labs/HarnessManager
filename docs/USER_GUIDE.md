@@ -115,7 +115,8 @@ the application menu has **Harness Manager** and **Open with Demo Boards**.
 
 **The layout.**
 - **The rail** (left) lists boards. **+** adds one by address; the circular arrow scans.
-  At the bottom: the theme, the service line, **Settings** (the sliders icon) and **Help**.
+  At the bottom: the theme (Light by default; Auto follows the system, and your choice is
+  remembered per browser), the service line, **Settings** (the sliders icon) and **Help**.
   [The sidebar](#the-sidebar-order-favourites-and-your-boardstoml-boards) below has the details.
 - **The header** shows the selected board: shell, design, harness, build check, health,
   and for a hub board the tunnel and the lease. **Harness** says which version it shows:

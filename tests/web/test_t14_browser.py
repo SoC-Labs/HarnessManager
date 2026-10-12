@@ -601,6 +601,62 @@ def test_the_theme_toggle_overrides_the_system_and_is_remembered(page_factory):
     page.locator('.rail .seg button:has-text("Auto")').click()
     expect(page.locator("html")).not_to_have_attribute("data-theme", "dark")
     assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(244, 245, 247)"
+    assert page.evaluate("localStorage.getItem('harness_manager.theme')") == "system"   # remembered, not removed
+    page.reload()
+    page.wait_for_selector(".board-item", timeout=T)
+    assert page.evaluate("document.documentElement.dataset.theme") is None             # still Auto
+
+
+def _bg(page):
+    return page.evaluate("getComputedStyle(document.body).backgroundColor")
+
+
+def _selected(page):
+    return page.locator('.rail .seg button[aria-pressed="true"]').first.inner_text().strip()
+
+
+def test_a_fresh_profile_starts_in_light_even_on_a_dark_os(page_factory):
+    page = page_factory("dark", theme=None)
+    page.wait_for_selector(".board-item", timeout=T)
+    assert page.evaluate("document.documentElement.dataset.theme") == "light"
+    assert _bg(page) == "rgb(244, 245, 247)"
+    assert _selected(page) == "Light"
+
+
+def test_twin_a_fresh_profile_on_a_light_os_is_light_too(page_factory):
+    page = page_factory("light", theme=None)
+    page.wait_for_selector(".board-item", timeout=T)
+    assert page.evaluate("document.documentElement.dataset.theme") == "light"
+    assert _selected(page) == "Light"
+
+
+def test_stored_system_follows_the_os(page_factory):
+    page = page_factory("dark", theme="system")
+    page.wait_for_selector(".board-item", timeout=T)
+    assert page.evaluate("document.documentElement.dataset.theme") is None
+    assert _bg(page) == "rgb(14, 17, 21)"
+    assert _selected(page) == "Auto"
+
+
+def test_twin_stored_system_on_a_light_os_is_light(page_factory):
+    page = page_factory("light", theme="system")
+    page.wait_for_selector(".board-item", timeout=T)
+    assert page.evaluate("document.documentElement.dataset.theme") is None
+    assert _bg(page) == "rgb(244, 245, 247)"
+
+
+def test_stored_dark_is_dark_even_on_a_light_os(page_factory):
+    page = page_factory("light", theme="dark")
+    page.wait_for_selector(".board-item", timeout=T)
+    assert page.evaluate("document.documentElement.dataset.theme") == "dark"
+    assert _bg(page) == "rgb(14, 17, 21)"
+
+
+def test_twin_stored_light_is_light_on_a_dark_os(page_factory):
+    page = page_factory("dark", theme="light")
+    page.wait_for_selector(".board-item", timeout=T)
+    assert page.evaluate("document.documentElement.dataset.theme") == "light"
+    assert _bg(page) == "rgb(244, 245, 247)"
 
 
 def test_keyboard_focus_is_visible(page_factory):
