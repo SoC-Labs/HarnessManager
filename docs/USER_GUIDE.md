@@ -16,7 +16,7 @@ Harness Manager version 0.1.0, as on `main`. Every command here is checked again
 | the Linux harness | the board runs the Linux harness (MicroBlaze V Linux), not bare metal |
 | a hub | the board sits behind a lab hub (fpgahub) |
 | the Debug USB | the MPS3 Debug USB cable is plugged into this PC |
-| signed releases | SoC Labs has published signed releases. **Not live yet:** no release key exists, so every client refuses every channel ([KEYS.md](KEYS.md)) |
+| signed releases | SoC Labs publishes signed releases on GitHub (channels beta and stable); Harness Manager trusts the 2026 release key ([KEYS.md](KEYS.md)) |
 
 Contents:
 1. [Install](#1-install)
@@ -988,7 +988,7 @@ are empty, and `rm_timing_note` says so with the whole design's WNS and WHS from
 `out/<name>_timing.rpt`; `kit check` prints the same line (`timing`).
 
 **What can go wrong**
-- **No kit:** the kit sources are the cache, the signed channel (not live yet), the hub's
+- **No kit:** the kit sources are the cache, the signed channel, the hub's
   mint archive (`HARNESS_MANAGER_KIT_HUB_DIR`), or a path you give. Ask SoC Labs for the
   kit zip and use `kit import`.
 - **Vivado release:** the generated `build_rm.tcl` refuses another major.minor than the
@@ -1314,9 +1314,9 @@ holder; it never releases the board.
 
 ## 10. Updates: the harness and the app
 
-**Needs:** signed releases (not live yet). Until SoC Labs publishes them, `update check`
-and `harness list` refuse every channel (exit 15), and the harness comes from SoC Labs as a bundle
-([section 3.1](#31-a-board-on-your-desk)). This section is how it works once they exist.
+**Needs:** the signed releases SoC Labs publishes on GitHub (beta and stable). Harness Manager
+1.0.x cannot update itself: re-run the installer once to reach 1.1.0; from then on `update app`
+works.
 
 Two things update separately:
 
