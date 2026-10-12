@@ -611,7 +611,7 @@ def test_negative_twin_a_setting_is_set_and_the_seams_variable_still_works(monke
 def test_board_and_hub_rows_are_not_read_here():
     with pytest.raises(UsageError, match="per board"):
         runtime.value("boards.x.name")
-    assert runtime.value("general.theme") == "auto"          # twin: an app row is
+    assert runtime.value("general.theme") == "light"          # twin: an app row is
 
 
 # --- the cache and settings.changed --------------------------------------------------------------

@@ -517,7 +517,7 @@ The columns:
 
 | # | Key (proposed) | What | Source today | Default | Scope | Sec | Chg | Owner | Menu |
 |---|---|---|---|---|---|---|---|---|---|
-| G1 | `general.theme` | light / dark / follow the system | `localStorage harness_manager.theme` (`web/static/js/theme.js:5,28-31`; read pre-paint `theme-boot.js:4`) | auto | U (browser) | | L | U | ✓ (stays in the browser) |
+| G1 | `general.theme` | light / dark / follow the system | `localStorage harness_manager.theme` (`web/static/js/theme.js:5,28-31`; read pre-paint `theme-boot.js:4`) | light | U (browser) | | L | U | ✓ (stays in the browser) |
 | G2 | `general.app_browser` | the browser the app window uses | env `HARNESS_MANAGER_APP_BROWSER` (`web/window.py:38,69,136`) | pywebview, else Chrome/Edge/Chromium | M | | L | U | ✓ |
 | G3 | `general.window_size` | app window size | const `WINDOW_SIZE` (`web/window.py:41`) | 1440×900 | U | | L | U | ✓ (remember last) |
 | G4 | `general.app_keep_dbus` | keep the desktop bus for the app window | env `HARNESS_MANAGER_APP_KEEP_DBUS` (`web/window.py:39,90-93`) | off | M | | L | Dev | env |

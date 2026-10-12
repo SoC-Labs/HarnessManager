@@ -130,7 +130,7 @@ def _i2c(v: Any) -> str:
 
 GENERAL = (
     # G1 web/static/js/theme.js:5,28-31 (stays in the browser: read before first paint)
-    Setting("general.theme", "enum", "auto", "General", "Light, dark, or follow the system",
+    Setting("general.theme", "enum", "light", "General", "Light (the default), dark, or follow the system",
             choices=("auto", "light", "dark")),
     # G2 web/window.py:39,68-78 (named_app_browser; SET-WIRE)
     Setting("general.app_browser", "str", "", "General",
