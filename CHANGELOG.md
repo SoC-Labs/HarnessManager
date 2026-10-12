@@ -4,6 +4,79 @@ Each release lists what a user of Harness Manager will notice. Versions follow
 `MAJOR.MINOR.PATCH`; until 1.0.0 a minor version may change the command line or the
 API (docs/API.md says what changed).
 
+## 1.1.0 (2026-10-13)
+
+### Upgrading from 1.0.x
+Re-run the installer once (`scripts/install.sh`, or `scripts\install.ps1` on Windows). 1.0.x
+could not update itself: `harness-manager update app` asked for a catalogue nobody publishes.
+After this one reinstall, `harness-manager update app` works.
+
+### New
+- **Windows laptops are supported.** `install.ps1` installs Harness Manager (with
+  `-Offline DIR` from a wheelhouse and no network, `-Latest` for the newest dependencies, a
+  Start menu entry, `-Uninstall`). The Debug USB scan finds the board's COM port and drive
+  letter and names the FTDI driver when it is missing. When nothing answers, Harness Manager
+  checks this PC's network (an address on the board's /24, a Public network profile, a
+  firewall block) and prints the exact Administrator PowerShell to fix it; it never runs it.
+  Card readers are listed and files are written with no Administrator; a whole-card image
+  ends with Administrator steps and Raspberry Pi Imager. SSH works from Windows. See USER_GUIDE
+  section 15 and INSTALL.md "Windows".
+- **The installer puts the command on your PATH** (one marked block in your shell's startup
+  files; `--no-path` skips it, `--uninstall` removes it). `make_wheelhouse.sh --platform
+  win_amd64|macos_arm64|macos_x86_64` builds a wheelhouse for another kind of laptop.
+- **The new-board wizard** accepts the v2.0 release bundle layout (`config-sd/`, `overlays/`,
+  `linux_bundle.json`), the older layout and a bare SD folder, and checks the overlays. It
+  waits the Linux time (300 s) for a Linux board and says so. The write result shows what
+  happened to the MBBIOS line, also in `bringup` on the command line and in the card
+  reader's result. The last step leads to Claim, then Name this board.
+- **Name this board.** One dialog, from Board > Access and from the wizard: a name (1 to 16
+  characters, upper-cased), a random MAC and an IP from the address pool. A board that moves
+  is found again by its host key. A board outside the pool keeps its IP; another network
+  needs your confirmation (`--allow-other-subnet`). `--ip auto` starts from the MAC.
+- **Board facts on the Overview:** revision (for example "Rev C"), MCC firmware version and
+  whether a user microSD is present, also in `info` and the bring-up scan. Anything but Rev C
+  and MCC v1.3.2 is marked "untested". Facts are only read, never changed.
+- **Import a folder of designs** in one click (Import > A folder of designs, and Settings >
+  Harness & kits > Designs): each design is listed as imported, skipped (another static
+  image) or refused with the reason.
+- **The Configuration SD card is shown on Linux boards too** (Versions). On a board reached
+  through the hub it cannot back up or write the card yet; it says so.
+- **Idle boards give their lease back.** A hub board nobody uses for `lease.idle_release_min`
+  minutes (default 30; 0 turns it off) gets a warning two minutes before, with "Keep it" to
+  stay; it is then closed and its lease released. Only a lease this app took is released, and
+  never while a job runs.
+- **A changed SSH host key is handled the same way everywhere:** one refusal that shows the
+  pinned and the new fingerprint and what to do. **Re-pin** (Board > Access, or `board repin
+  TARGET`) pins exactly the fingerprint you approve. A board that netboots without
+  persistent storage and makes a new key every boot can be allowed with the opt-in setting
+  `boards.<b>.ssh.netboot_new_key` (off by default); each such change is logged.
+- **Boards behind the hub can be claimed from the window:** the Access card asks the hub
+  for the claim and the identity instead of showing "Unknown", and offers Claim, Replace or
+  Re-pin as on the LAN.
+- **The app opens in the Light theme by default.** Auto is remembered once you pick it.
+- **`nanosoc_motor` designs can be debugged** like `nanosoc` (debug configuration and attach).
+
+### Fixes
+- **`harness-manager update app` and `update check` reach the app channel.** They asked
+  for a catalogue that is not published (a 404 on `--channel beta`); a channel from a single
+  document is now read as the app's.
+- **An OS-only update never rewrites an identical Configuration SD.** When the new release
+  has the same SD files as the one running, the base is left alone and the plan says so.
+- **Recover:** the restart and restore times of a Linux board say what the board does, and
+  a netbooted Linux board's restart waits for its image.
+- **Console route text follows the loaded design** after a swap, and the DUT uart1 is marked
+  not connected.
+- **The Overview header's uptime** is filled from the board's identity when no stats were read.
+- **The design picker keeps its list** when a re-read fails.
+- **The kit fetch hint** no longer names a lab path.
+- **`xdc` refuses the placeholder `rm_id`** as a usage error, and a missing wrapper says how
+  to get one.
+- **Development installs:** `make venv` ships the vendored pyverify by default and refuses a
+  venv that is not this checkout's; the service names the problem and its fix at start.
+- **A Linux release is identified by the image commit** the board reports.
+- A board still named "MPS3" shows its hub or `boards.toml` name; the card reader keeps each
+  revision's MBBIOS line; the app no longer shows internal names in its text.
+
 ## 1.0.2 (2026-10-07)
 
 - **The running OS slot no longer reads "Empty".** The v2.0.0 image carries no version
@@ -1185,66 +1258,3 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   rule a B+C config SD needs (was 0.1.0); an older client's plan is blocked "harness <v> needs
   harness-manager >= 1.0.0 (this is <its>); run `harness-manager update app` first".
 <!-- --- end fix-pack-9 (release tool) --- -->
-<!-- --- integ v1.1 --- -->
-- **The card reader keeps each revision's MBBIOS line** (FIX-PACK-9 on SD-FLASH's writer): a
-  B+C bundle written in this PC's card reader (`flash write --kind files`, `bringup
-  --card-reader`, the wizard) is decided per `MB/HBI0309<rev>/board.txt` against the card's own
-  (it was refused as "not read" when the card had `MB/HBI0309B/board.txt`). `result.mbbios`
-  lists each revision ("MBBIOS kept: HBI0309C mbb_v141.ebf", "MBBIOS kept: HBI0309B
-  mbb_v132.ebf") and the "WARNING: this card had no HBI0309B or HBI0309C folder: …" line.
-- **A board still called "MPS3" shows its hub or boards.toml name.** The image's default label
-  "MPS3" (any case, exactly that) is no name: such a board is named by boards.toml, then the
-  hub, then the hub target ("mps3-01"), else its address. "MPS3-02" is a name, as before.
-<!-- --- end integ v1.1 --- -->
-<!-- --- windows --- -->
-### Windows laptops: install, the Debug USB, the network, the card reader, SSH (WINDOWS, for v1.1.0)
-- **Install with no network:** `install.ps1 -Offline DIR` installs only from a wheelhouse
-  (pip `--no-index`, uv `--offline`), with the tested pins (`constraints.txt`; `-Latest` for
-  the newest), and adds **Harness Manager** to the Start menu (`-NoStartMenu` leaves it out;
-  `-Uninstall` removes it). `make_wheelhouse.sh --platform win_amd64|macos_arm64|macos_x86_64
-  --python-version X.Y` makes that wheelhouse from Linux: the laptop's own wheels, each
-  dependency judged by the laptop's markers (`scripts/wheelhouse_cross.py`), plus
-  `install.ps1` and `install.sh`.
-- **The Debug USB on Windows:** `probe` and the wizard's Over-USB scan find the MCC's COM port
-  (FTDI VCP channel letters or usbser locations) and the `V2M-MPS3` drive letter; with the
-  drive and no COM port they name Device Manager and the FTDI VCP driver. Mapped network
-  drives are never asked for a label. `--volume E:` means the drive's root.
-- **This PC's network, checked (Windows):** when nothing answers (`probe`, `info`, the
-  wizard's scan and its witness) or identify is silent while TCP works (`info`'s `cannot
-  discover`), HM reads the adapters (read only) and prints the exact Administrator
-  PowerShell: a fixed address on the board's /24 (`Set-NetIPInterface ... -Dhcp Disabled`,
-  `New-NetIPAddress ...`), a Public network made Private (`Set-NetConnectionProfile ...
-  -NetworkCategory Private`) or the board's UDP allowed (`New-NetFirewallRule -DisplayName
-  "Harness Manager board UDP" ...`), a cancelled Security Alert's Block rule for Python
-  turned off. HM never runs them. `--json` carries it as `error.data.network`.
-- **The card reader on Windows:** `flash devices` lists card readers through PowerShell
-  (never the system disk, an external hard disk or the board's own MCC drive); `files` writes
-  the card's drive letter with no Administrator. A whole-card image is never written by HM on
-  Windows: the job ends `needs_privilege` with Administrator PowerShell steps (and Raspberry
-  Pi Imager), a read-back that prints the sha256, and the wizard shows them with Copy buttons.
-- **SSH on Windows:** ssh.exe by its full path; known_hosts and config paths in a form ssh
-  cannot split (forward slashes; quoted when a path has a space, on every OS);
-  `%ProgramData%\ssh\ssh_config`; no console window for HM's ssh, PowerShell and ping.
-  Windows `ping` counts only a reply with `TTL=`.
-- **`--ip auto` starts from the MAC:** the first address tried is the pool's
-  `mac[5] mod size` (MPS3: 192.168.10.(110 + mac[5] mod 90)), then the usual skips, wrapping
-  round; the wizard's proposal starts from its random MAC. The lab's seat sheet is
-  `board identity TARGET --label WS-0N --ip 192.168.10.(110+N) --mac random`.
-- **Docs:** USER_GUIDE section 15, Windows; INSTALL.md "Windows", "The Start menu" and "A
-  wheelhouse for another kind of laptop".
-<!-- --- end windows --- -->
-<!-- --- quickwins --- -->
-- **The installer puts the command on PATH** (QUICKWINS G5): when `~/.local/bin` is not on PATH it
-  appends ONE marked block to your shell's startup files (bash: `~/.bashrc` and the login file;
-  zsh: `~/.zshrc` and `~/.zprofile`), never twice, prints what it did, and `--uninstall` removes
-  it; `--no-path` skips it. macOS prints how to keep it in the Dock (no `.app`).
-- **Board facts** (G2): revision, MCC firmware (from LOG.TXT) and user microSD in `info`, the
-  board API, chips on the Overview ("Rev C", "MCC v1.3.2", "microSD: yes"; "untested" for
-  anything but Rev C and MCC v1.3.2) and the bring-up scan rows. Checked, never changed.
-- **Import a folder of designs** (G3): the Import dialog's "A folder of designs" and Settings →
-  Harness & kits → Designs import a release's `overlays/` in one click, listing each as
-  imported, skipped (another static) or refused with the reason (`POST /overlays/import-folder`).
-- **No internal names in the app's words** (T1), recovery-mode wording and lease text only for hub
-  boards in Name this board (T2), and "Turn on card-reader writing" inline in the bring-up
-  wizard (T3; the setting stays off by default).
-<!-- --- end quickwins --- -->
