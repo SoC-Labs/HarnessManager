@@ -28,6 +28,15 @@ const mb = (n) => (Number.isFinite(Number(n)) && n ? `${(Number(n) / 1e6).toFixe
 
 // --- the OS slots ----------------------------------------------------------------------------------
 
+// What a slot tile calls the image: its release when the board or this host knows it, else
+// "unknown release" (a valid image from another tool or an older harness); "empty" only
+// for a slot with no image.
+function slotRelease(s) {
+  if (s.version) return s.release || s.version;
+  if (!s.state || s.state === "empty") return "empty";
+  return "unknown release";
+}
+
 function SlotTile({ id, os }) {
   const s = (os.slots || {})[id] || {};
   const job = os.job || {};
@@ -71,7 +80,7 @@ function SlotTile({ id, os }) {
   }
   return html`<div class=${`os-slot ${cls}`} data-testid=${`slot-${id}`} data-state=${s.state || "empty"}
       data-running=${run ? "yes" : "no"} data-default=${dft ? "yes" : "no"}>
-    <div class="os-slot-h"><span class="os-letter">Slot ${id}</span><span class="os-rel">${s.version || (s.state && s.state !== "empty" ? "image" : "empty")}</span>
+    <div class="os-slot-h"><span class="os-letter">Slot ${id}</span><span class="os-rel">${slotRelease(s)}</span>
       ${s.sid ? html`<span class="mono small muted">${s.sid}</span>` : null}</div>
     <${Chip} level=${chip[0]} icon=${chip[1]}>${chip[2]}<//>
     ${meter !== null ? html`<div class="meter"><div style=${{ width: `${meter}%` }}></div></div>` : null}

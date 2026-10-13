@@ -81,9 +81,7 @@ left the card in "uSD init error"). harnessd from platform 53f49b4 on also refus
 after the guard read the card (another host's push) is refused in the guard's words
 (``card_job_refusal``), never as "another client holds the control port".
 
-Test seams: ``poll_s``/``poll_max_s``/``job_timeout_s``/``push_stall_s``/``reboot_poll_s``
-on the adapter; the push port follows the deploy adapter's
-(``HARNESS_MANAGER_MPS3_PUSH_PORT``); the board-SSH forward uses
+Test seams: ``poll_s``/``poll_max_s``/``job_timeout_s``/``push_stall_s``/``reboot_poll_s`` on the adapter; the push port follows the deploy adapter's (``HARNESS_MANAGER_MPS3_PUSH_PORT``); the board-SSH forward uses
 ``tunnel.DEFAULT_LAUNCHER``/``DEFAULT_SSH_G``; identify uses
 ``HARNESS_MANAGER_MPS3_IDENTIFY_PORT``.
 """
@@ -117,6 +115,7 @@ from harness_manager.core.errors import (
     UsageError,
 )
 from harness_manager.core.pack import Progress, SlotInfo, SlotJob, SlotStatus, report_progress
+from harness_manager.services.update.version import same_u32 as _same_u32_text
 
 from . import ctlgate, slot_words
 from .constants import IMPL_LINUX, PUSH_PORT, REBOOT_WAIT_S_LINUX
@@ -188,8 +187,9 @@ def _hex32(value: Any) -> str:
 
 
 def same_u32(a: Any, b: Any) -> bool:
+    """Two u32s name one number; an empty side never matches (unlike the shared compare)."""
     x, y = _hex32(a), _hex32(b)
-    return bool(x) and x == y
+    return bool(x) and bool(y) and _same_u32_text(x, y)
 
 
 # --- timing: the budget, and the estimate -------------------------------------------------------
@@ -305,6 +305,12 @@ METER = JobMeter()
 # --- the board's status -----------------------------------------------------------------------
 
 
+def _known_text(value: Any) -> str | None:
+    """A reported text, or None when the board did not say (absent, null, empty)."""
+    text = "" if value is None or isinstance(value, bool) else str(value).strip()
+    return text or None
+
+
 def parse_status(raw: dict[str, Any]) -> SlotStatus:
     """``slot`` reply (every act answers the same object) -> ``SlotStatus``."""
     slots: dict[str, SlotInfo] = {}
@@ -315,7 +321,9 @@ def parse_status(raw: dict[str, Any]) -> SlotStatus:
         slots[name] = SlotInfo(
             name=name, state=str(one.get("state") or ""), hdr_crc=_hex32(one.get("hdr_crc")),
             length=int(one.get("len") or 0), sid=_hex32(one.get("sid")),
-            verified=str(one.get("verified") or "no"), err=str(one.get("err") or ""))
+            verified=str(one.get("verified") or "no"), err=str(one.get("err") or ""),
+            # v2.1 (additive): the image's release and build sha, ONLY when the board knows
+            version=_known_text(one.get("version")) or "", sha=_known_text(one.get("sha")))
     job = raw.get("job") if isinstance(raw.get("job"), dict) else {}
     return SlotStatus(
         running=str(raw.get("running") or "unknown"), slots=slots,
@@ -554,8 +562,9 @@ class Mps3OsSlots:
         for name, info in st.slots.items():
             rec = self.records.get(info.hdr_crc) if info.valid else {}
             if rec:
+                # the board's own version (v2.1) outranks what this host recorded pushing
                 info = replace(info, image_sha256=str(rec.get("sha256", "")),
-                               version=str(rec.get("version", "")))
+                               version=info.version or str(rec.get("version", "")))
             slots[name] = info
         return replace(st, slots=slots)
 

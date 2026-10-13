@@ -67,11 +67,12 @@ from .update.planner import (
     BoardView,
     Plan,
     fw_sha_match,
-    identity_rank,
     make_plan,
+    match_among,
+    match_slot,
     pinned_release,
     revision_check,
-    running_by_os_image,
+    running_summary,
 )
 from .update.schema import (
     KIND_OS_SLOT,
@@ -85,6 +86,7 @@ from .update.schema import (
 )
 from .update.state import HISTORY_KEEP, InstallRecords, StoredComponents
 from .update.version import at_least, compare, is_version, parse_version
+from .update.version import same_u32 as _same_u32
 
 CHANNELS = ("stable", "beta", "dev")
 
@@ -97,13 +99,6 @@ VERDICT_TEXT = {VERDICT_FITS: "fits", VERDICT_REKEY: "re-key",
 
 #: Install records that mean "the board was given this release" (the ``installed`` mark).
 INSTALLED_RESULTS = ("installed", "restored")
-
-
-def _same_u32(a: str, b: str) -> bool:
-    try:
-        return int(a, 16) == int(b, 16)
-    except (TypeError, ValueError):
-        return (a or "").lower() == (b or "").lower()
 
 
 def _key(version: str) -> Any:
@@ -397,16 +392,19 @@ class HarnessCatalog:
                         ident: BoardIdentity | None,
                         view: BoardView | None = None) -> HarnessRelease | None:
         """``planner.match_release`` over releases from several channels."""
-        if ident is None or not ident.shell_id:
-            return None
+        return match_among(releases, ident, view)
+
+    @staticmethod
+    def slot_releases(releases: Iterable[HarnessRelease], view: BoardView) -> dict[str, Any]:
+        """Per OS slot: the release it holds and how we know (``planner.match_slot``);
+        ``{"release": "", "basis": ""}`` is unknown. Empty when the board's slots are not read."""
         releases = list(releases)
-        ranked = [(rank, rel) for rel in releases
-                  if (rank := identity_rank(rel.identity, ident)) is not None]
-        if not ranked:
-            return running_by_os_image(releases, ident, view)
-        best = max(r for r, _ in ranked)
-        top = [rel for r, rel in ranked if r == best]
-        return top[0] if len(top) == 1 else None
+        static = view.identity.shell_id if view.identity is not None else ""
+        out: dict[str, Any] = {}
+        for name, info in sorted(view.os_slot_infos.items()):
+            rel, basis = match_slot(releases, info, static)
+            out[name] = {"release": rel.version if rel else "", "basis": basis}
+        return out
 
     def board_state(self, session: Any) -> tuple[BoardView, dict[str, Any]]:
         view = self.update.board_view(session)
@@ -445,8 +443,9 @@ class HarnessCatalog:
             running = self.running_release([r for r, _, _ in merged], view.identity, view) \
                 if view.identity_known else None
             board = {"board_id": board_id, "pack": pack, "identity_known": view.identity_known,
-                     "running": self._running_summary(view.identity),
+                     "running": running_summary(view.identity),
                      "running_release": running.version if running else "",
+                     "slot_releases": self.slot_releases([r for r, _, _ in merged], view),
                      "installed": self._last_summary(last), "pinned": pin["version"] if pin else "",
                      "lease": lease, "doors": self._doors(view)}
             if lease["required"] and not lease.get("here"):     # FIX-PACK-4: here, not mine
@@ -531,14 +530,6 @@ class HarnessCatalog:
         row["changes"] = what_changes(rel, view.identity if view.identity_known else None,
                                       running, plan)
         return row
-
-    @staticmethod
-    def _running_summary(ident: BoardIdentity | None) -> dict[str, Any]:
-        if ident is None:
-            return {}
-        return {"shell_id": ident.shell_id.lower(), "harness": ident.harness_version,
-                "firmware_sha": ident.firmware_sha, "impl": ident.harness_impl,
-                "usercode": ident.usercode.lower(), "ver32": ident.ver32, "proto": ident.proto}
 
     @staticmethod
     def _last_summary(last: dict[str, Any] | None) -> dict[str, Any] | None:
