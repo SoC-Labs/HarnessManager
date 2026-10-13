@@ -29,7 +29,7 @@
 //
 // FIX-PACK-8 (david: "warn + typed OK"): a design whose board pack declares that its boot code
 // writes the DUT's flash (the OverlayRef's `writes_dut_flash`: {why, word}; on the MPS3,
-// nanosoc_multicore until Linux v2.1) shows the pack's warning above Program on EVERY program,
+// nanosoc_multicore) shows the pack's warning above Program on EVERY program,
 // with a text field: Program (and Program anyway) stays off until the word is typed exactly
 // (programGuard, so still behind the lease holder rule and Arm), then sends
 // `allow_dut_flash_write: true`. Each program is a fresh choice: the field empties on a new pick

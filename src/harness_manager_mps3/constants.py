@@ -11,6 +11,8 @@ from pathlib import Path
 from pyverify.client import CONTROL_PORT  # noqa: F401 - re-exported; 6900
 from pyverify.console import SWO_PORT, UART0_PORT, UART1_PORT  # 6930 / 6931 / 6932
 
+from .designs import DESIGNS
+
 DEFAULT_SHELL_HOST = "192.168.10.101"   # firmware/common/net_proto.h:35-38 (compile-time today)
 JTAG_RBB_PORT = 6921                    # firmware jtag_server; OpenOCD remote_bitbang
 XVC_PORT = 2542                         # firmware xvc_server (Debug Bridge target by default)
@@ -98,40 +100,25 @@ MSD_VOLUME_LABEL = "V2M-MPS3"           # configuration microSD over USB mass st
 MCC_CHAR_PACE_S = 0.05                  # MCC drops burst writes; ≥50 ms/char (fpgahub 30ae4f3)
 
 # rm_id design numbers (rm_id & 0xFFFF). The overlay store's manifests are the
-# authority; this table only gives a readable name when no manifest is loaded.
+# authority; the design manifest (designs.py) gives a readable name when no manifest is
+# loaded. These three names are views of it, kept for the callers that import them.
 # Source: fpga/dfx/rm_list.tcl, docs/evidence/2026-09-w2/summary_20260922T113359Z.txt.
-KNOWN_DESIGNS = {
-    0x0000: "greybox",
-    0x0001: "nanosoc",
-    0x0003: "nanosoc_multicore",
-    0x0005: "nanosoc_upy",
-    0x0008: "nanosoc_iice",
-    0x000C: "nanosoc_motor",
-    0x001E: "led",
-}
+KNOWN_DESIGNS = {d: r.name for d, r in DESIGNS.items() if r.in_known_names}
 
 # Designs whose own boot code writes the DUT's QSPI flash (FIX-PACK-8; core.pack.DutFlashWrite:
 # Harness Manager warns before EVERY program of one and asks for the word, typed; --yes never
 # implies it). {design id (rm_id & 0xFFFF): (why, word)}; a manifest naming the design matches
 # too (overlays.writes_dut_flash). nanosoc_multicore: CPU1's boot ROM writes one 0x00 byte at
-# DUT flash 0x20000 onward on every boot (still in v2.1; Linux v2.0.0 release notes,
-# known issue 15; docs/HIL_LINUX.md OCD8).
-WRITES_DUT_FLASH = {
-    0x0003: ("nanosoc_multicore's boot code writes the DUT's QSPI flash (one byte at 0x20000 "
-             "onward) on every boot: it damages a MicroPython image there "
-             "(nanosoc_upy).", "MULTICORE"),
-}
+# DUT flash 0x20000 onward on every boot (Linux v2.0.0 release notes, known issue 15;
+# docs/HIL_LINUX.md OCD8).
+WRITES_DUT_FLASH = {d: (r.writes_flash_why, r.writes_flash_word)
+                    for d, r in DESIGNS.items() if r.writes_flash_word}
 
 # Designs that expose the SoC-400 debug port on the RP jtag_* pins, mapped to
-# the OpenOCD target-half config in mps3-nanosoc-platform/host/openocd/.
-# nanosoc_multicore needs a two-AP config that does not exist yet (harness
-# handover B4).
-DAP_DESIGN_CONFIGS = {
-    0x0001: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),
-    0x0005: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),
-    0x0008: ("nanosoc_iice_chain.cfg", "nanosoc_ops.tcl"),
-    0x000C: ("nanosoc_mps3_jtag.cfg", "nanosoc_ops.tcl"),     # nanosoc_motor: the nanosoc DAP
-}
+# the OpenOCD target-half config in mps3-nanosoc-platform/host/openocd/. The
+# two-core nanosoc_multicore (one access port per core) is in the manifest too
+# (DesignRow.multi_ap_configs) and is served by openocd.design_debug.
+DAP_DESIGN_CONFIGS = {d: r.dap_configs for d, r in DESIGNS.items() if r.dap_configs}
 
 # Where the OpenOCD target-half configs live when the setting mps3.openocd_cfg_dir (its
 # variable, then the Settings menu: openocd.config_dir(), read at each use) names none: a

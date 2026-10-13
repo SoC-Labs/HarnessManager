@@ -17,7 +17,7 @@ loaded ``rm_id`` design number to the OpenOCD target half from
 |---------------------|-----------------------------------------------|
 | nanosoc, nanosoc_upy| nanosoc_mps3_jtag.cfg + nanosoc_ops.tcl       |
 | nanosoc_iice        | nanosoc_iice_chain.cfg (+ nanosoc_ops.tcl)    |
-| nanosoc_multicore   | none yet: needs a two-AP config (handover B4) |
+| nanosoc_multicore   | nanosoc_mps3_multicore_jtag.cfg (two APs)     |
 | anything else       | none: no debug port (greybox, led, ...)       |
 
 Three rules from the configs themselves:
@@ -78,8 +78,8 @@ from harness_manager.core.errors import (
 )
 from harness_manager.core.pack import BoardSession
 
+from . import designs
 from .constants import (
-    DAP_DESIGN_CONFIGS,
     IMPL_LINUX,
     JTAG_RBB_PORT,
     KNOWN_DESIGNS,
@@ -89,8 +89,8 @@ from .constants import (
 )
 
 CFG_DIR_ENV = "HARNESS_MANAGER_MPS3_OPENOCD_DIR"
-MULTICORE_DESIGN = 0x0003          # constants.KNOWN_DESIGNS: nanosoc_multicore
-DAP_TAP_IDCODE = "0x6ba00477"      # nanosoc_mps3_jtag.cfg: _DAP_TAPID (silicon-verified)
+MULTICORE_DESIGN = designs.MULTICORE_DESIGN    # nanosoc_multicore: one access port per core
+DAP_TAP_IDCODE = designs.DAP_TAP_IDCODE        # nanosoc_mps3_jtag.cfg: _DAP_TAPID (silicon-verified)
 
 # Every config in DAP_DESIGN_CONFIGS creates the core as nanosoc.cpu0 and
 # defines nanosoc_halt_examine (nanosoc_mps3_jtag.cfg:84-104,
@@ -113,19 +113,13 @@ def design_debug(design: int) -> DesignDebug:
 
     ``NothingOnTargetError`` (exit 13) when the design has no debug port.
     """
-    name = KNOWN_DESIGNS.get(design, f"design 0x{design:04x}")
-    cfgs = DAP_DESIGN_CONFIGS.get(design)
-    if cfgs is not None:
-        return DesignDebug(design, name, tuple(cfgs))
-    if design == MULTICORE_DESIGN:
-        raise NothingOnTargetError(
-            "nanosoc_multicore: two-AP config not available yet",
-            hint="its OpenOCD config (one AP per core) is harness handover B4; "
-                 "debug nanosoc or nanosoc_upy meanwhile",
-        )
+    row = designs.DESIGNS.get(design)
+    name = KNOWN_DESIGNS.get(design) or (row.name if row else f"design 0x{design:04x}")
+    if row is not None and row.debug_configs is not None:
+        return DesignDebug(design, name, tuple(row.debug_configs), row.gdb_attach)
     raise NothingOnTargetError(
         f"the loaded design ({name}) has no debug port",
-        hint="load nanosoc, nanosoc_upy or nanosoc_iice first",
+        hint="load nanosoc, nanosoc_upy, nanosoc_iice or nanosoc_multicore first",
     )
 
 

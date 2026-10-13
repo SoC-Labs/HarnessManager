@@ -51,6 +51,7 @@ from harness_manager.core.errors import (
 )
 
 from .constants import CONSOLE_PORTS, KNOWN_DESIGNS
+from .designs import DESIGNS
 
 log = logging.getLogger(__name__)
 
@@ -81,35 +82,11 @@ class DesignUart:
     why: str = ""                  # for ``baud`` None: why there is no rate
 
 
-#: design_id -> uart0 rate. Every row cites the wrapper that fixes it.
+#: design_id -> uart0 rate. A view of the design manifest (designs.py); every row cites the
+#: wrapper that fixes it.
 DESIGN_UART: dict[int, DesignUart] = {
-    0x0001: DesignUart("nanosoc", 76800,
-                       "fpga/rp/nanosoc/rp_nanosoc_wrapper.sv:54 (UART_BAUD -> uart_axis_shim "
-                       ".BAUD, 382-384)"),
-    0x0003: DesignUart("nanosoc_multicore", 76800,
-                       "fpga/rp/nanosoc_multicore/rp_nanosoc_multicore_wrapper.sv:49 (UART_BAUD -> "
-                       "uart_axis_shim .BAUD, 229-231)"),
-    0x0005: DesignUart("nanosoc_upy", 76800,
-                       "fpga/rp/nanosoc_upy/rp_nanosoc_upy_wrapper.sv:62 (passed to "
-                       "rp_nanosoc_wrapper, 164)"),
-    0x0008: DesignUart("nanosoc_iice", 76800,
-                       "fpga/rp/nanosoc_iice/rp_nanosoc_iice_core.sv:165-182 (forwards only NGPIO, "
-                       "so rp_nanosoc_wrapper.sv:54's default applies)"),
-    0x000A: DesignUart("nanosoc_ila", 76800,
-                       "fpga/rp/nanosoc_ila/rp_nanosoc_ila_wrapper.sv:40 (passed to "
-                       "rp_nanosoc_wrapper, 107)"),
-    # Designs that put nothing on the console pair.
-    0x0000: DesignUart("greybox", None, "fpga/dfx/rms/rm_greybox/rm_greybox.sv",
-                       "no design is loaded (greybox): nothing drives uart0"),
-    0x0002: DesignUart("eth_ss", None, "fpga/rp/eth_ss/rp_eth_ss_wrapper.sv:193-195",
-                       "eth_ss ties its console off (rp_eth_ss_wrapper.sv:193-195)"),
-    0x0004: DesignUart("uart_echo", None, "fpga/dfx/rms/rm_uart_echo/rm_uart_echo.sv:273-274",
-                       "uart_echo echoes bytes on the AXI-Stream itself: there is no serial line, "
-                       "so there is no rate (rm_uart_echo.sv:273-274)"),
-    0x0007: DesignUart("clcd_demo", None, "fpga/rp/clcd_demo/rp_clcd_demo_wrapper.sv:331-333",
-                       "clcd_demo ties its console off (rp_clcd_demo_wrapper.sv:331-333)"),
-    0x0009: DesignUart("dbg_demo", None, "fpga/rp/dbg_demo/rp_dbg_demo_wrapper.sv:148-150",
-                       "dbg_demo ties its console off (rp_dbg_demo_wrapper.sv:148-150)"),
+    d: DesignUart(r.name, r.uart.baud, r.uart.source, r.uart.why)
+    for d, r in DESIGNS.items() if r.uart is not None
 }
 
 #: uart1: the shell's UARTBR U1 has no partition pins in v0.1; the BD ties its DUT side off.
