@@ -144,15 +144,15 @@ SPECS: tuple[CapabilitySpec, ...] = (
                    needs_hint=NEEDS_PRESENCE),
     # --- Mint 4 (net-protocol v0.20), gated on feature NAMES only. ---
     CapabilitySpec(HOSTIO_CAP, "Host I/O to the DUT (hostio)", _via_names((HOSTIO,), *_ETH_HUB),
-                   needs_hint="harness firmware that reports 'hostio' (mint 4)"),
+                   needs_hint="harness firmware that reports 'hostio' (newer images)"),
     CapabilitySpec(SENSORS_CAP, "Board sensors (sensors)", _via_names((SYSMON,), *_ETH_HUB),
-                   needs_hint="harness firmware that reports 'sysmon' (mint 4)"),
+                   needs_hint="harness firmware that reports 'sysmon' (newer images)"),
     CapabilitySpec(MCC_CAP, "Board controller through the harness (mcc)",
                    _via_names((MCCIF, MCC_LOCAL), *_ETH_HUB),
                    needs_hint=NEEDS_MCC_HARNESS),
     CapabilitySpec(COSIM_CAP, "Co-simulation clock and debug (cosim)",
                    _via_names((COSIM,), *_ETH_HUB),
-                   needs_hint="harness firmware that reports 'cosim' (mint 4)"),
+                   needs_hint="harness firmware that reports 'cosim' (newer images)"),
     # The user microSD card: OS slots (the slot verbs) and the design store (usd).
     CapabilitySpec(OS_SLOTS_CAP, "OS slots on the user card",
                    _via_names((SLOT,), *_ETH_HUB, L.SSH),
