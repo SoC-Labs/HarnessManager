@@ -39,9 +39,11 @@ from tests.fakes.virtual_board import (
     FIELDED_3F1A560F,
     FIELDED_ILA_MINT_BAKE,
     FIELDED_ILA_V011,
-    LINUX_HARNESSD_V1 as LINUX_HARNESSD,
     VirtualMps3,
     linux_harnessd_profile,
+)
+from tests.fakes.virtual_board import (
+    LINUX_HARNESSD_V1 as LINUX_HARNESSD,
 )
 
 

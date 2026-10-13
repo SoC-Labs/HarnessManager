@@ -413,7 +413,8 @@ def test_promote_legal_info_replaces_sha_and_size_on_stable_only(tmp_path, lx):
     assert s["legal_info"]["sha256"] != b["legal_info"]["sha256"]
     for k in ("name", "url"):
         assert s["legal_info"][k] == b["legal_info"][k]
-    rest = lambda e: {k: v for k, v in e.items() if k not in ("legal_info", "notes", "status")}
+    def rest(e):
+        return {k: v for k, v in e.items() if k not in ("legal_info", "notes", "status")}
     assert rest(s) == rest(b) and s["linux_bundle"] == b["linux_bundle"]
     assert s["notes"] == "public notes"
 

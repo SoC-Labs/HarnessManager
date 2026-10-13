@@ -408,7 +408,8 @@ def test_promote_with_notes_replaces_them_on_stable_only(tmp_path, repo, keys):
     assert beta.read_bytes() == beta_bytes                              # beta untouched
     b, s = _rel(beta), _rel(stable)
     assert s["notes"] == "Public notes for stable.\n\n- one" and s["notes"] != b["notes"]
-    rest = lambda e: {k: v for k, v in e.items() if k not in ("notes", "status")}
+    def rest(e):
+        return {k: v for k, v in e.items() if k not in ("notes", "status")}
     assert rest(s) == rest(b)                                           # all else identical
     sig = minisign.parse_signature(stable.with_name("channel.json.minisig").read_bytes())
     minisign.verify(stable.read_bytes(), sig, _pub(keys["pk2"]))        # signed as usual
