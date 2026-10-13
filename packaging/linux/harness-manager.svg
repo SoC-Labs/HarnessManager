@@ -1,1 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#2f5bd3"/><g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="16" height="16" rx="2"/><path d="M12 4v4M20 4v4M12 24v4M20 24v4M4 12h4M4 20h4M24 12h4M24 20h4"/><path d="M13 13h6v6h-6z"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- C: a chip with legs, and a big green status LED glowing at its corner. -->
+  <rect width="256" height="256" rx="56" fill="#2f5bd3"/>
+  <g stroke="#ffffff" stroke-width="14" stroke-linecap="round">
+    <path d="M92 36V66M128 36V66M164 36V66M92 190V220M128 190V220M164 190V220M36 92H66M36 128H66M36 164H66M190 92H220M190 128H220M190 164H220"/></g>
+  <rect x="62" y="62" width="132" height="132" rx="18" fill="#ffffff"/>
+  <rect x="88" y="88" width="80" height="80" rx="10" fill="#2f5bd3"/>
+  <circle cx="186" cy="186" r="38" fill="#2f5bd3"/>
+  <circle cx="186" cy="186" r="28" fill="#1fe08a"/>
+  <circle cx="177" cy="177" r="9" fill="#d6ffec"/>
+</svg>
