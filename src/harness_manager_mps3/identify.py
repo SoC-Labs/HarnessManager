@@ -10,7 +10,7 @@ The wire, as agreed with the Linux harness owner (plan §10, 2026-09-23)::
               "shell_id","rm_id","harness","proto","impl"?,"unit"?,"up_ms","os_up_ms"?,
               "mode":"run"|"rescue","reason"?,"ssh"?:{"claimed","host_key_sha256"},
               "ports":{"ctrl":6900,"push":6910,"tftp":69,"jtag":6921,"xvc":2542,
-                       "uart0":6930,"uart1":6931,"swo":6932}}
+                       "uart0":6930,"uart1":6931,"swo":6932},"claim_ports"?:{"hostio_adp":6933}}
 
 Facts this module relies on:
 
@@ -255,6 +255,22 @@ class IdentifyReply:
         return {k: v for k, v in p.items() if _int(v) is not None}
 
     @property
+    def claim_ports(self) -> dict[str, int]:
+        """Ports reachable only over the claim SSH (mint 4: ``hostio_adp`` 6933).
+
+        Kept apart from :attr:`ports` on purpose: a tool that forwards "the ports listed"
+        must never pick these up."""
+        p = self.raw.get("claim_ports")
+        if not isinstance(p, dict):
+            return {}
+        return {k: v for k, v in p.items() if _int(v) is not None}
+
+    @property
+    def hostio(self) -> bool:
+        """Mint 4: 6931 carries the hostio USRT1 channel (identify lists ``hostio_usrt1``)."""
+        return "hostio_usrt1" in self.ports
+
+    @property
     def control_port(self) -> int:
         return self.ports.get("ctrl", CONTROL_PORT)
 
@@ -270,6 +286,7 @@ class IdentifyReply:
     # -- conversions into the core model -----------------------------------------------
 
     def identity(self) -> BoardIdentity:
+        from .constants import HOSTIO_FEATURE
         from .shell import resolve_rm_name
 
         rm = self.rm_id
@@ -284,6 +301,7 @@ class IdentifyReply:
             harness_impl=self.impl,
             proto=self.proto,
             name=self.name,
+            features=(HOSTIO_FEATURE,) if self.hostio else (),
         )
 
     def describe(self) -> str:

@@ -57,6 +57,7 @@ from harness_manager.core.errors import (
     HarnessError,
     HeldError,
     NothingOnTargetError,
+    UnavailableError,
     UnreachableError,
     UsageError,
 )
@@ -71,6 +72,8 @@ from .constants import (
     DAP_DESIGN_CONFIGS,
     DEFAULT_SHELL_HOST,
     DUT_CONSOLE_PACE_S,
+    HOSTIO_CONSOLE,
+    HOSTIO_FEATURE,
     JTAG_RBB_PORT,
     PACED_CONSOLES,
     PUSH_PORT,
@@ -114,29 +117,66 @@ def _route(candidate: Candidate, via: str = "") -> Candidate:
 
 class Mps3Consoles:
     def __init__(self, endpoints: dict[str, str], pace_s: float = DUT_CONSOLE_PACE_S,
-                 shell: Mps3Shell | None = None) -> None:
+                 shell: Mps3Shell | None = None, *, features: Sequence[str] = (),
+                 session: Any = None) -> None:
         self._endpoints = endpoints
         self._pace_s = pace_s
         self._shell = shell
+        self._session = session
+        # Mint 4: the engine feature NAME ``hostio`` makes 6931 "hostio1" (never a version test).
+        self._hostio = HOSTIO_FEATURE in features
+
+    def note_features(self, features: Sequence[str]) -> None:
+        """The board's ``version.features`` as last read (an identity poll, or the rate
+        query): they decide what 6931 is called. Reading them here would cost a second
+        control connection, so a session whose candidate carried none shows ``uart1`` until
+        the first poll says."""
+        self._hostio = HOSTIO_FEATURE in features
+
+    @property
+    def hostio(self) -> bool:
+        return self._hostio
 
     def console_endpoints(self) -> dict[str, str]:
-        return dict(self._endpoints)
+        """The consoles by name. With the ``hostio`` feature 6931 is ``hostio1``, not ``uart1``."""
+        if not self._hostio:
+            return dict(self._endpoints)
+        return {(HOSTIO_CONSOLE if n == "uart1" else n): u for n, u in self._endpoints.items()}
 
     def console_write_pace_s(self) -> dict[str, float]:
-        """The DUT UARTs drop unpaced input (see constants.DUT_CONSOLE_PACE_S)."""
-        return {n: self._pace_s for n in PACED_CONSOLES if n in self._endpoints}
+        """The DUT UARTs drop unpaced input (see constants.DUT_CONSOLE_PACE_S). ``hostio1`` is
+        not in PACED_CONSOLES: hostio4 has its own flow control."""
+        eps = self.console_endpoints()
+        return {n: self._pace_s for n in PACED_CONSOLES if n in eps}
+
+    def hostio_status(self) -> dict:
+        """The hostio mode, pending change, held and drop counters (``uart.hostio_status``)."""
+        from .uart import HOSTIO_CAPABILITY, hostio_status
+
+        if self._shell is None or not self.hostio:
+            raise UnavailableError(HOSTIO_CAPABILITY, "this board has no hostio support")
+        return hostio_status(self._shell)
+
+    def hostio_set_mode(self, mode: str) -> dict:
+        """Claim-locked ``hostio set`` (``uart.hostio_set_mode``)."""
+        from .uart import HOSTIO_CAPABILITY, hostio_set_mode
+
+        if self._session is None or not self.hostio:
+            raise UnavailableError(HOSTIO_CAPABILITY, "this board has no hostio support")
+        return hostio_set_mode(self._session, mode)
 
     def console_baud_info(self) -> dict[str, dict]:
         """Each console's rate and whether it can change (L2: ``.uart``)."""
         from .uart import console_baud_info
 
-        return console_baud_info(self._endpoints, self._shell)
+        return console_baud_info(self.console_endpoints(), self._shell,
+                                 on_features=self.note_features)
 
     def console_set_baud(self, name: str, baud: int) -> dict:
         """The harness verb ``uart_baud`` (L2: ``.uart``); UnavailableError with the reason."""
         from .uart import console_set_baud
 
-        return console_set_baud(self._endpoints, self._shell, name, baud)
+        return console_set_baud(self.console_endpoints(), self._shell, name, baud)
 
 
 class Mps3Resets:
@@ -212,7 +252,9 @@ class Mps3Session(BoardSession):
         relay = _hook("hub", "relay_share_consoles")    # L1: hub shares as tcp:// consoles
         if relay is not None:
             endpoints = relay(endpoints, candidate)
-        self.consoles = Mps3Consoles(endpoints, console_pace_s, shell) if endpoints else None
+        features = tuple(getattr(candidate.identity, "features", ()) or ())
+        self.consoles = (Mps3Consoles(endpoints, console_pace_s, shell, features=features,
+                                      session=self) if endpoints else None)
 
         for attr, module, factory in (
             ("deploy", "deploy", "make_deploy_adapter"),
@@ -291,13 +333,21 @@ class Mps3Session(BoardSession):
         name = _hook("naming", "session_board_name")
         return name(self, identity) if name is not None else ("", "")
 
+    def _note_features(self, ident: BoardIdentity) -> None:
+        """Tell the consoles what the board advertises (mint 4: 6931 is hostio1 or uart1)."""
+        consoles = self.consoles
+        if consoles is not None and ident.harness_impl:    # a real ``version`` reply
+            consoles.note_features(tuple(ident.features or ()))
+
     def identity(self) -> BoardIdentity:
         if self.shell is None:
             return BoardIdentity(board_type="mps3")
         from .shell import ShellRescueError, SwapSettlingError
         started = time.monotonic()
         try:
-            return self.shell.identity()
+            ident = self.shell.identity()
+            self._note_features(ident)
+            return ident
         except ShellRescueError as exc:      # stage0 rescue: report what stage0 said (T12-2)
             return exc.identity
         except SwapSettlingError:            # our failed push: the hub's refusal is the swap

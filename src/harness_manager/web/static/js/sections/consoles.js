@@ -4,7 +4,7 @@
 // Attach (screen, or an export to TCP), Save and Clear, the terminal and a send line.
 //
 // The switcher lists what GET /consoles lists, named by each row's `role` (G1b):
-// - `dut` (uart0, uart1, swo): the DUT consoles;
+// - `dut` (uart0, uart1 or hostio1, swo): the DUT consoles;
 // - `linux-root` (tty_02 on a Linux harness, a ROOT shell): "Harness console"; only the lease
 //   holder types there (the row's `writable` / `read_only_reason`, and the socket's `input`
 //   frame, JS/consoles.js);
@@ -29,7 +29,7 @@
 // \xNN expanded (expandLine). A read-only console takes nothing, and shows no cursor.
 
 import { gateReason, interlock, isArmed, panelState, runAction, setArmed } from "../actions.js";
-import { call } from "../api.js";
+import { ENDPOINTS, call, toApiError } from "../api.js";
 import { baudWhy, capState, clock, shortScreen } from "../format.js";
 import { consoleSession, existingSession } from "../consoles.js";
 import { html, useEffect, useRef, useState } from "../lib.js";
@@ -116,7 +116,8 @@ const STATE_DOT = { up: "ok", connecting: "accent", down: "warn", closed: "idle"
 
 // --- the switcher's rows ------------------------------------------------------------------------
 
-const DUT_NAMES = { uart0: ["DUT console", "DUT"], uart1: ["DUT uart1", "uart1"], swo: ["DUT SWO", "SWO"] };
+// hostio1 (mint 4): with the board feature `hostio`, 6931 is the DUT's hostio channel 1, not uart1.
+const DUT_NAMES = { uart0: ["DUT console", "DUT"], uart1: ["DUT uart1", "uart1"], hostio1: ["DUT hostio1", "hostio1"], swo: ["DUT SWO", "SWO"] };
 const ROLE_ORDER = { dut: 0, "linux-root": 1, shell: 2, lane: 3, mcc: 4, "": 5 };
 
 function roleOf(name, meta) {
@@ -457,6 +458,88 @@ function ResetGroup({ bid, dut }) {
   </span>`;
 }
 
+// --- hostio1: the mode of the DUT's console pins (mint 4) ----------------------------------------
+
+const HOSTIO_ARM = "hostio_mode";
+const HOSTIO_PANEL = "hostio_mode";
+export const HOSTIO_GATE = { capability: "mps3.hostio", arm: HOSTIO_ARM, holder: "Switch the console pins" };
+export const HOSTIO_NOT_HELD = "Load the greybox or hold the DUT first; the change applies at the next design load.";
+
+// The daemon's two routes are optional: a daemon without them shows the console and no mode chip.
+export const hostioRoutes = () => !!(ENDPOINTS.hostioGet && ENDPOINTS.hostioSet);
+
+function hostioSpec(bid, want, reload) {
+  return {
+    key: "hostio_mode", label: `Switch to ${want}`, busyLabel: "Switching...", budgetS: 20,
+    command: `hostio set ${want}`,
+    run: async () => {
+      const { data } = await call("hostioSet", { bid }, { mode: want });
+      reload(data);
+      return data;
+    },
+    render: (d) => [{ kind: "ok", text: d && d.pending && d.pending !== d.mode
+      ? `hostio set ${want}: waiting for the next design load` : `hostio set ${want}: done` }],
+    // A refusal arrives as the board's words (not_held: HOSTIO_NOT_HELD); the strip shows them.
+    arm: HOSTIO_ARM,
+  };
+}
+
+function HostioStrip({ bid }) {
+  const [view, setView] = useState(null);
+  const [err, setErr] = useState("");
+  const load = async () => {
+    try {
+      const { data } = await call("hostioGet", { bid });
+      setView(data); setErr("");
+    } catch (e) {
+      setErr(toApiError(e).message);
+    }
+  };
+  useEffect(() => { if (hostioRoutes()) load(); }, [bid]);
+  if (!hostioRoutes()) return null;
+  const p = panelState(bid, HOSTIO_PANEL);
+  const mode = view ? view.mode : "";
+  const want = mode === "hostio4" ? "console" : "hostio4";
+  const spec = hostioSpec(bid, want, (d) => setView(d && d.mode ? d : view));
+  const why = gateReason(bid, HOSTIO_PANEL, spec.key, HOSTIO_GATE);
+  const running = p.running === spec.key;
+  const armed = isArmed(bid, HOSTIO_ARM);
+  const armWhy = why === "running" ? "" : why.startsWith("not armed") ? "" : why;
+  const blocked = !!why && !running;
+  const refused = !p.running && p.lines.length && p.lines[0].command === `hostio set ${want}`
+    ? p.lines.filter((l) => l.kind === "err" || l.kind === "hint").map((l) => l.text.replace(/^hint:\s*/, "")).join(" ") : "";
+  const click = async () => {
+    if (running) return;
+    if (why) { interlock(bid, HOSTIO_PANEL, spec.command, why); return; }
+    await runAction(bid, HOSTIO_PANEL, spec);
+    load();
+  };
+  const drops = view ? Number((view.drops || {}).ch1 || 0) : 0;
+  return html`<div class="cs-info hostio-strip" data-testid="hostio-strip">
+    <span class=${`chip ${mode === "hostio4" ? "accent" : "plain"}`} data-testid="hostio-mode" data-mode=${mode}
+      title="What the DUT's console pins carry now">${view ? `mode: ${mode}` : err ? "mode unknown" : "reading mode..."}</span>
+    ${view && view.changing ? html`<span class="chip held" data-testid="hostio-pending"
+      title="The change takes effect when the DUT's reset is next released (a design load)"><${Icon} name="clock" />
+      ${view.pending} at the next design load</span>` : null}
+    ${view && view.held ? html`<span class="chip plain" data-testid="hostio-held" title="The DUT is held in reset right now">held</span>` : null}
+    <span class="small muted" data-testid="hostio-drops"
+      title="Bytes from the DUT that nobody was listening to">${view ? `${drops} byte${drops === 1 ? "" : "s"} dropped` : ""}</span>
+    <span class="grow"></span>
+    <label class=${`arm-inline ${armed ? "armed" : ""} ${armWhy ? "dis" : ""}`} data-testid="arm-hostio-mode"
+        title="Arm, then switch: re-wires the DUT's console pins (needs the board's SSH claim)">
+      <input type="checkbox" checked=${armed} disabled=${!!armWhy} aria-label="Arm the hostio switch"
+        onChange=${(e) => setArmed(bid, HOSTIO_ARM, e.target.checked)} />
+      <${Icon} name=${armed ? "lock-open" : "lock"} />Arm</label>
+    <button type="button" class="btn sm" data-action="hostio_mode" aria-disabled=${blocked || !view ? "true" : undefined}
+        aria-busy=${running ? "true" : undefined} onClick=${click}
+        title=${blocked ? why : `Switch the DUT's console pins to ${want}, from the next design load`}>
+      ${running ? html`<${Spinner} />` : html`<${Icon} name="refresh-cw" />`}${want === "hostio4" ? "Switch to hostio4" : "Switch back to console"}</button>
+    ${err ? html`<p class="reason warn" data-testid="hostio-error"><${Icon} name="circle-x" /><span>${err}</span></p>` : null}
+    ${refused ? html`<p class="reason warn" data-testid="hostio-refused"><${Icon} name="circle-x" /><span>${refused}</span></p>` : null}
+    ${blocked && why && !/^not armed/.test(why) && why !== "running" ? html`<p class="reason held" data-testid="reason-hostio_mode"><${Icon} name="lock" /><span>${why}</span></p>` : null}
+  </div>`;
+}
+
 // --- the card -----------------------------------------------------------------------------------
 
 function ConsoleCard({ bid, list, c }) {
@@ -595,6 +678,7 @@ function ConsoleCard({ bid, list, c }) {
           title="Clear this console's screen (the others keep theirs; the board is not touched)"><${Icon} name="trash-2" /></button>
       </span>
     </div>
+    ${c.name === "hostio1" ? html`<${HostioStrip} bid=${bid} />` : null}
     ${note || resetNote ? html`<div class="console-note">${note}${resetNote}</div>` : null}
     ${attach ? html`<${AttachRow} bid=${bid} name=${c.name} onResult=${setResult} />` : null}
     <${Terminal} key=${c.name} session=${session} label=${c.label} writable=${acc.writable} />

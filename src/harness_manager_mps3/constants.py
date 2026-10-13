@@ -36,6 +36,16 @@ CLEARING_ARENA_BYTES = 262144
 
 CONSOLE_PORTS = {"uart0": UART0_PORT, "uart1": UART1_PORT, "swo": SWO_PORT}
 
+#: Mint 4 (net-protocol v0.20, "hostio"): with the engine feature NAME ``hostio`` (never a
+#: protocol version), TCP 6931 is the DUT's hostio USRT1 channel, so the console is called
+#: ``hostio1``, not ``uart1``, and is NOT paced (hostio4 has its own flow control). The port
+#: stays UART1_PORT; only the name changes. Without the feature name 6931 is the old inert uart1.
+HOSTIO_FEATURE = "hostio"
+HOSTIO_CONSOLE = "hostio1"
+#: 6933 = hostio CH0 (ADP). Claim-gated: reachable only over the claim SSH, never from
+#: ``identify.ports`` and never in a forwarded port list.
+HOSTIO_ADP_PORT = 6933
+
 #: Seconds per byte for input to the DUT UARTs. The nanoSoC UART has no receive FIFO:
 #: an unpaced `print(1+1)` arrived as `p(1+1)` and a NameError (board window 2026-09-23,
 #: platform docs/evidence/2026-09-w2/rf_flash_boot_20260923.txt). SWO is output only.
