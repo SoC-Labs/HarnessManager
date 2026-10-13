@@ -260,9 +260,11 @@ class UpdateService:
                     rev = rev_from = ""
         os_sha = os_crc = os_pending = fell = fell_crc = running = ""
         os_boot = slots_reason = ""
+        slot_infos: dict[str, Any] = {}
         if slots is not None:
             try:
                 st = slots.status()
+                slot_infos = dict(st.slots)                     # HM 1.2 L10: every slot's release
                 active = st.active_info
                 os_sha, os_crc = active.image_sha256, getattr(active, "hdr_crc", "")
                 os_pending = getattr(st, "pending_commit", "")
@@ -283,7 +285,8 @@ class UpdateService:
                          sd_revisions=revs, board_rev=rev, board_rev_from=rev_from,
                          mcc_firmware=getattr(boot, "firmware", "") or "",
                          hub_sd=self.hub_door_view(session),
-                         os_boot=os_boot, os_slots_reason=slots_reason)
+                         os_boot=os_boot, os_slots_reason=slots_reason,
+                         os_slot_infos=slot_infos)
 
     def plan_harness(self, session: Any, *, verified: VerifiedChannel | None = None,
                      channel: str | None = None, source: str | None = None,

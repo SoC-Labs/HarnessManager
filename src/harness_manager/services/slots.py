@@ -367,7 +367,8 @@ def slot_status_json(st: SlotStatus) -> dict[str, Any]:
         "pending_commit": st.pending_commit,
         "slots": {n: {"state": s.state, "hdr_crc": s.hdr_crc, "len": s.length, "sid": s.sid,
                       "verified": s.verified, "err": s.err, "image_sha256": s.image_sha256,
-                      "version": s.version, "running": n == st.running,
+                      "version": s.version, "sha": getattr(s, "sha", None),
+                      "running": n == st.running,
                       "default": n == st.default}
                   for n, s in sorted(st.slots.items())},
         "job": {"act": st.job.act, "slot": st.job.slot, "state": st.job.state,
@@ -403,7 +404,8 @@ def slot_status_from_json(doc: dict[str, Any]) -> SlotStatus:
             name=str(name), state=_text(one.get("state")), hdr_crc=_text(one.get("hdr_crc")),
             length=_int(one.get("len")), sid=_text(one.get("sid")),
             verified=_text(one.get("verified")) or "no", err=_text(one.get("err")),
-            image_sha256=_text(one.get("image_sha256")), version=_text(one.get("version")))
+            image_sha256=_text(one.get("image_sha256")), version=_text(one.get("version")),
+            sha=_text(one.get("sha")) or None)
     job = doc.get("job") if isinstance(doc.get("job"), dict) else {}
     rate = job.get("rate_bps")
     eta = job.get("eta_s")
