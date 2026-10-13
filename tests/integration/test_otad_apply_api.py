@@ -3,7 +3,7 @@
 
 The daemon app runs under FastAPI's TestClient over the real Engine and a virtual MPS3 (a
 console with a real PTY). The update service's app updater points at an install root in
-``tmp_path`` with the installer's venv registered and 1.1.0 staged. The apply step's three
+``tmp_path`` with the installer's venv registered and 9.1.0 staged. The apply step's three
 outside effects are replaced by recorders: the new version's ``--self-test``, the detached
 helper, and the daemon's own shutdown. Every check has a negative twin.
 """
@@ -51,7 +51,7 @@ from tests.fakes.t13_daemon import TOKEN, bid_path, engine_for, headers, state_d
 pytestmark = pytest.mark.skipif(not ptymod.supported(), reason="PTYs need a POSIX system")
 
 H = headers()
-NEW = "1.1.0"
+NEW = "9.1.0"
 
 
 @pytest.fixture(autouse=True)
@@ -62,13 +62,13 @@ def _wiring(tmp_path: Path, monkeypatch) -> None:
 
 
 def install_root(tmp_path: Path) -> Path:
-    """The installer's venv (current ``""``) and 1.1.0 staged beside it."""
+    """The installer's venv (current ``""``) and 9.1.0 staged beside it."""
     root = tmp_path / "root"
     (root / "venv" / "bin").mkdir(parents=True)
     (root / "venv" / "bin" / "python").write_text("installer python")
     _launch.register(root, root / "venv", __version__, extras=[], windows=False)
     (root / "versions" / NEW / "bin").mkdir(parents=True)
-    (root / "versions" / NEW / "bin" / "python").write_text("1.1.0 python")
+    (root / "versions" / NEW / "bin" / "python").write_text("9.1.0 python")
     ptr = json.loads((root / "current.json").read_text())
     ptr["versions"] = {NEW: {"state": "staged", "at": 0.0}}
     (root / "current.json").write_text(json.dumps(ptr))
