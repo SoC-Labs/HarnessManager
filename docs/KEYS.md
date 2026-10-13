@@ -1,6 +1,6 @@
 # Release signing keys
 
-> **PENDING david's U2 decision.** No key exists yet, and `trust.PINNED_KEYS` is empty, so
+> **PENDING the release owner's U2 decision.** No key exists yet, and `trust.PINNED_KEYS` is empty, so
 > every channel is refused by every client. That is the safe default. This page is the plan
 > for the ceremony (`docs/design/HM_SELF_UPDATE.md` §4.4, `HARNESS_DISTRIBUTION.md` §4.3).
 > Its facts (key ids, dates, where the backups are) are filled in once the ceremony has
@@ -14,14 +14,14 @@ One trust store covers the app catalogue (`hm-app`) and every harness catalogue
 | Role | Signs | Custody (recommended) |
 |---|---|---|
 | `root` | `keys.json` rotation statements only | cold: two encrypted USB sticks, in two places, never on a networked machine |
-| `harness-release` | `channel.json` on stable, beta and dev, for both catalogues | passphrase-protected, on david's machine; david signs stable |
+| `harness-release` | `channel.json` on stable, beta and dev, for both catalogues | passphrase-protected, on your machine; the release owner signs stable |
 | `app-ci` | dev only | no passphrase, for CI once GitHub Actions is back (optional) |
 
 Clients pin the public halves of root and release (and app-ci) in `PINNED_KEYS`. A new
 release key arrives through a root-signed `keys.json` with a higher serial. A root key never
 rotates over the air: a new root ships in a new app build.
 
-## The ceremony (david, about 30 minutes, once)
+## The ceremony (the release owner, about 30 minutes, once)
 
 1. On an offline or trusted laptop, make the two keys, each with a strong passphrase:
    - `minisign -G -p root.pub -s root.key`
@@ -29,7 +29,7 @@ rotates over the air: a new root ships in a new app build.
 2. Optional: `minisign -G -W -p ci.pub -s ci.key` (no passphrase), for CI when it is back.
 3. Copy `root.key` to two encrypted USB sticks and store them in two places. Delete it from
    the laptop.
-4. Keep `release.key` on david's machine only.
+4. Keep `release.key` on your machine only.
 5. Open a PR (the keys PR) that:
    - fills `PINNED_KEYS` in `src/harness_manager/services/update/trust.py`:
      `pinned("RWQ…", ROLE_ROOT, note="root 2026")`,
@@ -40,7 +40,7 @@ rotates over the air: a new root ships in a new app build.
 
 | Key | Key id | Made | Backups |
 |---|---|---|---|
-| root | `5763E43D3D0C3CF1` | 2026-10-07 | two encrypted USB sticks (david) |
+| root | `5763E43D3D0C3CF1` | 2026-10-07 | two encrypted USB sticks (the release owner) |
 | harness-release | `5A879A873F6B72BC` | 2026-10-07 | release maintainer's machine only |
 | app-ci | not made (no CI signing yet) | | |
 
@@ -65,7 +65,7 @@ The key source is a parameter, so any of U2's options works without a code chang
 - **HM's Python signer refuses a passphrase-protected key.** It never decrypts one.
 
 If U2 puts the release key with the lead as well (option b), nothing changes but the path in
-`HM_RELEASE_SECRET_KEY`. If david signs every stable release (option a), he runs
+`HM_RELEASE_SECRET_KEY`. If the release owner signs every stable release (option a), they run
 `make release-promote` himself, or the lead hands him the dry-run tree to sign.
 
 ## Throwaway keys (tests and dry runs)

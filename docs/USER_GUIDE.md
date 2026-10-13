@@ -158,7 +158,7 @@ the application menu has **Harness Manager** and **Open with Demo Boards**.
   and the app share them. `harness-manager config get general.board_order` prints the order.
   The demo (`app --demo`) keeps its own.
 - **Boards in `boards.toml` are always listed**, also straight after the service restarts. One
-  that is not open shows **not open** and its route (`through the hub mapstone-dev`).
+  that is not open shows **not open** and its route (`through the hub`).
   Nothing contacts it until you click it and press **Open board**; then it goes through its own
   `via` and hub.
 - **Scan** (the circular arrow) looks on this network, and also lists your `boards.toml`
@@ -362,8 +362,8 @@ default:** a board on your desk needs none, and nothing hub-related runs until y
 
 | You have | Command |
 |---|---|
-| an SSH account on the hub (the lab today) | `harness-manager hub add lab --ssh mapstone-dev.ecs.soton.ac.uk` |
-| an fpgahub token (no SSH) | `harness-manager hub add remote --url https://mapstone-dev.ecs.soton.ac.uk:7246 --ca-file ~/lab-hub-ca.pem --token-stdin` |
+| an SSH account on the hub (the lab today) | `harness-manager hub add lab --ssh hub.example.org` |
+| an fpgahub token (no SSH) | `harness-manager hub add remote --url https://hub.example.org:7246 --ca-file ~/lab-hub-ca.pem --token-stdin` |
 
 With `--token-stdin`, paste the token when asked. It goes into the secret store (the OS
 keyring, else a private file), never into a settings file. Use port 7246, not 7245 (7245
@@ -453,7 +453,7 @@ badge on its **Hub lease** line.
 **Which name the lease uses.** The hub knows the board by two names: the physical board
 (`mps3_03`) and the target it is leased as (`mps3_03_pl`). Both names are current, and
 neither is deprecated. HM's lease text uses the board name and shows the target as a
-detail: "mps3_03 on mapstone-dev (target mps3_03_pl)". HM takes the lease on the target,
+detail: "mps3_03 on hub (target mps3_03_pl)". HM takes the lease on the target,
 the same name the platform's scripts (pyverify) use, so everyone shares one lease and one
 queue. If the hub gives the target no board of its own, the text uses the target alone.
 [docs/HUB_MODE.md](HUB_MODE.md#boards-and-targets-the-name-hm-shows-the-name-it-leases-on)
@@ -466,11 +466,11 @@ explains why.
 | **Yours** | lease yours · 27 min | this Harness Manager holds the lease | **Give back lease** (asks first). The service renews it while the board is open here |
 | **Free** | no lease | nobody holds it | **Take lease** (it may queue; **Leave queue** stops waiting) |
 | **Held by alice@lab-pc-07** | leased to alice@lab-pc-07 | someone else holds it | **Request board** |
-| **Held by david@mapstone-dev (another session)** | leased to david@mapstone-dev (another session) | your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner) | nothing here: use the board there, or give it back there |
+| **Held by alice@hub (another session)** | leased to alice@hub (another session) | your hub name holds it, but not this Harness Manager: another session, or a script you run (a soak, a runner) | nothing here: use the board there, or give it back there |
 | **Requested · #1** or **Queued** (beside Held by) | requested · position 1 | you are waiting for it | **Leave queue** (the bar above the header) |
 
 "Yours" means this Harness Manager holds the lease's token, not just your name: every lab
-session shares one hub principal (david@mapstone-dev), so a lease another session took is
+session shares one hub principal (alice@hub), so a lease another session took is
 named as such, and background checks on the board stay paused while it holds it. The
 board lock's chip says **Open** (the board is open here); the lease is its own badge. A
 board with no hub has no lease badge.
@@ -513,7 +513,7 @@ Over the API, `DELETE /boards/{bid}?release=true` does both.
 
 **On the command line.** `TARGET` is the board's address (`192.168.10.101`); its
 `boards.toml` hub table names the hub. The output names the hub's board, with the target
-it is leased as: `mps3-01 (mps3_01 on mapstone-dev, target mps3_01_pl): held by …`.
+it is leased as: `mps3-01 (mps3_01 on hub, target mps3_01_pl): held by …`.
 `--json` has both `board` and `target`, and the `lease` TSV ends with a BOARD column.
 
 | Command | What it does |
@@ -1001,7 +1001,7 @@ Proven on Vivado 2026.1 with the RC2 kit: `docs/evidence/2026-09-30-kit-interact
 
 **Times.** Fetching a kit takes seconds from the cache. A build takes about 30 minutes for
 a small RM on a quiet machine, up to an hour when the machine is loaded, and about 50
-minutes for nanosoc, with 4 to 8 GB of RAM. Measured on srv03335: `minimal` 28-56 min at
+minutes for nanosoc, with 4 to 8 GB of RAM. Measured on the build server: `minimal` 28-56 min at
 load 33-50 (`docs/evidence/2026-09-29-kit-night`) and 30.5 min at load 4-9; nanosoc 48-55
 min (`docs/evidence/2026-09-30-kit-nanosoc`).
 
@@ -1573,7 +1573,7 @@ tools.vivado = "/tools/Xilinx/Vivado/2024.1/bin/vivado"
 updates.mirrors = ["/lab/mirror"]
 
 [hubs.lab]                      # a machine hub; each user sets their own token
-host = "mapstone-dev.ecs.soton.ac.uk"
+host = "hub.example.org"
 ```
 
 It fails closed: a file that cannot be read turns self-update off. Never put a token in it:

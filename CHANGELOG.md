@@ -848,7 +848,7 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
 
 - The Live display rides out one busy hub (PANEL-TRUTH, 2026-09-28). With the lease held
   and heartbeated, it said "cannot confirm you hold the lease on mps3_01_pl: lease show on
-  mapstone-dev... failed: ... kex_exchange_identification: read: Connection reset by peer":
+  hub... failed: ... kex_exchange_identification: read: Connection reset by peer":
   the hub's ssh server had turned ONE connection away, and the display asked the hub afresh
   on every open. Now it takes the lease service's own view while it is under a minute old;
   a hub read that fails that way stands on the last time the hub said the lease is yours
@@ -1041,7 +1041,7 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   list, an icon and words: **Yours** (this Harness Manager holds the lease), **Held by
   alice@lab-pc-07**, **Free**, and **Requested · #1** or **Queued** while you wait. A lease
   held under your own hub name by another session or a script (every lab session shares
-  one fpgahub principal) says **Held by david@mapstone-dev (another session)**, never
+  one fpgahub principal) says **Held by alice@hub (another session)**, never
   Yours, and offers no Release: only that session can. The board lock's chip (in the list
   and the header) now says **Open** instead of Yours. A board with no hub has no badge.
 - **Release lease** is a real button wherever a lease you hold is shown: the header's Hub
@@ -1066,7 +1066,7 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   not kept per browser; the demo keeps its own. A new window starts on the first board.
 - **Boards in `boards.toml` no longer vanish after the service restarts.** Every board
   your `boards.toml` configures is listed, as **not open** with its route ("through the
-  hub mapstone-dev"), and nothing contacts it until you press **Open board**, which goes
+  hub hub"), and nothing contacts it until you press **Open board**, which goes
   through its own `via` and hub. A board that is neither in `boards.toml` nor open is not
   listed after a restart, as before. The API: `GET /boards` rows add `source` (`open`,
   `probe` or `config`) and `configured` (the table's key, via, hub, target, match and
@@ -1075,7 +1075,7 @@ From the guide's §6 walk on board 2 (Linux harness rc2_v7n, claimed, through th
   more in boards.toml"), since a board behind a hub never answers a scan.
 - **+ Add a board by address** uses the matching `boards.toml` entry's route: type
   `192.168.10.101` and the hub field fills with `hub`, with a line naming the entry
-  (`boards.toml lab: through the hub mapstone-dev`). A route you type wins. Adding a board
+  (`boards.toml lab: through the hub hub`). A route you type wins. Adding a board
   whose entry says `via = "hub"` now finds it: the probe goes through the hub's SSH host
   (it used to try a tunnel with no host and report "no boards answered").
 

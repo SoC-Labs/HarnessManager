@@ -92,7 +92,7 @@ Lab boards sit behind a hub machine (fpgahub). You need an SSH account on the hu
 fpgahub token. Add the hub once as a named hub, test it, then add the board it offers:
 
 ```bash
-harness-manager hub add lab --ssh mapstone-dev.ecs.soton.ac.uk
+harness-manager hub add lab --ssh hub.example.org
 harness-manager hub test lab                        # never takes a lease
 harness-manager hub targets lab --add mps3_01_pl    # writes the board into boards.toml
 ```

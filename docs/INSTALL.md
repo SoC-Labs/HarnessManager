@@ -409,7 +409,7 @@ updates.mirrors = ["/lab/mirror"]
 
 [hubs.lab]                     # a machine hub; each user still sets their own token
 transport = "ssh"
-host = "mapstone-dev.ecs.soton.ac.uk"
+host = "hub.example.org"
 ```
 
 `[lock]` may name the three keys above by their settings names (`updates.channel`,

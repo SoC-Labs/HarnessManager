@@ -2,7 +2,7 @@
 
 **Status (2026-09-26):** the REST transport, the event stream and the `via = "hub"` planner are built, tested against a fake hub that is checked against fpgahub v0.3.0's own app, and wired into the pack and the daemon (the T8-1 to T8-5 CCRs are merged). A hub with a `url`, as a named hub (`harness-manager hub add NAME --url URL`) or in a board's `hub` table, is accepted. None of it has run against the real hub yet.
 
-Today Harness Manager reaches the lab hub (fpgahub on mapstone-dev) over SSH: `ssh HUB 'sg fpga -c "fpgahub …"'` for leases and shares, `ssh -N -L` for the board's ports. Hub mode replaces the first half with fpgahub's own REST API and its event stream, so a user with an **fpgahub token** and no SSH account can lease the board, see the queue and read the hub's shares. The second half, the board's own TCP ports, needs a route through the hub, which the lab hub does not offer today (see [The data plane](#the-data-plane)).
+Today Harness Manager reaches the lab hub (fpgahub on the hub) over SSH: `ssh HUB 'sg fpga -c "fpgahub …"'` for leases and shares, `ssh -N -L` for the board's ports. Hub mode replaces the first half with fpgahub's own REST API and its event stream, so a user with an **fpgahub token** and no SSH account can lease the board, see the queue and read the hub's shares. The second half, the board's own TCP ports, needs a route through the hub, which the lab hub does not offer today (see [The data plane](#the-data-plane)).
 
 Code: `src/harness_manager/transports/hub_rest.py` (the client), `hub_events.py` (the SSE stream), `hub_reach.py` (the data plane).
 
@@ -13,7 +13,7 @@ A hub can be a named setting instead of a table repeated in every board. **No hu
 ```toml
 # settings.toml (beside boards.toml; `harness-manager hub add` writes it)
 [hubs.lab]
-host = "mapstone-dev.ecs.soton.ac.uk"   # SSH: your lab account ("local" on the hub itself)
+host = "hub.example.org"   # SSH: your lab account ("local" on the hub itself)
 group = "fpga"                           # the fpgahub socket's group ("" = no sg)
 jump = ""                                # an SSH jump host on the way to the hub (ssh -J)
 holder = ""                              # the lease holder ("" = harness-manager-<user>@<host>)
@@ -21,7 +21,7 @@ lease_ttl = "1h"                         # also request_ttl (2h) and queue_timeo
 stage_dir = ".cache/harness-manager/hub-sd"  # the hub SD door's staging dir (see below)
 
 [hubs.remote]
-url = "https://mapstone-dev.ecs.soton.ac.uk:7246"   # REST: a token (7245 is mTLS)
+url = "https://hub.example.org:7246"   # REST: a token (7245 is mTLS)
 token = "store"                          # store (default) | file:PATH | env:VAR | fpgahub-login
 ca_file = "~/lab-hub-ca.pem"
 ```
@@ -44,7 +44,7 @@ hub = { use = "lab", target = "mps3_01_pl" }
 
 ```
 harness-manager hub list
-harness-manager hub add lab --ssh mapstone-dev.ecs.soton.ac.uk [--jump HOST] [--lease-ttl 30m]
+harness-manager hub add lab --ssh hub.example.org [--jump HOST] [--lease-ttl 30m]
 harness-manager hub add remote --url https://HUB:7246 --ca-file ~/lab-hub-ca.pem --token-stdin
 harness-manager hub token NAME --stdin | --ref file:PATH | --clear
 harness-manager hub test NAME [--target mps3_01_pl]
@@ -88,14 +88,14 @@ harness-manager hub remove NAME [--force]
      ```
    - Or log in with the fpgahub CLI:
      ```
-     fpgahub login --addr mapstone-dev.ecs.soton.ac.uk:7246 --token YOUR-TOKEN
+     fpgahub login --addr hub.example.org:7246 --token YOUR-TOKEN
      ```
      Harness Manager then reads `~/.config/fpgahub/config.toml`, but only for the hub that file names.
 4. **Add the hub to `boards.toml`** (in `~/.config/harness-manager/`):
    ```toml
    [boards.lab]
    match = ["192.168.10.101"]
-   hub = { url = "https://mapstone-dev.ecs.soton.ac.uk:7246", target = "mps3_01_pl",
+   hub = { url = "https://hub.example.org:7246", target = "mps3_01_pl",
            token_file = "~/.config/harness-manager/hub.token", ca_file = "~/lab-hub-ca.pem" }
    ```
 5. **Check it:** `harness-manager lease show 192.168.10.101`. It prints the holder and the queue, or "not leased". A 401 means the hub did not accept the token, and the message says which file it came from.
@@ -183,8 +183,8 @@ a second target.
 
 | | SSH mode | Hub mode (REST) |
 |---|---|---|
-| Who the hub thinks you are | the unix account, `admin` on the socket | the token's owner, `owner@mapstone-dev`, with the token's role |
-| Holder name | fpgahub ignores `--holder` | the same: `Lease.holder` is the principal, e.g. `alice@mapstone-dev` |
+| Who the hub thinks you are | the unix account, `admin` on the socket | the token's owner, `owner@hub`, with the token's role |
+| Holder name | fpgahub ignores `--holder` | the same: `Lease.holder` is the principal, e.g. `alice@hub` |
 | Waiting in the queue | re-run `lease acquire` every 20 s | the hub's own long poll, `GET /lease/wait`, in 5 s slices (a cancel takes effect within a slice); the queue place is re-asserted every 20 s |
 | Leaving the queue | `fpgahub lease cancel` | `DELETE /targets/{t}/queue`; on a multi-target board it follows fpgahub's 409 `board_required` to `DELETE /boards/{b}/queue` |
 | Force give back | always allowed (the socket is admin) | **admin tokens only**; a write token gets REFUSED and `can_revoke()` says so in advance |
@@ -270,7 +270,7 @@ What Harness Manager does:
 
 1. **The SSH tunnel.** This is today's method and still the only working one. It needs an SSH account on the hub. `hub.host` next to `hub.url` keeps it as the fallback. The ethernet gate never applies to it: the forwarded connections start on the hub itself (the OUTPUT chain), not in FORWARD.
 2. **Routing through the hub (`via = "hub"`).** An external user reaches 192.168.10.x only when all of these hold:
-   1. **A route on the client.** On campus: `ip route add 192.168.10.0/24 via <mapstone-dev's campus IP>`. Off campus, a VPN into the campus network first: 192.168.10.x is private and never crosses the internet.
+   1. **A route on the client.** On campus: `ip route add 192.168.10.0/24 via <hub's campus IP>`. Off campus, a VPN into the campus network first: 192.168.10.x is private and never crosses the internet.
    2. **The hub forwards.** fpgahub writes the board NIC's networkd file with `IPForward=no` (`network.py render_networkd`). The admin must enable forwarding on both NICs, and let the host firewall pass it.
    3. **The board can answer.** The shell has no gateway on its /24, so the hub must masquerade: `nft add rule ip nat postrouting oifname "mps3_01_pl" masquerade`, or the equivalent firewalld rule. The gate checks the source address in FORWARD, before the masquerade rewrites it, so the two work together.
    4. **The ethernet gate admits you.** Set `[boards.mps3_01.targets.pl.access] gate_ethernet = true`, then run `fpgahub nftables apply`. With the gate on, the forward chain drops everything on the board NIC except the current lease holder's IP: the address the hub saw on the **acquire** request. So:
@@ -400,21 +400,21 @@ fpgahub sends nothing while idle, so the stream has no read timeout; TCP keep-al
 - **Timestamps are the hub's.** `expires_at` is fpgahub's ISO 8601 string, e.g. `2026-09-24T11:55:53.433256Z`.
 - **The contract is pinned to v0.3.0.** `tests/unit/test_t8_contract.py` replays a transcript of the real v0.3.0 app against the fake. After a hub upgrade, regenerate the transcript with `tests/fakes/t8_record_fpgahub_golden.py` in a scratch venv; its docstring has the commands.
 
-## Checking against the real hub (with david; read-only first)
+## Checking against the real hub (with the hub owner; read-only first)
 
 Nothing below changes hub state until step 6. Steps 1-5 are safe while someone holds the board.
 
-1. `curl -s https://mapstone-dev.ecs.soton.ac.uk:7246/api/v1/health` (anonymous). It should return `{"status":"ok","version":"0.3.0",…}`. This proves the web listener is reachable from srv03335 and which CA signs it (add `--cacert`).
+1. `curl -s https://hub.example.org:7246/api/v1/health` (anonymous). It should return `{"status":"ok","version":"0.3.0",…}`. This proves the web listener is reachable from the build server and which CA signs it (add `--cacert`).
 2. With a **read** token: `GET /api/v1/whoami` (the role and `holder`), `GET /api/v1/groups` (is `mps3_01` one target or several?), and `GET /api/v1/targets/mps3_01_pl`:
    - `access.gate_ethernet` and `access.share_tty`;
    - `network.host_ip`.
 3. `GET /api/v1/targets/mps3_01_pl/lease` and `/lease/history?limit=5`. Confirm the lease shape, and that a real revoke record has no `by`.
-4. `curl -N` on `/api/v1/events?types=lease.heartbeat` for a minute while someone's session heartbeats. This proves SSE reaches srv03335, through any proxy, unbuffered.
-5. On the hub, as david, read only:
+4. `curl -N` on `/api/v1/events?types=lease.heartbeat` for a minute while someone's session heartbeats. This proves SSE reaches the build server, through any proxy, unbuffered.
+5. On the hub, as the hub owner, read only:
    - `sysctl net.ipv4.ip_forward net.ipv4.conf.mps3_01_pl.forwarding`
    - `sudo nft list ruleset | grep -A3 fpgahub`
    - `ls -l /var/log/fpgahub/lease_events.jsonl`
    - `ss -ltnp | grep -E ':(7245|7246|120[0-9][0-9])'`
 
    These answer the data-plane questions, and whether the audit file is readable for the SSH-mode victim path.
-6. **Only in a window david opens,** with a **write** token of his own and the board free: `harness-manager lease acquire`, `lease show`, `lease release` through REST. Never a revoke while anyone else holds the board.
+6. **Only in a window the hub owner opens,** with a **write** token of their own and the board free: `harness-manager lease acquire`, `lease show`, `lease release` through REST. Never a revoke while anyone else holds the board.
