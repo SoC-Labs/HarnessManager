@@ -80,7 +80,7 @@ SD_FLASH_OFF_REASON = (f"off: turn on {SD_FLASH_SETTING} in Settings (or set "
 RESCUE_NETWORK_REASON = "comes with Linux v2.1"
 RESCUE_NETWORK_NOTE = "stage0 rescue boots an image from RAM; it does not write the card"
 #: The Linux OS step writes a WHOLE-CARD image (SD-FLASH kind ``card``): the MBR at LBA 0, the
-#: boot-select at LBA 1-2, the slots at LBA 67584 and 198656. A slot image (linux_slot.img,
+#: boot-select at LBA 1-2, the slots where its MBR entries 1 and 2 say (layout v1 or v2). A slot image (linux_slot.img,
 #: S0LB at its start) written at byte 0 gives a card that never boots.
 CARD_IMAGE_HINT = "a whole-card image (.img built with stage0_mkcard.py card --card-img)"
 USB_WRITE_WARNING = ("A USB write can take 5 minutes: do not unplug, power off or start a "
