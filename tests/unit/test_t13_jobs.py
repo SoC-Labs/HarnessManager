@@ -164,7 +164,10 @@ def test_negative_twin_a_failing_job_carries_its_error(jobs, seen):
 
 def test_a_bug_in_a_job_is_an_internal_error_not_a_crash(jobs, seen):
     job = finished(jobs.submit("deploy", "b", lambda progress: 1 / 0))
-    assert job.error["code"] == ExitCode.FAILED and "ZeroDivisionError" in job.error["message"]
+    assert job.error["code"] == ExitCode.FAILED
+    # L6: users get a sentence and a next step; the raw text is in the log, not the message
+    assert "ZeroDivisionError" not in job.error["message"]
+    assert job.error["message"].startswith("Something went wrong in the background service")
 
 
 def test_the_board_is_free_before_job_done_is_published(bus, jobs):

@@ -319,8 +319,11 @@ def pc_example(ip: Any) -> str:
     return f"{head}.{2 if last == '1' else 1}/24"
 
 
-def same_net_note(ip: Any) -> str:
-    """The line printed beside every new address."""
+def same_net_note(ip: Any, *, hub: bool = False) -> str:
+    """The line printed beside every new address. A board behind a hub is reached through
+    the hub, so this PC's own network does not matter: no note."""
+    if hub:
+        return ""
     ex = pc_example(ip)
     return f"this PC must be on the same /24 (e.g. {ex})" if ex else ""
 

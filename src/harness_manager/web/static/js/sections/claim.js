@@ -11,6 +11,14 @@ import { ArmBox, Card, Chip, Icon, Reason, Spinner } from "../ui.js";
 import { openModal } from "../modal.js";
 import { clearNamePrefill, hasNamePrefill, namePrefillArgs } from "../name_prefill.js";
 
+// The daemon stamps times in UTC ("2026-10-13T09:30:00Z"); people read their own clock.
+export function localStamp(iso) {
+  const d = new Date(String(iso));
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16).replace("T", " ");
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 // --- Board › Access (UI v2, lane UI2-BOARD): the SSH claim as its own card -----------------------
 
 
@@ -131,10 +139,10 @@ export function ClaimCard({ bid }) {
           : c.state === "other" ? html`<${Chip} level="held" icon="lock">Claimed by another key<//>`
           : c.state === "unclaimed" ? html`<${Chip} level="warn" icon="lock-open">Not claimed<//>`
           : html`<${Chip} level="unk" icon="circle-help">Unknown<//>`}
-          ${!c.live && c.checked_at && !(viaHub && c.state === "unknown") ? html` <span class="muted small">last check ${c.checked_at}</span>` : null}
+          ${!c.live && c.checked_at && !(viaHub && c.state === "unknown") ? html` <span class="muted small">last check ${localStamp(c.checked_at)}</span>` : null}
           ${checking ? html` <span class="muted small" data-testid="claim-hub-checking"><${Spinner} /> asking the hub…</span>` : null}</dd>
         ${who.key_fp ? html`<dt>Key</dt><dd class="mono small">${who.key_fp}</dd>` : null}
-        ${who.by ? html`<dt>Claimed by</dt><dd class="small">${who.by}${who.at ? ` · ${String(who.at).slice(0, 16).replace("T", " ")}` : ""}</dd>` : null}
+        ${who.by ? html`<dt>Claimed by</dt><dd class="small">${who.by}${who.at ? ` · ${localStamp(who.at)}` : ""}</dd>` : null}
         ${ssh ? html`<dt>Log in</dt><dd class="mono small">${ssh}</dd>` : null}
       </dl>
       ${changedKey ? html`<${Reason} level=${seenBefore ? "warn" : "err"} testid="claim-hostkey"
@@ -143,7 +151,7 @@ export function ClaimCard({ bid }) {
           : `Host key changed: pinned ${hk.pinned}, the board reports ${hk.reported}. SSH is refused.`} />` : null}
       ${changedKey ? html`<div class="stack gap-8" data-testid="claim-hostkey-box" data-repin=${canRepin ? "yes" : "no"}>
         <dl class="kv" data-testid="claim-hostkey-keys">
-          <dt>Pinned key</dt><dd class="mono small" data-testid="hostkey-old">${hk.pinned}${hk.pinned_at ? ` · pinned ${String(hk.pinned_at).slice(0, 16).replace("T", " ")}` : ""}</dd>
+          <dt>Pinned key</dt><dd class="mono small" data-testid="hostkey-old">${hk.pinned}${hk.pinned_at ? ` · pinned ${localStamp(hk.pinned_at)}` : ""}</dd>
           <dt>Key the board shows now</dt><dd class="mono small" data-testid="hostkey-new">${hk.reported || "not published"}</dd>
           ${hk.boot_id ? html`<dt>Board boot</dt><dd class="mono small" data-testid="hostkey-boot">${hk.boot_id}${hk.up_s !== null && hk.up_s !== undefined ? ` · up ${Math.round(hk.up_s)} s` : ""}</dd>` : null}
         </dl>

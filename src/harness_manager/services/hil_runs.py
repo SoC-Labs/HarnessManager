@@ -692,9 +692,11 @@ class HilRuns:
                 self._write_refusal(run)
                 return
             self._run(run)
-        except Exception as exc:  # noqa: BLE001 - a bug: say so in the run, never lose the board
+        except Exception:  # noqa: BLE001 - a bug: say so in the run, never lose the board
             log.exception("checks run %s on %s failed", run.id, run.board_id)
-            run.state, run.reason = FAILED, f"internal error: {type(exc).__name__}: {exc}"
+            run.state = FAILED
+            run.reason = ("Something went wrong in the background service. Details are in "
+                          "Activity; try again, or restart the app.")
         finally:
             self._end(run)
 

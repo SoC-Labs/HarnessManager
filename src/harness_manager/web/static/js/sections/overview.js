@@ -1034,7 +1034,8 @@ export function OverviewSection({ bid }) {
   }
   if (!b.info) {
     return html`<div class="card" data-testid="info-error"><div class="card-body">
-      ${b.infoError ? html`<${Reason} level="err" text=${`${b.infoLine}: ${b.infoError.errName}: ${b.infoError.message}`} />
+      ${b.infoError ? html`<span title=${b.infoError.errName || undefined}><${Reason} level="err"
+          text=${`${b.infoLine}: ${b.infoError.message}`} /></span>
           ${b.infoError.hint ? html`<div class="mt-8"><${Reason} text=${b.infoError.hint} /></div>` : null}
           <p class="mt-14"><button type="button" class="btn sm" onClick=${() => refreshInfo(bid)}>
             <${Icon} name="refresh-cw" /> Read again</button></p>`

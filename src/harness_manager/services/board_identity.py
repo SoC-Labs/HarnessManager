@@ -997,8 +997,8 @@ class IdentityService:
         ad = getattr(session, "net_identity", None)
         where = ad.address() if callable(getattr(ad, "address", None)) else ""
         local = "" if hub_name else IA.local_address_toward(where.rsplit(":", 1)[0].strip("[]"))
-        out["address"] = {"ip": ip_addr(new_ip), "same_net": IA.same_net_note(new_ip),
-                          "pc_example": IA.pc_example(new_ip),
+        out["address"] = {"ip": ip_addr(new_ip), "same_net": IA.same_net_note(new_ip, hub=bool(hub_name)),
+                          "pc_example": "" if hub_name else IA.pc_example(new_ip),
                           "subnet": IA.subnet_check(new_ip, local),
                           "moving": bool(self._moving(session, reported, chosen["ip"]))}
         out["pool"] = {"range": policy.ip_pool, "setting": policy.ip_pool_setting}
@@ -1114,7 +1114,8 @@ class IdentityService:
                                     confirm_subnet=confirm_subnet)
         new_ip = "" if clear else str(plan["want"].get("ip") or "")
         return {"want": want, "plan": plan, "notes": notes, "identity": before,
-                "address": self._address_out(new_ip)}
+                "address": self._address_out(
+                    new_ip, hub=bool(self._hub_name(session, before.get("hub"))))}
 
     def fix(self, session: Any, *, confirm: str, want: Mapping[str, Any] | None = None,
             from_hub: bool = False, clear: bool = False, wait_s: float | None = None,
@@ -1224,7 +1225,9 @@ class IdentityService:
         out = {"board_id": bid, "action": "cleared" if clear else "set",
                "changes": plan["changes"], "set": set_reply, "reboot": witness,
                "verified": verified, "identity": after or before, "notes": notes,
-               "moved": None, "address": self._address_out(new_ip)}
+               "moved": None,
+               "address": self._address_out(
+                   new_ip, hub=bool(self._hub_name(session, before.get("hub"))))}
         if not verified:
             why = notes[-1] if notes else "it was not read back"
             raise ActionFailedError(
@@ -1234,13 +1237,13 @@ class IdentityService:
         return out
 
     @staticmethod
-    def _address_out(new_ip: str) -> dict[str, str] | None:
+    def _address_out(new_ip: str, hub: bool = False) -> dict[str, str] | None:
         from harness_manager.services import identity_assign as IA
 
         if not ip_addr(new_ip):
             return None
-        return {"ip": ip_addr(new_ip), "same_net": IA.same_net_note(new_ip),
-                "pc_example": IA.pc_example(new_ip)}
+        return {"ip": ip_addr(new_ip), "same_net": IA.same_net_note(new_ip, hub=hub),
+                "pc_example": "" if hub else IA.pc_example(new_ip)}
 
     def _fix_moving(self, session: Any, ad: Any, plan: Mapping[str, Any], set_reply: Any,
                     notes: list[str], *, old_host: str, new_ip: str, host_key: str,
@@ -1292,7 +1295,8 @@ class IdentityService:
         out = {"board_id": key, "action": "set", "changes": plan["changes"], "set": set_reply,
                "reboot": found.get("reboot") or {}, "verified": verified, "identity": identity,
                "notes": notes, "moved": moved,
-               "address": self._address_out(elsewhere or new_ip)}
+               "address": self._address_out(elsewhere or new_ip,
+                                            hub=bool(self._hub_name(session, None)))}
         if not verified:
             raise ActionFailedError(
                 f"the board moved to {addr}, but it does not report the new identity: "

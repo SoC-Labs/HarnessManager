@@ -190,8 +190,8 @@ def register(ctx: RouteContext) -> None:
             except UsageError:
                 raise
             except HarnessError as exc:        # a board can be written without the facts
-                notes.append(f"the hub did not say {target}'s address and description "
-                             f"({exc.message}); the board is written without them")
+                notes.append(f"the hub did not say {target}'s address "
+                             f"({exc.message}); the board is written without it")
             progress("write", 1, 2)
             before = dict(r.layer.values)
             out = hubs.add_board_for_target(name, target, r, board_key=key, name=label,

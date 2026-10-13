@@ -291,9 +291,12 @@ class JobManager:
                 result = serialise(fn(progress))
         except HarnessError as exc:
             error = exc
-        except Exception as exc:  # noqa: BLE001 - a bug in a job must still end the job
+        except Exception:  # noqa: BLE001 - a bug in a job must still end the job
             log.exception("%s failed", job.describe())
-            error = HarnessError(f"internal error: {type(exc).__name__}: {exc}")
+            # The raw text stays in the log line above, never in the user's message.
+            error = HarnessError(
+                "Something went wrong in the background service.",
+                hint="Details are in Activity; try again, or restart the app.")
         finally:
             # Free the board BEFORE saying so, so a client that reacts to job.done
             # is never refused by this job's own claim.

@@ -518,7 +518,7 @@ function ReleaseSource({ bid, w }) {
         <b class="mono">${r.version}</b> <span class="small muted">${r.impl || "?"} · ${r.static_id || ""} · ${r.verdict || "no verdict"}</span></label></li>`)}</ul>` : null}
     ${w.planError ? html`<${Reason} level="err" text=${`${w.planError.errName}: ${w.planError.message}`} />` : null}
     ${plan ? html`<div class="bu-plan" data-testid="release-plan">
-      <ul class="small">${(plan.steps || []).map((s, i) => html`<li key=${i}>${s.detail || s.what || s.step || JSON.stringify(s)}</li>`)}</ul>
+      <ul class="small">${(plan.steps || []).map((s, i) => html`<li key=${i}>${s.detail || s.what || s.step || "Another step (no description given)"}</li>`)}</ul>
       ${(plan.blockers || []).map((b) => html`<${Reason} key=${b} level="err" testid="release-blocker" text=${`The planner refuses this release here: ${b}`} />`)}
       ${(plan.blockers || []).length && linux(w) ? html`<${Reason} testid="release-linux-usb"
         text="A Linux release cannot be installed over the Debug USB today: its OS image needs the running harness. Write its configuration SD from its bundle (a folder or zip), then the user microSD with a whole-card image in step 5." />` : null}
@@ -1053,8 +1053,14 @@ function Proposal({ bid, w }) {
       <dt>IP</dt><dd>${p.ip ? html`<span class="mono" data-testid="bu-id-ip">${ipOnly(p.ip)}</span> <span class="sub">a free address of ${p.pool}, searched from the MAC</span>`
         : html`<span class="small" data-testid="bu-id-ip-error">${p.ip_error}</span>`}</dd>
     </dl>
-    ${p.ip ? html`<p class="small" data-testid="bu-id-same-net">${p.same_net.charAt(0).toUpperCase()}${p.same_net.slice(1)}.</p>` : null}
+    ${p.ip && p.same_net ? html`<p class="small" data-testid="bu-id-same-net">${p.same_net.charAt(0).toUpperCase()}${p.same_net.slice(1)}.</p>` : null}
   </div>`;
+}
+
+// A board in stage0 rescue cannot be named yet: its real next step is the power-cycle.
+export function nextTitle({ linuxUp, rescue }) {
+  if (rescue) return "Next: power-cycle it, then name it";
+  return linuxUp ? "Next: claim it, then name it" : "Next: name it";
 }
 
 function NextStep({ bid, w }) {
@@ -1063,7 +1069,7 @@ function NextStep({ bid, w }) {
   const why = ok ? "" : rescue ? "the board is in stage0 RESCUE: do step 5, power-cycle it, then wait for the harness again (step 4)"
     : "once the harness answers (step 4)";
   const linuxUp = ok && w.witness.impl === "linux";
-  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title=${linuxUp ? "Next: claim it, then name it" : "Next: name it"} state="" testid="bu-step-next">
+  return html`<${Step} n=${osNeeded(w) ? "6" : "5"} title=${nextTitle({ linuxUp, rescue })} state="" testid="bu-step-next">
     <p class="small secondary" data-testid="bu-next-text">${linuxUp
       ? "Every new board starts as MPS3, 192.168.10.101 (the generic image). First claim its SSH on Board > Access (the name is set over that claim); once it is claimed, name it: the dialog sets its name, a random MAC and its own IP."
       : "Every new board starts as MPS3, 192.168.10.101 (the generic image). On Board > Access, name it: the dialog sets its name, a random MAC and its own IP."}</p>
