@@ -591,6 +591,14 @@ The changes `harness-manager slot rollback`, `card commit` and `card clear` make
 | `POST /boards/{bid}/slots/rollback` `{confirm, reboot?, wait_s?}` | 202 job `slot_rollback`; the result is `{board_id, act, slot, rebooted, fell_back, note, slots, evidence?}` |
 | `POST /boards/{bid}/card/commit` `{confirm}` | 202 job `card_commit`; the result is `{board_id, committed, card, line, note}` |
 | `POST /boards/{bid}/card/clear` `{confirm}` | 202 job `card_clear`; the result is `{board_id, card, line, note}` |
+
+### The card contents: /persist backup and restore (HM 1.2, `persist_api.py`)
+
+| Route | Answer |
+|---|---|
+| `GET /boards/{bid}/persist/backups` | `{board_id, backups, recent, recent_days}`: this board's backups on this PC, newest first; `recent` is true when one is no older than `recent_days` (the card re-make guard) |
+| `POST /boards/{bid}/persist/backup` | 202 job `persist_backup`: copies /persist over the claim SSH to this PC with a manifest (names, sizes, sha256; never contents); refused unless this PC holds the claim |
+| `POST /boards/{bid}/persist/restore` `{confirm, backup_id}` | 202 job `persist_restore`: checks the archive's sha256, restores it, lists /persist again and reports missing, changed and newer files; needs `confirm` and the hub lease |
 | `POST /boards/{bid}/slots/push` `{confirm, image?, bundle?, static_id?, version?, rollback_first?}` | 202 job `slot_push` (FIX-PACK-6); the result is `{board_id, act, slot, rolled_back_first, image, static_id, slots}` |
 | `POST /boards/{bid}/slots/commit` `{confirm, slot?}` | 202 job `slot_commit` (FIX-PACK-6); the result is `{board_id, act, slot, note, slots}` |
 | `POST /boards/{bid}/slots/verify` `{slot?}` | 202 job `slot_verify` (FIX-PACK-6); the result is `{board_id, act, slot, slots}` |

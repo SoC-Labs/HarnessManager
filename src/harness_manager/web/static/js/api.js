@@ -189,6 +189,9 @@ export const ENDPOINTS = Object.freeze({
   cardwriterWrite: ["POST", "/cardwriter/write"],              // SD-FLASH
   cardwriterCheck: ["POST", "/cardwriter/check"],              // SD-FLASH: the unsigned phrase first
   identityProposal: ["GET", "/boards/{bid}/identity/proposal"],  // IDENTITY: "Name this board"
+  persistBackups: ["GET", "/boards/{bid}/persist/backups"],    // HM 1.2: the card contents
+  persistBackup: ["POST", "/boards/{bid}/persist/backup"],
+  persistRestore: ["POST", "/boards/{bid}/persist/restore"],
   // --- end v1.1 ---
 });
 

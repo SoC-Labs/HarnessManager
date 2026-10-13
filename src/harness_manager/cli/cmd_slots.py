@@ -155,7 +155,7 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
 
     cp = subparsers.add_parser(
         "card", help="the board's user microSD: status, commit the running overlay as the "
-                     "power-on default, clear it",
+                     "power-on default, clear it; backup, list backups and restore its contents",
         description="The user microSD holds the overlay the board loads at power-on (and, on "
                     "the Linux harness, its OS slots). No card: the board boots exactly as it "
                     "always has.",

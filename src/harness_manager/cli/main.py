@@ -391,6 +391,8 @@ def make_parser() -> argparse.ArgumentParser:
     # -- slot / card (lane LINUX-SLOTS: the Linux OS slots and the user microSD) ----------
     from . import cmd_slots
     verbs.update(cmd_slots.register(sub))
+    from . import cmd_persist      # HM 1.2 L3: card backup | backups | restore
+    cmd_persist.register(sub, verbs)
 
     # -- hub (lane SET-HUBS: fpgahub hubs as named settings; never opens a board) ----------
     from . import cmd_hubcfg

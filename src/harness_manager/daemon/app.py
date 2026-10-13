@@ -131,6 +131,7 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
 # UI2-API-BUILD (docs/planning/UI_V2_PLAN.md §2 G4): the readings history (readings_api.py).
 # G5/G6/G8 add routes to kit_api.py and card_api.py, which are loaded above.
 EXTENSIONS += ("readings_api",)
+EXTENSIONS += ("persist_api",)    # HM 1.2 L3: back up /persist before a card re-make
 # --- end ui2 api-build routes ---
 
 
