@@ -1144,13 +1144,10 @@ def make_controller_adapter(session: Any) -> Any:
     fallback = _usb_or_hub_controller(session)
     ident = getattr(getattr(session, "candidate", None), "identity", None)
     feats = tuple(getattr(ident, "features", ()) or ())
-    if not feats and getattr(session, "shell", None) is not None:
-        # The probe listed no features (a board opened by address): one `version` read says
-        # whether the image reaches the MCC itself. An unreachable board keeps what it had.
-        try:
-            feats = tuple(getattr(session.identity(), "features", ()) or ())
-        except Exception:  # noqa: BLE001 - never fail a session open over a feature read
-            feats = ()
+    # No extra read at session open: a probe that listed no features leaves the USB/hub
+    # controller in place, and the session upgrades it at its first identity read that names
+    # a harness MCC feature (``Mps3Session._note_features``). A read here cost every session
+    # open a connection (and the single-client 6900 a ghost).
     if recognise(feats) is None:
         return fallback
     return RoutedController(session, fallback)

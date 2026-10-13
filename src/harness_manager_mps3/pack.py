@@ -338,6 +338,18 @@ class Mps3Session(BoardSession):
         consoles = self.consoles
         if consoles is not None and ident.harness_impl:    # a real ``version`` reply
             consoles.note_features(tuple(ident.features or ()))
+        if ident.harness_impl:
+            self._upgrade_controller(tuple(ident.features or ()))
+
+    def _upgrade_controller(self, features: tuple[str, ...]) -> None:
+        """Mint 4: the first read naming ``mccif``/``mcc_local`` routes the MCC through the
+        harness (``harness_mcc.RoutedController``) on a session opened without features."""
+        from .harness_mcc import RoutedController, recognise
+
+        current = getattr(self, "controller", None)
+        if isinstance(current, RoutedController) or recognise(features) is None:
+            return
+        self.controller = RoutedController(self, current)
 
     def identity(self) -> BoardIdentity:
         if self.shell is None:

@@ -165,6 +165,7 @@ def test_oscillator_reads_go_over_the_harness_and_a_protected_set_is_never_sent(
 
 def test_the_cli_and_api_require_gets_the_routed_controller_with_no_usb(open_board):
     fake, eng, session, bid = open_board(("mcc_local",), route="loopback")
+    session.identity()          # opened by address: the first read names mcc_local (no read at open)
     assert session.controller is not None and not session.controller.has_fallback
     ctx = Ctx(argparse.Namespace(), eng, "json")
     assert ctx.require(session, "controller", C.REBOOT_BOARD) is session.controller
