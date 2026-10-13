@@ -127,7 +127,7 @@ def clash_groups(records: Mapping[str, Mapping[str, Any]], *, now: float | None 
             if value:
                 groups.setdefault(value, []).append(e)
         for value, members in groups.items():
-            boards = _distinct(members)
+            boards = _distinct(members, f)
             if len(boards) >= 2:
                 out.append({"field": f, "value": value,
                             "boards": [{k: b[k] for k in ("board_id", "name", "kind", "target",
@@ -135,12 +135,29 @@ def clash_groups(records: Mapping[str, Mapping[str, Any]], *, now: float | None 
     return out
 
 
-def _distinct(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One entry per physical board: the same hub target or the same address is one board."""
+def _distinct(members: list[dict[str, Any]], field_name: str = "") -> list[dict[str, Any]]:
+    """One entry per physical board. The same hub target, address or board id is one board.
+    So is a board record and a hub entry that do not both say where they are and agree on
+    another identity field than the one clashing: a board opened by address and its own hub
+    entry share no target and no address, but report one MAC and one IP."""
+    others = [f for f in ("mac", "ip") if f != field_name]
+
+    def same(a: dict[str, Any], b: dict[str, Any]) -> bool:
+        if a["target"] and a["target"] == b["target"]:
+            return True
+        if a["address"] and a["address"] == b["address"]:
+            return True
+        if a["board_id"] and a["board_id"] == b["board_id"]:
+            return True
+        if a["kind"] == b["kind"] or a["target"] and b["target"] or \
+                a["address"] and b["address"]:
+            return False             # two boards seen, or both say where they are: two places
+        return any(_norm(f, a["rec"].get(f)) and
+                   _norm(f, a["rec"].get(f)) == _norm(f, b["rec"].get(f)) for f in others)
+
     kept: list[dict[str, Any]] = []
     for m in members:
-        if any((m["target"] and m["target"] == k["target"])
-               or (m["address"] and m["address"] == k["address"]) for k in kept):
+        if any(same(m, k) for k in kept):
             continue
         kept.append(m)
     return kept
