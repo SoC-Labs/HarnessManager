@@ -192,6 +192,8 @@ export const ENDPOINTS = Object.freeze({
   persistBackups: ["GET", "/boards/{bid}/persist/backups"],    // HM 1.2: the card contents
   persistBackup: ["POST", "/boards/{bid}/persist/backup"],
   persistRestore: ["POST", "/boards/{bid}/persist/restore"],
+  cosimState: ["GET", "/boards/{bid}/cosim"],                    // HM 1.2: the DUT clock
+  cosimAct: ["POST", "/boards/{bid}/cosim"],
   // --- end v1.1 ---
 });
 

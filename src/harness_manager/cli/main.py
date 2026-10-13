@@ -427,6 +427,9 @@ def make_parser() -> argparse.ArgumentParser:
     cmd_bringup.register(sub, parents=(fmt, usb))
     verbs["bringup"] = sub.choices["bringup"]
     # --- end bringup-usb ---
+    from . import cmd_cosim  # HM 1.2 L5c: the DUT clock
+    cmd_cosim.register(sub)
+    verbs["cosim"] = sub.choices["cosim"]
     return p
 
 

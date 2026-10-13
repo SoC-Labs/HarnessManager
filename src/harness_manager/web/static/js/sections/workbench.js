@@ -13,6 +13,7 @@ import { registerTab } from "../route.js";
 import { boardState, changed, openActivity, S } from "../store.js";
 import { Icon } from "../ui.js";
 import { ConsolesSection } from "./consoles.js";
+import { CosimCard, cosimOffered } from "./cosim.js";
 import { DebugCard, debugLive } from "./debug.js";
 import { ProgramStrip } from "./program.js";
 import { viewState, XvcCard } from "./xvc.js";
@@ -67,6 +68,7 @@ function Rail({ bid }) {
         onClick=${() => { W.fold = true; W.flyout = null; changed(); }}><${Icon} name="panel-right" />Fold</button></div>
     <${DebugCard} bid=${bid} />
     <${XvcCard} bid=${bid} />
+    ${cosimOffered(bid) ? html`<${CosimCard} bid=${bid} />` : null}
     <${WbRecent} bid=${bid} />
   </aside>`;
 }

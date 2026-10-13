@@ -285,7 +285,13 @@ display TARGET show [--rate HZ] [--for SECONDS]
     A live view in this terminal: half-block truecolor at a reduced scale,
     redrawn in place, when the terminal has truecolor (COLORTERM=truecolor);
     otherwise one status line per refresh. 4 refreshes a second by default.
-    Ctrl-] exits (Ctrl-C too). --json needs --for and prints one object."""
+    Ctrl-] exits (Ctrl-C too). --json needs --for and prints one object.
+
+cosim cycles|halt|run TARGET
+cosim step TARGET N
+    Read, stop, step exactly N cycles (1 to 100,000,000) or restart the DUT clock.
+    Halt, step and run need the board claimed. Serial input and the network receive
+    are not held while the clock is stopped."""
 
 HUBS = """\
 A lab board sits behind a hub (fpgahub). No hub is the default: a board on your

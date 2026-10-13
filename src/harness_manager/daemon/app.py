@@ -132,6 +132,7 @@ EXTENSIONS = ("consoles_api", "hub_api", "power_api", "update_api", "xdc_api", "
 # G5/G6/G8 add routes to kit_api.py and card_api.py, which are loaded above.
 EXTENSIONS += ("readings_api",)
 EXTENSIONS += ("persist_api",)    # HM 1.2 L3: back up /persist before a card re-make
+EXTENSIONS += ("cosim_api",)      # HM 1.2 L5c: the DUT clock (feature cosim)
 # --- end ui2 api-build routes ---
 
 

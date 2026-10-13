@@ -592,6 +592,13 @@ The changes `harness-manager slot rollback`, `card commit` and `card clear` make
 | `POST /boards/{bid}/card/commit` `{confirm}` | 202 job `card_commit`; the result is `{board_id, committed, card, line, note}` |
 | `POST /boards/{bid}/card/clear` `{confirm}` | 202 job `card_clear`; the result is `{board_id, card, line, note}` |
 
+### The DUT clock (HM 1.2, `cosim_api.py`, feature `cosim`)
+
+| Route | Answer |
+|---|---|
+| `GET /boards/{bid}/cosim` | `{offered, reason?, mode, running, cycles, remaining}`: the clock's state; `offered` false with the reason when the board's image has no clock control |
+| `POST /boards/{bid}/cosim` `{act: "cycles"\|"halt"\|"step"\|"run", n?}` | the board's reply (`mode, running, cycles, remaining`, and `n` for step); halt, step and run need this PC's claim; `n` is 1..100000000 (400 otherwise) |
+
 ### The card contents: /persist backup and restore (HM 1.2, `persist_api.py`)
 
 | Route | Answer |
