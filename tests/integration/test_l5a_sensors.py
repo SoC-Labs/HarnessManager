@@ -36,11 +36,10 @@ def state(tmp_path: Path) -> Path:
 
 
 def with_sensors(vb, **cfg):
-    """The SYSMON model on the virtual board. The virtual board's LINUX_MINT4 advertises `sysmon`
-    but its FakeShell is built without the model (self.sensors is None), so install it here."""
-    from pyverify.testing.mint4_models import SensorsModel
+    """Reconfigure the SYSMON model the LINUX_MINT4 fake already carries (no cfg: keep it)."""
+    if cfg:
+        from pyverify.testing.mint4_models import SensorsModel
 
-    if vb.shell.sensors is None:
         vb.shell.sensors = SensorsModel(vb.shell, cfg)
     return vb
 

@@ -48,7 +48,10 @@ from pyverify.testing.fakeshell import FakeShell
 from .fake_identify import FakeIdentifyResponder
 
 #: The feature names the installed FakeShell accepts (it refuses any other).
-_UPSTREAM_FEATURES = frozenset(getattr(_upstream_fakeshell, "VERSION_FEATURES", ()))
+#: Engine names (lcd_mirror ... and the mint-4 hostio/cosim/sysmon/mccif/mcc_local) are
+#: accepted too: FakeShell builds their models (HostioModel, ...) from them.
+_UPSTREAM_FEATURES = frozenset(getattr(_upstream_fakeshell, "VERSION_FEATURES", ())) | frozenset(
+    getattr(_upstream_fakeshell, "ENGINE_FEATURES", ()))
 
 #: The FakeShell keywords the upstream Linux profile adds (pyverify HOST lane).
 _UPSTREAM_KEYS = frozenset({"profile", "hung", "mode", "identify", "identify_port", "unit",
@@ -286,6 +289,11 @@ class HarnessFakeShell(FakeShell):
         return reply
 
     def _op_stats(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self.upstream:
+            # Upstream's reply carries the engine blocks (lcd_mirror, sysmon, ...) in contract order.
+            reply = super()._op_stats(request)
+            reply.update(self.stats_extra)
+            return reply
         with self._lock:
             last = self.swaps[-1] if self.swaps else None
             reply: dict[str, Any] = {

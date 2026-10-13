@@ -5,7 +5,6 @@ console panel can read and switch the DUT's pin mode. A v2.1 board keeps "uart1"
 from __future__ import annotations
 
 import pytest
-from pyverify.testing.mint4_models import HostioModel
 
 from harness_manager.core.errors import RefusedError, UnavailableError, UsageError
 from harness_manager.core.events import EventBus
@@ -18,16 +17,7 @@ from harness_manager_mps3.tunnel import CLAIM_GATED_PORTS, DEFAULT_REMOTE_PORTS,
 from tests.fakes.virtual_board import LINUX_HARNESSD, LINUX_MINT4, VirtualMps3
 
 
-def _model(vb: VirtualMps3) -> VirtualMps3:
-    """The W0-A harness fake filters ``features`` to upstream's v0.11 names, so a mint-4 board
-    has the NAME ``hostio`` but no hostio model; attach upstream's (reported to the lead)."""
-    if vb.shell.hostio is None:
-        vb.shell.hostio = HostioModel(vb.shell, None)
-    return vb
-
-
 def _open(vb: VirtualMps3):
-    _model(vb)
     ports = {n: p for n, p in vb.console_ports.items() if n in CONSOLE_PORTS}   # no hostio_adp
     pack = Mps3Pack(console_ports=ports)
     session = pack.open(pack.candidate_for_host(vb.shell_endpoint))
