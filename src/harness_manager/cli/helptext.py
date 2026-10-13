@@ -85,7 +85,7 @@ probe [--host ADDR]... [--serial URL]... [--volume PATH]... [--timeout S] [--no-
 info TARGET
     Identity (shell_id, rm_id, harness version, build check), health, and the
     capability view: every capability this board has, and for each one it
-    lacks, the reason ("needs the Debug USB cable", "needs harness firmware with
+    lacks, the reason ("needs the Debug USB cable", "needs a release with
     'stats'"). The GUI's System tab shows this.
 attach TARGET [--note TEXT] [--for SECONDS]
     Take the board's session lock and hold it in the foreground until Ctrl-C,
@@ -143,7 +143,7 @@ pty TARGET NAME [--baud RATE] [--for SECONDS]
 baud TARGET NAME [RATE]
     The console's rate, where it comes from (serial, design, harness) and
     whether it can change. RATE changes it (0 = the default): a serial console
-    reopens its port; uart0/uart1 need harness firmware with 'uart_baud' (the
+    reopens its port; uart0/uart1 need a release with 'uart_baud' (the
     loaded design fixes 76800 otherwise). Exit 12 with the reason when it
     cannot change.
 console TARGET NAME [--read-only] [--for SECONDS]
@@ -194,7 +194,7 @@ xvc open TARGET [--byo] [--for SECONDS]
     slot and starts HM's hw_server, and holds them until Ctrl-C, `detach`, or
     --for; the session reopens after every partition swap. --byo runs only the
     relay, for your own hw_server. A hub board needs your lease.
-xvc close TARGET           kick the client, stop hw_server, free the board's slot
+xvc close TARGET           kick the client, stop hw_server, free the board's debug connection
 xvc status TARGET          state, the Vivado URL, who is attached, the probes files
 xvc tcl TARGET [--byo]     the Vivado Tcl snippet for the loaded design
 xvc ltx TARGET [--rm | --static | --full] [-o FILE]
@@ -255,7 +255,7 @@ sd TARGET restore ZIP [--yes]
 PANEL = """\
 panel show TARGET
     What the board's front panel (the LCD) shows: page, owner, banner, card,
-    sessions, taps, Identify, and what this harness image does not report.
+    sessions, taps, Identify, and what this release does not report.
 panel mirror TARGET
     The panel's text grid (read from the board, or rebuilt when the image does
     not send it: harness feature 'panel').
@@ -325,7 +325,7 @@ lease force TARGET         force-release it after 2:00 with no answer (asks firs
 lease leave TARGET         leave the queue and withdraw your request
 lease dismiss TARGET       forget the last forced release of your lease
 A lease needs a hub, and nothing takes one for you: run `lease acquire`, or use
-Acquire lease in the app. The service renews it while the board is open there.
+Take lease in the app. The service renews it while the board is open there.
 --via ssh:HOST (or via = "ssh:HOST" in boards.toml) is a tunnel only: no hub,
 so no lease. --via hub goes through the board's hub.
 

@@ -287,7 +287,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                  "force, leave, dismiss",
         description="The hub lease that keeps two people off one shared board. It needs a hub "
                     "(`harness-manager hub`), and nothing takes it for you: `acquire` here, or "
-                    "Acquire lease in the app. The Harness "
+                    "Take lease in the app. The Harness "
                     "Manager service heartbeats it while the board is open there. `request` "
                     "asks the holder to give it up; with no answer in 2:00, `force` takes it.",
         parents=[fmt], epilog=_cols("lease"))

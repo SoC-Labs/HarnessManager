@@ -218,7 +218,7 @@ def identity_and_locate() -> tuple[Check, ...]:
               answers=(Answer(12, (
                   E("error.name", "eq", "UNAVAILABLE", "exit 12, unavailable"),
                   E("error.message", "contains", NO_LOCATE,
-                    f"Identify isn't available on this harness image ({NO_LOCATE})")),
+                    f"Identify isn't available on this release ({NO_LOCATE})")),
                   note=f"not on this image: refused, exit 12 ({NO_LOCATE})"),),
               evidence="a6_locate",
               note=f"blinked {LOCATE_S} s: IDENTIFY: <this Harness Manager's user@host> on the "
@@ -512,7 +512,7 @@ def bare_metal(*, static: str = BARE_METAL_STATIC) -> Plan:
         Check("R7b", "4", "Identify on bare metal (refused: no blink)", SAFE,
               ("identify", "{B}"),
               (E("error.message", "contains", "harness feature 'locate'",
-                 "unavailable — Identify isn't available on this harness image yet (harness feature 'locate'), rc=12"),),
+                 "unavailable — Identify isn't available on this release yet (harness feature 'locate'), rc=12"),),
               exit_ok=(12,), evidence="r7b_identify",
               writes="none expected (bare metal refuses; a harness with 'locate' blinks the "
                      "backlight)"),

@@ -216,8 +216,8 @@ function Changes({ changes }) {
   return html`<ul class="changes" data-testid="changes">${(changes.summary || []).map((l) => html`<li key=${l}>${l}</li>`)}</ul>`;
 }
 
-function factsText(row) {
-  return [row.static_id, row.impl || "?", `fw ${(row.fw_sha || "?").slice(0, 8)}`, bytesText(row.size),
+function factsText(row, detail) {
+  return [row.static_id, row.impl || "?", detail ? `build ${(row.fw_sha || "?").slice(0, 8)}` : "", bytesText(row.size),
     row.cached ? "cached" : "", row.released_at ? `released ${String(row.released_at).slice(0, 10)}` : ""].filter(Boolean).join(" · ");
 }
 
@@ -236,11 +236,12 @@ function Row({ bid, row, h, pinBusy, netboot, focus }) {
   const ask = asks(row, netboot);
   const toggle = () => { h.open[row.version] = !open; changed(); };
   const facts = factsText(row);
+  const full = factsText(row, true);   // the build id rides the hover, not the row
   const offered = (row.marks || []).includes("offered") && !(row.marks || []).includes("running");
   return html`<li class=${`hrow ${picked ? "picked" : ""} ${fold ? "os-fold" : ""}`} data-release=${row.version}
       data-verdict=${row.verdict || "none"}>
-    <div class="hrow-top" title=${fold ? `${whyText(row)} · ${facts}` : undefined}>
-      <span class="mono hver" title=${facts}>${row.version}</span>
+    <div class="hrow-top" title=${fold ? `${whyText(row)} · ${full}` : undefined}>
+      <span class="mono hver" title=${full}>${row.version}</span>
       <span class="tags">${(row.channels || []).map((c) => html`<span class="tag" key=${c}>${c}</span>`)}</span>
       <${Marks} row=${row} />
       <span class="grow"></span>
@@ -258,7 +259,7 @@ function Row({ bid, row, h, pinBusy, netboot, focus }) {
     </div>
     ${fold ? null : html`<div class="hrow-verdict"><${VerdictChip} row=${row} /><${ViaChip} row=${row} />
       <span class="secondary small hwhy" data-testid="why" title=${whyText(row)}>${whyText(row)}</span></div>`}
-    ${fold || picked ? null : html`<div class="os-facts-row"><span class="small muted os-facts" title=${facts}>${facts}</span>
+    ${fold || picked ? null : html`<div class="os-facts-row"><span class="small muted os-facts" title=${full}>${facts}</span>
       <button type="button" class="link-btn" data-action="changes" aria-expanded=${open ? "true" : "false"}
         onClick=${toggle}>${open ? "Hide what changes" : "What changes"}</button></div>`}
     ${open && !fold ? html`<div class="hrow-more">
@@ -622,7 +623,7 @@ export function ReleasesCard({ bid, linux = false, netboot = false }) {
       ${h.empty && !cat ? html`<${Reason} testid="harness-empty" text="No list yet: Refresh fetches the signed channel and plans every release for this board (nothing is installed)." />` : null}
       ${cat ? html`<div class="small secondary" data-testid="harness-running">Running <b class="mono">${board.running_release || "unrecorded"}</b>
           ${running.harness && running.harness !== board.running_release ? html` · <span data-testid="harness-running-fw"
-            title="What the harness firmware reports (its version verb): the header shows both">firmware reports <span class="mono">${running.harness}</span></span>` : null}
+            title="What the release reports (its version verb): the header shows both">release reports <span class="mono">${running.harness}</span></span>` : null}
           ${running.shell_id ? html` · static <span class="mono">${running.shell_id}</span>` : null}
           ${board.pinned ? html` <${Chip} level="held" icon="lock" testid="pinned-chip">pinned ${board.pinned}<//>` : null}
           ${(cat.channels || []).length ? html` · ${(cat.channels || []).map((c) => html`<span key=${c.channel} class="chan"><span class="mono">${c.channel}</span> #${c.serial}</span>`)}` : null}

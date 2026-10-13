@@ -135,7 +135,7 @@ export function baudWhy(v) {
   if (v.source === "design" && v.design && v.baud) {
     return `fixed by the ${v.design} design${/uart_baud/.test(v.reason || "") ? " (needs harness 'uart_baud')" : ""}`;
   }
-  if (v.source === "harness" && !v.settable) return "fixed by the harness firmware";
+  if (v.source === "harness" && !v.settable) return "fixed by the release";
   return v.reason || "";
 }
 

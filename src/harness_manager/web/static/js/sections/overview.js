@@ -190,7 +190,7 @@ function netIdentity(b) {
 
 const HARNESS_TITLES = {
   wedged: "The harness is wedged", offline: "The harness is offline",
-  rescue: "The board is in stage0 rescue", unknown: "The harness state is unknown",
+  rescue: "The board is in rescue mode", unknown: "The harness state is unknown",
 };
 
 // One row per problem, each with its one fix; nothing when all is well. The header's Overview
@@ -349,7 +349,7 @@ function IdentityStrip({ bid }) {
   const srcWords = Object.entries(src).map(([k, v]) => `${k} from ${v}`).join(", ");
   const idSrc = ni ? `Source: the board's identity${srcWords ? ` (${srcWords})` : ""}${rep.via ? `, via ${rep.via}` : ""}` : "";
   return html`<div class="ov-id" data-testid="ov-identity">
-    <span class="ov-id-i" title=${ni ? `${idSrc}. The label is the front panel's row 0.` : "Source: this harness image reports no label (net-protocol v0.16 identity)"}>
+    <span class="ov-id-i" title=${ni ? `${idSrc}. The label is the front panel's row 0.` : "Source: this release reports no label (net-protocol v0.16 identity)"}>
       <span class="ov-id-k">Label</span>
       ${label ? html`<span class="board-label" data-testid="ov-label">${label}</span>${labelDefault ? html`<span class="ov-id-note">image default</span>` : null}`
         : html`<span class="muted" data-testid="ov-label">not reported</span>`}</span>
@@ -652,7 +652,7 @@ function CardRow({ b }) {
   let sub = "";
   if (l.busy) { name = ""; sub = l.text; }
   else if (c && c.store && c.present && c.default) { name = c.default.rm_name || c.default.rm_id || "?"; sub = `kept on the card [${c.default.slot || "?"}]`; }
-  else if (c && c.store && c.present) { name = "greybox"; sub = "nothing kept on the card"; }
+  else if (c && c.store && c.present) { name = "the empty design"; sub = "nothing kept on the card"; }
   else if (l.none) { name = "the baseline"; sub = l.text; }
   else { sub = l.text; }
   return html`<dt>Boots next</dt><dd data-testid="tile-card" title=${`${l.text}${l.title ? `\n${l.title}` : ""}`}
@@ -697,9 +697,9 @@ function DesignCard({ bid }) {
     top = html`<div class="ov-prog" data-testid="ov-design-progress" title=${`Programming ${bar.overlay}: ${bar.line}`}>
       <p class="reason"><${Spinner} /><span>Programming ${bar.overlay} · ${bar.line}</span></p><${MiniBar} bar=${bar} /></div>`;
   } else {
-    top = html`<div class="ov-design" title=${`Source: the harness's identity (rm_id read back after the swap)${ref ? ` · ${ref.name}: ${bytesText(ref.size_bytes)} partial, ${ref.ip_class || "?"}` : ""}`}>
+    top = html`<div class="ov-design" title=${`Source: the harness's identity (design number read back after the swap)${ref ? ` · ${ref.name}: ${bytesText(ref.size_bytes)} partial, ${ref.ip_class || "?"}` : ""}`}>
       <span class="ov-name" data-testid="tile-design-name">${id.rm_name || "unknown design"}</span>
-      <span class="mono muted">${hexId(id.rm_id) || "rm_id not reported"}</span>
+      <span class="mono muted">${hexId(id.rm_id) || "design number not reported"}</span>
       <span class="tags">${ref && ref.ltx_sha256 ? html`<span class="tag ila" title="its build kept the ILA probes file (.ltx)">ILAs</span>` : null}
         ${ref && ref.receipt_sha256 ? html`<span class="tag kit" title="built with Harness Manager's kit (a build receipt)">kit-built</span>` : null}
         ${baseline ? html`<span class="tag">baseline</span>` : null}</span></div>`;
@@ -709,7 +709,7 @@ function DesignCard({ bid }) {
         title=${`Read back from the board after programming, at ${clock(dep.doneAt)}`}>verified ${hhmm(dep.doneAt)}<//>
       <span class="sub">by you · ${Math.round(dep.seconds || 0)} s</span>`
     : dep.state === "failed" ? html`<${Chip} level="err" icon="circle-x" cls="ov-chip-sm" title=${dep.reason}>failed ${hhmm(dep.doneAt)}<//><span class="sub ov-ell">${dep.reason}</span>`
-      : html`<span class="secondary" title="Not programmed from this page: the name and rm_id are what the harness reports">reported by the harness</span>
+      : html`<span class="secondary" title="Not programmed from this page: the name and design number are what the harness reports">reported by the harness</span>
         ${b.infoOkAt ? html`<span class="sub">read ${hhmm(b.infoOkAt)}</span>` : null}`;
   return html`<${OvCard} title="Design" icon="layers" testid="tile-design"
       go=${html`<${Go} label="Workbench" action="ov-go-workbench" title="Program, reset and debug on the Workbench" run=${() => navigate(bid, "workbench")} />`}>
@@ -738,7 +738,7 @@ function Watching({ bid }) {
   const viewers = Number((b.background || {}).viewers || 0);
   const others = Math.max(0, viewers - 1);
   return html`<span class="ov-watch" data-testid="ov-watching" data-source="viewers"
-      title="Source: the service's viewers (pages showing this board); this harness image does not list who is connected (presence)">
+      title="Source: the service's viewers (pages showing this board); this release does not list who is connected (presence)">
     <b>you</b> <span class="muted">(this page)</span>${others ? html`, <b>${others}</b> <span class="muted">other page${others === 1 ? "" : "s"}</span>` : null}</span>`;
 }
 
@@ -840,7 +840,7 @@ function LeaseCard({ bid }) {
   let until = "";
   if (who.state === "here" && exp) until = `until ${hhmm(exp)}`;
   else if ((who.state === "other" || who.state === "elsewhere") && exp) until = `until ${hhmm(exp)} · ${who.holder}`;
-  else if (who.state === "free") until = "nobody holds it: Acquire is in the header";
+  else if (who.state === "free") until = "nobody holds it: Take is in the header";
   const w = waitingForYou(bid);
   const people = leaseQueue(bid).people;
   const firstOther = people.find((x) => x.mine) || people[0];
@@ -849,7 +849,7 @@ function LeaseCard({ bid }) {
     const since = epochOf(w.first.since);
     wait = html`<div class="ov-wait" data-testid="ov-wait" title=${`#${w.first.position}${since ? ` since ${hhmm(since)}` : ""}${w.first.message ? `: “${w.first.message}”` : ""}. When you release, the hub hands the lease to ${whoParts(w.first.holder).who} at once.`}>
       <${Icon} name="triangle-alert" /><span><b>${waitWords(w)}:</b> release when you're done.
-      <button type="button" class="link" data-action="ov-release" onClick=${(e) => openReleaseConfirm(bid, e.currentTarget)}>Release…</button></span></div>`;
+      <button type="button" class="link" data-action="ov-release" onClick=${(e) => openReleaseConfirm(bid, e.currentTarget)}>Give back…</button></span></div>`;
   } else if ((who.state === "other" || who.state === "elsewhere") && firstOther) {
     const nm = whoParts(firstOther.holder).who;
     wait = html`<div class="ov-wait info" data-testid="ov-wait" title="The hub promotes the next person the moment the lease frees">

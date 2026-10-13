@@ -318,7 +318,7 @@ def test_negative_twin_release_and_close_leaves_the_design_and_cancel_closes_not
     assert opened(show) == [BOARD_SPARE]
     d = close_dialog(page)
     d.locator('[data-choice="release"]').click()
-    expect(d.locator('[data-action="close_confirm"]')).to_have_text("Release and close")
+    expect(d.locator('[data-action="close_confirm"]')).to_have_text("Give back and close")
     d.locator('[data-action="close_confirm"]').click()
     expect(page.locator('[data-action="open-take"]')).to_be_visible(timeout=T)
     assert not any(m == "POST" and p.endswith("/restore") for m, p, _b in seen)      # no restore

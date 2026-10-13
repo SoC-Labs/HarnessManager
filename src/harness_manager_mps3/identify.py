@@ -17,7 +17,7 @@ Facts this module relies on:
 - identify is a firmware SERVICE MODULE, so both engines answer it once it is
   registered (Linux now; bare-metal from v0.12). ``impl`` absent = bare-metal.
 - It is independent of 6900: it answers while another client holds 6900.
-- stage0 RESCUE answers it with ``"mode":"rescue"`` (+ ``reason``) and has NO 6900.
+- Rescue mode answers it with ``"mode":"rescue"`` (+ ``reason``) and has NO 6900.
 - A hung ``mps3-harnessd`` is silent here too (same service loop).
 - UDP cannot cross an SSH or hub tunnel: identify works on the board's own
   network only. Over a tunnel, discovery is by explicit address (6900 ping).
@@ -324,7 +324,7 @@ class IdentifyReply:
     def candidate(self) -> Candidate:
         if self.is_rescue:
             link = Link(LinkKind.ETHERNET, self.control_endpoint,
-                        "stage0 rescue: TFTP and identify only, no control channel")
+                        "in rescue mode: TFTP and identify only, no control channel")
             label = f"MPS3 in RESCUE at {self.address}"
         else:
             link = Link(LinkKind.ETHERNET, self.control_endpoint,
@@ -455,7 +455,7 @@ def probe_identify(hints: ProbeHints, found: Sequence[Candidate]) -> list[Candid
       answer the 6900 ping (a board in rescue, or with its harness down, is
       found this way); nothing is broadcast.
     - Without: broadcast (``broadcast_targets()``) plus the fixed ``.101``, which
-      stays a permanent secondary address under DHCP and is stage0 rescue's address.
+      stays a permanent secondary address under DHCP and is rescue mode's address.
 
     A board already in ``found`` (same control endpoint or board_id) is skipped.
     Rescue boards are included; their ``evidence`` says so.
@@ -535,7 +535,7 @@ class DiscoverWitness:
     """Is "Find boards on the network" usable for this board? A successful identify is the
     proof: one unicast probe to the board's own address (``probe``: ``identify()``, so a
     test points it at a fake), its answer kept ``DISCOVER_OK_TTL_S`` (a silence
-    ``DISCOVER_FAIL_TTL_S``), so ``info`` does not ask on every read. Every harness image
+    ``DISCOVER_FAIL_TTL_S``), so ``info`` does not ask on every read. Every release
     that serves identify answers it (Linux from v0.11, bare metal from FOLD A-v0.12); no
     image lists an ``identify`` feature, so the feature is never the gate."""
 

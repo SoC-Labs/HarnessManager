@@ -55,9 +55,9 @@ const BYTE_PHASES = new Set(["push", "card"]);
 // the shell parks the swap, push = clearing + partial bytes, verify = the swap's reply read
 // back, card = the D13 commit to the card's free slot).
 const SAYS = {
-  guard: "checking the shell, rm_id, size and lease",
+  guard: "checking the shell, design number, size and lease",
   swap: "the shell parks the swap: partition decoupled, DUT held",
-  verify: "reading rm_id back from the board",
+  verify: "reading the design number back from the board",
   card: "writing the pair to the card's free slot",
 };
 // Bare metal's Ethernet push, measured on silicon (the over-the-wire reconfiguration: ~570 KB/s).
@@ -78,7 +78,7 @@ function renderDeploy(result) {
   if (!result || typeof result !== "object") return [{ kind: "out", text: String(result) }];
   const verdict = result.verified ? "verified by the board" : "WRITTEN, NOT VERIFIED";
   const lines = [
-    { kind: result.verified ? "ok" : "warnline", text: `rm_id ${result.rm_id}: ${verdict}` },
+    { kind: result.verified ? "ok" : "warnline", text: `design number ${result.rm_id}: ${verdict}` },
     { kind: "out", text: `transport ${result.transport || "?"}, ${Number(result.seconds || 0).toFixed(1)} s` },
   ];
   if (result.card) lines.push({ kind: result.card.kept ? "ok" : "warnline", text: cardText(result.card) });
@@ -313,7 +313,7 @@ function DesignPicker({ bid }) {
           : html`<span class="ph">${placeholder}</span>`}
         <span class="chev-d"><${Icon} name="chevron-down" /></span></button>
       ${u.open ? html`<div class="combo-pop" role="listbox" aria-label="Designs" data-testid="design-list">
-        <input class="input sm" placeholder="Filter by name or rm_id" value=${u.q} aria-label="Filter the designs"
+        <input class="input sm" placeholder="Filter by name or design number" value=${u.q} aria-label="Filter the designs"
           data-testid="design-filter" ref=${(el) => { if (el && !el.dataset.f) { el.dataset.f = "1"; el.focus(); } }}
           onInput=${(e) => { u.q = e.target.value; changed(); }} />
         ${b.overlays && b.overlaysError ? html`<div class="small muted combo-stale" data-testid="design-list-stale">
@@ -360,7 +360,7 @@ function Preflight({ bid }) {
   const b = boardState(bid);
   const name = b.selectedOverlay;
   if (!name) {
-    return html`<div class="small muted pf-empty">Preflight runs as soon as you pick: same shell, rm_id, size, lease.</div>`;
+    return html`<div class="small muted pf-empty">Preflight runs as soon as you pick: same shell, design number, size, lease.</div>`;
   }
   const items = b.preflight && b.preflightFor === name ? b.preflight.items : [];
   const ref = refOf(b, name);
@@ -600,7 +600,7 @@ function CardLine({ bid }) {
   const reason = b.card.reason || "";
   const on = !reason && !!b.keepOnCard;
   const def = b.card.default;
-  const boots = def && def.rm_name ? `${def.rm_name}${def.slot ? ` [${def.slot}]` : ""}` : "greybox (nothing kept)";
+  const boots = def && def.rm_name ? `${def.rm_name}${def.slot ? ` [${def.slot}]` : ""}` : "the empty design (nothing kept)";
   const what = b.selectedOverlay || "it";
   return html`<div class="card-line" data-testid="keep-card" title="The user microSD's overlay store: the design the board loads at power-on">
     <${Icon} name="memory-stick" />Boots next: <b data-testid="card-boots">${boots}</b> ·
@@ -702,7 +702,7 @@ function outcomeOf(bid) {
   }
   if (dep.state !== "done" && dep.state !== "failed") return null;
   const restore = dep.overlay === "greybox" || /^0x0+$/i.test(String(dep.rm_id || ""));
-  const verb = restore ? "Restored baseline: greybox" : `Programmed ${dep.overlay || "the design"}`;
+  const verb = restore ? "Restored baseline: the empty design" : `Programmed ${dep.overlay || "the design"}`;
   const secs = dep.seconds || (t && t.doneAt && t.startedAt ? t.doneAt - t.startedAt : 0);
   const push = phaseSecs(t, "push");
   const total = (t && t.totals.push) || 0;

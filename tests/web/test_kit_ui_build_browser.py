@@ -146,7 +146,7 @@ def test_the_bar_follows_the_guide_and_lands_on_design(page_factory, daemon, eng
     expect(ready).to_contain_text("No Vivado on this machine")
     # the built-in the catalogue proposes, and the rm_id HM proposes for it (K8)
     expect(page.locator('[data-testid="build-design"] .choice.on')).to_have_attribute("data-design", "minimal")
-    expect(by_id(page, "wrapper-rm-id")).to_contain_text("rm_id 0x0100F28A")
+    expect(by_id(page, "wrapper-rm-id")).to_contain_text("design number 0x0100F28A")
     expect(by_id(page, "rm-id-proposed")).to_be_visible()
     # G8: the partition's pblock facts and its capacity, from the pin model
     pb = by_id(page, "bd-pblock")
@@ -583,7 +583,7 @@ def test_my_rtl_reads_the_folder_in_compile_order_and_continues(page_factory, da
     expect(scan).to_contain_text("4 HDL files in compile order (1 package first)", timeout=T)
     expect(scan).to_contain_text("top rm_demo")
     expect(by_id(page, "bd-generics").locator('input[aria-label="Generic name"]')).to_have_value("IMG")
-    expect(by_id(page, "wrapper-rm-id")).to_contain_text("rm_id 0x0100DFA0")
+    expect(by_id(page, "wrapper-rm-id")).to_contain_text("design number 0x0100DFA0")
     expect_node(page, "design", "current")
     by_id(page, "bd-rm-xdc").fill(str(rtl / "demo_rm.xdc"))
     expect(by_id(page, "bd-constraints").locator(".bd-ff.on")).to_have_count(1)

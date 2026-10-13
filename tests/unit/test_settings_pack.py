@@ -153,12 +153,12 @@ def test_the_rows_carry_type_scope_secret_and_apply():
     r = rows_by_key()
     assert not any(s.secret for s in r.values())                 # the MPS3 has no secret
     assert r["mps3.openocd_cfg_dir"].lockable and r["mps3.openocd_cfg_dir"].scope == "machine"
-    assert r["mps3.console.pace_ms"].apply == "reopen" and r["mps3.console.pace_ms"].ui
+    assert r["mps3.console.pace_ms"].apply == "reopen" and r["mps3.console.pace_ms"].dev_only
     assert r["mps3.rbb_port"].apply == "restart" and not r["mps3.rbb_port"].ui   # a dev seam
     assert r["mps3.overlay_dirs"].env_split == "pathsep"
     assert {s.scope for k, s in r.items() if k.startswith("boards.")} == {"board"}
     for s in r.values():
-        assert s.doc and s.section in ("Tools", "Harness + kits", "Consoles", "Debug",
+        assert s.doc and s.section in ("Tools", "Harness & kits", "Consoles", "Debug",
                                        "Advanced", "Boards"), s.key
 
 

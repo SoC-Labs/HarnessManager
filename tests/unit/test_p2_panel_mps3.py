@@ -94,9 +94,9 @@ def test_bare_metal_v011_offers_the_panel_owner_only_with_the_reasons(bare):
     info = bare.engine.info(bare.bid)
     assert C.FRONT_PANEL in info.capabilities
     assert info.unavailable[C.LOCATE] == NEEDS_LOCATE == (
-        "Identify isn't available on this harness image yet (harness feature 'locate')")
+        "Identify isn't available on this release yet (harness feature 'locate')")
     assert info.unavailable[C.PRESENCE] == NEEDS_PRESENCE == (
-        "this harness image doesn't report who is connected (harness feature 'presence')")
+        "this release doesn't report who is connected (harness feature 'presence')")
     sup = bare.panel.support()
     assert sup.source == "rebuilt" and "'locate'" in sup.locate
     assert sup.impl == "bare-metal"          # the harness's own word, for a view to name it

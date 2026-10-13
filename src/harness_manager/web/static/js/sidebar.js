@@ -888,7 +888,7 @@ export function BoardPreview({ bid }) {
           ${hub ? html`<${PreviewLease} bid=${bid} w=${w} />` : null}
           <dt>Loaded</dt><dd data-testid="preview-loaded">${ident ? html`<div class="line"><span>${ident.rm_name || "unknown"}${" "}
               <span class="mono sub">${hexId(ident.rm_id)}</span></span>
-              <span class="sub">on shell ${hexId(ident.shell_id) || "?"}${ident.harness_version ? ` · harness firmware ${ident.harness_version}` : ""}</span>
+              <span class="sub">on shell ${hexId(ident.shell_id) || "?"}${ident.harness_version ? ` · release ${ident.harness_version}` : ""}</span>
               <${CheckChip} check=${ident.build_check} testid="preview-build" prefix="build " /></div>
               <div class="sub">${seen ? `as this page last read it, at ${clock(seen.at).slice(0, 5)}` : "as the board last reported it"}: read again when you open it</div>`
             : html`<span class="muted">read when you open it</span>`}</dd>

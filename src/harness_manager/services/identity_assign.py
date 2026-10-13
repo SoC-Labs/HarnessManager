@@ -13,7 +13,7 @@ david, 2 Oct 2026 (relayed by the Linux lead; they replace BRINGUP-2's MAC from 
 Board-agnostic. What is the board pack's (``IdentityPolicy``): the MAC's first byte and the
 ranges never handed out (the MPS3 image default 02:00:00:*), the address pool (MPS3:
 192.168.10.110-199, the setting ``mps3.identity.ip_pool``), the addresses never handed out
-(MPS3: 192.168.10.101, the image default and stage0 rescue's), and how to ask whether an
+(MPS3: 192.168.10.101, the image default and rescue mode's), and how to ask whether an
 address answers now (MPS3: UDP identify). A pack gives its policy with ``identity_policy()``
 (on the pack, or the engine for a demo); without one the core's generic policy applies.
 
@@ -29,7 +29,7 @@ What is the core's:
   when none is left;
 - **the registry** (``board_identity.SeenIdentities``, ``<state>/identity/seen.json``): every
   MAC and IP this Harness Manager assigned or saw, per board id, with the date;
-- the notes every front end shows: the same-/24 rule, stage0 rescue's address, the MAC-only
+- the notes every front end shows: the same-/24 rule, rescue mode's address, the MAC-only
   ARP trap, the hub guard;
 - ``move_board_table``: a board whose address changed keeps its boards.toml table (its pinned
   SSH host key, its name, its power meter) under its new board id.

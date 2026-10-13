@@ -28,7 +28,7 @@ What is guarded, and where:
 How the job is read: ``session.os_slots`` (CCR T7-2): ``busy_job()`` when the adapter has it
 (the MPS3 one does: its rate and ETA estimates, and no ``slot`` request to a bare-metal
 harness), else ``slots_reason()`` then ``status()``. A board with no OS slots (bare metal,
-no card, stage0 rescue) or a harness that does not answer at all (refused, no route) has no
+no card, rescue mode) or a harness that does not answer at all (refused, no route) has no
 job to protect: allowed (a harness that does not answer is what a reboot recovers). A
 harness whose control port is HELD cannot say, so the reset is refused as busy
 (``HeldError``); ``force`` is the way past it.

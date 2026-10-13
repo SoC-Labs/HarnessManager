@@ -532,7 +532,7 @@ class Mps3OsSlots:
             live = self._live()
         except HarnessError as exc:
             if type(exc).__name__ == "ShellRescueError":
-                return ("the board is in stage0 RESCUE (no bootable slot): provisioning a slot "
+                return ("the board is in rescue mode (no bootable slot): provisioning a slot "
                         "from rescue comes with Linux v2.1; write the card in a PC card reader instead")
             return f"the harness did not answer: {exc.message}"
         if not live.version_ok:

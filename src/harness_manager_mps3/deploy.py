@@ -459,7 +459,7 @@ class Mps3Deploy:
         hint = (f"give HM the folder of overlays built with {where}'s mint, the one that holds "
                 "greybox/manifest.json: once with `harness-manager restore TARGET --overlay-dir "
                 "DIR`, or for good with `harness-manager config set mps3.overlay_dirs DIR` (the "
-                "app: Settings > Harness + kits > Extra overlay directories). A kit carries no "
+                "app: Settings > Harness & kits > Extra overlay directories). A kit carries no "
                 "overlays, so `kit import` adds no greybox, and `kit pack` builds RMs only "
                 "(rm_id 0 is refused)")
         return f"no baseline overlay (greybox) for {where}: {looked}", hint
@@ -1044,7 +1044,7 @@ def _refusal_error(reply: dict, overlay: OverlayRef) -> HarnessError:
     if _is_fabric_mismatch(err):
         return IncompatibleError(
             f"the shell refused {overlay.name}: the running fabric does not match the "
-            f"harness image ({err})",
+            f"release ({err})",
             hint="nothing was loaded; `info` shows the skew. Re-provision the image for "
                  "this fabric, or restore the base bitstream it was built for")
     if reply.get("ok") is True:

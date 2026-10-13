@@ -72,7 +72,7 @@ export function byoOf(x) {
 
 function slotHeldText(st) {
   if (!st) return "";
-  if (st.state === "held") return st.detail || "another client holds the board's XVC slot";
+  if (st.state === "held") return st.detail || "another client holds the board's debug connection";
   if (st.state === "failed" && /XVC slot is held/.test(st.detail || "")) return st.detail;
   return "";
 }
@@ -107,7 +107,7 @@ export async function loadXvc(bid) {
     if (routeMissing(r.error) || r.error.errName === "UNAVAILABLE") {
       // A daemon without the XVC routes, or an engine without the service (the demo): a
       // reason, not an error.
-      x.unsupported = r.error.reason || r.error.message || "this harness-manager-daemon has no XVC routes";
+      x.unsupported = r.error.reason || r.error.message || "this background service has no XVC routes";
       x.st = { state: "down", open: false, reason: x.unsupported, warnings: [] };
       x.error = null;
     } else {

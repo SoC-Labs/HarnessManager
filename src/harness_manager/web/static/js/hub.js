@@ -20,7 +20,7 @@ import { ActionRow, Chip, Icon } from "./ui.js";
 export function leaseSpecs(bid) {
   const hub = week(bid).hub;
   const lease = hub && hub.lease;
-  const label = !lease ? "Acquire lease" : "Renew";
+  const label = !lease ? "Take lease" : "Renew";
   return {
     acquire: {
       key: "lease_acquire", label, busyLabel: "Leasing...",
@@ -34,7 +34,7 @@ export function leaseSpecs(bid) {
       onDone: () => loadHub(bid),
     },
     release: {
-      key: "lease_release", label: "Release", busyLabel: "Releasing...", budgetS: 30,
+      key: "lease_release", label: "Give back", busyLabel: "Giving back...", budgetS: 30,
       command: "lease release",
       run: async () => (await call("leaseRelease", { bid })).data,
       render: (r) => [{ kind: "ok", text: r && r.cancelled
@@ -93,7 +93,7 @@ export function HubFact({ bid }) {
       lease yours${left !== null ? ` · ${durationText(left)}` : ""}<//>`;
   } else if (who.state === "elsewhere") {
     leaseChip = html`<${Chip} level="held" icon="lock" testid="lease-chip"
-      title=${`${where}, held under your hub name by another session or tool (a soak, a runner), not this Harness Manager${left !== null ? `; it ends in ${durationText(left)}` : ""}. Release it there.`}>
+      title=${`${where}, held under your hub name by another session or tool (a soak, a runner), not this Harness Manager${left !== null ? `; it ends in ${durationText(left)}` : ""}. Give it back there.`}>
       leased to ${lease.holder} (another session)<//>`;
   } else {
     leaseChip = html`<${Chip} level="err" icon="lock" testid="lease-chip"

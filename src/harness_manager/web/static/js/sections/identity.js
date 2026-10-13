@@ -420,6 +420,6 @@ export function IdentityCard({ bid, clashes = [], goTo = null }) {
       ${b.netIdentityError ? html`<${Reason} level="err" text=${`${b.netIdentityError.errName}: ${b.netIdentityError.message}`} />` : null}
       ${!has && b.info && !bare ? html`<p class="small muted" data-testid="access-identity-none">${hubRouted(claimOf(b))
         ? "Not read yet. This board is behind a hub, where its identify is read through the hub: the SSH claim card does that when it loads (Check through the hub)."
-        : "This harness image does not report its identity (net-protocol v0.16 adds it)."}</p>` : null}
+        : "This release does not report its identity (net-protocol v0.16 adds it)."}</p>` : null}
     </div><//>`;
 }

@@ -152,7 +152,7 @@ def parse_via(via: str) -> str:
     kind, sep, host = via.partition(":")
     if kind != VIA_SSH or not sep or not host or any(c.isspace() for c in host):
         raise UsageError(f"via {via!r} is not ssh:HOST",
-                         hint="e.g. --via ssh:mapstone-dev.ecs.soton.ac.uk (the lab hub)")
+                         hint="e.g. --via ssh:hub.example.org (the lab hub)")
     return host
 
 

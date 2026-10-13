@@ -123,7 +123,7 @@ def test_back_to_greybox_swaps_the_partition_then_says_it_is_greybox(show):
     expect(by_id(page, "greybox-result")).to_contain_text("rc 0", timeout=T)
     expect(page.locator('[data-testid="fact-design"]')).to_contain_text("greybox", timeout=T)
     # its twin: once the board runs greybox the step has nothing to do, and says so
-    expect(by_id(page, "reason-restore")).to_contain_text("already greybox", timeout=T)
+    expect(by_id(page, "reason-restore")).to_contain_text("already the empty design", timeout=T)
     expect(page.locator('[data-action="restore"]')).to_have_attribute("aria-disabled", "true")
     assert not page.errors, page.errors
 

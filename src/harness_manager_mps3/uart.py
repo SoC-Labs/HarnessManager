@@ -7,7 +7,7 @@ read at d5c4017):
 |---|---|---|---|
 | ``uart0`` (TCP 6930) | the RP's console AXI-Stream pair, serialised by ``uart_axis_shim`` INSIDE the RM | the loaded design, at build time (``UART_BAUD``) | only through the harness verb ``uart_baud`` (feature ``uart_baud``) |
 | ``uart1`` (TCP 6931) | UARTBR U1, whose DUT side the shell ties off | nothing drives it | no |
-| ``swo`` (TCP 6932) | the shell's NRZ SWO deserialiser | the harness firmware (divisor 24) | no |
+| ``swo`` (TCP 6932) | the shell's NRZ SWO deserialiser | the release (divisor 24) | no |
 | ``fpga_uart0..3`` (``serial://``) | FT4232H lanes on the Debug USB | the host port | yes: the broker reopens the port (not this module) |
 | a hub share (``tcp://``, not a shell console) | fpgahub's share of a host port | the share | no |
 
@@ -98,7 +98,7 @@ UART1_NOT_CONNECTED = "DUT uart1: not connected in this shell"
 #: Mint 4: with the ``hostio`` feature 6931 is the DUT's hostio channel 1, not the shell's UART1.
 HOSTIO_WHY = ("hostio1 passes the DUT's bytes as they are: it has no baud rate of its own "
               "(the DUT sets it) and Harness Manager does not pace what you type")
-#: swo: the harness firmware's NRZ deserialiser divisor 24 = a 25-cycle bit period.
+#: swo: the release's NRZ deserialiser divisor 24 = a 25-cycle bit period.
 SWO_DIVISOR = 24
 SWO_BAUD = DESIGN_CLK_HZ // (SWO_DIVISOR + 1)          # 2 000 000 at the 50 MHz dut_clk
 SWO_SOURCE = "firmware/uart_over_eth/uart_over_eth.c:30-35 (UART_OVER_ETH_SWO_DIVISOR 24)"
@@ -143,7 +143,7 @@ def design_row(stream: str, rm_id: Any) -> dict[str, Any]:
                     connected_reason=UART1_NOT_CONNECTED)
     if stream == "swo":
         return _row("ethernet", SWO_BAUD, "harness",
-                    reason=f"the harness firmware fixes the SWO deserialiser at {SWO_BAUD} baud "
+                    reason=f"the release fixes the SWO deserialiser at {SWO_BAUD} baud "
                            f"(divisor {SWO_DIVISOR} at the {DESIGN_CLK_HZ // 1_000_000} MHz "
                            f"dut_clk; {SWO_SOURCE})", cite=SWO_SOURCE)
     did, row = design_uart(rm_id)
@@ -155,7 +155,7 @@ def design_row(stream: str, rm_id: Any) -> dict[str, Any]:
         return _row("ethernet", None, "design", reason=row.why, design=row.name, cite=row.source)
     return _row("ethernet", row.baud, "design", design=row.name, cite=row.source,
                 reason=f"{row.name} fixes {stream} at {row.baud} baud when it is built "
-                       f"({row.source}); changing it at run time needs harness firmware with "
+                       f"({row.source}); changing it at run time needs a release with "
                        f"'{FEATURE}'")
 
 
@@ -331,7 +331,7 @@ HOSTIO_MODES = ("console", "hostio4")
 
 #: One plain sentence per refusal ``code`` (the contract's table). ``not_held`` is the one a
 #: user meets: the board names a hex design id that means nothing to them.
-HOSTIO_NOT_HELD = ("Load the greybox or hold the DUT first; the change applies at the next "
+HOSTIO_NOT_HELD = ("Load the empty design or hold the DUT first; the change applies at the next "
                    "design load.")
 _HOSTIO_CODE_WORDS = {
     "not_supported": "This board's software has no hostio support.",

@@ -99,7 +99,7 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
     ap.add_argument("--for", dest="for_s", type=float, default=None, metavar="SECONDS",
                     help="hold the session this long when this command owns it "
                          "(default: until Ctrl-C)")
-    sub.add_parser("close", help="kick the client, stop hw_server, free the board's slot",
+    sub.add_parser("close", help="kick the client, stop hw_server, free the board's debug connection",
                    parents=[fmt, board], epilog=epilog("xvc"))
     sub.add_parser("status", help="state, the Vivado URL, who is attached, the probes files",
                    parents=[fmt, board], epilog=epilog("xvc"))

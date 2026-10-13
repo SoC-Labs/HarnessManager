@@ -71,7 +71,7 @@ _REGISTRY: dict[str, Tester] = {}
 
 
 def section_id(name: str) -> str:
-    """A section's name as an id: ``"Harness + kits"`` -> ``"harness-kits"``."""
+    """A section's name as an id: ``"Harness & kits"`` -> ``"harness-kits"``."""
     return re.sub(r"[^a-z0-9]+", "-", str(name).lower()).strip("-")
 
 

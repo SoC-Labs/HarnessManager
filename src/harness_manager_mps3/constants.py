@@ -67,7 +67,7 @@ IMPL_LINUX = "linux"
 
 #: UDP identify probe (plan §10): one datagram in, one reply to the SENDER's
 #: addr:port. Independent of the single-client 6900, so it answers while 6900
-#: is held, parked by a swap, or (stage0 rescue) not there at all.
+#: is held, parked by a swap, or (rescue mode) not there at all.
 IDENTIFY_PORT = 6899
 SSH_PORT = 22                           # dropbear on the Linux harness (DL5)
 

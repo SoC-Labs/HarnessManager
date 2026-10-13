@@ -121,7 +121,7 @@ function InstallFlow({ bid }) {
   };
   const setRow = (i, key, value) => { const next = files.slice(); next[i] = { ...next[i], [key]: value }; setFiles(next); };
   return html`<${Card} title="Install onto the configuration SD" icon="hard-drive" testid="sd-flow"
-      sub="The board loads its base (bitstream, firmware, config) from this SD at power-on. Paths are on the machine running harness-manager-daemon.">
+      sub="The board loads its base (bitstream, firmware, config) from this SD at power-on. Paths are on the computer running the background service.">
     ${sdOut ? html`<${Reason} icon="circle-slash" testid="sd-unavailable"
       text=${`The configuration SD is out of reach from here: ${sdOut}`} />` : null}
     <ol class="flow">

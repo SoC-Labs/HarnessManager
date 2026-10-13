@@ -466,7 +466,7 @@ REASONS = [
     ("bare-metal-named", {"impl": "bare-metal", "features": ENGINE},
      "needs the Linux harness with lcd_mirror"),
     ("no-engine", {"features": BITS, "block": None},
-     "the Live display needs a harness image with lcd_mirror (this image has none"),
+     "the Live display needs a release with lcd_mirror (this image has none"),
     ("unclaimed", {"pinned": False}, D.CLAIM_HINT),
     ("unclaimed-now", {"claimed": False}, "the board is unclaimed now; " + D.CLAIM_HINT),
     ("no-ssh", {"claim": False}, D.NO_SSH),

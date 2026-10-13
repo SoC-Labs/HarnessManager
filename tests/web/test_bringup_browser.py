@@ -3,7 +3,7 @@
 The REAL daemon over ``DemoEngine(showcase=True)`` (what ``app --demo`` serves) in the system
 Chrome. The demo's new board (``mps3@usb:/dev/ttyUSB20``, demo_showcase's bringup-usb block)
 is found by the scan, added, backed up, written, rebooted and witnessed; its Ethernet twin at
-192.168.10.101 comes up bare-metal, or in stage0 RESCUE for the Linux bundle. Every
+192.168.10.101 comes up bare-metal, or in rescue mode for the Linux bundle. Every
 behaviour has its negative twin. Nothing here touches a device: the demo's writes are in
 memory and its drive is a folder in the test's tmp dir.
 """
@@ -392,7 +392,7 @@ def test_twin_a_dark_board_times_out_and_offers_the_restore(demo, monkeypatch):
 def test_linux_comes_up_in_rescue_and_the_os_step_offers_the_whole_card_image(demo):
     page = demo.page()
     bring_up(page, demo.example(1))
-    expect(by(page, "bu-witness-result")).to_contain_text("stage0 RESCUE answers", timeout=T)
+    expect(by(page, "bu-witness-result")).to_contain_text("Rescue mode answers", timeout=T)
     os_step = by(page, "bu-step-os")
     expect(os_step).to_be_visible()
     expect(by(page, "bu-os-why-network")).to_contain_text("comes with Linux v2.1")
@@ -401,7 +401,7 @@ def test_linux_comes_up_in_rescue_and_the_os_step_offers_the_whole_card_image(de
     expect(by(page, "bu-os-why-reader")).to_contain_text("bringup.sd_flash")    # the switch is off
     expect(os_step.locator('[data-option="skip"] input')).to_be_enabled()
     expect(page.locator('[data-action="bu-next"]')).to_be_disabled()
-    expect(by(page, "bu-next-why")).to_contain_text("stage0 RESCUE")
+    expect(by(page, "bu-next-why")).to_contain_text("Rescue mode")
     os_step.locator('[data-option="skip"] input').check()
     expect(os_step).to_have_attribute("data-state", "done")
     assert not page.errors, page.errors
@@ -796,7 +796,7 @@ def test_twin_a_harness_that_predates_identity_set_is_told_so_and_nothing_is_sen
     page = demo.page()
     serve_identity(page, linux_identity(refusal={
         "name": "UNAVAILABLE", "hint": "",
-        "message": "pending the Linux lead's interface: this harness image has no identity verbs "
+        "message": "pending the Linux lead's interface: this release has no identity verbs "
                    "(net-protocol v0.16 `identity`/`identity_set`, images rc2_v7 and later)"},
         reported={"feature": False}), posts)
     open_identity(page, PREFILL)

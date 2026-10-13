@@ -43,7 +43,7 @@ KIND_OVERLAY = "overlay"
 KIND_RECEIPT = "receipt"
 
 #: The dialog's five rows: (id, title), in order.
-GROUPS = (("files", "Files"), ("shell", "Same shell"), ("rm_id", "rm_id in the user range"),
+GROUPS = (("files", "Files"), ("shell", "Same shell"), ("rm_id", "Design number in the user range"),
           ("crc", "CRC and sizes"), ("pair", "Clearing pairs with the partial"))
 #: A check's group by its name; anything else (the pair's stream checks) is ``pair``.
 GROUP_OF = {"manifest": "files", "build": "files", "static_id": "files", "timing": "files",

@@ -135,7 +135,7 @@ def test_negative_twin_bare_metal_keeps_its_three_second_restart(show):
     page = recover(show, BOARD_V011)
     card = by_id(page, "reset-shell")
     expect(card).to_contain_text("~3 s", timeout=T)
-    expect(card).to_contain_text("Warm firmware restart")
+    expect(card).to_contain_text("Warm restart")
     assert "3 min" not in card.inner_text()
 
 
@@ -144,7 +144,7 @@ def test_a_netbooted_linux_board_says_restart_waits_for_its_image(show):
     page = recover(show, BOARD_LINUX)
     card = by_id(page, "reset-shell")
     expect(card.locator(".rc-d")).to_have_attribute(
-        "title", re.compile("waits in stage0 rescue until its image is pushed again"), timeout=T)
+        "title", re.compile("waits in rescue mode until its release is pushed again"), timeout=T)
     assert "~3 min" in card.inner_text()
     assert card.locator('.kp[data-keep="lost"]').count() >= 2          # the consoles do not come back
     assert "reconnect by themselves" not in card.locator(".rc-d").get_attribute("title")
@@ -154,7 +154,7 @@ def test_twin_a_card_board_comes_back_by_itself_after_the_restart(show):
     page = recover(show, BOARD_LINUX)
     card = by_id(page, "reset-shell")
     expect(card.locator(".rc-d")).to_have_attribute("title", re.compile("reconnect by themselves"), timeout=T)
-    assert "stage0 rescue" not in card.locator(".rc-d").get_attribute("title")
+    assert "Rescue mode" not in card.locator(".rc-d").get_attribute("title")
     assert card.locator('.kp[data-keep="back"]').count() == 1
 
 

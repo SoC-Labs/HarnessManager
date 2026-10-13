@@ -58,7 +58,8 @@ function sectionRows(id, skip = new Set()) {
       continue;
     }
     const spec = specOf(key) || {};
-    if (spec.ui === false) dev.push({ ...row, readonly: true, dev: true, env: row.env || spec.env || "" });
+    if (spec.ui === false) dev.push(spec.owner === "dev" ? { ...row, readonly: true, dev: true, env: row.env || spec.env || "" }
+      : { ...row });   // dev_only: hidden, but settable once shown
     else if (spec.pack) (packs[spec.pack] = packs[spec.pack] || []).push(row);
     else core.push(row);
   }

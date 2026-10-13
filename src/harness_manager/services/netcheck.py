@@ -7,7 +7,7 @@ things go wrong, and HM can see both (read only, through PowerShell):
    address there (no DHCP server on a direct cable: Windows falls back to 169.254.x.x).
 2. **A Public network profile.** Windows calls a new adapter's network (an "Unidentified
    network", no gateway) Public, and Windows Firewall then drops what the board sends
-   unasked: the UDP identify replies (finding boards, a board in stage0 RESCUE, a board
+   unasked: the UDP identify replies (finding boards, a board in rescue mode, a board
    that moved), while TCP (6900, SSH) still works because this PC opened it. And a
    "Windows Security Alert" for Python that was cancelled leaves an inbound BLOCK rule for
    python.exe, which wins over any allow rule.
@@ -214,7 +214,7 @@ def diagnose(host: str, adapters: Sequence[Adapter], blocks: Sequence[dict[str, 
                 "public_profile", "The board's network is Public",
                 f"Windows treats {a.shown}, the board's network, as a Public network, and "
                 "Windows Firewall drops the board's UDP replies there: finding boards, a board "
-                "in stage0 RESCUE, a board that moved. Make the network Private (one line), or "
+                "in rescue mode, a board that moved. Make the network Private (one line), or "
                 "allow UDP from the board's network.",
                 [private_profile(a.alias)], alternative=[firewall_rule(str(net))],
                 adapter=a.alias))

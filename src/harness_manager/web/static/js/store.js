@@ -559,7 +559,7 @@ async function probeNow(hosts, via = "", auto = false) {
   S.scan = { running: true, line: hosts ? `adding ${hosts.join(", ")}${via ? ` ${via}` : ""}...` : "scanning...", level: "" };
   changed();
   // With explicit hosts the pack pings only those and unicasts identify to them, so a board
-  // in stage0 rescue (identify, no 6900) is still found: keep scan_network on. `via`
+  // in rescue mode (identify, no 6900) is still found: keep scan_network on. `via`
   // ("ssh:HOST") reaches them through that hub's tunnel.
   const body = hosts ? { hosts, scan_usb: false, ...(via ? { via } : {}) } : {};
   const what = hosts ? `probe ${hosts.join(" ")}${via ? ` --via ${via}` : ""}` : "probe";
@@ -1062,8 +1062,8 @@ export async function start() {
   onConnection((state) => {
     const was = S.connection;
     S.connection = state;
-    if (was === "down" && state === "ok") log("ok", "daemon", "harness-manager-daemon answered again");
-    if (state === "down" && was !== "down") log("warning", "daemon", "harness-manager-daemon did not answer");
+    if (was === "down" && state === "ok") log("ok", "daemon", "the background service answered again");
+    if (state === "down" && was !== "down") log("warning", "daemon", "the background service did not answer");
     changed();
   });
   const saved = restoreSelection();

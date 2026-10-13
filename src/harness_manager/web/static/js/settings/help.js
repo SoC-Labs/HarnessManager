@@ -48,7 +48,7 @@ export const HELP_PAGES = [
   ["lease", "Leases",
     "One lease per hub board, taken from the hub. The header holds the control: acquire, release, request, cancel; "
     + "\"N waiting\" opens the hub's queue (who, their place, how long they want it, since when, their message; "
-    + "automation waits apart, behind every person). Releasing hands the board to the next person, as the hub does.",
+    + "automation waits apart, behind every person). Giving the lease back hands the board to the next person, as the hub does.",
     ["Hubs and leases"]],
   ["settings", "Settings",
     "Settings opens on General. Hubs and Boards are what boards.toml and settings.toml hold; the theme is in the "

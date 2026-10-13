@@ -105,7 +105,7 @@ def test_twin_a_harness_that_says_bare_metal_is_named_so(page_factory, daemon, e
     details(page)
     c = card(page)
     expect(c.locator('[data-testid="panel-rebuilt"]')).to_contain_text(
-        "this bare-metal harness image does not send its panel's text", timeout=T)
+        "this bare-metal release does not send its panel's text", timeout=T)
     c.locator('[data-testid="panel-not-reported"] summary').click()
     expect(c.locator('[data-testid="panel-impl"]')).to_contain_text("the bare-metal harness")
 
@@ -119,7 +119,7 @@ def test_twin_a_harness_that_does_not_say_is_named_neither_way(page_factory, dae
     details(page)
     c = card(page)
     expect(c.locator('[data-testid="panel-rebuilt"]')).to_contain_text(
-        "this harness image does not send", timeout=T)
+        "this release does not send", timeout=T)
     c.locator('[data-testid="panel-not-reported"] summary').click()
     expect(c.locator('[data-testid="panel-impl"]')).to_have_text(
         "the harness did not say which harness it is")
@@ -249,7 +249,7 @@ def test_twin_demo_the_bare_metal_board_is_rebuilt_and_named_from_its_impl(showc
     expect(c.locator('[data-testid="panel-headline"]')).to_have_attribute("data-state", "rebuilt",
                                                                            timeout=T)
     expect(c.locator('[data-testid="panel-rebuilt"]')).to_contain_text(
-        "this bare-metal harness image does not send its panel's text")
+        "this bare-metal release does not send its panel's text")
     # UI v2: the daemon's 422 (UNAVAILABLE) makes the Front panel Text only, and says why
     expect(c).to_have_attribute("data-view", "text", timeout=T)
     expect(c.locator('[data-action="panel-view-live"]')).to_be_disabled()

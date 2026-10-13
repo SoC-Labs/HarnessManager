@@ -180,17 +180,22 @@ def mps3_rows(*, console_pace_s: float = _c.DUT_CONSOLE_PACE_S,
               rbb_port: int = _c.JTAG_RBB_PORT, push_port: int | None = None,
               tftp_port: int | None = None) -> tuple[Setting, ...]:
     """Every MPS3 row. The arguments are ``Mps3Pack``'s own (``--pack-overrides``)."""
+    from harness_manager.settings.rows import mark_dev_only
+
     from .hub import DEFAULT_SHARE_BAUD, DEFAULT_TARGET
     from .mcc import DEFAULT_TIMING, SHARE_PACE_S
     from .sysmon import DEFAULT_DEVICE, DEFAULT_HW_SERVER
     from .telemetry import SYSMON_MIN_INTERVAL_S
     from .xvc import REACH_CHOICES
 
-    return (*_pack_rows(console_pace_s, rbb_port, push_port or _c.PUSH_PORT,
+    rows = (*_pack_rows(console_pace_s, rbb_port, push_port or _c.PUSH_PORT,
                         tftp_port or TFTP_PORT, DEFAULT_TIMING.pace_s, SHARE_PACE_S),
             *_board_rows(DEFAULT_TARGET, DEFAULT_SHARE_BAUD, REACH_CHOICES,
                          DEFAULT_HW_SERVER, DEFAULT_DEVICE, SYSMON_MIN_INTERVAL_S),
             *_slot_rows(), *_identity_rows())
+    # L11 WORDS: pacing and SYSMON plumbing are for developers; visibility only.
+    return mark_dev_only(rows, keys={"mps3.console.pace_ms", "mps3.mcc.pace_ms", "mps3.mcc.share_pace_ms"},
+                         prefixes=("boards.*.sysmon.",))
 
 
 def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: int,
@@ -203,7 +208,7 @@ def _pack_rows(console_pace_s: float, rbb_port: int, push_port: int, tftp_port: 
              scope="machine", owner="admin", env="HARNESS_MANAGER_MPS3_OPENOCD_DIR",
              advanced=True),
         # K7 (the core's --overlay-dir puts directories first: cli/cmd_program.py:23-25)
-        _row("mps3.overlay_dirs", "list", [], "Harness + kits",
+        _row("mps3.overlay_dirs", "list", [], "Harness & kits",
              "Extra overlay directories, searched first", at="overlays.py:334",
              env="HARNESS_MANAGER_MPS3_OVERLAY_DIRS", env_split="pathsep"),
         # C1: the pack's kwarg console_pace_s (pack.py:375), paced consoles constants.py:31
@@ -345,19 +350,19 @@ def _slot_rows() -> tuple[Setting, ...]:
     from . import os_slots as _os
 
     return (
-        _row(_os.CARD_WRITE_BPS_KEY, "int", _os.CARD_WRITE_BPS, "Harness + kits",
+        _row(_os.CARD_WRITE_BPS_KEY, "int", _os.CARD_WRITE_BPS, "Harness & kits",
              "How fast the board's user microSD takes a write, bytes a second (B2: ~70 KB/s; "
              "the OS-slot budgets and ETAs are sized from it)", at="os_slots.py:211",
              scope="pack", advanced=True, env=_os.CARD_WRITE_BPS_ENV, check=_positive),
-        _row(_os.CARD_READ_BPS_KEY, "int", _os.CARD_READ_BPS, "Harness + kits",
+        _row(_os.CARD_READ_BPS_KEY, "int", _os.CARD_READ_BPS, "Harness & kits",
              "How fast the board reads its user microSD back, bytes a second (B2: 14-135 "
              "KB/s, the slowest is the default)", at="os_slots.py:212", scope="pack",
              advanced=True, env=_os.CARD_READ_BPS_ENV, check=_positive),
-        _row(_os.JOB_TIMEOUT_KEY, "float", _os.JOB_TIMEOUT_S, "Harness + kits",
+        _row(_os.JOB_TIMEOUT_KEY, "float", _os.JOB_TIMEOUT_S, "Harness & kits",
              "The least cap on a whole OS-slot push or verify, in seconds (a bigger image "
              "gets its size at the card's rates, x1.5)", at="os_slots.py:243", scope="pack",
              env=_os.JOB_TIMEOUT_ENV, check=_positive),
-        _row(_os.STALL_KEY, "float", _os.STALL_S, "Harness + kits",
+        _row(_os.STALL_KEY, "float", _os.STALL_S, "Harness & kits",
              "How long an OS-slot push or its card job may go without moving a byte before "
              "it is stuck, in seconds", at="os_slots.py:244", scope="pack",
              env=_os.STALL_ENV, check=_positive),
@@ -374,6 +379,6 @@ def _identity_rows() -> tuple[Setting, ...]:
     return (
         _row(_ni.IP_POOL_KEY, "str", _ni.DEFAULT_IP_POOL, "Boards",
              "The addresses Harness Manager gives boards it names (a.b.c.X-Y, one /24; "
-             f"{_ni.RESERVED_IPS[0]} is never given: the image's and stage0 rescue's)",
+             f"{_ni.RESERVED_IPS[0]} is never given: the image's and rescue mode's)",
              at="net_identity.py:142", env=_ni.IP_POOL_ENV, check=pool_problem),
     )

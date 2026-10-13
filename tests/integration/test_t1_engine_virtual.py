@@ -55,7 +55,7 @@ def test_open_info_close_on_the_fielded_board(vboard: VirtualMps3, state: Path):
     # Ethernet only: the reason for each missing capability is carried, not guessed.
     assert "reboot_board" not in info.capabilities
     assert info.unavailable["reboot_board"].startswith("needs the Debug USB cable")
-    assert info.unavailable["reset_shell"] == "needs harness firmware with 'reboot'"
+    assert info.unavailable["reset_shell"] == "needs a release with 'reboot'"
 
     lock = eng.lock_owner(cand.board_id)
     assert lock is not None and lock.pid == os.getpid() and lock.note == "t1 integration"

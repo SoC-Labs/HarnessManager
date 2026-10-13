@@ -51,7 +51,7 @@ claimed by another key, or with no pin here, is ``ClaimLockedError`` with the cl
 before anything dials. Bare metal and unclaimed boards keep the shell's endpoint.
 
 **OpenOCD on the board** (lane DEBUG-ONBOARD; ``services/debug_onboard.py`` has the contract).
-The Linux harness image runs OpenOCD itself: ``mps3-debug up|down|status --json [--rm NAME]``
+The Linux release runs OpenOCD itself: ``mps3-debug up|down|status --json [--rm NAME]``
 over the claim's SSH (``claim.ssh_argv`` run by ``claim.DEFAULT_RUN``: the key-only argv, the
 pinned host key, ``-J`` the hub; no other SSH path). Its gdb servers listen on the board's
 127.0.0.1:3333 (core 0) and 3334 (core 1); they ride the session's one claim forward

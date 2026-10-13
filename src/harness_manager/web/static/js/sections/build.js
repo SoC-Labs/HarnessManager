@@ -20,7 +20,7 @@
 // - Add = POST /kits/pack {import: true}; the Workbench opens with the design picked.
 //
 // Building needs no lease; only programming does (the note under the bar says who holds it).
-// Paths are on harness-manager-daemon's host (docs/API.md). The Import dialog is ../import.js.
+// Paths are on the background service's computer (docs/API.md). The Import dialog is ../import.js.
 
 import { ApiError, call, callBlob, routeMissing, toApiError, waitJob } from "../api.js";
 import { panelState } from "../actions.js";
@@ -169,7 +169,7 @@ function st(bid) {
 function explain(err) {
   const e = toApiError(err);
   if ((e.status === 404 && /\/(guide|kit)\b/.test(e.message || "")) || routeMissing(e)) {
-    return new ApiError({ name: "UNAVAILABLE", message: "this harness-manager-daemon has no build-kit routes yet",
+    return new ApiError({ name: "UNAVAILABLE", message: "this background service has no build-kit routes yet",
       hint: "update Harness Manager: this version has no build kit support" }, 404);
   }
   return e;
@@ -289,7 +289,7 @@ function designProblem(x) {
   if (x.src === "rtl") {
     if (x.scanError) {
       return { err: { gate: x.scanError.errName, title: x.scanError.message, text: x.scanError.hint || "",
-        fix: "Give the folder that holds your RTL, or its .f file list (an absolute path on harness-manager-daemon's host)." } };
+        fix: "Give the folder that holds your RTL, or its .f file list (an absolute path on the background service's computer)." } };
     }
     if (!x.rtl.trim()) return { todo: "Give the folder that holds your RTL, or its .f file list." };
     if (!x.scan) return { todo: "Read it: Harness Manager lists the sources in compile order and finds the top." };
@@ -722,9 +722,9 @@ function PathsHint() {
   const host = window.location.hostname;
   return isLoopbackHost(host)
     ? html`<${Reason} testid="build-paths-hint" icon="info"
-        text="Paths are on this machine: harness-manager-daemon runs here, and so does Vivado (Harness Manager gives the command; it does not run it)." />`
+        text="Paths are on this machine: the background service runs here, and so does Vivado (Harness Manager gives the command; it does not run it)." />`
     : html`<${Reason} level="warn" testid="build-paths-hint" icon="triangle-alert"
-        text=${`This page comes from harness-manager-daemon on ${host}: every path is on that machine, not this one. To build on this machine, download the build directory as a zip.`} />`;
+        text=${`This page comes from the background service on ${host}: every path is on that machine, not this one. To build on this machine, download the build directory as a zip.`} />`;
 }
 
 // --- the head: the bar, where you are, ready to build, the lease ------------------------------
@@ -960,10 +960,10 @@ function SetupPanel({ bid, f }) {
         ${showFetch ? html`<div class="field wrap bd-field"><label>Source</label>
           <${Seg} label="Kit source" value=${x.source} onChange=${(val) => { x.source = val; changed(); }} options=${[
             { value: "auto", label: "Automatic", title: "the cache, then the release channel, then the hub" },
-            { value: "path", label: "A folder or zip", title: "a kit directory, a kit zip, or a fielded/<static>/ directory on harness-manager-daemon's host" },
+            { value: "path", label: "A folder or zip", title: "a kit directory, a kit zip, or a fielded/<static>/ directory on the background service's computer" },
           ]} />
           ${x.source === "path" ? html`<input class="input mono grow" aria-label="Kit source path" data-testid="kit-source-path"
-            placeholder="/path/to/fielded/0x72BB0A36 (absolute, on harness-manager-daemon's host)" value=${x.sourcePath}
+            placeholder="/path/to/fielded/0x72BB0A36 (absolute, on the background service's computer)" value=${x.sourcePath}
             onInput=${(e) => { x.sourcePath = e.target.value; changed(); }} />` : null}</div>
           ${x.source === "auto" && (kb.sources || []).length ? html`<ul class="source-list" data-testid="kit-sources">${kb.sources.map((s) => html`
             <li key=${s.name} data-source=${s.name} data-available=${s.available ? "true" : "false"}>
@@ -1084,7 +1084,7 @@ function Constraints({ bid, f, locked, edit }) {
         onInput=${(e) => edit(() => (x.rmXdc = e.target.value))} />
       ${xdc ? html`<button type="button" class="btn ghost icon-only sm" title="No rm_xdc (it is optional)" aria-label="Clear the rm_xdc" disabled=${locked}
         onClick=${() => edit(() => (x.rmXdc = ""))}><${Icon} name="x" /></button>` : null}</div>
-      ${xdc && !absPath(xdc) ? html`<${Reason} level="warn" text="Give it as an absolute path on harness-manager-daemon's host." />` : null}`;
+      ${xdc && !absPath(xdc) ? html`<${Reason} level="warn" text="Give it as an absolute path on the background service's computer." />` : null}`;
   } else {
     body = html`<div class="bd-xpath">${xdc ? html`<span class="mono small">"rm_xdc": "${xdc}"</span><span class="small muted">from the pasted design's build</span>`
       : html`<span class="small muted">none in the design: add <span class="mono">"rm_xdc": "/path/to/${designName(x) || "my_rm"}_rm.xdc"</span> to its build</span>`}</div>`;
@@ -1131,7 +1131,7 @@ function RmId({ rm, checks }) {
   const range = (checks || []).find((c) => c.name === "rm_id_range" && c.state !== "ok");
   const free = (checks || []).find((c) => c.name === "rm_id_clash" && c.state === "ok");
   return html`<div data-testid="wrapper-rm-id">
-    <div class="line"><span class="mono">rm_id ${rm.rm_id}</span>
+    <div class="line"><span class="mono">design number ${rm.rm_id}</span>
       ${rm.proposed ? html`<${Chip} level="accent" testid="rm-id-proposed">proposed by HM<//>` : html`<${Chip}>from the design<//>`}
       ${free && !clash ? html`<span class="sub">${free.detail}</span>` : null}</div>
     ${rm.proposed ? html`<div class="sub">User designs take design ids 0x8000-0xFFFF; the same name proposes the same id on every machine.</div>` : null}
@@ -1216,7 +1216,7 @@ function DesignPanel({ bid, f }) {
   } else {
     src = html`<div class="stack-sm"><textarea class="input mono bd-json" rows="11" aria-label="Design JSON" data-testid="build-design-json"
         placeholder=${SAMPLE} disabled=${locked} value=${x.paste} onInput=${(e) => edit(() => (x.paste = e.target.value))}></textarea>
-      <div class="small muted">A pasted design lives only in this page; give paths absolute (on harness-manager-daemon's host). The format: USER_GUIDE §7.2.</div></div>`;
+      <div class="small muted">A pasted design lives only in this page; give paths absolute (on the background service's computer). The format: USER_GUIDE §7.2.</div></div>`;
   }
   return html`<${Panel} f=${f} k="design" title="Your design">
     <p class="bd-lead">Pick what to build: an example, the folder with your RTL, or a design .json. Everything about the design is here, in one place.</p>
@@ -1227,7 +1227,7 @@ function DesignPanel({ bid, f }) {
     ${src}
     <dl class="kv bd-kv">
       ${x.src === "rtl" ? null : html`<dt>Name</dt><dd class="mono">${name || html`<span class="muted">none</span>`}</dd>`}
-      <dt>rm_id</dt><dd><${RmId} rm=${rmIdOf(x)} checks=${checks} /></dd>
+      <dt>Design number</dt><dd><${RmId} rm=${rmIdOf(x)} checks=${checks} /></dd>
       <dt>Sources</dt><dd><${Sources} x=${x} /></dd>
       <dt>Generics</dt><dd><${Generics} bid=${bid} x=${x} locked=${locked} edit=${edit} /></dd>
     </dl>
@@ -1271,7 +1271,7 @@ function Way({ bid, x }) {
       <${Seg} label="How to run Vivado" value=${way} options=${WAYS} onChange=${(v) => { x.way = v; persist(bid); changed(); }} />
 </div>
     ${text ? html`<${Cmd} text=${text} testid="script-command" />`
-      : html`<${Reason} level="unk" testid="bd-way-missing" text="This harness-manager-daemon gives no command for this way: update Harness Manager, or use Batch." />`}
+      : html`<${Reason} level="unk" testid="bd-way-missing" text="This background service gives no command for this way: update Harness Manager, or use Batch." />`}
     <div class="bd-way-note">${note}${it && it.watch ? html` <span class="muted">Watches: ${it.watch}.</span>` : null}</div>
     <label class=${`bd-stop${x.stopAfter ? " on" : ""}`} title="STOP_AFTER=link: the script returns after link, before close_project, so the static with your RM linked in stays open. The receipt says stopped.">
       <input type="checkbox" data-testid="bd-stop-after" checked=${!!x.stopAfter} disabled=${!!x.scriptBusy}
@@ -1317,7 +1317,7 @@ function BuildPanel({ bid, f }) {
       <p class="bd-lead">Harness Manager writes <span class="mono">build_rm.tcl</span>, the kit and the XDC kit for <b>${name}</b> into one folder. Nothing runs yet.</p>
       <div class="field bd-field"><label for=${`bd-dir-${bid}`}>Build directory</label>
         <input id=${`bd-dir-${bid}`} class="input mono grow" data-testid="build-dir" value=${x.buildDir}
-          placeholder=${`/home/you/builds/${name || "my_rm"} (absolute, on harness-manager-daemon's host)`}
+          placeholder=${`/home/you/builds/${name || "my_rm"} (absolute, on the background service's computer)`}
           onInput=${(e) => { x.buildDir = e.target.value; persist(bid); changed(); }} /></div>
       <div class="field bd-field"><label for=${`bd-jobs-${bid}`}>Threads</label>
         <select id=${`bd-jobs-${bid}`} class="select" value=${x.jobs} onChange=${(e) => { x.jobs = e.target.value; persist(bid); changed(); }}>
@@ -1326,7 +1326,7 @@ function BuildPanel({ bid, f }) {
       ${!x.buildDir.trim() && suggestDir(x) ? html`<div class="small muted">Under your home:${" "}<button type="button" class="link small mono" data-testid="build-dir-suggest"
           onClick=${() => { x.buildDir = suggestDir(x); persist(bid); changed(); }}>${suggestDir(x)}</button></div>` : null}
       <${PathsHint} />
-      ${x.buildDir.trim() && !dirOk ? html`<${Reason} level="warn" testid="build-dir-hint" text="Give the build directory as an absolute path (harness-manager-daemon's working directory is not yours)." />` : null}
+      ${x.buildDir.trim() && !dirOk ? html`<${Reason} level="warn" testid="build-dir-hint" text="Give the build directory as an absolute path (the background service's working directory is not yours)." />` : null}
       ${errs}
       ${x.zipSaved ? html`<${Reason} level="ok" testid="script-zip-saved" text=${`Saved ${x.zipSaved}: unzip it, then run build_rm.tcl in its folder (README.txt says how).`} />` : null}
       <div class="bd-acts">
@@ -1503,7 +1503,7 @@ function AddLease({ bid, name }) {
   else if (who.state === "other" || who.state === "elsewhere") {
     level = "held";
     text = `Programming needs the lease: ${who.holder} holds ${board}${who.state === "elsewhere" ? " in another session" : ""}. Adding doesn't: add ${name} now, then request the board (header).`;
-  } else if (who.state === "free") text = "Programming needs the lease: nobody holds it. Acquire it in the header when you get there.";
+  } else if (who.state === "free") text = "Programming needs the lease: nobody holds it. Take the lease in the header when you get there.";
   else text = "Programming needs the lease; adding doesn't.";
   return html`<p class=${`reason ${level}`} data-testid="add-lease" data-lease=${who.state}><${Icon} name=${level === "held" ? "lock" : level === "ok" ? "circle-check" : "info"} /><span>${text}</span></p>`;
 }
@@ -1517,7 +1517,7 @@ function AddPanel({ bid, f }) {
   const kind = ((boardState(bid).info || {}).identity || {}).harness_impl || "";
   if (f.imported) return html`<${Panel} f=${f} k="add" title=${`${name} is on the Workbench`}>
     <div class="outcome ok" data-testid="pack-done"><${Icon} name="circle-check" /><span><b>${name}</b> <span class="mono">${(x.packed && x.packed.rm_id) || r.rm_id}</span> is in this machine's overlay store: the Workbench lists it for every board on ${r.static_id}. Pick it there, tick Arm, then Program.</span></div>
-    ${x.packed && x.packed.shadowed_by ? html`<${Reason} level="warn" testid="pack-shadowed" text=${`The Workbench lists ${x.packed.shadowed_by} instead: the same name, rm_id and static, and the first one found wins. Rename your design, or load this one with --overlay-dir ${x.packed.overlay_dir}.`} />` : null}
+    ${x.packed && x.packed.shadowed_by ? html`<${Reason} level="warn" testid="pack-shadowed" text=${`The Workbench lists ${x.packed.shadowed_by} instead: the same name, design number and static, and the first one found wins. Rename your design, or load this one with --overlay-dir ${x.packed.overlay_dir}.`} />` : null}
     <${AddLease} bid=${bid} name=${name} />
     <div class="bd-acts"><${Btn} cls="primary" icon="wrench" testid="open-workbench" onClick=${() => pickOnWorkbench(bid, name)}>Open the Workbench<//>
       <${Btn} cls="ghost" icon="plus" testid="build-another" onClick=${() => { resetDesign(x); x.buildDir = ""; x.view = null; persist(bid); followCurrent(bid); loadGuide(bid); }}>Build another design<//></div>

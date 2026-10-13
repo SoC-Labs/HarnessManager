@@ -346,7 +346,7 @@ async function send(name, params, body, accept, query = null, opts = {}) {
     setConnection("down");
     throw new ApiError({
       name: "NO_ANSWER",
-      message: "harness-manager-daemon did not answer",
+      message: "the background service did not answer",
       hint: "check it is running: harness-manager daemon status",
     }, 0, true);
   }
@@ -406,7 +406,7 @@ export async function callBytes(name, params = {}, query = null, accept = "appli
   throw failure(res, data);
 }
 
-// A request harness-manager-daemon refused because a job holds the board (409 HELD, "... job <id>").
+// A request The background service refused because a job holds the board (409 HELD, "... job <id>").
 // A week-plan route this daemon does not serve yet (its lane has not landed): the catch-all
 // answers 404 "no such endpoint", and a GET under /boards/{bid:path} answers 404 for the
 // board id with the suffix glued on. The page then hides that feature instead of erroring.
@@ -617,7 +617,7 @@ export async function callUpload(name, params = {}, bytes = null, query = null,
     setConnection("down");
     throw new ApiError({
       name: "NO_ANSWER",
-      message: "harness-manager-daemon did not answer",
+      message: "the background service did not answer",
       hint: "check it is running: harness-manager daemon status",
     }, 0, true);
   }

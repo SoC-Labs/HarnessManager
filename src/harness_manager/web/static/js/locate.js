@@ -43,7 +43,7 @@ export function countdownMs(d, asked = LOCATE_SECONDS) {
 }
 // PANEL-TRUTH: harness_manager_mps3.capabilities.NEEDS_LOCATE, word for word: by feature,
 // never a harness type guessed from a missing one.
-export const NEEDS_LOCATE = "Identify isn't available on this harness image yet (harness feature 'locate')";
+export const NEEDS_LOCATE = "Identify isn't available on this release yet (harness feature 'locate')";
 export const NOT_READ = "Not read yet: open the board (or scan again) to see whether it can blink";
 
 // Per-board state, kept here and not in boardState(): a board in the sidebar that is not open

@@ -200,7 +200,7 @@ class HarnessMcc:
         has no harness MCC feature: the verb is behind it."""
         support = recognise(self._features())
         if support is None:
-            raise UnavailableError(C.REBOOT_BOARD, "this harness image does not reach the MCC "
+            raise UnavailableError(C.REBOOT_BOARD, "this release does not reach the MCC "
                                                    f"(no {' or '.join(repr(f) for f in FEATURES)}"
                                                    " in its features; net-protocol v0.18)")
         now = self._clock()

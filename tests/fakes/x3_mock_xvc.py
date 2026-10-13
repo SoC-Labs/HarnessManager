@@ -99,7 +99,7 @@ class XvcSim:
         if "xvc_jtagbb" in feats and "xvc_dbgbr" not in feats:
             return JTAGBB_REASON
         if "xvc_dbgbr" not in feats:
-            return "needs harness firmware with 'xvc_dbgbr' (v0.11 or later)"
+            return "needs a release with 'xvc_dbgbr' (v0.11 or later)"
         return ""
 
     def facts(self, bid: str) -> dict[str, Any]:

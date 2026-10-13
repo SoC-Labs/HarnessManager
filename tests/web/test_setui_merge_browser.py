@@ -326,8 +326,9 @@ def test_the_restart_note_says_which_start_flag_would_win_over_the_setting(page_
 @pytest.mark.mock_too
 def test_negative_twin_a_restart_row_with_no_start_flag_names_none(page_factory, world):  # noqa: F811
     world()
-    page = open_settings(page_factory, "debug")
-    page.locator('[data-testid="setting-group"][data-group="debug"] [data-action="show-more"]').click()
+    page = open_settings(page_factory, "advanced")
+    page.locator('[data-action="show-dev"]').check()          # L11: the port rows are developer-only now
+    page.locator('[data-testid="settings-nav"] [data-settings-section="debug"]').click()
     type_in(row(page, "debug.port_base"), "24000")
     note = by_id(page, "settings-restart")
     expect(note).to_contain_text("debug.port_base", timeout=T)
@@ -379,7 +380,9 @@ def user_files() -> list[str]:
 
 def test_the_demos_settings_show_the_pack_rows_write_its_own_dir_and_reach_no_hub(demo, tmp_path):
     before = user_files()
-    page = demo_settings(demo, "consoles")
+    page = demo_settings(demo, "advanced")
+    page.locator('[data-action="show-dev"]').check()                          # L11: pacing is developer-only
+    page.locator('[data-testid="settings-nav"] [data-settings-section="consoles"]').click()
     r = row(page, "mps3.console.pace_ms")                                     # the pack's rows
     type_in(r, "30")
     expect(source(r)).to_have_attribute("data-source", "user", timeout=T)

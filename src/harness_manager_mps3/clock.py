@@ -7,7 +7,7 @@ What the fielded firmware can do (0x3F1A560F):
 - It cannot read the clock back, so ``clocks()`` reports the value as
   unavailable rather than inventing one. After a successful ``set_clock``, it
   reports the value it set, labelled with its source.
-- Any-frequency ``set_clk`` is harness firmware item A8. When a board reports
+- Any-frequency ``set_clk`` is release item A8. When a board reports
   that feature, this adapter will accept arbitrary MHz.
 
 UI2-POLISH (david, first real-board look, 10-01): on the Linux harness the DUT clock is FIXED by
@@ -123,7 +123,7 @@ class Mps3Clocks:
             allowed = ", ".join(f"{int(m)}" for m in sorted(PRESET_MHZ))
             raise UsageError(
                 f"{mhz} MHz is not a preset on this firmware",
-                hint=f"presets: {allowed} MHz (any frequency needs harness firmware item A8)",
+                hint=f"presets: {allowed} MHz (any frequency needs release item A8)",
             )
         resp = self._session.shell.call(lambda c: c.set_clk(preset, presets=DEFAULT_CLK_PRESETS))
         if not resp.ok:

@@ -14,7 +14,7 @@ while the harness owns it; a tap on the panel stops it (docs/design/BOARD_LOCATE
 default. Through harness-manager-daemon a start goes at most once every 10 s per board (exit
 8, ALREADY, says when the next may go); no hub lease is needed.
 
-On a harness image without ``panel`` (bare metal v0.11, and Linux images before R1-R3)
+On a release without ``panel`` (bare metal v0.11, and Linux images before R1-R3)
 ``panel show`` gives the KVM owner only, says the state is rebuilt and lists what the image
 does not report (by feature; PANEL-TRUTH: never a harness type guessed from a missing
 feature, only the harness's own ``version.impl``); ``panel mirror`` is rebuilt from what
@@ -89,7 +89,7 @@ def register(subparsers: Any) -> dict[str, argparse.ArgumentParser]:
     ip = subparsers.add_parser("identify", help="blink the board's panel so you can find it",
                                description="Identify: blink the board's panel backlight, with "
                                            "an IDENTIFY banner naming you on the panel, so you "
-                                           "can tell which board it is (a harness image with "
+                                           "can tell which board it is (a release with "
                                            "feature 'locate'). A tap on the panel stops it. No "
                                            "hub lease is needed; at most once every 10 s per "
                                            "board.",
@@ -255,7 +255,7 @@ def _show_human(body: dict[str, Any]) -> list[str]:
     if impl_words(support):
         out.append(f"harness    {impl_words(support)}")
     if panel.get("source") == "rebuilt":
-        out.append(f"source     {panel.get('note') or 'rebuilt'} (this harness image does not "
+        out.append(f"source     {panel.get('note') or 'rebuilt'} (this release does not "
                    "send its panel's text)")
     out.append(f"banner     {panel.get('banner') or '-'}")
     if panel.get("card"):

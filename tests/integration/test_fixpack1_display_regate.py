@@ -8,7 +8,7 @@ Now (``harness_manager_mps3.display``, ``services.display``, ``daemon.display_ap
 ``engine.info``):
 
 - a stream that closes before HELLO re-gates on a live ``version`` read: an image without
-  the engine ends the display with "the Live display needs a harness image with lcd_mirror
+  the engine ends the display with "the Live display needs a release with lcd_mirror
   (this image has none...)";
 - the engine still named but nothing listening on 6940: it stops after ``no_service_max``
   (3) tries with ssh's reason;
@@ -90,7 +90,7 @@ def test_a_reboot_into_an_image_without_lcd_mirror_ends_with_that_reason(rig_fac
         wait_for(lambda: rig.status()["state"] == "down"
                  and rig.status()["reason"] == D.NO_ENGINE, what="down: no engine")
         assert rig.status()["reason"].startswith(
-            "the Live display needs a harness image with lcd_mirror (this image has none")
+            "the Live display needs a release with lcd_mirror (this image has none")
         quiet_for(rig, 1.2)                        # past every back-off: it stopped for good
         assert rig.svc.boards() == [] and rig.adapter.tunnel_status() is None
         # The routes answer the same, typed (422), from the facts the re-gate read.
@@ -284,7 +284,7 @@ def test_a_board_changing_job_forgets_as_it_starts_and_ends_and_a_deploy_does_no
         bus = rig.engine.bus
         bus.publish(Event("job.started", BOARD, {"job": "j1", "kind": "update_harness"}))
         bus.publish(Event("job.done", BOARD, {"job": "j1", "result": {}}))
-        assert settle_forgets(rig) == ["the harness image was updated"] * 2
+        assert settle_forgets(rig) == ["the release was updated"] * 2
         bus.publish(Event("job.started", BOARD, {"job": "j2", "kind": "deploy"}))  # the twin
         bus.publish(Event("job.done", BOARD, {"job": "j2", "result": {}}))
         assert len(settle_forgets(rig)) == 2

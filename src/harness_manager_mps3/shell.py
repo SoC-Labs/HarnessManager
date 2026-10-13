@@ -12,7 +12,7 @@ host sees, and what it means:
 | On 6900 | Meaning | Error (exit) | ``Health.control_channel`` |
 |---|---|---|---|
 | connect refused (RST) | nothing listens: Linux kernel up and harnessd dead or respawning; or bare-metal lwIP up with no listener | ``ShellRefusedError`` (7) | ``offline``, notes from the diagnosis |
-| connect times out | no board, a dead CPU, or stage0 rescue (no TCP) | ``ShellSilentError`` (7) | ``offline``, or ``rescue`` when identify says so |
+| connect times out | no board, a dead CPU, or rescue mode (no TCP) | ``ShellSilentError`` (7) | ``offline``, or ``rescue`` when identify says so |
 | connected, never a reply | the service loop is hung (a hung harnessd's kernel still accepts) | ``ShellWedgedError`` (7) | ``wedged`` |
 | accept then EOF, or RST after accept | another client holds 6900 (single client) | ``HeldError`` (4) | ``busy`` |
 | ``{"ok":false,"err":"EBUSY"}`` (A3) | the same, said explicitly | ``HeldError`` (4) | ``busy`` |
@@ -28,7 +28,7 @@ nothing changes.
 
 The diagnosis after a refused or silent connect asks, cheapest first, whether
 anything else on the board answers: UDP identify (6899; ``mode:"rescue"`` means
-stage0 rescue), then for non-loopback hosts TCP 22 (the Linux OS) and ICMP.
+rescue mode), then for non-loopback hosts TCP 22 (the Linux OS) and ICMP.
 
 Reading keys pyverify does not model. pyverify's ``VersionResponse`` (the
 installed one) drops ``impl``, ``proto``, ``usercode`` and ``clr_max``, and its
@@ -707,7 +707,7 @@ class Mps3Shell:
             if diagnosis.reply is not None and diagnosis.reply.is_rescue:
                 reason = diagnosis.reply.reason
                 raise ShellRescueError(
-                    f"the board at {self.host} is in stage0 RESCUE: no control channel"
+                    f"the board at {self.host} is in rescue mode: no control channel"
                     + (f" ({reason})" if reason else ""),
                     hint=HARNESS_STATES["harness.rescue"],
                     identity=diagnosis.reply.identity(), reply=diagnosis.reply) from exc

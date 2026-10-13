@@ -9,7 +9,7 @@ and raising the same errors, so ``LeaseService`` and the pack cannot tell them a
 
 Configured in boards.toml, beside (or instead of) ``host``::
 
-    hub = { url = "https://mapstone-dev.ecs.soton.ac.uk:7246", target = "mps3_01_pl",
+    hub = { url = "https://hub.example.org:7246", target = "mps3_01_pl",
             token_file = "~/.config/harness-manager/hub.token", ca_file = "~/lab-ca.pem" }
 
 ``url`` set means REST; ``host`` alone means SSH; both means REST, with ``host``
@@ -370,11 +370,11 @@ def _loopback(host: str) -> bool:
 def _normalise_url(url: Any, where: str) -> str:
     if not isinstance(url, str) or not url.strip():
         raise UsageError(f"{where}.url must be the hub's API address, e.g. "
-                         "\"https://mapstone-dev.ecs.soton.ac.uk:7246\"")
+                         "\"https://hub.example.org:7246\"")
     parts = urlsplit(url.strip())
     if parts.scheme not in ("https", "http") or not parts.hostname:
         raise UsageError(f"{where}.url {url!r} is not an http(s) URL",
-                         hint="e.g. https://mapstone-dev.ecs.soton.ac.uk:7246 (the hub's web port)")
+                         hint="e.g. https://hub.example.org:7246 (the hub's web port)")
     if parts.username or parts.password:
         raise UsageError(f"{where}.url must not carry credentials; put the token in token_file",
                          hint="a URL ends up in logs; a token file does not")

@@ -3,7 +3,7 @@
 A capability is available only when every link and every harness feature it
 needs is present. The app never guesses: it asks ``negotiate`` and, for each
 missing capability, shows ``reason`` ("needs the Debug USB cable",
-"needs harness firmware with 'stats'").
+"needs a release with 'stats'").
 
 Board packs declare their capabilities with ``CapabilitySpec``. The names
 below are the shared vocabulary; packs may add their own (prefix with the
@@ -57,7 +57,7 @@ class Route:
     def describe(self) -> str:
         parts = [k.value for k in sorted(self.links, key=lambda k: k.value)]
         if self.features:
-            parts.append("harness firmware with " + ", ".join(f"'{f}'" for f in sorted(self.features)))
+            parts.append("a release with " + ", ".join(f"'{f}'" for f in sorted(self.features)))
         return " + ".join(parts) if parts else "nothing"
 
 
@@ -105,6 +105,6 @@ def _describe(spec: CapabilitySpec, links: frozenset[LinkKind]) -> str:
     # Prefer explaining the route whose links are already present (only features missing).
     for route in spec.routes:
         if route.links <= links and route.features:
-            return "needs harness firmware with " + ", ".join(
+            return "needs a release with " + ", ".join(
                 f"'{f}'" for f in sorted(route.features))
     return "needs " + " or ".join(r.describe() for r in spec.routes)

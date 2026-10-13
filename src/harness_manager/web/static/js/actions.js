@@ -74,7 +74,7 @@ export function gateReason(bid, panel, key, opts = {}) {
     if (b.job.kind === "lease") return "waiting for the hub lease (it may be queued): Cancel it in the header to stop waiting";
     if (b.job.kind === "lease_request") return "waiting for the hub lease: your request is queued (Leave queue stops waiting)";
     if (b.job.kind === "lease_force") return "waiting for the force release to finish";
-    return `waiting for the ${jobLabel(b.job.kind)} job to finish (harness-manager-daemon holds the board)`;
+    return `waiting for the ${jobLabel(b.job.kind)} job to finish (the background service holds the board)`;
   }
   if (opts.holder) {
     const why = holderOnly(bid, opts.holder);

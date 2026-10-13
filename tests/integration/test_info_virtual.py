@@ -30,7 +30,7 @@ def test_info_json_reports_fielded_identity(vboard: VirtualMps3, capsys):
     assert "deploy_partial" in info["capabilities"]
     # Ethernet only: the controller features must say why they are missing.
     assert info["unavailable"]["reboot_board"].startswith("needs the Debug USB cable")
-    assert info["unavailable"]["reset_shell"] == "needs harness firmware with 'reboot'"
+    assert info["unavailable"]["reset_shell"] == "needs a release with 'reboot'"
     # The fielded firmware has no shell console over Ethernet (handover A12).
     assert "console_shell" in info["unavailable"]
     assert "power" in info["unavailable"]["telemetry_power"]
