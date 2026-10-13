@@ -179,7 +179,8 @@ def test_twin_the_board_summary_before_board_identity_is_reported():
     old = "the Linux harness's SSH: claim it with your key, check the claim, ssh in"
     subverbs = list(_verbs(_verbs(make_parser())["board"]))
     assert "identity" in subverbs
-    assert unnamed_subverbs("board", old, subverbs) == ["repin", "claim-status", "identity"]
+    assert unnamed_subverbs("board", old, subverbs) == ["repin", "claim-status", "identity",
+                                                        "keys"]
 
 
 def test_twin_a_summary_that_drops_a_subverb_is_reported():

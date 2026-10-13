@@ -44,6 +44,10 @@ export const ENDPOINTS = Object.freeze({
   // HUB-CLAIM: ?hub=true asks the hub on a hub board (Access card, on load); ?refresh=true now
   claimStatus: ["GET", "/boards/{bid}/claim"],
   repin: ["POST", "/boards/{bid}/repin"],
+  claimKeys: ["GET", "/boards/{bid}/claim/keys"],                // HM 1.2: who may log in
+  claimKeyCheck: ["POST", "/boards/{bid}/claim/keys/check"],
+  claimKeyAdd: ["POST", "/boards/{bid}/claim/keys"],
+  claimKeyRemove: ["POST", "/boards/{bid}/claim/keys/remove"],
   // --- BOARD-ID: the board's label/IP/MAC and the fix (docs/API.md "Board identity") ---
   netIdentity: ["GET", "/boards/{bid}/identity"],
   netIdentityFix: ["POST", "/boards/{bid}/identity"],

@@ -138,6 +138,10 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
         ("POST", "/boards/{bid}/claim"),
         ("GET", "/boards/{bid}/ssh"),
         ("POST", "/boards/{bid}/repin"),               # HOSTKEY: the approved re-pin
+        ("GET", "/boards/{bid}/claim/keys"),           # HM 1.2 L9
+        ("POST", "/boards/{bid}/claim/keys/check"),
+        ("POST", "/boards/{bid}/claim/keys"),
+        ("POST", "/boards/{bid}/claim/keys/remove"),
     ),
     # BOARD-ID: served in the mock by tests/fakes/idn_mock_identity.py (a simulated identity).
     "identity_api": (

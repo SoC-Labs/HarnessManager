@@ -75,8 +75,9 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
         TSV_COLUMNS.setdefault(layout, cols)
     fmt, board = _fmt(), _board()
     vp = subparsers.add_parser(
-        "board", help="the board's SSH and identity: claim, repin, claim-status, ssh, identity "
-                      "(label, IP and MAC against its hub entry, and the fix)",
+        "board", help="the board's SSH and identity: claim, repin, claim-status, ssh, keys (who "
+                      "may log in), identity (label, IP and MAC against its hub entry, and the "
+                      "fix)",
         description="The Linux harness's SSH claim (TOFU) and its SSH reach, and the board's "
                     "identity. A claim gives your key root on the board, pins its host key, "
                     "and from then on the board takes slot changes only over that SSH.",
@@ -127,6 +128,9 @@ def register(subparsers: Any) -> argparse.ArgumentParser:
 
     cmd_identity.add_parser(sub, [fmt, board])
     TSV_COLUMNS.setdefault("board identity", cmd_identity.TSV)
+    from . import cmd_board as board_verbs  # HM 1.2 L9: board keys list|add|remove
+
+    board_verbs.add_keys_parser(sub, [fmt, board])
     vp.set_defaults(fn=cmd_board)
     return vp
 
@@ -141,10 +145,11 @@ def _service(ctx: Ctx) -> Any:
 
 
 def cmd_board(ctx: Ctx) -> int:
+    from . import cmd_board as board_verbs
     from .cmd_identity import cmd_identity
 
     return {"claim": _claim, "claim-status": _claim_status, "ssh": _ssh, "repin": _repin,
-            "identity": cmd_identity}[ctx.args.board_cmd](ctx)
+            "identity": cmd_identity, "keys": board_verbs.cmd_keys}[ctx.args.board_cmd](ctx)
 
 
 # --- the view ---------------------------------------------------------------------------------

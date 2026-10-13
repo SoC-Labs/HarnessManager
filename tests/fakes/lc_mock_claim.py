@@ -146,6 +146,55 @@ def register(app: FastAPI, state: Any, ok: Any, accepted: Any) -> ClaimSim:
 
         return accepted(state.jobs.start(bid, "repin", run))
 
+    # HM 1.2 L9: the board's keys, simulated (one key, this PC's).
+    mine = {"fingerprint": "SHA256:mockmockmockmockmockmockmockmockmockmockmoc",
+            "type": "ssh-ed25519", "label": "this PC", "mine": True}
+
+    @app.get(f"{API}/boards/{{bid:path}}/claim/keys")
+    def claim_keys(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return ok(board_id=bid, keys=[mine])
+
+    @app.post(f"{API}/boards/{{bid:path}}/claim/keys/check")
+    def claim_key_check(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> Any:  # noqa: B008
+        state.session(bid)
+        from harness_manager_mps3.claim import parse_public_key
+
+        k = parse_public_key((body or {}).get("key", ""), (body or {}).get("label", ""))
+        return ok(board_id=bid, key={x: k[x] for x in ("type", "fingerprint", "label")})
+
+    @app.post(f"{API}/boards/{{bid:path}}/claim/keys", status_code=202)
+    def claim_key_add(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> Any:  # noqa: B008
+        state.session(bid)
+        b = body or {}
+        if b.get("confirm") is not True:
+            raise RefusedError("adding a key needs a confirmation", hint='send {"confirm": true}')
+        from harness_manager_mps3.claim import parse_public_key
+
+        k = parse_public_key(b.get("key", ""), b.get("label", ""))
+
+        def run(progress: Any) -> dict[str, Any]:
+            row = {"fingerprint": k["fingerprint"], "type": k["type"], "label": k["label"],
+                   "mine": False}
+            return {"board_id": bid, "key": {"action": "added", **row, "keys": [mine, row]}}
+
+        return accepted(state.jobs.start(bid, "claim_key", run))
+
+    @app.post(f"{API}/boards/{{bid:path}}/claim/keys/remove", status_code=202)
+    def claim_key_remove(bid: str, body: dict[str, Any] = Body(default_factory=dict)) -> Any:  # noqa: B008
+        state.session(bid)
+        b = body or {}
+        if b.get("confirm") is not True:
+            raise RefusedError("removing a key needs a confirmation")
+        if b.get("fingerprint") == mine["fingerprint"]:
+            raise RefusedError("that is the key this PC uses to log in to the board")
+
+        def run(progress: Any) -> dict[str, Any]:
+            return {"board_id": bid, "key": {"action": "removed",
+                                             "fingerprint": b.get("fingerprint"), "keys": [mine]}}
+
+        return accepted(state.jobs.start(bid, "claim_key", run))
+
     @app.get(f"{API}/boards/{{bid:path}}/ssh")
     def ssh_argv(bid: str, command: str | None = None) -> dict[str, Any]:
         state.session(bid)
