@@ -158,7 +158,7 @@ def test_set_is_refused_in_words_while_a_design_runs(tmp_path, broker):
         vb.shell.current_rm_id = 0x0A1B2C3D
         with pytest.raises(RefusedError) as e:
             broker.hostio_set(s, "hostio4")
-        assert e.value.message == ("Load the greybox or hold the DUT first; the change applies "
+        assert e.value.message == ("Load the empty design or hold the DUT first; the change applies "
                                    "at the next design load.")
         assert "0x" not in e.value.message
         assert broker.hostio(s)["pending"] == "console"        # nothing changed
