@@ -1122,6 +1122,18 @@ def hm12_register(app: FastAPI, state: Any) -> None:
         state.session(bid)
         return _ok(board_id=bid, offered=False, reason="This board's image has no clock control")
 
+    @app.get(f"{API}/boards/{{bid}}/mcc")
+    def mcc_read(bid: str) -> dict[str, Any]:
+        state.session(bid)
+        return _ok(board_id=bid, mcc=None)
+
+    @app.post(f"{API}/boards/{{bid}}/mcc/osc")
+    def mcc_osc(bid: str) -> Any:
+        state.session(bid)
+        from harness_manager.core.errors import UnavailableError
+        return _err(UnavailableError("clock_board", "this board's harness cannot set the board "
+                                                   "clocks itself"))
+
     @app.get(f"{API}/boards/{{bid}}/hostio")
     def hostio_get(bid: str) -> dict[str, Any]:
         state.session(bid)

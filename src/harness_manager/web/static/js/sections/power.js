@@ -344,7 +344,7 @@ export function recoverSteps(bid) {
   if (warm) {
     steps.splice(at("reboot"), 0, {
       k: "warm", key: "warm_reset", panel: "warm_reset", t: "Warm reset (like pressing the board's reset button)",
-      bt: "Warm reset", icon: "rotate-cw", testid: "warm-card", result: "warm-result", arm: "arm-warm",
+      bt: "Warm reset", icon: "rotate-ccw", testid: "warm-card", result: "warm-result", arm: "arm-warm",
       sh: "Restarts the whole board; the FPGA stays loaded.", time: lx ? "~3 min" : "~1 min",
       d: `Restarts the whole board like pressing its reset button, through its controller: the harness, the DUT and the network chip start again. The FPGA is not reloaded.${lx ? " Linux boots again (about 3 minutes)." : ""}`,
       keep: K(["lost"], ["back", "drop, then reconnect"], ["lost", "restarts with the board"], ["kept"], ["kept"]),

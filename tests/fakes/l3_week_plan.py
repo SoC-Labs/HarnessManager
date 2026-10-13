@@ -67,6 +67,8 @@ EXTENSION_ROUTES: dict[str, tuple[tuple[str, str], ...]] = {
     "power_api": (
         ("GET", "/boards/{bid}/power"),
         ("POST", "/boards/{bid}/power/cycle"),
+        ("GET", "/boards/{bid}/mcc"),                      # HM 1.2 L5b
+        ("POST", "/boards/{bid}/mcc/osc"),
     ),
     "update_api": (
         ("POST", "/update/check"),
