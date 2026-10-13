@@ -222,7 +222,8 @@ def register(ctx: RouteContext) -> None:
         serial = bringup.mcc_serial(getattr(s, "candidate", None))
         policy, macs, ips = bringup.identity_inputs(d.engine)
         proposal = bringup.propose_identity(serial, policy=policy, taken_macs=macs,
-                                            taken_ips=ips)
+                                            taken_ips=ips,
+                                            hub=getattr(s, "hub", None) is not None)
         return _JSON(ok(board_id=bid, proposal=proposal,
                         command=bringup.identity_command(host, proposal)))
 

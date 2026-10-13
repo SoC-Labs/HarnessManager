@@ -269,6 +269,13 @@ class Stub:
             return 3
         try:
             sock = socket.create_connection((host, port), timeout=2.0)
+        except ConnectionResetError:
+            # On a loaded host the fake server's RST can land inside connect() itself. Real
+            # OpenOCD's connect has completed by then (the server accepted, then closed), so
+            # it is the same "closed at once" the first read reports below.
+            _say("Error: Error on socket 'remote_bitbang_fill_buf': errno==104, "
+                 "message: Connection reset by peer.")
+            return 1
         except OSError as exc:
             _say(f"Error: Error on socket 'Failed to connect': errno=={exc.errno}, "
                  f"message: {exc.strerror}.")
