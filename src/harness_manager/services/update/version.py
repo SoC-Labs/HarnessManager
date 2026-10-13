@@ -96,3 +96,13 @@ def at_least(have: str, need: str) -> bool:
     if not need:
         return True
     return compare(have, need) >= 0
+
+
+def same_u32(a: object, b: object) -> bool:
+    """Do two u32 texts name one number? Hex (``0x`` or bare) is compared as numbers; text
+    that is not hex is compared case-insensitively. ``None`` counts as empty and never raises."""
+    x, y = ("" if a is None else str(a)), ("" if b is None else str(b))
+    try:
+        return int(x, 16) == int(y, 16)
+    except ValueError:
+        return x.lower() == y.lower()

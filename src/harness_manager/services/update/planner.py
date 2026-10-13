@@ -44,6 +44,7 @@ from .schema import (
     os_provisioned_static,
 )
 from .version import at_least, compare_safe, same_version
+from .version import same_u32 as _same_u32
 
 #: UI2 G6: where a Linux board's OS boots from (``BoardView.os_boot``, ``Plan.os_boot``).
 OS_BOOT_CARD = "card"
@@ -248,6 +249,7 @@ class BoardView:
     has_os_slots: bool = False
     os_active_sha: str = ""               # the running OS slot image, when the adapter says
     os_active_crc: str = ""               # the running slot's S0LB table CRC (the board's hdr_crc)
+    os_slot_infos: dict[str, Any] = field(default_factory=dict)   # slot name -> core.pack.SlotInfo (both slots)
     os_pending: str = ""                  # a slot committed and not booted yet (rule 1)
     # LINUX-ANSWERS (S5): a fallback: the default slot that failed to boot, the slot running
     # instead, and the failed slot's hdr_crc ("" = none; ``slot_health.fell_back``)
@@ -318,13 +320,6 @@ def revision_check(rel: HarnessRelease, board: BoardView) -> tuple[str, str]:
     return blocker, warning
 
 
-def _same_u32(a: str, b: str) -> bool:
-    try:
-        return int(a, 16) == int(b, 16)
-    except (TypeError, ValueError):
-        return a.lower() == b.lower()
-
-
 def same_sd_part(a: HarnessRelease, b: HarnessRelease) -> bool:
     """Do two releases carry byte-identical configuration SD parts (by signed sha256)?"""
     sa = sorted(c.asset.sha256 for c in a.by_target(TARGET_MCC_SD))
@@ -348,7 +343,7 @@ def running_summary(ident: BoardIdentity | None) -> dict[str, Any]:
     return {"shell_id": ident.shell_id.lower(), "harness": ident.harness_version,
             "firmware_sha": ident.firmware_sha, "usercode": ident.usercode.lower(),
             "impl": ident.harness_impl, "features": sorted(ident.features),
-            "ver32": ident.ver32.lower()}
+            "ver32": ident.ver32.lower(), "proto": ident.proto}
 
 
 #: The shortest sha prefix that names a build (git's own short-sha floor).
@@ -432,13 +427,62 @@ def match_release(channel: Channel, ident: BoardIdentity,
     is None, "unrecorded": naming one of them would be a guess. With no identity fit, a
     Linux board is matched by the OS image its running slot holds (``running_by_os_image``).
     """
-    ranked = [(rank, rel) for rel in channel.harness
+    return match_among(channel.harness, ident, board)
+
+
+def match_among(releases: Iterable[HarnessRelease], ident: BoardIdentity | None,
+                board: BoardView | None = None) -> HarnessRelease | None:
+    """``match_release`` over any releases (the catalogue merges several channels' lists)."""
+    if ident is None or not ident.shell_id:
+        return None
+    releases = list(releases)
+    ranked = [(rank, rel) for rel in releases
               if (rank := identity_rank(rel.identity, ident)) is not None]
     if not ranked:
-        return running_by_os_image(channel.harness, ident, board)
+        return running_by_os_image(releases, ident, board)
     best = max(rank for rank, _ in ranked)
     top = [rel for rank, rel in ranked if rank == best]
     return top[0] if len(top) == 1 else None
+
+
+def match_slot(releases: Iterable[HarnessRelease], slot: Any,
+               static_id: str = "") -> tuple[HarnessRelease | None, str]:
+    """The release one OS slot holds, and how we know: ``(release, basis)``.
+
+    ``slot`` is a ``core.pack.SlotInfo``. Order: the build sha the board reported for the
+    slot (``basis`` "sha", a prefix match against the release's recorded build sha), else the
+    image's table CRC or the image sha256 this host pushed ("hdr_crc" / "image"), else
+    ``(None, "")``: unknown. A version string alone NEVER matches. A hit must be one
+    release (two releases with the same image are unknown, not a guess), on the board's
+    static when ``static_id`` is given.
+    """
+    rels = [r for r in releases if not static_id or _same_u32(r.identity.static_id, static_id)]
+    if not getattr(slot, "valid", False):
+        return None, ""
+
+    def one(hits: list[HarnessRelease]) -> HarnessRelease | None:
+        return hits[0] if hits and len({r.version for r in hits}) == 1 else None
+
+    sha = getattr(slot, "sha", None)
+    if sha:
+        hit = one([r for r in rels if fw_sha_match(r.identity.fw_sha, sha) is True])
+        if hit is not None:
+            return hit, "sha"
+    crc, img = getattr(slot, "hdr_crc", ""), (getattr(slot, "image_sha256", "") or "").lower()
+    hits = []
+    for r in rels:
+        comp = next((c for c in r.components if c.kind == KIND_OS_SLOT), None)
+        if comp is None:
+            continue
+        want = os_header_crc(comp)
+        if (crc and want and _same_u32(want, crc)) or (img and img == comp.asset.sha256):
+            hits.append(r)
+    hit = one(hits)
+    if hit is not None:
+        by_crc = bool(crc) and any(_same_u32(os_header_crc(c), crc) for c in hit.components
+                                   if c.kind == KIND_OS_SLOT and os_header_crc(c))
+        return hit, "hdr_crc" if by_crc else "image"
+    return None, ""
 
 
 def running_by_os_image(releases: Iterable[HarnessRelease], ident: BoardIdentity | None,

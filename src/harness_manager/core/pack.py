@@ -548,7 +548,8 @@ class SlotInfo:
     verified: str = VERIFIED_NO     # no | boot | readback
     err: str = ""
     image_sha256: str = ""          # host-side: the image HM pushed under this hdr_crc ("" = unknown)
-    version: str = ""               # host-side: the release HM pushed there ("" = unknown)
+    version: str = ""               # the release there: the board's (v2.1 slot status), else what HM pushed ("" = unknown)
+    sha: str | None = None          # the image's build sha, when the board said (v2.1; None = unknown)
     slot_mb: int | None = None      # the card's design-slot size, when the board said (None = not reported)
     store_ver: int | None = None    # the card's layout version, when the board said
 
