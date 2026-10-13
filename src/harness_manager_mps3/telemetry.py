@@ -48,7 +48,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from harness_manager.core.errors import HarnessError, UnavailableError
+from harness_manager.core.errors import (
+    ActionFailedError,
+    HarnessError,
+    UnavailableError,
+    UsageError,
+)
 from harness_manager.core.model import BoardIdentity, Candidate, Link, Reading
 from harness_manager.power import vivado
 from harness_manager.power.adapter import PowerAdapter
@@ -128,6 +133,21 @@ def harness_replies(client: Any, tap: Any, *, telemetry: bool,
     return tel, st
 
 
+def _ask_sensors(client: Any) -> tuple[dict[str, Any] | None, str]:
+    """`sensors` get on the open connection: (the good reply, "") or (None, why not). Never
+    raises: a board without it, or an old pyverify, only means the raw stats path is used."""
+    ask = getattr(client, "sensors", None)
+    if not callable(ask):
+        return None, "the installed pyverify has no sensors()"
+    try:
+        reply = ask()
+    except Exception as exc:  # noqa: BLE001 - the raw stats path still works
+        return None, f"{type(exc).__name__}: {exc}"
+    if isinstance(reply, dict) and reply.get("ok") is True:
+        return reply, ""
+    return None, str((reply or {}).get("err") or "no reply") if isinstance(reply, dict) else "no reply"
+
+
 # --- pure parsers (unit-tested directly) -------------------------------------------------
 
 
@@ -181,6 +201,150 @@ def _unavailable_sysmon(reason: str, source: str) -> list[Reading]:
     return [Reading.unavailable(n, u, reason, source=source) for n, _r, u, _nom, _p in CHANNELS]
 
 
+# --- mint 4 `sensors` (net-protocol v0.20): SYSMON, converted by the harness ----------------------
+
+SENSORS_SOURCE = "sensors (harness)"
+SENSORS_CAPABILITY = "mps3.sensors"
+#: The latched alarm bits, in SYSMON's order, in plain words.
+ALARM_WORDS = ("Over temperature", "Temperature above its alarm level",
+               "VCCINT outside its window", "VCCAUX outside its window",
+               "VCCBRAM outside its window")
+#: `sensors set` ranges (net-protocol.md "sensors"); the k range depends on the reference.
+TEMP_MAX_C = 125.0
+VCCINT_MIN_V, VCCINT_MAX_V = 0.5, 1.2
+K_RANGE = {"external": (0.5, 2.0), "internal": (-20.0, 20.0)}
+SENSORS_SET_KEYS = ("temp_hi_c", "temp_ot_c", "vccint_lo_v", "vccint_hi_v", "k")
+#: Plain sentences for the new verbs' error codes.
+SENSORS_CODE_WORDS = {
+    "not_supported": "This board's harness does not have sensors (it needs the mint-4 hardware).",
+    "no_hw": "The board's temperature and voltage sensor did not answer.",
+    "invalid": "The board refused the values",
+    "denied": "The board does not allow that.",
+    "busy": "The board is busy; try again in a moment.",
+    "timeout": "The sensor did not answer in time; try again.",
+}
+
+
+def alarm_words(alm: Any) -> list[str]:
+    """The latched alarm bits as words (bit 0 first); an unreadable word says nothing."""
+    if isinstance(alm, bool) or not isinstance(alm, int) or alm < 0:
+        return []
+    return [w for i, w in enumerate(ALARM_WORDS) if alm >> i & 1]
+
+
+def _num(v: Any) -> bool:
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+
+
+def check_sensors_set(fields: Any, ref: str | None) -> dict[str, float]:
+    """The values of a `sensors set` request, checked against the contract. All or nothing: any
+    refused value raises ``UsageError`` and nothing is sent. ``ref`` is the board's reference
+    ("internal"/"external"; None = unknown, the wider range is allowed and the board decides)."""
+    if not isinstance(fields, dict) or not fields:
+        raise UsageError("nothing to set", hint="give at least one threshold or the calibration")
+    unknown = sorted(set(fields) - set(SENSORS_SET_KEYS))
+    if unknown:
+        raise UsageError(f"cannot set {unknown[0]!r}", hint=", ".join(SENSORS_SET_KEYS))
+    out: dict[str, float] = {}
+    for k, v in fields.items():
+        if not _num(v):
+            raise UsageError(f"{k} must be a number")
+        out[k] = float(v)
+    hi, ot = out.get("temp_hi_c"), out.get("temp_ot_c")
+    for name, val in (("temp_hi_c", hi), ("temp_ot_c", ot)):
+        if val is not None and not 0 < val <= TEMP_MAX_C:
+            raise UsageError(f"{name} must be above 0 and at most {TEMP_MAX_C:g} degC")
+    if hi is not None and ot is not None and not hi < ot:
+        raise UsageError("the temperature alarm level must be below the over-temperature level")
+    lo, up = out.get("vccint_lo_v"), out.get("vccint_hi_v")
+    for name, val in (("vccint_lo_v", lo), ("vccint_hi_v", up)):
+        if val is not None and not VCCINT_MIN_V <= val <= VCCINT_MAX_V:
+            raise UsageError(f"{name} must be between {VCCINT_MIN_V:g} and {VCCINT_MAX_V:g} V")
+    if lo is not None and up is not None and not lo < up:
+        raise UsageError("the VCCINT lower limit must be below its upper limit")
+    if "k" in out:
+        lo_k, hi_k = K_RANGE.get(ref or "internal", K_RANGE["internal"])   # unknown: board decides
+        if not lo_k <= out["k"] <= hi_k:
+            what = "scale" if ref == "external" else "offset in degC"
+            raise UsageError(f"the calibration {what} must be between {lo_k:g} and {hi_k:g}")
+    return out
+
+
+def check_sensors_set_against(fields: dict[str, float], thr: dict[str, Any] | None) -> None:
+    """One-sided pairs are checked against the thresholds in force (the board does the same)."""
+    if not thr:
+        return
+    hi = fields.get("temp_hi_c", thr.get("temp_hi_c"))
+    ot = fields.get("temp_ot_c", thr.get("temp_ot_c"))
+    if _num(hi) and _num(ot) and not hi < ot and ("temp_hi_c" in fields or "temp_ot_c" in fields):
+        raise UsageError("the temperature alarm level must be below the over-temperature level",
+                         hint=f"now {thr.get('temp_hi_c')} and {thr.get('temp_ot_c')} degC")
+    lo = fields.get("vccint_lo_v", thr.get("vccint_lo_v"))
+    up = fields.get("vccint_hi_v", thr.get("vccint_hi_v"))
+    if _num(lo) and _num(up) and not lo < up and ("vccint_lo_v" in fields or "vccint_hi_v" in fields):
+        raise UsageError("the VCCINT lower limit must be below its upper limit",
+                         hint=f"now {thr.get('vccint_lo_v')} and {thr.get('vccint_hi_v')} V")
+
+
+def sensors_error(reply: dict[str, Any], what: str) -> HarnessError:
+    """A refused `sensors` request as the error Harness Manager shows (the reply's ``code``)."""
+    code = str(reply.get("code") or "")
+    err = str(reply.get("err") or "")
+    words = SENSORS_CODE_WORDS.get(code)
+    if code == "locked" or "board claimed" in err:
+        from harness_manager.services.claim import lock_error
+
+        return lock_error(err, what)
+    if code == "not_supported" or "unknown op" in err:
+        return UnavailableError(SENSORS_CAPABILITY, SENSORS_CODE_WORDS["not_supported"])
+    if code == "no_hw":
+        return UnavailableError(SENSORS_CAPABILITY, f"{words} [harness: {err or code}]")
+    if code == "invalid":
+        return UsageError(f"{words}: {err.removeprefix('invalid ') or 'invalid'}; nothing was "
+                          "changed")
+    return ActionFailedError(f"{what} failed: {words or err or code or 'no reason given'}"
+                             + (f" [harness: {err}]" if words and err else ""))
+
+
+def sensors_body(reply: dict[str, Any]) -> dict[str, Any]:
+    """The sensors reply in the daemon's words: the contract keys plus ``alarms`` (plain
+    words for the latched bits) and ``cal_words``."""
+    body = {k: v for k, v in reply.items() if k not in ("ok", "op", "act")}
+    body["alarms"] = alarm_words(reply.get("alm"))
+    body["calibrated"] = reply.get("cal") not in (None, "none")
+    return body
+
+
+def sensors_reply_readings(reply: dict[str, Any], observed_at: float | None = None) -> list[Reading]:
+    """Converted readings from a good `sensors` reply (calibrated by the board)."""
+    stamp = {} if observed_at is None else {"observed_at": observed_at}
+    note = ("calibrated by the harness" if reply.get("cal") not in (None, "none")
+            else "not calibrated")
+    rows: list[Reading] = []
+    for name, key, unit in (("fpga_die_temp", "temp_c", "degC"),
+                            ("fpga_die_temp_max", "temp_max_c", "degC"),
+                            ("fpga_die_temp_min", "temp_min_c", "degC"),
+                            ("vccint", "vccint_v", "V"), ("vccaux", "vccaux_v", "V"),
+                            ("vccbram", "vccbram_v", "V")):
+        v = reply.get(key)
+        if _num(v):
+            extra = ("maximum since power-up; " if name.endswith("_max")
+                     else "minimum since power-up; " if name.endswith("_min") else "")
+            rows.append(Reading(name, float(v), unit, SENSORS_SOURCE, reason=extra + note, **stamp))
+        else:
+            rows.append(Reading.unavailable(name, unit, f"the harness's sensors reply has no {key}",
+                                            source=SENSORS_SOURCE))
+    return rows
+
+
+def merge_sensors(base: list[Reading], conv: list[Reading]) -> list[Reading]:
+    """The converted rows win by name; rows only the raw path has (rail min/max) are kept."""
+    by = {r.name: r for r in conv if r.value is not None}
+    out = [by.pop(r.name, r) for r in base]
+    out += list(by.values())
+    return out
+
+
 # --- the adapter ---------------------------------------------------------------------------
 
 
@@ -209,6 +373,8 @@ class Mps3Telemetry:
             self._ident = (clock(), cand_ident, "")
         self._shell_cache: tuple[float, dict | None, dict | str | None, str] | None = None
         self._sysmon_cache: tuple[float, list[Reading]] | None = None
+        #: the `sensors` reply read with the last harness read: (reply or None, why not)
+        self._sensors_last: tuple[dict[str, Any] | None, str] = (None, "")
         self._est_cache: tuple[float, dict[str, vivado.PowerEstimate]] | None = None
 
     # -- the TelemetryAdapter protocol ------------------------------------------------------
@@ -236,6 +402,83 @@ class Mps3Telemetry:
         if st.get("os_up_ms") is not None:          # a Linux harness that sends it
             out["os_up_ms"] = st.get("os_up_ms")
         return out
+
+    # -- the Readings page's Sensors card (daemon/readings_api.py) -------------------------------
+
+    def sensors_get(self) -> dict[str, Any]:
+        """``GET /boards/{bid}/sensors``: the `sensors` body (open to any peer). Raises
+        ``UnavailableError`` with a plain sentence on a board without feature ``sysmon``."""
+        with self._lock:
+            self._need_sensors()
+            reply = self._shell.call_raw(lambda c, _t: c.sensors())
+            if not isinstance(reply, dict) or not reply.get("ok"):
+                raise sensors_error(reply if isinstance(reply, dict) else {}, "reading the sensors")
+            return sensors_body(reply)
+
+    def sensors_act(self, act: str, fields: dict[str, Any] | None = None) -> dict[str, Any]:
+        """``set`` or ``clear_alm`` (CLAIM-LOCKED): validated here, nothing sent if any value is
+        refused; sent through the claim forward when the claim is this Harness Manager's."""
+        with self._lock:
+            self._need_sensors()
+            if act not in ("set", "clear_alm"):
+                raise UsageError(f"unknown sensors action {act!r}", hint="set or clear_alm")
+            what = "changing the alarm thresholds" if act == "set" else "clearing the alarms"
+            want: dict[str, float] = {}
+            if act == "set":
+                state = self.sensors_get()
+                want = check_sensors_set(fields, state.get("ref"))
+                check_sensors_set_against(want, state.get("thr"))
+            elif fields:
+                raise UsageError("clear_alm takes no values")
+
+            def msg(c: Any) -> dict[str, Any]:
+                return c.sensors_set(**want) if act == "set" else c.sensors_clear_alarms()
+
+            reply = self._sensors_send(msg, what)
+            if not isinstance(reply, dict) or not reply.get("ok"):
+                raise sensors_error(reply if isinstance(reply, dict) else {}, what)
+            self._shell_cache = None          # the next telemetry read sees the new state
+            body = sensors_body(reply)
+            body["persisted"] = bool(reply.get("persisted")) if act == "set" else None
+            return body
+
+    def _sensors_send(self, build: Callable[[Any], dict[str, Any]], what: str) -> dict[str, Any]:
+        """The claim-locked path of ``HarnessdSetter``: direct unless the claim is ours."""
+        from harness_manager.services.claim import lock_error
+
+        from . import slot_words
+        from .net_identity import _route
+
+        def locked(reply: Any) -> bool:
+            return (isinstance(reply, dict) and not reply.get("ok")
+                    and slot_words.is_claim_lock(str(reply.get("err") or ""),
+                                                 slot_words.reply_code(reply)))
+
+        route = _route(self._session, what)
+        if route != "board-ssh":
+            reply = self._shell.call_raw(lambda c, _t: build(c))
+            if not locked(reply):
+                return reply
+            _route(self._session, what, claimed=True)
+        from .card import _forwarded, _gate_key
+        from .os_slots import claim_forward
+        from .shell import Mps3Shell
+
+        with claim_forward(self._session, "sensors", what) as (host, ctl, _push):
+            shell = _forwarded(Mps3Shell(host, ctl, gate_key=_gate_key(self._shell)))
+            reply = shell.call_raw(lambda c, _t: build(c))
+        if locked(reply):                      # refused even from the board itself
+            raise lock_error(str(reply.get("err") or ""), what)
+        return reply
+
+    def _need_sensors(self) -> None:
+        feats, err = self._features()
+        if self._shell is None:
+            raise UnavailableError(SENSORS_CAPABILITY, "no Ethernet link to the board's harness")
+        if "sysmon" not in feats:
+            why = (f"{err}; " if err else "")
+            raise UnavailableError(SENSORS_CAPABILITY, why + "this board's harness has no "
+                                   "temperature and voltage sensors (it needs the mint-4 hardware)")
 
     # -- identity (features, loaded design) ------------------------------------------------------
 
@@ -268,21 +511,27 @@ class Mps3Telemetry:
 
     # -- the harness (6900) ------------------------------------------------------------------------
 
-    def _harness(self, want_telemetry: bool,
-                 want_stats: bool) -> tuple[dict | None, dict | str | None, str, float]:
+    def _harness(self, want_telemetry: bool, want_stats: bool,
+                 want_sensors: bool = False) -> tuple[dict | None, dict | str | None, str, float]:
         now = self._clock()
         cache = self._shell_cache
         if cache is not None and now - cache[0] < SHELL_MIN_INTERVAL_S:
             return cache[1], cache[2], cache[3], cache[0]
+
+        def ask(client: Any, tap: Any) -> Any:
+            replies = harness_replies(client, tap, telemetry=want_telemetry, stats=want_stats)
+            return replies, (_ask_sensors(client) if want_sensors else (None, ""))
+
         try:
-            tel, st = self._shell.call_raw(lambda client, tap: harness_replies(
-                client, tap, telemetry=want_telemetry, stats=want_stats))
+            (tel, st), sensors = self._shell.call_raw(ask)
             err = ""
         except HarnessError as exc:
-            tel, st, err = None, None, f"cannot ask the harness: {exc}"
+            tel, st, err, sensors = None, None, f"cannot ask the harness: {exc}", (None, "")
         except Exception as exc:  # noqa: BLE001 - a codec surprise is a reason, not a crash
-            tel, st, err = None, None, f"unexpected harness reply: {type(exc).__name__}: {exc}"
+            tel, st, sensors = None, None, (None, "")
+            err = f"unexpected harness reply: {type(exc).__name__}: {exc}"
         self._shell_cache = (now, tel, st, err)
+        self._sensors_last = sensors
         return tel, st, err, now
 
     # -- sources -------------------------------------------------------------------------------------
@@ -291,10 +540,13 @@ class Mps3Telemetry:
         feats, ident_err = self._features()
         rows: list[Reading] = []
         if "sysmon" in feats and self._shell is not None:
-            _tel, st, err, when = self._harness("touch_temp" in feats, True)
+            _tel, st, err, when = self._harness("touch_temp" in feats, True, True)
             sample = err or stats_sysmon_sample(st, observed_at=when)
             rows += (_unavailable_sysmon(sample, SHELL_SYSMON_SOURCE) if isinstance(sample, str)
                      else sysmon_readings(sample))
+            conv, _why = self._sensors_last
+            if conv is not None:          # mint 4: the harness's converted, calibrated values
+                rows = merge_sensors(rows, sensors_reply_readings(conv, when))
         if self.sysmon is not None:
             rows += self._jtag_sysmon()
         elif self.sysmon_error:
@@ -331,7 +583,7 @@ class Mps3Telemetry:
     def _touch_readings(self) -> list[Reading]:
         feats, ident_err = self._features()
         if "touch_temp" in feats and self._shell is not None:
-            tel, _st, err, when = self._harness(True, "sysmon" in feats)
+            tel, _st, err, when = self._harness(True, "sysmon" in feats, "sysmon" in feats)
             return touch_readings(tel, err, observed_at=when)
         if ident_err:
             reason = ident_err

@@ -6,7 +6,7 @@
 // the counters since the shell started.
 
 import { panelState } from "../actions.js";
-import { call } from "../api.js";
+import { call, toApiError } from "../api.js";
 import { ageText, capState, clock, healthOf, valueText } from "../format.js";
 import { html, useEffect } from "../lib.js";
 import { boardState, changed, loadTelemetry, quietWords, rereadBoard } from "../store.js";
@@ -91,6 +91,161 @@ function ReadingsCard({ bid }) {
   <//>`;
 }
 
+// --- Sensors (mint 4, feature `sysmon`): GET/POST /boards/{bid}/sensors --------------------------
+// The harness's converted SYSMON values. Setting thresholds or the calibration, and clearing the
+// alarms, are claim-locked and armed. The ranges are net-protocol.md "sensors"; the board checks
+// them again and applies nothing if any value is refused.
+
+// SENSORS-VALIDATE-BEGIN
+const SENSOR_FIELDS = [
+  ["temp_hi_c", "Temperature alarm level", "degC"],
+  ["temp_ot_c", "Over-temperature level", "degC"],
+  ["vccint_lo_v", "VCCINT lower limit", "V"],
+  ["vccint_hi_v", "VCCINT upper limit", "V"],
+  ["k", "Calibration", ""],
+];
+
+// The values to send (only the boxes filled in) and the problems, in plain words. `ref` is the
+// board's reference ("internal" or "external") and `thr` the thresholds now in force.
+function checkSensorForm(form, ref, thr) {
+  const out = {};
+  const errors = [];
+  for (const [key] of SENSOR_FIELDS) {
+    const raw = form[key] === undefined || form[key] === null ? "" : String(form[key]).trim();
+    if (raw === "") continue;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) { errors.push(`${key}: "${raw}" is not a number`); continue; }
+    out[key] = v;
+  }
+  if (!Object.keys(out).length) return { values: out, errors: ["Fill in at least one value."] };
+  const has = (k) => out[k] !== undefined;
+  const cur = (k) => (has(k) ? out[k] : (thr || {})[k]);
+  for (const k of ["temp_hi_c", "temp_ot_c"]) {
+    if (has(k) && !(out[k] > 0 && out[k] <= 125)) errors.push(`${k}: must be above 0 and at most 125 degC`);
+  }
+  if ((has("temp_hi_c") || has("temp_ot_c")) && typeof cur("temp_hi_c") === "number"
+      && typeof cur("temp_ot_c") === "number" && !(cur("temp_hi_c") < cur("temp_ot_c"))) {
+    errors.push("The temperature alarm level must be below the over-temperature level.");
+  }
+  for (const k of ["vccint_lo_v", "vccint_hi_v"]) {
+    if (has(k) && !(out[k] >= 0.5 && out[k] <= 1.2)) errors.push(`${k}: must be between 0.5 and 1.2 V`);
+  }
+  if ((has("vccint_lo_v") || has("vccint_hi_v")) && typeof cur("vccint_lo_v") === "number"
+      && typeof cur("vccint_hi_v") === "number" && !(cur("vccint_lo_v") < cur("vccint_hi_v"))) {
+    errors.push("The VCCINT lower limit must be below its upper limit.");
+  }
+  if (has("k")) {
+    const [lo, hi] = ref === "external" ? [0.5, 2.0] : [-20.0, 20.0];
+    if (!(out.k >= lo && out.k <= hi)) {
+      errors.push(`k: ${ref === "external" ? "the scale" : "the offset in degC"} must be between ${lo} and ${hi}`);
+    }
+  }
+  return { values: out, errors };
+}
+
+const ALARM_BITS = ["Over temperature", "Temperature above its alarm level",
+  "VCCINT outside its window", "VCCAUX outside its window", "VCCBRAM outside its window"];
+function alarmWords(alm) {
+  const n = Number(alm) || 0;
+  return ALARM_BITS.filter((_, i) => (n >> i) & 1);
+}
+// SENSORS-VALIDATE-END
+
+const sensorsByBoard = {};
+function sensorsOf(bid) {
+  if (!sensorsByBoard[bid]) sensorsByBoard[bid] = { data: null, error: null, loading: false, form: {} };
+  return sensorsByBoard[bid];
+}
+
+async function loadSensors(bid) {
+  const st = sensorsOf(bid);
+  if (st.loading) return;
+  st.loading = true;
+  changed();
+  try {
+    st.data = (await call("sensors", { bid })).data.sensors;
+    st.error = null;
+  } catch (e) {
+    st.error = toApiError(e);
+  }
+  st.loading = false;
+  changed();
+}
+
+const fmt = (v, n, unit) => (v === null || v === undefined || Number.isNaN(Number(v)) ? "n/a" : `${Number(v).toFixed(n)} ${unit}`);
+
+function SensorsCard({ bid }) {
+  const b = boardState(bid);
+  const st = sensorsOf(bid);
+  const cap = capState(b.info, "mps3.sensors");
+  useEffect(() => { if (cap && cap.available) loadSensors(bid); }, [bid, cap && cap.available]);
+  if (!cap || !cap.available) return null;           // a board without the sensors shows no card
+  const d = st.data;
+  const p = panelState(bid, "sensors");
+  const check = checkSensorForm(st.form, d && d.ref, d && d.thr);
+  const touched = Object.values(st.form).some((v) => String(v ?? "").trim() !== "");
+  const armKey = "sensors";
+  const finish = () => { st.form = {}; return loadSensors(bid); };
+  const setSpec = {
+    key: "sensors-set", label: "Set alarm thresholds / calibration", busyLabel: "Setting...", budgetS: 20,
+    command: `sensors set ${Object.entries(check.values).map(([k, v]) => `${k}=${v}`).join(" ")}`.trim(),
+    run: async () => {
+      if (check.errors.length) throw new Error(check.errors[0]);
+      return (await call("sensorsAct", { bid }, { act: "set", ...check.values })).data.sensors;
+    },
+    render: (r) => [{ kind: "ok", text: r && r.persisted === false
+      ? "Set for this boot only (the board has no card-backed storage to keep it)." : "Set and kept." }],
+    onDone: finish,
+  };
+  const clearSpec = {
+    key: "sensors-clear", label: "Clear alarms", busyLabel: "Clearing...", budgetS: 20,
+    command: "sensors clear_alm",
+    run: async () => (await call("sensorsAct", { bid }, { act: "clear_alm" })).data.sensors,
+    render: () => [{ kind: "ok", text: "Alarms cleared." }],
+    onDone: finish,
+  };
+  const alarms = d ? alarmWords(d.alm) : [];
+  const rails = d ? [["VCCINT", d.vccint_v, d.thr && `${d.thr.vccint_lo_v} to ${d.thr.vccint_hi_v} V`],
+    ["VCCAUX", d.vccaux_v, ""], ["VCCBRAM", d.vccbram_v, ""]] : [];
+  const unit = d && d.ref === "external" ? "scale" : "offset, degC";
+  return html`<${Card} title="Sensors" icon="thermometer" testid="sensors-card"
+      sub="Die temperature and supply rails, read by the harness. There is no power sensor on this board.">
+    ${st.error ? html`<${Reason} level="err" testid="sensors-error"
+      text=${st.error.errName === "UNAVAILABLE" ? `Cannot: ${st.error.reason || st.error.message}` : `${st.error.errName}: ${st.error.message}`} />` : null}
+    ${!d && !st.error ? html`<p class="muted"><${Spinner} /> Reading...</p>` : null}
+    ${d ? html`<table class="table" data-testid="sensors-table"><tbody>
+      <tr data-reading="die-temp"><td>Die temperature</td>
+        <td class="r num">${fmt(d.temp_c, 1, "°C")}
+          <div class="small muted">${fmt(d.temp_min_c, 1, "°C")} lowest, ${fmt(d.temp_max_c, 1, "°C")} highest since power-up</div></td>
+        <td class="small muted">${d.cal && d.cal !== "none" ? `Calibrated (${d.cal === "persist" ? "kept from before" : "set this boot"})` : "Uncalibrated"}</td></tr>
+      ${rails.map(([name, v, win]) => html`<tr key=${name} data-reading=${name.toLowerCase()}><td>${name}</td>
+        <td class="r num">${fmt(v, 3, "V")}</td>
+        <td class="small muted">${win ? `Alarm window ${win}` : "Fixed alarm window"}</td></tr>`)}
+      ${d.touch_temp_c !== null && d.touch_temp_c !== undefined ? html`<tr data-reading="lcd-ambient"><td>LCD module ambient</td>
+        <td class="r num">${fmt(d.touch_temp_c, 1, "°C")}</td><td class="small muted">Not the FPGA die</td></tr>` : null}
+      <tr data-testid="sensors-alarms"><td>Alarms</td>
+        <td colspan="2">${alarms.length ? alarms.map((w) => html`<${Chip} key=${w} level="err" icon="circle-alert">${w}<//> `)
+          : html`<span class="muted">None since the last clear</span>`}</td></tr>
+      <tr><td>Alarm levels now</td><td colspan="2" class="small muted">${d.thr ? `Temperature ${d.thr.temp_hi_c} °C, over-temperature ${d.thr.temp_ot_c} °C, VCCINT ${d.thr.vccint_lo_v} to ${d.thr.vccint_hi_v} V` : ""}</td></tr>
+    </tbody></table>
+    <div class="actions" data-testid="sensors-form">
+      <div class="row wrap">${SENSOR_FIELDS.map(([key, label, u]) => html`<label key=${key} class="field small">
+        <span>${label}${key === "k" ? ` (${unit})` : u ? ` (${u})` : ""}</span>
+        <input type="text" inputmode="decimal" data-field=${key} value=${st.form[key] ?? ""}
+          placeholder=${key === "k" ? String(d.k) : String((d.thr || {})[key] ?? "")}
+          onInput=${(e) => { st.form[key] = e.target.value; changed(); }} /></label>`)}</div>
+      ${touched && check.errors.length ? check.errors.map((m) => html`<${Reason} key=${m} level="err" text=${m} testid="sensors-invalid" />`) : null}
+      <${ActionRow} bid=${bid} panel="sensors" spec=${setSpec} variant="primary" icon="shield-check" compact=${true}
+        gate=${{ arm: armKey, holder: "Changing the sensor settings", capability: "mps3.sensors" }}>
+        <${ArmBox} bid=${bid} armKey=${armKey} testid="arm-sensors" compact=${true}
+          text="Arm: I understand this changes the board's alarm settings; they are kept across restarts when the board has a card." /><//>
+      <${ActionRow} bid=${bid} panel="sensors" spec=${clearSpec} icon="circle-check" compact=${true}
+        gate=${{ arm: armKey, holder: "Clearing the sensor alarms", capability: "mps3.sensors" }} />
+      <${ResultBlock} lines=${p.lines} panel=${p} testid="sensors-result" />
+    </div>` : null}
+  <//>`;
+}
+
 function DutClockCard({ bid }) {
   const b = boardState(bid);
   const w = week(bid);
@@ -169,6 +324,7 @@ export function ReadingsPage({ bid }) {
   return html`<div class="bt-pair">
     <${ReadingsCard} bid=${bid} />
     <div class="bt-stack">
+      <${SensorsCard} bid=${bid} />
       <${DutClockCard} bid=${bid} />
       <${OscillatorsCard} bid=${bid} />
       <${CountersCard} bid=${bid} />
