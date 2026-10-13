@@ -52,7 +52,10 @@ OS_CAPABILITY = "OS slot update"
 CARD_CAPABILITY = "user microSD"
 LINUX_BUNDLE = "linux_bundle.json"
 SLOT_IMAGE = "linux_slot.img"
-REBOOT_WAIT_S = 180.0
+#: A Linux cold boot is ~190 s (205 s to SSH); the old 180 s reported a false failure.
+#: Same value as the MPS3 pack's ``REBOOT_WAIT_S_LINUX`` (core code does not import a pack).
+REBOOT_WAIT_S_LINUX = 300.0
+REBOOT_WAIT_S = REBOOT_WAIT_S_LINUX
 
 LeaseCheck = Callable[[Any, str], Any]
 
@@ -380,6 +383,10 @@ def _int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+def _opt_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _text(value: Any) -> str:
     return "" if value is None else str(value)
 
@@ -427,6 +434,7 @@ def card_status_from_json(doc: dict[str, Any]) -> CardStatus:
         state=_text(doc.get("state")), text=_text(doc.get("text")),
         reason=_text(doc.get("reason")),
         card_mb=mb if isinstance(mb, int) and not isinstance(mb, bool) else None,
+        slot_mb=_opt_int(doc.get("slot_mb")), store_ver=_opt_int(doc.get("store_ver")),
         default={str(k): _text(v) for k, v in default.items()} if isinstance(default, dict)
         else None,
         boot=_text(doc.get("boot")), committable=bool(doc.get("committable", False)),
@@ -438,6 +446,7 @@ def card_status_json(st: CardStatus) -> dict[str, Any]:
     """What the CLI and the API show of a ``CardStatus``."""
     return {"store": st.store, "present": st.present, "state": st.state, "text": st.text,
             "reason": st.reason, "card_mb": st.card_mb,
+            "slot_mb": st.slot_mb, "store_ver": st.store_ver,
             "default": st.default, "boot": st.boot, "committable": st.committable,
             "os_slots": slot_status_json(st.os_slots) if st.os_slots is not None else None,
             "notes": list(st.notes), "line": card_line(st)}

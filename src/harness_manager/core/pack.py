@@ -266,6 +266,8 @@ class CardStatus:
     # --- additive (LINUX-SLOTS ``card status``, CCR LS-1): the rest of the same read, and
     # what the pack's card adapter adds to it. Defaults keep L1-CARD's shape unchanged.
     card_mb: int | None = None               # the card's size, once it is ready
+    slot_mb: int | None = None               # each design slot's size (net-protocol v0.20); None = not reported
+    store_ver: int | None = None             # the card's layout: 1 = 8 MiB slots, 2 = 32 MiB; None = not reported
     default: dict[str, str] | None = None    # {rm_id, static_id, slot[, rm_name]}: loaded at power-on
     boot: str = ""                           # the power-on decision: loaded|skipped|none|failed:<why>
     committable: bool = False                # a card commit could land now
@@ -547,6 +549,8 @@ class SlotInfo:
     err: str = ""
     image_sha256: str = ""          # host-side: the image HM pushed under this hdr_crc ("" = unknown)
     version: str = ""               # host-side: the release HM pushed there ("" = unknown)
+    slot_mb: int | None = None      # the card's design-slot size, when the board said (None = not reported)
+    store_ver: int | None = None    # the card's layout version, when the board said
 
     @property
     def valid(self) -> bool:
