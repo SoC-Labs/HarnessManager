@@ -2,14 +2,22 @@
 // the install flow: 1 back up, 2 install files, 3 reboot and witness it, 4 restore if needed.
 // The storage routes are the existing ones; every write is armed and needs a backup first.
 
-import { panelState, runJob } from "../actions.js";
+import { hubSdReason, panelState, runJob } from "../actions.js";
 import { capState, journalText } from "../format.js";
 import { html, useState } from "../lib.js";
-import { boardState, changed, loadPending } from "../store.js";
+import { boardState, changed, loadPending, S } from "../store.js";
 import { week } from "../week.js";
 import { ARM_TEXT, REBOOT_GATE, rebootSpec } from "./power.js";
 import { ActionRow, ArmBox, Card, Icon, Reason, ResultBlock } from "../ui.js";
 import { BringupButton, usbOnly } from "../bringup.js";       // BRINGUP-USB
+
+// HUB-SD: a hub board whose session has no storage adapter: the plain reason (else "").
+function hubSdOut(bid) {
+  const b = boardState(bid);
+  const none = b.session && b.session.adapters && b.session.adapters.storage === false;
+  const row = S.boards[bid];
+  return none && row && row.hub ? hubSdReason(row.hub.name).replace(/^Cannot: /, "") : "";
+}
 
 const pct = (d) => (d.total ? Math.floor((d.done * 100) / d.total) : 0);
 
@@ -102,7 +110,7 @@ function InstallFlow({ bid }) {
   // Over a hub there is no USB_MSD link: both storage capabilities say why, once, here.
   const bk = capState(boardState(bid).info, "storage_backup");
   const inst = capState(boardState(bid).info, "storage_install");
-  const sdOut = bk && inst && !bk.available && !inst.available ? bk.reason : "";
+  const sdOut = bk && inst && !bk.available && !inst.available ? bk.reason : hubSdOut(bid);
   const installGuard = () => {
     if (!given.length) return "add at least one file: its path on the SD and the local file to write";
     if (given.some((f) => f.dest.trim().toLowerCase().endsWith(".ebf"))) {
@@ -187,7 +195,7 @@ export function ConfigSdCard({ bid, route, routeWhy = "", foot = null, after = n
   const id = (b.info && b.info.identity) || {};
   const pb = panelState(bid, "sd_backup");
   const bk = capState(b.info, "storage_backup");
-  const out = bk && !bk.available ? bk.reason : "";
+  const out = bk && !bk.available ? bk.reason : hubSdOut(bid);
   const last = w.lastBackup;
   return html`<${Card} title=${title} icon="hard-drive" cls="os-here" testid="config-sd"
       sub=${sub}>

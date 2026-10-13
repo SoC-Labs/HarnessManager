@@ -38,6 +38,15 @@ export function setArmed(bid, armKey, on) {
   changed();
 }
 
+// The configuration SD of a board behind a hub. The hub can write the harness file
+// (nanosoc.bit) for an update, but it cannot read the card, so this window's backup and
+// by-hand file install have nothing to work on there.
+export function hubSdReason(hubName) {
+  const via = hubName ? ` (${hubName})` : "";
+  return `Cannot: this board's configuration SD is reached through the hub${via}, and the hub cannot read the card or write other files to it. `
+    + "Harness installs go through Versions (the hub writes the harness file there). To back up the SD or write files by hand, connect the board's Debug USB to this PC.";
+}
+
 // Why an action cannot run now, or "" when it can.
 export function gateReason(bid, panel, key, opts = {}) {
   const row = S.boards[bid];
@@ -51,6 +60,11 @@ export function gateReason(bid, panel, key, opts = {}) {
   // The adapter the daemon calls for this action (GET .../session): a link may allow a
   // capability that this build's board session still has no adapter for.
   if (opts.adapter && b.session && b.session.adapters && b.session.adapters[opts.adapter] === false) {
+    // HUB-SD: on a hub board the config SD is not a drive this PC can open. Say what the hub
+    // does and does not do, instead of "no adapter in this build".
+    if (opts.adapter === "storage" && row.hub) {
+      return hubSdReason(row.hub.name);
+    }
     return `Cannot: this board's session has no ${opts.adapter} adapter in this build`;
   }
   const p = panelState(bid, panel);
